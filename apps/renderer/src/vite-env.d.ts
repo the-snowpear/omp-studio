@@ -20,6 +20,7 @@ declare global {
    * in a desktop transport + `StudioClientImpl` itself.
    */
   var ompStudio: OmpStudioDesktopApi | undefined;
+  var ompStudioRemote: import("../../desktop/src/remote/shared").RemoteApi | undefined;
 
   /**
    * Window-chrome helpers (not the Host transport). Theme sync talks to the
@@ -283,7 +284,7 @@ declare global {
    */
   var ompStudioTerminal:
     | {
-        create(size?: { cols?: number; rows?: number }): Promise<{ id: string; name: string; cwd: string }>;
+        create(size?: { cols?: number; rows?: number; targetId?: string; workspaceId?: string }): Promise<{ id: string; name: string; cwd: string }>;
         write(id: string, data: string): Promise<void>;
         resize(id: string, cols: number, rows: number): Promise<void>;
         dispose(id: string): Promise<void>;

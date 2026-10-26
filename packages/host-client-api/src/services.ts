@@ -689,6 +689,7 @@ const CLIENT_ERROR_CODES: Record<ClientErrorCode, true> = {
   CAPABILITY_UNAVAILABLE: true,
   RESYNC_REQUIRED: true,
   TRANSPORT_ERROR: true,
+  OUTCOME_UNKNOWN: true,
   INTERNAL_ERROR: true,
   CURSOR_STALE: true,
 };

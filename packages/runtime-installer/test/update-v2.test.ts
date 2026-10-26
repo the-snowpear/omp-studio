@@ -51,6 +51,14 @@ test("a macOS Runtime archive carries omp and extracts it executable", async () 
   for (const name of runtimeArchiveFiles("omp")) assert.deepEqual(await readFile(join(source, name)), await readFile(join(root, "out", name)));
   if (process.platform !== "win32") assert.equal((await stat(join(root, "out", "omp"))).mode & 0o777, 0o755);
 });
+test("a Linux Runtime archive preserves bytes without becoming a desktop update target", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-linux-")), source = await archiveSource(root, "linux-x64", "omp");
+  await createRuntimeArchive(source, join(root, "a.zip"));
+  await extractRuntimeArchive(join(root, "a.zip"), join(root, "out"));
+  assert.deepEqual(await readFile(join(source, "omp")), await readFile(join(root, "out", "omp")));
+  assert.equal((UPDATE_PLATFORMS as readonly string[]).includes("linux-x64"), false);
+  if (process.platform !== "win32") assert.equal((await stat(join(root, "out", "omp"))).mode & 0o777, 0o755);
+});
 test("Runtime archive entrypoint must agree with the manifest platform", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-mismatch-"));
   const wrong = await archiveSource(root, "darwin-arm64", "omp.exe");
@@ -59,7 +67,7 @@ test("Runtime archive entrypoint must agree with the manifest platform", async (
   const bytes = (name: string) => new TextEncoder().encode(name);
   for (const [name, archive] of [
     ["swapped", zipSync({ "checksums.json": bytes("c"), omp: bytes("x"), "runtime-manifest.json": manifest, "runtime-signature.json": bytes("s") }, { level: 0 })],
-    ["unsupported", zipSync({ "checksums.json": bytes("c"), omp: bytes("x"), "runtime-manifest.json": new TextEncoder().encode(JSON.stringify({ platform: "linux-x64", entrypoint: "omp" })), "runtime-signature.json": bytes("s") }, { level: 0 })],
+    ["unsupported", zipSync({ "checksums.json": bytes("c"), omp: bytes("x"), "runtime-manifest.json": new TextEncoder().encode(JSON.stringify({ platform: "freebsd-x64", entrypoint: "omp" })), "runtime-signature.json": bytes("s") }, { level: 0 })],
     ["two-entrypoints", zipSync({ "checksums.json": bytes("c"), omp: bytes("x"), "omp.exe": bytes("x"), "runtime-manifest.json": manifest }, { level: 0 })],
     ["finder", zipSync({ ".DS_Store": bytes("d") }, { level: 0 })],
   ] as const) {
@@ -71,7 +79,8 @@ test("platform table follows the artifact platform", () => {
   assert.equal(runtimeEntrypointFor("win32-x64"), "omp.exe");
   assert.equal(runtimeEntrypointFor("win32-arm64"), "omp.exe");
   assert.equal(runtimeEntrypointFor("darwin-arm64"), "omp");
-  assert.throws(() => runtimeEntrypointFor("linux-x64"), /Unsupported/);
+  assert.equal(runtimeEntrypointFor("linux-x64"), "omp");
+  assert.equal(runtimeEntrypointFor("linux-arm64"), "omp");
   assert.deepEqual([...UPDATE_PLATFORMS], ["win32-x64", "win32-arm64", "darwin-arm64"]);
 });
 test("a macOS catalog ships the desktop as a zipped app and rejects the Windows installer", () => {

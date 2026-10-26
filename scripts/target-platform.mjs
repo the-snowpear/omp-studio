@@ -5,12 +5,13 @@ import { peArchitecture } from "./windows-architecture.mjs";
 // Mirrors packages/runtime-installer/src/runtime-platform.ts; target-platform.test.mjs
 // keeps the two tables identical. The entrypoint follows the artifact platform,
 // never the machine running the script.
-export const RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "omp.exe", darwin: "omp" });
+export const RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "omp.exe", darwin: "omp", linux: "omp" });
 export const UPDATE_PLATFORMS = Object.freeze(["win32-x64", "win32-arm64", "darwin-arm64"]);
+export const RUNTIME_PLATFORMS = Object.freeze([...UPDATE_PLATFORMS, "linux-x64", "linux-arm64"]);
 
 export function runtimeOsOf(platform) {
   const os = String(platform).split("-", 1)[0];
-  if (os !== "win32" && os !== "darwin") throw new Error(`Unsupported Runtime platform: ${platform}`);
+  if (os !== "win32" && os !== "darwin" && os !== "linux") throw new Error(`Unsupported Runtime platform: ${platform}`);
   return os;
 }
 
@@ -23,7 +24,7 @@ export function resolveTargetPlatform(env = process.env, host = { platform: proc
   const os = String(env.OMP_TARGET_PLATFORM ?? host.platform).trim().toLowerCase();
   const arch = String(env.OMP_TARGET_ARCH ?? host.arch).trim().toLowerCase();
   const target = `${os}-${arch}`;
-  if (!UPDATE_PLATFORMS.includes(target)) throw new Error(`Unsupported target platform: ${target}`);
+  if (!RUNTIME_PLATFORMS.includes(target)) throw new Error(`Unsupported target platform: ${target}`);
   return target;
 }
 
@@ -41,8 +42,19 @@ export function machOArchitecture(bytes) {
   return arch;
 }
 
+export function elfArchitecture(bytes) {
+  if (bytes.length < 20 || bytes.toString("hex", 0, 4) !== "7f454c46" || bytes[4] !== 2 || bytes[5] !== 1) {
+    throw new Error("Not a supported 64-bit little-endian ELF executable");
+  }
+  const machine = bytes.readUInt16LE(18);
+  if (machine === 62) return "x64";
+  if (machine === 183) return "arm64";
+  throw new Error(`Unsupported ELF machine: ${machine}`);
+}
+
 export function executableArchitecture(bytes, platform) {
-  return runtimeOsOf(platform) === "darwin" ? machOArchitecture(bytes) : peArchitecture(bytes);
+  const os = runtimeOsOf(platform);
+  return os === "darwin" ? machOArchitecture(bytes) : os === "linux" ? elfArchitecture(bytes) : peArchitecture(bytes);
 }
 
 export function assertExecutableTarget(path, platform) {

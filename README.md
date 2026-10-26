@@ -98,6 +98,7 @@ Skills、Plugins、MCP、Slash Commands 同一页开关、探测和打开目录�
 - **Agent Hub / Skills / 模型** — 库存与配置走 Host；没有 read model 的表面保持禁用，不用假数据填满。
 - **本机能力** — Git、文件树、终端 PTY、系统通知、浏览器打开；控制面仍是语义 command，不是 shell 脚本拼装。
 - **托管 Runtime** — 钉住的 oh-my-pi 子模块 + overlay + 四组接缝补丁；`omp --mode studio-host`。工件走 Ed25519 校验。
+- **SSH 工作区（开发预览）** — 在项目/分支栏选择本机或远端工作，支持系统密钥和账密连接的源码实现；兼容性与未验收边界见 [SSH 使用说明](docs/ssh-workspaces.md)。
 
 ## 快速开始
 

@@ -7,6 +7,12 @@ import { PLATFORM } from "../platform";
 import { demoPath } from "./demoPaths";
 import type { TreeGitStatus } from "../git/treeStatus";
 
+export const PREVIEW_SSH_TARGETS = [
+  { id: "demo-linux", name: "dev-linux", platform: "linux" as const },
+  { id: "demo-windows", name: "build-windows", platform: "win32" as const },
+  { id: "demo-mac", name: "studio-mac", platform: "darwin" as const },
+];
+
 export const PREVIEW_DESKTOP_RECOVERY = { version: "0.1.4" } as const;
 
 export type PreviewThreadWait = "approval" | "plan" | "ask";

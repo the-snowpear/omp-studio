@@ -1,5 +1,6 @@
+import { useExecutionTarget } from "./workspaces/ExecutionTargets";
 import { readCssVar, readXtermTheme, applyTheme } from "./terminalTheme";
-import { TerminalGraphicsDecoder, type TerminalGraphic } from "./terminalGraphics";
+import { useTerminalSessions, type TerminalSession as Session, type TerminalScreenHost as Host } from "./terminalSessions";
 import { TerminalGraphicView } from "./TerminalGraphicView";
 import { TerminalRecordingControls } from "./recordings/TerminalRecordingControls";
 /**
@@ -17,34 +18,11 @@ import { useI18n } from "./i18n";
 
 /** 每个终端的回滚行数。乘以同时存在的终端数就是本面板的内存底数。 */
 const TERMINAL_SCROLLBACK_LINES = 1_000;
-/**
- * 屏幕还没挂载时暂存的 PTY 字节上限。只保留尾部：宿主通常在 `create` 之后立刻
- * 挂上，真正需要这个缓冲的情况都是异常路径，而异常路径不该无界增长。
- */
-const PENDING_MAX_CHARS = 64 * 1024;
 
 export type TerminalPaneHandle = {
   create: () => void;
   available: boolean;
 };
-
-type SessionStatus = "running" | "ended";
-
-type Session = {
-  readonly workspaceId?: string;
-  readonly sessionId?: string;
-  readonly id: string;
-  readonly name: string;
-  readonly cwd: string;
-  readonly status: SessionStatus;
-};
-
-type Host = {
-  readonly term: Terminal;
-  readonly fit: FitAddon;
-};
-
-
 
 export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; workspaceId?: string | undefined; sessionId?: string | undefined }>(function TerminalPane(
   { visible, workspaceId, sessionId },
@@ -52,108 +30,34 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
 ) {
   const { t } = useI18n();
   const api = globalThis.ompStudioTerminal;
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const executionTarget = useExecutionTarget();
+  const { store, sessions: allSessions, graphics, graphicsErrors } = useTerminalSessions();
+  const sessions = allSessions.filter(session => session.targetId === executionTarget.id);
+  const [activeId, setActiveId] = useState<string | null>(() => store.activeIds.get(executionTarget.id) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [graphics, setGraphics] = useState<Record<string, TerminalGraphic[]>>({});
-  const [graphicsErrors, setGraphicsErrors] = useState<Record<string, string>>({});
-  const decoders = useRef(new Map<string, TerminalGraphicsDecoder>());
-  const hosts = useRef(new Map<string, Host>());
-  const pending = useRef(new Map<string, string>());
-  const sessionsRef = useRef<Session[]>([]);
-  const bootstrapped = useRef(false);
+  const bootstrapped = useRef(sessions.length > 0);
   const createLock = useRef(false);
-  sessionsRef.current = sessions;
+  const targetStatus = executionTarget.inventory.statuses.find(status => status.id === executionTarget.id);
+  const canCreate = !executionTarget.id || (targetStatus?.state === "connected" && !targetStatus.operation);
+  const selectSession = (id: string): void => { store.activeIds.set(executionTarget.id, id); setActiveId(id); };
 
   const createSession = useCallback(async () => {
-    if (!api || createLock.current) return;
+    if (!api || createLock.current || !canCreate) return;
     createLock.current = true;
     setCreating(true);
     setError(null);
-    try {
-      const info = await api.create({ cols: 80, rows: 24 });
-      const session: Session = { id: info.id, name: info.name, cwd: info.cwd, status: "running", ...(workspaceId ? { workspaceId } : {}), ...(sessionId ? { sessionId } : {}) };
-      setSessions((current) => [...current, session]);
-      setActiveId(info.id);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      createLock.current = false;
-      setCreating(false);
-    }
-  }, [api, workspaceId, sessionId]);
+    try { setActiveId(await store.create(executionTarget.id, workspaceId, sessionId)); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { createLock.current = false; setCreating(false); }
+  }, [api, store, workspaceId, sessionId, executionTarget.id, canCreate]);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      create: () => {
-        void createSession();
-      },
-      available: api !== undefined,
-    }),
-    [api, createSession],
-  );
-
+  useImperativeHandle(ref, () => ({ create: () => { void createSession(); }, available: api !== undefined && canCreate }), [api, canCreate, createSession]);
   useEffect(() => {
-    if (!api || bootstrapped.current || !visible) return;
+    if (!api || bootstrapped.current || !visible || !canCreate) return;
     bootstrapped.current = true;
     void createSession();
-  }, [api, visible, createSession]);
-
-  useEffect(() => {
-    if (!api) return;
-    const offData = api.onData((event) => {
-      let decoder = decoders.current.get(event.id);
-      if (!decoder) { decoder = new TerminalGraphicsDecoder(); decoders.current.set(event.id, decoder); }
-      const decoded = decoder.push(event.data);
-      if (decoded.images.length) setGraphics(current => ({ ...current, [event.id]: [...(current[event.id] ?? []), ...decoded.images].slice(-4) }));
-      if (decoded.errors.length) setGraphicsErrors(current => ({ ...current, [event.id]: decoded.errors.join("; ") }));
-      const host = hosts.current.get(event.id);
-      if (host) {
-        host.term.write(decoded.text);
-        return;
-      }
-      // A screen normally mounts right after `create`, but until it does the
-      // bytes have to go somewhere. Keep only the tail: an unbounded string
-      // concat here is a PTY-rate leak if the host never arrives.
-      const buffered = (pending.current.get(event.id) ?? "") + decoded.text;
-      pending.current.set(
-        event.id,
-        buffered.length > PENDING_MAX_CHARS ? buffered.slice(buffered.length - PENDING_MAX_CHARS) : buffered,
-      );
-    });
-    const offExit = api.onExit((event) => {
-      // Release the xterm instance as soon as the shell is gone: each one keeps
-      // its own scrollback plus rendered DOM, and previously they all stayed
-      // mounted until the whole pane unmounted. The row stays in `sessions` so
-      // the user still sees it as "ended".
-      const host = hosts.current.get(event.id);
-      if (host !== undefined) {
-        host.term.dispose();
-        hosts.current.delete(event.id);
-      }
-      pending.current.delete(event.id);
-      decoders.current.delete(event.id);
-      setSessions((current) =>
-        current.map((session) => (session.id === event.id ? { ...session, status: "ended" } : session)),
-      );
-    });
-    return () => {
-      offData();
-      offExit();
-    };
-  }, [api]);
-
-  useEffect(() => {
-    if (!api) return;
-    return () => {
-      for (const host of hosts.current.values()) host.term.dispose();
-      hosts.current.clear();
-      decoders.current.clear();
-      for (const session of sessionsRef.current) void api.dispose(session.id);
-    };
-  }, [api]);
+  }, [api, visible, canCreate, createSession]);
 
   if (!api) {
     return (
@@ -179,7 +83,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
               role="option"
               tabIndex={selected ? 0 : -1}
               aria-selected={selected}
-              onClick={() => setActiveId(session.id)}
+              onClick={() => selectSession(session.id)}
             >
               <span className="ti-icon" aria-hidden="true">
                 <Icon name="terminal" extra="sm" />
@@ -191,10 +95,11 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
               <span className="ti-badge gray">
                 YOU<span className="sr-only"> {t("terminal.userCreated")}</span>
               </span>
+              <button className="icon-btn small" type="button" aria-label={`关闭终端 ${session.name}`} onClick={event => { event.stopPropagation(); void store.remove(session.id).catch(cause => setError(String(cause))); }}><Icon name="x" extra="sm" /></button>
             </div>
           );
         })}
-        <button className="term-new" type="button" disabled={creating} onClick={() => void createSession()}>
+        <button className="term-new" type="button" disabled={creating || !canCreate} onClick={() => void createSession()}>
           <Icon name="plus" extra="sm" />
           {t("terminal.newTerminal")}
         </button>
@@ -215,7 +120,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
                 </span>
               )}
             </div>
-            <TerminalRecordingControls key={active.id} api={api} id={active.id} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />
+            {executionTarget.id ? <p className="muted small">SSH 终端暂不支持本机录制；关闭标签会结束该终端。</p> : <TerminalRecordingControls key={active.id} api={api} id={active.id} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />}
+            {error ? <p role="alert" className="muted small">{error}</p> : null}
             {(graphics[active.id]?.length || graphicsErrors[active.id]) ? <div style={{ maxHeight: 240, overflow: "auto" }} aria-label="Terminal images / 终端图片">
               {graphics[active.id]?.map((image, index) => <TerminalGraphicView key={index} image={image} />)}
               {graphicsErrors[active.id] ? <p role="status">{graphicsErrors[active.id]}</p> : null}
@@ -226,8 +132,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
                   key={session.id}
                   session={session}
                   api={api}
-                  hosts={hosts.current}
-                  pending={pending.current}
+                  hosts={store.hosts}
+                  pending={store.pending}
                   active={visible && session.id === active.id}
                 />
               ))}
@@ -267,7 +173,8 @@ function XtermScreen({
     if (host === undefined) {
       const term = new Terminal({
         convertEol: true,
-        cursorBlink: true,
+        disableStdin: session.status === "ended",
+        cursorBlink: session.status !== "ended",
         fontSize: 12,
         lineHeight: 1.3,
         fontFamily: readCssVar("--font-mono", "Menlo, Consolas, monospace"),
@@ -294,13 +201,15 @@ function XtermScreen({
       node.appendChild(host.term.element ?? node);
     }
 
+    host.term.options.disableStdin = session.status === "ended";
+    host.term.options.cursorBlink = session.status !== "ended";
     const observer = new MutationObserver(() => applyTheme(host.term));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
     return () => {
       observer.disconnect();
     };
-  }, [api, hosts, pending, session.id]);
+  }, [api, hosts, pending, session.id, session.status]);
 
   useEffect(() => {
     const host = hosts.get(session.id);

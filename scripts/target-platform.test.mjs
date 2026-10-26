@@ -6,6 +6,8 @@ import { test } from "node:test";
 import * as installer from "../packages/runtime-installer/dist/src/index.js";
 import {
   RUNTIME_ENTRYPOINTS,
+  RUNTIME_PLATFORMS,
+  elfArchitecture,
   UPDATE_PLATFORMS,
   assertExecutableTarget,
   assertNativeTargetBuild,
@@ -37,7 +39,8 @@ function pe(machine) {
 test("script and runtime-installer platform tables stay identical", () => {
   assert.deepEqual({ ...RUNTIME_ENTRYPOINTS }, { ...installer.RUNTIME_ENTRYPOINTS });
   assert.deepEqual([...UPDATE_PLATFORMS], [...installer.UPDATE_PLATFORMS]);
-  for (const platform of UPDATE_PLATFORMS) assert.equal(runtimeEntrypointFor(platform), installer.runtimeEntrypointFor(platform));
+  assert.deepEqual([...RUNTIME_PLATFORMS], [...installer.RUNTIME_PLATFORMS]);
+  for (const platform of RUNTIME_PLATFORMS) assert.equal(runtimeEntrypointFor(platform), installer.runtimeEntrypointFor(platform));
 });
 
 test("target platform follows the host unless overridden, and only supported targets resolve", () => {
@@ -45,7 +48,9 @@ test("target platform follows the host unless overridden, and only supported tar
   assert.equal(resolveTargetPlatform({ OMP_TARGET_ARCH: "arm64" }, { platform: "win32", arch: "x64" }), "win32-arm64");
   assert.equal(resolveTargetPlatform({ OMP_TARGET_PLATFORM: "Darwin", OMP_TARGET_ARCH: " ARM64 " }, { platform: "win32", arch: "x64" }), "darwin-arm64");
   assert.throws(() => resolveTargetPlatform({}, { platform: "darwin", arch: "x64" }), /Unsupported target platform: darwin-x64/u);
-  assert.throws(() => resolveTargetPlatform({}, { platform: "linux", arch: "x64" }), /Unsupported/u);
+  assert.equal(resolveTargetPlatform({}, { platform: "linux", arch: "x64" }), "linux-x64");
+  assert.equal(resolveTargetPlatform({}, { platform: "linux", arch: "arm64" }), "linux-arm64");
+  assert.equal(installer.isUpdatePlatform("linux-x64"), false);
 });
 
 test("Mach-O parsing accepts thin arm64/x64 and refuses universal or foreign files", () => {
@@ -68,6 +73,20 @@ test("executable architecture uses PE on Windows and Mach-O on macOS", async () 
   assert.throws(() => assertExecutableTarget(join(root, "omp"), "darwin-arm64"), /expected a darwin-arm64 executable, found x64/u);
   await writeFile(join(root, "omp"), machO(0x0100000c));
   assertExecutableTarget(join(root, "omp"), "darwin-arm64");
+});
+
+test("Linux Runtime uses ELF targets without enabling Linux desktop updates", () => {
+  const elf = Buffer.alloc(64);
+  elf.write("\x7fELF", 0, "ascii");
+  elf[4] = 2; elf[5] = 1;
+  elf.writeUInt16LE(62, 18);
+  assert.equal(elfArchitecture(elf), "x64");
+  assert.equal(executableArchitecture(elf, "linux-x64"), "x64");
+  elf.writeUInt16LE(183, 18);
+  assert.equal(elfArchitecture(elf), "arm64");
+  assert.equal(runtimeEntrypointFor("linux-arm64"), "omp");
+  assert.equal(UPDATE_PLATFORMS.includes("linux-x64"), false);
+  assert.throws(() => elfArchitecture(pe(0x8664)), /ELF/u);
 });
 
 test("native build guard rejects cross builds and Rosetta", () => {

@@ -14,7 +14,7 @@ export type SubagentConversationEngineInput = { readonly preview: boolean; reado
 export type SubagentConversationSnapshot = { readonly state: ConversationState; readonly rows: readonly TimelineRow[]; readonly demo: boolean; readonly loadingOlder: boolean; readonly identityKey: string };
 /** Numeric-only counters for the diagnostics sampler; never rows, text or ids. */
 export type SubagentConversationEngineDiagnostics = { readonly disposed: number; readonly rows: number; readonly listeners: number; readonly openBufferEvents: number; readonly openBufferBytes: number };
-export type SubagentConversationEngine = { getSnapshot(): SubagentConversationSnapshot; subscribe(listener: () => void): () => void; start(): void; dispose(): void; loadOlder(): Promise<void>; getDiagnostics(): SubagentConversationEngineDiagnostics };
+export type SubagentConversationEngine = { getSnapshot(): SubagentConversationSnapshot; subscribe(listener: () => void): () => void; start(): void; dispose(): void; loadOlder(): Promise<void>; reload(): Promise<void>; getDiagnostics(): SubagentConversationEngineDiagnostics };
 
 let generation = 10_000;
 /** Engines created and not yet disposed; only the open subagent pane should hold one. */
@@ -118,6 +118,7 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
       activeEngines -= 1;
     },
     loadOlder,
+    reload: () => hydrate(true),
     getDiagnostics: () => ({ disposed: disposed ? 1 : 0, rows: snapshot.rows.length, listeners: listeners.size, openBufferEvents: buffered.length, openBufferBytes: bufferedBytes }),
   };
 }

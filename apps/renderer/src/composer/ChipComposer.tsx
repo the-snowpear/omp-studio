@@ -1,3 +1,4 @@
+import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { useWordPrediction, type ComposerPrediction } from "./useWordPrediction";
 import { isPrimaryModifier } from "../keyboard/shortcuts";
 import {
@@ -147,6 +148,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   },
   ref,
 ) {
+  const executionTarget = useExecutionTarget();
   const editorRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const imagesRef = useRef(new Map<string, PromptImage>());
@@ -241,7 +243,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const ingestFiles = async (fileList: FileList | File[]): Promise<void> => {
     const files = Array.from(fileList);
     if (files.length === 0) return;
-    const resolved = workspaceId ? await resolveOsPaths(workspaceId, files) : new Map();
+    const resolved = workspaceId && executionTarget.id === null ? await resolveOsPaths(workspaceId, files) : new Map();
     let skipped = 0;
     for (const file of files) {
       const meta = resolved.get(file);
@@ -285,9 +287,11 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       skipped += 1;
     }
     if (skipped > 0) {
-      onError?.(workspaceId
-        ? "有些文件读不到，未添加为胶囊：可能已被移动或是快捷方式。"
-        : "当前环境无法解析磁盘路径，只有图片可以附件。");
+      onError?.(executionTarget.id !== null
+        ? "SSH 工作区可以直接附加图片；普通文件请通过 @ 选择远端文件，本机文件尚不支持上传。"
+        : workspaceId
+          ? "有些文件读不到，未添加为胶囊：可能已被移动或是快捷方式。"
+          : "当前环境无法解析磁盘路径，只有图片可以附件。");
     }
   };
 

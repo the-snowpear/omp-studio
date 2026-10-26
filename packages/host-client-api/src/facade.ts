@@ -591,8 +591,8 @@ function validateOptions(options: StudioHostClientFacadeOptions): void {
   if (!Number.isSafeInteger(options.authority.authorityEpoch) || options.authority.authorityEpoch < 1) {
     throw new TypeError("facade authority epoch must be a positive integer");
   }
-  if (options.platform !== "win32" && options.platform !== "darwin") {
-    throw new TypeError("facade platform must be 'win32' or 'darwin'");
+  if (options.platform !== "win32" && options.platform !== "darwin" && options.platform !== "linux") {
+    throw new TypeError("facade platform must be 'win32', 'darwin' or 'linux'");
   }
   if (options.arch !== "x64" && options.arch !== "arm64") {
     throw new TypeError("facade arch must be 'x64' or 'arm64'");
@@ -715,6 +715,10 @@ export class StudioHostClientFacade implements ClientTransport {
 
   get runtimeInstallInProgress(): boolean {
     return this.#installInFlight;
+  }
+
+  get hasPendingCommands(): boolean {
+    return this.#installInFlight || this.#dispatchesInFlight > 0 || this.#registry.hasPending();
   }
   #lastInstallResult: RuntimeInstallState | undefined;
   /** Last workspace list seen; feeds the bootstrap selection (`projects.list` wins in the Renderer). */

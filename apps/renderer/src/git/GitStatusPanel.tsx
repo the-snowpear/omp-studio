@@ -22,6 +22,7 @@ import type {
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
+import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 
 import { GitCommitGraph } from "./GitCommitGraph";
 import { GitDiffResizer, useGitDiffHeight } from "./GitDiffResizer";
@@ -38,6 +39,7 @@ type RepositoryHook = {
 };
 
 export function useGitRepository(client: StudioClient, workspaceId?: WorkspaceId): RepositoryHook {
+  const { syncRevision } = useExecutionTarget();
   const [repository, setRepository] = useState<GitRepositoryReadModel | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -75,7 +77,7 @@ export function useGitRepository(client: StudioClient, workspaceId?: WorkspaceId
       generation.current += 1;
       unsubscribe();
     };
-  }, [client, refresh, workspaceId]);
+  }, [client, refresh, workspaceId, syncRevision]);
 
   return { ...(repository === undefined ? {} : { repository }), loading, ...(error === undefined ? {} : { error }), refresh };
 }
@@ -135,6 +137,7 @@ function patchLines(patch: string) {
 
 export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly client: StudioClient; readonly workspaceId?: WorkspaceId; readonly focusPath?: string }) {
   const { t } = useI18n();
+  const { syncRevision } = useExecutionTarget();
   const repositoryHook = useGitRepository(client, workspaceId);
   const repository = repositoryHook.repository;
   const [branches, setBranches] = useState<GitBranchListReadModel>();
@@ -227,7 +230,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
   useEffect(() => {
     void refreshDetails();
     return () => { detailsGeneration.current += 1; };
-  }, [refreshDetails]);
+  }, [refreshDetails, syncRevision]);
 
   useEffect(() => {
     void refreshLog();
@@ -239,7 +242,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
       logGeneration.current += 1;
       unsubscribe();
     };
-  }, [client, graphLayout.open, refreshLog, workspaceId]);
+  }, [client, graphLayout.open, refreshLog, workspaceId, syncRevision]);
 
   useEffect(() => {
     if (workspaceId === undefined || selectedCommit === undefined) {
@@ -281,7 +284,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
       (cause) => { if (!cancelled) { setDiff(undefined); setNotice(hostErrorMessage(cause, "无法读取 Diff")); } },
     );
     return () => { cancelled = true; };
-  }, [client, selected, workspaceId]);
+  }, [client, selected, workspaceId, syncRevision]);
 
   const execute = useCallback(async (operation: GitOperation) => {
     if (operation.kind !== "clone" && workspaceId === undefined) return false;

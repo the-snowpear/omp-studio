@@ -4,7 +4,7 @@
  * artifact handled on macOS keeps `omp.exe`. `scripts/target-platform.mjs`
  * mirrors this table and a metadata test keeps the two identical.
  */
-export const RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "omp.exe", darwin: "omp" } as const);
+export const RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "omp.exe", darwin: "omp", linux: "omp" } as const);
 export type RuntimeOs = keyof typeof RUNTIME_ENTRYPOINTS;
 export type RuntimeEntrypoint = (typeof RUNTIME_ENTRYPOINTS)[RuntimeOs];
 
@@ -12,9 +12,12 @@ export type RuntimeEntrypoint = (typeof RUNTIME_ENTRYPOINTS)[RuntimeOs];
 export const UPDATE_PLATFORMS = Object.freeze(["win32-x64", "win32-arm64", "darwin-arm64"] as const);
 export type UpdatePlatform = (typeof UPDATE_PLATFORMS)[number];
 
+/** Runtime build targets; adding a remote target does not add a desktop updater. */
+export const RUNTIME_PLATFORMS = Object.freeze([...UPDATE_PLATFORMS, "linux-x64", "linux-arm64"] as const);
+
 export function runtimeOsOf(platform: string): RuntimeOs {
   const os = platform.split("-", 1)[0];
-  if (os !== "win32" && os !== "darwin") throw new Error(`Unsupported Runtime platform: ${platform}`);
+  if (os !== "win32" && os !== "darwin" && os !== "linux") throw new Error(`Unsupported Runtime platform: ${platform}`);
   return os;
 }
 

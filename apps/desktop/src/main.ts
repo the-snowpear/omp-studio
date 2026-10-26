@@ -1,3 +1,7 @@
+import { installRemoteRuntime } from "./remote/install.js";
+import { RemoteTerminalManager } from "./remote/terminal.js";
+import { RemoteConnectionManager } from "./remote/manager.js";
+import { registerRemoteIpc } from "./remote/ipc.js";
 import { DesktopPrediction, registerPredictionIpc } from "./prediction.js";
 import { registerSkillshareTokenIpc } from "./chrome-skillshare.js";
 import { DesktopLiveAudio, registerLiveAudioIpc } from "./live-audio.js";
@@ -283,6 +287,10 @@ export async function main(): Promise<void> {
       })().catch((error) => console.error("[omp-studio] confirming the macOS update failed", error));
     }
   }
+  const remoteBundle = join(app.getAppPath(), "dist", "remote-host");
+  const remoteHelpers = app.isPackaged ? join(process.resourcesPath, "ssh-askpass") : join(app.getAppPath(), "dist", "ssh-askpass");
+  const remoteConnections = new RemoteConnectionManager(join(desktopPaths().stateRoot, "ssh-connections.json"), remoteBundle, undefined, remoteHelpers);
+  const remoteTerminals = new RemoteTerminalManager(remoteConnections);
   const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);
   const mediaUploads = new MediaUploadManager(activeArtifactLibrary);
   const liveAudio = new DesktopLiveAudio({
@@ -458,7 +466,7 @@ export async function main(): Promise<void> {
     const target = resolveRendererEntryFrom(layout.rendererDist, RENDERER_DEV_URL);
     if (!(await protocol.isProtocolHandled("omp-artifact"))) {
       const origin = target.kind === "url" ? new URL(target.url).origin : "null";
-      protocol.handle("omp-artifact", request => artifactResponse(request, activeArtifactLibrary(), origin));
+      protocol.handle("omp-artifact", request => remoteConnections.activeId === null ? artifactResponse(request, activeArtifactLibrary(), origin) : new Response("Remote artifact transfer is not available", { status: 503 }));
     }
     const allowedOrigin = rendererOriginFor(target);
     const preloadPath = layout.preloadPath;
@@ -489,6 +497,7 @@ export async function main(): Promise<void> {
     // Fixed named channels only; every payload validated at this boundary.
     // `dispose` removes handlers before Host shutdown on app quit.
     const isTrustedSender = (sender: { getURL(): string }) => sender === window.webContents && isTrustedRendererUrl(sender.getURL(), allowedOrigin);
+    const isTrustedLocalSender = (sender: { getURL(): string }) => isTrustedSender(sender) && remoteConnections.activeId === null;
     const payloadHealth = registerPayloadHealthIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -507,6 +516,16 @@ export async function main(): Promise<void> {
     });
     window.webContents.once("render-process-gone", () => payloadHealth.failed());
     const ipc = registerDesktopIpc({ facade: context.transport, isTrustedSender });
+    const remoteIpc = registerRemoteIpc({ ipc: ipcMain, manager: remoteConnections, isTrusted: isTrustedSender, confirmDeployment: async profile => {
+      const answer = await dialog.showMessageBox(window, { type: "question", title: "连接 SSH 工作区", message: `连接到 ${profile.name}`, detail: "将使用系统 SSH 配置连接，并在远端用户目录安装或复用 OMP Studio Host（约 2 MB）。需要远端 Node.js 22+；不复制本机模型凭证，不修改 SSH 服务设置。", buttons: ["连接并准备", "取消"], defaultId: 0, cancelId: 1 });
+      return answer.response === 0;
+    }, installRuntime: async id => {
+      const picked = await dialog.showOpenDialog(window, { title: "选择匹配远端系统的签名 Runtime ZIP", properties: ["openFile"], filters: [{ name: "OMP Studio Runtime", extensions: ["zip"] }] });
+      if (picked.canceled || !picked.filePaths[0]) return { installed: false };
+      if (remoteTerminals.hasTarget(id)) throw new Error("请先关闭这个 SSH 目标的终端，再安装 Runtime");
+      await installRemoteRuntime(remoteConnections, id, picked.filePaths[0], trustedKeys);
+      return { installed: true };
+    } });
     const disposeChrome = registerTitleBarOverlayIpc({ isTrustedSender });
     const disposeNotify = registerChromeNotifyIpc({
       isTrustedSender,
@@ -553,15 +572,20 @@ export async function main(): Promise<void> {
     desktopConversationViews.registerWindow(window.webContents, windowSurface.isVisible() && !windowSurface.isMinimized());
     const refreshConversationVisibility = () => { const visible = windowSurface.isVisible() && !windowSurface.isMinimized(); desktopConversationViews.setVisible(window.webContents, visible); if (!visible) { liveAudio.disposeWindow(window.webContents.id); browserObservation.disposeWindow(window.webContents.id); prediction.disposeWindow(window.webContents.id); } };
     const resetConversationVisibility = () => desktopConversationViews.reset(window.webContents);
+    const cancelRemotePreparation = () => { void remoteIpc.cancelPending().catch(() => {}); };
+    const cancelRemoteNavigation = (_event: unknown, _url: string, isInPlace: boolean, isMainFrame: boolean) => { if (isMainFrame && !isInPlace) cancelRemotePreparation(); };
     const removeConversationVisibility = () => desktopConversationViews.remove(window.webContents);
     window.on("show", refreshConversationVisibility);
     window.on("hide", refreshConversationVisibility);
     window.on("minimize", refreshConversationVisibility);
     window.on("restore", refreshConversationVisibility);
     window.webContents.on("did-start-navigation", resetConversationVisibility);
+    window.webContents.on("did-start-navigation", cancelRemoteNavigation);
+    window.webContents.on("render-process-gone", cancelRemotePreparation);
+    window.webContents.on("destroyed", cancelRemotePreparation);
     window.webContents.on("destroyed", removeConversationVisibility);
     ipcMain.handle(CONVERSATION_VIEW_CHANNEL, ({ sender }, input: unknown) =>
-      !sender.isDestroyed() && isTrustedSender(sender) && desktopConversationViews.report(sender, input));
+      !sender.isDestroyed() && isTrustedLocalSender(sender) && desktopConversationViews.report(sender, input));
     const logsDirectory = defaultHostLogsDirectory();
     const disposeLogs = registerChromeLogsIpc({
       ipcMain: {
@@ -599,7 +623,7 @@ export async function main(): Promise<void> {
         },
       },
     });
-    const disposeServiceDefinitions = registerServiceDefinitionsIpc({ ipcMain, isTrustedSender,
+    const disposeServiceDefinitions = registerServiceDefinitionsIpc({ ipcMain, isTrustedSender: isTrustedLocalSender,
       store: new ServiceDefinitionStore(join(app.getPath("userData"), "service-definitions.enc"), {
         available: () => safeStorage.isEncryptionAvailable(),
         encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value),
@@ -608,7 +632,7 @@ export async function main(): Promise<void> {
     const disposeProfile = registerChromeProfileIpc({ isTrustedSender });
     const disposeArtifacts = registerArtifactIpc({
       ipcMain,
-      isTrustedSender,
+      isTrustedSender: isTrustedLocalSender,
       library: activeArtifactLibrary,
       async chooseDirectory(sender) {
         const owner = BrowserWindow.fromWebContents(sender as WebContents);
@@ -630,12 +654,12 @@ export async function main(): Promise<void> {
         return result.canceled ? undefined : result.filePath;
       },
     });
-    const disposeSkillshareTokens = registerSkillshareTokenIpc({ ipcMain, isTrustedSender, directory: activeMediaDirectory });
-    const disposeMediaUploads = registerMediaUploadIpc({ ipcMain, isTrustedSender, manager: mediaUploads });
-    const disposeLiveAudio = registerLiveAudioIpc({ ipcMain, isTrustedSender, manager: liveAudio, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
-    const disposePrediction = registerPredictionIpc({ipcMain,isTrustedSender,manager:prediction,isVisible:sender=>{const owner=BrowserWindow.fromWebContents(sender as WebContents);return !!owner&&owner.isVisible()&&!owner.isMinimized();}});
-    const disposeBrowserObservation = registerBrowserObservationIpc({ ipcMain, isTrustedSender, manager: browserObservation, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
-    const disposeComputerCapture = registerComputerCaptureIpc({ ipcMain, isTrustedSender, directory: activeMediaDirectory, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
+    const disposeSkillshareTokens = registerSkillshareTokenIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, directory: activeMediaDirectory });
+    const disposeMediaUploads = registerMediaUploadIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, manager: mediaUploads });
+    const disposeLiveAudio = registerLiveAudioIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, manager: liveAudio, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
+    const disposePrediction = registerPredictionIpc({ipcMain,isTrustedSender: isTrustedLocalSender,manager:prediction,isVisible:sender=>{const owner=BrowserWindow.fromWebContents(sender as WebContents);return !!owner&&owner.isVisible()&&!owner.isMinimized();}});
+    const disposeBrowserObservation = registerBrowserObservationIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, manager: browserObservation, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
+    const disposeComputerCapture = registerComputerCaptureIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, directory: activeMediaDirectory, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
     const disposeImage = registerChromeImageIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -687,6 +711,8 @@ export async function main(): Promise<void> {
       },
       isTrustedSender,
       manager: terminalManager,
+      remote: remoteTerminals,
+      activeRemote: () => remoteConnections.activeId,
       recordings: terminalRecordings,
     });
     const disposeWorkspaceShell = registerWorkspaceShellIpc({
@@ -700,7 +726,7 @@ export async function main(): Promise<void> {
       },
       isTrustedSender,
       actions: {
-        resolveWorkspaceCwd: (workspaceId) => hostFactory.resolveWorkspaceCwd(workspaceId),
+        resolveWorkspaceCwd: (workspaceId) => { if (remoteConnections.activeId !== null) throw new Error("SSH 工作区不支持本机文件打开操作"); return hostFactory.resolveWorkspaceCwd(workspaceId); },
         openInExternalEditor,
         revealInFileManager: async (cwd) => {
           const error = await shell.openPath(cwd);
@@ -850,12 +876,16 @@ export async function main(): Promise<void> {
         window.removeListener("minimize", refreshConversationVisibility);
         window.removeListener("restore", refreshConversationVisibility);
         window.webContents.removeListener("did-start-navigation", resetConversationVisibility);
+        window.webContents.removeListener("did-start-navigation", cancelRemoteNavigation);
+        window.webContents.removeListener("render-process-gone", cancelRemotePreparation);
+        window.webContents.removeListener("destroyed", cancelRemotePreparation);
         window.webContents.removeListener("destroyed", removeConversationVisibility);
         removeConversationVisibility();
         disposeProfile();
         disposeOpenUrl.dispose();
         disposeNotify();
         disposeChrome();
+        remoteIpc.dispose();
         ipc.dispose();
       },
     };
@@ -867,7 +897,7 @@ export async function main(): Promise<void> {
     : undefined;
 
   const application = createDesktopApplication({
-    beforeShutdown: async () => { macSwap?.cleanExit(); stopAppNapGuard?.(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    beforeShutdown: async () => { remoteTerminals.disposeAll(); await remoteConnections.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
     platform: process.platform,

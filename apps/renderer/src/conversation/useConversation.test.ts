@@ -79,6 +79,20 @@ describe("useConversation hold lifecycle (W03)", () => {
     return { client, release: () => { const batch = pending; pending = []; for (const done of batch) done(opened(target, `hello ${target}`)); } };
   }
 
+  it("reloads the same conversation after SSH recovery without remounting its engine", async () => {
+    const { client, release } = gatedClient();
+    const hook = renderHook(({ syncRevision }) => useConversation({ preview: false, client, identity: { sessionId: sessionA, runtimeEpoch: epoch }, canRead: true, runtimeConnected: true, syncRevision }), { initialProps: { syncRevision: 1 } });
+    release();
+    await vi.waitFor(() => expect(hook.result.current.state.hydrateStatus).toBe("ready"));
+    const original = hook.result.current.engine;
+    hook.rerender({ syncRevision: 2 });
+    expect(hook.result.current.engine).toBe(original);
+    expect(client.query).toHaveBeenCalledTimes(2);
+    release();
+    await vi.waitFor(() => expect(hook.result.current.state.hydrateStatus).toBe("ready"));
+    expect(hook.result.current.rows[0]).toMatchObject({ type: "user", text: `hello ${sessionA}` });
+  });
+
   it("keeps the same-session transcript across an engine remount, drops it on session switch and on unmount", async () => {
     const { client, release } = gatedClient();
     const base = activeConversationEngineCount();

@@ -28,6 +28,7 @@ files:
   - "!**/dist/artifacts/**"
   - "!**/dist/test/**"
   - "!**/*.exe"
+  - "!dist/ssh-askpass/**"
 
 # Native PTY bits must not stay inside asar. Icons are also unpacked so a
 # fallback path exists if extraResources is missing.
@@ -45,6 +46,12 @@ buildDependenciesFromSource: false
 # Product icons live next to app.asar as real files: Windows Shell cannot
 # use an asar path for the taskbar / notifications.
 extraResources:
+  - from: apps/desktop/dist/ssh-askpass
+    to: ssh-askpass
+    filter:
+      - "omp-ssh-askpass.exe"
+      - "askpass.sh"
+      - "askpass.cjs"
   - from: apps/renderer/dist
     to: renderer/dist
     filter:

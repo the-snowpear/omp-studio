@@ -40,7 +40,7 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { overlayHash } from "./omp-overlay.mjs";
 import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
-import { RUNTIME_ENTRYPOINTS, UPDATE_PLATFORMS, runtimeEntrypointFor } from "./target-platform.mjs";
+import { RUNTIME_ENTRYPOINTS, RUNTIME_PLATFORMS, runtimeEntrypointFor } from "./target-platform.mjs";
 
 export const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
 
@@ -585,7 +585,7 @@ export function assertPinConsistent(upstream, series) {
     }
   }
   for (const platform of upstream.platforms ?? []) {
-    if (!UPDATE_PLATFORMS.includes(platform)) throw new Error(`upstream pin platform ${platform} is not a supported Runtime platform`);
+    if (!RUNTIME_PLATFORMS.includes(platform)) throw new Error(`upstream pin platform ${platform} is not a supported Runtime platform`);
   }
 }
 

@@ -1,0 +1,35 @@
+.execution-picker { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.execution-picker > button > span:not(.spinner):not(.chip) { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execution-menu { width: min(310px, calc(100vw - 32px)); max-height: min(520px, 70vh); overflow-y: auto; }
+.execution-menu-row { display: flex; align-items: center; gap: var(--sp-8); width: 100%; min-width: 0; padding: var(--sp-8) var(--sp-10); border-radius: var(--r-4); color: var(--text); text-align: left; font: inherit; }
+.execution-menu-row:hover:not(:disabled) { background: var(--surface-hover); }
+.execution-menu-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.execution-menu-row small { display: block; color: var(--text-3); font-size: var(--fs-11); margin-top: var(--sp-2); }
+.execution-menu-help { padding: var(--sp-8) var(--sp-10); color: var(--text-3); font-size: var(--fs-12); line-height: 1.6; }
+.execution-profile { display: flex; align-items: center; }
+.execution-profile .execution-menu-row { flex: 1; }
+.execution-persistent { justify-content: flex-end; width: max-content; min-width: 170px; max-width: 100%; }
+.remote-offline, .execution-error, .ssh-error { color: var(--danger); }
+.execution-error { position: absolute; bottom: 32px; right: 0; width: min(360px, 80vw); padding: var(--sp-10); background: var(--surface); border: 1px solid var(--border-float); border-radius: var(--r-8); font-size: var(--fs-12); overflow-wrap: anywhere; z-index: var(--z-menu); }
+.ssh-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; margin: auto; padding: var(--sp-24); background: var(--surface); color: var(--text); border: 1px solid var(--border-float); border-radius: var(--r-10); box-shadow: var(--shadow-modal); }
+.ssh-dialog::backdrop { background: color-mix(in srgb, var(--text) 30%, transparent); }
+.ssh-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-16); margin-bottom: var(--sp-20); }
+.ssh-dialog-head h2 { margin: 0; font-size: var(--fs-18); font-weight: var(--fw-semibold); }
+.ssh-dialog label { display: grid; gap: var(--sp-6); margin: var(--sp-14) 0; font-size: var(--fs-12); }
+.ssh-dialog input, .ssh-dialog select { width: 100%; padding: var(--sp-10) var(--sp-12); border: 1px solid var(--border-strong); border-radius: var(--r-6); background: var(--surface-2); color: var(--text); font: inherit; }
+.ssh-dialog input:focus-visible, .ssh-dialog select:focus-visible, .execution-picker button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ssh-dialog p { line-height: 1.6; overflow-wrap: anywhere; }
+.ssh-dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-8); margin-top: var(--sp-24); }
+.ssh-directory-actions { display: flex; gap: var(--sp-8); }
+.ssh-directory-list { max-height: 260px; min-height: 80px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-6); margin-top: var(--sp-12); }
+.ssh-directory-list button { display: flex; width: 100%; align-items: center; gap: var(--sp-8); padding: var(--sp-8) var(--sp-12); text-align: left; color: var(--text); overflow-wrap: anywhere; }
+.ssh-directory-list p { padding: var(--sp-12); }
+.ssh-directory-list button:hover { background: var(--surface-hover); }
+.remote-scope-notice { position: fixed; z-index: var(--z-toast); bottom: 32px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8); width: max-content; max-width: calc(100vw - 32px); padding: var(--sp-10) var(--sp-12); border: 1px solid var(--border-float); border-radius: var(--r-8); background: var(--surface); color: var(--text-2); font-size: var(--fs-12); }
+.remote-scope-notice > span { max-width: 520px; overflow-wrap: anywhere; }
+.remote-scope-label { position: fixed; z-index: var(--z-topbar); bottom: 6px; right: var(--sp-16); max-width: 45vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: var(--sp-2) var(--sp-8); border: 1px solid var(--border); border-radius: var(--r-full); background: var(--surface); color: var(--text-3); font-size: var(--fs-11); pointer-events: none; }
+.remote-scope-notice.disconnected { color: var(--danger); }
+.remote-retry-count { display: block; margin-top: var(--sp-4); color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.remote-scope-notice button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.remote-scope-notice > span { line-height: 1.6; }
+@media (max-width: 600px) { .execution-picker > button > span:not(.spinner):not(.chip) { max-width: 110px; } .ssh-dialog { padding: var(--sp-16); } }

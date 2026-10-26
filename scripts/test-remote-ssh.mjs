@@ -1,0 +1,31 @@
+import { probeRemote, deployRemote, attachRemote, runSsh, nodeRemoteCommand } from '../apps/desktop/dist/src/remote/deploy.js';
+import { resolve } from 'node:path';
+import assert from 'node:assert/strict';
+const alias=process.argv[2];
+if(!alias)throw Error('SSH alias required');
+const connection={host:alias};
+const environment=await probeRemote(connection);
+const marker='omp-studio-ssh-test-'+Date.now();
+environment.root=environment.platform==='win32'?environment.home+'\\AppData\\Local\\Temp\\'+marker:environment.home+'/.cache/'+marker;
+console.log(JSON.stringify({alias,platform:environment.platform,root:environment.root}));
+const installation=await deployRemote(connection,environment,resolve('apps/desktop/dist/remote-host'));
+console.log('DEPLOYED',JSON.stringify(installation));
+const workspace=JSON.parse(await runSsh(connection,nodeRemoteCommand(`const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const root=p.join(${JSON.stringify(environment.root)},'测试 project');fs.mkdirSync(root,{recursive:true});fs.writeFileSync(p.join(root,'sample.txt'),${JSON.stringify('SSH real file\r\n')});cp.execFileSync('git',['init',root]);process.stdout.write(JSON.stringify(root));`)));
+let transport=await attachRemote(connection,environment,installation);
+try {
+ const first=await transport.bootstrap();
+ const projects=await transport.registerWorkspace(workspace);
+ const files=await transport.query({queryName:'workspace.fileTree',input:{workspaceId:projects.activeWorkspaceId}});
+ assert.ok(files.ok&&files.result.nodes.some(n=>n.name==='sample.txt'));
+ const git=await transport.query({queryName:'git.repository.get',input:{workspaceId:projects.activeWorkspaceId}});
+ assert.ok(git.ok&&git.result.isRepository);
+ console.log('FILES_GIT_OK',first.runtime.status);
+ await transport.close();
+ await new Promise(r=>setTimeout(r,1000));
+ transport=await attachRemote(connection,environment,installation);
+ const next=await transport.bootstrap();
+ assert.equal(first.authority.authorityId,next.authority.authorityId);
+ console.log('RECONNECT_SAME_HOST_OK');
+ await transport.peer.request('shutdown');
+} finally {await transport.close();}
+console.log('PASS',alias);

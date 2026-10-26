@@ -90,6 +90,7 @@ if (process.platform === "darwin") {
 }
 
 run(executable, ["--version"], { cwd: ompSourceDirectory, env });
+if (process.platform === "linux") assertExecutableTarget(executable, artifactPlatform);
 if (process.platform === "win32") assertPeArchitecture(executable, resolveTargetArch());
 run(executable, ["--smoke-test"], { cwd: ompSourceDirectory, env });
 console.log(`Built and verified ${executable}`);

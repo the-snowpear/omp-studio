@@ -455,7 +455,7 @@ test("pin entrypoints and platforms must agree with the managed table", async ()
       outDirectory: join(inputs.root, "out-pin"),
     });
   await assert.rejects(generate({ ...inputs.upstream, entrypoints: { win32: "omp.exe", darwin: "omp.exe" } }), /entrypoint for darwin/u);
-  await assert.rejects(generate({ ...inputs.upstream, entrypoints: { linux: "omp" } }), /entrypoint for linux/u);
+  await assert.rejects(generate({ ...inputs.upstream, entrypoints: { linux: "omp.exe" } }), /entrypoint for linux/u);
   await assert.rejects(generate({ ...inputs.upstream, platforms: ["win32-x64", "darwin-x64"] }), /darwin-x64 is not a supported/u);
 });
 

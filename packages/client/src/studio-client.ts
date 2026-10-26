@@ -50,6 +50,7 @@ export class StudioClientImpl implements StudioClient {
   private transportUnsubscribe: Unsubscribe | null = null;
   private bootstrapPromise: Promise<ClientBootstrap> | null = null;
   private bootstrapping = false;
+  private transportGeneration = 0;
   private readonly bufferedEvents: ClientEvent[] = [];
   private readonly listeners: RendererSubscription[] = [];
   private readonly stateListeners: Array<(state: ClientState) => void> = [];
@@ -70,11 +71,13 @@ export class StudioClientImpl implements StudioClient {
     if (this.bootstrapPromise !== null) {
       return this.bootstrapPromise;
     }
+    const generation = this.transportGeneration;
     this.bootstrapping = true;
     this.ensureSubscribed();
     const run = (async (): Promise<ClientBootstrap> => {
       try {
         const bootstrap = await this.transport.bootstrap();
+        if (this.closed || generation !== this.transportGeneration) throw CLIENT_CLOSED_ERROR;
         if (bootstrap.contractVersion !== CLIENT_CONTRACT_VERSION) {
           throw {
             code: "UNAVAILABLE",
@@ -90,17 +93,17 @@ export class StudioClientImpl implements StudioClient {
       } catch (error) {
         // Events buffered without a successful snapshot cannot be trusted;
         // discard them so a later retry starts from a clean baseline.
-        this.bufferedEvents.length = 0;
+        if (generation === this.transportGeneration) this.bufferedEvents.length = 0;
         throw error;
       } finally {
-        this.bootstrapping = false;
+        if (generation === this.transportGeneration) this.bootstrapping = false;
       }
     })();
     this.bootstrapPromise = run;
     try {
       return await run;
     } finally {
-      this.bootstrapPromise = null;
+      if (this.bootstrapPromise === run) this.bootstrapPromise = null;
     }
   }
 
@@ -193,6 +196,16 @@ export class StudioClientImpl implements StudioClient {
         this.stateListeners.splice(index, 1);
       }
     };
+  }
+
+  /** A lost transport is not evidence that an accepted operation failed. */
+  transportLost(reason: string): void {
+    if (this.closed) return;
+    this.transportGeneration++;
+    this.bootstrapPromise = null;
+    this.bootstrapping = false;
+    this.bufferedEvents.length = 0;
+    this.applyAction({ type: "transport.lost", reason, occurredAt: this.ids.now() });
   }
 
   async close(): Promise<void> {

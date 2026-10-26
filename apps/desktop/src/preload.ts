@@ -33,6 +33,7 @@ import {
   type TerminalDataEvent,
   type TerminalExitEvent,
 } from "./terminal-shared.js";
+import { REMOTE_CHANNELS, type RemoteApi } from "./remote/shared.js";
 import { createOmpStudioChromeApi, subscribeChannel } from "./chrome-api.js";
 
 /**
@@ -65,6 +66,27 @@ const sender: DesktopIpcBridge = {
 const api = createDesktopIpcBridge(sender);
 
 contextBridge.exposeInMainWorld(DESKTOP_BRIDGE_GLOBAL, api);
+const remoteApi: RemoteApi = {
+  list: () => ipcRenderer.invoke(REMOTE_CHANNELS.list),
+  save: profile => ipcRenderer.invoke(REMOTE_CHANNELS.save, profile),
+  remove: id => ipcRenderer.invoke(REMOTE_CHANNELS.remove, id),
+  connect: (id, credentials) => ipcRenderer.invoke(REMOTE_CHANNELS.connect, id, credentials),
+  installRuntime: id => ipcRenderer.invoke(REMOTE_CHANNELS.installRuntime, id),
+  disconnect: id => ipcRenderer.invoke(REMOTE_CHANNELS.disconnect, id),
+  select: id => ipcRenderer.invoke(REMOTE_CHANNELS.select, id),
+  bootstrap: id => ipcRenderer.invoke(REMOTE_CHANNELS.bootstrap, id),
+  query: (id, request) => ipcRenderer.invoke(REMOTE_CHANNELS.query, id, request),
+  command: async (id, request) => {
+    const result = await ipcRenderer.invoke(REMOTE_CHANNELS.command, id, request);
+    if (!result.ok) throw result.error;
+    return result.accepted;
+  },
+  directories: (id, path) => ipcRenderer.invoke(REMOTE_CHANNELS.directories, id, path),
+  register: (id, path) => ipcRenderer.invoke(REMOTE_CHANNELS.register, id, path),
+  onEvent: listener => subscribeChannel(ipcRenderer, REMOTE_CHANNELS.event, listener),
+  onChanged: listener => subscribeChannel(ipcRenderer, REMOTE_CHANNELS.changed, listener),
+};
+contextBridge.exposeInMainWorld("ompStudioRemote", Object.freeze(remoteApi));
 contextBridge.exposeInMainWorld("ompStudioChrome", createOmpStudioChromeApi(ipcRenderer, webUtils));
 
 const terminalApi: OmpStudioTerminalApi = {

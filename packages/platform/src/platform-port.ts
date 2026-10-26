@@ -2,7 +2,7 @@ import { assertNonEmpty, type ResourceHandle, type Brand } from "./handles.js";
 import type { RuntimeContainmentPort } from "./containment.js";
 
 /** Host platform identifier. Only platforms implementing {@link PlatformPort} are listed. */
-export type Platform = "win32" | "darwin";
+export type Platform = "win32" | "darwin" | "linux";
 
 /**
  * Transport family of a {@link PrivateEndpoint}.

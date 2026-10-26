@@ -31,6 +31,8 @@ export interface PtyProcess {
 }
 
 export interface PtySpawnOptions {
+  readonly args?: readonly string[];
+  readonly env?: NodeJS.ProcessEnv;
   readonly file: string;
   readonly name: string;
   readonly cwd: string;
@@ -174,9 +176,9 @@ function killProcessTree(child: ChildProcess): void {
 }
 
 function spawnWithPipes(options: PtySpawnOptions): PtyProcess {
-  const child = spawn(options.file, shellArgs(options.file, { backend: "pipes" }), {
+  const child = spawn(options.file, options.args ?? shellArgs(options.file, { backend: "pipes" }), {
     cwd: options.cwd,
-    env: terminalEnvironment(),
+    env: terminalEnvironment(options.env),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
     ...processGroupSpawnOptions(),
@@ -219,12 +221,12 @@ function spawnWithPipes(options: PtySpawnOptions): PtyProcess {
 
 function spawnWithNodePty(options: PtySpawnOptions): PtyProcess {
   const pty = loadNodePty();
-  const proc = pty.spawn(options.file, shellArgs(options.file, { backend: "pty" }), {
+  const proc = pty.spawn(options.file, options.args ?? shellArgs(options.file, { backend: "pty" }), {
     name: "xterm-256color",
     cols: options.cols,
     rows: options.rows,
     cwd: options.cwd,
-    env: terminalEnvironment(),
+    env: terminalEnvironment(options.env),
     useConpty: process.platform === "win32",
   });
   return {
@@ -247,7 +249,7 @@ function spawnWithNodePty(options: PtySpawnOptions): PtyProcess {
   };
 }
 
-export function createNodePtySpawner(): PtySpawner {
+export function createNodePtySpawner(requirePty = false): PtySpawner {
   let nodePtyOk: boolean | undefined;
   return {
     spawn(options) {
@@ -256,10 +258,12 @@ export function createNodePtySpawner(): PtySpawner {
           const proc = spawnWithNodePty(options);
           nodePtyOk = true;
           return proc;
-        } catch {
+        } catch (error) {
           nodePtyOk = false;
+          if (requirePty) throw error;
         }
       }
+      if (requirePty) throw new Error("SSH terminal requires a working PTY backend");
       return spawnWithPipes(options);
     },
   };

@@ -28,7 +28,7 @@
   ],
   "scripts": {
     "preview": "node scripts/preview.mjs",
-    "build": "npm run build:packages && npm run build -w @omp-studio/renderer && npm run build -w @omp-studio/desktop",
+    "build": "npm run build:packages && npm run build -w @omp-studio/renderer && npm run build -w @omp-studio/desktop && node scripts/bundle-remote-host.mjs",
     "typecheck": "npm run build:packages && npm run typecheck -w @omp-studio/renderer && npm run typecheck -w @omp-studio/desktop",
     "test": "npm run build && npm run test:built",
     "conversation:e2e:manual": "node scripts/real-conversation-e2e.mjs",

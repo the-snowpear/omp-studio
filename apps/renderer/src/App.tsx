@@ -1,3 +1,6 @@
+import { ExecutionTargets, useExecutionTarget, useTargetMemory } from "./workspaces/ExecutionTargets";
+import { RemoteScopeNotice } from "./workspaces/RemoteScopeNotice";
+import { ExecutionTargetPicker } from "./workspaces/ExecutionTargetPicker";
 import { PlanExecutionPicker, useNativePlanReview } from "./deck/PlanExecutionPicker";
 import { WorktreeLaunchGate, SessionWorktreesPane } from "./workspaces/SessionWorktreesPane";
 import { useSessionTitles } from "./history/useSessionTitles";
@@ -131,6 +134,7 @@ import {
 } from "./diagnosticsModel";
 import { queryWithTimeout } from "./updateCheck";
 import { TerminalPane, type TerminalPaneHandle } from "./TerminalPane";
+import { TerminalSessionsProvider } from "./terminalSessions";
 import { TipHost } from "./TipHost";
 import { ToastHost } from "./ToastHost";
 import { compactNoticeFromOutput } from "./compactNotice";
@@ -479,8 +483,9 @@ async function resyncRuntimeModel(client: ClientStateSource): Promise<Model> {
     client.query("history.list", { limit: 20, status: "active" }),
     client.query("environment.get", {}),
     client.query("diagnostics.get", {}),
+    client.query("home.get", {}),
   ]);
-  const [capabilities, commandManifest, workspaces, history, environment, diagnostics] = results;
+  const [capabilities, commandManifest, workspaces, history, environment, diagnostics, home] = results;
   return {
     ...(capabilities.status === "fulfilled" ? { capabilities: capabilities.value } : {}),
     ...(commandManifest.status === "fulfilled" ? { commandManifest: commandManifest.value } : {}),
@@ -488,6 +493,7 @@ async function resyncRuntimeModel(client: ClientStateSource): Promise<Model> {
     ...(history.status === "fulfilled" ? { history: history.value } : {}),
     ...(environment.status === "fulfilled" ? { environment: environment.value } : {}),
     ...(diagnostics.status === "fulfilled" ? { diagnostics: diagnostics.value } : {}),
+    ...(home.status === "fulfilled" ? { home: home.value } : {}),
   };
 }
 
@@ -1575,6 +1581,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
   /** 除「目录展开 / 添加上下文」外的菜单动作分发（App 侧统一 toast 与桌面调用）。 */
   onFileAction?: (action: FileMenuAction, target: FileMenuTarget) => void;
 }) {
+  const executionTarget = useExecutionTarget();
   const [model, setModel] = useState<WorkspaceFileTreeReadModel | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
@@ -1612,7 +1619,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
       if (generation === generationRef.current) setLoading(false);
     }
   }, [client, onSelectionChange, workspaceId]);
-  useEffect(() => { void refresh(); }, [refresh, refreshToken]);
+  useEffect(() => { void refresh(); }, [refresh, refreshToken, executionTarget.syncRevision]);
   const visible = useMemo(() => filterWorkspaceNodes(model?.nodes ?? [], search), [model?.nodes, search]);
   const displayExpanded = useMemo(() => expandedWorkspacePathsForSearch(visible, expanded, search), [expanded, search, visible]);
   const visibleItems = useMemo(() => flattenVisibleWorkspaceNodes(visible, displayExpanded), [displayExpanded, visible]);
@@ -3420,13 +3427,16 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
   composerDraft?: ComposerSnapshot;
 }) {
   const { t } = useI18n();
-  const [draft, setDraft] = useState<ComposerSnapshot>(emptySnapshot);
+  const executionTarget = useExecutionTarget();
+  const [draft, setDraft] = useTargetMemory<ComposerSnapshot>("composer-current-draft", emptySnapshot);
   const composerDraftRef = useRef<ComposerSnapshot | undefined>(composerDraft);
   composerDraftRef.current = composerDraft;
   const [submittedPrompt, setSubmittedPrompt] = useState<{ readonly sessionId?: SessionId; readonly title: string } | undefined>(undefined);
   const [bottomResizing, setBottomResizing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [planSaveBusy, setPlanSaveBusy] = useState(false);
+  const [remotePlanSave, setRemotePlanSave] = useState<{ resolve(path: string | null): void }>();
+  const [remotePlanPath, setRemotePlanPath] = useState("PLAN.md");
   const planSaveBusyRef = useRef(false);
   const [sending, setSending] = useState(false);
   const [optimisticPrompt, setOptimisticPrompt] = useState<OptimisticPrompt | undefined>(undefined);
@@ -3553,8 +3563,11 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
   const [composerExpanded, setComposerExpanded] = useState(true);
   const [modeCapsulesPresent, setModeCapsulesPresent] = useState(false);
   const composerInputRef = composerRef;
+  useEffect(() => {
+    if (!snapshotIsEmpty(draft)) composerInputRef.current?.setSnapshot(draft);
+  }, []);
   // 流式期间按 Enter 的消息先排本地队列，本轮 run 结束后由 flush effect 按序发送。
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+  const [queuedMessages, setQueuedMessages] = useTargetMemory<QueuedMessage[]>("composer-queue", () => []);
   const [previewSpeeds, setPreviewSpeeds] = useState<Record<string, StudioSpeed>>({});
   const queuedSeqRef = useRef(0);
   const [queueEdit, setQueueEdit] = useState<QueueEditState | undefined>(undefined);
@@ -3757,6 +3770,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
     // currently connected Runtime capability manifest.
     canRead: true,
     runtimeConnected,
+    syncRevision: preview ? 0 : executionTarget.syncRevision,
     deferHydrate: deferResidentHydrate,
     ...(previewThreadId === undefined ? {} : { previewThreadId }),
   });
@@ -3911,6 +3925,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
       setCreateProjectOpen(false);
       return;
     }
+    if (!preview && executionTarget.id) { setCreateProjectOpen(false); executionTarget.openDirectory(); return; }
     setCreateProjectBusy(true);
     try {
       const handle = await client.command("workspace.pick", name ? { name } : {});
@@ -4036,6 +4051,10 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
       没有新通道时保持静默失败而不是抛错。取消 / 空输入 / 工作区外 → null，
       不发起保存。 */
   const pickPlanSaveTarget = useCallback(async (): Promise<string | null> => {
+    if (executionTarget.id) {
+      setRemotePlanPath("PLAN.md");
+      return new Promise(resolve => setRemotePlanSave({ resolve }));
+    }
     const chrome = globalThis.ompStudioChrome;
     if (chrome?.pickPlanSavePath !== undefined) {
       if (activeWorkspace === undefined) {
@@ -4058,7 +4077,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
       /* Electron 不支持 window.prompt（electron/electron#472）。 */
     }
     return null;
-  }, [activeWorkspace]);
+  }, [activeWorkspace, executionTarget.id]);
   const savePlanAndQuit = useCallback(async (): Promise<void> => {
     if (!canStartPlanSaveAndQuit(can("mode.plan.review.saveAndQuit"), planSaveBusyRef.current)) return;
     planSaveBusyRef.current = true;
@@ -4502,7 +4521,10 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
     : !preview && selectedSessionId !== undefined && selectedThreadId !== undefined;
   // prompt 通道可用性（与会话目标、连接、能力相关，与是否流式无关）：
   // 直接发送与流式期间的本地排队共用同一组闸门。
+  const executionStatus = executionTarget.inventory.statuses.find(value => value.id === executionTarget.id);
+  const targetOffline = !preview && executionTarget.id !== null && (executionStatus?.state !== "connected" || Boolean(executionStatus.operation));
   const promptChannelReady =
+    !targetOffline &&
     !busy &&
     !connection?.resyncRequired &&
     !sending &&
@@ -4531,6 +4553,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
   // 想纠偏就在排队栏里点「插入纠偏」，走 core.steer 打断当前回合。
   const queueEnabled = composerQueueEnabled({ textReady, running: composerRunning, promptChannelReady });
   const followUpChannelReady =
+    !targetOffline &&
     !busy &&
     !connection?.resyncRequired &&
     !sending &&
@@ -4544,7 +4567,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
     followUpChannelReady,
   });
   const steerNowEnabled =
-    !sending && sessionCreating !== true && promptTargetReady && !connection?.resyncRequired && can("core.steer");
+    !targetOffline && !sending && sessionCreating !== true && promptTargetReady && !connection?.resyncRequired && can("core.steer");
   const restorePending = (requestId: string) => {
     const pending = convo.state.pendingUsers.find((entry) => entry.requestId === requestId);
     if (!pending) return;
@@ -5259,6 +5282,15 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
   }
   return (
     <>
+      {remotePlanSave ? <div className="modal-backdrop" onKeyDown={event => { if (event.key === "Escape") { remotePlanSave.resolve(null); setRemotePlanSave(undefined); } }}>
+        <section className="modal" role="dialog" aria-modal="true" aria-label="保存远端计划">
+          <form onSubmit={event => { event.preventDefault(); remotePlanSave.resolve(remotePlanPath.trim()); setRemotePlanSave(undefined); }}>
+            <h2>保存远端计划</h2><p>保存到 SSH · {executionTarget.name} 的当前项目中。</p>
+            <label>项目内相对路径<input autoFocus required value={remotePlanPath} onChange={event => setRemotePlanPath(event.target.value)} /></label>
+            <div className="ssh-dialog-actions"><button type="button" className="btn outline" onClick={() => { remotePlanSave.resolve(null); setRemotePlanSave(undefined); }}>取消</button><button className="btn primary" disabled={!remotePlanPath.trim()}>保存并退出</button></div>
+          </form>
+        </section>
+      </div> : null}
       <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={true} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
       <div className={`workbench${sideOpen ? " split-right" : ""}`} id="workbench">
         <div className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`}>
@@ -5532,6 +5564,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
                   </>
                 )}
               </span>
+              <ExecutionTargetPicker onOpen={() => { setContextProjectMenuOpen(false); setContextBranchMenuOpen(false); }} otherMenuOpen={contextProjectMenuOpen || contextBranchMenuOpen} />
               <span className="spacer" />
               {branchNotice ? (
                 <span className={`ctx-item ctx-notice-${branchNotice.tone}`} role="status">
@@ -5556,7 +5589,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
                   <span>—</span>
                 )}
               </span>
-            </div> : null}
+            </div> : <div className="ctx-strip execution-persistent"><ExecutionTargetPicker /></div>}
             {createProjectOpen ? (
               <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (!createProjectBusy) setCreateProjectOpen(false); }}>
                 <section className="modal create-project-modal" role="dialog" aria-modal="true" aria-labelledby="createProjectTitle" onMouseDown={(event) => event.stopPropagation()}>
@@ -6263,6 +6296,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   onHistoryChange: (history: SessionHistoryReadModel) => void;
 }) {
   const { t } = useI18n();
+  const executionTarget = useExecutionTarget();
   const previewMode = usePreviewMode();
   const appUpdate = useAppUpdate();
   const effectiveUpdate = previewMode.preview ? PREVIEW_APP_UPDATE : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
@@ -6291,8 +6325,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [projectListExpanded, setProjectListExpanded] = useState(true);
   const [selectedProject, setSelectedProject] = useState<SelectedProject | null>(() => previewOn() ? CURRENT_PROJECT : null);
   const composerRef = useRef<ChipComposerHandle | null>(null);
-  const [selectedProvisionalSessionId, setSelectedProvisionalSessionId] = useState<string | undefined>(undefined);
-  const [composerDraftsBySession, setComposerDraftsBySession] = useState<Readonly<Record<string, ComposerSnapshot>>>({});
+  const [selectedProvisionalSessionId, setSelectedProvisionalSessionId] = useTargetMemory<string | undefined>("provisional-session", () => undefined);
+  const [composerDraftsBySession, setComposerDraftsBySession] = useTargetMemory<Readonly<Record<string, ComposerSnapshot>>>("composer-drafts", () => ({}));
   const [draftSkills, setDraftSkills] = useState<ReadonlySet<string>>(() => new Set());
   const [usedSkills, setUsedSkills] = useState<ReadonlySet<string>>(() => new Set());
   const usedSkillsIdentityRef = useRef("");
@@ -6876,6 +6910,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   /** System directory picker → register + activate + enter the workbench. */
   const pickProject = async () => {
     if (previewMode.preview) return;
+    if (executionTarget.id) { go("workbench"); executionTarget.openDirectory(); return; }
     const generation = navigationGate.next();
     try {
       const result = await workspaceActionQueue.enqueue(async () => {
@@ -7100,6 +7135,14 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     const activeWorkspace = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
     if (activeWorkspace !== undefined) await refreshProjectHistory(activeWorkspace.workspaceId);
   }, [refreshHistoryModels, refreshProjectHistory, state.model.workspaces]);
+
+  const recoveryHistoryRefresh = useRef(() => {});
+  recoveryHistoryRefresh.current = () => {
+    if (previewMode.preview) return;
+    void refreshHistoryModels();
+    for (const workspaceId of Object.keys(projectHistoryCache)) void refreshProjectHistory(workspaceId as WorkspaceId);
+  };
+  useEffect(() => { if (executionTarget.syncRevision > 0) recoveryHistoryRefresh.current(); }, [executionTarget.syncRevision]);
 
   /** Mutating a session is routed through the active workspace's Runtime.
       Switch and wait for the authoritative receipt before archive/unarchive so
@@ -8837,13 +8880,18 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   );
 }
 
-export function App({ client: inputClient }: { readonly client: StudioClient }) {
+export function App({ client }: { readonly client: StudioClient }) {
+  return <TerminalSessionsProvider><ExecutionTargets client={client}>{(active, key) => <TargetApp key={key} client={active} />}</ExecutionTargets></TerminalSessionsProvider>;
+}
+
+function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
   const { t } = useI18n();
   const client = inputClient as ClientStateSource;
+  const executionTarget = useExecutionTarget();
   const [initialModelCommitted, setInitialModelCommitted] = useState(false);
   const [state, dispatch] = useReducer(reduce, { loading: true, model: {}, events: [], route: "workbench" });
-  const [route, setRoute] = useState<Route>(initialRouteFromSettings);
-  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const [route, setRoute] = useTargetMemory<Route>("route", initialRouteFromSettings);
+  const [selectedHistoryId, setSelectedHistoryId] = useTargetMemory<string | null>("selected-history", () => null);
 
   useEffect(() => {
     let cancelled = false;
@@ -8914,7 +8962,7 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
     return () => {
       cancelled = true;
     };
-  }, [client, state.loading, runtimeEpoch, runtimeStatus]);
+  }, [client, state.loading, runtimeEpoch, runtimeStatus, executionTarget.syncRevision]);
 
   /* 上次页面持久化：供「启动后默认页面 = 上次页面」读取。 */
   useEffect(() => {
@@ -8972,6 +9020,7 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
   return (
     <PreviewModeProvider>
       <I18nProvider>
+        <RemoteScopeNotice />
         {body}
         {initialModelCommitted && !state.loading ? <WorkbenchHealth /> : null}
         <StartupNotice />

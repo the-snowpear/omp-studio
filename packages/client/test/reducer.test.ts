@@ -958,6 +958,31 @@ test("large decimal cursors advance without Number precision loss", () => {
   assert.equal(state.connection.resyncRequired, false);
 });
 
+test("lost SSH acknowledgement remains unknown and is not retried on reconnect", async () => {
+  let calls = 0;
+  const client = new StudioClientImpl(new MemoryClientTransport({
+    bootstrap: () => bootstrap(),
+    command: async () => { calls++; throw { code: "OUTCOME_UNKNOWN", message: "SSH disconnected after dispatch" }; },
+  }), fixedIds());
+  await client.bootstrap();
+  await assert.rejects(client.command("core.prompt", { text: "do not repeat" }));
+  assert.equal(client.getState().commands[REQ_1]?.status, "outcome_unknown");
+  await client.resync();
+  assert.equal(calls, 1);
+  assert.equal(client.getState().commands[REQ_1]?.status, "outcome_unknown");
+  await client.close();
+});
+
+test("transport loss preserves target state while making pending work unknown", () => {
+  let state = bootedState();
+  state = issue(state, "session.create", REQ_1);
+  state = reduceClientState(state, { type: "event", event: accepted(REQ_1, 11) });
+  const lost = reduceClientState(state, { type: "transport.lost", reason: "SSH disconnected", occurredAt: TS });
+  assert.equal(lost.connection.resyncRequired, true);
+  assert.equal(lost.commands[REQ_1]?.status, "outcome_unknown");
+  assert.equal(lost.entities.snapshot, state.entities.snapshot);
+});
+
 test("StudioClientImpl buffers bootstrap races and does not deliver ignored events", async () => {
   let emitDuringBootstrap: ((event: ClientEvent) => void) | undefined;
   const listeners: Array<(event: ClientEvent) => void> = [];
@@ -1256,6 +1281,25 @@ test("conversation.changed advances transport state without retaining transcript
   state = reduceClientState(state, { type: "event", event: main });
   assert.equal(state.connection.cursor, "12");
   assert.equal("conversation" in state, false);
+});
+
+test("late bootstrap completion cannot overwrite a recovered connection or clear its pending bootstrap", async () => {
+  const releases: Array<(value: ClientBootstrap) => void> = [];
+  const transport = new MemoryClientTransport({ bootstrap: () => new Promise<ClientBootstrap>(resolve => releases.push(resolve)) });
+  const client = new StudioClientImpl(transport);
+  const first = client.bootstrap();
+  const rejected = assert.rejects(first);
+  client.transportLost("SSH connection lost");
+  const recovered = client.bootstrap();
+  releases[0]!(bootstrap(1));
+  await rejected;
+  const shared = client.bootstrap();
+  assert.equal(releases.length, 2);
+  releases[1]!(bootstrap(2));
+  await recovered; await shared;
+  assert.equal(client.getState().entities.snapshot?.stateVersion, 2);
+  assert.equal(client.getState().connection.resyncRequired, false);
+  await client.close();
 });
 
 test("terminal command receipts are capped so a long session cannot retain unbounded command state", () => {

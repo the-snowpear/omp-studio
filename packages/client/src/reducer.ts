@@ -133,6 +133,7 @@ export type ClientAction =
       readonly error: ClientError;
       readonly occurredAt: string;
     }
+  | { readonly type: "transport.lost"; readonly reason: string; readonly occurredAt: string }
   | { readonly type: "close" };
 
 const EMPTY_UI: ClientUiState = Object.freeze({});
@@ -615,6 +616,8 @@ function reduceClientStateCore(state: ClientState, action: ClientAction): Client
       return reduceCommandIssue(state, action);
     case "command.transportFailed":
       return reduceTransportFailed(state, action);
+    case "transport.lost":
+      return { ...state, connection: { ...state.connection, resyncRequired: true, resyncReason: action.reason }, commands: markPendingOutcomeUnknown(state.commands, action.reason, action.occurredAt) };
     case "close":
       return state.connection.phase === "closed"
         ? state
@@ -1159,7 +1162,13 @@ function reduceTransportFailed(state: ClientState, action: TransportFailedAction
     ...state,
     commands: {
       ...state.commands,
-      [action.requestId]: {
+      [action.requestId]: action.error.code === "OUTCOME_UNKNOWN" ? {
+        requestId: existing.requestId,
+        commandName: existing.commandName,
+        status: "outcome_unknown",
+        reason: action.error.message,
+        observedAt: action.occurredAt,
+      } : {
         requestId: existing.requestId,
         commandName: existing.commandName,
         status: "failed",

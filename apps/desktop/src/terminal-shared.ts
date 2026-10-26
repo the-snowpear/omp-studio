@@ -26,6 +26,8 @@ export const TERMINAL_MAX_ROWS = 200;
 export const TERMINAL_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 export interface TerminalCreateInput {
+  readonly targetId?: string;
+  readonly workspaceId?: string;
   readonly cols?: number;
   readonly rows?: number;
 }
@@ -105,15 +107,18 @@ export function parseSessionId(value: unknown, field: string): string {
   return value;
 }
 
-export function parseCreateInput(value: unknown): TerminalSize {
+export function parseCreateInput(value: unknown): TerminalSize & { targetId?: string; workspaceId?: string } {
   const input = value === undefined ? {} : value;
   assertPlainObject(input, "terminal create");
   for (const key of Object.keys(input)) {
-    if (key !== "cols" && key !== "rows") {
+    if (key !== "cols" && key !== "rows" && key !== "targetId" && key !== "workspaceId") {
       throw new TerminalIpcError(`terminal create: unexpected field ${key}`);
     }
   }
+  for (const key of ["targetId", "workspaceId"]) if (input[key] !== undefined && (typeof input[key] !== "string" || !input[key])) throw new TerminalIpcError(`Invalid ${key}`);
   return {
+    ...(typeof input.targetId === "string" ? { targetId: input.targetId } : {}),
+    ...(typeof input.workspaceId === "string" ? { workspaceId: input.workspaceId } : {}),
     cols: parseDimension(input.cols, "terminal create: cols", TERMINAL_MIN_COLS, TERMINAL_MAX_COLS, 80),
     rows: parseDimension(input.rows, "terminal create: rows", TERMINAL_MIN_ROWS, TERMINAL_MAX_ROWS, 24),
   };

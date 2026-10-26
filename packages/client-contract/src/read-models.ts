@@ -29,7 +29,7 @@ import type {
 } from "./ids.js";
 
 /** Platform family, mirroring the public PlatformPort union. Never implies a path. */
-export type PlatformId = "win32" | "darwin";
+export type PlatformId = "win32" | "darwin" | "linux";
 
 /** CPU architecture of the running platform. */
 export type ArchId = "x64" | "arm64";

@@ -15,6 +15,7 @@ import {
   parseRecordingInput,
 } from "./terminal-shared.js";
 import type { TerminalSessionManager, TerminalSessionListeners } from "./terminal-pty.js";
+import type { RemoteTerminalManager } from "./remote/terminal.js";
 import type { TerminalRecordingManager } from "./terminal-recording.js";
 
 export interface TerminalSender {
@@ -37,6 +38,8 @@ export interface TerminalIpcOptions {
   readonly ipcMain: TerminalIpcMain;
   readonly isTrustedSender: (sender: TerminalSender) => boolean;
   readonly manager: TerminalSessionManager;
+  readonly remote?: RemoteTerminalManager;
+  readonly activeRemote?: () => string | null;
   readonly recordings?: TerminalRecordingManager;
 }
 
@@ -71,6 +74,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
     const teardown = (): void => {
       if (!tracked.delete(sender.id)) return;
       options.manager.disposeWindow(sender.id);
+      options.remote?.disposeWindow(sender.id);
     };
     sender.once("destroyed", teardown);
     sender.once("did-navigate", teardown);
@@ -86,6 +90,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
     assertTrusted(event.sender); track(event.sender);
     const input = parseRecordingInput(payload);
     if (!options.recordings) throw new Error("Terminal recording is unavailable");
+    if (options.remote?.owns(event.sender.id, input.id)) throw new Error("SSH terminal recording is not supported");
     return options.recordings.start(event.sender.id, input, options.manager.recordingTarget(event.sender.id, input.id));
   });
   ipc.handle(TERMINAL_IPC_CHANNELS.recordingStop, (event, payload) => {
@@ -103,31 +108,40 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
     assertTrusted(event.sender);
     track(event.sender);
     const size = parseCreateInput(payload);
+    if (size.targetId) {
+      if (!options.remote || !size.workspaceId) throw new Error("SSH terminal requires a remote workspace");
+      return options.remote.create(event.sender.id, size.targetId, size.workspaceId, size, listenersFor(event.sender));
+    }
+    if (options.activeRemote?.()) throw new Error("SSH workspace cannot open a local terminal implicitly");
     return options.manager.create(event.sender.id, size, listenersFor(event.sender));
   });
 
   ipc.handle(TERMINAL_IPC_CHANNELS.write, (event, payload) => {
     assertTrusted(event.sender);
     const input = parseWriteInput(payload);
-    options.manager.write(event.sender.id, input.id, input.data);
+    if (options.remote?.owns(event.sender.id, input.id)) options.remote.write(event.sender.id, input.id, input.data);
+    else options.manager.write(event.sender.id, input.id, input.data);
   });
 
   ipc.handle(TERMINAL_IPC_CHANNELS.resize, (event, payload) => {
     assertTrusted(event.sender);
     const input = parseResizeInput(payload);
-    options.manager.resize(event.sender.id, input.id, input.cols, input.rows);
+    if (options.remote?.owns(event.sender.id, input.id)) options.remote.resize(event.sender.id, input.id, input.cols, input.rows);
+    else options.manager.resize(event.sender.id, input.id, input.cols, input.rows);
   });
 
   ipc.handle(TERMINAL_IPC_CHANNELS.dispose, (event, payload) => {
     assertTrusted(event.sender);
     const input = parseDisposeInput(payload);
-    options.manager.dispose(event.sender.id, input.id, listenersFor(event.sender));
+    if (options.remote?.owns(event.sender.id, input.id)) options.remote.dispose(event.sender.id, input.id);
+    else options.manager.dispose(event.sender.id, input.id, listenersFor(event.sender));
   });
 
   return Object.freeze({
     dispose(): void {
       for (const windowId of [...tracked]) {
         options.manager.disposeWindow(windowId);
+        options.remote?.disposeWindow(windowId);
       }
       tracked.clear();
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.create);
