@@ -4,7 +4,7 @@ import {
   RuntimeInstaller, assertSafeVersion, createRuntimeArchive, extractRuntimeArchive, writeJsonAtomic, verifyUpdateManifest,
   verifySignedArtifact, RUNTIME_ARTIFACT_LAYOUT, parseRuntimeInstallationManifest,
   type ComponentRelease, type SignedUpdateManifest, type UpdateComponent, type UnifiedUpdateSnapshot,
-  type ActivateOptions,
+  type ActivateOptions, type UpdateErrorStage,
 } from "@omp-studio/runtime-installer";
 import { STUDIO_PROTOCOL_VERSION } from "@omp-studio/studio-protocol";
 import { compareSemver } from "./chrome-app-update.js";
@@ -12,6 +12,8 @@ import { compareRuntimeVersions } from "./runtime-install.js";
 import { discoverUpdates, type DiscoveredUpdates } from "./update-discovery.js";
 import { cachedUpdatePath, downloadDifferentialArtifact, isVerifiedFile, type DifferentialInput } from "./differential-artifact.js";
 import type { UpdatePrefs } from "./update-prefs-store.js";
+import type { HostLog } from "./host-log.js";
+import { UpdateRestartBlockedError } from "./update-restart.js";
 
 interface Journal {
   schema: 2; authorized: boolean;
@@ -22,6 +24,7 @@ interface Journal {
   rollbackRequested?: boolean;
   runtimeTrial?: { version: string; previousVersion?: string };
   lastError?: string;
+  lastErrorStage?: UpdateErrorStage;
   /** A desktop file whose new version failed to start and was swapped back; never offered again. */
   failedApp?: { version: string; sha256: string };
 }
@@ -39,7 +42,8 @@ export interface UpdateCoordinatorOptions {
   prefs: { read(): Promise<UpdatePrefs> };
   snapshotChanged: (snapshot: UnifiedUpdateSnapshot) => void;
   isBusy: () => boolean;
-  beforeQuit: () => Promise<void>;
+  getRestartBlocker?: () => string | undefined;
+  beforeQuit: (onShutdownStarted: () => void) => Promise<void>;
   installDesktop: (path: string, release: ComponentRelease) => Promise<void>;
   /** Why this installation cannot update itself (e.g. macOS App Translocation); undefined when it can. */
   preflightDesktop?: () => Promise<string | undefined>;
@@ -59,6 +63,7 @@ export interface UpdateCoordinatorOptions {
   restart: () => void; quit: () => void;
   differential?: DifferentialInput["differential"];
   fetcher?: typeof fetch;
+  log?: HostLog;
   bundledRuntimeRoot?: string;
   initialInstallerPath?: string;
   /**
@@ -92,6 +97,51 @@ export class UpdateCoordinator {
   private emit(): void { this.options.snapshotChanged(this.state); }
   private save(): Promise<void> { return writeJsonAtomic(join(this.options.root, "transaction-v2.json"), this.journal); }
   private verify(value: unknown): SignedUpdateManifest { return verifyUpdateManifest(value, this.options.keys, this.options.repo, this.options.platform); }
+  /** An external installation may have completed a prepared Runtime already. */
+  private async reconcileRuntimePending(): Promise<Awaited<ReturnType<RuntimeInstaller["currentManifest"]>>> {
+    const current = await this.installer.currentManifest().catch(() => undefined);
+    this.snapshot.runtime.currentVersion = current?.manifest.runtimeVersion;
+    const envelope = this.journal.pending.runtime;
+    const release = envelope?.manifest.runtime;
+    const manifest = current?.manifest;
+    const satisfied = (candidate: ComponentRelease | undefined): boolean => Boolean(candidate && manifest &&
+      manifest.runtimeVersion === candidate.version && manifest.channel === candidate.channel &&
+      manifest.platform === this.options.platform && manifest.studioProtocol.min === candidate.studioProtocol.min &&
+      manifest.studioProtocol.max === candidate.studioProtocol.max);
+    // Discovery can predate an external installation even before preparation
+    // has created a journal entry.
+    if (satisfied(this.found.runtime?.manifest.runtime)) {
+      delete this.found.runtime;
+      if (!envelope) {
+        this.snapshot.runtime = { component: "runtime", currentVersion: manifest!.runtimeVersion, phase: "idle" };
+        this.emit();
+      }
+    }
+    if (!release || !manifest || !satisfied(release)) return current;
+    this.journal.previous.runtime = envelope!;
+    delete this.journal.pending.runtime;
+    if (this.found.runtime?.manifest.runtime?.file.sha256 === release.file.sha256) delete this.found.runtime;
+    this.snapshot.runtime = { component: "runtime", currentVersion: manifest.runtimeVersion, phase: "idle" };
+    // A trial's rollback target belongs to the activation that created it.
+    // Resolving stale pending state must never reset that recovery intent.
+    if (!this.journal.pending.app && this.snapshot.app.phase !== "failed" &&
+      (this.journal.lastErrorStage ?? "apply") === "apply") {
+      delete this.journal.lastError;
+      delete this.journal.lastErrorStage;
+      if (this.snapshot.errorStage === "apply") {
+        this.snapshot.error = undefined;
+        this.snapshot.errorStage = undefined;
+      }
+    }
+    await this.save();
+    this.options.log?.write("info", "update.pending.satisfied", `component=runtime version=${release.version}`);
+    this.emit();
+    return current;
+  }
+
+  private restartBlocker(): string | undefined {
+    return this.options.getRestartBlocker?.() ?? (this.options.isBusy() ? "任务仍在运行，请完成后重启更新" : undefined);
+  }
   private async pruneCache(): Promise<void> {
     const retained = new Set<string>();
     for (const envelope of [...Object.values(this.journal.pending), ...Object.values(this.journal.previous), this.journal.rollbackApp]) {
@@ -126,7 +176,7 @@ export class UpdateCoordinator {
       for (const sequence of Object.values(raw.watermarks)) if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error("Invalid update watermark");
       this.journal = raw;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") { this.journalInvalid = true; this.snapshot.error = "更新状态损坏；请从诊断恢复或重新安装，已停止自动更新"; this.emit(); return; }
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") { this.journalInvalid = true; this.snapshot.error = "更新状态损坏；请从诊断恢复或重新安装，已停止自动更新"; this.snapshot.errorStage = "recovery"; this.emit(); return; }
     }
     await this.applyDesktopInstallOutcome();
     const app = this.journal.pending.app?.manifest.app;
@@ -134,12 +184,14 @@ export class UpdateCoordinator {
     // A failed desktop installation leaves authorization pending; never activate
     // a Runtime requiring that desktop until the new executable actually starts.
     // A pending desktop matching this executable is started, awaiting confirmation.
-    const runtimeEnvelope = this.journal.pending.runtime;
     const otherDesktopPending = this.journal.pending.app !== undefined && this.journal.pending.app.manifest.app?.version !== this.options.appVersion;
-    if (this.journal.authorized && otherDesktopPending && runtimeEnvelope?.manifest.runtime) {
+    if (this.journal.authorized && otherDesktopPending && this.journal.pending.runtime?.manifest.runtime) {
       this.snapshot.error = "桌面更新事务不完整，请使用历史 Setup 恢复";
+      this.snapshot.errorStage = "recovery";
       this.journal.authorized = false;
     }
+    await this.reconcileRuntimePending();
+    const runtimeEnvelope = this.journal.pending.runtime;
     if (this.journal.authorized && !otherDesktopPending && runtimeEnvelope?.manifest.runtime) {
       const release = runtimeEnvelope.manifest.runtime;
       try {
@@ -173,11 +225,14 @@ export class UpdateCoordinator {
         // A resumed activation can fail while the candidate is already active.
         // Leave its trial available for the Host-startup rollback path.
         if ((await this.installer.current().catch(() => undefined))?.runtimeVersion !== this.journal.runtimeTrial?.version) delete this.journal.runtimeTrial;
-        this.snapshot.runtime = { ...this.snapshot.runtime, phase: "failed", message: String(error) };
+        this.snapshot.runtime = { ...this.snapshot.runtime, phase: "failed", message: String(error), errorStage: "recovery" };
       }
     }
     this.journal.authorized = false;
-    if (this.journal.lastError) this.snapshot.error = this.journal.lastError;
+    if (this.journal.lastError) {
+      this.snapshot.error = this.journal.lastError;
+      this.snapshot.errorStage = this.journal.lastErrorStage ?? "apply";
+    }
     const current = await this.installer.current().catch(() => undefined);
     this.snapshot.runtime.currentVersion = current?.runtimeVersion;
     for (const kind of ["app", "runtime"] as const) {
@@ -212,7 +267,8 @@ export class UpdateCoordinator {
     }
     this.journal.authorized = false;
     this.journal.lastError = message;
-    this.snapshot.app = { ...this.snapshot.app, version: pending.version, phase: "failed", message };
+    this.journal.lastErrorStage = "recovery";
+    this.snapshot.app = { ...this.snapshot.app, version: pending.version, phase: "failed", message, errorStage: "recovery" };
   }
 
   /**
@@ -238,7 +294,9 @@ export class UpdateCoordinator {
     this.promoteApp();
     if (this.journal.failedApp?.sha256 === app.file.sha256) delete this.journal.failedApp;
     delete this.journal.lastError;
+    delete this.journal.lastErrorStage;
     this.snapshot.error = undefined;
+    this.snapshot.errorStage = undefined;
     this.snapshot.app = { component: "app", currentVersion: this.options.appVersion, phase: "idle" };
     await this.save(); await this.pruneCache().catch(() => {}); this.emit();
   }
@@ -250,16 +308,15 @@ export class UpdateCoordinator {
     if (this.controller || this.applying || this.journalInvalid) return this.state;
     const controller = this.controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(new Error("Update check timed out")), 60_000);
-    this.snapshot.checking = true; this.snapshot.error = undefined; this.emit();
+    this.snapshot.checking = true; this.snapshot.error = undefined; this.snapshot.errorStage = undefined; this.emit();
     try {
       const prefs = await this.options.prefs.read();
-      const installedRuntime = await this.installer.currentManifest().catch(() => undefined);
-      this.snapshot.runtime.currentVersion = installedRuntime?.manifest.runtimeVersion;
+      const installedRuntime = await this.reconcileRuntimePending();
       if (this.journal.pending.runtime?.manifest.runtime?.channel !== undefined && this.journal.pending.runtime.manifest.runtime.channel !== prefs.runtimeChannel) {
         delete this.journal.pending.runtime;
         this.snapshot.runtime = { component: "runtime", currentVersion: this.snapshot.runtime.currentVersion, phase: "idle" };
       }
-      this.found = await discoverUpdates({ repo: this.options.repo, platform: this.options.platform, keys: this.options.keys, mirror: prefs.mirrorPrefix, channel: prefs.runtimeChannel, signal: controller.signal, watermarks: this.journal.watermarks, currentVersions: { app: this.options.appVersion, runtime: this.snapshot.runtime.currentVersion }, ...(this.options.fetcher ? { fetcher: this.options.fetcher } : {}) });
+      this.found = await discoverUpdates({ repo: this.options.repo, platform: this.options.platform, keys: this.options.keys, mirror: prefs.mirrorPrefix, channel: prefs.runtimeChannel, signal: controller.signal, watermarks: this.journal.watermarks, currentVersions: { app: this.options.appVersion, runtime: this.snapshot.runtime.currentVersion }, cacheDirectory: join(this.options.root, "catalog-cache"), ...(this.options.log ? { log: this.options.log } : {}), ...(this.options.fetcher ? { fetcher: this.options.fetcher } : {}) });
       for (const kind of ["app", "runtime"] as const) {
         const baseline = this.found.baselines?.[kind], release = baseline?.manifest[kind];
         if (!release || this.journal.previous[kind]?.manifest[kind]?.file.sha256 === release.file.sha256) continue;
@@ -291,7 +348,11 @@ export class UpdateCoordinator {
         this.snapshot.releaseNotesUrl = envelope!.manifest.releaseNotesUrl;
       }
       await this.save();
-    } catch (error) { this.snapshot.error = error instanceof Error ? error.message : String(error); }
+    } catch (error) {
+      this.snapshot.error = error instanceof Error ? error.message : String(error);
+      this.snapshot.errorStage = "check";
+      this.options.log?.write("warn", "update.check.failed", this.snapshot.error);
+    }
     finally { clearTimeout(timeout); this.controller = undefined; this.snapshot.checking = false; this.emit(); }
     return this.state;
   }
@@ -300,6 +361,7 @@ export class UpdateCoordinator {
     if (this.journalInvalid) throw new Error(this.snapshot.error);
     if (this.journal.rollbackRequested) throw new Error("桌面回滚已准备，请重启应用完成恢复");
     if (this.controller || this.applying) throw new Error("已有正在进行的更新任务");
+    await this.reconcileRuntimePending();
     if (!this.found.app && !this.found.runtime) await this.check();
     if (this.snapshot.error) throw new Error(this.snapshot.error);
     if (this.controller || this.applying) throw new Error("已有正在进行的更新任务");
@@ -313,7 +375,7 @@ export class UpdateCoordinator {
         if (kind === "app" && this.options.preflightDesktop) {
           const reason = await this.options.preflightDesktop();
           if (reason !== undefined) {
-            this.snapshot.app = { ...this.snapshot.app, version: release.version, phase: "failed", message: reason }; this.emit();
+            this.snapshot.app = { ...this.snapshot.app, version: release.version, phase: "failed", message: reason, errorStage: "prepare" }; this.emit();
             if (target === "app") throw new Error(reason);
             continue;
           }
@@ -323,25 +385,28 @@ export class UpdateCoordinator {
           const targetApp = this.journal.pending.app?.manifest.app?.version ?? this.options.appVersion;
           const protocol = this.journal.pending.app?.manifest.app?.studioProtocol ?? { min: STUDIO_PROTOCOL_VERSION, max: STUDIO_PROTOCOL_VERSION };
           if (compareSemver(targetApp, release.minAppVersion) < 0 || release.studioProtocol.min > protocol.max || release.studioProtocol.max < protocol.min) {
-            this.snapshot.runtime = { ...this.snapshot.runtime, phase: "failed", message: "Runtime 需要兼容的桌面版本，请先更新桌面" }; this.emit();
+            this.snapshot.runtime = { ...this.snapshot.runtime, phase: "failed", message: "Runtime 需要兼容的桌面版本，请先更新桌面", errorStage: "prepare" }; this.emit();
             throw new Error(this.snapshot.runtime.message);
           }
         }
-        this.snapshot[kind] = { ...this.snapshot[kind], version: release.version, phase: "downloading", message: undefined };
+        this.snapshot[kind] = { ...this.snapshot[kind], version: release.version, phase: "downloading", message: undefined, errorStage: undefined };
         this.emit();
         try {
           if (kind === "runtime" && release.channel === "stable" && this.journal.pending.app?.manifest.app?.bundledRuntimeVersion === release.version) {
             this.snapshot.runtime = { ...this.snapshot.runtime, method: "reuse", receivedBytes: 0, totalBytes: 0 };
-          } else await downloadDifferentialArtifact({ release, previous: this.journal.previous[kind]?.manifest[kind], root: this.cache, mirror: prefs.mirrorPrefix, signal: controller.signal, fetcher: this.options.fetcher, differential: this.options.differential,
+          } else await downloadDifferentialArtifact({ release, previous: this.journal.previous[kind]?.manifest[kind], root: this.cache, mirror: prefs.mirrorPrefix, signal: controller.signal, fetcher: this.options.fetcher, differential: this.options.differential, ...(this.options.log ? { log: this.options.log } : {}),
             progress: (method, receivedBytes, totalBytes, message) => { this.snapshot[kind] = { ...this.snapshot[kind], method, receivedBytes, totalBytes, message }; this.emit(); },
           });
           controller.signal.throwIfAborted();
           this.journal.pending[kind] = envelope!;
           await this.save();
           this.snapshot[kind].phase = "ready";
+          if (kind === "runtime" && (await this.installer.current())?.runtimeVersion === release.version) await this.reconcileRuntimePending();
         } catch (error) {
           this.snapshot[kind].phase = controller.signal.aborted ? "cancelled" : "failed";
           this.snapshot[kind].message = error instanceof Error ? error.message : String(error);
+          this.snapshot[kind].errorStage = "prepare";
+          this.options.log?.write("warn", "update.prepare.failed", `component=${kind} ${this.snapshot[kind].message}`);
           throw error;
         } finally { this.emit(); }
       }
@@ -351,13 +416,16 @@ export class UpdateCoordinator {
   async apply(): Promise<{ ok: boolean; deferred?: boolean; message?: string }> {
     if (this.journalInvalid) return { ok: false, message: this.snapshot.error ?? "Invalid update journal" };
     if (this.controller || this.applying) return { ok: false, message: "更新尚未准备完成" };
-    if (this.options.isBusy()) return { ok: true, deferred: true, message: "任务仍在运行，请完成后重启更新" };
-    // A pending desktop matching this executable already runs and awaits confirmation.
-    const pendingApp = this.journal.pending.app?.manifest.app?.version === this.options.appVersion ? undefined : this.journal.pending.app;
-    if (!pendingApp && !this.journal.pending.runtime) return { ok: false, message: "没有待应用的更新" };
     this.applying = true;
     let stopped = false;
     try {
+      const hadRuntimePending = this.journal.pending.runtime !== undefined;
+      await this.reconcileRuntimePending();
+      // A pending desktop matching this executable already runs and awaits confirmation.
+      const pendingApp = this.journal.pending.app?.manifest.app?.version === this.options.appVersion ? undefined : this.journal.pending.app;
+      if (!pendingApp && !this.journal.pending.runtime) return hadRuntimePending ? { ok: true } : { ok: false, message: "没有待应用的更新" };
+      const blocker = this.restartBlocker();
+      if (blocker) throw new UpdateRestartBlockedError(blocker);
       const prefs = await this.options.prefs.read();
       if (this.journal.pending.runtime?.manifest.runtime?.channel && this.journal.pending.runtime.manifest.runtime.channel !== prefs.runtimeChannel) throw new Error("Runtime 通道已更改，请重新检查更新");
       for (const kind of ["app", "runtime"] as const) {
@@ -378,11 +446,22 @@ export class UpdateCoordinator {
         const current = await this.installer.currentManifest();
         if (current && (current.manifest.studioProtocol.max < targetApp.studioProtocol.min || current.manifest.studioProtocol.min > targetApp.studioProtocol.max)) throw new Error("请同时准备兼容的 Runtime 更新");
       }
-      if (this.options.isBusy()) return { ok: true, deferred: true };
+      const finalBlocker = this.restartBlocker();
+      if (finalBlocker) throw new UpdateRestartBlockedError(finalBlocker);
       delete this.journal.lastError;
+      delete this.journal.lastErrorStage;
+      this.snapshot.error = undefined;
+      this.snapshot.errorStage = undefined;
       this.journal.authorized = true; await this.save();
-      await this.options.beforeQuit();
+      for (const kind of ["app", "runtime"] as const) {
+        if (kind === "app" ? pendingApp : this.journal.pending.runtime) this.snapshot[kind] = { ...this.snapshot[kind], phase: "applying", message: undefined, errorStage: undefined };
+      }
+      this.emit();
+      await this.options.beforeQuit(() => { stopped = true; });
+      // Older injected ports do not report the marker, but a completed shutdown
+      // still needs recovery if the platform installer subsequently fails.
       stopped = true;
+      this.options.log?.write("info", "update.apply.started");
       const app = pendingApp?.manifest.app;
       if (app) {
         // Shutdown takes seconds; re-verify the exact bytes about to be
@@ -394,10 +473,29 @@ export class UpdateCoordinator {
       return { ok: true };
     } catch (error) {
       this.journal.authorized = false;
-      this.journal.lastError = error instanceof Error ? error.message : String(error);
-      await this.save();
-      if (stopped) this.options.restart();
-      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+      for (const kind of ["app", "runtime"] as const) {
+        if (this.snapshot[kind].phase === "applying") this.snapshot[kind].phase = "ready";
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof UpdateRestartBlockedError && !stopped) {
+        delete this.journal.lastError;
+        delete this.journal.lastErrorStage;
+        this.snapshot.error = undefined;
+        this.snapshot.errorStage = undefined;
+        await this.save();
+        this.emit();
+        this.options.log?.write("info", "update.apply.deferred", message);
+        return { ok: true, deferred: true, message };
+      }
+      this.journal.lastError = message;
+      this.journal.lastErrorStage = "apply";
+      this.snapshot.error = message;
+      this.snapshot.errorStage = "apply";
+      this.emit();
+      this.options.log?.write("error", "update.apply.failed", `shutdownStarted=${stopped} ${message}`);
+      try { await this.save(); }
+      finally { if (stopped) this.options.restart(); }
+      return { ok: false, message };
     } finally { this.applying = false; }
   }
   async rollbackDesktop(): Promise<{ ok: boolean; message?: string }> {
@@ -410,7 +508,7 @@ export class UpdateCoordinator {
     const controller = this.controller = new AbortController();
     try {
       const prefs = await this.options.prefs.read();
-      await downloadDifferentialArtifact({ release: app, root: this.cache, mirror: prefs.mirrorPrefix, signal: controller.signal, fetcher: this.options.fetcher, progress: () => {} });
+      await downloadDifferentialArtifact({ release: app, root: this.cache, mirror: prefs.mirrorPrefix, signal: controller.signal, fetcher: this.options.fetcher, ...(this.options.log ? { log: this.options.log } : {}), progress: () => {} });
       this.journal.pending = { app: envelope };
       this.journal.rollbackRequested = true;
       await this.save();
@@ -431,10 +529,10 @@ export class UpdateCoordinator {
       const old = await verifySignedArtifact({ directory, layout: RUNTIME_ARTIFACT_LAYOUT, parseManifest: parseRuntimeInstallationManifest, requireCovered: m => ["runtime-manifest.json", m.entrypoint], trustedKeys: this.options.keys });
       if (old.manifest.studioProtocol.min > STUDIO_PROTOCOL_VERSION || old.manifest.studioProtocol.max < STUDIO_PROTOCOL_VERSION) throw new Error("上一 Runtime 与当前桌面不兼容");
       await this.installer.activate(trial.previousVersion, this.options.activateOptions);
-      this.snapshot.runtime = { component: "runtime", currentVersion: trial.previousVersion, phase: "failed", message: "新 Runtime 启动失败，已恢复上一版本" };
+      this.snapshot.runtime = { component: "runtime", currentVersion: trial.previousVersion, phase: "failed", message: "新 Runtime 启动失败，已恢复上一版本", errorStage: "recovery" };
       delete this.journal.runtimeTrial; await this.save(); this.emit(); return true;
     } catch (error) {
-      this.snapshot.runtime = { ...this.snapshot.runtime, phase: "failed", message: `Runtime 恢复失败：${String(error)}` };
+      this.snapshot.runtime = { ...this.snapshot.runtime, phase: "failed", message: `Runtime 恢复失败：${String(error)}`, errorStage: "recovery" };
       delete this.journal.runtimeTrial; await this.save(); this.emit(); return false;
     }
   }

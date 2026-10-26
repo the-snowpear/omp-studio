@@ -1,0 +1,30 @@
+/* Output content keeps its own text ramp. UI controls inside it retain the UI ramp. */
+:is(.ev-body, .tc-body, .think-scroll, .btw-body, .term, .lifecycle-list, .event-transcript, .ji-output) {
+  --text-font-scale: var(--output-font-scale);
+  --font-mono: var(--font-output-code);
+  --fs-11: calc(11px * var(--output-font-scale));
+  --fs-12: calc(12px * var(--output-font-scale));
+  --fs-13: calc(13px * var(--output-font-scale));
+  --fs-14: calc(14px * var(--output-font-scale));
+  --fs-16: calc(16px * var(--output-font-scale));
+  --fs-18: calc(18px * var(--output-font-scale));
+  --fs-22: calc(22px * var(--output-font-scale));
+  font-family: var(--font-output);
+}
+.tc-body { font-size: var(--fs-14); }
+.term, .lifecycle-list, .event-transcript, .ji-output { font-family: var(--font-output-code); }
+.ev-body :is(pre, code, .mono), .tc-body :is(pre, code, .mono) { font-family: var(--font-output-code); }
+.convo-scroll { --tc-line: calc(12px * var(--output-font-scale) * 1.65); }
+.ev-body .md-code-head, .tc-body :is(.tool-body-head, .tc-foot, .tc-label, .tc-note, button, input, textarea, select), .btw-body .empty {
+  --text-font-scale: var(--ui-font-scale);
+  --font-mono: var(--font-mono-default);
+  --fs-11: var(--ui-fs-11);
+  --fs-12: var(--ui-fs-12);
+  --fs-13: calc(13px * var(--ui-font-scale));
+  --fs-14: var(--ui-fs-14);
+  --fs-16: var(--ui-fs-16);
+  font-family: var(--font-ui);
+}
+.tc-body :is(button, input, textarea, select), .ev-body button { font-family: var(--font-ui); }
+.ji-output { font-size: calc(12px * var(--output-font-scale)); }
+.event-transcript { font-size: var(--fs-12); }

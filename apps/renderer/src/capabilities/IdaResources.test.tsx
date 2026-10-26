@@ -1,3 +1,4 @@
+import { selectOption } from "../test/selectOption";
 import {act,cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
 import {afterEach,expect,it,vi} from "vitest";
 import type {StudioClient} from "@omp-studio/client-contract";
@@ -10,7 +11,7 @@ vi.mock("../hostError",()=>({waitReceipt:async(client:{results:Record<string,unk
 afterEach(()=>{cleanup();localStorage.clear();});
 it("IDA preview requires exact operation review and never reaches Host",async()=>{
  localStorage.setItem("omp.previewMode","1");const client={command:vi.fn(),query:vi.fn()} as unknown as StudioClient;render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><IdaPane client={client} sessionId="s" available/></PreviewModeProvider></I18nProvider>);
- fireEvent.change(screen.getByRole("combobox",{name:"IDA 数据库"}),{target:{value:"demo-db"}});fireEvent.change(screen.getByRole("combobox",{name:"IDA 操作"}),{target:{value:"save"}});fireEvent.click(screen.getByRole("button",{name:"检查操作"}));expect(await screen.findByRole("alertdialog")).toBeTruthy();fireEvent.click(screen.getByRole("button",{name:"确认执行"}));expect(await screen.findByText("演示操作已完成")).toBeTruthy();expect(client.command).not.toHaveBeenCalled();expect(client.query).not.toHaveBeenCalled();
+ selectOption(screen.getByRole("combobox",{name:"IDA 数据库"}), "sample.exe · open");selectOption(screen.getByRole("combobox",{name:"IDA 操作"}), "save");fireEvent.click(screen.getByRole("button",{name:"检查操作"}));expect(await screen.findByRole("alertdialog")).toBeTruthy();fireEvent.click(screen.getByRole("button",{name:"确认执行"}));expect(await screen.findByText("演示操作已完成")).toBeTruthy();expect(client.command).not.toHaveBeenCalled();expect(client.query).not.toHaveBeenCalled();
 });
 it("resource preview reads local fixtures without Host calls",async()=>{
  localStorage.setItem("omp.previewMode","1");const client={command:vi.fn(),query:vi.fn()} as unknown as StudioClient;render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><ResourcesPane client={client} sessionId="s" available/></PreviewModeProvider></I18nProvider>);fireEvent.click(screen.getByRole("button",{name:"读取"}));expect(screen.getByText(/This is a local preview/)).toBeTruthy();expect(client.command).not.toHaveBeenCalled();
@@ -24,8 +25,9 @@ it.each(["resources", "ida"])("%s releases busy state after a late response from
  const surface=(sessionId:string)=><I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled>{kind==="ida"?<IdaPane client={client} sessionId={sessionId} available/>:<ResourcesPane client={client} sessionId={sessionId} available/>}</PreviewModeProvider></I18nProvider>;
  const {rerender}=render(surface("first"));
  if(kind==="ida"){
+  fireEvent.click(screen.getByRole("combobox",{name:"IDA 数据库"}));
   await screen.findByRole("option",{name:/sample.exe/});
-  fireEvent.change(screen.getByRole("combobox",{name:"IDA 数据库"}),{target:{value:"demo-db"}});
+  selectOption(screen.getByRole("combobox",{name:"IDA 数据库"}), "sample.exe · open");
  }
  await waitFor(()=>expect((screen.getByRole("button",{name:"读取"}) as HTMLButtonElement).disabled).toBe(false));
  fireEvent.click(screen.getByRole("button",{name:"读取"}));
@@ -33,8 +35,9 @@ it.each(["resources", "ida"])("%s releases busy state after a late response from
  rerender(surface("second"));
  await act(async()=>{complete({result:{text:"stale first session",offset:0,total:1,truncated:false}});await pending;});
  if(kind==="ida"){
+  fireEvent.click(screen.getByRole("combobox",{name:"IDA 数据库"}));
   await screen.findByRole("option",{name:/sample.exe/});
-  fireEvent.change(screen.getByRole("combobox",{name:"IDA 数据库"}),{target:{value:"demo-db"}});
+  selectOption(screen.getByRole("combobox",{name:"IDA 数据库"}), "sample.exe · open");
  }
  await waitFor(()=>expect((screen.getByRole("button",{name:"读取"}) as HTMLButtonElement).disabled).toBe(false));
  expect(screen.queryByText("stale first session")).toBeNull();

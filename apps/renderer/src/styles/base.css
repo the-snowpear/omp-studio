@@ -18,6 +18,7 @@ html, body {
    flashes the wrong theme. */
 html {
   background: var(--bg);
+  font-size: calc(16px * var(--ui-font-scale));
 }
 
 body {

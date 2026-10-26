@@ -322,6 +322,7 @@ test("signed size bounds reject oversized and short bodies even when their hash 
       const destination = join(dir, `size-${expectedSize}`);
       await assert.rejects(downloadOne({
         url: "https://example.com/file", destination, expectedSize,
+        requestPolicy: { retryDelaysMs: [0, 0] },
         expectedSha256: createHash("sha256").update(content).digest("hex"),
         signal: new AbortController().signal, onProgress() {},
         fetcher: async () => new Response(content),
@@ -363,5 +364,74 @@ test("partial HTTP responses require a complete matching Content-Range", async (
         fetcher: async () => new Response("ok", { status: 206, headers: range ? { "Content-Range": range } : {} }),
       }), /Content-Range/);
     }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("an interrupted mirror download switches to the origin and resumes without the mirror ETag", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "omp-download-fallback-"));
+  const content = Buffer.from("hello world"), prefix = content.subarray(0, 6);
+  const url = "https://github.com/owner/repo/releases/download/v1/file.zip";
+  const requests: Array<{ url: string; headers: Headers }> = [];
+  try {
+    const destination = join(dir, "file.zip");
+    await downloadOne({ url, mirror: "https://mirror.example/", destination, expectedSize: content.length,
+      expectedSha256: createHash("sha256").update(content).digest("hex"),
+      signal: new AbortController().signal, onProgress() {}, requestPolicy: { retryDelaysMs: [0, 0] },
+      fetcher: async (source, init) => {
+        requests.push({ url: String(source), headers: new Headers(init?.headers) });
+        if (requests.length === 1) return new Response(new ReadableStream({
+          start(controller) { controller.enqueue(prefix); },
+          pull(controller) { return new Promise<void>(resolve => setTimeout(() => { controller.error(new TypeError("connection reset")); resolve(); }, 20)); },
+        }), { headers: { ETag: '"mirror-tag"' } });
+        return new Response(content.subarray(prefix.length), { status: 206, headers: { "Content-Range": `bytes ${prefix.length}-${content.length - 1}/${content.length}` } });
+      },
+    });
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1]?.url, url);
+    assert.equal(requests[1]?.headers.get("range"), `bytes=${prefix.length}-`);
+    assert.equal(requests[1]?.headers.get("if-range"), null);
+    assert.deepEqual(await readFile(destination), content);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("a stalled download times out, preserves its checkpoint and automatically resumes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "omp-download-stall-"));
+  const content = Buffer.from("hello world"), prefix = content.subarray(0, 6);
+  let requests = 0;
+  try {
+    const destination = join(dir, "file.zip");
+    await downloadOne({ url: "https://example.com/file.zip", destination, expectedSize: content.length,
+      expectedSha256: createHash("sha256").update(content).digest("hex"),
+      signal: new AbortController().signal, onProgress() {}, requestPolicy: { idleTimeoutMs: 5, retryDelaysMs: [0, 0] },
+      fetcher: async (_url, init) => {
+        if (++requests === 1) return new Response(new ReadableStream({ start(controller) { controller.enqueue(prefix); } }), { headers: { ETag: '"origin-tag"' } });
+        const headers = new Headers(init?.headers);
+        assert.equal(headers.get("range"), `bytes=${prefix.length}-`);
+        assert.equal(headers.get("if-range"), '"origin-tag"');
+        return new Response(content.subarray(prefix.length), { status: 206, headers: { "Content-Range": `bytes ${prefix.length}-${content.length - 1}/${content.length}` } });
+      },
+    });
+    assert.equal(requests, 2);
+    assert.deepEqual(await readFile(destination), content);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("an early EOF resumes the missing bytes without requiring a manual retry", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "omp-download-truncated-"));
+  const content = Buffer.from("hello world"), prefix = content.subarray(0, 6);
+  let requests = 0;
+  try {
+    const destination = join(dir, "file.zip");
+    await downloadOne({ url: "https://example.com/file.zip", destination, expectedSize: content.length,
+      expectedSha256: createHash("sha256").update(content).digest("hex"),
+      signal: new AbortController().signal, onProgress() {}, requestPolicy: { retryDelaysMs: [0, 0] },
+      fetcher: async (_url, init) => {
+        if (++requests === 1) return new Response(prefix);
+        assert.equal(new Headers(init?.headers).get("range"), `bytes=${prefix.length}-`);
+        return new Response(content.subarray(prefix.length), { status: 206, headers: { "Content-Range": `bytes ${prefix.length}-${content.length - 1}/${content.length}` } });
+      },
+    });
+    assert.equal(requests, 2);
+    assert.deepEqual(await readFile(destination), content);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

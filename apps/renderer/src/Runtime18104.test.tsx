@@ -1,3 +1,4 @@
+import { selectOption } from "./test/selectOption";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
@@ -32,13 +33,13 @@ it("makes billed message prediction an explicit opt-in and keeps demo changes lo
 it("distinguishes blocking a provider from an unrestricted agent pool", async () => {
   preview(<AgentPoolsPane client={client} visible />);
   const policy = screen.getByRole("combobox", { name: "账号池策略" });
-  fireEvent.change(policy, { target: { value: "blocked" } });
+  selectOption(policy, "禁止此提供商");
   fireEvent.click(screen.getByRole("button", { name: "保存账号范围" }));
   await screen.findByText("已保存，当前显示生效配置。");
-  expect((policy as HTMLSelectElement).value).toBe("blocked");
-  fireEvent.change(policy, { target: { value: "unrestricted" } });
+  expect((policy as HTMLButtonElement).textContent).toBe("禁止此提供商");
+  selectOption(policy, "不限制");
   fireEvent.click(screen.getByRole("button", { name: "保存账号范围" }));
-  await waitFor(() => expect((policy as HTMLSelectElement).value).toBe("unrestricted"));
+  await waitFor(() => expect((policy as HTMLButtonElement).textContent).toBe("不限制"));
   expect(command).not.toHaveBeenCalled();
 });
 

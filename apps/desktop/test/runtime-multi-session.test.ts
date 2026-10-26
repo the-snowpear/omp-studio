@@ -17,6 +17,7 @@ import type {
 
 import type { DesktopRuntimeSession, DesktopRuntimeSessionPort } from "../src/host-composition.js";
 import { createDesktopRuntimeSessionPort, type DesktopRuntimeSessionPortOptions } from "../src/runtime-session.js";
+import { UpdateRestartBlockedError } from "../src/update-restart.js";
 
 const T0 = "2026-08-15T21:30:00.000Z";
 
@@ -200,6 +201,69 @@ test("a failed restart preparation keeps the Runtime usable and retains the rest
     const stored = JSON.parse(await readFile(join(profileDirectory, "update-session-restore.json"), "utf8"));
     assert.deepEqual(stored.residents.map((r: { sessionId: string }) => r.sessionId), [resident.sessionId]);
   } finally { state.failStop.clear(); await port.stop(); await rm(profileDirectory, { recursive: true, force: true }); }
+});
+
+test("update restart postpones interactions, queued commands and background work without stopping residents", async () => {
+  const profileDirectory = await mkdtemp(join(tmpdir(), "omp-restart-blocked-"));
+  const { port, state } = createHarness();
+  const blockers: Array<[Partial<OperatorStateSnapshot>, RegExp]> = [
+    [{ isStreaming: true }, /任务/],
+    [{ isCompacting: true }, /压缩/],
+    [{ pendingInteraction: { interactionId: "approval" } as never }, /交互/],
+    [{ plan: { status: "review" } as never }, /计划审阅/],
+    [{ pendingMessages: 1 }, /排队消息/],
+    [{ activeCommandIds: ["command" as never] }, /命令/],
+    ...["starting", "running", "reviving"].map(status => [
+      { agents: [{ status, activeJobIds: [] }] as never }, /后台任务/,
+    ] as [Partial<OperatorStateSnapshot>, RegExp]),
+    [{ agents: [{ status: "idle", activeJobIds: ["job"] }] as never }, /后台任务/],
+    ...["queued", "running"].map(status => [
+      { jobs: [{ status }] as never }, /后台任务/,
+    ] as [Partial<OperatorStateSnapshot>, RegExp]),
+  ];
+  try {
+    await port.start({ ...context, profileDirectory });
+    await port.rebind?.(WORKSPACE_B);
+    for (const [patch, message] of blockers) {
+      state.snapshotPatch = patch;
+      assert.match(port.updateRestartBlocker!()!, message);
+      await assert.rejects(() => port.prepareRestart!(
+        () => assert.fail("a blocked restart must not begin shutdown"),
+      ), error => error instanceof UpdateRestartBlockedError && message.test(error.message));
+      assert.deepEqual(state.stopped, []);
+    }
+    state.snapshotPatch = {};
+    assert.equal(port.updateRestartBlocker!(), undefined);
+    let began = false;
+    await port.prepareRestart!(async () => {
+      assert.equal(JSON.parse(await readFile(join(profileDirectory, "update-session-restore.json"), "utf8")).residents.length, 2);
+      assert.deepEqual(state.stopped, []);
+      began = true;
+    });
+    assert.equal(began, true);
+    assert.equal(state.stopped.length, 2);
+  } finally { await port.stop(); await rm(profileDirectory, { recursive: true, force: true }); }
+});
+
+test("a postponed restart discards restore intent so a normal start follows the latest workspace", async () => {
+  const profileDirectory = await mkdtemp(join(tmpdir(), "omp-restart-postponed-"));
+  const first = createHarness(), second = createHarness();
+  const restorePath = join(profileDirectory, "update-session-restore.json");
+  try {
+    await first.port.start({ ...context, profileDirectory });
+    await assert.rejects(() => first.port.prepareRestart!(async () => {
+      // The final facade check finds a command accepted during the file write.
+      assert.equal(JSON.parse(await readFile(restorePath, "utf8")).residents[0].workspace.workspaceId, WORKSPACE_A.workspaceId);
+      throw new UpdateRestartBlockedError("仍有命令未完成，请完成后重启更新");
+    }), UpdateRestartBlockedError);
+    assert.deepEqual(first.state.stopped, []);
+    await assert.rejects(readFile(restorePath), /ENOENT/);
+
+    await first.port.rebind?.(WORKSPACE_B);
+    await first.port.stop();
+    await second.port.start({ ...context, profileDirectory, workspace: WORKSPACE_B });
+    assert.deepEqual(second.state.launchedIn.map(row => row.workspaceId), [WORKSPACE_B.workspaceId]);
+  } finally { await first.port.stop(); await second.port.stop(); await rm(profileDirectory, { recursive: true, force: true }); }
 });
 
 test("update restoration isolates missing sessions and keeps healthy residents usable", async () => {

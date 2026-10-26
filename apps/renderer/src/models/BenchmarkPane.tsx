@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AvailableModelRecord,
@@ -336,7 +337,7 @@ export function BenchmarkPane({
           <div className="benchmark-fields">
             <label>
               {t("工作负载", "Workload")}
-              <select
+              <AppSelect
                 className="select"
                 value={profile}
                 onChange={(event) => {
@@ -362,7 +363,7 @@ export function BenchmarkPane({
                 <option value="generation">Generation</option>
                 <option value="mix">Mix</option>
                 <option value="cache">Cache · cold / warm</option>
-              </select>
+              </AppSelect>
             </label>
             <label>
               {profile === "cache"
@@ -482,7 +483,7 @@ export function BenchmarkPane({
       <div className="benchmark-toolbar">
         <label>
           {t("本 Runtime 的测试", "Runs in this Runtime")}
-          <select
+          <AppSelect
             className="select"
             value={selected ?? ""}
             onChange={(event) => {
@@ -506,11 +507,11 @@ export function BenchmarkPane({
                 {workspaceStateLabel(run.state, resolvedLanguage)}
               </option>
             ))}
-          </select>
+          </AppSelect>
         </label>
         <label>
           {t("排名指标", "Rank by")}
-          <select
+          <AppSelect
             className="select"
             value={metric}
             onChange={(event) => setMetric(event.target.value as Metric)}
@@ -519,7 +520,7 @@ export function BenchmarkPane({
             <option value="tokensPerSecond">Total tok/s ↑</option>
             <option value="generationTps">Decode tok/s ↑</option>
             <option value="prefillTps">Prefill tok/s ↑</option>
-          </select>
+          </AppSelect>
         </label>
       </div>
       {snapshot ? (

@@ -96,7 +96,7 @@ export function ComposerApprovalPicker({
     <span className="approval-pill-wrap">
       <button
         type="button"
-        className={`pill-btn${mode === "yolo" ? " danger" : ""}`}
+        className={`pill-btn cmp-responsive-pill${mode === "yolo" ? " danger" : ""}`}
         disabled={disabled}
         onClick={() => {
           onInteract?.();
@@ -105,10 +105,10 @@ export function ComposerApprovalPicker({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`${t("composer.permissionMode")}${resolvedLanguage === "zh" ? "：" : ": "}${label}`}
-        data-tip={disabled ? t("composer.cannotSwitchPermission") : t("composer.permissionPillTip")}
+        data-tip={disabled ? t("composer.cannotSwitchPermission") : `${t("composer.permissionPillTip")}: ${label}`}
       >
         <Icon name="shield" extra="sm" />
-        <span>{label}</span>
+        <span className="cmp-pill-label">{label}</span>
       </button>
       {open ? (
         <>

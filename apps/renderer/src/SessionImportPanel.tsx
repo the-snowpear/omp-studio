@@ -1,3 +1,4 @@
+import { AppSelect } from "./AppSelect";
 import { useEffect, useRef, useState } from "react";
 import type { ForeignSessionSummary, ForeignSource, StudioClient, WorkspaceRecord, WorkspaceId } from "@omp-studio/client-contract";
 import { invokeUpgrade, useUpgradeAvailable } from "./runtimeUpgrade";
@@ -60,7 +61,7 @@ export function SessionImportPanel({ client, onOpen, onImported }: {
  return <div className="session-import">
   <button className="btn small outline" disabled={!available} data-tip={!available ? t("runtimeUpgrade.unavailable") : undefined} onClick={() => setOpen(value => !value)}>{t("runtimeUpgrade.importTitle")}</button>
   {open ? <section className="session-import-panel" aria-label={t("runtimeUpgrade.importTitle")}>
-   <div className="row"><select className="select" value={source} disabled={busy} aria-label={t("runtimeUpgrade.importTitle")} onChange={event => setSource(event.target.value as ForeignSource)}><option value="claude">Claude</option><option value="codex">Codex</option></select>
+   <div className="row"><AppSelect className="select" value={source} disabled={busy} aria-label={t("runtimeUpgrade.importTitle")} onChange={event => setSource(event.target.value as ForeignSource)}><option value="claude">Claude</option><option value="codex">Codex</option></AppSelect>
     {preview ? <span className="chip gray">{t("common.demo")}</span> : null}
     <button className="btn small" disabled={busy} onClick={() => setOpen(false)}>{t("common.close")}</button>
    </div>
@@ -70,7 +71,7 @@ export function SessionImportPanel({ client, onOpen, onImported }: {
    {!busy && sessions.length === 0 ? <p className="muted">{t("history.noMatches")}</p> : null}
    {selected ? <>
     <div className="session-import-preview"><MarkdownText text={body} /></div>
-    {!selected.cwdExists ? <label>{t("runtimeUpgrade.importCwd")}<select className="select" value={fallback} disabled={busy} onChange={event => setFallback(event.target.value)}><option value="">—</option>{workspaces.map(workspace => <option key={workspace.workspaceId} value={workspace.workspaceId}>{workspace.name}</option>)}</select></label> : null}
+    {!selected.cwdExists ? <label>{t("runtimeUpgrade.importCwd")}<AppSelect className="select" value={fallback} disabled={busy} onChange={event => setFallback(event.target.value)}><option value="">—</option>{workspaces.map(workspace => <option key={workspace.workspaceId} value={workspace.workspaceId}>{workspace.name}</option>)}</AppSelect></label> : null}
     {result ? <div role="status"><p>{t("runtimeUpgrade.importDone")}</p><button className="btn primary" onClick={() => { if (!preview) onOpen(result.sessionId, result.workspaceId as WorkspaceId); }}>{t("common.open")}</button></div> :
     <button className="btn primary" disabled={busy || !body || (!selected.cwdExists && !fallback)} onClick={() => void run()}>{t("runtimeUpgrade.importAction")}</button>}
    </> : null}

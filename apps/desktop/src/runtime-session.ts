@@ -86,6 +86,7 @@ import type {
   DesktopRuntimeSessionPort,
 } from "./host-composition.js";
 import type { HostLog } from "./host-log.js";
+import { UpdateRestartBlockedError, updateRestartBlockerForSnapshot } from "./update-restart.js";
 
 export interface DesktopRuntimeSessionPortOptions {
   /** Bridge token state lives under `<profile>/<bridgeDirectoryName>`; defaults to `bridge`. */
@@ -406,6 +407,14 @@ export function createDesktopRuntimeSessionPort(
   };
 
   let restartPrepared = false;
+  const updateRestartBlocker = (): string | undefined => {
+    for (const resident of residents.values()) {
+      if (resident.session.hello() === undefined) continue;
+      const blocker = updateRestartBlockerForSnapshot(resident.session.controller.publication()?.snapshot);
+      if (blocker) return blocker;
+    }
+    return undefined;
+  };
   const serialized = <T>(operation: () => Promise<T>, allowDuringRestart = false): Promise<T> => {
     const guarded = () => {
       if (restartPrepared && !allowDuringRestart) throw new Error("Runtime is restarting for an update");
@@ -817,14 +826,27 @@ export function createDesktopRuntimeSessionPort(
     stop(): Promise<void> {
       return serialized(stopAll, true);
     },
-    prepareRestart(): Promise<void> {
+    updateRestartBlocker,
+    prepareRestart(beforeStop?: () => void | Promise<void>): Promise<void> {
       return serialized(async () => {
-        if (!context) return;
+        if (!context) { await beforeStop?.(); return; }
+        const blocker = updateRestartBlocker();
+        if (blocker) throw new UpdateRestartBlockedError(blocker);
         const current = [...residents.values()];
-        if (current.some(r => r.session.hello() !== undefined && !sessionCanUpdate(r.session))) throw new Error("Finish active sessions and pending interactions before restarting");
-        await writeJsonAtomic(join(context.profileDirectory, "update-session-restore.json"), {
+        const restorePath = join(context.profileDirectory, "update-session-restore.json");
+        await writeJsonAtomic(restorePath, {
           activeSessionId, residents: current.map(r => ({ sessionId: r.sessionId, workspace: r.workspace })),
         });
+        try {
+          const latestBlocker = updateRestartBlocker();
+          if (latestBlocker) throw new UpdateRestartBlockedError(latestBlocker);
+          await beforeStop?.();
+        } catch (error) {
+          // A postponement leaves every Worker running, so the user may keep
+          // changing sessions. A later normal launch must not restore this view.
+          if (error instanceof UpdateRestartBlockedError) await rm(restorePath, { force: true });
+          throw error;
+        }
         // Latch only after every Worker stopped: a partial failure keeps the
         // desktop running and must not reject later lifecycle calls. The
         // restore file stays either way so already-stopped Sessions still
@@ -1705,11 +1727,7 @@ function sessionIsIdle(session: DesktopRuntimeSession): boolean {
 }
 
 function sessionCanUpdate(session: DesktopRuntimeSession): boolean {
-  if (!sessionIsIdle(session)) return false;
-  const snapshot = session.controller.publication()!.snapshot;
-  return !snapshot.agents.some((agent) =>
-    agent.status === "starting" || agent.status === "running" || agent.status === "reviving" || agent.activeJobIds.length > 0,
-  ) && !snapshot.jobs.some((job) => job.status === "queued" || job.status === "running");
+  return updateRestartBlockerForSnapshot(session.controller.publication()?.snapshot) === undefined;
 }
 
 function errorDetail(error: unknown): string {

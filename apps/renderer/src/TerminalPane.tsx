@@ -1,5 +1,6 @@
 import { useExecutionTarget } from "./workspaces/ExecutionTargets";
-import { readCssVar, readXtermTheme, applyTheme } from "./terminalTheme";
+import { readTerminalTypography, readXtermTheme, applyTheme } from "./terminalTheme";
+import { useAppSettings } from "./settings/appSettings";
 import { useTerminalSessions, type TerminalSession as Session, type TerminalScreenHost as Host } from "./terminalSessions";
 import { TerminalGraphicView } from "./TerminalGraphicView";
 import { TerminalRecordingControls } from "./recordings/TerminalRecordingControls";
@@ -165,6 +166,7 @@ function XtermScreen({
   active: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const { settings } = useAppSettings();
 
   useEffect(() => {
     const node = containerRef.current;
@@ -175,9 +177,8 @@ function XtermScreen({
         convertEol: true,
         disableStdin: session.status === "ended",
         cursorBlink: session.status !== "ended",
-        fontSize: 12,
+        ...readTerminalTypography(),
         lineHeight: 1.3,
-        fontFamily: readCssVar("--font-mono", "Menlo, Consolas, monospace"),
         theme: readXtermTheme(),
         allowProposedApi: false,
         // xterm 的默认值也是 1000，写出来是为了让这条上限有据可查：回滚缓冲乘以
@@ -210,6 +211,22 @@ function XtermScreen({
       observer.disconnect();
     };
   }, [api, hosts, pending, session.id, session.status]);
+
+  useEffect(() => {
+    const host = hosts.get(session.id);
+    if (!host) return;
+    applyTheme(host.term);
+    const node = containerRef.current;
+    let disposed = false;
+    const fit = () => {
+      if (disposed || !active || !node || node.clientWidth === 0 || node.clientHeight === 0) return;
+      host.fit.fit();
+      void api.resize(session.id, host.term.cols, host.term.rows);
+    };
+    const frame = requestAnimationFrame(fit);
+    void document.fonts?.ready.then(fit);
+    return () => { disposed = true; cancelAnimationFrame(frame); };
+  }, [active, api, hosts, session.id, settings.terminalFontFamily, settings.terminalFontSize]);
 
   useEffect(() => {
     const host = hosts.get(session.id);

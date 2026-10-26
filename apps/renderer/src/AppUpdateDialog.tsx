@@ -7,8 +7,8 @@ import { PLATFORM } from "./platform";
 
 /** macOS swaps the app bundle itself: there is no installer to download or launch. */
 const UPDATE_COPY = PLATFORM === "darwin"
-  ? { packageSize: "appUpdate.packageSizeMac", downloading: "appUpdate.downloadingMac", downloadSuccess: "appUpdate.downloadSuccessMac" }
-  : { packageSize: "appUpdate.packageSize", downloading: "appUpdate.downloading", downloadSuccess: "appUpdate.downloadSuccess" };
+  ? { packageSize: "appUpdate.packageSizeMac", downloading: "appUpdate.downloadingMac" }
+  : { packageSize: "appUpdate.packageSize", downloading: "appUpdate.downloading" };
 
 export interface AppUpdateDialogProps {
   readonly update: {
@@ -27,7 +27,12 @@ export interface AppUpdateDialogProps {
   };
   readonly preview?: boolean;
   readonly isDownloading?: boolean;
+  readonly isApplying?: boolean;
+  readonly checkError?: string | null;
   readonly downloadError?: string | null;
+  readonly applyError?: string | null;
+  readonly applyNotice?: string | null;
+  readonly cancelError?: string | null;
   readonly receivedBytes?: number | undefined;
   readonly totalBytes?: number | undefined;
   readonly readyToApply?: boolean;
@@ -60,7 +65,12 @@ export function AppUpdateDialog({
   update,
   preview = false,
   isDownloading = false,
+  isApplying = false,
+  checkError = null,
   downloadError = null,
+  applyError = null,
+  applyNotice = null,
+  cancelError = null,
   receivedBytes,
   totalBytes,
   readyToApply = false,
@@ -71,7 +81,10 @@ export function AppUpdateDialog({
   onCancel,
 }: AppUpdateDialogProps): ReactNode {
   const { t } = useI18n();
-  const [downloading, setDownloading] = useState(isDownloading);
+  const [operation, setOperation] = useState<"download" | "apply" | null>(null);
+  const downloading = isDownloading || operation === "download";
+  const applying = isApplying || operation === "apply";
+  const busy = downloading || applying;
   const [simulatedProgress, setSimulatedProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [previewReady, setPreviewReady] = useState(false);
@@ -84,18 +97,14 @@ export function AppUpdateDialog({
       : null;
 
   useEffect(() => {
-    setDownloading(isDownloading);
-  }, [isDownloading]);
-
-  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || downloading) return;
+      if (event.key !== "Escape" || busy) return;
       event.preventDefault();
       onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, downloading]);
+  }, [onClose, busy]);
 
   const previewTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -107,40 +116,44 @@ export function AppUpdateDialog({
   }, []);
 
   const handleDownload = useCallback(async () => {
-    if (downloading) return;
+    if (busy) return;
+    setStatusMessage(null);
     if (preview) {
       if (previewReady) {
-        setStatusMessage(t("updates.applyAndRestart") + " · " + t("appUpdate.demoUpdate"));
-        setPreviewReady(false);
+        setOperation("apply");
+        previewTimersRef.current.push(setTimeout(() => {
+          setOperation(null);
+          setPreviewReady(false);
+          setStatusMessage(t("appUpdate.demoApplied"));
+        }, 600));
         return;
       }
-      setDownloading(true);
+      setOperation("download");
       setSimulatedProgress(20);
       const timers = previewTimersRef.current;
       timers.length = 0;
       timers.push(setTimeout(() => setSimulatedProgress(60), 600));
       timers.push(setTimeout(() => setSimulatedProgress(100), 1200));
       timers.push(setTimeout(() => {
-        setDownloading(false);
+        setOperation(null);
         setPreviewReady(true);
-        setStatusMessage(t(UPDATE_COPY.downloadSuccess) + " " + t("appUpdate.demoUpdate"));
+        setStatusMessage(t("updates.readyToApply") + " " + t("appUpdate.demoUpdate"));
       }, 1600));
       return;
     }
     const action = ready ? onApply : onDownloadAndInstall;
     if (action) {
-      setDownloading(true);
-      setStatusMessage(null);
+      setOperation(ready ? "apply" : "download");
       try {
         const ok = await action();
         if (ok) {
-          setStatusMessage(t(UPDATE_COPY.downloadSuccess));
+          setStatusMessage(t(ready ? "appUpdate.restarting" : "updates.readyToApply"));
         }
       } finally {
-        setDownloading(false);
+        setOperation(null);
       }
     }
-  }, [downloading, preview, previewReady, ready, onApply, onDownloadAndInstall, t]);
+  }, [busy, preview, previewReady, ready, onApply, onDownloadAndInstall, t]);
 
   const openGithub = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -154,7 +167,7 @@ export function AppUpdateDialog({
   }, [update.htmlUrl]);
 
   return createPortal(
-    <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={downloading ? undefined : onClose}>
+    <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={busy ? undefined : onClose}>
       <section
         className="modal create-project-modal create-branch-modal app-update-modal"
         role="dialog"
@@ -181,7 +194,7 @@ export function AppUpdateDialog({
               </span>
             </p>
           </div>
-          {!downloading && (
+          {!busy && (
             <button type="button" className="icon-btn" aria-label={t("common.close")} onClick={onClose}>
               <Icon name="x" />
             </button>
@@ -190,7 +203,7 @@ export function AppUpdateDialog({
 
         <div className="create-project-body app-update-body" style={{ maxHeight: 320, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
           {update.plan === "full" && update.reason !== "restart-update" ? <p>{t("updates.fullInstallerRequired")}{update.reason ? ` · ${update.reason}` : ""}</p> : null}
-          {ready ? <p>{t("updates.readyToApply")}</p> : null}
+          {ready && !applying ? <p>{t("updates.readyToApply")}</p> : null}
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", opacity: 0.8 }}>
             <span>{t("appUpdate.releaseDate")}: {formatDate(update.publishedAt)}</span>
             {update.assetSize ? <span>{t(UPDATE_COPY.packageSize)}: {formatBytes(update.assetSize)}</span> : null}
@@ -216,12 +229,20 @@ export function AppUpdateDialog({
             </div>
           </div>
 
-          {downloadError ? (
-            <div className="alert-box error" style={{ color: "var(--red)", fontSize: "0.85rem", display: "flex", gap: 6, alignItems: "center" }}>
+          {([
+            ["appUpdate.checkFailed", checkError],
+            ["appUpdate.downloadFailed", downloadError],
+            ["appUpdate.applyFailed", applyError],
+            ["appUpdate.cancelFailed", cancelError],
+          ] as const).map(([label, message]) => message ? (
+            <div key={label} className="alert-box error" role="alert" style={{ color: "var(--red)", fontSize: "0.85rem", display: "flex", gap: 6, alignItems: "center" }}>
               <Icon name="alert" extra="sm" />
-              <span>{t("appUpdate.downloadFailed")}: {downloadError}</span>
+              <span>{t(label)}: {message}</span>
             </div>
-          ) : null}
+          ) : null)}
+
+          {applyNotice ? <p className="small muted" role="status">{applyNotice}</p> : null}
+          {applying ? <p role="status">{t("appUpdate.restarting")}</p> : null}
 
           {statusMessage ? (
             <div className="alert-box success" style={{ color: "var(--green)", fontSize: "0.85rem", display: "flex", gap: 6, alignItems: "center" }}>
@@ -269,18 +290,18 @@ export function AppUpdateDialog({
 
           <div className="app-update-actions" style={{ display: "flex", gap: 8 }}>
             {downloading && onCancel ? <button type="button" className="btn outline" onClick={() => void onCancel()}>{t("common.cancel")}</button> : null}
-            {onSkip && !ready && update.component !== "runtime" ? <button type="button" className="btn outline" disabled={downloading} onClick={() => void onSkip()}>{t("updates.skipVersion")}</button> : null}
-            <button type="button" className="btn outline" disabled={downloading} onClick={onClose}>
+            {onSkip && !ready && update.component !== "runtime" ? <button type="button" className="btn outline" disabled={busy} onClick={() => void onSkip()}>{t("updates.skipVersion")}</button> : null}
+            <button type="button" className="btn outline" disabled={busy} onClick={onClose}>
               {t("appUpdate.remindLater")}
             </button>
             <button
               type="button"
               className="btn primary"
-              disabled={downloading || (!onDownloadAndInstall && !preview)}
+              disabled={busy || (!preview && !(ready ? onApply : onDownloadAndInstall))}
               autoFocus
               onClick={handleDownload}
             >
-              {downloading ? t(UPDATE_COPY.downloading) : ready ? t("updates.applyAndRestart") : t("appUpdate.downloadAndInstall")}
+              {applying ? t("appUpdate.restarting") : downloading ? t(UPDATE_COPY.downloading) : ready ? t("updates.applyAndRestart") : t("appUpdate.downloadAndInstall")}
             </button>
           </div>
         </div>

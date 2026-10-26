@@ -115,59 +115,57 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
   const archivedFiles = await listArchivedCandidateFiles(archiveRoot);
   const byId = new Map<string, SessionCatalogEntry>();
 
-  const consider = async (file: string, archived: boolean): Promise<void> => {
+  // Headers are read concurrently and merged in file order afterwards, so the
+  // duplicate-id winner stays the same as a sequential scan.
+  const consider = async (file: string, archived: boolean): Promise<ConsideredFile> => {
     let metadata: Awaited<ReturnType<typeof lstat>>;
     try {
       metadata = await lstat(file);
     } catch {
-      note("CORRUPT_SKIPPED");
-      return;
+      return { note: "CORRUPT_SKIPPED" };
     }
-    if (metadata.isSymbolicLink()) {
-      note("SYMLINK_SKIPPED");
-      return;
-    }
-    if (!metadata.isFile()) return;
-    if (metadata.size > maxSessionBytes) {
-      note("OVERSIZE_SKIPPED");
-      return;
-    }
-    const header = await readSessionHeader(file, archived ? prefixBytes : Math.min(prefixBytes, metadata.size), maxSessionBytes);
-    if (header === undefined) {
-      note("CORRUPT_SKIPPED");
-      return;
-    }
-    if (!header.hasConversationMessage) return;
+    if (metadata.isSymbolicLink()) return { note: "SYMLINK_SKIPPED" };
+    if (!metadata.isFile()) return {};
+    if (metadata.size > maxSessionBytes) return { note: "OVERSIZE_SKIPPED" };
+    const header = await cachedSessionHeader(file, metadata, archived ? prefixBytes : Math.min(prefixBytes, metadata.size), maxSessionBytes);
+    if (header === undefined) return { note: "CORRUPT_SKIPPED" };
+    if (!header.hasConversationMessage) return {};
     if (allowedCwd !== undefined && (header.cwd === undefined || !sameWorkspaceCwd(header.cwd, allowedCwd))) {
-      return;
+      return {};
     }
     const origin = classifyOrigin(header.studioOrigin);
-    if (origin !== "studio" && !includeCliSessions) return;
+    if (origin !== "studio" && !includeCliSessions) return {};
     const title = sanitizeTitle(header.title);
     const createdAt = normalizeTimestamp(header.timestamp);
-    const entry: SessionCatalogEntry = {
-      sessionId: header.id,
-      origin,
-      archived,
-      pinned: pinnedSessionIds.has(header.id),
-      modifiedAt: metadata.mtime.toISOString(),
-      sizeBytes: metadata.size,
-      ...(title === undefined ? {} : { title }),
-      ...(createdAt === undefined ? {} : { createdAt }),
+    return {
+      entry: {
+        sessionId: header.id,
+        origin,
+        archived,
+        pinned: pinnedSessionIds.has(header.id),
+        modifiedAt: metadata.mtime.toISOString(),
+        sizeBytes: metadata.size,
+        ...(title === undefined ? {} : { title }),
+        ...(createdAt === undefined ? {} : { createdAt }),
+      },
     };
+  };
+
+  const considered = await mapConcurrent(
+    [...files.map((file) => ({ file, archived: false })), ...archivedFiles.map((file) => ({ file, archived: true }))],
+    SCAN_CONCURRENCY,
+    ({ file, archived }) => consider(file, archived),
+  );
+  for (const result of considered) {
+    if (result.note !== undefined) note(result.note);
+    const entry = result.entry;
+    if (entry === undefined) continue;
     const existing = byId.get(entry.sessionId);
     if (existing !== undefined) {
       note("DUPLICATE_SESSION_ID");
-      if (existing.modifiedAt >= entry.modifiedAt) return;
+      if (existing.modifiedAt >= entry.modifiedAt) continue;
     }
     byId.set(entry.sessionId, entry);
-  };
-
-  for (const file of files) {
-    await consider(file, false);
-  }
-  for (const file of archivedFiles) {
-    await consider(file, true);
   }
 
   return {
@@ -178,6 +176,62 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([code, count]) => ({ code, count })),
   };
+}
+
+interface ConsideredFile {
+  entry?: SessionCatalogEntry;
+  note?: SessionCatalogDiagnosticCode;
+}
+
+/** Sidebar projects each scan the same global tree; a bounded pool keeps one scan fast without flooding the FS. */
+const SCAN_CONCURRENCY = 24;
+const HEADER_CACHE_MAX = 8_192;
+
+interface CachedHeader {
+  readonly mtimeMs: number;
+  readonly size: number;
+  readonly header: ParsedHeader | undefined;
+}
+
+/**
+ * Parsed headers survive across scans (one per sidebar project, plus refreshes)
+ * and are reused while the file's mtime and size are unchanged. Workspace
+ * filtering happens after this, so the cache is workspace-independent.
+ */
+const headerCache = new Map<string, CachedHeader>();
+
+async function cachedSessionHeader(
+  file: string,
+  metadata: { readonly mtimeMs: number; readonly size: number },
+  byteLimit: number,
+  maxSessionBytes: number,
+): Promise<ParsedHeader | undefined> {
+  const key = `${byteLimit}:${maxSessionBytes}:${file}`;
+  const hit = headerCache.get(key);
+  if (hit !== undefined && hit.mtimeMs === metadata.mtimeMs && hit.size === metadata.size) return hit.header;
+  let header: ParsedHeader | undefined;
+  try {
+    header = await readSessionHeader(file, byteLimit, maxSessionBytes);
+  } catch {
+    // The file vanished or became unreadable between lstat and open.
+    return undefined;
+  }
+  if (headerCache.size >= HEADER_CACHE_MAX) headerCache.clear();
+  headerCache.set(key, { mtimeMs: metadata.mtimeMs, size: metadata.size, header });
+  return header;
+}
+
+async function mapConcurrent<T, R>(items: readonly T[], limit: number, run: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await run(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 /**

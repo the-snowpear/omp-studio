@@ -11,6 +11,7 @@ import { discoverUpdates } from "../src/update-discovery.js";
 import { UpdateCoordinator } from "../src/update-coordinator.js";
 import { DEFAULT_UPDATE_PREFS } from "../src/update-prefs-store.js";
 import { migrateLegacyRuntime } from "../src/migrate-runtime.js";
+import { UpdateRestartBlockedError } from "../src/update-restart.js";
 
 const pair = generateKeyPairSync("ed25519"), keys = { test: pair.publicKey.export({ type: "spki", format: "pem" }) };
 function file(asset: string, bytes: Buffer): UpdateFile { return { asset, url: `https://github.com/owner/repo/releases/download/v2/${asset}`, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), sha512: createHash("sha512").update(bytes).digest("base64") }; }
@@ -274,4 +275,125 @@ test("apply rechecks a pending Runtime minimum desktop version after an external
   const downgraded = new UpdateCoordinator({ ...options, appVersion: "0.9.0" }); await downgraded.initialize();
   assert.equal((await downgraded.apply()).ok, false);
   assert.equal(stopped, 0);
+});
+
+for (const entry of ["startup", "check", "prepare", "apply", "discovered"] as const) {
+  test(`an externally installed prepared Runtime is reconciled during ${entry}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "omp-runtime-satisfied-"));
+    const runtimeRoot = join(root, "installed"), version = "18.0.0-studio.2";
+    const installer = new RuntimeInstaller(runtimeRoot, { trustedKeys: keys });
+    const selfCheck = { run: async () => {} };
+    await installer.install(await runtimeFixture(root, "18.0.0-studio.1"));
+    await installer.activate("18.0.0-studio.1", { selfCheck });
+    const candidate = await runtimeFixture(root, version), archive = join(root, "runtime.zip");
+    await createRuntimeArchive(candidate, archive);
+    const bytes = await readFile(archive);
+    const envelope = signed({ runtime: { ...component("runtime.zip", version), file: file("runtime.zip", bytes) } });
+    const requests: string[] = [], source = fetcher([envelope], requests);
+    const runtimeFetch = (async (...args: Parameters<typeof fetch>) => String(args[0]).endsWith("runtime.zip")
+      ? new Response(new Uint8Array(bytes), { headers: { "content-length": String(bytes.length) } }) : source(...args)) as typeof fetch;
+    let shutdowns = 0;
+    const options = { root: join(root, "updates"), runtimeRoot, repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+      prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false,
+      beforeQuit: async () => { shutdowns++; }, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: runtimeFetch, activateOptions: { selfCheck } };
+    let coordinator = new UpdateCoordinator(options);
+    await coordinator.initialize();
+    if (entry === "discovered") await coordinator.check();
+    else await coordinator.prepare("runtime");
+    await installer.install(candidate); await installer.activate(version, { selfCheck });
+    const path = join(options.root, "transaction-v2.json");
+    if (entry === "startup") {
+      const journal = JSON.parse(await readFile(path, "utf8"));
+      journal.authorized = true;
+      journal.lastError = "Finish active sessions and pending interactions before restarting";
+      journal.runtimeTrial = { version, previousVersion: "18.0.0-studio.1" };
+      await writeFile(path, JSON.stringify(journal));
+      coordinator = new UpdateCoordinator(options); await coordinator.initialize();
+      assert.equal(coordinator.state.error, undefined);
+      assert.deepEqual(JSON.parse(await readFile(path, "utf8")).runtimeTrial, journal.runtimeTrial);
+    } else if (entry === "check") await coordinator.check();
+    else if (entry === "prepare" || entry === "discovered") await coordinator.prepare("runtime");
+    else assert.equal((await coordinator.apply()).ok, true);
+    assert.equal(coordinator.state.runtime.currentVersion, version);
+    assert.equal(coordinator.state.runtime.version, undefined);
+    assert.equal(coordinator.state.runtime.phase, "idle");
+    assert.equal(JSON.parse(await readFile(path, "utf8")).pending.runtime, undefined);
+    await coordinator.check();
+    assert.equal(coordinator.state.runtime.version, undefined);
+    assert.equal(shutdowns, 0);
+  });
+}
+
+test("a corrupt active Runtime keeps its prepared same-version repair", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-runtime-repair-pending-"));
+  const runtimeRoot = join(root, "installed"), version = "18.0.0-studio.2";
+  const installer = new RuntimeInstaller(runtimeRoot, { trustedKeys: keys });
+  const source = await runtimeFixture(root, version), selfCheck = { run: async () => {} };
+  await installer.install(source); await installer.activate(version, { selfCheck });
+  const archive = join(root, "runtime.zip"); await createRuntimeArchive(source, archive);
+  const bytes = await readFile(archive), release = { ...component("runtime.zip", version), file: file("runtime.zip", bytes) };
+  const updates = join(root, "updates"); await mkdir(updates, { recursive: true });
+  await writeFile(join(updates, "transaction-v2.json"), JSON.stringify({ schema: 2, authorized: false, pending: { runtime: signed({ runtime: release }) }, previous: {}, watermarks: {} }));
+  const cached = cachedUpdatePath(join(updates, "cache"), release.file); await mkdir(dirname(cached), { recursive: true }); await writeFile(cached, bytes);
+  await writeFile(join(runtimeRoot, "versions", version, "omp.exe"), "corrupt");
+  const options = { root: updates, runtimeRoot, repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {},
+    installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([]), activateOptions: { selfCheck } };
+  const coordinator = new UpdateCoordinator(options); await coordinator.initialize();
+  assert.equal(coordinator.state.runtime.phase, "ready");
+  assert.equal(coordinator.state.runtime.version, version);
+  assert.equal((await coordinator.apply()).ok, true);
+  await new UpdateCoordinator(options).initialize();
+  assert.equal((await installer.currentManifest())?.manifest.runtimeVersion, version);
+});
+
+test("a final restart blocker defers without losing the prepared artifact or recording a failure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-final-blocker-"));
+  const requests: string[] = [];
+  let blocked = true, installs = 0, restarts = 0;
+  const options = { root, runtimeRoot: join(root, "installed"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false,
+    beforeQuit: async () => { if (blocked) throw new UpdateRestartBlockedError("请先处理待完成的交互，再重启更新"); },
+    installDesktop: async () => { installs++; }, restart: () => { restarts++; }, quit: () => {}, fetcher: fetcher([signed({ app: component() })], requests) };
+  const coordinator = new UpdateCoordinator(options); await coordinator.initialize(); await coordinator.prepare("app");
+  const preparedRequests = requests.length;
+  assert.deepEqual(await coordinator.apply(), { ok: true, deferred: true, message: "请先处理待完成的交互，再重启更新" });
+  assert.equal(coordinator.state.app.phase, "ready");
+  assert.equal(coordinator.state.error, undefined);
+  const journal = JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8"));
+  assert.equal(journal.authorized, false); assert.equal(journal.lastError, undefined);
+  blocked = false;
+  assert.equal((await coordinator.apply()).ok, true);
+  assert.equal(installs, 1); assert.equal(restarts, 0); assert.equal(requests.length, preparedRequests);
+});
+
+test("a Host cleanup failure after shutdown starts restarts the old desktop for recovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-partial-shutdown-"));
+  let restarts = 0, installs = 0;
+  const phases: string[] = [];
+  const coordinator = new UpdateCoordinator({ root, runtimeRoot: join(root, "installed"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: s => { phases.push(s.app.phase); }, isBusy: () => false,
+    beforeQuit: async started => { started(); throw new Error("Host cleanup failed"); },
+    installDesktop: async () => { installs++; }, restart: () => { restarts++; }, quit: () => {}, fetcher: fetcher([signed({ app: component() })]) });
+  await coordinator.initialize(); await coordinator.prepare("app");
+  assert.deepEqual(await coordinator.apply(), { ok: false, message: "Host cleanup failed" });
+  assert.equal(restarts, 1); assert.equal(installs, 0); assert.ok(phases.includes("applying"));
+  assert.equal(coordinator.state.app.phase, "ready"); assert.equal(coordinator.state.errorStage, "apply");
+  const saved = JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8"));
+  assert.equal(saved.authorized, false); assert.equal(saved.lastErrorStage, "apply");
+});
+
+test("a failed update check reports its stage and preserves an already prepared update", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-check-offline-"));
+  let offline = false, installs = 0;
+  const source = fetcher([signed({ app: component() })]);
+  const coordinator = new UpdateCoordinator({ root, runtimeRoot: join(root, "installed"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {},
+    installDesktop: async () => { installs++; }, restart: () => {}, quit: () => {},
+    fetcher: (async (...args) => offline ? new Response(null, { status: 403 }) : source(...args)) as typeof fetch });
+  await coordinator.initialize(); await coordinator.prepare("app");
+  offline = true; await coordinator.check();
+  assert.equal(coordinator.state.errorStage, "check"); assert.match(coordinator.state.error ?? "", /403/);
+  assert.equal(coordinator.state.app.phase, "ready");
+  assert.equal((await coordinator.apply()).ok, true); assert.equal(installs, 1);
 });

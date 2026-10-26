@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClientBootstrap, StudioClient } from "@omp-studio/client-contract";
 import type { BrowserObservationEvent, BrowserObservationInput, BrowserObservationResultMap, StudioBrowserTab } from "@omp-studio/studio-protocol";
@@ -77,7 +78,7 @@ export function BrowserPane({ client, sessionId, available, visible, capabilitie
   }, [human, frame, send]);
   const selectedTab = tabs.find(tab => tab.id === selected);
   return <section className="browser-pane" aria-label={zh ? "浏览器观察" : "Browser observation"}>
-    <div className="browser-toolbar"><select className="select" aria-label={zh ? "浏览器标签" : "Browser tab"} value={selected} disabled={!enabled || busy} onChange={event => { epoch.current++; detach(); setSelected(event.target.value); }}><option value="">{zh ? "选择 Runtime 标签" : "Select Runtime tab"}</option>{tabs.map(tab => <option value={tab.id} key={tab.id}>{tab.kind} · {tab.title || tab.name}</option>)}</select><button className="btn small primary" disabled={!selectedTab?.observable || !canObserve || busy} onClick={() => void observe()}>{busy ? "…" : zh ? "观察" : "Observe"}</button></div>
+    <div className="browser-toolbar"><AppSelect className="select" aria-label={zh ? "浏览器标签" : "Browser tab"} value={selected} disabled={!enabled || busy} onChange={event => { epoch.current++; detach(); setSelected(event.target.value); }}><option value="">{zh ? "选择 Runtime 标签" : "Select Runtime tab"}</option>{tabs.map(tab => <option value={tab.id} key={tab.id}>{tab.kind} · {tab.title || tab.name}</option>)}</AppSelect><button className="btn small primary" disabled={!selectedTab?.observable || !canObserve || busy} onClick={() => void observe()}>{busy ? "…" : zh ? "观察" : "Observe"}</button></div>
     {error ? <p role="alert" className="browser-error">{error}</p> : null}
     {!enabled || !tabs.length ? <WorkspaceEmpty icon="globe" title={zh ? "暂无可观察的浏览器" : "No observable browser"}>{!enabled ? zh ? "连接支持浏览器观察的 Runtime 后重试。" : "Connect a Runtime with browser observation support." : zh ? "OMP 打开浏览器后，其主代理和子代理的标签会出现在这里。" : "Tabs created by OMP and its subagents appear here."}</WorkspaceEmpty> : null}
     {selectedTab?.reason ? <p role="status">{selectedTab.reason}</p> : null}

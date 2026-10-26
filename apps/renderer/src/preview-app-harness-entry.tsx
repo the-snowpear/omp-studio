@@ -24,6 +24,7 @@ import "./styles/agent-hub.css";
 import "./styles/models-roles.css";
 import "./styles/btw.css";
 import "./App.css";
+import "./styles/typography.css";
 
 // Explicit QA parameters affect only this local fixture entry, never the packaged app.
 const qaParams = new URLSearchParams(window.location.search);
@@ -65,6 +66,33 @@ try {
     "omp.gitGraphLayout",
     JSON.stringify({ open: true, splitRatio: 0.46 }),
   );
+  // 背景截图：?wallpaper=1 打开内置预设；?wallpaperScope=app 覆盖整个应用。
+  const wallpaper = {
+    version: 1,
+    enabled: true,
+    activeId: qaParams.get("wallpaperPreset") ?? "preset:aurora",
+    scope: qaParams.get("wallpaperScope") === "workbench" ? "workbench" : "app",
+    opacity: Number(qaParams.get("wallpaperOpacity") ?? 70),
+    strength: Number(qaParams.get("wallpaperStrength") ?? 65),
+    scrimAuto: qaParams.get("wallpaperScrim") === null,
+    scrim: Number(qaParams.get("wallpaperScrim") ?? 45),
+    blur: 8,
+    fit: "cover",
+    focus: "center",
+    motion: "auto",
+  };
+  if (qaParams.get("wallpaper") === "1") {
+    window.localStorage.setItem("omp.background", JSON.stringify(wallpaper));
+    // 预览模式的 Provider 读 sessionStorage 演示值，不读真实偏好。
+    window.sessionStorage.setItem("omp.previewBackground", JSON.stringify(wallpaper));
+  } else {
+    window.localStorage.removeItem("omp.background");
+    window.sessionStorage.removeItem("omp.previewBackground");
+  }
+  // 设置页截图：?settingsGroup=background 直接落在目标标签。
+  if (qaParams.get("settingsGroup") !== null) {
+    window.sessionStorage.setItem("omp.settingsIntent", JSON.stringify({ group: qaParams.get("settingsGroup") }));
+  }
 } catch {
   /* storage blocked */
 }

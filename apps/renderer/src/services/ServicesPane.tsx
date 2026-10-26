@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import {
   WorkspaceDialog,
   WorkspaceSection,
@@ -441,7 +442,7 @@ export function ServicesPane({
                     {row.readyAt ? ` · ${label("已就绪", "ready")}` : ""}
                   </span>
                 </button>
-                <select
+                <AppSelect
                   aria-label={`${row.name} ${label("生命周期", "lifetime")}`}
                   className="select"
                   value={row.mode}
@@ -465,7 +466,7 @@ export function ServicesPane({
                   <option value="detached">
                     {label("脱离运行", "Detached")}
                   </option>
-                </select>
+                </AppSelect>
                 <button
                   className="btn small outline"
                   disabled={busy || !canControl}
@@ -684,7 +685,7 @@ export function ServicesPane({
                 </label>
                 <label>
                   {label("生命周期", "Lifetime")}
-                  <select
+                  <AppSelect
                     className="select"
                     value={spec.mode}
                     onChange={(event) =>
@@ -704,11 +705,11 @@ export function ServicesPane({
                     <option value="detached">
                       {label("脱离运行", "Detached")}
                     </option>
-                  </select>
+                  </AppSelect>
                 </label>
                 <label>
                   {label("重启策略", "Restart policy")}
-                  <select
+                  <AppSelect
                     className="select"
                     value={spec.restart}
                     onChange={(event) =>
@@ -724,7 +725,7 @@ export function ServicesPane({
                       {label("失败时", "On failure")}
                     </option>
                     <option value="always">{label("总是", "Always")}</option>
-                  </select>
+                  </AppSelect>
                 </label>
                 <label className="service-wide">
                   <span>

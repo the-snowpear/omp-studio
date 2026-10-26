@@ -15,7 +15,6 @@
  */
 
 import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
-import { emptyStats } from "@omp-studio/studio-protocol";
 import type {
   AuthorityEpoch,
   AuthorityId,
@@ -265,7 +264,6 @@ const BOOTSTRAP: ClientBootstrap = {
 };
 
 const QUERY_INPUTS = {
-  "stats.read": {filter:{}},
   "prediction.query": {sessionId:"test",version:1,before:"",prefix:""},
   "artifacts.text.read": { artifactId: "11111111-1111-4111-8111-111111111111" },
   "artifacts.list": {},
@@ -279,6 +277,7 @@ const QUERY_INPUTS = {
   "session.state": {},
   "home.get": {},
   "models.get": {},
+  "models.adaptation.resolve": { providerId: "gateway", api: "openai-completions", modelId: "example" },
   "skills.get": {},
   "mcp.get": {},
   "mcp.logs.get": { name: "filesystem" },
@@ -286,6 +285,7 @@ const QUERY_INPUTS = {
   "projects.list": {},
   "workspace.fileTree": { workspaceId: WORKSPACE_ID },
   "usage.get": {},
+  "stats.dashboard": {},
   "conversation.open": { target: { kind: "session", sessionId: SESSION_ID }, limit: 50 },
   "session.transcript.read": { limit: 50 },
   "agent.transcript.read": { agentId: AGENT_ID, limit: 50 },
@@ -309,7 +309,7 @@ const QUERY_INPUTS = {
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
-  "stats.read": {ok:true,queryName:"stats.read",result:emptyStats({})},
+  "stats.dashboard": {ok:true,queryName:"stats.dashboard",result:{available:true,url:"http://127.0.0.1:3847/#/overview?range=all"}},
   "prediction.query": {ok:true,queryName:"prediction.query",result:{version:1,suffix:null,engine:"ngram"}},
   "artifacts.text.read": { ok: true, queryName: "artifacts.text.read", result: { artifact: { artifactId: "11111111-1111-4111-8111-111111111111", kind: "annotation", name: "notes.json", mimeType: "application/json", bytes: 2, createdAt: "2026-09-25T00:00:00.000Z", sha256: "0".repeat(64) }, text: "{}" } },
   "artifacts.list": { ok: true, queryName: "artifacts.list", result: { artifacts: [], total: 0, totalBytes: 0 } },
@@ -357,6 +357,7 @@ const QUERY_RESPONSES = {
       },
     },
   },
+  "models.adaptation.resolve": { ok: true, queryName: "models.adaptation.resolve", result: { catalogVersion: "fixture-v1", status: "none", candidates: [], values: {}, sources: {} } },
   "skills.get": {
     ok: true,
     queryName: "skills.get",

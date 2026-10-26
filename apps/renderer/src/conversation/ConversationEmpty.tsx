@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { SessionHistoryEntry, SessionHistoryReadModel, StudioClient, TokenUsageReadModel } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
-import { SHORTCUTS, formatShortcut } from "../keyboard/shortcuts";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useOperatorProfile } from "../settings/operatorProfile";
 import { ensureRuntimeConnection } from "../runtimeEnsure";
@@ -249,13 +248,6 @@ export function ConversationEmpty({
           )}
         </div>
       </section>
-
-      <div className="ce-tips ce-anim" style={{ ["--d" as string]: "880ms" }}>
-        <span className="ce-tip"><span className="kbd">{formatShortcut(SHORTCUTS.newChat)}</span>{t("conversation.tipNewChat")}</span>
-        <span className="ce-tip"><span className="kbd">{formatShortcut(SHORTCUTS.commandPalette)}</span>{t("conversation.tipSearch")}</span>
-        <span className="ce-tip"><span className="kbd">/</span>{t("conversation.tipCommands")}</span>
-        <span className="ce-tip"><span className="kbd">@</span>{t("conversation.tipContext")}</span>
-      </div>
     </div>
   );
 }

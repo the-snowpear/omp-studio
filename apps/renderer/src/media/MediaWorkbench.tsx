@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import {
   WorkspaceEmpty,
   WorkspaceStatus,
@@ -475,7 +476,7 @@ export function MediaWorkbench({
   ) => (
     <label>
       {label}
-      <select
+      <AppSelect
         className="select"
         value={value}
         onChange={(event) => update(event.target.value)}
@@ -488,7 +489,7 @@ export function MediaWorkbench({
               {row.name}
             </option>
           ))}
-      </select>
+      </AppSelect>
     </label>
   );
   const inputList =
@@ -553,7 +554,7 @@ export function MediaWorkbench({
         <div className="media-request-form">
           <label>
             {t("模型", "Model")}
-            <select
+            <AppSelect
               className="select"
               value={model}
               onChange={(event) => {
@@ -573,7 +574,7 @@ export function MediaWorkbench({
                   {row.local ? " · local" : ""}
                 </option>
               ))}
-            </select>
+            </AppSelect>
           </label>
           <p className="small muted">
             {choice
@@ -630,7 +631,7 @@ export function MediaWorkbench({
                 </label>
                 <label>
                   {t("输出格式", "Output format")}
-                  <select
+                  <AppSelect
                     className="select"
                     value={format}
                     onChange={(event) => setFormat(event.target.value)}
@@ -638,7 +639,7 @@ export function MediaWorkbench({
                     {(choice?.formats ?? ["wav"]).map((format) => (
                       <option key={format}>{format}</option>
                     ))}
-                  </select>
+                  </AppSelect>
                 </label>
                 {show("speed") ? (
                   <label>
@@ -718,7 +719,7 @@ export function MediaWorkbench({
               ) : null}
               <label>
                 {t("音频产物", "Audio artifact")}
-                <select
+                <AppSelect
                   className="select"
                   value={audio}
                   onChange={(event) => setAudio(event.target.value)}
@@ -736,7 +737,7 @@ export function MediaWorkbench({
                         {row.name}
                       </option>
                     ))}
-                </select>
+                </AppSelect>
               </label>
               <div className="media-parameter-grid">
                 <label>
@@ -752,7 +753,7 @@ export function MediaWorkbench({
                 {show("timestamps") ? (
                   <label>
                     {t("时间戳", "Timestamps")}
-                    <select
+                    <AppSelect
                       className="select"
                       value={timestamps}
                       onChange={(event) => setTimestamps(event.target.value)}
@@ -760,7 +761,7 @@ export function MediaWorkbench({
                       <option value="none">{t("无", "None")}</option>
                       <option value="segment">{t("段落", "Segments")}</option>
                       <option value="word">{t("词", "Words")}</option>
-                    </select>
+                    </AppSelect>
                   </label>
                 ) : null}
                 {show("temperature") ? (
@@ -785,7 +786,7 @@ export function MediaWorkbench({
               <div className="media-parameter-grid">
                 <label>
                   {t("宽高比（可选）", "Aspect ratio (optional)")}
-                  <select
+                  <AppSelect
                     className="select"
                     value={aspect}
                     onChange={(event) => setAspect(event.target.value)}
@@ -803,7 +804,7 @@ export function MediaWorkbench({
                     ].map((value) => (
                       <option key={value}>{value}</option>
                     ))}
-                  </select>
+                  </AppSelect>
                 </label>
                 <label>
                   {t(
@@ -852,7 +853,7 @@ export function MediaWorkbench({
                     </label>
                     <label>
                       {t("分辨率（可选）", "Resolution (optional)")}
-                      <select
+                      <AppSelect
                         className="select"
                         value={resolution}
                         onChange={(event) => setResolution(event.target.value)}
@@ -870,13 +871,13 @@ export function MediaWorkbench({
                         ].map((value) => (
                           <option key={value}>{value}</option>
                         ))}
-                      </select>
+                      </AppSelect>
                     </label>
                     {imagePicker(t("首帧", "First frame"), first, setFirst)}
                     {imagePicker(t("尾帧", "Last frame"), last, setLast)}
                     <label>
                       {t("生成音频", "Generate audio")}
-                      <select
+                      <AppSelect
                         className="select"
                         value={withAudio}
                         onChange={(event) => setWithAudio(event.target.value)}
@@ -886,7 +887,7 @@ export function MediaWorkbench({
                         </option>
                         <option value="yes">{t("是", "Yes")}</option>
                         <option value="no">{t("否", "No")}</option>
-                      </select>
+                      </AppSelect>
                     </label>
                     <label>
                       Seed

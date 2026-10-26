@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useEffect, useId, useRef, type FormEvent, type KeyboardEvent } from "react";
 import { Icon } from "../icons";
 import { MarkdownText } from "../conversation/markdown";
@@ -51,10 +52,10 @@ export function BtwPanel({
   return (
     <div className="btw-panel">
       {session.historyAvailable ? <div className="btw-history-toolbar">
-        <select disabled={session.snapshot?.status === "running"} className="select" aria-label={t("runtimeUpgrade.btwHistory")} value={session.selectedTopicId ?? ""} onChange={event => { if (event.target.value) void session.selectTopic?.(event.target.value); else session.newTopic?.(); }}>
+        <AppSelect disabled={session.snapshot?.status === "running"} className="select" aria-label={t("runtimeUpgrade.btwHistory")} value={session.selectedTopicId ?? ""} onChange={event => { if (event.target.value) void session.selectTopic?.(event.target.value); else session.newTopic?.(); }}>
           <option value="">{t("runtimeUpgrade.btwNew")}</option>
           {session.topics?.map(topic => <option key={topic.topicId} value={topic.topicId}>{topic.question} ({topic.turnCount})</option>)}
-        </select>
+        </AppSelect>
         <button className="btn small" disabled={session.snapshot?.status === "running"} onClick={() => session.newTopic?.()}>{t("runtimeUpgrade.btwNew")}</button>
         <button className="btn small" onClick={() => void session.refreshHistory?.()}>{t("common.refresh")}</button>
       </div> : null}

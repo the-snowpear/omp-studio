@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { WebRoleChain } from "./WebRoleChain";
 /**
  * Web Search configuration panel (4th tab of the model-config page).
@@ -841,11 +842,11 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
         <div className="wsx-params-grid">
           <div className="wsx-field">
             <span>{t("modelConfig.webSearchTimeoutLabel")}</span>
-            <select value={draft.timeoutSeconds} onChange={(event) => setDraft((d) => ({ ...d, timeoutSeconds: Number(event.target.value) }))}>
+            <AppSelect value={draft.timeoutSeconds} onChange={(event) => setDraft((d) => ({ ...d, timeoutSeconds: Number(event.target.value) }))}>
               {TIMEOUT_OPTIONS.map((value) => (
                 <option key={value} value={value}>{value}s</option>
               ))}
-            </select>
+            </AppSelect>
             <em>{t("modelConfig.webSearchTimeoutDesc")}</em>
           </div>
           {webSearch.routing ? null : <div className="wsx-field">
@@ -937,7 +938,7 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
               </label>
               <label className="wsx-field">
                 <span>{t("modelConfig.webSearchSearxngSafesearch")}</span>
-                <select
+                <AppSelect
                   value={draft.searxngSafesearch === null ? "" : String(draft.searxngSafesearch)}
                   onChange={(event) => setDraft((d) => ({ ...d, searxngSafesearch: event.target.value === "" ? null : Number(event.target.value) }))}
                 >
@@ -945,7 +946,7 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
                   <option value="0">{t("modelConfig.webSearchSafesearch0")}</option>
                   <option value="1">{t("modelConfig.webSearchSafesearch1")}</option>
                   <option value="2">{t("modelConfig.webSearchSafesearch2")}</option>
-                </select>
+                </AppSelect>
               </label>
             </div>
             <div className="wsx-adv-group wsx-exa-group">

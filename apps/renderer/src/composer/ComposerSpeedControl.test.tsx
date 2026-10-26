@@ -1,3 +1,4 @@
+import { selectOption } from "../test/selectOption";
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -17,8 +18,9 @@ it("preview exposes supported speeds and preserves its selection when the menu r
  }
  render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><Harness/></PreviewModeProvider></I18nProvider>);
  const select = await screen.findByRole("combobox", { name: "服务档位" });
+ fireEvent.click(select);
  expect(screen.getAllByRole("option").map(option => option.textContent)).toEqual(["Normal", "Fast", "Ultrafast", "Slow"]);
- fireEvent.change(select, { target: { value: "ultrafast" } }); expect((select as HTMLSelectElement).value).toBe("ultrafast");
+ selectOption(select, "Ultrafast"); expect((select as HTMLButtonElement).textContent).toBe("Ultrafast");
  fireEvent.click(screen.getByRole("button", { name: "Toggle menu" })); fireEvent.click(screen.getByRole("button", { name: "Toggle menu" }));
- expect((await screen.findByRole("combobox", { name: "服务档位" }) as HTMLSelectElement).value).toBe("ultrafast"); expect(client.command).not.toHaveBeenCalled();
+ expect((await screen.findByRole("combobox", { name: "服务档位" }) as HTMLButtonElement).textContent).toBe("Ultrafast"); expect(client.command).not.toHaveBeenCalled();
 });

@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import {
   createContext,
   useCallback,
@@ -45,12 +46,14 @@ export function AnnotationButton({
   source,
   label,
   small = false,
+  iconOnly = false,
   menu = false,
   onActivate,
 }: {
   source?: AnnotationCapture;
   label?: string;
   small?: boolean;
+  iconOnly?: boolean;
   menu?: boolean;
   onActivate?: () => void;
 }) {
@@ -63,7 +66,13 @@ export function AnnotationButton({
       type="button"
       role={menu ? "menuitem" : undefined}
       className={
-        menu ? "menu-item" : small ? "ev-msg-copy" : "btn small outline"
+        menu
+          ? "menu-item"
+          : iconOnly
+            ? "icon-btn"
+            : small
+              ? "ev-msg-copy"
+              : "btn small outline"
       }
       aria-label={title}
       data-tip={title}
@@ -92,8 +101,8 @@ export function AnnotationButton({
         onActivate?.();
       }}
     >
-      <Icon name="pencil" extra="sm" />
-      {small ? null : title}
+      <Icon name="pencil" extra={iconOnly ? "" : "sm"} />
+      {small || iconOnly ? null : title}
     </button>
   );
 }
@@ -507,7 +516,7 @@ export function AnnotationsProvider({
             ) : null}
             <div className="annotation-layout">
               <div className="annotation-source">
-                <select
+                <AppSelect
                   className="select"
                   aria-label={zh ? "标注来源" : "Annotation source"}
                   value={source?.id ?? ""}
@@ -526,7 +535,7 @@ export function AnnotationsProvider({
                       {item.label}
                     </option>
                   ))}
-                </select>
+                </AppSelect>
                 {source ? (
                   <button
                     className="btn small danger"

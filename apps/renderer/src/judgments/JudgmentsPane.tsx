@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { WorkspaceSection } from "../workspaces/Workspace";
 import { JudgeModelPane } from "./JudgeModelPane";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -533,7 +534,7 @@ export function JudgmentsPane({
               </label>
               <label>
                 {t("输入格式", "Input format")}
-                <select
+                <AppSelect
                   className="select"
                   value={jsonItems ? "json" : "lines"}
                   onChange={(event) =>
@@ -546,7 +547,7 @@ export function JudgmentsPane({
                   <option value="json">
                     JSON: [{'{"key":"id","state":"text or object"}'}]
                   </option>
-                </select>
+                </AppSelect>
               </label>
               <label>
                 {t("待评审内容", "Items to judge")}
@@ -606,7 +607,7 @@ export function JudgmentsPane({
                     </label>
                     <label>
                       {t("类型", "Type")}
-                      <select
+                      <AppSelect
                         className="select"
                         value={question.type}
                         onChange={(event) =>
@@ -623,7 +624,7 @@ export function JudgmentsPane({
                         <option value="score">
                           {t("有序评分", "Ordered score")}
                         </option>
-                      </select>
+                      </AppSelect>
                     </label>
                     <button
                       className="btn small"

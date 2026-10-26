@@ -1,32 +1,138 @@
-import { FrustrationPane } from "./FrustrationPane";
-import { AccountStatusPane } from "./models/AccountStatusPane";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
-import type { StatsFilter, StatsRow, StatsSnapshot } from "@omp-studio/studio-protocol";
 import { usePreviewMode } from "./preview/PreviewContext";
-import { statsPreview } from "./preview/statsPreview";
+import { PREVIEW_STATS_TOTALS } from "./preview/fixtures";
 import { useI18n } from "./i18n";
 import { hostErrorMessage } from "./hostError";
-import "./models/benchmark.css";
 
-export function StatisticsPage({client}:{client:StudioClient}){
- const {preview}=usePreviewMode();const {resolvedLanguage}=useI18n();const zh=resolvedLanguage==="zh";
- const [filter,setFilter]=useState<StatsFilter>({range:"all"});const [draft,setDraft]=useState({model:"",provider:"",folder:""});const [tab,setTab]=useState("overview");const [data,setData]=useState<StatsSnapshot>();const [error,setError]=useState("");const [refresh,setRefresh]=useState(0);
- useEffect(()=>{let active=true;let timer:ReturnType<typeof setTimeout>;setError("");if(preview){setData(statsPreview(filter));return;}setData(undefined);let first=true;
-  const read=async()=>{try{const result=await client.query("stats.read",{filter,...(first&&refresh>0?{refresh:true}:{})});first=false;if(active)setData(result);}catch(cause){if(active)setError(hostErrorMessage(cause,zh?"统计不可用":"Statistics unavailable"));}finally{if(active)timer=setTimeout(()=>void read(),2000);}};void read();return()=>{active=false;clearTimeout(timer);};
- },[client,filter,preview,refresh]);
- const tabs=[{id:"overview",label:zh?"概览":"Overview"},{id:"models",label:zh?"模型与提供商":"Models and providers"},{id:"costs",label:zh?"费用与额度":"Costs and quotas"},{id:"tools",label:zh?"工具与错误":"Tools and errors"},{id:"projects",label:zh?"项目与会话":"Projects and sessions"},{id:"frustration",label:"Frustration"}];
- const cost=(row:StatsRow)=>row.costEstimate===null?(zh?"未知":"Unknown"):"$"+row.costEstimate.toFixed(4)+(row.unpriced>0?(zh?"（部分已定价）":" (partially priced)"):"");
- const table=(rows:StatsRow[],label:string)=><table className="benchmark-table" aria-label={label}><thead><tr>{[label,zh?"请求 / 调用":"Requests / calls",zh?"错误":"Errors","Tokens",zh?"API 等价估算":"API-equivalent estimate",zh?"未定价":"Unpriced"].map(text=><th key={text}>{text}</th>)}</tr></thead><tbody>{rows.map(row=><tr key={row.id}><td>{row.label}</td><td>{row.requests.toLocaleString()}</td><td>{row.errors?.toLocaleString()??"—"}</td><td>{Math.round(row.tokens).toLocaleString()}</td><td>{cost(row)}</td><td>{row.unpriced.toLocaleString()}</td></tr>)}</tbody></table>;
- return <div className="page-wide"><h2>{zh?"本机 OMP 统计":"Local OMP statistics"}{preview?<span className="chip gray xs">{zh?"演示":"Demo"}</span>:null}</h2>
-  <p className="muted">{zh?"默认汇总全部本机历史；先显示缓存，再后台同步。金额为 API 等价估算，实际账单费用未提供。":"All local history by default. Cached results appear before background synchronization. Costs are API-equivalent estimates; actual billed costs are not provided."}</p>
-  <form className="benchmark-toolbar" onSubmit={event=>{event.preventDefault();setFilter({range:filter.range??"all",...Object.fromEntries(Object.entries(draft).filter(([,v])=>v.trim()).map(([k,v])=>[k,v.trim()]))} as StatsFilter);}}>
-   <label>{zh?"时间":"Time"}<select className="select" value={filter.range??"all"} onChange={event=>setFilter({...filter,range:event.target.value as NonNullable<StatsFilter["range"]>})}>{["all","1h","24h","7d","30d","90d"].map(value=><option key={value} value={value}>{value==="all"?(zh?"全部":"All"):value}</option>)}</select></label>
-   {(["model","provider","folder"] as const).map(key=><label key={key}>{key==="model"?(zh?"模型":"Model"):key==="provider"?(zh?"提供商":"Provider"):(zh?"项目目录":"Project folder")}<input className="input" value={draft[key]} onChange={event=>setDraft({...draft,[key]:event.target.value})}/></label>)}<button className="btn small">{zh?"应用过滤":"Apply filters"}</button><button type="button" className="btn small outline" onClick={()=>setRefresh(n=>n+1)}>{zh?"同步":"Sync"}</button>
-  </form>
-  {error?<p role="alert">{error}</p>:null}{data?.reason?<p role="status">{data.reason}</p>:null}
-  {data?<p className="small muted">{zh?"同步":"Sync"}: {data.sync.state} · {data.sync.current}/{data.sync.total} · {zh?"已处理":"Processed"} {data.sync.processed}{data.updatedAt?` · ${new Date(data.updatedAt).toLocaleString()}`:""}{data.cached?(zh?" · 缓存":" · Cached"):""}</p>:<p role="status">{zh?"读取统计…":"Loading statistics…"}</p>}
-  <div role="tablist" aria-label={zh?"统计分类":"Statistics categories"}>{tabs.map(item=><button className="btn small outline" role="tab" aria-selected={tab===item.id} key={item.id} onClick={()=>setTab(item.id)}>{item.label}</button>)}</div>
-  <section role="tabpanel">{data?.available?tab==="overview"?table([data.overall],zh?"总计":"Total"):tab==="models"?<>{table(data.models,zh?"模型":"Models")}{table(data.providers,zh?"提供商":"Providers")}</>:tab==="costs"?<><AccountStatusPane client={client}/>{table(data.models,zh?"费用":"Costs")}<p>{zh?"统计数据库不提供实时账户额度；请在模型配置页查看账户与额度。":"The statistics database does not provide live account quotas. See Accounts in model configuration."}</p></>:tab==="tools"?table(data.tools,zh?"工具":"Tools"):tab==="projects"?<>{table(data.projects,zh?"项目":"Projects")}{table(data.sessions??[],zh?"会话记录（最近 500 条）":"Session records (latest 500)")}</>:<FrustrationPane client={client} filter={filter} data={data.frustration} onUpdated={()=>setRefresh(n=>n+1)}/>:null}</section>
- </div>;
+type Phase = "loading" | "ready" | "unavailable";
+
+/**
+ * Native statistics page.
+ *
+ * Everything below the shell's tab bar is the upstream `omp stats` dashboard
+ * itself, embedded from its loopback origin. It already ships every section,
+ * drill-down and trace view, and it carries its own range switcher and sync
+ * button, so this page deliberately adds no toolbar of its own: a second set of
+ * controls would drift from the panel and duplicate what is already on screen.
+ *
+ * Studio only owns the two states the embed cannot express — while the panel is
+ * starting, and when no panel could be reached at all.
+ *
+ * Preview mode never fakes the embed: an iframe pointed at a fabricated URL
+ * would claim a local service exists when it does not. Preview shows demo
+ * aggregates and says so.
+ */
+export function StatisticsPage({ client }: { client: StudioClient }) {
+  const { preview } = usePreviewMode();
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const [phase, setPhase] = useState<Phase>("loading");
+  const [url, setUrl] = useState<string | undefined>(undefined);
+  const [reason, setReason] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const framedRef = useRef(false);
+
+  useEffect(() => {
+    if (preview) return;
+    let active = true;
+    setPhase("loading");
+    setReason("");
+    framedRef.current = false;
+    void (async () => {
+      try {
+        const result = await client.query("stats.dashboard", {});
+        if (!active) return;
+        if (result.available && result.url !== undefined) {
+          setUrl(result.url);
+          return;
+        }
+        setPhase("unavailable");
+        setReason(result.reason ?? (zh ? "本机统计面板不可用。" : "The local statistics panel is unavailable."));
+      } catch (cause) {
+        if (!active) return;
+        setPhase("unavailable");
+        setReason(hostErrorMessage(cause, zh ? "统计面板不可用" : "Statistics panel unavailable"));
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [client, preview, attempt, zh]);
+
+  // A load event also fires for the panel's own error document, so the frame is
+  // only trusted once a probe confirms the server still answers.
+  const onFrameLoad = useCallback(() => {
+    if (framedRef.current) return;
+    framedRef.current = true;
+    void (async () => {
+      try {
+        const result = await client.query("stats.dashboard", {});
+        setPhase(result.available ? "ready" : "unavailable");
+        if (!result.available) setReason(result.reason ?? "");
+      } catch {
+        setPhase("unavailable");
+      }
+    })();
+  }, [client]);
+
+  const openExternal = useCallback(() => {
+    void client.command("usage.openDashboard", {});
+  }, [client]);
+
+  if (preview) {
+    const demo = PREVIEW_STATS_TOTALS;
+    return (
+      <div className="stats-page">
+        <p className="stats-demo-note">
+          {zh
+            ? "统计面板由本机 OMP Runtime 提供，需关闭预览后查看；下面是演示汇总。"
+            : "The statistics panel is served by the local OMP Runtime. Turn preview off to view it; demo aggregates follow."}
+        </p>
+        <div className="stats-demo">
+          <div className="stats-demo-cell"><span className="l">Tokens</span><span className="v">{demo.tokens.toLocaleString()}</span></div>
+          <div className="stats-demo-cell"><span className="l">{zh ? "请求" : "Requests"}</span><span className="v">{demo.requests.toLocaleString()}</span></div>
+          <div className="stats-demo-cell"><span className="l">{zh ? "错误" : "Errors"}</span><span className="v">{demo.errors.toLocaleString()}</span></div>
+          <div className="stats-demo-cell"><span className="l">{zh ? "API 等价估算" : "API-equivalent"}</span><span className="v">{`$${demo.costEstimate.toFixed(2)}`}</span></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "unavailable") {
+    return (
+      <div className="stats-page">
+        <div className="stats-fallback">
+          <p className="stats-fallback-title">{zh ? "无法连接本机统计面板" : "Cannot reach the local statistics panel"}</p>
+          <p className="stats-fallback-detail">{reason}</p>
+          <div className="stats-fallback-actions">
+            <button type="button" className="btn small" onClick={() => setAttempt(n => n + 1)}>{zh ? "重试" : "Retry"}</button>
+            <button type="button" className="btn small outline" onClick={openExternal}>{zh ? "在浏览器打开" : "Open in browser"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="stats-page">
+      <div className="stats-frame">
+        <iframe
+          className="stats-frame-body"
+          src={url}
+          title={zh ? "OMP 统计面板" : "OMP statistics panel"}
+          onLoad={onFrameLoad}
+        />
+        {phase === "loading" ? (
+          <div className="stats-overlay">
+            <span className="stats-spinner" aria-hidden="true" />
+            <p className="stats-overlay-title">{zh ? "正在连接本机统计面板" : "Connecting to the local statistics panel"}</p>
+            <p className="stats-overlay-detail">
+              {zh ? "首次进入需要启动统计数据服务，通常几秒内完成。" : "The first visit starts the statistics service; this usually takes a few seconds."}
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }

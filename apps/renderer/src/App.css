@@ -75,7 +75,7 @@
   border-radius: 999px;
   background: transparent;
   color: var(--text-3);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-font-scale));
   line-height: 20px;
   cursor: pointer;
 }
@@ -101,7 +101,7 @@
   border-radius: 4px;
   background: transparent;
   color: var(--text);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--text-font-scale));
   line-height: 26px;
   white-space: nowrap;
   writing-mode: horizontal-tb;
@@ -192,7 +192,7 @@ body.is-resizing ::selection {
 }
 
 .home-h {
-  font-size: 14px;
+  font-size: calc(14px * var(--text-font-scale));
   font-weight: var(--fw-semibold);
   margin: 0 0 10px;
 }

@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 
 import {
   draftProviderYamlNode,
+  modelParameterValues,
   type ModelCatalogEntry,
   type ModelOverridePatch,
   type ModelProviderUpsertInput,
@@ -108,9 +109,8 @@ function upsertFromDraft(editor: ProviderYamlDraft): ModelProviderUpsertInput {
     models: editor.models.filter((model) => model.source === "custom").map((model) => ({
       id: model.id,
       name: model.name,
-      ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
-      ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
-      reasoning: model.reasoning,
+      ...modelParameterValues(model),
+      ...(model.parameterSources ? { parameterSources: model.parameterSources } : {}),
       image: model.image,
       tools: model.tools,
       ...(model.cost ? { cost: model.cost } : {}),
@@ -295,6 +295,12 @@ const CASES: ParityCase[] = [
 ];
 
 describe("draftProviderYamlNode parity with toYamlProvider", () => {
+  test("complete thinking configuration and raw unknown reasoning use the same YAML node", () => {
+    const full = draft({ models: [modelEntry({ id: "adaptive", parameters: { contextWindow: 200000, maxContextWindow: 1000000, thinkingConfig: { mode: "anthropic-adaptive", efforts: ["low", "high"], defaultLevel: "high", effortMap: { high: "max" }, requiresEffort: true } } }), modelEntry({ id: "unknown", parameters: {} })] });
+    const actual = toYamlProvider(upsertFromDraft(full), undefined);
+    assert.deepEqual(draftProviderYamlNode(full, undefined), actual);
+    assert.equal(Object.hasOwn((actual.models as Array<Record<string, unknown>>)[1]!, "reasoning"), false);
+  });
   for (const entry of CASES) {
     test(entry.name, () => expectParity(entry));
   }

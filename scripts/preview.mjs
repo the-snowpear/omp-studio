@@ -10,6 +10,7 @@ const root = process.cwd();
 const previewHost = "127.0.0.1";
 const previewPort = process.env.OMP_PREVIEW_PORT ?? "5173";
 const previewUrl = `http://${previewHost}:${previewPort}`;
+const previewAumid = "com.ompstudio.desktop.preview";
 // A Homebrew or nvm Node on macOS keeps npm outside dirname(node); `npm run` names the CLI it runs.
 const npmCli = process.env.OMP_NPM_CLI
   ?? (process.platform === "win32" ? undefined : process.env.npm_execpath)
@@ -110,8 +111,9 @@ async function registerWindowsPreviewShortcut() {
   if (process.platform !== "win32") return;
   const appData = process.env.APPDATA;
   if (!appData) return;
-  const shortcutPath = join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "OMP Studio.lnk");
-  const aumid = "com.ompstudio.desktop";
+  // Distinct name and AUMID: sharing the installed app's would hijack its taskbar and toast identity.
+  const shortcutPath = join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "OMP Studio (Preview).lnk");
+  const aumid = previewAumid;
   const psScript = `
 $code = @'
 using System;
@@ -333,7 +335,11 @@ async function main() {
 
   console.log(`[preview] Opening OMP Studio Desktop (${production ? "production bundle" : "dev server"})...`);
   const desktop = start(electronExecutable, [join(root, "apps", "desktop")], {
-    env: { ...process.env, ...(production ? {} : { OMP_RENDERER_DEV_URL: previewUrl }) },
+    env: {
+      ...process.env,
+      OMP_APP_USER_MODEL_ID: previewAumid,
+      ...(production ? {} : { OMP_RENDERER_DEV_URL: previewUrl }),
+    },
   });
 
   const exitCode = await new Promise((resolve, reject) => {

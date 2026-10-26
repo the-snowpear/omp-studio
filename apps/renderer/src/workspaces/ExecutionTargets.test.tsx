@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { selectOption } from "../test/selectOption";
 import { useState } from "react";
 import type { ClientBootstrap, StudioClient } from "@omp-studio/client-contract";
 import type { RemoteApi, RemoteInventory } from "../../../desktop/src/remote/shared";
@@ -99,4 +100,24 @@ it("preview target selection never connects to a real SSH host", async () => {
   render(<ExecutionTargets client={local}>{() => <PreviewModeProvider switchEnabled><ExecutionTargetPicker /></PreviewModeProvider>}</ExecutionTargets>);
   fireEvent.click(await screen.findByRole("button", { name: /此计算机/ })); fireEvent.click(screen.getByRole("menuitem", { name: /dev-linux/ }));
   expect(screen.getByRole("button", { name: /SSH · dev-linux/ })).toBeTruthy(); expect(remote.connect).not.toHaveBeenCalled(); expect(remote.select).not.toHaveBeenCalled();
+});
+
+it("keeps SSH authentication and platform pickers inside the connection dialog", async () => {
+  Object.assign(HTMLDialogElement.prototype, {
+    showModal(this: HTMLDialogElement) { this.setAttribute("open", ""); },
+    close(this: HTMLDialogElement) { this.removeAttribute("open"); },
+  });
+  const remote = api(); globalThis.ompStudioRemote = remote;
+  render(<ExecutionTargets client={local}>{() => <PreviewModeProvider switchEnabled><ExecutionTargetPicker /></PreviewModeProvider>}</ExecutionTargets>);
+  fireEvent.click(await screen.findByRole("button", { name: /此计算机/ }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "添加 SSH 连接" }));
+  const dialog = screen.getByRole("dialog", { name: "添加 SSH 连接" });
+  const auth = screen.getByRole("combobox", { name: /认证方式/ });
+  fireEvent.click(auth);
+  expect(dialog.contains(screen.getByRole("listbox"))).toBe(true);
+  selectOption(auth, "用户名和密码");
+  selectOption(screen.getByRole("combobox", { name: /远端系统/ }), "Windows");
+  expect(screen.getByRole("combobox", { name: /远端系统/ }).textContent).toContain("Windows");
+  expect(screen.getByLabelText("用户名").hasAttribute("required")).toBe(true);
+  expect(remote.save).not.toHaveBeenCalled();
 });

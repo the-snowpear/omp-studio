@@ -24,7 +24,7 @@ import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
  * context is just a transport plus a coarse availability status.
  */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, powerMonitor, powerSaveBlocker, protocol, safeStorage, session, shell, systemPreferences, Tray, type NativeImage, type WebContents } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, powerMonitor, powerSaveBlocker, protocol, safeStorage, session, shell, systemPreferences, Tray, type NativeImage, type WebContents } from "electron";
 import { registerServiceDefinitionsIpc } from "./chrome-services.js";
 import { ServiceDefinitionStore } from "./service-definitions.js";
 import { activeArtifactLibrary, activeMediaDirectory, activeProfileDirectory } from "./artifact-library.js";
@@ -35,7 +35,7 @@ import {
   applyTitleBarOverlay,
   registerTitleBarOverlayIpc,
 } from "./titlebar-overlay.js";
-import { APP_USER_MODEL_ID, resolveAppIconPath, resolveTrayIconPath } from "./app-icon.js";
+import { resolveAppIconPath, resolveAppUserModelId, resolveTrayIconPath } from "./app-icon.js";
 import { APP_MENU_COMMAND_CHANNEL, type AppMenuCommand } from "./app-menu-shared.js";
 import { registerMediaAccessIpc } from "./chrome-media-access.js";
 import { buildApplicationMenuTemplate } from "./platform/app-menu.js";
@@ -196,7 +196,7 @@ export async function main(): Promise<void> {
   const macSwap = macBundle === undefined ? undefined : macSwapMarkers(macSwapDirectory, { version: app.getVersion(), bundlePath: macBundle });
   macSwap?.started(process.pid);
   if (process.platform === "win32") {
-    app.setAppUserModelId(APP_USER_MODEL_ID);
+    app.setAppUserModelId(resolveAppUserModelId());
   }
   await app.whenReady();
   if (await offerMoveToApplications()) return;
@@ -257,7 +257,9 @@ export async function main(): Promise<void> {
       repo: "the-snowpear/omp-studio", platform: `${process.platform}-${process.arch}`, appVersion: app.getVersion(), keys: trustedKeys,
       prefs: createUpdatePrefsStore({ appDataDirectory: join(app.getPath("appData"), "omp-studio") }),
       snapshotChanged: (snapshot: UnifiedUpdateSnapshot) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send(CHROME_UPDATES_CHANNELS.changed, snapshot); },
-      isBusy: () => hostFactory.isBusy(), beforeQuit: () => hostFactory.shutdownForUpdate(),
+      isBusy: () => hostFactory.isBusy(), getRestartBlocker: () => hostFactory.updateRestartBlocker(),
+      beforeQuit: (onShutdownStarted: () => void) => hostFactory.shutdownForUpdate(onShutdownStarted),
+      fetcher: net.fetch.bind(net) as typeof fetch, log: hostFactory.log,
       restart: () => { app.relaunch({ args: relaunchArguments(process.argv) }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
     };
     if (macBundle === undefined) {
@@ -812,7 +814,7 @@ export async function main(): Promise<void> {
       isTrustedSender,
       currentVersion: layout.effectiveVersion,
     });
-    applyTitleBarOverlay(window, "light");
+    applyTitleBarOverlay(window, { theme: "light" });
     rendererWindow = window;
     // Close hides to the tray (streaming keeps running in background); the
     // real quit path releases this through `isQuitting`.

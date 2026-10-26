@@ -720,9 +720,9 @@ describe("role thinking control", () => {
     const model = { reasoning: true, thinking: ["low", "high"] };
     assert.deepEqual(roleThinkingControl(model).ids, ["off", "low", "high"]);
     assert.equal(clampRoleThinking("xhigh", model), "high");
-    assert.equal(clampRoleThinking("medium", model), "low");
+    assert.equal(clampRoleThinking("medium", model), "high");
     assert.equal(clampRoleThinking("minimal", model), "low");
-    assert.equal(clampRoleThinking("off", model), undefined);
+    assert.equal(clampRoleThinking("off", model), "off");
     assert.equal(clampRoleThinking("high", model), "high");
   });
 });

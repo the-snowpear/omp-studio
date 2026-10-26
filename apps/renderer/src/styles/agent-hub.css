@@ -240,7 +240,7 @@
   display: inline-flex; align-items: center;
   height: 18px; padding: 0 var(--sp-8);
   border-radius: var(--r-6);
-  font-size: 10.5px; font-weight: var(--fw-medium);
+  font-size: calc(10.5px * var(--text-font-scale)); font-weight: var(--fw-medium);
   background: var(--surface-2); color: var(--text-3);
 }
 
@@ -249,18 +249,18 @@
   display: inline-flex; align-items: center; gap: 3px;
   height: 18px; padding: 0 var(--sp-6);
   border-radius: var(--r-full);
-  font-size: 10.5px; font-weight: var(--fw-medium);
+  font-size: calc(10.5px * var(--text-font-scale)); font-weight: var(--fw-medium);
   background: var(--amber-soft); color: var(--amber);
 }
 .hub-ro-tag {
   display: inline-flex; align-items: center;
   height: 18px; padding: 0 var(--sp-6);
   border-radius: var(--r-full);
-  font-size: 10.5px; font-weight: var(--fw-medium);
+  font-size: calc(10.5px * var(--text-font-scale)); font-weight: var(--fw-medium);
   background: var(--surface-2); color: var(--text-3);
 }
 
-.hub-model { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); }
+.hub-model { font-family: var(--font-mono); font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-3); }
 .hub-fallback { color: var(--amber); font-weight: var(--fw-medium); }
 
 /* ============================================================
@@ -315,7 +315,7 @@
   height: 18px; padding: 0 var(--sp-6);
   border: 1px solid var(--border);
   border-radius: var(--r-6);
-  font-size: 10px; font-family: var(--font-mono);
+  font-size: calc(10px * var(--text-font-scale)); font-family: var(--font-mono);
   color: var(--text-faint); background: transparent;
 }
 
@@ -344,21 +344,21 @@
   font-family: var(--font-mono); font-size: var(--fs-18); font-weight: var(--fw-semibold);
   font-variant-numeric: tabular-nums; letter-spacing: -0.01em; color: var(--text); line-height: 1;
 }
-.hub-card .hc-tokens i { font-style: normal; font-size: 10px; color: var(--text-faint); }
+.hub-card .hc-tokens i { font-style: normal; font-size: calc(10px * var(--text-font-scale)); color: var(--text-faint); }
 .hub-card .hc-tokens .hc-spark { padding-bottom: 1px; }
 
 /* req · tools：一行安静小字（单位在左、数字在右，右对齐成一条线） */
 .hub-card .hc-pace { display: inline-flex; gap: var(--sp-12); }
 .hub-num { display: inline-flex; align-items: baseline; gap: 4px; }
-.hub-num i { font-style: normal; font-size: 10px; color: var(--text-faint); }
+.hub-num i { font-style: normal; font-size: calc(10px * var(--text-font-scale)); color: var(--text-faint); }
 .hub-num b {
-  font-family: var(--font-mono); font-size: 12px; font-weight: var(--fw-medium);
+  font-family: var(--font-mono); font-size: calc(12px * var(--text-font-scale)); font-weight: var(--fw-medium);
   font-variant-numeric: tabular-nums; color: var(--text-2); line-height: 1;
 }
 
 /* 成本：降级为最底小字 */
 .hub-card .hc-cost {
-  font-family: var(--font-mono); font-size: 11px;
+  font-family: var(--font-mono); font-size: calc(11px * var(--text-font-scale));
   font-variant-numeric: tabular-nums; color: var(--text-faint); line-height: 1;
 }
 
@@ -461,9 +461,9 @@
 }
 .hub-node .hn-foot {
   display: flex; align-items: center; gap: var(--sp-6);
-  margin-top: 4px; font-size: 10.5px; color: var(--text-faint);
+  margin-top: 4px; font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-faint);
 }
-.hub-node .hn-foot .mono { font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; }
+.hub-node .hn-foot .mono { font-family: var(--font-mono); font-size: calc(10px * var(--text-font-scale)); font-variant-numeric: tabular-nums; }
 .hub-node .hn-foot .hn-art { margin-left: auto; display: flex; gap: var(--sp-4); }
 
 /* 树状模式下的孤儿（无父/父不可见）仍用整卡，视觉上比叶子更"独立" */
@@ -665,7 +665,7 @@
   height: 16px;
   padding: 0 var(--sp-6);
   border-radius: var(--r-full);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   font-weight: var(--fw-medium);
 }
 .hub-outcome.injected { background: var(--accent-soft); color: var(--accent); }

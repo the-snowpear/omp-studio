@@ -1,3 +1,6 @@
+import { AppSelect } from "../AppSelect";
+import { FontSettings } from "./FontSettings";
+import { FONT_SETTINGS_KEYS } from "./typography";
 import { Runtime1844Rows } from "./Runtime1844Rows";
 /**
  * 设置页 7 个标签面板（Phase 1）。
@@ -95,7 +98,7 @@ function appSource<K extends keyof AppSettings>(app: AppSettings, key: K): Setti
   return app[key] === DEFAULT_APP_SETTINGS[key] ? "default" : "user";
 }
 
-function AppSelect<T extends string>({
+function AppSettingSelect<T extends string>({
   value,
   options,
   onChange,
@@ -107,11 +110,11 @@ function AppSelect<T extends string>({
   label: string;
 }) {
   return (
-    <select className="select" value={value} aria-label={label} onChange={(event) => onChange(event.target.value as T)}>
+    <AppSelect className="select" value={value} aria-label={label} onChange={(event) => onChange(event.target.value as T)}>
       {options.map(([optionValue, optionLabel]) => (
         <option key={optionValue} value={optionValue}>{optionLabel}</option>
       ))}
-    </select>
+    </AppSelect>
   );
 }
 
@@ -169,7 +172,7 @@ function FutureRows({ rows, demo }: { rows: readonly FutureRowDef[]; demo?: Runt
     <SettingRow key={row.key} label={row.label} desc={row.desc} source="unavailable" reason={row.reason}>
       {row.control.type === "select" ? (
         demo ? (
-          <select
+          <AppSelect
             className="select"
             aria-label={row.label}
             value={demo.value(row.key)}
@@ -181,7 +184,7 @@ function FutureRows({ rows, demo }: { rows: readonly FutureRowDef[]; demo?: Runt
                 <option key={optVal} value={optVal}>{optLabel}</option>
               );
             })}
-          </select>
+          </AppSelect>
         ) : (
           <StaticSelect value={row.control.value} options={row.control.options} label={row.label} title={row.reason} />
         )
@@ -336,7 +339,7 @@ function RuntimeScalarRow({
       source={runtimeSource(available)}
       {...(available ? {} : { reason: t("settings.runtime.unavailable") })}
     >
-      <select
+      <AppSelect
         className="select"
         aria-label={label}
         value={value}
@@ -344,7 +347,7 @@ function RuntimeScalarRow({
         onChange={(event) => runtime?.set?.(keyName, event.target.value as StudioRuntimeSettingValue)}
       >
         {options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}
-      </select>
+      </AppSelect>
       <RuntimePending runtime={runtime} />
     </SettingRow>
   );
@@ -415,7 +418,7 @@ function RuntimeMethodOrderRow({ runtime, demo, label, desc }: {
       source={runtimeSource(available)}
       {...(available ? {} : { reason: t("settings.runtime.unavailable") })}
     >
-      <select
+      <AppSelect
         className="select"
         aria-label={label}
         value={selected}
@@ -423,7 +426,7 @@ function RuntimeMethodOrderRow({ runtime, demo, label, desc }: {
         onChange={(event) => runtime?.set?.(keyName, event.target.value.split(",") as StudioRuntimeSettingValue)}
       >
         {displayOptions.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}
-      </select>
+      </AppSelect>
       <RuntimePending runtime={runtime} />
     </SettingRow>
   );
@@ -464,6 +467,7 @@ function RuntimeSpeculationRow({ runtime, demo, label, desc }: {
 /* ------------------------------------------------------------------ */
 
 const GENERAL_RESET_KEYS: readonly (keyof AppSettings)[] = [
+  ...FONT_SETTINGS_KEYS,
   "language", "theme", "density", "streaming", "streamingCadenceHz", "toolActivity",
   "restoreLastProject", "restoreLastSession", "startupPage",
   "rememberLayout", "perProjectLayout",
@@ -483,7 +487,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
       />
       <SettingSection title={t("settings.general.sectionApp")}>
         <SettingRow label={t("settings.general.language")} desc={t("settings.general.languageDesc")} source={appSource(app, "language")}>
-          <AppSelect
+          <AppSettingSelect
             label={t("settings.general.language")}
             value={app.language}
             options={[
@@ -495,7 +499,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
           />
         </SettingRow>
         <SettingRow label={t("settings.general.theme")} desc={t("settings.general.themeDesc")} source={appSource(app, "theme")}>
-          <AppSelect
+          <AppSettingSelect
             label={t("settings.general.theme")}
             value={app.theme}
             options={[
@@ -506,7 +510,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
           />
         </SettingRow>
         <SettingRow label={t("settings.general.density")} desc={t("settings.general.densityDesc")} source={appSource(app, "density")}>
-          <AppSelect
+          <AppSettingSelect
             label={t("settings.general.density")}
             value={app.density}
             options={[
@@ -521,7 +525,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
           <Switch checked={app.streaming} onChange={(streaming) => updateApp({ streaming })} label={t("settings.general.streaming")} />
         </SettingRow>
         <SettingRow label={t("settings.general.streamingCadence")} desc={t("settings.general.streamingCadenceDesc")} source={appSource(app, "streamingCadenceHz")}>
-          <AppSelect
+          <AppSettingSelect
             label={t("settings.general.streamingCadence")}
             value={String(app.streamingCadenceHz)}
             options={[
@@ -534,7 +538,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
           />
         </SettingRow>
         <SettingRow label={t("settings.general.toolActivity")} desc={t("settings.general.toolActivityDesc")} source={appSource(app, "toolActivity")}>
-          <AppSelect
+          <AppSettingSelect
             label={t("settings.general.toolActivity")}
             value={app.toolActivity}
             options={[
@@ -546,6 +550,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
           />
         </SettingRow>
       </SettingSection>
+      <FontSettings key={String(ctl.preview)} ctl={ctl} />
       <SettingSection title={t("settings.general.sectionStartup")}>
         <SettingRow label={t("settings.general.restoreLastProject")} desc={t("settings.general.restoreLastProjectDesc")} source={appSource(app, "restoreLastProject")}>
           <Switch checked={app.restoreLastProject} onChange={(restoreLastProject) => updateApp({ restoreLastProject })} label={t("settings.general.restoreLastProject")} />
@@ -554,7 +559,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
           <Switch checked={app.restoreLastSession} onChange={(restoreLastSession) => updateApp({ restoreLastSession })} label={t("settings.general.restoreLastSession")} />
         </SettingRow>
         <SettingRow label={t("settings.general.startupPage")} desc={t("settings.general.startupPageDesc")} source={appSource(app, "startupPage")}>
-          <AppSelect
+          <AppSettingSelect
             label={t("settings.general.startupPage")}
             value={app.startupPage}
             options={[
@@ -687,7 +692,7 @@ export function PermissionsTab({ ctl, demo }: { ctl: SettingsCtl; demo?: Runtime
           source={approvalMode === undefined ? "unavailable" : "runtime"}
           reason={t("settings.permissions.approvalModeReason")}
         >
-          <select
+          <AppSelect
             className={`select${approvalMode === "yolo" ? " danger" : ""}`}
             value={approvalMode === undefined ? "" : approvalMode}
             disabled={approvalMode === undefined}
@@ -703,7 +708,7 @@ export function PermissionsTab({ ctl, demo }: { ctl: SettingsCtl; demo?: Runtime
             <option value="always-ask-cached">Ask and remember</option>
             <option value="write">Write</option>
             <option value="yolo">Yolo</option>
-          </select>
+          </AppSelect>
         </SettingRow>
         <SettingRow
           label={t("settings.permissions.forgetApprovals")}
@@ -1142,7 +1147,7 @@ export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefin
           source={!available ? "unavailable" : (prefs?.runtimeChannel === "canary" ? "user" : "default")}
           {...(!available ? { reason: t("common.unavailable") } : {})}
         >
-          <select
+          <AppSelect
             className="select"
             value={prefs?.runtimeChannel ?? "stable"}
             disabled={disabled}
@@ -1157,7 +1162,7 @@ export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefin
           >
             <option value="stable">Stable</option>
             <option value="canary">Canary</option>
-          </select>
+          </AppSelect>
         </SettingRow>
         <SettingRow
           label={t("updates.autoDownload")}
@@ -1340,9 +1345,9 @@ function RuntimeUpgradeRows({ runtime, demo }: { runtime?: RuntimeSettingsCtl | 
       <div>
         {tiers.map(([name, tier], index) => <div key={index} className="row">
           <input className="input" aria-label={t("runtimeUpgrade.agent")} value={name} disabled={disabled} onChange={event => setTiers(rows => rows.map((row, i) => i === index ? [event.target.value, row[1]] : row))} />
-          <select className="select" aria-label={t("runtimeUpgrade.tiers")} value={tier} disabled={disabled} onChange={event => setTiers(rows => rows.map((row, i) => i === index ? [row[0], event.target.value] : row))}>
+          <AppSelect className="select" aria-label={t("runtimeUpgrade.tiers")} value={tier} disabled={disabled} onChange={event => setTiers(rows => rows.map((row, i) => i === index ? [row[0], event.target.value] : row))}>
             {["inherit","none","auto","default","flex","scale","priority","ultrafast"].map(value => <option key={value}>{value}</option>)}
-          </select>
+          </AppSelect>
           <button className="btn small" disabled={disabled} onClick={() => setTiers(rows => rows.filter((_, i) => i !== index))}>{t("common.delete")}</button>
         </div>)}
         <button className="btn small" disabled={disabled || tiers.length >= 256} onClick={() => setTiers(rows => [...rows, ["", "inherit"]])}>{t("runtimeUpgrade.add")}</button>

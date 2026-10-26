@@ -5,21 +5,36 @@
 
 :root {
   /* Typography */
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+  --font-ui-default: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   /* ui-monospace / Menlo / Monaco only resolve on macOS; Windows still lands on Consolas. */
-  --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, "SF Mono", Menlo, Monaco,
+  --font-mono-default: "JetBrains Mono", "Cascadia Code", ui-monospace, "SF Mono", Menlo, Monaco,
     Consolas, "Courier New", monospace;
+  --font-ui: var(--font-ui-default);
+  --font-mono: var(--font-mono-default);
+  --font-terminal: var(--font-mono-default);
+  --font-output: var(--font-ui-default);
+  --font-output-code: var(--font-mono-default);
+  --ui-font-scale: 1;
+  --text-font-scale: var(--ui-font-scale);
+  --output-font-scale: 1;
+  --terminal-font-size: 12px;
 
   /* Typography scale: clear hierarchy with meaningful steps.
      Removed --fs-13 (too close to 12px to be distinguishable).
      The ladder now follows ~1.17x ratio for legible hierarchy. */
-  --fs-11: 11px;   /* Smallest UI text: timestamps, metadata, helper text */
-  --fs-12: 12px;   /* Standard UI text: buttons, labels, tree items */
-  --fs-14: 14px;   /* Secondary headings, emphasized text, section labels */
-  --fs-16: 16px;   /* Body text, input fields, conversation content */
-  --fs-18: 18px;   /* Page titles, panel headings */
-  --fs-22: 22px;   /* Large headings, welcome messages */
+  --ui-fs-11: calc(11px * var(--ui-font-scale));
+  --fs-11: var(--ui-fs-11);   /* Smallest UI text: timestamps, metadata, helper text */
+  --ui-fs-12: calc(12px * var(--ui-font-scale));
+  --fs-12: var(--ui-fs-12);   /* Standard UI text: buttons, labels, tree items */
+  --ui-fs-14: calc(14px * var(--ui-font-scale));
+  --fs-14: var(--ui-fs-14);   /* Secondary headings, emphasized text, section labels */
+  --ui-fs-16: calc(16px * var(--ui-font-scale));
+  --fs-16: var(--ui-fs-16);   /* Body text, input fields, conversation content */
+  --ui-fs-18: calc(18px * var(--ui-font-scale));
+  --fs-18: var(--ui-fs-18);   /* Page titles, panel headings */
+  --ui-fs-22: calc(22px * var(--ui-font-scale));
+  --fs-22: var(--ui-fs-22);   /* Large headings, welcome messages */
 
   --fw-regular: 400;
   --fw-medium: 500;

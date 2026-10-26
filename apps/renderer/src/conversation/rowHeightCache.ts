@@ -26,7 +26,7 @@ export function rowHeightEstimate(key: string | undefined): number {
   return remembered ?? DEFAULT_ROW_ESTIMATE;
 }
 
-/** 仅供测试复位模块级缓存。 */
+/** 字体变化或测试复位时丢弃旧的布局度量。 */
 export function resetRowHeightCache(): void {
   heights.clear();
 }

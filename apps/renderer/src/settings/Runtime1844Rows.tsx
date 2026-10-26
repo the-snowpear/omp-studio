@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useEffect, useState } from "react";
 import { GUI_SETTING_DEFINITIONS, GUI_SETTING_KEYS, validateGuiSetting, type GuiSettingKey } from "@omp-studio/studio-protocol";
 import type { StudioRuntimeSettingValue } from "@omp-studio/client-contract";
@@ -10,10 +11,10 @@ export function Runtime1844Rows({ runtime }: { runtime?: RuntimeSettingsCtl | un
   const [persist, setPersist] = useState(true);
   return <SettingSection title={zh ? "运行与模型偏好" : "Runtime and model preferences"}>
     <label className="small muted">{zh ? "修改保存到 " : "Save changes to "}
-      <select className="select" value={persist ? "global" : "session"} onChange={e => setPersist(e.target.value === "global")}>
+      <AppSelect className="select" value={persist ? "global" : "session"} onChange={e => setPersist(e.target.value === "global")}>
         <option value="global">{zh ? "用户配置" : "User configuration"}</option>
         <option value="session">{zh ? "仅当前会话" : "Current session only"}</option>
-      </select>
+      </AppSelect>
     </label>
     {GUI_SETTING_KEYS.map(key => <RuntimeSetting key={key} name={key} runtime={runtime} persist={persist} />)}
     {runtime?.error ? <p role="alert">{runtime.error}</p> : null}
@@ -44,10 +45,10 @@ function RuntimeSetting({ name, runtime, persist }: { name: GuiSettingKey; runti
     reason={zh ? "当前 Runtime 未提供此设置" : "Unavailable in this Runtime"}>
     <div style={{ display: "grid", gap: 6, minWidth: 200, maxWidth: 420 }}>
       {definition.type === "boolean" ? <Switch label={label} disabled={disabled} checked={value === true} onChange={save} /> :
-        definition.type === "enum" ? <select className="select" aria-label={label} disabled={disabled} value={String(value ?? "")} onChange={e => save(e.target.value)}>
+        definition.type === "enum" ? <AppSelect className="select" aria-label={label} disabled={disabled} value={String(value ?? "")} onChange={e => save(e.target.value)}>
           {!enabled ? <option value="">—</option> : null}
           {definition.values.map(option => <option key={option} value={option} disabled={name === "spelling.autocomplete" && option === "apple" && !/Mac/i.test(navigator.platform)}>{option}</option>)}
-        </select> : <>
+        </AppSelect> : <>
           {definition.type === "thresholds" ? <textarea className="input" aria-label={label} disabled={disabled} rows={3} value={draft} onChange={e => setDraft(e.target.value)} /> :
             <input className="input" aria-label={label} disabled={disabled} type={definition.type === "number" ? "number" : "text"} min={0} value={draft} onChange={e => setDraft(e.target.value)} />}
           <button className="btn sm" disabled={disabled} onClick={() => { try { save(definition.type === "thresholds" ? JSON.parse(draft) : definition.type === "number" ? Number(draft) : draft); } catch (cause) { setError(String(cause)); } }}>{zh ? "应用" : "Apply"}</button>

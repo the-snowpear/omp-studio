@@ -215,7 +215,7 @@ describe("WebSearchPanel", () => {
     const { client, onSaved } = mount();
     fireEvent.click(screen.getAllByRole("button", { name: /设为优先/ })[0]!);
     fireEvent.click(screen.getByRole("button", { name: /高级设置/ }));
-    fireEvent.change(screen.getByDisplayValue(/实例默认/), { target: { value: "2" } });
+    selectOption(screen.getByRole("combobox", { name: /安全搜索/ }), /严格/);
     fireEvent.click(screen.getByRole("button", { name: /保存|Save/ }));
     await waitFor(() => expect(client.command).toHaveBeenCalled());
     const [commandName, input] = client.command.mock.calls[0]! as [string, Record<string, unknown>];
@@ -252,3 +252,4 @@ function credButtonInRow(rowSelector: string, text: string): HTMLElement {
   if (!button) throw new Error(`No credential button in row containing "${text}"`);
   return button;
 }
+import { selectOption } from "./test/selectOption";

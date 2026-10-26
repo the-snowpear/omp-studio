@@ -386,7 +386,7 @@ function createProductionWin32EndpointProviders(): Win32EndpointProviders {
   return {
     async currentUserSid(): Promise<string> {
       const whoami = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe");
-      const { stdout } = await execFileAsync(whoami, ["/user", "/fo", "csv", "/nh"]);
+      const { stdout } = await execFileAsync(whoami, ["/user", "/fo", "csv", "/nh"], { windowsHide: true });
       return parseWindowsUserSid(stdout);
     },
     generateEndpointAuthority: () => randomBytes(24).toString("base64url"),
@@ -419,7 +419,7 @@ function createProductionWin32EndpointProviders(): Win32EndpointProviders {
       // The reservation registry entry is the owned resource; the runtime
       // pipe itself inherits current-user protection from the spawning user.
       const icacls = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "icacls.exe");
-      await execFileAsync(icacls, [reservationPath(authority), "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`]);
+      await execFileAsync(icacls, [reservationPath(authority), "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`], { windowsHide: true });
     },
     async releaseEndpoint(authority: string): Promise<void> {
       try {
@@ -506,7 +506,16 @@ function productionManagedInstall(hostLog: HostLog): DesktopManagedInstallOption
     pendingArtifact: pendingRuntimeArtifact,
     // Packaged builds trust only the keys they ship; env overrides are for development.
     environmentTrustedKeys: !app.isPackaged,
-    activateOptions: { selfCheck: withCodeSignatureCheck(createSmokeTestRunner({ timeoutMs: 240_000 })) },
+    activateOptions: {
+      selfCheck: withCodeSignatureCheck(createSmokeTestRunner({
+        timeoutMs: 240_000,
+        onOutput: (stream, text) => {
+          for (const line of text.split(/\r?\n/u)) {
+            if (line.trim().length > 0) hostLog.write("info", `runtime.self_check.${stream}`, line);
+          }
+        },
+      })),
+    },
     ...(process.platform === "darwin"
       ? { prepareStaging: (directory: string) => clearQuarantine(directory, { warn: (detail) => hostLog.write("warn", "runtime.quarantine_clear", detail) }) }
       : {}),
@@ -521,14 +530,16 @@ function productionManagedInstall(hostLog: HostLog): DesktopManagedInstallOption
 }
 
 export interface ProductionDesktopHostFactory extends DesktopHostFactory {
+  readonly log: HostLog;
   /** Resolve an opaque workspaceId to its Host-owned canonical cwd. */
   resolveWorkspaceCwd(workspaceId: string): Promise<string>;
   /** Current active workspace cwd, used by the local PTY manager. */
   activeWorkspaceCwd(): string | undefined;
   isBusy(): boolean;
+  updateRestartBlocker(): string | undefined;
   rollbackRuntime(): Promise<void>;
   pruneRuntimes(): Promise<void>;
-  shutdownForUpdate(): Promise<void>;
+  shutdownForUpdate(onShutdownStarted: () => void): Promise<void>;
 }
 
 /**
@@ -680,6 +691,7 @@ export function createProductionHostFactory(options?: {
     ...baseOptions,
   });
   return {
+    log: hostLog,
     async create(): Promise<DesktopHostComposition> {
       await awaitLoginEnvironment();
       await options?.beforeCreate?.();
@@ -711,6 +723,9 @@ export function createProductionHostFactory(options?: {
     isBusy(): boolean {
       return activeComposition?.isBusy() ?? false;
     },
+    updateRestartBlocker(): string | undefined {
+      return activeComposition?.updateRestartBlocker?.();
+    },
     async rollbackRuntime(): Promise<void> {
       if (!activeComposition?.rollbackRuntime) throw new Error("Managed Runtime maintenance is unavailable");
       await activeComposition.rollbackRuntime();
@@ -719,9 +734,9 @@ export function createProductionHostFactory(options?: {
       if (!activeComposition?.pruneRuntimes) throw new Error("Managed Runtime maintenance is unavailable");
       await activeComposition.pruneRuntimes();
     },
-    async shutdownForUpdate(): Promise<void> {
-      if (activeComposition?.isBusy()) throw new Error("Runtime is busy");
-      await activeComposition?.prepareUpdateRestart?.();
+    async shutdownForUpdate(onShutdownStarted: () => void): Promise<void> {
+      if (activeComposition?.prepareUpdateRestart) await activeComposition.prepareUpdateRestart(onShutdownStarted);
+      else onShutdownStarted();
       await activeComposition?.shutdown();
     },
   };

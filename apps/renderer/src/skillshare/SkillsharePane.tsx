@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WorkspaceDialog } from "../workspaces/Workspace";
 import type { CommandInput, StudioClient } from "@omp-studio/client-contract";
@@ -550,7 +551,7 @@ export function SkillsharePane({
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
-            <select
+            <AppSelect
               className="select"
               aria-label={t("搜索排序", "Search order")}
               value={sort}
@@ -559,7 +560,7 @@ export function SkillsharePane({
               <option value="relevance">{t("相关性", "Relevance")}</option>
               <option value="downloads">{t("下载量", "Downloads")}</option>
               <option value="recent">{t("最近更新", "Recent")}</option>
-            </select>
+            </AppSelect>
             <button
               className="btn small"
               disabled={busy || !enabled}
@@ -664,7 +665,7 @@ export function SkillsharePane({
             </label>
             <label>
               {t("安装范围", "Install scope")}
-              <select
+              <AppSelect
                 className="select"
                 value={scope}
                 onChange={(event) =>
@@ -673,7 +674,7 @@ export function SkillsharePane({
               >
                 <option value="project">{t("当前项目", "Project")}</option>
                 <option value="user">{t("当前用户", "User")}</option>
-              </select>
+              </AppSelect>
             </label>
             <button
               className="btn small primary"
@@ -690,7 +691,7 @@ export function SkillsharePane({
       {tab === "installed" ? (
         <>
           <div className="skillshare-toolbar">
-            <select
+            <AppSelect
               className="select"
               aria-label={t("更新范围", "Update scope")}
               value={scope}
@@ -698,7 +699,7 @@ export function SkillsharePane({
             >
               <option value="project">{t("当前项目", "Project")}</option>
               <option value="user">{t("当前用户", "User")}</option>
-            </select>
+            </AppSelect>
             <button
               className="btn small"
               disabled={busy || !enabled}
@@ -791,7 +792,7 @@ export function SkillsharePane({
         <div className="skillshare-form">
           <label>
             {t("维护动作", "Maintenance action")}
-            <select
+            <AppSelect
               className="select"
               value={actionType}
               onChange={(event) =>
@@ -830,7 +831,7 @@ export function SkillsharePane({
                   }
                 </option>
               ))}
-            </select>
+            </AppSelect>
           </label>
           {["publish", "version", "import"].includes(actionType) ? (
             <label>

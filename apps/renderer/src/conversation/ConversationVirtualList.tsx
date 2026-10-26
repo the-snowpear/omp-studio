@@ -1,6 +1,8 @@
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import { memo, useCallback, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { rememberRowHeight, rowHeightEstimate } from "./rowHeightCache";
+import { TYPOGRAPHY_BEFORE_CHANGE, TYPOGRAPHY_CHANGE } from "../settings/typography";
+import { captureAnchor, restoreAnchor, type ScrollAnchor } from "./useConversationScroll";
 
 export const MAX_MOUNTED_CONVERSATION_ROWS = 120;
 export const CONVERSATION_OVERSCAN = 6;
@@ -82,6 +84,41 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
     }
     virtualizer.measureElement(el);
   }, [virtualizer]);
+  useLayoutEffect(() => {
+    const scroller = scrollerRef?.current;
+    if (!enabled || !scroller) return;
+    let anchor: ScrollAnchor | null = null;
+    let frame = 0;
+    const before = () => {
+      cancelAnimationFrame(frame);
+      anchor = null;
+      // The existing follow hook owns tail positioning. Only detached readers need an anchor.
+      if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 1) return;
+      anchor = captureAnchor(scroller);
+    };
+    const changed = () => {
+      measureMargin();
+      if (anchor) {
+        const saved = anchor;
+        // Keep offscreen estimates while reading, so clearing the measured
+        // prefix cannot evict the anchored message. Mounted rows are measured
+        // now; other rows replace their estimates when they next mount.
+        for (const row of hostRef.current?.querySelectorAll<HTMLElement>(".convo-virtual-row") ?? []) measureRow(row);
+        frame = requestAnimationFrame(() => {
+          restoreAnchor(scroller, saved);
+          // Row ResizeObserver measurements are deferred one frame by the virtualizer.
+          frame = requestAnimationFrame(() => { restoreAnchor(scroller, saved); });
+        });
+      } else virtualizer.measure();
+    };
+    window.addEventListener(TYPOGRAPHY_BEFORE_CHANGE, before);
+    window.addEventListener(TYPOGRAPHY_CHANGE, changed);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener(TYPOGRAPHY_BEFORE_CHANGE, before);
+      window.removeEventListener(TYPOGRAPHY_CHANGE, changed);
+    };
+  }, [enabled, scrollerRef, virtualizer, measureMargin, measureRow]);
   // `scrollMargin` 取决于列表上方每个兄弟（banner、notice、「加载更早」按钮）的高度。
   // 原实现无依赖、每次渲染都重测（两次 rect + 一次 scrollTop = 三次强制同步布局读）：
   // 流式期间每帧渲染 → 每秒上百次布局读 → RecalcStyle/Layout 风暴（实测 ~200 次/秒），

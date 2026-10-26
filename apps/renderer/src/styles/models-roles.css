@@ -366,7 +366,7 @@ body.is-pv-sorting * {
   font-size: var(--fs-11); color: var(--text-3);
   margin-top: 7px; display: flex; gap: var(--sp-10); flex-wrap: wrap;
 }
-.pv-sub .mono { font-size: 10.5px; }
+.pv-sub .mono { font-size: calc(10.5px * var(--text-font-scale)); }
 /* 第二行 API 地址：纯文字，不要胶囊底。workbench.css 的 .pv-url（预览
    工具条里的地址栏）带 surface-2 圆角底；这里必须逐项覆盖背景/圆角/内边
    距/高度，让地址只是与标题左对齐的一行等宽小字。字号比 10.5px 大一档。 */
@@ -542,7 +542,7 @@ body.is-pv-sorting * {
 .pm-row:last-child { border-bottom: none; }
 .pm-row.is-off { opacity: 0.6; }
 .pm-name { font-weight: var(--fw-medium); display: flex; align-items: center; gap: var(--sp-6); }
-.pm-sel { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); }
+.pm-sel { font-family: var(--font-mono); font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-3); }
 .pm-meta { display: flex; gap: var(--sp-4); flex-wrap: wrap; flex: 1; min-width: 0; }
 .pm-empty {
   padding: var(--sp-14); font-size: var(--fs-12); color: var(--text-3);
@@ -560,7 +560,7 @@ body.is-pv-sorting * {
   margin-bottom: 16px;
 }
 .mp-sec > h3 {
-  font-size: 15px; 
+  font-size: calc(15px * var(--text-font-scale));
   font-weight: var(--fw-semibold);
   margin-bottom: 4px;
   display: flex; 
@@ -569,7 +569,7 @@ body.is-pv-sorting * {
   color: var(--text);
 }
 .mp-sec > .sec-desc { 
-  font-size: 12px; 
+  font-size: calc(12px * var(--text-font-scale));
   color: var(--text-3); 
   margin-bottom: 14px;
   line-height: 1.5;
@@ -1155,35 +1155,27 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
 }
 
 .role-row .role-model-section .chip.fb { flex-shrink: 0; }
-.role-row .role-model-section select {
-  appearance: none;
-  -webkit-appearance: none;
+.role-row .role-model-section .app-select {
   height: 36px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-4);
   box-sizing: border-box;
-  padding: 0 var(--sp-18) 0 16px !important;
-  text-indent: 2px;
+  padding: 0 var(--sp-8);
   font-family: var(--font-mono);
   font-size: var(--fs-11);
   color: var(--text);
   cursor: pointer;
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%23808899' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
 }
-.role-row .role-model-section select:hover { border-color: var(--accent-border); }
-.role-row .role-model-section select:focus {
+.role-row .role-model-section .app-select:hover { border-color: var(--accent-border); }
+.role-row .role-model-section .app-select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-softer);
 }
 .role-row .role-model-section .effort-select {
-  flex: 0 0 76px;
-  padding-left: 16px !important;
-  text-indent: 5px !important;
+  flex: 0 0 92px;
   color: var(--accent);
 }
 .role-row .role-model-section .effort-select:disabled {
@@ -1795,7 +1787,7 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   border-radius: 50%;
   background: var(--accent);
   color: #fff;
-  font-size: 9px;
+  font-size: calc(9px * var(--text-font-scale));
   font-weight: var(--fw-semibold);
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -2232,7 +2224,7 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
 .wsx-pmark { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: var(--bg-inset); border: 1px solid color-mix(in srgb, var(--border) 65%, transparent); }
 .wsx-pmark .brand, .wsx-pmark img { width: 18px; height: 18px; object-fit: contain; }
 .wsx-pmark.is-globe { color: var(--text-2); }
-.wsx-pmark.is-letter { color: #fff; font-size: 12px; font-weight: var(--fw-semibold); border: 0; }
+.wsx-pmark.is-letter { color: #fff; font-size: calc(12px * var(--text-font-scale)); font-weight: var(--fw-semibold); border: 0; }
 
 /* Hero: status card with the effective-chain preview. */
 .wsx-hero { display: flex; flex-direction: column; gap: var(--sp-12); border: 1px solid var(--tint-green-border, var(--border)); border-radius: var(--r-10, 10px); background: linear-gradient(180deg, color-mix(in srgb, var(--accent-softer) 45%, var(--bg)), var(--bg) 70%); padding: var(--sp-14) var(--sp-16); }
@@ -2275,7 +2267,7 @@ body.is-wsx-sorting { cursor: grabbing; }
 .wsx-provider-main { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 1px; }
 .wsx-provider-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-12); font-weight: var(--fw-medium); }
 .wsx-provider-id { color: var(--text-3); font: 10px/1.2 var(--font-mono); }
-.wsx-cred-chip { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 76px; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: var(--fw-medium); }
+.wsx-cred-chip { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 76px; padding: 2px 8px; border-radius: 999px; font-size: calc(10px * var(--text-font-scale)); font-weight: var(--fw-medium); }
 .wsx-cred-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; }
 .wsx-cred-chip.is-ready { color: var(--green); background: var(--green-soft); }
 .wsx-cred-chip.is-ready::before { background: var(--green); }
@@ -2324,8 +2316,8 @@ body.is-wsx-sorting { cursor: grabbing; }
 .wsx-toggle-text b { font-size: var(--fs-13); font-weight: var(--fw-semibold); color: var(--text); }
 .wsx-field { display: flex; flex-direction: column; gap: var(--sp-4); }
 .wsx-field > span { color: var(--text-2); font-size: var(--fs-12); font-weight: var(--fw-medium); }
-.wsx-field input, .wsx-field select { width: 100%; height: 32px; padding: 0 var(--sp-8); border: 1px solid var(--border); border-radius: var(--r-6); background: var(--bg-inset); color: var(--text); font-size: var(--fs-12); }
-.wsx-field input:focus, .wsx-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-softer); }
+.wsx-field input, .wsx-field .app-select { width: 100%; height: 32px; padding: 0 var(--sp-8); border: 1px solid var(--border); border-radius: var(--r-6); background: var(--bg-inset); color: var(--text); font-size: var(--fs-12); }
+.wsx-field input:focus, .wsx-field .app-select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-softer); }
 .wsx-field em { font-style: normal; color: var(--text-3); font-size: var(--fs-11); line-height: 1.4; }
 
 /* Credential modal (ported to <body>; centered, slightly above mid-window). */
@@ -2367,3 +2359,18 @@ body.is-wsx-sorting { cursor: grabbing; }
   .wsx-params-grid { grid-template-columns: 1fr; }
   .wsx-exa-group { padding: var(--sp-12) 0 0; border-top: 1px solid var(--border); border-left: 0; }
 }
+/* Parameter recommendations share the existing model form. */
+.mc-parameters { min-width: 0; padding: 12px 0; border-block: 1px solid var(--border); }
+.mc-parameters-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mc-parameters .f-grid { margin-top: 12px; }
+.mc-parameters .is-recommended, .mc-parameters input::placeholder { color: var(--text-muted, #868995); }
+.mc-parameter-origin { margin-left: 6px; font-weight: 400; color: var(--text-muted, #868995); }
+.mc-parameter-origin[data-source="manual"] { color: var(--accent); }
+.mc-parameter-reset { padding: 3px 0; border: 0; background: transparent; color: var(--text-muted, #868995); font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.mc-parameter-reset:hover { color: var(--accent); }
+.mc-thinking-config { margin-top: 10px; }
+.mc-thinking-config summary { cursor: pointer; font-size: 12px; }
+.mc-thinking-efforts { display: flex; flex-wrap: wrap; gap: 12px; }
+.mc-thinking-efforts label { display: inline-flex; align-items: center; gap: 5px; font-weight: 400; }
+.mc-catalog-update { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-block: 12px; }
+.mc-thinking-adjustment { font-size: 11px; color: var(--text-muted, #868995); }

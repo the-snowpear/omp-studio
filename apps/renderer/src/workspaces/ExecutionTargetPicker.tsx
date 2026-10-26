@@ -1,4 +1,5 @@
 import "./ssh.css";
+import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../icons";
@@ -159,15 +160,15 @@ export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpe
       </div>
     </> : null}
     {displayError && !modalOpen ? <span className="execution-error" role="alert">{displayError}</span> : null}
-    {modalOpen ? createPortal(<dialog ref={dialog} className="ssh-dialog" aria-labelledby="ssh-dialog-title" onCancel={event => { event.preventDefault(); closeModal(); }}>
+    {modalOpen ? createPortal(<dialog role="dialog" ref={dialog} className="ssh-dialog" aria-labelledby="ssh-dialog-title" onCancel={event => { event.preventDefault(); closeModal(); }}>
       <div className="ssh-dialog-head"><h2 id="ssh-dialog-title">{form ? editing ? "编辑 SSH 连接" : "添加 SSH 连接" : "选择远端项目目录"}</h2><button type="button" className="icon-btn" aria-label="关闭" disabled={busy} onClick={closeModal}><Icon name="x" /></button></div>
       {form ? <form onSubmit={event => { event.preventDefault(); save(); }}>
         <label>连接名称<input autoFocus value={name} onChange={event => setName(event.target.value)} placeholder="开发服务器" maxLength={80} disabled={busy} /></label>
         <label>主机地址或 SSH 配置别名<input required value={host} onChange={event => setHost(event.target.value)} placeholder="dev-server 或 192.168.1.10" autoCapitalize="off" spellCheck={false} disabled={busy} /></label>
         <label>用户名{authMode === "agent" ? "（可留空使用 SSH 配置）" : ""}<input value={user} onChange={event => setUser(event.target.value)} required={authMode === "password"} placeholder="用户名" autoComplete="username" autoCapitalize="off" spellCheck={false} disabled={busy} /></label>
-        <label>认证方式<select value={authMode} onChange={event => setAuthMode(event.target.value as "agent" | "password")} disabled={busy}><option value="agent">系统 SSH 配置 / 密钥 / agent</option><option value="password">用户名和密码</option></select></label>
+        <label>认证方式<AppSelect value={authMode} onChange={event => setAuthMode(event.target.value as "agent" | "password")} disabled={busy}><option value="agent">系统 SSH 配置 / 密钥 / agent</option><option value="password">用户名和密码</option></AppSelect></label>
         <label>端口（留空使用 SSH 配置）<input type="number" min="1" max="65535" value={port} onChange={event => setPort(event.target.value)} placeholder="22" disabled={busy} /></label>
-        <label>远端系统<select value={platform} onChange={event => setPlatform(event.target.value as typeof platform)} disabled={busy}><option value="linux">Linux</option><option value="win32">Windows</option><option value="darwin">macOS</option></select></label>
+        <label>远端系统<AppSelect value={platform} onChange={event => setPlatform(event.target.value as typeof platform)} disabled={busy}><option value="linux">Linux</option><option value="win32">Windows</option><option value="darwin">macOS</option></AppSelect></label>
         <p className="muted small">{authMode === "password" ? "连接时会单独询问密码，只在本次连接期间保留，不保存到配置。账密模式仅支持直接密码认证，暂不支持跳板机、验证码或密码变更。" : "复用系统 SSH config、密钥和 ssh-agent。可直接填写 user@host，或单独填写用户名。"}</p>
         <p className="muted small">远端需要 Node.js 22+。首次主机信任仍需在系统 SSH 完成，不会自动接受未知主机密钥。</p>
         {preview ? <p className="muted small">演示模式只修改界面，不连接服务器。</p> : null}

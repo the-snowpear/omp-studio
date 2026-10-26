@@ -11,6 +11,7 @@
  * Host 切模式等本轮结束后再生效。
  */
 
+import { AppSelect } from "./AppSelect";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 
 import type { CommandInput, CommandName } from "@omp-studio/client-contract";
@@ -533,7 +534,7 @@ export function ComposerModePicker({
                     </span>
                   </label>
                   <div className="cmp-mode-params">
-                    <select
+                    <AppSelect
                       aria-label={t("composer.loopLimitType")}
                       value={loopKind}
                       disabled={!loopReady}
@@ -542,7 +543,7 @@ export function ComposerModePicker({
                       <option value="none">{t("composer.loopUnlimited")}</option>
                       <option value="turns">turns</option>
                       <option value="minutes">minutes</option>
-                    </select>
+                    </AppSelect>
                     {loopKind !== "none" ? (
                       <input
                         type="number"
@@ -559,11 +560,11 @@ export function ComposerModePicker({
                     ) : null}
                   </div>
                   <div className="cmp-mode-params">
-                    <select aria-label={t("composer.loopCondition")} value={local.loopConditionMode} disabled={!loopReady || loopOn} onChange={event => setLocal(current => ({ ...current, loopConditionMode: event.target.value as PreviewLayer3["loopConditionMode"] }))}>
+                    <AppSelect aria-label={t("composer.loopCondition")} value={local.loopConditionMode} disabled={!loopReady || loopOn} onChange={event => setLocal(current => ({ ...current, loopConditionMode: event.target.value as PreviewLayer3["loopConditionMode"] }))}>
                       <option value="none">{t("composer.loopNoCondition")}</option>
                       <option value="while">while</option>
                       <option value="until">until</option>
-                    </select>
+                    </AppSelect>
                   </div>
                   {local.loopConditionMode !== "none" ? (
                     <div className="cmp-mode-params">

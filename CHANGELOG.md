@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-10-26
+
+### Added
+
+- OMP 18.12.6：新增「Ask and remember」审批模式、会话级批准与记住授权、忘记审批入口、后台作业树与详情、作业 widget、MCP 授权管理、历史会话只读咨询，以及新的原生设置。[迁移说明](docs/migrations/omp-18.12.6.md)。
+- SSH 工作区开发预览：连接远端 Host 与 Runtime、浏览远端文件、使用远端终端，并支持凭据管理与连接恢复。[使用说明与限制](docs/ssh-workspaces.md)。
+- 模型参数自动推荐：结合端点元数据和内置模型目录推荐容量与思考配置，显示参数来源，保留手工覆盖，并支持主动更新目录。[配置说明](docs/model-adaptation.md)。
+- 设置 → 常规 → 字体：分别设置界面、终端和输出的字体及字号，支持搜索系统字体、自定义名称和独立恢复默认。[字体说明](docs/fonts.md)。
+- 设置 → 背景：上传图片、动图或视频作为工作台 / 整个应用背景，支持预设、图库、不透明度、遮罩、模糊、填充与焦点。文件仅保存在本机，隐藏窗口时暂停视频，尊重系统「减少动态效果」。
+
+### Changed
+
+- Runtime 从 `18.10.4-studio.8` 升至 **`18.12.6-studio.1`**；本版应用与 Runtime 更新的最低兼容应用版本为 **0.1.11**，旧版请使用完整安装包升级。
+- 统一下拉选择器与设置控件，改善明暗主题、背景透出、Computer Use 面板和各工作区布局；新对话欢迎内容垂直居中，简化快捷键提示。
+- 统计页直接内嵌原生 OMP Stats 面板，按需启动托管 Runtime 的统计服务；移除旧统计 worker 与独立 Frustration 面板。
+- 会话目录并发读取并缓存文件头，减少多个项目重复扫描的开销。
+- 发布复用来源完全一致的签名 Runtime；默认发布 Windows x64 与 ARM64，macOS Apple Silicon 保留手动可选构建。
+
+### Fixed
+
+- 修复 Windows 启动时身份查询和权限设置后台命令造成的终端短暂闪现；补充 Runtime 首装自检的标准输出与错误输出日志，便于排查启动失败（关联 #3）。持续新增 Bun 进程的完整故障尚未复现，issue 保留跟进。
+- 更新检查与下载统一使用 Electron 网络栈，支持镜像失败回退官方源、瞬时故障重试、超时与断点续传，避免失效缓存或过期 CDN 地址阻塞更新。
+- 更新重启前识别运行任务、待处理交互、计划审阅、排队消息和后台代理，说明延期原因并保留已验证下载；修复同版本残留事务、恢复与关停失败后的会话恢复。
+- 模型角色切换时按模型支持的档位映射思考配置，区分明确关闭与 Runtime 默认；修正模型获取、编辑及 YAML 预览的一致性。
+
 ## [0.1.10] - 2026-10-14
 
 ### Added
@@ -251,7 +276,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/the-snowpear/omp-studio/compare/v0.1.10...v0.1.11
+[0.1.10]: https://github.com/the-snowpear/omp-studio/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/the-snowpear/omp-studio/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/the-snowpear/omp-studio/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/the-snowpear/omp-studio/compare/v0.1.6...v0.1.7

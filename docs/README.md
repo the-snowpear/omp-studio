@@ -9,6 +9,9 @@ Public documentation for OMP Studio.
 | [getting-started.md](getting-started.md) | Run from source |
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |
 | [../doc/ssh-workspace-test-prompt.md](../doc/ssh-workspace-test-prompt.md) | SSH 与账密功能的独立测试交接提示词 |
+| [model-adaptation.md](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |
+| [fonts.md](fonts.md) | Independent interface, terminal and output font preferences |
+| [releases/v0.1.11.md](releases/v0.1.11.md) | 0.1.11 发布页文案、Windows 下载与升级说明 |
 | [releases/v0.1.10.md](releases/v0.1.10.md) | 0.1.10 发布页文案、三平台下载与升级说明 |
 | [migrations/omp-18.12.6.md](migrations/omp-18.12.6.md) | 18.10.4 → 18.12.6 版本概览、Runtime 适配与新功能 GUI 入口 |
 | [migrations/omp-18.10.4.md](migrations/omp-18.10.4.md) | 18.8.0 → 18.10.4 完整版本概览、GUI 入口与验收 |

@@ -1,6 +1,6 @@
 {
   "name": "@omp-studio/testkit",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "type": "module",
   "main": "./dist/src/index.js",
@@ -21,13 +21,13 @@
     "test:built": "node --test dist/test/*.test.js"
   },
   "dependencies": {
-    "@omp-studio/client": "0.1.10",
-    "@omp-studio/client-contract": "0.1.10",
-    "@omp-studio/host-client-api": "0.1.10",
-    "@omp-studio/studio-host": "0.1.10",
-    "@omp-studio/studio-protocol": "0.1.10",
-    "@omp-studio/transport-desktop": "0.1.10",
-    "@omp-studio/transport-web": "0.1.10"
+    "@omp-studio/client": "0.1.11",
+    "@omp-studio/client-contract": "0.1.11",
+    "@omp-studio/host-client-api": "0.1.11",
+    "@omp-studio/studio-host": "0.1.11",
+    "@omp-studio/studio-protocol": "0.1.11",
+    "@omp-studio/transport-desktop": "0.1.11",
+    "@omp-studio/transport-web": "0.1.11"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

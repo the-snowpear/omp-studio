@@ -34,6 +34,11 @@ export const RENDERER_CSP =
   "object-src 'none'; " +
   "base-uri 'self'; " +
   "form-action 'self'; " +
+  // The statistics page embeds the native `omp stats` dashboard. That server
+  // only ever binds 127.0.0.1:3847 (the adapter probes and spawns that exact
+  // endpoint), so the frame is pinned to one origin: no wildcard port, no
+  // loopback for scripts, connections, images or media.
+  "frame-src http://127.0.0.1:3847; " +
   "frame-ancestors 'none'";
 
 /** Development-only policy required by Vite's React Refresh preamble. */

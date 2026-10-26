@@ -45,6 +45,7 @@ import type { DesktopHostComposition } from "../src/types.js";
 import { createDesktopRuntimeSessionPort } from "../src/runtime-session.js";
 import { InMemorySessionLeaseStore } from "@omp-studio/studio-host";
 import { runtimeEntrypointFor } from "@omp-studio/runtime-installer";
+import { UpdateRestartBlockedError } from "../src/update-restart.js";
 
 const UPSTREAM_COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const T0 = "2026-08-12T00:00:00.000Z";
@@ -801,6 +802,94 @@ test("shutdown failure fails closed and never releases a lease it owns", async (
       assert.deepEqual(endpoint.calls, ["endpoint.create", "endpoint.release"]);
       assert.deepEqual(lock.calls, ["acquire"]);
       assert.equal(lock.released, false);
+    });
+  });
+});
+
+test("update restart rechecks commands accepted while the restore intent is being saved", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const session = fakeSessionPort({ ready: true });
+      let finishOpen!: (value: { workspaces: [] }) => void;
+      let acceptDuringPrepare = true;
+      let began = false;
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: fakeAuthorityLock().port,
+        privateEndpoint: fakePrivateEndpoint().port,
+        runtimeSession: session.port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+        facade: { workspaces: {
+          list: () => ({ workspaces: [] }),
+          open: () => new Promise(resolve => { finishOpen = resolve; }),
+          pick: async () => ({ workspaces: [] }),
+        } },
+      });
+      session.port.prepareRestart = async beforeStop => {
+        // The real port yields while persisting the restore intent.
+        await new Promise<void>(resolve => setImmediate(resolve));
+        if (acceptDuringPrepare) await composition.facade.command({
+          commandName: "workspace.open", input: { workspaceId: "ws-0001" as WorkspaceId },
+          requestId: "restart-workspace" as CommandRequestId, idempotencyKey: "restart-workspace" as IdempotencyKey,
+        });
+        await beforeStop?.();
+        await session.port.stop();
+      };
+      try {
+        await assert.rejects(() => composition.prepareUpdateRestart!(() => { began = true; }),
+          error => error instanceof UpdateRestartBlockedError && /命令/.test(error.message));
+        assert.equal(began, false);
+        assert.equal(composition.isBusy(), false);
+        assert.match(composition.updateRestartBlocker!()!, /命令/);
+        assert.deepEqual(session.calls, ["session.start"]);
+        assert.equal((await composition.facade.bootstrap()).runtime.status, "connected");
+
+        finishOpen({ workspaces: [] });
+        await new Promise<void>(resolve => setImmediate(resolve));
+        assert.equal(composition.updateRestartBlocker!(), undefined);
+        acceptDuringPrepare = false;
+        session.beforeStop(async () => {
+          assert.equal(began, true);
+          await assert.rejects(() => composition.facade.bootstrap(), error => {
+            assertClosedFacadeError(error);
+            return true;
+          });
+        });
+        await composition.prepareUpdateRestart!(() => { began = true; });
+        assert.equal(began, true);
+        assert.deepEqual(session.calls, ["session.start", "session.stop"]);
+        await assert.rejects(() => composition.facade.command({
+          commandName: "workspace.open", input: { workspaceId: "ws-0001" as WorkspaceId },
+          requestId: "after-restart" as CommandRequestId, idempotencyKey: "after-restart" as IdempotencyKey,
+        }), error => { assertClosedFacadeError(error); return true; });
+      } finally { finishOpen?.({ workspaces: [] }); await composition.shutdown(); }
+    });
+  });
+});
+
+test("update restart reports shutdown started before a later Host cleanup failure", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const session = fakeSessionPort({ ready: true });
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: fakeAuthorityLock().port,
+        privateEndpoint: fakePrivateEndpoint({ releaseError: new Error("endpoint release failed") }).port,
+        runtimeSession: session.port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+      });
+      let began = false;
+      session.port.prepareRestart = async beforeStop => {
+        await beforeStop?.();
+        assert.equal(began, true);
+        await session.port.stop();
+      };
+      await composition.prepareUpdateRestart!(() => { began = true; });
+      await assert.rejects(() => composition.shutdown(), /endpoint release failed/);
+      assert.equal(began, true);
+      assert.ok(session.calls.includes("session.stop"));
     });
   });
 });

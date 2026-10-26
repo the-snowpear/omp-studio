@@ -1,3 +1,4 @@
+import { selectOption } from "../test/selectOption";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
@@ -19,9 +20,7 @@ it("requires selection and confirmation for the optional model and keeps preview
       </PreviewModeProvider>
     </I18nProvider>,
   );
-  fireEvent.change(screen.getByRole("combobox", { name: "引擎" }), {
-    target: { value: "smollm" },
-  });
+  selectOption(screen.getByRole("combobox", { name: "引擎" }), "SmolLM2-135M");
   fireEvent.click(screen.getByRole("button", { name: "保存" }));
   expect(screen.getByRole("dialog", { name: "下载本地预测模型" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "确认并下载" }));
@@ -59,12 +58,10 @@ it("preserves the selected prediction engine when switching settings tabs", () =
     </I18nProvider>
   );
   const mounted = render(view(true));
-  fireEvent.change(screen.getByRole("combobox", { name: "引擎" }), {
-    target: { value: "smollm" },
-  });
+  selectOption(screen.getByRole("combobox", { name: "引擎" }), "SmolLM2-135M");
   mounted.rerender(view(false));
   mounted.rerender(view(true));
   expect(
-    (screen.getByRole("combobox", { name: "引擎" }) as HTMLSelectElement).value,
-  ).toBe("smollm");
+    (screen.getByRole("combobox", { name: "引擎" }) as HTMLButtonElement).textContent,
+  ).toBe("SmolLM2-135M");
 });

@@ -223,7 +223,7 @@ img.profile-edit-avatar-img { display: block; }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
+  font-size: calc(28px * var(--text-font-scale));
   font-weight: var(--fw-semibold);
   overflow: hidden;
 }
@@ -406,8 +406,8 @@ img.profile-edit-avatar-img { display: block; }
 .tk-chart { display: block; width: 100%; height: 210px; margin-top: var(--sp-24); overflow: visible; }
 .tk-chart .tk-grid { stroke: var(--border); stroke-dasharray: 3 4; stroke-width: 1; }
 .tk-chart .tk-grid.base { stroke-dasharray: none; }
-.tk-chart .tk-yt { font-family: var(--font-mono); font-size: 9px; fill: var(--text-faint); pointer-events: none; }
-.tk-chart .tk-xt { font-size: 9.5px; fill: var(--text-faint); pointer-events: none; }
+.tk-chart .tk-yt { font-family: var(--font-mono); font-size: calc(9px * var(--text-font-scale)); fill: var(--text-faint); pointer-events: none; }
+.tk-chart .tk-xt { font-size: calc(9.5px * var(--text-font-scale)); fill: var(--text-faint); pointer-events: none; }
 .tk-chart .tk-xt.in,
 .tk-chart .tk-yt.in { animation: tk-axis-in var(--dur-chart-axis) var(--ease) both; }
 .tk-chart .tk-xt.out,
@@ -685,6 +685,7 @@ img.profile-edit-avatar-img { display: block; }
    高度塌缩不会把整页弹回顶部。 */
 .page-body:has(.cap-layout),
 .page-body:has(.set-layout),
+.page-body:has(.stats-page),
 .page-body:has(.hub-page.is-chat-preview),
 .page-body:has(.hub-page.is-chat-closing) {
   display: flex;
@@ -741,7 +742,7 @@ img.profile-edit-avatar-img { display: block; }
 .cap-side button:hover { background: var(--surface-hover); }
 .cap-side button .cnt {
   margin-left: auto;
-  font-size: 10px;
+  font-size: calc(10px * var(--text-font-scale));
   color: var(--text-faint);
 }
 
@@ -946,7 +947,7 @@ img.profile-edit-avatar-img { display: block; }
 .cap-scope {
   display: inline-flex; align-items: center; gap: var(--sp-4);
   padding: 0 var(--sp-8); height: 18px;
-  font-size: 10.5px; font-weight: var(--fw-medium);
+  font-size: calc(10.5px * var(--text-font-scale)); font-weight: var(--fw-medium);
   border-radius: var(--r-full);
   white-space: nowrap;
 }
@@ -956,7 +957,7 @@ img.profile-edit-avatar-img { display: block; }
 .cap-source {
   display: block;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   color: var(--text-3);
   white-space: nowrap;
   overflow: hidden;
@@ -973,7 +974,7 @@ img.profile-edit-avatar-img { display: block; }
 .cap-step {
   display: inline-flex; align-items: center; gap: var(--sp-4);
   padding: 0 var(--sp-8); height: 18px;
-  font-size: 10.5px; font-weight: var(--fw-medium);
+  font-size: calc(10.5px * var(--text-font-scale)); font-weight: var(--fw-medium);
   border-radius: var(--r-full);
   background: var(--surface-2); color: var(--text-faint);
   white-space: nowrap;
@@ -1016,14 +1017,14 @@ img.profile-edit-avatar-img { display: block; }
 .cap-provide-head svg { width: 12px; height: 12px; color: var(--text-3); flex-shrink: 0; }
 .cap-provide-count {
   margin-left: var(--sp-2);
-  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3);
+  font-family: var(--font-mono); font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 .cap-provide-items { display: inline-flex; flex-wrap: wrap; gap: var(--sp-4); }
 .cap-provide-item {
   display: inline-flex; align-items: center;
   padding: 0 var(--sp-8); height: 18px;
-  font-size: 10.5px; font-family: var(--font-mono);
+  font-size: calc(10.5px * var(--text-font-scale)); font-family: var(--font-mono);
   /* 容器是 surface-2（浅灰），chips 用 surface（白/更深）突出边界 */
   background: var(--surface); color: var(--text-2);
   border: 1px solid var(--border); border-radius: var(--r-4);
@@ -1217,7 +1218,7 @@ img.profile-edit-avatar-img { display: block; }
 .perm-card .pm-head { display: flex; align-items: center; gap: var(--sp-8); font-weight: var(--fw-semibold); margin-bottom: var(--sp-6); }
 
 /* ---------- 诊断中心 ---------- */
-.diag-page h1 { font-size: 18px; }
+.diag-page h1 { font-size: calc(18px * var(--text-font-scale)); }
 .diag-head {
   display: flex; align-items: flex-start; gap: var(--sp-12);
   margin-bottom: var(--sp-16);
@@ -1293,3 +1294,52 @@ details.diag-advanced > summary {
 }
 details.diag-advanced > summary::-webkit-details-marker { display: none; }
 details.diag-advanced .da-body { padding: 0 var(--sp-14) var(--sp-12); }
+
+/* ---------- 统计页：整页内嵌原生面板 ----------
+   顶部标签栏以下的整块区域就是原生 `omp stats` 网页本身，不加工具条、不加外框、
+   不留内边距，避免和面板自己已有的头部（范围切换、Sync DB）重复一套控件。 */
+.page-body:has(.stats-page) {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.stats-page { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+
+.stats-frame { position: relative; flex: 1 1 auto; min-height: 0; background: var(--surface); overflow: hidden; }
+.stats-frame-body { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+
+/* 连接中 / 失败态：只在这两种情况下占用整块区域 */
+.stats-overlay {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-8);
+  background: var(--surface); text-align: center; padding: var(--sp-24);
+}
+.stats-overlay-title { font-size: var(--fs-13); font-weight: var(--fw-medium); color: var(--text); }
+.stats-overlay-detail { font-size: var(--fs-12); color: var(--text-3); max-width: 42ch; line-height: 1.6; }
+.stats-spinner {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  animation: stats-spin .8s linear infinite;
+}
+@keyframes stats-spin { to { transform: rotate(360deg); } }
+
+.stats-fallback {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-8);
+  background: var(--surface); padding: var(--sp-24); text-align: center;
+}
+.stats-fallback-title { font-size: var(--fs-14); font-weight: var(--fw-semibold); color: var(--text); }
+.stats-fallback-detail { font-size: var(--fs-12); color: var(--text-3); max-width: 46ch; line-height: 1.6; }
+.stats-fallback-actions { display: flex; gap: var(--sp-8); margin-top: var(--sp-4); }
+
+/* 预览模式：不伪造内嵌，只给演示汇总 */
+.stats-demo-note { font-size: var(--fs-12); color: var(--text-3); line-height: 1.6; padding: var(--sp-16) var(--sp-24) 0; }
+.stats-demo {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px;
+  margin: var(--sp-12) var(--sp-24) var(--sp-24);
+  background: var(--border); border: 1px solid var(--border); border-radius: var(--r-10); overflow: hidden;
+}
+.stats-demo-cell { background: var(--surface); padding: var(--sp-12) var(--sp-14); display: flex; flex-direction: column; gap: 2px; }
+.stats-demo-cell .l { font-size: var(--fs-11); color: var(--text-3); }
+.stats-demo-cell .v { font-family: var(--font-mono); font-size: var(--fs-16); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }

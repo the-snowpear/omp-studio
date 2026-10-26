@@ -1,3 +1,4 @@
+import type { ModelAdaptationInput, ModelAdaptationResult, ModelCatalogRefreshResult } from "./model-adaptation.js";
 import type { WorkbenchOperation, WorkbenchResultMap } from "@omp-studio/studio-protocol";
 import type { PredictionQuery, PredictionResult } from "@omp-studio/studio-protocol";
 import type { UpgradeOperation, UpgradeResultMap } from "@omp-studio/studio-protocol";
@@ -82,6 +83,7 @@ import type {
   SessionHistoryReadModel,
   SessionHistoryStatus,
   TokenUsageReadModel,
+  StatsDashboardReadModel,
   WorkspaceListReadModel,
   WorkspaceFileTreeReadModel,
   WorkspaceFileMutationResult,
@@ -91,7 +93,6 @@ import type {
 export type EmptyInput = Readonly<Record<string, never>>;
 
 export interface QueryInputMap {
-  "stats.read": {filter:StatsFilter;refresh?:boolean};
   "prediction.query": PredictionQuery;
   "artifacts.text.read": { readonly artifactId: string };
   "artifacts.list": import("@omp-studio/studio-protocol").ArtifactListInput;
@@ -109,6 +110,7 @@ export interface QueryInputMap {
   "session.state": EmptyInput;
   "home.get": EmptyInput;
   "models.get": EmptyInput;
+  "models.adaptation.resolve": ModelAdaptationInput;
   "skills.get": EmptyInput;
   "mcp.get": EmptyInput;
   /** Recent Host-owned probe log for one configured MCP server. */
@@ -118,6 +120,8 @@ export interface QueryInputMap {
   /** Lists one directory level. Omit path for the workspace root. */
   "workspace.fileTree": { readonly workspaceId: WorkspaceId; readonly path?: string };
   "usage.get": EmptyInput;
+  /** Native dashboard endpoint the statistics page embeds; starts it if needed. */
+  "stats.dashboard": EmptyInput;
   /** Latest page plus bounded live recovery state for a main or child conversation. */
   "conversation.open": { readonly target: ConversationTarget; readonly limit?: number };
   "session.transcript.read": { readonly cursor?: OpaqueCursor; readonly limit?: number };
@@ -155,7 +159,6 @@ export interface QueryInputMap {
 }
 
 export interface QueryResultMap {
-  "stats.read": StatsSnapshot;
   "prediction.query": PredictionResult;
   "artifacts.text.read": import("@omp-studio/studio-protocol").ArtifactTextResult;
   "artifacts.list": import("@omp-studio/studio-protocol").ArtifactPage;
@@ -172,6 +175,7 @@ export interface QueryResultMap {
   "session.state": OperatorStateSnapshot;
   "home.get": HomeReadModel;
   "models.get": ModelConfigReadModel;
+  "models.adaptation.resolve": ModelAdaptationResult;
   /** Configured OMP skills + plugins. Not Runtime CapabilityManifest. */
   "skills.get": ExtensibilityReadModel;
   /** Configured OMP MCP servers. Disk scan, not MCPManager connection state. */
@@ -185,6 +189,8 @@ export interface QueryResultMap {
   "workspace.fileTree": WorkspaceFileTreeReadModel;
   /** Homepage token heatmap / curve. Aggregates from omp stats.db only. */
   "usage.get": TokenUsageReadModel;
+  /** Loopback URL of the native statistics dashboard, for in-app embedding. */
+  "stats.dashboard": StatsDashboardReadModel;
   "conversation.open": ConversationOpenResult;
   /** Active-branch transcript page. Protocol public shape; never `unknown[]`. */
   "session.transcript.read": ConversationTranscriptPage;
@@ -577,6 +583,7 @@ interface CoreCommandInputMap {
   "models.provider.probe": ModelProviderProbeInput;
   /** Force `omp models refresh` so runtime discovery rewrites `models.db`. */
   "models.discovery.refresh": EmptyInput;
+  "models.catalog.refresh": EmptyInput;
   /** Persist the quick model-switch rotation order into config.yml. */
   "models.cycleOrder.set": { readonly order: ReadonlyArray<string> };
   /** Targeted web-search config write (web_search.* / providers.webSearch* / searxng.* / exa.*). */
@@ -669,7 +676,6 @@ interface CoreCommandInputMap {
   "agents.definition.configure": AgentDefinitionConfigureInput;
   /** Open the native `omp stats` dashboard in the default browser. */
   "usage.openDashboard": EmptyInput;
-  "stats.frustration": FrustrationInput;
   /** Execute one strictly typed Host-owned Git operation. */
   "git.execute": GitExecuteInput;
   /** Execute one strictly typed GitHub CLI operation. */
@@ -715,6 +721,7 @@ interface CoreCommandResultMap {
   "models.provider.test": ModelProviderTestResult;
   "models.provider.probe": ModelDiscoveryResult;
   "models.discovery.refresh": ConfigWriteResult;
+  "models.catalog.refresh": ModelCatalogRefreshResult;
   "models.cycleOrder.set": ConfigWriteResult;
   "models.webSearch.set": ConfigWriteResult;
   "models.webSearch.credential.set": ConfigWriteResult;
@@ -735,7 +742,6 @@ interface CoreCommandResultMap {
   "agents.definition.delete": ConfigWriteResult;
   "agents.definition.configure": ConfigWriteResult;
   "usage.openDashboard": ConfigWriteResult;
-  "stats.frustration": FrustrationResult;
   "git.execute": GitOperationResult;
   "github.execute": GitHubOperationResult;
 }
@@ -883,4 +889,3 @@ export interface ClientCommandAccepted<TName extends CommandName = CommandName> 
   readonly status: "accepted";
   readonly acceptedAt: string;
 }
-import type { StatsFilter, StatsSnapshot, FrustrationInput, FrustrationResult } from "@omp-studio/studio-protocol";

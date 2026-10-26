@@ -1,3 +1,6 @@
+import { createModelCatalogService, createModelOriginStore } from "./model-adaptation.js";
+import { modelParameterValues, parseModelThinkingConfig, providerModelYamlNode, providerOverrideYamlNode } from "@omp-studio/client-contract";
+import type { ModelParameterValues, ModelParameterSources } from "@omp-studio/client-contract";
 import { migrateModelRoleConfig } from "./model-role-migration.js";
 import { readWebRouting, writeWebRouting } from "./web-routing.js";
 /**
@@ -254,6 +257,7 @@ export interface OmpModelsAdapterOptions {
   readonly fetch?: typeof globalThis.fetch;
   /** Agent config directory; defaults to `~/.omp/agent` (test injection). */
   readonly agentDir?: string;
+  readonly catalogCachePath?: string;
   /** Active workspace cwd for project-scoped role writes. */
   readonly getCwd?: () => string | undefined;
   /** Auth sqlite path; defaults to `{agentDir}/agent.db`. */
@@ -712,7 +716,6 @@ function parseThinking(selector: string): { primary: string; thinking?: string }
   if (!level || !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(level)) {
     return { primary: selector };
   }
-  if (level === "off") return { primary: match[1] ?? selector };
   return { primary: match[1] ?? selector, thinking: level };
 }
 
@@ -766,6 +769,7 @@ export function availableFromCacheModel(
   const compat = model.compat !== null && typeof model.compat === "object" ? model.compat as Record<string, unknown> : undefined;
   const image = Array.isArray(input) && input.includes("image") && compat?.stripImageInput !== true;
   const thinking = parseCacheThinkingEfforts(model.thinking);
+  const thinkingConfig = parseModelThinkingConfig(model.thinking);
   const contextWindow = cacheNumber(model.contextWindow);
   const maxTokens = cacheNumber(model.maxTokens);
   const cost = cacheCost(model.cost);
@@ -785,6 +789,7 @@ export function availableFromCacheModel(
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
     ...(thinking.length > 0 ? { thinking } : {}),
+    ...(thinkingConfig ? { thinkingConfig } : {}),
     ...(cost ? { cost } : {}),
     ...(pricing ? { pricing } : {}),
     ...(maxContextWindow === undefined ? {} : { maxContextWindow }),
@@ -812,6 +817,7 @@ export function catalogEntryFromAvailable(model: AvailableModelRecord): ModelCat
     ...(model.maxContextWindow === undefined ? {} : { maxContextWindow: model.maxContextWindow }),
     ...(model.api === undefined ? {} : { api: model.api }),
     ...(model.thinking && model.thinking.length > 0 ? { thinking: model.thinking } : {}),
+    ...(model.thinkingConfig === undefined ? {} : { thinkingConfig: model.thinkingConfig }),
   };
 }
 
@@ -834,6 +840,7 @@ export function availableFromCatalogEntry(providerId: string, model: ModelCatalo
     ...(model.maxContextWindow === undefined ? {} : { maxContextWindow: model.maxContextWindow }),
     ...(model.api === undefined ? {} : { api: model.api }),
     ...(model.thinking && model.thinking.length > 0 ? { thinking: model.thinking } : {}),
+    ...(model.thinkingConfig === undefined ? {} : { thinkingConfig: model.thinkingConfig }),
   };
 }
 
@@ -850,27 +857,6 @@ function costOf(value: YamlValue | undefined): ModelCostMeta | undefined {
     ...(output === undefined ? {} : { output }),
     ...(cacheRead === undefined ? {} : { cacheRead }),
     ...(cacheWrite === undefined ? {} : { cacheWrite }),
-  };
-}
-
-function costToYaml(cost: ModelCostMeta | undefined, complete: boolean): Record<string, YamlValue> | undefined {
-  if (!cost) return undefined;
-  if (cost.input === undefined && cost.output === undefined && cost.cacheRead === undefined && cost.cacheWrite === undefined) {
-    return undefined;
-  }
-  if (complete) {
-    return {
-      input: cost.input ?? 0,
-      output: cost.output ?? 0,
-      cacheRead: cost.cacheRead ?? 0,
-      cacheWrite: cost.cacheWrite ?? 0,
-    };
-  }
-  return {
-    ...(cost.input === undefined ? {} : { input: cost.input }),
-    ...(cost.output === undefined ? {} : { output: cost.output }),
-    ...(cost.cacheRead === undefined ? {} : { cacheRead: cost.cacheRead }),
-    ...(cost.cacheWrite === undefined ? {} : { cacheWrite: cost.cacheWrite }),
   };
 }
 
@@ -908,68 +894,20 @@ function extrasFromYaml(entry: Record<string, YamlValue>): {
   };
 }
 
-function writeRemoteCompaction(rc: ModelProviderRemoteCompaction | undefined): Record<string, YamlValue> | undefined {
-  if (!rc) return undefined;
-  const row: Record<string, YamlValue> = {};
-  if (rc.enabled !== undefined) row.enabled = rc.enabled;
-  if (rc.endpoint) row.endpoint = rc.endpoint;
-  if (rc.model) row.model = rc.model;
-  return Object.keys(row).length > 0 ? row : undefined;
+function writeOverrideRow(override: ModelOverridePatch, previous?: Record<string, YamlValue>): Record<string, YamlValue> | undefined {
+  const row = providerOverrideYamlNode(override, previous) as Record<string, YamlValue>;
+  return Object.keys(row).length ? row : undefined;
 }
 
-function writeThinking(
-  efforts: ReadonlyArray<string> | undefined,
-  mode: string = "effort",
-  prevThinking?: Record<string, YamlValue>,
-): Record<string, YamlValue> | undefined {
-  const parsed = parseModelThinkingEfforts(efforts);
-  if (parsed.length === 0) return undefined;
-  const out: Record<string, YamlValue> = {
-    mode,
-    efforts: [...parsed],
+function parametersFromYaml(row: Record<string, YamlValue>): ModelParameterValues {
+  const thinkingConfig = parseModelThinkingConfig(row.thinking);
+  return {
+    ...(numberOf(row.contextWindow) === undefined ? {} : { contextWindow: numberOf(row.contextWindow)! }),
+    ...(numberOf(row.maxContextWindow) === undefined ? {} : { maxContextWindow: numberOf(row.maxContextWindow)! }),
+    ...(numberOf(row.maxTokens) === undefined ? {} : { maxTokens: numberOf(row.maxTokens)! }),
+    ...(typeof row.reasoning === "boolean" ? { reasoning: row.reasoning } : {}),
+    ...(thinkingConfig ? { thinkingConfig } : {}),
   };
-  if (prevThinking?.defaultLevel !== undefined) out.defaultLevel = prevThinking.defaultLevel;
-  if (prevThinking?.effortMap !== undefined) out.effortMap = prevThinking.effortMap;
-  if (prevThinking?.supportsDisplay !== undefined) out.supportsDisplay = prevThinking.supportsDisplay;
-  return out;
-}
-
-/** Preserve native compatibility flags that the Studio form does not own. */
-function writeBedrockCompat(row:Record<string,YamlValue>, previous:Record<string,YamlValue>|undefined, enabled:boolean|undefined):void {
-  const compat={...asRecord(previous?.compat)};
-  if(enabled===undefined)delete compat.bedrockMessagesApi;
-  else compat.bedrockMessagesApi=enabled;
-  if(Object.keys(compat).length)row.compat=compat;
-}
-
-function writeOverrideRow(
-  override: ModelOverridePatch,
-  prevOverride?: Record<string, YamlValue>,
-): Record<string, YamlValue> | undefined {
-  const row: Record<string, YamlValue> = {};
-  writeBedrockCompat(row, prevOverride, override.bedrockMessagesApi);
-  if (override.name !== undefined) row.name = override.name;
-  if (override.contextWindow !== undefined) row.contextWindow = override.contextWindow;
-  if (override.maxTokens !== undefined) row.maxTokens = override.maxTokens;
-  if (override.reasoning !== undefined) row.reasoning = override.reasoning;
-  if (override.tools !== undefined) row.supportsTools = override.tools;
-  if (override.image === true) row.input = ["text", "image"];
-  else if (override.image === false) row.input = ["text"];
-  const cost = costToYaml(override.cost, false);
-  if (cost) row.cost = cost;
-  if (override.omitMaxOutputTokens !== undefined) row.omitMaxOutputTokens = override.omitMaxOutputTokens;
-  if (override.premiumMultiplier !== undefined) row.premiumMultiplier = override.premiumMultiplier;
-  if (override.imageCountBudget !== undefined) row.imageCountBudget = override.imageCountBudget;
-  if (override.headers && Object.keys(override.headers).length > 0) row.headers = { ...override.headers };
-  if (override.contextPromotionTarget) row.contextPromotionTarget = override.contextPromotionTarget;
-  if (override.compactionModel) row.compactionModel = override.compactionModel;
-  const rc = writeRemoteCompaction(override.remoteCompaction);
-  if (rc) row.remoteCompaction = rc;
-  const prevThinking = asRecord(prevOverride?.thinking);
-  const prevMode = stringOf(prevThinking?.mode);
-  const thinking = writeThinking(override.thinking, prevMode ?? "effort", prevThinking);
-  if (thinking) row.thinking = thinking;
-  return Object.keys(row).length > 0 ? row : undefined;
 }
 
 function yamlModels(id: string, models: Array<Record<string, YamlValue>> | undefined): ModelCatalogEntry[] {
@@ -984,8 +922,10 @@ function yamlModels(id: string, models: Array<Record<string, YamlValue>> | undef
     const cost = costOf(model.cost);
     const extras = extrasFromYaml(model);
     const thinking = parseModelThinkingEfforts(model.thinking);
+    const parameters = parametersFromYaml(model);
     return [{
       ...executionMetadata(model),
+      ...parameters, parameters,
       id: modelId,
       name: stringOf(model.name) ?? modelId,
       selector: `${id}/${modelId}`,
@@ -1030,7 +970,9 @@ function yamlModelOverrides(raw: YamlValue | undefined): ModelProviderRecord["mo
     const image = Array.isArray(input) ? input.includes("image") : undefined;
     const extras = extrasFromYaml(entry);
     const thinking = parseModelThinkingEfforts(entry.thinking);
+    const parameters = parametersFromYaml(entry);
     const patch: OverrideEntry = {
+      ...parameters,
       ...(name === undefined ? {} : { name }),
       ...(contextWindow === undefined ? {} : { contextWindow }),
       ...(maxTokens === undefined ? {} : { maxTokens }),
@@ -1065,6 +1007,8 @@ function applyOverrideToCatalog(
     ...(override.name === undefined ? {} : { name: override.name }),
     ...(override.contextWindow === undefined ? {} : { contextWindow: override.contextWindow }),
     ...(override.maxTokens === undefined ? {} : { maxTokens: override.maxTokens }),
+    ...(override.maxContextWindow === undefined ? {} : { maxContextWindow: override.maxContextWindow }),
+    ...(override.thinkingConfig === undefined ? {} : { thinkingConfig: override.thinkingConfig }),
     ...(override.reasoning === undefined ? {} : { reasoning: override.reasoning }),
     ...(override.tools === undefined ? {} : { tools: override.tools }),
     ...(override.image === undefined ? {} : { image: override.image }),
@@ -1315,34 +1259,8 @@ export function toYamlProvider(input: ModelProviderUpsertInput, previous: Record
   if (input.models) {
     const prevModelsList = Array.isArray(previous?.models) ? previous.models : undefined;
     next.models = input.models.map((model) => {
-      const row: Record<string, YamlValue> = { id: model.id };
-      if (model.name) row.name = model.name;
-      if (model.kind) row.kind = model.kind;
-      if (model.webSearch) row.webSearch = model.webSearch;
-      if (model.api) row.api = mapApi(model.api);
-      if (model.baseUrl) row.baseUrl = model.baseUrl;
-      if (model.contextWindow) row.contextWindow = model.contextWindow;
-      if (model.maxTokens) row.maxTokens = model.maxTokens;
-      if (model.reasoning !== undefined) row.reasoning = model.reasoning;
-      if (model.image) row.input = ["text", "image"];
-      if (model.tools === false) row.supportsTools = false;
-      const cost = costToYaml(model.cost, true);
-      if (cost) row.cost = cost;
-      if (model.omitMaxOutputTokens) row.omitMaxOutputTokens = true;
-      if (model.premiumMultiplier !== undefined) row.premiumMultiplier = model.premiumMultiplier;
-      if (model.imageCountBudget !== undefined) row.imageCountBudget = model.imageCountBudget;
-      if (model.headers && Object.keys(model.headers).length > 0) row.headers = { ...model.headers };
-      if (model.contextPromotionTarget) row.contextPromotionTarget = model.contextPromotionTarget;
-      if (model.compactionModel) row.compactionModel = model.compactionModel;
-      const rc = writeRemoteCompaction(model.remoteCompaction);
-      if (rc) row.remoteCompaction = rc;
       const prevModel = prevModelsList?.find((item): item is Record<string, YamlValue> => Boolean(item) && typeof item === "object" && !Array.isArray(item) && (item as Record<string, YamlValue>).id === model.id);
-      writeBedrockCompat(row, prevModel, model.bedrockMessagesApi);
-      const prevThinking = asRecord(prevModel?.thinking);
-      const prevMode = stringOf(prevThinking?.mode);
-      const thinking = writeThinking(model.thinking, prevMode ?? "effort", prevThinking);
-      if (thinking) row.thinking = thinking;
-      return row;
+      return providerModelYamlNode(model, prevModel) as Record<string, YamlValue>;
     });
   }
   if (input.modelOverrides !== undefined) {
@@ -1683,6 +1601,10 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
   const locateOmp = options.locateOmp ?? defaultLocateOmp;
   const openUrl = options.openUrl;
   const doFetch = options.fetch ?? globalThis.fetch;
+  const agentDirectory = options.agentDir ?? defaultAgentDir();
+  const catalog = createModelCatalogService({ cachePath: options.catalogCachePath ?? join(agentDirectory, "studio-model-catalog.v1.json"), fetch: doFetch });
+  const origins = createModelOriginStore(agentDirectory);
+
 
   async function resolvePaths(): Promise<{ agentDir: string; modelsPath: string; configPath: string } | undefined> {
     const agentDir = options.agentDir ?? defaultAgentDir();
@@ -2193,6 +2115,25 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     return new Set([...BUILTIN_ROLES.map((role) => role.id), ...Object.keys(tags)]);
   }
 
+  async function saveProviderOrigins(input: ModelProviderUpsertInput, written: Record<string, YamlValue>): Promise<boolean> {
+      const records: Record<string, { values: ModelParameterValues; sources: ModelParameterSources }> = {};
+      const savedSources = await origins.reader();
+      for (const row of (written.models as Array<Record<string, YamlValue>> | undefined) ?? []) {
+        const id = String(row.id);
+        const values = parametersFromYaml(row);
+        records[id] = { values, sources: input.models?.find(model => model.id === id)?.parameterSources ?? savedSources(input.id, id, values) };
+      }
+      for (const [id, raw] of Object.entries(asRecord(written.modelOverrides) ?? {})) {
+        const row = asRecord(raw);
+        if (!row) continue;
+        const values = parametersFromYaml(row);
+        records[id] = { values, sources: input.modelOverrides?.[id]?.parameterSources ?? savedSources(input.id, id, values) };
+      }
+      try { await origins.save(input.id, records); }
+      catch { return false; }
+      return true;
+  }
+
   return {
     async get(): Promise<ModelConfigReadModel> {
       const paths = await resolvePaths();
@@ -2297,6 +2238,16 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           ...(issue ? { issue } : {}),
         };
       });
+      const savedSources = await origins.reader();
+      for (const provider of providers) {
+        for (const model of provider.models) {
+          if (model.source !== "custom") continue;
+          Object.assign(model, { parameterSources: savedSources(provider.id, model.id, model.parameters ?? modelParameterValues(model)) });
+        }
+        for (const [id, override] of Object.entries(provider.modelOverrides ?? {})) {
+          Object.assign(override, { parameterSources: savedSources(provider.id, id, modelParameterValues(override)) });
+        }
+      }
       const generatedConfigYml = [
         `modelRoleStorage: ${storage}`,
         `modelRoles:`,
@@ -2308,6 +2259,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       return {
         providers,
         presets: PRESET_GROUPS,
+        catalog: await catalog.status(),
         roles,
         cycleOrder: cycleOrder.length > 0 ? cycleOrder : ["smol", "default", "slow"],
         availableModels: mergedAvailable,
@@ -2346,6 +2298,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       };
     },
 
+    resolveAdaptation: (input) => catalog.resolve(input),
+    refreshCatalog: () => catalog.refresh(),
+
     async upsertProvider(input: ModelProviderUpsertInput): Promise<ConfigWriteResult> {
       const paths = await resolvePaths();
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
@@ -2357,6 +2312,8 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       if (typeof input.enabled === "boolean") {
         await applyProviderEnabled(paths.configPath, input.id, input.enabled);
       }
+      const sourcesSaved = await saveProviderOrigins(input, asRecord(providers[input.id])!);
+      if (!sourcesSaved) return { ...WRITE_OK, contentHash, message: "配置已保存，但来源记录未保存；重新打开时将显示为手工配置" };
       return { ...WRITE_OK, contentHash };
     },
 
@@ -2389,7 +2346,8 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         root.providers = providers;
       }
       const contentHash = await writeModelsFile(paths.modelsPath, root, input.expectedHash);
-      return { ...WRITE_OK, contentHash, message: "已写入 models.yml" };
+      const sourcesSaved = !input.overlay || await saveProviderOrigins(input.overlay, asRecord(asRecord(root.providers)?.[input.overlay.id])!);
+      return { ...WRITE_OK, contentHash, message: sourcesSaved ? "已写入 models.yml" : "配置已保存，但来源记录未保存；重新打开时将显示为手工配置" };
     },
 
     async deleteProvider(input): Promise<ConfigWriteResult> {

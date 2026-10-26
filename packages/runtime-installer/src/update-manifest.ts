@@ -97,14 +97,17 @@ export function verifyUpdateManifest(value: unknown, keys: Readonly<Record<strin
 }
 
 export type UpdatePhase = "idle" | "checking" | "downloading" | "verifying" | "ready" | "applying" | "failed" | "cancelled";
+export type UpdateErrorStage = "check" | "prepare" | "apply" | "recovery";
 export interface ComponentUpdateState {
   component: UpdateComponent; currentVersion?: string | undefined; version?: string | undefined;
   phase: UpdatePhase; method?: DownloadMethod | undefined;
   receivedBytes?: number | undefined; totalBytes?: number | undefined; message?: string | undefined;
+  errorStage?: UpdateErrorStage | undefined;
 }
 export interface UnifiedUpdateSnapshot {
   schema: 2; checking: boolean; app: ComponentUpdateState; runtime: ComponentUpdateState;
   rollbackAppVersion?: string | undefined;
   rollbackAppPending?: boolean | undefined;
   error?: string | undefined; releaseNotesUrl?: string | undefined;
+  errorStage?: UpdateErrorStage | undefined;
 }

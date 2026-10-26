@@ -148,4 +148,106 @@ describe("createOmpUsageService", () => {
     assert.deepEqual(opened, ["http://127.0.0.1:3847/"]);
     assert.equal(JSON.stringify(result).includes("C:\\\\tools"), false);
   });
+
+  test("dashboard reuses a live panel without spawning, and deep-links the all range", async () => {
+    const spawned: string[] = [];
+    let probes = 0;
+    const service = createOmpUsageService({
+      locateOmp: async () => "C:\tools\omp.exe",
+      spawnDashboard: exe => {
+        spawned.push(exe);
+      },
+      probeDashboard: async () => {
+        probes += 1;
+        return true;
+      },
+      now: () => NOW,
+    });
+    const result = await service.dashboard?.();
+    assert.equal(result?.available, true);
+    assert.equal(result?.url, "http://127.0.0.1:3847/#/overview?range=all");
+    assert.equal(probes, 1);
+    assert.deepEqual(spawned, [], "a live panel is reused, never respawned");
+    assert.equal(JSON.stringify(result).includes("C:\\tools"), false, "no filesystem path leaks into the read model");
+  });
+
+  test("dashboard starts one panel for concurrent callers and caches the endpoint", async () => {
+    const spawned: string[] = [];
+    let live = false;
+    const service = createOmpUsageService({
+      locateOmp: async () => "C:\tools\omp.exe",
+      spawnDashboard: exe => {
+        spawned.push(exe);
+        live = true;
+      },
+      probeDashboard: async () => live,
+      delay: async () => undefined,
+      now: (() => {
+        let t = NOW;
+        return () => (t += 10);
+      })(),
+      dashboardStartTimeoutMs: 5_000,
+    });
+    const [a, b] = await Promise.all([service.dashboard?.(), service.dashboard?.()]);
+    assert.equal(a?.available, true);
+    assert.equal(b?.available, true);
+    assert.deepEqual(spawned, ["C:\tools\omp.exe"], "two mounts must not race two servers onto one port");
+    const cached = await service.dashboard?.();
+    assert.equal(cached?.url, "http://127.0.0.1:3847/#/overview?range=all");
+    assert.equal(spawned.length, 1, "a resolved endpoint is reused");
+  });
+
+  test("dashboard reports an honest reason when no Runtime can be located", async () => {
+    const service = createOmpUsageService({
+      locateOmp: async () => undefined,
+      probeDashboard: async () => false,
+      now: () => NOW,
+    });
+    const result = await service.dashboard?.();
+    assert.equal(result?.available, false);
+    assert.equal(result?.url, undefined);
+    assert.match(result?.reason ?? "", /未找到 OMP Runtime/);
+  });
+
+  test("dashboard gives up after the startup deadline instead of hanging the page", async () => {
+    let clock = NOW;
+    const service = createOmpUsageService({
+      locateOmp: async () => "C:\tools\omp.exe",
+      spawnDashboard: () => undefined,
+      probeDashboard: async () => false,
+      delay: async () => {
+        clock += 1_000;
+      },
+      now: () => clock,
+      dashboardStartTimeoutMs: 3_000,
+    });
+    const result = await service.dashboard?.();
+    assert.equal(result?.available, false);
+    assert.match(result?.reason ?? "", /未在预期时间内就绪/);
+  });
+
+  test("dashboard stops claiming a running panel once the process is gone", async () => {
+    let live = true;
+    const spawned: string[] = [];
+    const service = createOmpUsageService({
+      locateOmp: async () => "C:\tools\omp.exe",
+      spawnDashboard: exe => {
+        spawned.push(exe);
+      },
+      probeDashboard: async () => live,
+      delay: async () => undefined,
+      now: (() => {
+        let t = NOW;
+        return () => (t += 10);
+      })(),
+      dashboardStartTimeoutMs: 1_000,
+    });
+    const first = await service.dashboard?.();
+    assert.equal(first?.available, true);
+    live = false;
+    const second = await service.dashboard?.();
+    assert.equal(second?.available, false, "a cached URL must not report a dead panel as running");
+    assert.match(second?.reason ?? "", /未在预期时间内就绪/);
+    assert.equal(spawned.length, 1, "the first call reused a live panel; only the retry spawns");
+  });
 });

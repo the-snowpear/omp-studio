@@ -25,7 +25,7 @@
   gap: 8px;
   margin-top: 10px;
 }
-.session-recovery-actions select {
+.session-recovery-actions .app-select {
   min-width: 0;
   max-width: 100%;
   flex: 1 1 200px;

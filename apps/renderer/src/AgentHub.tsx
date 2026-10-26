@@ -1,3 +1,4 @@
+import { AppSelect } from "./AppSelect";
 import { AgentModelDetails } from "./models/AgentModelDetails";
 import { PREVIEW_AGENT_DEFINITIONS } from "./preview/agentSpawnPreview";
 import { ModelDelegationList } from "./ModelDelegationList";
@@ -3125,7 +3126,7 @@ export function AgentHubPage({
                         <label className="tiny muted" htmlFor="naRole">
                           {zh ? "代理定义" : "Agent definition"}
                         </label>
-                        <select
+                        <AppSelect
                           className="select"
                           id="naRole"
                           value={spawnDefinition}
@@ -3162,13 +3163,13 @@ export function AgentHubPage({
                               </option>
                             ))
                           )}
-                        </select>
+                        </AppSelect>
                       </div>
                       <div className="field">
                         <label className="tiny muted" htmlFor="naEffort">
                           {zh ? "本次思考强度" : "Thinking effort for this run"}
                         </label>
-                        <select
+                        <AppSelect
                           className="select"
                           id="naEffort"
                           value={spawnEffort}
@@ -3183,7 +3184,7 @@ export function AgentHubPage({
                           <option value="lo">{zh ? "轻量" : "Low"}</option>
                           <option value="med">{zh ? "标准" : "Medium"}</option>
                           <option value="hi">{zh ? "深入" : "High"}</option>
-                        </select>
+                        </AppSelect>
                       </div>
                     </div>
                     <div className="agent-spawn-config" role="status">

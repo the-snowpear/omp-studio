@@ -31,6 +31,7 @@ import "./styles/sidebar.css";
 import "./styles/workbench.css";
 import "./styles/pages.css";
 import "./App.css";
+import "./styles/typography.css";
 
 const SESSION = "perf-session" as SessionId;
 const TURN = "perf-turn";

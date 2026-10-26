@@ -1,9 +1,11 @@
+import { selectOption } from "./test/selectOption";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeSettingsReadModel } from "@omp-studio/client-contract";
 import { I18nProvider } from "./i18n";
 import { PreviewModeProvider } from "./preview/PreviewContext";
+import { BackgroundProvider } from "./background/BackgroundProvider";
 import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
 import { SettingsPage, type RuntimeSettingsApi } from "./SettingsPage";
 
@@ -38,10 +40,12 @@ function renderSettings(options: { preview?: boolean; runtimeSettings?: RuntimeS
   return render(
     <PreviewModeProvider switchEnabled>
       <I18nProvider forcedLanguage="zh">
-        <SettingsPage
-          onSetApprovalMode={vi.fn()}
-          {...(options.runtimeSettings === undefined ? {} : { runtimeSettings: options.runtimeSettings })}
-        />
+        <BackgroundProvider preview={options.preview === true} theme="light">
+          <SettingsPage
+            onSetApprovalMode={vi.fn()}
+            {...(options.runtimeSettings === undefined ? {} : { runtimeSettings: options.runtimeSettings })}
+          />
+        </BackgroundProvider>
       </I18nProvider>
     </PreviewModeProvider>,
   );
@@ -84,14 +88,14 @@ describe("Runtime settings seam", () => {
     expect((screen.getByRole("switch", { name: "自动修复编辑" }) as HTMLButtonElement).disabled).toBe(true);
 
     openTab("任务与执行");
-    expect((screen.getByRole("combobox", { name: "意外停止检测" }) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "意外停止检测" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("textbox", { name: "判断模型" }) as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByRole("combobox", { name: "Claude 重置券" }) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Claude 重置券" }) as HTMLButtonElement).disabled).toBe(true);
 
     openTab("上下文与记忆");
     expect((screen.getByRole("switch", { name: "扩展上下文" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("switch", { name: "异步压缩" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("combobox", { name: "压缩方法顺序" }) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "压缩方法顺序" }) as HTMLButtonElement).disabled).toBe(true);
 
     openTab("高级");
     expect(screen.queryByRole("combobox", { name: "Codex code mode" })).toBeNull();
@@ -106,9 +110,9 @@ describe("Runtime settings seam", () => {
     await waitFor(() => expect(onSet).toHaveBeenCalledTimes(1));
 
     openTab("任务与执行");
-    fireEvent.change(screen.getByRole("combobox", { name: "意外停止检测" }), { target: { value: "mechanical" } });
+    selectOption(screen.getByRole("combobox", { name: "意外停止检测" }), "机械检测");
     await waitFor(() => expect(onSet).toHaveBeenCalledTimes(2));
-    fireEvent.change(screen.getByRole("combobox", { name: "意外停止模型" }), { target: { value: "online" } });
+    selectOption(screen.getByRole("combobox", { name: "意外停止模型" }), "在线模型");
     await waitFor(() => expect(onSet).toHaveBeenCalledTimes(3));
 
     openTab("上下文与记忆");
@@ -120,7 +124,7 @@ describe("Runtime settings seam", () => {
     await waitFor(() => expect(onSet).toHaveBeenCalledTimes(4));
     fireEvent.click(asyncCompaction);
     await waitFor(() => expect(onSet).toHaveBeenCalledTimes(5));
-    fireEvent.change(screen.getByRole("combobox", { name: "压缩方法顺序" }), { target: { value: "snapcompact,remote,handoff,shake,soft" } });
+    selectOption(screen.getByRole("combobox", { name: "压缩方法顺序" }), "Snapcompact → Remote → Handoff → Shake → Soft");
     await waitFor(() => expect(onSet).toHaveBeenCalledTimes(6));
     expect(screen.getByText("运行中")).toBeTruthy();
 
@@ -155,15 +159,15 @@ describe("Runtime settings seam", () => {
     expect((screen.getByRole("switch", { name: "自动修复编辑" }) as HTMLButtonElement).getAttribute("aria-checked")).toBe("false");
 
     openTab("任务与执行");
-    expect((screen.getByRole("combobox", { name: "意外停止检测" }) as HTMLSelectElement).value).toBe("mechanical");
+    expect((screen.getByRole("combobox", { name: "意外停止检测" }) as HTMLButtonElement).textContent).toBe("机械检测");
     expect(screen.queryByRole("combobox", { name: "意外停止模型" })).toBeNull();
-    expect((screen.getByRole("combobox", { name: "Claude 重置券" }) as HTMLSelectElement).value).toBe("unset");
+    expect((screen.getByRole("combobox", { name: "Claude 重置券" }) as HTMLButtonElement).textContent).toBe("首次使用前询问");
     expect((screen.getByRole("spinbutton", { name: "MCP 启动等待（毫秒）" }) as HTMLInputElement).value).toBe("250");
 
     openTab("上下文与记忆");
     expect((screen.getByRole("switch", { name: "扩展上下文" }) as HTMLButtonElement).getAttribute("aria-checked")).toBe("true");
     expect((screen.getByRole("switch", { name: "异步压缩" }) as HTMLButtonElement).getAttribute("aria-checked")).toBe("true");
-    expect((screen.getByRole("combobox", { name: "压缩方法顺序" }) as HTMLSelectElement).value).toBe("remote,snapcompact,handoff,shake,soft");
+    expect((screen.getByRole("combobox", { name: "压缩方法顺序" }) as HTMLButtonElement).textContent).toBe("Remote → Snapcompact → Handoff → Shake → Soft");
 
     openTab("高级");
     expect(screen.queryByRole("combobox", { name: "Codex code mode" })).toBeNull();

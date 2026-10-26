@@ -1,3 +1,4 @@
+import { selectOption } from "./test/selectOption";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
@@ -75,9 +76,7 @@ it("routes a transcription shortcut to voice and releases the Live surface when 
 it("releases library media when hidden while keeping the selected artifact and filter", () => {
   open();
   fireEvent.click(screen.getByRole("tab", { name: "产物库" }));
-  fireEvent.change(screen.getByRole("combobox", { name: "文件类型" }), {
-    target: { value: "audio" },
-  });
+  selectOption(screen.getByRole("combobox", { name: "文件类型" }), "音频");
   fireEvent.click(screen.getByRole("button", { name: /review-notes.wav/ }));
   expect(document.querySelector(".media-inspector audio")).not.toBeNull();
   fireEvent.click(screen.getByRole("tab", { name: "生成" }));
@@ -85,7 +84,7 @@ it("releases library media when hidden while keeping the selected artifact and f
   fireEvent.click(screen.getByRole("tab", { name: "产物库" }));
   expect(document.querySelector(".media-inspector audio")).not.toBeNull();
   expect(
-    (screen.getByRole("combobox", { name: "文件类型" }) as HTMLSelectElement)
-      .value,
-  ).toBe("audio");
+    (screen.getByRole("combobox", { name: "文件类型" }) as HTMLButtonElement)
+      .textContent,
+  ).toBe("音频");
 });

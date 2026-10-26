@@ -144,9 +144,9 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     reportPerformanceSample(sample: MemorySample): Promise<boolean> {
       return ipcRenderer.invoke(CHROME_PERFORMANCE_CHANNEL, sample) as Promise<boolean>;
     },
-    setTheme(theme: "light" | "dark"): Promise<void> {
+    setTheme(theme: "light" | "dark", tint?: { color: string; symbolColor: string }): Promise<void> {
       if (theme !== "light" && theme !== "dark") return Promise.resolve();
-      return ipcRenderer.invoke(TITLEBAR_OVERLAY_CHANNEL, { theme }) as Promise<void>;
+      return ipcRenderer.invoke(TITLEBAR_OVERLAY_CHANNEL, tint === undefined ? { theme } : { theme, tint }) as Promise<void>;
     },
     notify(payload: { title: string; body?: string }): Promise<void> {
       return ipcRenderer.invoke(CHROME_NOTIFY_CHANNEL, payload) as Promise<void>;

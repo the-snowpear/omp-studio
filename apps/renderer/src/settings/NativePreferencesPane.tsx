@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import "../models/sessionOptions.css";
 import { useEffect, useRef, useState } from "react";
 import type {
@@ -381,7 +382,7 @@ export function NativePreferencesPane({
       <div className="session-options-row">
         <label>
           {zh ? "保存范围" : "Save scope"}{" "}
-          <select
+          <AppSelect
             className="select"
             value={scope}
             onChange={(event) =>
@@ -394,7 +395,7 @@ export function NativePreferencesPane({
             <option value="global">
               {zh ? "原生全局设置" : "Native global settings"}
             </option>
-          </select>
+          </AppSelect>
         </label>
       </div>
       {error ? (
@@ -442,7 +443,7 @@ export function NativePreferencesPane({
                       disabled={busy}
                     />
                   ) : row.type === "enum" ? (
-                    <select
+                    <AppSelect
                       className="select"
                       aria-label={label(row)}
                       value={JSON.stringify(drafts[row.key] ?? row.value)}
@@ -463,7 +464,7 @@ export function NativePreferencesPane({
                           {choice(value)}
                         </option>
                       ))}
-                    </select>
+                    </AppSelect>
                   ) : (
                     <input
                       className="input"

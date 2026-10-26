@@ -1,6 +1,7 @@
 import { ExecutionTargets, useExecutionTarget, useTargetMemory } from "./workspaces/ExecutionTargets";
 import { RemoteScopeNotice } from "./workspaces/RemoteScopeNotice";
 import { ExecutionTargetPicker } from "./workspaces/ExecutionTargetPicker";
+import { AppSelect } from "./AppSelect";
 import { PlanExecutionPicker, useNativePlanReview } from "./deck/PlanExecutionPicker";
 import { WorktreeLaunchGate, SessionWorktreesPane } from "./workspaces/SessionWorktreesPane";
 import { useSessionTitles } from "./history/useSessionTitles";
@@ -18,6 +19,7 @@ import { WorkbenchHealth } from "./WorkbenchHealth";
 import { conversationViewLeases } from "./conversation/conversationViews";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { applyTypography } from "./settings/typography";
 import type { CSSProperties, FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
 import type {
@@ -173,6 +175,8 @@ import { useUserMessageTreeConfirm } from "./conversation/UserMessageTreeConfirm
 import { getDefaultThumbStore } from "./conversation/userMessageThumbs";
 import { claimTransientToast, isTransientStatusNotice, transientStatusFamily } from "./conversation/transientStatusNotice";
 import { PreviewModeProvider, usePreviewMode } from "./preview/PreviewContext";
+import { BackgroundProvider } from "./background/BackgroundProvider";
+import { AppBackgroundLayer } from "./background/AppBackgroundLayer";
 import {
   getAppSettings,
   readLastRoute,
@@ -1097,10 +1101,10 @@ function GenericCommandForm({ manifest, busy, enabled, onInvoke }: { manifest: O
     <div className="generic-command">
       <div className="panel-head"><div><h2>Command form</h2><p className="muted">Manifest-driven operator entry; capability and Host validate the mutation.</p></div></div>
       <div className="actions">
-        <select className="select" value={selected} onChange={(event) => setSelected(event.target.value)}>
+        <AppSelect className="select" value={selected} onChange={(event) => setSelected(event.target.value)}>
           <option value="">Select command</option>
           {manifest.commands.filter((entry) => entry.presentation === "generic-form" && entry.availability === "available").map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
-        </select>
+        </AppSelect>
         <input className="input" value={args} onChange={(event) => setArgs(event.target.value)} aria-label="Command arguments JSON" placeholder="{}" />
         <button className="btn primary" disabled={!command || !enabled || busy} onClick={() => { try { onInvoke(command!.id, JSON.parse(args)); } catch { /* malformed JSON stays local */ } }}>Invoke</button>
       </div>
@@ -1110,7 +1114,8 @@ function GenericCommandForm({ manifest, busy, enabled, onInvoke }: { manifest: O
 
 function VirtualEventTranscript({ events }: { events: readonly ShellEventLogEntry[] }) {
   const [scrollTop, setScrollTop] = useState(0);
-  const rowHeight = 32;
+  const { settings } = useAppSettings();
+  const rowHeight = Math.max(32, Math.ceil(32 * settings.outputFontSize / 14));
   const viewportHeight = 224;
   const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 3);
   const visible = events.slice(start, start + Math.ceil(viewportHeight / rowHeight) + 6);
@@ -1119,7 +1124,7 @@ function VirtualEventTranscript({ events }: { events: readonly ShellEventLogEntr
       <div style={{ height: events.length * rowHeight, position: "relative" }}>
         {visible.map((event, index) => {
           const actual = start + index;
-          return <div className="event-row" key={`${event.cursor}-${event.kind}`} style={{ transform: `translateY(${actual * rowHeight}px)` }}><span className="mono event-cursor">{event.cursor}</span><span>{event.kind}</span><span className="muted">{event.occurredAt}</span></div>;
+          return <div className="event-row" key={`${event.cursor}-${event.kind}`} style={{ height: rowHeight, transform: `translateY(${actual * rowHeight}px)` }}><span className="mono event-cursor">{event.cursor}</span><span>{event.kind}</span><span className="muted">{event.occurredAt}</span></div>;
         })}
       </div>
     </div>
@@ -1167,6 +1172,8 @@ type ShellChrome = {
   expandedProjects: ReadonlySet<string>;
   /** Real-mode active history, keyed by opaque workspace id. */
   projectHistories: ProjectHistoryCache;
+  /** Real mode: the project list is still being fetched. */
+  projectsLoading: boolean;
   /** Renderer-only rows for fresh sessions with a draft or accepted prompt. */
   provisionalThreads: ReadonlyArray<ProvisionalProjectThread>;
   /** Current blank-history workbench, used only for active-row styling. */
@@ -2236,7 +2243,6 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         </button>
       </div>
       <div className="sb-actions">
-        <button className="action-row" aria-label={t("nav.statistics")} onClick={()=>onRoute("statistics")}><Icon name="pulse"/><span className="lbl">{t("nav.statistics")}</span></button>
         <button className="action-row new-convo-btn" aria-label={t("nav.newChat")} onClick={() => chrome.onStartNewChat()}>
           <Icon name="plus" />
           <span className="lbl">{t("nav.newChat")}</span>
@@ -2556,14 +2562,20 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                           <span className="lm-count">{`+${total - entries.length}`}</span>
                         </button>
                       ) : null}
-                      {historyState?.status === "loading" && !total ? <div className="empty" style={{ padding: "16px 8px" }}><p className="muted small">{t("common.loading")}</p></div> : null}
+                      {(historyState === undefined || historyState.status === "loading") && !total ? <div className="empty" style={{ padding: "16px 8px" }}><p className="muted small">{t("common.loading")}</p></div> : null}
                       {historyState?.status === "error" && !total ? <div className="empty" style={{ padding: "16px 8px" }}><p className="muted small">{historyState.error ?? t("history.catalogUnavailable")}</p></div> : null}
-                      {historyState?.status !== "loading" && historyState?.status !== "error" && !total ? <div className="empty" style={{ padding: "16px 8px" }}><p className="muted small">{t("home.noRecentSessions")}</p></div> : null}
+                      {historyState !== undefined && historyState.status === "ready" && !total ? <div className="empty" style={{ padding: "16px 8px" }}><p className="muted small">{t("home.noRecentSessions")}</p></div> : null}
                     </>);
                   })() : null}
                 </div>
               );
             })
+          ) : chrome.projectsLoading ? (
+            <div className="project">
+              <div className="empty" style={{ padding: "16px 8px" }}>
+                <p className="muted small">{t("common.loading")}</p>
+              </div>
+            </div>
           ) : (
             <div className="project">
               <div className="empty" style={{ padding: "16px 8px" }}>
@@ -3213,7 +3225,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
       <button className="icon-btn" data-tip={t("nav.history")} aria-label={t("nav.history")} onClick={() => onRoute("history")}><Icon name="history" /></button>
       <div className="tb-right">
         <div className="telemetry">
-          <AnnotationButton />
+          <AnnotationButton iconOnly />
           <AnchoredPop
             id="tokens"
             openId={openMenu}
@@ -3289,21 +3301,19 @@ function useComposerCollisionCollapse() {
     const hasPressure = () => {
       bar.dataset.measuring = "true";
       const modes = bar.querySelector<HTMLElement>(".cmp-mode-cluster");
-      // Menus and flyouts are absolutely positioned descendants and may enlarge
-      // bar.scrollWidth while open. Only the in-flow capsule cluster represents
-      // real pressure against the model picker.
-      const pressured = modes !== null && modes.scrollWidth > modes.clientWidth + 1;
+      // Measure in-flow controls, not scrollWidth: open menus extend beyond the
+      // bar, and the mode cluster can be absent even when the send button spills.
+      const right = bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight);
+      const pressured = Array.from(bar.children).some((child) => child.getBoundingClientRect().right > right + 1)
+        || (modes !== null && modes.scrollWidth > modes.clientWidth + 1);
       delete bar.dataset.measuring;
       return pressured;
     };
     const measure = () => {
       frame = undefined;
-      // Menus and flyouts are absolutely positioned descendants and may enlarge
-      // bar.scrollWidth while open. Only the in-flow capsule cluster represents
-      // real pressure against the model picker.
       // Resetting collapse to "full" then back reflows the bar. Do not do that
-      // while a composer menu is open: capsule toggles would make the popup jump.
-      if (bar.querySelector("[aria-expanded='true']")) return;
+      // while a menu is open unless resizing has pushed controls out of bounds.
+      if (bar.querySelector("[aria-expanded='true']") && !hasPressure()) return;
       // 无变化不写：本 hook 自己观察着这个 bar（ResizeObserver），无条件改写
       // data-collapse 会触发布局变化又把观察者唤醒，形成 rAF 级自持循环。
       const setCollapse = (value: string) => {
@@ -3311,7 +3321,7 @@ function useComposerCollisionCollapse() {
       };
       setCollapse("full");
       if (!hasPressure()) return;
-      setCollapse("model");
+      setCollapse("compact");
       if (!hasPressure()) return;
       setCollapse("modes");
     };
@@ -5565,16 +5575,20 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
                 )}
               </span>
               <ExecutionTargetPicker onOpen={() => { setContextProjectMenuOpen(false); setContextBranchMenuOpen(false); }} otherMenuOpen={contextProjectMenuOpen || contextBranchMenuOpen} />
-              <span className="spacer" />
               {branchNotice ? (
                 <span className={`ctx-item ctx-notice-${branchNotice.tone}`} role="status">
                   <Icon name={branchNotice.tone === "ok" ? "check" : "alert"} extra="sm" />
                   <span>{branchNotice.text}</span>
                 </span>
               ) : null}
-              <span
-                className="ctx-item muted"
+              <button
+                type="button"
+                className="ctx-item ctx-git-summary muted"
                 data-tip={t("git.uncommitted")}
+                aria-label={t("shell.uncommittedChanges")}
+                aria-controls="sidePanel"
+                aria-expanded={sideOpen && sideTab === "git"}
+                onClick={onOpenGit}
               >
                 <Icon name="commit" extra="sm" />
                 {preview ? (
@@ -5588,7 +5602,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
                 ) : (
                   <span>—</span>
                 )}
-              </span>
+              </button>
             </div> : <div className="ctx-strip execution-persistent"><ExecutionTargetPicker /></div>}
             {createProjectOpen ? (
               <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (!createProjectBusy) setCreateProjectOpen(false); }}>
@@ -6285,8 +6299,10 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
   );
 }
 
-function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, onNewThread, onWorkspacesChange, onHistoryChange }: {
+function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, onNewThread, projectsLoading, onWorkspacesChange, onHistoryChange }: {
   state: ViewState;
+  /** projects.list has not answered yet: the sidebar shows loading, not "no projects". */
+  projectsLoading: boolean;
   client: ClientStateSource;
   onRoute: (route: Route) => void;
   selectedHistoryId: string | null;
@@ -6396,6 +6412,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [previewDeckWait, setPreviewDeckWait] = useState<ThreadWaitKind | undefined>("plan");
   const { settings: appSettings, update: updateAppSettings } = useAppSettings();
   const theme = appSettings.theme;
+  useLayoutEffect(() => { applyTypography(appSettings); }, [appSettings.uiFontFamily, appSettings.uiFontSize, appSettings.terminalFontFamily, appSettings.terminalFontSize, appSettings.outputFontFamily, appSettings.outputFontSize]);
   const [sidebarWidth, setSidebarWidth] = useState(272);
   const [splitRatio, setSplitRatio] = useState(0.46);
   const [sideOpen, setSideOpen] = useState(() => previewOn());
@@ -6711,7 +6728,6 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     document.documentElement.style.setProperty("--sidebar-w", `${sidebarWidth}px`);
     document.documentElement.style.setProperty("--panel-w", `${panelWidth}px`);
     document.documentElement.style.setProperty("--bottom-panel-h", `${bottomHeight}px`);
-    void globalThis.ompStudioChrome?.setTheme(appSettings.theme);
   }, [appSettings.theme, appSettings.density, sidebarWidth, panelWidth, bottomHeight]);
 
   /* 布局记忆（App 级，非 Host）：按 scope（全局 / project:<id>）恢复与
@@ -8254,6 +8270,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     projectListExpanded,
     expandedProjects,
     projectHistories: projectHistoryCache,
+    projectsLoading,
     provisionalThreads: Object.values(provisionalThreadsBySession),
     ...(selectedHistoryId === null && activeComposerOwner !== undefined
       ? { activeProvisionalSessionId: activeComposerOwner as SessionId }
@@ -8426,7 +8443,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   };
   return (
     <AnnotationsProvider client={client} workspaceId={hubWorkspaceId} sessionId={viewedSessionId} runtimeSessionId={snapshot?.sessionId} onInsert={insertPreparedPrompt}>
+    <BackgroundProvider key={previewMode.preview ? "background-preview" : "background-real"} preview={previewMode.preview} theme={theme}>
     <div className="app" id="appRoot">
+      <AppBackgroundLayer route={state.route} theme={theme} />
       <a className="skip-link" href="#convoScroll">跳到对话内容</a>
       <Titlebar
         canBack={trailAt > 0}
@@ -8864,7 +8883,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           update={effectiveUpdate}
           preview={previewMode.preview}
           isDownloading={!previewMode.preview && appUpdate.state.downloading}
+          isApplying={!previewMode.preview && appUpdate.state.applying}
+          checkError={previewMode.preview ? null : appUpdate.state.checkError}
           downloadError={previewMode.preview ? null : appUpdate.state.downloadError}
+          applyError={previewMode.preview ? null : appUpdate.state.applyError}
+          applyNotice={previewMode.preview ? null : appUpdate.state.applyNotice}
+          cancelError={previewMode.preview ? null : appUpdate.state.cancelError}
           receivedBytes={previewMode.preview ? undefined : appUpdate.state.receivedBytes}
           totalBytes={previewMode.preview ? undefined : appUpdate.state.totalBytes}
           readyToApply={!previewMode.preview && appUpdate.state.readyToApply === true}
@@ -8876,6 +8900,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         />
       ) : null}
     </div>
+    </BackgroundProvider>
     </AnnotationsProvider>
   );
 }
@@ -8889,6 +8914,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
   const client = inputClient as ClientStateSource;
   const executionTarget = useExecutionTarget();
   const [initialModelCommitted, setInitialModelCommitted] = useState(false);
+  const [projectsSettled, setProjectsSettled] = useState(false);
   const [state, dispatch] = useReducer(reduce, { loading: true, model: {}, events: [], route: "workbench" });
   const [route, setRoute] = useTargetMemory<Route>("route", initialRouteFromSettings);
   const [selectedHistoryId, setSelectedHistoryId] = useTargetMemory<string | null>("selected-history", () => null);
@@ -8909,11 +8935,18 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
     });
     const load = async () => {
       setInitialModelCommitted(false);
+      setProjectsSettled(false);
       try {
         const bootstrap = await client.bootstrap();
         if (cancelled) return;
         const clientState = client.getState?.();
         dispatch({ type: "ready", bootstrap, ...(clientState ? { clientState } : {}) });
+        // The sidebar only needs the project list; commit it as soon as it
+        // lands instead of waiting for the slowest query (the history scan).
+        void client.query("projects.list", {}).then(
+          (workspaces) => { if (!cancelled) dispatch({ type: "model", model: { workspaces } }); },
+          () => undefined,
+        ).finally(() => { if (!cancelled) setProjectsSettled(true); });
         const results = await Promise.allSettled([
           queryWithTimeout(() => client.query("environment.get", {})),
           client.query("capabilities.get", {}),
@@ -8921,10 +8954,9 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
           client.query("diagnostics.get", {}),
           client.query("history.list", { limit: 20, status: "active" }),
           client.query("home.get", {}),
-          client.query("projects.list", {}),
         ]);
         if (cancelled) return;
-        const [environment, capabilities, commandManifest, diagnostics, history, home, workspaces] = results;
+        const [environment, capabilities, commandManifest, diagnostics, history, home] = results;
         dispatch({ type: "model", model: {
           ...(environment.status === "fulfilled" ? { environment: environment.value } : {}),
           ...(capabilities.status === "fulfilled" ? { capabilities: capabilities.value } : {}),
@@ -8932,11 +8964,13 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
           ...(diagnostics.status === "fulfilled" ? { diagnostics: diagnostics.value } : {}),
           ...(history.status === "fulfilled" ? { history: history.value } : {}),
           ...(home.status === "fulfilled" ? { home: home.value } : {}),
-          ...(workspaces.status === "fulfilled" ? { workspaces: workspaces.value } : {}),
         } });
         setInitialModelCommitted(true);
       } catch (error) {
-        if (!cancelled) dispatch({ type: "ready", bootstrap: unavailableBootstrap(), hostError: asError(error) });
+        if (!cancelled) {
+          dispatch({ type: "ready", bootstrap: unavailableBootstrap(), hostError: asError(error) });
+          setProjectsSettled(true);
+        }
       }
     };
     void load();
@@ -9013,6 +9047,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
       selectedHistoryId={selectedHistoryId}
       onSelectThread={(entry) => { setSelectedHistoryId(entry.historyId); setRoute("workbench"); }}
       onNewThread={() => setSelectedHistoryId(null)}
+        projectsLoading={!projectsSettled}
         onWorkspacesChange={(workspaces) => dispatch({ type: "model", model: { workspaces } })}
         onHistoryChange={(history) => dispatch({ type: "model", model: { history } })}
     />

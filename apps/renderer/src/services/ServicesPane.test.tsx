@@ -24,7 +24,7 @@ it("preview creates and controls demo services without calling Host or desktop s
   fireEvent.click(screen.getByRole("button", { name: "新建服务" }));
   fireEvent.change(screen.getByLabelText("名称"), { target: { value: "demo-task" } });
   fireEvent.change(screen.getByLabelText("命令"), { target: { value: "npm run dev" } });
-  expect((screen.getByLabelText("生命周期") as HTMLSelectElement).value).toBe("session");
+  expect(screen.getByLabelText("生命周期").textContent).toBe("会话内（默认）");
   fireEvent.click(screen.getByRole("button", { name: "仅保存配置" }));
   await screen.findByText("demo-task");
   expect(client.command).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled();

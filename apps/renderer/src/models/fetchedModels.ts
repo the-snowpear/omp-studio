@@ -1,11 +1,11 @@
+import { MODEL_PARAMETER_FIELDS, mergeModelParameters, modelParameterValues, type ModelAdaptationCandidate, type ModelAdaptationResult, type ModelParameterValues, type ModelParameterSources } from "@omp-studio/client-contract";
 /**
  * Candidate list for the provider editor's "auto-fetch models" button.
  *
  * Pure display/merge logic over what `models.provider.probe` returned, the
- * draft's existing model rows, and the local `models.db` catalog. Nothing here
- * talks to the Host, and nothing invents metadata: a field the endpoint did not
- * report and the local catalog does not know stays absent so OMP's own bundled
- * catalog and defaults (128k / 16k) keep filling the gap at load time.
+ * draft's existing model rows, and typed adaptation results. Unknown metadata
+ * stays absent. In particular, a same-id row from another provider's runtime
+ * cache is never used as an arbitrary source of gateway thinking controls.
  */
 
 import type {
@@ -15,6 +15,9 @@ import type {
 } from "@omp-studio/client-contract";
 
 export type FetchedModelCandidate = {
+  readonly parameters?: ModelParameterValues;
+  readonly parameterSources?: ModelParameterSources;
+  readonly adaptation?: ModelAdaptationResult;
   readonly kind?: import("@omp-studio/client-contract").ModelKind;
   readonly webSearch?: string;
   readonly id: string;
@@ -34,44 +37,48 @@ export type FetchedModelCandidate = {
 /**
  * Merge probe output with the draft's models and the local catalog.
  *
- * Endpoint-reported values win; the local `models.db` record for the same model
- * id fills the rest; anything still unknown is left off. `picked` defaults to
+ * Endpoint-reported values win; a confirmed compatible catalog match fills
+ * the rest; anything still unknown is left off. `picked` defaults to
  * every new model and leaves existing ones out.
  */
 export function toCandidates(
   fetched: ReadonlyArray<ModelDiscoveryModel>,
   draftModels: ReadonlyArray<ModelCatalogEntry>,
-  available: ReadonlyArray<AvailableModelRecord>,
+  _available: ReadonlyArray<AvailableModelRecord>,
+  adaptations: ReadonlyMap<string, ModelAdaptationResult> = new Map(),
 ): FetchedModelCandidate[] {
   const existingIds = new Set(draftModels.map((model) => model.id));
-  const catalog = new Map<string, AvailableModelRecord>();
-  for (const model of available) {
-    if (!catalog.has(model.id)) catalog.set(model.id, model);
-  }
   const out: FetchedModelCandidate[] = [];
   const seen = new Set<string>();
   for (const model of fetched) {
     const id = model.id.trim();
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    const known = catalog.get(id);
+    const adaptation = adaptations.get(id);
+    const known = adaptation?.values;
     const contextWindow = model.contextWindow ?? known?.contextWindow;
     const maxTokens = model.maxTokens ?? known?.maxTokens;
     const reasoning = model.reasoning ?? known?.reasoning;
-    const image = model.image ?? known?.image;
-    const kind = model.kind ?? known?.kind;
-    const webSearch = model.webSearch ?? known?.webSearch;
-    const thinking = known?.thinking && known.thinking.length > 0 ? known.thinking : undefined;
+    const image = model.image;
+    const kind = model.kind;
+    const webSearch = model.webSearch;
+    const thinking = known?.thinkingConfig?.efforts;
     const enriched = known !== undefined && (
       (model.contextWindow === undefined && contextWindow !== undefined)
       || (model.maxTokens === undefined && maxTokens !== undefined)
       || (model.reasoning === undefined && reasoning !== undefined)
-      || (model.image === undefined && image !== undefined)
       || thinking !== undefined
     );
+    const parameters: ModelParameterValues = known ?? {
+      ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+      ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
+      ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
+    };
+    const parameterSources = adaptation?.sources ?? Object.fromEntries(Object.keys(parameters).map(field => [field, { source: "endpoint" as const }]));
     const existing = existingIds.has(id);
     out.push({
-      id,
+      id, parameters, parameterSources,
+      ...(adaptation ? { adaptation } : {}),
       name: model.name.trim() || id,
       existing,
       picked: !existing,
@@ -126,6 +133,9 @@ export function candidatesToEntries(
     selector: `${providerId}/${item.id}`,
     ...(item.contextWindow === undefined ? {} : { contextWindow: item.contextWindow }),
     ...(item.maxTokens === undefined ? {} : { maxTokens: item.maxTokens }),
+    ...(item.parameters ?? {}),
+    ...(item.parameters ? { parameters: item.parameters } : {}),
+    ...(item.parameterSources ? { parameterSources: item.parameterSources } : {}),
     image: item.image === true,
     reasoning: item.reasoning === true,
     tools: true,
@@ -148,5 +158,22 @@ export function mergeImportedModels(
 ): ModelCatalogEntry[] {
   const importedIds = new Set(imported.map((model) => model.id));
   const kept = current.filter((model) => !(model.source === "custom" && importedIds.has(model.id)));
-  return [...kept, ...imported];
+  return [...kept, ...imported.map(model => {
+    const previous = current.find(row => row.id === model.id && row.source === "custom");
+    if (!previous) return model;
+    const prior = modelParameterValues(previous);
+    const manualFields = MODEL_PARAMETER_FIELDS.filter(field => prior[field] !== undefined && (!previous.parameterSources?.[field] || previous.parameterSources[field]?.source === "manual"));
+    const parameters = mergeModelParameters(model.parameters ?? modelParameterValues(model), Object.fromEntries(manualFields.map(field => [field, prior[field]])));
+    const parameterSources = { ...model.parameterSources, ...Object.fromEntries(manualFields.map(field => [field, { source: "manual" as const }])) };
+    return { ...previous, ...model, ...parameters, parameters, parameterSources, reasoning: parameters.reasoning ?? false, thinking: parameters.thinkingConfig?.efforts ?? [] };
+  })];
+}
+
+export function chooseFetchedModelCandidate(candidate: FetchedModelCandidate, selected: ModelAdaptationCandidate): FetchedModelCandidate {
+  const adaptation = candidate.adaptation!;
+  const endpoint = Object.fromEntries(MODEL_PARAMETER_FIELDS.filter(field => candidate.parameterSources?.[field]?.source === "endpoint").map(field => [field, candidate.parameters?.[field]]));
+  const values = mergeModelParameters(selected.values, endpoint);
+  const sources: ModelParameterSources = Object.fromEntries(MODEL_PARAMETER_FIELDS.filter(field => values[field] !== undefined).map(field => [field, endpoint[field] !== undefined ? { source: "endpoint" } : { source: "catalog", catalogVersion: adaptation.catalogVersion, catalogModel: selected.key }]));
+  const { contextWindow: _ctx, maxTokens: _max, reasoning: _reasoning, thinking: _thinking, ...rest } = candidate;
+  return { ...rest, ...values, ...(values.thinkingConfig ? { thinking: values.thinkingConfig.efforts } : {}), parameters: values, parameterSources: sources, enriched: true, adaptation: { ...adaptation, status: "matched", candidates: [selected], values, sources } };
 }

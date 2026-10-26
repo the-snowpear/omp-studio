@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import {
   PREVIEW_SPEED,
   PREVIEW_WARMING,
@@ -215,7 +216,7 @@ export function SessionOptionsPane({
           </label>
           <label>
             {zh ? "服务档位" : "Service tier"}
-            <select
+            <AppSelect
               className="select"
               aria-label={zh ? "处理速度" : "Serving speed"}
               value={speed?.selected ?? "normal"}
@@ -251,7 +252,7 @@ export function SessionOptionsPane({
                   }
                 </option>
               ))}
-            </select>
+            </AppSelect>
           </label>
         </div>
         <p className="muted">
@@ -304,7 +305,7 @@ export function SessionOptionsPane({
         <div className="session-options-row">
           <label>
             {zh ? "模式" : "Mode"}
-            <select
+            <AppSelect
               className="select"
               aria-label={zh ? "缓存保温模式" : "Cache warming mode"}
               value={warming?.mode ?? "off"}
@@ -324,7 +325,7 @@ export function SessionOptionsPane({
               <option value="idle">
                 {zh ? "执行与空闲期间" : "During runs and idle"}
               </option>
-            </select>
+            </AppSelect>
           </label>
           <label className="session-options-check">
             <input

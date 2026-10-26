@@ -223,6 +223,7 @@ type ModelsCommandName =
   | "models.login.logout"
   | "models.provider.test"
   | "models.provider.probe"
+  | "models.catalog.refresh"
   | "models.discovery.refresh"
   | "models.cycleOrder.set"
   | "models.webSearch.set"
@@ -284,9 +285,7 @@ export interface StudioHostClientFacadeOptions {
   readonly git?: HostGitService;
   /** Optional Host-owned GitHub CLI adapter. Independent of Runtime availability. */
   readonly github?: HostGitHubService;
-  /** Optional omp stats usage adapter (heatmap / native dashboard). */
   readonly usage?: HostUsageService;
-  readonly stats?: {read(input:{filter:StatsFilter;refresh?:boolean}):Promise<StatsSnapshot>;frustration(input:FrustrationInput):Promise<FrustrationResult>};
   /** Bounded idempotency registry capacity (default 512). */
   readonly registryCapacity?: number;
 }
@@ -717,6 +716,7 @@ export class StudioHostClientFacade implements ClientTransport {
     return this.#installInFlight;
   }
 
+  /** Commands and Runtime installs must finish before replacing the Host or closing for an update. */
   get hasPendingCommands(): boolean {
     return this.#installInFlight || this.#dispatchesInFlight > 0 || this.#registry.hasPending();
   }
@@ -838,7 +838,6 @@ export class StudioHostClientFacade implements ClientTransport {
 
   async #dispatchQuery(request: ClientQueryRequest): Promise<ClientQueryResponse> {
     switch (request.queryName) {
-      case "stats.read": {const input=(request as ClientQueryRequest<"stats.read">).input;validateStatsFilter(input.filter);if(!this.#options.stats)throw unavailableError("Local statistics worker unavailable");return {ok:true,queryName:request.queryName,result:await this.#options.stats.read(input)} as ClientQueryResponse;}
       case "prediction.query": {
         const input=(request as ClientQueryRequest<"prediction.query">).input;
         validatePredictionQuery(input);
@@ -885,6 +884,12 @@ export class StudioHostClientFacade implements ClientTransport {
       }
       case "home.get": {
         const result = await this.#queryHome();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "models.adaptation.resolve": {
+        const service = this.#options.models;
+        if (!service?.resolveAdaptation) throw clientError("CAPABILITY_UNAVAILABLE", "Model adaptation is unavailable");
+        const result = await service.resolveAdaptation(request.input as import("@omp-studio/client-contract").ModelAdaptationInput);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "models.get": {
@@ -935,6 +940,17 @@ export class StudioHostClientFacade implements ClientTransport {
       case "usage.get": {
         const result = await this.#queryUsage();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "stats.dashboard": {
+        const usage = this.#options.usage;
+        if (usage?.dashboard === undefined) {
+          return {
+            ok: true,
+            queryName: request.queryName,
+            result: { available: false, reason: "本机统计面板未接入。" },
+          } as ClientQueryResponse;
+        }
+        return { ok: true, queryName: request.queryName, result: await usage.dashboard() } as ClientQueryResponse;
       }
       case "conversation.open": {
         const openRequest = request as ClientQueryRequest<"conversation.open">;
@@ -1098,6 +1114,7 @@ export class StudioHostClientFacade implements ClientTransport {
       case "models.login.logout":
       case "models.provider.test":
       case "models.provider.probe":
+      case "models.catalog.refresh":
       case "models.discovery.refresh":
       case "models.cycleOrder.set":
       case "models.webSearch.set":
@@ -1113,7 +1130,6 @@ export class StudioHostClientFacade implements ClientTransport {
       case "workspace.directory.create": {
         return this.#commandWorkspaceFile(request as ClientCommandRequest<"workspace.file.create" | "workspace.directory.create">);
       }
-      case "stats.frustration": return this.#commandFrustration(request as ClientCommandRequest<"stats.frustration">);
       case "usage.openDashboard": {
         return this.#commandUsage(request as ClientCommandRequest<"usage.openDashboard">);
       }
@@ -2789,7 +2805,7 @@ export class StudioHostClientFacade implements ClientTransport {
     service: HostModelsService,
   ): Promise<void> {
     try {
-      let result: ConfigWriteResult | ModelProviderTestResult | ModelDiscoveryResult;
+      let result: ConfigWriteResult | ModelProviderTestResult | ModelDiscoveryResult | import("@omp-studio/client-contract").ModelCatalogRefreshResult;
       switch (request.commandName) {
         case "models.provider.upsert":
           result = await service.upsertProvider(request.input as never);
@@ -2835,6 +2851,10 @@ export class StudioHostClientFacade implements ClientTransport {
           break;
         case "models.provider.probe":
           result = await service.probeProvider(request.input as never);
+          break;
+        case "models.catalog.refresh":
+          if (!service.refreshCatalog) throw clientError("CAPABILITY_UNAVAILABLE", "Model catalog updates are unavailable");
+          result = await service.refreshCatalog();
           break;
         case "models.discovery.refresh":
           result = await service.refreshDiscovery();
@@ -3184,14 +3204,6 @@ export class StudioHostClientFacade implements ClientTransport {
     }
   }
 
-  async #commandFrustration(request:ClientCommandRequest<"stats.frustration">):Promise<ClientCommandAccepted> {
-    validateEnvelope(request);validateFrustrationInput(request.input);
-    const service=this.#options.stats;if(!service)throw unavailableError("Statistics worker unavailable");
-    const acceptedAt=this.#options.diagnostics.now();const replay=this.#registry.accept(request,acceptedAt);
-    if(replay){this.#replayTerminal(replay,request.requestId);return {commandName:request.commandName,requestId:request.requestId,status:"accepted",acceptedAt:replay.acceptedAt};}
-    const accepted={commandName:request.commandName,requestId:request.requestId,status:"accepted" as const,acceptedAt};this.#bus.emit({kind:"command.accepted",accepted});
-    void(async()=>{try{const result=await service.frustration(request.input);this.#emitTerminal(request.requestId,{requestId:request.requestId,commandName:request.commandName,status:"completed",result,observedAt:this.#options.diagnostics.now()});}catch(error){this.#emitTerminal(request.requestId,{requestId:request.requestId,commandName:request.commandName,status:"failed",error:toClientError(error),observedAt:this.#options.diagnostics.now()});}})();return accepted;
-  }
   async #commandUsage(request: ClientCommandRequest<"usage.openDashboard">): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
     const service = this.#options.usage;
@@ -3436,4 +3448,3 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 }
 import { validatePredictionQuery } from "@omp-studio/studio-protocol";
-import { type StatsFilter, type StatsSnapshot, type FrustrationInput, type FrustrationResult, validateStatsFilter, validateFrustrationInput } from "@omp-studio/studio-protocol";

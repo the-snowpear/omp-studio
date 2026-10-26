@@ -1,3 +1,8 @@
+import { ModelParameterEditor } from "./models/ModelParameterEditor";
+import { createModelParameterDraft, effectiveModelParameters, effectiveParameterSources, modelParameterDraftError, type ModelParameterDraft } from "./models/modelParameterDraft";
+import { previewModelAdaptation } from "./preview/modelAdaptationPreview";
+import { thinkingForRoleModel, sameModelParameter, modelParameterValues } from "@omp-studio/client-contract";
+import { AppSelect } from "./AppSelect";
 import { AgentPoolsPane } from "./models/AgentPoolsPane";
 import { ModelCompactionPane } from "./models/ModelCompactionPane";
 import { ModelPresetsPane } from "./models/ModelPresetsPane";
@@ -35,7 +40,6 @@ import {
   modelAcceptsRole,
   clampRoleThinking,
   isModelEnvConfigName,
-  MODEL_CONFIG_THINKING_EFFORTS,
   roleThinkingControl,
   resolveModelPrice,
 } from "@omp-studio/client-contract";
@@ -56,6 +60,7 @@ import {
 } from "./preview/modelConfigFixtures";
 import {
   candidatesToEntries,
+  chooseFetchedModelCandidate,
   type FetchedModelCandidate,
   mergeImportedModels,
   pickedCount,
@@ -401,13 +406,6 @@ function fmtK(n?: number): string {
   return String(n);
 }
 
-function toggleThinkingEffort(current: readonly string[], id: string): string[] {
-  const next = new Set(current);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  return MODEL_CONFIG_THINKING_EFFORTS.filter((item) => next.has(item));
-}
-
 function thinkingMenuAnchor(btn: HTMLElement, menu?: HTMLElement | null): { top: number; left: number; width: number } {
   const rect = btn.getBoundingClientRect();
   const width = Math.max(rect.width, menu?.offsetWidth ?? 0);
@@ -418,106 +416,6 @@ function thinkingMenuAnchor(btn: HTMLElement, menu?: HTMLElement | null): { top:
     top = Math.max(8, rect.top - height - 4);
   }
   return { top, left, width };
-}
-
-function ThinkingEffortSelect({
-  value,
-  onChange,
-}: {
-  value: readonly string[];
-  onChange: (next: string[]) => void;
-}) {
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState({ top: 0, left: 0, width: 168 });
-  const { t } = useI18n();
-  const selected = MODEL_CONFIG_THINKING_EFFORTS.filter((id) => value.includes(id));
-  const label = selected.length > 0 ? selected.join(", ") : "low, medium, high…";
-
-  useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
-    setAnchor(thinkingMenuAnchor(btnRef.current, menuRef.current));
-  }, [open, selected.length]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        setOpen(false);
-      }
-    };
-    const onDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (btnRef.current?.contains(target) || menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("mousedown", onDown);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("mousedown", onDown);
-    };
-  }, [open]);
-
-  return (
-    <div className="thinking-effort-dd">
-      <button
-        ref={btnRef}
-        type="button"
-        className={`select thinking-effort-btn${open ? " is-open" : ""}`}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label="thinking effort"
-        data-tip={selected.length > 0 ? selected.join(", ") : t("modelConfig.tipThinking")}
-        onMouseDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (open) {
-            setOpen(false);
-            return;
-          }
-          if (btnRef.current) setAnchor(thinkingMenuAnchor(btnRef.current));
-          setOpen(true);
-        }}
-      >
-        <span>{label}</span>
-        <Icon name="chevron-d" extra="sm" />
-      </button>
-      {open
-        ? createPortal(
-            <div
-              ref={menuRef}
-              className="menu thinking-effort-menu"
-              role="listbox"
-              aria-multiselectable="true"
-              aria-label="thinking effort"
-              style={{ top: anchor.top, left: anchor.left, width: anchor.width }}
-              onMouseDown={(event) => event.stopPropagation()}
-            >
-              {MODEL_CONFIG_THINKING_EFFORTS.map((id) => {
-                const on = selected.includes(id);
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    role="option"
-                    aria-selected={on}
-                    className={`pick-role${on ? " is-on" : ""}`}
-                    onClick={() => onChange(toggleThinkingEffort(value, id))}
-                  >
-                    <span className={`pick-check${on ? " on" : ""}`}>{on ? <Icon name="check" extra="sm" /> : null}</span>
-                    <span className="pick-copy"><b className="mono">{id}</b></span>
-                  </button>
-                );
-              })}
-            </div>,
-            document.body,
-          )
-        : null}
-    </div>
-  );
 }
 
 function AuthTypeSelect({
@@ -663,12 +561,17 @@ type ModelEditState =
   | { kind: "custom"; index: number; draft: CustomModelForm; providerId?: string }
   | { kind: "add"; draft: CustomModelForm; providerId?: string };
 
+function updateModelParameterDraft(current: ModelEditState | null, update: (draft: ModelParameterDraft) => ModelParameterDraft): ModelEditState | null {
+  if (!current) return null;
+  const parameters = update(current.draft.parameters);
+  if (current.kind === "override") return { ...current, draft: { ...current.draft, parameters } };
+  return { ...current, draft: { ...current.draft, parameters } };
+}
+
 type DraftOverrideForm = {
+  parameters: ModelParameterDraft;
   bedrockMessagesApi: "" | "true" | "false";
   name: string;
-  contextWindow: string;
-  maxTokens: string;
-  reasoning: "" | "true" | "false";
   tools: "" | "true" | "false";
   image: "" | "true" | "false";
   costIn: string;
@@ -684,20 +587,16 @@ type DraftOverrideForm = {
   rcEnabled: "" | "true" | "false";
   rcEndpoint: string;
   rcModel: string;
-  thinking: string[];
 };
 
 type CustomModelForm = {
+  parameters: ModelParameterDraft;
   bedrockMessagesApi: "" | "true" | "false";
   id: string;
   name: string;
   api: string;
-  contextWindow: string;
-  maxTokens: string;
-  reasoning: boolean;
   tools: boolean;
   image: boolean;
-  thinking: string[];
   costIn: string;
   costOut: string;
   costCacheR: string;
@@ -755,16 +654,14 @@ function rcFromParts(
 
 function BedrockMessagesControl({value,onChange}:{value:""|"true"|"false";onChange:(value:""|"true"|"false")=>void}) {
   const {t}=useI18n();
-  return <div className="field span2"><label>Bedrock Messages API</label><select className="select" aria-label="Bedrock Messages API" value={value} onChange={event=>onChange(event.target.value as ""|"true"|"false")}><option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option></select><span className="desc">{t("modelConfig.bedrockMessagesDesc")}</span></div>;
+  return <div className="field span2"><label>Bedrock Messages API</label><AppSelect className="select" aria-label="Bedrock Messages API" value={value} onChange={event=>onChange(event.target.value as ""|"true"|"false")}><option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option></AppSelect><span className="desc">{t("modelConfig.bedrockMessagesDesc")}</span></div>;
 }
 
 function blankOverrideForm(from?: DraftOverride): DraftOverrideForm {
   return {
+    parameters: createModelParameterDraft(from),
     bedrockMessagesApi: from?.bedrockMessagesApi === undefined ? "" : from.bedrockMessagesApi ? "true" : "false",
     name: from?.name ?? "",
-    contextWindow: from?.contextWindow !== undefined ? String(from.contextWindow) : "",
-    maxTokens: from?.maxTokens !== undefined ? String(from.maxTokens) : "",
-    reasoning: from?.reasoning === undefined ? "" : from.reasoning ? "true" : "false",
     tools: from?.tools === undefined ? "" : from.tools ? "true" : "false",
     image: from?.image === undefined ? "" : from.image ? "true" : "false",
     costIn: from?.cost?.input !== undefined ? String(from.cost.input) : "",
@@ -780,19 +677,16 @@ function blankOverrideForm(from?: DraftOverride): DraftOverrideForm {
     rcEnabled: from?.remoteCompaction?.enabled === undefined ? "" : from.remoteCompaction.enabled ? "true" : "false",
     rcEndpoint: from?.remoteCompaction?.endpoint ?? "",
     rcModel: from?.remoteCompaction?.model ?? "",
-    thinking: [...(from?.thinking ?? [])],
   };
 }
 
 function blankCustomForm(from?: ModelCatalogEntry): CustomModelForm {
   return {
+    parameters: createModelParameterDraft(from),
     bedrockMessagesApi: from?.bedrockMessagesApi === undefined ? "" : from.bedrockMessagesApi ? "true" : "false",
     id: from?.id ?? "",
     name: from?.name ?? "",
     api: from?.api ?? "inherit",
-    contextWindow: from?.contextWindow !== undefined ? String(from.contextWindow) : "128000",
-    maxTokens: from?.maxTokens !== undefined ? String(from.maxTokens) : "16384",
-    reasoning: from?.reasoning ?? false,
     tools: from?.tools ?? true,
     image: from?.image ?? false,
     costIn: !from?.pricing && from?.cost?.input !== undefined ? String(from.cost.input) : "",
@@ -809,7 +703,6 @@ function blankCustomForm(from?: ModelCatalogEntry): CustomModelForm {
     rcEnabled: from?.remoteCompaction?.enabled ?? false,
     rcEndpoint: from?.remoteCompaction?.endpoint ?? "",
     rcModel: from?.remoteCompaction?.model ?? "",
-    thinking: [...(from?.thinking ?? [])],
   };
 }
 
@@ -821,16 +714,10 @@ function parseOptionalNumber(text: string): number | undefined {
 }
 
 function overrideFromForm(form: DraftOverrideForm): DraftOverride | null {
-  const next: DraftOverride = {};
+  const next: DraftOverride = { ...effectiveModelParameters(form.parameters), parameterSources: effectiveParameterSources(form.parameters) };
   const bedrock = triState(form.bedrockMessagesApi);
   if (bedrock !== undefined) next.bedrockMessagesApi = bedrock;
   if (form.name.trim()) next.name = form.name.trim();
-  const ctx = parseOptionalNumber(form.contextWindow);
-  if (ctx !== undefined) next.contextWindow = ctx;
-  const max = parseOptionalNumber(form.maxTokens);
-  if (max !== undefined) next.maxTokens = max;
-  const reasoning = triState(form.reasoning);
-  if (reasoning !== undefined) next.reasoning = reasoning;
   const tools = triState(form.tools);
   if (tools !== undefined) next.tools = tools;
   const image = triState(form.image);
@@ -849,7 +736,6 @@ function overrideFromForm(form: DraftOverrideForm): DraftOverride | null {
   if (form.compactionModel.trim()) next.compactionModel = form.compactionModel.trim();
   const rc = rcFromParts(triState(form.rcEnabled), form.rcEndpoint, form.rcModel);
   if (rc) next.remoteCompaction = rc;
-  if (form.reasoning === "true" && form.thinking.length > 0) next.thinking = [...form.thinking];
   return Object.keys(next).length > 0 ? next : null;
 }
 
@@ -873,6 +759,8 @@ function applyOverrideToDraft(host: Draft, modelId: string, form: DraftOverrideF
       ...(parsed.image === undefined ? {} : { image: parsed.image }),
       ...(parsed.cost === undefined ? {} : { cost: parsed.cost }),
       ...(parsed.thinking === undefined ? {} : { thinking: parsed.thinking }),
+      ...(parsed.thinkingConfig === undefined ? {} : { thinkingConfig: parsed.thinkingConfig }),
+      ...(parsed.maxContextWindow === undefined ? {} : { maxContextWindow: parsed.maxContextWindow }),
     };
   });
   return { next: { ...host, modelOverrides, models }, parsed };
@@ -881,8 +769,7 @@ function applyOverrideToDraft(host: Draft, modelId: string, form: DraftOverrideF
 function entryFromCustomForm(providerId: string, form: CustomModelForm): ModelCatalogEntry | null {
   const id = form.id.trim();
   if (!id) return null;
-  const contextWindow = parseOptionalNumber(form.contextWindow);
-  const maxTokens = parseOptionalNumber(form.maxTokens);
+  const parameters = effectiveModelParameters(form.parameters);
   const cost = costFromFields(form.costIn, form.costOut, form.costCacheR, form.costCacheW);
   const premium = parseOptionalNumber(form.premiumMultiplier);
   const imageBudget = parseOptionalNumber(form.imageCountBudget);
@@ -892,9 +779,9 @@ function entryFromCustomForm(providerId: string, form: CustomModelForm): ModelCa
     id,
     name: form.name.trim() || id,
     selector: `${providerId}/${id}`,
-    ...(contextWindow === undefined ? {} : { contextWindow }),
-    ...(maxTokens === undefined ? {} : { maxTokens }),
-    reasoning: form.reasoning,
+    ...parameters, parameters,
+    parameterSources: effectiveParameterSources(form.parameters),
+    reasoning: parameters.reasoning ?? false,
     tools: form.tools,
     image: form.image,
     ...(cost ? { cost } : {}),
@@ -910,7 +797,7 @@ function entryFromCustomForm(providerId: string, form: CustomModelForm): ModelCa
     ...(form.contextPromotionTarget.trim() ? { contextPromotionTarget: form.contextPromotionTarget.trim() } : {}),
     ...(form.compactionModel.trim() ? { compactionModel: form.compactionModel.trim() } : {}),
     ...(rc ? { remoteCompaction: rc } : {}),
-    ...(form.reasoning && form.thinking.length > 0 ? { thinking: [...form.thinking] } : {}),
+    ...(parameters.thinkingConfig ? { thinking: parameters.thinkingConfig.efforts } : {}),
   };
 }
 
@@ -1050,7 +937,10 @@ function catalogDraftEqual(left: ModelCatalogEntry, right: ModelCatalogEntry): b
     && left.cost?.output === right.cost?.output
     && left.cost?.cacheRead === right.cost?.cacheRead
     && left.cost?.cacheWrite === right.cost?.cacheWrite
-    && sameStringList(left.thinking, right.thinking);
+    && sameStringList(left.thinking, right.thinking)
+    && sameModelParameter(left.thinkingConfig, right.thinkingConfig)
+    && sameModelParameter(left.parameters, right.parameters)
+    && sameModelParameter(left.parameterSources, right.parameterSources);
 }
 
 function overrideDraftEqual(left: DraftOverride | undefined, right: DraftOverride | undefined): boolean {
@@ -1059,6 +949,9 @@ function overrideDraftEqual(left: DraftOverride | undefined, right: DraftOverrid
   return left.name === right.name
     && left.contextWindow === right.contextWindow
     && left.maxTokens === right.maxTokens
+    && left.maxContextWindow === right.maxContextWindow
+    && sameModelParameter(left.thinkingConfig, right.thinkingConfig)
+    && sameModelParameter(left.parameterSources, right.parameterSources)
     && left.reasoning === right.reasoning
     && left.tools === right.tools
     && left.image === right.image
@@ -1111,21 +1004,24 @@ function rolesEqual(left: ModelRoleRecord, right: ModelRoleRecord): boolean {
     && left.name === right.name
     && left.desc === right.desc
     && left.primary === right.primary
-    && (left.thinking || "off") === (right.thinking || "off");
+    && left.thinking === right.thinking;
 }
 
 function roleSelector(role: ModelRoleRecord): string {
-  return role.thinking && role.thinking !== "off" ? `${role.primary}:${role.thinking}` : role.primary;
+  return role.thinking ? `${role.primary}:${role.thinking}` : role.primary;
 }
+
+type ModelRoleDraft = ModelRoleRecord & { readonly thinkingAdjustment?: string };
 
 function withRoleModel(
   role: ModelRoleRecord,
   primary: string,
   model: AvailableModelRecord | undefined,
-): ModelRoleRecord {
-  const thinking = clampRoleThinking(role.thinking, model);
+): ModelRoleDraft {
+  const thinking = role.primary !== primary ? thinkingForRoleModel(role.thinking, model) : clampRoleThinking(role.thinking, model);
   const { issue: _ignored, thinking: _thinking, ...rest } = role;
-  return thinking ? { ...rest, primary, thinking } : { ...rest, primary };
+  const thinkingAdjustment = role.thinking && thinking && role.thinking !== thinking ? `${role.thinking} → ${thinking}` : (role as ModelRoleDraft).thinkingAdjustment;
+  return { ...rest, primary, ...(thinking ? { thinking } : {}), ...(thinkingAdjustment ? { thinkingAdjustment } : {}) };
 }
 
 function roleThinkingUi(role: Pick<ModelRoleRecord, "thinking">, model: AvailableModelRecord | undefined) {
@@ -1133,7 +1029,7 @@ function roleThinkingUi(role: Pick<ModelRoleRecord, "thinking">, model: Availabl
   return {
     items: MODEL_THINKING.filter((item) => control.ids.includes(item.id)),
     disabled: control.disabled,
-    value: clampRoleThinking(role.thinking, model) || "off",
+    value: role.thinking === undefined ? "" : (clampRoleThinking(role.thinking, model) ?? "off"),
   };
 }
 
@@ -1147,17 +1043,22 @@ function RoleThinkingSeg({
   onChange: (next: ModelRoleRecord) => void;
 }) {
   const thinking = roleThinkingUi(role, model);
+  const { t } = useI18n();
   return (
+    <>
     <span className={`seg${thinking.disabled ? " is-disabled" : ""}`} role="tablist">
+      <button type="button" className={thinking.value === "" ? "active" : undefined} onClick={() => { const { thinking: _old, ...rest } = role; onChange(rest); }}>{t("modelAdaptation.defaultThinking")}</button>
       {thinking.items.map((item) => (
         <button type="button" key={item.id} className={thinking.value === item.id ? "active" : undefined} disabled={thinking.disabled} onClick={() => {
-          const next = { ...role };
-          if (item.id === "off") delete next.thinking;
-          else next.thinking = item.id;
+          const { thinkingAdjustment: _mapping, ...next } = role as ModelRoleDraft;
+          next.thinking = item.id;
           onChange(next);
         }}>{item.label}</button>
       ))}
     </span>
+    {(role as ModelRoleDraft).thinkingAdjustment ? <small className="mc-thinking-adjustment">{(role as ModelRoleDraft).thinkingAdjustment}</small> : null}
+    {model?.thinkingConfig?.requiresEffort ? <small className="mc-thinking-adjustment">{t("modelAdaptation.required")}</small> : null}
+    </>
   );
 }
 
@@ -1196,9 +1097,9 @@ function providerUpsertFromDraft(editor: Draft, contentHash?: string): ModelProv
     models: editor.models.filter((model) => model.source === "custom").map((model) => ({
       id: model.id,
       name: model.name,
-      ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
-      ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
-      reasoning: model.reasoning,
+      ...modelParameterValues(model),
+      ...(model.thinkingConfig === undefined ? {} : { thinkingConfig: model.thinkingConfig }),
+      ...(model.parameterSources ? { parameterSources: model.parameterSources } : {}),
       image: model.image,
       tools: model.tools,
       ...(model.cost ? { cost: model.cost } : {}),
@@ -1304,7 +1205,7 @@ function parseRoleSelector(selector: string): { primary: string; thinking?: stri
   const idx = selector.lastIndexOf(":");
   if (idx > 0) {
     const suffix = selector.slice(idx + 1);
-    if (suffix !== "off" && MODEL_THINKING.some((item) => item.id === suffix)) {
+    if (MODEL_THINKING.some((item) => item.id === suffix)) {
       return { primary: selector.slice(0, idx), thinking: suffix };
     }
   }
@@ -1929,6 +1830,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [probeResult, setProbeResult] = useState<ModelDiscoveryResult | null>(null);
   const [probing, setProbing] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [catalogUpdating, setCatalogUpdating] = useState(false);
+  const fetchGeneration = useRef(0);
+  const fetchIdentity = useRef("");
   const [fetchDetail, setFetchDetail] = useState<{ ok: boolean; text: string } | null>(null);
   const [candidates, setCandidates] = useState<FetchedModelCandidate[] | null>(null);
   const [createRoleOpen, setCreateRoleOpen] = useState(false);
@@ -2085,6 +1989,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     if (role) setRoleDraft({ ...role });
   }, [data, roleId, roleDraft]);
 
+  const currentFetchIdentity = JSON.stringify([editorState?.id, editorState?.api, editorState?.endpointUrl]);
+  fetchIdentity.current = currentFetchIdentity;
+  useEffect(() => { fetchGeneration.current += 1; setCandidates(null); setFetching(false); }, [currentFetchIdentity]);
   const providers = data?.providers ?? [];
   const roles = data?.roles ?? [];
   const webSearchReadyCount = data?.webSearch.providers.filter((provider) => provider.credentialFree || provider.hasCredential).length ?? 0;
@@ -2767,7 +2674,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
           roles: current.roles.map((item) => (item.id === (baseline?.id ?? role.id) ? record : item)),
         };
       });
-      toast(t("modelConfig.demoRoleUpdated"));
+      toast((next.thinkingAdjustment ? `${next.thinkingAdjustment} · ` : "") + t("modelConfig.demoRoleUpdated"));
       setRoleId(null);
       setRoleDraft(null);
       return;
@@ -2790,7 +2697,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         toast(t("modelConfig.selectPrimaryFirst"));
         return;
       }
-      toast(t("modelConfig.savedToConfigToast"));
+      toast((next.thinkingAdjustment ? `${next.thinkingAdjustment} · ` : "") + t("modelConfig.savedToConfigToast"));
       setRoleId(null);
       setRoleDraft(null);
       await refresh();
@@ -2964,9 +2871,23 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       toast(!providerId ? t("modelConfig.toastFillProviderIdFirst") : t("modelConfig.toastFillBaseUrlFirst"));
       return;
     }
+    const requestGeneration = ++fetchGeneration.current;
+    const requestIdentity = fetchIdentity.current;
+    const stillCurrent = () => requestGeneration === fetchGeneration.current && requestIdentity === fetchIdentity.current;
+    const adaptFetched = async (models: readonly import("@omp-studio/client-contract").ModelDiscoveryModel[]) => {
+      const matches = await Promise.all(models.map(async model => {
+        const endpoint = { ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }), ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }), ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }) };
+        const input = { providerId, api: draft.api, modelId: model.id, name: model.name, endpoint, ...(data?.catalog ? { catalogVersion: data.catalog.version } : {}) };
+        const result = preview ? previewModelAdaptation(input) : await client.query("models.adaptation.resolve", input).catch(() => undefined);
+        return [model.id, result] as const;
+      }));
+      return new Map(matches.filter((pair): pair is readonly [string, import("@omp-studio/client-contract").ModelAdaptationResult] => pair[1] !== undefined));
+    };
     if (preview) {
       const demo = createPreviewFetchedModels();
-      setCandidates(toCandidates(demo, draft.models, data?.availableModels ?? []));
+      const matches = await adaptFetched(demo);
+      if (!stillCurrent()) return;
+      setCandidates(toCandidates(demo, draft.models, [], matches));
       setFetchDetail({ ok: true, text: t("modelConfig.detailDemoFetchNoHost", { count: demo.length }) });
       setModelsTab("custom");
       toast(t("modelConfig.toastDemoAutoFetchNoHost"));
@@ -2986,11 +2907,14 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         ...(Object.keys(headers).length > 0 ? { headers } : {}),
         ...(draft.discoveryTimeoutMs === undefined ? {} : { timeoutMs: draft.discoveryTimeoutMs }),
       });
+      if (!stillCurrent()) return;
       if (!result.ok) {
         setFetchDetail({ ok: false, text: `${result.detail} · ${result.latencyMs}ms` });
         return;
       }
-      const next = toCandidates(result.models, draft.models, data?.availableModels ?? []);
+      const matches = await adaptFetched(result.models);
+      if (!stillCurrent()) return;
+      const next = toCandidates(result.models, draft.models, [], matches);
       setCandidates(next);
       setModelsTab("custom");
       setFetchDetail({
@@ -3000,9 +2924,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
           : t("modelConfig.detailFetchSuccessStats", { total: next.length, added: next.filter((item) => !item.existing).length, latencyMs: result.latencyMs }),
       });
     } catch (error) {
-      setFetchDetail({ ok: false, text: hostErrorMessage(error, t("modelConfig.textFetchModelsFailed")) });
+      if (stillCurrent()) setFetchDetail({ ok: false, text: hostErrorMessage(error, t("modelConfig.textFetchModelsFailed")) });
     } finally {
-      setFetching(false);
+      if (stillCurrent()) setFetching(false);
     }
   };
 
@@ -3014,6 +2938,18 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     setFetchDetail(null);
     setModelsTab("custom");
     toast(t("modelConfig.toastImportDraftModels", { count: entries.length }));
+  };
+
+  const updateModelCatalog = async () => {
+    if (preview) { toast(t("modelAdaptation.demoUpdate")); return; }
+    setCatalogUpdating(true);
+    try {
+      const handle = await client.command("models.catalog.refresh", {});
+      const result = await waitReceipt<import("@omp-studio/client-contract").ModelCatalogRefreshResult>(client, handle.requestId);
+      setData(current => current ? { ...current, catalog: result.catalog } : current);
+      toast(result.message);
+    } catch (error) { toast(hostErrorMessage(error, t("modelConfig.toastRefreshFailed"))); }
+    finally { setCatalogUpdating(false); }
   };
 
   const refreshDiscovery = async () => {
@@ -3224,6 +3160,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             ...(entry.maxTokens === undefined ? {} : { maxTokens: entry.maxTokens }),
             ...(entry.cost ? { cost: entry.cost } : {}),
             thinking: entry.thinking,
+            ...(entry.thinkingConfig === undefined ? {} : { thinkingConfig: entry.thinkingConfig }),
           });
         } else if (!current) {
           map.set(entry.selector, {
@@ -3239,6 +3176,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             ...(entry.contextWindow === undefined ? {} : { contextWindow: entry.contextWindow }),
             ...(entry.maxTokens === undefined ? {} : { maxTokens: entry.maxTokens }),
             ...(entry.cost ? { cost: entry.cost } : {}),
+            ...(entry.thinkingConfig === undefined ? {} : { thinkingConfig: entry.thinkingConfig }),
           });
         }
       }
@@ -3250,6 +3188,10 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   return (
     <div className="page-wide" id="mcRoot">
       <a className="skip-link" href="#mcPanels">{t("common.skipToContent")}</a>
+      <div className="mc-catalog-update">
+        <span className="small muted">{t("modelAdaptation.catalog")} · {preview ? t("modelAdaptation.demo") : data?.catalog?.version ?? t("modelAdaptation.unknown")}</span>
+        <button type="button" className="btn small outline" disabled={catalogUpdating || (!preview && !data)} onClick={() => void updateModelCatalog()}>{t(catalogUpdating ? "modelAdaptation.updating" : "modelAdaptation.update")}</button>
+      </div>
       <div className="mc-tabbar">
         <div className="mc-tabs" id="mcTabs" ref={mcTabsRef} role="tablist" aria-label={t("modelConfig.modelConfigView")} onKeyDown={onTabKey}>
           <button role="tab" id="mcTabProviders" aria-controls="mcPanelProviders" aria-selected={tab === "providers"} tabIndex={tab === "providers" ? 0 : -1} className={tab === "providers" ? "active" : undefined} onClick={() => activate("providers")}>
@@ -3501,9 +3443,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                 <div className="mp-sec-divider" aria-hidden="true" />
 
                 <h3>{t("modelConfig.apiTypeSection")}</h3>
-                <select className="select" style={{ maxWidth: 320 }} value={editor.api} onChange={(event) => setEditor({ ...editor, api: event.target.value })}>
+                <AppSelect className="select" style={{ maxWidth: 320 }} value={editor.api} onChange={(event) => setEditor({ ...editor, api: event.target.value })}>
                   {MODEL_API_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                </select>
+                </AppSelect>
               </div>
 
               <div className="mp-sec">
@@ -3577,8 +3519,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                     {candidates.length === 0 ? (
                       <div className="pm-empty"><Icon name="box" extra="sm" />{t("modelConfig.endpointNoModels")}</div>
                     ) : candidates.map((item) => (
-                      <label className={`pm-row mc-fetch-row${item.existing ? " is-off" : ""}`} key={item.id}>
-                        <input type="checkbox" checked={item.picked} onChange={() => setCandidates(togglePicked(candidates, item.id))} />
+                      <div className={`pm-row mc-fetch-row${item.existing ? " is-off" : ""}`} key={item.id}>
+                        <input type="checkbox" aria-label={item.name} checked={item.picked} onChange={() => setCandidates(togglePicked(candidates, item.id))} />
                         <span className="pm-name">{item.name}</span>
                         <span className="pm-sel ellipsis">{`${editor.id || "provider"}/${item.id}`}</span>
                         <span className="pm-meta">
@@ -3586,10 +3528,15 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                           {item.maxTokens ? <span className="chip gray xs">{fmtK(item.maxTokens)} out</span> : null}
                           {item.image ? <span className="chip blue xs chip-icon" data-tip={t("modelConfig.badgeImage")}><Icon name="image" extra="sm" /></span> : null}
                           {item.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.badgeReasoning")}><Icon name="brain" extra="sm" /></span> : null}
-                          {item.enriched ? <span className="chip gray xs" data-tip={t("modelConfig.localEnrichedTip")}>{t("modelConfig.localEnriched")}</span> : null}
+                          {[...new Set(Object.values(item.parameterSources ?? {}).map(origin => origin.source))].map(source => <span key={source} className="chip gray xs">{t(`modelAdaptation.source.${source}`)}</span>)}
+                          {item.adaptation?.status === "ambiguous" ? <span className="chip gray xs">{t("modelAdaptation.ambiguousBadge")}</span> : null}
                           {item.existing ? <span className="chip gray xs">{t("modelConfig.alreadyExists")}</span> : null}
                         </span>
-                      </label>
+                        {item.adaptation?.status === "ambiguous" ? <AppSelect aria-label={`${t("modelAdaptation.chooseModel")} · ${item.id}`} className="select" value="" onChange={event => {
+                          const selected = item.adaptation?.candidates.find(candidate => candidate.key === event.target.value);
+                          if (selected) setCandidates(current => current?.map(candidate => candidate.id === item.id ? chooseFetchedModelCandidate(candidate, selected) : candidate) ?? null);
+                        }}><option value="">{t("modelAdaptation.chooseModel")}</option>{item.adaptation.candidates.map(candidate => <option key={candidate.key} value={candidate.key}>{candidate.provider} / {candidate.id}</option>)}</AppSelect> : null}
+                      </div>
                     ))}
                     <div className="mc-fetch-foot">
                       <span className="spacer" />
@@ -3719,10 +3666,10 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                     </div>
                     <div className="field">
                       <label>Transport</label>
-                      <select className="select" value={editor.transport} onChange={(event) => setEditor({ ...editor, transport: event.target.value as "" | "pi-native" })}>
+                      <AppSelect className="select" value={editor.transport} onChange={(event) => setEditor({ ...editor, transport: event.target.value as "" | "pi-native" })}>
                         <option value="">{t("modelConfig.httpSseDefault")}</option>
                         <option value="pi-native">pi-native</option>
-                      </select>
+                      </AppSelect>
                     </div>
                     <div className="kv-row span2" style={{ border: "none", padding: "4px 0" }}>
                       <span className="k">Remote Compaction</span>
@@ -3980,41 +3927,20 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                         <p className="small muted" style={{ marginBottom: 10 }}>{t("modelConfig.overrideInheritCatalogDesc")}</p>
                         <div className="f-grid">
                           <div className="field"><label>Name</label><input className="input" placeholder={t("common.inherit")} value={modelEditView.draft.name} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, name: e.target.value } })} /></div>
-                          <div className="field"><label>Context Window</label><input className="input mono" type="number" placeholder={t("common.inherit")} value={modelEditView.draft.contextWindow} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, contextWindow: e.target.value } })} /></div>
-                          <div className="field"><label>Max Tokens</label><input className="input mono" type="number" placeholder={t("common.inherit")} value={modelEditView.draft.maxTokens} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, maxTokens: e.target.value } })} /></div>
-                          <div className="field"><label>Reasoning</label>
-                            <select className="select" value={modelEditView.draft.reasoning} onChange={(e) => {
-                              const reasoning = e.target.value as DraftOverrideForm["reasoning"];
-                              setModelEdit({
-                                ...modelEditView,
-                                draft: {
-                                  ...modelEditView.draft,
-                                  reasoning,
-                                  thinking: reasoning === "true" ? modelEditView.draft.thinking : [],
-                                },
-                              });
-                            }}>
-                              <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
-                            </select>
-                          </div>
+                          <ModelParameterEditor client={client} preview={preview}
+                            input={{ providerId: modelEditHost.id, api: modelEditHost.models.find(model => model.id === modelEditView.modelId)?.api ?? modelEditHost.api, modelId: modelEditView.modelId, name: modelEditView.draft.name }}
+                            value={modelEditView.draft.parameters}
+                            onChange={update => setModelEdit(current => updateModelParameterDraft(current, update))} />
                           <div className="field"><label>Tools</label>
-                            <select className="select" value={modelEditView.draft.tools} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, tools: e.target.value as DraftOverrideForm["tools"] } })}>
+                            <AppSelect className="select" value={modelEditView.draft.tools} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, tools: e.target.value as DraftOverrideForm["tools"] } })}>
                               <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
-                            </select>
+                            </AppSelect>
                           </div>
                           <div className="field"><label>Image Input</label>
-                            <select className="select" value={modelEditView.draft.image} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, image: e.target.value as DraftOverrideForm["image"] } })}>
+                            <AppSelect className="select" value={modelEditView.draft.image} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, image: e.target.value as DraftOverrideForm["image"] } })}>
                               <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
-                            </select>
+                            </AppSelect>
                           </div>
-                          {modelEditView.draft.reasoning === "true" ? (
-                            <div className="field"><label>thinking effort</label>
-                              <ThinkingEffortSelect
-                                value={modelEditView.draft.thinking}
-                                onChange={(thinking) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, thinking } })}
-                              />
-                            </div>
-                          ) : null}
                           <div className="field span2"><label>{t("modelConfig.costTokensUnit")}</label>
                             <div className="cost-grid">
                               <input className="input mono" placeholder="Input" value={modelEditView.draft.costIn} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, costIn: e.target.value } })} />
@@ -4029,9 +3955,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                           <div className="adv-body">
                             <div className="f-grid">
                               <div className="field"><label>Omit Max Output Tokens</label>
-                                <select className="select" value={modelEditView.draft.omitMaxOutputTokens} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, omitMaxOutputTokens: e.target.value as DraftOverrideForm["omitMaxOutputTokens"] } })}>
+                                <AppSelect className="select" value={modelEditView.draft.omitMaxOutputTokens} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, omitMaxOutputTokens: e.target.value as DraftOverrideForm["omitMaxOutputTokens"] } })}>
                                   <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
-                                </select>
+                                </AppSelect>
                               </div>
                               <BedrockMessagesControl value={modelEditView.draft.bedrockMessagesApi} onChange={bedrockMessagesApi => setModelEdit({...modelEditView,draft:{...modelEditView.draft,bedrockMessagesApi}})}/>
                               <div className="field"><label>Premium Multiplier</label>
@@ -4050,9 +3976,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                                 <input className="input mono" placeholder="provider/model" value={modelEditView.draft.compactionModel} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, compactionModel: e.target.value } })} />
                               </div>
                               <div className="field"><label>Remote Compaction</label>
-                                <select className="select" value={modelEditView.draft.rcEnabled} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, rcEnabled: e.target.value as DraftOverrideForm["rcEnabled"] } })}>
+                                <AppSelect className="select" value={modelEditView.draft.rcEnabled} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, rcEnabled: e.target.value as DraftOverrideForm["rcEnabled"] } })}>
                                   <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
-                                </select>
+                                </AppSelect>
                               </div>
                               <div className="field"><label>Compaction Endpoint</label>
                                 <input className="input mono" placeholder={t("common.inherit")} value={modelEditView.draft.rcEndpoint} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, rcEndpoint: e.target.value } })} />
@@ -4066,7 +3992,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                       </div>
                       <div className="modal-foot">
                         <button type="button" className="btn outline" onClick={() => setModelEdit(null)}>{t("common.cancel")}</button>
-                        <button type="button" className="btn primary" onClick={() => {
+                        <button type="button" className="btn primary" disabled={modelEditView.draft.parameters.pending || Boolean(modelParameterDraftError(modelEditView.draft.parameters))} onClick={() => {
                           if (!modelEditHost) return;
                           const { next, parsed } = applyOverrideToDraft(modelEditHost, modelEditView.modelId, modelEditView.draft);
                           if (modelEditView.providerId) {
@@ -4092,50 +4018,19 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                             <input className="input" value={modelEditView.draft.name} placeholder={t("modelConfig.displayNamePlaceholder")} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, name: e.target.value } })} />
                           </div>
                           <div className="field span2"><label>API Type</label>
-                            <select className="select" value={modelEditView.draft.api} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, api: e.target.value } })}>
+                            <AppSelect className="select" value={modelEditView.draft.api} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, api: e.target.value } })}>
                               <option value="inherit">{t("modelConfig.inheritProvider")}</option>
                               {MODEL_API_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                            </select>
+                            </AppSelect>
                           </div>
-                          <div className="field"><label>Context Window</label>
-                            <input className="input mono" type="number" value={modelEditView.draft.contextWindow} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, contextWindow: e.target.value } })} />
-                          </div>
-                          <div className="field"><label>Max Output Tokens</label>
-                            <input className="input mono" type="number" value={modelEditView.draft.maxTokens} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, maxTokens: e.target.value } })} />
-                          </div>
-                          <div className={`field${modelEditView.draft.reasoning ? "" : " span2"}`}>
-                            <label>&nbsp;</label>
-                            <div className="mc-caps-row">
-                              <label className="desc">
-                                <input type="checkbox" checked={modelEditView.draft.reasoning} onChange={(e) => {
-                                  const reasoning = e.target.checked;
-                                  setModelEdit({
-                                    ...modelEditView,
-                                    draft: {
-                                      ...modelEditView.draft,
-                                      reasoning,
-                                      thinking: reasoning ? modelEditView.draft.thinking : [],
-                                    },
-                                  });
-                                }} /> Reasoning
-                              </label>
-                              <label className="desc">
-                                <input type="checkbox" checked={modelEditView.draft.tools} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, tools: e.target.checked } })} /> Tools
-                              </label>
-                              <label className="desc">
-                                <input type="checkbox" checked={modelEditView.draft.image} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, image: e.target.checked } })} /> Image Input
-                              </label>
-                            </div>
-                          </div>
-                          {modelEditView.draft.reasoning ? (
-                            <div className="field">
-                              <label>thinking effort</label>
-                              <ThinkingEffortSelect
-                                value={modelEditView.draft.thinking}
-                                onChange={(thinking) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, thinking } })}
-                              />
-                            </div>
-                          ) : null}
+                          <ModelParameterEditor client={client} preview={preview}
+                            input={{ providerId: modelEditHost.id, api: modelEditView.draft.api === "inherit" ? modelEditHost.api : modelEditView.draft.api, modelId: modelEditView.draft.id, name: modelEditView.draft.name }}
+                            value={modelEditView.draft.parameters}
+                            onChange={update => setModelEdit(current => updateModelParameterDraft(current, update))} />
+                          <div className="field span2"><div className="mc-caps-row">
+                            <label className="desc"><input type="checkbox" checked={modelEditView.draft.tools} onChange={event => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, tools: event.target.checked } })} /> Tools</label>
+                            <label className="desc"><input type="checkbox" checked={modelEditView.draft.image} onChange={event => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, image: event.target.checked } })} /> Image Input</label>
+                          </div></div>
                           <div className="field span2"><label>{t("modelConfig.costTitle")}</label>
                             <div className="cost-grid">
                               <input className="input mono" placeholder="Input" value={modelEditView.draft.costIn} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, costIn: e.target.value } })} />
@@ -4194,7 +4089,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                       </div>
                       <div className="modal-foot">
                         <button type="button" className="btn outline" onClick={() => setModelEdit(null)}>{t("common.cancel")}</button>
-                        <button type="button" className="btn primary" onClick={() => {
+                        <button type="button" className="btn primary" disabled={modelEditView.draft.parameters.pending || Boolean(modelParameterDraftError(modelEditView.draft.parameters))} onClick={() => {
                           if (!modelEditHost) return;
                           const entry = entryFromCustomForm(modelEditHost.id || "provider-id", modelEditView.draft);
                           if (!entry) {
@@ -4309,14 +4204,14 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                   <div className="kv-row">
                     <span className="k">Recovery</span>
                     <span className="v">
-                      <select
+                      <AppSelect
                         className="select"
                         value={revertPolicyDraft ?? data?.fallbackRevertPolicy ?? "cooldown-expiry"}
                         onChange={(event) => setRevertPolicyDraft(event.target.value as ModelFallbackRevertPolicy)}
                       >
                         <option value="cooldown-expiry">cooldown-expiry</option>
                         <option value="never">never</option>
-                      </select>
+                      </AppSelect>
                     </span>
                   </div>
                 </div>
@@ -4426,14 +4321,15 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                           groups={groupModelsByProvider(usable.filter(model => modelAcceptsRole(role.id, model)), orderedProviders)}
                           onChange={(primary) => { void saveRole(withRoleModel(role, primary, availableBySelector.get(primary))); }}
                         />
-                        <select className="effort-select" value={thinking.value} disabled={thinking.disabled} aria-label={t("modelConfig.thinkingEffort")} onChange={(event) => {
-                          const next = { ...role };
-                          if (event.target.value === "off") delete next.thinking;
+                        <AppSelect className="effort-select" value={thinking.value} disabled={thinking.disabled} aria-label={t("modelConfig.thinkingEffort")} onChange={(event) => {
+                          const { thinkingAdjustment: _mapping, ...next } = role as ModelRoleDraft;
+                          if (event.target.value === "") delete next.thinking;
                           else next.thinking = event.target.value;
                           void saveRole(next);
                         }}>
+                          <option value="">{t("modelAdaptation.defaultThinking")}</option>
                           {thinking.items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                        </select>
+                        </AppSelect>
                       </>
                     )}
                     {!role.builtin ? (

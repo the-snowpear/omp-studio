@@ -1,3 +1,4 @@
+import { selectOption } from "./test/selectOption";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComposerModePicker } from "./ComposerModePicker";
@@ -19,7 +20,7 @@ function mount(preview = false) {
 describe("Composer migration controls", () => {
   it("submits a structured until condition and requires non-empty command text", () => {
     const onRun = mount();
-    fireEvent.change(screen.getByRole("combobox", { name: "循环继续条件" }), { target: { value: "until" } });
+    selectOption(screen.getByRole("combobox", { name: "循环继续条件" }), "until");
     const loop = screen.getByRole("checkbox", { name: /Loop/ });
     expect((loop as HTMLInputElement).disabled).toBe(true);
     fireEvent.change(screen.getByRole("textbox", { name: "循环条件命令" }), { target: { value: "test -f done" } });

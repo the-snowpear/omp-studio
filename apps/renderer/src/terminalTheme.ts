@@ -28,10 +28,16 @@ export function readXtermTheme(): {
   };
 }
 
+export function readTerminalTypography(): { fontFamily: string; fontSize: number } {
+  return {
+    fontFamily: readCssVar("--font-terminal", "Menlo, Consolas, monospace"),
+    fontSize: Number.parseFloat(readCssVar("--terminal-font-size", "12px")),
+  };
+}
+
 export function applyTheme(term: Terminal): void {
   term.options.theme = readXtermTheme();
-  term.options.fontFamily = readCssVar(
-    "--font-mono",
-    "Menlo, Consolas, monospace",
-  );
+  const typography = readTerminalTypography();
+  term.options.fontFamily = typography.fontFamily;
+  term.options.fontSize = typography.fontSize;
 }

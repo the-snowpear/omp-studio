@@ -99,7 +99,7 @@
      interaction that did nothing, and the wrapper's hover fill made the whole
      strip look like one button covering three separate targets. */
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   color: var(--text-3);
   border-radius: var(--r-4);
 }
@@ -145,7 +145,7 @@
   padding: 0 10px;
   border-radius: var(--r-6);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   color: var(--text-2);
   background: var(--surface);
   border: 1px solid var(--border-strong);
@@ -193,14 +193,14 @@
 }
 .tok-hero .th-v {
   font-family: var(--font-mono);
-  font-size: 21px;
+  font-size: calc(21px * var(--text-font-scale));
   line-height: 1.15;
   font-weight: var(--fw-semibold);
   color: var(--text);
   margin-top: 5px;
   font-variant-numeric: tabular-nums;
 }
-.tok-hero .th-sub { font-size: 10.5px; color: var(--text-3); margin-top: 3px; }
+.tok-hero .th-sub { font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-3); margin-top: 3px; }
 .tok-hero .th-sub b { color: var(--green); font-weight: var(--fw-semibold); }
 
 /* Tier 2 — input vs output as proportion, not two unrelated numbers. */
@@ -228,7 +228,7 @@
   min-width: 100%;
   background: var(--surface-3);
 }
-.tok-keys { display: flex; gap: var(--sp-12); font-size: 10.5px; color: var(--text-3); }
+.tok-keys { display: flex; gap: var(--sp-12); font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-3); }
 .tok-keys span { display: flex; align-items: center; gap: 4px; }
 .tok-keys i { width: 7px; height: 7px; border-radius: 2px; flex: none; }
 
@@ -254,7 +254,7 @@
 
 .tp-grid { padding: 0 var(--sp-14) var(--sp-10); display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .tp-cell { background: var(--surface); padding: var(--sp-8) var(--sp-10); }
-.tp-cell .k { font-size: 10.5px; color: var(--text-3); }
+.tp-cell .k { font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-3); }
 .tp-cell .v { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text); margin-top: 1px; }
 .tp-ctx { padding: var(--sp-10) var(--sp-14); font-size: var(--fs-11); color: var(--text-2); display: flex; flex-direction: column; gap: var(--sp-6); }
 
@@ -282,7 +282,7 @@
 }
 .ctx-legend .cl-row { display: flex; align-items: center; gap: 7px; font-size: var(--fs-11); color: var(--text-2); }
 .ctx-legend .cl-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
-.ctx-legend .cl-v { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--text); }
+.ctx-legend .cl-v { margin-left: auto; font-family: var(--font-mono); font-size: calc(10.5px * var(--text-font-scale)); color: var(--text); }
 
 /* ---------- 主工作区布局 ---------- */
 .workbench {
@@ -468,7 +468,7 @@
 .ev-head .who .role-badge {
   width: 18px; height: 18px; border-radius: var(--r-4);
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: var(--fw-bold);
+  font-size: calc(10px * var(--text-font-scale)); font-weight: var(--fw-bold);
 }
 .role-badge.u { background: var(--surface-3); color: var(--text-2); }
 .role-badge.a { background: var(--accent-soft); color: var(--accent); }
@@ -1016,7 +1016,7 @@
   width: 100%;
   min-width: 0;
 }
-.subagent-strip .hub-act { height: 18px; padding: 0 8px; font-size: 10.5px; }
+.subagent-strip .hub-act { height: 18px; padding: 0 8px; font-size: calc(10.5px * var(--text-font-scale)); }
 .subagent-strip .sa-name {
   flex: 1;
   min-width: 0;
@@ -1030,7 +1030,7 @@
 .subagent-strip .sa-dur {
   flex: none;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   font-variant-numeric: tabular-nums;
   color: var(--text-faint);
 }
@@ -1057,10 +1057,10 @@
   color: var(--text);
   line-height: 1;
 }
-.sa-tok i { font-style: normal; font-size: 10px; color: var(--text-faint); }
+.sa-tok i { font-style: normal; font-size: calc(10px * var(--text-font-scale)); color: var(--text-faint); }
 .sa-cost {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-font-scale));
   color: var(--text-faint);
   line-height: 1;
 }
@@ -1232,7 +1232,7 @@
   width: 100%;
   max-width: 100%;
   text-align: left;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-font-scale));
   line-height: 1.5;
   color: var(--text-3);
   border-radius: var(--r-4);
@@ -1294,7 +1294,7 @@
   min-height: var(--tap-min);
   padding: 2px var(--tl-pad-x);
   text-align: left;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-font-scale));
   color: var(--text-3);
   border-radius: var(--r-4);
 }
@@ -1320,7 +1320,7 @@
 }
 .tl-detail.is-path {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--text-font-scale));
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
@@ -1712,13 +1712,13 @@
   font-family: var(--font-mono); font-size: var(--fs-11);
 }
 .lsp-row + .lsp-row { border-top: 1px solid var(--border); }
-.lsp-sev { flex: none; text-transform: uppercase; font-size: 10px; }
+.lsp-sev { flex: none; text-transform: uppercase; font-size: calc(10px * var(--text-font-scale)); }
 .lsp-row.error .lsp-sev, .lsp-row.error { color: var(--red); }
 .lsp-row.warning .lsp-sev { color: var(--amber); }
 .lsp-row .m-file { color: var(--accent); }
 .tc-todo { display: flex; flex-direction: column; gap: 2px; }
 .todo-ph {
-  font-size: 10.5px; color: var(--text-faint);
+  font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-faint);
   margin-top: var(--sp-6);
 }
 .todo-ph:first-child { margin-top: 0; }
@@ -2055,7 +2055,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .mm-preview .mp-no {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--text-font-scale));
   color: var(--text-faint);
   margin-bottom: 4px;
 }
@@ -2120,7 +2120,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   border-radius: var(--r-4);
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 10px;
+  font-size: calc(10px * var(--text-font-scale));
 }
 
 /* 新内容提示 — 圆形图标按钮（淡紫底 + 深紫下尖角），悬浮在 composer 右上角。
@@ -2402,7 +2402,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: inline-flex;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-font-scale));
   font-variant-numeric: tabular-nums;
   font-weight: var(--fw-semibold);
 }
@@ -2503,7 +2503,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   flex: none;
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   font-variant-numeric: tabular-nums;
   color: var(--text-faint);
 }
@@ -2621,7 +2621,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .task-dock-file-dir {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2632,7 +2632,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   gap: 6px;
   flex: none;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   font-variant-numeric: tabular-nums;
   font-weight: var(--fw-semibold);
 }
@@ -2849,7 +2849,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .dk-agent {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   color: var(--text-faint);
   white-space: nowrap;
 }
@@ -2879,7 +2879,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   border-radius: var(--r-full);
   background: color-mix(in srgb, var(--surface) 65%, transparent);
   color: var(--text-3);
-  font-size: 10px;
+  font-size: calc(10px * var(--text-font-scale));
   font-weight: var(--fw-medium);
   letter-spacing: 0.01em;
   cursor: pointer;
@@ -2926,7 +2926,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .dk-scope {
   display: flex; align-items: center; gap: var(--sp-4);
   margin-top: var(--sp-6);
-  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint);
+  font-family: var(--font-mono); font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-faint);
 }
 .dk-scope .icon { width: 11px; height: 11px; }
 .dk-path {
@@ -2951,7 +2951,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .dk-queue .q-pos {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   color: var(--text-faint);
   min-width: 28px;
   text-align: center;
@@ -3014,7 +3014,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   background: var(--code-bg);
   border: 1px solid var(--border);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   color: var(--text);
   white-space: pre-wrap;
 }
@@ -3848,7 +3848,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   padding: var(--sp-4) var(--sp-8) var(--sp-8);
   min-width: 0;
 }
-.composer-bar .cb-group { display: flex; align-items: center; gap: var(--sp-2); }
+.composer-bar .cb-group { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
 .composer-bar .pill-btn {
   display: inline-flex; align-items: center; gap: 4px;
   height: 24px; padding: 0 var(--sp-8);
@@ -3977,7 +3977,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: flex; align-items: center; gap: var(--sp-6);
   padding: 0 var(--sp-8) var(--sp-6) 32px;
 }
-.cmp-mode-params select,
+.cmp-mode-params .app-select,
 .cmp-mode-params input[type="number"],
 .cmp-mode-params input[type="text"] {
   height: 24px;
@@ -3992,8 +3992,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .cmp-mode-params input[type="number"] { width: 64px; }
 .cmp-mode-params input[type="text"] { flex: 1; }
 /* 与 .input/.select 相同：外发光，不要全局 :focus-visible 的紫色实线 */
-.cmp-mode-params select:focus,
-.cmp-mode-params select:focus-visible,
+.cmp-mode-params .app-select:focus,
+.cmp-mode-params .app-select:focus-visible,
 .cmp-mode-params input[type="number"]:focus,
 .cmp-mode-params input[type="number"]:focus-visible,
 .cmp-mode-params input[type="text"]:focus,
@@ -4060,18 +4060,36 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.cmp-model-label-initial { display: none !important; }
+.composer-bar .cmp-compact-icon { display: none; }
 
-/* Composer 根据真实内容碰撞分两步收紧：先折叠模型名，再折叠模式胶囊。
+/* Composer 根据真实内容碰撞分两步收紧：先将权限 / 模型 / 思考收为图标，
+   再折叠模式胶囊并允许换行。
    data-measuring 只在同步测量期间恢复胶囊自然宽度，避免 flex 裁切掩盖碰撞。 */
 .composer-bar[data-measuring="true"] .mode-chip { flex: none; }
-.composer-bar[data-collapse="model"] .pill-btn.meta-model,
-.composer-bar[data-collapse="modes"] .pill-btn.meta-model { padding-inline: var(--sp-6); }
-.composer-bar[data-collapse="model"] .cmp-model-label-full,
-.composer-bar[data-collapse="modes"] .cmp-model-label-full { display: none !important; }
-.composer-bar[data-collapse="model"] .cmp-model-label-initial,
-.composer-bar[data-collapse="modes"] .cmp-model-label-initial { display: block !important; }
-.composer-bar[data-collapse="modes"] .cmp-mode-cluster { gap: var(--sp-2); }
+.composer-bar:is([data-collapse="compact"], [data-collapse="modes"]) .cmp-responsive-pill {
+  width: 24px;
+  padding-inline: 0;
+  justify-content: center;
+  gap: 0;
+  position: relative;
+}
+.composer-bar:is([data-collapse="compact"], [data-collapse="modes"]) .cmp-pill-label,
+.composer-bar:is([data-collapse="compact"], [data-collapse="modes"]) .cmp-responsive-pill .cmp-pill-caret { display: none; }
+.composer-bar:is([data-collapse="compact"], [data-collapse="modes"]) .cmp-compact-icon { display: block; }
+.composer-bar:is([data-collapse="compact"], [data-collapse="modes"]) .cmp-task-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}
+/* Keep every control reachable when shortening labels still cannot fit a row. */
+.composer-bar[data-collapse="modes"] { flex-wrap: wrap; }
+.composer-bar[data-collapse="modes"] .cmp-mode-cluster {
+  gap: var(--sp-2);
+  flex: none;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.composer-bar .composer-tier { flex: none; }
 .composer-bar[data-collapse="modes"] .mode-chip {
   width: 24px;
   max-width: 24px;
@@ -4269,9 +4287,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
    只保留上半圆角，下半紧贴 composer 形成视觉一体。宽度比 composer 窄。
    外阴影让这条在对话区背景上略微浮起。 */
 .ctx-strip {
-  max-width: calc(var(--doc-max-w) - 80px);
+  max-width: min(calc(100% - var(--sp-24)), calc(var(--doc-max-w) - 80px));
   margin: 0 auto 0;
-  display: flex; align-items: center; gap: var(--sp-12);
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6) var(--sp-12);
   background: var(--surface);
   padding: 7px var(--sp-16);
   font-size: var(--fs-12);
@@ -4281,25 +4299,42 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   box-shadow: 0 3px 12px -3px rgba(0, 0, 0, 0.15);
 }
 .ctx-item { display: inline-flex; align-items: center; gap: var(--sp-4); min-width: 0; }
-.ctx-project-wrap { position: relative; display: inline-flex; min-width: 0; }
+.ctx-item > .icon { flex: none; }
+.ctx-strip > .ctx-item:last-child { flex: none; margin-left: auto; white-space: nowrap; }
+.ctx-project-wrap,
+.ctx-branch-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 1 1 0;
+  min-width: 40px;
+  max-width: max-content;
+}
 .ctx-project-switch {
+  max-width: 100%;
   color: var(--text-2);
   font: inherit;
   border-radius: var(--r-4);
   padding: 2px var(--sp-4);
-  margin: -2px calc(var(--sp-4) * -1);
   transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 .ctx-project-switch:hover,
 .ctx-project-switch[aria-expanded="true"] { color: var(--text); background: var(--surface-hover); }
 .ctx-project-switch .icon:last-child { width: 11px; height: 11px; color: var(--text-faint); }
+.ctx-project-switch > span,
+.ctx-git-switch > span,
+.ctx-notice-ok > span,
+.ctx-notice-error > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ctx-git-switch {
-  max-width: min(280px, 40vw);
+  max-width: min(280px, 100%);
   color: var(--text-2);
   font: inherit;
   border-radius: var(--r-4);
   padding: 2px var(--sp-4);
-  margin: -2px calc(var(--sp-4) * -1);
   transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 .ctx-git-switch:hover { color: var(--text); background: var(--surface-hover); }
@@ -4358,16 +4393,24 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 
 /* Branch switch trigger + uncommitted diffstat in the context strip. */
-.ctx-branch-wrap { position: relative; display: inline-flex; min-width: 0; }
 .ctx-git-switch .icon:last-child { width: 11px; height: 11px; color: var(--text-faint); }
 .ctx-git-switch:disabled { cursor: default; }
 .ctx-git-switch:disabled:hover { color: var(--text-2); background: transparent; }
 .ctx-branch-menu .ctx-project-list .menu-item { font-size: var(--fs-12); }
 .ctx-notice-ok { color: var(--green); }
 .ctx-notice-error { color: var(--red); }
+.ctx-git-summary {
+  font: inherit;
+  border-radius: var(--r-4);
+  padding: 2px var(--sp-4);
+  margin: -2px calc(var(--sp-4) * -1);
+  transition: background var(--dur-fast) var(--ease);
+}
+.ctx-git-summary:hover { background: var(--surface-hover); }
 .ctx-diffstat {
   display: inline-flex;
   align-items: baseline;
+  white-space: nowrap;
   gap: var(--sp-6);
   font-variant-numeric: tabular-nums;
 }
@@ -4434,14 +4477,14 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .create-project-head h2 {
   margin: 3px 0 0;
-  font-size: 24px;
+  font-size: calc(24px * var(--text-font-scale));
   line-height: 1.2;
   letter-spacing: -0.025em;
 }
 .create-project-kicker {
   color: var(--accent);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--text-font-scale));
   font-weight: var(--fw-semibold);
   letter-spacing: 0.12em;
 }
@@ -4758,7 +4801,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   cursor: pointer;
 }
 .complete-item:hover, .complete-item.sel { background: var(--accent-soft); color: var(--accent); }
-.complete-item .ci-type { margin-left: auto; font-size: 10px; color: var(--text-faint); }
+.complete-item .ci-type { margin-left: auto; font-size: calc(10px * var(--text-font-scale)); color: var(--text-faint); }
 
 /* ---------- 底部运行面板 ---------- */
 .bottom-panel {
@@ -4785,8 +4828,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .bottom-panel.resizing { transition: none; }
 .bp-reveal {
   position: absolute;
-  /* 让位 minimap 竖条：偏移惯例同 .mm-preview（--minimap-w + 8px） */
-  right: calc(var(--sp-10) + var(--minimap-w) + 8px);
+  /* Minimap ends above the composer; use its reserved right gutter here so
+     this button stays outside the composer instead of covering its corner. */
+  right: var(--sp-10);
   bottom: var(--sp-8);
   z-index: var(--z-fab);
   background: var(--surface);
@@ -4864,13 +4908,13 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .term-item.active .ti-icon { background: var(--accent-soft); color: var(--accent); }
 .term-item .ti-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .term-item .ti-name { font-family: var(--font-mono); font-size: var(--fs-11); font-weight: var(--fw-medium); color: var(--text); }
-.term-item .ti-sub { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint); }
+.term-item .ti-sub { font-family: var(--font-mono); font-size: calc(9.5px * var(--text-font-scale)); color: var(--text-faint); }
 .term-item .ti-badge {
   flex: none;
   height: 15px;
   padding: 0 4px;
   border-radius: var(--r-4);
-  font-size: 9px;
+  font-size: calc(9px * var(--text-font-scale));
   font-weight: var(--fw-bold);
   display: inline-flex; align-items: center;
 }
@@ -4893,7 +4937,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   padding: 5px var(--sp-12);
   border-bottom: 1px solid var(--border);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   color: var(--text-3);
 }
 .term-out { flex: 1; overflow-y: auto; padding: var(--sp-8) var(--sp-12); }
@@ -4993,7 +5037,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   border-top: 0;
   border-radius: 0 0 var(--r-6) var(--r-6);
   padding: var(--sp-8) var(--sp-10);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   margin: 0;
   color: var(--text-2);
   overflow-x: auto;
@@ -5336,7 +5380,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   border-radius: 999px;
   background: var(--surface-3);
   color: #fff;
-  font-size: 10px;
+  font-size: calc(10px * var(--text-font-scale));
   line-height: 1;
   max-width: 100%;
   overflow: hidden;
@@ -5563,7 +5607,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .ch-file-diff .chip { margin: var(--sp-6) var(--sp-12) 0; }
 .ch-file-diff .diff-head-row {
   padding: 4px var(--sp-10);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   color: var(--text-3);
   background: color-mix(in srgb, var(--surface-2) 70%, var(--surface));
 }
@@ -5638,7 +5682,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--font-mono);
-  font-size: 10px; font-weight: var(--fw-semibold);
+  font-size: calc(10px * var(--text-font-scale)); font-weight: var(--fw-semibold);
   letter-spacing: 0;
 }
 /* Now a real <button> (it opens the diff and was mouse-only as a div), so the
@@ -5661,12 +5705,12 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .ch-row .ch-file { font-family: var(--font-mono); font-size: var(--fs-11); flex: 1; min-width: 0; text-align: left; }
 /* +/− 计数成组右对齐，tabular 数字不跳动 */
 .ch-delta { display: inline-flex; align-items: baseline; gap: var(--sp-4); flex: none; }
-.ch-add { color: var(--green); font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
-.ch-del { color: var(--red); font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.ch-add { color: var(--green); font-family: var(--font-mono); font-size: calc(10.5px * var(--text-font-scale)); font-variant-numeric: tabular-nums; }
+.ch-del { color: var(--red); font-family: var(--font-mono); font-size: calc(10.5px * var(--text-font-scale)); font-variant-numeric: tabular-nums; }
 /* 归属信息（主 Agent / deps 子 Agent / 开始前已存在 / 未跟踪）：低调胶囊 */
 .ch-note {
   flex: none;
-  font-size: 10px;
+  font-size: calc(10px * var(--text-font-scale));
   color: var(--text-faint);
   background: var(--surface-2);
   padding: 1px 6px;
@@ -5730,7 +5774,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   justify-content: center; padding: 2px 0;
   border: none;
   font-family: inherit;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
 }
 .dl.collapse:hover { color: var(--accent); }
 /* Split 模式。
@@ -5781,7 +5825,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .pv-console {
   flex: none; height: 120px; border-top: 1px solid var(--border);
   overflow-y: auto; padding: var(--sp-8) var(--sp-12);
-  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; color: var(--text-2);
+  font-family: var(--font-mono); font-size: calc(10.5px * var(--text-font-scale)); line-height: 1.6; color: var(--text-2);
   background: var(--code-bg);
 }
 /* 模拟页面内容 */
@@ -5797,7 +5841,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .pv-el-hover { outline: 2px solid var(--accent) !important; outline-offset: 1px; }
 .pv-el-tag {
   position: absolute; background: var(--accent); color: var(--text-on-accent);
-  font-size: 10px; padding: 1px 6px; border-radius: var(--r-4); z-index: var(--z-topbar);
+  font-size: calc(10px * var(--text-font-scale)); padding: 1px 6px; border-radius: var(--r-4); z-index: var(--z-topbar);
   font-family: var(--font-mono); pointer-events: none;
 }
 /* Preview 错误 */
@@ -5815,7 +5859,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: flex; align-items: center; gap: var(--sp-8);
 }
 .pv-error .pe-body { padding: var(--sp-12) var(--sp-14); font-size: var(--fs-12); color: var(--text-2); }
-.pv-error pre { margin-top: var(--sp-8); background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--r-6); padding: var(--sp-8); font-size: 10.5px; overflow-x: auto; }
+.pv-error pre { margin-top: var(--sp-8); background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--r-6); padding: var(--sp-8); font-size: calc(10.5px * var(--text-font-scale)); overflow-x: auto; }
 
 /* Agent Hub
    The row is a plain container now — it used to be a clickable div wrapping two
@@ -5853,7 +5897,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .agent-row .ag-name { font-weight: var(--fw-semibold); font-size: var(--fs-12); display: flex; align-items: center; gap: var(--sp-6); flex-wrap: wrap; }
 .agent-row .ag-task { font-size: var(--fs-11); color: var(--text-2); }
 .agent-row .ag-meta {
-  font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono);
+  font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-faint); font-family: var(--font-mono);
   display: flex; gap: var(--sp-10);
   /* Token counts and costs sit in a column of rows; proportional digits make
      them jitter as values change. */
@@ -5999,7 +6043,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   margin-left: auto;
   flex: none;
 }
-.cmdk-item .ci-kind { margin-left: auto; font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); }
+.cmdk-item .ci-kind { margin-left: auto; font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-faint); font-family: var(--font-mono); }
 .cmdk-list:has(.cmdk-empty) {
   display: flex;
 }
@@ -6033,7 +6077,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .scenario-fab:hover { border-color: var(--accent); color: var(--accent); }
 .scenario-menu { width: 300px; max-height: 420px; overflow-y: auto; }
 .scenario-menu .menu-item .sc-no {
-  font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+  font-family: var(--font-mono); font-size: calc(10px * var(--text-font-scale)); color: var(--text-faint);
   width: 20px; flex: none;
 }
 
@@ -6194,10 +6238,15 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   padding-right: var(--sp-16);
   background: radial-gradient(620px 340px at 50% 16%, rgba(124, 92, 240, 0.06), transparent 72%);
 }
+/* 欢迎区在整块工作区里垂直居中（与 ui_reference/ver1 一致）。写 auto 而不是
+   justify-content: center：内容比可视区高时 auto 边距归零，从顶部开始滚动，
+   滚动容器不会把顶部内容顶到够不着的地方。水平方向仍由 auto 边距居中。 */
 .convo-wrap.is-empty .convo-doc {
-  margin: 0 auto;
+  margin-block: auto;
   width: 100%;
   max-width: 960px;
+  /* 与顶部 24px 对称：doc 自己的上下内边距不相等时，居中后的内容仍会整体偏上 4px。 */
+  padding-bottom: var(--sp-24);
   padding-right: var(--sp-32);
 }
 .convo-wrap.is-empty .minimap { display: none; }
@@ -6219,7 +6268,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   width: 100%;
   max-width: 100%;
   margin: 0 auto;
-  padding: var(--sp-32) 0 var(--sp-24);
+  /* 上下等距：欢迎区靠 .convo-doc 的 auto 边距居中，块内上下留白必须对称，
+     否则可见内容会比盒子中心偏上 4px。16px 只够在贴边时垫一下，居中时的
+     呼吸留白由 auto 边距给；整块因此矮 24px，1440×900 这类窗口也能真正居中。 */
+  padding: var(--sp-16) 0;
 }
 
 .convo-empty .ce-anim {
@@ -6260,7 +6312,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 
 .ce-greet {
   margin: 0 0 var(--sp-6);
-  font-size: 32px;
+  font-size: calc(32px * var(--text-font-scale));
   line-height: 1.25;
   font-weight: var(--fw-semibold);
   letter-spacing: -0.02em;
@@ -6302,7 +6354,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .ce-heat-pi {
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-font-scale));
   font-weight: 700;
   color: #7b5cf0;
 }
@@ -6325,7 +6377,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   position: relative;
   height: 11px;
   width: calc(var(--ce-weeks, 53) * (var(--ce-cell) + var(--ce-gap)) - var(--ce-gap));
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--text-font-scale));
   color: var(--text-faint);
   line-height: 1;
   animation: ce-in 0.4s var(--ease-out) backwards;
@@ -6342,7 +6394,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: grid;
   grid-template-rows: repeat(7, var(--ce-cell));
   row-gap: var(--ce-gap);
-  font-size: 9px;
+  font-size: calc(9px * var(--text-font-scale));
   color: var(--text-faint);
   animation: ce-in 0.4s var(--ease-out) backwards;
   animation-delay: 740ms;
@@ -6401,12 +6453,13 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: calc(10px * var(--text-font-scale));
   color: var(--text-faint);
 }
 .ce-heat-legend i { width: 9px; height: 9px; border-radius: 2px; background: var(--ce-l0); }
 
-.ce-recent { width: 100%; margin: 0 0 var(--sp-20); }
+/* 最近对话是欢迎区最后一段：不再给下边距，否则垂直居中的可视重心会偏上 10px。 */
+.ce-recent { width: 100%; margin: 0; }
 .ce-recent-head {
   display: flex;
   align-items: baseline;
@@ -6479,17 +6532,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   color: var(--text-faint);
 }
 .ce-meta-sep { width: 1px; height: 10px; background: var(--border-strong); }
-
-.ce-tips {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: var(--sp-6) var(--sp-16);
-  font-size: var(--fs-11);
-  color: var(--text-faint);
-}
-.ce-tip { display: inline-flex; align-items: center; gap: var(--sp-6); }
 
 :root[data-theme="dark"] .convo-empty {
   --pi-line: rgba(139, 108, 246, 0.5);

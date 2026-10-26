@@ -1,3 +1,4 @@
+import type { ModelAdaptationInput, ModelAdaptationResult, ModelCatalogRefreshResult } from "@omp-studio/client-contract";
 /**
  * Injected service ports consumed by {@link StudioHostClientFacade}.
  *
@@ -434,6 +435,8 @@ export type HostRuntimeInstallProbe = () => RuntimeInstallState | Promise<Runtim
  * the facade only publishes the public read model and write receipts.
  */
 export interface HostModelsService {
+  resolveAdaptation?(input: ModelAdaptationInput): Promise<ModelAdaptationResult>;
+  refreshCatalog?(): Promise<ModelCatalogRefreshResult>;
   get(): ModelConfigReadModel | Promise<ModelConfigReadModel>;
   upsertProvider(input: ModelProviderUpsertInput): ConfigWriteResult | Promise<ConfigWriteResult>;
   deleteProvider(input: { readonly id: string; readonly expectedHash?: string }): ConfigWriteResult | Promise<ConfigWriteResult>;
@@ -593,6 +596,11 @@ export interface HostGitHubService {
 export interface HostUsageService {
   get(): TokenUsageReadModel | Promise<TokenUsageReadModel>;
   openDashboard(): ConfigWriteResult | Promise<ConfigWriteResult>;
+  /**
+   * Loopback endpoint of the native statistics dashboard. Starts the dashboard
+   * when nothing is listening yet, so `available` means a server answered.
+   */
+  dashboard?(): Promise<import("@omp-studio/client-contract").StatsDashboardReadModel>;
 }
 
 /** Input accepted by the semantic interaction responder. */

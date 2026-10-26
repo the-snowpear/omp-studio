@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type { AgentBtwOperation, AgentBtwState } from "@omp-studio/studio-protocol";
@@ -29,7 +30,7 @@ export function AgentBtwPane({client,sessionId,agentId,available}:{client:Studio
  return <section className="btw-panel" aria-label={zh?"子代理 BTW":"Child agent BTW"}>
   <p className="small muted">{agentId} · {preview?(zh?"演示":"Demo"):(state?.targetSessionId??"—")} · {zh?"独立话题，使用此子代理的上下文":"Independent topics using this child's context"}</p>
   {!preview&&!available?<p role="status">{zh?"当前 Runtime 或目标不支持子代理 BTW":"This Runtime or target does not support child BTW"}</p>:null}
-  <select className="select" aria-label={zh?"BTW 话题":"BTW topic"} value={topic} disabled={busy||running} onChange={event=>{const next=event.target.value;setTopic(next);setState(current=>current?{...current,turns:preview?(demoHistory.current[next]??[]):[]}:current);}}><option value="">{zh?"新话题":"New topic"}</option>{state?.topics.map(item=><option key={item.topicId} value={item.topicId}>{item.question}</option>)}</select>
+  <AppSelect className="select" aria-label={zh?"BTW 话题":"BTW topic"} value={topic} disabled={busy||running} onChange={event=>{const next=event.target.value;setTopic(next);setState(current=>current?{...current,turns:preview?(demoHistory.current[next]??[]):[]}:current);}}><option value="">{zh?"新话题":"New topic"}</option>{state?.topics.map(item=><option key={item.topicId} value={item.topicId}>{item.question}</option>)}</AppSelect>
   <div className="btw-body">{(topic?state?.turns:[])?.filter((turn,index,turns)=>index!==turns.length-1||turn.answer!==live?.text).map((turn,index)=><div key={index}><p>{turn.question}</p><MarkdownText text={turn.answer}/></div>)}{live?<><p>{live.question}</p><MarkdownText text={live.text} {...(running?{streaming:true}:{})}/></>:null}</div>
   {error?<p role="alert">{error}</p>:null}{live?.error?<p role="alert">{live.error.message}</p>:null}
   <form onSubmit={event=>{event.preventDefault();void send();}}><textarea className="input" aria-label={zh?"向子代理提问":"Ask child agent"} maxLength={65536} value={draft} onChange={event=>setDraft(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"&&!event.shiftKey&&!event.nativeEvent.isComposing){event.preventDefault();if(!running&&!busy)void send();}}}/>

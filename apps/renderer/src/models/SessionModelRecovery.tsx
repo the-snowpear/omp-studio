@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import type {
   ClientBootstrap,
@@ -194,7 +195,7 @@ export function SessionModelRecovery({
       {error ? <p role="alert">{error}</p> : null}
       {notice ? <p role="status">{notice}</p> : null}
       <div className="session-recovery-actions">
-        <select
+        <AppSelect
           className="select"
           aria-label={zh ? "替代模型" : "Replacement model"}
           value={model}
@@ -212,7 +213,7 @@ export function SessionModelRecovery({
               {row.label} · {row.model}
             </option>
           ))}
-        </select>
+        </AppSelect>
         <button
           className="btn primary"
           disabled={busy || !model || (!preview && !threadId)}

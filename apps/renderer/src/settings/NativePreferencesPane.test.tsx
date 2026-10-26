@@ -1,3 +1,4 @@
+import { selectOption } from "../test/selectOption";
 import {
   cleanup,
   fireEvent,
@@ -31,7 +32,7 @@ it("preview applies and clears a title override without writing Runtime configur
   );
   const field = await screen.findByRole("combobox", { name: "标题图标" });
   const row = field.closest(".set-row")!;
-  fireEvent.change(field, { target: { value: JSON.stringify("boring") } });
+  selectOption(field, "仅标题");
   fireEvent.click(
     within(row as HTMLElement).getByRole("button", { name: "应用" }),
   );
@@ -46,7 +47,7 @@ it("preview applies and clears a title override without writing Runtime configur
   );
   fireEvent.click(screen.getByRole("button", { name: "确认" }));
   await waitFor(() =>
-    expect((field as HTMLSelectElement).value).toBe(JSON.stringify("emoji")),
+    expect((field as HTMLButtonElement).textContent).toBe("Emoji"),
   );
   expect(client.command).not.toHaveBeenCalled();
   expect(client.query).not.toHaveBeenCalled();

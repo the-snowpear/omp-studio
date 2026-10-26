@@ -1,3 +1,4 @@
+import { selectOption } from "./test/selectOption";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { conversationPages } from "@omp-studio/testkit";
@@ -598,7 +599,7 @@ it("previews a configured agent spawn without sending Host queries or writes", a
  const dialog = await screen.findByRole("dialog", { name: "创建代理" });
  fireEvent.change(within(dialog).getByRole("textbox", { name: "任务描述" }), { target: { value: "检查模型配置页面的布局" } });
  expect(within(dialog).queryByRole("combobox", { name: "本次主模型" })).toBeNull();
- fireEvent.change(within(dialog).getByRole("combobox", { name: "本次思考强度" }), { target: { value: "hi" } });
+ selectOption(within(dialog).getByRole("combobox", { name: "本次思考强度" }), "深入");
  fireEvent.click(within(dialog).getByRole("button", { name: "预览创建" }));
  await screen.findByText(/演示任务已配置/); expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
 });

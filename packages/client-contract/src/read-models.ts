@@ -1,3 +1,5 @@
+import type { ModelThinkingConfig } from "./model-thinking.js";
+import type { ModelParameterValues, ModelParameterSources, ModelCatalogStatus } from "./model-adaptation.js";
 /**
  * Public read models for the P0 surface: environment, capability, diagnostic,
  * session history and home pages (FRONTEND_INTEGRATION.md §12.1).
@@ -350,6 +352,21 @@ export interface TokenUsageReadModel {
   readonly unavailableReason?: string;
 }
 
+/**
+ * Loopback endpoint of the native `omp stats` dashboard, which the statistics
+ * page embeds. The Host starts the dashboard on demand and probes it with its
+ * own identity header, so `available` reflects a server that answered — not a
+ * path that was found on disk. `url` is loopback-only and carries a deep link
+ * to the requested section and range.
+ */
+export interface StatsDashboardReadModel {
+  readonly available: boolean;
+  /** Loopback dashboard URL with a `#/<section>?range=<range>` deep link. */
+  readonly url?: string;
+  /** User-facing reason when no dashboard answered. */
+  readonly reason?: string;
+}
+
 /** Wire API used by a provider or custom model in `models.yml`. */
 export type ModelApiKind =
   | "openai-completions"
@@ -440,6 +457,9 @@ export interface ModelProviderRemoteCompaction {
 
 /** Partial `models.yml` modelOverrides / extra custom-model fields. */
 export interface ModelOverridePatch {
+  readonly maxContextWindow?: number;
+  readonly thinkingConfig?: ModelThinkingConfig | null;
+  readonly parameterSources?: ModelParameterSources;
   /** Native compat.bedrockMessagesApi; fits anthropic-messages payloads to Bedrock constraints. */
   readonly bedrockMessagesApi?: boolean;
   readonly kind?: import("./model-kinds.js").ModelKind;
@@ -470,6 +490,9 @@ export interface ModelExecutionMetadata {
   readonly compatibility?: { readonly preferWebsockets?: boolean; readonly useResponsesLite?: boolean; readonly toolMode?: "code_mode_only" };
 }
 export interface ModelCatalogEntry extends ModelExecutionMetadata {
+  readonly thinkingConfig?: ModelThinkingConfig | null;
+  readonly parameters?: ModelParameterValues;
+  readonly parameterSources?: ModelParameterSources;
   readonly bedrockMessagesApi?: boolean;
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
@@ -573,6 +596,7 @@ export interface ModelRoleRecord {
 }
 
 export interface AvailableModelRecord extends ModelExecutionMetadata {
+  readonly thinkingConfig?: ModelThinkingConfig | null;
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly provider: string;
@@ -724,6 +748,7 @@ export interface ModelWebSearchCredentialRemoveInput {
  * never appear. `generated*Yml` is Host-built and already redacted.
  */
 export interface ModelConfigReadModel {
+  readonly catalog?: ModelCatalogStatus;
   readonly providers: ReadonlyArray<ModelProviderRecord>;
   readonly presets: ReadonlyArray<ModelPresetGroup>;
   readonly roles: ReadonlyArray<ModelRoleRecord>;

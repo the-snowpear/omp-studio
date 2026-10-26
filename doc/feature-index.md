@@ -48,6 +48,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 壳布局、侧栏、底栏、路由 | `apps/renderer/src/App.tsx` | 工作台主文件；Explorer 真树 `RealFileTree` 也在这里 |
 | 会话行 ⋯ 菜单 / 行右键 | `apps/renderer/src/App.tsx`（`ThreadRowMenu` / `ThreadActionMenuItems` / `runThreadRowAction`） | 顶栏「对话选项」同款七项（弹层 208px 稍窄）；⋯ 点击锚按钮、行右键贴光标，同一弹层；作用于所在行会话：非当前会话先 `openHistoryEntry`（`resumeForAction`，必要时切工作区并 resume）再执行；预览演示行会话动作禁用（写表面不伪造目标）；临时行仅当为当前活动会话时可用，草稿行保留原生右键 |
 | 悬停 tip | `apps/renderer/src/TipHost.tsx` | `[data-tip]` 门户气泡；不用原生 `title`；文案短词，未实现加「（暂未实现）」 |
+| 通用单选下拉 | `apps/renderer/src/AppSelect.tsx`、`styles/components.css` | 普通单选统一用 `AppSelect` + `option` / `optgroup`；受控 value/onChange、主题、键盘、超过 10 项自动搜索；`npm run check:selects` 阻止产品源码新增原生 select |
 | 首页 | `apps/renderer/src/HomePage.tsx` | `home.get` / `usage.get` / 历史入口 |
 | 首页身份 / 头像 | `apps/renderer/src/settings/operatorProfile.ts`、`avatarCrop.ts`、`AvatarCropDialog.tsx`、`HomePage.tsx`；桌面 `chrome-profile.ts` | 显示名本地记忆；选图后圆形裁切；头像写入 `%APPDATA%\omp-studio\profile\`（覆盖，无历史）；NSIS 卸载删除 |
 | 历史 / 项目会话缓存 | `apps/renderer/src/HistoryPage.tsx`、`sidebar/useProjectHistories.ts`、`sidebar/provisionalThread.ts`、`studio-host/src/session-catalog.ts` | `history.list`；侧栏按 `workspaceId` 独立加载 / 分页 / 刷新；只有 title/session/model/thinking 元数据、尚无 `message` 的空白 JSONL 不进入历史；草稿非空或提示词已发送时显示 Renderer 临时行，正式 LLM 标题到达后按 `sessionId` 接管；归档成功的 `sessionId` 会阻止迟到的 Workbench 状态复活临时行；resume / archive / drop / delete（历史页「⋮ → 删除会话」走 `session.delete`，Host 清 transcript/artifacts/遥测/绑定/租约/pin 残留） |
@@ -136,6 +137,7 @@ Renderer 读当前查看会话：`apps/renderer/src/telemetry/useViewedSessionTe
 | 发现 / 插件根 | — | `host-client-api/src/omp-discovery/**` | — |
 | Token 用量 | Home / `usage/tokenUsage.ts` | `omp-usage-adapter.ts`、`usage.get` | 聚合 `omp stats.db`，不是演示数字 |
 | 动态价格 / 图片能力 | `ModelConfigPage.tsx` | `omp-models-adapter.ts`；`client-contract/src/model-pricing.ts` 解析只读分时价/长上下文价；固定覆盖与价格元数据分开 | 保留上游 catalog policy，历史费用只读已记录 usage |
+| 模型参数自动适配 | `models/ModelParameterEditor.tsx`、`modelParameterDraft.ts`、`fetchedModels.ts`；预览 `preview/modelAdaptationPreview.ts` | `models.adaptation.resolve`、`models.catalog.refresh` → `host-client-api/src/model-adaptation.ts`；完整 thinking / 原始参数与来源旁文件由 `omp-models-adapter.ts` 读写；目录生成 `scripts/model-catalog.mjs` | 只写原生 models.yml 支持字段，保留 Runtime 请求编码；[使用与维护](../docs/model-adaptation.md) |
 
 预览 fixture：`hubPreview.ts`、`skillsPreview.ts`、`capabilitiesPreview.ts`、`preview/modelConfigFixtures.ts`（含 `createPreviewFetchedModels()`）。不要把这些写进 Host。
 
@@ -146,6 +148,7 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 功能 | UI | 实现 |
 |---|---|---|
 | 状态 / 暂存 / 提交 | `apps/renderer/src/git/GitStatusPanel.tsx` | `apps/desktop/src/git-service.ts` → `git.execute` |
+| Composer Git 增删统计 | `apps/renderer/src/App.tsx` 项目上下文条 | 点击统计展开右侧 Git 页签；预览 / 真实共用 `onOpenGit` |
 | 面板拆分 / 更多操作 | `git/GitPanelSplit.tsx`、`GitMoreActionsMenu.tsx` | 操作 kind 见 `client-contract/src/git.ts` `GitOperation` |
 | 文件树 git 徽章 | `git/treeStatus.ts`；`App.tsx` `RealFileTree` | `git.repository.get` |
 | Explorer 读写圆点 | `conversation/explorerFileActivity.ts`；`App.tsx` `RealFileTree` | 主会话 `liveTools`：读红点、写绿点；预览用 fixture `reading`/`writing` |
@@ -166,7 +169,7 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 底栏终端 | `apps/renderer/src/TerminalPane.tsx` | `terminal-ipc.ts`、`terminal-pty.ts` |
 | Shell 录制 / 回放 | `recordings/TerminalRecordingControls.tsx`、`RecordingPlayer.tsx`、`format.ts`、`recording.worker.ts`；产物库录制项 | `terminal-recording.ts` + 固定 terminal recording IPC；真实 PTY 输出流写入产物库；支持 `.studiocast` 和上游 `.ompcast` 只读回放，无额外 AgentSession/TUI |
 | 标题栏 overlay | 壳 | `titlebar-overlay.ts` |
-| 应用图标 | 侧栏 / 关于 `AppIcon`；`public/icon.png`、`favicon.ico` | Renderer 自带图标资源；桌面运行时在 Windows 设置 `AppUserModelId` 并把 `resources/icon.ico` 注入窗口（任务栏/窗口身份）；安装包由 `packaging/electron-builder.yml` 将同一 ICO 写入 EXE，并创建带图标的桌面与开始菜单快捷方式 |
+| 应用图标 | 侧栏 / 关于 `AppIcon`；`public/icon.png`、`favicon.ico` | Renderer 自带图标资源；桌面运行时在 Windows 设置 `AppUserModelId`（`app-icon.ts` `resolveAppUserModelId`；`npm run preview` 经 `OMP_APP_USER_MODEL_ID` 用独立 `.preview` ID 与`OMP Studio (Preview).lnk`，不得与安装版共用——开始菜单里同 ID 的第二个快捷方式会让任务栏/通知变成该快捷方式的图标）并把 `resources/icon.ico` 注入窗口（任务栏/窗口身份）；安装包由 `packaging/electron-builder.yml` 将同一 ICO 写入 EXE，并创建带图标的桌面与开始菜单快捷方式 |
 | 系统通知 | — | `chrome-notify.ts` |
 | 系统托盘 / 关闭到托盘 | —（纯 Main 行为，无 Renderer 面，不进 preload/client-contract） | `tray.ts`（Electron-free，Main 注入 Tray/Menu/nativeImage：菜单文案 zh/en、左键打开、首隐气泡与 `%APPDATA%\omp-studio\tray-hint-shown` 标记、退出确认框文案）+ `main.ts`（close 事件拦截为 hide，托盘不可用时保持关窗即退出；`DesktopWindow.show()`）+ `composition.ts`（`requestQuit` 确认门：`host-composition.ts` `isBusy()` 以 residents 流式/压缩为准，回退当前会话 snapshot；`isQuitting` 注入窗口工厂放行真实退出） |
 | 外部 https 链接 | 启动提示 GitHub 卡；`ompStudioChrome.openUrl` | `chrome-open-url.ts` → `shell.openExternal`（系统默认浏览器，不是 Electron 窗）；只接受 https |
@@ -174,6 +177,8 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 应用更新（GitHub Release） | AppUpdateDialog、settings/appUpdate、settings/updates、settings/DesktopUpdateRecovery；预览 PREVIEW_APP_UPDATE / PREVIEW_DESKTOP_RECOVERY | Main update-coordinator / unified-updates-ipc 管理后台准备、持久化事务、统一重启；update-discovery 验签按组件/通道/架构发现；differential-artifact + electron-update-adapter 分块下载/全量回退及静默 NSIS；共享 v2 清单和 ZIP 在 runtime-installer。旧 chrome-updates 保留本地导入与诊断维护；新打包应用禁用旧在线 startApp/startRuntime。 |
 | Plan 另存为对话框 | `App.tsx` `pickPlanSaveTarget` / `savePlanAndQuit`；`deck/PlanCard.tsx` 按钮 | `workspace-shell-shared.ts`、`workspace-shell-ipc.ts`、`plan-save-path.ts`（原生另存为，默认 `<工作区>/PLAN.md`，回传工作区相对路径；越界拒绝）→ Bridge `mode.plan.review.saveAndQuit` |
 | 设置页 | `SettingsPage.tsx`、`settings/tabs.tsx` | 本地设置 + 少量 Host query |
+| 背景（图片 / 视频 / 动图） | `background/BackgroundSettingsPane.tsx`、`AppBackgroundLayer.tsx`、`BackgroundProvider.tsx`、`backgroundLibrary.ts`；预览 `preview/backgroundPreview.ts` | 纯 Renderer 本地：偏好 `omp.background`、文件 IndexedDB `omp-studio-backgrounds`；`[data-backdrop]` 让结构壳、卡片和控件按层次透出（菜单 / 弹窗保留高不透明度与背景模糊）；`ompStudioChrome.setTheme` 仅额外带标题栏 tint。不进 Host / client-contract |
+| 字体与字号 | `settings/FontSettings.tsx`、`settings/typography.ts`、`styles/typography.css`；`terminalTheme.ts` | 常规页三组独立字体与字号；本地设置、系统字体搜索／手填、预览示例隔离；xterm 原实例更新及虚拟行高重测；使用说明 `docs/fonts.md` |
 | 预测输入 | `composer/useWordPrediction.ts`、`settings/PredictionSettingsPane.tsx`；desktop `prediction.ts` | 原生 WordCompletionProvider；默认本地 n-gram，模型下载和外部历史显式选择；私有通道不进入 Bridge 事件 |
 | 标题图标与短码 | `history/useSessionTitles.ts`、`history/SessionTitleMark.tsx` | `session.titles.inspect`；原生当前/保存标题元数据；保留稳定会话身份与现有原生重新生成流程 |
 | 原生运行偏好 | `settings/NativePreferencesPane.tsx` | `preferences.native.get/set/clearOverride`；静态原生设置句柄，Advisor/标题/OTLP；范围与生效来源；OTLP 下次启动生效 |
@@ -353,8 +358,7 @@ GUI 适配及本地验收记录：[实施记录](../docs/migrations/omp-18.4.4-g
 | 独立任务范围 | `AgentHub.tsx` 的 `solutionSpace` 输入 | `agent.spawn` → `agent-hub-service.ts` → 原生 task |
 | Benchmark 详细阶段 | `models/BenchmarkPane.tsx`、`preview/benchmarksPreview.ts` | `benchmarks-protocol.ts`、`services/benchmark-service.ts` → 原生 detailed benchmark |
 | 本地输入预测、语料与模型管理 | `composer/ChipComposer.tsx`、`settings/PredictionSettings.tsx`；预览 `preview/predictionPreview.ts` | `prediction.query` 经 Facade/controller/Bridge 临时查询；`prediction.control` 管理语料和显式下载；overlay `services/prediction-service.ts` + 原生 `predict/client.ts`、`predict/daemon.ts` |
-| 统计、缓存与历史同步 | `StatisticsPage.tsx`；预览 `preview/statsPreview.ts` | `contracts/stats.ts`、Facade `stats.read`；Desktop `stats-worker.ts` 管理独立原生 `studio/stats-worker.ts`，复用统计数据库、同步锁、聚合与过滤；不创建 AgentSession |
-| Frustration 估算、确认、取消与失败重试 | `FrustrationPane.tsx` | `stats.frustration` 经 Host 幂等回执及私有 worker 通道；原生 Judge 分析，单次报价绑定范围、待分析集合和 Judge，重试仅包含耗尽重试的失败文本 |
+| 统计页（整页内嵌原生面板） | 入口在首页 Token 用量卡右上角（侧栏与二级导航刻意不再放，避免重复入口）；`StatisticsPage.tsx` 把二级页头以下整块区域交给 iframe，**不加工具条/外框/内边距**（面板自带范围切换与 Sync DB）；深链 `#/overview?range=all`；只有连接中与失败态是 Studio 自己的界面；预览 fixture 在 `preview/fixtures.ts` 的 `PREVIEW_STATS_TOTALS`，不伪造内嵌 | `stats.dashboard` → `omp-usage-adapter.ts` 的 `dashboard()`：先探测 `x-omp-stats-dashboard` 身份头，未运行则用**托管 Runtime 的 omp.exe** 拉起 `omp stats`（PATH 兜底）并轮询就绪；并发调用共享一次启动。CSP `frame-src` 只放行 `http://127.0.0.1:3847` |
 | MCP instructions 策略 | `CapabilitiesPage.tsx` MCP 行；预览 `capabilitiesPreview.ts` | `mcp.setInstructions` → `omp-mcp-adapter.ts`，只修改生效的原生来源，保留连接信息，新会话加载 |
 | Bedrock Messages 请求兼容 | `ModelConfigPage.tsx` 模型高级设置 | `ModelOverridePatch.bedrockMessagesApi` → `omp-models-adapter.ts` 的 `compat.bedrockMessagesApi`；`provider-yaml-draft.ts` 保持 YAML 预览与写入一致 |
 | 子代理 BTW、独立话题与追问 | `btw/AgentBtwPane.tsx`；Agent Hub BTW 标签、`SubagentInspectCard.tsx` 与侧栏入口；预览 `preview/agentBtwPreview.ts` | `agent.btw.read/ask/abort` → Workbench `services/agent-btw-service.ts`；原生 child AgentSession + `StudioBtwService`，父会话/目标实例凭据绑定，目标失效中止；不使用主 BTW 状态槽 |

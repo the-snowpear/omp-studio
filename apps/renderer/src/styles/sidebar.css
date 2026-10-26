@@ -370,7 +370,7 @@
   text-align: left;
 }
 .load-more:hover { background: var(--surface-hover); color: var(--text-2); }
-.load-more .lm-count { margin-left: auto; color: var(--text-faint); font-size: 10.5px; }
+.load-more .lm-count { margin-left: auto; color: var(--text-faint); font-size: calc(10.5px * var(--text-font-scale)); }
 .thread .t-title {
   flex: 1 1 0;
   min-width: 0;
@@ -393,7 +393,7 @@
   transition: --title-fade var(--dur-fast) var(--ease-out), --title-clear var(--dur-fast) var(--ease-out);
 }
 .thread .t-meta {
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   color: var(--text-faint);
   flex: none;
   margin-left: auto;
@@ -432,7 +432,7 @@
 .t-wait.chip.xs {
   height: 20px;
   padding: 0 10px;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
 }
 /* 与项目头 .tw 同宽的文件夹列：运行中在此转圈，空闲留空，标题左缘对齐。 */
 .thread .t-gutter {
@@ -459,7 +459,7 @@
   border-radius: var(--r-full);
   background: var(--accent);
   color: var(--text-on-accent);
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--text-font-scale));
   font-weight: var(--fw-semibold);
   display: inline-flex;
   align-items: center;
@@ -751,7 +751,7 @@
   border-radius: var(--r-full);
   background: var(--accent);
   color: var(--text-on-accent);
-  font-size: 11px;
+  font-size: calc(11px * var(--text-font-scale));
   font-weight: var(--fw-semibold);
   display: flex;
   align-items: center;
@@ -808,7 +808,7 @@
 .omp-menu-profile .avatar {
   width: 32px;
   height: 32px;
-  font-size: 13px;
+  font-size: calc(13px * var(--text-font-scale));
 }
 .omp-menu-profile:hover { background: var(--surface-hover); }
 .omp-menu-profile > span:not(.avatar) {
@@ -909,7 +909,7 @@
   border-radius: var(--r-full);
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 10px; font-weight: var(--fw-semibold);
+  font-size: calc(10px * var(--text-font-scale)); font-weight: var(--fw-semibold);
   font-family: var(--font-mono);
 }
 .sb-actions .action-row .meta .chev {
@@ -1012,7 +1012,7 @@
 }
 .sd-search input::placeholder { color: var(--text-faint); }
 .sd-search .kbd {
-  font-family: var(--font-mono); font-size: 10px;
+  font-family: var(--font-mono); font-size: calc(10px * var(--text-font-scale));
   color: var(--text-faint); padding: 1px 4px;
   border: 1px solid var(--border);
   border-radius: 3px; background: var(--bg-inset);
@@ -1040,7 +1040,7 @@
 }
 .sd-tab:hover { background: var(--surface-hover); color: var(--text); }
 .sd-tab.active { background: var(--accent-soft); color: var(--accent); }
-.sd-tab .count { font-family: var(--font-mono); font-size: 10px; opacity: .7; }
+.sd-tab .count { font-family: var(--font-mono); font-size: calc(10px * var(--text-font-scale)); opacity: .7; }
 
 /* 抽屉正文 */
 .sd-body {
@@ -1063,8 +1063,8 @@
 .sk-group-chevron { display:inline-flex; color:var(--text-faint); transition:transform 120ms ease-out; }
 .sk-group:not(.is-collapsed) .sk-group-chevron { transform:rotate(90deg); }
 .sk-group-head:hover { color:var(--text); }
-.sk-group-label { font-size:10.5px; font-weight:600; letter-spacing:.06em; }
-.sk-group-count,.sk-meta { color:var(--text-faint); font-family:var(--font-mono); font-size:10px; }
+.sk-group-label { font-size: calc(10.5px * var(--text-font-scale)); font-weight:600; letter-spacing:.06em; }
+.sk-group-count,.sk-meta { color:var(--text-faint); font-family:var(--font-mono); font-size: calc(10px * var(--text-font-scale)); }
 .sk-group-rule { flex:1; height:1px; background:var(--border); }
 .sk-group-items {
   --sk-h: 54px;
@@ -1265,11 +1265,11 @@
 
 .sk-content { flex:1; min-width:0; }
 .sk-row1 { display:flex; align-items:center; gap:6px; min-width:0; }
-.sk-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono); font-size:13px; line-height:18px; font-weight:600; color:var(--text); }
-.sk-scope { flex:none; font-size:10px; line-height:14px; letter-spacing:.04em; font-weight:500; opacity:.85; }
+.sk-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono); font-size: calc(13px * var(--text-font-scale)); line-height:18px; font-weight:600; color:var(--text); }
+.sk-scope { flex:none; font-size: calc(10px * var(--text-font-scale)); line-height:14px; letter-spacing:.04em; font-weight:500; opacity:.85; }
 .sk-scope-workspace { color:var(--accent); }.sk-scope-global { color:var(--green); }.sk-scope-builtin { color:var(--text-3); }.sk-scope-plugin { color:var(--amber); }
 .sk-external { display:inline-flex; flex:none; color:var(--text-faint); }.sk-external .icon { width:12px; height:12px; }
-.sk-desc { min-width:0; margin-top:1px; overflow:hidden; font-size:12px; line-height:16px; color:var(--text-2); text-overflow:ellipsis; white-space:nowrap; }
+.sk-desc { min-width:0; margin-top:1px; overflow:hidden; font-size: calc(12px * var(--text-font-scale)); line-height:16px; color:var(--text-2); text-overflow:ellipsis; white-space:nowrap; }
 .sk-card.has-error .sk-desc { color:var(--red); }.sk-desc .icon { width:11px; height:11px; margin-right:5px; vertical-align:-2px; }
 
 .sk-preview-hit {
@@ -1308,11 +1308,11 @@
 .sk-card:hover .persistent-retry,
 .sk-card:focus-visible .persistent-retry,
 .sk-card:has(:focus-visible) .persistent-retry { display:none; }
-.sk-actions .add-btn { display:inline-flex; align-items:center; gap:3px; height:22px; padding:0 7px; border-radius:6px; font-size:11px; font-weight:500; color:var(--sk-tone); background:color-mix(in srgb, var(--sk-tone) 12%, transparent); white-space:nowrap; }
+.sk-actions .add-btn { display:inline-flex; align-items:center; gap:3px; height:22px; padding:0 7px; border-radius:6px; font-size: calc(11px * var(--text-font-scale)); font-weight:500; color:var(--sk-tone); background:color-mix(in srgb, var(--sk-tone) 12%, transparent); white-space:nowrap; }
 .sk-actions .add-btn:hover { filter:brightness(1.12); }.sk-actions .add-btn .icon { width:11px; height:11px; }
 .sk-actions .add-btn.retry-hover { color:var(--red); background:var(--red-soft); }
 .sk-actions .icon-btn { width:22px; height:22px; color:var(--text-3); }.sk-actions .icon-btn:hover { background:var(--surface-hover); color:var(--text); }
-.sk-persistent { display:inline-flex; max-width:42px; overflow:hidden; text-overflow:ellipsis; padding-right:3px; color:var(--sk-tone); font-size:10px; letter-spacing:.04em; white-space:nowrap; }
+.sk-persistent { display:inline-flex; max-width:42px; overflow:hidden; text-overflow:ellipsis; padding-right:3px; color:var(--sk-tone); font-size: calc(10px * var(--text-font-scale)); letter-spacing:.04em; white-space:nowrap; }
 .persistent-retry { opacity:1!important; pointer-events:auto!important; color:var(--red)!important; background:var(--red-soft)!important; }
 .sk-card.is-retrying .sk-icon .icon { animation:sk-row-spin .9s linear infinite; }
 @keyframes sk-row-spin { to { transform:rotate(360deg); } }
@@ -1377,7 +1377,7 @@
 .sk-fly-kicker {
   display: flex; align-items: center; gap: 6px;
   margin-bottom: 6px;
-  font-size: 10px; letter-spacing: .06em; font-weight: 600;
+  font-size: calc(10px * var(--text-font-scale)); letter-spacing: .06em; font-weight: 600;
   color: var(--text-3); text-transform: uppercase;
 }
 .sk-fly-kicker .chip { text-transform: none; letter-spacing: 0; }
@@ -1458,7 +1458,7 @@
 .sd-foot-link .icon { color: var(--accent); flex: none; }
 .sd-foot-link .label { flex: 1; }
 .sd-foot-link .kbd {
-  font-family: var(--font-mono); font-size: 10px;
+  font-family: var(--font-mono); font-size: calc(10px * var(--text-font-scale));
   color: var(--text-faint);
 }
 

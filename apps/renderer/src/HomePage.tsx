@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import type { ClientBootstrap, ConfigWriteResult, HomeReadModel, SessionHistoryReadModel, StudioClient, TokenUsageReadModel, WorkspaceListReadModel } from "@omp-studio/client-contract";
+import type { ClientBootstrap, HomeReadModel, SessionHistoryReadModel, StudioClient, TokenUsageReadModel, WorkspaceListReadModel } from "@omp-studio/client-contract";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "./icons";
 import { pagePhaseClass, useDeferredKey } from "./pageTransition";
@@ -36,7 +36,6 @@ import { useI18n } from "./i18n";
 export type PageRoute = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media" | "evaluation" | "statistics";
 
 const PAGE_NAV_DEFS: ReadonlyArray<{ id: PageRoute; icon: string; key: string }> = [
-  { id:"statistics",icon:"pulse",key:"nav.statistics" },
   { id: "workbench", icon: "layout", key: "nav.workbench" },
   { id: "home", icon: "home", key: "nav.home" },
   { id: "history", icon: "history", key: "nav.history" },
@@ -445,19 +444,7 @@ function dayLabel(ts: number, lang: "zh" | "en" = "zh"): string {
 const CHART_Y_RATIOS = [0, 0.25, 0.5, 0.75, 1] as const;
 const EMPTY_CHART_MODELS: readonly TokenChartModelPts[] = [];
 
-function waitReceipt<T>(client: StudioClient, requestId: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const unsub = client.subscribe({ scope: "command", requestId: requestId as never }, (event) => {
-      if (event.kind !== "command.receipt" || event.receipt.requestId !== requestId) return;
-      unsub();
-      if (event.receipt.status === "completed") resolve(event.receipt.result as T);
-      else if (event.receipt.status === "failed") reject(new Error(event.receipt.error?.message ?? "Command failed"));
-      else reject(new Error(`Command incomplete: ${event.receipt.status}`));
-    });
-  });
-}
-
-function TokenUsageCard({ client }: { client?: StudioClient }) {
+function TokenUsageCard({ client, onOpenStats }: { client?: StudioClient; onOpenStats: () => void }) {
   const { t, resolvedLanguage } = useI18n();
   const { preview } = usePreviewMode();
   const previewUsage = useMemo(() => buildPreviewUsage(), []);
@@ -475,8 +462,6 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
   const [chartTipPos, setChartTipPos] = useState({ left: 0, top: 0 });
   const [cellTip, setCellTip] = useState<{ ts: number } | null>(null);
   const [cellTipPos, setCellTipPos] = useState({ left: 0, top: 0 });
-  const [dash, setDash] = useState<{ phase: "idle" | "opening" | "opened" | "error"; message?: string }>({ phase: "idle" });
-  const dashTimer = useRef(0);
   const cardRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const chartTipRef = useRef<HTMLDivElement>(null);
@@ -514,8 +499,6 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
       window.clearInterval(timer);
     };
   }, [preview, client, resolvedLanguage, t]);
-
-  useEffect(() => () => window.clearTimeout(dashTimer.current), []);
 
   const usage = preview ? previewUsage : (liveUsage ?? EMPTY_USAGE);
   const loading = !preview && liveUsage === null;
@@ -821,18 +804,6 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
       ? t("home.syncingUsage")
       : usage.unavailableReason ?? t("home.localUsage");
 
-  const dashLabel =
-    dash.phase === "opening" ? t("home.openingStats") : dash.phase === "opened" ? t("home.openedStats") : dash.phase === "error" ? t("home.openStatsFailed") : t("home.openStats");
-  const dashTitle = preview
-    ? t("common.preview")
-    : dash.phase === "error"
-      ? t("common.failed")
-      : dash.phase === "opening"
-        ? t("home.openingStats")
-        : dash.phase === "opened"
-          ? t("home.openedStats")
-          : "Stats";
-
   return (
     <div className="card tk-card" id="tkCard" ref={cardRef}>
       <div className="tk-head">
@@ -842,29 +813,10 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
         <button
           type="button"
           className="btn outline small"
-          disabled={preview || !client || dash.phase === "opening"}
-          aria-busy={dash.phase === "opening"}
-          data-tip={dashTitle}
-          onClick={() => {
-            if (preview || !client || dash.phase === "opening") return;
-            window.clearTimeout(dashTimer.current);
-            setDash({ phase: "opening" });
-            void (async () => {
-              try {
-                const handle = await client.command("usage.openDashboard", {});
-                const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
-                setDash({ phase: "opened", message: receipt.message ?? "OMP Stats" });
-                dashTimer.current = window.setTimeout(() => {
-                  setDash((prev) => (prev.phase === "opened" ? { phase: "idle" } : prev));
-                }, 2500);
-              } catch (error) {
-                const message = error instanceof Error ? error.message : t("home.openStatsFailed");
-                setDash({ phase: "error", message });
-              }
-            })();
-          }}
+          data-tip={t("home.openStatsPage")}
+          onClick={() => onOpenStats()}
         >
-          <Icon name="external" extra="sm" />{dashLabel}
+          <Icon name="arrow-r" extra="sm" />{t("nav.statistics")}
         </button>
         <div className="seg tk-views" role="group" aria-label={t("home.tokenUsage")}>
           {tokenViews.map((entry) => (
@@ -1187,7 +1139,7 @@ export function HomePage({
         )}
       </div>
 
-      <TokenUsageCard {...(client ? { client } : {})} />
+      <TokenUsageCard {...(client ? { client } : {})} onOpenStats={() => onRoute("statistics")} />
 
       <h3 className="home-h home-h-tight">{t("home.recentActivity")}</h3>
       <div className="card" style={{ padding: 6 }} id="activityList">

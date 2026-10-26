@@ -1,3 +1,5 @@
+import { modelParameterValues } from "./model-adaptation.js";
+import type { ModelProviderModelInput } from "./operations.js";
 /**
  * Provider editor draft → `models.yml` node mapping.
  *
@@ -17,7 +19,7 @@
  *   after the Host's `restoreRedactedApiKeys`, the real credential — survives.
  */
 
-import { parseModelThinkingEfforts } from "./model-thinking.js";
+import { modelThinkingYamlNode } from "./model-thinking.js";
 import type {
   ModelAuthType,
   ModelCatalogEntry,
@@ -134,22 +136,6 @@ function remoteCompactionNode(rc: ModelProviderRemoteCompaction | undefined): Re
   return Object.keys(row).length > 0 ? row : undefined;
 }
 
-function thinkingNode(
-  efforts: ReadonlyArray<string> | undefined,
-  previous: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  const parsed = parseModelThinkingEfforts(efforts);
-  if (parsed.length === 0) return undefined;
-  const out: Record<string, unknown> = {
-    mode: typeof previous?.mode === "string" ? previous.mode : "effort",
-    efforts: [...parsed],
-  };
-  if (previous?.defaultLevel !== undefined) out.defaultLevel = previous.defaultLevel;
-  if (previous?.effortMap !== undefined) out.effortMap = previous.effortMap;
-  if (previous?.supportsDisplay !== undefined) out.supportsDisplay = previous.supportsDisplay;
-  return out;
-}
-
 /** One `models:` row. Only `custom` rows are written, matching the save path. */
 function bedrockCompatNode(previous:Record<string,unknown>|undefined,enabled:boolean|undefined):Record<string,unknown> {
   const compat={...nestedNode(previous?.compat)};
@@ -157,17 +143,20 @@ function bedrockCompatNode(previous:Record<string,unknown>|undefined,enabled:boo
   return Object.keys(compat).length?{compat}:{};
 }
 
-function modelNode(model: ModelCatalogEntry, previous: Record<string, unknown> | undefined): Record<string, unknown> {
-  const row: Record<string, unknown> = { id: model.id };
+export function providerModelYamlNode(model: ModelCatalogEntry | ModelProviderModelInput, previous: Record<string, unknown> | undefined): Record<string, unknown> {
+  const row: Record<string, unknown> = { ...previous, id: model.id };
+  for (const key of ["name", "kind", "webSearch", "api", "baseUrl", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "input", "supportsTools", "cost", "omitMaxOutputTokens", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction", "thinking"]) delete row[key];
+  const parameters = modelParameterValues(model);
   Object.assign(row,bedrockCompatNode(previous,model.bedrockMessagesApi));
   if (model.name) row.name = model.name;
   if (model.kind) row.kind = model.kind;
   if (model.webSearch) row.webSearch = model.webSearch;
   if (model.api) row.api = mapApiAlias(model.api);
   if (model.baseUrl) row.baseUrl = model.baseUrl;
-  if (model.contextWindow) row.contextWindow = model.contextWindow;
-  if (model.maxTokens) row.maxTokens = model.maxTokens;
-  if (model.reasoning !== undefined) row.reasoning = model.reasoning;
+  if (parameters.contextWindow !== undefined) row.contextWindow = parameters.contextWindow;
+  if (parameters.maxContextWindow !== undefined) row.maxContextWindow = parameters.maxContextWindow;
+  if (parameters.maxTokens !== undefined) row.maxTokens = parameters.maxTokens;
+  if (parameters.reasoning !== undefined) row.reasoning = parameters.reasoning;
   if (model.image) row.input = ["text", "image"];
   if (model.tools === false) row.supportsTools = false;
   const cost = costNode(model.cost, true);
@@ -180,17 +169,19 @@ function modelNode(model: ModelCatalogEntry, previous: Record<string, unknown> |
   if (model.compactionModel) row.compactionModel = model.compactionModel;
   const rc = remoteCompactionNode(model.remoteCompaction);
   if (rc) row.remoteCompaction = rc;
-  const thinking = thinkingNode(model.thinking, nestedNode(previous?.thinking));
+  const thinking = modelThinkingYamlNode(parameters.thinkingConfig, model.thinking, nestedNode(previous?.thinking));
   if (thinking) row.thinking = thinking;
   return row;
 }
 
 /** One `modelOverrides:` row, sparse like the Host writer. */
-function overrideNode(override: ModelOverridePatch, previous: Record<string, unknown> | undefined): Record<string, unknown> {
-  const row: Record<string, unknown> = {};
+export function providerOverrideYamlNode(override: ModelOverridePatch, previous: Record<string, unknown> | undefined): Record<string, unknown> {
+  const row: Record<string, unknown> = { ...previous };
+  for (const key of ["name", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "thinking", "supportsTools", "input", "cost", "omitMaxOutputTokens", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction"]) delete row[key];
   Object.assign(row,bedrockCompatNode(previous,override.bedrockMessagesApi));
   if (override.name !== undefined) row.name = override.name;
   if (override.contextWindow !== undefined) row.contextWindow = override.contextWindow;
+  if (override.maxContextWindow !== undefined) row.maxContextWindow = override.maxContextWindow;
   if (override.maxTokens !== undefined) row.maxTokens = override.maxTokens;
   if (override.reasoning !== undefined) row.reasoning = override.reasoning;
   if (override.tools !== undefined) row.supportsTools = override.tools;
@@ -206,7 +197,7 @@ function overrideNode(override: ModelOverridePatch, previous: Record<string, unk
   if (override.compactionModel) row.compactionModel = override.compactionModel;
   const rc = remoteCompactionNode(override.remoteCompaction);
   if (rc) row.remoteCompaction = rc;
-  const thinking = thinkingNode(override.thinking, nestedNode(previous?.thinking));
+  const thinking = modelThinkingYamlNode(override.thinkingConfig, override.thinking, nestedNode(previous?.thinking));
   if (thinking) row.thinking = thinking;
   return row;
 }
@@ -348,7 +339,7 @@ export function draftProviderYamlNode(
   const previousModels = Array.isArray(previous?.models) ? previous.models : [];
   next.models = draft.models
     .filter((model) => model.source === "custom")
-    .map((model) => modelNode(model, previousModels.find((item): item is Record<string, unknown> => (
+    .map((model) => providerModelYamlNode(model, previousModels.find((item): item is Record<string, unknown> => (
       isPlainRecord(item) && item.id === model.id
     ))));
 
@@ -359,7 +350,7 @@ export function draftProviderYamlNode(
     const previousOverrides = nestedNode(previous?.modelOverrides);
     const mapped: Record<string, unknown> = {};
     for (const [modelId, override] of Object.entries(overrides)) {
-      const row = overrideNode(override, nestedNode(previousOverrides?.[modelId]));
+      const row = providerOverrideYamlNode(override, nestedNode(previousOverrides?.[modelId]));
       if (row) mapped[modelId] = row;
     }
     if (Object.keys(mapped).length > 0) next.modelOverrides = mapped;

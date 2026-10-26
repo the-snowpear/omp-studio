@@ -16,6 +16,12 @@ export const PREVIEW_APP_SETTINGS: AppSettings = {
   language: "system",
   theme: "dark",
   density: "compact",
+  uiFontFamily: "",
+  uiFontSize: 14,
+  terminalFontFamily: "Cascadia Code",
+  terminalFontSize: 13,
+  outputFontFamily: "",
+  outputFontSize: 15,
   streaming: true,
   streamingCadenceHz: 60,
   toolActivity: "full",
@@ -32,6 +38,9 @@ export const PREVIEW_APP_SETTINGS: AppSettings = {
   showToolIntent: true,
   showTokenUsage: false,
 };
+
+/** Demo catalog only; never presented as an inventory of the user's system. */
+export const PREVIEW_FONT_FAMILIES = ["Cascadia Code", "Consolas", "JetBrains Mono", "Microsoft YaHei", "PingFang SC", "Segoe UI"];
 
 /**
  * Runtime 级「尚未接入」行的演示初值，键与 settings/tabs.tsx 中

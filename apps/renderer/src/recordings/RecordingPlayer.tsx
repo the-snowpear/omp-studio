@@ -1,7 +1,9 @@
+import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { applyTheme, readCssVar, readXtermTheme } from "../terminalTheme";
+import { applyTheme, readTerminalTypography, readXtermTheme } from "../terminalTheme";
+import { useAppSettings } from "../settings/appSettings";
 import { useI18n } from "../i18n";
 import {
   applyRecordedFrame,
@@ -20,6 +22,7 @@ export function RecordingPlayer({
   demoText?: string | undefined;
 }) {
   const { resolvedLanguage } = useI18n();
+  const { settings } = useAppSettings();
   const zh = resolvedLanguage === "zh";
   const [recording, setRecording] = useState<PlaybackRecording>();
   const [error, setError] = useState("");
@@ -125,10 +128,9 @@ export function RecordingPlayer({
       rows: recording.rows,
       disableStdin: true,
       cursorBlink: false,
-      fontSize: 12,
+      ...readTerminalTypography(),
       scrollback: 1000,
       allowProposedApi: false,
-      fontFamily: readCssVar("--font-mono", "Menlo, Consolas, monospace"),
       theme: readXtermTheme(),
     });
     terminal.open(node.current);
@@ -154,6 +156,10 @@ export function RecordingPlayer({
       terminal.dispose();
     };
   }, [recording]);
+  useEffect(() => {
+    const terminal = term.current;
+    if (terminal) applyTheme(terminal);
+  }, [recording, settings.terminalFontFamily, settings.terminalFontSize]);
   useEffect(() => {
     if (!recording || !playing || document.hidden) return;
     let frame = 0;
@@ -312,7 +318,7 @@ export function RecordingPlayer({
             >
               {playing ? (zh ? "暂停" : "Pause") : zh ? "播放" : "Play"}
             </button>
-            <select
+            <AppSelect
               className="select"
               aria-label={zh ? "回放速度" : "Playback speed"}
               value={speed}
@@ -323,7 +329,7 @@ export function RecordingPlayer({
                   {value}×
                 </option>
               ))}
-            </select>
+            </AppSelect>
             <span className="small mono">
               {(position / 1000).toFixed(1)} /{" "}
               {(recording.durationMs / 1000).toFixed(1)}s

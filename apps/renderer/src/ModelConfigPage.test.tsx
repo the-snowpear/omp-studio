@@ -1,3 +1,4 @@
+import { previewModelAdaptation } from "./preview/modelAdaptationPreview";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type {
@@ -120,7 +121,12 @@ function fakeClient(probe: ModelDiscoveryResult | Error = PROBE_OK, modelConfig?
   readonly query: ReturnType<typeof vi.fn>;
   readonly command: ReturnType<typeof vi.fn>;
 } {
-  const query = vi.fn(async (name: string) => {
+  const query = vi.fn(async (name: string, input: import("@omp-studio/client-contract").ModelAdaptationInput) => {
+    if (name === "models.adaptation.resolve") {
+      const result = previewModelAdaptation(input);
+      if (input.modelId !== "glm-5") return result;
+      return { ...result, values: { ...result.values, contextWindow: 131072 }, sources: { ...result.sources, contextWindow: { source: "catalog", catalogVersion: "demo-v1" } } };
+    }
     if (name === "models.get") return modelConfig ?? readModel();
     if (name === "agents.definitions.get") {
       return {
@@ -206,6 +212,25 @@ function plainText(value: string): string {
 }
 
 describe("ModelConfigPage 自动获取模型", () => {
+  it("applies gray recommendations to the model draft and the provider YAML save, including provenance", async () => {
+    const { client, container } = await openEditor();
+    fireEvent.click(screen.getByRole("button", { name: "添加模型" }));
+    fireEvent.change(await screen.findByPlaceholderText("如 gpt-example"), { target: { value: "glm-5" } });
+    const context = await screen.findByRole("spinbutton", { name: "上下文窗口" }) as HTMLInputElement;
+    await waitFor(() => expect(context.placeholder).toBe("131072"));
+    expect(context.value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "保存模型" }));
+    await waitFor(async () => expect(plainText(await yamlCardText(container, "gateway"))).toContain("contextWindow: 131072"));
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() => expect(client.command).toHaveBeenCalledWith("models.yml.write", expect.objectContaining({
+      overlay: expect.objectContaining({ models: expect.arrayContaining([expect.objectContaining({
+        id: "glm-5", contextWindow: 131072,
+        thinkingConfig: expect.objectContaining({ mode: "effort", defaultLevel: "high" }),
+        parameterSources: expect.objectContaining({ contextWindow: expect.objectContaining({ source: "catalog" }) }),
+      })]) }),
+    })));
+  });
+
   it("probes the wire API without a discovery type and imports picked models into the draft", async () => {
     const { client } = await openEditor();
 
@@ -227,8 +252,8 @@ describe("ModelConfigPage 自动获取模型", () => {
     const importButton = await screen.findByRole("button", { name: /导入 2 个模型/ });
     expect(screen.getByText("gateway/fresh")).toBeTruthy();
     expect(screen.getAllByText("已存在")).toHaveLength(1);
-    // glm-5 has no endpoint metadata but the local models.db knows it.
-    expect(screen.getByText("本地补全")).toBeTruthy();
+    // The typed adaptation query supplies the missing catalog parameters.
+    expect(screen.getAllByText("目录").length).toBeGreaterThan(0);
     expect(screen.getByText("131k ctx")).toBeTruthy();
 
     fireEvent.click(importButton);

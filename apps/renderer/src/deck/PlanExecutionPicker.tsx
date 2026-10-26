@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type { NativePlanReview } from "@omp-studio/studio-protocol";
@@ -30,5 +31,5 @@ export function PlanExecutionPicker({ details, role, onChange, disabled, loading
 }) {
   const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const tier = details?.tiers.find(tier => tier.role === role);
-  return <div className="plan-execution"><label><span>{zh ? "执行档位" : "Execution tier"}</span><select className="select" aria-label={zh ? "计划执行档位" : "Plan execution tier"} value={role} disabled={disabled || loading || !details?.available || !details.tiers.length} onChange={event => onChange(event.target.value)}>{!details?.tiers.length ? <option value="">{loading ? zh ? "读取中…" : "Loading…" : zh ? "使用原有模型" : "Use the existing model"}</option> : details.tiers.map(item => <option key={item.role} value={item.role}>{item.role} · {item.name}</option>)}</select></label>{tier ? <span className="plan-execution-detail">{tier.provider}/{tier.model}{tier.thinkingLevel ? " · " + tier.thinkingLevel : ""}</span> : null}{error ? <span role="alert" className="feature-error">{error}</span> : null}</div>;
+  return <div className="plan-execution"><label><span>{zh ? "执行档位" : "Execution tier"}</span><AppSelect className="select" aria-label={zh ? "计划执行档位" : "Plan execution tier"} value={role} disabled={disabled || loading || !details?.available || !details.tiers.length} onChange={event => onChange(event.target.value)}>{!details?.tiers.length ? <option value="">{loading ? zh ? "读取中…" : "Loading…" : zh ? "使用原有模型" : "Use the existing model"}</option> : details.tiers.map(item => <option key={item.role} value={item.role}>{item.role} · {item.name}</option>)}</AppSelect></label>{tier ? <span className="plan-execution-detail">{tier.provider}/{tier.model}{tier.thinkingLevel ? " · " + tier.thinkingLevel : ""}</span> : null}{error ? <span role="alert" className="feature-error">{error}</span> : null}</div>;
 }

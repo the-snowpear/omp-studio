@@ -11,6 +11,8 @@ export interface SelfCheckRunner {
 
 /** Minimal structural view of a child process used by the default runner. */
 export interface SelfCheckChild {
+  readonly stdout?: NodeJS.ReadableStream | null;
+  readonly stderr?: NodeJS.ReadableStream | null;
   once(
     event: "error" | "close",
     listener: (value?: unknown) => void,
@@ -23,7 +25,7 @@ export interface SelfCheckSpawn {
   (
     command: string,
     args: readonly string[],
-    options: { env?: NodeJS.ProcessEnv; stdio: "ignore"; windowsHide: boolean },
+    options: { env?: NodeJS.ProcessEnv; stdio: ["ignore", "pipe", "pipe"]; windowsHide: boolean },
   ): SelfCheckChild;
 }
 
@@ -36,6 +38,8 @@ export interface SmokeTestRunnerOptions {
   env?: NodeJS.ProcessEnv;
   /** Injectable spawn; defaults to node:child_process spawn. */
   spawn?: SelfCheckSpawn;
+  /** Host-only diagnostics; output is drained even when no listener is supplied. */
+  onOutput?: (stream: "stdout" | "stderr", text: string) => void;
 }
 
 const DEFAULT_SMOKE_ARGS = ["--smoke-test"] as const;
@@ -47,7 +51,7 @@ const defaultSpawn: SelfCheckSpawn = (command, args, options) =>
 
 /**
  * Default activation self-check: runs `entrypoint --smoke-test` with a
- * timeout, hidden window, and no inherited stdio, resolving only on exit 0.
+ * timeout, hidden window, and captured output, resolving only on exit 0.
  */
 export function createSmokeTestRunner(
   options: SmokeTestRunnerOptions = {},
@@ -65,7 +69,7 @@ export function createSmokeTestRunner(
         try {
           child = runProcess(entrypointPath, args, {
             env,
-            stdio: "ignore",
+            stdio: ["ignore", "pipe", "pipe"],
             windowsHide: true,
           });
         } catch (error) {
@@ -76,6 +80,12 @@ export function createSmokeTestRunner(
             ),
           );
           return;
+        }
+
+        for (const name of ["stdout", "stderr"] as const) {
+          const stream = child[name];
+          stream?.setEncoding("utf8");
+          stream?.on("data", (text: string) => options.onOutput?.(name, text));
         }
 
         let settled = false;

@@ -175,7 +175,7 @@
    `style="height:16px;padding:0 5px"` on 23 call sites, which meant the sizes
    were unversioned and drifted (16px vs 18px, 5px vs 6px). Same values,
    now named. */
-.chip.xs { height: 16px; padding: 0 var(--sp-6); font-size: 10.5px; }
+.chip.xs { height: 16px; padding: 0 var(--sp-6); font-size: calc(10.5px * var(--text-font-scale)); }
 .chip.sm { height: 18px; padding: 0 var(--sp-6); }
 
 /* ---------- Menu / Popover ---------- */
@@ -250,7 +250,7 @@
 
 .kbd {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--text-font-scale));
   padding: 1px 5px;
   border: 1px solid var(--border-strong);
   border-bottom-width: 2px;
@@ -582,6 +582,95 @@
               0 0 14px 1px color-mix(in srgb, var(--danger-orange) 20%, transparent);
 }
 textarea.input { height: auto; min-height: 72px; padding: var(--sp-8) var(--sp-10); resize: vertical; }
+
+/* ---------- AppSelect ----------
+   Native select popups cannot follow Studio's theme on every platform. The
+   trigger keeps the existing `.select` contract while the listbox is a small
+   portal surface with the same menu tokens as the rest of the app. */
+.app-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.app-select:hover:not(:disabled) { border-color: var(--accent-border); }
+.app-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.app-select-chevron { flex: none; color: var(--text-3); transition: transform var(--dur-fast) var(--ease); }
+.app-select[aria-expanded="true"] .app-select-chevron { transform: rotate(180deg); color: var(--accent); }
+.app-select-popup {
+  position: fixed;
+  z-index: calc(var(--z-modal) + 2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: var(--sp-6);
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-8);
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+  animation: omp-menu-in var(--dur-fast) var(--ease-out);
+}
+.app-select-popup[data-side="top"] { transform-origin: bottom center; }
+.app-select-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.app-select-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex: none;
+  height: 30px;
+  margin-bottom: var(--sp-4);
+  padding: 0 var(--sp-8);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--bg-inset);
+  color: var(--text-3);
+}
+.app-select-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-softer); }
+.app-select-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-12);
+}
+.app-select-search input::placeholder { color: var(--text-faint); opacity: 1; }
+.app-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  width: 100%;
+  min-height: 30px;
+  padding: 5px var(--sp-8);
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-12);
+  text-align: left;
+  cursor: pointer;
+}
+.app-select-option > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-select-option:hover:not(:disabled),
+.app-select-option.is-active:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.app-select-option[aria-selected="true"]:not(:disabled) { color: var(--accent); background: var(--accent-softer); }
+.app-select-option:disabled { color: var(--text-faint); cursor: not-allowed; }
+.app-select-check { display: inline-flex; flex: none; width: 14px; color: var(--accent); }
+.app-select-group { padding: var(--sp-6) var(--sp-8) var(--sp-4); color: var(--text-faint); font-size: var(--fs-11); font-weight: var(--fw-medium); }
+.app-select-empty { padding: var(--sp-12) var(--sp-8); color: var(--text-3); font-size: var(--fs-12); text-align: center; }
+@media (prefers-reduced-motion: reduce) {
+  .app-select-popup, .app-select-chevron { animation: none; transition: none; }
+}
 
 /* Switch.
    Rendered as <button role="switch"> rather than <span> so it is focusable,

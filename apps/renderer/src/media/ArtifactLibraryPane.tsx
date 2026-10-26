@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { previewMediaUrl } from "../preview/mediaFixtureUrls";
 import { GraphicPreview } from "../graphics/GraphicPreview";
 import { graphicFormat } from "../graphics/graphic-types";
@@ -233,7 +234,7 @@ export function ArtifactLibraryPane({
       <div className="media-toolbar">
         <h3>{t("media.library")}</h3>
         {preview ? <span className="chip gray">{t("common.demo")}</span> : null}
-        <select
+        <AppSelect
           className="select"
           aria-label={t("media.filter")}
           value={kind}
@@ -258,7 +259,7 @@ export function ArtifactLibraryPane({
               {t(`media.kind.${value}`)}
             </option>
           ))}
-        </select>
+        </AppSelect>
         <button
           type="button"
           className="btn small outline"

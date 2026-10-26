@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import type { StudioClient, CommandInput } from "@omp-studio/client-contract";
 import type {
@@ -358,7 +359,7 @@ export function PredictionSettingsPane({
       <div className="prediction-settings-form">
         <label>
           {zh ? "引擎" : "Engine"}
-          <select
+          <AppSelect
             className="select"
             value={method}
             disabled={!enabled || !!busy}
@@ -372,11 +373,11 @@ export function PredictionSettingsPane({
                 {label}
               </option>
             ))}
-          </select>
+          </AppSelect>
         </label>
         <label>
           {zh ? "保存范围" : "Scope"}
-          <select
+          <AppSelect
             className="select"
             value={scope}
             disabled={!!busy}
@@ -388,7 +389,7 @@ export function PredictionSettingsPane({
             <option value="global">
               {zh ? "OMP 全局设置" : "Global OMP setting"}
             </option>
-          </select>
+          </AppSelect>
         </label>
         <button
           className="btn outline"

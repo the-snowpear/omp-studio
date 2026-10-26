@@ -22,6 +22,12 @@ export interface AppSettings {
   readonly language: AppLanguage;
   readonly theme: AppTheme;
   readonly density: InfoDensity;
+  readonly uiFontFamily: string;
+  readonly uiFontSize: number;
+  readonly terminalFontFamily: string;
+  readonly terminalFontSize: number;
+  readonly outputFontFamily: string;
+  readonly outputFontSize: number;
   /** 关闭后助手消息不带流式光标（显示层行为）。运行状态仍在对话底部。 */
   readonly streaming: boolean;
   /** 流式快照发布上限；实际频率仍受浏览器/显示器 RAF 限制。 */
@@ -46,6 +52,12 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   language: "system",
   theme: "light",
   density: "standard",
+  uiFontFamily: "",
+  uiFontSize: 14,
+  terminalFontFamily: "",
+  terminalFontSize: 12,
+  outputFontFamily: "",
+  outputFontSize: 14,
   streaming: true,
   streamingCadenceHz: 60,
   toolActivity: "concise",
@@ -84,6 +96,10 @@ function pickNumber<T extends number>(value: unknown, allowed: ReadonlyArray<T>)
   return typeof value === "number" && (allowed as readonly number[]).includes(value) ? value as T : undefined;
 }
 
+function fontSize(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : fallback;
+}
+
 function parseStoredSettings(raw: string | null): AppSettings {
   if (!raw) return DEFAULT_APP_SETTINGS;
   try {
@@ -92,6 +108,12 @@ function parseStoredSettings(raw: string | null): AppSettings {
       language: pick(value.language, LANGUAGES) ?? DEFAULT_APP_SETTINGS.language,
       theme: pick(value.theme, THEMES) ?? DEFAULT_APP_SETTINGS.theme,
       density: pick(value.density, DENSITIES) ?? DEFAULT_APP_SETTINGS.density,
+      uiFontFamily: typeof value.uiFontFamily === "string" ? value.uiFontFamily : "",
+      uiFontSize: fontSize(value.uiFontSize, 12, 20, 14),
+      terminalFontFamily: typeof value.terminalFontFamily === "string" ? value.terminalFontFamily : "",
+      terminalFontSize: fontSize(value.terminalFontSize, 8, 32, 12),
+      outputFontFamily: typeof value.outputFontFamily === "string" ? value.outputFontFamily : "",
+      outputFontSize: fontSize(value.outputFontSize, 8, 32, 14),
       streaming: pickBoolean(value.streaming) ?? DEFAULT_APP_SETTINGS.streaming,
       streamingCadenceHz: pickNumber(value.streamingCadenceHz, STREAMING_CADENCE_HZ) ?? DEFAULT_APP_SETTINGS.streamingCadenceHz,
       toolActivity: pick(value.toolActivity, TOOL_ACTIVITY) ?? DEFAULT_APP_SETTINGS.toolActivity,

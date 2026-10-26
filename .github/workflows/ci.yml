@@ -42,6 +42,7 @@ jobs:
       - run: npm ci
       # The renderer imports chart sources from the patched vendor tree.
       - run: npm run omp:overlay:apply
+      - run: npm run check:selects
       - run: npm run build
       - run: npm run test:core
         if: inputs.scope != 'full'

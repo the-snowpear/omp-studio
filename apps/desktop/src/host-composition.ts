@@ -1,5 +1,4 @@
 import { artifactLibraryForProfile } from "./artifact-library.js";
-import { NativeStatsWorker, supportsNativeStatsWorker } from "./stats-worker.js";
 import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 /**
  * Desktop Host composition (FRONTEND_INTEGRATION.md §9.2).
@@ -84,7 +83,7 @@ import { createOmpAgentDefinitionsService } from "@omp-studio/host-client-api/ag
 import { createOmpExtensibilityService } from "@omp-studio/host-client-api/extensibility";
 import { createOmpMcpService } from "@omp-studio/host-client-api/mcp";
 import { createOmpModelsService } from "@omp-studio/host-client-api/models";
-import { createOmpUsageService } from "@omp-studio/host-client-api/usage";
+import { createOmpUsageService, defaultLocateOmp } from "@omp-studio/host-client-api/usage";
 import type { PlatformPort, PrivateEndpoint } from "@omp-studio/platform";
 import {
   HostBackend,
@@ -132,6 +131,7 @@ import {
 } from "./runtime-install.js";
 import { createDesktopSemanticCommands, createWorkspaceSessionCatalog } from "./session-commands.js";
 import type { DesktopHostComposition, DesktopRuntimeStatus } from "./types.js";
+import { UpdateRestartBlockedError, updateRestartBlockerForSnapshot } from "./update-restart.js";
 
 /** Default Runtime resolution preference for the P1 managed slice. */
 const DEFAULT_RUNTIME_PREFERENCE: RuntimePreference = { kind: "managed" };
@@ -214,7 +214,8 @@ export interface DesktopRuntimeSessionPort {
   start(context: DesktopRuntimeSessionContext): Promise<DesktopRuntimeSession | undefined>;
   /** Gracefully stops the Runtime if this port started one; no-op otherwise. */
   stop(): Promise<void>;
-  prepareRestart?(): Promise<void>;
+  updateRestartBlocker?(): string | undefined;
+  prepareRestart?(beforeStop?: () => void | Promise<void>): Promise<void>;
   /** Stop idle workers for an installation, then restore their sessions using
    * the activated executable. Serialized with all other lifecycle changes. */
   withRuntimeMaintenance?<T>(operation: () => Promise<T>, expectedVersion?: () => string | undefined,
@@ -442,8 +443,8 @@ function clearDisconnect(holder: { current: HostRuntimeDisconnect | undefined })
 }
 
 interface FacadeContext {
-  stats?: NativeStatsWorker;
-  statsPaused?: boolean;
+  /** One usage adapter per Host: it caches the resolved dashboard endpoint. */
+  usage?: HostUsageService;
   readonly authority: PublicAuthorityIdentity;
   readonly platform: PlatformId;
   readonly arch: ArchId;
@@ -657,11 +658,8 @@ function managedRuntimeInstallService(context: FacadeContext): HostRuntimeInstal
         }
       : async () => undefined),
   });
-  if (maintenance === undefined) return async(channel)=>{context.statsPaused=true;try{await context.stats?.dispose();delete context.stats;return await install(channel);}finally{context.statsPaused=false;}};
+  if (maintenance === undefined) return install;
   return async (channel) => {
-    context.statsPaused=true;
-    try {
-    await context.stats?.dispose();delete context.stats;
     let version: string | undefined;
     let previousVersion: string | undefined;
     const result = await maintenance(async () => {
@@ -682,14 +680,9 @@ function managedRuntimeInstallService(context: FacadeContext): HostRuntimeInstal
       if (next?.hello()?.runtimeVersion !== version) throw new Error("Installed Runtime did not become ready with the expected version");
     }
     return result;
-    } finally { context.statsPaused=false; }
   };
 }
 
-function statsWorker(context:FacadeContext):NativeStatsWorker {
-  if(context.statsPaused)throw new Error("Statistics paused for Runtime maintenance");
-  return context.stats??=new NativeStatsWorker({cacheFile:join(context.profileDirectory,"stats-cache.json"),executable:async()=>{await installedRuntimeContext(context);const manifest=await context.backend.installer.currentManifest();return manifest&&supportsNativeStatsWorker(manifest.manifest.runtimeVersion)?manifest.entrypointPath:undefined;}});
-}
 function buildFacade(context: FacadeContext): StudioHostClientFacade {
   const seams = context.seams;
   const sessionRef = context.sessionRef;
@@ -920,8 +913,15 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     ...(seams.workspaceFiles === undefined ? {} : { workspaceFiles: seams.workspaceFiles }),
     ...(seams.git === undefined ? {} : { git: seams.git }),
     ...(seams.github === undefined ? {} : { github: seams.github }),
-    usage: seams.usage ?? createOmpUsageService(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
-    stats: {read: input=>statsWorker(context).read(input), frustration: input=>statsWorker(context).frustration(input)},
+    usage: seams.usage ?? (context.usage ??= createOmpUsageService({
+      ...(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
+      // The managed Runtime ships its own `omp`; a machine without OMP on PATH
+      // can still start the statistics dashboard. PATH lookup stays the fallback.
+      locateOmp: async () => {
+        const manifest = await context.backend.installer.currentManifest();
+        return manifest?.entrypointPath ?? (await defaultLocateOmp());
+      },
+    })),
     // Live accessors follow workspace/runtime rebind. Conversation and
     // interaction events are not buffered; reload never replays old deltas.
     runtime: {
@@ -1085,9 +1085,32 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     if (this.#closed || this.isBusy()) throw new Error("Finish active sessions before cleaning Runtime versions");
     await this.#facadeContext.backend.installer.prune({ retainStable: 2 });
   }
-  async prepareUpdateRestart(): Promise<void> {
-    if (this.#closed || this.isBusy()) throw new Error("Finish active sessions before restarting");
-    await this.#runtimeSession?.prepareRestart?.();
+  updateRestartBlocker(): string | undefined {
+    if (this.#closed || this.#shutdownStarted) return "应用正在关闭，请稍后重试";
+    if (this.#facade.runtimeInstallInProgress) return "Runtime 更新尚未完成，请完成后重启更新";
+    if (this.#facade.hasPendingCommands) return "仍有命令未完成，请完成后重启更新";
+    if (this.#runtimeSession?.updateRestartBlocker) return this.#runtimeSession.updateRestartBlocker();
+    const residents = this.#runtimeSession?.listResidents?.().residents;
+    if (residents?.some(row => row.phase === "running" || row.phase === "compacting")) return "任务仍在运行，请完成后重启更新";
+    if (residents?.some(row => row.phase === "waiting")) return "请先处理待完成的交互，再重启更新";
+    if (residents?.some(row => row.pendingMessages > 0)) return "仍有排队消息，请处理后重启更新";
+    const session = this.#sessionRef.current;
+    return session?.hello() ? updateRestartBlockerForSnapshot(session.controller.publication()?.snapshot) : undefined;
+  }
+
+  async prepareUpdateRestart(onShutdownStarted?: () => void): Promise<void> {
+    const blocker = this.updateRestartBlocker();
+    if (blocker) throw new UpdateRestartBlockedError(blocker);
+    const beforeStop = async (): Promise<void> => {
+      // Saving the restore intent yields: a command may have arrived meanwhile.
+      // close() synchronously closes its command gate before its first await.
+      const latestBlocker = this.updateRestartBlocker();
+      if (latestBlocker) throw new UpdateRestartBlockedError(latestBlocker);
+      onShutdownStarted?.();
+      await this.#facade.close();
+    };
+    if (this.#runtimeSession?.prepareRestart) await this.#runtimeSession.prepareRestart(beforeStop);
+    else await beforeStop();
   }
 
   /**
@@ -1238,7 +1261,6 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     this.#unsubscribeResidents?.();
     this.#unsubscribeWorkspace?.();
     this.#facadeContext.seams.disposeHostOperations?.();
-    await this.#facadeContext.stats?.dispose();
     if (this.#sessionStarted && this.#runtimeSession !== undefined) {
       await this.#runtimeSession.stop();
     }

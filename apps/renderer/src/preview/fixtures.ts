@@ -592,7 +592,8 @@ export const PREVIEW_APP_UPDATE: PreviewAppUpdate = {
   name: "OMP Studio 0.2.0",
   releaseNotes: `### 新增功能与改进
 
-- **增量更新**：后台准备桌面与 Runtime 更新，完成后点击「重启更新」。
+- **稳定更新**：后台准备桌面与 Runtime 更新；镜像失败自动切源并继续下载。
+- **按需重启**：等待任务和交互完成后手动重试，已验证的更新会保留。
 - **左下角状态提示**：发现新版本时在侧栏底部清晰展示更新提示徽标。
 - **双语国际化支持**：新增完整的中文与英文更新引导。
 - **性能与稳定性优化**：优化 Runtime Bridge 握手与 IPC 通信效率。`,
@@ -624,4 +625,16 @@ export const PREVIEW_UPDATES = {
     bytesPerSecond: 4_194_304,
     message: "正在下载 Runtime (43%)...",
   },
+} as const;
+
+/**
+ * Statistics panel demo aggregates. The real page embeds the local `omp stats`
+ * dashboard, which preview mode must not fabricate — these numbers stand in for
+ * that panel so the surface is not empty while preview is on.
+ */
+export const PREVIEW_STATS_TOTALS = {
+  tokens: 1_045_409_258,
+  requests: 10_443,
+  errors: 239,
+  costEstimate: 1_121.8,
 } as const;

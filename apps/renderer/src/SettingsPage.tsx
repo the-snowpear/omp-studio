@@ -1,4 +1,5 @@
 import { SessionWorktreesPane } from "./workspaces/SessionWorktreesPane";
+import { BackgroundSettingsPane } from "./settings/BackgroundSettingsPane";
 import { FeatureSettingsPane } from "./settings/FeatureSettingsPane";
 import { PredictionSettingsPane } from "./settings/PredictionSettingsPane";
 import "./composer/prediction.css";
@@ -45,7 +46,7 @@ import type {
 
 export const SETTINGS_INTENT_KEY = "omp.settingsIntent";
 
-export type SettingsGroupId = "general" | "interaction" | "permissions" | "context" | "files" | "tasks" | "advanced" | "native";
+export type SettingsGroupId = "general" | "background" | "interaction" | "permissions" | "context" | "files" | "tasks" | "advanced" | "native";
 
 type GroupId = SettingsGroupId;
 
@@ -59,7 +60,7 @@ export interface RuntimeSettingsApi {
   readonly onSet?: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue, persist?: boolean) => void | Promise<void>;
 }
 
-const GROUP_IDS: ReadonlyArray<SettingsGroupId> = ["general", "interaction", "permissions", "context", "files", "tasks", "advanced", "native"];
+const GROUP_IDS: ReadonlyArray<SettingsGroupId> = ["general", "background", "interaction", "permissions", "context", "files", "tasks", "advanced", "native"];
 
 export function setSettingsIntent(group: SettingsGroupId): void {
   try {
@@ -108,6 +109,7 @@ export function SettingsPage({
   const { t, resolvedLanguage } = useI18n();
   const groups: ReadonlyArray<readonly [GroupId, string, string]> = [
     ["general", "settings", t("settings.tabs.general")],
+    ["background", "image", t("settings.tabs.background")],
     ["interaction", "message", t("settings.tabs.interaction")],
     ["permissions", "shield", t("settings.tabs.permissions")],
     ["context", "layers", t("settings.tabs.context")],
@@ -256,6 +258,9 @@ export function SettingsPage({
           <div {...pane("native")} id="set-native" role="tabpanel" aria-labelledby="setTab-native" tabIndex={0}><NativePreferencesPane client={client} context={nativeContext} visible={group === "native"} /><FeatureSettingsPane group="voice" client={client} context={nativeContext} visible={group === "native"} /></div>
           <div {...pane("general")} id="set-general" role="tabpanel" aria-labelledby="setTab-general" tabIndex={0}>
             <GeneralTab ctl={ctl} />
+          </div>
+          <div {...pane("background")} id="set-background" role="tabpanel" aria-labelledby="setTab-background" tabIndex={0}>
+            <BackgroundSettingsPane ctl={ctl} visible={group === "background"} onDemoAction={flashDemo} />
           </div>
           <div {...pane("interaction")} id="set-interaction" role="tabpanel" aria-labelledby="setTab-interaction" tabIndex={0}>
             <InteractionTab ctl={ctl} demo={demoRuntime} prediction={<PredictionSettingsPane client={client} context={nativeContext} visible={group === "interaction"} />} />

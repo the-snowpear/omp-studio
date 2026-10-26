@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import type {
   ClientBootstrap,
@@ -317,7 +318,7 @@ export function NativeMaintenancePane({
                 ? "ZIP 包含主会话、子代理与模型请求载荷；HTML 用于浏览已保存的分支和子会话。另存副本不随内部清理删除。"
                 : "ZIP includes the main transcript, child agents and model request payload. HTML presents saved branches and child sessions. Saved copies remain independent of internal cleanup."}
             </p>
-            <label className="tiny muted">{zh ? "导出格式" : "Export format"} <select className="select" value={exportFormat} disabled={working} onChange={event => setExportFormat(event.target.value as "archive" | "html")}><option value="archive">ZIP · dump all</option><option value="html">HTML</option></select></label>
+            <label className="tiny muted">{zh ? "导出格式" : "Export format"} <AppSelect className="select" value={exportFormat} disabled={working} onChange={event => setExportFormat(event.target.value as "archive" | "html")}><option value="archive">ZIP · dump all</option><option value="html">HTML</option></AppSelect></label>
           </div>
           <button
             className="btn outline"

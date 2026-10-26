@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type {
@@ -121,7 +122,7 @@ export function ComposerSpeedControl({
     <div className="composer-speed">
       <label className="composer-speed-row">
         <span className="am-label">{zh ? "服务档位" : "Service speed"}</span>
-        <select
+        <AppSelect
           className="select"
           aria-label={zh ? "服务档位" : "Service speed"}
           value={speed?.selected ?? "normal"}
@@ -141,7 +142,7 @@ export function ComposerSpeedControl({
               {labels[value]}
             </option>
           ))}
-        </select>
+        </AppSelect>
       </label>
       <p className="am-desc">
         {zh

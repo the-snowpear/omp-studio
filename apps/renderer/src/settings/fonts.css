@@ -1,0 +1,18 @@
+.font-toolbar { display: flex; align-items: center; gap: var(--sp-10); flex-wrap: wrap; margin: var(--sp-12) 0; }
+.font-groups { display: grid; gap: var(--sp-12); }
+.font-group { min-width: 0; padding: var(--sp-16); border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface); }
+.font-group-heading { display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; }
+.font-group-heading button { margin-left: auto; }
+.font-group-desc { color: var(--text-3); font-size: var(--fs-11); margin: var(--sp-6) 0 var(--sp-12); }
+.font-controls { display: flex; gap: var(--sp-12); flex-wrap: wrap; }
+.font-controls label { display: flex; flex-direction: column; gap: var(--sp-4); flex: 1; min-width: 160px; font-size: var(--fs-12); }
+.font-controls .font-size-control { flex: 0 0 100px; min-width: 100px; }
+.font-controls .select, .font-controls .input { width: 100%; }
+.font-custom-name { width: 100%; margin-top: var(--sp-8); }
+.font-sample { padding: var(--sp-12); margin-top: var(--sp-12); background: var(--surface-2); border-radius: var(--r-6); overflow: auto; }
+.font-sample-ui { font-family: var(--font-ui); font-size: calc(14px * var(--ui-font-scale)); }
+.font-sample-ui span { font-size: calc(12px * var(--ui-font-scale)); color: var(--text-3); }
+.font-sample-terminal, .font-sample-terminal code { font-family: var(--font-terminal); font-size: var(--terminal-font-size); line-height: 1.3; }
+.font-sample-output { font-family: var(--font-output); font-size: calc(14px * var(--output-font-scale)); }
+.font-sample-output pre, .font-sample-output code { font-family: var(--font-output-code); font-size: calc(12px * var(--output-font-scale)); }
+.font-sample pre { margin-top: var(--sp-8); }

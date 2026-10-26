@@ -62,7 +62,6 @@ export * from "./contracts/gui-settings.js";
 
 export * from "./contracts/session-gui.js";
 export * from "./contracts/prediction.js";
-export * from "./contracts/stats.js";
 export * from "./contracts/agent-btw.js";
 export * from "./contracts/ida.js";
 export * from "./contracts/ask-attachments.js";

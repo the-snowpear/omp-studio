@@ -75,10 +75,6 @@ function modelShortName(selector: string): string {
   return tail.split(":")[0] || selector;
 }
 
-function labelInitial(label: string): string {
-  return Array.from(label.trim())[0]?.toLocaleUpperCase() ?? "—";
-}
-
 /** Composer / 子代理编辑共用的模型菜单（角色列表 + 「更多模型」飞出层）。 */
 export function ComposerModelMenu({
   data,
@@ -531,11 +527,12 @@ export function ComposerModelPicker({
       <span className="cmp-pill-wrap">
         <button
           type="button"
-          className="pill-btn meta-model"
+          className="pill-btn meta-model cmp-responsive-pill"
           aria-haspopup="menu"
           aria-expanded={menu === "model"}
           aria-label={t("composer.selectModel")}
-          data-tip={!modelReady ? t("common.notImplemented") : t("composer.model")}
+          aria-description={modelLabel}
+          data-tip={!modelReady ? t("common.notImplemented") : `${t("composer.model")}: ${modelLabel}`}
           onClick={() => {
             if (menu === "model") {
               closeAll();
@@ -544,8 +541,8 @@ export function ComposerModelPicker({
             setMenu("model");
           }}
         >
-          <span className="cmp-model-label-full">{modelLabel}</span>
-          <span className="cmp-model-label-initial" aria-hidden="true">{labelInitial(modelLabel)}</span>
+          <Icon name="cpu" extra="sm cmp-compact-icon" />
+          <span className="cmp-pill-label">{modelLabel}</span>
           {taskModel ? (
             <span
               className="cmp-task-dot"
@@ -610,21 +607,23 @@ export function ComposerModelPicker({
       <span className="cmp-pill-wrap">
         <button
           type="button"
-          className="pill-btn"
+          className="pill-btn cmp-responsive-pill"
           disabled={!pick || thinking.disabled || !thinkingReady}
           aria-haspopup="menu"
           aria-expanded={menu === "thinking"}
           aria-label={t("composer.reasoningEffort")}
+          aria-description={thinkingLabel}
           data-tip={
             !thinkingReady
               ? t("common.notImplemented")
               : thinking.disabled
                 ? t("composer.thinkingNotSupported")
-                : t("composer.reasoningEffort")
+                : `${t("composer.reasoningEffort")}: ${thinkingLabel}`
           }
           onClick={() => setMenu((current) => (current === "thinking" ? "none" : "thinking"))}
         >
-          <span>{thinkingLabel}</span>
+          <Icon name="brain" extra="sm cmp-compact-icon" />
+          <span className="cmp-pill-label">{thinkingLabel}</span>
           <Icon name="chevron-d" extra="sm cmp-pill-caret" />
         </button>
         {menu === "thinking" ? (

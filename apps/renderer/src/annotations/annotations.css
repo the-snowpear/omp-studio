@@ -62,7 +62,7 @@
   white-space: pre;
 }
 .annotation-dialog textarea.input,
-.annotation-source > select {
+.annotation-source > .app-select {
   width: 100%;
 }
 .annotation-source-details {

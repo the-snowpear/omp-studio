@@ -5,6 +5,7 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { PREVIEW_SERVICE_TIER } from "../preview/sessionGuiPreview";
+import { Icon } from "../icons";
 
 export function ServiceTierPicker({ client, sessionId, available, modelKey }: { client: StudioClient; sessionId: string | undefined; available: boolean; modelKey: string }) {
  const {preview}=usePreviewMode();const {resolvedLanguage}=useI18n();const zh=resolvedLanguage==="zh";
@@ -16,7 +17,7 @@ export function ServiceTierPicker({ client, sessionId, available, modelKey }: { 
  const labels={standard:zh?"标准":"Standard",slow:"Slow",priority:"Priority",ultrafast:"Ultrafast"};
  const change=async(tier:SessionTier)=>{if(!state||busy)return;if(preview){setState({...state,configured:tier,effective:tier});return;}if(!sessionId||!available)return;const generation=epoch.current;setBusy(true);setError("");try{const handle=await client.command("session.tier.set",{sessionId:sessionId as SessionId,selector:state.selector,tier});const value=await waitReceipt<{result:SessionTierState}>(client,handle.requestId);if(epoch.current===generation)setState(value.result);}catch(cause){if(epoch.current===generation)setError(hostErrorMessage(cause,zh?"档位切换失败":"Could not change service tier"));}finally{if(epoch.current===generation)setBusy(false);}};
  return <div className="composer-tier" style={{position:"relative"}}>
-  <button className="btn small outline" aria-expanded={open} aria-label={zh?"服务档位":"Service tier"} onClick={()=>setOpen(!open)}>{state?labels[state.effective]:zh?"档位":"Tier"}</button>
+  <button className="icon-btn small" aria-expanded={open} aria-label={zh?"服务档位":"Service tier"} aria-description={state?labels[state.effective]:undefined} data-tip={`${zh?"服务档位":"Service tier"}${state?`: ${labels[state.effective]}`:""}`} onClick={()=>setOpen(!open)}><Icon name={state?.effective==="slow"?"clock":"zap"} extra="sm" /></button>
   {open?<div className="rms-pop" style={{position:"absolute",bottom:"100%",right:0,minWidth:250,padding:12}}>
    <p className="small muted">{preview?(zh?"演示":"Demo"):zh?"仅当前会话":"Current session only"}</p>
    {!preview&&!available?<p role="status">{zh?"当前 Runtime 不支持服务档位面板":"This Runtime does not support service tiers"}</p>:null}

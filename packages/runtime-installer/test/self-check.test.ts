@@ -7,7 +7,7 @@ import type { SelfCheckChild, SelfCheckSpawn } from "../src/index.js";
 interface SpawnCall {
   command: string;
   args: string[];
-  options: { env?: NodeJS.ProcessEnv; stdio: "ignore"; windowsHide: boolean };
+  options: { env?: NodeJS.ProcessEnv; stdio: ["ignore", "pipe", "pipe"]; windowsHide: boolean };
 }
 
 function fakeChild(onKill?: (emitter: EventEmitter) => void): SelfCheckChild & { emitter: EventEmitter } {
@@ -39,7 +39,7 @@ test("smoke-test runner spawns the entrypoint with --smoke-test and resolves on 
   assert.ok(call);
   assert.equal(call.command, "C:\\runtimes\\v1\\omp.exe");
   assert.deepEqual(call.args, ["--smoke-test"]);
-  assert.equal(call.options.stdio, "ignore");
+  assert.deepEqual(call.options.stdio, ["ignore", "pipe", "pipe"]);
   assert.equal(call.options.windowsHide, true);
   assert.equal(call.options.env?.TEST_ENV, "1");
   child.emitter.emit("close", 0);
@@ -76,4 +76,22 @@ test("smoke-test runner rejects when the self-check times out", async () => {
     timeoutMs: 20,
   });
   await assert.rejects(runner.run("entrypoint"), /timed out after 20ms/u);
+});
+
+test("a failed self-check forwards its real stdout and stderr to Host diagnostics", async () => {
+  const output = { stdout: "", stderr: "" };
+  const runner = createSmokeTestRunner({
+    args: ["-e", 'process.stdout.write("self-check: starting\\n"); process.stderr.write("Error: 自检依赖加载失败\\n"); process.exitCode = 1;'],
+    onOutput: (stream, text) => { output[stream] += text; },
+  });
+  await assert.rejects(runner.run(process.execPath), /failed with exit 1/u);
+  assert.equal(output.stdout, "self-check: starting\n");
+  assert.equal(output.stderr, "Error: 自检依赖加载失败\n");
+});
+
+test("self-check output is drained without a diagnostics listener", async () => {
+  const runner = createSmokeTestRunner({
+    args: ["-e", 'process.stdout.write("o".repeat(1024 * 1024)); process.stderr.write("e".repeat(1024 * 1024));'],
+  });
+  await runner.run(process.execPath);
 });

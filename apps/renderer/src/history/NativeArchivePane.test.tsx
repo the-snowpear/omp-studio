@@ -1,3 +1,4 @@
+import { selectOption } from "../test/selectOption";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
@@ -32,9 +33,7 @@ it("preserves the preview search across hiding the pane without reading or openi
   fireEvent.click(await screen.findByRole("button", { name: /完善消息队列/ }));
   fireEvent.click(await screen.findByRole("button", { name: "演示会话" }));
   expect(open).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByRole("combobox", { name: "内容" }), {
-    target: { value: "prompts" },
-  });
+  selectOption(screen.getByRole("combobox", { name: "内容" }), "提示词");
   fireEvent.change(screen.getByRole("searchbox", { name: "搜索提示词" }), {
     target: { value: "图片" },
   });

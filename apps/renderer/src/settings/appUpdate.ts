@@ -13,7 +13,12 @@ import { cancelUpdate, checkForUpdates, downloadUpdateToReady, fetchUpdatePrefs,
 export interface AppUpdateState {
   readonly checking: boolean;
   readonly downloading: boolean;
+  readonly applying: boolean;
+  readonly checkError: string | null;
   readonly downloadError: string | null;
+  readonly applyError: string | null;
+  readonly applyNotice: string | null;
+  readonly cancelError: string | null;
   readonly readyToApply?: boolean;
   readonly rollbackVersion?: string | undefined;
   readonly rollbackReady?: boolean;
@@ -36,10 +41,13 @@ export interface AppUpdateState {
   } | null;
 }
 
+const clearedMessages = { checkError: null, downloadError: null, applyError: null, applyNotice: null, cancelError: null };
+let applyInFlight = false;
 let currentState: AppUpdateState = {
   checking: false,
   downloading: false,
-  downloadError: null,
+  applying: false,
+  ...clearedMessages,
   updateInfo: null,
 };
 
@@ -64,9 +72,9 @@ function updateCopy(key: string): string {
 let unifiedSnapshot: import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot | undefined;
 const unsubscribeUpdates = subscribeUpdates(() => {
   if (unifiedSnapshot) return;
-  const { check, checking, job, prefs } = getUpdatesState();
+  const { check, checking, job, prefs, error } = getUpdatesState();
   updateState({
-    checking,
+    checking, checkError: check?.error ?? (job?.phase === "failed" ? null : error),
     updateInfo: check ? {
       available: !check.error && check.app.plan !== "none" && check.app.version !== prefs?.skippedAppVersion,
       currentVersion: check.app.currentVersion ?? currentState.updateInfo?.currentVersion ?? "",
@@ -84,16 +92,29 @@ const unsubscribeUpdates = subscribeUpdates(() => {
   });
 });
 function receiveUnifiedUpdate(snapshot: import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot): void {
+  const sameTarget = unifiedSnapshot?.app.version === snapshot.app.version && unifiedSnapshot?.runtime.version === snapshot.runtime.version;
   unifiedSnapshot = snapshot;
   const parts = [snapshot.app, snapshot.runtime];
   const downloading = parts.some(p => p.phase === "downloading" || p.phase === "verifying");
-  const ready = !downloading && parts.some(p => p.phase === "ready");
+  const applying = applyInFlight || parts.some(p => p.phase === "applying");
+  const ready = !downloading && parts.some(p => p.phase === "ready" || p.phase === "applying");
   const current = snapshot.app.version ? snapshot.app : snapshot.runtime;
+  const messages: Record<keyof typeof clearedMessages, string | null> = {
+    ...clearedMessages,
+    ...(sameTarget && ready && !downloading && !applying ? { applyError: currentState.applyError, applyNotice: currentState.applyNotice, cancelError: currentState.cancelError } : {}),
+  };
+  const recordError = (stage: "check" | "prepare" | "apply" | "recovery" | undefined, message: string) => {
+    if (stage === "prepare") messages.downloadError = message;
+    else if (stage === "apply" || stage === "recovery") messages.applyError = message;
+    else messages.checkError = message;
+  };
+  if (snapshot.error) recordError(snapshot.errorStage, snapshot.error);
+  else for (const part of parts) if (part.phase === "failed" && part.message) recordError(part.errorStage ?? "prepare", part.message);
   updateState({
-    checking: snapshot.checking, downloading, readyToApply: ready,
+    checking: snapshot.checking, downloading, applying, readyToApply: ready,
     rollbackVersion: snapshot.rollbackAppVersion,
     rollbackReady: snapshot.rollbackAppPending === true && snapshot.app.phase === "ready",
-    downloadError: snapshot.error ?? parts.find(p => p.phase === "failed")?.message ?? null,
+    ...messages,
     receivedBytes: parts.reduce((n, p) => n + (p.receivedBytes ?? 0), 0),
     totalBytes: parts.reduce((n, p) => n + (p.totalBytes ?? 0), 0),
     updateInfo: {
@@ -129,7 +150,7 @@ export async function checkForAppUpdates(options?: {
     return null;
   }
 
-  updateState({ checking: true });
+  updateState({ checking: true, checkError: null });
   try {
     if (silent) {
       const prefs = await fetchUpdatePrefs();
@@ -141,7 +162,7 @@ export async function checkForAppUpdates(options?: {
     if (result?.error && !silent) throw new Error(result.error);
     return currentState.updateInfo;
   } catch (error) {
-    updateState({ checking: false });
+    updateState({ checking: false, checkError: error instanceof Error ? error.message : String(error) });
     if (!silent) {
       throw error;
     }
@@ -155,13 +176,15 @@ export async function checkForAppUpdates(options?: {
 export async function downloadAndInstallAppUpdate(): Promise<boolean> {
   const chrome = globalThis.ompStudioChrome;
   if (!chrome || !currentState.updateInfo?.available) {
-    updateState({ downloadError: "No available update" });
+    updateState({ downloadError: updateCopy("appUpdate.noAvailableUpdate") });
     return false;
   }
 
-  updateState({ downloading: true, downloadError: null, readyToApply: false });
+  updateState({ downloading: true, ...clearedMessages, readyToApply: false });
+  let unifiedPreparation = false;
   try {
     if (chrome.prepareUpdates && await chrome.getUpdateSnapshot?.().catch(() => null)) {
+      unifiedPreparation = true;
       receiveUnifiedUpdate(await chrome.prepareUpdates("all"));
       return false;
     }
@@ -169,6 +192,11 @@ export async function downloadAndInstallAppUpdate(): Promise<boolean> {
     updateState({ readyToApply: true });
     return false;
   } catch (err) {
+    if (unifiedPreparation) {
+      const snapshot = await chrome.getUpdateSnapshot?.().catch(() => null);
+      if (snapshot) receiveUnifiedUpdate(snapshot);
+      if (currentState.checkError || currentState.downloadError || currentState.applyError) return false;
+    }
     const message = err instanceof Error ? err.message : String(err);
     updateState({ downloading: false, downloadError: message });
     return false;
@@ -178,20 +206,26 @@ export async function downloadAndInstallAppUpdate(): Promise<boolean> {
 }
 
 export async function applyAppUpdate(): Promise<boolean> {
-  if (!currentState.readyToApply) return false;
-  updateState({ downloading: true, downloadError: null });
+  if (!currentState.readyToApply || currentState.applying) return false;
+  applyInFlight = true;
+  updateState({ applying: true, ...clearedMessages });
   try {
     const result = await globalThis.ompStudioChrome?.applyUpdate();
-    if (!result?.ok || result.deferred) {
-      updateState({ downloadError: result?.message ?? "Update could not be applied; finish active sessions and retry" });
+    if (result?.deferred) {
+      updateState({ applyNotice: result.message ?? updateCopy("appUpdate.applyDeferred") });
+      return false;
+    }
+    if (!result?.ok) {
+      updateState({ applyError: result?.message ?? updateCopy("updates.stateUnavailable") });
       return false;
     }
     return true;
   } catch (error) {
-    updateState({ downloadError: error instanceof Error ? error.message : String(error) });
+    updateState({ applyError: error instanceof Error ? error.message : String(error) });
     return false;
   } finally {
-    updateState({ downloading: false });
+    applyInFlight = false;
+    updateState({ applying: false });
   }
 }
 
@@ -205,7 +239,7 @@ export async function skipAppUpdate(): Promise<void> {
 export async function prepareDesktopRollback(): Promise<boolean> {
   const chrome = globalThis.ompStudioChrome;
   if (!chrome?.rollbackUpdate || !chrome.getUpdateSnapshot) return false;
-  updateState({ downloading: true, downloadError: null });
+  updateState({ downloading: true, ...clearedMessages });
   try {
     const result = await chrome.rollbackUpdate();
     if (!result.ok || result.deferred) throw new Error(result.message ?? updateCopy("updates.rollbackAppPrepareFailed"));
@@ -220,27 +254,33 @@ export async function prepareDesktopRollback(): Promise<boolean> {
 }
 
 export async function cancelAppUpdate(): Promise<void> {
-  if (unifiedSnapshot) { await globalThis.ompStudioChrome?.cancelUpdate("unified"); return; }
-  const job = getUpdatesState().job;
-  if (job?.kind !== "app") return;
+  updateState({ cancelError: null });
   try {
-    await cancelUpdate(job.jobId);
-    updateState({ readyToApply: false });
+    if (unifiedSnapshot) await globalThis.ompStudioChrome?.cancelUpdate("unified");
+    else {
+      const job = getUpdatesState().job;
+      if (job?.kind !== "app") return;
+      await cancelUpdate(job.jobId);
+      updateState({ readyToApply: false });
+    }
+    updateState(clearedMessages);
   } catch (error) {
-    updateState({ downloadError: error instanceof Error ? error.message : String(error) });
+    updateState({ cancelError: error instanceof Error ? error.message : String(error) });
   }
 }
 
 export function dismissAppUpdate(): void {
-  updateState({ updateInfo: null, downloadError: null });
+  updateState({ updateInfo: null, ...clearedMessages });
 }
 
 export function __resetAppUpdateForTests(initial?: Partial<AppUpdateState>): void {
   unifiedSnapshot = undefined;
+  applyInFlight = false;
   currentState = {
     checking: false,
     downloading: false,
-    downloadError: null,
+    applying: false,
+    ...clearedMessages,
     updateInfo: null,
     ...initial,
   };

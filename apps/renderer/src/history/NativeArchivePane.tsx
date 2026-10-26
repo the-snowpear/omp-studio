@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import type {
   ClientBootstrap,
@@ -238,7 +239,7 @@ export function NativeArchivePane({
       >
         <label>
           {zh ? "内容" : "Content"}
-          <select
+          <AppSelect
             className="select"
             value={view}
             onChange={(event) => setView(event.target.value as View)}
@@ -246,11 +247,11 @@ export function NativeArchivePane({
             <option value="sessions">{zh ? "会话" : "Sessions"}</option>
             <option value="recaps">{zh ? "回顾" : "Recaps"}</option>
             <option value="prompts">{zh ? "提示词" : "Prompts"}</option>
-          </select>
+          </AppSelect>
         </label>
         <label>
           {zh ? "范围" : "Scope"}
-          <select
+          <AppSelect
             className="select"
             value={scope}
             onChange={(event) =>
@@ -261,7 +262,7 @@ export function NativeArchivePane({
               {zh ? "当前工作区" : "Current workspace"}
             </option>
             <option value="all">{zh ? "全部工作区" : "All workspaces"}</option>
-          </select>
+          </AppSelect>
         </label>
         {view === "prompts" ? (
           <label className="archive-search">

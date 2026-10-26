@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 
-import type { ConfigWriteResult, TokenUsageReadModel } from "@omp-studio/client-contract";
+import type { ConfigWriteResult, StatsDashboardReadModel, TokenUsageReadModel } from "@omp-studio/client-contract";
 
 import { getStatsDbPath } from "./omp-discovery/paths.js";
 import { sanitizeDisplayText } from "./read-models.js";
@@ -31,6 +31,15 @@ const YEAR_LOOKBACK_DAYS = 400;
 
 const DASHBOARD_URL = "http://127.0.0.1:3847/";
 const DASHBOARD_PROBE_MS = 800;
+/**
+ * Deep link the statistics page embeds. The native client routes on the URL
+ * hash and defaults to `24h`, which shows an empty page for anyone who has not
+ * run OMP today; `all` is the range that always has data in this profile.
+ */
+const DASHBOARD_EMBED_URL = `${DASHBOARD_URL}#/overview?range=all`;
+/** A cold dashboard parses session tails before it can answer, so poll past that. */
+const DASHBOARD_START_TIMEOUT_MS = 20_000;
+const DASHBOARD_POLL_MS = 250;
 
 const OPEN_OK: ConfigWriteResult = {
   applied: true,
@@ -54,6 +63,10 @@ export interface OmpUsageAdapterOptions {
   readonly probeDashboard?: () => Promise<boolean>;
   readonly now?: () => number;
   readonly syncThrottleMs?: number;
+  /** Injectable sleep so the startup poll runs instantly under test. */
+  readonly delay?: (ms: number) => Promise<void>;
+  /** How long a cold dashboard may take to answer before reporting unavailable. */
+  readonly dashboardStartTimeoutMs?: number;
 }
 
 interface ModelDayRow {
@@ -109,7 +122,7 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-async function defaultLocateOmp(): Promise<string | undefined> {
+export async function defaultLocateOmp(): Promise<string | undefined> {
   const exeName = process.platform === "win32" ? "omp.exe" : "omp";
   const extraDirs = [join(homedir(), ".omp", "bin"), join(homedir(), ".local", "bin")];
   const dirs = [...(process.env.PATH ?? "").split(delimiter), ...extraDirs];
@@ -297,6 +310,54 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
   const probeDashboard = options.probeDashboard ?? defaultProbeDashboard;
   const now = options.now ?? Date.now;
   const throttleMs = options.syncThrottleMs ?? SYNC_THROTTLE_MS;
+  const delay = options.delay ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  const startTimeoutMs = options.dashboardStartTimeoutMs ?? DASHBOARD_START_TIMEOUT_MS;
+  /** Resolved once a dashboard answered; later calls skip the startup poll. */
+  let dashboardUrl: string | undefined;
+  let dashboardStarting: Promise<DashboardStart> | undefined;
+
+  type DashboardStart = { readonly url: string } | { readonly reason: string };
+
+  /**
+   * Resolve a dashboard endpoint, starting one when nothing answers. A page
+   * mount and the homepage card can ask at the same time, so concurrent callers
+   * share one spawn instead of racing two servers onto the same port.
+   */
+  async function ensureDashboard(): Promise<DashboardStart> {
+    // Always probe before answering: a panel that died after we first reached it
+    // must not keep reporting "running" from a cached URL.
+    if (await probeDashboard()) {
+      dashboardUrl = DASHBOARD_EMBED_URL;
+      return { url: dashboardUrl };
+    }
+    dashboardUrl = undefined;
+    if (dashboardStarting !== undefined) return dashboardStarting;
+    dashboardStarting ??= (async (): Promise<DashboardStart> => {
+      try {
+        const exe = await locateOmp();
+        if (exe === undefined) {
+          return { reason: "未找到 OMP Runtime，无法启动本机统计面板。" };
+        }
+        spawnDashboard(exe);
+        const deadline = now() + startTimeoutMs;
+        // The clock is the primary budget, but a stalled or non-advancing clock
+        // must never spin this loop forever: bound the attempts as well.
+        const maxPolls = Math.max(1, Math.ceil(startTimeoutMs / DASHBOARD_POLL_MS) + 4);
+        for (let poll = 0; poll < maxPolls && now() < deadline; poll += 1) {
+          await delay(DASHBOARD_POLL_MS);
+          if (await probeDashboard()) return { url: DASHBOARD_EMBED_URL };
+        }
+        return { reason: "本机统计面板未在预期时间内就绪，可稍后重试或在浏览器打开。" };
+      } catch {
+        // A rejected locator or spawn must not leave the shared promise stuck.
+        return { reason: "启动本机统计面板失败。" };
+      }
+    })();
+    const result = await dashboardStarting;
+    dashboardStarting = undefined;
+    if ("url" in result) dashboardUrl = result.url;
+    return result;
+  }
 
   let lastSyncAt = 0;
   let inflight: Promise<void> | undefined;
@@ -346,6 +407,11 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
         return emptyModel(generatedAt, "无法读取用量库。");
       }
       return emptyModel(generatedAt, "尚未同步到用量数据。可点击「打开 OMP Stats」生成统计库。");
+    },
+
+    async dashboard(): Promise<StatsDashboardReadModel> {
+      const result = await ensureDashboard();
+      return "url" in result ? { available: true, url: result.url } : { available: false, reason: result.reason };
     },
 
     async openDashboard(): Promise<ConfigWriteResult> {

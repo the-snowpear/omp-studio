@@ -167,6 +167,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
       label: "palette.groupConfig",
       items: [
         { id: "set-general", icon: "settings", label: "palette.settingsGeneral", keywords: "general 设置 常规 主题 密度 通知 启动 布局", action: { kind: "openSettings", group: "general" } },
+        { id: "set-background", icon: "image", label: "palette.settingsBackground", keywords: "background wallpaper 背景 壁纸 图片 视频 动图 透明度 模糊 遮罩", action: { kind: "openSettings", group: "background" } },
         { id: "set-interaction", icon: "message", label: "palette.settingsInteraction", keywords: "interaction steering 对话与交互 中断 粘贴 thinking 工具意图", action: { kind: "openSettings", group: "interaction" } },
         { id: "set-permissions", icon: "shield", label: "palette.settingsPermissions", keywords: "permissions 权限与安全 审批 always ask write yolo 工具级 forget approvals remembered 忘记 记住的审批", action: { kind: "openSettings", group: "permissions" } },
         { id: "set-context", icon: "layers", label: "palette.settingsContext", keywords: "context compact 上下文与记忆 压缩 记忆 memory hindsight mnemopi", action: { kind: "openSettings", group: "context" } },

@@ -1,0 +1,712 @@
+/**
+ * 背景层与设置页图库。
+ *
+ * 分工：
+ * - `.app-backdrop*` 只画媒体与遮罩；数值全部来自 `--bd-*` 变量。
+ * - `[data-backdrop="on"]` 把结构壳与卡片/控件的表面 token 换成有层次的半透明；
+ *   菜单 / 弹窗 / 选择器保留 94% 左右的不透明度与背景模糊（瞬态阅读面优先）。
+ * - 预览卡与图库沿用同一组变量与 `.bg-media`，避免预览和真实两套画法。
+ */
+
+/* `.app` 是背景层的定位与层叠上下文：媒体层用 z-index:-1，低于所有界面。 */
+.app {
+  position: relative;
+  isolation: isolate;
+}
+
+:root {
+  --bd-scrim-base: #ffffff;
+}
+:root[data-theme="dark"] {
+  --bd-scrim-base: #000000;
+}
+
+/* ---------- 背景层 ---------- */
+
+.app-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--bg);
+  animation: bg-fade-in 240ms var(--ease) both;
+}
+
+@keyframes bg-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.bg-media {
+  position: absolute;
+  inset: calc(-2 * var(--bd-blur, 0px));
+  width: auto;
+  height: auto;
+  object-fit: var(--bd-fit, cover);
+  object-position: var(--bd-focus, center);
+  opacity: var(--bd-media-opacity, 1);
+  filter: blur(var(--bd-blur, 0px));
+}
+
+.bg-media-preset,
+.bg-media-empty {
+  inset: calc(-2 * var(--bd-blur, 0px));
+}
+
+.bg-media-empty {
+  background: var(--bg);
+}
+
+/* 深色主题下，过暗的壁纸会被深色壳吃掉；只对暗色资产提亮，避免把浅色图洗白。 */
+:root[data-theme="dark"] .bg-media[data-luma="dark"],
+:root[data-theme="dark"] .bg-media-tile[data-luma="dark"] {
+  filter: blur(var(--bd-blur, 0px)) brightness(1.55) saturate(1.12);
+}
+
+.bg-media-tile {
+  position: absolute;
+  inset: 0;
+  background-repeat: repeat;
+  background-position: var(--bd-focus, center);
+  opacity: var(--bd-media-opacity, 1);
+  filter: blur(var(--bd-blur, 0px));
+}
+
+.app-backdrop-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--bd-scrim-base);
+  opacity: var(--bd-scrim, 0);
+}
+
+/* ---------- 表面玻璃 ----------
+   用户要的是「界面每一层都能看到背景，只是明度不同」，所以把表面 token 统一
+   换成半透明：卡片、工具卡、代码块、Composer、按钮、徽标都会带背景。
+   结构壳与面板的嵌套底色仍由上面那组规则控制，避免叠成纯白。 */
+
+:root[data-backdrop="on"] {
+  --bd-surface-base: #ffffff;
+  --bd-surface-2-base: #f2f2f5;
+  --bd-surface-3-base: #e8e8ec;
+  --bd-code-base: #f4f4f7;
+
+  --surface: color-mix(in srgb, var(--bd-surface-base) 46%, transparent);
+  --surface-2: color-mix(in srgb, var(--bd-surface-2-base) 40%, transparent);
+  --surface-3: color-mix(in srgb, var(--bd-surface-3-base) 34%, transparent);
+  --code-bg: color-mix(in srgb, var(--bd-code-base) 54%, transparent);
+}
+
+:root[data-backdrop="on"][data-theme="dark"] {
+  --bd-surface-base: #1a1b1f;
+  --bd-surface-2-base: #222329;
+  --bd-surface-3-base: #2b2c33;
+  --bd-code-base: #141519;
+
+  --surface: color-mix(in srgb, var(--bd-surface-base) 56%, transparent);
+  --surface-2: color-mix(in srgb, var(--bd-surface-2-base) 50%, transparent);
+  --surface-3: color-mix(in srgb, var(--bd-surface-3-base) 44%, transparent);
+  --code-bg: color-mix(in srgb, var(--bd-code-base) 62%, transparent);
+}
+
+/* 只给需要「隔着玻璃读字」的表面加背景模糊，避免上百张卡片同时开合成层。 */
+:root[data-backdrop="on"] .composer,
+:root[data-backdrop="on"] .codeblock,
+:root[data-backdrop="on"] .menu,
+:root[data-backdrop="on"] .modal,
+:root[data-backdrop="on"] .app-select-popup {
+  backdrop-filter: blur(16px) saturate(1.06);
+}
+
+/* 菜单 / 弹窗 / 选择器是瞬态阅读面：比卡片更实，仍然带一点背景。 */
+:root[data-backdrop="on"] .menu,
+:root[data-backdrop="on"] .modal,
+:root[data-backdrop="on"] .app-select-popup {
+  background: color-mix(in srgb, var(--bd-surface-base) 94%, transparent);
+}
+
+/* 右侧 minimap 是常驻 chrome，别在玻璃界面里留一条纯白。 */
+:root[data-backdrop="on"] .minimap {
+  background: color-mix(in srgb, var(--bg) 35%, transparent);
+}
+
+/* 用户气泡：浅色主题的淡紫与深色主题的强调色都改成带背景的玻璃。 */
+:root[data-backdrop="on"][data-theme="light"] .ev-user .ev-body {
+  background: color-mix(in srgb, #eee9ff 72%, transparent);
+}
+:root[data-backdrop="on"][data-theme="dark"] .ev-user .ev-body {
+  background: color-mix(in srgb, var(--accent) 88%, transparent);
+}
+
+/* ---------- 结构壳透出 ----------
+   只给「每个区域最外层」那一层底色：.app-body / .topbar / .composer-region 都是
+   嵌套在 .main-col 里的实心底，若也上色会叠成两三层白纱，把壁纸洗到看不见。 */
+
+:root[data-backdrop="on"] .app-body {
+  background: transparent;
+}
+
+:root[data-backdrop="on"] .main-col {
+  background: color-mix(in srgb, var(--bg) var(--bd-shell, 100%), transparent);
+}
+
+:root[data-backdrop="on"] .topbar,
+:root[data-backdrop="on"] .composer-region,
+:root[data-backdrop="on"] .bottom-panel,
+:root[data-backdrop="on"] .side-panel {
+  background: transparent;
+}
+
+:root[data-backdrop="on"][data-backdrop-scope="app"] .app-titlebar {
+  background: color-mix(in srgb, var(--bg) var(--bd-shell, 100%), transparent);
+}
+
+/* 二级页头部不再整条铺底色：只给标签组一个圆角玻璃胶囊，避免出现带直角的
+   浅色长条。标题、返回、主题按钮直接落在背景上。 */
+:root[data-backdrop="on"] .page-head {
+  background: transparent;
+  border-bottom-color: color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+:root[data-backdrop="on"] .page-nav {
+  isolation: isolate;
+}
+
+:root[data-backdrop="on"] .page-nav::before {
+  content: "";
+  position: absolute;
+  inset: -6px -10px;
+  z-index: -1;
+  border-radius: var(--r-8);
+  background: color-mix(in srgb, var(--bg) 42%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  backdrop-filter: blur(14px) saturate(1.05);
+  pointer-events: none;
+}
+
+:root[data-backdrop="on"][data-backdrop-scope="app"] .sidebar {
+  background: color-mix(in srgb, var(--bg-inset) var(--bd-shell, 100%), transparent);
+}
+
+/* 侧栏的阴影垫层只保留阴影，不再重复画一层底色。 */
+:root[data-backdrop="on"][data-backdrop-scope="app"] .sidebar::after {
+  background: transparent;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+/* ---------- 设置页：预览卡 ---------- */
+
+.bg-preview {
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  overflow: hidden;
+  background: transparent;
+  margin-bottom: var(--sp-12);
+}
+
+.bg-preview-stage {
+  position: relative;
+  height: clamp(148px, 22vh, 216px);
+  overflow: hidden;
+}
+
+.bg-preview-stage .bg-media {
+  inset: calc(-2 * var(--bd-blur, 0px));
+}
+
+.bg-preview-ui {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.bg-preview-topbar {
+  height: 18%;
+  min-height: 22px;
+  background: color-mix(in srgb, var(--bg) var(--bd-shell, 100%), transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.bg-preview-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.bg-preview-sidebar {
+  width: 22%;
+  background: color-mix(in srgb, var(--bg-inset) var(--bd-shell, 100%), transparent);
+  border-right: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.bg-preview-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6%;
+  padding: 4% 5%;
+  background: color-mix(in srgb, var(--bg) var(--bd-shell, 100%), transparent);
+}
+
+.bg-preview-bubble {
+  align-self: flex-start;
+  max-width: 62%;
+  padding: 4% 5%;
+  border-radius: var(--r-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.4;
+  box-shadow: none;
+}
+
+.bg-preview-composer {
+  height: 22%;
+  min-height: 24px;
+  border-radius: var(--r-6);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+}
+
+.bg-preview-caption {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
+  backdrop-filter: blur(12px);
+  font-size: var(--fs-12);
+  color: var(--text-3);
+}
+
+.bg-preview-caption .spacer {
+  flex: 1;
+}
+
+.bg-preview-disabled {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+
+/* ---------- 设置页：图库 ---------- */
+
+.bg-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-6) var(--sp-12);
+  padding: var(--sp-8) var(--sp-12);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--surface-2);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+
+.bg-summary b {
+  color: var(--text);
+  font-weight: var(--fw-medium);
+}
+
+.bg-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-14);
+}
+
+.bg-gallery-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-8);
+}
+
+.bg-gallery-title {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  color: var(--text-2);
+}
+
+.bg-gallery-count {
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+}
+
+.bg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: var(--sp-10);
+}
+
+.bg-tile {
+  position: relative;
+  min-width: 0;
+}
+
+.bg-tile-main {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: 0;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--text-2);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.bg-tile-main:hover {
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+
+.bg-tile.is-active .bg-tile-main {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.bg-tile-thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.bg-tile-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.bg-tile-thumb .bg-tile-preset {
+  position: absolute;
+  inset: 0;
+}
+
+.bg-tile-thumb .bg-tile-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+
+.bg-tile-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: 0 var(--sp-8) var(--sp-8);
+  min-width: 0;
+}
+
+.bg-tile-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  color: var(--text);
+}
+
+.bg-tile-kind {
+  flex: none;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.bg-tile.is-active .bg-tile-kind {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.bg-tile-active {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 10px;
+  line-height: 18px;
+  pointer-events: none;
+}
+
+.bg-tile-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-4);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.bg-tile:hover .bg-tile-remove,
+.bg-tile:focus-within .bg-tile-remove,
+.bg-tile.is-active .bg-tile-remove {
+  opacity: 1;
+}
+
+.bg-tile-remove:hover {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, var(--border));
+}
+
+.bg-tile-confirm {
+  position: absolute;
+  inset: auto 6px 6px 6px;
+  display: flex;
+  gap: var(--sp-4);
+  justify-content: flex-end;
+  padding: var(--sp-4);
+  border-radius: var(--r-6);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  border: 1px solid var(--border-strong);
+}
+
+.bg-add {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  min-height: 0;
+  aspect-ratio: 16 / 9;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-8);
+  color: var(--text-3);
+  background: transparent;
+  font-size: var(--fs-12);
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.bg-add:hover,
+.bg-add:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
+.bg-add[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.bg-drop {
+  border-radius: var(--r-8);
+  outline: 1px dashed transparent;
+  outline-offset: 4px;
+  transition: outline-color var(--dur-fast) var(--ease);
+}
+
+.bg-drop.is-dragging {
+  outline-color: var(--accent);
+}
+
+.bg-importing {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--surface);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+
+.bg-importing .spinner {
+  width: 14px;
+  height: 14px;
+}
+
+.bg-errors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.bg-error,
+.bg-notice,
+.bg-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  border-radius: var(--r-6);
+  border: 1px solid var(--border);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+
+.bg-error {
+  border-color: color-mix(in srgb, var(--red) 35%, var(--border));
+  background: var(--red-soft);
+  color: var(--text);
+}
+
+.bg-notice {
+  border-color: color-mix(in srgb, var(--amber) 35%, var(--border));
+  background: var(--amber-soft);
+  color: var(--text);
+}
+
+.bg-hint {
+  border-color: color-mix(in srgb, var(--amber) 30%, var(--border));
+  background: var(--amber-soft);
+  color: var(--text-2);
+}
+
+.bg-error .icon,
+.bg-notice .icon,
+.bg-hint .icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+.bg-error-close,
+.bg-notice-close {
+  margin-left: auto;
+  flex: none;
+}
+
+.bg-storage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8) var(--sp-12);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+
+.bg-storage .spacer {
+  flex: 1;
+}
+
+.bg-empty {
+  padding: var(--sp-14) var(--sp-16);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-8);
+  font-size: var(--fs-12);
+  color: var(--text-3);
+  text-align: center;
+}
+
+.bg-preview-note {
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+}
+
+/* 隐藏的原生文件选择器：按钮 / 拖放都可以触发。 */
+.bg-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---------- 设置页：滑杆 ---------- */
+
+.set-slider {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  min-width: 190px;
+}
+
+.set-slider .slider {
+  flex: 1;
+  min-width: 120px;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  outline: none;
+  cursor: pointer;
+}
+
+.set-slider .slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.set-slider .slider::-webkit-slider-thumb:hover {
+  transform: scale(1.08);
+}
+
+.set-slider .slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+}
+
+.set-slider .slider:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.set-slider .slider-value {
+  flex: none;
+  min-width: 52px;
+  text-align: right;
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-backdrop {
+    animation: none;
+  }
+  .bg-tile-main,
+  .bg-tile-remove,
+  .bg-add,
+  .set-slider .slider::-webkit-slider-thumb {
+    transition: none;
+  }
+}
