@@ -10,6 +10,7 @@ import { verifySignedArtifact, parseRuntimeInstallationManifest, RUNTIME_ARTIFAC
 import { REMOTE_PROTOCOL_VERSION } from "../apps/desktop/dist/src/remote/wire.js";
 import { assertExecutableTarget, assertNativeTargetBuild, resolveTargetPlatform } from "./target-platform.mjs";
 import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
+import { defaultArtifactDirectory, deriveRuntimeVersion, readPatchSeries, readUpstreamVersion } from "./runtime-artifact.mjs";
 
 export const PRIVATE_NODE_VERSION = "24.17.0";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -32,7 +33,7 @@ export async function buildRemoteEnvironment(options = {}) {
   assertNativeTargetBuild(platform);
   const appVersion = JSON.parse(await readFile(join(root, "package.json"), "utf8")).version;
   const repo = options.repo ?? process.env.GITHUB_REPOSITORY ?? "the-snowpear/omp-studio";
-  const runtime = options.runtime ?? join(root, "packages/runtime-installer/dist/artifacts", platform);
+  const runtime = options.runtime ?? process.env.OMP_ARTIFACT_DIR ?? defaultArtifactDirectory(platform, deriveRuntimeVersion(await readUpstreamVersion(), await readPatchSeries()));
   const table = JSON.parse(await readFile(join(root, "packaging/keys/trusted-keys.json"), "utf8"));
   const keys = Object.fromEntries(await Promise.all(Object.entries(table.keys).map(async ([id, name]) => [id, await readFile(join(root, "packaging/keys", name))])));
   const verified = await verifySignedArtifact({ directory: runtime, layout: RUNTIME_ARTIFACT_LAYOUT, parseManifest: parseRuntimeInstallationManifest, requireCovered: m => ["runtime-manifest.json", m.entrypoint], trustedKeys: options.trustedKeys ?? keys });
