@@ -1,32 +1,36 @@
-/**
- * 虚拟行行高的跨挂载记忆。
- *
- * `estimateSize` 固定 132px 时，切回一个看过的时间线要重走「估高 → 实测 → 贴底」的
- * 修正链（`settling` 隐身两帧就是为它兜底的）。这里把量过的行高按 rowKey 记在模块级
- * 缓存里，重挂时未测量的行直接拿上次的真实高度当估高：首次布局就接近最终值，修正与
- * 重排随之减少。行高仍以虚拟列表自己的测量为准，这里只影响初值。
- *
- * 上限 8192 条（行键是 itemId，全局唯一性不保证但撞键最多让某行初估偏差，实测立刻
- * 覆盖）；超限整体清空，简单且内存有界。
- */
-const MAX_ENTRIES = 8192;
+/** Cross-mount estimates, partitioned by actual body width, typography and
+ * conversation/panel identity. Measurements remain authoritative. All contexts
+ * share one bounded LRU, so a resize never clears an entire measured prefix. */
+export const MAX_ROW_HEIGHT_ENTRIES = 8192;
+export const ROW_WIDTH_BUCKET_PX = 32;
+export const DEFAULT_ROW_ESTIMATE = 132;
+export type RowHeightContext = {
+  readonly width: number;
+  readonly typography: string;
+  readonly panel: string;
+};
 
 const heights = new Map<string, number>();
-
-export const DEFAULT_ROW_ESTIMATE = 132;
-
-export function rememberRowHeight(key: string, height: number): void {
-  if (!(height > 0)) return;
-  if (heights.size >= MAX_ENTRIES && !heights.has(key)) heights.clear();
-  heights.set(key, height);
+function cacheKey(key: string, context?: RowHeightContext): string {
+  return JSON.stringify([context?.panel ?? "", context?.typography ?? "", context === undefined ? 0 : Math.round(context.width / ROW_WIDTH_BUCKET_PX), key]);
 }
-
-export function rowHeightEstimate(key: string | undefined): number {
-  const remembered = key === undefined ? undefined : heights.get(key);
-  return remembered ?? DEFAULT_ROW_ESTIMATE;
+export function rememberRowHeight(key: string, height: number, context?: RowHeightContext): void {
+  if (!(height > 0) || !Number.isFinite(height)) return;
+  const entry = cacheKey(key, context);
+  heights.delete(entry);
+  heights.set(entry, height);
+  if (heights.size > MAX_ROW_HEIGHT_ENTRIES) heights.delete(heights.keys().next().value!);
 }
-
-/** 字体变化或测试复位时丢弃旧的布局度量。 */
+export function rowHeightEstimate(key: string | undefined, context?: RowHeightContext): number {
+  if (key === undefined) return DEFAULT_ROW_ESTIMATE;
+  const entry = cacheKey(key, context);
+  const remembered = heights.get(entry);
+  if (remembered === undefined) return DEFAULT_ROW_ESTIMATE;
+  heights.delete(entry);
+  heights.set(entry, remembered);
+  return remembered;
+}
+/** Explicit typography invalidation or test reset. Width changes do not call it. */
 export function resetRowHeightCache(): void {
   heights.clear();
 }

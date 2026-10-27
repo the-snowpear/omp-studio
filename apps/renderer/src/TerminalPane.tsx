@@ -239,15 +239,17 @@ function XtermScreen({
       } catch {
         // Fit can throw while the panel is mid-collapse.
       }
-      host.term.focus();
     };
-    const frame = requestAnimationFrame(sync);
+    const frame = requestAnimationFrame(() => { sync(); host.term.focus(); });
+    let resizeFrame = 0;
     const ro = new ResizeObserver(() => {
-      requestAnimationFrame(sync);
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(sync);
     });
     ro.observe(node);
     return () => {
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(resizeFrame);
       ro.disconnect();
     };
   }, [active, api, hosts, session.id]);

@@ -17,11 +17,19 @@ export type InfoDensity = "compact" | "standard" | "cozy";
 export type ToolActivityDetail = "full" | "concise" | "hidden";
 export type StartupPage = "home" | "workbench" | "last";
 export type StreamingCadenceHz = 30 | 60 | 90 | 120;
+export type ConversationWidthMode = "standard" | "wide" | "full" | "custom";
+
+export const CONVERSATION_WIDTH_MODES: readonly ConversationWidthMode[] = ["standard", "wide", "full", "custom"];
+export const CONVERSATION_WIDTH_LIMITS = { min: 640, max: 1440, step: 32 } as const;
+export const CONVERSATION_WIDTH_KEYS = ["conversationWidthMode", "conversationCustomWidth"] as const;
 
 export interface AppSettings {
   readonly language: AppLanguage;
   readonly theme: AppTheme;
   readonly density: InfoDensity;
+  readonly conversationWidthMode: ConversationWidthMode;
+  /** 自定义阅读列最大宽度；切换预设时保留。 */
+  readonly conversationCustomWidth: number;
   readonly uiFontFamily: string;
   readonly uiFontSize: number;
   readonly terminalFontFamily: string;
@@ -48,10 +56,14 @@ export interface AppSettings {
   readonly showTokenUsage: boolean;
 }
 
+export type ConversationWidthPreferences = Pick<AppSettings, typeof CONVERSATION_WIDTH_KEYS[number]>;
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   language: "system",
   theme: "light",
   density: "standard",
+  conversationWidthMode: "standard",
+  conversationCustomWidth: 1024,
   uiFontFamily: "",
   uiFontSize: 14,
   terminalFontFamily: "",
@@ -100,6 +112,13 @@ function fontSize(value: unknown, min: number, max: number, fallback: number): n
   return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : fallback;
 }
 
+export function normalizeConversationCustomWidth(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_APP_SETTINGS.conversationCustomWidth;
+  const { min, max, step } = CONVERSATION_WIDTH_LIMITS;
+  const clamped = Math.min(max, Math.max(min, value));
+  return min + Math.round((clamped - min) / step) * step;
+}
+
 function parseStoredSettings(raw: string | null): AppSettings {
   if (!raw) return DEFAULT_APP_SETTINGS;
   try {
@@ -108,6 +127,8 @@ function parseStoredSettings(raw: string | null): AppSettings {
       language: pick(value.language, LANGUAGES) ?? DEFAULT_APP_SETTINGS.language,
       theme: pick(value.theme, THEMES) ?? DEFAULT_APP_SETTINGS.theme,
       density: pick(value.density, DENSITIES) ?? DEFAULT_APP_SETTINGS.density,
+      conversationWidthMode: pick(value.conversationWidthMode, CONVERSATION_WIDTH_MODES) ?? DEFAULT_APP_SETTINGS.conversationWidthMode,
+      conversationCustomWidth: normalizeConversationCustomWidth(value.conversationCustomWidth),
       uiFontFamily: typeof value.uiFontFamily === "string" ? value.uiFontFamily : "",
       uiFontSize: fontSize(value.uiFontSize, 12, 20, 14),
       terminalFontFamily: typeof value.terminalFontFamily === "string" ? value.terminalFontFamily : "",

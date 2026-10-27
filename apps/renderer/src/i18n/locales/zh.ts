@@ -281,6 +281,7 @@ const zhRaw = {
     "file": "文件"
   },
   "shell": {
+    "returnToConversation": "返回对话",
     "globalActions": "全局操作",
     "cloneRepo": "克隆 Git 仓库…",
     "tempWorkspace": "创建临时工作区",
@@ -1551,6 +1552,23 @@ const zhRaw = {
       "hint": "拖动调整位置，滚轮缩放",
       "retake": "重拍",
       "errorProcessing": "无法处理图片。"
+    },
+    "conversationWidth": {
+      "title": "对话宽度",
+      "desc": "全局显示偏好，只改变对话阅读列，不影响模型、上下文或消息内容。窄窗口会自动适应可用空间。",
+      "mode": "阅读列宽度",
+      "modeDesc": "标准与宽屏为最大宽度；铺满使用扣除侧栏、面板和边距后的净可用空间。",
+      "customWidth": "自定义宽度",
+      "customDesc": "640–1440 px，每步 32 px。拖动时仅预览数值，松手、键盘调整完成或失焦后保存；切换预设会保留此值。",
+      "options": {
+        "standard": "标准 · 768 px",
+        "wide": "宽屏 · 1024 px",
+        "full": "铺满 · 可用宽度",
+        "custom": "自定义"
+      },
+      "customValue": "自定义 · {width} px",
+      "globalDisplay": "全局显示偏好 · 不改变当前会话内容",
+      "openSettings": "在设置中调整宽度"
     },
     "fonts": {
       "title": "字体",

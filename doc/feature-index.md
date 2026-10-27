@@ -54,6 +54,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 历史 / 项目会话缓存 | `apps/renderer/src/HistoryPage.tsx`、`sidebar/useProjectHistories.ts`、`sidebar/provisionalThread.ts`、`studio-host/src/session-catalog.ts` | `history.list`；侧栏按 `workspaceId` 独立加载 / 分页 / 刷新；只有 title/session/model/thinking 元数据、尚无 `message` 的空白 JSONL 不进入历史；草稿非空或提示词已发送时显示 Renderer 临时行，正式 LLM 标题到达后按 `sessionId` 接管；归档成功的 `sessionId` 会阻止迟到的 Workbench 状态复活临时行；resume / archive / drop / delete（历史页「⋮ → 删除会话」走 `session.delete`，Host 清 transcript/artifacts/遥测/绑定/租约/pin 残留） |
 | 命令面板 | `apps/renderer/src/CommandPalette.tsx`、`commandPaletteCatalog.ts` | 动作目录与路由 |
 | 主题 / 密度 / 上次路由 / 浮窗几何 | `apps/renderer/src/settings/appSettings.ts` | 本地 UI 记忆，不进 Host；BTW 几何在 `LayoutMemory`；侧栏项目展开与 Explorer 目录展开记忆在 `sidebar/expandMemory.ts` |
+| 对话阅读宽度 / 窄窗口预算 | `settings/ConversationWidthSettings.tsx`、`settings/ConversationWidthContext.tsx`、`layout/{useReadingColumn,useWorkbenchLayout,workbenchLayout}.ts`、`conversation/conversationReflow.ts`；使用说明 `docs/conversation-width.md` | AppSettings 全局偏好，标准/宽松/填满/自定义；读取实际 `.convo-wrap` 宽度、正文与输入列共用净宽；左/右/底面板临时首选/有效布局与窄窗退让；离底阅读消息/块锚定，贴底仍由唯一 writer 负责；预览演示值不写真实存储。 |
 | 进入应用提示（尚未完成） | `apps/renderer/src/StartupNotice.tsx`、`settings/startupNotice.ts` | 中文全局弹窗：项目 GitHub、关闭 / 不再提醒；「不再提醒」只写 localStorage，不进 Host；GitHub 卡点开走 `ompStudioChrome.openUrl` |
 | 预览开关 | `apps/renderer/src/preview/mode.ts`、`PreviewContext.tsx` | 显示层开关；`PREVIEW_MODE_SWITCH_ENABLED` |
 | 预览 fixture / 壳 | `apps/renderer/src/preview/fixtures.ts`、`surfaces.tsx`、`btwPreview.ts` | 新读表面必须同时接预览与真实 |

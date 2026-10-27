@@ -330,13 +330,78 @@
 }
 /* 虚拟列表的已挂载行走普通流（见 ConversationVirtualList）：行长高当帧就把文档一起撑高，
    `.convo-doc` 的 ResizeObserver 得以在同一个绘制前窗口贴底，展开工具卡时下方内容不再
-   「先往下再归位」。`overflow: clip` 保留：横向溢出（长代码行）仍按老规矩裁掉，未挂载
-   头尾由容器 padding 占位、不会溢出。 */
+   「先往下再归位」。未挂载头尾由容器 padding 占位。旧嵌入面保留裁切，主阅读列在
+   下方放开横向外层裁切，改由代码 / 表格 / diff 自己提供内部横向滚动。 */
 .convo-virtual-list { overflow: clip; }
 /* 每行自成一个 BFC：`.ev` 带 margin-bottom，若允许它穿出行盒与相邻行合并，行的实测高度
    就比它在流里实际占的位置少一段（虚拟化据此算未挂载区域的 padding，几百行累积起来就是
    几千像素的滚动量误差）。绝对定位时代行盒本身是 BFC，这里显式补回同一语义。 */
 .convo-virtual-row { display: flow-root; }
+
+/* 主阅读列：hook 只给主 .convo-wrap 加标记并写实测值；不重定义 --doc-max-w，
+   Hub、子 Agent 检查卡和 BTW 仍使用原来的上限。Perf harness 可复用同一标记/变量。
+   Doc 的 containing block 已扣原生 scrollbar；Composer 是兄弟盒，需额外扣一次。
+   两边用相同的净宽与 G / G+rail，窄列和有上限的宽列都能保持左右边线一致。 */
+.convo-wrap[data-reading-column] {
+  --conversation-width: 768px;
+  --reading-gutter: var(--sp-32);
+  --reading-rail: 44px;
+  --reading-scrollbar: 0px;
+  --reading-doc-max: calc(var(--conversation-width) + 2 * var(--reading-gutter) + var(--reading-rail));
+  --reading-composer-end: calc(var(--reading-gutter) + var(--reading-rail) + var(--reading-scrollbar));
+  container-type: inline-size;
+  container-name: reading-column;
+}
+.convo-wrap[data-reading-column] > .convo-scroll {
+  min-height: 0;
+  min-width: 0;
+}
+/* Anchor restoration belongs to conversationReflow, not a second browser correction. */
+.convo-scroll,
+.sa-inspect-scroll { overflow-anchor: none; }
+.convo-wrap[data-reading-column] > .convo-scroll > .convo-doc,
+.convo-wrap[data-reading-column] > .convo-scroll > .new-content-pill-row {
+  width: 100%;
+  max-width: var(--reading-doc-max);
+  padding-left: var(--reading-gutter);
+  padding-right: calc(var(--reading-gutter) + var(--reading-rail));
+}
+.convo-wrap[data-reading-column][data-reading-minimap="off"] > .minimap {
+  display: none;
+}
+.convo-wrap[data-reading-column][data-reading-minimap="off"] > .convo-scroll {
+  scrollbar-width: auto;
+  scrollbar-gutter: stable;
+}
+.convo-wrap[data-reading-column][data-reading-minimap="off"] > .convo-scroll::-webkit-scrollbar {
+  display: block;
+}
+/* Code/table/diff own their horizontal scroll. Never use the virtual list as a
+   crop to hide an over-wide row: ordinary text/URLs wrap, media fit their row. */
+.convo-wrap[data-reading-column] > .convo-scroll .convo-virtual-list { overflow: visible; }
+.convo-wrap[data-reading-column] > .convo-scroll :is(.convo-body, .convo-virtual-row, .ev, .ev-copy-host, .ev-body) {
+  min-width: 0;
+}
+.convo-wrap[data-reading-column] > .convo-scroll :is(.convo-body, .convo-virtual-row, .ev) { max-width: 100%; }
+.convo-wrap[data-reading-column] > .convo-scroll .ev-body { overflow-wrap: anywhere; }
+.convo-wrap[data-reading-column] > .convo-scroll .ev-body :not(pre) > .chip-code {
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+}
+.convo-wrap[data-reading-column] > .convo-scroll .ev-body :is(img, svg:not(.icon)) {
+  max-width: 100%;
+  height: auto;
+}
+.convo-wrap[data-reading-column] > .convo-scroll :is(.md-code, .md-code-pre, .md-table-wrap, .tc-code, .tc-diff, .codeblock) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.convo-wrap[data-reading-column] > .convo-scroll :is(.md-code-pre, .md-table-wrap, .tc-code, .tc-diff, .codeblock) {
+  overflow-x: auto;
+}
+.convo-wrap[data-reading-column] > .convo-scroll .md-table-wrap table { min-width: max-content; }
 
 /* ============================================================
    会话切换过场：正文淡出 → 骨架兜住空窗 → 交叉溶解淡入
@@ -2251,6 +2316,29 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   position: relative;
   overflow: visible;
 }
+.convo-wrap[data-reading-column] > .composer-region {
+  min-width: 0;
+  padding-left: var(--reading-gutter);
+  padding-right: var(--reading-composer-end);
+}
+.convo-wrap[data-reading-column] > .composer-region > :is(.composer, .composer-queues, .queue-strip) {
+  min-width: 0;
+  max-width: var(--conversation-width);
+  margin-inline: auto;
+}
+.convo-wrap[data-reading-column] > .composer-region > .composer-queues > .queue-strip {
+  max-width: var(--conversation-width);
+}
+.convo-wrap[data-reading-column] > .composer-region > .ctx-strip {
+  min-width: 0;
+  max-width: min(calc(100% - var(--sp-24)), max(0px, calc(var(--conversation-width) - 80px)));
+}
+.convo-wrap[data-reading-column] > .composer-region > :is(.task-dock, .deck) {
+  left: var(--reading-gutter);
+  right: var(--reading-composer-end);
+  min-width: 0;
+  max-width: var(--conversation-width);
+}
 
 /* Composer-attached task progress: floating popup over the conversation.
    Out of flow so the composer chrome does not grow a white slab; only the
@@ -2762,7 +2850,41 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   z-index: 3;
   background: var(--surface);
 }
-/* Ask 紧凑卡 / Ask 卡：与子 Agent 检查卡相同的底边变形加载与退出。不作用于 Plan 卡。 */
+/* 矮工作区（含打开底栏）以真实 convo-wrap 高度封顶，不仅看 window vh。
+   只收紧舞台 / 正文的 flex 最小尺寸，保留原有变高和换题动画；标题与主动作不随正文滚走。 */
+.convo-wrap[data-reading-column] > .composer-region > .deck {
+  --reading-deck-cap: max(0px, min(420px, 72vh, var(--deck-max-height, 72vh), calc(var(--reading-height, 100dvh) - var(--sp-16) - var(--sp-8))));
+  max-height: var(--reading-deck-cap);
+}
+.convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .deck-cell, .dk-stage) {
+  min-height: 0;
+  max-height: var(--reading-deck-cap);
+}
+.convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage):not([hidden]),
+.convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage, .deck-cell) > :is(.ask-card, .approval-card) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  max-height: var(--reading-deck-cap);
+  overflow: hidden;
+}
+.convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage, .deck-cell) > :is(.ask-card, .approval-card) {
+  flex: 0 1 auto;
+}
+.convo-wrap[data-reading-column] > .composer-region > .deck :is(.ask-card, .approval-card) > :is(.ask-head, .approval-head, .dk-actions, .ask-error, .dk-steer-hint, .plan-execution) {
+  flex: none;
+}
+.convo-wrap[data-reading-column] > .composer-region > .deck :is(.ask-card, .approval-card) > :is(.dk-swap, .ask-body, .approval-body) {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.convo-wrap[data-reading-column] > .composer-region > .deck :is(.ask-head, .approval-head) { flex-wrap: wrap; }
+.convo-wrap[data-reading-column] > .composer-region > .deck :is(.ask-body, .approval-body) { overflow-wrap: anywhere; }
+.convo-wrap[data-reading-column] > .composer-region > .deck .dk-opt-row { flex-wrap: wrap; }
+/* ---------- Ask 紧凑卡 / Ask 卡：与子 Agent 检查卡相同的底边变形加载与退出。不作用于 Plan 卡。 */
 .deck.is-ask-enter,
 .deck.is-ask-leave {
   transform-origin: 50% 100%;
@@ -6250,6 +6372,14 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   padding-right: var(--sp-32);
 }
 .convo-wrap.is-empty .minimap { display: none; }
+.convo-wrap[data-reading-column].is-empty > .convo-scroll { padding-right: 0; }
+.convo-wrap[data-reading-column].is-empty > .convo-scroll > .convo-doc {
+  /* 欢迎插画保持独立的 960px 上限；仅 Composer 跟随阅读宽度预设。 */
+  max-width: 960px;
+  flex: none;
+  padding-inline: var(--reading-gutter);
+}
+.convo-wrap[data-reading-column].is-empty .ce-pi { max-width: 100%; }
 
 .convo-empty {
   --pi-line: rgba(124, 92, 240, 0.35);
@@ -6587,3 +6717,48 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .cmp-mode-check .am-label { font-size:var(--fs-12); font-weight:var(--fw-medium); }
 .cmp-mode-check .am-desc, .cmp-mode-flyout > .am-desc { font-size:var(--fs-11); color:var(--text-3); }
 .cmp-mode-flyout > .am-desc { margin:4px 8px; }
+
+/* 最窄主列按自己的容器宽度兜底，不按窗口宽度误判侧栏/右分栏。
+   Composer 的内容碰撞 hook 仍决定 normal / compact / modes，这里不另造折叠策略。 */
+@container reading-column (max-width: 480px) {
+  .convo-wrap[data-reading-column] > .composer-region > .composer .composer-bar {
+    flex-wrap: wrap;
+    row-gap: var(--sp-6);
+    padding-inline: var(--sp-4);
+  }
+  .convo-wrap[data-reading-column] > .composer-region > .ctx-strip {
+    max-width: 100%;
+    padding-inline: var(--sp-8);
+  }
+  .convo-wrap[data-reading-column] > .composer-region > .task-dock.open.single .task-dock-shell { width: 100%; }
+  .convo-wrap[data-reading-column] > .composer-region > .task-dock.both .task-dock-panel { grid-template-columns: minmax(0, 1fr); }
+  .convo-wrap[data-reading-column] > .composer-region > .task-dock .task-dock-col + .task-dock-col {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .convo-wrap[data-reading-column] > .composer-region > .deck .dk-head-end {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+  .convo-wrap[data-reading-column] > .composer-region > .deck .ask-collapsed-bar { flex-wrap: wrap; }
+  .convo-wrap[data-reading-column] > .composer-region > .deck .dk-actions { padding-inline: var(--sp-8); }
+  .convo-wrap[data-reading-column] > .composer-region > .composer-queues .qs-head { flex-wrap: wrap; }
+  .convo-wrap[data-reading-column] > .composer-region > .composer-queues .qs-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-4);
+    padding-right: 0;
+  }
+  .convo-wrap[data-reading-column] > .composer-region > .composer-queues .qs-status {
+    position: static;
+    width: auto;
+    transform: none;
+    gap: var(--sp-8);
+  }
+  .convo-wrap[data-reading-column] > .composer-region > .composer-queues .qs-actions { margin-left: auto; }
+  .convo-wrap[data-reading-column] > .composer-region > .composer-queues .qs-text { overflow-wrap: anywhere; }
+  .convo-wrap[data-reading-column].is-empty > .convo-scroll .ce-heat-board { grid-template-columns: max-content; }
+  .convo-wrap[data-reading-column].is-empty > .convo-scroll .ce-heat-days { display: none; }
+  .convo-wrap[data-reading-column].is-empty > .convo-scroll :is(.ce-heat-months, .ce-heat-cells, .ce-heat-legend) { grid-column: 1; }
+  .convo-wrap[data-reading-column].is-empty > .convo-scroll .ce-meta-proj { display: none; }
+}

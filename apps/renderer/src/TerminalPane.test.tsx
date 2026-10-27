@@ -25,6 +25,30 @@ function Harness({ visible }: { visible: boolean }) {
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); mocks.terminals.length = 0; __resetAppSettingsForTests(null); });
 
+it("fits automatic resize without taking focus away from the composer", async () => {
+  const observers: Array<() => void> = [];
+  vi.stubGlobal("ResizeObserver", class { constructor(callback: () => void) { observers.push(callback); } observe() {} disconnect() {} });
+  const api = {
+    create: vi.fn().mockResolvedValue({ id: "resize-shell", name: "Shell", cwd: "D:/workspace" }),
+    write: vi.fn().mockResolvedValue(undefined), resize: vi.fn().mockResolvedValue(undefined), dispose: vi.fn().mockResolvedValue(undefined),
+    onData: vi.fn(() => () => {}), onExit: vi.fn(() => () => {}),
+  };
+  vi.stubGlobal("ompStudioTerminal", api);
+  render(<><input aria-label="Composer" /><Harness visible /></>);
+  await waitFor(() => expect(mocks.terminals).toHaveLength(1));
+  await waitFor(() => expect(mocks.terminals[0]!.focus).toHaveBeenCalled());
+  const terminal = mocks.terminals[0]!;
+  const composer = document.querySelector<HTMLInputElement>('input[aria-label="Composer"]')!;
+  composer.focus();
+  const focusCalls = terminal.focus.mock.calls.length;
+  const resizeCalls = api.resize.mock.calls.length;
+  act(() => observers.forEach(resize => resize()));
+  await waitFor(() => expect(api.resize.mock.calls.length).toBeGreaterThan(resizeCalls));
+  expect(document.activeElement).toBe(composer);
+  expect(terminal.focus).toHaveBeenCalledTimes(focusCalls);
+  expect(api.create).toHaveBeenCalledTimes(1);
+});
+
 it("updates live and hidden terminal fonts without recreating the shell or stealing focus", async () => {
   __resetAppSettingsForTests(null);
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });

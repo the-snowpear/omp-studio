@@ -16,6 +16,8 @@ export const PREVIEW_APP_SETTINGS: AppSettings = {
   language: "system",
   theme: "dark",
   density: "compact",
+  conversationWidthMode: "standard",
+  conversationCustomWidth: 1024,
   uiFontFamily: "",
   uiFontSize: 14,
   terminalFontFamily: "Cascadia Code",

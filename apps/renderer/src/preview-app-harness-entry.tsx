@@ -47,9 +47,9 @@ const qaRoute = [
   ? qaParams.get("route")!
   : "workbench";
 try {
-  window.localStorage.setItem("omp.lastRoute", qaRoute);
+  if (qaParams.get("preserveSettings") !== "1") window.localStorage.setItem("omp.lastRoute", qaRoute);
   window.localStorage.setItem(STARTUP_NOTICE_STORAGE_KEY, STARTUP_NOTICE_ID);
-  window.localStorage.setItem(
+  if (qaParams.get("preserveSettings") !== "1") window.localStorage.setItem(
     "omp.appSettings",
     JSON.stringify({
       theme: qaTheme,

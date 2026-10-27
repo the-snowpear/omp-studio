@@ -281,6 +281,7 @@ export const en: LocaleDictionary = {
     "file": "File"
   },
   "shell": {
+    "returnToConversation": "Back to conversation",
     "globalActions": "Global Actions",
     "cloneRepo": "Clone Git Repository…",
     "tempWorkspace": "Create Temporary Workspace",
@@ -1551,6 +1552,23 @@ export const en: LocaleDictionary = {
       "hint": "Drag to adjust position, scroll to zoom",
       "retake": "Retake",
       "errorProcessing": "Unable to process image."
+    },
+    "conversationWidth": {
+      "title": "Conversation Width",
+      "desc": "A global display preference for the conversation reading column only. It does not change models, context or message content. Narrow windows adapt to the available space.",
+      "mode": "Reading column width",
+      "modeDesc": "Standard and Wide set a maximum width. Full uses the space remaining after sidebars, panels and gutters.",
+      "customWidth": "Custom width",
+      "customDesc": "640–1440 px in 32 px steps. Dragging previews the value locally; releasing, finishing a keyboard adjustment or leaving the slider saves it. Presets keep this value.",
+      "options": {
+        "standard": "Standard · 768 px",
+        "wide": "Wide · 1024 px",
+        "full": "Full · Available width",
+        "custom": "Custom"
+      },
+      "customValue": "Custom · {width} px",
+      "globalDisplay": "Global display preference · Leaves conversation content unchanged",
+      "openSettings": "Adjust width in Settings"
     },
     "fonts": {
       "title": "Fonts",

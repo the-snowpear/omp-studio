@@ -18,12 +18,12 @@ describe("rowHeightCache", () => {
     expect(rowHeightEstimate("row-b")).toBe(DEFAULT_ROW_ESTIMATE);
   });
 
-  it("超上限整体清空，内存有界", () => {
+  it("keeps a bounded LRU and evicts the oldest context", () => {
     resetRowHeightCache();
     rememberRowHeight("keep", 100);
     for (let index = 0; index < 8192; index += 1) rememberRowHeight(`row-${index}`, 50);
     expect(rowHeightEstimate("keep")).toBe(DEFAULT_ROW_ESTIMATE);
-    expect(rowHeightEstimate("row-0")).toBe(DEFAULT_ROW_ESTIMATE);
+    expect(rowHeightEstimate("row-0")).toBe(50);
     rememberRowHeight("fresh", 80);
     expect(rowHeightEstimate("fresh")).toBe(80);
   });

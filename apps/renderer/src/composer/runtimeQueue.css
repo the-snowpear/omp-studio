@@ -71,3 +71,11 @@
 .composer-queues:has(.runtime-queue) .queue-strip {
   margin-inline: 0;
 }
+/* Only the primary composer adopts the measured reading column. Hub/inspect
+   queue instances keep their own container and the legacy --doc-max-w cap. */
+.convo-wrap[data-reading-column] > .composer-region > .composer-queues:has(.runtime-queue) {
+  max-width: var(--conversation-width);
+}
+.convo-wrap[data-reading-column] > .composer-region > .composer-queues .runtime-queue .qs-text {
+  overflow-wrap: anywhere;
+}

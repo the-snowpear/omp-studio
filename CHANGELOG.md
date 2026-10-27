@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 设置对话阅读宽度（标准、宽松、填满、自定义），并在窄窗口临时收缩/隐藏工作台面板；空间恢复时保留用户首选布局。窗口缩放时对话滚动锚定阅读位置。
+
 ## [0.1.11] - 2026-10-26
 
 ### Added
