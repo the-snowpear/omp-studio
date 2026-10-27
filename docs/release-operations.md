@@ -74,6 +74,20 @@ trust a replacement: a manually installed full Setup is required again.
 
 ## Verified Publication
 
+Published on 2026-10-28:
+
+- Release: https://github.com/the-snowpear/omp-studio/releases/tag/v0.1.12
+- Successful workflow: https://github.com/the-snowpear/omp-studio/actions/runs/40539480400
+- Release source/tag: `a72f7f4bd79e84be695932909ebdc206cfbedee1`.
+- Desktop: `0.1.12` for Windows x64/ARM64 and macOS arm64; Runtime: `18.12.6-studio.9`, upstream `45c35e40c46166dc726ccc52f5d27f40f2449f99`; minimum desktop version `0.1.12`.
+- All three desktop candidates and six SSH environment candidates passed on native runners. Thirty public assets were uploaded and the stable release became Latest. Release notes include the curated changelog in `docs/releases/v0.1.12.md`.
+- Review fixed Intel macOS dependency preflight, an empty-model-file credential sync failure, and selection of the versioned Runtime artifact directory during remote packaging. It also captured the missing continue regression into overlay, corrected a probe test's spawn lifecycle, and limited test concurrency.
+- Local production checks, all workspace suites, 85 tooling tests and Runtime patch replay passed. Runtime verification ran 854 passing tests and restored the scratch vendor checkout clean. Browser checks covered width selection, preview preference isolation, narrow-window overflow and sidebar focus/escape; no console errors were reported. Initial all-suite performance/timeout failures passed after concurrency was limited; the first patch replay exposed formatting issues that were corrected before the successful run.
+- Post-publication verification in `outputs/published-v0.1.12/verification.json` (not committed) passed 41 checks: signed desktop and remote manifests, all 30 assets' recorded sizes/digests, the legacy migration signature, and a downloaded x64 Runtime archive's signature, coverage, checksums and source identity. This does not claim clean-machine installation, reporter-machine reproduction, or a live SSH/model/OAuth acceptance run.
+- First workflow `40536208522` exposed a remote packager lookup of the platform directory instead of its Runtime-version subdirectory. Its three desktop candidates passed; the superseded run was cancelled after retaining their signed Runtime artifacts. The corrected workflow reused matching desktop Runtime artifacts and rebuilt all remote environments before publishing.
+- Issue #6 reply was posted and read back: https://github.com/the-snowpear/omp-studio/issues/6#issuecomment-6448947177 . The issue remains open for reporter retesting; the one-shot reply todo was removed after verification.
+- Issue #7 reply was posted and read back, and the issue was closed as completed: https://github.com/the-snowpear/omp-studio/issues/7#issuecomment-6448813166 .
+
 Published on 2026-09-06:
 
 - Release: https://github.com/the-snowpear/omp-studio/releases/tag/v0.1.4
