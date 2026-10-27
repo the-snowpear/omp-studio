@@ -30,6 +30,19 @@ export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean)
     setPriority(panel);
   }, []);
   const dismissOverlay = useCallback(() => focusPanel(null), [focusPanel]);
+  /* A priority is the gesture that just asked for a panel ("show this even if it
+     has to float"). A window resize is a new layout negotiation, not that gesture:
+     keeping it would turn a docked panel into a focus-trapping drawer whenever the
+     window crosses the overlay threshold. */
+  useLayoutEffect(() => {
+    const dropPriority = () => {
+      if (priorityRef.current === null) return;
+      beforeConversationLayoutChange();
+      setPriority(null);
+    };
+    window.addEventListener("resize", dropPriority);
+    return () => window.removeEventListener("resize", dropPriority);
+  }, []);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
