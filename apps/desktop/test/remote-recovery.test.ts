@@ -196,3 +196,14 @@ test("safe SSH errors identify the failure without returning arbitrary stderr", 
   const marker = randomBytes(12).toString("hex");
   assert.equal(sshFailure(`unrecognized server output ${marker}`, undefined, 1).message.includes(marker), false);
 });
+
+test("unresolved Windows SSH aliases and remote directory conflicts show actionable errors", () => {
+  const unresolved = sshFailure("ssh: Could not resolve hostname testserver: 不知道这样的主机。", undefined, 255);
+  assert.equal(unresolved.connectionCode, "configuration");
+  assert.match(unresolved.message, /主机地址.*Host 别名/);
+  const temporary = sshFailure("ssh: Could not resolve hostname example: Temporary failure in name resolution", undefined, 255);
+  assert.equal(temporary.connectionCode, "network");
+  const conflict = sshFailure("Error: ENOTDIR: not a directory, mkdir '/home/ubuntu/.local/share/omp-studio/remote/versions/hash'", undefined, 1);
+  assert.equal(conflict.connectionCode, "environment");
+  assert.match(conflict.message, /同名文件占用/);
+});

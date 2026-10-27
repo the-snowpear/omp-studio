@@ -97,17 +97,19 @@ export class UpdateCoordinator {
   private emit(): void { this.options.snapshotChanged(this.state); }
   private save(): Promise<void> { return writeJsonAtomic(join(this.options.root, "transaction-v2.json"), this.journal); }
   private verify(value: unknown): SignedUpdateManifest { return verifyUpdateManifest(value, this.options.keys, this.options.repo, this.options.platform); }
-  /** An external installation may have completed a prepared Runtime already. */
+  /** An external installation may have completed or superseded a prepared Runtime. */
   private async reconcileRuntimePending(): Promise<Awaited<ReturnType<RuntimeInstaller["currentManifest"]>>> {
     const current = await this.installer.currentManifest().catch(() => undefined);
     this.snapshot.runtime.currentVersion = current?.manifest.runtimeVersion;
     const envelope = this.journal.pending.runtime;
     const release = envelope?.manifest.runtime;
     const manifest = current?.manifest;
-    const satisfied = (candidate: ComponentRelease | undefined): boolean => Boolean(candidate && manifest &&
-      manifest.runtimeVersion === candidate.version && manifest.channel === candidate.channel &&
-      manifest.platform === this.options.platform && manifest.studioProtocol.min === candidate.studioProtocol.min &&
-      manifest.studioProtocol.max === candidate.studioProtocol.max);
+    const satisfied = (candidate: ComponentRelease | undefined): boolean => {
+      if (!candidate || !manifest || manifest.channel !== candidate.channel || manifest.platform !== this.options.platform) return false;
+      if ((compareRuntimeVersions(manifest.runtimeVersion, candidate.version) ?? 0) > 0) return true;
+      return manifest.runtimeVersion === candidate.version && manifest.studioProtocol.min === candidate.studioProtocol.min &&
+        manifest.studioProtocol.max === candidate.studioProtocol.max;
+    };
     // Discovery can predate an external installation even before preparation
     // has created a journal entry.
     if (satisfied(this.found.runtime?.manifest.runtime)) {
@@ -118,7 +120,9 @@ export class UpdateCoordinator {
       }
     }
     if (!release || !manifest || !satisfied(release)) return current;
-    this.journal.previous.runtime = envelope!;
+    // Only a matching release describes the installed bytes. An obsolete
+    // candidate must not become the differential baseline for a newer install.
+    if (manifest.runtimeVersion === release.version) this.journal.previous.runtime = envelope!;
     delete this.journal.pending.runtime;
     if (this.found.runtime?.manifest.runtime?.file.sha256 === release.file.sha256) delete this.found.runtime;
     this.snapshot.runtime = { component: "runtime", currentVersion: manifest.runtimeVersion, phase: "idle" };

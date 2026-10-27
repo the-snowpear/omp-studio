@@ -324,6 +324,43 @@ for (const entry of ["startup", "check", "prepare", "apply", "discovered"] as co
   });
 }
 
+for (const entry of ["startup", "check"] as const) {
+  test(`a newer installed Runtime supersedes a prepared older update during ${entry}`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "omp-runtime-superseded-"));
+    const runtimeRoot = join(root, "installed"), updates = join(root, "updates");
+    const version = "18.12.6-studio.1", obsoleteVersion = "18.10.4-studio.8";
+    const installer = new RuntimeInstaller(runtimeRoot, { trustedKeys: keys });
+    const selfCheck = { run: async () => {} };
+    const obsolete = signed({ runtime: component("runtime.zip", obsoleteVersion) });
+    const baseline = signed({ runtime: component("previous.zip", "18.8.0-studio.20") });
+    const options = { root: updates, runtimeRoot, repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+      prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false,
+      beforeQuit: async () => { assert.fail("an obsolete update must not shut down the Host"); },
+      installDesktop: async () => {}, restart: () => { assert.fail("an obsolete update must not restart the app"); }, quit: () => {},
+      fetcher: fetcher([obsolete]), activateOptions: { selfCheck } };
+    const coordinator = new UpdateCoordinator(options);
+    if (entry === "check") { await coordinator.initialize(); await coordinator.prepare("runtime"); }
+    else {
+      await mkdir(updates, { recursive: true });
+      await writeFile(join(updates, "transaction-v2.json"), JSON.stringify({ schema: 2, authorized: true, pending: { runtime: obsolete }, previous: { runtime: baseline }, watermarks: {}, lastError: "Finish active sessions before restarting" }));
+    }
+    await installer.install(await runtimeFixture(root, version));
+    await installer.activate(version, { selfCheck });
+    if (entry === "startup") await coordinator.initialize();
+    await coordinator.check();
+    assert.equal(coordinator.state.runtime.currentVersion, version);
+    assert.equal(coordinator.state.runtime.version, undefined);
+    assert.equal(coordinator.state.runtime.phase, "idle");
+    assert.equal(coordinator.state.error, undefined);
+    const journal = JSON.parse(await readFile(join(updates, "transaction-v2.json"), "utf8"));
+    assert.equal(journal.pending.runtime, undefined);
+    if (entry === "startup") assert.deepEqual(journal.previous.runtime, baseline);
+    await coordinator.prepare("runtime");
+    assert.equal((await coordinator.apply()).ok, false);
+    assert.equal((await installer.current())?.runtimeVersion, version);
+  });
+}
+
 test("a corrupt active Runtime keeps its prepared same-version repair", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-runtime-repair-pending-"));
   const runtimeRoot = join(root, "installed"), version = "18.0.0-studio.2";
