@@ -165,7 +165,7 @@ export function observeConversationReflow({ scroller, host, beforeEvent, changeE
   let stable: StableLayout | null = null;
   let pending: PendingReflow | null = null;
   let width = host.getBoundingClientRect().width;
-  let settleFrame = 0; let snapshotFrame = 0;
+  let settleFrame = 0; let snapshotFrame = 0; let watchdogFrame = 0;
   let disposed = false;
   const readStable = () => {
     const following = conversationIsFollowing(scroller);
@@ -185,9 +185,20 @@ export function observeConversationReflow({ scroller, host, beforeEvent, changeE
   };
   const cancel = () => {
     cancelAnimationFrame(settleFrame); settleFrame = 0;
+    cancelAnimationFrame(watchdogFrame); watchdogFrame = 0;
     pending = null;
     reflowing.delete(scroller);
     pinRow(null);
+  };
+  /** A `before` is speculative: a resizer click without a drag, a clamped
+   * keyboard nudge, a panel toggle that changes nothing. None of those are
+   * followed by `changed`, and an open transaction suppresses every scroll
+   * event until the reader makes an unrelated gesture. Release it next frame. */
+  const watchdog = () => {
+    watchdogFrame = 0;
+    if (pending === null || settleFrame) return;
+    cancel();
+    readStable();
   };
   const intent = () => {
     cancel();
@@ -228,8 +239,10 @@ export function observeConversationReflow({ scroller, host, beforeEvent, changeE
     const actualWidth = host.getBoundingClientRect().width;
     if (pending === null && Math.abs(actualWidth - width) < 0.5) readStable();
     begin(stable);
+    if (pending !== null && !watchdogFrame && !settleFrame) watchdogFrame = requestAnimationFrame(watchdog);
   };
   const changed = () => {
+    cancelAnimationFrame(watchdogFrame); watchdogFrame = 0;
     begin(stable);
     width = host.getBoundingClientRect().width;
     measureMargin();
