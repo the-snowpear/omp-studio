@@ -183,6 +183,14 @@ export interface OperatorStateSnapshot {
    * resume it: the turn is waiting on background jobs, not finished.
    */
   awaitingAsyncWork?: boolean;
+  /**
+   * How the last turn on the active branch ended, read from the tail assistant
+   * message's `stopReason`. `interrupted` means it stopped without a final
+   * report — an operator abort, a provider error, or a process exit that load
+   * recovery closed — so `core.continue` can resume it. Absent before any turn
+   * has run, and on Runtime versions that predate the field.
+   */
+  lastTurnOutcome?: "completed" | "interrupted";
   /** omp builds that wrote this session, ending with the running one. */
   runtimeIdentity?: SessionBuildProvenance;
   telemetry?: SessionTelemetrySnapshot;

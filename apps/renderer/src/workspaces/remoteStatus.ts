@@ -5,6 +5,7 @@ export function remoteStatusLabel(status?: RemoteConnectionStatus): string {
   switch (status?.state) {
     case "connected": return "已连接";
     case "connecting": return "连接中";
+    case "awaiting-approval": return "等待确认";
     case "recovering": return "恢复中";
     case "degraded": return "响应迟缓";
     case "synchronizing": return "同步中";
@@ -14,5 +15,5 @@ export function remoteStatusLabel(status?: RemoteConnectionStatus): string {
 }
 
 export function remoteConnectionPending(status?: RemoteConnectionStatus): boolean {
-  return status !== undefined && ["connecting", "recovering", "degraded", "synchronizing"].includes(status.state);
+  return status !== undefined && ["connecting", "awaiting-approval", "recovering", "degraded", "synchronizing"].includes(status.state);
 }

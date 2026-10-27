@@ -16,6 +16,8 @@ import { loadInstallerTrustedKeys } from "../runtime-install.js";
 import { remoteAuthority } from "./authority.js";
 import type { DesktopHostComposition } from "../types.js";
 import { remotePlatform, secureRemoteDirectory } from "./platform.js";
+import { RemoteNetworkProxy } from "./network-proxy.js";
+import { applyRemoteProvisioning, type RemoteProvisioning } from "./provisioning.js";
 
 export interface RemoteHostOptions {
   readonly stateDirectory: string;
@@ -24,6 +26,8 @@ export interface RemoteHostOptions {
 }
 
 export interface RemoteHost {
+  readonly network?: RemoteNetworkProxy;
+  provision?(input: RemoteProvisioning): Promise<void>;
   readonly composition: DesktopHostComposition;
   workspacePath(workspaceId: string): string;
   registerWorkspace(path: string): Promise<WorkspaceListReadModel>;
@@ -33,6 +37,11 @@ export interface RemoteHost {
 /** Headless composition shares domain services, never imports the Electron factory. */
 export async function createRemoteHost(options: RemoteHostOptions): Promise<RemoteHost> {
   const platform = remotePlatform(process.platform);
+  const network = new RemoteNetworkProxy();
+  await network.start();
+  // These belong only to this private Host and its children, never the user's shell configuration.
+  for (const name of ["PI_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]) process.env[name] = network.proxyUrl;
+  process.env.NO_PROXY = "localhost,127.0.0.1,::1";
   const stateDirectory = resolve(options.stateDirectory);
   await secureRemoteDirectory(stateDirectory);
   const registry = new WorkspaceRegistry(join(stateDirectory, "workspaces.json"));
@@ -94,6 +103,8 @@ export async function createRemoteHost(options: RemoteHostOptions): Promise<Remo
     });
     const host = composition;
     return {
+      network,
+      provision: input => applyRemoteProvisioning(stateDirectory, network.brokerUrl, input),
       composition: host,
       workspacePath(workspaceId) {
         const stored = registry.get(workspaceId);
@@ -105,7 +116,7 @@ export async function createRemoteHost(options: RemoteHostOptions): Promise<Remo
         const stored = await registry.upsertByPath(path, undefined, undefined, false);
         return workspaces.open({ workspaceId: stored.workspaceId as WorkspaceId });
       },
-      close: () => host.shutdown(),
+      close: async () => { await host.shutdown(); await network.close(); },
     };
-  } catch (error) { dispose(); throw error; }
+  } catch (error) { dispose(); await network.close(); throw error; }
 }

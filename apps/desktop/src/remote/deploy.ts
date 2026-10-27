@@ -11,8 +11,9 @@ import type { RemoteAttachment } from "./wire.js";
 
 export interface RemoteEnvironment {
   platform: RemotePlatform; arch: string; home: string; node: string; version: string; root: string;
+  shell?: "posix" | "powershell";
 }
-export interface RemoteInstallation { entry: string; state: string; bundleVersion?: string; }
+export interface RemoteInstallation { entry: string; state: string; bundleVersion?: string; node?: string; environmentVersion?: string; }
 
 export async function runSsh(connection: SshConnection, command: string, input?: Buffer | Readable, timeoutMs = 30_000, signal?: AbortSignal, authentication?: SshAuthentication): Promise<string> {
   signal?.throwIfAborted();
@@ -44,21 +45,14 @@ export async function runSsh(connection: SshConnection, command: string, input?:
   }).finally(() => authenticationRequest?.dispose());
 }
 
-export function nodeRemoteCommand(script: string): string {
+export function nodeRemoteCommand(script: string, executable = "node"): string {
   const encoded = Buffer.from(script).toString("base64");
-  return `node -e "eval(Buffer.from('${encoded}','base64').toString())"`;
+  return `${executable === "node" ? "node" : `"${executable}"`} -e "eval(Buffer.from('${encoded}','base64').toString())"`;
 }
 
 export async function probeRemote(connection: SshConnection, signal?: AbortSignal, authentication?: SshAuthentication): Promise<RemoteEnvironment> {
-  const result = JSON.parse(await runSsh(connection, nodeRemoteCommand(`
-    const os=require('node:os'),p=require('node:path');
-    const platform=process.platform,home=os.homedir();
-    if(!['linux','win32','darwin'].includes(platform))throw Error('Unsupported remote system');
-    if(Number(process.versions.node.split('.')[0])<22)throw Error('Remote Node.js 22 or newer is required');
-    const root=platform==='win32'?p.join(process.env.LOCALAPPDATA||p.join(home,'AppData','Local'),'omp-studio','remote'):platform==='darwin'?p.join(home,'Library','Application Support','omp-studio','remote'):p.join(process.env.XDG_DATA_HOME||p.join(home,'.local','share'),'omp-studio','remote');
-    process.stdout.write(JSON.stringify({platform,arch:process.arch,home,node:process.execPath,version:process.versions.node,root}));
-  `), undefined, 30_000, signal, authentication)) as RemoteEnvironment;
-  return result;
+  const { detectRemoteEnvironment } = await import("./probe.js");
+  return detectRemoteEnvironment(connection, signal, authentication);
 }
 
 export async function deployRemote(connection: SshConnection, environment: RemoteEnvironment, bundleDirectory: string, signal?: AbortSignal, authentication?: SshAuthentication): Promise<RemoteInstallation> {
@@ -79,11 +73,12 @@ export async function deployRemote(connection: SshConnection, environment: Remot
       catch(error){process.stderr.write(String(error.stderr||error.message));process.exitCode=1;return;}
       process.stdout.write(JSON.stringify({entry,state,bundleVersion:hash}));
     });
-  `), bytes, 105_000, signal, authentication)) as RemoteInstallation;
+  `, environment.node), bytes, 105_000, signal, authentication)) as RemoteInstallation;
   return result;
 }
 
-export async function attachRemote(connection: SshConnection, environment: RemoteEnvironment, installation: RemoteInstallation, signal?: AbortSignal, authentication?: SshAuthentication, attachment?: RemoteAttachment): Promise<SshRemoteTransport> {
-  const script = `const cp=require('node:child_process');const c=cp.spawn(process.execPath,${JSON.stringify([installation.entry, "attach", "--state", installation.state])},{stdio:'inherit',windowsHide:true});c.on('exit',code=>process.exitCode=code||0);c.on('error',e=>{process.stderr.write(e.message);process.exitCode=1});`;
-  return SshRemoteTransport.connect({ connection, shell: environment.platform === "win32" ? "cmd" : "posix", executable: "node", args: [], launchCommand: nodeRemoteCommand(script), expectedPlatform: environment.platform, ...(installation.bundleVersion ? { expectedBundleVersion: installation.bundleVersion } : {}), ...(signal ? { signal } : {}), ...(authentication ? { authentication } : {}), ...(attachment ? { attachment } : {}) });
+export async function attachRemote(connection: SshConnection, environment: RemoteEnvironment, installation: RemoteInstallation, signal?: AbortSignal, authentication?: SshAuthentication, attachment?: RemoteAttachment, networkChannel = false): Promise<SshRemoteTransport> {
+  const script = `const cp=require('node:child_process');const c=cp.spawn(process.execPath,${JSON.stringify([installation.entry, networkChannel ? "network" : "attach", "--state", installation.state])},{stdio:'inherit',windowsHide:true});c.on('exit',code=>process.exitCode=code||0);c.on('error',e=>{process.stderr.write(e.message);process.exitCode=1});`;
+  const { remoteNodeCommand } = await import("./remote-command.js");
+  return SshRemoteTransport.connect({ connection, shell: environment.platform === "win32" ? "cmd" : "posix", executable: "node", args: [], launchCommand: remoteNodeCommand(environment, script, installation.node), expectedPlatform: environment.platform, networkChannel, ...(installation.bundleVersion ? { expectedBundleVersion: installation.bundleVersion } : {}), ...(signal ? { signal } : {}), ...(authentication ? { authentication } : {}), ...(attachment ? { attachment } : {}) });
 }

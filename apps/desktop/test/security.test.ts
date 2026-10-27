@@ -502,26 +502,34 @@ describe("RENDERER_CSP: no unsafe-eval", () => {
     assert.match(RENDERER_CSP, /default-src 'self'/);
   });
 
-  test("installCspHeaders injects the policy on every http(s) response", () => {
-    let captured: { responseHeaders: Record<string, string[]> } | undefined;
+  test("installCspHeaders injects the policy only on responses the renderer owns", () => {
+    const captured: Array<{ url: string; headers: Record<string, string[]> }> = [];
     const session = {
       webRequest: {
         onHeadersReceived(
           listener: (
-            details: { responseHeaders?: Record<string, string[]> },
+            details: { url?: string; responseHeaders?: Record<string, string[]> },
             callback: (response: { responseHeaders: Record<string, string[]> }) => void,
           ) => void,
         ) {
-          listener({ responseHeaders: { "X-Frame-Options": ["DENY"] } }, (response) => {
-            captured = response;
-          });
+          for (const url of ["file:///app/index.html", "http://127.0.0.1:3847/api/stats/models"]) {
+            listener({ url, responseHeaders: { "X-Frame-Options": ["DENY"] } }, (response) => {
+              captured.push({ url, headers: response.responseHeaders });
+            });
+          }
         },
       },
     };
-    installCspHeaders(session, RENDERER_CSP);
-    assert.ok(captured);
-    assert.deepEqual(captured?.responseHeaders["Content-Security-Policy"], [RENDERER_CSP]);
-    assert.deepEqual(captured?.responseHeaders["X-Frame-Options"], ["DENY"], "existing headers kept");
+    installCspHeaders(session, RENDERER_CSP, (url) => url.startsWith("file:"));
+    assert.equal(captured.length, 2);
+    const [own, framed] = captured;
+    assert.equal(own?.url, "file:///app/index.html");
+    assert.deepEqual(own?.headers["Content-Security-Policy"], [RENDERER_CSP]);
+    assert.deepEqual(own?.headers["X-Frame-Options"], ["DENY"], "existing headers kept");
+    // The statistics dashboard is framed by the renderer. Stamping it with the
+    // renderer policy would apply `frame-ancestors 'none'` and blank the page.
+    assert.equal(framed?.url, "http://127.0.0.1:3847/api/stats/models");
+    assert.deepEqual(framed?.headers, { "X-Frame-Options": ["DENY"] });
   });
 });
 
@@ -538,7 +546,10 @@ test("rendererCspFor keeps packaged CSP strict and permits Vite refresh only in 
     assert.equal(value.includes("127.0.0.1"), false, `${directive} must not reach loopback`);
   }
   const frameSrc = packaged.split(";").map(part => part.trim()).find(part => part.startsWith("frame-src")) ?? "";
-  assert.equal(frameSrc, "frame-src http://127.0.0.1:3847");
+  // `'self'` keeps the same-origin graphic-preview frame: any source listed in
+  // `frame-src` replaces the `default-src` fallback, so omitting it would blank
+  // the X3D preview as well as the dashboard.
+  assert.equal(frameSrc, "frame-src 'self' http://127.0.0.1:3847");
   assert.equal(packaged.includes("127.0.0.1:*"), false, "no wildcard loopback port");
   const dev = rendererCspFor({ kind: "url", url: "http://127.0.0.1:5173" });
   assert.match(dev, /script-src 'self' 'unsafe-inline'/u);

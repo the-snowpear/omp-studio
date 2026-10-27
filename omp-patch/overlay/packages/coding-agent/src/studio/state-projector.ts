@@ -270,6 +270,7 @@ export class StudioStateProjector {
 		const awaitingAsyncWork =
 			this.#awaitingAsyncWork && jobs.some(job => job.status === "running" || job.status === "queued");
 		const runtimeIdentity = this.#runtimeIdentity();
+		const lastTurnOutcome = this.#runtime.session.isStreaming ? undefined : this.#lastTurnOutcome();
 		const snapshot: StudioOperatorStateSnapshot = {
 			runtimeId: this.#runtime.runtimeId,
 			runtimeEpoch: this.#runtime.runtimeEpoch,
@@ -300,6 +301,11 @@ export class StudioStateProjector {
 			jobs,
 			...(jobAgents.length > 0 ? { jobAgents } : {}),
 			...(awaitingAsyncWork ? { awaitingAsyncWork: true } : {}),
+			// A running turn has nothing to resume, and reading the branch on every
+			// streaming state change would walk the whole session per token flush.
+			...(this.#runtime.session.isStreaming
+				? {}
+				: { ...(lastTurnOutcome === undefined ? {} : { lastTurnOutcome }) }),
 			...(runtimeIdentity === undefined ? {} : { runtimeIdentity }),
 			telemetry: this.#telemetrySnapshot,
 			...(this.#retry === undefined || this.#retrySessionId !== this.#runtime.sessionManager.getSessionId()
@@ -407,6 +413,33 @@ export class StudioStateProjector {
 			}));
 		}
 		return this.#ownedTranscript;
+	}
+
+	/**
+	 * How the last turn on the active branch ended, read from the tail assistant
+	 * message's `stopReason`. Live events cannot answer this: after a restart the
+	 * only trace of an interrupted turn is the terminal record load recovery
+	 * appended, and a restored conversation must still offer the operator a way
+	 * to go on.
+	 */
+	#lastTurnOutcome(): "completed" | "interrupted" | undefined {
+		const sessionManager = this.#runtime.sessionManager as
+			| { getBranch?: () => SessionEntry[]; getEntries?: () => SessionEntry[] }
+			| undefined;
+		const entries = sessionManager?.getBranch?.() ?? sessionManager?.getEntries?.() ?? [];
+		for (let index = entries.length - 1; index >= 0; index -= 1) {
+			const entry = entries[index];
+			if (entry?.type !== "message") continue;
+			const message = entry.message;
+			if (message.role !== "assistant") return undefined;
+			return message.stopReason === "aborted" || message.stopReason === "error" ? "interrupted" : "completed";
+		}
+		return undefined;
+	}
+
+	/** Current tail reading, for commands that must decide whether a turn is resumable. */
+	get lastTurnOutcome(): "completed" | "interrupted" | undefined {
+		return this.#lastTurnOutcome();
 	}
 
 	/**

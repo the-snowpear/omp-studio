@@ -5,7 +5,7 @@ import { RemoteOperationError } from "./wire.js";
 
 interface Sender { getURL(): string; isDestroyed(): boolean; send(channel: string, payload: unknown): void; }
 interface Ipc { handle(channel: string, listener: (event: { sender: Sender }, ...args: unknown[]) => unknown): void; removeHandler(channel: string): void; }
-export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnectionManager; isTrusted(sender: Sender): boolean; confirmDeployment(profile: RemoteConnectionProfile): Promise<boolean>; installRuntime(id: string): Promise<{ installed: boolean }> }): { cancelPending(): Promise<void>; dispose(): void } {
+export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnectionManager; isTrusted(sender: Sender): boolean; confirmDeployment?(profile: RemoteConnectionProfile): Promise<boolean>; installRuntime(id: string): Promise<{ installed: boolean }> }): { cancelPending(): Promise<void>; dispose(): void } {
   const { ipc, manager } = options;
   let disposed = false;
   const senders = new Set<Sender>();
@@ -50,7 +50,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
         attempt.controller.signal.addEventListener("abort", onAbort, { once: true });
         stopWaiting = () => attempt.controller.signal.removeEventListener("abort", onAbort);
       });
-      const confirmed = await Promise.race([options.confirmDeployment(manager.profile(target)), cancelled]);
+      const confirmed = options.confirmDeployment ? await Promise.race([options.confirmDeployment(manager.profile(target)), cancelled]) : true;
       if (!confirmed || attempt.controller.signal.aborted || disposed) throw new Error("连接已取消");
       await manager.connect(target, credentials, attempt.controller.signal);
     } finally {
@@ -60,6 +60,8 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
     }
   });
   handle(REMOTE_CHANNELS.installRuntime, id => options.installRuntime(idOf(id)));
+  handle(REMOTE_CHANNELS.approve, id => manager.approveDeployment(idOf(id)));
+  handle(REMOTE_CHANNELS.retryNetwork, id => read(id, remote => remote.transport.peer.request("network.reset")));
   handle(REMOTE_CHANNELS.disconnect, id => {
     const target = idOf(id);
     const attempt = connecting.get(target);
@@ -81,7 +83,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
   handle(REMOTE_CHANNELS.register, (id, path) => {
     if (typeof path !== "string" || !path) throw new Error("远端目录不能为空");
     manager.assertWritable(idOf(id));
-    return manager.get(idOf(id)).transport.registerWorkspace(path);
+    return manager.get(idOf(id)).transport.registerWorkspace(path).then(async result => { await manager.rememberDirectory(idOf(id), path); return result; });
   });
   const emit = (channel: string, payload: unknown): void => { for (const sender of senders) { if (sender.isDestroyed()) senders.delete(sender); else sender.send(channel, payload); } };
   const offEvent = manager.onEvent(event => emit(REMOTE_CHANNELS.event, event));

@@ -120,6 +120,7 @@ export class ConversationStore {
   private compacting: { readonly action: string } | undefined;
   private lastStreamSeq: number | undefined;
   private resyncRequired = false;
+  private lastTurnInterrupted = false;
   private disposed = false;
   private frame: FrameHandle | undefined;
   private queuedStreaming = false;
@@ -188,6 +189,7 @@ export class ConversationStore {
     this.items = bounded.items; this.olderCursor = page.olderCursor; this.headCursor = page.headCursor; this.hasMoreBefore = page.hasMoreBefore || bounded.trimmed;
     this.liveMessages.clear(); this.clearLiveTools(); this.liveOrder = []; this.openTurnItems.clear(); this.messageErrors.clear(); this.compacting = undefined;
     this.lastStreamSeq = undefined; this.status = "ready"; this.error = undefined; this.resyncRequired = false;
+    this.setLastTurnInterrupted(false);
     this.markStructureChanged();
     this.trimAncillary();
     for (const event of replay) this.applyEventInternal(event.update, event.streamSeq);
@@ -240,7 +242,7 @@ export class ConversationStore {
         const message: MutableMessage = { messageId: update.messageId, turnId: update.turnId, role: update.role, createdAt: update.createdAt, blocks: new Map(), aborted: false, dirty: true };
         this.liveMessages.set(update.messageId, message); if (!this.liveOrder.includes(update.messageId)) this.liveOrder.push(update.messageId);
         const clearsPersistedErrors = update.role === "assistant" && this.messageErrors.size > 0;
-        if (update.role === "assistant") this.messageErrors.clear();
+        if (update.role === "assistant") { this.messageErrors.clear(); this.setLastTurnInterrupted(false); }
         this.markStructureChanged(clearsPersistedErrors); break;
       }
       case "conversation.message.delta": {
@@ -287,8 +289,8 @@ export class ConversationStore {
         }
         break;
       }
-      case "conversation.turn.completed": this.closeTurn(update.turnId, false); this.finishResync(); break;
-      case "conversation.turn.aborted": this.closeTurn(update.turnId, true); this.finishResync(); break;
+      case "conversation.turn.completed": this.setLastTurnInterrupted(false); this.closeTurn(update.turnId, false); this.finishResync(); break;
+      case "conversation.turn.aborted": this.setLastTurnInterrupted(true); this.closeTurn(update.turnId, true); this.finishResync(); break;
       case "conversation.compaction.started": this.compacting = { action: update.action }; this.markStructureChanged(false); break;
       case "conversation.compaction.completed": if (update.item !== undefined) this.upsertItem(update.item); this.compacting = undefined; this.markStructureChanged(); break;
       case "conversation.notice": this.notices = [...this.notices.slice(-(NOTICE_LIMIT - 1)), { id: `notice:${this.generation}:${this.notices.length}`, level: update.level, message: update.message, ...(update.source === undefined ? {} : { source: update.source }) }]; break;
@@ -317,6 +319,20 @@ export class ConversationStore {
     if (!this.resyncRequired) return;
     this.resyncRequired = false;
     this.status = "ready";
+  }
+  /**
+   * Latch "the last turn stopped without a final report".
+   *
+   * The tail row cannot carry this by itself: `message.completed` usually lands
+   * before `turn.aborted` and folds the live row into a persisted item, so the
+   * status degrades to `completed` and `closeTurn` has no row left to mark. Only
+   * a new assistant message or a completed turn clears it again — an unrelated
+   * event must not, or a continue in flight would lose the slot it just took.
+   * Guarded on assignment: this sits on the streaming hot path.
+   */
+  private setLastTurnInterrupted(interrupted: boolean): void {
+    if (this.lastTurnInterrupted === interrupted) return;
+    this.lastTurnInterrupted = interrupted;
   }
   private closeTurn(turnId: string, aborted: boolean): void {
     let dropped = false;
@@ -371,6 +387,10 @@ export class ConversationStore {
     for (const turnId of this.openTurnItems.values()) turnIds.add(turnId);
     if (turnIds.size === 0) return false;
     for (const turnId of turnIds) this.closeTurn(turnId, true);
+    // Same terminal reading as `conversation.turn.aborted`: the Runtime went idle
+    // without ever closing the turn, so this session's tail is an interrupted one
+    // and `core.continue` must stay reachable.
+    this.setLastTurnInterrupted(true);
     this.publishNow();
     return true;
   }
@@ -498,7 +518,7 @@ export class ConversationStore {
     return result;
   }
   private state(): ConversationState {
-    return { generation: this.generation, identity: this.identity, items: this.items, liveMessages: this.materializeMessages(), liveTools: this.liveToolsRecord(), liveOrder: this.liveOrder, ...(this.olderCursor === undefined ? {} : { olderCursor: this.olderCursor }), ...(this.headCursor === undefined ? {} : { headCursor: this.headCursor }), hasMoreBefore: this.hasMoreBefore, hydrateStatus: this.status, ...(this.unavailableReason === undefined ? {} : { unavailableReason: this.unavailableReason }), ...(this.error === undefined ? {} : { error: this.error }), notices: this.notices, pendingUsers: this.pendingUsers, ...(this.lastStreamSeq === undefined ? {} : { lastEventSeq: this.lastStreamSeq }), resyncRequired: this.resyncRequired, userDisplays: this.userDisplays as Record<string, ComposerDoc>, userThumbs: this.userThumbs, openTurnItems: Object.fromEntries(this.openTurnItems), ...(this.compacting === undefined ? {} : { compacting: this.compacting }), messageErrors: Object.fromEntries(this.messageErrors) };
+    return { generation: this.generation, identity: this.identity, items: this.items, liveMessages: this.materializeMessages(), liveTools: this.liveToolsRecord(), liveOrder: this.liveOrder, ...(this.olderCursor === undefined ? {} : { olderCursor: this.olderCursor }), ...(this.headCursor === undefined ? {} : { headCursor: this.headCursor }), hasMoreBefore: this.hasMoreBefore, hydrateStatus: this.status, ...(this.unavailableReason === undefined ? {} : { unavailableReason: this.unavailableReason }), ...(this.error === undefined ? {} : { error: this.error }), notices: this.notices, pendingUsers: this.pendingUsers, ...(this.lastStreamSeq === undefined ? {} : { lastEventSeq: this.lastStreamSeq }), resyncRequired: this.resyncRequired, lastTurnInterrupted: this.lastTurnInterrupted, userDisplays: this.userDisplays as Record<string, ComposerDoc>, userThumbs: this.userThumbs, openTurnItems: Object.fromEntries(this.openTurnItems), ...(this.compacting === undefined ? {} : { compacting: this.compacting }), messageErrors: Object.fromEntries(this.messageErrors) };
   }
   private queuePublish(streaming = false): void {
     if (this.disposed) return;
@@ -557,7 +577,7 @@ export class ConversationStore {
     // tail forces a copy, and then only because `rows` must stay one array.
     const rows = tagTimelineStructure(transientRows.length === 0 ? this.persistedRows : [...this.persistedRows, ...transientRows], this.structureToken, this.shapeToken);
     this.snapshot = { state, rows };
-    const metadataDependencies: readonly unknown[] = [state.identity, state.items, state.olderCursor, state.headCursor, state.hasMoreBefore, state.hydrateStatus, state.unavailableReason, state.error, state.notices, state.pendingUsers, state.resyncRequired, state.userDisplays, state.userThumbs, state.compacting];
+    const metadataDependencies: readonly unknown[] = [state.identity, state.items, state.olderCursor, state.headCursor, state.hasMoreBefore, state.hydrateStatus, state.unavailableReason, state.error, state.notices, state.pendingUsers, state.resyncRequired, state.lastTurnInterrupted, state.userDisplays, state.userThumbs, state.compacting];
     const metadataChanged = metadataDependencies.length !== this.metadataDependencies.length || metadataDependencies.some((value, index) => value !== this.metadataDependencies[index]);
     if (metadataChanged) { this.metadataDependencies = metadataDependencies; this.metadataSnapshot = this.snapshot; for (const listener of this.metadataListeners) listener(); }
     for (const listener of this.listeners) listener();
@@ -590,6 +610,7 @@ export class ConversationStore {
     this.itemIdCache = undefined;
     this.compacting = undefined;
     this.queuedStreaming = false; this.queuedImmediate = false; this.lastPublishedAt = undefined;
+    this.setLastTurnInterrupted(false);
     const empty: ConversationStoreSnapshot = { state: { ...emptyConversationState(this.generation), identity: this.identity }, rows: [] };
     this.snapshot = empty; this.metadataSnapshot = empty; this.metadataDependencies = [];
   }

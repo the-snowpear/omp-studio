@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ConversationMessageItem, ConversationRuntimeEvent, SessionId } from "@omp-studio/client-contract";
 import { ConversationStore } from "./conversationStore";
 import { subagentTurnRunning } from "./subagentComposerGate";
-import { timelineStructureToken } from "./conversationViewModel";
+import { timelineStructureToken, tailInterrupted } from "./conversationViewModel";
 
 function item(id: string, role: "user" | "assistant", text: string): ConversationMessageItem {
   return { kind: "message", itemId: id, parentId: null, createdAt: id, role, content: [{ type: "text", text }] };
@@ -81,6 +81,38 @@ describe("ConversationStore", () => {
     const persisted = store.getSnapshot().state.items.at(-1);
     expect(persisted?.kind === "message" && persisted.content.some((block) => block.type === "toolResult" && block.toolCallId === "tool")).toBe(true);
     expect(store.getSnapshot().state.liveTools).toEqual({});
+  });
+
+  it("latches an aborted turn even when message.completed already settled its row", () => {
+    // The order the Runtime delivers: `message.completed` folds the live row
+    // into a persisted item whose status degrades to `completed` (only an error
+    // payload keeps `error`), then `turn.aborted` arrives with no live row left
+    // to mark. Without a turn-level latch a manual stop leaves the tail reading
+    // as finished, so nothing offers to continue it.
+    const { store, sessionId, frames } = create(); store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
+    store.applyEvent(started(sessionId, "live"), 1);
+    store.applyEvent(delta(sessionId, "live", "half an answer"), 2);
+    store.applyEvent({ kind: "conversation.message.completed", sessionId, turnId: "turn", messageId: "live", item: item("live", "assistant", "half an answer") }, 3);
+    store.applyEvent({ kind: "conversation.turn.aborted", sessionId, turnId: "turn" }, 4); frames.flush();
+    expect(store.getSnapshot().rows.at(-1)).toMatchObject({ type: "assistant", status: "completed" });
+    expect(store.getSnapshot().state.lastTurnInterrupted).toBe(true);
+    store.applyEvent(started(sessionId, "next", "turn-2"), 5); frames.flush();
+    expect(store.getSnapshot().state.lastTurnInterrupted).toBe(false);
+  });
+
+  it("reads the tail as interrupted only when it stopped without a final report", () => {
+    const completed = create("completed"); completed.store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
+    completed.store.applyEvent(started(completed.sessionId, "live"), 1);
+    completed.store.applyEvent({ kind: "conversation.message.completed", sessionId: completed.sessionId, turnId: "turn", messageId: "live", item: item("live", "assistant", "done") }, 2);
+    completed.store.applyEvent({ kind: "conversation.turn.completed", sessionId: completed.sessionId, turnId: "turn" }, 3); completed.frames.flush();
+    expect(tailInterrupted(completed.store.getSnapshot().rows)).toBe(false);
+
+    const failed = create("failed"); failed.store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
+    failed.store.applyEvent(started(failed.sessionId, "live"), 1);
+    failed.store.applyEvent({ kind: "conversation.message.completed", sessionId: failed.sessionId, turnId: "turn", messageId: "live", item: item("live", "assistant", "half"), error: { message: "400 provider exploded" } }, 2);
+    failed.frames.flush();
+    expect(tailInterrupted(failed.store.getSnapshot().rows)).toBe(true);
+    completed.store.dispose(); failed.store.dispose();
   });
 
   it("settles turns the Runtime never closed, so an errored run stops reading as live", () => {

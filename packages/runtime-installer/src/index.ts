@@ -6,3 +6,4 @@ export * from "./signed-artifact.js";
 export * from "./update-manifest.js";
 export * from "./runtime-archive.js";
 export * from "./runtime-platform.js";
+export * from "./remote-environment.js";

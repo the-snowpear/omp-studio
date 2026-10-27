@@ -26,7 +26,8 @@
     "@omp-studio/transport-desktop": "0.1.11",
     "builder-util-runtime": "9.7.0",
     "electron-updater": "6.8.9",
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "socks": "2.8.7"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",

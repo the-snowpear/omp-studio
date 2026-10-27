@@ -51,6 +51,29 @@ it("states the reason and renders no frame when no panel answered", async () => 
   expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
 });
 
+it("keeps the loading overlay until the Host names an endpoint", async () => {
+  // An about:blank frame fires `load` immediately, so mounting one before the
+  // Host answered would let the probe retire the overlay while nothing loaded.
+  let resolveDashboard: ((value: { available: boolean; url?: string }) => void) | undefined;
+  const client = {
+    query: vi.fn(() => new Promise((resolve) => { resolveDashboard = resolve; })),
+    command: vi.fn(),
+    subscribe: vi.fn(),
+  } as unknown as StudioClient;
+  const { container } = render(
+    <I18nProvider forcedLanguage="zh">
+      <PreviewModeProvider switchEnabled>
+        <StatisticsPage client={client} />
+      </PreviewModeProvider>
+    </I18nProvider>,
+  );
+  expect(container.querySelector("iframe")).toBeNull();
+  expect(screen.getByText("正在连接本机统计面板")).toBeTruthy();
+  resolveDashboard?.({ available: true, url: "http://127.0.0.1:3847/#/overview?range=all" });
+  await waitFor(() => expect(container.querySelector("iframe")).toBeTruthy());
+  expect(screen.getByText("正在连接本机统计面板")).toBeTruthy();
+});
+
 it("preview never fabricates an embed and never reaches the Host", async () => {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
   const client = clientReturning({ available: true, url: "http://127.0.0.1:3847/#/overview?range=all" });

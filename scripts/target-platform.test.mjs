@@ -47,7 +47,7 @@ test("target platform follows the host unless overridden, and only supported tar
   assert.equal(resolveTargetPlatform({}, { platform: "darwin", arch: "arm64" }), "darwin-arm64");
   assert.equal(resolveTargetPlatform({ OMP_TARGET_ARCH: "arm64" }, { platform: "win32", arch: "x64" }), "win32-arm64");
   assert.equal(resolveTargetPlatform({ OMP_TARGET_PLATFORM: "Darwin", OMP_TARGET_ARCH: " ARM64 " }, { platform: "win32", arch: "x64" }), "darwin-arm64");
-  assert.throws(() => resolveTargetPlatform({}, { platform: "darwin", arch: "x64" }), /Unsupported target platform: darwin-x64/u);
+  assert.equal(resolveTargetPlatform({}, { platform: "darwin", arch: "x64" }), "darwin-x64");
   assert.equal(resolveTargetPlatform({}, { platform: "linux", arch: "x64" }), "linux-x64");
   assert.equal(resolveTargetPlatform({}, { platform: "linux", arch: "arm64" }), "linux-arm64");
   assert.equal(installer.isUpdatePlatform("linux-x64"), false);

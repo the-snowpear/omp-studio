@@ -11,6 +11,22 @@ const canonical = v => Array.isArray(v) ? `[${v.map(canonical).join(",")}]` : v 
 const table = JSON.parse(await readFile("packaging/keys/trusted-keys.json", "utf8"));
 const artifacts = [], notes = [], identities = [];
 for (const dir of await readdir("outputs/publish")) {
+  if (dir.startsWith("release-candidate-remote-")) {
+    const platform = dir.slice("release-candidate-remote-".length);
+    if (!["win32-x64", "win32-arm64", "linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64"].includes(platform)) throw new Error("Unexpected remote environment platform");
+    const root = join("outputs/publish", dir), name = `remote-environment-${platform}.json`;
+    const { manifest: m, signature: s } = JSON.parse(await readFile(join(root, name), "utf8"));
+    const keyName = table.keys[s.keyId];
+    if (!keyName || s.algorithm !== "ed25519" || !verify(null, Buffer.from(`omp-studio-remote-environment-v1\n${canonical(m)}`), createPublicKey(await readFile(join("packaging/keys", keyName))), Buffer.from(s.value, "base64url"))) throw new Error("Invalid remote environment signature");
+    if (process.env.OMP_RELEASE_KIND === "runtime" || m.repo !== repo || m.platform !== platform || m.schema !== 1) throw new Error("Remote environment candidate identity mismatch");
+    const tag = `v${m.appVersion}`, file = m.archive;
+    if (!/^[A-Za-z0-9._-]+$/u.test(file.asset) || file.url !== `https://github.com/${repo}/releases/download/${tag}/${file.asset}`) throw new Error("Invalid remote environment asset URL");
+    const bytes = await readFile(join(root, file.asset));
+    if (bytes.length !== file.size || createHash("sha256").update(bytes).digest("hex") !== file.sha256 || (await readdir(root)).length !== 2) throw new Error("Remote environment asset verification failed");
+    identities.push({ tag, title: `OMP Studio ${m.appVersion}`, prerelease: false, latest: true });
+    artifacts.push(join(root, name), join(root, file.asset));
+    continue;
+  }
   const platform = platformOfReleaseCandidate(dir);
   if (platform === undefined) throw new Error("Unexpected release candidate");
   const root = join("outputs/publish", dir);

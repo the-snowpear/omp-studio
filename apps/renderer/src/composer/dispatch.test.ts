@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canFlushQueuedMessage,
+  composerContinueEnabled,
   composerFollowUpEnabled,
   composerOwnerSessionId,
   composerOwnsLiveSnapshot,
@@ -214,6 +215,39 @@ describe("composer send path (simulated vs OMP)", () => {
         liveSessionId: "sess-a",
       }),
     ).toBe(true);
+  });
+});
+
+/**
+ * The fourth send path: empty composer, and the last turn stopped without a
+ * final report. Every row below is a way that slot can be taken away from the
+ * operator, so the gate has to refuse it.
+ */
+describe("empty-composer continue gate", () => {
+  const idle = {
+    textReady: false,
+    running: false,
+    pendingInteraction: false,
+    queueEdit: false,
+    channelReady: true,
+    interrupted: true,
+  } as const;
+
+  it("offers continue on an empty composer after an interrupted turn", () => {
+    expect(composerContinueEnabled(idle)).toBe(true);
+  });
+
+  it("hands the slot back to a draft, a running turn, an ask card, or a queued edit", () => {
+    expect(composerContinueEnabled({ ...idle, textReady: true })).toBe(false);
+    expect(composerContinueEnabled({ ...idle, running: true })).toBe(false);
+    expect(composerContinueEnabled({ ...idle, pendingInteraction: true })).toBe(false);
+    // Editing a queued message: that draft is empty, so `textReady` cannot catch it.
+    expect(composerContinueEnabled({ ...idle, queueEdit: true })).toBe(false);
+  });
+
+  it("follows the channel and the interrupted tail", () => {
+    expect(composerContinueEnabled({ ...idle, channelReady: false })).toBe(false);
+    expect(composerContinueEnabled({ ...idle, interrupted: false })).toBe(false);
   });
 });
 

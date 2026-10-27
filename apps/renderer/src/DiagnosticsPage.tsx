@@ -97,6 +97,7 @@ const PREVIEW_CYCLE: ReadonlyArray<{ id: PreviewDiagScenario; labelKey: string }
   { id: "update", labelKey: "diagnostics.previewUpdateAvailable" },
   { id: "ok", labelKey: "diagnostics.previewEnvironmentOk" },
   { id: "fail", labelKey: "diagnostics.previewCheckFailed" },
+  { id: "blocked", labelKey: "diagnostics.previewUpdateBlocked" },
 ];
 
 function useNotice(): [notice: { text: string; icon: string } | null, show: (text: string, icon?: string) => void, dismiss: () => void] {
@@ -327,15 +328,23 @@ export function DiagnosticsPage({
   const viewEnv = preview ? previewEnvironment(scenario, previewInstallerState) : env;
   const viewDiag = preview ? previewDiagnostics(scenario) : diag;
   const viewCaps = preview ? previewCapabilities() : caps;
-  const view = useMemo(
-    () => deriveDiagnosticsView({
+  const runtimeUpdate = preview ? undefined : updates.state.check?.runtime;
+  const runtimeUpdateBlocker = preview
+    ? scenario === "blocked" ? t("diagnostics.runtimeUpdateBlockerDemo", { version: mock.requiredAppVersion }) : undefined
+    : runtimeUpdate?.plan === "blocked" ? runtimeUpdate.reason ?? t("diagnostics.runtimeUpdateBlocker") : undefined;
+  const blocksLocalUpdate = Boolean(runtimeUpdateBlocker && (preview || !viewEnv?.installer.availableVersion || viewEnv.installer.availableVersion === runtimeUpdate?.runtimeVersion));
+  const view = useMemo(() => {
+    const derived = deriveDiagnosticsView({
       ...(viewRuntime === undefined ? {} : { runtime: viewRuntime }),
       ...(viewEnv === undefined ? {} : { environment: viewEnv }),
       ...(viewDiag === undefined ? {} : { diagnostics: viewDiag }),
       ...(viewCaps === undefined ? {} : { capabilities: viewCaps }),
-    }, (k, p) => t(k, p as any)),
-    [viewRuntime, viewEnv, viewDiag, viewCaps, t],
-  );
+    }, (k, p) => t(k, p as any));
+    if (blocksLocalUpdate && derived.hero.kind === "update") {
+      return { ...derived, hero: { ...derived.hero, title: t("diagnostics.runtimeUpdateBlocked"), detail: runtimeUpdateBlocker! } };
+    }
+    return derived;
+  }, [viewRuntime, viewEnv, viewDiag, viewCaps, t, blocksLocalUpdate, runtimeUpdateBlocker]);
 
   const refreshQueries = useCallback(async (): Promise<boolean> => {
     const [d, c, e] = await Promise.allSettled([
@@ -399,10 +408,12 @@ export function DiagnosticsPage({
         show(
           scenario === "update"
             ? t("diagnostics.updateCheckedDemo", { version: mock.availableVersion })
-            : scenario === "ok"
-              ? t("diagnostics.latestArtifactDemo")
-              : t("diagnostics.checkUpdateFailedDemo"),
-          scenario === "fail" ? "alert-c" : "check",
+            : scenario === "blocked"
+              ? t("diagnostics.runtimeUpdateBlockerDemo", { version: mock.requiredAppVersion })
+              : scenario === "ok"
+                ? t("diagnostics.latestArtifactDemo")
+                : t("diagnostics.checkUpdateFailedDemo"),
+          scenario === "fail" || scenario === "blocked" ? "alert-c" : "check",
         );
       }
       return;
@@ -424,6 +435,8 @@ export function DiagnosticsPage({
       if (!notify) return;
       if (remoteCheckResult?.error) {
         show(`${t("diagnostics.updateCheckFailed")}: ${remoteCheckResult.error}`, "alert-c");
+      } else if (remoteCheckResult?.runtime.plan === "blocked") {
+        show(remoteCheckResult.runtime.reason ?? t("diagnostics.runtimeUpdateBlocker"), "alert-c");
       } else if (remoteCheckResult?.runtime.plan === "available") {
         show(
           t("diagnostics.foundLocalUpdateWith", { version: remoteCheckResult.runtime.runtimeVersion ?? "" }),
@@ -473,6 +486,10 @@ export function DiagnosticsPage({
 
   const installRuntime = useCallback(async (kind: "install" | "update" | "reinstall" | "import") => {
     setConfirmReinstall(false);
+    if (kind === "update" && blocksLocalUpdate) {
+      show(runtimeUpdateBlocker!, "alert-c");
+      return;
+    }
     if (preview) {
       if (kind === "import") {
         show(t("updates.importDemo"), "check");
@@ -614,7 +631,7 @@ export function DiagnosticsPage({
     } finally {
       setBusy(null);
     }
-  }, [beginAction, client, preview, show, t, updates.state.check?.runtime.plan]);
+  }, [beginAction, client, preview, show, t, updates.state.check?.runtime.plan, blocksLocalUpdate, runtimeUpdateBlocker]);
 
   const restartRuntime = useCallback(async () => {
     setConfirmRestart(false);
@@ -799,7 +816,7 @@ export function DiagnosticsPage({
           <div className="small">{view.hero.detail}</div>
         </div>
         <div className="es-actions">
-          <button type="button" className="btn primary" disabled={busy !== null} onClick={runPrimary}>
+          <button type="button" className="btn primary" disabled={busy !== null || (view.hero.primary === "update" && blocksLocalUpdate)} data-tip={view.hero.primary === "update" && blocksLocalUpdate ? runtimeUpdateBlocker : undefined} onClick={runPrimary}>
             <Icon name={primaryIcon(view.hero.primary)} extra="sm" />
             {primaryLabel(view.hero.primary, busy, t)}
           </button>
@@ -821,7 +838,7 @@ export function DiagnosticsPage({
           <div className="dv-k">{t("diagnostics.managedRuntimeTitle")}</div>
           <div className="dv-v">{installer?.version ?? t("common.notInstalled")}</div>
           <div className="dv-s">
-            {installer?.status === "update-available" && installer.availableVersion
+            {blocksLocalUpdate && installer?.status === "update-available" ? runtimeUpdateBlocker : installer?.status === "update-available" && installer.availableVersion
               ? t("diagnostics.updatableTo", { version: installer.availableVersion })
               : installer?.status === "not-installed" && installer.availableVersion
                 ? t("diagnostics.localArtifact", { version: installer.availableVersion })
@@ -870,10 +887,10 @@ export function DiagnosticsPage({
                 <Icon name={check.tone === "ok" ? "check" : check.tone === "warn" ? "alert" : "x"} extra="sm" />
               </span>
               <span className="ck-name">{check.label}</span>
-              <span className="ck-detail wrap">{check.detail}</span>
+              <span className="ck-detail wrap">{check.action === "update" && blocksLocalUpdate ? runtimeUpdateBlocker : check.detail}</span>
               <span className="ck-actions">
                 {check.action ? (
-                  <button type="button" className="btn small outline" disabled={busy !== null && check.action !== "problems"} onClick={() => runCheckAction(check.action!)}>
+                  <button type="button" className="btn small outline" disabled={(busy !== null && check.action !== "problems") || (check.action === "update" && blocksLocalUpdate)} onClick={() => runCheckAction(check.action!)}>
                     {check.action === "install" ? t("common.install") : check.action === "update" ? t("common.update") : t("common.view")}
                   </button>
                 ) : null}
@@ -894,10 +911,13 @@ export function DiagnosticsPage({
             <div className="sr-label">{t("updates.pruneOld")}</div>
             <button type="button" className="btn outline" disabled={busy !== null || (!preview && !globalThis.ompStudioChrome?.pruneRuntimeUpdates)} onClick={() => void maintainRuntime("prune")}>{t("updates.pruneOld")}</button>
           </div>
-          {!preview && updates.state.check?.runtime.plan === "available" ? (
+          {(runtimeUpdate?.plan === "available" || runtimeUpdate?.plan === "blocked") ? (
             <div className="set-row">
-              <div className="sr-label">{t("diagnostics.updateRuntime")} · {updates.state.check.runtime.runtimeVersion}</div>
-              <button type="button" className="btn outline" disabled={busy !== null} onClick={() => void installRuntime("update")}>{t("common.update")}</button>
+              <div>
+                <div className="sr-label">{t("diagnostics.updateRuntime")} · {runtimeUpdate.runtimeVersion}</div>
+                {runtimeUpdateBlocker ? <div className="sr-desc" role="status">{runtimeUpdateBlocker}</div> : null}
+              </div>
+              <button type="button" className="btn outline" disabled={busy !== null || Boolean(runtimeUpdateBlocker)} onClick={() => void installRuntime("update")}>{t("common.update")}</button>
             </div>
           ) : null}
           <div className="set-row">

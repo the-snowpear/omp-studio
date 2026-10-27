@@ -53,6 +53,7 @@ const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
 	"session.clearContext",
 	"session.drop",
 	"turn.retry",
+	"core.continue",
 	"core.prompt",
 	"core.steer",
 	"core.followUp",
@@ -727,6 +728,12 @@ export class StudioBridgeDispatcher {
 			}
 			case "turn.retry":
 				return await this.#sessionControl.retry();
+			case "core.continue":
+				// The projection owns the tail reading, so the command and the button
+				// that triggers it can never disagree about what "interrupted" means.
+				return await this.#sessionControl.continueTurn({
+					interrupted: this.projector.lastTurnOutcome === "interrupted",
+				});
 			case "session.model.set":
 				return await this.runtime.services.models.setModel(operation.selector, operation.thinking);
 			case "session.thinking.set":

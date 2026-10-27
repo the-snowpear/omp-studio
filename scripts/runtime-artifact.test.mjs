@@ -282,8 +282,8 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   assert.equal(upstream.commit, REAL_UPSTREAM_COMMIT);
   assert.equal(series.upstreamCommit, upstream.commit);
   assert.equal(upstream.entrypoint, "omp.exe");
-  assert.deepEqual(upstream.entrypoints, { win32: "omp.exe", darwin: "omp" });
-  assert.deepEqual(upstream.platforms, ["win32-x64", "win32-arm64", "darwin-arm64"]);
+  assert.deepEqual(upstream.entrypoints, { win32: "omp.exe", darwin: "omp", linux: "omp" });
+  assert.deepEqual(upstream.platforms, ["win32-x64", "win32-arm64", "darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"]);
   assert.equal(upstreamVersion, "18.12.6");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^studio\.\d+$/u);
@@ -456,7 +456,7 @@ test("pin entrypoints and platforms must agree with the managed table", async ()
     });
   await assert.rejects(generate({ ...inputs.upstream, entrypoints: { win32: "omp.exe", darwin: "omp.exe" } }), /entrypoint for darwin/u);
   await assert.rejects(generate({ ...inputs.upstream, entrypoints: { linux: "omp.exe" } }), /entrypoint for linux/u);
-  await assert.rejects(generate({ ...inputs.upstream, platforms: ["win32-x64", "darwin-x64"] }), /darwin-x64 is not a supported/u);
+  await assert.rejects(generate({ ...inputs.upstream, platforms: ["win32-x64", "solaris-x64"] }), /solaris-x64 is not a supported/u);
 });
 
 test("entrypoint must match the artifact platform and the binary must match it", async () => {

@@ -55,7 +55,7 @@ export async function runRemoteHost(argv: string[]): Promise<void> {
     state: { type: "string" }, runtime: { type: "string" }, keys: { type: "string" }, "agent-dir": { type: "string" }, artifact: { type: "string" },
   } });
   const mode = positionals[0];
-  if (positionals.length !== 1 || !["serve", "attach", "start", "install", "probe"].includes(mode ?? "")) throw new Error("Usage: host.mjs start|serve|attach|install|probe --state <directory>");
+  if (positionals.length !== 1 || !["serve", "attach", "network", "start", "install", "probe"].includes(mode ?? "")) throw new Error("Usage: host.mjs start|serve|attach|network|install|probe --state <directory>");
   const state = resolve(values.state ?? remoteStateRoot(remotePlatform(process.platform)));
   const { connectRemoteEndpoint } = await import("./server.js");
   if (mode === "probe") {
@@ -73,7 +73,7 @@ export async function runRemoteHost(argv: string[]): Promise<void> {
     await installRuntime(state, resolve(values.artifact), resolve(values.keys));
     return;
   }
-  if (mode === "attach") {
+  if (mode === "attach" || mode === "network") {
     const downstream = new RemotePeer(process.stdin, process.stdout);
     let upstream: RemotePeer | undefined;
     let opening: Promise<RemotePeer> | undefined;
@@ -84,10 +84,14 @@ export async function runRemoteHost(argv: string[]): Promise<void> {
       if (!opening) {
         if (method !== "hello") throw new RemoteConnectionError("protocol", "Remote attachment must start with hello");
         const attachment = input && typeof input === "object" && "attachment" in input ? input.attachment as RemoteAttachment : undefined;
-        opening = connectRemoteEndpoint(state, false, attachment).then(peer => {
+        opening = connectRemoteEndpoint(state, false, attachment, mode === "network").then(peer => {
           if (closed) { peer.close(); throw new RemoteConnectionError("cancelled", "Remote attachment was cancelled"); }
           upstream = peer;
           off = peer.onEvent(event => downstream.publish(event));
+          if (mode === "network") {
+            peer.handle((method, input) => downstream.request(method, input));
+            downstream.onEvent(event => peer.publish(event));
+          }
           peer.onClose(error => downstream.close(error));
           return peer;
         });

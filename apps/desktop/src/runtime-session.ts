@@ -1435,6 +1435,7 @@ function createSingleDesktopRuntimeSessionPort(
       const port = new NodeRuntimeProcessPort({
         env: {
           ...process.env,
+          ...(socketDirectory === undefined || process.env.OMP_AUTH_BROKER_URL ? {} : { OMP_STUDIO_AUTH_BROKER_FILE: join(socketDirectory, "auth-broker.json") }),
           OMP_STUDIO_MEDIA_ROOT: mediaDirectory,
           ...(socketDirectory === undefined ? {} : { OMP_STUDIO_SOCKET_DIR: socketDirectory }),
           // The Runtime's parent watchdog is enabled on macOS only for now.

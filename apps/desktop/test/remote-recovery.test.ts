@@ -158,12 +158,12 @@ test("the overall recovery deadline aborts a hung attachment and releases its pa
   assert.equal(f.calls.attach, 2); assert.equal(f.calls.clearAuthentication, 1);
 });
 
-test("password connection preserves a target-OS mismatch and clears the input immediately", async t => {
+test("auto-detected system overrides legacy profile metadata and handshake mismatch clears the password", async t => {
   const f = await fixture(t, {}, true);
   f.setProbe(async () => ({ platform: "win32", arch: "x64", home: "C:\\Users\\test", node: "node", version: "24", root: "C:\\remote" }));
   const credentials = { password: "test-only" };
-  await assert.rejects(f.manager.connect(f.profile.id, credentials), /目标系统是 win32/);
-  assert.equal(credentials.password, ""); assert.equal(f.calls.probe, 1); assert.equal(f.calls.attach, 0);
+  await assert.rejects(f.manager.connect(f.profile.id, credentials), /体检结果 win32\/x64/);
+  assert.equal(credentials.password, ""); assert.equal(f.calls.probe, 1); assert.equal(f.calls.attach, 1);
   assert.equal(f.calls.clearAuthentication, 1);
 });
 

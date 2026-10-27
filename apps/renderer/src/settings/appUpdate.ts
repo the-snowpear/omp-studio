@@ -30,6 +30,7 @@ export interface AppUpdateState {
     readonly currentVersion: string;
     readonly plan?: "none" | "hot" | "full";
     readonly reason?: string | undefined;
+    readonly blockedReason?: string | undefined;
     readonly version?: string | undefined;
     readonly name?: string | undefined;
     readonly releaseNotes?: string | undefined;
@@ -121,7 +122,7 @@ function receiveUnifiedUpdate(snapshot: import("@omp-studio/runtime-installer").
       component: current.component,
       available: Boolean(current.version), currentVersion: current.currentVersion ?? "",
       version: current.version, name: current.component === "runtime" ? `OMP Runtime ${current.version ?? ""}` : `OMP Studio ${current.version ?? ""}`,
-      reason: "restart-update", htmlUrl: snapshot.releaseNotesUrl,
+      reason: "restart-update", blockedReason: current.blockedReason, htmlUrl: snapshot.releaseNotesUrl,
       releaseNotes: parts.filter(p => p.version).map(p => `${p.component === "app" ? "OMP Studio" : "Runtime"}: ${p.currentVersion ?? "—"} → ${p.version}${p.method === "differential" ? ` · ${updateCopy("appUpdate.downloadDifferential")}` : p.method === "reuse" ? ` · ${updateCopy("appUpdate.downloadReuse")}` : p.method === "full" ? ` · ${updateCopy("appUpdate.downloadFull")}` : ""}${p.message ? `\n${p.message}` : ""}`).join("\n\n"),
     },
   });
@@ -180,6 +181,10 @@ export async function downloadAndInstallAppUpdate(): Promise<boolean> {
     return false;
   }
 
+  if (currentState.updateInfo.blockedReason) {
+    updateState({ applyNotice: currentState.updateInfo.blockedReason });
+    return false;
+  }
   updateState({ downloading: true, ...clearedMessages, readyToApply: false });
   let unifiedPreparation = false;
   try {

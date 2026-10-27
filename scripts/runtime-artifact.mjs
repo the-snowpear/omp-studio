@@ -233,6 +233,7 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "session.clearContext",
   "session.drop",
   "turn.retry",
+  "core.continue",
   "core.prompt",
   "core.steer",
   "core.followUp",

@@ -185,6 +185,7 @@ export const PREVIEW_PROJECTS: PreviewProject[] = [
       { id: "t9", title: "补齐预览模式的会话分页演示", time: "7d ago", msgs: 5, status: "idle" },
       { id: "t10", title: "清理历史遗留的 mock 分支", time: "9d ago", msgs: 21, status: "idle" },
       { id: "t11", title: "侧栏会话行悬停操作样式走查", time: "11d ago", msgs: 3, status: "idle" },
+      { id: "t12", title: "修 MermaidBlock 的 TS2322（中途停止）", time: "1h ago", msgs: 7, status: "idle" },
     ],
   },
   {
@@ -530,12 +531,13 @@ export function defaultPreviewSelection(): { projectId: string; threadId: string
   return { projectId: "p1", threadId: "t1" };
 }
 
-export type PreviewDiagScenario = "ok" | "update" | "fail";
+export type PreviewDiagScenario = "ok" | "update" | "fail" | "blocked";
 export type PreviewDiagError = { time: string; src: string; msg: string };
 export type PreviewDiagLog = { tone: "muted" | "err"; text: string };
 export type PreviewDiagnostics = {
   version: string;
   availableVersion: string;
+  requiredAppVersion: string;
   upstreamVersion: string;
   upstreamCommit: string;
   platform: string;
@@ -549,6 +551,7 @@ export type PreviewDiagnostics = {
 export const PREVIEW_DIAGNOSTICS: PreviewDiagnostics = {
   version: "18.8.0-studio.17",
   availableVersion: "18.8.0-studio.18",
+  requiredAppVersion: "0.1.11",
   upstreamVersion: "18.8.0",
   upstreamCommit: "4ef97c8826ee012829a3e756b693a2a16a414f47",
   platform: PLATFORM === "darwin" ? "darwin" : "win32",

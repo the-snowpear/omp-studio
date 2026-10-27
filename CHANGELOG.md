@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 统计页在应用内正常显示：托管 Runtime 拉起 `omp stats` 时不再打开系统浏览器，且渲染进程的 CSP 不再注入到被内嵌的仪表盘（`frame-ancestors 'none'` 曾让整页白屏）。
+- 开启 CLI 自动恢复时，Studio 新建会话仍创建独立会话，不再重复占用旧会话的写入租约（[the-snowpear/omp-studio#6](https://github.com/the-snowpear/omp-studio/issues/6)）。
+- Runtime 更新检查提前显示桌面版本或协议不兼容的原因，禁用不可执行的更新入口；准备兼容桌面后仍可一起更新（[the-snowpear/omp-studio#6](https://github.com/the-snowpear/omp-studio/issues/6)）。
+
 ## [0.1.11] - 2026-10-26
 
 ### Added

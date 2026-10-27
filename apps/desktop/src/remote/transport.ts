@@ -8,6 +8,7 @@ import { sshAuthenticationRequest, type SshAuthentication } from "./authenticati
 import { RemoteConnectionError, connectionCancelled, sshFailure } from "./errors.js";
 
 export interface SshRemoteOptions {
+  readonly networkChannel?: boolean;
   readonly connection: SshConnection;
   readonly authentication?: SshAuthentication;
   readonly attachment?: RemoteAttachment;
@@ -85,7 +86,7 @@ export class SshRemoteTransport implements ClientTransport {
     peer.onClose(() => { options.signal?.removeEventListener("abort", cancel); authenticationRequest?.dispose(); });
     if (options.signal?.aborted) cancel();
     try {
-      const hello = await peer.request<RemoteHello>("hello", options.attachment ? { attachment: options.attachment } : null);
+      const hello = await peer.request<RemoteHello>("hello", { ...(options.attachment ? { attachment: options.attachment } : {}), ...(options.networkChannel ? { networkChannel: true } : {}) });
       if (hello.protocolVersion !== REMOTE_PROTOCOL_VERSION) throw new RemoteConnectionError("protocol", "远端 Host 协议版本与客户端不一致，请手动重新连接以更新 Host");
       if (hello.platform !== options.expectedPlatform) throw new RemoteConnectionError("environment", `远端系统是 ${hello.platform}，与配置的 ${options.expectedPlatform} 不符`);
       if (options.expectedBundleVersion !== undefined && hello.bundleVersion !== options.expectedBundleVersion) throw new RemoteConnectionError("protocol", "远端 Host 版本已改变，请手动重新连接；未覆盖现有 Host");

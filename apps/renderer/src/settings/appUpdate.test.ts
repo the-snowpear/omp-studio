@@ -154,6 +154,30 @@ it("prepares desktop rollback from the unified snapshot without installing until
   expect(applyUpdate).toHaveBeenCalledOnce();
 });
 
+it("shows a Runtime-only compatibility blocker without preparing a download", async () => {
+  const prepareUpdates = vi.fn();
+  const blocker = "Runtime 至少需要桌面 0.1.11，请先更新桌面";
+  vi.stubGlobal("ompStudioChrome", {
+    getUpdatePrefs: async () => prefs, checkUpdates: vi.fn(), prepareUpdates,
+    getUpdateSnapshot: async () => ({ schema: 2, checking: false, app: { component: "app", currentVersion: "0.1.10", phase: "idle" }, runtime: { component: "runtime", currentVersion: "18.10.4-studio.8", version: "18.12.6-studio.1", phase: "idle", blockedReason: blocker } }),
+  });
+  await checkForAppUpdates({ silent: true });
+  expect(getAppUpdateState().updateInfo).toMatchObject({ component: "runtime", blockedReason: blocker });
+  await expect(downloadAndInstallAppUpdate()).resolves.toBe(false);
+  expect(prepareUpdates).not.toHaveBeenCalled();
+  expect(getAppUpdateState()).toMatchObject({ downloading: false, applyNotice: blocker, downloadError: null });
+});
+
+it("allows the desktop update to prepare alongside a currently blocked Runtime", async () => {
+  const snapshot = { schema: 2, checking: false, app: { component: "app", currentVersion: "0.1.10", version: "0.1.11", phase: "idle" }, runtime: { component: "runtime", version: "18.12.6-studio.1", phase: "idle", blockedReason: "请先更新桌面" } };
+  const prepareUpdates = vi.fn(async () => snapshot);
+  vi.stubGlobal("ompStudioChrome", { getUpdatePrefs: async () => prefs, checkUpdates: vi.fn(), getUpdateSnapshot: async () => snapshot, prepareUpdates });
+  await checkForAppUpdates({ silent: true });
+  expect(getAppUpdateState().updateInfo).toMatchObject({ component: "app", blockedReason: undefined });
+  await downloadAndInstallAppUpdate();
+  expect(prepareUpdates).toHaveBeenCalledWith("all");
+});
+
 it("does not save a Runtime-only version as a skipped desktop version", async () => {
   const setUpdatePrefs = vi.fn();
   vi.stubGlobal("ompStudioChrome", {

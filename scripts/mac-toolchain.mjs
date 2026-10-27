@@ -24,12 +24,13 @@ export function macToolchainProblems({
   bunVersion,
   env = process.env,
   arch = process.arch,
+  targetArch = "arm64",
   translated = isRosettaTranslated(),
   run = defaultRun,
 } = {}) {
   const problems = [];
-  if (arch !== "arm64" || translated) {
-    problems.push("Node is not a native arm64 build; install arm64 Node (nodejs.org, nvm or Homebrew on Apple Silicon)");
+  if (arch !== targetArch || translated) {
+    problems.push(`Node is not a native ${targetArch} build; install matching Node for this build target`);
   }
   // `xcode-select -p` never pops the install dialog; the /usr/bin shims (git,
   // clang, xcrun tools) do, so they are only touched once CLT is known present.
@@ -53,7 +54,8 @@ export function macToolchainProblems({
   if (rust) {
     try {
       const host = /^host: (.+)$/mu.exec(run("rustc", ["-vV"], env))?.[1]?.trim();
-      if (host !== "aarch64-apple-darwin") problems.push(`Rust must build for aarch64-apple-darwin; rustc host is ${host ?? "unknown"}`);
+      const expected = targetArch === "x64" ? "x86_64-apple-darwin" : "aarch64-apple-darwin";
+      if (host !== expected) problems.push(`Rust must build for ${expected}; rustc host is ${host ?? "unknown"}`);
     } catch {
       problems.push("Rust is missing; install it with rustup (https://rustup.rs)");
     }

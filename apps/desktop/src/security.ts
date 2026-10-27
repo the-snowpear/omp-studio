@@ -37,8 +37,10 @@ export const RENDERER_CSP =
   // The statistics page embeds the native `omp stats` dashboard. That server
   // only ever binds 127.0.0.1:3847 (the adapter probes and spawns that exact
   // endpoint), so the frame is pinned to one origin: no wildcard port, no
-  // loopback for scripts, connections, images or media.
-  "frame-src http://127.0.0.1:3847; " +
+  // loopback for scripts, connections, images or media. `'self'` stays listed
+  // because naming any source in `frame-src` replaces the `default-src`
+  // fallback, which would blank the same-origin graphic-preview frame.
+  "frame-src 'self' http://127.0.0.1:3847; " +
   "frame-ancestors 'none'";
 
 /** Development-only policy required by Vite's React Refresh preamble. */
@@ -212,16 +214,32 @@ export interface CspSession {
   readonly webRequest: {
     onHeadersReceived(
       listener: (
-        details: { responseHeaders?: Record<string, string[]> },
+        details: { url?: string; responseHeaders?: Record<string, string[]> },
         callback: (response: { responseHeaders: Record<string, string[]> }) => void,
       ) => void,
     ): unknown;
   };
 }
 
-/** Inject the renderer CSP on every http(s) response of the given session. */
-export function installCspHeaders(session: CspSession, csp: string): void {
+/**
+ * Inject the renderer CSP on responses the predicate claims.
+ *
+ * The listener is session-wide, so an unfiltered injection also lands on
+ * framed documents — notably the native `omp stats` dashboard the statistics
+ * page embeds, whose injected `frame-ancestors 'none'` then refuses the frame
+ * and leaves the page blank. Callers pass the renderer's own origin so only
+ * Studio's document carries the policy.
+ */
+export function installCspHeaders(
+  session: CspSession,
+  csp: string,
+  owns: (url: string) => boolean,
+): void {
   session.webRequest.onHeadersReceived((details, callback) => {
+    if (!owns(details.url ?? "")) {
+      callback({ responseHeaders: details.responseHeaders ?? {} });
+      return;
+    }
     callback({
       responseHeaders: {
         ...(details.responseHeaders ?? {}),

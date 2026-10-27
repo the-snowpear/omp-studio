@@ -24,6 +24,7 @@ export interface AppUpdateDialogProps {
     readonly assetSize?: number | undefined;
     readonly plan?: "none" | "hot" | "full";
     readonly reason?: string | undefined;
+    readonly blockedReason?: string | undefined;
   };
   readonly preview?: boolean;
   readonly isDownloading?: boolean;
@@ -116,7 +117,7 @@ export function AppUpdateDialog({
   }, []);
 
   const handleDownload = useCallback(async () => {
-    if (busy) return;
+    if (busy || update.blockedReason) return;
     setStatusMessage(null);
     if (preview) {
       if (previewReady) {
@@ -153,7 +154,7 @@ export function AppUpdateDialog({
         setOperation(null);
       }
     }
-  }, [busy, preview, previewReady, ready, onApply, onDownloadAndInstall, t]);
+  }, [busy, preview, previewReady, ready, onApply, onDownloadAndInstall, t, update.blockedReason]);
 
   const openGithub = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -241,7 +242,8 @@ export function AppUpdateDialog({
             </div>
           ) : null)}
 
-          {applyNotice ? <p className="small muted" role="status">{applyNotice}</p> : null}
+          {update.blockedReason ? <p role="status">{update.blockedReason}</p> : null}
+          {applyNotice && applyNotice !== update.blockedReason ? <p className="small muted" role="status">{applyNotice}</p> : null}
           {applying ? <p role="status">{t("appUpdate.restarting")}</p> : null}
 
           {statusMessage ? (
@@ -297,7 +299,7 @@ export function AppUpdateDialog({
             <button
               type="button"
               className="btn primary"
-              disabled={busy || (!preview && !(ready ? onApply : onDownloadAndInstall))}
+              disabled={busy || Boolean(update.blockedReason) || (!preview && !(ready ? onApply : onDownloadAndInstall))}
               autoFocus
               onClick={handleDownload}
             >

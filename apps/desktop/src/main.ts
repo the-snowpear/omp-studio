@@ -2,6 +2,11 @@ import { installRemoteRuntime } from "./remote/install.js";
 import { RemoteTerminalManager } from "./remote/terminal.js";
 import { RemoteConnectionManager } from "./remote/manager.js";
 import { registerRemoteIpc } from "./remote/ipc.js";
+import { RemoteEnvironmentInstaller } from "./remote/environment-installer.js";
+import { LocalCredentialVault } from "./remote/local-vault.js";
+import { connectRemoteServices } from "./remote/connected-services.js";
+import { RuntimeInstaller } from "@omp-studio/runtime-installer";
+import { defaultOmpAgentDir } from "@omp-studio/studio-host";
 import { DesktopPrediction, registerPredictionIpc } from "./prediction.js";
 import { registerSkillshareTokenIpc } from "./chrome-skillshare.js";
 import { DesktopLiveAudio, registerLiveAudioIpc } from "./live-audio.js";
@@ -291,7 +296,23 @@ export async function main(): Promise<void> {
   }
   const remoteBundle = join(app.getAppPath(), "dist", "remote-host");
   const remoteHelpers = app.isPackaged ? join(process.resourcesPath, "ssh-askpass") : join(app.getAppPath(), "dist", "ssh-askpass");
-  const remoteConnections = new RemoteConnectionManager(join(desktopPaths().stateRoot, "ssh-connections.json"), remoteBundle, undefined, remoteHelpers);
+  const remoteInstaller = new RemoteEnvironmentInstaller({ cache: join(desktopPaths().stateRoot, "remote-packages"), repo: "the-snowpear/omp-studio", appVersion: app.getVersion(), keys: trustedKeys, fetcher: net.fetch.bind(net) as typeof fetch,
+    mirror: async () => (await createUpdatePrefsStore({ appDataDirectory: desktopPaths().stateRoot }).read()).mirrorPrefix });
+  const remoteVault = new LocalCredentialVault({
+    agentDirectory: () => defaultOmpAgentDir(),
+    brokerFile: async () => join(await runtimeSocketDirectory(activeProfileDirectory()), "auth-broker.json"),
+    runtimeExecutable: async () => {
+      const installer = new RuntimeInstaller(runtimeInstallLayout?.installDirectory ?? join(app.getPath("appData"), "omp-studio", "runtimes"), { trustedKeys });
+      const current = await installer.currentManifest();
+      if (!current) throw new Error("请先安装本机 Runtime，以同步模型登录和凭证");
+      return current.entrypointPath;
+    },
+  });
+  const remoteConnections: RemoteConnectionManager = new RemoteConnectionManager(join(desktopPaths().stateRoot, "ssh-connections.json"), remoteBundle, undefined, remoteHelpers, undefined, {
+    requireApproval: true,
+    prepare: (profile, environment, authentication, signal, progress) => remoteInstaller.prepare(profile, environment, authentication, signal, progress),
+    connected: (id, remote, signal, report) => connectRemoteServices(remoteConnections, id, remote, signal, report, remoteVault, url => session.defaultSession.resolveProxy(url)),
+  });
   const remoteTerminals = new RemoteTerminalManager(remoteConnections);
   const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);
   const mediaUploads = new MediaUploadManager(activeArtifactLibrary);
@@ -472,7 +493,10 @@ export async function main(): Promise<void> {
     }
     const allowedOrigin = rendererOriginFor(target);
     const preloadPath = layout.preloadPath;
-    installCspHeaders(session.defaultSession, rendererCspFor(target));
+    // Only Studio's own document gets the renderer policy: the session hook also
+    // sees framed responses, and stamping the statistics dashboard with
+    // `frame-ancestors 'none'` is what blanked that page.
+    installCspHeaders(session.defaultSession, rendererCspFor(target), (url) => isTrustedRendererUrl(url, allowedOrigin));
     session.defaultSession.setPermissionRequestHandler(createPermissionRequestHandler(allowedOrigin));
 
     const window = createSecureWindow({
@@ -518,10 +542,7 @@ export async function main(): Promise<void> {
     });
     window.webContents.once("render-process-gone", () => payloadHealth.failed());
     const ipc = registerDesktopIpc({ facade: context.transport, isTrustedSender });
-    const remoteIpc = registerRemoteIpc({ ipc: ipcMain, manager: remoteConnections, isTrusted: isTrustedSender, confirmDeployment: async profile => {
-      const answer = await dialog.showMessageBox(window, { type: "question", title: "连接 SSH 工作区", message: `连接到 ${profile.name}`, detail: "将使用系统 SSH 配置连接，并在远端用户目录安装或复用 OMP Studio Host（约 2 MB）。需要远端 Node.js 22+；不复制本机模型凭证，不修改 SSH 服务设置。", buttons: ["连接并准备", "取消"], defaultId: 0, cancelId: 1 });
-      return answer.response === 0;
-    }, installRuntime: async id => {
+    const remoteIpc = registerRemoteIpc({ ipc: ipcMain, manager: remoteConnections, isTrusted: isTrustedSender, installRuntime: async id => {
       const picked = await dialog.showOpenDialog(window, { title: "选择匹配远端系统的签名 Runtime ZIP", properties: ["openFile"], filters: [{ name: "OMP Studio Runtime", extensions: ["zip"] }] });
       if (picked.canceled || !picked.filePaths[0]) return { installed: false };
       if (remoteTerminals.hasTarget(id)) throw new Error("请先关闭这个 SSH 目标的终端，再安装 Runtime");
@@ -899,7 +920,7 @@ export async function main(): Promise<void> {
     : undefined;
 
   const application = createDesktopApplication({
-    beforeShutdown: async () => { remoteTerminals.disposeAll(); await remoteConnections.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    beforeShutdown: async () => { remoteTerminals.disposeAll(); await remoteConnections.close(); remoteVault.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
     platform: process.platform,

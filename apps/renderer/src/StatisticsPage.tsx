@@ -117,12 +117,16 @@ export function StatisticsPage({ client }: { client: StudioClient }) {
   return (
     <div className="stats-page">
       <div className="stats-frame">
-        <iframe
-          className="stats-frame-body"
-          src={url}
-          title={zh ? "OMP 统计面板" : "OMP statistics panel"}
-          onLoad={onFrameLoad}
-        />
+        {/* Mount the frame only once the Host named an endpoint: an `about:blank`
+            frame fires `load` immediately and the probe would call it ready. */}
+        {url !== undefined ? (
+          <iframe
+            className="stats-frame-body"
+            src={url}
+            title={zh ? "OMP 统计面板" : "OMP statistics panel"}
+            onLoad={onFrameLoad}
+          />
+        ) : null}
         {phase === "loading" ? (
           <div className="stats-overlay">
             <span className="stats-spinner" aria-hidden="true" />

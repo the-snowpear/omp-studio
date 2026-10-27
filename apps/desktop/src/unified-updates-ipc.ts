@@ -19,7 +19,7 @@ export function registerUnifiedUpdatesIpc(options: Pick<ChromeUpdatesIpcOptions,
     return {
       checkedAt: new Date().toISOString(),
       app: { currentVersion: s.app.currentVersion, plan: s.app.version ? "full" : "none", version: s.app.version, reason: "restart-update", sizeBytes: s.app.totalBytes, releaseNotesUrl: s.releaseNotesUrl },
-      runtime: { plan: s.runtime.version ? "available" : "none", runtimeVersion: s.runtime.version, sizeBytes: s.runtime.totalBytes },
+      runtime: { plan: s.runtime.version ? s.runtime.blockedReason ? "blocked" : "available" : "none", runtimeVersion: s.runtime.version, sizeBytes: s.runtime.totalBytes, ...(s.runtime.blockedReason ? { reason: s.runtime.blockedReason } : {}) },
       ...(s.error ? { error: s.error } : {}),
     };
   });

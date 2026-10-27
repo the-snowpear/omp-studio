@@ -18,6 +18,10 @@ function Surface() {
   const [error, setError] = useState("");
   return <><span data-testid="target">{target.id ?? "local"}</span><input aria-label="draft" value={draft} onChange={e => setDraft(e.target.value)} /><button onClick={() => void target.select("remote").catch(e => setError(e.message))}>remote</button><button onClick={() => void target.select(null)}>local</button><span>{error}</span></>;
 }
+function ConnectSurface() {
+  const target = useExecutionTarget();
+  return <button onClick={() => void target.connect("new-remote")}>connect new</button>;
+}
 function bootstrap(): ClientBootstrap {
   return { contractVersion: 2, authority: { authorityId: "authority", authorityEpoch: 1 }, runtime: { status: "unavailable", classification: "unavailable" }, surface: { terminalAttach: false, fileReveal: false, previewInput: false, openExternal: false }, capabilityManifest: { profile: "full-parity-v1", generatedAt: "2026-10-25", hash: "test", capabilities: [] }, commandManifestHash: "test", selected: { workspaceId: "ws" } } as unknown as ClientBootstrap;
 }
@@ -102,7 +106,7 @@ it("preview target selection never connects to a real SSH host", async () => {
   expect(screen.getByRole("button", { name: /SSH · dev-linux/ })).toBeTruthy(); expect(remote.connect).not.toHaveBeenCalled(); expect(remote.select).not.toHaveBeenCalled();
 });
 
-it("keeps SSH authentication and platform pickers inside the connection dialog", async () => {
+it("keeps authentication inside the connection dialog and identifies the target system automatically", async () => {
   Object.assign(HTMLDialogElement.prototype, {
     showModal(this: HTMLDialogElement) { this.setAttribute("open", ""); },
     close(this: HTMLDialogElement) { this.removeAttribute("open"); },
@@ -116,8 +120,23 @@ it("keeps SSH authentication and platform pickers inside the connection dialog",
   fireEvent.click(auth);
   expect(dialog.contains(screen.getByRole("listbox"))).toBe(true);
   selectOption(auth, "用户名和密码");
-  selectOption(screen.getByRole("combobox", { name: /远端系统/ }), "Windows");
-  expect(screen.getByRole("combobox", { name: /远端系统/ }).textContent).toContain("Windows");
+  expect(screen.queryByRole("combobox", { name: /远端系统/ })).toBeNull();
+  expect(screen.getByText(/连接后自动识别 Windows/)).toBeTruthy();
   expect(screen.getByLabelText("用户名").hasAttribute("required")).toBe(true);
   expect(remote.save).not.toHaveBeenCalled();
+});
+
+it("loads a just-saved connection when connect runs before the inventory rerender", async () => {
+  let inventory: RemoteInventory = { profiles: [], statuses: [] };
+  const remote = api();
+  remote.list = vi.fn(async () => inventory);
+  remote.connect = vi.fn(async () => {});
+  remote.save = vi.fn(async () => { throw new Error("not used"); });
+  remote.onChanged = () => () => {};
+  globalThis.ompStudioRemote = remote;
+  render(<ExecutionTargets client={local}>{() => <ConnectSurface />}</ExecutionTargets>);
+  await screen.findByText("connect new");
+  inventory = { profiles: [{ id: "new-remote", name: "New", host: "new" }], statuses: [{ id: "new-remote", state: "disconnected" }] };
+  fireEvent.click(screen.getByText("connect new"));
+  await waitFor(() => expect(remote.connect).toHaveBeenCalledWith("new-remote", undefined));
 });

@@ -54,6 +54,9 @@ export const SEAM_GROUPS = Object.freeze([
       "packages/coding-agent/src/cli.ts",
       "packages/coding-agent/src/cli/args.ts",
       "packages/coding-agent/src/cli/flag-tables.ts",
+      // `OMP_STATS_NO_OPEN`: Studio frames the dashboard, so no external browser.
+      "packages/coding-agent/src/cli/stats-cli.ts",
+      "packages/coding-agent/test/stats-cli.test.ts",
       "packages/coding-agent/src/commands/launch-help.ts",
       "packages/coding-agent/src/config/settings.ts",
       "packages/coding-agent/src/task/settings.ts",

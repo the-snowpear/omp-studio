@@ -3,6 +3,7 @@ import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { rasterizeSvg } from "@oh-my-pi/pi-natives";
 import type { CustomMessage } from "../../session/messages";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
+import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
 
 /**
  * Presentation-neutral session control surface shared by the Studio Bridge and
@@ -20,7 +21,17 @@ export interface SessionControlSession {
 	readonly isCompacting: boolean;
 	readonly queuedMessageCount: number;
 	readonly sessionFile?: string;
-	prompt(text: string, options?: { images?: ImageContent[]; prependMessages?: CustomMessage[] }): Promise<boolean>;
+	prompt(
+		text: string,
+		options?: {
+			images?: ImageContent[];
+			prependMessages?: CustomMessage[];
+			/** Deliver as a hidden `developer` message instead of a visible user turn. */
+			synthetic?: boolean;
+			/** Mark the prompt as a deliberate operator action (synthetic continues). */
+			userInitiated?: boolean;
+		},
+	): Promise<boolean>;
 	steer(text: string, images?: ImageContent[], options?: { prependMessages?: CustomMessage[] }): Promise<void>;
 	followUp(text: string, images?: ImageContent[], options?: { prependMessages?: CustomMessage[] }): Promise<void>;
 	promptCustomMessage?(
@@ -30,8 +41,23 @@ export interface SessionControlSession {
 	maybeStartTitleGeneration?(text: string): void;
 	resetSessionContext(): Promise<{ droppedCount: number } | undefined>;
 	retry(): Promise<boolean>;
+	/**
+	 * `omp --restore`: go on with the turn the previous process left unfinished.
+	 * Optional so a narrow test double can omit load recovery.
+	 */
+	restoreInterruptedTurn?(): Promise<boolean>;
 	abort(options?: { reason?: string; preserveQueuedInput?: boolean }): Promise<void>;
 	newSession(options?: { drop?: boolean }): Promise<boolean>;
+}
+
+/**
+ * `core.continue` outcome. `restored` means load recovery had an unfinished turn
+ * to go on with; `continue` is the hidden synthetic continue; `none` means there
+ * was nothing to resume, so the surface can say so instead of failing silently.
+ */
+export interface ContinueTurnOutcome {
+	readonly started: boolean;
+	readonly mode: "restored" | "continue" | "none";
 }
 
 export class SessionControlError extends Error {
@@ -156,6 +182,29 @@ export class SessionControlService {
 		const retried = await this.#session.retry();
 		if (!retried) return { retried: false, reason: "nothing_to_retry" };
 		return { retried: true };
+	}
+
+	/**
+	 * `core.continue`: resume the turn that stopped without a final report.
+	 *
+	 * A turn the previous process left unfinished is handed to `restoreInterruptedTurn`,
+	 * which closes its unresolved tool calls and retries it the way `omp --restore` does.
+	 * Everything else takes the hidden synthetic continue the TUI's `c` / `.` sends: the
+	 * model keeps the partial answer and goes on, and nothing is written as a visible user
+	 * message. `interrupted: false` is the caller's tail reading — the guard that keeps a
+	 * stale surface from turning a finished conversation into a fresh model call.
+	 */
+	async continueTurn(input: { readonly interrupted: boolean }): Promise<ContinueTurnOutcome> {
+		this.#assertNotCompacting("continue the interrupted turn");
+		if (this.#session.isStreaming) {
+			throw new SessionControlError("BUSY_STREAMING", "Cannot continue while a response is streaming");
+		}
+		if (input.interrupted && (await this.#session.restoreInterruptedTurn?.()) === true) {
+			return { started: true, mode: "restored" };
+		}
+		if (!input.interrupted) return { started: false, mode: "none" };
+		const started = await this.#session.prompt(manualContinuePrompt, { synthetic: true, userInitiated: true });
+		return started ? { started: true, mode: "continue" } : { started: false, mode: "none" };
 	}
 
 	/**

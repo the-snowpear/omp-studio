@@ -1,0 +1,64 @@
+name: Remote environments
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: win32-x64, os: windows-latest }
+          - { target: win32-arm64, os: windows-11-arm }
+          - { target: linux-x64, os: ubuntu-24.04 }
+          - { target: linux-arm64, os: ubuntu-24.04-arm }
+          - { target: darwin-x64, os: macos-15-intel }
+          - { target: darwin-arm64, os: macos-15 }
+    runs-on: ${{ matrix.os }}
+    environment: release
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: omp-patch/vendor/oh-my-pi -> target
+          key: remote-${{ matrix.target }}
+      - name: Build signed native Runtime and complete remote environment
+        env:
+          OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          node -e 'require("node:fs").writeFileSync(require("node:path").join(process.env.RUNNER_TEMP,"omp-remote-signing.pem"),process.env.OMP_SIGNING_SECRET,{mode:384})'
+          export OMP_RUNTIME_SIGNING_KEY="$RUNNER_TEMP/omp-remote-signing.pem"
+          trap 'rm -f "$OMP_RUNTIME_SIGNING_KEY"' EXIT
+          export OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
+          export OMP_TARGET_PLATFORM="${TARGET%-*}"
+          export OMP_TARGET_ARCH="${TARGET##*-}"
+          npm ci
+          npm run omp:overlay:apply
+          npm run omp:build:host
+          node scripts/build-remote-environment.mjs
+          node scripts/verify-remote-environment.mjs "outputs/remote-environments/$TARGET"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-remote-${{ matrix.target }}
+          path: outputs/remote-environments/${{ matrix.target }}/
+          if-no-files-found: error

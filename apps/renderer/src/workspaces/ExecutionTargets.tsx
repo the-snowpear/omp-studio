@@ -4,9 +4,11 @@ import { StudioClientImpl } from "@omp-studio/client";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type { RemoteApi, RemoteInventory, RemoteConnectionProfile, RemoteCredentials } from "../../../desktop/src/remote/shared";
 import { SshPasswordDialog } from "./SshPasswordDialog";
+import { SshPreparationDialog } from "./SshPreparationDialog";
 import { createRemoteTransport, type RemoteTransportState } from "./remoteTransport";
 
 interface ExecutionTargetContextValue {
+  localClient?: StudioClient;
   id: string | null;
   name: string;
   inventory: RemoteInventory;
@@ -193,11 +195,13 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
     cancelledConnection.current = undefined;
     let credentials: RemoteCredentials | undefined;
     try {
-      const profile = rawInventory.profiles.find(value => value.id === targetId);
+      let inventory = rawInventory;
+      if (!inventory.profiles.some(value => value.id === targetId)) inventory = await api.list();
+      const profile = inventory.profiles.find(value => value.id === targetId);
       if (!profile) throw new Error("SSH 连接不存在");
-      const status = rawInventory.statuses.find(value => value.id === targetId);
+      const status = inventory.statuses.find(value => value.id === targetId);
       if (status?.state === "connected") { await synchronize(targetId); return; }
-      if (status && ["connecting", "recovering", "degraded", "synchronizing"].includes(status.state)) throw new Error("SSH 正在恢复或同步；可以等待或取消，不会重复连接");
+      if (status && ["connecting", "awaiting-approval", "recovering", "degraded", "synchronizing"].includes(status.state)) throw new Error("SSH 正在恢复或同步；可以等待或取消，不会重复连接");
       if (profile.authMode === "password") {
         let password = await new Promise<string | null>(resolve => {
           passwordRequest.current = { id: targetId, resolve };
@@ -252,10 +256,13 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
   const profile = inventory.profiles.find(value => value.id === id);
   const syncRevision = id === null ? 0 : transports.current.get(id)?.syncRevision ?? 0;
   const syncError = id === null ? "" : transports.current.get(id)?.error ?? "";
-  const value = useMemo(() => ({ id, name: id === null ? "此计算机" : profile?.name ?? "SSH", inventory, api, inventoryError, syncRevision, syncError, refresh, connect, cancelConnection, select, openDirectory: () => setDirectoryRequest(value => value + 1), directoryRequest, memory }), [id, profile?.name, inventory, api, inventoryError, syncRevision, syncError, refresh, connect, cancelConnection, select, directoryRequest, memory]);
+  const value = useMemo(() => ({ localClient: client, id, name: id === null ? "此计算机" : profile?.name ?? "SSH", inventory, api, inventoryError, syncRevision, syncError, refresh, connect, cancelConnection, select, openDirectory: () => setDirectoryRequest(value => value + 1), directoryRequest, memory }), [client, id, profile?.name, inventory, api, inventoryError, syncRevision, syncError, refresh, connect, cancelConnection, select, directoryRequest, memory]);
+  const preparing = rawInventory.statuses.find(status => ["connecting", "awaiting-approval", "synchronizing"].includes(status.state) && connectionLock.current === status.id);
+  const preparingProfile = preparing && rawInventory.profiles.find(profile => profile.id === preparing.id);
   const activeClient = id === null ? client : clientFor(id);
   return <Context.Provider value={value}>
     {ready ? children(activeClient, `${id ?? "local"}:${generation}`) : <div className="empty" role="status"><p>{inventoryError || "正在恢复工作位置…"}</p>{inventoryError ? <button className="btn outline" onClick={() => globalThis.location.reload()}>重新加载</button> : null}</div>}
     {passwordProfile ? <SshPasswordDialog profile={passwordProfile} onSubmit={finishPassword} onCancel={() => finishPassword(null)} /> : null}
+    {preparing && preparingProfile && !passwordProfile ? <SshPreparationDialog profile={preparingProfile} status={preparing} onApprove={() => { void api?.approveDeployment(preparing.id).catch(() => {}); }} onCancel={() => { void cancelConnection(preparing.id).catch(() => {}); }} /> : null}
   </Context.Provider>;
 }

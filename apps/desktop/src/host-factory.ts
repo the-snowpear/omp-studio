@@ -668,7 +668,15 @@ export function createProductionHostFactory(options?: {
   };
   const baseOptions = {
     authorityLockServices: createProductionAuthorityLockServices(),
-    resolver: { probe: createProcessProbe() },
+    resolver: {
+      probe: createProcessProbe({
+        onOutput: (stream, text) => {
+          for (const line of text.split(/\r?\n/u)) {
+            if (line.trim().length > 0) hostLog.write("info", `runtime.probe.${stream}`, line);
+          }
+        },
+      }),
+    },
     runtimeSession,
     managedInstall: productionManagedInstall(hostLog),
     facade,

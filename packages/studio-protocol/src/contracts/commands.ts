@@ -60,6 +60,13 @@ export type SessionOperation =
     }
   | { kind: "session.tree.branch"; targetId: string }
   | { kind: "turn.retry" }
+  /**
+   * Resume the turn that stopped without a final report (operator abort,
+   * provider error, or a process exit closed at load). Same hidden `synthetic`
+   * continue the TUI's `c` / `.` shortcut sends, so no user message enters the
+   * transcript. Refuses while streaming.
+   */
+  | { kind: "core.continue" }
   | { kind: "session.fast.set"; enabled: boolean }
   | { kind: "session.prewalk.arm"; target?: string }
   | { kind: "session.prewalk.disarm" }

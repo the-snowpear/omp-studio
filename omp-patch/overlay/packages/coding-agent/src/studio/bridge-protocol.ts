@@ -117,6 +117,7 @@ export type StudioOperation =
 	  }
 	| { kind: "session.tree.branch"; targetId: string }
 	| { kind: "turn.retry" }
+	| { kind: "core.continue" }
 	| { kind: "core.prompt"; text: string; images?: unknown[] }
 	| { kind: "core.steer"; text: string; images?: unknown[] }
 	| { kind: "core.followUp"; text: string; images?: unknown[] }
@@ -464,6 +465,12 @@ export interface StudioOperatorStateSnapshot {
 	 * starts, the run settles terminally, or no job is left running.
 	 */
 	awaitingAsyncWork?: boolean;
+	/**
+	 * How the last turn on the active branch ended, from the tail assistant
+	 * message's `stopReason`: `interrupted` covers an operator abort, a provider
+	 * error, and the record load recovery appends after a process exit.
+	 */
+	lastTurnOutcome?: "completed" | "interrupted";
 	/** omp builds that wrote this session, oldest first, ending with the running one. */
 	runtimeIdentity?: StudioRuntimeIdentitySnapshot;
 	telemetry?: StudioSessionTelemetry;
@@ -667,6 +674,7 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 		case "session.fork":
 		case "session.tree.get":
 		case "turn.retry":
+		case "core.continue":
 		case "core.abort":
 		case "loop.pause":
 		case "loop.disable":
@@ -1132,6 +1140,7 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	"session.clearContext",
 	"session.drop",
 	"turn.retry",
+	"core.continue",
 	"core.prompt",
 	"core.steer",
 	"core.followUp",

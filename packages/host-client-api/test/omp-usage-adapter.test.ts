@@ -107,12 +107,12 @@ describe("createOmpUsageService", () => {
   });
 
   test("openDashboard spawns hidden omp stats when the dashboard is not live", async () => {
-    const spawned: string[] = [];
+    const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     const opened: string[] = [];
     const service = createOmpUsageService({
       locateOmp: async () => "C:\\tools\\omp.exe",
-      spawnDashboard: (exe) => {
-        spawned.push(exe);
+      spawnDashboard: (exe, options) => {
+        spawned.push({ exe, ...(options === undefined ? {} : { options }) });
       },
       openUrl: async (url) => {
         opened.push(url);
@@ -122,7 +122,9 @@ describe("createOmpUsageService", () => {
     });
     const result = await service.openDashboard();
     assert.equal(result.applied, true);
-    assert.deepEqual(spawned, ["C:\\tools\\omp.exe"]);
+    // The explicit browser request keeps `omp stats` opening one; only the
+    // embedded dashboard start suppresses it.
+    assert.deepEqual(spawned, [{ exe: "C:\\tools\\omp.exe", options: { open: true } }]);
     assert.deepEqual(opened, []);
     assert.equal(JSON.stringify(result).includes("C:\\\\tools"), false);
   });
@@ -150,12 +152,12 @@ describe("createOmpUsageService", () => {
   });
 
   test("dashboard reuses a live panel without spawning, and deep-links the all range", async () => {
-    const spawned: string[] = [];
+    const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     let probes = 0;
     const service = createOmpUsageService({
       locateOmp: async () => "C:\tools\omp.exe",
-      spawnDashboard: exe => {
-        spawned.push(exe);
+      spawnDashboard: (exe, options) => {
+        spawned.push({ exe, ...(options === undefined ? {} : { options }) });
       },
       probeDashboard: async () => {
         probes += 1;
@@ -172,12 +174,12 @@ describe("createOmpUsageService", () => {
   });
 
   test("dashboard starts one panel for concurrent callers and caches the endpoint", async () => {
-    const spawned: string[] = [];
+    const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     let live = false;
     const service = createOmpUsageService({
       locateOmp: async () => "C:\tools\omp.exe",
-      spawnDashboard: exe => {
-        spawned.push(exe);
+      spawnDashboard: (exe, options) => {
+        spawned.push({ exe, ...(options === undefined ? {} : { options }) });
         live = true;
       },
       probeDashboard: async () => live,
@@ -191,7 +193,8 @@ describe("createOmpUsageService", () => {
     const [a, b] = await Promise.all([service.dashboard?.(), service.dashboard?.()]);
     assert.equal(a?.available, true);
     assert.equal(b?.available, true);
-    assert.deepEqual(spawned, ["C:\tools\omp.exe"], "two mounts must not race two servers onto one port");
+    // The embedded start must not also open the panel in the system browser.
+    assert.deepEqual(spawned, [{ exe: "C:\tools\omp.exe" }], "two mounts must not race two servers onto one port");
     const cached = await service.dashboard?.();
     assert.equal(cached?.url, "http://127.0.0.1:3847/#/overview?range=all");
     assert.equal(spawned.length, 1, "a resolved endpoint is reused");
@@ -228,11 +231,11 @@ describe("createOmpUsageService", () => {
 
   test("dashboard stops claiming a running panel once the process is gone", async () => {
     let live = true;
-    const spawned: string[] = [];
+    const spawned: Array<{ exe: string; options?: { readonly open?: boolean } }> = [];
     const service = createOmpUsageService({
       locateOmp: async () => "C:\tools\omp.exe",
-      spawnDashboard: exe => {
-        spawned.push(exe);
+      spawnDashboard: (exe, options) => {
+        spawned.push({ exe, ...(options === undefined ? {} : { options }) });
       },
       probeDashboard: async () => live,
       delay: async () => undefined,

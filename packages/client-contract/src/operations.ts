@@ -387,6 +387,7 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, Upgra
   "runtime.settings.get": { readonly keys?: ReadonlyArray<StudioRuntimeSettingKey> };
   "runtime.settings.set": StudioRuntimeSettingSetInput;
   "turn.retry": EmptyInput;
+  "core.continue": EmptyInput;
   "mode.plan.enter": { readonly initialPrompt?: string };
   "mode.plan.exit": { readonly discardDraft?: boolean };
   "mode.plan.review.open": EmptyInput;
@@ -799,6 +800,17 @@ export interface BtwBranchOutcome {
   readonly reason?: string;
 }
 
+/**
+ * `core.continue` completion. `restored` means load recovery had an unfinished
+ * turn to go on with; `continue` is the hidden synthetic continue; `none` means
+ * there was nothing to resume (or the Runtime refused because the tail is not
+ * an interrupted turn), so the surface can say so instead of failing silently.
+ */
+export interface ContinueTurnOutcome {
+  readonly started: boolean;
+  readonly mode: "restored" | "continue" | "none";
+}
+
 export type CommandResultMap = CoreCommandResultMap & {
   [K in Exclude<
     keyof RuntimeCommandInputMap,
@@ -813,6 +825,7 @@ export type CommandResultMap = CoreCommandResultMap & {
     | "runtime.settings.get"
     | "runtime.settings.set"
     | "mode.plan.review.saveAndQuit"
+    | "core.continue"
   >]: OperatorStateSnapshot;
 } & {
   [K in EvaluationOperation["kind"]]: EvaluationCommandOutcome;
@@ -830,6 +843,7 @@ export type CommandResultMap = CoreCommandResultMap & {
   "runtime.settings.get": StudioRuntimeSettingsGetResult;
   "runtime.settings.set": StudioRuntimeSettingsSetResult;
   "mode.plan.review.saveAndQuit": StudioPlanSaveAndQuitResult;
+  "core.continue": ContinueTurnOutcome;
 };
 
 export type EvaluationCommandOutcome = { readonly snapshot: OperatorStateSnapshot; readonly result: unknown };

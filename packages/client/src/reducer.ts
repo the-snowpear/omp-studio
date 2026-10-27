@@ -326,6 +326,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "runtime.settings.get": false,
   "runtime.settings.set": true,
   "turn.retry": true,
+  "core.continue": true,
   "runtime.install": true,
   "runtime.ensure": true,
   "session.create": true,

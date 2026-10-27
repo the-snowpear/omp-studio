@@ -10,6 +10,9 @@ import type { RemoteHost } from "./host.js";
 import { remotePlatform, secureRemoteDirectory } from "./platform.js";
 import { RemotePeer, REMOTE_PROTOCOL_VERSION, type RemoteAttachment } from "./wire.js";
 import { RemoteConnectionError } from "./errors.js";
+import { NetworkStreams } from "./network-stream.js";
+import type { RemoteNetworkMode } from "./shared.js";
+import type { RemoteProvisioning } from "./provisioning.js";
 
 export interface RemoteHello {
   readonly protocolVersion: number;
@@ -60,6 +63,7 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
     peers.add(peer);
     let authenticated = false;
     let observer = false;
+    let networkChannel = false;
     let unsubscribe: (() => void) | undefined;
     const timer = setTimeout(() => peer.close(new Error("Remote authentication timed out")), 5_000);
     peer.onClose(() => { clearTimeout(timer); unsubscribe?.(); peers.delete(peer); if (attached === peer) attached = undefined; });
@@ -73,8 +77,14 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
         }
         observer = Boolean(input && typeof input === "object" && "observe" in input && input.observe === true);
         const attachment = input && typeof input === "object" && "attachment" in input ? input.attachment as RemoteAttachment | undefined : undefined;
+        networkChannel = Boolean(input && typeof input === "object" && "networkChannel" in input && input.networkChannel);
         if (attachment && (typeof attachment.key !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(attachment.key) || !Number.isSafeInteger(attachment.sequence) || attachment.sequence < 1)) throw new RemoteConnectionError("protocol", "Invalid remote attachment identity");
-        if (!observer) {
+        if (networkChannel) {
+          if (!host.network || !attached || !attachment || attachment.key !== lastAttachment?.key || attachment.sequence !== lastAttachment.sequence) throw new RemoteConnectionError("replaced", "联网通道必须属于当前 SSH 连接");
+          const streams = new NetworkStreams(peer);
+          host.network.attach(streams);
+          host.network.report = route => peer.publish({ channel: "network-route", route });
+        } else if (!observer) {
           const sameOwner = attachment && lastAttachment && attachment.key === lastAttachment.key;
           if (sameOwner && attachment && lastAttachment && attachment.sequence <= lastAttachment.sequence) throw new RemoteConnectionError("replaced", "这条 SSH 通道已被更新的连接取代");
           // Only a newer channel holding this desktop's attachment key may replace its orphaned attach.
@@ -88,9 +98,21 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
         return hello;
       }
       if (observer && method !== "hello" && method !== "shutdown") throw new Error("A status connection cannot access the workspace");
+      if (networkChannel && method !== "hello" && method !== "ping") throw new Error("Network channel cannot control the workspace");
       switch (method) {
         case "hello": return hello;
         case "ping": return { instanceId: hello.instanceId };
+        case "network.configure": {
+          const { mode } = input as { mode: RemoteNetworkMode };
+          if (!["remote-first", "remote-only", "local-only"].includes(mode)) throw new Error("Unsupported network mode");
+          host.network?.configure(mode); return { configured: true };
+        }
+        case "network.reset": host.network?.reset(); return { reset: true };
+        case "provisioning.apply": {
+          if (!host.provision) throw new Error("Remote provisioning is unavailable");
+          await host.provision(input as RemoteProvisioning); return { applied: true };
+        }
+        case "network.open": throw new Error("Network streams require the dedicated channel");
         case "bootstrap":
           await host.composition.transport.query({ queryName: "projects.list", input: {} });
           return host.composition.transport.bootstrap();
@@ -159,7 +181,7 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
   } };
 }
 
-export async function connectRemoteEndpoint(stateDirectory: string, observe = false, attachment?: RemoteAttachment): Promise<RemotePeer> {
+export async function connectRemoteEndpoint(stateDirectory: string, observe = false, attachment?: RemoteAttachment, networkChannel = false): Promise<RemotePeer> {
   let data: EndpointFile;
   try { data = JSON.parse(await readFile(join(stateDirectory, ENDPOINT_FILE), "utf8")) as EndpointFile; }
   catch (error) { if (!observe && (error as NodeJS.ErrnoException).code === "ENOENT") throw new RemoteConnectionError("host-unavailable", "远端 Host 已停止或端点不存在；请手动重新连接，自动恢复不会重启任务"); throw error; }
@@ -174,7 +196,7 @@ export async function connectRemoteEndpoint(stateDirectory: string, observe = fa
     });
   });
   const peer = new RemotePeer(socket, socket);
-  try { await peer.request("hello", { token: data.token, observe, ...(attachment ? { attachment } : {}) }); return peer; }
+  try { await peer.request("hello", { token: data.token, observe, ...(attachment ? { attachment } : {}), ...(networkChannel ? { networkChannel: true } : {}) }); return peer; }
   catch (error) { peer.close(); throw error; }
 }
 

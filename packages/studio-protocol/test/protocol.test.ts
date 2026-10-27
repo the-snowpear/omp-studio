@@ -549,6 +549,7 @@ test("WP-021/022/024/025 parses the canonical safe-operation fixtures", async ()
     ["request.clearContext.json", "session.clearContext"],
     ["request.drop.json", "session.drop"],
     ["request.retry.json", "turn.retry"],
+    ["request.continue.json", "core.continue"],
     ["request.prompt.json", "core.prompt"],
     ["request.steer.json", "core.steer"],
     ["request.followUp.json", "core.followUp"],
@@ -575,6 +576,7 @@ test("WP-021/022/024/025 fail closed on invalid safe-operation arguments", () =>
     { kind: "core.steer", text: "x", extra: true },
     { kind: "core.followUp", images: [] },
     { kind: "core.abort", text: "x" },
+    { kind: "core.continue", text: "x" },
   ];
   for (const operation of cases) {
     assert.throws(

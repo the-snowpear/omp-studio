@@ -277,10 +277,16 @@ jobs:
           path: outputs/release/darwin-arm64/
           if-no-files-found: error
 
+  build-remote:
+    needs: prepare
+    if: needs.prepare.outputs.kind == 'desktop'
+    uses: ./.github/workflows/remote-environments.yml
+    secrets: inherit
+
   publish:
-    needs: [prepare, build, build-macos]
+    needs: [prepare, build, build-macos, build-remote]
     # A skipped macOS job (the default) must not skip the Windows release.
-    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') && (needs.build-remote.result == 'success' || needs.build-remote.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: release
     permissions:

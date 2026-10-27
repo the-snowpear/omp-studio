@@ -27,6 +27,9 @@ export type ConversationState = {
   readonly olderCursor?: OpaqueCursor; readonly headCursor?: OpaqueCursor; readonly hasMoreBefore: boolean; readonly hydrateStatus: HydrateStatus;
   readonly unavailableReason?: string; readonly error?: { readonly code: string; readonly message: string }; readonly notices: readonly ConversationNotice[];
   readonly pendingUsers: readonly PendingUser[]; readonly lastEventSeq?: number; readonly resyncRequired: boolean;
+  /** 上一轮停在中止上（`turn.aborted`）。行状态常被 `message.completed` 提前退化成
+   *  `completed`，所以「还能继续」要另存一个会话级闩锁。 */
+  readonly lastTurnInterrupted: boolean;
   readonly userDisplays: { readonly [itemId: string]: ComposerDoc }; readonly userThumbs: UserThumbMap; readonly openTurnItems: { readonly [itemId: string]: string };
   readonly compacting?: { readonly action: string }; readonly messageErrors?: { readonly [messageId: string]: ConversationMessageError };
 };
@@ -76,6 +79,24 @@ export function tailStreaming(rows: readonly TimelineRow[]): boolean {
 }
 
 /**
+ * 尾部是否停在「非完成暂停」（报错停止 / 手动中止）。
+ *
+ * 这是「空输入继续」的唯一行级依据，必须与 `tailStreaming` 用同一套「尾行」定义：
+ * 两个判定若各扫各的，同一个尾部可能同时被当成在流式与已中断，播放键就会和停止键
+ * 抢同一个位置。行状态里只有 `error` 与 `aborted` 两种中断表达，正常完成是
+ * `completed`；同样只看尾部几行，因为中断只会落在时间线末尾。
+ */
+export function tailInterrupted(rows: readonly TimelineRow[]): boolean {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index]!;
+    if (row.type === "compacting") continue;
+    if (row.type === "user" && (row.pending !== undefined || row.itemId.startsWith("pending:"))) continue;
+    return row.type === "assistant" && (row.status === "error" || row.status === "aborted");
+  }
+  return false;
+}
+
+/**
  * 时间线的两级内容版本。
  *
  * `structure` 在**任何**行内容变化时前进（含工具启停 —— 见 store 的 `markRowChanged`），
@@ -96,7 +117,7 @@ export function timelineShapeToken(rows: readonly TimelineRow[]): object {
   return timelineStructureTokens.get(rows)?.shape ?? rows;
 }
 export function emptyConversationState(generation = 0): ConversationState {
-  return { generation, identity: null, items: [], liveMessages: {}, liveTools: {}, liveOrder: [], hasMoreBefore: false, hydrateStatus: "idle", notices: [], pendingUsers: [], resyncRequired: false, userDisplays: {}, userThumbs: {}, openTurnItems: {} };
+  return { generation, identity: null, items: [], liveMessages: {}, liveTools: {}, liveOrder: [], hasMoreBefore: false, hydrateStatus: "idle", notices: [], pendingUsers: [], resyncRequired: false, lastTurnInterrupted: false, userDisplays: {}, userThumbs: {}, openTurnItems: {} };
 }
 export function resetConversation(generation: number, identity: ConversationIdentity | null, hydrateStatus: HydrateStatus, unavailableReason?: string): ConversationState {
   return { ...emptyConversationState(generation), identity, hydrateStatus, ...(unavailableReason === undefined ? {} : { unavailableReason }) };

@@ -259,10 +259,45 @@ export const PREVIEW_CONVO_ITEMS: readonly ConversationItem[] = [
   },
 ];
 
+/**
+ * A conversation whose last turn stopped without a final report. The demo story
+ * is the empty-composer play button, so the tail here is a truncated answer, not
+ * a finished one.
+ */
+export const PREVIEW_INTERRUPTED_ITEMS: readonly ConversationItem[] = [
+  RESET,
+  {
+    kind: "message",
+    itemId: "preview-interrupted-user",
+    parentId: "preview-reset-1",
+    createdAt: at(2),
+    role: "user",
+    content: [{ type: "text", text: "把 MermaidBlock 的 TS2322 修掉，然后重跑 typecheck 和 lint。" }],
+  },
+  {
+    kind: "message",
+    itemId: "preview-interrupted-assistant",
+    parentId: "preview-interrupted-user",
+    createdAt: at(6),
+    role: "assistant",
+    content: [
+      { type: "text", text: "已经定位到 `MermaidBlock.tsx:147` 的字面量类型问题，改成 `MermaidTheme` 之后 typecheck 只剩两条告警。接下来先把 lint 跑完，再" },
+    ],
+  },
+];
+
+/** Threads whose preview tail stands for an interrupted turn (`core.continue` demo). */
+const PREVIEW_INTERRUPTED_THREADS: ReadonlySet<string> = new Set(["t12"]);
+
+export function previewTailInterrupted(threadId: string | undefined): boolean {
+  return threadId !== undefined && PREVIEW_INTERRUPTED_THREADS.has(threadId);
+}
+
 /** Small transcript variants used by the composer preview states. */
 export function previewConversationItems(threadId = "t1"): readonly ConversationItem[] {
   if (threadId === "t0") return [];
   if (threadId === "t4") return PREVIEW_CONVO_ITEMS.slice(0, 2);
+  if (previewTailInterrupted(threadId)) return PREVIEW_INTERRUPTED_ITEMS;
   return PREVIEW_CONVO_ITEMS;
 }
 

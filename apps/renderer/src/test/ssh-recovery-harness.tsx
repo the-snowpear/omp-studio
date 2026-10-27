@@ -32,7 +32,7 @@ globalThis.ompStudioRemote = {
   onChanged: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
   onEvent: () => () => {},
   bootstrap: async () => { if (failSync) throw new Error("演示：快照暂不可用"); return fixture.bootstrap(); },
-  query: (_id, request) => fixture.query(request), command: unavailable, save: unavailable, remove: unavailable, register: unavailable, directories: unavailable, installRuntime: unavailable,
+  query: (_id, request) => fixture.query(request), command: unavailable, save: unavailable, remove: unavailable, register: unavailable, directories: unavailable, installRuntime: unavailable, approveDeployment: unavailable, retryNetwork: unavailable,
   connect: async () => { failSync = false; setStatus("connected"); },
   disconnect: async () => setStatus("disconnected"), select: async id => { inventory = { ...inventory, activeId: id }; },
 } satisfies RemoteApi;

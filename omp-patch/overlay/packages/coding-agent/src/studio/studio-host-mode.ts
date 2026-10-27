@@ -1,4 +1,5 @@
 import { StudioCfgService } from "./services/cfg-service";
+import { createStudioAuthBroker } from "./services/auth-broker-service";
 import { cfgLoopConditionTimeoutMs, cfgLoopMode } from "../modes/settings";
 import { cfgTaskEnableLsp } from "../task/settings";
 import { StudioLiveAudioService } from "./services/live-audio-service";
@@ -484,6 +485,7 @@ export function createStudioHostRuntime(
 		onChange: () => () => {},
 	},
 ): StudioHostRuntime {
+  const credentialBroker = createStudioAuthBroker(session);
 	if (!Number.isSafeInteger(bridgeConfig.runtimeEpoch) || (bridgeConfig.runtimeEpoch as number) <= 0) {
 		throw new Error("Studio Host Runtime epoch must be a positive safe integer");
 	}
@@ -1042,6 +1044,7 @@ export function createStudioHostRuntime(
 		dispose: () => {
 			if (disposed) return;
 			disposed = true;
+			credentialBroker.close();
 			performanceSampler.dispose();
 			session.setBeforeNextUserTurn(undefined);
 			session.setResetConsentHandler?.(undefined);

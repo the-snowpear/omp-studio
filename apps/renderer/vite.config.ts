@@ -6,10 +6,12 @@ import react from "@vitejs/plugin-react";
 // Must stay in lockstep with apps/desktop/src/security.ts RENDERER_CSP.
 // file:// loads do not reliably get webRequest CSP headers, so the packaged
 // index.html carries the policy as a meta tag. `frame-ancestors` is enforced
-// by the desktop response header because browsers ignore it in meta CSP.
+// by the desktop response header because browsers ignore it in meta CSP; the
+// statistics page's loopback frame lives in `frame-src` here because listing
+// any source there replaces the `default-src` fallback.
 // Vite dev still needs HMR.
 const PACKAGED_RENDERER_CSP =
-  "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: omp-artifact:; media-src 'self' blob: omp-artifact:; font-src 'self' data:; connect-src 'self' omp-artifact:; object-src 'none'; base-uri 'self'; form-action 'self'";
+  "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: omp-artifact:; media-src 'self' blob: omp-artifact:; font-src 'self' data:; connect-src 'self' omp-artifact:; frame-src 'self' http://127.0.0.1:3847; object-src 'none'; base-uri 'self'; form-action 'self'";
 
 function packagedCspPlugin() {
   return {

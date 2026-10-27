@@ -13,7 +13,7 @@ export const UPDATE_PLATFORMS = Object.freeze(["win32-x64", "win32-arm64", "darw
 export type UpdatePlatform = (typeof UPDATE_PLATFORMS)[number];
 
 /** Runtime build targets; adding a remote target does not add a desktop updater. */
-export const RUNTIME_PLATFORMS = Object.freeze([...UPDATE_PLATFORMS, "linux-x64", "linux-arm64"] as const);
+export const RUNTIME_PLATFORMS = Object.freeze([...UPDATE_PLATFORMS, "darwin-x64", "linux-x64", "linux-arm64"] as const);
 
 export function runtimeOsOf(platform: string): RuntimeOs {
   const os = platform.split("-", 1)[0];

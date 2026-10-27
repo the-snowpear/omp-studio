@@ -517,6 +517,7 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
       "jobs",
       "jobAgents",
       "awaitingAsyncWork",
+      "lastTurnOutcome",
       "runtimeIdentity",
       "telemetry",
       "runtimeSettings",
@@ -563,6 +564,12 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
     throw new ContractValidationError("expected an array", "$snapshot.snapshot.jobAgents");
   }
   if (input.awaitingAsyncWork !== undefined) booleanValue(input.awaitingAsyncWork, "$snapshot.snapshot.awaitingAsyncWork");
+  if (input.lastTurnOutcome !== undefined && input.lastTurnOutcome !== "completed" && input.lastTurnOutcome !== "interrupted") {
+    throw new ContractValidationError(
+      'expected "completed" or "interrupted"',
+      "$snapshot.snapshot.lastTurnOutcome",
+    );
+  }
   if (input.runtimeIdentity !== undefined) {
     const identity = record(input.runtimeIdentity, "$snapshot.snapshot.runtimeIdentity");
     record(identity.current, "$snapshot.snapshot.runtimeIdentity.current");
@@ -1092,6 +1099,7 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
   "session.clearContext": { keys: ["kind"] },
   "session.drop": { keys: ["kind"] },
   "turn.retry": { keys: ["kind"] },
+  "core.continue": { keys: ["kind"] },
   "core.prompt": {
     keys: ["kind", "text", "images"],
     validate: (operation) => {

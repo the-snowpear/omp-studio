@@ -191,5 +191,8 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
 }
 
 export function defaultConversationEngineInput(input: Omit<ConversationEngineInput, "previewItems" | "previewLive"> & { readonly previewThreadId?: string }): ConversationEngineInput {
-  return { ...input, previewItems: input.preview ? previewConversationItems(input.previewThreadId) : [], ...(input.preview ? { previewLive: PREVIEW_CONVO_LIVE } : {}) };
+  // Only `t1` is the streaming demo. Handing the live fixture to every preview
+  // thread pins `running` true everywhere, which turns the send button into the
+  // stop button and hides the paused-continue state entirely.
+  return { ...input, previewItems: input.preview ? previewConversationItems(input.previewThreadId) : [], ...(input.preview && input.previewThreadId === "t1" ? { previewLive: PREVIEW_CONVO_LIVE } : {}) };
 }

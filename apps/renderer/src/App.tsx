@@ -53,6 +53,7 @@ import type {
   WorkspaceFileNode,
   WorkspaceFileTreeReadModel,
   PromptImageInput,
+  ContinueTurnOutcome,
 } from "@omp-studio/client-contract";
 import { selectComposerReceipt, type ClientState } from "@omp-studio/client";
 import {
@@ -92,6 +93,7 @@ import {
   type StudioSlashCommand,
 } from "./composer/commands";
 import {
+  composerContinueEnabled,
   composerFollowUpEnabled,
   composerOwnerSessionId,
   composerOwnsLiveSnapshot,
@@ -163,6 +165,7 @@ import { agentTestRunSummary, projectAgentTestRuns, rerunTestPrompt } from "./co
 import { revealConversationTool } from "./conversation/conversationReveal";
 import { useConversation } from "./conversation/useConversation";
 import type { PendingUser } from "./conversation/conversationViewModel";
+import { tailInterrupted } from "./conversation/conversationViewModel";
 import { usePersistedSessionAgents } from "./conversation/persistedSessionAgents";
 import { explorerRowActivity, EMPTY_EXPLORER_FILE_ACTIVITY, type ExplorerFileActivity } from "./conversation/explorerFileActivity";
 import {
@@ -219,6 +222,7 @@ import {
 import { PreviewDeck } from "./preview/PreviewDeck";
 import { PREVIEW_DECK_ITEMS } from "./preview/deckFixtures";
 import { PREVIEW_BTW_QUESTION, PREVIEW_BTW_SNAPSHOTS, previewBtwSnapshot } from "./preview/btwPreview";
+import { previewTailInterrupted } from "./preview/conversationFixtures";
 import { BtwHost } from "./btw/BtwHost";
 import { BtwPanel } from "./btw/BtwPanel";
 import type { BtwRect } from "./btw/btwGeometry";
@@ -4746,6 +4750,48 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
       })
       .finally(() => setBusy(false));
   };
+  // 「继续」：会话停在「没有最终汇报」的尾巴上、输入框又为空时，发送位换成播放键。
+  // 判定分两层：可见性看尾行/快照，可用性直接复用 retryTurnDisabledReason（九项门禁），
+  // 预览下按 fixture 的暂停线程走演示分支。`core.continue` 只在能持续时出现，
+  // 旧 Runtime 上没有该能力就退回 turn.retry 的重跑语义。
+  const continueInterrupted = preview
+    ? previewTailInterrupted(previewThreadId)
+    : snapshot?.lastTurnOutcome === "interrupted"
+      || convo.state.lastTurnInterrupted
+      || tailInterrupted(convo.rows);
+  const continueSlot =
+    continueInterrupted
+    && !textReady
+    && !composerRunning
+    && queueEdit === undefined
+    && pendingInteraction === null;
+  const continueEnabled = preview ? true : retryTurnDisabledReason === undefined;
+  const continueTurn = () => {
+    if (!continueEnabled) return;
+    if (preview) {
+      setStatusToast("预览模式：继续仅演示，不会调用 Runtime");
+      return;
+    }
+    if (!can("core.continue")) {
+      retryLastTurn();
+      return;
+    }
+    setBusy(true);
+    client
+      .command("core.continue", {})
+      .then((handle) => waitReceipt<ContinueTurnOutcome>(client, handle.requestId))
+      .then((result) => {
+        if (result.started === true) {
+          setComposerError(undefined);
+          return;
+        }
+        setStatusToast(result.mode === "none" ? "没有可继续的上一轮" : "未继续");
+      })
+      .catch((error: unknown) => {
+        setComposerError(hostErrorMessage(error, t("composer.continueUnavailable")));
+      })
+      .finally(() => setBusy(false));
+  };
   const branchUserMessage = (itemId: string, text: string) => {
     if (userBranchDisabledReason !== undefined) return;
     void executeUserMessageBranch({
@@ -5962,7 +6008,8 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
                   openNonce={modelMenuNonce}
                 />
                 {!can("session.speed.get") ? <ServiceTierPicker client={client} sessionId={composerOwner} available={can("session.tier.get")} modelKey={JSON.stringify(snapshot?.model)} /> : null}
-                {/* 运行中且没有草稿时，发送位变停止；有草稿时保持"加入排队栏"，
+                {/* 运行中且没有草稿时，发送位变停止；上一轮停在没有最终汇报的尾巴上时
+                    变播放键（空输入也能点，点了继续）；有草稿时保持"加入排队栏"，
                     否则会吃掉流式期间唯一的点击排队入口。编辑排队时始终是写回。 */}
                 {composerRunning && !textReady && queueEdit === undefined ? (
                   <button
@@ -5978,6 +6025,16 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
                     aria-label={t("composer.stopRunning")}
                   >
                     <Icon name="stop" extra="sm" />
+                  </button>
+                ) : continueSlot ? (
+                  <button
+                    className="send-btn"
+                    disabled={!continueEnabled}
+                    onClick={continueTurn}
+                    data-tip={continueEnabled ? t("composer.continueTurnAria") : retryTurnDisabledReason ?? t("composer.continueUnavailable")}
+                    aria-label={t("composer.continueTurnAria")}
+                  >
+                    <Icon name="play" extra="sm" />
                   </button>
                 ) : (
                   <button
@@ -6314,6 +6371,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const { t } = useI18n();
   const executionTarget = useExecutionTarget();
   const previewMode = usePreviewMode();
+  const modelClient = (executionTarget.localClient ?? client) as ClientStateSource;
+  const [modelClientState, setModelClientState] = useState(() => modelClient.getState?.());
+  useEffect(() => {
+    setModelClientState(modelClient.getState?.());
+    return modelClient.onState?.(setModelClientState);
+  }, [modelClient]);
   const appUpdate = useAppUpdate();
   const effectiveUpdate = previewMode.preview ? PREVIEW_APP_UPDATE : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
   const [showAppUpdateDialog, setShowAppUpdateDialog] = useState(false);
@@ -8611,7 +8674,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           ) : pageRoute === "evaluation" ? (
             <EvaluationPage client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} available={hubRuntimeConnected} capabilities={capabilities} />
           ) : pageRoute === "model-config" ? (
-            <ModelConfigPage capabilities={capabilities} onOpenEvaluation={() => go("evaluation")} key={mcNonce} client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} runtimeAvailable={hubRuntimeConnected} />
+            <ModelConfigPage capabilities={capabilities} onOpenEvaluation={() => go("evaluation")} key={mcNonce} client={modelClient} sessionId={modelClientState?.connection.selected?.sessionId} workspaceId={modelClientState?.connection.selected?.workspaceId} runtimeAvailable={modelClientState?.connection.runtime?.status === "connected"} />
           ) : pageRoute === "statistics" ? (
             <StatisticsPage client={client}/>
           ) : pageRoute === "settings" ? (

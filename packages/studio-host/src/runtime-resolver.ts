@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { lstat, mkdtemp, realpath, rm, stat } from "node:fs/promises";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import type {
   OperatorCommandManifest,
   RuntimeInstallationManifest,
@@ -20,6 +21,9 @@ import {
   type WindowsBridgeAclPort,
 } from "./bridge-auth.js";
 import { ensurePrivateSocketDirectory } from "./socket-paths.js";
+import { POSIX_PROCESS_GROUP_SPAWN_OPTIONS, PosixProcessGroupContainment } from "./posix-process-group.js";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * WP-062 System Runtime Resolver.
@@ -584,6 +588,8 @@ export interface ProcessProbeOptions {
   /** Extra environment variables merged over process.env for the child. */
   env?: NodeJS.ProcessEnv;
   spawnProcess?: typeof spawn;
+  /** Host-owned diagnostics; both streams are drained even without a listener. */
+  onOutput?: (stream: "stdout" | "stderr", text: string) => void;
   /** Injectable bootstrap; defaults to createBridgeBootstrap with `windowsAcl`. */
   createBootstrap?: (workspaceDirectory: string, platform: NodeJS.Platform) => Promise<{
     endpoint: string;
@@ -696,14 +702,25 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
             XDG_DATA_HOME: join(workspace, ".local", "share"),
             XDG_STATE_HOME: join(workspace, ".local", "state"),
             XDG_CACHE_HOME: join(workspace, ".cache"),
+            // Stream phase markers before a synchronous startup hang can hide them.
+            ...(options.onOutput === undefined ? {} : { PI_DEBUG_STARTUP: "1" }),
             // A probe outlives a crashed Host only until its parent watchdog notices.
             ...(context.platform === "darwin" ? { OMP_STUDIO_PARENT_PID: String(process.pid) } : {}),
             ...options.env,
           },
-          stdio: "ignore",
+          stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
+          ...(context.platform === "win32" ? {} : POSIX_PROCESS_GROUP_SPAWN_OPTIONS),
           },
         );
+        for (const name of ["stdout", "stderr"] as const) {
+          child[name]?.setEncoding("utf8");
+          child[name]?.on("data", (text: string) => options.onOutput?.(name, text));
+        }
+        await new Promise<void>((resolveSpawn, rejectSpawn) => {
+          child.once("spawn", resolveSpawn);
+          child.once("error", rejectSpawn);
+        });
       } catch (error) {
         await removeWorkspace(workspace, cleanup);
         return { failure: "SPAWN_FAILED", failureDetail: (error as Error).message };
@@ -806,11 +823,13 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
         return { failure: "CONNECTION_FAILED", failureDetail: (error as Error).message };
       } finally {
         client?.close();
-        child.kill();
-        await waitForChildExit(child);
-        // A killed Runtime cannot unlink its socket; the short directory outlives the workspace.
-        if (ownedSocket !== undefined) await rm(ownedSocket, { force: true });
-        await removeWorkspace(workspace, cleanup);
+        try {
+          await terminateProbeProcessTree(child, context.platform);
+        } finally {
+          // A killed Runtime cannot unlink its socket; the short directory outlives the workspace.
+          if (ownedSocket !== undefined) await rm(ownedSocket, { force: true });
+          await removeWorkspace(workspace, cleanup);
+        }
       }
     },
   };
@@ -839,18 +858,19 @@ function mapHandshakeFailure(
   }
 }
 
-async function waitForChildExit(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  await new Promise<void>((resolveExit) => {
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolveExit();
-    }, 2_000);
-    child.once("close", () => {
-      clearTimeout(timer);
-      resolveExit();
-    });
-  });
+async function terminateProbeProcessTree(child: ChildProcess, platform: NodeJS.Platform): Promise<void> {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+  // Kill the tree while its root is still alive: killing only the root first
+  // leaves detached Bun workers behind and loses taskkill's tree anchor.
+  if (platform === "win32") {
+    await execFileAsync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"),
+      ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, timeout: 5_000 });
+  } else {
+    new PosixProcessGroupContainment().forceStop(child);
+  }
+  if (!(await childExitsWithin(child, 5_000))) {
+    throw new Error("Runtime probe process tree did not stop");
+  }
 }
 
 async function childExitsWithin(child: ChildProcess, timeoutMs: number): Promise<boolean> {

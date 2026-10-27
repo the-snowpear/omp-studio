@@ -19,6 +19,13 @@
 .ssh-dialog input, .ssh-dialog select { width: 100%; padding: var(--sp-10) var(--sp-12); border: 1px solid var(--border-strong); border-radius: var(--r-6); background: var(--surface-2); color: var(--text); font: inherit; }
 .ssh-dialog input:focus-visible, .ssh-dialog select:focus-visible, .execution-picker button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ssh-dialog p { line-height: 1.6; overflow-wrap: anywhere; }
+.ssh-preparation-target { display: flex; align-items: center; gap: var(--sp-8); }
+.ssh-preparation-target > span { margin-left: auto; color: var(--text-3); font-size: var(--fs-12); }
+.ssh-preparation-steps { display: flex; list-style: none; gap: var(--sp-12); padding: 0; margin: var(--sp-24) 0; }
+.ssh-preparation-steps li { flex: 1; display: flex; align-items: center; gap: var(--sp-6); color: var(--text-3); font-size: var(--fs-12); }
+.ssh-preparation-steps li[aria-current] { color: var(--accent); font-weight: var(--fw-semibold); }
+.ssh-preparation-progress { width: 100%; height: 6px; accent-color: var(--accent); }
+.ssh-install-path { display: block; padding: var(--sp-10); border-radius: var(--r-6); background: var(--surface-2); overflow-wrap: anywhere; }
 .ssh-dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-8); margin-top: var(--sp-24); }
 .ssh-directory-actions { display: flex; gap: var(--sp-8); }
 .ssh-directory-list { max-height: 260px; min-height: 80px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-6); margin-top: var(--sp-12); }

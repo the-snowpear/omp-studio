@@ -21,6 +21,8 @@ import { DEFAULT_APP_SETTINGS } from "./appSettings";
 import { SettingRow, SettingSection, StaticSelect, Switch, type SettingSource } from "./SettingRow";
 import { useUpdates, type UpdatePrefs } from "./updates";
 import { DesktopUpdateRecovery } from "./DesktopUpdateRecovery";
+import { UpdateAutomationSettings } from "./UpdateAutomationSettings";
+import { PREVIEW_UPDATE_PREFS } from "../preview/settingsPreview";
 import { useI18n } from "../i18n";
 import type {
   RuntimeSettingsReadModel,
@@ -551,6 +553,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
         </SettingRow>
       </SettingSection>
       <FontSettings key={String(ctl.preview)} ctl={ctl} />
+      <UpdateAutomationSettings key={`updates-${ctl.preview}`} preview={ctl.preview} />
       <SettingSection title={t("settings.general.sectionStartup")}>
         <SettingRow label={t("settings.general.restoreLastProject")} desc={t("settings.general.restoreLastProjectDesc")} source={appSource(app, "restoreLastProject")}>
           <Switch checked={app.restoreLastProject} onChange={(restoreLastProject) => updateApp({ restoreLastProject })} label={t("settings.general.restoreLastProject")} />
@@ -1031,21 +1034,11 @@ export function TasksTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined;
 /* 7. 高级                                                              */
 /* ------------------------------------------------------------------ */
 
-const DEFAULT_UPDATE_PREFS: UpdatePrefs = {
-  mirrorPrefix: "",
-  autoCheck: true,
-  skippedAppVersion: "",
-  runtimeChannel: "stable",
-  autoDownload: true,
-  preferHotUpdate: true,
-  lastIndexSequence: 0,
-};
-
 export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined; runtime?: RuntimeSettingsCtl | undefined }) {
   const { t } = useI18n();
   const preview = runtime?.preview === true || demo !== undefined;
   const updates = useUpdates();
-  const [previewPrefs, setPreviewPrefs] = useState<UpdatePrefs>(DEFAULT_UPDATE_PREFS);
+  const [previewPrefs, setPreviewPrefs] = useState<UpdatePrefs>(PREVIEW_UPDATE_PREFS);
   const prefs = preview ? previewPrefs : updates.state.prefs;
   const available = preview || prefs !== null;
   const disabled = !available;
@@ -1125,24 +1118,6 @@ export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefin
           </div>
         </SettingRow>
         <SettingRow
-          label={t("updates.autoCheck")}
-          source={!available ? "unavailable" : (prefs?.autoCheck === false ? "user" : "default")}
-          {...(!available ? { reason: t("common.unavailable") } : {})}
-        >
-          <Switch
-            label={t("updates.autoCheck")}
-            checked={prefs?.autoCheck ?? true}
-            disabled={disabled}
-            onChange={(next) => {
-              if (preview) {
-                setPreviewPrefs((prev) => ({ ...prev, autoCheck: next }));
-              } else {
-                void updates.savePrefs({ autoCheck: next });
-              }
-            }}
-          />
-        </SettingRow>
-        <SettingRow
           label={t("updates.channel")}
           source={!available ? "unavailable" : (prefs?.runtimeChannel === "canary" ? "user" : "default")}
           {...(!available ? { reason: t("common.unavailable") } : {})}
@@ -1163,25 +1138,6 @@ export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefin
             <option value="stable">Stable</option>
             <option value="canary">Canary</option>
           </AppSelect>
-        </SettingRow>
-        <SettingRow
-          label={t("updates.autoDownload")}
-          desc={t("updates.autoDownloadHint")}
-          source={!available ? "unavailable" : (prefs?.autoDownload === false ? "user" : "default")}
-          {...(!available ? { reason: t("common.unavailable") } : {})}
-        >
-          <Switch
-            label={t("updates.autoDownload")}
-            checked={prefs?.autoDownload ?? true}
-            disabled={disabled}
-            onChange={(next) => {
-              if (preview) {
-                setPreviewPrefs((prev) => ({ ...prev, autoDownload: next }));
-              } else {
-                void updates.savePrefs({ autoDownload: next });
-              }
-            }}
-          />
         </SettingRow>
         {prefs?.skippedAppVersion ? (
           <SettingRow

@@ -662,6 +662,20 @@ test("concurrent preference changes retain both edits and never lower the sequen
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test("automatic downloads default on for existing preferences and a saved opt-out survives restart", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "omp-auto-download-prefs-"));
+  try {
+    await writeFile(join(dir, "update-prefs.json"), JSON.stringify({ autoCheck: true, runtimeChannel: "canary" }));
+    const store = createUpdatePrefsStore({ appDataDirectory: dir });
+    assert.equal((await store.read()).autoDownload, true);
+    await store.write({ autoDownload: false });
+    const restarted = createUpdatePrefsStore({ appDataDirectory: dir });
+    assert.equal((await restarted.read()).autoDownload, false);
+    assert.equal((await restarted.write({ mirrorPrefix: "https://mirror.example.com/" })).autoDownload, false);
+    assert.equal((await restarted.read()).runtimeChannel, "canary");
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test("index rejects filesystem escape versions and file names before staging writes", () => {
   for (const unsafe of ["../escape", "C:\\escape", "/absolute", "file:stream", "CON.exe"]) {
     const index = createSampleIndex();

@@ -49,6 +49,26 @@ export function composerFollowUpEnabled(input: {
 }
 
 /**
+ * Empty-composer continue. The button only exists while the last turn stopped
+ * without a final report and nothing else owns the composer: a queued-message
+ * edit takes the slot (its draft is empty, so `textReady` cannot catch it), an
+ * ask/approval card must not be raced, and a running turn has nothing to
+ * resume. Channel readiness is the same gate `turn.retry` uses.
+ */
+export function composerContinueEnabled(input: {
+  readonly textReady: boolean;
+  readonly running: boolean;
+  readonly pendingInteraction: boolean;
+  readonly queueEdit: boolean;
+  readonly channelReady: boolean;
+  readonly interrupted: boolean;
+}): boolean {
+  if (!input.interrupted || input.textReady || input.running) return false;
+  if (input.pendingInteraction || input.queueEdit) return false;
+  return input.channelReady;
+}
+
+/**
  * Flush only the live session's own queue. A queue built while session A was
  * streaming must not ride `core.prompt` into session B after a sidebar switch.
  */

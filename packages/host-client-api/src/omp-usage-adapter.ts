@@ -58,7 +58,7 @@ export interface OmpUsageAdapterOptions {
   readonly statsDbPath?: string;
   readonly locateOmp?: () => Promise<string | undefined>;
   readonly exec?: (exe: string, args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
-  readonly spawnDashboard?: (exe: string) => void;
+  readonly spawnDashboard?: (exe: string, options?: { readonly open?: boolean }) => void;
   readonly openUrl?: (url: string) => Promise<void>;
   readonly probeDashboard?: () => Promise<boolean>;
   readonly now?: () => number;
@@ -146,10 +146,20 @@ export async function defaultLocateOmp(): Promise<string | undefined> {
   return undefined;
 }
 
-function defaultSpawnDashboard(exe: string): void {
+/**
+ * Start the native dashboard server.
+ *
+ * `open` decides whether `omp stats` may also launch the default browser. The
+ * statistics page frames this dashboard, so an embedded start must not hand
+ * the same panel to Edge/Chrome; the explicit 「在浏览器打开」 fallback still
+ * must. The switch is an env var rather than a flag because an older Runtime
+ * rejects unknown flags outright and would never start the server.
+ */
+function defaultSpawnDashboard(exe: string, options?: { readonly open?: boolean }): void {
   const child = spawn(exe, ["stats"], {
     stdio: "ignore",
     windowsHide: true,
+    ...(options?.open === true ? {} : { env: { ...process.env, OMP_STATS_NO_OPEN: "1" } }),
     // On Windows, `detached: true` allocates a new console window.
     ...(process.platform === "win32" ? {} : { detached: true }),
   });
@@ -425,7 +435,9 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
           await openUrl(DASHBOARD_URL);
           return OPENED_OK;
         }
-        spawnDashboard(exe);
+        // An explicit request to see the panel in a browser keeps `omp stats`
+        // opening one; only the embedded start suppresses it.
+        spawnDashboard(exe, { open: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : "打开 OMP Stats 失败";
         throw { code: "UNAVAILABLE", message };

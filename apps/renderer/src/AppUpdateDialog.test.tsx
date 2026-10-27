@@ -61,6 +61,23 @@ it("labels checks, downloads and application errors by their stage", () => {
   expect(screen.getByRole("alert").textContent).toBe("下载失败: Connection reset");
 });
 
+it("explains Runtime compatibility and disables downloading until the blocker clears", async () => {
+  const download = vi.fn().mockResolvedValue(false);
+  const update = { component: "runtime" as const, currentVersion: "18.10.4-studio.8", version: "18.12.6-studio.1", blockedReason: "Runtime 至少需要桌面 0.1.11，请先更新桌面" };
+  const props = { update, onClose: vi.fn(), onDownloadAndInstall: download };
+  const { rerender } = render(<AppUpdateDialog {...props} />);
+  expect(screen.getByRole("status").textContent).toContain("请先更新桌面");
+  const button = screen.getByRole("button", { name: "下载更新" }) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  fireEvent.click(button);
+  expect(download).not.toHaveBeenCalled();
+  expect(screen.queryByText(/下载失败/)).toBeNull();
+  rerender(<AppUpdateDialog {...props} update={{ ...update, blockedReason: undefined }} />);
+  expect(button.disabled).toBe(false);
+  fireEvent.click(button);
+  await waitFor(() => expect(download).toHaveBeenCalledOnce());
+});
+
 it("simulates preparation and restarting locally in preview", async () => {
   vi.useFakeTimers();
   const download = vi.fn(), apply = vi.fn();

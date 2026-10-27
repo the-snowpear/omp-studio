@@ -917,6 +917,7 @@ test("sensitive mutations are blocked with RESYNC_REQUIRED while resync is requi
     assert.fail("expected failed entry");
   }
   assert.equal(isSensitiveCommand("session.resume"), true);
+  assert.equal(isSensitiveCommand("core.continue"), true);
   assert.equal(isSensitiveCommand("interaction.respond"), true);
   assert.equal(isSensitiveCommand("btw.ask"), true);
   assert.equal(isSensitiveCommand("btw.branch"), true);

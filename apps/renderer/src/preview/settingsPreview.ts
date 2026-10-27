@@ -10,6 +10,17 @@ import { useCallback, useState } from "react";
 
 import { getAppSettings, type AppSettings } from "../settings/appSettings";
 import type { RuntimeDemoApi } from "../settings/tabs";
+import type { UpdatePrefs } from "../settings/updates";
+
+export const PREVIEW_UPDATE_PREFS: UpdatePrefs = {
+  mirrorPrefix: "",
+  autoCheck: true,
+  autoDownload: true,
+  skippedAppVersion: "",
+  runtimeChannel: "stable",
+  preferHotUpdate: true,
+  lastIndexSequence: 0,
+};
 
 /** App 级设置的演示值（预览模式显示，不落盘）。 */
 export const PREVIEW_APP_SETTINGS: AppSettings = {

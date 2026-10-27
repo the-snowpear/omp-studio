@@ -10,9 +10,15 @@ import type { SshRemoteTransport } from "./transport.js";
 import { createPasswordAuthentication, type SshAuthentication } from "./authentication.js";
 import { connectionCancelled, connectionFailure, RemoteConnectionError } from "./errors.js";
 import { RemoteRequestTimeout, type RemoteAttachment } from "./wire.js";
+import type { PreparationProgress } from "./environment-installer.js";
 
 interface PreparedRemote extends RemoteInstallation { environment: RemoteEnvironment; attachment: RemoteAttachment; instanceId?: string; }
-interface LiveRemote extends RemoteInstallation { transport: SshRemoteTransport; environment: RemoteEnvironment; generation: number; connectedAt: number; healthVersion: number; hostRestarted: boolean; }
+export interface LiveRemote extends RemoteInstallation { transport: SshRemoteTransport; environment: RemoteEnvironment; generation: number; connectedAt: number; healthVersion: number; hostRestarted: boolean; }
+export interface RemoteManagerOptions {
+  requireApproval?: boolean;
+  prepare?: (profile: RemoteConnectionProfile, environment: RemoteEnvironment, authentication: SshAuthentication | undefined, signal: AbortSignal, progress: PreparationProgress) => Promise<RemoteInstallation>;
+  connected?: (id: string, remote: LiveRemote, signal: AbortSignal, report: (patch: Partial<RemoteConnectionStatus>) => void) => Promise<() => void>;
+}
 interface ConnectionAttempt { promise: Promise<void>; controller: AbortController; }
 interface RecoveryBudget { startedAt: number; attempts: number; }
 export interface RemoteRecoveryPolicy { maxAttempts: number; budgetMs: number; delaysMs: readonly number[]; stableMs: number; random(): number; }
@@ -37,13 +43,15 @@ export class RemoteConnectionManager {
   readonly #events = new Set<(value: { id: string; generation: number; event: ClientEvent }) => void>();
   readonly #maintenance = new Map<string, Promise<unknown>>();
   readonly #authentication = new Map<string, SshAuthentication>();
+  readonly #approvals = new Map<string, () => void>();
+  readonly #resources = new Map<string, () => void>();
   #loaded: Promise<void> | undefined;
   #writes: Promise<void> = Promise.resolve();
   #closed = false;
   #generation = 0;
   activeId: string | null = null;
 
-  constructor(readonly path: string, readonly bundleDirectory: string, readonly services = backend, readonly helperDirectory = join(dirname(bundleDirectory), "ssh-askpass"), readonly recovery = REMOTE_RECOVERY_POLICY) {}
+  constructor(readonly path: string, readonly bundleDirectory: string, readonly services = backend, readonly helperDirectory = join(dirname(bundleDirectory), "ssh-askpass"), readonly recovery = REMOTE_RECOVERY_POLICY, readonly options: RemoteManagerOptions = {}) {}
   onChanged(listener: () => void): () => void { this.#listeners.add(listener); return () => { this.#listeners.delete(listener); }; }
   onEvent(listener: (value: { id: string; generation: number; event: ClientEvent }) => void): () => void { this.#events.add(listener); return () => { this.#events.delete(listener); }; }
   async list(): Promise<RemoteInventory> { await this.#load(); return { profiles: [...this.#profiles.values()], statuses: [...this.#status.values()], activeId: this.activeId }; }
@@ -51,7 +59,9 @@ export class RemoteConnectionManager {
   async save(input: Omit<RemoteConnectionProfile, "id"> & { id?: string }): Promise<RemoteConnectionProfile> {
     await this.#load();
     sshArguments(input);
-    if (!input.name?.trim() || input.name.length > 80 || !["linux", "win32", "darwin"].includes(input.platform)) throw new Error("Connection name and target system are required");
+    if (!input.name?.trim() || input.name.length > 80) throw new Error("Connection name is required");
+    if (input.networkMode && !["remote-first", "remote-only", "local-only"].includes(input.networkMode)) throw new Error("Unsupported network mode");
+    if (input.localProxyUrl && !["http:", "https:", "socks5:", "socks5h:"].includes(new URL(input.localProxyUrl).protocol)) throw new Error("不支持的本机代理类型");
     if (input.authMode !== undefined && input.authMode !== "agent" && input.authMode !== "password") throw new Error("Unsupported SSH authentication method");
     if (input.authMode === "password" && !input.user?.trim()) throw new Error("账密连接需要填写用户名");
     if (input.user?.trim() && input.host.includes("@")) throw new Error("使用独立用户名字段时，主机中请勿重复填写 user@");
@@ -59,7 +69,9 @@ export class RemoteConnectionManager {
     this.assertWritable(id);
     if (input.id && !this.#profiles.has(input.id)) throw new Error("Unknown SSH connection");
     if (this.#live.has(id) || this.#connecting.has(id) || this.#disconnecting.has(id) || this.#wanted.has(id) || this.activeId === id) throw new Error("Switch away and disconnect before editing this connection");
-    const profile: RemoteConnectionProfile = { id, name: input.name.trim(), host: input.host, platform: input.platform, authMode: input.authMode ?? "agent", ...(input.user ? { user: input.user.trim() } : {}), ...(input.port ? { port: input.port } : {}) };
+    const old = this.#profiles.get(id);
+    const sameTarget = old?.host === input.host && old?.user === input.user?.trim() && old?.port === input.port && old?.installRoot === input.installRoot;
+    const profile: RemoteConnectionProfile = { id, name: input.name.trim(), host: input.host, authMode: input.authMode ?? "agent", networkMode: input.networkMode ?? "remote-first", ...(input.user ? { user: input.user.trim() } : {}), ...(input.port ? { port: input.port } : {}), ...(input.installRoot ? { installRoot: input.installRoot } : {}), ...(input.localProxyUrl ? { localProxyUrl: input.localProxyUrl } : {}), ...(sameTarget && old?.installationApproved ? { installationApproved: true } : {}), ...(old?.lastDirectory ? { lastDirectory: old.lastDirectory } : {}), ...(sameTarget && old?.platform ? { platform: old.platform, ...(old.arch ? { arch: old.arch } : {}) } : {}) };
     this.#profiles.set(id, profile);
     this.#prepared.delete(id);
     this.#budgets.delete(id);
@@ -142,12 +154,27 @@ export class RemoteConnectionManager {
             if (!["host-unavailable", "protocol"].includes(connectionFailure(error).connectionCode)) throw error;
           }
         }
-        this.#setStatus({ id, state: "connecting", message: "正在检查 SSH 和远端环境" });
+        this.#setStatus({ id, state: "connecting", stage: "probe", message: "正在自动识别远端系统和运行环境" });
         const environment = await this.services.probeRemote(profile, controller.signal, authentication);
         controller.signal.throwIfAborted();
-        if (environment.platform !== profile.platform) throw new RemoteConnectionError("environment", `目标系统是 ${environment.platform}，请修改连接配置`);
-        this.#setStatus({ id, state: "connecting", message: "正在准备远端 Host" });
-        const installation = await this.services.deployRemote(profile, environment, this.bundleDirectory, controller.signal, authentication);
+        profile.platform = environment.platform; profile.arch = environment.arch;
+        if (this.options.requireApproval && !profile.installationApproved) {
+          this.#setStatus({ id, state: "awaiting-approval", stage: "confirmation", platform: environment.platform, arch: environment.arch, installRoot: environment.root, message: "体检完成，请确认准备远端运行环境" });
+          await new Promise<void>((resolve, reject) => {
+            const abort = () => { this.#approvals.delete(id); reject(connectionCancelled()); };
+            this.#approvals.set(id, () => { controller.signal.removeEventListener("abort", abort); this.#approvals.delete(id); resolve(); });
+            controller.signal.addEventListener("abort", abort, { once: true });
+            if (controller.signal.aborted) abort();
+          });
+          profile.installationApproved = true;
+        }
+        await this.#flush();
+        const progress: PreparationProgress = (stage, message, receivedBytes, totalBytes) => this.#setStatus({ id, state: "connecting", platform: environment.platform, arch: environment.arch, installRoot: environment.root, stage, message, ...(receivedBytes !== undefined ? { receivedBytes } : {}), ...(totalBytes !== undefined ? { totalBytes } : {}) });
+        progress("install", "正在准备远端 Host");
+        const installation = this.options.prepare
+          ? await this.options.prepare(profile, environment, authentication, controller.signal, progress)
+          : await this.services.deployRemote(profile, environment, this.bundleDirectory, controller.signal, authentication);
+        if (installation.node) environment.node = installation.node;
         controller.signal.throwIfAborted();
         const next: PreparedRemote = { ...installation, environment, attachment: prepared?.attachment ?? { key: randomBytes(32).toString("base64url"), sequence: 0 }, ...(prepared?.instanceId ? { instanceId: prepared.instanceId } : {}) };
         this.#prepared.set(id, next);
@@ -176,12 +203,20 @@ export class RemoteConnectionManager {
       const attachment = { key: prepared.attachment.key, sequence: ++prepared.attachment.sequence };
       transport = await this.services.attachRemote(profile, prepared.environment, prepared, signal, authentication, attachment);
       signal.throwIfAborted();
+      if (transport.hello && (transport.hello.platform !== prepared.environment.platform || transport.hello.arch !== prepared.environment.arch)) {
+        throw new RemoteConnectionError("environment", `目标系统是 ${transport.hello.platform}/${transport.hello.arch}，与体检结果 ${prepared.environment.platform}/${prepared.environment.arch} 不符`);
+      }
       this.#setStatus({ id, state: "synchronizing", arch: prepared.environment.arch, message: "SSH 已连通，正在核对远端快照" });
       await transport.bootstrap();
       signal.throwIfAborted();
       if (this.#closed || !this.#wanted.has(id)) throw connectionCancelled();
       const hostRestarted = Boolean(prepared.instanceId && transport.hello?.instanceId !== prepared.instanceId);
       const live: LiveRemote = { ...prepared, transport, generation: ++this.#generation, connectedAt: Date.now(), healthVersion: 0, hostRestarted };
+      if (this.options.connected) {
+        this.#resources.get(id)?.();
+        const dispose = await this.options.connected(id, live, signal, patch => this.#setStatus({ ...this.#status.get(id)!, ...patch, id }));
+        this.#resources.set(id, dispose);
+      }
       this.#live.set(id, live);
       transport.subscribe({ scope: "all" }, event => {
         if (this.#live.get(id) !== live || this.#status.get(id)?.state !== "connected") return;
@@ -202,7 +237,8 @@ export class RemoteConnectionManager {
   }
 
   #connected(id: string, live: LiveRemote): void {
-    this.#setStatus({ id, state: "connected", generation: live.generation, arch: live.environment.arch, hostRestarted: live.hostRestarted, ...(live.hostRestarted ? { message: "远端 Host 已更换实例；已重新读取状态，不能保证原任务仍在运行" } : {}) });
+    const previous = this.#status.get(id);
+    this.#setStatus({ id, state: "connected", generation: live.generation, platform: live.environment.platform, arch: live.environment.arch, installRoot: live.environment.root, ...(previous?.networkRoute ? { networkRoute: previous.networkRoute } : {}), ...(previous?.networkMessage ? { networkMessage: previous.networkMessage } : {}), hostRestarted: live.hostRestarted, ...(live.hostRestarted ? { message: "远端 Host 已更换实例；已重新读取状态，不能保证原任务仍在运行" } : {}) });
   }
   async #healthChanged(id: string, live: LiveRemote, healthy: boolean): Promise<void> {
     if (this.#live.get(id) !== live || this.#closed) return;
@@ -222,6 +258,7 @@ export class RemoteConnectionManager {
   #transportLost(id: string, live: LiveRemote, error: Error): void {
     if (this.#live.get(id) !== live) return;
     this.#live.delete(id);
+    this.#resources.get(id)?.(); this.#resources.delete(id);
     if (this.#closed || !this.#wanted.has(id) || this.#maintenance.has(id)) {
       this.#setStatus({ id, state: "disconnected", message: "SSH 已断开；未停止远端任务" });
       return;
@@ -251,6 +288,7 @@ export class RemoteConnectionManager {
     pending?.controller.abort();
     const live = this.#live.get(id);
     this.#live.delete(id);
+    this.#resources.get(id)?.(); this.#resources.delete(id);
     this.#setStatus({ id, state: "disconnected", message: "连接已取消或断开；未停止远端任务" });
     const run = Promise.resolve().then(async () => {
       await live?.transport.close();
@@ -266,6 +304,8 @@ export class RemoteConnectionManager {
     await Promise.all([...ids].filter(id => !this.#maintenance.has(id)).map(id => this.disconnect(id)));
   }
   authentication(id: string): SshAuthentication | undefined { return this.#authentication.get(id); }
+  approveDeployment(id: string): void { const approve = this.#approvals.get(id); if (!approve) throw new Error("没有等待确认的远端安装"); approve(); }
+  async rememberDirectory(id: string, path: string): Promise<void> { this.profile(id).lastDirectory = path; await this.#flush(); }
   async #clearAuthentication(id: string): Promise<void> {
     const authentication = this.#authentication.get(id);
     this.#authentication.delete(id);
@@ -314,6 +354,7 @@ export class RemoteConnectionManager {
     await Promise.allSettled([...this.#disconnecting.values()]);
     await Promise.allSettled([...this.#maintenance.values()]);
     const live = [...this.#live.values()]; this.#live.clear();
+    for (const dispose of this.#resources.values()) dispose(); this.#resources.clear();
     await Promise.all(live.map(value => value.transport.close()));
     await Promise.all([...this.#authentication.keys()].map(id => this.#clearAuthentication(id)));
     await this.#writes;

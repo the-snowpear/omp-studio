@@ -53,7 +53,7 @@ const env = toolingEnvironment({
 // then kills the unsigned binary the moment the smoke test runs it.
 if (process.platform === "darwin") {
   delete env.BUN_NO_CODESIGN_MACHO_BINARY;
-  assertMacToolchain({ rust: true, bunVersion: run(bun, ["--version"], { env, capture: true }), env });
+  assertMacToolchain({ rust: true, targetArch: process.arch, bunVersion: run(bun, ["--version"], { env, capture: true }), env });
 }
 
 // Building a vendor tree without the fork applied yields an omp.exe with no

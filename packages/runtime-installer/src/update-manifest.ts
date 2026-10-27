@@ -103,6 +103,7 @@ export interface ComponentUpdateState {
   phase: UpdatePhase; method?: DownloadMethod | undefined;
   receivedBytes?: number | undefined; totalBytes?: number | undefined; message?: string | undefined;
   errorStage?: UpdateErrorStage | undefined;
+  blockedReason?: string | undefined;
 }
 export interface UnifiedUpdateSnapshot {
   schema: 2; checking: boolean; app: ComponentUpdateState; runtime: ComponentUpdateState;

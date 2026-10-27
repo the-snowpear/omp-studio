@@ -9,9 +9,12 @@ import { createRuntimeArchive, RuntimeInstaller, updateSigningBytes, type Compon
 import { downloadDifferentialArtifact, cachedUpdatePath } from "../src/differential-artifact.js";
 import { discoverUpdates } from "../src/update-discovery.js";
 import { UpdateCoordinator } from "../src/update-coordinator.js";
-import { DEFAULT_UPDATE_PREFS } from "../src/update-prefs-store.js";
+import { DEFAULT_UPDATE_PREFS, type UpdatePrefs } from "../src/update-prefs-store.js";
 import { migrateLegacyRuntime } from "../src/migrate-runtime.js";
 import { UpdateRestartBlockedError } from "../src/update-restart.js";
+import type { ChromeUpdatesSender } from "../src/chrome-updates.js";
+import { registerUnifiedUpdatesIpc } from "../src/unified-updates-ipc.js";
+import { CHROME_UPDATES_CHANNELS } from "../src/chrome-updates-shared.js";
 
 const pair = generateKeyPairSync("ed25519"), keys = { test: pair.publicKey.export({ type: "spki", format: "pem" }) };
 function file(asset: string, bytes: Buffer): UpdateFile { return { asset, url: `https://github.com/owner/repo/releases/download/v2/${asset}`, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), sha512: createHash("sha512").update(bytes).digest("base64") }; }
@@ -31,6 +34,39 @@ function fetcher(envelopes: SignedUpdateManifest[], counter: string[] = []): typ
     return new Response(new Uint8Array(bytes), { headers: { "content-length": String(bytes.length) } });
   }) as typeof fetch;
 }
+
+for (const scenario of [
+  { name: "downloads by default", initial: {}, duringCheck: {}, checks: 1, downloads: 1 },
+  { name: "only checks when automatic downloads are disabled", initial: { autoDownload: false }, duringCheck: {}, checks: 1, downloads: 0 },
+  { name: "does nothing when automatic checks are disabled", initial: { autoCheck: false }, duringCheck: {}, checks: 0, downloads: 0 },
+  { name: "honors automatic downloads disabled during a check", initial: {}, duringCheck: { autoDownload: false }, checks: 1, downloads: 0 },
+  { name: "honors automatic checks disabled during a check", initial: {}, duringCheck: { autoCheck: false }, checks: 1, downloads: 0 },
+] satisfies Array<{ name: string; initial: Partial<UpdatePrefs>; duringCheck: Partial<UpdatePrefs>; checks: number; downloads: number }>) {
+  test(`background updater ${scenario.name}`, async t => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    let prefs: UpdatePrefs = { ...DEFAULT_UPDATE_PREFS, ...scenario.initial };
+    const coordinator = new UpdateCoordinator({ root: tmpdir(), runtimeRoot: tmpdir(), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys,
+      prefs: { read: async () => prefs }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {} });
+    const check = t.mock.method(coordinator, "check", async () => {
+      prefs = { ...prefs, ...scenario.duringCheck };
+      return coordinator.state;
+    });
+    const prepare = t.mock.method(coordinator, "prepare", async () => {});
+    try {
+      coordinator.startBackground();
+      t.mock.timers.tick(15_000);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(check.mock.callCount(), scenario.checks);
+      assert.equal(prepare.mock.callCount(), scenario.downloads);
+      prefs = { ...prefs, autoCheck: true, autoDownload: false };
+      t.mock.timers.tick(4 * 60 * 60 * 1000);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(check.mock.callCount(), scenario.checks + 1);
+      assert.equal(prepare.mock.callCount(), scenario.downloads);
+    } finally { coordinator.dispose(); }
+  });
+}
+
 test("differential reconstruction falls back exactly once and never executes unverified bytes", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-diff-test-"));
   const previous = component("old.exe", "1.0.0"), next = component();
@@ -56,6 +92,38 @@ test("discovery combines desktop and independent Runtime, rejecting sequence rol
   assert.equal(found.app?.manifest.app?.version, "2.0.0"); assert.equal(found.runtime?.manifest.runtime?.version, "18.0.0-studio.2");
   await assert.rejects(() => discoverUpdates({ ...input, watermarks: { "app:stable:win32-x64": 3 } }), /rollback/);
 });
+for (const [name, minimum, protocol, appProtocol] of [
+  ["minimum desktop version", "0.1.11", { min: 1, max: 1 }, { min: 1, max: 1 }],
+  ["Studio protocol", "0.1.0", { min: 2, max: 2 }, { min: 1, max: 2 }],
+] as const) {
+  test(`update checks expose the ${name} blocker before downloading and a prepared desktop clears it`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "omp-update-compatibility-"));
+    const runtime = { ...component("runtime.zip", "18.12.6-studio.1"), minAppVersion: minimum, studioProtocol: protocol };
+    const app = { ...component("setup.exe", "0.1.12"), studioProtocol: appProtocol, bundledRuntimeVersion: runtime.version };
+    const requests: string[] = [];
+    const coordinator = new UpdateCoordinator({ root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "win32-x64", appVersion: "0.1.10", keys,
+      prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([signed({ runtime, app })], requests) });
+    const handlers = new Map<string, (event: { sender: ChromeUpdatesSender }, value?: unknown) => unknown>();
+    const remove = registerUnifiedUpdatesIpc({ ipcMain: { removeHandler: channel => { handlers.delete(channel); }, handle: (channel, action) => { handlers.set(channel, action); } }, isTrustedSender: () => true }, coordinator);
+    try {
+      await coordinator.initialize();
+      const check = () => handlers.get(CHROME_UPDATES_CHANNELS.check)!({ sender: { isDestroyed: () => false, getURL: () => "file:///qa/index.html" } });
+      const first = await check() as { runtime: { plan: string; reason?: string } };
+      assert.equal(first.runtime.plan, "blocked");
+      assert.match(first.runtime.reason!, /请先更新桌面/);
+      assert.equal(coordinator.state.runtime.phase, "idle");
+      await assert.rejects(coordinator.prepare("runtime"), /请先更新桌面/);
+      assert.equal(requests.some(url => url.endsWith("runtime.zip") || url.endsWith("runtime.zip.blockmap")), false);
+      await coordinator.prepare("app");
+      const paired = await check() as { runtime: { plan: string; reason?: string } };
+      assert.equal(paired.runtime.plan, "available");
+      assert.equal(paired.runtime.reason, undefined);
+      await coordinator.prepare("runtime");
+      assert.equal(coordinator.state.runtime.phase, "ready");
+    } finally { remove(); }
+  });
+}
+
 test("discovery routes both the release catalog and manifests through the mirror", async () => {
   const requests: string[] = [];
   const app = signed({ app: component() });

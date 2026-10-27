@@ -134,6 +134,56 @@ describe("Runtime installation handoff", () => {
   });
 });
 
+describe("Runtime update compatibility", () => {
+  it("shows the desktop blocker and never falls back to local installation", async () => {
+    const { client, command, environment: installedEnvironment } = installHarness();
+    const blocker = "Runtime 至少需要桌面 0.1.11，请先更新桌面";
+    const environment: EnvironmentReadModel = { ...installedEnvironment, installer: { status: "update-available", version: "1.0.0", availableVersion: "2.0.0", signature: "verified" } };
+    const prepareUpdates = vi.fn();
+    window.ompStudioChrome = { getUpdatePrefs: async () => installPrefs, prepareUpdates } as never;
+    __resetUpdatesForTests({ check: { checkedAt: new Date().toISOString(), app: { plan: "full", version: "0.1.11" }, runtime: { plan: "blocked", runtimeVersion: "2.0.0", reason: blocker } } });
+    renderPage({ preview: false, client, environment });
+    expect(screen.getByText("Runtime 更新需先升级桌面")).toBeTruthy();
+    expect(screen.getAllByText(blocker).length).toBeGreaterThan(0);
+    const buttons = [screen.getByRole("button", { name: "更新 Runtime" }), ...screen.getAllByRole("button", { name: "更新" })];
+    for (const button of buttons) {
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(button);
+    }
+    expect(command).not.toHaveBeenCalled();
+    expect(prepareUpdates).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "重装" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("reports a blocked manual check rather than announcing an installable update", async () => {
+    const { client, environment } = installHarness();
+    window.ompStudioChrome = {
+      getUpdatePrefs: async () => installPrefs,
+      checkUpdates: async () => ({ checkedAt: new Date().toISOString(), app: { plan: "none" }, runtime: { plan: "blocked", runtimeVersion: "2.0.0", reason: "请先更新桌面" } }),
+    } as never;
+    renderPage({ preview: false, client, environment });
+    fireEvent.click(screen.getAllByRole("button", { name: "检查更新" })[0]!);
+    await waitFor(() => expect(screen.getByText("请先更新桌面")).toBeTruthy());
+    expect(screen.queryByText("发现可用制品 2.0.0")).toBeNull();
+  });
+
+  it("demonstrates the same blocker without using Host data or writes", () => {
+    __resetUpdatesForTests({ check: { checkedAt: new Date().toISOString(), app: { plan: "none" }, runtime: { plan: "blocked", reason: "Real Host blocker" } } });
+    const client = renderPage({ preview: true });
+    fireEvent.click(screen.getByRole("button", { name: "预览：有可用更新" }));
+    fireEvent.click(screen.getByRole("button", { name: "预览：环境正常" }));
+    fireEvent.click(screen.getByRole("button", { name: "预览：启动失败" }));
+    expect(screen.getByText("Runtime 更新需先升级桌面")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "更新 Runtime" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getAllByRole("button", { name: "检查更新" })[0]!);
+    expect(screen.queryByText("已检查更新（演示）· 18.8.0-studio.18 可用")).toBeNull();
+    expect(screen.getAllByText(/请先更新桌面（演示）/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Real Host blocker")).toBeNull();
+    expect(client.query).not.toHaveBeenCalled();
+    expect(client.command).not.toHaveBeenCalled();
+  });
+});
+
 describe("DiagnosticsPage", () => {
   it("keeps Runtime maintenance local in preview", () => {
     const rollback = vi.fn();

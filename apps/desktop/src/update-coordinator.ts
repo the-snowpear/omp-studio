@@ -91,7 +91,12 @@ export class UpdateCoordinator {
     this.snapshot = { schema: 2, checking: false, app: { component: "app", currentVersion: options.appVersion, phase: "idle" }, runtime: { component: "runtime", phase: "idle" } };
   }
   get state(): UnifiedUpdateSnapshot {
-    return structuredClone({ ...this.snapshot, rollbackAppVersion: this.journal.rollbackApp?.manifest.app?.version, rollbackAppPending: this.journal.rollbackRequested === true });
+    const runtime = this.journal.pending.runtime?.manifest.runtime ?? this.found.runtime?.manifest.runtime;
+    const app = this.journal.pending.app?.manifest.app;
+    return structuredClone({ ...this.snapshot,
+      runtime: { ...this.snapshot.runtime, blockedReason: runtime && this.snapshot.runtime.version
+        ? this.runtimeCompatibilityBlocker(runtime, app?.version ?? this.options.appVersion, app?.studioProtocol) : undefined },
+      rollbackAppVersion: this.journal.rollbackApp?.manifest.app?.version, rollbackAppPending: this.journal.rollbackRequested === true });
   }
   get hasRuntimeTrial(): boolean { return this.journal.runtimeTrial !== undefined; }
   private emit(): void { this.options.snapshotChanged(this.state); }
@@ -305,8 +310,14 @@ export class UpdateCoordinator {
     await this.save(); await this.pruneCache().catch(() => {}); this.emit();
   }
 
-  private assertRuntimeCompatible(release: ComponentRelease, appVersion: string, protocol: ComponentRelease["studioProtocol"] = { min: STUDIO_PROTOCOL_VERSION, max: STUDIO_PROTOCOL_VERSION }): void {
-    if (compareSemver(appVersion, release.minAppVersion) < 0 || release.studioProtocol.min > protocol.max || release.studioProtocol.max < protocol.min) throw new Error("Runtime 需要兼容的桌面版本，请先更新桌面");
+  private runtimeCompatibilityBlocker(release: ComponentRelease, appVersion: string, protocol: ComponentRelease["studioProtocol"] = { min: STUDIO_PROTOCOL_VERSION, max: STUDIO_PROTOCOL_VERSION }): string | undefined {
+    if (compareSemver(appVersion, release.minAppVersion) < 0) return `Runtime 至少需要桌面 ${release.minAppVersion}，请先更新桌面`;
+    if (release.studioProtocol.min > protocol.max || release.studioProtocol.max < protocol.min) return "Runtime 需要兼容的桌面协议，请先更新桌面";
+    return undefined;
+  }
+  private assertRuntimeCompatible(release: ComponentRelease, appVersion: string, protocol?: ComponentRelease["studioProtocol"]): void {
+    const reason = this.runtimeCompatibilityBlocker(release, appVersion, protocol);
+    if (reason) throw new Error(reason);
   }
   async check(): Promise<UnifiedUpdateSnapshot> {
     if (this.controller || this.applying || this.journalInvalid) return this.state;
@@ -388,10 +399,8 @@ export class UpdateCoordinator {
         if (kind === "runtime") {
           const targetApp = this.journal.pending.app?.manifest.app?.version ?? this.options.appVersion;
           const protocol = this.journal.pending.app?.manifest.app?.studioProtocol ?? { min: STUDIO_PROTOCOL_VERSION, max: STUDIO_PROTOCOL_VERSION };
-          if (compareSemver(targetApp, release.minAppVersion) < 0 || release.studioProtocol.min > protocol.max || release.studioProtocol.max < protocol.min) {
-            this.snapshot.runtime = { ...this.snapshot.runtime, phase: "failed", message: "Runtime 需要兼容的桌面版本，请先更新桌面", errorStage: "prepare" }; this.emit();
-            throw new Error(this.snapshot.runtime.message);
-          }
+          const reason = this.runtimeCompatibilityBlocker(release, targetApp, protocol);
+          if (reason) throw new Error(reason);
         }
         this.snapshot[kind] = { ...this.snapshot[kind], version: release.version, phase: "downloading", message: undefined, errorStage: undefined };
         this.emit();
@@ -546,7 +555,8 @@ export class UpdateCoordinator {
         const prefs = await this.options.prefs.read();
         if (!prefs.autoCheck || this.controller || this.applying || this.journal.rollbackRequested) return;
         await this.check();
-        if (!this.snapshot.error && prefs.autoDownload !== false) await this.prepare();
+        const latestPrefs = await this.options.prefs.read();
+        if (!this.snapshot.error && latestPrefs.autoCheck && latestPrefs.autoDownload !== false) await this.prepare();
       } catch { /* Errors are represented by snapshot; no background dialog. */ }
     };
     this.initialTimer = setTimeout(() => void tick(), 15_000);

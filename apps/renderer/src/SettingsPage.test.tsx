@@ -1,5 +1,5 @@
 import { selectOption } from "./test/selectOption";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "./i18n";
@@ -14,6 +14,7 @@ import {
   type AppLanguage,
 } from "./settings/appSettings";
 import { setSettingsIntent, SettingsPage } from "./SettingsPage";
+import { __resetUpdatesForTests, type UpdatePrefs } from "./settings/updates";
 
 beforeAll(() => {
   // jsdom 没有 ResizeObserver / matchMedia；SlidingTabs 与 tab 过渡需要 stub。
@@ -35,6 +36,8 @@ afterEach(() => {
   window.localStorage.removeItem("omp.lastRoute");
   window.sessionStorage.removeItem("omp.settingsIntent");
   __resetAppSettingsForTests(null);
+  __resetUpdatesForTests();
+  vi.unstubAllGlobals();
 });
 
 function renderSettings(options: {
@@ -64,6 +67,50 @@ function renderSettings(options: {
 function openTab(name: string) {
   fireEvent.click(screen.getByRole("tab", { name }));
 }
+
+describe("SettingsPage · 自动更新", () => {
+  it("常规页默认开启自动下载，关闭后写入桌面偏好并在重新打开时保留", async () => {
+    let prefs: UpdatePrefs = { mirrorPrefix: "", autoCheck: true, skippedAppVersion: "", runtimeChannel: "stable", preferHotUpdate: true, lastIndexSequence: 0 };
+    const setUpdatePrefs = vi.fn(async (patch: Partial<UpdatePrefs>) => {
+      prefs = { ...prefs, ...patch };
+      return prefs;
+    });
+    vi.stubGlobal("ompStudioChrome", { getUpdatePrefs: vi.fn(async () => prefs), setUpdatePrefs });
+    const view = renderSettings();
+    const toggle = screen.getByRole("switch", { name: "自动下载更新" });
+    await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("switch", { name: "自动检查更新" })).toBeTruthy();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
+    expect(setUpdatePrefs).toHaveBeenCalledWith({ autoDownload: false });
+    openTab("高级");
+    expect(screen.queryByRole("switch", { name: "自动下载更新" })).toBeNull();
+    view.unmount();
+    __resetUpdatesForTests();
+    renderSettings();
+    await waitFor(() => expect(screen.getByRole("switch", { name: "自动下载更新" }).hasAttribute("disabled")).toBe(false));
+    expect(screen.getByRole("switch", { name: "自动下载更新" }).getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("预览开关只改演示状态，不读取或写入桌面偏好", () => {
+    const getUpdatePrefs = vi.fn(), setUpdatePrefs = vi.fn();
+    vi.stubGlobal("ompStudioChrome", { getUpdatePrefs, setUpdatePrefs });
+    renderSettings({ preview: true });
+    const toggle = screen.getByRole("switch", { name: "自动下载更新" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(getUpdatePrefs).not.toHaveBeenCalled();
+    expect(setUpdatePrefs).not.toHaveBeenCalled();
+  });
+
+  it("没有桌面桥时禁用自动更新开关", () => {
+    vi.stubGlobal("ompStudioChrome", undefined);
+    renderSettings();
+    expect(screen.getByRole("switch", { name: "自动下载更新" }).hasAttribute("disabled")).toBe(true);
+  });
+});
 
 describe("SettingsPage · 背景", () => {
   it("点击内置预设立即切换并写入本地偏好", () => {
