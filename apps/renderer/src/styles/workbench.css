@@ -349,8 +349,6 @@
   --reading-scrollbar: 0px;
   --reading-doc-max: calc(var(--conversation-width) + 2 * var(--reading-gutter) + var(--reading-rail));
   --reading-composer-end: calc(var(--reading-gutter) + var(--reading-rail) + var(--reading-scrollbar));
-  container-type: inline-size;
-  container-name: reading-column;
 }
 .convo-wrap[data-reading-column] > .convo-scroll {
   min-height: 0;
@@ -6719,46 +6717,47 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .cmp-mode-flyout > .am-desc { margin:4px 8px; }
 
 /* 最窄主列按自己的容器宽度兜底，不按窗口宽度误判侧栏/右分栏。
-   Composer 的内容碰撞 hook 仍决定 normal / compact / modes，这里不另造折叠策略。 */
-@container reading-column (max-width: 480px) {
-  .convo-wrap[data-reading-column] > .composer-region > .composer .composer-bar {
-    flex-wrap: wrap;
-    row-gap: var(--sp-6);
-    padding-inline: var(--sp-4);
-  }
-  .convo-wrap[data-reading-column] > .composer-region > .ctx-strip {
-    max-width: 100%;
-    padding-inline: var(--sp-8);
-  }
-  .convo-wrap[data-reading-column] > .composer-region > .task-dock.open.single .task-dock-shell { width: 100%; }
-  .convo-wrap[data-reading-column] > .composer-region > .task-dock.both .task-dock-panel { grid-template-columns: minmax(0, 1fr); }
-  .convo-wrap[data-reading-column] > .composer-region > .task-dock .task-dock-col + .task-dock-col {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-  }
-  .convo-wrap[data-reading-column] > .composer-region > .deck .dk-head-end {
-    max-width: 100%;
-    flex-wrap: wrap;
-  }
-  .convo-wrap[data-reading-column] > .composer-region > .deck .ask-collapsed-bar { flex-wrap: wrap; }
-  .convo-wrap[data-reading-column] > .composer-region > .deck .dk-actions { padding-inline: var(--sp-8); }
-  .convo-wrap[data-reading-column] > .composer-region > .composer-queues .qs-head { flex-wrap: wrap; }
-  .convo-wrap[data-reading-column] > .composer-region > .composer-queues .qs-item {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--sp-4);
-    padding-right: 0;
-  }
-  .convo-wrap[data-reading-column] > .composer-region > .composer-queues .qs-status {
-    position: static;
-    width: auto;
-    transform: none;
-    gap: var(--sp-8);
-  }
-  .convo-wrap[data-reading-column] > .composer-region > .composer-queues .qs-actions { margin-left: auto; }
-  .convo-wrap[data-reading-column] > .composer-region > .composer-queues .qs-text { overflow-wrap: anywhere; }
-  .convo-wrap[data-reading-column].is-empty > .convo-scroll .ce-heat-board { grid-template-columns: max-content; }
-  .convo-wrap[data-reading-column].is-empty > .convo-scroll .ce-heat-days { display: none; }
-  .convo-wrap[data-reading-column].is-empty > .convo-scroll :is(.ce-heat-months, .ce-heat-cells, .ce-heat-legend) { grid-column: 1; }
-  .convo-wrap[data-reading-column].is-empty > .convo-scroll .ce-meta-proj { display: none; }
+   Composer 的内容碰撞 hook 仍决定 normal / compact / modes，这里不另造折叠策略。
+   用 hook 实测的 data-reading-narrow 而不是 @container：container-type 会带来
+   layout containment，令 .convo-wrap 变成 position:fixed 后代的包含块，Composer
+   选单的点击遮罩与图片灯箱就不再贴住视口（点侧栏/topbar 关不掉菜单）。 */
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .composer .composer-bar {
+  flex-wrap: wrap;
+  row-gap: var(--sp-6);
+  padding-inline: var(--sp-4);
 }
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .ctx-strip {
+  max-width: 100%;
+  padding-inline: var(--sp-8);
+}
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .task-dock.open.single .task-dock-shell { width: 100%; }
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .task-dock.both .task-dock-panel { grid-template-columns: minmax(0, 1fr); }
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .task-dock .task-dock-col + .task-dock-col {
+  border-left: 0;
+  border-top: 1px solid var(--border);
+}
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .deck .dk-head-end {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .deck .ask-collapsed-bar { flex-wrap: wrap; }
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .deck .dk-actions { padding-inline: var(--sp-8); }
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .composer-queues .qs-head { flex-wrap: wrap; }
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .composer-queues .qs-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+  padding-right: 0;
+}
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .composer-queues .qs-status {
+  position: static;
+  width: auto;
+  transform: none;
+  gap: var(--sp-8);
+}
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .composer-queues .qs-actions { margin-left: auto; }
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .composer-queues .qs-text { overflow-wrap: anywhere; }
+.convo-wrap[data-reading-column][data-reading-narrow].is-empty > .convo-scroll .ce-heat-board { grid-template-columns: max-content; }
+.convo-wrap[data-reading-column][data-reading-narrow].is-empty > .convo-scroll .ce-heat-days { display: none; }
+.convo-wrap[data-reading-column][data-reading-narrow].is-empty > .convo-scroll :is(.ce-heat-months, .ce-heat-cells, .ce-heat-legend) { grid-column: 1; }
+.convo-wrap[data-reading-column][data-reading-narrow].is-empty > .convo-scroll .ce-meta-proj { display: none; }

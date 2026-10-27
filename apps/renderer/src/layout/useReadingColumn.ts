@@ -14,6 +14,12 @@ type ReadingColumnGeometry = {
   readonly minimap: boolean;
 };
 
+/** Below this column width the composer bar, queues and deck stack to one column.
+ * Mirrors `max-width: 480px`; set as an attribute rather than a container query
+ * because container-type would make .convo-wrap a containing block for the
+ * fixed-position overlays (composer menu backdrops, image lightbox) inside it. */
+export const NARROW_COLUMN_MAX = 480;
+
 /** All widths are CSS pixels. The scrollbar is already absent from the document's
  * containing block, but must also be reserved by its composer sibling. */
 export function readingColumnGeometry(
@@ -67,10 +73,13 @@ export function useReadingColumn(
       let geometry = readingColumnGeometry(containerWidth, current, isWelcome, scale, nativeScrollbar());
       const minimap = geometry.minimap ? "on" : "off";
       const markersChanged = element.dataset.readingMinimap !== minimap;
-      if (markersChanged || !sameGeometry(previous, geometry)) {
+      const narrow = containerWidth <= NARROW_COLUMN_MAX;
+      const narrowChanged = element.hasAttribute("data-reading-narrow") !== narrow;
+      if (markersChanged || narrowChanged || !sameGeometry(previous, geometry)) {
         beforeConversationLayoutChange();
         try {
           element.dataset.readingColumn = current.mode;
+          if (narrowChanged) element.toggleAttribute("data-reading-narrow", narrow);
           if (markersChanged) {
             element.dataset.readingMinimap = minimap;
             // Switching to native scrollbars changes the scroller's clientWidth.
