@@ -1,3 +1,8 @@
 [submodule "omp-patch/vendor/oh-my-pi"]
 	path = omp-patch/vendor/oh-my-pi
 	url = https://github.com/can1357/oh-my-pi.git
+	# The vendor work tree is expected to be dirty at all times: overlay 铺进去、
+	# 接缝补丁套上之后，源码与上游必然不同。真正的来源是 omp-patch/overlay 与
+	# omp-patch/patches（普通跟踪文件），vendor 里的改动由 omp:patches:regen 回收，
+	# 所以这里不把 vendor 工作区差异算进 git status。
+	ignore = dirty

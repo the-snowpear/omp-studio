@@ -1598,8 +1598,7 @@ test("WP-014 confirmation registry evicts the oldest token at capacity", () => {
 });
 
 /**
- * Stand-in for the spawned Runtime. The probe only reads `exitCode` /
- * `signalCode` and waits for `close`, so nothing needs to be executed.
+ * Stand-in for the spawned Runtime's spawn/close lifecycle; no binary runs.
  */
 class FakeProbeChild extends EventEmitter {
   exitCode: number | null = null;
@@ -1643,7 +1642,10 @@ async function probeWithLostShutdownAck(exitCodeAfterShutdown?: number): Promise
   });
   const probe = createProcessProbe({
     createBootstrap: async () => ({ endpoint: bridge.endpoint, token, tokenFile: "unused" }),
-    spawnProcess: (() => child as unknown as ChildProcess) as unknown as typeof spawn,
+    spawnProcess: (() => {
+      queueMicrotask(() => child.emit("spawn"));
+      return child as unknown as ChildProcess;
+    }) as unknown as typeof spawn,
     shutdownGraceMs: 250,
   });
   try {

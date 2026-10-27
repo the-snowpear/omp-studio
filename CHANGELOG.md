@@ -7,15 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-10-27
+
 ### Added
 
-- 设置对话阅读宽度（标准、宽松、填满、自定义），并在窄窗口临时收缩/隐藏工作台面板；空间恢复时保留用户首选布局。窗口缩放时对话滚动锚定阅读位置。[宽度与窄窗说明](docs/conversation-width.md)。
+- 设置对话阅读宽度（标准、宽屏、铺满、自定义），并在窄窗口临时收缩/隐藏工作台面板；空间恢复时保留用户首选布局。窗口缩放时对话滚动锚定阅读位置（[#7](https://github.com/the-snowpear/omp-studio/issues/7)）。[宽度与窄窗说明](docs/conversation-width.md)。
+- 中止或报错后的对话可在空输入框直接继续；正常结束的对话不触发额外模型调用。
+- SSH 首次连接自动识别远端系统，经确认后安装私有 Node、Host 与签名 Runtime；发布 Linux、Windows、macOS 的 x64 / ARM64 远端环境包。
+- SSH 使用本机模型配置与凭证服务，支持远端优先、仅远端、仅本机三种联网方式；工作台显示当前出口，并提供重试远端网络入口。
+
+### Changed
+
+- 自动检查更新和自动下载设置移至「设置 → 常规」，更新准备前再次读取开关，及时尊重用户暂停自动下载的选择。
+- 开发检查统一为可按包运行的 `scripts/check.mjs`，加入包依赖与 Electron / Renderer 分层检查，并限制测试进程并发。
 
 ### Fixed
 
 - 统计页在应用内正常显示：托管 Runtime 拉起 `omp stats` 时不再打开系统浏览器，且渲染进程的 CSP 不再注入到被内嵌的仪表盘（`frame-ancestors 'none'` 曾让整页白屏）。
 - 开启 CLI 自动恢复时，Studio 新建会话仍创建独立会话，不再重复占用旧会话的写入租约（[the-snowpear/omp-studio#6](https://github.com/the-snowpear/omp-studio/issues/6)）。
 - Runtime 更新检查提前显示桌面版本或协议不兼容的原因，禁用不可执行的更新入口；准备兼容桌面后仍可一起更新（[the-snowpear/omp-studio#6](https://github.com/the-snowpear/omp-studio/issues/6)）。
+- 丢弃已被本机更高版本取代的旧 Runtime 更新事务，避免重新安装旧版本。
+- Runtime 启动自检超时后清理进程树，并将启动阶段日志写入 Host 日志。
+- 改善 SSH 主机名解析和目录冲突提示；空模型配置不再阻断凭证同步，Intel macOS 远端环境构建使用匹配的依赖安装检查。
+- 修复窄窗口面板优先级残留、固定弹层定位、无实际宽度变化时未释放滚动锚定，以及终端自动调整尺寸抢焦点的问题。
 
 ## [0.1.11] - 2026-10-26
 
@@ -286,7 +300,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/the-snowpear/omp-studio/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/the-snowpear/omp-studio/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/the-snowpear/omp-studio/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/the-snowpear/omp-studio/compare/v0.1.8...v0.1.9

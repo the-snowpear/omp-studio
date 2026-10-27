@@ -64,6 +64,9 @@ architecture_review_v2_work/
 /spacing-compare.png
 /Untitled*.png
 
+# Root scratch HTML exports (timestamp-named dumps such as 202609231523.html)
+/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*.html
+
 # UI experiment dumps (not the ver1/ver2 design reference)
 ui_reference/test/
 
@@ -84,5 +87,6 @@ packaging/installer-host/dist/
 packaging/resources/installer-ui/
 packaging/resources/installer-host/
 
-# Alternate lockfile (repo uses npm / package-lock.json)
+# Alternate package manager artifacts (repo uses npm / package-lock.json)
 pnpm-lock.yaml
+pnpm-workspace.yaml

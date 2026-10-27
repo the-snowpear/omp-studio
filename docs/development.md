@@ -26,7 +26,7 @@ in a pull request.
 ```powershell
 npm install
 npm run omp:overlay:apply # once after cloning or changing the upstream pin
-npm run check          # build once, then core regression tests
+npm run check          # architecture rules, compile, core regression tests
 npm run preview        # Electron from source
 ```
 
@@ -34,19 +34,26 @@ Choose other commands as needed; these are alternatives, not a checklist:
 
 | Command | Use |
 |---|---|
-| `npm run typecheck` | TypeScript checks without bundling the renderer |
+| `npm run check -- --fast` | Architecture rules, selector rules and an incremental compile only |
+| `npm run check -- --only <package>` | Rebuild one dependency closure, then run that package's core suites |
+| `npm run check -- --all` | Run every package test file instead of the core list |
+| `npm run check -- --production` | Add the renderer and remote-host release bundles |
 | `npm run build` | Production build, no tests |
 | `npm test` | Build and run all workspace tests |
 | `npm run test:tooling` | Build script dependencies and test packaging, signatures and updates |
 | `npm run pack:win` / `npm run pack:mac` | Build and audit a desktop package on its native platform |
+
+`scripts/check.mjs` is the only check entry point. Compilation is incremental
+(`tsconfig.base.json` → `dist/.tsbuildinfo`) and runs in dependency order, so a
+single package rebuilds in about two seconds and a cold full compile stays under
+half a minute. A failing step prints the tail of its output only.
 
 Renderer charts reuse the pinned native sources. Apply the overlay and generated seams before the first workspace build, including UI-only work. When editing native source, regenerate before reapplying so local edits are preserved. Ordinary builds need the applied sources but do not compile Rust or install the Runtime's Bun dependencies.
 
 Scoped UI work:
 
 ```powershell
-npm run typecheck -w @omp-studio/renderer
-npm run test -w @omp-studio/renderer
+npm run check -- --only renderer
 ```
 
 ## Platform differences
@@ -102,18 +109,26 @@ Tests should protect observable behaviour. Do not add fixture inventories,
 source-text/AST equality checks, or tests that only pin a UI label or default
 constant. Small copy/style changes usually need visual review, not new tests.
 
-`npm run check` builds once and runs the core list in `scripts/test-core.mjs`:
-Bridge/client communication, session lifecycle and history, Composer and
-approvals, conversation state, local files, installation and update recovery.
-`npm test` keeps the broader workspace regression suite available on demand.
-After a current build, `test:core` and `test:built` rerun tests without rebuilding.
-Package-local test commands are useful when editing one feature.
+`npm run check` runs the architecture rules, the selector rules, an incremental
+compile and the core list in `scripts/core-suites.mjs`: Bridge/client
+communication, session lifecycle and history, Composer and approvals,
+conversation state, local files, installation and update recovery. `npm test`
+keeps the broader workspace regression suite available on demand. After a
+current build, `test:core` and `test:built` rerun tests without rebuilding.
+Package-local test commands are useful when editing one feature, and
+`npm run check -- --only <package>` is the scoped equivalent of the full gate.
 
-`typecheck` builds shared TypeScript declarations in dependency order, then
-checks renderer and desktop types; it does not run Vite. Packaging scripts
-have a separate `test:tooling` entry. Runtime patch verification is for
-Runtime/overlay/seam changes and upstream upgrades. Performance benchmarks
-and `scripts/full-gui-e2e.mjs` are manual diagnostics for affected behaviour.
+`scripts/architecture.test.mjs` runs before anything compiles. It fails on a new
+workspace dependency cycle, a dependency outside the declared layering,
+`electron` outside `apps/desktop`, `react` outside `apps/renderer`, Node built-ins
+or `electron` in renderer sources, `@omp-studio/testkit` imported by a Host
+package, or a second definition of `PREVIEW_MODE_SWITCH_ENABLED`. When a rule
+must change, change the table and the code in the same commit.
+
+Packaging scripts have a separate `test:tooling` entry. Runtime patch
+verification is for Runtime/overlay/seam changes and upstream upgrades.
+Performance benchmarks and `scripts/full-gui-e2e.mjs` are manual diagnostics for
+affected behaviour.
 
 Release jobs build and package artifacts, audit the package, and verify the
 signed update assets. They do not repeat source tests. The duplicate P5
@@ -122,8 +137,10 @@ current builder still preserves the signed migration feed for old clients.
 
 ## CI
 
-PRs and pushes to `main` run one Windows build and the core suite. Documentation
-and UI-reference-only changes skip CI. The manual CI workflow has three scopes:
+PRs and pushes to `main` run `npm run check -- --production` on Windows: the
+architecture rules, the compile, the core suite and the release bundles.
+Documentation and UI-reference-only changes skip CI. The manual CI workflow has
+three scopes:
 
 - `core` (default): the same Windows checks.
 - `full`: all workspace and tooling tests on Windows and macOS, plus native

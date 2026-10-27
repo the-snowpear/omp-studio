@@ -34,6 +34,7 @@ Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`；macOS：`~
 | macOS / Windows 平台差异 | 平台层 |
 | Host 协议 / Runtime 进程 | Host 内核 |
 | overlay / 接缝补丁 | Runtime overlay |
+| 检查门禁 / 架构约束 | 检查门禁与架构约束 |
 | 某条 query/command 落哪 | 命令落点速查 |
 
 
@@ -51,6 +52,7 @@ Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`；macOS：`~
 - 参数校验只做一处：Host facade 或真正执行操作的服务（文件越界、git 参数注入这类安全检查放在服务里）。IPC / transport 只检查信封形状，不逐字段校验，不校验 Host 自己的输出，不深拷贝。
 - 新增 query / command 只需改契约类型、facade 分发和实现，不要为它另写边界校验器。
 - 测试只测用户能感知的行为和真实出过的 bug；不要为校验器、内部结构、"拒绝畸形输入"写成套测试，也不要为了测试改夹具绕圈。
+- 唯一的例外是 `scripts/architecture.test.mjs`：它只锚定已经写进本文的分层决策（依赖方向、electron / react 边界、预览开关唯一），不限制内部重构。改决策就同一次提交里改表和代码，diff 就是记录。
 - 发布前的检查只拦真正会发坏包的问题（签名、架构、产物缺失）。不在发布流程里重跑源码测试或 GUI 验收。
 
 ## 预览模式与 Mock 数据
@@ -97,23 +99,46 @@ Git 提交就是版本历史和恢复点，日常改动不再做 `backup/` 快�
 
 ## 验证
 
-优先按改动范围验证；日常检查只构建一次并运行核心流程回归：
+只有一个检查入口：`scripts/check.mjs`。按改动范围选切片，不要每次都跑全量。
 
 ```bash
-npm run check
+npm run check                          # 架构约束 + 选择器规则 + 编译 + 核心包/渲染测试
+npm run check -- --fast                # 只做架构约束、选择器规则和编译
+npm run check -- --only studio-host    # 只编译该包依赖闭包，再跑它的核心测试
+npm run check -- --only renderer       # 编译渲染层依赖，再跑核心渲染测试
+npm run check -- --all                 # 跑每个包的全部测试文件，不只核心名单
+npm run check -- --production          # 追加 Vite 生产包与远端 Host 产物（发布前、CI）
+node scripts/check.mjs --list          # 看有哪些组和包
 ```
 
-常用命令：
+组：`arch`、`selects`、`types`、`packages`、`renderer`、`production`；`--only` 也接受包名。失败只打末尾 40 行，CI 里会写成错误注解。
 
-- `npm run build`
-- `npm run typecheck`（TypeScript 检查，不打 Vite 生产包）
+编译是增量的（`tsconfig.base.json` 的 `incremental`，缓存落在各包 `dist/.tsbuildinfo`），全量编译按依赖分层并行。改一个包时用 `--only <包>`，别重编 12 个包。
+
+核心回归名单在 `scripts/core-suites.mjs`，`check.mjs`、`test-core.mjs` 和 CI 共用这一份。不要把页面细节、演示 fixture 或性能基准加入默认门禁；新测试应验证实际行为。
+
+### 架构约束（`scripts/architecture.test.mjs`）
+
+检查第一步就跑，改坏了秒级报错，不靠 review 记：
+
+- workspace 包之间的值依赖无环
+- 包只能依赖 `ALLOWED_INTERNAL_DEPS` 里声明的方向（例如 `client` 不能反向依赖 `studio-host`）
+- 只有 `apps/desktop` 可以依赖、导入 `electron`
+- 只有 `apps/renderer` 可以依赖 `react` / `react-dom` / `@testing-library/*`
+- `apps/renderer` 源码不能直接 import Node 内置模块或 `electron`，必须走 preload
+- `packages/*/src` 不能 import `@omp-studio/testkit`（演示数据留在渲染层 preview）
+- `PREVIEW_MODE_SWITCH_ENABLED` 只有 `preview/mode.ts` 一处定义，只有 `preview/` 读它
+
+改分层是决策不是失误：同一次提交里改表和代码，diff 就是记录。
+
+其余命令：
+
+- `npm run build`（完整构建，含生产包）
 - `npm test`（按需运行完整工作区测试）
 - `npm run test:tooling`（打包、签名、更新脚本改动时运行）
 - `npm run preview`（Windows：构建后启动 Electron 预览）
 
-核心测试名单在 `scripts/test-core.mjs`。不要把页面细节、演示 fixture 或性能基准加入默认门禁；新测试应验证实际行为。
-
-普通 PR / main CI 只运行 Windows 构建和核心测试；纯文档改动跳过。完整双平台与 Runtime 检查通过 CI 的 `full` 手动运行，性能 workflow 也只手动触发。发布负责构建、打包和产物校验，不重复跑源码测试。
+普通 PR / main CI 跑 `npm run check -- --production`：架构规则、类型、核心测试和生产包各一次；纯文档改动跳过。完整双平台与 Runtime 检查通过 CI 的 `full` 手动运行，性能 workflow 也只手动触发。发布负责打包和产物校验，不重复跑源码测试。
 
 运行时/补丁专项命令见根目录 `package.json`，包括 `runtime:verify-source` 和 `omp:verify:patches`，只在相关改动或升级上游时按需运行。
 

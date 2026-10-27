@@ -51,7 +51,7 @@ export class LocalCredentialVault {
   async snapshot(): Promise<RemoteProvisioning> {
     const directory = this.options.agentDirectory();
     const text = await readFile(join(directory, "models.yml"), "utf8").catch(error => { if (error.code === "ENOENT") return "providers: {}\n"; throw error; });
-    const models = parse(text) as { providers?: Record<string, { apiKey?: string }> };
+    const models = (parse(text) ?? {}) as { providers?: Record<string, { apiKey?: string }> };
     for (const provider of Object.values(models?.providers ?? {})) {
       if (provider.apiKey && /^[A-Z_][A-Z0-9_]*$/u.test(provider.apiKey) && process.env[provider.apiKey]) provider.apiKey = process.env[provider.apiKey]!;
       if (provider.apiKey?.startsWith("!")) provider.apiKey = (await promisify(exec)(provider.apiKey.slice(1), { timeout: 10_000, maxBuffer: 1024 * 1024, windowsHide: true })).stdout.trim();

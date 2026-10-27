@@ -1,6 +1,6 @@
 # SSH 工作区
 
-当前为开发预览功能，尚未发布。界面在本机，项目文件、Git、OMP Runtime 和模型执行在远端；不创建整个项目的本机镜像。
+当前为开发预览功能。界面在本机，项目文件、Git、OMP Runtime 和模型执行在远端；不创建整个项目的本机镜像。0.1.12 起提供匹配远端系统的签名环境包，首次连接可自动准备私有运行环境。
 
 ## 连接
 
@@ -14,8 +14,8 @@
 
 - 本机系统 OpenSSH Client；Windows 使用系统自带 `ssh.exe`。
 - 已在系统 SSH 完成主机密钥信任。密钥模式需可使用密钥或 ssh-agent 非交互登录；账密模式由应用密码框提供本次连接的凭证。应用不保存 SSH 密码，不关闭主机密钥验证，不转发 agent。
-- 远端 Node.js 22+；工作区使用 Git 时还需远端 Git。暂不自动安装 Node。
-- 远端 Linux、Windows 或 macOS。已实测 Windows x64 与 Ubuntu x64；macOS 实测暂缓，不能视为已认证兼容。
+- 远端具备 POSIX Shell 和 tar，或 Windows PowerShell；应用下载并上传包含私有 Node、Host、Runtime 的签名环境包，不要求预装全局 Node。工作区使用 Git 时仍需远端 Git。
+- 远端 Linux、Windows 或 macOS，CPU 为 x64 / ARM64；Linux 需要兼容 glibc 2.28+。原生构建与自检覆盖六种目标，历史连接实测为 Windows x64 与 Ubuntu x64；其他组合仍需实际连接验收。
 
 选择远端绝对目录后，项目、文件树、`@` 文件提及和 Git 面板读取这台远端的文件。连接失败不会切换到一个假的 SSH 工作区，也不会悄悄回落到本机执行。
 
@@ -23,11 +23,13 @@
 
 ## Runtime 与模型配置
 
-SSH Host 可以在没有 Runtime 时浏览项目和 Git，但不能生成回复。在执行位置菜单中选择 **导入签名 Runtime**，导入与远端 OS / CPU 架构匹配的 ZIP。只接受桌面应用既有可信公钥验证通过的制品，不信任 ZIP 自带的公钥。
+首次连接先体检远端系统，展示准备目录并请求确认，然后下载、验签、上传并激活匹配的私有环境。桌面发布附件中的 `remote-environment-<平台>.json` 和 `omp-studio-remote-<版本>-<平台>.*` 供应用自动使用；也可在执行位置菜单中 **导入签名 Runtime** 进行维护。只接受桌面应用既有可信公钥验证通过的制品，不信任 ZIP 自带的公钥。
 
 安装前必须完成远端任务、审批并关闭该目标终端。安装会验证签名、上传并校验文件、等待 Host 及 Runtime 退出、运行自检、激活后重连。不会修改正在运行的 EXE，不注册系统服务，也不改 `sshd` 或防火墙。
 
-远端使用独立的 OMP agent 目录，模型设置可在连接后的 **模型配置** 页面管理。本机供应商凭证不会复制到远端；也不接管远端桌面已打开的会话。项目级 Skills / MCP 等仍按 OMP 现有发现规则运行。独立 agent 目录不等于隔离所有系统配置：OMP 用户级插件和统计等仍可能读取远端账户的共享根目录。
+远端使用独立的 OMP agent 目录，并同步本机模型配置、模型选择、思考档位和供应商 API Key；连接后 **模型配置** 页面继续管理本机配置。OAuth 刷新通过 SSH 专用通道调用本机凭证服务，刷新令牌和 MCP 凭证留在本机。请只连接可信账户与服务器。项目级 Skills / MCP 等仍按 OMP 现有发现规则运行。独立 agent 目录不等于隔离所有系统配置：OMP 用户级插件和统计等仍可能读取远端账户的共享根目录。
+
+连接配置支持 **远端优先**、**仅远端**、**仅本机** 三种网络出口。远端优先仅在建立连接失败时尝试本机出口，不重放已发送的模型请求；远端私有地址继续使用远端网络。工作台显示当前出口，可手动重试远端网络。本机出口使用系统代理或连接中指定的上游代理。
 
 | 平台 | Host 默认数据根 |
 |---|---|
@@ -35,7 +37,7 @@ SSH Host 可以在没有 Runtime 时浏览项目和 Git，但不能生成回复�
 | Windows | `%LOCALAPPDATA%\omp-studio\remote` |
 | macOS | `~/Library/Application Support/omp-studio/remote` |
 
-其下 `versions/` 存放版本化 Host，`state/` 保存工作区注册表与私有连接信息，`state/agent/` 是独立 agent 配置，`state/runtimes/` 为签名 Runtime 安装。
+其下 `environments/` 存放完整私有环境，`current-environment.json` 记录当前版本；`state/` 保存工作区注册表与私有连接信息，`state/agent/` 是独立 agent 配置，`state/runtimes/` 为签名 Runtime 安装。旧部署可能保留 `versions/` 中的 Host。
 
 ## 终端与断线
 
@@ -59,7 +61,7 @@ SSH Host 可以在没有 Runtime 时浏览项目和 Git，但不能生成回复�
 - SSH alias 直接复用系统 config；暂未提供别名枚举和首次指纹确认。账密弹窗、Windows helper 和协议层已验证，真实密码登录仍阻塞；多因素、密码变更和账密跳板连接不在本轮范围。
 - 图片可作为内容附件发往远端；普通本机文件上传尚未接入，请用 `@` 选择远端文件。
 - 远端产物的本机预览/下载、外部编辑器与文件管理器打开、本机媒体/浏览器/屏幕转发、SSH 终端录制暂不支持；相关本机旁路不会操作本机同名路径。
-- Runtime 自动下载尚未接入，使用签名 ZIP 导入。Linux Runtime 平台表和 ELF 校验已接入，正式制品仍应在原生 Linux runner 构建并执行完整自检；本次跨平台测试构建不作为发布制品。
+- 自动环境准备需要本机能访问 GitHub Release 或已配置的更新镜像；不支持离线首次自动连接。六种环境包均由对应的原生 runner 构建，包含签名 Runtime。
 - macOS 实机、macOS 客户端出站 SSH、跳板/MFA/休眠重启、真实模型文件修改尚未验收。
 
 开发实现和实际测试记录见 [SSH 实施状态](../doc/ssh-workspace-progress.md)，原始讨论见 [SSH 工作区计划](../doc/ssh-workspace-plan.md)。

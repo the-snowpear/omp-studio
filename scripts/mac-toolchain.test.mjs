@@ -33,6 +33,11 @@ test("a ready Apple Silicon toolchain reports no problems", () => {
   assert.deepEqual(macToolchainProblems({ rust: true, bunVersion: "1.4.2", arch: "arm64", translated: false, run }), []);
 });
 
+test("a native Intel toolchain can build the x64 remote Runtime", () => {
+  const { run } = runner({ ...READY, "rustc -vV": "host: x86_64-apple-darwin\n" });
+  assert.deepEqual(macToolchainProblems({ rust: true, bunVersion: "1.4.2", arch: "x64", targetArch: "x64", translated: false, run }), []);
+});
+
 test("missing Command Line Tools never touches the shims that pop the install dialog", () => {
   const { run, calls } = runner({ ...READY, "/usr/bin/xcode-select -p": new Error("unable to get active developer directory") });
   const problems = macToolchainProblems({ arch: "arm64", translated: false, run });

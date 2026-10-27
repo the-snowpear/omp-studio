@@ -485,7 +485,7 @@ export function createStudioHostRuntime(
 		onChange: () => () => {},
 	},
 ): StudioHostRuntime {
-  const credentialBroker = createStudioAuthBroker(session);
+	const credentialBroker = createStudioAuthBroker(session);
 	if (!Number.isSafeInteger(bridgeConfig.runtimeEpoch) || (bridgeConfig.runtimeEpoch as number) <= 0) {
 		throw new Error("Studio Host Runtime epoch must be a positive safe integer");
 	}

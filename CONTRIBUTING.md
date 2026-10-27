@@ -45,12 +45,24 @@ install script documents those.
    private keys, or a dirty vendor gitlink. The submodule pin is a gitlink
    only; overlay apply **will** dirty the vendor working tree locally.
 6. Add or update tests that protect an observable contract. Do not add
-   tautologies (`expect(true).toBe(true)`, source-text greps).
+   tautologies (`expect(true).toBe(true)`, source-text greps). The architecture
+   rules are the one structural exception: they pin a layering decision, not the
+   code that implements it.
 7. Put user-facing changes under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md).
-8. Run checks that match the change. `npm run check` builds once and runs
-   core regressions; `npm test` runs the full workspace suite when needed.
-   Use `npm run test:tooling` for packaging/update scripts and
-   `npm run omp:verify:patches` for Runtime / patch work.
+8. Run checks that match the change. `npm run check` runs the architecture
+   rules, the selector rules, an incremental compile and the core suites;
+   `npm run check -- --only <package>` rebuilds one dependency closure and runs
+   only that package's suites, `npm run check -- --all` widens the test scope,
+   and `npm run check -- --production` adds the release bundles. `npm test` runs
+   the full workspace suite when needed. Use `npm run test:tooling` for
+   packaging/update scripts and `npm run omp:verify:patches` for Runtime / patch
+   work.
+
+The architecture rules in [`scripts/architecture.test.mjs`](scripts/architecture.test.mjs)
+fail fast on layering mistakes: a new package dependency, `electron` outside
+`apps/desktop`, `react` outside `apps/renderer`, Node built-ins or `electron` in
+renderer sources, fixtures imported by a Host package, or a second preview
+switch. When a rule has to change, change the table and the code in one commit.
 
 ## Pull request checklist
 

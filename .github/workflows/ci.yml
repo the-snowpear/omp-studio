@@ -42,10 +42,9 @@ jobs:
       - run: npm ci
       # The renderer imports chart sources from the patched vendor tree.
       - run: npm run omp:overlay:apply
-      - run: npm run check:selects
-      - run: npm run build
-      - run: npm run test:core
-        if: inputs.scope != 'full'
+      # Architecture rules, selector rules, compile, core suites, then the
+      # production bundles. One entry point, same code path as a local run.
+      - run: npm run check -- --production
       - run: npm run test:built
         if: inputs.scope == 'full'
       - name: Packaging and update tooling tests

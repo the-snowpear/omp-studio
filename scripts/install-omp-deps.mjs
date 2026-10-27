@@ -8,7 +8,7 @@ const bun = findBun();
 const env = toolingEnvironment({
   BUN_CONFIG_MAX_HTTP_REQUESTS: process.env.BUN_CONFIG_MAX_HTTP_REQUESTS ?? "4",
 });
-if (process.platform === "darwin") assertMacToolchain({ bunVersion: run(bun, ["--version"], { env, capture: true }), env });
+if (process.platform === "darwin") assertMacToolchain({ targetArch: process.arch, bunVersion: run(bun, ["--version"], { env, capture: true }), env });
 
 run(bun, args, {
   cwd: ompSourceDirectory,

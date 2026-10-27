@@ -38,6 +38,20 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 
 现行架构：[`docs/architecture.md`](../docs/architecture.md)。长文历史基线：[`BACKEND_FOUNDATION.md`](BACKEND_FOUNDATION.md)、[`FRONTEND_INTEGRATION.md`](FRONTEND_INTEGRATION.md)。补丁流程：[`omp-patch/README.md`](../omp-patch/README.md)。
 
+## 检查门禁与架构约束
+
+改工程底座（编译、测试、包结构）时看这里；日常改产品功能不用打开。
+
+| 事 | 文件 | 说明 |
+|---|---|---|
+| 一次检查跑什么 | `scripts/check.mjs` | 组 `arch` / `selects` / `types` / `packages` / `renderer` / `production`；支持 `--fast`、`--only <组\|包>`、`--all`、`--production` |
+| 核心回归名单 | `scripts/core-suites.mjs` | `check.mjs`、`test-core.mjs`、CI 共用一份，改名单只改这里 |
+| 分层与 Electron 边界 | `scripts/architecture.test.mjs` | 包依赖无环、依赖方向白名单、electron 只在 desktop、react 只在 renderer、renderer 不碰 Node、Host 不 import testkit、预览开关唯一 |
+| 选择器规则 | `scripts/check-renderer-selects.mjs` | 普通单选必须用 `AppSelect`，例外在文件内的 `allowed` 表 |
+| 增量编译 | `tsconfig.base.json` 的 `incremental` | 缓存落各包 `dist/.tsbuildinfo`；`tsc -p` 单包热编译约 2 秒 |
+
+> 命令与用法以 [`AGENTS.md`](../AGENTS.md) 的「验证」一节为准，这里只放文件落点。
+
 ---
 
 ## 工作台壳

@@ -42,7 +42,7 @@ test("the local credential relay filters MCP secrets and refreshes OAuth at the 
   } finally { vault.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }); }
 });
 
-test("local credential snapshots copy API keys while keeping OAuth refresh tokens at home", async () => {
+for (const modelsYml of ["providers: {}\n", ""]) test(`local credential snapshots copy API keys with ${modelsYml ? "configured" : "empty"} models while keeping OAuth refresh tokens at home`, async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-vault-snapshot-"));
   const server = createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
@@ -57,7 +57,7 @@ test("local credential snapshots copy API keys while keeping OAuth refresh token
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const brokerFile = join(root, "broker.json");
   await writeFile(brokerFile, JSON.stringify({ url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, token: "local-only-secret" }));
-  await writeFile(join(root, "models.yml"), "providers: {}\n");
+  await writeFile(join(root, "models.yml"), modelsYml);
   const vault = new LocalCredentialVault({ agentDirectory: () => root, brokerFile: async () => brokerFile, runtimeExecutable: async () => { throw new Error("must use the running local Runtime"); } });
   try {
     const snapshot = await vault.snapshot();

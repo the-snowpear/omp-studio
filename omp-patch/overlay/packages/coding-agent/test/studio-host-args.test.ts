@@ -61,9 +61,17 @@ describe("studio-host launch arguments", () => {
 		let resumed: SessionManager | undefined;
 		try {
 			const settings = Settings.isolated({ autoResume: true });
-			resumed = await createSessionManager(parseArgs(["--mode", "studio-host", "--resume", previous.getSessionFile()!]), directory.path(), settings);
+			resumed = await createSessionManager(
+				parseArgs(["--mode", "studio-host", "--resume", previous.getSessionFile()!]),
+				directory.path(),
+				settings,
+			);
 			expect(resumed?.getSessionId()).toBe(previous.getSessionId());
-			const continued = await createSessionManager(parseArgs(["--mode", "studio-host", "--continue"]), directory.path(), settings);
+			const continued = await createSessionManager(
+				parseArgs(["--mode", "studio-host", "--continue"]),
+				directory.path(),
+				settings,
+			);
 			expect(continued?.getSessionId()).toBe(previous.getSessionId());
 			const parsed = parseArgs([]);
 			const cli = await createSessionManager(parsed, directory.path(), settings);

@@ -57,6 +57,11 @@ in [release-operations.md](release-operations.md).
 |---|---|---|
 | Windows | `outputs/release/<arch>/` | Setup EXE and blockmap, Runtime ZIP and blockmap, signed `updates-win32-<arch>.json` |
 | macOS arm64 | `outputs/release/darwin-arm64/` | App ZIP and blockmap, first-install DMG, Runtime ZIP and blockmap, signed `updates-darwin-arm64.json` |
+| SSH targets (six OS/CPU combinations) | `outputs/remote-environments/<platform>/` | Signed `remote-environment-<platform>.json` and complete `omp-studio-remote-<version>-<platform>.zip` / `.tar.gz` |
+
+Desktop releases also build remote environments on native Windows, Linux and
+macOS x64/arm64 runners. Each archive contains private Node, the Host bundle
+and signed Runtime. All six jobs must succeed before the desktop publication.
 
 Runtime-only releases omit the desktop package. Windows also retains the
 signed v1 migration feed unchanged so old installations can migrate to Setup;
