@@ -1,5 +1,6 @@
 import { AppSelect } from "../AppSelect";
 import { FontSettings } from "./FontSettings";
+import { ConversationWidthSettings } from "./ConversationWidthSettings";
 import { FONT_SETTINGS_KEYS } from "./typography";
 import { Runtime1844Rows } from "./Runtime1844Rows";
 /**
@@ -17,7 +18,7 @@ import { Runtime1844Rows } from "./Runtime1844Rows";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppSettings } from "./appSettings";
-import { DEFAULT_APP_SETTINGS } from "./appSettings";
+import { CONVERSATION_WIDTH_KEYS, DEFAULT_APP_SETTINGS } from "./appSettings";
 import { SettingRow, SettingSection, StaticSelect, Switch, type SettingSource } from "./SettingRow";
 import { useUpdates, type UpdatePrefs } from "./updates";
 import { DesktopUpdateRecovery } from "./DesktopUpdateRecovery";
@@ -120,13 +121,14 @@ function AppSettingSelect<T extends string>({
   );
 }
 
-function TabHeader({ title, desc, ctl, runtime, resetKeys, resetTitle }: {
+function TabHeader({ title, desc, ctl, runtime, resetKeys, resetTitle, previewReset = false }: {
   title: string;
   desc: string;
   ctl?: SettingsCtl;
   runtime?: RuntimeSettingsCtl;
   resetKeys?: readonly (keyof AppSettings)[];
   resetTitle?: string;
+  previewReset?: boolean;
 }) {
   const { t } = useI18n();
   const preview = ctl?.preview === true || runtime?.preview === true;
@@ -140,7 +142,7 @@ function TabHeader({ title, desc, ctl, runtime, resetKeys, resetTitle }: {
           <button
             type="button"
             className="btn small outline"
-            disabled={ctl === undefined || ctl.preview}
+            disabled={ctl === undefined || (ctl.preview && !previewReset)}
             data-tip={ctl?.preview ? t("common.preview") : (resetTitle ?? t("common.resetDefaults"))}
             onClick={() => ctl?.resetApp(resetKeys)}
           >
@@ -470,6 +472,7 @@ function RuntimeSpeculationRow({ runtime, demo, label, desc }: {
 
 const GENERAL_RESET_KEYS: readonly (keyof AppSettings)[] = [
   ...FONT_SETTINGS_KEYS,
+  ...CONVERSATION_WIDTH_KEYS,
   "language", "theme", "density", "streaming", "streamingCadenceHz", "toolActivity",
   "restoreLastProject", "restoreLastSession", "startupPage",
   "rememberLayout", "perProjectLayout",
@@ -486,6 +489,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
         desc={t("settings.general.desc")}
         ctl={ctl}
         resetKeys={GENERAL_RESET_KEYS}
+        previewReset
       />
       <SettingSection title={t("settings.general.sectionApp")}>
         <SettingRow label={t("settings.general.language")} desc={t("settings.general.languageDesc")} source={appSource(app, "language")}>
@@ -552,6 +556,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
           />
         </SettingRow>
       </SettingSection>
+      <ConversationWidthSettings />
       <FontSettings key={String(ctl.preview)} ctl={ctl} />
       <UpdateAutomationSettings key={`updates-${ctl.preview}`} preview={ctl.preview} />
       <SettingSection title={t("settings.general.sectionStartup")}>

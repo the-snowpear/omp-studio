@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject, type UIEvent } from "react";
+import { cancelConversationReflow, isConversationReflowing, isConversationReflowScroll, registerConversationScroll } from "./conversationReflow";
 
 export const FOLLOW_THRESHOLD_PX = 72;
 export const AT_TAIL_PX = 1;
@@ -157,22 +158,32 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
       unpinnedAt.current = Date.now();
     }
   }, [pin, scrollerRef]);
-  const detachFromLatest = useCallback(() => setPinned(false), [setPinned]);
+  const detachFromLatest = useCallback(() => {
+    const el = scrollerRef.current;
+    if (el !== null) cancelConversationReflow(el);
+    setPinned(false);
+  }, [scrollerRef, setPinned]);
   const jumpToLatest = useCallback(() => {
     const el = scrollerRef.current;
     if (el === null) return;
+    cancelConversationReflow(el);
     setPinned(true);
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [scrollerRef, setPinned]);
   const preparePrepend = useCallback(() => {
     const el = scrollerRef.current;
     if (el === null) return;
+    cancelConversationReflow(el);
     anchor.current = captureAnchor(el);
     previousFirst.current = firstItemId(el);
     setPinned(false);
   }, [scrollerRef, setPinned]);
   const onScroll = useCallback((event: UIEvent<HTMLElement>) => {
     const el = event.currentTarget;
+    // A block-anchor correction is not user navigation. In particular, a
+    // shrinking width/font reflow must not re-pin a detached reader merely
+    // because the corrected scrollTop is now within the follow threshold.
+    if (isConversationReflowScroll(el)) { lastScrollTop.current = el.scrollTop; return; }
     const canScroll = el.scrollHeight > el.clientHeight + 1;
     if (!canScroll) {
       if (pin === "bottom" && !pinned.current) {
@@ -211,7 +222,11 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
   useLayoutEffect(() => { pinned.current = pin === "bottom"; setFollow(pin === "bottom"); setHasNewContent(false); anchor.current = null; lastScrollTop.current = 0; lastStickTop.current = 0; unpinnedAt.current = 0; }, [identityKey, pin]);
   useLayoutEffect(() => {
     const el = scrollerRef.current;
-    const doc = el?.querySelector<HTMLElement>(".convo-doc") ?? null;
+    return el === null ? undefined : registerConversationScroll(el, identityKey, () => pinned.current);
+  }, [identityKey, scrollerRef]);
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    const doc = el?.querySelector<HTMLElement>(".convo-doc, .sa-inspect-doc") ?? null;
     if (el === null) return;
     // Establish the initial position in the same pre-paint layout pass. Later
     // content/virtualizer growth is owned exclusively by the observer.
@@ -225,7 +240,7 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     }
     resizeFollow.current = true;
     const handleResize = () => {
-      if (el.scrollHeight <= el.clientHeight + 1) {
+      if (el.scrollHeight <= el.clientHeight + 1 && !isConversationReflowing(el)) {
         if (pin === "bottom") {
           pinned.current = true;
           setFollow(true);

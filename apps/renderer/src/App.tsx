@@ -20,6 +20,13 @@ import { conversationViewLeases } from "./conversation/conversationViews";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { applyTypography } from "./settings/typography";
+import { ConversationWidthProvider, useConversationWidth } from "./settings/ConversationWidthContext";
+import { ConversationWidthMenu } from "./settings/ConversationWidthSettings";
+import { useReadingColumn } from "./layout/useReadingColumn";
+import { useWorkbenchLayout } from "./layout/useWorkbenchLayout";
+import { useCompactTopbar } from "./layout/useCompactTopbar";
+import { beforeConversationLayoutChange } from "./conversation/conversationReflow";
+import { panelSize, SIDEBAR_LIMITS, SIDE_PANEL_LIMITS } from "./layout/workbenchLayout";
 import type { CSSProperties, FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
 import type {
@@ -148,7 +155,7 @@ import { buildPaletteGroups, type BottomTab, type PaletteAction, type SideTab } 
 import { toDrawerItems } from "./extensibilityMap";
 import { countEnabledDrawerItems, createPreviewDrawerItems, type DrawerItem } from "./skillsPreview";
 import { pagePhaseClass, useDeferredKey } from "./pageTransition";
-import { revealBottomBar, toggleBottomBarOpen, toggleBottomBarVisible } from "./bottomPanelChrome";
+import { toggleBottomBarOpen, toggleBottomBarVisible } from "./bottomPanelChrome";
 import { useViewedSessionTelemetry, type ViewedSessionTelemetryState } from "./telemetry/useViewedSessionTelemetry";
 import { hostErrorMessage, waitReceipt } from "./hostError";
 import { asConversationClient } from "./conversation/conversationHost";
@@ -772,12 +779,19 @@ function CrumbMenu({ id, openId, onToggle, tip, current, children, menu }: {
 }) {
   const open = openId === id;
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState({ top: 0, left: 0 });
 
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) return;
-    const rect = buttonRef.current.getBoundingClientRect();
-    setAnchor({ top: rect.bottom + 4, left: rect.left });
+    const position = () => {
+      const rect = buttonRef.current!.getBoundingClientRect();
+      const width = menuRef.current?.offsetWidth ?? 240;
+      setAnchor({ top: rect.bottom + 4, left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)) });
+    };
+    position();
+    window.addEventListener("resize", position);
+    return () => window.removeEventListener("resize", position);
   }, [open]);
 
   return (
@@ -796,6 +810,7 @@ function CrumbMenu({ id, openId, onToggle, tip, current, children, menu }: {
       {open
         ? createPortal(
             <div
+              ref={menuRef}
               className="menu title-menu-popover crumb-popover"
               role="menu"
               style={{ top: anchor.top, left: anchor.left }}
@@ -1042,6 +1057,7 @@ function Titlebar({
         className="icon-btn"
         data-tip={sidebarCollapsed ? t("common.expand") : t("common.collapse")}
         aria-label={sidebarCollapsed ? t("menu.expandSidebar") : t("menu.collapseSidebar")}
+        aria-controls="sidebar"
         aria-expanded={sidebarCollapsed === false}
         disabled={!onToggleSidebar}
         onClick={onToggleSidebar}
@@ -2145,18 +2161,21 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     const sidebar = handle.closest(".sidebar");
     handle.setPointerCapture(event.pointerId);
     const startX = event.clientX;
-    const startWidth = chrome.sidebarWidth;
+    const startWidth = sidebar instanceof HTMLElement ? sidebar.getBoundingClientRect().width : chrome.sidebarWidth;
+    const root = handle.closest<HTMLElement>(".adaptive-workbench") ?? document.documentElement;
+    const maxWidth = root.dataset.layoutOverlay === "sidebar" ? Math.min(400, root.clientWidth - 24) : Math.min(400, Math.max(200, root.clientWidth - 560));
+    beforeConversationLayoutChange();
     document.body.classList.add("is-resizing");
     document.body.style.cursor = "col-resize";
     let latest = startWidth;
     const apply = (width: number) => {
       latest = width;
-      if (sidebar instanceof HTMLElement) sidebar.style.width = `${width}px`;
-      document.documentElement.style.setProperty("--sidebar-w", `${width}px`);
+      root.style.setProperty("--sidebar-w", `${width}px`);
+      handle.setAttribute("aria-valuenow", String(Math.round(width)));
     };
     const move = (next: PointerEvent) => {
       next.preventDefault();
-      apply(Math.min(400, Math.max(200, startWidth + next.clientX - startX)));
+      apply(Math.min(maxWidth, Math.max(Math.min(200, maxWidth), startWidth + next.clientX - startX)));
     };
     const up = () => {
       document.body.classList.remove("is-resizing");
@@ -2169,6 +2188,15 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     handle.addEventListener("pointermove", move);
     handle.addEventListener("pointerup", up);
     handle.addEventListener("pointercancel", up);
+  };
+  const onResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const current = event.currentTarget.closest(".sidebar")?.getBoundingClientRect().width ?? chrome.sidebarWidth;
+    const step = event.shiftKey ? 32 : 16;
+    const value = event.key === "ArrowRight" ? current + step : event.key === "ArrowLeft" ? current - step : event.key === "Home" ? 200 : event.key === "End" ? 400 : undefined;
+    if (value === undefined) return;
+    event.preventDefault();
+    beforeConversationLayoutChange();
+    chrome.onResizeSidebar(panelSize(value, SIDEBAR_LIMITS));
   };
   const onSplitPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!chrome.explorerOpen) return;
@@ -2222,8 +2250,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const projectShare = chrome.splitRatio * 100;
   const fileShare = 100 - projectShare;
   return (
-    <aside ref={sidebarRef} className={`sidebar${chrome.collapsed ? " collapsed" : ""}${chrome.explorerOpen ? "" : " explorer-collapsed"}`} id="sidebar" aria-label={t("shell.projectAndChat")} style={{ width: chrome.sidebarWidth }}>
-      <div className="sidebar-resizer" id="sbResizer" role="separator" aria-orientation="vertical" aria-label={t("shell.adjustPanelWidth")} tabIndex={0} onPointerDown={onResizePointerDown} />
+    <aside ref={sidebarRef} className={`sidebar${chrome.collapsed ? " collapsed" : ""}${chrome.explorerOpen ? "" : " explorer-collapsed"}`} id="sidebar" inert={chrome.collapsed} aria-label={t("shell.projectAndChat")}>
+      <div className="sidebar-resizer" id="sbResizer" role="separator" aria-orientation="vertical" aria-label={t("shell.adjustPanelWidth")} aria-valuemin={200} aria-valuemax={400} aria-valuenow={chrome.sidebarWidth} tabIndex={0} onPointerDown={onResizePointerDown} onKeyDown={onResizeKeyDown} onDoubleClick={() => chrome.onResizeSidebar(272)} />
       <div className="sb-top">
         <AppMenu
           chrome={chrome}
@@ -3039,7 +3067,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
   const viewedTelemetry = useViewedSessionTelemetry({
     client: preview ? null : client,
     preview,
-    enabled: openMenu === "tokens" || openMenu === "context",
+    enabled: openMenu === "tokens" || openMenu === "context" || openMenu === "overflow-tokens" || openMenu === "overflow-context",
     viewedSessionId,
     liveSessionId: preview ? undefined : snapshotFrom(state)?.sessionId,
     liveTelemetry: preview ? undefined : (state.clientState?.entities.telemetry ?? undefined),
@@ -3066,9 +3094,10 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
     action?.();
   };
 
+  const topbarRef = useCompactTopbar();
   return (
     <>
-    <header className="topbar">
+    <header ref={topbarRef} className="topbar">
       <div className="tb-left">
         <nav className="tb-crumb" aria-label={t("shell.currentLocation")}>
           <CrumbMenu
@@ -3203,6 +3232,8 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
                     if (target !== undefined) run(() => chrome.onArchiveThread(target));
                   }}
                 >{t("history.archiveSession")}</MenuItem>
+                <div className="menu-sep" />
+                <ConversationWidthMenu onSelect={() => setOpenMenu(null)} onOpenSettings={() => { setOpenMenu(null); setSettingsIntent("general"); onRoute("settings"); }} />
               </>
             }
           >
@@ -3211,23 +3242,42 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
           </CrumbMenu>
         </nav>
         <button
-          className="icon-btn"
+          className="icon-btn tb-optional"
           data-tip={sessionLive && !sessionBusy ? t("shell.tipForkThread") : sessionActionReason}
           aria-label={t("shell.forkThread")}
           disabled={!sessionLive || sessionBusy}
           onClick={() => run(chrome.onForkThread)}
         ><Icon name="fork" /></button>
         <button
-          className="icon-btn"
+          className="icon-btn tb-optional"
           data-tip={sessionLive && !sessionBusy ? t("shell.tipHandoffThread") : sessionActionReason}
           aria-label={t("shell.handoffThread")}
           disabled={!sessionLive || sessionBusy}
           onClick={() => run(chrome.onHandoffThread)}
         ><Icon name="handoff" /></button>
       </div>
-      <button className="icon-btn lg" data-tip={t("nav.agentHub")} aria-label="Agent Hub" onClick={() => onRoute("agent-hub")}><Icon name="bot" extra="lg" /></button>
-      <button className="icon-btn" data-tip={t("nav.history")} aria-label={t("nav.history")} onClick={() => onRoute("history")}><Icon name="history" /></button>
+      <button className="icon-btn lg tb-optional" data-tip={t("nav.agentHub")} aria-label="Agent Hub" onClick={() => onRoute("agent-hub")}><Icon name="bot" extra="lg" /></button>
+      <button className="icon-btn tb-optional" data-tip={t("nav.history")} aria-label={t("nav.history")} onClick={() => onRoute("history")}><Icon name="history" /></button>
       <div className="tb-right">
+        <div className="tb-overflow" onMouseDown={event => event.stopPropagation()}>
+          <button type="button" className="icon-btn" aria-label={t("common.more")} data-tip={t("common.more")} aria-haspopup="menu" aria-expanded={openMenu === "overflow" || openMenu === "overflow-tokens" || openMenu === "overflow-context"} onClick={() => setOpenMenu(openMenu?.startsWith("overflow") ? null : "overflow")}><Icon name="more" /></button>
+          {openMenu?.startsWith("overflow") ? createPortal(
+            <div className="menu title-menu-popover tb-overflow-menu" role="menu" aria-label={t("common.more")} onMouseDown={event => event.stopPropagation()}>
+              {openMenu === "overflow-tokens" ? <>{preview ? <PreviewTokenPanel /> : <RealTokenPanel telemetry={telemetry} view={viewedTelemetry} />}<TokenCounterPane client={client} /></> : openMenu === "overflow-context" ? (preview ? <PreviewContextPanel /> : <RealContextPanel telemetry={telemetry} view={viewedTelemetry} />) : <>
+                <MenuItem icon="bot" onClick={() => run(() => onRoute("agent-hub"))}>{t("nav.agentHub")}</MenuItem>
+                <MenuItem icon="history" onClick={() => run(() => onRoute("history"))}>{t("nav.history")}</MenuItem>
+                <MenuItem icon="terminal" onClick={() => run(onOpenTerminal)}>{t("nav.terminal")}</MenuItem>
+                <MenuItem icon="diff" onClick={() => run(onOpenChanges)}>Changes</MenuItem>
+                <MenuItem icon="branch" onClick={() => run(onOpenGit)}>Git</MenuItem>
+                <div className="menu-sep" />
+                <MenuItem onClick={() => setOpenMenu("overflow-tokens")}>{t("shell.tokenUsageDetails")}</MenuItem>
+                <MenuItem onClick={() => setOpenMenu("overflow-context")}>{t("shell.contextCompositionDetails")}</MenuItem>
+                <MenuItem icon="minimize" disabled={!sessionLive || sessionBusy} onClick={() => run(chrome.onCompactThread)}>{t("shell.compactThread")}</MenuItem>
+                <MenuItem icon="light" onClick={() => run(chrome.onToggleTheme)}>{t("shell.theme")}</MenuItem>
+                <MenuItem icon="home" onClick={() => run(() => onRoute("home"))}>{t("nav.home")}</MenuItem>
+              </>}
+            </div>, document.body) : null}
+        </div>
         <div className="telemetry">
           <AnnotationButton iconOnly />
           <AnchoredPop
@@ -3283,10 +3333,10 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
           )}
         </div>
         <button className={`icon-btn${sideOpen ? " active" : ""}`} data-tip={t("menu.rightPanel")} aria-controls="sidePanel" aria-expanded={sideOpen} onClick={onToggleSide}><Icon name="panel" /></button>
-        <button className="icon-btn" data-tip={t("shell.theme")} onClick={chrome.onToggleTheme} aria-label={t("shell.theme")}>
+        <button className="icon-btn tb-optional" data-tip={t("shell.theme")} onClick={chrome.onToggleTheme} aria-label={t("shell.theme")}>
           <Icon name={chrome.theme === "dark" ? "moon" : "light"} />
         </button>
-        <button className="icon-btn" data-tip={t("nav.home")} onClick={() => onRoute("home")}><Icon name="home" /></button>
+        <button className="icon-btn tb-optional" data-tip={t("nav.home")} onClick={() => onRoute("home")}><Icon name="home" /></button>
       </div>
     </header>
     </>
@@ -3364,7 +3414,7 @@ const PROMPT_SEND_PHASE_LABEL: Record<PromptSendPhase, string> = {
   initiating: "Initiating",
 };
 
-function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, onCloseSide, sideTab, onSideTabChange, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, bottomTab, onBottomTabChange, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwWindow, btwSession, btwSideHeadRect, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactPending, onViewedTelemetryRefresh, composerDraft, onComposerDraftChange }: {
+function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, selectedSessionId, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, onCloseSide, sideTab, onSideTabChange, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, bottomTab, onBottomTabChange, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwWindow, btwSession, btwSideHeadRect, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactPending, onViewedTelemetryRefresh, composerDraft, onComposerDraftChange }: {
   state: ViewState;
   client: ClientStateSource;
   onOpenWorktree?: ((workspaceId: string) => Promise<void>) | undefined;
@@ -3391,6 +3441,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
   onCloseSide: () => void;
   sideTab: SideTab;
   onSideTabChange: (tab: SideTab) => void;
+  layoutOverlayDismiss?: () => void;
   /** 右侧面板宽度（px），由 spResizer 拖拽调整，App 持久化到 --panel-w。 */
   panelWidth: number;
   onResizePanel: (width: number) => void;
@@ -3480,20 +3531,23 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
     if (!(panel instanceof HTMLElement)) return;
     handle.setPointerCapture(event.pointerId);
     const startX = event.clientX;
-    const startWidth = panelWidth;
+    const startWidth = panel.getBoundingClientRect().width;
+    const root = handle.closest<HTMLElement>(".adaptive-workbench") ?? document.documentElement;
+    const maxWidth = root.dataset.layoutOverlay === "side" ? Math.min(640, root.clientWidth - 24) : Math.min(640, Math.max(360, root.clientWidth - 560));
+    beforeConversationLayoutChange();
     handle.classList.add("dragging");
     document.body.classList.add("is-resizing");
     document.body.style.cursor = "col-resize";
     let latest = startWidth;
     const apply = (width: number) => {
       latest = width;
-      panel.style.width = `${width}px`;
-      document.documentElement.style.setProperty("--panel-w", `${width}px`);
+      root.style.setProperty("--panel-w", `${width}px`);
+      handle.setAttribute("aria-valuenow", String(Math.round(width)));
     };
     const move = (next: PointerEvent) => {
       next.preventDefault();
       // 面板贴右缘：指针左移变宽、右移变窄。
-      apply(Math.min(640, Math.max(360, startWidth - (next.clientX - startX))));
+      apply(Math.min(maxWidth, Math.max(Math.min(360, maxWidth), startWidth - (next.clientX - startX))));
     };
     const up = () => {
       handle.classList.remove("dragging");
@@ -3508,6 +3562,15 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
     handle.addEventListener("pointerup", up);
     handle.addEventListener("pointercancel", up);
   };
+  const onPanelResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const current = event.currentTarget.closest(".side-panel")?.getBoundingClientRect().width ?? panelWidth;
+    const step = event.shiftKey ? 32 : 16;
+    const value = event.key === "ArrowLeft" ? current + step : event.key === "ArrowRight" ? current - step : event.key === "Home" ? 360 : event.key === "End" ? 640 : undefined;
+    if (value === undefined) return;
+    event.preventDefault();
+    beforeConversationLayoutChange();
+    onResizePanel(panelSize(value, SIDE_PANEL_LIMITS));
+  };
   // 底栏拖拽调高：照右侧 sp-resizer。收起时拖动先展开；拖动期间关掉 height
   // 过渡（.resizing），否则每一步都在追光标。夹取 120–480，对齐 ver1。
   const onBottomResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -3520,14 +3583,16 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
     setBottomResizing(true);
     handle.setPointerCapture(event.pointerId);
     const startY = event.clientY;
-    const startHeight = bottomHeight;
+    const startHeight = panel.getBoundingClientRect().height;
+    const root = handle.closest<HTMLElement>(".adaptive-workbench") ?? document.documentElement;
+    beforeConversationLayoutChange();
     document.body.classList.add("is-resizing");
     document.body.style.cursor = "row-resize";
     let latest = startHeight;
     const apply = (height: number) => {
       latest = clampBottomHeight(height);
       panel.style.height = `${latest}px`;
-      document.documentElement.style.setProperty("--bottom-panel-h", `${latest}px`);
+      root.style.setProperty("--bottom-panel-h", `${latest}px`);
       handle.setAttribute("aria-valuenow", String(latest));
     };
     const move = (next: PointerEvent) => {
@@ -3864,6 +3929,9 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
   /* 在屏面的欢迎态：由 ConversationPane 上报（leaving 期间保留旧屏）。壳层布局类
      跟它走，避免切换瞬间 minimap 占宽把还在淡出的欢迎页向左顶。 */
   const [surfaceWelcome, setSurfaceWelcome] = useState(showWelcome);
+  const readingColumnRef = useRef<HTMLDivElement>(null);
+  const conversationWidth = useConversationWidth();
+  useReadingColumn(readingColumnRef, conversationWidth, surfaceWelcome);
   const [jumpPill, setJumpPill] = useState<{ visible: boolean; jumpToLatest: () => void } | undefined>(undefined);
   const jumpPillRef = useRef<{ visible: boolean; jumpToLatest: () => void } | undefined>(undefined);
   const jumpToLatestSlot = useCallback((slot: { visible: boolean; jumpToLatest: () => void }) => {
@@ -5349,7 +5417,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
       </div> : null}
       <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={true} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
       <div className={`workbench${sideOpen ? " split-right" : ""}`} id="workbench">
-        <div className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`}>
+        <div ref={readingColumnRef} className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`}>
           <SessionModelRecovery demo={previewThreadId === "t5"} client={client} currentSessionId={snapshot?.sessionId} targetSessionId={selectedSessionId} threadId={selectedThreadId} available={runtimeConnected && !connection?.resyncRequired} capabilities={capabilities} onOpenModels={() => onRoute("model-config")} />
           <ConversationPane
             snapshot={convo}
@@ -6109,8 +6177,8 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
             <Icon name="panel-bottom" extra="sm" />
           </button>
         </div>
-        <aside className={`side-panel${sideOpen ? " open" : ""}`} id="sidePanel" aria-label={t("shell.rightPanel")} style={{ width: panelWidth }}>
-          <div className="sp-resizer" id="spResizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-label={t("shell.adjustPanelWidth")} onPointerDown={onPanelResizePointerDown} />
+        <aside className={`side-panel${sideOpen ? " open" : ""}`} id="sidePanel" inert={!sideOpen} aria-label={t("shell.rightPanel")}>
+          <div className="sp-resizer" id="spResizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-label={t("shell.adjustPanelWidth")} aria-valuemin={360} aria-valuemax={640} aria-valuenow={panelWidth} onPointerDown={onPanelResizePointerDown} onKeyDown={onPanelResizeKeyDown} onDoubleClick={() => onResizePanel(480)} />
           <div className="sp-head">
             <div className="tabs" role="tablist" aria-label={t("menu.view")}>
               <button className={sideTab === "changes" ? "active" : ""} role="tab" aria-selected={sideTab === "changes"} aria-controls="spChanges" onClick={() => onSideTabChange("changes")}>
@@ -6244,6 +6312,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
           onKeyDown={onBottomResizeKeyDown}
         />
         <div className="bp-head">
+          {layoutOverlayDismiss ? <button type="button" className="btn small outline layout-bottom-back" onClick={layoutOverlayDismiss}><Icon name="arrow-l" extra="sm" />{t("shell.returnToConversation")}</button> : null}
           <div className="tabs" role="tablist" aria-label={t("shell.bottomViews")}>
             <button className={bottomTab === "terminal" ? "active" : ""} role="tab" aria-selected={bottomTab === "terminal"} onClick={() => { onBottomTabChange("terminal"); onBottomOpenChange(true); }}>
               <Icon name="terminal" extra="sm" />Terminal
@@ -6280,7 +6349,7 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
             <Icon name={bottomOpen ? "chevron-d" : "chevron-u"} extra="sm" />
           </button>
         </div>
-        <div className="bp-body">
+        <div className="bp-body" inert={!bottomOpen || !bottomVisible}>
           <div className={`bp-page${bottomTab === "terminal" ? " active" : ""}`} id="bpTerminal" role="tabpanel">
             <TerminalPane ref={terminalRef} workspaceId={workspaceId} sessionId={snapshot?.sessionId} visible={bottomTab === "terminal" && bottomOpen && bottomVisible} />
           </div>
@@ -6481,10 +6550,6 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [sideOpen, setSideOpen] = useState(() => previewOn());
   const [bottomOpen, setBottomOpen] = useState(() => previewOn());
   const [bottomVisible, setBottomVisible] = useState(true);
-  const applyBottomChrome = useCallback((next: { visible: boolean; open: boolean }) => {
-    setBottomVisible(next.visible);
-    setBottomOpen(next.open);
-  }, []);
   const [sideTab, setSideTab] = useState<SideTab>("changes");
   /** 右侧面板宽度：默认与 tokens.css 的 --panel-w(480px) 一致，spResizer 拖拽提交。 */
   const [panelWidth, setPanelWidth] = useState(480);
@@ -6537,6 +6602,50 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const pageRoute = isSecondary(state.route) ? state.route : lastPageRoute.current;
   const pageMeta = SECONDARY_META[pageRoute];
   const shellClass = pagePhaseClass(shellPhase);
+  const layout = useWorkbenchLayout({ collapsed, sidebarWidth, sideOpen, panelWidth, bottomVisible, bottomOpen, bottomHeight }, !showPage);
+  const toggleSidebar = useCallback(() => {
+    beforeConversationLayoutChange();
+    if (layout.sidebarShown) { setCollapsed(true); layout.focusPanel(null); }
+    else { setCollapsed(false); layout.focusPanel("sidebar"); }
+  }, [layout.sidebarShown, layout.focusPanel]);
+  const openSide = useCallback(() => {
+    beforeConversationLayoutChange();
+    setSideOpen(true);
+    layout.focusPanel("side");
+  }, [layout.focusPanel]);
+  const closeSide = useCallback(() => {
+    beforeConversationLayoutChange();
+    setSideOpen(false);
+    layout.focusPanel(null);
+  }, [layout.focusPanel]);
+  const toggleSide = useCallback(() => {
+    if (layout.sideShown) closeSide();
+    else openSide();
+  }, [layout.sideShown, closeSide, openSide]);
+  const changeBottomOpen = useCallback((open: boolean) => {
+    beforeConversationLayoutChange();
+    setBottomOpen(open);
+    if (open) setBottomVisible(true);
+    layout.focusPanel(open ? "bottom" : null);
+  }, [layout.focusPanel]);
+  const changeBottomVisible = useCallback((visible: boolean) => {
+    beforeConversationLayoutChange();
+    setBottomVisible(visible);
+    if (visible && !layout.bottomVisible) {
+      setBottomOpen(true);
+      layout.focusPanel("bottom");
+    } else {
+      layout.focusPanel(visible && layout.bottomOpen ? "bottom" : null);
+    }
+  }, [layout.bottomVisible, layout.bottomOpen, layout.focusPanel]);
+  const toggleBottom = useCallback(() => {
+    if (!layout.bottomVisible || !layout.bottomOpen) {
+      setBottomVisible(true);
+      changeBottomOpen(true);
+      return;
+    }
+    changeBottomOpen(false);
+  }, [layout.bottomVisible, layout.bottomOpen, changeBottomOpen]);
   const [trailAt, setTrailAt] = useState(0);
   const [capNonce, setCapNonce] = useState(0);
   const [settingsNonce, setSettingsNonce] = useState(0);
@@ -6584,7 +6693,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const btwWindow = useBtwWindow({
     sideOpen,
     sideHeadRect,
-    onDock: () => { setSideTab("btw"); setSideOpen(true); },
+    onDock: () => { setSideTab("btw"); openSide(); },
   });
   const btwOnBranchedRef = useRef<(sessionId: string) => Promise<boolean>>(async () => false);
   const btwSession = useBtwSession({
@@ -6788,10 +6897,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", appSettings.theme);
     document.documentElement.setAttribute("data-density", appSettings.density);
-    document.documentElement.style.setProperty("--sidebar-w", `${sidebarWidth}px`);
-    document.documentElement.style.setProperty("--panel-w", `${panelWidth}px`);
-    document.documentElement.style.setProperty("--bottom-panel-h", `${bottomHeight}px`);
-  }, [appSettings.theme, appSettings.density, sidebarWidth, panelWidth, bottomHeight]);
+  }, [appSettings.theme, appSettings.density]);
 
   /* 布局记忆（App 级，非 Host）：按 scope（全局 / project:<id>）恢复与
      持久化；预览模式不参与，避免与演示默认布局互相覆盖。 */
@@ -7972,15 +8078,15 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         go("workbench");
         return;
       case "toggleSidebar":
-        setCollapsed((value) => !value);
+        toggleSidebar();
         return;
       case "toggleBottom":
         go("workbench");
-        applyBottomChrome(toggleBottomBarOpen({ visible: bottomVisible, open: bottomOpen }));
+        toggleBottom();
         return;
       case "toggleSide":
         go("workbench");
-        setSideOpen((value) => !value);
+        toggleSide();
         return;
       case "openSkills":
         go("workbench");
@@ -7992,7 +8098,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       case "openBottom":
         go("workbench");
         setBottomTab(action.tab);
-        applyBottomChrome(revealBottomBar());
+        changeBottomOpen(true);
         return;
       case "openSide":
         go("workbench");
@@ -8002,7 +8108,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           btwWindow.dock();
         }
         setSideTab(action.tab);
-        setSideOpen(true);
+        openSide();
         return;
       case "openSettings":
         setSettingsIntent(action.group);
@@ -8077,7 +8183,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       const key = event.key.toLowerCase();
       if (key === "b" && !event.shiftKey) {
         event.preventDefault();
-        setCollapsed((value) => !value);
+        toggleSidebar();
       } else if (key === "k" && event.shiftKey) {
         event.preventDefault();
         setSkillsOpen((value) => !value);
@@ -8089,12 +8195,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         startNewChat();
       } else if (key === "j" && !event.shiftKey) {
         event.preventDefault();
-        applyBottomChrome(toggleBottomBarOpen({ visible: bottomVisible, open: bottomOpen }));
+        toggleBottom();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [archiveBusy, archivePending, applyBottomChrome, bottomOpen, bottomVisible, dialog, go, skillsOpen, paletteOpen, closePalette, openPalette, startNewChat]);
+  }, [archiveBusy, archivePending, toggleBottom, toggleSidebar, dialog, go, skillsOpen, paletteOpen, closePalette, openPalette, startNewChat]);
 
   // macOS menu bar: the same actions as the shortcuts above plus a few menu-only ones.
   const runMenuCommand = useRef<(command: string) => void>(() => {});
@@ -8104,8 +8210,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       case "file.newChat": startNewChat(); return;
       case "file.openProject": void pickProject(); return;
       case "view.commandPalette": openPalette(); return;
-      case "view.toggleSidebar": setCollapsed((value) => !value); return;
-      case "view.toggleBottomPanel": applyBottomChrome(toggleBottomBarOpen({ visible: bottomVisible, open: bottomOpen })); return;
+      case "view.toggleSidebar": toggleSidebar(); return;
+      case "view.toggleBottomPanel": toggleBottom(); return;
       case "view.toggleSkills": setSkillsOpen((value) => !value); return;
       case "help.shortcuts": openDialog("shortcuts"); return;
     }
@@ -8327,7 +8433,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   };
 
   const chrome: ShellChrome = {
-    collapsed,
+    collapsed: !layout.sidebarShown,
     skillsOpen,
     explorerOpen,
     projectListExpanded,
@@ -8347,7 +8453,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     previewProjectId,
     previewThreadId,
     ...(previewDeckWait === undefined ? {} : { previewDeckWait }),
-    onToggleSidebar: () => setCollapsed((value) => !value),
+    onToggleSidebar: toggleSidebar,
     onToggleSkills: () => setSkillsOpen((value) => !value),
     onSkillsEnabledCount: setSkillsEnabledCount,
     onToggleExplorer: () => setExplorerOpen((value) => !value),
@@ -8462,7 +8568,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     onOpenDialog: openDialog,
     onOpenTerminalPanel: () => {
       setBottomTab("terminal");
-      setBottomOpen(true);
+      changeBottomOpen(true);
     },
     onOpenProjectInEditor: openProjectInEditor,
     onOpenProjectDirectory: openProjectDirectory,
@@ -8540,8 +8646,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           }
           onRoute(route);
         }}
-        onToggleSidebar={() => setCollapsed((value) => !value)}
-        sidebarCollapsed={collapsed}
+        onToggleSidebar={toggleSidebar}
+        sidebarCollapsed={!layout.sidebarShown}
         menus={
           <>
             <TitleMenu id="file" label={t("menu.file")} openId={openMenu} onToggle={setOpenMenu}>
@@ -8567,11 +8673,11 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               <button className="menu-item" role="menuitem" onClick={() => runEdit("selectAll")}>{t("menu.selectAll")}<span className="kbd">{formatShortcut(SHORTCUTS.selectAll)}</span></button>
             </TitleMenu>
             <TitleMenu id="view" label={t("menu.view")} openId={openMenu} onToggle={setOpenMenu}>
-              <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setCollapsed((value) => !value))}>{collapsed ? t("menu.expandSidebar") : t("menu.collapseSidebar")}<span className="kbd">{formatShortcut(SHORTCUTS.toggleSidebar)}</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => runMenu(toggleSidebar)}>{layout.sidebarShown ? t("menu.collapseSidebar") : t("menu.expandSidebar")}<span className="kbd">{formatShortcut(SHORTCUTS.toggleSidebar)}</span></button>
               <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setExplorerOpen((value) => !value))}>{explorerOpen ? t("menu.collapseExplorer") : t("menu.expandExplorer")}</button>
               <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setSkillsOpen((value) => !value))}>{skillsOpen ? t("skills.closeAria") : t("skills.title")}<span className="kbd">{formatShortcut(SHORTCUTS.skills)}</span></button>
-              <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setSideOpen((value) => !value))}>{sideOpen ? t("menu.collapseRightPanel") : t("menu.expandRightPanel")}</button>
-              <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setBottomOpen((value) => !value))}>{bottomOpen ? t("menu.collapseBottomPanel") : t("menu.expandBottomPanel")}<span className="kbd">{formatShortcut(SHORTCUTS.toggleBottomPanel)}</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => runMenu(toggleSide)}>{layout.sideShown ? t("menu.collapseRightPanel") : t("menu.expandRightPanel")}</button>
+              <button className="menu-item" role="menuitem" onClick={() => runMenu(toggleBottom)}>{layout.bottomOpen ? t("menu.collapseBottomPanel") : t("menu.expandBottomPanel")}<span className="kbd">{formatShortcut(SHORTCUTS.toggleBottomPanel)}</span></button>
               <div className="menu-sep" />
               <button className="menu-item" role="menuitem" onClick={() => runMenu(() => chrome.onToggleTheme())}>{theme === "dark" ? t("menu.lightTheme") : t("menu.darkTheme")}</button>
             </TitleMenu>
@@ -8706,7 +8812,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           <SecondaryInteractionDeck client={client} interaction={pendingInteraction} runtimeConnected={hubRuntimeConnected} resyncRequired={state.clientState?.connection.resyncRequired === true} preview={previewMode.preview} />
         </SecondaryPage>
       ) : (
-      <div className={`app-body ${shellClass}`}>
+      <div ref={layout.rootRef} className={`app-body adaptive-workbench ${shellClass}`} data-layout-overlay={layout.overlay ?? undefined}>
+        {layout.overlay ? <button type="button" className="layout-overlay-backdrop" aria-label={t("common.close")} onClick={layout.dismissOverlay} /> : null}
         <AppSidebar state={state} chrome={chrome} client={client} onRoute={go} onOpenAppUpdateDialog={() => setShowAppUpdateDialog(true)} />
         <div className="main-col">
           <AppTopbar
@@ -8715,11 +8822,11 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             chrome={chrome}
             onRoute={go}
             threadTitle={threadTitle}
-            sideOpen={sideOpen}
-            onToggleSide={() => setSideOpen((value) => !value)}
-            onOpenChanges={() => { setSideTab("changes"); setSideOpen(true); }}
-            onOpenGit={() => { setSideTab("git"); setSideOpen(true); }}
-            onOpenTerminal={() => { setBottomTab("terminal"); setBottomOpen(true); }}
+            sideOpen={layout.sideShown}
+            onToggleSide={toggleSide}
+            onOpenChanges={() => { setSideTab("changes"); openSide(); }}
+            onOpenGit={() => { setSideTab("git"); openSide(); }}
+            onOpenTerminal={() => { setBottomTab("terminal"); changeBottomOpen(true); }}
             viewedSessionId={selected?.sessionId}
             telemetryRefreshToken={telemetryRefreshToken}
           />
@@ -8742,6 +8849,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             onOpenDiagnostics={() => go("diagnostics")}
           />
           <WorkbenchCanvas
+            layoutOverlayDismiss={layout.dismissOverlay}
             onOpenWorktree={openManagedWorktree}
             state={state}
             client={client}
@@ -8761,23 +8869,23 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             onSelectThread={openHistoryEntry}
             onBranchedSession={selectBranchedSession}
             hiddenPreviewThreads={chrome.hiddenPreviewThreads}
-            sideOpen={sideOpen}
-            onCloseSide={() => setSideOpen(false)}
+            sideOpen={layout.sideShown}
+            onCloseSide={closeSide}
             sideTab={sideTab}
             onSideTabChange={setSideTab}
             panelWidth={panelWidth}
             onResizePanel={setPanelWidth}
-            bottomOpen={bottomOpen}
-            onBottomOpenChange={setBottomOpen}
-            bottomVisible={bottomVisible}
-            onBottomVisibleChange={setBottomVisible}
+            bottomOpen={layout.bottomOpen}
+            onBottomOpenChange={changeBottomOpen}
+            bottomVisible={layout.bottomVisible}
+            onBottomVisibleChange={changeBottomVisible}
             bottomHeight={bottomHeight}
             onResizeBottom={(height) => setBottomHeight(clampBottomHeight(height))}
             bottomTab={bottomTab}
             onBottomTabChange={setBottomTab}
             onRoute={go}
-            onOpenChanges={() => { setSideTab("changes"); setSideOpen(true); }}
-            onOpenGit={() => { setSideTab("git"); setSideOpen(true); }}
+            onOpenChanges={() => { setSideTab("changes"); openSide(); }}
+            onOpenGit={() => { setSideTab("git"); openSide(); }}
              composerRef={composerRef}
              {...(composerDraftsBySession[activeComposerOwner ?? ""] === undefined
                ? {}
@@ -9117,6 +9225,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
   );
   return (
     <PreviewModeProvider>
+      <ConversationWidthProvider>
       <I18nProvider>
         <RemoteScopeNotice />
         {body}
@@ -9124,6 +9233,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
         <StartupNotice />
         <TipHost />
       </I18nProvider>
+      </ConversationWidthProvider>
     </PreviewModeProvider>
   );
 }

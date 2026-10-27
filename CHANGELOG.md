@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 设置对话阅读宽度（标准、宽松、填满、自定义），并在窄窗口临时收缩/隐藏工作台面板；空间恢复时保留用户首选布局。窗口缩放时对话滚动锚定阅读位置。[宽度与窄窗说明](docs/conversation-width.md)。
+
 ### Fixed
 
 - 统计页在应用内正常显示：托管 Runtime 拉起 `omp stats` 时不再打开系统浏览器，且渲染进程的 CSP 不再注入到被内嵌的仪表盘（`frame-ancestors 'none'` 曾让整页白屏）。

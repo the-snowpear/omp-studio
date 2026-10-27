@@ -22,6 +22,7 @@ import { useI18n } from "./i18n";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_APP_SETTINGS, PREVIEW_APPROVAL_MODE, usePreviewAppSettings, useRuntimeDemo } from "./preview/settingsPreview";
 import { type AppSettings, useAppSettings } from "./settings/appSettings";
+import { ConversationWidthProvider, useConversationWidth } from "./settings/ConversationWidthContext";
 import { SlidingTabs } from "./SlidingTabs";
 import {
   AdvancedTab,
@@ -82,7 +83,12 @@ function takeSettingsIntent(): SettingsGroupId | null {
   }
 }
 
-export function SettingsPage({
+/** Reuse the global provider; standalone settings surfaces keep a local demo boundary. */
+export function SettingsPage(props: Parameters<typeof SettingsPageContent>[0]) {
+  return <ConversationWidthProvider><SettingsPageContent {...props} /></ConversationWidthProvider>;
+}
+
+function SettingsPageContent({
   client,
   approvalMode,
   onSetApprovalMode,
@@ -125,6 +131,7 @@ export function SettingsPage({
   const { preview } = usePreviewMode();
 
   const real = useAppSettings();
+  const conversationWidth = useConversationWidth();
   const previewApp = usePreviewAppSettings();
   const rawRuntimeDemo = useRuntimeDemo();
   const [flash, setFlash] = useState<string | null>(null);
@@ -182,9 +189,14 @@ export function SettingsPage({
   const ctl: SettingsCtl = preview
     ? {
       preview: true,
-      app: previewApp.app,
+      app: {
+        ...previewApp.app,
+        conversationWidthMode: conversationWidth.mode,
+        conversationCustomWidth: conversationWidth.customWidth,
+      },
       updateApp: (patch) => {
         previewApp.patch(patch);
+        conversationWidth.update(patch);
         flashDemo();
       },
       resetApp: (keys) => {
@@ -193,6 +205,7 @@ export function SettingsPage({
           (patch as Record<string, unknown>)[key] = PREVIEW_APP_SETTINGS[key];
         }
         previewApp.patch(patch);
+        conversationWidth.update(patch);
         flashDemo();
       },
       approvalMode: PREVIEW_APPROVAL_MODE,
