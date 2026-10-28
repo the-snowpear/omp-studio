@@ -30,13 +30,17 @@ async function fixture(t) {
   const startup = join(cwd, "mock-gh.sh");
   await writeFile(startup, `gh() {
     printf '%s\\n' "$*" >> "$REQUEST_LOG"
+    if [[ "$CACHE_HIT" = legacy && "$2" != *name=* ]]; then
+      printf '%s\\t84\\t%s\\n' "$LEGACY_NAME" "$LEGACY_SHA"
+      return
+    fi
     case "$CACHE_HIT:$2" in
       desktop:*) echo 42 ;;
       remote:*name=*-remote*) echo 84 ;;
     esac
   }
   `);
-  const run = async (cacheHit, rebuild = "false") => {
+  const run = async (cacheHit, rebuild = "false", extra = {}) => {
     const output = join(cwd, "result");
     const log = join(cwd, "requests");
     await writeFile(output, ""); await writeFile(log, "");
@@ -46,6 +50,7 @@ async function fixture(t) {
         GITHUB_OUTPUT: output, REQUEST_LOG: log, CACHE_HIT: cacheHit,
         GITHUB_REPOSITORY: "example/studio", PLATFORM: "win32-x64",
         BUN_VERSION: "1.4.2", OMP_RUNTIME_CHANNEL: "stable", REBUILD: rebuild,
+        ...extra,
       },
     });
     return {
@@ -53,7 +58,7 @@ async function fixture(t) {
       requests: await readFile(log, "utf8"),
     };
   };
-  return { run, write, commit };
+  return { run, write, commit, sha: () => git("rev-parse", "HEAD").toString().trim() };
 }
 
 test("Runtime reuse downloads the matching desktop or remote artifact; force bypasses lookup", async t => {
@@ -82,4 +87,16 @@ test("Runtime identity survives desktop edits and changes with Runtime sources o
   assert.notEqual(runtime, original);
   await write("packaging/keys/public.pem", "public key v2"); commit();
   assert.notEqual((await run("none")).key, runtime);
+});
+
+test("cache migration preserves signed Runtime bytes after orchestration edits and rejects changed sources", async t => {
+  const { run, write, commit, sha } = await fixture(t);
+  const legacy = { LEGACY_NAME: (await run("none")).key, LEGACY_SHA: sha() };
+  await write("scripts/build-omp-host.mjs", "build orchestration v2"); commit();
+  const reused = await run("legacy", "false", legacy);
+  assert.notEqual(reused.key, legacy.LEGACY_NAME);
+  assert.equal(reused.name, legacy.LEGACY_NAME);
+  assert.equal(reused.run_id, "84");
+  await write("omp-patch/overlay/host.ts", "changed Runtime source"); commit();
+  assert.equal((await run("legacy", "false", legacy)).run_id, "");
 });

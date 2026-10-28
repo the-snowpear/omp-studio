@@ -6,7 +6,7 @@ import { bundlePreload, PRELOAD_BUNDLE } from "./preload-bundle.mjs";
 
 // Execute the shipped bundle with the sandbox's restricted require. In #8 a
 // Host barrel import threw before any of the window bridges were exposed.
-test("sandboxed preload exposes the desktop bridges and forwards scoped IPC", async () => {
+for (const platform of ["win32", "darwin"]) test(`${platform} sandboxed preload exposes the desktop bridges and forwards scoped IPC`, async () => {
   bundlePreload();
   const globals = {};
   const listeners = new Map();
@@ -25,7 +25,7 @@ test("sandboxed preload exposes the desktop bridges and forwards scoped IPC", as
   };
   runInNewContext(readFileSync(PRELOAD_BUNDLE, "utf8"), {
     require: name => { assert.equal(name, "electron"); return electron; },
-    process: { platform: "win32", env: {} },
+    process: { platform, env: {} },
     TextEncoder,
     TextDecoder,
   }, { filename: "preload.cjs", timeout: 1000 });

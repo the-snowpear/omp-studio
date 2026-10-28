@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-10-28
+
+### Fixed
+
+- 修复 Windows 和 macOS 启动时因 preload 引入 Host 的 Node 模块而显示「Studio client unavailable」的问题；保留沙箱与上下文隔离，并增加两平台的桥接挂载回归检查（[#8](https://github.com/the-snowpear/omp-studio/issues/8)）。
+
+### Changed
+
+- 六个平台的远程环境发布复用签名 Runtime；远程构建跳过 Renderer、Electron 二进制下载和重复桌面构建，发行工件上传减少额外压缩。
+- 旧 Runtime 缓存可在核对源代码与公钥一致后迁移，沿用已发布签名字节，避免只改构建编排就重复编译同一 Runtime 版本。
+
 ## [0.1.12] - 2026-10-28
 
 ### Added

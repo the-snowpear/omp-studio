@@ -6,7 +6,9 @@
 
 桌面与六个平台的远程环境发布共用 `.github/scripts/find-runtime.sh`。脚本按平台、通道、Bun 版本、上游 commit，以及已提交的 overlay、接缝补丁、构建/签名/探测代码和公钥计算身份；仅修改桌面界面不会重编 Runtime。指纹读取 Git 对象，不受 Windows CRLF 影响。
 
-命中未过期的 Actions 工件时直接下载签名 Runtime，跳过 Bun、Rust 与 Runtime 编译。桌面与远程任务可互相复用工件；冷构建使用不同上传名，避免同次发布冲突。已有 Runtime 不再重复上传。工件过期或相关输入改变时重新构建；发布输入 `rebuild_runtime` 会同时强制桌面与远程任务重建。首次使用新指纹规则也会冷构建，实际耗时须以 Actions 为准。
+命中未过期的 Actions 工件时直接下载签名 Runtime，跳过 Bun、Rust 与 Runtime 编译。桌面与远程任务可互相复用工件；冷构建使用不同上传名，避免同次发布冲突。已有 Runtime 不再重复上传。工件过期或 Runtime 源码改变时重新构建；发布输入 `rebuild_runtime` 会同时强制桌面与远程任务重建。无可迁移工件时首次使用新指纹规则也会冷构建，实际耗时须以 Actions 为准。
+
+迁移旧缓存命名或仅修改构建编排时，精确查找未命中会检查已有工件对应的 Git commit；Runtime overlay、补丁、上游 pin、元数据生成代码和公钥一致时沿用原签名字节，避免相同 Runtime 版本因重新编译而违反发布不可变规则。强制重建会跳过此回退。
 
 远程任务使用 `npm run build:remote`，只编译包、Desktop Host 类型与远程 Host bundle，跳过 Renderer，并在安装依赖时跳过 Electron 二进制下载。随后运行 `npm run omp:build:host -- --skip-build` 时，包依赖已经就绪，不再重复构建整个桌面。普通 `omp:build:host` 调用仍执行完整构建。
 
