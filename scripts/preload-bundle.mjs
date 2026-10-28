@@ -24,16 +24,23 @@ function loadEsbuild() {
 }
 
 export function bundlePreload() {
-  loadEsbuild().buildSync({
+  const result = loadEsbuild().buildSync({
     absWorkingDir: repositoryRoot,
     entryPoints: ["apps/desktop/src/preload.ts"],
     bundle: true,
     platform: "node",
     format: "cjs",
     external: ["electron"],
+    metafile: true,
     outfile: PRELOAD_BUNDLE,
     logLevel: "warning",
   });
+  const unsupported = Object.values(result.metafile.outputs)
+    .flatMap(output => output.imports)
+    .filter(dependency => dependency.path !== "electron");
+  if (unsupported.length) {
+    throw new Error(`Sandboxed preload cannot load: ${unsupported.map(dependency => dependency.path).join(", ")}`);
+  }
   if (!existsSync(PRELOAD_BUNDLE)) {
     throw new Error("Sandboxed preload was not emitted at apps/desktop/dist/preload.cjs");
   }

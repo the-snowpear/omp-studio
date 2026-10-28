@@ -2,10 +2,24 @@ name: Remote environments
 
 on:
   workflow_call:
+    inputs:
+      rebuild_runtime:
+        type: boolean
+        default: false
   workflow_dispatch:
+    inputs:
+      rebuild_runtime:
+        type: boolean
+        description: Force a Runtime rebuild even when its sources are unchanged
+        default: false
 
 permissions:
   contents: read
+  actions: read
+
+env:
+  BUN_VERSION: "1.4.2"
+  OMP_RUNTIME_CHANNEL: stable
 
 jobs:
   build:
@@ -22,6 +36,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     environment: release
     timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OMP_TARGET_PLATFORM: ${{ startsWith(matrix.target, 'win32-') && 'win32' || startsWith(matrix.target, 'darwin-') && 'darwin' || 'linux' }}
+      OMP_TARGET_ARCH: ${{ endsWith(matrix.target, '-arm64') && 'arm64' || 'x64' }}
     defaults:
       run:
         shell: bash
@@ -29,17 +47,43 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Find reusable Runtime
+        id: runtime
+        env:
+          PLATFORM: ${{ matrix.target }}
+          REBUILD: ${{ inputs.rebuild_runtime }}
+        run: bash .github/scripts/find-runtime.sh
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
       - uses: oven-sh/setup-bun@v2
+        if: steps.runtime.outputs.run_id == ''
         with:
-          bun-version: 1.4.2
+          bun-version: ${{ env.BUN_VERSION }}
       - uses: Swatinem/rust-cache@v2
+        if: steps.runtime.outputs.run_id == ''
         with:
           workspaces: omp-patch/vendor/oh-my-pi -> target
-          key: remote-${{ matrix.target }}
+          shared-key: platform
+          key: natives-${{ matrix.target }}
+          cache-workspace-crates: true
+      - name: Install Host dependencies
+        env:
+          # Remote hosts use the bundled private Node, never Electron.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm ci
+      - run: npm run omp:overlay:apply
+      - name: Reuse signed Runtime
+        if: steps.runtime.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.runtime.outputs.name }}
+          path: packages/runtime-installer/dist/artifacts/${{ matrix.target }}/
+          run-id: ${{ steps.runtime.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Build remote Host without desktop renderer
+        run: npm run build:remote
       - name: Build signed native Runtime and complete remote environment
         env:
           OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
@@ -50,15 +94,21 @@ jobs:
           export OMP_RUNTIME_SIGNING_KEY="$RUNNER_TEMP/omp-remote-signing.pem"
           trap 'rm -f "$OMP_RUNTIME_SIGNING_KEY"' EXIT
           export OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
-          export OMP_TARGET_PLATFORM="${TARGET%-*}"
-          export OMP_TARGET_ARCH="${TARGET##*-}"
-          npm ci
-          npm run omp:overlay:apply
-          npm run omp:build:host
+          if [ -z "${{ steps.runtime.outputs.run_id }}" ]; then
+            npm run omp:build:host -- --skip-build
+          fi
           node scripts/build-remote-environment.mjs
           node scripts/verify-remote-environment.mjs "outputs/remote-environments/$TARGET"
       - uses: actions/upload-artifact@v4
+        if: steps.runtime.outputs.run_id == ''
+        with:
+          name: ${{ steps.runtime.outputs.key }}-remote
+          path: packages/runtime-installer/dist/artifacts/${{ matrix.target }}/
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
         with:
           name: release-candidate-remote-${{ matrix.target }}
+          compression-level: 0
           path: outputs/remote-environments/${{ matrix.target }}/
           if-no-files-found: error

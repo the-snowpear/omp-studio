@@ -314,6 +314,11 @@ if (plan.production) {
       command: process.execPath,
       args: [join(root, "scripts", "bundle-remote-host.mjs")],
     },
+    {
+      name: "bundle:preload",
+      command: process.execPath,
+      args: ["--test", join(root, "scripts", "preload-bundle.test.mjs")],
+    },
   ];
   await pool(steps, failures);
 }

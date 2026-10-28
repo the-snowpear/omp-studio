@@ -49,6 +49,8 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 分层与 Electron 边界 | `scripts/architecture.test.mjs` | 包依赖无环、依赖方向白名单、electron 只在 desktop、react 只在 renderer、renderer 不碰 Node、Host 不 import testkit、预览开关唯一 |
 | 选择器规则 | `scripts/check-renderer-selects.mjs` | 普通单选必须用 `AppSelect`，例外在文件内的 `allowed` 表 |
 | 增量编译 | `tsconfig.base.json` 的 `incremental` | 缓存落各包 `dist/.tsbuildinfo`；`tsc -p` 单包热编译约 2 秒 |
+| 发布 Runtime 复用 / 远程构建 | `.github/scripts/find-runtime.sh`、`.github/workflows/{release,remote-environments}.yml`；`package.json` 的 `build:remote` | 按已提交输入复用签名 Runtime，远程任务跳过 Renderer / Electron 二进制；见 `packaging/README.md` |
+| 沙箱 preload 构建回归 | `scripts/preload-bundle.mjs`、`preload-bundle.test.mjs`；`apps/desktop/src/ipc-validation.ts` | 禁止 bundle 外部加载 Node/Host 模块；production 检查执行 bundle 并验证桌面桥接挂载 |
 
 > 命令与用法以 [`AGENTS.md`](../AGENTS.md) 的「验证」一节为准，这里只放文件落点。
 

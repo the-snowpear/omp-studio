@@ -92,7 +92,6 @@ jobs:
         env:
           PLATFORM: win32-${{ matrix.arch }}
           REBUILD: ${{ inputs.rebuild_runtime }}
-          INPUTS_HASH: ${{ hashFiles('omp-patch/overlay/**', 'omp-patch/patches/**', 'omp-patch/upstream.json', 'packaging/keys/trusted-keys.json', 'scripts/build-omp-host.mjs', 'scripts/runtime-artifact.mjs') }}
         run: bash .github/scripts/find-runtime.sh
       - uses: actions/setup-node@v4
         with:
@@ -117,7 +116,7 @@ jobs:
         if: steps.runtime.outputs.run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: ${{ steps.runtime.outputs.key }}
+          name: ${{ steps.runtime.outputs.name }}
           path: packages/runtime-installer/dist/artifacts/win32-${{ matrix.arch }}/
           run-id: ${{ steps.runtime.outputs.run_id }}
           github-token: ${{ github.token }}
@@ -158,13 +157,16 @@ jobs:
             if (Test-Path -LiteralPath $keyPath) { Remove-Item -LiteralPath $keyPath -Force }
           }
       - uses: actions/upload-artifact@v4
+        if: steps.runtime.outputs.run_id == ''
         with:
           name: ${{ steps.runtime.outputs.key }}
+          compression-level: 0
           path: packages/runtime-installer/dist/artifacts/win32-${{ matrix.arch }}/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: release-candidate-${{ matrix.arch }}
+          compression-level: 0
           path: outputs/release/${{ matrix.arch }}/
           if-no-files-found: error
 
@@ -199,7 +201,6 @@ jobs:
         env:
           PLATFORM: darwin-arm64
           REBUILD: ${{ inputs.rebuild_runtime }}
-          INPUTS_HASH: ${{ hashFiles('omp-patch/overlay/**', 'omp-patch/patches/**', 'omp-patch/upstream.json', 'packaging/keys/trusted-keys.json', 'scripts/build-omp-host.mjs', 'scripts/runtime-artifact.mjs') }}
         run: bash .github/scripts/find-runtime.sh
       - uses: actions/setup-node@v4
         with:
@@ -223,7 +224,7 @@ jobs:
         if: steps.runtime.outputs.run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: ${{ steps.runtime.outputs.key }}
+          name: ${{ steps.runtime.outputs.name }}
           path: packages/runtime-installer/dist/artifacts/darwin-arm64/
           run-id: ${{ steps.runtime.outputs.run_id }}
           github-token: ${{ github.token }}
@@ -267,20 +268,28 @@ jobs:
           npm run updates:build
           npm run updates:verify
       - uses: actions/upload-artifact@v4
+        if: steps.runtime.outputs.run_id == ''
         with:
           name: ${{ steps.runtime.outputs.key }}
+          compression-level: 0
           path: packages/runtime-installer/dist/artifacts/darwin-arm64/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: release-candidate-darwin-arm64
+          compression-level: 0
           path: outputs/release/darwin-arm64/
           if-no-files-found: error
 
   build-remote:
     needs: prepare
     if: needs.prepare.outputs.kind == 'desktop'
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/remote-environments.yml
+    with:
+      rebuild_runtime: ${{ inputs.rebuild_runtime || false }}
     secrets: inherit
 
   publish:

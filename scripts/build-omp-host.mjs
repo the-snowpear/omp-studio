@@ -96,7 +96,9 @@ run(executable, ["--smoke-test"], { cwd: ompSourceDirectory, env });
 console.log(`Built and verified ${executable}`);
 
 const npm = npmInvocation();
-run(npm.command, [...npm.prefix, "run", "build"]);
+// Remote release jobs build their Host dependencies first and never need the
+// desktop renderer. Local/installer callers keep the complete workspace build.
+if (!process.argv.includes("--skip-build")) run(npm.command, [...npm.prefix, "run", "build"]);
 const runtimeIdentity = await probeRuntimeIdentity({ binaryPath: executable });
 console.log(`Probed Runtime identity ${runtimeIdentity.runtimeVersion}`);
 

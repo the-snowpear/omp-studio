@@ -2,6 +2,18 @@
 
 > 当前更新重构：默认采用当前用户安装（`%LOCALAPPDATA%\Programs\OMP Studio`），应用使用 `asInvoker`。新安装器不全局结束同名进程，自动更新走 NSIS 静默模式。活跃 Runtime 已移出安装目录，详见 [更新系统](../docs/updates.md)。以下涉及全机安装、Program Files、requireAdministrator 和旧 Runtime 路径的段落是 v0.1.5 及以前的历史说明；发布新版本以更新文档和当前配置为准。
 
+## 发布构建与 Runtime 复用
+
+桌面与六个平台的远程环境发布共用 `.github/scripts/find-runtime.sh`。脚本按平台、通道、Bun 版本、上游 commit，以及已提交的 overlay、接缝补丁、构建/签名/探测代码和公钥计算身份；仅修改桌面界面不会重编 Runtime。指纹读取 Git 对象，不受 Windows CRLF 影响。
+
+命中未过期的 Actions 工件时直接下载签名 Runtime，跳过 Bun、Rust 与 Runtime 编译。桌面与远程任务可互相复用工件；冷构建使用不同上传名，避免同次发布冲突。已有 Runtime 不再重复上传。工件过期或相关输入改变时重新构建；发布输入 `rebuild_runtime` 会同时强制桌面与远程任务重建。首次使用新指纹规则也会冷构建，实际耗时须以 Actions 为准。
+
+远程任务使用 `npm run build:remote`，只编译包、Desktop Host 类型与远程 Host bundle，跳过 Renderer，并在安装依赖时跳过 Electron 二进制下载。随后运行 `npm run omp:build:host -- --skip-build` 时，包依赖已经就绪，不再重复构建整个桌面。普通 `omp:build:host` 调用仍执行完整构建。
+
+签名、目标架构、产物摘要与远程环境验证照常执行；上传已打包的发行工件使用 `compression-level: 0`，减少额外压缩。
+
+沙箱 preload 只允许外部加载 `electron`。打包时检查 bundle 的实际外部依赖；`npm run check -- --production` 与 `npm run test:tooling` 还会在受限环境中执行真实 bundle，验证桥接对象可挂载及 IPC 事件过滤，覆盖 [Issue #8](https://github.com/the-snowpear/omp-studio/issues/8) 的启动故障。
+
 安装器骨架：可见向导是 `packaging/ui` 那套 720×480 HTML，由 WebView2
 小宿主显示；NSIS 只负责提权和解包。浏览器里仍可直接打开原型预览。
 
