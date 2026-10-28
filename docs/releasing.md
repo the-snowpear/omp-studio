@@ -46,10 +46,12 @@ the restored output matches its target.
 packaging inputs change, and can also be run manually. It warms Rust workspace
 and dependency output plus Bun downloads on all six native platforms. Existing
 signed Runtimes are downloaded unchanged while native modules are compiled for
-the cache; changed Runtime inputs are built, checked and signed once. Windows
+the cache. Cache warming never signs a replacement Runtime; when no matching
+artifact exists, the next release producer builds it using the warm native cache. Windows
 jobs additionally download Electron, NSIS and WebView2 and prepare node-pty.
 Nothing is published. The optional `verify_remote` manual input packages and
-verifies all six remote candidates using the prepared Runtime artifacts.
+verifies all six remote candidates using existing signed Runtime artifacts;
+run that verification after a matching Runtime has been produced for every platform.
 
 Warm on `main` so later release tags can restore the default branch caches.
 GitHub isolates caches saved under different tags; a cache saved only by one

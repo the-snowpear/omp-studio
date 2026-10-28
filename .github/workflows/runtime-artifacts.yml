@@ -23,7 +23,7 @@ on:
         options: [all, win32-x64, win32-arm64, linux-x64, linux-arm64, darwin-x64, darwin-arm64]
         default: all
       warm_cache:
-        description: Compile native modules even when an existing signed Runtime is reused
+        description: Warm native compilation only, preserving existing signed Runtime bytes
         type: boolean
         default: true
 
@@ -104,12 +104,12 @@ jobs:
           run-id: ${{ steps.runtime.outputs.run_id }}
           github-token: ${{ github.token }}
       - name: Warm native compilation while preserving signed Runtime bytes
-        if: steps.runtime.outputs.run_id != '' && inputs.warm_cache
+        if: inputs.warm_cache
         run: |
           npm run omp:install-deps
           npm run omp:build:natives
       - name: Build and sign Runtime once
-        if: steps.runtime.outputs.run_id == ''
+        if: steps.runtime.outputs.run_id == '' && !inputs.warm_cache
         env:
           OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
         run: |
@@ -121,6 +121,7 @@ jobs:
           npm run build:packages
           npm run omp:build:host -- --skip-build
       - uses: actions/upload-artifact@v4
+        if: steps.runtime.outputs.run_id != '' || !inputs.warm_cache
         with:
           name: ${{ steps.runtime.outputs.key }}
           path: packages/runtime-installer/dist/artifacts/${{ matrix.target }}/
