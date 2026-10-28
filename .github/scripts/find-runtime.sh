@@ -19,8 +19,8 @@ key="runtime-${PLATFORM}-${OMP_RUNTIME_CHANNEL}-${vendor}-bun${BUN_VERSION}-${in
 run_id=""
 name="$key"
 if [ "${REBUILD:-}" != "true" ]; then
-  # Remote and desktop jobs can build the same target concurrently on a cold
-  # release. Separate upload names avoid artifact conflicts; either is reusable.
+  # Older remote runs used a -remote suffix. Both names carry the same source
+  # identity; new releases prepare one artifact per platform for all consumers.
   for name in "$key" "$key-remote"; do
     run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${name}&per_page=20" \
       --jq '[.artifacts[] | select(.expired | not)][0].workflow_run.id // empty' || true)"

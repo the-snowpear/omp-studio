@@ -1,0 +1,129 @@
+name: Prepare signed Runtimes
+
+on:
+  workflow_call:
+    inputs:
+      platforms:
+        type: string
+        default: all
+      runtime_channel:
+        type: string
+        default: stable
+      rebuild_runtime:
+        type: boolean
+        default: false
+      warm_cache:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Native platforms to prepare
+        type: choice
+        options: [all, win32-x64, win32-arm64, linux-x64, linux-arm64, darwin-x64, darwin-arm64]
+        default: all
+      warm_cache:
+        description: Compile native modules even when an existing signed Runtime is reused
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  BUN_VERSION: "1.4.4"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.runtime_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: plan
+        env:
+          RUNTIME_PLATFORMS: ${{ inputs.platforms || 'all' }}
+        run: node scripts/release-plan.mjs
+
+  runtime:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    environment: release
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OMP_TARGET_PLATFORM: ${{ startsWith(matrix.target, 'win32-') && 'win32' || startsWith(matrix.target, 'darwin-') && 'darwin' || 'linux' }}
+      OMP_TARGET_ARCH: ${{ endsWith(matrix.target, '-arm64') && 'arm64' || 'x64' }}
+      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Find reusable Runtime
+        id: runtime
+        env:
+          PLATFORM: ${{ matrix.target }}
+          REBUILD: ${{ inputs.rebuild_runtime }}
+        run: bash .github/scripts/find-runtime.sh
+      - uses: actions/setup-node@v4
+        if: steps.runtime.outputs.run_id == '' || inputs.warm_cache
+        with:
+          node-version: 24
+      - uses: ./.github/actions/cache-release-downloads
+        if: steps.runtime.outputs.run_id == '' || inputs.warm_cache
+      - uses: oven-sh/setup-bun@v2
+        if: steps.runtime.outputs.run_id == '' || inputs.warm_cache
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: ./.github/actions/cache-runtime-build
+        if: steps.runtime.outputs.run_id == '' || inputs.warm_cache
+      - name: Install build dependencies
+        if: steps.runtime.outputs.run_id == '' || inputs.warm_cache
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm ci --prefer-offline --no-audit --no-fund
+      - name: Apply Runtime sources
+        if: steps.runtime.outputs.run_id == '' || inputs.warm_cache
+        run: npm run omp:overlay:apply
+      - name: Reuse signed Runtime
+        if: steps.runtime.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.runtime.outputs.name }}
+          path: packages/runtime-installer/dist/artifacts/${{ matrix.target }}/
+          run-id: ${{ steps.runtime.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Warm native compilation while preserving signed Runtime bytes
+        if: steps.runtime.outputs.run_id != '' && inputs.warm_cache
+        run: |
+          npm run omp:install-deps
+          npm run omp:build:natives
+      - name: Build and sign Runtime once
+        if: steps.runtime.outputs.run_id == ''
+        env:
+          OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          node -e 'require("node:fs").writeFileSync(require("node:path").join(process.env.RUNNER_TEMP,"omp-runtime-signing.pem"),process.env.OMP_SIGNING_SECRET,{mode:384})'
+          export OMP_RUNTIME_SIGNING_KEY="$RUNNER_TEMP/omp-runtime-signing.pem"
+          trap 'rm -f "$OMP_RUNTIME_SIGNING_KEY"' EXIT
+          export OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
+          npm run build:packages
+          npm run omp:build:host -- --skip-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.runtime.outputs.key }}
+          path: packages/runtime-installer/dist/artifacts/${{ matrix.target }}/
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error

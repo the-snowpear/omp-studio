@@ -10,8 +10,9 @@ and performance diagnostics.
 Push a new desktop tag `v<workspace version>` or Runtime tag
 `runtime-v<Runtime version>`, or run the Release workflow manually.
 
-1. Build and sign the Runtime, including its binary smoke and identity checks,
-   or reuse a matching signed Runtime from a previous workflow run.
+1. Prepare each platform's signed Runtime once, including binary smoke and
+   identity checks, or reuse a matching signed Runtime from an earlier run.
+   Desktop and remote jobs download that same prepared artifact.
 2. Build the workspace once and package the desktop when requested.
    `pack:win` / `pack:mac` audit the resulting package.
 3. Collect previous update catalogs, build the new signed assets, and run
@@ -19,7 +20,7 @@ Push a new desktop tag `v<workspace version>` or Runtime tag
 4. Upload candidates. The publisher checks signatures and uploaded digests,
    then publishes only after all requested architectures succeed.
 
-The Runtime is reused automatically: each build job hashes the Runtime inputs
+The Runtime is reused automatically: the shared Runtime producer hashes its inputs
 (vendor commit, `omp-patch/overlay`, `omp-patch/patches`, `upstream.json`, the
 trusted key table, the Runtime build scripts, Bun version, channel and
 platform) and downloads the signed Runtime artifact of an earlier run with the
@@ -41,10 +42,24 @@ fallback. Electron or dependency changes therefore rebuild the module. Normal
 packaging keeps native rebuilding enabled; electron-rebuild decides whether
 the restored output matches its target.
 
-Run **Warm Windows release caches** manually on `main` to fill or verify the
-x64/ARM64 caches before a release. It downloads Electron, NSIS and WebView2, then runs
-`npm run pack:win -- --native-only`, without a Runtime build, signing key or
-publication. A new cache is populated only after the job succeeds.
+**Warm release caches** runs on `main` after relevant Runtime, dependency or
+packaging inputs change, and can also be run manually. It warms Rust workspace
+and dependency output plus Bun downloads on all six native platforms. Existing
+signed Runtimes are downloaded unchanged while native modules are compiled for
+the cache; changed Runtime inputs are built, checked and signed once. Windows
+jobs additionally download Electron, NSIS and WebView2 and prepare node-pty.
+Nothing is published. The optional `verify_remote` manual input packages and
+verifies all six remote candidates using the prepared Runtime artifacts.
+
+Warm on `main` so later release tags can restore the default branch caches.
+GitHub isolates caches saved under different tags; a cache saved only by one
+release tag is not available to the next tag. Signed Runtime artifact lookup
+works across workflow runs separately from the compilation caches.
+
+The reusable **Prepare signed Runtimes** workflow owns the native build matrix.
+Consumers wait for it and never compile another Runtime during the same release.
+Runtime-only releases prepare only the requested Windows architectures and
+optional macOS arm64. Its manual entry can warm or prepare one native platform.
 
 | Manual input | Purpose |
 |---|---|
