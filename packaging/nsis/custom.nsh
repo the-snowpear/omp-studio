@@ -7,15 +7,14 @@
 !include x64.nsh
 ;
 ; 可见向导是 `packaging/ui`（WebView2 宿主 OmpInstallerUi.exe）。
-; NSIS 只做提权拷贝引擎：隐藏 MUI 页、读 options.ini、写文件。
+; NSIS 隐藏原生页、读取 options.ini、写程序文件；旧全机迁移单独提权。
 ; 目录解析表与 `scripts/installer-dir.mjs` / HTML `resolveInstallDir` 保持一致。
-; 缺少 WebView2 时回退到默认目录 + 原生 InstFiles。
-; HTML 不从 $PLUGINSDIR 用 file:// 打开：NSIS 3 提权后该目录仅 Administrators
-; 可读，WebView2 子进程会 ERR_ACCESS_DENIED。宿主拷到 ProgramData 并用
-; https://omp-installer/ 虚拟主机加载。握手 INI 仍写 $PLUGINSDIR。
+; 缺少 WebView2 时回退到完整的原生欢迎、目录、进度与完成页。
+; HTML 从当前账户下每次安装独立的目录经 https://omp-installer/ 加载；
+; 握手 INI 留在该次 NSIS 的 $PLUGINSDIR，宿主通过 PID 握手绑定。
 ;
 ; 范围
-;   - 所有用户（perMachine: true），默认 %PROGRAMFILES%\OMP Studio，需要管理员。
+;   - 当前用户（perMachine: false），默认 %LOCALAPPDATA%\Programs\OMP Studio。
 ; 目录（浏览/手输的是选中文件夹，写入的是解析后的安装根）
 ;   - 末级已是 OMP Studio，或路径里已有本应用 exe / 卸载器 → 原样使用
 ;   - 升级 / 修复 / 降级：锁定上次 InstallLocation
@@ -27,11 +26,11 @@
 ;   - 旧版本 → 原地更新；升级时留下 $INSTDIR\userdata 供首次启动把头像迁到 AppData
 ;   - 相同版本 → 确认后修复覆盖程序文件（静默 /S 默认修复）
 ;   - 更高版本 → 确认后才允许降级（静默 /S 默认拒绝）
-;   - 进程占用 → 确认后结束 OMP Studio.exe（及 $INSTDIR 下的 omp.exe）再写文件
+;   - 进程占用 → 提示从托盘退出，再重试；不强制终止任务
 ;   - electron-updater `/updated` 跳过版本确认（仍锁目录、仍处理进程占用）
 ; 快捷方式
-;   - 开始菜单：始终创建（所有用户开始菜单）
-;   - 桌面：全新安装默认创建（公共桌面）；升级不强制重建用户已删的图标
+;   - 开始菜单：始终创建（当前用户开始菜单）
+;   - 桌面：全新安装默认创建；升级沿用用户已有图标状态
 ;     （createDesktopShortcut: true，不要改 always）
 ; 头像
 ;   - 现写 %APPDATA%\omp-studio\profile\（覆盖，无历史）
@@ -42,11 +41,8 @@
 ;   - 自定义 customRemoveFiles 会完全替换默认的 RMDir /r $INSTDIR。
 ;     真卸载必须先 SetOutPath $TEMP，再整目录删除。
 ;   - perMachine 时默认 $APPDATA 是 ProgramData；删头像前切到 current。
-;   - $INSTDIR\runtime 是正在跑的 Runtime（extraFiles → versions\<ver>\omp.exe）。
-;     升级时删掉旧树再写入新版本；真卸载随 $INSTDIR 一起删。
-;     AppData 会话/日志保留；旧版若在 AppData 留下过 runtimes 也不主动删。
-;     不给 Users 额外授权：应用是 requireAdministrator，首次写 current.json 走的是提权进程；
-;     放开 Modify 会让任何标准用户改掉已签名的 runtime-manifest.json，而解析端只比对哈希。
+;   - $INSTDIR\runtime 提供签名 Runtime 种子；活跃副本在 LocalAppData。
+;     升级与卸载清程序树，保留外置 Runtime、会话与日志。
 
 !ifndef BUILD_UNINSTALLER
   !include "WordFunc.nsh"
@@ -61,6 +57,7 @@
   Var ompDirLocked
   Var ompHtmlUi
   Var ompHtmlResolved
+  Var ompUiProcess
   !define MUI_CUSTOMFUNCTION_GUIINIT ompHideNsisUi
 !endif
 
@@ -125,9 +122,6 @@ FunctionEnd
     ${if} $ompExistingVersion == ""
       ReadRegStr $ompExistingVersion HKCU "${UNINSTALL_REGISTRY_KEY_2}" DisplayVersion
     ${endIf}
-    ${if} $ompExistingVersion == ""
-      ReadRegStr $ompExistingVersion HKCU "${UNINSTALL_REGISTRY_KEY_2}" DisplayVersion
-    ${endIf}
   !endif
 
   ${if} $ompExistingDir != ""
@@ -185,7 +179,7 @@ FunctionEnd
 !macro customHeader
   !ifndef BUILD_UNINSTALLER
   Function ompResolveInstDir
-    StrCmp $ompHtmlResolved "1" omp_res_done
+    StrCmp $ompHtmlResolved "1" omp_res_html
     StrCmp $ompDirLocked "1" omp_res_locked
     StrCmp $INSTDIR "" omp_res_done
 
@@ -346,6 +340,11 @@ FunctionEnd
       Pop $R0
       Goto omp_res_done
 
+    omp_res_html:
+      ; PAGE_INSTALL_MODE runs after the HTML page and resets $INSTDIR through
+      ; setInstallModePerUser. Restore the directory the user actually chose.
+      ReadINIStr $INSTDIR "$PLUGINSDIR\options.ini" "Install" "Dir"
+      Goto omp_res_done
     omp_res_locked:
       StrCpy $INSTDIR $ompExistingDir
     omp_res_done:
@@ -377,11 +376,17 @@ FunctionEnd
     omp_html_write_ini:
     WriteINIStr "$PLUGINSDIR\host.ini" "Setup" "Version" "${VERSION}"
     WriteINIStr "$PLUGINSDIR\host.ini" "Setup" "RuntimeVersion" "${OMP_RUNTIME_VERSION}"
+    WriteINIStr "$PLUGINSDIR\host.ini" "Setup" "Arch" "${OMP_TARGET_ARCH}"
     WriteINIStr "$PLUGINSDIR\host.ini" "Setup" "DefaultDir" "$INSTDIR"
     WriteINIStr "$PLUGINSDIR\host.ini" "Setup" "ExistingVersion" "$ompExistingVersion"
     WriteINIStr "$PLUGINSDIR\host.ini" "Setup" "ExistingDir" "$ompExistingDir"
     !ifdef APP_64_UNPACKED_SIZE
       IntOp $R7 ${APP_64_UNPACKED_SIZE} + 512
+      IntOp $R7 $R7 / 1024
+      WriteINIStr "$PLUGINSDIR\host.ini" "Setup" "SpaceRequiredMB" "$R7"
+    !endif
+    !ifdef APP_ARM64_UNPACKED_SIZE
+      IntOp $R7 ${APP_ARM64_UNPACKED_SIZE} + 512
       IntOp $R7 $R7 / 1024
       WriteINIStr "$PLUGINSDIR\host.ini" "Setup" "SpaceRequiredMB" "$R7"
     !endif
@@ -406,30 +411,40 @@ FunctionEnd
     Delete "$PLUGINSDIR\host-ready.txt"
     Delete "$PLUGINSDIR\webview2-missing.txt"
     Delete "$PLUGINSDIR\webview2-error.txt"
+    Delete "$PLUGINSDIR\native.ini"
+    Delete "$PLUGINSDIR\status.ini"
 
-    ; --ui 仍指向 PLUGINSDIR 抽出物；宿主会拷到 ProgramData 再虚拟主机加载。
-    ; --dir 必须留在 PLUGINSDIR：握手 INI 由已提权的 Setup 读写。
-    Exec '"$PLUGINSDIR\omp-host\OmpInstallerUi.exe" --ui "$PLUGINSDIR\omp-ui" --dir "$PLUGINSDIR"'
+    ; --ui 指向抽出的源码，宿主拷到当前账户的独立目录再加载。
+    ; --dir 留在 PLUGINSDIR，归属于此次 Setup 的握手文件。
+    ClearErrors
+    Exec '"$PLUGINSDIR\omp-host\OmpInstallerUi.exe" --ui "$PLUGINSDIR\omp-ui" --dir "$PLUGINSDIR" --parent $HWNDPARENT'
+    IfErrors omp_html_fallback
 
     StrCpy $R0 0
     omp_html_wait_ready:
       Sleep 200
-      IfFileExists "$PLUGINSDIR\host-ready.txt" omp_html_wait_opt
+      IfFileExists "$PLUGINSDIR\host-ready.txt" omp_html_open_process
       IfFileExists "$PLUGINSDIR\webview2-missing.txt" omp_html_fallback
       IfFileExists "$PLUGINSDIR\webview2-error.txt" omp_html_fallback
       IfFileExists "$PLUGINSDIR\cancel.ini" omp_html_cancel
       IntOp $R0 $R0 + 1
       IntCmp $R0 75 omp_html_fallback omp_html_wait_ready omp_html_fallback
 
+    omp_html_open_process:
+      ; Open the PID published by this host. StdUtils wait tokens are opaque
+      ; strings, not Win32 process handles usable by GetExitCodeProcess.
+      ReadINIStr $1 "$PLUGINSDIR\host-ready.txt" "Host" "Pid"
+      System::Call 'kernel32::OpenProcess(i 0x00101000, i 0, i r1) p .r0'
+      StrCpy $ompUiProcess $0
+      StrCmp $ompUiProcess 0 omp_html_cancel
     omp_html_wait_opt:
       Sleep 200
       IfFileExists "$PLUGINSDIR\options.ini" omp_html_ready
       IfFileExists "$PLUGINSDIR\cancel.ini" omp_html_cancel
       IfFileExists "$PLUGINSDIR\webview2-missing.txt" omp_html_fallback
       IfFileExists "$PLUGINSDIR\webview2-error.txt" omp_html_fallback
-      nsProcess::_FindProcess /NOUNLOAD "OmpInstallerUi.exe"
-      Pop $R1
-      StrCmp $R1 0 omp_html_wait_opt
+      System::Call 'kernel32::GetExitCodeProcess(p $ompUiProcess, *i .r1)'
+      StrCmp $1 259 omp_html_wait_opt ; STILL_ACTIVE, this host only
       IfFileExists "$PLUGINSDIR\options.ini" omp_html_ready
       Goto omp_html_cancel
 
@@ -445,14 +460,61 @@ FunctionEnd
 
     omp_html_cancel:
       StrCpy $ompHtmlUi "0"
+      System::Call 'kernel32::CloseHandle(p $ompUiProcess)'
+      SetErrorLevel 1
       Quit
 
     omp_html_fallback:
       StrCpy $ompHtmlUi "0"
+      WriteINIStr "$PLUGINSDIR\native.ini" "Setup" "Fallback" "1"
+      System::Call 'kernel32::CloseHandle(p $ompUiProcess)'
       Call ompRestoreNsisUi
-      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "无法加载安装向导。$\r$\n$\r$\n将安装到默认位置 $INSTDIR。" /SD IDOK IDOK omp_html_fallback_ok
+      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "无法加载图形向导，将使用 Windows 标准安装界面。$\r$\n$\r$\n安装内容与用户数据保留规则相同。" /SD IDOK IDOK omp_html_fallback_ok
       Quit
     omp_html_fallback_ok:
+      ${If} $ompExistingVersion != ""
+        ${VersionCompare} "${VERSION}" "$ompExistingVersion" $R5
+        ${If} $R5 == 0
+          MessageBox MB_OKCANCEL|MB_ICONQUESTION "已安装 OMP Studio $ompExistingVersion。继续将修复程序文件，保留会话与设置。" IDOK omp_native_version_done
+          Quit
+        ${ElseIf} $R5 == 2
+          MessageBox MB_YESNO|MB_ICONEXCLAMATION "已安装较新版本 $ompExistingVersion，当前安装包为 ${VERSION}。降级可能无法读取新版配置。$\r$\n$\r$\n仍然降级？" IDYES omp_native_version_done
+          Quit
+        ${EndIf}
+      ${EndIf}
+    omp_native_version_done:
+  FunctionEnd
+
+  Function ompNativeWelcomePre
+    StrCmp $ompHtmlUi "1" 0 +2
+      Abort
+    ${If} ${isUpdated}
+      Abort
+    ${EndIf}
+    Call ompRestoreNsisUi
+  FunctionEnd
+
+  Function ompNativeWelcomeShow
+    ; The preceding custom bootstrap is not a page the user can go back to.
+    GetDlgItem $0 $HWNDPARENT 3
+    EnableWindow $0 0
+  FunctionEnd
+
+  Function ompNativeDirectoryPre
+    StrCmp $ompHtmlUi "1" 0 +2
+      Abort
+    StrCmp $ompDirLocked "1" 0 +2
+      Abort
+    ${If} ${isUpdated}
+      Abort
+    ${EndIf}
+    Call ompRestoreNsisUi
+  FunctionEnd
+
+  Function ompNativeFinishPre
+    StrCmp $ompHtmlUi "1" 0 +2
+      Abort
+    Call ompRestoreNsisUi
   FunctionEnd
 
   Function ompHtmlWelcomeLeave
@@ -477,15 +539,17 @@ FunctionEnd
     omp_html_fin_loop:
       Sleep 300
       IfFileExists "$PLUGINSDIR\finish.ini" omp_html_fin_done
-      nsProcess::_FindProcess /NOUNLOAD "OmpInstallerUi.exe"
-      Pop $R1
-      StrCmp $R1 0 omp_html_fin_loop
+      System::Call 'kernel32::GetExitCodeProcess(p $ompUiProcess, *i .r1)'
+      StrCmp $1 259 omp_html_fin_loop
     omp_html_fin_done:
+    System::Call 'kernel32::CloseHandle(p $ompUiProcess)'
     ReadINIStr $R2 "$PLUGINSDIR\finish.ini" "Install" "Run"
     ${If} $R2 == "1"
       ${StdUtils.ExecShellAsUser} $0 "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "open" ""
     ${EndIf}
-    Abort
+    ; HTML already collected the finish choice. Complete the hidden copy
+    ; engine with a success status and release its installer-instance lock.
+    !insertmacro quitSuccess
   FunctionEnd
 
   !endif
@@ -493,15 +557,24 @@ FunctionEnd
 
 !macro customWelcomePage
   Page custom ompHtmlWelcomeShow ompHtmlWelcomeLeave
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE ompNativeWelcomePre
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW ompNativeWelcomeShow
+  !insertmacro MUI_PAGE_WELCOME
 !macroend
 
 !macro customFinishPage
   Page custom ompHtmlFinishShow
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE ompNativeFinishPre
+  !insertmacro MUI_PAGE_FINISH
 !macroend
 
 ; Steal InstFiles PRE so electron-builder's StrContains append cannot
 ; re-nest an empty custom folder that does not contain "OMP Studio".
 !macro customPageAfterChangeDir
+  ; The fallback directory page runs after PAGE_INSTALL_MODE, so its choice
+  ; cannot be reset by multi-user initialization. HTML and updates skip it.
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE ompNativeDirectoryPre
+  !insertmacro MUI_PAGE_DIRECTORY
   !ifdef MUI_PAGE_CUSTOMFUNCTION_PRE
     !undef MUI_PAGE_CUSTOMFUNCTION_PRE
   !endif
@@ -510,7 +583,11 @@ FunctionEnd
   !endif
   Function ompInstFilesPre
     Call ompResolveInstDir
+    WriteINIStr "$PLUGINSDIR\status.ini" "Setup" "Phase" "preparing"
     StrCmp $ompHtmlUi "1" 0 omp_instfiles_pre_done
+      ; A custom finish page does not enable MUI's automatic advance. Without
+      ; this, NSIS waits on an invisible Next button after copying the files.
+      SetAutoClose true
       Call ompHideNsisUi
     omp_instfiles_pre_done:
   FunctionEnd
@@ -519,8 +596,18 @@ FunctionEnd
       Call ompHideNsisUi
     omp_instfiles_show_done:
   FunctionEnd
+  Function ompInstFilesLeave
+    ; MUI invokes the install-page leave hook when its worker finishes,
+    ; including a section Abort, before painting the aborted-page header.
+    StrCmp $ompHtmlUi "1" 0 omp_inst_leave_done
+    IfAbort 0 omp_inst_leave_done
+      SetErrorLevel 2
+      Quit
+    omp_inst_leave_done:
+  FunctionEnd
   !define MUI_PAGE_CUSTOMFUNCTION_PRE ompInstFilesPre
   !define MUI_PAGE_CUSTOMFUNCTION_SHOW ompInstFilesShow
+  !define MUI_PAGE_CUSTOMFUNCTION_LEAVE ompInstFilesLeave
 !macroend
 
 !macro customCheckAppRunning
@@ -529,9 +616,10 @@ FunctionEnd
   File /r "${BUILD_RESOURCES_DIR}\installer-host\*.*"
   ExecWait '"$PLUGINSDIR\omp-maintenance\OmpInstallerUi.exe" --wait-install-root "$INSTDIR"' $R0
   ${If} $R0 != 0
-    MessageBox MB_OK|MB_ICONEXCLAMATION "请先退出此安装的 OMP Studio，再重试更新。" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "请从托盘菜单退出此安装的 OMP Studio，再重试。安装程序不会强制终止任务。" /SD IDOK
     Abort
   ${EndIf}
+  WriteINIStr "$PLUGINSDIR\status.ini" "Setup" "Phase" "files"
 !macroend
 
 !macro customRemoveFiles
@@ -575,6 +663,7 @@ FunctionEnd
 
 !macro customInstall
   ${If} $ompLegacyMachineDir != ""
+    WriteINIStr "$PLUGINSDIR\status.ini" "Setup" "Phase" "migrating"
     ExecWait '"$PLUGINSDIR\omp-maintenance\OmpInstallerUi.exe" --migrate-machine "$ompLegacyMachineDir" "$INSTDIR"' $R0
     ${If} $R0 == 11
       ; 注册表残留但卸载程序已缺失：重新运行安装包必然同样失败，只能引导人工清理。
@@ -587,11 +676,12 @@ FunctionEnd
       Quit
     ${EndIf}
   ${EndIf}
+  WriteINIStr "$PLUGINSDIR\status.ini" "Setup" "Phase" "finishing"
   StrCmp $ompHtmlUi "1" 0 omp_custom_install_ui
     Call ompHideNsisUi
   omp_custom_install_ui:
   ; electron-builder normally creates this link in installSection.nsh. Keep a
-  ; deterministic all-users copy as a final guard: custom UI directory choices
+  ; deterministic current-user copy: custom UI directory choices
   ; must never make the Start menu shortcut disappear.
   StrCpy $R7 $installMode
   SetShellVarContext current
@@ -612,6 +702,5 @@ FunctionEnd
       WinShell::SetLnkAUMI "$DESKTOP\OMP Studio.lnk" "${APP_ID}"
     omp_desktop_done:
   ${EndIf}
-  WriteINIStr "$PLUGINSDIR\done.ini" "Install" "Done" "1"
   WriteINIStr "$PLUGINSDIR\done.ini" "Install" "InstDir" "$INSTDIR"
 !macroend

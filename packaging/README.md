@@ -1,213 +1,72 @@
-# OMP Studio Windows Installer — packaging 骨架
+# OMP Studio 安装与打包
 
-> 当前更新重构：默认采用当前用户安装（`%LOCALAPPDATA%\Programs\OMP Studio`），应用使用 `asInvoker`。新安装器不全局结束同名进程，自动更新走 NSIS 静默模式。活跃 Runtime 已移出安装目录，详见 [更新系统](../docs/updates.md)。以下涉及全机安装、Program Files、requireAdministrator 和旧 Runtime 路径的段落是 v0.1.5 及以前的历史说明；发布新版本以更新文档和当前配置为准。
+Windows 安装器使用 WebView2 显示 720 × 480 的四步向导，NSIS 负责复制文件、注册安装信息和创建快捷方式。缺少 WebView2 或图形宿主启动失败时，使用完整的 Windows 原生向导。
 
-## 发布构建与 Runtime 复用
+## Windows 安装行为
 
-桌面与六个平台的远程环境发布共用 `.github/scripts/find-runtime.sh`。脚本按平台、通道、Bun 版本、上游 commit，以及已提交的 overlay、接缝补丁、构建/签名/探测代码和公钥计算身份；仅修改桌面界面不会重编 Runtime。指纹读取 Git 对象，不受 Windows CRLF 影响。
+- 默认仅为当前账户安装，位置是 `%LOCALAPPDATA%ProgramsOMP Studio`；应用使用 `asInvoker`。
+- 全新安装可选目录；更新、修复与降级沿用现有的 `InstallLocation`。同版修复与降级都需要确认，包括原生回退流程。
+- 发现目标目录的应用仍运行时，提示先从托盘菜单「退出」，再直接重试。安装器不会强制终止任务，也不会阻止其他目录的 Studio 或 OMP。
+- 文件写入期间不能取消；没有承诺或模拟回滚。失败时显示未完成状态，关闭向导后可重新运行安装包。
+- 进度百分比来自 NSIS 的原生进度控件；准备阶段没有百分比时显示活动指示。完成页以 NSIS 的完成握手为准。
+- 开始菜单快捷方式始终创建；桌面快捷方式全新默认勾选，更新与修复读取现有图标状态，保留用户的选择。
+- 完成页可选择运行应用。点击「完成」或标题栏关闭按钮都会应用这一选择，并退出 NSIS 与 WebView2 宿主。
+- 旧全机安装迁移仍会单独请求管理员授权，完成 Runtime 与头像迁移后才移除旧安装。
 
-命中未过期的 Actions 工件时直接下载签名 Runtime，跳过 Bun、Rust 与 Runtime 编译。桌面与远程任务可互相复用工件；冷构建使用不同上传名，避免同次发布冲突。已有 Runtime 不再重复上传。工件过期或 Runtime 源码改变时重新构建；发布输入 `rebuild_runtime` 会同时强制桌面与远程任务重建。无可迁移工件时首次使用新指纹规则也会冷构建，实际耗时须以 Actions 为准。
+### 目录规则
 
-迁移旧缓存命名或仅修改构建编排时，精确查找未命中会检查已有工件对应的 Git commit；Runtime overlay、补丁、上游 pin、元数据生成代码和公钥一致时沿用原签名字节，避免相同 Runtime 版本因重新编译而违反发布不可变规则。强制重建会跳过此回退。
+浏览与输入选择一个文件夹，实际安装根按以下规则解析：
 
-远程任务使用 `npm run build:remote`，只编译包、Desktop Host 类型与远程 Host bundle，跳过 Renderer，并在安装依赖时跳过 Electron 二进制下载。随后运行 `npm run omp:build:host -- --skip-build` 时，包依赖已经就绪，不再重复构建整个桌面。普通 `omp:build:host` 调用仍执行完整构建。
+| 选择 | 安装位置 |
+|---|---|
+| 已是 `OMP Studio` 目录，或已有应用/卸载器 | 原目录；重复的产品后缀收成一层 |
+| 盘符根、系统目录、非空普通文件夹 | 添加 `OMP Studio` 子目录 |
+| 空目录或尚不存在的路径 | 所选目录本身 |
+| 更新、修复、降级 | 上次安装位置 |
 
-签名、目标架构、产物摘要与远程环境验证照常执行；上传已打包的发行工件使用 `compression-level: 0`，减少额外压缩。
+对应实现：`scripts/installer-dir.mjs`、`packaging/ui/wizard.js` 与 `packaging/nsis/custom.nsh`。安装执行前检查目标位置能否写入和可用空间，失败时保留可编辑的目录页。
 
-沙箱 preload 只允许外部加载 `electron`。打包时检查 bundle 的实际外部依赖；`npm run check -- --production` 与 `npm run test:tooling` 还会在受限环境中执行真实 bundle，验证桥接对象可挂载及 IPC 事件过滤，覆盖 [Issue #8](https://github.com/the-snowpear/omp-studio/issues/8) 的启动故障。
+### 数据与卸载
 
-安装器骨架：可见向导是 `packaging/ui` 那套 720×480 HTML，由 WebView2
-小宿主显示；NSIS 只负责提权和解包。浏览器里仍可直接打开原型预览。
+程序目录包含桌面程序、公钥与随包提供的签名 Runtime。活跃 Runtime 位于 `%LOCALAPPDATA%omp-studiountimes`，会话、日志和设置位于 `%APPDATA%omp-studio`；详见 [更新系统](../docs/updates.md)。
 
-## 目录结构
+真实卸载使用 electron-builder 的原生 MUI2 卸载器：删除程序目录、快捷方式、头像目录和旧版安装目录内的 `userdata`；保留会话、日志及外置 Runtime。升级调用旧卸载器时保留头像与 `userdata`，供迁移使用。
 
-```
-packaging/
-  electron-builder.yml   # electron-builder 配置（NSIS target）
-  installer-host/        # WebView2 宿主源码（csc 在 pack:win 时编译）
-    InstallerHost.cs
-  installer-shell/       # 本地 Electron 预览同一套 HTML（不打进 Setup）
-  ui/                    # 安装器 UI（浏览器原型 = Setup 真界面）
-    index.html
-    styles.css
-    app-icon.png
-    README.md
-  nsis/custom.nsh        # 隐藏 MUI、启动宿主、读 options.ini
-  README.md              # 本文件
-```
+## 文件与预览
 
-## 预览 UI 原型
+| 文件 | 职责 |
+|---|---|
+| `electron-builder.yml` | 打包布局、当前用户模式、NSIS 配置 |
+| `ui/index.html`、`styles.css`、`wizard.js` | 图形向导与明确标记的演示模式 |
+| `installer-host/InstallerHost.cs` | WebView2、目录/磁盘读取、安装握手与原生进度读取 |
+| `nsis/custom.nsh` | 安装与卸载钩子、原生回退页、完成退出 |
+| `installer-shell/` | 本地 Electron 预览，读取本机目录，安装过程为演示 |
 
-```bash
-# 方式一：直接浏览器打开（无服务依赖）
-open packaging/ui/index.html
+直接打开 `ui/index.html`，或运行 `npm --prefix packaging/installer-shell run dev`。浏览器与 Electron 预览显示「演示」；真实 Setup 从宿主读取版本、架构、磁盘和快捷方式状态，不回退到演示数据。
 
-# 方式二：本地静态服务（推荐）
-python -m http.server 4175 --directory packaging/ui
-# 然后访问 http://127.0.0.1:4175
-```
+每次图形安装使用当前账户下独立的临时 UI 与 WebView2 缓存，退出时清理；不再向所有 Users 授予共享缓存的写权限。握手文件只属于该次 NSIS 实例，进程等待使用该宿主的句柄。
 
-> `ui/README.md` 记录了窗口尺寸、页面层次、主题令牌、动效和 NSIS 落地时的降级边界。
-
-## 运行 HTML 宿主外壳
-
-本地用 Electron 预览真窗口（浏览/磁盘是本机的，安装进度是演示）：
+## Windows 构建与验证
 
 ```bash
-npm --prefix packaging/installer-shell run dev
-```
-
-打进 Setup 的是 WebView2 宿主，不是第二份 Electron。`pack:win` 会编译
-`OmpInstallerUi.exe`，NSIS 启动它并隐藏 MUI 向导。本机没有 WebView2
-时回退到默认目录 + 原生进度页。
-
-提权安装时不要用 `$PLUGINSDIR` 的 `file://`：NSIS 3 会把该临时目录锁成
-Administrators-only，而 WebView2 子进程是中完整性，会 `ERR_ACCESS_DENIED`。
-成熟做法是宿主把 HTML 拷到 `%ProgramData%\omp-studio\installer\ui`，
-用 `SetVirtualHostNameToFolderMapping` 打开 `https://omp-installer/…`，
-WebView2 缓存放 `%ProgramData%\omp-studio\installer-webview`（Users 可写）。
-握手 INI 仍在 `$PLUGINSDIR`（父进程已提权，写得进去）。
-
-## 构建真实安装器
-
-从仓库根目录：
-
-```powershell
 npm run pack:win
-```
-
-需要先能完成本机 `omp:build:host`（Bun、MSVC、Rust、已执行过 `omp:keys`）。
-产物在 `outputs/installer/`（gitignore）：
-
-- `win-unpacked/` — 安装布局（审计用）
-- `OMP-Studio-Setup-0.1.0-win-x64.exe` — NSIS Setup（未 Authenticode 签名）
-
-`pack:win` 会：构建 workspace 与 sandboxed preload、确认
-`apps/renderer/dist`、把公钥拷到 `packaging/runtime-keys`、调用 electron-builder、
-再扫描 unpacked 树与 Setup exe，发现 `signing-private.pem` 或 `BEGIN PRIVATE KEY`
-即失败。
-
-已有签名 Runtime 工件时：
-
-```powershell
-npm run pack:win -- --skip-host
-```
-
-单独步骤仍可用：
-
-```powershell
-npm run omp:build:host
-npm run pack:win:prepare
-npx electron-builder --config packaging/electron-builder.yml --win nsis --publish never
+npm run pack:win -- --skip-host --skip-build
+npm run pack:win:ui
 npm run pack:win:audit
+npm run test:tooling
 ```
 
-## 安装行为（产品契约）
+构建产物在 `outputs/installer/`：`win-unpacked/` 与 `OMP-Studio-Setup-<version>-windows-<arch>.exe`。一次构建一个架构：`OMP_TARGET_ARCH=x64` 或 `arm64`。ARM64 的小型 WebView2 宿主使用 x86，引导程序通过 Windows API 检查原生 ARM64 进程，界面显示真实目标架构。
 
-原型 `packaging/ui/index.html` 左上角可切换情景预览（含卸载）。浏览器打开
-仍是演示数据；Setup 里同一文件走 `?host=installer`，读注册表/磁盘真值。
+`pack:win` 构建工作区和沙箱 preload、准备当前签名 Runtime 与公钥、编译 WebView2 宿主、打包并审计。`--skip-host --skip-build` 仅复用已准备好的构建与签名 Runtime。审计覆盖架构、Runtime 签名、必要资源及私钥泄露；不重复运行源码测试。
 
-静默 `/S` 不启动 HTML，占用确认仍用系统 MessageBox（相同版本默认修复，
-降级默认拒绝）。electron-updater `/updated` 也不走 HTML。
+普通检查使用 [项目检查入口](../AGENTS.md#验证)。安装回归包含真实 NSIS 函数、目录保留、宿主完成退出、旧版迁移、实际进程范围，以及图形向导的运行中重试、快捷方式选择和失败反馈。
 
-NSIS 落地在 `packaging/nsis/custom.nsh`：
+## 发布 Runtime 复用
 
-- 交互安装：隐藏 MUI 窗，只显示 WebView2 宿主；相同版本 / 降级 / 占用对话框在 HTML 里。
-  HTML 成功后跳过空的原生自定义页，拷贝文件时 InstFiles 保持隐藏。
-- `options.ini` 给出解析后的安装根和是否创建桌面快捷方式。
-- 已有安装时 HTML 锁定上次目录。
-- `customCheckAppRunning`：HTML 已确认结束进程则不再弹原生框；卸载仍用系统 MessageBox。
+桌面与六个平台远程环境共用 `.github/scripts/find-runtime.sh`，按已提交的 Runtime 输入和目标平台查找签名工件。桌面界面或安装器变化不重建未变化的 Runtime；缓存命中仍核对来源、平台、通道与签名。工件过期或 Runtime 源码变化时才重建，`rebuild_runtime` 可强制冷构建。
 
-### 默认位置
-
-所有用户、需要管理员：`%PROGRAMFILES%\OMP Studio`（通常是 `C:\Program Files\OMP Studio`）。
-
-### 选择文件夹后是否新建
-
-浏览或手输的是「选中的文件夹」，真正写入的是解析后的安装根。规则与 Inno `AppendDefaultDirName`、常见国内安装包一致：只在「容器」上套一层产品目录，空目录或已是产品目录则原样使用。实现：`scripts/installer-dir.mjs` 与 `packaging/nsis/custom.nsh` `ompResolveInstDir`。
-
-| 选中路径 | 实际安装到 |
-|---|---|
-| 末级已是 `OMP Studio`（忽略大小写），含误套的 `...\OMP Studio\OMP Studio` | 原样使用（双层收成一层） |
-| 目录里已有 `OMP Studio.exe` / 卸载器 | 原样使用 |
-| 已有本应用安装（升级 / 修复 / 降级） | 上次的 `InstallLocation`，不另建 |
-| 盘符根、`Program Files`、桌面、文档、下载等系统目录 | 追加 `\OMP Studio` |
-| 已存在且非空的普通文件夹 | 追加 `\OMP Studio` |
-| 空目录，或不存在的路径（将创建） | 原样作为安装根 |
-
-不要用「只要末级不是产品名就一律套一层」：那会把用户建好的空目录 `D:\Dev` 变成 `D:\Dev\OMP Studio`。也不要只看「目录非空」而不看末级名：二次安装选中已有产品目录时会变成 `OMP Studio\OMP Studio`。
-
-### 版本占用
-
-| 情景 | 行为 |
-|---|---|
-| 全新 | 可选目录；开始菜单 + 桌面默认勾选 |
-| 更旧版本 | 原地更新；目录锁定；会话在 AppData；运行时随程序文件更新；头像覆盖同一文件 |
-| 相同版本 | 确认后修复覆盖程序文件；AppData 会话保留 |
-| 更高版本 | 警告确认后才允许降级 |
-| 进程占用 | 确认后结束 `OMP Studio.exe`（及安装目录下的 `omp.exe`）再写文件 |
-
-交互安装的占用对话框在 HTML 里；`customInit` 的系统 MessageBox 只留给静默 `/S`
-（相同版本默认修复，降级默认拒绝）。electron-updater `/updated` 跳过版本确认。
-
-### 卸载
-
-没有单独的 HTML 卸载向导；真实卸载仍是 electron-builder 的 MUI2 卸载段。原型左上角「卸载」情景只用来核对文案与删除范围。
-
-| 删除 | 保留 |
-|---|---|
-| `%PROGRAMFILES%\OMP Studio` 程序文件（含正在跑的 `$INSTDIR\runtime\versions\...\omp.exe`、`runtime-keys\`） | `%APPDATA%\omp-studio` 里的会话、日志、`workspaces.json`；旧版若在 AppData 留下过 `runtimes` 也不主动删 |
-| 开始菜单 / 桌面快捷方式 | `%APPDATA%\omp-studio-endpoints` |
-| `%APPDATA%\omp-studio\profile`（头像） | |
-| 旧版 `$INSTDIR\userdata` | |
-
-实现落在 `packaging/nsis/custom.nsh`：
-
-- `customUnInstall` / `customRemoveFiles` **升级时也会执行**（先卸旧版再装新版）。必须 `${ifNot} ${isUpdated}` 才删头像，升级只清程序文件、留下 `userdata` 给首次启动迁移。
-- 覆盖了 `customRemoveFiles` 就不能再依赖默认的 `RMDir /r $INSTDIR`。真卸载要先 `SetOutPath $TEMP` 再整目录删除，否则安装目录会剩文件。
-- 所有用户安装时 `$APPDATA` 默认是 ProgramData；删头像前 `SetShellVarContext current`。
-- `deleteAppDataOnUninstall` 只对 oneClick 有效，向导式安装不能靠它。
-
-### 快捷方式
-
-- 开始菜单：始终创建，直接放在所有用户开始菜单根（`menuCategory: false`），不套公司名子目录。
-- 桌面：全新默认创建（公共桌面）；`createDesktopShortcut: true`（不要 `always`），升级时不把用户删掉的图标加回来。
-- 完成页默认勾选「运行 OMP Studio」。
-- 不写入 PATH。
-
-安装范围为所有用户（`perMachine: true`）。头像在 `%APPDATA%\omp-studio\profile\`，上传覆盖、无历史；卸载时删除该目录。
-
-### Runtime 工件
-
-安装目录里的 `runtime\versions\<ver>\omp.exe` 就是**正在跑的 Runtime**（electron-builder `extraFiles` 直接铺成 `RuntimeInstaller` 布局）。首次启动核验签名并写 `runtime\current.json`；诊断页的安装/更新也写这个目录。公钥在 `runtime-keys\`（不含私钥）。卸载随程序文件删掉这份 `omp.exe`；AppData 里的会话和日志仍保留。
-
-NSIS 保持 Program Files 的默认安全 ACL，`custom.nsh` 故意不向标准 Users 开放 `$INSTDIR\runtime` 的修改权限以防提权漏洞；安装包通过管理员权限部署，更新操作在提权桌面主进程中安全执行并完成验签自检。
-
-打包前：
-
-```bash
-npm run pack:win
-```
-
-`pack:win:prepare` 会确认 `packages/runtime-installer/dist/artifacts/win32-x64` 存在，并把本机 `%APPDATA%\omp-studio\keys` 里的公钥拷到 `packaging/runtime-keys`（gitignore）。没有工件或公钥时直接失败，避免打出不能用的安装包。Renderer 打进 `resources/renderer/dist`，对应 `resolveRendererEntry` 的 asar 相对路径。
-
-## 可见向导
-
-Setup 显示 `packaging/ui` 的 720×480 HTML（WebView2），不再用 MUI2 原生页。
-浏览器打开仍可预览情景开关；`?host=installer` 隐藏原型铬，走真实目录/占用。
-缺少 WebView2 时 NSIS 回退到默认安装位置 + 原生进度。卸载仍是 MUI2。
-HTML 经 ProgramData 虚拟主机加载，不是 NSIS 临时目录上的 `file://`。
-
-## 关键坑位（实现 NSIS 时注意）
-
-1. **node-pty 原生模块**：打包时需按 Electron ABI 重编译（`@electron/rebuild`），
-   electron-builder 需在 `files` 里放行原生模块并开启 `npmRebuild`。
-2. **renderer 相对路径**：`apps/desktop/src/security.ts` 生产环境从
-   `appPath/../renderer/dist` 加载渲染器，打包后需保持该相对结构，
-   否则装出来的应用白屏。
-3. **monorepo workspaces**：electron-builder 在 workspace 里打包需要显式
-   指定 `appDirectory`（默认取 `package.json` 所在目录，即 apps/desktop），
-   并确认 `@omp-studio/*` 工作区包被收集进产物。
+发布流程和完整产物表见 [releasing.md](../docs/releasing.md)。
 
 ## macOS（darwin-arm64，ad hoc 签名）
 

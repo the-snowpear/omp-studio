@@ -15,4 +15,5 @@ npm --prefix packaging/installer-shell run dev
 
 - `minimize` / `close` / `drag`
 - `getState` / `statDir` / `browse`
-- `startInstall` / `poll` / `finish` / `killApp`（预览里 kill 是空操作）
+- `startInstall` / `poll` / `finish`（预览中仅模拟安装，并显示「演示」）
+- `openReleaseNotes`（固定仓库的当前版本发行说明）

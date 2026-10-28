@@ -89,7 +89,7 @@ function requireFile(path, label) {
 
 function copyUi() {
   mkdirSync(RESOURCES_UI, { recursive: true });
-  for (const name of ["index.html", "styles.css"]) {
+  for (const name of ["index.html", "styles.css", "wizard.js"]) {
     copyFileSync(join(UI_SRC, name), join(RESOURCES_UI, name));
   }
   const productIcon = join(repositoryRoot, "icon.png");
@@ -216,6 +216,7 @@ export async function buildInstallerHost() {
     "/reference:System.dll",
     "/reference:System.Drawing.dll",
     "/reference:System.Windows.Forms.dll",
+    "/reference:System.Web.Extensions.dll",
     HOST_CS,
   ];
   if (existsSync(icon)) args.splice(5, 0, `/win32icon:${icon}`);
