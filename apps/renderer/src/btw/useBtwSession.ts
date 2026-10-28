@@ -11,6 +11,8 @@ import type {
   StudioClient,
 } from "@omp-studio/client-contract";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { emptySnapshot, type ComposerSnapshot } from "../composer/types";
+import { snapshotFromText } from "../composer/serialize";
 
 /** Matches the Runtime `StudioBtwService` question cap. */
 export const BTW_QUESTION_MAX_CHARS = 64 * 1024;
@@ -43,6 +45,8 @@ export interface BtwSessionApi {
   /** Compose field lives here so docking/undocking does not drop a half-typed ask. */
   readonly draft: string;
   setDraft(text: string): void;
+  readonly composerDraft?: ComposerSnapshot;
+  setComposerDraft?(snapshot: ComposerSnapshot): void;
   /** Wall clock of the first `running` sighting for this round; null when idle. */
   readonly startedAt: number | null;
   readonly canAbort: boolean;
@@ -71,7 +75,9 @@ export interface BtwSessionApi {
 export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   const { t } = useI18n();
   const [question, setQuestion] = useState("");
-  const [draft, setDraft] = useState("");
+  const [composerDraft, setComposerDraft] = useState<ComposerSnapshot>(emptySnapshot);
+  const draft = composerDraft.text;
+  const setDraft = useCallback((text: string) => setComposerDraft(snapshotFromText(text)), []);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -325,6 +331,8 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
     question: snapshot?.question ?? (question !== "" ? question : (input.preview ? (input.previewQuestion ?? "") : "")),
     draft,
     setDraft,
+    composerDraft,
+    setComposerDraft,
     startedAt,
     canAbort,
     canBranch,

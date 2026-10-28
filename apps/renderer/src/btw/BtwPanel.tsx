@@ -48,19 +48,25 @@ export function BtwPanel({ session, demo, onDemoNext }: { session: BtwSessionApi
 function BtwComposer({ session }: { session: BtwSessionApi }) {
   const { t } = useI18n(); const inputId = useId();
   const composer = useRef<ChipComposerHandle>(null);
-  const [draft, setDraft] = useState<ComposerSnapshot>(emptySnapshot);
+  const [fallbackDraft, setFallbackDraft] = useState<ComposerSnapshot>(emptySnapshot);
+  const draft = session.composerDraft ?? fallbackDraft;
+  const localDraft = useRef<ComposerSnapshot | undefined>(undefined);
   const topic = session.selectedTopicId;
-  useEffect(() => { composer.current?.clear(); setDraft(emptySnapshot()); }, [topic]);
+  useEffect(() => {
+    if (draft === localDraft.current) return;
+    localDraft.current = draft;
+    composer.current?.setSnapshot(draft);
+  }, [draft]);
   const ready = !snapshotIsEmpty(draft) && !session.pending && session.snapshot?.status !== "running";
   const submit = async () => {
     if (!ready) return;
     const current = composer.current?.getSnapshot() ?? draft;
-    if (await session.ask(current.text, false, [...current.images])) { composer.current?.clear(); setDraft(emptySnapshot()); session.setDraft(""); }
+    if (await session.ask(current.text, false, [...current.images])) { composer.current?.clear(); session.setDraft(""); }
   };
   const onSubmit = (event: FormEvent) => { event.preventDefault(); void submit(); };
   return <form className="btw-compose" onSubmit={onSubmit}>
     <label className="sr-only" htmlFor={inputId}>{t("btw.questionLabel")}</label>
-    <ChipComposer id={inputId} ref={composer} compact disabled={session.pending} slashCatalog={[]} placeholder={session.snapshot?.status === "running" ? t("runtimeUpgrade.btwWait") : topic ? t("runtimeUpgrade.btwFollow") : t("btw.placeholder")} onChange={next => { setDraft(next); session.setDraft(next.text); }} onSubmit={() => void submit()} onError={() => {}} />
+    <ChipComposer id={inputId} ref={composer} compact disabled={session.pending} slashCatalog={[]} placeholder={session.snapshot?.status === "running" ? t("runtimeUpgrade.btwWait") : topic ? t("runtimeUpgrade.btwFollow") : t("btw.placeholder")} onChange={next => { localDraft.current = next; setFallbackDraft(next); if (session.setComposerDraft) session.setComposerDraft(next); else session.setDraft(next.text); }} onSubmit={() => void submit()} onError={() => {}} />
     <button type="button" className="icon-btn small" aria-label="添加附件 / Attach files" disabled={session.pending} onClick={() => composer.current?.openFilePicker()}><Icon name="plus" extra="sm" /></button>
     <button type="submit" className="icon-btn small btw-compose-send" disabled={!ready} aria-label={t("common.send")}><Icon name="send" extra="sm" /></button>
   </form>;
