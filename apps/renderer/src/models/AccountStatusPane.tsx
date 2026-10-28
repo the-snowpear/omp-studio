@@ -325,6 +325,7 @@ export function AccountStatusPane({
                   </span>
                 ) : null}
               </div>
+              {account.policy ? <p className="small muted">Priority {account.policy.priority} · Reserve {account.policy.reservePct}% ({account.policy.reserveSource}) · {account.policy.state}{account.policy.remainingPct === undefined ? "" : ` · ${account.policy.remainingPct}% left`}</p> : null}
               {quotas(account.limits)}
               {account.source === "oauth" ? (
                 <div className="account-resets">

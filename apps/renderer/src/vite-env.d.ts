@@ -77,7 +77,7 @@ declare global {
         /** Initial workbench health; absent on older installed main/preload versions. */
         reportPayloadHealth?(status: "ready" | "failed"): Promise<boolean>;
         reportPerformanceSample?(sample: import("@omp-studio/studio-protocol").MemorySample): Promise<boolean>;
-        setConversationViewState?(state: { runtimeEpoch: number; visibleSessionIds: readonly string[] }): Promise<boolean>;
+        setConversationViewState?(state: { runtimeEpoch: number; visibleSessionIds: readonly string[]; blockedSessionIds?: readonly string[] }): Promise<boolean>;
         setTheme(theme: "light" | "dark", tint?: { color: string; symbolColor: string }): Promise<void>;
         /** Fixed by the preload; read it through `src/platform.ts`. Absent on older installs. */
         readonly platform?: "win32" | "darwin" | "linux";

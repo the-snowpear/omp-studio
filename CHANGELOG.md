@@ -7,9 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-10-28
+
+### Added
+
+- 会话费用预算与会话树支出、只读上下文查看器、草稿专用听写及原生 `local://` 文件编辑；新增面板同时提供真实数据与隔离演示。
+- 受限目录逐次审批设置、Ask 备注选项归属、WATCHDOG 审阅范围与推理开关、空闲回顾／压缩显式启用、自动压缩日志和同仓库 Worktree 恢复范围。
+- 新会话支持不加载上下文指令文件；BTW 支持图片与 `side: true` 文件命令标题，模型发现支持服务端 reasoning 配置、决策模型与新增兼容字段。
+
 ### Changed
 
+- Runtime 从 `18.12.6-studio.9` 升级到 `18.13.2-studio.10`，构建 Bun 升至 1.4.4；本版更新兼容基线为 0.1.15，旧版使用完整 Setup 升级。保留四组可重放接缝补丁。详见 [迁移记录](docs/migrations/omp-18.13.2.md)。
+
 - 发布复用 npm、Electron、NSIS 和 WebView2 下载缓存，并在安装依赖后恢复匹配 Electron/架构的 node-pty 产物；普通 Studio 版本号升级不再导致依赖缓存失效。增加独立的 Windows x64/ARM64 缓存预热工作流，供发布前填充与验证。
+
+### Fixed
+
+- 模型页 OAuth 登录和模型刷新优先使用已安装的托管 Runtime，修复未在系统 PATH 安装 OMP 时提示 `omp executable was not found`（[#14](https://github.com/the-snowpear/omp-studio/issues/14)）。
+- Runtime 启动探测显式固定临时工作区并隔离继承配置，避免自动切到共享临时目录后加载外部扩展；关联 [#3](https://github.com/the-snowpear/omp-studio/issues/3)，持续创建进程的完整故障保留用户复测。
+- BTW 的文字与图片草稿在浮窗／停靠切换后保留；预算面板复用已协商能力，旧 Runtime 不发起未知命令。
+- 更新弹窗适配窄窗口，精简下载与 GitHub 入口文案。
 
 ## [0.1.14] - 2026-10-28
 

@@ -132,6 +132,7 @@ export type AskSubmitPayload = {
     readonly selectedOptions: readonly string[];
     readonly customInput?: string;
     readonly note?: string;
+    readonly noteOption?: string;
     readonly customInputImages?: readonly import("@omp-studio/studio-protocol").AskImage[];
     readonly noteImages?: readonly import("@omp-studio/studio-protocol").AskImage[];
   }>;
@@ -147,11 +148,13 @@ export function submitAskValue(
       const markers=(images:readonly unknown[]|undefined)=>images?.map((_,i)=>`[Image #${i+1}]`).join(" ")??"";
       const custom = [answer.custom.trim(),markers(answer.customInputImages)].filter(Boolean).join("\n");
       const note=[answer.note?.trim(),markers(answer.noteImages)].filter(Boolean).join("\n");
+      const noteOption = !custom && note ? answer.noteOption ?? (answer.picked.length === 1 ? answer.picked[0] : undefined) : undefined;
       return {
         id: question.id,
         selectedOptions: custom ? [] : [...answer.picked],
         ...(custom ? { customInput: custom } : {}),
         ...(note ? {note}:{}),
+        ...(noteOption && answer.picked.includes(noteOption) ? { noteOption } : {}),
         ...(answer.customInputImages?.length?{customInputImages:answer.customInputImages}:{}),
         ...(answer.noteImages?.length?{noteImages:answer.noteImages}:{}),
       };

@@ -17,6 +17,17 @@ export const PREVIEW_FEATURE_SETTINGS: FeatureSettingRow[] = [
   { key: "prewalk.autoTarget", value: "@smol", source: "default" },
   { key: "async.widgets", value: true, source: "default" },
   { key: "computer.backgroundFallback", value: "takeover", source: "default" },
+  { key: "tools.restrictedFolders", value: ["private/credentials", "production-data"], source: "project" },
+  { key: "extensionHandlers.modeControl", value: true, source: "default" },
+  { key: "recap.enabled", value: false, source: "runtime" },
+  { key: "recap.idleSeconds", value: 240, source: "default" },
+  { key: "compaction.idleEnabled", value: false, source: "default" },
+  { key: "compaction.idleThresholdTokens", value: 200000, source: "default" },
+  { key: "compaction.idleTimeoutSeconds", value: 300, source: "default" },
+  { key: "gc.autoCompress", value: false, source: "default" },
+  { key: "session.worktreeScope", value: "repo", source: "default" },
+  { key: "stt.enabled", value: false, source: "default" },
+  { key: "stt.language", value: "zh", source: "global" },
 ];
 export const PREVIEW_POOL_ACCOUNTS: PoolAccountOption[] = [
   { provider: "anthropic", identityKey: "email:review@example.test", label: "Review · Team" },

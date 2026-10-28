@@ -1,3 +1,8 @@
+import { StudioAdvisorConfigService } from "./advisor-config-service";
+import { isAdvisorConfigKind, type AdvisorConfigOperation } from "../advisor-config-protocol";
+import { isLocalResourceKind, type LocalResourceOperation } from "../local-resources-protocol";
+import { isDictationKind, type DictationOperation } from "../dictation-protocol";
+import { StudioContextViewService } from "./context-view-service";
 import type { StudioModeControlService } from "./mode-control-service";
 import { isNativePlanReviewKind, type NativePlanReviewOperation } from "../plan-review-protocol";
 import { StudioSessionWorktreesService } from "./session-worktrees-service";
@@ -65,6 +70,16 @@ import type { StudioServiceRow, WorkbenchOperation } from "../workbench-protocol
 import { validateWorkbenchOperation, validateWorkbenchResult } from "../workbench-protocol";
 import { SessionControlError } from "./session-control-service";
 
+function isAdvisorConfigOperation(operation: WorkbenchOperation): operation is AdvisorConfigOperation {
+	return isAdvisorConfigKind(operation.kind);
+}
+function isLocalResourceOperation(operation: WorkbenchOperation): operation is LocalResourceOperation {
+	return isLocalResourceKind(operation.kind);
+}
+function isDictationOperation(operation: WorkbenchOperation): operation is DictationOperation {
+	return isDictationKind(operation.kind);
+}
+
 function isSessionTitlesOperation(operation: WorkbenchOperation): operation is SessionTitlesOperation {
 	return isSessionTitlesKind(operation.kind);
 }
@@ -115,6 +130,8 @@ export function projectService(daemon: DaemonSnapshot): StudioServiceRow {
 
 /** Uses the current worker's native ToolSession and its lifecycle/owner subscriptions. */
 export class StudioWorkbenchService {
+	readonly advisorConfig: StudioAdvisorConfigService;
+	readonly contextView: StudioContextViewService;
 	readonly titles: StudioSessionTitlesService;
 	readonly prediction: StudioPredictionService;
 	readonly maintenance: StudioMaintenanceService;
@@ -149,6 +166,8 @@ export class StudioWorkbenchService {
 		readonly session: AgentSession,
 		readonly liveAudio = new StudioLiveAudioService(session),
 	) {
+		this.advisorConfig = new StudioAdvisorConfigService(session);
+		this.contextView = new StudioContextViewService(session);
 		this.titles = new StudioSessionTitlesService(session);
 		this.prediction = new StudioPredictionService(session);
 		if (typeof session.runEphemeralTurn === "function") this.prediction.enableMessagePrediction(session);
@@ -181,6 +200,7 @@ export class StudioWorkbenchService {
 		this.computerObservation = new StudioComputerObservationService(session);
 	}
 	dispose(): void {
+		this.contextView.dispose();
 		this.prediction.dispose();
 		this.portability.dispose();
 		this.compression.dispose();
@@ -205,6 +225,9 @@ export class StudioWorkbenchService {
 		return result;
 	}
 	async #execute(operation: WorkbenchOperation): Promise<unknown> {
+		if (isAdvisorConfigOperation(operation)) return this.advisorConfig.execute(operation);
+		if (isLocalResourceOperation(operation)) return this.resources.local(operation);
+		if (isDictationOperation(operation)) return this.liveAudio.dictation(operation);
 		if (isSessionTitlesOperation(operation)) return this.titles.execute(operation);
 		if (isPredictionChannelOperation(operation)) return this.prediction.execute(operation);
 		if (isMaintenanceOperation(operation)) return this.maintenance.execute(operation);

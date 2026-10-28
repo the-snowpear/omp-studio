@@ -437,6 +437,8 @@ function probeImageInput(row: Record<string, unknown>): boolean | undefined {
 
 /** Reasoning support as reported by the endpoint (OpenRouter / Ollama shapes). */
 function probeReasoning(row: Record<string, unknown>): boolean | undefined {
+  const metadata = probeRecord(row.metadata);
+  if (typeof (metadata?.reasoning ?? row.reasoning) === "boolean") return (metadata?.reasoning ?? row.reasoning) as boolean;
   if (Array.isArray(row.supported_parameters)) {
     return row.supported_parameters.some((item) => typeof item === "string" && item.toLowerCase().includes("reasoning"));
   }
@@ -453,6 +455,7 @@ function probeReasoning(row: Record<string, unknown>): boolean | undefined {
  * unknown so nothing overrides OMP's bundled catalog on import.
  */
 function probeModelMeta(row: Record<string, unknown>): Omit<ModelDiscoveryModel, "id" | "name"> {
+  row = { ...row, ...(probeRecord(row.metadata) ?? {}), ...(probeRecord(row.model_info) ?? {}) };
   const topProvider = probeRecord(row.top_provider);
   const contextWindow =
     probePositiveInt(row.context_length) ??
@@ -466,9 +469,15 @@ function probeModelMeta(row: Record<string, unknown>): Omit<ModelDiscoveryModel,
     probePositiveInt(row.outputTokenLimit) ??
     probePositiveInt(row.max_tokens);
   const reasoning = probeReasoning(row);
+  const levels = Array.isArray(row.supported_reasoning_levels) ? row.supported_reasoning_levels.map(value => typeof value === "string" ? value.toLowerCase() : typeof probeRecord(value)?.effort === "string" ? String(probeRecord(value)?.effort).toLowerCase() : "").filter(value => ["low", "medium", "high", "xhigh", "max"].includes(value)) : [];
+  const defaultLevel = typeof row.default_reasoning_level === "string" ? row.default_reasoning_level.toLowerCase() : undefined;
+  const thinkingConfig = reasoning === false ? undefined : parseModelThinkingConfig({ mode: "effort", efforts: levels, defaultLevel });
   const image = probeImageInput(row);
+  const nativeInfo = probeRecord(row.model_info);
+  const judge = row.type === "decision" || row.mode === "decisions" || nativeInfo?.mode === "decisions";
   return {
-    ...(parseModelKind(row.kind) === undefined ? {} : { kind: parseModelKind(row.kind)! }),
+    ...(thinkingConfig ? { thinkingConfig, reasoning: true } : {}),
+    ...(judge ? { kind: "judge" as const, api: "openai-decisions" } : parseModelKind(row.kind) === undefined ? {} : { kind: parseModelKind(row.kind)! }),
     ...(typeof row.webSearch === "string" && row.webSearch.trim() ? { webSearch: row.webSearch } : {}),
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
@@ -485,14 +494,16 @@ function probeModelMeta(row: Record<string, unknown>): Omit<ModelDiscoveryModel,
  * `{ models: [{ name: "models/x", displayName, inputTokenLimit }] }`, Ollama
  * `{ models: [{ name: "qwen3:32b" }] }`, LiteLLM `model_name`, and bare arrays.
  */
-export function parseDiscoveryModels(payload: unknown): ModelDiscoveryModel[] {
+export function parseDiscoveryModels(payload: unknown, advertisedReasoning = true): ModelDiscoveryModel[] {
   const out: ModelDiscoveryModel[] = [];
   const seen = new Set<string>();
   const push = (id: string, name?: string, meta?: Omit<ModelDiscoveryModel, "id" | "name">) => {
     const trimmed = id.trim();
     if (!trimmed || seen.has(trimmed)) return;
     seen.add(trimmed);
-    out.push({ id: trimmed, name: name && name.trim().length > 0 ? name.trim() : trimmed, ...(meta ?? {}) });
+    const metadata = { ...(meta ?? {}) };
+    if (!advertisedReasoning) { delete metadata.thinkingConfig; delete metadata.reasoning; }
+    out.push({ id: trimmed, name: name && name.trim().length > 0 ? name.trim() : trimmed, ...metadata });
   };
   if (!payload || typeof payload !== "object") return out;
   const record = payload as Record<string, unknown>;
@@ -519,9 +530,10 @@ export function parseDiscoveryModels(payload: unknown): ModelDiscoveryModel[] {
       else if (item && typeof item === "object") {
         const row = item as Record<string, unknown>;
         const id = typeof row.id === "string" ? row.id : typeof row.model_name === "string" ? row.model_name : "";
+        const meta = probeRecord(row.metadata);
         const label = typeof row.display_name === "string"
           ? row.display_name
-          : typeof row.name === "string" ? row.name : undefined;
+          : typeof meta?.display_name === "string" ? meta.display_name : typeof row.name === "string" ? row.name : undefined;
         push(id, label, probeModelMeta(row));
       }
     }
@@ -545,7 +557,7 @@ interface ProviderYaml {
   api?: string;
   auth?: string;
   headers?: unknown;
-  discovery?: { type?: string; timeoutMs?: number };
+  discovery?: { type?: string; timeoutMs?: number; advertisedReasoning?: boolean };
   models?: Array<Record<string, YamlValue>>;
   modelOverrides?: unknown;
   disableStrictTools?: boolean;
@@ -862,6 +874,8 @@ function costOf(value: YamlValue | undefined): ModelCostMeta | undefined {
 
 function extrasFromYaml(entry: Record<string, YamlValue>): {
   bedrockMessagesApi?: boolean;
+  requiresThinkingPresence?: boolean;
+  extendedCacheTtlBeta?: boolean;
   omitMaxOutputTokens?: boolean;
   premiumMultiplier?: number;
   imageCountBudget?: number;
@@ -881,6 +895,8 @@ function extrasFromYaml(entry: Record<string, YamlValue>): {
   const api = stringOf(entry.api);
   const baseUrl = stringOf(entry.baseUrl);
   return {
+    ...(typeof asRecord(entry.compat)?.requiresThinkingPresence === "boolean" ? { requiresThinkingPresence: asRecord(entry.compat)!.requiresThinkingPresence as boolean } : {}),
+    ...(typeof asRecord(entry.compat)?.extendedCacheTtlBeta === "boolean" ? { extendedCacheTtlBeta: asRecord(entry.compat)!.extendedCacheTtlBeta as boolean } : {}),
     ...(typeof entry.omitMaxOutputTokens === "boolean" ? { omitMaxOutputTokens: entry.omitMaxOutputTokens } : {}),
     ...(typeof asRecord(entry.compat)?.bedrockMessagesApi === "boolean" ? {bedrockMessagesApi: asRecord(entry.compat)!.bedrockMessagesApi as boolean} : {}),
     ...(premiumMultiplier === undefined ? {} : { premiumMultiplier }),
@@ -943,6 +959,8 @@ function yamlModels(id: string, models: Array<Record<string, YamlValue>> | undef
       ...(extras.baseUrl === undefined ? {} : { baseUrl: extras.baseUrl }),
       ...(extras.omitMaxOutputTokens === undefined ? {} : { omitMaxOutputTokens: extras.omitMaxOutputTokens }),
       ...(extras.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: extras.bedrockMessagesApi }),
+      ...(extras.requiresThinkingPresence === undefined ? {} : { requiresThinkingPresence: extras.requiresThinkingPresence }),
+      ...(extras.extendedCacheTtlBeta === undefined ? {} : { extendedCacheTtlBeta: extras.extendedCacheTtlBeta }),
       ...(extras.premiumMultiplier === undefined ? {} : { premiumMultiplier: extras.premiumMultiplier }),
       ...(extras.imageCountBudget === undefined ? {} : { imageCountBudget: extras.imageCountBudget }),
       ...(extras.headers ? { headers: extras.headers } : {}),
@@ -982,6 +1000,8 @@ function yamlModelOverrides(raw: YamlValue | undefined): ModelProviderRecord["mo
       ...(cost ? { cost } : {}),
       ...(extras.omitMaxOutputTokens === undefined ? {} : { omitMaxOutputTokens: extras.omitMaxOutputTokens }),
       ...(extras.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: extras.bedrockMessagesApi }),
+      ...(extras.requiresThinkingPresence === undefined ? {} : { requiresThinkingPresence: extras.requiresThinkingPresence }),
+      ...(extras.extendedCacheTtlBeta === undefined ? {} : { extendedCacheTtlBeta: extras.extendedCacheTtlBeta }),
       ...(extras.premiumMultiplier === undefined ? {} : { premiumMultiplier: extras.premiumMultiplier }),
       ...(extras.imageCountBudget === undefined ? {} : { imageCountBudget: extras.imageCountBudget }),
       ...(extras.headers ? { headers: extras.headers } : {}),
@@ -1058,7 +1078,7 @@ function providerFromYaml(
   const discoveryType = stringOf(asRecord(raw.discovery)?.type);
   const discoveryTimeout = numberOf(asRecord(raw.discovery)?.timeoutMs);
   if (discoveryType !== undefined) {
-    yaml.discovery = { type: discoveryType, ...(discoveryTimeout === undefined ? {} : { timeoutMs: discoveryTimeout }) };
+    yaml.discovery = { type: discoveryType, ...(discoveryTimeout === undefined ? {} : { timeoutMs: discoveryTimeout }), ...(typeof asRecord(raw.discovery)?.advertisedReasoning === "boolean" ? { advertisedReasoning: asRecord(raw.discovery)!.advertisedReasoning as boolean } : {}) };
   }
   if (Array.isArray(raw.models)) {
     yaml.models = raw.models.filter((item): item is Record<string, YamlValue> => Boolean(item) && typeof item === "object" && !Array.isArray(item));
@@ -1113,7 +1133,7 @@ function providerFromYaml(
       ...(auth.envName === undefined ? {} : { envName: auth.envName }),
     },
     ...(yaml.discovery?.type
-      ? { discovery: { type: yaml.discovery.type, ...(yaml.discovery.timeoutMs === undefined ? {} : { timeoutMs: yaml.discovery.timeoutMs }) } }
+      ? { discovery: { type: yaml.discovery.type, ...(yaml.discovery.timeoutMs === undefined ? {} : { timeoutMs: yaml.discovery.timeoutMs }), ...(yaml.discovery.advertisedReasoning === undefined ? {} : { advertisedReasoning: yaml.discovery.advertisedReasoning }) } }
       : preset?.discovery
         ? { discovery: { type: preset.discovery } }
         : {}),
@@ -1195,7 +1215,9 @@ export function toYamlProvider(input: ModelProviderUpsertInput, previous: Record
   }
   if (input.discovery) {
     next.discovery = {
+      ...(asRecord(next.discovery) ?? {}),
       type: input.discovery.type,
+      ...(input.discovery.advertisedReasoning === undefined ? {} : { advertisedReasoning: input.discovery.advertisedReasoning }),
       ...(input.discovery.timeoutMs === undefined ? {} : { timeoutMs: input.discovery.timeoutMs }),
     };
   } else if (input.discovery === null) {
@@ -2620,6 +2642,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       let apiKey = input.apiKey;
       let api = input.api;
       let discoveryType = input.discoveryType;
+      let advertisedReasoning = input.advertisedReasoning !== false;
       let timeoutMs = input.timeoutMs ?? TEST_TIMEOUT_MS;
       if (apiKey) {
         const resolved = resolveRequestApiKey(apiKey);
@@ -2648,6 +2671,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
             }
           }
           const discovery = asRecord(raw.discovery);
+          advertisedReasoning = input.advertisedReasoning ?? (discovery?.advertisedReasoning !== false);
           if (!discoveryType) discoveryType = stringOf(discovery?.type);
           if (input.timeoutMs === undefined) {
             const yamlTimeout = numberOf(discovery?.timeoutMs);
@@ -2687,7 +2711,32 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           lastStatus = response.status;
           if (response.status < 200 || response.status >= 300) continue;
           const payload = await response.json().catch(() => null);
-          const models = parseDiscoveryModels(payload);
+          let models = parseDiscoveryModels(payload, advertisedReasoning);
+          if (discoveryType === "lm-studio") {
+            const nativeBase = endpointUrl.replace(/\/$/, "").replace(/\/v1$/, "");
+            const metadata = new Map<string, Record<string, unknown>>();
+            for (const nativePath of ["/api/v0/models", "/api/v1/models"]) {
+              const native = await doFetch(nativeBase + nativePath, { method: "GET", headers, signal: controller.signal }).then(response => response.ok ? response.json() : null).catch(() => null);
+              const rows = probeRecord(native);
+              const entries = rows?.models ?? rows?.data;
+              if (!Array.isArray(entries)) continue;
+              for (const raw of entries) {
+                const row = probeRecord(raw);
+                if (!row) continue;
+                const instances = Array.isArray(row.loaded_instances) ? row.loaded_instances.map(probeRecord).filter((item): item is Record<string, unknown> => !!item) : [];
+                const loadedWindow = instances.map(instance => probePositiveInt(probeRecord(instance.config)?.context_length)).find(value => value !== undefined);
+                const info = { ...row, context_window: loadedWindow ?? (row.state === "loaded" ? probePositiveInt(row.loaded_context_length) : undefined) ?? row.max_context_length, input_modalities: row.has_vision_adapter === true || row.type === "vlm" ? ["text", "image"] : undefined };
+                for (const id of [row.id, row.key, ...instances.map(instance => instance.id)]) if (typeof id === "string") metadata.set(id, info);
+              }
+            }
+            models = models.map(model => {
+              const row = metadata.get(model.id);
+              if (!row) return model;
+              const meta = probeModelMeta(row);
+              const { thinkingConfig: _thinking, ...withoutThinking } = model;
+              return meta.kind === "judge" ? { ...withoutThinking, ...meta, reasoning: false } : { ...model, ...meta };
+            });
+          }
           return {
             ok: true,
             found: models.length,

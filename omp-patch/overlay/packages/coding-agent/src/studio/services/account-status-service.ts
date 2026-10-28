@@ -1,3 +1,5 @@
+import { computePolicyDiagnostics } from "../../cli/usage-cli";
+import { cfgRetryUsageReservePct } from "../../session/settings";
 import { createHash } from "node:crypto";
 import type { OAuthAccountSummary, ResetCreditAccountStatus, UsageReport } from "@oh-my-pi/pi-ai";
 import { resolveUsedFraction } from "@oh-my-pi/pi-ai/usage";
@@ -173,6 +175,10 @@ export class StudioAccountStatusService {
 				const report = matches.sort((left, right) => right.fetchedAt - left.fetchedAt)[0];
 				if (report) matches.forEach(item => assigned.add(item));
 				accounts.push({
+					policy: computePolicyDiagnostics(provider, account, report?.limits, {
+						globalReservePct: cfgRetryUsageReservePct.get(this.session.settings),
+						getAccountPolicy: (provider, identity) => auth.oauth.policy(provider, identity),
+					}),
 					id: accountId(provider, String(account.credentialId)),
 					provider,
 					label: clean(account.email ?? account.accountId ?? "Account " + (account.position + 1)),

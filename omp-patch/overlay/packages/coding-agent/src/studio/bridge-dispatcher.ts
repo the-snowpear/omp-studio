@@ -1,3 +1,4 @@
+import { isContextViewKind, type ContextViewOperation } from "./context-view-protocol";
 import { isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, type WorkbenchOperation } from "./workbench-protocol";
 import { isUpgradeOperationKind, UPGRADE_OPERATION_KINDS, type UpgradeOperation } from "./runtime-upgrade-protocol";
 import { isEvaluationOperationKind } from "./evaluation-validation";
@@ -316,7 +317,8 @@ export class StudioBridgeDispatcher {
 		if (
 			operation.kind !== "runtime.shutdown" &&
 			operation.kind !== "tokens.count" &&
-			operation.kind !== "prediction.query"
+			operation.kind !== "prediction.query" &&
+			operation.kind !== "session.owner.update"
 		) {
 			try {
 				await this.runtime.ensureWorkerLive?.();
@@ -335,6 +337,20 @@ export class StudioBridgeDispatcher {
 				);
 				return;
 			}
+		}
+		if (operation.kind === "session.owner.update") {
+			if (request.runtimeEpoch === this.runtime.runtimeEpoch && operation.sessionId === this.runtime.sessionId)
+				this.runtime.services.idleMaintenance.update(operation.state);
+			send(`owner:${request.requestId}`, {
+				type: "studio.receipt",
+				requestId: request.requestId,
+				commandId: crypto.randomUUID(),
+				runtimeEpoch: this.runtime.runtimeEpoch,
+				stateVersion: this.projector.stateVersion,
+				status: "completed",
+				result: { updated: true },
+			});
+			return;
 		}
 		if (operation.kind === "runtime.snapshot") {
 			send(`snapshot-result:${request.requestId}`, this.projector.response(request.requestId));
@@ -364,6 +380,23 @@ export class StudioBridgeDispatcher {
 					);
 				}
 			})();
+			return;
+		}
+		if (isContextViewKind(operation.kind)) {
+			try {
+				const result = this.runtime.services.workbench.contextView.execute(operation as ContextViewOperation);
+				send(`context:${request.requestId}`, {
+					type: "studio.receipt",
+					requestId: request.requestId,
+					commandId: crypto.randomUUID(),
+					runtimeEpoch: this.runtime.runtimeEpoch,
+					stateVersion: this.projector.stateVersion,
+					status: "completed",
+					result,
+				});
+			} catch (error) {
+				this.#reject(request, protocolError(error), send, false);
+			}
 			return;
 		}
 		if (operation.kind === "session.transcript.read") {
@@ -895,8 +928,12 @@ export class StudioBridgeDispatcher {
 
 	async #executeBtwOperation(operation: StudioRequest["operation"]): Promise<unknown> {
 		switch (operation.kind) {
-			case "btw.ask":
-				return this.runtime.services.btw.ask(operation.question);
+			case "btw.ask": {
+				const side = operation.command
+					? this.runtime.services.commands.sideCommand(operation.command.name, operation.command.arguments)
+					: undefined;
+				return this.runtime.services.btw.ask(side?.question ?? operation.question, operation.images, side?.title);
+			}
 			case "btw.abort":
 				return this.runtime.services.btw.abort(operation.ephemeralId);
 			case "btw.branch":

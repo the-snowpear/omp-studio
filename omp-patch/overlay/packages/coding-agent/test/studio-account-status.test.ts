@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
+import { Settings } from "../src/config/settings";
 import type { AgentSession } from "../src/session/agent-session";
 import { projectQuota, StudioAccountStatusService } from "../src/studio/services/account-status-service";
 
@@ -36,6 +37,7 @@ describe("Studio read-only account status", () => {
 			credentials: { list: () => [{ provider: "anthropic", key: "private-key" }] },
 			keys: { source: () => ({ concrete: true }) },
 			oauth: {
+				policy: () => undefined,
 				accounts: (provider: string) =>
 					provider === "anthropic"
 						? [
@@ -63,6 +65,7 @@ describe("Studio read-only account status", () => {
 		};
 		const service = new StudioAccountStatusService({
 			sessionId: "session",
+			settings: Settings.isolated(),
 			modelRegistry: { authStorage: auth, getAvailable: () => [] },
 		} as unknown as AgentSession);
 		const cold = await service.get(false);
@@ -95,11 +98,12 @@ it("signs out the exact native credential when account labels are duplicated, re
 	});
 	const auth = {
 		credentials: { list: () => [{ provider: "anthropic" }], removeById },
-		oauth: { accounts: () => accounts },
+		oauth: { accounts: () => accounts, policy: () => undefined },
 		keys: { source: () => undefined },
 	};
 	const service = new StudioAccountStatusService({
 		sessionId: "owner",
+		settings: Settings.isolated(),
 		modelRegistry: { authStorage: auth, getAvailable: () => [] },
 	} as unknown as AgentSession);
 	const rows = (await service.get()).accounts;

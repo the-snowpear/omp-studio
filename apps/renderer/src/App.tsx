@@ -1,3 +1,7 @@
+import { LocalFilesPane } from "./capabilities/LocalFilesPane";
+import { DictationControl } from "./composer/DictationControl";
+import { ContextInspector } from "./conversation/ContextInspector";
+import { SessionBudgetPane } from "./models/SessionBudgetPane";
 import { ExecutionTargets, useExecutionTarget, useTargetMemory } from "./workspaces/ExecutionTargets";
 import { RemoteScopeNotice } from "./workspaces/RemoteScopeNotice";
 import { ExecutionTargetPicker } from "./workspaces/ExecutionTargetPicker";
@@ -472,6 +476,7 @@ const TOASTED_NOTICE_MEMORY = 400;
 const TRAIL_MAX = 100;
 
 function setSlashUiIntent(ui: SlashNativeUi): void {
+  window.dispatchEvent(new CustomEvent("omp-studio-slash-ui", { detail: ui }));
   try {
     sessionStorage.setItem(SLASH_UI_INTENT_KEY, ui);
   } catch {
@@ -2982,6 +2987,9 @@ function RealTokenPanel({ telemetry, view }: { telemetry: SessionTelemetrySnapsh
       <div className="tr-row">TPS<span className="tr-v">{telemetry.generationTps !== undefined ? telemetry.generationTps.toFixed(1) : turn?.tps !== undefined ? turn.tps.toFixed(1) : "—"}</span></div>
       {telemetry.advisorCost !== undefined ? <div className="tr-row">Advisor<span className="tr-v">{formatTelemetryCost(telemetry.advisorCost)}</span></div> : null}
       {telemetry.servedModel && telemetry.servedModel !== telemetry.requestedModel ? <div role="status" className="tr-row">{tr("runtimeUpgrade.servedModel")}<span className="tr-v">{telemetry.servedModel} · {tr("runtimeUpgrade.requestedModel")} {telemetry.requestedModel}</span></div> : null}
+      {telemetry.treeCost !== undefined ? <div className="tr-row">Session tree (USD)<span className="tr-v">${telemetry.treeCost.toFixed(4)}</span></div> : null}
+      {telemetry.budget ? <div role="status" className="tr-row">Budget<span className="tr-v">{telemetry.budget.maxCost === null ? "—" : `$${telemetry.budget.maxCost}`} · {telemetry.budget.limitReached ? "cap reached" : "below cap"}</span></div> : null}
+      {telemetry.editRejections ? Object.entries(telemetry.editRejections).map(([kind, count]) => <div className="tr-row" key={kind}>Edit · {kind}<span className="tr-v">{count}</span></div>) : null}
       <div className="tr-row">Reasoning<span className="tr-v">{formatTelemetryTokens(t.reasoning)}</span></div>
       <div className="tr-row">Cache read<span className="tr-v">{formatTelemetryTokens(t.cacheRead)}</span></div>
       <div className="tr-row">Cache write<span className="tr-v">{formatTelemetryTokens(t.cacheWrite)}</span></div>
@@ -3289,7 +3297,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
             align="end"
             triggerClassName="t-group"
             popoverClassName="telemetry-pop tok-pop"
-            panel={<>{preview ? <PreviewTokenPanel /> : <RealTokenPanel telemetry={telemetry} view={viewedTelemetry} />}<TokenCounterPane key={String(preview)} client={client} /></>}
+            panel={<>{preview ? <PreviewTokenPanel /> : <RealTokenPanel telemetry={telemetry} view={viewedTelemetry} />}<TokenCounterPane key={String(preview)} client={client} /><button className="btn small outline" onClick={() => { setSlashUiIntent("context-viewer"); onRoute("workbench"); }}>{t("palette.openContext")}</button></>}
           >
             {preview ? <PreviewTokenTrigger /> : <RealTokenTrigger telemetry={telemetry} />}
           </AnchoredPop>
@@ -3686,6 +3694,9 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
   const { preview } = usePreviewMode();
   const treeConfirm = useUserMessageTreeConfirm(preview);
   const [inspectTarget, setInspectTarget] = useState<SubagentHubTarget | null>(null);
+  const [contextInspectorOpen, setContextInspectorOpen] = useState(false);
+  const [localFilesOpen, setLocalFilesOpen] = useState(false);
+  const [localFileName, setLocalFileName] = useState("");
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
   const [rememberedPlan, setRememberedPlan] = useState<{ title: string; body: string } | undefined>(undefined);
   const planDialogOriginRef = useRef<HTMLElement | null>(null);
@@ -4383,6 +4394,12 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
       submitted: submittedPromptTitle !== undefined || running,
     });
   }, [onProvisionalSessionChange, provisionalTitle, running, composerOwner, submittedPromptTitle, textReady, workspaceId]);
+  useEffect(() => {
+    if (preview || !snapshot || !composerOwner || executionTarget.id) return;
+    conversationViewLeases.setOwnerKnown();
+    const blocked = !snapshotIsEmpty(draft) || sending || optimisticPrompt !== undefined || queuedMessages.length > 0 || pendingInteraction !== undefined || worktreeGated;
+    return blocked ? conversationViewLeases.block(Number(snapshot.runtimeEpoch), composerOwner) : undefined;
+  }, [preview, snapshot?.runtimeEpoch, composerOwner, draft, sending, optimisticPrompt, queuedMessages.length, pendingInteraction, worktreeGated, executionTarget.id]);
   const abortEligible = isAbortEligible({
     executionMatches,
     streaming: sessionStreaming,
@@ -4394,6 +4411,8 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
   const activityStatus = useMemo(
     () => (preview
       ? (previewThreadId === "t1" ? PREVIEW_RUN_ACTIVITY.status : null)
+      : snapshot?.pause?.paused
+        ? { phase: "waiting" as const, label: snapshot.pause.unsettledTurns || snapshot.pause.unfinishedJobs ? `暂停收尾 / Draining · ${snapshot.pause.unsettledTurns ?? 0} turns · ${snapshot.pause.unfinishedJobs ?? 0} jobs` : "已停稳 / Safely paused" }
       : optimisticPrompt !== undefined
         ? { phase: "waiting" as const, label: PROMPT_SEND_PHASE_LABEL[optimisticPrompt.phase] }
         : executionMatches && snapshot?.awaitingAsyncWork === true && !sessionStreaming
@@ -4405,7 +4424,7 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
           awaiting: executionMatches && awaitingTurn,
           ...(activityRetry === undefined ? {} : { retry: activityRetry }),
         })),
-    [activityRetry, awaitingTurn, convo.state, executionMatches, optimisticPrompt, preview, previewThreadId, sessionStreaming, snapshot?.pendingMessages, snapshot?.awaitingAsyncWork],
+    [activityRetry, awaitingTurn, convo.state, executionMatches, optimisticPrompt, preview, previewThreadId, sessionStreaming, snapshot?.pendingMessages, snapshot?.awaitingAsyncWork, snapshot?.pause],
   );
   const runWindowKey = preview ? `preview:${previewThreadId ?? ""}` : convo.identityKey;
   const runWindow = useRunWindow(activityStatus !== null, runWindowKey);
@@ -5287,6 +5306,8 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
     onOpenChanges();
   }
   function openSlashUi(ui: SlashNativeUi): void {
+    if (ui === "context-viewer") { setContextInspectorOpen(true); return; }
+    if (ui === "local-files") { setLocalFilesOpen(true); return; }
     if (ui === "model-picker") {
       setModelMenuNonce((value) => value + 1);
       return;
@@ -5330,8 +5351,12 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
   useEffect(() => {
     const ui = takeSlashUiIntent();
     if (ui !== undefined) openSlashUi(ui);
+    const receive = (event: Event) => openSlashUi((event as CustomEvent<SlashNativeUi>).detail);
+    window.addEventListener("omp-studio-slash-ui", receive);
+    return () => window.removeEventListener("omp-studio-slash-ui", receive);
   }, []);
   async function runSlashCommand(command: StudioSlashCommand, args: string): Promise<boolean> {
+    if (command.name === "local") { setLocalFileName(args.trim()); setLocalFilesOpen(true); return true; }
     if (command.availability === "disabled") {
       setComposerError(command.disabledReason ?? `/${command.name} 暂不可用`);
       return false;
@@ -5345,6 +5370,11 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
     if (execute.kind === "native-ui") {
       openSlashUi(execute.ui);
       return true;
+    }
+    if (command.side && execute.kind === "invoke") {
+      btwWindow.show();
+      if (preview) { onBtwPreviewAsk(); return true; }
+      return btwSession.ask(`/${command.name}${args ? ` ${args}` : ""}`, true, undefined, { name: command.name, arguments: args });
     }
     /* BTW 不走通用 run()：ask 的回执带着 branchToken，那是唯一能拿到它的地方，
        而 run() 只回报成败。同时把浮窗唤起来，placement 保持上次的偏好。
@@ -5415,6 +5445,8 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
           </form>
         </section>
       </div> : null}
+      <ContextInspector client={client} sessionId={snapshot?.sessionId} visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} />
+      {localFilesOpen ? <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="local://"><button autoFocus className="btn small ghost" onClick={() => setLocalFilesOpen(false)}>{t("common.close")}</button><LocalFilesPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialName={localFileName} /></section></div> : null}
       <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={true} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
       <div className={`workbench${sideOpen ? " split-right" : ""}`} id="workbench">
         <div ref={readingColumnRef} className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`}>
@@ -5961,6 +5993,13 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
                 }}
                 onError={setComposerError}
               />
+              <DictationControl client={client} sessionId={composerOwner} available={runtimeConnected && executionMatches && !worktreeGated} onText={text => {
+                const current = composerInputRef.current?.getSnapshot() ?? draft;
+                const next = snapshotFromDoc({ nodes: [...current.doc.nodes, { type: "text", value: `${current.text.trim() ? "\n" : ""}${text}` }] });
+                composerInputRef.current?.setSnapshot(next);
+                setDraft(next);
+                if (composerOwner) onComposerDraftChange?.(composerOwner, next);
+              }} />
               <p className="sr-only" id="composerHint">{
                 queueEdit !== undefined
                   ? t("composer.editingQueuedMessageHint")
@@ -7722,7 +7761,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     }));
   }, [client, previewMode.preview, runSessionCreate, refreshSessionTitles, workspaceActionQueue]);
 
-  const startNewChat = useCallback(() => {
+  const startNewChat = useCallback((noContextFiles?: boolean) => {
     if (previewMode.preview) {
       go("workbench");
       return;
@@ -7734,7 +7773,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     onNewThread();
     go("workbench");
     runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
-      const handle = await client.command("session.create", {});
+      const handle = await client.command("session.create", noContextFiles ? { noContextFiles: true } : {});
       const created = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
       refreshSessionTitles();
       return created;
@@ -7770,6 +7809,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     if (execute.kind === "native-ui") {
       applySlashUi(execute.ui);
       return true;
+    }
+    if (command.side && execute.kind === "invoke") {
+      go("workbench");
+      btwWindow.show();
+      if (previewMode.preview) { setBtwDemoRound(0); return true; }
+      return btwSession.ask(`/${command.name}${args ? ` ${args}` : ""}`, true, undefined, { name: command.name, arguments: args });
     }
     if (execute.kind === "typed" && execute.name === "btw.ask") {
       go("workbench");
@@ -8038,7 +8083,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         go("diagnostics");
         return;
       case "newChat":
-        startNewChat();
+        startNewChat(action.noContextFiles);
         return;
       case "pickProject":
         void pickProject();
@@ -8109,6 +8154,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         }
         setSideTab(action.tab);
         openSide();
+        return;
+      case "openContext":
+        applySlashUi("context-viewer");
         return;
       case "openSettings":
         setSettingsIntent(action.group);

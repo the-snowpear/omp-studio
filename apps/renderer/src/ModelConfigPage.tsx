@@ -543,6 +543,7 @@ type Draft = {
   envName: string;
   command: string;
   discoveryType: string;
+  advertisedReasoning?: boolean;
   discoveryTimeoutMs?: number;
   headersText: string;
   disableStrictTools: boolean;
@@ -571,6 +572,8 @@ function updateModelParameterDraft(current: ModelEditState | null, update: (draf
 type DraftOverrideForm = {
   parameters: ModelParameterDraft;
   bedrockMessagesApi: "" | "true" | "false";
+  requiresThinkingPresence: "" | "true" | "false";
+  extendedCacheTtlBeta: "" | "true" | "false";
   name: string;
   tools: "" | "true" | "false";
   image: "" | "true" | "false";
@@ -592,6 +595,8 @@ type DraftOverrideForm = {
 type CustomModelForm = {
   parameters: ModelParameterDraft;
   bedrockMessagesApi: "" | "true" | "false";
+  requiresThinkingPresence: "" | "true" | "false";
+  extendedCacheTtlBeta: "" | "true" | "false";
   id: string;
   name: string;
   api: string;
@@ -652,6 +657,11 @@ function rcFromParts(
   };
 }
 
+function ModelCompatControl({ label, value, onChange }: { label: string; value: "" | "true" | "false"; onChange(value: "" | "true" | "false"): void }) {
+  const { t } = useI18n();
+  return <div className="field span2"><label>{label}</label><AppSelect className="select" aria-label={label} value={value} onChange={event => onChange(event.target.value as "" | "true" | "false")}><option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option></AppSelect></div>;
+}
+
 function BedrockMessagesControl({value,onChange}:{value:""|"true"|"false";onChange:(value:""|"true"|"false")=>void}) {
   const {t}=useI18n();
   return <div className="field span2"><label>Bedrock Messages API</label><AppSelect className="select" aria-label="Bedrock Messages API" value={value} onChange={event=>onChange(event.target.value as ""|"true"|"false")}><option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option></AppSelect><span className="desc">{t("modelConfig.bedrockMessagesDesc")}</span></div>;
@@ -661,6 +671,8 @@ function blankOverrideForm(from?: DraftOverride): DraftOverrideForm {
   return {
     parameters: createModelParameterDraft(from),
     bedrockMessagesApi: from?.bedrockMessagesApi === undefined ? "" : from.bedrockMessagesApi ? "true" : "false",
+    requiresThinkingPresence: from?.requiresThinkingPresence === undefined ? "" : from.requiresThinkingPresence ? "true" : "false",
+    extendedCacheTtlBeta: from?.extendedCacheTtlBeta === undefined ? "" : from.extendedCacheTtlBeta ? "true" : "false",
     name: from?.name ?? "",
     tools: from?.tools === undefined ? "" : from.tools ? "true" : "false",
     image: from?.image === undefined ? "" : from.image ? "true" : "false",
@@ -684,6 +696,8 @@ function blankCustomForm(from?: ModelCatalogEntry): CustomModelForm {
   return {
     parameters: createModelParameterDraft(from),
     bedrockMessagesApi: from?.bedrockMessagesApi === undefined ? "" : from.bedrockMessagesApi ? "true" : "false",
+    requiresThinkingPresence: from?.requiresThinkingPresence === undefined ? "" : from.requiresThinkingPresence ? "true" : "false",
+    extendedCacheTtlBeta: from?.extendedCacheTtlBeta === undefined ? "" : from.extendedCacheTtlBeta ? "true" : "false",
     id: from?.id ?? "",
     name: from?.name ?? "",
     api: from?.api ?? "inherit",
@@ -717,6 +731,10 @@ function overrideFromForm(form: DraftOverrideForm): DraftOverride | null {
   const next: DraftOverride = { ...effectiveModelParameters(form.parameters), parameterSources: effectiveParameterSources(form.parameters) };
   const bedrock = triState(form.bedrockMessagesApi);
   if (bedrock !== undefined) next.bedrockMessagesApi = bedrock;
+  const requiresThinkingPresence = triState(form.requiresThinkingPresence);
+  if (requiresThinkingPresence !== undefined) next.requiresThinkingPresence = requiresThinkingPresence;
+  const extendedCacheTtlBeta = triState(form.extendedCacheTtlBeta);
+  if (extendedCacheTtlBeta !== undefined) next.extendedCacheTtlBeta = extendedCacheTtlBeta;
   if (form.name.trim()) next.name = form.name.trim();
   const tools = triState(form.tools);
   if (tools !== undefined) next.tools = tools;
@@ -791,6 +809,8 @@ function entryFromCustomForm(providerId: string, form: CustomModelForm): ModelCa
     ...(form.baseUrl.trim() ? { baseUrl: form.baseUrl.trim() } : {}),
     ...(form.omitMaxOutputTokens ? { omitMaxOutputTokens: true } : {}),
     ...(triState(form.bedrockMessagesApi) === undefined ? {} : { bedrockMessagesApi: triState(form.bedrockMessagesApi)! }),
+    ...(triState(form.requiresThinkingPresence) === undefined ? {} : { requiresThinkingPresence: triState(form.requiresThinkingPresence)! }),
+    ...(triState(form.extendedCacheTtlBeta) === undefined ? {} : { extendedCacheTtlBeta: triState(form.extendedCacheTtlBeta)! }),
     ...(premium === undefined ? {} : { premiumMultiplier: premium }),
     ...(imageBudget === undefined ? {} : { imageCountBudget: imageBudget }),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
@@ -849,6 +869,7 @@ function draftFromProvider(provider: ModelProviderRecord): Draft {
     envName: provider.auth.envName ?? `${provider.id.replace(/-/g, "_").toUpperCase()}_API_KEY`,
     command: provider.auth.type === "command" && provider.auth.apiKey ? provider.auth.apiKey : "",
     discoveryType: provider.discovery?.type ?? "",
+    ...(provider.discovery?.advertisedReasoning === undefined ? {} : { advertisedReasoning: provider.discovery.advertisedReasoning }),
     ...(provider.discovery?.timeoutMs === undefined ? {} : { discoveryTimeoutMs: provider.discovery.timeoutMs }),
     headersText: Object.entries(provider.headers ?? {}).map(([key, value]) => `${key}: ${value}`).join("\n"),
     disableStrictTools: provider.disableStrictTools ?? false,
@@ -956,6 +977,8 @@ function overrideDraftEqual(left: DraftOverride | undefined, right: DraftOverrid
     && left.tools === right.tools
     && left.image === right.image
     && left.bedrockMessagesApi === right.bedrockMessagesApi
+    && left.requiresThinkingPresence === right.requiresThinkingPresence
+    && left.extendedCacheTtlBeta === right.extendedCacheTtlBeta
     && left.omitMaxOutputTokens === right.omitMaxOutputTokens
     && left.premiumMultiplier === right.premiumMultiplier
     && left.imageCountBudget === right.imageCountBudget
@@ -980,6 +1003,7 @@ function draftsEqual(left: Draft, right: Draft): boolean {
     || left.command !== right.command
     || left.discoveryType !== right.discoveryType
     || left.discoveryTimeoutMs !== right.discoveryTimeoutMs
+    || left.advertisedReasoning !== right.advertisedReasoning
     || left.headersText !== right.headersText
     || left.disableStrictTools !== right.disableStrictTools
     || left.transport !== right.transport
@@ -1082,7 +1106,7 @@ function providerUpsertFromDraft(editor: Draft, contentHash?: string): ModelProv
       ...(editor.command ? { command: editor.command } : {}),
     },
     discovery: editor.discoveryType
-      ? { type: editor.discoveryType, ...(editor.discoveryTimeoutMs === undefined ? {} : { timeoutMs: editor.discoveryTimeoutMs }) }
+      ? { type: editor.discoveryType, ...(editor.discoveryTimeoutMs === undefined ? {} : { timeoutMs: editor.discoveryTimeoutMs }), ...(editor.advertisedReasoning === undefined ? {} : { advertisedReasoning: editor.advertisedReasoning }) }
       : null,
     headers: parseHeaders(editor.headersText),
     disableStrictTools: editor.disableStrictTools,
@@ -1107,6 +1131,8 @@ function providerUpsertFromDraft(editor: Draft, contentHash?: string): ModelProv
       ...(model.baseUrl ? { baseUrl: model.baseUrl } : {}),
       ...(model.omitMaxOutputTokens ? { omitMaxOutputTokens: true } : {}),
       ...(model.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: model.bedrockMessagesApi }),
+      ...(model.requiresThinkingPresence === undefined ? {} : { requiresThinkingPresence: model.requiresThinkingPresence }),
+      ...(model.extendedCacheTtlBeta === undefined ? {} : { extendedCacheTtlBeta: model.extendedCacheTtlBeta }),
       ...(model.premiumMultiplier === undefined ? {} : { premiumMultiplier: model.premiumMultiplier }),
       ...(model.imageCountBudget === undefined ? {} : { imageCountBudget: model.imageCountBudget }),
       ...(model.headers ? { headers: model.headers } : {}),
@@ -2903,6 +2929,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         providerId,
         endpointUrl,
         api: draft.api,
+        advertisedReasoning: draft.advertisedReasoning !== false,
         ...(secret ? { apiKey: secret } : {}),
         ...(Object.keys(headers).length > 0 ? { headers } : {}),
         ...(draft.discoveryTimeoutMs === undefined ? {} : { timeoutMs: draft.discoveryTimeoutMs }),
@@ -3589,6 +3616,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                 {modelsTab === "discovery" ? (
                   <div className="kv-list">
                     <div className="kv-row"><span className="k">Discovery Type</span><span className="v"><span className="chip-code">{editor.discoveryType}</span></span></div>
+                    <div className="kv-row"><span className="k">采用服务端 reasoning 配置</span><span className="v"><input type="checkbox" checked={editor.advertisedReasoning !== false} onChange={event => setEditor({ ...editor, advertisedReasoning: event.target.checked })} /><span className="tiny muted">读取 /v1/models 的 ladder、none 和 reasoning:false；关闭则沿用目录推断。</span></span></div>
                     <div className="kv-row"><span className="k">Timeout（ms）</span><span className="v">
                       <input className="input mono" type="number" style={{ width: 120 }} value={editor.discoveryTimeoutMs ?? ""} onChange={(event) => {
                         const next = { ...editor };
@@ -3959,6 +3987,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                                   <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
                                 </AppSelect>
                               </div>
+                              <ModelCompatControl label="Requires thinking presence" value={modelEditView.draft.requiresThinkingPresence} onChange={requiresThinkingPresence => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, requiresThinkingPresence } })} />
+                              <ModelCompatControl label="Extended cache TTL beta" value={modelEditView.draft.extendedCacheTtlBeta} onChange={extendedCacheTtlBeta => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, extendedCacheTtlBeta } })} />
                               <BedrockMessagesControl value={modelEditView.draft.bedrockMessagesApi} onChange={bedrockMessagesApi => setModelEdit({...modelEditView,draft:{...modelEditView.draft,bedrockMessagesApi}})}/>
                               <div className="field"><label>Premium Multiplier</label>
                                 <input className="input mono" placeholder={t("common.inherit")} value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />
@@ -4054,6 +4084,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                                   <span className="desc">{t("modelConfig.omitMaxOutputTokensDesc")}</span>
                                 </span>
                               </div>
+                              <ModelCompatControl label="Requires thinking presence" value={modelEditView.draft.requiresThinkingPresence} onChange={requiresThinkingPresence => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, requiresThinkingPresence } })} />
+                              <ModelCompatControl label="Extended cache TTL beta" value={modelEditView.draft.extendedCacheTtlBeta} onChange={extendedCacheTtlBeta => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, extendedCacheTtlBeta } })} />
                               <BedrockMessagesControl value={modelEditView.draft.bedrockMessagesApi} onChange={bedrockMessagesApi => setModelEdit({...modelEditView,draft:{...modelEditView.draft,bedrockMessagesApi}})}/>
                               <div className="field"><label>Premium Multiplier</label>
                                 <input className="input mono" placeholder={t("common.notSet")} value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />

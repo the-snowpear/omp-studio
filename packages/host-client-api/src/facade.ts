@@ -1,3 +1,4 @@
+import type { ContextViewOperation } from "@omp-studio/studio-protocol";
 import { validateArtifactTextInput, validateArtifactIdInput, isWorkbenchOperationKind, isUpgradeOperationKind } from "@omp-studio/studio-protocol";
 import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
 /**
@@ -838,6 +839,15 @@ export class StudioHostClientFacade implements ClientTransport {
 
   async #dispatchQuery(request: ClientQueryRequest): Promise<ClientQueryResponse> {
     switch (request.queryName) {
+      case "context.view.open":
+      case "context.view.list":
+      case "context.view.entry":
+      case "context.view.release": {
+        const session = this.#runtimeSession();
+        if (!session) throw unavailableError("Context requires a connected Runtime");
+        const result = await session.readContext({ kind: request.queryName, ...request.input } as ContextViewOperation);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "prediction.query": {
         const input=(request as ClientQueryRequest<"prediction.query">).input;
         validatePredictionQuery(input);
@@ -3295,7 +3305,7 @@ export class StudioHostClientFacade implements ClientTransport {
     const input = request.input;
     switch (commandName) {
       case "session.create":
-        void this.#runSemanticCommand(() => service.create!(), request.requestId, commandName);
+        void this.#runSemanticCommand(() => service.create!(input as { noContextFiles?: boolean }), request.requestId, commandName);
         break;
       case "session.resume":
       case "session.drop": {
@@ -3345,8 +3355,8 @@ export class StudioHostClientFacade implements ClientTransport {
     input: unknown,
   ): void {
     if (commandName === "session.create") {
-      if (input === null || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== 0) {
-        throw clientError("INVALID_ARGUMENT", "session.create input must be empty");
+      if (input === null || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => key !== "noContextFiles") || ("noContextFiles" in input && typeof input.noContextFiles !== "boolean")) {
+        throw clientError("INVALID_ARGUMENT", "Choose a boolean noContextFiles startup option");
       }
       return;
     }

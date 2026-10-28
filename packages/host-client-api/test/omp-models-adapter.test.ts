@@ -884,6 +884,16 @@ describe("models.get availableModels thinking", () => {
 });
 
 describe("parseDiscoveryModels", () => {
+  test("nested gateway ladders override defaults, explicit false disables reasoning and opt-out leaves it unknown", () => {
+    const payload = { data: [{ id: "gateway", metadata: { display_name: "Gateway", context_window: 32768, input_modalities: ["text", "image"], supported_reasoning_levels: [{ effort: "none" }, { effort: "HIGH" }, { effort: "low" }], default_reasoning_level: "high" } }] };
+    const model = parseDiscoveryModels(payload)[0]!;
+    assert.equal(model.name, "Gateway"); assert.equal(model.contextWindow, 32768); assert.equal(model.image, true);
+    assert.deepEqual(model.thinkingConfig?.efforts, ["low", "high"]); assert.equal(model.thinkingConfig?.defaultLevel, "high");
+    const disabled = parseDiscoveryModels({ data: [{ ...payload.data[0], metadata: { ...payload.data[0]!.metadata, reasoning: false } }] })[0]!;
+    assert.equal(disabled.reasoning, false); assert.equal(disabled.thinkingConfig, undefined);
+    assert.equal(parseDiscoveryModels(payload, false)[0]?.reasoning, undefined);
+    assert.equal(parseDiscoveryModels({ data: [{ model_name: "judge", model_info: { mode: "decisions" } }] })[0]?.kind, "judge");
+  });
   test("reads Ollama tags and OpenAI data lists", () => {
     assert.deepEqual(
       parseDiscoveryModels({ models: [{ name: "qwen2.5:latest" }, { name: "llama3.2" }] }).map((item) => item.id),
@@ -1216,6 +1226,19 @@ describe("P1/P2 model-config adapter surfaces", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  test("LM Studio native decisions become judges with their loaded context window", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-lm-decisions-"));
+    try {
+      const service = createOmpModelsService({ agentDir: dir, fetch: (async input => {
+        const url = String(input);
+        const payload = url.endsWith("/api/v1/models") ? { models: [{ key: "decision-model", type: "decision", has_vision_adapter: true, max_context_length: 32768, loaded_instances: [{ id: "loaded-judge", config: { context_length: 8192 } }] }] } : url.endsWith("/api/v0/models") ? { data: [] } : { data: [{ id: "loaded-judge" }] };
+        return new Response(JSON.stringify(payload), { status: 200 });
+      }) as typeof fetch });
+      const result = await service.probeProvider({ providerId: "lm-studio", discoveryType: "lm-studio", endpointUrl: "http://127.0.0.1:1234/v1" });
+      assert.equal(result.models[0]?.kind, "judge"); assert.equal(result.models[0]?.api, "openai-decisions"); assert.equal(result.models[0]?.contextWindow, 8192); assert.equal(result.models[0]?.image, true); assert.equal(result.models[0]?.reasoning, false);
+    } finally { await rm(dir, { recursive: true, force: true }); }
   });
 
   test("probe parses Ollama tags and does not write models.db", async () => {

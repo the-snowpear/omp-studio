@@ -18,7 +18,7 @@ permissions:
   actions: read
 
 env:
-  BUN_VERSION: "1.4.2"
+  BUN_VERSION: "1.4.4"
   OMP_RUNTIME_CHANNEL: stable
 
 jobs:
@@ -72,7 +72,7 @@ jobs:
         env:
           # Remote hosts use the bundled private Node, never Electron.
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit --no-fund
       - run: npm run omp:overlay:apply
       - name: Reuse signed Runtime
         if: steps.runtime.outputs.run_id != ''

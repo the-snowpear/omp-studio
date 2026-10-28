@@ -1,3 +1,10 @@
+export interface SessionResumeRow {
+	sessionId: string;
+	title: string;
+	modifiedAt: string;
+	currentDirectory: boolean;
+	continuationOf?: string;
+}
 export interface SessionWorktreeRow {
 	id: string;
 	branch: string;
@@ -22,6 +29,13 @@ export interface WorktreeRemovalPreview {
 	keepBranch: boolean;
 }
 export type SessionWorktreeOperation =
+	| { kind: "worktrees.session.resume.list"; sessionId: string; scope?: "directory" | "repo" }
+	| {
+			kind: "worktrees.session.resume.prepare";
+			sessionId: string;
+			targetSessionId: string;
+			scope: "directory" | "repo";
+	  }
 	| { kind: "worktrees.session.list"; sessionId: string }
 	| { kind: "worktrees.session.startPolicy"; sessionId: string }
 	| { kind: "worktrees.session.continueHere"; sessionId: string }
@@ -36,6 +50,13 @@ export type SessionWorktreeOperation =
 	| { kind: "worktrees.session.remove.prepare"; sessionId: string; id: string }
 	| { kind: "worktrees.session.remove.apply"; sessionId: string; token: string };
 export interface SessionWorktreeResultMap {
+	"worktrees.session.resume.list": { scope: "directory" | "repo"; sessions: SessionResumeRow[]; truncated: boolean };
+	"worktrees.session.resume.prepare": {
+		targetSessionId: string;
+		requestedSessionId: string;
+		workspaceId?: string;
+		cwd?: string;
+	};
 	"worktrees.session.list": { worktrees: SessionWorktreeRow[]; truncated: boolean };
 	"worktrees.session.startPolicy": WorktreeStartPolicy;
 	"worktrees.session.continueHere": { continued: true };
@@ -45,6 +66,8 @@ export interface SessionWorktreeResultMap {
 	"worktrees.session.remove.apply": { removed: boolean; messages: string[] };
 }
 export const SESSION_WORKTREE_KINDS = [
+	"worktrees.session.resume.list",
+	"worktrees.session.resume.prepare",
 	"worktrees.session.list",
 	"worktrees.session.startPolicy",
 	"worktrees.session.continueHere",
@@ -98,6 +121,14 @@ function worktree(value: unknown): void {
 	if (row.reason !== undefined) text(row.reason, 1024);
 }
 export function validateSessionWorktreeOperation(value: unknown): void {
+	const resume = value as { kind?: string; sessionId?: unknown; targetSessionId?: unknown; scope?: unknown };
+	if (resume.kind === "worktrees.session.resume.list" || resume.kind === "worktrees.session.resume.prepare") {
+		text(resume.sessionId, 128);
+		if (resume.kind.endsWith("prepare")) text(resume.targetSessionId, 128);
+		if (resume.scope !== undefined && resume.scope !== "directory" && resume.scope !== "repo")
+			throw Error("Invalid resume scope");
+		return;
+	}
 	const row = object(value, ["kind", "sessionId", "id", "branch", "keepChanges", "freshOnly", "token"]);
 	text(row.sessionId, 128);
 	if (typeof row.kind !== "string" || !isSessionWorktreeKind(row.kind)) throw Error("Unknown worktree operation");
@@ -118,6 +149,7 @@ export function validateSessionWorktreeOperation(value: unknown): void {
 	} else object(value, ["kind", "sessionId"]);
 }
 export function validateSessionWorktreeResult(kind: SessionWorktreeOperation["kind"], value: unknown): void {
+	if (kind === "worktrees.session.resume.list" || kind === "worktrees.session.resume.prepare") return;
 	if (JSON.stringify(value).length > 524288) throw Error("Worktree result exceeds limit");
 	if (kind === "worktrees.session.continueHere") {
 		if (object(value, ["continued"]).continued !== true) throw Error("Invalid start decision");

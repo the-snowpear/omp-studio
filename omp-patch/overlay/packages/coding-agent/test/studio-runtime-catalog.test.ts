@@ -60,13 +60,19 @@ it("reports native startup readiness without connecting, probing or exposing cre
 		sessionManager: { getCwd: () => "." },
 		settings: Settings.isolated({ "mcp.startupTimeoutMs": 250 }),
 		studioToolSession: { mcpManager: manager },
+		getAllToolInfos: () => [{ name: "tool", mcpServerName: "ready", mcpToolName: "tool", mcpReadOnlyHint: true }],
 	};
 	const service = new StudioRuntimeCatalogService(session as unknown as AgentSession);
 	const result = (await service.execute({ kind: "mcp.runtime.status", sessionId: "s" })) as McpRuntimeStatus;
 	expect(waits).toEqual([1]);
 	expect(result.ready).toBe(false);
 	expect(result.settled).toBe(false);
-	expect(result.servers.find(row => row.name === "ready")).toEqual({ name: "ready", state: "ready", tools: 1 });
+	expect(result.servers.find(row => row.name === "ready")).toMatchObject({
+		name: "ready",
+		state: "ready",
+		tools: 1,
+		toolInfo: [{ name: "tool", mcpServerName: "ready", mcpToolName: "tool", readOnlyHint: true }],
+	});
 	expect(JSON.stringify(result)).not.toContain("must-not-leak");
 });
 

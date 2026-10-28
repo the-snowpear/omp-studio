@@ -264,6 +264,10 @@ const BOOTSTRAP: ClientBootstrap = {
 };
 
 const QUERY_INPUTS = {
+  "context.view.open": { sessionId: SESSION_ID },
+  "context.view.list": { sessionId: SESSION_ID, snapshotId: "context-fixture", category: "system-prompt" },
+  "context.view.entry": { sessionId: SESSION_ID, snapshotId: "context-fixture", entryId: "entry-fixture" },
+  "context.view.release": { sessionId: SESSION_ID, snapshotId: "context-fixture" },
   "prediction.query": {sessionId:"test",version:1,before:"",prefix:""},
   "artifacts.text.read": { artifactId: "11111111-1111-4111-8111-111111111111" },
   "artifacts.list": {},
@@ -309,6 +313,10 @@ const QUERY_INPUTS = {
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
+  "context.view.open": { ok: true, queryName: "context.view.open", result: { sessionId: SESSION_ID, snapshotId: "context-fixture", capturedAt: T0, contextWindow: 200000, usedTokens: 10, freeTokens: 199990, bufferTokens: 0, thresholdTokens: null, savedTokens: 0, truncated: false, categories: [] } },
+  "context.view.list": { ok: true, queryName: "context.view.list", result: { entries: [], total: 0 } },
+  "context.view.entry": { ok: true, queryName: "context.view.entry", result: { entryId: "entry-fixture", text: "", totalChars: 0, truncated: false } },
+  "context.view.release": { ok: true, queryName: "context.view.release", result: { released: true } },
   "stats.dashboard": {ok:true,queryName:"stats.dashboard",result:{available:true,url:"http://127.0.0.1:3847/#/overview?range=all"}},
   "prediction.query": {ok:true,queryName:"prediction.query",result:{version:1,suffix:null,engine:"ngram"}},
   "artifacts.text.read": { ok: true, queryName: "artifacts.text.read", result: { artifact: { artifactId: "11111111-1111-4111-8111-111111111111", kind: "annotation", name: "notes.json", mimeType: "application/json", bytes: 2, createdAt: "2026-09-25T00:00:00.000Z", sha256: "0".repeat(64) }, text: "{}" } },

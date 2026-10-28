@@ -1,3 +1,4 @@
+import { ResumeScopePane } from "./history/ResumeScopePane";
 import { SessionPortabilityPane } from "./history/SessionPortabilityPane";
 import { SeanceDialog } from "./history/SeanceDialog";
 import type { SessionTitleRow } from "@omp-studio/studio-protocol";
@@ -470,6 +471,7 @@ export function HistoryPage({
       <section aria-labelledby="histHeading">
         <h2 className="sr-only" id="histHeading">{t("history.listHeading")}</h2>
         <SessionImportPanel client={client ?? null} onOpen={onImportedOpen ?? (() => {})} {...(onImported ? { onImported } : {})} />
+        <ResumeScopePane client={client} context={nativeContext} onOpen={onImportedOpen} />
         <div className="hist-toolbar">
           <label className="sr-only" htmlFor="histSearch">{t("history.searchLabel")}</label>
           <input

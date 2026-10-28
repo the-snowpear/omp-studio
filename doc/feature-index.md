@@ -280,6 +280,23 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 
 接缝补丁（改上游已有文件）：`omp-patch/patches/0001` CLI 入口 → `0002` session → `0003` modes/pause → `0004` extensibility。分组名单：`scripts/omp-seam.mjs`。
 
+## OMP 18.13.2 新增迁移面
+
+| 功能 | Renderer / Host | Runtime overlay |
+|---|---|---|
+| 费用预算与会话树统计 | `models/SessionBudgetPane.tsx`、`App.tsx` Token 面 | `services/session-options-service.ts`、`session-telemetry.ts` |
+| 上下文只读快照 | `conversation/ContextInspector.tsx`、`preview/contextViewPreview.ts`；facade `context.view.*` query | `services/context-view-service.ts`；关闭 release，不写账本正文 |
+| 草稿听写 | `composer/DictationControl.tsx`、`media/liveCapture.ts`；Desktop 固定私有音频通道 | `services/live-audio-service.ts`（原生 STTController） |
+| 受限目录 / 空闲维护配置 | `settings/FeatureSettingsPane.tsx`、`conversation/conversationViews.ts`；Desktop `conversation-views.ts` | `services/feature-settings-service.ts`、`idle-maintenance-service.ts` |
+| WATCHDOG 配置 | `settings/AdvisorConfigPane.tsx` | `services/advisor-config-service.ts` |
+| `local://` 文件原位编辑 | `capabilities/LocalFilesPane.tsx`、`ResourcesPane.tsx`；`/local` | `services/resource-service.ts` |
+| Worktree 恢复范围 | `history/ResumeScopePane.tsx`、`preview/resumeScopePreview.ts`；Desktop 注册目标 workspace | `services/session-worktrees-service.ts`（原生 picker / continuation） |
+| 新模型发现与兼容 | `ModelConfigPage.tsx`、`models/fetchedModels.ts`；Host `omp-models-adapter.ts` | 原生 model discovery / catalog；模型目录由 `scripts/model-catalog.mjs` 生成 |
+| 自动压缩日志 | `diagnostics/SessionCompressionPane.tsx` | `services/maintenance-service.ts` |
+| 扩展模式切换 | 既有 Plan / Vibe / Goal / Loop UI | `services/extension-modes.ts`，共用 mode owners 与 `mode_changed` |
+
+使用入口、版本区间及验收边界见 [`docs/migrations/omp-18.13.2.md`](../docs/migrations/omp-18.13.2.md)。
+
 ## 命令落点速查
 
 只列常改的；完整表仍以 `operations.ts` 为准。

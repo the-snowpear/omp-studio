@@ -1,3 +1,4 @@
+import { pauseWorkStatus } from "../slash-commands/builtin-control";
 import { cfgToolsApprovalMode } from "../tools/settings";
 import { logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "@oh-my-pi/pi-ai/error";
@@ -93,6 +94,7 @@ export class StudioStateProjector {
 	readonly #modeService: StudioModeControlService;
 	readonly #listeners = new Set<(event: StudioEventEnvelope) => void>();
 	readonly #terminalReceipts: StudioReceipt[] = [];
+	#pauseRefresh: NodeJS.Timeout | undefined;
 	readonly #unsubscribePause: () => void;
 	readonly #unsubscribeLoop: () => void;
 	readonly #unsubscribeLive: () => void;
@@ -135,7 +137,12 @@ export class StudioStateProjector {
 		this.#modeService = runtime.services.modes;
 		this.#telemetrySnapshot = this.#telemetry();
 		this.#committedSnapshot = this.snapshot();
-		this.#unsubscribePause = this.#pauseService.onChange(() => this.commitStateChange());
+		this.#unsubscribePause = this.#pauseService.onChange(state => {
+			clearInterval(this.#pauseRefresh);
+			this.#pauseRefresh = state.paused ? setInterval(() => this.commitStateChange(), 1000) : undefined;
+			this.#pauseRefresh?.unref();
+			this.commitStateChange();
+		});
 		this.#unsubscribeLoop = this.#loopService.onChange(() => this.commitStateChange());
 		this.#unsubscribeLive = this.#liveService.onChange(() => this.commitStateChange());
 		this.#unsubscribeModes = this.#modeService.onChange(() => this.commitStateChange());
@@ -276,6 +283,10 @@ export class StudioStateProjector {
 			runtimeEpoch: this.#runtime.runtimeEpoch,
 			stateVersion: this.stateVersion,
 			sessionId: this.#runtime.sessionId,
+			...(this.#runtime.resumedFromSessionId ? { resumedFromSessionId: this.#runtime.resumedFromSessionId } : {}),
+			...(this.#runtime.sessionManager?.getHeader?.()?.continuationOf
+				? { continuationOf: this.#runtime.sessionManager.getHeader()!.continuationOf }
+				: {}),
 			workerResidency,
 			workerGeneration,
 			...(sessionTitle === undefined ? {} : { sessionTitle }),
@@ -284,7 +295,10 @@ export class StudioStateProjector {
 			isCompacting: this.#runtime.session.isCompacting,
 			activeMode,
 			approvalMode: this.#runtime.services.permissions?.state() ?? this.#approvalMode(),
-			pause: this.#pauseService.state(),
+			pause:
+				this.#pauseService.state().paused && typeof this.#runtime.session.getAdvisorStatusOverview === "function"
+					? { ...this.#pauseService.state(), ...pauseWorkStatus(this.#runtime.session) }
+					: this.#pauseService.state(),
 			// Service- and projector-owned members go in by reference: the literal
 			// is local and `cloneSnapshot` below deep-copies it before it escapes,
 			// so cloning them here only copied the same bytes twice per snapshot.
@@ -618,6 +632,7 @@ export class StudioStateProjector {
 	}
 
 	dispose(): void {
+		clearInterval(this.#pauseRefresh);
 		if (this.#telemetryTimer !== undefined) clearTimeout(this.#telemetryTimer);
 		this.#telemetryTimer = undefined;
 		this.#unsubscribePause();

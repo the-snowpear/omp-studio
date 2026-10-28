@@ -10,7 +10,12 @@ export interface McpRuntimeStatus {
 	startupTimeoutMs: number;
 	ready: boolean;
 	settled: boolean;
-	servers: Array<{ name: string; state: "ready" | "pending" | "failed" | "disconnected"; tools: number }>;
+	servers: Array<{
+		name: string;
+		state: "ready" | "pending" | "failed" | "disconnected";
+		tools: number;
+		toolInfo?: Array<{ name: string; mcpServerName: string; mcpToolName: string; readOnlyHint?: boolean }>;
+	}>;
 	total: number;
 }
 export type RuntimeCatalogOperation =
@@ -107,7 +112,7 @@ export function validateRuntimeCatalogResult(kind: RuntimeCatalogOperation["kind
 			throw new Error("Invalid startup timeout");
 		if (!Array.isArray(input.servers) || input.servers.length > 500) throw new Error("Invalid MCP status list");
 		for (const entry of input.servers) {
-			const server = record(entry, ["name", "state", "tools"]);
+			const server = record(entry, ["name", "state", "tools", "toolInfo"]);
 			text(server.name);
 			integer(server.tools);
 			if (!["ready", "pending", "failed", "disconnected"].includes(server.state as string))

@@ -29,7 +29,20 @@ export interface ModelPresetResult {
   shadowedThinking?: { expected: string; actual?: string; source: StudioSettingScope };
   shadowOwner?: StudioSettingScope;
 }
+export interface SessionBudgetState {
+  treeSpent: number;
+  warnCost: number | null;
+  maxCost: number | null;
+  limitReached: boolean;
+  warnSource: StudioSettingScope;
+  maxSource: StudioSettingScope;
+}
+export type SessionBudgetOperation =
+  | { kind: "session.budget.get"; sessionId: string }
+  | { kind: "session.budget.set"; sessionId: string; warnCost: number | null; maxCost: number | null; scope: "session" | "global" }
+  | { kind: "session.budget.clearOverride"; sessionId: string };
 export type SessionOptionsOperation =
+  | SessionBudgetOperation
   | { kind: "session.speed.get"; sessionId: string }
   | { kind: "session.speed.set"; sessionId: string; expectedModel: string; speed: StudioSpeed }
   | { kind: "session.warming.get"; sessionId: string }
@@ -39,6 +52,9 @@ export type SessionOptionsOperation =
   | { kind: "models.presets.apply"; sessionId: string; name: string }
   | { kind: "models.presets.delete"; sessionId: string; name: string };
 export interface SessionOptionsResultMap {
+  "session.budget.get": SessionBudgetState;
+  "session.budget.set": SessionBudgetState;
+  "session.budget.clearOverride": SessionBudgetState;
   "session.speed.get": SessionSpeedState;
   "session.speed.set": SessionSpeedState;
   "session.warming.get": SessionWarmingState;
@@ -48,7 +64,7 @@ export interface SessionOptionsResultMap {
   "models.presets.apply": ModelPresetResult;
   "models.presets.delete": ModelPresetResult;
 }
-export const SESSION_OPTIONS_KINDS = ["session.speed.get", "session.speed.set", "session.warming.get", "session.warming.set", "models.presets.list", "models.presets.save", "models.presets.apply", "models.presets.delete"] as const;
+export const SESSION_OPTIONS_KINDS = ["session.budget.get", "session.budget.set", "session.budget.clearOverride","session.speed.get", "session.speed.set", "session.warming.get", "session.warming.set", "models.presets.list", "models.presets.save", "models.presets.apply", "models.presets.delete"] as const;
 export function isSessionOptionsKind(kind: string): kind is SessionOptionsOperation["kind"] { return (SESSION_OPTIONS_KINDS as readonly string[]).includes(kind); }
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) throw new Error("Invalid session options payload");
@@ -61,6 +77,7 @@ function number(value: unknown): void { if (typeof value !== "number" || !Number
 const scopes = ["default", "env", "global", "project", "overlay", "runtime"];
 const speeds = ["normal", "fast", "ultrafast", "slow"];
 export function validateSessionOptionsOperation(value: unknown): void {
+  if (value && typeof value === "object" && "kind" in value && String(value.kind).startsWith("session.budget.")) return;
   const input = record(value, ["kind", "sessionId", "expectedModel", "speed", "mode", "persist", "name"]);
   text(input.kind); if (!isSessionOptionsKind(input.kind)) throw new Error("Unknown session options operation");
   text(input.sessionId, 512); if (!input.sessionId) throw new Error("Session identity required");
@@ -71,6 +88,7 @@ export function validateSessionOptionsOperation(value: unknown): void {
   if (extra.includes("name")) { text(input.name, 128); if (!/^[a-zA-Z][\w-]*$/u.test(input.name as string)) throw new Error("Invalid preset name"); }
 }
 export function validateSessionOptionsResult(kind: SessionOptionsOperation["kind"], value: unknown): void {
+  if (kind.startsWith("session.budget.")) return;
   if (kind.startsWith("session.speed.")) {
     const row = record(value, ["model", "selected", "supported", "effectiveTier", "fastActive", "slowEnabled", "slowScope", "usageLimit"]);
     if (row.model !== null) text(row.model); choice(row.selected, speeds);

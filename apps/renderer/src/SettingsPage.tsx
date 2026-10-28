@@ -268,7 +268,7 @@ function SettingsPageContent({
       <div className="cap-main" id="setMain">
         {flash ? <div className="set-flash" role="status">{flash}</div> : null}
         <div className="cap-pane-stage" ref={stageRef}>
-          <div {...pane("native")} id="set-native" role="tabpanel" aria-labelledby="setTab-native" tabIndex={0}><NativePreferencesPane client={client} context={nativeContext} visible={group === "native"} /><FeatureSettingsPane group="voice" client={client} context={nativeContext} visible={group === "native"} /></div>
+          <div {...pane("native")} id="set-native" role="tabpanel" aria-labelledby="setTab-native" tabIndex={0}><NativePreferencesPane client={client} context={nativeContext} visible={group === "native"} /><FeatureSettingsPane group="voice" client={client} context={nativeContext} visible={group === "native"} /><AdvisorConfigPane client={client} context={nativeContext} visible={group === "native"} /></div>
           <div {...pane("general")} id="set-general" role="tabpanel" aria-labelledby="setTab-general" tabIndex={0}>
             <GeneralTab ctl={ctl} />
           </div>
@@ -281,6 +281,7 @@ function SettingsPageContent({
           </div>
           <div {...pane("permissions")} id="set-permissions" role="tabpanel" aria-labelledby="setTab-permissions" tabIndex={0}>
             <PermissionsTab ctl={ctl} demo={demoRuntime} />
+            <FeatureSettingsPane group="permissions" client={client} context={nativeContext} visible={group === "permissions"} />
           </div>
           <div {...pane("context")} id="set-context" role="tabpanel" aria-labelledby="setTab-context" tabIndex={0}>
             <ContextTab demo={demoRuntime} runtime={runtime} />
@@ -292,6 +293,7 @@ function SettingsPageContent({
           </div>
           <div {...pane("tasks")} id="set-tasks" role="tabpanel" aria-labelledby="setTab-tasks" tabIndex={0}>
             <TasksTab demo={demoRuntime} runtime={runtime} />
+            <SessionBudgetPane client={client} sessionId={nativeContext?.sessionId} available={nativeContext?.available === true} visible={group === "tasks"} capabilities={nativeContext?.capabilities} />
             <FeatureSettingsPane group="tasks" client={client} context={nativeContext} visible={group === "tasks"} />
             <SessionWorktreesPane client={client} context={nativeContext} visible={group === "tasks"} onOpenWorkspace={onOpenWorktree} />
           </div>
@@ -305,3 +307,5 @@ function SettingsPageContent({
   );
 }
 import { PredictionSettings } from "./settings/PredictionSettings";
+import { AdvisorConfigPane } from "./settings/AdvisorConfigPane";
+import { SessionBudgetPane } from "./models/SessionBudgetPane";

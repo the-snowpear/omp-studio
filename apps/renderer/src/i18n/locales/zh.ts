@@ -2600,6 +2600,8 @@ const zhRaw = {
     "openGit": "打开 Git 面板",
     "openPreview": "打开 Preview 预览",
     "openAgents": "打开 Agents 子代理",
+    "newWithoutContext": "新会话 · 不加载指令文件",
+    "openContext": "打开上下文查看器",
     "openBtw": "打开 BTW 旁路面板",
     "settingsGeneral": "常规设置",
     "settingsInteraction": "对话与交互设置",

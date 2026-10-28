@@ -28,6 +28,8 @@ export type SlashNativeUi =
   | "skills-drawer"
   | "session-tree"
   | "user-message-branch"
+  | "context-viewer"
+  | "local-files"
   | "plan-review";
 
 export type SlashSelect = "run-now" | "complete-args" | "native-ui" | "chip";
@@ -44,6 +46,7 @@ export type SlashSubcommand = {
 };
 
 export type StudioSlashCommand = {
+  readonly side?: boolean;
   readonly name: string;
   readonly aliases: readonly string[];
   readonly description: string;
@@ -204,6 +207,7 @@ export function mergeSlashCatalogWithManifest(manifest?: OperatorCommandManifest
       ...(metadata?.typed === undefined ? {} : { typed: metadata.typed }),
       invokeId: entry.id,
       source: entry.source,
+      ...(entry.side ? { side: true } : {}),
     } satisfies StudioSlashCommand;
   });
 }
@@ -407,7 +411,8 @@ export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
   cmd("jobs", "后台任务", "capability", { select: "run-now", invokeId: "builtin.jobs" }),
   cmd("usage", "供应商用量", "help", { select: "run-now", invokeId: "builtin.usage" }),
   cmd("stats", "打开用量看板", "help", { select: "run-now", invokeId: "builtin.stats" }),
-  cmd("context", "上下文占用", "context", { select: "run-now", invokeId: "builtin.context" }),
+  cmd("local", "编辑原生会话文件", "context", { ui: "local-files", allowArgs: true }),
+  cmd("context", "检查上下文正文与 token 估算", "context", { ui: "context-viewer" }),
   cmd("changelog", "更新说明", "help", { select: "run-now", invokeId: "builtin.changelog" }),
   cmd("hotkeys", "打开命令面板", "help", { select: "native-ui", ui: "command-palette" }),
   cmd("todo", "待办列表", "session", { allowArgs: true, hint: "<subcommand>", select: "complete-args", invokeId: "builtin.todo" }),

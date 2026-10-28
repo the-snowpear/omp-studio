@@ -1192,6 +1192,7 @@ function McpBody({ tool }: { tool: ToolView }) {
 export const ToolBody = memo(function ToolBody({ tool, follow }: { tool: ToolView; follow?: boolean }) {
   const kind = toolKind(tool);
   const fields = toolFields(tool);
+  const refusal = jsonString(fields.errorKind);
   const live = follow ?? tool.status === "running";
   const inner =
     kind === "find" ? <FindBody tool={tool} /> :
@@ -1235,6 +1236,7 @@ export const ToolBody = memo(function ToolBody({ tool, follow }: { tool: ToolVie
   return (
     <ToolCardLive.Provider value={live}>
       {tool.truncated === true ? <TruncationMark /> : null}
+      {refusal ? <p role="status" className="tc-label">Edit refusal · {refusal}</p> : null}
       {inner}
       <ToolMedia tool={tool} />
     </ToolCardLive.Provider>

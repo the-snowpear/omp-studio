@@ -39,7 +39,9 @@ export interface NativeConnectionCheck {
 	checkedAt: number;
 	checks: Array<{ id: "bridge" | "session" | "model"; status: "ok" | "warning" | "error"; detail: string }>;
 }
+export interface AutoCompressionStatus { enabled: boolean; ranAt?: number; log: string; }
 export type MaintenanceOperation =
+	| { kind: "maintenance.compression.auto.status"; sessionId: string }
 	| { kind: "maintenance.gc.preview"; sessionId: string; categories: GcCategory[] }
 	| { kind: "maintenance.gc.apply"; sessionId: string; token: string }
 	| { kind: "maintenance.gc.status"; sessionId: string }
@@ -47,6 +49,7 @@ export type MaintenanceOperation =
 	| { kind: "maintenance.export.status"; sessionId: string }
 	| { kind: "maintenance.connection.check"; sessionId: string };
 export interface MaintenanceResultMap {
+	"maintenance.compression.auto.status": AutoCompressionStatus;
 	"maintenance.gc.preview": GcPreview;
 	"maintenance.gc.apply": GcSummary;
 	"maintenance.gc.status": GcStatus;
@@ -55,6 +58,7 @@ export interface MaintenanceResultMap {
 	"maintenance.connection.check": NativeConnectionCheck;
 }
 export const MAINTENANCE_OPERATION_KINDS = [
+	"maintenance.compression.auto.status",
 	"maintenance.gc.preview",
 	"maintenance.gc.apply",
 	"maintenance.gc.status",
@@ -150,6 +154,7 @@ export function validateMaintenanceOperation(value: unknown): void {
 	else if (row.token !== undefined) throw new Error("Unexpected cleanup token");
 }
 export function validateMaintenanceResult(kind: MaintenanceOperation["kind"], value: unknown): void {
+	if (kind === "maintenance.compression.auto.status") return;
 	if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 32768)
 		throw new Error("Maintenance result exceeds limit");
 	if (kind === "maintenance.gc.preview") {

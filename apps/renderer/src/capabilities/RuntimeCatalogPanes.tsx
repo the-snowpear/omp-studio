@@ -156,6 +156,7 @@ export function McpRuntimePane({
                   <span className="small muted">
                     {server.tools} {zh ? "个工具" : "tools"}
                   </span>
+                  {server.toolInfo?.length ? <details className="small muted"><summary>{zh ? "工具身份与只读提示" : "Tool identity and read-only hints"}</summary>{server.toolInfo.map(tool => <p key={tool.name}>{tool.mcpServerName}/{tool.mcpToolName} · {tool.name} · {tool.readOnlyHint === true ? "readOnlyHint" : tool.readOnlyHint === false ? "mutable hint" : "unknown hint"}</p>)}<p>{zh ? "提示不等于授权；调用仍受当前审批策略控制。" : "Hints are not authorization; calls still follow approval policy."}</p></details> : null}
                   {preview || authAvailable ? (
                     <McpAuthActions
                       client={client}

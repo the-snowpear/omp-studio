@@ -20,6 +20,7 @@ export type FetchedModelCandidate = {
   readonly adaptation?: ModelAdaptationResult;
   readonly kind?: import("@omp-studio/client-contract").ModelKind;
   readonly webSearch?: string;
+  readonly api?: string;
   readonly id: string;
   readonly name: string;
   /** Already present under this provider (any source), so importing would duplicate. */
@@ -62,14 +63,16 @@ export function toCandidates(
     const image = model.image;
     const kind = model.kind;
     const webSearch = model.webSearch;
-    const thinking = known?.thinkingConfig?.efforts;
+    const thinking = model.thinkingConfig?.efforts ?? known?.thinkingConfig?.efforts;
     const enriched = known !== undefined && (
       (model.contextWindow === undefined && contextWindow !== undefined)
       || (model.maxTokens === undefined && maxTokens !== undefined)
       || (model.reasoning === undefined && reasoning !== undefined)
       || thinking !== undefined
     );
-    const parameters: ModelParameterValues = known ?? {
+    const parameters: ModelParameterValues = {
+      ...(known ?? {}),
+      ...(model.thinkingConfig ? { thinkingConfig: model.thinkingConfig } : {}),
       ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
       ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
       ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
@@ -78,6 +81,7 @@ export function toCandidates(
     const existing = existingIds.has(id);
     out.push({
       id, parameters, parameterSources,
+      ...(model.api ? { api: model.api } : {}),
       ...(adaptation ? { adaptation } : {}),
       name: model.name.trim() || id,
       existing,
@@ -127,6 +131,7 @@ export function candidatesToEntries(
 ): ModelCatalogEntry[] {
   return candidates.filter((item) => item.picked).map((item) => ({
     id: item.id,
+    ...(item.api ? { api: item.api } : {}),
     ...(item.kind === undefined ? {} : { kind: item.kind }),
     ...(item.webSearch === undefined ? {} : { webSearch: item.webSearch }),
     name: item.name,

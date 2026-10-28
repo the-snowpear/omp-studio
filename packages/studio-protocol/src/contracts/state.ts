@@ -105,6 +105,8 @@ export interface SessionModelState {
 }
 
 export interface PauseState {
+  unsettledTurns?: number;
+  unfinishedJobs?: number;
   paused: boolean;
   pauseEpoch?: number;
   pausedAt?: string;
@@ -137,6 +139,8 @@ export interface SessionBuildProvenance {
 }
 
 export interface OperatorStateSnapshot {
+  continuationOf?: string;
+  resumedFromSessionId?: string;
   runtimeId: RuntimeId;
   runtimeEpoch: RuntimeEpoch;
   stateVersion: StateVersion;

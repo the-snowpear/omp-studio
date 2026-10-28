@@ -9,6 +9,7 @@ export type ApprovalGrantView = {
 };
 
 export type ApprovalView = {
+  readonly restriction?: boolean;
   readonly title: string;
   readonly toolLabel: string;
   readonly risk: ApprovalRisk;
@@ -119,7 +120,8 @@ export function approvalFromInteraction(
     };
   }
   const tool = toolKey(stringDetail(detail, "toolName") ?? interaction.approvalType);
-  const choices = {
+  const restriction = detail.source === "restriction";
+  const choices = restriction ? {} : {
     ...(interaction.session === undefined ? {} : { session: interaction.session }),
     ...(interaction.grants === undefined || interaction.grants.length === 0 ? {} : { grants: interaction.grants }),
   };
@@ -139,6 +141,7 @@ export function approvalFromInteraction(
   const title = TOOL_TITLES[tool] ?? (interaction.title || `Allow ${interaction.approvalType}?`);
   const scope = defaultScope(tool, stringDetail(detail, "scope"));
   return {
+    restriction,
     title,
     toolLabel: TOOL_LABELS[tool] ?? interaction.approvalType,
     risk: riskOf(stringDetail(detail, "risk")),

@@ -1,3 +1,5 @@
+import type { SessionOwnerOperation } from "./session-owner";
+import type { ContextViewOperation } from "./context-view";
 import type { WorkbenchOperation } from "./workbench";
 import type { PredictionOperation } from "./prediction.js";
 import type { UpgradeOperation } from "./runtime-upgrade";
@@ -102,7 +104,7 @@ export type ModeOperation =
   | { kind: "loop.disable" };
 
 export type CompositeOperation =
-  | { kind: "btw.ask"; question: string }
+  | { kind: "btw.ask"; question: string; images?: import("./runtime-upgrade.js").BtwImage[]; command?: { name: string; arguments: string } }
   | { kind: "btw.abort"; ephemeralId: string }
   | { kind: "btw.branch"; branchToken: string }
   | { kind: "tan.start"; work: string }
@@ -137,6 +139,8 @@ export type TransferOperation = {
 };
 
 export type StudioOperation =
+  | SessionOwnerOperation
+  | ContextViewOperation
   | PredictionOperation
   | WorkbenchOperation
   | UpgradeOperation

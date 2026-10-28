@@ -65,6 +65,16 @@ export class StudioRuntimeCatalogService {
 									? "pending"
 									: "disconnected",
 					tools: connection?.tools?.length ?? 0,
+					toolInfo: this.session
+						.getAllToolInfos()
+						.filter(tool => tool.mcpServerName === name)
+						.slice(0, 100)
+						.map(tool => ({
+							name: tool.name,
+							mcpServerName: tool.mcpServerName!,
+							mcpToolName: tool.mcpToolName ?? tool.name,
+							...(tool.mcpReadOnlyHint === undefined ? {} : { readOnlyHint: tool.mcpReadOnlyHint }),
+						})),
 				};
 			});
 			return {

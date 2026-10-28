@@ -48,7 +48,26 @@ export interface ModelPresetResult {
 	shadowedThinking?: { expected: string; actual?: string; source: StudioSettingScope };
 	shadowOwner?: StudioSettingScope;
 }
+export interface SessionBudgetState {
+	treeSpent: number;
+	warnCost: number | null;
+	maxCost: number | null;
+	limitReached: boolean;
+	warnSource: StudioSettingScope;
+	maxSource: StudioSettingScope;
+}
+export type SessionBudgetOperation =
+	| { kind: "session.budget.get"; sessionId: string }
+	| {
+			kind: "session.budget.set";
+			sessionId: string;
+			warnCost: number | null;
+			maxCost: number | null;
+			scope: "session" | "global";
+	  }
+	| { kind: "session.budget.clearOverride"; sessionId: string };
 export type SessionOptionsOperation =
+	| SessionBudgetOperation
 	| { kind: "session.speed.get"; sessionId: string }
 	| { kind: "session.speed.set"; sessionId: string; expectedModel: string; speed: StudioSpeed }
 	| { kind: "session.warming.get"; sessionId: string }
@@ -58,6 +77,9 @@ export type SessionOptionsOperation =
 	| { kind: "models.presets.apply"; sessionId: string; name: string }
 	| { kind: "models.presets.delete"; sessionId: string; name: string };
 export interface SessionOptionsResultMap {
+	"session.budget.get": SessionBudgetState;
+	"session.budget.set": SessionBudgetState;
+	"session.budget.clearOverride": SessionBudgetState;
 	"session.speed.get": SessionSpeedState;
 	"session.speed.set": SessionSpeedState;
 	"session.warming.get": SessionWarmingState;
@@ -68,6 +90,9 @@ export interface SessionOptionsResultMap {
 	"models.presets.delete": ModelPresetResult;
 }
 export const SESSION_OPTIONS_KINDS = [
+	"session.budget.get",
+	"session.budget.set",
+	"session.budget.clearOverride",
 	"session.speed.get",
 	"session.speed.set",
 	"session.warming.get",
@@ -106,6 +131,8 @@ function number(value: unknown): void {
 const scopes = ["default", "env", "global", "project", "overlay", "runtime"];
 const speeds = ["normal", "fast", "ultrafast", "slow"];
 export function validateSessionOptionsOperation(value: unknown): void {
+	if (value && typeof value === "object" && "kind" in value && String(value.kind).startsWith("session.budget."))
+		return;
 	const input = record(value, ["kind", "sessionId", "expectedModel", "speed", "mode", "persist", "name"]);
 	text(input.kind);
 	if (!isSessionOptionsKind(input.kind)) throw new Error("Unknown session options operation");
@@ -135,6 +162,7 @@ export function validateSessionOptionsOperation(value: unknown): void {
 	}
 }
 export function validateSessionOptionsResult(kind: SessionOptionsOperation["kind"], value: unknown): void {
+	if (kind.startsWith("session.budget.")) return;
 	if (kind.startsWith("session.speed.")) {
 		const row = record(value, [
 			"model",

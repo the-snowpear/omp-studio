@@ -59,6 +59,7 @@ export function ApprovalCard({
           {view.configuration.shadowedBy ? <p className="dk-reason">{zh ? "生效值仍由此来源覆盖" : "Effective value remains overridden by"}: {view.configuration.shadowedBy}</p> : null}
           {view.configuration.expiresAt ? <p className="small muted">{zh ? "审批到期时间" : "Approval expires"} · {new Date(view.configuration.expiresAt).toLocaleTimeString()}</p> : null}
         </div> : null}
+        {view.restriction ? <p className="dk-reason">{zh ? "受限目录：每次操作都需批准，不能记住或为本会话放行。" : "Restricted folder: each action needs approval; grants cannot cover it."}</p> : null}
         {view.extra ? <pre className="dk-extra">{view.extra}</pre> : null}
         {view.reason ? <div className="dk-reason">{view.reason}</div> : null}
         {view.scope ? (
@@ -117,7 +118,7 @@ export function ApprovalCard({
               </div>
             ) : null}
           </span>
-        ) : (
+        ) : view.restriction ? null : (
           <button
             type="button"
             className="btn small outline"

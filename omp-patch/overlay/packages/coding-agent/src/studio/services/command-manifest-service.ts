@@ -1,12 +1,13 @@
 import * as crypto from "node:crypto";
 import { buildSkillPromptMessage, parseSkillInvocation } from "../../extensibility/skills";
-import type { FileSlashCommand } from "../../extensibility/slash-commands";
+import { renderFileSlashCommand, type FileSlashCommand } from "../../extensibility/slash-commands";
 import type { AgentSession } from "../../session/agent-session";
 import { SKILL_PROMPT_MESSAGE_TYPE } from "../../session/messages";
 import { BUILTIN_SLASH_COMMANDS_INTERNAL, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
 import type { SlashCommandRuntime } from "../../slash-commands/types";
 
 export interface StudioOperatorCommand {
+	side?: boolean;
 	id: string;
 	name: string;
 	aliases: string[];
@@ -30,7 +31,7 @@ export interface StudioOperatorCommandManifest {
 	unclassifiedBuiltins: string[];
 }
 
-const UPSTREAM_COMMIT = "45c35e40c46166dc726ccc52f5d27f40f2449f99";
+const UPSTREAM_COMMIT = "e996e1c7ac476f60e02b8ed9764cf30fa8c00a8e";
 const STUDIO_SESSION_TITLE_ENSURE_ID = "studio.session-title.ensure";
 const DESTRUCTIVE = new Set(["delete", "drop", "clear", "fork"]);
 const READ_ONLY = new Set(["help", "version", "stats", "models", "tree", "branch", "goal"]);
@@ -82,6 +83,9 @@ export class StudioCommandManifestService {
 				aliases: [...(command.aliases ?? [])],
 				description: command.description ?? `/${command.name}`,
 				source: manifestSource(command.source),
+				...(command.source === "file" && this.session.slashCommands?.find(file => file.name === command.name)?.side
+					? { side: true }
+					: {}),
 				implementation:
 					command.source === "extension"
 						? "extension-command"
@@ -99,6 +103,13 @@ export class StudioCommandManifestService {
 		}
 		this.#current = this.#replace(commands);
 		return this.manifest();
+	}
+
+	sideCommand(name: string, args: string): { question: string; title: string } {
+		const command = this.session.slashCommands.find(command => command.name === name);
+		if (!command?.side)
+			throw new StudioCommandManifestError("COMMAND_UNKNOWN", "Side command is no longer available");
+		return { question: renderFileSlashCommand(command, args), title: `/${name}${args ? ` ${args}` : ""}` };
 	}
 
 	async invoke(commandId: string, args: unknown): Promise<unknown> {

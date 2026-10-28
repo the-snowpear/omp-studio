@@ -1,3 +1,7 @@
+import { cfgGcAutoCompress } from "../cli/gc-settings";
+import { scheduleGcAutoCompress } from "../cli/gc-auto-compress";
+import { StudioIdleMaintenance } from "./services/idle-maintenance-service";
+import { StudioExtensionModes } from "./services/extension-modes";
 import { StudioCfgService } from "./services/cfg-service";
 import { createStudioAuthBroker } from "./services/auth-broker-service";
 import { cfgLoopConditionTimeoutMs, cfgLoopMode } from "../modes/settings";
@@ -160,6 +164,7 @@ export interface StudioHostRuntime {
 	readonly sessionId: string;
 	readonly session: AgentSession;
 	readonly sessionManager: SessionManager;
+	readonly resumedFromSessionId?: string;
 	readonly workerResidency?: () => StudioWorkerResidency;
 	readonly workerGeneration?: () => number;
 	readonly ensureWorkerLive?: () => Promise<void>;
@@ -169,6 +174,8 @@ export interface StudioHostRuntime {
 		loop: StudioLoopService;
 		live: StudioLiveService;
 		modes: StudioModeControlService;
+		extensionModes: StudioExtensionModes;
+		idleMaintenance: StudioIdleMaintenance;
 		models: StudioModelControlService;
 		permissions?: StudioPermissionControlService;
 		settings: StudioRuntimeSettingsService;
@@ -213,6 +220,7 @@ export type RunStudioHostMode = (
 ) => Promise<void>;
 
 export interface StudioHostModeDependencies {
+	resumedFromSessionId?: string;
 	createBridge?: () => StudioBridgeLifecycle;
 	createRuntimeId?: () => string;
 	tanCustomTools?: (CustomTool | ToolDefinition)[];
@@ -484,8 +492,13 @@ export function createStudioHostRuntime(
 		ensureLive: async () => {},
 		onChange: () => () => {},
 	},
+	resumedFromSessionId?: string,
 ): StudioHostRuntime {
 	const credentialBroker = createStudioAuthBroker(session);
+	if (cfgGcAutoCompress.get(session.settings))
+		void scheduleGcAutoCompress(session.settings.getAgentDir()).catch(error =>
+			logger.warn("Studio background compression failed", { error: String(error) }),
+		);
 	if (!Number.isSafeInteger(bridgeConfig.runtimeEpoch) || (bridgeConfig.runtimeEpoch as number) <= 0) {
 		throw new Error("Studio Host Runtime epoch must be a positive safe integer");
 	}
@@ -521,6 +534,7 @@ export function createStudioHostRuntime(
 	const live = new StudioLiveService(liveSessionFactory ?? liveAudio.factory);
 	liveAudio.bindControl(live);
 	const modes = new StudioModeControlService(session);
+	const extensionModes = new StudioExtensionModes(session, modes, loop);
 	const models = new StudioModelControlService(session);
 	const workbench = new StudioWorkbenchService(session, liveAudio);
 	workbench.planControl = modes;
@@ -534,6 +548,12 @@ export function createStudioHostRuntime(
 		await permissions.applyPending();
 	});
 	const interaction = new StudioInteractionGateway();
+	const idleMaintenance = new StudioIdleMaintenance(
+		session,
+		loop,
+		interaction,
+		() => workerLifecycle.residency() === "active",
+	);
 	workbench.worktrees.interaction = interaction;
 	workbench.runtimeFeatures.mcpAuth.interaction = interaction;
 	modes.interaction = interaction;
@@ -961,6 +981,7 @@ export function createStudioHostRuntime(
 	});
 	return Object.freeze({
 		runtimeId: createRuntimeId(),
+		...(resumedFromSessionId ? { resumedFromSessionId } : {}),
 		runtimeEpoch: bridgeConfig.runtimeEpoch as number,
 		get sessionId() {
 			return session.sessionManager.getSessionId();
@@ -978,6 +999,8 @@ export function createStudioHostRuntime(
 			loop,
 			live,
 			modes,
+			extensionModes,
+			idleMaintenance,
 			models,
 			permissions,
 			settings,
@@ -1059,6 +1082,8 @@ export function createStudioHostRuntime(
 			loop.dispose();
 			live.dispose();
 			workbench.dispose();
+			idleMaintenance.dispose();
+			extensionModes.dispose();
 			modes.dispose();
 			btw.dispose();
 			agents.dispose();
@@ -1115,6 +1140,7 @@ function createStudioMainWorkerSupervisor(
 			["connecting", "active", "stopping"].includes(runtime.services.live.state().status)
 		)
 			return true;
+		if (runtime.services.idleMaintenance.keepWorkerLive()) return true;
 		if (runtime.services.workbench.skillshare.running) return true;
 		if (
 			runtime.services.workbench.ida.running ||
@@ -1232,6 +1258,8 @@ function createStudioMainWorkerSupervisor(
 				const next = await recreateSession(sessionFile);
 				slot.replace(next);
 				runtime.services.modes.rebindSettings();
+				runtime.services.extensionModes.rebind();
+				runtime.services.idleMaintenance.rebind();
 				runtime.services.workbench.prediction.enableMessagePrediction(next);
 				runtime.services.cfg?.rebind();
 				generation += 1;
@@ -1300,6 +1328,7 @@ export async function runStudioHostMode(
 			ensureLive: async () => await supervisorRef.current?.ensureLive(),
 			onChange: listener => supervisorRef.current?.onChange(listener) ?? (() => {}),
 		},
+		dependencies.resumedFromSessionId,
 	);
 	const supervisor: StudioMainWorkerSupervisor =
 		dependencies.recreateSession === undefined

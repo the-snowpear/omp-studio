@@ -11,6 +11,8 @@
  * live and recomputed numbers must stay byte-identical for identical inputs.
  */
 
+import { cfgSessionWarnCost, cfgSessionMaxCost } from "../session/settings";
+import type { Settings } from "../config/settings";
 import type { StudioSessionTelemetry } from "./bridge-protocol";
 
 /** Hidden CLI argument handled by `cli.ts` before command dispatch. */
@@ -24,6 +26,8 @@ export const STUDIO_SESSION_TELEMETRY_PROBE_ARG = "--studio-session-telemetry-pr
  * available port degrades to zeros instead of throwing.
  */
 export interface StudioTelemetrySessionPort {
+	readonly settings?: Settings;
+	readonly costGate?: { spent: number; check(): unknown };
 	getAdvisorCost?(): number;
 	readonly tokenRate?: { rate(): number | null };
 	getSessionStats(): {
@@ -36,6 +40,7 @@ export interface StudioTelemetrySessionPort {
 			total: number;
 		};
 		cost: number;
+		editRejections?: Record<string, number>;
 	};
 	getContextBreakdown():
 		| {
@@ -114,6 +119,17 @@ export function buildStudioSessionTelemetry(input: BuildStudioSessionTelemetryIn
 	const telemetry: StudioSessionTelemetry = {
 		sessionId: input.sessionId,
 		capturedAt: input.capturedAt,
+		...(session.costGate ? { treeCost: finiteNonNegative(session.costGate.spent) } : {}),
+		...(session.settings && session.costGate
+			? {
+					budget: {
+						warnCost: cfgSessionWarnCost.get(session.settings) ?? null,
+						maxCost: cfgSessionMaxCost.get(session.settings) ?? null,
+						limitReached: session.costGate.check() !== undefined,
+					},
+				}
+			: {}),
+		...(stats.editRejections ? { editRejections: { ...stats.editRejections } } : {}),
 		tokens: {
 			input: finiteNonNegative(tokens.input),
 			output: finiteNonNegative(tokens.output),

@@ -11,9 +11,10 @@ export type SideTab = "changes" | "git" | "preview" | "computer" | "agents" | "b
 export type BottomTab = "terminal" | "problems" | "tests" | "output" | "logs" | "pvlogs";
 
 export type PaletteAction =
+  | { kind: "openContext" }
   | { kind: "route"; route: PageRoute }
   | { kind: "diagnostics"; intent?: "check-update" | "reconnect" | "restart" }
-  | { kind: "newChat" }
+  | { kind: "newChat"; noContextFiles?: boolean }
   | { kind: "pickProject" }
   | { kind: "selectThread"; entry: SessionHistoryEntry }
   | { kind: "previewThread"; threadId: string }
@@ -121,6 +122,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
           keywords: `new chat thread 新建对话 ${shortcutSearchText(SHORTCUTS.newChat)}`,
           action: { kind: "newChat" },
         },
+        { id: "new-without-context", icon: "plus", label: "palette.newWithoutContext", keywords: "new session no context files 不加载指令 AGENTS CLAUDE", action: { kind: "newChat", noContextFiles: true } },
         { id: "pick-folder", icon: "folder-open", label: "home.openLocalFolder", keywords: "open project workspace folder 打开本地文件夹", action: { kind: "pickProject" } },
         { id: "history", icon: "history", label: "nav.history", keywords: "time travel 会话历史", action: { kind: "route", route: "history" } },
       ],
@@ -158,6 +160,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
         { id: "open-preview", icon: "globe", label: "browser.title", keywords: "browser 浏览器 观察 接管 preview", action: { kind: "openSide", tab: "preview" } },
         { id: "open-computer", icon: "monitor", label: "computer.title", keywords: "computer 电脑 屏幕 窗口 观察", action: { kind: "openSide", tab: "computer" } },
         { id: "open-agents", icon: "bot", label: "palette.openAgents", keywords: "agents 打开 Agents", action: { kind: "openSide", tab: "agents" } },
+        { id: "open-context", icon: "layers", label: "palette.openContext", keywords: "context inspector 上下文 查看器 提示词 tokens 工具输出", action: { kind: "openContext" } },
         { id: "open-btw", icon: "sparkles", label: "palette.openBtw", keywords: "btw 旁路 side channel 提问 打开 BTW 面板", action: { kind: "openSide", tab: "btw" } },
         { id: "open-skills", icon: "layers", label: "menu.openSkills", hint: formatShortcut(SHORTCUTS.skills, "hint"), keywords: `skills plugins drawer 技能 插件 打开技能与插件 ${shortcutSearchText(SHORTCUTS.skills)}`, action: { kind: "openSkills" } },
       ],

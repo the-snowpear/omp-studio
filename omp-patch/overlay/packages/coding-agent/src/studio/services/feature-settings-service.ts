@@ -6,13 +6,26 @@ import {
 	cfgWorktreeOnStart,
 	cfgWorktreeOnExit,
 } from "../../task/settings";
-import { cfgCompactionModelThresholds, cfgContextFilesExtra } from "../../session/context-settings";
-import { cfgPrewalkAuto, cfgPrewalkAutoTarget, cfgRetryFallbackOn } from "../../session/settings";
-import { cfgAsyncWidgets, cfgComputerBackgroundFallback } from "../../tools/settings";
+import {
+	cfgCompactionModelThresholds,
+	cfgContextFilesExtra,
+	cfgCompactionIdleEnabled,
+	cfgCompactionIdleThresholdTokens,
+	cfgCompactionIdleTimeoutSeconds,
+} from "../../session/context-settings";
+import {
+	cfgPrewalkAuto,
+	cfgPrewalkAutoTarget,
+	cfgRetryFallbackOn,
+	cfgSessionWorktreeScope,
+} from "../../session/settings";
+import { cfgAsyncWidgets, cfgComputerBackgroundFallback, cfgToolsRestrictedFolders } from "../../tools/settings";
+import { cfgExtensionHandlersModeControl } from "../../extensibility/settings";
+import { cfgSttEnabled, cfgSttLanguage } from "../../stt/settings";
 import { cfgBashGitGuard } from "../../exec/settings";
-import { cfgComposerPredictions } from "../../modes/settings";
+import { cfgComposerPredictions, cfgRecapEnabled, cfgRecapIdleSeconds } from "../../modes/settings";
 import { cfgSpeechSpeed, cfgTtsLocalSpeed } from "../../tts/settings";
-import { cfgGcCompress, cfgGcCompressAfterDays } from "../../cli/gc-settings";
+import { cfgGcCompress, cfgGcCompressAfterDays, cfgGcAutoCompress } from "../../cli/gc-settings";
 import {
 	planModelCompactionPoint,
 	previewModelCompactionPoint,
@@ -47,6 +60,17 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"prewalk.autoTarget": cfgPrewalkAutoTarget,
 	"async.widgets": cfgAsyncWidgets,
 	"computer.backgroundFallback": cfgComputerBackgroundFallback,
+	"tools.restrictedFolders": cfgToolsRestrictedFolders,
+	"extensionHandlers.modeControl": cfgExtensionHandlersModeControl,
+	"recap.enabled": cfgRecapEnabled,
+	"recap.idleSeconds": cfgRecapIdleSeconds,
+	"compaction.idleEnabled": cfgCompactionIdleEnabled,
+	"compaction.idleThresholdTokens": cfgCompactionIdleThresholdTokens,
+	"compaction.idleTimeoutSeconds": cfgCompactionIdleTimeoutSeconds,
+	"gc.autoCompress": cfgGcAutoCompress,
+	"session.worktreeScope": cfgSessionWorktreeScope,
+	"stt.enabled": cfgSttEnabled,
+	"stt.language": cfgSttLanguage,
 };
 
 export class StudioFeatureSettingsService {
@@ -112,6 +136,7 @@ export class StudioFeatureSettingsService {
 			);
 		if (operation.kind === "preferences.features.clearOverride") {
 			setting.clearOverride(this.session.settings);
+			this.session.refreshIdleMaintenance?.();
 			return this.#row(operation.key);
 		}
 		setting.assertWritable(operation.value);
@@ -120,6 +145,7 @@ export class StudioFeatureSettingsService {
 			setting.set(this.session.settings, operation.value);
 			await this.session.settings.flush();
 		}
+		this.session.refreshIdleMaintenance?.();
 		return this.#row(operation.key);
 	}
 }

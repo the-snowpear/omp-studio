@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import { getAgentDir, withFileLock, logger } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../../session/agent-session";
+import { cfgSessionWorktreeScope } from "../../session/settings";
+import { resolveResumeTarget, sessionDisplayName } from "../../session/session-listing";
 import { SessionManager } from "../../session/session-manager";
 import { FileSessionStorage } from "../../session/session-storage";
 import {
@@ -170,6 +172,31 @@ export class StudioSessionWorktreesService {
 	}
 	async execute(operation: SessionWorktreeOperation): Promise<unknown> {
 		this.#check(operation.sessionId);
+		if (operation.kind === "worktrees.session.resume.list" || operation.kind === "worktrees.session.resume.prepare") {
+			const cwd = this.session.sessionManager.getCwd();
+			const scope = operation.scope ?? cfgSessionWorktreeScope.get(this.session.settings);
+			const sessions = await SessionManager.listForPicker(cwd, undefined, new FileSessionStorage(), scope);
+			this.#check(operation.sessionId);
+			if (operation.kind === "worktrees.session.resume.list")
+				return {
+					scope,
+					sessions: sessions.slice(0, 200).map(info => ({
+						sessionId: info.id,
+						title: sessionDisplayName(info),
+						modifiedAt: info.modified.toISOString(),
+						currentDirectory: path.resolve(info.cwd) === path.resolve(cwd),
+						...(info.continuationOf ? { continuationOf: info.continuationOf } : {}),
+					})),
+					truncated: sessions.length > 200,
+				};
+			const selected = sessions.find(info => info.id === operation.targetSessionId);
+			if (!selected)
+				throw new SessionControlError("INVALID_ARGUMENT", "Session is outside the selected resume scope");
+			const target = await resolveResumeTarget(selected.id, selected.cwd);
+			this.#check(operation.sessionId);
+			if (!target) throw new SessionControlError("INVALID_ARGUMENT", "Resume session is unavailable");
+			return { targetSessionId: target.session.id, requestedSessionId: selected.id, cwd: target.session.cwd };
+		}
 		if (operation.kind === "worktrees.session.continueHere") {
 			this.#startDecisionSession = operation.sessionId;
 			return { continued: true };

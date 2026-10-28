@@ -4699,6 +4699,27 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .create-project-foot .btn { justify-content: center; min-width: 92px; height: 38px; }
 .create-project-foot .spinner { margin-right: var(--sp-6); }
+/* 更新弹窗：下载态底部同时出现「取消 / 跳过此版本 / 稍后提醒 / 主操作」四个按钮，
+   520px 时再挤一个带文字的 GitHub 入口，链接文字折成三行、主操作被 overflow 裁掉。
+   宽度收到 560px，入口只留图标（说明走 data-tip），宽度让给动作组；底部两列网格让
+   图标在动作组换行时仍居中于整块，按钮尺寸沿用 .create-project-foot 的 92×38。 */
+.app-update-modal { max-width: 560px; }
+.app-update-foot {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-8);
+}
+.app-update-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  min-width: 0;
+  /* 没有 htmlUrl 时动作组是唯一子项，固定落右列，不会被塞进 32px 的图标列。 */
+  grid-column: 2;
+}
 .startup-notice-modal { width: min(480px, calc(100vw - 48px)); }
 .startup-notice-body { display: grid; gap: var(--sp-12); }
 .startup-notice-body > .create-branch-hint { margin: 0; }

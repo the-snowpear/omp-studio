@@ -175,7 +175,6 @@ export function AppUpdateDialog({
         aria-modal="true"
         aria-labelledby="appUpdateTitle"
         onMouseDown={(event) => event.stopPropagation()}
-        style={{ maxWidth: 520 }}
       >
         <div className="create-project-head">
           <div>
@@ -273,24 +272,22 @@ export function AppUpdateDialog({
           ) : null}
         </div>
 
-        <div className="create-project-foot app-update-foot" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            {update.htmlUrl ? (
-              <a
-                href={update.htmlUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                onClick={openGithub}
-                style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.85rem", color: "var(--text-muted)" }}
-              >
-                <Brand id="github" extra="sm" />
-                <span>{t("appUpdate.viewOnGithub")}</span>
-                <Icon name="external" extra="sm" />
-              </a>
-            ) : null}
-          </div>
+        <div className="create-project-foot app-update-foot">
+          {update.htmlUrl ? (
+            <a
+              className="icon-btn lg"
+              href={update.htmlUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              aria-label={t("appUpdate.viewOnGithub")}
+              data-tip={t("appUpdate.viewOnGithub")}
+              onClick={openGithub}
+            >
+              <Brand id="github" />
+            </a>
+          ) : null}
 
-          <div className="app-update-actions" style={{ display: "flex", gap: 8 }}>
+          <div className="app-update-actions">
             {downloading && onCancel ? <button type="button" className="btn outline" onClick={() => void onCancel()}>{t("common.cancel")}</button> : null}
             {onSkip && !ready && update.component !== "runtime" ? <button type="button" className="btn outline" disabled={busy} onClick={() => void onSkip()}>{t("updates.skipVersion")}</button> : null}
             <button type="button" className="btn outline" disabled={busy} onClick={onClose}>
@@ -303,7 +300,7 @@ export function AppUpdateDialog({
               autoFocus
               onClick={handleDownload}
             >
-              {applying ? t("appUpdate.restarting") : downloading ? t(UPDATE_COPY.downloading) : ready ? t("updates.applyAndRestart") : t("appUpdate.downloadAndInstall")}
+              {applying ? t("appUpdate.restarting") : downloading ? t("updates.downloading") : ready ? t("updates.applyAndRestart") : t("appUpdate.downloadAndInstall")}
             </button>
           </div>
         </div>

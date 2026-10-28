@@ -1,3 +1,5 @@
+import { cfgGcAutoCompress } from "../../cli/gc-settings";
+import { GC_AUTO_COMPRESS_LOG } from "../../cli/gc-auto-compress";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getAgentDir, sanitizeText } from "@oh-my-pi/pi-utils";
@@ -132,6 +134,34 @@ export class StudioMaintenanceService {
 	}
 	async execute(operation: MaintenanceOperation): Promise<unknown> {
 		this.#check(operation.sessionId);
+		if (operation.kind === "maintenance.compression.auto.status") {
+			const file = path.join(this.session.settings.getAgentDir(), GC_AUTO_COMPRESS_LOG);
+			try {
+				const stat = await fs.stat(file);
+				const handle = await fs.open(file, "r");
+				try {
+					const buffer = Buffer.alloc(Math.min(16384, stat.size));
+					const { bytesRead } = await handle.read(
+						buffer,
+						0,
+						buffer.length,
+						Math.max(0, stat.size - buffer.length),
+					);
+					return {
+						enabled: cfgGcAutoCompress.get(this.session.settings),
+						ranAt: stat.mtimeMs,
+						log: buffer.subarray(0, bytesRead).toString("utf8"),
+					};
+				} finally {
+					await handle.close();
+				}
+			} catch {
+				return {
+					enabled: cfgGcAutoCompress.get(this.session.settings),
+					log: "No completed automatic compression log",
+				};
+			}
+		}
 		if (operation.kind === "maintenance.gc.status") {
 			if (this.#gcOwner !== operation.sessionId) return { phase: "idle" };
 			if (

@@ -1,3 +1,6 @@
+import type { SessionOwnerOperation } from "./session-owner-protocol";
+import { CONTEXT_VIEW_KINDS, isContextViewKind, type ContextViewOperation } from "./context-view-protocol";
+import type { ImageContent } from "@oh-my-pi/pi-ai";
 import {
 	isWorkbenchOperationKind,
 	validateWorkbenchOperation,
@@ -78,6 +81,8 @@ import type { EvaluationOperation } from "./evaluation-protocol";
 import { isEvaluationOperationKind, validateEvaluationOperation } from "./evaluation-validation";
 
 export type StudioOperation =
+	| SessionOwnerOperation
+	| ContextViewOperation
 	| PredictionOperation
 	| WorkbenchOperation
 	| UpgradeOperation
@@ -149,7 +154,7 @@ export type StudioOperation =
 	| { kind: "goal.resume" }
 	| { kind: "goal.drop" }
 	| { kind: "goal.guided.start"; initial?: string }
-	| { kind: "btw.ask"; question: string }
+	| { kind: "btw.ask"; question: string; images?: ImageContent[]; command?: { name: string; arguments: string } }
 	| { kind: "btw.abort"; ephemeralId: string }
 	| { kind: "btw.branch"; branchToken: string }
 	| { kind: "tan.start"; work: string }
@@ -347,6 +352,9 @@ export interface StudioEventEnvelope {
 }
 
 export interface StudioSessionTelemetry {
+	treeCost?: number;
+	budget?: { warnCost: number | null; maxCost: number | null; limitReached: boolean };
+	editRejections?: Record<string, number>;
 	advisorCost?: number;
 	generationTps?: number;
 	requestedModel?: string;
@@ -413,6 +421,8 @@ export interface StudioRuntimeIdentitySnapshot {
 }
 
 export interface StudioOperatorStateSnapshot {
+	continuationOf?: string;
+	resumedFromSessionId?: string;
 	runtimeId: string;
 	runtimeEpoch: number;
 	stateVersion: number;
@@ -448,7 +458,13 @@ export interface StudioOperatorStateSnapshot {
 	model?: StudioModelState;
 	/** Session-scoped Task subagent model override; absent while inheriting. */
 	taskModel?: StudioModelState;
-	pause?: { paused: boolean; pauseEpoch?: number; pausedAt?: string };
+	pause?: {
+		paused: boolean;
+		pauseEpoch?: number;
+		pausedAt?: string;
+		unsettledTurns?: number;
+		unfinishedJobs?: number;
+	};
 	live?: { status: "off" | "connecting" | "active" | "stopping" | "failed"; deviceId?: string };
 	pendingInteraction?: StudioPendingInteraction;
 	pendingMessages: number;
@@ -592,6 +608,8 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 	) {
 		throw new StudioFrameError("Invalid Studio request");
 	}
+	if (operation.kind === "session.owner.update") return input as unknown as StudioRequest;
+	if (isContextViewKind(operation.kind)) return input as unknown as StudioRequest;
 	if (isEvaluationOperationKind(operation.kind)) {
 		validateEvaluationOperation(operation);
 		return input as unknown as StudioRequest;
@@ -802,7 +820,7 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			}
 			break;
 		case "btw.ask":
-			exactKeys(operation, ["kind", "question"]);
+			exactKeys(operation, ["kind", "question", "images", "command"]);
 			if (!nonEmptyString(operation.question)) throw new StudioFrameError("Invalid BTW question");
 			break;
 		case "btw.abort":
@@ -1123,6 +1141,7 @@ export function stableEmptyManifestHash(kind: "capabilities" | "commands"): stri
 }
 
 export const STUDIO_IMPLEMENTED_CAPABILITIES = [
+	...CONTEXT_VIEW_KINDS,
 	"settings.approval",
 	"prediction.query",
 	"composer.predictions",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommandInput } from "@omp-studio/client-contract";
-import type { CompressionState, SessionCompressionResultMap } from "@omp-studio/studio-protocol";
+import type { CompressionState, AutoCompressionStatus, SessionCompressionResultMap } from "@omp-studio/studio-protocol";
 import type { FeatureSettingsProps } from "../settings/useFeatureSettings";
 import { FeatureSettingsPane } from "../settings/FeatureSettingsPane";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -12,6 +12,7 @@ const size = (bytes: number) => `${(bytes / 1048576).toFixed(2)} MiB`;
 export function SessionCompressionPane(props: FeatureSettingsProps) {
   const { preview } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const [state, setState] = useState<CompressionState>({ phase: "idle" }), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [automatic, setAutomatic] = useState<AutoCompressionStatus>();
   const epoch = useRef(0), lock = useRef(false);
   const supports = (id: string) => preview || props.context?.capabilities?.capabilities.some(row => row.id === id && row.grade !== "unavailable") === true;
   const enabled = preview || !!(props.client && props.context?.available && props.context.sessionId && supports("maintenance.compression.scan"));
@@ -56,6 +57,10 @@ export function SessionCompressionPane(props: FeatureSettingsProps) {
       {state.phase === "ready" ? <div className="feature-actions"><button className="btn primary" disabled={working || !supports("maintenance.compression.apply") || !summary.candidates || Date.now() >= (state.expiresAt ?? 0)} onClick={() => void run(true)}>{zh ? "压缩这些文件" : "Compress these files"}</button><span className="feature-status">{zh ? "预览有效期 5 分钟" : "Preview expires in 5 minutes"} · {summary.method?.toUpperCase()}</span></div> : null}
     </>}{summary.errors.map((message, index) => <p className="feature-error" role="alert" key={index}>{message}</p>)}</div> : null}
     {error || state.error ? <p className="feature-error" role="alert">{error || state.error}</p> : null}
+    <details><summary>{zh ? "最近自动压缩日志" : "Latest automatic compression log"}</summary><button className="btn small outline" onClick={() => {
+      if (preview) { setAutomatic({ enabled: false, log: "演示：compress skipped: unsupported on this filesystem" }); return; }
+      if (props.client && props.context?.sessionId) void props.client.command("maintenance.compression.auto.status", { sessionId: props.context.sessionId }).then(handle => waitReceipt<{ result: AutoCompressionStatus }>(props.client!, handle.requestId)).then(result => setAutomatic(result.result)).catch(cause => setError(hostErrorMessage(cause, "Compression log unavailable")));
+    }}>{zh ? "读取日志" : "Read log"}</button>{automatic ? <><p>{automatic.enabled ? "Enabled" : "Disabled"} · {automatic.ranAt ? new Date(automatic.ranAt).toLocaleString() : "—"}</p><pre>{automatic.log}</pre></> : null}</details>
     <FeatureSettingsPane {...props} group="maintenance" />
   </section>;
 }

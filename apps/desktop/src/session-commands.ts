@@ -254,11 +254,11 @@ export function createDesktopSemanticCommands(options: {
       }
       return { applied: true, runtimeEffect: "immediate", message: artifactsWarning ? "Session deleted; managed artifact cleanup failed. Review the artifact library." : deleteManagedArtifacts ? "Session and managed artifacts deleted" : "Session deleted; managed artifacts retained" };
     },
-    create: async () => {
+    create: async (input) => {
       if (options.switchSession === undefined) {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Fresh Runtime sessions are not available");
       }
-      let next = await options.switchSession({ kind: "fresh" });
+      let next = await options.switchSession({ kind: "fresh", ...(input?.noContextFiles === undefined ? {} : { noContextFiles: input.noContextFiles }) });
       if (next?.controller.publication()?.snapshot === undefined && options.ensureRuntime !== undefined) {
         next = (await options.ensureRuntime()) ?? next;
       }
@@ -295,7 +295,7 @@ export function createDesktopSemanticCommands(options: {
       if (restored === undefined) {
         throw missingRuntime("Runtime is not available");
       }
-      if (restored.sessionId !== target) {
+      if (restored.sessionId !== target && restored.resumedFromSessionId !== target && restored.continuationOf !== target) {
         throw new StudioHostError("INTERNAL_ERROR", "Session resume failed; the previous session was kept when possible");
       }
       return restored;
@@ -425,6 +425,12 @@ export function createDesktopSemanticCommands(options: {
           throw new StudioHostError("INTERNAL_ERROR", "Invalid import result");
         const workspaceId = await options.registerImportedWorkspace!(imported.cwd);
         return { snapshot: latest, result: { imported: true, sessionId: imported.sessionId, workspaceId } };
+      }
+      if (operation.kind === "worktrees.session.resume.prepare") {
+        const result = receipt.result as { targetSessionId: string; requestedSessionId: string; cwd: string };
+        if (!result.cwd || !options.registerImportedWorkspace) throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Resume workspace registration is unavailable");
+        const workspaceId = await options.registerImportedWorkspace(result.cwd);
+        return { snapshot: latest, result: { targetSessionId: result.targetSessionId, requestedSessionId: result.requestedSessionId, workspaceId } };
       }
       if (operation.kind === "worktrees.session.create" || operation.kind === "worktrees.session.open") {
         validateSessionWorktreeResult(operation.kind, receipt.result);

@@ -1,3 +1,8 @@
+import { STTController, type SttTarget, type SttCallbacks } from "../../stt";
+import { cfgSttEnabled, cfgSttLanguage } from "../../stt/settings";
+import { resolveSttModelSpec } from "../../stt/models";
+import { isSttModelCached } from "../../stt/downloader";
+import type { DictationOperation, DictationState } from "../dictation-protocol";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
@@ -18,7 +23,14 @@ interface Controller {
 	toggleMute(): void;
 	readonly muted: boolean;
 }
+export interface DictationControllerPort {
+	readonly state: "idle" | "recording" | "transcribing";
+	start(target: SttTarget, callbacks: SttCallbacks): Promise<void>;
+	stop(): Promise<void>;
+	dispose(): void;
+}
 interface Capture {
+	kind?: "live" | "dictation";
 	id: string;
 	sessionId: string;
 	voice: string;
@@ -61,6 +73,22 @@ export class StudioLiveAudioService {
 	readonly #socketDirectory: string | undefined;
 	readonly #available: boolean;
 	readonly #unsubscribe: () => void;
+	#dictationController: DictationControllerPort | undefined;
+	#dictationText = "";
+	#dictationVolatile = "";
+	#dictationGeneration = 0;
+	#dictationState: DictationState = {
+		available: false,
+		enabled: false,
+		phase: "off",
+		text: "",
+		model: "",
+		language: "",
+		cloud: false,
+		downloadRequired: false,
+	};
+	#dictationStop: Promise<DictationState> | undefined;
+	#dictationStart: Promise<void> | undefined;
 	#capture?: Capture;
 	#state: LiveAudioState;
 	#disposed = false;
@@ -75,8 +103,12 @@ export class StudioLiveAudioService {
 		readonly options: {
 			directory?: string;
 			socketDirectory?: string;
+			createDictationController?: (
+				createCapture: (onAudio: (error: Error | null, samples: Float32Array) => void) => { stop(): void },
+			) => DictationControllerPort;
 			createController?: (options: LiveSessionControllerOptions) => Controller;
 			prepareTimeoutMs?: number;
+			dictationFlushTimeoutMs?: number;
 		} = {},
 	) {
 		this.#root = options.directory ?? process.env.OMP_STUDIO_MEDIA_ROOT;
@@ -98,6 +130,8 @@ export class StudioLiveAudioService {
 						"COMMAND_BLOCKED",
 						"Attach this window's authenticated microphone before starting Live",
 					);
+				if (capture.kind === "dictation")
+					throw new StudioLiveError("COMMAND_BLOCKED", "End dictation before starting Live");
 				capture.started = true;
 				clearTimeout(capture.timer);
 				this.#state.phase = "connecting";
@@ -160,17 +194,227 @@ export class StudioLiveAudioService {
 		this.#unsubscribe =
 			session.registerSessionChangeCallback?.(() => {
 				const capture = this.#capture;
-				if (capture && capture.sessionId !== session.sessionId) void this.#release(capture).catch(() => {});
+				if (capture && capture.sessionId !== session.sessionId) {
+					this.#cancelDictation();
+					void this.#release(capture).catch(() => {});
+				}
 			}) ?? (() => {});
 	}
-	get running(): boolean {
+	#captureActive(): boolean {
 		return !!this.#capture && (!this.#capture.closed || !["off", "error"].includes(this.#state.phase));
+	}
+	get running(): boolean {
+		return !!this.#dictationController || this.#captureActive();
 	}
 	dispose(): void {
 		this.#disposed = true;
+		this.#cancelDictation();
 		this.#unsubscribe();
 		if (this.#capture) void this.#release(this.#capture).catch(() => {});
 	}
+
+	async dictation(operation: DictationOperation): Promise<DictationState> {
+		if (this.#disposed || operation.sessionId !== this.session.sessionId)
+			throw new StudioLiveError("COMMAND_BLOCKED", "Dictation requires the active session");
+		if (operation.kind === "dictation.status") return this.#dictationStatus();
+		if (operation.kind === "dictation.prepare") {
+			if (!cfgSttEnabled.get(this.session.settings))
+				throw new StudioLiveError("COMMAND_BLOCKED", "Enable draft dictation in voice settings first");
+			if (this.running)
+				throw new StudioLiveError("COMMAND_BLOCKED", "End Live or dictation before starting another capture");
+			this.#cancelDictation();
+			await this.#prepare(operation.sessionId, "dictation");
+			const capture = this.#capture!;
+			capture.kind = "dictation";
+			this.#dictationState = {
+				...(await this.#dictationStatus()),
+				audioId: capture.id,
+				phase: "prepared",
+				text: "",
+			};
+			return { ...this.#dictationState };
+		}
+		const capture = this.#capture;
+		if (
+			!capture ||
+			capture.kind !== "dictation" ||
+			capture.id !== operation.audioId ||
+			capture.sessionId !== operation.sessionId
+		)
+			throw new StudioLiveError("COMMAND_BLOCKED", "Dictation capture expired");
+		if (operation.kind === "dictation.cancel") {
+			this.#cancelDictation();
+			this.#closeSocket(capture);
+			this.#state.phase = "off";
+			return { ...this.#dictationState };
+		}
+		if (operation.kind === "dictation.stop") return this.#stopDictation(capture);
+		if (this.#dictationController || !capture.socket || capture.closed)
+			throw new StudioLiveError("COMMAND_BLOCKED", "Attach the microphone before starting dictation");
+		const generation = ++this.#dictationGeneration;
+		capture.started = true;
+		clearTimeout(capture.timer);
+		this.#dictationText = this.#dictationVolatile = "";
+		this.#dictationState = { ...this.#dictationState, phase: "starting", text: "" };
+		const current = () =>
+			generation === this.#dictationGeneration && operation.sessionId === this.session.sessionId && !this.#disposed;
+		const publish = () => {
+			if (current()) this.#dictationState.text = (this.#dictationText + this.#dictationVolatile).slice(0, 65536);
+		};
+		const target: SttTarget = {
+			setVolatileText: text => {
+				if (current()) {
+					this.#dictationVolatile = text.slice(0, 65536);
+					publish();
+				}
+			},
+			clearVolatileText: () => {
+				if (current()) {
+					this.#dictationVolatile = "";
+					publish();
+				}
+			},
+			commitVolatileText: text => {
+				if (current()) {
+					this.#dictationText = (this.#dictationText + text).slice(0, 65536);
+					this.#dictationVolatile = "";
+					publish();
+				}
+			},
+			submit: () => {
+				throw new Error("Draft dictation cannot submit a prompt");
+			},
+			deleteBeforeCursor: () => {
+				throw new Error("Draft dictation cannot edit a prompt");
+			},
+		};
+		const createCapture = (onAudio: (error: Error | null, samples: Float32Array) => void) => {
+			if (!capture.socket || capture.closed) throw new Error("Microphone detached");
+			capture.onAudio = onAudio;
+			return {
+				stop: () => {
+					capture.onAudio = undefined;
+				},
+			};
+		};
+		const controller =
+			this.options.createDictationController?.(createCapture) ??
+			new STTController(createCapture, {
+				settings: this.session.settings,
+				registry: this.session.modelRegistry,
+				getSessionId: () => operation.sessionId,
+			});
+		this.#dictationController = controller;
+		const start = controller.start(target, {
+			manualSubmit: true,
+			showStatus: () => {},
+			showWarning: message => {
+				if (current()) this.#dictationState = { ...this.#dictationState, phase: "error", error: message };
+			},
+			onStateChange: state => {
+				if (!current()) return;
+				this.#dictationState.phase = state === "idle" ? "complete" : state;
+				publish();
+			},
+		});
+		this.#dictationStart = start;
+		void start
+			.then(
+				() => {
+					if (current() && controller.state !== "recording")
+						this.#dictationState.phase = this.#dictationState.error ? "error" : "complete";
+				},
+				error => {
+					if (current())
+						this.#dictationState = {
+							...this.#dictationState,
+							phase: "error",
+							error: error instanceof Error ? error.message : "Dictation start failed",
+						};
+				},
+			)
+			.finally(() => {
+				if (current() && this.#dictationState.phase === "error") {
+					controller.dispose();
+					if (this.#dictationController === controller) this.#dictationController = undefined;
+					this.#state.phase = "off";
+					this.#closeSocket(capture);
+				}
+			});
+		return { ...this.#dictationState };
+	}
+
+	async #dictationStatus(): Promise<DictationState> {
+		const model = this.session.resolveRoleModel("dictation");
+		const cloud = model !== undefined && model.api !== "local-inference";
+		const spec = resolveSttModelSpec(model?.id);
+		return {
+			...this.#dictationState,
+			available: this.#available,
+			enabled: cfgSttEnabled.get(this.session.settings),
+			model: model ? model.provider + "/" + model.id : spec.key,
+			language: cfgSttLanguage.get(this.session.settings),
+			cloud,
+			downloadRequired: !cloud && !(await isSttModelCached(spec.key)),
+			...(cloud ? {} : { downloadSize: spec.sizeHint }),
+		};
+	}
+
+	#cancelDictation(): void {
+		this.#dictationGeneration++;
+		this.#dictationController?.dispose();
+		this.#dictationController = undefined;
+		this.#dictationStart = undefined;
+		this.#dictationStop = undefined;
+		this.#dictationText = this.#dictationVolatile = "";
+		this.#dictationState = { ...this.#dictationState, phase: "off", text: "" };
+	}
+
+	#stopDictation(capture: Capture): Promise<DictationState> {
+		if (this.#dictationStop) return this.#dictationStop;
+		const generation = this.#dictationGeneration;
+		const controller = this.#dictationController;
+		if (!controller) return Promise.resolve({ ...this.#dictationState });
+		// No new samples after stop, but the transport stays attached until flush completes.
+		capture.onAudio = undefined;
+		capture.socket?.setTimeout(0);
+		this.#dictationState.phase = "transcribing";
+		this.#dictationStop = (async () => {
+			const deadline = Promise.withResolvers<void>();
+			const timer = setTimeout(
+				() => deadline.reject(new Error("Dictation flush timed out")),
+				this.options.dictationFlushTimeoutMs ?? 120000,
+			);
+			try {
+				await Promise.race([
+					(async () => {
+						await controller.stop();
+						await this.#dictationStart;
+						if (controller.state === "recording") await controller.stop();
+					})(),
+					deadline.promise,
+				]);
+				if (generation === this.#dictationGeneration)
+					this.#dictationState.phase = this.#dictationState.error ? "error" : "complete";
+			} catch (error) {
+				if (generation === this.#dictationGeneration)
+					this.#dictationState = {
+						...this.#dictationState,
+						phase: "error",
+						error: error instanceof Error ? error.message : "Dictation failed",
+					};
+			} finally {
+				clearTimeout(timer);
+				controller.dispose();
+				if (this.#dictationController === controller) this.#dictationController = undefined;
+				if (generation === this.#dictationGeneration) this.#state.phase = "off";
+				this.#closeSocket(capture);
+			}
+			return { ...this.#dictationState };
+		})();
+		return this.#dictationStop;
+	}
+
 	execute(operation: LiveAudioOperation): Promise<LiveAudioState> {
 		const work = this.#operations.then(async () => {
 			validateLiveAudioOperation(operation);
@@ -332,7 +576,10 @@ export class StudioLiveAudioService {
 			if (capture.socket !== socket) return;
 			capture.socket = undefined;
 			if (this.#capture === capture) this.#state.attached = false;
-			if (!capture.closed) void this.#release(capture).catch(() => {});
+			if (!capture.closed) {
+				if (capture.kind === "dictation") this.#cancelDictation();
+				void this.#release(capture).catch(() => {});
+			}
 		});
 	}
 	#closeSocket(capture: Capture): void {

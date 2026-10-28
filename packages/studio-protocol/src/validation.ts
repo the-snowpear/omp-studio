@@ -1,4 +1,5 @@
 import { GUI_SETTING_KEYS, isGuiSettingKey, validateGuiSetting } from "./contracts/gui-settings.js";
+import { isContextViewKind } from "./contracts/context-view.js";
 import { isWorkbenchOperationKind, validateWorkbenchOperation } from "./contracts/workbench.js";
 import { isUpgradeOperationKind, validateUpgradeOperation } from "./contracts/runtime-upgrade.js";
 import { isEvaluationOperationKind, parseEvaluationOperation } from "./evaluation-validation.js";
@@ -454,7 +455,7 @@ export function parseOperatorCommandManifest(value: unknown): OperatorCommandMan
   for (const [index, rawCommand] of manifest.commands.entries()) {
     const path = `$commandManifest.commands[${index}]`;
     const command = record(rawCommand, path);
-    exactKeys(command, ["id", "name", "aliases", "description", "source", "implementation", "argumentSchema", "interactionKinds", "presentation", "availability", "risk", "effect", "contractTestId"], path);
+    exactKeys(command, ["id", "name", "aliases", "description", "source", "implementation", "argumentSchema", "interactionKinds", "presentation", "availability", "risk", "effect", "contractTestId", "side"], path);
     const id = nonEmptyString(command.id, `${path}.id`);
     if (seenIds.has(id)) throw new ContractValidationError("duplicate command id", `${path}.id`);
     seenIds.add(id);
@@ -519,6 +520,8 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
       "awaitingAsyncWork",
       "lastTurnOutcome",
       "runtimeIdentity",
+      "continuationOf",
+      "resumedFromSessionId",
       "telemetry",
       "runtimeSettings",
       "runtimeSettingsActivation",
@@ -659,7 +662,7 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
   }
   if (input.pause !== undefined) {
     const pause = record(input.pause, "$snapshot.snapshot.pause");
-    exactKeys(pause, ["paused", "pauseEpoch", "pausedAt"], "$snapshot.snapshot.pause");
+    exactKeys(pause, ["paused", "pauseEpoch", "pausedAt", "unsettledTurns", "unfinishedJobs"], "$snapshot.snapshot.pause");
     booleanValue(pause.paused, "$snapshot.snapshot.pause.paused");
     if (pause.pauseEpoch !== undefined) nonNegativeInteger(pause.pauseEpoch, "$snapshot.snapshot.pause.pauseEpoch");
     optionalString(pause.pausedAt, "$snapshot.snapshot.pause.pausedAt");
@@ -1299,7 +1302,7 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "btw.ask": {
-    keys: ["kind", "question"],
+    keys: ["kind", "question", "images", "command"],
     validate: (operation) => nonEmptyString(operation.question, "$request.operation.question"),
   },
   "btw.abort": {
@@ -1564,6 +1567,8 @@ export function parseFoundationStudioRequest(value: unknown): StudioRequest {
 
   const operation = record(input.operation, "$request.operation");
   const kind = nonEmptyString(operation.kind, "$request.operation.kind");
+  if (kind === "session.owner.update") return input as unknown as StudioRequest;
+  if (isContextViewKind(kind)) return input as unknown as StudioRequest;
   if (isWorkbenchOperationKind(kind)) {
     try { validateWorkbenchOperation(operation); } catch (error) { throw new ContractValidationError(error instanceof Error ? error.message : "invalid operation", "$request.operation"); }
     return input as unknown as StudioRequest;

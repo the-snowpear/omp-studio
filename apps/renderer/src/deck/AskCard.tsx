@@ -1,3 +1,4 @@
+import { AppSelect } from "../AppSelect";
 import { MarkdownInline } from "../conversation/markdown";
 import { PLATFORM } from "../platform";
 import {useState,useEffect} from "react";
@@ -79,7 +80,7 @@ export function AskBody({
   useEffect(()=>{onBusy?.(customBusy||noteBusy);return()=>onBusy?.(false);},[customBusy,noteBusy,onBusy]);
   return (
     <div className="ask-body">
-      <p className="dk-sub"><MarkdownInline text={question.question} k={`q-${question.id}`} /></p>
+      <div className="dk-sub"><MarkdownInline text={question.question} k={`q-${question.id}`} /></div>
       <div className="dk-opts" role={question.multi ? "group" : "radiogroup"} aria-label={question.question}>
         {question.options.map((option, index) => {
           const on = answer.picked.includes(option.label);
@@ -118,6 +119,7 @@ export function AskBody({
           }}
         />
         {question.acceptImages&&onPatch?<AskImages onBusy={setCustomBusy} label="回答 / Answer" images={answer.customInputImages??[]} onChange={customInputImages=>onPatch({customInputImages})} files={customFiles} disabled={disabled}/>:null}
+        {question.acceptImages !== undefined && onPatch && answer.picked.length > 0 && !answer.custom.trim() && !(answer.customInputImages?.length) ? <label className="small muted">备注对象 / Note on<AppSelect className="select" aria-label="备注对象 / Note on" value={answer.noteOption && answer.picked.includes(answer.noteOption) ? answer.noteOption : answer.picked[0] ?? ""} disabled={disabled} onChange={event => onPatch({ noteOption: event.target.value })}>{answer.picked.map(label => <option key={label} value={label}>{label}</option>)}</AppSelect></label> : null}
         {question.acceptImages!==undefined&&onPatch?<><textarea className="input" aria-label="备注 / Note" placeholder="备注 / Note" value={answer.note??""} disabled={disabled} onChange={event=>onPatch({note:event.target.value})} onPaste={event=>{if(question.acceptImages&&event.clipboardData.files.length){event.preventDefault();setNoteFiles([...event.clipboardData.files]);}}}/>{question.acceptImages?<AskImages onBusy={setNoteBusy} label="备注 / Note" images={answer.noteImages??[]} onChange={noteImages=>onPatch({noteImages})} files={noteFiles} disabled={disabled}/>:null}</>:null}
       </div>
     </div>

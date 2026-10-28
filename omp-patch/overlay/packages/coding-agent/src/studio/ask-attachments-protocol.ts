@@ -10,6 +10,7 @@ export interface AskAnswerPayload {
 		selectedOptions: string[];
 		customInput?: string;
 		note?: string;
+		noteOption?: string;
 		customInputImages?: AskImage[];
 		noteImages?: AskImage[];
 	}>;
@@ -26,7 +27,15 @@ export function validateAskAnswerPayload(value: unknown): asserts value is AskAn
 		images = 0;
 	const ids = new Set<string>();
 	for (const value of root.results) {
-		const row = object(value, ["id", "selectedOptions", "customInput", "note", "customInputImages", "noteImages"]);
+		const row = object(value, [
+			"id",
+			"selectedOptions",
+			"customInput",
+			"note",
+			"noteOption",
+			"customInputImages",
+			"noteImages",
+		]);
 		if (typeof row.id !== "string" || !row.id || row.id.length > 512 || ids.has(row.id))
 			throw Error("Invalid Ask question identity");
 		ids.add(row.id);
@@ -36,7 +45,7 @@ export function validateAskAnswerPayload(value: unknown): asserts value is AskAn
 			row.selectedOptions.some(v => typeof v !== "string" || v.length > 4096)
 		)
 			throw Error("Invalid Ask selection");
-		for (const key of ["customInput", "note"])
+		for (const key of ["customInput", "note", "noteOption"])
 			if (row[key] !== undefined && (typeof row[key] !== "string" || (row[key] as string).length > 65536))
 				throw Error("Invalid Ask text");
 		for (const key of ["customInputImages", "noteImages"]) {

@@ -245,6 +245,7 @@ describe("ModelConfigPage 自动获取模型", () => {
       api: "openai-completions",
       apiKey: "sk-live",
       headers: { "X-Org-Id": "org-1" },
+      advertisedReasoning: true,
     });
     expect(input.discoveryType).toBeUndefined();
 
