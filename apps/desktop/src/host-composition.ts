@@ -890,6 +890,10 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     models:
       seams.models ??
       createOmpModelsService({
+        locateOmp: async () => {
+          const manifest = await context.backend.installer.currentManifest();
+          return manifest?.entrypointPath ?? (await defaultLocateOmp());
+        },
         ...(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
         getCwd: () => seams.getWorkspaceCwd?.() ?? context.workspaceCwd.current,
       }),

@@ -293,7 +293,7 @@ function SettingsPageContent({
           </div>
           <div {...pane("tasks")} id="set-tasks" role="tabpanel" aria-labelledby="setTab-tasks" tabIndex={0}>
             <TasksTab demo={demoRuntime} runtime={runtime} />
-            <SessionBudgetPane client={client} sessionId={nativeContext?.sessionId} available={nativeContext?.available === true} visible={group === "tasks"} />
+            <SessionBudgetPane client={client} sessionId={nativeContext?.sessionId} available={nativeContext?.available === true} visible={group === "tasks"} capabilities={nativeContext?.capabilities} />
             <FeatureSettingsPane group="tasks" client={client} context={nativeContext} visible={group === "tasks"} />
             <SessionWorktreesPane client={client} context={nativeContext} visible={group === "tasks"} onOpenWorkspace={onOpenWorktree} />
           </div>

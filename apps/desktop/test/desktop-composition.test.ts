@@ -10,10 +10,14 @@
 
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
+import { PassThrough } from "node:stream";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 
 import type { ClientBootstrap, ClientError, CommandRequestId, EventCursor, IdempotencyKey, ResidentsReadModel, WorkspaceId } from "@omp-studio/client-contract";
 import { privateEndpoint, type PlatformPort } from "@omp-studio/platform";
@@ -594,7 +598,7 @@ for (const rejectedContext of [false, true]) {
         installer: { trustedKeys: { "test-key": publicKey.export({ type: "spki", format: "pem" }) } },
         resolver: { probe: fullParityProbe() },
         managedInstall: { installDirectory: join(profileDirectory, "runtime"), locateArtifact: async () => artifact, activateOptions: { selfCheck: { run: async () => undefined } } },
-        facade: { getActiveWorkspace: () => ({ workspaceId: "ws-0001", cwd: profileDirectory }) },
+        facade: { getActiveWorkspace: () => ({ workspaceId: "ws-0001", cwd: profileDirectory }), openUrl: async () => {} },
       });
       const events: Array<{ kind: string; receipt?: { status: string; error?: { message: string } } }> = [];
       composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
@@ -614,6 +618,29 @@ for (const rejectedContext of [false, true]) {
         assert.equal(launches.length, 1);
         assert.equal((await composition.facade.bootstrap()).runtime.status, "connected");
         assert.equal(composition.isBusy(), false);
+        // Login must use the just-installed Runtime, even with no system omp.
+        const loginEvents: typeof events = [];
+        const off = composition.facade.subscribe({ scope: "all" }, event => loginEvents.push(event));
+        const spawn = mock.method(childProcess, "spawn", ((exe: string, args: string[]) => {
+          assert.ok(exe.startsWith(profileDirectory));
+          assert.equal(basename(exe), runtimeEntrypointFor(`${process.platform}-${process.arch}`));
+          assert.deepEqual(args, ["--mode", "rpc"]);
+          const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), kill: () => true });
+          child.stdin.on("data", data => {
+            assert.equal(JSON.parse(String(data)).providerId, "openai-codex");
+            child.stdout.write(JSON.stringify({ type: "response", command: "login", success: true }) + "\n");
+          });
+          queueMicrotask(() => child.stdout.write(JSON.stringify({ type: "ready" }) + "\n"));
+          return child;
+        }) as unknown as typeof childProcess.spawn);
+        syncBuiltinESMExports();
+        try {
+          await composition.facade.command({ commandName: "models.login.start", input: { providerId: "openai-codex" }, requestId: "login" as CommandRequestId, idempotencyKey: "login" as IdempotencyKey });
+          const deadline = Date.now() + 2000;
+          while (!loginEvents.some(event => event.kind === "command.receipt") && Date.now() < deadline) await new Promise<void>(resolve => setImmediate(resolve));
+          assert.equal(loginEvents.find(event => event.kind === "command.receipt")?.receipt?.status, "completed");
+          assert.equal(spawn.mock.callCount(), 1);
+        } finally { spawn.mock.restore(); syncBuiltinESMExports(); off(); }
       } finally { await composition.shutdown(); }
     });
   });

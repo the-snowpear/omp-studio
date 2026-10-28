@@ -363,7 +363,7 @@ export function SessionOptionsPane({
           </p>
         ) : null}
       </section>
-      <SessionBudgetPane client={client} sessionId={sessionId} available={available} visible={visible} />
+      <SessionBudgetPane client={client} sessionId={sessionId} available={available} visible={visible} capabilities={capabilities} />
       {confirm ? (
         <div
           className="session-options-confirm"

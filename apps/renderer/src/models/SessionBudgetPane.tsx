@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { StudioClient } from "@omp-studio/client-contract";
+import type { ClientBootstrap, StudioClient } from "@omp-studio/client-contract";
 import type { SessionBudgetState, SessionOptionsResultMap } from "@omp-studio/studio-protocol";
 import { AppSelect } from "../AppSelect";
 import { useI18n } from "../i18n";
@@ -8,13 +8,14 @@ import { hostErrorMessage, waitReceipt } from "../hostError";
 
 const DEMO_BUDGET: SessionBudgetState = { treeSpent: 2.48, warnCost: 5, maxCost: 10, limitReached: false, warnSource: "global", maxSource: "global" };
 
-export function SessionBudgetPane({ client, sessionId, available, visible = true }: { client?: StudioClient | undefined; sessionId?: string | undefined; available: boolean; visible?: boolean }) {
+export function SessionBudgetPane({ client, sessionId, available, visible = true, capabilities }: { client?: StudioClient | undefined; sessionId?: string | undefined; available: boolean; visible?: boolean; capabilities?: ClientBootstrap["capabilityManifest"] | undefined }) {
   const { preview } = usePreviewMode();
   const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
   const [budget, setBudget] = useState<SessionBudgetState>();
   const [warn, setWarn] = useState(""); const [cap, setCap] = useState("");
   const [scope, setScope] = useState<"session" | "global">("session");
-  const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [supported, setSupported] = useState(false);
+  const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const supported = preview || capabilities?.capabilities.some(row => row.id === "session.budget.get" && row.grade !== "unavailable") === true;
   const generation = useRef(0); const locked = useRef(false);
   const applyState = (next: SessionBudgetState) => { setBudget(next); setWarn(next.warnCost === null ? "" : String(next.warnCost)); setCap(next.maxCost === null ? "" : String(next.maxCost)); };
   const invoke = useCallback(async <K extends "session.budget.get" | "session.budget.set" | "session.budget.clearOverride">(kind: K, fields: Record<string, unknown> = {}): Promise<SessionOptionsResultMap[K]> => {
@@ -23,17 +24,14 @@ export function SessionBudgetPane({ client, sessionId, available, visible = true
     return (await waitReceipt<{ result: SessionOptionsResultMap[K] }>(client, handle.requestId)).result;
   }, [client, sessionId]);
   useEffect(() => {
-    const epoch = ++generation.current; locked.current = false; setBusy(false); setError(""); setSupported(preview); setBudget(undefined);
+    const epoch = ++generation.current; locked.current = false; setBusy(false); setError(""); setBudget(undefined);
     if (!visible) return;
     if (preview) { applyState({ ...DEMO_BUDGET }); return; }
-    if (client && sessionId && available) void client.query("capabilities.get", {}).then(async manifest => {
-      if (generation.current !== epoch) return;
-      const canRead = manifest.capabilities.some(row => row.id === "session.budget.get" && row.grade !== "unavailable");
-      setSupported(canRead);
-      if (canRead) { const result = await invoke("session.budget.get"); if (generation.current === epoch) applyState(result); }
+    if (client && sessionId && available && supported) void invoke("session.budget.get").then(result => {
+      if (generation.current === epoch) applyState(result);
     }).catch(cause => { if (generation.current === epoch) setError(hostErrorMessage(cause, zh ? "预算读取失败" : "Budget unavailable")); });
     return () => { generation.current++; };
-  }, [preview, visible, client, sessionId, available, invoke, zh]);
+  }, [preview, visible, client, sessionId, available, supported, invoke, zh]);
   const save = async (clear = false) => {
     if (locked.current || !supported) return;
     const warnCost = warn.trim() ? Number(warn) : null; const maxCost = cap.trim() ? Number(cap) : null;
