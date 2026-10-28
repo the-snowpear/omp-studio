@@ -15,7 +15,7 @@
 ; https://omp-installer/ 虚拟主机加载。握手 INI 仍写 $PLUGINSDIR。
 ;
 ; 范围
-;   - 所有用户（perMachine: true），默认 %PROGRAMFILES%\OMP Studio，需要管理员。
+;   - 当前用户（perMachine: false），默认 %LOCALAPPDATA%\Programs\OMP Studio。
 ; 目录（浏览/手输的是选中文件夹，写入的是解析后的安装根）
 ;   - 末级已是 OMP Studio，或路径里已有本应用 exe / 卸载器 → 原样使用
 ;   - 升级 / 修复 / 降级：锁定上次 InstallLocation
@@ -185,7 +185,7 @@ FunctionEnd
 !macro customHeader
   !ifndef BUILD_UNINSTALLER
   Function ompResolveInstDir
-    StrCmp $ompHtmlResolved "1" omp_res_done
+    StrCmp $ompHtmlResolved "1" omp_res_html
     StrCmp $ompDirLocked "1" omp_res_locked
     StrCmp $INSTDIR "" omp_res_done
 
@@ -346,6 +346,11 @@ FunctionEnd
       Pop $R0
       Goto omp_res_done
 
+    omp_res_html:
+      ; PAGE_INSTALL_MODE runs after the HTML page and resets $INSTDIR through
+      ; setInstallModePerUser. Restore the directory the user actually chose.
+      ReadINIStr $INSTDIR "$PLUGINSDIR\options.ini" "Install" "Dir"
+      Goto omp_res_done
     omp_res_locked:
       StrCpy $INSTDIR $ompExistingDir
     omp_res_done:
@@ -485,7 +490,9 @@ FunctionEnd
     ${If} $R2 == "1"
       ${StdUtils.ExecShellAsUser} $0 "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "open" ""
     ${EndIf}
-    Abort
+    ; HTML already collected the finish choice. Complete the hidden copy
+    ; engine with a success status and release its installer-instance lock.
+    !insertmacro quitSuccess
   FunctionEnd
 
   !endif
@@ -511,6 +518,9 @@ FunctionEnd
   Function ompInstFilesPre
     Call ompResolveInstDir
     StrCmp $ompHtmlUi "1" 0 omp_instfiles_pre_done
+      ; A custom finish page does not enable MUI's automatic advance. Without
+      ; this, NSIS waits on an invisible Next button after copying the files.
+      SetAutoClose true
       Call ompHideNsisUi
     omp_instfiles_pre_done:
   FunctionEnd

@@ -7,11 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复 Windows 安装向导选定的目录在写入前被安装模式重置为 AppData 默认目录的问题；修复安装仍沿用已有目录（[#12](https://github.com/the-snowpear/omp-studio/issues/12)）。
+- HTML 安装向导完成后自动进入收尾并退出隐藏的 NSIS 进程，避免修复安装后残留 Setup（[#12](https://github.com/the-snowpear/omp-studio/issues/12)、[#6](https://github.com/the-snowpear/omp-studio/issues/6)）。
+
 ## [0.1.13] - 2026-10-28
 
 ### Fixed
 
-- 修复 Windows 和 macOS 启动时因 preload 引入 Host 的 Node 模块而显示「Studio client unavailable」的问题；保留沙箱与上下文隔离，并增加两平台的桥接挂载回归检查（[#8](https://github.com/the-snowpear/omp-studio/issues/8)）。
+- 修复 Windows 和 macOS 启动时因 preload 引入 Host 的 Node 模块而显示「Studio client unavailable」的问题；保留沙箱与上下文隔离，并增加两平台的桥接挂载回归检查（[#8](https://github.com/the-snowpear/omp-studio/issues/8)、[#11](https://github.com/the-snowpear/omp-studio/issues/11)、[#6](https://github.com/the-snowpear/omp-studio/issues/6) 的启动报错）。
 
 ### Changed
 
