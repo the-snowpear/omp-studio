@@ -25,7 +25,8 @@ import type {
   SubscriptionScope,
   Unsubscribe,
 } from "@omp-studio/client-contract";
-import { eventMatchesScope } from "@omp-studio/host-client-api";
+// Keep the sandboxed preload on the Node-free client dependency graph.
+import { eventMatchesScope } from "@omp-studio/client";
 import { DESKTOP_IPC_CHANNELS } from "@omp-studio/transport-desktop";
 import type { OmpStudioDesktopApi } from "@omp-studio/transport-desktop";
 

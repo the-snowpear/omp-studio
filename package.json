@@ -31,6 +31,7 @@
     "models:catalog:generate": "node scripts/model-catalog.mjs",
     "models:catalog:check": "node scripts/model-catalog.mjs --check",
     "build": "npm run build:packages && npm run build -w @omp-studio/renderer && npm run build -w @omp-studio/desktop && node scripts/bundle-remote-host.mjs",
+    "build:remote": "npm run build:packages && npm run build -w @omp-studio/desktop && node scripts/bundle-remote-host.mjs",
     "typecheck": "node scripts/check.mjs --fast",
     "test": "npm run build && npm run test:built",
     "conversation:e2e:manual": "node scripts/real-conversation-e2e.mjs",
