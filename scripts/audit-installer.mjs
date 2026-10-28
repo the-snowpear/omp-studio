@@ -153,6 +153,12 @@ function formatSize(path) {
   return `${bytes} B`;
 }
 
+export function findInstallerExecutable(outputDir, version, arch = resolveTargetArch()) {
+  const path = join(outputDir, `OMP-Studio-Setup-${version}-windows-${arch}.exe`);
+  if (!existsSync(path)) throw new Error(`NSIS Setup exe missing: ${path}`);
+  return path;
+}
+
 /**
  * @param {string} outputDir
  * @returns {{ installerExe: string, unpackedDir: string, notes: string[] }}
@@ -278,14 +284,8 @@ export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory
     throw new Error(`Refusing to ship a private signing key in the installer:\n${keyHits.join("\n")}`);
   }
 
-  const setupExes = readdirSync(outputDir)
-    .filter((name) => name.toLowerCase().endsWith(".exe") && /setup/i.test(name))
-    .filter((name) => !targetArch || name.endsWith(`-${targetArch}.exe`))
-    .map((name) => join(outputDir, name));
-  if (setupExes.length === 0) {
-    throw new Error(`NSIS Setup exe missing under ${outputDir}`);
-  }
-  const installerExe = setupExes.sort()[setupExes.length - 1];
+  const product = JSON.parse(readFileSync(join(REPOSITORY_ROOT, "package.json"), "utf8"));
+  const installerExe = findInstallerExecutable(outputDir, product.version, targetArch);
   const setupBytes = readFileSync(installerExe);
   if (PRIVATE_KEY_MARKERS.some((marker) => setupBytes.includes(marker))) {
     throw new Error(`NSIS Setup exe embeds a private key marker: ${installerExe}`);

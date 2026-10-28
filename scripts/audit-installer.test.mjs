@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { auditInstallerOutput, findPrivateKeyFiles } from "./audit-installer.mjs";
+import { auditInstallerOutput, findInstallerExecutable, findPrivateKeyFiles } from "./audit-installer.mjs";
+
+test("the installer audit selects the current version and architecture even when older Setup files remain", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-audit-version-"));
+  for (const name of ["OMP-Studio-Setup-0.1.5-windows-x64.exe", "OMP-Studio-Setup-0.1.14-windows-x64.exe", "OMP-Studio-Setup-0.1.14-windows-arm64.exe"]) await writeFile(join(root, name), "fixture");
+  assert.equal(findInstallerExecutable(root, "0.1.14", "x64"), join(root, "OMP-Studio-Setup-0.1.14-windows-x64.exe"));
+  assert.equal(findInstallerExecutable(root, "0.1.14", "arm64"), join(root, "OMP-Studio-Setup-0.1.14-windows-arm64.exe"));
+  assert.throws(() => findInstallerExecutable(root, "0.1.15", "x64"), /NSIS Setup exe missing/);
+});
 
 test("findPrivateKeyFiles reports a PEM private key and ignores a public key", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-audit-keys-"));

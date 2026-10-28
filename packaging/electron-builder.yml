@@ -62,7 +62,7 @@ extraResources:
   - from: apps/desktop/resources/icon.png
     to: icon.png
 
-# Signed Runtime live copy next to the exe (not inside asar).
+# Signed Runtime seed next to the exe (not inside asar).
 # Only the current series version is staged by pack:win:prepare.
 # Layout: $INSTDIR\runtime\versions\<ver>\omp.exe
 extraFiles:
@@ -111,7 +111,7 @@ nsis:
   language: 2052
   uninstallDisplayName: OMP Studio
   artifactName: OMP-Studio-Setup-${version}-windows-${arch}.${ext}
-  # Unsigned 0.1.0 preview. Replace with a real Authenticode cert before GitHub Releases.
+  # Authenticode signing is not configured; Runtime/update signatures are separate.
   # signingHashAlgorithms: [sha256]
 
 # Seeds installer.exe in the updater cache. Discovery uses signed v2 catalogs.

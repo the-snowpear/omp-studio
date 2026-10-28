@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -17,6 +17,15 @@ test("legacy migration waits on the real NSIS process and checks the uninstall r
 internal static class Harness {
   static void Check(bool value) { if (!value) throw new Exception("Maintenance regression"); }
   static int Main(string[] args) {
+    ProcessStartInfo other = new ProcessStartInfo(Path.Combine(args[0], "other install", "OMP Studio.exe"));
+    other.UseShellExecute = false; other.CreateNoWindow = true;
+    using (Process child = Process.Start(other)) {
+      try {
+        Check(UpdateMaintenance.IsRunning(Path.Combine(args[0], "other install")));
+        Check(!UpdateMaintenance.IsRunning(Path.Combine(args[0], "target install")));
+        Check(UpdateMaintenance.WaitForExit(Path.Combine(args[0], "target install")) == 0);
+      } finally { child.Kill(); child.WaitForExit(); }
+    }
     string oldRoot = Path.Combine(args[0], "old install with spaces");
     Directory.CreateDirectory(oldRoot);
     string original = Path.Combine(oldRoot, "Uninstall OMP Studio.exe");
@@ -53,10 +62,15 @@ internal static class Harness {
     return 0;
   }
 }`;
-  await writeFile(path, "using System; using System.IO; using System.Diagnostics;\n" + source.slice(start, end) + harness);
+  await writeFile(path, "using System; using System.IO; using System.Diagnostics; using System.Text; using System.Runtime.InteropServices;\n" + source.slice(start, end) + harness);
   const csc = ["Framework64", "Framework"].map(arch => join(process.env.WINDIR ?? "C:\\Windows", "Microsoft.NET", arch, "v4.0.30319", "csc.exe")).find(existsSync);
   assert.ok(csc, ".NET Framework C# compiler is required for the Windows installer");
-  execFileSync(csc, ["/nologo", "/target:exe", `/out:${exe}`, path], { windowsHide: true, timeout: 60_000 });
+  const otherRoot = join(directory, "other install");
+  await mkdir(otherRoot);
+  const idle = join(directory, "Idle.cs");
+  await writeFile(idle, "static class Idle { static void Main() { System.Threading.Thread.Sleep(60000); } }");
+  execFileSync(csc, ["/nologo", "/target:winexe", "/platform:x64", `/out:${join(otherRoot, "OMP Studio.exe")}`, idle], { windowsHide: true, timeout: 60_000 });
+  execFileSync(csc, ["/nologo", "/target:exe", "/platform:x86", `/out:${exe}`, path], { windowsHide: true, timeout: 60_000 });
   const output = execFileSync(exe, [directory], { windowsHide: true, encoding: "utf8", timeout: 30_000 });
   assert.match(output, /success passed/);
 });

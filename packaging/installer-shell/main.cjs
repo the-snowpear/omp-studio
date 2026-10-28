@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -9,6 +9,8 @@ const WINDOW_HEIGHT = 480;
 const repoRoot = path.resolve(__dirname, "..", "..");
 let previewDone = false;
 let mainWindow = null;
+let previewStarted = 0;
+let previewPath = "";
 
 function resolveUiPath() {
   const candidates = [
@@ -74,12 +76,13 @@ function getState() {
     productName: "OMP Studio",
     version: productVersion(),
     runtimeVersion: runtimeVersion(),
-    arch: "x64",
-    defaultPath: path.join(process.env.ProgramFiles || "C:\\Program Files", "OMP Studio"),
+    arch: process.env.OMP_TARGET_ARCH || process.arch,
+    defaultPath: path.join(process.env.LOCALAPPDATA || os.homedir(), "Programs", "OMP Studio"),
     existingVersion: "",
     existingPath: "",
     occupancy: occupancy === "fresh" || occupancy === "" ? null : occupancy,
     running: false,
+    desktopShortcut: true,
     spaceRequiredMB: 350,
     specialFolders: specialFolders(),
   };
@@ -179,23 +182,26 @@ ipcMain.on("installer-shell:browse", (event, current) => {
   event.returnValue = picked && picked[0] ? picked[0] : "";
 });
 
-ipcMain.on("installer-shell:startInstall", () => {
+ipcMain.on("installer-shell:startInstall", (event, options) => {
   previewDone = false;
+  previewStarted = Date.now();
+  previewPath = options.path;
+  event.returnValue = { ok: true, path: previewPath };
   setTimeout(() => {
     previewDone = true;
   }, 4000);
 });
 
 ipcMain.on("installer-shell:poll", (event) => {
-  event.returnValue = { done: previewDone };
+  event.returnValue = { done: previewDone, phase: "files", percent: Math.min(99, Math.round((Date.now() - previewStarted) / 40)), path: previewPath };
 });
 
 ipcMain.on("installer-shell:finish", (event) => {
   windowFromSender(event)?.close();
 });
 
-ipcMain.on("installer-shell:killApp", (event) => {
-  event.returnValue = true;
+ipcMain.on("installer-shell:openReleaseNotes", () => {
+  void shell.openExternal(`https://github.com/the-snowpear/omp-studio/releases/tag/v${productVersion()}`);
 });
 
 app.whenReady().then(() => {

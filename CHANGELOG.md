@@ -7,10 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-10-28
+
 ### Fixed
 
 - 修复 Windows 安装向导选定的目录在写入前被安装模式重置为 AppData 默认目录的问题；修复安装仍沿用已有目录（[#12](https://github.com/the-snowpear/omp-studio/issues/12)）。
 - HTML 安装向导完成后自动进入收尾并退出隐藏的 NSIS 进程，避免修复安装后残留 Setup（[#12](https://github.com/the-snowpear/omp-studio/issues/12)、[#6](https://github.com/the-snowpear/omp-studio/issues/6)）。
+- 修复 Windows 更新/修复时已有桌面快捷方式被默认移除、ARM64 安装包显示 x64、目录页图标溢出遮挡内容，以及完成页路径再次解析的问题。
+- 图形向导不可用时使用完整原生向导，恢复目录选择、修复/降级确认与完成页；安装失败时显示未完成状态，避免隐藏进程或虚假完成。
+- 修复 NSIS 与图形宿主交换中文路径时的编码差异，以及打包审计误选输出目录里旧版 Setup 的问题。
+
+### Changed
+
+- Windows 安装进度读取 NSIS 的实际数值和阶段；写入期间明确不可取消，移除未实现的回滚承诺。
+- 发现应用运行时，提示从托盘「退出」后直接重试；只检查目标安装目录，不再强制结束任务。保留应用关窗隐藏到托盘的行为。
+- 保留紫色四步向导，精简文案，改善明暗主题、长路径、键盘导航、弹窗焦点和发行说明入口；预览明确标记为演示。
+- 图形宿主的 UI 与 WebView2 缓存按安装实例隔离到当前账户，移除共享目录的 Users 写权限。
 
 ## [0.1.13] - 2026-10-28
 
@@ -316,7 +328,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/the-snowpear/omp-studio/compare/v0.1.13...v0.1.14
+[0.1.13]: https://github.com/the-snowpear/omp-studio/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/the-snowpear/omp-studio/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/the-snowpear/omp-studio/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/the-snowpear/omp-studio/compare/v0.1.9...v0.1.10

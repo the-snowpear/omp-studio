@@ -40,7 +40,7 @@ html, body { height: 100%; margin: 0; }
 
   --text-1: #1a1a24;
   --text-2: #54566b;
-  --text-3: #8a8ba0;
+  --text-3: #6d6e83;
 
   --hairline: #e4e4ec;
   --border-strong: #cfcfda;
@@ -93,7 +93,7 @@ html, body { height: 100%; margin: 0; }
 
   --text-1: #ececf4;
   --text-2: #a6a7bc;
-  --text-3: #6f7089;
+  --text-3: #9697ac;
 
   --hairline: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
@@ -143,7 +143,7 @@ html, body { height: 100%; margin: 0; }
     --titlebar-btn-active: rgba(255, 255, 255, 0.12);
     --text-1: #ececf4;
     --text-2: #a6a7bc;
-    --text-3: #6f7089;
+    --text-3: #9697ac;
     --hairline: rgba(255, 255, 255, 0.08);
     --border-strong: rgba(255, 255, 255, 0.16);
     --header-bg: #22222b;
@@ -328,6 +328,9 @@ html, body { height: 100%; margin: 0; }
   color: var(--text-1);
 }
 .titlebar .tb-title span { color: var(--text-3); font-weight: 400; margin-left: 6px; }
+.titlebar .tb-title #tbAction { color: var(--text-1); font-weight: 600; margin-left: 0; }
+.preview-badge { margin-left: 10px; font-size: 10px; color: var(--accent); }
+.preview-badge[hidden] { display: none; }
 .tb-buttons { margin-left: auto; display: flex; height: 100%; }
 .tb-btn {
   width: 46px;
@@ -458,8 +461,11 @@ html, body { height: 100%; margin: 0; }
   display: flex;
   flex-direction: column;
   padding: 28px 32px 18px;
+  min-height: 0;
+  overflow-y: auto;
 }
 .pane h1 { font-size: 17.5px; font-weight: 650; letter-spacing: 0.01em; }
+.pane h1:focus, .headband h1:focus { outline: none; }
 .pane .lede { margin-top: 8px; font-size: 12.5px; color: var(--text-2); max-width: 46ch; }
 
 .features { margin-top: 22px; display: flex; flex-direction: column; gap: 14px; }
@@ -478,6 +484,8 @@ html, body { height: 100%; margin: 0; }
 
 .pane .foot-hint { margin-top: auto; font-size: 11.5px; color: var(--text-3); display: flex; align-items: center; gap: 7px; }
 .pane .foot-hint svg { width: 13px; height: 13px; color: var(--accent); }
+.foot-hint { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-3); }
+.foot-hint svg { width: 13px; height: 13px; flex: 0 0 auto; color: var(--accent); }
 
 /* ---------- 6. 内页标头带（中间页，NSIS 原生标头） ---------- */
 .headband {
@@ -492,7 +500,7 @@ html, body { height: 100%; margin: 0; }
 .headband h1 { font-size: 14px; font-weight: 650; }
 .headband p { font-size: 11.5px; color: var(--text-3); }
 
-.form-page { flex: 1 1 auto; display: flex; flex-direction: column; }
+.form-page { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .form {
   flex: 1 1 auto;
   min-height: 0;
@@ -500,6 +508,7 @@ html, body { height: 100%; margin: 0; }
   flex-direction: column;
   padding: 14px 32px 12px;
   gap: 12px;
+  overflow-y: auto;
 }
 
 .group { position: relative; border: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -509,6 +518,7 @@ html, body { height: 100%; margin: 0; }
 .path-row { display: flex; gap: 8px; }
 .input {
   flex: 1 1 auto;
+  min-width: 0;
   height: 28px;
   padding: 0 10px;
   border: 1px solid var(--control-border);
@@ -537,6 +547,9 @@ html, body { height: 100%; margin: 0; }
 }
 .path-hint svg { width: 13px; height: 13px; flex: 0 0 auto; margin-top: 1px; color: var(--accent); }
 .path-hint .mono { font-family: var(--font-mono); font-size: 11px; color: var(--text-1); }
+.path-hint .mono { overflow-wrap: anywhere; }
+.path-error { color: var(--warning); font-size: 11.5px; overflow-wrap: anywhere; }
+.path-error[hidden] { display: none; }
 .path-hint.append svg { color: var(--accent); }
 .path-hint.warn { color: var(--warning); }
 .path-hint.warn svg { color: var(--warning); }
@@ -609,6 +622,7 @@ html, body { height: 100%; margin: 0; }
 .btn.primary:disabled { opacity: 0.45; color: var(--on-accent); }
 
 .btn.small { height: 26px; min-width: 0; padding: 0 12px; font-size: 11.5px; }
+.btn[hidden] { display: none; }
 
 .link {
   color: var(--accent);
@@ -674,7 +688,7 @@ html, body { height: 100%; margin: 0; }
 
 /* ---------- 9. 磁盘空间指示 ---------- */
 .space-block { display: flex; flex-direction: column; gap: 7px; }
-.space-legend { display: flex; align-items: baseline; gap: 16px; font-size: 11.5px; color: var(--text-2); }
+.space-legend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; font-size: 11.5px; color: var(--text-2); }
 .space-legend .k { display: inline-flex; align-items: center; gap: 6px; }
 .space-legend .k i { width: 8px; height: 8px; border-radius: 2px; }
 .space-legend .k.req i { background: var(--accent); }
@@ -730,6 +744,9 @@ html, body { height: 100%; margin: 0; }
   position: absolute; inset: 0;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent 55%);
 }
+.progress.indeterminate .bar { animation: progress-wait 1.4s ease-in-out infinite; }
+.progress.failed .bar { background: var(--warning); }
+@keyframes progress-wait { from { left: -30%; } to { left: 100%; } }
 .file-row {
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -770,6 +787,7 @@ html, body { height: 100%; margin: 0; }
 .logview .line .t { color: var(--text-3); flex: 0 0 auto; }
 .logview .line.hl .m { color: var(--accent); font-weight: 500; }
 .logview .line.done .m { color: var(--success); }
+.logview .line.error .m { color: var(--warning); }
 @keyframes log-in {
   from { opacity: 0; transform: translateY(5px); }
   to { opacity: 1; transform: translateY(0); }
@@ -829,7 +847,7 @@ html, body { height: 100%; margin: 0; }
 .summary .row { display: flex; align-items: center; gap: 14px; padding: 8px 12px; font-size: 12px; }
 .summary .row + .row { border-top: 1px solid var(--hairline); }
 .summary .k { width: 62px; flex: 0 0 auto; color: var(--text-3); font-size: 11.5px; }
-.summary .v { color: var(--text-1); font-family: var(--font-mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.summary .v { color: var(--text-1); font-family: var(--font-mono); font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
 .summary .v.ui-font { font-family: var(--font-ui); font-size: 12px; }
 
 .finish-actions { margin-top: auto; display: flex; align-items: center; justify-content: space-between; width: 100%; }
@@ -860,6 +878,7 @@ html, body { height: 100%; margin: 0; }
 .footer .spacer { flex: 1; }
 .footer .f-group { display: none; align-items: center; gap: 8px; }
 .footer .f-group.on { display: flex; }
+.install-wait { font-size: 11.5px; color: var(--text-2); }
 
 /* ---------- 13. 对话框 / Toast（原型增强，NSIS 用系统 MessageBox 降级） ---------- */
 .overlay {
@@ -1030,4 +1049,5 @@ html[data-host="installer"] .tb-btn {
   }
   .success-mark .ring, .success-mark .tick { stroke-dashoffset: 0; }
   .finish-item { opacity: 1; }
+  .progress.indeterminate .bar { animation: none; left: 35%; }
 }
