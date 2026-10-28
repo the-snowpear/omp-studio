@@ -96,7 +96,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
+      - uses: ./.github/actions/cache-release-downloads
+        with:
+          desktop: "true"
       - uses: oven-sh/setup-bun@v2
         if: steps.runtime.outputs.run_id == ''
         with:
@@ -112,6 +114,7 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           npm ci
+      - uses: ./.github/actions/cache-desktop-native
       - name: Reuse signed Runtime
         if: steps.runtime.outputs.run_id != ''
         uses: actions/download-artifact@v4
@@ -205,7 +208,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
+      - uses: ./.github/actions/cache-release-downloads
+        with:
+          desktop: "true"
       - uses: oven-sh/setup-bun@v2
         if: steps.runtime.outputs.run_id == ''
         with:
@@ -220,6 +225,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci
+      - uses: ./.github/actions/cache-desktop-native
       - name: Reuse signed Runtime
         if: steps.runtime.outputs.run_id != ''
         uses: actions/download-artifact@v4

@@ -1,0 +1,25 @@
+name: Cache release downloads
+description: Reuse npm archives and optional desktop packaging tools across Studio versions
+inputs:
+  desktop:
+    description: Also cache Electron, electron-builder, headers and the WebView2 SDK
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - id: identity
+      shell: bash
+      run: node scripts/release-cache.mjs
+    - name: Cache npm archives
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.identity.outputs.npm }}
+        key: npm-v1-${{ runner.os }}-${{ runner.arch }}-node${{ steps.identity.outputs.node }}-${{ steps.identity.outputs.dependencies }}
+        restore-keys: npm-v1-${{ runner.os }}-${{ runner.arch }}-node${{ steps.identity.outputs.node }}-
+    - name: Cache desktop tool downloads
+      if: inputs.desktop == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.identity.outputs.tools }}
+        key: desktop-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.dependencies }}-${{ hashFiles('scripts/build-installer-host.mjs') }}
+        restore-keys: desktop-tools-v1-${{ runner.os }}-${{ runner.arch }}-

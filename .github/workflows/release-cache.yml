@@ -1,0 +1,38 @@
+name: Warm Windows release caches
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cache-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, os: windows-latest }
+          - { arch: arm64, os: windows-11-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      OMP_TARGET_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: ./.github/actions/cache-release-downloads
+        with:
+          desktop: "true"
+      - run: npm ci
+      - uses: ./.github/actions/cache-desktop-native
+      - name: Download NSIS tools
+        run: node -e "const w=require('app-builder-lib/out/toolsets/windows.js'); Promise.all([w.getMakeNsisPath(),w.getNsisPluginsPath()]).then(()=>console.log('NSIS tools ready'));"
+      - name: Prepare Electron native dependencies
+        run: npm run pack:win -- --native-only

@@ -56,7 +56,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
+      - uses: ./.github/actions/cache-release-downloads
       - uses: oven-sh/setup-bun@v2
         if: steps.runtime.outputs.run_id == ''
         with:

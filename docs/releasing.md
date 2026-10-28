@@ -29,6 +29,23 @@ setup, Rust compilation and Runtime dependency installation. Set
 runs workspace tests, full patch replay or GUI acceptance during publication.
 The repeated P5 readiness gate and old v1 asset generator have been removed.
 
+Release jobs also cache npm archives, Electron/electron-builder downloads and
+the WebView2 SDK. Their dependency fingerprint excludes workspace versions, so
+a Studio-only version bump keeps the same dependency cache. Download caches
+may fall back within the same OS/CPU; `npm ci` still installs the full lockfile.
+
+Desktop jobs restore `node-pty/build/Release` after `npm ci`, including
+electron-rebuild's architecture/ABI metadata. This native cache uses an exact
+OS/CPU, Node major, external dependency and packaging-policy key, without a
+fallback. Electron or dependency changes therefore rebuild the module. Normal
+packaging keeps native rebuilding enabled; electron-rebuild decides whether
+the restored output matches its target.
+
+Run **Warm Windows release caches** manually on `main` to fill or verify the
+x64/ARM64 caches before a release. It downloads NSIS tools and runs
+`npm run pack:win -- --native-only`, without a Runtime build, signing key or
+publication. A new cache is populated only after the job succeeds.
+
 | Manual input | Purpose |
 |---|---|
 | `release_kind` | Complete desktop release or independent Runtime |

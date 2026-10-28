@@ -11,6 +11,7 @@
  *   --skip-host   reuse packages/runtime-installer/dist/artifacts (still
  *                 fails if the signed tree is missing)
  *   --skip-build  skip `npm run build` (preload is still bundled)
+ *   --native-only  build/cache the Electron native dependencies without packaging
  *
  * Env: CSC_IDENTITY_AUTO_DISCOVERY=false so an unsigned 0.1.0 preview does
  * not pick a random machine certificate.
@@ -80,6 +81,24 @@ async function main() {
     CSC_LINK: "",
     WIN_CSC_LINK: "",
   };
+
+  if (hasFlag("--native-only")) {
+    disableNodePtySpectreMitigation();
+    const electronVersion = JSON.parse(readFileSync(join(repositoryRoot, "node_modules", "electron", "package.json"), "utf8")).version;
+    const { rebuild } = await import("@electron/rebuild");
+    const task = rebuild({
+      buildPath: join(repositoryRoot, "apps", "desktop"),
+      projectRootPath: repositoryRoot,
+      electronVersion,
+      arch: targetArch,
+      platform: "win32",
+      disablePreGypCopy: true,
+    });
+    task.lifecycle.on("module-skip", name => console.log(`[pack:win] Reused ${name} for Electron ${electronVersion} (${targetArch})`));
+    await task;
+    console.log(`[pack:win] Electron native dependencies ready (${targetArch})`);
+    return;
+  }
 
   if (!skipHost) {
     console.log("[pack:win] Building signed Runtime host artifact...");

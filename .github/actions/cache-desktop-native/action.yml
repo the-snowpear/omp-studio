@@ -1,0 +1,15 @@
+name: Cache desktop native modules
+description: Restore Electron native output after npm ci has recreated node_modules
+runs:
+  using: composite
+  steps:
+    - id: identity
+      shell: bash
+      run: node scripts/release-cache.mjs
+    - name: Cache node-pty for Electron
+      uses: actions/cache@v4
+      with:
+        # .forge-meta lets electron-rebuild check the architecture and ABI.
+        # No fallback: a changed dependency or build policy requires a rebuild.
+        path: node_modules/node-pty/build/Release
+        key: electron-native-v1-${{ runner.os }}-${{ runner.arch }}-node${{ steps.identity.outputs.node }}-${{ steps.identity.outputs.dependencies }}-${{ hashFiles('scripts/pack-win.mjs', 'scripts/pack-mac.mjs', 'scripts/mac-bundle.mjs', 'packaging/electron-builder.yml') }}

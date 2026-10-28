@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 发布复用 npm、Electron、NSIS 和 WebView2 下载缓存，并在安装依赖后恢复匹配 Electron/架构的 node-pty 产物；普通 Studio 版本号升级不再导致依赖缓存失效。增加独立的 Windows x64/ARM64 缓存预热工作流，供发布前填充与验证。
+
 ## [0.1.14] - 2026-10-28
 
 ### Fixed
