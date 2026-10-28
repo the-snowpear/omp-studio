@@ -1,5 +1,5 @@
 import captureModule from "./live-capture.worklet.js?url&no-inline";
-export interface LiveCapture { audioId: string; stop(): void }
+export interface LiveCapture { audioId: string; pause(): void; stop(): void }
 /** Chromium owns device consent; Main owns the Runtime endpoint/token and transport. */
 export async function openLiveCapture(options: {
   deviceId?: string; signal: AbortSignal; attach(): Promise<string>; onFault(message: string): void;
@@ -9,11 +9,14 @@ export async function openLiveCapture(options: {
   options.signal.throwIfAborted();
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, ...(options.deviceId ? { deviceId: { exact: options.deviceId } } : {}) }, video: false });
   let context: AudioContext | undefined; let source: MediaStreamAudioSourceNode | undefined; let capture: AudioWorkletNode | undefined; let audioId: string | undefined; let closed = false;
+  const pause = () => {
+    stream.getTracks().forEach(track => { track.onended = null; track.stop(); });
+    if (capture) { capture.port.onmessage = null; capture.port.postMessage("stop"); capture.disconnect(); capture.port.close(); capture = undefined; }
+    source?.disconnect(); source = undefined; void context?.close().catch(() => {}); context = undefined;
+  };
   const stop = () => {
     if (closed) return; closed = true; options.signal.removeEventListener("abort", stop);
-    stream.getTracks().forEach(track => { track.onended = null; track.stop(); });
-    if (capture) { capture.port.onmessage = null; capture.port.postMessage("stop"); capture.disconnect(); capture.port.close(); }
-    source?.disconnect(); void context?.close().catch(() => {});
+    pause();
     if (audioId) void api.detachLiveAudio!({ audioId }).catch(() => {});
   };
   options.signal.addEventListener("abort", stop, { once: true });
@@ -42,6 +45,6 @@ export async function openLiveCapture(options: {
     capture.onprocessorerror = () => fault("Live audio processor stopped");
     source = context.createMediaStreamSource(stream); source.connect(capture); capture.connect(context.destination);
     await context.resume(); options.signal.throwIfAborted();
-    return { audioId, stop };
+    return { audioId, pause, stop };
   } catch (cause) { stop(); throw cause; }
 }

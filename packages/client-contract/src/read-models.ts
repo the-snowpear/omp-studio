@@ -423,6 +423,7 @@ export interface ModelAuthMeta {
 }
 
 export interface ModelDiscoveryMeta {
+  readonly advertisedReasoning?: boolean;
   readonly type: string;
   readonly timeoutMs?: number;
 }
@@ -462,6 +463,8 @@ export interface ModelOverridePatch {
   readonly parameterSources?: ModelParameterSources;
   /** Native compat.bedrockMessagesApi; fits anthropic-messages payloads to Bedrock constraints. */
   readonly bedrockMessagesApi?: boolean;
+  readonly requiresThinkingPresence?: boolean;
+  readonly extendedCacheTtlBeta?: boolean;
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly name?: string;
@@ -494,6 +497,8 @@ export interface ModelCatalogEntry extends ModelExecutionMetadata {
   readonly parameters?: ModelParameterValues;
   readonly parameterSources?: ModelParameterSources;
   readonly bedrockMessagesApi?: boolean;
+  readonly requiresThinkingPresence?: boolean;
+  readonly extendedCacheTtlBeta?: boolean;
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly id: string;
@@ -999,6 +1004,8 @@ export interface ModelProviderTestResult {
  * must not substitute values of their own.
  */
 export interface ModelDiscoveryModel {
+  readonly thinkingConfig?: ModelThinkingConfig;
+  readonly api?: string;
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly id: string;

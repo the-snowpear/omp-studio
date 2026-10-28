@@ -1,3 +1,4 @@
+import { resolveResumeTarget } from "../../session/session-listing";
 import { resolveSessionModelSelector } from "../../config/model-resolver";
 import type { AgentSession } from "../../session/agent-session";
 import { SessionManager } from "../../session/session-manager";
@@ -9,15 +10,15 @@ export class StudioSessionRestoreService {
 		if (operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "Session changed before model inspection");
 		const manager = this.session.sessionManager;
-		const candidates = await SessionManager.list(manager.getCwd(), manager.getSessionDir());
-		const target = candidates.find(row => row.id === operation.targetSessionId);
+		const resolved = await resolveResumeTarget(operation.targetSessionId, manager.getCwd(), manager.getSessionDir());
+		const target = resolved?.session;
 		if (!target)
 			throw new SessionControlError(
 				"INVALID_ARGUMENT",
 				"The target session is not in the current workspace session catalog",
 			);
 		const saved = await SessionManager.peekRestoreModels(target.path);
-		if (saved.sessionId !== operation.targetSessionId)
+		if (saved.sessionId !== target.id)
 			throw new SessionControlError("COMMAND_BLOCKED", "The session identity changed during model inspection");
 		const registry = this.session.modelRegistry;
 		await registry.awaitInitialBackgroundRefresh();

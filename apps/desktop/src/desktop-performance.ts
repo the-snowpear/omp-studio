@@ -11,7 +11,7 @@ let nextInstance = 0;
 export function registerPerformanceController(controller: StudioRuntimeSessionController): () => void {
   controllers.add(controller);
   const unregister = desktopConversationViews.registerController({ epoch: () => controller.publication()?.snapshot.runtimeEpoch,
-    setVisibleSessions: (ids) => controller.setConversationVisibleSessions(ids) });
+    setVisibleSessions: (ids) => controller.setConversationVisibleSessions(ids), updateOwner: (state) => controller.updateOwnerState(state) });
   const offPublication = controller.onPublication(() => desktopConversationViews.refresh());
   return () => { offPublication(); unregister(); controllers.delete(controller); };
 }

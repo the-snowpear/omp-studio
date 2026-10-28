@@ -54,6 +54,7 @@ function createHarness(options: {
   maxResidentSessions?: number;
   idleWorkerTtlMs?: number;
   requiresModelFor?: string;
+  continuation?: { requested: string; actual: string; confirmed: boolean };
 } = {}) {
   let nextFresh = 0;
   let commitSeq = 0;
@@ -68,9 +69,10 @@ function createHarness(options: {
     terminalOutcomes,
   });
   const workerPortFactory = ({ resumeSessionId, model, nextRuntimeEpoch }: Parameters<NonNullable<DesktopRuntimeSessionPortOptions["workerPortFactory"]>>[0]): DesktopRuntimeSessionPort => {
-    const sessionId = resumeSessionId ?? `fresh-${++nextFresh}`;
+    const continuation = options.continuation?.requested === resumeSessionId ? options.continuation : undefined;
+    const sessionId = continuation?.actual ?? resumeSessionId ?? `fresh-${++nextFresh}`;
     const epoch = nextRuntimeEpoch();
-    snapshots.set(sessionId, baseSnapshot(sessionId, epoch));
+    snapshots.set(sessionId, { ...baseSnapshot(sessionId, epoch), ...(continuation?.confirmed ? { resumedFromSessionId: resumeSessionId! } : {}) });
     const sessionListeners = new Set<(value: FakePublication) => void>();
     listeners.set(sessionId, sessionListeners);
     let alive = true;
@@ -191,6 +193,24 @@ test("pending interaction resident is neither idle nor eligible for capacity/TTL
   await port.stop();
 });
 
+
+test("continuation resume adopts the native actual identity but refuses unrelated worker identities", async () => {
+  for (const confirmed of [true, false]) {
+    const { port } = createHarness({ continuation: { requested: "saved", actual: "continuing", confirmed } });
+    try {
+      await port.start(context);
+      if (confirmed) {
+        const resumed = await port.switchSession!({ kind: "resume", sessionId: "saved" });
+        assert.equal(resumed?.controller.publication()?.snapshot.sessionId, "continuing");
+        assert.equal(port.listResidents!().activeSessionId, "continuing");
+        assert.equal(port.listResidents!().residents.some(row => row.sessionId === "saved"), false);
+      } else {
+        await assert.rejects(() => port.switchSession!({ kind: "resume", sessionId: "saved" }), /different Session identity/);
+        assert.equal(port.listResidents!().activeSessionId, "fresh-1");
+      }
+    } finally { await port.stop(); }
+  }
+});
 
 test("missing-model recovery preserves the current worker and forwards only the explicitly selected model", async () => {
  const harness = createHarness({ requiresModelFor: "saved" }); const { port } = harness;

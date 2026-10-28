@@ -291,7 +291,10 @@ export function QueuedDeck({
     if (editsLocked) return;
     setAnswers((prev) => {
       const at = prev[item.id] ?? NO_ASK_ANSWER;
-      return { ...prev, [item.id]: { ...at, picked: nextPicked(item.question, at.picked, label) } };
+      const picked = nextPicked(item.question, at.picked, label);
+      const { noteOption: previousNoteOption, ...rest } = at;
+      const noteOption = picked.includes(label) ? label : previousNoteOption && picked.includes(previousNoteOption) ? previousNoteOption : picked[0];
+      return { ...prev, [item.id]: { ...rest, picked, ...(noteOption ? { noteOption } : {}) } };
     });
   }, [editsLocked]);
 

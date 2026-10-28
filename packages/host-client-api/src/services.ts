@@ -621,7 +621,7 @@ export interface HostInteractionRespondInput {
  * fabricates a completion.
  */
 export interface HostSemanticCommandService {
-  create?(): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
+  create?(input?: { readonly noContextFiles?: boolean }): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
   resume(input: { readonly threadId: ThreadId; readonly model?: string }): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
   drop(input: {
     readonly threadId: ThreadId;

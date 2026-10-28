@@ -177,6 +177,15 @@ export class StudioLoopService {
 		return this.state()!;
 	}
 
+	/** Resume an extension-paused loop without submitting a user turn. */
+	resume(): StudioLoopState {
+		this.#assertUsable();
+		if (!this.#enabled) throw new StudioLoopError("COMMAND_BLOCKED", "Loop mode is not enabled");
+		this.#paused = false;
+		this.#notify();
+		return this.state()!;
+	}
+
 	pause(): StudioLoopState {
 		this.#assertUsable();
 		if (!this.#enabled) throw new StudioLoopError("COMMAND_BLOCKED", "Loop mode is not enabled");

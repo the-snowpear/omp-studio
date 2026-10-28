@@ -15,7 +15,9 @@ export interface AccountResetStatus {
   state: "unfetched" | "available" | "unavailable";
   availableCount?: number; redeemableCount?: number; eligible?: boolean; credits: AccountResetCredit[];
 }
+export interface AccountRoutingPolicy { priority: number; reservePct: number; reserveSource: "global" | "override"; state: "eligible" | "inside-reserve" | "exhausted" | "unknown"; remainingPct?: number; reclaimAbovePct?: number }
 export interface StudioAccountStatus {
+  policy?: AccountRoutingPolicy;
   id: string; provider: string; label: string; organization?: string;
   source: "oauth" | "api-key" | "ambient"; active: boolean;
   limits: AccountQuotaWindow[]; reportedAt?: number; resets: AccountResetStatus;
@@ -65,7 +67,7 @@ export function validateAccountStatus(value: unknown): asserts value is AccountS
   for (const key of ["refreshing", "usageUnavailable", "truncated"]) boolean(result[key]);
   optional(result, ["refreshedAt"], number);
   list(result.accounts, 200, value => {
-    const row = object(value, ["id", "provider", "label", "organization", "source", "active", "limits", "reportedAt", "resets"]);
+    const row = object(value, ["id", "provider", "label", "organization", "source", "active", "limits", "reportedAt", "resets", "policy"]);
     for (const key of ["id", "provider", "label"]) text(row[key]);
     optional(row, ["organization"], text); optional(row, ["reportedAt"], number); boolean(row.active);
     if (!["oauth", "api-key", "ambient"].includes(row.source as string)) throw new Error("Invalid account source");

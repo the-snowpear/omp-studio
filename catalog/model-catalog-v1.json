@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "version": "6bcce76d84125a21",
-  "upstreamCommit": "45c35e40c46166dc726ccc52f5d27f40f2449f99",
+  "version": "2853c2b0f27ec841",
+  "upstreamCommit": "e996e1c7ac476f60e02b8ed9764cf30fa8c00a8e",
   "entries": [
     {
       "key": "abliteration/openai-responses/abliterated-model",
@@ -84,7 +84,7 @@
       "name": "DeepSeek V4 Flash",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1048576,
+        "contextWindow": 1000000,
         "maxTokens": 393216,
         "reasoning": true,
         "thinkingConfig": {
@@ -104,7 +104,7 @@
       "name": "DeepSeek V4 Pro",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1048576,
+        "contextWindow": 1000000,
         "maxTokens": 393216,
         "reasoning": true,
         "thinkingConfig": {
@@ -146,6 +146,28 @@
       "values": {
         "contextWindow": 262144,
         "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "aiand/openai-completions/moonshotai/kimi-k2.6",
+      "provider": "aiand",
+      "id": "moonshotai/kimi-k2.6",
+      "name": "Kimi K2.6",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 262144,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -255,7 +277,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 262140,
+        "maxTokens": 65536,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -290,13 +312,35 @@
       }
     },
     {
+      "key": "aiand/openai-completions/zai-org/glm-5.1",
+      "provider": "aiand",
+      "id": "zai-org/glm-5.1",
+      "name": "GLM 5.1",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 202752,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "aiand/openai-completions/zai-org/glm-5.2",
       "provider": "aiand",
       "id": "zai-org/glm-5.2",
-      "name": "Open flagship GLM for long-horizon coding agents and million-token context work",
+      "name": "GLM 5.2",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1048576,
+        "contextWindow": 1000000,
         "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
@@ -8927,42 +8971,6 @@
       }
     },
     {
-      "key": "anthropic/anthropic-messages/claude-3-5-sonnet-20240620",
-      "provider": "anthropic",
-      "id": "claude-3-5-sonnet-20240620",
-      "name": "Claude Sonnet 3.5",
-      "api": "anthropic-messages",
-      "values": {
-        "contextWindow": 200000,
-        "maxTokens": 8192,
-        "reasoning": false
-      }
-    },
-    {
-      "key": "anthropic/anthropic-messages/claude-3-5-sonnet-20241022",
-      "provider": "anthropic",
-      "id": "claude-3-5-sonnet-20241022",
-      "name": "Claude Sonnet 3.5 v2",
-      "api": "anthropic-messages",
-      "values": {
-        "contextWindow": 200000,
-        "maxTokens": 8192,
-        "reasoning": false
-      }
-    },
-    {
-      "key": "anthropic/anthropic-messages/claude-3-haiku-20240307",
-      "provider": "anthropic",
-      "id": "claude-3-haiku-20240307",
-      "name": "Claude Haiku 3",
-      "api": "anthropic-messages",
-      "values": {
-        "contextWindow": 200000,
-        "maxTokens": 4096,
-        "reasoning": false
-      }
-    },
-    {
       "key": "anthropic/anthropic-messages/claude-fable-5",
       "provider": "anthropic",
       "id": "claude-fable-5",
@@ -9099,74 +9107,6 @@
           ],
           "supportsDisplay": true
         }
-      }
-    },
-    {
-      "key": "anthropic/anthropic-messages/claude-opus-4-0",
-      "provider": "anthropic",
-      "id": "claude-opus-4-0",
-      "name": "Claude Opus 4",
-      "api": "anthropic-messages",
-      "values": {
-        "contextWindow": 200000,
-        "maxTokens": 32000,
-        "reasoning": true,
-        "thinkingConfig": {
-          "mode": "budget",
-          "efforts": [
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh"
-          ]
-        }
-      }
-    },
-    {
-      "key": "anthropic/anthropic-messages/claude-opus-4-1",
-      "provider": "anthropic",
-      "id": "claude-opus-4-1",
-      "name": "Claude Opus 4.1",
-      "api": "anthropic-messages",
-      "values": {
-        "contextWindow": 200000,
-        "maxTokens": 32000,
-        "reasoning": true,
-        "thinkingConfig": {
-          "mode": "budget",
-          "efforts": [
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh"
-          ]
-        }
-      }
-    },
-    {
-      "key": "anthropic/anthropic-messages/claude-opus-4-1-20250805",
-      "provider": "anthropic",
-      "id": "claude-opus-4-1-20250805",
-      "name": "Claude 4.1 Opus",
-      "api": "anthropic-messages",
-      "values": {
-        "contextWindow": 200000,
-        "maxTokens": 32000,
-        "reasoning": false
-      }
-    },
-    {
-      "key": "anthropic/anthropic-messages/claude-opus-4-20250514",
-      "provider": "anthropic",
-      "id": "claude-opus-4-20250514",
-      "name": "Claude 4 Opus",
-      "api": "anthropic-messages",
-      "values": {
-        "contextWindow": 200000,
-        "maxTokens": 32000,
-        "reasoning": false
       }
     },
     {
@@ -9315,40 +9255,6 @@
         "reasoning": true
       },
       "limitation": "native-thinking"
-    },
-    {
-      "key": "anthropic/anthropic-messages/claude-sonnet-4-0",
-      "provider": "anthropic",
-      "id": "claude-sonnet-4-0",
-      "name": "Claude Sonnet 4",
-      "api": "anthropic-messages",
-      "values": {
-        "contextWindow": 200000,
-        "maxTokens": 64000,
-        "reasoning": true,
-        "thinkingConfig": {
-          "mode": "budget",
-          "efforts": [
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh"
-          ]
-        }
-      }
-    },
-    {
-      "key": "anthropic/anthropic-messages/claude-sonnet-4-20250514",
-      "provider": "anthropic",
-      "id": "claude-sonnet-4-20250514",
-      "name": "Claude 4 Sonnet",
-      "api": "anthropic-messages",
-      "values": {
-        "contextWindow": 200000,
-        "maxTokens": 64000,
-        "reasoning": false
-      }
     },
     {
       "key": "anthropic/anthropic-messages/claude-sonnet-4-5",
@@ -10760,39 +10666,15 @@
       }
     },
     {
-      "key": "cline-pass/openai-completions/cline-free/mimo-v2.6-flash",
+      "key": "cline-pass/openai-completions/cline-free/minimax-m3.1-flash",
       "provider": "cline-pass",
-      "id": "cline-free/mimo-v2.6-flash",
-      "name": "MiMo-V2.6-Flash (free)",
+      "id": "cline-free/minimax-m3.1-flash",
+      "name": "minimax-m3.1-flash (free)",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1048576,
-        "maxTokens": 131072,
+        "contextWindow": 128000,
+        "maxTokens": 8192,
         "reasoning": true
-      }
-    },
-    {
-      "key": "cline-pass/openai-completions/cline-free/muse-spark-1.3-contributor",
-      "provider": "cline-pass",
-      "id": "cline-free/muse-spark-1.3-contributor",
-      "name": "Muse Spark 1.3 (C) (free)",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1048576,
-        "maxTokens": 131072,
-        "reasoning": true,
-        "thinkingConfig": {
-          "mode": "effort",
-          "efforts": [
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh"
-          ],
-          "defaultLevel": "medium",
-          "requiresEffort": false
-        }
       }
     },
     {
@@ -10858,6 +10740,18 @@
             "xhigh"
           ]
         }
+      }
+    },
+    {
+      "key": "cline-pass/openai-completions/deepseek-v4.1-flash-1017",
+      "provider": "cline-pass",
+      "id": "deepseek-v4.1-flash-1017",
+      "name": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 393216,
+        "reasoning": true
       }
     },
     {
@@ -10930,30 +10824,6 @@
       }
     },
     {
-      "key": "cline-pass/openai-completions/mimo-v2.5",
-      "provider": "cline-pass",
-      "id": "mimo-v2.5",
-      "name": "MiMo-V2.5",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1050000,
-        "maxTokens": 131072,
-        "reasoning": true
-      }
-    },
-    {
-      "key": "cline-pass/openai-completions/mimo-v2.5-pro",
-      "provider": "cline-pass",
-      "id": "mimo-v2.5-pro",
-      "name": "MiMo-V2.5-Pro",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1050000,
-        "maxTokens": 131072,
-        "reasoning": true
-      }
-    },
-    {
       "key": "cline-pass/openai-completions/mimo-v2.6-flash",
       "provider": "cline-pass",
       "id": "mimo-v2.6-flash",
@@ -10998,6 +10868,30 @@
       "values": {
         "contextWindow": 1048576,
         "maxTokens": 131072,
+        "reasoning": true
+      }
+    },
+    {
+      "key": "cline-pass/openai-completions/nvidia/nemotron-3.5-lightning-free",
+      "provider": "cline-pass",
+      "id": "nvidia/nemotron-3.5-lightning-free",
+      "name": "Nemotron 3.5 Lightning Free (free)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65000,
+        "reasoning": true
+      }
+    },
+    {
+      "key": "cline-pass/openai-completions/poolside/laguna-s-2.1-free",
+      "provider": "cline-pass",
+      "id": "poolside/laguna-s-2.1-free",
+      "name": "Laguna S 2.1 (free)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 256000,
+        "maxTokens": 32768,
         "reasoning": true
       }
     },
@@ -11058,6 +10952,18 @@
       }
     },
     {
+      "key": "cline-pass/openai-completions/reflection/beam-free",
+      "provider": "cline-pass",
+      "id": "reflection/beam-free",
+      "name": "Beam 1.0 (free)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "reasoning": true
+      }
+    },
+    {
       "key": "cloudflare-ai-gateway/anthropic-messages/alibaba/qwen3-max",
       "provider": "cloudflare-ai-gateway",
       "id": "alibaba/qwen3-max",
@@ -11099,7 +11005,7 @@
       "api": "anthropic-messages",
       "values": {
         "contextWindow": 1000000,
-        "maxTokens": 65536,
+        "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "budget",
@@ -11785,6 +11691,244 @@
             "high",
             "xhigh"
           ]
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-2.5-flash",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-2.5-flash",
+      "name": "Gemini 2.5 Flash",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-2.5-flash-lite",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-2.5-flash-lite",
+      "name": "Gemini 2.5 Flash-Lite",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-2.5-pro",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-2.5-pro",
+      "name": "Gemini 2.5 Pro",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-3-flash",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-3-flash",
+      "name": "Gemini 3 Flash Preview",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-3.1-flash-lite",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-3.1-flash-lite",
+      "name": "Gemini 3.1 Flash Lite",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-3.1-pro",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-3.1-pro",
+      "name": "Gemini 3.1 Pro Preview",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-3.5-flash",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-3.5-flash",
+      "name": "Gemini 3.5 Flash",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-3.5-flash-lite",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-3.5-flash-lite",
+      "name": "Gemini 3.5 Flash Lite",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-3.6-flash",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-3.6-flash",
+      "name": "Gemini 3.6 Flash",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-3.7-flash",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-3.7-flash",
+      "name": "Gemini 3.7 Flash",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-3.8-flash",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-3.8-flash",
+      "name": "Gemini 3.8 Flash",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
         }
       }
     },
@@ -12951,6 +13095,26 @@
       }
     },
     {
+      "key": "cloudflare-ai-gateway/openai-completions/workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+      "provider": "cloudflare-ai-gateway",
+      "id": "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+      "name": "Deepseek V4.1 Flash 1017",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 1048576,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
       "key": "cloudflare-ai-gateway/openai-completions/workers-ai/@cf/google/gemma-4-26b-a4b-it",
       "provider": "cloudflare-ai-gateway",
       "id": "workers-ai/@cf/google/gemma-4-26b-a4b-it",
@@ -13579,6 +13743,30 @@
       }
     },
     {
+      "key": "commandcode/openai-completions/minimax/minimax-m3.1-flash",
+      "provider": "commandcode",
+      "id": "minimax/minimax-m3.1-flash",
+      "name": "MiniMax M3.1 Flash",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65536,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "commandcode/openai-completions/minimax/minimax-m3.1-flash:free",
+      "provider": "commandcode",
+      "id": "minimax/minimax-m3.1-flash:free",
+      "name": "MiniMax M3.1 Flash",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65536,
+        "reasoning": false
+      }
+    },
+    {
       "key": "commandcode/openai-completions/MiniMaxAI/MiniMax-M2.5",
       "provider": "commandcode",
       "id": "MiniMaxAI/MiniMax-M2.5",
@@ -13688,6 +13876,30 @@
       "provider": "commandcode",
       "id": "nvidia/nemotron-3.5-super-vl",
       "name": "Nemotron 3.5 Super VL",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 65536,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "commandcode/openai-completions/ornith/ornith-1.5-122b",
+      "provider": "commandcode",
+      "id": "ornith/ornith-1.5-122b",
+      "name": "Ornith 1.5 122B",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 65536,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "commandcode/openai-completions/ornith/ornith-1.5-122b:free",
+      "provider": "commandcode",
+      "id": "ornith/ornith-1.5-122b:free",
+      "name": "Ornith 1.5 122B",
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
@@ -13893,18 +14105,6 @@
       "provider": "commandcode",
       "id": "reflection/beam:free",
       "name": "Beam 1.0",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
-        "reasoning": false
-      }
-    },
-    {
-      "key": "commandcode/openai-completions/stealth/cat-jam:free",
-      "provider": "commandcode",
-      "id": "stealth/cat-jam:free",
-      "name": "Cat Jam",
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048576,
@@ -15635,7 +15835,7 @@
       "key": "coreweave/openai-completions/reflection/Beam-1.0-501B-A23B",
       "provider": "coreweave",
       "id": "reflection/Beam-1.0-501B-A23B",
-      "name": "Beam 1.0",
+      "name": "Beam 1.0 501B A23B",
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048576,
@@ -16067,8 +16267,8 @@
       "name": "DeepSeek-V3.2",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 163840,
-        "maxTokens": 65536,
+        "contextWindow": 16384,
+        "maxTokens": 16384,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -16203,7 +16403,7 @@
       "key": "deepinfra/openai-completions/deepseek-ai/DeepSeek-V4.1-Flash-1017",
       "provider": "deepinfra",
       "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
-      "name": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "name": "DeepSeek V4.1 Flash 1017",
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048576,
@@ -16288,7 +16488,7 @@
       "key": "deepinfra/openai-completions/google/gemini-3.1-pro",
       "provider": "deepinfra",
       "id": "google/gemini-3.1-pro",
-      "name": "google/gemini-3.1-pro",
+      "name": "Gemini 3.1 Pro Preview",
       "api": "openai-completions",
       "values": {
         "contextWindow": 1000000,
@@ -16781,50 +16981,6 @@
       }
     },
     {
-      "key": "deepinfra/openai-completions/NousResearch/Hermes-3-Llama-3.1-405B",
-      "provider": "deepinfra",
-      "id": "NousResearch/Hermes-3-Llama-3.1-405B",
-      "name": "NousResearch/Hermes-3-Llama-3.1-405B",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 131072,
-        "maxTokens": 8192,
-        "reasoning": true,
-        "thinkingConfig": {
-          "mode": "effort",
-          "efforts": [
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh"
-          ]
-        }
-      }
-    },
-    {
-      "key": "deepinfra/openai-completions/NousResearch/Hermes-3-Llama-3.1-70B",
-      "provider": "deepinfra",
-      "id": "NousResearch/Hermes-3-Llama-3.1-70B",
-      "name": "NousResearch/Hermes-3-Llama-3.1-70B",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 131072,
-        "maxTokens": 8192,
-        "reasoning": true,
-        "thinkingConfig": {
-          "mode": "effort",
-          "efforts": [
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh"
-          ]
-        }
-      }
-    },
-    {
       "key": "deepinfra/openai-completions/nvidia/Nemotron-Content-Safety-3.5",
       "provider": "deepinfra",
       "id": "nvidia/Nemotron-Content-Safety-3.5",
@@ -17260,7 +17416,16 @@
       "values": {
         "contextWindow": 256000,
         "maxTokens": 256000,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
       }
     },
     {
@@ -17611,7 +17776,7 @@
       "name": "DeepSeek V4 Flash",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1000000,
+        "contextWindow": 1048576,
         "maxTokens": 393216,
         "reasoning": true,
         "thinkingConfig": {
@@ -17631,7 +17796,7 @@
       "name": "DeepSeek V4 Flash Vision Exp",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1000000,
+        "contextWindow": 1048576,
         "maxTokens": 393216,
         "reasoning": true,
         "thinkingConfig": {
@@ -17651,7 +17816,7 @@
       "name": "DeepSeek V4 Pro",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1000000,
+        "contextWindow": 1048576,
         "maxTokens": 393216,
         "reasoning": true,
         "thinkingConfig": {
@@ -21838,6 +22003,27 @@
       "limitation": "native-thinking"
     },
     {
+      "key": "google/google-generative-ai/gemini-pro-latest",
+      "provider": "google",
+      "id": "gemini-pro-latest",
+      "name": "Gemini Pro Latest",
+      "api": "google-generative-ai",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
       "key": "google/google-generative-ai/gemini-robotics-er-1.6-preview",
       "provider": "google",
       "id": "gemini-robotics-er-1.6-preview",
@@ -22264,7 +22450,7 @@
       "name": "Qwen3.8 27B",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 131042,
+        "contextWindow": 131072,
         "maxTokens": 16384,
         "reasoning": true,
         "thinkingConfig": {
@@ -22388,7 +22574,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 163840,
-        "maxTokens": 163840,
+        "maxTokens": 32768,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -22566,6 +22752,26 @@
       "provider": "huggingface",
       "id": "deepseek-ai/DeepSeek-V4.1-Flash",
       "name": "DeepSeek V4.1 Flash",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 384000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "huggingface/openai-completions/deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "provider": "huggingface",
+      "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "name": "DeepSeek V4.1 Flash 1017",
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048576,
@@ -23056,7 +23262,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 131072,
+        "maxTokens": 81920,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -23113,6 +23319,27 @@
       }
     },
     {
+      "key": "huggingface/openai-completions/Qwen/Qwen3-8B",
+      "provider": "huggingface",
+      "id": "Qwen/Qwen3-8B",
+      "name": "Qwen3 8B",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 40960,
+        "maxTokens": 32768,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
       "key": "huggingface/openai-completions/Qwen/Qwen3-Coder-30B-A3B-Instruct",
       "provider": "huggingface",
       "id": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
@@ -23132,7 +23359,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 66536,
+        "maxTokens": 65536,
         "reasoning": false
       }
     },
@@ -23156,7 +23383,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 66536,
+        "maxTokens": 32768,
         "reasoning": false
       }
     },
@@ -23168,8 +23395,18 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 131072,
-        "reasoning": false
+        "maxTokens": 32768,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
       }
     },
     {
@@ -24120,7 +24357,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 65536,
+        "maxTokens": 943718,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -24352,7 +24589,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 131072,
+        "maxTokens": 943718,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -25750,8 +25987,8 @@
       "name": "DeepSeek Chat",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 163840,
-        "maxTokens": 16384,
+        "contextWindow": 128000,
+        "maxTokens": 16000,
         "reasoning": false
       }
     },
@@ -25953,7 +26190,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 943718,
+        "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -26064,8 +26301,8 @@
       "name": "DeepSeek V4 Pro 0813",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1024000,
-        "maxTokens": 384000,
+        "contextWindow": 1048576,
+        "maxTokens": 393216,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -26721,7 +26958,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 65536,
+        "maxTokens": 943718,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -27051,6 +27288,28 @@
       "values": {
         "contextWindow": 260000,
         "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/inception/mercury-3",
+      "provider": "kilo",
+      "id": "inception/mercury-3",
+      "name": "Mercury 3",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -28401,6 +28660,28 @@
       "values": {
         "contextWindow": 1048576,
         "maxTokens": 943718,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/minimax/minimax-m3.1-flash:free",
+      "provider": "kilo",
+      "id": "minimax/minimax-m3.1-flash:free",
+      "name": "MiniMax M3.1 Flash (free)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 524288,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -30775,7 +31056,7 @@
       "key": "kilo/openai-completions/openai/gpt-audio",
       "provider": "kilo",
       "id": "openai/gpt-audio",
-      "name": "GPT Audio",
+      "name": "GPT-Audio",
       "api": "openai-completions",
       "values": {
         "contextWindow": 128000,
@@ -30787,7 +31068,7 @@
       "key": "kilo/openai-completions/openai/gpt-audio-mini",
       "provider": "kilo",
       "id": "openai/gpt-audio-mini",
-      "name": "GPT Audio Mini",
+      "name": "GPT-Audio Mini",
       "api": "openai-completions",
       "values": {
         "contextWindow": 128000,
@@ -32266,7 +32547,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 81920,
+        "maxTokens": 65536,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -32287,7 +32568,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 235929,
+        "maxTokens": 81920,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -32308,7 +32589,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 235929,
+        "maxTokens": 65536,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -32328,8 +32609,8 @@
       "name": "Qwen3.5 9B",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 256000,
-        "maxTokens": 32768,
+        "contextWindow": 262144,
+        "maxTokens": 65536,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -32616,8 +32897,8 @@
       "name": "Qwen3.8 2.4T A95B",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1000000,
-        "maxTokens": 131072,
+        "contextWindow": 1010000,
+        "maxTokens": 909000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -32638,7 +32919,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 235929,
+        "maxTokens": 65536,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -32786,6 +33067,28 @@
       "api": "openai-completions",
       "values": {
         "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/recursive/flint-v1.0:free",
+      "provider": "kilo",
+      "id": "recursive/flint-v1.0:free",
+      "name": "Flint (free)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 235929,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
       }
     },
     {
@@ -34378,8 +34681,8 @@
       "name": "MiMo-V2.5",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1048576,
-        "maxTokens": 131072,
+        "contextWindow": 1050000,
+        "maxTokens": 945000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -34398,8 +34701,8 @@
       "name": "MiMo-V2.5-Pro",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1048576,
-        "maxTokens": 131072,
+        "contextWindow": 1050000,
+        "maxTokens": 945000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -34578,7 +34881,7 @@
       "name": "GLM-4.6",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 202752,
+        "contextWindow": 204800,
         "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
@@ -34722,8 +35025,8 @@
       "name": "GLM-5.1",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 200000,
-        "maxTokens": 128000,
+        "contextWindow": 202752,
+        "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -35361,6 +35664,34 @@
       }
     },
     {
+      "key": "minimax-cn/anthropic-messages/MiniMax-M3.1-Flash",
+      "provider": "minimax-cn",
+      "id": "MiniMax-M3.1-Flash",
+      "name": "MiniMax-M3.1-Flash",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 524288,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "anthropic-adaptive",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "effortMap": {
+            "low": "low",
+            "medium": "medium",
+            "high": "high"
+          },
+          "requiresEffort": true
+        }
+      }
+    },
+    {
       "key": "minimax-code-cn/anthropic-messages/MiniMax-M2",
       "provider": "minimax-code-cn",
       "id": "MiniMax-M2",
@@ -35538,6 +35869,34 @@
             "medium": "adaptive",
             "high": "adaptive"
           }
+        }
+      }
+    },
+    {
+      "key": "minimax-code-cn/anthropic-messages/MiniMax-M3.1-Flash",
+      "provider": "minimax-code-cn",
+      "id": "MiniMax-M3.1-Flash",
+      "name": "MiniMax-M3.1-Flash",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 524288,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "anthropic-adaptive",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "effortMap": {
+            "low": "low",
+            "medium": "medium",
+            "high": "high"
+          },
+          "requiresEffort": true
         }
       }
     },
@@ -35799,6 +36158,34 @@
             "medium": "adaptive",
             "high": "adaptive"
           }
+        }
+      }
+    },
+    {
+      "key": "minimax-code/anthropic-messages/MiniMax-M3.1-Flash",
+      "provider": "minimax-code",
+      "id": "MiniMax-M3.1-Flash",
+      "name": "MiniMax-M3.1-Flash",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 524288,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "anthropic-adaptive",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "effortMap": {
+            "low": "low",
+            "medium": "medium",
+            "high": "high"
+          },
+          "requiresEffort": true
         }
       }
     },
@@ -36086,6 +36473,34 @@
             "medium": "adaptive",
             "high": "adaptive"
           }
+        }
+      }
+    },
+    {
+      "key": "minimax/anthropic-messages/MiniMax-M3.1-Flash",
+      "provider": "minimax",
+      "id": "MiniMax-M3.1-Flash",
+      "name": "MiniMax-M3.1-Flash",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 524288,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "anthropic-adaptive",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "effortMap": {
+            "low": "low",
+            "medium": "medium",
+            "high": "high"
+          },
+          "requiresEffort": true
         }
       }
     },
@@ -42872,7 +43287,17 @@
       "values": {
         "contextWindow": 1050000,
         "maxTokens": 65530,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
       }
     },
     {
@@ -43954,6 +44379,28 @@
       "values": {
         "contextWindow": 260000,
         "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "nanogpt/openai-completions/inception/mercury-3",
+      "provider": "nanogpt",
+      "id": "inception/mercury-3",
+      "name": "Mercury 3",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -45821,6 +46268,28 @@
       "values": {
         "contextWindow": 512000,
         "maxTokens": 80000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "nanogpt/openai-completions/minimax/minimax-m3.1-flash",
+      "provider": "nanogpt",
+      "id": "minimax/minimax-m3.1-flash",
+      "name": "MiniMax M3.1 Flash",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 524288,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -48743,6 +49212,28 @@
       }
     },
     {
+      "key": "nanogpt/openai-completions/ornith-ai/ornith-1.5-122b",
+      "provider": "nanogpt",
+      "id": "ornith-ai/ornith-1.5-122b",
+      "name": "Ornith 1.5 122B",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 32768,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "nanogpt/openai-completions/ornith-ai/ornith-1.5-35b-a3b",
       "provider": "nanogpt",
       "id": "ornith-ai/ornith-1.5-35b-a3b",
@@ -49457,22 +49948,12 @@
       "key": "nanogpt/openai-completions/qwen/qwen3-235b-a22b-thinking-2507",
       "provider": "nanogpt",
       "id": "qwen/qwen3-235b-a22b-thinking-2507",
-      "name": "Qwen3 235B A22B Thinking 2507",
+      "name": "Qwen 3 235b A22B 2507 Thinking",
       "api": "openai-completions",
       "values": {
         "contextWindow": 131072,
-        "maxTokens": 8192,
-        "reasoning": true,
-        "thinkingConfig": {
-          "mode": "effort",
-          "efforts": [
-            "minimal",
-            "low",
-            "medium",
-            "high"
-          ],
-          "requiresEffort": true
-        }
+        "maxTokens": 81920,
+        "reasoning": false
       }
     },
     {
@@ -49570,12 +50051,21 @@
       "key": "nanogpt/openai-completions/Qwen/Qwen3-8B",
       "provider": "nanogpt",
       "id": "Qwen/Qwen3-8B",
-      "name": "Qwen/Qwen3-8B",
+      "name": "Qwen3 8B",
       "api": "openai-completions",
       "values": {
         "contextWindow": 131072,
         "maxTokens": 8192,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
       }
     },
     {
@@ -50000,7 +50490,16 @@
       "values": {
         "contextWindow": 991808,
         "maxTokens": 65536,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
       }
     },
     {
@@ -56718,6 +57217,26 @@
       }
     },
     {
+      "key": "novita/openai-completions/deepseek/deepseek-v4.1-flash-1017",
+      "provider": "novita",
+      "id": "deepseek/deepseek-v4.1-flash-1017",
+      "name": "DeepSeek V4.1 Flash 1017",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 393216,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
       "key": "novita/openai-completions/deepseek/deepseek-v4.1-flash-dst",
       "provider": "novita",
       "id": "deepseek/deepseek-v4.1-flash-dst",
@@ -58838,10 +59357,10 @@
       "key": "nvidia/openai-completions/meta/llama-3.2-3b-instruct",
       "provider": "nvidia",
       "id": "meta/llama-3.2-3b-instruct",
-      "name": "meta/llama-3.2-3b-instruct",
+      "name": "Llama 3.2 3B Instruct",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 32768,
+        "contextWindow": 131072,
         "maxTokens": 32000,
         "reasoning": false
       }
@@ -60489,6 +61008,28 @@
       }
     },
     {
+      "key": "nvidia/openai-completions/stepfun-ai/step-5-preview",
+      "provider": "nvidia",
+      "id": "stepfun-ai/step-5-preview",
+      "name": "Step 5 Preview",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 1048576,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "nvidia/openai-completions/stockmark/stockmark-2-100b-instruct",
       "provider": "nvidia",
       "id": "stockmark/stockmark-2-100b-instruct",
@@ -60588,7 +61129,7 @@
       "key": "nvidia/openai-completions/z-ai/glm-5.1",
       "provider": "nvidia",
       "id": "z-ai/glm-5.1",
-      "name": "GLM 5.1",
+      "name": "GLM-5.1",
       "api": "openai-completions",
       "values": {
         "contextWindow": 131072,
@@ -61839,6 +62380,28 @@
       }
     },
     {
+      "key": "openai/openai-responses/gpt-6.1-terra",
+      "provider": "openai",
+      "id": "gpt-6.1-terra",
+      "name": "GPT-6.1 Terra",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 1050000,
+        "maxTokens": 128000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      }
+    },
+    {
       "key": "openai/openai-responses/gpt-daybreak-blue-latest",
       "provider": "openai",
       "id": "gpt-daybreak-blue-latest",
@@ -62801,6 +63364,28 @@
       }
     },
     {
+      "key": "opencode-go/openai-completions/minimax-m3.1-flash-free",
+      "provider": "opencode-go",
+      "id": "minimax-m3.1-flash-free",
+      "name": "MiniMax M3.1 Flash Free",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 512000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "opencode-go/openai-completions/ox-alpha-free",
       "provider": "opencode-go",
       "id": "ox-alpha-free",
@@ -62941,11 +63526,9 @@
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
-            "minimal",
             "low",
             "medium",
-            "high",
-            "xhigh"
+            "high"
           ]
         }
       }
@@ -62963,11 +63546,9 @@
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
-            "minimal",
             "low",
             "medium",
-            "high",
-            "xhigh"
+            "high"
           ]
         }
       }
@@ -63966,6 +64547,28 @@
       }
     },
     {
+      "key": "opencode-zen/openai-completions/flint-40b-free",
+      "provider": "opencode-zen",
+      "id": "flint-40b-free",
+      "name": "Flint 40B Free",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "opencode-zen/openai-completions/glm-4.6",
       "provider": "opencode-zen",
       "id": "glm-4.6",
@@ -64663,6 +65266,28 @@
       }
     },
     {
+      "key": "opencode-zen/openai-completions/minimax-m3.1-flash-free",
+      "provider": "opencode-zen",
+      "id": "minimax-m3.1-flash-free",
+      "name": "MiniMax M3.1 Flash Free",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 512000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "opencode-zen/openai-completions/mistral-large-4",
       "provider": "opencode-zen",
       "id": "mistral-large-4",
@@ -64893,11 +65518,9 @@
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
-            "minimal",
             "low",
             "medium",
-            "high",
-            "xhigh"
+            "high"
           ]
         }
       }
@@ -65622,6 +66245,29 @@
       }
     },
     {
+      "key": "opencode-zen/openai-responses/muse-wonder-1.0",
+      "provider": "opencode-zen",
+      "id": "muse-wonder-1.0",
+      "name": "Muse Wonder",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      }
+    },
+    {
       "key": "qianfan/openai-completions/deepseek-v3.2",
       "provider": "qianfan",
       "id": "deepseek-v3.2",
@@ -66129,7 +66775,7 @@
       "key": "synthetic/openai-completions/hf:deepseek-ai/DeepSeek-V4.1-Flash",
       "provider": "synthetic",
       "id": "hf:deepseek-ai/DeepSeek-V4.1-Flash",
-      "name": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "name": "DeepSeek V4.1 Flash",
       "api": "openai-completions",
       "values": {
         "contextWindow": 524288,
@@ -66146,10 +66792,74 @@
       }
     },
     {
+      "key": "synthetic/openai-completions/hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "provider": "synthetic",
+      "id": "hf:deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "name": "DeepSeek V4.1 Flash 1017",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 524288,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "synthetic/openai-completions/hf:MiniMaxAI/MiniMax-M3",
+      "provider": "synthetic",
+      "id": "hf:MiniMaxAI/MiniMax-M3",
+      "name": "MiniMax-M3",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 524288,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "synthetic/openai-completions/hf:moonshotai/Kimi-K2.7-Code",
+      "provider": "synthetic",
+      "id": "hf:moonshotai/Kimi-K2.7-Code",
+      "name": "Kimi K2.7 Code",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "synthetic/openai-completions/hf:moonshotai/Kimi-K3",
       "provider": "synthetic",
       "id": "hf:moonshotai/Kimi-K3",
-      "name": "moonshotai/Kimi-K3",
+      "name": "Kimi K3",
       "api": "openai-completions",
       "values": {
         "contextWindow": 524288,
@@ -66174,7 +66884,7 @@
       "key": "synthetic/openai-completions/hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
       "provider": "synthetic",
       "id": "hf:nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
-      "name": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+      "name": "Nemotron 3 Super 120B A12B",
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
@@ -66196,7 +66906,7 @@
       "key": "synthetic/openai-completions/hf:openai/gpt-oss-120b",
       "provider": "synthetic",
       "id": "hf:openai/gpt-oss-120b",
-      "name": "openai/gpt-oss-120b",
+      "name": "GPT OSS 120B",
       "api": "openai-completions",
       "values": {
         "contextWindow": 131072,
@@ -66205,6 +66915,27 @@
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "synthetic/openai-completions/hf:Qwen/Qwen3.6-27B",
+      "provider": "synthetic",
+      "id": "hf:Qwen/Qwen3.6-27B",
+      "name": "Qwen3.6 27B",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
             "low",
             "medium",
             "high"
@@ -66237,7 +66968,7 @@
       "key": "synthetic/openai-completions/hf:zai-org/GLM-4.7-Flash",
       "provider": "synthetic",
       "id": "hf:zai-org/GLM-4.7-Flash",
-      "name": "zai-org/GLM-4.7-Flash",
+      "name": "GLM-4.7-Flash",
       "api": "openai-completions",
       "values": {
         "contextWindow": 196608,
@@ -66256,10 +66987,32 @@
       }
     },
     {
+      "key": "synthetic/openai-completions/hf:zai-org/GLM-5.2",
+      "provider": "synthetic",
+      "id": "hf:zai-org/GLM-5.2",
+      "name": "GLM-5.2",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 524288,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
       "key": "synthetic/openai-completions/hf:zai-org/GLM-5.3",
       "provider": "synthetic",
       "id": "hf:zai-org/GLM-5.3",
-      "name": "zai-org/GLM-5.3",
+      "name": "GLM-5.3",
       "api": "openai-completions",
       "values": {
         "contextWindow": 524288,
@@ -66281,7 +67034,7 @@
       "key": "synthetic/openai-completions/hf:zai-org/GLM-5.3-Flash",
       "provider": "synthetic",
       "id": "hf:zai-org/GLM-5.3-Flash",
-      "name": "zai-org/GLM-5.3-Flash",
+      "name": "GLM-5.3-Flash",
       "api": "openai-completions",
       "values": {
         "contextWindow": 524288,
@@ -66693,7 +67446,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 524288,
-        "maxTokens": 250000,
+        "maxTokens": 524288,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -66992,7 +67745,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1000000,
-        "maxTokens": 500000,
+        "maxTokens": 65536,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -67013,8 +67766,17 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1000000,
-        "maxTokens": 500000,
-        "reasoning": false
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
       }
     },
     {
@@ -67156,7 +67918,7 @@
       "name": "GLM-5.3",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1048576,
+        "contextWindow": 1048575,
         "maxTokens": 262144,
         "reasoning": true,
         "thinkingConfig": {
@@ -67261,10 +68023,10 @@
       }
     },
     {
-      "key": "umans/anthropic-messages/umans-deepseek-v4.1-flash-1017-lab",
+      "key": "umans/anthropic-messages/umans-deepseek-v4.1-flash-1017",
       "provider": "umans",
-      "id": "umans-deepseek-v4.1-flash-1017-lab",
-      "name": "Umans DeepSeek V4.1 Flash 1017 (lab)",
+      "id": "umans-deepseek-v4.1-flash-1017",
+      "name": "Umans DeepSeek V4.1 Flash 1017",
       "api": "anthropic-messages",
       "values": {
         "contextWindow": 1048576,
@@ -67967,6 +68729,26 @@
       "provider": "venice",
       "id": "deepseek-v4-1-flash",
       "name": "DeepSeek V4.1 Flash",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "venice/openai-completions/deepseek-v4-1-flash-1017",
+      "provider": "venice",
+      "id": "deepseek-v4-1-flash-1017",
+      "name": "DeepSeek v4.1 Flash (1017)",
       "api": "openai-completions",
       "values": {
         "contextWindow": 1000000,
@@ -69195,6 +69977,28 @@
       }
     },
     {
+      "key": "venice/openai-completions/mercury-3",
+      "provider": "venice",
+      "id": "mercury-3",
+      "name": "Mercury 3",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "venice/openai-completions/minimax-m21",
       "provider": "venice",
       "id": "minimax-m21",
@@ -69265,6 +70069,28 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 500000,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "venice/openai-completions/minimax-m3-1-flash",
+      "provider": "venice",
+      "id": "minimax-m3-1-flash",
+      "name": "MiniMax M3.1 Flash",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
         "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
@@ -72565,8 +73391,8 @@
       "name": "DeepSeek V4.1 Flash",
       "api": "anthropic-messages",
       "values": {
-        "contextWindow": 1000000,
-        "maxTokens": 384000,
+        "contextWindow": 1048576,
+        "maxTokens": 32768,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "budget",
@@ -72587,8 +73413,8 @@
       "name": "DeepSeek V4.1 Flash 1017",
       "api": "anthropic-messages",
       "values": {
-        "contextWindow": 1000000,
-        "maxTokens": 384000,
+        "contextWindow": 1048576,
+        "maxTokens": 1048576,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "budget",
@@ -72866,7 +73692,7 @@
       "key": "vercel-ai-gateway/anthropic-messages/google/gemini-3-flash",
       "provider": "vercel-ai-gateway",
       "id": "google/gemini-3-flash",
-      "name": "Gemini 3 Flash",
+      "name": "Gemini 3 Flash Preview",
       "api": "anthropic-messages",
       "values": {
         "contextWindow": 1000000,
@@ -72979,7 +73805,17 @@
       "values": {
         "contextWindow": 1000000,
         "maxTokens": 65000,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
       }
     },
     {
@@ -73318,6 +74154,28 @@
       "values": {
         "contextWindow": 260000,
         "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "vercel-ai-gateway/anthropic-messages/inception/mercury-3",
+      "provider": "vercel-ai-gateway",
+      "id": "inception/mercury-3",
+      "name": "Mercury 3",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "budget",
@@ -74279,6 +75137,31 @@
       "values": {
         "contextWindow": 1048576,
         "maxTokens": 1048576,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "anthropic-adaptive",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "effortMap": {
+            "low": "adaptive",
+            "medium": "adaptive",
+            "high": "adaptive"
+          }
+        }
+      }
+    },
+    {
+      "key": "vercel-ai-gateway/anthropic-messages/minimax/minimax-m3.1-flash",
+      "provider": "vercel-ai-gateway",
+      "id": "minimax/minimax-m3.1-flash",
+      "name": "MiniMax M3.1 Flash",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 524288,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "anthropic-adaptive",
@@ -80890,7 +81773,17 @@
       "values": {
         "contextWindow": 200000,
         "maxTokens": 64000,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
       }
     },
     {
@@ -80936,7 +81829,7 @@
       "api": "anthropic-messages",
       "values": {
         "contextWindow": 200000,
-        "maxTokens": 64000,
+        "maxTokens": 32000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "budget",
@@ -80958,7 +81851,7 @@
       "api": "anthropic-messages",
       "values": {
         "contextWindow": 200000,
-        "maxTokens": 64000,
+        "maxTokens": 32000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "anthropic-budget-effort",
@@ -81147,7 +82040,7 @@
       "api": "anthropic-messages",
       "values": {
         "contextWindow": 1000000,
-        "maxTokens": 128000,
+        "maxTokens": 64000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "anthropic-adaptive",
@@ -81367,7 +82260,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 256000,
-        "maxTokens": 64000,
+        "maxTokens": 32000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -81385,7 +82278,7 @@
       "key": "zenmux/openai-completions/bytedance/doubao-seed-2.0-code",
       "provider": "zenmux",
       "id": "bytedance/doubao-seed-2.0-code",
-      "name": "Doubao-Seed-2.0-Code",
+      "name": "Doubao Seed 2.0 Code",
       "api": "openai-completions",
       "values": {
         "contextWindow": 256000,
@@ -81411,7 +82304,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 256000,
-        "maxTokens": 64000,
+        "maxTokens": 32000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -81433,7 +82326,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 256000,
-        "maxTokens": 64000,
+        "maxTokens": 32000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -81455,7 +82348,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 256000,
-        "maxTokens": 64000,
+        "maxTokens": 32000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -81553,6 +82446,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 256000,
+        "maxTokens": 32000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -81686,7 +82580,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 128000,
-        "maxTokens": 64000,
+        "maxTokens": 8000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -81701,7 +82595,7 @@
       "key": "zenmux/openai-completions/deepseek/deepseek-v3.2-exp",
       "provider": "zenmux",
       "id": "deepseek/deepseek-v3.2-exp",
-      "name": "DeepSeek-V3.2-Exp",
+      "name": "DeepSeek V3.2 Exp",
       "api": "openai-completions",
       "values": {
         "contextWindow": 163000,
@@ -81909,7 +82803,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048000,
-        "maxTokens": 64000,
+        "maxTokens": 65535,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -81930,8 +82824,17 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048000,
-        "maxTokens": 64000,
-        "reasoning": false
+        "maxTokens": 65535,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
       }
     },
     {
@@ -81942,7 +82845,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048000,
-        "maxTokens": 64000,
+        "maxTokens": 65535,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -81964,7 +82867,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048000,
-        "maxTokens": 64000,
+        "maxTokens": 65535,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -82049,7 +82952,17 @@
       "values": {
         "contextWindow": 1050000,
         "maxTokens": 65530,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
       }
     },
     {
@@ -82071,7 +82984,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048000,
-        "maxTokens": 64000,
+        "maxTokens": 65535,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -83144,7 +84057,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 204000,
-        "maxTokens": 64000,
+        "maxTokens": 128000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -83177,7 +84090,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 204000,
-        "maxTokens": 64000,
+        "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -83281,7 +84194,29 @@
       "name": "MiniMax-M3",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1048576,
+        "contextWindow": 1000000,
+        "maxTokens": 512000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "zenmux/openai-completions/minimax/minimax-m3.1-flash",
+      "provider": "zenmux",
+      "id": "minimax/minimax-m3.1-flash",
+      "name": "MiniMax-M3.1-Flash",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
         "maxTokens": 512000,
         "reasoning": true,
         "thinkingConfig": {
@@ -83611,7 +84546,18 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 400000,
-        "reasoning": false
+        "maxTokens": 128000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
       }
     },
     {
@@ -83682,7 +84628,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 400000,
-        "maxTokens": 64000,
+        "maxTokens": 128000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -83715,7 +84661,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 272000,
-        "maxTokens": 64000,
+        "maxTokens": 128000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -83799,7 +84745,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 400000,
-        "maxTokens": 64000,
+        "maxTokens": 128000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -83832,7 +84778,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 272000,
-        "maxTokens": 64000,
+        "maxTokens": 128000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -83853,7 +84799,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 272000,
-        "maxTokens": 64000,
+        "maxTokens": 100000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -83872,7 +84818,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 400000,
-        "maxTokens": 64000,
+        "maxTokens": 128000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -83905,7 +84851,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 272000,
-        "maxTokens": 64000,
+        "maxTokens": 128000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -84002,7 +84948,16 @@
       "values": {
         "contextWindow": 400000,
         "maxTokens": 128000,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
       }
     },
     {
@@ -84014,7 +84969,16 @@
       "values": {
         "contextWindow": 400000,
         "maxTokens": 128000,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
       }
     },
     {
@@ -84444,22 +85408,12 @@
       "key": "zenmux/openai-completions/qwen/qwen3-235b-a22b-thinking-2507",
       "provider": "zenmux",
       "id": "qwen/qwen3-235b-a22b-thinking-2507",
-      "name": "Qwen3 235B A22B Thinking 2507",
+      "name": "Qwen 3 235b A22B 2507 Thinking",
       "api": "openai-completions",
       "values": {
         "contextWindow": 256000,
         "maxTokens": 8192,
-        "reasoning": true,
-        "thinkingConfig": {
-          "mode": "effort",
-          "efforts": [
-            "minimal",
-            "low",
-            "medium",
-            "high"
-          ],
-          "requiresEffort": true
-        }
+        "reasoning": false
       }
     },
     {
@@ -84610,7 +85564,16 @@
       "values": {
         "contextWindow": 1020000,
         "maxTokens": 1020000,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
       }
     },
     {
@@ -84726,7 +85689,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1000000,
-        "maxTokens": 65536,
+        "maxTokens": 64000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -85047,8 +86010,18 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 256000,
-        "maxTokens": 64000,
-        "reasoning": false
+        "maxTokens": 256000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
       }
     },
     {

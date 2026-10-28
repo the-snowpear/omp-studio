@@ -71,7 +71,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function mapAskDialogValue(
+export function mapAskDialogValue(
 	value: unknown,
 	questions: ExtensionAskDialogQuestion[],
 	acceptImages = false,
@@ -108,6 +108,12 @@ function mapAskDialogValue(
 		if (customInput !== undefined && (typeof customInput !== "string" || customInput.trim().length === 0)) {
 			throw new StudioInteractionError("INVALID_ARGUMENT", "Ask interaction returned an invalid custom input");
 		}
+		if (
+			raw.noteOption !== undefined &&
+			(customInput !== undefined || !raw.selectedOptions.includes(raw.noteOption))
+		) {
+			throw new StudioInteractionError("INVALID_ARGUMENT", "The note must belong to a selected option");
+		}
 		mapped.push({
 			id: question.id,
 			question: question.question,
@@ -116,6 +122,7 @@ function mapAskDialogValue(
 			selectedOptions: raw.selectedOptions as string[],
 			...(typeof customInput === "string" ? { customInput } : {}),
 			...(typeof raw.note === "string" ? { note: raw.note } : {}),
+			...(typeof raw.noteOption === "string" ? { noteOption: raw.noteOption } : {}),
 			...(raw.customInputImages
 				? { customInputImages: raw.customInputImages as import("@oh-my-pi/pi-ai").ImageContent[] }
 				: {}),
@@ -212,6 +219,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 					commandId: this.commandId,
 					title,
 					...(placeholder === undefined ? {} : { placeholder }),
+					...(dialogOptions?.secret === true ? { secret: true } : {}),
 				}),
 			dialogOptions,
 		);

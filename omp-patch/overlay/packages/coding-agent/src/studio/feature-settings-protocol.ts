@@ -17,6 +17,17 @@ export const FEATURE_SETTING_KEYS = [
 	"prewalk.autoTarget",
 	"async.widgets",
 	"computer.backgroundFallback",
+	"tools.restrictedFolders",
+	"extensionHandlers.modeControl",
+	"recap.enabled",
+	"recap.idleSeconds",
+	"compaction.idleEnabled",
+	"compaction.idleThresholdTokens",
+	"compaction.idleTimeoutSeconds",
+	"gc.autoCompress",
+	"session.worktreeScope",
+	"stt.enabled",
+	"stt.language",
 ] as const;
 export type FeatureSettingKey = (typeof FEATURE_SETTING_KEYS)[number];
 export type FeatureSettingValue =

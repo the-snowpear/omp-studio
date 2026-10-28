@@ -1,15 +1,16 @@
 import { CONVERSATION_LIMITS } from "@omp-studio/studio-protocol";
 export const CONVERSATION_VIEW_CHANNEL = "omp-studio:chrome:set-conversation-view-state";
-export interface ConversationViewState { runtimeEpoch: number; visibleSessionIds: readonly string[] }
+export interface ConversationViewState { runtimeEpoch: number; visibleSessionIds: readonly string[]; blockedSessionIds?: readonly string[] }
 export function parseConversationViewState(value: unknown): ConversationViewState | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
-  if (Object.keys(raw).length !== 2 || !Number.isSafeInteger(raw.runtimeEpoch) || Number(raw.runtimeEpoch) <= 0
+  if (Object.keys(raw).some(key => !["runtimeEpoch", "visibleSessionIds", "blockedSessionIds"].includes(key)) || !Number.isSafeInteger(raw.runtimeEpoch) || Number(raw.runtimeEpoch) <= 0
     || !Array.isArray(raw.visibleSessionIds) || raw.visibleSessionIds.length > 8
     || raw.visibleSessionIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS)) return undefined;
-  return { runtimeEpoch: raw.runtimeEpoch as number, visibleSessionIds: [...new Set(raw.visibleSessionIds as string[])] };
+  if (raw.blockedSessionIds !== undefined && (!Array.isArray(raw.blockedSessionIds) || raw.blockedSessionIds.length > 8 || raw.blockedSessionIds.some(id => typeof id !== "string" || id.length > CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS))) return undefined;
+  return { runtimeEpoch: raw.runtimeEpoch as number, visibleSessionIds: [...new Set(raw.visibleSessionIds as string[])], ...(raw.blockedSessionIds === undefined ? {} : { blockedSessionIds: [...new Set(raw.blockedSessionIds as string[])] }) };
 }
-type Controller = { epoch: () => number | undefined; setVisibleSessions: (ids: ReadonlySet<string> | undefined) => void };
+type Controller = { epoch: () => number | undefined; setVisibleSessions: (ids: ReadonlySet<string> | undefined) => void; updateOwner?: (state: { known: boolean; visibleSessionIds: readonly string[]; blockedSessionIds: readonly string[] }) => void };
 type View = { visible: boolean; state?: ConversationViewState };
 /** Window truth and Renderer interest are combined before choosing a policy. */
 export class ConversationViews {
@@ -36,13 +37,18 @@ export class ConversationViews {
     for (const [controller, previous] of this.#controllers) {
       const epoch = controller.epoch();
       const visible = new Set<string>();
+      const blocked = new Set<string>();
+      let ownerKnown = true;
       for (const view of this.#windows.values()) if (view.visible && view.state !== undefined && view.state.runtimeEpoch === epoch) {
         for (const id of view.state.visibleSessionIds) visible.add(id);
+        if (view.state.blockedSessionIds === undefined) ownerKnown = false;
+        for (const id of view.state.blockedSessionIds ?? []) blocked.add(id);
       }
-      const signature = `${epoch}:${legacy ? "legacy" : [...visible].sort().join("\u0000")}`;
+      const signature = `${epoch}:${legacy ? "legacy" : [...visible].sort().join("\u0000")}:${ownerKnown}:${[...blocked].sort().join("\u0000")}`;
       if (signature === previous) continue;
       this.#controllers.set(controller, signature);
       controller.setVisibleSessions(legacy ? undefined : visible);
+      controller.updateOwner?.({ known: !legacy && ownerKnown, visibleSessionIds: [...visible], blockedSessionIds: [...blocked] });
     }
   }
 }

@@ -56,7 +56,7 @@ function parseBtwError(value: unknown, path: string): BtwError {
  */
 export function parseBtwSnapshot(value: unknown, path = "$snapshot"): BtwSnapshot {
   const input = record(value, path);
-  exactKeys(input, ["ephemeralId", "status", "text", "copy", "error", "sessionId", "topicId", "question"], path);
+  exactKeys(input, ["ephemeralId", "status", "text", "copy", "error", "sessionId", "topicId", "question", "title"], path);
   for (const key of ["sessionId", "topicId"] as const) if (input[key] !== undefined) boundedNonEmptyString(input[key], path + "." + key, BTW_ID_MAX_CHARS);
   if (input.question !== undefined) boundedString(input.question, path + ".question", 65536);
   boundedNonEmptyString(input.ephemeralId, `${path}.ephemeralId`, BTW_ID_MAX_CHARS);

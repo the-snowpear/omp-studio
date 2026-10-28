@@ -1,3 +1,5 @@
+import type { SessionOwnerState } from "@omp-studio/studio-protocol";
+import type { ContextViewOperation, ContextViewResultMap } from "@omp-studio/studio-protocol";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import {
@@ -321,6 +323,19 @@ export class StudioBridgeClient {
 
   messagesCursor(): OpaqueCursor | undefined {
     return this.#projection.messagesCursor();
+  }
+
+  async updateOwner(state: SessionOwnerState): Promise<void> {
+    const snapshot = this.#projection.snapshot();
+    if (this.#state !== "ready" || !snapshot || this.#runtimeEpoch === undefined) return;
+    await this.invoke({ type: "studio.request", requestId: (this.options.createRequestId ?? randomUUID)() as RequestId, runtimeEpoch: this.#runtimeEpoch, operation: { kind: "session.owner.update", sessionId: snapshot.sessionId, state } });
+  }
+
+  async readContext<K extends ContextViewOperation["kind"]>(operation: Extract<ContextViewOperation, { kind: K }>): Promise<ContextViewResultMap[K]> {
+    if (this.#state !== "ready" || this.#runtimeEpoch === undefined) throw new StudioHostError("OUTCOME_UNKNOWN", "Context unavailable");
+    const receipt = await this.invoke({ type: "studio.request", requestId: (this.options.createRequestId ?? randomUUID)() as RequestId, runtimeEpoch: this.#runtimeEpoch, operation });
+    if (receipt.status !== "completed") throw new StudioHostError(receipt.error?.code ?? "OUTCOME_UNKNOWN", receipt.error?.message ?? "Context read failed");
+    return receipt.result as ContextViewResultMap[K];
   }
 
   async requestCommandManifest(): Promise<OperatorCommandManifest> {

@@ -36,7 +36,16 @@ export interface AccountResetStatus {
 	eligible?: boolean;
 	credits: AccountResetCredit[];
 }
+export interface AccountRoutingPolicy {
+	priority: number;
+	reservePct: number;
+	reserveSource: "global" | "override";
+	state: "eligible" | "inside-reserve" | "exhausted" | "unknown";
+	remainingPct?: number;
+	reclaimAbovePct?: number;
+}
 export interface StudioAccountStatus {
+	policy?: AccountRoutingPolicy;
 	id: string;
 	provider: string;
 	label: string;
@@ -161,6 +170,7 @@ export function validateAccountStatus(value: unknown): asserts value is AccountS
 			"limits",
 			"reportedAt",
 			"resets",
+			"policy",
 		]);
 		for (const key of ["id", "provider", "label"]) text(row[key]);
 		optional(row, ["organization"], text);

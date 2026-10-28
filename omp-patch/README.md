@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The development Runtime pin is `can1357/oh-my-pi` `v18.12.6` at commit `45c35e40c46166dc726ccc52f5d27f40f2449f99` (Runtime `18.12.6-studio.1`). See the [18.12.6 migration report](../docs/migrations/omp-18.12.6.md); the previous pin is documented in the [18.10.4 report](../docs/migrations/omp-18.10.4.md).
+The development Runtime pin is `can1357/oh-my-pi` `v18.13.2` at commit `e996e1c7ac476f60e02b8ed9764cf30fa8c00a8e` (Runtime `18.13.2-studio.10`). See the [18.13.2 migration report](../docs/migrations/omp-18.13.2.md). The upgrade baseline was `18.12.6-studio.9`; the [18.12.6 report](../docs/migrations/omp-18.12.6.md) records its original migration, not its later patchset revisions.
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
@@ -33,7 +33,7 @@ The overlay is ordinary tracked source in this repository. Editing it is an ordi
 
 ## Windows build toolchain
 
-The v18.12.6 Windows bytecode bundle uses Bun 1.4.2 (unchanged since v18.10.4). Set `BUN_EXE` to a separately installed 1.4.2 executable before building; the global Bun installation need not change. Bun 1.3.14 hit an internal compile assertion for the earlier 18.3.0 bundle; use the validated 1.4.2 build runtime. Use the upstream-pinned Rust `nightly-2026-10-06` toolchain. Release signing uses the existing GitHub Environment; local development keys are not release identities.
+The v18.13.2 Windows bytecode bundle uses the upstream-pinned Bun **1.4.4**, including its certificate/Brotli fixes. Set `BUN_EXE` to a separately installed 1.4.4 executable before building; the global Bun installation need not change. Use the upstream-pinned Rust `nightly-2026-10-06` toolchain. Release signing uses the existing GitHub Environment; the isolated local `canary` test artifact is not a release identity and is not installed automatically.
 
 ## Working loop
 

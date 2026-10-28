@@ -1,9 +1,11 @@
 import { useEffect, type RefObject } from "react";
 import type { ConversationIdentity } from "./conversationHost";
 
-export type ConversationViewState = { runtimeEpoch: number; visibleSessionIds: readonly string[] };
+export type ConversationViewState = { runtimeEpoch: number; visibleSessionIds: readonly string[]; blockedSessionIds?: readonly string[] };
 export class ConversationViewLeases {
   readonly #leases = new Map<object, { epoch: number; id: string }>();
+  readonly #blockers = new Map<object, { epoch: number; id: string }>();
+  #ownerKnown = false;
   #epoch: number | undefined;
   #scheduled = false;
   constructor(readonly report: (state: ConversationViewState) => void) {}
@@ -13,6 +15,11 @@ export class ConversationViewLeases {
     this.#leases.set(token, { epoch, id }); this.#schedule();
     return () => { this.#leases.delete(token); this.#schedule(); };
   }
+  setOwnerKnown(): void { this.#ownerKnown = true; this.#schedule(); }
+  block(epoch: number, id: string): () => void {
+    const token = {}; this.#blockers.set(token, { epoch, id }); this.#schedule();
+    return () => { this.#blockers.delete(token); this.#schedule(); };
+  }
   #schedule(): void {
     if (this.#scheduled) return;
     this.#scheduled = true;
@@ -21,7 +28,8 @@ export class ConversationViewLeases {
       const epoch = this.#epoch;
       if (epoch === undefined) return;
       const ids = [...new Set([...this.#leases.values()].filter((lease) => lease.epoch === epoch).map((lease) => lease.id))];
-      if (ids.length <= 8) this.report({ runtimeEpoch: epoch, visibleSessionIds: ids });
+      const blocked = [...new Set([...this.#blockers.values()].filter(lease => lease.epoch === epoch).map(lease => lease.id))];
+      if (ids.length <= 8 && blocked.length <= 8) this.report({ runtimeEpoch: epoch, visibleSessionIds: ids, ...(this.#ownerKnown ? { blockedSessionIds: blocked } : {}) });
     });
   }
 }

@@ -1,0 +1,15 @@
+.context-inspector-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgb(0 0 0 / .38); display: grid; place-items: center; padding: 20px; }
+.context-inspector { width: min(1120px, 100%); height: min(820px, 90dvh); min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 20px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 16px 60px rgb(0 0 0 / .24); }
+.context-inspector header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.context-inspector h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; }
+.context-inspector header p { margin: 0; }
+.context-inspector-summary { font-variant-numeric: tabular-nums; margin: 0; }
+.context-inspector-controls { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr); gap: 12px; }
+.context-inspector-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(180px, 30%) minmax(0, 1fr); gap: 16px; }
+.context-inspector-split aside, .context-inspector-split article { min-width: 0; min-height: 0; overflow: auto; }
+.context-inspector-split ul { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
+.context-entry { display: grid; gap: 6px; width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: transparent; color: inherit; cursor: pointer; }
+.context-entry.active { border-color: var(--accent); background: var(--accent-soft); }
+.context-entry span, .context-entry small { color: var(--muted); overflow-wrap: anywhere; }
+.context-inspector pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font: 12px/1.65 var(--font-mono, monospace); }
+@media (max-width: 620px) { .context-inspector-backdrop { padding: 8px; } .context-inspector { padding: 14px; height: 95dvh; } .context-inspector-controls { grid-template-columns: 1fr; } .context-inspector-split { grid-template-columns: 1fr; grid-template-rows: minmax(110px, 30%) minmax(0, 1fr); } }

@@ -20,7 +20,7 @@ export class StudioUpgradeService {
 			case "btw.history.read":
 				return this.btw.historyRead(operation.topicId);
 			case "btw.followUp":
-				return this.btw.followUp(operation.topicId, operation.question);
+				return this.btw.followUp(operation.topicId, operation.question, operation.images);
 			case "session.models.mentions": {
 				const scoped = this.session.scopedModels.map(row => row.model);
 				const models = scoped.length ? scoped : this.session.modelRegistry.getAvailable();

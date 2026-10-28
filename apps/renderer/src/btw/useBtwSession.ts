@@ -52,7 +52,7 @@ export interface BtwSessionApi {
   readonly pending: boolean;
   readonly error: string | undefined;
   readonly notice: string | undefined;
-  ask(question: string, newTopic?: boolean): Promise<boolean>;
+  ask(question: string, newTopic?: boolean, images?: import("@omp-studio/client-contract").PromptImageInput[], command?: { name: string; arguments: string }): Promise<boolean>;
   abort(): Promise<void>;
   branch(): Promise<void>;
   copy(): Promise<void>;
@@ -191,7 +191,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   );
 
   const ask = useCallback(
-    async (text: string, forceNewTopic = false): Promise<boolean> => {
+    async (text: string, forceNewTopic = false, images?: import("@omp-studio/client-contract").PromptImageInput[], command?: { name: string; arguments: string }): Promise<boolean> => {
       const trimmed = text.trim();
       if (trimmed.length === 0) {
         setError("先写下要问的问题");
@@ -226,13 +226,13 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
         if (!forceNewTopic && selectedTopicId && historyAvailable && input.client) {
           const previous = snapshot;
           if (previous?.status !== "completed") throw new Error(tRef.current("runtimeUpgrade.btwFollowNeedsCompleted"));
-          const outcome = await invokeUpgrade(input.client, "btw.followUp", { topicId: selectedTopicId, question: trimmed });
+          const outcome = await invokeUpgrade(input.client, "btw.followUp", { topicId: selectedTopicId, question: trimmed, ...(images?.length ? { images } : {}) });
           if (generation !== selectionGeneration.current) return false;
           if (previous && turns[turns.length - 1]?.answer !== previous.text) setTurns(rows => [...rows, { question: previous.question ?? question, answer: previous.text, status: "complete", createdAt: Date.now(), updatedAt: Date.now() }]);
           setBranchToken(null); setHistorySnapshot(null); expectedRoundRef.current = outcome.ephemeralId; setStartedAt(Date.now());
           return true;
         }
-        const outcome = await dispatch<BtwAskOutcome>("btw.ask", { question: trimmed });
+        const outcome = await dispatch<BtwAskOutcome>("btw.ask", { question: trimmed, ...(images?.length ? { images } : {}), ...(command ? { command } : {}) });
         if (generation !== selectionGeneration.current) return false;
         if (forceNewTopic) setTurns([]);
         setSelectedTopicId(historyAvailable ? outcome.ephemeralId : null);

@@ -60,10 +60,12 @@ describe("WP-034 StudioTreeService", () => {
 			resumeAfterAskReanswer: () => resumed++,
 			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
 		} as unknown as AgentSession;
-		const result = await new StudioTreeService(session, new StudioScriptedInteractionPort(["option:1"])).navigate(
-			"cmd-1",
-			{ targetId: "ask-result" },
-		);
+		const result = await new StudioTreeService(
+			session,
+			new StudioScriptedInteractionPort([
+				{ results: [{ id: "q1", selectedOptions: ["B"], note: "Keep this choice", noteOption: "B" }] },
+			]),
+		).navigate("cmd-1", { targetId: "ask-result" });
 		expect(result).toMatchObject({ askReanswerCommitted: true, leafId: "leaf" });
 		expect(resumed).toBe(1);
 	});
@@ -86,11 +88,12 @@ describe("WP-034 StudioTreeService", () => {
 		expect(result).toMatchObject({ cancelled: true, askReanswerCommitted: false });
 	});
 
-	test("an empty single-question multi-select is treated as cancellation", async () => {
+	test("an empty single-question multi-select commits a select-none answer", async () => {
 		let navigateCalls = 0;
 		const session = {
-			navigateTree: async () => {
-				navigateCalls += 1;
+			navigateTree: async (_target: string, options: Record<string, unknown>) => {
+				navigateCalls++;
+				if (options.reanswerAskResult) return { cancelled: false, askReanswerCommitted: true };
 				return {
 					cancelled: false,
 					reopenAsk: {
@@ -99,13 +102,15 @@ describe("WP-034 StudioTreeService", () => {
 					},
 				};
 			},
+			resumeAfterAskReanswer: () => {},
 			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
 		} as unknown as AgentSession;
-		const result = await new StudioTreeService(session, new StudioScriptedInteractionPort([[]])).navigate("cmd-1", {
-			targetId: "ask-result",
-		});
-		expect(result).toMatchObject({ cancelled: true, askReanswerCommitted: false });
-		expect(navigateCalls).toBe(1);
+		const result = await new StudioTreeService(
+			session,
+			new StudioScriptedInteractionPort([{ results: [{ id: "q1", selectedOptions: [] }] }]),
+		).navigate("cmd-1", { targetId: "ask-result" });
+		expect(result).toMatchObject({ cancelled: false, askReanswerCommitted: true });
+		expect(navigateCalls).toBe(2);
 	});
 
 	test("fails closed with recoverable Ask details when no remote interaction port is attached", async () => {

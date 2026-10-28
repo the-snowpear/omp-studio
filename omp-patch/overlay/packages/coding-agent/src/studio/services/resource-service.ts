@@ -1,3 +1,7 @@
+import { listLocalFiles } from "../../internal-urls/local-protocol";
+import { acquireFileLock } from "@oh-my-pi/pi-utils";
+import { writeFileAtomically } from "../../utils/atomic-file";
+import type { LocalResourceOperation } from "../local-resources-protocol";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import {
@@ -19,6 +23,50 @@ import {
 } from "../resources-protocol";
 export class StudioResourceService {
 	constructor(readonly session: AgentSession) {}
+	async local(operation: LocalResourceOperation): Promise<unknown> {
+		if (operation.sessionId !== this.session.sessionId || !this.session.studioToolSession)
+			throw Error("Local resources require the active session");
+		const context = sessionResolveContext(this.session.studioToolSession);
+		const options = LocalProtocolHandler.resolveOptions(context);
+		if (!options) throw Error("Session local resource mapping is unavailable");
+		if (operation.kind === "resource.local.list") {
+			const files = await listLocalFiles(options);
+			return {
+				files: files
+					.slice(0, 500)
+					.map(file => ({ name: file.name, uri: file.url, bytes: file.size, modifiedAt: file.mtimeMs })),
+				truncated: files.length > 500,
+			};
+		}
+		if (!operation.uri.startsWith("local://")) throw Error("Choose a session-local file");
+		const handler = new LocalProtocolHandler();
+		const located = await handler.locate(parseInternalUrl(operation.uri), context);
+		if (!located) throw Error("Local file no longer exists");
+		const lock = operation.kind === "resource.local.save" ? await acquireFileLock(located) : undefined;
+		try {
+			const stat = await fs.stat(located);
+			if (!stat.isFile() || stat.size > 512 * 1024)
+				throw Error("The text editor supports regular files up to 512 KiB");
+			const bytes = await fs.readFile(located);
+			if (bytes.includes(0)) throw Error("This local resource is binary");
+			const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+			const version = createHash("sha256").update(bytes).digest("hex");
+			if (operation.sessionId !== this.session.sessionId) throw Error("Session changed while opening local file");
+			if (operation.kind === "resource.local.open") return { uri: operation.uri, version, text };
+			if (version !== operation.version) throw Error("The local file changed; reopen it before saving");
+			if (
+				typeof operation.text !== "string" ||
+				Buffer.byteLength(operation.text) > 512 * 1024 ||
+				operation.text.includes("\0")
+			)
+				throw Error("Local text exceeds editor limits");
+			await writeFileAtomically(located, operation.text, stat.mode & 0o777);
+			return { saved: true, uri: operation.uri, version: createHash("sha256").update(operation.text).digest("hex") };
+		} finally {
+			lock?.release();
+		}
+	}
+
 	async read(operation: ResourceOperation): Promise<ResourcePage> {
 		validateResourceOperation(operation);
 		if (operation.sessionId !== this.session.sessionId || !this.session.studioToolSession)

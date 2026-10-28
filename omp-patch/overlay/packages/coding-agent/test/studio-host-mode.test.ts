@@ -31,6 +31,8 @@ function fakeSession(
 		isCompacting: false,
 		hasPostPromptWork: false,
 		getVibeModeState: () => undefined,
+		getPlanModeState: () => undefined,
+		getGoalModeState: () => undefined,
 		prompt: async () => {},
 		compact: async () => {},
 		resetSessionContext: async () => {},

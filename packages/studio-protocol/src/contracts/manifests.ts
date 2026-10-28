@@ -34,6 +34,7 @@ export type CommandImplementation =
 export type CommandPresentation = "native" | "generic-form" | "terminal";
 
 export interface OperatorCommandManifestEntry {
+  side?: boolean;
   id: string;
   name: string;
   aliases: string[];

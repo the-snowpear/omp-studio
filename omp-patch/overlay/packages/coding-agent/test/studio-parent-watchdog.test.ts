@@ -128,6 +128,8 @@ test("losing the Host aborts the turn and shuts down without draining", async ()
 		isCompacting: false,
 		hasPostPromptWork: false,
 		getVibeModeState: () => undefined,
+		getPlanModeState: () => undefined,
+		getGoalModeState: () => undefined,
 		prompt: async () => {},
 		compact: async () => {},
 		resetSessionContext: async () => {},

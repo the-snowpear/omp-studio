@@ -191,5 +191,6 @@ export * from "./provider-yaml-draft.js";
 export * from "./conversation.js";
 export * from "./git.js";
 
+export type { ContextViewIndex, ContextViewResultMap, ContextViewOperation, ContextCategoryId, ContextEntrySummary } from "@omp-studio/studio-protocol";
 export type { UpgradeOperation, UpgradeResultMap, BtwTopicSummary, BtwHistoryTurn, ForeignSessionSummary, ForeignSource, RuntimeAuthProvider, ModelMentionInfo } from "@omp-studio/studio-protocol";
 export * from "./model-adaptation.js";

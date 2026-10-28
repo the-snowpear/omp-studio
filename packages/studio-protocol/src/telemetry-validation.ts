@@ -104,7 +104,7 @@ function parseContext(value: unknown, path: string): NonNullable<SessionTelemetr
 
 export function parseSessionTelemetrySnapshot(value: unknown, path = "$telemetry"): SessionTelemetrySnapshot {
   const input = record(value, path);
-  exactKeys(input, ["sessionId", "capturedAt", "tokens", "lastCompletedTurn", "context", "unavailableReason", "advisorCost", "generationTps", "requestedModel", "servedModel"], path);
+  exactKeys(input, ["sessionId", "capturedAt", "tokens", "lastCompletedTurn", "context", "unavailableReason", "advisorCost", "generationTps", "requestedModel", "servedModel", "treeCost", "budget", "editRejections"], path);
   nonEmptyString(input.sessionId, `${path}.sessionId`);
   nonEmptyString(input.capturedAt, `${path}.capturedAt`);
   for (const key of ["advisorCost", "generationTps"]) if (input[key] !== undefined) finiteNonNegative(input[key], path + "." + key);

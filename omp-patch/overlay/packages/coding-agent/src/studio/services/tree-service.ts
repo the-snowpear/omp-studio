@@ -1,8 +1,12 @@
+import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { shiftImageMarkers } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
+import { renderAttachmentSourceNotice } from "../../session/attachment-source-notice";
 import { expandModelMentionTags, type ModelMention } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { AgentSession } from "../../session/agent-session";
 import type { SessionTreeNode } from "../../session/session-entries";
-import type { AskToolInput } from "../../tools/ask";
+import { formatQuestionResult, formatSingleQuestionResponse, type AskToolInput } from "../../tools/ask";
+import { mapAskDialogValue } from "../remote-extension-ui";
 import type { AskToolDetails, QuestionResult } from "@oh-my-pi/pi-tui/tools/ask";
 import type { StudioInteractionPort } from "./interaction-port";
 
@@ -156,12 +160,59 @@ export class StudioTreeService {
 		commandId: string,
 		questions: AskToolInput["questions"],
 	): Promise<AgentToolResult<AskToolDetails> | undefined> {
-		const results: QuestionResult[] = [];
-		for (const question of questions) {
-			const answer = await this.#answerQuestion(commandId, question, questions.length > 1);
-			if (answer === undefined) return undefined;
-			results.push(answer);
-		}
+		const payload = await this.interaction!.ask({
+			commandId,
+			title: "Re-answer",
+			acceptImages: true,
+			questions: questions.map(question => ({
+				id: question.id,
+				question: question.question,
+				options: question.options.map((option, index) => ({ id: `option:${index}`, ...option })),
+				multiple: question.multi === true,
+			})),
+		});
+		if (payload === undefined) return undefined;
+		const mapped = mapAskDialogValue(payload, questions, true);
+		if (mapped.kind !== "submit") return undefined;
+		const images: ImageContent[] = [];
+		const results: QuestionResult[] = mapped.results.map(answer => {
+			const customOffset = images.length;
+			images.push(...(answer.customInputImages ?? []));
+			const noteOffset = images.length;
+			images.push(...(answer.noteImages ?? []));
+			return {
+				id: answer.id,
+				question: answer.question,
+				options: answer.options,
+				multi: answer.multi,
+				selectedOptions: answer.selectedOptions,
+				...(answer.customInput === undefined
+					? {}
+					: {
+							customInput: shiftImageMarkers(
+								answer.customInput,
+								customOffset,
+								answer.customInputImages?.length ?? 0,
+							),
+						}),
+				...(answer.note === undefined
+					? {}
+					: { note: shiftImageMarkers(answer.note, noteOffset, answer.noteImages?.length ?? 0) }),
+				...(answer.noteOption === undefined ? {} : { noteOption: answer.noteOption }),
+			};
+		});
+		if (
+			results.length === 1 &&
+			!results[0]!.multi &&
+			!results[0]!.selectedOptions.length &&
+			results[0]!.customInput === undefined &&
+			!images.length
+		)
+			return undefined;
+		const imageBlocks: AgentToolResult<AskToolDetails>["content"] = images.flatMap((image, index) => {
+			const notice = renderAttachmentSourceNotice(image, index + 1, { askAnswer: true });
+			return notice ? [{ type: "text" as const, text: notice.content }, image] : [image];
+		});
 		if (results.length === 1) {
 			const answer = results[0]!;
 			const details: AskToolDetails = {
@@ -170,82 +221,17 @@ export class StudioTreeService {
 				multi: answer.multi,
 				selectedOptions: answer.selectedOptions,
 				...(answer.customInput === undefined ? {} : { customInput: answer.customInput }),
+				...(answer.note ? { note: answer.note } : {}),
+				...(answer.noteOption ? { noteOption: answer.noteOption } : {}),
 			};
-			return { content: [{ type: "text", text: formatSingleAnswer(answer) }], details };
+			return { content: [{ type: "text", text: formatSingleQuestionResponse(answer) }, ...imageBlocks], details };
 		}
 		return {
-			content: [{ type: "text", text: `User answers:\n${results.map(formatQuestionAnswer).join("\n")}` }],
+			content: [
+				{ type: "text", text: `User answers:\n${results.map(formatQuestionResult).join("\n")}` },
+				...imageBlocks,
+			],
 			details: { results },
 		};
 	}
-
-	async #answerQuestion(
-		commandId: string,
-		question: AskToolInput["questions"][number],
-		allowEmpty: boolean,
-	): Promise<QuestionResult | undefined> {
-		const options = question.options.map((option, index) => ({
-			id: `option:${index}`,
-			label: option.label,
-			...(option.description === undefined ? {} : { description: option.description }),
-		}));
-		const customId = "custom-input";
-		let selectedIds: string[] = [];
-		if (options.length > 0) {
-			const selected = await this.interaction!.select({
-				commandId,
-				title: question.question,
-				options: [...options, { id: customId, label: "Other (type your own)" }],
-				multiple: question.multi === true,
-			});
-			if (selected === undefined) return undefined;
-			selectedIds = typeof selected === "string" ? [selected] : selected;
-			if (!question.multi && selectedIds.length !== 1) {
-				throw new StudioTreeError("INVALID_ARGUMENT", "Ask interaction returned multiple single-choice answers");
-			}
-			if (selectedIds.some(id => id !== customId && !options.some(option => option.id === id))) {
-				throw new StudioTreeError("INVALID_ARGUMENT", "Ask interaction returned an unknown option");
-			}
-		}
-		let customInput: string | undefined;
-		if (options.length === 0 || selectedIds.includes(customId)) {
-			customInput = await this.interaction!.input({
-				commandId,
-				title: question.question,
-				placeholder: "Type your answer",
-			});
-			if (customInput === undefined) return undefined;
-		}
-		const selectedOptions = selectedIds
-			.filter(id => id !== customId)
-			.map(id => options.find(option => option.id === id)!.label);
-		if (!allowEmpty && selectedOptions.length === 0 && customInput === undefined) return undefined;
-		return {
-			id: question.id,
-			question: question.question,
-			options: options.map(option => option.label),
-			multi: question.multi ?? false,
-			selectedOptions,
-			...(customInput === undefined ? {} : { customInput }),
-		};
-	}
-}
-
-function formatQuestionAnswer(result: QuestionResult): string {
-	if (result.customInput !== undefined) return `${result.id}: "${result.customInput}"`;
-	if (result.multi) return `${result.id}: [${result.selectedOptions.join(", ")}]`;
-	return `${result.id}: ${result.selectedOptions[0] ?? "(cancelled)"}`;
-}
-
-function formatSingleAnswer(result: QuestionResult): string {
-	const parts: string[] = [];
-	if (result.selectedOptions.length > 0) {
-		parts.push(
-			result.multi
-				? `User selected: ${result.selectedOptions.join(", ")}`
-				: `User selected: ${result.selectedOptions[0]}`,
-		);
-	}
-	if (result.customInput !== undefined) parts.push(`User provided custom input: ${result.customInput}`);
-	return parts.join("\n");
 }

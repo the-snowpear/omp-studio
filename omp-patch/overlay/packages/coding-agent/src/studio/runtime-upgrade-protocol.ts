@@ -1,10 +1,11 @@
+import type { ImageContent } from "@oh-my-pi/pi-ai";
 /** Typed capabilities added with the OMP 18.2 migration. Kept wire-only. */
 export type ForeignSource = "claude" | "codex";
 export type RuntimeAuthProvider = "typesafe" | "exa" | "ollama-cloud";
 export type UpgradeOperation =
 	| { kind: "btw.history.list" }
 	| { kind: "btw.history.read"; topicId: string }
-	| { kind: "btw.followUp"; topicId: string; question: string }
+	| { kind: "btw.followUp"; topicId: string; question: string; images?: ImageContent[] }
 	| { kind: "session.models.mentions" }
 	| { kind: "session.import.list"; source: ForeignSource }
 	| { kind: "session.import.preview"; source: ForeignSource; sourceId: string }
@@ -43,6 +44,7 @@ export interface BtwHistoryTurn {
 }
 export interface BtwTopicSummary {
 	topicId: string;
+	title?: string;
 	question: string;
 	status: BtwHistoryTurn["status"];
 	updatedAt: number;
@@ -106,7 +108,7 @@ export function validateUpgradeOperation(value: unknown): asserts value is Upgra
 	const fields: Record<UpgradeOperation["kind"], string[]> = {
 		"btw.history.list": [],
 		"btw.history.read": ["topicId"],
-		"btw.followUp": ["topicId", "question"],
+		"btw.followUp": ["topicId", "question", "images"],
 		"session.models.mentions": [],
 		"session.import.list": ["source"],
 		"session.import.preview": ["source", "sourceId"],
@@ -118,6 +120,7 @@ export function validateUpgradeOperation(value: unknown): asserts value is Upgra
 	if (Object.keys(op).some(key => key !== "kind" && !fields[op.kind as UpgradeOperation["kind"]].includes(key)))
 		throw new Error("Unknown Runtime operation field");
 	for (const key of fields[op.kind as UpgradeOperation["kind"]]) {
+		if (key === "images") continue;
 		if ((key === "fallbackCwd" || key === "fallbackWorkspaceId") && op[key] === undefined) continue;
 		const text = op[key];
 		const limit = key === "question" ? 65536 : key === "apiKey" ? 16384 : key === "fallbackCwd" ? 4096 : 512;
@@ -184,7 +187,10 @@ export function validateUpgradeResult(kind: UpgradeOperation["kind"], value: unk
 	const checks: Record<UpgradeOperation["kind"], Check> = {
 		"btw.history.list": shape({
 			sessionId: short,
-			topics: array(shape({ topicId: short, question: short, status, updatedAt: number, turnCount: number }), 100),
+			topics: array(
+				shape({ topicId: short, question: short, "title?": short, status, updatedAt: number, turnCount: number }),
+				100,
+			),
 		}),
 		"btw.history.read": shape({
 			sessionId: short,

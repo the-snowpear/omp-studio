@@ -4,7 +4,10 @@ export const FEATURE_SETTING_KEYS = [
   "contextFiles.extra", "task.structured", "bash.gitGuard", "worktree.onStart",
   "worktree.onExit", "composer.predictions", "speech.speed", "tts.localSpeed",
   "gc.compress", "gc.compressAfterDays", "prewalk.auto", "prewalk.autoTarget",
-  "async.widgets", "computer.backgroundFallback",
+  "async.widgets", "computer.backgroundFallback", "tools.restrictedFolders",
+  "extensionHandlers.modeControl", "recap.enabled", "recap.idleSeconds",
+  "compaction.idleEnabled", "compaction.idleThresholdTokens", "compaction.idleTimeoutSeconds",
+  "gc.autoCompress", "session.worktreeScope", "stt.enabled", "stt.language",
 ] as const;
 export type FeatureSettingKey = (typeof FEATURE_SETTING_KEYS)[number];
 export type FeatureSettingValue = null | boolean | number | string | FeatureSettingValue[] | { [key: string]: FeatureSettingValue };

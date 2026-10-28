@@ -251,7 +251,7 @@ export interface DesktopRuntimeSessionPort {
    * (`resume`) or a fresh process (`fresh`). Increments the Runtime epoch.
    * On launch failure the port restores the previous session when possible.
    */
-  switchSession?(intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh" }): Promise<DesktopRuntimeSession | undefined>;
+  switchSession?(intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean }): Promise<DesktopRuntimeSession | undefined>;
   /**
    * Apply the tool approval mode across resident Runtimes (plan §5.3): the
    * active Runtime persists the mode to the OMP global configuration, every

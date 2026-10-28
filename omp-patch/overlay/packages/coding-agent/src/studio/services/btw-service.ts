@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { BtwHistoryStore, type BtwHistoryRecord, getBtwTurns } from "../../session/btw-history";
 import type { BtwTopicSummary } from "../runtime-upgrade-protocol";
-import type { AssistantMessage, Message } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, Message } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
 import btwUserPrompt from "../../prompts/system/btw-user.md" with { type: "text" };
 import { CONVERSATION_LIVE_COALESCE_INTERVAL_MS } from "./conversation-live-projector";
@@ -13,6 +13,7 @@ export type StudioBtwStatus = "running" | "completed" | "failed" | "aborted";
 export interface StudioBtwSnapshot {
 	sessionId?: string;
 	topicId?: string;
+	title?: string;
 	question?: string;
 	ephemeralId: string;
 	status: StudioBtwStatus;
@@ -30,6 +31,7 @@ export interface StudioBtwSessionPort {
 	};
 	runEphemeralTurn(args: {
 		promptText: string;
+		promptImages?: ImageContent[];
 		history?: readonly Message[];
 		conversationKey?: string;
 		onTextDelta?: (delta: string) => void;
@@ -63,6 +65,8 @@ interface StudioBtwRecord {
 	branchToken: string;
 	branchConsumed: boolean;
 	question: string;
+	images?: ImageContent[];
+	title?: string;
 	status: StudioBtwStatus;
 	text: string;
 	textBytes: number;
@@ -156,6 +160,7 @@ export class StudioBtwService {
 					return {
 						topicId: record.id,
 						question: record.question.slice(0, 512),
+						...(record.title ? { title: record.title.slice(0, 512) } : {}),
 						updatedAt: record.updatedAt,
 						status: turns[turns.length - 1]?.status ?? record.status,
 						turnCount: turns.length,
@@ -183,7 +188,7 @@ export class StudioBtwService {
 		};
 	}
 
-	async followUp(topicId: string, question: string) {
+	async followUp(topicId: string, question: string, images?: ImageContent[]) {
 		if (this.#isRunning()) throw new StudioBtwError("BUSY_STREAMING", "A BTW answer is running");
 		if (!question.trim() || question.length > 65536)
 			throw new StudioBtwError("INVALID_ARGUMENT", "Invalid BTW question");
@@ -201,7 +206,13 @@ export class StudioBtwService {
 		)
 			throw new StudioBtwError("COMMAND_BLOCKED", "Start a new topic: this conversation reached its history limit");
 		const history: Message[] = turns.flatMap(turn => [
-			{ role: "user" as const, content: turn.question, timestamp: turn.createdAt },
+			{
+				role: "user" as const,
+				content: turn.images?.length
+					? [{ type: "text" as const, text: turn.question }, ...turn.images]
+					: turn.question,
+				timestamp: turn.createdAt,
+			},
 			{
 				role: "assistant" as const,
 				content: [{ type: "text" as const, text: turn.answer }],
@@ -230,6 +241,8 @@ export class StudioBtwService {
 			branchToken: "",
 			branchConsumed: true,
 			question: question.trim(),
+			...(images?.length ? { images: [...images] } : {}),
+			...(prior.title ? { title: prior.title } : {}),
 			status: "running",
 			text: "",
 			textBytes: 0,
@@ -250,6 +263,7 @@ export class StudioBtwService {
 		if (!store || this.#storeSession !== record.originalSessionId) return Promise.resolve();
 		const turn = {
 			question: record.question,
+			...(record.images?.length ? { images: record.images } : {}),
 			answer: record.text,
 			status:
 				record.status === "completed"
@@ -265,7 +279,12 @@ export class StudioBtwService {
 		};
 		const data: BtwHistoryRecord = record.prior
 			? { ...record.prior, updatedAt: turn.updatedAt, followUps: [...(record.prior.followUps ?? []), turn] }
-			: { ...turn, id: record.topicId, leafId: record.originalLeafId };
+			: {
+					...turn,
+					id: record.topicId,
+					leafId: record.originalLeafId,
+					...(record.title ? { title: record.title } : {}),
+				};
 		this.#lastSaved = data;
 		this.#writes = this.#writes
 			.catch(() => {})
@@ -344,7 +363,11 @@ export class StudioBtwService {
 		return () => this.#listeners.delete(listener);
 	}
 
-	ask(question: string): { ephemeralId: string; branchToken: string; status: "running" } {
+	ask(
+		question: string,
+		images?: ImageContent[],
+		title?: string,
+	): { ephemeralId: string; branchToken: string; status: "running" } {
 		if (this.#saveError)
 			throw new StudioBtwError(
 				"COMMAND_BLOCKED",
@@ -365,6 +388,8 @@ export class StudioBtwService {
 			branchToken: this.#tokenGenerator(),
 			branchConsumed: false,
 			question: trimmed,
+			...(images?.length ? { images: [...images] } : {}),
+			...(title ? { title: title.slice(0, 512) } : {}),
 			status: "running",
 			text: "",
 			textBytes: 0,
@@ -470,6 +495,7 @@ export class StudioBtwService {
 				...(record.history ? { history: record.history } : {}),
 				conversationKey: record.conversationKey,
 				promptText: prompt.render(btwUserPrompt, { question: record.question }),
+				...(record.images?.length ? { promptImages: record.images } : {}),
 				signal: record.abortController.signal,
 				onTextDelta: delta => this.#append(record, delta),
 			});
@@ -526,6 +552,7 @@ export class StudioBtwService {
 		return {
 			sessionId: record.originalSessionId,
 			topicId: record.topicId,
+			...(record.title ? { title: record.title } : {}),
 			question: record.question,
 			ephemeralId: record.ephemeralId,
 			status: record.status,

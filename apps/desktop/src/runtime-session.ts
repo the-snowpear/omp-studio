@@ -438,13 +438,13 @@ export function createDesktopRuntimeSessionPort(
     return leaseStore;
   };
 
-  const workerPort = (resumeSessionId?: string, model?: string): DesktopRuntimeSessionPort => {
+  const workerPort = (resumeSessionId?: string, model?: string, noContextFiles?: boolean): DesktopRuntimeSessionPort => {
     const port =
       options.workerPortFactory?.({
         ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
         ...(model === undefined ? {} : { model }),
         nextRuntimeEpoch,
-      }) ?? createSingleDesktopRuntimeSessionPort(workerOptions, resumeSessionId, nextRuntimeEpoch, model);
+      }) ?? createSingleDesktopRuntimeSessionPort(workerOptions, resumeSessionId, nextRuntimeEpoch, model, noContextFiles);
     port.attachSessionSink?.((session) => {
       if (session !== undefined) {
         const snapshot = session.controller.publication()?.snapshot;
@@ -513,6 +513,7 @@ export function createDesktopRuntimeSessionPort(
     resumeSessionId?: string,
     launchWorkspace?: { workspaceId: string; cwd: string },
     model?: string,
+    noContextFiles?: boolean,
   ): Promise<DesktopRuntimeSession | undefined> => {
     const launchContext = context;
     const selected = launchWorkspace ?? workspace;
@@ -532,7 +533,7 @@ export function createDesktopRuntimeSessionPort(
     }
     await ensureCapacity();
     let lease: SessionLease | undefined;
-    const port = workerPort(resumeSessionId, model);
+    const port = workerPort(resumeSessionId, model, noContextFiles);
     try {
       if (resumeSessionId !== undefined) {
         lease = await getLeaseStore().acquire({ sessionId: resumeSessionId, ownerId });
@@ -548,7 +549,9 @@ export function createDesktopRuntimeSessionPort(
         throw new Error("Runtime Worker did not publish a ready Session snapshot");
       }
       if (resumeSessionId !== undefined && snapshot.sessionId !== resumeSessionId) {
-        throw new Error("Runtime Worker authenticated a different Session identity");
+        if (snapshot.resumedFromSessionId !== resumeSessionId && snapshot.continuationOf !== resumeSessionId) throw new Error("Runtime Worker authenticated a different Session identity");
+        await lease?.release();
+        lease = await getLeaseStore().acquire({ sessionId: snapshot.sessionId, ownerId });
       }
       if (lease === undefined) {
         lease = await getLeaseStore().acquire({ sessionId: snapshot.sessionId, ownerId });
@@ -1021,7 +1024,7 @@ export function createDesktopRuntimeSessionPort(
     switchSession(intent): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
         if (intent.kind === "resume") return await selectResident(intent.sessionId, intent.model);
-        return await launchWorker();
+        return await launchWorker(undefined, undefined, undefined, intent.noContextFiles);
       });
     },
     async applyApprovalMode(mode: ApprovalMode): Promise<{
@@ -1124,6 +1127,7 @@ function createSingleDesktopRuntimeSessionPort(
   initialResumeSessionId: string | undefined,
   nextRuntimeEpoch: () => number,
   initialModel?: string,
+  initialNoContextFiles?: boolean,
 ): DesktopRuntimeSessionPort {
   // POSIX Runtimes lead their own process group so stopping one also stops
   // the tool processes it started; Windows keeps the kill-based fallback.
@@ -1142,6 +1146,7 @@ function createSingleDesktopRuntimeSessionPort(
   let alive = false;
   let resumeSessionId: string | undefined = initialResumeSessionId;
   let resumeModel = initialModel;
+  let noContextFiles = initialNoContextFiles;
   /** Bumped on every launch so a late socket close cannot kill the next session. */
   let generation = 0;
   /** Public start/stop/rebind/switch must not overlap; overlapping kills the live Runtime. */
@@ -1408,6 +1413,7 @@ function createSingleDesktopRuntimeSessionPort(
 
     try {
       const extra = ["--cwd", selected.cwd];
+      if (noContextFiles) extra.push("--no-context-files");
       if (resumeModel !== undefined) extra.push("--model", resumeModel);
       if (resumeSessionId !== undefined) {
         extra.push("--resume", resumeSessionId);
@@ -1572,7 +1578,7 @@ function createSingleDesktopRuntimeSessionPort(
       });
     },
 
-    switchSession(intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh" }): Promise<DesktopRuntimeSession | undefined> {
+    switchSession(intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean }): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
         const previousResume = resumeSessionId;
         const previousModel = resumeModel;
@@ -1581,6 +1587,7 @@ function createSingleDesktopRuntimeSessionPort(
         await stopCurrent("replace");
         resumeSessionId = intent.kind === "resume" ? intent.sessionId : undefined;
         resumeModel = intent.kind === "resume" ? intent.model : undefined;
+        noContextFiles = intent.kind === "fresh" ? intent.noContextFiles : noContextFiles;
         try {
           const next = await launch();
           if (next !== undefined) {

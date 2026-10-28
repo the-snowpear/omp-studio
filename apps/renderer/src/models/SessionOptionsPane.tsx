@@ -1,3 +1,4 @@
+import { SessionBudgetPane } from "./SessionBudgetPane";
 import { AppSelect } from "../AppSelect";
 import {
   PREVIEW_SPEED,
@@ -362,6 +363,7 @@ export function SessionOptionsPane({
           </p>
         ) : null}
       </section>
+      <SessionBudgetPane client={client} sessionId={sessionId} available={available} visible={visible} />
       {confirm ? (
         <div
           className="session-options-confirm"

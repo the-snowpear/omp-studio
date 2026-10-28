@@ -9,9 +9,10 @@ import {
 	saveModelPreset,
 } from "../../config/model-presets";
 import type { AgentSession } from "../../session/agent-session";
-import { cfgProvidersCacheWarming } from "../../session/settings";
+import { cfgProvidersCacheWarming, cfgSessionWarnCost, cfgSessionMaxCost } from "../../session/settings";
 import type {
 	ModelPresetResult,
+	SessionBudgetState,
 	ModelPresetRow,
 	SessionOptionsOperation,
 	SessionSpeedState,
@@ -72,12 +73,53 @@ export class StudioSessionOptionsService {
 		};
 	}
 
+	budget(): SessionBudgetState {
+		const settings = this.session.settings;
+		return {
+			treeSpent: this.session.costGate?.spent ?? this.session.getSessionStats().cost,
+			warnCost: cfgSessionWarnCost.get(settings) ?? null,
+			maxCost: cfgSessionMaxCost.get(settings) ?? null,
+			limitReached: this.session.costGate?.check() !== undefined,
+			warnSource: cfgSessionWarnCost.provenance(settings),
+			maxSource: cfgSessionMaxCost.provenance(settings),
+		};
+	}
+
 	async execute(operation: SessionOptionsOperation): Promise<unknown> {
 		validateSessionOptionsOperation(operation);
 		const session = this.session;
 		const settings = session.settings;
 		if (operation.sessionId !== session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "The active session changed; reload its controls");
+		if (operation.kind === "session.budget.get") return this.budget();
+		if (operation.kind === "session.budget.clearOverride") {
+			cfgSessionWarnCost.clearOverride(settings);
+			cfgSessionMaxCost.clearOverride(settings);
+			return this.budget();
+		}
+		if (operation.kind === "session.budget.set") {
+			if (operation.scope !== "session" && operation.scope !== "global")
+				throw new SessionControlError("INVALID_ARGUMENT", "Choose a session or user budget scope");
+			for (const value of [operation.warnCost, operation.maxCost]) {
+				if (value !== null && (typeof value !== "number" || !Number.isFinite(value) || value <= 0))
+					throw new SessionControlError(
+						"INVALID_ARGUMENT",
+						"Cost thresholds must be positive USD amounts or unset",
+					);
+			}
+			if (operation.scope === "global") {
+				cfgSessionWarnCost.set(settings, operation.warnCost ?? undefined);
+				cfgSessionMaxCost.set(settings, operation.maxCost ?? undefined);
+				cfgSessionWarnCost.clearOverride(settings);
+				cfgSessionMaxCost.clearOverride(settings);
+				await settings.flush();
+			} else {
+				// null masks an inherited threshold for this session; undefined would merely clear the override.
+				settings.writeValue(cfgSessionWarnCost, operation.warnCost, "override");
+				settings.writeValue(cfgSessionMaxCost, operation.maxCost, "override");
+			}
+			return this.budget();
+		}
 		if (operation.kind === "session.speed.get") return this.speed();
 		if (operation.kind === "session.warming.get") return this.warming();
 		if (operation.kind === "session.speed.set") {

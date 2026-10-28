@@ -25,6 +25,7 @@ export interface BtwError {
 export interface BtwSnapshot {
   readonly sessionId?: string;
   readonly topicId?: string;
+  readonly title?: string;
   readonly question?: string;
   readonly ephemeralId: string;
   readonly status: BtwStatus;

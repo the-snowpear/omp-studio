@@ -2600,6 +2600,8 @@ export const en: LocaleDictionary = {
     "openGit": "Open Git Panel",
     "openPreview": "Open Preview",
     "openAgents": "Open Agents Panel",
+    "newWithoutContext": "New session · no context files",
+    "openContext": "Open Context Viewer",
     "openBtw": "Open BTW Panel",
     "settingsGeneral": "General Settings",
     "settingsInteraction": "Interaction Settings",

@@ -1,3 +1,4 @@
+import type { ContextViewOperation, ContextViewResultMap } from "@omp-studio/studio-protocol";
 import type { ModelAdaptationInput, ModelAdaptationResult, ModelCatalogRefreshResult } from "./model-adaptation.js";
 import type { WorkbenchOperation, WorkbenchResultMap } from "@omp-studio/studio-protocol";
 import type { PredictionQuery, PredictionResult } from "@omp-studio/studio-protocol";
@@ -92,7 +93,8 @@ import type {
 /** Empty input shape for queries that take no arguments. */
 export type EmptyInput = Readonly<Record<string, never>>;
 
-export interface QueryInputMap {
+type ContextViewQueryMap = { [K in ContextViewOperation["kind"]]: Omit<Extract<ContextViewOperation, { kind: K }>, "kind"> };
+export interface QueryInputMap extends ContextViewQueryMap {
   "prediction.query": PredictionQuery;
   "artifacts.text.read": { readonly artifactId: string };
   "artifacts.list": import("@omp-studio/studio-protocol").ArtifactListInput;
@@ -158,7 +160,7 @@ export interface QueryInputMap {
   "github.pr.checks": { readonly workspaceId: WorkspaceId; readonly number: number };
 }
 
-export interface QueryResultMap {
+export interface QueryResultMap extends ContextViewResultMap {
   "prediction.query": PredictionResult;
   "artifacts.text.read": import("@omp-studio/studio-protocol").ArtifactTextResult;
   "artifacts.list": import("@omp-studio/studio-protocol").ArtifactPage;
@@ -251,7 +253,7 @@ export interface ModelProviderUpsertInput {
   readonly local?: boolean;
   readonly enabled?: boolean;
   readonly auth: ModelProviderAuthInput;
-  readonly discovery?: { readonly type: string; readonly timeoutMs?: number } | null;
+  readonly discovery?: { readonly type: string; readonly timeoutMs?: number; readonly advertisedReasoning?: boolean } | null;
   readonly headers?: Readonly<Record<string, string>>;
   readonly disableStrictTools?: boolean;
   readonly transport?: "pi-native" | null;
@@ -289,6 +291,7 @@ export interface ModelProviderSetEnabledInput {
  * button uses for ordinary providers that have no `discovery` block.
  */
 export interface ModelProviderProbeInput {
+  readonly advertisedReasoning?: boolean;
   readonly providerId: string;
   readonly endpointUrl?: string;
   readonly apiKey?: string;
@@ -444,7 +447,7 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, Upgra
   "session.tree.branch": { readonly targetId: string };
   "operator.invoke": { readonly commandId: string; readonly arguments?: unknown };
   /** Side-channel question that does not enter the main transcript. */
-  "btw.ask": { readonly question: string };
+  "btw.ask": { readonly question: string; readonly images?: PromptImageInput[]; readonly command?: { name: string; arguments: string } };
   /** Cancel the in-flight BTW answer. The id fences a stale abort against a newer ask. */
   "btw.abort": { readonly ephemeralId: string };
   /**
@@ -509,7 +512,7 @@ interface CoreCommandInputMap {
    */
   "runtime.ensure": { readonly force?: boolean };
   /** Start a fresh Runtime session in the active workspace. */
-  "session.create": EmptyInput;
+  "session.create": { readonly noContextFiles?: boolean };
   /** Resume a thread from history or the home page. */
   "session.resume": { readonly threadId: ThreadId; readonly model?: string };
   /** Drop a thread. Destructive: the Host issues a one-time confirmation. */

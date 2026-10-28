@@ -1,4 +1,22 @@
 import {
+	ADVISOR_CONFIG_KINDS,
+	isAdvisorConfigKind,
+	type AdvisorConfigOperation,
+	type AdvisorConfigResultMap,
+} from "./advisor-config-protocol";
+import {
+	LOCAL_RESOURCE_KINDS,
+	isLocalResourceKind,
+	type LocalResourceOperation,
+	type LocalResourceResultMap,
+} from "./local-resources-protocol";
+import {
+	DICTATION_KINDS,
+	isDictationKind,
+	type DictationOperation,
+	type DictationResultMap,
+} from "./dictation-protocol";
+import {
 	NATIVE_PLAN_REVIEW_KINDS,
 	isNativePlanReviewKind,
 	validateNativePlanReviewOperation,
@@ -267,6 +285,9 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
+	| AdvisorConfigOperation
+	| LocalResourceOperation
+	| DictationOperation
 	| SessionTitlesOperation
 	| PredictionChannelOperation
 	| MaintenanceOperation
@@ -328,6 +349,9 @@ export interface WorkbenchResultMap
 		BrowserObservationResultMap,
 		StudioIdaResultMap,
 		SessionOptionsResultMap,
+		AdvisorConfigResultMap,
+		LocalResourceResultMap,
+		DictationResultMap,
 		SessionGuiResultMap,
 		SkillshareResultMap,
 		LiveAudioResultMap,
@@ -352,6 +376,9 @@ export interface WorkbenchResultMap
 	"runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
 export const WORKBENCH_OPERATION_KINDS = [
+	...ADVISOR_CONFIG_KINDS,
+	...LOCAL_RESOURCE_KINDS,
+	...DICTATION_KINDS,
 	...SESSION_TITLES_KINDS,
 	...PREDICTION_KINDS,
 	...MAINTENANCE_OPERATION_KINDS,
@@ -408,6 +435,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 	"maintenance.compression.status",
 	"worktrees.session.list",
 	"worktrees.session.startPolicy",
+	"worktrees.session.resume.list",
 	"mode.plan.review.details",
 	"ratchet.list",
 	"ratchet.read",
@@ -421,6 +449,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 	"ida.status.details",
 	"ida.database.cancel",
 	"session.speed.get",
+	"session.budget.get",
 	"session.warming.get",
 	"models.presets.list",
 	...SESSION_GUI_READ_KINDS,
@@ -512,6 +541,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	if (!value || typeof value !== "object") throw new Error("Invalid workbench operation");
 	const kind = (value as Record<string, unknown>).kind;
 	if (typeof kind !== "string" || !isWorkbenchOperationKind(kind)) throw new Error("Unknown workbench operation");
+	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
 	if (isSessionTitlesKind(kind)) {
 		validateSessionTitlesOperation(value);
 		return;
@@ -634,6 +664,9 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	const fields: Record<
 		Exclude<
 			WorkbenchOperation["kind"],
+			| AdvisorConfigOperation["kind"]
+			| LocalResourceOperation["kind"]
+			| DictationOperation["kind"]
 			| SessionTitlesOperation["kind"]
 			| PredictionChannelOperation["kind"]
 			| MaintenanceOperation["kind"]
@@ -728,6 +761,7 @@ function serviceRow(value: unknown): void {
 	if (row.ownerAgentId !== undefined) text(row.ownerAgentId);
 }
 export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value: unknown): void {
+	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
 	if (isSessionTitlesKind(kind)) {
 		validateSessionTitlesResult(kind, value);
 		return;

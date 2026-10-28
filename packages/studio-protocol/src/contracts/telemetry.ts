@@ -2,6 +2,9 @@ import type { SessionId } from "./ids.js";
 
 /** Sanitized, numeric-only Runtime telemetry for the active session. */
 export interface SessionTelemetrySnapshot {
+  readonly treeCost?: number;
+  readonly budget?: { warnCost: number | null; maxCost: number | null; limitReached: boolean };
+  readonly editRejections?: Record<string, number>;
   readonly advisorCost?: number;
   readonly generationTps?: number;
   readonly requestedModel?: string;

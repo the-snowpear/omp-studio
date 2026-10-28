@@ -341,10 +341,10 @@ index a186773bd7..1751d507b7 100644
  export function releaseJudgmentBatches(ownerId: string): void {
  	for (const [id, batch] of batches) {
 diff --git a/packages/coding-agent/src/extensibility/extensions/runner.ts b/packages/coding-agent/src/extensibility/extensions/runner.ts
-index 7b9804375d..dc0a7702b0 100644
+index a8e6184a09..3658c6fcd3 100644
 --- a/packages/coding-agent/src/extensibility/extensions/runner.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/runner.ts
-@@ -799,6 +799,26 @@ export class ExtensionRunner {
+@@ -800,6 +800,35 @@ export class ExtensionRunner {
  		return this.settings;
  	}
  
@@ -368,14 +368,32 @@ index 7b9804375d..dc0a7702b0 100644
 +		};
 +	}
 +
++	/** Attach a mode owner without replacing the runner's other actions. */
++	bindSessionModes(modes: NonNullable<ExtensionContextActions["sessionModes"]>): () => void {
++		const previous = this.#sessionModes;
++		this.#sessionModes = modes;
++		return () => {
++			if (this.#sessionModes === modes) this.#sessionModes = previous;
++		};
++	}
++
  	initialize(
  		actions: ExtensionActions,
  		contextActions: ExtensionContextActions,
+@@ -843,7 +872,7 @@ export class ExtensionRunner {
+ 		if (contextActions.getPendingPlanReview) this.#getPendingPlanReviewFn = contextActions.getPendingPlanReview;
+ 		if (contextActions.openPlanReview) this.#openPlanReviewFn = contextActions.openPlanReview;
+ 		// Assigned unconditionally: a headless rebind must not inherit a previous host's controls.
+-		this.#sessionModes = contextActions.sessionModes;
++		if (contextActions.sessionModes) this.#sessionModes = contextActions.sessionModes;
+ 		this.#getContextUsageFn = contextActions.getContextUsage;
+ 		this.#compactFn = contextActions.compact;
+ 		this.#getSystemPromptFn = contextActions.getSystemPrompt;
 diff --git a/packages/coding-agent/src/extensibility/extensions/types.ts b/packages/coding-agent/src/extensibility/extensions/types.ts
-index c78dfd9fc2..9f8b39544c 100644
+index 36455df9f2..25147c42f6 100644
 --- a/packages/coding-agent/src/extensibility/extensions/types.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/types.ts
-@@ -319,6 +319,30 @@ export interface ExtensionUIContext {
+@@ -328,6 +328,30 @@ export interface ExtensionUIContext {
  	/** Show a text input dialog. */
  	input(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined>;
  
@@ -407,7 +425,7 @@ index c78dfd9fc2..9f8b39544c 100644
  	askDialog?(
  		questions: ExtensionAskDialogQuestion[],
 diff --git a/packages/coding-agent/src/extensibility/extensions/wrapper.ts b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
-index 0e491adb67..126a7fb918 100644
+index 43a8445f78..413c24e113 100644
 --- a/packages/coding-agent/src/extensibility/extensions/wrapper.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
 @@ -8,6 +8,7 @@ import {
@@ -418,7 +436,7 @@ index 0e491adb67..126a7fb918 100644
  } from "@oh-my-pi/pi-agent-core";
  import type { ComputerSafetyCheck, ImageContent, Static, TextContent, TSchema } from "@oh-my-pi/pi-ai";
  import { prompt, sanitizeText, untilAborted } from "@oh-my-pi/pi-utils";
-@@ -28,7 +29,7 @@ import { withFileMutationSession } from "../../tools/file-write-fallback";
+@@ -29,7 +30,7 @@ import { withFileMutationSession } from "../../tools/file-write-fallback";
  import { normalizeToolEventInput, resolveToolEventInput } from "../tool-event-input";
  import { applyToolProxy } from "../tool-proxy";
  import type { ExtensionRunner } from "./runner";
@@ -427,7 +445,7 @@ index 0e491adb67..126a7fb918 100644
  
  /**
   * Second `renderCall` argument that satisfies both the omp and the upstream-pi
-@@ -60,6 +61,18 @@ function renderOptionsWithTheme<T extends object>(options: T, theme: Theme): T &
+@@ -61,6 +62,18 @@ function renderOptionsWithTheme<T extends object>(options: T, theme: Theme): T &
  	}) as T & Theme;
  }
  
@@ -446,7 +464,7 @@ index 0e491adb67..126a7fb918 100644
  /**
   * Adapts a RegisteredTool into an AgentTool.
   */
-@@ -417,11 +430,54 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+@@ -429,11 +442,55 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
  				});
  			};
  
@@ -484,6 +502,7 @@ index 0e491adb67..126a7fb918 100644
 +								details: {
 +									toolName: this.tool.name,
 +									toolCallId,
++									source: resolved.source,
 +									...(approvalCheck.reason === undefined ? {} : { reason: approvalCheck.reason }),
 +									summary: truncateForPrompt(prompt.full),
 +									risk: tierRisk(resolved.tier),
@@ -506,7 +525,7 @@ index 0e491adb67..126a7fb918 100644
  				cancelPreflight();
  				if (pendingSafetyChecks.length > 0) {
  					throw new Error(
-@@ -437,12 +493,11 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+@@ -456,12 +513,11 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
  				);
  			}
  
@@ -520,7 +539,7 @@ index 0e491adb67..126a7fb918 100644
  					reason: approvalCheck.reason,
  					appendix: safetyAppendix,
  					sessionSubject: sessionScope?.subject,
-@@ -463,13 +518,7 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+@@ -482,13 +538,7 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
  				cancelPreflight();
  				throw new Error(`Tool call denied by user: ${this.tool.name}`);
  			}
@@ -1174,7 +1193,7 @@ index 865ce7e70f..9392a9b64f 100644
  	return result.daemon;
  }
 diff --git a/packages/coding-agent/src/live/controller.ts b/packages/coding-agent/src/live/controller.ts
-index 64889231f4..0cec1f5553 100644
+index d5e2df50d2..d1d038b466 100644
 --- a/packages/coding-agent/src/live/controller.ts
 +++ b/packages/coding-agent/src/live/controller.ts
 @@ -46,6 +46,8 @@ export interface LiveSessionCallbacks {
@@ -1198,7 +1217,7 @@ index 64889231f4..0cec1f5553 100644
  	#unsubscribeSession: (() => void) | undefined;
  	#sendChain: Promise<void> = Promise.resolve();
  	#stopPromise: Promise<void> | undefined;
-@@ -127,6 +130,7 @@ export class LiveSessionController {
+@@ -132,6 +135,7 @@ export class LiveSessionController {
  
  	constructor(options: LiveSessionControllerOptions) {
  		this.#session = options.session;
@@ -1206,7 +1225,7 @@ index 64889231f4..0cec1f5553 100644
  		this.#callbacks = options.callbacks;
  		this.#extractAssistantText = options.extractAssistantText;
  		this.#voice = options.voice?.trim() || DEFAULT_LIVE_VOICE;
-@@ -183,7 +187,7 @@ export class LiveSessionController {
+@@ -188,7 +192,7 @@ export class LiveSessionController {
  			if (this.#stopped) {
  				throw this.#failure ?? new Error("The live session stopped before recording began.");
  			}
@@ -1216,10 +1235,10 @@ index 64889231f4..0cec1f5553 100644
  					this.#reportFailure(error);
  					return;
 diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
-index fbf834ae39..705eb2226b 100644
+index 388006c09a..c492d474d9 100644
 --- a/packages/coding-agent/src/sdk.ts
 +++ b/packages/coding-agent/src/sdk.ts
-@@ -297,11 +297,11 @@ import {
+@@ -298,11 +298,11 @@ import {
  import { resolveYieldReportText } from "./tools/yield";
  import { createModelJobWidgetAuthor, type JobWidgetAuthor, JobWidgets, resolveToolCallIntent } from "./job-widgets";
  import { createBrowserPrelude } from "./tools/browser";
@@ -1233,7 +1252,7 @@ index fbf834ae39..705eb2226b 100644
  import { isIrcEnabled } from "./irc/messaging";
  import { imageGenTool } from "./tools/image-gen";
  import { wrapToolWithMetaNotice } from "./tools/output-meta";
-@@ -953,8 +953,8 @@ export interface CreateAgentSessionResult {
+@@ -968,8 +968,8 @@ export interface CreateAgentSessionResult {
  	session: AgentSession;
  	/** Extensions result (loaded extensions + runtime) */
  	extensionsResult: LoadExtensionsResult;
@@ -1244,7 +1263,7 @@ index fbf834ae39..705eb2226b 100644
  	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
  	mcpManager?: MCPManager;
  	/** Warning if session was restored with a different model than saved */
-@@ -4427,7 +4427,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4478,7 +4478,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			await extensionRunner.emitAfterProviderResponse(response, model, signal);
  		};
  
@@ -1297,8 +1316,30 @@ index 6315774c44..950eae2c89 100644
  		} catch (error) {
  			throw new Error(
  				`cannot reach skill registry ${this.registryUrl}: ${error instanceof Error ? error.message : String(error)}`,
+diff --git a/packages/coding-agent/src/tools/ask.ts b/packages/coding-agent/src/tools/ask.ts
+index 141b8d8a36..902133124c 100644
+--- a/packages/coding-agent/src/tools/ask.ts
++++ b/packages/coding-agent/src/tools/ask.ts
+@@ -478,7 +478,7 @@ async function askSingleQuestion(
+ 	return { selectedOptions, customInput, note, timedOut };
+ }
+ 
+-function formatQuestionResult(result: QuestionResult): string {
++export function formatQuestionResult(result: QuestionResult): string {
+ 	const noteOn = result.noteOption === undefined ? "" : ` on ${result.noteOption}`;
+ 	const noteSuffix = result.note ? ` (note${noteOn}: ${result.note})` : "";
+ 	const custom = result.customInput === undefined ? undefined : `"${result.customInput}"`;
+@@ -492,7 +492,7 @@ function formatQuestionResult(result: QuestionResult): string {
+ 	return `${result.id}: ${answer}${timeoutSuffix}${noteSuffix}`;
+ }
+ 
+-function formatSingleQuestionResponse(result: {
++export function formatSingleQuestionResponse(result: {
+ 	selectedOptions: string[];
+ 	customInput?: string;
+ 	note?: string;
 diff --git a/packages/coding-agent/src/tools/browser.ts b/packages/coding-agent/src/tools/browser.ts
-index 37662aebd5..f8b345916e 100644
+index cff05d8e73..a48228bd43 100644
 --- a/packages/coding-agent/src/tools/browser.ts
 +++ b/packages/coding-agent/src/tools/browser.ts
 @@ -1,4 +1,5 @@
@@ -1307,7 +1348,7 @@ index 37662aebd5..f8b345916e 100644
  import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
  import { isRecord, logger, untilAborted } from "@oh-my-pi/pi-utils";
  import type { EvalPreludeContext, EvalPreludeDefinition } from "../eval/preludes";
-@@ -613,10 +614,12 @@ async function closeBrowser(
+@@ -629,10 +630,12 @@ async function closeBrowser(
  ): Promise<AgentToolResult<unknown>> {
  	const kill = !!params.kill;
  	if (params.all) {
@@ -1321,10 +1362,10 @@ index 37662aebd5..f8b345916e 100644
  	const text = closed ? `Released managed tab ${JSON.stringify(name)}` : `No tab named ${JSON.stringify(name)}`;
  	return toolResult(details).text(text).done();
 diff --git a/packages/coding-agent/src/tools/browser/registry.ts b/packages/coding-agent/src/tools/browser/registry.ts
-index c7e0053cac..242846fff2 100644
+index 78a5bb5f94..ef2c9024f0 100644
 --- a/packages/coding-agent/src/tools/browser/registry.ts
 +++ b/packages/coding-agent/src/tools/browser/registry.ts
-@@ -461,6 +461,16 @@ async function disposeBrowserHandle(handle: BrowserHandle, opts: ReleaseBrowserO
+@@ -459,6 +459,16 @@ async function disposeBrowserHandle(handle: BrowserHandle, opts: ReleaseBrowserO
  		}
  		return;
  	}
@@ -1342,7 +1383,7 @@ index c7e0053cac..242846fff2 100644
  		try {
  			handle.browser.disconnect();
 diff --git a/packages/coding-agent/src/tools/browser/tab-supervisor.ts b/packages/coding-agent/src/tools/browser/tab-supervisor.ts
-index bb9a5a843e..6156f03eb0 100644
+index c4e3984dab..2dc05b16f9 100644
 --- a/packages/coding-agent/src/tools/browser/tab-supervisor.ts
 +++ b/packages/coding-agent/src/tools/browser/tab-supervisor.ts
 @@ -57,6 +57,7 @@ import { cfgBrowserScreenshotDir } from "./settings";
@@ -1353,7 +1394,7 @@ index bb9a5a843e..6156f03eb0 100644
  
  // Coding-agent binary/bundle workers route through the CLI entrypoint with a
  // hidden argv mode, so compiled/npm builds only need one JavaScript entry.
-@@ -417,6 +418,7 @@ async function acquireTabImpl(
+@@ -419,6 +420,7 @@ async function acquireTabImpl(
  	const reattaching = awaitWorkerRecovery(name, opts, "Browser tab open aborted");
  	if (reattaching) await reattaching;
  	const existing = tabs.get(name);
@@ -1361,7 +1402,7 @@ index bb9a5a843e..6156f03eb0 100644
  	if (existing) {
  		if (existing.browser === browser && existing.state === "alive") {
  			const requestedCmuxSurface = "client" in browser ? (opts.cmuxSurface ?? browser.surface) : undefined;
-@@ -458,6 +460,7 @@ async function acquireTabImpl(
+@@ -460,6 +462,7 @@ async function acquireTabImpl(
  				if (tabs.get(name) !== existing || existing.state !== "alive") {
  					return await acquireTabImpl(name, browser, { ...opts, deadlineStartMs: startedAt });
  				}
@@ -1369,7 +1410,7 @@ index bb9a5a843e..6156f03eb0 100644
  				// The creator may opt out later: an explicit `persist` on
  				// reuse by the owning session updates the tab (omitted
  				// leaves it). Reuse by any other session never changes it.
-@@ -923,6 +926,7 @@ async function runInTabWithSnapshot(
+@@ -926,6 +929,7 @@ async function runInTabWithSnapshot(
  			`Tab ${JSON.stringify(name)} is busy: another call on this tab is still running. Await each call before starting the next instead of running them together (Promise.all, asyncio.gather), or group the steps in one tab.run(...)`,
  		);
  	}
@@ -1377,7 +1418,7 @@ index bb9a5a843e..6156f03eb0 100644
  	// An already-aborted call never runs: without this early exit the worker
  	// branch below would send `abort` before `run`, which the worker ignores
  	// for a not-yet-active run and then execute anyway.
-@@ -1481,6 +1485,26 @@ async function findTargetForTab(tab: WorkerTabSession): Promise<Target | undefin
+@@ -1484,6 +1488,26 @@ async function findTargetForTab(tab: WorkerTabSession): Promise<Target | undefin
  	return undefined;
  }
  
@@ -1404,7 +1445,7 @@ index bb9a5a843e..6156f03eb0 100644
  /**
   * Set a tab's web lifecycle state through a supervisor-owned CDP session —
   * no worker-protocol change needed; CDP allows multiple sessions per target.
-@@ -1622,6 +1646,7 @@ export async function freezeTabsForOwner(ownerId: string): Promise<number> {
+@@ -1625,6 +1649,7 @@ export async function freezeTabsForOwner(ownerId: string): Promise<number> {
  	let count = 0;
  	for (const tab of tabs.values()) {
  		if (tab.ownerSessionId !== ownerId) continue;
@@ -1448,10 +1489,10 @@ index 3c7d0a6cc7..8d815a565a 100644
  /** Registers a controller for owner-scoped session cleanup. */
  export function registerComputerController(ownerId: string | undefined, controller: ComputerController): () => void {
 diff --git a/packages/coding-agent/src/tools/context.ts b/packages/coding-agent/src/tools/context.ts
-index 69a89ba51f..5ac1e02d6c 100644
+index 34d59bd4ce..4a015a29c9 100644
 --- a/packages/coding-agent/src/tools/context.ts
 +++ b/packages/coding-agent/src/tools/context.ts
-@@ -29,8 +29,21 @@ declare module "@oh-my-pi/pi-agent-core" {
+@@ -31,8 +31,21 @@ declare module "@oh-my-pi/pi-agent-core" {
  	}
  }
  
@@ -1473,7 +1514,7 @@ index 69a89ba51f..5ac1e02d6c 100644
  	#hasUI = false;
  	#toolNames: string[] = [];
  
-@@ -41,10 +54,17 @@ export class ToolContextStore {
+@@ -43,10 +56,17 @@ export class ToolContextStore {
  	) {}
  
  	getContext(toolCall?: ToolCallContext): AgentToolContext {
@@ -1493,7 +1534,7 @@ index 69a89ba51f..5ac1e02d6c 100644
  			toolNames: this.#toolNames,
  			toolCall,
  			// Loop-dispatched calls carry the loop's passive-context sink; direct
-@@ -53,8 +73,14 @@ export class ToolContextStore {
+@@ -55,8 +75,14 @@ export class ToolContextStore {
  		};
  	}
  
@@ -1524,10 +1565,10 @@ index e6d3bdb947..164a2b7172 100644
  	selectedModel: Model,
  	activeModel: Model | undefined,
 diff --git a/packages/coding-agent/test/extensions-runner.test.ts b/packages/coding-agent/test/extensions-runner.test.ts
-index 5948bc7744..46c315f2c1 100644
+index 805ec5c7be..0725f33e91 100644
 --- a/packages/coding-agent/test/extensions-runner.test.ts
 +++ b/packages/coding-agent/test/extensions-runner.test.ts
-@@ -2571,7 +2571,7 @@ describe("ExtensionRunner", () => {
+@@ -2605,7 +2605,7 @@ describe("ExtensionRunner", () => {
  			name: "dangerous_tool",
  			label: "Dangerous Tool",
  			description: "Test tool",
@@ -1536,7 +1577,7 @@ index 5948bc7744..46c315f2c1 100644
  			approval: "exec" as const,
  			execute: async () => ({ content: [{ type: "text" as const, text: "ok" }] }),
  		};
-@@ -2783,6 +2783,76 @@ describe("ExtensionRunner", () => {
+@@ -2817,6 +2817,76 @@ describe("ExtensionRunner", () => {
  			}
  		});
  

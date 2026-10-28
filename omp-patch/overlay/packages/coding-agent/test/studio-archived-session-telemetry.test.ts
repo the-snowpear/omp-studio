@@ -249,9 +249,12 @@ describe("studio archived session telemetry probe", () => {
 					messages: [fixture.userMessage, fixture.assistantMessage],
 				},
 			});
+			const manager = SessionManager.inMemory();
+			manager.appendMessage(fixture.userMessage);
+			manager.appendMessage(fixture.assistantMessage);
 			liveSession = new AgentSession({
 				agent,
-				sessionManager: SessionManager.inMemory(),
+				sessionManager: manager,
 				settings,
 				modelRegistry: registry as ModelRegistry,
 				skills: [...inputs.skills],

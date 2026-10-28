@@ -1,3 +1,5 @@
+import type { SessionOwnerState } from "@omp-studio/studio-protocol";
+import type { ContextViewOperation, ContextViewResultMap } from "@omp-studio/studio-protocol";
 import type {
   AgentTranscriptPage,
   CommandId,
@@ -164,6 +166,16 @@ export class StudioRuntimeSessionController {
    * Read the active-branch transcript. This is a query, not a Composer
    * command: it is not recorded on the command ledger.
    */
+  updateOwnerState(state: SessionOwnerState): void { void this.bridge.updateOwner(state).catch(() => {}); }
+
+  async readContext<K extends ContextViewOperation["kind"]>(operation: Extract<ContextViewOperation, { kind: K }>): Promise<ContextViewResultMap[K]> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (!snapshot || snapshot.sessionId !== operation.sessionId) throw new StudioHostError("OUTCOME_UNKNOWN", "Context session unavailable");
+    const result = await this.bridge.readContext(operation);
+    if (this.bridge.projectionSnapshot()?.sessionId !== operation.sessionId) throw new StudioHostError("CURSOR_STALE", "Session changed during context read");
+    return result;
+  }
+
   async predict(input:PredictionQuery):Promise<PredictionResult> {
     const snapshot=this.bridge.projectionSnapshot();
     if(!snapshot || snapshot.sessionId!==input.sessionId)throw new StudioHostError("OUTCOME_UNKNOWN","Prediction session unavailable");

@@ -1,10 +1,11 @@
+export interface BtwImage { type: "image"; mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/svg+xml"; data: string }
 /** Typed capabilities added with the OMP 18.2 migration. Kept wire-only. */
 export type ForeignSource = "claude" | "codex";
 export type RuntimeAuthProvider = "typesafe" | "exa" | "ollama-cloud";
 export type UpgradeOperation =
  | { kind: "btw.history.list" }
  | { kind: "btw.history.read"; topicId: string }
- | { kind: "btw.followUp"; topicId: string; question: string }
+ | { kind: "btw.followUp"; topicId: string; question: string; images?: BtwImage[] }
  | { kind: "session.models.mentions" }
  | { kind: "session.import.list"; source: ForeignSource }
  | { kind: "session.import.preview"; source: ForeignSource; sourceId: string }
@@ -25,7 +26,7 @@ export interface BtwHistoryTurn {
  createdAt: number; updatedAt: number; error?: string;
 }
 export interface BtwTopicSummary {
- topicId: string; question: string; status: BtwHistoryTurn["status"]; updatedAt: number; turnCount: number;
+ topicId: string; question: string; title?: string; status: BtwHistoryTurn["status"]; updatedAt: number; turnCount: number;
 }
 export interface ForeignSessionSummary {
  source: ForeignSource; sourceId: string; title: string; directoryName: string; cwdExists: boolean;
@@ -49,13 +50,14 @@ export function validateUpgradeOperation(value: unknown): asserts value is Upgra
  const op = value as Record<string, unknown>;
  if (typeof op.kind !== "string" || !isUpgradeOperationKind(op.kind)) throw new Error("Unknown Runtime operation");
  const fields: Record<UpgradeOperation["kind"], string[]> = {
-  "btw.history.list": [], "btw.history.read": ["topicId"], "btw.followUp": ["topicId", "question"],
+  "btw.history.list": [], "btw.history.read": ["topicId"], "btw.followUp": ["topicId", "question", "images"],
   "session.models.mentions": [], "session.import.list": ["source"],
   "session.import.preview": ["source", "sourceId"], "session.import.execute": ["source", "sourceId", "fallbackCwd", "fallbackWorkspaceId"],
   "runtime.auth.get": ["provider"], "runtime.auth.set": ["provider", "apiKey"], "runtime.auth.remove": ["provider"],
  };
  if (Object.keys(op).some(key => key !== "kind" && !fields[op.kind as UpgradeOperation["kind"]].includes(key))) throw new Error("Unknown Runtime operation field");
  for (const key of fields[op.kind as UpgradeOperation["kind"]]) {
+  if (key === "images") continue;
   if ((key === "fallbackCwd" || key === "fallbackWorkspaceId") && op[key] === undefined) continue;
   const text = op[key];
   const limit = key === "question" ? 65536 : key === "apiKey" ? 16384 : key === "fallbackCwd" ? 4096 : 512;
@@ -88,7 +90,7 @@ export function validateUpgradeResult(kind: UpgradeOperation["kind"], value: unk
  const status = enumeration(["running","complete","cancelled","error","interrupted"]);
  const summary = shape({source: enumeration(["claude","codex"]),sourceId:short,title:short,directoryName:short,cwdExists:bool,modifiedAt:short,"messageCount?":number,"firstMessage?":short});
  const checks: Record<UpgradeOperation["kind"], Check> = {
-  "btw.history.list": shape({sessionId:short,topics:array(shape({topicId:short,question:short,status,updatedAt:number,turnCount:number}),100)}),
+  "btw.history.list": shape({sessionId:short,topics:array(shape({topicId:short,question:short,"title?":short,status,updatedAt:number,turnCount:number}),100)}),
   "btw.history.read": shape({sessionId:short,topicId:short,turns:array(shape({question:text,answer:text,status,createdAt:number,updatedAt:number,"error?":short}),32)}),
   "btw.followUp": shape({ephemeralId:short,status:enumeration(["running"])}),
   "session.models.mentions": shape({sessionId:short,mentions:array(shape({agent:short,selector:short,name:short}),1024),available:array(shape({selector:short,name:short,image:bool}),10000),activeModelImage:bool}),

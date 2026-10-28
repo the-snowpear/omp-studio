@@ -54,6 +54,7 @@ export interface ProviderYamlDraft {
   envName: string;
   command: string;
   discoveryType: string;
+  advertisedReasoning?: boolean;
   discoveryTimeoutMs?: number | undefined;
   headersText: string;
   disableStrictTools: boolean;
@@ -148,6 +149,11 @@ export function providerModelYamlNode(model: ModelCatalogEntry | ModelProviderMo
   for (const key of ["name", "kind", "webSearch", "api", "baseUrl", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "input", "supportsTools", "cost", "omitMaxOutputTokens", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction", "thinking"]) delete row[key];
   const parameters = modelParameterValues(model);
   Object.assign(row,bedrockCompatNode(previous,model.bedrockMessagesApi));
+  const compat = { ...nestedNode(row.compat) };
+  for (const key of ["requiresThinkingPresence", "extendedCacheTtlBeta"] as const) {
+    if (model[key] === undefined) delete compat[key]; else compat[key] = model[key];
+  }
+  if (Object.keys(compat).length) row.compat = compat; else delete row.compat;
   if (model.name) row.name = model.name;
   if (model.kind) row.kind = model.kind;
   if (model.webSearch) row.webSearch = model.webSearch;
@@ -179,6 +185,11 @@ export function providerOverrideYamlNode(override: ModelOverridePatch, previous:
   const row: Record<string, unknown> = { ...previous };
   for (const key of ["name", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "thinking", "supportsTools", "input", "cost", "omitMaxOutputTokens", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction"]) delete row[key];
   Object.assign(row,bedrockCompatNode(previous,override.bedrockMessagesApi));
+  const compat = { ...nestedNode(row.compat) };
+  for (const key of ["requiresThinkingPresence", "extendedCacheTtlBeta"] as const) {
+    if (override[key] === undefined) delete compat[key]; else compat[key] = override[key];
+  }
+  if (Object.keys(compat).length) row.compat = compat; else delete row.compat;
   if (override.name !== undefined) row.name = override.name;
   if (override.contextWindow !== undefined) row.contextWindow = override.contextWindow;
   if (override.maxContextWindow !== undefined) row.maxContextWindow = override.maxContextWindow;
@@ -208,6 +219,7 @@ function discoveryNode(draft: ProviderYamlDraft): Record<string, unknown> | unde
   return {
     type,
     ...(draft.discoveryTimeoutMs === undefined ? {} : { timeoutMs: draft.discoveryTimeoutMs }),
+    ...(draft.advertisedReasoning === undefined ? {} : { advertisedReasoning: draft.advertisedReasoning }),
   };
 }
 
@@ -306,7 +318,7 @@ export function draftProviderYamlNode(
   else delete next.local;
 
   const discovery = discoveryNode(draft);
-  if (discovery) next.discovery = discovery;
+  if (discovery) next.discovery = { ...nestedNode(previous?.discovery), ...discovery };
   else delete next.discovery;
 
   // `auth: none|oauth` is written explicitly and removed under the credential
