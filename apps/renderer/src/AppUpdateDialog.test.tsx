@@ -27,6 +27,17 @@ it("offers skipping for desktop updates but not for Runtime-only updates", () =>
   expect(screen.getByRole("button", { name: "跳过此版本" })).toBeTruthy();
 });
 
+it("exposes the GitHub release link as an icon without a visible label", () => {
+  render(<AppUpdateDialog isDownloading update={{ currentVersion: "0.1.5", version: "0.1.6", htmlUrl: "https://github.com/the-snowpear/omp-studio/releases" }} onClose={vi.fn()} onCancel={vi.fn()} onSkip={vi.fn()} />);
+  const link = screen.getByRole("link", { name: "前往 GitHub 查看" });
+  expect(link.textContent).toBe("");
+  expect(link.getAttribute("data-tip")).toBe("前往 GitHub 查看");
+  expect(screen.queryByText("前往 GitHub 查看")).toBeNull();
+  for (const label of ["取消", "跳过此版本", "稍后提醒", "正在下载…"]) {
+    expect(screen.getByRole("button", { name: label })).toBeTruthy();
+  }
+});
+
 it("shows restart blockers as a waiting status and retries application without downloading", async () => {
   const download = vi.fn(), apply = vi.fn().mockResolvedValue(false);
   render(<AppUpdateDialog update={{ currentVersion: "0.1.5", version: "0.1.6" }} readyToApply applyNotice="请处理待确认的交互后重试" onClose={vi.fn()} onDownloadAndInstall={download} onApply={apply} />);

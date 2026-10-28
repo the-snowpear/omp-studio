@@ -585,7 +585,7 @@ function rejectedResolution(
 export interface ProcessProbeOptions {
   /** Additional CLI args inserted before the reserved Studio Bridge arguments. */
   args?: readonly string[];
-  /** Extra environment variables merged over process.env for the child. */
+  /** Extra child environment; probe workspace/profile isolation takes precedence. */
   env?: NodeJS.ProcessEnv;
   spawnProcess?: typeof spawn;
   /** Host-owned diagnostics; both streams are drained even without a listener. */
@@ -672,11 +672,14 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
       try {
         child = (options.spawnProcess ?? spawn)(
           context.executablePath,
-          buildProcessProbeArgs(options.args ?? [], bootstrap),
+          // cwd === HOME triggers OMP's automatic move to the shared temp root
+          // unless the launch directory is also explicit in its CLI arguments.
+          buildProcessProbeArgs([...(options.args ?? []), "--cwd", workspace], bootstrap),
           {
           cwd: workspace,
           env: {
             ...process.env,
+            ...options.env,
             // A compatibility probe must not leave empty/project-keyed
             // session directories in the user's real OMP profile. Keep every
             // probe artifact under the scratch workspace removed below.
@@ -694,6 +697,8 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
             // under `~/.claude`, `~/.codex` and `~/.gemini` is reached through
             // `os.homedir()`, which only HOME/USERPROFILE can move.
             PI_CODING_AGENT_DIR: join(workspace, ".omp-agent"),
+            PI_CONFIG_DIR: ".omp",
+            PI_CONFIG_FILES: "",
             OMP_PROFILE: "",
             PI_PROFILE: "",
             HOME: workspace,
@@ -706,7 +711,6 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
             ...(options.onOutput === undefined ? {} : { PI_DEBUG_STARTUP: "1" }),
             // A probe outlives a crashed Host only until its parent watchdog notices.
             ...(context.platform === "darwin" ? { OMP_STUDIO_PARENT_PID: String(process.pid) } : {}),
-            ...options.env,
           },
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,

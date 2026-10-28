@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -96,6 +96,62 @@ test("an asynchronously missing probe executable reports SPAWN_FAILED", async ()
     const result = await createProcessProbe({ createBootstrap: unavailableBridge(directory) })
       .probe({ ...probeContext(directory), executablePath: join(directory, "missing-runtime") });
     assert.equal(result.failure, "SPAWN_FAILED");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("probe startup stays in its workspace and does not execute extensions from external configuration", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-probe-isolation-"));
+  const sharedTemp = join(directory, "shared-temp");
+  const extensions = join(sharedTemp, ".omp", "extensions");
+  const marker = join(directory, "external-extension-ran");
+  const extension = join(extensions, "marker.mjs");
+  const config = join(directory, "external-config.json");
+  const script = join(directory, "runtime.mjs");
+  await mkdir(extensions, { recursive: true });
+  await writeFile(extension, `import {writeFileSync} from 'node:fs';writeFileSync(${JSON.stringify(marker)},'executed');`);
+  await writeFile(config, JSON.stringify({ extensions: [extension] }));
+  // Model OMP's actual startup rule: cwd === HOME moves to the shared temp
+  // root unless --cwd/--allow-home is supplied, then extensions are discovered.
+  await writeFile(script, `import {readFileSync,existsSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {pathToFileURL} from 'node:url';
+const args=process.argv.slice(2);
+const cwdIndex=args.lastIndexOf('--cwd');
+if(cwdIndex>=0)process.chdir(args[cwdIndex+1]);
+else if(!args.includes('--allow-home')&&process.cwd()===process.env.HOME)process.chdir(tmpdir());
+if(process.env.PI_CONFIG_FILES){for(const file of JSON.parse(readFileSync(process.env.PI_CONFIG_FILES,'utf8')).extensions)await import(pathToFileURL(file).href);}
+const ambient=join(process.cwd(),'.omp','extensions','marker.mjs');
+if(process.cwd()!==process.env.HOME&&existsSync(ambient))await import(pathToFileURL(ambient).href);
+console.log(JSON.stringify({cwd:process.cwd(),home:process.env.HOME,configDir:process.env.PI_CONFIG_DIR}));
+`);
+  try {
+    // The first case exposes auto-chdir pollution; the second isolates the
+    // inherited-config bug by disabling auto-chdir in the Runtime itself.
+    for (const args of [[], ["--allow-home"]]) {
+      let output = "";
+      let workspace: string | undefined;
+      const result = await createProcessProbe({
+        args,
+        createBootstrap: unavailableBridge(directory),
+        cleanupWorkspace: false,
+        env: { TMPDIR: sharedTemp, TMP: sharedTemp, TEMP: sharedTemp, PI_CONFIG_FILES: config, PI_CONFIG_DIR: "external-config" },
+        spawnProcess: ((_exe: string, childArgs: readonly string[], options: SpawnOptions) => {
+          workspace = options.cwd as string;
+          return spawn(process.execPath, [script, ...childArgs], options);
+        }) as typeof spawn,
+        onOutput: (stream, text) => { if (stream === "stdout") output += text; },
+      }).probe(probeContext(directory));
+      assert.equal(result.failure, "PROCESS_CRASHED");
+      const state = JSON.parse(output) as { cwd: string; home: string; configDir: string };
+      assert.ok(workspace);
+      assert.equal(await realpath(state.cwd), await realpath(workspace));
+      assert.equal(state.home, workspace);
+      assert.equal(state.configDir, ".omp");
+      await assert.rejects(readFile(marker), { code: "ENOENT" });
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -42,7 +42,7 @@ packaging keeps native rebuilding enabled; electron-rebuild decides whether
 the restored output matches its target.
 
 Run **Warm Windows release caches** manually on `main` to fill or verify the
-x64/ARM64 caches before a release. It downloads NSIS tools and runs
+x64/ARM64 caches before a release. It downloads Electron, NSIS and WebView2, then runs
 `npm run pack:win -- --native-only`, without a Runtime build, signing key or
 publication. A new cache is populated only after the job succeeds.
 

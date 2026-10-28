@@ -58,7 +58,7 @@ function nupkgUrl(version) {
   return `https://api.nuget.org/v3-flatcontainer/${name}/${version}/${name}.${version}.nupkg`;
 }
 
-async function ensureNupkg(version) {
+export async function downloadWebView2Sdk(version = WEBVIEW2_VERSION) {
   mkdirSync(CACHE_DIR, { recursive: true });
   const nupkg = join(CACHE_DIR, `microsoft.web.webview2.${version}.nupkg`);
   if (existsSync(nupkg) && readFileSync(nupkg).length > 1024) return nupkg;
@@ -162,7 +162,7 @@ export async function buildInstallerHost() {
   requireFile(HOST_CS, "InstallerHost.cs");
   const csc = findCsc();
   const extractDir = join(CACHE_DIR, `webview2-${WEBVIEW2_VERSION}`);
-  const nupkg = await ensureNupkg(WEBVIEW2_VERSION);
+  const nupkg = await downloadWebView2Sdk();
   const extractedCore = join(extractDir, "lib", "net462", "Microsoft.Web.WebView2.Core.dll");
   const extractedCore45 = join(extractDir, "lib", "net45", "Microsoft.Web.WebView2.Core.dll");
   if (!existsSync(extractedCore) && !existsSync(extractedCore45)) {
