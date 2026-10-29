@@ -8,6 +8,7 @@
 
 import {
   TERMINAL_IPC_CHANNELS,
+  parseAckInput,
   parseCreateInput,
   parseDisposeInput,
   parseResizeInput,
@@ -84,6 +85,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
   ipc.removeHandler(TERMINAL_IPC_CHANNELS.write);
   ipc.removeHandler(TERMINAL_IPC_CHANNELS.resize);
   ipc.removeHandler(TERMINAL_IPC_CHANNELS.dispose);
+  ipc.removeHandler(TERMINAL_IPC_CHANNELS.ack);
   for (const channel of [TERMINAL_IPC_CHANNELS.recordingStart, TERMINAL_IPC_CHANNELS.recordingStop, TERMINAL_IPC_CHANNELS.recordingStatus]) ipc.removeHandler(channel);
 
   ipc.handle(TERMINAL_IPC_CHANNELS.recordingStart, (event, payload) => {
@@ -130,6 +132,17 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
     else options.manager.resize(event.sender.id, input.id, input.cols, input.rows);
   });
 
+  // Flow control: the Renderer reports how much output it has written to
+  // xterm. Not every renderer can ACK (older bundle), which is why `create`
+  // decides whether this session is flow-controlled at all.
+  ipc.handle(TERMINAL_IPC_CHANNELS.ack, (event, payload) => {
+    assertTrusted(event.sender);
+    const input = parseAckInput(payload);
+    if (options.remote?.owns(event.sender.id, input.id)) options.remote.acknowledge(event.sender.id, input.id, input.bytes);
+    else options.manager.acknowledge(event.sender.id, input.id, input.bytes);
+    return { ok: true };
+  });
+
   ipc.handle(TERMINAL_IPC_CHANNELS.dispose, (event, payload) => {
     assertTrusted(event.sender);
     const input = parseDisposeInput(payload);
@@ -148,6 +161,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.write);
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.resize);
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.dispose);
+      ipc.removeHandler(TERMINAL_IPC_CHANNELS.ack);
       for (const channel of [TERMINAL_IPC_CHANNELS.recordingStart, TERMINAL_IPC_CHANNELS.recordingStop, TERMINAL_IPC_CHANNELS.recordingStatus]) ipc.removeHandler(channel);
     },
   });

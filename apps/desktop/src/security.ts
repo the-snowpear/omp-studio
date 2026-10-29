@@ -198,16 +198,113 @@ export function installNavigationGuards(
 }
 
 /**
- * Permission requests (microphone, notifications, clipboard …) are granted to
- * the trusted renderer document only. Artifact frames and anything else a page
- * embeds are denied instead of being granted by Electron's default.
+ * Chromium permissions granted to the Studio renderer document, one entry per
+ * permission the product actually uses. Everything not listed here is denied:
+ * the previous implementation approved every permission for the trusted
+ * origin, which handed an XSS in the renderer the whole Electron permission
+ * surface (device access, geolocation, MIDI, display capture, …).
+ *
+ * Evidence for the grants (grep over `apps/renderer/src`, 2026-10-30):
+ * - `media` — microphone for Live audio / voice capture
+ *   (`media/liveCapture.ts`, `media/AudioCapturePane.tsx` `getUserMedia({ audio })`).
+ * - `clipboard-sanitized-write` — `navigator.clipboard.writeText` copy actions
+ *   across the workbench (paths, ids, transcripts).
+ *
+ * Deliberately denied, with the reason the product does not need them:
+ * - `clipboard-read` — nothing calls `navigator.clipboard.readText()`; paste
+ *   arrives through DOM paste events, which need no permission.
+ * - `notifications` — notifications are raised by Main (`chrome-notify.ts`)
+ *   over a chrome IPC channel, never by a renderer `Notification` object.
+ * - `fullscreen` / `pointerLock` — the window is driven by Main
+ *   (`titlebar-overlay.ts`); nothing in the renderer calls
+ *   `requestFullscreen()` or `requestPointerLock()`.
+ * - `display-capture`, `mediaKeySystem`, `geolocation`, `midi`, `idle-detection`,
+ *   `hid`, `serial`, `usb`, `openExternal`, `speaker-selection`,
+ *   `top-level-storage-access` — no call site.
+ *
+ * Adding a permission is a product decision: add it here (with the call site
+ * in the comment) in the same change as the feature, not as a wildcard.
+ */
+export const RENDERER_PERMISSION_MATRIX: Readonly<Record<string, boolean>> = Object.freeze({
+  media: true,
+  "clipboard-sanitized-write": true,
+});
+
+/**
+ * Per-permission decision for the trusted renderer document.
+ *
+ * Two independent gates: the request must come from the packaged renderer
+ * entry (or the dev-server origin) — the same check the navigation guard uses —
+ * and the permission itself must be on the allow-list. Unknown permission
+ * names are denied, so a future Chromium permission never becomes implicit.
+ */
+export function isRendererPermissionAllowed(
+  permission: string,
+  requestingUrl: string | undefined,
+  allowedOrigin: string,
+): boolean {
+  if (!isTrustedRendererUrl(requestingUrl ?? "", allowedOrigin)) return false;
+  return RENDERER_PERMISSION_MATRIX[permission] === true;
+}
+
+/**
+ * Permission requests. A denied request is answered `false`; Electron's own
+ * default would otherwise apply per-permission. `callback` is invoked exactly
+ * once on every path: a missed callback leaves the requesting frame hanging.
  */
 export function createPermissionRequestHandler(
   allowedOrigin: string,
 ): (contents: unknown, permission: string, callback: (granted: boolean) => void, details: { readonly requestingUrl?: string }) => void {
-  return (_contents, _permission, callback, details) => {
-    callback(isTrustedRendererUrl(details.requestingUrl ?? "", allowedOrigin));
+  return (_contents, permission, callback, details) => {
+    callback(isRendererPermissionAllowed(permission, details.requestingUrl, allowedOrigin));
   };
+}
+
+/** `session.setPermissionCheckHandler` details (Electron 43). */
+export interface PermissionCheckDetails {
+  readonly requestingUrl?: string;
+  readonly embeddingOrigin?: string;
+  readonly securityOrigin?: string;
+}
+
+/**
+ * Synchronous permission *checks* (`navigator.permissions.query`, feature
+ * detection inside Chromium) must agree with the request handler above —
+ * otherwise a site check reports "granted" while the request is denied, or
+ * vice versa. Same matrix, same origin gate; absent URLs fall back to the
+ * security origin, and a `file:` entry accepts the opaque `file://` origin
+ * Chromium reports for packaged documents.
+ */
+export function createPermissionCheckHandler(
+  allowedOrigin: string,
+): (contents: unknown, permission: string, requestingOrigin: string, details?: PermissionCheckDetails) => boolean {
+  return (_contents, permission, requestingOrigin, details) => {
+    const requestingUrl = details?.requestingUrl ?? details?.securityOrigin ?? requestingOrigin;
+    if (details?.requestingUrl !== undefined) {
+      return isRendererPermissionAllowed(permission, details.requestingUrl, allowedOrigin);
+    }
+    if (allowedOrigin.startsWith("file:")) {
+      // Packaged documents have the opaque `file://` origin; the request
+      // handler still re-checks the exact document URL.
+      if (requestingOrigin === "file://") return RENDERER_PERMISSION_MATRIX[permission] === true;
+      return isRendererPermissionAllowed(permission, requestingUrl, allowedOrigin);
+    }
+    if (requestingOrigin !== allowedOrigin) return false;
+    return RENDERER_PERMISSION_MATRIX[permission] === true;
+  };
+}
+
+/**
+ * Device permission requests (`setDevicePermissionHandler`: WebHID, WebSerial,
+ * WebUSB). The Studio has no device-integrated feature, so every device is
+ * denied — the same posture as the permission matrix, which denies `hid`,
+ * `serial` and `usb` requests outright.
+ */
+export function createDevicePermissionHandler(): (details: {
+  readonly deviceType?: string | undefined;
+  readonly origin?: string | undefined;
+}) => boolean {
+  return () => false;
 }
 
 /** Minimal structural session surface for CSP header injection. */

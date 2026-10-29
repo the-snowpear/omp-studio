@@ -77,7 +77,7 @@ import { createAppTray, quitBusyDialogStrings, quitBusyMessageBoxOptions } from 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { cpus, homedir, totalmem } from "node:os";
 import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
@@ -86,6 +86,8 @@ import { completeDesktopRuntimeTrial } from "./runtime-startup.js";
 import { registerDesktopIpc } from "./ipc.js";
 import {
   RENDERER_CSP,
+  createDevicePermissionHandler,
+  createPermissionCheckHandler,
   createPermissionRequestHandler,
   createSecureWindow,
   installCspHeaders,
@@ -120,6 +122,9 @@ import { resolveRendererEntryFrom } from "./security.js";
 import { AppPayloadInstaller, createSmokeTestRunner, type UnifiedUpdateSnapshot } from "@omp-studio/runtime-installer";
 import { withCodeSignatureCheck } from "./platform/code-signature.js";
 import { planSaveRelativeTarget } from "./plan-save-path.js";
+import { registerPerfProfileIpc } from "./perf-profile-ipc.js";
+import { PerfProfileService } from "./perf-profile.js";
+import { PERF_PROFILE_CHANNELS } from "./perf-profile-shared.js";
 import { registerTerminalIpc } from "./terminal-ipc.js";
 import { TerminalSessionManager, createNodePtySpawner } from "./terminal-pty.js";
 import { TerminalRecordingManager } from "./terminal-recording.js";
@@ -254,6 +259,62 @@ export async function main(): Promise<void> {
       if (error.length > 0) throw new Error(error);
     },
   });
+  // P0-6: GPU / low-spec probe. `getGPUInfo("basic")` cannot distinguish
+  // hardware from software compositing (its fields are identical), so the
+  // grading reads `app.getGPUFeatureStatus()` and only falls back to the
+  // `getGPUInfo("complete")` renderer string when that status is inconclusive.
+  // Hardware acceleration is never disabled here: Chromium deprecated the
+  // silent SwiftShader fallback, and the answer to software compositing is
+  // fewer draw operations, not less hardware.
+  const perfProfileCachePath = join(desktopPaths().stateRoot, "perf-profile.json");
+  // Chromium publishes its GPU verdict asynchronously: until the first
+  // `gpu-info-update`, `getGPUFeatureStatus()` reports `disabled_software` even
+  // on a hardware-compositing machine (observed here: first snapshot software,
+  // next event hardware). The probe therefore treats the status as unknown
+  // until it settles, and only a settled verdict is cached or broadcast.
+  let gpuStatusSettled = false;
+  const perfProfiles = new PerfProfileService({
+    getGPUFeatureStatus: () => app.getGPUFeatureStatus() as unknown as Readonly<Record<string, string>>,
+    async getGLRenderer() {
+      const info = (await app.getGPUInfo("complete")) as {
+        readonly gpuDevice?: ReadonlyArray<{ readonly glRenderer?: unknown }>;
+      } | null;
+      const renderer = info?.gpuDevice?.[0]?.glRenderer;
+      return typeof renderer === "string" ? renderer : undefined;
+    },
+    cores: () => cpus().length,
+    totalMemoryBytes: () => totalmem(),
+    onBattery: () => powerMonitor.isOnBatteryPower(),
+    now: () => new Date(),
+    async readCache() {
+      return JSON.parse(await readFile(perfProfileCachePath, "utf8")) as unknown;
+    },
+    async writeCache(snapshot) {
+      await mkdir(dirname(perfProfileCachePath), { recursive: true });
+      await writeFile(perfProfileCachePath, `${JSON.stringify(snapshot)}\n`, "utf8");
+    },
+    log: (level, event, detail) => hostFactory.log?.write(level, event, detail),
+    onChanged: (snapshot) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send(PERF_PROFILE_CHANNELS.changed, snapshot);
+      }
+    },
+    gpuStatusSettled: () => gpuStatusSettled,
+  });
+  // The cached snapshot must exist before the first window's preload runs, so
+  // the Renderer can pick its tier for the very first paint.
+  await perfProfiles.load();
+  void perfProfiles.refresh();
+  const settleGpuStatus = (): void => {
+    if (gpuStatusSettled) { void perfProfiles.refresh(); return; }
+    gpuStatusSettled = true;
+    void perfProfiles.refresh();
+  };
+  app.on("gpu-info-update", settleGpuStatus);
+  // Fallback for platforms/windows that never emit `gpu-info-update`.
+  setTimeout(() => { if (!gpuStatusSettled) settleGpuStatus(); }, 2_000).unref?.();
+  powerMonitor.on("on-battery", () => { void perfProfiles.refresh(); });
+  powerMonitor.on("on-ac", () => { void perfProfiles.refresh(); });
   // Runs once the renderer has booted: a macOS update commits only then.
   let confirmMacDesktop: (() => Promise<void>) | undefined;
   if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined)) {
@@ -506,7 +567,11 @@ export async function main(): Promise<void> {
     // sees framed responses, and stamping the statistics dashboard with
     // `frame-ancestors 'none'` is what blanked that page.
     installCspHeaders(session.defaultSession, rendererCspFor(target), (url) => isTrustedRendererUrl(url, allowedOrigin));
+    // One allow-list for requests, synchronous checks and device access: an
+    // unknown or unused permission is denied instead of approved by default.
     session.defaultSession.setPermissionRequestHandler(createPermissionRequestHandler(allowedOrigin));
+    session.defaultSession.setPermissionCheckHandler(createPermissionCheckHandler(allowedOrigin));
+    session.defaultSession.setDevicePermissionHandler(createDevicePermissionHandler());
 
     const window = createSecureWindow({
       BrowserWindow,
@@ -552,6 +617,24 @@ export async function main(): Promise<void> {
     });
     window.webContents.once("render-process-gone", () => payloadHealth.failed());
     const ipc = registerDesktopIpc({ facade: context.transport, isTrustedSender });
+    const disposePerfProfile = registerPerfProfileIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event) => listener({ sender: event.sender }));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+        on(channel, listener) {
+          ipcMain.on(channel, (event) => listener(event));
+        },
+        removeListener(channel, listener) {
+          ipcMain.removeListener(channel, listener as never);
+        },
+      },
+      isTrustedSender,
+      service: perfProfiles,
+    });
     const remoteIpc = registerRemoteIpc({ ipc: ipcMain, manager: remoteConnections, isTrusted: isTrustedSender, installRuntime: async id => {
       const picked = await dialog.showOpenDialog(window, { title: "选择匹配远端系统的签名 Runtime ZIP", properties: ["openFile"], filters: [{ name: "OMP Studio Runtime", extensions: ["zip"] }] });
       if (picked.canceled || !picked.filePaths[0]) return { installed: false };
@@ -902,6 +985,7 @@ export async function main(): Promise<void> {
         disposeLogs.dispose();
         disposeMetrics.dispose();
         disposePerformance.dispose();
+        disposePerfProfile.dispose();
         disposeMediaAccess.dispose();
         ipcMain.removeHandler(CONVERSATION_VIEW_CHANNEL);
         window.removeListener("show", refreshConversationVisibility);
