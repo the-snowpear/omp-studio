@@ -1402,6 +1402,9 @@ function createSingleDesktopRuntimeSessionPort(
       ...(options.handshakeTimeoutMs === undefined ? {} : { handshakeTimeoutMs: options.handshakeTimeoutMs }),
       ...(options.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: options.requestTimeoutMs }),
       ...(options.connectSocket === undefined ? {} : { connectSocket: options.connectSocket }),
+      onInternalError: (error, source) => {
+        log?.write("warn", "runtime.bridge.internal-error", `${source}: ${errorDetail(error)}`);
+      },
       onDisconnect: () => {
         if (launchGeneration !== generation) {
           log?.write(

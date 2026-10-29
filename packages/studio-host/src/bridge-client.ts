@@ -92,6 +92,11 @@ export interface StudioBridgeClientOptions {
   onProjectionChanged?: (snapshot: StudioSnapshotResponse["snapshot"]) => void;
   onDisconnect?: () => void;
   requestTimeoutMs?: number;
+  /**
+   * Diagnose non-fatal consumer/protocol-frame problems without tearing down
+   * the Bridge. Transport-level failures still disconnect as before.
+   */
+  onInternalError?: (error: Error, source: "projection" | "event" | "receipt" | "frame") => void;
 }
 
 interface PendingRequest {
@@ -644,12 +649,21 @@ export class StudioBridgeClient {
     const listener = (chunk: Buffer): void => {
       try {
         for (const frame of decoder.push(chunk)) this.#processReadyFrame(frame);
-      } catch {
+      } catch (error) {
+        this.#report(error, "frame");
         socket.destroy();
       }
     };
     this.#readyDataListener = listener;
     socket.on("data", listener);
+  }
+
+  #report(error: unknown, source: "projection" | "event" | "receipt" | "frame"): void {
+    try {
+      this.options.onInternalError?.(error instanceof Error ? error : new Error(String(error)), source);
+    } catch {
+      // Diagnostics must never influence the transport.
+    }
   }
 
   #processReadyFrame(frame: DecodedFrame): void {
@@ -664,8 +678,18 @@ export class StudioBridgeClient {
         throw new Error("Receipt epoch mismatch");
       }
       const pending = this.#pendingRequests.get(receipt.requestId);
-      if (pending === undefined) throw new Error("Uncorrelated Studio receipt");
-      pending.onReceipt?.(receipt);
+      // A receipt for a request this connection never sent (for example a late
+      // reply from the Runtime's previous epoch) carries no state. Ignoring it
+      // is safe; throwing here used to destroy the whole Bridge.
+      if (pending === undefined) {
+        this.#report(new Error("Uncorrelated Studio receipt"), "receipt");
+        return;
+      }
+      try {
+        pending.onReceipt?.(receipt);
+      } catch (error) {
+        this.#report(error, "receipt");
+      }
       if (TERMINAL_RECEIPT_STATUSES.has(receipt.status)) {
         if (pending.timer !== undefined) clearTimeout(pending.timer);
         this.#pendingRequests.delete(receipt.requestId);
@@ -693,8 +717,8 @@ export class StudioBridgeClient {
     if (result === "applied") {
       try {
         this.options.onEvent?.(event);
-      } catch {
-        // Isolate the constructor event hook from the socket handler.
+      } catch (error) {
+        this.#report(error, "event");
       }
       // One clone per dispatch, not one per listener: the envelope is read-only
       // downstream (each fanout re-parses it into fresh objects), and a
@@ -707,8 +731,8 @@ export class StudioBridgeClient {
         for (const listener of listeners) {
           try {
             listener(delivered);
-          } catch {
-            // Isolate sibling event listeners from the socket handler.
+          } catch (error) {
+            this.#report(error, "event");
           }
         }
       }
@@ -755,9 +779,25 @@ export class StudioBridgeClient {
    * `#projectionListeners` has exactly one member.
    */
   #publishProjection(snapshot: StudioSnapshotResponse["snapshot"]): void {
-    const published = structuredClone(snapshot);
-    this.options.onProjectionChanged?.(published);
-    for (const listener of this.#projectionListeners) listener(published);
+    let published: StudioSnapshotResponse["snapshot"];
+    try {
+      published = structuredClone(snapshot);
+    } catch (error) {
+      this.#report(error, "projection");
+      return;
+    }
+    try {
+      this.options.onProjectionChanged?.(published);
+    } catch (error) {
+      this.#report(error, "projection");
+    }
+    for (const listener of [...this.#projectionListeners]) {
+      try {
+        listener(published);
+      } catch (error) {
+        this.#report(error, "projection");
+      }
+    }
   }
 }
 import { type PredictionQuery, type PredictionResult, validatePredictionResult } from "@omp-studio/studio-protocol";

@@ -553,6 +553,62 @@ test("connectUntilReady retries CONNECTION_FAILED until the pipe accepts", async
   }
 });
 
+test("an uncorrelated receipt after the snapshot is ignored instead of killing the Bridge", async () => {
+  const token = "bridge-token-uncorrelated-receipt";
+  const internalErrors: string[] = [];
+  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    afterSnapshot: (response) => [
+      encodeFrame("receipt:unknown", response.snapshot.runtimeEpoch, {
+        type: "studio.receipt",
+        requestId: "request-never-sent",
+        commandId: "runtime-command-never-sent",
+        runtimeEpoch: response.snapshot.runtimeEpoch,
+        stateVersion: 0,
+        status: "completed",
+      }),
+    ],
+  });
+  const client = new StudioBridgeClient({
+    endpoint: bridge.endpoint,
+    token,
+    onInternalError: (error, source) => internalErrors.push(`${source}:${error.message}`),
+  });
+  try {
+    await client.connect();
+    const response = await client.requestSnapshot();
+    assert.equal(response.snapshot.runtimeEpoch, 1);
+    assert.equal(client.state, "ready");
+    assert.deepEqual(internalErrors, ["receipt:Uncorrelated Studio receipt"]);
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("a throwing projection subscriber does not reject the snapshot or close the Bridge", async () => {
+  const token = "bridge-token-projection-throw";
+  const internalErrors: string[] = [];
+  const bridge = await listenForHello((hello) => helloResponse(hello, token));
+  const client = new StudioBridgeClient({
+    endpoint: bridge.endpoint,
+    token,
+    onInternalError: (error, source) => internalErrors.push(`${source}:${error.message}`),
+  });
+  client.onProjectionChanged(() => {
+    throw new Error("projection subscriber exploded");
+  });
+  try {
+    await client.connect();
+    const response = await client.requestSnapshot();
+    assert.equal(response.snapshot.runtimeEpoch, 1);
+    assert.equal(client.state, "ready");
+    assert.equal(internalErrors.includes("projection:projection subscriber exploded"), true);
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
 test("WP-011 authenticates a real local Bridge connection without sending the token", async () => {
   const token = "bridge-token-1";
   let observedHello = "";
