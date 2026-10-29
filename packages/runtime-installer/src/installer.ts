@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { access, lstat, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { RuntimeInstallationManifest } from "@omp-studio/studio-protocol";
 import { parseRuntimeInstallationManifest } from "./manifest.js";
@@ -51,6 +51,13 @@ export interface RuntimeInstallerOptions {
 export interface RuntimeInstallOptions {
   /** Only set inside a maintenance transaction that has stopped all Runtime processes. */
   allowReferencedRepair?: boolean;
+}
+
+/** Signed archives and Actions downloads may lose modes without changing signed bytes. */
+async function restoreExecutableMode(directory: string, manifest: RuntimeInstallationManifest): Promise<void> {
+  if (process.platform !== "win32" && !manifest.platform.startsWith("win32-")) {
+    await chmod(join(directory, manifest.entrypoint), 0o755);
+  }
 }
 
 export class RuntimeInstallationReferencedError extends Error {
@@ -112,7 +119,10 @@ export class RuntimeInstaller {
           trustedKeys: this.#trustedKeys,
           ...(this.#signatureVerifier ? { signatureVerifier: this.#signatureVerifier } : {}),
         });
-        if (installed.manifest.runtimeVersion === manifest.runtimeVersion) return installed.manifest;
+        if (installed.manifest.runtimeVersion === manifest.runtimeVersion) {
+          await restoreExecutableMode(installedDirectory, installed.manifest);
+          return installed.manifest;
+        }
       } catch {
         // The replacement source is already verified; repair a corrupt installed copy.
       }
@@ -140,6 +150,7 @@ export class RuntimeInstaller {
           ...(this.#signatureVerifier ? { signatureVerifier: this.#signatureVerifier } : {}),
         });
         if (verified.manifest.runtimeVersion !== manifest.runtimeVersion) throw new Error("Artifact version changed during installation");
+        await restoreExecutableMode(directory, verified.manifest);
       },
     });
     return manifest;
@@ -172,7 +183,7 @@ export class RuntimeInstaller {
         current?.runtimeVersion === runtimeVersion || current?.previousRuntimeVersion === runtimeVersion;
       if (referenced) {
         throw new Error(
-          `Runtime ${runtimeVersion} failed its activation self-check; referenced installation and current.json were preserved`,
+          `Runtime ${runtimeVersion} failed its activation self-check: ${error instanceof Error ? error.message : String(error)}; referenced installation and current.json were preserved`,
           { cause: error },
         );
       }
@@ -212,7 +223,7 @@ export class RuntimeInstaller {
       );
     }
     throw new Error(
-      `Runtime ${runtimeVersion} failed its activation self-check; candidate moved to ${basename(quarantinePath)} and current.json was not changed`,
+      `Runtime ${runtimeVersion} failed its activation self-check: ${selfCheckError instanceof Error ? selfCheckError.message : String(selfCheckError)}; candidate moved to ${basename(quarantinePath)} (${quarantinePath}) and current.json was not changed`,
       { cause: selfCheckError },
     );
   }

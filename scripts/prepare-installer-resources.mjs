@@ -2,11 +2,12 @@
 // Never copies the private signing key. Never packs leftover artifact versions.
 // Invoked before electron-builder.
 
-import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { verifySignedArtifact, RUNTIME_ARTIFACT_LAYOUT, parseRuntimeInstallationManifest } from "@omp-studio/runtime-installer";
 import { resolveTargetArch, assertRuntimeManifestTarget, assertPeArchitecture } from "./windows-architecture.mjs";
 import { assertExecutableTarget, assertRuntimeManifestPlatform, resolveTargetPlatform, runtimeEntrypointFor } from "./target-platform.mjs";
+import { stageRuntimePayload } from "./stage-runtime-payload.mjs";
 
 import {
   REPOSITORY_ROOT,
@@ -129,7 +130,7 @@ async function main() {
   const destination = join(RUNTIME_PAYLOAD_DIR, runtimeVersion);
   await rm(RUNTIME_PAYLOAD_DIR, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
-  await cp(source, destination, { recursive: true });
+  await stageRuntimePayload(source, destination, TARGET);
   if (await exists(join(destination, RUNTIME_PRIVATE_KEY_FILE))) {
     throw new Error("refusing to pack Runtime private signing key inside the artifact tree");
   }

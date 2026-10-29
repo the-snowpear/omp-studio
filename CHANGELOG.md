@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 对话区的小地图轨道（圆点导航、视口指示条、筛选/跳转工具）从对话列右边缘移到左边缘：正文与 Composer 的净宽、同宽同中线不变，回到最新、审批/提问浮层、任务进度、子代理检查卡和 `xd://` 通知都跟着让到同一侧；窄列隐藏小地图、回到原生滚动条的行为保持不变。轨道底部的「筛选」与「回到最新」按钮改为在轨道宽度内水平居中（与轨道连接线同轴），不再偏左。
 
+## [0.1.17] - 2026-10-29
+
+### Fixed
+
+- 修复 macOS 随包 Runtime 在下载构建工件后丢失执行权限、首次启动无法激活的问题；打包暂存及本机安装恢复 `0755`，保留签名字节与包内 / ZIP 权限审计（[#18](https://github.com/the-snowpear/omp-studio/issues/18)）。激活失败时显示自检原因与隔离位置。
+- 修复桌面升级后仍沿用旧 Runtime：启动时比较随包与当前版本，自动验签、自检并激活较新的随包版本；保留同版、更新的独立 Runtime 及回滚选择，继续按协议与能力协商兼容多版本（[#19](https://github.com/the-snowpear/omp-studio/issues/19)）。
+- Worktree 创建选择支持关闭、Esc 和重新打开；等待操作时显示进度，失败后可重试，Runtime 断开后移除弹窗，避免故障弹窗挡住诊断入口（[#19](https://github.com/the-snowpear/omp-studio/issues/19)）。
+- 修复 Runtime 在启动握手后断开仍被误报就绪的问题；保留启动失败状态并记录命令清单读取失败。
+
 ## [0.1.16] - 2026-10-29
 
 ### Fixed
@@ -365,7 +374,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.17...HEAD
+[0.1.17]: https://github.com/the-snowpear/omp-studio/compare/v0.1.16...v0.1.17
+[0.1.16]: https://github.com/the-snowpear/omp-studio/compare/v0.1.15...v0.1.16
+[0.1.15]: https://github.com/the-snowpear/omp-studio/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/the-snowpear/omp-studio/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/the-snowpear/omp-studio/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/the-snowpear/omp-studio/compare/v0.1.11...v0.1.12

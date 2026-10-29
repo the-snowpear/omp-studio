@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { mkdtemp, mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
@@ -32,10 +32,12 @@ async function artifact(
   version: string,
   content = `omp-${version}`,
   channel: "stable" | "canary" = "stable",
+  platform = "win32-x64",
 ): Promise<string> {
   const directory = join(parent, `artifact-${version}`);
   await mkdir(directory);
-  await writeFile(join(directory, "omp.exe"), content);
+  const entrypoint = platform.startsWith("win32-") ? "omp.exe" : "omp";
+  await writeFile(join(directory, entrypoint), content);
   const manifest = `${JSON.stringify({
       runtimeVersion: version,
       upstreamVersion: "0.0.0",
@@ -45,8 +47,8 @@ async function artifact(
       profile: "full-parity-v1",
       capabilityHash: "capability-fixture",
       commandManifestHash: "command-fixture",
-      platform: "win32-x64",
-      entrypoint: "omp.exe",
+      platform,
+      entrypoint,
       channel,
     })}\n`;
   await writeFile(join(directory, "runtime-manifest.json"), manifest);
@@ -54,12 +56,30 @@ async function artifact(
   const manifestDigest = createHash("sha256").update(manifest).digest("hex");
   const checksums = `${JSON.stringify({
       algorithm: "sha256",
-      files: { "omp.exe": digest, "runtime-manifest.json": manifestDigest },
+      files: { [entrypoint]: digest, "runtime-manifest.json": manifestDigest },
     })}\n`;
   await writeFile(join(directory, "checksums.json"), checksums);
   await writeSignature(directory, manifest, checksums);
   return directory;
 }
+
+test("POSIX install restores execute bits before activation and on same-version reinstall", { skip: process.platform === "win32" }, async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-runtime-mode-"));
+  try {
+    const root = join(temporary, "installed"), installer = runtimeInstaller(root);
+    const source = await artifact(temporary, "v1", "signed executable", "stable", "darwin-arm64");
+    await chmod(join(source, "omp"), 0o644);
+    await installer.install(source);
+    const installed = join(root, "versions", "v1", "omp");
+    const checkMode = { run: async () => { assert.equal((await stat(installed)).mode & 0o777, 0o755); } };
+    await installer.activate("v1", { selfCheck: checkMode });
+    await chmod(installed, 0o644);
+    await installer.install(source);
+    await installer.activate("v1", { selfCheck: checkMode });
+    assert.equal((await stat(join(source, "omp"))).mode & 0o777, 0o644);
+    assert.equal(await readFile(installed, "utf8"), "signed executable");
+  } finally { await rm(temporary, { recursive: true, force: true }); }
+});
 
 test("WP-003 installs two versions, activates, and rolls back atomically", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "omp-studio-installer-"));

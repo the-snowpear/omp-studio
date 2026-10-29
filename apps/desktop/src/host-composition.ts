@@ -1125,6 +1125,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     const workspace = context.selectedWorkspace.current;
     let stageStarted = performance.now();
     try {
+      let seedFailure: string | undefined;
       if (options.managedInstall?.seedOnStart === true) {
         try {
           const seeded = await seedManagedRuntimeFromArtifact({
@@ -1136,13 +1137,17 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
           });
           if (seeded === "seeded") seams.hostLog?.write("info", "runtime.seed", "seeded managed runtime from shipped artifact");
         } catch (error) {
+          seedFailure = error instanceof Error ? error.message : String(error);
           seams.hostLog?.write("warn", "runtime.seed.fail", errorDetailForLog(error));
         }
         startupStage("seed", stageStarted, seams);
       }
       if (startup.closing) return;
       stageStarted = performance.now();
-      const resolution = await backend.resolve(options.preference ?? DEFAULT_RUNTIME_PREFERENCE);
+      const resolved = await backend.resolve(options.preference ?? DEFAULT_RUNTIME_PREFERENCE);
+      const resolution = seedFailure !== undefined && resolved.classification === "rejected"
+        ? { ...resolved, rejectionReason: seedFailure }
+        : resolved;
       startupStage("resolve", stageStarted, seams);
       seams.hostLog?.write(
         resolution.classification === "managed" || resolution.classification === "compatible-system" ? "info" : "warn",

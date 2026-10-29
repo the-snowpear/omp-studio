@@ -23,7 +23,8 @@ async function openWorkspace(client: StudioClient, workspaceId: string, fresh: b
 /** The Runtime independently fences the first prompt until this choice has been resolved. */
 export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(blocked: boolean): void; onOpenWorkspace?: ((workspaceId: string) => Promise<void>) | undefined }) {
   const { preview } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
-  const [phase, setPhase] = useState<"idle" | "checking" | "ask" | "creating" | "failed">("idle"), [error, setError] = useState("");
+  const [phase, setPhase] = useState<"idle" | "checking" | "ask" | "creating" | "continuing" | "failed">("idle"), [error, setError] = useState("");
+  const [dismissed, setDismissed] = useState(false);
   const epoch = useRef(0), lock = useRef(false), moving = useRef(false);
   const openWorkspaceAction = useRef(props.onOpenWorkspace);
   useLayoutEffect(() => { openWorkspaceAction.current = props.onOpenWorkspace; }, [props.onOpenWorkspace]);
@@ -45,8 +46,8 @@ export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(
     finally { if (epoch.current === current) { lock.current = false; moving.current = false; } }
   }, [props.client, props.context?.sessionId, gate]);
   useLayoutEffect(() => {
-    if (moving.current) return;
-    const current = ++epoch.current; lock.current = false; setError("");
+    if (moving.current && enabled) return;
+    const current = ++epoch.current; lock.current = false; setError(""); setDismissed(false);
     if (!enabled) { setPhase("idle"); gate(false); return; }
     setPhase("checking"); gate(true);
     void invoke(props.client!, "worktrees.session.startPolicy", { sessionId: props.context!.sessionId! }).then(policy => {
@@ -58,16 +59,32 @@ export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(
     return () => { if (!moving.current) { epoch.current++; gate(false); } };
   }, [enabled, props.context?.sessionId, props.client, create, gate]);
   useEffect(() => () => { epoch.current++; gate(false); }, [gate]);
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setDismissed(true); };
+    if (phase === "idle" || phase === "checking" || dismissed) return;
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [phase, dismissed]);
   async function continueHere() {
     if (lock.current) return;
     if (!props.client || !props.context?.sessionId) { setPhase("idle"); gate(false); return; }
-    const current = epoch.current; lock.current = true;
+    const current = epoch.current; lock.current = true; setPhase("continuing"); setError("");
     try { await invoke(props.client, "worktrees.session.continueHere", { sessionId: props.context.sessionId }); if (epoch.current === current) { setPhase("idle"); gate(false); } }
-    catch (cause) { if (epoch.current === current) setError(hostErrorMessage(cause, "Cannot continue in this workspace")); }
+    catch (cause) { if (epoch.current === current) { setPhase("failed"); setError(hostErrorMessage(cause, "Cannot continue in this workspace")); } }
     finally { if (epoch.current === current) lock.current = false; }
   }
   if (phase === "idle" || phase === "checking") return null;
-  return createPortal(<div className="worktree-modal-backdrop"><section className="worktree-modal worktree-launch" role="dialog" aria-modal="true" aria-label={zh ? "新会话工作区" : "New session workspace"}><span className="feature-eyebrow">{zh ? "独立工作目录" : "ISOLATED WORKSPACE"}</span><h2>{zh ? "为这次任务创建 Worktree" : "Create a worktree for this task"}</h2><p>{zh ? "从当前 HEAD 创建独立分支。原工作区的未提交修改保持原样，新会话在独立目录中运行。" : "Create a branch from HEAD. Uncommitted source changes stay in place; the new session runs in its own directory."}</p>{phase === "creating" ? <p role="status"><progress /> {zh ? "正在准备分支与新会话…" : "Preparing the branch and session…"}</p> : <div className="feature-actions"><button className="btn primary" onClick={() => void create(epoch.current)}>{zh ? "创建并进入" : "Create and open"}</button><button className="btn outline" onClick={() => void continueHere()}>{zh ? "留在当前工作区" : "Stay in this workspace"}</button></div>}{error ? <p role="alert" className="feature-error">{error}</p> : null}</section></div>, document.body);
+  if (dismissed) return <div className="feature-status" role="status">
+    {zh ? "发送前需完成工作区选择。关闭提示不会取消正在执行的操作。" : "Resolve the workspace choice before sending. Dismissing does not cancel an operation in progress."}
+    <button className="btn small ghost" onClick={() => setDismissed(false)}>{zh ? "显示工作区选择" : "Show workspace choice"}</button>
+    {error ? <p role="alert">{error}</p> : null}
+  </div>;
+  return createPortal(<div className="worktree-modal-backdrop"><section className="worktree-modal worktree-launch" role="dialog" aria-modal="true" aria-label={zh ? "新会话工作区" : "New session workspace"}>
+    <header className="feature-settings-head"><span className="feature-eyebrow">{zh ? "独立工作目录" : "ISOLATED WORKSPACE"}</span><button className="icon-btn" aria-label={zh ? "关闭工作区选择" : "Close workspace choice"} onClick={() => setDismissed(true)}><Icon name="x" /></button></header>
+    <h2>{zh ? "为这次任务创建 Worktree" : "Create a worktree for this task"}</h2><p>{zh ? "从当前 HEAD 创建独立分支。原工作区的未提交修改保持原样，新会话在独立目录中运行。" : "Create a branch from HEAD. Uncommitted source changes stay in place; the new session runs in its own directory."}</p>
+    {phase === "creating" || phase === "continuing" ? <p role="status"><progress /> {phase === "creating" ? zh ? "正在准备分支与新会话…" : "Preparing the branch and session…" : zh ? "正在确认当前工作区…" : "Confirming the current workspace…"}</p> : <div className="feature-actions"><button className="btn primary" onClick={() => void create(epoch.current)}>{zh ? "创建并进入" : "Create and open"}</button><button className="btn outline" onClick={() => void continueHere()}>{zh ? "留在当前工作区" : "Stay in this workspace"}</button></div>}
+    {error ? <p role="alert" className="feature-error">{error}</p> : null}
+  </section></div>, document.body);
 }
 
 export function SessionWorktreesPane(props: FeatureSettingsProps & { launcher?: boolean; onOpenWorkspace?: ((workspaceId: string) => Promise<void>) | undefined }) {
