@@ -1,3 +1,4 @@
+import { SlidingTabs } from "./SlidingTabs";
 import { AppSelect } from "./AppSelect";
 import { AgentModelDetails } from "./models/AgentModelDetails";
 import { PREVIEW_AGENT_DEFINITIONS } from "./preview/agentSpawnPreview";
@@ -2990,29 +2991,9 @@ export function AgentHubPage({
                             ) : null}
                           </div>
                           <div className="hub-detail-tabs">
-                            <div
-                              className="tabs"
-                              role="tablist"
-                              aria-label="Agent 详情"
-                              id="hubTabs"
-                            >
-                              {TABS.map(([id, label]) => (
-                                <button
-                                  key={id}
-                                  type="button"
-                                  role="tab"
-                                  className={tab === id ? "active" : undefined}
-                                  aria-selected={tab === id}
-                                  tabIndex={tab === id ? 0 : -1}
-                                  onClick={() => {
-                                    setTab(id);
-                                    setNotice(null);
-                                  }}
-                                >
-                                  {hubWord(label, zh)}
-                                </button>
-                              ))}
-                            </div>
+                            <SlidingTabs id="hubTabs" ariaLabel={zh ? "Agent 详情" : "Agent details"} value={tab} orientation="horizontal" className="tabs"
+                              items={TABS.map(([id, label]) => ({ id, label: hubWord(label, zh), icon: "bot", buttonId: `hub-tab-${id}`, panelId: "hubDetailBody" }))}
+                              onChange={id => { setTab(id); setNotice(null); }} />
                           </div>
                           <div className="hub-detail-body" id="hubDetailBody">
                             {renderDetailBody(selectedAgent)}

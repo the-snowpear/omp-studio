@@ -25,6 +25,7 @@ import "./styles/models-roles.css";
 import "./styles/btw.css";
 import "./App.css";
 import "./styles/typography.css";
+import "./styles/tabs.css";
 
 // Explicit QA parameters affect only this local fixture entry, never the packaged app.
 const qaParams = new URLSearchParams(window.location.search);

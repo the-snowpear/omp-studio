@@ -3,6 +3,7 @@ import { createModelParameterDraft, effectiveModelParameters, effectiveParameter
 import { previewModelAdaptation } from "./preview/modelAdaptationPreview";
 import { thinkingForRoleModel, sameModelParameter, modelParameterValues } from "@omp-studio/client-contract";
 import { AppSelect } from "./AppSelect";
+import { SlidingTabs } from "./SlidingTabs";
 import { AgentPoolsPane } from "./models/AgentPoolsPane";
 import { ModelCompactionPane } from "./models/ModelCompactionPane";
 import { ModelPresetsPane } from "./models/ModelPresetsPane";
@@ -13,7 +14,7 @@ import { loadRuntimeModels } from "./models/runtimeModels";
 import { RuntimeCredentials, VisionModelStatus } from "./models/RuntimeCredentials";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, CSSProperties } from "react";
+import type { FormEvent, PointerEvent as ReactPointerEvent, CSSProperties } from "react";
 import type {
   ClientBootstrap,
   AvailableModelRecord,
@@ -1746,10 +1747,6 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragPhase, setDragPhase] = useState<"dragging" | "settling">("dragging");
   const loaded = useRef(false);
-  const mcTabsRef = useRef<HTMLDivElement>(null);
-  const tabWinRef = useRef<HTMLSpanElement>(null);
-  const tabMirrorRef = useRef<HTMLSpanElement>(null);
-  const tabWinPrimed = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
   const orderRef = useRef(displayOrder);
   const clearDragStylesRef = useRef(false);
@@ -1939,63 +1936,6 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   });
   const availCount = providers.filter((item) => item.enabled && item.status === "available").length;
   const roleIssues = roles.filter((role) => role.issue).length;
-
-  // 把滑动选中气泡对准当前激活的 tab 按钮：窗口盖在其上，镜像反向位移保持
-  // 克隆与基础层对齐（与 SecondaryPage 的 page-nav 同一套算法）。
-  useLayoutEffect(() => {
-    const tabs = mcTabsRef.current;
-    const win = tabWinRef.current;
-    const mirror = tabMirrorRef.current;
-    if (!tabs || !win || !mirror) return;
-
-    const sync = () => {
-      const active = tabs.querySelector<HTMLElement>(`#${TAB_BUTTON_ID[tab]}`);
-      if (!active) return;
-      const animate = tabWinPrimed.current;
-      if (!animate) {
-        win.style.transition = "none";
-        mirror.style.transition = "none";
-      }
-      win.style.left = `${active.offsetLeft}px`;
-      win.style.width = `${active.offsetWidth}px`;
-      mirror.style.left = `${-active.offsetLeft}px`;
-      if (!animate) {
-        void win.offsetWidth;
-        win.style.removeProperty("transition");
-        mirror.style.removeProperty("transition");
-        tabWinPrimed.current = true;
-      }
-    };
-
-    sync();
-
-    if (typeof ResizeObserver !== "undefined") {
-      const observer = new ResizeObserver(() => sync());
-      observer.observe(tabs);
-      for (const btn of tabs.querySelectorAll('[role="tab"]')) {
-        observer.observe(btn);
-      }
-      return () => observer.disconnect();
-    }
-  }, [tab, providers.length, roles.length, agentCount]);
-
-  const activate = (next: McTab, focus = false) => {
-    setTab(next);
-    if (focus) document.getElementById(TAB_BUTTON_ID[next])?.focus();
-  };
-
-  const onTabKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const keys: McTab[] = ["providers", "roles", "subagents", "websearch", "presets", "accounts", "benchmark"];
-    const index = keys.indexOf(tab);
-    let next: McTab | null = null;
-    if (event.key === "ArrowRight") next = keys[(index + 1) % keys.length] ?? "providers";
-    else if (event.key === "ArrowLeft") next = keys[(index - 1 + keys.length) % keys.length] ?? "providers";
-    else if (event.key === "Home") next = "providers";
-    else if (event.key === "End") next = "benchmark";
-    if (!next) return;
-    event.preventDefault();
-    activate(next, true);
-  };
 
   const toast = (text: string) => {
     setFlash(text);
@@ -3094,38 +3034,23 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         <button type="button" className="btn small outline" disabled={catalogUpdating || (!preview && !data)} onClick={() => void updateModelCatalog()}>{t(catalogUpdating ? "modelAdaptation.updating" : "modelAdaptation.update")}</button>
       </div>
       <div className="mc-tabbar">
-        <div className="mc-tabs" id="mcTabs" ref={mcTabsRef} role="tablist" aria-label={t("modelConfig.modelConfigView")} onKeyDown={onTabKey}>
-          <button role="tab" id="mcTabProviders" aria-controls="mcPanelProviders" aria-selected={tab === "providers"} tabIndex={tab === "providers" ? 0 : -1} className={tab === "providers" ? "active" : undefined} onClick={() => activate("providers")}>
-            <Icon name="server" extra="sm" /><span>{t("modelConfig.providersTab")}</span>
-            <span className={`chip ${availCount === 0 && providers.length > 0 ? "amber" : "gray"} xs`}>{providers.length}<span className="sr-only"> {t("modelConfig.providersCountAria", { count: providers.length })}</span></span>
-          </button>
-          <button role="tab" id="mcTabRoles" aria-controls="mcPanelRoles" aria-selected={tab === "roles"} tabIndex={tab === "roles" ? 0 : -1} className={tab === "roles" ? "active" : undefined} onClick={() => activate("roles")}>
-            <Icon name="steering" extra="sm" /><span>{t("modelConfig.rolesTab")}</span>
-            <span className={`chip ${roleIssues ? "red" : "gray"} xs`}>{roles.length}<span className="sr-only"> {t("modelConfig.rolesCountAria", { count: roles.length })}</span></span>
-          </button>
-          <button role="tab" id="mcTabSubagents" aria-controls="mcPanelSubagents" aria-selected={tab === "subagents"} tabIndex={tab === "subagents" ? 0 : -1} className={tab === "subagents" ? "active" : undefined} onClick={() => activate("subagents")}>
-            <Icon name="bot" extra="sm" /><span>{t("modelConfig.subagentsTab")}</span>
-            <span className="chip gray xs">{agentCount}<span className="sr-only"> {t("modelConfig.subagentsCountAria", { count: agentCount })}</span></span>
-          </button>
-          <button role="tab" id="mcTabWebSearch" aria-controls="mcPanelWebSearch" aria-selected={tab === "websearch"} tabIndex={tab === "websearch" ? 0 : -1} className={tab === "websearch" ? "active" : undefined} onClick={() => activate("websearch")}>
-            <Icon name="globe" extra="sm" /><span>{t("modelConfig.webSearchTab")}</span>
-            <span className={`chip ${webSearchReadyCount === 0 ? "amber" : "gray"} xs`}>{webSearchReadyCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchReadyCount })}</span></span>
-          </button>
-          <button role="tab" id="mcTabPresets" aria-controls="mcPanelPresets" aria-selected={tab === "presets"} tabIndex={tab === "presets" ? 0 : -1} className={tab === "presets" ? "active" : undefined} onClick={() => activate("presets")}><Icon name="layers" extra="sm" /><span>{resolvedLanguage === "zh" ? "预设" : "Presets"}</span></button>
-          <button role="tab" id="mcTabAccounts" aria-controls="mcPanelAccounts" aria-selected={tab === "accounts"} tabIndex={tab === "accounts" ? 0 : -1} className={tab === "accounts" ? "active" : undefined} onClick={() => activate("accounts")}><Icon name="user" extra="sm" /><span>{resolvedLanguage === "zh" ? "账户" : "Accounts"}</span></button>
-          <button role="tab" id="mcTabBenchmark" aria-controls="mcPanelBenchmark" aria-selected={tab === "benchmark"} tabIndex={tab === "benchmark" ? 0 : -1} className={tab === "benchmark" ? "active" : undefined} onClick={() => activate("benchmark")}><Icon name="pulse" extra="sm" /><span>{t("modelConfig.benchmarkTab")}</span></button>
-          <span className="mc-tab-window" ref={tabWinRef} aria-hidden="true">
-            <span className="mc-tab-mirror" ref={tabMirrorRef}>
-              <button type="button" tabIndex={-1}><Icon name="server" extra="sm" /><span>{t("modelConfig.providersTab")}</span><span className={`chip ${availCount === 0 && providers.length > 0 ? "amber" : "gray"} xs`}>{providers.length}<span className="sr-only"> {t("modelConfig.providersCountAria", { count: providers.length })}</span></span></button>
-              <button type="button" tabIndex={-1}><Icon name="steering" extra="sm" /><span>{t("modelConfig.rolesTab")}</span><span className={`chip ${roleIssues ? "red" : "gray"} xs`}>{roles.length}<span className="sr-only"> {t("modelConfig.rolesCountAria", { count: roles.length })}</span></span></button>
-              <button type="button" tabIndex={-1}><Icon name="bot" extra="sm" /><span>{t("modelConfig.subagentsTab")}</span><span className="chip gray xs">{agentCount}<span className="sr-only"> {t("modelConfig.subagentsCountAria", { count: agentCount })}</span></span></button>
-              <button type="button" tabIndex={-1}><Icon name="globe" extra="sm" /><span>{t("modelConfig.webSearchTab")}</span><span className="chip gray xs">{webSearchReadyCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchReadyCount })}</span></span></button>
-              <button type="button" tabIndex={-1}><Icon name="layers" extra="sm" /><span>{resolvedLanguage === "zh" ? "预设" : "Presets"}</span></button>
-              <button type="button" tabIndex={-1}><Icon name="user" extra="sm" /><span>{resolvedLanguage === "zh" ? "账户" : "Accounts"}</span></button>
-              <button type="button" tabIndex={-1}><Icon name="pulse" extra="sm" /><span>{t("modelConfig.benchmarkTab")}</span></button>
-            </span>
-          </span>
-        </div>
+        <SlidingTabs<McTab>
+          id="mcTabs"
+          className="mc-tabs"
+          ariaLabel={t("modelConfig.modelConfigView")}
+          orientation="horizontal"
+          value={tab}
+          onChange={setTab}
+          items={[
+            { id: "providers", icon: "server", label: t("modelConfig.providersTab"), buttonId: TAB_BUTTON_ID.providers, panelId: "mcPanelProviders", badge: <span className={`chip ${availCount === 0 && providers.length > 0 ? "amber" : "gray"} xs`}>{providers.length}<span className="sr-only"> {t("modelConfig.providersCountAria", { count: providers.length })}</span></span> },
+            { id: "roles", icon: "steering", label: t("modelConfig.rolesTab"), buttonId: TAB_BUTTON_ID.roles, panelId: "mcPanelRoles", badge: <span className={`chip ${roleIssues ? "red" : "gray"} xs`}>{roles.length}<span className="sr-only"> {t("modelConfig.rolesCountAria", { count: roles.length })}</span></span> },
+            { id: "subagents", icon: "bot", label: t("modelConfig.subagentsTab"), buttonId: TAB_BUTTON_ID.subagents, panelId: "mcPanelSubagents", badge: <span className="chip gray xs">{agentCount}<span className="sr-only"> {t("modelConfig.subagentsCountAria", { count: agentCount })}</span></span> },
+            { id: "websearch", icon: "globe", label: t("modelConfig.webSearchTab"), buttonId: TAB_BUTTON_ID.websearch, panelId: "mcPanelWebSearch", badge: <span className={`chip ${webSearchReadyCount === 0 ? "amber" : "gray"} xs`}>{webSearchReadyCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchReadyCount })}</span></span> },
+            { id: "presets", icon: "layers", label: resolvedLanguage === "zh" ? "预设" : "Presets", buttonId: TAB_BUTTON_ID.presets, panelId: "mcPanelPresets" },
+            { id: "accounts", icon: "user", label: resolvedLanguage === "zh" ? "账户" : "Accounts", buttonId: TAB_BUTTON_ID.accounts, panelId: "mcPanelAccounts" },
+            { id: "benchmark", icon: "pulse", label: t("modelConfig.benchmarkTab"), buttonId: TAB_BUTTON_ID.benchmark, panelId: "mcPanelBenchmark" },
+          ]}
+        />
       </div>
 
       <ToastHost message={flash} onDismiss={() => setFlash(null)} />

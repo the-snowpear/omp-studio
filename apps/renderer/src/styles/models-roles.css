@@ -52,7 +52,7 @@
    相比之下编辑器里那些 .seg 是字段级的迷你控件，这里是与「整个页面上
    半页还是下半页」对应的页面级导航，尺寸和字重都要更重。 */
 .mc-tabs {
-  position: relative;   /* 滑动气泡的包含块 + 按钮 offsetLeft/Width 的度量基准 */
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -73,55 +73,9 @@
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .mc-tabs button:hover { color: var(--accent); }
-/* 激活态完全由滑动气泡（.mc-tab-window）承担，基础按钮不再写 active 背景/
-   颜色：否则点击瞬间目标标签会原地「亮起」终态，与气泡滑动叠加出淡入效果。
-   气泡盖住的标签由窗口内镜像克隆透出紫色文字，气泡滑走即恢复中性色 ——
-   切换只剩气泡的左右滑动。 */
-/* .mc-tabs button.active 不再定义样式 */
+/* Actual-button selection and overflow are shared with the other page tabs. */
 /* 计数徽标在 tab 里是次要信息：不该和标签抢字重。 */
 .mc-tabs .chip { font-weight: var(--fw-regular); }
-
-/* ---- 滑动选中气泡（复用切页导航 page-nav 的「遮盖变色」机制）----
-   一块绝对定位的 accent-soft 窗口盖在激活标签上，窗口里是一份紫色镜像克隆
-   （各标签内容原样复制、颜色固定 accent）。窗口的 left/width 由 JS 按激活
-   标签的 offsetLeft/offsetWidth 写入，镜像的 left 反向等量偏移，克隆与基础
-   层保持逐像素对齐；窗口 overflow:hidden 裁剪，气泡盖住哪个标签，那个标签
-   就实时透出紫色文字 —— 切换时气泡左右滑动，被盖过的标签随之变色。
-   transition 必须写在 left/width 上（不要用 translateX(var())：Chromium 不
-   对手写 var() 引用的 transform 做 transition）。left/width 会随内容加载
-   （徽标计数变化）联动，所以镜像布局要与 .mc-tabs 完全一致。 */
-.mc-tab-window {
-  position: absolute;
-  top: 3px;          /* .mc-tabs 的 padding-top */
-  left: 0;
-  height: 30px;      /* .mc-tabs button 的 height */
-  width: 0;
-  border-radius: var(--r-6);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent-border);
-  overflow: hidden;
-  pointer-events: none;
-  transition: left var(--dur-slide) var(--ease-ios),
-              width var(--dur-slide) var(--ease-ios);
-}
-.mc-tab-mirror {
-  position: absolute;
-  top: 0;
-  left: 0;
-  display: flex;
-  align-items: center;
-  gap: 2px;             /* 必须与 .mc-tabs 的 gap 一致 */
-  padding: 0 0 0 3px;   /* 左边距补偿 offsetLeft 里的容器 padding，克隆才对齐 */
-  box-sizing: content-box;
-  width: max-content;
-  transition: left var(--dur-slide) var(--ease-ios);
-}
-.mc-tab-mirror button {
-  color: var(--accent);
-  cursor: default;
-  flex: none;
-}
-.mc-tab-mirror .chip { color: var(--accent); }
 
 /* 面板切换用 [hidden]，浏览器默认即 display:none。这里只保证没有别的规则
    把它 display 回来（.page-wide 下的元素较多）。

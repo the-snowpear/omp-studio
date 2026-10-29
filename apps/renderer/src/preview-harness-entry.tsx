@@ -19,6 +19,7 @@ import "./styles/pages.css";
 import "./styles/agent-hub.css";
 import "./styles/models-roles.css";
 import "./App.css";
+import "./styles/tabs.css";
 
 const host = document.getElementById("root");
 if (host !== null) {

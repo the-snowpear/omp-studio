@@ -50,6 +50,7 @@ import "./styles/models-roles.css";
 import "./styles/btw.css";
 import "./App.css";
 import "./styles/typography.css";
+import "./styles/tabs.css";
 
 if (import.meta.env.DEV) {
   const disposePerformanceTimelineCleanup = initPerformanceTimelineCleanup();

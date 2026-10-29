@@ -1,3 +1,4 @@
+import { SlidingTabs } from "../SlidingTabs";
 import { AppSelect } from "../AppSelect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WorkspaceDialog } from "../workspaces/Workspace";
@@ -517,30 +518,9 @@ export function SkillsharePane({
           )}
         </p>
       ) : null}
-      <div
-        className="skillshare-tabs"
-        role="tablist"
-        aria-label={t("注册表视图", "Registry view")}
-      >
-        {(["browse", "installed", "manage", "tokens"] as const).map((name) => (
-          <button
-            key={name}
-            role="tab"
-            aria-selected={tab === name}
-            className={`btn small ${tab === name ? "primary" : "outline"}`}
-            onClick={() => setTab(name)}
-          >
-            {
-              {
-                browse: t("发现与安装", "Discover / install"),
-                installed: t("已安装", "Installed"),
-                manage: t("发布与维护", "Publish / maintain"),
-                tokens: t("发布令牌", "Publish tokens"),
-              }[name]
-            }
-          </button>
-        ))}
-      </div>
+      <SlidingTabs ariaLabel={t("注册表视图", "Registry view")} value={tab} orientation="horizontal" className="skillshare-tabs"
+        items={(["browse", "installed", "manage", "tokens"] as const).map(id => ({ id, icon: "package", label: { browse: t("发现与安装", "Discover / install"), installed: t("已安装", "Installed"), manage: t("发布与维护", "Publish / maintain"), tokens: t("发布令牌", "Publish tokens") }[id], buttonId: `skillshare-tab-${id}`, panelId: `skillshare-${id}` }))}
+        onChange={setTab} />
       {tab === "browse" ? (
         <>
           <div className="skillshare-toolbar">

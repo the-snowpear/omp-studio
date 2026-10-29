@@ -746,37 +746,6 @@ img.profile-edit-avatar-img { display: block; }
   color: var(--text-faint);
 }
 
-.cap-tab-window {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  width: auto;
-  height: 0;
-  border-radius: var(--r-6);
-  background: var(--accent-soft);
-  overflow: hidden;
-  pointer-events: none;
-  transition: top var(--dur-slide) var(--ease-ios),
-              height var(--dur-slide) var(--ease-ios);
-}
-.cap-tab-mirror {
-  position: absolute;
-  top: 0;
-  left: 0;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  transition: top var(--dur-slide) var(--ease-ios);
-}
-.cap-tab-mirror button {
-  color: var(--accent);
-  cursor: default;
-  background: transparent;
-}
-.cap-side .cap-tab-mirror button:hover { background: transparent; }
-.cap-tab-mirror .cnt { color: var(--text-faint); }
-
 .cap-main {
   flex: 1;
   min-width: 0;

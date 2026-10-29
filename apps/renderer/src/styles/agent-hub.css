@@ -766,20 +766,11 @@
   font-family: var(--font-mono);
 }
 
-/* 详情 tabs 激活态（沿用 components .tabs 结构，这里补 active 底色） */
+/* Detail tab spacing; shared selection lives in tabs.css. */
 .hub-detail-tabs .tabs { display: flex; gap: var(--sp-2); }
 .hub-detail-tabs .tabs [role="tab"] {
   padding: 7px var(--sp-12);
   font-size: var(--fs-12);
-  color: var(--text-3);
-  border-radius: var(--r-6) var(--r-6) 0 0;
-  border-bottom: 2px solid transparent;
-}
-.hub-detail-tabs .tabs [role="tab"]:hover { color: var(--text); background: var(--surface-hover); }
-.hub-detail-tabs .tabs [role="tab"].active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-  font-weight: var(--fw-medium);
 }
 
 /* 骨架屏复用 components .card 即可，无需新增 */

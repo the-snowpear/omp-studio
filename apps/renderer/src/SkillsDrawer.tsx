@@ -1,3 +1,4 @@
+import { SlidingTabs } from "./SlidingTabs";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { StudioClient } from "@omp-studio/client-contract";
@@ -443,29 +444,13 @@ export function SkillsDrawer({
         />
         <span className="kbd">/</span>
       </label>
-      <nav className="sd-tabs" role="tablist" aria-label={t("skills.categoriesAria")}>
-        {([
+      <SlidingTabs ariaLabel={t("skills.categoriesAria")} value={cat} orientation="horizontal" className="sd-tabs"
+        items={([
           ["all", t("common.all"), items.length],
           ["skill", t("skills.tabSkills"), skillN],
           ["plugin", t("skills.tabPlugins"), pluginN],
-        ] as const).map(([key, label, count]) => (
-          <button
-            key={key}
-            className={`sd-tab${cat === key ? " active" : ""}`}
-            role="tab"
-            aria-selected={cat === key}
-            data-cat={key}
-            type="button"
-            onClick={() => {
-              if (key === cat) return;
-              setCat(key);
-              setFilterEpoch((epoch) => epoch + 1);
-            }}
-          >
-            {label} <span className="count">{count}</span>
-          </button>
-        ))}
-      </nav>
+        ] as const).map(([id, label, count]) => ({ id, label, icon: id === "all" ? "layers" : id === "skill" ? "sparkles" : "package", buttonId: `sd-tab-${id}`, panelId: "sdBody", badge: <span className="count">{count}</span> }))}
+        onChange={key => { setCat(key); setFilterEpoch(epoch => epoch + 1); }} />
       <div className="sd-body" id="sdBody" tabIndex={-1}>
         {grouped.length === 0 ? (
           <div className="sd-empty">

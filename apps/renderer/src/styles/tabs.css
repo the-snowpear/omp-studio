@@ -1,0 +1,86 @@
+/* Actual content tabs, not navigation links or field-level .seg filters.
+ * Workbench and page tabs share selection styling; compact Ask chips keep
+ * their own height. No hidden selection windows or mirrored label layers. */
+:root {
+  --tab-radius: var(--r-6);
+  --tab-height: 32px;
+}
+
+:is(.tabs, .mc-tabs, .workspace-tabs, .sd-tabs, .skillshare-tabs)[role="tablist"] {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+:is(.tabs, .mc-tabs, .workspace-tabs, .sd-tabs, .cap-side, .skillshare-tabs, .dk-head-chips)[role="tablist"] > [role="tab"] {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--tab-radius);
+  background: transparent;
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+:is(.tabs, .mc-tabs, .workspace-tabs, .sd-tabs, .cap-side, .skillshare-tabs)[role="tablist"] > [role="tab"] {
+  height: var(--tab-height);
+}
+
+:is(.tabs, .mc-tabs, .workspace-tabs, .sd-tabs, .cap-side, .skillshare-tabs, .dk-head-chips)[role="tablist"] > [role="tab"]:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+:is(.tabs, .mc-tabs, .workspace-tabs, .sd-tabs, .cap-side, .skillshare-tabs, .dk-head-chips)[role="tablist"] > [role="tab"]:is(.active, [aria-selected="true"]) {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
+}
+
+:is(.tabs, .mc-tabs, .workspace-tabs, .sd-tabs, .cap-side, .skillshare-tabs, .dk-head-chips)[role="tablist"] > [role="tab"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The overflow picker stays outside the scrollport and the tablist semantics. */
+.page-tabs {
+  display: flex;
+  gap: var(--sp-4);
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+}
+.page-tabs--horizontal { align-items: center; }
+.page-tabs--horizontal > [role="tablist"] { flex: 0 1 auto; }
+.page-tabs--horizontal > [role="tablist"] > [role="tab"] { max-width: min(240px, 100%); }
+.page-tabs--vertical { width: 200px; flex: none; flex-direction: column; }
+.page-tabs--vertical > .cap-side { width: 100%; min-height: 0; flex: 1 1 auto; gap: 2px; }
+.page-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-tabs [role="tab"] > :is(.icon, .chip, .cnt) { flex-shrink: 0; }
+.page-tabs-all.app-select {
+  flex: none;
+  width: 32px;
+  min-width: 32px;
+  height: var(--tab-height);
+  padding: 0;
+  justify-content: center;
+  border-radius: var(--tab-radius);
+}
+.page-tabs-all > .app-select-value { display: none; }
+.page-tabs-all > .app-select-chevron { margin: 0; }
+.page-tabs--vertical > .page-tabs-all { align-self: flex-end; }
+
+@media (max-width: 880px) {
+  .cap-layout > .page-tabs--vertical { width: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.tabs, .mc-tabs, .workspace-tabs, .sd-tabs, .cap-side, .skillshare-tabs, .dk-head-chips)[role="tablist"] > [role="tab"] {
+    transition: none;
+  }
+}
