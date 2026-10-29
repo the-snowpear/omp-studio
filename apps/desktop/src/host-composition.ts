@@ -1328,6 +1328,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
       });
       await backend.initialize();
 
+      let seedFailure: string | undefined;
       if (options.managedInstall?.seedOnStart === true) {
         const hasTrustedKey =
           installerOptions?.trustedKeys !== undefined && Object.keys(installerOptions.trustedKeys).length > 0;
@@ -1345,12 +1346,16 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
             seams.hostLog?.write("info", "runtime.seed", "seeded managed runtime from shipped artifact");
           }
         } catch (error) {
+          seedFailure = error instanceof Error ? error.message : String(error);
           seams.hostLog?.write("warn", "runtime.seed.fail", errorDetailForLog(error));
         }
       }
 
       // 5. Managed Runtime resolution with the injected resolver/probe.
-      const resolution = await backend.resolve(options.preference ?? DEFAULT_RUNTIME_PREFERENCE);
+      const resolved = await backend.resolve(options.preference ?? DEFAULT_RUNTIME_PREFERENCE);
+      const resolution = seedFailure !== undefined && resolved.classification === "rejected"
+        ? { ...resolved, rejectionReason: seedFailure }
+        : resolved;
       seams.hostLog?.write(
         resolution.classification === "managed" || resolution.classification === "compatible-system" ? "info" : "warn",
         "runtime.resolve",

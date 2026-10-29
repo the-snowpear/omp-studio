@@ -26,6 +26,7 @@ import {
   parseRuntimeInstallationManifest,
   type ActivateOptions,
   type RuntimeInstallOptions,
+  type InstalledRuntimeManifest,
 } from "@omp-studio/runtime-installer";
 import type { HostBackend } from "@omp-studio/studio-host";
 import type { RuntimeInstallationManifest } from "@omp-studio/studio-protocol";
@@ -146,8 +147,8 @@ export interface DesktopManagedInstallOptions {
   /** Packaged public verification key dir (`$INSTDIR\runtime-keys`). Never the private key. */
   readonly trustedKeysDirectory?: string;
   /**
-   * When no current managed install exists, copy+activate the located
-   * artifact into the installer root before the first resolve. Packaged
+   * When no current managed install exists or the bundled version is newer,
+   * copy+activate the located artifact before the first resolve. Packaged
    * extraFiles already land under `versions/`, so this is verify +
    * `current.json`. Failures stay read-only.
    */
@@ -469,7 +470,7 @@ export type SeedManagedRuntimeResult = "seeded" | "already-installed" | "skipped
 
 export interface SeedManagedRuntimeBackend {
   readonly installer: {
-    currentManifest(): Promise<unknown>;
+    currentManifest(): Promise<InstalledRuntimeManifest | undefined>;
   };
   install(directory: string): Promise<RuntimeInstallationManifest>;
   activate(version: string, options?: ActivateOptions): Promise<unknown>;
@@ -477,7 +478,10 @@ export interface SeedManagedRuntimeBackend {
 
 /**
  * Copy the shipped/located signed artifact into the Host installer root
- * when nothing is current. Does not start a Runtime session. When the
+ * when nothing is current or the bundle is newer. Preserve newer independent
+ * updates and an explicit rollback from this bundle (or a newer version).
+ * Compatibility is still decided by the resolver's protocol/capability probe.
+ * Does not start a Runtime session. When the
  * artifact already is that versions folder, install is a no-op and this
  * only activates.
  */
@@ -496,14 +500,22 @@ export async function seedManagedRuntimeFromArtifact(options: {
   } catch {
     current = undefined;
   }
-  if (current !== undefined) return "already-installed";
   const locate = options.locateArtifact ?? locateManagedRuntimeArtifact;
   const channel = effectiveRuntimeChannel(options.channel);
   const artifactDirectory = await locate({ platform: options.platform, channel });
-  if (artifactDirectory === undefined) return "skipped";
+  if (artifactDirectory === undefined) return current === undefined ? "skipped" : "already-installed";
   const locatedManifest = await readArtifactManifest(artifactDirectory);
   if (locatedManifest !== undefined && locatedManifest.channel !== channel) {
     throw new Error(`Managed Runtime artifact channel mismatch: expected ${channel}`);
+  }
+  if (current !== undefined) {
+    const available = locatedManifest?.runtimeVersion;
+    const previous = current.record.previousRuntimeVersion;
+    if (available === undefined || current.manifest.channel !== channel ||
+      (compareRuntimeVersions(available, current.manifest.runtimeVersion) ?? 0) <= 0 ||
+      (previous !== undefined && (compareRuntimeVersions(previous, available) ?? -1) >= 0)) {
+      return "already-installed";
+    }
   }
   const manifest = await options.backend.install(artifactDirectory);
   if (manifest.channel !== channel) {

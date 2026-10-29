@@ -640,7 +640,7 @@ test("createManagedArtifactLocator reads extraFiles-style runtime root", async (
   }
 });
 
-test("seedManagedRuntimeFromArtifact skips without a key or artifact, and does not reinstall", async () => {
+test("seedManagedRuntimeFromArtifact skips without a key or artifact", async () => {
   const calls: string[] = [];
   const skippedKey = await seedManagedRuntimeFromArtifact({
     backend: {
@@ -679,23 +679,42 @@ test("seedManagedRuntimeFromArtifact skips without a key or artifact, and does n
   });
   assert.equal(skippedArtifact, "skipped");
 
-  const already = await seedManagedRuntimeFromArtifact({
-    backend: {
-      installer: { currentManifest: async () => ({}) },
-      install: async () => {
-        throw new Error("must not install");
-      },
-      activate: async () => {
-        throw new Error("must not activate");
-      },
-    },
-    platform: "win32-x64",
-    hasTrustedKey: true,
-    locateArtifact: async () => {
-      throw new Error("must not locate");
-    },
-  });
-  assert.equal(already, "already-installed");
+});
+
+test("startup upgrades an older Runtime but preserves equal/newer versions and rollback choices", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-seed-upgrade-"));
+  try {
+    const older = await writeArtifact(root, "18.12.6-studio.9");
+    const bundled = await writeArtifact(root, "18.13.2-studio.10");
+    const newer = await writeArtifact(root, "18.14.0-studio.11");
+    for (const scenario of ["upgrade", "equal", "newer", "rollback", "failed"] as const) {
+      const installer = new RuntimeInstaller(join(root, scenario), { trustedKeys: { "test-key": trustedPublicKey } });
+      const initial = scenario === "newer" ? newer : scenario === "equal" ? bundled : older;
+      const installed = await installer.install(initial);
+      await installer.activate(installed.runtimeVersion, { selfCheck: passingSelfCheck });
+      if (scenario === "rollback") {
+        const next = await installer.install(bundled);
+        await installer.activate(next.runtimeVersion, { selfCheck: passingSelfCheck });
+        await installer.rollback();
+      }
+      const before = await installer.current();
+      const seed = () => seedManagedRuntimeFromArtifact({
+        backend: { installer, install: directory => installer.install(directory), activate: (version, options) => installer.activate(version, options) },
+        platform: "win32-x64", hasTrustedKey: true, locateArtifact: async () => bundled,
+        activateOptions: { selfCheck: scenario === "failed" ? { run: async () => { throw Error("self-check failed"); } } : passingSelfCheck },
+      });
+      if (scenario === "failed") {
+        await assert.rejects(seed, /self-check failed/);
+        assert.deepEqual(await installer.current(), before);
+      } else {
+        assert.equal(await seed(), scenario === "upgrade" ? "seeded" : "already-installed");
+        if (scenario === "upgrade") {
+          assert.equal((await installer.current())?.runtimeVersion, "18.13.2-studio.10");
+          assert.equal((await installer.current())?.previousRuntimeVersion, "18.12.6-studio.9");
+        } else assert.deepEqual(await installer.current(), before);
+      }
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("seedManagedRuntimeFromArtifact installs and activates a located artifact", async () => {

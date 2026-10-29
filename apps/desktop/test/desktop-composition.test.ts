@@ -570,6 +570,27 @@ async function writeSignedRuntimeArtifact(profileDirectory: string) {
   return { artifact, publicKey };
 }
 
+test("startup exposes activation failure and quarantine path through bootstrap diagnostics", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    const { artifact, publicKey } = await writeSignedRuntimeArtifact(profileDirectory);
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port,
+      authorityLock: fakeAuthorityLock().port,
+      privateEndpoint: fakePrivateEndpoint().port,
+      installer: { trustedKeys: { "test-key": publicKey.export({ type: "spki", format: "pem" }) } },
+      managedInstall: {
+        seedOnStart: true, installDirectory: join(profileDirectory, "runtime"), locateArtifact: async () => artifact,
+        activateOptions: { selfCheck: { run: async () => { throw Error("spawn EACCES: Runtime is not executable"); } } },
+      },
+    });
+    try {
+      const bootstrap = await composition.facade.bootstrap();
+      assert.match(bootstrap.runtime.unavailableReason ?? "", /EACCES/);
+      assert.match(bootstrap.runtime.unavailableReason ?? "", /\.quarantine-/);
+    } finally { await composition.shutdown(); }
+  });
+});
+
 for (const rejectedContext of [false, true]) {
   test(`managed install initializes and refreshes the coordinator launch context (stale rejected context=${rejectedContext})`, async () => {
     await withTempProfile(async (profileDirectory) => {
