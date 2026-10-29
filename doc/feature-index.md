@@ -63,6 +63,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 |---|---|---|
 | 挂载 / 无 Host 空态 | `apps/renderer/src/main.tsx` | `StudioClientImpl` + `createDesktopTransport`；缺桥则 `Unavailable` |
 | 壳布局、侧栏、底栏、路由 | `apps/renderer/src/App.tsx`、`DeferredPanel.tsx`、`pageIntents.ts`、`shellModelLoader.ts` | 工作台主文件；非当前重页面按需加载，导航统一拦截未保存模型草稿；媒体文本在返回后的 Composer 合并；壳读模型按 authority/workspace/Runtime/环境分别失效，在途读取共享并分域提交；Explorer 真树 `RealFileTree` 也在这里 |
+| 模块化停靠 / 布局预设 | `apps/renderer/src/dock/{types,model,store,hosts,gestures}.ts`、`DockContext.tsx`、`PanelRegistration.tsx`、`DockRegions.tsx`、`DockMenus.tsx`、`DockSettings.tsx`；`panels/registry.ts` | 四区＋应用内浮窗；单例稳定宿主、会话隔离、预设、布局撤销；使用说明 `docs/workbench-docking.md` |
 | 会话行 ⋯ 菜单 / 行右键 | `apps/renderer/src/App.tsx`（`ThreadRowMenu` / `ThreadActionMenuItems` / `runThreadRowAction`） | 顶栏「对话选项」同款七项（弹层 208px 稍窄）；⋯ 点击锚按钮、行右键贴光标，同一弹层；作用于所在行会话：非当前会话先 `openHistoryEntry`（`resumeForAction`，必要时切工作区并 resume）再执行；预览演示行会话动作禁用（写表面不伪造目标）；临时行仅当为当前活动会话时可用，草稿行保留原生右键 |
 | 悬停 tip | `apps/renderer/src/TipHost.tsx` | `[data-tip]` 门户气泡；不用原生 `title`；文案短词，未实现加「（暂未实现）」 |
 | 通用单选下拉 | `apps/renderer/src/AppSelect.tsx`、`styles/components.css` | 普通单选统一用 `AppSelect` + `option` / `optgroup`；受控 value/onChange、主题、键盘、超过 10 项自动搜索；`npm run check:selects` 阻止产品源码新增原生 select |
@@ -70,7 +71,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 首页身份 / 头像 | `apps/renderer/src/settings/operatorProfile.ts`、`avatarCrop.ts`、`AvatarCropDialog.tsx`、`HomePage.tsx`；桌面 `chrome-profile.ts` | 显示名本地记忆；选图后圆形裁切；头像写入 `%APPDATA%\omp-studio\profile\`（覆盖，无历史）；NSIS 卸载删除 |
 | 历史 / 项目会话缓存 | `apps/renderer/src/HistoryPage.tsx`、`sidebar/useProjectHistories.ts`、`sidebar/provisionalThread.ts`、`studio-host/src/session-catalog.ts` | `history.list`；侧栏按 `workspaceId` 独立加载 / 分页 / 刷新；只有 title/session/model/thinking 元数据、尚无 `message` 的空白 JSONL 不进入历史；草稿非空或提示词已发送时显示 Renderer 临时行，正式 LLM 标题到达后按 `sessionId` 接管；归档成功的 `sessionId` 会阻止迟到的 Workbench 状态复活临时行；resume / archive / drop / delete（历史页「⋮ → 删除会话」走 `session.delete`，Host 清 transcript/artifacts/遥测/绑定/租约/pin 残留） |
 | 命令面板 | `apps/renderer/src/CommandPalette.tsx`、`commandPaletteCatalog.ts` | 动作目录与路由 |
-| 主题 / 密度 / 上次路由 / 浮窗几何 | `apps/renderer/src/settings/appSettings.ts` | 本地 UI 记忆，不进 Host；BTW 几何在 `LayoutMemory`；侧栏项目展开与 Explorer 目录展开记忆在 `sidebar/expandMemory.ts` |
+| 主题 / 密度 / 上次路由 | `apps/renderer/src/settings/appSettings.ts` | 本地 UI 记忆，不进 Host；旧 `LayoutMemory` 只作为迁移输入，新布局与 BTW 几何由 `dock/store.ts` 保存；侧栏项目展开与 Explorer 目录展开记忆在 `sidebar/expandMemory.ts` |
 | 对话阅读宽度 / 窄窗口预算 | `settings/ConversationWidthSettings.tsx`、`settings/ConversationWidthContext.tsx`、`layout/{useReadingColumn,useWorkbenchLayout,workbenchLayout}.ts`、`conversation/conversationReflow.ts`；使用说明 `docs/conversation-width.md` | AppSettings 全局偏好，标准/宽松/填满/自定义；读取实际 `.convo-wrap` 宽度、正文与输入列共用净宽；左/右/底面板临时首选/有效布局与窄窗退让；离底阅读消息/块锚定，贴底仍由唯一 writer 负责；预览演示值不写真实存储。 |
 | 进入应用提示（尚未完成） | `apps/renderer/src/StartupNotice.tsx`、`settings/startupNotice.ts` | 中文全局弹窗：项目 GitHub、关闭 / 不再提醒；「不再提醒」只写 localStorage，不进 Host；GitHub 卡点开走 `ompStudioChrome.openUrl` |
 | 预览开关 | `apps/renderer/src/preview/mode.ts`、`PreviewContext.tsx` | 显示层开关；`PREVIEW_MODE_SWITCH_ENABLED` |
@@ -111,7 +112,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 审批 / Ask 卡片 | `InteractionDeck.tsx`、`deck/ApprovalCard.tsx`、`deck/AskCard.tsx`、`deck/QueuedDeck.tsx`、`deck/askGenie.ts`、`deck/interactionGate.ts` | `interaction.respond`；Ask 紧凑卡/Ask 卡加载与退出为底边变形浮入（不改 Plan 放大缩小）。可见提问卡不复用 Composer `gated` |
 | Plan 评审 | `deck/PlanCard.tsx`、`deck/PlanCreatedCard.tsx`、`planSections.ts`、`planFeedback.ts`、`conversation/toolMeta.ts`（`xd://propose`） | 出现时保持紧凑卡，点放大或对话入口才展开大卡；紧凑卡与展开卡右上角均放「保存并退出」（能力存在时显示），不再占用底部评审操作区；大卡章节批注；大卡底栏常驻全文批注（整份计划）；大卡右上角叉号收成紧凑卡；有意见 `mode.plan.review.respond` refine，空 Refine 走 dismiss 回 Composer；批准 `execute` 清上下文、`compact` 先压缩再执行、`keep` 保留上下文（`approve` 是 keep 别名）；钉在 `xd://propose` 所在 assistant 行（批准后不跟到最新轮）；执行后入口卡打开只读大卡回看正文，不再打 `mode.plan.review.open` |
 | 权限档位 | `ComposerApprovalPicker.tsx`（`App.tsx` 接入） | `permissions.mode.set`；预览本地切换；历史会话先 `session.resume` 再 set；流式 / 压缩中可改，下一轮对话才写入 `tools.approvalMode` |
-| BTW 旁路问答 | `apps/renderer/src/btw/`（`BtwHost.tsx`、`useBtwWindow.ts`、`useBtwSession.ts`） | `/btw` → `btw.ask`；中止 / 分支 `btw.abort` / `btw.branch`；事件 `btw.changed` |
+| BTW 旁路问答 | `apps/renderer/src/btw/`（`BtwPanel.tsx`、`useBtwSession.ts`）；窗口统一由 `dock/` 管理 | `/btw` → `btw.ask`；中止 / 分支 `btw.abort` / `btw.branch`；事件 `btw.changed` |
 | 会话生命周期 UI | `apps/renderer/src/sessionLifecycle.ts` | `session.create` / `resume` |
 | 侧栏运行态 / 等待态 | `sidebar/threadRunning.ts`、`threadWait.ts`、`ThreadSpin.tsx`、`ThreadWaitChip.tsx` | 当前会话从 live snapshot、后台会话从 `residents.list` / `residents.changed` 摘要推导；不把后台 snapshot 注入当前会话 |
 

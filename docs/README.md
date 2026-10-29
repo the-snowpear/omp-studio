@@ -10,6 +10,8 @@ Public documentation for OMP Studio.
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |
 | [../doc/ssh-workspace-test-prompt.md](../doc/ssh-workspace-test-prompt.md) | SSH 与账密功能的独立测试交接提示词 |
 | [model-adaptation.md](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |
+| [workbench-docking.md](workbench-docking.md) | 工具停靠、浮窗、会话布局和预设 |
+| [dock-delivery-2026-10-29.md](dock-delivery-2026-10-29.md) | 停靠工作台实现与验收记录、未验证边界 |
 | [fonts.md](fonts.md) | Independent interface, terminal and output font preferences |
 | [releases/v0.1.11.md](releases/v0.1.11.md) | 0.1.11 发布页文案、三平台下载与升级说明 |
 | [releases/v0.1.10.md](releases/v0.1.10.md) | 0.1.10 发布页文案、三平台下载与升级说明 |
