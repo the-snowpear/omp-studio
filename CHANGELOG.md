@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 发布先为每个平台准备一次签名 Runtime，Windows/macOS 桌面包与 SSH 远程包共享同一份产物；main 在相关构建输入变化后预热六个平台的 Rust/Bun 缓存和 Windows 打包工具，供后续发布标签复用。预热已有 Runtime 时保留原始签名字节。
+
 ## [0.1.15] - 2026-10-28
 
 ### Added

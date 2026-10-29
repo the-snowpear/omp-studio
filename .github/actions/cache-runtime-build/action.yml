@@ -1,0 +1,17 @@
+name: Cache Runtime compilation
+description: Share Bun downloads and Rust dependency/workspace output with main cache warming
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      with:
+        path: ~/.bun/install/cache
+        key: bun-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.BUN_VERSION }}-${{ hashFiles('omp-patch/vendor/oh-my-pi/bun.lock') }}
+        restore-keys: bun-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.BUN_VERSION }}-
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: omp-patch/vendor/oh-my-pi -> target
+        shared-key: platform
+        key: natives-${{ env.OMP_TARGET_PLATFORM }}-${{ env.OMP_TARGET_ARCH }}
+        cache-workspace-crates: true
+        cache-on-failure: "true"

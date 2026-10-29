@@ -1,16 +1,61 @@
-name: Warm Windows release caches
+name: Warm release caches
 
 on:
   workflow_dispatch:
+    inputs:
+      verify_remote:
+        description: Also package and verify remote candidates without publishing
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - omp-patch/**
+      - packages/studio-host/src/**
+      - packages/studio-protocol/src/**
+      - packages/runtime-installer/src/**
+      - package-lock.json
+      - scripts/*omp*.mjs
+      - scripts/runtime-*.mjs
+      - scripts/pack-*.mjs
+      - scripts/mac-bundle.mjs
+      - scripts/build-installer-host.mjs
+      - scripts/warm-release-tools.mjs
+      - scripts/release-cache.mjs
+      - scripts/release-plan.mjs
+      - scripts/target-platform.mjs
+      - scripts/windows-architecture.mjs
+      - scripts/mac-toolchain.mjs
+      - packaging/keys/**
+      - packaging/electron-builder.yml
+      - .github/scripts/find-runtime.sh
+      - .github/actions/cache-*/**
+      - .github/workflows/runtime-artifacts.yml
+      - .github/workflows/release-cache.yml
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: release-cache-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  runtime:
+    uses: ./.github/workflows/runtime-artifacts.yml
+    with:
+      warm_cache: true
+    secrets: inherit
+
+  verify-remote:
+    needs: runtime
+    if: inputs.verify_remote
+    uses: ./.github/workflows/remote-environments.yml
+    with:
+      prepared_runtime: true
+    secrets: inherit
+
   warm:
     strategy:
       fail-fast: false
