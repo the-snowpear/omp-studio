@@ -40,16 +40,27 @@
   margin-left: var(--sp-16);
   /* 气泡 .nav-window 的包含块。 */
   position: relative;
+  /* 窄窗口下保持单行：入口不压缩，导航条自己横向滚动。
+     没有 min-width: 0 时 flex 项按内容撑开，640px 会把每个入口压成竖排单字。 */
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
 }
+.page-nav::-webkit-scrollbar { display: none; }
 .page-nav a {
   height: 30px;
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: var(--sp-6);
   padding: 0 var(--sp-10);
   border-radius: var(--r-6);
   font-size: var(--fs-12);
   color: var(--text-3);
+  white-space: nowrap;
 }
 .page-nav a:hover { background: var(--surface-hover); color: var(--text); text-decoration: none; }
 /* 激活态不再靠加重字体区分：font-weight 变化会让拉丁字形（"Time Travel" /

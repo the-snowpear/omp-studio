@@ -91,6 +91,13 @@ export function SecondaryPage({
     const sync = () => {
       const active = nav.querySelector<HTMLElement>(`[data-nav="${route}"]`);
       if (!active) return;
+      // Keep the active entry reachable when the header is too narrow for all
+      // links: scroll only as far as needed, never re-center the row.
+      const left = active.offsetLeft;
+      const right = left + active.offsetWidth;
+      const inset = 8;
+      if (left < nav.scrollLeft + inset) nav.scrollLeft = Math.max(0, left - inset);
+      else if (right > nav.scrollLeft + nav.clientWidth - inset) nav.scrollLeft = right - nav.clientWidth + inset;
       win.style.left = `${active.offsetLeft}px`;
       win.style.width = `${active.offsetWidth}px`;
       mirror.style.left = `${-active.offsetLeft}px`;
