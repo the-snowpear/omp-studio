@@ -9,14 +9,24 @@
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import { privateEndpoint } from "@omp-studio/platform";
-import { StudioBridgeHandshakeError, type RuntimeResolution } from "@omp-studio/studio-host";
-import type { OperatorCommandManifest, StudioHelloResponse } from "@omp-studio/studio-protocol";
+import { createChallengeProof, StudioBridgeHandshakeError, type RuntimeResolution } from "@omp-studio/studio-host";
+import {
+  encodeFrame,
+  FrameDecoder,
+  type OperatorCommandManifest,
+  type RuntimeEpoch,
+  type RuntimeInstanceId,
+  type StudioHelloResponse,
+} from "@omp-studio/studio-protocol";
 
 import type { DesktopRuntimeSessionContext } from "../src/host-composition.js";
 import {
@@ -261,3 +271,130 @@ test("classifyLaunchFailure maps handshake timeout, spawn, and early exit", () =
   const generic = classifyLaunchFailure(new Error("bridge refused the handshake"));
   assert.equal(generic.code, "launch-failed");
 });
+
+for (const manifestOutcome of ["disconnect", "process-exit", "rejected"] as const) {
+  test(`startup command manifest ${manifestOutcome} reports the actual Runtime availability`, async () => {
+    const directory = await mkdtemp(join(tmpdir(), "omp-rs-startup-"));
+    const lines: string[] = [];
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+    });
+    const exit = (): void => {
+      if (child.exitCode !== null) return;
+      child.exitCode = 0;
+      child.emit("exit", 0, null);
+    };
+    let token = "";
+    const epoch = 1 as RuntimeEpoch;
+    class StartupSocket extends EventEmitter {
+      readonly decoder = new FrameDecoder();
+      destroyed = false;
+      write(buffer: Buffer): boolean {
+        for (const frame of this.decoder.push(buffer)) {
+          const request = frame.body as { type: string; requestId: string; challenge: string; operation?: { kind: string } };
+          let response: unknown;
+          if (request.type === "studio.hello") {
+            const runtimeId = "runtime-startup" as RuntimeInstanceId;
+            response = {
+              type: "studio.hello.result",
+              requestId: request.requestId,
+              selectedProtocolVersion: 1,
+              runtimeVersion: "7.0.0-studio.1",
+              upstreamVersion: "0.0.0",
+              upstreamCommit: UPSTREAM,
+              runtimeInstanceId: runtimeId,
+              runtimeEpoch: epoch,
+              stateVersion: 0,
+              capabilityManifest: {
+                profile: "limited", generatedAt: "2026-10-29T00:00:00.000Z",
+                hash: "capability-fixture", capabilities: [],
+              },
+              commandManifestHash: "command-fixture",
+              challengeProof: createChallengeProof(token, request.challenge, runtimeId),
+            };
+          } else if (request.operation?.kind === "runtime.snapshot") {
+            response = {
+              type: "studio.snapshot",
+              requestId: request.requestId,
+              snapshot: {
+                runtimeId: "runtime-startup", runtimeEpoch: epoch, stateVersion: 0, sessionId: "session-startup",
+                isStreaming: false, isCompacting: false, activeMode: "normal", approvalMode: "yolo",
+                pendingMessages: 0, activeCommandIds: [], agentsRevision: 0, jobsRevision: 0, agents: [], jobs: [],
+              },
+              commandManifestHash: "command-fixture",
+              capabilityHash: "capability-fixture",
+              lastEventSeq: 0,
+              terminalReceipts: [],
+            };
+          } else if (request.operation?.kind === "operator.manifest.get" && manifestOutcome !== "rejected") {
+            queueMicrotask(() => {
+              if (manifestOutcome === "process-exit") exit();
+              this.destroy();
+            });
+            continue;
+          } else {
+            response = {
+              type: "studio.receipt", requestId: request.requestId, runtimeEpoch: epoch, stateVersion: 0,
+              status: request.operation?.kind === "runtime.shutdown" ? "completed" : "rejected",
+            };
+          }
+          queueMicrotask(() => {
+            this.emit("data", encodeFrame(`response:${request.requestId}`, epoch, response));
+            if (request.operation?.kind === "runtime.shutdown") {
+              this.emit("data", encodeFrame("shutdown-complete", epoch, {
+                type: "studio.event", runtimeEpoch: epoch, stateVersion: 0, eventSeq: 1,
+                occurredAt: "2026-10-29T00:00:00.000Z", event: { kind: "runtime.shutdownComplete" },
+              }));
+              exit();
+            }
+          });
+        }
+        return true;
+      }
+      destroy(): void {
+        if (this.destroyed) return;
+        this.destroyed = true;
+        queueMicrotask(() => this.emit("close"));
+      }
+    }
+    const port = createDesktopRuntimeSessionPort({
+      windowsAcl: {
+        secureDirectory: async () => undefined,
+        createSecureTokenFile: async (path, value) => { await writeFile(path, value); },
+      },
+      containment: { requestStop: exit, forceStop: exit },
+      spawnProcess: ((_command: string, args: string[]) => {
+        token = readFileSync(args[args.indexOf("--bridge-token-file") + 1]!, "utf8").trim();
+        queueMicrotask(() => child.emit("spawn"));
+        return child;
+      }) as unknown as typeof spawn,
+      connectSocket: () => {
+        const socket = new StartupSocket();
+        queueMicrotask(() => socket.emit("connect"));
+        return socket as unknown as Socket;
+      },
+      log: { write: (_level, event, detail) => { lines.push(`${event} ${detail ?? ""}`); } },
+    });
+    try {
+      const install = join(directory, "runtime");
+      await writeLiveRuntime(install, "7.0.0-studio.1");
+      const start = () => port.start({ ...context(directory, install), workspace: { workspaceId: "ws-startup", cwd: directory } });
+      if (manifestOutcome === "rejected") {
+        const session = await start();
+        assert.ok(session);
+        assert.ok(session.hello(), "a rejected optional manifest must preserve the live connection");
+        assert.equal(session.commandManifest(), undefined);
+      } else {
+        await assert.rejects(start, /Studio Bridge.*(disconnected|exited)/u);
+        assert.equal(port.listResidents?.().residents.length, 0);
+        assert.equal(port.lastUnavailable?.()?.code, "launch-failed");
+        assert.equal(lines.some(line => line.startsWith("runtime.launch.ready")), false);
+        assert.equal(lines.some(line => line.startsWith("runtime.respawn.schedule")), false);
+      }
+    } finally {
+      await port.stop();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}

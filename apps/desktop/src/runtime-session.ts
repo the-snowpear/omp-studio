@@ -1391,7 +1391,7 @@ function createSingleDesktopRuntimeSessionPort(
         }
         log?.write("warn", "runtime.disconnect", `generation=${launchGeneration} alive=${alive}`);
         alive = false;
-        if (!stopping && !draining) {
+        if (becameReady && !stopping && !draining) {
           noteUnexpectedLoss({ code: "pipe-closed", reason: "Studio Bridge pipe closed" });
         }
         const current = controller;
@@ -1510,8 +1510,14 @@ function createSingleDesktopRuntimeSessionPort(
       let command: OperatorCommandManifest | undefined;
       try {
         command = selectVerifiedCommandManifest(hello, await client.requestCommandManifest());
-      } catch {
+      } catch (error) {
+        log?.write("warn", "runtime.command-manifest.unavailable", errorDetail(error));
         command = undefined;
+      }
+      // The manifest is optional, but losing its transport is a startup failure.
+      // Do not overwrite the disconnect with alive=true and publish a dead Worker.
+      if (client.state === "disconnected" || lastExit !== undefined) {
+        throw new Error("Studio Bridge disconnected or Runtime exited before startup completed");
       }
       const view = helloView(hello, launchContext.resolution.classification);
       const session: DesktopRuntimeSession = {
