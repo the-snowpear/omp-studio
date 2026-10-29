@@ -30,7 +30,7 @@ const samples: Record<string, string> = {
 const fixtureUrls = Object.fromEntries(
   Object.entries(
     import.meta.glob("./graphics/fixtures/*", {
-      query: "?url",
+      query: "?url&no-inline",
       import: "default",
       eager: true,
     }),

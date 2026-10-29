@@ -192,6 +192,7 @@ interface ResidentRuntime {
   readonly workspace: { workspaceId: string; cwd: string };
   port: DesktopRuntimeSessionPort;
   session: DesktopRuntimeSession;
+  stopping: boolean;
   readonly lease: SessionLease;
   lastSelected: number;
   idleSince: number | undefined;
@@ -446,24 +447,44 @@ export function createDesktopRuntimeSessionPort(
         nextRuntimeEpoch,
       }) ?? createSingleDesktopRuntimeSessionPort(workerOptions, resumeSessionId, nextRuntimeEpoch, model, noContextFiles);
     port.attachSessionSink?.((session) => {
+      // Ownership comes from the Worker port, never from a returned snapshot.
+      // A launch is selected only after admission; late callbacks from retired
+      // Workers and early callbacks before the resident is registered are inert.
+      const resident = [...residents.values()].find((candidate) => candidate.port === port);
+      if (resident === undefined || resident.stopping) return;
+      const isActive = activeSessionId === resident.sessionId;
       if (session !== undefined) {
         const snapshot = session.controller.publication()?.snapshot;
-        const resident = snapshot === undefined ? undefined : residents.get(snapshot.sessionId);
-        if (resident !== undefined) {
-          resident.port = port;
-          trackResidentPublication(resident, session);
-          emitResidents();
+        if (snapshot?.sessionId !== resident.sessionId) {
+          if (isActive) {
+            rememberUnavailable(unavailableFacts("launch-failed", "Runtime Worker authenticated a different Session identity"));
+            sessionSink?.(undefined);
+          }
+          return;
         }
-        rememberDisconnect(undefined);
-        rememberUnavailable(undefined);
+        trackResidentPublication(resident, session);
+        if (isActive) {
+          rememberDisconnect(undefined);
+          rememberUnavailable(undefined);
+        }
+      } else if (isActive) {
+        rememberDisconnect(port.lastDisconnect?.());
+        rememberUnavailable(port.lastUnavailable?.());
       }
-      sessionSink?.(session);
+      if (isActive) sessionSink?.(session);
+      emitResidents();
     });
     return port;
   };
 
   const stopResident = async (resident: ResidentRuntime): Promise<void> => {
-    await resident.port.stop();
+    resident.stopping = true;
+    try {
+      await resident.port.stop();
+    } catch (error) {
+      resident.stopping = false;
+      throw error;
+    }
     resident.unsubscribePublication?.();
     resident.unsubscribePublication = undefined;
     if (resident.heartbeatTimer !== undefined) clearInterval(resident.heartbeatTimer);
@@ -564,6 +585,7 @@ export function createDesktopRuntimeSessionPort(
         workspace: selected,
         port,
         session,
+        stopping: false,
         lease,
         lastSelected: 0,
         idleSince: undefined,
@@ -580,7 +602,6 @@ export function createDesktopRuntimeSessionPort(
         resident.heartbeatTimer = setInterval(() => {
           void Promise.resolve(lease!.heartbeat!()).catch((error) => {
             options.log?.write("error", "runtime.worker.lease-lost", errorDetail(error));
-            rememberDisconnect({ code: "lease-lost", reason: "session writer lease was lost" });
             void serialized(async () => {
               const sessionId = resident.sessionId;
               const wasActive = activeSessionId === sessionId;
@@ -588,6 +609,7 @@ export function createDesktopRuntimeSessionPort(
               // the facade retains a stale Session whose hello/snapshot already
               // vanished, and Composer core.abort races into UNAVAILABLE.
               if (wasActive) {
+                rememberDisconnect({ code: "lease-lost", reason: "session writer lease was lost" });
                 sessionSink?.(undefined);
                 // Wake facade lifecycle observers immediately; process stop can
                 // take seconds and must not leave a clickable stale snapshot.
@@ -1537,6 +1559,9 @@ function createSingleDesktopRuntimeSessionPort(
       bundle = session;
       alive = true;
       becameReady = true;
+      // Fresh Workers must reconnect/relaunch the Session they already own,
+      // rather than silently creating a different Session on auto-respawn.
+      resumeSessionId = controller.publication()?.snapshot.sessionId ?? resumeSessionId;
       resumeModel = undefined;
       log?.write("info", "runtime.launch.ready", `generation=${launchGeneration}`);
       rememberUnavailable(undefined);

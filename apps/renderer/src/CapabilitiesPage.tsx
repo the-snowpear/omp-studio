@@ -43,11 +43,8 @@ import {
 } from "./skillsPreview";
 import { usePreviewMode } from "./preview/PreviewContext";
 
-export const CAP_INTENT_KEY = "omp.capIntent";
-
-export type CapTab = "skills" | "plugins" | "mcp" | "slash" | "ida" | "resources";
-
-type CapIntent = { tab?: CapTab; name?: string };
+import { takeCapIntent as takeIntent, type CapTab } from "./pageIntents";
+export { CAP_INTENT_KEY, setCapIntent, type CapTab } from "./pageIntents";
 
 /** Translation function signature shared by module-scope display builders. */
 type TFunc = (key: string, params?: TranslationParams) => string;
@@ -88,28 +85,6 @@ function slashToPreview(t: TFunc, command: StudioSlashCommand): PreviewSlash {
 
 function slashBareName(name: string): string {
   return name.startsWith("/") ? name.slice(1) : name;
-}
-
-export function setCapIntent(tab: CapTab, name?: string): void {
-  try {
-    sessionStorage.setItem(CAP_INTENT_KEY, JSON.stringify({ tab, name: name ?? null }));
-  } catch {
-    /* sessionStorage may be blocked; navigation still opens the page. */
-  }
-}
-
-function takeIntent(): CapIntent | null {
-  try {
-    const raw = sessionStorage.getItem(CAP_INTENT_KEY);
-    if (!raw) return null;
-    sessionStorage.removeItem(CAP_INTENT_KEY);
-    const value = JSON.parse(raw) as { tab?: unknown; name?: unknown };
-    const tab = TABS.some(([id]) => id === value.tab) ? value.tab as CapTab : undefined;
-    const name = typeof value.name === "string" ? value.name : undefined;
-    return { ...(tab ? { tab } : {}), ...(name ? { name } : {}) };
-  } catch {
-    return null;
-  }
 }
 
 function previewSkills(): SkillPreview[] {

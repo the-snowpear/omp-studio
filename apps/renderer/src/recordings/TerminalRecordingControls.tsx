@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { WorkspaceStatus } from "../workspaces/Workspace";
-import { RecordingPlayer } from "./RecordingPlayer";
+import { DeferredPanel, lazyPanel } from "../DeferredPanel";
+const RecordingPlayer = lazyPanel(() => import("./RecordingPlayer").then(module => ({ default: module.RecordingPlayer })));
 import "./recordings.css";
 type Api = NonNullable<typeof globalThis.ompStudioTerminal>;
 type Status = Awaited<ReturnType<NonNullable<Api["recordingStatus"]>>>;
@@ -9,12 +10,14 @@ export function TerminalRecordingControls({
   api,
   id,
   ended,
+  visible = true,
   workspaceId,
   sessionId,
 }: {
   api: Api;
   id: string;
   ended: boolean;
+  visible?: boolean;
   workspaceId?: string | undefined;
   sessionId?: string | undefined;
 }) {
@@ -26,10 +29,17 @@ export function TerminalRecordingControls({
   const [error, setError] = useState("");
   const [playback, setPlayback] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const reading = useRef(false);
+  const queuedPoll = useRef<(() => void) | undefined>(undefined);
   useEffect(() => {
+    if (!visible) return;
     let active = true;
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
+      if (!active || document.hidden) return;
+      clearTimeout(timer);
+      if (reading.current) { queuedPoll.current = poll; return; }
+      reading.current = true;
       try {
         const value = await api.recordingStatus?.(id);
         if (active) setStatus(value);
@@ -37,15 +47,26 @@ export function TerminalRecordingControls({
         if (active)
           setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
-        if (active) timer = setTimeout(() => void poll(), 1000);
+        reading.current = false;
+        const next = queuedPoll.current;
+        queuedPoll.current = undefined;
+        if (next) next();
+        else if (active && !document.hidden) timer = setTimeout(() => void poll(), 1000);
       }
     };
+    const visibilityChanged = () => {
+      clearTimeout(timer);
+      if (!document.hidden) void poll();
+    };
+    document.addEventListener("visibilitychange", visibilityChanged);
     void poll();
     return () => {
       active = false;
+      if (queuedPoll.current === poll) queuedPoll.current = undefined;
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", visibilityChanged);
     };
-  }, [api, id, refresh]);
+  }, [api, id, refresh, visible]);
   const run = async (action: () => Promise<Status | undefined>) => {
     if (busy) return;
     setBusy(true);
@@ -147,10 +168,11 @@ export function TerminalRecordingControls({
         </p>
       ) : null}
       {playback ? (
-        <RecordingPlayer
+        <DeferredPanel><RecordingPlayer
           key={status?.artifactId ?? "import"}
           artifactId={status?.artifactId}
-        />
+          visible={visible}
+        /></DeferredPanel>
       ) : null}
     </>
   );

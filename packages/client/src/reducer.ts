@@ -609,7 +609,8 @@ function markPendingOutcomeUnknown(
  * Some of them intentionally stop or replace a Runtime while still in flight,
  * so a Runtime identity change cannot make their outcome ambiguous. */
 function preserveHostOwnedCommand(command: CommandState): boolean {
-  return command.commandName === "workspace.open"
+  return command.commandName === "runtime.ensure"
+    || command.commandName === "workspace.open"
     || command.commandName === "workspace.pick"
     || command.commandName === "session.archive"
     || command.commandName === "session.unarchive"

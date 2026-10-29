@@ -272,6 +272,9 @@ export interface HostRuntimeAccess {
     readonly limit?: number;
   }) => Promise<ConversationTranscriptPage>;
   readonly hello: () => HostRuntimeHelloView | undefined;
+  /** Host-owned preparation before any Hello; never implies negotiated identity. */
+  readonly startupState?: () => "connecting" | undefined;
+  readonly onConnectionChanged?: (listener: () => void) => () => void;
   /**
    * Why the Runtime never connected. Read when `hello()` is undefined and
    * no previous hello was observed. Optional: tests and read-only Hosts

@@ -47,10 +47,8 @@ type DiagAction = {
 
 type CapManifest = ClientBootstrap["capabilityManifest"];
 
-export const DIAGNOSTICS_INTENT_KEY = "omp.diagnosticsIntent";
-export type DiagnosticsIntent = "check-update" | "reconnect" | "restart";
-
-const DIAGNOSTICS_INTENTS: ReadonlySet<string> = new Set(["check-update", "reconnect", "restart"]);
+import { takeDiagnosticsIntent } from "./pageIntents";
+export { DIAGNOSTICS_INTENT_KEY, setDiagnosticsIntent, type DiagnosticsIntent } from "./pageIntents";
 
 async function applyRuntimeArtifact(client: StudioClient, channel: RuntimeChannel | undefined, incompleteMessage: string): Promise<void> {
   if (channel === undefined) throw new Error("无法确认 Runtime 工件通道，请重新检查更新");
@@ -61,28 +59,6 @@ async function applyRuntimeArtifact(client: StudioClient, channel: RuntimeChanne
   const result = receipt.result as RuntimeInstallState | undefined;
   if (result?.status !== "installed") {
     throw new Error(result?.message ?? incompleteMessage);
-  }
-}
-
-export function setDiagnosticsIntent(intent: DiagnosticsIntent): void {
-  try {
-    sessionStorage.setItem(DIAGNOSTICS_INTENT_KEY, JSON.stringify({ intent }));
-  } catch {
-    /* sessionStorage may be blocked */
-  }
-}
-
-function takeDiagnosticsIntent(): DiagnosticsIntent | null {
-  try {
-    const raw = sessionStorage.getItem(DIAGNOSTICS_INTENT_KEY);
-    if (!raw) return null;
-    sessionStorage.removeItem(DIAGNOSTICS_INTENT_KEY);
-    const value = JSON.parse(raw) as { intent?: unknown };
-    return typeof value.intent === "string" && DIAGNOSTICS_INTENTS.has(value.intent)
-      ? (value.intent as DiagnosticsIntent)
-      : null;
-  } catch {
-    return null;
   }
 }
 

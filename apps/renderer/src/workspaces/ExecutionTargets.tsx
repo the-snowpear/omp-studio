@@ -1,4 +1,4 @@
-import { modelConfigHasUnsavedChanges } from "../ModelConfigPage";
+import { modelConfigHasUnsavedChanges } from "../models/modelConfigState";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { StudioClientImpl } from "@omp-studio/client";
 import type { StudioClient } from "@omp-studio/client-contract";

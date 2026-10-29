@@ -45,9 +45,8 @@ import type {
   StudioRuntimeSettingsActivation,
 } from "@omp-studio/client-contract";
 
-export const SETTINGS_INTENT_KEY = "omp.settingsIntent";
-
-export type SettingsGroupId = "general" | "background" | "interaction" | "permissions" | "context" | "files" | "tasks" | "advanced" | "native";
+import { takeSettingsIntent, type SettingsGroupId } from "./pageIntents";
+export { SETTINGS_INTENT_KEY, setSettingsIntent, type SettingsGroupId } from "./pageIntents";
 
 type GroupId = SettingsGroupId;
 
@@ -59,28 +58,6 @@ export interface RuntimeSettingsApi {
   readonly pendingKey?: StudioRuntimeSettingKey;
   readonly error?: string;
   readonly onSet?: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue, persist?: boolean) => void | Promise<void>;
-}
-
-const GROUP_IDS: ReadonlyArray<SettingsGroupId> = ["general", "background", "interaction", "permissions", "context", "files", "tasks", "advanced", "native"];
-
-export function setSettingsIntent(group: SettingsGroupId): void {
-  try {
-    sessionStorage.setItem(SETTINGS_INTENT_KEY, JSON.stringify({ group }));
-  } catch {
-    /* sessionStorage may be blocked; navigation still opens the page. */
-  }
-}
-
-function takeSettingsIntent(): SettingsGroupId | null {
-  try {
-    const raw = sessionStorage.getItem(SETTINGS_INTENT_KEY);
-    if (!raw) return null;
-    sessionStorage.removeItem(SETTINGS_INTENT_KEY);
-    const value = JSON.parse(raw) as { group?: unknown };
-    return GROUP_IDS.some((id) => id === value.group) ? value.group as SettingsGroupId : null;
-  } catch {
-    return null;
-  }
 }
 
 /** Reuse the global provider; standalone settings surfaces keep a local demo boundary. */

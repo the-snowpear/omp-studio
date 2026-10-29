@@ -39,8 +39,9 @@ export const RENDERER_CSP =
   // endpoint), so the frame is pinned to one origin: no wildcard port, no
   // loopback for scripts, connections, images or media. `'self'` stays listed
   // because naming any source in `frame-src` replaces the `default-src`
-  // fallback, which would blank the same-origin graphic-preview frame.
-  "frame-src 'self' http://127.0.0.1:3847; " +
+  // fallback. Packaged graphics use their own read-only origin so the opaque
+  // iframe can import modules without allowing file: access or same-origin.
+  "frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847; " +
   "frame-ancestors 'none'";
 
 /** Development-only policy required by Vite's React Refresh preamble. */
@@ -214,7 +215,7 @@ export interface CspSession {
   readonly webRequest: {
     onHeadersReceived(
       listener: (
-        details: { url?: string; responseHeaders?: Record<string, string[]> },
+        details: { url?: string; resourceType?: string; responseHeaders?: Record<string, string[]> },
         callback: (response: { responseHeaders: Record<string, string[]> }) => void,
       ) => void,
     ): unknown;
@@ -227,8 +228,8 @@ export interface CspSession {
  * The listener is session-wide, so an unfiltered injection also lands on
  * framed documents — notably the native `omp stats` dashboard the statistics
  * page embeds, whose injected `frame-ancestors 'none'` then refuses the frame
- * and leaves the page blank. Callers pass the renderer's own origin so only
- * Studio's document carries the policy.
+ * and leaves the page blank. Only the trusted main-frame response carries the
+ * renderer policy; subframes enforce their own document policies.
  */
 export function installCspHeaders(
   session: CspSession,
@@ -236,7 +237,7 @@ export function installCspHeaders(
   owns: (url: string) => boolean,
 ): void {
   session.webRequest.onHeadersReceived((details, callback) => {
-    if (!owns(details.url ?? "")) {
+    if ((details.resourceType !== undefined && details.resourceType !== "mainFrame") || !owns(details.url ?? "")) {
       callback({ responseHeaders: details.responseHeaders ?? {} });
       return;
     }

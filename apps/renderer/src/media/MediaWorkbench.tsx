@@ -28,26 +28,13 @@ import {
 } from "../preview/mediaWorkbenchPreview";
 import { AudioCapturePane } from "./AudioCapturePane";
 import { previewMediaUrl } from "../preview/mediaFixtureUrls";
-import { artifactUrl } from "./ArtifactLibraryPane";
+import { artifactUrl } from "./artifactUrl";
 import "./mediaWorkbench.css";
 
-export const MEDIA_INTENT_KEY = "omp.mediaIntent";
-export function setMediaIntent(type: MediaKind): void {
-  try {
-    sessionStorage.setItem(MEDIA_INTENT_KEY, type);
-  } catch {}
-}
+import { takeMediaIntent } from "../pageIntents";
+export { MEDIA_INTENT_KEY, setMediaIntent, takeMediaIntent } from "../pageIntents";
 const active = (job: MediaJob) =>
   ["queued", "running", "waiting"].includes(job.state);
-export function takeMediaIntent(): MediaKind {
-  try {
-    const value = sessionStorage.getItem(MEDIA_INTENT_KEY);
-    sessionStorage.removeItem(MEDIA_INTENT_KEY);
-    if (["image", "video", "speech", "transcription"].includes(value ?? ""))
-      return value as MediaKind;
-  } catch {}
-  return "image";
-}
 export function MediaWorkbench({
   client,
   workspaceId,

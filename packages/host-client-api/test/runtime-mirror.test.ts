@@ -14,7 +14,7 @@ import type {
 import type { OperatorStateSnapshot, StudioOperation, RuntimeEpoch, RuntimeId, SessionId, StateVersion } from "@omp-studio/studio-protocol";
 import { StudioHostClientFacade, createDefaultHostDiagnosticsFactory } from "../src/index.js";
 import type { HostInvokeOutcome } from "../src/services.js";
-import type { HostBackend } from "@omp-studio/studio-host";
+import type { HostBackend, RuntimePublication } from "@omp-studio/studio-host";
 
 const snapshot: OperatorStateSnapshot = {
   runtimeId: "runtime-1" as RuntimeId,
@@ -34,7 +34,8 @@ const snapshot: OperatorStateSnapshot = {
 };
 
 function makeFacade(invocations: StudioOperation[], install: () => Promise<RuntimeInstallState> = async () => ({ status: "installed", signature: "unknown" }),
-  invokeOverride?: (operation: StudioOperation) => Promise<HostInvokeOutcome>): StudioHostClientFacade {
+  invokeOverride?: (operation: StudioOperation) => Promise<HostInvokeOutcome>,
+  onPublication?: (listener: (publication: RuntimePublication) => void) => () => void): StudioHostClientFacade {
   return new StudioHostClientFacade({
     authority: { authorityId: "authority-1" as PublicAuthorityIdentity["authorityId"], authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"] },
     platform: "win32",
@@ -45,6 +46,7 @@ function makeFacade(invocations: StudioOperation[], install: () => Promise<Runti
     runtime: {
       hello: () => ({ runtimeId: "runtime-1", runtimeEpoch: 1, classification: "managed" }),
       snapshot: () => snapshot,
+      ...(onPublication === undefined ? {} : { onPublication }),
     },
     catalog: { list: () => [] },
     diagnostics: createDefaultHostDiagnosticsFactory(),
@@ -249,6 +251,86 @@ test("Runtime mirror validation and dispatch resolve the operation kind from com
     unsubscribe();
     await facade.close();
   }
+});
+
+test("same-version Runtime recovery replays after a connection fence without lowering the watermark", async () => {
+  let live = true;
+  let available: OperatorStateSnapshot | undefined = snapshot;
+  let publish!: (publication: RuntimePublication) => void;
+  let wake!: (residents: ResidentsReadModel) => void;
+  const facade = new StudioHostClientFacade({
+    authority: { authorityId: "authority-1" as PublicAuthorityIdentity["authorityId"], authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"] },
+    platform: "win32", arch: "x64", backend: {} as HostBackend,
+    capabilityManifest: () => undefined, commandManifest: () => undefined,
+    runtime: {
+      hello: () => live ? { runtimeId: "runtime-1", runtimeEpoch: 1, classification: "managed" } : undefined,
+      snapshot: () => available,
+      unavailable: () => live ? undefined : { code: "launch-failed", reason: "recovery pending" },
+      onPublication(listener) { publish = listener; return () => undefined; },
+    },
+    residents: {
+      list: () => ({ residents: [], generatedAt: "2026-10-29T00:00:00.000Z" }),
+      onChanged(listener) { wake = listener; return () => undefined; },
+    },
+    catalog: { list: () => [] }, diagnostics: createDefaultHostDiagnosticsFactory(),
+    install: async () => ({ status: "installed", signature: "unknown" }),
+  });
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, event => events.push(event));
+  const publishVersion = (version: number) => publish({
+    commitSeq: version, publishedAt: "2026-10-29T00:00:00.000Z",
+    snapshot: { ...snapshot, stateVersion: version as StateVersion }, terminalOutcomes: [],
+  });
+  const wakeConnection = () => wake({ residents: [], generatedAt: "2026-10-29T00:00:00.000Z" });
+  const countSnapshots = () => events.filter(event => event.kind === "snapshot").length;
+  try {
+    publishVersion(4);
+    publishVersion(4);
+    assert.equal(countSnapshots(), 1);
+    for (const unavailable of [false, true]) {
+      available = undefined;
+      live = !unavailable;
+      wakeConnection(); // May run before the publication via connectionChanged.
+      assert.equal(events.filter(event => event.kind === "runtime.changed").at(-1)?.connection.status, unavailable ? "unavailable" : "connecting");
+      live = true;
+      available = snapshot;
+      wakeConnection(); // The recovery sync must not consume the replay flag.
+      const before = countSnapshots();
+      publishVersion(3);
+      assert.equal(countSnapshots(), before, "stale lower version must not restore a fenced snapshot");
+      publishVersion(4);
+      publishVersion(4);
+      assert.equal(countSnapshots(), before + 1, "exactly one same-version recovery snapshot");
+    }
+    publishVersion(5);
+    publishVersion(4);
+    assert.equal(countSnapshots(), 4, "normal publications remain monotonic and deduped");
+  } finally { await facade.close(); }
+});
+
+test("snapshot dedupe still delivers terminal Runtime receipts", async () => {
+  let publish!: (publication: RuntimePublication) => void;
+  let finish!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  const facade = makeFacade([], undefined, async () => { await gate; return snapshot; }, listener => {
+    publish = listener;
+    return () => undefined;
+  });
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, event => events.push(event));
+  const requestId = "deduped-terminal" as CommandRequestId;
+  try {
+    const publication: RuntimePublication = { commitSeq: 1, publishedAt: "2026-10-29T00:00:00.000Z", snapshot, terminalOutcomes: [] };
+    publish(publication);
+    await facade.command({ commandName: "runtime.settings.get", input: {}, requestId, idempotencyKey: requestId as unknown as IdempotencyKey });
+    publish({ ...publication, terminalOutcomes: [{
+      commandId: "deduped-command" as never, requestId, runtimeId: snapshot.runtimeId, runtimeEpoch: snapshot.runtimeEpoch,
+      operationKind: "runtime.settings.get", requestedAt: publication.publishedAt, terminalAt: publication.publishedAt,
+      status: "failed", errorCode: "UNAVAILABLE", errorMessage: "Runtime disconnected",
+    }] });
+    assert.equal(events.filter(event => event.kind === "snapshot").length, 1);
+    assert.equal((await waitForReceipt(events, requestId)).receipt.status, "failed");
+  } finally { finish(); await facade.close(); }
 });
 
 test("resident lifecycle loss publishes runtime.changed before the broker summary", async () => {

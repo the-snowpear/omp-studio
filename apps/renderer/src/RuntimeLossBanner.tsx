@@ -46,6 +46,12 @@ export function RuntimeLossBanner({
   }, [client, preview]);
 
   const status = runtime?.status ?? "unavailable";
+  if (status === "connecting") {
+    return <div className={variant === "hub" ? "hub-conn" : "banner"} role="status" aria-busy="true">
+      <span className="spinner" aria-hidden="true" />
+      <span>Runtime 正在准备，工作台已可用；连接完成后即可发送消息。</span>
+    </div>;
+  }
   if (status !== "disconnected" && status !== "unavailable") {
     return null;
   }

@@ -35,6 +35,7 @@ import { ServiceDefinitionStore } from "./service-definitions.js";
 import { activeArtifactLibrary, activeMediaDirectory, activeProfileDirectory } from "./artifact-library.js";
 import { runtimeSocketDirectory } from "./runtime-session.js";
 import { artifactResponse, registerArtifactIpc } from "./chrome-artifacts.js";
+import { graphicAssetResponse } from "./graphic-protocol.js";
 import {
   TITLEBAR_OVERLAY,
   applyTitleBarOverlay,
@@ -81,6 +82,7 @@ import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { createDesktopApplication } from "./composition.js";
+import { completeDesktopRuntimeTrial } from "./runtime-startup.js";
 import { registerDesktopIpc } from "./ipc.js";
 import {
   RENDERER_CSP,
@@ -123,7 +125,10 @@ import { TerminalSessionManager, createNodePtySpawner } from "./terminal-pty.js"
 import { TerminalRecordingManager } from "./terminal-recording.js";
 import { MediaUploadManager, registerMediaUploadIpc } from "./media-upload.js";
 
-protocol.registerSchemesAsPrivileged([{ scheme: "omp-artifact", privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } }]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: "omp-artifact", privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } },
+  { scheme: "omp-graphics", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+]);
 
 /** Developer-only override for the renderer entry (Vite dev server). */
 const RENDERER_DEV_URL = rendererDevServerUrl(app.isPackaged, process.env.OMP_RENDERER_DEV_URL);
@@ -237,10 +242,8 @@ export async function main(): Promise<void> {
     beforeCreate: async () => { await updateCoordinator?.initialize(); },
     afterCreate: async (composition, workspaceSelected) => {
       if (!updateCoordinator?.hasRuntimeTrial || !workspaceSelected) return false;
-      const ready = composition.status === "ready";
-      if (!ready) await composition.shutdown();
-      await updateCoordinator.completeStartup(ready, workspaceSelected);
-      return !ready;
+      return completeDesktopRuntimeTrial(composition,
+        (ready, selected) => updateCoordinator!.completeStartup(ready, selected), workspaceSelected);
     },
     openUrl: async (url) => {
       if (!/^https?:\/\//i.test(url)) throw new Error("refusing to open a non-http login url");
@@ -467,8 +470,10 @@ export async function main(): Promise<void> {
   let trayRef: DesktopTray | null = null;
   let closeToTrayEnabled = false;
   let rendererWindow: BrowserWindow | null = null;
+  let graphicRendererDist: string | undefined;
 
   const createWindow: DesktopWindowFactory = async (context) => {
+    const windowStarted = performance.now();
     // Payload boot accounting belongs to the instance that acquired the lock.
     const layout = await resolveAppResourceLayout({
       appPath: app.getAppPath(),
@@ -487,6 +492,10 @@ export async function main(): Promise<void> {
     });
 
     const target = resolveRendererEntryFrom(layout.rendererDist, RENDERER_DEV_URL);
+    graphicRendererDist = layout.rendererDist;
+    if (!(await protocol.isProtocolHandled("omp-graphics"))) {
+      protocol.handle("omp-graphics", request => graphicRendererDist === undefined ? new Response(null, { status: 503 }) : graphicAssetResponse(request, graphicRendererDist));
+    }
     if (!(await protocol.isProtocolHandled("omp-artifact"))) {
       const origin = target.kind === "url" ? new URL(target.url).origin : "null";
       protocol.handle("omp-artifact", request => remoteConnections.activeId === null ? artifactResponse(request, activeArtifactLibrary(), origin) : new Response("Remote artifact transfer is not available", { status: 503 }));
@@ -538,6 +547,7 @@ export async function main(): Promise<void> {
       },
     });
     window.webContents.once("did-finish-load", () => {
+      hostFactory.log?.write("info", "desktop.startup", `stage=window-load elapsedMs=${Math.round(performance.now() - windowStarted)}`);
       void payloadHealth.didFinishLoad().catch((error) => console.error("[omp-studio] payload health persistence failed", error));
     });
     window.webContents.once("render-process-gone", () => payloadHealth.failed());

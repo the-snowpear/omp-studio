@@ -29,7 +29,7 @@ import { Icon } from "./icons";
 import { useI18n } from "./i18n";
 import { hostErrorMessage } from "./hostError";
 import { MODEL_THINKING, createPreviewModelConfig } from "./preview/modelConfigFixtures";
-import { ModelPickCaps, ProviderGlyph, ROLE_ICONS, ROLE_TINTS, groupModelsByProvider } from "./ModelConfigPage";
+import { ModelPickCaps, ProviderGlyph, ROLE_ICONS, ROLE_TINTS, groupModelsByProvider } from "./models/modelPresentation";
 
 type MenuKind = "none" | "model" | "thinking";
 
