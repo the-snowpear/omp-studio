@@ -22,13 +22,13 @@ import { AvatarCropDialog } from "./settings/AvatarCropDialog";
 import {
   DAY_MS,
   EMPTY_USAGE,
-  USAGE_POLL_MS,
   buildPreviewUsage,
   fmtTokens,
   intensity,
   parseDateKey,
   startOfDay,
 } from "./usage/tokenUsage";
+import { startUsagePolling } from "./usage/usagePolling";
 import { useAxisCrossfade, useTokenChartMorph, type TokenChartModelPts } from "./usage/useTokenChartMorph";
 
 import { useI18n } from "./i18n";
@@ -499,11 +499,13 @@ function TokenUsageCard({ client, onOpenStats }: { client?: StudioClient; onOpen
         }
       }
     };
-    void load();
-    const timer = window.setInterval(() => { void load(); }, USAGE_POLL_MS);
+    // Polling stops while the window is hidden (P0-2): each `usage.get` reaches
+    // the Host's Runtime entrypoint lookup, and a minimised window has nobody to
+    // show the numbers to. Becoming visible refreshes immediately.
+    const stopPolling = startUsagePolling({ load });
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stopPolling();
     };
   }, [preview, client, resolvedLanguage, t]);
 

@@ -26,6 +26,7 @@ import { resolveLanguage } from "./i18n";
 import { initPerformanceTimelineCleanup } from "./performanceTimelineCleanup";
 import { createRendererPerformanceReporter } from "./rendererPerformance";
 import { PLATFORM } from "./platform";
+import { applyTier, TIER_ATTRIBUTES, type PerfTier } from "./perf/tiers";
 
 const stopPerformanceReporter = createRendererPerformanceReporter(globalThis.ompStudioChrome);
 window.addEventListener("pagehide", stopPerformanceReporter, { once: true });
@@ -39,6 +40,52 @@ document.documentElement.setAttribute("data-theme", initialSettings.theme);
 document.documentElement.setAttribute("data-platform", PLATFORM);
 document.documentElement.setAttribute("data-density", initialSettings.density);
 document.documentElement.setAttribute("lang", resolveLanguage(initialSettings.language));
+
+/**
+ * P0-6：首帧前把 GPU / 低配 / 动效分级写到 `<html>`。
+ *
+ * Main 用 `app.getGPUFeatureStatus()`（不是 `getGPUInfo("basic")`：实测两者在
+ * 软合成下字段完全相同）探测并给出 L0–L3，`ompStudioPerf.cached` 是 preload
+ * 同步读到的上一次快照，所以这里不需要 IPC 往返、也不会出现「先全效再降级」
+ * 的闪烁。浏览器 / harness 没有这个桥：保持 L0，不猜机器等级。
+ *
+ * 用户覆盖只有「减少动效」一个旋钮（系统 `prefers-reduced-motion` 或显式
+ * `omp.perf.motion=off`）。它只会把层级压到 L1 或更低，绝不会把 L2/L3 抬回去
+ * ——降级是「少画」，不是「少校验」。
+ */
+function motionOffRequested(suggested?: "full" | "reduced" | "off"): boolean {
+  // Main's own verdict for this machine (L3 grades motion off) is a floor,
+  // never a ceiling: a user setting can only make it stricter.
+  if (suggested === "off") return true;
+  try {
+    if (window.localStorage.getItem("omp.perf.motion") === "off") return true;
+  } catch {
+    /* storage blocked: fall through to the OS preference */
+  }
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function applyPerformanceTier(snapshot?: { readonly tier: PerfTier; readonly motion?: "full" | "reduced" | "off" } | null): void {
+  const resolved = snapshot?.tier ?? globalThis.ompStudioPerf?.cached?.tier ?? "L0";
+  const suggested = snapshot?.motion ?? globalThis.ompStudioPerf?.cached?.motion;
+  applyTier(document.documentElement, resolved);
+  // `applyTier` writes the tier's canonical motion value; the machine verdict
+  // and the user's override only ever tighten it, so they are applied after
+  // (an unchanged `setAttribute` does not invalidate style).
+  if (motionOffRequested(suggested)) document.documentElement.setAttribute(TIER_ATTRIBUTES.motion, "off");
+}
+
+applyPerformanceTier();
+const perfBridge = globalThis.ompStudioPerf;
+if (perfBridge !== undefined) {
+  perfBridge.onChanged(snapshot => applyPerformanceTier(snapshot));
+  if (perfBridge.cached === null) void perfBridge.probe().then(snapshot => applyPerformanceTier(snapshot)).catch(() => undefined);
+}
+if (typeof window.matchMedia === "function") {
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+  reduced.addEventListener?.("change", () => applyPerformanceTier());
+}
+
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/components.css";

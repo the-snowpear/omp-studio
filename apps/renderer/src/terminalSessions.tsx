@@ -21,6 +21,17 @@ interface TerminalState {
 }
 const PENDING_MAX_CHARS = 64 * 1024;
 
+/**
+ * UTF-8 byte length without allocating for ASCII (terminal output is almost
+ * entirely ASCII). Flow control counts the same unit Main counts, so a
+ * graphics-stripped payload is still credited for exactly what was sent.
+ */
+export function utf8Length(text: string): number {
+  if (/^[\u0000-\u007f]*$/u.test(text)) return text.length;
+  return new TextEncoder().encode(text).length;
+}
+
+
 export class TerminalSessions {
   readonly hosts = new Map<string, TerminalScreenHost>();
   readonly pending = new Map<string, string>();
@@ -28,6 +39,8 @@ export class TerminalSessions {
   readonly #decoders = new Map<string, TerminalGraphicsDecoder>();
   readonly #listeners = new Set<() => void>();
   readonly #earlyExits = new Set<string>();
+  readonly #acked = new Map<string, number>();
+  #ackScheduled = false;
   #state: TerminalState = { sessions: [], graphics: {}, graphicsErrors: {} };
   #off: (() => void) | undefined;
   #creating = 0;
@@ -42,7 +55,9 @@ export class TerminalSessions {
     this.#listen();
     this.#creating++;
     try {
-      const info = await this.api.create({ cols: 80, rows: 24, ...(targetId ? { targetId, ...(workspaceId ? { workspaceId } : {}) } : {}) });
+      // `flowControl: true` is the opt-in handshake: Main then pauses the PTY
+      // when this store falls behind, and resumes on our ACKs below.
+      const info = await this.api.create({ cols: 80, rows: 24, flowControl: true, ...(targetId ? { targetId, ...(workspaceId ? { workspaceId } : {}) } : {}) });
       if (this.#closed) { await this.api.dispose(info.id); throw new Error("Terminal window has closed"); }
       const session: TerminalSession = { ...info, targetId, status: this.#earlyExits.delete(info.id) ? "ended" : "running", ...(workspaceId ? { workspaceId } : {}), ...(sessionId ? { sessionId } : {}) };
       this.#publish({ ...this.#state, sessions: [...this.#state.sessions, session] });
@@ -73,6 +88,7 @@ export class TerminalSessions {
     for (const session of this.#state.sessions) void this.api?.dispose(session.id).catch(() => {});
     for (const id of this.hosts.keys()) this.#releaseScreen(id);
     this.pending.clear();
+    this.#acked.clear();
     this.#decoders.clear();
     this.#listeners.clear();
   }
@@ -89,9 +105,18 @@ export class TerminalSessions {
         graphics: decoded.images.length ? { ...this.#state.graphics, [event.id]: [...(this.#state.graphics[event.id] ?? []), ...decoded.images].slice(-4) } : this.#state.graphics,
         graphicsErrors: decoded.errors.length ? { ...this.#state.graphicsErrors, [event.id]: decoded.errors.join("; ") } : this.#state.graphicsErrors,
       });
+      // ACK accounting uses what Main sent (`event.data`), not the graphics-
+      // stripped text: Main counts bytes on the wire, and crediting less would
+      // eventually stall a graphics-heavy session.
+      const bytes = typeof event.bytes === "number" ? event.bytes : utf8Length(event.data);
       const host = this.hosts.get(event.id);
-      if (host) host.term.write(decoded.text);
-      else this.pending.set(event.id, ((this.pending.get(event.id) ?? "") + decoded.text).slice(-PENDING_MAX_CHARS));
+      if (host) host.term.write(decoded.text, () => this.#ack(event.id, bytes));
+      else {
+        // No xterm attached (target view unmounted): the text is held here, so
+        // credit it now instead of letting Main pause forever.
+        this.pending.set(event.id, ((this.pending.get(event.id) ?? "") + decoded.text).slice(-PENDING_MAX_CHARS));
+        this.#ack(event.id, bytes);
+      }
     });
     const offExit = this.api.onExit(event => {
       if (this.#creating && !this.#state.sessions.some(session => session.id === event.id)) this.#earlyExits.add(event.id);
@@ -100,11 +125,45 @@ export class TerminalSessions {
     this.#off = () => { offData(); offExit(); };
   }
 
+  /**
+   * Credit `bytes` back to Main. Writes that complete in the same tick are
+   * coalesced into one ACK, so a burst costs one small message per tick rather
+   * than one per xterm write callback.
+   */
+  #ack(id: string, bytes: number): void {
+    const api = this.api;
+    if (api?.ack === undefined || this.#closed) return;
+    this.#acked.set(id, (this.#acked.get(id) ?? 0) + bytes);
+    if (this.#ackScheduled) return;
+    this.#ackScheduled = true;
+    queueMicrotask(() => {
+      this.#ackScheduled = false;
+      this.#flushAcks();
+    });
+  }
+
+  #flushAcks(): void {
+    const api = this.api;
+    if (api?.ack === undefined) return;
+    const pending = [...this.#acked];
+    this.#acked.clear();
+    for (const [id, bytes] of pending) {
+      // The terminal may have been closed while the microtask was queued.
+      if (this.#closed || bytes <= 0) continue;
+      try {
+        api.ack(id, bytes);
+      } catch {
+        // A window mid-teardown can reject the IPC; the session is gone anyway.
+      }
+    }
+  }
+
   #releaseScreen(id: string): void {
     this.hosts.get(id)?.term.dispose();
     this.hosts.delete(id);
     this.pending.delete(id);
     this.#decoders.delete(id);
+    this.#acked.delete(id);
   }
   #publish(state: TerminalState): void { this.#state = state; for (const listener of this.#listeners) listener(); }
 }

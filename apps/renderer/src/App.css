@@ -3,6 +3,11 @@
  * #root fill, Home / History pages, and a few Host-driven readouts.
  * Workbench chrome comes from styles/{tokens,base,components,sidebar,workbench}.css.
  */
+/* GPU / motion tiers (L0–L3). Imported from here rather than from main.tsx so
+   every renderer entry — including the preview and perf harnesses — gets the
+   degradation rules, and so the rules load last in the cascade; they rely on
+   `!important`, not on source order, for exactly that reason. */
+@import "./perf/tiers.css";
 
 #root {
   height: 100%;

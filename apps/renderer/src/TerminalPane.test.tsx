@@ -85,7 +85,8 @@ it("updates live and hidden terminal fonts without recreating the shell or steal
   act(() => updateAppSettings({ terminalFontSize: 20, terminalFontFamily: "Consolas" }));
   expect(terminal.options.fontSize).toBe(20);
   expect(terminal.options.fontFamily).toContain("Consolas");
-  expect(terminal.write).toHaveBeenCalledWith("retained shell output");
+  // The write carries the flow-control ACK callback (P0-4).
+  expect(terminal.write).toHaveBeenCalledWith("retained shell output", expect.any(Function));
   expect(terminal.focus).toHaveBeenCalledTimes(focusCalls);
   view.rerender(<Harness visible={false} />);
   act(() => updateAppSettings({ terminalFontSize: 28 }));

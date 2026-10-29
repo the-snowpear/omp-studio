@@ -23,6 +23,13 @@ declare global {
   var ompStudioRemote: import("../../desktop/src/remote/shared").RemoteApi | undefined;
 
   /**
+   * Read-only GPU / low-spec performance profile (P0-6). Absent in a browser
+   * and in harnesses, so every reader tolerates `undefined`; the renderer
+   * entry then degrades to L0 instead of guessing a machine class.
+   */
+  var ompStudioPerf: import("../../desktop/src/perf-profile-shared").OmpStudioPerfApi | undefined;
+
+  /**
    * Window-chrome helpers (not the Host transport). Theme sync talks to the
    * native caption buttons; workspace actions resolve paths in Main and never
    * send a filesystem path back to the Renderer.
@@ -284,15 +291,17 @@ declare global {
    */
   var ompStudioTerminal:
     | {
-        create(size?: { cols?: number; rows?: number; targetId?: string; workspaceId?: string }): Promise<{ id: string; name: string; cwd: string }>;
+        create(size?: { cols?: number; rows?: number; targetId?: string; workspaceId?: string; flowControl?: boolean }): Promise<{ id: string; name: string; cwd: string }>;
         write(id: string, data: string): Promise<void>;
         resize(id: string, cols: number, rows: number): Promise<void>;
         dispose(id: string): Promise<void>;
         recordingStart?(input: { id: string; workspaceId?: string; sessionId?: string }): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
         recordingStop?(id: string): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
         recordingStatus?(id: string): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
-        onData(listener: (event: { id: string; data: string }) => void): () => void;
+        onData(listener: (event: { id: string; data: string; bytes?: number }) => void): () => void;
         onExit(listener: (event: { id: string }) => void): () => void;
+        /** Flow control: bytes written to xterm. Absent on an older preload. */
+        ack?(id: string, bytes: number): void;
       }
     | undefined;
 }

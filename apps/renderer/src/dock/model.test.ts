@@ -198,3 +198,100 @@ describe("dock layouts", () => {
     expect(rect).toEqual({ x: -80, y: -200, width: 950, height: 840 });
   });
 });
+
+describe("dock empty regions", () => {
+  const rightPanels = createDefaultLayout().right.groups[0]!.panels;
+  const bottomPanels = createDefaultLayout().bottom.groups[0]!.panels;
+
+  it("collapses the right region when its last group leaves, keeping size and other regions", () => {
+    let layout = reduce({ type: "region", region: "right", visible: true }, { type: "resize", region: "right", size: 620 });
+    expect(layout.right.visible).toBe(true);
+    layout = dockReducer(layout, { type: "move", panels: rightPanels, target: { region: "left" } });
+    expect(layout.right).toMatchObject({ visible: false, size: 620, groups: [] });
+    expect(layout.left.panels).toEqual(["files", ...rightPanels]);
+    expect(layout.left.visible).toBe(true);
+    expect(layout.bottom.visible).toBe(true);
+    expectSingletons(layout);
+  });
+
+  it("collapses the bottom region when its last group leaves but keeps expansion and size", () => {
+    let layout = reduce({ type: "bottomExpanded", expanded: true }, { type: "resize", region: "bottom", size: 320 });
+    layout = dockReducer(layout, { type: "move", panels: bottomPanels, target: { region: "right" } });
+    expect(layout.bottom).toMatchObject({ visible: false, expanded: true, size: 320, groups: [] });
+    expect(layout.right.visible).toBe(true);
+    expect(layout.right.groups[0]!.panels).toEqual(expect.arrayContaining(bottomPanels));
+    expectSingletons(layout);
+  });
+
+  it("keeps a multi-module region open and ignores reordering inside one region", () => {
+    let layout = reduce({ type: "region", region: "right", visible: true });
+    layout = dockReducer(layout, { type: "move", panels: ["git"], target: { region: "left" } });
+    expect(layout.right).toMatchObject({ visible: true, groups: [{ panels: ["changes", "browser", "computer"] }] });
+    layout = dockReducer(layout, { type: "move", panels: ["problems"], target: { region: "left" } });
+    expect(layout.bottom.visible).toBe(true);
+    // A whole group re-enters the same region as a new group: move() empties the
+    // old group halfway through, but the committed layout is never empty.
+    let reordered = reduce({ type: "region", region: "right", visible: true });
+    reordered = dockReducer(reordered, { type: "move", panels: rightPanels, target: { region: "right", groupId: "right-main", split: "after" } });
+    expect(reordered.right.visible).toBe(true);
+    expect(reordered.right.groups).toHaveLength(1);
+    expect(reordered.right.groups[0]!.panels).toEqual(rightPanels);
+  });
+
+  it("collapses right and bottom when their last module is hidden", () => {
+    let layout = reduce({ type: "region", region: "right", visible: true });
+    layout = dockReducer(layout, { type: "hide", panels: rightPanels });
+    expect(layout.right).toMatchObject({ visible: false, groups: [] });
+    expect(layout.hidden.changes).toBeDefined();
+    layout = dockReducer(layout, { type: "hide", panels: bottomPanels });
+    expect(layout.bottom).toMatchObject({ visible: false, groups: [] });
+    // Reopening one module brings its region back.
+    layout = dockReducer(layout, { type: "open", panel: "git" });
+    expect(layout.right.visible).toBe(true);
+    expect(locatePanel(layout, "git")?.region).toBe("right");
+    expectSingletons(layout);
+  });
+
+  it("shows an explicitly opened empty region until the user closes it again", () => {
+    let layout = reduce({ type: "move", panels: rightPanels, target: { region: "left" } });
+    expect(layout.right.visible).toBe(false);
+    layout = dockReducer(layout, { type: "region", region: "right", visible: true });
+    expect(layout.right).toMatchObject({ visible: true, groups: [] });
+    // Unrelated commits must not close the empty state the user asked for.
+    layout = dockReducer(layout, { type: "resize", region: "left", size: 300 });
+    expect(layout.right.visible).toBe(true);
+    expect(dockReducer(layout, { type: "open", panel: "git" }).right.visible).toBe(true);
+    expect(dockReducer(layout, { type: "region", region: "right", visible: false }).right.visible).toBe(false);
+  });
+
+  it("leaves empty left cards and an empty rail alone, and never touches the conversation", () => {
+    let layout = reduce({ type: "region", region: "rail", visible: true });
+    layout = dockReducer(layout, { type: "move", panels: ["files"], target: { region: "right" } });
+    expect(layout.left).toMatchObject({ visible: true, panels: [], width: 272 });
+    layout = dockReducer(layout, { type: "move", panels: ["agents"], target: { region: "right" } });
+    expect(layout.rail).toMatchObject({ mode: "expanded", lastMode: "expanded", panels: [] });
+    expect(layout.right.visible).toBe(true);
+    expect(layout).not.toHaveProperty("center");
+    expectSingletons(layout);
+  });
+
+  it("converges old configurations where an empty right or bottom region stayed visible", () => {
+    const defaults = createDefaultLayout();
+    const raw = {
+      ...defaults,
+      right: { ...defaults.right, visible: true, groups: [] },
+      bottom: { ...defaults.bottom, visible: true, expanded: true, size: 300, groups: [] },
+      left: { ...defaults.left, visible: true, panels: [] },
+      rail: { ...defaults.rail, mode: "expanded", panels: [] },
+    };
+    const restored = normalizeLayout(raw);
+    expect(restored.right).toMatchObject({ visible: false, groups: [] });
+    expect(restored.bottom).toMatchObject({ visible: false, expanded: true, size: 300, groups: [] });
+    expect(restored.left).toMatchObject({ visible: true, panels: [] });
+    expect(restored.rail).toMatchObject({ mode: "expanded", panels: [] });
+    expect(normalizeLayout(restored)).toEqual(restored);
+    // A region closed by the user but still holding modules keeps its state.
+    expect(normalizeLayout(builtInPresets()[1]!.layout).left.visible).toBe(false);
+    expect(normalizeLayout(builtInPresets()[1]!.layout).bottom.visible).toBe(false);
+  });
+});

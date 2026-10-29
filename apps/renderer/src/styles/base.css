@@ -253,17 +253,25 @@ code, pre, .mono { font-family: var(--font-mono); }
   flex: none;
 }
 
-/* Skeleton shimmer */
-@keyframes omp-shimmer { to { background-position: -200% 0; } }
+/* Skeleton shimmer.
+   Was `background-position` on a 200%-wide gradient — a non-composited property,
+   so every frame repainted the placeholder (and there can be dozens on screen
+   while a session hydrates). The band is now its own absolutely positioned
+   `::after` and only `transform` moves, which stays on the compositor. Skeletons
+   are empty placeholder boxes by construction (ConversationSkeleton), so the
+   overlay has no content to cover. */
+@keyframes omp-shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 .skeleton {
+  position: relative;
+  overflow: hidden;
   border-radius: var(--r-4);
-  background: linear-gradient(
-    90deg,
-    var(--surface-2) 25%,
-    var(--surface-3) 50%,
-    var(--surface-2) 75%
-  );
-  background-size: 200% 100%;
+  background: var(--surface-2);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--surface-3) 85%, var(--surface-2)), transparent);
   animation: omp-shimmer 1.4s linear infinite;
 }
 
@@ -300,5 +308,8 @@ code, pre, .mono { font-family: var(--font-mono); }
      looks like a rendering artifact. Fall back to a flat placeholder tone. */
   .skeleton {
     background: var(--surface-3) !important;
+  }
+  .skeleton::after {
+    display: none;
   }
 }

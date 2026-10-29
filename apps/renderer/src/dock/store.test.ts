@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { builtInPresets, createDefaultLayout, locatePanel } from "./model";
 import { DockStore, dockProjectKey } from "./store";
 import type { DockScope } from "./types";
@@ -6,12 +6,23 @@ import type { DockScope } from "./types";
 class MemoryStorage implements Storage {
   readonly data = new Map<string, string>();
   writes: string[] = [];
+  attempts = 0;
+  failures = 0;
+  failAll = false;
   get length() { return this.data.size; }
   clear() { this.data.clear(); }
   getItem(key: string) { return this.data.get(key) ?? null; }
   key(index: number) { return [...this.data.keys()][index] ?? null; }
   removeItem(key: string) { this.data.delete(key); }
-  setItem(key: string, value: string) { this.writes.push(key); this.data.set(key, value); }
+  setItem(key: string, value: string) {
+    this.attempts++;
+    if (this.failAll || this.failures > 0) {
+      if (this.failures > 0) this.failures--;
+      throw Object.assign(new Error("The quota has been exceeded."), { name: "QuotaExceededError" });
+    }
+    this.writes.push(key);
+    this.data.set(key, value);
+  }
 }
 
 const a: DockScope = { target: "local", project: "project-a", session: "session-a" };
@@ -49,9 +60,11 @@ describe("dock persistence and session scope", () => {
     restart.switchScope(b, false);
     expect(layout(restart)).toEqual(expected);
   });
-  it("saves committed actions immediately under target/project/session identity", () => {
+  it("saves committed actions under target/project/session identity", () => {
     const { store, storage } = setup();
     store.dispatch({ type: "move", panels: ["terminal"], target: { region: "left" } });
+    expect(storage.writes).toEqual([]); // batched, not lost
+    store.flush();
     expect(storage.writes).toHaveLength(1);
     const moved = layout(store);
     store.switchScope(b, false);
@@ -121,6 +134,7 @@ describe("dock persistence and session scope", () => {
     store.undo();
     store.dispatch({ type: "hide", panels: ["files"] });
     expect(store.getSnapshot().canRedo).toBe(false);
+    store.flush();
     const restored = new DockStore(storage);
     restored.switchScope(a, false);
     expect(layout(restored)).toEqual(layout(store));
@@ -131,6 +145,7 @@ describe("dock persistence and session scope", () => {
     const { store, storage } = setup();
     store.dispatch({ type: "activate", groupId: "right-main", panel: "git" });
     expect(store.getSnapshot().canUndo).toBe(false);
+    store.flush();
     expect(storage.writes).toHaveLength(1);
     store.dispatch({ type: "open", panel: "btw" });
     store.dispatch({ type: "move", panels: ["files"], target: { region: "float" } });
@@ -399,5 +414,139 @@ describe("legacy layout migration", () => {
     expect(preset.layout.floats).toEqual([]);
     expect(preset.layout.right).toMatchObject({ visible: false, groups: [{ active: "btw" }] });
     expect(locatePanel(preset.layout, "btw")?.region).toBe("right");
+  });
+});
+
+describe("dock persistence batching", () => {
+  it("writes once for a burst of dispatches and reads back after a flush", () => {
+    const { store, storage } = setup();
+    for (let index = 0; index < 40; index++) store.dispatch({ type: "resize", region: "left", size: 240 + index });
+    expect(storage.writes).toEqual([]);
+    const resized = layout(store);
+    store.flush();
+    expect(storage.writes).toHaveLength(1);
+    expect(storage.writes[0]).toBe("omp.dock.v1");
+    const reload = new DockStore(storage);
+    reload.switchScope(a, false);
+    expect(layout(reload)).toEqual(resized);
+  });
+
+  it("lands the batch window on its own", () => {
+    vi.useFakeTimers();
+    try {
+      const { store, storage } = setup();
+      store.dispatch({ type: "resize", region: "left", size: 300 });
+      store.dispatch({ type: "resize", region: "left", size: 320 });
+      expect(storage.writes).toEqual([]);
+      vi.advanceTimersByTime(400);
+      expect(storage.writes).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("flushes before a scope change, a draft handoff and a page hide", () => {
+    const { store, storage } = setup();
+    store.dispatch({ type: "move", panels: ["terminal"], target: { region: "left" } });
+    const moved = layout(store);
+    store.switchScope(b, false);
+    expect(storage.writes.length).toBeGreaterThan(0);
+    store.switchScope(a, false);
+    expect(layout(store)).toEqual(moved);
+    store.dispatch({ type: "resize", region: "left", size: 300 });
+    store.beginDraft(draft);
+    expect(storage.data.get("omp.dock.v1")).toContain('"width":300');
+    store.switchScope(a, false);
+    store.dispatch({ type: "resize", region: "left", size: 310 });
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    delete (document as { hidden?: boolean }).hidden;
+    expect(storage.data.get("omp.dock.v1")).toContain('"width":310');
+    store.dispatch({ type: "resize", region: "left", size: 320 });
+    window.dispatchEvent(new Event("pagehide"));
+    expect(storage.data.get("omp.dock.v1")).toContain('"width":320');
+  });
+});
+
+describe("dock storage failures", () => {
+  it("retries once with a lean payload that keeps the current session", () => {
+    const storage = new MemoryStorage();
+    const store = new DockStore(storage);
+    store.switchScope(a, false);
+    storage.writes = [];
+    store.dispatch({ type: "move", panels: ["git"], target: { region: "left" } });
+    storage.failures = 1;
+    store.flush();
+    expect(storage.writes).toHaveLength(1);
+    const reload = new DockStore(storage);
+    reload.switchScope(a, false);
+    expect(locatePanel(layout(reload), "git")?.region).toBe("left");
+  });
+
+  it("stops retrying after the lean payload also fails, and stays usable", () => {
+    const storage = new MemoryStorage();
+    const store = new DockStore(storage);
+    store.switchScope(a, false);
+    storage.failAll = true;
+    storage.attempts = 0;
+    store.dispatch({ type: "resize", region: "left", size: 300 });
+    store.flush();
+    expect(storage.attempts).toBe(2); // full payload, then the lean one
+    for (let index = 0; index < 5; index++) store.dispatch({ type: "resize", region: "left", size: 300 + index });
+    store.flush();
+    expect(storage.attempts).toBe(2); // the session stopped writing after the first failure
+    expect(layout(store).left.width).toBe(304);
+    expect(store.getSnapshot().canUndo).toBe(true);
+  });
+});
+
+describe("dock region events", () => {
+  it("emits one omp:dock-region event per region action with the requested state", () => {
+    const { store } = setup();
+    const events: { region: string; visible: boolean }[] = [];
+    const listener = (event: Event) => events.push((event as CustomEvent<{ region: string; visible: boolean }>).detail);
+    window.addEventListener("omp:dock-region", listener);
+    try {
+      store.dispatch({ type: "region", region: "right", visible: true });
+      store.dispatch({ type: "region", region: "rail", visible: false });
+      store.dispatch({ type: "railMode", mode: "compact" });
+      store.dispatch({ type: "bottomExpanded", expanded: true });
+      store.dispatch({ type: "open", panel: "git" });
+    } finally {
+      window.removeEventListener("omp:dock-region", listener);
+    }
+    expect(events).toEqual([{ region: "right", visible: true }, { region: "rail", visible: false }]);
+    expect(store.getSnapshot().layout.right.visible).toBe(true);
+    expect(store.getSnapshot().layout.rail.mode).toBe("compact");
+  });
+});
+
+describe("dock auto-collapse and history", () => {
+  it("undo restores the region a move collapsed, redo collapses it again", () => {
+    const { store } = setup();
+    const panels = layout(store).right.groups[0]!.panels;
+    store.dispatch({ type: "region", region: "right", visible: true });
+    const opened = layout(store);
+    store.dispatch({ type: "move", panels, target: { region: "bottom" } });
+    expect(layout(store).right).toMatchObject({ visible: false, groups: [] });
+    store.undo();
+    expect(layout(store)).toEqual(opened);
+    expect(layout(store).right.visible).toBe(true);
+    store.redo();
+    expect(layout(store).right).toMatchObject({ visible: false, groups: [] });
+  });
+
+  it("keeps the menu state and the layout in agreement after a hidden empty region", () => {
+    const { store } = setup();
+    const panels = layout(store).right.groups[0]!.panels;
+    store.dispatch({ type: "region", region: "right", visible: true });
+    store.dispatch({ type: "hide", panels });
+    // The View menu renders `checked={layout[region].visible}`, so the collapsed
+    // region reads as unchecked and can be reopened into its empty state.
+    expect(layout(store).right.visible).toBe(false);
+    store.dispatch({ type: "region", region: "right", visible: true });
+    expect(layout(store).right).toMatchObject({ visible: true, groups: [] });
+    store.dispatch({ type: "region", region: "right", visible: false });
+    expect(layout(store).right.visible).toBe(false);
   });
 });

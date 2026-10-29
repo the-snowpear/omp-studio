@@ -1,0 +1,137 @@
+/* ==========================================================================
+   GPU / motion performance tiers (L0–L3)
+   --------------------------------------------------------------------------
+   The desktop main process probes `app.getGPUFeatureStatus()` and the user can
+   force motion off; the renderer entry writes the result onto <html> **before**
+   the first frame, so this file only reacts to attributes and never has to flip
+   styles after paint (no "draw it fully, then degrade" flash):
+
+     <html data-gpu="hardware|software">
+     <html data-motion="on|off">
+     <html data-perf="normal|low">
+
+   Tier mapping (see `perf/tiers.ts`, which classifies the same three inputs for
+   telemetry/tests):
+
+     L0  hardware + normal + motion on   full visuals
+     L1  motion off                      reduced motion  (also the sub-layer of L2/L3)
+     L2  software compositing or perf low
+     L3  software compositing + perf low
+
+   L1 ⊂ L2 ⊂ L3: every tier includes the rules of the ones before it, which is
+   why `motion: off` on a software-GPU machine still gets the L2 effect cut
+   instead of being pulled back up to L1.
+
+   Rules of engagement:
+   - Never `animation: none` on everything: spinners, progress bars and running
+     dots are status signals. Like the existing `prefers-reduced-motion` block in
+     base.css, L1 collapses the duration to ~0 with one iteration, which holds
+     the final painted frame instead of making the control disappear.
+   - `box-shadow: none` is a safe L2 lever because focus rings are drawn with
+     `outline` (base.css). The one exception is `.composer:focus-within`, which
+     paints its focus state with box-shadow and suppresses the textarea ring —
+     L2 restores an outline for it below.
+   - No `will-change`, no JS observers: everything here is attribute + selector.
+   ========================================================================== */
+
+/* ---------- L1: reduced motion -------------------------------------------- */
+:root:is([data-motion="off"], [data-gpu="software"], [data-perf="low"]) *,
+:root:is([data-motion="off"], [data-gpu="software"], [data-perf="low"]) *::before,
+:root:is([data-motion="off"], [data-gpu="software"], [data-perf="low"]) *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Pulse carries "running" through opacity alone; a held frame can land at 0.35
+   and read as disabled, so pin it opaque (same reasoning as base.css). */
+:root:is([data-motion="off"], [data-gpu="software"], [data-perf="low"]) .dot.pulse {
+  opacity: 1 !important;
+}
+
+/* Skeleton: a frozen mid-sweep gradient looks like a rendering artifact. */
+:root:is([data-motion="off"], [data-gpu="software"], [data-perf="low"]) .skeleton {
+  background: var(--surface-3) !important;
+}
+:root:is([data-motion="off"], [data-gpu="software"], [data-perf="low"]) .skeleton::after {
+  display: none !important;
+}
+
+/* Indeterminate progress: the travelling bar is the only cue that something is
+   happening. Keep a visible static block instead of a frozen sliver. */
+:root:is([data-motion="off"], [data-gpu="software"], [data-perf="low"])
+  .progress-fill::after,
+:root:is([data-motion="off"], [data-gpu="software"], [data-perf="low"])
+  .tc-progress .jw-bar-track.indeterminate .jw-bar-fill {
+  animation: none !important;
+}
+:root:is([data-motion="off"], [data-gpu="software"], [data-perf="low"])
+  .tc-progress .jw-bar-track.indeterminate .jw-bar-fill {
+  left: 0 !important;
+  width: 100% !important;
+  opacity: 0.45;
+}
+
+/* ---------- L2: software compositing / low perf ---------------------------- */
+/* Software compositing pays for every translucent blur in the rasterizer and
+   every shadow in the paint pass; the round-2 audit measured +62 % idle CPU on
+   the software path. Kill the effect layers, keep the layout and colours. */
+:root:is([data-gpu="software"], [data-perf="low"]) {
+  --bd-blur: 0px;
+  --shadow-menu: none;
+  --shadow-modal: none;
+  --shadow-pop: none;
+}
+
+:root:is([data-gpu="software"], [data-perf="low"]) *,
+:root:is([data-gpu="software"], [data-perf="low"]) *::before,
+:root:is([data-gpu="software"], [data-perf="low"]) *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+/* The composer announces focus with a glow instead of an outline (workbench.css
+   `.composer:focus-within` also clears the textarea ring). With shadows gone the
+   state would be invisible, so draw a real ring. */
+:root:is([data-gpu="software"], [data-perf="low"]) .composer:focus-within,
+:root:is([data-gpu="software"], [data-perf="low"]) .composer:has(.approval-menu),
+:root:is([data-gpu="software"], [data-perf="low"]) .composer:has(.cmp-menu) {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
+/* `box-shadow` is used as a ring on a handful of inputs that also clear their
+   own outline; restore the ring for those specifically. */
+:root:is([data-gpu="software"], [data-perf="low"])
+  :is(input, textarea, select):is(:focus, :focus-visible):not(.composer-input) {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
+/* Decorative sweeps stop entirely: they are the cheapest thing to drop and the
+   least noticed. (L1 already collapsed their duration; this removes the layer.) */
+:root:is([data-gpu="software"], [data-perf="low"]) .ce-heat-cells::after {
+  display: none !important;
+}
+
+/* ---------- L3: software compositing *and* low perf ----------------------- */
+/* Aggressive long-content containment. These three lists are plain maps with no
+   measurement contract (unlike the virtualised transcript, whose row heights are
+   read back by the virtual list and the minimap), so skipping off-screen rows is
+   safe here: they settle to `auto <remembered>` after the first render. */
+:root[data-gpu="software"][data-perf="low"] :is(.hist-row, .activity-row, .ce-row) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+
+/* Non-essential decoration layers: the wallpaper/glass stack is pure blur work
+   and the empty-state artwork is a large SVG. */
+:root[data-gpu="software"][data-perf="low"] :is(.bg-wallpaper, .bg-glass, .bg-scrim, .app-background) {
+  display: none !important;
+}
+:root[data-gpu="software"][data-perf="low"] .ce-pi {
+  display: none !important;
+}
