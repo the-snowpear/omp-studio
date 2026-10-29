@@ -101,12 +101,6 @@
 .computer-setting > div { flex: 1; min-width: 0; }
 .computer-setting strong { font-size: var(--fs-12); font-weight: var(--fw-medium); }
 .computer-setting p { color: var(--text-faint); font-size: var(--fs-11); margin-top: 3px; }
-.computer-switch { position: relative; width: 30px; height: 18px; padding: 2px; border-radius: var(--r-full); background: var(--surface-3); flex: none; transition: background var(--dur) var(--ease); }
-.computer-switch::before { content: ""; position: absolute; inset: -3px; }
-.computer-switch > span { display: block; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 3px #0002; transition: transform var(--dur) var(--ease); }
-.computer-switch[aria-checked="true"] { background: var(--accent); }
-.computer-switch[aria-checked="true"] > span { transform: translateX(12px); background: var(--text-on-accent); }
-.computer-switch:disabled { opacity: .45; cursor: not-allowed; }
 .computer-permission-body dl { display: grid; gap: var(--sp-12); }
 .computer-permission-body dl > div { display: flex; justify-content: space-between; gap: var(--sp-12); }
 .computer-permission-body dt { display: inline-flex; align-items: center; gap: var(--sp-8); color: var(--text-3); font-size: var(--fs-11); }

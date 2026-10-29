@@ -265,6 +265,17 @@
   --scrollbar-hover: rgba(20, 20, 30, 0.32);
   --minimap-viewport: rgba(20, 20, 30, 0.08);
   --selection: rgba(110, 86, 207, 0.2);
+
+  /* 开关旋钮的两条不变式，别压成一句「旋钮都比轨道亮」：
+     1) 关态：旋钮比轨道亮，两个主题都成立。所以暗色不能沿用 --surface
+        (#1a1b1f)，它比轨道(--border-strong 叠在 --bg 上约 #31333b)更暗，
+        旋钮会读成一个洞；暗色改用 --glyph-faint 这个中间明度。
+     2) 开态：旋钮取 --text-on-accent 一侧。暗色下 accent 是浅丁香，旋钮就是
+        刻意比轨道更暗 —— 这条是反的，由 accent 明度决定，不是 bug。
+     --switch-thumb-disabled 只服务「禁用 + 关」这一格：它仍须在轨道上方
+     (凸起)，但不能和可用态一样亮。 */
+  --switch-thumb: var(--surface);
+  --switch-thumb-disabled: var(--surface);
 }
 
 /* ---------------- Dark ---------------- */
@@ -371,6 +382,11 @@
   --scrollbar-hover: rgba(235, 235, 245, 0.3);
   --minimap-viewport: rgba(235, 235, 245, 0.07);
   --selection: rgba(158, 140, 252, 0.3);
+  --switch-thumb: var(--glyph-faint);
+  /* 见浅色分区的两条不变式。可用·关的旋钮是 #676b74，禁用·关必须仍亮于轨道
+     (--surface-3 #2b2c33) —— 沿用 --surface 会在暗色下变成更暗的一方，正是
+     本次重做要消除的「洞」。 */
+  --switch-thumb-disabled: var(--border-float);
 }
 
 /* Compatibility names from older feature panes reuse the established Studio

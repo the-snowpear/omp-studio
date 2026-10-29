@@ -430,16 +430,6 @@ body.is-pv-sorting * {
   z-index: 1;
   pointer-events: auto;
 }
-/* 圆点（knob）相对椭圆（track）死居中：top:50% + 负半高，不受 pill 边框 /
-   DPI 缩放下边框算术的累积舍入影响（100% 缩放时等价于原来的 top:1px）。
-   去掉 knob 自己的 1px 边框：track 边框 + knob 边框 + 1px 偏移会在上下各叠
-   出 2px 深色带，视觉上让圆看起来没坐正；去边框后是干净的 16px 圆，上下
-   各 1px 对称空隙。 */
-.pv-act.is-switch .switch::after {
-  top: 50%;
-  margin-top: -8px;
-  border: none;
-}
 
 /* 展开箭头：常驻，作为「卡片可点开」的导航提示 */
 .pv-act.is-expand { color: var(--text-3); }
