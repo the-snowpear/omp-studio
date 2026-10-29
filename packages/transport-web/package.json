@@ -21,6 +21,6 @@
     "test:built": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@omp-studio/client-contract": "0.1.15"
+    "@omp-studio/client-contract": "0.1.16"
   }
 }

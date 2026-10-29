@@ -19,6 +19,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@omp-studio/client-contract": "0.1.15"
+    "@omp-studio/client-contract": "0.1.16"
   }
 }

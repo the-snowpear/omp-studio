@@ -21,6 +21,6 @@
     "test:built": "node --test \"dist/test/*.test.js\""
   },
   "dependencies": {
-    "@omp-studio/platform": "0.1.15"
+    "@omp-studio/platform": "0.1.16"
   }
 }
