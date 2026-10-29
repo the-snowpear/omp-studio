@@ -1,6 +1,6 @@
 {
   "name": "@omp-studio/renderer",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "type": "module",
   "description": "Shared OMP Studio renderer: pure-browser React surface over the semantic StudioClient contract",

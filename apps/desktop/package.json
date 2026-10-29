@@ -1,7 +1,7 @@
 {
   "name": "@omp-studio/desktop",
   "productName": "OMP Studio",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "type": "module",
   "main": "./dist/src/main.js",

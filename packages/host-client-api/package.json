@@ -1,6 +1,6 @@
 {
   "name": "@omp-studio/host-client-api",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "description": "Presentation-neutral Host semantic facade for the OMP Studio product client (P1)",
   "type": "module",

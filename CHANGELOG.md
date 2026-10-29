@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-10-29
+
+### Fixed
+
+- 修复应用更新在没有任何任务运行时仍提示「后台任务仍在运行」而拒绝重启（[#17](https://github.com/the-snowpear/omp-studio/issues/17)）。根因是会话创建时主 agent 即被登记为运行中，桌面端从未收到它的运行状态回落通知，更新检查却直接采信该状态；现在根 agent 的忙碌与否以会话是否仍在生成、是否有排队消息和未完成命令为准，失去会话的子代理残影不再阻塞。
+- 更新被推迟时在提示中列出真正占用后台的代理或作业名，不再只给一句无法定位的通用文案。
+
 ### Changed
 
 - 发布先为每个平台准备一次签名 Runtime，Windows/macOS 桌面包与 SSH 远程包共享同一份产物；main 在相关构建输入变化后预热六个平台的 Rust/Bun 缓存和 Windows 打包工具，供后续发布标签复用。预热已有 Runtime 时保留原始签名字节。
+- 恢复 macOS Apple Silicon 发行包（0.1.15 未提供桌面包）：本版重新随 Release 提供 DMG、App ZIP 与 `updates-darwin-arm64` 更新目录，采用 ad hoc 签名、尚未公证。
 
 ## [0.1.15] - 2026-10-28
 

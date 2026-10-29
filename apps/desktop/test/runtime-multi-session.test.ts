@@ -232,6 +232,20 @@ test("update restart postpones interactions, queued commands and background work
       ), error => error instanceof UpdateRestartBlockedError && message.test(error.message));
       assert.deepEqual(state.stopped, []);
     }
+    // A session that is merely open keeps its root agent registered as
+    // `running`; that registration default is not work and must not hold the
+    // update back. The turn in flight is covered by `isStreaming` instead.
+    state.snapshotPatch = { agents: [{ agentId: "Main", kind: "main", displayName: "Main", status: "running", hasLiveSession: true, activeJobIds: [] }] as never };
+    assert.equal(port.updateRestartBlocker!(), undefined);
+    // A subagent that lost its session cannot still be working.
+    state.snapshotPatch = { agents: [{ agentId: "Ghost", kind: "sub", displayName: "Ghost", status: "running", hasLiveSession: false, activeJobIds: [] }] as never };
+    assert.equal(port.updateRestartBlocker!(), undefined);
+    // A live subagent and a queued job still postpone the restart, and the
+    // message names them so the user knows what to finish.
+    state.snapshotPatch = { agents: [{ agentId: "Worker", kind: "sub", displayName: "Worker", status: "running", hasLiveSession: true, activeJobIds: [] }] as never };
+    assert.match(port.updateRestartBlocker!()!, /Worker/);
+    state.snapshotPatch = { jobs: [{ jobId: "job-1", label: "npm run dev", status: "running" }] as never };
+    assert.match(port.updateRestartBlocker!()!, /npm run dev/);
     state.snapshotPatch = {};
     assert.equal(port.updateRestartBlocker!(), undefined);
     let began = false;
