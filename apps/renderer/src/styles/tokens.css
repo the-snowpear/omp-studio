@@ -272,8 +272,14 @@
         旋钮会读成一个洞；暗色改用 --glyph-faint 这个中间明度。
      2) 开态：旋钮取 --text-on-accent 一侧。暗色下 accent 是浅丁香，旋钮就是
         刻意比轨道更暗 —— 这条是反的，由 accent 明度决定，不是 bug。
-     --switch-thumb-disabled 只服务「禁用 + 关」这一格：它仍须在轨道上方
-     (凸起)，但不能和可用态一样亮。 */
+     --switch-thumb-disabled 是「禁用 + 关」这一格的跨主题对偶值：浅色 = 轨道
+     上方一档白，暗色 = 轨道上方一档中间调。它和 --surface-3 绑死，所以写成
+     字面值/别名而不是 color-mix(…, var(--surface-3) …)：否则以后调轨道底色会
+     静默改掉禁用旋钮，而且没人看得出旋钮动过。
+     另：关态轨道是半透明 --border-strong 填充，实际对比度随所在行底浮动
+     (--surface 1.46 / --bg 1.49 / --surface-2 ≈1.36)。这不是漂移：控件跟着面板
+     自动沉一档或浮一档，比写死一个灰更不容易在白卡和灰底上同时出错。报数以
+     --surface 为基准。 */
   --switch-thumb: var(--surface);
   --switch-thumb-disabled: var(--surface);
 }
@@ -383,9 +389,10 @@
   --minimap-viewport: rgba(235, 235, 245, 0.07);
   --selection: rgba(158, 140, 252, 0.3);
   --switch-thumb: var(--glyph-faint);
-  /* 见浅色分区的两条不变式。可用·关的旋钮是 #676b74，禁用·关必须仍亮于轨道
-     (--surface-3 #2b2c33) —— 沿用 --surface 会在暗色下变成更暗的一方，正是
-     本次重做要消除的「洞」。 */
+  /* 禁用·关必须仍比轨道亮：--surface(#1a1b1f) 比轨道 --surface-3(#2b2c33) 更暗，
+     沿用会让禁用态重新变成「洞」；这里换成更亮的 --border-float(#46505f)，对
+     轨道 1.70:1。可用·关是 --glyph-faint(#676b74) 对轨道 2.25:1，梯度
+     2.25 → 1.70 保持「禁用更淡」，同时明暗次序与浅色一致。 */
   --switch-thumb-disabled: var(--border-float);
 }
 
