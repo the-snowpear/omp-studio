@@ -94,7 +94,7 @@ it("inserts prepared text after returning from media without losing the current 
   fireEvent.input(editor);
   await open("Media");
   await screen.findByRole("button", { name: "Insert prepared result" });
-  expect(document.querySelector("#workbench")).toBeNull();
+  expect(document.querySelector("#workbench")?.closest(".adaptive-workbench")?.hasAttribute("hidden")).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Insert prepared result" }));
   await waitFor(() => expect(document.querySelector('[role="textbox"]')?.textContent).toContain("prepared result"));
   expect(document.querySelector('[role="textbox"]')?.textContent).toContain("existing draft");

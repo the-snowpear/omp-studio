@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import type { EnvironmentId, HistoryEntryId, SessionHistoryEntry, SessionId, ThreadId, WorkspaceId } from "@omp-studio/client-contract";
 import { AppSidebar } from "../App";
+import { DockProvider } from "../dock/DockContext";
+import { WORKBENCH_PANELS } from "../panels/registry";
 import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
@@ -87,7 +89,7 @@ function renderSidebar({ preview, chrome, state }: {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, preview ? "1" : "0");
   render(
     <I18nProvider forcedLanguage="zh">
-      <PreviewModeProvider switchEnabled>
+      <PreviewModeProvider switchEnabled><DockProvider definitions={WORKBENCH_PANELS}>
         <AppSidebar
           state={state}
           chrome={chrome}
@@ -95,7 +97,7 @@ function renderSidebar({ preview, chrome, state }: {
           onRoute={() => undefined}
           onOpenAppUpdateDialog={() => undefined}
         />
-      </PreviewModeProvider>
+      </DockProvider></PreviewModeProvider>
     </I18nProvider>,
   );
 }

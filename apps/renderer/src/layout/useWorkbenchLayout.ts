@@ -2,12 +2,12 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { beforeConversationLayoutChange, afterConversationLayoutChange } from "../conversation/conversationReflow";
 import { fitWorkbench, type LayoutPanel, type WorkbenchLayout, type WorkbenchPreferences } from "./workbenchLayout";
 
-type LayoutVisibility = Pick<WorkbenchLayout, "sidebarShown" | "sideShown" | "bottomVisible" | "bottomOpen" | "overlay">;
+type LayoutVisibility = Pick<WorkbenchLayout, "sidebarShown" | "sideShown" | "bottomVisible" | "bottomOpen" | "overlay" | "railMode">;
 function visibilityOf(layout: WorkbenchLayout): LayoutVisibility {
-  return { sidebarShown: layout.sidebarShown, sideShown: layout.sideShown, bottomVisible: layout.bottomVisible, bottomOpen: layout.bottomOpen, overlay: layout.overlay };
+  return { sidebarShown: layout.sidebarShown, sideShown: layout.sideShown, bottomVisible: layout.bottomVisible, bottomOpen: layout.bottomOpen, overlay: layout.overlay, railMode: layout.railMode };
 }
 function sameVisibility(a: LayoutVisibility, b: LayoutVisibility): boolean {
-  return a.sidebarShown === b.sidebarShown && a.sideShown === b.sideShown && a.bottomVisible === b.bottomVisible && a.bottomOpen === b.bottomOpen && a.overlay === b.overlay;
+  return a.sidebarShown === b.sidebarShown && a.sideShown === b.sideShown && a.bottomVisible === b.bottomVisible && a.bottomOpen === b.bottomOpen && a.overlay === b.overlay && a.railMode === b.railMode;
 }
 
 export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean) {
@@ -60,11 +60,12 @@ export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean)
         composerHeight: composer?.offsetHeight ?? 160,
       }, priorityRef.current, lastLayout.current);
       const previous = lastLayout.current;
-      const geometryChanged = !root.style.getPropertyValue("--sidebar-w") || !previous || layout.sidebarWidth !== previous.sidebarWidth || layout.panelWidth !== previous.panelWidth || layout.bottomHeight !== previous.bottomHeight || !sameVisibility(layout, previous);
+      const geometryChanged = !root.style.getPropertyValue("--sidebar-w") || !previous || layout.sidebarWidth !== previous.sidebarWidth || layout.panelWidth !== previous.panelWidth || layout.railWidth !== previous.railWidth || layout.bottomHeight !== previous.bottomHeight || !sameVisibility(layout, previous);
       if (!geometryChanged) return;
       beforeConversationLayoutChange();
       root.style.setProperty("--sidebar-w", `${layout.sidebarWidth}px`);
       root.style.setProperty("--panel-w", `${layout.panelWidth}px`);
+      root.style.setProperty("--dock-rail-w", `${layout.railWidth}px`);
       root.style.setProperty("--bottom-panel-h", `${layout.bottomHeight}px`);
       root.querySelector("#sbResizer")?.setAttribute("aria-valuenow", String(Math.round(layout.sidebarWidth)));
       root.querySelector("#spResizer")?.setAttribute("aria-valuenow", String(Math.round(layout.panelWidth)));
@@ -90,7 +91,7 @@ export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean)
       observer?.disconnect();
       window.removeEventListener("resize", schedule);
     };
-  }, [active, prefs.collapsed, prefs.sidebarWidth, prefs.sideOpen, prefs.panelWidth, prefs.bottomVisible, prefs.bottomOpen, prefs.bottomHeight, priority]);
+  }, [active, prefs.collapsed, prefs.sidebarWidth, prefs.sideOpen, prefs.panelWidth, prefs.bottomVisible, prefs.bottomOpen, prefs.bottomHeight, prefs.railMode, prefs.railWidth, priority]);
   const previousVisibility = useRef(visibility);
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -116,8 +117,9 @@ export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean)
     const drawer = root.querySelector<HTMLElement>(drawerSelector);
     if (!drawer) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const nodes = () => [...drawer.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [contenteditable="true"], [tabindex="0"]')]
-      .filter(node => !node.closest("[inert]") && node.getClientRects().length > 0);
+    const hostNodes = () => [...drawer.querySelectorAll<HTMLElement>('[data-dock-slot]')].flatMap(slot => [...document.querySelectorAll<HTMLElement>(`[data-panel="${slot.dataset.dockSlot}"] button:not(:disabled), [data-panel="${slot.dataset.dockSlot}"] input:not(:disabled), [data-panel="${slot.dataset.dockSlot}"] textarea:not(:disabled), [data-panel="${slot.dataset.dockSlot}"] [tabindex="0"]`)]);
+    const nodes = () => [...drawer.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [contenteditable="true"], [tabindex="0"]'), ...hostNodes()]
+      .filter(node => !node.closest("[inert], [hidden]") && node.getClientRects().length > 0);
     if (!drawer.contains(document.activeElement)) nodes()[0]?.focus({ preventScroll: true });
     const backdrop = root.querySelector<HTMLElement>(".layout-overlay-backdrop");
     const restoreInert = () => {

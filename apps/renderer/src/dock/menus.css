@@ -1,0 +1,78 @@
+/* Dock controls share the app's menu, input and settings tokens. */
+.dock-menu-popover {
+  position: fixed;
+  width: 344px;
+  min-width: min(280px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: var(--z-menu);
+}
+.dock-menu-content { min-width: 0; }
+.dock-menu-content .menu-item { min-height: 30px; }
+.dock-menu-content .menu-item > .icon { flex: none; }
+.dock-menu-content .menu-item > span:first-of-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dock-menu-content .menu-item .hint {
+  max-width: 56%;
+  text-align: right;
+  flex-shrink: 0;
+  white-space: normal;
+  line-height: 1.35;
+}
+.dock-menu-content .menu-item > .icon:last-child:not(:first-child),
+.dock-menu-section > .menu-item > .icon:last-child { margin-left: auto; }
+.dock-menu-heading { display: flex; align-items: center; gap: var(--sp-8); }
+.dock-menu-check { display: flex; flex: 0 0 14px; justify-content: center; margin-left: auto; }
+.dock-menu-content .kbd + .dock-menu-check { margin-left: 0; }
+.dock-menu-subsection {
+  margin: 2px 0 4px var(--sp-8);
+  padding-left: var(--sp-4);
+  border-left: 1px solid var(--border);
+}
+.dock-menu-subsection .menu-label { line-height: 1.5; }
+.dock-menu-button { flex: none; }
+.dock-preset-form {
+  display: grid;
+  gap: var(--sp-8);
+  margin: var(--sp-8) 0;
+  padding: var(--sp-10);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface);
+}
+.dock-preset-form label { font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.dock-preset-form .input { width: 100%; min-width: 0; }
+.dock-preset-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8); }
+.dock-preset-manager {
+  padding: var(--sp-12);
+  margin-top: var(--sp-12);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface);
+}
+.dock-preset-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-8); }
+.dock-current-preset { display: inline-flex; align-items: center; gap: var(--sp-8); font-size: var(--fs-11); color: var(--text-3); }
+.dock-preset-manager > .dock-preset-actions + .dock-preset-actions { margin-top: var(--sp-8); }
+.dock-preset-manager > .dock-preset-actions > .select { width: 220px; max-width: 100%; }
+.dock-preset-delete { margin-top: var(--sp-12); padding: var(--sp-12); border: 1px solid var(--border); border-radius: var(--r-8); }
+.dock-preset-delete > p:first-child { margin: 0 0 var(--sp-8); font-weight: var(--fw-medium); }
+.dock-layout-recovery { padding-top: var(--sp-12); margin-top: var(--sp-12); border-top: 1px solid var(--border); }
+.dock-settings-notice { margin: var(--sp-10) 0 0; color: var(--text-2); font-size: var(--fs-12); }
+.dock-layout-help { margin-top: var(--sp-16); color: var(--text-3); font-size: var(--fs-12); line-height: 1.6; }
+.dock-layout-help strong { color: var(--text-2); font-weight: var(--fw-medium); }
+.dock-layout-help p { margin: var(--sp-8) 0; }
+.dock-layout-help dl { display: grid; gap: var(--sp-4); margin: var(--sp-8) 0; }
+.dock-layout-help dl > div { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-8); }
+.dock-layout-help dd { margin: 0; color: var(--text-2); }
+.dock-settings .set-row { flex-wrap: wrap; }
+.dock-settings .set-row > div:first-child { flex: 1 1 260px; }
+.dock-settings .set-row .sr-control { max-width: 100%; }
+.dock-settings .set-row .select { max-width: 100%; }
+@media (prefers-reduced-motion: reduce) {
+  .dock-menu-popover { animation: none; }
+}

@@ -13,6 +13,8 @@ export type WorkbenchPreferences = {
   bottomVisible: boolean;
   bottomOpen: boolean;
   bottomHeight: number;
+  railMode?: "hidden" | "expanded" | "compact";
+  railWidth?: number;
 };
 export type WorkbenchLayout = {
   sidebarShown: boolean;
@@ -23,6 +25,8 @@ export type WorkbenchLayout = {
   bottomOpen: boolean;
   bottomHeight: number;
   overlay: LayoutPanel | null;
+  railMode: "hidden" | "expanded" | "compact";
+  railWidth: number;
 };
 
 export function panelSize(value: number, limits: { min: number; max: number; initial: number }): number {
@@ -83,6 +87,12 @@ export function fitWorkbench(
       if ((!previous.sidebarShown && !cautious.sidebarShown) || (!previous.sideShown && !cautious.sideShown)) horizontal = cautious;
     }
   }
+  const preferredRail = prefs.railMode ?? "hidden";
+  const railWidth = panelSize(prefs.railWidth ?? 320, { min: 280, max: 480, initial: 320 });
+  const occupied = (horizontal.sidebarShown && horizontal.overlay !== "sidebar" ? horizontal.sidebarWidth : 0)
+    + (horizontal.sideShown && horizontal.overlay !== "side" ? horizontal.panelWidth : 0);
+  const railBuffer = previous?.railMode === "compact" && priority === null ? LAYOUT_RESTORE_GAP : 0;
+  const railMode = preferredRail === "expanded" && width - occupied - railWidth < CONVERSATION_MIN_WIDTH + railBuffer ? "compact" : preferredRail;
   const preferredHeight = panelSize(prefs.bottomHeight, BOTTOM_PANEL_LIMITS);
   const budget = Math.max(0, available.height - available.composerHeight - 160);
   const bottomOverlay = priority === "bottom" && prefs.bottomVisible && prefs.bottomOpen && budget < BOTTOM_PANEL_LIMITS.min;
@@ -90,6 +100,8 @@ export function fitWorkbench(
   const bottomOpen = bottomVisible && prefs.bottomOpen && (budget >= BOTTOM_PANEL_LIMITS.min || bottomOverlay);
   return {
     ...horizontal,
+    railMode,
+    railWidth,
     bottomVisible,
     bottomOpen,
     bottomHeight: bottomOverlay ? Math.max(0, available.height) : Math.min(preferredHeight, Math.max(0, budget)),

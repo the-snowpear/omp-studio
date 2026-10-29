@@ -1,6 +1,7 @@
 import { AppSelect } from "../AppSelect";
 import { FontSettings } from "./FontSettings";
 import { ConversationWidthSettings } from "./ConversationWidthSettings";
+import { DockSettings } from "../dock/DockSettings";
 import { FONT_SETTINGS_KEYS } from "./typography";
 import { Runtime1844Rows } from "./Runtime1844Rows";
 /**
@@ -475,7 +476,6 @@ const GENERAL_RESET_KEYS: readonly (keyof AppSettings)[] = [
   ...CONVERSATION_WIDTH_KEYS,
   "language", "theme", "density", "streaming", "streamingCadenceHz", "toolActivity",
   "restoreLastProject", "restoreLastSession", "startupPage",
-  "rememberLayout", "perProjectLayout",
   "notifyTaskDone", "notifyErrors", "notifyConfirmations", "notifyLongTasks",
 ];
 
@@ -578,13 +578,8 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
             onChange={(startupPage) => updateApp({ startupPage })}
           />
         </SettingRow>
-        <SettingRow label={t("settings.general.rememberLayout")} desc={t("settings.general.rememberLayoutDesc")} source={appSource(app, "rememberLayout")}>
-          <Switch checked={app.rememberLayout} onChange={(rememberLayout) => updateApp({ rememberLayout })} label={t("settings.general.rememberLayout")} />
-        </SettingRow>
-        <SettingRow label={t("settings.general.perProjectLayout")} desc={t("settings.general.perProjectLayoutDesc")} source={appSource(app, "perProjectLayout")}>
-          <Switch checked={app.perProjectLayout} onChange={(perProjectLayout) => updateApp({ perProjectLayout })} label={t("settings.general.perProjectLayout")} />
-        </SettingRow>
       </SettingSection>
+      <DockSettings />
       <SettingSection title={t("settings.general.sectionNotify")} desc={t("settings.general.notifyDesc")}>
         <SettingRow label={t("settings.general.notifyTaskDone")} desc={t("settings.general.notifyTaskDoneDesc")} source={appSource(app, "notifyTaskDone")}>
           <Switch checked={app.notifyTaskDone} onChange={(notifyTaskDone) => updateApp({ notifyTaskDone })} label={t("settings.general.notifyTaskDone")} />

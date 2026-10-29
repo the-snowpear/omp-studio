@@ -1,3 +1,14 @@
+import { DockStore } from "./dock/store";
+import { PanelRegistration } from "./dock/PanelRegistration";
+import { DockProvider, DockPanel, useDock, useDockEngine, useOptionalDock } from "./dock/DockContext";
+import { WORKBENCH_PANELS } from "./panels/registry";
+import { DockCardRegion, DockGroupRegion, DockRail, DockRailToggle, DockFloatingLayer, DockCapsules, DockKeyboard } from "./dock/DockRegions";
+import { DockViewMenu } from "./dock/DockMenus";
+import { locatePanel } from "./dock/model";
+import type { DockScope, PanelId } from "./dock/types";
+import "./dock/dock.css";
+import "./dock/menus.css";
+import "./dock/integration.css";
 import { DeferredPanel, LoadWhenVisible, lazyPanel } from "./DeferredPanel";
 import { useModelConnection } from "./models/useModelConnection";
 import { LocalFilesPane } from "./capabilities/LocalFilesPane";
@@ -69,7 +80,6 @@ import type {
 import { selectComposerReceipt, type ClientState } from "@omp-studio/client";
 import {
   clientShellChanged,
-  layoutRestoreNeeded,
   shouldRecordShellEvent,
   toShellEventLogEntry,
   type ShellEventLogEntry,
@@ -149,7 +159,6 @@ import {
   runtimeCanRestart,
 } from "./diagnosticsModel";
 import { createShellModelLoader, type ShellModel as Model } from "./shellModelLoader";
-import type { TerminalPaneHandle } from "./TerminalPane";
 const TerminalPane = lazyPanel(() => import("./TerminalPane").then(module => ({ default: module.TerminalPane })));
 import { TerminalSessionsProvider } from "./terminalSessions";
 import { TipHost } from "./TipHost";
@@ -196,10 +205,8 @@ import { AppBackgroundLayer } from "./background/AppBackgroundLayer";
 import {
   getAppSettings,
   readLastRoute,
-  readLayoutMemory,
   useAppSettings,
   writeLastRoute,
-  writeLayoutMemory,
 } from "./settings/appSettings";
 import { desktopNotice, notifyAskConfirmation, clearAskConfirmationNotice } from "./settings/desktopNotice";
 import { StartupNotice } from "./StartupNotice";
@@ -236,11 +243,8 @@ import { PreviewDeck } from "./preview/PreviewDeck";
 import { PREVIEW_DECK_ITEMS } from "./preview/deckFixtures";
 import { PREVIEW_BTW_QUESTION, PREVIEW_BTW_SNAPSHOTS, previewBtwSnapshot } from "./preview/btwPreview";
 import { previewTailInterrupted } from "./preview/conversationFixtures";
-import { BtwHost } from "./btw/BtwHost";
 import { BtwPanel } from "./btw/BtwPanel";
-import type { BtwRect } from "./btw/btwGeometry";
 import { useBtwSession, type BtwSessionApi } from "./btw/useBtwSession";
-import { useBtwWindow, type BtwWindowApi } from "./btw/useBtwWindow";
 import { InteractionDeck } from "./InteractionDeck";
 import { ASK_GENIE_HOLD_MS, isAskDeckInteraction, prefersReducedMotion } from "./deck/askGenie";
 import { interactionDeckDisabled, planReviewDeckDisabled, usableCapabilityManifest } from "./deck/interactionGate";
@@ -605,7 +609,7 @@ function TitleMenu({ id, label, openId, onToggle, children }: {
               role="menu"
               style={{ top: anchor.top, left: anchor.left }}
               onMouseDown={(event) => {
-                event.preventDefault();
+                if (!(event.target as Element).closest("input, textarea, [contenteditable]")) event.preventDefault();
                 event.stopPropagation();
               }}
             >
@@ -1034,6 +1038,7 @@ function Titlebar({
         data-tip={sidebarCollapsed ? t("common.expand") : t("common.collapse")}
         aria-label={sidebarCollapsed ? t("menu.expandSidebar") : t("menu.collapseSidebar")}
         aria-controls="sidebar"
+        data-dock-entry="left"
         aria-expanded={sidebarCollapsed === false}
         disabled={!onToggleSidebar}
         onClick={onToggleSidebar}
@@ -1890,6 +1895,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const appUpdate = useAppUpdate();
   const effectiveUpdate = preview ? PREVIEW_APP_UPDATE : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
   const hasUpdate = effectiveUpdate?.available === true;
+  const dock = useOptionalDock();
+  const hasDockCards = !dock || dock.layout.left.panels.length > 0;
   const sidebarRef = useRef<HTMLElement>(null);
   const ompBtnRef = useRef<HTMLButtonElement>(null);
   const ompMenuRef = useRef<HTMLDivElement>(null);
@@ -2130,6 +2137,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     };
   }, [chrome.skillsOpen, chrome.collapsed, chrome.sidebarWidth]);
   const onResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dock?.preferences.locked) return;
     if (chrome.collapsed) return;
     event.preventDefault();
     window.getSelection()?.removeAllRanges();
@@ -2175,14 +2183,15 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     chrome.onResizeSidebar(panelSize(value, SIDEBAR_LIMITS));
   };
   const onSplitPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!chrome.explorerOpen) return;
+    if (dock?.preferences.locked) return;
+    if (!hasDockCards) return;
     event.preventDefault();
     window.getSelection()?.removeAllRanges();
     const handle = event.currentTarget;
     const sidebar = handle.closest(".sidebar");
     if (!(sidebar instanceof HTMLElement)) return;
     const projects = sidebar.querySelector("#sbProjects");
-    const files = sidebar.querySelector("#sbFiles");
+    const files = sidebar.querySelector(".dock-left-cards");
     if (!(projects instanceof HTMLElement) || !(files instanceof HTMLElement)) return;
     const top = projects.getBoundingClientRect().top;
     const span = files.getBoundingClientRect().bottom - top;
@@ -2262,7 +2271,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
           <span className="meta"><span className="count">{chrome.skillsEnabledCount}</span><Icon name="chevron-r" extra="sm chev" /></span>
         </button>
       </div>
-      <section className="sb-section" id="sbProjects" aria-labelledby="sbProjectsTitle" style={{ ["--sb-proj-basis" as string]: `${projectShare.toFixed(3)}%` }}>
+      <section className="sb-section" id="sbProjects" aria-labelledby="sbProjectsTitle" style={{ ["--sb-proj-basis" as string]: hasDockCards ? `${projectShare.toFixed(3)}%` : "100%" }}>
         <div className="sb-section-head">
           <h2 id="sbProjectsTitle">{t("shell.projectAndChat")}</h2>
           <div className="sb-head-actions">
@@ -2598,6 +2607,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
       </section>
       <div
         className="sb-divider"
+        hidden={!hasDockCards}
         id="sbDivider"
         role="separator"
         tabIndex={0}
@@ -2609,7 +2619,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         onPointerDown={onSplitPointerDown}
         onDoubleClick={() => chrome.onResizeSplit(0.5)}
         onKeyDown={(event) => {
-          if (!chrome.explorerOpen) return;
+          if (!hasDockCards) return;
           const step = event.shiftKey ? 0.15 : 0.05;
           if (event.key === "ArrowUp") { event.preventDefault(); chrome.onResizeSplit(Math.max(0.15, chrome.splitRatio - step)); }
           else if (event.key === "ArrowDown") { event.preventDefault(); chrome.onResizeSplit(Math.min(0.85, chrome.splitRatio + step)); }
@@ -2617,7 +2627,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
           else if (event.key === "End") { event.preventDefault(); chrome.onResizeSplit(0.85); }
         }}
       />
-      <section className={`sb-section${chrome.explorerOpen ? "" : " collapse"}`} id="sbFiles" aria-labelledby="sbFilesTitle" style={{ ["--sb-files-basis" as string]: `${fileShare.toFixed(3)}%` }}>
+      {dock ? <div className="dock-left-cards" style={{ flex: hasDockCards ? `1 1 ${fileShare}%` : "0 0 0", minHeight: 0, overflow: "hidden" }}><DockCardRegion region="left" visible={!chrome.collapsed} /></div> : null}
+      <DockPanel id="files">
+      <section className="dock-files-content" id="sbFiles" aria-labelledby="sbFilesTitle" >
         <div className="sb-section-head">
           <h2 id="sbFilesTitle">{t("shell.workspace")}</h2>
           <div className="sb-head-actions">
@@ -2626,9 +2638,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
             <button className={`icon-btn${fileSearch ? " active" : ""}`} data-tip={t("common.filter")} aria-label={t("shell.filterLoadedFiles")} onClick={() => setFileSearch((value) => value ? "" : " ")}><Icon name="search" extra="sm" /></button>
             <button className="icon-btn" data-tip={t("common.refresh")} aria-label={t("shell.refreshFileTree")} disabled={!chrome.selectedProject} onClick={() => preview ? setPreviewFileMessage(`${t("common.demo")}: ${t("shell.refreshFileTree")}`) : setFileRefreshToken((value) => value + 1)}><Icon name="refresh" extra="sm" /></button>
           </div>
-          <button className={`icon-btn sb-collapse-btn${chrome.explorerOpen ? "" : " is-collapsed"}`} aria-label={chrome.explorerOpen ? t("menu.collapseExplorer") : t("menu.expandExplorer")} aria-expanded={chrome.explorerOpen} onClick={chrome.onToggleExplorer}>
-            <Icon name={chrome.explorerOpen ? "chevron-d" : "chevron-u"} extra="sm" />
-          </button>
+
         </div>
         {fileSearch ? <div style={{ padding: "4px 10px" }}><input autoFocus className="input" value={fileSearch.trim()} onChange={(event) => setFileSearch(event.target.value || " ")} placeholder={`${t("shell.filterLoadedFiles")}…`} aria-label={t("shell.filterLoadedFiles")} /></div> : null}
         {preview && previewFileMessage ? <div className="muted tiny" role="status" style={{ padding: "2px 12px 6px" }}>{previewFileMessage}</div> : null}
@@ -2680,6 +2690,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
           )}
         </div>
       </section>
+      </DockPanel>
       <SkillsDrawer
         open={chrome.skillsOpen}
         client={client}
@@ -3238,6 +3249,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
       <button className="icon-btn lg tb-optional" data-tip={t("nav.agentHub")} aria-label="Agent Hub" onClick={() => onRoute("agent-hub")}><Icon name="bot" extra="lg" /></button>
       <button className="icon-btn tb-optional" data-tip={t("nav.history")} aria-label={t("nav.history")} onClick={() => onRoute("history")}><Icon name="history" /></button>
       <div className="tb-right">
+        <DockRailToggle />
         <div className="tb-overflow" onMouseDown={event => event.stopPropagation()}>
           <button type="button" className="icon-btn" aria-label={t("common.more")} data-tip={t("common.more")} aria-haspopup="menu" aria-expanded={openMenu === "overflow" || openMenu === "overflow-tokens" || openMenu === "overflow-context"} onClick={() => setOpenMenu(openMenu?.startsWith("overflow") ? null : "overflow")}><Icon name="more" /></button>
           {openMenu?.startsWith("overflow") ? createPortal(
@@ -3311,7 +3323,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
             </button>
           )}
         </div>
-        <button className={`icon-btn${sideOpen ? " active" : ""}`} data-tip={t("menu.rightPanel")} aria-controls="sidePanel" aria-expanded={sideOpen} onClick={onToggleSide}><Icon name="panel" /></button>
+        <button className={`icon-btn${sideOpen ? " active" : ""}`} data-tip={t("menu.rightPanel")} aria-controls="sidePanel" data-dock-entry="right" aria-expanded={sideOpen} onClick={onToggleSide}><Icon name="panel" /></button>
         <button className="icon-btn tb-optional" data-tip={t("shell.theme")} onClick={chrome.onToggleTheme} aria-label={t("shell.theme")}>
           <Icon name={chrome.theme === "dark" ? "moon" : "light"} />
         </button>
@@ -3393,7 +3405,9 @@ const PROMPT_SEND_PHASE_LABEL: Record<PromptSendPhase, string> = {
   initiating: "Initiating",
 };
 
-function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, selectedSessionId, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, onCloseSide, sideTab, onSideTabChange, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, bottomTab, onBottomTabChange, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwWindow, btwSession, btwSideHeadRect, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactPending, onViewedTelemetryRefresh, composerDraft, onComposerDraftChange, composerInsertion, onComposerInsertionApplied }: {
+function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, state, client, onOpenWorktree, selectedSessionId, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwSession, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactPending, onViewedTelemetryRefresh, composerDraft, onComposerDraftChange, composerInsertion, onComposerInsertionApplied }: {
+  workbenchVisible: boolean;
+  railMode: "hidden" | "expanded" | "compact";
   state: ViewState;
   client: ClientStateSource;
   onOpenWorktree?: ((workspaceId: string) => Promise<void>) | undefined;
@@ -3417,9 +3431,6 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
   onBranchedSession?: (sessionId: string) => Promise<boolean>;
   hiddenPreviewThreads?: ReadonlySet<string>;
   sideOpen: boolean;
-  onCloseSide: () => void;
-  sideTab: SideTab;
-  onSideTabChange: (tab: SideTab) => void;
   layoutOverlayDismiss?: () => void;
   /** 右侧面板宽度（px），由 spResizer 拖拽调整，App 持久化到 --panel-w。 */
   panelWidth: number;
@@ -3432,8 +3443,6 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
   /** 底部运行面板高度（px），由 bpResizer 拖拽调整，App 持久化到 --bottom-panel-h。 */
   bottomHeight: number;
   onResizeBottom: (height: number) => void;
-  bottomTab: BottomTab;
-  onBottomTabChange: (tab: BottomTab) => void;
   onRoute: (route: Route) => void;
   onOpenChanges: () => void;
   /** 打开右侧面板的 Git 页签。 */
@@ -3455,9 +3464,7 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
   /** Refresh Host history after Runtime's `/pin` command persists its global pin file. */
   onPinCompleted?: () => Promise<void>;
   /** BTW 浮窗状态由 AppShell 持有，工作台只负责画它与侧栏页。 */
-  btwWindow: BtwWindowApi;
   btwSession: BtwSessionApi;
-  btwSideHeadRect: () => BtwRect | undefined;
   onBtwDemoNext: () => void;
   /** Preview `/btw`: reset the fixture round. Local UI only. */
   onBtwPreviewAsk: () => void;
@@ -3489,21 +3496,12 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
   const optimisticPromptRef = useRef(optimisticPrompt);
   optimisticPromptRef.current = optimisticPrompt;
   const composerBarRef = useComposerCollisionCollapse();
-  // 右侧面板收起是 250ms 滑出动画：Changes 内容跟随 sideOpen 立即卸载会先闪一帧空面板，
-  // 这里延迟到滑动结束后再卸载。时长须与 tokens.css 的 --dur-slow 保持一致。
-  const [sideContentMounted, setSideContentMounted] = useState(sideOpen);
-  useEffect(() => {
-    if (sideOpen) {
-      setSideContentMounted(true);
-      return;
-    }
-    const timer = window.setTimeout(() => setSideContentMounted(false), 250);
-    return () => window.clearTimeout(timer);
-  }, [sideOpen]);
+  const dock = useDockEngine();
   // 右侧面板拖拽调宽：照左栏 sidebar-resizer 的模式，pointer capture 期间直接写
   // 元素宽度与 --panel-w（收起动画的 margin 偏移量依赖该变量），松手后提交 state。
   // 夹取范围与 .side-panel 的 min/max-width（360/640）保持一致。
   const onPanelResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dock.store.getSnapshot().preferences.locked) return;
     if (!sideOpen) return;
     event.preventDefault();
     window.getSelection()?.removeAllRanges();
@@ -3555,6 +3553,7 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
   // 底栏拖拽调高：照右侧 sp-resizer。收起时拖动先展开；拖动期间关掉 height
   // 过渡（.resizing），否则每一步都在追光标。夹取 120–480，对齐 ver1。
   const onBottomResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dock.store.getSnapshot().preferences.locked) return;
     event.preventDefault();
     window.getSelection()?.removeAllRanges();
     const handle = event.currentTarget;
@@ -3663,20 +3662,6 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
   const promptUnsub = useRef<Unsubscribe | undefined>(undefined);
   const promptDispatchGate = useMemo(createComposerDispatchGate, []);
   useEffect(() => () => promptUnsub.current?.(), []);
-  const [terminalCreateRequested, setTerminalCreateRequested] = useState(false);
-  const createTerminal = () => {
-    onBottomTabChange("terminal");
-    onBottomVisibleChange(true);
-    onBottomOpenChange(true);
-    setTerminalCreateRequested(true);
-  };
-  const terminalHandle = useCallback((handle: TerminalPaneHandle | null) => {
-    if (handle?.available && terminalCreateRequested) {
-      handle.create();
-      setTerminalCreateRequested(false);
-    }
-  }, [terminalCreateRequested]);
-  const terminalAvailable = typeof globalThis.ompStudioTerminal !== "undefined";
   const { preview } = usePreviewMode();
   const treeConfirm = useUserMessageTreeConfirm(preview);
   const [inspectTarget, setInspectTarget] = useState<SubagentHubTarget | null>(null);
@@ -4200,13 +4185,13 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
   const composerTarget = { selectedSessionId, sessionCreating, liveSessionId: snapshot?.sessionId };
   const composerOwner = composerOwnerSessionId(composerTarget) as SessionId | undefined;
   useEffect(() => {
-    if (!composerInsertion || composerInsertion.owner !== composerOwner || !composerInputRef.current) return;
+    if (!workbenchVisible || !composerInsertion || composerInsertion.owner !== composerOwner || !composerInputRef.current) return;
     const current = composerInputRef.current.getSnapshot();
     const addition = (current.doc.nodes.length ? "\n\n" : "") + composerInsertion.text;
     composerInputRef.current.setSnapshot(snapshotFromDoc({ nodes: [...current.doc.nodes, { type: "text", value: addition }] }));
     composerInputRef.current.focus();
     onComposerInsertionApplied?.();
-  }, [composerInsertion, composerOwner, onComposerInsertionApplied]);
+  }, [composerInsertion, composerOwner, onComposerInsertionApplied, workbenchVisible]);
   const snapshotIsViewedSession = preview || composerOwnsLiveSnapshot(composerTarget);
   const executionMatches = snapshotIsViewedSession;
   const [worktreeGated, setWorktreeGated] = useState(false);
@@ -5366,7 +5351,7 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
       return true;
     }
     if (command.side && execute.kind === "invoke") {
-      btwWindow.show();
+      dock.store.dispatch({ type: "open", panel: "btw" });
       if (preview) { onBtwPreviewAsk(); return true; }
       return btwSession.ask(`/${command.name}${args ? ` ${args}` : ""}`, true, undefined, { name: command.name, arguments: args });
     }
@@ -5375,7 +5360,7 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
        预览开时同样走这条路径：打开演示浮窗，问题用输入框里的原文，不调 Host。 */
     if (execute.kind === "typed" && execute.name === "btw.ask") {
       const question = typeof execute.input.question === "string" ? execute.input.question : args.trim();
-      btwWindow.show();
+      dock.store.dispatch({ type: "open", panel: "btw" });
       if (preview) {
         onBtwPreviewAsk();
         if (question.length === 0) return true;
@@ -5441,9 +5426,11 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
       </div> : null}
       <ContextInspector client={client} sessionId={snapshot?.sessionId} visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} />
       {localFilesOpen ? <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="local://"><button autoFocus className="btn small ghost" onClick={() => setLocalFilesOpen(false)}>{t("common.close")}</button><LocalFilesPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialName={localFileName} /></section></div> : null}
-      <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={true} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
+      <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={state.route === "workbench"} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
       <div className={`workbench${sideOpen ? " split-right" : ""}`} id="workbench">
         <div ref={readingColumnRef} className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`}>
+          {railMode === "compact" ? <DockRail mode="compact" /> : null}
+          <DockCapsules />
           <SessionModelRecovery demo={previewThreadId === "t5"} client={client} currentSessionId={snapshot?.sessionId} targetSessionId={selectedSessionId} threadId={selectedThreadId} available={runtimeConnected && !connection?.resyncRequired} capabilities={capabilities} onOpenModels={() => onRoute("model-config")} />
           <ConversationPane
             snapshot={convo}
@@ -5726,8 +5713,7 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
                 className="ctx-item ctx-git-summary muted"
                 data-tip={t("git.uncommitted")}
                 aria-label={t("shell.uncommittedChanges")}
-                aria-controls="sidePanel"
-                aria-expanded={sideOpen && sideTab === "git"}
+                aria-controls="dock-tab-git"
                 onClick={onOpenGit}
               >
                 <Icon name="commit" extra="sm" />
@@ -6205,70 +6191,31 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
             aria-label={bottomVisible ? t("shell.collapseBottomBar") : t("shell.expandBottomBar")}
             aria-expanded={bottomVisible}
             aria-controls="bottomPanel"
+            data-dock-entry="bottom"
             onClick={() => onBottomVisibleChange(toggleBottomBarVisible({ visible: bottomVisible, open: bottomOpen }).visible)}
           >
             <Icon name="panel-bottom" extra="sm" />
           </button>
         </div>
+        {railMode === "expanded" ? <DockRail mode="expanded" /> : null}
         <aside className={`side-panel${sideOpen ? " open" : ""}`} id="sidePanel" inert={!sideOpen} aria-label={t("shell.rightPanel")}>
           <div className="sp-resizer" id="spResizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-label={t("shell.adjustPanelWidth")} aria-valuemin={360} aria-valuemax={640} aria-valuenow={panelWidth} onPointerDown={onPanelResizePointerDown} onKeyDown={onPanelResizeKeyDown} onDoubleClick={() => onResizePanel(480)} />
-          <div className="sp-head">
-            <div className="tabs" role="tablist" aria-label={t("menu.view")}>
-              <button className={sideTab === "changes" ? "active" : ""} role="tab" aria-selected={sideTab === "changes"} aria-controls="spChanges" onClick={() => onSideTabChange("changes")}>
-                <Icon name="diff" extra="sm" />Changes
-              </button>
-              <button className={sideTab === "git" ? "active" : ""} role="tab" aria-selected={sideTab === "git"} aria-controls="spGit" onClick={() => onSideTabChange("git")}>
-                <Icon name="branch" extra="sm" />Git
-              </button>
-              <button className={sideTab === "preview" ? "active" : ""} role="tab" aria-selected={sideTab === "preview"} aria-controls="spPreview" onClick={() => onSideTabChange("preview")}>
-                <Icon name="globe" extra="sm" />{t("browser.title")}
-              </button>
-              <button className={sideTab === "agents" ? "active" : ""} role="tab" aria-selected={sideTab === "agents"} aria-controls="spAgents" onClick={() => onSideTabChange("agents")}>
-                <Icon name="bot" extra="sm" />Agents
-                {preview ? <span className="chip gray xs">4</span> : rosterAgents !== undefined ? <span className="chip gray xs">{rosterAgents.length}</span> : snapshot ? <span className="chip gray xs">{snapshot.agents.length}</span> : null}
-              </button>
-              <button className={sideTab === "computer" ? "active" : ""} role="tab" aria-selected={sideTab === "computer"} aria-controls="spComputer" onClick={() => onSideTabChange("computer")}><Icon name="monitor" extra="sm" />{t("computer.title")}</button>
-              {btwWindow.open && btwWindow.placement === "docked" ? (
-                /* 这个按钮同时是拖出握把：移动超过阈值并离开标题栏就切回浮动态，
-                   不到阈值当普通点击。状态点让 BTW 在别的 tab 前台时也能看出在跑。 */
-                <button
-                  className={`btw-tab${sideTab === "btw" ? " active" : ""}`}
-                  role="tab"
-                  aria-selected={sideTab === "btw"}
-                  aria-controls="spBtw"
-                  data-tip={t("shell.dragOut")}
-                  onClick={() => onSideTabChange("btw")}
-                  onPointerDown={(event) => {
-                    if (event.button !== 0) return;
-                    btwWindow.beginUndockDrag(event, () => onSideTabChange("btw"));
-                  }}
-                >
-                  <Icon name="sparkles" extra="sm" />BTW
-                  <span
-                    className="btw-tab-dot"
-                    data-status={btwSession.snapshot?.status ?? "idle"}
-                    aria-hidden="true"
-                  />
-                </button>
-              ) : null}
-            </div>
-            <span className="spacer" />
-            <button className="icon-btn small" data-tip="关闭" onClick={onCloseSide}><Icon name="x" extra="sm" /></button>
-          </div>
-          <div className="sp-body">
-            <div className={`sp-page${sideTab === "changes" ? " active" : ""}`} id="spChanges" role="tabpanel">
-              {sideContentMounted && sideTab === "changes" ? (preview ? <PreviewChanges {...(changesFocus.path === undefined ? {} : { focusPath: changesFocus.path })} {...(changesFocus.turnId === undefined ? {} : { focusTurnId: changesFocus.turnId })} focusKey={changesFocus.key} /> : <SessionChanges rows={convo.rows} {...(changesFocus.path === undefined ? {} : { focusPath: changesFocus.path })} {...(changesFocus.turnId === undefined ? {} : { focusTurnId: changesFocus.turnId })} focusKey={changesFocus.key} />) : null}
-            </div>
-            <div className={`sp-page${sideTab === "git" ? " active" : ""}`} id="spGit" role="tabpanel">
-              <SessionWorktreesPane launcher onOpenWorkspace={onOpenWorktree} client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={sideOpen && sideContentMounted && sideTab === "git"} />
-              {sideContentMounted && sideTab === "git" ? (preview ? <PreviewGitPanel /> : <GitStatusPanel client={client} {...(activeWorkspace === undefined ? {} : { workspaceId: activeWorkspace.workspaceId })} />) : null}
-            </div>
-            <div className={`sp-page${sideTab === "preview" ? " active" : ""}`} id="spPreview" role="tabpanel">
-              <BrowserPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={sideOpen && sideContentMounted && sideTab === "preview"} capabilities={capabilities} />
-            </div>
-            <div className={`sp-page${sideTab === "computer" ? " active" : ""}`} id="spComputer" role="tabpanel"><ComputerPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={sideOpen && sideContentMounted && sideTab === "computer"} capabilities={capabilities} /></div>
-            <div className={`sp-page${sideTab === "agents" ? " active" : ""}`} id="spAgents" role="tabpanel">
-              {preview ? (
+          <DockGroupRegion region="right" visible={sideOpen} />
+        </aside>
+      </div>
+      <div className={`bottom-panel${bottomOpen ? "" : " collapsed"}${bottomVisible ? "" : " closed"}${bottomResizing ? " resizing" : ""}`} id="bottomPanel" inert={!bottomVisible}>
+        <div className="bp-resizer" id="bpResizer" role="separator" tabIndex={0} aria-orientation="horizontal" aria-label={t("shell.resizeBottomPanel")} aria-valuemin={BOTTOM_PANEL_MIN} aria-valuemax={BOTTOM_PANEL_MAX} aria-valuenow={bottomHeight} onPointerDown={onBottomResizePointerDown} onDoubleClick={() => { onBottomOpenChange(true); onResizeBottom(BOTTOM_PANEL_DEFAULT); }} onKeyDown={onBottomResizeKeyDown} />
+        <DockGroupRegion region="bottom" visible={bottomVisible} expanded={bottomOpen} />
+      </div>
+      <DockFloatingLayer />
+      <DockKeyboard />
+      <PanelRegistration panels={{
+        changes: <>{preview ? <PreviewChanges {...(changesFocus.path === undefined ? {} : { focusPath: changesFocus.path })} {...(changesFocus.turnId === undefined ? {} : { focusTurnId: changesFocus.turnId })} focusKey={changesFocus.key} /> : <SessionChanges rows={convo.rows} {...(changesFocus.path === undefined ? {} : { focusPath: changesFocus.path })} {...(changesFocus.turnId === undefined ? {} : { focusTurnId: changesFocus.turnId })} focusKey={changesFocus.key} />}</>,
+        git: visibility => <><SessionWorktreesPane launcher onOpenWorkspace={onOpenWorktree} client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={visibility.visible} />
+              {preview ? <PreviewGitPanel /> : <GitStatusPanel client={client} {...(activeWorkspace === undefined ? {} : { workspaceId: activeWorkspace.workspaceId })} />}</>,
+        browser: visibility => <><BrowserPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={visibility.visible} capabilities={capabilities} /></>,
+        computer: visibility => <><ComputerPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={visibility.visible} capabilities={capabilities} /></>,
+        agents: <>{preview ? (
                 <PreviewSideAgents onOpenHub={() => onRoute("agent-hub")} />
               ) : rosterAgents !== undefined ? (
                 rosterAgents.length ? (
@@ -6304,95 +6251,11 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
                     </div>
                   ))
                 ) : <Deferred title={t("shell.noAgentsTitle")} detail={t("shell.noAgentsDetail")} />
-              ) : <Deferred title={t("shell.agentsDeferredTitle")} detail={t("shell.agentsDeferredDetail")} />}
-            </div>
-            <div className={`sp-page${sideTab === "btw" ? " active" : ""}`} id="spBtw" role="tabpanel">
-              {btwWindow.open && btwWindow.placement === "docked" ? (
-                <BtwPanel
-                  session={btwSession}
-                  {...(preview ? { demo: true, onDemoNext: onBtwDemoNext } : {})}
-                />
-              ) : btwWindow.open ? (
-                <Deferred title={t("shell.btwFloatingTitle")} detail={t("shell.btwFloatingDetail")} />
-              ) : (
-                <Deferred title={t("shell.btwClosedTitle")} detail={t("shell.btwClosedDetail")} />
-              )}
-            </div>
-          </div>
-        </aside>
-        <BtwHost
-          window={btwWindow}
-          session={btwSession}
-          sideOpen={sideOpen}
-          sideHeadRect={btwSideHeadRect}
-          {...(preview ? { demo: true, onDemoNext: onBtwDemoNext } : {})}
-        />
-      </div>
-      <div className={`bottom-panel${bottomOpen ? "" : " collapsed"}${bottomVisible ? "" : " closed"}${bottomResizing ? " resizing" : ""}`} id="bottomPanel" {...(bottomVisible ? {} : { inert: true })}>
-        <div
-          className={`bp-resizer${bottomResizing ? " dragging" : ""}`}
-          id="bpResizer"
-          role="separator"
-          tabIndex={0}
-          aria-orientation="horizontal"
-          aria-label={t("shell.resizeBottomPanel")}
-          aria-valuemin={BOTTOM_PANEL_MIN}
-          aria-valuemax={BOTTOM_PANEL_MAX}
-          aria-valuenow={bottomHeight}
-          data-tip={t("shell.resizeHeight")}
-          onPointerDown={onBottomResizePointerDown}
-          onDoubleClick={() => { onBottomOpenChange(true); onResizeBottom(BOTTOM_PANEL_DEFAULT); }}
-          onKeyDown={onBottomResizeKeyDown}
-        />
-        <div className="bp-head">
-          {layoutOverlayDismiss ? <button type="button" className="btn small outline layout-bottom-back" onClick={layoutOverlayDismiss}><Icon name="arrow-l" extra="sm" />{t("shell.returnToConversation")}</button> : null}
-          <div className="tabs" role="tablist" aria-label={t("shell.bottomViews")}>
-            <button className={bottomTab === "terminal" ? "active" : ""} role="tab" aria-selected={bottomTab === "terminal"} onClick={() => { onBottomTabChange("terminal"); onBottomOpenChange(true); }}>
-              <Icon name="terminal" extra="sm" />Terminal
-            </button>
-            <button className={bottomTab === "problems" ? "active" : ""} role="tab" aria-selected={bottomTab === "problems"} onClick={() => { onBottomTabChange("problems"); onBottomOpenChange(true); }}>
-              <Icon name="alert-c" extra="sm" />Problems
-            </button>
-            <button className={bottomTab === "tests" ? "active" : ""} role="tab" aria-selected={bottomTab === "tests"} onClick={() => { onBottomTabChange("tests"); onBottomOpenChange(true); }}>
-              <Icon name="test" extra="sm" />Tests
-              {!preview && testSummary.failed > 0 ? <span className="chip red xs">{testSummary.failed}<span className="sr-only"> {t("shell.failedCount", { count: testSummary.failed })}</span></span> : null}
-              {!preview && testSummary.failed === 0 && testSummary.running > 0 ? <span className="chip amber xs">{testSummary.running}<span className="sr-only"> {t("shell.runningCount", { count: testSummary.running })}</span></span> : null}
-            </button>
-            <button className={bottomTab === "output" ? "active" : ""} role="tab" aria-selected={bottomTab === "output"} onClick={() => { onBottomTabChange("output"); onBottomOpenChange(true); }}>
-              <Icon name="console" extra="sm" />Output
-            </button>
-            <button className={bottomTab === "logs" ? "active" : ""} role="tab" aria-selected={bottomTab === "logs"} onClick={() => { onBottomTabChange("logs"); onBottomOpenChange(true); }}>
-              <Icon name="book" extra="sm" />OMP Logs
-              {state.events.length > 0 && <span className="chip gray xs">{state.events.length}<span className="sr-only"> {t("shell.eventsCount", { count: state.events.length })}</span></span>}
-            </button>
-            <button className={bottomTab === "pvlogs" ? "active" : ""} role="tab" aria-selected={bottomTab === "pvlogs"} onClick={() => { onBottomTabChange("pvlogs"); onBottomOpenChange(true); }}>
-              <Icon name="globe" extra="sm" />Preview Logs
-            </button>
-          </div>
-          <span className="spacer" />
-          <button
-            className="icon-btn small"
-            data-tip={terminalAvailable ? t("terminal.newTerminal") : t("terminal.newTerminal")}
-            disabled={!terminalAvailable}
-            onClick={createTerminal}
-          >
-            <Icon name="plus" extra="sm" />
-          </button>
-          <button className="icon-btn small" data-tip={bottomOpen ? t("common.collapse") : t("common.expand")} aria-expanded={bottomOpen} aria-controls="bottomPanel" onClick={() => onBottomOpenChange(toggleBottomBarOpen({ visible: bottomVisible, open: bottomOpen }).open)}>
-            <Icon name={bottomOpen ? "chevron-d" : "chevron-u"} extra="sm" />
-          </button>
-        </div>
-        <div className="bp-body" inert={!bottomOpen || !bottomVisible}>
-          <div className={`bp-page${bottomTab === "terminal" ? " active" : ""}`} id="bpTerminal" role="tabpanel">
-            <LoadWhenVisible visible={bottomTab === "terminal" && bottomOpen && bottomVisible}>
-              <TerminalPane ref={terminalHandle} workspaceId={workspaceId} sessionId={snapshot?.sessionId} visible={bottomTab === "terminal" && bottomOpen && bottomVisible} />
-            </LoadWhenVisible>
-          </div>
-          <div className={`bp-page${bottomTab === "problems" ? " active" : ""}`} id="bpProblems" role="tabpanel">
-            {preview ? <PreviewProblems /> : <Deferred title={t("shell.problemsUnavailableTitle")} detail={t("shell.problemsUnavailableDetail")} />}
-          </div>
-          <div className={`bp-page${bottomTab === "tests" ? " active" : ""}`} id="bpTests" role="tabpanel">
-            {preview ? <PreviewTests /> : (
+              ) : <Deferred title={t("shell.agentsDeferredTitle")} detail={t("shell.agentsDeferredDetail")} />}</>,
+        btw: <><BtwPanel session={btwSession} {...(preview ? { demo: true, onDemoNext: onBtwDemoNext } : {})} /></>,
+        terminal: visibility => <><TerminalPane workspaceId={workspaceId} sessionId={snapshot?.sessionId} visible={visibility.visible} /></>,
+        problems: <>{preview ? <PreviewProblems /> : <Deferred title={t("shell.problemsUnavailableTitle")} detail={t("shell.problemsUnavailableDetail")} />}</>,
+        tests: <>{preview ? <PreviewTests /> : (
               <AgentTestsPane
                 runs={testRuns}
                 rerunDisabled={testRerunDisabled}
@@ -6400,10 +6263,8 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
                 onRerun={(command) => { void dispatchPrompt(snapshotFromText(rerunTestPrompt(command))); }}
                 onReveal={(run) => { revealConversationTool(convoScrollerRef.current, run); }}
               />
-            )}
-          </div>
-          <div className={`bp-page${bottomTab === "output" ? " active" : ""}`} id="bpOutput" role="tabpanel">
-            <div className="panel-head"><div><h2>Command lifecycle</h2><p className="muted">Semantic command ledger from client state.</p></div></div>
+            )}</>,
+        output: <><div className="panel-head"><div><h2>Command lifecycle</h2><p className="muted">Semantic command ledger from client state.</p></div></div>
             {commandRows.length ? (
               <ul className="lifecycle-list">
                 {commandRows.map((command) => (
@@ -6443,17 +6304,11 @@ function WorkbenchCanvas({ layoutOverlayDismiss, state, client, onOpenWorktree, 
             {commandManifest && <GenericCommandForm manifest={commandManifest} busy={busy} enabled={can("operator.invoke")} onInvoke={(commandId, args) => void run("operator.invoke", { commandId, ...(args === undefined ? {} : { arguments: args }) })} />}
             {runtime?.classification === "limited-system" && <p className="capability-note">Runtime is Limited. P4 mutations are disabled until the capability manifest grants them.</p>}
               </>
-            ) : null}
-          </div>
-          <div className={`bp-page${bottomTab === "logs" ? " active" : ""}`} id="bpLogs" role="tabpanel">
-            <div className="panel-head"><div><h2>OMP Logs</h2><p className="muted">{t("shell.ompLogsVirtualDesc")}</p></div><span className="mono">{t("shell.eventsCount", { count: state.events.length })}</span></div>
-            <VirtualEventTranscript events={state.events} />
-          </div>
-          <div className={`bp-page${bottomTab === "pvlogs" ? " active" : ""}`} id="bpPvlogs" role="tabpanel">
-            {preview ? <PreviewLogs /> : <Deferred title={t("shell.previewLogsUnavailableTitle")} detail={t("shell.previewLogsUnavailableDetail")} />}
-          </div>
-        </div>
-      </div>
+            ) : null}</>,
+        logs: <><div className="panel-head"><div><h2>OMP Logs</h2><p className="muted">{t("shell.ompLogsVirtualDesc")}</p></div><span className="mono">{t("shell.eventsCount", { count: state.events.length })}</span></div>
+            <VirtualEventTranscript events={state.events} /></>,
+        pvlogs: <>{preview ? <PreviewLogs /> : <Deferred title={t("shell.previewLogsUnavailableTitle")} detail={t("shell.previewLogsUnavailableDetail")} />}</>,
+      }} />
       <ToastHost message={statusToast} icon="info" onDismiss={() => setStatusToast(null)} />
       {treeConfirm.dialog}
     </>
@@ -6492,7 +6347,9 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     return () => { disposed = true; };
   }, [previewMode.preview, appUpdate.check]);
   const previewOn = () => previewMode.preview;
-  const [collapsed, setCollapsed] = useState(false);
+  const dock = useDock();
+  const collapsed = !dock.layout.left.visible;
+  const setCollapsed = (value: boolean) => dock.store.dispatch({ type: "region", region: "left", visible: !value });
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [skillsEnabledCount, setSkillsEnabledCount] = useState(() => previewOn() ? countEnabledDrawerItems(createPreviewDrawerItems()) : 0);
   const [explorerOpen, setExplorerOpen] = useState(() => previewOn());
@@ -6508,6 +6365,31 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const [composerInsertion, setComposerInsertion] = useState<{ owner: string | undefined; text: string }>();
   const clearComposerInsertion = useCallback(() => setComposerInsertion(undefined), []);
   const [selectedProvisionalSessionId, setSelectedProvisionalSessionId] = useTargetMemory<string | undefined>("provisional-session", () => undefined);
+  const [dockSelection, setDockSelection] = useTargetMemory<DockScope>("dock-selection", () => {
+    const selected = state.bootstrap?.selected;
+    return { target: executionTarget.id ?? "local", project: selected?.workspaceId ?? state.model.workspaces?.activeWorkspaceId ?? null, session: selected?.sessionId ?? "draft:initial", ...(!selected?.sessionId ? { draft: true } : {}) };
+  });
+  const dockSelectionRef = useRef(dockSelection);
+  const initialDockSelection = useRef(true);
+  const [freshView, setFreshView] = useState(0);
+  const previewRef = useRef(previewMode.preview);
+  previewRef.current = previewMode.preview;
+  dockSelectionRef.current = dockSelection;
+  const commitDockSelection = useCallback((scope: DockScope) => {
+    initialDockSelection.current = false;
+    dockSelectionRef.current = scope;
+    if (!previewRef.current) dock.store.switchScope(scope, false);
+    setDockSelection(scope);
+  }, [dock.store, setDockSelection]);
+  const beginDockDraft = useCallback((project: string | null) => {
+    initialDockSelection.current = false;
+    const scope: DockScope = { target: executionTarget.id ?? "local", project, session: `draft:${crypto.randomUUID()}`, draft: true };
+    dock.store.beginDraft(scope);
+    setFreshView(value => value + 1);
+    dockSelectionRef.current = scope;
+    setDockSelection(scope);
+    return scope;
+  }, [dock.store, executionTarget.id, setDockSelection]);
   const [composerDraftsBySession, setComposerDraftsBySession] = useTargetMemory<Readonly<Record<string, ComposerSnapshot>>>("composer-drafts", () => ({}));
   const [draftSkills, setDraftSkills] = useState<ReadonlySet<string>>(() => new Set());
   const [usedSkills, setUsedSkills] = useState<ReadonlySet<string>>(() => new Set());
@@ -6579,17 +6461,22 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const { settings: appSettings, update: updateAppSettings } = useAppSettings();
   const theme = appSettings.theme;
   useLayoutEffect(() => { applyTypography(appSettings); }, [appSettings.uiFontFamily, appSettings.uiFontSize, appSettings.terminalFontFamily, appSettings.terminalFontSize, appSettings.outputFontFamily, appSettings.outputFontSize]);
-  const [sidebarWidth, setSidebarWidth] = useState(272);
-  const [splitRatio, setSplitRatio] = useState(0.46);
-  const [sideOpen, setSideOpen] = useState(() => previewOn());
-  const [bottomOpen, setBottomOpen] = useState(() => previewOn());
-  const [bottomVisible, setBottomVisible] = useState(true);
-  const [sideTab, setSideTab] = useState<SideTab>("changes");
-  /** 右侧面板宽度：默认与 tokens.css 的 --panel-w(480px) 一致，spResizer 拖拽提交。 */
-  const [panelWidth, setPanelWidth] = useState(480);
-  /** 底栏高度：默认与 tokens.css 的 --bottom-panel-h(240px) 一致，bpResizer 拖拽提交。 */
-  const [bottomHeight, setBottomHeight] = useState(BOTTOM_PANEL_DEFAULT);
-  const [bottomTab, setBottomTab] = useState<BottomTab>("logs");
+  const sidebarWidth = dock.layout.left.width;
+  const splitRatio = dock.layout.left.ratio;
+  const sideOpen = dock.layout.right.visible;
+  const bottomOpen = dock.layout.bottom.expanded;
+  const bottomVisible = dock.layout.bottom.visible;
+  const panelWidth = dock.layout.right.size;
+  const bottomHeight = dock.layout.bottom.size;
+  const setSidebarWidth = (size: number) => dock.store.dispatch({ type: "resize", region: "left", size });
+  const setSplitRatio = (ratio: number) => dock.store.dispatch({ type: "resize", region: "left", ratio });
+  const setSideOpen = (visible: boolean) => dock.store.dispatch({ type: "region", region: "right", visible });
+  const setBottomOpen = (expanded: boolean) => dock.store.dispatch({ type: "bottomExpanded", expanded });
+  const setBottomVisible = (visible: boolean) => dock.store.dispatch({ type: "region", region: "bottom", visible });
+  const setPanelWidth = (size: number) => dock.store.dispatch({ type: "resize", region: "right", size });
+  const setBottomHeight = (size: number) => dock.store.dispatch({ type: "resize", region: "bottom", size });
+  const setSideTab = (tab: SideTab) => dock.store.dispatch({ type: "open", panel: tab === "preview" ? "browser" : tab });
+  const setBottomTab = (tab: BottomTab) => dock.store.dispatch({ type: "open", panel: tab });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [sessionActionError, setSessionActionError] = useState<string | undefined>(undefined);
@@ -6636,7 +6523,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const pageRoute = isSecondary(state.route) ? state.route : lastPageRoute.current;
   const pageMeta = SECONDARY_META[pageRoute];
   const shellClass = pagePhaseClass(shellPhase);
-  const layout = useWorkbenchLayout({ collapsed, sidebarWidth, sideOpen, panelWidth, bottomVisible, bottomOpen, bottomHeight }, !showPage);
+  const layout = useWorkbenchLayout({ collapsed, sidebarWidth, sideOpen, panelWidth, bottomVisible, bottomOpen, bottomHeight, railMode: dock.layout.rail.mode, railWidth: dock.layout.rail.width }, !showPage);
   const toggleSidebar = useCallback(() => {
     beforeConversationLayoutChange();
     if (layout.sidebarShown) { setCollapsed(true); layout.focusPanel(null); }
@@ -6680,6 +6567,15 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     }
     changeBottomOpen(false);
   }, [layout.bottomVisible, layout.bottomOpen, changeBottomOpen]);
+  useEffect(() => {
+    const open = (event: Event) => {
+      const panel = (event as CustomEvent<{ panel: PanelId }>).detail.panel;
+      const location = locatePanel(dock.store.getSnapshot().layout, panel);
+      layout.focusPanel(location?.region === "left" ? "sidebar" : location?.region === "right" ? "side" : location?.region === "bottom" ? "bottom" : null);
+    };
+    window.addEventListener("omp:dock-open", open);
+    return () => window.removeEventListener("omp:dock-open", open);
+  }, [dock.store, layout.focusPanel]);
   const [trailAt, setTrailAt] = useState(0);
   const [capNonce, setCapNonce] = useState(0);
   const [settingsNonce, setSettingsNonce] = useState(0);
@@ -6716,19 +6612,6 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   /* BTW 旁路问答：状态挂在 AppShell 而不是 WorkbenchCanvas —— 回首页会卸载
      WorkbenchCanvas，浮窗不该跟着消失。演示轮次只改本地 UI，不碰 Host。 */
   const [btwDemoRound, setBtwDemoRound] = useState(0);
-  /* 吸附落点要的是拖动那一刻的实时位置，所以按需量而不是订阅：右侧栏宽度、
-     收起动画、tab 数量都会改这个盒子。 */
-  const sideHeadRect = useCallback((): BtwRect | undefined => {
-    const head = document.querySelector("#sidePanel .sp-head");
-    if (!(head instanceof HTMLElement)) return undefined;
-    const box = head.getBoundingClientRect();
-    return { x: box.left, y: box.top, width: box.width, height: box.height };
-  }, []);
-  const btwWindow = useBtwWindow({
-    sideOpen,
-    sideHeadRect,
-    onDock: () => { setSideTab("btw"); openSide(); },
-  });
   const btwOnBranchedRef = useRef<(sessionId: string) => Promise<boolean>>(async () => false);
   const btwSession = useBtwSession({
     ...(snapshot?.sessionId ? { sessionId: snapshot.sessionId } : {}),
@@ -6791,6 +6674,30 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     ?? Object.values(projectHistoryCache).flatMap((historyState) => historyState.model?.entries ?? [])
       .find((entry) => entry.historyId === selectedHistoryId);
   const viewedSessionId = selected?.sessionId ?? snapshot?.sessionId;
+  useLayoutEffect(() => {
+    if (previewMode.preview) {
+      dock.store.switchScope({ target: "preview", project: previewProjectId, session: previewThreadId }, true);
+      return;
+    }
+    let scope = dockSelectionRef.current;
+    if (initialDockSelection.current && !creatingSession && selectedHistoryId === null) {
+      const session = state.clientState?.connection.selected?.sessionId ?? state.bootstrap?.selected.sessionId ?? snapshot?.sessionId;
+      const project = state.model.workspaces?.activeWorkspaceId ?? state.bootstrap?.selected.workspaceId ?? scope.project;
+      if (session && (scope.session !== session || scope.project !== project)) {
+        scope = { target: executionTarget.id ?? "local", project, session };
+        dockSelectionRef.current = scope;
+        setDockSelection(scope);
+      }
+      if (session && project) initialDockSelection.current = false;
+    }
+    if (!creatingSession && selected?.sessionId && selected.sessionId !== scope.session) {
+      scope = { target: executionTarget.id ?? "local", project: residentRows.find(row => row.sessionId === selected.sessionId)?.workspaceId ?? selectedProject?.id ?? scope.project, session: selected.sessionId };
+      dockSelectionRef.current = scope;
+      setDockSelection(scope);
+    }
+    dock.store.switchScope(scope, false);
+  }, [dock.store, dockSelection, previewMode.preview, previewProjectId, previewThreadId, selected?.sessionId, creatingSession, executionTarget.id, snapshot?.sessionId, state.model.workspaces?.activeWorkspaceId, state.clientState?.connection.selected?.sessionId]);
+
   const { agents: viewedAgents, ready: persistedAgentsReady } = usePersistedSessionAgents({
     preview: previewMode.preview,
     client,
@@ -6936,85 +6843,6 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     document.documentElement.setAttribute("data-density", appSettings.density);
   }, [appSettings.theme, appSettings.density]);
 
-  /* 布局记忆（App 级，非 Host）：按 scope（全局 / project:<id>）恢复与
-     持久化；预览模式不参与，避免与演示默认布局互相覆盖。 */
-  const layoutScope = appSettings.rememberLayout && appSettings.perProjectLayout && selectedProject
-    ? `project:${selectedProject.id}`
-    : "global";
-  const appliedLayoutScope = useRef<string | null>(null);
-  const skipNextLayoutPersist = useRef(false);
-  const previewWasOn = useRef(previewMode.preview);
-  useEffect(() => {
-    const leavingPreview = previewWasOn.current && !previewMode.preview;
-    previewWasOn.current = previewMode.preview;
-    if (!layoutRestoreNeeded({
-      preview: previewMode.preview,
-      rememberLayout: appSettings.rememberLayout,
-      leavingPreview,
-      appliedScope: appliedLayoutScope.current,
-      layoutScope,
-    })) return;
-    appliedLayoutScope.current = layoutScope;
-    const memory = readLayoutMemory(layoutScope);
-    if (memory === undefined) return;
-    skipNextLayoutPersist.current = true;
-    if (memory.collapsed !== undefined) setCollapsed(memory.collapsed);
-    if (memory.sidebarWidth !== undefined) setSidebarWidth(memory.sidebarWidth);
-    if (memory.splitRatio !== undefined) setSplitRatio(memory.splitRatio);
-    if (memory.sideOpen !== undefined) setSideOpen(memory.sideOpen);
-    if (memory.bottomOpen !== undefined) setBottomOpen(memory.bottomOpen);
-    if (memory.bottomVisible !== undefined) setBottomVisible(memory.bottomVisible);
-    if (memory.sideTab === "changes" || memory.sideTab === "git" || memory.sideTab === "preview"
-      || memory.sideTab === "agents" || memory.sideTab === "btw" || memory.sideTab === "computer") setSideTab(memory.sideTab);
-    if (memory.bottomTab === "terminal" || memory.bottomTab === "problems" || memory.bottomTab === "tests"
-      || memory.bottomTab === "output" || memory.bottomTab === "logs" || memory.bottomTab === "pvlogs") setBottomTab(memory.bottomTab);
-    if (memory.explorerOpen !== undefined) setExplorerOpen(memory.explorerOpen);
-    if (memory.panelWidth !== undefined) setPanelWidth(memory.panelWidth);
-    if (memory.bottomHeight !== undefined) setBottomHeight(clampBottomHeight(memory.bottomHeight));
-    const btwOpen = memory.btwOpen ?? memory.btwPlacement === "docked";
-    btwWindow.restoreMemory({
-      ...(typeof btwOpen === "boolean" ? { open: btwOpen } : {}),
-      ...(memory.btwPlacement === "float" || memory.btwPlacement === "docked" ? { placement: memory.btwPlacement } : {}),
-      ...(memory.btwMinimized === undefined ? {} : { minimized: memory.btwMinimized }),
-      ...(memory.btwX !== undefined && memory.btwY !== undefined && memory.btwW !== undefined && memory.btwH !== undefined
-        ? { rect: { x: memory.btwX, y: memory.btwY, width: memory.btwW, height: memory.btwH } }
-        : {}),
-      ...(memory.btwCapX !== undefined && memory.btwCapY !== undefined
-        ? { capsulePos: { x: memory.btwCapX, y: memory.btwCapY } }
-        : {}),
-    });
-  }, [previewMode.preview, appSettings.rememberLayout, layoutScope, btwWindow.restoreMemory]);
-  useEffect(() => {
-    if (previewMode.preview || !appSettings.rememberLayout) return;
-    if (appliedLayoutScope.current !== layoutScope) return;
-    if (skipNextLayoutPersist.current) {
-      skipNextLayoutPersist.current = false;
-      return;
-    }
-    writeLayoutMemory(layoutScope, {
-      collapsed,
-      sidebarWidth,
-      splitRatio,
-      sideOpen,
-      bottomOpen,
-      bottomVisible,
-      sideTab,
-      bottomTab,
-      explorerOpen,
-      panelWidth,
-      bottomHeight,
-      btwOpen: btwWindow.open,
-      btwPlacement: btwWindow.placement,
-      btwMinimized: btwWindow.minimized,
-      btwX: btwWindow.rect.x,
-      btwY: btwWindow.rect.y,
-      btwW: btwWindow.rect.width,
-      btwH: btwWindow.rect.height,
-      btwCapX: btwWindow.capsulePos.x,
-      btwCapY: btwWindow.capsulePos.y,
-    });
-  }, [previewMode.preview, appSettings.rememberLayout, layoutScope, collapsed, sidebarWidth, splitRatio, sideOpen, bottomOpen, bottomVisible, sideTab, bottomTab, explorerOpen, panelWidth, bottomHeight, btwWindow.open, btwWindow.placement, btwWindow.minimized, btwWindow.rect, btwWindow.capsulePos]);
-
   /* Resident changes drive task notifications. A disappeared row is a
      neutral stop/disconnect, never a success notification. */
   const streamingSinceRef = useRef<{ on: boolean; since: number }>({ on: false, since: 0 });
@@ -7108,7 +6936,17 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     return () => window.removeEventListener("mousedown", close);
   }, [openMenu]);
 
+  const commitActivatedWorkspace = async (project: string, generation: number) => {
+    const residents = await client.query("residents.list", {});
+    if (!navigationGate.isCurrent(generation)) return;
+    const active = residents.residents.find(row => row.sessionId === residents.activeSessionId && row.workspaceId === project);
+    onNewThread();
+    setSelectedProvisionalSessionId(undefined);
+    if (active) commitDockSelection({ target: executionTarget.id ?? "local", project, session: active.sessionId });
+    else beginDockDraft(project);
+  };
   const selectProject = (project: SelectedProject) => {
+    if (!previewMode.preview && state.model.workspaces?.activeWorkspaceId === project.id) { setSelectedProject(project); setExplorerOpen(true); return; }
     const generation = navigationGate.next();
     setSelectedProject(project);
     setExplorerOpen(true);
@@ -7121,6 +6959,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       const workspaces = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
       if (!navigationGate.isCurrent(generation)) return;
       onWorkspacesChange(workspaces);
+      await commitActivatedWorkspace(project.id, generation);
     }).catch((error) => {
       if (!navigationGate.isCurrent(generation)) return;
       setShellNotice({ text: hostErrorMessage(error, "切换项目失败"), icon: "alert" });
@@ -7143,6 +6982,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       onWorkspacesChange(result);
       const active = result.workspaces.find((workspace) => workspace.active);
       if (active) {
+        await commitActivatedWorkspace(active.workspaceId, generation);
         setSelectedProject({ id: active.workspaceId, name: active.name });
         setExplorerOpen(true);
         expandProject(active.workspaceId);
@@ -7559,6 +7399,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
         await ensureWorkspaceActive(targetWorkspaceId);
         const handle = await client.command("session.delete", { threadId: entry.threadId, deleteManagedArtifacts });
         await waitReceipt(client, handle.requestId);
+        if (entry.sessionId) dock.store.deleteSession({ target: executionTarget.id ?? "local", project: targetWorkspaceId ?? null, session: entry.sessionId });
         if (entry.sessionId !== undefined) {
           archivedProvisionalSessionIdsRef.current = new Set([
             ...archivedProvisionalSessionIdsRef.current,
@@ -7592,7 +7433,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       try {
         const handle = await client.command("session.fork", {});
         const receipt = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
-        await refreshHistoryModels();
+        await selectBranchedSession(receipt.sessionId);
         setShellNotice({ text: t("shell.forkedToNewSession", { id: receipt.sessionId }), icon: "check" });
       } catch (error) {
         setShellNotice({ text: hostErrorMessage(error, "Fork 失败"), icon: "alert" });
@@ -7606,7 +7447,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       try {
         const handle = await client.command("session.handoff", {});
         const receipt = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
-        await refreshHistoryModels();
+        await selectBranchedSession(receipt.sessionId);
         setShellNotice({ text: t("shell.handoffToNewSession", { id: receipt.sessionId }), icon: "check" });
       } catch (error) {
         setShellNotice({ text: hostErrorMessage(error, "Handoff 失败"), icon: "alert" });
@@ -7733,11 +7574,18 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const runSessionCreate = useCallback((work: () => Promise<OperatorStateSnapshot | void>) => {
     if (sessionCreateWaitRef.current) return;
     setCreatingSession(true);
+    const creatingScope = dockSelectionRef.current;
     const pending = work()
-      .then((created): NewSessionWaitResult => ({
-        ok: true,
-        ...(created?.sessionId === undefined ? {} : { sessionId: created.sessionId as SessionId }),
-      }))
+      .then((created): NewSessionWaitResult => {
+        if (created?.sessionId) {
+          const scope: DockScope = { target: creatingScope.target, project: creatingScope.project, session: created.sessionId };
+          dock.store.adoptDraft(scope, { scope: creatingScope, preview: false });
+          if (dockSelectionRef.current.session === creatingScope.session) {
+            commitDockSelection(scope);
+          }
+        }
+        return { ok: true, ...(created?.sessionId === undefined ? {} : { sessionId: created.sessionId as SessionId }) };
+      })
       .catch((error): NewSessionWaitResult => {
         const message = hostErrorMessage(error, "新建对话失败");
         setShellNotice({ text: message, icon: "alert" });
@@ -7748,7 +7596,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
         if (sessionCreateWaitRef.current === pending) sessionCreateWaitRef.current = null;
       });
     sessionCreateWaitRef.current = pending;
-  }, []);
+  }, [dock.store, commitDockSelection, setSelectedProvisionalSessionId]);
   const ensureNewSession = useCallback(() => {
     if (previewMode.preview || sessionCreateWaitRef.current) return;
     runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
@@ -7769,13 +7617,14 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     setSessionActionError(undefined);
     setSelectedProvisionalSessionId(undefined);
     onNewThread();
+    beginDockDraft(state.model.workspaces?.activeWorkspaceId ?? selectedProject?.id ?? null);
     runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
       const handle = await client.command("session.create", noContextFiles ? { noContextFiles: true } : {});
       const created = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
       refreshSessionTitles();
       return created;
     }));
-  }, [client, go, navigationGate, onNewThread, previewMode.preview, runSessionCreate, refreshSessionTitles, workspaceActionQueue]);
+  }, [client, go, navigationGate, onNewThread, previewMode.preview, runSessionCreate, refreshSessionTitles, workspaceActionQueue, beginDockDraft, selectedProject?.id, state.model.workspaces?.activeWorkspaceId]);
 
   const applySlashUi = (ui: SlashNativeUi): void => {
     if (ui === "settings") { go("settings"); return; }
@@ -7809,13 +7658,13 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     }
     if (command.side && execute.kind === "invoke") {
       go("workbench");
-      btwWindow.show();
+      dock.store.dispatch({ type: "open", panel: "btw" });
       if (previewMode.preview) { setBtwDemoRound(0); return true; }
       return btwSession.ask(`/${command.name}${args ? ` ${args}` : ""}`, true, undefined, { name: command.name, arguments: args });
     }
     if (execute.kind === "typed" && execute.name === "btw.ask") {
       go("workbench");
-      btwWindow.show();
+      dock.store.dispatch({ type: "open", panel: "btw" });
       if (previewMode.preview) {
         setBtwDemoRound(0);
         return true;
@@ -7906,6 +7755,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     const generation = navigationGate.next();
     setSelectedProvisionalSessionId(undefined);
     onNewThread();
+    beginDockDraft(project.id);
     runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
       const open = await client.command("workspace.open", { workspaceId: project.id as WorkspaceId });
       const model = await waitReceipt<WorkspaceListReadModel>(client, open.requestId);
@@ -7917,8 +7767,9 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       setProjectListExpanded(true);
       void loadProjectHistory(project.id as WorkspaceId);
       const handle = await client.command("session.create", {});
-      await waitReceipt(client, handle.requestId);
+      const created = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
       refreshSessionTitles(project.id as WorkspaceId);
+      return created;
     }));
   }, [client, expandProject, loadProjectHistory, navigationGate, previewMode.preview, go, onNewThread, onWorkspacesChange, runSessionCreate, refreshSessionTitles, workspaceActionQueue]);
 
@@ -7935,7 +7786,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   /** opts.resumeForAction：行级「打开并执行」——即使无驻留也 resume，让目标会话
       真正成为 Runtime 活动会话；失败时向上抛出，由调用方统一报告并中止后续动作。 */
   const openHistoryEntry = (entry: SessionHistoryEntry, workspaceId?: WorkspaceId, opts?: { resumeForAction?: boolean; skipQueue?: boolean }): Promise<void> => {
-    if (!onRoute("workbench")) return Promise.resolve();
+    if (!onRoute("workbench")) return opts?.resumeForAction ? Promise.reject(new Error("会话切换已取消")) : Promise.resolve();
     const generation = navigationGate.next();
     setSelectedProvisionalSessionId(undefined);
     if (previewMode.preview) {
@@ -7949,7 +7800,11 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     // Same-workspace navigation and resident activation can update the identity
     // immediately. For a cold cross-workspace archive row, wait for workspace.open
     // so the Host archive reader is never asked to scan the old cwd first.
-    if (!workspaceSwitchPending) onSelectThread(entry);
+    const selectEntry = () => {
+      if (entry.sessionId) commitDockSelection({ target: executionTarget.id ?? "local", project: targetWorkspaceId ?? null, session: entry.sessionId });
+      onSelectThread(entry);
+    };
+    if (!workspaceSwitchPending) selectEntry();
     const run = async () => {
       try {
         if (!navigationGate.isCurrent(generation)) {
@@ -7965,7 +7820,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
             return;
           }
           onWorkspacesChange(workspaces);
-          if (workspaceSwitchPending && navigationGate.isCurrent(generation)) onSelectThread(entry);
+          if (workspaceSwitchPending && navigationGate.isCurrent(generation)) selectEntry();
           const selectedWorkspace = workspaces.workspaces.find((workspace) => workspace.workspaceId === targetWorkspaceId);
           if (selectedWorkspace !== undefined) {
             setSelectedProject({ id: selectedWorkspace.workspaceId, name: selectedWorkspace.name });
@@ -8017,12 +7872,14 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     // Do not turn that normal live state into the misleading "仍在写入" error.
     if (shouldOpenLiveProvisional(thread.sessionId, snapshot?.sessionId)) {
       setSessionActionError(undefined);
+      commitDockSelection({ target: executionTarget.id ?? "local", project: thread.workspaceId, session: thread.sessionId });
       setSelectedProvisionalSessionId(thread.sessionId);
       onNewThread();
       onRoute("workbench");
       return;
     }
     if (!thread.submitted) {
+      commitDockSelection({ target: executionTarget.id ?? "local", project: thread.workspaceId, session: thread.sessionId });
       setSelectedProvisionalSessionId(thread.sessionId);
       onNewThread();
       setSessionActionError(undefined);
@@ -8055,6 +7912,11 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   };
 
   const selectBranchedSession = async (sessionId: string): Promise<boolean> => {
+    const project = dockSelectionRef.current.project;
+    beginDockDraft(project);
+    const scope: DockScope = { target: executionTarget.id ?? "local", project, session: sessionId };
+    dock.store.adoptDraft(scope);
+    commitDockSelection(scope);
     await refreshHistoryModels();
     try {
       const history = await client.query("history.list", {
@@ -8074,6 +7936,19 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const runPaletteAction = (action: PaletteAction) => {
     closePalette(false);
     switch (action.kind) {
+      case "dock": {
+        const current = dock.store.getSnapshot();
+        if (action.operation === "undo") dock.store.undo();
+        else if (action.operation === "redo") dock.store.redo();
+        else if (action.operation === "lock") dock.store.updatePreferences({ locked: !current.preferences.locked });
+        else if (action.operation === "snap") dock.store.updatePreferences({ snap: !current.preferences.snap });
+        else if (action.operation === "rail") dock.store.dispatch({ type: "region", region: "rail", visible: current.layout.rail.mode === "hidden" });
+        else if (action.operation === "files") dock.store.dispatch({ type: "open", panel: "files" });
+        else if (action.operation === "reset") dock.store.resetFactory();
+        else dock.store.applyPreset(action.operation);
+        go("workbench");
+        return;
+      }
       case "route":
         go(action.route);
         return;
@@ -8142,17 +8017,10 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       case "openBottom":
         go("workbench");
         setBottomTab(action.tab);
-        changeBottomOpen(true);
         return;
       case "openSide":
         go("workbench");
-        // BTW 是浮动/停靠两态的：只切 tab 会开出一个空壳，所以顺手停靠进来。
-        if (action.tab === "btw") {
-          btwWindow.show();
-          btwWindow.dock();
-        }
         setSideTab(action.tab);
-        openSide();
         return;
       case "openContext":
         applySlashUi("context-viewer");
@@ -8613,10 +8481,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     onToggleOmpMenu: () => setOmpMenuOpen((value) => !value),
     ompMenuOpen,
     onOpenDialog: openDialog,
-    onOpenTerminalPanel: () => {
-      setBottomTab("terminal");
-      changeBottomOpen(true);
-    },
+    onOpenTerminalPanel: () => setBottomTab("terminal"),
     onOpenProjectInEditor: openProjectInEditor,
     onOpenProjectDirectory: openProjectDirectory,
     projectShellUnavailable,
@@ -8715,11 +8580,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
               <button className="menu-item" role="menuitem" onClick={() => runEdit("selectAll")}>{t("menu.selectAll")}<span className="kbd">{formatShortcut(SHORTCUTS.selectAll)}</span></button>
             </TitleMenu>
             <TitleMenu id="view" label={t("menu.view")} openId={openMenu} onToggle={setOpenMenu}>
-              <button className="menu-item" role="menuitem" onClick={() => runMenu(toggleSidebar)}>{layout.sidebarShown ? t("menu.collapseSidebar") : t("menu.expandSidebar")}<span className="kbd">{formatShortcut(SHORTCUTS.toggleSidebar)}</span></button>
-              <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setExplorerOpen((value) => !value))}>{explorerOpen ? t("menu.collapseExplorer") : t("menu.expandExplorer")}</button>
-              <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setSkillsOpen((value) => !value))}>{skillsOpen ? t("skills.closeAria") : t("skills.title")}<span className="kbd">{formatShortcut(SHORTCUTS.skills)}</span></button>
-              <button className="menu-item" role="menuitem" onClick={() => runMenu(toggleSide)}>{layout.sideShown ? t("menu.collapseRightPanel") : t("menu.expandRightPanel")}</button>
-              <button className="menu-item" role="menuitem" onClick={() => runMenu(toggleBottom)}>{layout.bottomOpen ? t("menu.collapseBottomPanel") : t("menu.expandBottomPanel")}<span className="kbd">{formatShortcut(SHORTCUTS.toggleBottomPanel)}</span></button>
+              <DockViewMenu onClose={() => setOpenMenu(null)} onSettings={() => { setSettingsIntent("general"); go("settings"); }} />
               <div className="menu-sep" />
               <button className="menu-item" role="menuitem" onClick={() => runMenu(() => chrome.onToggleTheme())}>{theme === "dark" ? t("menu.lightTheme") : t("menu.darkTheme")}</button>
             </TitleMenu>
@@ -8856,8 +8717,8 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
           </DeferredPanel>
           <SecondaryInteractionDeck client={client} interaction={pendingInteraction} runtimeConnected={hubRuntimeConnected} resyncRequired={state.clientState?.connection.resyncRequired === true} preview={previewMode.preview} />
         </SecondaryPage>
-      ) : (
-      <div ref={layout.rootRef} className={`app-body adaptive-workbench ${shellClass}`} data-layout-overlay={layout.overlay ?? undefined}>
+      ) : null}
+      <div hidden={showPage} inert={showPage} ref={layout.rootRef} className={`app-body adaptive-workbench ${shellClass}`} data-layout-overlay={layout.overlay ?? undefined}>
         {layout.overlay ? <button type="button" className="layout-overlay-backdrop" aria-label={t("common.close")} onClick={layout.dismissOverlay} /> : null}
         <AppSidebar state={state} chrome={chrome} client={client} onRoute={go} onOpenAppUpdateDialog={() => setShowAppUpdateDialog(true)} />
         <div className="main-col">
@@ -8869,9 +8730,9 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
             threadTitle={threadTitle}
             sideOpen={layout.sideShown}
             onToggleSide={toggleSide}
-            onOpenChanges={() => { setSideTab("changes"); openSide(); }}
-            onOpenGit={() => { setSideTab("git"); openSide(); }}
-            onOpenTerminal={() => { setBottomTab("terminal"); changeBottomOpen(true); }}
+            onOpenChanges={() => { setSideTab("changes"); }}
+            onOpenGit={() => { setSideTab("git"); }}
+            onOpenTerminal={() => { setBottomTab("terminal"); }}
             viewedSessionId={selected?.sessionId}
             telemetryRefreshToken={telemetryRefreshToken}
           />
@@ -8894,12 +8755,14 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
             onOpenDiagnostics={() => go("diagnostics")}
           />
           <WorkbenchCanvas
+            workbenchVisible={!showPage}
+            railMode={layout.railMode}
             layoutOverlayDismiss={layout.dismissOverlay}
             onOpenWorktree={openManagedWorktree}
             state={state}
             client={client}
             viewIdentity={selectedProvisionalSessionId === undefined
-              ? (selectedHistoryId === null ? "live" : `history:${selectedHistoryId}`)
+              ? (selectedHistoryId === null ? `live:${freshView}` : `history:${selectedHistoryId}`)
               : `draft:${selectedProvisionalSessionId}`}
              {...((selectedProvisionalSessionId ?? selected?.sessionId) === undefined ? {} : { selectedSessionId: selectedProvisionalSessionId ?? selected?.sessionId as string })}
             viewedAgents={viewedAgents}
@@ -8915,9 +8778,6 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
             onBranchedSession={selectBranchedSession}
             hiddenPreviewThreads={chrome.hiddenPreviewThreads}
             sideOpen={layout.sideShown}
-            onCloseSide={closeSide}
-            sideTab={sideTab}
-            onSideTabChange={setSideTab}
             panelWidth={panelWidth}
             onResizePanel={setPanelWidth}
             bottomOpen={layout.bottomOpen}
@@ -8926,11 +8786,9 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
             onBottomVisibleChange={changeBottomVisible}
             bottomHeight={bottomHeight}
             onResizeBottom={(height) => setBottomHeight(clampBottomHeight(height))}
-            bottomTab={bottomTab}
-            onBottomTabChange={setBottomTab}
             onRoute={go}
-            onOpenChanges={() => { setSideTab("changes"); openSide(); }}
-            onOpenGit={() => { setSideTab("git"); openSide(); }}
+            onOpenChanges={() => { setSideTab("changes"); }}
+            onOpenGit={() => { setSideTab("git"); }}
              composerRef={composerRef}
              {...(composerDraftsBySession[activeComposerOwner ?? ""] === undefined
                ? {}
@@ -8944,21 +8802,18 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
             onProvisionalSessionChange={onProvisionalSessionChange}
             onPinCompleted={refreshPinnedHistory}
             onSlashUi={applySlashUi}
-            btwWindow={btwWindow}
             btwSession={btwSession}
-            btwSideHeadRect={sideHeadRect}
             onBtwDemoNext={() => setBtwDemoRound((round) => (round + 1) % PREVIEW_BTW_SNAPSHOTS.length)}
             onBtwPreviewAsk={() => setBtwDemoRound(0)}
             compactPending={compactPending}
             onCompactPending={setCompactPending}
             onViewedTelemetryRefresh={refreshViewedTelemetry}
             {...(createProjectNonce === 0 ? {} : { createProjectNonce })}
-            {...(selectedProject?.id === undefined ? {} : { workspaceId: selectedProject.id })}
+            {...(dockSelection.project === null ? {} : { workspaceId: dockSelection.project })}
           />
           <span className="sr-only">client contract v{CLIENT_CONTRACT_VERSION}{snapshot ? ` · session ${snapshot.sessionId}` : ""}</span>
         </div>
       </div>
-      )}
       {renameOpen ? (
         <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (!renameBusy) setRenameOpen(false); }}>
           <section className="modal create-project-modal rename-thread-modal" role="dialog" aria-modal="true" aria-labelledby="renameThreadTitle" onMouseDown={(event) => event.stopPropagation()}>
@@ -9125,10 +8980,11 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
 }
 
 export function App({ client }: { readonly client: StudioClient }) {
-  return <TerminalSessionsProvider><ExecutionTargets client={client}>{(active, key) => <TargetApp key={key} client={active} />}</ExecutionTargets></TerminalSessionsProvider>;
+  const [dockStore] = useState(() => new DockStore());
+  return <TerminalSessionsProvider><ExecutionTargets client={client}>{(active, key) => <TargetApp key={key} client={active} dockStore={dockStore} />}</ExecutionTargets></TerminalSessionsProvider>;
 }
 
-function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
+function TargetApp({ client: inputClient, dockStore }: { readonly client: StudioClient; readonly dockStore: DockStore }) {
   const { t } = useI18n();
   const client = inputClient as ClientStateSource;
   const executionTarget = useExecutionTarget();
@@ -9283,7 +9139,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
       <ConversationWidthProvider>
       <I18nProvider>
         <RemoteScopeNotice />
-        {body}
+        <DockProvider definitions={WORKBENCH_PANELS} store={dockStore}>{body}</DockProvider>
         <StartupNotice />
         <TipHost />
       </I18nProvider>

@@ -1,0 +1,235 @@
+/* Dock chrome only. Business modules keep their own theme and typography. */
+.dock-host-layer,
+.dock-floating-layer { display: contents; }
+.dock-panel-content {
+  position: fixed;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: auto;
+  background: var(--bg-inset);
+  color: var(--text);
+  scrollbar-width: thin;
+}
+.dock-panel-content[hidden],
+.dock-slot[hidden],
+.dock-card-region[hidden],
+.dock-group-region[hidden],
+.dock-group[hidden],
+.dock-capsules[hidden] { display: none !important; }
+.dock-panel-content > :is(div, section, main, aside) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.dock-panel-content[data-dock-auto-height] > :is(div, section, main, aside) {
+  height: auto;
+  min-height: 0;
+  flex: none;
+}
+.dock-panel-content :is(.terminal-root, .terminal-pane, .browser-panel, .computer-panel, .git-panel, .changes-panel, .btw-panel) {
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+.dock-slot { box-sizing: border-box; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.dock-icon-button,
+.dock-card-title,
+.dock-tab > button,
+.dock-rail-icon,
+.dock-capsule {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+}
+.dock-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 3px;
+  color: var(--text-3);
+  border-radius: var(--r-4);
+  cursor: pointer;
+}
+.dock-icon-button:hover,
+.dock-icon-button.is-active { color: var(--text); background: var(--surface-hover); }
+.dock-icon-button.is-active { background: var(--accent-soft); color: var(--accent); }
+.dock-icon-button:disabled { opacity: 0.45; cursor: default; }
+:is(.dock-card-region, .dock-group-region, .dock-rail-expanded, .dock-rail-compact, .dock-float, .dock-capsules) :is(button, [role="separator"], [tabindex]):focus-visible,
+.dock-rail-toggle:focus-visible,
+.dock-float:focus-visible,
+.dock-rail-overlay:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.dock-card-region,
+.dock-group-region { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+.dock-card-region { flex: 1 1 0; overflow: hidden; }
+.dock-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  padding: var(--sp-8);
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: auto;
+  scrollbar-width: thin;
+}
+.dock-card {
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--bg-inset);
+}
+.dock-card-header {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  gap: 2px;
+  padding: 2px var(--sp-4);
+  background: var(--bg-inset);
+  color: var(--text-2);
+  user-select: none;
+  cursor: grab;
+  touch-action: none;
+}
+.dock-card-title {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+  min-height: 28px;
+  padding: 2px 3px;
+  text-align: left;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  border-radius: var(--r-4);
+  cursor: pointer;
+  touch-action: none;
+}
+.dock-card-title > span,
+.dock-overlay-title > span,
+.dock-float-title > span:not(.dock-count),
+.dock-capsule-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-card-title:hover { background: var(--surface-hover); color: var(--text); }
+.dock-grip { flex: 0 0 auto; width: 12px; opacity: 0; color: var(--text-faint); font-size: 16px; transition: opacity var(--dur-fast) var(--ease); }
+.dock-card-header:hover .dock-grip,
+.dock-card-header:focus-within .dock-grip { opacity: 1; }
+.dock-card-body { overflow: hidden; min-width: 0; border-top: 1px solid var(--border); }
+.dock-card-resizer {
+  position: relative;
+  height: 6px;
+  cursor: ns-resize;
+  touch-action: none;
+  background: var(--surface-2);
+}
+.dock-card-resizer::after { content: ""; position: absolute; left: calc(50% - 12px); top: 2px; width: 24px; height: 2px; background: var(--border-strong); border-radius: 2px; }
+.dock-card-resizer:hover::after { background: var(--accent); }
+.dock-card-resizer[aria-disabled="true"] { cursor: default; }
+.dock-empty { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-8); min-width: 0; min-height: 72px; padding: var(--sp-12); color: var(--text-3); font-size: var(--fs-12); text-align: center; }
+.dock-demo { align-self: flex-start; flex: 0 0 auto; margin: 3px 6px; padding: 1px 5px; border: 1px solid var(--accent-border); border-radius: var(--r-4); color: var(--accent); background: var(--accent-softer); font-size: var(--fs-11); white-space: nowrap; }
+.dock-region-toolbar { display: flex; align-items: center; min-width: 0; min-height: 30px; flex: 0 0 auto; padding: 2px var(--sp-6); gap: 3px; border-bottom: 1px solid var(--border); background: var(--bg-inset); }
+.dock-region-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-11); color: var(--text-3); font-weight: var(--fw-medium); }
+.dock-toolbar-spacer { flex: 1 1 0; }
+.dock-group-picker { min-width: 0; max-width: 160px; height: 26px; font-size: var(--fs-11); }
+.dock-groups { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
+.dock-group-region-bottom > .dock-groups { flex-direction: row; }
+.dock-group { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
+.dock-groups:not(.is-constrained):has(> .dock-group-separator) > .dock-group:first-child { flex: var(--dock-group-ratio, 0.5) 1 0; }
+.dock-groups:not(.is-constrained):has(> .dock-group-separator) > .dock-group:last-child { flex: calc(1 - var(--dock-group-ratio, 0.5)) 1 0; }
+.dock-group-body { position: relative; display: flex; flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; background: var(--bg-inset); }
+.dock-group-body > .dock-slot { flex: 1 1 0; height: auto; }
+.dock-tab-strip { display: flex; align-items: center; gap: 2px; height: 36px; min-height: 36px; flex: 0 0 36px; padding: 2px 4px; box-sizing: border-box; background: var(--surface-2); border-bottom: 1px solid var(--border); min-width: 0; }
+.dock-group-grip { width: 18px; height: 28px; font-size: 17px; cursor: grab; touch-action: none; }
+.dock-group-grip:disabled { visibility: hidden; width: 8px; }
+.dock-tabs { display: flex; align-items: center; flex: 1 1 0; min-width: 0; min-height: 32px; gap: 3px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.dock-tabs::-webkit-scrollbar { display: none; }
+.dock-tab { display: flex; position: relative; flex: 0 0 auto; align-items: center; max-width: 210px; height: 32px; box-sizing: border-box; border: 1px solid transparent; border-radius: var(--r-6); color: var(--text-3); transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
+.dock-tab:hover { color: var(--text-2); background: var(--surface-hover); }
+.dock-tab.is-active { color: var(--text); background: var(--bg-inset); border-color: var(--border-strong); }
+.dock-tab > [role="tab"] { display: flex; align-items: center; gap: var(--sp-6); min-width: 0; height: 30px; padding: 0 2px 0 8px; font-size: var(--fs-12); font-weight: var(--fw-medium); border-radius: var(--r-6); cursor: pointer; touch-action: none; }
+.dock-tab > [role="tab"] > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-tab .icon { flex: 0 0 auto; }
+.dock-tab > .dock-tab-close { display: flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 26px; padding: 3px; margin: 0 1px; border-radius: var(--r-4); opacity: 0; cursor: pointer; }
+.dock-tab-menu { display: flex; flex: 0 0 24px; opacity: 0; }
+.dock-tab-menu > .dock-menu-button { width: 24px; height: 26px; min-width: 24px; padding: 3px; }
+.dock-tab:is(:hover, :focus-within, .is-active) > :is(.dock-tab-close, .dock-tab-menu) { opacity: 1; }
+.dock-tab > .dock-tab-close:hover { background: var(--surface-active); }
+.dock-all-tabs.app-select { flex: 0 0 26px; width: 26px; min-width: 26px; height: 26px; padding: 4px; gap: 0; border-color: transparent; background: transparent; }
+.dock-all-tabs .app-select-value { display: none; }
+.dock-all-tabs .app-select-chevron { margin: auto; }
+.dock-group-separator { flex: 0 0 6px; position: relative; background: var(--surface-2); cursor: ns-resize; touch-action: none; }
+.dock-group-region-bottom .dock-group-separator { cursor: ew-resize; }
+.dock-group-separator::after { content: ""; position: absolute; inset: 2px 0; background: var(--border); }
+.dock-group-region-bottom .dock-group-separator::after { inset: 0 2px; }
+.dock-group-separator:hover::after { background: var(--accent); }
+.dock-group-separator[aria-disabled="true"] { cursor: default; }
+/* A collapsed bottom region is exactly one tab row, not a second header row. */
+.dock-group-region-bottom > .dock-region-toolbar { position: absolute; right: 0; top: 0; height: 36px; min-height: 36px; box-sizing: border-box; padding: 2px; z-index: 1; background: var(--surface-2); }
+.dock-group-region-bottom > .dock-region-toolbar > :is(.dock-region-label, .dock-toolbar-spacer, .dock-demo) { display: none; }
+.dock-group-region-bottom > .dock-groups > .dock-group:last-child > .dock-tab-strip,
+.dock-group-region-bottom > .dock-groups.is-constrained > .dock-group:not([hidden]) > .dock-tab-strip { padding-right: 91px; }
+.dock-group-region-bottom:has(> .dock-region-toolbar > .dock-group-picker) > .dock-groups > .dock-group:not([hidden]) > .dock-tab-strip { padding-right: 230px; }
+.dock-group-region.is-folded > .dock-groups { flex: 0 0 36px; }
+.dock-rail-expanded { position: relative; display: flex; flex-direction: column; width: var(--dock-rail-w, 320px); flex: 0 0 var(--dock-rail-w, 320px); min-width: 0; min-height: 0; background: var(--bg-inset); border-left: 1px solid var(--border); }
+.dock-rail-width-resizer { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; z-index: 15; cursor: ew-resize; touch-action: none; }
+.dock-rail-width-resizer:hover,
+.dock-rail-width-resizer:focus-visible { background: var(--accent-border); }
+.dock-rail-width-resizer[aria-disabled="true"] { cursor: default; pointer-events: none; }
+.dock-rail-compact { position: absolute; right: 8px; width: 40px; min-height: 0; pointer-events: none; overflow: visible; }
+.dock-rail-icons { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: stretch; width: 40px; max-height: 100%; box-sizing: border-box; padding: 3px; border: 1px solid var(--border-strong); border-radius: var(--r-8); background: var(--surface); box-shadow: 0 3px 14px rgb(0 0 0 / 8%); z-index: 29; pointer-events: auto; overflow: auto; scrollbar-width: thin; }
+.dock-rail-icon-list { display: flex; flex-direction: column; gap: 3px; min-height: 0; flex: 1 1 auto; overflow: auto; scrollbar-width: none; }
+.dock-rail-icon { display: flex; align-items: center; justify-content: center; flex: 0 0 32px; min-width: 30px; min-height: 32px; border: 1px solid transparent; border-radius: var(--r-6); color: var(--text-3); cursor: pointer; touch-action: none; }
+.dock-rail-icon:hover { background: var(--surface-hover); color: var(--text); }
+.dock-rail-icon.is-active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-border); }
+.dock-rail-icon-actions { display: flex; align-items: center; flex-direction: column; gap: 2px; flex: 0 0 auto; padding-top: 4px; margin-top: 4px; border-top: 1px solid var(--border); }
+.dock-rail-icons > .dock-demo { font-size: 9px; margin: 1px 0 3px; padding: 1px; }
+.dock-rail-overlay { display: flex; flex-direction: column; position: absolute; right: 48px; top: 0; bottom: 0; max-width: calc(100vw - 64px); min-width: 0; min-height: 0; background: var(--bg-inset); border: 1px solid var(--border-strong); border-radius: var(--r-8); box-shadow: 0 12px 40px rgb(0 0 0 / 16%); z-index: 29; pointer-events: auto; overflow: hidden; }
+.dock-overlay-title { display: flex; align-items: center; gap: var(--sp-6); flex: 1 1 0; min-width: 0; padding-left: 4px; font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.dock-float { display: flex; flex-direction: column; position: fixed; box-sizing: border-box; min-width: 0; min-height: 0; overflow: visible; color: var(--text); background: var(--bg-inset); border: 1px solid var(--border-strong); border-radius: var(--r-8); box-shadow: 0 16px 48px rgb(0 0 0 / 18%), 0 2px 8px rgb(0 0 0 / 8%); }
+.dock-float.is-maximized { border-radius: 0; }
+.dock-float-titlebar { display: flex; align-items: center; gap: 2px; height: 34px; min-height: 34px; box-sizing: border-box; flex: 0 0 34px; padding: 3px 5px 3px 10px; border-radius: var(--r-8) var(--r-8) 0 0; background: var(--bg-inset); cursor: grab; user-select: none; touch-action: none; }
+.dock-float-title { display: flex; flex: 1 1 0; min-width: 0; align-items: center; gap: var(--sp-6); font-weight: var(--fw-medium); font-size: var(--fs-12); }
+.dock-float-title .icon { flex: 0 0 auto; }
+.dock-float > .dock-group-body { border-radius: 0 0 var(--r-8) var(--r-8); }
+.dock-count { display: inline-flex; justify-content: center; align-items: center; flex: 0 0 auto; min-width: 16px; min-height: 16px; padding: 0 3px; border-radius: var(--r-4); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-11); }
+.dock-float-resizer { position: absolute; touch-action: none; }
+.dock-float-resizer-n { left: 10px; right: 10px; top: -3px; height: 6px; cursor: ns-resize; }
+.dock-float-resizer-s { left: 10px; right: 10px; bottom: -3px; height: 6px; cursor: ns-resize; }
+.dock-float-resizer-e { top: 10px; bottom: 10px; right: -3px; width: 6px; cursor: ew-resize; }
+.dock-float-resizer-w { top: 10px; bottom: 10px; left: -3px; width: 6px; cursor: ew-resize; }
+.dock-float-resizer-ne, .dock-float-resizer-se, .dock-float-resizer-sw, .dock-float-resizer-nw { width: 12px; height: 12px; }
+.dock-float-resizer-ne { top: -4px; right: -4px; cursor: nesw-resize; }
+.dock-float-resizer-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
+.dock-float-resizer-sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
+.dock-float-resizer-nw { top: -4px; left: -4px; cursor: nwse-resize; }
+.dock-capsules { display: flex; position: absolute; left: 16px; right: 56px; flex-wrap: wrap; justify-content: flex-end; align-content: flex-end; gap: 6px; overflow: auto; pointer-events: none; z-index: 28; scrollbar-width: thin; }
+.dock-capsule { display: flex; align-items: center; gap: 6px; max-width: 178px; height: 32px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--r-6); background: var(--surface); box-shadow: 0 2px 8px rgb(0 0 0 / 8%); pointer-events: auto; cursor: pointer; font-size: var(--fs-12); }
+.dock-capsule:hover { background: var(--surface-2); border-color: var(--accent-border); }
+.dock-capsule .icon { flex: 0 0 auto; }
+.dock-capsule-overflow { max-width: 180px; height: 32px; pointer-events: auto; }
+.dock-drag-preview { position: fixed; box-sizing: border-box; pointer-events: none; z-index: 59; border: 2px solid var(--accent); border-radius: var(--r-6); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); font-size: var(--fs-12); font-weight: var(--fw-medium); display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: visible; text-shadow: 0 1px 2px var(--bg-inset), 0 -1px 2px var(--bg-inset); }
+.dock-drag-preview[hidden] { display: none; }
+body.dock-dragging :is(.dock-card-header, .dock-tabs, .dock-float-titlebar, .dock-rail-icon) { cursor: grabbing; }
+body.dock-resizing :is(.dock-card, .dock-group, .dock-float) { user-select: none; }
+@media (prefers-reduced-motion: reduce) {
+  .dock-grip, .dock-tab { transition: none; }
+}
+@media (pointer: coarse) {
+  .dock-tab > :is(.dock-tab-close, .dock-tab-menu), .dock-grip { opacity: 1; }
+  .dock-card-resizer { height: 10px; }
+}

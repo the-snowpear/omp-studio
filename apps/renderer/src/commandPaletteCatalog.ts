@@ -11,6 +11,7 @@ export type SideTab = "changes" | "git" | "preview" | "computer" | "agents" | "b
 export type BottomTab = "terminal" | "problems" | "tests" | "output" | "logs" | "pvlogs";
 
 export type PaletteAction =
+  | { kind: "dock"; operation: "rail" | "undo" | "redo" | "lock" | "snap" | "reset" | "default" | "focus" | "debug" | "files" }
   | { kind: "openContext" }
   | { kind: "route"; route: PageRoute }
   | { kind: "diagnostics"; intent?: "check-update" | "reconnect" | "restart" }
@@ -146,6 +147,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
       id: "panels",
       label: "palette.groupPanels",
       items: [
+        ...([['rail', '对话工具区 / Conversation tools'], ['files', '打开 Files'], ['undo', '撤销布局修改 / Undo layout'], ['redo', '重做布局修改 / Redo layout'], ['lock', '锁定布局 / Lock layout'], ['snap', '停靠吸附 / Dock snapping'], ['reset', '恢复出厂布局 / Reset layout'], ['default', '默认布局 / Default'], ['focus', '专注布局 / Focus'], ['debug', '调试布局 / Debug']] as const).map(([operation, label]) => ({ id: `dock-${operation}`, icon: 'layout', label, keywords: 'dock layout 停靠 布局', action: { kind: 'dock' as const, operation } })),
         { id: "toggle-sidebar", icon: "layout", label: "palette.toggleSidebar", hint: formatShortcut(SHORTCUTS.toggleSidebar, "hint"), keywords: `sidebar 侧栏 切换侧栏 ${shortcutSearchText(SHORTCUTS.toggleSidebar)}`, action: { kind: "toggleSidebar" } },
         { id: "toggle-bottom", icon: "rows", label: "palette.toggleBottom", hint: formatShortcut(SHORTCUTS.toggleBottomPanel, "hint"), keywords: `bottom panel 底部面板 切换底部面板 ${shortcutSearchText(SHORTCUTS.toggleBottomPanel)}`, action: { kind: "toggleBottom" } },
         { id: "toggle-side", icon: "panel", label: "palette.toggleSide", keywords: "right panel 右侧面板 切换右侧面板", action: { kind: "toggleSide" } },

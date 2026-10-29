@@ -30,6 +30,18 @@ describe("workbench space budget", () => {
     expect(fitWorkbench(prefs, at(770), null, narrow).sidebarShown).toBe(false);
     expect(fitWorkbench(prefs, at(800), null, narrow).sidebarShown).toBe(true);
   });
+  it("compacts the rail before changing the existing horizontal budget", () => {
+    const rail = { ...prefs, railMode: "expanded" as const, railWidth: 320 };
+    expect(fitWorkbench(rail, at(1920))).toMatchObject({ railMode: "expanded", sidebarWidth: 272, panelWidth: 480 });
+    expect(fitWorkbench(rail, at(1440))).toMatchObject({ railMode: "compact" });
+    const small = fitWorkbench(rail, at(1280));
+    expect(small).toMatchObject({ railMode: "compact", sidebarWidth: 272, panelWidth: 448 });
+    expect(fitWorkbench(rail, at(1640), null, small).railMode).toBe("compact");
+    expect(fitWorkbench(rail, at(1680), null, small).railMode).toBe("expanded");
+    expect(rail.railMode).toBe("expanded");
+    expect(fitWorkbench({ ...rail, railMode: "compact" }, at(1920)).railMode).toBe("compact");
+    expect(fitWorkbench({ ...rail, railMode: "hidden" }, at(640))).toMatchObject({ railMode: "hidden", sidebarShown: false, sideShown: false });
+  });
   it("folds the bottom bar in short windows and restores it when taller", () => {
     const short = fitWorkbench(prefs, at(1280, 380));
     expect(short).toMatchObject({ bottomVisible: true, bottomOpen: false });
