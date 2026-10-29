@@ -217,7 +217,8 @@
 .dock-float-resizer-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
 .dock-float-resizer-sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
 .dock-float-resizer-nw { top: -4px; left: -4px; cursor: nwse-resize; }
-.dock-capsules { display: flex; position: absolute; left: 16px; right: 56px; flex-wrap: wrap; justify-content: flex-end; align-content: flex-end; gap: 6px; overflow: auto; pointer-events: none; z-index: 28; scrollbar-width: thin; }
+/* 左 56px 让出对话区左侧的 minimap 轨道（36 + 20），右 56px 让出紧凑工具区。 */
+.dock-capsules { display: flex; position: absolute; left: 56px; right: 56px; flex-wrap: wrap; justify-content: flex-end; align-content: flex-end; gap: 6px; overflow: auto; pointer-events: none; z-index: 28; scrollbar-width: thin; }
 .dock-capsule { display: flex; align-items: center; gap: 6px; max-width: 178px; height: 32px; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--r-6); background: var(--surface); box-shadow: 0 2px 8px rgb(0 0 0 / 8%); pointer-events: auto; cursor: pointer; font-size: var(--fs-12); }
 .dock-capsule:hover { background: var(--surface-2); border-color: var(--accent-border); }
 .dock-capsule .icon { flex: 0 0 auto; }

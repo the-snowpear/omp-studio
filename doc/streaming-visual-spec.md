@@ -767,8 +767,8 @@
 ### 13.4 对话文档宽度公式
 
 ```css
-max-width:     calc(var(--doc-max-w) + var(--sp-32)*2 + var(--minimap-w) + 8px);
-padding-right: calc(var(--sp-32) + var(--minimap-w) + 8px);
+max-width:    calc(var(--doc-max-w) + var(--sp-32)*2 + var(--minimap-w) + 8px);
+padding-left: calc(var(--sp-32) + var(--minimap-w) + 8px); /* minimap 轨道在对话区左侧 */
 ```
 
-所有浮动辅助元素（回到最新按钮、xdev 通知）使用相同公式对齐。
+所有浮动辅助元素（回到最新按钮、xdev 通知、审批/提问浮层、任务进度、子代理检查卡）使用相同公式对齐，正文列与 Composer 保持同宽同中线。

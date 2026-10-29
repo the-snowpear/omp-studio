@@ -125,7 +125,7 @@
   background: color-mix(in srgb, var(--bd-surface-base) 94%, transparent);
 }
 
-/* 右侧 minimap 是常驻 chrome，别在玻璃界面里留一条纯白。 */
+/* 左侧 minimap 是常驻 chrome，别在玻璃界面里留一条纯白。 */
 :root[data-backdrop="on"] .minimap {
   background: color-mix(in srgb, var(--bg) 35%, transparent);
 }

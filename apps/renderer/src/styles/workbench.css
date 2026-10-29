@@ -320,13 +320,13 @@
 .convo-scroll::-webkit-scrollbar { display: none; }
 .convo-doc {
   /* 内容列与 composer 同宽同边线：max-width 补回自身水平 padding（含 minimap 让位），
-     使正文净宽等于 --doc-max-w，且中线与 composer 一致（右移补 minimap 后居中）。
+     使正文净宽等于 --doc-max-w，且中线与 composer 一致（左移补 minimap 后居中）。
      position:relative 作为 xd:// 挂载通知悬浮层的定位上下文 */
   position: relative;
   max-width: calc(var(--doc-max-w) + var(--sp-32) + var(--sp-32) + var(--minimap-w) + 8px);
   margin: 0 auto;
   padding: var(--sp-24) var(--sp-32) var(--sp-32);
-  padding-right: calc(var(--sp-32) + var(--minimap-w) + 8px);
+  padding-left: calc(var(--sp-32) + var(--minimap-w) + 8px);
 }
 /* 虚拟列表的已挂载行走普通流（见 ConversationVirtualList）：行长高当帧就把文档一起撑高，
    `.convo-doc` 的 ResizeObserver 得以在同一个绘制前窗口贴底，展开工具卡时下方内容不再
@@ -348,7 +348,10 @@
   --reading-rail: 44px;
   --reading-scrollbar: 0px;
   --reading-doc-max: calc(var(--conversation-width) + 2 * var(--reading-gutter) + var(--reading-rail));
-  --reading-composer-end: calc(var(--reading-gutter) + var(--reading-rail) + var(--reading-scrollbar));
+  /* minimap 轨道在 inline-start（左）侧，正文与 Composer 的起始边都让出 rail；
+     原生滚动条仍在 inline-end（右）侧，只有 minimap 关掉时才需要 Composer 额外扣一次。 */
+  --reading-doc-start: calc(var(--reading-gutter) + var(--reading-rail));
+  --reading-composer-end: calc(var(--reading-gutter) + var(--reading-scrollbar));
 }
 .convo-wrap[data-reading-column] > .convo-scroll {
   min-height: 0;
@@ -361,8 +364,8 @@
 .convo-wrap[data-reading-column] > .convo-scroll > .new-content-pill-row {
   width: 100%;
   max-width: var(--reading-doc-max);
-  padding-left: var(--reading-gutter);
-  padding-right: calc(var(--reading-gutter) + var(--reading-rail));
+  padding-left: var(--reading-doc-start);
+  padding-right: var(--reading-gutter);
 }
 .convo-wrap[data-reading-column][data-reading-minimap="off"] > .minimap {
   display: none;
@@ -1149,8 +1152,8 @@
   --dur-sa-inspect: 480ms;
   --dur-sa-inspect-leave: 260ms;
   position: absolute;
-  left: calc(var(--sp-16) - 24px);
-  right: calc(var(--sp-16) + var(--minimap-w) + 8px - 24px);
+  left: calc(var(--sp-16) + var(--minimap-w) + 8px - 24px);
+  right: calc(var(--sp-16) - 24px);
   /* 固定约 82% 工作区高（视口 − 标题栏 36px − 顶栏），底边贴 Composer，不随对话列伸缩。 */
   top: auto;
   bottom: var(--sp-8);
@@ -2019,15 +2022,19 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   background: var(--surface);
 }
 
-/* ---------- Conversation Minimap（参照 omp-web ChatMinimap：36px 圆点轨道 + 预览浮层） ---------- */
+/* ---------- Conversation Minimap（参照 omp-web ChatMinimap：36px 圆点轨道 + 预览浮层） ----------
+   轨道贴在对话区左边缘（inline-start）。左右留白、浮层与工具菜单的方向都与这条边成对
+   改动：.convo-doc / .new-content-pill-row / .composer-region / .deck / .task-dock /
+   .sa-inspect / .convo-notice.xdev-mount 的让位，以及 .mm-preview / .minimap-tools /
+   .mm-menu 的锚边。 */
 .minimap {
   position: absolute;
   top: 0;
-  right: 0;
+  left: 0;
   width: var(--minimap-w);
   height: 100%;
   background: var(--bg);
-  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   z-index: var(--z-rail);
   user-select: none;
   /* 不设 cursor:pointer：空白区（含视口指示条）不提示可点击，
@@ -2093,10 +2100,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .mm-mark.file { border-color: var(--green); background: var(--green-soft); }
 .mm-mark.bash, .mm-mark.thinking, .mm-mark.plan { border-color: var(--blue); background: var(--blue-soft); }
 
-/* Minimap hover 预览浮层（左侧弹出，含回合序号 + 用户消息 + assistant 标题大纲） */
+/* Minimap hover 预览浮层（向右侧弹出，含回合序号 + 用户消息 + assistant 标题大纲） */
 .mm-preview {
   position: absolute;
-  right: calc(var(--minimap-w) + 8px);
+  left: calc(var(--minimap-w) + 8px);
   top: 8px;
   width: 264px;
   max-height: 320px;
@@ -2147,13 +2154,16 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .mm-preview .mp-heading:hover { background: var(--accent-soft); }
 .mm-preview .mp-empty { color: var(--text-faint); font-style: italic; }
 
-/* 底部工具按钮 */
+/* 底部工具按钮（筛选 / 回到最新）：在轨道宽度内水平居中——按 left:50% 平移半个
+   自身宽度，容器仍只有按钮那么宽，底部的轨道拖动区不被额外挡住。 */
 .minimap-tools {
   position: absolute;
-  right: 4px;
+  left: 50%;
   bottom: 6px;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 2px;
   z-index: var(--z-rail-tools);
 }
@@ -2174,8 +2184,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   to { background-color: transparent; }
 }
 .ev.mm-flash { animation: omp-mm-flash 900ms var(--ease-out); border-radius: var(--r-6); }
-/* 筛选/跳转菜单：锚在 minimap 工具按钮上方（.menu 本体样式见 components.css） */
-.mm-menu { right: 4px; bottom: 56px; min-width: 208px; }
+/* 筛选/跳转菜单：锚在 minimap 工具按钮上方，向对话一侧展开（.menu 本体样式见 components.css） */
+.mm-menu { left: 4px; bottom: 56px; min-width: 208px; }
 /* 预览模式的悬浮预览「演示」chip */
 .mm-preview .mp-demo {
   margin-left: 6px;
@@ -2199,8 +2209,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   bottom: 12px;
   margin: 0 auto;
   max-width: calc(var(--doc-max-w) + var(--sp-32) + var(--sp-32) + var(--minimap-w) + 8px);
-  padding-left: var(--sp-32);
-  padding-right: calc(var(--sp-32) + var(--minimap-w) + 8px);
+  padding-left: calc(var(--sp-32) + var(--minimap-w) + 8px);
+  padding-right: var(--sp-32);
   display: flex;
   justify-content: flex-end;
   pointer-events: none;
@@ -2309,14 +2319,14 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   flex: none;
   background: var(--bg);
   padding: var(--sp-10) var(--sp-16) var(--sp-8);
-  /* 右侧让出 minimap 宽度，避免被遮挡（参照 omp-web CHAT_INPUT_RIGHT_PADDING） */
-  padding-right: calc(var(--sp-16) + var(--minimap-w) + 8px);
+  /* 左侧让出 minimap 宽度，避免被遮挡（参照 omp-web CHAT_INPUT_RIGHT_PADDING） */
+  padding-left: calc(var(--sp-16) + var(--minimap-w) + 8px);
   position: relative;
   overflow: visible;
 }
 .convo-wrap[data-reading-column] > .composer-region {
   min-width: 0;
-  padding-left: var(--reading-gutter);
+  padding-left: var(--reading-doc-start);
   padding-right: var(--reading-composer-end);
 }
 .convo-wrap[data-reading-column] > .composer-region > :is(.composer, .composer-queues, .queue-strip) {
@@ -2332,10 +2342,28 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   max-width: min(calc(100% - var(--sp-24)), max(0px, calc(var(--conversation-width) - 80px)));
 }
 .convo-wrap[data-reading-column] > .composer-region > :is(.task-dock, .deck) {
-  left: var(--reading-gutter);
+  left: var(--reading-doc-start);
   right: var(--reading-composer-end);
   min-width: 0;
   max-width: var(--conversation-width);
+}
+/* 紧凑工具区（.dock-rail-compact，右边缘 40px + 8px 间距）是浮层。minimap 挪到左侧后
+   对话列不再有右侧 chrome 让位，而紧凑模式只在主列不足 880px 时出现——此时正文必然填满
+   可用宽、右留白只剩 gutter，浮层会压住最后一行文字。正文与 Composer 同时再让 48px：
+   两侧加同样的量，净宽与中线仍与 `.convo-doc` 一致（欢迎态由后面的 is-empty 规则覆盖）。 */
+.convo-wrap[data-reading-column]:has(> .dock-rail-compact) > .convo-scroll > .convo-doc,
+.convo-wrap[data-reading-column]:has(> .dock-rail-compact) > .convo-scroll > .new-content-pill-row {
+  max-width: calc(var(--reading-doc-max) + 48px);
+  padding-right: calc(var(--reading-gutter) + 48px);
+}
+.convo-wrap[data-reading-column]:has(> .dock-rail-compact) > .composer-region {
+  padding-right: calc(var(--reading-composer-end) + 48px);
+}
+.convo-wrap[data-reading-column]:has(> .dock-rail-compact) > .composer-region > :is(.task-dock, .deck) {
+  right: calc(var(--reading-composer-end) + 48px);
+}
+.convo-wrap[data-reading-column]:has(> .dock-rail-compact) .convo-notice.xdev-mount {
+  right: calc(var(--sp-32) + 48px);
 }
 
 /* Composer-attached task progress: floating popup over the conversation.
@@ -2346,8 +2374,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   --task-dock-row: 28px;
   --task-dock-rows: 5;
   position: absolute;
-  left: var(--sp-16);
-  right: calc(var(--sp-16) + var(--minimap-w) + 8px);
+  left: calc(var(--sp-16) + var(--minimap-w) + 8px);
+  right: var(--sp-16);
   /* 下缘与 region 内第一个控件保持 8px 间距：region padding-top 10px − 2px。 */
   bottom: calc(100% - var(--sp-2));
   margin: 0 auto;
@@ -2748,10 +2776,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
      新内容更高时向上生长、更矮时向下收起，而不是瞬间跳变。 */
 .deck {
   position: absolute;
-  left: var(--sp-16);
+  left: calc(var(--sp-16) + var(--minimap-w) + 8px);
   bottom: var(--sp-8);
-  /* 与 .composer-region 的右 padding 一致（含 minimap 让位），与 composer 同宽同中线 */
-  right: calc(var(--sp-16) + var(--minimap-w) + 8px);
+  /* 与 .composer-region 的左 padding 一致（含 minimap 让位），与 composer 同宽同中线 */
+  right: var(--sp-16);
   margin: 0 auto;
   max-width: var(--doc-max-w);
   z-index: var(--z-rail);
@@ -6251,8 +6279,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .convo-notice.xdev-mount {
   position: absolute;
   top: var(--sp-8);
-  left: var(--sp-32);
-  right: calc(var(--sp-32) + var(--minimap-w) + 8px);
+  left: calc(var(--sp-32) + var(--minimap-w) + 8px);
+  right: var(--sp-32);
   z-index: var(--z-scroll-aid);
   box-shadow: var(--shadow-menu);
 }
@@ -6386,9 +6414,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   margin-block: auto;
   width: 100%;
   max-width: 960px;
-  /* 与顶部 24px 对称：doc 自己的上下内边距不相等时，居中后的内容仍会整体偏上 4px。 */
+  /* 与顶部 24px 对称：doc 自己的上下内边距不相等时，居中后的内容仍会整体偏上 4px。
+     欢迎态没有 minimap，左右按普通留白对称（.convo-doc 的基础左让位要在这里收回）。 */
   padding-bottom: var(--sp-24);
-  padding-right: var(--sp-32);
+  padding-inline: var(--sp-32);
 }
 .convo-wrap.is-empty .minimap { display: none; }
 .convo-wrap[data-reading-column].is-empty > .convo-scroll { padding-right: 0; }
