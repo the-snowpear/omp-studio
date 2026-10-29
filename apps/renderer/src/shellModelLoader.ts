@@ -40,10 +40,18 @@ export function createShellModelLoader(client: StudioClient) {
       const add = (name: string, key: string, load: () => Promise<ShellModel>) => {
         selected.set(name, key);
         if (committed.get(name) === key) return Promise.resolve();
-        const request = once(key, name, load).then(value => {
-          if (selected.get(name) !== key) return;
-          if (publish(value) !== false) committed.set(name, key);
-        });
+        // A transient timeout must not leave a domain permanently empty: retry
+        // once, then say so instead of swallowing the failure in allSettled.
+        const attempt = (retry: boolean): Promise<void> =>
+          once(key, name, load).then(value => {
+            if (selected.get(name) !== key) return;
+            if (publish(value) !== false) committed.set(name, key);
+          }).catch(error => {
+            if (selected.get(name) !== key) return;
+            if (retry) return attempt(false);
+            console.warn(`[omp-studio] shell model ${name} failed`, error);
+          });
+        const request = attempt(true);
         requests.push(request);
         return request;
       };
@@ -59,8 +67,17 @@ export function createShellModelLoader(client: StudioClient) {
       await Promise.allSettled(requests);
     },
     async page(scope: ShellModelScope, route: string, publish: (value: ShellModel) => void) {
-      if (route === "home") await once(scope.workspace, "home", async () => ({ home: await client.query("home.get", {}) })).then(publish);
-      if (route === "diagnostics") await once(scope.environment, "diagnostics", async () => ({ diagnostics: await client.query("diagnostics.get", {}) })).then(publish);
+      const run = async (name: string, key: string, load: () => Promise<ShellModel>) => {
+        try {
+          publish(await once(key, name, load));
+        } catch (error) {
+          // Page loads are optional; a failure should not surface as an
+          // unhandled rejection from the fire-and-forget caller.
+          console.warn(`[omp-studio] shell model ${name} failed`, error);
+        }
+      };
+      if (route === "home") await run("home", scope.workspace, async () => ({ home: await client.query("home.get", {}) }));
+      if (route === "diagnostics") await run("diagnostics", scope.environment, async () => ({ diagnostics: await client.query("diagnostics.get", {}) }));
     },
   };
 }

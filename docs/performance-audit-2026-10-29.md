@@ -534,22 +534,40 @@ renderer 的 22 个 `setInterval` 中只有 2 处按 `document.hidden` 门控（
 | 场景 | 合并前 | 合并后 | 判读 |
 |---|---:|---:|---|
 | 切 Agent Hub：script / 长任务 / 最差帧 | 258 ms / 10 / 554 ms | 365–390 ms / 14–15 / 708–933 ms | **首访需动态加载 AgentHub chunk**，属懒加载的首次成本；后续访问应回落，未单独测 |
-| composer 输入 200 字符：script | 1,869 ms | **2,197–2,254 ms（+18~21%）** | 即使**只跑输入场景**（fresh session）仍为 2,197 ms，说明不是前序 chunk 加载所致，需 profile 定位是否 App.tsx 重构引入额外 re-render |
+| composer 输入 200 字符：script | 1,869 ms | 2,135–2,257 ms | 已用**合并前渲染层**做同机 A/B：基线包当前测得 2,146 / 2,757 ms，与合并后同量级 ⇒ **环境漂移，不是分支回退**（早前 1,869 ms 是较低负载样本） |
 | 滚动：script | 24.3 ms | 12.7–15.7 ms | 变好 |
 | 面板开合：script | 38.6 ms | 41–43 ms | 持平 |
 
-**结论**：合并没有引入阻断问题，首屏体积与首帧、热启动、常驻内存都有可确认收益；但**不能宣称整体「启动快 21.9%」**——真实冷启动收益未被证明，且 4x 降速下的输入脚本成本有约 18–21% 的可复现上升，需要在合并后单独定位。
+**结论**：合并没有引入阻断问题，首屏体积与首帧、热启动、常驻内存都有可确认收益；但**不能宣称整体「启动快 21.9%」**——真实冷启动收益未被证明。4x 降速下唯一可归因于分支的成本是「首次进入懒加载页面要拉 chunk」，输入/滚动/面板没有可复现回退。
 
 ### 12.3 审查遗留（非阻断，建议按序处理）
 
-1. **【建议优先修】`runtimeTouched` 覆盖不全**（`apps/desktop/src/host-composition.ts:865-881`）：`switchSession` / `evacuateResident` 未置位，极端时序（先切换/迁出、随后 workspace 换代）可能留下未被 stop 的 Runtime。修法：在两个包装入口置 `context.runtimeTouched.current = true`，或把置位下沉到可能 spawn 的 port 层。
-2. `shellModelLoader` 的域失败被 `allSettled` 吞掉且同 scope 不重试（`shellModelLoader.ts:57`）——`commands.getManifest` 一次超时会让命令清单长期为空且无提示。
+> 第 1、2 项已在本次修复中处理（见 §12.4）；其余仍开放。
+
+1. ✅ **已修：`runtimeTouched` 覆盖不全**（原 `host-composition.ts:865-881`）：`switchSession` / `evacuateResident` 现在都会置位 `context.runtimeTouched.current = true`，极端时序下 Runtime 不会漏停。
+2. ✅ **已修：`shellModelLoader` 域失败静默**：每个域失败先重试一次，仍失败则 `console.warn` 且不标记 committed（下次 load 会再试）；`page()` 的可选加载失败改为告警，不再从 fire-and-forget 调用产生 unhandled rejection（`shellModelLoader.ts:40-82`）。
 3. `composition.runtimeStatus` 在延后启动下成为「一次采样、永远过期」的字段（`main.ts` 不读，但属于导出面）。
 4. `connecting` 期点「重启更新」会直接报「Runtime 正在准备」（`host-composition.ts:1222`），建议先 `await whenRuntimeReady()` 再判 blocker。
 5. `omp-graphics://` 白名单 `^assets/...\.(js|css)$` 覆盖了整包渲染产物且 `Access-Control-Allow-Origin: null`（`graphic-protocol.ts:30/40`），建议收窄到专用子目录。
 6. 会话切换时插入意图会被静默丢弃（`App.tsx:6848-6850`）；两条组合测试缺失（真实 MediaPage intent、经 lazy 的终端 ref 单建）。
 7. **安全面需确认**：`security.ts` 把 CSP 注入收缩到只对 mainFrame，图形 iframe 改靠自身 meta CSP；主窗口 CSP 仍无 `unsafe-eval`，但这是一次安全行为变更，建议安全侧签字。
 8. 测量证据仍不在仓库：分支 A/B 驱动 `paired-launch.mjs` 未入仓、`outputs/` 被 gitignore；本轮复测的原始 JSON 同样只在本地。
+
+### 12.4 本次修复记录（2026-10-29 17:30）
+
+| 修复 | 位置 | 验证 |
+|---|---|---|
+| Runtime 漏停 | `host-composition.ts:865-889`：`switchSession` / `evacuateResident` 置位 `runtimeTouched` | desktop 构建 + `desktop-composition`/`desktop-lifecycle` **43/43** |
+| 域加载失败静默 | `shellModelLoader.ts:40-82`：失败重试一次 + 持续失败告警 + `page()` 不产生 unhandled rejection | `shellModelLoader` **8/8**（新增 3 条：失败重试一次并发布、持续失败告警且下次 load 重试、page 失败转告警） |
+| 输入回退误判 | 无代码改动（A/B 证伪） | 合并前渲染层同机 2,146 / 2,757 ms vs 合并后 2,135 / 2,257 ms |
+
+**本次未修及原因**
+
+- **S3 `connecting` 期更新重启**：要改「等待就绪」语义与失败文案，属产品取舍，先确认再动。
+- **S5 `omp-graphics` 白名单收窄**：需把 viewer 资产输出到专用子目录或建立静态闭包清单，当前不构成可利用提权（无 preload/IPC、代码非机密）。
+- **S1 `composition.runtimeStatus` 过期字段**：`main.ts` 不读，属清理项，等下次触碰该类型时一并删。
+- **CSP 收缩到 mainFrame**：安全行为变更，需要安全侧签字后再固化。
+- **§1.2 其余 P0**（探针/哈希缓存、composer 击键路径、PTY 合批、GPU 降级、空闲动画）：属于后续优化路线，不在本次「合并审查修复」范围。
 
 ## 13. 证据索引
 
@@ -567,4 +585,5 @@ renderer 的 22 个 `setInterval` 中只有 2 处按 `document.hidden` 门控（
 | 本机启动区段 | `%APPDATA%\omp-studio\logs\host-2026-10-2*.log` 的 `runtime.resolve` / `runtime.launch.begin` / `runtime.handshake.ok` / `runtime.launch.ready` |
 | 分支审查（合并前） | `outputs/perf-audit/branch-desktop-review.md`、`branch-renderer-review.md`、`branch-verify.md` |
 | 合并后复测原始数据 | `outputs/perf-audit/bench/raw/after2-startup.json`、`after2/after3-idle.json`、`after2/after4/after6-throttle*.json`；基线在 `raw/baseline-20261029/` |
+| 输入场景 A/B（合并前渲染层对照） | `outputs/perf-audit/bench/raw/typing-check-*.json`（合并后）与 `typing-base-*.json`（合并前渲染层同机复测） |
 | 既有基线 | [performance.md](performance.md)、[performance-report-2026-09-24.md](performance-report-2026-09-24.md)、`doc/streaming-cpu-performance-audit.md` |

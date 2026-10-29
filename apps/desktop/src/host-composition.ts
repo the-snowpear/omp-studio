@@ -865,6 +865,9 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       ...(context.runtimeSession?.switchSession === undefined
         ? {}
         : { switchSession: (intent) => {
+            // A switch can spawn a Runtime before any session is bound; mark it
+            // so shutdown still stops a Runtime that never reaches bindSession.
+            context.runtimeTouched.current = true;
             const generation = context.startup.generation;
             return context.startup.run(async () => {
               if (generation !== context.startup.generation) throw new Error("Workspace changed before session switch");
@@ -878,7 +881,12 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
         : { applyApprovalMode: (mode) => context.runtimeSession!.applyApprovalMode!(mode) }),
       ...(context.runtimeSession?.evacuateResident === undefined
         ? {}
-        : { evacuateResident: (sessionId) => context.runtimeSession!.evacuateResident!(sessionId) }),
+        : { evacuateResident: (sessionId) => {
+            // Evacuation talks to a live resident; it can be the only runtime
+            // touch in a workspace that is about to be replaced.
+            context.runtimeTouched.current = true;
+            return context.runtimeSession!.evacuateResident!(sessionId);
+          } }),
       supportsConcurrentSessions: context.runtimeSession?.supportsConcurrentSessions === true,
       bindSession: (session) => context.bindSession.current(session),
       interaction: context.interaction,

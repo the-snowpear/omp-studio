@@ -69,3 +69,46 @@ it("refreshes only workspace and Runtime-specific data when switching resident s
   expect(query.mock.calls.filter(([name]) => name === "history.list")).toHaveLength(2);
   expect(query).toHaveBeenCalledWith("history.list", expect.objectContaining({ workspaceId: "b" }));
 });
+
+it("retries a failed domain once and still publishes it", async () => {
+  let attempts = 0;
+  const query = vi.fn(async (name: string) => {
+    if (name === "commands.getManifest" && attempts++ === 0) throw new Error("timeout");
+    return { name };
+  });
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const loader = createShellModelLoader({ query } as unknown as StudioClient);
+  const publish = vi.fn();
+  await loader.load(scope("epoch"), "workbench", publish, vi.fn());
+  expect(query.mock.calls.filter(([name]) => name === "commands.getManifest")).toHaveLength(2);
+  expect(publish).toHaveBeenCalledWith({ commandManifest: { name: "commands.getManifest" } });
+  expect(warn).not.toHaveBeenCalled();
+  warn.mockRestore();
+});
+
+it("reports a domain that keeps failing and retries it on the next load", async () => {
+  const query = vi.fn(async (name: string) => {
+    if (name === "commands.getManifest") throw new Error("still down");
+    return { name };
+  });
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const loader = createShellModelLoader({ query } as unknown as StudioClient);
+  await loader.load(scope("epoch"), "workbench", vi.fn(), vi.fn());
+  expect(query.mock.calls.filter(([name]) => name === "commands.getManifest")).toHaveLength(2);
+  expect(warn).toHaveBeenCalledOnce();
+  await loader.load(scope("epoch"), "workbench", vi.fn(), vi.fn());
+  expect(query.mock.calls.filter(([name]) => name === "commands.getManifest")).toHaveLength(4);
+  warn.mockRestore();
+});
+
+it("turns optional page failures into a warning instead of a rejection", async () => {
+  const query = vi.fn(async (name: string) => {
+    if (name === "home.get") throw new Error("offline");
+    return { name };
+  });
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const loader = createShellModelLoader({ query } as unknown as StudioClient);
+  await expect(loader.page(scope("epoch"), "home", vi.fn())).resolves.toBeUndefined();
+  expect(warn).toHaveBeenCalledOnce();
+  warn.mockRestore();
+});
