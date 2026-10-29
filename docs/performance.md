@@ -82,3 +82,45 @@ PERF_BUILD_MODE=file PERF_REPORT=outputs/perf/file-smoke.json node scripts/rende
 Runtime 修改仍按 `npm run omp:overlay:apply` → vendor 编辑 → `npm run omp:patches:regen`。`npm run omp:verify:patches` 要求 vendor 干净，会应用并在 finally 清理补丁/overlay；它是 Runtime 专项验证，独立于日常 `npm run check`。不要在未回收的 vendor 改动上运行清理。
 
 验收数据及未覆盖范围见 [本次性能报告](performance-report-2026-09-24.md)。RSS 未马上下降不单独判失败；以 provider/listener/pending/Worker 计数及三批操作后的 retained heap 为准。若计数稳定而 RSS 持续上涨，另做诊断，不自动增加强制 GC 或杀进程策略。
+
+## 0.2.0 优化轮（2026-10-30）
+
+本轮把第二轮审查（[round2](performance-review-2026-10-29-round2.md)）里的 P0/P1 落成代码。执行记录、逐项证据与未验证部分见 [0.2.0-optimization-execution-report.md](0.2.0-optimization-execution-report.md)。这里只保留**维护者需要知道的常量与不变量**，改这些值时必须连同对应测试一起改。
+
+### 空闲绘制
+
+- 默认界面不再有无限动画。加载态的 `omp-spin` 与骨架 `omp-shimmer` 是仅存的两条无限动画，它们是状态指示器，不是装饰。
+- 动画只允许用合成属性（`opacity` / `transform`）。`text-shadow`、`box-shadow`、`background-position`、`filter` 的无限动画会逐帧重绘，禁止新增。
+- `prefers-reduced-motion: reduce` 与 `data-motion="off"` 走同一套 L1 规则（`apps/renderer/src/perf/tiers.css`）；L1 只把时长压到 0.01ms、迭代 1 次，不写 `animation: none`，否则 loading 指示器会消失。
+- 分级 L0–L3 由 Main 的 `app.getGPUFeatureStatus()` 判定（`getGPUInfo("basic")` 无法区分软/硬合成，禁止用作判据），renderer 入口在首帧前写入 `data-gpu` / `data-motion` / `data-perf`。**降级是少画，不是退回软件渲染，也不是关校验。**
+
+### Runtime 验签证据
+
+- `RuntimeInstaller#currentManifest()` 每次仍完整验签（三份签名元数据 + ed25519），只有 entrypoint 的**字节**校验走证据缓存 `StatKeyedVerificationCache`。
+- 缓存键 = 绝对路径 + `lstat` 身份（size/mtimeMs/inode/dev）+ assertion（校验类型、版本、期望摘要）；TTL 10 分钟；install/activate/rollback/uninstall/prune 一律 `invalidate()`；进程重启即空；执行边界（spawn 前）的指纹永远当场读。
+- 三层失效（stat 身份、TTL、进程内 + 显式 invalidate）都是承重的，简化时必须保留。`mtime + size` 不能单独作为永久信任依据。
+- 诊断：`installer.verificationStats()`（`contentHashes` / `cacheHits` / `singleFlightJoins` / `skippedBytes`）、`backend.fingerprints.stats()`。
+
+### Facade 快照与 conversation.open
+
+- `OperatorStateSnapshot` 在 facade 内部以只读引用传递（`#currentSnapshotRef()` / `#hasSnapshot()` / `#currentRuntimeEpoch()`），只在四个真正的出口拷贝一次：bootstrap、`home.get`、`session.state`、live telemetry 叶子。流式热路径与 `kind:"snapshot"` 事件零拷贝。
+- `conversation.open` 的事件排空是**分片**的：默认 64 envelope 或 4ms 一片，`setImmediate` 让出；审批/回执/publication/runtimeLost 仍是同步屏障（`flush()` 语义未变）。事件顺序、watermark 与 epoch 隔离不变；outbox > 2,000 时退化为一次全量排空，避免把长 task 换成无界积压。
+
+### PTY 与终端 IPC
+
+- 合批窗口 8ms（半帧）；每会话一个 `StringDecoder`，跨 chunk 的半个码点会重组，不产出替换字符。
+- 有界：每会话缓冲硬上限 2MiB，到上限**先暂停源再交付**，不丢字节；退出时先刷净缓冲再发 exit，并留一个合批窗口给 ConPTY 的尾行。
+- 流控：渲染侧 `xterm.write` 回调 ACK，水位 HIGH 500KiB / LOW 100KiB（xterm 官方建议）。没有 ACK 的旧 preload 自动降级为"只合批、不暂停"。
+- 输入通道不合批、不计水位。
+
+### Dock 工作台
+
+- 布局持久化按 200ms 合并写；scope 切换、draft 交接、`pagehide`、`beforeunload`、`visibilitychange→hidden` 同步刷盘。配额失败先精简载荷重试一次，再失败则本次会话不再写，且永不抛错。
+- 面板正文是固定宿主层（`PanelHosts`），与卡片列不在同一 DOM 祖先链，因此滚动交接由 `scrollChain.planScroll()` 显式完成：内部还能滚就完全不拦截，到边界才把剩余量交给最近的外层可滚容器，`preventDefault` 只发生一次。
+- 区域可见性在 reducer 末尾统一收敛（`settle()`）：右栏/底栏失去最后一个模块自动收起；左栏保留空态、对话工具区不动。只在最终提交状态判断，撤销/重做天然恢复。
+- `MutationObserver` 只关心 dock 几何节点，面板正文内的流式 DOM 变化不触发测量；测量按 host 几何签名早退。
+
+### 门禁
+
+- 新增核心套件（`scripts/core-suites.mjs`）：Dock 模型/持久化/宿主/滚动交接、窄窗抽屉、Composer 击键预算、GPU 分级、用量轮询、IPC 订阅生命周期、Runtime 验签证据、快照克隆计数、open 分片、终端合批与流控。
+- 验收口径：默认界面可见空闲 CPU（自绘动画成本）目标 < 0.8%，无限装饰动画数 = 0；首屏 JS ≤ 2.5MB raw / 800KB gzip。真实数字与测量条件见执行报告，不把旧报告数值当成本轮结果。
