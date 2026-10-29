@@ -1,7 +1,12 @@
 import { join } from "node:path";
 import { RuntimeInstaller, type ActivateOptions, type RuntimeInstallerOptions } from "@omp-studio/runtime-installer";
 import type { RuntimePreference, SessionBinding } from "@omp-studio/studio-protocol";
-import { resolveRuntime, type RuntimeResolution, type RuntimeResolverEnvironment } from "./runtime-resolver.js";
+import {
+  ExecutableFingerprintCache,
+  resolveRuntime,
+  type RuntimeResolution,
+  type RuntimeResolverEnvironment,
+} from "./runtime-resolver.js";
 import { ThreadBindingStore } from "./thread-binding-store.js";
 
 export interface HostBackendOptions {
@@ -20,6 +25,14 @@ export interface HostBackendOptions {
 export class HostBackend {
   readonly bindings: ThreadBindingStore;
   readonly installer: RuntimeInstaller;
+  /**
+   * Shared executable fingerprint cache. Two Host entry points resolve the same
+   * Runtime at startup (composition and the update coordinator); sharing one
+   * cache lets the second join the first one's read instead of hashing a
+   * ~170 MB executable again. The identity that gates a spawn is still always
+   * read inside the resolve that spawns.
+   */
+  readonly fingerprints = new ExecutableFingerprintCache();
   readonly #resolver: Omit<RuntimeResolverEnvironment, "managedLookup">;
 
   constructor(options: HostBackendOptions) {
@@ -43,16 +56,36 @@ export class HostBackend {
   async resolve(preference: RuntimePreference): Promise<RuntimeResolution> {
     return resolveRuntime(preference, {
       ...this.#resolver,
+      fingerprints: this.#resolver.fingerprints ?? this.fingerprints,
       managedLookup: { current: async () => await this.installer.currentManifest() },
     });
   }
 
+  /**
+   * Forget every piece of Runtime verification evidence the Host holds. Call it
+   * after an operation that can change the installed bytes outside this class
+   * (`installer.rollback()`, a manual repair, an update that rewrote the
+   * version tree): install/activate already do it for themselves.
+   */
+  invalidateRuntimeVerification(): void {
+    this.installer.invalidate();
+    this.fingerprints.invalidate();
+  }
+
   async install(artifactDirectory: string, options?: Parameters<RuntimeInstaller["install"]>[1]) {
-    return await this.installer.install(artifactDirectory, options);
+    try {
+      return await this.installer.install(artifactDirectory, options);
+    } finally {
+      this.invalidateRuntimeVerification();
+    }
   }
 
   async activate(runtimeVersion: string, options?: ActivateOptions) {
-    return await this.installer.activate(runtimeVersion, options);
+    try {
+      return await this.installer.activate(runtimeVersion, options);
+    } finally {
+      this.invalidateRuntimeVerification();
+    }
   }
 
   async bind(binding: SessionBinding, executableIdentity: string): Promise<void> {

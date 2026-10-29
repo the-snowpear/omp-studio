@@ -14,6 +14,10 @@ import type {
   StudioHelloResponse,
 } from "@omp-studio/studio-protocol";
 import { FULL_PARITY_REQUIRED_CAPABILITIES, STUDIO_PROTOCOL_VERSION } from "@omp-studio/studio-protocol";
+import {
+  StatKeyedVerificationCache,
+  type VerificationCacheStats,
+} from "@omp-studio/runtime-installer";
 import { StudioBridgeClient, StudioBridgeHandshakeError, StudioBridgeRequestError } from "./bridge-client.js";
 import {
   createBridgeBootstrap,
@@ -149,6 +153,13 @@ export interface RuntimeResolverEnvironment {
   probe?: RuntimeProbePort;
   /** Injectable path checks; defaults to node:fs lstat. */
   pathCheck?: PathCheckPort;
+  /**
+   * Executable fingerprint source. Defaults to a cache scoped to this resolve,
+   * which already collapses the two probe-time fingerprints into one read.
+   * `HostBackend` passes a long-lived instance so concurrent resolves share one
+   * in-flight read instead of hashing the same executable twice.
+   */
+  fingerprints?: ExecutableFingerprintPort;
   /** Workspace handed to the probe; defaults to os.tmpdir(). */
   workspaceDirectory?: string;
   probeTimeoutMs?: number;
@@ -229,9 +240,115 @@ export async function validateExecutablePath(
 
 /** Opaque executable-content fingerprint. Never contains the original path. */
 export async function fingerprintExecutable(platform: NodeJS.Platform, absolutePath: string): Promise<string> {
+  return (await readExecutableFingerprint(platform, absolutePath)).fingerprint;
+}
+
+interface ExecutableFingerprintRead {
+  /** `sha256:`-prefixed, platform-salted content digest. */
+  readonly fingerprint: string;
+  readonly bytes: number;
+}
+
+/**
+ * One full read of the candidate. The `platform\0` salt is part of the identity
+ * algorithm and is frozen: Thread bindings persist these values, so changing
+ * it would invalidate every existing binding.
+ */
+async function readExecutableFingerprint(
+  platform: NodeJS.Platform,
+  absolutePath: string,
+): Promise<ExecutableFingerprintRead> {
   const hash = createHash("sha256").update(`${platform}\0`);
-  for await (const chunk of createReadStream(absolutePath)) hash.update(chunk as Buffer);
-  return `sha256:${hash.digest("hex")}`;
+  let bytes = 0;
+  for await (const chunk of createReadStream(absolutePath)) {
+    const buffer = chunk as Buffer;
+    bytes += buffer.length;
+    hash.update(buffer);
+  }
+  return { fingerprint: `sha256:${hash.digest("hex")}`, bytes };
+}
+
+export interface ExecutableFingerprintOptions {
+  /**
+   * Execution boundary: read the bytes now instead of answering from a recorded
+   * fingerprint. `resolveRuntime` sets this before the probe spawns the
+   * candidate, so the identity that gates a launch is always measured in the
+   * resolve that launches.
+   */
+  readonly fresh?: boolean;
+}
+
+/** Injectable executable fingerprint source; defaults to `ExecutableFingerprintCache`. */
+export interface ExecutableFingerprintPort {
+  fingerprint(
+    platform: NodeJS.Platform,
+    absolutePath: string,
+    options?: ExecutableFingerprintOptions,
+  ): Promise<string>;
+}
+
+/** How long a non-execution lookup may reuse a recorded fingerprint while the stat identity is unchanged. */
+export const EXECUTABLE_FINGERPRINT_MAX_AGE_MS = 10 * 60_000;
+
+/**
+ * Stat-keyed memo for executable fingerprints.
+ *
+ * `resolveRuntime` fingerprints the candidate before and after the live probe
+ * to prove the file did not change underneath it. Each of those was a full read
+ * of a ~170 MB executable. This cache makes the second read reuse the first one
+ * when `lstat` still reports the same size/mtime/inode/device, and gives
+ * concurrent resolves a single in-flight read (single flight) when they are
+ * handed the same instance - `HostBackend` shares one.
+ *
+ * Reuse rules mirror the installer's verification evidence cache:
+ * - stat identity must match (any content-metadata change forces a re-read),
+ *   and the re-read result is what gets compared, so a target that changed
+ *   during the probe is still rejected;
+ * - `fresh: true` always reads (used at the execution boundary);
+ * - entries expire after `maxAgeMs` and are cleared by `invalidate()`;
+ * - failures are never recorded.
+ */
+export class ExecutableFingerprintCache implements ExecutableFingerprintPort {
+  readonly #verifications: StatKeyedVerificationCache<string>;
+  readonly #read: (platform: NodeJS.Platform, absolutePath: string) => Promise<ExecutableFingerprintRead>;
+
+  constructor(options: {
+    maxAgeMs?: number;
+    now?: () => number;
+    read?: (platform: NodeJS.Platform, absolutePath: string) => Promise<ExecutableFingerprintRead>;
+  } = {}) {
+    this.#read = options.read ?? readExecutableFingerprint;
+    this.#verifications = new StatKeyedVerificationCache<string>({
+      maxAgeMs: options.maxAgeMs ?? EXECUTABLE_FINGERPRINT_MAX_AGE_MS,
+      ...(options.now === undefined ? {} : { now: options.now }),
+    });
+  }
+
+  async fingerprint(
+    platform: NodeJS.Platform,
+    absolutePath: string,
+    options: ExecutableFingerprintOptions = {},
+  ): Promise<string> {
+    const result = await this.#verifications.verify({
+      path: absolutePath,
+      // Platform and algorithm are part of the identity, so evidence for one is
+      // never reused for the other.
+      assertion: `executable-fingerprint-sha256:v1:${platform}`,
+      verify: async () => (await this.#read(platform, absolutePath)).fingerprint,
+      ...(options.fresh === true ? { fresh: true } : {}),
+    });
+    return result.value;
+  }
+
+  /** Diagnostics: full reads, reused fingerprints and bytes that were not read again. */
+  stats(): VerificationCacheStats {
+    return this.#verifications.stats();
+  }
+
+  /** Drop recorded fingerprints and stop an in-flight read from recording one. */
+  invalidate(): void {
+    this.#verifications.invalidate();
+  }
 }
 
 /**
@@ -302,6 +419,9 @@ export async function resolveRuntime(
   const supportedProtocolVersions = environment.supportedProtocolVersions ?? [STUDIO_PROTOCOL_VERSION];
   const requiredCapabilities = environment.requiredCapabilities ?? FULL_PARITY_REQUIRED_CAPABILITIES;
   const pathCheck = environment.pathCheck ?? nodePathCheckPort;
+  // One fingerprint per resolve instead of two: the post-probe comparison
+  // reuses the pre-probe read only while `lstat` still reports the same file.
+  const fingerprints = environment.fingerprints ?? new ExecutableFingerprintCache();
 
   const candidate = await resolveCandidate(preference, environment, platform, arch);
   if (candidate.kind === "error") {
@@ -316,7 +436,9 @@ export async function resolveRuntime(
   const executablePath = pathValidation.absolutePath as string;
   let executableIdentity: string;
   try {
-    executableIdentity = await fingerprintExecutable(platform, executablePath);
+    // Execution boundary: the identity that gates the spawn is always read now,
+    // never carried over from an earlier resolve.
+    executableIdentity = await fingerprints.fingerprint(platform, executablePath, { fresh: true });
   } catch {
     return rejectedResolution(candidateInfo.source, "executable could not be fingerprinted");
   }
@@ -356,7 +478,10 @@ export async function resolveRuntime(
     outcome = await environment.probe.probe(probeContext);
   }
   try {
-    if ((await fingerprintExecutable(platform, executablePath)) !== executableIdentity) {
+    // Same resolve: a cached fingerprint is used only when the re-stat during
+    // this lookup still matches the one recorded before the probe; otherwise the
+    // bytes are read again and the comparison below decides.
+    if ((await fingerprints.fingerprint(platform, executablePath)) !== executableIdentity) {
       return rejectedResolution(candidateInfo.source, describeProbeFailure("IDENTITY_MISMATCH"), {
         probeFailure: "IDENTITY_MISMATCH",
       });
