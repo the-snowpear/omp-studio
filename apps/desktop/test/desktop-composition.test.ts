@@ -50,6 +50,7 @@ import { createDesktopRuntimeSessionPort } from "../src/runtime-session.js";
 import { InMemorySessionLeaseStore } from "@omp-studio/studio-host";
 import { runtimeEntrypointFor } from "@omp-studio/runtime-installer";
 import { UpdateRestartBlockedError } from "../src/update-restart.js";
+import { completeDesktopRuntimeTrial } from "../src/runtime-startup.js";
 
 const UPSTREAM_COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const T0 = "2026-08-12T00:00:00.000Z";
@@ -314,6 +315,181 @@ function assertClosedFacadeError(error: unknown): void {
   assert.equal(clientError.code, "TRANSPORT_ERROR");
   assert.match(clientError.message, /closed/u);
 }
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function withPendingStartup(run: (fixture: {
+  composition: DesktopHostComposition;
+  resolveProbe(): void;
+  session: ReturnType<typeof fakeSessionPort>;
+  lock: ReturnType<typeof fakeAuthorityLock>;
+  endpoint: ReturnType<typeof fakePrivateEndpoint>;
+  workspace: { workspaceId: string; cwd: string };
+}) => Promise<void>, customize?: (port: DesktopRuntimeSessionPort) => void): Promise<void> {
+  await withTempProfile(async profileDirectory => {
+    await withTempExecutable(async executablePath => {
+      const gate = deferred<void>();
+      const session = fakeSessionPort({ ready: true });
+      customize?.(session.port);
+      const lock = fakeAuthorityLock();
+      const endpoint = fakePrivateEndpoint();
+      const workspace = { workspaceId: "ws-a", cwd: profileDirectory };
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: lock.port,
+        privateEndpoint: endpoint.port,
+        runtimeSession: session.port,
+        deferredRuntime: true,
+        resolver: { probe: { probe: async (...args) => { await gate.promise; return fullParityProbe().probe(...args); } } },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+        facade: { getActiveWorkspace: () => workspace },
+      });
+      try { await run({ composition, resolveProbe: () => gate.resolve(), session, lock, endpoint, workspace }); }
+      finally { gate.resolve(); await composition.whenRuntimeReady?.(); await composition.shutdown(); }
+    });
+  });
+}
+
+test("deferred bootstrap is honest connecting and the same facade connects without ensure relaunch", async () => {
+  let ensures = 0;
+  await withPendingStartup(async ({ composition, resolveProbe, session }) => {
+    const facade = composition.facade;
+    const initial = await facade.bootstrap();
+    assert.equal(initial.runtime.status, "connecting");
+    assert.equal(initial.runtime.runtimeId, undefined);
+    assert.equal("snapshot" in initial, false);
+    const environment = await facade.query({ queryName: "environment.get", input: {} });
+    assert.ok(environment.ok);
+    assert.equal(environment.result.runtime.status, "connecting");
+    const connections: string[] = [];
+    const receipts: string[] = [];
+    facade.subscribe({ scope: "all" }, event => {
+      if (event.kind === "runtime.changed") connections.push(event.connection.status);
+      if (event.kind === "command.receipt") receipts.push(event.receipt.status);
+    });
+    await Promise.all(["ensure-a", "ensure-b"].map(id => facade.command({
+      commandName: "runtime.ensure", input: {}, requestId: id as CommandRequestId, idempotencyKey: id as IdempotencyKey,
+    })));
+    assert.equal(ensures, 0);
+    resolveProbe();
+    await composition.whenRuntimeReady?.();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(composition.facade, facade);
+    assert.equal((await facade.bootstrap()).runtime.status, "connected");
+    assert.deepEqual(session.calls, ["session.start"]);
+    assert.equal(ensures, 0);
+    assert.deepEqual(connections, ["connected"]);
+    assert.equal(receipts.length, 2);
+  }, port => { port.ensure = async () => { ensures++; return undefined; }; });
+});
+
+test("deferred startup failure publishes unavailable without a publication", async () => {
+  await withPendingStartup(async ({ composition, resolveProbe }) => {
+    const states: string[] = [];
+    composition.facade.subscribe({ scope: "all" }, event => {
+      if (event.kind === "runtime.changed") states.push(event.connection.status);
+    });
+    assert.equal((await composition.facade.bootstrap()).runtime.status, "connecting");
+    resolveProbe();
+    await composition.whenRuntimeReady?.();
+    const failed = await composition.facade.bootstrap();
+    assert.equal(failed.runtime.status, "unavailable");
+    assert.equal(failed.runtime.unavailableCode, "launch-failed");
+    assert.deepEqual(states, ["unavailable"]);
+  }, port => { port.start = async () => { throw new Error("test Runtime failure"); }; });
+});
+
+test("shutdown waits for in-flight launch and stops it before releasing authority", async () => {
+  const launched = deferred<void>();
+  const finishLaunch = deferred<void>();
+  await withPendingStartup(async ({ composition, resolveProbe, session, lock, endpoint }) => {
+    const connections: string[] = [];
+    composition.facade.subscribe({ scope: "all" }, event => { if (event.kind === "runtime.changed") connections.push(event.connection.status); });
+    resolveProbe();
+    await launched.promise;
+    const closing = composition.shutdown();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(lock.released, false);
+    assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+    finishLaunch.resolve();
+    await closing;
+    assert.ok(session.calls.includes("session.stop"));
+    assert.equal(lock.released, true);
+    assert.deepEqual(connections, []);
+  }, port => {
+    const start = port.start;
+    port.start = async context => { launched.resolve(); await finishLaunch.promise; return start(context); };
+  });
+});
+
+test("workspace switch during launch cannot bind the old bootstrap target", async () => {
+  const launched = deferred<void>();
+  const finishLaunch = deferred<void>();
+  let rebinds = 0;
+  await withPendingStartup(async ({ composition, resolveProbe, workspace }) => {
+    const ids: Array<string | undefined> = [];
+    composition.facade.subscribe({ scope: "all" }, event => { if (event.kind === "runtime.changed") ids.push(event.connection.runtimeId); });
+    resolveProbe();
+    await launched.promise;
+    const switching = composition.rebindWorkspace({ workspaceId: "ws-b", cwd: workspace.cwd }, { launchIfMissing: false });
+    finishLaunch.resolve();
+    await switching;
+    assert.equal(rebinds, 1);
+    assert.equal((await composition.facade.bootstrap()).runtime.runtimeId, undefined);
+    assert.ok(!ids.includes(HELLO_VIEW.runtimeId));
+  }, port => {
+    const start = port.start;
+    port.start = async context => { launched.resolve(); await finishLaunch.promise; return start(context); };
+    port.rebind = async () => { rebinds++; return undefined; };
+  });
+});
+
+test("session switches queued for an obsolete workspace fail instead of selecting it", async () => {
+  let switches = 0;
+  await withPendingStartup(async ({ composition, resolveProbe, workspace }) => {
+    const receipts: Array<{ requestId: string; status: string }> = [];
+    composition.facade.subscribe({ scope: "all" }, event => {
+      if (event.kind === "command.receipt") receipts.push(event.receipt);
+    });
+    await composition.facade.command({ commandName: "session.create", input: {}, requestId: "old-create" as CommandRequestId, idempotencyKey: "old-create" as IdempotencyKey });
+    await new Promise(resolve => setImmediate(resolve));
+    const changing = composition.rebindWorkspace({ workspaceId: "ws-b", cwd: workspace.cwd }, { launchIfMissing: false });
+    resolveProbe(); await changing;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(switches, 0);
+    assert.ok(receipts.some(receipt => receipt.requestId === "old-create" && receipt.status === "failed"));
+  }, port => { port.switchSession = async () => { switches++; return undefined; }; port.rebind = async () => undefined; });
+});
+
+test("Runtime maintenance waits for startup before resolving the installed version", async () => {
+  await withPendingStartup(async ({ composition, resolveProbe }) => {
+    let settled = false;
+    const rollback = composition.rollbackRuntime!().then(() => { settled = true; }, () => { settled = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(settled, false);
+    resolveProbe();
+    await rollback;
+    assert.equal(settled, true);
+  });
+});
+
+test("Runtime trial waits for startup terminal success or failure", async () => {
+  for (const fail of [false, true]) {
+    await withPendingStartup(async ({ composition, resolveProbe }) => {
+      const outcomes: boolean[] = [];
+      const trial = completeDesktopRuntimeTrial(composition, async ready => { outcomes.push(ready); }, true);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(outcomes, []);
+      resolveProbe();
+      assert.equal(await trial, fail);
+      assert.deepEqual(outcomes, [!fail]);
+    }, fail ? port => { port.start = async () => { throw new Error("trial failed"); }; } : undefined);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Initialization order + no-runtime read-only bootstrap

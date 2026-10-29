@@ -62,7 +62,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 功能 | 入口 | 说明 |
 |---|---|---|
 | 挂载 / 无 Host 空态 | `apps/renderer/src/main.tsx` | `StudioClientImpl` + `createDesktopTransport`；缺桥则 `Unavailable` |
-| 壳布局、侧栏、底栏、路由 | `apps/renderer/src/App.tsx` | 工作台主文件；Explorer 真树 `RealFileTree` 也在这里 |
+| 壳布局、侧栏、底栏、路由 | `apps/renderer/src/App.tsx`、`DeferredPanel.tsx`、`pageIntents.ts`、`shellModelLoader.ts` | 工作台主文件；非当前重页面按需加载，导航统一拦截未保存模型草稿；媒体文本在返回后的 Composer 合并；壳读模型按 authority/workspace/Runtime/环境分别失效，在途读取共享并分域提交；Explorer 真树 `RealFileTree` 也在这里 |
 | 会话行 ⋯ 菜单 / 行右键 | `apps/renderer/src/App.tsx`（`ThreadRowMenu` / `ThreadActionMenuItems` / `runThreadRowAction`） | 顶栏「对话选项」同款七项（弹层 208px 稍窄）；⋯ 点击锚按钮、行右键贴光标，同一弹层；作用于所在行会话：非当前会话先 `openHistoryEntry`（`resumeForAction`，必要时切工作区并 resume）再执行；预览演示行会话动作禁用（写表面不伪造目标）；临时行仅当为当前活动会话时可用，草稿行保留原生右键 |
 | 悬停 tip | `apps/renderer/src/TipHost.tsx` | `[data-tip]` 门户气泡；不用原生 `title`；文案短词，未实现加「（暂未实现）」 |
 | 通用单选下拉 | `apps/renderer/src/AppSelect.tsx`、`styles/components.css` | 普通单选统一用 `AppSelect` + `option` / `optgroup`；受控 value/onChange、主题、键盘、超过 10 项自动搜索；`npm run check:selects` 阻止产品源码新增原生 select |
@@ -166,7 +166,7 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 
 | 功能 | UI | 实现 |
 |---|---|---|
-| 状态 / 暂存 / 提交 | `apps/renderer/src/git/GitStatusPanel.tsx` | `apps/desktop/src/git-service.ts` → `git.execute` |
+| 状态 / 暂存 / 提交 | `apps/renderer/src/git/GitStatusPanel.tsx`、`git/useGitRepository.ts` | `apps/desktop/src/git-service.ts` → `git.execute`；仓库读按 client/workspace 共享订阅与在途请求，失效通知合并补读 |
 | Composer Git 增删统计 | `apps/renderer/src/App.tsx` 项目上下文条 | 点击统计展开右侧 Git 页签；预览 / 真实共用 `onOpenGit` |
 | 面板拆分 / 更多操作 | `git/GitPanelSplit.tsx`、`GitMoreActionsMenu.tsx` | 操作 kind 见 `client-contract/src/git.ts` `GitOperation` |
 | 文件树 git 徽章 | `git/treeStatus.ts`；`App.tsx` `RealFileTree` | `git.repository.get` |
@@ -203,9 +203,9 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 原生运行偏好 | `settings/NativePreferencesPane.tsx` | `preferences.native.get/set/clearOverride`；静态原生设置句柄，Advisor/标题/OTLP；范围与生效来源；OTLP 下次启动生效 |
 | 原生维护 / 完整导出 | `diagnostics/NativeMaintenancePane.tsx`、`preview/maintenancePreview.ts` | `maintenance.gc.preview/apply/status`、`maintenance.session.export`、`maintenance.export.status`、`maintenance.connection.check`；native GC 与 dump-all ZIP/HTML；Desktop `session-commands.ts` + `runtime-media-files.ts` 私有文件提升入库 |
 | 诊断页 | `DiagnosticsPage.tsx`、`diagnosticsModel.ts`、`runtimeEnsure.ts`、`RuntimeLossBanner.tsx`、`ActionProgressBar.tsx`、`updateCheck.ts`；预览 `preview/fixtures.ts` `PREVIEW_DIAGNOSTICS`；桌面 `chrome-logs.ts` | `diagnostics.get` / `environment.get` / `capabilities.get`；`chrome-updates.ts` 提供网络下载、本地导入、回滚并重启、清理旧 Runtime，`settings/updates.ts` 按 jobId 等待终态；启动与进页静默检查更新（超时不报错）；手动检查更新超时才提示；本地制品对比 `runtime-install.ts` `probeManagedRuntimeInstall`；安装/更新/重装 `runtime.install`；断开或启动失败时「重新连接 Runtime」走 `runtime.ensure`；已连接时「重启 Runtime」走 `runtime.ensure` `{ force: true }`，收据未连上时自动再 `ensure` 并等到 `runtime.changed` connected；Host 日志打开/导出走 chrome IPC `chrome-logs.ts`（路径不回传 Renderer）。工作台 / Hub / 空对话复用 `RuntimeLossBanner`。长操作显示分步进度条。 |
-| 安全窗 / CSP | — | `apps/desktop/src/security.ts` |
+| 安全窗 / CSP / 图形沙箱 | — | `apps/desktop/src/security.ts`、`graphic-protocol.ts`；`apps/renderer/graphic-preview.html`：图形 iframe 无父文档/Node/IPC，打包内置资源只读协议，WASM 权限仅限图形 iframe |
 | Windows 安装包 | packaging/ui、installer-host | packaging/electron-builder.yml / nsis/custom.nsh：当前用户安装、旧全机迁移、静默升级；scripts/build-update-assets-v2.mjs、verify-update-assets-v2.mjs、publish-update-release.mjs + .github/workflows/release.yml：多架构签名差分工件与独立 Runtime 发版；详见 docs/updates.md。 |
-| 组装顺序 | — | `host-factory.ts` → `host-composition.ts` → `composition.ts`；入口 `main.ts` |
+| 组装顺序 | — | `host-factory.ts` → `host-composition.ts` → `composition.ts`；入口 `main.ts`。生产桌面先创建基础 Host/facade，`runtime-startup.ts` 拥有后台 Runtime 初始化及维护串行任务；更新试运行等待终态 |
 
 Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `event` / `close`（`packages/transport-desktop/src/channels.ts`）。不要再加通用 `invoke(channel, payload)`。
 

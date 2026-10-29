@@ -148,6 +148,49 @@ async function setup(options: { withTray?: boolean; withConfirm?: boolean; trayT
   };
 }
 
+describe("quit during startup", () => {
+  test("waits for a late Host then shuts it down without opening a window", async () => {
+    let finishHost!: (host: DesktopHostComposition) => void;
+    const events: string[] = [];
+    const pending = new Promise<DesktopHostComposition>(resolve => { finishHost = resolve; });
+    const app = createDesktopApplication({
+      hostFactory: { create: () => pending },
+      createWindow: async () => { events.push("window"); throw new Error("must not open"); },
+      requestSingleInstanceLock: () => true,
+      onSecondInstance: () => {}, onBeforeQuit: () => {}, onAllWindowsClosed: () => {},
+      quit: () => { events.push("quit"); },
+    });
+    const starting = app.start();
+    const closing = app.quit();
+    assert.equal(events.length, 0);
+    finishHost({ shutdown: async () => { events.push("shutdown"); } } as unknown as DesktopHostComposition);
+    await Promise.all([starting, closing]);
+    assert.deepEqual(events, ["shutdown", "quit"]);
+  });
+
+  test("disposes a window whose factory completes after quitting", async () => {
+    let finishWindow!: (window: DesktopWindow) => void;
+    let windowStarted!: () => void;
+    const opened = new Promise<void>(resolve => { windowStarted = resolve; });
+    const pending = new Promise<DesktopWindow>(resolve => { finishWindow = resolve; });
+    const events: string[] = [];
+    const app = createDesktopApplication({
+      hostFactory: { create: async () => ({ status: "read-only", shutdown: async () => {} } as unknown as DesktopHostComposition) },
+      createWindow: () => { windowStarted(); return pending; },
+      createTray: () => { events.push("tray"); return undefined; },
+      requestSingleInstanceLock: () => true,
+      onSecondInstance: () => {}, onBeforeQuit: () => {}, onAllWindowsClosed: () => {},
+      quit: () => {},
+    });
+    const starting = app.start();
+    await opened;
+    await app.quit();
+    finishWindow({ dispose: () => events.push("dispose"), close: () => events.push("close") } as unknown as DesktopWindow);
+    await starting;
+    assert.deepEqual(events, ["dispose", "close"]);
+  });
+});
+
 describe("desktop lifecycle", () => {
   test("start hands isQuitting to the window factory and creates the tray", async () => {
     const h = await setup();

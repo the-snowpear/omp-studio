@@ -51,7 +51,7 @@ export async function generateModelCatalog(check = false) {
   for (const [path, content] of outputs) {
     const target = resolve(root, path);
     if (check) {
-      if (await readFile(target, "utf8") !== content) throw new Error(`${path} is stale; run npm run models:catalog:generate`);
+      if ((await readFile(target, "utf8")).replace(/\r\n/g, "\n") !== content) throw new Error(`${path} is stale; run npm run models:catalog:generate`);
     } else {
       await mkdir(resolve(target, ".."), { recursive: true });
       await writeFile(target, content, "utf8");

@@ -3,7 +3,7 @@ import type { GitCommitChangesReadModel, GitCommitDiffReadModel, GitLogListReadM
 import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { FileRowMenu, type FileMenuAction, type FileMenuController, type FileMenuTarget } from "../menus";
-import { setHubIntent } from "../AgentHub";
+import { setHubIntent } from "../pageIntents";
 import { GitCommitGraph } from "../git/GitCommitGraph";
 import { GitDiffResizer, useGitDiffHeight } from "../git/GitDiffResizer";
 import { GitMoreActionsMenu } from "../git/GitMoreActionsMenu";

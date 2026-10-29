@@ -96,6 +96,7 @@ export interface DesktopHostFactoryOptionsWin32 {
   readonly resolver?: Omit<RuntimeResolverEnvironment, "managedLookup">;
   /** Runtime resolution preference; defaults to `{ kind: "managed" }`. */
   readonly preference?: RuntimePreference;
+  readonly deferredRuntime?: boolean;
   /** Client-visible arch; defaults from the running process. */
   readonly arch?: ArchId;
   /** Runtime start/stop port; absent means the composition stays read-only. */
@@ -121,6 +122,7 @@ export interface DesktopHostFactoryOptionsDarwin {
   readonly resolver?: Omit<RuntimeResolverEnvironment, "managedLookup">;
   /** Runtime resolution preference; defaults to `{ kind: "managed" }`. */
   readonly preference?: RuntimePreference;
+  readonly deferredRuntime?: boolean;
   /** Client-visible arch; defaults from the running process. */
   readonly arch?: ArchId;
   /** Runtime start/stop port; absent means the composition stays read-only. */
@@ -177,6 +179,7 @@ export function createDesktopHostFactory(options: DesktopHostFactoryOptions): De
         ...(options.runtimeSession === undefined ? {} : { runtimeSession: options.runtimeSession }),
         ...(options.resolver === undefined ? {} : { resolver: options.resolver }),
         ...(options.preference === undefined ? {} : { preference: options.preference }),
+        ...(options.deferredRuntime === undefined ? {} : { deferredRuntime: options.deferredRuntime }),
         ...(options.arch === undefined ? {} : { arch: options.arch }),
         ...(options.managedInstall === undefined ? {} : { managedInstall: options.managedInstall }),
         ...(options.facade === undefined ? {} : { facade: options.facade }),
@@ -590,14 +593,7 @@ export function createProductionHostFactory(options?: {
   const github = createDesktopGithubService({ registry, runner: gitProcessRunner, queue: gitWriteQueue });
   let activeComposition: DesktopHostComposition | undefined;
   const workspaceCwd: { current: string | undefined } = { current: undefined };
-  // Selecting a Session that belongs to another project moves the active
-  // workspace inside the Broker (e.g. resuming a background thread from the
-  // palette). Main-process chrome — external editor, file manager, local PTY
-  // cwd — has to follow that, not just the explicit workspace.open path.
-  let detachWorkspaceSink: (() => void) | undefined;
-  detachWorkspaceSink = runtimeSession.attachWorkspaceSink?.((workspace) => {
-    workspaceCwd.current = workspace.cwd;
-  });
+  // Accepted Runtime workspace bindings also move Main's local chrome cwd.
   const innerWorkspaces = createOmpWorkspaceService({
     registry,
     pickDirectory,
@@ -648,12 +644,11 @@ export function createProductionHostFactory(options?: {
     github,
     disposeHostOperations: () => {
       stopPerformance?.(); stopPerformance = undefined;
-      detachWorkspaceSink?.();
-      detachWorkspaceSink = undefined;
       gitProcessRunner.cancelAll();
       git.dispose();
     },
     getWorkspaceCwd: () => workspaceCwd.current,
+    onRuntimeWorkspaceChanged: workspace => { workspaceCwd.current = workspace.cwd; },
     getActiveWorkspace: () => {
       const activeId = registry.activeWorkspaceId;
       if (activeId === undefined) {
@@ -678,6 +673,7 @@ export function createProductionHostFactory(options?: {
       }),
     },
     runtimeSession,
+    deferredRuntime: true,
     managedInstall: productionManagedInstall(hostLog),
     facade,
   };

@@ -22,6 +22,7 @@ Public documentation for OMP Studio.
 | [migrations/omp-18.4.4-gui.md](migrations/omp-18.4.4-gui.md) | Complete GUI scope and local delivery evidence |
 | [development.md](development.md) | Inner loop, tests, overlay |
 | [performance.md](performance.md) | Streaming budgets, local counters, rollback and repeatable benchmarks |
+| [performance-2026-10-29.md](performance-2026-10-29.md) | 启动、整壳性能与包体优化；开源方案对比、实测及覆盖限制 |
 | [architecture.md](architecture.md) | Packages, Bridge, data rules |
 | [releasing.md](releasing.md) | Version, changelog, tag, Windows installer, macOS build |
 | [updates.md](updates.md) | In-app updates on Windows and macOS: storage, trust, recovery |

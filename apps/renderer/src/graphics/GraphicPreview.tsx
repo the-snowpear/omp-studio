@@ -382,7 +382,7 @@ function X3DPreview({
         key={name + source.length}
         ref={frame}
         sandbox="allow-scripts"
-        src={new URL("graphic-preview.html", document.baseURI).href}
+        src={document.location.protocol === "file:" ? "omp-graphics://viewer/graphic-preview.html" : new URL("graphic-preview.html", document.baseURI).href}
         title={zh ? "VRML / X3D 三维预览" : "VRML / X3D preview"}
         className="graphic-x3d"
       />

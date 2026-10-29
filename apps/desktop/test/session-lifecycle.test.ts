@@ -238,7 +238,7 @@ function liveSession(initial: OperatorStateSnapshot = SNAPSHOT): LiveHandle {
         hasMoreBefore: false,
       }),
     } as unknown as StudioRuntimeSessionController,
-    hello: () => HELLO_VIEW,
+    hello: () => ({ ...HELLO_VIEW, runtimeId: handle.snapshot.runtimeId, runtimeEpoch: handle.snapshot.runtimeEpoch }),
     capabilityManifest: () => HELLO.capabilityManifest,
     commandManifest: () => COMMAND_MANIFEST,
     onPublication: () => () => {},

@@ -1,5 +1,7 @@
 # 流式性能维护
 
+启动/整壳订阅、按需加载和资源体积的后续优化见 [2026-10-29 报告](performance-2026-10-29.md)。`scripts/startup-perf.mjs` 单独测完整 App 合成夹具，不代替真实 Runtime 启动数据；性能脚本支持用 `PERF_URL` 连接已启动的生产验证页面。
+
 OMP Studio 的流式管线继续使用 Runtime Bridge、Host conversation 事件、Renderer 有界 Store 和现有 Markdown 扫描器。优化不改变持久 transcript，也不删除 IPC 校验或 Renderer transport 的克隆隔离。
 
 ## 数据路径与所有权

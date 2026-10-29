@@ -25,9 +25,9 @@ export type DesktopRuntimeStatus = "ready" | "read-only";
 /**
  * Host-side composition produced by the injected Host factory.
  *
- * `status` is `"ready"` only when Host and Runtime are fully up; otherwise
- * the shell opens in read-only environment state and every IPC call fails
- * closed. `shutdown()` performs the graceful close sequence: renderer
+ * `status` is `"ready"` only when Host and Runtime are fully up; while
+ * Runtime prepares, the same facade serves Host reads with connecting truth.
+ * `shutdown()` performs the graceful close sequence: renderer
  * client-session close first, then Host shutdown and authority release —
  * it is invoked only on app quit, never on renderer reload.
  */
@@ -37,6 +37,8 @@ export interface DesktopHostComposition {
   /** Renderer-facing transport the IPC layer serves calls from. */
   readonly transport: ClientTransport;
   readonly status: DesktopRuntimeStatus;
+  /** Main-only startup terminal barrier (success or unavailable), for update trials. */
+  whenRuntimeReady?(): Promise<void>;
   /** Re-bind to the same Host session without stopping the Runtime. */
   reload(): Promise<DesktopHostComposition>;
   /**

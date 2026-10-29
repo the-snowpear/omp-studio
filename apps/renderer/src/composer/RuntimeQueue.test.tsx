@@ -1,10 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
 import { I18nProvider } from "../i18n";
 import { RuntimeQueue, queueTakebackSnapshot } from "./RuntimeQueue";
 vi.mock("../hostError",()=>({waitReceipt:async(client:{results:Record<string,unknown>},id:string)=>client.results[id],hostErrorMessage:(error:Error)=>error.message}));
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 function fake(){let seq=0;const results:Record<string,unknown>={};const command=vi.fn(async(kind:string,input:{id?:string})=>{const requestId=String(++seq);results[requestId]={result:kind==="session.queue.list"?{sessionId:"s",total:2,followUpMode:"one-at-a-time",steeringMode:"all",items:[{id:"first",queue:"followUp",state:"pending",text:"same",imageCount:0},{id:"second",queue:"followUp",state:"pending",text:"same",imageCount:0}]}:{removed:false,images:[]}};return {requestId};});return {client:{command,results} as unknown as StudioClient,command};}
 it("sends the selected identity for duplicate text and never restores consumed messages",async()=>{
  const {client,command}=fake();const recover=vi.fn();render(<I18nProvider forcedLanguage="zh"><RuntimeQueue client={client} sessionId="s" available hasDraft={()=>false} onRecover={recover}/></I18nProvider>);
@@ -18,6 +18,40 @@ it("requires an explicit merge decision before removing a message",async()=>{
 });
 it("restores namespaced skill identities without dropping their disambiguation suffix",async()=>{
  const result=await queueTakebackSnapshot({removed:true,text:"Use /skill:plugin/review~2",images:[]});expect(result.text).toBe("Use /skill:plugin/review~2");expect(result.doc.nodes).toContainEqual(expect.objectContaining({type:"chip",chip:expect.objectContaining({kind:"skill",name:"plugin/review~2"})}));
+});
+
+it("does not repeatedly wake an idle empty Runtime, and refreshes when work starts", async () => {
+ vi.useFakeTimers();
+ let seq=0;const results:Record<string,unknown>={};
+ const command=vi.fn(async()=>{const requestId=String(++seq);results[requestId]={result:{sessionId:"s",total:0,items:[],followUpMode:"all",steeringMode:"all"}};return {requestId};});
+ const client={command,results} as unknown as StudioClient;
+ const props={client,sessionId:"s",available:true,hasDraft:()=>false,onRecover:vi.fn()};
+ const view=render(<RuntimeQueue {...props} />);
+ await act(async()=>{});
+ await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
+ expect(command).toHaveBeenCalledOnce();
+ view.rerender(<RuntimeQueue {...props} running />);
+ await act(async()=>{});
+ expect(command).toHaveBeenCalledTimes(2);
+ await act(async()=>{await vi.advanceTimersByTimeAsync(1500);});
+ expect(command).toHaveBeenCalledTimes(3);
+});
+
+it("coalesces demand changes behind an outstanding queue read and ignores its old error", async () => {
+ let reject!: (cause: Error) => void;
+ const blocked = new Promise<unknown>((_resolve, fail) => { reject = fail; });
+ let seq=0;const results:Record<string,unknown>={};
+ const command=vi.fn(async()=>{const requestId=String(++seq);results[requestId]=seq===1?blocked:{result:{sessionId:"s",total:0,items:[],followUpMode:"all",steeringMode:"all"}};return {requestId};});
+ const props={client:{command,results} as unknown as StudioClient,sessionId:"s",available:true,hasDraft:()=>false,onRecover:vi.fn()};
+ const view=render(<RuntimeQueue {...props} />);
+ await act(async()=>{});
+ view.rerender(<RuntimeQueue {...props} running pending={1} />);
+ view.rerender(<RuntimeQueue {...props} running pending={2} />);
+ await act(async()=>{});
+ expect(command).toHaveBeenCalledOnce();
+ await act(async()=>{reject(new Error("stale queue failure"));});
+ expect(command).toHaveBeenCalledTimes(2);
+ expect(screen.queryByText("stale queue failure")).toBeNull();
 });
 
 it("retries recovery acknowledgement without inserting the draft twice",async()=>{

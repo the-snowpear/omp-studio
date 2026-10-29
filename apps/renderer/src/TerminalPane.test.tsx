@@ -1,5 +1,5 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { useLayoutEffect } from "react";
+import { useCallback, useLayoutEffect } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { __resetAppSettingsForTests, updateAppSettings, useAppSettings } from "./settings/appSettings";
 import { applyTypography } from "./settings/typography";
@@ -24,6 +24,24 @@ function Harness({ visible }: { visible: boolean }) {
 }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); mocks.terminals.length = 0; __resetAppSettingsForTests(null); });
+
+it("an explicit create on first mount does not also auto-create a shell", async () => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  const api = {
+    create: vi.fn().mockResolvedValue({ id: "explicit-shell", name: "Shell", cwd: "D:/workspace" }),
+    write: vi.fn().mockResolvedValue(undefined), resize: vi.fn().mockResolvedValue(undefined), dispose: vi.fn().mockResolvedValue(undefined),
+    onData: vi.fn(() => () => {}), onExit: vi.fn(() => () => {}),
+  };
+  vi.stubGlobal("ompStudioTerminal", api);
+  function ExplicitCreate() {
+    const attach = useCallback((handle: import("./TerminalPane").TerminalPaneHandle | null) => { handle?.create(); }, []);
+    return <TerminalSessionsProvider><TerminalPane ref={attach} visible /></TerminalSessionsProvider>;
+  }
+  render(<ExplicitCreate />);
+  await waitFor(() => expect(mocks.terminals).toHaveLength(1));
+  await act(async () => {});
+  expect(api.create).toHaveBeenCalledOnce();
+});
 
 it("fits automatic resize without taking focus away from the composer", async () => {
   const observers: Array<() => void> = [];

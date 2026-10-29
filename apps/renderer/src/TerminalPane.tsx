@@ -46,6 +46,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
   const createSession = useCallback(async () => {
     if (!api || createLock.current || !canCreate) return;
     createLock.current = true;
+    bootstrapped.current = true;
     setCreating(true);
     setError(null);
     try { setActiveId(await store.create(executionTarget.id, workspaceId, sessionId)); }
@@ -121,7 +122,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
                 </span>
               )}
             </div>
-            {executionTarget.id ? <p className="muted small">SSH 终端暂不支持本机录制；关闭标签会结束该终端。</p> : <TerminalRecordingControls key={active.id} api={api} id={active.id} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />}
+            {executionTarget.id ? <p className="muted small">SSH 终端暂不支持本机录制；关闭标签会结束该终端。</p> : <TerminalRecordingControls key={active.id} api={api} id={active.id} visible={visible} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />}
             {error ? <p role="alert" className="muted small">{error}</p> : null}
             {(graphics[active.id]?.length || graphicsErrors[active.id]) ? <div style={{ maxHeight: 240, overflow: "auto" }} aria-label="Terminal images / 终端图片">
               {graphics[active.id]?.map((image, index) => <TerminalGraphicView key={index} image={image} />)}

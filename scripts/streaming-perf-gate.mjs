@@ -107,6 +107,7 @@ async function loadPlaywright() {
 }
 
 async function startServer() {
+  if (process.env.PERF_URL) return { server: { close: async () => {} }, url: process.env.PERF_URL };
   if (production) {
     const { build, preview } = await import("vite");
     const outDir = join(root, "outputs", "perf", "harness-production");

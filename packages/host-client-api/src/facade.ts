@@ -692,6 +692,7 @@ export class StudioHostClientFacade implements ClientTransport {
   /** Bounded (`DEDUPE_KEY_CAPACITY`) FIFO of requestIds whose terminal receipt was already published. */
   readonly #terminalEmitted = new Set<CommandRequestId>();
   #unsubscribePublication: Unsubscribe | undefined;
+  #unsubscribeConnection: Unsubscribe | undefined;
   #unsubscribeConversation: Unsubscribe | undefined;
   #unsubscribeConversationResync: Unsubscribe | undefined;
   #unsubscribeTelemetry: Unsubscribe | undefined;
@@ -708,6 +709,8 @@ export class StudioHostClientFacade implements ClientTransport {
   #lastPublishedVersion: StateVersion | undefined;
   #lastPublishedRuntimeId: RuntimeId | undefined;
   #lastPublishedEpoch: RuntimeEpoch | undefined;
+  /** A connection fence requires replay even when the Runtime version did not advance. */
+  #snapshotReplayRequired = false;
   /** Last GUI `interaction.required` published as `id:generation`. Snapshot recovery must not re-emit the same card. */
   #lastGuiInteractionKey: string | undefined;
   #installInFlight = false;
@@ -739,6 +742,7 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#registry = new CommandRegistry(options.registryCapacity ?? DEFAULT_REGISTRY_CAPACITY);
     this.#bus = new HostEventBus(options.authority.authorityEpoch, () => options.diagnostics.now(), () => this.#eventContext());
     this.#lastEmittedConnection = this.#currentConnection();
+    this.#unsubscribeConnection = options.runtime?.onConnectionChanged?.(() => this.#syncRuntimeEvents());
     const onPublication = options.runtime?.onPublication;
     if (onPublication !== undefined) {
       this.#unsubscribePublication = onPublication((publication) => this.#onPublication(publication));
@@ -1307,6 +1311,8 @@ export class StudioHostClientFacade implements ClientTransport {
       return;
     }
     this.#closed = true;
+    this.#unsubscribeConnection?.();
+    this.#unsubscribeConnection = undefined;
     this.#unsubscribePublication?.();
     this.#unsubscribePublication = undefined;
     this.#unsubscribeConversation?.();
@@ -1448,6 +1454,9 @@ export class StudioHostClientFacade implements ClientTransport {
     }
     const hello = this.#deriveHello();
     if (hello === undefined) {
+      if (runtime.startupState?.() === "connecting") {
+        return { status: "connecting", classification: "unavailable" };
+      }
       const last = this.#lastHello;
       if (last === undefined) {
         return this.#unavailableConnection();
@@ -1536,6 +1545,10 @@ export class StudioHostClientFacade implements ClientTransport {
     if (prev === undefined || connectionEquals(prev, next)) {
       return;
     }
+    if (prev.status !== "connected" || next.status !== "connected") {
+      this.#snapshotReplayRequired = true;
+      this.#lastGuiInteractionKey = undefined;
+    }
     this.#bus.emit({
       kind: "runtime.changed",
       connection: next,
@@ -1599,10 +1612,14 @@ export class StudioHostClientFacade implements ClientTransport {
     // Runtime fence before receiving that Worker's snapshot.
     this.#syncRuntimeEvents();
     const version = snapshot.stateVersion;
+    const currentConnection = this.#lastEmittedConnection;
+    const ready = currentConnection?.status === "connected"
+      && currentConnection.runtimeId === snapshot.runtimeId
+      && currentConnection.runtimeEpoch === snapshot.runtimeEpoch;
     const identityChanged =
       this.#lastPublishedRuntimeId !== snapshot.runtimeId ||
       this.#lastPublishedEpoch !== snapshot.runtimeEpoch;
-    if (identityChanged) {
+    if (ready && identityChanged) {
       const hadIdentity = this.#lastPublishedRuntimeId !== undefined;
       this.#lastPublishedRuntimeId = snapshot.runtimeId;
       this.#lastPublishedEpoch = snapshot.runtimeEpoch;
@@ -1614,8 +1631,11 @@ export class StudioHostClientFacade implements ClientTransport {
       }
     }
     let publishedSnapshot = false;
-    if (this.#lastPublishedVersion === undefined || Number(version) > Number(this.#lastPublishedVersion)) {
+    if (ready && (this.#lastPublishedVersion === undefined
+      || Number(version) > Number(this.#lastPublishedVersion)
+      || (this.#snapshotReplayRequired && version === this.#lastPublishedVersion))) {
       this.#lastPublishedVersion = version;
+      this.#snapshotReplayRequired = false;
       publishedSnapshot = true;
       this.#bus.emit({
         kind: "snapshot",

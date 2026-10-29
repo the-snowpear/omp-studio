@@ -1,6 +1,6 @@
 /** Real Chromium / production-file Electron highlight and Mermaid verification. */
 import { build, createServer } from "vite";
-import { chromium, _electron } from "playwright";
+const { chromium, _electron } = process.env.PLAYWRIGHT_MODULE ? createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE) : await import("playwright");
 import { execFileSync, spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { cpus } from "node:os";
@@ -37,6 +37,12 @@ app.whenReady().then(()=>{const w=new BrowserWindow({width:1440,height:900,show:
     page = await electron.firstWindow();
     Object.assign(identity, await electron.evaluate(({ app }) => ({ electron: app.getVersion(), versions: process.versions })));
   } else {
+    if (process.env.PERF_URL) {
+      browser = await chromium.launch({ headless: true });
+      page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+      identity.chromium = browser.version();
+      await page.goto(process.env.PERF_URL);
+    } else {
     server = await createServer({ root: renderer, configFile: join(renderer, "vite.config.ts"), logLevel: "warn",
       optimizeDeps: { include: ["lowlight", "mermaid"] },
       server: { host: "127.0.0.1", port: 5197, strictPort: false } });
@@ -44,6 +50,7 @@ app.whenReady().then(()=>{const w=new BrowserWindow({width:1440,height:900,show:
     page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     identity.chromium = browser.version();
     await page.goto(`${server.resolvedUrls.local[0]}perf-harness.html`);
+    }
   }
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });

@@ -508,12 +508,16 @@ describe("RENDERER_CSP: no unsafe-eval", () => {
       webRequest: {
         onHeadersReceived(
           listener: (
-            details: { url?: string; responseHeaders?: Record<string, string[]> },
+            details: { url?: string; resourceType?: string; responseHeaders?: Record<string, string[]> },
             callback: (response: { responseHeaders: Record<string, string[]> }) => void,
           ) => void,
         ) {
-          for (const url of ["file:///app/index.html", "http://127.0.0.1:3847/api/stats/models"]) {
-            listener({ url, responseHeaders: { "X-Frame-Options": ["DENY"] } }, (response) => {
+          for (const [url, resourceType] of [
+            ["file:///app/index.html", "mainFrame"],
+            ["http://127.0.0.1:3847/api/stats/models", "subFrame"],
+            ["file:///app/graphic-preview.html", "subFrame"],
+          ] as const) {
+            listener({ url, resourceType, responseHeaders: { "X-Frame-Options": ["DENY"] } }, (response) => {
               captured.push({ url, headers: response.responseHeaders });
             });
           }
@@ -521,8 +525,8 @@ describe("RENDERER_CSP: no unsafe-eval", () => {
       },
     };
     installCspHeaders(session, RENDERER_CSP, (url) => url.startsWith("file:"));
-    assert.equal(captured.length, 2);
-    const [own, framed] = captured;
+    assert.equal(captured.length, 3);
+    const [own, framed, graphics] = captured;
     assert.equal(own?.url, "file:///app/index.html");
     assert.deepEqual(own?.headers["Content-Security-Policy"], [RENDERER_CSP]);
     assert.deepEqual(own?.headers["X-Frame-Options"], ["DENY"], "existing headers kept");
@@ -530,6 +534,7 @@ describe("RENDERER_CSP: no unsafe-eval", () => {
     // renderer policy would apply `frame-ancestors 'none'` and blank the page.
     assert.equal(framed?.url, "http://127.0.0.1:3847/api/stats/models");
     assert.deepEqual(framed?.headers, { "X-Frame-Options": ["DENY"] });
+    assert.deepEqual(graphics?.headers, { "X-Frame-Options": ["DENY"] });
   });
 });
 
@@ -549,7 +554,7 @@ test("rendererCspFor keeps packaged CSP strict and permits Vite refresh only in 
   // `'self'` keeps the same-origin graphic-preview frame: any source listed in
   // `frame-src` replaces the `default-src` fallback, so omitting it would blank
   // the X3D preview as well as the dashboard.
-  assert.equal(frameSrc, "frame-src 'self' http://127.0.0.1:3847");
+  assert.equal(frameSrc, "frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847");
   assert.equal(packaged.includes("127.0.0.1:*"), false, "no wildcard loopback port");
   const dev = rendererCspFor({ kind: "url", url: "http://127.0.0.1:5173" });
   assert.match(dev, /script-src 'self' 'unsafe-inline'/u);

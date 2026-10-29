@@ -5,7 +5,8 @@ import { graphicFormat } from "../graphics/graphic-types";
 import { PREVIEW_GRAPHICS } from "../preview/mediaPreview";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OpenAnnotationArtifact } from "../annotations/Annotations";
-import { RecordingPlayer } from "../recordings/RecordingPlayer";
+import { DeferredPanel, lazyPanel } from "../DeferredPanel";
+const RecordingPlayer = lazyPanel(() => import("../recordings/RecordingPlayer").then(module => ({ default: module.RecordingPlayer })));
 import { PREVIEW_RECORDING } from "../preview/recordingsPreview";
 import type {
   ArtifactKind,
@@ -21,9 +22,8 @@ import { SettingRow, SettingSection } from "../settings/SettingRow";
 import { Icon } from "../icons";
 import "./media.css";
 
-export function artifactUrl(artifactId: string): string {
-  return `omp-artifact://library/${encodeURIComponent(artifactId)}`;
-}
+import { artifactUrl } from "./artifactUrl";
+export { artifactUrl } from "./artifactUrl";
 function bytesLabel(bytes: number): string {
   return bytes < 1024 * 1024
     ? `${(bytes / 1024).toFixed(1)} KiB`
@@ -393,12 +393,12 @@ export function ArtifactLibraryPane({
                   : { src: artifactUrl(selected.artifactId) })}
               />
             ) : selected.kind === "recording" ? (
-              <RecordingPlayer
+              <DeferredPanel><RecordingPlayer
                 key={selected.artifactId}
                 {...(preview
                   ? { demoText: PREVIEW_RECORDING }
                   : { artifactId: selected.artifactId })}
-              />
+              /></DeferredPanel>
             ) : selected.kind === "image" ? (
               <img
                 src={

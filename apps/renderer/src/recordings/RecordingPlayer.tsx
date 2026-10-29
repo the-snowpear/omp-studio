@@ -17,9 +17,11 @@ import "./recordings.css";
 export function RecordingPlayer({
   artifactId,
   demoText,
+  visible = true,
 }: {
   artifactId?: string | undefined;
   demoText?: string | undefined;
+  visible?: boolean;
 }) {
   const { resolvedLanguage } = useI18n();
   const { settings } = useAppSettings();
@@ -42,6 +44,9 @@ export function RecordingPlayer({
   const screenDirty = useRef(false);
   const fileGeneration = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  useEffect(() => { if (!visible) setPlaying(false); }, [visible]);
   useEffect(() => {
     const generation = ++epoch.current;
     setRecording(undefined);
@@ -161,11 +166,12 @@ export function RecordingPlayer({
     if (terminal) applyTheme(terminal);
   }, [recording, settings.terminalFontFamily, settings.terminalFontSize]);
   useEffect(() => {
-    if (!recording || !playing || document.hidden) return;
+    if (!recording || !playing || !visible || document.hidden) return;
     let frame = 0;
     const start = performance.now();
     const initial = position;
     const tick = () => {
+      if (!visibleRef.current || document.hidden) return;
       const at = Math.min(
         recording.durationMs,
         initial + (performance.now() - start) * speed,
@@ -176,10 +182,10 @@ export function RecordingPlayer({
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [recording, playing, speed, seek]);
+  }, [recording, playing, speed, seek, visible]);
   useEffect(() => {
     const hide = () => {
-      if (document.hidden) setPlaying(false);
+      if (document.hidden) { paintGeneration.current++; setPlaying(false); }
     };
     document.addEventListener("visibilitychange", hide);
     return () => document.removeEventListener("visibilitychange", hide);
@@ -187,11 +193,11 @@ export function RecordingPlayer({
   const paintGeneration = useRef(0);
   useEffect(() => {
     const terminal = term.current;
-    if (!terminal || !recording) return;
     const generation = ++paintGeneration.current;
+    if (!terminal || !recording || !visible) return;
+    const isCurrent = () => paintGeneration.current === generation && term.current === terminal && visibleRef.current && !document.hidden;
     const paint = async () => {
-      if (paintGeneration.current !== generation || term.current !== terminal)
-        return;
+      if (!isCurrent()) return;
       let changed = false;
       if (position < renderedAt.current || renderedAt.current < 0) {
         terminal.reset();
@@ -218,8 +224,7 @@ export function RecordingPlayer({
         cursor.current < recording.events.length &&
         recording.events[cursor.current]!.at <= position
       ) {
-        if (paintGeneration.current !== generation || term.current !== terminal)
-          return;
+        if (!isCurrent()) return;
         const event = recording.events[cursor.current++]!;
         changed = true;
         renderedAt.current = event.at;
@@ -232,6 +237,7 @@ export function RecordingPlayer({
         if (++work % 200 === 0)
           await new Promise((resolve) => setTimeout(resolve, 0));
       }
+      if (!isCurrent()) return;
       if (
         recording.format === "ompcast" &&
         screen.current &&
@@ -244,12 +250,14 @@ export function RecordingPlayer({
             .map((row) => row + "\x1b[0m\x1b[K")
             .join("\r\n"),
         );
+        if (!isCurrent()) return;
         screenDirty.current = false;
       }
-      renderedAt.current = position;
+      if (isCurrent()) renderedAt.current = position;
     };
     writeTail.current = writeTail.current.then(paint).catch(() => {});
-  }, [recording, position, seek]);
+    return () => { paintGeneration.current++; };
+  }, [recording, position, seek, visible]);
   return (
     <section
       className="recording-player"

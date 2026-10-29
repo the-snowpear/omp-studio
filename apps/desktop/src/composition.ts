@@ -32,6 +32,7 @@ import type {
 
 export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopApplication {
   let host: DesktopHostComposition | null = null;
+  let creatingHost: Promise<DesktopHostComposition> | null = null;
   let mainWindow: DesktopWindow | null = null;
   let tray: DesktopTray | null = null;
   let runtimeStatus: DesktopRuntimeStatus = "read-only";
@@ -91,7 +92,10 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
   });
 
   async function shutdownHost(): Promise<void> {
-    const current = host;
+    let current = host;
+    if (current === null && creatingHost !== null) {
+      try { current = await creatingHost; } catch { return; }
+    }
     host = null;
     if (current === null) return;
     try {
@@ -158,7 +162,7 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
     },
 
     async start(): Promise<void> {
-      if (started) return;
+      if (started || quitting) return;
       started = true;
 
       let hasLock = deps.requestSingleInstanceLock();
@@ -170,6 +174,7 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
           if (delayMs > 0) {
             await new Promise((resolve) => setTimeout(resolve, delayMs));
           }
+          if (quitting) return;
           hasLock = deps.requestSingleInstanceLock();
         }
       }
@@ -180,8 +185,12 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
         return;
       }
 
+      if (quitting) return;
       try {
-        host = await deps.hostFactory.create();
+        creatingHost = deps.hostFactory.create();
+        const created = await creatingHost;
+        if (quitting) return; // shutdownHost owns the late composition.
+        host = created;
         runtimeStatus = host.status;
       } catch (error) {
         // Fail closed: keep the window in read-only environment state.
@@ -189,11 +198,18 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
         log(`host composition failed; opening read-only window: ${String(error)}`);
       }
 
-      mainWindow = await deps.createWindow({
+      if (quitting) return;
+      const createdWindow = await deps.createWindow({
         transport: host?.transport ?? null,
         runtimeStatus,
         isQuitting: () => quitting,
       });
+      if (quitting) {
+        createdWindow.dispose?.();
+        createdWindow.close();
+        return;
+      }
+      mainWindow = createdWindow;
 
       // The tray owns close-to-tray; when it is unavailable the window
       // close keeps the legacy destroy-and-quit behavior.

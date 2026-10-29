@@ -166,6 +166,103 @@ const context = {
 const WORKSPACE_A = { workspaceId: "workspace-a", cwd: "C:/workspace" };
 const WORKSPACE_B = { workspaceId: "workspace-b", cwd: "C:/other" };
 
+function callbackHarness() {
+  const workers: Array<{
+    session: DesktopRuntimeSession;
+    recover: (session: DesktopRuntimeSession | undefined) => void;
+    disconnected: boolean;
+    unavailable: boolean;
+  }> = [];
+  const port = createDesktopRuntimeSessionPort({
+    sessionLeaseStore: new InMemorySessionLeaseStore(),
+    workerPortFactory: ({ resumeSessionId, nextRuntimeEpoch }) => {
+      const sessionId = resumeSessionId ?? `callback-${workers.length + 1}`;
+      const epoch = nextRuntimeEpoch();
+      let sink: ((session: DesktopRuntimeSession | undefined) => void) | undefined;
+      const worker = {
+        disconnected: false,
+        unavailable: false,
+        session: undefined as unknown as DesktopRuntimeSession,
+        recover: (session: DesktopRuntimeSession | undefined) => sink?.(session),
+      };
+      worker.session = callbackSession(sessionId, epoch, () => !worker.disconnected);
+      workers.push(worker);
+      return {
+        async start() {
+          // A factory is allowed to notify before launch admission populated
+          // the residents map. That must not replace the previously bound view.
+          sink?.(worker.session);
+          return worker.session;
+        },
+        async stop() { worker.disconnected = true; sink?.(undefined); },
+        attachSessionSink(listener) { sink = listener; },
+        lastDisconnect: () => worker.disconnected ? { code: "pipe-closed", reason: "Worker disconnected" } : undefined,
+        lastUnavailable: () => worker.unavailable ? { code: "launch-failed", reason: "Worker recovery failed" } : undefined,
+      } satisfies DesktopRuntimeSessionPort;
+    },
+  });
+  return { port, workers };
+}
+
+function callbackSession(sessionId: string, epoch: number, live = () => true, runtimeId = `runtime-${sessionId}`): DesktopRuntimeSession {
+  const current = { ...snapshot(sessionId, epoch), runtimeId: runtimeId as OperatorStateSnapshot["runtimeId"] };
+  return {
+    controller: { publication: () => ({ commitSeq: 1, publishedAt: T0, snapshot: current, terminalOutcomes: [] }) },
+    hello: () => live() ? { runtimeId: current.runtimeId, runtimeEpoch: epoch, classification: "managed" } : undefined,
+    capabilityManifest: () => undefined,
+    commandManifest: () => undefined,
+    onPublication: () => () => undefined,
+  } as unknown as DesktopRuntimeSession;
+}
+
+test("Worker callbacks update only their owner and cannot bind a background or unregistered Session", async () => {
+  const { port, workers } = callbackHarness();
+  const bindings: Array<DesktopRuntimeSession | undefined> = [];
+  port.attachSessionSink?.(session => bindings.push(session));
+  try {
+    await port.start(context);
+    await port.switchSession?.({ kind: "fresh" });
+    assert.deepEqual(bindings, [], "launch return owns initial selection, not early callbacks");
+    const [background, active] = workers;
+    assert.ok(background && active);
+    active.disconnected = true;
+    active.unavailable = true;
+    active.recover(undefined);
+    const disconnect = port.lastDisconnect?.();
+    const unavailable = port.lastUnavailable?.();
+    assert.deepEqual(bindings, [undefined]);
+
+    background.recover(callbackSession("callback-1", 3));
+    background.recover(undefined);
+    assert.deepEqual(bindings, [undefined]);
+    assert.deepEqual(port.lastDisconnect?.(), disconnect);
+    assert.deepEqual(port.lastUnavailable?.(), unavailable);
+    assert.equal(port.listResidents?.().activeSessionId, "callback-2");
+    const selected = await port.switchSession?.({ kind: "resume", sessionId: "callback-1" });
+    assert.equal(selected?.hello()?.runtimeEpoch, 3, "background recovery updates the owning resident");
+
+    const same = selected!;
+    background.recover(same);
+    const changed = callbackSession("callback-1", 4, () => true, "replacement-runtime");
+    background.recover(changed);
+    assert.deepEqual(bindings, [undefined, same, changed]);
+    assert.equal(port.lastUnavailable?.(), undefined);
+    assert.equal(port.lastDisconnect?.(), undefined);
+
+    background.recover(callbackSession("callback-2", 5));
+    assert.equal(bindings.at(-1), undefined, "a different Session identity stays fenced");
+    assert.equal(port.lastUnavailable?.()?.code, "launch-failed");
+    assert.equal(port.listResidents?.().activeSessionId, "callback-1");
+    assert.equal(active.session.hello(), undefined);
+
+    await port.evacuateResident?.("callback-2");
+    const count = bindings.length;
+    active.recover(callbackSession("callback-2", 6));
+    active.recover(undefined);
+    assert.equal(bindings.length, count, "disposed callbacks cannot replace or clear the active view");
+  } finally { await port.stop(); }
+});
+
 test("update restart persists and restores resident sessions with their original workspaces", async () => {
   const profileDirectory = await mkdtemp(join(tmpdir(), "omp-restart-residents-"));
   const first = createHarness(), second = createHarness();

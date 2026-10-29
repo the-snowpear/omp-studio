@@ -48,9 +48,11 @@ export function graphicVendorPlugin(): Plugin {
               ? "text/javascript"
               : ext === "css"
                 ? "text/css"
-                : ext === "png"
-                  ? "image/png"
-                  : "application/octet-stream",
+                : ext === "wasm"
+                  ? "application/wasm"
+                  : ext === "png"
+                    ? "image/png"
+                    : "application/octet-stream",
           );
           createReadStream(target)
             .on("error", () => res.destroy())
@@ -63,10 +65,13 @@ export function graphicVendorPlugin(): Plugin {
     async generateBundle() {
       for (const file of await files(source)) {
         if (!DISTRIBUTABLE.test(file)) continue;
+        const assetPath = relative(source, file).split(sep).join("/");
+        // The viewer imports the minified ESM entry; X_ITE selects matching minified components.
+        if (["x_ite.js", "x_ite.mjs", "x_ite.min.js"].includes(assetPath)) continue;
+        if (assetPath.startsWith("assets/components/") && assetPath.endsWith(".js") && !assetPath.endsWith(".min.js")) continue;
         this.emitFile({
           type: "asset",
-          fileName:
-            "graphics-xite/" + relative(source, file).split(sep).join("/"),
+          fileName: "graphics-xite/" + assetPath,
           source: await readFile(file),
         });
       }

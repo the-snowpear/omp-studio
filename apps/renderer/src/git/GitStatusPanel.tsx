@@ -13,7 +13,6 @@ import type {
   GitOperation,
   GitOperationResult,
   GitRemoteListReadModel,
-  GitRepositoryReadModel,
   GitWorktreeListReadModel,
   StudioClient,
   WorkspaceId,
@@ -30,57 +29,9 @@ import { GitMoreActionsMenu } from "./GitMoreActionsMenu";
 import { GitPanelSplit } from "./GitPanelSplit";
 import { GitTip } from "./GitTip";
 import { readGitGraphLayout, writeGitGraphLayout } from "./gitGraphMemory";
+import { useGitRepository } from "./useGitRepository";
 
-type RepositoryHook = {
-  readonly repository?: GitRepositoryReadModel;
-  readonly loading: boolean;
-  readonly error?: string;
-  readonly refresh: () => Promise<void>;
-};
-
-export function useGitRepository(client: StudioClient, workspaceId?: WorkspaceId): RepositoryHook {
-  const { syncRevision } = useExecutionTarget();
-  const [repository, setRepository] = useState<GitRepositoryReadModel | undefined>();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-  const generation = useRef(0);
-
-  const refresh = useCallback(async () => {
-    const requestGeneration = ++generation.current;
-    if (workspaceId === undefined) {
-      setRepository(undefined);
-      setError(undefined);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const value = await client.query("git.repository.get", { workspaceId });
-      if (requestGeneration !== generation.current) return;
-      setRepository(value);
-      setError(undefined);
-    } catch (cause) {
-      if (requestGeneration !== generation.current) return;
-      setRepository(undefined);
-      setError(hostErrorMessage(cause, "无法读取 Git 仓库状态"));
-    } finally {
-      if (requestGeneration === generation.current) setLoading(false);
-    }
-  }, [client, workspaceId]);
-
-  useEffect(() => {
-    void refresh();
-    const unsubscribe = client.subscribe({ scope: "all" }, (event) => {
-      if (event.kind === "git.repository.changed" && event.repository.workspaceId === workspaceId) void refresh();
-    });
-    return () => {
-      generation.current += 1;
-      unsubscribe();
-    };
-  }, [client, refresh, workspaceId, syncRevision]);
-
-  return { ...(repository === undefined ? {} : { repository }), loading, ...(error === undefined ? {} : { error }), refresh };
-}
+export { useGitRepository } from "./useGitRepository";
 
 function ask(label: string, initial = ""): string | undefined {
   const value = window.prompt(label, initial)?.trim();

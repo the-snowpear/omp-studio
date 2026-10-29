@@ -235,7 +235,7 @@ function bootedState(b: ClientBootstrap = bootstrap()): ClientState {
   return reduceClientState(createInitialClientState(), { type: "bootstrap.set", bootstrap: b, occurredAt: TS });
 }
 
-function issue(state: ClientState, name: "session.create" | "session.resume" | "session.archive" | "runtime.install" | "workspace.open" | "workspace.pick", requestId: CommandRequestId): ClientState {
+function issue(state: ClientState, name: CommandName, requestId: CommandRequestId): ClientState {
   return reduceClientState(state, {
     type: "command.issue",
     requestId,
@@ -622,6 +622,53 @@ test("session.create survives the fresh Runtime epoch change until completion", 
     },
   });
   assert.equal(state.commands[REQ_1]?.status, "completed");
+});
+
+test("runtime.ensure remains Host-owned through connecting, reconnect and force-restart snapshots", () => {
+  let state = bootedState();
+  state = issue(state, "runtime.ensure", REQ_1);
+  state = reduceClientState(state, {
+    type: "event",
+    event: { ...base("11"), kind: "command.accepted", accepted: { commandName: "runtime.ensure", requestId: REQ_1, status: "accepted", acceptedAt: TS } },
+  });
+  for (const [cursor, connection] of [
+    [12, { status: "connecting", classification: "unavailable" }],
+    [13, { status: "disconnected", classification: "managed", runtimeId: "rt-1", runtimeEpoch: 1 }],
+    [14, { status: "connected", classification: "managed", runtimeId: "rt-2", runtimeEpoch: 2 }],
+  ] as Array<[number, RuntimeConnection]>) {
+    state = reduceClientState(state, { type: "event", event: runtimeChanged(cursor, connection) });
+    assert.equal(state.commands[REQ_1]?.status, "accepted");
+  }
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(15, snapshot(1, 3)) });
+  assert.equal(state.commands[REQ_1]?.status, "accepted");
+  state = reduceClientState(state, {
+    type: "event",
+    event: { ...base("16"), kind: "command.receipt", receipt: {
+      commandName: "runtime.ensure", requestId: REQ_1, status: "completed", observedAt: TS,
+      result: { status: "connected", classification: "managed", runtimeId: "rt-2" as RuntimeId, runtimeEpoch: 3 as RuntimeEpoch },
+    } },
+  });
+  assert.equal(state.commands[REQ_1]?.status, "completed");
+});
+
+test("same-version snapshot restores the client slice after deferred connecting fenced its identity", () => {
+  let state = bootedState(bootstrap(4));
+  state = reduceClientState(state, { type: "event", event: runtimeChanged(11, { status: "connecting", classification: "unavailable" }) });
+  assert.equal(state.entities.snapshot, null);
+  state = reduceClientState(state, { type: "event", event: runtimeChanged(12, bootstrap().runtime) });
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(13, snapshot(4, 1)) });
+  assert.equal(state.entities.snapshot?.stateVersion, 4);
+  assert.equal(state.connection.stateVersion, 4);
+});
+
+test("runtime.ensure still becomes unknown on transport or authority loss", () => {
+  const pending = issue(bootedState(), "runtime.ensure", REQ_1);
+  const lost = reduceClientState(pending, { type: "transport.lost", reason: "Host disconnected", occurredAt: TS });
+  assert.equal(lost.commands[REQ_1]?.status, "outcome_unknown");
+  const rebooted = reduceClientState(pending, { type: "bootstrap.set", bootstrap: {
+    ...bootstrap(), authority: { authorityId: "auth-2" as AuthorityId, authorityEpoch: 2 as AuthorityEpoch },
+  }, occurredAt: TS });
+  assert.equal(rebooted.commands[REQ_1]?.status, "outcome_unknown");
 });
 
 test("session.archive survives the Runtime loss it causes until the Host receipt", () => {

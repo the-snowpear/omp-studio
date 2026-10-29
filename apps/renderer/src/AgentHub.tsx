@@ -65,11 +65,10 @@ import {
   type TabPaneRole,
 } from "./pageTransition";
 
-export const HUB_INTENT_KEY = "omp.hubIntent";
+import { HUB_INTENT_KEY, type HubTab } from "./pageIntents";
+export { HUB_INTENT_KEY, setHubIntent, type HubTab, type HubIntentTab } from "./pageIntents";
 const HUB_STATE_KEY = "omp.agentHub.state";
 
-export type HubTab = "overview" | "transcript" | "jobs" | "messages" | "btw";
-export type HubIntentTab = HubTab | "chat";
 export type HubView = "flat" | "tree";
 
 type HubStatus = "running" | "idle" | "parked" | "aborted";
@@ -237,23 +236,6 @@ const CONTRACT = {
 } as const;
 
 type HubIntent = { agentId: string; tab?: HubTab; chat?: boolean };
-
-export function setHubIntent(agentId: string, tab?: HubIntentTab): void {
-  if (!isRealSubagentId(agentId)) return;
-  try {
-    const openChat = tab === "chat";
-    sessionStorage.setItem(
-      HUB_INTENT_KEY,
-      JSON.stringify({
-        agentId,
-        tab: openChat ? null : (tab ?? null),
-        ...(openChat ? { chat: true } : {}),
-      }),
-    );
-  } catch {
-    /* sessionStorage may be blocked; navigation still opens the hub. */
-  }
-}
 
 function parseHubTab(value: unknown): HubTab | undefined {
   if (value === "btw") return value;
