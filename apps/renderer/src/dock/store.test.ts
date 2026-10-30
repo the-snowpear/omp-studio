@@ -7,8 +7,9 @@ class MemoryStorage implements Storage {
   readonly data = new Map<string, string>();
   writes: string[] = [];
   attempts = 0;
-  failures = 0;
   failAll = false;
+  /** Simulates a quota: return true to reject one specific payload. */
+  reject: ((key: string, value: string) => boolean) | undefined;
   get length() { return this.data.size; }
   clear() { this.data.clear(); }
   getItem(key: string) { return this.data.get(key) ?? null; }
@@ -16,10 +17,7 @@ class MemoryStorage implements Storage {
   removeItem(key: string) { this.data.delete(key); }
   setItem(key: string, value: string) {
     this.attempts++;
-    if (this.failAll || this.failures > 0) {
-      if (this.failures > 0) this.failures--;
-      throw Object.assign(new Error("The quota has been exceeded."), { name: "QuotaExceededError" });
-    }
+    if (this.failAll || this.reject?.(key, value)) throw Object.assign(new Error("The quota has been exceeded."), { name: "QuotaExceededError" });
     this.writes.push(key);
     this.data.set(key, value);
   }
@@ -28,9 +26,12 @@ class MemoryStorage implements Storage {
 const a: DockScope = { target: "local", project: "project-a", session: "session-a" };
 const b: DockScope = { ...a, session: "session-b" };
 const c: DockScope = { target: "ssh:work", project: "project-a", session: "session-a" };
+const d: DockScope = { ...a, session: "session-d" };
 const draft: DockScope = { ...a, session: "draft-1", draft: true };
 const layout = (store: DockStore) => store.getSnapshot().layout;
 const openGit = (store: DockStore) => store.dispatch({ type: "open", panel: "git" });
+/** The degraded payload is the only one without the derived `recent` cache. */
+const rejectsRecent = (key: string, value: string) => key === "omp.dock.v1" && !value.includes('"recent":{}');
 
 function setup(): { store: DockStore; storage: MemoryStorage } {
   const storage = new MemoryStorage();
@@ -418,6 +419,15 @@ describe("legacy layout migration", () => {
 });
 
 describe("dock persistence batching", () => {
+  it("keeps a twenty-dispatch burst to a single payload write", () => {
+    const { store, storage } = setup();
+    for (let index = 0; index < 20; index++) store.dispatch({ type: "resize", region: "left", size: 240 + index });
+    expect(storage.writes).toEqual([]);
+    store.flush();
+    expect(storage.writes).toEqual(["omp.dock.v1"]);
+    expect(storage.data.get("omp.dock.v1")).toContain('"width":259');
+  });
+
   it("writes once for a burst of dispatches and reads back after a flush", () => {
     const { store, storage } = setup();
     for (let index = 0; index < 40; index++) store.dispatch({ type: "resize", region: "left", size: 240 + index });
@@ -469,34 +479,128 @@ describe("dock persistence batching", () => {
 });
 
 describe("dock storage failures", () => {
-  it("retries once with a lean payload that keeps the current session", () => {
+  it("a degraded write keeps every other session's layout, preset and default", () => {
     const storage = new MemoryStorage();
     const store = new DockStore(storage);
     store.switchScope(a, false);
+    store.dispatch({ type: "move", panels: ["terminal"], target: { region: "left" } });
+    const savedA = layout(store);
+    store.switchScope(b, false);
+    store.dispatch({ type: "region", region: "right", visible: true });
+    const savedB = layout(store);
+    store.switchScope(c, false);
+    store.dispatch({ type: "card", panel: "files", collapsed: true, height: 320 });
+    const presetId = store.savePreset("Review");
+    store.updatePreferences({ projectDefaults: { [dockProjectKey(a)]: presetId } });
+    const savedC = layout(store);
+    store.switchScope(d, false);
+    store.dispatch({ type: "move", panels: ["files"], target: { region: "bottom" } });
+    const savedD = layout(store);
+    // The full payload no longer fits. Only the derived `recent` cache may go.
     storage.writes = [];
-    store.dispatch({ type: "move", panels: ["git"], target: { region: "left" } });
-    storage.failures = 1;
+    storage.reject = rejectsRecent;
     store.flush();
-    expect(storage.writes).toHaveLength(1);
+    storage.reject = undefined;
+    expect(storage.writes.filter(key => key === "omp.dock.v1")).toHaveLength(1);
     const reload = new DockStore(storage);
-    reload.switchScope(a, false);
-    expect(locatePanel(layout(reload), "git")?.region).toBe("left");
+    for (const [scope, expected] of [[a, savedA], [b, savedB], [c, savedC], [d, savedD]] as const) {
+      reload.switchScope(scope, false);
+      expect(layout(reload)).toEqual(expected);
+    }
+    expect(reload.getSnapshot().presets.find(preset => preset.id === presetId)?.name).toBe("Review");
+    expect(reload.getSnapshot().preferences.projectDefaults).toEqual({ [dockProjectKey(a)]: presetId });
   });
 
-  it("stops retrying after the lean payload also fails, and stays usable", () => {
+  it("writes the full payload again once the quota recovers", () => {
+    const { store, storage } = setup();
+    store.dispatch({ type: "move", panels: ["git"], target: { region: "left" } });
+    storage.reject = rejectsRecent;
+    store.flush();
+    expect(storage.data.get("omp.dock.v1")).toContain('"recent":{}');
+    storage.reject = undefined;
+    store.dispatch({ type: "resize", region: "left", size: 300 });
+    store.flush();
+    expect(storage.data.get("omp.dock.v1")).not.toContain('"recent":{}');
+    expect(storage.data.get("omp.dock.v1")).toContain('"width":300');
+  });
+
+  it("stops writing after the last attempt fails, without throwing", () => {
     const storage = new MemoryStorage();
     const store = new DockStore(storage);
     store.switchScope(a, false);
-    storage.failAll = true;
+    const previous = storage.data.get("omp.dock.v1")!;
     storage.attempts = 0;
+    storage.failAll = true;
     store.dispatch({ type: "resize", region: "left", size: 300 });
-    store.flush();
-    expect(storage.attempts).toBe(2); // full payload, then the lean one
+    expect(() => store.flush()).not.toThrow();
+    expect(storage.attempts).toBe(3); // full payload, recovery snapshot, degraded payload
+    // The last good payload is left untouched instead of being replaced.
+    expect(storage.data.get("omp.dock.v1")).toBe(previous);
     for (let index = 0; index < 5; index++) store.dispatch({ type: "resize", region: "left", size: 300 + index });
     store.flush();
-    expect(storage.attempts).toBe(2); // the session stopped writing after the first failure
+    expect(storage.attempts).toBe(3); // no retries once the session stopped writing
     expect(layout(store).left.width).toBe(304);
     expect(store.getSnapshot().canUndo).toBe(true);
+  });
+
+  it("blocks instead of rewriting when there is no cache left to drop", () => {
+    const storage = new MemoryStorage();
+    const store = new DockStore(storage);
+    const unscoped: DockScope = { target: "local", project: null, session: "unscoped" };
+    store.switchScope(unscoped, false);
+    const previous = storage.data.get("omp.dock.v1")!;
+    expect(previous).toContain('"recent":{}');
+    storage.attempts = 0;
+    storage.failAll = true;
+    store.dispatch({ type: "resize", region: "left", size: 300 });
+    store.flush();
+    // Full payload, then the identical cache-less one: the previous payload survives.
+    expect(storage.attempts).toBe(2);
+    expect(storage.data.get("omp.dock.v1")).toBe(previous);
+    expect(storage.data.has("omp.dock.v1.backup")).toBe(false);
+    expect(layout(store).left.width).toBe(300);
+  });
+
+  it("keeps a one-time snapshot of the last good payload", () => {
+    const { store, storage } = setup();
+    store.dispatch({ type: "move", panels: ["git"], target: { region: "left" } });
+    store.flush();
+    const good = storage.data.get("omp.dock.v1")!;
+    storage.reject = rejectsRecent;
+    store.dispatch({ type: "resize", region: "left", size: 300 });
+    store.flush();
+    expect(storage.data.get("omp.dock.v1.backup")).toBe(good);
+    // A later degradation keeps the existing snapshot instead of overwriting it.
+    store.dispatch({ type: "resize", region: "left", size: 310 });
+    store.flush();
+    expect(storage.data.get("omp.dock.v1.backup")).toBe(good);
+    storage.reject = undefined;
+    store.dispatch({ type: "resize", region: "left", size: 320 });
+    store.flush();
+    expect(storage.data.get("omp.dock.v1.backup")).toBe(good);
+    expect(JSON.parse(storage.data.get("omp.dock.v1")!).version).toBe(1);
+  });
+
+  it("a storage failure around a draft never damages the formal layouts", () => {
+    const { store, storage } = setup();
+    store.dispatch({ type: "move", panels: ["terminal"], target: { region: "left" } });
+    const formal = layout(store);
+    store.beginDraft(draft); // boundary flush of the formal layout
+    const onDisk = storage.data.get("omp.dock.v1");
+    const attempts = storage.attempts;
+    storage.failAll = true;
+    store.dispatch({ type: "card", panel: "terminal", height: 360 });
+    store.flush(); // draft edits are never persisted, so nothing is attempted
+    expect(storage.attempts).toBe(attempts);
+    expect(storage.data.get("omp.dock.v1")).toBe(onDisk);
+    store.adoptDraft(b); // the formal write fails; memory must stay intact
+    expect(storage.data.get("omp.dock.v1")).toBe(onDisk);
+    expect(layout(store).cards.terminal.height).toBe(360);
+    expect(store.getSnapshot().scope).toMatchObject({ ...b, draft: false });
+    expect(store.getSnapshot().canUndo).toBe(true);
+    storage.failAll = false;
+    store.switchScope(a, false);
+    expect(layout(store)).toEqual(formal);
   });
 });
 

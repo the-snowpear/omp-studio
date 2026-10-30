@@ -3,6 +3,8 @@ import { builtInPresets, createDefaultLayout, dockReducer, normalizeLayout } fro
 import { PANEL_IDS, type DockAction, type DockLayout, type DockPreferences, type DockPreset, type DockScope, type DockSnapshot, type PanelId } from "./types";
 
 const STORAGE_KEY = "omp.dock.v1";
+/** One manual-recovery snapshot of the last good payload; never rewritten. */
+const BACKUP_KEY = "omp.dock.v1.backup";
 const LEGACY_PREFIX = "omp.layoutMemory.";
 const HISTORY_LIMIT = 20;
 /** One write per interaction burst; page hide flushes anything still pending. */
@@ -117,7 +119,7 @@ export class DockStore {
   private timer: ReturnType<typeof setTimeout> | undefined;
   /** Lifecycle listeners exist only while a write is pending. */
   private unwatch: (() => void) | undefined;
-  /** Storage refused even the lean payload: this session keeps everything in memory. */
+  /** Storage refused even the degraded payload: this session keeps everything in memory. */
   private blocked = false;
 
   constructor(storage?: Storage | null) {
@@ -210,35 +212,51 @@ export class DockStore {
     this.write();
   }
 
-  private payload(slim: boolean): string {
-    const current = scopeKey(this.scope);
-    const sessions: Record<string, DockLayout> = slim
-      ? Object.fromEntries(this.real.saved.has(current) ? [[current, this.real.saved.get(current)!]] : [])
-      : Object.fromEntries(this.real.saved);
+  /**
+   * The only thing a degraded payload may drop is `recent`: it is a derived
+   * cache of "this project's last layout" that is rebuilt on the next save.
+   * Everything else - every saved session, every preset, the preferences - is
+   * the only copy the user has, so dropping it would be data loss rather than
+   * a smaller save.
+   */
+  private payload(degraded: boolean): string {
     return JSON.stringify({
       version: 1, migrated: true,
       preferences: this.real.preferences,
       presets: this.real.presets.filter(preset => !preset.builtin),
-      sessions,
-      recent: slim ? {} : Object.fromEntries(this.real.recent),
+      sessions: Object.fromEntries(this.real.saved),
+      recent: degraded ? {} : Object.fromEntries(this.real.recent),
     });
+  }
+
+  /** One-time snapshot of the last successfully stored payload, for manual recovery. */
+  private backup(storage: Storage): void {
+    if (storage.getItem(BACKUP_KEY)) return;
+    const previous = storage.getItem(STORAGE_KEY);
+    if (previous) storage.setItem(BACKUP_KEY, previous);
   }
 
   private write = (): void => {
     this.timer = undefined;
     this.unwatch?.(); this.unwatch = undefined;
     if (this.preview || !this.dirty || this.blocked) return;
-    if (!this.storage) { this.dirty = false; return; }
+    const storage = this.storage;
+    if (!storage) { this.dirty = false; return; }
+    const full = this.payload(false);
     try {
-      this.storage.setItem(STORAGE_KEY, this.payload(false));
+      storage.setItem(STORAGE_KEY, full);
       this.dirty = false;
       return;
-    } catch { /* Full or blocked: retry once with the layout that matters now. */ }
+    } catch { /* Full: keep the last good payload, then drop only the cache. */ }
+    const degraded = this.payload(true);
+    // Only a real degradation is worth a recovery snapshot of the previous payload.
+    if (degraded !== full) try { this.backup(storage); } catch { /* Best effort; never blocks the save. */ }
     try {
-      this.storage.setItem(STORAGE_KEY, this.payload(true));
+      storage.setItem(STORAGE_KEY, degraded);
       this.dirty = false;
     } catch {
-      // One degradation per session: keep working in memory, stop retrying.
+      // Never replace the stored layout with a partial one: keep the previous
+      // payload, keep everything in memory, and stop writing for this session.
       this.blocked = true;
     }
   };
