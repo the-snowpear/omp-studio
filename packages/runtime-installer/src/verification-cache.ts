@@ -28,8 +28,7 @@ import { lstat } from "node:fs/promises";
  *   version cannot reuse a record.
  * - A record is only trusted for `maxAgeMs` (default 10 minutes) and the cache
  *   starts empty on every process start, so the first lookup after a restart
- *   always reads the file. `fresh: true` additionally forces a read on
- *   execution boundaries (right before a Runtime process is spawned).
+ *   always reads the file.
  * - Concurrent lookups for the same path/identity share one in-flight read
  *   (single flight).
  * - A failed verification is never recorded: the next caller reads again.
@@ -61,12 +60,11 @@ import { lstat } from "node:fs/promises";
  *    accident - only by deliberately raising this constant, which is a security
  *    decision and has to be reviewed as one.
  * 3. **Process lifetime + explicit `invalidate()`**: the cache starts empty, so
- *    the first lookup after a restart always hashes; `fresh: true` forces a read
- *    at execution boundaries (before a Runtime process is spawned) even inside
- *    the window; and every mutation point (install, activate, rollback,
- *    uninstall, prune) clears the record explicitly, including reads that were
- *    already in flight - evidence that started before an installation boundary
- *    proves nothing about the bytes installed after it.
+ *    the first lookup after a restart always hashes, and every mutation point
+ *    (install, activate, rollback, uninstall, prune) clears the record
+ *    explicitly, including reads that were already in flight - evidence that
+ *    started before an installation boundary proves nothing about the bytes
+ *    installed after it.
  *
  * Removing layer 1 makes a legitimate reinstall or repair reuse stale evidence;
  * removing layer 2 turns "we verify the Runtime" into "we verified it once, at
@@ -128,39 +126,35 @@ export interface StatKeyedVerificationCacheOptions {
   readonly now?: () => number;
 }
 
-export interface StatKeyedVerificationInput<T> {
+export interface StatKeyedVerificationInput {
   /** Absolute path of the file whose bytes were verified. */
   readonly path: string;
   /** What was verified, e.g. `file-checksums-sha256:v1:1.2.3:<digest>`. */
   readonly assertion: string;
   /** Performs the real verification; must throw when it fails. */
-  readonly verify: () => Promise<T>;
-  /** Execution boundary: ignore a recorded verification and read the bytes again. */
-  readonly fresh?: boolean;
+  readonly verify: () => Promise<void>;
 }
 
-export interface StatKeyedVerificationResult<T> {
-  readonly value: T;
-  /** True when the file bytes were not read again. */
-  readonly hit: boolean;
-}
-
-interface RecordedVerification<T> {
+/**
+ * The evidence itself. There is no recorded *value*: the only thing this cache
+ * can answer is "these bytes already passed that assertion", which is what its
+ * single caller (the installer's entrypoint checksum) needs.
+ */
+interface RecordedVerification {
   readonly identity: string;
   readonly assertion: string;
   readonly verifiedAt: number;
   readonly bytes: number;
-  readonly value: T;
 }
 
 interface InFlightVerification {
   readonly promise: Promise<void>;
 }
 
-export class StatKeyedVerificationCache<T> {
+export class StatKeyedVerificationCache {
   readonly #maxAgeMs: number;
   readonly #now: () => number;
-  readonly #recorded = new Map<string, RecordedVerification<T>>();
+  readonly #recorded = new Map<string, RecordedVerification>();
   readonly #inFlight = new Map<string, InFlightVerification>();
   #generation = 0;
   #stats: {
@@ -199,12 +193,23 @@ export class StatKeyedVerificationCache<T> {
     this.#recorded.clear();
   }
 
-  async verify(input: StatKeyedVerificationInput<T>): Promise<StatKeyedVerificationResult<T>> {
+  /** Verify unless recorded evidence still describes these bytes and this assertion. */
+  async verify(input: StatKeyedVerificationInput): Promise<void> {
+    await this.#verify(input, false);
+  }
+
+  /**
+   * `fresh` is internal: it is used only when evidence was invalidated while a
+   * read was in flight. There is deliberately no public "skip the check" knob -
+   * the execution boundary that wants a guaranteed read now reads the bytes
+   * itself (`resolveRuntime`) instead of asking this cache to bypass itself.
+   */
+  async #verify(input: StatKeyedVerificationInput, fresh: boolean): Promise<void> {
     const identity = await readFileStatIdentity(input.path);
     const identityKey = fileStatIdentityKey(identity);
     const recorded = this.#recorded.get(input.path);
     const usable =
-      input.fresh !== true &&
+      !fresh &&
       recorded !== undefined &&
       recorded.assertion === input.assertion &&
       recorded.identity === identityKey &&
@@ -218,7 +223,7 @@ export class StatKeyedVerificationCache<T> {
     if (recorded !== undefined && usable) {
       this.#stats.cacheHits += 1;
       this.#stats.skippedBytes += recorded.bytes;
-      return { value: recorded.value, hit: true };
+      return;
     }
 
     const flightKey = `${input.path}\u0000${identityKey}\u0000${input.assertion}`;
@@ -232,10 +237,10 @@ export class StatKeyedVerificationCache<T> {
       if (joined !== undefined && joined.assertion === input.assertion && joined.identity === identityKey) {
         this.#stats.cacheHits += 1;
         this.#stats.skippedBytes += joined.bytes;
-        return { value: joined.value, hit: true };
+        return;
       }
       // Dropped by an `invalidate()` while the read was running: verify again.
-      return await this.verify({ ...input, fresh: true });
+      return await this.#verify(input, true);
     }
 
     let settleFlight: () => void = () => undefined;
@@ -254,7 +259,7 @@ export class StatKeyedVerificationCache<T> {
     this.#stats.contentHashes += 1;
     this.#stats.hashedBytes += identity.size;
     try {
-      const value = await input.verify();
+      await input.verify();
       // Evidence that started before an invalidation proves nothing about the
       // bytes that are installed now.
       if (this.#generation === generation) {
@@ -263,11 +268,9 @@ export class StatKeyedVerificationCache<T> {
           assertion: input.assertion,
           verifiedAt: this.#now(),
           bytes: identity.size,
-          value,
         });
       }
       settleFlight();
-      return { value, hit: false };
     } catch (error) {
       rejectFlight(error);
       throw error;
