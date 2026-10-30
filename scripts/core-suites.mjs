@@ -58,6 +58,7 @@ export const CORE_RENDERER_SUITES = [
   "src/dock/scrollChain.test.ts",
   "src/App.dockRegion.test.tsx",
   "src/layout/useWorkbenchLayout.test.tsx",
+  "src/terminalSessions.test.tsx",
   "src/usage/usagePolling.test.ts",
   "src/perf/tiers.test.ts",
   "src/App.composerPerf.test.tsx",
