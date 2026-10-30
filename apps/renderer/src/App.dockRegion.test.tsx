@@ -19,6 +19,7 @@ import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
 const clients: StudioClientImpl[] = [];
 afterEach(async () => {
   cleanup();
+  window.dispatchEvent(new Event("pagehide"));
   for (const client of clients.splice(0)) await client.close();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
