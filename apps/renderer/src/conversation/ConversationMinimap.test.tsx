@@ -44,7 +44,7 @@ const ROWS: TimelineRow[] = [
 ];
 
 function mark(itemId: string, type: MinimapMark["type"]): MinimapMark {
-  return { itemId, type, label: type, preview: "", turn: 0 };
+  return { itemId, type, labelKey: `conversation.${type}`, preview: "", turn: 0 };
 }
 
 describe("deriveMinimapMarks", () => {
@@ -86,7 +86,14 @@ describe("deriveMinimapMarks", () => {
   it("marks an in-progress compact divider as compact", () => {
     const marks = deriveMinimapMarks([{ type: "compacting", action: "context-full" }]);
     expect(marks).toEqual([
-      { itemId: "compacting", type: "compact", label: "压缩中", preview: "正在压缩当前上下文", turn: 1 },
+      {
+        itemId: "compacting",
+        type: "compact",
+        labelKey: "conversation.minimapCompacting",
+        preview: "",
+        previewKey: "conversation.minimapCompactingPreview",
+        turn: 1,
+      },
     ]);
   });
 
@@ -299,7 +306,7 @@ describe("ConversationMinimap 组件", () => {
     view.rerender(<Harness rows={[...ROWS]} />);
 
     fireEvent.click(screen.getByRole("button", { name: "筛选事件" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "仅显示错误与关键节点" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "仅显示错误与关键节点" }));
 
     expect(screen.queryByRole("button", { name: "#1 用户消息" })).toBeNull();
     expect(screen.queryByRole("button", { name: "#2 助手回复" })).toBeNull();
@@ -407,5 +414,155 @@ describe("scrollOffsetToCenter", () => {
     };
     const node = { getBoundingClientRect: () => ({ top: 802, height: 79 }) };
     expect(scrollOffsetToCenter(scroller, node)).toBe(2315);
+  });
+});
+
+describe("回归：筛选 / 预览 / 失败分类", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  /** 只在真的换了活跃点时才重写轨道：命中同一圆点不应触发整条轨道的遍历。 */
+  it("活跃点未变时同步不遍历轨道", () => {
+    const view = render(<Harness rows={ROWS} />);
+    injectGeometry(view.container, { scrollHeight: 500, clientHeight: 250, rowHeight: 100 });
+    view.rerender(<Harness rows={[...ROWS]} />);
+    const track = view.container.querySelector<HTMLElement>("#mmTrack")!;
+    const inner = track.querySelectorAll.bind(track);
+    let walks = 0;
+    track.querySelectorAll = ((selector: string) => {
+      if (selector === ".mm-mark") walks += 1;
+      return inner(selector);
+    }) as HTMLElement["querySelectorAll"];
+
+    const scroller = screen.getByTestId("scroller");
+    // 先确认初始同步已经把活跃点写进 DOM（挂载后的 layout effect 已跑过）。
+    act(() => { fireEvent.scroll(scroller); });
+    expect(view.container.querySelector(".mm-mark.active")).not.toBeNull();
+    // 位置没变：再滚两次都不该再遍历整条轨道。
+    walks = 0;
+    act(() => { fireEvent.scroll(scroller); });
+    act(() => { fireEvent.scroll(scroller); });
+    expect(walks).toBe(0);
+  });
+
+  it("筛选切走再切回后活跃圆点仍然高亮", () => {
+    // 圆点集合变化会让 React 重渲染整条轨道，命令式写入的 .active 会被抹掉；
+    // 若不重新应用，属性与 class 会分叉，屏幕上没有任何圆点高亮。
+    const view = render(<Harness rows={ROWS} />);
+    injectGeometry(view.container, { scrollHeight: 500, clientHeight: 250, rowHeight: 100 });
+    view.rerender(<Harness rows={[...ROWS]} />);
+    act(() => { fireEvent.scroll(screen.getByTestId("scroller")); });
+    expect(view.container.querySelector(".mm-mark.active")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "筛选事件" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "仅显示错误与关键节点" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "显示全部节点" }));
+
+    const active = view.container.querySelector(".mm-mark.active");
+    expect(active).not.toBeNull();
+    expect(active?.getAttribute("aria-current")).toBe("true");
+    expect(view.container.querySelectorAll('[aria-current="true"]')).toHaveLength(1);
+  });
+
+  it("键盘从一个圆点移到下一个，预览不会被前一个的隐藏定时器关掉", () => {
+    vi.useFakeTimers();
+    const view = render(<Harness rows={ROWS} />);
+    injectGeometry(view.container, { scrollHeight: 500, clientHeight: 250, rowHeight: 100 });
+    view.rerender(<Harness rows={[...ROWS]} />);
+    const dots = screen.getAllByRole("button", { name: /^#\d+ / });
+
+    act(() => { dots[0]!.focus(); });
+    expect(screen.queryByText(/^#01 /)).not.toBeNull();
+    act(() => { dots[1]!.focus(); });
+    expect(screen.queryByText(/^#02 /)).not.toBeNull();
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(screen.queryByText(/^#02 /)).not.toBeNull();
+  });
+
+  it("会关闭菜单的菜单项把焦点还给筛选按钮", () => {
+    // 焦点留在被卸载的菜单项上会掉到 <body>，下一次 Tab 从页面顶部重来。
+    // 开关项（menuitemcheckbox）故意不关菜单，因此不在本用例范围。
+    const view = render(<Harness rows={ROWS} />);
+    injectGeometry(view.container, { scrollHeight: 500, clientHeight: 250, rowHeight: 100 });
+    view.rerender(<Harness rows={[...ROWS]} />);
+    const filter = screen.getByRole("button", { name: "筛选事件" });
+    stubScrollerScroll();
+    fireEvent.click(filter);
+    // 首项（跳到下一个错误）在没有错误时是禁用的，焦点必须落到第一个可用项。
+    expect(document.activeElement?.getAttribute("role")).toMatch(/^menuitem/);
+    expect((document.activeElement as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("menuitem", { name: "跳到下一个错误" }));
+    expect(document.activeElement).toBe(filter);
+  });
+
+  it("用被中止的工具不再把回合标成错误", () => {
+    // 用户按停止后 `closeTurn` 会清 openTurnItems，没有结果的调用退化为 missing；
+    // 这两者都不是失败，否则「跳到下一个错误」会带着人巡视自己的取消操作。
+    // 中间隔一条用户行：连续 assistant 行会被合成同一个 run。
+    const rows: TimelineRow[] = [
+      {
+        type: "assistant",
+        itemId: "aborted-run",
+        createdAt: "t1",
+        status: "aborted",
+        segments: [{
+          type: "batch",
+          key: "b1",
+          tools: [{ toolCallId: "c1", toolName: "Bash", status: "aborted" }],
+        }],
+      },
+      { type: "user", itemId: "u1", createdAt: "t1.5", text: "继续" },
+      {
+        type: "assistant",
+        itemId: "missing-run",
+        createdAt: "t2",
+        status: "completed",
+        segments: [{
+          type: "batch",
+          key: "b2",
+          tools: [{ toolCallId: "c2", toolName: "Read", status: "missing" }],
+        }],
+      },
+    ];
+    expect(deriveMinimapMarks(rows).map((entry) => entry.type)).toEqual(["bash", "user", "file"]);
+  });
+
+  it("滚轮落在轨道上时滚动对话", () => {
+    const view = render(<Harness rows={ROWS} />);
+    injectGeometry(view.container, { scrollHeight: 1000, clientHeight: 200, rowHeight: 100 });
+    view.rerender(<Harness rows={[...ROWS]} />);
+    const scroller = screen.getByTestId("scroller");
+    let currentTop = 200;
+    Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => currentTop, set: (value: number) => { currentTop = value; } });
+
+    const minimap = view.container.querySelector(".minimap")!;
+    const wheel = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+    act(() => { minimap.dispatchEvent(wheel); });
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(currentTop).toBe(320);
+  });
+});
+
+describe("回归：轨道键盘导航", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("整条轨道只有一个 Tab 停靠点，方向键在圆点间移动", () => {
+    const view = render(<Harness rows={ROWS} />);
+    injectGeometry(view.container, { scrollHeight: 500, clientHeight: 250, rowHeight: 100 });
+    view.rerender(<Harness rows={[...ROWS]} />);
+    const dots = screen.getAllByRole("button", { name: /^#\d+ / });
+    expect(dots.filter((dot) => dot.getAttribute("tabindex") === "0")).toHaveLength(1);
+
+    act(() => { dots[0]!.focus(); });
+    fireEvent.keyDown(dots[0]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(dots[1]);
+    // 移动后停靠点跟着走，Tab 离开再回来落在这里。
+    expect(dots[0]!.getAttribute("tabindex")).toBe("-1");
+    expect(dots[1]!.getAttribute("tabindex")).toBe("0");
+    fireEvent.keyDown(dots[1]!, { key: "Home" });
+    expect(document.activeElement).toBe(dots[0]);
   });
 });

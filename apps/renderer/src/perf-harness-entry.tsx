@@ -1,7 +1,7 @@
 /**
  * 流式渲染性能 harness（`scripts/streaming-perf-gate.mjs` 驱动，不属于产品代码）。
  *
- * 这里挂的是真实的 ConversationPane + ConversationMinimap，共用一个 scroller，喂给它的
+ * 这里挂的是真实的 ConversationPane（自带 ConversationMinimap，共用同一个 scroller），喂给它的
  * 是真实的 ConversationStore 与真实的 runtime 事件序列。jsdom 里的单测只能测到 React
  * 的 commit 时长，看不到 CSS 布局、ResizeObserver、滚动写入与合成 —— 而流式掉帧恰好
  * 出在那一层，所以门禁必须在真 Chromium 里跑。
@@ -19,7 +19,6 @@ import type {
   SessionId,
 } from "@omp-studio/client-contract";
 import { ConversationPane } from "./conversation/ConversationPane";
-import { ConversationMinimap } from "./conversation/ConversationMinimap";
 import { ConversationStore } from "./conversation/conversationStore";
 import type { ConversationSnapshot } from "./conversation/conversationEngine";
 import { renderWorkHarness } from "./render-work-harness";
@@ -617,12 +616,13 @@ function HarnessView() {
   );
   return (
     <div className="app-body" style={{ display: "flex", position: "relative", height: "100vh", overflow: "hidden" }}>
+      {/* minimap 由 ConversationPane 自己渲染，与本 pane 共用同一个 scroller。
+          这里曾再挂一个：两条轨道同时测量同一份 DOM，流式帧里的布局开销被算了两遍。 */}
       <ConversationPane
         {...(snapshot === undefined ? {} : { snapshot })}
         scrollerRef={scrollerRef}
         onLoadOlder={() => undefined}
       />
-      <ConversationMinimap rows={snapshot?.rows ?? []} scrollerRef={scrollerRef} />
     </div>
   );
 }

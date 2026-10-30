@@ -1,15 +1,19 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 import { compactMinimapPreview } from "./compactSummary";
 import { batchSummary, toolKind, type ThinkView } from "./toolMeta";
 import { tailStreaming, timelineStructureToken } from "./conversationViewModel";
@@ -56,20 +60,26 @@ export type MinimapMark = {
   readonly type: MinimapMarkType;
   /** A failed user row is rendered as an error, but remains a user-navigation target. */
   readonly navigationTypes?: readonly MinimapMarkType[];
-  readonly label: string;
+  /** i18n key instead of literal copy: marks are cached across renders and
+   *  locale switches, so the label must be translated at paint time. */
+  readonly labelKey: string;
   readonly preview: string;
+  /** Fixed UI sentence for previews that are not user content. */
+  readonly previewKey?: string;
+  /** `preview` is an error message that needs the localized "send failed" prefix. */
+  readonly previewError?: boolean;
   readonly turn: number;
 };
 
-const MARK_LABEL: Record<MinimapMarkType, string> = {
-  user: "用户消息",
-  assistant: "助手回复",
-  error: "错误",
-  bash: "命令执行",
-  file: "文件操作",
-  thinking: "思考",
-  compact: "历史压缩",
-  checkpoint: "检查点",
+const MARK_LABEL_KEY: Record<MinimapMarkType, string> = {
+  user: "conversation.minimapUser",
+  assistant: "conversation.minimapAssistant",
+  error: "conversation.minimapError",
+  bash: "conversation.minimapBash",
+  file: "conversation.minimapFile",
+  thinking: "conversation.minimapThinking",
+  compact: "conversation.minimapCompact",
+  checkpoint: "conversation.minimapCheckpoint",
 };
 
 /** 折叠与「仅关键节点」筛选时优先保留的类型。 */
@@ -92,7 +102,13 @@ function assistantMarkType(rows: readonly Extract<TimelineRow, { type: "assistan
       if (segment.type === "thinking") hasThinking = true;
       else if (segment.type === "batch") {
         for (const tool of segment.tools) {
-          if (tool.status === "failed" || tool.status === "aborted" || tool.status === "missing") return "error";
+          /* Only a real failure paints the turn red. `aborted` is the user
+             pressing stop, and `missing` is what a call left without a result
+             becomes when that stop lands mid-tool (`closeTurn` clears
+             `openTurnItems`, so `toolViews` degrades to "missing"); flagging
+             either turns 跳到下一个错误 into a tour of the user's own
+             cancellations. The tool still contributes its kind below. */
+          if (tool.status === "failed") return "error";
           const kind = toolKind(tool);
           if (kind === "bash") hasBash = true;
           else if (kind === "read" || kind === "write" || kind === "edit" || kind === "ast_edit") hasFile = true;
@@ -142,32 +158,41 @@ function buildMark(row: TimelineRow, turn: number): MinimapMark {
       itemId: row.itemId,
       type: failed ? "error" : "user",
       ...(failed ? { navigationTypes: ["user", "error"] as const } : {}),
-      label: failed ? MARK_LABEL.error : MARK_LABEL.user,
-      preview: row.error ? `发送失败：${row.error}` : row.text.trim(),
+      labelKey: failed ? MARK_LABEL_KEY.error : MARK_LABEL_KEY.user,
+      preview: row.error ?? row.text.trim(),
+      ...(row.error === undefined ? {} : { previewError: true as const }),
       turn,
     };
   }
   if (row.type === "assistant") {
     const type = assistantMarkType([row]);
-    return { itemId: row.itemId, type, label: MARK_LABEL[type], preview: assistantPreview(row.segments), turn };
+    return { itemId: row.itemId, type, labelKey: MARK_LABEL_KEY[type], preview: assistantPreview(row.segments), turn };
   }
   if (row.type === "compaction") {
     return {
       itemId: row.item.itemId,
       type: "compact",
-      label: MARK_LABEL.compact,
+      labelKey: MARK_LABEL_KEY.compact,
       preview: compactMinimapPreview(row.item),
       turn,
     };
   }
   if (row.type === "compacting") {
-    return { itemId: "compacting", type: "compact", label: "压缩中", preview: "正在压缩当前上下文", turn };
+    return {
+      itemId: "compacting",
+      type: "compact",
+      labelKey: "conversation.minimapCompacting",
+      preview: "",
+      previewKey: "conversation.minimapCompactingPreview",
+      turn,
+    };
   }
   return {
     itemId: row.item.itemId,
     type: "checkpoint",
-    label: MARK_LABEL.checkpoint,
-    preview: "会话在此处重置，更早的消息仍可通过会话归档查看。",
+    labelKey: MARK_LABEL_KEY.checkpoint,
+    preview: "",
+    previewKey: "conversation.minimapCheckpointPreview",
     turn,
   };
 }
@@ -197,7 +222,7 @@ function markForAssistantRun(
   const mark: MinimapMark = {
     itemId: first.itemId,
     type,
-    label: MARK_LABEL[type],
+    labelKey: MARK_LABEL_KEY[type],
     preview: assistantPreview(segments),
     turn,
   };
@@ -316,6 +341,47 @@ export function pickNextMark(
   return null;
 }
 
+/** 跳转后等目标行被虚拟列表挂载的最长时间。平滑滚动通常几百毫秒内到点到行。 */
+const JUMP_FLASH_TIMEOUT_MS = 1_500;
+
+/**
+ * 等 `itemId` 对应的行出现在 scroller 里，出现后高亮。
+ *
+ * 返回取消函数；组件里的 ref 同时只保留一个（新跳转覆盖旧等待）。没有
+ * MutationObserver 的环境退化为一次 rAF 复查。
+ */
+function watchForMountedRow(scroller: HTMLElement, itemId: string, flash: (node: HTMLElement) => void): () => void {
+  const selector = `[data-item-id="${cssEscape(itemId)}"]`;
+  const flashIfMounted = (): boolean => {
+    const node = scroller.querySelector<HTMLElement>(selector);
+    if (node === null) return false;
+    flash(node);
+    return true;
+  };
+  if (flashIfMounted()) return () => undefined;
+  let observer: MutationObserver | null = null;
+  let timer: number | null = null;
+  let frame = 0;
+  const stop = () => {
+    observer?.disconnect();
+    observer = null;
+    if (timer !== null) { window.clearTimeout(timer); timer = null; }
+    if (frame !== 0 && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
+    frame = 0;
+  };
+  timer = window.setTimeout(stop, JUMP_FLASH_TIMEOUT_MS);
+  if (typeof MutationObserver === "function") {
+    observer = new MutationObserver(() => {
+      if (flashIfMounted()) stop();
+    });
+    observer.observe(scroller, { childList: true, subtree: true });
+  } else if (typeof requestAnimationFrame === "function") {
+    /* 一行代码路径：无 MutationObserver 时退化为下一帧复查一次。 */
+    frame = requestAnimationFrame(() => { if (flashIfMounted()) stop(); });
+  }
+  return stop;
+}
+
 function flashRow(node: HTMLElement): void {
   node.classList.remove("mm-flash");
   void node.offsetWidth;
@@ -398,14 +464,24 @@ export function ConversationMinimap({
   const filterButtonRef = useRef<HTMLButtonElement | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const hideTimerRef = useRef<number | null>(null);
-  const jumpFrameRef = useRef<number | null>(null);
+  /** 跳转后等待目标行挂载的取消函数（虚拟列表只挂载窗口内的行）。 */
+  const jumpWatchRef = useRef<(() => void) | null>(null);
   /** 拖动进行中：滚动事件里的强制重测被降级（见 onScroll），拖动结束补一次。 */
   const draggingRef = useRef(false);
 
+  const { t } = useI18n();
   const [fractions, setFractions] = useState<MarkFractions>({});
   const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [keyOnly, setKeyOnly] = useState(false);
+  /**
+   * Roving tabindex：整条轨道只占一个 Tab 停靠点。
+   *
+   * 圆点都是 <button>，长会话里可达几十个；逐个停靠会让键盘用户按下 Tab 后
+   * 被卡在轨道里。轨道内用 ↑/↓（或 Home/End）在圆点间移动，Tab 直接离开轨道。
+   * `-1` 表示还没进过轨道，此时第一个圆点承担停靠点。
+   */
+  const [focusIndex, setFocusIndex] = useState(-1);
 
   const prevMarksRef = useRef<readonly MinimapMark[]>([]);
   /**
@@ -434,47 +510,68 @@ export function ConversationMinimap({
   }, [structureToken]);
   const marks = derived.marks;
   prevMarksRef.current = marks;
+  /* Refs mirror committed state, never a render that may be thrown away: React
+     19 can abandon a render, and an imperative `measureNow`/`syncActiveMark`
+     reading `marksRef` would then measure a dot set that never reached the DOM
+     (stale anchors, an active id with no element). Same for `busy`. */
   const marksRef = useRef(marks);
-  marksRef.current = marks;
+  const fractionsRef = useRef(fractions);
   /** 回调要保持同一身份（RO / scroll 监听都按它建），所以忙碌标记走 ref 而不是闭包。 */
   const busyRef = useRef(false);
-  busyRef.current = busy ?? tailStreaming(rows);
-
-  const fractionsRef = useRef(fractions);
-  fractionsRef.current = fractions;
+  useLayoutEffect(() => {
+    marksRef.current = marks;
+    fractionsRef.current = fractions;
+    busyRef.current = busy ?? tailStreaming(rows);
+  });
 
   /**
    * 视口指示条：两次读 + 两次写。写之前先比对缓存值，相同则跳过——每个 setAttribute
    * / style 写入都是一轮样式失效，流式跟随期间 60Hz 全量写会让每帧凭空多出 2-3 轮
    * RecalcStyle（实测峰值 310 次/秒的主因之一）。
+   *
+   * 缓存量按数值保存（不是格式化后的字符串）：只有真的要写时才拼 `px` / 整数字符串，
+   * 命中缓存时不再为每个指标分配字符串。
    */
-  const viewportWriteRef = useRef({ max: "", now: "", display: "", height: "", top: "" });
+  const viewportWriteRef = useRef({ max: -1, now: -1, hidden: false, height: -1, top: -1 });
   const syncViewport = useCallback(() => {
     const scroller = scrollerRef.current;
     const viewport = viewportRef.current;
     const track = trackRef.current;
     if (!scroller || !viewport || !track) return;
     const cache = viewportWriteRef.current;
-    const write = (key: "max" | "now" | "display" | "height" | "top", apply: () => void, value: string) => {
-      if (cache[key] === value) return;
-      cache[key] = value;
-      apply();
-    };
     const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     const range = Math.max(0, track.clientHeight - TOOLS_RESERVE_PX);
-    write("max", () => viewport.setAttribute("aria-valuemax", cache.max), String(Math.round(maxScroll)));
-    write("now", () => viewport.setAttribute("aria-valuenow", cache.now), String(Math.round(Math.min(maxScroll, Math.max(0, scroller.scrollTop)))));
-    if (maxScroll <= 0) {
-      write("display", () => { viewport.style.display = "none"; }, "none");
-      return;
+    const maxValue = Math.round(maxScroll);
+    if (cache.max !== maxValue) {
+      cache.max = maxValue;
+      viewport.setAttribute("aria-valuemax", String(maxValue));
     }
-    write("display", () => { viewport.style.display = ""; }, "");
-    const viewportH = range > 0
+    const nowValue = Math.round(Math.min(maxScroll, Math.max(0, scroller.scrollTop)));
+    if (cache.now !== nowValue) {
+      cache.now = nowValue;
+      viewport.setAttribute("aria-valuenow", String(nowValue));
+    }
+    const hidden = maxScroll <= 0;
+    if (cache.hidden !== hidden) {
+      cache.hidden = hidden;
+      viewport.style.display = hidden ? "none" : "";
+    }
+    if (hidden) return;
+    /* 量化到 0.5px：浮点量每帧都会变，逐位比较等于「每次都写」，反而丢掉缓存的意义。 */
+    const quantize = (value: number): number => Math.round(value * 2) / 2;
+    const viewportH = quantize(range > 0
       ? Math.min(range, Math.max(MIN_VIEWPORT_H, (scroller.clientHeight / scroller.scrollHeight) * range))
-      : MIN_VIEWPORT_H;
+      : MIN_VIEWPORT_H);
     const progress = Math.min(1, Math.max(0, scroller.scrollTop / maxScroll));
-    write("height", () => { viewport.style.height = cache.height; }, `${viewportH}px`);
-    write("top", () => { viewport.style.top = cache.top; }, `${range > viewportH ? progress * (range - viewportH) : 0}px`);
+    const top = quantize(range > viewportH ? progress * (range - viewportH) : 0);
+    if (cache.height !== viewportH) {
+      cache.height = viewportH;
+      viewport.style.height = `${viewportH}px`;
+    }
+    if (cache.top !== top) {
+      cache.top = top;
+      viewport.style.top = `${top}px`;
+    }
   }, [scrollerRef]);
 
   /**
@@ -519,7 +616,13 @@ export function ConversationMinimap({
       }
       return true;
     }
-    const marksKey = `${current.length}:${current[0]!.itemId}:${current[current.length - 1]!.itemId}`;
+    /* 锚点缓存的失效键。
+       只取「长度 + 首 + 尾」会漏掉中间插入/替换：compaction 完成把尾部的
+       compacting 行换成 compaction 行、翻页把中间一段换掉，长度与首尾都可能不变，
+       而缓存里的绝对像素中心已经对错了行。取中位 id 让这类变化也命中；真正的
+       像素变化（卡片展开、字号、宽度）已由 scrollHeight 容差覆盖。 */
+    const middle = current[current.length >> 1]!.itemId;
+    const marksKey = `${current.length}:${current[0]!.itemId}:${middle}:${current[current.length - 1]!.itemId}`;
     const anchorCache = anchorCacheRef.current;
     if (anchorCache.marksKey !== marksKey || Math.abs(anchorCache.scrollHeight - scrollHeight) > 2) {
       anchorCache.centers.clear();
@@ -577,7 +680,12 @@ export function ConversationMinimap({
 
   /**
    * 活跃圆点由内容视口中线决定；只使用 scroll metrics，不逐点读正文 rect。
+   *
+   * 命中同一个圆点时直接返回（O(1)）：滚动事件每帧都调它，流式贴底时绝大多数
+   * 节拍活跃点不变，整条轨道无需遍历。`activeElRef` 记住当前高亮的元素，DOM 被
+   * React 重渲染换掉（筛选、圆点集合变化）时 `isConnected` 失效，走完整路径。
    */
+  const activeElRef = useRef<HTMLElement | null>(null);
   const syncActiveMark = useCallback(() => {
     const scroller = scrollerRef.current;
     const track = trackRef.current;
@@ -588,7 +696,9 @@ export function ConversationMinimap({
       scrollHeight: scroller.scrollHeight,
       scrollerHeight: scroller.clientHeight,
     });
-    applyActiveMark(track, next);
+    const currentEl = activeElRef.current;
+    if (next === activeIdRef.current && currentEl?.isConnected === true && currentEl.classList.contains("active")) return;
+    activeElRef.current = applyActiveMark(track, next);
     activeIdRef.current = next;
   }, [scrollerRef]);
 
@@ -729,16 +839,27 @@ export function ConversationMinimap({
     };
   }, [requestMeasure, syncActiveMark, syncViewport, scrollerRef]);
 
-  useLayoutEffect(() => {
-    syncActiveMark();
-  }, [fractions, syncActiveMark]);
-
   const filtered = useMemo(
     () => (keyOnly ? marks.filter((mark) => KEY_TYPES.includes(mark.type)) : marks),
     [marks, keyOnly],
   );
   const visible = useMemo(() => spaceMinimapMarks(filtered, fractions), [filtered, fractions]);
   const hoveredMark = hoveredItemId === null ? null : visible.find((mark) => mark.itemId === hoveredItemId) ?? null;
+
+  /**
+   * 圆点集合变化后重新落一次活跃点。
+   *
+   * `.active` / `aria-current` 是命令式写在 DOM 上的，而圆点由 React 渲染。普通
+   * 重渲染不会碰它们（className 字符串没变，React 不写 DOM），但被筛掉的圆点会
+   * 连同元素一起卸载、切回来时是全新节点——活跃点恰好被筛掉的那一次，高亮就
+   * 随元素一起没了。`visible` 的每次变化都覆盖这个场景。
+   *
+   * 不挂在「每次提交」上：那会在流式期间每帧多出几次布局读，而这几类重渲染
+   * 本身不会抹掉命令式写入的 class。
+   */
+  useLayoutEffect(() => {
+    syncActiveMark();
+  }, [visible, syncActiveMark]);
 
   const jumpTo = useCallback(
     (itemId: string) => {
@@ -759,33 +880,20 @@ export function ConversationMinimap({
       const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
       const top = Math.max(0, Math.min(maxScroll, fraction * scroller.scrollHeight - scroller.clientHeight / 2));
       scroller.scrollTo({ behavior: "smooth", top });
-      const deadline = now() + 1_000;
-      const flashWhenMounted = () => {
-        const mounted = scroller.querySelector<HTMLElement>(`[data-item-id="${cssEscape(itemId)}"]`);
-        if (mounted) {
-          jumpFrameRef.current = null;
-          flashRow(mounted);
-          return;
-        }
-        if (now() < deadline && typeof requestAnimationFrame === "function") {
-          jumpFrameRef.current = requestAnimationFrame(flashWhenMounted);
-        } else {
-          jumpFrameRef.current = null;
-        }
-      };
-      if (jumpFrameRef.current !== null && typeof cancelAnimationFrame === "function") {
-        cancelAnimationFrame(jumpFrameRef.current);
-      }
-      if (typeof requestAnimationFrame === "function") jumpFrameRef.current = requestAnimationFrame(flashWhenMounted);
+      /* 虚拟列表只挂载窗口内的行：目标行要等平滑滚动把它带进窗口才出现。
+         这里用 MutationObserver 等它出现，而不是每帧 rAF 轮询 querySelector
+         （1 秒 × 60 帧的全子树查询，恰好压在跳转引发的布局最忙的时段）。
+         超时兜底用 setTimeout，挂载后立刻断开。 */
+      jumpWatchRef.current?.();
+      jumpWatchRef.current = watchForMountedRow(scroller, itemId, flashRow);
     },
     [onNavigateStart, scrollerRef],
   );
 
   useEffect(
     () => () => {
-      if (jumpFrameRef.current !== null && typeof cancelAnimationFrame === "function") {
-        cancelAnimationFrame(jumpFrameRef.current);
-      }
+      jumpWatchRef.current?.();
+      jumpWatchRef.current = null;
     },
     [],
   );
@@ -811,7 +919,126 @@ export function ConversationMinimap({
     hideTimerRef.current = window.setTimeout(() => setHoveredItemId(null), PREVIEW_HIDE_DELAY_MS);
   }, [cancelHide]);
 
+  /**
+   * 键盘路径必须和鼠标路径一样先撤销待隐藏定时器。
+   *
+   * `onBlur` 会排一个 250ms 的隐藏；焦点从一个圆点直接移到下一个时，前一个圆点
+   * 的定时器仍在跑，会在新圆点的预览出现后把它关掉。鼠标没事只是因为
+   * `onMouseEnter` 调了 `cancelHide()`。
+   */
+  const showPreview = useCallback((itemId: string) => {
+    cancelHide();
+    setHoveredItemId(itemId);
+  }, [cancelHide]);
+
   useEffect(() => cancelHide, [cancelHide]);
+
+  /* 圆点稳定回调。`MinimapDot` 是 memo 组件，内联箭头函数会让每个点每个节拍
+     都重新渲染；这些回调只依赖 ref 与稳定引用，不需要 `visible`/`fractions`。 */
+  const onMarkClick = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+    jumpTo(event.currentTarget.dataset.markId ?? "");
+  }, [jumpTo]);
+  const onMarkEnter = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+    const itemId = event.currentTarget.dataset.markId;
+    if (itemId !== undefined) showPreview(itemId);
+  }, [showPreview]);
+  const onMarkFocus = useCallback((event: ReactFocusEvent<HTMLButtonElement>) => {
+    const itemId = event.currentTarget.dataset.markId;
+    if (itemId === undefined) return;
+    showPreview(itemId);
+    /* 记下停靠点：离开轨道再回来时焦点回到同一个圆点，而不是始终第一个。 */
+    const track = trackRef.current;
+    const index = track === null ? -1 : Array.from(track.querySelectorAll<HTMLElement>(".mm-mark")).indexOf(event.currentTarget);
+    if (index >= 0) setFocusIndex(index);
+  }, [showPreview]);
+  const onMarkEscape = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Escape") {
+      setHoveredItemId(null);
+      return;
+    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") return;
+    /* 在轨道内移动焦点；与菜单同一套方向键语义。 */
+    const track = trackRef.current;
+    if (track === null) return;
+    const dots = Array.from(track.querySelectorAll<HTMLElement>(".mm-mark"));
+    if (dots.length === 0) return;
+    const index = dots.indexOf(event.currentTarget);
+    const nextIndex = event.key === "Home" ? 0
+      : event.key === "End" ? dots.length - 1
+      : event.key === "ArrowDown" ? Math.min(dots.length - 1, index + 1)
+      : Math.max(0, index - 1);
+    event.preventDefault();
+    dots[nextIndex]?.focus();
+  }, []);
+
+  /* 菜单：两个按钮都必须把焦点还给触发按钮。选完菜单项时菜单卸载，焦点若留在
+     被移除的节点上会掉到 <body>，下一次 Tab 从页面顶部重新开始。Escape 与选择
+     走同一条路径。 */
+  const closeMenu = useCallback(() => {
+    setFilterOpen(false);
+    filterButtonRef.current?.focus();
+  }, []);
+
+  /** 菜单键盘导航：↑/↓ 在可用项之间移动，Escape 关闭并还焦点。 */
+  const onMenuKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMenu();
+      return;
+    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") return;
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)'));
+    if (items.length === 0) return;
+    event.preventDefault();
+    const active = document.activeElement;
+    const index = items.findIndex((item) => item === active);
+    const nextIndex = event.key === "Home" ? 0
+      : event.key === "End" ? items.length - 1
+      : event.key === "ArrowDown" ? (index + 1) % items.length
+      : index <= 0 ? items.length - 1 : index - 1;
+    items[nextIndex]?.focus();
+  }, [closeMenu]);
+
+  /* 打开菜单时把焦点送进第一个**可用**项：`aria-haspopup="menu"` 之后菜单必须以键盘
+     可用，而首项在没有错误时是禁用的——focus() 落在 disabled 按钮上是空操作，
+     焦点会留在触发按钮、方向键却已不再作用于按钮，等于键盘用户进不了菜单。 */
+  useEffect(() => {
+    if (!filterOpen) return;
+    const first = filterWrapRef.current?.querySelector<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)');
+    first?.focus();
+  }, [filterOpen]);
+
+  /**
+   * 滚轮转发给对话。
+   *
+   * `.minimap` 是覆盖在 `.convo-scroll` 之上的定位兄弟（z-index 10），滚轮打在
+   * 36px 轨道上时事件目标是 minimap，而 `.app-body` / `.app-shell` 都是
+   * `overflow: clip`，祖先谁都不会滚——光标停在左侧导航条上就丢失滚动。
+   * 这里把同一段 delta 交给 scroller；`scrollTop` 的写入会像真实滚动一样触发
+   * scroll 事件，视口条 / 活跃点 / 贴底脱离都走既有路径。
+   *
+   * 必须用原生监听器（`passive: false`）：React 的 `onWheel` 在根容器上是
+   * passive 注册的，`preventDefault()` 不生效。Ctrl/⌘ + 滚轮（缩放）与
+   * 横向 delta 放行。
+   */
+  useEffect(() => {
+    const root = rootRef.current;
+    if (root === null) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.deltaY === 0) return;
+      const scroller = scrollerRef.current;
+      if (scroller === null) return;
+      const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      if (maxScroll <= 0) return;
+      event.preventDefault();
+      /* `deltaMode` 1 = lines, 2 = pages。缩放到 CSS px，避免行模式在长会话里只挪几像素。 */
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scroller.clientHeight : 1;
+      scroller.scrollTop = Math.min(maxScroll, Math.max(0, scroller.scrollTop + event.deltaY * unit));
+    };
+    root.addEventListener("wheel", onWheel, { passive: false });
+    return () => root.removeEventListener("wheel", onWheel);
+  }, [scrollerRef]);
 
   useLayoutEffect(() => {
     if (hoveredItemId === null) return;
@@ -985,32 +1212,32 @@ export function ConversationMinimap({
     <div className="minimap" id="minimap" ref={rootRef}>
       <div className="minimap-track" id="mmTrack" ref={trackRef} onPointerDown={onTrackPointerDown}>
         <span className="mm-rail" aria-hidden="true" />
-        {visible.map((mark) => (
-          <button
-            key={mark.itemId}
-            type="button"
-            data-mark-id={mark.itemId}
-            className={`mm-mark ${mark.type}`}
-            style={
-              fractions[mark.itemId] === undefined
-                ? undefined
-                : { top: `calc(${(fractions[mark.itemId]! * 100).toFixed(2)}% - ${(fractions[mark.itemId]! * TOOLS_RESERVE_PX).toFixed(1)}px)` }
-            }
-            aria-label={`#${mark.turn} ${mark.label}`}
-            aria-current={activeIdRef.current === mark.itemId ? "true" : undefined}
-            onClick={() => jumpTo(mark.itemId)}
-            onMouseEnter={() => {
-              cancelHide();
-              setHoveredItemId(mark.itemId);
-            }}
-            onMouseLeave={scheduleHide}
-            onFocus={() => setHoveredItemId(mark.itemId)}
-            onBlur={scheduleHide}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") setHoveredItemId(null);
-            }}
-          />
-        ))}
+        {visible.map((mark, index) => {
+          const fraction = fractions[mark.itemId];
+          return (
+            <MinimapDot
+              key={mark.itemId}
+              itemId={mark.itemId}
+              type={mark.type}
+              label={t("conversation.minimapMarkLabel", { turn: mark.turn, label: t(mark.labelKey) })}
+              {...(fraction === undefined
+                ? {}
+                : { top: `calc(${(fraction * 100).toFixed(2)}% - ${(fraction * TOOLS_RESERVE_PX).toFixed(1)}px)` })}
+              onClick={onMarkClick}
+              onEnter={onMarkEnter}
+              onFocus={onMarkFocus}
+              onLeave={scheduleHide}
+              onEscape={onMarkEscape}
+              /* `focusIndex` 指向旧集合时（筛选后变短）回落到第一项，
+                 否则整条轨道会没有任何 Tab 停靠点。 */
+              tabbable={index === (focusIndex >= 0 && focusIndex < visible.length ? focusIndex : 0)}
+            />
+          );
+        })}
+        {keyOnly && visible.length === 0 && marks.length > 0 ? (
+          /* 筛选后一个圆点都不剩时给出原因：否则轨道是空的，用户只会以为坏了。 */
+          <span className="mm-empty-filter">{t("conversation.minimapNoKeyMarks")}</span>
+        ) : null}
       </div>
       <div
         className="mm-viewport"
@@ -1018,7 +1245,7 @@ export function ConversationMinimap({
         ref={viewportRef}
         role="scrollbar"
         tabIndex={0}
-        aria-label="对话滚动位置"
+        aria-label={t("conversation.minimapScrollPosition")}
         aria-controls="convoScroll"
         aria-orientation="vertical"
         aria-valuemin={0}
@@ -1038,10 +1265,18 @@ export function ConversationMinimap({
           }}
         >
           <div className="mp-no">
-            #{String(hoveredMark.turn).padStart(2, "0")} · {hoveredMark.label}
-            {preview ? <span className="mp-demo">演示</span> : null}
+            #{String(hoveredMark.turn).padStart(2, "0")} · {t(hoveredMark.labelKey)}
+            {preview ? <span className="mp-demo">{t("conversation.minimapDemo")}</span> : null}
           </div>
-          {hoveredMark.preview ? <div className="mp-user">{hoveredMark.preview}</div> : <div className="mp-empty">无预览文本</div>}
+          {hoveredMark.previewKey !== undefined ? (
+            <div className="mp-user">{t(hoveredMark.previewKey)}</div>
+          ) : hoveredMark.previewError === true ? (
+            <div className="mp-user">{t("conversation.minimapSendFailed", { error: hoveredMark.preview })}</div>
+          ) : hoveredMark.preview ? (
+            <div className="mp-user">{hoveredMark.preview}</div>
+          ) : (
+            <div className="mp-empty">{t("conversation.minimapEmptyPreview")}</div>
+          )}
         </div>
       ) : null}
       <div className="minimap-tools">
@@ -1050,8 +1285,8 @@ export function ConversationMinimap({
             ref={filterButtonRef}
             type="button"
             className="icon-btn"
-            data-tip={keyOnly ? "仅关键" : "筛选"}
-            aria-label="筛选事件"
+            data-tip={keyOnly ? t("conversation.minimapKeyOnly") : t("conversation.minimapFilter")}
+            aria-label={t("conversation.minimapFilterEvents")}
             aria-haspopup="menu"
             aria-expanded={filterOpen}
             onClick={() => setFilterOpen((open) => !open)}
@@ -1062,37 +1297,32 @@ export function ConversationMinimap({
             <Icon name="filter" extra="sm" />
           </button>
           {filterOpen ? (
-            <div className="menu mm-menu" role="menu" aria-label="筛选与跳转" onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                setFilterOpen(false);
-                filterButtonRef.current?.focus();
-              }
-            }}>
-              <div className="menu-label">筛选与跳转</div>
+            <div className="menu mm-menu" role="menu" aria-label={t("conversation.minimapMenuLabel")} onKeyDown={onMenuKeyDown}>
+              <div className="menu-label">{t("conversation.minimapMenuLabel")}</div>
               <button type="button" className="menu-item" role="menuitem" disabled={!hasError} onClick={() => {
-                setFilterOpen(false);
+                closeMenu();
                 jumpToNext(["error"]);
               }}>
                 <Icon name="alert" extra="sm" />
-                跳到下一个错误
+                {t("conversation.minimapJumpNextError")}
               </button>
               <button type="button" className="menu-item" role="menuitem" disabled={!hasUser} onClick={() => {
-                setFilterOpen(false);
+                closeMenu();
                 jumpToNext(["user"]);
               }}>
                 <Icon name="message" extra="sm" />
-                跳到下一个用户消息
+                {t("conversation.minimapJumpNextUser")}
               </button>
               <div className="menu-sep" />
               <button
                 type="button"
                 className="menu-item"
-                role="menuitem"
-                aria-pressed={keyOnly}
+                role="menuitemcheckbox"
+                aria-checked={keyOnly}
                 onClick={() => setKeyOnly((only) => !only)}
               >
                 <Icon name={keyOnly ? "eye" : "filter" } extra="sm" />
-                {keyOnly ? "显示全部节点" : "仅显示错误与关键节点"}
+                {keyOnly ? t("conversation.minimapShowAll") : t("conversation.minimapShowKeyOnly")}
               </button>
             </div>
           ) : null}
@@ -1100,8 +1330,8 @@ export function ConversationMinimap({
         <button
           type="button"
           className="icon-btn"
-          data-tip="回到最新"
-          aria-label="回到最新"
+          data-tip={t("conversation.scrollToBottom")}
+          aria-label={t("conversation.scrollToBottom")}
           onClick={() => {
             if (onJumpToLatest) onJumpToLatest();
             else scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
@@ -1113,6 +1343,57 @@ export function ConversationMinimap({
     </div>
   );
 }
+
+type MinimapDotProps = {
+  readonly itemId: string;
+  readonly type: MinimapMarkType;
+  readonly label: string;
+  readonly top?: string;
+  readonly onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  readonly onEnter: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  readonly onFocus: (event: ReactFocusEvent<HTMLButtonElement>) => void;
+  readonly onLeave: () => void;
+  readonly onEscape: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
+  readonly tabbable: boolean;
+};
+
+/**
+ * 单个圆点。memo 让悬停/筛选等父级状态变化跳过整条轨道：
+ * 长会话里 `visible` 最多几十个点，每个点一次 `t()` + style 对象分配，
+ * 每个滚动节拍都重做一遍并不必要——位置只在 `top` 变化时才需要新渲染。
+ *
+ * `aria-current` 故意不写进 JSX：活跃点由 `applyActiveMark` 命令式维护
+ * （class + 属性成对），React 再渲染一次不会把它改回去，两者不会打架。
+ */
+const MinimapDot = memo(function MinimapDot({
+  itemId,
+  type,
+  label,
+  top,
+  onClick,
+  onEnter,
+  onFocus,
+  onLeave,
+  onEscape,
+  tabbable,
+}: MinimapDotProps) {
+  return (
+    <button
+      type="button"
+      data-mark-id={itemId}
+      className={`mm-mark ${type}`}
+      style={top === undefined ? undefined : { top }}
+      aria-label={label}
+      onClick={onClick}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onFocus={onFocus}
+      onBlur={onLeave}
+      onKeyDown={onEscape}
+      tabIndex={tabbable ? 0 : -1}
+    />
+  );
+});
 
 type TrackGeometry = {
   readonly trackHeight: number;
@@ -1152,11 +1433,18 @@ export function activeMarkId(
   return bestId;
 }
 
-function applyActiveMark(track: HTMLElement, activeId: string | null): void {
+/** Applies the active class/attribute pair and returns the newly active element. */
+function applyActiveMark(track: HTMLElement, activeId: string | null): HTMLElement | null {
+  let activeEl: HTMLElement | null = null;
   for (const el of track.querySelectorAll<HTMLElement>(".mm-mark")) {
     const active = el.dataset.markId === activeId;
     el.classList.toggle("active", active);
-    if (active) el.setAttribute("aria-current", "true");
-    else el.removeAttribute("aria-current");
+    if (active) {
+      el.setAttribute("aria-current", "true");
+      activeEl = el;
+    } else {
+      el.removeAttribute("aria-current");
+    }
   }
+  return activeEl;
 }

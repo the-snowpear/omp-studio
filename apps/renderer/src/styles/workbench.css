@@ -2040,7 +2040,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   /* 不设 cursor:pointer：空白区（含视口指示条）不提示可点击，
      只有节点（.mm-mark）是点击手 */
 }
-.minimap-track { position: relative; width: 100%; height: 100%; }
+/* 轨道是拖拽面：显式 `touch-action: none`，否则触摸/笔输入下浏览器先认领纵向
+   平移手势并派发 `pointercancel`，拖动在第一帧就被取消（应用里其它拖拽面
+   .bottom-panel-resizer / 侧栏 resizer 同样这么处理）。 */
+.minimap-track { position: relative; width: 100%; height: 100%; touch-action: none; }
 /* 连接节点的轨道参考线 */
 .mm-rail {
   position: absolute;
@@ -2062,6 +2065,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   border-radius: 2px;
   background: var(--minimap-viewport);
   z-index: 1; /* 在圆点之下、工具按钮之下 */
+  touch-action: none;
 }
 /* 回合节点：灰色圆点（同 omp-web 语义，每轮 user/assistant 一个点） */
 .mm-mark {
@@ -2080,6 +2084,19 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
     border-color var(--dur-fast) var(--ease),
     box-shadow var(--dur-fast) var(--ease);
 }
+/* Pointer target expansion（与 .icon-btn 同一套 WCAG 2.2 SC 2.5.8 处理）：
+   视觉尺寸保持 8px 的圆点/40×3 的横条，命中区域撑到 --tap-min。
+   轨道 36px 宽，水平方向正好铺满；相邻圆点纵向最近约 11px，扩大后的命中区
+   会互相叠一点——相邻圆点本就属于「同一簇」，叠住比点不中好。 */
+.mm-mark::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, var(--tap-min));
+  height: max(100%, var(--tap-min));
+  transform: translate(-50%, -50%);
+}
 .mm-mark:hover { transform: translate(-50%, -50%) scale(1.25); border-color: rgba(128, 128, 128, 0.9); }
 /* 活跃回合（滚动时最接近视口中部） */
 .mm-mark.active {
@@ -2088,19 +2105,31 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--border-strong);
   transform: translate(-50%, -50%) scale(1.12);
 }
-/* 特殊事件（需求：错误 / 审批突出显示），保留彩色点缀；
-   用户消息与 agent 汇总为横条（比轨道略宽，突出回合边界） */
+/* 特殊事件保留彩色点缀；用户消息与 agent 汇总为横条（比轨道略宽，突出回合边界）。
+   类型集合以 ConversationMinimap 的 MinimapMarkType 为准——ver1 遗留的
+   approval / ask / plan 永远不会命中，已删除。 */
 .mm-mark.user { width: 40px; height: 3px; border-radius: 1px; background: rgba(128, 128, 128, 0.5); border-color: rgba(128, 128, 128, 0.85); }
 .mm-mark.assistant { width: 36px; height: 3px; border-radius: 1px; background: var(--purple); border-color: var(--purple); }
 .mm-mark.error { background: var(--red); border-color: var(--red); }
-.mm-mark.approval { background: var(--amber); border-color: var(--amber); }
 .mm-mark.checkpoint { background: var(--accent); border-color: var(--accent); }
-.mm-mark.ask { background: var(--accent); border-color: var(--accent); }
 .mm-mark.compact { background: var(--text-3); border-color: var(--text-3); width: 12px; height: 3px; border-radius: 1px; }
 .mm-mark.file { border-color: var(--green); background: var(--green-soft); }
-.mm-mark.bash, .mm-mark.thinking, .mm-mark.plan { border-color: var(--blue); background: var(--blue-soft); }
+.mm-mark.bash, .mm-mark.thinking { border-color: var(--blue); background: var(--blue-soft); }
+/* 「仅显示关键节点」筛到空轨道时的说明：居中在轨道上半段，不挡工具按钮。 */
+.mm-empty-filter {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  writing-mode: vertical-rl;
+  font-size: calc(10px * var(--text-font-scale));
+  color: var(--text-faint);
+  pointer-events: none;
+  z-index: 1;
+}
 
-/* Minimap hover 预览浮层（向右侧弹出，含回合序号 + 用户消息 + assistant 标题大纲） */
+/* Minimap hover 预览浮层（向右侧弹出，含回合序号 + 预览文本）。
+   ver1 的大纲标题（.mp-heading）在 React 版里没有对应数据源，样式一并移除。 */
 .mm-preview {
   position: absolute;
   left: calc(var(--minimap-w) + 8px);
@@ -2116,11 +2145,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   padding: var(--sp-10);
   font-size: var(--fs-11);
   color: var(--text-2);
-  /* Was pointer-events: none, which silently killed three handlers bound to
-     this element in workbench.js: the mouseenter/mouseleave pair that keeps the
-     panel open while the cursor travels into it, and the click handler on
-     .mp-heading that jumps to an outline entry. The panel could never be
-     entered, so heading navigation was unreachable. */
+  /* 必须可进入：指针从圆点移进浮层时由 mouseenter 取消隐藏定时器，
+     否则 250ms 后预览会在光标仍悬停其上时消失。 */
   pointer-events: auto;
 }
 .mm-preview .mp-no {
@@ -2141,17 +2167,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.mm-preview .mp-heading {
-  padding: 3px 8px;
-  border-radius: var(--r-4);
-  cursor: pointer;
-  color: var(--accent);
-  font-weight: var(--fw-medium);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.mm-preview .mp-heading:hover { background: var(--accent-soft); }
 .mm-preview .mp-empty { color: var(--text-faint); font-style: italic; }
 
 /* 底部工具按钮（筛选 / 回到最新）：在轨道宽度内水平居中——按 left:50% 平移半个

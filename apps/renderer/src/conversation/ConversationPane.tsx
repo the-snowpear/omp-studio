@@ -16,7 +16,7 @@ import {
 import { conversationFollowKey, useConversationScroll } from "./useConversationScroll";
 import { retainConversationWhileRemounting } from "./useConversation";
 import type { ConversationEngine, ConversationSnapshot } from "./conversationEngine";
-import { resetConversation, tailStreaming, type ConversationState, type TimelineRow, withCompactingRow } from "./conversationViewModel";
+import { resetConversation, tagTimelineStructure, tailStreaming, timelineShapeToken, timelineStructureToken, type ConversationState, type TimelineRow, withCompactingRow } from "./conversationViewModel";
 import { isRetryTranscriptNotice } from "./activityStatus";
 import { isTransientStatusNotice } from "./transientStatusNotice";
 import type { SubagentHubTarget } from "./toolMeta";
@@ -143,7 +143,32 @@ export function ConversationPane({
         identityKey: "",
       };
   const showWelcome = Boolean(welcome && (forceWelcome || rows.length === 0) && compacting !== true);
-  const displayRows = withCompactingRow(rows, compacting === true, effectiveSnapshot?.state.compacting?.action);
+  /**
+   * `withCompactingRow` 追加行时返回**新数组**，令牌却只挂在 store 发布的那一个
+   * 数组上，于是 `timelineStructureToken(displayRows)` 退化成数组身份。流式的每一帧
+   * store 都会重新发布 `rows`，拼接结果跟着换身份——压缩中（`compactPending` /
+   * 本地压缩保持）恰好在流式之前，这时 minimap 的 marks 与 `ConvoTranscript` 的
+   * binds 会每帧全量重算，正是结构令牌要避免的开销。
+   *
+   * 修法是把拼接结果按「源令牌 + 追加行本身」重新打标：行内容变化仍沿 source
+   * 令牌前进（不丢失效），而仅因 store 重发布导致的数组换身份不再穿透。
+   * `useMemo` 保证未追加时数组身份原样等于 `rows`，不额外分配。
+   */
+  const displayRows = useMemo(
+    () => withCompactingRow(rows, compacting === true, effectiveSnapshot?.state.compacting?.action),
+    [rows, compacting, effectiveSnapshot?.state.compacting?.action],
+  );
+  const sourceStructureToken = timelineStructureToken(rows);
+  const sourceShapeToken = timelineShapeToken(rows);
+  const compactingAction = effectiveSnapshot?.state.compacting?.action;
+  const appendedTokens = useMemo(
+    () => ({ structure: {}, shape: {} }),
+    // 追加行只由这三个输入决定；源令牌代表它前面的全部内容。
+    [sourceStructureToken, sourceShapeToken, compacting === true, compactingAction],
+  );
+  if (displayRows !== rows) {
+    tagTimelineStructure(displayRows, appendedTokens.structure, appendedTokens.shape);
+  }
   /**
    * 这一帧有没有属于「当前会话」的东西可画。
    *
