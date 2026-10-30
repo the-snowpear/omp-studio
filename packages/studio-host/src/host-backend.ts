@@ -2,7 +2,6 @@ import { join } from "node:path";
 import { RuntimeInstaller, type ActivateOptions, type RuntimeInstallerOptions } from "@omp-studio/runtime-installer";
 import type { RuntimePreference, SessionBinding } from "@omp-studio/studio-protocol";
 import {
-  ExecutableFingerprintCache,
   resolveRuntime,
   type RuntimeResolution,
   type RuntimeResolverEnvironment,
@@ -25,14 +24,6 @@ export interface HostBackendOptions {
 export class HostBackend {
   readonly bindings: ThreadBindingStore;
   readonly installer: RuntimeInstaller;
-  /**
-   * Shared executable fingerprint cache. Two Host entry points resolve the same
-   * Runtime at startup (composition and the update coordinator); sharing one
-   * cache lets the second join the first one's read instead of hashing a
-   * ~170 MB executable again. The identity that gates a spawn is still always
-   * read inside the resolve that spawns.
-   */
-  readonly fingerprints = new ExecutableFingerprintCache();
   readonly #resolver: Omit<RuntimeResolverEnvironment, "managedLookup">;
 
   constructor(options: HostBackendOptions) {
@@ -56,7 +47,9 @@ export class HostBackend {
   async resolve(preference: RuntimePreference): Promise<RuntimeResolution> {
     return resolveRuntime(preference, {
       ...this.#resolver,
-      fingerprints: this.#resolver.fingerprints ?? this.fingerprints,
+      // The installer answers with the signed entrypoint digest, so the resolver
+      // can prove the bytes it is about to execute without trusting the
+      // installer's evidence cache.
       managedLookup: { current: async () => await this.installer.currentManifest() },
     });
   }
@@ -69,7 +62,6 @@ export class HostBackend {
    */
   invalidateRuntimeVerification(): void {
     this.installer.invalidate();
-    this.fingerprints.invalidate();
   }
 
   async install(artifactDirectory: string, options?: Parameters<RuntimeInstaller["install"]>[1]) {

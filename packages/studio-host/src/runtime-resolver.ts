@@ -14,10 +14,6 @@ import type {
   StudioHelloResponse,
 } from "@omp-studio/studio-protocol";
 import { FULL_PARITY_REQUIRED_CAPABILITIES, STUDIO_PROTOCOL_VERSION } from "@omp-studio/studio-protocol";
-import {
-  StatKeyedVerificationCache,
-  type VerificationCacheStats,
-} from "@omp-studio/runtime-installer";
 import { StudioBridgeClient, StudioBridgeHandshakeError, StudioBridgeRequestError } from "./bridge-client.js";
 import {
   createBridgeBootstrap,
@@ -123,6 +119,14 @@ export interface ManagedRuntimeInstallation {
   manifest: RuntimeInstallationManifest;
   /** Absolute path of the installed entrypoint. */
   entrypointPath: string;
+  /**
+   * Raw `sha256` hex of the entrypoint from the signature-covered
+   * `checksums.json`. The resolver compares its own fresh read against this
+   * value before the probe runs, so the execution boundary does not depend on
+   * the installer's evidence cache. Absent means "cannot prove", which fails
+   * closed.
+   */
+  entrypointSha256?: string;
 }
 
 /** Read-only current managed installation lookup (satisfied by RuntimeInstaller#currentManifest). */
@@ -154,12 +158,11 @@ export interface RuntimeResolverEnvironment {
   /** Injectable path checks; defaults to node:fs lstat. */
   pathCheck?: PathCheckPort;
   /**
-   * Executable fingerprint source. Defaults to a cache scoped to this resolve,
-   * which already collapses the two probe-time fingerprints into one read.
-   * `HostBackend` passes a long-lived instance so concurrent resolves share one
-   * in-flight read instead of hashing the same executable twice.
+   * Seam for the execution-boundary read (tests count reads through it).
+   * Production uses `readExecutableDigests`: one streamed pass that yields both
+   * the platform-salted identity and the plain content digest.
    */
-  fingerprints?: ExecutableFingerprintPort;
+  readDigests?: (platform: NodeJS.Platform, absolutePath: string) => Promise<ExecutableDigests>;
   /** Workspace handed to the probe; defaults to os.tmpdir(). */
   workspaceDirectory?: string;
   probeTimeoutMs?: number;
@@ -191,6 +194,8 @@ interface Candidate {
   executablePath: string;
   allowLimited: boolean;
   installationManifest?: RuntimeInstallationManifest;
+  /** Signed entrypoint digest for a managed candidate (see ManagedRuntimeInstallation). */
+  entrypointSha256?: string;
 }
 
 export interface ExecutablePathCheck {
@@ -240,116 +245,67 @@ export async function validateExecutablePath(
 
 /** Opaque executable-content fingerprint. Never contains the original path. */
 export async function fingerprintExecutable(platform: NodeJS.Platform, absolutePath: string): Promise<string> {
-  return (await readExecutableFingerprint(platform, absolutePath)).fingerprint;
-}
-
-interface ExecutableFingerprintRead {
-  /** `sha256:`-prefixed, platform-salted content digest. */
-  readonly fingerprint: string;
-  readonly bytes: number;
+  return (await readExecutableDigests(platform, absolutePath)).identity;
 }
 
 /**
- * One full read of the candidate. The `platform\0` salt is part of the identity
- * algorithm and is frozen: Thread bindings persist these values, so changing
- * it would invalidate every existing binding.
+ * Both digests of one read of the candidate executable.
+ *
+ * The trust chain this has to serve is
+ * `signed metadata -> signed checksums -> executable bytes -> identity -> probe -> spawn`,
+ * and a single pass answers both questions the chain asks:
+ *
+ * - `contentSha256` — raw hex of `sha256(bytes)`. This is the value the
+ *   signature-covered `checksums.json` lists for the entrypoint, so a managed
+ *   Runtime can prove the bytes it is about to execute are the bytes that were
+ *   signed.
+ * - `identity` — `sha256(platform\0 || bytes)`, the opaque value Thread
+ *   bindings persist and the probe fence compares. The `platform\0` salt is
+ *   part of the frozen identity algorithm; changing it would invalidate every
+ *   existing binding, so it is derived here next to the plain digest instead of
+ *   being computed by a second read.
  */
-async function readExecutableFingerprint(
+export interface ExecutableDigests {
+  /** `sha256:`-prefixed, platform-salted identity (frozen algorithm). */
+  readonly identity: string;
+  /** Raw lowercase hex of `sha256(bytes)`, directly comparable to `checksums.json`. */
+  readonly contentSha256: string;
+  readonly bytes: number;
+}
+
+export async function readExecutableDigests(
   platform: NodeJS.Platform,
   absolutePath: string,
-): Promise<ExecutableFingerprintRead> {
-  const hash = createHash("sha256").update(`${platform}\0`);
+): Promise<ExecutableDigests> {
+  const identity = createHash("sha256").update(`${platform}\0`);
+  const content = createHash("sha256");
   let bytes = 0;
   for await (const chunk of createReadStream(absolutePath)) {
     const buffer = chunk as Buffer;
     bytes += buffer.length;
-    hash.update(buffer);
+    identity.update(buffer);
+    content.update(buffer);
   }
-  return { fingerprint: `sha256:${hash.digest("hex")}`, bytes };
+  return { identity: `sha256:${identity.digest("hex")}`, contentSha256: content.digest("hex"), bytes };
 }
 
-export interface ExecutableFingerprintOptions {
-  /**
-   * Execution boundary: read the bytes now instead of answering from a recorded
-   * fingerprint. `resolveRuntime` sets this before the probe spawns the
-   * candidate, so the identity that gates a launch is always measured in the
-   * resolve that launches.
-   */
-  readonly fresh?: boolean;
-}
-
-/** Injectable executable fingerprint source; defaults to `ExecutableFingerprintCache`. */
-export interface ExecutableFingerprintPort {
-  fingerprint(
-    platform: NodeJS.Platform,
-    absolutePath: string,
-    options?: ExecutableFingerprintOptions,
-  ): Promise<string>;
-}
-
-/** How long a non-execution lookup may reuse a recorded fingerprint while the stat identity is unchanged. */
-export const EXECUTABLE_FINGERPRINT_MAX_AGE_MS = 10 * 60_000;
-
-/**
- * Stat-keyed memo for executable fingerprints.
+/*
+ * There used to be an `ExecutableFingerprintCache` here: a stat-keyed memo that
+ * let the post-probe fingerprint reuse the pre-probe read when
+ * size/mtime/inode/device still matched, cutting a resolve from two full reads
+ * of a ~170 MB executable to one.
  *
- * `resolveRuntime` fingerprints the candidate before and after the live probe
- * to prove the file did not change underneath it. Each of those was a full read
- * of a ~170 MB executable. This cache makes the second read reuse the first one
- * when `lstat` still reports the same size/mtime/inode/device, and gives
- * concurrent resolves a single in-flight read (single flight) when they are
- * handed the same instance - `HostBackend` shares one.
- *
- * Reuse rules mirror the installer's verification evidence cache:
- * - stat identity must match (any content-metadata change forces a re-read),
- *   and the re-read result is what gets compared, so a target that changed
- *   during the probe is still rejected;
- * - `fresh: true` always reads (used at the execution boundary);
- * - entries expire after `maxAgeMs` and are cleared by `invalidate()`;
- * - failures are never recorded.
+ * It is gone on purpose. The probe *executes* the candidate, so the bytes on
+ * disk after the probe must be proven equal to the bytes that were approved
+ * before it. A stat comparison cannot prove that: a local writer can rewrite the
+ * file in place (same size, same inode) and restore `mtime` afterwards, and the
+ * memo would hand back the pre-probe fingerprint and declare the file unchanged.
+ * The execution boundary therefore reads the file twice again — once before the
+ * probe, once after — and compares digests, which is the guarantee this fence
+ * exists for. Cheap steady-state queries never come through here; they use the
+ * installer's evidence cache instead, so the ~170 MB read stays off the 30 s
+ * polling path.
  */
-export class ExecutableFingerprintCache implements ExecutableFingerprintPort {
-  readonly #verifications: StatKeyedVerificationCache<string>;
-  readonly #read: (platform: NodeJS.Platform, absolutePath: string) => Promise<ExecutableFingerprintRead>;
-
-  constructor(options: {
-    maxAgeMs?: number;
-    now?: () => number;
-    read?: (platform: NodeJS.Platform, absolutePath: string) => Promise<ExecutableFingerprintRead>;
-  } = {}) {
-    this.#read = options.read ?? readExecutableFingerprint;
-    this.#verifications = new StatKeyedVerificationCache<string>({
-      maxAgeMs: options.maxAgeMs ?? EXECUTABLE_FINGERPRINT_MAX_AGE_MS,
-      ...(options.now === undefined ? {} : { now: options.now }),
-    });
-  }
-
-  async fingerprint(
-    platform: NodeJS.Platform,
-    absolutePath: string,
-    options: ExecutableFingerprintOptions = {},
-  ): Promise<string> {
-    const result = await this.#verifications.verify({
-      path: absolutePath,
-      // Platform and algorithm are part of the identity, so evidence for one is
-      // never reused for the other.
-      assertion: `executable-fingerprint-sha256:v1:${platform}`,
-      verify: async () => (await this.#read(platform, absolutePath)).fingerprint,
-      ...(options.fresh === true ? { fresh: true } : {}),
-    });
-    return result.value;
-  }
-
-  /** Diagnostics: full reads, reused fingerprints and bytes that were not read again. */
-  stats(): VerificationCacheStats {
-    return this.#verifications.stats();
-  }
-
-  /** Drop recorded fingerprints and stop an in-flight read from recording one. */
-  invalidate(): void {
-    this.#verifications.invalidate();
-  }
-}
 
 /**
  * A POSIX PATH symlink (Homebrew, `bun -g`) stands for its real file when that
@@ -419,9 +375,7 @@ export async function resolveRuntime(
   const supportedProtocolVersions = environment.supportedProtocolVersions ?? [STUDIO_PROTOCOL_VERSION];
   const requiredCapabilities = environment.requiredCapabilities ?? FULL_PARITY_REQUIRED_CAPABILITIES;
   const pathCheck = environment.pathCheck ?? nodePathCheckPort;
-  // One fingerprint per resolve instead of two: the post-probe comparison
-  // reuses the pre-probe read only while `lstat` still reports the same file.
-  const fingerprints = environment.fingerprints ?? new ExecutableFingerprintCache();
+  const readDigests = environment.readDigests ?? readExecutableDigests;
 
   const candidate = await resolveCandidate(preference, environment, platform, arch);
   if (candidate.kind === "error") {
@@ -434,14 +388,17 @@ export async function resolveRuntime(
     return rejectedResolution(candidateInfo.source, `executable rejected: ${pathValidation.reason}`);
   }
   const executablePath = pathValidation.absolutePath as string;
-  let executableIdentity: string;
+  // Execution boundary, first half: one read of the bytes answers both questions
+  // the trust chain asks — the identity that gates the spawn (frozen algorithm,
+  // persisted by Thread bindings) and the plain content digest that the signed
+  // checksums cover. Nothing here is reused from an earlier resolve.
+  let boundary: ExecutableDigests;
   try {
-    // Execution boundary: the identity that gates the spawn is always read now,
-    // never carried over from an earlier resolve.
-    executableIdentity = await fingerprints.fingerprint(platform, executablePath, { fresh: true });
+    boundary = await readDigests(platform, executablePath);
   } catch {
     return rejectedResolution(candidateInfo.source, "executable could not be fingerprinted");
   }
+  const executableIdentity = boundary.identity;
 
   if (candidateInfo.source === "managed") {
     const installationManifest = candidateInfo.installationManifest as RuntimeInstallationManifest;
@@ -451,6 +408,20 @@ export async function resolveRuntime(
     }
     if (!overlapsProtocolRange(installationManifest.studioProtocol, supportedProtocolVersions)) {
       return rejectedResolution("managed", "installation protocol range is not supported by this Host");
+    }
+    // Prove the bytes are the ones that were signed before anything executes
+    // them. Without this, a managed Runtime could be swapped on disk and the
+    // installer's evidence cache (metadata-keyed, bounded by a TTL) would be the
+    // only thing standing between the tampered file and the probe.
+    const expectedEntrypoint = candidateInfo.entrypointSha256;
+    if (expectedEntrypoint === undefined) {
+      return rejectedResolution("managed", "signed checksums do not cover the Runtime entrypoint");
+    }
+    if (boundary.contentSha256 !== expectedEntrypoint) {
+      return rejectedResolution(
+        "managed",
+        "installed Runtime entrypoint does not match the signed checksum; reinstall or repair the Runtime",
+      );
     }
   }
 
@@ -478,10 +449,15 @@ export async function resolveRuntime(
     outcome = await environment.probe.probe(probeContext);
   }
   try {
-    // Same resolve: a cached fingerprint is used only when the re-stat during
-    // this lookup still matches the one recorded before the probe; otherwise the
-    // bytes are read again and the comparison below decides.
-    if ((await fingerprints.fingerprint(platform, executablePath)) !== executableIdentity) {
+    // Execution boundary, second half: the probe has just *executed* this file,
+    // so read the bytes again and prove they are the same bytes the boundary
+    // check approved. A stat-only comparison cannot do that — a local writer can
+    // rewrite in place (same size, same inode) and restore `mtime`. For a
+    // managed Runtime the fresh read is also compared against the signed
+    // digest, so "changed to a different but self-consistent file" fails too.
+    const afterProbe = await readDigests(platform, executablePath);
+    const contentStillSigned = candidateInfo.source !== "managed" || afterProbe.contentSha256 === candidateInfo.entrypointSha256;
+    if (afterProbe.identity !== boundary.identity || !contentStillSigned) {
       return rejectedResolution(candidateInfo.source, describeProbeFailure("IDENTITY_MISMATCH"), {
         probeFailure: "IDENTITY_MISMATCH",
       });
@@ -640,6 +616,7 @@ async function resolveCandidate(
         executablePath: installation.entrypointPath,
         allowLimited: false,
         installationManifest: installation.manifest,
+        ...(installation.entrypointSha256 === undefined ? {} : { entrypointSha256: installation.entrypointSha256 }),
       },
     };
   }

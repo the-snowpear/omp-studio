@@ -4,15 +4,21 @@ import { lstat } from "node:fs/promises";
  * Reusable verification evidence.
  *
  * Hashing a 170 MB Runtime executable is the single most expensive thing the
- * Host does per launch, and the same bytes were being hashed three to five
- * times per start: `resolveRuntime` fingerprints before and after the probe,
- * `RuntimeInstaller#currentManifest()` re-checks the entrypoint checksum, and
- * the periodic `usage.get` lookup goes through `currentManifest()` again every
- * 30 s.
+ * Host does per launch. `RuntimeInstaller#currentManifest()` re-checks the
+ * entrypoint checksum on every call, and the periodic `usage.get` lookup goes
+ * through it again every 30 s.
  *
  * This cache records "these exact bytes were verified against this exact
- * assertion" and answers later lookups from cheap `lstat` metadata. It is
- * deliberately conservative:
+ * assertion" and answers later lookups from cheap `lstat` metadata.
+ *
+ * It is **not** used to prove anything at the execution boundary.
+ * `resolveRuntime` reads the bytes itself twice (before and after the probe)
+ * and compares digests, because a metadata comparison cannot see an in-place
+ * rewrite that restored `size`/`mtime`/inode; for a managed Runtime it also
+ * compares that fresh digest against the signature-covered checksum. This
+ * cache keeps the 30 s polling path and repeated status queries off the disk.
+ *
+ * It is deliberately conservative:
  *
  * - The key is `(absolute path, size, mtimeMs, inode, device, assertion)`. Any
  *   change to the file's content metadata drops the record immediately - not

@@ -34,6 +34,16 @@ export interface InstalledRuntimeManifest {
   record: ActiveRuntimeRecord;
   manifest: RuntimeInstallationManifest;
   entrypointPath: string;
+  /**
+   * Raw `sha256` hex of the entrypoint as recorded in the signature-covered
+   * `checksums.json` (the digest the artifact was signed against).
+   *
+   * Callers that are about to *execute* the Runtime use it to compare their own
+   * fresh read of the bytes against the signed value, instead of trusting the
+   * evidence cache in this class. It is optional only so a hand-written
+   * `InstalledRuntimeManifest` in a test fixture stays valid.
+   */
+  entrypointSha256?: string;
 }
 
 export interface ActivateOptions {
@@ -436,6 +446,6 @@ export class RuntimeInstaller {
         await verifyFileChecksums(versionDirectory, { [manifest.entrypoint]: expectedChecksum });
       },
     });
-    return { record, manifest, entrypointPath };
+    return { record, manifest, entrypointPath, entrypointSha256: expectedChecksum };
   }
 }

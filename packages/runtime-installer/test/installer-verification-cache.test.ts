@@ -78,6 +78,22 @@ async function installedRuntime(
   return { installer, entrypoint: join(root, "versions", "v1", "omp.exe") };
 }
 
+test("currentManifest publishes the signed entrypoint digest for the execution boundary", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-evidence-digest-"));
+  try {
+    const content = "signed-bytes";
+    const { installer, entrypoint } = await installedRuntime(temporary, {}, content);
+    const manifest = await installer.currentManifest();
+    assert.ok(manifest);
+    // The digest the resolver compares its own fresh read against, taken from the
+    // signature-covered checksums.json rather than recomputed here.
+    assert.equal(manifest.entrypointSha256, createHash("sha256").update(content).digest("hex"));
+    assert.equal(manifest.entrypointPath, entrypoint);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
 test("repeated currentManifest lookups hash the entrypoint once and report the skipped bytes", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "omp-evidence-reuse-"));
   try {

@@ -36,7 +36,7 @@ export const CORE_NODE_SUITES = [
   "packages/runtime-installer/dist/test/installer.test.js",
   "packages/runtime-installer/dist/test/installer-verification-cache.test.js",
   "packages/runtime-installer/dist/test/update-v2.test.js",
-  "packages/studio-host/dist/test/runtime-fingerprint-cache.test.js",
+  "packages/studio-host/dist/test/runtime-executable-verification.test.js",
 ];
 
 export const CORE_RENDERER_SUITES = [
