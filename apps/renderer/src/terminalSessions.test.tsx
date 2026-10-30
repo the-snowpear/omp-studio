@@ -88,12 +88,15 @@ class FakeMain {
 function fakeScreen() {
   const writes: string[] = [];
   const callbacks: Array<() => void> = [];
+  let disposed = 0;
   const host = {
     term: {
       write: (data: string, callback?: () => void) => {
         writes.push(data);
         if (callback) callbacks.push(callback);
       },
+      // A real xterm has this; releasing a terminal calls it exactly once.
+      dispose: () => { disposed += 1; },
     } as unknown as Terminal,
     fit: { fit: () => {} } as never,
   };
@@ -101,6 +104,9 @@ function fakeScreen() {
     host,
     writes,
     written: () => writes.join(""),
+    get disposed(): number {
+      return disposed;
+    },
     fireCallbacks() {
       for (const callback of callbacks.splice(0)) callback();
     },
@@ -306,13 +312,15 @@ describe("zero-text batches", () => {
 // ---- Exit / dispose / teardown -------------------------------------------
 
 describe("teardown releases the backlog without crediting it", () => {
-  it("an exit while unmounted clears the queue and sends no ACK", async () => {
+  it("a natural exit keeps an unmounted terminal's output for the first attach", async () => {
     const { store, api, id } = await storeWith(null);
     api.emit(id, "queued-but-never-shown");
     api.exit(id);
     await settle();
 
-    expect(store.pending.get(id)).toBeUndefined();
+    // The process ending is not the user closing the tab: the output the user
+    // never saw must survive until the screen exists.
+    expect(store.pending.get(id)?.text).toBe("queued-but-never-shown");
     expect(api.value.ack).not.toHaveBeenCalled();
     expect(store.snapshot().sessions[0]?.status).toBe("ended");
   });
@@ -339,13 +347,15 @@ describe("teardown releases the backlog without crediting it", () => {
     expect(store.pending.get(id)).toBeUndefined();
   });
 
-  it("a chunk that arrives after the exit event is not queued again", async () => {
+  it("a chunk that arrives after the exit event is appended, not dropped", async () => {
     const { store, api, id } = await storeWith(null);
     api.emit(id, "queued");
     api.exit(id);
+    // Main keeps the batcher open for one window after the exit notification
+    // because ConPTY can hand over the shell's last line afterwards.
     api.emit(id, "trailing");
     await settle();
-    expect(store.pending.get(id)).toBeUndefined();
+    expect(store.pending.get(id)?.text).toBe("queuedtrailing");
     expect(api.value.ack).not.toHaveBeenCalled();
   });
 
@@ -369,6 +379,139 @@ describe("teardown releases the backlog without crediting it", () => {
   });
 });
 
+// ---- A natural exit must not destroy output the user never saw ------------
+
+describe("terminal lifecycle: natural exit preserves the backlog", () => {
+  it("replays the whole backlog on the first attach after the exit", async () => {
+    const { store, api, id } = await storeWith(null);
+    api.emit(id, "line 1\r\n");
+    api.emit(id, "line 2\r\n");
+    api.exit(id);
+    const screen = fakeScreen();
+    store.attachHost(id, screen.host);
+    expect(screen.written()).toBe("line 1\r\nline 2\r\n");
+    // The flow-control session is over; replaying is display, not credit.
+    await settle();
+    expect(api.value.ack).not.toHaveBeenCalled();
+    expect(store.pending.get(id)).toBeUndefined();
+  });
+
+  it("keeps output from both sides of the exit in arrival order", async () => {
+    const { store, api, id } = await storeWith(null);
+    api.emit(id, "before-exit ");
+    api.exit(id);
+    api.emit(id, "after-exit");
+    const screen = fakeScreen();
+    store.attachHost(id, screen.host);
+    expect(screen.written()).toBe("before-exit after-exit");
+  });
+
+  it("re-attaching an ended terminal does not replay the output twice", async () => {
+    const { store, api, id } = await storeWith(null);
+    api.emit(id, "once");
+    api.exit(id);
+    const first = fakeScreen();
+    store.attachHost(id, first.host);
+    expect(first.written()).toBe("once");
+    const second = fakeScreen();
+    store.attachHost(id, second.host);
+    expect(second.written()).toBe("");
+  });
+
+  it("writes a mounted terminal's tail into its screen without crediting it", async () => {
+    const { store, api, id } = await storeWith(null);
+    const screen = fakeScreen();
+    store.attachHost(id, screen.host);
+    api.emit(id, "before");
+    screen.fireCallbacks();
+    await settle();
+    expect(api.ackedBytes(id)).toBe(utf8Length("before"));
+    api.exit(id);
+    api.emit(id, "tail");
+    expect(screen.written()).toBe("beforetail");
+    await settle();
+    expect(api.ackedBytes(id)).toBe(utf8Length("before"));
+  });
+
+  it("keeps truncation visible after a natural exit and clears it on close", async () => {
+    const { store, api, id } = await storeWith(null);
+    for (let chunk = 0; chunk < 50; chunk += 1) api.emit(id, "x".repeat(64 * 1024));
+    api.exit(id);
+    const queue = store.pending.get(id);
+    expect(queue?.truncated).toBe(true);
+    expect(queue?.bytes).toBe(PENDING_MAX_BYTES);
+    expect(store.snapshot().notices[id]).toMatch(/3 MiB/u);
+
+    const screen = fakeScreen();
+    store.attachHost(id, screen.host);
+    expect(screen.written().length).toBe(PENDING_MAX_BYTES);
+    expect(store.snapshot().notices[id]).toMatch(/3 MiB/u);
+
+    await store.remove(id);
+    expect(store.pending.get(id)).toBeUndefined();
+    expect(store.snapshot().notices[id]).toBeUndefined();
+  });
+
+  it("releases an ended terminal when the user closes it", async () => {
+    const { store, api, id } = await storeWith(null);
+    api.emit(id, "shown");
+    api.exit(id);
+    const screen = fakeScreen();
+    store.attachHost(id, screen.host);
+    await store.remove(id);
+    expect(store.pending.get(id)).toBeUndefined();
+    expect(store.hosts.get(id)).toBeUndefined();
+    expect(store.snapshot().sessions.some(session => session.id === id)).toBe(false);
+    expect(store.snapshot().notices[id]).toBeUndefined();
+    expect(screen.disposed).toBe(1);
+  });
+
+  it("ignores data that arrives after the user closed an ended terminal", async () => {
+    const { store, api, id } = await storeWith(null);
+    api.emit(id, "shown");
+    api.exit(id);
+    await store.remove(id);
+    api.emit(id, "late");
+    await settle();
+    expect(store.pending.get(id)).toBeUndefined();
+    expect(api.value.ack).not.toHaveBeenCalled();
+  });
+
+  it("does not resurrect a queue for data that arrives while close is in flight", async () => {
+    const api = harness();
+    let releaseClose: () => void = () => {};
+    const closing = new Promise<void>((resolve) => { releaseClose = resolve; });
+    api.value.dispose = vi.fn(async () => { await closing; });
+    globalThis.ompStudioTerminal = api.value as unknown as typeof globalThis.ompStudioTerminal;
+    const store = new TerminalSessions(globalThis.ompStudioTerminal);
+    const id = await store.create(null);
+    const removing = store.remove(id);
+    api.emit(id, "during-close");
+    releaseClose();
+    await removing;
+    expect(store.pending.get(id)).toBeUndefined();
+    expect(store.snapshot().sessions.some(session => session.id === id)).toBe(false);
+    expect(api.value.ack).not.toHaveBeenCalled();
+  });
+
+  it("drops nothing when the process exits before create returns", async () => {
+    const api = harness();
+    globalThis.ompStudioTerminal = api.value as unknown as typeof globalThis.ompStudioTerminal;
+    const store = new TerminalSessions(globalThis.ompStudioTerminal);
+    const creating = store.create(null);
+    api.emit("terminal", "early output");
+    api.exit("terminal");
+    const id = await creating;
+    expect(store.snapshot().sessions[0]?.status).toBe("ended");
+    expect(store.pending.get(id)?.text).toBe("early output");
+    const screen = fakeScreen();
+    store.attachHost(id, screen.host);
+    expect(screen.written()).toBe("early output");
+    await settle();
+    expect(api.value.ack).not.toHaveBeenCalled();
+  });
+});
+
 // ---- Local shell and SSH behave identically ------------------------------
 
 describe("local PTY and SSH terminals share one contract", () => {
@@ -387,6 +530,27 @@ describe("local PTY and SSH terminals share one contract", () => {
       await settle();
       expect(screen.written()).toBe(chunks.join(""));
       expect(api.ackedBytes(id)).toBe(utf8Length(chunks.join("")));
+    });
+  }
+
+  for (const [label, target] of [["local", null], ["ssh", "remote-target"]] as const) {
+    it(`${label}: a natural exit keeps the backlog and replays it without crediting`, async () => {
+      const { store, api, id } = await storeWith(target, target === null ? undefined : "ws");
+      api.emit(id, "before exit\r\n");
+      api.exit(id);
+      api.emit(id, "after exit\r\n");
+      await settle();
+      expect(store.snapshot().sessions.find(session => session.id === id)?.status).toBe("ended");
+
+      const screen = fakeScreen();
+      store.attachHost(id, screen.host);
+      expect(screen.written()).toBe("before exit\r\nafter exit\r\n");
+      expect(api.value.ack).not.toHaveBeenCalled();
+      expect(store.pending.get(id)).toBeUndefined();
+
+      await store.remove(id);
+      expect(screen.disposed).toBe(1);
+      expect(store.pending.get(id)).toBeUndefined();
     });
   }
 

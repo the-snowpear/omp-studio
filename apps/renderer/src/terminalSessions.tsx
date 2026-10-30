@@ -127,8 +127,18 @@ export class TerminalSessions {
   readonly #listeners = new Set<() => void>();
   readonly #earlyExits = new Set<string>();
   readonly #acked = new Map<string, number>();
-  /** Terminals whose output must never be credited again (ended / disposed). */
-  readonly #sealed = new Set<string>();
+  /**
+   * Terminals whose flow-control session is over: Main has closed the batcher,
+   * so nothing here may ACK any more (on exit or disposal). This says nothing
+   * about whether output may still be *displayed*.
+   */
+  readonly #creditsClosed = new Set<string>();
+  /**
+   * Terminals the user closed (or the whole window did): the screen, the
+   * backlog, the notice and the decoder are released, and late events are
+   * ignored instead of resurrecting a queue.
+   */
+  readonly #released = new Set<string>();
   #ackScheduled = false;
   #state: TerminalState = { sessions: [], graphics: {}, graphicsErrors: {}, notices: {} };
   #off: (() => void) | undefined;
@@ -179,7 +189,8 @@ export class TerminalSessions {
     for (const id of this.hosts.keys()) this.#releaseScreen(id);
     this.pending.clear();
     this.#acked.clear();
-    this.#sealed.clear();
+    for (const session of this.#state.sessions) this.#released.add(session.id);
+    this.#creditsClosed.clear();
     this.#decoders.clear();
     this.#listeners.clear();
   }
@@ -189,19 +200,23 @@ export class TerminalSessions {
    * that accumulated while it was missing. `TerminalPane` calls this on mount.
    */
   attachHost(id: string, host: TerminalScreenHost): void {
+    if (this.#released.has(id)) return;
     this.hosts.set(id, host);
-    this.#drain(id);
+    // An ended terminal still owes the user everything it printed: replay the
+    // backlog without crediting it, because the flow-control session is gone.
+    if (this.#creditsClosed.has(id)) this.#deliverEnded(id);
+    else this.#drain(id);
   }
 
   #listen(): void {
     if (!this.api || this.#off) return;
     const offData = this.api.onData(event => {
+      if (this.#released.has(event.id)) return;
       if (!this.#creating && !this.#state.sessions.some(session => session.id === event.id)) return;
-      // A terminal that already exited has nowhere to put trailing output (its
-      // backlog was released with `#flushBestEffort`); queueing it would only
-      // reserve memory until the tab is closed. A still-mounted screen keeps
-      // receiving it, because the shell's last line is worth showing.
-      if (this.#sealed.has(event.id) && this.hosts.get(event.id) === undefined) return;
+      // An ended terminal still accepts output: Main keeps the batcher open for
+      // one window after the exit notification because ConPTY can hand over the
+      // shell's last line afterwards. Those bytes are shown (or queued, still
+      // bounded) but never credited again - the flow-control session is over.
       let decoder = this.#decoders.get(event.id);
       if (!decoder) { decoder = new TerminalGraphicsDecoder(); this.#decoders.set(event.id, decoder); }
       const decoded = decoder.push(event.data);
@@ -224,8 +239,10 @@ export class TerminalSessions {
       }
       const host = this.hosts.get(event.id);
       if (host !== undefined) {
-        // Credited once xterm has written it, not when it was received.
-        host.term.write(text, () => this.#ack(event.id, bytes));
+        // Credited once xterm has written it, not when it was received - and
+        // never after the process is gone (there is nothing left to credit).
+        if (this.#creditsClosed.has(event.id)) host.term.write(text);
+        else host.term.write(text, () => this.#ack(event.id, bytes));
         return;
       }
       // No xterm yet: keep it, in order, and do NOT acknowledge. The missing
@@ -237,10 +254,13 @@ export class TerminalSessions {
     });
     const offExit = this.api.onExit(event => {
       if (this.#creating && !this.#state.sessions.some(session => session.id === event.id)) this.#earlyExits.add(event.id);
-      // The PTY is gone: stop crediting (a late xterm callback must not ACK a
-      // dead session), deliver what is still queued as a best effort, release it.
-      this.#sealed.add(event.id);
-      this.#flushBestEffort(event.id);
+      // The process ended; the tab did not. Stop crediting (Main closed the
+      // batcher, and a late xterm callback must not ACK a dead session) but keep
+      // the backlog until a screen exists: an unmounted terminal that printed
+      // its error message and exited must still show it when the user opens it.
+      this.#creditsClosed.add(event.id);
+      this.#acked.delete(event.id);
+      this.#deliverEnded(event.id);
       this.#publish({ ...this.#state, sessions: this.#state.sessions.map(session => session.id === event.id ? { ...session, status: "ended" } : session) });
     });
     this.#off = () => { offData(); offExit(); };
@@ -279,15 +299,25 @@ export class TerminalSessions {
     this.#ack(id, dropped);
   }
 
-  /** Best-effort write of whatever is queued, never acknowledged (session is over). */
-  #flushBestEffort(id: string): void {
+  /**
+   * Display an ended terminal's backlog, in arrival order, without crediting it
+   * (the flow-control session is over) and without touching its account.
+   *
+   * With no screen attached the backlog stays queued - still bounded by
+   * `PENDING_MAX_BYTES` - for the first attach; releasing it here is exactly the
+   * bug this method replaced. The truncation notice, if any, stays in state
+   * until the user closes the terminal, so a loss that happened before the exit
+   * stays visible.
+   */
+  #deliverEnded(id: string): void {
     const queue = this.pending.get(id);
     if (queue === undefined) return;
+    const host = this.hosts.get(id);
+    if (host === undefined) return;
+    this.pending.delete(id);
     const text = queue.text;
     queue.clear();
-    this.pending.delete(id);
-    const host = this.hosts.get(id);
-    if (host !== undefined && text.length > 0) host.term.write(text);
+    if (text.length > 0) host.term.write(text);
   }
 
   #notifyTruncation(id: string): void {
@@ -309,7 +339,7 @@ export class TerminalSessions {
     if (api?.ack === undefined || this.#closed || bytes <= 0) return;
     // Only a live terminal may credit. A disposed/ended session must not ACK,
     // and xterm callbacks queued before teardown can still fire afterwards.
-    if (this.#sealed.has(id)) return;
+    if (this.#creditsClosed.has(id) || this.#released.has(id)) return;
     if (this.#creating === 0 && !this.#state.sessions.some(session => session.id === id)) return;
     this.#acked.set(id, (this.#acked.get(id) ?? 0) + bytes);
     if (this.#ackScheduled) return;
@@ -327,7 +357,7 @@ export class TerminalSessions {
     this.#acked.clear();
     for (const [id, bytes] of pending) {
       // The terminal may have ended or been closed while the microtask queued.
-      if (this.#closed || this.#sealed.has(id) || bytes <= 0) continue;
+      if (this.#closed || this.#creditsClosed.has(id) || this.#released.has(id) || bytes <= 0) continue;
       try {
         api.ack(id, bytes);
       } catch {
@@ -337,12 +367,13 @@ export class TerminalSessions {
   }
 
   #releaseScreen(id: string): void {
+    this.#released.add(id);
     this.hosts.get(id)?.term.dispose();
     this.hosts.delete(id);
     this.pending.delete(id);
     this.#decoders.delete(id);
     this.#acked.delete(id);
-    this.#sealed.delete(id);
+    this.#creditsClosed.delete(id);
   }
   #publish(state: TerminalState): void { this.#state = state; for (const listener of this.#listeners) listener(); }
 }
