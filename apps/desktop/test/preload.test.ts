@@ -14,11 +14,12 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import type { ClientEvent, SubscriptionScope } from "@omp-studio/client-contract";
-import { DESKTOP_IPC_CHANNELS } from "@omp-studio/transport-desktop";
+import { DESKTOP_IPC_CHANNELS, DESKTOP_IPC_LIMITS } from "@omp-studio/transport-desktop";
 
 import {
   createDesktopIpcBridge,
   DESKTOP_BRIDGE_GLOBAL,
+  isSubscriptionEventEnvelope,
   type DesktopIpcBridge,
 } from "../src/ipc-validation.js";
 import type { OmpStudioDesktopApi } from "@omp-studio/transport-desktop";
@@ -417,6 +418,69 @@ describe("createDesktopIpcBridge: id-addressed delivery", () => {
     bridge.emitEvent(event, [runtimeId]);
     assert.equal(all.length, 1);
     assert.equal(runtime.length, 1);
+  });
+});
+
+describe("createDesktopIpcBridge: envelope id limit is the shared protocol limit", () => {
+  const ids = (count: number): string[] =>
+    Array.from({ length: count }, (_, index) => `s${index}`);
+
+  /**
+   * Anti-drift: Main slices a scope's ids at `DESKTOP_IPC_LIMITS` and this
+   * guard must accept exactly that. When a local preload literal was smaller
+   * than Main's chunk size, legal 33..64-id envelopes were thrown away and the
+   * subscription silently starved.
+   */
+  test("the guard accepts exactly the shared limit and rejects one id more", () => {
+    const limit = DESKTOP_IPC_LIMITS.maxSubscriptionIdsPerEvent;
+    assert.equal(Number.isInteger(limit) && limit > 0, true, "the shared limit must be a positive integer");
+    const envelope = (count: number): unknown => ({
+      subscriptionIds: ids(count),
+      event: makeEvent({}),
+    });
+    assert.equal(isSubscriptionEventEnvelope(envelope(1)), true);
+    assert.equal(isSubscriptionEventEnvelope(envelope(limit)), true, "a full-size envelope is legal");
+    assert.equal(isSubscriptionEventEnvelope(envelope(limit + 1)), false, "the limit is exact, not advisory");
+    assert.equal(isSubscriptionEventEnvelope(envelope(0)), false, "an envelope must name at least one id");
+  });
+
+  test("a full-size envelope delivers once to each id it names", () => {
+    const bridge = new FakeBridge();
+    const api = createDesktopIpcBridge(bridge);
+    const limit = DESKTOP_IPC_LIMITS.maxSubscriptionIdsPerEvent;
+    const received = new Array<number>(limit).fill(0);
+    for (let index = 0; index < limit; index += 1) {
+      const slot = index;
+      api.subscribe({ scope: "all" }, () => {
+        received[slot] = (received[slot] ?? 0) + 1;
+      });
+    }
+    assert.equal(bridge.subscriptionIds.length, limit);
+    bridge.emitEvent(makeEvent({}), bridge.subscriptionIds);
+    assert.deepEqual(received, new Array<number>(limit).fill(1));
+  });
+
+  test("an envelope the guard rejects does not block the next legal one", () => {
+    const bridge = new FakeBridge();
+    const api = createDesktopIpcBridge(bridge);
+    const received: ClientEvent[] = [];
+    api.subscribe({ scope: "all" }, (event) => {
+      received.push(event);
+    });
+    const [subscriptionId] = bridge.subscriptionIds;
+    assert.ok(subscriptionId);
+    const limit = DESKTOP_IPC_LIMITS.maxSubscriptionIdsPerEvent;
+    // One id over the cap, then a non-envelope, then a legal envelope. The
+    // guard runs per message, so rejecting the first two must not swallow the
+    // third: a single bad packet may never silence the channel.
+    bridge.emitPayload({
+      subscriptionIds: [...ids(limit), subscriptionId],
+      event: makeEvent({ cursor: "1" }),
+    });
+    bridge.emitPayload(null);
+    bridge.emitEvent(makeEvent({ cursor: "2" }), [subscriptionId]);
+    assert.equal(received.length, 1);
+    assert.equal(received[0]?.cursor, "2");
   });
 });
 

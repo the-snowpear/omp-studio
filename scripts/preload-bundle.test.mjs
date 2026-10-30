@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createContext, runInContext } from "node:vm";
+import { DESKTOP_IPC_LIMITS } from "@omp-studio/transport-desktop";
 import { bundlePreload, PRELOAD_BUNDLE } from "./preload-bundle.mjs";
 
 /**
@@ -72,6 +73,16 @@ for (const platform of ["win32", "darwin"]) test(`${platform} sandboxed preload 
   // The delivered event belongs to the preload realm; compare structurally.
   assert.equal(events.length, 1, "one envelope for one subscription");
   assert.deepEqual(JSON.parse(JSON.stringify(events[0])), event);
+
+  // P1-1: Main slices a scope's ids at the same shared limit, so a full-size
+  // envelope must be delivered by the SHIPPED bundle — a smaller guard here
+  // would silently drop legal events for every listener past the first chunk.
+  const filler = Array.from(
+    { length: DESKTOP_IPC_LIMITS.maxSubscriptionIdsPerEvent - 1 },
+    (_, index) => `filler-${index}`,
+  );
+  listeners.get(eventChannel)({}, inbound({ subscriptionIds: [...filler, subscriptionId], event }));
+  assert.equal(events.length, 2, "a full-size envelope is delivered, not discarded as malformed");
 
   unsubscribe();
   assert.equal(listeners.size, 0);

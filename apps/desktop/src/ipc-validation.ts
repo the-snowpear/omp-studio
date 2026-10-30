@@ -44,6 +44,7 @@ import type {
 import { eventMatchesScope } from "@omp-studio/client";
 import {
   DESKTOP_IPC_CHANNELS,
+  DESKTOP_IPC_LIMITS,
   isPlainObject,
   parseSubscriptionScope,
   ValidationError,
@@ -62,7 +63,13 @@ export const DESKTOP_BRIDGE_GLOBAL = "ompStudio" as const;
  */
 export const SUBSCRIPTION_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/u;
 
-const MAX_EVENT_IDS = 32;
+/**
+ * Envelope id cap, shared with Main's forwarder (`DESKTOP_IPC_LIMITS`). Main
+ * slices a scope's ids to this size and this guard accepts exactly that; a
+ * local literal here used to be smaller than Main's chunk size, so legal
+ * envelopes were discarded as malformed.
+ */
+const MAX_EVENT_IDS = DESKTOP_IPC_LIMITS.maxSubscriptionIdsPerEvent;
 
 let subscriptionSequence = 0;
 

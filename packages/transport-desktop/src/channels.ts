@@ -46,3 +46,22 @@ export const DESKTOP_IPC_CHANNELS: Readonly<{
 /** Union of every P1 Desktop IPC channel name. */
 export type DesktopIpcChannel =
   (typeof DESKTOP_IPC_CHANNELS)[keyof typeof DESKTOP_IPC_CHANNELS];
+
+/**
+ * Wire limits of the Desktop IPC protocol, shared by both sides of the bridge.
+ *
+ * `maxSubscriptionIdsPerEvent` is the maximum number of renderer subscription
+ * ids one `event` envelope may carry. Main slices a scope's ids into chunks of
+ * at most this size — a bigger fan-out is split into several envelopes, never
+ * dropped — and the preload rejects an envelope that exceeds it. Both sides
+ * read this constant (Main's `forward`, the preload's envelope guard), so the
+ * two cannot drift: a mismatch used to make Main send envelopes the preload
+ * silently discarded, so a legal subscription watched an event go by.
+ *
+ * The value bounds one IPC message: 64 ids plus one event stay small, and a
+ * window with hundreds of listeners over one scope still gets exactly-once
+ * delivery through a handful of envelopes.
+ */
+export const DESKTOP_IPC_LIMITS: Readonly<{ maxSubscriptionIdsPerEvent: number }> = Object.freeze({
+  maxSubscriptionIdsPerEvent: 64,
+});

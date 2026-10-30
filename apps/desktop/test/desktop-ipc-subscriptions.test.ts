@@ -15,7 +15,12 @@
  * - window destroy / navigation / renderer crash tears down every id, and
  *   nothing is sent to a destroyed WebContents afterwards;
  * - N subscribe / N unsubscribe returns the Host subscription count to its
- *   baseline instead of growing without bound.
+ *   baseline instead of growing without bound;
+ * - a scope with more ids than fit in one IPC envelope is split losslessly:
+ *   every id appears in exactly one envelope, every subscriber still gets the
+ *   event exactly once, and every envelope passes the preload's guard (Main
+ *   and preload read the same `DESKTOP_IPC_LIMITS` cap — a local literal on
+ *   either side silently swallowed legal delivery).
  *
  * `registerDesktopIpc` imports `electron` at module load; the data-URL loader
  * registered below stubs that module, so the test runs under plain
@@ -60,9 +65,18 @@ import type {
   SubscriptionScope,
   Unsubscribe,
 } from "@omp-studio/client-contract";
-import { DESKTOP_IPC_CHANNELS } from "@omp-studio/transport-desktop";
+import {
+  DESKTOP_IPC_CHANNELS,
+  DESKTOP_IPC_LIMITS,
+  type OmpStudioDesktopApi,
+} from "@omp-studio/transport-desktop";
 
 import type { DesktopIpcHandle, DesktopIpcOptions, DesktopSender } from "../src/ipc.js";
+import {
+  createDesktopIpcBridge,
+  isSubscriptionEventEnvelope,
+  type DesktopIpcBridge,
+} from "../src/ipc-validation.js";
 
 // ---- Fakes ---------------------------------------------------------------
 
@@ -116,6 +130,8 @@ interface FakeSender extends DesktopSender {
   destroyed: boolean;
   readonly sent: Array<{ channel: string; payload: unknown }>;
   readonly listeners: Map<string, Set<(...args: readonly unknown[]) => void>>;
+  /** Optional renderer-side sink: what Main sends, a preload bridge receives. */
+  deliver: ((channel: string, payload: unknown) => void) | undefined;
   fire(event: string): void;
   listenerCount(event: string): number;
 }
@@ -135,6 +151,7 @@ function makeSender(id: number): FakeSender {
     destroyed: false,
     sent: [],
     listeners,
+    deliver: undefined,
     isDestroyed() {
       return this.destroyed;
     },
@@ -148,6 +165,7 @@ function makeSender(id: number): FakeSender {
     },
     send(channel, payload) {
       this.sent.push({ channel, payload });
+      this.deliver?.(channel, payload);
     },
     fire(event) {
       for (const listener of [...(listeners.get(event) ?? [])]) listener();
@@ -233,6 +251,43 @@ function harness(trusted: (sender: DesktopSender) => boolean = () => true): Harn
         .map((entry) => (entry.payload as { subscriptionIds: string[] }).subscriptionIds);
     },
   };
+}
+
+// ---- End-to-end rig: Main's `send` feeds a real preload bridge ------------
+
+/**
+ * Attach the real preload bridge (`createDesktopIpcBridge`) to a Main harness:
+ * the bridge's `invoke` goes to the fake `ipcMain`, and everything Main sends
+ * is delivered — Electron-shaped, `(IpcRendererEvent, payload)` — to the
+ * bridge's event listeners. A test using this rig covers the whole path a
+ * renderer takes: Main slices -> IPC message -> preload envelope guard ->
+ * per-subscription listener, so a limit mismatch cannot hide.
+ */
+function attachPreload(rig: Harness, sender: FakeSender): OmpStudioDesktopApi {
+  type Listener = (event: unknown, ...args: readonly unknown[]) => void;
+  const listeners = new Map<string, Set<Listener>>();
+  const bridge: DesktopIpcBridge = {
+    async invoke(channel, ...args) {
+      const handler = rig.ipc.handlers.get(channel);
+      assert.ok(handler, `no handler for ${channel}`);
+      return await handler({ sender }, ...args);
+    },
+    on(channel, listener) {
+      let set = listeners.get(channel);
+      if (set === undefined) {
+        set = new Set();
+        listeners.set(channel, set);
+      }
+      set.add(listener);
+    },
+    removeListener(channel, listener) {
+      listeners.get(channel)?.delete(listener);
+    },
+  };
+  sender.deliver = (channel, payload) => {
+    for (const listener of [...(listeners.get(channel) ?? [])]) listener({}, payload);
+  };
+  return createDesktopIpcBridge(bridge);
 }
 
 // ---- Id-scoped subscription lifecycle -------------------------------------
@@ -497,5 +552,150 @@ describe("desktop ipc subscriptions: envelope validation", () => {
     rig.handle.dispose();
     assert.ok(rig.ipc.removed.includes(DESKTOP_IPC_CHANNELS.unsubscribe));
     assert.equal(rig.ipc.handlers.size, 0);
+  });
+});
+
+// ---- Fan-out: one scope, more ids than fit in one envelope ---------------
+
+/**
+ * Counts that straddle the per-envelope id cap: below it, exactly at it, one
+ * over it, and several envelopes' worth.
+ */
+const FAN_OUT_COUNTS = [1, 32, 33, 64, 65, 128] as const;
+
+/** N listeners over one scope; returns one hit counter per listener. */
+function subscribeMany(api: OmpStudioDesktopApi, count: number): number[] {
+  const calls = new Array<number>(count).fill(0);
+  for (let index = 0; index < count; index += 1) {
+    const slot = index;
+    api.subscribe({ scope: "all" }, () => {
+      calls[slot] = (calls[slot] ?? 0) + 1;
+    });
+  }
+  return calls;
+}
+
+/** Assert no listener got the event twice or missed it. */
+function assertEachHitExactlyOnce(calls: readonly number[], message: string): void {
+  const wrong = calls.flatMap((hits, index) => (hits === 1 ? [] : [{ index, hits }]));
+  assert.deepEqual(wrong, [], message);
+}
+
+/**
+ * A window with N listeners over the SAME scope gets one shared Host
+ * subscription; Main must then address every event to all N ids. If Main and
+ * the preload disagree about how many ids one envelope may carry, the
+ * envelopes the preload considers illegal are dropped silently — the
+ * subscribers simply never hear the event.
+ */
+describe("desktop ipc subscriptions: one scope with many subscribers", () => {
+  for (const count of FAN_OUT_COUNTS) {
+    test(`${count} subscribers over one scope each receive the event exactly once`, async () => {
+      const rig = harness();
+      const sender = makeSender(1);
+      const api = attachPreload(rig, sender);
+      const calls = subscribeMany(api, count);
+      assert.equal(rig.facade.activeCount(), 1, "one Host subscription serves the whole scope");
+      assert.equal(rig.facade.subscribeCalls(), 1, "the Host subscription is not multiplied per renderer id");
+
+      rig.facade.emit(stateEvent());
+
+      assertEachHitExactlyOnce(calls, "every subscriber must get the event exactly once");
+      const limit = DESKTOP_IPC_LIMITS.maxSubscriptionIdsPerEvent;
+      const envelopes = rig.envelopes(sender);
+      assert.equal(envelopes.length, Math.ceil(count / limit), "one envelope per full slice of ids");
+      assert.deepEqual(
+        envelopes.map((ids) => ids.length),
+        Array.from({ length: envelopes.length }, (_, slice) => Math.min(limit, count - slice * limit)),
+        "every envelope is full except possibly the last",
+      );
+      const ids = envelopes.flat();
+      assert.equal(ids.length, count, "no id is dropped");
+      assert.equal(new Set(ids).size, count, "each id appears in exactly one envelope");
+      assert.equal(
+        Math.max(...envelopes.map((chunk) => chunk.length)),
+        Math.min(count, limit),
+        "Main slices at the shared protocol limit",
+      );
+      for (const entry of sender.sent) {
+        assert.equal(
+          isSubscriptionEventEnvelope(entry.payload),
+          true,
+          "the preload guard accepts every envelope Main sent",
+        );
+      }
+      rig.handle.dispose();
+    });
+  }
+
+  test("cancelling some ids keeps the rest of a wide scope live; cancelling all returns to baseline", async () => {
+    const count = 128;
+    const rig = harness();
+    const sender = makeSender(1);
+    const api = attachPreload(rig, sender);
+    const baseline = rig.facade.activeCount();
+    const calls = new Array<number>(count).fill(0);
+    const cancellers: Unsubscribe[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const slot = index;
+      cancellers.push(
+        api.subscribe({ scope: "all" }, () => {
+          calls[slot] = (calls[slot] ?? 0) + 1;
+        }),
+      );
+    }
+    assert.equal(rig.facade.activeCount(), 1);
+
+    const cancelled = new Set([0, 1, 63, 64, 127]);
+    for (const index of cancelled) cancellers[index]?.();
+    assert.equal(rig.facade.activeCount(), 1, "the shared Host subscription survives for the remaining ids");
+
+    rig.facade.emit(stateEvent("5"));
+    const wrong = calls.flatMap((hits, index) =>
+      hits === (cancelled.has(index) ? 0 : 1) ? [] : [{ index, hits }],
+    );
+    assert.deepEqual(wrong, [], "cancelled ids stop receiving; every other id still gets exactly one event");
+    const remaining = rig.envelopes(sender).flat();
+    assert.equal(remaining.length, count - cancelled.size, "cancelled ids are dropped from the envelopes");
+    assert.equal(new Set(remaining).size, remaining.length, "no id is duplicated across the remaining envelopes");
+
+    for (let index = 0; index < count; index += 1) cancellers[index]?.();
+    assert.equal(rig.facade.activeCount(), baseline, "the last id releases the shared Host subscription");
+    const sentBefore = sender.sent.length;
+    rig.facade.emit(stateEvent("6"));
+    assert.equal(sender.sent.length, sentBefore, "an empty scope sends no envelope at all");
+    rig.handle.dispose();
+  });
+
+  test("destroying the window with many subscribers leaves nothing behind", async () => {
+    const count = 128;
+    const rig = harness();
+    const sender = makeSender(1);
+    const api = attachPreload(rig, sender);
+    const calls = subscribeMany(api, count);
+    assert.equal(rig.facade.activeCount(), 1);
+
+    sender.fire("destroyed");
+    assert.equal(rig.facade.activeCount(), 0, "every Host subscription is released");
+
+    const sentBefore = sender.sent.length;
+    rig.facade.emit(stateEvent("9"));
+    assert.equal(sender.sent.length, sentBefore, "no envelope is sent to a torn-down window");
+    assert.deepEqual(calls.filter((hits) => hits !== 0), [], "no subscriber fires after teardown");
+    rig.handle.dispose();
+  });
+
+  test("a WebContents that reports itself destroyed stops forwarding a wide scope", async () => {
+    const rig = harness();
+    const sender = makeSender(1);
+    const api = attachPreload(rig, sender);
+    subscribeMany(api, 128);
+    assert.equal(rig.facade.activeCount(), 1);
+
+    sender.destroyed = true;
+    rig.facade.emit(stateEvent("7"));
+    assert.deepEqual(sender.sent, [], "nothing is sent to destroyed WebContents");
+    assert.equal(rig.facade.activeCount(), 0, "the destroy path also released the Host subscription");
+    rig.handle.dispose();
   });
 });

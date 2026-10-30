@@ -46,6 +46,7 @@ import { ipcMain, type IpcMain, type IpcMainInvokeEvent } from "electron";
 import type { ClientEvent, ClientTransport, SubscriptionScope, Unsubscribe } from "@omp-studio/client-contract";
 import {
   DESKTOP_IPC_CHANNELS,
+  DESKTOP_IPC_LIMITS,
   isPlainObject,
   parseClientCommandRequest,
   parseClientQueryRequest,
@@ -130,8 +131,13 @@ interface WindowSubscriptions {
  */
 const MAX_REMEMBERED_CANCELLATIONS = 1_024;
 
-/** Ids per outbound envelope; a bigger scope fan-out is split, never dropped. */
-const MAX_IDS_PER_EVENT = 64;
+/**
+ * Ids per outbound envelope, shared with the preload's envelope guard
+ * (`DESKTOP_IPC_LIMITS`, `@omp-studio/transport-desktop`). A bigger scope
+ * fan-out is split across several envelopes, never dropped — and the preload
+ * accepts exactly the envelopes this size allows.
+ */
+const MAX_IDS_PER_EVENT = DESKTOP_IPC_LIMITS.maxSubscriptionIdsPerEvent;
 
 /**
  * Electron `ipcMain.handle` stringifies a thrown plain object as
