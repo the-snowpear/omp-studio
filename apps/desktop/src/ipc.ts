@@ -190,9 +190,14 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
     return facade;
   }
 
-  function rememberCancellation(subscriptionId: string): void {
-    cancelled.delete(subscriptionId);
-    cancelled.add(subscriptionId);
+  function cancellationKey(sender: DesktopSender, subscriptionId: string): string {
+    return `${sender.id}:${subscriptionId}`;
+  }
+
+  function rememberCancellation(sender: DesktopSender, subscriptionId: string): void {
+    const key = cancellationKey(sender, subscriptionId);
+    cancelled.delete(key);
+    cancelled.add(key);
     if (cancelled.size > MAX_REMEMBERED_CANCELLATIONS) {
       const oldest = cancelled.values().next();
       if (!oldest.done) cancelled.delete(oldest.value);
@@ -286,7 +291,7 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
     // A cancellation that arrived before this registration (renderer called
     // unsubscribe before the subscribe invoke resolved, or a reordering IPC
     // layer) must not survive as an orphan: register then cancel immediately.
-    if (cancelled.delete(request.subscriptionId)) {
+    if (cancelled.delete(cancellationKey(sender, request.subscriptionId))) {
       cancelSubscription(window, request.subscriptionId);
     }
   }
@@ -314,11 +319,11 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
   function cancel(sender: DesktopSender, subscriptionId: string): boolean {
     const window = windows.get(sender.id);
     if (window === undefined) {
-      rememberCancellation(subscriptionId);
+      rememberCancellation(sender, subscriptionId);
       return false;
     }
     if (!cancelSubscription(window, subscriptionId)) {
-      rememberCancellation(subscriptionId);
+      rememberCancellation(sender, subscriptionId);
       return false;
     }
     return true;

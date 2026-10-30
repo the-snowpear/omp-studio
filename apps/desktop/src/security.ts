@@ -207,6 +207,7 @@ export function installNavigationGuards(
  * Evidence for the grants (grep over `apps/renderer/src`, 2026-10-30):
  * - `media` — microphone for Live audio / voice capture
  *   (`media/liveCapture.ts`, `media/AudioCapturePane.tsx` `getUserMedia({ audio })`).
+ * - `local-fonts` — system font picker (`settings/typography.ts` `queryLocalFonts()`).
  * - `clipboard-sanitized-write` — `navigator.clipboard.writeText` copy actions
  *   across the workbench (paths, ids, transcripts).
  *
@@ -227,6 +228,7 @@ export function installNavigationGuards(
  */
 export const RENDERER_PERMISSION_MATRIX: Readonly<Record<string, boolean>> = Object.freeze({
   media: true,
+  "local-fonts": true,
   "clipboard-sanitized-write": true,
 });
 

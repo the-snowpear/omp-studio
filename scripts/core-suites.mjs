@@ -62,5 +62,4 @@ export const CORE_RENDERER_SUITES = [
   "src/usage/usagePolling.test.ts",
   "src/perf/tiers.test.ts",
   "src/perf/tierControl.test.ts",
-  "src/App.composerPerf.test.tsx",
 ];

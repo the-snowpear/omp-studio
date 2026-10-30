@@ -306,15 +306,15 @@ export async function main(): Promise<void> {
   await perfProfiles.load();
   void perfProfiles.refresh();
   const settleGpuStatus = (): void => {
-    if (gpuStatusSettled) { void perfProfiles.refresh(); return; }
+    if (gpuStatusSettled) { void perfProfiles.refresh(true); return; }
     gpuStatusSettled = true;
-    void perfProfiles.refresh();
+    void perfProfiles.refresh(true);
   };
   app.on("gpu-info-update", settleGpuStatus);
   // Fallback for platforms/windows that never emit `gpu-info-update`.
   setTimeout(() => { if (!gpuStatusSettled) settleGpuStatus(); }, 2_000).unref?.();
-  powerMonitor.on("on-battery", () => { void perfProfiles.refresh(); });
-  powerMonitor.on("on-ac", () => { void perfProfiles.refresh(); });
+  powerMonitor.on("on-battery", () => { void perfProfiles.refresh(true); });
+  powerMonitor.on("on-ac", () => { void perfProfiles.refresh(true); });
   // Runs once the renderer has booted: a macOS update commits only then.
   let confirmMacDesktop: (() => Promise<void>) | undefined;
   if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined)) {
@@ -626,7 +626,7 @@ export async function main(): Promise<void> {
           ipcMain.removeHandler(channel);
         },
         on(channel, listener) {
-          ipcMain.on(channel, (event) => listener(event));
+          ipcMain.on(channel, listener);
         },
         removeListener(channel, listener) {
           ipcMain.removeListener(channel, listener as never);

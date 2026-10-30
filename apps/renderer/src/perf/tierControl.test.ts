@@ -173,10 +173,20 @@ describe("startTierControl: the live tier survives a preference change", () => {
     wiring.dispose();
   });
 
-  it("does not probe when a cached snapshot already exists", () => {
+  it("reconciles the startup cache after subscribing", async () => {
     const wiring = harness({ cached: CACHED_L2 });
-    expect(wiring.probe).not.toHaveBeenCalled();
+    expect(wiring.probe).toHaveBeenCalledTimes(1);
+    await wiring.resolveProbe({ tier: "L0", probedAt: "2026-10-30T10:00:00.000Z" });
+    expect(wiring.tier()).toBe("L0");
     wiring.dispose();
+  });
+
+  it("ignores a probe that resolves after dispose", async () => {
+    const wiring = harness({ cached: null });
+    wiring.dispose();
+    wiring.root.setAttribute(PERF_TIER_ATTRIBUTE, "new-wiring");
+    await wiring.resolveProbe({ tier: "L3", probedAt: "2026-10-30T11:00:00.000Z" });
+    expect(wiring.tier()).toBe("new-wiring");
   });
 
   it("keeps the last valid state when the probe fails", async () => {

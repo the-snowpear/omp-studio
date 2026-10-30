@@ -93,11 +93,13 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
     const input = parseRecordingInput(payload);
     if (!options.recordings) throw new Error("Terminal recording is unavailable");
     if (options.remote?.owns(event.sender.id, input.id)) throw new Error("SSH terminal recording is not supported");
+    options.manager.flushOutput(event.sender.id, input.id);
     return options.recordings.start(event.sender.id, input, options.manager.recordingTarget(event.sender.id, input.id));
   });
   ipc.handle(TERMINAL_IPC_CHANNELS.recordingStop, (event, payload) => {
     assertTrusted(event.sender); const input = parseDisposeInput(payload);
     if (!options.recordings) throw new Error("Terminal recording is unavailable");
+    options.manager.flushOutput(event.sender.id, input.id);
     return options.recordings.stop(event.sender.id, input.id);
   });
   ipc.handle(TERMINAL_IPC_CHANNELS.recordingStatus, (event, payload) => {

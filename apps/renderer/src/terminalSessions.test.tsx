@@ -674,11 +674,40 @@ it("coalesces acknowledgements from one tick into a single message", async () =>
   expect(api.value.ack).toHaveBeenCalledWith(id, 6);
 });
 
+it("recovers output and ACKs after a failed close", async () => {
+  const { store, api, id } = await storeWith(null);
+  const host = fakeScreen();
+  store.attachHost(id, host.host);
+  api.value.dispose.mockRejectedValueOnce(new Error("IPC unavailable"));
+  await expect(store.remove(id)).rejects.toThrow("IPC unavailable");
+  api.emit(id, "still alive");
+  host.fireCallbacks();
+  await settle();
+  expect(host.written()).toBe("still alive");
+  expect(api.ackedBytes(id)).toBe(11);
+  await store.remove(id);
+  expect(host.disposed).toBe(1);
+});
+
+it("preserves oversized ordinary logs including ANSI sequences", async () => {
+  const { store, api, id } = await storeWith(null);
+  const host = fakeScreen();
+  store.attachHost(id, host.host);
+  const text = "\x1b[32m" + "x".repeat(2 * 1024 * 1024 + 128) + "\x1b[0m";
+  api.emit(id, text);
+  host.fireCallbacks();
+  await settle();
+  expect(host.written()).toBe(text);
+  expect(api.ackedBytes(id)).toBe(text.length);
+  expect(store.snapshot().graphicsErrors[id]).toBeUndefined();
+});
+
 it("works without an ack method (older preload) and queues instead of losing output", async () => {
   const remote = harness({ ack: false });
   globalThis.ompStudioTerminal = remote.value as unknown as typeof globalThis.ompStudioTerminal;
   const store = new TerminalSessions(globalThis.ompStudioTerminal);
   const id = await store.create(null);
+  expect(remote.value.create).toHaveBeenCalledWith({ cols: 80, rows: 24 });
   remote.emit(id, "世界");
   await settle();
   expect(store.pending.get(id)?.text).toBe("世界");

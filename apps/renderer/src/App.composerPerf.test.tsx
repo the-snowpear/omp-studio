@@ -140,6 +140,30 @@ it("publishes the deferred draft once the typing pauses", async () => {
   expect(probe.canvas).toBe(1);
 });
 
+it("keeps draft books across execution-target remounts", async () => {
+  const initial = structuredClone(contractFixtures.bootstrap);
+  vi.stubGlobal("ompStudioRemote", {
+    list: async () => ({ profiles: [{ id: "remote", name: "Test", host: "test" }], statuses: [{ id: "remote", state: "connected" }] }),
+    onChanged: () => () => {}, onEvent: () => () => {}, select: async () => {},
+    bootstrap: async () => ({ ...initial, selected: { ...initial.selected, workspaceId: "ws-default" } }),
+    query: async (_id: string, request: { queryName: string }) => structuredClone((contractFixtures.queryResponses as Record<string, unknown>)[request.queryName]),
+  });
+  let editor = await mount();
+  await type(editor, "local draft");
+  const choose = async (name: string) => {
+    fireEvent.click(document.querySelector<HTMLButtonElement>(".execution-picker > button")!);
+    const item = Array.from(document.querySelectorAll<HTMLButtonElement>(".execution-menu-row")).find(button => button.textContent?.startsWith(name));
+    expect(item).toBeTruthy();
+    fireEvent.click(item!);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)); });
+    editor = document.querySelector<HTMLElement>("#composerInput")!;
+  };
+  await choose("Test");
+  await type(editor, "remote draft");
+  await choose("此计算机");
+  expect(editor.textContent).toBe("local draft");
+});
+
 it("keeps the sent text intact while the draft publish is still pending", async () => {
   const editor = await mount();
   await type(editor, "a");

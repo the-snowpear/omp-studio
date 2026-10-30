@@ -206,7 +206,9 @@ function spawnWithPipes(options: PtySpawnOptions): PtyProcess {
   child.stderr?.on("data", (chunk: string) => {
     for (const listener of dataListeners) listener(chunk);
   });
-  child.on("exit", (code) => {
+  // Process exit can precede the readable tail, especially while flow control
+  // has paused the pipes. `close` means both output streams have drained.
+  child.on("close", (code) => {
     for (const listener of exitListeners) listener({ exitCode: code ?? 0 });
   });
   return {
@@ -427,6 +429,7 @@ export class TerminalSessionManager {
       this.#markEnded(windowId, id, listeners);
       this.#timers.setTimeout(() => {
         this.#batcher.close(id);
+        this.#recording?.end(windowId, id);
         this.#wiring.delete(id);
       }, TERMINAL_BATCH_MS);
     });
@@ -478,7 +481,15 @@ export class TerminalSessionManager {
     this.#kill(session, windowId, id, listeners);
   }
 
+  /** Recording boundaries drain output while the recording is still open. */
+  flushOutput(windowId: number, id?: string): void {
+    for (const [terminalId, wiring] of this.#wiring) {
+      if (wiring.windowId === windowId && (id === undefined || id === terminalId)) this.#batcher.flush(terminalId);
+    }
+  }
+
   disposeWindow(windowId: number): void {
+    this.flushOutput(windowId);
     this.#recording?.disposeWindow(windowId);
     const bucket = this.#windows.get(windowId);
     if (bucket !== undefined) {
@@ -542,7 +553,6 @@ export class TerminalSessionManager {
     const session = this.#windows.get(windowId)?.get(id);
     if (session === undefined || session.ended) return;
     session.ended = true;
-    this.#recording?.end(windowId, id);
     this.#windows.get(windowId)?.delete(id);
     listeners.onExit({ id });
   }

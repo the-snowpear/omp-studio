@@ -160,7 +160,7 @@ export class TerminalSessions {
     try {
       // `flowControl: true` is the opt-in handshake: Main then pauses the PTY
       // when this store falls behind, and resumes on our ACKs below.
-      const info = await this.api.create({ cols: 80, rows: 24, flowControl: true, ...(targetId ? { targetId, ...(workspaceId ? { workspaceId } : {}) } : {}) });
+      const info = await this.api.create({ cols: 80, rows: 24, ...(this.api.ack ? { flowControl: true } : {}), ...(targetId ? { targetId, ...(workspaceId ? { workspaceId } : {}) } : {}) });
       if (this.#closed) { await this.api.dispose(info.id); throw new Error("Terminal window has closed"); }
       const session: TerminalSession = { ...info, targetId, status: this.#earlyExits.delete(info.id) ? "ended" : "running", ...(workspaceId ? { workspaceId } : {}), ...(sessionId ? { sessionId } : {}) };
       this.#publish({ ...this.#state, sessions: [...this.#state.sessions, session] });
@@ -178,7 +178,12 @@ export class TerminalSessions {
   async remove(id: string): Promise<void> {
     if (!this.#state.sessions.some(session => session.id === id)) return;
     this.#removing.add(id);
-    await this.api?.dispose(id);
+    try {
+      await this.api?.dispose(id);
+    } catch (error) {
+      this.#removing.delete(id);
+      throw error;
+    }
     this.#releaseScreen(id);
     const { [id]: _graphic, ...graphics } = this.#state.graphics;
     const { [id]: _error, ...graphicsErrors } = this.#state.graphicsErrors;
