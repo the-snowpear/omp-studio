@@ -147,6 +147,20 @@ test("SSH PTY is never paused when the renderer did not negotiate flow control",
   f.manager.dispose(1, terminal.id);
 });
 
+test("SSH exit preserves the trailing output until the tail window drains", async () => {
+  const f = flowFixture();
+  const terminal = await f.manager.create(1, "target", "workspace", { cols: 80, rows: 24 }, {
+    onData: event => f.events.push(`data:${event.data}`),
+    onExit: () => f.events.push("exit"),
+  });
+  f.emit("before");
+  f.exit();
+  f.emit("after");
+  await until(() => !f.manager.owns(1, terminal.id), "SSH tail drain");
+  assert.deepEqual(f.events, ["data:before", "exit", "data:after"]);
+  f.manager.disposeAll();
+});
+
 test("SSH dispose delivers the buffered tail before the exit event", async () => {
   const f = flowFixture();
   const terminal = await f.manager.create(1, "target", "workspace", { cols: 80, rows: 24, flowControl: true }, {

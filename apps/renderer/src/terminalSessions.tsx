@@ -134,11 +134,15 @@ export class TerminalSessions {
    */
   readonly #creditsClosed = new Set<string>();
   /**
-   * Terminals the user closed (or the whole window did): the screen, the
-   * backlog, the notice and the decoder are released, and late events are
-   * ignored instead of resurrecting a queue.
+   * Terminals whose removal is in flight (`remove()` awaits `dispose`, and Main
+   * can still deliver a last batch while it does). Output for these is ignored
+   * instead of being queued for a screen that is about to be destroyed.
+   *
+   * The set is bounded by construction: an id is added before the dispose call
+   * and dropped when the screen is released, so it only holds terminals that are
+   * mid-close right now - not every terminal ever closed.
    */
-  readonly #released = new Set<string>();
+  readonly #removing = new Set<string>();
   #ackScheduled = false;
   #state: TerminalState = { sessions: [], graphics: {}, graphicsErrors: {}, notices: {} };
   #off: (() => void) | undefined;
@@ -156,7 +160,7 @@ export class TerminalSessions {
     try {
       // `flowControl: true` is the opt-in handshake: Main then pauses the PTY
       // when this store falls behind, and resumes on our ACKs below.
-      const info = await this.api.create({ cols: 80, rows: 24, flowControl: true, ...(targetId ? { targetId, ...(workspaceId ? { workspaceId } : {}) } : {}) });
+      const info = await this.api.create({ cols: 80, rows: 24, ...(this.api.ack ? { flowControl: true } : {}), ...(targetId ? { targetId, ...(workspaceId ? { workspaceId } : {}) } : {}) });
       if (this.#closed) { await this.api.dispose(info.id); throw new Error("Terminal window has closed"); }
       const session: TerminalSession = { ...info, targetId, status: this.#earlyExits.delete(info.id) ? "ended" : "running", ...(workspaceId ? { workspaceId } : {}), ...(sessionId ? { sessionId } : {}) };
       this.#publish({ ...this.#state, sessions: [...this.#state.sessions, session] });
@@ -173,7 +177,13 @@ export class TerminalSessions {
 
   async remove(id: string): Promise<void> {
     if (!this.#state.sessions.some(session => session.id === id)) return;
-    await this.api?.dispose(id);
+    this.#removing.add(id);
+    try {
+      await this.api?.dispose(id);
+    } catch (error) {
+      this.#removing.delete(id);
+      throw error;
+    }
     this.#releaseScreen(id);
     const { [id]: _graphic, ...graphics } = this.#state.graphics;
     const { [id]: _error, ...graphicsErrors } = this.#state.graphicsErrors;
@@ -189,7 +199,6 @@ export class TerminalSessions {
     for (const id of this.hosts.keys()) this.#releaseScreen(id);
     this.pending.clear();
     this.#acked.clear();
-    for (const session of this.#state.sessions) this.#released.add(session.id);
     this.#creditsClosed.clear();
     this.#decoders.clear();
     this.#listeners.clear();
@@ -200,7 +209,7 @@ export class TerminalSessions {
    * that accumulated while it was missing. `TerminalPane` calls this on mount.
    */
   attachHost(id: string, host: TerminalScreenHost): void {
-    if (this.#released.has(id)) return;
+    if (this.#removing.has(id)) return;
     this.hosts.set(id, host);
     // An ended terminal still owes the user everything it printed: replay the
     // backlog without crediting it, because the flow-control session is gone.
@@ -211,7 +220,7 @@ export class TerminalSessions {
   #listen(): void {
     if (!this.api || this.#off) return;
     const offData = this.api.onData(event => {
-      if (this.#released.has(event.id)) return;
+      if (this.#removing.has(event.id)) return;
       if (!this.#creating && !this.#state.sessions.some(session => session.id === event.id)) return;
       // An ended terminal still accepts output: Main keeps the batcher open for
       // one window after the exit notification because ConPTY can hand over the
@@ -339,7 +348,7 @@ export class TerminalSessions {
     if (api?.ack === undefined || this.#closed || bytes <= 0) return;
     // Only a live terminal may credit. A disposed/ended session must not ACK,
     // and xterm callbacks queued before teardown can still fire afterwards.
-    if (this.#creditsClosed.has(id) || this.#released.has(id)) return;
+    if (this.#creditsClosed.has(id) || this.#removing.has(id)) return;
     if (this.#creating === 0 && !this.#state.sessions.some(session => session.id === id)) return;
     this.#acked.set(id, (this.#acked.get(id) ?? 0) + bytes);
     if (this.#ackScheduled) return;
@@ -357,7 +366,7 @@ export class TerminalSessions {
     this.#acked.clear();
     for (const [id, bytes] of pending) {
       // The terminal may have ended or been closed while the microtask queued.
-      if (this.#closed || this.#creditsClosed.has(id) || this.#released.has(id) || bytes <= 0) continue;
+      if (this.#closed || this.#creditsClosed.has(id) || this.#removing.has(id) || bytes <= 0) continue;
       try {
         api.ack(id, bytes);
       } catch {
@@ -367,13 +376,16 @@ export class TerminalSessions {
   }
 
   #releaseScreen(id: string): void {
-    this.#released.add(id);
+    this.#removing.add(id);
     this.hosts.get(id)?.term.dispose();
     this.hosts.delete(id);
     this.pending.delete(id);
     this.#decoders.delete(id);
     this.#acked.delete(id);
     this.#creditsClosed.delete(id);
+    // The session is gone from `#state` by the time this returns, so the
+    // unknown-session guard blocks later output on its own.
+    this.#removing.delete(id);
   }
   #publish(state: TerminalState): void { this.#state = state; for (const listener of this.#listeners) listener(); }
 }

@@ -6438,7 +6438,11 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   /* 每个会话的草稿快照不进 React state：击键时写 state 会把整个 AppShell
      （58 处 state）按字符重渲一次。草稿只在「挂载/切会话恢复」边界被读，
      用 ref 簿记即可（`composer/draftStore.ts`）。 */
-  const [composerDraftBook] = useState(createComposerDraftBook);
+  const [composerDraftBook] = useTargetMemory("composer-drafts", () => {
+    const book = createComposerDraftBook();
+    executionTarget.memory.set("composer-drafts", book);
+    return book;
+  });
   const [draftSkills, setDraftSkills] = useState<ReadonlySet<string>>(() => new Set());
   const [usedSkills, setUsedSkills] = useState<ReadonlySet<string>>(() => new Set());
   const usedSkillsIdentityRef = useRef("");

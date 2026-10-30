@@ -18,7 +18,7 @@
  * fell back to the *startup cache* and could pull a live L2/L3 back to L0.
  */
 
-import { applyTier, TIER_ATTRIBUTES, type PerfTier } from "./tiers";
+import { applyTier, type PerfTier } from "./tiers";
 
 /** Main's own motion suggestion for the machine (`off` only on the lowest tier). */
 export type MotionPolicy = "full" | "reduced" | "off";
@@ -78,12 +78,12 @@ export class TierState {
     return true;
   }
 
-  /** The tier and motion state the DOM should carry right now. */
-  resolve(motionOff: boolean): { tier: PerfTier; motionOff: boolean } {
+  /** The tier the DOM should carry right now. */
+  resolve(motionOff: boolean): PerfTier {
     const machine = this.#machine;
     // Main's own verdict (`motion: "off"` on L3) is a floor too.
     const off = motionOff || machine?.motion === "off";
-    return { tier: effectiveTier(machine?.tier ?? "L0", off), motionOff: off };
+    return effectiveTier(machine?.tier ?? "L0", off);
   }
 }
 
@@ -107,15 +107,14 @@ export interface TierControlEnvironment {
 export function startTierControl(environment: TierControlEnvironment): () => void {
   const { root, source } = environment;
   const state = new TierState(source?.cached ?? null);
+  let active = true;
   const element = root;
 
   const render = (): void => {
-    const resolved = state.resolve(environment.motionOff());
-    applyTier(element, resolved.tier);
-    // `applyTier` writes the tier's canonical motion value; the user floor and
-    // Main's verdict are applied on top. An unchanged `setAttribute` does not
-    // invalidate style, so re-applying on every change is free.
-    if (resolved.motionOff) element.setAttribute(TIER_ATTRIBUTES.motion, "off");
+    // One attribute, one source: the tier already encodes the motion floor
+    // (`L1` = reduced motion), so a preference change only changes the tier.
+    if (!active) return;
+    applyTier(element, state.resolve(environment.motionOff()));
   };
 
   render();
@@ -125,24 +124,20 @@ export function startTierControl(environment: TierControlEnvironment): () => voi
     disposers.push(source.onChanged(snapshot => {
       if (state.accept(snapshot)) render();
     }));
-    if (source.cached === null) {
-      // First launch for this profile: no synchronous snapshot yet, so the
-      // first frame is optimistic (L0) and the probe refines it without a flash
-      // of "fully degraded then normal".
-      const pending = source.probe();
-      void pending
-        .then(snapshot => {
-          if (state.accept(snapshot)) render();
-        })
-        .catch(() => {
-          // Keep the last valid state; an unreachable Main is not a reason to
-          // change what the user is looking at.
-        });
-    }
+    // The preload cache precedes this subscription. A push may have happened
+    // between them, so reconcile once even when the first paint used the cache.
+    void source.probe()
+      .then(snapshot => {
+        if (active && state.accept(snapshot)) render();
+      })
+      .catch(() => {
+        // Keep the last valid state when Main is unreachable.
+      });
   }
   disposers.push(environment.onMotionPreferenceChange?.(render) ?? (() => {}));
 
   return () => {
+    active = false;
     for (const dispose of disposers.splice(0)) dispose();
   };
 }

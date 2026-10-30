@@ -91,8 +91,10 @@ Runtime 修改仍按 `npm run omp:overlay:apply` → vendor 编辑 → `npm run 
 
 - 默认界面不再有无限动画。加载态的 `omp-spin` 与骨架 `omp-shimmer` 是仅存的两条无限动画，它们是状态指示器，不是装饰。
 - 动画只允许用合成属性（`opacity` / `transform`）。`text-shadow`、`box-shadow`、`background-position`、`filter` 的无限动画会逐帧重绘，禁止新增。
-- `prefers-reduced-motion: reduce` 与 `data-motion="off"` 走同一套 L1 规则（`apps/renderer/src/perf/tiers.css`）；L1 只把时长压到 0.01ms、迭代 1 次，不写 `animation: none`，否则 loading 指示器会消失。
-- 分级 L0–L3 由 Main 的 `app.getGPUFeatureStatus()` 判定（`getGPUInfo("basic")` 无法区分软/硬合成，禁止用作判据），renderer 入口在首帧前写入 `data-gpu` / `data-motion` / `data-perf`。**降级是少画，不是退回软件渲染，也不是关校验。**
+- `prefers-reduced-motion: reduce` 与「减少动效」偏好走同一套 L1 规则（`apps/renderer/src/perf/tiers.css`）；L1 只把时长压到 0.01ms、迭代 1 次，不写 `animation: none`，否则 loading 指示器会消失。
+- 分级 L0–L3 **只由 Main 判定**（`apps/desktop/src/perf-profile.ts`，判据 `app.getGPUFeatureStatus()`；`getGPUInfo("basic")` 无法区分软/硬合成，禁止用作判据）。渲染层不重新推导等级，只保存最新机器快照、叠加用户的减少动效偏好（用户只能更严），并在首帧前写**一个**属性：
+  `<html data-perf-tier="L2 L1">` —— 值是"包含的层"集合（`L3` → `L3 L2 L1`，`L0` → `L0`），CSS 用 `[data-perf-tier~="L2"]` 选择。改等级只改 Main 的 `gradePerfProfile()`；改视觉只改 `tiers.css`。
+  **降级是少画，不是退回软件渲染，也不是关校验。**
 
 ### Runtime 验签证据
 
@@ -122,5 +124,5 @@ Runtime 修改仍按 `npm run omp:overlay:apply` → vendor 编辑 → `npm run 
 
 ### 门禁
 
-- 新增核心套件（`scripts/core-suites.mjs`）：Dock 模型/持久化/宿主/滚动交接、窄窗抽屉、Composer 击键预算、GPU 分级、用量轮询、IPC 订阅生命周期、Runtime 验签证据、快照克隆计数、open 分片、终端合批与流控。
+- 新增核心套件（`scripts/core-suites.mjs`）：Dock 模型/持久化/宿主/滚动交接、窄窗抽屉、Composer 击键预算、GPU 分级与等级接线（`tiers.test.ts` / `tierControl.test.ts`）、用量轮询、IPC 订阅生命周期、Runtime 验签证据、快照克隆计数、open 分片、终端合批与流控。
 - 验收口径：默认界面可见空闲 CPU（自绘动画成本）目标 < 0.8%，无限装饰动画数 = 0；首屏 JS ≤ 2.5MB raw / 800KB gzip。真实数字与测量条件见执行报告，不把旧报告数值当成本轮结果。

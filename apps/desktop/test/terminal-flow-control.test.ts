@@ -19,6 +19,7 @@ import {
   type TerminalSender,
 } from "../src/terminal-ipc.js";
 import type { TerminalBatchTimers } from "../src/terminal-batch.js";
+import type { TerminalRecordingManager } from "../src/terminal-recording.js";
 
 class ManualTimers implements TerminalBatchTimers {
   readonly scheduled: Array<{ handler: () => void; cancelled: boolean }> = [];
@@ -59,6 +60,7 @@ function makePty(): FakePty {
   const dataListeners: Array<(data: string) => void> = [];
   const exitListeners: Array<(info: { exitCode: number }) => void> = [];
   return {
+    backend: "pty",
     writes: [],
     resizes: [],
     pauses: 0,
@@ -186,7 +188,10 @@ function rig(): Rig {
       disposeWindow: () => {},
     },
   });
-  registerTerminalIpc({ ipcMain: ipc, isTrustedSender: () => true, manager });
+  registerTerminalIpc({ ipcMain: ipc, isTrustedSender: () => true, manager, recordings: {
+    start: () => { recorded.push("start"); },
+    stop: () => { recorded.push("stop"); },
+  } as unknown as TerminalRecordingManager });
   const sender = makeSender(7);
   const invoke = (channel: string, payload?: unknown): unknown => {
     const handler = ipc.handlers.get(channel);
@@ -257,6 +262,35 @@ describe("terminal IPC: output batching", () => {
       "data first, then exit",
     );
     assert.deepEqual(f.data(), ["last line"]);
+  });
+
+  test("recording start and stop flush the output that belongs before each boundary", () => {
+    const f = rig();
+    const session = f.create();
+    f.ptys[0]?.emitData("before start");
+    f.invoke(TERMINAL_IPC_CHANNELS.recordingStart, { id: session.id });
+    f.ptys[0]?.emitData("before stop");
+    f.invoke(TERMINAL_IPC_CHANNELS.recordingStop, { id: session.id });
+    assert.deepEqual(f.recorded, ["out:before start", "start", "out:before stop", "stop"]);
+  });
+
+  test("recording remains open for output that arrives after natural exit", () => {
+    const f = rig();
+    f.create();
+    f.ptys[0]?.emitData("before");
+    f.ptys[0]?.emitExit();
+    f.ptys[0]?.emitData("after");
+    assert.deepEqual(f.recorded, ["out:before"]);
+    f.timers.run();
+    assert.deepEqual(f.recorded, ["out:before", "out:after", "end"]);
+  });
+
+  test("window teardown flushes recording output before ending it", () => {
+    const f = rig();
+    f.create();
+    f.ptys[0]?.emitData("pending tail");
+    f.manager.disposeWindow(f.sender.id);
+    assert.deepEqual(f.recorded, ["out:pending tail", "end"]);
   });
 
   test("a chunk that arrives after the exit event is still delivered", () => {

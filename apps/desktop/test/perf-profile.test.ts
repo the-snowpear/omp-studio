@@ -336,6 +336,24 @@ describe("PerfProfileService", () => {
     assert.equal(fakes.calls.filter((call) => call === "gpu-status").length, 1);
   });
 
+  test("a GPU change during a pending probe is measured before refresh completes", async () => {
+    let settled = false;
+    let release!: (value: string | undefined) => void;
+    const fakes = makeDeps({ gpu: SOFTWARE_STATUS, settled: () => settled });
+    const service = new PerfProfileService({
+      ...fakes.deps,
+      getGLRenderer: () => new Promise(resolve => { release = resolve; }),
+    });
+    const first = service.refresh();
+    settled = true;
+    const changed = service.refresh(true);
+    release(undefined);
+    assert.equal((await first).tier, "L2");
+    assert.equal((await changed).tier, "L2");
+    assert.deepEqual(fakes.changed.map(snapshot => snapshot.tier), ["L2"]);
+    assert.equal(fakes.calls.filter(call => call === "gpu-status").length, 1);
+  });
+
   test("probe() reuses a fresh snapshot and re-probes a stale one", async () => {
     const fakes = makeDeps({ gpu: HARDWARE_STATUS });
     const service = new PerfProfileService(fakes.deps, { freshMs: 30_000 });

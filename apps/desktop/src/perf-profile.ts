@@ -234,6 +234,7 @@ export class PerfProfileService {
   #current: PerfProfileSnapshot | undefined;
   #lastProbeAt = 0;
   #inflight: Promise<PerfProfileSnapshot> | undefined;
+  #refreshRequested = false;
 
   constructor(deps: PerfProfileProbeDeps, options: PerfProfileServiceOptions = {}) {
     this.#deps = deps;
@@ -263,10 +264,20 @@ export class PerfProfileService {
     return snapshot;
   }
 
-  /** Re-probe now. Concurrent callers share one probe. */
-  async refresh(): Promise<PerfProfileSnapshot> {
-    if (this.#inflight !== undefined) return this.#inflight;
-    const inflight = this.#probe().finally(() => {
+  /** Concurrent queries share one probe; changed facts request a follow-up. */
+  async refresh(changed = false): Promise<PerfProfileSnapshot> {
+    if (this.#inflight !== undefined) {
+      if (changed) this.#refreshRequested = true;
+      return this.#inflight;
+    }
+    const inflight = (async () => {
+      let snapshot: PerfProfileSnapshot;
+      do {
+        this.#refreshRequested = false;
+        snapshot = await this.#probe();
+      } while (this.#refreshRequested);
+      return snapshot;
+    })().finally(() => {
       this.#inflight = undefined;
     });
     this.#inflight = inflight;

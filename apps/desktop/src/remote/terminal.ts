@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { createNodePtySpawner, type PtyProcess, type PtySpawner, type TerminalSessionListeners } from "../terminal-pty.js";
-import { TerminalOutputBatcher } from "../terminal-batch.js";
+import { TERMINAL_BATCH_MS, TerminalOutputBatcher } from "../terminal-batch.js";
 import { TERMINAL_MAX_SESSIONS, type TerminalSessionInfo, type TerminalSize } from "../terminal-shared.js";
 import { sshArguments, systemSshExecutable, type RemotePlatform } from "./platform.js";
 import type { RemoteConnectionManager } from "./manager.js";
@@ -20,6 +20,7 @@ interface RemoteSession {
   readonly targetId: string;
   readonly process: PtyProcess;
   readonly listeners: TerminalSessionListeners;
+  ended: boolean;
   cancelAuthentication(): void;
 }
 
@@ -53,7 +54,7 @@ export class RemoteTerminalManager {
   ): Promise<TerminalSessionInfo> {
     if (this.#closed) throw new Error("Terminal manager is closed");
     this.connections.assertWritable(targetId);
-    const count = [...this.#sessions.values()].filter(value => value.windowId === windowId).length + (this.#pending.get(windowId) ?? 0);
+    const count = [...this.#sessions.values()].filter(value => value.windowId === windowId && !value.ended).length + (this.#pending.get(windowId) ?? 0);
     if (count >= TERMINAL_MAX_SESSIONS) throw new Error("Too many SSH terminals");
     const epoch = this.#windowEpochs.get(windowId) ?? 0;
     this.#pending.set(windowId, (this.#pending.get(windowId) ?? 0) + 1);
@@ -73,16 +74,21 @@ export class RemoteTerminalManager {
       try { process = this.pty.spawn({ file: systemSshExecutable(), args, name, cwd: homedir(), cols: size.cols, rows: size.rows, ...(authenticationRequest ? { env: authenticationRequest.env } : {}) }); }
       catch (error) { authenticationRequest?.dispose(); throw error; }
       const id = randomBytes(16).toString("base64url");
-      this.#sessions.set(id, { windowId, targetId, process, listeners, cancelAuthentication: () => authenticationRequest?.dispose() });
+      const session: RemoteSession = { windowId, targetId, process, listeners, ended: false, cancelAuthentication: () => authenticationRequest?.dispose() };
+      this.#sessions.set(id, session);
       this.#batcher.open(id, { flowControl: size.flowControl === true });
       process.onData(data => this.#batcher.push(id, data));
       process.onExit(() => {
         // Deliver the tail before the exit event, like the local shell.
         this.#batcher.flush(id);
+        session.ended = true;
         authenticationRequest?.dispose();
-        this.#sessions.delete(id);
-        this.#batcher.close(id);
         listeners.onExit({ id });
+        // Keep the sink wired through the same tail window as the local PTY.
+        setTimeout(() => {
+          this.#batcher.close(id);
+          this.#sessions.delete(id);
+        }, TERMINAL_BATCH_MS);
       });
       return { id, name, cwd: path };
     } finally {
@@ -92,11 +98,11 @@ export class RemoteTerminalManager {
     }
   }
 
-  hasTarget(targetId: string): boolean { return [...this.#sessions.values()].some(session => session.targetId === targetId); }
+  hasTarget(targetId: string): boolean { return [...this.#sessions.values()].some(session => session.targetId === targetId && !session.ended); }
   owns(windowId: number, id: string): boolean { return this.#sessions.get(id)?.windowId === windowId; }
-  write(windowId: number, id: string, data: string): void { if (this.owns(windowId, id)) this.#sessions.get(id)!.process.write(data); }
+  write(windowId: number, id: string, data: string): void { const session = this.#sessions.get(id); if (session?.windowId === windowId && !session.ended) session.process.write(data); }
   resize(windowId: number, id: string, cols: number, rows: number): void {
-    if (!this.owns(windowId, id)) return;
+    if (!this.owns(windowId, id) || this.#sessions.get(id)!.ended) return;
     // Output queued before the resize belongs to the old geometry.
     this.#batcher.flush(id);
     this.#sessions.get(id)!.process.resize(cols, rows);
@@ -110,7 +116,7 @@ export class RemoteTerminalManager {
     this.#batcher.close(id);
     this.#sessions.delete(id);
     session.cancelAuthentication();
-    session.process.kill();
+    if (!session.ended) session.process.kill();
   }
   disposeWindow(windowId: number): void {
     this.#windowEpochs.set(windowId, (this.#windowEpochs.get(windowId) ?? 0) + 1);

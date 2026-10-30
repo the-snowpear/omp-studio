@@ -390,6 +390,19 @@ describe("desktop ipc subscriptions: cancellation is idempotent and race-safe", 
     rig.handle.dispose();
   });
 
+  test("an early cancellation belongs only to its sender", async () => {
+    const rig = harness();
+    const a = makeSender(1), b = makeSender(2);
+    await rig.unsubscribe(a, "shared-id");
+    await rig.subscribe(b, "shared-id", { scope: "all" });
+    await rig.subscribe(a, "shared-id", { scope: "all" });
+    rig.facade.emit(stateEvent());
+    assert.deepEqual(rig.envelopes(a), []);
+    assert.deepEqual(rig.envelopes(b), [["shared-id"]]);
+    assert.equal(rig.facade.activeCount(), 1);
+    rig.handle.dispose();
+  });
+
   test("the remembered cancellation set is bounded and does not block new ids", async () => {
     const rig = harness();
     const sender = makeSender(1);

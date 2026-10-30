@@ -105,7 +105,7 @@ export class RuntimeInstaller {
    * poll or a second resolve reads 170 MB again only when the bytes, the
    * signature-covered digest or the active version actually changed.
    */
-  readonly #verifications: StatKeyedVerificationCache<void>;
+  readonly #verifications: StatKeyedVerificationCache;
 
   constructor(readonly rootDirectory: string, options: RuntimeInstallerOptions = {}) {
     this.#versionsDirectory = join(rootDirectory, "versions");
@@ -114,7 +114,7 @@ export class RuntimeInstaller {
     this.#trustedKeys = options.trustedKeys ?? {};
     this.#isRuntimeReferenced = options.isRuntimeReferenced;
     this.#prepareStaging = options.prepareStaging;
-    this.#verifications = new StatKeyedVerificationCache<void>({
+    this.#verifications = new StatKeyedVerificationCache({
       maxAgeMs: options.verificationMaxAgeMs ?? DEFAULT_VERIFICATION_MAX_AGE_MS,
       ...(options.now === undefined ? {} : { now: options.now }),
     });

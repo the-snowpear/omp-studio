@@ -674,6 +674,7 @@ describe("navigation and new-window policy", () => {
     };
     // Used by the product today.
     assert.equal(decide("media"), true, "microphone for Live/voice capture");
+    assert.equal(decide("local-fonts"), true, "settings reads system font families");
     assert.equal(decide("clipboard-sanitized-write"), true, "copy actions use navigator.clipboard.writeText");
     // Not used: denied instead of inherited from Electron's default.
     for (const permission of [
@@ -700,7 +701,7 @@ describe("navigation and new-window policy", () => {
     }
     // Every grant in the matrix is exercised above: a new entry has to bring
     // its own call site and its own assertion.
-    assert.deepEqual(Object.keys(RENDERER_PERMISSION_MATRIX).sort(), ["clipboard-sanitized-write", "media"]);
+    assert.deepEqual(Object.keys(RENDERER_PERMISSION_MATRIX).sort(), ["clipboard-sanitized-write", "local-fonts", "media"]);
   });
 
   test("permissions are denied for untrusted documents even when allow-listed", () => {
