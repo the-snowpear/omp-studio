@@ -18,7 +18,7 @@
  * fell back to the *startup cache* and could pull a live L2/L3 back to L0.
  */
 
-import { applyTier, TIER_ATTRIBUTES, type PerfTier } from "./tiers";
+import { applyTier, type PerfTier } from "./tiers";
 
 /** Main's own motion suggestion for the machine (`off` only on the lowest tier). */
 export type MotionPolicy = "full" | "reduced" | "off";
@@ -78,12 +78,12 @@ export class TierState {
     return true;
   }
 
-  /** The tier and motion state the DOM should carry right now. */
-  resolve(motionOff: boolean): { tier: PerfTier; motionOff: boolean } {
+  /** The tier the DOM should carry right now. */
+  resolve(motionOff: boolean): PerfTier {
     const machine = this.#machine;
     // Main's own verdict (`motion: "off"` on L3) is a floor too.
     const off = motionOff || machine?.motion === "off";
-    return { tier: effectiveTier(machine?.tier ?? "L0", off), motionOff: off };
+    return effectiveTier(machine?.tier ?? "L0", off);
   }
 }
 
@@ -110,12 +110,9 @@ export function startTierControl(environment: TierControlEnvironment): () => voi
   const element = root;
 
   const render = (): void => {
-    const resolved = state.resolve(environment.motionOff());
-    applyTier(element, resolved.tier);
-    // `applyTier` writes the tier's canonical motion value; the user floor and
-    // Main's verdict are applied on top. An unchanged `setAttribute` does not
-    // invalidate style, so re-applying on every change is free.
-    if (resolved.motionOff) element.setAttribute(TIER_ATTRIBUTES.motion, "off");
+    // One attribute, one source: the tier already encodes the motion floor
+    // (`L1` = reduced motion), so a preference change only changes the tier.
+    applyTier(element, state.resolve(environment.motionOff()));
   };
 
   render();

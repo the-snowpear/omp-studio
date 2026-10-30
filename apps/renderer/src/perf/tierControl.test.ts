@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi } from "vitest";
 import { TierState, effectiveTier, startTierControl, type MachinePerfSnapshot, type TierControlSource } from "./tierControl";
-import { TIER_ATTRIBUTES } from "./tiers";
+import { PERF_TIER_ATTRIBUTE } from "./tiers";
 
 /**
  * The renderer entry's tier wiring.
@@ -19,7 +19,7 @@ interface Harness {
   readonly source: TierControlSource;
   readonly probe: ReturnType<typeof vi.fn>;
   readonly unsubscribe: ReturnType<typeof vi.fn>;
-  attrs(): { gpu: string | null; motion: string | null; perf: string | null };
+  tier(): string | null;
   push(snapshot: MachinePerfSnapshot): void;
   setMotionPreference(off: boolean): void;
   resolveProbe(snapshot: MachinePerfSnapshot): Promise<void>;
@@ -62,11 +62,7 @@ function harness(options: { cached?: MachinePerfSnapshot | null; motionOff?: boo
     source,
     probe,
     unsubscribe,
-    attrs: () => ({
-      gpu: root.getAttribute(TIER_ATTRIBUTES.gpu),
-      motion: root.getAttribute(TIER_ATTRIBUTES.motion),
-      perf: root.getAttribute(TIER_ATTRIBUTES.perf),
-    }),
+    tier: () => root.getAttribute(PERF_TIER_ATTRIBUTE),
     push: snapshot => listener?.(snapshot),
     setMotionPreference: off => {
       motion.off = off;
@@ -116,52 +112,54 @@ describe("TierState", () => {
     expect(state.machine?.tier).toBe("L2");
   });
 
-  it("folds Main's own motion verdict into the resolution", () => {
-    expect(new TierState({ tier: "L3", motion: "off" }).resolve(false)).toEqual({ tier: "L3", motionOff: true });
-    expect(new TierState({ tier: "L2", motion: "reduced" }).resolve(false)).toEqual({ tier: "L2", motionOff: false });
-    expect(new TierState(null).resolve(false)).toEqual({ tier: "L0", motionOff: false });
+  it("folds Main's own motion verdict into the resolved tier", () => {
+    expect(new TierState({ tier: "L3", motion: "off" }).resolve(false)).toBe("L3");
+    expect(new TierState({ tier: "L1", motion: "off" }).resolve(false)).toBe("L1");
+    expect(new TierState({ tier: "L2", motion: "reduced" }).resolve(false)).toBe("L2");
+    expect(new TierState({ tier: "L0", motion: "full" }).resolve(true)).toBe("L1");
+    expect(new TierState(null).resolve(false)).toBe("L0");
   });
 });
 
 describe("startTierControl: the live tier survives a preference change", () => {
   it("keeps a pushed L2 when the OS motion preference changes", () => {
     const wiring = harness({ cached: CACHED_L0 });
-    expect(wiring.attrs()).toEqual({ gpu: "hardware", motion: "on", perf: "normal" });
+    expect(wiring.tier()).toBe("L0");
     wiring.push({ tier: "L2", motion: "reduced", probedAt: "2026-10-30T10:00:00.000Z" });
-    expect(wiring.attrs()).toEqual({ gpu: "software", motion: "on", perf: "normal" });
+    expect(wiring.tier()).toBe("L2 L1");
     wiring.setMotionPreference(true);
     // The machine tier is the live one, not the startup cache: L2 stays L2.
-    expect(wiring.attrs()).toEqual({ gpu: "software", motion: "off", perf: "normal" });
+    expect(wiring.tier()).toBe("L2 L1");
     wiring.dispose();
   });
 
   it("keeps a pushed L3 when the OS motion preference changes", () => {
     const wiring = harness({ cached: CACHED_L0 });
     wiring.push({ tier: "L3", motion: "off", probedAt: "2026-10-30T10:00:00.000Z" });
-    expect(wiring.attrs()).toEqual({ gpu: "software", motion: "off", perf: "low" });
+    expect(wiring.tier()).toBe("L3 L2 L1");
     wiring.setMotionPreference(true);
-    expect(wiring.attrs()).toEqual({ gpu: "software", motion: "off", perf: "low" });
+    expect(wiring.tier()).toBe("L3 L2 L1");
     wiring.setMotionPreference(false);
-    expect(wiring.attrs()).toEqual({ gpu: "software", motion: "off", perf: "low" });
+    expect(wiring.tier()).toBe("L3 L2 L1");
     wiring.dispose();
   });
 
   it("uses the newest snapshot when a better machine is reported", () => {
     const wiring = harness({ cached: CACHED_L2 });
-    expect(wiring.attrs()).toEqual({ gpu: "software", motion: "on", perf: "normal" });
+    expect(wiring.tier()).toBe("L2 L1");
     wiring.push({ tier: "L0", motion: "full", probedAt: "2026-10-30T10:00:00.000Z" });
-    expect(wiring.attrs()).toEqual({ gpu: "hardware", motion: "on", perf: "normal" });
+    expect(wiring.tier()).toBe("L0");
     wiring.setMotionPreference(true);
-    expect(wiring.attrs()).toEqual({ gpu: "hardware", motion: "off", perf: "normal" });
+    expect(wiring.tier()).toBe("L1");
     wiring.dispose();
   });
 
   it("turns a plain L0 into L1 while the preference is on, and back", () => {
     const wiring = harness({ cached: CACHED_L0 });
     wiring.setMotionPreference(true);
-    expect(wiring.attrs()).toEqual({ gpu: "hardware", motion: "off", perf: "normal" });
+    expect(wiring.tier()).toBe("L1");
     wiring.setMotionPreference(false);
-    expect(wiring.attrs()).toEqual({ gpu: "hardware", motion: "on", perf: "normal" });
+    expect(wiring.tier()).toBe("L0");
     wiring.dispose();
   });
 
@@ -169,9 +167,9 @@ describe("startTierControl: the live tier survives a preference change", () => {
     const wiring = harness({ cached: null });
     expect(wiring.probe).toHaveBeenCalledTimes(1);
     // First frame is optimistic; the probe refines it without a flash.
-    expect(wiring.attrs()).toEqual({ gpu: "hardware", motion: "on", perf: "normal" });
+    expect(wiring.tier()).toBe("L0");
     await wiring.resolveProbe({ tier: "L2", motion: "reduced", probedAt: "2026-10-30T10:00:00.000Z" });
-    expect(wiring.attrs()).toEqual({ gpu: "software", motion: "on", perf: "normal" });
+    expect(wiring.tier()).toBe("L2 L1");
     wiring.dispose();
   });
 
@@ -183,18 +181,18 @@ describe("startTierControl: the live tier survives a preference change", () => {
 
   it("keeps the last valid state when the probe fails", async () => {
     const wiring = harness({ cached: null, motionOff: true });
-    expect(wiring.attrs()).toEqual({ gpu: "hardware", motion: "off", perf: "normal" });
+    expect(wiring.tier()).toBe("L1");
     await wiring.rejectProbe();
-    expect(wiring.attrs()).toEqual({ gpu: "hardware", motion: "off", perf: "normal" });
+    expect(wiring.tier()).toBe("L1");
     wiring.dispose();
   });
 
   it("ignores a probe that resolves after a newer push", async () => {
     const wiring = harness({ cached: null });
     wiring.push({ tier: "L2", motion: "reduced", probedAt: "2026-10-30T10:00:00.000Z" });
-    expect(wiring.attrs().gpu).toBe("software");
+    expect(wiring.tier()).toBe("L2 L1");
     await wiring.resolveProbe({ tier: "L0", motion: "full", probedAt: "2026-10-30T09:00:00.000Z" });
-    expect(wiring.attrs().gpu).toBe("software");
+    expect(wiring.tier()).toBe("L2 L1");
     wiring.dispose();
   });
 
@@ -211,10 +209,10 @@ describe("startTierControl: the live tier survives a preference change", () => {
         return () => listeners.delete(listener);
       },
     });
-    expect(root.getAttribute(TIER_ATTRIBUTES.gpu)).toBe("hardware");
+    expect(root.getAttribute(PERF_TIER_ATTRIBUTE)).toBe("L0");
     off = true;
     for (const listener of [...listeners]) listener();
-    expect(root.getAttribute(TIER_ATTRIBUTES.motion)).toBe("off");
+    expect(root.getAttribute(PERF_TIER_ATTRIBUTE)).toBe("L1");
     dispose();
     expect(listeners.size).toBe(0);
   });
@@ -226,8 +224,8 @@ describe("startTierControl: the live tier survives a preference change", () => {
     expect(wiring.motionListeners()).toBe(0);
     expect(wiring.unsubscribe).toHaveBeenCalledTimes(1);
     // A late push from the disposed wiring must not touch the DOM again.
-    wiring.root.setAttribute(TIER_ATTRIBUTES.gpu, "unchanged");
+    wiring.root.setAttribute(PERF_TIER_ATTRIBUTE, "unchanged");
     wiring.push({ tier: "L3", probedAt: "2026-10-30T11:00:00.000Z" });
-    expect(wiring.root.getAttribute(TIER_ATTRIBUTES.gpu)).toBe("unchanged");
+    expect(wiring.root.getAttribute(PERF_TIER_ATTRIBUTE)).toBe("unchanged");
   });
 });
