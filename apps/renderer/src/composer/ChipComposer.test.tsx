@@ -653,4 +653,32 @@ describe("ChipComposer", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onQueue).not.toHaveBeenCalled();
   });
+  it("does not re-measure capsules for every typed character", () => {
+    const ref = createRef<ChipComposerHandle>();
+    render(<ChipComposer ref={ref} placeholder="msg" />);
+    act(() => { ref.current?.insertChip({ kind: "mode", label: "plan", name: "plan" }); });
+    const editor = editorOf();
+    // Truncation measurement reads scrollWidth/clientWidth, which forces layout.
+    const layoutReads = { box: 0 };
+    const descriptors = ["clientWidth", "scrollWidth"].map((name) => [name, Object.getOwnPropertyDescriptor(Element.prototype, name)!] as const);
+    for (const [name, original] of descriptors) {
+      Object.defineProperty(Element.prototype, name, {
+        configurable: true,
+        get(this: Element) {
+          layoutReads.box += 1;
+          return original.get!.call(this);
+        },
+      });
+    }
+    try {
+      editor.innerHTML = `${editor.innerHTML}a`;
+      fireEvent.input(editor);
+      layoutReads.box = 0;
+      editor.innerHTML = `${editor.innerHTML}b`;
+      fireEvent.input(editor);
+      expect(layoutReads.box).toBe(0);
+    } finally {
+      for (const [name, original] of descriptors) Object.defineProperty(Element.prototype, name, original);
+    }
+  });
 });

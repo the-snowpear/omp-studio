@@ -21,13 +21,29 @@ export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean)
   useLayoutEffect(() => {
     if (wasActive.current !== active) {
       wasActive.current = active;
+      priorityRef.current = null;
       setPriority(null);
       lastLayout.current = undefined;
     }
   }, [active]);
+  /* `priorityRef` is written synchronously here: one gesture can reach the same
+     panel twice (topbar button + the dock region event it dispatches), and a
+     second "show this panel" must not re-run the conversation reflow for a
+     layout that is already in place. */
   const focusPanel = useCallback((panel: LayoutPanel | null) => {
+    if (priorityRef.current === panel) return;
+    priorityRef.current = panel;
     beforeConversationLayoutChange();
     setPriority(panel);
+  }, []);
+  /* Closing a panel only drops the priority that panel itself holds. Clearing it
+     unconditionally would also release whichever drawer a narrow window is
+     currently showing — closing the bottom bar must not hide the side panel. */
+  const releaseFocus = useCallback((panel: LayoutPanel | null) => {
+    if (panel === null || priorityRef.current !== panel) return;
+    priorityRef.current = null;
+    beforeConversationLayoutChange();
+    setPriority(null);
   }, []);
   const dismissOverlay = useCallback(() => focusPanel(null), [focusPanel]);
   /* A priority is the gesture that just asked for a panel ("show this even if it
@@ -37,6 +53,7 @@ export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean)
   useLayoutEffect(() => {
     const dropPriority = () => {
       if (priorityRef.current === null) return;
+      priorityRef.current = null;
       beforeConversationLayoutChange();
       setPriority(null);
     };
@@ -159,5 +176,5 @@ export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean)
       if (previousFocus?.isConnected && !previousFocus.closest("[inert]")) previousFocus.focus({ preventScroll: true });
     };
   }, [active, visibility.overlay, dismissOverlay]);
-  return { ...visibility, rootRef, focusPanel, dismissOverlay };
+  return { ...visibility, rootRef, focusPanel, releaseFocus, dismissOverlay };
 }

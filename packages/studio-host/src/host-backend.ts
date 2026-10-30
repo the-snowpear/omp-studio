@@ -1,7 +1,11 @@
 import { join } from "node:path";
 import { RuntimeInstaller, type ActivateOptions, type RuntimeInstallerOptions } from "@omp-studio/runtime-installer";
 import type { RuntimePreference, SessionBinding } from "@omp-studio/studio-protocol";
-import { resolveRuntime, type RuntimeResolution, type RuntimeResolverEnvironment } from "./runtime-resolver.js";
+import {
+  resolveRuntime,
+  type RuntimeResolution,
+  type RuntimeResolverEnvironment,
+} from "./runtime-resolver.js";
 import { ThreadBindingStore } from "./thread-binding-store.js";
 
 export interface HostBackendOptions {
@@ -43,16 +47,37 @@ export class HostBackend {
   async resolve(preference: RuntimePreference): Promise<RuntimeResolution> {
     return resolveRuntime(preference, {
       ...this.#resolver,
+      // The installer answers with the signed entrypoint digest, so the resolver
+      // can prove the bytes it is about to execute without trusting the
+      // installer's evidence cache.
       managedLookup: { current: async () => await this.installer.currentManifest() },
     });
   }
 
+  /**
+   * Forget every piece of Runtime verification evidence the Host holds. Call it
+   * after an operation that can change the installed bytes outside this class
+   * (`installer.rollback()`, a manual repair, an update that rewrote the
+   * version tree): install/activate already do it for themselves.
+   */
+  invalidateRuntimeVerification(): void {
+    this.installer.invalidate();
+  }
+
   async install(artifactDirectory: string, options?: Parameters<RuntimeInstaller["install"]>[1]) {
-    return await this.installer.install(artifactDirectory, options);
+    try {
+      return await this.installer.install(artifactDirectory, options);
+    } finally {
+      this.invalidateRuntimeVerification();
+    }
   }
 
   async activate(runtimeVersion: string, options?: ActivateOptions) {
-    return await this.installer.activate(runtimeVersion, options);
+    try {
+      return await this.installer.activate(runtimeVersion, options);
+    } finally {
+      this.invalidateRuntimeVerification();
+    }
   }
 
   async bind(binding: SessionBinding, executableIdentity: string): Promise<void> {

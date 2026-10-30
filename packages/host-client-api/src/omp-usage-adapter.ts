@@ -373,11 +373,27 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
   let inflight: Promise<void> | undefined;
 
   async function syncOnce(): Promise<{ readonly ompPath?: string; readonly syncError?: string }> {
+    // Cheap answers first: the throttle window and an in-flight sync need no
+    // Runtime lookup at all. `locateOmp()` is cheap now that runtime evidence is
+    // cached, but it is still a file probe on the 30 s poll — order it after the
+    // decisions that can answer without it.
+    const started = now();
+    if (inflight) {
+      await inflight;
+      return {};
+    }
+    if (lastSyncAt > 0 && started - lastSyncAt < throttleMs) {
+      return {};
+    }
     const exe = await locateOmp();
     if (exe === undefined) {
+      // Same `exe`-classified message as before the reorder: not finding the
+      // Runtime still surfaces as a sync error, never as a generic read failure.
       return { syncError: "未找到 omp。安装 OMP 或将其加入 PATH 后即可同步用量。" };
     }
-    const started = now();
+    // Re-check after the await: a concurrent caller may have started or finished
+    // the sync while the locator was resolving. Keeping this check after the
+    // await is what makes `syncOnce` single-flight.
     if (inflight) {
       await inflight;
       return { ompPath: exe };

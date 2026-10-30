@@ -634,6 +634,15 @@ img.profile-edit-avatar-img { display: block; }
 }
 .hist-row:hover,
 .hist-row:focus-within { border-color: var(--accent-border); }
+/* 长列表（历史会话 / 活动流）没有测量契约：行高不会被虚拟列表、minimap 或贴底
+   滚动读回，因此可以安全跳过视口外行的内容布局与绘制。`auto` 让渲染过的行记住
+   实测高度，往回滚动时滚动条不漂移；首屏之前的行用 45px 兜底
+   （≈ 标题 + 副行两行的高度）。虚拟化正文不要照抄：那些行的高度是回读的。 */
+.hist-row,
+.activity-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 45px;
+}
 .hist-row .h-main {
   display: block;
   flex: 1;

@@ -36,6 +36,13 @@ export interface OmpStudioDesktopApi {
   command<TName extends CommandName>(
     request: ClientCommandRequest<TName>,
   ): Promise<ClientCommandAccepted<TName>>;
+  /**
+   * Register one subscription. The returned `Unsubscribe` must cancel exactly
+   * that registration on the Main side (not "everything for this window"),
+   * and must stay safe to call twice — `DesktopClientTransport` relies on it
+   * to release subscriptions one at a time, and Main tears the rest down on
+   * window destroy / navigation.
+   */
   subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe;
   close(): Promise<void>;
 }

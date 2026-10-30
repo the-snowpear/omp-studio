@@ -35,6 +35,7 @@ import {
 } from "./terminal-shared.js";
 import { REMOTE_CHANNELS, type RemoteApi } from "./remote/shared.js";
 import { createOmpStudioChromeApi, subscribeChannel } from "./chrome-api.js";
+import { createPerfProfileApi } from "./perf-profile-shared.js";
 
 /**
  * Electron `ipcRenderer.on` calls `(IpcRendererEvent, payload)`. The Host
@@ -90,6 +91,22 @@ const remoteApi: RemoteApi = {
 };
 contextBridge.exposeInMainWorld("ompStudioRemote", Object.freeze(remoteApi));
 contextBridge.exposeInMainWorld("ompStudioChrome", createOmpStudioChromeApi(ipcRenderer, webUtils));
+// P0-6: read-only GPU/low-spec profile. `cached` is read synchronously at
+// preload time (sendSync) so the Renderer can pick its first-paint policy
+// without waiting for an IPC round-trip; there is no write method.
+contextBridge.exposeInMainWorld(
+  "ompStudioPerf",
+  createPerfProfileApi({
+    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+    sendSync: (channel) => ipcRenderer.sendSync(channel),
+    on: (channel, listener) => {
+      ipcRenderer.on(channel, listener);
+    },
+    removeListener: (channel, listener) => {
+      ipcRenderer.removeListener(channel, listener);
+    },
+  }),
+);
 
 const terminalApi: OmpStudioTerminalApi = {
   recordingStart(input) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStart, input); },
@@ -114,6 +131,11 @@ const terminalApi: OmpStudioTerminalApi = {
   },
   onExit(listener) {
     return subscribeChannel<TerminalExitEvent>(ipcRenderer, TERMINAL_IPC_CHANNELS.exit, listener);
+  },
+  ack(id, bytes) {
+    // Fire-and-forget: an ACK is a credit, not a state change. A window that
+    // closed mid-write must not produce an unhandled rejection.
+    void ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.ack, { id, bytes }).catch(() => undefined);
   },
 };
 

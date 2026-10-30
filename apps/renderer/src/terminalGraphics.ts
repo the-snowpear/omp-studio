@@ -57,6 +57,19 @@ export class TerminalGraphicsDecoder {
   private kitty = "";
   private kittyOptions: Record<string, string> = {};
   push(chunk: string): { text: string; images: TerminalGraphic[]; errors: string[] } {
+    if (!this.pending && !chunk.includes("\x1b")) return { text: chunk, images: [], errors: [] };
+    const text: string[] = [], images: TerminalGraphic[] = [], errors: string[] = [];
+    // Main batches ordinary logs up to 2 MiB (and can overshoot by one PTY
+    // chunk). Bound graphic parsing, not the size of the text transport batch.
+    for (let at = 0; at < chunk.length; at += 64 * 1024) {
+      const result = this.decode(chunk.slice(at, at + 64 * 1024));
+      text.push(result.text);
+      images.push(...result.images);
+      errors.push(...result.errors);
+    }
+    return { text: text.join(""), images, errors };
+  }
+  private decode(chunk: string): { text: string; images: TerminalGraphic[]; errors: string[] } {
     const result = { text: "", images: [] as TerminalGraphic[], errors: [] as string[] };
     if (chunk.length + this.pending.length > GRAPHICS_MAX_BYTES) { this.pending = ""; this.kitty = ""; result.errors.push("Terminal graphics input exceeds limit"); return result; }
     this.pending += chunk;

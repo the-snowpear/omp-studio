@@ -1,7 +1,7 @@
 import { useExecutionTarget } from "./workspaces/ExecutionTargets";
 import { readTerminalTypography, readXtermTheme, applyTheme } from "./terminalTheme";
 import { useAppSettings } from "./settings/appSettings";
-import { useTerminalSessions, type TerminalSession as Session, type TerminalScreenHost as Host } from "./terminalSessions";
+import { useTerminalSessions, type TerminalSessions, type TerminalSession as Session, type TerminalScreenHost as Host } from "./terminalSessions";
 import { TerminalGraphicView } from "./TerminalGraphicView";
 import { TerminalRecordingControls } from "./recordings/TerminalRecordingControls";
 /**
@@ -32,7 +32,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
   const { t } = useI18n();
   const api = globalThis.ompStudioTerminal;
   const executionTarget = useExecutionTarget();
-  const { store, sessions: allSessions, graphics, graphicsErrors } = useTerminalSessions();
+  const { store, sessions: allSessions, graphics, graphicsErrors, notices } = useTerminalSessions();
   const sessions = allSessions.filter(session => session.targetId === executionTarget.id);
   const [activeId, setActiveId] = useState<string | null>(() => store.activeIds.get(executionTarget.id) ?? null);
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +124,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
             </div>
             {executionTarget.id ? <p className="muted small">SSH 终端暂不支持本机录制；关闭标签会结束该终端。</p> : <TerminalRecordingControls key={active.id} api={api} id={active.id} visible={visible} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />}
             {error ? <p role="alert" className="muted small">{error}</p> : null}
+            {notices[active.id] ? <p role="status" className="muted small">{notices[active.id]}</p> : null}
             {(graphics[active.id]?.length || graphicsErrors[active.id]) ? <div style={{ maxHeight: 240, overflow: "auto" }} aria-label="Terminal images / 终端图片">
               {graphics[active.id]?.map((image, index) => <TerminalGraphicView key={index} image={image} />)}
               {graphicsErrors[active.id] ? <p role="status">{graphicsErrors[active.id]}</p> : null}
@@ -135,7 +136,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
                   session={session}
                   api={api}
                   hosts={store.hosts}
-                  pending={store.pending}
+                  store={store}
                   active={visible && session.id === active.id}
                 />
               ))}
@@ -157,13 +158,13 @@ function XtermScreen({
   session,
   api,
   hosts,
-  pending,
+  store,
   active,
 }: {
   session: Session;
   api: NonNullable<typeof globalThis.ompStudioTerminal>;
   hosts: Map<string, Host>;
-  pending: Map<string, string>;
+  store: TerminalSessions;
   active: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -193,15 +194,13 @@ function XtermScreen({
         void api.write(session.id, data);
       });
       host = { term, fit };
-      hosts.set(session.id, host);
-      const queued = pending.get(session.id);
-      if (queued !== undefined) {
-        term.write(queued);
-        pending.delete(session.id);
-      }
     } else if (termParentMissing(host.term, node)) {
       node.appendChild(host.term.element ?? node);
     }
+    // Register the host and hand over the backlog that arrived while it was
+    // missing: the store writes it in order and credits Main per written batch
+    // (it deliberately does not acknowledge queued-but-unwritten output).
+    store.attachHost(session.id, host);
 
     host.term.options.disableStdin = session.status === "ended";
     host.term.options.cursorBlink = session.status !== "ended";
@@ -211,7 +210,7 @@ function XtermScreen({
     return () => {
       observer.disconnect();
     };
-  }, [api, hosts, pending, session.id, session.status]);
+  }, [api, hosts, store, session.id, session.status]);
 
   useEffect(() => {
     const host = hosts.get(session.id);

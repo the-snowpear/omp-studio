@@ -83,6 +83,31 @@ function clean(layout: DockLayout): void {
   layout.floats = layout.floats.filter(group => group.panels.length > 0);
 }
 
+const isEmpty = (layout: DockLayout, region: "right" | "bottom"): boolean => layout[region].groups.length === 0;
+
+/**
+ * Visibility convergence, only ever applied to a final layout. A region that
+ * lost its last module collapses, so an empty tab strip never keeps occupying
+ * width (right) or height (bottom).
+ *
+ * Left cards and the conversation rail keep their state when empty: both are
+ * deliberate empty states with their own "add a tool" affordance, and the rail
+ * is an overlay that occupies no layout space.
+ *
+ * `before` is the layout the step started from: a region that was already
+ * empty stays open, so an explicit "region visible" on an empty region still
+ * shows its "add a tool" state. Without `before` (persisted data) every empty
+ * region converges. Sizes, ratios, `bottom.expanded` and `rail.lastMode` are
+ * user intent and survive; only `visible` changes.
+ */
+export function settle(layout: DockLayout, before?: DockLayout): void {
+  for (const region of ["right", "bottom"] as const) {
+    if (!isEmpty(layout, region)) continue;
+    if (before && isEmpty(before, region)) continue;
+    layout[region].visible = false;
+  }
+}
+
 function reveal(layout: DockLayout, location: DockLocation, panel: PanelId): void {
   if (location.region === "left") layout.left.visible = true;
   else if (location.region === "rail") {
@@ -243,6 +268,9 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
       break;
     }
   }
+  // Only the committed result is judged; move() reorders inside a region and
+  // briefly empties it on the way, so settling there would drop live regions.
+  settle(next, layout);
   return same(layout, next) ? layout : next;
 }
 
@@ -331,6 +359,8 @@ export function normalizeLayout(value: unknown): DockLayout {
   }
   layout.presetId = typeof raw.presetId === "string" && raw.presetId ? raw.presetId : "default";
   clean(layout);
+  // Old configurations could keep an empty region open; the same rule applies here.
+  settle(layout);
   return layout;
 }
 

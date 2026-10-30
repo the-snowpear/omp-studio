@@ -70,8 +70,10 @@ export class ConversationEventFanout {
   readonly #coalescer: ConversationCoalescer;
 
   constructor(readonly options: { readonly incrementalToolReplay?: boolean; readonly backgroundCoalescing?: boolean;
-    readonly timers?: Pick<ConversationCoalescerOptions, "setTimer" | "clearTimer"> } = {}) {
-    this.#coalescer = new ConversationCoalescer({ ...options.timers, emit: (envelope) => this.#deliver(envelope) });
+    readonly timers?: Pick<ConversationCoalescerOptions, "setTimer" | "clearTimer">;
+    /** Slice budget / scheduler for bulk flushes (tests inject a manual one). */
+    readonly delivery?: Pick<ConversationCoalescerOptions, "schedule" | "cancelSchedule" | "sliceEvents" | "sliceMs" | "now"> } = {}) {
+    this.#coalescer = new ConversationCoalescer({ ...options.timers, ...options.delivery, emit: (envelope) => this.#deliver(envelope) });
   }
 
   setVisibleSessions(ids: ReadonlySet<string> | undefined): void {
@@ -132,7 +134,12 @@ export class ConversationEventFanout {
   snapshot(sessionId: ConversationRuntimeEvent["sessionId"]):
     | { readonly status: "complete"; readonly watermark: number; readonly events: readonly StudioConversationForward[] }
     | { readonly status: "resyncRequired"; readonly watermark: number; readonly events: readonly []; readonly reason: string } {
-    this.#coalescer.flush(sessionId);
+    // Sliced on purpose: `conversation.open` must return after one bounded slice
+    // instead of draining a whole background backlog in one task. The envelopes
+    // left queued keep their order, are delivered as ordinary live events and
+    // get streamSeq > watermark, so the subscribe-before-open dedupe still holds
+    // (the Client drops buffered events at or below the watermark only).
+    this.#coalescer.flushSliced(sessionId);
     const session = this.#replay.get(sessionId);
     const watermark = this.#streamSeq.get(sessionId) ?? 0;
     if (session?.overflowed === true || this.#evictedTurns.has(sessionId)) {

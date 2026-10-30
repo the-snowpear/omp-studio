@@ -96,6 +96,41 @@ function snapshotOf(editor: HTMLElement, images: Map<string, PromptImage>): Comp
 }
 
 /**
+ * Capsule identity in document order. Capsule labels/wrapping only need
+ * re-measuring when this changes (insert/remove/undo), not on every character
+ * typed next to them — the old code re-walked every capsule twice per keystroke.
+ */
+function chipSignature(editor: HTMLElement): string {
+  const chips = editor.querySelectorAll<HTMLElement>(".cm-chip");
+  if (chips.length === 0) return "";
+  const parts: string[] = [];
+  for (const chip of chips) parts.push(chip.dataset.chip ?? "");
+  return parts.join("\u0001");
+}
+
+type ThumbSubject = ImagePreviewSubject & { id: string };
+
+/** Image capsules are immutable; the strip only changes when the capsules do. */
+function sameThumbs(current: readonly ThumbSubject[], next: readonly ThumbSubject[]): boolean {
+  if (current.length !== next.length) return false;
+  for (let index = 0; index < current.length; index += 1) {
+    const a = current[index]!;
+    const b = next[index]!;
+    if (a.id !== b.id || a.label !== b.label || a.url !== b.url) return false;
+  }
+  return true;
+}
+
+function imageChipKey(snapshot: ComposerSnapshot): string {
+  let key = "";
+  for (const node of snapshot.doc.nodes) {
+    if (node.type !== "chip" || node.chip.kind !== "image") continue;
+    key += `${node.chip.id}\u0000${node.chip.label}\u0001`;
+  }
+  return key;
+}
+
+/**
  * Absolute OS paths resolved by Main. Files under the workspace come back
  * workspace-relative; anything else on the machine keeps its absolute path,
  * which the Runtime resolves just as well.
@@ -153,6 +188,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const fileRef = useRef<HTMLInputElement | null>(null);
   const imagesRef = useRef(new Map<string, PromptImage>());
   const composingRef = useRef(false);
+  const chipSignatureRef = useRef("");
+  const imageChipKeyRef = useRef("");
   const [documentVersion,setDocumentVersion]=useState(0);
   const predictionVersion=useRef(0);
   const predictionBusy=useRef(false);
@@ -178,11 +215,18 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     invalidatePrediction();
     const editor = editorRef.current;
     if (!editor) return emptySnapshot();
-    renumberImageChips(editor);
-    syncChipTruncation(editor);
-    requestAnimationFrame(() => {
-      if (editorRef.current === editor) syncChipTruncation(editor);
-    });
+    // Renumbering labels and measuring truncation are the only forced-layout
+    // reads on this path, and only a capsule can invalidate them: plain typing
+    // next to a `/plan` chip must not re-measure every capsule twice.
+    if (chipSignature(editor) !== chipSignatureRef.current) {
+      renumberImageChips(editor);
+      chipSignatureRef.current = chipSignature(editor);
+      syncChipTruncation(editor);
+      // Wrapping/scrollbars settle one frame later; re-measure once then.
+      requestAnimationFrame(() => {
+        if (editorRef.current === editor) syncChipTruncation(editor);
+      });
+    }
     const snapshot = snapshotOf(editor, imagesRef.current);
     const typed = typedSlashSource(snapshot.doc);
     setSlashSource(typed);
@@ -191,21 +235,27 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       setCommandDismissed(false);
     }
     setEmpty(snapshotIsEmpty(snapshot));
-    const nextThumbs = snapshot.doc.nodes.flatMap((node) => {
-      if (node.type !== "chip" || node.chip.kind !== "image" || node.chip.image === undefined) return [];
-      return [{
-        id: node.chip.id,
-        url: imagePreviewUrl(node.chip.image),
-        label: node.chip.label,
-        mimeType: node.chip.image.mimeType,
-        data: node.chip.image.data,
-      }];
-    });
-    setThumbs(nextThumbs);
-    // Drop bytes for capsules the user deleted; base64 payloads are large.
-    const live = new Set(nextThumbs.map((thumb) => thumb.id));
-    for (const id of [...imagesRef.current.keys()]) {
-      if (!live.has(id)) imagesRef.current.delete(id);
+    // Preview URLs are base64 data URLs; rebuilding them per keystroke allocates
+    // the whole payload again for an image capsule that cannot have changed.
+    const imageKey = imageChipKey(snapshot);
+    if (imageKey !== imageChipKeyRef.current) {
+      imageChipKeyRef.current = imageKey;
+      const nextThumbs = snapshot.doc.nodes.flatMap((node) => {
+        if (node.type !== "chip" || node.chip.kind !== "image" || node.chip.image === undefined) return [];
+        return [{
+          id: node.chip.id,
+          url: imagePreviewUrl(node.chip.image),
+          label: node.chip.label,
+          mimeType: node.chip.image.mimeType,
+          data: node.chip.image.data,
+        }];
+      });
+      setThumbs((current) => (sameThumbs(current, nextThumbs) ? current : nextThumbs));
+      // Drop bytes for capsules the user deleted; base64 payloads are large.
+      const live = new Set(nextThumbs.map((thumb) => thumb.id));
+      for (const id of [...imagesRef.current.keys()]) {
+        if (!live.has(id)) imagesRef.current.delete(id);
+      }
     }
     onChange?.(snapshot);
     return snapshot;
@@ -302,6 +352,32 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       return live ?? null;
     });
   }, [thumbs]);
+
+  /* Capsule truncation depends on the editor's content width; typing only moves
+     the height. A width-only ResizeObserver re-measures when the box actually
+     changes (window resize, scrollbar appearing) without reading layout on the
+     keystroke path, which is where the per-character measurement used to be. */
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (editor === null || typeof ResizeObserver === "undefined") return undefined;
+    let width = editor.clientWidth;
+    let frame = 0;
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[0]?.contentRect.width ?? editor.clientWidth;
+      if (Math.abs(next - width) < 0.5) return;
+      width = next;
+      if (frame !== 0) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (editorRef.current === editor) syncChipTruncation(editor);
+      });
+    });
+    observer.observe(editor);
+    return () => {
+      if (frame !== 0) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, []);
 
   useImperativeHandle(ref, () => ({
     focus(options) {

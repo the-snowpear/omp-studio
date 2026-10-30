@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -98,10 +99,18 @@ function environment(partial: Partial<RuntimeResolverEnvironment> = {}): Runtime
 // The PATH locator and managed manifests use the host's entrypoint name.
 const HOST_ENTRYPOINT = runtimeEntrypointFor(process.platform);
 
+/**
+ * The bytes every fixture writes. A managed candidate now has to prove its
+ * content matches the signed checksum digest, so the fixtures carry the digest
+ * that corresponds to these bytes.
+ */
+const FIXTURE_BYTES = "fixture-bytes";
+const FIXTURE_SHA256 = createHash("sha256").update(FIXTURE_BYTES).digest("hex");
+
 async function executableFile(): Promise<{ directory: string; path: string }> {
   const directory = await mkdtemp(join(tmpdir(), "omp-studio-resolver-"));
   const path = join(directory, HOST_ENTRYPOINT);
-  await writeFile(path, "fixture-bytes");
+  await writeFile(path, FIXTURE_BYTES);
   return { directory, path };
 }
 
@@ -124,7 +133,7 @@ function managedManifest(partial: Partial<RuntimeInstallationManifest> = {}): Ru
 
 test("RT-001 signed-equivalent managed full-parity installation resolves as managed", async () => {
   const { path } = await executableFile();
-  const resolution = await resolveRuntime({ kind: "managed" }, environment({ managedLookup: { current: async () => ({ manifest: managedManifest(), entrypointPath: path }) } }));
+  const resolution = await resolveRuntime({ kind: "managed" }, environment({ managedLookup: { current: async () => ({ manifest: managedManifest(), entrypointPath: path, entrypointSha256: FIXTURE_SHA256 }) } }));
   assert.equal(resolution.classification, "managed");
   assert.equal(resolution.source, "managed");
   assert.equal(resolution.profile, "full-parity-v1");
@@ -233,7 +242,7 @@ test("managed installation manifest with a limited profile stays managed with wa
   });
   const resolution = await resolveRuntime(
     { kind: "managed" },
-    environment({ managedLookup: { current: async () => ({ manifest: limitedManifest, entrypointPath: path }) }, probe: probeWith(fullOutcome({ hello: limitedHello })) }),
+    environment({ managedLookup: { current: async () => ({ manifest: limitedManifest, entrypointPath: path, entrypointSha256: FIXTURE_SHA256 }) }, probe: probeWith(fullOutcome({ hello: limitedHello })) }),
   );
   assert.equal(resolution.classification, "managed");
   assert.equal(resolution.profile, "limited");
@@ -253,7 +262,7 @@ test("managed manifest claiming full parity without evidence is rejected", async
   });
   const resolution = await resolveRuntime(
     { kind: "managed" },
-    environment({ managedLookup: { current: async () => ({ manifest: managedManifest(), entrypointPath: path }) }, probe: probeWith(fullOutcome({ hello: limitedHello })) }),
+    environment({ managedLookup: { current: async () => ({ manifest: managedManifest(), entrypointPath: path, entrypointSha256: FIXTURE_SHA256 }) }, probe: probeWith(fullOutcome({ hello: limitedHello })) }),
   );
   assert.equal(resolution.classification, "rejected");
   assert.match(resolution.rejectionReason ?? "", /claims full parity/u);
@@ -264,7 +273,7 @@ test("managed Runtime is rejected when its command manifest cannot be verified",
   const resolution = await resolveRuntime(
     { kind: "managed" },
     environment({
-      managedLookup: { current: async () => ({ manifest: managedManifest({ profile: "limited" }), entrypointPath: path }) },
+      managedLookup: { current: async () => ({ manifest: managedManifest({ profile: "limited" }), entrypointPath: path, entrypointSha256: FIXTURE_SHA256 }) },
       probe: probeWith({ hello: hello({ capabilityManifest: { ...hello().capabilityManifest, profile: "limited" } }), smoke: "passed", shutdown: "passed" }),
     }),
   );
@@ -276,7 +285,7 @@ test("managed capability hash drift is rejected", async () => {
   const { path } = await executableFile();
   const resolution = await resolveRuntime(
     { kind: "managed" },
-    environment({ managedLookup: { current: async () => ({ manifest: managedManifest({ capabilityHash: "sha256:different" }), entrypointPath: path }) } }),
+    environment({ managedLookup: { current: async () => ({ manifest: managedManifest({ capabilityHash: "sha256:different" }), entrypointPath: path, entrypointSha256: FIXTURE_SHA256 }) } }),
   );
   assert.equal(resolution.classification, "rejected");
   assert.match(resolution.rejectionReason ?? "", /capability hash drift/u);
@@ -292,7 +301,7 @@ test("managed command manifest hash drift is rejected", async () => {
     { kind: "managed" },
     environment({
       managedLookup: {
-        current: async () => ({ manifest: managedManifest({ commandManifestHash: "sha256:commands-drifted" }), entrypointPath: path }),
+        current: async () => ({ manifest: managedManifest({ commandManifestHash: "sha256:commands-drifted" }), entrypointPath: path, entrypointSha256: FIXTURE_SHA256 }),
       },
     }),
   );
@@ -304,7 +313,7 @@ test("managed installation platform mismatch is rejected", async () => {
   const { path } = await executableFile();
   const resolution = await resolveRuntime(
     { kind: "managed" },
-    environment({ managedLookup: { current: async () => ({ manifest: managedManifest({ platform: "linux-arm64" }), entrypointPath: path }) } }),
+    environment({ managedLookup: { current: async () => ({ manifest: managedManifest({ platform: "linux-arm64" }), entrypointPath: path, entrypointSha256: FIXTURE_SHA256 }) } }),
   );
   assert.equal(resolution.classification, "rejected");
   assert.match(resolution.rejectionReason ?? "", /platform/u);
@@ -324,7 +333,7 @@ test("probe failure rejects managed and system candidates alike", async () => {
   const { path } = await executableFile();
   const managed = await resolveRuntime(
     { kind: "managed" },
-    environment({ managedLookup: { current: async () => ({ manifest: managedManifest(), entrypointPath: path }) }, probe: probeWith({ failure: "PROBE_TIMEOUT" }) }),
+    environment({ managedLookup: { current: async () => ({ manifest: managedManifest(), entrypointPath: path, entrypointSha256: FIXTURE_SHA256 }) }, probe: probeWith({ failure: "PROBE_TIMEOUT" }) }),
   );
   assert.equal(managed.classification, "rejected");
   assert.equal(managed.probeFailure, "PROBE_TIMEOUT");

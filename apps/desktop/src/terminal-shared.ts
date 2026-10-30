@@ -15,6 +15,8 @@ export const TERMINAL_IPC_CHANNELS = {
   recordingStatus: "omp-studio:desktop:terminal-recording-status",
   data: "omp-studio:desktop:terminal-data",
   exit: "omp-studio:desktop:terminal-exit",
+  /** Renderer -> Main: bytes written to xterm (flow-control acknowledgement). */
+  ack: "omp-studio:desktop:terminal-ack",
 } as const;
 
 export const TERMINAL_MAX_SESSIONS = 8;
@@ -30,6 +32,13 @@ export interface TerminalCreateInput {
   readonly workspaceId?: string;
   readonly cols?: number;
   readonly rows?: number;
+  /**
+   * Opt in to output flow control: Main then pauses the PTY once the Renderer
+   * has more than the high watermark of unacknowledged output, and resumes on
+   * ACKs. Only a Renderer that actually acknowledges (`api.ack`) may set this;
+   * without it the terminal still works, batched but unpaused.
+   */
+  readonly flowControl?: boolean;
 }
 
 export interface TerminalSize {
@@ -72,8 +81,23 @@ export function parseRecordingInput(value: unknown): TerminalRecordingInput {
 
 export interface TerminalDataEvent {
   readonly id: string;
+  /** One batched payload: several PTY chunks joined in one IPC message. */
   readonly data: string;
+  /**
+   * UTF-8 byte length of `data`. Optional for compatibility: an older Main
+   * omits it and the Renderer falls back to measuring the string itself.
+   */
+  readonly bytes?: number;
 }
+
+export interface TerminalAckInput {
+  readonly id: string;
+  /** UTF-8 bytes the Renderer has written to xterm since its previous ACK. */
+  readonly bytes: number;
+}
+
+/** Upper bound on one ACK; a larger number is a bug, not a credit. */
+export const TERMINAL_MAX_ACK_BYTES = 64 * 1024 * 1024;
 
 export interface TerminalExitEvent {
   readonly id: string;
@@ -107,18 +131,20 @@ export function parseSessionId(value: unknown, field: string): string {
   return value;
 }
 
-export function parseCreateInput(value: unknown): TerminalSize & { targetId?: string; workspaceId?: string } {
+export function parseCreateInput(value: unknown): TerminalSize & { targetId?: string; workspaceId?: string; flowControl: boolean } {
   const input = value === undefined ? {} : value;
   assertPlainObject(input, "terminal create");
   for (const key of Object.keys(input)) {
-    if (key !== "cols" && key !== "rows" && key !== "targetId" && key !== "workspaceId") {
+    if (key !== "cols" && key !== "rows" && key !== "targetId" && key !== "workspaceId" && key !== "flowControl") {
       throw new TerminalIpcError(`terminal create: unexpected field ${key}`);
     }
   }
   for (const key of ["targetId", "workspaceId"]) if (input[key] !== undefined && (typeof input[key] !== "string" || !input[key])) throw new TerminalIpcError(`Invalid ${key}`);
+  if (input.flowControl !== undefined && typeof input.flowControl !== "boolean") throw new TerminalIpcError("Invalid flowControl");
   return {
     ...(typeof input.targetId === "string" ? { targetId: input.targetId } : {}),
     ...(typeof input.workspaceId === "string" ? { workspaceId: input.workspaceId } : {}),
+    flowControl: input.flowControl === true,
     cols: parseDimension(input.cols, "terminal create: cols", TERMINAL_MIN_COLS, TERMINAL_MAX_COLS, 80),
     rows: parseDimension(input.rows, "terminal create: rows", TERMINAL_MIN_ROWS, TERMINAL_MAX_ROWS, 24),
   };
@@ -164,6 +190,20 @@ export function parseDisposeInput(value: unknown): TerminalDisposeInput {
   return { id: parseSessionId(value.id, "terminal dispose: id") };
 }
 
+export function parseAckInput(value: unknown): TerminalAckInput {
+  assertPlainObject(value, "terminal ack");
+  for (const key of Object.keys(value)) {
+    if (key !== "id" && key !== "bytes") {
+      throw new TerminalIpcError(`terminal ack: unexpected field ${key}`);
+    }
+  }
+  const bytes = value.bytes;
+  if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0 || bytes > TERMINAL_MAX_ACK_BYTES) {
+    throw new TerminalIpcError(`terminal ack: bytes must be an integer 0–${TERMINAL_MAX_ACK_BYTES}`);
+  }
+  return { id: parseSessionId(value.id, "terminal ack: id"), bytes };
+}
+
 export interface OmpStudioTerminalApi {
   create(size?: TerminalCreateInput): Promise<TerminalSessionInfo>;
   write(id: string, data: string): Promise<void>;
@@ -174,4 +214,9 @@ export interface OmpStudioTerminalApi {
   recordingStatus(id: string): Promise<TerminalRecordingStatus>;
   onData(listener: (event: TerminalDataEvent) => void): () => void;
   onExit(listener: (event: TerminalExitEvent) => void): () => void;
+  /**
+   * Acknowledge output written to xterm (flow control). Optional so a Renderer
+   * running against an older shell degrades to batching without pausing.
+   */
+  ack?(id: string, bytes: number): void;
 }

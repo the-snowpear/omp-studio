@@ -54,6 +54,10 @@ export class DesktopClientTransport implements ClientTransport {
 
   subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe {
     this.assertOpen();
+    // `stopApi` is the api-level cancellation: it drops this listener *and*
+    // releases the Main-side registration behind it (preload -> `unsubscribe`
+    // channel). Without that half, stopping a listener leaked a live Host
+    // subscription and kept forwarding events nobody consumed.
     let active = true;
     const stopApi = this.api.subscribe(scope, (event) => {
       if (active) listener(event);

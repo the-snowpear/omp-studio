@@ -27,6 +27,29 @@ import {
   type TerminalIpcMain,
   type TerminalSender,
 } from "../src/terminal-ipc.js";
+import type { TerminalBatchTimers } from "../src/terminal-batch.js";
+
+/** Manual clock: the manager batches output, so tests decide when a window ends. */
+class ManualTimers implements TerminalBatchTimers {
+  readonly scheduled: Array<{ handler: () => void; cancelled: boolean }> = [];
+
+  setTimeout(handler: () => void): unknown {
+    const timer = { handler, cancelled: false };
+    this.scheduled.push(timer);
+    return timer;
+  }
+
+  clearTimeout(handle: unknown): void {
+    const timer = handle as { cancelled: boolean };
+    timer.cancelled = true;
+    const index = this.scheduled.indexOf(timer as { handler: () => void; cancelled: boolean });
+    if (index >= 0) this.scheduled.splice(index, 1);
+  }
+
+  run(): void {
+    for (const timer of this.scheduled.splice(0)) if (!timer.cancelled) timer.handler();
+  }
+}
 
 interface FakePty extends PtyProcess {
   readonly writes: string[];
@@ -137,11 +160,13 @@ function makeIpc(): FakeIpc {
 function register(trusted: (sender: TerminalSender) => boolean = () => true) {
   const ipc = makeIpc();
   const ptys: FakePty[] = [];
+  const timers = new ManualTimers();
   const manager = new TerminalSessionManager({
     spawner: makeSpawner(ptys),
     resolveShell: () => ({ name: "pwsh", file: "pwsh.exe" }),
     resolveCwd: () => "D:\\work",
     newId: () => `term-${ptys.length + 1}xxxx`,
+    output: { timers },
   });
   const handle = registerTerminalIpc({ ipcMain: ipc, isTrustedSender: trusted, manager });
   return {
@@ -149,6 +174,7 @@ function register(trusted: (sender: TerminalSender) => boolean = () => true) {
     ptys,
     manager,
     handle,
+    timers,
     invoke(channel: string, sender: TerminalSender, payload?: unknown) {
       const handler = ipc.handlers.get(channel);
       assert.ok(handler, `no handler for ${channel}`);
@@ -159,9 +185,10 @@ function register(trusted: (sender: TerminalSender) => boolean = () => true) {
 
 describe("terminal payload validation", () => {
   test("create defaults missing size and rejects extras", () => {
-    assert.deepEqual(parseCreateInput(undefined), { cols: 80, rows: 24 });
-    assert.deepEqual(parseCreateInput({}), { cols: 80, rows: 24 });
-    assert.deepEqual(parseCreateInput({ cols: 120, rows: 30 }), { cols: 120, rows: 30 });
+    assert.deepEqual(parseCreateInput(undefined), { cols: 80, rows: 24, flowControl: false });
+    assert.deepEqual(parseCreateInput({}), { cols: 80, rows: 24, flowControl: false });
+    assert.deepEqual(parseCreateInput({ cols: 120, rows: 30 }), { cols: 120, rows: 30, flowControl: false });
+    assert.deepEqual(parseCreateInput({ flowControl: true }), { cols: 80, rows: 24, flowControl: true });
     assert.throws(() => parseCreateInput({ cols: 120, rows: 30, extra: true }), TerminalIpcError);
     assert.throws(() => parseCreateInput({ cols: 0, rows: 24 }), TerminalIpcError);
   });
@@ -219,6 +246,7 @@ describe("registerTerminalIpc", () => {
         TERMINAL_IPC_CHANNELS.recordingStart,
         TERMINAL_IPC_CHANNELS.recordingStop,
         TERMINAL_IPC_CHANNELS.recordingStatus,
+        TERMINAL_IPC_CHANNELS.ack,
       ].sort(),
     );
     assert.equal(ipc.handlers.has(TERMINAL_IPC_CHANNELS.data), false);
@@ -234,7 +262,7 @@ describe("registerTerminalIpc", () => {
   });
 
   test("create / write / resize / data / exit / dispose", () => {
-    const { invoke, ptys, handle } = register();
+    const { invoke, ptys, handle, timers } = register();
     const sender = makeSender(7);
     const created = invoke(TERMINAL_IPC_CHANNELS.create, sender, { cols: 80, rows: 24 }) as {
       id: string;
@@ -249,7 +277,11 @@ describe("registerTerminalIpc", () => {
     invoke(TERMINAL_IPC_CHANNELS.resize, sender, { id: created.id, cols: 100, rows: 20 });
     assert.deepEqual(ptys[0]?.resizes, [{ cols: 100, rows: 20 }]);
     ptys[0]?.emitData("hello");
-    assert.deepEqual(sender.sent, [{ channel: TERMINAL_IPC_CHANNELS.data, payload: { id: created.id, data: "hello" } }]);
+    assert.equal(sender.sent.length, 0, "output is batched, not forwarded per chunk");
+    timers.run();
+    assert.deepEqual(sender.sent, [
+      { channel: TERMINAL_IPC_CHANNELS.data, payload: { id: created.id, data: "hello", bytes: 5 } },
+    ]);
     ptys[0]?.emitExit();
     assert.equal(sender.sent.at(-1)?.channel, TERMINAL_IPC_CHANNELS.exit);
     invoke(TERMINAL_IPC_CHANNELS.dispose, sender, { id: created.id });

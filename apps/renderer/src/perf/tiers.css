@@ -1,0 +1,132 @@
+/* ==========================================================================
+   Performance tiers L0–L3
+   --------------------------------------------------------------------------
+   Main grades the machine (`apps/desktop/src/perf-profile.ts`); the renderer
+   entry writes the verdict onto <html> **before** the first frame, so this file
+   only reacts to one attribute and never has to flip styles after paint (no
+   "draw it fully, then degrade" flash):
+
+     <html data-perf-tier="L2 L1">
+
+   The value is the set of included layers: the painted tier first, then every
+   layer it contains. `L3` is `"L3 L2 L1"`, `L1` is `"L1"`, `L0` is `"L0"` (no
+   layer matches, full visuals). Every rule below is therefore one short
+   `~=` selector instead of a repeated three-way `:is([data-gpu=…],
+   [data-perf=…], [data-motion=…])` list — the old shape that made the renderer
+   re-derive Main's grading and could contradict it.
+
+   Rules of engagement:
+   - Never `animation: none` on everything: spinners, progress bars and running
+     dots are status signals. Like the existing `prefers-reduced-motion` block in
+     base.css, L1 collapses the duration to ~0 with one iteration, which holds
+     the final painted frame instead of making the control disappear.
+   - `box-shadow: none` is a safe L2 lever because focus rings are drawn with
+     `outline` (base.css). The one exception is `.composer:focus-within`, which
+     paints its focus state with box-shadow and suppresses the textarea ring —
+     L2 restores an outline for it below.
+   - L1 is the smallest layer (motion only), L2 adds the effect cut, L3 adds
+     containment and drops decoration. A user who asks for reduced motion on an
+     L2 machine is still L2: the layers are cumulative, not exclusive.
+   - No `will-change`, no JS observers: everything here is attribute + selector.
+   ========================================================================== */
+
+/* ---------- L1: reduced motion -------------------------------------------- */
+:root[data-perf-tier~="L1"] *,
+:root[data-perf-tier~="L1"] *::before,
+:root[data-perf-tier~="L1"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Pulse carries "running" through opacity alone; a held frame can land at 0.35
+   and read as disabled, so pin it opaque (same reasoning as base.css). */
+:root[data-perf-tier~="L1"] .dot.pulse {
+  opacity: 1 !important;
+}
+
+/* Skeleton: a frozen mid-sweep gradient looks like a rendering artifact. */
+:root[data-perf-tier~="L1"] .skeleton {
+  background: var(--surface-3) !important;
+}
+:root[data-perf-tier~="L1"] .skeleton::after {
+  display: none !important;
+}
+
+/* Indeterminate progress: the travelling bar is the only cue that something is
+   happening. Keep a visible static block instead of a frozen sliver. */
+:root[data-perf-tier~="L1"] .progress-fill::after,
+:root[data-perf-tier~="L1"] .tc-progress .jw-bar-track.indeterminate .jw-bar-fill {
+  animation: none !important;
+}
+:root[data-perf-tier~="L1"] .tc-progress .jw-bar-track.indeterminate .jw-bar-fill {
+  left: 0 !important;
+  width: 100% !important;
+  opacity: 0.45;
+}
+
+/* ---------- L2: software compositing or low-end hardware ------------------- */
+/* Software compositing pays for every translucent blur in the rasterizer and
+   every shadow in the paint pass; the round-2 audit measured +62 % idle CPU on
+   the software path. Kill the effect layers, keep the layout and colours. */
+:root[data-perf-tier~="L2"] {
+  --bd-blur: 0px;
+  --shadow-menu: none;
+  --shadow-modal: none;
+  --shadow-pop: none;
+}
+
+:root[data-perf-tier~="L2"] *,
+:root[data-perf-tier~="L2"] *::before,
+:root[data-perf-tier~="L2"] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+/* The composer announces focus with a glow instead of an outline (workbench.css
+   `.composer:focus-within` also clears the textarea ring). With shadows gone the
+   state would be invisible, so draw a real ring. */
+:root[data-perf-tier~="L2"] .composer:focus-within,
+:root[data-perf-tier~="L2"] .composer:has(.approval-menu),
+:root[data-perf-tier~="L2"] .composer:has(.cmp-menu) {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
+/* `box-shadow` is used as a ring on a handful of inputs that also clear their
+   own outline; restore the ring for those specifically. */
+:root[data-perf-tier~="L2"]
+  :is(input, textarea, select):is(:focus, :focus-visible):not(.composer-input) {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
+/* Decorative sweeps stop entirely: they are the cheapest thing to drop and the
+   least noticed. (L1 already collapsed their duration; this removes the layer.) */
+:root[data-perf-tier~="L2"] .ce-heat-cells::after {
+  display: none !important;
+}
+
+/* ---------- L3: lowest tier ----------------------------------------------- */
+/* Aggressive long-content containment, for the one list that does not get it
+   unconditionally: `.hist-row` / `.activity-row` are already contained in
+   pages.css (`auto 45px`), so repeating them here only fought that value. Like
+   those, `.ce-row` is a plain map with no measurement contract (unlike the
+   virtualised transcript, whose row heights are read back by the virtual list
+   and the minimap), so skipping off-screen rows is safe. */
+:root[data-perf-tier~="L3"] .ce-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+
+/* Non-essential decoration layers: the wallpaper/glass stack is pure blur work
+   and the empty-state artwork is a large SVG. */
+:root[data-perf-tier~="L3"] :is(.bg-wallpaper, .bg-glass, .bg-scrim, .app-background) {
+  display: none !important;
+}
+:root[data-perf-tier~="L3"] .ce-pi {
+  display: none !important;
+}

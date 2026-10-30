@@ -6,7 +6,7 @@ import { MenuItem } from "../menus";
 import { formatShortcut } from "../keyboard/shortcuts";
 import { useDock } from "./DockContext";
 import { locatePanel } from "./model";
-import type { DockAction, DockGroup, DockLayout, DockLocation, DockPreset, PanelId } from "./types";
+import type { DockAction, DockGroup, DockLayout, DockLocation, DockPreset, DockRegionId, PanelId } from "./types";
 import "./menus.css";
 
 export function useDockCopy() {
@@ -87,8 +87,16 @@ function DockToolItems({ onClose }: { onClose?: (() => void) | undefined }) {
   return <>{definitions.map(panel => <MenuItem key={panel.id} icon={panel.icon} hint={locationDescription(layout, panel.id, copy)} title={`${panel.title} · ${locationDescription(layout, panel.id, copy)}`} onClick={() => { store.dispatch({ type: "open", panel: panel.id }); onClose?.(); }}>{panel.title}</MenuItem>)}</>;
 }
 
+/**
+ * What a region toggle shows. `visible` is the persisted preference; `presented`
+ * is what the layout solver actually put on screen. A narrow window can hold
+ * `visible && !presented` — the region is preferred on but clipped, which is the
+ * case where the menu used to render "checked" while nothing was shown.
+ */
+export type DockRegionToggleState = { visible: boolean; presented: boolean };
+
 /** Contents only; the caller owns the View menu popover. */
-export function DockViewMenu({ onClose, onSettings, groupId }: { onClose?: (() => void) | undefined; onSettings?: (() => void) | undefined; groupId?: string | undefined }) {
+export function DockViewMenu({ onClose, onSettings, groupId, regionState }: { onClose?: (() => void) | undefined; onSettings?: (() => void) | undefined; groupId?: string | undefined; regionState?: Partial<Record<DockRegionId, DockRegionToggleState>> | undefined }) {
   const { layout, preferences, presets, store, preview, modified, canUndo, canRedo } = useDock();
   const copy = useDockCopy();
   const [saving, setSaving] = useState(false);
@@ -98,7 +106,17 @@ export function DockViewMenu({ onClose, onSettings, groupId }: { onClose?: (() =
   return <div className="dock-menu-content" data-dock-menu="view">
     <div className="menu-label dock-menu-heading">{copy("工作台布局", "Workbench layout")}{preview ? <span className="chip amber xs demo-chip">{copy("演示", "Demo")}</span> : null}</div>
     <div className="menu-label">{copy("区域", "Regions")}</div>
-    {(["left", "right", "bottom", "rail"] as const).map(region => <MenuToggle key={region} icon={{ left: "layout", right: "panel", bottom: "panel-bottom", rail: "layers" }[region]} label={regionName(region, copy)} checked={region === "rail" ? layout.rail.mode !== "hidden" : layout[region].visible} kbd={region === "left" ? formatShortcut({ key: "B" }) : region === "bottom" ? formatShortcut({ key: "J" }) : region === "rail" ? formatShortcut({ key: "L", shift: true }) : undefined} onClick={() => run({ type: "region", region, visible: region === "rail" ? layout.rail.mode === "hidden" : !layout[region].visible })} />)}
+    {(["left", "right", "bottom", "rail"] as const).map(region => {
+      const state = regionState?.[region];
+      // Checked follows what is on screen, so the menu can never disagree with
+      // the workspace. The toggle asks for the opposite of the presented state:
+      // "off" opens it, "preferred on but clipped" re-presents it (a no-op store
+      // commit still broadcasts the region action, which lets the shell take the
+      // focus priority back), and "on screen" closes it.
+      const shown = state ? state.presented : region === "rail" ? layout.rail.mode !== "hidden" : layout[region].visible;
+      const nextVisible = state ? !state.presented : region === "rail" ? layout.rail.mode === "hidden" : !layout[region].visible;
+      return <MenuToggle key={region} icon={{ left: "layout", right: "panel", bottom: "panel-bottom", rail: "layers" }[region]} label={regionName(region, copy)} checked={shown} kbd={region === "left" ? formatShortcut({ key: "B" }) : region === "bottom" ? formatShortcut({ key: "J" }) : region === "rail" ? formatShortcut({ key: "L", shift: true }) : undefined} onClick={() => run({ type: "region", region, visible: nextVisible })} />;
+    })}
     <div className="menu-sep" />
     <MenuSection label={copy("工具", "Tools")} icon="wrench"><DockToolItems onClose={onClose} /></MenuSection>
     {group ? <MenuSection label={copy("当前组", "Current group")} icon="layers"><DockPanelMenu panels={group.panels} groupId={group.id} onClose={onClose} /></MenuSection> : <MenuItem icon="layers" disabled title={copy("请在卡片或标签组的更多菜单中选择操作目标。", "Choose a card or tab group's More menu to select a target.")}>{copy("当前组（未选择）", "Current group (none selected)")}</MenuItem>}

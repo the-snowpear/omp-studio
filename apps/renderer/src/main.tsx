@@ -26,6 +26,7 @@ import { resolveLanguage } from "./i18n";
 import { initPerformanceTimelineCleanup } from "./performanceTimelineCleanup";
 import { createRendererPerformanceReporter } from "./rendererPerformance";
 import { PLATFORM } from "./platform";
+import { startTierControl } from "./perf/tierControl";
 
 const stopPerformanceReporter = createRendererPerformanceReporter(globalThis.ompStudioChrome);
 window.addEventListener("pagehide", stopPerformanceReporter, { once: true });
@@ -39,6 +40,41 @@ document.documentElement.setAttribute("data-theme", initialSettings.theme);
 document.documentElement.setAttribute("data-platform", PLATFORM);
 document.documentElement.setAttribute("data-density", initialSettings.density);
 document.documentElement.setAttribute("lang", resolveLanguage(initialSettings.language));
+
+/**
+ * P0-6：首帧前把 GPU / 低配 / 动效分级写到 `<html>`。
+ *
+ * Main 用 `app.getGPUFeatureStatus()`（不是 `getGPUInfo("basic")`：实测两者在
+ * 软合成下字段完全相同）判定机器等级 L0–L3；`ompStudioPerf.cached` 是 preload
+ * 同步读到的上一次快照，所以首帧不需要 IPC 往返。等级规则只在 Main 一处，渲染层
+ * 只负责「保存最新机器等级 + 叠加用户的减少动效偏好」（见 `perf/tierControl.ts`），
+ * 不再自己从 GPU/CPU/内存事实推导等级。
+ *
+ * 「减少动效」是用户能收紧的下限（L0 → L1），绝不会把 L2/L3 抬回去；系统的
+ * `prefers-reduced-motion` 与显式 `omp.perf.motion=off` 走同一条路径。
+ */
+const reducedMotionQuery = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : undefined;
+const stopTierControl = startTierControl({
+  root: document.documentElement,
+  source: globalThis.ompStudioPerf,
+  motionOff: () => {
+    try {
+      if (window.localStorage.getItem("omp.perf.motion") === "off") return true;
+    } catch {
+      /* storage blocked: fall through to the OS preference */
+    }
+    return reducedMotionQuery?.matches === true;
+  },
+  onMotionPreferenceChange: listener => {
+    reducedMotionQuery?.addEventListener?.("change", listener);
+    return () => reducedMotionQuery?.removeEventListener?.("change", listener);
+  },
+});
+// One wiring per document: a hot reload must not stack a second set of listeners
+// on the old module instance, and a page hide tears them down.
+import.meta.hot?.dispose(stopTierControl);
+window.addEventListener("pagehide", stopTierControl, { once: true });
+
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/components.css";

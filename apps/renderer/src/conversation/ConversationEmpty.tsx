@@ -8,11 +8,11 @@ import { ensureRuntimeConnection } from "../runtimeEnsure";
 import { ActionProgressBar, type ActionProgress } from "../ActionProgressBar";
 import {
   EMPTY_USAGE,
-  USAGE_POLL_MS,
   buildPreviewUsage,
   fmtTokens,
   totalsByDayFromUsage,
 } from "../usage/tokenUsage";
+import { startUsagePolling } from "../usage/usagePolling";
 import { buildActivityHeatmap, heatCellTip } from "./activityHeatmap";
 import { collectHistoryRecents, collectPreviewRecents, type EmptyRecentRow } from "./emptyRecents";
 
@@ -79,11 +79,12 @@ export function ConversationEmpty({
         }
       }
     };
-    void load();
-    const timer = window.setInterval(() => { void load(); }, USAGE_POLL_MS);
+    // Same visibility gate as the home card (P0-2): no `usage.get` while the
+    // window is hidden, an immediate refresh when it comes back.
+    const stopPolling = startUsagePolling({ load });
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stopPolling();
     };
   }, [preview, client, resolvedLanguage]);
 
