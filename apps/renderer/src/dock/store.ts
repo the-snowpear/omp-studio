@@ -3,8 +3,12 @@ import { builtInPresets, createDefaultLayout, dockReducer, normalizeLayout } fro
 import { PANEL_IDS, type DockAction, type DockLayout, type DockPreferences, type DockPreset, type DockScope, type DockSnapshot, type PanelId } from "./types";
 
 const STORAGE_KEY = "omp.dock.v1";
+/** One manual-recovery snapshot of the last good payload; never rewritten. */
+const BACKUP_KEY = "omp.dock.v1.backup";
 const LEGACY_PREFIX = "omp.layoutMemory.";
 const HISTORY_LIMIT = 20;
+/** One write per interaction burst; page hide flushes anything still pending. */
+const PERSIST_DELAY = 200;
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const cloneLayout = (layout: DockLayout): DockLayout => dockReducer(createDefaultLayout(), { type: "apply", layout });
@@ -111,6 +115,12 @@ export class DockStore {
   private snapshot: DockSnapshot;
   private dirty = false;
   private sequence = 0;
+  /** Pending debounced write; a drag resize dispatches per frame but stores once. */
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  /** Lifecycle listeners exist only while a write is pending. */
+  private unwatch: (() => void) | undefined;
+  /** Storage refused even the degraded payload: this session keeps everything in memory. */
+  private blocked = false;
 
   constructor(storage?: Storage | null) {
     this.storage = storage === undefined ? browserStorage() : storage;
@@ -184,18 +194,87 @@ export class DockStore {
     for (const listener of this.listeners) listener();
   }
 
-  private persist(): void {
-    if (this.preview || !this.dirty) return;
+  /**
+   * Commits are batched: resizing a card dispatches per frame, and serializing
+   * every session layout per frame is what made the dock stutter. Every
+   * explicit boundary (scope change, draft handoff, page hide) calls `flush`.
+   */
+  private queue(): void {
+    if (this.preview || !this.dirty || this.blocked) return;
+    this.watch();
+    if (this.timer !== undefined) return;
+    this.timer = setTimeout(this.write, PERSIST_DELAY);
+  }
+
+  /** Synchronous write; never throws, even when storage is full or blocked. */
+  flush(): void {
+    if (this.timer !== undefined) { clearTimeout(this.timer); this.timer = undefined; }
+    this.write();
+  }
+
+  /**
+   * The only thing a degraded payload may drop is `recent`: it is a derived
+   * cache of "this project's last layout" that is rebuilt on the next save.
+   * Everything else - every saved session, every preset, the preferences - is
+   * the only copy the user has, so dropping it would be data loss rather than
+   * a smaller save.
+   */
+  private payload(degraded: boolean): string {
+    return JSON.stringify({
+      version: 1, migrated: true,
+      preferences: this.real.preferences,
+      presets: this.real.presets.filter(preset => !preset.builtin),
+      sessions: Object.fromEntries(this.real.saved),
+      recent: degraded ? {} : Object.fromEntries(this.real.recent),
+    });
+  }
+
+  /** One-time snapshot of the last successfully stored payload, for manual recovery. */
+  private backup(storage: Storage): void {
+    if (storage.getItem(BACKUP_KEY)) return;
+    const previous = storage.getItem(STORAGE_KEY);
+    if (previous) storage.setItem(BACKUP_KEY, previous);
+  }
+
+  private write = (): void => {
+    this.timer = undefined;
+    this.unwatch?.(); this.unwatch = undefined;
+    if (this.preview || !this.dirty || this.blocked) return;
+    const storage = this.storage;
+    if (!storage) { this.dirty = false; return; }
+    const full = this.payload(false);
     try {
-      this.storage?.setItem(STORAGE_KEY, JSON.stringify({
-        version: 1, migrated: true,
-        preferences: this.real.preferences,
-        presets: this.real.presets.filter(preset => !preset.builtin),
-        sessions: Object.fromEntries(this.real.saved),
-        recent: Object.fromEntries(this.real.recent),
-      }));
+      storage.setItem(STORAGE_KEY, full);
       this.dirty = false;
-    } catch { /* Layouts and history remain usable when storage is blocked/full. */ }
+      return;
+    } catch { /* Full: keep the last good payload, then drop only the cache. */ }
+    const degraded = this.payload(true);
+    // Only a real degradation is worth a recovery snapshot of the previous payload.
+    if (degraded !== full) try { this.backup(storage); } catch { /* Best effort; never blocks the save. */ }
+    try {
+      storage.setItem(STORAGE_KEY, degraded);
+      this.dirty = false;
+    } catch {
+      // Never replace the stored layout with a partial one: keep the previous
+      // payload, keep everything in memory, and stop writing for this session.
+      this.blocked = true;
+    }
+  };
+
+  /** Page hide / backgrounding is the last chance to write a pending layout. */
+  private watch(): void {
+    if (this.unwatch || typeof window === "undefined") return;
+    const leave = () => this.flush();
+    const visibility = () => { if (document.hidden) this.flush(); };
+    window.addEventListener("pagehide", leave);
+    window.addEventListener("beforeunload", leave);
+    document.addEventListener("visibilitychange", visibility);
+    this.unwatch = () => {
+      window.removeEventListener("pagehide", leave);
+      window.removeEventListener("beforeunload", leave);
+      document.removeEventListener("visibilitychange", visibility);
+      this.unwatch = undefined;
+    };
   }
 
   private save(scope: DockScope, layout: DockLayout): void {
@@ -218,12 +297,16 @@ export class DockStore {
       history.redo = [];
     }
     this.save(this.scope, layout);
-    this.persist();
+    this.queue();
     this.publish();
   }
 
   dispatch(action: DockAction): void {
     this.commit(dockReducer(this.layout, action, this.state.preferences.locked), action.type !== "activate" && action.type !== "raise");
+    // One contract for every region switch, whichever menu or button caused it.
+    if (action.type === "region" && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("omp:dock-region", { detail: { region: action.region, visible: action.visible } }));
+    }
     if (action.type === "open" && typeof window !== "undefined") requestAnimationFrame(() => {
       window.dispatchEvent(new CustomEvent("omp:dock-open", { detail: { panel: action.panel } }));
     });
@@ -244,19 +327,19 @@ export class DockStore {
 
   switchScope(scope: DockScope, preview: boolean): void {
     const key = scopeKey(scope);
-    if (this.preview === preview && scopeKey(this.scope) === key) { this.persist(); return; }
-    // Every committed action is already synchronous. In particular entering
-    // preview never flushes a real write or writes the old layout to the new key.
-    if (!preview) this.persist();
+    if (this.preview === preview && scopeKey(this.scope) === key) { this.flush(); return; }
+    // A scope change is a hard boundary: batched writes from the previous scope
+    // land now, and entering preview never writes real state.
+    if (!preview) this.flush();
     this.preview = preview;
     this.scope = { ...scope };
     if (!this.state.layouts.has(key) || (!scope.draft && !this.state.saved.has(key))) this.state.layouts.set(key, this.startingLayout(scope));
-    this.persist();
+    this.flush();
     this.publish();
   }
 
   beginDraft(scope: DockScope): void {
-    this.persist();
+    this.flush();
     const draft = { ...scope, draft: true };
     const key = scopeKey(draft);
     const layout = this.startingLayout(draft, true);
@@ -289,7 +372,7 @@ export class DockStore {
     state.histories.delete(draftKey);
     state.drafts.delete(project);
     if (currentIsDraft) this.scope = formal;
-    this.persist();
+    this.flush();
     this.publish();
   }
 
@@ -304,7 +387,7 @@ export class DockStore {
     if (state.recent.get(project)?.scopeKey === key) state.recent.delete(project);
     if (scopeKey(this.scope) === key) state.layouts.set(key, this.startingLayout(formal));
     if (!this.preview) this.dirty = true;
-    this.persist();
+    this.flush();
     this.publish();
   }
 
@@ -314,7 +397,7 @@ export class DockStore {
     if (!layout) return;
     history.redo.push(this.layout);
     this.save(this.scope, layout);
-    this.persist();
+    this.flush();
     this.publish();
   }
 
@@ -324,7 +407,7 @@ export class DockStore {
     if (!layout) return;
     history.undo.push(this.layout);
     this.save(this.scope, layout);
-    this.persist();
+    this.flush();
     this.publish();
   }
 
@@ -333,7 +416,7 @@ export class DockStore {
     if (equal(next, this.state.preferences)) return;
     this.state.preferences = next;
     if (!this.preview) this.dirty = true;
-    this.persist();
+    this.flush();
     this.publish();
   }
 
@@ -344,7 +427,9 @@ export class DockStore {
     // Save/update changes the baseline, not the arrangement or its undo stack.
     const layout = dockReducer(this.layout, { type: "apply", layout: { ...this.layout, presetId: preset.id } });
     if (layout !== this.layout) this.commit(layout, false);
-    else { this.persist(); this.publish(); }
+    else this.publish();
+    // Presets are discrete edits, so they skip the batch window.
+    this.flush();
   }
 
   savePreset(name: string): string {
@@ -371,7 +456,7 @@ export class DockStore {
     if (!preset || preset.builtin || !name.trim() || preset.name === name.trim()) return;
     this.state.presets = this.state.presets.map(item => item.id === id ? { ...item, name: name.trim() } : item);
     if (!this.preview) this.dirty = true;
-    this.persist();
+    this.flush();
     this.publish();
   }
 
@@ -383,7 +468,7 @@ export class DockStore {
     this.state.preferences = { ...prefs, appDefault: prefs.appDefault === id ? "default" : prefs.appDefault, projectDefaults: Object.fromEntries(Object.entries(prefs.projectDefaults).map(([key, value]) => [key, value === id ? "default" : value])) };
     // Existing session layouts, including their now-deleted baseline ID, survive.
     if (!this.preview) this.dirty = true;
-    this.persist();
+    this.flush();
     this.publish();
   }
 

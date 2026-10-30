@@ -80,6 +80,10 @@ import {
   type CreateSecureWindowDeps,
   type NavigationGuardedContents,
   createPermissionRequestHandler,
+  createPermissionCheckHandler,
+  createDevicePermissionHandler,
+  isRendererPermissionAllowed,
+  RENDERER_PERMISSION_MATRIX,
   type WindowLike,
 } from "../src/security.js";
 
@@ -266,10 +270,11 @@ describe("registerDesktopIpc: fixed channel surface", () => {
     DESKTOP_IPC_CHANNELS.query,
     DESKTOP_IPC_CHANNELS.command,
     DESKTOP_IPC_CHANNELS.subscribe,
+    DESKTOP_IPC_CHANNELS.unsubscribe,
     DESKTOP_IPC_CHANNELS.close,
   ];
 
-  test("registers handlers for exactly the five inbound channels and never the event channel", () => {
+  test("registers handlers for exactly the six inbound channels and never the event channel", () => {
     const { ipc, handle } = registerIpc();
     assert.deepEqual([...ipc.handlers.keys()].sort(), [...INBOUND].sort());
     assert.equal(ipc.handlers.has(DESKTOP_IPC_CHANNELS.event), false, "event is outbound only");
@@ -277,7 +282,7 @@ describe("registerDesktopIpc: fixed channel surface", () => {
     handle.dispose();
   });
 
-  test("dispose removes exactly the five inbound handlers", () => {
+  test("dispose removes exactly the six inbound handlers", () => {
     const { ipc, handle } = registerIpc();
     handle.dispose();
     assert.deepEqual([...ipc.removed].sort(), [...INBOUND].sort());
@@ -323,7 +328,7 @@ describe("registerDesktopIpc: envelope parsing before dispatch", () => {
         idempotencyKey: "k",
       }),
     );
-    await assert.rejects(() => invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "allx" }));
+    await assert.rejects(() => invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: { scope: "allx" }, subscriptionId: "sub-1" }));
     assert.deepEqual(facade.calls, []);
     handle.dispose();
   });
@@ -403,31 +408,35 @@ describe("registerDesktopIpc: window-bound event forwarding and teardown", () =>
   test("subscription events are forwarded to the sender on the event channel", async () => {
     const { invoke, facade, handle } = registerIpc();
     const sender = makeSender(1);
-    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "all" });
+    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: { scope: "all" }, subscriptionId: "sub-1" });
     assert.deepEqual(facade.calls, ["subscribe:all"]);
     const registered = facade.subscribeListeners[0];
     assert.ok(registered);
     registered.listener(validEvent());
-    assert.deepEqual(sender.sent, [{ channel: DESKTOP_IPC_CHANNELS.event, payload: validEvent() }]);
+    assert.deepEqual(sender.sent, [
+      { channel: DESKTOP_IPC_CHANNELS.event, payload: { subscriptionIds: ["sub-1"], event: validEvent() } },
+    ]);
     handle.dispose();
   });
 
   test("conversation.changed preserves streamSeq across Desktop IPC", async () => {
     const { invoke, facade, handle } = registerIpc();
     const sender = makeSender(1);
-    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "all" });
+    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: { scope: "all" }, subscriptionId: "sub-1" });
     const registered = facade.subscribeListeners[0];
     assert.ok(registered);
     const event = validConversationEvent();
     assert.doesNotThrow(() => registered.listener(event));
-    assert.deepEqual(sender.sent, [{ channel: DESKTOP_IPC_CHANNELS.event, payload: event }]);
+    assert.deepEqual(sender.sent, [
+      { channel: DESKTOP_IPC_CHANNELS.event, payload: { subscriptionIds: ["sub-1"], event } },
+    ]);
     handle.dispose();
   });
 
   test("events are not forwarded to a destroyed sender", async () => {
     const { invoke, facade, handle } = registerIpc();
     const sender = makeSender(1);
-    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "all" });
+    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: { scope: "all" }, subscriptionId: "sub-1" });
     const registered = facade.subscribeListeners[0];
     assert.ok(registered);
     sender.destroyed = true;
@@ -439,7 +448,7 @@ describe("registerDesktopIpc: window-bound event forwarding and teardown", () =>
   test("the close channel tears down the window subscription without closing the Host facade", async () => {
     const { invoke, facade, handle } = registerIpc();
     const sender = makeSender(1);
-    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "all" });
+    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: { scope: "all" }, subscriptionId: "sub-1" });
     await invoke(DESKTOP_IPC_CHANNELS.close, sender);
     assert.deepEqual(facade.calls, ["subscribe:all"]);
     assert.equal(facade.unsubscribed, 1);
@@ -449,7 +458,7 @@ describe("registerDesktopIpc: window-bound event forwarding and teardown", () =>
   test("WebContents destroy tears down the window subscription", async () => {
     const { invoke, facade, handle } = registerIpc();
     const sender = makeSender(1);
-    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "all" });
+    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: { scope: "all" }, subscriptionId: "sub-1" });
     assert.equal(facade.unsubscribed, 0);
     sender.fireOnce("destroyed");
     assert.equal(facade.unsubscribed, 1);
@@ -459,7 +468,7 @@ describe("registerDesktopIpc: window-bound event forwarding and teardown", () =>
   test("main-frame navigation (reload) tears down the window subscription", async () => {
     const { invoke, facade, handle } = registerIpc();
     const sender = makeSender(1);
-    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "all" });
+    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: { scope: "all" }, subscriptionId: "sub-1" });
     sender.fireOnce("did-navigate");
     assert.equal(facade.unsubscribed, 1);
     handle.dispose();
@@ -469,8 +478,8 @@ describe("registerDesktopIpc: window-bound event forwarding and teardown", () =>
     const { invoke, facade, handle } = registerIpc();
     const senderA = makeSender(1);
     const senderB = makeSender(2);
-    await invoke(DESKTOP_IPC_CHANNELS.subscribe, senderA, { scope: "all" });
-    await invoke(DESKTOP_IPC_CHANNELS.subscribe, senderB, { scope: "all" });
+    await invoke(DESKTOP_IPC_CHANNELS.subscribe, senderA, { scope: { scope: "all" }, subscriptionId: "sub-a" });
+    await invoke(DESKTOP_IPC_CHANNELS.subscribe, senderB, { scope: { scope: "all" }, subscriptionId: "sub-b" });
     handle.dispose();
     assert.equal(facade.unsubscribed, 2);
   });
@@ -640,9 +649,9 @@ describe("navigation and new-window policy", () => {
 
   test("permission requests are granted to the renderer document only", () => {
     const handler = createPermissionRequestHandler("file:///C:/app/index.html");
-    const decide = (requestingUrl: string | undefined): boolean => {
+    const decide = (requestingUrl: string | undefined, permission = "media"): boolean => {
       let granted: boolean | undefined;
-      handler(undefined, "media", (value) => { granted = value; }, requestingUrl === undefined ? {} : { requestingUrl });
+      handler(undefined, permission, (value) => { granted = value; }, requestingUrl === undefined ? {} : { requestingUrl });
       return granted === true;
     };
     assert.equal(decide("file:///C:/app/index.html"), true);
@@ -654,6 +663,96 @@ describe("navigation and new-window policy", () => {
     let granted = false;
     dev(undefined, "media", (value) => { granted = value; }, { requestingUrl: "http://localhost:5173/index.html" });
     assert.equal(granted, true);
+  });
+
+  test("permissions are granted one by one, never as a wildcard", () => {
+    const handler = createPermissionRequestHandler("file:///C:/app/index.html");
+    const decide = (permission: string, requestingUrl = "file:///C:/app/index.html"): boolean => {
+      let granted: boolean | undefined;
+      handler(undefined, permission, (value) => { granted = value; }, { requestingUrl });
+      return granted === true;
+    };
+    // Used by the product today.
+    assert.equal(decide("media"), true, "microphone for Live/voice capture");
+    assert.equal(decide("clipboard-sanitized-write"), true, "copy actions use navigator.clipboard.writeText");
+    // Not used: denied instead of inherited from Electron's default.
+    for (const permission of [
+      "clipboard-read",
+      "notifications",
+      "fullscreen",
+      "pointerLock",
+      "display-capture",
+      "geolocation",
+      "midi",
+      "midiSysex",
+      "idle-detection",
+      "openExternal",
+      "hid",
+      "serial",
+      "usb",
+      "mediaKeySystem",
+      "speaker-selection",
+      "top-level-storage-access",
+      "background-sync",
+      "unknown-future-permission",
+    ]) {
+      assert.equal(decide(permission), false, `${permission} must be denied`);
+    }
+    // Every grant in the matrix is exercised above: a new entry has to bring
+    // its own call site and its own assertion.
+    assert.deepEqual(Object.keys(RENDERER_PERMISSION_MATRIX).sort(), ["clipboard-sanitized-write", "media"]);
+  });
+
+  test("permissions are denied for untrusted documents even when allow-listed", () => {
+    const handler = createPermissionRequestHandler("file:///C:/app/index.html");
+    const decide = (permission: string, requestingUrl: string): boolean => {
+      let granted: boolean | undefined;
+      handler(undefined, permission, (value) => { granted = value; }, { requestingUrl });
+      return granted === true;
+    };
+    for (const url of [
+      "file:///C:/app/other.html",
+      "file:///C:/app/../evil/index.html",
+      "https://evil.example/",
+      "http://127.0.0.1:3847/api/stats/models",
+      "omp-artifact://library/report.html",
+      "omp-graphics://viewer/index.html",
+      "data:text/html,<script>1</script>",
+      "javascript:alert(1)",
+      "",
+    ]) {
+      assert.equal(decide("media", url), false, `media must be denied for ${url}`);
+      assert.equal(decide("clipboard-sanitized-write", url), false, `clipboard must be denied for ${url}`);
+    }
+    assert.equal(isRendererPermissionAllowed("media", "file:///C:/app/index.html", "file:///C:/app/index.html"), true);
+    assert.equal(isRendererPermissionAllowed("media", "file:///C:/app/index.html", "file:///C:/app/other.html"), false);
+  });
+
+  test("the permission check handler agrees with the request handler", () => {
+    const entry = "file:///C:/app/index.html";
+    const check = createPermissionCheckHandler(entry);
+    const ask = (permission: string, origin: string, details?: { requestingUrl?: string; securityOrigin?: string }): boolean =>
+      check(undefined, permission, origin, details);
+    assert.equal(ask("media", "file://"), true);
+    assert.equal(ask("clipboard-sanitized-write", "file://"), true);
+    assert.equal(ask("media", "file://", { requestingUrl: entry }), true);
+    assert.equal(ask("media", "file://", { requestingUrl: "file:///C:/app/other.html" }), false);
+    assert.equal(ask("geolocation", "file://"), false);
+    assert.equal(ask("notifications", "file://"), false);
+    assert.equal(ask("media", "omp-artifact://library"), false);
+    assert.equal(ask("media", "https://evil.example"), false);
+
+    const dev = createPermissionCheckHandler("http://localhost:5173");
+    assert.equal(dev(undefined, "media", "http://localhost:5173"), true);
+    assert.equal(dev(undefined, "media", "http://evil.example"), false);
+    assert.equal(dev(undefined, "usb", "http://localhost:5173"), false);
+  });
+
+  test("device permission requests are denied: no WebHID/Serial/USB feature exists", () => {
+    const handler = createDevicePermissionHandler();
+    for (const deviceType of ["hid", "serial", "usb", undefined]) {
+      assert.equal(handler({ deviceType, origin: "file:///C:/app/index.html" }), false);
+    }
   });
 });
 

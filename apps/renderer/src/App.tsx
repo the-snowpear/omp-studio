@@ -44,7 +44,7 @@ import { useReadingColumn } from "./layout/useReadingColumn";
 import { useWorkbenchLayout } from "./layout/useWorkbenchLayout";
 import { useCompactTopbar } from "./layout/useCompactTopbar";
 import { beforeConversationLayoutChange } from "./conversation/conversationReflow";
-import { panelSize, SIDEBAR_LIMITS, SIDE_PANEL_LIMITS } from "./layout/workbenchLayout";
+import { layoutPanelForRegion, panelSize, SIDEBAR_LIMITS, SIDE_PANEL_LIMITS, type DockRegion } from "./layout/workbenchLayout";
 import type { CSSProperties, FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
 import type {
@@ -140,6 +140,7 @@ import {
   workspaceDirectoryLister,
 } from "./composer/mentions";
 import { snapshotFromDoc, snapshotFromText, snapshotFromTextAndImages, snapshotIsEmpty } from "./composer/serialize";
+import { createComposerDraftBook } from "./composer/draftStore";
 import { emptySnapshot, fileLabel, type ComposerSnapshot } from "./composer/types";
 import { mergeUsedSkills, skillNamesInDoc, skillNamesInText } from "./skills/skillUsage";
 import type { StudioSpeed } from "@omp-studio/studio-protocol";
@@ -2627,7 +2628,10 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
           else if (event.key === "End") { event.preventDefault(); chrome.onResizeSplit(0.85); }
         }}
       />
-      {dock ? <div className="dock-left-cards" style={{ flex: hasDockCards ? `1 1 ${fileShare}%` : "0 0 0", minHeight: 0, overflow: "hidden" }}><DockCardRegion region="left" visible={!chrome.collapsed} /></div> : null}
+      {/* 左栏最后一个模块被移走时不自动收起：空态（「添加工具或拖动到这里」）
+          要占自然高度。原来的 flex:0 0 0 + overflow:hidden 把它压成 0 高，
+          用户只看到一条空白栏，既没有内容也没有提示。 */}
+      {dock ? <div className="dock-left-cards" style={{ flex: hasDockCards ? `1 1 ${fileShare}%` : "0 0 auto", minHeight: 0, overflow: hasDockCards ? "hidden" : "visible" }}><DockCardRegion region="left" visible={!chrome.collapsed} /></div> : null}
       <DockPanel id="files">
       <section className="dock-files-content" id="sbFiles" aria-labelledby="sbFilesTitle" >
         <div className="sb-section-head">
@@ -3334,6 +3338,14 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
   );
 }
 
+/** 击键不重渲工作台：草稿提交合并到停止输入后一次（见 WorkbenchCanvas）。 */
+const COMPOSER_DRAFT_PUBLISH_MS = 140;
+
+/** 渲染真正依赖的草稿边界：空/非空、胶囊、图片。文本本身不在其中。 */
+function draftStatusOf(snapshot: ComposerSnapshot): string {
+  return `${snapshotIsEmpty(snapshot) ? "e" : "t"}${snapshot.images.length > 0 ? "i" : ""}${snapshot.doc.nodes.some((node) => node.type === "chip") ? "c" : ""}`;
+}
+
 function useComposerCollisionCollapse() {
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -3484,6 +3496,32 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   const [draft, setDraft] = useTargetMemory<ComposerSnapshot>("composer-current-draft", () => composerDraft ?? emptySnapshot());
   const composerDraftRef = useRef<ComposerSnapshot | undefined>(composerDraft);
   composerDraftRef.current = composerDraft;
+  /* 击键路径：快照先进 `draftLive`（不重渲），`draft` 只是「可渲染视图」。
+     渲染真正依赖的边界只有三个布尔（空/胶囊/图片），其余（标题预览、斜杠
+     命令可用性、技能集合）推迟到停止输入后一次提交；发送、清空、恢复等
+     命令式动作照旧同步提交。命令式读取一律走 `draftLive`，不读滞后视图。 */
+  const draftLive = useRef<ComposerSnapshot>(draft);
+  const draftPublish = useRef(0);
+  const publishDraft = useCallback((next: ComposerSnapshot, immediate?: boolean) => {
+    draftLive.current = next;
+    if (draftPublish.current !== 0) {
+      window.clearTimeout(draftPublish.current);
+      draftPublish.current = 0;
+    }
+    if (immediate === true || draftStatusOf(next) !== draftStatusOf(draft)) {
+      setDraft(next);
+      return;
+    }
+    draftPublish.current = window.setTimeout(() => {
+      draftPublish.current = 0;
+      setDraft(draftLive.current);
+    }, COMPOSER_DRAFT_PUBLISH_MS);
+  }, [draft, setDraft]);
+  /** 命令式提交（清空/恢复/插入）：立即发布，同时保持 live 快照一致。 */
+  const commitDraft = useCallback((next: ComposerSnapshot) => publishDraft(next, true), [publishDraft]);
+  useEffect(() => () => {
+    if (draftPublish.current !== 0) window.clearTimeout(draftPublish.current);
+  }, []);
   const [submittedPrompt, setSubmittedPrompt] = useState<{ readonly sessionId?: SessionId; readonly title: string } | undefined>(undefined);
   const [bottomResizing, setBottomResizing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -3623,7 +3661,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   const [modeCapsulesPresent, setModeCapsulesPresent] = useState(false);
   const composerInputRef = composerRef;
   useEffect(() => {
-    const restored = composerDraftRef.current ?? draft;
+    const restored = composerDraftRef.current ?? draftLive.current;
     if (!snapshotIsEmpty(restored)) composerInputRef.current?.setSnapshot(restored);
   }, []);
   // 流式期间按 Enter 的消息先排本地队列，本轮 run 结束后由 flush effect 按序发送。
@@ -3694,8 +3732,6 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   queuedMessagesRef.current = queuedMessages;
   const previewQueueRef = useRef(previewQueue);
   previewQueueRef.current = previewQueue;
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
   const queueViewRef = useRef({ selectedSessionId, preview });
   useEffect(() => {
     const prev = queueViewRef.current;
@@ -3703,7 +3739,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (prev.selectedSessionId === selectedSessionId && prev.preview === preview) return;
     const editing = queueEditRef.current;
     if (editing === undefined) return;
-    const composer = composerInputRef.current?.getSnapshot() ?? draftRef.current;
+    const composer = composerInputRef.current?.getSnapshot() ?? draftLive.current;
     const realQueue = queuedMessagesRef.current;
     const demoQueue = previewQueueRef.current;
     const inPreview = demoQueue.some((item) => item.id === editing.entryId);
@@ -3715,7 +3751,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (inPreview) setPreviewQueue([...result.queue]);
     else setQueuedMessages([...result.queue]);
     setQueueEdit(undefined);
-    setDraft(result.composer);
+    commitDraft(result.composer);
     composerInputRef.current?.setSnapshot(result.composer);
   }, [selectedSessionId, preview]);
   // Composer content belongs to the viewed conversation, not to the workbench
@@ -3732,7 +3768,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (previous.sessionId === selectedSessionId && previous.threadId === selectedThreadId && previous.viewIdentity === viewIdentity) return;
     composerInputRef.current?.clear();
     const restored = composerDraftRef.current ?? emptySnapshot();
-    setDraft(restored);
+    commitDraft(restored);
     if (!snapshotIsEmpty(restored)) composerInputRef.current?.setSnapshot(restored);
     setComposerError(undefined);
     setQueueEdit(undefined);
@@ -3743,7 +3779,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (pending === undefined || pending.sessionId !== selectedSessionId) return;
     pendingComposerFillRef.current = undefined;
     const restored = snapshotFromTextAndImages(pending.fill.text ?? "", pending.fill.images);
-    setDraft(restored);
+    commitDraft(restored);
     composerInputRef.current?.setSnapshot(restored);
     setComposerError(undefined);
     queueMicrotask(() => composerInputRef.current?.focus());
@@ -3847,8 +3883,15 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     }
     wasCompactPending.current = compactPending === true;
   }, [compactPending]);
+  /* 技能集合是内容而不是身份：草稿每换一次快照都重新 `new Set(...)` 会让
+     AppShell 跟着重渲（击键 → 标题/侧栏）。只有名字真的变了才上报。 */
+  const draftSkillKeyRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    onDraftSkillsChange?.(skillNamesInDoc(draft.doc));
+    const names = skillNamesInDoc(draft.doc);
+    const key = [...names].sort().join("\u0000");
+    if (draftSkillKeyRef.current === key) return;
+    draftSkillKeyRef.current = key;
+    onDraftSkillsChange?.(names);
   }, [draft.doc, onDraftSkillsChange]);
   useEffect(() => {
     // 增量扫描：`mergeUsedSkills` 做并集，所以只需要交出「这次新看到的」技能名。
@@ -4652,14 +4695,14 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     const pending = convo.state.pendingUsers.find((entry) => entry.requestId === requestId);
     if (!pending) return;
     const restored = pending.doc !== undefined ? snapshotFromDoc(pending.doc) : snapshotFromText(pending.draft);
-    setDraft(restored);
+    commitDraft(restored);
     composerInputRef.current?.setSnapshot(restored);
     setComposerError(undefined);
     convo.dropPending(requestId);
   };
   const applyComposerFill = (fill: UserMessageEditorFill) => {
     const restored = snapshotFromTextAndImages(fill.text ?? "", fill.images);
-    setDraft(restored);
+    commitDraft(restored);
     composerInputRef.current?.setSnapshot(restored);
     setComposerError(undefined);
     queueMicrotask(() => composerInputRef.current?.focus());
@@ -5038,7 +5081,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     // A pending create has no queue owner yet. Keep the second draft in the
     // editor until the first dispatch completes, including same-frame Enter.
     if (promptDispatchGate.busy && !composerRunning) return;
-    const payload = composerInputRef.current?.getSnapshot() ?? draft;
+    const payload = composerInputRef.current?.getSnapshot() ?? draftLive.current;
     // OMP 18.11: typing while a tool approval waits denies that call and steers the turn.
     if (
       composerRunning &&
@@ -5057,12 +5100,12 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (!promptEnabled && composerSlashExecute(payload, slashCatalog) === undefined) return;
     setComposerError(undefined);
     composerInputRef.current?.clear();
-    setDraft(emptySnapshot());
+    commitDraft(emptySnapshot());
     if (!preview && selectedSessionId === undefined && snapshot === undefined) {
       ensureNewSession?.();
     }
     if (!(await dispatchPrompt(payload, { waitForReady: waitForNewSession !== undefined }))) {
-      setDraft(payload);
+      commitDraft(payload);
       composerInputRef.current?.setSnapshot(payload);
     }
   };
@@ -5070,7 +5113,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (sending) return;
     setComposerError(undefined);
     composerInputRef.current?.clear();
-    setDraft(emptySnapshot());
+    commitDraft(emptySnapshot());
     setSending(true);
     try {
       if (!(await respond("cancel"))) throw new Error("拒绝审批失败 / Could not deny the approval");
@@ -5086,7 +5129,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
       });
       await waitReceipt(client, handle.requestId);
     } catch (error) {
-      setDraft(payload);
+      commitDraft(payload);
       composerInputRef.current?.setSnapshot(payload);
       setComposerError(hostErrorMessage(error, "纠偏失败"));
     } finally {
@@ -5096,15 +5139,15 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   const sendFollowUp = async () => {
     if (!followUpEnabled || promptDispatchGate.busy) return;
     setComposerError(undefined);
-    const payload = composerInputRef.current?.getSnapshot() ?? draft;
+    const payload = composerInputRef.current?.getSnapshot() ?? draftLive.current;
     composerInputRef.current?.clear();
-    setDraft(emptySnapshot());
+    commitDraft(emptySnapshot());
     if (!(await dispatchPrompt(payload, { asFollowUp: true }))) {
-      setDraft(payload);
+      commitDraft(payload);
       composerInputRef.current?.setSnapshot(payload);
     }
   };
-  const takeComposerSnapshot = (): ComposerSnapshot => composerInputRef.current?.getSnapshot() ?? draft;
+  const takeComposerSnapshot = (): ComposerSnapshot => composerInputRef.current?.getSnapshot() ?? draftLive.current;
   const queueEntryOf = (payload: ComposerSnapshot, id: number): QueuedMessage => {
     const ownerSessionId = composerOwner;
     return {
@@ -5128,7 +5171,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (preview) setPreviewQueue([...result.queue]);
     else setQueuedMessages([...result.queue]);
     setQueueEdit(result.editing);
-    setDraft(result.composer);
+    commitDraft(result.composer);
     composerInputRef.current?.setSnapshot(result.composer);
     setComposerError(undefined);
   };
@@ -5157,7 +5200,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
       previewQueueSeqRef.current += 1;
       setPreviewQueue((queue) => [...queue, queueEntryOf(payload, previewQueueSeqRef.current)]);
       composerInputRef.current?.clear();
-      setDraft(emptySnapshot());
+      commitDraft(emptySnapshot());
       setComposerError(undefined);
       return;
     }
@@ -5881,7 +5924,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                 images: [...current.images, ...recovered.images],
                 doc: { nodes: [...current.doc.nodes, { type: "text" as const, value: "\n" }, ...recovered.doc.nodes] },
               };
-              setDraft(merged); composerInputRef.current?.setSnapshot(merged); composerInputRef.current?.focus();
+              commitDraft(merged); composerInputRef.current?.setSnapshot(merged); composerInputRef.current?.focus();
             }} /> : null)}
             <MessageQueueBar
               messages={sessionQueue}
@@ -5935,12 +5978,14 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                 slashCatalog={slashCatalog}
                 onRunCommand={runSlashCommand}
                 onChange={(next) => {
-                  setDraft(next);
                   // Draft ownership follows the same truth as the queue: on a
                   // fresh-draft surface whose session is still being created the
                   // snapshot's session must not receive this draft.
                   const owner = composerOwner;
                   if (owner !== undefined) onComposerDraftChange?.(owner, next);
+                  // Keystrokes land in the live ref first; the render-visible
+                  // `draft` follows only at a status boundary or a typing pause.
+                  publishDraft(next);
                 }}
                 onSubmit={() => {
                   if (queueEdit !== undefined) {
@@ -5974,10 +6019,10 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                 onError={setComposerError}
               />
               <DictationControl client={client} sessionId={composerOwner} available={runtimeConnected && executionMatches && !worktreeGated} onText={text => {
-                const current = composerInputRef.current?.getSnapshot() ?? draft;
+                const current = composerInputRef.current?.getSnapshot() ?? draftLive.current;
                 const next = snapshotFromDoc({ nodes: [...current.doc.nodes, { type: "text", value: `${current.text.trim() ? "\n" : ""}${text}` }] });
                 composerInputRef.current?.setSnapshot(next);
-                setDraft(next);
+                commitDraft(next);
                 if (composerOwner) onComposerDraftChange?.(composerOwner, next);
               }} />
               <p className="sr-only" id="composerHint">{
@@ -6133,7 +6178,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                         commitQueuedEdit();
                         return;
                       }
-                      const payload = composerInputRef.current?.getSnapshot() ?? draft;
+                      const payload = composerInputRef.current?.getSnapshot() ?? draftLive.current;
                       if (composerSlashExecute(payload, slashCatalog) !== undefined) {
                         void sendPrompt();
                         return;
@@ -6390,7 +6435,10 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     setDockSelection(scope);
     return scope;
   }, [dock.store, executionTarget.id, setDockSelection]);
-  const [composerDraftsBySession, setComposerDraftsBySession] = useTargetMemory<Readonly<Record<string, ComposerSnapshot>>>("composer-drafts", () => ({}));
+  /* 每个会话的草稿快照不进 React state：击键时写 state 会把整个 AppShell
+     （58 处 state）按字符重渲一次。草稿只在「挂载/切会话恢复」边界被读，
+     用 ref 簿记即可（`composer/draftStore.ts`）。 */
+  const [composerDraftBook] = useState(createComposerDraftBook);
   const [draftSkills, setDraftSkills] = useState<ReadonlySet<string>>(() => new Set());
   const [usedSkills, setUsedSkills] = useState<ReadonlySet<string>>(() => new Set());
   const usedSkillsIdentityRef = useRef("");
@@ -6406,17 +6454,8 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     setUsedSkills((prev) => mergeUsedSkills(prev, names));
   }, []);
   const onComposerDraftChange = useCallback((sessionId: string, draft: ComposerSnapshot) => {
-    setComposerDraftsBySession((current) => {
-      if (snapshotIsEmpty(draft)) {
-        if (!(sessionId in current)) return current;
-        const next = { ...current };
-        delete next[sessionId];
-        return next;
-      }
-      if (current[sessionId] === draft) return current;
-      return { ...current, [sessionId]: draft };
-    });
-  }, []);
+    composerDraftBook.set(sessionId, draft);
+  }, [composerDraftBook]);
   useEffect(() => {
     if (selectedHistoryId !== null) setSelectedProvisionalSessionId(undefined);
   }, [selectedHistoryId]);
@@ -6526,9 +6565,12 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const layout = useWorkbenchLayout({ collapsed, sidebarWidth, sideOpen, panelWidth, bottomVisible, bottomOpen, bottomHeight, railMode: dock.layout.rail.mode, railWidth: dock.layout.rail.width }, !showPage);
   const toggleSidebar = useCallback(() => {
     beforeConversationLayoutChange();
-    if (layout.sidebarShown) { setCollapsed(true); layout.focusPanel(null); }
+    // Closing a panel releases only its own priority: a narrow window may be
+    // showing the right panel as a drawer, and collapsing the sidebar must not
+    // hand that drawer's priority back to the layout solver.
+    if (layout.sidebarShown) { setCollapsed(true); layout.releaseFocus("sidebar"); }
     else { setCollapsed(false); layout.focusPanel("sidebar"); }
-  }, [layout.sidebarShown, layout.focusPanel]);
+  }, [layout.sidebarShown, layout.focusPanel, layout.releaseFocus]);
   const openSide = useCallback(() => {
     beforeConversationLayoutChange();
     setSideOpen(true);
@@ -6537,8 +6579,8 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const closeSide = useCallback(() => {
     beforeConversationLayoutChange();
     setSideOpen(false);
-    layout.focusPanel(null);
-  }, [layout.focusPanel]);
+    layout.releaseFocus("side");
+  }, [layout.releaseFocus]);
   const toggleSide = useCallback(() => {
     if (layout.sideShown) closeSide();
     else openSide();
@@ -6546,19 +6588,21 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const changeBottomOpen = useCallback((open: boolean) => {
     beforeConversationLayoutChange();
     setBottomOpen(open);
-    if (open) setBottomVisible(true);
-    layout.focusPanel(open ? "bottom" : null);
-  }, [layout.focusPanel]);
+    if (open) { setBottomVisible(true); layout.focusPanel("bottom"); }
+    else layout.releaseFocus("bottom");
+  }, [layout.focusPanel, layout.releaseFocus]);
   const changeBottomVisible = useCallback((visible: boolean) => {
     beforeConversationLayoutChange();
     setBottomVisible(visible);
     if (visible && !layout.bottomVisible) {
       setBottomOpen(true);
       layout.focusPanel("bottom");
+    } else if (visible && layout.bottomOpen) {
+      layout.focusPanel("bottom");
     } else {
-      layout.focusPanel(visible && layout.bottomOpen ? "bottom" : null);
+      layout.releaseFocus("bottom");
     }
-  }, [layout.bottomVisible, layout.bottomOpen, layout.focusPanel]);
+  }, [layout.bottomVisible, layout.bottomOpen, layout.focusPanel, layout.releaseFocus]);
   const toggleBottom = useCallback(() => {
     if (!layout.bottomVisible || !layout.bottomOpen) {
       setBottomVisible(true);
@@ -6576,6 +6620,22 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     window.addEventListener("omp:dock-open", open);
     return () => window.removeEventListener("omp:dock-open", open);
   }, [dock.store, layout.focusPanel]);
+  /* dock-engine 的 region 动作（视图菜单勾选、快捷键、拖拽入坞）提交后广播。
+     菜单路径过去只改 `dock.layout.*.visible`，没给布局求解器聚焦优先级，
+     窄窗下 `fitWorkbench` 会把这个刚打开的侧栏裁掉。这里复用顶栏按钮同一条
+     机制：可见 → 抢优先级；不可见 → 只释放它自己那一个。 */
+  useEffect(() => {
+    const region = (event: Event) => {
+      const detail = (event as CustomEvent<{ region?: DockRegion; visible?: boolean }>).detail;
+      if (detail === undefined || detail.region === undefined) return;
+      const panel = layoutPanelForRegion(detail.region);
+      if (panel === null) return;
+      if (detail.visible === true) layout.focusPanel(panel);
+      else layout.releaseFocus(panel);
+    };
+    window.addEventListener("omp:dock-region", region);
+    return () => window.removeEventListener("omp:dock-region", region);
+  }, [layout.focusPanel, layout.releaseFocus]);
   const [trailAt, setTrailAt] = useState(0);
   const [capNonce, setCapNonce] = useState(0);
   const [settingsNonce, setSettingsNonce] = useState(0);
@@ -6752,6 +6812,8 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     sessionCreating: creatingSession,
     liveSessionId: snapshot?.sessionId,
   });
+  /** Restore boundary only: read, never subscribe (see `composer/draftStore.ts`). */
+  const activeComposerDraft = composerDraftBook.get(activeComposerOwner);
   useEffect(() => {
     if (composerInsertion && composerInsertion.owner !== activeComposerOwner) setComposerInsertion(undefined);
   }, [composerInsertion, activeComposerOwner]);
@@ -8580,7 +8642,23 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
               <button className="menu-item" role="menuitem" onClick={() => runEdit("selectAll")}>{t("menu.selectAll")}<span className="kbd">{formatShortcut(SHORTCUTS.selectAll)}</span></button>
             </TitleMenu>
             <TitleMenu id="view" label={t("menu.view")} openId={openMenu} onToggle={setOpenMenu}>
-              <DockViewMenu onClose={() => setOpenMenu(null)} onSettings={() => { setSettingsIntent("general"); go("settings"); }} />
+              <DockViewMenu
+                onClose={() => setOpenMenu(null)}
+                onSettings={() => { setSettingsIntent("general"); go("settings"); }}
+                /* 区域开关同时看到「偏好真值」和「布局求解器实际呈现」：窄窗里
+                   偏好为 true 但被裁掉的区域，菜单必须显示未勾选，点一次要抢回
+                   聚焦优先级，而不是把偏好关掉。 */
+                regionState={{
+                  left: { visible: dock.layout.left.visible, presented: layout.sidebarShown },
+                  right: { visible: dock.layout.right.visible, presented: layout.sideShown },
+                  /* 底栏的`presented`是整条在屏而不是正文展开：折叠态只显示
+                     标签行，它仍然是可见区域的真实状态；若用 expanded 判定，菜单会
+                     显示未勾选、点一次却只是重复设置 visible（store 无变化），用户
+                     看到的是菜单没反应。展开/折叠由标签条上的箭头负责。 */
+                  bottom: { visible: dock.layout.bottom.visible, presented: layout.bottomVisible },
+                  rail: { visible: dock.layout.rail.mode !== "hidden", presented: dock.layout.rail.mode !== "hidden" },
+                }}
+              />
               <div className="menu-sep" />
               <button className="menu-item" role="menuitem" onClick={() => runMenu(() => chrome.onToggleTheme())}>{theme === "dark" ? t("menu.lightTheme") : t("menu.darkTheme")}</button>
             </TitleMenu>
@@ -8790,9 +8868,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
             onOpenChanges={() => { setSideTab("changes"); }}
             onOpenGit={() => { setSideTab("git"); }}
              composerRef={composerRef}
-             {...(composerDraftsBySession[activeComposerOwner ?? ""] === undefined
-               ? {}
-               : { composerDraft: composerDraftsBySession[activeComposerOwner ?? ""] })}
+             {...(activeComposerDraft === undefined ? {} : { composerDraft: activeComposerDraft })}
              onComposerDraftChange={onComposerDraftChange}
              composerInsertion={composerInsertion}
              onComposerInsertionApplied={clearComposerInsertion}

@@ -13,6 +13,7 @@ import { win32 } from "node:path";
 import { randomBytes } from "node:crypto";
 
 import { processGroupSpawnOptions, terminateProcessTree } from "./platform/process-tree.js";
+import { TERMINAL_BATCH_MS, TerminalOutputBatcher, type TerminalBatchTimers, type TerminalFlowStats } from "./terminal-batch.js";
 
 import { TERMINAL_MAX_SESSIONS, type TerminalSessionInfo, type TerminalSize } from "./terminal-shared.js";
 
@@ -28,6 +29,13 @@ export interface PtyProcess {
   kill(): void;
   onData(listener: (data: string) => void): void;
   onExit(listener: (info: PtyExitInfo) => void): void;
+  /**
+   * Stop reading the source (flow control: the Renderer is behind). Optional:
+   * a backend without it simply keeps buffering up to the hard cap.
+   */
+  pause?(): void;
+  /** Resume reading after {@link pause}. */
+  resume?(): void;
 }
 
 export interface PtySpawnOptions {
@@ -115,6 +123,8 @@ interface NodePtyModule {
     write(data: string): void;
     resize(cols: number, rows: number): void;
     kill(): void;
+    pause(): void;
+    resume(): void;
     onData(listener: (data: string) => void): void;
     onExit(listener: (info: { exitCode: number; signal?: number }) => void): void;
   };
@@ -210,6 +220,16 @@ function spawnWithPipes(options: PtySpawnOptions): PtyProcess {
     kill: () => {
       killProcessTree(child);
     },
+    // Pausing the readable streams lets the OS pipe fill and blocks the child,
+    // which is the same back-pressure a real terminal applies.
+    pause: () => {
+      child.stdout?.pause();
+      child.stderr?.pause();
+    },
+    resume: () => {
+      child.stdout?.resume();
+      child.stderr?.resume();
+    },
     onData: (listener) => {
       dataListeners.push(listener);
     },
@@ -239,6 +259,12 @@ function spawnWithNodePty(options: PtySpawnOptions): PtyProcess {
     },
     kill: () => {
       proc.kill();
+    },
+    pause: () => {
+      proc.pause();
+    },
+    resume: () => {
+      proc.resume();
     },
     onData: (listener) => {
       proc.onData(listener);
@@ -270,7 +296,8 @@ export function createNodePtySpawner(requirePty = false): PtySpawner {
 }
 
 export interface TerminalSessionListeners {
-  onData(event: { id: string; data: string }): void;
+  /** One batched payload; `bytes` is its UTF-8 length (for flow control). */
+  onData(event: { id: string; data: string; bytes?: number }): void;
   onExit(event: { id: string }): void;
 }
 
@@ -281,17 +308,28 @@ interface LiveSession {
   size: TerminalSize;
 }
 
+/** Output batching / flow-control tuning; defaults live in `terminal-batch.ts`. */
+export interface TerminalSessionOutputOptions {
+  readonly batchMs?: number;
+  readonly highWaterBytes?: number;
+  readonly lowWaterBytes?: number;
+  readonly hardCapBytes?: number;
+  readonly timers?: TerminalBatchTimers;
+}
+
 export interface TerminalSessionManagerOptions {
   readonly spawner: PtySpawner;
   readonly resolveShell?: () => ResolvedShell;
   readonly resolveCwd?: () => string;
   readonly newId?: () => string;
   readonly recording?: {
+    /** Fed from the batcher, not per PTY chunk (see `terminal-batch.ts`). */
     output(windowId: number, id: string, data: string): void;
     resize(windowId: number, id: string, cols: number, rows: number): void;
     end(windowId: number, id: string): void;
     disposeWindow(windowId: number): void;
   };
+  readonly output?: TerminalSessionOutputOptions;
 }
 
 export class TerminalSessionManager {
@@ -301,6 +339,11 @@ export class TerminalSessionManager {
   readonly #resolveCwd: () => string;
   readonly #newId: () => string;
   readonly #recording: TerminalSessionManagerOptions["recording"];
+  readonly #batcher: TerminalOutputBatcher;
+  readonly #timers: TerminalBatchTimers;
+  /** Where a batched payload for `id` goes (window + that session's listeners). */
+  readonly #wiring = new Map<string, { readonly windowId: number; readonly listeners: TerminalSessionListeners }>();
+  #capFlushes = 0;
 
   constructor(options: TerminalSessionManagerOptions) {
     this.#spawner = options.spawner;
@@ -308,9 +351,49 @@ export class TerminalSessionManager {
     this.#resolveCwd = options.resolveCwd ?? (() => resolveTerminalCwd());
     this.#newId = options.newId ?? (() => randomBytes(16).toString("base64url"));
     this.#recording = options.recording;
+    const output = options.output;
+    this.#timers = output?.timers ?? {
+      setTimeout: (handler, ms) => setTimeout(handler, ms),
+      clearTimeout: (handle) => {
+        clearTimeout(handle as ReturnType<typeof setTimeout>);
+      },
+    };
+    this.#batcher = new TerminalOutputBatcher({
+      sink: {
+        send: (id, data, bytes) => {
+          this.#wiring.get(id)?.listeners.onData({ id, data, bytes });
+        },
+        record: (id, data) => {
+          const wiring = this.#wiring.get(id);
+          if (wiring !== undefined) this.#recording?.output(wiring.windowId, id, data);
+        },
+        pauseSource: (id, paused) => {
+          const proc = this.#sessionById(id)?.proc;
+          if (paused) proc?.pause?.();
+          else proc?.resume?.();
+        },
+        capReached: () => {
+          this.#capFlushes += 1;
+        },
+      },
+      timers: this.#timers,
+      ...(output?.batchMs === undefined ? {} : { batchMs: output.batchMs }),
+      ...(output?.highWaterBytes === undefined ? {} : { highWaterBytes: output.highWaterBytes }),
+      ...(output?.lowWaterBytes === undefined ? {} : { lowWaterBytes: output.lowWaterBytes }),
+      ...(output?.hardCapBytes === undefined ? {} : { hardCapBytes: output.hardCapBytes }),
+    });
   }
 
-  create(windowId: number, size: TerminalSize, listeners: TerminalSessionListeners): TerminalSessionInfo {
+  /** Cap-forced flushes and open buffers (diagnostics/tests). */
+  get flow(): { readonly capFlushes: number; readonly openBuffers: number } {
+    return { capFlushes: this.#capFlushes, openBuffers: this.#batcher.openSessions };
+  }
+
+  create(
+    windowId: number,
+    size: TerminalSize & { readonly flowControl?: boolean },
+    listeners: TerminalSessionListeners,
+  ): TerminalSessionInfo {
     const bucket = this.#bucket(windowId);
     if (bucket.size >= TERMINAL_MAX_SESSIONS) {
       throw new Error(`terminal: at most ${TERMINAL_MAX_SESSIONS} sessions per window`);
@@ -327,14 +410,40 @@ export class TerminalSessionManager {
       rows: size.rows,
     });
     const session: LiveSession = { info, proc, ended: false, size };
+    this.#wiring.set(id, { windowId, listeners });
+    // `flowControl` is only true when the Renderer acknowledges xterm writes.
+    this.#batcher.open(id, { flowControl: size.flowControl === true });
     proc.onData((data) => {
-      if (!session.ended) { this.#recording?.output(windowId, id, data); listeners.onData({ id, data }); }
+      // Not gated on `session.ended`: a platform can hand over a final chunk
+      // after the exit notification, and the batcher still holds the id for
+      // one batch window (see `onExit`). Once it is closed, pushes are no-ops.
+      this.#batcher.push(id, data);
     });
     proc.onExit(() => {
+      // Deliver what is buffered, then let one batch window pass before the id
+      // is released: ConPTY can hand over a final chunk after the exit
+      // notification, and the shell's last line is part of the output.
+      this.#batcher.flush(id);
       this.#markEnded(windowId, id, listeners);
+      this.#timers.setTimeout(() => {
+        this.#batcher.close(id);
+        this.#wiring.delete(id);
+      }, TERMINAL_BATCH_MS);
     });
     bucket.set(id, session);
     return info;
+  }
+
+  /** Renderer wrote `bytes` of this terminal's output to xterm (flow control). */
+  acknowledge(windowId: number, id: string, bytes: number): void {
+    const wiring = this.#wiring.get(id);
+    if (wiring === undefined || wiring.windowId !== windowId) return;
+    this.#batcher.acknowledge(id, bytes);
+  }
+
+  /** Flow-control state for tests and diagnostics (`undefined` once released). */
+  flowStats(id: string): TerminalFlowStats | undefined {
+    return this.#batcher.stats(id);
   }
 
   write(windowId: number, id: string, data: string): void {
@@ -349,6 +458,9 @@ export class TerminalSessionManager {
   resize(windowId: number, id: string, cols: number, rows: number): void {
     const session = this.#windows.get(windowId)?.get(id);
     if (session === undefined || session.ended) return;
+    // Deliver pending output before recording the resize, otherwise the
+    // recording would apply the new geometry to earlier output.
+    this.#batcher.flush(id);
     session.proc.resize(cols, rows);
     session.size = { cols, rows }; this.#recording?.resize(windowId, id, cols, rows);
   }
@@ -369,17 +481,30 @@ export class TerminalSessionManager {
   disposeWindow(windowId: number): void {
     this.#recording?.disposeWindow(windowId);
     const bucket = this.#windows.get(windowId);
-    if (bucket === undefined) return;
-    for (const [id, session] of bucket) {
-      this.#kill(session, windowId, id);
+    if (bucket !== undefined) {
+      for (const [id, session] of bucket) {
+        this.#kill(session, windowId, id);
+      }
+      this.#windows.delete(windowId);
     }
-    this.#windows.delete(windowId);
+    // Sessions whose exit is still draining their buffer are no longer in the
+    // bucket; release them here so a closed window leaves nothing behind.
+    for (const [id, wiring] of [...this.#wiring]) {
+      if (wiring.windowId !== windowId) continue;
+      this.#batcher.close(id);
+      this.#wiring.delete(id);
+    }
   }
 
   disposeAll(): void {
     for (const windowId of [...this.#windows.keys()]) {
       this.disposeWindow(windowId);
     }
+    for (const id of [...this.#wiring.keys()]) {
+      this.#batcher.close(id);
+      this.#wiring.delete(id);
+    }
+    this.#batcher.closeAll();
   }
 
   #bucket(windowId: number): Map<string, LiveSession> {
@@ -388,6 +513,14 @@ export class TerminalSessionManager {
     const created = new Map<string, LiveSession>();
     this.#windows.set(windowId, created);
     return created;
+  }
+
+  #sessionById(id: string): LiveSession | undefined {
+    for (const bucket of this.#windows.values()) {
+      const session = bucket.get(id);
+      if (session !== undefined) return session;
+    }
+    return undefined;
   }
 
   #require(windowId: number, id: string): LiveSession {
@@ -417,6 +550,10 @@ export class TerminalSessionManager {
   #kill(session: LiveSession, windowId: number, id: string, listeners?: TerminalSessionListeners): void {
     if (!session.ended) {
       session.ended = true;
+      // Stop batching and deliver the tail *before* the exit event, so the
+      // renderer never sees "exited" ahead of the shell's last output.
+      this.#batcher.close(id);
+      this.#wiring.delete(id);
       this.#recording?.end(windowId, id);
       try {
         session.proc.kill();

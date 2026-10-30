@@ -43,3 +43,119 @@ test("Windows SSH shell exits if its requested working directory cannot be enter
   assert.ok(script.includes("catch"));
   assert.ok(script.includes("exit 1"));
 });
+
+// ---- P2-1: the SSH path must satisfy the same flow-control contract --------
+
+interface FlowFixture {
+  readonly manager: RemoteTerminalManager;
+  readonly data: string[];
+  readonly events: string[];
+  pauses(): number;
+  resumes(): number;
+  emit(text: string): void;
+  exit(): void;
+}
+
+/** Fake SSH PTY that can produce output and records pause/resume. */
+function flowFixture(): FlowFixture {
+  const data: string[] = [];
+  const events: string[] = [];
+  let dataListener: (chunk: string) => void = () => {};
+  let exitListener: (info: { exitCode: number }) => void = () => {};
+  let pauses = 0;
+  let resumes = 0;
+  const remote = { environment: { platform: "linux" }, transport: { peer: { request: async () => ({ path: "/work" }) } } };
+  const manager = new RemoteTerminalManager(
+    { get: () => remote, profile: () => ({ host: "test-host", name: "Test" }), assertWritable: () => {}, authentication: () => undefined } as unknown as RemoteConnectionManager,
+    {
+      spawn() {
+        return {
+          write: (chunk: string) => { data.push(chunk); },
+          resize: () => {},
+          kill: () => {},
+          pause: () => { pauses += 1; },
+          resume: () => { resumes += 1; },
+          onData: (listener: (chunk: string) => void) => { dataListener = listener; },
+          onExit: (listener: (info: { exitCode: number }) => void) => { exitListener = listener; },
+        };
+      },
+    },
+  );
+  return {
+    manager,
+    data,
+    events,
+    pauses: () => pauses,
+    resumes: () => resumes,
+    emit: (text) => dataListener(text),
+    exit: () => exitListener({ exitCode: 0 }),
+  };
+}
+
+/** Poll until `predicate` holds (the batcher flushes on a real 8 ms window). */
+async function until(predicate: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!predicate()) {
+    if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+}
+
+test("SSH output is coalesced into one message per batching window", async () => {
+  const f = flowFixture();
+  const terminal = await f.manager.create(1, "target", "workspace", { cols: 80, rows: 24, flowControl: true }, {
+    onData: (event) => f.events.push(event.data),
+    onExit: () => {},
+  });
+  f.emit("a");
+  f.emit("b");
+  f.emit("c");
+  assert.deepEqual(f.events, [], "nothing is forwarded before the window closes");
+  await until(() => f.events.length === 1, "the batched SSH message");
+  assert.deepEqual(f.events, ["abc"]);
+  f.manager.dispose(1, terminal.id);
+});
+
+test("SSH PTY pauses above the high watermark and resumes on the renderer's ACK", async () => {
+  const f = flowFixture();
+  const terminal = await f.manager.create(1, "target", "workspace", { cols: 80, rows: 24, flowControl: true }, {
+    onData: () => {},
+    onExit: () => {},
+  });
+  const chunk = "x".repeat(512 * 1024); // ≥ the 500 KiB high watermark
+  f.emit(chunk);
+  await until(() => f.pauses() === 1, "the SSH PTY to be paused");
+  // The renderer never acknowledged while unmounted: no resume yet.
+  assert.equal(f.resumes(), 0);
+
+  f.manager.acknowledge(1, terminal.id, chunk.length);
+  assert.equal(f.resumes(), 1, "acknowledging the backlog resumes the SSH PTY");
+  f.manager.dispose(1, terminal.id);
+});
+
+test("SSH PTY is never paused when the renderer did not negotiate flow control", async () => {
+  const f = flowFixture();
+  const terminal = await f.manager.create(1, "target", "workspace", { cols: 80, rows: 24 }, {
+    onData: (event) => f.events.push(event.data),
+    onExit: () => {},
+  });
+  const chunk = "y".repeat(600 * 1024);
+  f.emit(chunk);
+  f.emit(chunk);
+  await until(() => f.events.join("").length === chunk.length * 2, "both SSH messages");
+  assert.equal(f.pauses(), 0, "batched but never throttled, like the local shell");
+  f.manager.dispose(1, terminal.id);
+});
+
+test("SSH dispose delivers the buffered tail before the exit event", async () => {
+  const f = flowFixture();
+  const terminal = await f.manager.create(1, "target", "workspace", { cols: 80, rows: 24, flowControl: true }, {
+    onData: (event) => f.events.push(`data:${event.data}`),
+    onExit: () => f.events.push("exit"),
+  });
+  f.emit("tail");
+  // Dispose before the 8 ms window closes: the tail must still be delivered.
+  f.manager.dispose(1, terminal.id);
+  f.exit();
+  assert.deepEqual(f.events, ["data:tail", "exit"]);
+});

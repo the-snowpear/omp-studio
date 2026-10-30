@@ -786,7 +786,9 @@ export class StudioHostClientFacade implements ClientTransport {
     const capabilityManifest = await this.#resolveManifest(this.#options.capabilityManifest, () => neutralCapabilityManifest(now));
     const commandManifest = await this.#resolveManifest(this.#options.commandManifest, () => neutralCommandManifest(now));
     const residents = await this.#readResidentsForBootstrap();
-    const snapshot = this.#currentSnapshot();
+    // Read-only view: `selection` and the pending interaction are derived
+    // fields; only the `snapshot` handed to the Client is copied below.
+    const snapshot = this.#currentSnapshotRef();
     const connection = this.#currentConnection();
     this.#lastEmittedConnection = connection;
     const base: ClientBootstrapBase = {
@@ -808,7 +810,8 @@ export class StudioHostClientFacade implements ClientTransport {
     const pendingInteraction = this.#bootstrapPendingInteraction(snapshot);
     return {
       ...base,
-      snapshot,
+      // The one copy on this path: bootstrap is an external boundary.
+      snapshot: structuredClone(snapshot),
       stateVersion: snapshot.stateVersion,
       cursor: bootstrapCursor,
       ...(messagesCursor === undefined ? {} : { messagesCursor }),
@@ -1278,7 +1281,7 @@ export class StudioHostClientFacade implements ClientTransport {
     validateRuntimeMirrorCommandInput(request.commandName, request.input);
     const service = this.#options.commands;
     if (service?.invoke === undefined) throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available on this Host`);
-    if (this.#currentSnapshot() === undefined) throw unavailableError(`${request.commandName} requires a Runtime snapshot`);
+    if (!this.#hasSnapshot()) throw unavailableError(`${request.commandName} requires a Runtime snapshot`);
     const operation = { ...request.input, kind: request.commandName } as unknown as StudioOperation;
     const acceptedAt = this.#options.diagnostics.now();
     const replay = this.#registry.accept(request, acceptedAt);
@@ -1355,7 +1358,8 @@ export class StudioHostClientFacade implements ClientTransport {
   // ------------------------------------------------------------------
 
   #eventContext(): HostEventContext {
-    const snapshot = this.#currentSnapshot();
+    // Read two fields; the operator pack is never copied for an event envelope.
+    const snapshot = this.#currentSnapshotRef();
     if (snapshot === undefined) {
       return {};
     }
@@ -1431,11 +1435,21 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   /**
-   * Current safe snapshot, or undefined when no Runtime is ready. Once a
-   * Runtime was seen, a vanished hello isolates its stale snapshot: the
-   * facade never serves Runtime state that belongs to a lost epoch.
+   * Current safe snapshot as an internal read-only view, or undefined when no
+   * Runtime is ready. Once a Runtime was seen, a vanished hello isolates its
+   * stale snapshot: the facade never serves Runtime state that belongs to a
+   * lost epoch.
+   *
+   * This is the zero-copy seam: the returned object is the committed
+   * publication snapshot (`RuntimePublicationStore` hands that same object to
+   * every consumer and requires it to be treated as frozen). Internal code may
+   * read fields from it, but it must never mutate it and must never hand it to
+   * a caller outside the facade. External boundaries copy once through
+   * {@link StudioHostClientFacade.#snapshotCopy}; cloning per read made every
+   * streamed conversation event deep-copy the whole operator pack (agents,
+   * jobs, telemetry) two or three times.
    */
-  #currentSnapshot(): OperatorStateSnapshot | undefined {
+  #currentSnapshotRef(): OperatorStateSnapshot | undefined {
     const runtime = this.#options.runtime;
     if (runtime === undefined) {
       return undefined;
@@ -1443,7 +1457,27 @@ export class StudioHostClientFacade implements ClientTransport {
     if (this.#deriveHello() === undefined && this.#lastHello !== undefined) {
       return undefined;
     }
-    const snapshot = runtime.snapshot?.() ?? runtime.session?.publication()?.snapshot;
+    return runtime.snapshot?.() ?? runtime.session?.publication()?.snapshot;
+  }
+
+  /** Narrow existence check: no snapshot copy, no field reads. */
+  #hasSnapshot(): boolean {
+    return this.#currentSnapshotRef() !== undefined;
+  }
+
+  /** Narrow epoch read for the epoch fence on forwarded Runtime events. */
+  #currentRuntimeEpoch(): RuntimeEpoch | undefined {
+    return this.#currentSnapshotRef()?.runtimeEpoch;
+  }
+
+  /**
+   * The single external copy of the current snapshot. Call it only where the
+   * value leaves the facade (query results, bootstrap); internal reads use
+   * {@link StudioHostClientFacade.#currentSnapshotRef} so one logical path
+   * never copies the operator pack twice.
+   */
+  #snapshotCopy(): OperatorStateSnapshot | undefined {
+    const snapshot = this.#currentSnapshotRef();
     return snapshot === undefined ? undefined : structuredClone(snapshot);
   }
 
@@ -1504,11 +1538,11 @@ export class StudioHostClientFacade implements ClientTransport {
         ...(last.upstreamCommit === undefined ? {} : { upstreamCommit: last.upstreamCommit }),
       };
     }
-    const snapshot = this.#currentSnapshot();
+    const hasSnapshot = this.#hasSnapshot();
     const runtimeId = hello.runtimeId as RuntimeId;
     const runtimeEpoch = hello.runtimeEpoch as RuntimeEpoch;
     return {
-      status: snapshot === undefined ? "connecting" : "connected",
+      status: hasSnapshot ? "connected" : "connecting",
       classification: hello.classification,
       runtimeId,
       runtimeEpoch,
@@ -1701,7 +1735,7 @@ export class StudioHostClientFacade implements ClientTransport {
 
   #onTelemetryForward(forward: StudioTelemetryForward): void {
     this.#syncRuntimeEvents();
-    const snapshot = this.#currentSnapshot();
+    const snapshot = this.#currentSnapshotRef();
     if (snapshot === undefined) return;
     const envelope = forward.envelope;
     if (envelope.runtimeEpoch !== snapshot.runtimeEpoch) return;
@@ -1739,7 +1773,7 @@ export class StudioHostClientFacade implements ClientTransport {
    */
   #onBtwForward(forward: StudioBtwForward): void {
     this.#syncRuntimeEvents();
-    const snapshot = this.#currentSnapshot();
+    const snapshot = this.#currentSnapshotRef();
     if (snapshot === undefined) return;
     const envelope = forward.envelope;
     if (envelope.runtimeEpoch !== snapshot.runtimeEpoch) return;
@@ -1764,7 +1798,7 @@ export class StudioHostClientFacade implements ClientTransport {
 
   #onInteractionForward(forward: StudioInteractionForward): void {
     this.#syncRuntimeEvents();
-    const snapshot = this.#currentSnapshot();
+    const snapshot = this.#currentSnapshotRef();
     if (snapshot === undefined) {
       return;
     }
@@ -1837,12 +1871,13 @@ export class StudioHostClientFacade implements ClientTransport {
 
   #onConversationForward(forward: StudioConversationForward): void {
     this.#syncRuntimeEvents();
-    const snapshot = this.#currentSnapshot();
-    if (snapshot === undefined) {
+    // Hottest Host path: one epoch read per streamed event, no snapshot copy.
+    const runtimeEpoch = this.#currentRuntimeEpoch();
+    if (runtimeEpoch === undefined) {
       return;
     }
     const envelope = forward.envelope;
-    if (envelope.runtimeEpoch !== snapshot.runtimeEpoch) {
+    if (envelope.runtimeEpoch !== runtimeEpoch) {
       return;
     }
     let update;
@@ -2097,7 +2132,8 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   #querySessionState(): OperatorStateSnapshot {
-    const snapshot = this.#currentSnapshot();
+    // Query results leave the facade: copy the operator pack exactly once here.
+    const snapshot = this.#snapshotCopy();
     if (snapshot === undefined) {
       throw unavailableError("session.state requires a Runtime snapshot");
     }
@@ -2105,7 +2141,7 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #queryHome(): Promise<HomeReadModel> {
-    const snapshot = this.#currentSnapshot();
+    const snapshot = this.#currentSnapshotRef();
     if (snapshot === undefined) {
       throw unavailableError("home.get requires a Runtime snapshot");
     }
@@ -2131,7 +2167,8 @@ export class StudioHostClientFacade implements ClientTransport {
     return {
       authority: { ...this.#options.authority },
       runtime: this.#currentConnection(),
-      snapshot,
+      // External boundary: copy the snapshot read at the start of this query.
+      snapshot: structuredClone(snapshot),
       recentThreads,
       ...(recentWorkspaces === undefined ? {} : { recentWorkspaces }),
     };
@@ -2166,8 +2203,7 @@ export class StudioHostClientFacade implements ClientTransport {
     readonly cursor?: OpaqueCursor;
     readonly limit?: number;
   }): Promise<ConversationTranscriptPage> {
-    const snapshot = this.#currentSnapshot();
-    if (snapshot === undefined) {
+    if (!this.#hasSnapshot()) {
       throw unavailableError("session.transcript.read requires a connected Runtime");
     }
     const reader = this.#options.runtime?.readTranscript;
@@ -2185,7 +2221,7 @@ export class StudioHostClientFacade implements ClientTransport {
         error instanceof Error ? error.message : "malformed transcript page",
       );
     }
-    const current = this.#currentSnapshot();
+    const current = this.#currentSnapshotRef();
     if (current === undefined) {
       throw unavailableError("session.transcript.read requires a connected Runtime");
     }
@@ -2256,8 +2292,7 @@ export class StudioHostClientFacade implements ClientTransport {
     readonly cursor?: OpaqueCursor;
     readonly limit?: number;
   }): Promise<AgentTranscriptPage> {
-    const snapshot = this.#currentSnapshot();
-    if (snapshot === undefined) {
+    if (!this.#hasSnapshot()) {
       throw unavailableError("agent.transcript.read requires a connected Runtime");
     }
     const reader = this.#options.runtime?.readAgentTranscript;
@@ -2281,8 +2316,7 @@ export class StudioHostClientFacade implements ClientTransport {
     readonly cursor?: OpaqueCursor;
     readonly limit?: number;
   }): Promise<ConversationTranscriptPage> {
-    const snapshot = this.#currentSnapshot();
-    if (snapshot === undefined) {
+    if (!this.#hasSnapshot()) {
       throw unavailableError("agent.conversation.read requires a connected Runtime");
     }
     const reader = this.#options.runtime?.readAgentConversation;
@@ -2312,9 +2346,11 @@ export class StudioHostClientFacade implements ClientTransport {
     if (archive === undefined || archive.readRevision === undefined || archive.createProbeCopy === undefined) {
       throw unavailableError("session.telemetry.read requires the session archive");
     }
-    const liveSnapshot = this.#currentSnapshot();
+    const liveSnapshot = this.#currentSnapshotRef();
     if (liveSnapshot !== undefined && liveSnapshot.sessionId === input.sessionId && liveSnapshot.telemetry !== undefined) {
-      return this.#telemetryReadResult(input.sessionId, "live", "current-live", liveSnapshot.telemetry);
+      // The published snapshot owns this telemetry object; the read result is an
+      // external boundary, so copy the payload (not the whole operator pack).
+      return this.#telemetryReadResult(input.sessionId, "live", "current-live", structuredClone(liveSnapshot.telemetry));
     }
     let revision: { sessionId: string; transcriptRevision: string };
     try {
@@ -2384,9 +2420,9 @@ export class StudioHostClientFacade implements ClientTransport {
       if (telemetry.sessionId !== sessionId) return undefined;
       // The Runtime may have resumed this exact session while the probe ran;
       // live data wins over a recomputed archive estimate.
-      const liveSnapshot = this.#currentSnapshot();
+      const liveSnapshot = this.#currentSnapshotRef();
       if (liveSnapshot !== undefined && liveSnapshot.sessionId === sessionId && liveSnapshot.telemetry !== undefined) {
-        return this.#telemetryReadResult(sessionId, "live", "current-live", liveSnapshot.telemetry);
+        return this.#telemetryReadResult(sessionId, "live", "current-live", structuredClone(liveSnapshot.telemetry));
       }
       return this.#telemetryReadResult(sessionId, "archive-recomputed", "current-environment-recomputed", telemetry);
     } catch {
@@ -2745,7 +2781,7 @@ export class StudioHostClientFacade implements ClientTransport {
         "permissions.mode.set is not available: no semantic command service is wired",
       );
     }
-    if (this.#currentSnapshot() === undefined) {
+    if (!this.#hasSnapshot()) {
       throw unavailableError("permissions.mode.set requires a Runtime snapshot");
     }
     const mode = request.input.mode;
@@ -3305,7 +3341,7 @@ export class StudioHostClientFacade implements ClientTransport {
     if (commandName === "session.create" && service.create === undefined) {
       throw clientError("CAPABILITY_UNAVAILABLE", "session.create is not available");
     }
-    if (commandName !== "session.create" && commandName !== "session.resume" && this.#currentSnapshot() === undefined) {
+    if (commandName !== "session.create" && commandName !== "session.resume" && !this.#hasSnapshot()) {
       throw unavailableError(`${commandName} requires a Runtime snapshot`);
     }
     this.#validateSemanticInput(commandName, request.input);

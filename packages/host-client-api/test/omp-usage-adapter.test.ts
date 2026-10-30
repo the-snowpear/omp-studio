@@ -253,4 +253,67 @@ describe("createOmpUsageService", () => {
     assert.match(second?.reason ?? "", /未在预期时间内就绪/);
     assert.equal(spawned.length, 1, "the first call reused a live panel; only the retry spawns");
   });
+
+  test("the sync throttle answers without probing for the omp entrypoint", async () => {
+    let locates = 0;
+    let execs = 0;
+    let clock = NOW;
+    const service = createOmpUsageService({
+      locateOmp: async () => {
+        locates += 1;
+        return "C:\tools\omp.exe";
+      },
+      exec: async () => {
+        execs += 1;
+        return { stdout: "", stderr: "", code: 0 };
+      },
+      statsDbPath: join(tmpdir(), "omp-usage-throttle-stats.db"),
+      now: () => clock,
+      syncThrottleMs: 30_000,
+    });
+    await service.get();
+    assert.deepEqual({ locates, execs }, { locates: 1, execs: 1 });
+    await service.get();
+    assert.deepEqual({ locates, execs }, { locates: 1, execs: 1 }, "inside the window nothing is probed or spawned");
+    clock += 30_001;
+    await service.get();
+    assert.deepEqual({ locates, execs }, { locates: 2, execs: 2 });
+  });
+
+  test("a missing omp still reports the exe-classified sync error after the reorder", async () => {
+    const service = createOmpUsageService({
+      locateOmp: async () => undefined,
+      statsDbPath: join(tmpdir(), "omp-usage-missing-stats.db"),
+      now: () => NOW,
+    });
+    const model = await service.get();
+    assert.match(model.unavailableReason ?? "", /安装 OMP 或将其加入 PATH/);
+  });
+
+  test("concurrent get() calls stay single-flight and share one locator", async () => {
+    let locates = 0;
+    let execs = 0;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const service = createOmpUsageService({
+      locateOmp: async () => {
+        locates += 1;
+        return "C:\tools\omp.exe";
+      },
+      exec: async () => {
+        execs += 1;
+        await gate;
+        return { stdout: "", stderr: "", code: 0 };
+      },
+      statsDbPath: join(tmpdir(), "omp-usage-missing-stats.db"),
+      now: () => NOW,
+    });
+    const first = service.get();
+    await Promise.resolve();
+    const second = service.get();
+    release();
+    await Promise.all([first, second]);
+    assert.equal(execs, 1, "one omp stats spawn for overlapping polls");
+    assert.equal(locates, 1, "the in-flight poll answers without another Runtime lookup");
+  });
 });

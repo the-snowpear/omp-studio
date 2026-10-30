@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `0.2.0` is the release candidate branch: a push there has to run the same
+    # gate as `main`, otherwise the candidate is only ever verified locally.
+    branches: [main, "0.2.0"]
     paths-ignore: ["*.md", "docs/**", "doc/**", "ui_reference/**", ".github/ISSUE_TEMPLATE/**", ".github/PULL_REQUEST_TEMPLATE.md"]
   pull_request:
     paths-ignore: ["*.md", "docs/**", "doc/**", "ui_reference/**", ".github/ISSUE_TEMPLATE/**", ".github/PULL_REQUEST_TEMPLATE.md"]

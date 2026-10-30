@@ -16,6 +16,11 @@ import {
   RUNTIME_ARTIFACT_LAYOUT,
   type RuntimeSignatureVerifier,
 } from "./signed-artifact.js";
+import {
+  DEFAULT_VERIFICATION_MAX_AGE_MS,
+  StatKeyedVerificationCache,
+  type VerificationCacheStats,
+} from "./verification-cache.js";
 
 export type { RuntimeSignatureVerifier } from "./signed-artifact.js";
 
@@ -29,6 +34,16 @@ export interface InstalledRuntimeManifest {
   record: ActiveRuntimeRecord;
   manifest: RuntimeInstallationManifest;
   entrypointPath: string;
+  /**
+   * Raw `sha256` hex of the entrypoint as recorded in the signature-covered
+   * `checksums.json` (the digest the artifact was signed against).
+   *
+   * Callers that are about to *execute* the Runtime use it to compare their own
+   * fresh read of the bytes against the signed value, instead of trusting the
+   * evidence cache in this class. It is optional only so a hand-written
+   * `InstalledRuntimeManifest` in a test fixture stays valid.
+   */
+  entrypointSha256?: string;
 }
 
 export interface ActivateOptions {
@@ -46,6 +61,14 @@ export interface RuntimeInstallerOptions {
    * bundle inherits. It must not change file contents; verification follows.
    */
   prepareStaging?: (directory: string) => Promise<void>;
+  /**
+   * Trust window for a recorded entrypoint verification (see
+   * `verification-cache.ts`). Defaults to 10 minutes. Tests shorten it or
+   * inject a clock; production keeps the default.
+   */
+  verificationMaxAgeMs?: number;
+  /** Injectable clock for the verification evidence cache. */
+  now?: () => number;
 }
 
 export interface RuntimeInstallOptions {
@@ -76,6 +99,13 @@ export class RuntimeInstaller {
   readonly #trustedKeys: Readonly<Record<string, string | Buffer>>;
   readonly #isRuntimeReferenced: ((runtimeVersion: string) => boolean | Promise<boolean>) | undefined;
   readonly #prepareStaging: ((directory: string) => Promise<void>) | undefined;
+  /**
+   * Verification evidence for the active entrypoint. Keyed on the entrypoint's
+   * stat identity plus the signed checksum and active version, so a `usage.get`
+   * poll or a second resolve reads 170 MB again only when the bytes, the
+   * signature-covered digest or the active version actually changed.
+   */
+  readonly #verifications: StatKeyedVerificationCache<void>;
 
   constructor(readonly rootDirectory: string, options: RuntimeInstallerOptions = {}) {
     this.#versionsDirectory = join(rootDirectory, "versions");
@@ -84,6 +114,24 @@ export class RuntimeInstaller {
     this.#trustedKeys = options.trustedKeys ?? {};
     this.#isRuntimeReferenced = options.isRuntimeReferenced;
     this.#prepareStaging = options.prepareStaging;
+    this.#verifications = new StatKeyedVerificationCache<void>({
+      maxAgeMs: options.verificationMaxAgeMs ?? DEFAULT_VERIFICATION_MAX_AGE_MS,
+      ...(options.now === undefined ? {} : { now: options.now }),
+    });
+  }
+
+  /** Diagnostics: how often the entrypoint was actually hashed vs. reused. */
+  verificationStats(): VerificationCacheStats {
+    return this.#verifications.stats();
+  }
+
+  /**
+   * Forget every recorded verification. Called by install/activate/rollback/
+   * uninstall/prune, and available to callers that want the next lookup to
+   * re-verify the active Runtime from scratch.
+   */
+  invalidate(): void {
+    this.#verifications.invalidate();
   }
 
   async install(artifactDirectory: string, options: RuntimeInstallOptions = {}): Promise<RuntimeInstallationManifest> {
@@ -121,6 +169,9 @@ export class RuntimeInstaller {
         });
         if (installed.manifest.runtimeVersion === manifest.runtimeVersion) {
           await restoreExecutableMode(installedDirectory, installed.manifest);
+          // An installation boundary: the bytes were just verified in full, so
+          // any recorded evidence is at best redundant and at worst stale.
+          this.invalidate();
           return installed.manifest;
         }
       } catch {
@@ -153,6 +204,7 @@ export class RuntimeInstaller {
         await restoreExecutableMode(directory, verified.manifest);
       },
     });
+    this.invalidate();
     return manifest;
   }
 
@@ -198,6 +250,7 @@ export class RuntimeInstaller {
       activatedAt: new Date().toISOString(),
     };
     await writeJsonAtomic(this.#currentPath, record);
+    this.invalidate();
     return record;
   }
 
@@ -239,6 +292,7 @@ export class RuntimeInstaller {
       activatedAt: new Date().toISOString(),
     };
     await writeJsonAtomic(this.#currentPath, record);
+    this.invalidate();
     return record;
   }
 
@@ -254,6 +308,7 @@ export class RuntimeInstaller {
     const target = join(this.#versionsDirectory, runtimeVersion);
     if (!isInside(this.#versionsDirectory, target)) throw new Error("Runtime uninstall target escaped the versions directory");
     await rm(target, { recursive: true, force: false });
+    this.invalidate();
   }
 
   async prune(options: { retainStable?: number } = {}): Promise<string[]> {
@@ -313,6 +368,7 @@ export class RuntimeInstaller {
         // Skip on failure
       }
     }
+    if (removed.length > 0) this.invalidate();
     return removed;
   }
 
@@ -345,8 +401,16 @@ export class RuntimeInstaller {
   /**
    * Read-only query for the active installation: its runtime manifest and the
    * absolute entrypoint path. Never mutates `current.json` or activation
-   * state; used by the Runtime Resolver's managed lookup. Re-verifies signed
-   * metadata and the actual executable bytes before they reach the process probe.
+   * state; used by the Runtime Resolver's managed lookup and by the `usage.get`
+   * entrypoint lookup.
+   *
+   * Signed metadata (manifest, `checksums.json`, signature) is re-verified on
+   * every call - those files are a few kilobytes. The entrypoint bytes are the
+   * expensive part, so they are re-hashed only when the recorded evidence no
+   * longer applies: the file's stat identity changed, the signed digest
+   * changed, the active version changed, the evidence is older than
+   * `verificationMaxAgeMs`, or `invalidate()` was called. A tampered entrypoint
+   * still fails here with the same "Checksum mismatch" error as before.
    */
   async currentManifest(): Promise<InstalledRuntimeManifest | undefined> {
     const record = await this.current();
@@ -371,7 +435,17 @@ export class RuntimeInstaller {
     if (!isInside(versionDirectory, entrypointPath) || !(await lstat(entrypointPath)).isFile()) {
       throw new Error("Runtime entrypoint escapes the version directory");
     }
-    await verifyFileChecksums(versionDirectory, { [manifest.entrypoint]: checksums.files[manifest.entrypoint]! });
-    return { record, manifest, entrypointPath };
+    const expectedChecksum = checksums.files[manifest.entrypoint];
+    if (expectedChecksum === undefined) throw new Error(`Checksum mismatch for ${manifest.entrypoint}`);
+    await this.#verifications.verify({
+      path: entrypointPath,
+      // A different signed digest or a different active version is different
+      // evidence even when the file's metadata looks unchanged.
+      assertion: `file-checksums-sha256:v1:${record.runtimeVersion}:${expectedChecksum}`,
+      verify: async () => {
+        await verifyFileChecksums(versionDirectory, { [manifest.entrypoint]: expectedChecksum });
+      },
+    });
+    return { record, manifest, entrypointPath, entrypointSha256: expectedChecksum };
   }
 }

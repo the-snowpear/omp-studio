@@ -3980,9 +3980,16 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 [data-theme="dark"] .magic-kw-ch {
   color: hsl(var(--magic-hue, 200) 90% 68%);
 }
-.magic-kw.is-animated .magic-kw-ch {
+/* 扫光只在「输入框镜像层」里跑，而且只给每个关键字的前 39 个字符。
+   `filter` 是逐帧重建该字符的层再重绘，成本随字符数线性增长；它又挂在用户气泡上
+   恒开（`UserMessageBody` 传 magicKeywords=true），是会话正文里最贵的一条无限动画。
+   正文改为静态 HSL 渐变——每个字符的 --magic-hue 本来就不同，彩虹识读不变。 */
+.composer-input-mirror .magic-kw.is-animated .magic-kw-ch {
   animation: magic-kw-shimmer 1.8s linear infinite;
   animation-delay: calc(var(--magic-i, 0) * -90ms);
+}
+.composer-input-mirror .magic-kw.is-animated .magic-kw-ch:nth-child(n+40) {
+  animation: none;
 }
 @keyframes magic-kw-shimmer {
   0% { filter: hue-rotate(0deg); }
@@ -4037,18 +4044,21 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .composer-bar .pill-btn.danger:hover {
   color: var(--danger-orange);
 }
-.composer-bar .pill-btn.danger > span {
-  animation: omp-text-breath 2.6s ease-in-out infinite;
+/* 静态双层霓虹（亮芯 70% + 柔晕 32%，即原 keyframes 的峰值帧）。发光全部由静态
+   text-shadow 承担：原来是无限 text-shadow 动画，属非合成属性，逐帧重绘文字层，
+   实测是出厂态空闲 CPU 的最大单笔。出现时用一次性 fade-in 交代「模式已切换」，
+   动 opacity（合成属性）且只跑一遍，跑完即静态。 */
+.composer-bar .pill-btn.danger > span,
+.approval-menu-item.danger.selected .am-label {
+  text-shadow: 0 0 2px color-mix(in srgb, var(--danger-glow) 70%, transparent),
+               0 0 9px color-mix(in srgb, var(--danger-glow) 32%, transparent);
 }
-@keyframes omp-text-breath {
-  0%, 100% {
-    text-shadow: 0 0 1px color-mix(in srgb, var(--danger-glow) 45%, transparent),
-                 0 0 5px color-mix(in srgb, var(--danger-glow) 18%, transparent);
-  }
-  50% {
-    text-shadow: 0 0 2px color-mix(in srgb, var(--danger-glow) 70%, transparent),
-                 0 0 9px color-mix(in srgb, var(--danger-glow) 32%, transparent);
-  }
+.composer-bar .pill-btn.danger > span {
+  animation: omp-text-reveal 0.9s var(--ease-out) 1;
+}
+@keyframes omp-text-reveal {
+  from { opacity: 0.3; }
+  to { opacity: 1; }
 }
 /* 权限模式 pill（plan §5.5）：菜单浮于 composer 上方，不挤占布局 */
 .approval-pill-wrap { position: relative; display: inline-flex; flex: none; }
@@ -4089,9 +4099,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
    （否则最底下的 Full Access 项会被合成层挡住点不到）。 */
 .approval-menu-item.danger .am-label { color: var(--danger-orange); }
 .approval-menu-item.danger.selected { color: var(--danger-orange); }
-.approval-menu-item.danger.selected .am-label {
-  animation: omp-text-breath 2.6s ease-in-out infinite;
-}
 .approval-menu-item .am-label { font-size: var(--fs-12); font-weight: var(--fw-medium); }
 .approval-menu-item .am-desc { font-size: var(--fs-11); color: var(--text-3); }
 .cmp-mode-cluster {
@@ -6483,10 +6490,11 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   stroke-linejoin: miter;
   stroke-miterlimit: 2;
   stroke-linecap: square;
-  animation: pi-breathe 8s var(--ease) 0.6s infinite;
+  /* 静态 0.94 ≈ 原 8s 呼吸的平均亮度。无限 opacity 动画会常驻一个合成层、
+     让合成器每帧唤醒；图案本身还有 .ce-anim 的入场，识别度不依赖持续呼吸。 */
+  opacity: 0.94;
 }
 .ce-greet, .ce-sub { position: relative; }
-@keyframes pi-breathe { 0%, 100% { opacity: 0.85; } 50% { opacity: 1; } }
 
 .ce-greet {
   margin: 0 0 var(--sp-6);
@@ -6589,22 +6597,31 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   grid-auto-columns: var(--ce-cell);
   gap: var(--ce-gap);
 }
+/* 入场扫光：一条渐变带 + `transform: translateX`（合成属性），扫一遍就停在
+   容器外。原来是 `background-position` 的无限动画——非合成属性，每帧重绘整块
+   热力图，还是 7.5s 一个循环的常驻唤醒源。 */
 .ce-heat-cells::after {
   content: "";
   position: absolute;
-  inset: -5px;
+  top: -5px;
+  bottom: -5px;
+  left: 0;
+  width: 55%;
   z-index: 3;
   pointer-events: none;
-  background: linear-gradient(100deg, transparent 42%, rgba(228, 216, 255, 0.32) 50%, transparent 58%);
-  background-size: 300% 100%;
-  background-position: 130% 0;
-  animation: ce-sheen 7.5s var(--ease) infinite 2.6s;
+  background: linear-gradient(100deg, transparent 30%, rgba(228, 216, 255, 0.32) 50%, transparent 70%);
+  transform: translateX(-120%);
+  animation: ce-sheen-sweep 3.2s var(--ease-out) 1.4s 1 both;
 }
-@keyframes ce-sheen {
-  0%, 52% { background-position: 130% 0; }
-  82%, 100% { background-position: -50% 0; }
+@keyframes ce-sheen-sweep {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(240%); }
 }
 
+.ce-heat-cells {
+  /* 一次性网格淡入，给不参与错峰的格子一个统一入场。 */
+  animation: ce-in 0.36s var(--ease-out) 700ms backwards;
+}
 .ce-hc {
   position: relative;
   border-radius: 2.5px;
@@ -6613,6 +6630,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   animation: ce-hc-in 0.5s var(--ease-out) backwards;
   animation-delay: calc(760ms + var(--cw) * 10ms + var(--cd) * 5ms);
 }
+/* 371 格逐个入场 = 371 条并发的一次性动画（各自提升合成层）。只让最前面约
+   60 格错峰，其余直接随网格淡入出现：峰值并发动画数 371 → 60。 */
+.ce-hc:nth-child(n+61) { animation: none; }
 .ce-heat [data-l="1"] { background: var(--ce-l1); }
 .ce-heat [data-l="2"] { background: var(--ce-l2); }
 .ce-heat [data-l="3"] { background: var(--ce-l3); }
@@ -6738,9 +6758,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 @media (prefers-reduced-motion: reduce) {
   .convo-empty .ce-anim { animation: none; opacity: 1; transform: none; }
-  .ce-pi-glyph { animation: none; }
-  .ce-hc, .ce-heat-months, .ce-heat-days { animation: none; }
+  .ce-pi-glyph { opacity: 0.94; }
+  .ce-hc, .ce-heat-months, .ce-heat-days, .ce-heat-cells { animation: none; }
   .ce-heat-cells::after { display: none; }
+  .composer-bar .pill-btn.danger > span { animation: none; }
 }
 
 .btw-history-toolbar { display:flex; gap:6px; padding:8px; flex-wrap:wrap; }
