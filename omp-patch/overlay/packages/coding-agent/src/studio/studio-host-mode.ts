@@ -1373,6 +1373,9 @@ export async function runStudioHostMode(
 		) {
 			await runtime.services.modes.enterPlan();
 		}
+		// The Host owns this identity once the Bridge is ready. Materialize even
+		// an empty session so a restart can --resume it before the first message.
+		await slot.sessionManager.ensureOnDisk();
 		await bridge.start(runtime);
 		// Install the Remote UI factory so Ask / tool dialogs surface as
 		// interaction cards on the Bridge (plan §2.5). The interactive TUI

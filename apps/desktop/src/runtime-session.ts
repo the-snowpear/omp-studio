@@ -1365,6 +1365,8 @@ function createSingleDesktopRuntimeSessionPort(
       );
       return undefined;
     }
+    const launchStarted = performance.now();
+    let stageStarted = launchStarted;
     if (!(await isUsableWorkspaceDirectory(selected.cwd))) {
       log?.write("warn", "runtime.launch.skip", "workspace-unusable");
       rememberUnavailable(unavailableFacts("workspace-unusable", "workspace directory is unusable"));
@@ -1385,6 +1387,12 @@ function createSingleDesktopRuntimeSessionPort(
     }
 
     const launchGeneration = ++generation;
+    const stage = (name: string): void => {
+      const now = performance.now();
+      log?.write("info", "runtime.launch.stage", `generation=${launchGeneration} stage=${name} elapsedMs=${(now - stageStarted).toFixed(2)} totalMs=${(now - launchStarted).toFixed(2)}`);
+      stageStarted = now;
+    };
+    stage("verify");
     lastExit = undefined;
     let becameReady = false;
     log?.write(
@@ -1410,6 +1418,7 @@ function createSingleDesktopRuntimeSessionPort(
             process.platform,
             createWindowsBridgeAclPort(),
           );
+    stage("bootstrap");
 
     /** Filled by the readiness hook with the authenticated handshake hello. */
     let hello: StudioHelloResponse | undefined;
@@ -1558,6 +1567,7 @@ function createSingleDesktopRuntimeSessionPort(
       });
       processPort = port;
       await port.start(binding);
+      stage("handshake");
 
       controller = new StudioRuntimeSessionController(client, new CommandLedger(), undefined, {
         incrementalToolReplay: process.env.OMP_INCREMENTAL_REPLAY !== "0",
@@ -1566,6 +1576,7 @@ function createSingleDesktopRuntimeSessionPort(
       unregisterPerformance = registerPerformanceController(controller);
       sessionController = controller;
       await controller.refresh();
+      stage("snapshot");
       if (hello === undefined) {
         throw new Error("Runtime Bridge handshake completed without a hello response");
       }
@@ -1577,6 +1588,7 @@ function createSingleDesktopRuntimeSessionPort(
         log?.write("warn", "runtime.command-manifest.unavailable", errorDetail(error));
         command = undefined;
       }
+      stage("manifest");
       // The manifest is optional, but losing its transport is a startup failure.
       // Do not overwrite the disconnect with alive=true and publish a dead Worker.
       if (client.state === "disconnected" || lastExit !== undefined) {

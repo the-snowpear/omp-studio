@@ -265,7 +265,7 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 | SSH 账密认证 / 终端 | `apps/desktop/src/remote/{authentication,terminal}.ts`；`apps/desktop/ssh-askpass/`；`scripts/build-ssh-askpass.mjs`；Renderer `terminalSessions.tsx`；验收交接见 `doc/ssh-workspace-test-prompt.md` |
 | 后台评测任务与报告 | `packages/studio-host/src/evaluation-coordinator.ts`、`apps/desktop/src/evaluation-workspace.ts`；Host 共享所有者由 `host-composition.ts` 的 `evaluationOwner` 传入各对话上下文 |
 | Backend 生命周期 | `packages/studio-host/src/host-backend.ts` |
-| 解析 / 启动 Runtime | `runtime-resolver.ts`、`runtime-session-controller.ts`、`runtime-process-port.ts` |
+| 解析 / 启动 Runtime | `runtime-resolver.ts`、`runtime-session-controller.ts`、`runtime-process-port.ts`；Desktop `runtime-session.ts` 的 `runtime.launch.stage` 分别记录校验、Bridge 准备、握手、快照和命令清单耗时；大文件校验使用 1 MiB 流式读取 |
 | Bridge 客户端 | `bridge-client.ts`、`bridge-auth.ts` |
 | 状态投影 | `state-projector.ts`、`runtime-projection.ts` |
 | 交互转发 | `interaction-adapter.ts`、`interaction-events.ts` |
@@ -282,7 +282,7 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 
 | 主题 | 文件 |
 |---|---|
-| 进程入口 / 服务组装 | `studio-host-mode.ts` |
+| 进程入口 / 服务组装 | `studio-host-mode.ts`；Bridge 就绪前 `ensureOnDisk()` 固定空会话身份，首次发消息前也能重连恢复 |
 | 队列分组 / 待恢复输入 / Worker 回收 | `services/runtime-queue-service.ts`、`session-gui-service.ts`、`studio-host-mode.ts`；接缝 `session/agent-session.ts` 统一分组、身份和修改入口 |
 | 会话压缩阈值 / 标题元数据 | `services/session-compaction-policy.ts`、`session-titles-service.ts`；接缝 `session/session-manager.ts` 自定义条目索引、原生标题槽读取 |
 | Bridge 服务端 / 分发 | `bridge-server.ts`、`bridge-dispatcher.ts`、`bridge-protocol.ts` |

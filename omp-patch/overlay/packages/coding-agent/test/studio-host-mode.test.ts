@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
 	createStudioHostRuntime,
 	runStudioHostMode,
@@ -100,6 +101,34 @@ async function waitForListedAgent(runtime: StudioHostRuntime, agentId: string, i
 describe("studio-host runtime", () => {
 	afterEach(() => {
 		AgentRegistry.resetGlobalForTests();
+	});
+
+	test("an empty session is resumable before the Bridge reports it ready", async () => {
+		using directory = TempDir.createSync("@omp-studio-empty-resume-");
+		const manager = SessionManager.create(directory.path(), path.join(directory.path(), "sessions"));
+		const id = manager.getSessionId();
+		const file = manager.getSessionFile()!;
+		const session = { ...fakeSession(id), sessionManager: manager } as unknown as AgentSession;
+		try {
+			await runStudioHostMode(session, { runtimeEpoch: 1 }, async () => {}, {
+				createBridge: () => ({
+					async start(runtime) {
+						expect(runtime.sessionId).toBe(id);
+						expect(await Bun.file(file).exists()).toBe(true);
+					},
+					async stop() {},
+				}),
+			});
+		} finally {
+			await manager.close();
+		}
+		const resumed = await SessionManager.open(file);
+		try {
+			expect(resumed.getSessionId()).toBe(id);
+			expect(resumed.buildSessionContext().messages).toEqual([]);
+		} finally {
+			await resumed.close();
+		}
 	});
 
 	test("binds the TUI and Bridge lifecycle to one session identity", async () => {

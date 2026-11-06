@@ -90,20 +90,24 @@ test("writeJsonAtomic writes atomically without leaving .tmp files", async () =>
   assert.deepEqual(files, ["test.json"]);
 });
 
-test("verifySignedArtifact verifies valid artifact successfully", async () => {
+test("verifySignedArtifact verifies a large artifact and detects a changed final byte", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "omp-signed-valid-"));
-  const artifactDir = await createValidArtifact(temporary);
+  const content = "runtime bytes\n".repeat(170_001) + "tail";
+  const artifactDir = await createValidArtifact(temporary, "v1", content);
 
-  const result = await verifySignedArtifact({
+  const options = {
     directory: artifactDir,
     layout: RUNTIME_ARTIFACT_LAYOUT,
     parseManifest: parseRuntimeInstallationManifest,
-    requireCovered: (m) => ["runtime-manifest.json", m.entrypoint],
+    requireCovered: (m: ReturnType<typeof parseRuntimeInstallationManifest>) => ["runtime-manifest.json", m.entrypoint],
     trustedKeys,
-  });
+  };
+  const result = await verifySignedArtifact(options);
 
   assert.equal(result.manifest.runtimeVersion, "v1");
   assert.ok(result.checksums.files["omp.exe"]);
+  await writeFile(join(artifactDir, "omp.exe"), content.slice(0, -1) + "!");
+  await assert.rejects(verifySignedArtifact(options), /Checksum mismatch for omp.exe/u);
 });
 
 test("verifySignedArtifact rejects signature mismatch", async () => {

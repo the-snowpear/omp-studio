@@ -280,7 +280,9 @@ export async function readExecutableDigests(
   const identity = createHash("sha256").update(`${platform}\0`);
   const content = createHash("sha256");
   let bytes = 0;
-  for await (const chunk of createReadStream(absolutePath)) {
+  // Match the installer's bounded bulk reads; both execution-boundary passes
+  // still hash every byte, including the final partial chunk.
+  for await (const chunk of createReadStream(absolutePath, { highWaterMark: 1024 * 1024 })) {
     const buffer = chunk as Buffer;
     bytes += buffer.length;
     identity.update(buffer);

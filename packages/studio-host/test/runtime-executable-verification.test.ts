@@ -298,16 +298,17 @@ test("two resolves each read the bytes twice: no shared fingerprint cache", asyn
 });
 
 test("readExecutableDigests yields both the frozen identity and the plain content digest", async () => {
-  const { directory, path } = await executableFile();
+  const content = "Runtime 字节\n".repeat(150_001) + "final bytes";
+  const { directory, path } = await executableFile(content);
   try {
     const digests = await readExecutableDigests(process.platform, path);
-    assert.equal(digests.contentSha256, FIXTURE_SHA256);
+    assert.equal(digests.contentSha256, createHash("sha256").update(content).digest("hex"));
     assert.equal(
       digests.identity,
-      `sha256:${createHash("sha256").update(`${process.platform}\0`).update(FIXTURE_BYTES).digest("hex")}`,
+      `sha256:${createHash("sha256").update(`${process.platform}\0`).update(content).digest("hex")}`,
       "the identity algorithm (platform salt) is frozen",
     );
-    assert.equal(digests.bytes, Buffer.byteLength(FIXTURE_BYTES));
+    assert.equal(digests.bytes, Buffer.byteLength(content));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

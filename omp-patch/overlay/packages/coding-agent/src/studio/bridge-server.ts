@@ -29,7 +29,7 @@ const UPSTREAM_COMMIT = "e996e1c7ac476f60e02b8ed9764cf30fa8c00a8e";
  * refuses to sign an artifact whose probed identity disagrees with the series,
  * so a stale value here fails the build (see `scripts/build-omp-host.mjs`).
  */
-const PATCHSET_VERSION = "studio.43";
+const PATCHSET_VERSION = "studio.44";
 
 /** Reads and interrupts must not wait for `core.prompt` to finish. Prompt holds
  *  `#dispatchQueue` for the whole turn, including 503 auto-retry backoff. */

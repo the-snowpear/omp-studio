@@ -2,6 +2,8 @@
 
 0.2.0 新功能的持续运行审查见 [2026-11-06 报告](reviews/0.2.0-performance-review-2026-11-06.md)：评测读取合并与隐藏暂停、浏览器存档写入收敛，以及首屏体积、后台网页与大型报告的后续优化空间。
 
+Runtime 启动和重连专项见 [2026-11-06 启动报告](reviews/runtime-startup-performance-2026-11-06.md)：大文件校验改用 1 MiB 分块，执行前后完整指纹检查保持不变；Studio Bridge 公布会话前将其落盘，避免空会话重连失败。`runtime.launch.stage` 的 `verify`、`bootstrap`、`handshake`、`snapshot`、`manifest` 给出单阶段和累计耗时；仅记录阶段与数字，不记录凭据或正文。
+
 启动/整壳订阅、按需加载和资源体积的后续优化见 [2026-10-29 报告](performance-2026-10-29.md)；第二轮综合审查（打包形态、GPU 软合成、6× 低配、动画 A/B）见 [performance-review-2026-10-29-round2.md](performance-review-2026-10-29-round2.md)。`scripts/startup-perf.mjs` 单独测完整 App 合成夹具，不代替真实 Runtime 启动数据；性能脚本支持用 `PERF_URL` 连接已启动的生产验证页面。
 
 OMP Studio 的流式管线继续使用 Runtime Bridge、Host conversation 事件、Renderer 有界 Store 和现有 Markdown 扫描器。优化不改变持久 transcript，也不删除执行服务的安全检查或 Renderer transport 的克隆隔离；固定可信 Main 输出不重复做逐字段解析。
