@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMP Studio 官网：三版方案</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="./favicon.ico">
+<style>
+:root { --ink: #edeaf4; --mute: #a39fb3; --ease: cubic-bezier(.32, .72, 0, 1); color-scheme: dark; }
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; background: #09080d; color: var(--ink); font-family: "Geist Variable", "Noto Sans SC Variable", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+main { display: flex; height: 100dvh; min-height: 560px; gap: 2px; }
+a { position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; color: inherit; text-decoration: none; isolation: isolate; transition: flex-grow .7s var(--ease); }
+main:hover a, main:focus-within a { flex-grow: .72; }
+main a:hover, main a:focus-visible { flex-grow: 1.9; }
+a:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }
+img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: var(--focus, 50% 50%); z-index: -2; transition: scale 1.1s var(--ease); }
+a:hover img, a:focus-visible img { scale: 1.035; }
+a::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(transparent 38%, rgb(6 5 10 / .92) 88%); }
+.copy { position: absolute; left: 0; right: 0; bottom: 0; width: min(100%, 34rem); padding: clamp(20px, 2.6vw, 40px); }
+h2 { font-size: clamp(30px, 3.4vw, 54px); font-weight: 800; letter-spacing: -.03em; line-height: 1.1; }
+h2 small { display: block; margin-top: 7px; font-size: 14.5px; font-weight: 500; letter-spacing: 0; color: var(--mute); }
+p { margin-top: 12px; font-size: 15px; line-height: 1.65; color: #d3cfdf; }
+.open { display: inline-block; margin-top: 16px; padding: 8px 18px; border-radius: 999px; background: #f3f0fb; color: #0c0a12; font-size: 14px; font-weight: 600; }
+@media (max-width: 860px) {
+  main { flex-direction: column; height: auto; }
+  a { flex: none; height: 76dvh; }
+  main:hover a, main:focus-within a, main a:hover { flex-grow: 0; }
+}
+@media (prefers-reduced-motion: reduce) { a, img { transition: none; } }
+</style>
+</head>
+<body>
+<main aria-label="三版方案">
+  <a href="./a/" style="--focus: 84% 50%">
+    <img src="./media/concepts/a.webp" alt="方案 A 首屏：暗色背景上的玻璃 π">
+    <div class="copy"><h2>穿越<small>暗色，电影感，滚动即镜头</small></h2>
+      <p>实时光线步进的玻璃 π，镜头从拱门穿过，飞过散落的窗口，落进一段随滚动播放的真实对话。</p>
+      <span class="open">打开方案 A</span></div>
+  </a>
+  <a href="./b/" style="--focus: 82% 40%">
+    <img src="./media/concepts/b.webp" alt="方案 B 首屏：白色石膏质感的窗口里运行着真实应用">
+    <div class="copy"><h2>活窗<small>亮色，石膏质感，真机可玩</small></h2>
+      <p>首屏就是真实的 Studio 渲染层。可以点、可以拖大小，导览会替你操作它。</p>
+      <span class="open">打开方案 B</span></div>
+  </a>
+  <a href="./c/" style="--focus: 78% 20%">
+    <img src="./media/concepts/c.webp" alt="方案 C 首屏：由字符组成的应用界面">
+    <div class="copy"><h2>解析<small>字符网格，键盘优先</small></h2>
+      <p>把 TUI 与 GUI 的差别做成着色器：界面从字符解析成画面。Ctrl K 可以操作整个站点。</p>
+      <span class="open">打开方案 C</span></div>
+  </a>
+</main>
+<script type="module">
+import "@fontsource-variable/geist/wght.css";
+import "@fontsource-variable/noto-sans-sc/wght.css";
+</script>
+</body>
+</html>

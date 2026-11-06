@@ -1,0 +1,28 @@
+{
+  "name": "omp-studio-website",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "OMP Studio promotional and download site (three design concepts). Standalone: not part of the npm workspaces.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "assets": "python tools/build_media.py",
+    "live": "node tools/build-live.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/noto-sans-sc": "^5.3.1",
+    "@fontsource/fusion-pixel-12px-proportional-sc": "^5.3.0",
+    "gsap": "^3.15.1",
+    "lenis": "^1.3.27"
+  },
+  "devDependencies": {
+    "@phosphor-icons/core": "^2.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6"
+  }
+}

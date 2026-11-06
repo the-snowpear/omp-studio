@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMP Studio：给你的 Coding Agent 一个像样的家</title>
+<meta name="description" content="OMP Studio 是 oh-my-pi 的开源桌面工作台。对话、审批、子 Agent、用量和 Git，收进同一扇窗口。支持 Windows 与 macOS。">
+<meta name="theme-color" content="#07060c">
+<link rel="icon" href="../favicon.ico">
+<link rel="preload" as="image" href="../media/seq/chat/0000.webp">
+</head>
+<body>
+<canvas id="glass" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="nav" id="nav">
+  <a class="brand" href="#top"><img src="../media/icon-256.webp" width="30" height="30" alt=""><span>OMP Studio</span></a>
+  <nav aria-label="页面导航">
+    <a href="#passage">工作台</a>
+    <a href="#chapters">能力</a>
+    <a href="#bridge">架构</a>
+  </nav>
+  <div class="nav-end">
+    <a class="nav-gh" href="https://github.com/the-snowpear/omp-studio" data-icon="github"><span data-stars>GitHub</span></a>
+    <a class="btn btn-small" href="#download" data-jump>下载</a>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero" id="hero">
+    <div class="hero-copy">
+      <h1><span class="ln"><span>给你的 Coding Agent</span></span><span class="ln"><span>一个像样的家</span></span></h1>
+      <p class="hero-sub">oh-my-pi 的桌面工作台。对话、审批、子 Agent、用量和 Git，收进同一扇窗口。</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary magnetic" data-primary href="https://github.com/the-snowpear/omp-studio/releases"><span data-primary-label>下载</span></a>
+        <a class="btn btn-ghost" href="https://github.com/the-snowpear/omp-studio">查看源码</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="passage" id="passage">
+    <div class="stage">
+      <div class="world" aria-hidden="true"></div>
+      <div class="flash" aria-hidden="true"></div>
+      <div class="say" data-say="0"><p>Coding Agent 越来越能干</p></div>
+      <div class="say" data-say="1"><p>工作流却还散落在十几个窗口里</p></div>
+      <div class="window" id="win">
+        <canvas id="seq" width="1920" height="1080" role="img" aria-label="OMP Studio 工作台录屏：Agent 修复类型错误的完整一轮，从发送到改动审核"></canvas>
+      </div>
+      <div class="captions">
+        <article data-cap="0"><h2>一句话交代任务</h2><p>发送之后，新对话直接接着流式输出，项目和分支已经带上。</p></article>
+        <article data-cap="1"><h2>每一步都看得见</h2><p>思考、工具调用和命令输出实时流进对话，不用再去翻终端。</p></article>
+        <article data-cap="2"><h2>改动当场就能读</h2><p>编辑卡片里直接是红绿 diff，改的是哪几行一眼清楚。</p></article>
+        <article data-cap="3"><h2>进度和验证跟着走</h2><p>步骤清单随执行更新，typecheck 重跑通过后才算收尾。</p></article>
+        <article data-cap="4"><h2>最后交给你审</h2><p>本轮改动汇总成一张卡片，逐个文件审核、标注。</p></article>
+      </div>
+    </div>
+    <div class="m-only m-stream">
+      <h2>一扇窗口，看完一整轮</h2>
+      <p>思考、工具调用、diff 和验证，实时流进同一条对话。</p>
+      <video data-lazy data-src="../media/clip/stream.mp4" poster="../media/poster/stream.webp" muted loop playsinline></video>
+    </div>
+  </section>
+
+  <section class="chapters" id="chapters">
+    <div class="ch-stage">
+      <div class="ch-head">
+        <div class="ch-titles"></div>
+      </div>
+      <div class="ch-track"></div>
+      <div class="ch-tabs" role="tablist" aria-label="能力章节"></div>
+    </div>
+  </section>
+
+  <section class="more" id="more">
+    <h2 class="more-title">那些用久了才离不开的细节</h2>
+    <div class="mosaic">
+      <figure class="tile t-btw"><video data-lazy data-src="../media/clip/btw.mp4" poster="../media/poster/btw.webp" muted loop playsinline></video><figcaption><b>BTW 旁路提问</b>主线在跑，岔出去问一句，不打断它。</figcaption></figure>
+      <figure class="tile t-cmdk"><video data-lazy data-src="../media/clip/cmdk.mp4" poster="../media/poster/cmdk.webp" muted loop playsinline></video><figcaption><b>Ctrl K</b>会话、页面和动作，一个入口搜到。</figcaption></figure>
+      <figure class="tile t-restore"><video data-lazy data-src="../media/clip/restore.mp4" poster="../media/poster/restore.webp" muted loop playsinline></video><figcaption><b>回溯与分叉</b>回到任一条消息，或从那里另开一支。</figcaption></figure>
+      <figure class="tile t-queue"><video data-lazy data-src="../media/clip/queue.mp4" poster="../media/poster/queue.webp" muted loop playsinline></video><figcaption><b>排队与插话</b>Agent 忙的时候也能继续说，排队或当场插入。</figcaption></figure>
+      <figure class="tile t-perm"><video data-lazy data-src="../media/clip/perm.mp4" poster="../media/poster/perm.webp" muted loop playsinline></video><figcaption><b>权限三档</b>随时切换 Agent 能做多少，Full Access 会明确提醒。</figcaption></figure>
+    </div>
+    <div class="logos" aria-label="部分支持的模型供应商"><div class="logos-track"></div></div>
+  </section>
+
+  <section class="bridge" id="bridge">
+    <h2>控制台不该靠猜</h2>
+    <p class="bridge-sub">Studio 不去读屏幕上的字。每个动作都是类型化的命令，每个状态都有 Runtime 给的真值。</p>
+    <ul class="nope" aria-label="Studio 不使用的做法">
+      <li><s>解析 TUI 文本</s></li>
+      <li><s>解析 ANSI 输出</s></li>
+      <li><s>模拟按键宏</s></li>
+    </ul>
+    <div class="pipe" aria-hidden="false">
+      <div class="pipe-line"><i class="pipe-fill"></i><b class="pk pk-down"></b><b class="pk pk-up"></b></div>
+      <ol>
+        <li><code>Renderer</code><span>React 工作台</span></li>
+        <li><code>StudioClient</code><span>语义 query 与 command</span></li>
+        <li><code>Desktop IPC</code><span>只解析信封</span></li>
+        <li><code>Host facade</code><span>校验并分发</span></li>
+        <li><code>Bridge</code><span>Runtime 的类型化连接</span></li>
+        <li><code>omp --mode studio-host</code><span>钉住版本的 Runtime</span></li>
+      </ol>
+    </div>
+    <dl class="laws">
+      <div><dt>界面拿不到钥匙</dt><dd>Renderer 见不到 Bridge token、进程句柄或会话路径。</dd></div>
+      <div><dt>不认识的操作直接拒绝</dt><dd>未知 mutation 失败关闭，不会猜着执行。</dd></div>
+      <div><dt>accepted 不等于成功</dt><dd>接受和完成是两个状态，界面不会提前报喜。</dd></div>
+      <div><dt>断线不装作没事</dt><dd>Runtime 丢失会封存旧 epoch，未完成的操作标为 outcome_unknown。</dd></div>
+    </dl>
+  </section>
+
+  <section class="final" id="download">
+    <div class="final-inner">
+      <h2>把它装上</h2>
+      <p class="final-meta"><span data-version>0.1.17</span> 版，<span data-date>2026-10-29</span> 发布。开源，MIT 许可。</p>
+      <a class="btn btn-primary btn-big magnetic" data-primary href="https://github.com/the-snowpear/omp-studio/releases"><span data-primary-label>下载</span><small data-primary-size></small></a>
+      <p class="final-note" data-note></p>
+      <ul class="others" data-others></ul>
+      <details class="source">
+        <summary>从源码运行</summary>
+        <div class="cmd"><pre><code>git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git
+cd omp-studio
+npm install
+npm run omp:overlay:apply
+npm run preview</code></pre><button class="copy" type="button" data-copy>复制</button></div>
+        <p>需要 Node.js 22+。模型与登录沿用 OMP 的 <code>models.yml</code> 和 <code>omp login</code>，仓库不内置任何供应商密钥。</p>
+      </details>
+      <ul class="trust">
+        <li><b>差分更新</b>只下载变化的数据块，失败回退完整下载。</li>
+        <li><b>Ed25519 验签</b>Runtime 和更新清单签名校验后才执行。</li>
+        <li><b>能退回去</b>保留上一个桌面版本，出问题一键恢复。</li>
+      </ul>
+    </div>
+    <footer>
+      <div class="foot-links">
+        <a href="https://github.com/the-snowpear/omp-studio">GitHub</a>
+        <a href="https://github.com/the-snowpear/omp-studio/blob/main/docs/README.md">文档</a>
+        <a href="https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md">更新日志</a>
+        <a href="https://github.com/the-snowpear/omp-studio/issues">反馈问题</a>
+        <a href="https://linux.do/">LINUX DO</a>
+      </div>
+      <p>页面中的界面录屏使用预览模式演示数据。Runtime 来自 <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>（MIT；Pi by Mario Zechner，omp by Can Bölük）。OMP Studio 以 MIT 许可开源。</p>
+    </footer>
+  </section>
+</main>
+<script type="module" src="./main.ts"></script>
+</body>
+</html>
