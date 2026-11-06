@@ -2,9 +2,13 @@
 
 0.2.0 新功能的持续运行审查见 [2026-11-06 报告](reviews/0.2.0-performance-review-2026-11-06.md)：评测读取合并与隐藏暂停、浏览器存档写入收敛，以及首屏体积、后台网页与大型报告的后续优化空间。
 
-Runtime 启动和重连专项见 [2026-11-06 启动报告](reviews/runtime-startup-performance-2026-11-06.md)：大文件校验改用 1 MiB 分块，执行前后完整指纹检查保持不变；Studio Bridge 公布会话前将其落盘，避免空会话重连失败。`runtime.launch.stage` 的 `verify`、`bootstrap`、`handshake`、`snapshot`、`manifest` 给出单阶段和累计耗时；仅记录阶段与数字，不记录凭据或正文。
+Runtime 启动和重连专项见 [启动报告](reviews/runtime-startup-performance-2026-11-06.md)：大文件校验使用 1 MiB 分块；每次解析都检查新鲜内容，完整探测另比较执行前后指纹。Studio Bridge 公布会话前将其落盘，避免空会话重连失败。`runtime.launch.stage` 的 `verify`、`bootstrap`、`handshake`、`snapshot`、`manifest` 给出单阶段和累计耗时；仅记录阶段与数字，不记录凭据或正文。
 
-后续精简将普通校验和带平台前缀的指纹合到 `runtime-installer/file-digests.ts`。Electron 中 ≥32 MiB 文件由一次性 Worker 用固定 1 MiB 缓冲同步读取，主线程保持异步；成功结果等待线程退出后才返回，无线程池或新增缓存。小文件与普通 Node CLI 保留异步流。三份签名元数据并行读取，安装检查与版本查找并行，实际启动只创建安装器而不重新加载线程绑定。完整应用交替对照中位数从 10.46 秒降至 8.67 秒；当前仍保留每次启动的独立兼容性探测。
+后续精简将普通校验和带平台前缀的指纹合到 `runtime-installer/file-digests.ts`。Electron 中 ≥32 MiB 文件由一次性 Worker 用固定 1 MiB 缓冲同步读取，主线程保持异步；成功结果等待线程退出后才返回，无线程池或新增字节缓存。小文件与普通 Node CLI 保留异步流。三份签名元数据并行读取，安装检查与版本查找并行，实际启动只创建安装器而不重新加载线程绑定。启用验收复用前，该轮完整应用交替对照中位数从 10.46 秒降至 8.67 秒。
+
+2026-11-07 起，`HostBackend` 在 `<profile>/runtime-acceptance.json` 保存一次成功的托管 Runtime 完整验收。键绑定实际文件内容指纹、签名 manifest、激活记录、平台／架构、协议与能力要求及 `MANAGED_ACCEPTANCE_POLICY`。规则改变需递增该常量；协议／能力配置与安装变化会自动改变键。日常仍完整读取当前文件内容，只有键匹配时才跳过独立探测进程；实际会话继续进行新鲜文件校验、认证握手与快照读取。受限能力等级与缺失能力保留原值；外部／自定义 Runtime 一律完整探测。缺失／损坏记录或失败验收不会获得快速路径；写入失败仍可连接，但下次启动需重新验收。此兼容性验收不代替安装器原有的字节证据缓存，也不缓存 PID、连接或会话状态。
+
+同一配置、同一 `studio.44` 的最新完整应用交替对照为 5.38 秒 → 3.57 秒，约快 34%。之前不同时间的 8～10 秒结果不能直接用于计算本轮收益；数据、首次验收、重新激活和重连验证见启动报告。
 
 启动/整壳订阅、按需加载和资源体积的后续优化见 [2026-10-29 报告](performance-2026-10-29.md)；第二轮综合审查（打包形态、GPU 软合成、6× 低配、动画 A/B）见 [performance-review-2026-10-29-round2.md](performance-review-2026-10-29-round2.md)。`scripts/startup-perf.mjs` 单独测完整 App 合成夹具，不代替真实 Runtime 启动数据；性能脚本支持用 `PERF_URL` 连接已启动的生产验证页面。
 

@@ -556,7 +556,7 @@ async function installedRuntimeContext(context: FacadeContext): Promise<DesktopR
   context.seams.hostLog?.write(
     resolution.classification === "managed" ? "info" : "warn",
     "runtime.resolve",
-    `classification=${resolution.classification}${resolution.rejectionReason === undefined ? "" : ` reason=${resolution.rejectionReason}`}`,
+    `classification=${resolution.classification} acceptance=${resolution.reusedAcceptance ? "reused" : "live"}${resolution.rejectionReason === undefined ? "" : ` reason=${resolution.rejectionReason}`}`,
   );
   if (resolution.classification !== "managed") {
     rememberUnavailable(context.lastUnavailable, undefined, undefined, classificationUnavailable(resolution));
@@ -1266,7 +1266,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
       seams.hostLog?.write(
         resolution.classification === "managed" || resolution.classification === "compatible-system" ? "info" : "warn",
         "runtime.resolve",
-        `classification=${resolution.classification}${resolution.rejectionReason === undefined ? "" : ` reason=${resolution.rejectionReason}`}`,
+        `classification=${resolution.classification} acceptance=${resolution.reusedAcceptance ? "reused" : "live"}${resolution.rejectionReason === undefined ? "" : ` reason=${resolution.rejectionReason}`}`,
       );
       if (startup.closing) return;
       const port = this.#runtimeSession;

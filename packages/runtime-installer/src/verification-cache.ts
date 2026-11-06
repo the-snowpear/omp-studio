@@ -12,8 +12,9 @@ import { lstat } from "node:fs/promises";
  * assertion" and answers later lookups from cheap `lstat` metadata.
  *
  * It is **not** used to prove anything at the execution boundary.
- * `resolveRuntime` reads the bytes itself twice (before and after the probe)
- * and compares digests, because a metadata comparison cannot see an in-place
+ * `resolveRuntime` always reads current bytes, including when it reuses managed
+ * compatibility acceptance. Full probes also read afterwards and compare
+ * digests, because a metadata comparison cannot see an in-place
  * rewrite that restored `size`/`mtime`/inode; for a managed Runtime it also
  * compares that fresh digest against the signature-covered checksum. This
  * cache keeps the 30 s polling path and repeated status queries off the disk.

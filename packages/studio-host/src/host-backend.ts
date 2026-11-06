@@ -7,6 +7,7 @@ import {
   type RuntimeResolverEnvironment,
 } from "./runtime-resolver.js";
 import { ThreadBindingStore } from "./thread-binding-store.js";
+import { FileManagedRuntimeAcceptance } from "./managed-runtime-acceptance.js";
 
 export interface HostBackendOptions {
   stateDirectory: string;
@@ -37,7 +38,11 @@ export class HostBackend {
       ...options.installer,
       isRuntimeReferenced: version => this.bindings.isRuntimeReferenced(version),
     });
-    this.#resolver = options.resolver ?? {};
+    this.#resolver = {
+      ...options.resolver,
+      managedAcceptance: options.resolver?.managedAcceptance ??
+        new FileManagedRuntimeAcceptance(join(options.stateDirectory, "runtime-acceptance.json")),
+    };
   }
 
   async initialize(): Promise<void> {
@@ -50,15 +55,19 @@ export class HostBackend {
       // The installer answers with the signed entrypoint digest, so the resolver
       // can prove the bytes it is about to execute without trusting the
       // installer's evidence cache.
-      managedLookup: { current: async () => await this.installer.currentManifest() },
+      managedLookup: { current: async () => {
+        const installed = await this.installer.currentManifest();
+        return installed && { ...installed, activation: installed.record.activatedAt };
+      } },
     });
   }
 
   /**
-   * Forget every piece of Runtime verification evidence the Host holds. Call it
+   * Forget the installer's in-process content-verification evidence. Call it
    * after an operation that can change the installed bytes outside this class
    * (`installer.rollback()`, a manual repair, an update that rewrote the
-   * version tree): install/activate already do it for themselves.
+   * version tree): install/activate already do it for themselves. Compatibility
+   * acceptance is independently keyed by fresh bytes, metadata and activation.
    */
   invalidateRuntimeVerification(): void {
     this.installer.invalidate();

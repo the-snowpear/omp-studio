@@ -1,4 +1,5 @@
 import { readFileDigests } from "@omp-studio/runtime-installer";
+import { createHash } from "node:crypto";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { lstat, mkdtemp, realpath, rm, stat } from "node:fs/promises";
 import type { Socket } from "node:net";
@@ -30,10 +31,10 @@ const execFileAsync = promisify(execFile);
  * Classifies a candidate runtime as one of:
  *   "managed" | "compatible-system" | "limited-system" | "rejected"
  *
- * The classification is a probe result, never a user setting. The resolver
- * never trusts a file name or a `--version` banner: every non-rejected
- * classification requires a live Studio Hello through an injected
- * RuntimeProbePort plus capability manifest evidence. When evidence is
+ * Classification comes from a full probe or a matching managed acceptance,
+ * never a file name or a `--version` banner. Accepted managed bytes are freshly
+ * hashed on every resolve; system/custom candidates always get a live probe.
+ * The session launcher still authenticates its own live Bridge. When evidence is
  * missing the resolver fails closed (rejected / limited with warnings) and
  * never claims full parity it cannot prove.
  */
@@ -62,6 +63,10 @@ export type RuntimeProbeFailureCode =
 const DEFAULT_PROBE_TIMEOUT_MS = 30_000;
 
 const DEFAULT_PROBE_ATTEMPTS = 2;
+
+// Bump when the full acceptance rules below change. Protocol/capability inputs,
+// signed manifest, activation and executable content also participate in the key.
+const MANAGED_ACCEPTANCE_POLICY = 1;
 
 /** Drain grace for the graceful-shutdown gate, independent of the connect budget. */
 const SHUTDOWN_EXIT_GRACE_MS = 10_000;
@@ -126,6 +131,19 @@ export interface ManagedRuntimeInstallation {
    * closed.
    */
   entrypointSha256?: string;
+  /** Activation journal identity: upgrades, repairs and rollbacks get new acceptance. */
+  activation?: string;
+}
+
+export interface ManagedRuntimeAcceptanceValue {
+  protocol: number;
+  runtimeProfile: "full-parity-v1" | "limited";
+  missingCapabilities: string[];
+}
+
+export interface ManagedRuntimeAcceptance {
+  get(key: string): Promise<ManagedRuntimeAcceptanceValue | undefined>;
+  set(key: string, value: ManagedRuntimeAcceptanceValue): Promise<void>;
 }
 
 /** Read-only current managed installation lookup (satisfied by RuntimeInstaller#currentManifest). */
@@ -150,9 +168,11 @@ export interface RuntimeResolverEnvironment {
   requiredCapabilities?: readonly string[];
   /** Managed current-manifest lookup; required for `{ kind: "managed" }`. */
   managedLookup?: ManagedRuntimeLookup;
+  /** Host-owned successful full probe, reused only for freshly verified managed bytes. */
+  managedAcceptance?: ManagedRuntimeAcceptance;
   /** System PATH locator; used when `{ kind: "system" }` has no explicit executable. */
   locateSystemRuntime?: SystemRuntimeLocator;
-  /** Live probe port; when absent every candidate is rejected (fail closed). */
+  /** Required for a new managed acceptance and for every system/custom resolution. */
   probe?: RuntimeProbePort;
   /** Injectable path checks; defaults to node:fs lstat. */
   pathCheck?: PathCheckPort;
@@ -186,6 +206,8 @@ export interface RuntimeResolution extends RuntimeProbeResult {
   shutdownStatus: "passed" | "failed" | "skipped";
   /** Host-side probe failure code; the Renderer-facing reason stays in `rejectionReason`. */
   probeFailure?: RuntimeProbeFailureCode;
+  /** Compatibility evidence was reused; connection readiness still requires a live session. */
+  reusedAcceptance?: true;
 }
 
 interface Candidate {
@@ -193,6 +215,7 @@ interface Candidate {
   executablePath: string;
   allowLimited: boolean;
   installationManifest?: RuntimeInstallationManifest;
+  activation?: string;
   /** Signed entrypoint digest for a managed candidate (see ManagedRuntimeInstallation). */
   entrypointSha256?: string;
 }
@@ -281,21 +304,11 @@ export async function readExecutableDigests(
 }
 
 /*
- * There used to be an `ExecutableFingerprintCache` here: a stat-keyed memo that
- * let the post-probe fingerprint reuse the pre-probe read when
- * size/mtime/inode/device still matched, cutting a resolve from two full reads
- * of a ~170 MB executable to one.
- *
- * It is gone on purpose. The probe *executes* the candidate, so the bytes on
- * disk after the probe must be proven equal to the bytes that were approved
- * before it. A stat comparison cannot prove that: a local writer can rewrite the
- * file in place (same size, same inode) and restore `mtime` afterwards, and the
- * memo would hand back the pre-probe fingerprint and declare the file unchanged.
- * The execution boundary therefore reads the file twice again — once before the
- * probe, once after — and compares digests, which is the guarantee this fence
- * exists for. Cheap steady-state queries never come through here; they use the
- * installer's evidence cache instead, so the ~170 MB read stays off the 30 s
- * polling path.
+ * Every resolution reads current bytes. A full probe executes the candidate,
+ * so it also reads them afterwards: stat identity cannot detect an in-place
+ * rewrite that restores mtime. A managed acceptance reuses only compatibility
+ * results, never the executable fingerprint. Cheap status queries instead use
+ * the installer's bounded evidence cache and do not pass through this resolver.
  */
 
 /**
@@ -390,6 +403,7 @@ export async function resolveRuntime(
     return rejectedResolution(candidateInfo.source, "executable could not be fingerprinted");
   }
   const executableIdentity = boundary.identity;
+  let acceptanceKey: string | undefined;
 
   if (candidateInfo.source === "managed") {
     const installationManifest = candidateInfo.installationManifest as RuntimeInstallationManifest;
@@ -413,6 +427,32 @@ export async function resolveRuntime(
         "managed",
         "installed Runtime entrypoint does not match the signed checksum; reinstall or repair the Runtime",
       );
+    }
+    if (environment.managedAcceptance) {
+      acceptanceKey = createHash("sha256").update(JSON.stringify({
+        policy: MANAGED_ACCEPTANCE_POLICY,
+        platform, arch, executablePath, activation: candidateInfo.activation,
+        protocols: [...supportedProtocolVersions].sort((a, b) => a - b),
+        capabilities: [...requiredCapabilities].sort(),
+        manifest: installationManifest,
+        identity: boundary.identity, sha256: boundary.contentSha256,
+      })).digest("hex");
+      const accepted = await environment.managedAcceptance.get(acceptanceKey);
+      if (accepted && supportedProtocolVersions.includes(accepted.protocol) &&
+        accepted.protocol >= installationManifest.studioProtocol.min && accepted.protocol <= installationManifest.studioProtocol.max) {
+        const missingCapabilities = accepted.missingCapabilities;
+        const resolution = classifyManaged(installationManifest, accepted.runtimeProfile, {
+          source: "managed",
+          executableIdentity, runtimeVersion: installationManifest.runtimeVersion,
+          upstreamVersion: installationManifest.upstreamVersion, upstreamCommit: installationManifest.upstreamCommit,
+          selectedProtocolVersion: accepted.protocol, capabilityHash: installationManifest.capabilityHash,
+          commandManifestHash: installationManifest.commandManifestHash,
+          commandManifestVerified: true, smokeStatus: "passed", shutdownStatus: "passed",
+          missingCapabilities,
+          warnings: missingCapabilities.length ? [`missing required capabilities: ${missingCapabilities.join(", ")}`] : [],
+        });
+        if (resolution.classification === "managed") return { ...resolution, reusedAcceptance: true };
+      }
     }
   }
 
@@ -523,11 +563,22 @@ export async function resolveRuntime(
   };
 
   if (candidateInfo.source === "managed") {
-    return classifyManaged(candidateInfo.installationManifest as RuntimeInstallationManifest, hello, profile, {
+    const installationManifest = candidateInfo.installationManifest as RuntimeInstallationManifest;
+    const resolution = classifyManaged(installationManifest, profile, {
       ...shared,
       missingCapabilities,
       warnings,
     });
+    if (acceptanceKey && resolution.classification === "managed" &&
+      smokeStatus === "passed" && shutdownStatus === "passed" &&
+      resolution.runtimeVersion === installationManifest.runtimeVersion &&
+      resolution.upstreamVersion === installationManifest.upstreamVersion &&
+      resolution.upstreamCommit === installationManifest.upstreamCommit) {
+      await environment.managedAcceptance!.set(acceptanceKey, {
+        protocol: hello.selectedProtocolVersion, runtimeProfile: profile, missingCapabilities,
+      });
+    }
+    return resolution;
   }
 
   // system / custom follow identical rules; only the source label differs.
@@ -550,7 +601,6 @@ export async function resolveRuntime(
 
 function classifyManaged(
   installationManifest: RuntimeInstallationManifest,
-  hello: StudioHelloResponse,
   helloProfile: "full-parity-v1" | "limited",
   evidence: Omit<RuntimeResolution, "classification" | "profile" | "missingCapabilities" | "warnings"> & {
     missingCapabilities: string[];
@@ -565,10 +615,10 @@ function classifyManaged(
   ) {
     return rejectedResolution("managed", "installation manifest claims full parity but the runtime evidence does not support it");
   }
-  if (installationManifest.capabilityHash !== hello.capabilityManifest.hash) {
+  if (installationManifest.capabilityHash !== evidence.capabilityHash) {
     return rejectedResolution("managed", "managed runtime capability hash drift");
   }
-  if (installationManifest.commandManifestHash !== hello.commandManifestHash) {
+  if (installationManifest.commandManifestHash !== evidence.commandManifestHash) {
     return rejectedResolution("managed", "managed runtime command manifest hash drift");
   }
 
@@ -607,6 +657,7 @@ async function resolveCandidate(
         executablePath: installation.entrypointPath,
         allowLimited: false,
         installationManifest: installation.manifest,
+        ...(installation.activation === undefined ? {} : { activation: installation.activation }),
         ...(installation.entrypointSha256 === undefined ? {} : { entrypointSha256: installation.entrypointSha256 }),
       },
     };

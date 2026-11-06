@@ -390,33 +390,25 @@ export async function locateManagedRuntimeArtifact(
   options: LocateManagedRuntimeArtifactOptions,
 ): Promise<string | undefined> {
   const roots = options.roots ?? defaultArtifactRoots(options.platform);
-  const matches: Array<{ directory: string; version: string }> = [];
-  for (const root of roots) {
+  const matches = (await Promise.all(roots.map(async root => {
     const direct = await readArtifactManifest(root);
     if (direct !== undefined) {
-      if (matchesArtifact(direct, options)) {
-        matches.push({ directory: root, version: direct.runtimeVersion });
-      }
-      continue;
+      return matchesArtifact(direct, options) ? [{ directory: root, version: direct.runtimeVersion }] : [];
     }
     let entries;
     try {
       entries = await readdir(root, { withFileTypes: true });
     } catch {
-      continue;
+      return [];
     }
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith(".")) {
-        continue;
-      }
-      const directory = join(root, entry.name);
-      const manifest = await readArtifactManifest(directory);
-      if (manifest === undefined || !matchesArtifact(manifest, options)) {
-        continue;
-      }
-      matches.push({ directory, version: manifest.runtimeVersion });
-    }
-  }
+    return (await Promise.all(entries
+      .filter(entry => entry.isDirectory() && !entry.name.startsWith("."))
+      .map(async entry => {
+        const directory = join(root, entry.name);
+        const manifest = await readArtifactManifest(directory);
+        return manifest && matchesArtifact(manifest, options) ? [{ directory, version: manifest.runtimeVersion }] : [];
+      }))).flat();
+  }))).flat();
   if (matches.length === 0) {
     return undefined;
   }

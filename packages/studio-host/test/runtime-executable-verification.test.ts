@@ -14,6 +14,7 @@ import type {
 } from "@omp-studio/studio-protocol";
 import { FULL_PARITY_REQUIRED_CAPABILITIES } from "@omp-studio/studio-protocol";
 import { runtimeEntrypointFor } from "@omp-studio/runtime-installer";
+import { FileManagedRuntimeAcceptance } from "../src/managed-runtime-acceptance.js";
 import {
   fingerprintExecutable,
   readExecutableDigests,
@@ -152,6 +153,101 @@ test("the boundary reads the bytes before and after the probe", async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("a managed acceptance survives Host restarts and still reads current executable bytes", async context => {
+  const { directory, path } = await executableFile();
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "acceptance.json");
+  const { readDigests, reads } = countingReads();
+  let probes = 0;
+  const run = (overrides: Partial<RuntimeResolverEnvironment> = {}) => resolveRuntime({ kind: "managed" }, managedEnvironment(path, {
+    managedAcceptance: new FileManagedRuntimeAcceptance(file), readDigests,
+    probe: { probe: async () => { probes++; return fullOutcome(); } }, ...overrides,
+  }));
+  const first = await run();
+  assert.equal(first.classification, "managed");
+  assert.equal(first.reusedAcceptance, undefined);
+  assert.equal(reads.length, 2);
+  const second = await run();
+  assert.deepEqual(second, { ...first, reusedAcceptance: true });
+  assert.equal(probes, 1);
+  assert.equal(reads.length, 3, "daily startup freshly scans bytes, without an unneeded post-probe scan");
+
+  await run({ supportedProtocolVersions: [1, 2] });
+  assert.equal(probes, 2, "a changed Host protocol contract needs full acceptance");
+  const expanded = await run({ requiredCapabilities: [...FULL_PARITY_REQUIRED_CAPABILITIES, "new-required-capability"] });
+  assert.equal(expanded.classification, "rejected");
+  assert.equal(probes, 3, "new capability requirements cannot reuse old acceptance");
+});
+
+test("activation and damaged acceptance records trigger a full probe; failed probes are not remembered", async context => {
+  const { directory, path } = await executableFile();
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "acceptance.json");
+  let activation = "first", probes = 0, fail = true;
+  const run = () => resolveRuntime({ kind: "managed" }, managedEnvironment(path, {
+    managedLookup: { current: async () => ({ manifest: managedManifest(), entrypointPath: path, entrypointSha256: FIXTURE_SHA256, activation }) },
+    managedAcceptance: new FileManagedRuntimeAcceptance(file),
+    probe: { probe: async () => { probes++; return { ...fullOutcome(), smoke: fail ? "failed" : "passed" }; } },
+  }));
+  assert.equal((await run()).classification, "rejected");
+  fail = false;
+  assert.equal((await run()).reusedAcceptance, undefined);
+  assert.equal((await run()).reusedAcceptance, true);
+  assert.equal(probes, 2);
+  activation = "after-update";
+  assert.equal((await run()).reusedAcceptance, undefined);
+  assert.equal(probes, 3);
+  await writeFile(file, "interrupted write");
+  assert.equal((await run()).classification, "managed");
+  assert.equal(probes, 4);
+});
+
+test("a limited managed Runtime reuses acceptance without promoting its capabilities", async context => {
+  const { directory, path } = await executableFile();
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "acceptance.json");
+  let probes = 0;
+  const run = () => resolveRuntime({ kind: "managed" }, managedEnvironment(path, {
+    managedLookup: { current: async () => ({ manifest: { ...managedManifest(), profile: "limited" }, entrypointPath: path, entrypointSha256: FIXTURE_SHA256 }) },
+    managedAcceptance: new FileManagedRuntimeAcceptance(file),
+    probe: { probe: async () => {
+      probes++;
+      const greeting = hello();
+      return { ...fullOutcome(), hello: { ...greeting, capabilityManifest: {
+        ...greeting.capabilityManifest, profile: "limited", capabilities: greeting.capabilityManifest.capabilities.slice(1),
+      } } };
+    } },
+  }));
+  const first = await run();
+  assert.equal(first.classification, "managed");
+  assert.equal(first.profile, "limited");
+  assert.ok(first.missingCapabilities.length > 0);
+  assert.deepEqual(await run(), { ...first, reusedAcceptance: true });
+  assert.equal(probes, 1);
+});
+
+test("remembered acceptance never permits tampered bytes or bypasses system/custom probes", async context => {
+  const { directory, path } = await executableFile();
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  let probes = 0;
+  const environment = managedEnvironment(path, {
+    managedAcceptance: new FileManagedRuntimeAcceptance(join(directory, "acceptance.json")),
+    probe: { probe: async () => { probes++; return fullOutcome(); } },
+  });
+  await resolveRuntime({ kind: "managed" }, environment);
+  const before = await stat(path);
+  await writeFile(path, TAMPERED_BYTES);
+  await utimes(path, before.atime, before.mtime);
+  assert.equal((await resolveRuntime({ kind: "managed" }, environment)).classification, "rejected");
+  assert.equal(probes, 1, "tampered bytes must not execute, even with a cached acceptance");
+  await writeFile(path, FIXTURE_BYTES);
+  for (const kind of ["system", "custom"] as const) {
+    await resolveRuntime({ kind, executable: path, allowLimited: false }, environment);
+    await resolveRuntime({ kind, executable: path, allowLimited: false }, environment);
+  }
+  assert.equal(probes, 5);
 });
 
 test("an in-place rewrite with a restored mtime is still detected after the probe", async () => {
