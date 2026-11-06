@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { BrowserWindow, Menu, Notification, View, WebContentsView, dialog, nativeImage, session, shell, type DownloadItem, type Session, type WebContents } from "electron";
-import type { BrowserElementReference, ManagedBrowserCommand, ManagedBrowserControl, ManagedBrowserDownload, ManagedBrowserEvent, ManagedBrowserPage, ManagedBrowserPageOpener, ManagedBrowserPresentation, ManagedBrowserState } from "@omp-studio/studio-protocol";
+import type { BrowserElementReference, ManagedBrowserCommand, ManagedBrowserDownload, ManagedBrowserEvent, ManagedBrowserPage, ManagedBrowserPageOpener, ManagedBrowserPresentation, ManagedBrowserState } from "@omp-studio/studio-protocol";
 import { normalizeBrowserAddress } from "./managed-browser-address.js";
 import { faviconDataUrl, loadFavicon, pickFaviconUrl } from "./managed-browser-favicon.js";
 import { BROWSER_PICKER_POLL, BROWSER_PICKER_START, BROWSER_PICKER_STOP, BROWSER_PICKER_WORLD_ID, type BrowserPickerPoll } from "./managed-browser-picker.js";

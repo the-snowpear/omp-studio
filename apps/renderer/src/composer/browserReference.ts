@@ -1,3 +1,4 @@
+import { referenceCodec } from "./referenceCodec";
 import type { BrowserElementReference } from "@omp-studio/studio-protocol";
 
 export interface BrowserReferenceSnapshot {
@@ -19,22 +20,7 @@ export function browserReferenceSnapshot(reference: BrowserElementReference): Br
   ].join("\n\n");
   return { kind: "browser", key: `browser:${element.id}`, title: `${element.tagName} · ${element.title}`, url: element.url, text, element };
 }
-export function serializeBrowserReference(reference: BrowserReferenceSnapshot): string {
-  const { text, ...metadata } = reference;
-  return `<browser-reference metadata=${JSON.stringify(metadata)} length=${text.length}>\n${text}\n</browser-reference>`;
-}
-export function nextBrowserReference(text: string, from: number): { start: number; end: number; reference: BrowserReferenceSnapshot } | null {
-  const pattern = /<browser-reference metadata=(\{[^\n]*\}) length=(\d+)>\n/g;
-  pattern.lastIndex = from;
-  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
-    const bodyStart = pattern.lastIndex, bodyEnd = bodyStart + Number(match[2]);
-    const closing = "\n</browser-reference>";
-    if (text.slice(bodyEnd, bodyEnd + closing.length) !== closing) continue;
-    try {
-      const metadata = JSON.parse(match[1]!) as Omit<BrowserReferenceSnapshot, "text">;
-      if (metadata.kind !== "browser" || typeof metadata.key !== "string" || !metadata.element) continue;
-      return { start: match.index, end: bodyEnd + closing.length, reference: { ...metadata, text: text.slice(bodyStart, bodyEnd) } };
-    } catch { continue; }
-  }
-  return null;
-}
+export const { serialize: serializeBrowserReference, next: nextBrowserReference } = referenceCodec<BrowserReferenceSnapshot>(
+  "browser-reference",
+  metadata => metadata.kind === "browser" && typeof metadata.key === "string" && !!metadata.element,
+);

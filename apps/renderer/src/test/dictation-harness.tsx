@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useRef, useState } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type { DictationCaptureState, DictationConfiguration } from "@omp-studio/studio-protocol";
-import type { DictationAudioApi, DictationDesktopEvent, DictationOwner, DictationRecovery } from "../../../desktop/src/dictation-audio-shared";
+import type { DictationAudioApi, DictationDesktopEvent, DictationRecovery } from "../../../desktop/src/dictation-audio-shared";
 import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { ChipComposer, type ChipComposerHandle } from "../composer/ChipComposer";

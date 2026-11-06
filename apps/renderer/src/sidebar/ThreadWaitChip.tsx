@@ -1,5 +1,5 @@
 import { useI18n } from "../i18n";
-import { THREAD_WAIT_LABEL, THREAD_WAIT_TONE, type ThreadWaitKind } from "./threadWait";
+import { THREAD_WAIT_TONE, type ThreadWaitKind } from "./threadWait";
 
 const THREAD_WAIT_KEY: Record<ThreadWaitKind, string> = {
   approval: "sidebar.waitingApproval",

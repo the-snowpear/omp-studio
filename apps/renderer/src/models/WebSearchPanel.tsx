@@ -15,8 +15,8 @@ import { WebRoleChain } from "./WebRoleChain";
  * model.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useListReorder } from "./useListReorder";
 import { createPortal } from "react-dom";
 import type { ModelWebSearchSetInput, StudioClient, WebSearchConfigReadModel, WebSearchProviderRecord } from "@omp-studio/client-contract";
 import { Brand, hasBrand } from "../brands";
@@ -27,53 +27,6 @@ import { ToastHost } from "../ToastHost";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 
 const TIMEOUT_OPTIONS = [30, 60, 120, 180, 300];
-
-/* ── Pointer-drag re-ordering (same mechanics as the provider cards). ── */
-
-const CHAIN_ROW_GAP = 2;
-const CHAIN_DRAG_SETTLE_MS = 250;
-
-type DragRow = {
-  id: string;
-  el: HTMLElement;
-  relTop: number;
-  height: number;
-};
-
-function siblingShift(index: number, origin: number, over: number, slot: number): number {
-  if (origin < over && index > origin && index <= over) return -slot;
-  if (origin > over && index >= over && index < origin) return slot;
-  return 0;
-}
-
-function insertionIndex(items: ReadonlyArray<DragRow>, visualCenterRel: number): number {
-  if (items.length === 0) return 0;
-  for (let index = 0; index < items.length - 1; index++) {
-    const current = items[index];
-    const next = items[index + 1];
-    if (!current || !next) continue;
-    const boundary = (current.relTop + current.height / 2 + next.relTop + next.height / 2) / 2;
-    if (visualCenterRel < boundary) return index;
-  }
-  return items.length - 1;
-}
-
-function destinationTranslateY(items: ReadonlyArray<DragRow>, originIndex: number, overIndex: number): number {
-  const dragged = items[originIndex];
-  if (!dragged) return 0;
-  const visible = items.map((item) => item.id);
-  const nextVisible = visible.slice();
-  const [moved] = nextVisible.splice(originIndex, 1);
-  if (!moved) return 0;
-  nextVisible.splice(overIndex, 0, moved);
-  const heightById = new Map(items.map((item) => [item.id, item.height]));
-  let top = items[0]?.relTop ?? 0;
-  for (const id of nextVisible) {
-    if (id === dragged.id) break;
-    top += (heightById.get(id) ?? 0) + CHAIN_ROW_GAP;
-  }
-  return top - dragged.relTop;
-}
 
 /* ── Provider brand mark: real logo, globe for the aggregate, letter fallback. ── */
 
@@ -182,32 +135,18 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
     setDraft(draftFromReadModel(webSearch));
   }, [webSearch]);
 
-  /* ── Priority-chain pointer drag state. ── */
-  const chainListRef = useRef<HTMLDivElement | null>(null);
-  const dragLockRef = useRef(false);
-  const settleGenRef = useRef(0);
-  const clearDragStylesRef = useRef(false);
   const orderRef = useRef(draft.order);
   orderRef.current = draft.order;
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragPhase, setDragPhase] = useState<"dragging" | "settling">("dragging");
-
-  useLayoutEffect(() => {
-    if (!clearDragStylesRef.current) return;
-    clearDragStylesRef.current = false;
-    const root = chainListRef.current;
-    if (!root) return;
-    const rows = root.querySelectorAll<HTMLElement>(".wsx-chain-row");
-    for (const el of rows) {
-      el.style.transition = "transform 0s";
-      el.style.transform = "";
-    }
-    void root.offsetHeight;
-    for (const el of rows) {
-      el.style.removeProperty("transition");
-      el.style.removeProperty("transform");
-    }
-  }, [draggingId, draft.order]);
+  const { listRef: chainListRef, draggingId, dragPhase, onPointerDown: onChainDragPointerDown } = useListReorder({
+    order: draft.order, selector: ".wsx-chain-row", gap: 2, sortingClass: "is-wsx-sorting",
+    onReorder(from, to) {
+      const next = orderRef.current.slice();
+      const [moved] = next.splice(from, 1);
+      if (!moved) return;
+      next.splice(to, 0, moved);
+      setDraft(draft => ({ ...draft, order: next }));
+    },
+  });
 
   const byId = useMemo(() => new Map(webSearch.providers.map((provider) => [provider.id, provider])), [webSearch.providers]);
 
@@ -299,104 +238,6 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
     setDraft((d) => ({ ...d, exclude: [...d.exclude, id] }));
   };
   const restore = (id: string) => setDraft((d) => ({ ...d, exclude: d.exclude.filter((item) => item !== id) }));
-
-  /** Pointer-drag a chain row to a new position (mirrors the provider cards). */
-  const onChainDragPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, id: string) => {
-    if (event.button !== 0) return;
-    if (dragLockRef.current) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const root = chainListRef.current;
-    if (!root) return;
-    const listRect = root.getBoundingClientRect();
-    const items: DragRow[] = [...root.querySelectorAll<HTMLElement>(".wsx-chain-row")].flatMap((el) => {
-      const rowId = el.dataset.id;
-      if (!rowId) return [];
-      const rect = el.getBoundingClientRect();
-      return [{ id: rowId, el, relTop: rect.top - listRect.top, height: rect.height }];
-    });
-    const originIndex = items.findIndex((item) => item.id === id);
-    const dragged = items[originIndex];
-    if (originIndex < 0 || !dragged) return;
-    const handle = event.currentTarget;
-    const pointerId = event.pointerId;
-    handle.setPointerCapture(pointerId);
-    dragLockRef.current = true;
-    settleGenRef.current += 1;
-    setDragPhase("dragging");
-    setDraggingId(id);
-    document.body.classList.add("is-wsx-sorting");
-    document.body.style.cursor = "grabbing";
-    document.body.style.userSelect = "none";
-    const startY = event.clientY;
-    const slot = dragged.height + CHAIN_ROW_GAP;
-    let overIndex = originIndex;
-
-    const applyShifts = (over: number) => {
-      for (let index = 0; index < items.length; index++) {
-        const item = items[index];
-        if (!item || index === originIndex) continue;
-        const shift = siblingShift(index, originIndex, over, slot);
-        item.el.style.transform = shift ? `translate3d(0, ${shift}px, 0)` : "";
-      }
-    };
-
-    const stopCursor = () => {
-      document.body.classList.remove("is-wsx-sorting");
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      try {
-        handle.releasePointerCapture(pointerId);
-      } catch {
-        /* already released */
-      }
-    };
-
-    const movePointer = (next: PointerEvent) => {
-      next.preventDefault();
-      const dy = next.clientY - startY;
-      dragged.el.style.transform = `translate3d(0, ${dy}px, 0)`;
-      const nextOver = insertionIndex(items, dragged.relTop + dragged.height / 2 + dy);
-      if (nextOver === overIndex) return;
-      overIndex = nextOver;
-      applyShifts(overIndex);
-    };
-
-    const up = () => {
-      handle.removeEventListener("pointermove", movePointer);
-      handle.removeEventListener("pointerup", up);
-      handle.removeEventListener("pointercancel", up);
-      stopCursor();
-      const destY = destinationTranslateY(items, originIndex, overIndex);
-      const gen = ++settleGenRef.current;
-      setDragPhase("settling");
-      dragged.el.style.transition = "transform var(--dur-slow) var(--ease-ios), scale var(--dur-slow) var(--ease-ios)";
-      requestAnimationFrame(() => {
-        if (gen !== settleGenRef.current) return;
-        dragged.el.style.transform = `translate3d(0, ${destY}px, 0)`;
-      });
-
-      const finish = () => {
-        if (gen !== settleGenRef.current) return;
-        dragLockRef.current = false;
-        clearDragStylesRef.current = true;
-        setDraggingId(null);
-        setDragPhase("dragging");
-        if (overIndex === originIndex) return;
-        const next = orderRef.current.slice();
-        const [moved] = next.splice(originIndex, 1);
-        if (!moved) return;
-        next.splice(overIndex, 0, moved);
-        setDraft((d) => ({ ...d, order: next }));
-      };
-
-      window.setTimeout(finish, CHAIN_DRAG_SETTLE_MS);
-    };
-
-    handle.addEventListener("pointermove", movePointer);
-    handle.addEventListener("pointerup", up);
-    handle.addEventListener("pointercancel", up);
-  };
 
   /* ── Credential modal actions. ── */
 

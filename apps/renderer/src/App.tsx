@@ -26,12 +26,12 @@ import { agentPanelId, type AgentPanelId, type DockScope, type PanelId } from ".
 import "./dock/dock.css";
 import "./dock/menus.css";
 import "./dock/integration.css";
-import { DeferredPanel, LoadWhenVisible, lazyPanel } from "./DeferredPanel";
+import { DeferredPanel, lazyPanel } from "./DeferredPanel";
 import { useModelConnection } from "./models/useModelConnection";
 import { LocalFilesPane } from "./capabilities/LocalFilesPane";
 import { DictationControl } from "./composer/DictationControl";
 import { ContextInspector } from "./contextViewer/ContextInspector";
-import { SessionBudgetPane } from "./models/SessionBudgetPane";
+
 import { ExecutionTargets, useExecutionTarget, useTargetMemory } from "./workspaces/ExecutionTargets";
 import { RemoteScopeNotice } from "./workspaces/RemoteScopeNotice";
 import { ExecutionTargetPicker } from "./workspaces/ExecutionTargetPicker";
@@ -138,7 +138,6 @@ import {
   type StudioSlashCommand,
 } from "./composer/commands";
 import {
-  composerContinueEnabled,
   composerFollowUpEnabled,
   composerOwnerSessionId,
   composerOwnsLiveSnapshot,
@@ -199,7 +198,7 @@ import { buildPaletteGroups, type BottomTab, type PaletteAction, type SideTab } 
 import { toDrawerItems } from "./extensibilityMap";
 import { countEnabledDrawerItems, createPreviewDrawerItems, type DrawerItem } from "./skillsPreview";
 import { pagePhaseClass, useDeferredKey } from "./pageTransition";
-import { toggleBottomBarOpen, toggleBottomBarVisible } from "./bottomPanelChrome";
+import { toggleBottomBarVisible } from "./bottomPanelChrome";
 import { useViewedSessionTelemetry, type ViewedSessionTelemetryState } from "./telemetry/useViewedSessionTelemetry";
 import { hostErrorMessage, waitReceipt } from "./hostError";
 import { asConversationClient } from "./conversation/conversationHost";
@@ -219,7 +218,7 @@ import { collectLatestPlanDocument, SESSION_CHANGE_LAST_ID, sessionTaskProgress,
 import { TaskProgressDock } from "./conversation/TaskProgressDock";
 import { SessionChanges } from "./conversation/SessionChanges";
 import { AgentTestsPane } from "./conversation/AgentTestsPane";
-import { agentTestRunSummary, projectAgentTestRuns, rerunTestPrompt } from "./conversation/agentTestRuns";
+import { projectAgentTestRuns, rerunTestPrompt } from "./conversation/agentTestRuns";
 import { revealConversationTool, revealConversationTarget } from "./conversation/conversationReveal";
 import { useConversation } from "./conversation/useConversation";
 import type { PendingUser } from "./conversation/conversationViewModel";
@@ -273,7 +272,6 @@ import {
   PreviewFileTree,
   PreviewLogs,
   PreviewProblems,
-  PreviewSidePreview,
   PreviewSwitch,
   PreviewTests,
   PreviewTokenTrigger,
@@ -529,16 +527,6 @@ function takeSlashUiIntent(): SlashNativeUi | undefined {
   } catch {
     return undefined;
   }
-}
-
-function chipTone(value: string): "green" | "amber" | "red" {
-  if (value.includes("connected") || value === "managed" || value === "completed") return "green";
-  if (value.includes("reject") || value.includes("failed") || value === "error") return "red";
-  return "amber";
-}
-
-function Chip({ children }: { children: ReactNode }) {
-  return <span className={`chip ${chipTone(String(children))}`}>{children}</span>;
 }
 
 function relativeTime(iso: string): string {
@@ -2917,14 +2905,6 @@ function formatTelemetryTokens(value: number): string {
   return Math.round(value).toLocaleString("en-US");
 }
 
-const TELEMETRY_CONTEXT_PARTS: ReadonlyArray<{ key: keyof NonNullable<SessionTelemetrySnapshot["context"]>; label: string; color: string }> = [
-  { key: "systemPromptTokens", label: "系统提示词", color: "#8a919c" },
-  { key: "systemContextTokens", label: "系统上下文", color: "#64748b" },
-  { key: "systemToolsTokens", label: "工具定义", color: "#d9930d" },
-  { key: "skillsTokens", label: "Skills", color: "#6e56cf" },
-  { key: "messagesTokens", label: "对话消息", color: "#3b9bd4" },
-];
-
 /** 压缩档只剩图标，把被收起的数字放进 tooltip（`.t-tok-icon` 见 App.css）。 */
 function tokenUsageTip(telemetry: SessionTelemetrySnapshot | null): string {
   if (telemetry === null) return "Token";
@@ -3692,7 +3672,6 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   // 流式期间按 Enter 的消息先排本地队列，本轮 run 结束后由 flush effect 按序发送。
   const [queuedMessages, setQueuedMessages] = useTargetMemory<QueuedMessage[]>("composer-queue", () => []);
   const [previewSpeeds, setPreviewSpeeds] = useState<Record<string, StudioSpeed>>({});
-  const queuedSeqRef = useRef(0);
   const [queueEdit, setQueueEdit] = useState<QueueEditState | undefined>(undefined);
   const [contextProjectMenuOpen, setContextProjectMenuOpen] = useState(false);
   const [contextProjectQuery, setContextProjectQuery] = useState("");
@@ -4058,7 +4037,6 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     return sessionTaskProgress(convo.rows);
   }, [convo.rows, isNewConversation, preview]);
   const testRuns = useMemo(() => preview ? [] : projectAgentTestRuns(convo.rows), [convo.rows, preview]);
-  const testSummary = useMemo(() => agentTestRunSummary(testRuns), [testRuns]);
   const activeWorkspace = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
   const gitWorkspaceId = preview ? undefined : activeWorkspace?.workspaceId;
   const realGit = useGitRepository(client, gitWorkspaceId);

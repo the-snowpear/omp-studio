@@ -12,7 +12,7 @@ import { useI18n } from "../i18n";
 import { BackgroundMedia } from "./BackgroundMedia";
 import type { BackgroundAsset } from "./backgroundLibrary";
 import type { BackgroundSettings } from "./backgroundSettings";
-import type { BackgroundTheme } from "./backgroundTint";
+
 import { backgroundAssetKindKey, backgroundAssetName } from "./backgroundLabels";
 import { backdropCssVars } from "./backgroundVars";
 

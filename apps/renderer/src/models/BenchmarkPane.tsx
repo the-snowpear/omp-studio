@@ -16,7 +16,7 @@ import {
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
-import { PREVIEW_BENCHMARK, previewBenchmark } from "../preview/benchmarksPreview";
+import { PREVIEW_BENCHMARK } from "../preview/benchmarksPreview";
 import { WorkspaceStatus, workspaceStateLabel } from "../workspaces/Workspace";
 import "./benchmark.css";
 

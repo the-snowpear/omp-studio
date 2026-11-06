@@ -3454,65 +3454,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
    accept path selected with querySelector('span') — that matched whichever span
    came first and silently picked up the type label on some rows. */
 .complete-item .ci-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.composer-input-shell {
-  position: relative;
-  width: 100%;
-}
-.composer-input-mirror,
-.composer textarea.composer-input {
-  width: 100%;
-  border: none;
-  background: transparent;
-  resize: none;
-  padding: 5px var(--sp-14) var(--sp-4);
-  font-size: var(--fs-14);
-  line-height: 1.6;
-  min-height: 44px;
-  max-height: 200px;
-  outline: none;
-  font-family: var(--font-ui);
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-  box-sizing: border-box;
-  transition: height var(--dur-slow) var(--ease-out), min-height var(--dur-slow) var(--ease-out), max-height var(--dur-slow) var(--ease-out), padding var(--dur-slow) var(--ease-out);
-}
-.composer-input-mirror {
-  position: absolute;
-  inset: 0;
-  overflow: auto;
-  pointer-events: none;
-  color: var(--text);
-  scrollbar-width: none;
-}
-.composer-input-mirror::-webkit-scrollbar { display: none; }
-.composer textarea.composer-input {
-  position: relative;
-  z-index: 1;
-  color: transparent;
-  caret-color: var(--text);
-  overflow: auto;
-}
-.composer textarea.composer-input::placeholder {
-  color: var(--glyph-faint);
-  opacity: 1;
-}
-.composer.running.compact .composer-input-mirror,
-.composer.running.compact textarea.composer-input {
-  height: 24px;
-  min-height: 24px;
-  max-height: 24px;
-  padding-top: 1px;
-  padding-bottom: 0;
-  overflow: hidden;
-}
-.composer.running.expanded .composer-input-mirror,
-.composer.running.expanded textarea.composer-input {
-  height: 50px;
-  min-height: 50px;
-  max-height: 200px;
-}
-
 /* Inline file / skill / image capsules inside the composer body. */
 .chip-composer {
   position: relative;
@@ -4062,21 +4003,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 [data-theme="dark"] .magic-kw-ch {
   color: hsl(var(--magic-hue, 200) 90% 68%);
-}
-/* 扫光只在「输入框镜像层」里跑，而且只给每个关键字的前 39 个字符。
-   `filter` 是逐帧重建该字符的层再重绘，成本随字符数线性增长；它又挂在用户气泡上
-   恒开（`UserMessageBody` 传 magicKeywords=true），是会话正文里最贵的一条无限动画。
-   正文改为静态 HSL 渐变——每个字符的 --magic-hue 本来就不同，彩虹识读不变。 */
-.composer-input-mirror .magic-kw.is-animated .magic-kw-ch {
-  animation: magic-kw-shimmer 1.8s linear infinite;
-  animation-delay: calc(var(--magic-i, 0) * -90ms);
-}
-.composer-input-mirror .magic-kw.is-animated .magic-kw-ch:nth-child(n+40) {
-  animation: none;
-}
-@keyframes magic-kw-shimmer {
-  0% { filter: hue-rotate(0deg); }
-  100% { filter: hue-rotate(360deg); }
 }
 @media (prefers-reduced-motion: reduce) {
   .magic-kw.is-animated .magic-kw-ch { animation: none; }

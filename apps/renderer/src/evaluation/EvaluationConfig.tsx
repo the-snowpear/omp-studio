@@ -4,7 +4,6 @@ import type {
   EvaluationSpec,
   EvaluationContext,
   EvaluationQuestion,
-  RatchetEvaluationSpec,
 } from "@omp-studio/studio-protocol";
 import { AppSelect } from "../AppSelect";
 import { WorkspaceDialog } from "../workspaces/Workspace";

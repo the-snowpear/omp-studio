@@ -8,7 +8,6 @@ import { pipeline } from "node:stream/promises";
 import {
   validatePredictionEvent,
   validatePredictionInput,
-  type PredictionEvent,
 } from "@omp-studio/studio-protocol";
 import type { TerminalSender, TerminalIpcMain } from "./terminal-ipc.js";
 import {

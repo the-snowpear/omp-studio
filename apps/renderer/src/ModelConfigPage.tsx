@@ -1,3 +1,4 @@
+import { useListReorder } from "./models/useListReorder";
 import { ModelParameterEditor } from "./models/ModelParameterEditor";
 import { createModelParameterDraft, effectiveModelParameters, effectiveParameterSources, modelParameterDraftError, type ModelParameterDraft } from "./models/modelParameterDraft";
 import { previewModelAdaptation } from "./preview/modelAdaptationPreview";
@@ -14,7 +15,7 @@ import { loadRuntimeModels } from "./models/runtimeModels";
 import { RuntimeCredentials, VisionModelStatus } from "./models/RuntimeCredentials";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { FormEvent, PointerEvent as ReactPointerEvent, CSSProperties } from "react";
+import type { FormEvent, CSSProperties } from "react";
 import type {
   ClientBootstrap,
   AvailableModelRecord,
@@ -218,16 +219,6 @@ function flattenModelGroups(
   return items;
 }
 
-const PROVIDER_CARD_GAP = 10;
-const PROVIDER_DRAG_SETTLE_MS = 250;
-
-type DragCard = {
-  id: string;
-  el: HTMLElement;
-  relTop: number;
-  height: number;
-};
-
 function permuteVisible(
   full: ReadonlyArray<string>,
   visible: ReadonlyArray<string>,
@@ -236,41 +227,6 @@ function permuteVisible(
   const known = new Set(visible);
   const queue = nextVisible.slice();
   return full.map((id) => (known.has(id) ? queue.shift() ?? id : id));
-}
-
-function siblingShift(index: number, origin: number, over: number, slot: number): number {
-  if (origin < over && index > origin && index <= over) return -slot;
-  if (origin > over && index >= over && index < origin) return slot;
-  return 0;
-}
-
-function insertionIndex(items: ReadonlyArray<DragCard>, visualCenterRel: number): number {
-  if (items.length === 0) return 0;
-  for (let index = 0; index < items.length - 1; index++) {
-    const current = items[index];
-    const next = items[index + 1];
-    if (!current || !next) continue;
-    const boundary = (current.relTop + current.height / 2 + next.relTop + next.height / 2) / 2;
-    if (visualCenterRel < boundary) return index;
-  }
-  return items.length - 1;
-}
-
-function destinationTranslateY(items: ReadonlyArray<DragCard>, originIndex: number, overIndex: number): number {
-  const dragged = items[originIndex];
-  if (!dragged) return 0;
-  const visible = items.map((item) => item.id);
-  const nextVisible = visible.slice();
-  const [moved] = nextVisible.splice(originIndex, 1);
-  if (!moved) return 0;
-  nextVisible.splice(overIndex, 0, moved);
-  const heightById = new Map(items.map((item) => [item.id, item.height]));
-  let top = items[0]?.relTop ?? 0;
-  for (const id of nextVisible) {
-    if (id === dragged.id) break;
-    top += (heightById.get(id) ?? 0) + PROVIDER_CARD_GAP;
-  }
-  return top - dragged.relTop;
 }
 
 function BrandMark({ id, local, status }: { id: string; local?: boolean; status?: string }) {
@@ -1143,12 +1099,6 @@ function roleAssignModCount(
   return added.length + removed.length;
 }
 
-function missingModelSaveError(labels: ReadonlyArray<string>, t?: (k: string, p?: any) => string): string {
-  return t
-    ? t("modelConfig.cannotSaveRoleNoPrimary", { labels: labels.join(", ") })
-    : `Cannot save: role ${labels.join(", ")} has no primary model`;
-}
-
 function nextRolePrimaries(
   roles: ReadonlyArray<ModelRoleRecord>,
   drafts: Record<string, ReadonlyArray<string>>,
@@ -1166,14 +1116,6 @@ function nextRolePrimaries(
     for (const roleId of picked) next.set(roleId, selector);
   }
   return next;
-}
-
-function missingRoleLabels(
-  roles: ReadonlyArray<ModelRoleRecord>,
-  drafts: Record<string, ReadonlyArray<string>>,
-): string[] {
-  const next = nextRolePrimaries(roles, drafts);
-  return roles.filter((role) => role.primary && !next.has(role.id)).map((role) => role.alias);
 }
 
 function rolePrimaryUpdates(
@@ -1749,15 +1691,23 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [modelEdit, setModelEdit] = useState<ModelEditState | null>(null);
   const { shown: modelEditView, leaving: modelEditLeaving } = useOverlayPresence(modelEdit);
   const [displayOrder, setDisplayOrder] = useState<string[]>(() => readProviderOrder());
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragPhase, setDragPhase] = useState<"dragging" | "settling">("dragging");
   const loaded = useRef(false);
-  const listRef = useRef<HTMLDivElement>(null);
   const orderRef = useRef(displayOrder);
-  const clearDragStylesRef = useRef(false);
-  const settleGenRef = useRef(0);
-  const dragLockRef = useRef(false);
   orderRef.current = displayOrder;
+  const { listRef, draggingId, dragPhase, onPointerDown: onProviderDragPointerDown } = useListReorder({
+    order: displayOrder, selector: ".pv-card", gap: 10, sortingClass: "is-pv-sorting",
+    onReorder(from, to, visible) {
+      const nextVisible = visible.slice();
+      const [moved] = nextVisible.splice(from, 1);
+      if (!moved) return;
+      nextVisible.splice(to, 0, moved);
+      const nextOrder = permuteVisible(orderRef.current, visible, nextVisible);
+      if (sameOrder(nextOrder, orderRef.current)) return;
+      orderRef.current = nextOrder;
+      setDisplayOrder(nextOrder);
+      writeProviderOrder(nextOrder);
+    },
+  });
 
   const refresh = useCallback(async () => {
     if (preview) {
@@ -1916,21 +1866,6 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     });
   }, [data]);
 
-  useLayoutEffect(() => {
-    if (!clearDragStylesRef.current) return;
-    clearDragStylesRef.current = false;
-    const root = listRef.current;
-    if (!root) return;
-    for (const el of root.querySelectorAll<HTMLElement>(".pv-card")) {
-      el.style.transition = "transform 0s";
-      el.style.transform = "";
-    }
-    void root.offsetHeight;
-    for (const el of root.querySelectorAll<HTMLElement>(".pv-card")) {
-      el.style.removeProperty("transition");
-      el.style.removeProperty("transform");
-    }
-  }, [draggingId, displayOrder]);
 
   const orderedProviders = useMemo(() => sortProviders(providers, displayOrder), [providers, displayOrder]);
   const filtered = orderedProviders.filter((item) => {
@@ -2019,108 +1954,6 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       setModelConfigDirty(false);
     };
   }, [ymlCardsDirty]);
-
-  const onProviderDragPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, id: string) => {
-    if (event.button !== 0) return;
-    if (dragLockRef.current) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const root = listRef.current;
-    if (!root) return;
-    const listRect = root.getBoundingClientRect();
-    const items: DragCard[] = [...root.querySelectorAll<HTMLElement>(".pv-card")].flatMap((el) => {
-      const cardId = el.dataset.id;
-      if (!cardId) return [];
-      const rect = el.getBoundingClientRect();
-      return [{ id: cardId, el, relTop: rect.top - listRect.top, height: rect.height }];
-    });
-    const originIndex = items.findIndex((item) => item.id === id);
-    const dragged = items[originIndex];
-    if (originIndex < 0 || !dragged) return;
-    const handle = event.currentTarget;
-    const pointerId = event.pointerId;
-    handle.setPointerCapture(pointerId);
-    dragLockRef.current = true;
-    settleGenRef.current += 1;
-    setDragPhase("dragging");
-    setDraggingId(id);
-    document.body.classList.add("is-pv-sorting");
-    document.body.style.cursor = "grabbing";
-    document.body.style.userSelect = "none";
-    const startY = event.clientY;
-    const slot = dragged.height + PROVIDER_CARD_GAP;
-    let overIndex = originIndex;
-
-    const applyShifts = (over: number) => {
-      for (let index = 0; index < items.length; index++) {
-        const item = items[index];
-        if (!item || index === originIndex) continue;
-        const shift = siblingShift(index, originIndex, over, slot);
-        item.el.style.transform = shift ? `translate3d(0, ${shift}px, 0)` : "";
-      }
-    };
-
-    const stopCursor = () => {
-      document.body.classList.remove("is-pv-sorting");
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      try {
-        handle.releasePointerCapture(pointerId);
-      } catch {
-        /* already released */
-      }
-    };
-
-    const move = (next: PointerEvent) => {
-      next.preventDefault();
-      const dy = next.clientY - startY;
-      dragged.el.style.transform = `translate3d(0, ${dy}px, 0)`;
-      const nextOver = insertionIndex(items, dragged.relTop + dragged.height / 2 + dy);
-      if (nextOver === overIndex) return;
-      overIndex = nextOver;
-      applyShifts(overIndex);
-    };
-
-    const up = () => {
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-      handle.removeEventListener("pointercancel", up);
-      stopCursor();
-      const destY = destinationTranslateY(items, originIndex, overIndex);
-      const gen = ++settleGenRef.current;
-      setDragPhase("settling");
-      dragged.el.style.transition = "transform var(--dur-slow) var(--ease-ios), scale var(--dur-slow) var(--ease-ios)";
-      requestAnimationFrame(() => {
-        if (gen !== settleGenRef.current) return;
-        dragged.el.style.transform = `translate3d(0, ${destY}px, 0)`;
-      });
-
-      const finish = () => {
-        if (gen !== settleGenRef.current) return;
-        dragLockRef.current = false;
-        clearDragStylesRef.current = true;
-        setDraggingId(null);
-        setDragPhase("dragging");
-        if (overIndex === originIndex) return;
-        const visible = items.map((item) => item.id);
-        const nextVisible = visible.slice();
-        const [moved] = nextVisible.splice(originIndex, 1);
-        if (!moved) return;
-        nextVisible.splice(overIndex, 0, moved);
-        const nextOrder = permuteVisible(orderRef.current, visible, nextVisible);
-        if (sameOrder(nextOrder, orderRef.current)) return;
-        orderRef.current = nextOrder;
-        setDisplayOrder(nextOrder);
-        writeProviderOrder(nextOrder);
-      };
-
-      window.setTimeout(finish, PROVIDER_DRAG_SETTLE_MS);
-    };
-
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
-    handle.addEventListener("pointercancel", up);
-  };
 
   const mutateLocal = (recipe: (current: ModelConfigReadModel) => ModelConfigReadModel) => {
     setData((current) => recipe(current ?? createPreviewModelConfig()));
@@ -2426,23 +2259,6 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     }
     if (opts?.announce !== false) toast(last?.message ?? t("modelConfig.assignedRoles", { count: updates.length }));
     if (opts?.refreshAfter !== false) await refresh();
-  };
-
-  const assignModelToRoles = async (selector: string, roleIds: ReadonlyArray<string>) => {
-    const targets = roles.filter((role) => roleIds.includes(role.id) && role.primary !== selector);
-    if (targets.length === 0) return;
-    if (preview) {
-      await applyRolePrimaryUpdates(targets.map((role) => ({ role, selector })));
-      return;
-    }
-    setBusy(true);
-    try {
-      await applyRolePrimaryUpdates(targets.map((role) => ({ role, selector })));
-    } catch (error) {
-      toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
-    } finally {
-      setBusy(false);
-    }
   };
 
   const commitRoleAssign = (sel: string, addedIds: string[], removedIds: string[] = []) => {

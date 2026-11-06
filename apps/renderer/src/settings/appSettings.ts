@@ -271,53 +271,6 @@ export interface LayoutMemory {
   readonly btwCapY: number;
 }
 
-const LAYOUT_MEMORY_PREFIX = "omp.layoutMemory.";
-
-function layoutScopeKey(scope: string): string | undefined {
-  return /^[\w:.-]{1,96}$/u.test(scope) ? `${LAYOUT_MEMORY_PREFIX}${scope}` : undefined;
-}
-
-export function readLayoutMemory(scope: string): Partial<LayoutMemory> | undefined {
-  const key = layoutScopeKey(scope);
-  if (key === undefined) return undefined;
-  try {
-    const raw = readStorage(key);
-    if (!raw) return undefined;
-    const value = JSON.parse(raw) as Record<string, unknown>;
-    const memory = {
-      ...(typeof value.collapsed === "boolean" ? { collapsed: value.collapsed } : {}),
-      ...(typeof value.sidebarWidth === "number" && Number.isFinite(value.sidebarWidth) ? { sidebarWidth: value.sidebarWidth } : {}),
-      ...(typeof value.splitRatio === "number" && Number.isFinite(value.splitRatio) ? { splitRatio: value.splitRatio } : {}),
-      ...(typeof value.sideOpen === "boolean" ? { sideOpen: value.sideOpen } : {}),
-      ...(typeof value.bottomOpen === "boolean" ? { bottomOpen: value.bottomOpen } : {}),
-      ...(typeof value.bottomVisible === "boolean" ? { bottomVisible: value.bottomVisible } : {}),
-      ...(typeof value.sideTab === "string" ? { sideTab: value.sideTab } : {}),
-      ...(typeof value.bottomTab === "string" ? { bottomTab: value.bottomTab } : {}),
-      ...(typeof value.explorerOpen === "boolean" ? { explorerOpen: value.explorerOpen } : {}),
-      ...(typeof value.panelWidth === "number" && Number.isFinite(value.panelWidth) ? { panelWidth: value.panelWidth } : {}),
-      ...(typeof value.bottomHeight === "number" && Number.isFinite(value.bottomHeight) ? { bottomHeight: value.bottomHeight } : {}),
-      ...(typeof value.btwOpen === "boolean" ? { btwOpen: value.btwOpen } : {}),
-      ...(typeof value.btwPlacement === "string" ? { btwPlacement: value.btwPlacement } : {}),
-      ...(typeof value.btwMinimized === "boolean" ? { btwMinimized: value.btwMinimized } : {}),
-      ...(typeof value.btwX === "number" && Number.isFinite(value.btwX) ? { btwX: value.btwX } : {}),
-      ...(typeof value.btwY === "number" && Number.isFinite(value.btwY) ? { btwY: value.btwY } : {}),
-      ...(typeof value.btwW === "number" && Number.isFinite(value.btwW) ? { btwW: value.btwW } : {}),
-      ...(typeof value.btwH === "number" && Number.isFinite(value.btwH) ? { btwH: value.btwH } : {}),
-      ...(typeof value.btwCapX === "number" && Number.isFinite(value.btwCapX) ? { btwCapX: value.btwCapX } : {}),
-      ...(typeof value.btwCapY === "number" && Number.isFinite(value.btwCapY) ? { btwCapY: value.btwCapY } : {}),
-    };
-    return Object.keys(memory).length > 0 ? memory as Partial<LayoutMemory> : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export function writeLayoutMemory(scope: string, memory: LayoutMemory): void {
-  const key = layoutScopeKey(scope);
-  if (key === undefined) return;
-  writeStorage(key, JSON.stringify(memory));
-}
-
 /* ---------------------------------------------------------------
  * 启动行为辅助：上次访问页面（startupPage = "last" 时读取）。
  * --------------------------------------------------------------- */

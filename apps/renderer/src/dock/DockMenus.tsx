@@ -11,7 +11,7 @@ import { closePanels } from "./panelChrome";
 import { groupToolPanels } from "./toolGroups";
 import { useSurfaceDocument, surfaceWindow, revealMainWindow } from "./SurfaceContext";
 import type { DockFloat, DockPinMode } from "./types";
-import { isAgentPanelId, isBrowserPagePanelId, isInstancePanelId, type AgentPanelId, type BrowserPagePanelId, type DockAction, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRegionId, type PanelId } from "./types";
+import { isBrowserPagePanelId, isInstancePanelId, type AgentPanelId, type BrowserPagePanelId, type DockAction, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRegionId, type PanelId } from "./types";
 import { useWindowFocus } from "./windowOrder";
 import "./menus.css";
 

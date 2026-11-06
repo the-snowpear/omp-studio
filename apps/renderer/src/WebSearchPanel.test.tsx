@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { CommandReceipt, CommandRequestId, StudioClient, WebSearchConfigReadModel } from "@omp-studio/client-contract";
 
 import { WebSearchPanel } from "./models/WebSearchPanel";
+import { dragList } from "./test/drag-list";
 
 beforeAll(() => {
   class ResizeObserverStub {
@@ -106,6 +107,16 @@ function mount(webSearch = readModel(), client = fakeClient(), preview = false) 
 }
 
 describe("WebSearchPanel", () => {
+  it("reorders priority providers upward and sends the new order only on save", async () => {
+    const { client } = mount(readModel({ order: ["perplexity", "google", "duckduckgo"] }));
+    const rows = [...document.querySelectorAll<HTMLElement>(".wsx-chain-row")];
+    dragList(rows, 2, 0, 2, "button");
+    await waitFor(() => expect([...document.querySelectorAll<HTMLElement>(".wsx-chain-row")].map(row => row.dataset.id)).toEqual(["duckduckgo", "perplexity", "google"]));
+    expect(client.command).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /保存|Save/ }));
+    await waitFor(() => expect(client.command).toHaveBeenCalledWith("models.webSearch.set", expect.objectContaining({ order: ["duckduckgo", "perplexity", "google"] })));
+  });
+
   it("previews the effective chain: explicit order first, then the credential-ready auto chain", () => {
     mount();
     // Priority chip carries the rank.

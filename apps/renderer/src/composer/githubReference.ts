@@ -1,3 +1,4 @@
+import { referenceCodec } from "./referenceCodec";
 import type { GitHubReference } from "@omp-studio/client-contract";
 
 export interface GitHubReferenceSnapshot {
@@ -35,25 +36,7 @@ export function githubReferenceSnapshot(reference: GitHubReference): GitHubRefer
     ...(item.headOid ? { headOid: item.headOid } : {}), text: lines.join("\n\n") };
 }
 
-/** Length framing preserves arbitrary Markdown and nested-looking delimiters without duplicating source text. */
-export function serializeGithubReference(reference: GitHubReferenceSnapshot): string {
-  const { text, ...metadata } = reference;
-  return `<github-reference metadata=${JSON.stringify(metadata)} length=${text.length}>\n${text}\n</github-reference>`;
-}
-
-export function nextGithubReference(text: string, from: number): { start: number; end: number; reference: GitHubReferenceSnapshot } | null {
-  const pattern = /<github-reference metadata=(\{[^\n]*\}) length=(\d+)>\n/g;
-  pattern.lastIndex = from;
-  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
-    const bodyStart = pattern.lastIndex;
-    const bodyEnd = bodyStart + Number(match[2]);
-    const closing = "\n</github-reference>";
-    if (text.slice(bodyEnd, bodyEnd + closing.length) !== closing) continue;
-    try {
-      const metadata = JSON.parse(match[1]!) as Omit<GitHubReferenceSnapshot, "text">;
-      if (typeof metadata.key !== "string" || typeof metadata.title !== "string" || typeof metadata.url !== "string" || !["issue", "pr"].includes(metadata.kind)) continue;
-      return { start: match.index, end: bodyEnd + closing.length, reference: { ...metadata, text: text.slice(bodyStart, bodyEnd) } };
-    } catch { /* Ordinary pasted text is left untouched. */ }
-  }
-  return null;
-}
+export const { serialize: serializeGithubReference, next: nextGithubReference } = referenceCodec<GitHubReferenceSnapshot>(
+  "github-reference",
+  metadata => typeof metadata.key === "string" && typeof metadata.title === "string" && typeof metadata.url === "string" && ["issue", "pr"].includes(metadata.kind),
+);

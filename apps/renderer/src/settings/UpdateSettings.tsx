@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppSelect } from "../AppSelect";
 import { useI18n } from "../i18n";
-import { usePreviewMode } from "../preview/PreviewContext";
 import { PREVIEW_UPDATE_PREFS } from "../preview/settingsPreview";
 import { SettingRow, SettingSection } from "./SettingRow";
 import { useUpdates, type UpdatePrefs } from "./updates";
@@ -10,7 +9,6 @@ import type { RuntimeDemoApi, RuntimeSettingsCtl } from "./tabs";
 
 export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined; runtime?: RuntimeSettingsCtl | undefined }) {
   const { t, resolvedLanguage } = useI18n();
-  const { marks } = usePreviewMode();
   const preview = runtime?.preview === true || demo !== undefined;
   const updates = useUpdates();
   const [previewPrefs, setPreviewPrefs] = useState<UpdatePrefs>(PREVIEW_UPDATE_PREFS);

@@ -1,5 +1,5 @@
 import { lstat, mkdir, readdir, realpath, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 
 import type {
   WorkspaceFileMutationResult,

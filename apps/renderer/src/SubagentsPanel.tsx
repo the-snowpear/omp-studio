@@ -309,7 +309,6 @@ export function SubagentsPanel({
 
   const agents = data?.agents ?? [];
   const toolNames = data?.builtinToolNames ?? [];
-  const roleAliases = data?.roleAliases ?? [];
   const filtered = agents.filter((agent) => {
     const q = query.trim().toLowerCase();
     const matchesQuery = !q || agent.name.toLowerCase().includes(q) || agent.description.toLowerCase().includes(q);
@@ -322,12 +321,6 @@ export function SubagentsPanel({
     source,
     items: filtered.filter((agent) => agent.source === source),
   })).filter((group) => group.items.length > 0);
-
-  const modelSuggestions = useMemo(() => {
-    const fromRoles = (models?.roles ?? []).map((role) => role.alias);
-    const fromAvailable = (models?.availableModels ?? []).map((model) => model.selector);
-    return [...new Set([...roleAliases, ...fromRoles, ...fromAvailable])];
-  }, [models, roleAliases]);
 
   const otherAgentNames = agents.map((agent) => agent.name);
 

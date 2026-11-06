@@ -94,7 +94,6 @@ import { registerDesktopIpc } from "./ipc.js";
 import { screen } from "electron";
 import { registerFloatingWindows } from "./floating-windows.js";
 import {
-  RENDERER_CSP,
   createDevicePermissionHandler,
   createPermissionCheckHandler,
   createPermissionRequestHandler,
@@ -102,7 +101,6 @@ import {
   installCspHeaders,
   isTrustedRendererUrl,
   rendererOriginFor,
-  resolveRendererEntry,
   loadRendererTarget,
   rendererCspFor,
   rendererDevServerUrl,

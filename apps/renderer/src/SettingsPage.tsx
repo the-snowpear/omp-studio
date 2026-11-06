@@ -56,7 +56,7 @@ import { GUI_GROUPS, SETTINGS_CATALOG, SETTINGS_GROUPS, resolveSettingsGroup, ty
 import { GUI_SETTING_DEFINITIONS } from "@omp-studio/studio-protocol";
 import { MemoryCredentialPane } from "./settings/MemoryCredentialPane";
 
-import { takeSettingsIntent, type SettingsGroupId } from "./pageIntents";
+import { takeSettingsIntent } from "./pageIntents";
 export { SETTINGS_INTENT_KEY, setSettingsIntent, type SettingsGroupId } from "./pageIntents";
 
 type GroupId = ActiveSettingsGroup;

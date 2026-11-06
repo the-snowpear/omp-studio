@@ -7,7 +7,6 @@ import type {
   GitHubCheckRecord,
   GitHubChecksReadModel,
   GitHubExecuteInput,
-  GitHubOperation,
   GitHubOperationResult,
   GitHubPullRequestDetailReadModel,
   GitHubPullRequestListReadModel,

@@ -1,5 +1,4 @@
 import type {
-  EvaluationKind,
   EvaluationSpec,
   EvaluationRecord,
   EvaluationPlan,
@@ -7,7 +6,7 @@ import type {
   EvaluationContext,
 } from "@omp-studio/studio-protocol";
 import { PREVIEW_RATCHET } from "./ratchetPreview";
-import { PREVIEW_JUDGMENT_SPEC, PREVIEW_JUDGMENT_ITEMS } from "./judgmentsPreview";
+import { PREVIEW_JUDGMENT_SPEC } from "./judgmentsPreview";
 import { PREVIEW_BENCHMARK } from "./benchmarksPreview";
 
 export function previewEvaluationPlan(spec: EvaluationSpec): EvaluationPlan {

@@ -12,7 +12,6 @@ import {
   TITLEBAR_OVERLAY_CHANNEL,
   TITLEBAR_OVERLAY_HEIGHT,
   parseTitlebarThemePayload,
-  type TitlebarTheme,
   type TitlebarThemePayload,
 } from "./titlebar-overlay-shared.js";
 import { canRecolorTitleBarOverlay } from "./platform/window-chrome.js";

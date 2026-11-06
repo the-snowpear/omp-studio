@@ -9,7 +9,7 @@
 - 内容：`dock/DockContext.tsx`、`PanelRegistration.tsx`、`hosts.ts`；稳定 Portal target、首次显示挂载、隐藏 inert；展开的对话工具卡将宿主嵌入卡片，以原生滚动和裁剪，其余区域使用统一几何和裁剪。
 - 壳与手势：`dock/DockRegions.tsx`、`gestures.ts`；右栏上下最多两组、底栏左右最多两组、卡片／紧凑覆盖／多标签浮窗和胶囊。
 - 2026-10-30 交互修订：左栏改为全宽区段，全部折叠后标题收在底部；完整对话卡片悬在对话容器内部，不再构成独立侧栏。`DockDragPreview.tsx`／`dragPreview.ts` 只订阅拖动几何，借用现有内容宿主呈现真实目的地预览，松手才修改和保存布局。
-- 工具元数据：`panels/registry.ts`；业务入口由 `App.tsx` 的薄注册映射提供。BTW 已纳入统一停靠，旧独立窗口组件不再用于工作台。
+- 工具元数据：`panels/registry.ts`；业务入口由 `App.tsx` 的薄注册映射提供。BTW 已纳入统一停靠，旧独立窗口组件与 `btwGeometry` 已移除；下文相关路径仅作历史记录。
 - 有效布局仍由 `layout/workbenchLayout.ts` 和 `useWorkbenchLayout.ts` 计算；窄窗状态不修改持久偏好。
 - 菜单与设置：`dock/DockMenus.tsx`、`DockSettings.tsx`；现有快捷入口调用 open 动作定位当前位置。
 

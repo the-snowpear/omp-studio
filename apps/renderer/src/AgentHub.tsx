@@ -215,14 +215,6 @@ const TABS: ReadonlyArray<readonly [HubTab, string]> = [
   ["btw", "BTW"],
 ];
 
-const JOB_CHIP: Record<StudioJobSnapshot["status"], string> = {
-  queued: "gray",
-  running: "blue",
-  completed: "green",
-  failed: "red",
-  cancelled: "gray",
-};
-
 const CONTRACT = {
   chat: "发送（暂未实现）",
   revive: "Revive（暂未实现）",

@@ -1,4 +1,5 @@
 import { previewModelAdaptation } from "./preview/modelAdaptationPreview";
+import { dragList } from "./test/drag-list";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type {
@@ -103,6 +104,30 @@ function readModel(): ModelConfigReadModel {
     },
   };
 }
+
+it("reorders filtered provider cards while preserving hidden providers and keeping the order local", async () => {
+  window.localStorage.removeItem("omp.providerDisplayOrder");
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  const model = { ...readModel(), providers: [
+    { ...gateway(), id: "first", name: "Visible first" },
+    { ...gateway(), id: "hidden", name: "Hidden" },
+    { ...gateway(), id: "last", name: "Visible last" },
+  ] };
+  const client = fakeClient(PROBE_OK, model);
+  const { container } = render(<PreviewModeProvider switchEnabled><ModelConfigPage client={client} /></PreviewModeProvider>);
+  try {
+    await screen.findAllByRole("button", { name: "编辑供应商" });
+    fireEvent.change(container.querySelector(".mr-toolbar input")!, { target: { value: "Visible" } });
+    const rows = [...container.querySelectorAll<HTMLElement>(".pv-card")];
+    expect(rows.map(row => row.dataset.id)).toEqual(["first", "last"]);
+    dragList(rows, 0, 1, 10, ".pv-drag");
+    await waitFor(() => expect(JSON.parse(window.localStorage.getItem("omp.providerDisplayOrder")!)).toEqual(["last", "hidden", "first"]));
+    expect([...container.querySelectorAll<HTMLElement>(".pv-card")].map(row => row.dataset.id)).toEqual(["last", "first"]);
+    expect(client.command).not.toHaveBeenCalled();
+  } finally {
+    window.localStorage.removeItem("omp.providerDisplayOrder");
+  }
+});
 
 const PROBE_OK: ModelDiscoveryResult = {
   ok: true,

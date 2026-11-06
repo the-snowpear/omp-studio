@@ -1,8 +1,6 @@
 import { zipSync } from "fflate";
 import {
   BufferGeometry,
-  Float32BufferAttribute,
-  Group,
   Mesh,
   MeshStandardMaterial,
   Points,

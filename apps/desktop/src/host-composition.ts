@@ -111,7 +111,7 @@ import {
   type SessionPersistedAgentRecord,
 } from "@omp-studio/studio-host";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+
 import { join } from "node:path";
 import type {
   ApprovalMode,
@@ -477,7 +477,7 @@ interface FacadeContext {
   /** Last drop reason after a Runtime hello was observed. */
   readonly lastDisconnect: { current: HostRuntimeDisconnect | undefined };
   /** Single publication channel; Facade subscribe and session attach share it. */
-  readonly publications: DesktopPublicationForwarder;
+  readonly publications: IsolatedForwarder<RuntimePublication>;
   /** Authority-level resident projection and change fan-out. */
   readonly residents: IsolatedForwarder<DesktopResidentsChange>;
   /** Background terminal ledger outcomes; never publishes snapshots. */
@@ -504,38 +504,6 @@ interface FacadeContext {
    * an unverifiable installation.
    */
   readonly installerOptions?: HostBackendOptions["installer"];
-}
-
-/** Fan-out for the current Runtime bundle's publication stream. */
-export interface SessionPublicationForwarder {
-  subscribe(listener: (publication: RuntimePublication) => void): () => void;
-}
-
-/**
- * One publication channel for the composition lifetime. Facade subscribe,
- * session attach replay, reload replay and rebind all use this object.
- * Listener exceptions are isolated so a UI consumer cannot break Bridge
- * socket handling or sibling subscribers.
- */
-class DesktopPublicationForwarder implements SessionPublicationForwarder {
-  readonly #listeners = new Set<(publication: RuntimePublication) => void>();
-
-  subscribe(listener: (publication: RuntimePublication) => void): () => void {
-    this.#listeners.add(listener);
-    return () => {
-      this.#listeners.delete(listener);
-    };
-  }
-
-  publish(publication: RuntimePublication): void {
-    for (const listener of [...this.#listeners]) {
-      try {
-        listener(publication);
-      } catch {
-        // Isolate consumer failures from the Runtime publication path.
-      }
-    }
-  }
 }
 
 async function ensureInstalledRuntime(
@@ -1108,7 +1076,7 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
     ...root, sessionRef, startup, connectionChanges, interaction,
     selectedWorkspace: workspace, workspaceCwd: { current: workspace.current.cwd },
     lastUnavailable: { current: undefined }, lastDisconnect: { current: undefined },
-    publications: new DesktopPublicationForwarder(),
+    publications: new IsolatedForwarder<RuntimePublication>(),
     conversationEvents: new IsolatedForwarder<StudioConversationForward>(),
     conversationResync: new IsolatedForwarder<string>(),
     telemetryEvents: new IsolatedForwarder<StudioTelemetryForward>(),
@@ -1629,7 +1597,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
       const sessionRef: FacadeContext["sessionRef"] = { current: undefined };
       const connectionChanges = new IsolatedForwarder<void>();
       const startup = new DesktopRuntimeStartup(() => connectionChanges.publish(undefined));
-      const publications = new DesktopPublicationForwarder();
+      const publications = new IsolatedForwarder<RuntimePublication>();
       const residents = new IsolatedForwarder<DesktopResidentsChange>();
       const residentTerminalOutcomes = new IsolatedForwarder<ReadonlyArray<CommandLedgerEntry>>();
       const interaction = new DesktopInteractionHost(sessionRef);

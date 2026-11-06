@@ -4,11 +4,11 @@ import { AppSelect } from "../AppSelect";
 import { useEffect, useState } from "react";
 import type { AppSettings } from "./appSettings";
 import { DEFAULT_APP_SETTINGS } from "./appSettings";
-import { SettingRow, SettingSection, Switch, type SettingSource } from "./SettingRow";
-import { useUpdates, type UpdatePrefs } from "./updates";
-import { DesktopUpdateRecovery } from "./DesktopUpdateRecovery";
-import { PREVIEW_UPDATE_PREFS } from "../preview/settingsPreview";
-import { usePreviewMode } from "../preview/PreviewContext";
+import { SettingRow, Switch, type SettingSource } from "./SettingRow";
+
+
+
+
 import { useI18n } from "../i18n";
 import { useSettingsScope } from "./SettingsScope";
 import type {
