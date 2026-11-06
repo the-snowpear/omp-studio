@@ -3,9 +3,11 @@ import type { StudioClient, ModelMentionInfo } from "@omp-studio/client-contract
 import { invokeUpgrade } from "./runtimeUpgrade";
 import { useI18n } from "./i18n";
 import { PREVIEW_MODEL_MENTIONS } from "./preview/runtimeUpgradeFixtures";
+import { usePreviewMode } from "./preview/PreviewContext";
 /** Definitions authorized for delegation; these are not running-agent rows. */
 export function ModelDelegationList({ client, preview, sessionId }: { client: StudioClient | null; preview: boolean; sessionId?: string }) {
  const { t } = useI18n();
+ const { marks } = usePreviewMode();
  const [mentions, setMentions] = useState<readonly ModelMentionInfo[]>([]);
  useEffect(() => {
   let gone = false, refreshing = false, queued = false, connected = true, resyncing = false;
@@ -50,5 +52,5 @@ export function ModelDelegationList({ client, preview, sessionId }: { client: St
   return () => { gone = true; unsubscribe(); };
  }, [client, preview, sessionId]);
  if (!mentions.length) return null;
- return <section className="model-delegation-list" aria-label={t("runtimeUpgrade.delegation")}><span className="small muted">{t("runtimeUpgrade.delegation")}</span>{mentions.map(mention => <span className="chip gray" key={mention.agent} data-tip={mention.selector}>{mention.agent} · {mention.name}</span>)}{preview ? <span className="chip gray xs">{t("common.demo")}</span> : null}</section>;
+ return <section className="model-delegation-list" aria-label={t("runtimeUpgrade.delegation")}><span className="small muted">{t("runtimeUpgrade.delegation")}</span>{mentions.map(mention => <span className="chip gray" key={mention.agent} data-tip={mention.selector}>{mention.agent} · {mention.name}</span>)}{preview && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}</section>;
 }

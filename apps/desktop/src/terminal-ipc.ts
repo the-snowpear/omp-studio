@@ -40,6 +40,7 @@ export interface TerminalIpcOptions {
   readonly isTrustedSender: (sender: TerminalSender) => boolean;
   readonly manager: TerminalSessionManager;
   readonly remote?: RemoteTerminalManager;
+  readonly resolveWorkspaceCwd?: (workspaceId: string) => Promise<string>;
   readonly activeRemote?: () => string | null;
   readonly recordings?: TerminalRecordingManager;
 }
@@ -116,7 +117,8 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
       if (!options.remote || !size.workspaceId) throw new Error("SSH terminal requires a remote workspace");
       return options.remote.create(event.sender.id, size.targetId, size.workspaceId, size, listenersFor(event.sender));
     }
-    if (options.activeRemote?.()) throw new Error("SSH workspace cannot open a local terminal implicitly");
+    if (size.workspaceId && options.resolveWorkspaceCwd) return options.resolveWorkspaceCwd(size.workspaceId).then(cwd => options.manager.create(event.sender.id, size, listenersFor(event.sender), cwd));
+    if (!size.workspaceId && options.activeRemote?.()) throw new Error("SSH workspace cannot open a local terminal implicitly");
     return options.manager.create(event.sender.id, size, listenersFor(event.sender));
   });
 

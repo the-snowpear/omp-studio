@@ -301,6 +301,30 @@ describe("registerTerminalIpc", () => {
     handle.dispose();
   });
 
+  test("natural exits free running slots while their tails remain wired", () => {
+    const { invoke, ptys, handle, timers } = register();
+    const sender = makeSender(3);
+    const foreign = makeSender(4);
+    const sessions = Array.from({ length: TERMINAL_MAX_SESSIONS }, () =>
+      invoke(TERMINAL_IPC_CHANNELS.create, sender, {}) as { id: string },
+    );
+    ptys[0]?.emitExit();
+    const replacement = invoke(TERMINAL_IPC_CHANNELS.create, sender, {}) as { id: string };
+    assert.ok(replacement.id);
+    assert.throws(() => invoke(TERMINAL_IPC_CHANNELS.create, sender, {}), /at most/);
+    invoke(TERMINAL_IPC_CHANNELS.write, foreign, { id: sessions[1]!.id, data: "foreign" });
+    invoke(TERMINAL_IPC_CHANNELS.dispose, foreign, { id: sessions[1]!.id });
+    assert.deepEqual(ptys[1]?.writes, []);
+    assert.equal(ptys[1]?.killed, false);
+    ptys[0]?.emitData("late tail");
+    timers.run();
+    assert.deepEqual(sender.sent.at(-1), {
+      channel: TERMINAL_IPC_CHANNELS.data,
+      payload: { id: sessions[0]!.id, data: "late tail", bytes: 9 },
+    });
+    handle.dispose();
+  });
+
   test("dispose removes inbound handlers", () => {
     const { ipc, handle } = register();
     handle.dispose();

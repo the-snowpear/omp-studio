@@ -1,0 +1,99 @@
+.context-card {
+  --context-free: var(--surface-active);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  container-type: inline-size;
+  padding: 9px 14px 1px;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+}
+.dock-panel-content[data-dock-auto-height][data-panel="context"] > .context-card { height: 100%; }
+.context-card-summary, .context-card-meter-wrap, .context-card-footer { flex-shrink: 0; }
+.context-card-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.context-card-used { display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+.context-card-used > strong { color: var(--text); font-size: var(--fs-22); font-weight: var(--fw-medium); line-height: 1.2; font-variant-numeric: tabular-nums; letter-spacing: -0.7px; }
+.context-card-used > strong > span { margin-left: 1px; font-size: 15px; letter-spacing: 0; }
+.context-card-used > span { font-size: var(--fs-11); color: var(--text-3); }
+.context-card-used[data-tone="warning"] > strong { color: var(--amber); }
+.context-card-used[data-tone="danger"] > strong { color: var(--red); }
+.context-card-capacity { display: inline-flex; align-items: baseline; gap: 5px; color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-11); white-space: nowrap; }
+.context-card-capacity b { font-weight: var(--fw-medium); color: var(--text-2); }
+.context-card-meter-wrap { position: relative; height: 4px; margin: 9px 0 10px; }
+.context-card-meter { display: flex; height: 4px; overflow: hidden; border-radius: var(--r-full); background: var(--context-free); }
+.context-card-threshold-marker { position: absolute; top: -3px; width: 2px; height: 10px; border-radius: 1px; background: var(--text-3); box-shadow: 0 0 0 2px var(--bg); transform: translateX(-1px); }
+.context-card-meter > i { flex: 0 0 auto; height: 100%; }
+.context-card-rows { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: thin; }
+.context-card-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) 48px 45px; align-items: center; gap: 8px; min-height: 25px; font-size: var(--fs-12); }
+.context-card-dot { width: 8px; height: 8px; border-radius: 2px; justify-self: center; }
+.context-card-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-card-tokens, .context-card-percent { text-align: right; font-family: var(--font-mono); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.context-card-tokens { color: var(--text-3); }
+.context-card-percent { color: var(--text-2); }
+.context-card-row.is-free { margin-top: 4px; padding-top: 5px; border-top: 1px solid var(--border); color: var(--text-3); }
+.context-card-row.is-free .context-card-percent { color: var(--text-3); }
+.context-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 31px; margin-top: 2px; font-size: var(--fs-11); }
+.context-card-source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
+.context-card-actions { display: flex; align-items: center; flex-shrink: 0; gap: 8px; }
+.context-card-footer button { display: inline-flex; align-items: center; gap: 2px; padding: 4px 0 4px 6px; border: 0; border-radius: var(--r-4); background: none; color: var(--text-2); font: inherit; font-size: var(--fs-11); white-space: nowrap; cursor: pointer; }
+.context-card-footer button:hover:not(:disabled) { color: var(--text); }
+.context-card-footer .context-card-compact { box-sizing: border-box; height: 24px; gap: 4px; padding: 0 7px; background: var(--surface-hover); box-shadow: inset 0 0 0 1px var(--border); }
+.context-card-footer .context-card-compact:hover:not(:disabled) { background: var(--surface-active); }
+.context-card-footer button:disabled { opacity: 0.5; cursor: default; }
+.context-card-footer button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.context-card-footer button .icon { width: 12px; height: 12px; }
+.context-card-empty { padding-top: 14px; padding-bottom: 14px; font-size: var(--fs-12); color: var(--text-3); }
+.context-card-empty p { margin: 6px 0 0; font-size: var(--fs-11); }
+.dock-panel-content[data-panel="context"][data-dock-region="rail"] { border-radius: 0 0 calc(var(--r-10) - 1px) calc(var(--r-10) - 1px); }
+
+.context-threshold { display: flex; align-items: center; gap: 6px; min-width: 0; height: 24px; }
+.context-threshold-title, .context-threshold input { font: inherit; line-height: 1.4; }
+.context-threshold-title { display: block; color: var(--text-3); cursor: text; flex-shrink: 0; }
+.context-threshold-control { display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: max-content; min-width: 0; max-width: 100%; height: 24px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--r-4); background: var(--surface-hover); cursor: text; transition: background 140ms, border-color 140ms, box-shadow 140ms; }
+.context-threshold-control:hover { background: var(--surface-active); }
+.context-threshold.is-open .context-threshold-control { border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 2px var(--accent-softer); }
+/* 隐藏的等字体文本撑开网格，输入框覆盖网格并在超长时自行滚动。 */
+.context-threshold-input-wrap { display: inline-grid; grid-template-columns: minmax(0, max-content); align-items: center; min-width: 1ch; max-width: 10ch; overflow: hidden; }
+.context-threshold input, .context-threshold-measure { grid-area: 1 / 1; font: inherit; line-height: 1.4; font-variant-numeric: tabular-nums; }
+.context-threshold input { appearance: none; display: block; box-sizing: border-box; width: 0; min-width: 100%; max-width: 100%; margin: 0; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text-2); }
+.context-threshold-measure { visibility: hidden; overflow: hidden; white-space: pre; }
+.context-threshold input::placeholder { color: var(--text-3); font: inherit; }
+.context-threshold.is-custom input { color: var(--accent); }
+.context-threshold input[aria-invalid="true"] { color: var(--red); }
+.context-threshold .context-threshold-edit { flex: 0 0 11px; width: 11px; height: 11px; color: var(--text-3); }
+.context-threshold .context-threshold-edit.is-saved { color: var(--green); }
+.context-threshold-pop { position: fixed; z-index: 10000; box-sizing: border-box; max-height: calc(100vh - 24px); overflow-y: auto; padding: 14px; border: 1px solid var(--border); border-radius: var(--r-10); background: var(--bg-elevated, var(--bg)); color: var(--text-2); box-shadow: 0 8px 32px #0002; font-family: var(--font-ui); font-size: var(--fs-11); animation: context-threshold-in 120ms ease-out; }
+.context-threshold-pop header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: var(--fw-medium); color: var(--text); }
+.context-threshold-scope { padding: 2px 5px; border-radius: var(--r-4); background: var(--surface-hover); color: var(--text-3); font-size: var(--fs-10); font-weight: normal; }
+.context-threshold-description { margin: 8px 0 12px; color: var(--text-3); line-height: 1.6; }
+.context-threshold-result { display: flex; align-items: center; gap: 6px; line-height: 1.6; color: var(--text); }
+.context-threshold-result .icon { flex-shrink: 0; }
+.context-threshold-result.is-error { color: var(--red); }
+.context-threshold-effective { margin: 6px 0 0; color: var(--text-3); line-height: 1.5; }
+.context-threshold-effective b { color: var(--text-2); font-family: var(--font-mono); font-weight: var(--fw-medium); }
+.context-threshold-examples { display: flex; align-items: center; gap: 6px; margin: 12px 0; color: var(--text-3); }
+.context-threshold-pop button { border: 0; font: inherit; border-radius: var(--r-4); cursor: pointer; }
+.context-threshold-examples button { padding: 3px 7px; background: var(--surface-hover); color: var(--text-2); font-family: var(--font-mono); }
+.context-threshold-examples button:hover:not(:disabled) { background: var(--surface-active); color: var(--text); }
+.context-threshold-pop footer { display: flex; align-items: center; justify-content: space-between; padding-top: 10px; border-top: 1px solid var(--border); }
+.context-threshold-reset { padding: 5px 0; background: none; color: var(--text-3); }
+.context-threshold-reset:hover:not(:disabled) { color: var(--text); }
+.context-threshold-apply { display: flex; align-items: center; gap: 12px; padding: 5px 9px; background: var(--text); color: var(--bg); }
+.context-threshold-apply kbd { opacity: .6; font: inherit; }
+.context-threshold-pop button:disabled { cursor: default; opacity: .4; }
+.context-threshold-pop button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@keyframes context-threshold-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .context-threshold-pop { animation: none; } .context-threshold-control { transition: none; } }
+@container (max-width: 260px) {
+  .context-card-actions { gap: 4px; }
+  .context-card-details .context-card-details-text { display: none; }
+  .context-card-footer .context-card-details { width: 24px; height: 24px; justify-content: center; padding: 0; }
+}
+@container (max-width: 185px) {
+  .context-card-footer { gap: 4px; }
+  .context-threshold { gap: 4px; }
+  .context-threshold-control { gap: 3px; padding: 0 4px; }
+}

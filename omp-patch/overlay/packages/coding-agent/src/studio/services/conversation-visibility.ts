@@ -4,7 +4,18 @@ import type { ConversationRole } from "../conversation-protocol";
  * Roles the operator conversation surface may show. Runtime harness traffic
  * uses `developer` / `custom` / etc. and must not be mapped onto `system`.
  */
-export function publicConversationRole(role: unknown): ConversationRole | undefined {
+export function isComputerContinueMessage(value: unknown): boolean {
+	if (!value || typeof value !== "object") return false;
+	const message = value as { role?: unknown; customType?: unknown; attribution?: unknown; display?: unknown };
+	return (
+		message.role === "custom" &&
+		message.customType === "studio-computer-continue" &&
+		message.attribution === "user" &&
+		message.display === true
+	);
+}
+export function publicConversationRole(role: unknown, message?: unknown): ConversationRole | undefined {
+	if (isComputerContinueMessage(message)) return "user";
 	if (role === "user" || role === "assistant" || role === "system") return role;
 	return undefined;
 }

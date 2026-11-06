@@ -18,6 +18,7 @@ import type { DesktopHostComposition } from "../types.js";
 import { remotePlatform, secureRemoteDirectory } from "./platform.js";
 import { RemoteNetworkProxy } from "./network-proxy.js";
 import { applyRemoteProvisioning, type RemoteProvisioning } from "./provisioning.js";
+import { TransientMemoryCredentials, type MemoryCredentialEntry } from "../memory-credentials.js";
 
 export interface RemoteHostOptions {
   readonly stateDirectory: string;
@@ -28,6 +29,7 @@ export interface RemoteHostOptions {
 export interface RemoteHost {
   readonly network?: RemoteNetworkProxy;
   provision?(input: RemoteProvisioning): Promise<void>;
+  replaceMemoryCredentials?(entries: MemoryCredentialEntry[]): void;
   readonly composition: DesktopHostComposition;
   workspacePath(workspaceId: string): string;
   registerWorkspace(path: string): Promise<WorkspaceListReadModel>;
@@ -47,7 +49,8 @@ export async function createRemoteHost(options: RemoteHostOptions): Promise<Remo
   const registry = new WorkspaceRegistry(join(stateDirectory, "workspaces.json"));
   await registry.load();
   const log = createHostFileLog({ directory: join(stateDirectory, "logs") });
-  const runtimes = createDesktopRuntimeSessionPort({ log });
+  const memoryCredentials = new TransientMemoryCredentials();
+  const runtimes = createDesktopRuntimeSessionPort({ log, memoryCredentials });
   const runner = new HostProcessRunner();
   const queue = new GitWriteQueue();
   const pickDirectory = async (): Promise<undefined> => { throw new Error("Choose a remote directory with workspace.register"); };
@@ -85,6 +88,7 @@ export async function createRemoteHost(options: RemoteHostOptions): Promise<Remo
       managedInstall: { installDirectory: resolve(options.runtimeDirectory), trustedKeysDirectory: resolve(options.trustedKeysDirectory), environmentTrustedKeys: false, locateArtifact: async () => undefined },
       resolver: { probe: createProcessProbe() },
       runtimeSession: runtimes,
+      deferredRuntime: true,
       facade: {
         hostLog: log,
         workspaces,
@@ -105,6 +109,7 @@ export async function createRemoteHost(options: RemoteHostOptions): Promise<Remo
     return {
       network,
       provision: input => applyRemoteProvisioning(stateDirectory, network.brokerUrl, input),
+      replaceMemoryCredentials: entries => memoryCredentials.replace(entries),
       composition: host,
       workspacePath(workspaceId) {
         const stored = registry.get(workspaceId);

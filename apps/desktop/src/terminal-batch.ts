@@ -23,7 +23,7 @@
  *   resumes below `TERMINAL_FLOW_LOW_BYTES` (100 KiB) — the watermarks from
  *   xterm's flow-control guide. Without the negotiation (old renderer, no ACK
  *   method) the batcher degrades to batching only and never pauses.
- * - **No idle work.** A timer exists only while data is buffered.
+ * - **No idle work.** A timer exists only for buffered data or an exit tail window.
  *
  * Not here: the input path (`terminal write`). Keystrokes stay unbuffered and
  * unthrottled.
@@ -66,6 +66,8 @@ export interface TerminalBatchSink {
   pauseSource?(id: string, paused: boolean): void;
   /** Diagnostic hook: the hard cap forced a flush before the window closed. */
   capReached?(id: string, bufferedBytes: number): void;
+  /** Release the owner's session after its final output and timers are drained. */
+  release?(id: string): void;
 }
 
 export interface TerminalOutputBatcherOptions {
@@ -94,6 +96,8 @@ interface SessionState {
   readonly flowControl: boolean;
   paused: boolean;
   timer: unknown;
+  finishing: boolean;
+  finishTimer: unknown;
 }
 
 export class TerminalOutputBatcher {
@@ -137,6 +141,8 @@ export class TerminalOutputBatcher {
       flowControl: options.flowControl === true,
       paused: false,
       timer: undefined,
+      finishing: false,
+      finishTimer: undefined,
     });
   }
 
@@ -157,7 +163,7 @@ export class TerminalOutputBatcher {
       this.#flush(session, false);
       return;
     }
-    if (session.timer === undefined) {
+    if (!session.finishing && session.timer === undefined) {
       session.timer = this.#timers.setTimeout(() => {
         session.timer = undefined;
         this.#flush(session, false);
@@ -191,24 +197,37 @@ export class TerminalOutputBatcher {
     for (const session of [...this.#sessions.values()]) this.#flush(session, false);
   }
 
+  /** Flush before exit, then retain one window for a platform's late output. */
+  finish(id: string): void {
+    const session = this.#sessions.get(id);
+    if (session === undefined || session.finishing) return;
+    session.finishing = true;
+    session.finishTimer = this.#timers.setTimeout(() => {
+      session.finishTimer = undefined;
+      this.close(id);
+    }, this.#batchMs);
+    this.#flush(session, false);
+  }
+
   /**
    * Deliver the tail (`decoder.end()` flushes a dangling partial code point as
-   * a replacement character), release the session and stop its timer. Called
-   * on terminal exit, dispose and window teardown.
+   * a replacement character), then release the owner. Forced closure also
+   * cancels any natural-exit tail window, so both paths release only once.
    */
   close(id: string): void {
     const session = this.#sessions.get(id);
     if (session === undefined) return;
-    this.#flush(session, true);
     this.#sessions.delete(id);
-    if (session.timer !== undefined) {
-      this.#timers.clearTimeout(session.timer);
-      session.timer = undefined;
+    if (session.finishTimer !== undefined) {
+      this.#timers.clearTimeout(session.finishTimer);
+      session.finishTimer = undefined;
     }
+    this.#flush(session, true);
     if (session.paused) {
       session.paused = false;
       this.#sink.pauseSource?.(id, false);
     }
+    this.#sink.release?.(id);
   }
 
   /** Release every session (window teardown / app quit). */
@@ -240,7 +259,7 @@ export class TerminalOutputBatcher {
       }
       return;
     }
-    const bytes = session.bufferedBytes === 1 ? session.chunks[0]! : Buffer.concat(session.chunks, session.bufferedBytes);
+    const bytes = session.chunks.length === 1 ? session.chunks[0]! : Buffer.concat(session.chunks, session.bufferedBytes);
     session.chunks = [];
     session.bufferedBytes = 0;
     const text = final ? session.decoder.write(bytes) + session.decoder.end() : session.decoder.write(bytes);

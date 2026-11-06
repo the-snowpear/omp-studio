@@ -12,7 +12,7 @@ import type { StudioClient, WorkspaceId } from "@omp-studio/client-contract";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SessionHistoryEntry, SessionHistoryReadModel, SessionHistoryStatus } from "@omp-studio/client-contract";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import { ToastHost } from "./ToastHost";
 import type { PageRoute } from "./HomePage";
 import { usePreviewMode } from "./preview/PreviewContext";
@@ -74,9 +74,9 @@ function hostHistoryTitle(entry: SessionHistoryEntry, untitledTitle: string): st
   return title && title.length > 0 ? title : untitledTitle;
 }
 
-function useNotice(): [notice: { text: string; icon: string } | null, show: (text: string, icon?: string) => void, dismiss: () => void] {
-  const [notice, setNotice] = useState<{ text: string; icon: string } | null>(null);
-  return [notice, (text, icon = "info") => setNotice({ text, icon }), () => setNotice(null)];
+function useNotice(): [notice: { text: string; icon: IconName } | null, show: (text: string, icon?: IconName) => void, dismiss: () => void] {
+  const [notice, setNotice] = useState<{ text: string; icon: IconName } | null>(null);
+  return [notice, (text, icon: IconName = "info") => setNotice({ text, icon }), () => setNotice(null)];
 }
 
 function HistEmpty({ text }: { text: string }) {
@@ -175,6 +175,7 @@ function DeleteSessionDialog({
   onCancel: () => void;
 }) {
   const { t } = useI18n();
+  const { marks } = usePreviewMode();
   const [deleteManagedArtifacts, setDeleteManagedArtifacts] = useState(false);
   useEffect(() => {
     if (busy) return;
@@ -205,7 +206,7 @@ function DeleteSessionDialog({
         </div>
         <div className="create-project-body">
           <p className="create-branch-hint">
-            {preview ? t("history.deleteConfirmDemo") : t("history.deleteConfirmReal")}
+            {preview && marks ? t("history.deleteConfirmDemo") : t("history.deleteConfirmReal")}
           </p>
           <label className="small"><input type="checkbox" disabled={busy} checked={deleteManagedArtifacts} onChange={event => setDeleteManagedArtifacts(event.target.checked)} /> {t("history.deleteManagedArtifacts")}</label>
           <p className="small muted">{t("history.retainManagedArtifacts")}</p>
@@ -389,7 +390,7 @@ export function HistoryPage({
   /** 真实模式「删除会话」；预览模式下为 undefined（走演示确认 + toast）。 */
   onDeleteSession?: (entry: SessionHistoryEntry, deleteManagedArtifacts?: boolean) => Promise<boolean> | boolean;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [workspaceTab,setWorkspaceTab] = useState<"catalog"|"archive"|"transfer">("catalog");
@@ -426,7 +427,7 @@ export function HistoryPage({
   const confirmDelete = useCallback((deleteManagedArtifacts: boolean) => {
     if (deleteFor === null || deleting) return;
     if (preview || deleteFor.entry === undefined || onDeleteSession === undefined) {
-      show(t("history.demoDeleteToast", { title: deleteFor.title }), "trash");
+      if (marks || !preview) show(t("history.demoDeleteToast", { title: deleteFor.title }), "trash");
       setDeleteFor(null);
       return;
     }
@@ -444,7 +445,7 @@ export function HistoryPage({
         setDeleteError(error instanceof Error && error.message.length > 0 ? error.message : String(error));
         setDeleting(false);
       });
-  }, [deleteFor, deleting, preview, onDeleteSession, show, t]);
+  }, [deleteFor, deleting, marks, preview, onDeleteSession, show, t]);
 
   const previewRows = useMemo(
     () => PREVIEW_HISTORY
@@ -497,10 +498,10 @@ export function HistoryPage({
           {preview
             ? (
               <>
-                <button type="button" className="btn outline" onClick={() => show(t("history.demoExportToast"), "export")}>
+                <button type="button" className="btn outline" onClick={() => { if (marks) show(t("history.demoExportToast"), "export"); }}>
                   <Icon name="export" extra="sm" />{t("history.export")}
                 </button>
-                <span className="chip gray xs">{t("common.demo")}</span>
+                {marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}
               </>
             )
             : (
@@ -518,18 +519,18 @@ export function HistoryPage({
                 onOpen={() => onRoute("workbench")}
                 onAct={(kind) => {
                   if (kind === "resume") {
-                    show(t("history.demoResumeToast", { title: row.title }), "refresh");
+                    if (marks) show(t("history.demoResumeToast", { title: row.title }), "refresh");
                     onRoute("workbench");
                     return;
                   }
                   if (kind === "unarchive") {
-                    show(t("history.demoUnarchiveToast", { title: row.title }), "archive");
+                    if (marks) show(t("history.demoUnarchiveToast", { title: row.title }), "archive");
                     return;
                   }
                   if (kind === "more") {
                     return;
                   }
-                  show(t("history.demoForkToast", { title: row.title }), "fork");
+                  if (marks) show(t("history.demoForkToast", { title: row.title }), "fork");
                 }}
                 onConsult={() => setConsult({ source: row.id, title: row.title })}
                 onMore={(event) => openMenu(row.id, event)}
@@ -555,7 +556,7 @@ export function HistoryPage({
         <h2 className="tt-heading" id="ttHeading">Time Travel</h2>
         <p className="muted small tt-desc">{t("history.timeTravelDesc")}</p>
         {preview ? (
-          <TimeTravelRail onRestore={(kind) => show(t("history.demoRestoreToast", { desc: t(TT_RESTORE[kind]) }), "history")} />
+          <TimeTravelRail onRestore={(kind) => { if (marks) show(t("history.demoRestoreToast", { desc: t(TT_RESTORE[kind]) }), "history"); }} />
         ) : (
           <div className="empty">
             <Icon name="history" />

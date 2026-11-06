@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import type { ClientTransport, ClientContextScope } from "@omp-studio/client-contract";
 import { parseClientCommandRequest, parseClientQueryRequest } from "@omp-studio/transport-desktop";
 import { REMOTE_CHANNELS, type RemoteConnectionProfile, type RemoteCredentials } from "./shared.js";
 import type { RemoteConnectionManager } from "./manager.js";
@@ -9,6 +11,14 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
   const { ipc, manager } = options;
   let disposed = false;
   const senders = new Set<Sender>();
+  const contexts = new Map<string, { id: string; generation: number; transport: ClientTransport; off: () => void }>();
+  const target = (id: string, contextId?: unknown) => {
+    const remote = manager.get(id);
+    if (contextId === undefined) return remote.transport;
+    const entry = contexts.get(String(contextId));
+    if (!entry || entry.id !== id || entry.generation !== remote.generation) throw new Error("Conversation context needs reconnection");
+    return entry.transport;
+  };
   const connecting = new Map<string, { controller: AbortController; clearCredentials(): void }>();
   const handle = (channel: string, action: (...args: unknown[]) => unknown): void => {
     ipc.handle(channel, (event, ...args) => {
@@ -30,6 +40,8 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
     for (const attempt of connecting.values()) { attempt.controller.abort(); attempt.clearCredentials(); }
     connecting.clear();
     senders.clear();
+    for (const entry of contexts.values()) { entry.off(); await entry.transport.close().catch(() => {}); }
+    contexts.clear();
     await manager.cancelPending();
   };
   handle(REMOTE_CHANNELS.list, () => manager.list());
@@ -69,12 +81,24 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
     return manager.disconnect(target);
   });
   handle(REMOTE_CHANNELS.select, id => manager.select(id === null ? null : idOf(id)));
-  handle(REMOTE_CHANNELS.bootstrap, id => read(id, remote => remote.transport.bootstrap()));
-  handle(REMOTE_CHANNELS.query, (id: unknown, request: unknown) => read(id, remote => remote.transport.query(parseClientQueryRequest(request))));
-  handle(REMOTE_CHANNELS.command, async (id: unknown, request: unknown) => {
-    const target = idOf(id);
-    manager.assertWritable(target);
-    const transport = manager.get(target).transport;
+  handle(REMOTE_CHANNELS.openContext, async (id, scope) => {
+    const name = idOf(id), remote = manager.get(name), generation = remote.generation;
+    const transport = await remote.transport.openContext(scope as ClientContextScope);
+    if (disposed || manager.get(name) !== remote || remote.generation !== generation) { await transport.close(); throw new Error("SSH connection changed while opening the conversation"); }
+    const contextId = randomUUID();
+    const off = transport.subscribe({ scope: "all" }, event => emit(REMOTE_CHANNELS.event, { id: name, generation, contextId, event }));
+    contexts.set(contextId, { id: name, generation, transport, off }); return contextId;
+  });
+  handle(REMOTE_CHANNELS.closeContext, async (id, contextId) => {
+    const entry = contexts.get(String(contextId)); if (!entry || entry.id !== idOf(id)) return;
+    contexts.delete(String(contextId)); entry.off(); await entry.transport.close();
+  });
+  handle(REMOTE_CHANNELS.bootstrap, (id, contextId) => read(id, () => target(idOf(id), contextId).bootstrap()));
+  handle(REMOTE_CHANNELS.query, (id: unknown, request: unknown, contextId: unknown) => read(id, () => target(idOf(id), contextId).query(parseClientQueryRequest(request))));
+  handle(REMOTE_CHANNELS.command, async (id: unknown, request: unknown, contextId: unknown) => {
+    const name = idOf(id);
+    manager.assertWritable(name);
+    const transport = target(name, contextId);
     const command = parseClientCommandRequest(request);
     try { return { ok: true, accepted: await transport.command(command) }; }
     catch (error) { return { ok: false, error: { code: error instanceof RemoteOperationError ? "UNAVAILABLE" : "OUTCOME_UNKNOWN", message: error instanceof Error ? error.message : "命令结果未知；未自动重发，请重新连接核对" } }; }

@@ -14,10 +14,13 @@ import { useCallback, useSyncExternalStore } from "react";
 export type AppLanguage = "system" | "zh" | "en";
 export type AppTheme = "light" | "dark";
 export type InfoDensity = "compact" | "standard" | "cozy";
+export type AgentRosterDensity = "standard" | "minimal";
 export type ToolActivityDetail = "full" | "concise" | "hidden";
 export type StartupPage = "home" | "workbench" | "last";
 export type StreamingCadenceHz = 30 | 60 | 90 | 120;
 export type ConversationWidthMode = "standard" | "wide" | "full" | "custom";
+/** Explorer 文件图标着色：`cat` 按类型着色，`tri` 全灰阶只留敏感文件警示。 */
+export type FileTypePalette = "cat" | "tri";
 
 export const CONVERSATION_WIDTH_MODES: readonly ConversationWidthMode[] = ["standard", "wide", "full", "custom"];
 export const CONVERSATION_WIDTH_LIMITS = { min: 640, max: 1440, step: 32 } as const;
@@ -27,6 +30,9 @@ export interface AppSettings {
   readonly language: AppLanguage;
   readonly theme: AppTheme;
   readonly density: InfoDensity;
+  readonly agentRosterDensity: AgentRosterDensity;
+  /** 文件图标着色；`tri` 走三通道灰阶，写 `data-palette="tri"`。 */
+  readonly fileTypePalette: FileTypePalette;
   readonly conversationWidthMode: ConversationWidthMode;
   /** 自定义阅读列最大宽度；切换预设时保留。 */
   readonly conversationCustomWidth: number;
@@ -50,6 +56,8 @@ export interface AppSettings {
   readonly notifyErrors: boolean;
   readonly notifyConfirmations: boolean;
   readonly notifyLongTasks: boolean;
+  readonly dictationDeviceId: string;
+  readonly dictationToggleShortcut: string;
   readonly showThinkingSummary: boolean;
   readonly showToolIntent: boolean;
   /** 预留：对话内 Token 用量视图尚未实现，控件显示「尚未接入」。 */
@@ -62,6 +70,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   language: "system",
   theme: "light",
   density: "standard",
+  agentRosterDensity: "standard",
+  fileTypePalette: "cat",
   conversationWidthMode: "standard",
   conversationCustomWidth: 1024,
   uiFontFamily: "",
@@ -82,6 +92,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   notifyErrors: true,
   notifyConfirmations: true,
   notifyLongTasks: false,
+  dictationDeviceId: "",
+  dictationToggleShortcut: "",
   showThinkingSummary: true,
   showToolIntent: true,
   showTokenUsage: false,
@@ -92,6 +104,7 @@ const APP_SETTINGS_STORAGE_KEY = "omp.appSettings";
 const LANGUAGES: ReadonlyArray<AppLanguage> = ["system", "zh", "en"];
 const THEMES: ReadonlyArray<AppTheme> = ["light", "dark"];
 const DENSITIES: ReadonlyArray<InfoDensity> = ["compact", "standard", "cozy"];
+const FILE_TYPE_PALETTES: ReadonlyArray<FileTypePalette> = ["cat", "tri"];
 const TOOL_ACTIVITY: ReadonlyArray<ToolActivityDetail> = ["full", "concise", "hidden"];
 const STARTUP_PAGES: ReadonlyArray<StartupPage> = ["home", "workbench", "last"];
 const STREAMING_CADENCE_HZ: ReadonlyArray<StreamingCadenceHz> = [30, 60, 90, 120];
@@ -127,6 +140,8 @@ function parseStoredSettings(raw: string | null): AppSettings {
       language: pick(value.language, LANGUAGES) ?? DEFAULT_APP_SETTINGS.language,
       theme: pick(value.theme, THEMES) ?? DEFAULT_APP_SETTINGS.theme,
       density: pick(value.density, DENSITIES) ?? DEFAULT_APP_SETTINGS.density,
+      agentRosterDensity: pick(value.agentRosterDensity, ["standard", "minimal"] as const) ?? DEFAULT_APP_SETTINGS.agentRosterDensity,
+      fileTypePalette: pick(value.fileTypePalette, FILE_TYPE_PALETTES) ?? DEFAULT_APP_SETTINGS.fileTypePalette,
       conversationWidthMode: pick(value.conversationWidthMode, CONVERSATION_WIDTH_MODES) ?? DEFAULT_APP_SETTINGS.conversationWidthMode,
       conversationCustomWidth: normalizeConversationCustomWidth(value.conversationCustomWidth),
       uiFontFamily: typeof value.uiFontFamily === "string" ? value.uiFontFamily : "",
@@ -147,6 +162,8 @@ function parseStoredSettings(raw: string | null): AppSettings {
       notifyErrors: pickBoolean(value.notifyErrors) ?? DEFAULT_APP_SETTINGS.notifyErrors,
       notifyConfirmations: pickBoolean(value.notifyConfirmations) ?? DEFAULT_APP_SETTINGS.notifyConfirmations,
       notifyLongTasks: pickBoolean(value.notifyLongTasks) ?? DEFAULT_APP_SETTINGS.notifyLongTasks,
+      dictationDeviceId: typeof value.dictationDeviceId === "string" ? value.dictationDeviceId : "",
+      dictationToggleShortcut: typeof value.dictationToggleShortcut === "string" ? value.dictationToggleShortcut : "",
       showThinkingSummary: pickBoolean(value.showThinkingSummary) ?? DEFAULT_APP_SETTINGS.showThinkingSummary,
       showToolIntent: pickBoolean(value.showToolIntent) ?? DEFAULT_APP_SETTINGS.showToolIntent,
       showTokenUsage: pickBoolean(value.showTokenUsage) ?? DEFAULT_APP_SETTINGS.showTokenUsage,

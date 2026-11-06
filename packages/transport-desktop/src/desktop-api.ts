@@ -16,6 +16,7 @@
 
 import type {
   ClientBootstrap,
+  ClientContextScope,
   ClientCommandAccepted,
   ClientCommandRequest,
   ClientEvent,
@@ -29,12 +30,13 @@ import type {
 
 /** Desktop shell surface consumed by the renderer-side transport adapter. */
 export interface OmpStudioDesktopApi {
-  bootstrap(): Promise<ClientBootstrap>;
+  openContext?(scope: ClientContextScope): Promise<string>;
+  bootstrap(contextId?: string): Promise<ClientBootstrap>;
   query<TName extends QueryName>(
-    request: ClientQueryRequest<TName>,
+    request: ClientQueryRequest<TName>, contextId?: string,
   ): Promise<ClientQueryResponse<TName>>;
   command<TName extends CommandName>(
-    request: ClientCommandRequest<TName>,
+    request: ClientCommandRequest<TName>, contextId?: string,
   ): Promise<ClientCommandAccepted<TName>>;
   /**
    * Register one subscription. The returned `Unsubscribe` must cancel exactly
@@ -43,6 +45,6 @@ export interface OmpStudioDesktopApi {
    * to release subscriptions one at a time, and Main tears the rest down on
    * window destroy / navigation.
    */
-  subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe;
-  close(): Promise<void>;
+  subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void, contextId?: string): Unsubscribe;
+  close(contextId?: string): Promise<void>;
 }

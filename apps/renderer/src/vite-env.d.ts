@@ -56,7 +56,10 @@ declare global {
   type StudioArtifactFileResult = { ok: true; cancelled: boolean; artifact?: import("@omp-studio/studio-protocol").ArtifactRecord; storage?: import("@omp-studio/studio-protocol").ArtifactStorageState } | { ok: false; message: string };
 
   var ompStudioChrome:
-    | {
+    | (Partial<import("../../desktop/src/dictation-audio-shared").DictationAudioApi> & {
+        prepareFloatWindow?(input: import("../../desktop/src/floating-windows-shared").FloatWindowPrepare): Promise<import("../../desktop/src/floating-windows-shared").FloatWindowTicket>;
+        controlFloatWindow?(input: import("../../desktop/src/floating-windows-shared").FloatWindowControl): Promise<void>;
+        onFloatWindow?(listener: (event: import("../../desktop/src/floating-windows-shared").FloatWindowEvent) => void): () => void;
         revealSkillshareToken?(input: { secretId: string; sessionId: string }): Promise<{ ok: boolean; token?: string; name?: string; message?: string }>;
         attachLiveAudio?(input: { audioId: string; sessionId: string }): Promise<{ ok: boolean; message?: string }>;
         attachPrediction?(input: import("@omp-studio/studio-protocol").PredictionChannel): Promise<{ok:boolean;message?:string}>;
@@ -64,8 +67,11 @@ declare global {
         detachPrediction?(input:{channelId:string}):Promise<{ok:boolean;message?:string}>;
         importPredictionHistory?(input:{channelId:string}):Promise<{ok:boolean;cancelled?:boolean;message?:string;count?:number;truncated?:boolean}>;
         onPrediction?(listener:(event:import("@omp-studio/studio-protocol").PredictionEvent)=>void):()=>void;
+        managedBrowser?: import("@omp-studio/studio-protocol").ManagedBrowserApi;
         attachBrowserObservation?(input: { observationId: string; sessionId: string; tabId: string }): Promise<{ ok: boolean; message?: string }>;
         readComputerCapture?(input: { captureId: string; sessionId: string; targetId: string }): Promise<{ ok: true; data: ArrayBuffer; width: number; height: number } | { ok: false; message: string }>;
+        readComputerFrame?(input: { scopeSessionId: string; frameId: string; origin: "local" }): Promise<{ ok: true; data: ArrayBuffer; width: number; height: number; mimeType: "image/png"; artifactId?: string } | { ok: false; message: string }>;
+        saveComputerFrame?(input: { scopeSessionId: string; frameId: string; origin: "local" }): Promise<{ ok: true; artifactId: string } | { ok: false; message: string }>;
         controlBrowserObservation?(input: { observationId: string; input: import("@omp-studio/studio-protocol").BrowserObservationInput }): Promise<{ ok: boolean; message?: string }>;
         detachBrowserObservation?(input: { observationId: string }): Promise<{ ok: boolean; message?: string }>;
         onBrowserObservation?(listener: (event: import("@omp-studio/studio-protocol").BrowserObservationEvent) => void): () => void;
@@ -76,6 +82,9 @@ declare global {
         finishMediaUpload?(input: { uploadId: string }): Promise<{ ok: boolean; artifact?: import("@omp-studio/studio-protocol").ArtifactRecord; message?: string }>;
         abortMediaUpload?(input: { uploadId: string }): Promise<{ ok: boolean; message?: string }>;
         listServiceDefinitions?(input: StudioServiceDefinitionsInput): Promise<StudioServiceDefinitionResult>;
+        memoryCredentialStatus?(input: import("../../desktop/src/memory-credentials-shared").MemoryCredentialInput): Promise<import("../../desktop/src/memory-credentials-shared").MemoryCredentialResult>;
+        setMemoryCredential?(input: import("../../desktop/src/memory-credentials-shared").MemoryCredentialInput & { token: string }): Promise<import("../../desktop/src/memory-credentials-shared").MemoryCredentialResult>;
+        removeMemoryCredential?(input: import("../../desktop/src/memory-credentials-shared").MemoryCredentialInput): Promise<import("../../desktop/src/memory-credentials-shared").MemoryCredentialResult>;
         saveServiceDefinition?(input: StudioServiceDefinitionsInput): Promise<StudioServiceDefinitionResult>;
         removeServiceDefinition?(input: StudioServiceDefinitionsInput): Promise<StudioServiceDefinitionResult>;
         chooseArtifactDirectory?(): Promise<StudioArtifactFileResult>;
@@ -282,7 +291,7 @@ declare global {
             readonly message?: string;
           }) => void,
         ): () => void;
-      }
+      })
     | undefined;
 
   /**

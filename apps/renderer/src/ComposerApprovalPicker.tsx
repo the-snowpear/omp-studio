@@ -12,6 +12,7 @@ import type { ApprovalMode } from "@omp-studio/studio-protocol";
 
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
+import { usePreviewMode } from "./preview/PreviewContext";
 
 export function approvalPickerDisabled(input: {
   readonly preview: boolean;
@@ -82,6 +83,7 @@ export function ComposerApprovalPicker({
   onInteract?: () => void;
 }) {
   const { t, resolvedLanguage } = useI18n();
+  const { marks } = usePreviewMode();
   const [open, setOpen] = useState(false);
   const label = APPROVAL_MODE_LABELS[mode];
 
@@ -119,7 +121,7 @@ export function ComposerApprovalPicker({
             aria-label={t("composer.permissionMode")}
             onMouseDown={retainComposerFocus}
           >
-            {preview ? (
+            {preview && marks ? (
               <p className="cmp-menu-note">
                 <span className="chip gray xs">{t("common.demo")}</span>{t("composer.previewModelNote")}
               </p>

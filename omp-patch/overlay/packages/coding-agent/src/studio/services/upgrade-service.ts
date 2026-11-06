@@ -6,6 +6,9 @@ import type { ForeignSessionInfo } from "../../session/foreign-session-store";
 import type { UpgradeOperation, ForeignSessionSummary } from "../runtime-upgrade-protocol";
 import type { StudioBtwService } from "./btw-service";
 import { SessionControlError } from "./session-control-service";
+import { extractImagePastePathsFromText } from "@oh-my-pi/pi-tui/prompt/custom-editor";
+import { loadImageInput } from "../../utils/image-loading";
+import type { ImageContent } from "@oh-my-pi/pi-ai";
 
 /** Native Runtime facilities shared with GUI; no CLI/TUI automation. */
 export class StudioUpgradeService {
@@ -15,6 +18,20 @@ export class StudioUpgradeService {
 	) {}
 	async execute(operation: UpgradeOperation): Promise<unknown> {
 		switch (operation.kind) {
+			case "btw.images.resolve": {
+				const paths = extractImagePastePathsFromText(operation.text);
+				const images: ImageContent[] = [];
+				for (const file of paths ?? []) {
+					const image = await loadImageInput({
+						path: file,
+						cwd: this.session.sessionManager.getCwd(),
+						autoResize: false,
+					});
+					if (!image) throw new Error(`Cannot read pasted image: ${file}`);
+					images.push({ type: "image", mimeType: image.mimeType, data: image.data });
+				}
+				return { images };
+			}
 			case "btw.history.list":
 				return this.btw.historyList();
 			case "btw.history.read":

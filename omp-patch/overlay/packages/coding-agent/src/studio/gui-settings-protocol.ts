@@ -1,5 +1,8 @@
-/** OMP 18.4.4 settings exposed by the Studio GUI; exact public allowlist. */
+import { GUI_WORKBENCH_SETTINGS } from "./gui-workbench-settings-protocol";
+
+/** OMP settings exposed by the Studio GUI; exact public allowlist. */
 export const GUI_SETTING_DEFINITIONS = {
+	...GUI_WORKBENCH_SETTINGS,
 	"providers.cacheWarming": {
 		type: "enum",
 		values: ["off", "streaming", "idle"],
@@ -155,9 +158,11 @@ type DefinitionValue<D> = D extends { type: "enum"; values: readonly (infer V)[]
 		? boolean
 		: D extends { type: "number" }
 			? number
-			: D extends { type: "thresholds" }
-				? Record<string, number | string | null>
-				: string;
+			: D extends { type: "strings" }
+				? string[]
+				: D extends { type: "thresholds" }
+					? Record<string, number | string | null>
+					: string;
 export type GuiSettingsSnapshot = { [K in GuiSettingKey]?: DefinitionValue<(typeof GUI_SETTING_DEFINITIONS)[K]> };
 export const GUI_SETTING_KEYS = Object.keys(GUI_SETTING_DEFINITIONS) as GuiSettingKey[];
 export function isGuiSettingKey(key: string): key is GuiSettingKey {
@@ -169,11 +174,21 @@ export function validateGuiSetting(key: GuiSettingKey, value: unknown): void {
 	if (d.type === "string" && typeof value === "string" && value.length <= 4096 && !/[\u0000-\u001f]/u.test(value))
 		return;
 	if (
+		d.type === "strings" &&
+		Array.isArray(value) &&
+		value.every(
+			item =>
+				typeof item === "string" && item.trim().length > 0 && item.length <= 4096 && !/[\u0000-\u001f]/u.test(item),
+		)
+	)
+		return;
+	if (
 		d.type === "number" &&
 		typeof value === "number" &&
-		Number.isSafeInteger(value) &&
-		value >= 0 &&
-		value <= 2147483647
+		Number.isFinite(value) &&
+		("step" in d || Number.isSafeInteger(value)) &&
+		value >= ("min" in d ? d.min : 0) &&
+		value <= ("max" in d ? d.max : 2147483647)
 	)
 		return;
 	if (d.type === "enum" && typeof value === "string" && (d.values as readonly string[]).includes(value)) return;

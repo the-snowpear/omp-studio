@@ -1665,8 +1665,13 @@ const PROVIDER_STATUS_DETAIL_KEYS: Record<string, string> = {
   "本地服务未运行": "modelConfig.statusLocalServiceNotRunning",
 };
 
-function formatProviderStatusDetail(detail: string | undefined, t: (k: string) => string): string {
+function formatProviderStatusDetail(detail: string | undefined, t: (k: string) => string, marks = true, zh = false): string {
   if (!detail) return "";
+  if (!marks) {
+    if (detail === "已登录 · 演示账号" || detail === "Logged in · Demo Account") return zh ? "已登录" : "Logged in";
+    if (detail === "Demo · Not written to Host") return "";
+    return detail;
+  }
   if (PROVIDER_STATUS_DETAIL_KEYS[detail]) {
     return t(PROVIDER_STATUS_DETAIL_KEYS[detail]);
   }
@@ -1681,7 +1686,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     return () => window.clearInterval(timer);
   }, []);
   const { t } = useI18n();
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const [tab, setTab] = useState<McTab>("providers");
   const { shown: shownTab, phase: tabPhase } = useDeferredKey(tab);
   /* First paint must not play tabpanel page-in: it stacks on the shell/page-body
@@ -2159,7 +2164,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       if (overlayForm && draft) setProviderBaseline(draft);
       setModelsYmlDraft(null);
       if (close) setEditor(null);
-      toast(t("modelConfig.demoYamlUpdated"));
+      if (marks) toast(t("modelConfig.demoYamlUpdated"));
       return true;
     }
     setBusy(true);
@@ -2232,7 +2237,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         setRoleDraft(null);
         setRoleId(null);
       }
-      toast(t("modelConfig.demoRoleYamlUpdated"));
+      if (marks) toast(t("modelConfig.demoRoleYamlUpdated"));
       return true;
     }
     setBusy(true);
@@ -2295,7 +2300,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       });
       setRoleAssignDraft({});
       setEditor(null);
-      toast(roleUpdates.length > 0 ? t("modelConfig.demoUpdatedListAndRoles") : t("modelConfig.demoUpdatedList"));
+      if (marks) toast(roleUpdates.length > 0 ? t("modelConfig.demoUpdatedListAndRoles") : t("modelConfig.demoUpdatedList"));
       return;
     }
     setBusy(true);
@@ -2332,7 +2337,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
           providers: [...current.providers.filter((item) => item.id !== saved.id), saved],
         };
       });
-      toast(t("modelConfig.demoOkMessage", { message: okMessage }));
+      if (marks) toast(t("modelConfig.demoOkMessage", { message: okMessage }));
       return;
     }
     setBusy(true);
@@ -2351,7 +2356,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const deleteProvider = async (id: string) => {
     if (preview) {
       mutateLocal((current) => ({ ...current, providers: current.providers.filter((item) => item.id !== id) }));
-      toast(t("modelConfig.demoRemoved"));
+      if (marks) toast(t("modelConfig.demoRemoved"));
       return;
     }
     setBusy(true);
@@ -2380,7 +2385,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     const enabled = !provider.enabled;
     applyEnabledLocal(provider.id, enabled);
     if (preview) {
-      toast(enabled ? t("modelConfig.demoEnabled", { name: provider.name }) : t("modelConfig.demoDisabled", { name: provider.name }));
+      if (marks) toast(enabled ? t("modelConfig.demoEnabled", { name: provider.name }) : t("modelConfig.demoDisabled", { name: provider.name }));
       return;
     }
     const snapshot = data;
@@ -2408,7 +2413,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     if (updates.length === 0) return;
     if (preview) {
       mutateLocal((current) => withRolePrimaryUpdates(current, updates));
-      if (opts?.announce !== false) toast(t("modelConfig.demoAssignedRoles", { count: updates.length }));
+      if (opts?.announce !== false && marks) toast(t("modelConfig.demoAssignedRoles", { count: updates.length }));
       return;
     }
     let last: ConfigWriteResult | undefined;
@@ -2514,7 +2519,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
           roles: current.roles.map((item) => (item.id === (baseline?.id ?? role.id) ? record : item)),
         };
       });
-      toast((next.thinkingAdjustment ? `${next.thinkingAdjustment} · ` : "") + t("modelConfig.demoRoleUpdated"));
+      if (marks) toast((next.thinkingAdjustment ? `${next.thinkingAdjustment} · ` : "") + t("modelConfig.demoRoleUpdated"));
       setRoleId(null);
       setRoleDraft(null);
       return;
@@ -2577,7 +2582,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             : item),
         };
       });
-      toast(t("modelConfig.toastDemoLogin"));
+      if (marks) toast(t("modelConfig.toastDemoLogin"));
       return;
     }
     if (!data?.loginAvailable) {
@@ -2607,7 +2612,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
           return { ...item, statusDetail: t("modelConfig.statusNotLoggedIn"), auth: { ...auth, hasSecret: false } };
         }),
       }));
-      toast(t("modelConfig.toastDemoLogout"));
+      if (marks) toast(t("modelConfig.toastDemoLogout"));
       return;
     }
     setBusy(true);
@@ -2630,7 +2635,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         providerId,
         ok: true,
         latencyMs: 23 + Math.floor(Math.random() * 60),
-        detail: t("modelConfig.detailDemoConnectHttp200"),
+        detail: marks ? t("modelConfig.detailDemoConnectHttp200") : "HTTP 200",
       });
       return;
     }
@@ -2661,13 +2666,13 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       { id: "deepseek-r1", name: "deepseek-r1" },
     ],
     latencyMs: 28,
-    detail: t("modelConfig.detailDemoProbeSuccess", { providerId }),
+    detail: marks ? t("modelConfig.detailDemoProbeSuccess", { providerId }) : t("modelConfig.probeSuccess"),
   });
 
   const onProbe = async (providerId: string, endpointUrl?: string, apiKey?: string, discoveryType?: string, timeoutMs?: number) => {
     if (preview) {
       setProbeResult(previewProbeResult(providerId));
-      toast(t("modelConfig.toastDemoDiscoveryNoHost"));
+      if (marks) toast(t("modelConfig.toastDemoDiscoveryNoHost"));
       return;
     }
     setProbing(true);
@@ -2728,9 +2733,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       const matches = await adaptFetched(demo);
       if (!stillCurrent()) return;
       setCandidates(toCandidates(demo, draft.models, [], matches));
-      setFetchDetail({ ok: true, text: t("modelConfig.detailDemoFetchNoHost", { count: demo.length }) });
+      setFetchDetail({ ok: true, text: marks ? t("modelConfig.detailDemoFetchNoHost", { count: demo.length }) : resolvedLanguage === "zh" ? `获取到 ${demo.length} 个模型` : `Fetched ${demo.length} models` });
       setModelsTab("custom");
-      toast(t("modelConfig.toastDemoAutoFetchNoHost"));
+      if (marks) toast(t("modelConfig.toastDemoAutoFetchNoHost"));
       return;
     }
     setFetching(true);
@@ -2782,7 +2787,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   };
 
   const updateModelCatalog = async () => {
-    if (preview) { toast(t("modelAdaptation.demoUpdate")); return; }
+    if (preview) { if (marks) toast(t("modelAdaptation.demoUpdate")); return; }
     setCatalogUpdating(true);
     try {
       const handle = await client.command("models.catalog.refresh", {});
@@ -2795,7 +2800,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
 
   const refreshDiscovery = async () => {
     if (preview) {
-      toast(t("modelConfig.toastDemoNoRefresh"));
+      if (marks) toast(t("modelConfig.toastDemoNoRefresh"));
       return;
     }
     setBusy(true);
@@ -2817,7 +2822,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         modelRoleStorage: storage,
         roles: current.roles.map((role) => ({ ...role, scope: storage })),
       }));
-      toast(storage === "project" ? t("modelConfig.toastDemoScopeProject") : t("modelConfig.toastDemoScopeGlobal"));
+      if (marks) toast(storage === "project" ? t("modelConfig.toastDemoScopeProject") : t("modelConfig.toastDemoScopeGlobal"));
       return;
     }
     setBusy(true);
@@ -2854,7 +2859,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       }));
       setCreateRoleOpen(false);
       setNewRole({ id: "", name: "", desc: "" });
-      toast(t("modelConfig.toastDemoCustomRoleCreated"));
+      if (marks) toast(t("modelConfig.toastDemoCustomRoleCreated"));
       return;
     }
     setBusy(true);
@@ -2880,7 +2885,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       mutateLocal((current) => ({ ...current, roles: current.roles.filter((role) => role.id !== roleId) }));
       setRoleDraft(null);
       setRoleId(null);
-      toast(t("modelConfig.toastDemoCustomRoleDeleted"));
+      if (marks) toast(t("modelConfig.toastDemoCustomRoleDeleted"));
       return;
     }
     setBusy(true);
@@ -2906,7 +2911,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       mutateLocal((current) => ({ ...current, fallbackChains: chains, fallbackRevertPolicy: revertPolicy }));
       setFallbackDraft(nextChain);
       setRevertPolicyDraft(revertPolicy);
-      toast(t("modelConfig.toastDemoFallbackUpdated"));
+      if (marks) toast(t("modelConfig.toastDemoFallbackUpdated"));
       return;
     }
     setBusy(true);
@@ -2926,7 +2931,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const saveProviderOrder = async () => {
     if (preview) {
       mutateLocal((current) => ({ ...current, modelProviderOrder: orderDraft.slice() }));
-      toast(t("modelConfig.toastDemoModelProviderOrderUpdated"));
+      if (marks) toast(t("modelConfig.toastDemoModelProviderOrderUpdated"));
       setOrderEdit(false);
       return;
     }
@@ -2957,7 +2962,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const saveCycle = async () => {
     if (preview) {
       mutateLocal((current) => ({ ...current, cycleOrder: cycleDraft.slice() }));
-      toast(t("modelConfig.toastDemoLocalOrderUpdated"));
+      if (marks) toast(t("modelConfig.toastDemoLocalOrderUpdated"));
       setCycleEdit(false);
       return;
     }
@@ -3030,7 +3035,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     <div className="page-wide" id="mcRoot">
       <a className="skip-link" href="#mcPanels">{t("common.skipToContent")}</a>
       <div className="mc-catalog-update">
-        <span className="small muted">{t("modelAdaptation.catalog")} · {preview ? t("modelAdaptation.demo") : data?.catalog?.version ?? t("modelAdaptation.unknown")}</span>
+        <span className="small muted">{t("modelAdaptation.catalog")} · {preview && marks ? t("modelAdaptation.demo") : data?.catalog?.version ?? t("modelAdaptation.unknown")}</span>
         <button type="button" className="btn small outline" disabled={catalogUpdating || (!preview && !data)} onClick={() => void updateModelCatalog()}>{t(catalogUpdating ? "modelAdaptation.updating" : "modelAdaptation.update")}</button>
       </div>
       <div className="mc-tabbar">
@@ -3054,7 +3059,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       </div>
 
       <ToastHost message={flash} onDismiss={() => setFlash(null)} />
-      {preview ? (
+      {preview && marks ? (
         <div className="role-issue-banner mc-page-banner">
           <Icon name="info" extra="sm" />
           <div>
@@ -3160,7 +3165,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                   {editor.authType === "oauth" ? (() => {
                     const login = data?.loginProviders.find((item) => item.id === editor.id);
                     const authed = Boolean(login?.authenticated);
-                    const account = data?.providers.find((item) => item.id === editor.id)?.auth.account;
+                    const account = marks ? data?.providers.find((item) => item.id === editor.id)?.auth.account : undefined;
                     return (
                       <>
                         <div className="auth-status">
@@ -3235,7 +3240,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                             : name
                               ? detected
                                 ? <span className="auth-env-ok">{t("modelConfig.envVarDetectedDesc", { name })}</span>
-                                : preview
+                                : preview && marks
                                   ? t("modelConfig.envVarPreviewDesc", { name })
                                   : t("modelConfig.envVarRealDesc", { name })
                               : t("modelConfig.envVarDefaultDesc")}
@@ -3574,7 +3579,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                   <button type="button" className={sourceFilter === "third" ? "active" : undefined} onClick={() => setSourceFilter("third")}>{t("modelConfig.customFilter")}</button>
                 </span>
                 <span className="spacer" />
-                <button type="button" className="btn outline" disabled={preview} data-tip={preview ? t("common.demo") : undefined} onClick={() => void refresh()}><Icon name="refresh" extra="sm" />{t("modelConfig.refreshStatus")}</button>
+                <button type="button" className="btn outline" disabled={preview} data-tip={preview ? (marks ? t("common.demo") : t("common.unavailable")) : undefined} onClick={() => void refresh()}><Icon name="refresh" extra="sm" />{t("modelConfig.refreshStatus")}</button>
                 <button type="button" className="btn primary" onClick={() => { setModelEdit(null); setEditor(blankDraft()); setEditExisting(false); setPresetOpen(false); setPresetSel(null); setConfirmDelete(false); setTestResult(null); }}><Icon name="plus" extra="sm" />{t("modelConfig.addProvider")}</button>
               </div>
               {!data && !loadError ? (
@@ -3612,7 +3617,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                           <span className={`chip ${SOURCE_GROUP(provider.source) === "native" ? "blue" : "gray"} xs`}>{SOURCE_GROUP(provider.source) === "native" ? t("modelConfig.nativeProviderBadge") : t("modelConfig.customProviderBadge")}</span>
                           <span className="pv-count"><span className={`pv-dot dot ${st?.dot || "gray"}`} />{t("modelConfig.modelCount", { count: provider.models.length })}</span>
                         </div>
-                        <div className="pv-sub"><span className="pv-url ellipsis">{provider.endpointUrl || formatProviderStatusDetail(provider.statusDetail, t)}</span></div>
+                        <div className="pv-sub"><span className="pv-url ellipsis">{provider.endpointUrl || formatProviderStatusDetail(provider.statusDetail, t, marks, resolvedLanguage === "zh")}</span></div>
                       </div>
                       <div className="pv-acts">
                         <button type="button" className={`pv-act is-action${testing ? " is-testing" : ""}`} disabled={busy || testing} data-tip={t("common.test")} aria-label={t("modelConfig.testConnection")} onClick={() => void onTest("list", provider.id)}><Icon name="pulse" /></button>

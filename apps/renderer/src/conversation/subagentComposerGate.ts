@@ -4,6 +4,7 @@ import type { ConversationState } from "./conversationViewModel";
 /** Roster fields the inspect composer needs; matches Agent Hub `caps.chat`. */
 export type SubagentComposerAgent = {
   readonly agentId: string;
+  readonly displayName?: string;
   readonly kind: string;
   readonly status: string;
   readonly readOnly?: boolean;

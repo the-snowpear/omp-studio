@@ -171,6 +171,7 @@ test("operator abort holds image groups and never redispatches until explicit re
 		await session.waitForIdle();
 		expect(mock.calls).toHaveLength(1);
 		expect(agent.hasQueuedMessages()).toBe(false);
+		expect(session.hasHeldQueuedMessages).toBe(true);
 		const held = service.get();
 		expect(held.entries).toHaveLength(1);
 		expect(held.entries[0]).toMatchObject({ id, state: "held", imageCount: 1 });
@@ -183,6 +184,7 @@ test("operator abort holds image groups and never redispatches until explicit re
 			text: "restore screenshot",
 		});
 		service.execute({ kind: "session.queue.restore", sessionId: session.sessionId, id, queue: "followUp" });
+		expect(session.hasHeldQueuedMessages).toBe(false);
 		await session.waitForIdle();
 		expect(mock.calls).toHaveLength(2);
 		expect(JSON.stringify(mock.calls[1]!.context.messages)).toContain("/private/preserved.png");

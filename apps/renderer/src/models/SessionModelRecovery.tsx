@@ -32,7 +32,7 @@ export function SessionModelRecovery({
   demo?: boolean;
   onOpenModels: () => void;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [inspection, setInspection] = useState<SessionRestoreInspection>();
@@ -69,11 +69,11 @@ export function SessionModelRecovery({
     if (preview) {
       setInspection({
         targetSessionId: "preview-saved",
-        savedModels: ["demo/removed-model"],
+        savedModels: [marks ? "demo/removed-model" : "saved/removed-model"],
         status: "missing-model",
         thinking: "high",
         alternatives: [
-          { model: "demo/current-model", label: "Available model" },
+          { model: marks ? "demo/current-model" : "session/current-model", label: "Available model" },
         ],
         truncated: false,
       });
@@ -118,13 +118,14 @@ export function SessionModelRecovery({
     setError("");
     const generation = epoch.current;
     try {
-      if (preview)
-        setNotice(
-          zh
-            ? "演示：已选择替代模型，真实会话未更改。"
-            : "Demo: replacement selected; the real session is unchanged.",
-        );
-      else {
+      if (preview) {
+        if (marks)
+          setNotice(
+            zh
+              ? "演示：已选择替代模型，真实会话未更改。"
+              : "Demo: replacement selected; the real session is unchanged.",
+          );
+      } else {
         const handle = await client.command("session.resume", {
           threadId: threadId!,
           model,
@@ -173,7 +174,7 @@ export function SessionModelRecovery({
           : zh
             ? "无法检查会话恢复条件"
             : "Session restoration could not be checked"}
-        {preview ? (zh ? " · 演示" : " · Demo") : ""}
+        {preview && marks ? (zh ? " · 演示" : " · Demo") : ""}
       </strong>
       <p>
         {zh

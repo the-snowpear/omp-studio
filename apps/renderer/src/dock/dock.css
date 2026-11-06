@@ -1,6 +1,21 @@
 /* Dock chrome only. Business modules keep their own theme and typography. */
 .dock-host-layer,
 .dock-floating-layer { display: contents; }
+.dock-modal-backdrop { position: fixed; inset: 0; z-index: 80; background: rgb(0 0 0 / 0.38); }
+body.dock-dragging .dock-modal-backdrop { pointer-events: none; }
+body.dock-modal-active .dock-drag-preview { z-index: 85; }
+body.dock-modal-active .dock-panel-content.is-drag-preview { z-index: 86 !important; }
+body.dock-modal-active .dock-menu-popover { z-index: 87; }
+.dock-pin-button { opacity: 0; pointer-events: none; }
+.dock-float-titlebar:hover .dock-pin-button, .dock-float-titlebar:focus-within .dock-pin-button, .dock-pin-button.open { opacity: 1; pointer-events: auto; }
+.dock-pin-status { display: inline-flex; align-items: center; color: var(--text-muted); flex: 0 0 auto; }
+.dock-float.is-active-window{border-color:var(--accent-border)}
+.dock-float.is-active-window>.dock-float-titlebar{background:var(--accent-soft)}
+.dock-pinned-capsules { position: fixed; right: 16px; bottom: 16px; z-index: 34; display: flex; gap: 8px; max-width: calc(100vw - 32px); flex-wrap: wrap; }
+.dock-native-document { margin: 0; overflow: hidden; background: var(--bg); }
+.dock-native-float { border-radius: 0 !important; box-shadow: none !important; }
+.dock-native-float > .dock-float-titlebar { -webkit-app-region: drag; }
+.dock-native-float button, .dock-native-float [role="menu"], .dock-native-float .dock-pin-status { -webkit-app-region: no-drag; }
 .dock-panel-content {
   position: fixed;
   box-sizing: border-box;
@@ -25,7 +40,7 @@
   min-height: 0;
   height: 100%;
 }
-.dock-panel-content[data-dock-auto-height] > :is(div, section, main, aside) {
+.dock-panel-content[data-dock-auto-height]:is([data-dock-region="left"], [data-dock-region="rail"]) > :is(div, section, main, aside) {
   height: auto;
   min-height: 0;
   flex: none;
@@ -36,6 +51,10 @@
   min-height: 0;
 }
 .dock-slot { box-sizing: border-box; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+/* Rail bodies share the card list's native scroll chain and clipping. */
+.dock-card-region-rail .dock-slot { position: relative; }
+.dock-panel-content[data-dock-embedded] { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dock-panel-content[data-dock-embedded] :is(.dock-doc-scroll, #sbFiles > .sb-scroll, .btw-transcript) { overscroll-behavior-y: auto; }
 .dock-icon-button,
 .dock-card-title,
 .dock-tab > button,
@@ -129,21 +148,49 @@
 .dock-grip { flex: 0 0 auto; width: 12px; opacity: 0; color: var(--text-faint); font-size: 16px; transition: opacity var(--dur-fast) var(--ease); }
 .dock-card-header:hover .dock-grip,
 .dock-card-header:focus-within .dock-grip { opacity: 1; }
+.dock-card-region-rail .dock-card-header { position: relative; box-sizing: border-box; min-height: 44px; padding: 3px 14px; view-transition-class: dock-rail-heading; }
+.dock-card-region-rail .dock-card-header::after { content: ""; position: absolute; inset: auto 14px 0; height: 1px; background: var(--border); pointer-events: none; }
+.dock-card-region-rail .dock-card.is-collapsed .dock-card-header::after { opacity: 0; }
+.dock-card-region-rail .dock-card-header:hover { background: var(--surface-hover); }
+.dock-card-region-rail .dock-card-title { gap: 7px; padding: 3px 0; }
+.dock-card-region-rail .dock-card-title:hover { background: transparent; }
+.dock-card-region-rail .dock-card-title > .icon { flex: 0 0 auto; }
+.dock-card-region-rail .dock-card-title > .dock-card-chevron { width: 12px; height: 12px; color: var(--text-3); }
 .dock-card-body { overflow: hidden; min-width: 0; border-top: 1px solid var(--border); }
+.dock-card-region-rail .dock-card-body { border-top: 0; }
+/* The left tools are full-width sidebar sections, with one shared heading. */
+.dock-card-region-left > .dock-card-list { padding: 0; gap: 0; }
+.dock-card-region-left .dock-card { border: 0; border-radius: 0; background: transparent; }
+.dock-card-region-left .dock-card + .dock-card { border-top: 1px solid var(--border); }
+.dock-card-region-left .dock-card-header { padding-inline: var(--sp-8); background: transparent; }
+.dock-card-region-left .dock-card-title { font-size: var(--fs-11); font-weight: var(--fw-semibold); color: var(--text-3); }
+.dock-card-region-left .dock-card-body { border-top: 0; }
+.dock-card-region-left .dock-card:only-child:not(.is-collapsed) { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
+.dock-card-region-left .dock-card:only-child > .dock-card-body { flex: 1 1 0; min-height: 0; }
+.dock-card-region-left .dock-card:only-child > .dock-card-body > .dock-slot { height: 100% !important; }
+.dock-card-region-left .dock-card:only-child > .dock-card-resizer { display: none; }
+.dock-left-cards.is-folded :is(.dock-card-region, .dock-card-list) { flex: 0 0 auto; height: auto; }
+.dock-left-cards.is-folded { border-top: 1px solid var(--border); }
+.dock-card-actions { display: flex; flex: 0 0 auto; }
+.dock-card-actions .icon-btn { width: 20px; height: 20px; }
+.dock-card-header:is(:hover, :focus-within) .sb-head-actions { opacity: 1; }
+.dock-panel-content[data-dock-region="left"][data-panel="files"] > #sbFiles { display: flex; flex-direction: column; height: 100%; }
+.dock-panel-content[data-dock-region="left"] #sbFiles > .sb-section-head { display: none; }
+.dock-panel-content[data-dock-region="left"] #sbFiles > .sb-scroll { flex: 1 1 0; min-height: 0; overflow: auto; }
+/* 卡片底部不画可调条：这一行仍是卡片自身的一部分（透明背景），底边就是普通卡片
+   的圆角边框。只有指针进入这几像素时把光标换成 ns-resize；拖动、双击恢复自动
+   高度、键盘调整与焦点框都走原来的 resizer，不另造交互。 */
 .dock-card-resizer {
   position: relative;
   height: 6px;
   cursor: ns-resize;
   touch-action: none;
-  background: var(--surface-2);
+  background: transparent;
 }
-.dock-card-resizer::after { content: ""; position: absolute; left: calc(50% - 12px); top: 2px; width: 24px; height: 2px; background: var(--border-strong); border-radius: 2px; }
-.dock-card-resizer:hover::after { background: var(--accent); }
 .dock-card-resizer[aria-disabled="true"] { cursor: default; }
 .dock-empty { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-8); min-width: 0; min-height: 72px; padding: var(--sp-12); color: var(--text-3); font-size: var(--fs-12); text-align: center; }
 .dock-demo { align-self: flex-start; flex: 0 0 auto; margin: 3px 6px; padding: 1px 5px; border: 1px solid var(--accent-border); border-radius: var(--r-4); color: var(--accent); background: var(--accent-softer); font-size: var(--fs-11); white-space: nowrap; }
 .dock-region-toolbar { display: flex; align-items: center; min-width: 0; min-height: 30px; flex: 0 0 auto; padding: 2px var(--sp-6); gap: 3px; border-bottom: 1px solid var(--border); background: var(--bg-inset); }
-.dock-region-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-11); color: var(--text-3); font-weight: var(--fw-medium); }
 .dock-toolbar-spacer { flex: 1 1 0; }
 .dock-group-picker { min-width: 0; max-width: 160px; height: 26px; font-size: var(--fs-11); }
 .dock-groups { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
@@ -156,22 +203,53 @@
 .dock-tab-strip { display: flex; align-items: center; gap: 2px; height: 36px; min-height: 36px; flex: 0 0 36px; padding: 2px 4px; box-sizing: border-box; background: var(--surface-2); border-bottom: 1px solid var(--border); min-width: 0; }
 .dock-group-grip { width: 18px; height: 28px; font-size: 17px; cursor: grab; touch-action: none; }
 .dock-group-grip:disabled { visibility: hidden; width: 8px; }
-.dock-tabs { display: flex; align-items: center; flex: 1 1 0; min-width: 0; min-height: 32px; gap: 3px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+/* Only the left-edge proximity handler (or this grip's focus) reveals it. */
+.dock-tab-strip.has-reveal-grip > .dock-group-grip { width: 0; padding-inline: 0; margin-right: -2px; overflow: hidden; opacity: 0; pointer-events: none; transition: width var(--dur-fast) var(--ease), margin-right var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease); }
+.dock-tab-strip.has-reveal-grip.is-grip-visible > .dock-group-grip { width: 18px; margin-right: 0; opacity: 1; pointer-events: auto; }
+/* Grow only with its tabs: a short row keeps the add button next to the last
+   tab, and a full row shrinks the scroller instead of pushing add away. */
+.dock-tabs { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; min-height: 32px; gap: 3px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .dock-tabs::-webkit-scrollbar { display: none; }
-.dock-tab { display: flex; position: relative; flex: 0 0 auto; align-items: center; max-width: 210px; height: 32px; box-sizing: border-box; border: 1px solid transparent; border-radius: var(--r-6); color: var(--text-3); transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
+.dock-tab { display: flex; position: relative; flex: 0 1 auto; align-items: center; min-width: 80px; max-width: 210px; height: 32px; box-sizing: border-box; border: 1px solid transparent; border-radius: var(--r-6); color: var(--text-3); transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
 .dock-tab:hover { color: var(--text-2); background: var(--surface-hover); }
-.dock-tab.is-active { color: var(--text); background: var(--bg-inset); border-color: var(--border-strong); }
-.dock-tab > [role="tab"] { display: flex; align-items: center; gap: var(--sp-6); min-width: 0; height: 30px; padding: 0 2px 0 8px; font-size: var(--fs-12); font-weight: var(--fw-medium); border-radius: var(--r-6); cursor: pointer; touch-action: none; }
-.dock-tab > [role="tab"] > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-tab.is-active { min-width: 112px; color: var(--text); background: var(--bg-inset); border-color: var(--border-strong); }
+.dock-tab > .dock-tab-label { display: flex; flex: 1 1 auto; align-items: center; gap: var(--sp-6); min-width: 0; height: 30px; padding: 0 2px 0 8px; font-size: var(--fs-12); font-weight: var(--fw-medium); border-radius: var(--r-6); cursor: pointer; touch-action: none; }
+.dock-tab > .dock-tab-label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-agent-dot { display: inline-block; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+.dock-agent-dot:is([data-status="running"], [data-status="starting"], [data-status="reviving"]):not([data-stale]) { background: var(--green); }
+.dock-agent-dot[data-status="waiting"]:not([data-stale]) { background: var(--amber); }
+.dock-agent-dot[data-status="failed"]:not([data-stale]) { background: var(--red); }
+.dock-agent-abbr { font-size: var(--fs-11); font-weight: var(--fw-semibold); max-width: 24px; overflow: hidden; }
+.dock-rail-icon:has(.dock-agent-dot) { position: relative; }
+.dock-rail-icon .dock-agent-dot { position: absolute; right: 2px; bottom: 2px; }
+@media (prefers-reduced-motion: no-preference) {
+  .dock-agent-dot:is([data-status="running"], [data-status="starting"], [data-status="reviving"]):not([data-stale]) { animation: agent-running-breathe 2.4s ease-in-out infinite; }
+}
 .dock-tab .icon { flex: 0 0 auto; }
 .dock-tab > .dock-tab-close { display: flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 26px; padding: 3px; margin: 0 1px; border-radius: var(--r-4); opacity: 0; cursor: pointer; }
-.dock-tab-menu { display: flex; flex: 0 0 24px; opacity: 0; }
-.dock-tab-menu > .dock-menu-button { width: 24px; height: 26px; min-width: 24px; padding: 3px; }
-.dock-tab:is(:hover, :focus-within, .is-active) > :is(.dock-tab-close, .dock-tab-menu) { opacity: 1; }
+.dock-tab:is(:hover, :focus-within, .is-active) > .dock-tab-close { opacity: 1; }
 .dock-tab > .dock-tab-close:hover { background: var(--surface-active); }
-.dock-all-tabs.app-select { flex: 0 0 26px; width: 26px; min-width: 26px; height: 26px; padding: 4px; gap: 0; border-color: transparent; background: transparent; }
+/* Instance glyphs: a page's site icon, or its loading / failed / not-loaded state. */
+.dock-glyph { position: relative; display: inline-flex; flex: none; align-items: center; justify-content: center; width: 13px; height: 13px; }
+.dock-glyph.is-large { width: 16px; height: 16px; }
+.dock-glyph-image { display: block; width: 100%; height: 100%; object-fit: contain; border-radius: 2px; }
+.dock-glyph.is-muted { opacity: .5; filter: grayscale(1); }
+.dock-glyph .dock-glyph-error { color: var(--red); }
+.dock-glyph-spinner { display: inline-block; flex: none; box-sizing: border-box; width: 11px; height: 11px; border: 1.5px solid color-mix(in srgb, currentColor 22%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: dock-glyph-spin .8s linear infinite; }
+.dock-glyph.is-large .dock-glyph-spinner { width: 14px; height: 14px; }
+@keyframes dock-glyph-spin { to { transform: rotate(360deg); } }
+.dock-tab > .dock-tab-close.is-pending, .dock-card-close.is-pending { opacity: 1; cursor: progress; }
+.dock-tab > .dock-tab-close.is-pending:hover, .dock-card-close.is-pending:hover { background: transparent; }
+.dock-tab-close .dock-glyph-spinner, .dock-card-close .dock-glyph-spinner { width: 10px; height: 10px; }
+.dock-card-close { flex: none; }
+.dock-rail-icon .dock-glyph.is-large .dock-glyph-image { border-radius: 3px; }
+.dock-capsule .dock-glyph { flex: 0 0 auto; }
+.dock-all-tabs.app-select { flex: 0 0 26px; width: 26px; min-width: 26px; height: 26px; padding: 4px; gap: 0; margin-left: auto; border-color: transparent; background: transparent; }
 .dock-all-tabs .app-select-value { display: none; }
 .dock-all-tabs .app-select-chevron { margin: auto; }
+/* The add-tab button is a sibling of the scroller, so a strip in overflow keeps
+   it pinned to the right edge instead of scrolling it out of reach. */
+.dock-tab-add { flex: 0 0 26px; width: 26px; min-width: 26px; margin-left: 4px; }
 .dock-group-separator { flex: 0 0 6px; position: relative; background: var(--surface-2); cursor: ns-resize; touch-action: none; }
 .dock-group-region-bottom .dock-group-separator { cursor: ew-resize; }
 .dock-group-separator::after { content: ""; position: absolute; inset: 2px 0; background: var(--border); }
@@ -180,28 +258,141 @@
 .dock-group-separator[aria-disabled="true"] { cursor: default; }
 /* A collapsed bottom region is exactly one tab row, not a second header row. */
 .dock-group-region-bottom > .dock-region-toolbar { position: absolute; right: 0; top: 0; height: 36px; min-height: 36px; box-sizing: border-box; padding: 2px; z-index: 1; background: var(--surface-2); }
-.dock-group-region-bottom > .dock-region-toolbar > :is(.dock-region-label, .dock-toolbar-spacer, .dock-demo) { display: none; }
 .dock-group-region-bottom > .dock-groups > .dock-group:last-child > .dock-tab-strip,
-.dock-group-region-bottom > .dock-groups.is-constrained > .dock-group:not([hidden]) > .dock-tab-strip { padding-right: 91px; }
+.dock-group-region-bottom > .dock-groups.is-constrained > .dock-group:not([hidden]) > .dock-tab-strip { padding-right: 62px; }
 .dock-group-region-bottom:has(> .dock-region-toolbar > .dock-group-picker) > .dock-groups > .dock-group:not([hidden]) > .dock-tab-strip { padding-right: 230px; }
 .dock-group-region.is-folded > .dock-groups { flex: 0 0 36px; }
-.dock-rail-expanded { position: relative; display: flex; flex-direction: column; width: var(--dock-rail-w, 320px); flex: 0 0 var(--dock-rail-w, 320px); min-width: 0; min-height: 0; background: var(--bg-inset); border-left: 1px solid var(--border); }
+.dock-rail-expanded { position: absolute; right: 12px; display: flex; flex-direction: column; width: var(--dock-rail-w, 320px); min-width: 0; min-height: 0; pointer-events: none; }
+.dock-rail-expanded .dock-card-list { padding: 0 1px; gap: 10px; pointer-events: auto; }
+.dock-card-region-rail .dock-card-list { gap: 10px; }
+.dock-card-list, .dock-rail-icon-list { transition-duration: var(--dur); transition-timing-function: var(--ease); }
+.dock-rail-expanded .dock-card { border-radius: var(--r-10); pointer-events: auto; }
+.dock-rail-expanded .dock-card-region { flex: 0 1 auto; height: auto; max-height: 100%; }
+.dock-rail-expanded .dock-card-list { flex: 0 1 auto; }
+.dock-rail-expanded :is(.dock-empty, .dock-rail-width-resizer) { pointer-events: auto; }
+.dock-rail-toolbar { min-height: 28px; padding: 0 2px 4px; border: 0; background: transparent; pointer-events: auto; opacity: 0; transition: opacity var(--dur-fast) var(--ease); }
+:is(.dock-rail-expanded, .dock-rail-compact):is(:hover, :focus-within) .dock-rail-toolbar { opacity: 1; }
+.dock-rail-toolbar > :not(.dock-toolbar-spacer) { background: var(--surface); border-radius: var(--r-6); }
+.dock-rail-toolbar > button:nth-of-type(1) { view-transition-name: dock-rail-add; }
+.dock-rail-toolbar > button:nth-of-type(2) { view-transition-name: dock-rail-mode; }
+.dock-rail-toolbar > button:nth-of-type(3) { view-transition-name: dock-rail-hide; }
+.convo-wrap:not([data-dock-rail-transition-active]) :is(.dock-rail-toolbar > button, .dock-card-region-rail .dock-card, .dock-rail-icon) { view-transition-name: none !important; }
+.dock-rail-expanded .dock-card,
+.dock-rail-icon { view-transition-class: dock-rail-item; }
+/* A card fold keeps the reading surface in the root snapshot. For a rail width change, capture
+   the scroller as one clipped surface; lifting its document would lose both
+   scroll clipping and the minimap's stacking order. */
+:root:is([data-dock-rail-transition="compact"], [data-dock-rail-transition="expanded"], [data-dock-rail-transition="hidden"]) .convo-wrap[data-dock-rail-transition-active] > .convo-scroll { view-transition-name: dock-rail-conversation; }
+:root:is([data-dock-rail-transition="compact"], [data-dock-rail-transition="expanded"], [data-dock-rail-transition="hidden"]) .convo-wrap[data-dock-rail-transition-active] > .composer-region { view-transition-name: dock-rail-composer; }
+:root:is([data-dock-rail-transition="compact"], [data-dock-rail-transition="expanded"], [data-dock-rail-transition="hidden"]) .convo-wrap[data-dock-rail-transition-active] > .minimap { view-transition-name: dock-rail-minimap; }
+:root[data-dock-rail-transition] .dock-panel-content[data-dock-region="rail"][data-dock-rail-transition-active] { view-transition-name: match-element; view-transition-class: dock-rail-body; }
+:root[data-dock-rail-transition] .dock-panel-content[data-dock-rail-fold] { view-transition-class: dock-rail-body dock-rail-fold; }
+:root[data-dock-rail-transition]::view-transition { pointer-events: none; }
+:root[data-dock-rail-transition]::view-transition-group(*) { animation-duration: var(--dur-slow); animation-timing-function: var(--ease-nav); }
+:root[data-dock-rail-transition]::view-transition-old(root) { animation: none; opacity: 0; }
+:root[data-dock-rail-transition]::view-transition-new(root) { animation: none; }
+:root[data-dock-rail-transition]::view-transition-old(dock-rail-conversation),
+:root[data-dock-rail-transition]::view-transition-new(dock-rail-conversation),
+:root[data-dock-rail-transition]::view-transition-old(dock-rail-composer),
+:root[data-dock-rail-transition]::view-transition-new(dock-rail-composer) { height: 100%; object-fit: none; object-position: left bottom; animation-duration: var(--dur-slow); }
+:root[data-dock-rail-transition]::view-transition-image-pair(dock-rail-conversation) { overflow: clip; }
+/* 对话正文和 Composer 不做交叉淡入淡出：两列宽度不同，两份快照按各自的居中位置叠在
+   一起就是重影。旧快照按 --dock-rail-shift（新列左边界 − 旧列左边界）平移过去，滑到
+   位之后再换成新快照。 */
+:root[data-dock-rail-transition]::view-transition-old(dock-rail-conversation),
+:root[data-dock-rail-transition]::view-transition-old(dock-rail-composer) { animation: dock-rail-slide-out var(--dur-slow) var(--ease-nav) both; }
+:root[data-dock-rail-transition]::view-transition-new(dock-rail-conversation),
+:root[data-dock-rail-transition]::view-transition-new(dock-rail-composer) { animation: dock-rail-slide-in var(--dur-slow) var(--ease-nav) both; }
+@keyframes dock-rail-slide-out {
+  0% { transform: translateX(0); opacity: 1; }
+  70% { transform: translateX(var(--dock-rail-shift, 0px)); opacity: 1; }
+  100% { transform: translateX(var(--dock-rail-shift, 0px)); opacity: 0; }
+}
+@keyframes dock-rail-slide-in { 0%, 70% { opacity: 0; } 100% { opacity: 1; } }
+:root[data-dock-rail-transition]::view-transition-group(dock-rail-minimap) { z-index: 1; }
+:root[data-dock-rail-transition]::view-transition-old(dock-rail-minimap),
+:root[data-dock-rail-transition]::view-transition-old(.dock-rail-heading) { animation: none; opacity: 0; }
+:root[data-dock-rail-transition]::view-transition-new(dock-rail-minimap),
+:root[data-dock-rail-transition]::view-transition-new(.dock-rail-heading) { animation: none; }
+:root[data-dock-rail-transition]::view-transition-image-pair(.dock-rail-heading) { overflow: clip; border-radius: var(--r-10); }
+/* 标题只在卡片自己折叠时单独 lift（标题不动、正文折起）。整列 ↔ 图标列切换时卡片和
+   图标共用一个 name 做形变，标题跟着卡片快照走；否则它在展开方向没有旧快照，会被
+   直接画在最终位置——卡片还是个小圆点，三条标题已经整行出现。 */
+:root:is([data-dock-rail-transition="collapse"], [data-dock-rail-transition="expand"]) .convo-wrap[data-dock-rail-transition-active] .dock-card-region-rail .dock-card-header { view-transition-name: match-element; }
+:root:is([data-dock-rail-transition="collapse"], [data-dock-rail-transition="expand"])::view-transition-old(.dock-rail-item),
+:root:is([data-dock-rail-transition="collapse"], [data-dock-rail-transition="expand"])::view-transition-new(.dock-rail-item) { height: 100%; object-fit: none; object-position: left top; }
+:root[data-dock-rail-transition="compact"]::view-transition-image-pair(.dock-rail-item) { animation: dock-rail-round var(--dur-slow) var(--ease-nav) both; }
+:root[data-dock-rail-transition="expanded"]::view-transition-image-pair(.dock-rail-item) { animation: dock-rail-round var(--dur-slow) var(--ease-nav) reverse both; }
+:root[data-dock-rail-transition]::view-transition-image-pair(.dock-rail-item) { overflow: clip; border-radius: var(--r-10); }
+:root[data-dock-rail-transition]::view-transition-old(.dock-rail-item) { animation: dock-rail-morph-out var(--dur-slow) var(--ease) both; }
+:root[data-dock-rail-transition]::view-transition-new(.dock-rail-item) { animation: dock-rail-morph-in var(--dur-slow) var(--ease) both; }
+/* 图标那一侧不跟着组的形变拉伸：它本来就在右边缘，按原尺寸钉住，卡片在它周围长出来
+   / 收回去。否则 36px 的图标会被拉成几百像素的一团糊影。 */
+:root[data-dock-rail-transition="expanded"]::view-transition-old(.dock-rail-item),
+:root[data-dock-rail-transition="compact"]::view-transition-new(.dock-rail-item) { object-fit: none; object-position: right top; }
+:root[data-dock-rail-transition]::view-transition-old(.dock-rail-body) { animation: dock-rail-morph-out var(--dur) var(--ease) both; }
+:root[data-dock-rail-transition]::view-transition-new(.dock-rail-body) { animation: dock-rail-morph-in var(--dur-slow) var(--ease) both; }
+/* 卡片正文住在宿主层，不是卡片的 DOM 子节点，所以它跟不上卡片的形变：旧快照会停在
+   原地，新快照会直接画在最终位置。整列 ↔ 图标列切换时只让它随卡片的两端淡入淡出，
+   形变交给卡片本身；卡片自身的折叠仍走 .dock-rail-fold。 */
+:root:is([data-dock-rail-transition="compact"], [data-dock-rail-transition="expanded"], [data-dock-rail-transition="hidden"])::view-transition-old(.dock-rail-body) { animation: dock-rail-body-out var(--dur-slow) var(--ease) both; }
+:root:is([data-dock-rail-transition="compact"], [data-dock-rail-transition="expanded"], [data-dock-rail-transition="hidden"])::view-transition-new(.dock-rail-body) { animation: dock-rail-body-in var(--dur-slow) var(--ease) both; }
+@keyframes dock-rail-body-out { 0% { opacity: 1; } 35%, 100% { opacity: 0; } }
+@keyframes dock-rail-body-in { 0%, 70% { opacity: 0; } 100% { opacity: 1; } }
+:root:is([data-dock-rail-transition="collapse"], [data-dock-rail-transition="expand"])::view-transition-old(.dock-rail-body),
+:root:is([data-dock-rail-transition="collapse"], [data-dock-rail-transition="expand"])::view-transition-new(.dock-rail-body) { animation: none; }
+:root:is([data-dock-rail-transition="collapse"], [data-dock-rail-transition="expand"])::view-transition-old(.dock-rail-body) { opacity: 0; }
+:root[data-dock-rail-transition="collapse"]::view-transition-old(.dock-rail-fold) { opacity: 1; animation: dock-rail-fold-out var(--dur-slow) var(--ease-nav) both; }
+:root[data-dock-rail-transition="expand"]::view-transition-new(.dock-rail-fold) { animation: dock-rail-fold-in var(--dur-slow) var(--ease-nav) both; }
+@keyframes dock-rail-fold-out { to { opacity: 0; clip-path: inset(0 0 100%); } }
+@keyframes dock-rail-fold-in { from { opacity: 0; clip-path: inset(0 0 100%); } to { opacity: 1; clip-path: inset(0); } }
+@keyframes dock-rail-round { from { border-radius: var(--r-12); } to { border-radius: 18px; } }
+@keyframes dock-rail-morph-out { 0% { opacity: 1; } 65%, 100% { opacity: 0; } }
+@keyframes dock-rail-morph-in { 0%, 25% { opacity: 0; } 100% { opacity: 1; } }
+.convo-wrap:has(> .dock-rail-expanded) > :is(.convo-scroll, .composer-region) { box-sizing: border-box; width: max(0px, calc(100% - var(--dock-rail-w, 320px) - 12px)); }
 .dock-rail-width-resizer { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; z-index: 15; cursor: ew-resize; touch-action: none; }
 .dock-rail-width-resizer:hover,
 .dock-rail-width-resizer:focus-visible { background: var(--accent-border); }
 .dock-rail-width-resizer[aria-disabled="true"] { cursor: default; pointer-events: none; }
-.dock-rail-compact { position: absolute; right: 8px; width: 40px; min-height: 0; pointer-events: none; overflow: visible; }
-.dock-rail-icons { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: stretch; width: 40px; max-height: 100%; box-sizing: border-box; padding: 3px; border: 1px solid var(--border-strong); border-radius: var(--r-8); background: var(--surface); box-shadow: 0 3px 14px rgb(0 0 0 / 8%); z-index: 29; pointer-events: auto; overflow: auto; scrollbar-width: thin; }
-.dock-rail-icon-list { display: flex; flex-direction: column; gap: 3px; min-height: 0; flex: 1 1 auto; overflow: auto; scrollbar-width: none; }
-.dock-rail-icon { display: flex; align-items: center; justify-content: center; flex: 0 0 32px; min-width: 30px; min-height: 32px; border: 1px solid transparent; border-radius: var(--r-6); color: var(--text-3); cursor: pointer; touch-action: none; }
+.dock-rail-compact { position: absolute; right: 12px; display: flex; flex-direction: column; width: 40px; min-height: 0; pointer-events: none; overflow: visible; z-index: 29; }
+.dock-rail-compact > .dock-rail-toolbar { align-self: flex-end; width: max-content; }
+.dock-rail-icons { display: flex; flex-direction: column; width: 40px; min-height: 0; flex: 0 1 auto; overflow: auto; scrollbar-width: none; }
+.dock-rail-icon-list { display: flex; flex-direction: column; gap: var(--sp-8); padding: 2px; flex: 0 0 auto; }
+.dock-rail-icon { display: flex; align-items: center; justify-content: center; flex: 0 0 36px; width: 36px; height: 36px; box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: var(--r-full); background: var(--surface); color: var(--text-3); pointer-events: auto; cursor: pointer; touch-action: none; }
 .dock-rail-icon:hover { background: var(--surface-hover); color: var(--text); }
 .dock-rail-icon.is-active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-border); }
-.dock-rail-icon-actions { display: flex; align-items: center; flex-direction: column; gap: 2px; flex: 0 0 auto; padding-top: 4px; margin-top: 4px; border-top: 1px solid var(--border); }
+.dock-card.has-meter-summary .dock-grip { flex-basis: 0; width: 0; min-width: 0; overflow: hidden; margin-left: 0; opacity: 0; transition: flex-basis var(--dur-fast) var(--ease), margin-left var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease); }
+.dock-card.has-meter-summary .dock-card-header:is(:hover, :focus-within) .dock-grip { flex-basis: 12px; margin-left: 6px; opacity: 1; }
+.dock-meter-summary, .dock-meter-ring { --dock-meter-color: #3887dc; }
+:is(.dock-meter-summary, .dock-meter-ring)[data-tone="warning"] { --dock-meter-color: var(--amber); }
+:is(.dock-meter-summary, .dock-meter-ring)[data-tone="danger"] { --dock-meter-color: var(--red); }
+.dock-meter-summary { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 9px; margin-left: auto; padding-left: 8px; }
+.dock-meter-value { color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-12); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
+.dock-meter-track { width: 28px; height: 8px; overflow: hidden; border-radius: var(--r-full); background: var(--surface-active); }
+.dock-meter-track > i { display: block; height: 100%; border-radius: inherit; background: var(--dock-meter-color); }
+.dock-rail-icon.has-meter { position: relative; border-color: transparent; }
+.dock-meter-ring { position: absolute; inset: -1px; width: 36px; height: 36px; overflow: visible; pointer-events: none; }
+.dock-meter-ring circle { fill: none; stroke-width: 1.8; }
+.dock-meter-ring-track { stroke: var(--border-strong); }
+.dock-meter-ring-value { stroke: var(--dock-meter-color); stroke-linecap: round; }
+.dock-meter-ring-value.is-segment { stroke-width: 2.2; stroke-linecap: butt; }
+.dock-status-summary { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--sp-6); min-width: 0; margin-left: auto; padding-left: var(--sp-6); font-size: var(--fs-11); font-weight: var(--fw-regular); white-space: nowrap; overflow: hidden; }
+.dock-status-count { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
+.dock-status-count > i { width: 4px; height: 4px; flex: none; border-radius: 50%; background: currentColor; }
+.dock-status-count > b { font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
+.dock-status-count > span, .dock-status-note { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
+.dock-status-summary[data-stale] .dock-status-count { color: var(--text-faint) !important; }
+.dock-meter-ring[data-stale] .dock-meter-ring-value { stroke: var(--text-faint) !important; }
+.dock-meter-badge { position: absolute; right: -2px; bottom: -1px; display: flex; align-items: center; justify-content: center; min-width: 13px; height: 13px; padding: 0 2px; box-sizing: border-box; border-radius: var(--r-full); background: var(--surface); border: 1px solid var(--border-strong); color: var(--text-2); font-size: 9px; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; }
 .dock-rail-icons > .dock-demo { font-size: 9px; margin: 1px 0 3px; padding: 1px; }
-.dock-rail-overlay { display: flex; flex-direction: column; position: absolute; right: 48px; top: 0; bottom: 0; max-width: calc(100vw - 64px); min-width: 0; min-height: 0; background: var(--bg-inset); border: 1px solid var(--border-strong); border-radius: var(--r-8); box-shadow: 0 12px 40px rgb(0 0 0 / 16%); z-index: 29; pointer-events: auto; overflow: hidden; }
+.dock-rail-overlay { display: flex; flex-direction: column; position: absolute; box-sizing: border-box; right: 48px; top: 32px; max-height: calc(100% - 32px); max-width: calc(100vw - 64px); min-width: 0; min-height: 0; background: var(--bg-inset); border: 1px solid var(--border-strong); border-radius: var(--r-10); box-shadow: 0 12px 40px rgb(0 0 0 / 16%); z-index: 29; pointer-events: auto; overflow: hidden; }
+.dock-rail-overlay > .dock-card-header { box-sizing: border-box; flex: 0 0 44px; min-height: 44px; padding: 3px 10px 3px 14px; border-bottom: 1px solid var(--border); }
+.dock-rail-overlay > .dock-group-body { flex: 0 1 auto; flex-direction: column; }
+.dock-rail-overlay > .dock-group-body > .dock-slot { flex: 1 1 auto; }
 .dock-overlay-title { display: flex; align-items: center; gap: var(--sp-6); flex: 1 1 0; min-width: 0; padding-left: 4px; font-size: var(--fs-12); font-weight: var(--fw-medium); }
 .dock-float { display: flex; flex-direction: column; position: fixed; box-sizing: border-box; min-width: 0; min-height: 0; overflow: visible; color: var(--text); background: var(--bg-inset); border: 1px solid var(--border-strong); border-radius: var(--r-8); box-shadow: 0 16px 48px rgb(0 0 0 / 18%), 0 2px 8px rgb(0 0 0 / 8%); }
 .dock-float.is-maximized { border-radius: 0; }
+.dock-panel-content[data-dock-region="float"]:not([data-dock-maximized]) { border-radius: 0 0 calc(var(--r-8) - 1px) calc(var(--r-8) - 1px); }
 .dock-float-titlebar { display: flex; align-items: center; gap: 2px; height: 34px; min-height: 34px; box-sizing: border-box; flex: 0 0 34px; padding: 3px 5px 3px 10px; border-radius: var(--r-8) var(--r-8) 0 0; background: var(--bg-inset); cursor: grab; user-select: none; touch-action: none; }
 .dock-float-title { display: flex; flex: 1 1 0; min-width: 0; align-items: center; gap: var(--sp-6); font-weight: var(--fw-medium); font-size: var(--fs-12); }
 .dock-float-title .icon { flex: 0 0 auto; }
@@ -223,14 +414,39 @@
 .dock-capsule:hover { background: var(--surface-2); border-color: var(--accent-border); }
 .dock-capsule .icon { flex: 0 0 auto; }
 .dock-capsule-overflow { max-width: 180px; height: 32px; pointer-events: auto; }
-.dock-drag-preview { position: fixed; box-sizing: border-box; pointer-events: none; z-index: 59; border: 2px solid var(--accent); border-radius: var(--r-6); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); font-size: var(--fs-12); font-weight: var(--fw-medium); display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: visible; text-shadow: 0 1px 2px var(--bg-inset), 0 -1px 2px var(--bg-inset); }
+.dock-drag-preview { position: fixed; box-sizing: border-box; pointer-events: none; z-index: 57; border-radius: var(--r-8); background: var(--bg-inset); color: var(--text); box-shadow: 0 12px 40px rgb(0 0 0 / 18%); transform-origin: top left; transition-property: none; transition-duration: var(--dur); transition-timing-function: var(--ease-out); }
+.dock-drag-preview * { pointer-events: none !important; }
+.dock-layout-preview { position: fixed; z-index: 31; pointer-events: none; }
+.dock-layout-preview * { pointer-events: none !important; }
+.dock-drag-preview.is-snapped { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dock-drag-preview .dock-preview-group { position: relative; inset: auto; width: 100%; height: 100%; box-sizing: border-box; }
+.dock-drag-preview .dock-preview-group.dock-float { overflow: hidden; }
+.dock-drag-preview .dock-card-list { padding: 0; }
+.dock-drag-preview .dock-tab-close { opacity: 1; }
+.dock-drag-preview .sb-head-actions { opacity: 1; }
+.dock-drag-preview .dock-tabs { scrollbar-width: none; }
+.dock-drag-label { position: absolute; bottom: 100%; left: 0; margin-bottom: 7px; max-width: 100%; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--r-6); background: var(--surface); color: var(--text-2); font-size: var(--fs-11); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock-drag-source { visibility: hidden; pointer-events: none; }
+.dock-drag-source.is-drag-away { display: none; }
+.dock-card-placeholder { box-sizing: border-box; flex: 0 0 auto; }
+.dock-drag-preview > .dock-rail-icon-list { padding: 0; }
+.dock-panel-content.is-drag-preview,
+.dock-panel-content.is-drag-preview * { pointer-events: none !important; }
 .dock-drag-preview[hidden] { display: none; }
 body.dock-dragging :is(.dock-card-header, .dock-tabs, .dock-float-titlebar, .dock-rail-icon) { cursor: grabbing; }
 body.dock-resizing :is(.dock-card, .dock-group, .dock-float) { user-select: none; }
 @media (prefers-reduced-motion: reduce) {
-  .dock-grip, .dock-tab { transition: none; }
+  .dock-card-list, .dock-rail-icon-list { transition-duration: 0s; }
+  .dock-drag-preview { transition-duration: 0.01ms; }
+  .dock-grip, .dock-card.has-meter-summary .dock-grip, .dock-tab, .dock-rail-toolbar, .dock-tab-strip.has-reveal-grip > .dock-group-grip { transition: none; }
+  :root[data-dock-rail-transition]::view-transition-group(*),
+  :root[data-dock-rail-transition]::view-transition-image-pair(*),
+  :root[data-dock-rail-transition]::view-transition-old(*),
+  :root[data-dock-rail-transition]::view-transition-new(*) { animation-duration: 0.01ms !important; }
 }
 @media (pointer: coarse) {
-  .dock-tab > :is(.dock-tab-close, .dock-tab-menu), .dock-grip { opacity: 1; }
+  .dock-tab > .dock-tab-close, .dock-grip { opacity: 1; }
+  /* No hover on touch: keep the group grip reachable instead of proximity-only. */
+  .dock-tab-strip.has-reveal-grip > .dock-group-grip { width: 18px; margin-right: 0; opacity: 1; pointer-events: auto; }
   .dock-card-resizer { height: 10px; }
 }

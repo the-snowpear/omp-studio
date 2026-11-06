@@ -75,6 +75,7 @@
 
   /* Layout metrics */
   --topbar-h: 44px;
+  --nav-rail-w: 56px;
   --sidebar-w: 272px;
   --sidebar-min: 200px;
   --sidebar-max: 400px;
@@ -282,6 +283,30 @@
      --surface 为基准。 */
   --switch-thumb: var(--surface);
   --switch-thumb-disabled: var(--surface);
+
+  /* ---- Explorer 文件类型色（spec §4）----
+     8 个彩色通道 + 4 个别名 + 1 个 dim，不是 12 个色相：doc / config / lock 的语义
+     就是「普通文件」，上色只会把 ΔE 挤坏；package 是 .json，跟 data 同色、由立方体
+     承担区分。实测三态行底（--bg-inset / hover / 选中）最低 4.75:1。
+     使用边界（spec C1-B1，评审看到即打回）：类型色只表达「这个文件是什么」，
+     永久禁止表达「它现在怎么样」——git 状态 / live 读写 / 诊断点 / 构建失败 / 权限
+     告警只能走 --git-* / --red / --amber / --green。 */
+  --ftype-code: #3b5f8f;
+  --ftype-markup: #7d5527;
+  --ftype-style: #8a4a70;
+  --ftype-data: #1f6b55;
+  --ftype-script: #4a6b32;
+  --ftype-test: #6d6118;
+  --ftype-image: #23697d;
+  --ftype-secret: #96434b;
+  /* 别名：不新增色相。用 var() 间接，暗色块只覆盖上面 8 个即可自动跟随。 */
+  --ftype-package: var(--ftype-data);
+  --ftype-doc: var(--text-3);
+  --ftype-config: var(--text-3);
+  --ftype-lock: var(--text-3);
+  /* 噪音目录专用。不用 --glyph-faint：后者在 --surface-hover 上只有 2.85:1，破 3:1。
+     light 三档 4.14 / 3.76 / 3.22 —— 选中档留 0.22 余量（#7d828b 是零余量）。 */
+  --ftype-dim: #787d86;
 }
 
 /* ---------------- Dark ---------------- */
@@ -388,6 +413,19 @@
   --scrollbar-hover: rgba(235, 235, 245, 0.3);
   --minimap-viewport: rgba(235, 235, 245, 0.07);
   --selection: rgba(158, 140, 252, 0.3);
+  /* ---- Explorer 文件类型色（暗色同 8 个通道）----
+     明度重解得比浅色亮得多：dark 三态最低 4.98（--ftype-secret 作正文色）。 */
+  --ftype-code: #93b4dc;
+  --ftype-markup: #d3a271;
+  --ftype-style: #e0a6c2;
+  --ftype-data: #79bfa2;
+  --ftype-script: #9ac387;
+  --ftype-test: #c4bb6f;
+  --ftype-image: #6fc0d2;
+  --ftype-secret: #d1838b;
+  --ftype-dim: #72767f;
+  /* 别名沿用浅色块里的 var() 间接，此处只覆盖 8 个色相。 */
+
   --switch-thumb: var(--glyph-faint);
   /* 禁用·关必须仍比轨道亮：--surface(#1a1b1f) 比轨道 --surface-3(#2b2c33) 更暗，
      沿用会让禁用态重新变成「洞」；这里换成更亮的 --border-float(#46505f)，对
@@ -420,4 +458,66 @@
   --tint-purple: var(--tint-violet);
   --tint-purple-soft: var(--tint-violet-soft);
   --warning-soft: var(--amber-soft);
+}
+
+/* ---------------- Explorer 文件类型 · 三通道严格模式（spec §2 C1 二裁） ----------------
+   组件零改动：<html data-palette="tri"> 即可。12 个类别全部回落中性，只留一个
+   "需注意"通道（--ftype-secret → --amber）。切过去后 12 个图标仍能两两分辨，
+   这是"颜色只是加速器、语义 100% 由剪影承载"的现场证明。
+   选择器特异性 (0,2,0) 与 :root[data-theme="dark"] 相同，靠源顺序取胜 —— 必须留在
+   文件末尾，否则暗色块会把 tri 覆盖回去。
+   根元素用 data-palette（调色板模式），树行用 data-ftype（类型 id），两者不共名：
+   否则 `grep data-ftype` 会混进一个非 type id 的值，与当初否掉 data-t 同因。
+   --ftype-dim 不动：它服务噪音目录的降噪，不属于类型通道。 */
+:root[data-palette="tri"] {
+  --ftype-code: var(--text-3);
+  --ftype-markup: var(--text-3);
+  --ftype-style: var(--text-3);
+  --ftype-data: var(--text-3);
+  --ftype-script: var(--text-3);
+  --ftype-test: var(--text-3);
+  --ftype-image: var(--text-3);
+  --ftype-package: var(--text-3);
+  --ftype-doc: var(--text-3);
+  --ftype-config: var(--text-3);
+  --ftype-lock: var(--text-3);
+  --ftype-secret: var(--amber);
+}
+
+/* 系统强制高对比 / 请求更高对比时自动降级 —— 命中这些设置的人正是最需要它的，
+   不能要求他们再去设置里手动关。与 data-palette="tri" 覆盖同一组变量。
+   选择器用 :root:root（0,2,0）而不是 :root（0,1,0）：后者特异性低于
+   :root[data-theme="dark"]，暗色主题下会被暗色值覆盖，等于没降级。 */
+@media (forced-colors: active) {
+  :root:root:root {
+    --ftype-code: var(--text-3);
+    --ftype-markup: var(--text-3);
+    --ftype-style: var(--text-3);
+    --ftype-data: var(--text-3);
+    --ftype-script: var(--text-3);
+    --ftype-test: var(--text-3);
+    --ftype-image: var(--text-3);
+    --ftype-package: var(--text-3);
+    --ftype-doc: var(--text-3);
+    --ftype-config: var(--text-3);
+    --ftype-lock: var(--text-3);
+    --ftype-secret: var(--amber);
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root:root:root {
+    --ftype-code: var(--text-3);
+    --ftype-markup: var(--text-3);
+    --ftype-style: var(--text-3);
+    --ftype-data: var(--text-3);
+    --ftype-script: var(--text-3);
+    --ftype-test: var(--text-3);
+    --ftype-image: var(--text-3);
+    --ftype-package: var(--text-3);
+    --ftype-doc: var(--text-3);
+    --ftype-config: var(--text-3);
+    --ftype-lock: var(--text-3);
+    --ftype-secret: var(--amber);
+  }
 }

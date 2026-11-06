@@ -166,6 +166,7 @@
 
 .app-body {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   /* clip, not hidden: Chromium still scrolls overflow:hidden ancestors on
@@ -174,6 +175,270 @@
   overflow: clip;
   background: var(--bg);
 }
+
+/* Collapsible left rail + the page/workbench it navigates. The rail deliberately
+   lives outside .app-body: the workbench ResizeObserver measures only the
+   content it drives, and a sidebar overlay can never cover the rail. */
+.app-shell {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: clip;
+  position: relative;
+}
+.app-shell > .page,
+.cw-shared-page > .page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+}
+.app-shell > .app-body { flex: 1; min-width: 0; }
+
+/* Collapsible rail. Only the wrapper's width animates: the destination column is
+   a fixed-width strip clipped by .app-rail-clip, so collapsing hands the 56px
+   back to the page (it never overlays the workbench) and the handle can ride the
+   moving border instead of jumping from one state's position to the other's. */
+.app-rail {
+  --rail-btn-size: 38px;
+  --rail-step: 42px;
+  --rail-handle-w: 18px;
+  --rail-handle-h: 46px;
+  position: relative;
+  flex: none;
+  width: var(--nav-rail-w);
+  display: flex;
+  background: var(--bg-inset);
+  border-top: 1px solid var(--border);
+  z-index: var(--z-panel);
+  user-select: none;
+  -webkit-user-select: none;
+  transition: width var(--dur-slow) var(--ease-nav);
+}
+.app-rail.is-collapsed { width: 0; }
+/* Painted divider rather than border-right: a border keeps a 1px box alive at
+   width:0 and leaves a seam against the sidebar once the rail is gone. */
+.app-rail::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+  transition: opacity var(--dur-slow) var(--ease-nav);
+}
+.app-rail.is-collapsed::after { opacity: 0; }
+.app-rail-clip {
+  width: 100%;
+  height: 100%;
+  overflow: clip;
+}
+.app-rail-nav {
+  width: var(--nav-rail-w);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--sp-8) 0 var(--sp-10);
+}
+/* The handle rides the border line in both states: open it straddles the line
+   (half over the rail, half over the content), collapsed it sits flush against
+   the screen edge. `left: 100%` + margin-left keeps it locked to the moving
+   border for the whole width transition, so nothing snaps at either end.
+   Visual size is a slim tab; ::before grows the pointer target to 28x52.
+   `z-index: 1` is load-bearing: the divider is a ::after, generated after the
+   last child, so at equal stacking order it painted *on top* of the chip and a
+   1px line ran straight through the button. The chip has to cover the line it
+   rides, not the other way round. */
+.app-rail-handle {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 100%;
+  width: var(--rail-handle-w);
+  height: var(--rail-handle-h);
+  margin-left: calc(var(--rail-handle-w) / -2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  color: var(--text-3);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity var(--dur-fast) var(--ease),
+    margin-left var(--dur-slow) var(--ease-nav),
+    border-radius var(--dur-slow) var(--ease-nav),
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.app-rail-handle::before {
+  content: "";
+  position: absolute;
+  inset: -3px -5px;
+}
+.app-rail-handle:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.app-rail-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  opacity: 1;
+  pointer-events: auto;
+}
+/* Revealed by pointer proximity (NavRail.tsx), never by an overlay strip: an
+   invisible band would swallow clicks from the sidebar, and proximity also
+   covers the sidebar side of the line, where the user reaches for it. */
+.app-rail-handle.is-near {
+  opacity: 1;
+  pointer-events: auto;
+}
+.app-rail.is-collapsed .app-rail-handle {
+  margin-left: 0;
+  border-radius: 0 var(--r-full) var(--r-full) 0;
+}
+.app-rail-handle .icon { transition: transform var(--dur-slow) var(--ease-nav); }
+.app-rail.is-collapsed .app-rail-handle .icon { transform: rotate(180deg); }
+.app-rail-top {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  position: relative;
+}
+/* Same clock as .nav-window in pages.css: the tab bubble and the rail
+   highlight move together on route changes. */
+.app-rail-window {
+  position: absolute;
+  top: calc(var(--rail-active-index, 0) * var(--rail-step));
+  left: 50%;
+  width: var(--rail-btn-size);
+  height: var(--rail-btn-size);
+  transform: translateX(-50%);
+  border-radius: 10px;
+  background: var(--surface-active);
+  pointer-events: none;
+  transition: top var(--dur-slow) var(--ease-nav);
+}
+.app-rail-window.is-hidden { display: none; }
+.app-rail-btn {
+  width: var(--rail-btn-size);
+  height: var(--rail-btn-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 10px;
+  color: var(--text-3);
+  position: relative;
+  z-index: 1;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-slow) var(--ease-nav);
+}
+.app-rail-btn .icon { width: 18px; height: 18px; }
+.app-rail-btn:hover { background: var(--surface-hover); color: var(--text); }
+.app-rail-btn.active { color: var(--text); }
+.app-rail-btn:focus-visible,
+.app-rail-avatar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.app-rail-bottom {
+  width: 100%;
+  margin-top: auto;
+  padding-top: var(--sp-8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.app-rail-bottom::before {
+  content: "";
+  width: 24px;
+  height: 1px;
+  background: var(--border);
+  flex: none;
+}
+.app-rail-update { color: var(--accent); }
+.app-rail-notice {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-inset);
+}
+.app-rail-avatar {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+}
+.app-rail-avatar:hover { background: var(--surface-hover); }
+.app-rail-avatar img,
+.app-rail-avatar > span {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex: none;
+}
+.app-rail-avatar img { object-fit: cover; }
+.app-rail-avatar > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  /* 0.4 × 直径：底栏那只 24px 是按同一比例缩的，幽灵缩放后字形才对得上。 */
+  font-size: calc(12px * var(--text-font-scale));
+  font-weight: var(--fw-semibold);
+  overflow: hidden;
+}
+
+/* 头像幽灵：rail 与侧栏底栏之间搬家的那一下由它顶着（useIdentityFlight）。它挂在
+   body 上，两处真身在飞行期间都 visibility:hidden，所以永远只有一只头像在动。 */
+.identity-ghost {
+  position: fixed;
+  z-index: var(--z-fab);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-weight: var(--fw-semibold);
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+.identity-ghost.is-flying {
+  opacity: 1;
+  visibility: visible;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%), 0 10px 24px -10px rgb(0 0 0 / 38%);
+}
+.identity-ghost img { width: 100%; height: 100%; object-fit: cover; }
+/* 幽灵在飞的时候，两处真身一起让开：根类名由 useIdentityFlight 直接打在 <html> 上，
+   不进 React state —— 否则 AppShell 会在动画的头尾各重渲染一次，正好卡帧。 */
+:root.is-identity-floating .app-rail-avatar > span,
+:root.is-identity-floating .app-rail-avatar > img,
+:root.is-identity-floating .sb-avatar-slot { visibility: hidden; }
 
 .adaptive-workbench { position: relative; }
 .adaptive-workbench .sidebar,
@@ -225,11 +490,36 @@
 .tb-overflow { display: none; position: relative; }
 .tb-overflow-menu { top: 82px; right: 12px; left: auto; max-width: calc(100vw - 24px); max-height: calc(100dvh - 94px); overflow: auto; }
 .title-menu-popover { max-width: calc(100vw - 16px); max-height: calc(100dvh - 52px); overflow-y: auto; }
+/* 窄档不藏控件，只把「文字读数」收成图标：Token 用量 → 条形图图标，
+   Context → 只剩圆环，Compact 按钮交给 … 菜单（压缩进行中仍留一个取消图标）。
+   动作图标（Agent Hub / 历史 / Fork / Handoff / 主题 / 首页）始终保留；
+   面包屑保持内容宽度（基础规则已是 flex: 0 1 auto），标题与 Fork/Handoff 贴在一起，
+   剩余空白由 tb-left 吸收，动作/读数图标留在右侧。 */
 .topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) .tb-left { min-width: 0; }
-.topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) :is(.tb-optional, .telemetry) { display: none; }
+.topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) .telemetry {
+  flex: none;
+  gap: var(--sp-2);
+  padding: 0;
+  overflow: visible;
+}
+.topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) .telemetry .t-group {
+  gap: 0;
+  padding: 4px 5px;
+  margin: 0;
+}
+.topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) .telemetry :is(.t-item, .t-sep) { display: none; }
+.topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) .telemetry .t-tok-icon { display: inline-flex; }
+.topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) .tb-compact { display: none; }
+.topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) .tb-compact.is-pending {
+  display: inline-flex;
+  width: 24px;
+  margin-left: 0;
+  padding: 0;
+  justify-content: center;
+}
+.topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) .tb-compact-label { display: none; }
 .topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) .tb-right { flex: none; overflow: visible; }
 .topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) .tb-overflow { display: block; }
-.topbar:is([data-chrome-size="compact"], [data-chrome-size="narrow"]) .tb-crumb { flex: 1; }
 .topbar[data-chrome-size="narrow"] { gap: var(--sp-4); padding-inline: var(--sp-6); }
 .topbar[data-chrome-size="narrow"] :is(.crumb-project, .crumb-branch, .crumb-sep) { display: none; }
 .topbar[data-chrome-size="narrow"] .tb-left { gap: 0; }
@@ -248,12 +538,6 @@ body.is-resizing * {
 }
 body.is-resizing ::selection {
   background: transparent !important;
-}
-
-.app > .page {
-  flex: 1;
-  min-height: 0;
-  height: auto;
 }
 
 .home-h {
@@ -397,16 +681,9 @@ button.project-head {
   border-radius: var(--r-8);
 }
 
-.panel-head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-10);
-  margin-bottom: var(--sp-12);
-}
-.panel-head h2 {
-  margin: 0;
-  font-size: var(--fs-14);
-}
+/* Bottom-dock documents (Output, OMP Logs) keep their layout in
+   `panels/panels.css`: they own their masthead and scrollport instead of
+   inheriting a page frame the dock host does not provide. */
 
 .actions {
   display: flex;
@@ -414,24 +691,6 @@ button.project-head {
   flex-wrap: wrap;
 }
 
-.p4-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-16);
-  margin-top: var(--sp-20);
-  padding-top: var(--sp-16);
-  border-top: 1px solid var(--border);
-}
-.p4-grid h2 {
-  margin-bottom: var(--sp-8);
-  font-size: var(--fs-14);
-}
-
-.generic-command {
-  margin-top: 18px;
-  padding-top: var(--sp-16);
-  border-top: 1px solid var(--border);
-}
 .capability-note {
   margin: var(--sp-14) 0 0;
   padding: var(--sp-10) var(--sp-12);
@@ -440,65 +699,17 @@ button.project-head {
   border-radius: var(--r-4);
 }
 
-.lifecycle-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: var(--sp-4);
-  font-size: var(--fs-12);
-}
-.lifecycle-list li {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-8);
-  min-width: 0;
-  padding: 2px 0;
-}
-.lifecycle-list .mono {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-2);
-}
-
-.event-transcript {
-  overflow: auto;
-  border-top: 1px solid var(--border);
-  background: var(--surface-2);
-}
-.event-transcript > div {
-  position: relative;
-}
-.event-row {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 32px;
-  display: grid;
-  grid-template-columns: 72px 1fr auto;
-  align-items: center;
-  gap: var(--sp-8);
-  padding: 0 var(--sp-10);
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-12);
-  background: var(--surface-2);
-}
-.event-cursor {
-  color: var(--accent);
-}
-
 @media (max-width: 900px) {
+  :root { --nav-rail-w: 48px; }
+  .app-rail { --rail-btn-size: 34px; --rail-step: 38px; }
+  .app-rail-avatar { width: 30px; height: 30px; }
+  .app-rail-avatar img,
+  .app-rail-avatar > span { width: 26px; height: 26px; }
   .side-panel {
     max-width: 100%;
   }
   .page-body {
     padding: var(--sp-20);
-  }
-  .p4-grid {
-    grid-template-columns: 1fr;
   }
 }
 .tool-media-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.tool-media-preview{display:block;max-width:280px;max-height:180px;border:1px solid var(--border,#ddd);border-radius:6px;object-fit:contain;background:var(--surface-muted,#f6f6f6)}

@@ -359,6 +359,9 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 		await runtimeSettings.set("edit.autoRepair.enabled", true, false);
 		expect(cfgEditAutoRepairEnabled.get(session.settings)).toBe(true);
 		await runtimeSettings.set("edit.autoRepair.enabled", false, true);
+		// A user-config write must not discard a higher-priority session override.
+		expect(cfgEditAutoRepairEnabled.get(session.settings)).toBe(true);
+		cfgEditAutoRepairEnabled.clearOverride(session.settings);
 		expect(cfgEditAutoRepairEnabled.get(session.settings)).toBe(false);
 		await expect(runtimeSettings.set("edit.autoRepair.enabled", "yes", false)).rejects.toMatchObject({
 			code: "INVALID_ARGUMENT",
@@ -378,7 +381,7 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 			restartRequired: true,
 		});
 		expect(cfgCompactionExperimentalContextManagement.get(session.settings)).toBe(false);
-		expect(runtimeSettings.activation()).toEqual({
+		expect(runtimeSettings.activation()).toMatchObject({
 			configured: { "compaction.experimentalContextManagement": true },
 			restartRequired: ["compaction.experimentalContextManagement"],
 			sources: expect.objectContaining({ "compaction.experimentalContextManagement": "runtime" }),

@@ -1,4 +1,4 @@
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useWorkbenchLayout } from "./useWorkbenchLayout";
 import { CONVERSATION_MIN_WIDTH, SIDE_PANEL_LIMITS, type WorkbenchPreferences } from "./workbenchLayout";
@@ -26,6 +26,7 @@ function Probe({ prefs: preferences, onLayout }: { prefs: WorkbenchPreferences; 
   onLayout(layout);
   return (
     <div ref={layout.rootRef} className="app-body">
+      <aside id="sidebar" />
       <div id="workbench" />
       <div className="composer-region" />
     </div>
@@ -78,6 +79,21 @@ describe("workbench focus priority", () => {
     expect(f.layout.overlay).toBeNull();
     expect(f.layout.sideShown).toBe(false);
     f.view.unmount();
+  });
+
+  it("leaves Escape to an active dock drag without dismissing the sidebar", () => {
+    const f = harness(640);
+    f.call(layout => layout.focusPanel("sidebar"));
+    expect(f.layout.overlay).toBe("sidebar");
+    document.body.classList.add("dock-dragging");
+    try {
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(f.layout.overlay).toBe("sidebar");
+    } finally {
+      document.body.classList.remove("dock-dragging");
+    }
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(f.layout.overlay).toBeNull();
   });
 
   it("ignores a release for a panel that holds nothing", () => {

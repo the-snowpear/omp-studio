@@ -73,7 +73,7 @@ test("IDA absent state is explicit and never installs software", async () => {
 test("native Python fence rejects stale reviews after another actor edits or a mutation fails", async () => {
 	const script = `import ast,json,os,sys,threading,time,uuid
 source=ast.parse(open(sys.argv[1],encoding='utf8').read())
-nodes=[n for n in source.body if isinstance(n,ast.FunctionDef) and n.name in ('_handle','_run')]
+nodes=[n for n in source.body if isinstance(n,ast.FunctionDef) and n.name in ('_handle','_run','_view_page','_view_list')]
 sent=[]
 calls=[]
 checkpoints=[]
@@ -92,6 +92,15 @@ assert not call('studio',{'method':'rename','identity':'other','version':2})['ok
 page=call('studio',{'method':'view','identity':'native','version':2,'offset':1,'limit':1})['result']['result']
 assert page['text']=='two' and page['nextOffset']==2
 assert not call('studio',{'method':'view','identity':'native','version':2,'offset':99})['ok']
+from types import SimpleNamespace
+reads=[]
+items=[SimpleNamespace(address=index,length=4,internal_type=0) for index in range(1000)]
+scope['_db']=lambda:SimpleNamespace(strings=SimpleNamespace(get_all=lambda:iter(items)))
+def read_string(address,length,kind): reads.append(address);return b'test'
+scope['ida_bytes']=SimpleNamespace(get_strlit_contents=read_string)
+page=call('studio',{'method':'view','identity':'native','version':2,'params':{'kind':'strings'},'offset':500,'limit':2})['result']['result']
+assert reads==[500,501] and page['total']==1000 and page['nextOffset']==502
+assert page['text']=='0x1f4  "test"\\n0x1f5  "test"'
 assert calls==['rename','comment']
 print('fence and exactly-once execution passed')
 `;

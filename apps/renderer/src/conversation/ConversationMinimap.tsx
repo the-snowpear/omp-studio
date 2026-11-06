@@ -14,6 +14,7 @@ import {
 } from "react";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { compactMinimapPreview } from "./compactSummary";
 import { batchSummary, toolKind, type ThinkView } from "./toolMeta";
 import { tailStreaming, timelineStructureToken } from "./conversationViewModel";
@@ -470,6 +471,7 @@ export function ConversationMinimap({
   const draggingRef = useRef(false);
 
   const { t } = useI18n();
+  const { marks: previewMarks } = usePreviewMode();
   const [fractions, setFractions] = useState<MarkFractions>({});
   const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -1266,7 +1268,7 @@ export function ConversationMinimap({
         >
           <div className="mp-no">
             #{String(hoveredMark.turn).padStart(2, "0")} · {t(hoveredMark.labelKey)}
-            {preview ? <span className="mp-demo">{t("conversation.minimapDemo")}</span> : null}
+            {preview && previewMarks ? <span className="mp-demo">{t("conversation.minimapDemo")}</span> : null}
           </div>
           {hoveredMark.previewKey !== undefined ? (
             <div className="mp-user">{t(hoveredMark.previewKey)}</div>

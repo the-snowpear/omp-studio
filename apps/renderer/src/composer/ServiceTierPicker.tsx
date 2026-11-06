@@ -8,7 +8,7 @@ import { PREVIEW_SERVICE_TIER } from "../preview/sessionGuiPreview";
 import { Icon } from "../icons";
 
 export function ServiceTierPicker({ client, sessionId, available, modelKey }: { client: StudioClient; sessionId: string | undefined; available: boolean; modelKey: string }) {
- const {preview}=usePreviewMode();const {resolvedLanguage}=useI18n();const zh=resolvedLanguage==="zh";
+ const {preview,marks}=usePreviewMode();const {resolvedLanguage}=useI18n();const zh=resolvedLanguage==="zh";
  const [state,setState]=useState<SessionTierState>();const [open,setOpen]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState("");const epoch=useRef(0);
  useEffect(()=>{const generation=++epoch.current;setState(preview?PREVIEW_SERVICE_TIER:undefined);setError("");setBusy(false);
   if(!preview&&available&&sessionId){setBusy(true);void (async()=>{try{const handle=await client.command("session.tier.get",{sessionId});const value=await waitReceipt<{result:SessionTierState}>(client,handle.requestId);if(epoch.current===generation)setState(value.result);}catch(cause){if(epoch.current===generation)setError(hostErrorMessage(cause,zh?"档位不可用":"Service tiers unavailable"));}finally{if(epoch.current===generation)setBusy(false);}})();}
@@ -19,7 +19,7 @@ export function ServiceTierPicker({ client, sessionId, available, modelKey }: { 
  return <div className="composer-tier" style={{position:"relative"}}>
   <button className="icon-btn small" aria-expanded={open} aria-label={zh?"服务档位":"Service tier"} aria-description={state?labels[state.effective]:undefined} data-tip={`${zh?"服务档位":"Service tier"}${state?`: ${labels[state.effective]}`:""}`} onClick={()=>setOpen(!open)}><Icon name={state?.effective==="slow"?"clock":"zap"} extra="sm" /></button>
   {open?<div className="rms-pop" style={{position:"absolute",bottom:"100%",right:0,minWidth:250,padding:12}}>
-   <p className="small muted">{preview?(zh?"演示":"Demo"):zh?"仅当前会话":"Current session only"}</p>
+   <p className="small muted">{preview&&marks?(zh?"演示":"Demo"):zh?"仅当前会话":"Current session only"}</p>
    {!preview&&!available?<p role="status">{zh?"当前 Runtime 不支持服务档位面板":"This Runtime does not support service tiers"}</p>:null}
    {state?<><p className="small">{zh?"配置":"Configured"}: {state.configured} · {zh?"生效":"Effective"}: {labels[state.effective]}</p>{state.choices.map(choice=><button key={choice.id} className="btn small outline" disabled={busy||!choice.available} title={choice.reason} aria-pressed={state.effective===choice.id} onClick={()=>void change(choice.id)}>{labels[choice.id]}</button>)}{state.usageStatus?<p role="status">{state.usageStatus}</p>:null}</>:null}
    {error?<p role="alert">{error}</p>:null}

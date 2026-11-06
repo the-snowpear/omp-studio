@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { StudioClientImpl } from "@omp-studio/client";
 import { contractFixtures } from "@omp-studio/testkit";
@@ -68,11 +68,13 @@ it("a named session refreshes history once instead of looping after the result c
 it("blocks secondary navigation and forward when model configuration is dirty", async () => {
   await mount();
   await open("Project Home");
+  expect(document.querySelector('nav.page-nav [data-nav="home"]')).not.toBeNull();
+  expect(screen.getByRole("navigation", { name: "Primary" })).toBeTruthy();
   await open("Model Configuration");
   await screen.findByRole("heading", { name: "Model editor" });
   fireEvent.click(screen.getByRole("button", { name: "Mark model dirty" }));
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-  fireEvent.click(document.querySelector('a[data-nav="settings"]')!);
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name: "Settings" }));
   expect(document.querySelector("#pageBody")?.getAttribute("data-route")).toBe("model-config");
   expect((screen.getByLabelText("Model draft") as HTMLInputElement).value).toBe("unsaved provider");
   expect(confirm).toHaveBeenCalledOnce();

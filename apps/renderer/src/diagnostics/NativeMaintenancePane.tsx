@@ -42,7 +42,7 @@ export function NativeMaintenancePane({
   capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
   active: boolean;
 }) {
-  const { preview } = usePreviewMode(),
+  const { preview, marks } = usePreviewMode(),
     { resolvedLanguage } = useI18n(),
     zh = resolvedLanguage === "zh";
   const [categories, setCategories] = useState<GcCategory[]>([
@@ -219,7 +219,7 @@ export function NativeMaintenancePane({
             });
         if (current === epoch.current) {
           setGc({ phase: "complete", summary: result });
-          if (preview)
+          if (preview && marks)
             setNotice(
               zh
                 ? "演示清理完成，未修改任何文件。"
@@ -276,7 +276,7 @@ export function NativeMaintenancePane({
         <div>
           <h2>
             {zh ? "会话与本地数据" : "Sessions and local data"}{" "}
-            {preview ? (
+            {preview && marks ? (
               <span className="chip gray xs">{zh ? "演示" : "Demo"}</span>
             ) : null}
           </h2>
@@ -351,11 +351,12 @@ export function NativeMaintenancePane({
               disabled={!preview && !globalThis.ompStudioChrome?.exportArtifact}
               onClick={() => {
                 if (preview) {
-                  setNotice(
-                    zh
-                      ? "演示产物不会写入本机。"
-                      : "Demo artifacts are not written to disk.",
-                  );
+                  if (marks)
+                    setNotice(
+                      zh
+                        ? "演示产物不会写入本机。"
+                        : "Demo artifacts are not written to disk.",
+                    );
                   return;
                 }
                 void globalThis.ompStudioChrome!.exportArtifact!({
@@ -592,7 +593,7 @@ export function NativeMaintenancePane({
                   : "The native collector rechecks files and live sessions. Deletion of unreferenced attachments or expired files cannot be undone in Studio."}
               </p>
               <p>{categories.map(label).join(" · ")}</p>
-              {preview ? (
+              {preview && marks ? (
                 <p>
                   {zh
                     ? "演示操作不会修改真实文件。"

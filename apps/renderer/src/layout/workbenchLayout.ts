@@ -104,7 +104,7 @@ export function fitWorkbench(
   const occupied = (horizontal.sidebarShown && horizontal.overlay !== "sidebar" ? horizontal.sidebarWidth : 0)
     + (horizontal.sideShown && horizontal.overlay !== "side" ? horizontal.panelWidth : 0);
   const railBuffer = previous?.railMode === "compact" && priority === null ? LAYOUT_RESTORE_GAP : 0;
-  const railMode = preferredRail === "expanded" && width - occupied - railWidth < CONVERSATION_MIN_WIDTH + railBuffer ? "compact" : preferredRail;
+  const railMode = preferredRail === "expanded" && width - occupied - railWidth - 12 < CONVERSATION_MIN_WIDTH + railBuffer ? "compact" : preferredRail;
   const preferredHeight = panelSize(prefs.bottomHeight, BOTTOM_PANEL_LIMITS);
   const budget = Math.max(0, available.height - available.composerHeight - 160);
   const bottomOverlay = priority === "bottom" && prefs.bottomVisible && prefs.bottomOpen && budget < BOTTOM_PANEL_LIMITS.min;

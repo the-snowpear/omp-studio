@@ -1,0 +1,41 @@
+.dictation-control { position: relative; display: inline-flex; align-items: center; flex: none; }
+.dictation-control.is-active .dictation-mic { background: var(--accent-soft); color: var(--accent); }
+.dictation-control.has-recovery .dictation-mic { color: var(--danger-orange); }
+.dictation-panel { position: fixed; z-index: calc(var(--z-float) + 1); bottom: 12px; left: 16px; width: min(390px, calc(100vw - 32px)); max-height: min(540px, 70vh); overflow: auto; box-sizing: border-box; padding: 14px; border: 1px solid var(--border-float); border-radius: 12px; background: var(--surface); color: var(--text); box-shadow: var(--shadow-menu); animation: dictation-enter 140ms ease-out; }
+.dictation-panel p { margin: 8px 0; line-height: 1.55; }
+.dictation-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.dictation-head strong { font-size: 13px; font-weight: 600; }
+.dictation-head time { margin-left: 2px; color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.dictation-status-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--surface-2); color: var(--text-2); }
+.dictation-status-mark.recording { color: var(--accent); background: var(--accent-soft); }
+.dictation-status-mark.error, .dictation-status-mark.retained { color: var(--danger-orange); }
+.dictation-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.dictation-warning { font-size: 12px; color: var(--danger-orange); line-height: 1.55; overflow-wrap: anywhere; }
+.dictation-details { margin-top: 10px; }
+.dictation-details > div { display: flex; align-items: center; gap: 8px; }
+.dictation-model { color: var(--text); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.dictation-details > p { color: var(--text-2); font-size: 12px; }
+.dictation-details > .dictation-warning { color: var(--danger-orange); }
+.dictation-meter-row, .dictation-device-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.dictation-level { display: block; width: 96px; height: 7px; flex: 1; max-width: 150px; border: 0; border-radius: 4px; background: var(--surface-3); }
+.dictation-level::-webkit-meter-bar { border: 0; border-radius: 4px; background: var(--surface-3); }
+.dictation-level::-webkit-meter-optimum-value { border-radius: 4px; background: var(--accent); }
+.dictation-level::-moz-meter-bar { border-radius: 4px; background: var(--accent); }
+.dictation-device-setup { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
+.dictation-device-setup > label { display: grid; gap: 6px; }
+.dictation-device-actions { flex-wrap: wrap; }
+.dictation-recovery-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 170px; overflow: auto; padding: 9px; border-radius: 7px; background: var(--surface-2); font-size: 12px; }
+.dictation-progress { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--text-2); }
+.dictation-progress progress { width: 100%; accent-color: var(--accent); height: 6px; }
+.dictation-settings-extras { padding: 0 0 16px; }
+.dictation-settings-extras > .dictation-device-setup { margin: 0 0 12px; padding-top: 0; border-top: 0; }
+.dictation-shortcut { display: flex; align-items: center; gap: 6px; }
+.dictation-demo { padding: 12px; margin-top: 12px; background: var(--surface-2); border: 1px dashed var(--border-strong); border-radius: 9px; }
+.dictation-demo > header { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
+.dictation-demo textarea { width: 100%; min-height: 74px; resize: vertical; box-sizing: border-box; margin-top: 10px; }
+[data-composer-dictation] { color: var(--accent); text-decoration: underline dotted var(--accent-border); text-underline-offset: 4px; }
+[data-composer-dictation] [data-dictation-partial] { opacity: .65; }
+.dictation-control button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@keyframes dictation-enter { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dictation-panel { animation: none; } }
+@media (forced-colors: active) { .dictation-panel, .dictation-status-mark { border: 1px solid CanvasText; } .dictation-level { forced-color-adjust: auto; } }

@@ -2,9 +2,11 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { RemoteConnectionProfile } from "../../../desktop/src/remote/shared";
 import { Icon } from "../icons";
+import { usePreviewMode } from "../preview/PreviewContext";
 import "./ssh.css";
 
 export function SshPasswordDialog({ profile, demo = false, onSubmit, onCancel }: { profile: RemoteConnectionProfile; demo?: boolean; onSubmit(password: string): void; onCancel(): void }) {
+  const { marks } = usePreviewMode();
   const dialog = useRef<HTMLDialogElement>(null);
   const password = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -27,7 +29,7 @@ export function SshPasswordDialog({ profile, demo = false, onSubmit, onCancel }:
     }}>
       <p className="muted small">{profile.user}@{profile.host}{profile.port ? `:${profile.port}` : ""}</p>
       <label>SSH 密码<input ref={password} type="password" required autoComplete="off" autoCapitalize="off" spellCheck={false} maxLength={4096} /></label>
-      <p className="muted small">{demo ? "演示模式：不连接服务器，请勿输入真实密码。" : "只在本次连接期间保留于主进程内存，断开后清除。不会保存到连接配置、写入命令行或复制到远端文件。"}</p>
+      <p className="muted small">{demo && marks ? "演示模式：不连接服务器，请勿输入真实密码。" : "只在本次连接期间保留于主进程内存，断开后清除。不会保存到连接配置、写入命令行或复制到远端文件。"}</p>
       <p className="muted small">首次主机信任仍需在系统 SSH 完成。暂不支持密码变更、验证码或多因素登录。</p>
       <div className="ssh-dialog-actions"><button type="button" className="btn outline" onClick={cancel}>取消</button><button className="btn primary">连接</button></div>
     </form>

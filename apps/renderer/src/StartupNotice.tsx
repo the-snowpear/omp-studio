@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Brand } from "./brands";
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
+import { usePreviewMode } from "./preview/PreviewContext";
 import {
   PROJECT_GITHUB_HOST,
   PROJECT_GITHUB_URL,
@@ -116,12 +117,14 @@ export function StartupNoticeDialog({
 }
 
 export function StartupNotice(): ReactNode {
+  const { marks } = usePreviewMode();
   const [open, setOpen] = useState(shouldShowStartupNotice);
   const close = useCallback(() => setOpen(false), []);
   const dontRemind = useCallback(() => {
     dismissStartupNoticeForever();
     setOpen(false);
   }, []);
-  if (!open) return null;
+  // 预览数据按真实页面呈现时，不弹「开发预览 / 应用尚未完成」。
+  if (!marks || !open) return null;
   return <StartupNoticeDialog onClose={close} onDontRemind={dontRemind} />;
 }

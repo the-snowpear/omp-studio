@@ -5,10 +5,11 @@ import type { SubagentHubTarget } from "./toolMeta";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 
 export type UseSubagentConversationResult = SubagentConversationSnapshot & { loadOlder: () => void };
-export function useSubagentConversation(input: { readonly preview: boolean; readonly client: SubagentConversationClient | null; readonly target: SubagentHubTarget | null; readonly runtimeConnected: boolean; readonly parentSessionId?: SessionId; readonly liveSessionId?: SessionId }): UseSubagentConversationResult {
-  const engine = useMemo(() => createSubagentConversationEngine(subagentEngineInput(input)), [input.preview, input.client, input.target?.agentId, input.parentSessionId, input.liveSessionId, input.runtimeConnected]);
+export function useSubagentConversation(input: { readonly preview: boolean; readonly previewStream?: boolean; readonly client: SubagentConversationClient | null; readonly target: SubagentHubTarget | null; readonly runtimeConnected: boolean; readonly parentSessionId?: SessionId; readonly liveSessionId?: SessionId; readonly visible?: boolean; readonly agentGeneration?: number }): UseSubagentConversationResult {
+  const engine = useMemo(() => createSubagentConversationEngine(subagentEngineInput(input)), [input.preview, input.previewStream, input.client, input.target?.agentId, input.parentSessionId, input.liveSessionId, input.agentGeneration]);
   const { syncRevision } = useExecutionTarget();
-  useEffect(() => { engine.start(); return () => engine.dispose(); }, [engine]);
+  useEffect(() => () => engine.dispose(), [engine]);
+  useEffect(() => { engine.setActive(input.visible !== false, input.runtimeConnected); }, [engine, input.visible, input.runtimeConnected]);
   const lastSync = useRef({ engine, syncRevision });
   useEffect(() => {
     const previous = lastSync.current;

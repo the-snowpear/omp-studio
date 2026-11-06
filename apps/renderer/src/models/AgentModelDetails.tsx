@@ -28,7 +28,7 @@ export function AgentModelDetails({
   previewModel?: string | undefined;
   previewSaved?: boolean;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [open, setOpen] = useState(false);
@@ -118,7 +118,7 @@ export function AgentModelDetails({
     >
       <summary>
         {zh ? "模型与思考" : "Models and thinking"}
-        {preview ? (zh ? " · 演示" : " · Demo") : ""}
+        {preview && marks ? (zh ? " · 演示" : " · Demo") : ""}
       </summary>
       {!enabled ? (
         <p className="tiny muted">

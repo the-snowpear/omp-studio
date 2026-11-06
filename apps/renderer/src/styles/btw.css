@@ -322,4 +322,126 @@ body.is-btw-dragging .sp-head .tabs button.btw-tab { cursor: grabbing; }
 }
 
 /* 侧栏页里内容体自己撑满，不再有标题栏与把手。 */
-#spBtw .btw-panel { padding: var(--sp-12); }
+#spBtw .btw-panel:not(.btw-conversation) { padding: var(--sp-12); }
+
+/* ---------------- 旁路对话工作区 ---------------- */
+.btw-panel.btw-conversation {
+  gap: 0;
+  padding: 0;
+  min-width: 0;
+  overflow: hidden;
+  container-type: inline-size;
+  background: var(--surface);
+}
+.btw-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex: none;
+  padding: var(--sp-10) var(--sp-12);
+  border-bottom: 1px solid var(--border);
+}
+.btw-topic-row {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.btw-topic-icon { flex: none; color: var(--text-3); margin-right: var(--sp-2); }
+.btw-topic-row .btw-topic-select {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  padding: var(--sp-4) var(--sp-6);
+  border-color: transparent;
+  background: transparent;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+}
+.btw-topic-select:hover:not(:disabled) { background: var(--surface-hover); }
+.btw-topic-row .btw-new-topic { flex: none; white-space: nowrap; }
+.btw-transcript {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--sp-20) var(--sp-16);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+/* 消息气泡、正文、代码卡片与消息操作直接沿用主对话的 ev-* 样式。 */
+.btw-turn { min-width: 0; overflow-wrap: anywhere; }
+.btw-transcript .ev-head .btw-status { margin-left: auto; }
+.btw-turn-time { margin-left: auto; color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.btw-history-status { margin-left: auto; color: var(--text-3); }
+.btw-history-status.is-error { color: var(--red); }
+.btw-running-topic { display: flex; align-items: center; gap: var(--sp-6); flex: none; padding: var(--sp-8) var(--sp-16); background: var(--accent-softer); color: var(--accent); font-size: var(--fs-11); text-align: left; }
+.btw-running-topic:hover { background: var(--accent-soft); }
+.btw-child-pane { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.btw-child-context { flex: none; margin: 0; padding: var(--sp-8) var(--sp-12); color: var(--text-3); font-size: var(--fs-11); overflow-wrap: anywhere; }
+.btw-empty.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  min-height: min(280px, 100%);
+  padding: var(--sp-24) var(--sp-8);
+  text-align: left;
+}
+.btw-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: var(--sp-16);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface-2);
+  color: var(--accent);
+}
+.btw-empty.empty h3 { margin: 0 0 var(--sp-8); color: var(--text); font-size: var(--fs-16); font-weight: var(--fw-semibold); }
+.btw-empty.empty p { margin: 0; max-width: 28em; color: var(--text-2); font-size: var(--fs-12); line-height: 1.8; }
+.btw-empty-history { margin-top: var(--sp-16); color: var(--text-3); font-size: var(--fs-11); line-height: 1.7; }
+.btw-compose-area {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  flex: none;
+  padding: var(--sp-12) var(--sp-16) var(--sp-16);
+}
+.btw-composer { width: 100%; margin: 0; padding-top: var(--sp-4); }
+.btw-composer:focus-within {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 2px var(--accent-softer);
+}
+.btw-composer .chip-composer-editor {
+  min-height: 44px;
+  max-height: 160px;
+}
+.btw-composer .composer-bar .spacer { flex: 1; }
+.btw-image-button { color: var(--text-3); }
+.btw-image-button:hover:not(:disabled) { color: var(--text); }
+.btw-compose-hint {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  text-align: right;
+}
+.btw-feedback { display: flex; align-items: center; gap: var(--sp-8); color: var(--text-2); font-size: var(--fs-11); }
+.btw-feedback > span { flex: 1; }
+.btw-compose-area .btw-error { line-height: 1.6; overflow-wrap: anywhere; }
+.btw-thinking { display: flex; align-items: center; gap: 5px; min-height: 28px; }
+.btw-thinking > span { width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); animation: btw-pulse 1.4s ease-in-out infinite; }
+.btw-thinking > span:nth-child(2) { animation-delay: 160ms; }
+.btw-thinking > span:nth-child(3) { animation-delay: 320ms; }
+@container (max-width: 360px) {
+  .btw-transcript { padding: var(--sp-16) var(--sp-12); }
+  .btw-compose-area { padding-inline: var(--sp-12); }
+  .btw-toolbar { padding-inline: var(--sp-10); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btw-thinking > span { animation: none; }
+}

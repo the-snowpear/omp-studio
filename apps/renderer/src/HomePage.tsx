@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { ClientBootstrap, HomeReadModel, SessionHistoryReadModel, StudioClient, TokenUsageReadModel, WorkspaceListReadModel } from "@omp-studio/client-contract";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import { pagePhaseClass, useDeferredKey } from "./pageTransition";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_ACTIVITY, PREVIEW_PROJECTS } from "./preview/fixtures";
@@ -35,8 +35,10 @@ import { useI18n } from "./i18n";
 
 export type PageRoute = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media" | "evaluation" | "statistics";
 
-const PAGE_NAV_DEFS: ReadonlyArray<{ id: PageRoute; icon: string; key: string }> = [
-  { id: "workbench", icon: "layout", key: "nav.workbench" },
+/** The persistent AppNavRail is an additional entry point; the page header keeps
+ *  the original full tab row so both surfaces stay in sync. */
+const PAGE_NAV_DEFS: ReadonlyArray<{ id: PageRoute; icon: IconName; key: string }> = [
+  { id: "workbench", icon: "workbench", key: "nav.workbench" },
   { id: "home", icon: "home", key: "nav.home" },
   { id: "history", icon: "history", key: "nav.history" },
   { id: "capabilities", icon: "package", key: "nav.capabilities" },
@@ -59,15 +61,18 @@ export function SecondaryPage({
   className,
   onRoute,
   onToggleTheme,
+  backRoute = "workbench",
   children,
 }: {
   route: PageRoute;
   title: string;
-  titleIcon?: string;
+  titleIcon?: IconName;
   theme: "light" | "dark";
   className?: string;
   onRoute: (route: PageRoute) => void;
   onToggleTheme: () => void;
+  /** 页头返回按钮的目标页。多数二级页回工作台；统计页由首页 Token 卡进入，回首页。 */
+  backRoute?: PageRoute;
   children: ReactNode;
 }) {
   const { t } = useI18n();
@@ -141,10 +146,13 @@ export function SecondaryPage({
     );
   };
 
+  /* 返回按钮的提示跟随真实目标页，避免「回首页」却挂着「工作台」。 */
+  const backLabel = t(PAGE_NAV_DEFS.find((entry) => entry.id === backRoute)?.key ?? "nav.workbench");
+
   return (
     <div className={className ? `page ${className}` : "page"} id="pageRoot">
       <header className="page-head" id="pageHead">
-        <button className="icon-btn" data-tip={t("nav.workbench")} aria-label={t("nav.workbench")} onClick={() => onRoute("workbench")}>
+        <button className="icon-btn" data-tip={backLabel} aria-label={backLabel} onClick={() => onRoute(backRoute)}>
           <Icon name="arrow-l" />
         </button>
         <span className="ph-title">{titleIcon ? <Icon name={titleIcon} extra="sm" /> : null}{title}</span>
@@ -453,7 +461,7 @@ const EMPTY_CHART_MODELS: readonly TokenChartModelPts[] = [];
 
 function TokenUsageCard({ client, onOpenStats }: { client?: StudioClient; onOpenStats: () => void }) {
   const { t, resolvedLanguage } = useI18n();
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const previewUsage = useMemo(() => buildPreviewUsage(), []);
   const [liveUsage, setLiveUsage] = useState<TokenUsageReadModel | null>(null);
   const [view, setView] = useState<TokenView>("month");
@@ -807,7 +815,7 @@ function TokenUsageCard({ client, onOpenStats }: { client?: StudioClient; onOpen
           ? dayLabel(hoverPoint.ts, resolvedLanguage)
           : ""
     : "";
-  const rangeText = preview
+  const rangeText = preview && marks
     ? t("common.demo")
     : loading
       ? t("home.syncingUsage")
@@ -971,7 +979,7 @@ function TokenUsageCard({ client, onOpenStats }: { client?: StudioClient; onOpen
           ))}
         </div>
         <div className="tk-cal-foot">
-          <span className="tiny muted">{preview ? t("home.colorByDailyUsageDemo") : t("home.colorByDailyUsage")}</span>
+          <span className="tiny muted">{preview && marks ? t("home.colorByDailyUsageDemo") : t("home.colorByDailyUsage")}</span>
           <span className="spacer" />
           <span className="tk-scale" aria-hidden="true">{t("home.less")}
             <i data-s="0" /><i data-s="1" /><i data-s="2" /><i data-s="3" /><i data-s="4" /><i className="tk-scale-max">{t("home.more")}</i>
@@ -1009,7 +1017,7 @@ export function HomePage({
   if (snapshot?.isStreaming) extraBits.push(t("runtime.taskRunning"));
   if (waiting > 0) extraBits.push(t("runtime.agentsIdle", { count: waiting }));
 
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { profile, update, persistAvatar } = useOperatorProfile();
   const [editingProfile, setEditingProfile] = useState(false);
   const activities = (history?.entries ?? []).slice(0, 5);
@@ -1054,7 +1062,7 @@ export function HomePage({
               }
               onPickFolder?.();
             }}
-            data-tip={preview ? t("common.preview") : t("common.open")}
+            data-tip={preview && marks ? t("common.preview") : t("common.open")}
           >
             <Icon name="folder-open" extra="sm" />{t("home.openLocalFolder")}
           </button>

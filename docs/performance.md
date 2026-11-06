@@ -2,7 +2,7 @@
 
 启动/整壳订阅、按需加载和资源体积的后续优化见 [2026-10-29 报告](performance-2026-10-29.md)；第二轮综合审查（打包形态、GPU 软合成、6× 低配、动画 A/B）见 [performance-review-2026-10-29-round2.md](performance-review-2026-10-29-round2.md)。`scripts/startup-perf.mjs` 单独测完整 App 合成夹具，不代替真实 Runtime 启动数据；性能脚本支持用 `PERF_URL` 连接已启动的生产验证页面。
 
-OMP Studio 的流式管线继续使用 Runtime Bridge、Host conversation 事件、Renderer 有界 Store 和现有 Markdown 扫描器。优化不改变持久 transcript，也不删除 IPC 校验或 Renderer transport 的克隆隔离。
+OMP Studio 的流式管线继续使用 Runtime Bridge、Host conversation 事件、Renderer 有界 Store 和现有 Markdown 扫描器。优化不改变持久 transcript，也不删除执行服务的安全检查或 Renderer transport 的克隆隔离；固定可信 Main 输出不重复做逐字段解析。
 
 ## 数据路径与所有权
 
@@ -101,7 +101,7 @@ Runtime 修改仍按 `npm run omp:overlay:apply` → vendor 编辑 → `npm run 
 - `RuntimeInstaller#currentManifest()` 每次仍完整验签（三份签名元数据 + ed25519），只有 entrypoint 的**字节**校验走证据缓存 `StatKeyedVerificationCache`。
 - 缓存键 = 绝对路径 + `lstat` 身份（size/mtimeMs/inode/dev）+ assertion（校验类型、版本、期望摘要）；TTL 10 分钟；install/activate/rollback/uninstall/prune 一律 `invalidate()`；进程重启即空；执行边界（spawn 前）的指纹永远当场读。
 - 三层失效（stat 身份、TTL、进程内 + 显式 invalidate）都是承重的，简化时必须保留。`mtime + size` 不能单独作为永久信任依据。
-- 诊断：`installer.verificationStats()`（`contentHashes` / `cacheHits` / `singleFlightJoins` / `skippedBytes`）、`backend.fingerprints.stats()`。
+- 诊断：`installer.verificationStats()`（`contentHashes` / `cacheHits` / `singleFlightJoins` / `skippedBytes`）。执行边界指纹每次当场读取，不再描述已移除的 Host 指纹缓存。
 
 ### Facade 快照与 conversation.open
 
@@ -114,15 +114,38 @@ Runtime 修改仍按 `npm run omp:overlay:apply` → vendor 编辑 → `npm run 
 - 有界：每会话缓冲硬上限 2MiB，到上限**先暂停源再交付**，不丢字节；退出时先刷净缓冲再发 exit，并留一个合批窗口给 ConPTY 的尾行。
 - 流控：渲染侧 `xterm.write` 回调 ACK，水位 HIGH 500KiB / LOW 100KiB（xterm 官方建议）。没有 ACK 的旧 preload 自动降级为"只合批、不暂停"。
 - 输入通道不合批、不计水位。
+- 单个 Buffer 批次直接解码，不再 `Buffer.concat` 复制；多个 Buffer 仍按顺序合并，`StringDecoder` 的跨窗口状态不变。
+- 本地会话只有一份按 ID 索引的 owner/process/listeners/size/生命周期记录；自然退出进入 draining，不占运行限额。`TerminalOutputBatcher.finish()` 先排空、保留一个合批窗口，`close()` 取消尾部计时并最终解码，release 在输出之后只调用一次。本地/SSH 共用这套时序；录制在 final flush 后结束，窗口清理同时处理 running/draining。
+- Renderer 仅在会话列表变化时重建 ID 索引。ACK 回调只捕获 id/bytes，不额外滞留整份 event/batch 正文；live/ended 逐批有序排空，ended 不拼接整个最多 3MiB 的 backlog，也不 ACK。图片转义剥离后仍按 wire bytes 计数；无 xterm 时不提前信用，超限丢弃保留显式通知。
+
+### Composer 草稿与测量
+
+- `composer/useComposerDraft.ts` 持有精确 live 草稿和稳定的发布回调；渲染视图保持 140ms trailing debounce。空/非空、图片、胶囊边界立即发布，状态签名用标量保存，不重复扫描旧快照；发送与排队读取 editor/live 而非延迟视图。
+- 恢复/清空只写 editor 一次，立即发布该次 emit 的归一化快照；图片编号、目标级 draft book、页面导航和焦点规则保持不变。首次非空草稿显示侧栏临时会话行的壳渲染是状态边界，不当成连续击键回归。
+- 胶囊结构变化保留同步编号/测量；宽度 ResizeObserver 与胶囊变化共用一个可取消 RAF，连续插入/删除每帧至多补测一次。普通字符不触发布局测量，卸载取消未执行的帧。
+
+### 性能快照边界
+
+- 完整字段解析只在 `perf-profile-cache.ts` 的磁盘缓存入口执行，固定可信 Main cached/probe/changed 通道不重复解析或复制字段；preload 仍冻结 API，保留 null/缺 handler/调用失败处理和原 listener 身份注销。sender 信任检查与 Main 的分级规则不变。
+- `perf/tiers.ts` 预计算层数组与属性字符串，同值不 `setAttribute`；仍保留最新时间戳防回退、订阅后的主动 reconcile 和 dispose 后迟到 probe 不写 DOM。
+
+### 局部性能对照（2026-10-30）
+
+本轮合成测量输出在 `outputs/perf/local-refactor/`（忽略、不提交）：`before.json`、`after.json`，以及预先固定 A/B、B/A 交替顺序的 `paired.json`。每版本预热两次、采样五次，同机器/Node/负载比较中位数；复制字节和调用次数另外计数，不污染计时样本。
+
+- 每 1,000 个 64KiB 单块批次消除 1,000 次 concat、62.5MiB 额外复制；多块 concat、输出字节与消息数一致。
+- 每次连续插入 12 个胶囊，帧后扫描从 12 次减为 1 次；即时编号与测量不减少。同档位刷新 10,000 次，从 10,000 次属性 mutation 减为首次 1 次。
+- Renderer/Composer 计时是 jsdom 的同步合成 workload，不是浏览器布局、FPS 或真实 IPC 吞吐；低频 profile push 的微基准不代表可感知的整壳收益。多块及中文计时有明显波动，保留原样本，不把未减少的复制宣称成算法加速。
+- 行为回归覆盖 UTF-8、消费后 ACK、早到 create 数据、自然退出尾部、失败关闭恢复、草稿立即发送与目标切换；真实平台 ConPTY/SSH/macOS 的吞吐、RSS/retained heap 和整机 FPS 尚未量化。
 
 ### Dock 工作台
 
 - 布局持久化按 200ms 合并写；scope 切换、draft 交接、`pagehide`、`beforeunload`、`visibilitychange→hidden` 同步刷盘。配额失败先精简载荷重试一次，再失败则本次会话不再写，且永不抛错。
-- 面板正文是固定宿主层（`PanelHosts`），与卡片列不在同一 DOM 祖先链，因此滚动交接由 `scrollChain.planScroll()` 显式完成：内部还能滚就完全不拦截，到边界才把剩余量交给最近的外层可滚容器，`preventDefault` 只发生一次。
+- 支持 `moveBefore` 时，展开的对话工具卡将稳定的面板宿主置于卡片占位框内，正文随列表同步滚动和裁剪；嵌套滚动区到达边界时使用 `scrollChain.planScroll()` 接力，避免 Chromium 间歇性丢失滚轮步进。同文档移动保留活动内容；不支持 `moveBefore` 的浏览器与其他区域仍由固定宿主层承载，需要跨 DOM 交接时使用同一套滚动规划。
 - 区域可见性在 reducer 末尾统一收敛（`settle()`）：右栏/底栏失去最后一个模块自动收起；左栏保留空态、对话工具区不动。只在最终提交状态判断，撤销/重做天然恢复。
 - `MutationObserver` 只关心 dock 几何节点，面板正文内的流式 DOM 变化不触发测量；测量按 host 几何签名早退。
 
 ### 门禁
 
-- 新增核心套件（`scripts/core-suites.mjs`）：Dock 模型/持久化/宿主/滚动交接、窄窗抽屉、Composer 击键预算、GPU 分级与等级接线（`tiers.test.ts` / `tierControl.test.ts`）、用量轮询、IPC 订阅生命周期、Runtime 验签证据、快照克隆计数、open 分片、终端合批与流控。
+- 新增核心套件（`scripts/core-suites.mjs`）：Dock 模型/持久化/宿主/滚动交接、窄窗抽屉、GPU 分级与等级接线（`tiers.test.ts` / `tierControl.test.ts`）、用量轮询、IPC 订阅生命周期、Runtime 验签证据、快照克隆计数、open 分片、终端合批与流控。Composer 击键预算 `App.composerPerf.test.tsx` 单独运行，不放入默认门禁。
 - 验收口径：默认界面可见空闲 CPU（自绘动画成本）目标 < 0.8%，无限装饰动画数 = 0；首屏 JS ≤ 2.5MB raw / 800KB gzip。真实数字与测量条件见执行报告，不把旧报告数值当成本轮结果。

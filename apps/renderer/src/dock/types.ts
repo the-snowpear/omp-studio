@@ -1,17 +1,50 @@
-import type { ReactNode } from "react";
+import type { ReactNode, PointerEvent } from "react";
+import type { IconName } from "../icons";
 
-export const PANEL_IDS = ["files", "changes", "git", "browser", "computer", "agents", "terminal", "problems", "tests", "output", "logs", "pvlogs", "btw"] as const;
-export type PanelId = typeof PANEL_IDS[number];
+export const PANEL_IDS = ["files", "changes", "git", "git-quick", "browser", "computer", "agents", "agent-detail", "environment", "context", "context-viewer", "token-counter", "terminal", "problems", "tests", "output", "logs", "pvlogs", "btw"] as const;
+export type FixedPanelId = typeof PANEL_IDS[number];
+export type AgentPanelId = `agent-detail:${string}`;
+/** One managed-browser web page, qualified by the chat (session) that owns it. */
+export type BrowserPagePanelId = `browser-page:${string}`;
+export type ConversationPanelId = `conversation:${string}`;
+export const conversationPanelId = (viewId: string): ConversationPanelId => `conversation:${viewId}`;
+export const isConversationPanelId = (id: string): id is ConversationPanelId => id.startsWith("conversation:");
+export type PanelId = FixedPanelId | AgentPanelId | BrowserPagePanelId | ConversationPanelId;
+export const isAgentPanelId = (id: string): id is AgentPanelId => id.startsWith("agent-detail:");
+export const isBrowserPagePanelId = (id: string): id is BrowserPagePanelId => id.startsWith("browser-page:");
+/** Panels created per Agent or per web page rather than registered once. */
+export const isInstancePanelId = (id: string): id is AgentPanelId | BrowserPagePanelId | ConversationPanelId => isAgentPanelId(id) || isBrowserPagePanelId(id) || isConversationPanelId(id);
+export type AgentPanelTarget = {
+  agentId: string;
+  displayName?: string;
+  resolvedModel?: string;
+  parentSessionId?: string;
+  toolCallId?: string;
+  task?: string;
+  tokens?: string;
+  tools?: string | number;
+  requests?: string | number;
+  files?: string | number;
+  cost?: string;
+};
+export type AgentPanelDescriptor = { scope: string; target: AgentPanelTarget };
+export const agentPanelId = (scope: string, agentId: string): AgentPanelId => `agent-detail:${encodeURIComponent(JSON.stringify([scope, agentId]))}`;
+/** Live title, icon and status come from the browser state; only the last ready title is remembered. */
+export type BrowserPageDescriptor = { sessionId: string; pageId: string; title?: string | undefined };
+export const browserPagePanelId = (sessionId: string, pageId: string): BrowserPagePanelId => `browser-page:${encodeURIComponent(JSON.stringify([sessionId, pageId]))}`;
 export type DockRegionId = "left" | "rail" | "right" | "bottom";
 export type DockGroupId = string;
 export type RailMode = "hidden" | "expanded" | "compact";
 export type DockRect = { x: number; y: number; width: number; height: number };
 export type DockGroup = { id: DockGroupId; panels: PanelId[]; active: PanelId };
-export type DockFloat = DockGroup & { rect: DockRect; minimized: boolean; maximized: boolean };
+export type DockPinMode = "none" | "workspace" | "application" | "window" | "topmost";
+export type DockPin = { mode: Exclude<DockPinMode, "none">; owner?: string; workspace?: string; windowRect?: DockRect; coordinateVersion?: 1; returnMode?: "none" | "workspace" | "application"; agentPanels?: DockLayout["agentPanels"]; browserPages?: DockLayout["browserPages"] };
+export type DockFloat = DockGroup & { rect: DockRect; minimized: boolean; maximized: boolean; pin?: DockPin; windowId?: string };
 export type DockLocation = { region: DockRegionId | "float"; groupId?: string; index?: number; rect?: DockRect };
 export type CardPreferences = { collapsed: boolean; height: number | null };
 export type DockLayout = {
   version: 1;
+  floatCoordinateVersion?: 1 | undefined;
   left: { visible: boolean; width: number; ratio: number; panels: PanelId[] };
   rail: { mode: RailMode; lastMode: "expanded" | "compact"; width: number; panels: PanelId[] };
   right: { visible: boolean; size: number; ratio: number; groups: DockGroup[] };
@@ -19,6 +52,11 @@ export type DockLayout = {
   floats: DockFloat[];
   hidden: Partial<Record<PanelId, DockLocation>>;
   cards: Record<PanelId, CardPreferences>;
+  agentPanels: Record<string, AgentPanelDescriptor>;
+  lastAgentPanel?: AgentPanelId;
+  browserPages: Record<string, BrowserPageDescriptor>;
+  /** The page tab the user last focused; new pages land beside it. */
+  lastBrowserPage?: BrowserPagePanelId;
   presetId: string;
 };
 export type DockPreferences = {
@@ -30,10 +68,17 @@ export type DockPreferences = {
 };
 export type DockPreset = { id: string; name: string; layout: DockLayout; builtin?: boolean };
 export type DockScope = { target: string; project: string | null; session: string; draft?: boolean };
-export type DockTarget = DockLocation & { split?: "before" | "after" };
+export type DockTarget = DockLocation & { split?: "before" | "after"; ownerId?: string | undefined };
 export type DockAction =
   | { type: "move"; panels: PanelId[]; target: DockTarget }
   | { type: "open"; panel: PanelId }
+  | { type: "agent-open"; panel: AgentPanelId; descriptor: AgentPanelDescriptor }
+  | { type: "agent-focus"; panel: AgentPanelId }
+  /** Adds or refreshes a page tab. Passive opens (Agent, popups, restore) never reveal hidden regions. */
+  | { type: "browser-page-open"; panel: BrowserPagePanelId; descriptor: BrowserPageDescriptor; reveal: boolean; after?: BrowserPagePanelId | undefined }
+  | { type: "browser-page-focus"; panel: BrowserPagePanelId }
+  /** A closed page leaves the layout entirely; unlike tools it has no return address. */
+  | { type: "browser-page-close"; panels: BrowserPagePanelId[] }
   | { type: "hide"; panels: PanelId[] }
   | { type: "activate"; groupId: string; panel: PanelId }
   | { type: "region"; region: DockRegionId; visible: boolean }
@@ -45,5 +90,10 @@ export type DockAction =
   | { type: "raise"; groupId: string }
   | { type: "apply"; layout: DockLayout };
 export type PanelVisibility = { visible: boolean; width: number; height: number };
-export type PanelDefinition = { id: PanelId; title: string; icon: string; minHeight?: number; initialHeight?: number; render?: (visibility: PanelVisibility) => ReactNode };
-export type DockSnapshot = { layout: DockLayout; preferences: DockPreferences; presets: DockPreset[]; scope: DockScope; preview: boolean; canUndo: boolean; canRedo: boolean; modified: boolean };
+/** Replaces the static icon: a site image, or a busy / error / muted state over the icon. */
+export type PanelGlyph = { image?: string | undefined; state?: "busy" | "error" | "muted" | undefined; label?: string | undefined };
+/** Closing ends the panel's subject (a web page) instead of hiding the tool. */
+export type PanelClose = { run: () => void; label: string; tip: string; pending?: boolean | undefined; pendingTip?: string | undefined };
+export type PanelContentAdapter = { attach: (slot: HTMLElement, preview: boolean) => () => void; drag: (event: PointerEvent<HTMLElement>) => void; activate: () => void };
+export type PanelDefinition = { id: PanelId; title: string; menuTitle?: string; icon: IconName; meter?: boolean; minHeight?: number; initialHeight?: number; detail?: string; status?: string; stale?: boolean; compactLabel?: string; glyph?: PanelGlyph | undefined; close?: PanelClose | undefined; content?: PanelContentAdapter; render?: (visibility: PanelVisibility) => ReactNode };
+export type DockSnapshot = { layout: DockLayout; preferences: DockPreferences; presets: DockPreset[]; scope: DockScope; preview: boolean; modalPanel: PanelId | null; canUndo: boolean; canRedo: boolean; modified: boolean };

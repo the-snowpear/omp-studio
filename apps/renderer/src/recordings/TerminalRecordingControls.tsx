@@ -1,3 +1,4 @@
+import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { WorkspaceStatus } from "../workspaces/Workspace";
@@ -21,6 +22,7 @@ export function TerminalRecordingControls({
   workspaceId?: string | undefined;
   sessionId?: string | undefined;
 }) {
+  const document = useSurfaceDocument(), window = surfaceWindow(document);
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [status, setStatus] = useState<Status>();

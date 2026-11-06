@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Icon } from "./icons";
+import { usePreviewMode } from "./preview/PreviewContext";
 import type { ComposerDoc } from "./composer/types";
 import type { PromptImage } from "./composer/types";
 
@@ -29,6 +30,7 @@ export function MessageQueueBar({ messages, running, sendEnabled, demo, editingI
   onRemove: (entry: QueuedMessage) => void;
 }) {
   const [open, setOpen] = useState(true);
+  const { marks } = usePreviewMode();
   if (messages.length === 0) return null;
   return (
     <div className={`queue-strip${open ? "" : " collapsed"}`} role="group" aria-label="排队消息">
@@ -43,7 +45,7 @@ export function MessageQueueBar({ messages, running, sendEnabled, demo, editingI
           <Icon name="queue" extra="sm" />
           <span className="qs-title">本地草稿 ×{messages.length}</span>
           <span className="qs-note">{running ? "本轮结束后自动按序发送" : "空闲后自动发送"}</span>
-          {demo === true ? <span className="chip gray xs">演示</span> : null}
+          {demo === true && marks ? <span className="chip gray xs">演示</span> : null}
           <span className="qs-toggle" aria-hidden="true">
             <Icon name={open ? "chevron-d" : "chevron-u"} extra="sm" />
           </span>

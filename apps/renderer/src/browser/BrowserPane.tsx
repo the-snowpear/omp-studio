@@ -2,35 +2,65 @@ import { AppSelect } from "../AppSelect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClientBootstrap, StudioClient } from "@omp-studio/client-contract";
 import type { BrowserObservationEvent, BrowserObservationInput, BrowserObservationResultMap, StudioBrowserTab } from "@omp-studio/studio-protocol";
+import { BrowserStartPanel } from "./ManagedBrowserPane";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { WorkspaceEmpty } from "../workspaces/Workspace";
 import { PREVIEW_BROWSER_TAB, PREVIEW_BROWSER_IMAGE } from "../preview/browserPreview";
 import "./browser.css";
+import { useSurfaceDocument, useSurfaceChrome } from "../dock/SurfaceContext";
 
-export function BrowserPane({ client, sessionId, available, visible, capabilities }: {
-  client: StudioClient; sessionId?: string | undefined; available: boolean; visible: boolean; capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
-}) {
-  const { preview } = usePreviewMode(); const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
+interface BrowserPaneProps {
+  client: StudioClient;
+  /** The live Runtime session, for the legacy observation view. */
+  sessionId?: string | undefined;
+  /** The chat being viewed; its web pages open as their own dock tabs. */
+  chatId?: string | undefined;
+  available: boolean; visible: boolean; capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
+}
+
+/** Desktop pages need the native browser; Web UI, SSH and older Runtimes keep the observation view. */
+export function useManagedBrowserAvailable(available: boolean, capabilities: ClientBootstrap["capabilityManifest"] | undefined): boolean {
+  const { preview } = usePreviewMode();
+  const api = useSurfaceChrome()?.managedBrowser;
+  const [native, setNative] = useState(false);
+  const managed = !available || capabilities?.capabilities.some(item => item.id === "browser.managed.prepare" && item.grade !== "unavailable") === true;
+  useEffect(() => {
+    let current = true;
+    if (!api || preview || !managed) { setNative(false); return; }
+    void api.available().then(value => { if (current) setNative(value); }, () => { if (current) setNative(false); });
+    return () => { current = false; };
+  }, [api, managed, preview]);
+  return preview || native;
+}
+
+export function BrowserPane(props: BrowserPaneProps) {
+  const native = useManagedBrowserAvailable(props.available, props.capabilities);
+  if (native) return <BrowserStartPanel sessionId={props.chatId} visible={props.visible} />;
+  return <LegacyBrowserPane {...props} />;
+}
+function LegacyBrowserPane({ client, sessionId, available, visible, capabilities }: BrowserPaneProps) {
+  const { preview, marks } = usePreviewMode(); const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
   const [tabs, setTabs] = useState<StudioBrowserTab[]>([]); const [selected, setSelected] = useState("");
   const [state, setState] = useState<Extract<BrowserObservationEvent, { kind: "state" }>>();
   const [frame, setFrame] = useState<Extract<BrowserObservationEvent, { kind: "frame" }>>();
   const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [observing, setObserving] = useState(false); const [url, setUrl] = useState("");
   const observation = useRef<string | undefined>(undefined); const epoch = useRef(0); const scope = useRef(""); const urlDirty = useRef(false); const picture = useRef<HTMLImageElement>(null);
-  const chrome = globalThis.ompStudioChrome;
+  const chrome = useSurfaceChrome();
+  const document = useSurfaceDocument();
   const enabled = preview || (available && !!sessionId && capabilities?.capabilities.some(item => item.id === "browser.tabs.get" && item.grade !== "unavailable") === true);
   const canObserve = preview || (enabled && !!chrome?.attachBrowserObservation && capabilities?.capabilities.some(item => item.id === "browser.observe.prepare" && item.grade !== "unavailable") === true);
   const human = state?.control === "human";
-  const detach = useCallback(() => { const id = observation.current; observation.current = undefined; if (id) void globalThis.ompStudioChrome?.detachBrowserObservation?.({ observationId: id }); setObserving(false); setFrame(undefined); setState(undefined); }, []);
+  const detach = useCallback(() => { const id = observation.current; observation.current = undefined; if (id) void chrome?.detachBrowserObservation?.({ observationId: id }); setObserving(false); setFrame(undefined); setState(undefined); }, [chrome]);
   const send = useCallback(async (input: BrowserObservationInput) => {
     if (preview) { if (input.kind === "take" || input.kind === "release") setState(current => ({ kind: "state", observationId: "demo", tabId: PREVIEW_BROWSER_TAB.id, title: PREVIEW_BROWSER_TAB.title, url: PREVIEW_BROWSER_TAB.url, busy: false, frozen: false, ...current, control: input.kind === "take" ? "human" : "agent" })); return; }
     const id = observation.current; if (!id) return;
     try {
-      const value = await globalThis.ompStudioChrome?.controlBrowserObservation?.({ observationId: id, input });
+      const value = await chrome?.controlBrowserObservation?.({ observationId: id, input });
       if (!value?.ok && observation.current === id) setError(value?.message ?? (zh ? "浏览器控制不可用" : "Browser control unavailable"));
     } catch (cause) { if (observation.current === id) setError(hostErrorMessage(cause, zh ? "浏览器连接中断" : "Browser connection interrupted")); }
-  }, [preview, zh]);
+  }, [preview, zh, chrome]);
   useEffect(() => {
     epoch.current++; detach();
     const scopeKey = (sessionId ?? "") + ":" + preview;
@@ -55,7 +85,7 @@ export function BrowserPane({ client, sessionId, available, visible, capabilitie
     const hide = () => { if (document.hidden) { epoch.current++; detach(); } }; document.addEventListener("visibilitychange", hide);
     void poll();
     return () => { active = false; epoch.current++; clearTimeout(timer); clearInterval(heartbeat); unsubscribe?.(); document.removeEventListener("visibilitychange", hide); detach(); };
-  }, [client, sessionId, available, visible, enabled, preview, chrome, detach, send, zh]);
+  }, [client, sessionId, available, visible, enabled, preview, chrome, detach, send, zh, document]);
   const observe = async () => {
     const target = tabs.find(tab => tab.id === selected); if (!target?.observable || !canObserve || busy || !visible) return;
     const generation = ++epoch.current; detach(); setBusy(true); setError(""); urlDirty.current = false; setUrl(target.url);
@@ -84,7 +114,7 @@ export function BrowserPane({ client, sessionId, available, visible, capabilitie
     {selectedTab?.reason ? <p role="status">{selectedTab.reason}</p> : null}
     {observing ? <>
       <form className="browser-toolbar" onSubmit={event => { event.preventDefault(); if (human) { urlDirty.current = false; void send({ kind: "navigate", url }).catch(cause => setError(String(cause))); } }}><input className="input" aria-label={zh ? "浏览器地址" : "Browser address"} value={url} readOnly={!human} onChange={event => { urlDirty.current = true; setUrl(event.target.value); }} /><button className="btn small outline" disabled={!human}>{zh ? "前往" : "Go"}</button></form>
-      <div className="browser-toolbar"><span className="browser-status">{preview ? zh ? "演示 · " : "Demo · " : ""}{human ? zh ? "你正在控制" : "You have control" : state?.control === "waiting" ? zh ? "等待当前动作结束" : "Waiting for current action" : state?.control === "other-window" ? zh ? "其他窗口正在控制" : "Controlled by another window" : zh ? "观察模式" : "Observing"}{state?.frozen ? zh ? " · 页面已暂停" : " · Page frozen" : ""}</span><button className="btn small outline" disabled={state?.control === "other-window"} onClick={() => void send({ kind: human || state?.control === "waiting" ? "release" : "take" })}>{human || state?.control === "waiting" ? zh ? "归还控制" : "Return control" : zh ? "人工接管" : "Take control"}</button><button className="btn small outline" onClick={() => { epoch.current++; detach(); }}>{zh ? "停止观察" : "Stop viewing"}</button></div>
+      <div className="browser-toolbar"><span className="browser-status">{preview && marks ? zh ? "演示 · " : "Demo · " : ""}{human ? zh ? "你正在控制" : "You have control" : state?.control === "waiting" ? zh ? "等待当前动作结束" : "Waiting for current action" : state?.control === "other-window" ? zh ? "其他窗口正在控制" : "Controlled by another window" : zh ? "观察模式" : "Observing"}{state?.frozen ? zh ? " · 页面已暂停" : " · Page frozen" : ""}</span><button className="btn small outline" disabled={state?.control === "other-window"} onClick={() => void send({ kind: human || state?.control === "waiting" ? "release" : "take" })}>{human || state?.control === "waiting" ? zh ? "归还控制" : "Return control" : zh ? "人工接管" : "Take control"}</button><button className="btn small outline" onClick={() => { epoch.current++; detach(); }}>{zh ? "停止观察" : "Stop viewing"}</button></div>
       <div className={`browser-picture${human ? " is-controlled" : ""}`} tabIndex={human ? 0 : -1} aria-label={zh ? "浏览器实时画面" : "Live browser image"} onKeyDown={event => { if (!human || !frame || event.nativeEvent.isComposing) return; event.preventDefault(); if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) void send({ kind: "text", sequence: frame.sequence, text: event.key }); else void send({ kind: "key", sequence: frame.sequence, key: event.key, code: event.code, modifiers: (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0) }); }} onPaste={event => { if (human && frame) { event.preventDefault(); void send({ kind: "text", sequence: frame.sequence, text: event.clipboardData.getData("text/plain").slice(0, 16384) }); } }} onCompositionEnd={event => { if (human && frame) void send({ kind: "text", sequence: frame.sequence, text: event.data }); }}>
         {frame || preview ? <img ref={picture} alt={zh ? "当前浏览器画面" : "Current browser image"} draggable={false} src={preview ? PREVIEW_BROWSER_IMAGE : `data:image/jpeg;base64,${frame!.data}`} onLoad={event => { const image = event.currentTarget; if (image.naturalWidth > 4096 || image.naturalHeight > 4096 || image.naturalWidth * image.naturalHeight > 4_000_000) { setError(zh ? "画面超过资源限制" : "Frame exceeds the resource budget"); detach(); return; } if (!preview && frame) void send({ kind: "ack", sequence: frame.sequence }); }} onError={() => { setError(zh ? "浏览器画面无法解码" : "Browser frame could not be decoded"); detach(); }} onContextMenu={event => event.preventDefault()} onMouseDown={event => { if (!human || !frame) return; event.preventDefault(); event.currentTarget.parentElement?.focus(); const point = coordinates(event.clientX, event.clientY); if (point) void send({ kind: "click", sequence: frame.sequence, ...point, button: event.button === 2 ? "right" : "left" }); }} /> : <p>{zh ? "等待浏览器画面…" : "Waiting for browser frames…"}</p>}
       </div>

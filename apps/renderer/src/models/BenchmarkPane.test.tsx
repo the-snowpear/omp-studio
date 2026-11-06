@@ -11,7 +11,7 @@ it("preview benchmarks require review and keep reports and requests local", asyn
   const client = { command: vi.fn() } as unknown as StudioClient;
   render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><BenchmarkPane client={client} models={[]} available={false} /></PreviewModeProvider></I18nProvider>);
   const setup = screen.getByText("测试配置").closest("details")!; setup.open = true; fireEvent(setup, new Event("toggle"));
-  fireEvent.click(screen.getByRole("checkbox", { name: /demo\/swift/u }));
+  fireEvent.click(screen.getByRole("checkbox", { name: /anthropic\/claude-haiku-4\.5/u }));
   fireEvent.click(screen.getByRole("button", { name: "检查测试请求" }));
   expect(screen.getByLabelText("确认基准测试")).toBeTruthy();
   expect(client.command).not.toHaveBeenCalled();

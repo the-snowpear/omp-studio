@@ -40,7 +40,7 @@ export function NativeArchivePane({
   canOpen(sessionId: string): boolean;
   onOpen(sessionId: string): void;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [view, setView] = useState<View>("sessions"),
@@ -218,7 +218,7 @@ export function NativeArchivePane({
         <div>
           <h2>
             Archive / Recap{" "}
-            {preview ? (
+            {preview && marks ? (
               <span className="chip gray xs">{zh ? "演示" : "Demo"}</span>
             ) : null}
           </h2>
@@ -386,7 +386,7 @@ export function NativeArchivePane({
                       if (!preview) onOpen(detail.session.id);
                     }}
                   >
-                    {preview
+                    {preview && marks
                       ? zh
                         ? "演示会话"
                         : "Demo session"

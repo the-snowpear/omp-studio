@@ -1,5 +1,6 @@
 import type { JsonValue } from "@omp-studio/client-contract";
 import type { TreeGitStatus } from "../git/treeStatus";
+import type { IconName } from "../icons";
 import { jsonRecord, jsonString, type AssistantSegment, type TimelineRow, type ToolStatus, type ToolView } from "./conversationViewModel";
 
 export type ToolKind = string;
@@ -18,6 +19,7 @@ export type SubagentView = {
   readonly task?: string;
   readonly activity?: string;
   readonly currentTool?: string;
+  readonly latestActivity?: string;
   readonly dur?: string;
   readonly tokens?: string;
   readonly tools?: string | number;
@@ -28,7 +30,11 @@ export type SubagentView = {
 
 export type SubagentHubTarget = {
   readonly agentId: string;
-  readonly toolCallId: string;
+  readonly displayName?: string;
+  readonly resolvedModel?: string;
+  /** Present only when opened from an actual delegation, never fabricated by a roster. */
+  readonly toolCallId?: string;
+  readonly parentSessionId?: string;
   readonly task?: string;
   readonly tokens?: string;
   readonly tools?: string | number;
@@ -53,6 +59,7 @@ export function resolveSubagentHubTarget(agent: SubagentView): SubagentHubTarget
   if (agent.agentId === undefined || !isRealSubagentId(agent.agentId)) return undefined;
   return {
     agentId: agent.agentId,
+    displayName: agent.name,
     toolCallId: agent.toolCallId,
     ...(agent.task === undefined ? {} : { task: agent.task }),
     ...(agent.tokens === undefined ? {} : { tokens: agent.tokens }),
@@ -67,7 +74,7 @@ export function subagentCardKey(agent: SubagentView): string {
   return `${agent.toolCallId}:${agent.agentId ?? agent.name}`;
 }
 
-export const KIND_ICON: Record<string, string> = {
+export const KIND_ICON: Record<string, IconName> = {
   find: "search", wait: "clock", process: "terminal", agent_message: "message", documentation: "book",
   think: "brain",
   read: "file",
@@ -231,6 +238,47 @@ export function toolFields(tool: ToolView): { readonly [key: string]: JsonValue 
   return merged;
 }
 
+export type ComputerToolMediaItem = {
+  key: string;
+  image?: JsonValue;
+  frame?: { frameId: string; sessionId?: string; toolCallId?: string; agentId?: string };
+};
+
+/** Typed frame references and legacy inline screenshots share one identity-based media outlet. */
+export function computerToolMedia(tool: ToolView): ComputerToolMediaItem[] {
+  const fields = toolFields(tool), data = jsonRecord(tool.result?.data) ?? {};
+  const candidates: JsonValue[] = [];
+  const add = (value: JsonValue | undefined) => { if (Array.isArray(value)) candidates.push(...value); else if (value !== undefined) candidates.push(value); };
+  add(data.media); add(fields.media); add(fields.computerFrames);
+  if (toolKind(tool) === "computer") { add(fields.frames); add(fields.images); add(fields.screenshot); add(fields.shots); }
+  if (Array.isArray(fields.cells)) for (const cell of fields.cells) { const row = jsonRecord(cell); add(row?.media); add(row?.computerFrames); }
+  const items = new Map<string, ComputerToolMediaItem>();
+  const imageKeys = new Set<string>();
+  for (const value of candidates) {
+    const row = jsonRecord(value);
+    if (!row) continue;
+    const reference = jsonRecord(row.computerFrame) ?? row;
+    const frameId = jsonString(reference.frameId);
+    const image = typeof row.data === "string" && typeof row.mimeType === "string" ? value : undefined;
+    if (!frameId && !image) continue;
+    const imageKey = image ? `${row.mimeType}:${row.data}` : undefined;
+    const key = frameId ? `frame:${frameId}` : `image:${imageKey}`;
+    const existing = items.get(key);
+    if (existing) { if (image && !existing.image) existing.image = image; continue; }
+    if (imageKey && imageKeys.has(imageKey) && !frameId) continue;
+    if (imageKey) imageKeys.add(imageKey);
+    items.set(key, { key, ...(image ? { image } : {}), ...(frameId ? { frame: {
+      frameId, toolCallId: jsonString(reference.toolCallId) ?? tool.toolCallId,
+      ...(jsonString(reference.sessionId) ? { sessionId: jsonString(reference.sessionId)! } : {}),
+      ...(jsonString(reference.agentId) ? { agentId: jsonString(reference.agentId)! } : {}),
+    } } : {}) });
+  }
+  return [...items.values()];
+}
+export function hasComputerMedia(tool: ToolView): boolean {
+  return toolKind(tool) === "computer" || toolKind(tool) === "eval" && computerToolMedia(tool).some(item => item.frame !== undefined);
+}
+
 const PLAN_PROPOSE_PATH = /^xd:\/\/propose\/?$/i;
 
 export function isPlanProposeTool(tool: ToolView): boolean {
@@ -335,7 +383,7 @@ export function toolKind(tool: ToolView): ToolKind {
   return raw.replace(/[\s-]+/g, "_");
 }
 
-export function toolIcon(kind: ToolKind): string {
+export function toolIcon(kind: ToolKind): IconName {
   return KIND_ICON[kind] ?? "wrench";
 }
 
@@ -1002,7 +1050,11 @@ export function collectAgents(tools: readonly ToolView[]): SubagentView[] {
       const rawCost = measured ? jsonString(record?.cost) : undefined;
       const cost = rawCost === "[redacted]" ? undefined : rawCost;
       const activity = jsonString(record?.activity);
-      const currentTool = jsonString(jsonRecord(record?.currentTool)?.name);
+      const currentTool = jsonString(record?.currentTool) ?? jsonString(jsonRecord(record?.currentTool)?.name);
+      const currentDetail = jsonString(record?.currentToolIntent) ?? jsonString(record?.currentToolArgs);
+      const latestActivity = currentTool
+        ? [currentTool, currentDetail].filter(Boolean).join(" · ")
+        : jsonString(record?.lastIntent) ?? jsonString(record?.lastTool) ?? jsonString(record?.summary);
       out.push({
         name,
         status,
@@ -1011,6 +1063,7 @@ export function collectAgents(tools: readonly ToolView[]): SubagentView[] {
         ...(task === undefined ? {} : { task }),
         ...(activity === undefined ? {} : { activity }),
         ...(currentTool === undefined ? {} : { currentTool }),
+        ...(latestActivity === undefined ? {} : { latestActivity }),
         ...(dur === undefined ? {} : { dur }),
         ...(tokens === undefined ? {} : { tokens }),
         ...(toolsCount === undefined ? {} : { tools: toolsCount }),
@@ -1084,7 +1137,7 @@ export function saPill(agent: SubagentView | string): { cls: string; label: stri
     if (activity === "tool" || currentTool) {
       return { cls: "tool", label: currentTool ? `Running Tool · ${currentTool}` : "Running Tool" };
     }
-    return { cls: "thinking", label: "Thinking" };
+    return activity === "thinking" ? { cls: "thinking", label: "Thinking" } : { cls: "tool", label: "Running" };
   }
   if (status === "starting" || status === "reviving") return { cls: "thinking", label: "Starting" };
   if (status === "waiting") return { cls: "waiting", label: "Waiting for User" };

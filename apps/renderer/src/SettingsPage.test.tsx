@@ -1,31 +1,22 @@
 import { selectOption } from "./test/selectOption";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-
+import type { RuntimeSettingsReadModel } from "@omp-studio/client-contract";
+import { GUI_SETTING_KEYS } from "@omp-studio/studio-protocol";
 import { I18nProvider } from "./i18n";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { BackgroundProvider } from "./background/BackgroundProvider";
-import { BACKGROUND_STORAGE_KEY } from "./background/backgroundSettings";
 import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
-import {
-  __resetAppSettingsForTests,
-  getAppSettings,
-  updateAppSettings,
-  type AppLanguage,
-} from "./settings/appSettings";
-import { setSettingsIntent, SettingsPage } from "./SettingsPage";
+import { __resetAppSettingsForTests, getAppSettings, updateAppSettings } from "./settings/appSettings";
+import { BACKGROUND_STORAGE_KEY } from "./background/backgroundSettings";
+import { SETTINGS_GUI_COVERAGE } from "./settings/catalog";
+import { setSettingsIntent, SettingsPage, type RuntimeSettingsApi } from "./SettingsPage";
 import { __resetUpdatesForTests, type UpdatePrefs } from "./settings/updates";
 
 beforeAll(() => {
-  // jsdom 没有 ResizeObserver / matchMedia；SlidingTabs 与 tab 过渡需要 stub。
-  class ResizeObserverStub {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  }
+  class ResizeObserverStub { observe(): void {} unobserve(): void {} disconnect(): void {} }
   (globalThis as Record<string, unknown>).ResizeObserver = ResizeObserverStub;
-  window.matchMedia = (query: string) =>
-    ({ matches: query.includes("prefers-reduced-motion"), media: query, addEventListener: () => undefined, removeEventListener: () => undefined }) as unknown as MediaQueryList;
+  window.matchMedia = (query: string) => ({ matches: query.includes("prefers-reduced-motion"), media: query, addEventListener: () => undefined, removeEventListener: () => undefined }) as unknown as MediaQueryList;
 });
 
 afterEach(() => {
@@ -33,310 +24,208 @@ afterEach(() => {
   window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY);
   window.localStorage.removeItem("omp.appSettings");
   window.localStorage.removeItem(BACKGROUND_STORAGE_KEY);
-  window.localStorage.removeItem("omp.lastRoute");
   window.sessionStorage.removeItem("omp.settingsIntent");
   __resetAppSettingsForTests(null);
   __resetUpdatesForTests();
   vi.unstubAllGlobals();
 });
 
-function renderSettings(options: {
-  preview?: boolean;
-  approvalMode?: "always-ask" | "always-ask-cached" | "write" | "yolo";
-  onSetApprovalMode?: (mode: "always-ask" | "always-ask-cached" | "write" | "yolo") => void;
-  language?: AppLanguage;
-} = {}) {
-  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview === true ? "1" : "0");
-  const onSetApprovalMode = options.onSetApprovalMode ?? vi.fn();
-  const view = render(
-    <PreviewModeProvider switchEnabled>
-      <I18nProvider forcedLanguage={options.language ?? "zh"}>
-        <BackgroundProvider preview={options.preview === true} theme="light">
-          <SettingsPage
-            {...(options.approvalMode === undefined ? {} : { approvalMode: options.approvalMode })}
-            onSetApprovalMode={onSetApprovalMode}
-          />
-        </BackgroundProvider>
-      </I18nProvider>
-    </PreviewModeProvider>,
-  );
-  return { onSetApprovalMode, ...view };
+const snapshot: RuntimeSettingsReadModel = {
+  "edit.autoRepair.enabled": true, "features.unexpectedStopDetection": "smart", extendedContext: true,
+  "compaction.asyncEnabled": true, "compaction.methodOrder": ["remote", "snapcompact", "handoff", "shake", "soft"],
+  "providers.openai-codex.codeMode": "off", steeringMode: "one-at-a-time", followUpMode: "one-at-a-time",
+  interruptMode: "immediate", "edit.fuzzyThreshold": 0.95, "compaction.enabled": true,
+  "task.maxConcurrency": 32, "retry.enabled": true,
+};
+function renderSettings(options: { preview?: boolean; language?: "zh" | "en"; approvalMode?: "write"; onSetApprovalMode?: ReturnType<typeof vi.fn>; runtimeSettings?: RuntimeSettingsApi } = {}) {
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview ? "1" : "0");
+  return render(<PreviewModeProvider switchEnabled><I18nProvider forcedLanguage={options.language ?? "zh"}><BackgroundProvider preview={!!options.preview} theme="light">
+    <SettingsPage onSetApprovalMode={options.onSetApprovalMode ?? vi.fn()} {...(options.approvalMode ? { approvalMode: options.approvalMode } : {})} {...(options.runtimeSettings ? { runtimeSettings: options.runtimeSettings } : {})} />
+  </BackgroundProvider></I18nProvider></PreviewModeProvider>);
 }
+function openTab(name: string) { fireEvent.click(screen.getByRole("tab", { name })); }
 
-/** 切到指定标签并返回该标签的可达控件容器。 */
-function openTab(name: string) {
-  fireEvent.click(screen.getByRole("tab", { name }));
-}
+describe("settings navigation and real preferences", () => {
+  it("groups controls by purpose and covers each existing Runtime GUI setting once", () => {
+    renderSettings();
+    expect(screen.getAllByRole("tab").map(tab => tab.textContent)).toEqual([
+      "常规与通知", "外观与布局", "对话与输入", "语音", "上下文与记忆", "工具与终端",
+      "任务与代理", "模型与服务", "权限与安全", "更新与维护", "待支持",
+    ]);
+    expect(new Set(SETTINGS_GUI_COVERAGE).size).toBe(GUI_SETTING_KEYS.length);
+    expect([...SETTINGS_GUI_COVERAGE].sort()).toEqual([...GUI_SETTING_KEYS].sort());
+  });
 
-describe("SettingsPage · 自动更新", () => {
-  it("常规页默认开启自动下载，关闭后写入桌面偏好并在重新打开时保留", async () => {
+  it("searches by English and configuration key, then opens and highlights the actual control", async () => {
+    renderSettings({ runtimeSettings: { snapshot, onSet: vi.fn() } });
+    const search = screen.getByRole("searchbox", { name: "搜索设置" });
+    fireEvent.change(search, { target: { value: "edit.fuzzyThreshold" } });
+    fireEvent.click(screen.getByRole("button", { name: /编辑匹配阈值.*工具与终端/ }));
+    expect(screen.getByRole("tab", { name: "工具与终端" }).getAttribute("aria-selected")).toBe("true");
+    const input = await screen.findByRole("spinbutton", { name: "编辑匹配阈值" });
+    await waitFor(() => expect(input.closest(".set-row")?.classList.contains("settings-search-highlight")).toBe(true));
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(search, { target: { value: "message delivery" } });
+    expect(screen.getByRole("button", { name: /Steering 消息处理/ })).toBeTruthy();
+  });
+
+  it("allows changing categories with the keyboard", () => {
+    renderSettings();
+    const first = screen.getByRole("tab", { name: "常规与通知" });
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    const next = screen.getByRole("tab", { name: "外观与布局" });
+    expect(next.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(next);
+  });
+
+  it("preserves legacy group intents and targeted intents", async () => {
+    setSettingsIntent("background");
+    const first = renderSettings();
+    expect(screen.getByRole("tab", { name: "外观与布局" }).getAttribute("aria-selected")).toBe("true");
+    first.unmount();
+    setSettingsIntent("voice", "dictation");
+    renderSettings();
+    expect(screen.getByRole("tab", { name: "语音" }).getAttribute("aria-selected")).toBe("true");
+    expect(await screen.findByRole("heading", { name: /语音输入/ })).toBeTruthy();
+  });
+
+  it("saves local appearance and startup settings; reset affects only its own section", () => {
+    updateAppSettings({ theme: "dark", density: "cozy", restoreLastProject: false });
+    renderSettings();
+    openTab("外观与布局");
+    selectOption(screen.getByRole("combobox", { name: "主题" }), "Light");
+    expect(getAppSettings().theme).toBe("light");
+    fireEvent.click(screen.getByRole("button", { name: "恢复外观默认值" }));
+    expect(getAppSettings().density).toBe("standard");
+    expect(getAppSettings().restoreLastProject).toBe(false);
+    expect(window.localStorage.getItem("omp.appSettings")).toContain('"theme":"light"');
+  });
+
+  it("keeps old Runtime settings unavailable and describes unsupported features without fake controls", () => {
+    renderSettings();
+    openTab("对话与输入");
+    expect((screen.getByRole("combobox", { name: "Steering 消息处理" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("combobox", { name: "大段粘贴处理" })).toBeNull();
+    openTab("待支持");
+    expect(screen.getByText("大段粘贴处理")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "大段粘贴处理" })).toBeNull();
+  });
+
+  it("shows a read-only Runtime value without presenting it as editable", () => {
+    renderSettings({ runtimeSettings: { snapshot } });
+    openTab("对话与输入");
+    const control = screen.getByRole("combobox", { name: "Steering 消息处理" });
+    expect((control as HTMLButtonElement).disabled).toBe(true);
+    expect(control.textContent).toBe("一次处理一条");
+    expect(within(control.closest(".set-row") as HTMLElement).getByText("当前 Runtime 只提供读取")).toBeTruthy();
+  });
+
+  it("exposes an accessible English navigation and the real approval action", () => {
+    const change = vi.fn();
+    renderSettings({ language: "en", approvalMode: "write", onSetApprovalMode: change });
+    openTab("Permissions and security");
+    selectOption(screen.getByRole("combobox", { name: "Approval Mode" }), "Yolo");
+    expect(change).toHaveBeenCalledWith("yolo");
+    expect(screen.getByRole("searchbox", { name: "Search settings" })).toBeTruthy();
+  });
+
+  it("preserves update preferences across reopen", async () => {
     let prefs: UpdatePrefs = { mirrorPrefix: "", autoCheck: true, skippedAppVersion: "", runtimeChannel: "stable", preferHotUpdate: true, lastIndexSequence: 0 };
-    const setUpdatePrefs = vi.fn(async (patch: Partial<UpdatePrefs>) => {
-      prefs = { ...prefs, ...patch };
-      return prefs;
-    });
+    const setUpdatePrefs = vi.fn(async (patch: Partial<UpdatePrefs>) => { prefs = { ...prefs, ...patch }; return prefs; });
     vi.stubGlobal("ompStudioChrome", { getUpdatePrefs: vi.fn(async () => prefs), setUpdatePrefs });
     const view = renderSettings();
+    openTab("更新与维护");
     const toggle = screen.getByRole("switch", { name: "自动下载更新" });
-    await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false));
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByRole("switch", { name: "自动检查更新" })).toBeTruthy();
+    await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(toggle);
-    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
-    expect(setUpdatePrefs).toHaveBeenCalledWith({ autoDownload: false });
-    openTab("高级");
-    expect(screen.queryByRole("switch", { name: "自动下载更新" })).toBeNull();
-    view.unmount();
-    __resetUpdatesForTests();
-    renderSettings();
-    await waitFor(() => expect(screen.getByRole("switch", { name: "自动下载更新" }).hasAttribute("disabled")).toBe(false));
-    expect(screen.getByRole("switch", { name: "自动下载更新" }).getAttribute("aria-checked")).toBe("false");
+    await waitFor(() => expect(setUpdatePrefs).toHaveBeenCalledWith({ autoDownload: false }));
+    view.unmount(); __resetUpdatesForTests();
+    renderSettings(); openTab("更新与维护");
+    await waitFor(() => expect(screen.getByRole("switch", { name: "自动下载更新" }).getAttribute("aria-checked")).toBe("false"));
+  });
+});
+
+describe("Runtime settings and preview isolation", () => {
+  it("writes the native value at the selected scope and accepts decimal thresholds", async () => {
+    const onSet = vi.fn(async () => {});
+    renderSettings({ runtimeSettings: { snapshot, onSet } });
+    openTab("对话与输入");
+    selectOption(screen.getByRole("combobox", { name: "Steering 消息处理" }), "一次处理全部");
+    await waitFor(() => expect(onSet).toHaveBeenCalledWith("steeringMode", "all", true));
+    selectOption(screen.getByRole("combobox", { name: "运行设置保存范围" }), "仅当前会话");
+    selectOption(screen.getByRole("combobox", { name: "纠偏消息中断时机" }), "当前工具完成后");
+    await waitFor(() => expect(onSet).toHaveBeenCalledWith("interruptMode", "wait", false));
+    openTab("工具与终端");
+    const row = screen.getByRole("spinbutton", { name: "编辑匹配阈值" }).closest(".set-row") as HTMLElement;
+    fireEvent.change(within(row).getByRole("spinbutton"), { target: { value: "0.9" } });
+    fireEvent.click(within(row).getByRole("button", { name: "应用" }));
+    await waitFor(() => expect(onSet).toHaveBeenCalledWith("edit.fuzzyThreshold", 0.9, false));
   });
 
-  it("预览开关只改演示状态，不读取或写入桌面偏好", () => {
-    const getUpdatePrefs = vi.fn(), setUpdatePrefs = vi.fn();
-    vi.stubGlobal("ompStudioChrome", { getUpdatePrefs, setUpdatePrefs });
+  it("keeps preview changes in the preview after moving between categories", () => {
+    const onSet = vi.fn();
+    renderSettings({ preview: true, runtimeSettings: { snapshot, onSet } });
+    openTab("对话与输入");
+    selectOption(screen.getByRole("combobox", { name: "Steering 消息处理" }), "一次处理全部");
+    openTab("工具与终端"); openTab("对话与输入");
+    expect(screen.getByRole("combobox", { name: "Steering 消息处理" }).textContent).toBe("一次处理全部");
+    expect(onSet).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("omp.appSettings")).toBeNull();
+  });
+
+  it("keeps feature-setting previews local when navigating away and back", () => {
     renderSettings({ preview: true });
-    const toggle = screen.getByRole("switch", { name: "自动下载更新" });
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    openTab("上下文与记忆");
+    fireEvent.click(screen.getByRole("switch", { name: "空闲压缩" }));
+    openTab("常规与通知");
+    openTab("上下文与记忆");
+    expect(screen.getByRole("switch", { name: "空闲压缩" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("does not announce demo saves when preview marks are off", async () => {
+    window.history.replaceState(null, "", "?preview=1&marks=off");
+    try {
+      renderSettings({ preview: true });
+      openTab("对话与输入");
+      selectOption(screen.getByRole("combobox", { name: "引擎" }), "关闭");
+      await waitFor(() => expect(screen.queryByText("预测设置已保存。")).toBeNull());
+      expect(screen.queryByText(/演示设置已更新/)).toBeNull();
+    } finally { window.history.replaceState(null, "", "/"); }
+  });
+
+  it("exposes previously hidden session storage settings in preview", () => {
+    renderSettings({ preview: true });
+    openTab("更新与维护");
+    expect(screen.getByRole("switch", { name: "后台自动压缩闲置会话" })).toBeTruthy();
+    expect(screen.getByRole("spinbutton", { name: "闲置天数" })).toBeTruthy();
+  });
+
+  it("explains that OTLP can only be saved globally and requires a restart", async () => {
+    renderSettings({ preview: true });
+    openTab("更新与维护");
+    selectOption(screen.getByRole("combobox", { name: "运行设置保存范围" }), "仅当前会话");
+    const toggle = screen.getByRole("switch", { name: "OTLP 导出" });
+    expect((toggle as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("此项只能保存到用户配置")).toBeTruthy();
+    selectOption(screen.getByRole("combobox", { name: "运行设置保存范围" }), "用户配置");
     fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
-    expect(getUpdatePrefs).not.toHaveBeenCalled();
-    expect(setUpdatePrefs).not.toHaveBeenCalled();
+    expect(await screen.findByText("等待重启")).toBeTruthy();
   });
 
-  it("没有桌面桥时禁用自动更新开关", () => {
-    vi.stubGlobal("ompStudioChrome", undefined);
-    renderSettings();
-    expect(screen.getByRole("switch", { name: "自动下载更新" }).hasAttribute("disabled")).toBe(true);
-  });
-});
-
-describe("SettingsPage · 背景", () => {
-  it("点击内置预设立即切换并写入本地偏好", () => {
-    renderSettings({ preview: false, language: "zh" });
-    openTab("背景");
-    fireEvent.click(screen.getByRole("button", { name: "极光" }));
-    const stored = JSON.parse(window.localStorage.getItem(BACKGROUND_STORAGE_KEY) ?? "{}") as Record<string, unknown>;
-    expect(stored.enabled).toBe(true);
-    expect(stored.activeId).toBe("preset:aurora");
-  });
-
-  it("预览模式切换背景不写真实存储", () => {
-    renderSettings({ preview: true, language: "zh" });
-    openTab("背景");
-    fireEvent.click(screen.getByRole("button", { name: "极光" }));
-    expect(window.localStorage.getItem(BACKGROUND_STORAGE_KEY)).toBeNull();
-  });
-});
-
-describe("SettingsPage · 结构", () => {
-  it("渲染 9 个新标签，删除旧的 Models/Sessions/Preview 分组", () => {
-    renderSettings({ preview: false, language: "zh" });
-    const tabs = screen.getAllByRole("tab");
-    const labels = tabs.map((tab) => tab.textContent ?? "");
-    expect(labels).toContain("常规");
-    expect(labels).toContain("背景");
-    expect(labels).toContain("对话与交互");
-    expect(labels).toContain("权限与安全");
-    expect(labels).toContain("上下文与记忆");
-    expect(labels).toContain("文件与终端");
-    expect(labels).toContain("任务与执行");
-    expect(labels).toContain("高级");
-    expect(labels).toContain("运行偏好");
-    expect(labels).toHaveLength(9);
-    expect(screen.queryByText("Models and Providers")).toBeNull();
-    expect(screen.queryByText("Sessions")).toBeNull();
-    expect(screen.queryByText("Preview")).toBeNull();
-    // 权限模式下拉里的选项文案用 OMP 真实术语，不再用 Review/Workspace/Full Access。
-    expect(screen.queryByText("Review")).toBeNull();
-    expect(screen.queryByText("Full Access")).toBeNull();
-  });
-
-  it("支持英文模式渲染 9 个英文标签与所有子面板的英文文案", () => {
-    renderSettings({ preview: false, language: "en" });
-    const tabs = screen.getAllByRole("tab");
-    const labels = tabs.map((tab) => tab.textContent ?? "");
-    expect(labels).toContain("General");
-    expect(labels).toContain("Background");
-    expect(labels).toContain("Interaction");
-    expect(labels).toContain("Permissions");
-    expect(labels).toContain("Context & Memory");
-    expect(labels).toContain("Files & Terminal");
-    expect(labels).toContain("Tasks & Execution");
-    expect(labels).toContain("Advanced");
-    expect(labels).toContain("Runtime preferences");
-    expect(labels).toHaveLength(9);
-
-    // General tab English checks
-    expect(screen.getByRole("combobox", { name: "Interface Language" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Theme" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Information Density" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Streaming Refresh Rate" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Reset to Defaults" })).toBeTruthy();
-
-    // Interaction tab English checks
-    openTab("Interaction");
-    expect(screen.getByRole("combobox", { name: "Steering Message Handling" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Follow-up Message Handling" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Interrupt Timing" })).toBeTruthy();
-
-    // Permissions tab English checks
-    openTab("Permissions");
-    expect(screen.getByRole("combobox", { name: "Approval Mode" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "File Read" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Outside Workspace Policy" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Manage Rules" })).toBeTruthy();
-
-    // Context & Memory tab English checks
-    openTab("Context & Memory");
-    expect(screen.getByRole("combobox", { name: "Compact Strategy" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Memory Backend" })).toBeTruthy();
-
-    // Files & Terminal tab English checks
-    openTab("Files & Terminal");
-    expect(screen.getByRole("combobox", { name: "Edit Mode" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Single Read Limit" })).toBeTruthy();
-
-    // Tasks & Execution tab English checks
-    openTab("Tasks & Execution");
-    expect(screen.getByRole("combobox", { name: "Loop Mode" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Max Subtask Concurrency" })).toBeTruthy();
-
-    // Advanced tab English checks
-    openTab("Advanced");
-    expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Export" })).toBeTruthy();
-  }, 15000);
-
-  it("支持深链 intent 直接打开目标标签", () => {
-    setSettingsIntent("permissions");
-    renderSettings({ preview: false, approvalMode: "write", language: "zh" });
-    const tab = screen.getByRole("tab", { name: "权限与安全" });
-    expect(tab.getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("combobox", { name: "审批模式" })).toBeTruthy();
-  });
-});
-
-describe("SettingsPage · 真实模式", () => {
-  it("App 级设置改动持久化到 localStorage", () => {
-    renderSettings({ preview: false });
-    const themeSelect = screen.getByRole("combobox", { name: "主题" });
-    expect((themeSelect as HTMLButtonElement).textContent).toBe("Light");
-    selectOption(themeSelect, "Dark");
-    expect(getAppSettings().theme).toBe("dark");
-    expect(window.localStorage.getItem("omp.appSettings")).toContain('"theme":"dark"');
-
-    const densitySelect = screen.getByRole("combobox", { name: "信息密度" });
-    selectOption(densitySelect, "紧凑");
-    expect(getAppSettings().density).toBe("compact");
-    expect(window.localStorage.getItem("omp.appSettings")).toContain('"density":"compact"');
-
-    const cadenceSelect = screen.getByRole("combobox", { name: "流式刷新率" });
-    expect((cadenceSelect as HTMLButtonElement).textContent).toBe("60 Hz（默认）");
-    selectOption(cadenceSelect, "90 Hz");
-    expect(getAppSettings().streamingCadenceHz).toBe(90);
-    expect(window.localStorage.getItem("omp.appSettings")).toContain('"streamingCadenceHz":90');
-
-    const languageSelect = screen.getByRole("combobox", { name: "界面语言" });
-    expect((languageSelect as HTMLButtonElement).textContent).toBe("跟随系统 (System)");
-    selectOption(languageSelect, "English");
-    expect(getAppSettings().language).toBe("en");
-    expect(window.localStorage.getItem("omp.appSettings")).toContain('"language":"en"');
-  });
-
-  it("恢复默认值把本标签的 App 级设置重置", () => {
-    updateAppSettings({ language: "en", theme: "dark", density: "cozy", uiFontFamily: "Consolas", uiFontSize: 18, terminalFontSize: 24, outputFontSize: 20 });
-    renderSettings({ preview: false });
-    fireEvent.click(screen.getByRole("button", { name: "恢复默认值" }));
-    expect(getAppSettings().language).toBe("system");
-    expect(getAppSettings().theme).toBe("light");
-    expect(getAppSettings().density).toBe("standard");
-    expect(getAppSettings()).toMatchObject({ uiFontFamily: "", uiFontSize: 14, terminalFontSize: 12, outputFontSize: 14 });
-    expect(getAppSettings().streamingCadenceHz).toBe(60);
-    expect((screen.getByRole("combobox", { name: "主题" }) as HTMLButtonElement).textContent).toBe("Light");
-    expect((screen.getByRole("combobox", { name: "界面语言" }) as HTMLButtonElement).textContent).toBe("跟随系统 (System)");
-  });
-
-  it("非法的流式刷新率会回退到默认 60 Hz", () => {
-    __resetAppSettingsForTests(JSON.stringify({ streamingCadenceHz: 75 }));
-    expect(getAppSettings().streamingCadenceHz).toBe(60);
-    __resetAppSettingsForTests(JSON.stringify({ streamingCadenceHz: "60" }));
-    expect(getAppSettings().streamingCadenceHz).toBe(60);
-  });
-
-  it("无 Runtime 时审批模式禁用并提示，有 Runtime 时写真实命令", () => {
-    const onSetApprovalMode = vi.fn();
-    renderSettings({ preview: false, onSetApprovalMode });
-    openTab("权限与安全");
-    const select = screen.getByRole("combobox", { name: "审批模式" });
-    expect((select as HTMLButtonElement).disabled).toBe(true);
-    expect(select.textContent).toBe("无 Runtime");
-  });
-
-  it("审批模式选择调用 onSetApprovalMode", () => {
-    const onSetApprovalMode = vi.fn();
-    renderSettings({ preview: false, approvalMode: "write", onSetApprovalMode });
-    openTab("权限与安全");
-    const select = screen.getByRole("combobox", { name: "审批模式" });
-    expect((select as HTMLButtonElement).textContent).toBe("Write");
-    selectOption(select, "Yolo");
-    expect(onSetApprovalMode).toHaveBeenCalledWith("yolo");
-  });
-
-  it("尚未接入的 Runtime 行为只渲染禁用的静态控件，不做假开关", () => {
-    renderSettings({ preview: false });
-    openTab("对话与交互");
-    expect((screen.getByRole("combobox", { name: "Steering 消息处理" }) as HTMLButtonElement).disabled).toBe(true);
-
-    openTab("任务与执行");
-    expect((screen.getByRole("combobox", { name: "子任务最大并发数" }) as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it("隐藏标签的「尚未接入」按钮给出原因", () => {
-    renderSettings({ preview: false });
-    openTab("权限与安全");
-    const manage = screen.getByRole("button", { name: "管理规则" });
-    expect((manage as HTMLButtonElement).disabled).toBe(true);
-    expect(manage.getAttribute("data-tip")).toBe("管理规则（暂未实现）");
-  });
-});
-
-describe("SettingsPage · 预览模式", () => {
-  it("预览开时展示演示值，改动只影响本地状态，不写设置存储", () => {
-    renderSettings({ preview: true });
-    const themeSelect = screen.getByRole("combobox", { name: "主题" });
-    expect((themeSelect as HTMLButtonElement).textContent).toBe("Light");
-    const cadenceSelect = screen.getByRole("combobox", { name: "流式刷新率" });
-    expect((cadenceSelect as HTMLButtonElement).textContent).toBe("60 Hz（默认）");
-    selectOption(cadenceSelect, "120 Hz");
-    expect(getAppSettings().streamingCadenceHz).toBe(60);
-    expect(window.localStorage.getItem("omp.appSettings")).toBeNull();
-    selectOption(themeSelect, "Dark");
-    // 演示改动不落盘：真实存储仍是默认 light。
-    expect(getAppSettings().theme).toBe("light");
-    expect(window.localStorage.getItem("omp.appSettings")).toBeNull();
-    expect(screen.getByRole("status").textContent).toContain("演示");
-  });
-
-  it("预览开时 Runtime 行为行是可交互的演示控件并带提示", () => {
-    renderSettings({ preview: true });
-    openTab("对话与交互");
-    const steering = screen.getByRole("combobox", { name: "Steering 消息处理" });
-    expect((steering as HTMLButtonElement).disabled).toBe(false);
-    expect((steering as HTMLButtonElement).textContent).toBe("一次处理一条");
-    selectOption(steering, "一次处理全部");
-    expect((screen.getByRole("combobox", { name: "Steering 消息处理" }) as HTMLButtonElement).textContent).toBe("一次处理全部");
-    expect(screen.getByRole("status").textContent).toContain("演示");
-  });
-
-  it("预览开时审批模式显示演示值且不调用真实命令", () => {
-    const onSetApprovalMode = vi.fn();
-    renderSettings({ preview: true, onSetApprovalMode });
-    openTab("权限与安全");
-    const select = screen.getByRole("combobox", { name: "审批模式" });
-    expect((select as HTMLButtonElement).textContent).toBe("Write");
-    selectOption(select, "Yolo");
-    expect(onSetApprovalMode).not.toHaveBeenCalled();
+  it("does not report an old session's pending save after switching sessions", async () => {
+    let complete!: () => void;
+    const onSet = vi.fn(() => new Promise<void>(resolve => { complete = resolve; }));
+    const element = (sessionId: string) => <PreviewModeProvider switchEnabled><I18nProvider forcedLanguage="zh"><BackgroundProvider preview={false} theme="light">
+      <SettingsPage nativeContext={{ sessionId, available: false }} runtimeSettings={{ snapshot, onSet }} onSetApprovalMode={vi.fn()} />
+    </BackgroundProvider></I18nProvider></PreviewModeProvider>;
+    const view = render(element("first"));
+    openTab("对话与输入");
+    selectOption(screen.getByRole("combobox", { name: "Steering 消息处理" }), "一次处理全部");
+    expect(onSet).toHaveBeenCalledTimes(1);
+    view.rerender(element("second"));
+    complete();
+    await waitFor(() => expect(screen.queryByText("设置已保存。")).toBeNull());
+    expect(screen.getByRole("combobox", { name: "Steering 消息处理" }).textContent).toBe("一次处理一条");
   });
 });

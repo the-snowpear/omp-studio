@@ -58,7 +58,7 @@ async function collapseChrome(page) {
 }
 
 async function pageNav(page, route) {
-  await page.locator(`nav.page-nav > a[data-nav="${route}"]`).click();
+  await page.locator(`nav.app-rail [data-route="${route}"]`).click();
 }
 
 async function gotoWorkbench(page) {
@@ -66,7 +66,7 @@ async function gotoWorkbench(page) {
   if (await back.count()) {
     await back.click();
   } else {
-    const nav = page.locator('nav.page-nav > a[data-nav="workbench"]');
+    const nav = page.locator('nav.app-rail [data-route="workbench"]');
     if (await nav.count()) await nav.click();
   }
   await page.locator("#workbench").waitFor({ timeout: 20_000 });

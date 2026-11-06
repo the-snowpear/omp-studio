@@ -293,6 +293,24 @@ describe("terminal IPC: output batching", () => {
     assert.deepEqual(f.recorded, ["out:pending tail", "end"]);
   });
 
+  test("closing a naturally ended tab drains its tail and cancels release exactly once", () => {
+    const f = rig();
+    const session = f.create();
+    f.ptys[0]?.emitData("before");
+    f.ptys[0]?.emitExit();
+    f.ptys[0]?.emitData("tail");
+    f.invoke(TERMINAL_IPC_CHANNELS.dispose, { id: session.id });
+    assert.deepEqual(f.data(), ["before", "tail"]);
+    assert.deepEqual(f.recorded, ["out:before", "out:tail", "end"]);
+    assert.equal(f.timers.pending, 0);
+    assert.equal(f.ptys[0]?.killed, false, "an ended process is not killed again");
+    f.timers.run();
+    f.ptys[0]?.emitExit();
+    f.manager.disposeWindow(f.sender.id);
+    assert.deepEqual(f.recorded, ["out:before", "out:tail", "end"]);
+    assert.equal(f.manager.flow.openBuffers, 0);
+  });
+
   test("a chunk that arrives after the exit event is still delivered", () => {
     const f = rig();
     f.create();

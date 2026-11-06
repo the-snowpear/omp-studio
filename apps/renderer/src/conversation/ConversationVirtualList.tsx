@@ -38,10 +38,12 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
   scrollerRef,
   itemKeys,
   renderItem,
+  revealRef,
 }: {
   scrollerRef?: RefObject<HTMLElement | null>;
   itemKeys: readonly string[];
   renderItem: (index: number) => ReactNode;
+  revealRef?: RefObject<((index: number, mounted: () => void) => void) | null>;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
@@ -52,8 +54,11 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
   const heightContext = useRef<RowHeightContext>({ width: 0, typography: "", panel: "" });
   const contextInitialized = useRef(false);
   const [anchorKey, setAnchorKey] = useState<string | null>(null);
+  const [revealKey, setRevealKey] = useState<string | null>(null);
+  const revealPending = useRef<(() => void) | null>(null);
   const reflow = useRef<ConversationReflowObserver | null>(null);
-  const anchorIndex = anchorKey === null ? -1 : itemKeys.indexOf(anchorKey);
+  const pinnedKey = revealKey ?? anchorKey;
+  const anchorIndex = pinnedKey === null ? -1 : itemKeys.indexOf(pinnedKey);
   const rangeExtractor = useCallback((range: Range) => conversationRange(range, anchorIndex), [anchorIndex]);
   /** Offset from the scroller's scroll origin to the top of the list. Measured
    *  against the scroller itself rather than via `offsetTop`, whose reference is
@@ -97,6 +102,26 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
     return scroller != null && !conversationIsFollowing(scroller) && !isConversationReflowing(scroller)
       && item.end <= scroller.scrollTop && virtualizer.scrollDirection !== "backward";
   };
+  useLayoutEffect(() => {
+    if (!revealRef) return;
+    revealRef.current = (index, mounted) => {
+      if (!enabled) { mounted(); return; }
+      revealPending.current = mounted;
+      setRevealKey(keysRef.current[index]!);
+      virtualizer.scrollToIndex(index, { align: "start" });
+    };
+    return () => { revealRef.current = null; };
+  }, [enabled, revealRef, virtualizer]);
+  useLayoutEffect(() => {
+    if (revealKey === null || revealPending.current === null) return;
+    const mounted = revealPending.current;
+    const frame = requestAnimationFrame(() => {
+      revealPending.current = null;
+      mounted();
+      setRevealKey(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [revealKey]);
   /** Record on mount and on TanStack's existing row observer; do not create a
    * second per-row observer. Keep a bounded mounted-node registry for reflows. */
   const measureRow = useCallback((el: HTMLElement | null) => {
@@ -171,8 +196,9 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
   // the full long transcript as a fallback. `hostRef` stays attached here so
   // the margin effect can still measure and observe.
   if (visible.length === 0 && itemKeys.length > 0) {
-    const start = Math.max(0, itemKeys.length - UNMEASURED_TAIL_ROWS);
-    return <div ref={hostRef} className="convo-virtual-list">{itemKeys.slice(start).map((key, offset) => <div key={key} ref={measureRow} data-index={start + offset} data-row-key={key} className="convo-virtual-row">{renderItem(start + offset)}</div>)}</div>;
+    const requested = revealKey === null ? -1 : itemKeys.indexOf(revealKey);
+    const start = requested < 0 ? Math.max(0, itemKeys.length - UNMEASURED_TAIL_ROWS) : Math.max(0, requested - CONVERSATION_OVERSCAN);
+    return <div ref={hostRef} className="convo-virtual-list">{itemKeys.slice(start, start + UNMEASURED_TAIL_ROWS).map((key, offset) => <div key={key} ref={measureRow} data-index={start + offset} data-row-key={key} className="convo-virtual-row">{renderItem(start + offset)}</div>)}</div>;
   }
   /**
    * 挂载的行走**普通流**，未挂载的头尾由容器 padding 占位——不是绝对定位 + 容器高度。

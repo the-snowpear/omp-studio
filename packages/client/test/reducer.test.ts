@@ -1069,6 +1069,40 @@ test("StudioClientImpl buffers bootstrap races and does not deliver ignored even
   await client.close();
 });
 
+test("Computer metadata reaches runtime subscribers without waking global state or leaking sessions", async () => {
+  const transport = new MemoryClientTransport({ bootstrap: () => bootstrap() });
+  const client = new StudioClientImpl(transport, fixedIds());
+  await client.bootstrap();
+  const before = client.getState();
+  const delivered: ClientEvent[] = [];
+  let stateNotifications = 0;
+  client.onState(() => { stateNotifications++; });
+  client.subscribe({ scope: "runtime" }, event => delivered.push(event));
+  const event: ClientEvent = {
+    ...base("11", { runtimeEpoch: 1 as RuntimeEpoch }),
+    kind: "computer.changed",
+    change: { kind: "reset", sessionId: "sess-1", revision: 1 },
+  };
+  transport.emit({ ...event, authorityEpoch: 0 as AuthorityEpoch });
+  transport.emit({ ...event, runtimeEpoch: 0 as RuntimeEpoch });
+  transport.emit({ ...event, runtimeEpoch: 2 as RuntimeEpoch });
+  assert.equal(client.getState(), before);
+  transport.emit(event);
+  transport.emit(event); // duplicate delivery cursor
+  transport.emit({ ...event, cursor: "12" as EventCursor, change: { ...event.change, sessionId: "other" } });
+  transport.emit({ ...event, cursor: "13" as EventCursor, change: { ...event.change, revision: 2 } });
+  assert.equal(delivered.length, 2);
+  assert.equal(stateNotifications, 0);
+  assert.equal(client.getState().entities, before.entities);
+  assert.equal(client.getState().commands, before.commands);
+  assert.equal(client.getState().connection.cursor, "13");
+  assert.equal(client.getState().connection.resyncRequired, false);
+  // The next ordinary event still sees the consumed Computer delivery cursors.
+  transport.emit(changed(14));
+  assert.equal(stateNotifications, 1);
+  await client.close();
+});
+
 test("StudioClientImpl rejects an incompatible bootstrap contract before applying state", async () => {
   const client = new StudioClientImpl(new MemoryClientTransport({
     bootstrap: () => ({ ...bootstrap(), contractVersion: 1 } as unknown as ClientBootstrap),

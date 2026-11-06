@@ -4,6 +4,7 @@ import { Brand } from "./brands";
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
 import { PLATFORM } from "./platform";
+import { usePreviewMode } from "./preview/PreviewContext";
 
 /** macOS swaps the app bundle itself: there is no installer to download or launch. */
 const UPDATE_COPY = PLATFORM === "darwin"
@@ -82,6 +83,7 @@ export function AppUpdateDialog({
   onCancel,
 }: AppUpdateDialogProps): ReactNode {
   const { t } = useI18n();
+  const { marks } = usePreviewMode();
   const [operation, setOperation] = useState<"download" | "apply" | null>(null);
   const downloading = isDownloading || operation === "download";
   const applying = isApplying || operation === "apply";
@@ -125,7 +127,7 @@ export function AppUpdateDialog({
         previewTimersRef.current.push(setTimeout(() => {
           setOperation(null);
           setPreviewReady(false);
-          setStatusMessage(t("appUpdate.demoApplied"));
+          if (marks) setStatusMessage(t("appUpdate.demoApplied"));
         }, 600));
         return;
       }
@@ -138,7 +140,7 @@ export function AppUpdateDialog({
       timers.push(setTimeout(() => {
         setOperation(null);
         setPreviewReady(true);
-        setStatusMessage(t("updates.readyToApply") + " " + t("appUpdate.demoUpdate"));
+        setStatusMessage(t("updates.readyToApply") + (marks ? " " + t("appUpdate.demoUpdate") : ""));
       }, 1600));
       return;
     }
@@ -154,7 +156,7 @@ export function AppUpdateDialog({
         setOperation(null);
       }
     }
-  }, [busy, preview, previewReady, ready, onApply, onDownloadAndInstall, t, update.blockedReason]);
+  }, [busy, marks, preview, previewReady, ready, onApply, onDownloadAndInstall, t, update.blockedReason]);
 
   const openGithub = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -179,7 +181,7 @@ export function AppUpdateDialog({
         <div className="create-project-head">
           <div>
             <span className="create-project-kicker">
-              {t("appUpdate.dialogTitle")} {preview ? t("appUpdate.demoUpdate") : ""}
+              {t("appUpdate.dialogTitle")} {preview && marks ? t("appUpdate.demoUpdate") : ""}
             </span>
             <h2 id="appUpdateTitle">
               {update.name || (update.version ? `OMP Studio v${update.version}` : "OMP Studio")}

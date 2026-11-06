@@ -119,7 +119,7 @@ export function JudgmentsPane({
   available: boolean;
   capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const t = (cn: string, en: string) => (zh ? cn : en);
@@ -247,7 +247,7 @@ export function JudgmentsPane({
         setPage({
           batch,
           items:
-            batch.id === "demo-judgment"
+            batch.id === "batch-4f21"
               ? PREVIEW_JUDGMENT_ITEMS
               : [
                   {
@@ -336,7 +336,7 @@ export function JudgmentsPane({
           setBatches((rows) =>
             rows.map((row) =>
               row.id === confirmation.batch.id
-                ? { ...row, running: false, error: "Demo: cancelled" }
+                ? { ...row, running: false, error: t("已取消", "Cancelled") }
                 : row,
             ),
           );
@@ -394,12 +394,13 @@ export function JudgmentsPane({
   const saveResults = () =>
     void run(async (epoch) => {
       if (preview) {
-        setNotice(
-          t(
-            "演示：结果已存入产物库",
-            "Demo: results saved to artifact library",
-          ),
-        );
+        if (marks)
+          setNotice(
+            t(
+              "演示：结果已存入产物库",
+              "Demo: results saved to artifact library",
+            ),
+          );
         return;
       }
       if (!client || !sessionId || !page || page.batch.running)
@@ -457,7 +458,7 @@ export function JudgmentsPane({
       title={
         <>
           {t("批量评审", "Batch judgments")}
-          {preview ? t(" · 演示", " · Demo") : ""}
+          {preview && marks ? t(" · 演示", " · Demo") : ""}
         </>
       }
     >
@@ -727,7 +728,7 @@ export function JudgmentsPane({
                   />
                 </label>
               </div>
-              {preview ? (
+              {preview && marks ? (
                 <button
                   className="btn small"
                   onClick={() => {

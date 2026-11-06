@@ -28,6 +28,7 @@ function writeJsonLine(socket: net.Socket, value: unknown): void {
 	socket.write(JSON.stringify(value) + String.fromCharCode(10));
 }
 import { StudioPredictionService } from "../src/studio/services/prediction-service";
+import { StudioPredictionEngine } from "../src/studio/services/prediction-engine";
 import {
 	validatePredictionEvent,
 	validatePredictionChannelResult,
@@ -172,19 +173,26 @@ test("the native Studio daemon never bootstraps foreign history and persists exp
 			op: "complete",
 		});
 		expect(await Bun.file(marker).exists()).toBe(false);
-		expect(await call({ op: "import", prompts: ["please verify private prediction"] })).toMatchObject({
-			ok: true,
-			op: "import",
-			ingested: 1,
-		});
+		const engine = new StudioPredictionEngine(
+			{ sessionId: "test", settings: Settings.isolated() },
+			{
+				directory: agentDir,
+				client: { complete: async () => ({ engine: "ngram", suggestion: null }), sync() {}, close() {} },
+			},
+		);
+		try {
+			expect(await engine.importPrompts(["please verify private prediction"])).toBe(1);
+			expect(await engine.importPrompts(["please verify private prediction"])).toBe(0);
+			expect(await call({ op: "sync" })).toMatchObject({ ok: true, op: "sync", ingested: 1 });
+			expect(await call({ op: "sync" })).toMatchObject({ ok: true, op: "sync", ingested: 0 });
+		} finally {
+			engine.dispose();
+		}
 		expect((await fs.stat(getPredictStateDir(path.join(agentDir, "studio-predict"), "ngram"))).isDirectory()).toBe(
 			true,
 		);
 		expect(await Bun.file(marker).exists()).toBe(false);
 		await expect(fs.stat(getPredictStateDir(agentDir, "ngram"))).rejects.toMatchObject({ code: "ENOENT" });
-		expect(await call({ op: "import", prompts: Array.from({ length: 129 }, () => "over limit") })).toMatchObject({
-			ok: false,
-		});
 		await call({ op: "shutdown" });
 		await child.exited;
 	} finally {

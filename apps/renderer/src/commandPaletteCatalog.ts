@@ -1,4 +1,5 @@
 import type { SessionHistoryEntry } from "@omp-studio/client-contract";
+import type { IconName } from "./icons";
 import { SHORTCUTS, formatShortcut, shortcutSearchText } from "./keyboard/shortcuts";
 import type { CapTab } from "./CapabilitiesPage";
 import type { PageRoute } from "./HomePage";
@@ -28,13 +29,13 @@ export type PaletteAction =
   | { kind: "toggleTheme" }
   | { kind: "openBottom"; tab: BottomTab }
   | { kind: "openSide"; tab: SideTab }
-  | { kind: "openSettings"; group: SettingsGroupId }
+  | { kind: "openSettings"; group: SettingsGroupId; setting?: string }
   | { kind: "openModelConfig"; tab: McTab }
   | { kind: "openCapabilities"; tab: CapTab; name?: string };
 
 export type PaletteItem = {
   id: string;
-  icon: string;
+  icon: IconName;
   label: string;
   meta?: string;
   hint?: string;
@@ -132,7 +133,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
       id: "pages",
       label: "palette.groupPages",
       items: [
-        { id: "page-workbench", icon: "layout", label: "nav.workbench", keywords: "workbench 工作台", action: { kind: "route", route: "workbench" } },
+        { id: "page-workbench", icon: "workbench", label: "nav.workbench", keywords: "workbench 工作台", action: { kind: "route", route: "workbench" } },
         { id: "page-home", icon: "home", label: "nav.home", keywords: "home 首页 项目主页", action: { kind: "route", route: "home" } },
         { id: "page-hub", icon: "bot", label: "nav.agentHub", keywords: "agent hub 代理", action: { kind: "route", route: "agent-hub" } },
         { id: "page-cap", icon: "package", label: "nav.capabilities", keywords: "capabilities 能力中心", action: { kind: "route", route: "capabilities" } },
@@ -147,7 +148,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
       id: "panels",
       label: "palette.groupPanels",
       items: [
-        ...([['rail', '对话工具区 / Conversation tools'], ['files', '打开 Files'], ['undo', '撤销布局修改 / Undo layout'], ['redo', '重做布局修改 / Redo layout'], ['lock', '锁定布局 / Lock layout'], ['snap', '停靠吸附 / Dock snapping'], ['reset', '恢复出厂布局 / Reset layout'], ['default', '默认布局 / Default'], ['focus', '专注布局 / Focus'], ['debug', '调试布局 / Debug']] as const).map(([operation, label]) => ({ id: `dock-${operation}`, icon: 'layout', label, keywords: 'dock layout 停靠 布局', action: { kind: 'dock' as const, operation } })),
+        ...([['rail', '对话工具区 / Conversation tools'], ['files', '打开 Files'], ['undo', '撤销布局修改 / Undo layout'], ['redo', '重做布局修改 / Redo layout'], ['lock', '锁定布局 / Lock layout'], ['snap', '停靠吸附 / Dock snapping'], ['reset', '恢复出厂布局 / Reset layout'], ['default', '默认布局 / Default'], ['focus', '专注布局 / Focus'], ['debug', '调试布局 / Debug']] as const).map(([operation, label]): PaletteItem => ({ id: `dock-${operation}`, icon: 'layout', label, keywords: 'dock layout 停靠 布局', action: { kind: 'dock' as const, operation } })),
         { id: "toggle-sidebar", icon: "layout", label: "palette.toggleSidebar", hint: formatShortcut(SHORTCUTS.toggleSidebar, "hint"), keywords: `sidebar 侧栏 切换侧栏 ${shortcutSearchText(SHORTCUTS.toggleSidebar)}`, action: { kind: "toggleSidebar" } },
         { id: "toggle-bottom", icon: "rows", label: "palette.toggleBottom", hint: formatShortcut(SHORTCUTS.toggleBottomPanel, "hint"), keywords: `bottom panel 底部面板 切换底部面板 ${shortcutSearchText(SHORTCUTS.toggleBottomPanel)}`, action: { kind: "toggleBottom" } },
         { id: "toggle-side", icon: "panel", label: "palette.toggleSide", keywords: "right panel 右侧面板 切换右侧面板", action: { kind: "toggleSide" } },
@@ -160,7 +161,8 @@ function staticGroups(preview: boolean): PaletteGroup[] {
         { id: "open-changes", icon: "diff", label: "palette.openChanges", keywords: "changes 打开 Changes", action: { kind: "openSide", tab: "changes" } },
         { id: "open-git", icon: "branch", label: "palette.openGit", keywords: "git branch commit push pull stage 打开 Git", action: { kind: "openSide", tab: "git" } },
         { id: "open-preview", icon: "globe", label: "browser.title", keywords: "browser 浏览器 观察 接管 preview", action: { kind: "openSide", tab: "preview" } },
-        { id: "open-computer", icon: "monitor", label: "computer.title", keywords: "computer 电脑 屏幕 窗口 观察", action: { kind: "openSide", tab: "computer" } },
+        { id: "open-computer", icon: "monitor", label: "computer.title", keywords: "computer 电脑 屏幕 窗口 观察 代理截图 停止 接手 历史画面", action: { kind: "openSide", tab: "computer" } },
+        { id: "computer-settings", icon: "settings", label: "电脑操作设置 / Computer settings", keywords: "computer enabled display maxWidth maxHeight backgroundFallback 电脑 会话 全局 默认", action: { kind: "openSettings", group: "tasks", setting: "computer.enabled" } },
         { id: "open-agents", icon: "bot", label: "palette.openAgents", keywords: "agents 打开 Agents", action: { kind: "openSide", tab: "agents" } },
         { id: "open-context", icon: "layers", label: "palette.openContext", keywords: "context inspector 上下文 查看器 提示词 tokens 工具输出", action: { kind: "openContext" } },
         { id: "open-btw", icon: "sparkles", label: "palette.openBtw", keywords: "btw 旁路 side channel 提问 打开 BTW 面板", action: { kind: "openSide", tab: "btw" } },
@@ -172,13 +174,17 @@ function staticGroups(preview: boolean): PaletteGroup[] {
       label: "palette.groupConfig",
       items: [
         { id: "set-general", icon: "settings", label: "palette.settingsGeneral", keywords: "general 设置 常规 主题 密度 通知 启动 布局", action: { kind: "openSettings", group: "general" } },
-        { id: "set-background", icon: "image", label: "palette.settingsBackground", keywords: "background wallpaper 背景 壁纸 图片 视频 动图 透明度 模糊 遮罩", action: { kind: "openSettings", group: "background" } },
+        { id: "set-background", icon: "image", label: "palette.settingsBackground", keywords: "background wallpaper 背景 壁纸 图片 视频 动图 透明度 模糊 遮罩", action: { kind: "openSettings", group: "appearance", setting: "background" } },
+        { id: "set-appearance", icon: "image", label: "palette.settingsAppearance", keywords: "appearance layout font theme 外观 布局 字体 主题 宽度", action: { kind: "openSettings", group: "appearance" } },
+        { id: "set-voice", icon: "message", label: "palette.settingsVoice", keywords: "voice dictation speech 麦克风 听写 朗读 语音", action: { kind: "openSettings", group: "voice" } },
         { id: "set-interaction", icon: "message", label: "palette.settingsInteraction", keywords: "interaction steering 对话与交互 中断 粘贴 thinking 工具意图", action: { kind: "openSettings", group: "interaction" } },
         { id: "set-permissions", icon: "shield", label: "palette.settingsPermissions", keywords: "permissions 权限与安全 审批 always ask write yolo 工具级 forget approvals remembered 忘记 记住的审批", action: { kind: "openSettings", group: "permissions" } },
         { id: "set-context", icon: "layers", label: "palette.settingsContext", keywords: "context compact 上下文与记忆 压缩 记忆 memory hindsight mnemopi", action: { kind: "openSettings", group: "context" } },
         { id: "set-files", icon: "terminal", label: "palette.settingsFiles", keywords: "files edit mode hashline lsp shell 文件与终端 终端", action: { kind: "openSettings", group: "files" } },
         { id: "set-tasks", icon: "play", label: "palette.settingsTasks", keywords: "tasks plan goal loop 任务与执行 子任务 并发", action: { kind: "openSettings", group: "tasks" } },
-        { id: "set-advanced", icon: "wrench", label: "palette.settingsAdvanced", keywords: "advanced 设置 高级 配置层级 重试 循环保护", action: { kind: "openSettings", group: "advanced" } },
+        { id: "set-advanced", icon: "wrench", label: "palette.settingsAdvanced", keywords: "model service retry 模型 服务 重试 循环保护", action: { kind: "openSettings", group: "models" } },
+        { id: "set-maintenance", icon: "wrench", label: "palette.settingsMaintenance", keywords: "update maintenance 更新 维护 存储", action: { kind: "openSettings", group: "maintenance" } },
+        { id: "set-unsupported", icon: "settings", label: "palette.settingsUnsupported", keywords: "planned unsupported 待支持", action: { kind: "openSettings", group: "unsupported" } },
         { id: "mc-providers", icon: "server", label: "palette.modelProviders", keywords: "model config providers 模型配置 供应商", action: { kind: "openModelConfig", tab: "providers" } },
         { id: "mc-roles", icon: "steering", label: "palette.modelRoles", keywords: "model config roles 模型配置 角色", action: { kind: "openModelConfig", tab: "roles" } },
         { id: "mc-subagents", icon: "bot", label: "palette.modelSubagents", keywords: "model config subagents 模型配置 子代理", action: { kind: "openModelConfig", tab: "subagents" } },

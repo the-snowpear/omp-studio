@@ -1,11 +1,11 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { AppSelect } from "./AppSelect";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import { useI18n } from "./i18n";
 
 export type SlidingTabItem<T extends string> = {
   id: T;
-  icon: string;
+  icon: IconName;
   label: string;
   buttonId: string;
   panelId: string;

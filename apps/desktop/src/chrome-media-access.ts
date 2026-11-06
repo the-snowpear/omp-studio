@@ -9,6 +9,7 @@
  * Chromium.
  */
 import { CHROME_MEDIA_ACCESS_CHANNELS, type MicrophoneAccess } from "./chrome-media-access-shared.js";
+import { microphoneSettingsUrl } from "./platform/microphone-settings.js";
 
 export const MICROPHONE_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
 
@@ -44,8 +45,9 @@ export function registerMediaAccessIpc(options: {
   });
   options.ipcMain.handle(CHROME_MEDIA_ACCESS_CHANNELS.openMicrophoneSettings, async ({ sender }) => {
     if (!trusted(sender)) throw new Error("Untrusted media access request");
-    if (options.platform !== "darwin") return false;
-    await options.openExternal(MICROPHONE_SETTINGS_URL);
+    const url = microphoneSettingsUrl(options.platform);
+    if (!url) return false;
+    await options.openExternal(url);
     return true;
   });
   return {

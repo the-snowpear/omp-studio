@@ -303,6 +303,47 @@ describe("terminal flow control: lifecycle", () => {
     assert.equal(batcher.openSessions, 0);
   });
 
+  test("finish preserves split UTF-8 through late output, then releases the owner", () => {
+    const timers = new ManualTimers();
+    const events: string[] = [];
+    const batcher = new TerminalOutputBatcher({
+      timers,
+      batchMs: 12,
+      sink: { send: (_id, data) => events.push(data), release: (id) => events.push(`release:${id}`) },
+    });
+    batcher.open("term-1");
+    const bytes = Buffer.from("尾行", "utf8");
+    batcher.push("term-1", bytes.subarray(0, 2));
+    batcher.finish("term-1");
+    batcher.finish("term-1");
+    assert.equal(timers.pending, 1);
+    assert.equal(timers.scheduled[0]?.ms, 12);
+    batcher.push("term-1", bytes.subarray(2));
+    timers.run();
+    assert.deepEqual(events, ["尾行", "release:term-1"]);
+    batcher.close("term-1");
+    timers.run();
+    assert.equal(events.length, 2);
+    assert.equal(timers.pending, 0);
+  });
+
+  test("close cancels the exit window and releases a dangling UTF-8 tail once", () => {
+    const timers = new ManualTimers();
+    const events: string[] = [];
+    const batcher = new TerminalOutputBatcher({
+      timers,
+      sink: { send: (_id, data) => events.push(data), release: () => events.push("release") },
+    });
+    batcher.open("term-1");
+    batcher.finish("term-1");
+    batcher.push("term-1", Buffer.from("€", "utf8").subarray(0, 2));
+    batcher.close("term-1");
+    batcher.closeAll();
+    timers.run();
+    assert.deepEqual(events, ["�", "release"]);
+    assert.equal(timers.pending, 0);
+  });
+
   test("closing a paused session releases the source", () => {
     const { batcher, timers, recorded } = harness({ flowControl: true, highWaterBytes: 4, lowWaterBytes: 2 });
     batcher.push("term-1", "aaaa");

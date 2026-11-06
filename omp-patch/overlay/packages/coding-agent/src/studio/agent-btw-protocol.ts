@@ -1,29 +1,27 @@
-/** Child BTW is bound to an opaque Runtime target incarnation, never the main BTW slot. */
+import type { StudioBtwSnapshot as BtwSnapshot } from "./services/btw-service";
+import type { ImageContent as BtwImage } from "@oh-my-pi/pi-ai";
+import type { BtwHistoryTurn, BtwTopicSummary } from "./runtime-upgrade-protocol";
+
+/** Child BTW is bound to its target incarnation and never uses the main BTW slot. */
 export type AgentBtwOperation =
 	| { kind: "agent.btw.read"; sessionId: string; agentId: string; binding?: string; topicId?: string }
-	| { kind: "agent.btw.ask"; sessionId: string; agentId: string; binding: string; question: string; topicId?: string }
+	| {
+			kind: "agent.btw.ask";
+			sessionId: string;
+			agentId: string;
+			binding: string;
+			question: string;
+			topicId?: string;
+			images?: BtwImage[];
+	  }
 	| { kind: "agent.btw.abort"; sessionId: string; agentId: string; binding: string; ephemeralId: string };
 export interface AgentBtwState {
 	binding: string;
 	agentId: string;
 	targetSessionId: string;
-	snapshot: null | {
-		ephemeralId: string;
-		topicId?: string;
-		question?: string;
-		status: "running" | "completed" | "failed" | "aborted";
-		text: string;
-		error?: { code: "INTERNAL_ERROR" | "OUTPUT_LIMIT"; message: string };
-	};
-	topics: Array<{ topicId: string; question: string; status: string; updatedAt: number; turnCount: number }>;
-	turns: Array<{
-		question: string;
-		answer: string;
-		status: string;
-		createdAt: number;
-		updatedAt: number;
-		error?: string;
-	}>;
+	snapshot: BtwSnapshot | null;
+	topics: BtwTopicSummary[];
+	turns: BtwHistoryTurn[];
 }
 export interface AgentBtwResultMap {
 	"agent.btw.read": AgentBtwState;
@@ -44,8 +42,8 @@ function object(value: unknown, keys: readonly string[]): Record<string, unknown
 		throw Error("Invalid child BTW fields");
 	return value as Record<string, unknown>;
 }
-function text(value: unknown, max = 512, empty = false): void {
-	if (typeof value !== "string" || (!empty && !value.trim()) || value.length > max || value.includes("\0"))
+function text(value: unknown, max = 512): void {
+	if (typeof value !== "string" || !value.trim() || value.length > max || value.includes("\0"))
 		throw Error("Invalid child BTW text");
 }
 export function validateAgentBtwOperation(value: unknown): asserts value is AgentBtwOperation {
@@ -59,63 +57,21 @@ export function validateAgentBtwOperation(value: unknown): asserts value is Agen
 		...(kind === "agent.btw.abort"
 			? ["ephemeralId"]
 			: kind === "agent.btw.ask"
-				? ["question", "topicId"]
+				? ["question", "topicId", "images"]
 				: ["topicId"]),
 	]);
 	text(row.sessionId);
 	text(row.agentId);
 	if (kind !== "agent.btw.read" || row.binding !== undefined) text(row.binding, 128);
 	if (row.topicId !== undefined) text(row.topicId, 128);
-	if (kind === "agent.btw.ask") text(row.question, 65536);
+	if (kind === "agent.btw.ask") text(row.question, Number.POSITIVE_INFINITY);
 	if (kind === "agent.btw.abort") text(row.ephemeralId, 128);
 }
+/** Check the envelope only; history and images are produced by the Runtime. */
 export function validateAgentBtwState(value: unknown): asserts value is AgentBtwState {
-	if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 1048576)
-		throw Error("Child BTW exceeds wire budget");
 	const row = object(value, ["binding", "agentId", "targetSessionId", "snapshot", "topics", "turns"]);
 	text(row.binding, 128);
 	text(row.agentId);
 	text(row.targetSessionId);
-	const number = (v: unknown) => {
-		if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) throw Error("Invalid child BTW count");
-	};
-	if (row.snapshot !== null) {
-		const s = object(row.snapshot, ["ephemeralId", "topicId", "question", "status", "text", "error"]);
-		text(s.ephemeralId, 128);
-		text(s.text, 262144, true);
-		if (s.topicId !== undefined) text(s.topicId, 128);
-		if (s.question !== undefined) text(s.question, 65536);
-		if (!["running", "completed", "failed", "aborted"].includes(s.status as string))
-			throw Error("Invalid child BTW status");
-		if (s.error !== undefined) {
-			const e = object(s.error, ["code", "message"]);
-			if (!["INTERNAL_ERROR", "OUTPUT_LIMIT"].includes(e.code as string)) throw Error("Invalid child BTW error");
-			text(e.message);
-		}
-	}
-	for (const key of ["topics", "turns"] as const) {
-		const items = row[key];
-		if (!Array.isArray(items) || items.length > (key === "topics" ? 100 : 32))
-			throw Error("Invalid child BTW history");
-		for (const item of items) {
-			const r = object(
-				item,
-				key === "topics"
-					? ["topicId", "question", "status", "updatedAt", "turnCount"]
-					: ["question", "answer", "status", "createdAt", "updatedAt", "error"],
-			);
-			text(r.question, 65536);
-			number(r.updatedAt);
-			if (!["running", "complete", "cancelled", "error", "interrupted"].includes(r.status as string))
-				throw Error("Invalid history status");
-			if (key === "topics") {
-				text(r.topicId, 128);
-				number(r.turnCount);
-			} else {
-				text(r.answer, 262144, true);
-				number(r.createdAt);
-				if (r.error !== undefined) text(r.error);
-			}
-		}
-	}
+	if (!Array.isArray(row.topics) || !Array.isArray(row.turns)) throw Error("Invalid child BTW history");
 }

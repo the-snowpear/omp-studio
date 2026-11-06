@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { Icon } from "../icons";
 import { demoMark } from "./PromptHead";
+import { usePreviewMode } from "../preview/PreviewContext";
 import type { ApprovalView } from "./approvalContent";
 import { useI18n } from "../i18n";
 
@@ -28,6 +29,7 @@ export function ApprovalCard({
   onDeny: () => void;
 }) {
   const [rememberOpen, setRememberOpen] = useState(false);
+  const { marks } = usePreviewMode();
   const canSession = Boolean(view.configuration) || view.session !== undefined;
   const high = view.risk === "high";
   const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
@@ -42,7 +44,7 @@ export function ApprovalCard({
           {high ? zh ? "高风险" : "High risk" : view.risk === "medium" ? zh ? "中风险" : "Medium risk" : zh ? "低风险" : "Low risk"}
         </span>
         <span className="dk-head-end">
-          {demoMark(demo)}
+          {demoMark(demo, marks)}
           {meta ? <span className="dk-agent">{meta}</span> : null}
         </span>
       </div>

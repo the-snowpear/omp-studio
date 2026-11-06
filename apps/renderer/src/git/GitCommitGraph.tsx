@@ -7,14 +7,14 @@ import { useI18n } from "../i18n";
 
 import { buildGitGraphRows, GRAPH_COLORS, renderGraphRow, renderGraphThroughLanes, SWIMLANE_HEIGHT, SWIMLANE_WIDTH, type GraphRow } from "./gitGraphLayout";
 
-function refClass(ref: GitLogRef): string {
+export function gitRefClass(ref: GitLogRef): string {
   if (ref.kind === "head" || (ref.kind === "local" && ref.current)) return "git-ref local";
   if (ref.kind === "remote") return "git-ref remote";
   if (ref.kind === "tag") return "git-ref tag";
   return "git-ref";
 }
 
-function GraphSvg({ row }: { readonly row: GraphRow }) {
+export function GitGraphSvg({ row }: { readonly row: GraphRow }) {
   const rendered = renderGraphRow(row);
   return (
     <svg className="git-graph-svg" width={rendered.width} height={rendered.height} aria-hidden="true">
@@ -130,7 +130,7 @@ export function GitCommitGraph({
         return (
           <div key={row.id} className={`git-graph-block${selected ? " selected" : ""}`}>
             <div className="git-graph-lane">
-              <GraphSvg row={row} />
+              <GitGraphSvg row={row} />
               <GraphLaneExtend row={row} />
             </div>
             <div className="git-graph-col">
@@ -157,7 +157,7 @@ export function GitCommitGraph({
               {pills.length > 0 ? (
                 <div className="git-graph-refs">
                   {pills.map((ref) => (
-                    <span key={`${ref.kind}-${ref.name}`} className={refClass(ref)} style={ref.kind === "remote" ? { background: GRAPH_COLORS.remote } : ref.current ? { background: GRAPH_COLORS.local } : undefined}>
+                    <span key={`${ref.kind}-${ref.name}`} className={gitRefClass(ref)} style={ref.kind === "remote" ? { background: GRAPH_COLORS.remote } : ref.current ? { background: GRAPH_COLORS.local } : undefined}>
                       <span className="git-ref-sizer" aria-hidden="true">{ref.name}</span>
                       <span className="git-ref-clip"><span className="git-ref-scroll">{ref.name}</span></span>
                     </span>

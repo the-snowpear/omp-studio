@@ -1,10 +1,10 @@
 /**
  * Wheel handoff between a dock panel body and the card column around its slot.
  *
- * Every panel body lives in a fixed host layer at the end of the document (see
- * `hosts.ts`), so the browser can never chain its scroll into the
- * `.dock-card-list` that visually wraps the slot: the two are not on the same
- * DOM ancestor chain. `overscroll-behavior` cannot help either.
+ * Panel bodies outside the expanded conversation rail live in a fixed host
+ * layer (see `hosts.ts`), so the browser cannot chain their scroll into the
+ * card column around the slot. Expanded rail bodies share the native chain;
+ * the rail uses the same plan only for nested scrollports at their edge.
  *
  * For a single wheel event this module answers one question: can the body (and
  * anything inside it) still scroll natively in this direction? If yes, nothing

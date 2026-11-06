@@ -4,6 +4,7 @@ import type { JobInspection } from "@omp-studio/studio-protocol";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { JobWidget } from "./JobWidget";
+import { usePreviewMode } from "../preview/PreviewContext";
 import "./jobs.css";
 
 const POLL_MS = 2000;
@@ -38,6 +39,7 @@ export function JobInspector({
   onClose: () => void;
 }) {
   const { resolvedLanguage } = useI18n();
+  const { marks } = usePreviewMode();
   const zh = resolvedLanguage === "zh";
   const preview = previewInspection !== undefined;
   const [inspection, setInspection] = useState<JobInspection | undefined>(undefined);
@@ -86,7 +88,7 @@ export function JobInspector({
     >
       <div className="ji-head">
         <span className="ji-title" title={job.label}>{job.label}</span>
-        {preview ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
+        {preview && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
         {!preview ? (
           <button className="btn small ghost" type="button" onClick={() => void load()} disabled={!available}>
             {zh ? "刷新" : "Refresh"}
@@ -140,7 +142,7 @@ export function JobInspector({
           )}
         </>
       ) : !error && (preview || available) ? (
-        <div className="ji-note">{preview ? (zh ? "此演示任务没有详情" : "No demo details for this job") : zh ? "读取中…" : "Loading…"}</div>
+        <div className="ji-note">{preview ? (marks ? (zh ? "此演示任务没有详情" : "No demo details for this job") : zh ? "没有更多详情" : "No further details") : zh ? "读取中…" : "Loading…"}</div>
       ) : null}
     </section>
   );

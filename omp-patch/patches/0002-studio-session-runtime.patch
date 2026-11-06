@@ -110,6 +110,76 @@ index ae2066c237..e8a5e1e295 100644
  	provider: string,
  	identity: OAuthAccountIdentity,
  	limits: UsageLimit[] | undefined,
+diff --git a/packages/coding-agent/src/if-bench/runner.ts b/packages/coding-agent/src/if-bench/runner.ts
+index 6125f06216..20286af1da 100644
+--- a/packages/coding-agent/src/if-bench/runner.ts
++++ b/packages/coding-agent/src/if-bench/runner.ts
+@@ -74,6 +74,7 @@ export interface IfBenchSummary {
+ }
+ 
+ export interface IfBenchRunOptions {
++	signal?: AbortSignal;
+ 	targets: readonly BenchTarget[];
+ 	runtime: BenchRuntime;
+ 	maxTurns: number;
+@@ -137,6 +138,7 @@ export async function runIfBench(options: IfBenchRunOptions): Promise<IfBenchSum
+ 
+ 	const worker = async (): Promise<void> => {
+ 		for (;;) {
++			options.signal?.throwIfAborted();
+ 			const next = queue.shift();
+ 			if (!next) return;
+ 			ordered[next.index] = await runTarget(next.target, options);
+@@ -196,6 +198,7 @@ async function runTarget(target: BenchTarget, options: IfBenchRunOptions): Promi
+ 
+ 	try {
+ 		for (let turn = 1; turn <= options.maxTurns; turn += 1) {
++			options.signal?.throwIfAborted();
+ 			const actions: Action[] = makeActions(options.arrayLength, cumulativeActions, turn);
+ 			const turnPrompt = buildTurnPrompt({
+ 				turn,
+@@ -278,7 +281,24 @@ async function requestTurnWithRefusalRetry(
+ ): Promise<TurnOutcome> {
+ 	let outcome: TurnOutcome = { text: "", error: "request failed", durationMs: 0 };
+ 	for (let attempt = 1; attempt <= REFUSAL_MAX_ATTEMPTS; attempt += 1) {
+-		if (attempt > 1) await (options.sleep ?? Bun.sleep)(REFUSAL_BACKOFF_MS[attempt - 1] ?? 180_000);
++		options.signal?.throwIfAborted();
++		if (attempt > 1) {
++			const ms = REFUSAL_BACKOFF_MS[attempt - 1] ?? 180_000;
++			if (options.sleep) await options.sleep(ms);
++			else
++				await new Promise<void>((resolve, reject) => {
++					const abort = () => {
++						clearTimeout(timer);
++						reject(options.signal?.reason);
++					};
++					const timer = setTimeout(() => {
++						options.signal?.removeEventListener("abort", abort);
++						resolve();
++					}, ms);
++					options.signal?.addEventListener("abort", abort, { once: true });
++				});
++		}
++		options.signal?.throwIfAborted();
+ 		const sessionId = options.randomSessionId();
+ 		const apiKey = options.runtime.modelRegistry.resolver(model, sessionId);
+ 		outcome = await requestTurn(model, context, sessionId, apiKey, providerSessionState, target, options);
+@@ -305,6 +325,7 @@ async function requestTurn(
+ 	try {
+ 		const stream = options.stream(model, context, {
+ 			apiKey,
++			signal: options.signal,
+ 			sessionId,
+ 			promptCacheKey: sessionId,
+ 			maxTokens:
+@@ -339,6 +360,7 @@ async function requestTurn(
+ 		}
+ 		return { message, text, durationMs: elapsed(message) };
+ 	} catch (error) {
++		options.signal?.throwIfAborted();
+ 		return { text: "", error: errorText(error), durationMs: elapsed() };
+ 	}
+ }
 diff --git a/packages/coding-agent/src/plan-mode/approved-plan.ts b/packages/coding-agent/src/plan-mode/approved-plan.ts
 index 90cd798e91..2bc96a315d 100644
 --- a/packages/coding-agent/src/plan-mode/approved-plan.ts
@@ -123,7 +193,7 @@ index 90cd798e91..2bc96a315d 100644
  
  /** Validate and normalize the agent-supplied plan title into a safe filename stem.
 diff --git a/packages/coding-agent/src/predict/client.ts b/packages/coding-agent/src/predict/client.ts
-index 9d410bcfda..b502d810b8 100644
+index 9d410bcfda..9113e0e40b 100644
 --- a/packages/coding-agent/src/predict/client.ts
 +++ b/packages/coding-agent/src/predict/client.ts
 @@ -19,6 +19,8 @@ import { resolveWorkerSpawnCmd, SMOKE_TEST_TIMEOUT_MS, workerEnvFromParent } fro
@@ -263,29 +333,7 @@ index 9d410bcfda..b502d810b8 100644
  		const response = await this.#request(
  			id => ({ id, op: "complete", method: engine, before, prefix }),
  			COMPLETE_TIMEOUT_MS,
-@@ -244,6 +298,21 @@ class TextPredictionClient {
- 		return { engine, suggestion: response.suggestion };
- 	}
- 
-+	/** Explicit import into the isolated Studio learning state; never writes prompt history. */
-+	async importPrompts(prompts: string[]): Promise<number> {
-+		if (this.profile !== "studio") throw new Error("Explicit imports require the Studio prediction profile");
-+		let ingested = 0;
-+		for (let start = 0; start < prompts.length; start += 128) {
-+			const response = await this.#request(
-+				id => ({ id, op: "import", prompts: prompts.slice(start, start + 128) }),
-+				COMPLETE_TIMEOUT_MS,
-+			);
-+			if (!response.ok) throw new Error(response.error);
-+			if (response.op !== "import") throw new Error("Unexpected prediction import response");
-+			ingested += response.ingested;
-+		}
-+		return ingested;
-+	}
- 	/**
- 	 * Tell a running daemon new history rows exist. Without a live connection
- 	 * nothing needs telling: the daemon ingests everything new when it starts.
-@@ -262,12 +331,18 @@ class TextPredictionClient {
+@@ -262,12 +316,18 @@ class TextPredictionClient {
  	}
  
  	#connect(): Promise<DaemonConnection> {
@@ -305,7 +353,7 @@ index 9d410bcfda..b502d810b8 100644
  				this.#connection = connection;
  				this.#connecting = undefined;
  				return connection;
-@@ -335,13 +410,14 @@ export async function smokeTestTextPredictDaemon(): Promise<void> {
+@@ -335,13 +395,14 @@ export async function smokeTestTextPredictDaemon(): Promise<void> {
  		env: workerEnvFromParent({
  			[TEXT_PREDICT_SOCKET_ENV]: endpoint,
  			[TEXT_PREDICT_AGENT_DIR_ENV]: path.join(root, "agent"),
@@ -322,7 +370,7 @@ index 9d410bcfda..b502d810b8 100644
  		}
  		if (!connection) {
 diff --git a/packages/coding-agent/src/predict/daemon.ts b/packages/coding-agent/src/predict/daemon.ts
-index 1dac9d5a30..33ba4f366c 100644
+index 1dac9d5a30..1ff3e4476e 100644
 --- a/packages/coding-agent/src/predict/daemon.ts
 +++ b/packages/coding-agent/src/predict/daemon.ts
 @@ -21,6 +21,8 @@ import { blendPredictions } from "./blend";
@@ -376,28 +424,7 @@ index 1dac9d5a30..33ba4f366c 100644
  					pid: process.pid,
  					engines: [...this.#engines.keys()],
  				};
-@@ -280,6 +287,20 @@ class TextPredictDaemon {
- 				if (ingested > 0) this.#persistCadence.touch();
- 				return { id: request.id, ok: true, op: "sync", ingested };
- 			}
-+			case "import": {
-+				if (
-+					this.#profile !== "studio" ||
-+					!Array.isArray(request.prompts) ||
-+					request.prompts.length > 128 ||
-+					request.prompts.some(text => typeof text !== "string" || text.length > 4096)
-+				)
-+					throw new Error("Invalid explicit prediction import");
-+				const engine = await this.#engine("ngram");
-+				await engine.predictor.observe(request.prompts);
-+				engine.markDirty();
-+				await engine.persist();
-+				return { id: request.id, ok: true, op: "import", ingested: request.prompts.length };
-+			}
- 			case "shutdown":
- 				setImmediate(() => this.#server.exit("shutdown requested"));
- 				return { id: request.id, ok: true, op: "shutdown" };
-@@ -357,7 +378,7 @@ class TextPredictDaemon {
+@@ -357,7 +364,7 @@ class TextPredictDaemon {
  			await predictor.ready();
  			cursor = undefined;
  		}
@@ -406,7 +433,7 @@ index 1dac9d5a30..33ba4f366c 100644
  		const ingested = await engine.ingest(this.#historyDbPath);
  		if (ingested > 0) this.#persistCadence.touch();
  		logger.debug("text-predict: engine ready", {
-@@ -388,5 +409,7 @@ export async function startTextPredictDaemonFromEnvironment(): Promise<void> {
+@@ -388,5 +395,7 @@ export async function startTextPredictDaemonFromEnvironment(): Promise<void> {
  	if (!endpoint || !agentDir) {
  		throw new Error(`${TEXT_PREDICT_SOCKET_ENV} and ${TEXT_PREDICT_AGENT_DIR_ENV} must be set`);
  	}
@@ -431,7 +458,7 @@ index 86beea3866..7067f815f3 100644
  		path.join(os.homedir(), ".codex", "history.jsonl"),
  	];
 diff --git a/packages/coding-agent/src/predict/protocol.ts b/packages/coding-agent/src/predict/protocol.ts
-index f527c28992..f17e41b7e6 100644
+index f527c28992..23ab979d38 100644
 --- a/packages/coding-agent/src/predict/protocol.ts
 +++ b/packages/coding-agent/src/predict/protocol.ts
 @@ -19,6 +19,8 @@ export const TEXT_PREDICT_SOCKET_ENV = "OMP_TEXT_PREDICT_SOCKET";
@@ -462,13 +489,7 @@ index f527c28992..f17e41b7e6 100644
  	return { name: `omp.text-predict.${key}`, endpoint: ipcEndpoint(runtimeDir, `text-predict-${key}`) };
  }
  
-@@ -56,13 +66,24 @@ export type TextPredictRequest =
- 	  }
- 	/** Ingest history rows newer than each open engine's cursor. */
- 	| { id: number; op: "sync" }
-+	| { id: number; op: "import"; prompts: string[] }
- 	/** Persist and exit (a client found a daemon from an older omp version). */
- 	| { id: number; op: "shutdown" };
+@@ -61,7 +71,16 @@ export type TextPredictRequest =
  
  /** Daemon → client response. */
  export type TextPredictResponse =
@@ -486,18 +507,20 @@ index f527c28992..f17e41b7e6 100644
  	| { id: number; ok: true; op: "complete"; suggestion: PredictedWord | null }
  	| { id: number; ok: true; op: "feedback" | "shutdown" }
  	| { id: number; ok: true; op: "sync"; ingested: number }
-+	| { id: number; ok: true; op: "import"; ingested: number }
- 	| { id: number; ok: false; error: string };
 diff --git a/packages/coding-agent/src/ratchet/prelude-definition.ts b/packages/coding-agent/src/ratchet/prelude-definition.ts
-index 6490e232cf..f6c120fce7 100644
+index 6490e232cf..7f7b9ede52 100644
 --- a/packages/coding-agent/src/ratchet/prelude-definition.ts
 +++ b/packages/coding-agent/src/ratchet/prelude-definition.ts
-@@ -1,3 +1,4 @@
-+import { enforceStudioRatchetBoundary } from "../studio/services/ratchet-boundary";
+@@ -1,3 +1,8 @@
++import {
++	enforceStudioRatchetBoundary,
++	notifyStudioRatchetGate,
++	notifyStudioRatchetSetup,
++} from "../studio/services/ratchet-boundary";
  import { type } from "@oh-my-pi/omptype";
  import type { AgentToolResult, ToolApprovalDecision } from "@oh-my-pi/pi-agent-core";
  import type { ModelCost } from "@oh-my-pi/pi-catalog/types";
-@@ -194,6 +195,7 @@ async function invokeRatchet(
+@@ -194,9 +199,11 @@ async function invokeRatchet(
  	lookup: PriceLookup,
  ): Promise<AgentToolResult<unknown>> {
  	const cwd = session.cwd;
@@ -505,6 +528,34 @@ index 6490e232cf..f6c120fce7 100644
  	const lockKey = `${cwd}\0${params.flow}`;
  	if (params.action === "init") {
  		const state = await withFlowLock(lockKey, () => initFlow(cwd, params.flow, params));
++		await notifyStudioRatchetSetup(cwd, params);
+ 		return result(`ratchet flow ${state.flow} ready`, state);
+ 	}
+ 	switch (params.action) {
+@@ -207,6 +214,7 @@ async function invokeRatchet(
+ 				await saveState(cwd, fresh);
+ 				return fresh;
+ 			});
++			await notifyStudioRatchetSetup(cwd, params);
+ 			return result(`plan updated for ${state.flow}`, state);
+ 		}
+ 		case "split": {
+@@ -216,6 +224,7 @@ async function invokeRatchet(
+ 				await saveState(cwd, fresh);
+ 				return fresh;
+ 			});
++			await notifyStudioRatchetSetup(cwd, params);
+ 			return result(
+ 				`split ${state.flow}: ${state.train_ids.length} train / ${state.test_ids.length} test (seed ${state.split_seed})`,
+ 				{ train_ids: state.train_ids, test_ids: state.test_ids, seed: state.split_seed },
+@@ -254,6 +263,7 @@ async function invokeRatchet(
+ 			const gate = await withFlowLock(lockKey, async () =>
+ 				gateVariant(cwd, await requireState(cwd, params.flow), params.variant, params.change ?? "", lookup),
+ 			);
++			await notifyStudioRatchetGate(cwd, params.flow, params.variant, gate);
+ 			const lines = [`${gate.variant}: ${gate.decision} — ${gate.reasons.join("; ")}`];
+ 			for (const warning of gate.warnings) lines.push(`warning: ${warning}`);
+ 			if (gate.plateau)
 diff --git a/packages/coding-agent/src/registry/agent-registry.ts b/packages/coding-agent/src/registry/agent-registry.ts
 index e5acd41c89..5d14019168 100644
 --- a/packages/coding-agent/src/registry/agent-registry.ts
@@ -612,10 +663,18 @@ index 17654fad3e..352005048c 100644
  	attribution?: MessageAttribution;
  	/** Called synchronously with the messages pushed onto the steering queue. See {@link PromptOptions.onPromptQueued}. */
 diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
-index 33d2447849..7845cac57c 100644
+index 33d2447849..e01be95022 100644
 --- a/packages/coding-agent/src/session/agent-session.ts
 +++ b/packages/coding-agent/src/session/agent-session.ts
-@@ -730,6 +730,8 @@ type ScheduledAgentContinueOptions = {
+@@ -143,6 +143,7 @@ import { getEditStore } from "../edit/store";
+ import { releaseCompletionHandles } from "../eval/completion-bridge";
+ import { releaseJudgmentBatches } from "../eval/judgment-batch-bridge";
+ import type { EvalPreludeDefinition } from "../eval/preludes";
++import { computerUserMessageStarted, computerToolResultDelivered } from "../studio/computer-runtime-lifecycle";
+ import type { PythonResult } from "../eval/py/executor";
+ import { EVAL_STATE_CONTEXT_TYPE, formatEvalStateContext, isEvalStateContext } from "../eval/state";
+ import { WorkPoolRegistry } from "../task/workpool";
+@@ -730,6 +731,8 @@ type ScheduledAgentContinueOptions = {
  	shouldContinue?: () => boolean;
  	onSkip?: (reason: AgentContinueSkipReason) => void;
  	onError?: (error: unknown) => void;
@@ -624,7 +683,7 @@ index 33d2447849..7845cac57c 100644
  };
  
  type ScheduledAgentContinueRequest = {
-@@ -883,6 +885,14 @@ function todoRetryMatches(failed: Record<string, unknown>, retry: Record<string,
+@@ -883,6 +886,14 @@ function todoRetryMatches(failed: Record<string, unknown>, retry: Record<string,
  	return true;
  }
  
@@ -639,7 +698,7 @@ index 33d2447849..7845cac57c 100644
  export class AgentSession implements SettingsScope {
  	readonly agent: Agent;
  	readonly sessionManager: SessionManager;
-@@ -958,6 +968,9 @@ export class AgentSession implements SettingsScope {
+@@ -958,6 +969,9 @@ export class AgentSession implements SettingsScope {
  	 * command.
  	 */
  	readonly #queuedMessageRawText = new WeakMap<AgentMessage, string>();
@@ -649,7 +708,7 @@ index 33d2447849..7845cac57c 100644
  
  	// Event subscription state
  	#unsubscribeAgent?: () => void;
-@@ -1236,6 +1249,10 @@ export class AgentSession implements SettingsScope {
+@@ -1236,6 +1250,10 @@ export class AgentSession implements SettingsScope {
  	 *  incremented, so `isStreaming` alone cannot tell a host that a submission is admitted. */
  	#admittedSubmissionCount = 0;
  	#admittedSubmissionsSettled: PromiseWithResolvers<void> | undefined;
@@ -660,7 +719,7 @@ index 33d2447849..7845cac57c 100644
  	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
  	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
  	// checks in #handleAgentEvent) still fire on the original schedule — only the
-@@ -1866,11 +1883,12 @@ export class AgentSession implements SettingsScope {
+@@ -1866,11 +1884,12 @@ export class AgentSession implements SettingsScope {
  
  	/**
  	 * Cancel only this session's pending prewalk without changing the active model or settings, and keep
@@ -676,7 +735,7 @@ index 33d2447849..7845cac57c 100644
  	}
  
  	/** Restore a planning model and re-arm prewalk without partially applying a rejected restart. */
-@@ -1889,7 +1907,11 @@ export class AgentSession implements SettingsScope {
+@@ -1889,7 +1908,11 @@ export class AgentSession implements SettingsScope {
  		if (!state?.enabled) {
  			throw new ToolError("Plan mode is not active.");
  		}
@@ -689,7 +748,7 @@ index 33d2447849..7845cac57c 100644
  			suppliedTitle: title,
  			statePlanFilePath: state.planFilePath,
  			readPlan: url => this.#readPlanFile(url),
-@@ -1897,7 +1919,7 @@ export class AgentSession implements SettingsScope {
+@@ -1897,7 +1920,7 @@ export class AgentSession implements SettingsScope {
  		});
  		return {
  			content: [{ type: "text", text: "Plan ready for review." }],
@@ -698,18 +757,28 @@ index 33d2447849..7845cac57c 100644
  		};
  	}
  
-@@ -1923,7 +1945,9 @@ export class AgentSession implements SettingsScope {
+@@ -1923,7 +1946,9 @@ export class AgentSession implements SettingsScope {
  		this.#reseedTokenRate();
  		this.agent.setQueuedMessageGrouping(
  			(previous, next) =>
 -				isHiddenUserCompanion(previous) && (isHiddenUserCompanion(next) || isUserQueuedMessage(next)),
-+				(this.#studioQueueIds.has(previous) &&
-+					this.#studioQueueIds.get(previous) === this.#studioQueueIds.get(next)) ||
++				(this.#queuedMessageIds.has(previous) &&
++					this.#queuedMessageIds.get(previous) === this.#queuedMessageIds.get(next)) ||
 +				(isHiddenUserCompanion(previous) && (isHiddenUserCompanion(next) || isUserQueuedMessage(next))),
  		);
  		this.sessionManager = config.sessionManager;
  		this.settings = config.settings;
-@@ -5216,7 +5240,7 @@ export class AgentSession implements SettingsScope {
+@@ -3945,6 +3970,9 @@ export class AgentSession implements SettingsScope {
+ 	 * the recovery wait always sees the in-flight handler and blocks until it — and
+ 	 * everything it schedules — settles. */
+ 	#dispatchAgentEvent = async (event: AgentEvent): Promise<void> => {
++		if (event.type === "message_start") computerUserMessageStarted(this.sessionId, event.message);
++		if (event.type === "tool_execution_end")
++			computerToolResultDelivered(this.sessionId, event.toolCallId, event.result);
+ 		// Revoke before the first await: delayed end-of-turn maintenance must
+ 		// never revoke a foreground-control grant acquired by a later prompt.
+ 		const computerControlRevocation =
+@@ -5216,7 +5244,7 @@ export class AgentSession implements SettingsScope {
  					return;
  				}
  			}
@@ -718,7 +787,7 @@ index 33d2447849..7845cac57c 100644
  				options?.onSkip?.("aborted");
  				return;
  			}
-@@ -5359,6 +5383,14 @@ export class AgentSession implements SettingsScope {
+@@ -5359,6 +5387,14 @@ export class AgentSession implements SettingsScope {
  					this.#skipAgentContinue("should-continue-false", request);
  					return;
  				}
@@ -733,7 +802,7 @@ index 33d2447849..7845cac57c 100644
  
  				for (;;) {
  					const active = this.#activeAgentContinue;
-@@ -5447,6 +5479,7 @@ export class AgentSession implements SettingsScope {
+@@ -5447,6 +5483,7 @@ export class AgentSession implements SettingsScope {
  				delayMs: 100,
  				generation: options.generation,
  				shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -741,7 +810,7 @@ index 33d2447849..7845cac57c 100644
  			});
  			return true;
  		}
-@@ -5490,6 +5523,7 @@ export class AgentSession implements SettingsScope {
+@@ -5490,6 +5527,7 @@ export class AgentSession implements SettingsScope {
  						source: "auto-continue-queued-message",
  						generation,
  						shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -749,7 +818,7 @@ index 33d2447849..7845cac57c 100644
  					});
  					return;
  				}
-@@ -5796,6 +5830,28 @@ export class AgentSession implements SettingsScope {
+@@ -5796,6 +5834,28 @@ export class AgentSession implements SettingsScope {
  		await this.#extensionRunner.emit(mapped);
  	}
  
@@ -778,7 +847,7 @@ index 33d2447849..7845cac57c 100644
  	/**
  	 * Subscribe to agent events.
  	 * Session persistence is handled internally (saves messages on message_end).
-@@ -6473,6 +6529,7 @@ export class AgentSession implements SettingsScope {
+@@ -6473,6 +6533,7 @@ export class AgentSession implements SettingsScope {
  
  	/** Drop the in-memory conversation state after the terminal dispose flush. */
  	#releaseRetainedSessionMemory(): void {
@@ -786,7 +855,7 @@ index 33d2447849..7845cac57c 100644
  		this.#releaseQueuedTtsrReservations();
  		this.agent.reset();
  		this.#tools.releaseRestoredTranscript();
-@@ -7334,6 +7391,11 @@ export class AgentSession implements SettingsScope {
+@@ -7334,6 +7395,11 @@ export class AgentSession implements SettingsScope {
  	}
  
  	/** All messages including custom types like BashExecutionMessage */
@@ -798,7 +867,7 @@ index 33d2447849..7845cac57c 100644
  	get messages(): AgentMessage[] {
  		return this.agent.state.messages;
  	}
-@@ -8189,7 +8251,7 @@ export class AgentSession implements SettingsScope {
+@@ -8189,7 +8255,7 @@ export class AgentSession implements SettingsScope {
  			const queued = await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
  				timestamp: submittedAt,
  				attribution: promptAttribution,
@@ -807,7 +876,7 @@ index 33d2447849..7845cac57c 100644
  				rawText: typedText,
  				onPromptQueued: options?.onPromptQueued,
  				onPromptAdmitted: options?.onPromptAdmitted,
-@@ -8321,21 +8383,17 @@ export class AgentSession implements SettingsScope {
+@@ -8321,21 +8387,17 @@ export class AgentSession implements SettingsScope {
  		let dispatched = false;
  		const refusalBeforeDispatch = this.#costCapRefusal;
  		try {
@@ -837,7 +906,7 @@ index 33d2447849..7845cac57c 100644
  			});
  		} catch (error) {
  			turnError = error;
-@@ -8715,6 +8773,9 @@ export class AgentSession implements SettingsScope {
+@@ -8715,6 +8777,9 @@ export class AgentSession implements SettingsScope {
  			acceptTerminalEmptyStop?: boolean;
  		},
  	): Promise<boolean> {
@@ -847,7 +916,7 @@ index 33d2447849..7845cac57c 100644
  		// Returns false when the prompt was dropped before reaching the agent —
  		// every pre-dispatch bail (generation bump from abort, disposal, usage
  		// preflight denial) exits silently, and prompt() uses the outcome to hand
-@@ -9172,6 +9233,7 @@ export class AgentSession implements SettingsScope {
+@@ -9172,6 +9237,7 @@ export class AgentSession implements SettingsScope {
  		await this.#queueUserMessage(expandedText, images, "steer", {
  			timestamp: submittedAt,
  			attribution: options?.attribution,
@@ -855,7 +924,7 @@ index 33d2447849..7845cac57c 100644
  			rawText: text,
  			onPromptQueued: options?.onPromptQueued,
  		});
-@@ -9198,6 +9260,7 @@ export class AgentSession implements SettingsScope {
+@@ -9198,6 +9264,7 @@ export class AgentSession implements SettingsScope {
  			await this.#queueUserMessage(expandedText, images, "followUp", {
  				timestamp: submittedAt,
  				attribution: options?.attribution,
@@ -863,34 +932,92 @@ index 33d2447849..7845cac57c 100644
  				rawText: text,
  				onPromptQueued: options?.onPromptQueued,
  			});
-@@ -9459,6 +9522,8 @@ export class AgentSession implements SettingsScope {
- 			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
- 			const userMessage: AgentMessage = { role: "user", content, attribution, timestamp: timestamp ?? Date.now() };
- 			this.#queuedMessageRawText.set(userMessage, rawText);
-+			const studioGroupId = this.#studioQueueId(userMessage);
-+			for (const companion of prependMessages) this.#studioQueueIds.set(companion, studioGroupId);
- 			records.push(userMessage);
+@@ -9453,13 +9520,21 @@ export class AgentSession implements SettingsScope {
+ 		) {
+ 			return false;
+ 		}
++		if (mode === "aside" && (await this.#sessionGenerationChanged(sessionGeneration))) return false;
++		const userMessage: AgentMessage = {
++			role: "user",
++			content,
++			attribution,
++			timestamp: timestamp ?? Date.now(),
++			...(mode === "steer" ? { steering: true } : {}),
++		};
++		const records: AgentMessage[] = [...prependMessages, ...attachmentSourceNotices];
++		if (imageDescriptionNotice) records.push(imageDescriptionNotice);
++		records.push(userMessage);
++		this.#queuedMessageRawText.set(userMessage, rawText);
++		const groupId = this.#queuedMessageId(userMessage);
++		for (const message of records) this.#queuedMessageIds.set(message, groupId);
+ 		if (mode === "aside") {
+-			if (await this.#sessionGenerationChanged(sessionGeneration)) return false;
+-			const records: AgentMessage[] = [...prependMessages, ...attachmentSourceNotices];
+-			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
+-			const userMessage: AgentMessage = { role: "user", content, attribution, timestamp: timestamp ?? Date.now() };
+-			this.#queuedMessageRawText.set(userMessage, rawText);
+-			records.push(userMessage);
  			this.#irc.queueAside(records);
  			options?.onPromptAdmitted?.();
-@@ -9485,6 +9550,8 @@ export class AgentSession implements SettingsScope {
- 				timestamp: timestamp ?? Date.now(),
- 			};
- 			this.#queuedMessageRawText.set(userMessage, rawText);
-+			const studioGroupId = this.#studioQueueId(userMessage);
-+			for (const companion of prependMessages) this.#studioQueueIds.set(companion, studioGroupId);
- 			this.agent.followUp(userMessage);
+ 			// The awaits above (image normalization / vision description) can span the run's
+@@ -9473,52 +9548,19 @@ export class AgentSession implements SettingsScope {
+ 		// Publish the complete group without yielding: removal owns contiguous companions.
+ 		// The session-agent notice rides via prependMessages (from prompt()),
+ 		// so it arrives alongside the user message in the same turn (#14093).
+-		let userMessage: AgentMessage;
+ 		if (mode === "followUp") {
+-			for (const notice of prependMessages) this.agent.followUp(notice);
+-			for (const notice of attachmentSourceNotices) this.agent.followUp(notice);
+-			if (imageDescriptionNotice) this.agent.followUp(imageDescriptionNotice);
+-			userMessage = {
+-				role: "user",
+-				content,
+-				attribution,
+-				timestamp: timestamp ?? Date.now(),
+-			};
+-			this.#queuedMessageRawText.set(userMessage, rawText);
+-			this.agent.followUp(userMessage);
++			for (const message of records) this.agent.followUp(message);
  		} else {
- 			for (const notice of prependMessages) this.agent.steer(notice);
-@@ -9498,6 +9565,8 @@ export class AgentSession implements SettingsScope {
- 				timestamp: timestamp ?? Date.now(),
- 			};
- 			this.#queuedMessageRawText.set(userMessage, rawText);
-+			const studioGroupId = this.#studioQueueId(userMessage);
-+			for (const companion of prependMessages) this.#studioQueueIds.set(companion, studioGroupId);
- 			this.agent.steer(userMessage);
+-			for (const notice of prependMessages) this.agent.steer(notice);
+-			for (const notice of attachmentSourceNotices) this.agent.steer(notice);
+-			if (imageDescriptionNotice) this.agent.steer(imageDescriptionNotice);
+-			userMessage = {
+-				role: "user",
+-				content,
+-				steering: true,
+-				attribution,
+-				timestamp: timestamp ?? Date.now(),
+-			};
+-			this.#queuedMessageRawText.set(userMessage, rawText);
+-			this.agent.steer(userMessage);
++			for (const message of records) this.agent.steer(message);
  			// Wake any listener parked on steering arrival (the ACP permission
  			// gate): the message is on the queue now, so its wait ends even
-@@ -9688,6 +9757,7 @@ export class AgentSession implements SettingsScope {
+ 			// though the streaming boundary poll has not run yet. The whole
+ 			// admitted group rides along so the gate promotes exactly these
+ 			// messages — never an agent-authored steer that happened to be
+ 			// enqueued in the same window without firing the signal.
+-			this.#fireSteeringArrival([
+-				...prependMessages,
+-				...attachmentSourceNotices,
+-				...(imageDescriptionNotice ? [imageDescriptionNotice] : []),
+-				userMessage,
+-			]);
++			this.#fireSteeringArrival(records);
+ 		}
+-		// The optional call skips building the group when no caller asked for it.
+-		options?.onPromptQueued?.([
+-			...prependMessages,
+-			...attachmentSourceNotices,
+-			...(imageDescriptionNotice ? [imageDescriptionNotice] : []),
+-			userMessage,
+-		]);
++		options?.onPromptQueued?.(records);
+ 		options?.onPromptAdmitted?.();
+ 		// joinActiveTurn admission must never start an autonomous turn: the
+ 		// live run owns delivery, and an idle queue stays put until the host
+@@ -9688,6 +9730,7 @@ export class AgentSession implements SettingsScope {
  		this.#queuedMessageDrainScheduled = true;
  		this.#scheduleAgentContinue({
  			source: "queued-message-drain",
@@ -898,7 +1025,7 @@ index 33d2447849..7845cac57c 100644
  			shouldContinue: () => {
  				this.#queuedMessageDrainScheduled = false;
  				return (
-@@ -10278,13 +10348,28 @@ export class AgentSession implements SettingsScope {
+@@ -10278,15 +10321,24 @@ export class AgentSession implements SettingsScope {
  	 *  `forInterrupt` also withdraws input the run already dequeued but never recorded — live-steered
  	 *  into the aborted response, or taken for its next model call — and treats it as queued ahead of
  	 *  the rest (it was queued first). */
@@ -910,143 +1037,135 @@ index 33d2447849..7845cac57c 100644
  		const withdrawn = options?.forInterrupt ? this.agent.withdrawUndeliveredQueuedMessages() : undefined;
  		const steeringAll = [...(withdrawn?.steering ?? []), ...this.agent.peekSteeringQueue()];
  		const followUpAll = [...(withdrawn?.followUp ?? []), ...this.agent.peekFollowUpQueue()];
+-		const steering = steeringAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
+-		const followUp = followUpAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
 +		if (options?.preserveGroups) {
 +			for (const [queue, messages] of [
 +				["steering", steeringAll],
 +				["followUp", followUpAll],
 +			] as const) {
-+				for (let index = 0; index < messages.length; index++)
-+					if (isUserAuthoredQueuedMessage(messages[index])) {
-+						this.#heldQueueGroups.push({
-+							sessionId: this.sessionId,
-+							queue,
-+							messages: messages.slice(this.#queuedUserGroupStart(messages, index), index + 1),
-+						});
-+					}
++				for (const group of this.#queuedUserGroups(messages))
++					this.#heldQueueGroups.push({ sessionId: this.sessionId, queue, messages: group.messages });
 +			}
 +		}
- 		const steering = steeringAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
- 		const followUp = followUpAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
++		const steering = this.#queuedUserGroups(steeringAll).map(group => toRestoredQueuedMessage(group.anchor));
++		const followUp = this.#queuedUserGroups(followUpAll).map(group => toRestoredQueuedMessage(group.anchor));
  		const recordable = (m: AgentMessage): boolean =>
-@@ -10343,6 +10428,83 @@ export class AgentSession implements SettingsScope {
+ 			m.role !== "developer" && isDisplayableQueuedMessage(m) && !isUserAuthoredQueuedMessage(m);
+ 		const recordedOnInterrupt = new Set<AgentMessage>();
+@@ -10334,6 +10386,10 @@ export class AgentSession implements SettingsScope {
+ 		);
+ 	}
+ 
++	get hasHeldQueuedMessages(): boolean {
++		return this.#heldQueueGroups.some(group => group.sessionId === this.sessionId);
++	}
++
+ 	/** Whether an empty submit should interrupt the streaming turn: displayable input is
+ 	 *  queued, or live steering sits in the in-flight response, which the abort requeues
+ 	 *  for the continuation turn. */
+@@ -10343,17 +10399,142 @@ export class AgentSession implements SettingsScope {
  
  	/** Chip texts for the queue display. Steering live steering took for the streaming response
  	 *  stays listed until the transcript records it, when the model actually switches to it. */
 +
 +	/** Stable object identities are private to this Runtime generation, never text matched. */
-+	#studioQueueIds = new WeakMap<AgentMessage, string>();
-+	#studioQueueId(message: AgentMessage): string {
-+		let id = this.#studioQueueIds.get(message);
++	#queuedMessageId(message: AgentMessage): string {
++		let id = this.#queuedMessageIds.get(message);
 +		if (!id) {
-+			id = crypto.randomUUID();
-+			this.#studioQueueIds.set(message, id);
++			id = Bun.randomUUIDv7();
++			this.#queuedMessageIds.set(message, id);
 +		}
 +		return id;
 +	}
-+	#studioQueueGroups() {
++	#queuedUserGroups(messages: readonly AgentMessage[]) {
++		const groups: Array<{ id: string; messages: AgentMessage[]; anchor: AgentMessage }> = [];
++		for (let index = messages.length - 1; index >= 0; index--) {
++			const anchor = messages[index];
++			if (!isUserAuthoredQueuedMessage(anchor)) continue;
++			const start = this.#queuedUserGroupStart(messages, index);
++			const id = this.#queuedMessageId(anchor);
++			const group = messages.slice(start, index + 1);
++			for (const message of group) this.#queuedMessageIds.set(message, id);
++			groups.push({ id, messages: group, anchor });
++			index = start;
++		}
++		return groups.reverse();
++	}
++	#queuedMessageGroups() {
 +		const rows: Array<{
 +			id: string;
 +			queue: "steering" | "followUp";
-+			state: "pending" | "delivering";
++			state: "queued" | "inFlight" | "held";
 +			messages: AgentMessage[];
 +			anchor: AgentMessage;
 +		}> = [];
 +		for (const [queue, state, messages] of [
-+			["steering", "delivering", this.agent.peekLiveSteeredMessages()],
-+			["steering", "pending", this.agent.peekSteeringQueue()],
-+			["followUp", "pending", this.agent.peekFollowUpQueue()],
++			["steering", "inFlight", this.agent.peekLiveSteeredMessages()],
++			["steering", "queued", this.agent.peekSteeringQueue()],
++			["followUp", "queued", this.agent.peekFollowUpQueue()],
 +		] as const) {
-+			const groups = new Map<string, AgentMessage[]>();
-+			for (const message of messages) {
-+				const id = this.#studioQueueId(message);
-+				const group = groups.get(id) ?? [];
-+				group.push(message);
-+				groups.set(id, group);
-+			}
-+			for (const [id, group] of groups) {
-+				const anchor = group.findLast(isUserAuthoredQueuedMessage);
-+				if (anchor) rows.push({ id, queue, state, messages: group, anchor });
-+			}
++			for (const group of this.#queuedUserGroups(messages)) rows.push({ ...group, queue, state });
 +		}
++		for (const held of this.#heldQueueGroups)
++			if (held.sessionId === this.sessionId)
++				for (const group of this.#queuedUserGroups(held.messages))
++					rows.push({ ...group, queue: held.queue, state: "held" });
 +		return rows;
 +	}
 +	getStudioQueueSnapshot() {
-+		return this.#studioQueueGroups().map(({ id, queue, state, anchor }) => ({
-+			id,
-+			queue,
-+			state,
-+			text: this.#queuedMessageRawText.get(anchor) ?? queueChipText(anchor),
-+			imageCount: toRestoredQueuedMessage(anchor).images?.length ?? 0,
-+		}));
++		return this.#queuedMessageGroups()
++			.filter(row => row.state !== "held")
++			.map(({ id, queue, state, anchor }) => ({
++				id,
++				queue,
++				state: state === "inFlight" ? ("delivering" as const) : ("pending" as const),
++				text: this.#queuedMessageRawText.get(anchor) ?? queueChipText(anchor),
++				imageCount: toRestoredQueuedMessage(anchor).images?.length ?? 0,
++			}));
 +	}
 +	getStudioQueueDraft(id: string) {
-+		const row = this.#studioQueueGroups().find(row => row.id === id);
-+		if (!row || row.state !== "pending") return undefined;
++		const row = this.#queuedMessageGroups().find(row => row.id === id);
++		if (!row || row.state !== "queued") return undefined;
 +		const draft = toRestoredQueuedMessage(row.anchor);
 +		return { ...draft, text: this.#queuedMessageRawText.get(row.anchor) ?? draft.text };
 +	}
 +	steerStudioQueuedMessage(id: string): boolean {
-+		const row = this.#studioQueueGroups().find(row => row.id === id);
-+		if (!row || row.state !== "pending") return false;
-+		if (row.queue === "steering") return true;
-+		const retained = this.agent.peekFollowUpQueue().filter(message => !row.messages.includes(message));
-+		this.agent.replaceQueue("followUp", retained);
-+		this.agent.replaceQueue("steering", [...this.agent.peekSteeringQueue(), ...row.messages]);
-+		this.#reconcileQueuedMessageDrain();
-+		return true;
++		const row = this.#queuedMessageGroups().find(row => row.id === id);
++		return !!row && row.state === "queued" && (row.queue === "steering" || this.promoteQueuedMessage({ id }));
 +	}
 +	removeStudioQueuedMessage(id: string): boolean {
-+		const row = this.#studioQueueGroups().find(row => row.id === id);
-+		if (!row || row.state !== "pending") return false;
-+		const queue = row.queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
-+		const index = queue.indexOf(row.anchor);
-+		if (index < 0) return false;
-+		const without = this.#withoutQueuedUserMessage(queue, index).filter(
-+			message => this.#studioQueueIds.get(message) !== id,
-+		);
-+		this.agent.replaceQueue(row.queue, without);
-+		this.#reconcileQueuedMessageDrain();
-+		return true;
++		const row = this.#queuedMessageGroups().find(row => row.id === id);
++		return !!row && row.state === "queued" && this.removeQueuedMessage({ id }, row.queue);
 +	}
 +
  	getQueuedMessages(): { steering: readonly string[]; followUp: readonly string[]; liveSteered: number } {
- 		const liveSteered = this.agent.peekLiveSteeredMessages().filter(isUserAuthoredQueuedMessage).length;
+-		const liveSteered = this.agent.peekLiveSteeredMessages().filter(isUserAuthoredQueuedMessage).length;
++		const live = this.#queuedUserGroups(this.agent.peekLiveSteeredMessages());
  		return {
-@@ -10354,6 +10516,81 @@ export class AgentSession implements SettingsScope {
+-			steering: [...this.agent.peekLiveSteeredMessages(), ...this.agent.peekSteeringQueue()]
+-				.filter(isUserAuthoredQueuedMessage)
+-				.map(queueChipText),
+-			followUp: this.agent.peekFollowUpQueue().filter(isUserAuthoredQueuedMessage).map(queueChipText),
+-			liveSteered,
++			steering: [...live, ...this.#queuedUserGroups(this.agent.peekSteeringQueue())].map(group =>
++				queueChipText(group.anchor),
++			),
++			followUp: this.#queuedUserGroups(this.agent.peekFollowUpQueue()).map(group => queueChipText(group.anchor)),
++			liveSteered: live.length,
  		};
  	}
  
 +	/** Stable identities refer to the native message object, never to display text or position. */
 +	getQueuedMessageEntries(): QueuedMessageEntry[] {
-+		const entries: QueuedMessageEntry[] = [];
-+		const append = (
-+			messages: readonly AgentMessage[],
-+			queue: "steering" | "followUp",
-+			state: "queued" | "inFlight" | "held",
-+		) => {
-+			for (const message of messages) {
-+				if (!isUserAuthoredQueuedMessage(message)) continue;
-+				let id = this.#queuedMessageIds.get(message);
-+				if (!id) {
-+					id = Bun.randomUUIDv7();
-+					this.#queuedMessageIds.set(message, id);
-+				}
-+				entries.push({
-+					id,
-+					text: queueChipText(message),
-+					queue,
-+					state,
-+					imageCount: toRestoredQueuedMessage(message).images?.length ?? 0,
-+					editable: state !== "inFlight" && message.role === "user",
-+				});
-+			}
-+		};
-+		append(this.agent.peekLiveSteeredMessages(), "steering", "inFlight");
-+		append(this.agent.peekSteeringQueue(), "steering", "queued");
-+		append(this.agent.peekFollowUpQueue(), "followUp", "queued");
-+		for (const group of this.#heldQueueGroups)
-+			if (group.sessionId === this.sessionId) append(group.messages, group.queue, "held");
-+		return entries;
++		return this.#queuedMessageGroups().map(({ id, queue, state, anchor }) => ({
++			id,
++			queue,
++			state,
++			text: queueChipText(anchor),
++			imageCount: toRestoredQueuedMessage(anchor).images?.length ?? 0,
++			editable: state !== "inFlight" && anchor.role === "user",
++		}));
 +	}
 +
 +	/** Edit prepared text in place. Keep images, attribution and hidden companions; never replay commands. */
@@ -1094,7 +1213,7 @@ index 33d2447849..7845cac57c 100644
  	/** Last {@link getQueuedMessages} snapshot emitted as a `queue_update` event.
  	 *  Coalesces the agent's internal `onQueueChange` notification down to the
  	 *  externally observable transitions RPC/ACP/TUI subscribers actually care
-@@ -10396,7 +10633,7 @@ export class AgentSession implements SettingsScope {
+@@ -10396,7 +10577,7 @@ export class AgentSession implements SettingsScope {
  	 * already delivered target changes nothing; repeated calls may remove further
  	 * duplicates.
  	 */
@@ -1103,7 +1222,7 @@ index 33d2447849..7845cac57c 100644
  		return this.takeQueuedMessage(text, queue) !== undefined;
  	}
  
-@@ -10418,7 +10655,19 @@ export class AgentSession implements SettingsScope {
+@@ -10418,7 +10599,19 @@ export class AgentSession implements SettingsScope {
  	 * {@link removeQueuedMessage}, returning the removed message as editor-restorable
  	 * content (its chip text and images); undefined when nothing matched.
  	 */
@@ -1124,7 +1243,7 @@ index 33d2447849..7845cac57c 100644
  		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
  		const index = this.#findQueuedUserMessage(selected, text);
  		if (index < 0) return undefined;
-@@ -10435,7 +10684,7 @@ export class AgentSession implements SettingsScope {
+@@ -10435,7 +10628,7 @@ export class AgentSession implements SettingsScope {
  	 * {@link removeQueuedMessage}; agent-attributed handoffs are never promoted. A missing
  	 * or already delivered target changes nothing; repeated calls may promote duplicates.
  	 */
@@ -1133,20 +1252,35 @@ index 33d2447849..7845cac57c 100644
  		const followUp = this.agent.peekFollowUpQueue();
  		const index = this.#findQueuedUserMessage(followUp, text);
  		if (index < 0) return false;
-@@ -10461,7 +10710,11 @@ export class AgentSession implements SettingsScope {
+@@ -10461,7 +10654,11 @@ export class AgentSession implements SettingsScope {
  	 * matches the raw text the caller originally submitted first, then the queued chip text
  	 * itself (exact); -1 when nothing matches.
  	 */
 -	#findQueuedUserMessage(queue: readonly AgentMessage[], text: string): number {
 +	#findQueuedUserMessage(queue: readonly AgentMessage[], text: string | { id: string }): number {
 +		if (typeof text !== "string")
-+			return queue.findIndex(
++			return queue.findLastIndex(
 +				message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageIds.get(message) === text.id,
 +			);
  		let index = queue.findIndex(
  			message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageRawText.get(message) === text,
  		);
-@@ -11069,7 +11322,10 @@ export class AgentSession implements SettingsScope {
+@@ -10474,7 +10671,13 @@ export class AgentSession implements SettingsScope {
+ 	/** Companions are inserted contiguously before their user; this is where that group starts. */
+ 	#queuedUserGroupStart(queue: readonly AgentMessage[], userIndex: number): number {
+ 		let start = userIndex;
+-		while (start > 0 && isHiddenUserCompanion(queue[start - 1])) start--;
++		const id = this.#queuedMessageIds.get(queue[userIndex]);
++		while (
++			start > 0 &&
++			(isHiddenUserCompanion(queue[start - 1]) ||
++				(id !== undefined && this.#queuedMessageIds.get(queue[start - 1]) === id))
++		)
++			start--;
+ 		return start;
+ 	}
+ 
+@@ -11069,7 +11272,10 @@ export class AgentSession implements SettingsScope {
  		reason?: string;
  		/** Internal `/compact` startup keeps the manual-compaction marker alive while aborting the active turn. */
  		preserveCompaction?: boolean;
@@ -1157,7 +1291,7 @@ index 33d2447849..7845cac57c 100644
  		const userInterrupt = options?.reason === USER_INTERRUPT_LABEL;
  		this.#pendingAbortErrorId = userInterrupt ? AIError.create(AIError.Flag.UserInterrupt) : undefined;
  		if (userInterrupt) this.#advisors.autoResumeSuppressed = true;
-@@ -11168,6 +11424,7 @@ export class AgentSession implements SettingsScope {
+@@ -11168,6 +11374,7 @@ export class AgentSession implements SettingsScope {
  				} else this.#recordWithoutTurn([message]);
  			}
  		} finally {
@@ -1165,7 +1299,7 @@ index 33d2447849..7845cac57c 100644
  			this.#abortInProgress = false;
  			this.#drainStrandedQueuedMessages();
  			this.#abortUnwinds.delete(unwind.promise);
-@@ -12319,6 +12576,9 @@ export class AgentSession implements SettingsScope {
+@@ -12319,6 +12526,9 @@ export class AgentSession implements SettingsScope {
  
  	/** Retry the last failed assistant turn when the session is idle. */
  	async retry(): Promise<boolean> {
@@ -1175,7 +1309,7 @@ index 33d2447849..7845cac57c 100644
  		const didRetry = await this.#recovery.retry();
  		// A manual retry is the user resuming the run they interrupted, so it lifts the
  		// interrupt's auto-resume suppression the same way a typed prompt does.
-@@ -14211,7 +14471,7 @@ export class AgentSession implements SettingsScope {
+@@ -14211,7 +14421,7 @@ export class AgentSession implements SettingsScope {
  		const settingsKey = provider === "anthropic" ? "claudeResets.autoRedeem" : "codexResets.autoRedeem";
  		const source = provider === "anthropic" ? "claude-auto-reset" : "codex-auto-reset";
  		const runner = this.#extensionRunner;
@@ -1184,7 +1318,7 @@ index 33d2447849..7845cac57c 100644
  			const approved = headlessApprovedResetActions(actions);
  			const waiting = actions.find(action => !approved.some(spend => spend.attemptKey === action.attemptKey));
  			if (waiting && !coordinator.notifiedKeys.has(waiting.attemptKey)) {
-@@ -14253,16 +14513,18 @@ export class AgentSession implements SettingsScope {
+@@ -14253,16 +14463,18 @@ export class AgentSession implements SettingsScope {
  				? `Spend a saved ${providerLabel} rate-limit reset?\n${lines[0]}`
  				: `Spend ${actions.length} saved ${providerLabel} rate-limit resets?\n${lines.join("\n")}`;
  		try {
@@ -1213,7 +1347,7 @@ index 33d2447849..7845cac57c 100644
  			if (choice === "Yes") {
  				if (provider === "anthropic") cfgClaudeResetsAutoRedeem.set(this.settings, "yes");
  				else cfgCodexResetsAutoRedeem.set(this.settings, "yes");
-@@ -14821,7 +15083,7 @@ export class AgentSession implements SettingsScope {
+@@ -14821,7 +15033,7 @@ export class AgentSession implements SettingsScope {
  	 * @returns the archive path and member names, or `undefined` when the main
  	 * session has no messages.
  	 */
@@ -1222,7 +1356,7 @@ index 33d2447849..7845cac57c 100644
  		const messages = this.messages;
  		if (messages.length === 0) return undefined;
  		const entries: Array<readonly [string, string]> = [["session.md", `${this.formatSessionAsText()}\n`]];
-@@ -14864,7 +15126,7 @@ export class AgentSession implements SettingsScope {
+@@ -14864,7 +15076,7 @@ export class AgentSession implements SettingsScope {
  			entries.push([`subagents/${key}.md`, `${text}\n`]);
  			subagentCount++;
  		}
@@ -1231,6 +1365,27 @@ index 33d2447849..7845cac57c 100644
  		await writeArchive(filePath, "zip", entries);
  		return { path: filePath, files: entries.map(([name]) => name), subagentCount, subagentError };
  	}
+diff --git a/packages/coding-agent/src/session/context-usage-runtime.ts b/packages/coding-agent/src/session/context-usage-runtime.ts
+index bcb2b2bcd8..f2333f705e 100644
+--- a/packages/coding-agent/src/session/context-usage-runtime.ts
++++ b/packages/coding-agent/src/session/context-usage-runtime.ts
+@@ -12,6 +12,7 @@ import type { AgentSession } from "./agent-session";
+ import { resolveSpeculationMethod } from "./compaction-methods";
+ import { estimateInlineSavings } from "./snapcompact-inline";
+ import { resolveModelCompactionSettings } from "./model-compaction-threshold";
++import { resolveSessionCompactionSettings } from "../studio/services/session-compaction-policy";
+ import { resolveSpeculationLeadTokens } from "./speculation-lead";
+ 
+ import { cfgSkillful } from "./settings";
+@@ -56,7 +57,7 @@ export function computeSessionContextBreakdown(
+ 		}
+ 	}
+ 	return computeContextBreakdown(session, {
+-		compaction: resolveModelCompactionSettings(session.settings, session.model),
++		compaction: resolveSessionCompactionSettings(session.settings, session.model, session.sessionManager),
+ 		sourceRevision: session.settings.revision,
+ 		skillful: cfgSkillful.get(session.settings),
+ 		snapcompact,
 diff --git a/packages/coding-agent/src/session/prewalk.ts b/packages/coding-agent/src/session/prewalk.ts
 index 44f37e605a..ae50da37ea 100644
 --- a/packages/coding-agent/src/session/prewalk.ts
@@ -1290,8 +1445,30 @@ index 7c5caa4c25..40a3b426c0 100644
  }
  
  export interface SessionEntryBase {
+diff --git a/packages/coding-agent/src/session/session-maintenance.ts b/packages/coding-agent/src/session/session-maintenance.ts
+index 7d8c9796d5..359cce18b1 100644
+--- a/packages/coding-agent/src/session/session-maintenance.ts
++++ b/packages/coding-agent/src/session/session-maintenance.ts
+@@ -128,7 +128,7 @@ import {
+ 	cfgContextPromotionEnabled,
+ 	cfgSnapcompactShape,
+ } from "./context-settings";
+-import { resolveModelCompactionSettings } from "./model-compaction-threshold";
++import { resolveSessionCompactionSettings } from "../studio/services/session-compaction-policy";
+ import { cfgRetry } from "./settings";
+ 
+ export type CompactionCheckResult = Readonly<{
+@@ -587,7 +587,7 @@ export class SessionMaintenance {
+ 
+ 	/** Compaction policy in force for the active model (its `compaction.modelThresholds` entry applied). */
+ 	get #compactionSettings(): CompactionSettings {
+-		return resolveModelCompactionSettings(this.#host.settings, this.#model);
++		return resolveSessionCompactionSettings(this.#host.settings, this.#model, this.#host.sessionManager);
+ 	}
+ 
+ 	get #tokenizer() {
 diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/coding-agent/src/session/session-manager.ts
-index 67c284c75f..01fb26e799 100644
+index 67c284c75f..2945eb132d 100644
 --- a/packages/coding-agent/src/session/session-manager.ts
 +++ b/packages/coding-agent/src/session/session-manager.ts
 @@ -1,3 +1,5 @@
@@ -1316,17 +1493,20 @@ index 67c284c75f..01fb26e799 100644
  	type ThinkingLevelChangeEntry,
  	TITLE_CHANGE_ENTRY_TYPE,
  	type TitleChangeEntry,
-@@ -921,6 +925,9 @@ export class SessionManager {
+@@ -920,7 +924,12 @@ export class SessionManager {
+ 	#titleUpdatedAt = "";
  	#hasTitleSlot = true;
  	#entries: SessionEntry[] = [];
++	#customEntryIndex: { entries: SessionEntry[]; length: number; byType: Map<string, CustomEntry[]> } | undefined;
  	#index = new SessionEntryIndex();
 +	#reservedMessageIds: Array<{ role: "user" | "assistant" | "system"; id: string }> = [];
++	#reservedCustomMessageIds = new Map<string, string[]>();
 +	#reservedCompactionIds: string[] = [];
 +	#reservedMessageIdSet = new Set<string>();
  
  	/** File reflects all current entries; appends can go incrementally. */
  	#fileIsCurrent = false;
-@@ -1008,6 +1015,8 @@ export class SessionManager {
+@@ -1008,6 +1017,8 @@ export class SessionManager {
  	 * back to the most-recent session instead of being treated as a fresh crumb.
  	 */
  	#breadcrumbFresh = false;
@@ -1335,7 +1515,7 @@ index 67c284c75f..01fb26e799 100644
  	#sessionNameChangedCallbacks = new Set<() => void>();
  	#persistenceErrorCallbacks = new Set<(error: Error) => void>();
  	#persistenceNoticeCallbacks = new Set<(notice: SessionPersistenceNotice) => void>();
-@@ -2043,6 +2052,8 @@ export class SessionManager {
+@@ -2043,6 +2054,8 @@ export class SessionManager {
  			providerPromptCacheKey: options?.providerPromptCacheKey,
  			taskPromptCacheKey: options?.taskPromptCacheKey,
  		};
@@ -1344,7 +1524,7 @@ index 67c284c75f..01fb26e799 100644
  		const workspace = normalizeSessionWorkspace({
  			cwd: this.#cwd,
  			directories: options?.additionalDirectories ?? [],
-@@ -2055,6 +2066,7 @@ export class SessionManager {
+@@ -2055,6 +2068,7 @@ export class SessionManager {
  
  		this.#entries = [];
  		this.#index.clear();
@@ -1352,13 +1532,14 @@ index 67c284c75f..01fb26e799 100644
  		this.#fileIsCurrent = false;
  		this.#rewriteRequired = false;
  		this.#loadedMalformedRecords = 0;
-@@ -2092,17 +2104,81 @@ export class SessionManager {
+@@ -2092,17 +2106,108 @@ export class SessionManager {
  		const repairedUsage = normalizeLoadedUsage(entries);
  		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
  		this.#index.rebuild(entries);
 +		this.clearReservedMessageIds();
-+	}
-+
+ 	}
+ 
+-	#freshEntryFields(): { id: string; parentId: string | null; timestamp: string; runtime: RuntimeIdentity } {
 +	#occupiedIds(): { has(id: string): boolean } {
 +		return { has: id => this.#index.has(id) || this.#reservedMessageIdSet.has(id) };
 +	}
@@ -1373,12 +1554,17 @@ index 67c284c75f..01fb26e799 100644
 +		const [reserved] = this.#reservedMessageIds.splice(index, 1);
 +		this.#reservedMessageIdSet.delete(reserved.id);
 +		return reserved.id;
- 	}
- 
- 	#freshEntryFields(): { id: string; parentId: string | null; timestamp: string; runtime: RuntimeIdentity } {
++	}
++
++	#freshEntryFields(id = this.#nextId()): {
++		id: string;
++		parentId: string | null;
++		timestamp: string;
++		runtime: RuntimeIdentity;
++	} {
  		return {
 -			id: generateId(this.#index),
-+			id: this.#nextId(),
++			id,
  			parentId: this.#index.leafId(),
  			timestamp: nowIso(),
  			runtime: currentRuntimeIdentity(),
@@ -1393,6 +1579,27 @@ index 67c284c75f..01fb26e799 100644
 +		const id = this.#nextId();
 +		this.#reservedMessageIdSet.add(id);
 +		this.#reservedMessageIds.push({ role, id });
++		return id;
++	}
++
++	/** Reserve a visible custom message independently of the user/assistant message FIFO. */
++	reserveCustomMessageId(customType: string, timestamp: number): string {
++		const key = JSON.stringify([customType, timestamp]);
++		const id = this.#nextId();
++		this.#reservedMessageIdSet.add(id);
++		const ids = this.#reservedCustomMessageIds.get(key) ?? [];
++		ids.push(id);
++		this.#reservedCustomMessageIds.set(key, ids);
++		return id;
++	}
++
++	#takeReservedCustomMessageId(customType: string, timestamp: number | undefined): string | undefined {
++		if (timestamp === undefined) return undefined;
++		const key = JSON.stringify([customType, timestamp]);
++		const ids = this.#reservedCustomMessageIds.get(key);
++		const id = ids?.shift();
++		if (!ids?.length) this.#reservedCustomMessageIds.delete(key);
++		if (id) this.#reservedMessageIdSet.delete(id);
 +		return id;
 +	}
 +
@@ -1427,6 +1634,7 @@ index 67c284c75f..01fb26e799 100644
 +	}
 +
 +	clearReservedMessageIds(): void {
++		this.#reservedCustomMessageIds.clear();
 +		this.#reservedMessageIds.length = 0;
 +		this.#reservedCompactionIds.length = 0;
 +		this.#reservedMessageIdSet.clear();
@@ -1435,7 +1643,7 @@ index 67c284c75f..01fb26e799 100644
  	#setLeaf(id: string | null): void {
  		this.#index.setLeaf(id);
  		const batch = this.#atomicEntryBatch;
-@@ -3206,6 +3282,10 @@ export class SessionManager {
+@@ -3206,6 +3311,10 @@ export class SessionManager {
  		return this.#sessionId;
  	}
  
@@ -1446,7 +1654,7 @@ index 67c284c75f..01fb26e799 100644
  	getSessionFile(): string | undefined {
  		return this.#sessionFile;
  	}
-@@ -3363,6 +3443,58 @@ export class SessionManager {
+@@ -3363,6 +3472,70 @@ export class SessionManager {
  		return this.#sessionName;
  	}
  
@@ -1486,14 +1694,26 @@ index 67c284c75f..01fb26e799 100644
 +		filePath: string,
 +		storage: SessionStorage = new FileSessionStorage(),
 +	): Promise<{ sessionId: string; title?: string; source?: SessionTitleSource; card?: SessionTitleCard }> {
-+		const limit = 8 * 1024 * 1024;
-+		if (storage.statSync(filePath).size > limit) throw new Error("Session exceeds the 8 MiB title-inspection limit");
-+		const loaded = await loadSessionFile(filePath, storage, { throwIfMissing: true });
++		const [prefix, suffix] = await storage.readTextSlices(filePath, 64 * 1024, 64 * 1024);
++		const loaded = parseSessionContent(prefix);
 +		const header = loaded.entries[0];
-+		if (loaded.invalidHeader || !header || header.type !== "session" || loaded.malformedRecords > 0)
++		if (loaded.invalidHeader || !header || header.type !== "session")
 +			throw new Error("The saved session is incomplete or damaged; title inspection cannot continue");
-+		if ((loaded.sourceSize ?? 0) > limit) throw new Error("Session exceeds the 8 MiB title-inspection limit");
-+		const card = SessionManager.#cardForTitle(header.title, loaded.entries);
++		let card = SessionManager.#cardForTitle(header.title, []);
++		if (header.title && !card) {
++			const tail = parseSessionContent(suffix.slice(suffix.indexOf("\n") + 1)).entries;
++			let latest = tail.findLast(entry => entry.type === TITLE_CHANGE_ENTRY_TYPE);
++			if (!latest) {
++				await visitEntriesFromFile(
++					filePath,
++					entry => {
++						if (entry.type === TITLE_CHANGE_ENTRY_TYPE) latest = entry;
++					},
++					storage,
++				);
++			}
++			if (latest) card = SessionManager.#cardForTitle(header.title, [latest]);
++		}
 +		return {
 +			sessionId: header.id,
 +			...(header.title ? { title: header.title } : {}),
@@ -1505,7 +1725,7 @@ index 67c284c75f..01fb26e799 100644
  	onSessionNameChanged(cb: () => void): () => void {
  		this.#sessionNameChangedCallbacks.add(cb);
  		return () => {
-@@ -3488,7 +3620,15 @@ export class SessionManager {
+@@ -3488,7 +3661,13 @@ export class SessionManager {
  			| PythonExecutionMessage
  			| FileMentionMessage,
  	): string {
@@ -1514,15 +1734,13 @@ index 67c284c75f..01fb26e799 100644
 +		const reserved = role === "user" || role === "assistant" ? this.#takeReservedMessageId(role) : undefined;
 +		const entry: SessionMessageEntry = {
 +			type: "message",
-+			...(reserved === undefined
-+				? this.#freshEntryFields()
-+				: { id: reserved, parentId: this.#index.leafId(), timestamp: nowIso() }),
++			...this.#freshEntryFields(reserved),
 +			message,
 +		};
  		this.#recordEntry(entry);
  		return entry.id;
  	}
-@@ -3639,9 +3779,12 @@ export class SessionManager {
+@@ -3639,9 +3818,10 @@ export class SessionManager {
  			tokensAfter?: number;
  		} = {},
  	): string {
@@ -1530,13 +1748,43 @@ index 67c284c75f..01fb26e799 100644
  		const entry: CompactionEntry<T> = {
  			type: "compaction",
 -			...this.#freshEntryFields(),
-+			...(reserved === undefined
-+				? this.#freshEntryFields()
-+				: { id: reserved, parentId: this.#index.leafId(), timestamp: nowIso() }),
++			...this.#freshEntryFields(reserved),
  			summary,
  			shortSummary,
  			firstKeptEntryId,
-@@ -4099,10 +4242,16 @@ export class SessionManager {
+@@ -3702,7 +3882,7 @@ export class SessionManager {
+ 		timestamp?: number,
+ 	): string {
+ 		const normalized = normalizeCustomMessagePayload<T>({ customType, content, display, details, attribution });
+-		const fresh = this.#freshEntryFields();
++		const fresh = this.#freshEntryFields(this.#takeReservedCustomMessageId(normalized.customType, timestamp));
+ 		const entry: CustomMessageEntry<T> = {
+ 			type: "custom_message",
+ 			customType: normalized.customType,
+@@ -3921,6 +4101,22 @@ export class SessionManager {
+ 		return [...this.#entries];
+ 	}
+ 
++	findLastCustomEntry(customType: string, predicate: (entry: CustomEntry) => boolean): CustomEntry | undefined {
++		let index = this.#customEntryIndex;
++		if (!index || index.entries !== this.#entries || index.length > this.#entries.length) {
++			index = { entries: this.#entries, length: 0, byType: new Map() };
++			this.#customEntryIndex = index;
++		}
++		for (; index.length < this.#entries.length; index.length++) {
++			const entry = this.#entries[index.length];
++			if (entry.type !== "custom") continue;
++			let entries = index.byType.get(entry.customType);
++			if (!entries) index.byType.set(entry.customType, (entries = []));
++			entries.push(entry);
++		}
++		return index.byType.get(customType)?.findLast(predicate);
++	}
++
+ 	/**
+ 	 * The session as a tree. A well-formed session has exactly one root; orphaned
+ 	 * entries (broken parent chain) are returned as roots too.
+@@ -4099,10 +4295,16 @@ export class SessionManager {
  	 * @param cwd Working directory (stored in the session header)
  	 * @param sessionDir Optional session directory; defaults to the cwd-derived dir.
  	 */
@@ -1555,7 +1803,7 @@ index 67c284c75f..01fb26e799 100644
  		return manager;
  	}
  
-@@ -4152,6 +4301,7 @@ export class SessionManager {
+@@ -4152,6 +4354,7 @@ export class SessionManager {
  			copyArtifacts?: boolean;
  			suppressBreadcrumb?: boolean;
  			sessionFile?: string;
@@ -1563,7 +1811,7 @@ index 67c284c75f..01fb26e799 100644
  			resetInheritedCost?: boolean;
  			repairInterruptedTail?: boolean;
  			seance?: boolean;
-@@ -4160,6 +4310,7 @@ export class SessionManager {
+@@ -4160,6 +4363,7 @@ export class SessionManager {
  		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
  		const manager = new SessionManager(cwd, dir, true, storage);
  		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
@@ -1571,7 +1819,7 @@ index 67c284c75f..01fb26e799 100644
  
  		// A missing source must fail instead of forking an empty parentless session:
  		// the loader swallows ENOENT by default for fresh-session opens, so fork opts out.
-@@ -4182,6 +4333,7 @@ export class SessionManager {
+@@ -4182,6 +4386,7 @@ export class SessionManager {
  				parentSession: sourceHeader?.id,
  				providerPromptCacheKey: SessionManager.getInheritedProviderPromptCacheKey(sourceHeader),
  				taskPromptCacheKey: sourceHeader?.taskPromptCacheKey,
@@ -1579,7 +1827,7 @@ index 67c284c75f..01fb26e799 100644
  			},
  			options?.sessionFile,
  		);
-@@ -4335,6 +4487,38 @@ export class SessionManager {
+@@ -4335,6 +4540,38 @@ export class SessionManager {
  		return manager;
  	}
  
@@ -1618,7 +1866,7 @@ index 67c284c75f..01fb26e799 100644
  	/**
  	 * Whether `session` was recorded in a worktree of `cwd`'s repository that no
  	 * longer exists, e.g. a `/wt` worktree removed since. Resume such a session
-@@ -4434,7 +4618,10 @@ export class SessionManager {
+@@ -4434,7 +4671,10 @@ export class SessionManager {
  		cwd: string,
  		sessionDir?: string,
  		storage: SessionStorage = new FileSessionStorage(),
@@ -1630,7 +1878,7 @@ index 67c284c75f..01fb26e799 100644
  	): Promise<SessionManager> {
  		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
  		const resolvedCwd = path.resolve(cwd);
-@@ -4454,7 +4641,8 @@ export class SessionManager {
+@@ -4454,7 +4694,8 @@ export class SessionManager {
  				(!sessionDir || pathIsWithin(dir, path.dirname(breadcrumb.sessionFile)))
  			) {
  				const manager = new SessionManager(cwd, dir, true, storage);
@@ -1640,7 +1888,7 @@ index 67c284c75f..01fb26e799 100644
  				return manager;
  			}
  
-@@ -4554,8 +4742,9 @@ export class SessionManager {
+@@ -4554,8 +4795,9 @@ export class SessionManager {
  		}
  
  		const manager = new SessionManager(cwd, dir, true, storage);
@@ -1881,6 +2129,28 @@ index 806cb6af11..dc1cada8cd 100644
  		outputPath: result.outputPath,
  		patchPath: result.patchPath,
  		branchName: result.branchName,
+diff --git a/packages/coding-agent/src/task/worktree.ts b/packages/coding-agent/src/task/worktree.ts
+index 0bb8353547..1d71a5a1d6 100644
+--- a/packages/coding-agent/src/task/worktree.ts
++++ b/packages/coding-agent/src/task/worktree.ts
+@@ -385,7 +385,7 @@ function parseDiffGitLinePaths(line: string): string[] {
+ 	return [...new Set(paths)];
+ }
+ 
+-function patchTouchedFiles(patch: string): string[] {
++export function patchTouchedFiles(patch: string): string[] {
+ 	const files = new Set<string>();
+ 	for (const line of patch.split("\n")) {
+ 		for (const file of parseDiffGitLinePaths(line)) files.add(file);
+@@ -755,7 +755,7 @@ function collectWipPatches(wip: BaselineWipContext | undefined): string[] {
+ }
+ 
+ /** Keep only the `diff --git` sections of `patch` that touch one of `files`. */
+-function filterPatchFiles(patch: string, files: ReadonlySet<string>): string {
++export function filterPatchFiles(patch: string, files: ReadonlySet<string>): string {
+ 	const sections = patch.split(/^(?=diff --git )/m);
+ 	return sections.filter(section => parseDiffGitLinePaths(section.split("\n", 1)[0]).some(f => files.has(f))).join("");
+ }
 diff --git a/packages/tui/src/status-line/context-usage.ts b/packages/tui/src/status-line/context-usage.ts
 index 67707c9a39..bffda202a4 100644
 --- a/packages/tui/src/status-line/context-usage.ts

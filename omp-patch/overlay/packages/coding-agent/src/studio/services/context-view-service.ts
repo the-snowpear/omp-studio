@@ -1,10 +1,12 @@
 import { redactSensitiveCredentials, withCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { randomUUID } from "node:crypto";
 import type { ContextViewData, ContextViewEntry } from "@oh-my-pi/pi-tui/chrome/context-view-model";
+import { contextCategoryDescriptor } from "@oh-my-pi/pi-tui/chrome/context-view-model";
 import type { AgentSession } from "../../session/agent-session";
 import { buildSessionContextView } from "../../session/context-view";
 import type {
 	ContextCategoryId,
+	ContextCategorySummary,
 	ContextEntrySummary,
 	ContextViewIndex,
 	ContextViewOperation,
@@ -16,15 +18,30 @@ import { SessionControlError } from "./session-control-service";
 const SNAPSHOT_BYTES = 8 * 1024 * 1024;
 const ENTRY_BYTES = 256 * 1024;
 const PAGE_CHARS = 24000;
+const PAGE_ENTRIES = 50;
+/** Characters of redacted body kept for the in-list preview. */
+const PREVIEW_CHARS = 480;
+
 interface StoredEntry {
 	summary: ContextEntrySummary;
 	text: string;
+	/** Lowercased label + info + path + text, built once because snapshots are immutable. */
+	lowered: string;
 	truncated: boolean;
 }
 interface Snapshot {
 	index: ContextViewIndex;
 	entries: Map<string, StoredEntry>;
-	categories: Map<ContextCategoryId, string[]>;
+	/** Entry ids per category id and per child group key. */
+	groups: Map<string, string[]>;
+	childOwner: Map<string, ContextCategoryId>;
+}
+
+/** Slice a preview without splitting a surrogate pair. */
+function slicePreview(text: string, max: number): string {
+	let end = Math.min(text.length, max);
+	if (end < text.length && /[\uD800-\uDBFF]/u.test(text[end - 1] ?? "")) end--;
+	return text.slice(0, end);
 }
 
 /** Read-on-open native context snapshot. Body text is never retained in receipts or global state. */
@@ -59,20 +76,20 @@ export class StudioContextViewService {
 			throw new SessionControlError("INVALID_ARGUMENT", "Invalid context page");
 		if (selected.kind === "context.view.list") {
 			const search = (selected.search ?? "").trim().toLowerCase();
-			const ids = snapshot.categories.get(selected.category);
+			// A search spans the whole category; a group key only narrows browsing.
+			const key = selected.childKey && !search ? selected.childKey : selected.category;
+			if (key !== selected.category && snapshot.childOwner.get(key) !== selected.category)
+				throw new SessionControlError("INVALID_ARGUMENT", "Unknown context group");
+			const ids = snapshot.groups.get(key);
 			if (!ids) throw new SessionControlError("INVALID_ARGUMENT", "Unknown context category");
-			const entries = ids
+			const matched = ids
 				.map(id => snapshot.entries.get(id)!)
-				.filter(
-					entry =>
-						!search ||
-						`${entry.summary.label} ${entry.summary.info ?? ""} ${entry.text}`.toLowerCase().includes(search),
-				);
-			const page = entries.slice(offset, offset + 50).map(entry => entry.summary);
+				.filter(entry => !search || entry.lowered.includes(search));
+			const page = matched.slice(offset, offset + PAGE_ENTRIES).map(entry => entry.summary);
 			return {
 				entries: page,
-				total: entries.length,
-				...(offset + page.length < entries.length ? { nextOffset: offset + page.length } : {}),
+				total: matched.length,
+				...(offset + page.length < matched.length ? { nextOffset: offset + page.length } : {}),
 			} as ContextViewResultMap[K];
 		}
 		const entry = snapshot.entries.get(selected.entryId);
@@ -92,7 +109,16 @@ export class StudioContextViewService {
 		this.dispose();
 		const native: ContextViewData = buildSessionContextView(this.session);
 		const entries = new Map<string, StoredEntry>();
-		const categories = new Map<ContextCategoryId, string[]>();
+		const groups = new Map<string, string[]>();
+		const childOwner = new Map<string, ContextCategoryId>();
+		const childKeyById = new Map<string, string>();
+		for (const category of native.categories)
+			for (const child of category.children ?? []) {
+				if (!child.key) continue;
+				childOwner.set(child.key, category.id);
+				for (const entry of child.entries) childKeyById.set(entry.id, child.key);
+			}
+
 		let bytes = 0,
 			truncated = false;
 		for (const category of native.categories) {
@@ -108,10 +134,12 @@ export class StudioContextViewService {
 				const text = truncateUtf8(redacted, Math.min(ENTRY_BYTES, Math.max(0, SNAPSHOT_BYTES - bytes)));
 				bytes += Buffer.byteLength(text.text);
 				truncated ||= text.truncated;
+				const childKey = childKeyById.get(entry.id);
 				ids.push(entry.id);
 				entries.set(entry.id, {
 					text: text.text,
 					truncated: text.truncated,
+					lowered: `${entry.label} ${entry.info ?? ""} ${entry.path ?? ""} ${text.text}`.toLowerCase(),
 					summary: {
 						id: entry.id,
 						label: entry.label,
@@ -120,13 +148,61 @@ export class StudioContextViewService {
 						...(entry.info ? { info: entry.info } : {}),
 						...(entry.path ? { path: entry.path } : {}),
 						...(entry.interrupted ? { interrupted: true } : {}),
+						...(entry.timestamp !== undefined ? { timestamp: entry.timestamp } : {}),
+						...(entry.callId ? { callId: entry.callId } : {}),
+						...(childKey ? { childKey } : {}),
+						...(entry.thinkingGroup
+							? {
+									thinkingGroup: {
+										id: entry.thinkingGroup.id,
+										label: entry.thinkingGroup.label,
+										tokens: entry.thinkingGroup.tokens,
+										...(entry.thinkingGroup.interrupted ? { interrupted: true } : {}),
+									},
+								}
+							: {}),
+						preview: slicePreview(text.text, PREVIEW_CHARS),
 					},
 				});
 			};
 			for (const entry of category.entries) add(entry);
-			categories.set(category.id, ids);
+			groups.set(category.id, ids);
+			for (const child of category.children ?? []) {
+				if (!child.key) continue;
+				// Truncated entries never reached the store, so their groups shrink with them.
+				groups.set(
+					child.key,
+					child.entries.map(entry => entry.id).filter(id => entries.has(id)),
+				);
+			}
 		}
+
 		const breakdown = native.breakdown;
+		const categories: ContextCategorySummary[] = native.categories.map(category => {
+			const descriptor = contextCategoryDescriptor(category.id);
+			return {
+				id: category.id,
+				label: category.label,
+				tokens: category.tokens,
+				entries: groups.get(category.id)?.length ?? 0,
+				...(descriptor.overviewLabel ? { overviewLabel: descriptor.overviewLabel } : {}),
+				...(descriptor.openable === false ? { openable: false as const } : {}),
+				...((category.children?.length ?? 0) > 0
+					? {
+							children: category
+								.children!.filter(child => child.key !== undefined)
+								.map(child => ({
+									id: category.id,
+									key: child.key!,
+									label: child.label,
+									tokens: child.tokens,
+									entries: groups.get(child.key!)?.length ?? 0,
+								})),
+						}
+					: {}),
+			};
+		});
+
 		const index: ContextViewIndex = {
 			sessionId: this.session.sessionId,
 			snapshotId: randomUUID(),
@@ -138,14 +214,20 @@ export class StudioContextViewService {
 			thresholdTokens: breakdown.thresholdTokens ?? null,
 			savedTokens: breakdown.snapcompact?.savedTokens ?? 0,
 			truncated,
-			categories: native.categories.map(category => ({
-				id: category.id,
-				label: category.label,
-				tokens: category.tokens,
-				entries: categories.get(category.id)?.length ?? 0,
-			})),
+			categories,
+			...(breakdown.model
+				? { model: { id: breakdown.model.id, ...(breakdown.model.name ? { name: breakdown.model.name } : {}) } }
+				: {}),
+			...(breakdown.snapcompact
+				? {
+						snapcompact: {
+							visionCapable: breakdown.snapcompact.visionCapable,
+							savedTokens: breakdown.snapcompact.savedTokens,
+						},
+					}
+				: {}),
 		};
-		this.#snapshot = { index, entries, categories };
+		this.#snapshot = { index, entries, groups, childOwner };
 		return index;
 	}
 }

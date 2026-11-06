@@ -45,7 +45,7 @@ import { JobInspector } from "./conversation/JobInspector";
 import { agentJobTree, buildJobTree, type JobTreeRow } from "./conversation/jobTree";
 import type { MentionCandidate } from "./composer/types";
 import { RuntimeLossBanner } from "./RuntimeLossBanner";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import { buildPreviewHub, previewJobInspections } from "./hubPreview";
 import type { PreviewAgent, PreviewJob, PreviewMetrics } from "./hubPreview";
 import { usePreviewMode } from "./preview/PreviewContext";
@@ -1252,7 +1252,7 @@ function EmptyBlock({
   title,
   detail,
 }: {
-  icon: string;
+  icon: IconName;
   title?: string;
   detail: string;
 }) {

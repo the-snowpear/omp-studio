@@ -1,4 +1,6 @@
 import { CONTEXT_VIEW_KINDS } from "./context-view-protocol";
+import { isComputerWorkspaceQuery, type ComputerWorkspaceQuery } from "./computer-workspace-protocol";
+import { SessionControlError } from "./services/session-control-service";
 import { WORKBENCH_OPERATION_KINDS } from "./workbench-protocol";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
@@ -27,7 +29,7 @@ const UPSTREAM_COMMIT = "e996e1c7ac476f60e02b8ed9764cf30fa8c00a8e";
  * refuses to sign an artifact whose probed identity disagrees with the series,
  * so a stale value here fails the build (see `scripts/build-omp-host.mjs`).
  */
-const PATCHSET_VERSION = "studio.10";
+const PATCHSET_VERSION = "studio.43";
 
 /** Reads and interrupts must not wait for `core.prompt` to finish. Prompt holds
  *  `#dispatchQueue` for the whole turn, including 503 auto-retry backoff. */
@@ -112,6 +114,7 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 	#projector: StudioStateProjector | undefined;
 	#dispatcher: StudioBridgeDispatcher | undefined;
 	#unsubscribeProjector: (() => void) | undefined;
+	#unsubscribeComputer: (() => void) | undefined;
 	#dispatchQueue = Promise.resolve();
 	#firstSnapshot: PromiseWithResolvers<"ready" | "stopped" | "timeout"> | undefined;
 	#stopped = false;
@@ -143,6 +146,23 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 				socket.write(encodeStudioFrame(`event:${event.eventSeq}`, runtime.runtimeEpoch, event));
 			} catch {
 				// Isolate mapper/write failures so a bad conversation frame cannot destroy the socket.
+			}
+		});
+		this.#unsubscribeComputer = runtime.services.workbench?.computerWorkspace?.subscribe(event => {
+			const socket = this.#authenticatedSocket;
+			if (!socket || socket.destroyed || !this.#admitEventFrame(socket)) return;
+			try {
+				socket.write(
+					encodeStudioFrame(`computer:${event.revision}`, runtime.runtimeEpoch, {
+						type: "computer.event",
+						runtimeEpoch: runtime.runtimeEpoch,
+						stateVersion: this.#projector?.stateVersion ?? 0,
+						occurredAt: this.#now().toISOString(),
+						event,
+					}),
+				);
+			} catch {
+				/* Reconnect takes a fresh snapshot. */
 			}
 		});
 		this.#token = await consumeBridgeToken(this.#tokenFile);
@@ -191,6 +211,8 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 		if (process.platform !== "win32") await fs.rm(this.#endpoint, { force: true });
 		this.#token = undefined;
 		this.#runtime = undefined;
+		this.#unsubscribeComputer?.();
+		this.#unsubscribeComputer = undefined;
 		this.#unsubscribeProjector?.();
 		this.#unsubscribeProjector = undefined;
 		this.#projector?.dispose();
@@ -260,6 +282,47 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 							frame.header.runtimeEpoch !== runtime.runtimeEpoch
 						)
 							throw new Error("Stale Runtime epoch");
+						const computer = frame.body as {
+							type?: string;
+							requestId?: string;
+							runtimeEpoch?: number;
+							operation?: ComputerWorkspaceQuery;
+						};
+						if (computer.type === "computer.query") {
+							if (
+								typeof computer.requestId !== "string" ||
+								!computer.requestId ||
+								computer.runtimeEpoch !== runtime.runtimeEpoch ||
+								!computer.operation ||
+								!isComputerWorkspaceQuery(computer.operation.kind)
+							)
+								throw new Error("Invalid Computer query envelope");
+							const requestId = computer.requestId;
+							const send = (value: object): void => {
+								if (!socket.destroyed && socket === this.#authenticatedSocket)
+									socket.write(
+										encodeStudioFrame(requestId, runtime.runtimeEpoch, {
+											type: "computer.result",
+											requestId,
+											runtimeEpoch: runtime.runtimeEpoch,
+											...value,
+										}),
+									);
+							};
+							void runtime.services.workbench.computerWorkspace.query(computer.operation).then(
+								result => send({ ok: true, result }),
+								error =>
+									send({
+										ok: false,
+										error: {
+											code: error instanceof SessionControlError ? error.code : "COMMAND_FAILED",
+											message: error instanceof Error ? error.message : "Computer query failed",
+											retryable: false,
+										},
+									}),
+							);
+							continue;
+						}
 						const request = parseStudioRequest(frame.body);
 						if (request.runtimeEpoch !== runtime.runtimeEpoch) throw new Error("Stale Runtime epoch");
 						const dispatch = () =>
@@ -312,8 +375,8 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 							return {
 								id,
 								grade: (limited === undefined ? "stable" : "limited") as "stable" | "limited",
-								version: 1,
-								evidence: `studio-runtime:${id}:v1`,
+								version: id.startsWith("dictation.") ? 2 : 1,
+								evidence: `studio-runtime:${id}:v${id.startsWith("dictation.") ? 2 : 1}`,
 								...(limited === undefined ? {} : { limitations: [...limited.limitations] }),
 							};
 						}),

@@ -13,6 +13,7 @@ import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { useBackground } from "../background/BackgroundProvider";
 import { BackgroundPreview } from "../background/BackgroundPreview";
+import { usePreviewMode } from "../preview/PreviewContext";
 import {
   BACKGROUND_LIMITS,
   DEFAULT_BACKGROUND_SETTINGS,
@@ -122,6 +123,7 @@ export function BackgroundSettingsPane({
   readonly onDemoAction?: () => void;
 }) {
   const { t, resolvedLanguage } = useI18n();
+  const { marks } = usePreviewMode();
   const background = useBackground();
   const {
     settings,
@@ -223,7 +225,7 @@ export function BackgroundSettingsPane({
     <>
       <h3>
         {t("settings.background.title")}
-        {preview ? <span className="chip amber xs demo-chip">{t("common.demo")}</span> : null}
+        {preview && marks ? <span className="chip amber xs demo-chip">{t("common.demo")}</span> : null}
       </h3>
       <p className="desc">{t("settings.background.desc")}</p>
       <div className="set-toolbar">
@@ -231,7 +233,7 @@ export function BackgroundSettingsPane({
           type="button"
           className="btn small outline"
           disabled={preview}
-          data-tip={preview ? t("common.preview") : t("common.resetDefaults")}
+          data-tip={preview && marks ? t("common.preview") : t("common.resetDefaults")}
           onClick={reset}
         >
           {t("common.resetDefaults")}
@@ -305,7 +307,7 @@ export function BackgroundSettingsPane({
       </SettingSection>
 
       <SettingSection title={t("settings.background.sectionGallery")} desc={t("settings.background.galleryDesc")}>
-        {preview ? <p className="bg-preview-note">{t("settings.background.previewNote")}</p> : null}
+        {preview && marks ? <p className="bg-preview-note">{t("settings.background.previewNote")}</p> : null}
         <div
           className={`bg-drop${dragging ? " is-dragging" : ""}`}
           onDragOver={(event) => {

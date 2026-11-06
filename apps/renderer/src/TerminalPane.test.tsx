@@ -12,6 +12,7 @@ vi.mock("@xterm/xterm", () => ({ Terminal: class {
   cols = 80; rows = 24;
   element = document.createElement("div");
   write = vi.fn(); focus = vi.fn(); dispose = vi.fn(); onData = vi.fn(); loadAddon = vi.fn();
+  registerLinkProvider = vi.fn(() => ({ dispose: vi.fn() }));
   constructor(options: Record<string, unknown>) { this.options = options; mocks.terminals.push(this); }
   open(node: HTMLElement) { node.append(this.element); }
 } }));

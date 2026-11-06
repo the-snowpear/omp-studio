@@ -11,7 +11,7 @@ import { openLiveCapture, type LiveCapture } from "./liveCapture";
 import { MicrophoneDeniedError, MicrophoneSettingsButton, ensureMicrophoneAccess } from "./microphoneAccess";
 
 export function LiveAudioPane({ client, sessionId, available, visible = true }: { client: StudioClient; sessionId?: string | undefined; available: boolean; visible?: boolean }) {
-  const { preview } = usePreviewMode(); const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
+  const { preview, marks } = usePreviewMode(); const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
   const t = (cn: string, en: string) => zh ? cn : en;
   const [state, setState] = useState<LiveAudioState>(); const [voice, setVoice] = useState("sol"); const [device, setDevice] = useState(""); const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [review, setReview] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [micDenied, setMicDenied] = useState(false);
@@ -75,7 +75,7 @@ export function LiveAudioPane({ client, sessionId, available, visible = true }: 
   };
   const stop = () => { generation.current++; lock.current = false; setBusy(false); release(); setReview(false); setState(previous => previous ? { ...previous, phase: "off", attached: false, muted: false, inputLevel: 0, outputLevel: 0 } : previous); };
   return <section className="live-audio-pane" aria-label={t("Live 实时语音", "Live realtime audio")}>
-    <div className="media-toolbar"><h3>{t("Live 实时语音", "Live realtime audio")}</h3>{preview ? <span className="chip gray">{t("演示", "Demo")}</span> : null}<WorkspaceStatus state={state?.phase ?? "disconnected"} /></div>
+    <div className="media-toolbar"><h3>{t("Live 实时语音", "Live realtime audio")}</h3>{preview && marks ? <span className="chip gray">{t("演示", "Demo")}</span> : null}<WorkspaceStatus state={state?.phase ?? "disconnected"} /></div>
     <p className="small muted">{t("使用 Codex OAuth 实时语音；任务交给当前对话，声音从系统输出设备播放。隐藏窗口、离开此页面、切换会话或连接中断会停止麦克风，需要手动重新开始。", "Uses Codex OAuth realtime audio and delegates tasks to this conversation. Output uses the system device. Hiding the window, leaving this page, switching sessions or disconnecting stops the microphone; restart is always manual.")}</p>
     {!enabled ? <p className="muted">{t("Live 需要桌面麦克风通道及已连接的活动 Runtime。Web 客户端暂不可用。", "Live requires desktop microphone access and an active Runtime. This Web client cannot capture Live audio.")}</p> : null}
     <div className="media-parameter-grid"><label>{t("麦克风", "Microphone")}<AppSelect className="select" value={device} disabled={active || busy} onChange={event => setDevice(event.target.value)}><option value="">{t("系统默认", "System default")}</option>{devices.map((item, index) => <option key={item.deviceId} value={item.deviceId}>{item.label || t("麦克风", "Microphone") + " " + (index + 1)}</option>)}</AppSelect></label><label>{t("音色", "Voice")}<AppSelect className="select" value={voice} disabled={active || busy} onChange={event => setVoice(event.target.value)}>{LIVE_AUDIO_VOICES.map(name => <option key={name}>{name}</option>)}</AppSelect></label></div>

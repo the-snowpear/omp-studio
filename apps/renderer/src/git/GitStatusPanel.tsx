@@ -1,35 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
-  CommandRequestId,
   GitBranchListReadModel,
   GitCommitChangesReadModel,
   GitCommitDiffReadModel,
   GitDiffReadModel,
   GitDiffTarget,
   GitHubAuthReadModel,
-  GitHubOperation,
   GitHubPullRequestListReadModel,
   GitLogListReadModel,
-  GitOperation,
-  GitOperationResult,
   GitRemoteListReadModel,
   GitWorktreeListReadModel,
   StudioClient,
   WorkspaceId,
 } from "@omp-studio/client-contract";
 
-import { hostErrorMessage, waitReceipt } from "../hostError";
+import { hostErrorMessage } from "../hostError";
 import { Icon } from "../icons";
+import { fileTypeOf, iconNameFor, isSensitive } from "../explorer-types";
 import { useI18n } from "../i18n";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
+import { DiffDisplayMode } from "../conversation/ChangesPanel";
+import { splitDisplayPath } from "../conversation/toolMeta";
 
 import { GitCommitGraph } from "./GitCommitGraph";
 import { GitDiffResizer, useGitDiffHeight } from "./GitDiffResizer";
+import { GitPatch } from "./GitPatch";
 import { GitMoreActionsMenu } from "./GitMoreActionsMenu";
 import { GitPanelSplit } from "./GitPanelSplit";
 import { GitTip } from "./GitTip";
 import { readGitGraphLayout, writeGitGraphLayout } from "./gitGraphMemory";
-import { useGitRepository } from "./useGitRepository";
+import { useGitWorkspace } from "./GitWorkspaceContext";
 
 export { useGitRepository } from "./useGitRepository";
 
@@ -79,17 +79,10 @@ function statusLabel(index: string, worktree: string, t: (k: string) => string):
   return worktree === "untracked" ? t("git.untracked") : t("git.workingTree");
 }
 
-function patchLines(patch: string) {
-  return patch.split(/\r?\n/u).map((line, index) => {
-    const tone = line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "del" : "";
-    return <div key={`${index}-${line}`} className={`dl ${tone}`}><span className="dm">{tone === "add" ? "+" : tone === "del" ? "−" : " "}</span><span className="lc">{line}</span></div>;
-  });
-}
-
-export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly client: StudioClient; readonly workspaceId?: WorkspaceId; readonly focusPath?: string }) {
+export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, focusKey, view }: { readonly client: StudioClient; readonly workspaceId?: WorkspaceId; readonly focusPath?: string; readonly focusTarget?: GitDiffTarget; readonly focusKey?: number; readonly view?: "changes" | "history" }) {
   const { t } = useI18n();
   const { syncRevision } = useExecutionTarget();
-  const repositoryHook = useGitRepository(client, workspaceId);
+  const repositoryHook = useGitWorkspace();
   const repository = repositoryHook.repository;
   const [branches, setBranches] = useState<GitBranchListReadModel>();
   const [worktrees, setWorktrees] = useState<GitWorktreeListReadModel>();
@@ -98,12 +91,11 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
   const [pullRequests, setPullRequests] = useState<GitHubPullRequestListReadModel>();
   const [selected, setSelected] = useState<{ path: string; target: GitDiffTarget }>();
   const [diff, setDiff] = useState<GitDiffReadModel>();
-  const [commitMessage, setCommitMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string>();
-  const [activeRequest, setActiveRequest] = useState<{ domain: "git" | "github"; requestId: CommandRequestId }>();
+  const { draft: commitMessage, setDraft: setCommitMessage, busy, notice, setNotice, activeRequest, execute, executeGithub, cancel: cancelActive } = repositoryHook;
   const [graphLayout, setGraphLayout] = useState(readGitGraphLayout);
+  const graphVisible = view ? view === "history" : graphLayout.open;
   const [diffHeight, setDiffHeight] = useGitDiffHeight();
+  const [splitDiff, setSplitDiff] = useState(false);
   const [log, setLog] = useState<GitLogListReadModel>();
   const [logLoading, setLogLoading] = useState(false);
   const [logError, setLogError] = useState<string>();
@@ -131,7 +123,6 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
       client.query("git.worktrees.list", { workspaceId }),
       client.query("git.remotes.list", { workspaceId }),
       client.query("github.auth.get", { workspaceId }),
-      client.query("github.pr.list", { workspaceId, state: "open" }),
     ]);
     if (requestGeneration !== detailsGeneration.current) return;
     if (results[0].status === "fulfilled") setBranches(results[0].value);
@@ -142,8 +133,6 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
     else setRemotes(undefined);
     if (results[3].status === "fulfilled") setGithubAuth(results[3].value);
     else setGithubAuth(undefined);
-    if (results[4].status === "fulfilled") setPullRequests(results[4].value);
-    else setPullRequests(undefined);
   }, [client, workspaceId]);
 
   const persistGraphLayout = useCallback((next: typeof graphLayout) => {
@@ -153,7 +142,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
 
   const refreshLog = useCallback(async () => {
     const requestGeneration = ++logGeneration.current;
-    if (!graphLayout.open || workspaceId === undefined) {
+    if (!graphVisible || workspaceId === undefined) {
       setLog(undefined);
       setLogError(undefined);
       setLogLoading(false);
@@ -172,20 +161,18 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
     } finally {
       if (requestGeneration === logGeneration.current) setLogLoading(false);
     }
-  }, [client, graphLayout.open, logLimit, workspaceId]);
+  }, [client, graphVisible, logLimit, workspaceId]);
 
-  const refreshAll = useCallback(async () => {
-    await Promise.all([repositoryHook.refresh(), refreshDetails(), refreshLog()]);
-  }, [refreshDetails, refreshLog, repositoryHook.refresh]);
+  const refreshAll = repositoryHook.refresh;
 
   useEffect(() => {
     void refreshDetails();
     return () => { detailsGeneration.current += 1; };
-  }, [refreshDetails, syncRevision]);
+  }, [refreshDetails, syncRevision, repositoryHook.revision]);
 
   useEffect(() => {
     void refreshLog();
-    if (!graphLayout.open || workspaceId === undefined) return;
+    if (!graphVisible || workspaceId === undefined) return;
     const unsubscribe = client.subscribe({ scope: "all" }, (event) => {
       if (event.kind === "git.repository.changed" && event.repository.workspaceId === workspaceId) void refreshLog();
     });
@@ -193,7 +180,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
       logGeneration.current += 1;
       unsubscribe();
     };
-  }, [client, graphLayout.open, refreshLog, workspaceId, syncRevision]);
+  }, [client, graphVisible, refreshLog, workspaceId, syncRevision, repositoryHook.revision]);
 
   useEffect(() => {
     if (workspaceId === undefined || selectedCommit === undefined) {
@@ -236,62 +223,6 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
     );
     return () => { cancelled = true; };
   }, [client, selected, workspaceId, syncRevision]);
-
-  const execute = useCallback(async (operation: GitOperation) => {
-    if (operation.kind !== "clone" && workspaceId === undefined) return false;
-    setBusy(true);
-    setNotice(undefined);
-    try {
-      const handle = await client.command("git.execute", {
-        ...(workspaceId === undefined ? {} : { workspaceId }),
-        operation,
-      });
-      setActiveRequest({ domain: "git", requestId: handle.requestId });
-      const result = await waitReceipt<GitOperationResult>(client, handle.requestId, 5 * 60_000);
-      setNotice(result.message);
-      await refreshAll();
-      return true;
-    } catch (cause) {
-      setNotice(hostErrorMessage(cause, "Git 操作失败"));
-      return false;
-    } finally {
-      setActiveRequest(undefined);
-      setBusy(false);
-    }
-  }, [client, refreshAll, workspaceId]);
-
-  const executeGithub = useCallback(async (operation: GitHubOperation) => {
-    setBusy(true);
-    setNotice(undefined);
-    try {
-      const handle = await client.command("github.execute", {
-        ...(workspaceId === undefined ? {} : { workspaceId }),
-        operation,
-      });
-      setActiveRequest({ domain: "github", requestId: handle.requestId });
-      await waitReceipt(client, handle.requestId, 16 * 60_000);
-      setNotice(`${operation.kind} completed`);
-      await refreshAll();
-    } catch (cause) {
-      setNotice(hostErrorMessage(cause, "GitHub 操作失败"));
-    } finally {
-      setActiveRequest(undefined);
-      setBusy(false);
-    }
-  }, [client, refreshAll, workspaceId]);
-
-  const cancelActive = useCallback(async () => {
-    if (activeRequest === undefined) return;
-    try {
-      const handle = await client.command(activeRequest.domain === "git" ? "git.execute" : "github.execute", {
-        operation: { kind: "cancel", requestId: activeRequest.requestId },
-      });
-      await waitReceipt(client, handle.requestId, 30_000);
-      setNotice("已请求取消操作");
-    } catch (cause) {
-      setNotice(hostErrorMessage(cause, "取消操作失败"));
-    }
-  }, [activeRequest, client]);
 
   const runAdvanced = (value: string) => {
     if (!repository) return;
@@ -351,10 +282,10 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
     };
     const workingHit = repository.changes.find((change) => change.worktree !== "unmodified" && matches(change.path));
     const stagedHit = repository.changes.find((change) => change.index !== "unmodified" && matches(change.path));
-    const hit = workingHit ?? stagedHit;
+    const hit = focusTarget === "staged" ? stagedHit : focusTarget === "working" ? workingHit : workingHit ?? stagedHit;
     if (hit === undefined) return;
-    setSelected({ path: hit.path, target: workingHit !== undefined ? "working" : "staged" });
-  }, [focusPath, repository]);
+    setSelected({ path: hit.path, target: focusTarget ?? (workingHit !== undefined ? "working" : "staged") });
+  }, [focusPath, focusTarget, focusKey, repository]);
 
   const graphPanel = (
     <GitCommitGraph
@@ -380,9 +311,10 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
   const wrap = (top: ReactNode) => (
     <GitPanelSplit
       top={top}
+      {...(view ? { view } : {})}
       graphOpen={graphLayout.open}
       splitRatio={graphLayout.splitRatio}
-      onToggle={() => persistGraphLayout({ ...graphLayout, open: !graphLayout.open })}
+      onToggle={() => persistGraphLayout({ ...graphLayout, open: !graphVisible })}
       onResizeSplit={(ratio) => persistGraphLayout({ ...graphLayout, splitRatio: ratio })}
       {...(repository && (repository.ahead || repository.behind) ? { meta: <span className="chip gray xs">↑{repository.ahead} ↓{repository.behind}</span> } : {})}
     >
@@ -410,18 +342,27 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
         ) : (
           <GitTip text={staged.length === 0 ? t("git.noChanges") : t("git.unstageAll")}>
             <button type="button" className="icon-btn small" aria-label={t("git.unstageAll")} disabled={busy || staged.length === 0} onClick={() => void execute({ kind: "unstage", paths: staged.map((change) => change.path) })}>
-              <Icon name="minus" extra="sm" />
+              <Icon name="minimize" extra="sm" />
             </button>
           </GitTip>
         )}
       </div>
-      {changes.map((change) => (
-        <div className={`git-change-line${selected?.path === change.path && selected.target === target ? " selected" : ""}`} key={`${target}-${change.path}`}>
+      {changes.map((change) => {
+        const name = splitDisplayPath(change.path).name;
+        const ftype = fileTypeOf(name);
+        return (
+        <div
+          className={`git-change-line${selected?.path === change.path && selected.target === target ? " selected" : ""}`}
+          key={`${target}-${change.path}`}
+          data-ftype={ftype ?? undefined}
+          data-secret={isSensitive(name) || undefined}
+        >
           <button className="ch-row" aria-label={`查看 ${change.path} 的 ${target === "staged" ? "暂存" : "工作区"} Diff`} onClick={() => setSelected({ path: change.path, target })}>
+            <span className="ch-row-icon" aria-hidden="true"><Icon name={iconNameFor(ftype, name)} extra="sm" /></span>
             <span className="ch-file ellipsis">{change.path}</span><span className="ch-note">{statusLabel(change.index, change.worktree, t)}</span>
           </button>
           <GitTip text={target === "staged" ? t("git.unstage") : t("git.stage")}>
-            <button type="button" className="icon-btn small" aria-label={target === "staged" ? t("git.unstage") : t("git.stage")} disabled={busy} onClick={() => void execute({ kind: target === "staged" ? "unstage" : "stage", paths: [change.path] })}><Icon name={target === "staged" ? "minus" : "plus"} extra="sm" /></button>
+            <button type="button" className="icon-btn small" aria-label={target === "staged" ? t("git.unstage") : t("git.stage")} disabled={busy} onClick={() => void execute({ kind: target === "staged" ? "unstage" : "stage", paths: [change.path] })}><Icon name={target === "staged" ? "minimize" : "plus"} extra="sm" /></button>
           </GitTip>
           {target === "working" ? (
             <GitTip text={t("git.discard")}>
@@ -429,7 +370,8 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
             </GitTip>
           ) : null}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 
@@ -456,18 +398,18 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
       {rows(t("git.staged"), staged, "staged")}
       {rows(t("git.workingTree"), working, "working")}
       {repository.changes.length === 0 ? <div className="empty" style={{ padding: 18 }}>{t("git.workingTreeClean")}</div> : null}
-      {githubAuth?.authenticated && pullRequests?.pullRequests.length ? <div className="git-pr-list"><div className="ch-group-title">Open pull requests<span className="ch-count">{pullRequests.pullRequests.length}</span></div>{pullRequests.pullRequests.map((pr) => <div className="git-pr-row" key={pr.number}><span className="ellipsis">#{pr.number} {pr.title}</span><button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.checkout", number: pr.number })}>Checkout</button>{pr.draft ? <button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.ready", number: pr.number })}>Ready</button> : null}<GitTip text={pr.headOid ? "Squash" : "无 OID"}><button className="btn small primary" disabled={busy || !pr.headOid} onClick={() => { if (pr.headOid && window.confirm(`确认 squash merge #${pr.number}？`)) void executeGithub({ kind: "pr.merge", number: pr.number, method: "squash", expectedHeadOid: pr.headOid, deleteBranch: true }); }}>Merge</button></GitTip></div>)}</div> : null}
+
     </div>
     <div className="git-commit-box">
       <textarea value={commitMessage} placeholder="Commit message" rows={1} onChange={(event) => setCommitMessage(event.target.value)} />
-      <button className="btn small primary" disabled={busy || staged.length === 0 || !commitMessage.trim()} onClick={() => { const message = commitMessage.trim(); if (!message) return; void execute({ kind: "commit", message }).then((completed) => { if (completed) setCommitMessage(""); }); }}>Commit</button>
+      <button className="btn small primary" disabled={busy || staged.length === 0 || !commitMessage.trim()} onClick={() => { const submitted = commitMessage; const message = submitted.trim(); if (!message) return; void execute({ kind: "commit", message }).then((completed) => { if (completed) setCommitMessage(current => current === submitted ? "" : current); }); }}>Commit</button>
     </div>
     {selected ? (
       <>
         <GitDiffResizer height={diffHeight} onHeight={setDiffHeight} />
         <div className="ch-diff-slot git-diff-slot" style={{ height: diffHeight }}>
-          <div className="diff-toolbar"><Icon name="file-code" extra="sm" /><span className="mono small ellipsis">{selected.path}</span><span className="chip gray xs">{selected.target === "staged" ? "staged" : "working"}</span>{diff?.truncated ? <span className="chip gray xs">{t("common.truncated")}</span> : null}</div>
-          <div className="diff-scroll">{diff ? (diff.binary ? <div className="empty">Binary diff</div> : diff.patch.length === 0 && repository.changes.some((change) => change.path === selected.path && change.worktree === "untracked") ? <div className="empty">{t("git.untrackedNoDiff")}</div> : patchLines(diff.patch)) : <div className="empty">{t("git.readingDiff")}</div>}</div>
+          <div className="diff-toolbar"><Icon name="file-code" extra="sm" /><span className="mono small ellipsis">{selected.path}</span><span className="chip gray xs">{selected.target === "staged" ? "staged" : "working"}</span>{diff?.truncated ? <span className="chip gray xs">{t("common.truncated")}</span> : null}<span className="spacer" /><DiffDisplayMode split={splitDiff} onSplit={setSplitDiff} /></div>
+          <div className={`diff-scroll${splitDiff ? " diff-split" : ""}`}>{diff ? (diff.binary ? <div className="empty">Binary diff</div> : diff.patch.length === 0 && repository.changes.some((change) => change.path === selected.path && change.worktree === "untracked") ? <div className="empty">{t("git.untrackedNoDiff")}</div> : <GitPatch patch={diff.patch} split={splitDiff} />) : <div className="empty">{t("git.readingDiff")}</div>}</div>
         </div>
       </>
     ) : null}

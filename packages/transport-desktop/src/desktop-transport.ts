@@ -9,6 +9,7 @@
 
 import type {
   ClientBootstrap,
+  ClientContextScope,
   ClientCommandAccepted,
   ClientCommandRequest,
   ClientEvent,
@@ -35,21 +36,28 @@ export class DesktopClientTransport implements ClientTransport {
   private closePromise: Promise<void> | null = null;
   private readonly subscriptions = new Set<Unsubscribe>();
 
-  constructor(private readonly api: OmpStudioDesktopApi) {}
+  constructor(private readonly api: OmpStudioDesktopApi, private readonly contextId?: string) {}
+  get supportsContexts(): boolean { return this.api.openContext !== undefined; }
+
+  async openContext(scope: ClientContextScope): Promise<ClientTransport> {
+    this.assertOpen();
+    if (!this.api.openContext) throw new Error("This Host needs an update to open concurrent conversations.");
+    return new DesktopClientTransport(this.api, await this.api.openContext(scope));
+  }
 
   async bootstrap(): Promise<ClientBootstrap> {
     this.assertOpen();
-    return this.api.bootstrap();
+    return this.api.bootstrap(this.contextId);
   }
 
   async query<TName extends QueryName>(request: ClientQueryRequest<TName>): Promise<ClientQueryResponse<TName>> {
     this.assertOpen();
-    return this.api.query(request);
+    return this.api.query(request, this.contextId);
   }
 
   async command<TName extends CommandName>(request: ClientCommandRequest<TName>): Promise<ClientCommandAccepted<TName>> {
     this.assertOpen();
-    return this.api.command(request);
+    return this.api.command(request, this.contextId);
   }
 
   subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe {
@@ -61,7 +69,7 @@ export class DesktopClientTransport implements ClientTransport {
     let active = true;
     const stopApi = this.api.subscribe(scope, (event) => {
       if (active) listener(event);
-    });
+    }, this.contextId);
     const unsubscribe = (): void => {
       if (!active) return;
       active = false;
@@ -78,7 +86,7 @@ export class DesktopClientTransport implements ClientTransport {
     const active = [...this.subscriptions];
     this.subscriptions.clear();
     for (const unsubscribe of active) unsubscribe();
-    this.closePromise = Promise.resolve().then(() => this.api.close());
+    this.closePromise = Promise.resolve().then(() => this.api.close(this.contextId));
     return this.closePromise;
   }
 

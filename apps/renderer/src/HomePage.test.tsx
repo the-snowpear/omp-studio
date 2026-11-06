@@ -214,3 +214,37 @@ describe("SecondaryPage body motion", () => {
     expect(screen.queryByText("home-body")).toBeNull();
   });
 });
+
+describe("SecondaryPage header back", () => {
+  function renderPage(route: "statistics" | "settings", backRoute?: "home" | "workbench") {
+    const onRoute = vi.fn();
+    render(
+      <I18nProvider forcedLanguage="zh">
+        <SecondaryPage
+          route={route}
+          title="统计"
+          theme="dark"
+          {...(backRoute === undefined ? {} : { backRoute })}
+          onRoute={onRoute}
+          onToggleTheme={() => undefined}
+        >
+          <p>page-body</p>
+        </SecondaryPage>
+      </I18nProvider>,
+    );
+    return onRoute;
+  }
+
+  /* 统计页只从首页 Token 卡进入：返回箭头回首页，不再是工作台。 */
+  it("returns the statistics page to home", () => {
+    const onRoute = renderPage("statistics", "home");
+    fireEvent.click(screen.getByRole("button", { name: "首页" }));
+    expect(onRoute).toHaveBeenCalledWith("home");
+  });
+
+  it("keeps the workbench as the default target of other pages", () => {
+    const onRoute = renderPage("settings");
+    fireEvent.click(screen.getByRole("button", { name: "工作台" }));
+    expect(onRoute).toHaveBeenCalledWith("workbench");
+  });
+});

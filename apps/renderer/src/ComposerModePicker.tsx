@@ -1,5 +1,6 @@
 /**
- * Composer「Full Access」右侧的模式加号：三层弹窗 + 彩色胶囊。
+ * Composer 加号：宽栏保留快捷入口，窄栏将输入功能与模式收进分类菜单。
+ * 分类在同一个向上弹窗内逐级展开，避免窄窗口横向飞出。
  *
  * 层 1 会话模式单选（Plan / Goal / Vibe）。
  * 层 2 magic keyword 单选（Ultrathink / Orchestrate / Workflowz）——粘性，发送时注入正文。
@@ -19,10 +20,19 @@ import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
+import { MenuItem } from "./menus";
+import { usePreviewMode } from "./preview/PreviewContext";
 import type { MagicKeyword } from "./composerMode";
 
 type SessionMode = "plan" | "goal" | "vibe";
 type LoopLimitKind = "none" | "turns" | "minutes";
+type MenuSection = "root" | "content" | "session" | "orchestration" | "automation" | "all";
+
+type ComposerActions = {
+  onAttachFiles: () => void;
+  onMention: () => void;
+  onCommands: () => void;
+};
 
 type PreviewLayer3 = {
   session: SessionMode | null;
@@ -114,9 +124,11 @@ export function ComposerModePicker({
   onInteract,
   onCapsulesChange,
   speedControl,
+  composerActions,
 }: {
   preview: boolean;
   speedControl?: ReactNode;
+  composerActions?: ComposerActions;
   snapshot?: OperatorStateSnapshot;
   can: (id: string) => boolean;
   busy: boolean;
@@ -130,15 +142,63 @@ export function ComposerModePicker({
   onInteract?: () => void;
   onCapsulesChange?: (hasCapsules: boolean) => void;
 }) {
+  const hasComposerActions = composerActions !== undefined;
+  const [collapsed, setCollapsed] = useState(false);
+  const collapsedRef = useRef(false);
+  const unifiedTools = hasComposerActions && collapsed;
   const [open, setOpen] = useState(false);
+  const [section, setSection] = useState<MenuSection>("all");
   const [togglesOpen, setTogglesOpen] = useState(false);
   const [flyoutSide, setFlyoutSide] = useState<"right" | "left">("right");
   const [local, setLocal] = useState<PreviewLayer3>(PREVIEW_OFF);
   /** Overlay while streaming: snapshot.activeMode lags or Host is blocked by resync. */
   const [optimistic, setOptimistic] = useState<SessionMode | null | undefined>(undefined);
   const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (!hasComposerActions) return;
+    const bar = buttonRef.current?.closest<HTMLElement>(".composer-bar");
+    if (!bar) return;
+    const sync = () => {
+      const next = bar.dataset.collapse !== undefined && bar.dataset.collapse !== "full";
+      if (next === collapsedRef.current) return;
+      collapsedRef.current = next;
+      setCollapsed(next);
+      setSection(next ? "root" : "all");
+      setTogglesOpen(false);
+    };
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(bar, { attributes: true, attributeFilter: ["data-collapse"] });
+    return () => observer.disconnect();
+  }, [hasComposerActions]);
   const [menuHeight, setMenuHeight] = useState(380);
-  useLayoutEffect(() => { if (!open) return; const measure = () => { const bottom = menuRef.current?.getBoundingClientRect().bottom; if (bottom !== undefined) setMenuHeight(Math.max(100, bottom - 44)); }; measure(); window.addEventListener("resize", measure); return () => window.removeEventListener("resize", measure); }, [open]);
+  const [menuInset, setMenuInset] = useState(0);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const menu = menuRef.current;
+      if (!menu) return;
+      setMenuHeight(Math.max(100, menu.getBoundingClientRect().bottom - 44));
+      if (unifiedTools && buttonRef.current) {
+        setMenuInset(Math.min(0, window.innerWidth - 8 - buttonRef.current.getBoundingClientRect().left - menu.offsetWidth));
+      }
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    const bar = unifiedTools ? buttonRef.current?.closest(".composer-bar") : null;
+    const resizeObserver = bar ? new ResizeObserver(measure) : undefined;
+    const collapseObserver = bar ? new MutationObserver(measure) : undefined;
+    if (bar) {
+      resizeObserver?.observe(bar);
+      collapseObserver?.observe(bar, { attributes: true, attributeFilter: ["data-collapse"] });
+    }
+    return () => {
+      window.removeEventListener("resize", measure);
+      resizeObserver?.disconnect();
+      collapseObserver?.disconnect();
+    };
+  }, [open, section, unifiedTools]);
   const flyoutTimer = useRef<number | undefined>(undefined);
   const hostFailedRef = useRef(false);
   const wasStreamingRef = useRef(false);
@@ -146,9 +206,23 @@ export function ComposerModePicker({
   useEffect(() => () => window.clearTimeout(flyoutTimer.current), []);
   useEffect(() => {
     if (openNonce <= 0) return;
+    const grouped = hasComposerActions && collapsedRef.current;
     setOpen(true);
-    setTogglesOpen(openToggles);
+    setSection(grouped && openToggles ? "automation" : "all");
+    setTogglesOpen(!grouped && openToggles);
   }, [openNonce, openToggles]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setTogglesOpen(false);
+      setOpen(false);
+      buttonRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
   useEffect(() => {
     if (!preview) setLocal(PREVIEW_OFF);
   }, [preview]);
@@ -393,38 +467,83 @@ export function ComposerModePicker({
   }, [capsules.length, onCapsulesChange]);
 
   const { t } = useI18n();
+  const { marks } = usePreviewMode();
+  const showAll = !unifiedTools || section === "all";
+  const showSession = showAll || section === "session";
+  const showOrchestration = showAll || section === "orchestration";
+  const showAutomation = unifiedTools && section === "automation";
+  const runComposerAction = (action: () => void) => {
+    close();
+    action();
+  };
 
   return (
     <>
-      <span className="approval-pill-wrap">
+      <span className={`approval-pill-wrap${hasComposerActions ? " cmp-tools-wrap" : ""}`}>
         <button
+          ref={buttonRef}
           type="button"
           className="icon-btn small"
           onClick={() => {
             onInteract?.();
+            setSection(unifiedTools ? "root" : "all");
             setOpen((value) => !value);
           }}
           aria-haspopup="menu"
           aria-expanded={open}
-          aria-label={t("composer.sessionMode")}
-          data-tip={t("composer.mode")}
+          aria-label={t(unifiedTools ? "composer.moreTools" : "composer.sessionMode")}
+          aria-description={capsules.length ? capsules.map(capsule => capsule.label).join(", ") : undefined}
+          data-tip={t(unifiedTools ? "composer.moreTools" : "composer.mode")}
         >
           <Icon name="plus" extra="sm" />
+          {unifiedTools && capsules.length > 0 ? <span className="cmp-tools-active" aria-hidden="true" /> : null}
         </button>
         {open ? (
           <>
             <div className="approval-menu-backdrop" onClick={close} />
             <div
-              className="approval-menu cmp-mode-menu"
-              style={{ "--cmp-menu-max-height": `${menuHeight}px` } as CSSProperties}
+              className={`approval-menu cmp-mode-menu${unifiedTools ? " cmp-tools-menu" : ""}`}
+              style={{ "--cmp-menu-max-height": `${menuHeight}px`, ...(unifiedTools ? { left: menuInset } : {}) } as CSSProperties}
               role="menu"
-              aria-label={t("composer.sessionMode")}
+              aria-label={t(unifiedTools ? "composer.moreTools" : "composer.sessionMode")}
               ref={menuRef}
               onMouseDown={retainComposerFocus}
             >
               <div className="cmp-mode-menu-scroll">
-              {preview ? <p className="cmp-menu-note"><span className="chip gray xs">{t("common.demo")}</span>{t("composer.previewModelNote")}</p> : null}
-              {nextTurnOnly ? <p className="cmp-menu-note">{t("composer.modeNoteNextTurn")}</p> : null}
+              {preview && marks ? <p className="cmp-menu-note"><span className="chip gray xs">{t("common.demo")}</span>{t("composer.previewModelNote")}</p> : null}
+              {unifiedTools && section !== "root" ? (
+                <>
+                  <MenuItem icon="chevron-l" onClick={() => { setSection("root"); setTogglesOpen(false); }}>{t("composer.backToTools")}</MenuItem>
+                  <div className="cmp-menu-sep" />
+                </>
+              ) : null}
+              {unifiedTools && composerActions && section === "root" ? (
+                <>
+                  <button type="button" className="menu-item cmp-tools-category" role="menuitem" aria-haspopup="menu" onClick={() => setSection("content")}>
+                    <Icon name="attach" extra="sm" /><span>{t("composer.addContent")}</span><Icon name="chevron-r" extra="sm" />
+                  </button>
+                  <MenuItem icon="slash" onClick={() => runComposerAction(composerActions.onCommands)}>{t("composer.commands")}</MenuItem>
+                  <div className="cmp-menu-sep" />
+                  <button type="button" className="menu-item cmp-tools-category" role="menuitem" aria-haspopup="menu" onClick={() => setSection("session")}>
+                    <Icon name="message" extra="sm" /><span>{t("composer.sessionMode")}</span><Icon name="chevron-r" extra="sm" />
+                  </button>
+                  <button type="button" className="menu-item cmp-tools-category" role="menuitem" aria-haspopup="menu" onClick={() => setSection("orchestration")}>
+                    <Icon name="branch" extra="sm" /><span>{t("composer.orchestration")}</span><Icon name="chevron-r" extra="sm" />
+                  </button>
+                  <button type="button" className="menu-item cmp-tools-category" role="menuitem" aria-haspopup="menu" onClick={() => setSection("automation")}>
+                    <Icon name="zap" extra="sm" /><span>{t("composer.moreModes")}</span><Icon name="chevron-r" extra="sm" />
+                  </button>
+                </>
+              ) : null}
+              {unifiedTools && composerActions && section === "content" ? (
+                <>
+                  <p className="menu-label">{t("composer.addContent")}</p>
+                  <MenuItem icon="attach" onClick={() => runComposerAction(composerActions.onAttachFiles)}>{t("composer.attachFilesAria")}</MenuItem>
+                  <MenuItem icon="at" onClick={() => runComposerAction(composerActions.onMention)}>{t("composer.mentionAria")}</MenuItem>
+                </>
+              ) : null}
+              {nextTurnOnly && (showSession || showOrchestration || showAutomation) ? <p className="cmp-menu-note">{t("composer.modeNoteNextTurn")}</p> : null}
+              {showSession ? <>
               <p className="menu-label">{t("composer.sessionMode")}</p>
               <button
                 type="button"
@@ -463,7 +582,9 @@ export function ComposerModePicker({
                 <span className="am-desc">{t("composer.modeVibeDesc")}</span>
               </button>
 
-              <div className="cmp-menu-sep" />
+              </> : null}
+              {showSession && showOrchestration ? <div className="cmp-menu-sep" /> : null}
+              {showOrchestration ? <>
               <p className="menu-label">{t("composer.orchestration")}</p>
               <button
                 type="button"
@@ -495,13 +616,14 @@ export function ComposerModePicker({
                 <span className="am-label">Workflowz</span>
                 <span className="am-desc">{t("composer.workflowzDesc")}</span>
               </button>
-
+              </> : null}
               </div>
+              {showAll ? <>
               <div className="cmp-menu-sep" />
               <span
                 className={`cmp-more-zone${togglesOpen ? " is-open" : ""}`}
-                onMouseEnter={keepFlyoutOpen}
-                onMouseLeave={scheduleFlyoutClose}
+                onMouseEnter={unifiedTools ? undefined : keepFlyoutOpen}
+                onMouseLeave={unifiedTools ? undefined : scheduleFlyoutClose}
               >
                 <button
                   type="button"
@@ -509,21 +631,22 @@ export function ComposerModePicker({
                   aria-haspopup="menu"
                   aria-expanded={togglesOpen}
                   aria-label={t("composer.moreModes")}
-                  onClick={() => setTogglesOpen(true)}
+                  onClick={() => unifiedTools ? setSection("automation") : setTogglesOpen(true)}
                 >
                   <span>{t("composer.moreModes")}</span>
                   <span className="spacer" />
                   <Icon name={flyoutSide === "right" ? "chevron-r" : "chevron-l"} extra="sm" />
                 </button>
               </span>
-              {togglesOpen ? (
+              </> : null}
+              {togglesOpen || showAutomation ? (
                 <div
-                  className={`menu rms-pop cmp-flyout cmp-mode-flyout side-${flyoutSide}`}
+                  className={showAutomation ? "cmp-tools-options" : `menu rms-pop cmp-flyout cmp-mode-flyout side-${flyoutSide}`}
                   role="menu"
                   aria-label={t("composer.moreModesFlyoutAria")}
                   onMouseDown={retainComposerFocus}
-                  onMouseEnter={keepFlyoutOpen}
-                  onMouseLeave={scheduleFlyoutClose}
+                  onMouseEnter={showAutomation ? undefined : keepFlyoutOpen}
+                  onMouseLeave={showAutomation ? undefined : scheduleFlyoutClose}
                 >
                   <p className="menu-label">{t("composer.multipleSelectable")}</p>
                   <label className={`cmp-mode-check${loopOn ? " selected" : ""}`}>

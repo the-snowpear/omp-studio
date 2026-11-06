@@ -36,12 +36,15 @@ test("identical queue text has independent stable IDs and removes all skill comp
 		await session.followUp("same", undefined, { prependMessages: [prelude("second")] });
 		const first = session.getStudioQueueSnapshot();
 		expect(first).toHaveLength(2);
+		expect(session.getQueuedMessageEntries().map(row => row.id)).toEqual(first.map(row => row.id));
+		expect(session.getQueuedMessages().followUp).toEqual(["same", "same"]);
 		expect(first[0]!.id).not.toBe(first[1]!.id);
 		expect(session.getStudioQueueSnapshot()).toEqual(first);
 		expect(session.steerStudioQueuedMessage(first[1]!.id)).toBe(true);
 		expect(session.getStudioQueueSnapshot().find(row => row.id === first[1]!.id)?.queue).toBe("steering");
 		expect(agent.peekSteeringQueue()).toHaveLength(2);
-		expect(session.removeStudioQueuedMessage(first[1]!.id)).toBe(true);
+		expect(session.removeQueuedMessage({ id: first[1]!.id }, "steering")).toBe(true);
+		expect(agent.peekSteeringQueue()).toHaveLength(0);
 		expect(session.getStudioQueueSnapshot().map(row => row.id)).toEqual([first[0]!.id]);
 		expect(agent.peekFollowUpQueue()).toHaveLength(2);
 		expect(session.removeStudioQueuedMessage(first[1]!.id)).toBe(false);

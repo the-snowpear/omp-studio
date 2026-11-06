@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import type { ClientTransport, ClientContextScope } from "@omp-studio/client-contract";
 import { timingSafeEqual, randomBytes } from "node:crypto";
 import { chmod, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -13,6 +15,7 @@ import { RemoteConnectionError } from "./errors.js";
 import { NetworkStreams } from "./network-stream.js";
 import type { RemoteNetworkMode } from "./shared.js";
 import type { RemoteProvisioning } from "./provisioning.js";
+import type { MemoryCredentialEntry } from "../memory-credentials.js";
 
 export interface RemoteHello {
   readonly protocolVersion: number;
@@ -20,6 +23,7 @@ export interface RemoteHello {
   readonly arch: string;
   readonly bundleVersion: string;
   readonly instanceId: string;
+  readonly capabilities?: readonly string[];
 }
 
 export function hasActiveRemoteWork(bootstrap: ClientBootstrap): boolean {
@@ -57,7 +61,7 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
     }).catch(() => { idleSince = Date.now(); }).finally(() => { checkingIdle = false; });
   }, 60_000);
   idleTimer.unref();
-  const hello: RemoteHello = { protocolVersion: REMOTE_PROTOCOL_VERSION, platform: remotePlatform(process.platform), arch: process.arch, bundleVersion, instanceId: name };
+  const hello: RemoteHello = { protocolVersion: REMOTE_PROTOCOL_VERSION, platform: remotePlatform(process.platform), arch: process.arch, bundleVersion, instanceId: name, capabilities: [...(host.replaceMemoryCredentials ? ["memory.credentials"] : []), ...(host.composition.transport.openContext ? ["session.contexts"] : [])] };
   const server = createServer(socket => {
     const peer = new RemotePeer(socket, socket);
     peers.add(peer);
@@ -65,8 +69,17 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
     let observer = false;
     let networkChannel = false;
     let unsubscribe: (() => void) | undefined;
+    const contexts = new Map<string, { transport: ClientTransport; off?: () => void }>();
     const timer = setTimeout(() => peer.close(new Error("Remote authentication timed out")), 5_000);
-    peer.onClose(() => { clearTimeout(timer); unsubscribe?.(); peers.delete(peer); if (attached === peer) attached = undefined; });
+    peer.onClose(() => {
+      clearTimeout(timer); unsubscribe?.(); peers.delete(peer);
+      for (const context of contexts.values()) { context.off?.(); void context.transport.close(); }
+      contexts.clear();
+      if (attached === peer) {
+        attached = undefined;
+        host.replaceMemoryCredentials?.([]);
+      }
+    });
     peer.handle(async (method, input) => {
       if (stopping) throw new Error("Remote Host is shutting down");
       if (!authenticated) {
@@ -99,7 +112,20 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
       }
       if (observer && method !== "hello" && method !== "shutdown") throw new Error("A status connection cannot access the workspace");
       if (networkChannel && method !== "hello" && method !== "ping") throw new Error("Network channel cannot control the workspace");
+      const contextId = input && typeof input === "object" && "contextId" in input ? String(input.contextId) : undefined;
+      const bound = contextId ? contexts.get(contextId) : undefined;
+      if (contextId && !bound) throw new Error("Conversation context is closed");
+      const transport = bound?.transport ?? host.composition.transport;
+      const payload = contextId && input && typeof input === "object" && "input" in input ? input.input : input;
       switch (method) {
+        case "context.open": {
+          if (!host.composition.transport.openContext) throw new Error("Concurrent conversations are unavailable");
+          const transport = await host.composition.transport.openContext(input as ClientContextScope);
+          const id = randomUUID(); contexts.set(id, { transport }); return id;
+        }
+        case "context.close": {
+          bound?.off?.(); await bound?.transport.close(); if (contextId) contexts.delete(contextId); return { closed: true };
+        }
         case "hello": return hello;
         case "ping": return { instanceId: hello.instanceId };
         case "network.configure": {
@@ -112,18 +138,24 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
           if (!host.provision) throw new Error("Remote provisioning is unavailable");
           await host.provision(input as RemoteProvisioning); return { applied: true };
         }
+        case "memory.credentials.replace": {
+          if (!host.replaceMemoryCredentials || !Array.isArray(input)) throw new Error("Memory credential channel is unavailable");
+          host.replaceMemoryCredentials(input as MemoryCredentialEntry[]);
+          return { applied: true };
+        }
         case "network.open": throw new Error("Network streams require the dedicated channel");
         case "bootstrap":
-          await host.composition.transport.query({ queryName: "projects.list", input: {} });
-          return host.composition.transport.bootstrap();
-        case "query": return host.composition.transport.query(parseClientQueryRequest(input));
+          await transport.query({ queryName: "projects.list", input: {} });
+          return transport.bootstrap();
+        case "query": return transport.query(parseClientQueryRequest(payload));
         case "command":
           pendingWrites++;
-          try { return await host.composition.transport.command(parseClientCommandRequest(input)); }
+          try { return await transport.command(parseClientCommandRequest(payload)); }
           finally { pendingWrites--; }
         case "subscribe":
-          unsubscribe?.();
-          unsubscribe = host.composition.transport.subscribe(parseSubscriptionScope(input), event => peer.publish(event));
+          if (bound) {
+            bound.off?.(); bound.off = transport.subscribe(parseSubscriptionScope(payload), event => peer.publish({ contextId, event }));
+          } else { unsubscribe?.(); unsubscribe = transport.subscribe(parseSubscriptionScope(payload), event => peer.publish(event)); }
           return { subscribed: true };
         case "workspace.path":
           if (!input || typeof input !== "object" || !("workspaceId" in input) || typeof input.workspaceId !== "string") throw new Error("Workspace identity is required");

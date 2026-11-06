@@ -1,3 +1,4 @@
+import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type {
@@ -36,7 +37,7 @@ function plain(node: Node): string {
 export function predictionDraft(
   editor: HTMLElement,
 ): { text: string; caret: number } | undefined {
-  const selection = window.getSelection();
+  const selection = editor.ownerDocument.defaultView!.getSelection();
   if (!selection?.isCollapsed || !selection.rangeCount) return;
   const range = selection.getRangeAt(0);
   if (!editor.contains(range.startContainer)) return;
@@ -80,6 +81,7 @@ export function useWordPrediction(
   options: ComposerPrediction | undefined,
   blocked: boolean,
 ) {
+  const document = useSurfaceDocument(), window = surfaceWindow(document);
   const { preview } = usePreviewMode();
   const [ghost, setGhost] = useState<Ghost>(),
     [error, setError] = useState("");
@@ -102,7 +104,7 @@ export function useWordPrediction(
       (!preview && (!options.available || !options.sessionId))
     )
       return;
-    const chrome = globalThis.ompStudioChrome;
+    const chrome = window.ompStudioChrome;
     if (
       !preview &&
       (!chrome?.attachPrediction ||
@@ -375,6 +377,8 @@ export function useWordPrediction(
     options?.nextMessageAvailable,
     blocked,
     preview,
+    document,
+    window,
   ]);
   function key(key: string): boolean {
     const current = shown.current,

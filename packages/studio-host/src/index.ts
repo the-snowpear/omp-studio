@@ -36,3 +36,5 @@ export * from "./thread-binding-store.js";
 export * from "./windows-job-object.js";
 export * from "./workspace-path.js";
 export * from "./workspace-registry.js";
+
+export * from "./evaluation-coordinator.js";

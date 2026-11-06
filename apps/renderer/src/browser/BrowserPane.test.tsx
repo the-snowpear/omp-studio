@@ -5,14 +5,26 @@ import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
 import { BrowserPane } from "./BrowserPane";
+import { ManagedBrowserPane } from "./ManagedBrowserPane";
 afterEach(() => { cleanup(); localStorage.clear(); });
-it("keeps demonstration observation and takeover local, and releases the picture when the sidebar hides", async () => {
+it("keeps multi-element feedback and control local in preview across panel hiding", async () => {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1"); const client = { command: vi.fn(), query: vi.fn() } as unknown as StudioClient;
-  const view = (visible: boolean) => <I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><BrowserPane client={client} available visible={visible} /></PreviewModeProvider></I18nProvider>;
-  const { rerender } = render(view(true)); fireEvent.click(screen.getByRole("button", { name: "观察" }));
-  await waitFor(() => expect(screen.getByAltText("当前浏览器画面")).toBeTruthy());
-  fireEvent.click(screen.getByRole("button", { name: "人工接管" })); expect(screen.getByRole("button", { name: "归还控制" })).toBeTruthy();
-  rerender(view(false)); expect(screen.queryByAltText("当前浏览器画面")).toBeNull();
+  const onReferences = vi.fn();
+  const view = (visible: boolean) => <I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><ManagedBrowserPane sessionId="pane-test" pageId="pane-test:page-1" visible={visible} onReferences={onReferences} /></PreviewModeProvider></I18nProvider>;
+  const { rerender } = render(view(true));
+  fireEvent.click(await screen.findByRole("button", { name: "人工接管" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "归还 Agent 控制" })).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: "选择页面元素" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "停止选择元素" })).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: "Preview button · 0" }));
+  fireEvent.click(screen.getByRole("button", { name: "Preview button · 0" }));
+  expect(screen.getAllByRole("textbox", { name: /^备注/ })).toHaveLength(2);
+  fireEvent.change(screen.getAllByRole("textbox", { name: /^备注/ })[0]!, { target: { value: "调整按钮间距" } });
+  rerender(view(false)); expect(screen.queryByRole("region", { name: "浏览器页面" })).toBeNull();
+  rerender(view(true)); expect(screen.getByRole("button", { name: "归还 Agent 控制" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "加入输入框" }));
+  expect(onReferences.mock.calls[0]?.[0]).toHaveLength(2);
+  expect(onReferences.mock.calls[0]?.[0][0].note).toBe("调整按钮间距");
   expect(client.command).not.toHaveBeenCalled(); expect(client.query).not.toHaveBeenCalled();
 });
 it("does not ask an old Runtime for unknown browser commands", () => {

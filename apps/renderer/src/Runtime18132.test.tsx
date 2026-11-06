@@ -5,8 +5,8 @@ import type { StudioClient } from "@omp-studio/client-contract";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { SessionBudgetPane } from "./models/SessionBudgetPane";
 import { LocalFilesPane } from "./capabilities/LocalFilesPane";
-import { DictationControl } from "./composer/DictationControl";
-import { ContextInspector } from "./conversation/ContextInspector";
+import { DictationDemo } from "./preview/DictationDemo";
+import { ContextInspector } from "./contextViewer/ContextInspector";
 import { AskBody } from "./deck/AskCard";
 import { ApprovalCard } from "./deck/ApprovalCard";
 import { approvalFromInteraction } from "./deck/approvalContent";
@@ -50,22 +50,21 @@ it("offers only once or deny for restricted-folder approvals even with remembere
   expect(screen.getAllByRole("button").map(button => button.textContent)).toEqual(["拒绝", "允许一次"]);
 });
 
-it("draft dictation merges text only after stop and never requests microphone access in demo", async () => {
-  const onText = vi.fn();
-  render(<PreviewModeProvider switchEnabled><DictationControl client={client} available={false} onText={onText} /></PreviewModeProvider>);
-  fireEvent.click(screen.getByRole("button", { name: "听写" }));
-  fireEvent.click(screen.getByRole("button", { name: "确认打开麦克风" }));
-  expect(onText).not.toHaveBeenCalled();
-  fireEvent.click(await screen.findByRole("button", { name: "停止并填入草稿" }));
-  expect(onText).toHaveBeenCalledWith("请检查会话恢复后附件是否保留。");
+it("dictation demo keeps text in its isolated draft and never calls the Host", async () => {
+  render(<PreviewModeProvider switchEnabled><DictationDemo /></PreviewModeProvider>);
+  fireEvent.click(screen.getByRole("button", { name: "试用听写交互" }));
+  expect((screen.getByRole("textbox", { name: "演示草稿" }) as HTMLTextAreaElement).value).toBe("");
+  fireEvent.click(await screen.findByRole("button", { name: "停止并填入演示草稿" }));
+  expect((screen.getByRole("textbox", { name: "演示草稿" }) as HTMLTextAreaElement).value).toContain("session");
   expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
 });
 
 it("releases a real context snapshot when the viewer closes", async () => {
-  query.mockImplementation(async kind => kind === "context.view.open" ? { sessionId: "s", snapshotId: "snapshot", usedTokens: 0, contextWindow: 1000, freeTokens: 1000, savedTokens: 0, thresholdTokens: null, categories: [] } : kind === "context.view.list" ? { entries: [], total: 0 } : { released: true });
-  const view = render(<PreviewModeProvider switchEnabled={false}><ContextInspector client={client} sessionId="s" visible onClose={() => {}} /></PreviewModeProvider>);
+  query.mockImplementation(async kind => kind === "context.view.open" ? { sessionId: "s", snapshotId: "snapshot", capturedAt: "2026-11-01T10:00:00.000Z", usedTokens: 0, contextWindow: 1000, freeTokens: 1000, bufferTokens: 0, savedTokens: 0, thresholdTokens: null, truncated: false, categories: [] } : kind === "context.view.list" ? { entries: [], total: 0 } : { released: true });
+  const view = render(<PreviewModeProvider switchEnabled={false}><ContextInspector client={client} sessionId="s" opened /></PreviewModeProvider>);
   await waitFor(() => expect(query).toHaveBeenCalledWith("context.view.open", { sessionId: "s" }));
-  await screen.findByText(/上下文 0/);
+  const meter = await screen.findByRole("meter", { name: "上下文占用" });
+  expect(meter.getAttribute("aria-valuenow")).toBe("0");
   view.unmount();
   expect(query).toHaveBeenCalledWith("context.view.release", { sessionId: "s", snapshotId: "snapshot" });
 });

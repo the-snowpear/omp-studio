@@ -389,6 +389,8 @@ describe("terminal lifecycle: natural exit preserves the backlog", () => {
     api.exit(id);
     const screen = fakeScreen();
     store.attachHost(id, screen.host);
+    expect(screen.writes).toEqual(["line 1\r\n", "line 2\r\n"]);
+    expect(screen.pendingCallbacks).toBe(0);
     expect(screen.written()).toBe("line 1\r\nline 2\r\n");
     // The flow-control session is over; replaying is display, not credit.
     await settle();

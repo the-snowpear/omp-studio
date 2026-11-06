@@ -9,6 +9,7 @@ import type {
   WorkspaceId,
 } from "@omp-studio/client-contract";
 
+import { SKIPPED_DIRS } from "../explorer-types";
 import type { MentionCandidate } from "./types";
 
 /** `@` shows agents, skills (when the query is non-empty), and workspace paths. `/` is the command menu, not a mention. */
@@ -65,20 +66,9 @@ export type WorkspaceFileIndex = {
   search(query: string): Promise<MentionCandidate[]>;
 };
 
-/**
- * Directories skipped while indexing: huge, generated, or irrelevant as mentions.
- * A user can still reach them by typing the path (slash queries list on demand).
- */
-const SKIPPED_DIRS = new Set([
-  "node_modules",
-  "dist",
-  "build",
-  "out",
-  "coverage",
-  "target",
-  "vendor",
-  "__pycache__",
-]);
+/* 行为清单不在这里维护：`explorer-types.ts` 是唯一来源，视觉层的灰显消费同一个
+   Set（isNoiseDir ⊇ SKIPPED_DIRS）。改这个清单会影响产品行为（@ 提及是否跳过、
+   是否递归索引），T2 已裁定「行为层 / 视觉层」共用基线但不相等。 */
 
 /** Bounded so the first `@` keystroke stays responsive on a large repo. */
 const WALK_DIR_BUDGET = 400;

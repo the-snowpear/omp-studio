@@ -1,10 +1,15 @@
 import { PREDICTION_CHANNELS, type PredictionAttach, type PredictionControl, type PredictionResult, type PredictionEvent } from "./prediction-shared.js";
 import { validatePredictionEvent } from "@omp-studio/studio-protocol";
+import { FLOAT_WINDOW_CHANNELS, type FloatWindowPrepare, type FloatWindowTicket, type FloatWindowControl, type FloatWindowEvent } from "./floating-windows-shared.js";
 import { SKILLSHARE_TOKEN_CHANNEL, type SkillshareTokenReveal } from "./chrome-skillshare-shared.js";
 import { LIVE_AUDIO_CHANNELS, type LiveAudioAttach, type LiveAudioChunk, type LiveAudioResult } from "./live-audio-shared.js";
+import { DICTATION_AUDIO_CHANNELS, type DictationAudioApi, type DictationAudioAttach, type DictationAudioResult, type DictationDesktopEvent } from "./dictation-audio-shared.js";
 import { BROWSER_OBSERVATION_CHANNELS, type BrowserObservationAttach, type BrowserObservationControl, type BrowserObservationEvent, type BrowserObservationResult } from "./browser-observation-shared.js";
 import { validateBrowserObservationEvent } from "@omp-studio/studio-protocol";
+import type { ManagedBrowserApi, ManagedBrowserEvent, ManagedBrowserState } from "@omp-studio/studio-protocol";
+import { MANAGED_BROWSER_CHANNELS } from "./managed-browser-shared.js";
 import { COMPUTER_CAPTURE_CHANNEL, type ComputerCaptureRequest, type ComputerCaptureResult } from "./computer-observation-shared.js";
+import { COMPUTER_FRAME_CHANNELS, type ComputerFrameRequest, type ComputerFrameReadResult, type ComputerFrameSaveResult } from "./computer-frames-shared.js";
 import { CHROME_SERVICE_CHANNELS, type ServiceDefinitionResult, type ServiceDefinitionsInput } from "./chrome-services-shared.js";
 import { PAYLOAD_HEALTH_CHANNEL, type PayloadHealthStatus } from "./payload-health-shared.js";
 import { CHROME_ARTIFACT_CHANNELS, type ArtifactFileResult, type ArtifactImportInput } from "./chrome-artifacts-shared.js";
@@ -60,6 +65,7 @@ import type { UpdatePrefs } from "./update-prefs-store.js";
 import { MEDIA_UPLOAD_CHANNELS, type MediaUploadInput, type MediaUploadResult } from "./media-upload-shared.js";
 import { APP_MENU_COMMAND_CHANNEL, isAppMenuCommand, type AppMenuCommand } from "./app-menu-shared.js";
 import { CHROME_MEDIA_ACCESS_CHANNELS, type MicrophoneAccess } from "./chrome-media-access-shared.js";
+import { MEMORY_CREDENTIAL_CHANNELS, type MemoryCredentialInput, type MemoryCredentialResult } from "./memory-credentials-shared.js";
 
 /** The OS the renderer runs on; anything but Windows and macOS reports "linux". */
 export type ChromePlatform = "win32" | "darwin" | "linux";
@@ -94,6 +100,9 @@ export function subscribeChannel<T>(
 
 export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?: WebUtilsLike, platform: string = process.platform) {
   return Object.freeze({
+    prepareFloatWindow(input: FloatWindowPrepare): Promise<FloatWindowTicket> { return ipcRenderer.invoke(FLOAT_WINDOW_CHANNELS.prepare, input) as Promise<FloatWindowTicket>; },
+    controlFloatWindow(input: FloatWindowControl): Promise<void> { return ipcRenderer.invoke(FLOAT_WINDOW_CHANNELS.control, input) as Promise<void>; },
+    onFloatWindow(listener: (event: FloatWindowEvent) => void): () => void { return subscribeChannel(ipcRenderer, FLOAT_WINDOW_CHANNELS.changed, listener); },
     /** Fixed at preload time; renderer code reads it through `apps/renderer/src/platform.ts`. */
     platform: chromePlatform(platform),
     /** macOS menu bar commands; ids outside the allowlist are dropped here. */
@@ -110,13 +119,31 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     },
     revealSkillshareToken(input: { secretId: string; sessionId: string }): Promise<SkillshareTokenReveal> { return ipcRenderer.invoke(SKILLSHARE_TOKEN_CHANNEL, input) as Promise<SkillshareTokenReveal>; },
     attachLiveAudio(input: LiveAudioAttach): Promise<LiveAudioResult> { return ipcRenderer.invoke(LIVE_AUDIO_CHANNELS.attach, input) as Promise<LiveAudioResult>; },
+    attachDictationAudio(input: DictationAudioAttach): Promise<DictationAudioResult> { return ipcRenderer.invoke(DICTATION_AUDIO_CHANNELS.attach, input) as Promise<DictationAudioResult>; },
+    controlDictationAudio(input: Parameters<DictationAudioApi["controlDictationAudio"]>[0]): Promise<DictationAudioResult> { return ipcRenderer.invoke(DICTATION_AUDIO_CHANNELS.input, input) as Promise<DictationAudioResult>; },
+    appendDictationAudio(input: Parameters<DictationAudioApi["appendDictationAudio"]>[0]): Promise<DictationAudioResult> { return ipcRenderer.invoke(DICTATION_AUDIO_CHANNELS.chunk, input) as Promise<DictationAudioResult>; },
+    drainDictationAudio(input: { audioId: string }): Promise<DictationAudioResult> { return ipcRenderer.invoke(DICTATION_AUDIO_CHANNELS.drain, input) as Promise<DictationAudioResult>; },
+    getDictationRecovery(): Promise<DictationAudioResult> { return ipcRenderer.invoke(DICTATION_AUDIO_CHANNELS.recovery) as Promise<DictationAudioResult>; },
+    replayDictationAudio(input: { audioId: string }): Promise<DictationAudioResult> { return ipcRenderer.invoke(DICTATION_AUDIO_CHANNELS.replay, input) as Promise<DictationAudioResult>; },
+    retainDictationAudio(input: { audioId: string }): Promise<DictationAudioResult> { return ipcRenderer.invoke(DICTATION_AUDIO_CHANNELS.retain, input) as Promise<DictationAudioResult>; },
+    releaseDictationAudio(input: { audioId: string }): Promise<DictationAudioResult> { return ipcRenderer.invoke(DICTATION_AUDIO_CHANNELS.release, input) as Promise<DictationAudioResult>; },
+    onDictationAudio(listener: (event: DictationDesktopEvent) => void): () => void { return subscribeChannel(ipcRenderer, DICTATION_AUDIO_CHANNELS.event, listener); },
     attachPrediction(input:PredictionAttach):Promise<PredictionResult>{return ipcRenderer.invoke(PREDICTION_CHANNELS.attach,input) as Promise<PredictionResult>;},
     predictionInput(input:PredictionControl):Promise<PredictionResult>{return ipcRenderer.invoke(PREDICTION_CHANNELS.input,input) as Promise<PredictionResult>;},
     detachPrediction(input:{channelId:string}):Promise<PredictionResult>{return ipcRenderer.invoke(PREDICTION_CHANNELS.detach,input) as Promise<PredictionResult>;},
     importPredictionHistory(input:{channelId:string}):Promise<PredictionResult>{return ipcRenderer.invoke(PREDICTION_CHANNELS.import,input) as Promise<PredictionResult>;},
     onPrediction(listener:(event:PredictionEvent)=>void):()=>void{return subscribeChannel<unknown>(ipcRenderer,PREDICTION_CHANNELS.event,event=>{try{validatePredictionEvent(event);listener(event);}catch{/* Ignore malformed private data. */}});},
+    managedBrowser: Object.freeze<ManagedBrowserApi>({
+      available: () => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.available) as Promise<boolean>,
+      read: sessionId => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.read, sessionId) as Promise<ManagedBrowserState>,
+      execute: command => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.execute, command) as Promise<ManagedBrowserState>,
+      present: presentation => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.present, presentation) as Promise<void>,
+      subscribe: listener => subscribeChannel<ManagedBrowserEvent>(ipcRenderer, MANAGED_BROWSER_CHANNELS.event, listener),
+    }),
     attachBrowserObservation(input: BrowserObservationAttach): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.attach, input) as Promise<BrowserObservationResult>; },
     readComputerCapture(input: ComputerCaptureRequest): Promise<ComputerCaptureResult> { return ipcRenderer.invoke(COMPUTER_CAPTURE_CHANNEL, input) as Promise<ComputerCaptureResult>; },
+    readComputerFrame(input: ComputerFrameRequest): Promise<ComputerFrameReadResult> { return ipcRenderer.invoke(COMPUTER_FRAME_CHANNELS.read, input) as Promise<ComputerFrameReadResult>; },
+    saveComputerFrame(input: ComputerFrameRequest): Promise<ComputerFrameSaveResult> { return ipcRenderer.invoke(COMPUTER_FRAME_CHANNELS.save, input) as Promise<ComputerFrameSaveResult>; },
     controlBrowserObservation(input: BrowserObservationControl): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.input, input) as Promise<BrowserObservationResult>; },
     detachBrowserObservation(input: { observationId: string }): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.detach, input) as Promise<BrowserObservationResult>; },
     onBrowserObservation(listener: (event: BrowserObservationEvent) => void): () => void { return subscribeChannel<unknown>(ipcRenderer, BROWSER_OBSERVATION_CHANNELS.event, event => { try { validateBrowserObservationEvent(event); listener(event); } catch { /* Malformed private frames never enter the Renderer. */ } }); },
@@ -127,6 +154,9 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     finishMediaUpload(input: { uploadId: string }): Promise<MediaUploadResult> { return ipcRenderer.invoke(MEDIA_UPLOAD_CHANNELS.finish, input) as Promise<MediaUploadResult>; },
     abortMediaUpload(input: { uploadId: string }): Promise<MediaUploadResult> { return ipcRenderer.invoke(MEDIA_UPLOAD_CHANNELS.abort, input) as Promise<MediaUploadResult>; },
     listServiceDefinitions(input: ServiceDefinitionsInput): Promise<ServiceDefinitionResult> { return ipcRenderer.invoke(CHROME_SERVICE_CHANNELS.list, input) as Promise<ServiceDefinitionResult>; },
+    memoryCredentialStatus(input: MemoryCredentialInput): Promise<MemoryCredentialResult> { return ipcRenderer.invoke(MEMORY_CREDENTIAL_CHANNELS.status, input) as Promise<MemoryCredentialResult>; },
+    setMemoryCredential(input: MemoryCredentialInput & { token: string }): Promise<MemoryCredentialResult> { return ipcRenderer.invoke(MEMORY_CREDENTIAL_CHANNELS.set, input) as Promise<MemoryCredentialResult>; },
+    removeMemoryCredential(input: MemoryCredentialInput): Promise<MemoryCredentialResult> { return ipcRenderer.invoke(MEMORY_CREDENTIAL_CHANNELS.remove, input) as Promise<MemoryCredentialResult>; },
     saveServiceDefinition(input: ServiceDefinitionsInput): Promise<ServiceDefinitionResult> { return ipcRenderer.invoke(CHROME_SERVICE_CHANNELS.save, input) as Promise<ServiceDefinitionResult>; },
     removeServiceDefinition(input: ServiceDefinitionsInput): Promise<ServiceDefinitionResult> { return ipcRenderer.invoke(CHROME_SERVICE_CHANNELS.remove, input) as Promise<ServiceDefinitionResult>; },
     chooseArtifactDirectory(): Promise<ArtifactFileResult> {

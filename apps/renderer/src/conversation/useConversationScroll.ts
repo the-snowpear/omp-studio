@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject, type UIEvent } from "react";
 import { cancelConversationReflow, isConversationReflowing, isConversationReflowScroll, registerConversationScroll } from "./conversationReflow";
+import { CONVERSATION_REVEAL } from "./conversationReveal";
 
 export const FOLLOW_THRESHOLD_PX = 72;
 export const AT_TAIL_PX = 1;
@@ -170,6 +171,11 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     setPinned(true);
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [scrollerRef, setPinned]);
+  useEffect(() => {
+    const el = scrollerRef.current;
+    el?.addEventListener(CONVERSATION_REVEAL, detachFromLatest);
+    return () => el?.removeEventListener(CONVERSATION_REVEAL, detachFromLatest);
+  }, [scrollerRef, detachFromLatest]);
   const preparePrepend = useCallback(() => {
     const el = scrollerRef.current;
     if (el === null) return;

@@ -44,8 +44,7 @@
   width: 6px;
   height: 100%;
   cursor: col-resize;
-  /* 技能&插件抽屉（--z-rail:10）打开时全宽覆盖 .sb-section 区，若 resizer 低于它
-     手柄会被抽屉吃掉命中，侧栏宽度就无法拖拽了。resizer 必须始终可拖，抬到抽屉之上。 */
+  /* 抽屉在右边缘留出命中带，拖宽柄始终可拖。 */
   z-index: var(--z-rail-tools);
 }
 .sidebar-resizer:hover, .sidebar-resizer.dragging { background: var(--accent-border); }
@@ -561,13 +560,42 @@
   outline: 1px solid color-mix(in srgb, var(--accent) 68%, transparent);
   outline-offset: -1px;
 }
-.tree-row .tw { width: 14px; height: 14px; flex: none; color: var(--glyph-faint); display: inline-flex; }
+.tree-row .tw { width: 14px; height: 14px; flex: none; color: var(--text-3); display: inline-flex; }
 .tree-row .tw .icon { width: 12px; height: 12px; transform: rotate(0deg); transform-origin: center; transition: transform var(--dur-fast) var(--ease-out); }
 .tree-row.open > .tw .icon { transform: rotate(90deg); }
 .tree-row .fi { color: var(--text-3); display: inline-flex; flex: none; }
 /* Folders carry the accent so the eye can find structure without reading
    names; files stay neutral. Mirrors ver2's Explorer. */
 .tree-row[data-dir] .fi { color: var(--accent); }
+/* 文件类型色（spec §4.5）。12 条追加式规则：上面两条 .fi 默认与 [data-dir] .fi
+   一行不改 —— 目录行没有 data-ftype，accent 永远先命中。颜色落在 .fi 上，
+   .fname 保持中性（唯一例外见下方 data-secret）。
+   色与形是两个正交轴：形由 iconNameFor() 决定，色由这里的 data-ftype 派生，
+   所以 README.md 可以是「中性文档色 + 书形」而 .env 是「红 + 钥匙形」。 */
+.tree-row[data-ftype="code"] .fi { color: var(--ftype-code); }
+.tree-row[data-ftype="markup"] .fi { color: var(--ftype-markup); }
+.tree-row[data-ftype="style"] .fi { color: var(--ftype-style); }
+.tree-row[data-ftype="data"] .fi { color: var(--ftype-data); }
+.tree-row[data-ftype="doc"] .fi { color: var(--ftype-doc); }
+.tree-row[data-ftype="config"] .fi { color: var(--ftype-config); }
+.tree-row[data-ftype="script"] .fi { color: var(--ftype-script); }
+.tree-row[data-ftype="test"] .fi { color: var(--ftype-test); }
+.tree-row[data-ftype="package"] .fi { color: var(--ftype-package); }
+.tree-row[data-ftype="lock"] .fi { color: var(--ftype-lock); }
+.tree-row[data-ftype="image"] .fi { color: var(--ftype-image); }
+.tree-row[data-ftype="secret"] .fi { color: var(--ftype-secret); }
+/* 噪音目录：只弱化容器本身，子孙照常（整棵子树灰掉会让人以为加载失败）。
+   降一档灰但不降到看不见：--ftype-dim 三档 4.14 / 3.76 / 3.22，全部 >3:1；
+   .fname 悬停与选中回升 --text-2 —— 弱化是降噪，不是禁用。 */
+.tree-row[data-noise] .fi    { color: var(--ftype-dim); }
+.tree-row[data-noise] .fname { color: var(--text-3); }
+.tree-row[data-noise]:hover .fname,
+.tree-row[data-noise][aria-selected="true"] .fname { color: var(--text-2); }
+/* 敏感文件：形状（key / shield-key）+ 图标色 + 文件名色三处同时不同，扫视必然跳出。
+   这是对上面「文件保持中性」的唯一一次有意偏离，触发面通常 1–5 行。
+   已裁掉的「行尾 5px 点」不要复活：它会和 .fop 争位，且 forced-colors 下实心块消失。 */
+.tree-row[data-secret] .fi    { color: var(--ftype-secret); }
+.tree-row[data-secret] .fname { color: var(--ftype-secret); font-weight: var(--fw-medium); }
 .tree-row .fi .icon { width: 14px; height: 14px; }
 .tree-row .fname { flex: 1; min-width: 0; }
 /* Git 状态指示：行尾彩色字母（M/A/D/R/U/! = 修改/新增/删除/重命名/未跟踪/冲突）。
@@ -640,7 +668,9 @@
   --fname-fade: 51px;
   --fname-clear: 33px;
 }
-/* 徽章与按钮显隐同步淡出（状态集与 .fop 显隐完全一致）。 */
+/* 徽章与按钮显隐同步淡出（状态集与 .fop 显隐完全一致）。
+   注意：`.live` 的悬停收窄另有下方 (0,3,0) 的高特异性规则兜底；本条不能删，
+   它同时管 `.fstat` —— 删掉会让 git 徽章在悬停时不收窄，遮罩会把文件名吞掉。 */
 .tree-row:where([data-file], [data-dir]):where(:hover, :focus-visible, :focus-within) .fstat,
 .tree-row:where([data-file], [data-dir]):where(:hover, :focus-visible, :focus-within) .live {
   opacity: 0;
@@ -710,9 +740,23 @@
   max-width: 24px;
   transition: opacity var(--dur-fast) var(--ease-out), min-width var(--dur-fast) var(--ease-out), max-width var(--dur-fast) var(--ease-out);
 }
+/* 悬停收窄必须晚于上面的基础 max-width：两者特异性相同时源顺序决定胜负。
+   此前它只写在 674 行，被这里的 `max-width: 24px` 反向覆盖，于是 `.live`
+   悬停时不收窄；而文件名遮罩的 51px 渐隐带是按"徽章会腾出空间"推导的，
+   两个假设对不上就把名字吞掉——200px 窄栏 + 深度 3 时只剩 7px 不透明。
+   用 [data-file]/[data-dir] 把特异性提到 (0,3,0)，不再依赖源顺序。 */
+.tree-row[data-file]:where(:hover, :focus-visible, :focus-within) .live,
+.tree-row[data-dir]:where(:hover, :focus-visible, :focus-within) .live {
+  opacity: 0;
+  min-width: 0;
+  max-width: 0;
+}
 .tree-row.turn-file .fname { font-weight: var(--fw-medium); color: var(--text); }
 .tree-row .diag {
   width: 5px; height: 5px; border-radius: var(--r-full); flex: none;
+  /* 抬层而不是收窄：诊断是「这个文件有问题」，不该因为鼠标经过就消失；
+     git 徽章还有 .fname 着色做冗余，诊断没有。悬停时它压在两枚动作按钮之上。 */
+  position: relative; z-index: 1;
 }
 .diag.err { background: var(--red); }
 .diag.warn { background: var(--amber); }
@@ -725,14 +769,51 @@
 .tree-row[data-git="u"] .fname { color: var(--git-untracked); }
 .tree-row[data-git="x"] .fname { color: var(--git-conflict); }
 
-/* ---------- 左下用户与 OMP 状态 ---------- */
+/* ---------- 左下身份块（左栏 rail 收起时回落到这里） ----------
+   折叠/展开是一整套动作，不是只动头像：
+   ① 头像由壳里的幽灵在 rail 与这里之间搬运（useIdentityFlight）；
+   ② 这个盒子是「从底边长出来」的：高度用 grid 轨道 0fr→1fr 过渡，于是上方对话区与
+      文件区在同一个 flex 里被慢慢挤压，中间那条可拖动的分界线平滑上移，而不是跳一格；
+   ③ 盒子内部：分隔线从左画出来，名字/状态/chevron 依次展开。 */
 .sb-footer {
+  display: grid;
+  grid-template-rows: 0fr;
   flex: none;
   /* margin-top:auto 把用户区钉在左下角：上方区域即使全部折叠、只剩头部高度，
      空余空间也被这条 auto margin 吸收，用户区不会跟着上移。 */
   margin-top: auto;
-  border-top: 1px solid var(--border);
+  transition: grid-template-rows var(--dur-slow) var(--ease-nav);
+}
+.sb-footer[data-open="true"] { grid-template-rows: 1fr; }
+/* 折回：先让标签淡出（60ms），盒子再收。收缩前段很陡，文字还在的话会被切口咬住。 */
+.sb-footer:not([data-open="true"]) {
+  transition: grid-template-rows calc(var(--dur-slow) * 0.72) var(--ease-nav) calc(var(--dur-slow) * 0.2);
+}
+.sb-footer-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+.sb-footer-body {
+  position: relative;
   padding: var(--sp-8) var(--sp-10);
+}
+/* 分隔线用伪元素画：它能单独淡入、从左边画出来，整块就不会「啪」一下出现。 */
+.sb-footer-body::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: var(--border);
+  transform: scaleX(0);
+  transform-origin: left center;
+  opacity: 0;
+  transition: transform var(--dur-slow) var(--ease-nav), opacity var(--dur) var(--ease-out);
+}
+.sb-footer[data-open="true"] .sb-footer-body::before { transform: none; opacity: 1; }
+.sb-footer:not([data-open="true"]) .sb-footer-body::before {
+  transform-origin: right center;
+  transition: transform calc(var(--dur-slow) * 0.56) var(--ease-in),
+    opacity calc(var(--dur-slow) * 0.56) var(--ease-in);
 }
 .sb-user {
   display: flex;
@@ -745,6 +826,101 @@
   text-align: left;
 }
 .sb-user:hover { background: var(--surface-hover); }
+/* 头像圆的直径与字形按 0.4 比例绑定：幽灵按同一比例缩放，落地那一刻字形不跳。 */
+.sb-user .avatar {
+  --avatar-size: 24px;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  font-size: calc(var(--avatar-size) * 0.4 * var(--text-font-scale));
+}
+.sb-avatar-slot {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.sb-avatar-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+/* 名字/状态用 <span> 堆叠：button 里放 div 是非法 HTML，而 button 才是可聚焦的那层。
+   两级错开出现（名字 120ms、状态 180ms），像标签被抽出来一样。 */
+.sb-user .sb-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.sb-user .u-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  opacity: 0;
+  transform: translateX(6px);
+  /* 延迟按 --dur-slow 的比例写：盒子快长满（缓动前段很陡）时标签才开始，
+     否则底栏还在被裁切时标签就已经出现在切口上。 */
+  transition: opacity 200ms var(--ease-out) calc(var(--dur-slow) * 0.5),
+    transform 200ms var(--ease-out) calc(var(--dur-slow) * 0.5);
+}
+.sb-user .u-status {
+  font-size: var(--fs-11);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  opacity: 0;
+  transform: translateX(6px);
+  transition: opacity 200ms var(--ease-out) calc(var(--dur-slow) * 0.72),
+    transform 200ms var(--ease-out) calc(var(--dur-slow) * 0.72);
+}
+.sb-footer[data-open="true"] .u-name,
+.sb-footer[data-open="true"] .u-status { opacity: 1; transform: none; }
+/* 折回要快过盒子收缩：底栏是先矮下去、文字还在的话就会被切口咬住。 */
+.sb-footer:not([data-open="true"]) .u-name,
+.sb-footer:not([data-open="true"]) .u-status {
+  transition: opacity calc(var(--dur-slow) * 0.24) var(--ease-in),
+    transform calc(var(--dur-slow) * 0.24) var(--ease-in);
+}
+.sb-user .u-status.ok { color: var(--green); }
+.sb-user .u-status.warn { color: var(--amber); }
+.sb-user .u-status.err { color: var(--red); }
+.sb-version {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 0.68rem;
+  font-weight: var(--fw-semibold);
+  line-height: 1.2;
+}
+/* chevron 也是标签的一部分：最后出现，折回时最先走。 */
+.sb-user .sb-chevron {
+  display: flex;
+  margin-left: auto;
+  color: var(--glyph-faint);
+  opacity: 0;
+  transition: opacity 160ms var(--ease-out) calc(var(--dur-slow) * 0.88);
+}
+.sb-footer[data-open="true"] .sb-chevron { opacity: 1; }
+.sb-footer:not([data-open="true"]) .sb-chevron { transition: opacity calc(var(--dur-slow) * 0.2) var(--ease-in); }
+/* 挂上那一帧从「合上」起跑：盒子真的长出来、线从左边画出来、标签从后面跟上。
+   底栏是收起那一帧才挂载的，没有这次状态变化就没有过渡 —— 全交给 @starting-style。
+   放在这一段末尾：同权重时后写的这条才压得住上面 `[data-open]` 的终态值。 */
+@starting-style {
+  .sb-footer[data-open="true"] { grid-template-rows: 0fr; }
+  .sb-footer[data-open="true"] .sb-footer-body::before { transform: scaleX(0); opacity: 0; }
+  .sb-footer[data-open="true"] .sb-user .u-name,
+  .sb-footer[data-open="true"] .sb-user .u-status { opacity: 0; transform: translateX(6px); }
+  .sb-footer[data-open="true"] .sb-user .sb-chevron { opacity: 0; }
+}
+
+/* Avatar is still used by the OMP environment menu, now anchored on the rail. */
 .avatar {
   width: 24px;
   height: 24px;
@@ -760,28 +936,6 @@
   object-fit: cover;
   overflow: hidden;
 }
-/* The name/status pair moved from \<div\> to \<span\> (a \<div\> inside a \<button\> is
-   invalid HTML, and the button is what makes this focusable). Spans are inline,
-   so the two-line stack is now declared here rather than inherited from the
-   old block-level default. */
-.sb-user > span:not(.avatar) {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-.sb-user .u-name { font-size: var(--fs-12); font-weight: var(--fw-medium); }
-.sb-user .u-status {
-  font-size: var(--fs-11);
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.sb-user .u-status.ok { color: var(--green); }
-.sb-user .u-status.warn { color: var(--amber); }
-.sb-user .u-status.err { color: var(--red); }
-.sb-user .icon { margin-left: auto; color: var(--glyph-faint); }
-
 /* OMP 环境菜单：portal 到 body，按 ver1 overlay `up-left` 用 fixed 贴按钮上方 */
 .omp-menu {
   position: fixed;
@@ -941,29 +1095,33 @@
 .sb-actions .skills-btn[aria-expanded="true"] .meta .chev { color: var(--accent); }
 
 /* ============================================================
-   侧栏内嵌技能抽屉面板
-   关键约束：覆盖 .sb-section 列表（项目与对话 + Explorer），
-   不覆盖 .sb-top 与 .sb-footer。
+   技能抽屉：同一浮层覆盖项目列表与停靠正文
    ============================================================ */
 .sb-drawer-mask {
-  position: absolute;
-  left: 0; right: 0;
+  position: fixed;
+  left: var(--drawer-left, 0px);
+  width: var(--drawer-width, var(--sidebar-w));
   top: var(--drawer-top, 56px);
-  bottom: var(--drawer-bottom, 56px);
+  bottom: var(--drawer-bottom, 0px);
   background: var(--bg-inset);
   display: flex; flex-direction: column;
-  z-index: var(--z-rail);
+  overflow: clip;
+  z-index: calc(var(--z-fab) + 3);
   transform: translateX(-12px);
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
   transition: transform var(--dur-slow) var(--ease-out),
-              opacity var(--dur-slow) var(--ease);
+              opacity var(--dur-slow) var(--ease-out),
+              visibility var(--dur-slow) linear;
 }
 .sb-drawer-mask.open {
   transform: translateX(0);
   opacity: 1;
+  visibility: visible;
   pointer-events: auto;
 }
+.sb-drawer-mask[data-presented="false"] { display: none; }
 
 /* 抽屉顶部 */
 .sd-head {
@@ -1020,27 +1178,21 @@
 
 /* 分类 tab */
 .sd-tabs {
+  --tab-height: 24px;
+  --tab-radius: var(--r-full);
   flex: none;
   display: flex; gap: 4px;
   padding: 0 var(--sp-12) var(--sp-8);
   overflow-x: auto;
   scrollbar-width: thin;
 }
-.sd-tab {
+.sd-tabs > [role="tab"] {
   display: inline-flex; align-items: center; gap: 5px;
-  height: 24px; padding: 0 var(--sp-10);
-  border-radius: var(--r-full);
-  color: var(--text-3);
+  padding: 0 var(--sp-10);
   font-size: var(--fs-11);
   white-space: nowrap; flex: none;
-  cursor: pointer; background: transparent;
-  border: 0;
-  transition: background var(--dur-fast) var(--ease),
-              color var(--dur-fast) var(--ease);
 }
-.sd-tab:hover { background: var(--surface-hover); color: var(--text); }
-.sd-tab.active { background: var(--accent-soft); color: var(--accent); }
-.sd-tab .count { font-family: var(--font-mono); font-size: calc(10px * var(--text-font-scale)); opacity: .7; }
+.sd-tabs .count { font-family: var(--font-mono); font-size: calc(10px * var(--text-font-scale)); opacity: .7; }
 
 /* 抽屉正文 */
 .sd-body {
@@ -1465,7 +1617,7 @@
 /* 减少动效 */
 @media (prefers-reduced-motion: reduce) {
   .thread .t-spin { animation: none; }
-  .sb-drawer-mask { transition: opacity var(--dur-fast) linear; transform: none; }
+  .sb-drawer-mask { transition: opacity var(--dur-fast) linear, visibility var(--dur-fast) linear; transform: none; }
   .sb-drawer-mask.open { transform: none; }
   .new-convo-btn:active, .skills-btn:active, .add-btn:active { transform: none; }
   .sk-card, .sk-card::before, .sk-icon, .sk-added-mark, .sk-used-mark { transition: none; }

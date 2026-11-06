@@ -12,7 +12,7 @@ export function SessionImportPanel({ client, onOpen, onImported }: {
  client: StudioClient | null; onOpen: (sessionId: string, workspaceId: WorkspaceId) => void;
  onImported?: () => void;
 }) {
- const { preview } = usePreviewMode();
+ const { preview, marks } = usePreviewMode();
  const { t } = useI18n();
  const available = useUpgradeAvailable(client, preview, "session.import.execute");
  const [open, setOpen] = useState(false);
@@ -62,7 +62,7 @@ export function SessionImportPanel({ client, onOpen, onImported }: {
   <button className="btn small outline" disabled={!available} data-tip={!available ? t("runtimeUpgrade.unavailable") : undefined} onClick={() => setOpen(value => !value)}>{t("runtimeUpgrade.importTitle")}</button>
   {open ? <section className="session-import-panel" aria-label={t("runtimeUpgrade.importTitle")}>
    <div className="row"><AppSelect className="select" value={source} disabled={busy} aria-label={t("runtimeUpgrade.importTitle")} onChange={event => setSource(event.target.value as ForeignSource)}><option value="claude">Claude</option><option value="codex">Codex</option></AppSelect>
-    {preview ? <span className="chip gray">{t("common.demo")}</span> : null}
+    {preview && marks ? <span className="chip gray">{t("common.demo")}</span> : null}
     <button className="btn small" disabled={busy} onClick={() => setOpen(false)}>{t("common.close")}</button>
    </div>
    {busy ? <p role="status">{t("common.loading")}</p> : null}

@@ -15,7 +15,11 @@ import {
 	parseConversationRuntimeEvent,
 } from "../conversation-protocol";
 import { publicToolCallId, sanitizePublicText, sanitizeToolArguments, utf8ByteLength } from "./conversation-sanitizer";
-import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
+import {
+	isComputerContinueMessage,
+	isHarnessInjectedUserMessage,
+	publicConversationRole,
+} from "./conversation-visibility";
 
 export const CONVERSATION_LIVE_COALESCE_INTERVAL_MS = 16;
 export const CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD = 64;
@@ -44,6 +48,7 @@ export interface ConversationLiveProjectorOptions {
 	sessionId: string;
 	runtimeEpoch: number;
 	reserveMessageId: (input: { role: ConversationRole; createdAt: string }) => string;
+	reserveCustomMessageId?: (input: { customType: string; timestamp: number }) => string;
 	/** Non-message entries (compaction). Must not consume the message-id FIFO. */
 	allocateEntryId?: () => string;
 	reserveCompactionId?: () => string;
@@ -177,13 +182,11 @@ function createdAtOf(message: AgentMessage, fallbackIso: string): string {
 }
 
 function userText(message: AgentMessage): string {
-	if (message.role !== "user") return "";
+	if (message.role !== "user" && !isComputerContinueMessage(message)) return "";
+	if (!("content" in message)) return "";
 	if (typeof message.content === "string") return message.content;
 	if (!Array.isArray(message.content)) return "";
-	return message.content
-		.filter(block => block.type === "text")
-		.map(block => block.text)
-		.join("");
+	return message.content.flatMap(block => (block.type === "text" ? [block.text] : [])).join("");
 }
 
 function toolText(result: unknown): {
@@ -441,7 +444,7 @@ export class ConversationLiveProjector {
 
 	#onMessageStart(message: AgentMessage): void {
 		if (isHarnessInjectedUserMessage(message)) return;
-		const role = publicConversationRole(message.role);
+		const role = publicConversationRole(message.role, message);
 		if (role === undefined) {
 			this.#diagnostic(`ignored session message role ${message.role}`);
 			return;
@@ -449,7 +452,15 @@ export class ConversationLiveProjector {
 		if (this.#turnAborted) return;
 		const turnId = this.#ensureTurnId();
 		const createdAt = createdAtOf(message, this.#clock.nowIso());
-		const messageId = this.#options.reserveMessageId({ role, createdAt });
+		const messageId =
+			isComputerContinueMessage(message) && "customType" in message
+				? (this.#options.reserveCustomMessageId?.({
+						customType: message.customType,
+						timestamp: Date.parse(createdAt),
+					}) ??
+					this.#options.allocateEntryId?.() ??
+					crypto.randomUUID())
+				: this.#options.reserveMessageId({ role, createdAt });
 		const open: OpenMessage = {
 			messageId,
 			turnId,
@@ -501,7 +512,7 @@ export class ConversationLiveProjector {
 
 	#onMessageEnd(message: AgentMessage): void {
 		if (isHarnessInjectedUserMessage(message)) return;
-		const role = publicConversationRole(message.role);
+		const role = publicConversationRole(message.role, message);
 		if (role === undefined) {
 			this.#diagnostic(`ignored session message role ${message.role}`);
 			return;
@@ -800,7 +811,7 @@ export class ConversationLiveProjector {
 	}
 
 	#hydrateFromMessage(open: OpenMessage, message: AgentMessage): void {
-		if (message.role === "user") {
+		if (message.role === "user" || isComputerContinueMessage(message)) {
 			const raw = userText(message);
 			const text = this.#options.restoreModelMentions?.(raw) ?? raw;
 			if (text.length > 0) {
@@ -857,7 +868,7 @@ export class ConversationLiveProjector {
 	}
 
 	#contentFromMessage(open: OpenMessage, message: AgentMessage): ConversationContentBlock[] {
-		if (message.role === "user") {
+		if (message.role === "user" || isComputerContinueMessage(message)) {
 			const raw = userText(message);
 			const text = this.#options.restoreModelMentions?.(raw) ?? raw;
 			const sanitized = sanitizePublicText(text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);

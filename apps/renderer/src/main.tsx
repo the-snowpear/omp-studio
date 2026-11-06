@@ -39,6 +39,7 @@ applyTypography(initialSettings);
 document.documentElement.setAttribute("data-theme", initialSettings.theme);
 document.documentElement.setAttribute("data-platform", PLATFORM);
 document.documentElement.setAttribute("data-density", initialSettings.density);
+if (initialSettings.fileTypePalette === "tri") document.documentElement.dataset.palette = "tri";
 document.documentElement.setAttribute("lang", resolveLanguage(initialSettings.language));
 
 /**
@@ -105,7 +106,7 @@ export function mountRenderer(element: Element, client: StudioClient): void {
 }
 
 const host = document.getElementById("root");
-if (host !== null) {
+if (host !== null && !new URL(window.location.href).searchParams.has("dockHost")) {
   let client: StudioClient | undefined = globalThis.OMP_STUDIO_CLIENT;
   if (client === undefined) {
     const bridge = globalThis.ompStudio;

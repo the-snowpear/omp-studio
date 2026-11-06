@@ -12,6 +12,8 @@ import type {
 	StudioComputerTarget,
 } from "../computer-observation-protocol";
 import { SessionControlError } from "./session-control-service";
+import type { StudioComputerWorkspaceService } from "./computer-workspace-service";
+import type { ComputerWorkspaceSnapshot } from "../computer-workspace-protocol";
 
 /** Uses native capture only. No mouse or keyboard API is exposed to Studio. */
 export class StudioComputerObservationService {
@@ -25,6 +27,7 @@ export class StudioComputerObservationService {
 	constructor(
 		readonly session: AgentSession,
 		readonly directory = process.env.OMP_STUDIO_MEDIA_ROOT,
+		readonly workspace?: StudioComputerWorkspaceService,
 	) {}
 	#owners(): string[] {
 		return ownedStudioSessions(this.session)
@@ -32,13 +35,45 @@ export class StudioComputerObservationService {
 			.filter((owner): owner is string => typeof owner === "string");
 	}
 	#ensure(): DesktopSession {
-		this.#desktop ??= new DesktopSession({ display: "all" });
+		this.#desktop ??= this.#createObserver("all");
 		if (this.#timer) clearTimeout(this.#timer);
 		this.#timer = setTimeout(() => this.release(), 15_000);
 		this.#timer.unref();
 		return this.#desktop;
 	}
+	#createObserver(display: string): DesktopSession {
+		const options = { display, observationOnly: true };
+		const observer = new DesktopSession(options);
+		if ((observer as DesktopSession & { observationOnly?: boolean }).observationOnly !== true) {
+			void observer.close().catch(() => {});
+			throw new SessionControlError("CAPABILITY_UNAVAILABLE", "Native binding does not support passive observation");
+		}
+		return observer;
+	}
 	async status(): Promise<StudioComputerStatus> {
+		if (this.workspace) {
+			const snapshot = (await this.workspace.query({
+				kind: "computer.workspace.get",
+				sessionId: this.session.sessionId,
+			})) as ComputerWorkspaceSnapshot;
+			this.#targets.clear();
+			for (const target of snapshot.targets)
+				this.#targets.set(target.id, {
+					display: target.kind === "display" ? target.id.slice(8) : "all",
+					target: target.kind === "display" ? "desktop" : target.id.slice(7),
+				});
+			return {
+				enabled: snapshot.enabled,
+				available: snapshot.capabilities.capture,
+				backend: snapshot.backend,
+				capturePermission: snapshot.permissions.capture,
+				inputPermission: snapshot.permissions.input,
+				axPermission: snapshot.permissions.accessibility,
+				running: snapshot.active.filter(action => action.method === "computer.run").length,
+				targets: snapshot.targets,
+				...(snapshot.reason ? { reason: snapshot.reason } : {}),
+			};
+		}
 		const result: StudioComputerStatus = {
 			enabled: cfgComputerEnabled.get(this.session.settings),
 			available: false,
@@ -100,13 +135,19 @@ export class StudioComputerObservationService {
 			throw new SessionControlError("COMMAND_BLOCKED", "The session changed; reload computer targets");
 		if (operation.kind === "computer.status") return this.status();
 		if (operation.kind === "computer.configure") {
+			if (this.workspace) {
+				await this.workspace.setEnabled(operation.enabled);
+				if (!operation.enabled) this.release();
+				return { enabled: cfgComputerEnabled.get(this.session.settings) };
+			}
 			cfgComputerEnabled.set(this.session.settings, operation.enabled);
 			await this.session.settings.flush();
 			if (!operation.enabled) this.release();
 			return { enabled: cfgComputerEnabled.get(this.session.settings) };
 		}
 		if (operation.kind === "computer.stop") {
-			await Promise.all(this.#owners().map(owner => revokeComputerControlForOwner(owner)));
+			if (this.workspace) await this.workspace.stop();
+			else await Promise.all(this.#owners().map(owner => revokeComputerControlForOwner(owner)));
 			return { stopped: true };
 		}
 		if (operation.kind === "computer.observe.release") {
@@ -120,9 +161,8 @@ export class StudioComputerObservationService {
 		if (!target)
 			throw new SessionControlError("COMMAND_BLOCKED", "The target changed; refresh the screen and window list");
 		const generation = this.#generation;
+		const captureSession = target.display === "all" ? this.#ensure() : this.#createObserver(target.display);
 		this.#capturing = true;
-		const captureSession =
-			target.display === "all" ? this.#ensure() : new DesktopSession({ display: target.display });
 		this.#captureSession = captureSession;
 		try {
 			const capture = await captureSession.capture(target.target, { maxWidth: 1280, maxHeight: 896 });
@@ -141,8 +181,15 @@ export class StudioComputerObservationService {
 				height: capture.height,
 				expiresAt: Date.now() + 30_000,
 			};
-			await fs.writeFile(path.join(directory, id + ".png"), capture.data, { flag: "wx", mode: 0o600 });
-			await fs.writeFile(path.join(directory, id + ".json"), JSON.stringify(result), { flag: "wx", mode: 0o600 });
+			try {
+				await fs.writeFile(path.join(directory, id + ".png"), capture.data, { flag: "wx", mode: 0o600 });
+				await fs.writeFile(path.join(directory, id + ".json"), JSON.stringify(result), { flag: "wx", mode: 0o600 });
+			} catch (error) {
+				await Promise.all(
+					[".png", ".json"].map(suffix => fs.unlink(path.join(directory, id + suffix)).catch(() => {})),
+				);
+				throw error;
+			}
 			if (generation !== this.#generation) {
 				await Promise.all([
 					fs.unlink(path.join(directory, id + ".png")).catch(() => {}),

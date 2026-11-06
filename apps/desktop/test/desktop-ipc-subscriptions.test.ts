@@ -223,6 +223,29 @@ interface Harness {
   envelopes(sender: FakeSender): string[][];
 }
 
+test("conversation contexts isolate streams and closing one leaves its sibling subscribed", async () => {
+  const ipc = makeIpcMain(), sender = makeSender(812), root = makeFacade();
+  const a = makeFacade(), b = makeFacade();
+  root.openContext = async scope => scope.sessionId === "a" ? a : b;
+  const handle = registerDesktopIpc({ facade: root, isTrustedSender: () => true, ipcMain: ipc as never });
+  const invoke = (channel: string, ...args: unknown[]) => Promise.resolve(ipc.handlers.get(channel)!({ sender }, ...args));
+  const first = await invoke(DESKTOP_IPC_CHANNELS.openContext, { workspaceId: "workspace", sessionId: "a" });
+  const second = await invoke(DESKTOP_IPC_CHANNELS.openContext, { workspaceId: "workspace", sessionId: "b" });
+  await invoke(DESKTOP_IPC_CHANNELS.subscribe, { scope: { scope: "all" }, subscriptionId: "first" }, first);
+  await invoke(DESKTOP_IPC_CHANNELS.subscribe, { scope: { scope: "all" }, subscriptionId: "second" }, second);
+  a.emit(stateEvent());
+  assert.deepEqual((sender.sent.at(-1)?.payload as { subscriptionIds: string[] }).subscriptionIds, ["first"]);
+  b.emit(stateEvent());
+  assert.deepEqual((sender.sent.at(-1)?.payload as { subscriptionIds: string[] }).subscriptionIds, ["second"]);
+  await invoke(DESKTOP_IPC_CHANNELS.close, first);
+  assert.equal(a.activeCount(), 0);
+  assert.equal(b.activeCount(), 1);
+  const count = sender.sent.length;
+  a.emit(stateEvent()); b.emit(stateEvent());
+  assert.equal(sender.sent.length, count + 1);
+  handle.dispose();
+});
+
 function harness(trusted: (sender: DesktopSender) => boolean = () => true): Harness {
   const ipc = makeIpcMain();
   const facade = makeFacade();

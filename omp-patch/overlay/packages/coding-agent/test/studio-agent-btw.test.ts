@@ -10,8 +10,14 @@ function child(id: string, wait = false) {
 	const calls: Parameters<StudioBtwSessionPort["runEphemeralTurn"]>[0][] = [];
 	const artifacts = mkdtempSync(join(tmpdir(), "studio-child-btw-"));
 	const session: StudioBtwSessionPort = {
+		model: { api: "openai-responses", provider: "openai", id: "test" } as NonNullable<StudioBtwSessionPort["model"]>,
 		isStreaming: false,
-		sessionManager: { getSessionId: () => id, getLeafId: () => "leaf-" + id, getArtifactsDir: () => artifacts },
+		sessionManager: {
+			ensureOnDisk: async () => {},
+			getSessionId: () => id,
+			getLeafId: () => "leaf-" + id,
+			getArtifactsDir: () => artifacts,
+		},
 		branchFromBtw: async () => {
 			throw Error("unexpected branch");
 		},
@@ -85,7 +91,7 @@ test("child BTW keeps context/history and cancellation targets isolated, with no
 		await Bun.sleep(20);
 		state = await pool.execute({ ...base, kind: "agent.btw.read", agentId: "a", binding: ar.binding, topicId });
 		expect(state.turns).toHaveLength(2);
-		expect(a.calls[1]?.history?.[0]?.content).toBe("a only");
+		expect(JSON.stringify(a.calls[1]?.history?.[0]?.content)).toContain("a only");
 		targets.set("a", child("a-replaced").session);
 		await expect(
 			pool.execute({ ...base, kind: "agent.btw.ask", agentId: "a", binding: ar.binding, question: "stale" }),

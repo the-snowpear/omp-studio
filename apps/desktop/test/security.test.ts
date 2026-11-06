@@ -267,6 +267,7 @@ function validConversationEvent(): ClientEvent {
 describe("registerDesktopIpc: fixed channel surface", () => {
   const INBOUND = [
     DESKTOP_IPC_CHANNELS.bootstrap,
+    DESKTOP_IPC_CHANNELS.openContext,
     DESKTOP_IPC_CHANNELS.query,
     DESKTOP_IPC_CHANNELS.command,
     DESKTOP_IPC_CHANNELS.subscribe,
@@ -274,7 +275,7 @@ describe("registerDesktopIpc: fixed channel surface", () => {
     DESKTOP_IPC_CHANNELS.close,
   ];
 
-  test("registers handlers for exactly the six inbound channels and never the event channel", () => {
+  test("registers handlers for exactly the seven inbound channels and never the event channel", () => {
     const { ipc, handle } = registerIpc();
     assert.deepEqual([...ipc.handlers.keys()].sort(), [...INBOUND].sort());
     assert.equal(ipc.handlers.has(DESKTOP_IPC_CHANNELS.event), false, "event is outbound only");
@@ -282,7 +283,7 @@ describe("registerDesktopIpc: fixed channel surface", () => {
     handle.dispose();
   });
 
-  test("dispose removes exactly the six inbound handlers", () => {
+  test("dispose removes exactly the seven inbound handlers", () => {
     const { ipc, handle } = registerIpc();
     handle.dispose();
     assert.deepEqual([...ipc.removed].sort(), [...INBOUND].sort());

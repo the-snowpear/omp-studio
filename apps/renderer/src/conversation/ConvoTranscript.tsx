@@ -11,8 +11,10 @@ import {
   type TurnFileChange,
 } from "./toolMeta";
 import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
-import { useCallback, useMemo, useRef, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
+import { CONVERSATION_REVEAL, revealMountedConversationItem, type ConversationRevealRequest } from "./conversationReveal";
 import { ConversationVirtualList } from "./ConversationVirtualList";
+import { usePreviewMode } from "../preview/PreviewContext";
 
 /** One rendered transcript item plus the inputs it was built from. */
 type RenderedItem = { readonly deps: readonly unknown[]; readonly element: ReactNode };
@@ -167,6 +169,7 @@ export function ConvoTranscript({
   onRetryTurn?: () => void;
   retryTurnDisabledReason?: string;
 }) {
+  const { marks } = usePreviewMode();
   const structureToken = timelineStructureToken(rows);
   // `renderItems` 只按行 type 把行分成 row / assistantRun，与工具集无关，所以挂在
   // shape 令牌上：否则每次工具启停都要对全对话重算一遍分组。
@@ -174,6 +177,27 @@ export function ConvoTranscript({
   const binds = useMemo(() => turnChangeBinds(rows), [structureToken]);
   const createdBinds = useMemo(() => planCreatedBinds(rows, planLink), [planLink, structureToken]);
   const visualItems = useMemo(() => renderItems(rows), [shapeToken]);
+  const revealRef = useRef<((index: number, mounted: () => void) => void) | null>(null);
+  const revealData = useRef({ rows, visualItems });
+  revealData.current = { rows, visualItems };
+  useEffect(() => {
+    const scroller = scrollerRef?.current;
+    if (!scroller) return;
+    const reveal = (event: Event) => {
+      event.preventDefault();
+      const request = (event as CustomEvent<ConversationRevealRequest>).detail;
+      const current = revealData.current;
+      const rowIndex = current.rows.findIndex(row => request.itemId !== undefined
+        ? timelineRowKey(row) === request.itemId
+        : row.type === "assistant" && row.segments.some(segment => segment.type === "batch" && segment.tools.some(tool => tool.toolCallId === request.toolCallId)));
+      const row = current.rows[rowIndex];
+      const index = current.visualItems.findIndex(item => item.kind === "row" ? item.index === rowIndex : item.start <= rowIndex && item.end >= rowIndex);
+      if (row === undefined || index < 0 || revealRef.current === null) { request.finish(false); return; }
+      revealRef.current(index, () => revealMountedConversationItem(scroller, { ...request, itemId: timelineRowKey(row) }));
+    };
+    scroller.addEventListener(CONVERSATION_REVEAL, reveal);
+    return () => scroller.removeEventListener(CONVERSATION_REVEAL, reveal);
+  }, [scrollerRef]);
   /**
    * Element identity per transcript item.
    *
@@ -331,12 +355,13 @@ export function ConvoTranscript({
   );
   return (
     <>
-      {demo ? (
+      {demo === true && marks ? (
         <div className="convo-demo-banner">
           <span className="chip gray xs">演示</span>
         </div>
       ) : null}
       <ConversationVirtualList
+        revealRef={revealRef}
         {...(scrollerRef === undefined || demo ? {} : { scrollerRef })}
         itemKeys={itemKeys}
         renderItem={renderItem}

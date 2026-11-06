@@ -22,6 +22,7 @@ import type { ModelWebSearchSetInput, StudioClient, WebSearchConfigReadModel, We
 import { Brand, hasBrand } from "../brands";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { ToastHost } from "../ToastHost";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 
@@ -165,6 +166,7 @@ function credStateOf(provider: WebSearchProviderRecord | undefined): CredState {
 
 export function WebSearchPanel({ client, preview, webSearch, models = [], loginAvailable, onSaved, onPreviewSave }: WebSearchPanelProps) {
   const { t } = useI18n();
+  const { marks } = usePreviewMode();
   const [draft, setDraft] = useState<Draft>(() => draftFromReadModel(webSearch));
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
@@ -461,7 +463,7 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
   const runLogin = async (loginId: string, id: string) => {
     if (preview) {
       setProviderCredential(id, true, "oauth");
-      setFlash(t("modelConfig.toastDemoLogin"));
+      if (marks) setFlash(t("modelConfig.toastDemoLogin"));
       return;
     }
     setLoginBusy(true);
@@ -480,7 +482,7 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
   const runLogout = async (loginId: string, id: string) => {
     if (preview) {
       setProviderCredential(id, false);
-      setFlash(t("modelConfig.toastDemoLogout"));
+      if (marks) setFlash(t("modelConfig.toastDemoLogout"));
       return;
     }
     setLoginBusy(true);
@@ -526,7 +528,7 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
           exa: { enabled: draft.exaEnabled, searchDelayMs: draft.exaSearchDelayMs },
         },
       });
-      setFlash(t("modelConfig.demoYamlUpdated"));
+      if (marks) setFlash(t("modelConfig.demoYamlUpdated"));
       return;
     }
     setBusy(true);

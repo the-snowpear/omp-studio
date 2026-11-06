@@ -24,6 +24,7 @@ import { WebTransportError } from "./errors.js";
  * WebSocket; the adapter and the contracts it enforces do not change.
  */
 export interface OmpStudioWebApi {
+  openContext?(scope: import("@omp-studio/client-contract").ClientContextScope): Promise<OmpStudioWebApi>;
   bootstrap(): Promise<ClientBootstrap>;
   query<TName extends QueryName>(
     request: ClientQueryRequest<TName>,
@@ -68,6 +69,12 @@ export class WebClientTransport implements ClientTransport {
 
   constructor(api: OmpStudioWebApi) {
     this.#api = api;
+  }
+
+  async openContext(scope: import("@omp-studio/client-contract").ClientContextScope): Promise<ClientTransport> {
+    this.#throwIfClosed();
+    if (!this.#api.openContext) throw new Error("Update this Host to open concurrent conversations.");
+    return new WebClientTransport(await this.#api.openContext(scope));
   }
 
   async bootstrap(): Promise<ClientBootstrap> {

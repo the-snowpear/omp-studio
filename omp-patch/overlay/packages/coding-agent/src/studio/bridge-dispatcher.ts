@@ -539,6 +539,7 @@ export class StudioBridgeDispatcher {
 					![
 						"btw.history.list",
 						"btw.history.read",
+						"btw.images.resolve",
 						"session.models.mentions",
 						"session.import.list",
 						"session.import.preview",
@@ -740,7 +741,12 @@ export class StudioBridgeDispatcher {
 			case "queue.enqueue":
 				return await this.#sessionControl.enqueue(operation.text);
 			case "runtime.settings.get":
-				return this.runtime.services.settings.get(operation.keys);
+				return operation.checkHindsight
+					? {
+							...this.runtime.services.settings.get(operation.keys),
+							hindsightStatus: await this.runtime.services.settings.checkHindsight(),
+						}
+					: this.runtime.services.settings.get(operation.keys);
 			case "runtime.settings.set":
 				return await this.runtime.services.settings.set(operation.key, operation.value, operation.persist);
 			case "session.clearContext":

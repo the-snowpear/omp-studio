@@ -1,4 +1,4 @@
-import { WORKBENCH_OPERATION_KINDS, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
+import { COMPUTER_WORKSPACE_QUERY_KINDS, CONTEXT_VIEW_KINDS, WORKBENCH_OPERATION_KINDS, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, verify } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -146,8 +146,10 @@ test("artifact manifest carries the contract fields derived from real pin/series
   assert.match(manifest.capabilityHash, /^sha256:[a-f0-9]{64}$/u);
   assert.match(manifest.commandManifestHash, /^sha256:[a-f0-9]{64}$/u);
   assert.notEqual(manifest.capabilityHash, manifest.commandManifestHash);
-  const typedCommands = [...WORKBENCH_OPERATION_KINDS, ...UPGRADE_OPERATION_KINDS];
-  assert.deepEqual(new Set(IMPLEMENTED_CAPABILITIES.filter(id => typedCommands.includes(id))), new Set(typedCommands));
+  const typedCapabilities = [...COMPUTER_WORKSPACE_QUERY_KINDS, ...CONTEXT_VIEW_KINDS,
+    "settings.approval", "prediction.query", "composer.predictions",
+    ...WORKBENCH_OPERATION_KINDS, ...UPGRADE_OPERATION_KINDS];
+  assert.deepEqual(new Set(IMPLEMENTED_CAPABILITIES.filter(id => typedCapabilities.includes(id))), new Set(typedCapabilities));
   assert.equal(new Set(IMPLEMENTED_CAPABILITIES).size, IMPLEMENTED_CAPABILITIES.length);
   assert.equal(manifest.capabilityHash, implementedManifestHash("capabilities"));
   assert.equal(manifest.commandManifestHash, FIXTURE_COMMAND_MANIFEST_HASH);

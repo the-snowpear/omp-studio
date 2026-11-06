@@ -123,10 +123,10 @@ function makeEvent(overrides: object): ClientEvent {
 }
 
 describe("createDesktopIpcBridge: fixed named surface, no generic invoke", () => {
-  test("exposes exactly the five named methods, frozen, with no invoke escape hatch", () => {
+  test("exposes fixed named methods including isolated contexts, with no invoke escape hatch", () => {
     const bridge = new FakeBridge();
     const api = createDesktopIpcBridge(bridge);
-    assert.deepEqual(Object.keys(api).sort(), ["bootstrap", "close", "command", "query", "subscribe"]);
+    assert.deepEqual(Object.keys(api).sort(), ["bootstrap", "close", "command", "openContext", "query", "subscribe"]);
     assert.ok(Object.isFrozen(api));
     assert.equal((api as unknown as Record<string, unknown>).invoke, undefined);
     assert.equal((api as unknown as Record<string, unknown>).bridge, undefined);
@@ -503,9 +503,14 @@ describe("createOmpStudioChromeApi: fixed named surface, frozen object", () => {
       "cancelUpdate",
       "chooseArtifactDirectory", "importArtifact", "exportArtifact",
       "revealSkillshareToken", "beginMediaUpload", "appendLiveAudio", "attachLiveAudio", "detachLiveAudio", "appendMediaUpload", "finishMediaUpload", "abortMediaUpload",
+      "attachDictationAudio", "controlDictationAudio", "appendDictationAudio", "drainDictationAudio",
+      "getDictationRecovery", "replayDictationAudio", "retainDictationAudio", "releaseDictationAudio", "onDictationAudio",
       "attachBrowserObservation", "controlBrowserObservation", "detachBrowserObservation", "onBrowserObservation",
+      "managedBrowser",
+      "prepareFloatWindow", "controlFloatWindow", "onFloatWindow",
+      "memoryCredentialStatus", "setMemoryCredential", "removeMemoryCredential",
       "attachPrediction", "predictionInput", "detachPrediction", "importPredictionHistory", "onPrediction",
-      "readComputerCapture",
+      "readComputerCapture", "readComputerFrame", "saveComputerFrame",
       "listServiceDefinitions", "saveServiceDefinition", "removeServiceDefinition",
       "checkAppUpdate",
       "checkUpdates",

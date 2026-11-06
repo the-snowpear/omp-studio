@@ -1,14 +1,18 @@
-import { STTController, type SttTarget, type SttCallbacks } from "../../stt";
-import { cfgSttEnabled, cfgSttLanguage } from "../../stt/settings";
-import { resolveSttModelSpec } from "../../stt/models";
-import { isSttModelCached } from "../../stt/downloader";
-import type { DictationOperation, DictationState } from "../dictation-protocol";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { LiveSessionController, type LiveSessionControllerOptions } from "../../live/controller";
 import type { AgentSession } from "../../session/agent-session";
+import { isSttModelCached } from "../../stt/downloader";
+import { resolveSttModelSpec } from "../../stt/models";
+import type {
+	DictationChannel,
+	DictationConfiguration,
+	DictationInput,
+	DictationOperation,
+	DictationState,
+} from "../dictation-protocol";
 import {
 	type LiveAudioOperation,
 	type LiveAudioState,
@@ -16,6 +20,9 @@ import {
 	validateLiveAudioResult,
 } from "../live-audio-protocol";
 import { StudioLiveError, type StudioLiveService, type StudioLiveSessionFactory } from "./live-service";
+import { StudioDictationCapture } from "./dictation-capture";
+import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
+import { inspectDictationConfiguration } from "./dictation-configuration";
 
 interface Controller {
 	start(): Promise<void>;
@@ -23,14 +30,8 @@ interface Controller {
 	toggleMute(): void;
 	readonly muted: boolean;
 }
-export interface DictationControllerPort {
-	readonly state: "idle" | "recording" | "transcribing";
-	start(target: SttTarget, callbacks: SttCallbacks): Promise<void>;
-	stop(): Promise<void>;
-	dispose(): void;
-}
 interface Capture {
-	kind?: "live" | "dictation";
+	kind: "live" | "dictation";
 	id: string;
 	sessionId: string;
 	voice: string;
@@ -40,9 +41,11 @@ interface Capture {
 	server: Server;
 	peers: Set<Socket>;
 	socket?: Socket;
-	timer: ReturnType<typeof setTimeout>;
+	timer?: NodeJS.Timeout;
+	expiresAt: number;
 	onAudio?: (error: Error | null, samples: Float32Array) => void;
 	controller?: Controller;
+	dictation?: StudioDictationCapture;
 	started: boolean;
 	closed: boolean;
 }
@@ -56,56 +59,32 @@ const blank = (available: boolean): LiveAudioState => ({
 	outputLevel: 0,
 	transcripts: [],
 });
-/** macOS `sun_path` holds 104 bytes including the NUL; Node rejects longer paths with EINVAL. */
 const MAX_UNIX_SOCKET_PATH_BYTES = 103;
-/**
- * Socket name for one audio id, identical to `liveAudioSocketName` in
- * `@omp-studio/studio-host` (`socket-paths.ts`): Desktop connects only to the
- * endpoint it derives itself, so both copies assert the same test vector.
- */
+const MAX_PENDING_AUDIO_BYTES = 128 * 1024;
+const MAX_OUTBOUND_DICTATION_BYTES = 512 * 1024;
+/** Same deterministic name as the Desktop Host, including macOS sun_path budget. */
 export function liveAudioSocketName(audioId: string): string {
 	return `a-${createHash("sha256").update(audioId).digest("hex").slice(0, 16)}.sock`;
 }
-/** Private authenticated PCM transport. No credentials or audio bytes cross the Studio ledger. */
+/** Private authenticated audio transport. No audio, temporary text or credentials enter the ledger. */
 export class StudioLiveAudioService {
 	readonly #root: string | undefined;
-	/** POSIX only: the Host's short private socket directory (`OMP_STUDIO_SOCKET_DIR`). */
 	readonly #socketDirectory: string | undefined;
 	readonly #available: boolean;
 	readonly #unsubscribe: () => void;
-	#dictationController: DictationControllerPort | undefined;
-	#dictationText = "";
-	#dictationVolatile = "";
-	#dictationGeneration = 0;
-	#dictationState: DictationState = {
-		available: false,
-		enabled: false,
-		phase: "off",
-		text: "",
-		model: "",
-		language: "",
-		cloud: false,
-		downloadRequired: false,
-	};
-	#dictationStop: Promise<DictationState> | undefined;
-	#dictationStart: Promise<void> | undefined;
-	#capture?: Capture;
+	#capture: Capture | undefined;
+	#dictationKeybindings: KeybindingsManager | undefined;
 	#state: LiveAudioState;
 	#disposed = false;
-	#control?: StudioLiveService;
-	bindControl(control: StudioLiveService): void {
-		this.#control = control;
-	}
+	#control: StudioLiveService | undefined;
 	#operations: Promise<unknown> = Promise.resolve();
 	readonly factory: StudioLiveSessionFactory;
+
 	constructor(
 		readonly session: AgentSession,
 		readonly options: {
 			directory?: string;
 			socketDirectory?: string;
-			createDictationController?: (
-				createCapture: (onAudio: (error: Error | null, samples: Float32Array) => void) => { stop(): void },
-			) => DictationControllerPort;
 			createController?: (options: LiveSessionControllerOptions) => Controller;
 			prepareTimeoutMs?: number;
 			dictationFlushTimeoutMs?: number;
@@ -133,7 +112,7 @@ export class StudioLiveAudioService {
 				if (capture.kind === "dictation")
 					throw new StudioLiveError("COMMAND_BLOCKED", "End dictation before starting Live");
 				capture.started = true;
-				clearTimeout(capture.timer);
+				if (capture.timer) clearTimeout(capture.timer);
 				this.#state.phase = "connecting";
 				const controller = (this.options.createController ?? (options => new LiveSessionController(options)))({
 					session: this.session,
@@ -195,224 +174,125 @@ export class StudioLiveAudioService {
 			session.registerSessionChangeCallback?.(() => {
 				const capture = this.#capture;
 				if (capture && capture.sessionId !== session.sessionId) {
-					this.#cancelDictation();
+					capture.dictation?.input({ kind: "cancel" });
 					void this.#release(capture).catch(() => {});
 				}
 			}) ?? (() => {});
 	}
-	#captureActive(): boolean {
-		return !!this.#capture && (!this.#capture.closed || !["off", "error"].includes(this.#state.phase));
+	bindControl(control: StudioLiveService): void {
+		this.#control = control;
 	}
 	get running(): boolean {
-		return !!this.#dictationController || this.#captureActive();
+		const capture = this.#capture;
+		return (
+			!!capture && (!capture.closed || (capture.kind === "live" && !["off", "error"].includes(this.#state.phase)))
+		);
 	}
 	dispose(): void {
 		this.#disposed = true;
-		this.#cancelDictation();
 		this.#unsubscribe();
 		if (this.#capture) void this.#release(this.#capture).catch(() => {});
 	}
 
-	async dictation(operation: DictationOperation): Promise<DictationState> {
-		if (this.#disposed || operation.sessionId !== this.session.sessionId)
-			throw new StudioLiveError("COMMAND_BLOCKED", "Dictation requires the active session");
-		if (operation.kind === "dictation.status") return this.#dictationStatus();
-		if (operation.kind === "dictation.prepare") {
-			if (!cfgSttEnabled.get(this.session.settings))
-				throw new StudioLiveError("COMMAND_BLOCKED", "Enable draft dictation in voice settings first");
-			if (this.running)
-				throw new StudioLiveError("COMMAND_BLOCKED", "End Live or dictation before starting another capture");
-			this.#cancelDictation();
-			await this.#prepare(operation.sessionId, "dictation");
-			const capture = this.#capture!;
-			capture.kind = "dictation";
-			this.#dictationState = {
-				...(await this.#dictationStatus()),
-				audioId: capture.id,
-				phase: "prepared",
-				text: "",
-			};
-			return { ...this.#dictationState };
-		}
-		const capture = this.#capture;
-		if (
-			!capture ||
-			capture.kind !== "dictation" ||
-			capture.id !== operation.audioId ||
-			capture.sessionId !== operation.sessionId
-		)
-			throw new StudioLiveError("COMMAND_BLOCKED", "Dictation capture expired");
-		if (operation.kind === "dictation.cancel") {
-			this.#cancelDictation();
-			this.#closeSocket(capture);
-			this.#state.phase = "off";
-			return { ...this.#dictationState };
-		}
-		if (operation.kind === "dictation.stop") return this.#stopDictation(capture);
-		if (this.#dictationController || !capture.socket || capture.closed)
-			throw new StudioLiveError("COMMAND_BLOCKED", "Attach the microphone before starting dictation");
-		const generation = ++this.#dictationGeneration;
-		capture.started = true;
-		clearTimeout(capture.timer);
-		this.#dictationText = this.#dictationVolatile = "";
-		this.#dictationState = { ...this.#dictationState, phase: "starting", text: "" };
-		const current = () =>
-			generation === this.#dictationGeneration && operation.sessionId === this.session.sessionId && !this.#disposed;
-		const publish = () => {
-			if (current()) this.#dictationState.text = (this.#dictationText + this.#dictationVolatile).slice(0, 65536);
+	async #inspect(): Promise<DictationConfiguration> {
+		const { configuration, model } = inspectDictationConfiguration(this.session, this.#available);
+		this.#dictationKeybindings ??= KeybindingsManager.create();
+		this.#dictationKeybindings.reload();
+		configuration.hotkeys = {
+			pushToTalk: this.#dictationKeybindings.getKeys("app.stt.pushToTalk"),
+			toggle: this.#dictationKeybindings.getKeys("app.stt.toggle"),
 		};
-		const target: SttTarget = {
-			setVolatileText: text => {
-				if (current()) {
-					this.#dictationVolatile = text.slice(0, 65536);
-					publish();
-				}
-			},
-			clearVolatileText: () => {
-				if (current()) {
-					this.#dictationVolatile = "";
-					publish();
-				}
-			},
-			commitVolatileText: text => {
-				if (current()) {
-					this.#dictationText = (this.#dictationText + text).slice(0, 65536);
-					this.#dictationVolatile = "";
-					publish();
-				}
-			},
-			submit: () => {
-				throw new Error("Draft dictation cannot submit a prompt");
-			},
-			deleteBeforeCursor: () => {
-				throw new Error("Draft dictation cannot edit a prompt");
-			},
-		};
-		const createCapture = (onAudio: (error: Error | null, samples: Float32Array) => void) => {
-			if (!capture.socket || capture.closed) throw new Error("Microphone detached");
-			capture.onAudio = onAudio;
-			return {
-				stop: () => {
-					capture.onAudio = undefined;
-				},
-			};
-		};
-		const controller =
-			this.options.createDictationController?.(createCapture) ??
-			new STTController(createCapture, {
-				settings: this.session.settings,
-				registry: this.session.modelRegistry,
-				getSessionId: () => operation.sessionId,
-			});
-		this.#dictationController = controller;
-		const start = controller.start(target, {
-			manualSubmit: true,
-			showStatus: () => {},
-			showWarning: message => {
-				if (current()) this.#dictationState = { ...this.#dictationState, phase: "error", error: message };
-			},
-			onStateChange: state => {
-				if (!current()) return;
-				this.#dictationState.phase = state === "idle" ? "complete" : state;
-				publish();
-			},
-		});
-		this.#dictationStart = start;
-		void start
-			.then(
-				() => {
-					if (current() && controller.state !== "recording")
-						this.#dictationState.phase = this.#dictationState.error ? "error" : "complete";
-				},
-				error => {
-					if (current())
-						this.#dictationState = {
-							...this.#dictationState,
-							phase: "error",
-							error: error instanceof Error ? error.message : "Dictation start failed",
-						};
-				},
-			)
-			.finally(() => {
-				if (current() && this.#dictationState.phase === "error") {
-					controller.dispose();
-					if (this.#dictationController === controller) this.#dictationController = undefined;
-					this.#state.phase = "off";
-					this.#closeSocket(capture);
-				}
-			});
-		return { ...this.#dictationState };
+		if (!configuration.cloud)
+			configuration.downloadRequired = !(await isSttModelCached(resolveSttModelSpec(model?.id).key));
+		if (this.running && !configuration.blockedReason)
+			configuration.blockedReason = this.#capture?.kind === "dictation" ? "capture-active" : "live-active";
+		return configuration;
 	}
 
-	async #dictationStatus(): Promise<DictationState> {
-		const model = this.session.resolveRoleModel("dictation");
-		const cloud = model !== undefined && model.api !== "local-inference";
-		const spec = resolveSttModelSpec(model?.id);
-		return {
-			...this.#dictationState,
-			available: this.#available,
-			enabled: cfgSttEnabled.get(this.session.settings),
-			model: model ? model.provider + "/" + model.id : spec.key,
-			language: cfgSttLanguage.get(this.session.settings),
-			cloud,
-			downloadRequired: !cloud && !(await isSttModelCached(spec.key)),
-			...(cloud ? {} : { downloadSize: spec.sizeHint }),
-		};
-	}
-
-	#cancelDictation(): void {
-		this.#dictationGeneration++;
-		this.#dictationController?.dispose();
-		this.#dictationController = undefined;
-		this.#dictationStart = undefined;
-		this.#dictationStop = undefined;
-		this.#dictationText = this.#dictationVolatile = "";
-		this.#dictationState = { ...this.#dictationState, phase: "off", text: "" };
-	}
-
-	#stopDictation(capture: Capture): Promise<DictationState> {
-		if (this.#dictationStop) return this.#dictationStop;
-		const generation = this.#dictationGeneration;
-		const controller = this.#dictationController;
-		if (!controller) return Promise.resolve({ ...this.#dictationState });
-		// No new samples after stop, but the transport stays attached until flush completes.
-		capture.onAudio = undefined;
-		capture.socket?.setTimeout(0);
-		this.#dictationState.phase = "transcribing";
-		this.#dictationStop = (async () => {
-			const deadline = Promise.withResolvers<void>();
-			const timer = setTimeout(
-				() => deadline.reject(new Error("Dictation flush timed out")),
-				this.options.dictationFlushTimeoutMs ?? 120000,
-			);
-			try {
-				await Promise.race([
-					(async () => {
-						await controller.stop();
-						await this.#dictationStart;
-						if (controller.state === "recording") await controller.stop();
-					})(),
-					deadline.promise,
-				]);
-				if (generation === this.#dictationGeneration)
-					this.#dictationState.phase = this.#dictationState.error ? "error" : "complete";
-			} catch (error) {
-				if (generation === this.#dictationGeneration)
-					this.#dictationState = {
-						...this.#dictationState,
-						phase: "error",
-						error: error instanceof Error ? error.message : "Dictation failed",
-					};
-			} finally {
-				clearTimeout(timer);
-				controller.dispose();
-				if (this.#dictationController === controller) this.#dictationController = undefined;
-				if (generation === this.#dictationGeneration) this.#state.phase = "off";
-				this.#closeSocket(capture);
+	dictation(operation: DictationOperation): Promise<DictationState | DictationConfiguration | DictationChannel> {
+		// Open/Live prepare share a queue: asynchronous cache inspection must not
+		// allow two windows to reserve different captures concurrently.
+		const work = this.#operations.then(async () => {
+			if (this.#disposed || operation.sessionId !== this.session.sessionId)
+				throw new StudioLiveError("COMMAND_BLOCKED", "Dictation requires the active session");
+			const configuration = await this.#inspect();
+			if (this.#disposed || operation.sessionId !== this.session.sessionId)
+				throw new StudioLiveError("COMMAND_BLOCKED", "Session changed while inspecting dictation");
+			if (operation.kind === "dictation.inspect") return configuration;
+			if (operation.kind === "dictation.status") {
+				const capture = this.#capture?.kind === "dictation" ? this.#capture : undefined;
+				const phase = capture?.dictation?.phase;
+				const legacyPhase: DictationState["phase"] =
+					!phase || phase === "cancelled"
+						? "off"
+						: phase === "preparing"
+							? "starting"
+							: phase === "ready"
+								? "prepared"
+								: phase;
+				return {
+					available: configuration.available,
+					enabled: configuration.enabled,
+					...(capture ? { audioId: capture.id } : {}),
+					phase: legacyPhase,
+					text: "",
+					model: configuration.model,
+					language: configuration.language,
+					cloud: configuration.cloud,
+					downloadRequired: configuration.downloadRequired,
+					...(configuration.downloadSize ? { downloadSize: configuration.downloadSize } : {}),
+				};
 			}
-			return { ...this.#dictationState };
-		})();
-		return this.#dictationStop;
+			if (operation.kind === "dictation.cancel") {
+				const capture = this.#capture;
+				if (
+					!capture ||
+					capture.kind !== "dictation" ||
+					capture.id !== operation.audioId ||
+					capture.sessionId !== operation.sessionId
+				)
+					throw new StudioLiveError("COMMAND_BLOCKED", "Dictation capture expired or belongs to another session");
+				capture.dictation?.input({ kind: "cancel" });
+				await this.#release(capture);
+				return {
+					available: configuration.available,
+					enabled: configuration.enabled,
+					phase: "off" as const,
+					text: "",
+					model: configuration.model,
+					language: configuration.language,
+					cloud: configuration.cloud,
+					downloadRequired: configuration.downloadRequired,
+					...(configuration.downloadSize ? { downloadSize: configuration.downloadSize } : {}),
+				};
+			}
+			if (operation.kind !== "dictation.open")
+				throw new StudioLiveError(
+					"CAPABILITY_UNAVAILABLE",
+					"Legacy dictation control is unavailable; use dictation.inspect/open and the version 2 private audio channel",
+				);
+			if (
+				operation.configurationId !== configuration.configurationId ||
+				operation.configurationId !==
+					inspectDictationConfiguration(this.session, this.#available).configuration.configurationId
+			)
+				throw new StudioLiveError(
+					"COMMAND_BLOCKED",
+					"Voice configuration changed; inspect dictation before opening a channel",
+				);
+			if (configuration.blockedReason)
+				throw new StudioLiveError("COMMAND_BLOCKED", `Dictation is not ready: ${configuration.blockedReason}`);
+			const capture = await this.#prepare(operation.sessionId, "dictation", configuration);
+			return {
+				protocolVersion: 2 as const,
+				audioId: capture.id,
+				sessionId: capture.sessionId,
+				expiresAt: capture.expiresAt,
+				configuration,
+			};
+		});
+		this.#operations = work.catch(() => {});
+		return work;
 	}
 
 	execute(operation: LiveAudioOperation): Promise<LiveAudioState> {
@@ -424,7 +304,12 @@ export class StudioLiveAudioService {
 				await this.#prepare(operation.sessionId, operation.voice ?? "sol");
 			else if (operation.kind !== "live.audio.status") {
 				const capture = this.#capture;
-				if (!capture || operation.audioId !== capture.id || capture.sessionId !== operation.sessionId)
+				if (
+					!capture ||
+					capture.kind !== "live" ||
+					operation.audioId !== capture.id ||
+					capture.sessionId !== operation.sessionId
+				)
 					throw new StudioLiveError("COMMAND_BLOCKED", "This Live call has ended or belongs to another window");
 				if (operation.kind === "live.audio.release") await this.#release(capture);
 				else if (operation.kind === "live.audio.start") {
@@ -451,25 +336,28 @@ export class StudioLiveAudioService {
 		this.#operations = work.catch(() => {});
 		return work;
 	}
-	/** The socket goes in the Host's short directory; the media root is far too long for `sun_path`. */
+
 	#socketEndpoint(id: string): string {
-		const endpoint = this.#socketDirectory ? join(this.#socketDirectory, liveAudioSocketName(id)) : undefined;
-		if (endpoint === undefined || Buffer.byteLength(endpoint, "utf8") > MAX_UNIX_SOCKET_PATH_BYTES)
+		const endpoint = this.#socketDirectory ? path.join(this.#socketDirectory, liveAudioSocketName(id)) : undefined;
+		if (!endpoint || Buffer.byteLength(endpoint, "utf8") > MAX_UNIX_SOCKET_PATH_BYTES)
 			throw new StudioLiveError("CAPABILITY_UNAVAILABLE", "The desktop audio socket directory is unavailable");
 		return endpoint;
 	}
-	async #prepare(sessionId: string, voice: string): Promise<void> {
-		if (!this.#root) throw new StudioLiveError("CAPABILITY_UNAVAILABLE", "The desktop audio boundary is unavailable");
+	async #prepare(sessionId: string, voice: string, configuration?: DictationConfiguration): Promise<Capture> {
+		if (!this.#root || !this.#available)
+			throw new StudioLiveError("CAPABILITY_UNAVAILABLE", "The desktop audio boundary is unavailable");
 		if (this.running)
-			throw new StudioLiveError("COMMAND_BLOCKED", "Stop the current Live call before preparing another");
+			throw new StudioLiveError(
+				"COMMAND_BLOCKED",
+				"Stop the current Live call or dictation before preparing another",
+			);
 		const id = randomUUID(),
 			token = randomBytes(32).toString("hex");
 		const endpoint = process.platform === "win32" ? `\\\\.\\pipe\\omp-studio-audio-${id}` : this.#socketEndpoint(id);
-		const dir = join(this.#root, "audio");
-		await mkdir(dir, { recursive: true, mode: 0o700 });
-		const descriptor = join(dir, id + ".json");
+		const descriptor = path.join(this.#root, "audio", `${id}.json`);
 		const server = createServer(socket => this.#peer(capture, socket));
 		const capture: Capture = {
+			kind: configuration ? "dictation" : "live",
 			id,
 			sessionId,
 			voice,
@@ -480,43 +368,80 @@ export class StudioLiveAudioService {
 			peers: new Set(),
 			started: false,
 			closed: false,
-			timer: setTimeout(() => {
-				void this.#release(capture).catch(() => {});
-			}, this.options.prepareTimeoutMs ?? 30000),
+			expiresAt: Date.now() + (this.options.prepareTimeoutMs ?? 30000),
 		};
+		capture.timer = setTimeout(() => {
+			void this.#release(capture).catch(() => {});
+		}, this.options.prepareTimeoutMs ?? 30000);
 		capture.timer.unref?.();
 		this.#capture = capture;
 		this.#state = { ...blank(true), audioId: id, voice, phase: "prepared" };
+		if (configuration) {
+			const { model } = inspectDictationConfiguration(this.session, this.#available);
+			capture.dictation = new StudioDictationCapture(
+				id,
+				configuration,
+				{
+					settings: this.session.settings,
+					registry: this.session.modelRegistry,
+					getSessionId: () => sessionId,
+					configuration: { model, language: configuration.language, submitTrigger: configuration.submitTrigger },
+				},
+				{
+					flushTimeoutMs: this.options.dictationFlushTimeoutMs,
+					currentConfigurationId: () =>
+						inspectDictationConfiguration(this.session, this.#available).configuration.configurationId,
+					send: event => {
+						const socket = capture.socket;
+						if (!socket || capture.closed) return;
+						const line = JSON.stringify(event) + "\n";
+						if (socket.writableLength + Buffer.byteLength(line) > MAX_OUTBOUND_DICTATION_BYTES) {
+							void this.#release(capture).catch(() => {});
+							return;
+						}
+						socket.write(line);
+					},
+					close: () => this.#closeSocket(capture, true),
+				},
+			);
+		}
 		try {
-			await new Promise<void>((resolve, reject) => {
-				server.once("error", reject);
-				server.listen(endpoint, () => {
-					server.removeListener("error", reject);
-					resolve();
-				});
+			await fs.mkdir(path.dirname(descriptor), { recursive: true, mode: 0o700 });
+			const listening = Promise.withResolvers<void>();
+			server.once("error", listening.reject);
+			server.listen(endpoint, () => {
+				server.removeListener("error", listening.reject);
+				listening.resolve();
 			});
+			await listening.promise;
 			server.on("error", () => {
 				void this.#release(capture).catch(() => {});
 			});
 			if (capture.closed || sessionId !== this.session.sessionId || this.#disposed)
 				throw new Error("Session changed while preparing audio");
-			await writeFile(
+			await fs.writeFile(
 				descriptor,
 				JSON.stringify({
-					version: 1,
+					version: configuration ? 2 : 1,
 					audioId: id,
 					sessionId,
 					endpoint,
 					token,
-					expiresAt: Date.now() + (this.options.prepareTimeoutMs ?? 30000),
+					expiresAt: capture.expiresAt,
 				}),
 				{ mode: 0o600, flag: "wx" },
 			);
-		} catch (cause) {
+			if (capture.closed || sessionId !== this.session.sessionId || this.#disposed) {
+				await fs.unlink(descriptor).catch(() => {});
+				throw new Error("Session changed while publishing audio descriptor");
+			}
+			return capture;
+		} catch (error) {
 			await this.#release(capture);
-			throw cause;
+			throw error;
 		}
 	}
+
 	#peer(capture: Capture, socket: Socket): void {
 		if (capture.closed || capture.socket || capture.peers.size >= 4) {
 			socket.destroy();
@@ -528,7 +453,7 @@ export class StudioLiveAudioService {
 		let pending = Buffer.alloc(0);
 		socket.on("error", () => {});
 		socket.on("data", data => {
-			if (typeof data === "string" || capture.closed || pending.length + data.length > 128 * 1024) {
+			if (typeof data === "string" || capture.closed || pending.length + data.length > MAX_PENDING_AUDIO_BYTES) {
 				socket.destroy();
 				return;
 			}
@@ -547,28 +472,63 @@ export class StudioLiveAudioService {
 				capture.socket = socket;
 				this.#state.attached = true;
 				pending = pending.subarray(65);
-				socket.setTimeout(5000, () => socket.destroy());
+				if (capture.kind === "dictation") {
+					if (capture.timer) clearTimeout(capture.timer);
+					capture.timer = undefined;
+					socket.setTimeout(0);
+				} else socket.setTimeout(5000, () => socket.destroy());
 				socket.write("OK\n");
-				void unlink(capture.descriptor).catch(() => {});
+				capture.dictation?.input({ kind: "snapshot" });
+				void fs.unlink(capture.descriptor).catch(() => {});
 			}
-			while (pending.length >= 4) {
-				const length = pending.readUInt32LE(0);
-				if (length < 4 || length > 12800 || length % 4) {
-					socket.destroy();
-					return;
-				}
-				if (pending.length < length + 4) break;
-				const samples = new Float32Array(length / 4);
-				for (let i = 0; i < samples.length; i++) {
-					const value = pending.readFloatLE(4 + i * 4);
-					if (!Number.isFinite(value) || Math.abs(value) > 1) {
-						socket.destroy();
-						return;
+			try {
+				while (pending.length >= 4 && !capture.closed) {
+					const header = pending.readUInt32LE(0),
+						control = (header & 0x80000000) !== 0,
+						length = header & 0x7fffffff;
+					if (control) {
+						if (!capture.dictation || length < 1 || length > 4096) throw new Error("Invalid audio control frame");
+						if (pending.length < length + 4) break;
+						const input = JSON.parse(pending.toString("utf8", 4, length + 4)) as DictationInput;
+						pending = pending.subarray(length + 4);
+						if (
+							!input ||
+							typeof input !== "object" ||
+							!["start", "recording", "drain", "stop", "cancel", "snapshot", "ping"].includes(input.kind)
+						)
+							throw new Error("Unknown audio control");
+						if (
+							input.kind === "start" &&
+							(!["click", "hold", "toggle", "retry"].includes(input.mode) ||
+								typeof input.configurationId !== "string")
+						)
+							throw new Error("Invalid dictation start");
+						if (
+							input.kind === "drain" &&
+							(typeof input.requestId !== "string" || !input.requestId || input.requestId.length > 128)
+						)
+							throw new Error("Invalid dictation drain");
+						capture.dictation.input(input);
+						if (capture.dictation.phase === "recording") socket.setTimeout(5000);
+						else socket.setTimeout(0);
+						continue;
 					}
-					samples[i] = value;
+					if (length < 4 || length > 12800 || length % 4) throw new Error("Invalid PCM frame");
+					if (pending.length < length + 4) break;
+					const samples = new Float32Array(length / 4);
+					for (let i = 0; i < samples.length; i++) {
+						const value = pending.readFloatLE(4 + i * 4);
+						if (!Number.isFinite(value) || Math.abs(value) > 1) throw new Error("Invalid PCM sample");
+						samples[i] = value;
+					}
+					pending = pending.subarray(4 + length);
+					if (capture.dictation) capture.dictation.consumeAudio(samples);
+					else capture.onAudio?.(null, samples);
 				}
-				pending = pending.subarray(4 + length);
-				capture.onAudio?.(null, samples);
+			} catch {
+				if (capture.dictation)
+					capture.dictation.fail("AUDIO_PROTOCOL_ERROR", "The private dictation audio channel failed");
+				else socket.destroy();
 			}
 		});
 		socket.once("close", () => {
@@ -576,24 +536,33 @@ export class StudioLiveAudioService {
 			if (capture.socket !== socket) return;
 			capture.socket = undefined;
 			if (this.#capture === capture) this.#state.attached = false;
-			if (!capture.closed) {
-				if (capture.kind === "dictation") this.#cancelDictation();
-				void this.#release(capture).catch(() => {});
-			}
+			if (!capture.closed) void this.#release(capture).catch(() => {});
 		});
 	}
-	#closeSocket(capture: Capture): void {
+
+	#closeSocket(capture: Capture, graceful = false): void {
 		if (capture.closed) return;
 		capture.closed = true;
-		clearTimeout(capture.timer);
+		if (capture.timer) clearTimeout(capture.timer);
+		capture.timer = undefined;
 		capture.onAudio = undefined;
+		capture.dictation?.dispose();
+		for (const peer of capture.peers) {
+			if (graceful && peer === capture.socket) {
+				peer.setTimeout(0);
+				peer.end();
+				peer.destroySoon();
+			} else peer.destroy();
+		}
 		capture.socket = undefined;
-		for (const socket of capture.peers) socket.destroy();
 		capture.peers.clear();
 		if (capture.server.listening) capture.server.close();
 		else capture.server.once("listening", () => capture.server.close());
-		void unlink(capture.descriptor).catch(() => {});
-		if (this.#capture === capture) this.#state.attached = false;
+		void fs.unlink(capture.descriptor).catch(() => {});
+		if (this.#capture === capture) {
+			this.#state.attached = false;
+			if (capture.kind === "dictation") this.#state.phase = "off";
+		}
 	}
 	async #release(capture: Capture): Promise<void> {
 		this.#closeSocket(capture);

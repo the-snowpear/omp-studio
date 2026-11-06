@@ -13,13 +13,14 @@ export type McTab = "providers" | "roles" | "subagents" | "websearch" | "presets
 export type McIntent = { tab?: McTab; edit?: string; role?: string; assign?: string; agent?: string };
 export type CapTab = "skills" | "plugins" | "mcp" | "slash" | "ida" | "resources";
 export type CapIntent = { tab?: CapTab; name?: string };
-export type SettingsGroupId = "general" | "background" | "interaction" | "permissions" | "context" | "files" | "tasks" | "advanced" | "native";
+export type SettingsGroupId = "general" | "appearance" | "interaction" | "voice" | "permissions" | "context" | "files" | "tasks" | "models" | "maintenance" | "unsupported" | "background" | "advanced" | "native";
+export type SettingsIntent = { group: SettingsGroupId; setting?: string };
 export type DiagnosticsIntent = "check-update" | "reconnect" | "restart";
 export type HubTab = "overview" | "transcript" | "jobs" | "messages" | "btw";
 export type HubIntentTab = HubTab | "chat";
 
 const CAP_TABS: ReadonlyArray<CapTab> = ["skills", "plugins", "mcp", "slash", "ida", "resources"];
-const SETTINGS_GROUPS: ReadonlyArray<SettingsGroupId> = ["general", "background", "interaction", "permissions", "context", "files", "tasks", "advanced", "native"];
+const SETTINGS_GROUPS: ReadonlyArray<SettingsGroupId> = ["general", "appearance", "interaction", "voice", "permissions", "context", "files", "tasks", "models", "maintenance", "unsupported", "background", "advanced", "native"];
 const DIAGNOSTICS_INTENTS: ReadonlySet<string> = new Set(["check-update", "reconnect", "restart"]);
 
 export function setModelConfigIntent(intent: McIntent): void {
@@ -63,21 +64,22 @@ export function takeCapIntent(): CapIntent | null {
   }
 }
 
-export function setSettingsIntent(group: SettingsGroupId): void {
+export function setSettingsIntent(group: SettingsGroupId, setting?: string): void {
   try {
-    sessionStorage.setItem(SETTINGS_INTENT_KEY, JSON.stringify({ group }));
+    sessionStorage.setItem(SETTINGS_INTENT_KEY, JSON.stringify({ group, ...(setting ? { setting } : {}) }));
   } catch {
     /* sessionStorage may be blocked; navigation still opens the page. */
   }
 }
 
-export function takeSettingsIntent(): SettingsGroupId | null {
+export function takeSettingsIntent(): SettingsIntent | null {
   try {
     const raw = sessionStorage.getItem(SETTINGS_INTENT_KEY);
     if (!raw) return null;
     sessionStorage.removeItem(SETTINGS_INTENT_KEY);
-    const value = JSON.parse(raw) as { group?: unknown };
-    return SETTINGS_GROUPS.some((id) => id === value.group) ? value.group as SettingsGroupId : null;
+    const value = JSON.parse(raw) as { group?: unknown; setting?: unknown };
+    if (!SETTINGS_GROUPS.some((id) => id === value.group)) return null;
+    return { group: value.group as SettingsGroupId, ...(typeof value.setting === "string" ? { setting: value.setting } : {}) };
   } catch {
     return null;
   }

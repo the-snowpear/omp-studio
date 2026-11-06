@@ -4,6 +4,7 @@ export type ForeignSource = "claude" | "codex";
 export type RuntimeAuthProvider = "typesafe" | "exa" | "ollama-cloud";
 export type UpgradeOperation =
 	| { kind: "btw.history.list" }
+	| { kind: "btw.images.resolve"; text: string }
 	| { kind: "btw.history.read"; topicId: string }
 	| { kind: "btw.followUp"; topicId: string; question: string; images?: ImageContent[] }
 	| { kind: "session.models.mentions" }
@@ -21,6 +22,7 @@ export type UpgradeOperation =
 	| { kind: "runtime.auth.remove"; provider: RuntimeAuthProvider };
 export const UPGRADE_OPERATION_KINDS = [
 	"btw.history.list",
+	"btw.images.resolve",
 	"btw.history.read",
 	"btw.followUp",
 	"session.models.mentions",
@@ -35,6 +37,7 @@ export function isUpgradeOperationKind(kind: string): kind is UpgradeOperation["
 	return (UPGRADE_OPERATION_KINDS as readonly string[]).includes(kind);
 }
 export interface BtwHistoryTurn {
+	images?: readonly ImageContent[];
 	question: string;
 	answer: string;
 	status: "running" | "complete" | "cancelled" | "error" | "interrupted";
@@ -66,6 +69,7 @@ export interface ModelMentionInfo {
 	name: string;
 }
 export interface UpgradeResultMap {
+	"btw.images.resolve": { images: ImageContent[] };
 	"btw.history.list": { sessionId: string; topics: BtwTopicSummary[] };
 	"btw.history.read": { sessionId: string; topicId: string; turns: BtwHistoryTurn[] };
 	"btw.followUp": { ephemeralId: string; status: "running" };
@@ -107,6 +111,7 @@ export function validateUpgradeOperation(value: unknown): asserts value is Upgra
 	if (typeof op.kind !== "string" || !isUpgradeOperationKind(op.kind)) throw new Error("Unknown Runtime operation");
 	const fields: Record<UpgradeOperation["kind"], string[]> = {
 		"btw.history.list": [],
+		"btw.images.resolve": ["text"],
 		"btw.history.read": ["topicId"],
 		"btw.followUp": ["topicId", "question", "images"],
 		"session.models.mentions": [],
@@ -123,7 +128,16 @@ export function validateUpgradeOperation(value: unknown): asserts value is Upgra
 		if (key === "images") continue;
 		if ((key === "fallbackCwd" || key === "fallbackWorkspaceId") && op[key] === undefined) continue;
 		const text = op[key];
-		const limit = key === "question" ? 65536 : key === "apiKey" ? 16384 : key === "fallbackCwd" ? 4096 : 512;
+		const limit =
+			key === "question"
+				? Number.POSITIVE_INFINITY
+				: key === "text"
+					? 65536
+					: key === "apiKey"
+						? 16384
+						: key === "fallbackCwd"
+							? 4096
+							: 512;
 		if (typeof text !== "string" || !text.trim() || text.length > limit || text.includes("\0"))
 			throw new Error("Invalid Runtime operation field: " + key);
 	}
@@ -134,6 +148,14 @@ export function validateUpgradeOperation(value: unknown): asserts value is Upgra
 
 /** Validate results at the IPC boundary; credentials and native replay payloads have no public field. */
 export function validateUpgradeResult(kind: UpgradeOperation["kind"], value: unknown): void {
+	// BTW history is produced by the service; the transport owns frame limits.
+	if (
+		kind === "btw.history.list" ||
+		kind === "btw.history.read" ||
+		kind === "btw.followUp" ||
+		kind === "btw.images.resolve"
+	)
+		return;
 	type Check = (value: unknown) => void;
 	const text: Check = v => {
 		if (typeof v !== "string" || v.length > 262144) throw new Error("Invalid text result");
@@ -185,6 +207,7 @@ export function validateUpgradeResult(kind: UpgradeOperation["kind"], value: unk
 		"firstMessage?": short,
 	});
 	const checks: Record<UpgradeOperation["kind"], Check> = {
+		"btw.images.resolve": () => {},
 		"btw.history.list": shape({
 			sessionId: short,
 			topics: array(

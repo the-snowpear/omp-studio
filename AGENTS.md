@@ -72,10 +72,10 @@ Renderer 有全局 **预览模式**（顶栏右上角「预览」开关，三个
 
 ### 接入步骤（新页面 / 改页面时照做）
 
-1. 用 `usePreviewMode()`（`apps/renderer/src/preview/PreviewContext.tsx`）读 `preview`。
+1. 用 `usePreviewMode()`（`apps/renderer/src/preview/PreviewContext.tsx`）读 `preview`；需要按真实页面呈现时再读 `marks`。
 2. 演示数据放 `apps/renderer/src/preview/fixtures.ts`，或已有的 `hubPreview.ts` / `skillsPreview.ts` / `capabilitiesPreview.ts`。优先复用 ver1 `ui_reference/ver1/assets/js/mock-data.js` 里同名块，不要另起一套故事。
 3. 可复用的壳组件放 `apps/renderer/src/preview/surfaces.tsx`；页面里 `preview ? <FixtureUI /> : <真实或诚实空态 />`。
-4. 预览面带「演示」标记。fixture HTML 只来自本模块静态字符串，不要 `dangerouslySetInnerHTML` Host / 用户输入。
+4. 预览面带「演示」标记；`marks === false` 时（`?marks=off` 的「启动预览版」）所有演示标记、演示专用提示和 toast 都不显示，页面按真实产品呈现。fixture HTML 只来自本模块静态字符串，不要 `dangerouslySetInnerHTML` Host / 用户输入。
 5. 演示按钮只改本地 UI，不调 Host、不写 reducer、不伪造 `SurfaceCapabilities`。
 6. 没有对应 read model 时：预览关 = 禁用壳 + 原因；预览开 = 演示数据。不要把 `capabilities.get` 等现有 query 伪装成另一类库存。
 
@@ -90,6 +90,14 @@ Renderer 有全局 **预览模式**（顶栏右上角「预览」开关，三个
 ### 发布隐藏
 
 `apps/renderer/src/preview/mode.ts` 的 `PREVIEW_MODE_SWITCH_ENABLED`。改为 `false` 后开关消失并强制真实数据。不要另造第二套开关。
+
+### 启动入口
+
+| 脚本 | 形态 | 数据 |
+|---|---|---|
+| `启动预览.cmd` | 开发预览（Vite dev server，HMR） | 真实 Host 数据 |
+| `启动生产版.cmd` | 生产预览（改名 exe，复现已安装路径） | 真实 Host 数据 |
+| `启动预览版.cmd` | 开发预览 + `OMP_PREVIEW_DATA=1`（`?preview=1&marks=off`） | 演示 fixture，按真实页面呈现 |
 
 ## 备份规则
 

@@ -170,27 +170,28 @@ export interface DesktopIpcBridge {
  */
 export function createDesktopIpcBridge(bridge: DesktopIpcBridge): OmpStudioDesktopApi {
   const api: OmpStudioDesktopApi = {
-    bootstrap(): Promise<ClientBootstrap> {
-      return bridge.invoke(DESKTOP_IPC_CHANNELS.bootstrap) as Promise<ClientBootstrap>;
+    openContext: scope => bridge.invoke(DESKTOP_IPC_CHANNELS.openContext, scope) as Promise<string>,
+    bootstrap(contextId?: string): Promise<ClientBootstrap> {
+      return bridge.invoke(DESKTOP_IPC_CHANNELS.bootstrap, ...contextId ? [contextId] : []) as Promise<ClientBootstrap>;
     },
 
     query<TName extends QueryName>(
-      request: ClientQueryRequest<TName>,
+      request: ClientQueryRequest<TName>, contextId?: string,
     ): Promise<ClientQueryResponse<TName>> {
-      return bridge.invoke(DESKTOP_IPC_CHANNELS.query, request) as Promise<
+      return bridge.invoke(DESKTOP_IPC_CHANNELS.query, request, ...contextId ? [contextId] : []) as Promise<
         ClientQueryResponse<TName>
       >;
     },
 
     command<TName extends CommandName>(
-      request: ClientCommandRequest<TName>,
+      request: ClientCommandRequest<TName>, contextId?: string,
     ): Promise<ClientCommandAccepted<TName>> {
-      return bridge.invoke(DESKTOP_IPC_CHANNELS.command, request) as Promise<
+      return bridge.invoke(DESKTOP_IPC_CHANNELS.command, request, ...contextId ? [contextId] : []) as Promise<
         ClientCommandAccepted<TName>
       >;
     },
 
-    subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe {
+    subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void, contextId?: string): Unsubscribe {
       // The id is chosen here, before any IPC: a cancellation can therefore
       // name the registration even if it happens synchronously after this
       // call and before the registration round-trip completes.
@@ -216,7 +217,7 @@ export function createDesktopIpcBridge(bridge: DesktopIpcBridge): OmpStudioDeskt
       // registration (invalid scope) means Main never forwards, so the local
       // listener stays inert; the paired cancellation below is idempotent.
       void bridge
-        .invoke(DESKTOP_IPC_CHANNELS.subscribe, { scope, subscriptionId })
+        .invoke(DESKTOP_IPC_CHANNELS.subscribe, { scope, subscriptionId }, ...contextId ? [contextId] : [])
         .catch(() => undefined);
       let cancelled = false;
       return () => {
@@ -235,8 +236,8 @@ export function createDesktopIpcBridge(bridge: DesktopIpcBridge): OmpStudioDeskt
       };
     },
 
-    close(): Promise<void> {
-      return bridge.invoke(DESKTOP_IPC_CHANNELS.close) as Promise<void>;
+    close(contextId?: string): Promise<void> {
+      return bridge.invoke(DESKTOP_IPC_CHANNELS.close, ...contextId ? [contextId] : []) as Promise<void>;
     },
   };
 

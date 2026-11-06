@@ -18,6 +18,7 @@ import {
 	type StudioSnapshotResponse,
 } from "@oh-my-pi/pi-coding-agent/studio/bridge-protocol";
 import { StudioBridgeServer } from "@oh-my-pi/pi-coding-agent/studio/bridge-server";
+import type { ComputerWorkspaceChange } from "../src/studio/computer-workspace-protocol";
 import { StudioCommandManifestService } from "@oh-my-pi/pi-coding-agent/studio/services/command-manifest-service";
 import { StudioInteractionGateway } from "@oh-my-pi/pi-coding-agent/studio/services/interaction-port";
 import { StudioLiveService } from "@oh-my-pi/pi-coding-agent/studio/services/live-service";
@@ -307,6 +308,58 @@ function sendHello(socket: net.Socket, challenge: string, versions = [1]): void 
 }
 
 describe("WP-011 Studio Bridge runtime server", () => {
+	test("Computer query and increment use private envelopes without command receipts or Studio event sequence", async () => {
+		const fixture = await bridgeFixture();
+		const runtime = fakeRuntime();
+		let listener: ((event: ComputerWorkspaceChange) => void) | undefined;
+		Object.assign(runtime.services, {
+			workbench: {
+				computerWorkspace: {
+					subscribe(callback: (event: ComputerWorkspaceChange) => void) {
+						listener = callback;
+						return () => {};
+					},
+					async query(operation: { sessionId: string }) {
+						return { sessionId: operation.sessionId, revision: 99 };
+					},
+				},
+			},
+		});
+		const server = new StudioBridgeServer(fixture.endpoint, fixture.tokenFile);
+		servers.push(server);
+		const started = server.start(runtime);
+		await waitForTokenConsumption(fixture.tokenFile);
+		const socket = await connect(fixture.endpoint);
+		const hello = receiveFrame(socket);
+		sendHello(socket, "computer-query");
+		await hello;
+		const snapshot = await exchangeSnapshot(socket, "initial");
+		await started;
+		const received = receiveFrames(socket, 2);
+		socket.write(
+			encodeStudioFrame("computer-read", 7, {
+				type: "computer.query",
+				requestId: "computer-read",
+				runtimeEpoch: 7,
+				operation: { kind: "computer.workspace.get", sessionId: "session-test" },
+			}),
+		);
+		listener?.({ kind: "reset", sessionId: "session-test", revision: 100 });
+		const frames = await received;
+		expect(frames.map(frame => (frame.body as { type: string }).type).sort()).toEqual([
+			"computer.event",
+			"computer.result",
+		]);
+		expect(frames.find(frame => (frame.body as { type: string }).type === "computer.event")?.body).toMatchObject({
+			stateVersion: snapshot.snapshot.stateVersion,
+			event: { revision: 100 },
+		});
+		expect(frames.find(frame => (frame.body as { type: string }).type === "computer.result")?.body).toMatchObject({
+			requestId: "computer-read",
+			ok: true,
+			result: { revision: 99 },
+		});
+	});
 	test("authenticates hello, consumes the token file, and reports only implemented capability grade", async () => {
 		const fixture = await bridgeFixture();
 		const server = new StudioBridgeServer(fixture.endpoint, fixture.tokenFile, {

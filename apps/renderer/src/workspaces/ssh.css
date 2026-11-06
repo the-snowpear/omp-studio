@@ -8,7 +8,6 @@
 .execution-menu-help { padding: var(--sp-8) var(--sp-10); color: var(--text-3); font-size: var(--fs-12); line-height: 1.6; }
 .execution-profile { display: flex; align-items: center; }
 .execution-profile .execution-menu-row { flex: 1; }
-.execution-persistent { justify-content: flex-end; width: max-content; min-width: 170px; max-width: 100%; }
 .remote-offline, .execution-error, .ssh-error { color: var(--danger); }
 .execution-error { position: absolute; bottom: 32px; right: 0; width: min(360px, 80vw); padding: var(--sp-10); background: var(--surface); border: 1px solid var(--border-float); border-radius: var(--r-8); font-size: var(--fs-12); overflow-wrap: anywhere; z-index: var(--z-menu); }
 .ssh-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; margin: auto; padding: var(--sp-24); background: var(--surface); color: var(--text); border: 1px solid var(--border-float); border-radius: var(--r-10); box-shadow: var(--shadow-modal); }

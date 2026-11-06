@@ -28,7 +28,7 @@ export type CoreOperation =
   | { kind: "runtime.snapshot" }
   | { kind: "runtime.pause" }
   | { kind: "runtime.resume"; expectedPauseEpoch: number }
-  | { kind: "runtime.settings.get"; keys?: readonly StudioRuntimeSettingKey[] }
+  | { kind: "runtime.settings.get"; keys?: readonly StudioRuntimeSettingKey[]; checkHindsight?: boolean }
   | StudioRuntimeSettingSetOperation
   | { kind: "runtime.shutdown"; drain: true };
 

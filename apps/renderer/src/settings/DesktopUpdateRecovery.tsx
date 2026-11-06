@@ -1,11 +1,13 @@
 import { useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { PREVIEW_DESKTOP_RECOVERY } from "../preview/fixtures";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { useAppUpdate } from "./appUpdate";
 import { SettingRow } from "./SettingRow";
 
 export function DesktopUpdateRecovery({ preview }: { preview: boolean }) {
   const { t } = useI18n();
+  const { marks } = usePreviewMode();
   const updates = useAppUpdate();
   const [demoReady, setDemoReady] = useState(false);
   const [demoDone, setDemoDone] = useState(false);
@@ -32,7 +34,7 @@ export function DesktopUpdateRecovery({ preview }: { preview: boolean }) {
   };
   return <>
     <SettingRow
-      label={`${t("updates.rollbackApp")}${preview ? ` · ${t("appUpdate.demoUpdate")}` : ""}`}
+      label={`${t("updates.rollbackApp")}${preview && marks ? ` · ${t("appUpdate.demoUpdate")}` : ""}`}
       desc={available ? `${t("updates.rollbackAppTarget")}: ${version} · ${t("updates.rollbackAppHint")}` : t("updates.rollbackAppUnavailable")}
       source={available ? "user" : "unavailable"}
       {...(!available ? { reason: t("updates.rollbackAppUnavailable") } : {})}
@@ -42,7 +44,7 @@ export function DesktopUpdateRecovery({ preview }: { preview: boolean }) {
       </button>
     </SettingRow>
     {ready && !applying ? <p className="small muted" role="status">{t("updates.readyToApply")}</p> : null}
-    {preview && demoDone ? <p className="small muted" role="status">{t("updates.rollbackAppDemoDone")}</p> : null}
+    {preview && marks && demoDone ? <p className="small muted" role="status">{t("updates.rollbackAppDemoDone")}</p> : null}
     {!preview && updates.state.applyNotice ? <p className="small muted" role="status">{updates.state.applyNotice}</p> : null}
     {!preview ? ([
       ["appUpdate.checkFailed", updates.state.checkError],

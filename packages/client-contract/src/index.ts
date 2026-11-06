@@ -114,6 +114,9 @@ export interface CommandOptions {
  * interface in P1/P2. Envelopes are the semantic request/response shapes.
  */
 export interface ClientTransport {
+  readonly supportsContexts?: boolean;
+  /** An independent projection over the same Host and resident Runtime pool. */
+  openContext?(scope: ClientContextScope): Promise<ClientTransport>;
   bootstrap(): Promise<ClientBootstrap>;
   query<TName extends QueryName>(
     request: ClientQueryRequest<TName>,
@@ -131,6 +134,8 @@ export interface ClientTransport {
  * and progress through the accepted/receipt lifecycle as ClientEvents arrive.
  */
 export interface StudioClient {
+  readonly supportsContexts?: boolean;
+  openContext?(scope: ClientContextScope): Promise<StudioClient>;
   bootstrap(): Promise<ClientBootstrap>;
   query<TName extends QueryName>(name: TName, input: QueryInput<TName>): Promise<QueryResult<TName>>;
   command<TName extends CommandName>(
@@ -140,6 +145,12 @@ export interface StudioClient {
   ): Promise<CommandHandle<TName>>;
   subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe;
   close(): Promise<void>;
+}
+
+/** Opaque workspace/session identities; execution targets belong to the transport. */
+export interface ClientContextScope {
+  readonly workspaceId: WorkspaceId;
+  readonly sessionId?: SessionId;
 }
 
 // Session thinking selectors are protocol facts; re-exported so transport
@@ -192,5 +203,8 @@ export * from "./conversation.js";
 export * from "./git.js";
 
 export type { ContextViewIndex, ContextViewResultMap, ContextViewOperation, ContextCategoryId, ContextEntrySummary } from "@omp-studio/studio-protocol";
+export type { ComputerTarget, ComputerFrame, ComputerAction, ComputerControlState, ComputerWorkspaceSnapshot, ComputerActivityPage, ComputerObservationLease, ComputerStructureNode, ComputerStructureSnapshot, ComputerWorkspaceQuery, ComputerWorkspaceCommand, ComputerWorkspaceOperation, ComputerWorkspaceResultMap, ComputerWorkspaceChange } from "@omp-studio/studio-protocol";
 export type { UpgradeOperation, UpgradeResultMap, BtwTopicSummary, BtwHistoryTurn, ForeignSessionSummary, ForeignSource, RuntimeAuthProvider, ModelMentionInfo } from "@omp-studio/studio-protocol";
 export * from "./model-adaptation.js";
+
+export * from "./github.js";

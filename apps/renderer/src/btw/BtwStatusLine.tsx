@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { BtwSnapshot, BtwStatus } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
 import { formatElapsed } from "../conversation/activityStatus";
+import { useI18n } from "../i18n";
 
 const LABELS: Readonly<Record<BtwStatus, string>> = {
   running: "正在回答",
@@ -70,7 +71,12 @@ export function BtwStatusLine({
   const status: BtwStatus | "idle" = snapshot?.status ?? "idle";
   const running = status === "running";
   const elapsed = useFrozenElapsed(startedAt, running);
-  const label = btwStatusLabel(snapshot);
+  const { t } = useI18n();
+  const label = status === "idle" ? t("btw.statusIdle")
+    : status === "running" ? t("btw.statusRunning")
+    : status === "completed" ? t("btw.statusCompleted")
+    : status === "aborted" ? t("btw.statusAborted")
+    : snapshot?.error?.code === "OUTPUT_LIMIT" ? t("btw.statusLimit") : t("btw.statusFailed");
   const showClock = startedAt !== null && status !== "idle";
 
   return (

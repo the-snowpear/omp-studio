@@ -29,7 +29,7 @@ export function AccountStatusPane({
   available?: boolean;
   capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [open, setOpen] = useState(standalone);
@@ -259,7 +259,7 @@ export function AccountStatusPane({
       title={
         <>
           {zh ? "账户、额度与重置券" : "Accounts, quotas and saved resets"}
-          {preview ? (zh ? " · 演示" : " · Demo") : ""}
+          {preview && marks ? (zh ? " · 演示" : " · Demo") : ""}
         </>
       }
     >

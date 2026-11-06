@@ -13,6 +13,9 @@ import {
   parseFoundationStudioRequest,
   parseStudioHelloRequest,
   type StudioHelloResponse,
+  type StudioComputerQueryRequest,
+  type StudioComputerEventEnvelope,
+  COMPUTER_WORKSPACE_KINDS,
   type StudioEventEnvelope,
   type StudioSnapshotResponse,
 } from "@omp-studio/studio-protocol";
@@ -132,6 +135,7 @@ async function listenForHello(
     afterSnapshot?: (response: StudioSnapshotResponse) => Buffer[];
     snapshot?: (requestId: string, hello: StudioHelloResponse) => StudioSnapshotResponse;
     onRequest?: (request: StudioRequest, socket: Socket, hello: StudioHelloResponse) => void;
+    onComputerQuery?: (request: StudioComputerQueryRequest, socket: Socket, hello: StudioHelloResponse) => void;
   } = {},
 ): Promise<{
   endpoint: string;
@@ -161,6 +165,10 @@ async function listenForHello(
                 ? response
                 : encodeFrame(`hello-result:${hello.requestId}`, response.runtimeEpoch, response),
             );
+            continue;
+          }
+          if ((frame.body as { type?: unknown }).type === "computer.query" && negotiated && hooks.onComputerQuery) {
+            hooks.onComputerQuery(frame.body as StudioComputerQueryRequest, socket, negotiated);
             continue;
           }
           const request = parseFoundationStudioRequest(frame.body);
@@ -453,6 +461,55 @@ test("PR-010 Bridge shutdown waits for the terminal receipt and shutdownComplete
     await bridge.close();
   }
 });
+
+for (const supportsOwner of [false, true]) {
+  test(`startup owner notifications preserve the Bridge with ${supportsOwner ? "supporting" : "legacy"} Runtime`, async () => {
+    const token = "bridge-token-owner-notifications";
+    const received: string[] = [];
+    const bridge = await listenForHello(hello => {
+      const response = helloResponse(hello, token);
+      if (supportsOwner) response.capabilityManifest.capabilities.push({
+        id: "session.owner.update", grade: "stable", version: 1, evidence: "owner-fixture",
+      });
+      return response;
+    }, {
+      onRequest(request, socket, hello) {
+        received.push(request.operation.kind);
+        // Match released Runtimes: an unknown operation terminates the pipe.
+        if (request.operation.kind === "session.owner.update" && !supportsOwner) {
+          socket.destroy();
+          return;
+        }
+        socket.write(encodeFrame(`receipt:${request.requestId}`, hello.runtimeEpoch, {
+          type: "studio.receipt", requestId: request.requestId, runtimeEpoch: hello.runtimeEpoch,
+          stateVersion: 0, status: "completed",
+          result: request.operation.kind === "operator.manifest.get" ? {
+            generatedAt: "1970-01-01T00:00:00.000Z", upstreamCommit: hello.upstreamCommit,
+            hash: hello.commandManifestHash, commands: [], unclassifiedBuiltins: [],
+          } : { updated: true },
+        }));
+      },
+    });
+    const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
+    const controller = new StudioRuntimeSessionController(client, new CommandLedger());
+    const off = controller.onPublication(() => controller.updateOwnerState({
+      known: false, visibleSessionIds: [], blockedSessionIds: [],
+    }));
+    try {
+      await client.connect();
+      await controller.refresh();
+      await client.requestCommandManifest();
+      assert.equal(client.state, "ready");
+      assert.equal(received.includes("session.owner.update"), supportsOwner);
+      assert.equal(received.at(-1), "operator.manifest.get");
+    } finally {
+      off();
+      controller.dispose();
+      client.close();
+      await bridge.close();
+    }
+  });
+}
 
 test("RT-002 Bridge command-manifest probe parses and returns the advertised manifest", async () => {
   const token = "bridge-token-command-manifest";
@@ -1729,4 +1786,106 @@ test("probe fails the shutdown gate when the Runtime neither acks nor exits", as
   const outcome = await probeWithLostShutdownAck(undefined);
   assert.equal(outcome.smoke, "passed");
   assert.equal(outcome.shutdown, "failed");
+});
+
+for (const supported of [true, false]) {
+  test("Computer queries use a receipt-free channel with " + (supported ? "current" : "legacy") + " Runtime", async () => {
+    const token = "computer-query-token";
+    let queries = 0;
+    let commands = 0;
+    const bridge = await listenForHello(hello => {
+      const response = helloResponse(hello, token);
+      if (supported) response.capabilityManifest.capabilities = COMPUTER_WORKSPACE_KINDS.map(id => ({ id, grade: "stable", version: 1, evidence: "computer-fixture" }));
+      return response;
+    }, {
+      onComputerQuery(request, socket, hello) {
+        queries++;
+        assert.equal(request.runtimeEpoch, hello.runtimeEpoch);
+        const computerEvent = (sessionId: string, runtimeEpoch = hello.runtimeEpoch): StudioComputerEventEnvelope => ({
+          type: "computer.event", runtimeEpoch, stateVersion: 0 as StateVersion,
+          occurredAt: "2026-11-05T00:00:00.000Z", event: { kind: "reset", sessionId, revision: 1 },
+        });
+        socket.write(Buffer.concat([
+          encodeFrame("stale-epoch", 0 as RuntimeEpoch, computerEvent("session-1", 0 as RuntimeEpoch)),
+          encodeFrame("stale-session", hello.runtimeEpoch, computerEvent("other-session")),
+          encodeFrame("current", hello.runtimeEpoch, computerEvent("session-1")),
+          encodeFrame("result", hello.runtimeEpoch, { type: "computer.result", runtimeEpoch: hello.runtimeEpoch, requestId: request.requestId, ok: true, result: null }),
+        ]));
+      },
+      onRequest(request, socket, hello) {
+        commands++;
+        socket.write(encodeFrame("legacy-receipt", hello.runtimeEpoch, {
+          type: "studio.receipt", runtimeEpoch: hello.runtimeEpoch, requestId: request.requestId,
+          status: "completed", stateVersion: 0, result: { stopped: true },
+        }));
+      },
+    });
+    const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token, requestTimeoutMs: 1000 });
+    const ledger = new CommandLedger();
+    const controller = new StudioRuntimeSessionController(client, ledger);
+    const events: StudioComputerEventEnvelope[] = [];
+    let publications = 0;
+    let publicEvents = 0;
+    controller.onComputerEvent(event => events.push(event.envelope));
+    controller.onPublication(() => { publications++; });
+    client.onEvent(() => { publicEvents++; });
+    try {
+      await client.connect();
+      await controller.refresh();
+      publications = 0;
+      const read = () => controller.readComputer({ kind: "computer.frame.get", sessionId: "session-1", frameId: "frame-1" });
+      if (supported) assert.equal(await read(), null);
+      else await assert.rejects(read, error => error instanceof StudioHostError && error.code === "CAPABILITY_UNAVAILABLE");
+      assert.equal(queries, supported ? 1 : 0);
+      assert.equal(events.length, supported ? 1 : 0);
+      assert.equal(events[0]?.event.sessionId, supported ? "session-1" : undefined);
+      assert.equal(publications, 0);
+      assert.equal(publicEvents, 0);
+      assert.deepEqual(ledger.snapshot(), []);
+      const receipt = await controller.invoke(request({ kind: "computer.stop", sessionId: "session-1" }, "old-stop"));
+      assert.equal(receipt.status, "completed");
+      assert.equal(commands, 1);
+      assert.equal(ledger.snapshot().length, 1);
+      assert.equal(client.state, "ready");
+    } finally {
+      controller.dispose(); client.close(); await bridge.close();
+    }
+  });
+}
+
+test("Computer read rejects a session switch without creating a ledger entry", async () => {
+  const token = "computer-session-switch";
+  const bridge = await listenForHello(hello => {
+    const response = helloResponse(hello, token);
+    response.capabilityManifest.capabilities.push({ id: "computer.frame.get", grade: "stable", version: 1, evidence: "fixture" });
+    return response;
+  }, {
+    onComputerQuery(request, socket, hello) {
+      const next = snapshotResponse("switch", hello, "session-2").snapshot;
+      next.stateVersion = 1 as StateVersion;
+      socket.write(Buffer.concat([
+        encodeFrame("session-switch", hello.runtimeEpoch, { type: "studio.event", runtimeEpoch: hello.runtimeEpoch, eventSeq: 1, stateVersion: 1, occurredAt: "2026-11-05T00:00:00.000Z", event: { kind: "state.changed", snapshot: next } }),
+        encodeFrame("result", hello.runtimeEpoch, { type: "computer.result", requestId: request.requestId, runtimeEpoch: hello.runtimeEpoch, ok: true, result: null }),
+      ]));
+    },
+  });
+  const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token, requestTimeoutMs: 1000 });
+  const ledger = new CommandLedger();
+  const controller = new StudioRuntimeSessionController(client, ledger);
+  try {
+    await client.connect(); await controller.refresh();
+    await assert.rejects(() => controller.readComputer({ kind: "computer.frame.get", sessionId: "session-1", frameId: "frame-1" }), error => error instanceof StudioHostError && error.code === "CURSOR_STALE");
+    assert.deepEqual(ledger.snapshot(), []);
+    assert.equal(client.state, "ready");
+  } finally { controller.dispose(); client.close(); await bridge.close(); }
+});
+
+test("Computer stop and observation can run while the session is streaming", async () => {
+  const arbiter = new CommandArbiter(() => ({ runtimeEpoch: epoch, stateVersion: 1 as StateVersion, isStreaming: true, isCompacting: false }));
+  for (const operation of [
+    { kind: "computer.control.stop", sessionId: "session-1" },
+    { kind: "computer.frame.capture", sessionId: "session-1", leaseId: "lease-1", targetId: "display-1" },
+  ] as const) {
+    assert.equal(await arbiter.run(request(operation), () => "executed"), "executed");
+  }
 });

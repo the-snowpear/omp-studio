@@ -32,7 +32,7 @@ export function RuntimeQueueBar({
   running: boolean;
   showDemo?: boolean;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [result, setResult] = useState<RuntimeQueueResult>({
@@ -228,7 +228,7 @@ export function RuntimeQueueBar({
           <span className="qs-note">
             {zh ? "由 Runtime 排队和执行" : "Queued and executed by Runtime"}
           </span>
-          {preview ? (
+          {preview && marks ? (
             <span className="chip gray xs">{zh ? "演示" : "Demo"}</span>
           ) : null}
         </button>

@@ -199,6 +199,25 @@ function mapCompactionEntry(entry: SessionEntry & { type: "compaction" }): Conve
 }
 
 function projectEntry(entry: SessionEntry): ConversationItem | undefined {
+	if (
+		entry.type === "custom_message" &&
+		entry.customType === "studio-computer-continue" &&
+		entry.display &&
+		entry.attribution === "user"
+	) {
+		const text = sanitizePublicText(
+			typeof entry.content === "string" ? entry.content : "",
+			CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES,
+		);
+		return {
+			kind: "message",
+			itemId: entry.id,
+			parentId: entry.parentId,
+			createdAt: entry.timestamp,
+			role: "user",
+			content: [{ type: "text", text: text.text }],
+		};
+	}
 	if (IGNORED_ENTRY_TYPES.has(entry.type)) return undefined;
 	if (entry.type === "branch_summary" && CONVERSATION_BRANCH_SUMMARY_MAPPING === "ignore") return undefined;
 	if (entry.type === "message") return mapMessageEntry(entry);

@@ -1,9 +1,13 @@
+import { usePreviewMode } from "./preview/PreviewContext";
 import { useExecutionTarget } from "./workspaces/ExecutionTargets";
 import { readTerminalTypography, readXtermTheme, applyTheme } from "./terminalTheme";
 import { useAppSettings } from "./settings/appSettings";
 import { useTerminalSessions, type TerminalSessions, type TerminalSession as Session, type TerminalScreenHost as Host } from "./terminalSessions";
 import { TerminalGraphicView } from "./TerminalGraphicView";
 import { TerminalRecordingControls } from "./recordings/TerminalRecordingControls";
+import { useSurfaceDocument } from "./dock/SurfaceContext";
+import { BrowserLinkMenu } from "./browser/browserLinks";
+import { registerTerminalBrowserLinks } from "./browser/terminalBrowserLinks";
 /**
  * Desktop-chrome integrated shell. Uses `window.ompStudioTerminal` when the
  * Electron preload is present; otherwise shows an honest unavailable state.
@@ -25,23 +29,27 @@ export type TerminalPaneHandle = {
   available: boolean;
 };
 
-export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; workspaceId?: string | undefined; sessionId?: string | undefined }>(function TerminalPane(
-  { visible, workspaceId, sessionId },
+export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; workspaceId?: string | undefined; sessionId?: string | undefined; conversationId?: string | undefined }>(function TerminalPane(
+  { visible, workspaceId, sessionId, conversationId },
   ref,
 ) {
   const { t } = useI18n();
   const api = globalThis.ompStudioTerminal;
   const executionTarget = useExecutionTarget();
+  const { preview } = usePreviewMode();
+  const targetId = preview ? null : executionTarget.id;
   const { store, sessions: allSessions, graphics, graphicsErrors, notices } = useTerminalSessions();
-  const sessions = allSessions.filter(session => session.targetId === executionTarget.id);
-  const [activeId, setActiveId] = useState<string | null>(() => store.activeIds.get(executionTarget.id) ?? null);
+  const ownerKey = JSON.stringify([targetId, workspaceId ?? null, conversationId ?? sessionId ?? null]);
+  const sessions = allSessions.filter(session => session.targetId === targetId && (conversationId ? session.conversationId === conversationId : session.workspaceId === workspaceId && session.sessionId === sessionId));
+  const [activeId, setActiveId] = useState<string | null>(() => store.activeIds.get(ownerKey) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const bootstrapped = useRef(sessions.length > 0);
   const createLock = useRef(false);
   const targetStatus = executionTarget.inventory.statuses.find(status => status.id === executionTarget.id);
-  const canCreate = !executionTarget.id || (targetStatus?.state === "connected" && !targetStatus.operation);
-  const selectSession = (id: string): void => { store.activeIds.set(executionTarget.id, id); setActiveId(id); };
+  const canCreate = !targetId || (targetStatus?.state === "connected" && !targetStatus.operation);
+  const selectSession = (id: string): void => { store.activeIds.set(ownerKey, id); setActiveId(id); };
+  useEffect(() => { setActiveId(store.activeIds.get(ownerKey) ?? null); bootstrapped.current = sessions.length > 0; }, [ownerKey]);
 
   const createSession = useCallback(async () => {
     if (!api || createLock.current || !canCreate) return;
@@ -49,10 +57,10 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
     bootstrapped.current = true;
     setCreating(true);
     setError(null);
-    try { setActiveId(await store.create(executionTarget.id, workspaceId, sessionId)); }
+    try { setActiveId(await store.create(targetId, workspaceId, sessionId, conversationId)); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { createLock.current = false; setCreating(false); }
-  }, [api, store, workspaceId, sessionId, executionTarget.id, canCreate]);
+  }, [api, store, workspaceId, sessionId, targetId, conversationId, canCreate]);
 
   useImperativeHandle(ref, () => ({ create: () => { void createSession(); }, available: api !== undefined && canCreate }), [api, canCreate, createSession]);
   useEffect(() => {
@@ -168,6 +176,9 @@ function XtermScreen({
   active: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const hoveredLink = useRef<string | null>(null);
+  const [linkMenu, setLinkMenu] = useState<{ url: string; x: number; y: number }>();
+  const document = useSurfaceDocument();
   const { settings } = useAppSettings();
 
   useEffect(() => {
@@ -197,6 +208,8 @@ function XtermScreen({
     } else if (termParentMissing(host.term, node)) {
       node.appendChild(host.term.element ?? node);
     }
+    // xterm's public open() updates its browser-window services after adoption.
+    host.term.open(node);
     // Register the host and hand over the backlog that arrived while it was
     // missing: the store writes it in order and credits Main per written batch
     // (it deliberately does not acknowledge queued-but-unwritten output).
@@ -204,13 +217,15 @@ function XtermScreen({
 
     host.term.options.disableStdin = session.status === "ended";
     host.term.options.cursorBlink = session.status !== "ended";
+    const links = registerTerminalBrowserLinks(host.term, url => { hoveredLink.current = url; });
     const observer = new MutationObserver(() => applyTheme(host.term));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
     return () => {
       observer.disconnect();
+      links.dispose();
     };
-  }, [api, hosts, store, session.id, session.status]);
+  }, [api, hosts, store, session.id, session.status, document]);
 
   useEffect(() => {
     const host = hosts.get(session.id);
@@ -226,7 +241,7 @@ function XtermScreen({
     const frame = requestAnimationFrame(fit);
     void document.fonts?.ready.then(fit);
     return () => { disposed = true; cancelAnimationFrame(frame); };
-  }, [active, api, hosts, session.id, settings.terminalFontFamily, settings.terminalFontSize]);
+  }, [active, api, hosts, session.id, settings.terminalFontFamily, settings.terminalFontSize, document]);
 
   useEffect(() => {
     const host = hosts.get(session.id);
@@ -254,7 +269,7 @@ function XtermScreen({
     };
   }, [active, api, hosts, session.id]);
 
-  return <div className="term-xterm" ref={containerRef} hidden={!active} />;
+  return <><div className="term-xterm" ref={containerRef} hidden={!active} onContextMenu={event => { if (hoveredLink.current) { event.preventDefault(); setLinkMenu({ url: hoveredLink.current, x: event.clientX, y: event.clientY }); } }} />{linkMenu ? <BrowserLinkMenu url={linkMenu.url} point={linkMenu} onClose={() => setLinkMenu(undefined)} /> : null}</>;
 }
 
 function termParentMissing(term: Terminal, node: HTMLDivElement): boolean {

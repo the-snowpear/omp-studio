@@ -1,0 +1,16 @@
+.token-counter { height: 100%; min-height: 0; overflow: auto; color: var(--text); background: var(--surface); }
+.token-counter-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 16px 16px 10px; font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.token-counter-header > span:first-child { display: flex; align-items: center; gap: 7px; }
+.token-counter-header .icon { color: var(--text-3); }
+.token-counter-empty { padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-3); font-size: var(--fs-11); }
+.token-counter-body { display: grid; gap: 12px; padding: 0 16px 16px; }
+.token-counter-help { color: var(--text-3); font-size: var(--fs-10); line-height: 1.7; }
+.token-counter-input { display: block; width: 100%; min-height: 140px; max-height: 400px; resize: vertical; padding: 9px 10px; border: 1px solid var(--border-strong); border-radius: var(--r-6); background: var(--bg); font-family: var(--font-mono); font-size: var(--fs-11); line-height: 1.6; }
+.token-counter-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: var(--fs-10); color: var(--text-3); }
+.token-counter-actions .btn { margin-left: auto; }
+.token-counter-error { color: var(--red); font-size: var(--fs-11); overflow-wrap: anywhere; }
+.token-counter-results { width: 100%; border-collapse: collapse; font-size: var(--fs-11); }
+.token-counter-results :is(th, td) { padding: 6px 0; text-align: left; border-bottom: 1px solid var(--border); }
+.token-counter-results th { color: var(--text-3); font-weight: var(--fw-medium); }
+.token-counter-results td { font-family: var(--font-mono); }
+.token-counter-results :is(th, td):last-child { text-align: right; }

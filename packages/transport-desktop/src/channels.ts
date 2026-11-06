@@ -21,6 +21,7 @@
 export const DESKTOP_IPC_CHANNELS: Readonly<{
   /** Renderer -> Main: fetch the bootstrap, no payload. */
   readonly bootstrap: string;
+  readonly openContext: string;
   /** Renderer -> Main: one semantic query envelope. */
   readonly query: string;
   /** Renderer -> Main: one semantic command envelope. */
@@ -35,6 +36,7 @@ export const DESKTOP_IPC_CHANNELS: Readonly<{
   readonly close: string;
 }> = Object.freeze({
   bootstrap: "omp-studio:desktop:bootstrap",
+  openContext: "omp-studio:desktop:open-context",
   query: "omp-studio:desktop:query",
   command: "omp-studio:desktop:command",
   subscribe: "omp-studio:desktop:subscribe",

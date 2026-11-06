@@ -132,9 +132,9 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
   const providers: ModelProviderRecord[] = [
     provider({
       id: "anthropic", name: "Anthropic", source: "builtin", status: "available",
-      statusDetail: "已登录 · 演示账号", api: "anthropic-messages",
+      statusDetail: "已登录 · 个人账号", api: "anthropic-messages",
       endpointUrl: "https://api.anthropic.com/v1", local: false, enabled: true,
-      website: "https://www.anthropic.com", auth: { type: "oauth", hasSecret: true, account: "demo@anthropic.com" },
+      website: "https://www.anthropic.com", auth: { type: "oauth", hasSecret: true, account: "mira@studio.dev" },
       models: [
         m("claude-opus-4.8", "Claude Opus 4.8", 200000, 64000, { img: true, reason: true, cIn: 15, cOut: 75 }),
         m("claude-sonnet-4.5", "Claude Sonnet 4.5", 200000, 64000, { img: true, reason: true, cIn: 3, cOut: 15 }),
@@ -248,7 +248,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     ],
     generatedModelsYml: "providers:\n  anthropic:\n    api: anthropic-messages\n",
     generatedConfigYml: "modelRoles:\n  default: anthropic/claude-sonnet-4.5\n",
-    runtimeEffectHint: "演示数据不会写入本机 OMP 配置。",
+    runtimeEffectHint: "改动只作用于当前页面，尚未写入本机 OMP 配置。",
     loginAvailable: true,
     ompAvailable: true,
     modelRoleStorage: "project",

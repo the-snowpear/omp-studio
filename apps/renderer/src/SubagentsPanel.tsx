@@ -21,6 +21,7 @@ import { pagePhaseClass, useDeferredPresence } from "./pageTransition";
 import { parseJsonOrYaml, StructuredEditor } from "./structured-editor";
 import { ComposerModelMenu } from "./ComposerModelPicker";
 import { createPreviewModelConfig } from "./preview/modelConfigFixtures";
+import { usePreviewMode } from "./preview/PreviewContext";
 import {
   AGENT_THINKING,
   createPreviewAgentDefinitions,
@@ -234,6 +235,7 @@ export function SubagentsPanel({
   onCount?: (count: number) => void;
 }) {
   const { t, resolvedLanguage } = useI18n();
+  const { marks } = usePreviewMode();
   const zh = resolvedLanguage === "zh";
   const [data, setData] = useState<AgentDefinitionsReadModel | null>(preview ? createPreviewAgentDefinitions() : null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -349,7 +351,7 @@ export function SubagentsPanel({
         ...current,
         agents: current.agents.map((item) => (item.name === agent.name ? { ...item, disabled: !enabled } : item)),
       }));
-      toast(t("subagents.demoToggledEnabled"));
+      if (marks) toast(t("subagents.demoToggledEnabled"));
       return;
     }
     try {
@@ -454,7 +456,7 @@ export function SubagentsPanel({
           ...current,
           agents: [...current.agents.filter((item) => item.name !== record.name), record],
         }));
-        toast(t("subagents.demoListUpdated"));
+        if (marks) toast(t("subagents.demoListUpdated"));
       } else {
         mutateLocal((current) => ({
           ...current,
@@ -470,7 +472,7 @@ export function SubagentsPanel({
             };
           }),
         }));
-        toast(t("subagents.demoOverrideUpdated"));
+        if (marks) toast(t("subagents.demoOverrideUpdated"));
       }
       setDraft(null);
       return;
@@ -517,7 +519,7 @@ export function SubagentsPanel({
         agents: current.agents.filter((item) => item.name !== input.name),
       }));
       if (draftState?.name === input.name) setDraft(null);
-      toast(t("subagents.demoRemovedFromList"));
+      if (marks) toast(t("subagents.demoRemovedFromList"));
       setPendingDelete(null);
       return;
     }
@@ -612,7 +614,7 @@ export function SubagentsPanel({
           </button>
           <b style={{ fontSize: "var(--fs-14)" }}>{draft.existing ? t("subagents.editSubagent", { name: draft.name }) : t("subagents.newSubagent")}</b>
           {draft.source ? <span className={`chip ${SOURCE_CHIP[draft.source]} xs`}>{sourceLabel(draft.source, t)}</span> : <span className="chip purple xs">{t("common.custom") || "Custom"}</span>}
-          {preview ? <span className="chip purple xs">{t("common.demo")}</span> : null}
+          {preview && marks ? <span className="chip purple xs">{t("common.demo")}</span> : null}
         </div>
         <ToastHost message={flash} onDismiss={() => setFlash(null)} />
 
@@ -707,7 +709,7 @@ export function SubagentsPanel({
                       placement="down"
                       isRoleSelected={(role) => draft.models.includes(role.alias) || draft.models.includes(role.primary)}
                       isModelSelected={(selector) => draft.models.includes(selector)}
-                      note={preview ? t("subagents.demoNoticeDesc") : t("subagents.addModelNote")}
+                      note={preview && marks ? t("subagents.demoNoticeDesc") : t("subagents.addModelNote")}
                       onChooseRole={chooseRoleModel}
                       onChooseModel={addModelValue}
                       onClose={() => setModelMenuOpen(false)}
@@ -932,7 +934,7 @@ export function SubagentsPanel({
         </div>
         <span className="mr-count">{filtered.length} / {agents.length}</span>
         <span className="spacer" />
-        <button type="button" className="btn small outline" disabled={preview} onClick={() => void refresh()} data-tip={preview ? t("common.demo") : undefined}>
+        <button type="button" className="btn small outline" disabled={preview} onClick={() => void refresh()} data-tip={preview && marks ? t("common.demo") : undefined}>
           <Icon name="refresh" extra="sm" />{t("common.refresh")}
         </button>
         <button type="button" className="btn small primary" disabled={Boolean(loadError) && !preview} onClick={openNew}>
@@ -940,7 +942,7 @@ export function SubagentsPanel({
         </button>
       </div>
       <ToastHost message={flash} onDismiss={() => setFlash(null)} />
-      {preview ? <div className="role-issue-banner"><Icon name="sparkles" extra="sm" /><div><div className="rib-title">{t("subagents.demoNoticeTitle")}</div><div className="rib-text">{t("subagents.demoNoticeDesc")}</div></div></div> : null}
+      {preview && marks ? <div className="role-issue-banner"><Icon name="sparkles" extra="sm" /><div><div className="rib-title">{t("subagents.demoNoticeTitle")}</div><div className="rib-text">{t("subagents.demoNoticeDesc")}</div></div></div> : null}
       {!preview && !data && !loadError ? <div className="preset-banner" role="status"><Icon name="refresh" extra="sm" /><span>{t("subagents.readingDefinitions")}</span></div> : null}
       {!preview && loadError ? <div className="role-issue-banner"><Icon name="alert" extra="sm" /><div><div className="rib-title">{t("subagents.readDescription")}</div><div className="rib-text">{loadError}</div></div></div> : null}
       {data?.warnings.length ? (
@@ -1042,7 +1044,7 @@ export function SubagentsPanel({
                 <div className="modal-body">
                   <p>{t("subagents.deleteConfirmDesc", { name: pendingDelete.name })}</p>
                   <p className="desc">
-                    {preview ? t("subagents.deleteConfirmDemo") : t("subagents.deleteConfirmReal")}
+                    {preview ? (marks ? t("subagents.deleteConfirmDemo") : (zh ? "只会从本地列表移除，不会写入磁盘。" : "Only removed from the local list; nothing is written to disk.")) : t("subagents.deleteConfirmReal")}
                   </p>
                 </div>
                 <div className="modal-foot">

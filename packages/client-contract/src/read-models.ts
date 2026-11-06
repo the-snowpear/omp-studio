@@ -264,14 +264,21 @@ export interface RecentThread {
 }
 
 /**
- * One workspace row for the workbench/home surfaces. Carries only the
- * opaque workspace id, a basename-only display name and the last-open
- * timestamp. Never a path, cwd or root: paths live in the Host registry.
+ * One workspace row for the workbench/home surfaces. Carries the opaque
+ * workspace id, a basename display name, the last-open timestamp and the
+ * canonical root for display.
+ *
+ * `root` is the folder the operator picked in the system dialog, shown back
+ * to them as an address. It is display metadata only: every file, tree and
+ * mutation path stays workspace-relative and is resolved inside the Host
+ * registry, so nothing here is ever joined or used for access checks.
  */
 export interface WorkspaceRecord {
   readonly workspaceId: WorkspaceId;
-  /** Basename only. Never a path. */
+  /** Basename only; the display name. */
   readonly name: string;
+  /** Canonical workspace root for display. Absent on older Hosts. */
+  readonly root?: string;
   readonly lastOpenedAt: string;
   readonly active: boolean;
 }

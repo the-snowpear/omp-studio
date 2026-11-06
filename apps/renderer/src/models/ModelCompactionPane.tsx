@@ -4,11 +4,13 @@ import type { AvailableModelRecord } from "@omp-studio/client-contract";
 import type { CompactionPreview } from "@omp-studio/studio-protocol";
 import { useFeatureSettings, type FeatureSettingsProps } from "../settings/useFeatureSettings";
 import { useI18n } from "../i18n";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { hostErrorMessage } from "../hostError";
 import "../settings/featureSettings.css";
 
 export function ModelCompactionPane(props: FeatureSettingsProps & { models: readonly AvailableModelRecord[] }) {
   const state = useFeatureSettings(props), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
+  const { marks } = usePreviewMode();
   const models = props.models.filter(model => !model.kind || model.kind === "chat");
   const [selector, setSelector] = useState(""), [input, setInput] = useState("");
   const [plan, setPlan] = useState<CompactionPreview>(), [error, setError] = useState(""), [notice, setNotice] = useState("");
@@ -24,7 +26,7 @@ export function ModelCompactionPane(props: FeatureSettingsProps & { models: read
   useEffect(() => {
     const current = ++generation.current; setPlan(undefined); setError(""); setConfirmation("");
     if (!props.visible || !state.enabled || !selected) return;
-    if (state.preview) { setPlan({ valid: true, summary: zh ? "演示：400K 基础窗口的 85%" : "Demo: 85% of a 400K base", window: 500000, trigger: 340000, extended: false }); return; }
+    if (state.preview) { setPlan({ valid: true, summary: (marks ? zh ? "演示：" : "Demo: " : "") + (zh ? "400K 基础窗口的 85%" : "85% of a 400K base"), window: 500000, trigger: 340000, extended: false }); return; }
     const timer = setTimeout(() => {
       void state.invoke("models.compaction.preview", { sessionId: props.context!.sessionId!, selector: selected.selector, input }).then(result => { if (current === generation.current) setPlan(result); })
         .catch(cause => { if (current === generation.current) setError(hostErrorMessage(cause, "Cannot preview compaction")); });
@@ -35,7 +37,7 @@ export function ModelCompactionPane(props: FeatureSettingsProps & { models: read
     if (lock.current || !selected || !plan?.valid) return;
     const current = generation.current; lock.current = true; setBusy(true); setError(""); setNotice("");
     try {
-      const result = state.preview ? { saved: true, confirmationRequired: false, summary: zh ? "演示压缩配置已保存。" : "Demo compaction setting saved." }
+      const result = state.preview ? { saved: true, confirmationRequired: false, summary: (marks ? zh ? "演示压缩配置已保存。" : "Demo compaction setting saved." : zh ? "压缩配置已保存。" : "Compaction setting saved.") }
         : await state.invoke("models.compaction.set", { sessionId: props.context!.sessionId!, selector: selected.selector, input, confirmed });
       if (current !== generation.current) return;
       if (result.confirmationRequired) setConfirmation(result.summary); else { setConfirmation(""); setNotice(result.summary); }
@@ -43,7 +45,7 @@ export function ModelCompactionPane(props: FeatureSettingsProps & { models: read
     finally { lock.current = false; setBusy(false); }
   }
   return <section className="feature-settings" aria-label={zh ? "模型压缩阈值" : "Model compaction thresholds"}>
-    <header className="feature-settings-head"><div><span className="feature-eyebrow">{zh ? "上下文容量" : "CONTEXT CAPACITY"}{state.preview ? zh ? " · 演示" : " · DEMO" : ""}</span><h3>{zh ? "为每个模型设置压缩时机" : "Compaction timing per model"}</h3></div></header>
+    <header className="feature-settings-head"><div><span className="feature-eyebrow">{zh ? "上下文容量" : "CONTEXT CAPACITY"}{state.preview && marks ? zh ? " · 演示" : " · DEMO" : ""}</span><h3>{zh ? "为每个模型设置压缩时机" : "Compaction timing per model"}</h3></div></header>
     <p className="feature-status">{zh ? "普通数值指定基础窗口，由原生策略计算触发点；百分比指定窗口占比；f400k 表示精确触发。留空恢复默认。" : "Numbers set a base window; native policy determines the trigger. Percentages use the window; f400k sets an exact trigger. Empty restores defaults."}</p>
     {!state.enabled ? <p className="feature-status">{zh ? "连接支持模型压缩配置的 Runtime 后可编辑。" : "Connect a compatible Runtime to edit compaction settings."}</p> : null}
     <div className="feature-actions"><AppSelect className="select" aria-label={zh ? "压缩配置模型" : "Compaction model"} value={selected?.selector ?? ""} disabled={busy || !models.length} onChange={event => setSelector(event.target.value)}>{models.map(model => <option key={model.selector} value={model.selector}>{model.name} · {model.provider}</option>)}</AppSelect><input className="input" aria-label={zh ? "压缩阈值" : "Compaction threshold"} value={input} maxLength={64} placeholder="400k / 80% / f400k" disabled={!state.enabled || busy} onChange={event => setInput(event.target.value)} /></div>

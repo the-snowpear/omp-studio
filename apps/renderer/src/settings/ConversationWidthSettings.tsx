@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { AppSelect } from "../AppSelect";
 import { useI18n } from "../i18n";
 import { Icon } from "../icons";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { CONVERSATION_WIDTH_LIMITS, CONVERSATION_WIDTH_MODES, DEFAULT_APP_SETTINGS, type ConversationWidthMode } from "./appSettings";
 import { useConversationWidth } from "./ConversationWidthContext";
 import { SettingRow, SettingSection, Slider } from "./SettingRow";
@@ -9,6 +10,7 @@ import { SettingRow, SettingSection, Slider } from "./SettingRow";
 export function ConversationWidthSettings() {
   const { t } = useI18n();
   const { mode, customWidth, preview, update } = useConversationWidth();
+  const { marks } = usePreviewMode();
   const [draft, setDraft] = useState(customWidth);
   useEffect(() => setDraft(customWidth), [customWidth, preview, mode]);
   const commit = () => {
@@ -17,7 +19,7 @@ export function ConversationWidthSettings() {
   const label = t("settings.conversationWidth.title");
   return (
     <SettingSection title={label} desc={t("settings.conversationWidth.desc")}>
-      {preview ? <span className="chip amber xs demo-chip">{t("common.demo")}</span> : null}
+      {preview && marks ? <span className="chip amber xs demo-chip">{t("common.demo")}</span> : null}
       <SettingRow label={t("settings.conversationWidth.mode")} desc={t("settings.conversationWidth.modeDesc")} source={mode === DEFAULT_APP_SETTINGS.conversationWidthMode ? "default" : "user"}>
         <AppSelect className="select" aria-label={label} value={mode} onChange={event => update({ conversationWidthMode: event.target.value as ConversationWidthMode })}>
           {CONVERSATION_WIDTH_MODES.map(option => <option key={option} value={option}>{t(`settings.conversationWidth.options.${option}`)}</option>)}
@@ -48,13 +50,14 @@ export function ConversationWidthMenu({ onSelect, onOpenSettings }: {
 }) {
   const { t } = useI18n();
   const { mode, customWidth, preview, update } = useConversationWidth();
+  const { marks } = usePreviewMode();
   const labelId = useId();
   const descriptionId = useId();
   return (
     <div role="group" aria-labelledby={labelId} aria-describedby={descriptionId}>
       <div className="menu-label" id={labelId}>
         {t("settings.conversationWidth.title")}
-        {preview ? <span className="chip amber xs demo-chip">{t("common.demo")}</span> : null}
+        {preview && marks ? <span className="chip amber xs demo-chip">{t("common.demo")}</span> : null}
       </div>
       <div className="menu-label" id={descriptionId}>{t("settings.conversationWidth.globalDisplay")}</div>
       {CONVERSATION_WIDTH_MODES.map(option => (

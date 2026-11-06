@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { MODEL_CONFIG_THINKING_EFFORTS, MODEL_THINKING_MODES, MODEL_PARAMETER_FIELDS, mergeModelParameters, type StudioClient, type ModelAdaptationInput, type ModelThinkingConfig, type ModelParameterField } from "@omp-studio/client-contract";
 import { AppSelect } from "../AppSelect";
 import { useI18n } from "../i18n";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { previewModelAdaptation } from "../preview/modelAdaptationPreview";
 import { effectiveModelParameters, effectiveParameterSources, modelParameterDraftError, retainManualModelParameters, setManualModelParameter, type ModelParameterDraft } from "./modelParameterDraft";
 
@@ -13,6 +14,7 @@ export function ModelParameterEditor({ client, preview, input, value, onChange }
   onChange: (update: (draft: ModelParameterDraft) => ModelParameterDraft) => void;
 }) {
   const { t } = useI18n();
+  const { marks } = usePreviewMode();
   const change = useRef(onChange); change.current = onChange;
   const snapshot = useRef(value); snapshot.current = value;
   const [generation, setGeneration] = useState(0);
@@ -48,7 +50,7 @@ export function ModelParameterEditor({ client, preview, input, value, onChange }
   const recommendation = value.recommendation;
   const set = (field: ModelParameterField, next: unknown) => onChange(current => setManualModelParameter(current, field, next));
   const origin = (field: ModelParameterField) => sources[field] ? t(`modelAdaptation.source.${sources[field]!.source}`) : t("modelAdaptation.unknown");
-  const badge = (field: ModelParameterField) => <small className="mc-parameter-origin" data-source={sources[field]?.source} data-tip={sources[field]?.catalogModel}>{origin(field)}</small>;
+  const badge = (field: ModelParameterField) => <small className="mc-parameter-origin" data-source={sources[field]?.source} data-tip={marks ? sources[field]?.catalogModel : undefined}>{origin(field)}</small>;
   const updateThinking = (patch: Partial<ModelThinkingConfig>) => {
     const base = values.thinkingConfig ?? { mode: "effort" as const, efforts: MODEL_CONFIG_THINKING_EFFORTS };
     onChange(current => {
@@ -61,7 +63,7 @@ export function ModelParameterEditor({ client, preview, input, value, onChange }
 
   return <div className="mc-parameters span2">
     <div className="mc-parameters-header">
-      <strong>{t("modelAdaptation.title")}{preview ? ` · ${t("modelAdaptation.demo")}` : ""}</strong>
+      <strong>{t("modelAdaptation.title")}{preview && marks ? ` · ${t("modelAdaptation.demo")}` : ""}</strong>
       <button type="button" className="btn small outline" onClick={() => {
         onChange(current => {
           const { catalogVersion: _pin, recommendation: _old, ...rest } = retainManualModelParameters(current);
@@ -70,7 +72,7 @@ export function ModelParameterEditor({ client, preview, input, value, onChange }
         setGeneration(n => n + 1);
       }}>{t("modelAdaptation.reapply")}</button>
     </div>
-    <p className="small muted" aria-live="polite">{value.pending ? t("modelAdaptation.matching") : recommendation?.status === "matched" ? `${t("modelAdaptation.matched")} ${recommendation.candidates[0]?.provider} / ${recommendation.candidates[0]?.name} · ${recommendation.catalogVersion}` : recommendation?.status === "ambiguous" ? t("modelAdaptation.ambiguous") : t("modelAdaptation.noMatch")}</p>
+    <p className="small muted" aria-live="polite">{value.pending ? t("modelAdaptation.matching") : recommendation?.status === "matched" ? `${t("modelAdaptation.matched")} ${recommendation.candidates[0]?.provider} / ${recommendation.candidates[0]?.name}${marks ? ` · ${recommendation.catalogVersion}` : ""}` : recommendation?.status === "ambiguous" ? t("modelAdaptation.ambiguous") : t("modelAdaptation.noMatch")}</p>
     {recommendation?.status === "ambiguous" ? <AppSelect className="select" aria-label={t("modelAdaptation.chooseModel")} value="" onChange={event => {
       const selected = recommendation.candidates.find(row => row.key === event.target.value);
       if (!selected) return;

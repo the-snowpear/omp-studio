@@ -10,8 +10,13 @@ import { defaultOmpAgentDir } from "@omp-studio/studio-host";
 import { DesktopPrediction, registerPredictionIpc } from "./prediction.js";
 import { registerSkillshareTokenIpc } from "./chrome-skillshare.js";
 import { DesktopLiveAudio, registerLiveAudioIpc } from "./live-audio.js";
+import { DesktopDictationAudio, registerDictationAudioIpc } from "./dictation-audio.js";
 import { DesktopBrowserObservation, registerBrowserObservationIpc } from "./browser-observation.js";
+import { DesktopManagedBrowser } from "./managed-browser.js";
+import { ManagedBrowserRelay } from "./managed-browser-relay.js";
+import { registerManagedBrowserIpc } from "./managed-browser-ipc.js";
 import { registerComputerCaptureIpc } from "./computer-observation.js";
+import { ComputerFrameStore, registerComputerFrameIpc } from "./computer-frames.js";
 import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 /**
  * Electron Main entry for the OMP Studio Windows Desktop shell
@@ -32,6 +37,8 @@ import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, powerMonitor, powerSaveBlocker, protocol, safeStorage, session, shell, systemPreferences, Tray, type NativeImage, type WebContents } from "electron";
 import { registerServiceDefinitionsIpc } from "./chrome-services.js";
 import { ServiceDefinitionStore } from "./service-definitions.js";
+import { MemoryCredentialStore, localMemoryCredentialProvider } from "./memory-credentials.js";
+import { registerMemoryCredentialIpc } from "./memory-credentials-ipc.js";
 import { activeArtifactLibrary, activeMediaDirectory, activeProfileDirectory } from "./artifact-library.js";
 import { runtimeSocketDirectory } from "./runtime-session.js";
 import { artifactResponse, registerArtifactIpc } from "./chrome-artifacts.js";
@@ -84,6 +91,8 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { createDesktopApplication } from "./composition.js";
 import { completeDesktopRuntimeTrial } from "./runtime-startup.js";
 import { registerDesktopIpc } from "./ipc.js";
+import { screen } from "electron";
+import { registerFloatingWindows } from "./floating-windows.js";
 import {
   RENDERER_CSP,
   createDevicePermissionHandler,
@@ -242,8 +251,14 @@ export async function main(): Promise<void> {
   if (process.platform === "darwin" && !app.isPackaged && validAppIcon !== undefined) app.dock?.setIcon(validAppIcon);
 
   let updateCoordinator: UpdateCoordinator | undefined;
+  const memoryCredentials = new MemoryCredentialStore(join(app.getPath("userData"), "hindsight-credentials.enc"), {
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value),
+  });
   const hostFactory = createProductionHostFactory({
+    managedBrowser: true,
     loginEnvironment,
+    memoryCredentials: localMemoryCredentialProvider(memoryCredentials, "local"),
     beforeCreate: async () => { await updateCoordinator?.initialize(); },
     afterCreate: async (composition, workspaceSelected) => {
       if (!updateCoordinator?.hasRuntimeTrial || !workspaceSelected) return false;
@@ -375,11 +390,16 @@ export async function main(): Promise<void> {
   const remoteConnections: RemoteConnectionManager = new RemoteConnectionManager(join(desktopPaths().stateRoot, "ssh-connections.json"), remoteBundle, undefined, remoteHelpers, undefined, {
     requireApproval: true,
     prepare: (profile, environment, authentication, signal, progress) => remoteInstaller.prepare(profile, environment, authentication, signal, progress),
-    connected: (id, remote, signal, report) => connectRemoteServices(remoteConnections, id, remote, signal, report, remoteVault, url => session.defaultSession.resolveProxy(url)),
+    connected: (id, remote, signal, report) => connectRemoteServices(remoteConnections, id, remote, signal, report, remoteVault, url => session.defaultSession.resolveProxy(url), memoryCredentials),
   });
   const remoteTerminals = new RemoteTerminalManager(remoteConnections);
   const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);
   const mediaUploads = new MediaUploadManager(activeArtifactLibrary);
+  const dictationAudio = new DesktopDictationAudio({
+    directory: activeMediaDirectory,
+    files: () => runtimeMediaFilesForLibrary(activeArtifactLibrary()),
+    socketDirectory: () => runtimeSocketDirectory(activeProfileDirectory()),
+  });
   const liveAudio = new DesktopLiveAudio({
     directory: activeMediaDirectory,
     files: () => runtimeMediaFilesForLibrary(activeArtifactLibrary()),
@@ -387,6 +407,7 @@ export async function main(): Promise<void> {
   });
   const prediction = new DesktopPrediction({directory:activeMediaDirectory,socketDirectory:()=>runtimeSocketDirectory(activeProfileDirectory()),chooseHistory:async sender=>{const owner=BrowserWindow.fromWebContents(sender as WebContents);const options={title:"导入提示词历史 / Import prompt history",filters:[{name:"JSONL history",extensions:["jsonl"]}],properties:["openFile"] as const};const result=owner?await dialog.showOpenDialog(owner,{...options,properties:[...options.properties]}):await dialog.showOpenDialog({...options,properties:[...options.properties]});return result.canceled?undefined:result.filePaths[0];}});
   const browserObservation = new DesktopBrowserObservation({ directory: activeMediaDirectory, socketDirectory: () => runtimeSocketDirectory(activeProfileDirectory()) });
+  let managedBrowser: DesktopManagedBrowser | undefined;
   const terminalManager = new TerminalSessionManager({
     recording: terminalRecordings,
     spawner: createNodePtySpawner(),
@@ -559,7 +580,7 @@ export async function main(): Promise<void> {
     }
     if (!(await protocol.isProtocolHandled("omp-artifact"))) {
       const origin = target.kind === "url" ? new URL(target.url).origin : "null";
-      protocol.handle("omp-artifact", request => remoteConnections.activeId === null ? artifactResponse(request, activeArtifactLibrary(), origin) : new Response("Remote artifact transfer is not available", { status: 503 }));
+      protocol.handle("omp-artifact", request => artifactResponse(request, activeArtifactLibrary(), origin));
     }
     const allowedOrigin = rendererOriginFor(target);
     const preloadPath = layout.preloadPath;
@@ -596,8 +617,29 @@ export async function main(): Promise<void> {
     }
     // Fixed named channels only; every payload validated at this boundary.
     // `dispose` removes handlers before Host shutdown on app quit.
-    const isTrustedSender = (sender: { getURL(): string }) => sender === window.webContents && isTrustedRendererUrl(sender.getURL(), allowedOrigin);
-    const isTrustedLocalSender = (sender: { getURL(): string }) => isTrustedSender(sender) && remoteConnections.activeId === null;
+    const floatingWindows = registerFloatingWindows({
+      parent: window as BrowserWindow, ipcMain, allowedOrigin, preloadPath,
+      areas: () => screen.getAllDisplays().map(display => display.workArea),
+      isQuitting: context.isQuitting, openExternal: url => { void shell.openExternal(url); },
+      onWindow: child => desktopConversationViews.registerWindow(child.webContents, false),
+      onVisibility: child => {
+        const visible = child.isVisible() && !child.isMinimized();
+        desktopConversationViews.setVisible(child.webContents, visible);
+        dictationAudio.setVisible(child.webContents.id, visible);
+        if (!visible) { liveAudio.disposeWindow(child.webContents.id); browserObservation.disposeWindow(child.webContents.id); prediction.disposeWindow(child.webContents.id); }
+      },
+      onClosed: contents => desktopConversationViews.remove(contents),
+      onWillClose: child => managedBrowser?.detachWindow(child),
+    });
+    managedBrowser = new DesktopManagedBrowser({ directory: join(activeProfileDirectory(), "browser"), downloadsDirectory: app.getPath("downloads"), windowFor: floatingWindows.windowFor });
+    new ManagedBrowserRelay({ manager: managedBrowser, directory: activeMediaDirectory });
+    window.on("close", () => { if (context.isQuitting()) managedBrowser?.detachWindow(window as BrowserWindow); });
+    const isTrustedSender = (sender: { getURL(): string }) => (sender === window.webContents || floatingWindows.owns(sender)) && isTrustedRendererUrl(sender.getURL(), allowedOrigin);
+    // These fixed IPC methods are local desktop capabilities. Each request already carries its session/workspace; a sibling SSH view cannot disable them.
+    const isTrustedLocalSender = isTrustedSender;
+    const disposeMemoryCredentials = registerMemoryCredentialIpc({ ipcMain, isTrustedSender, store: memoryCredentials, activeTarget: () => remoteConnections.activeId,
+      supportsSync: target => { if (target === null) return true; try { return remoteConnections.get(target).transport.hello?.capabilities?.includes("memory.credentials") === true; } catch { return false; } },
+    });
     const payloadHealth = registerPayloadHealthIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -686,8 +728,9 @@ export async function main(): Promise<void> {
       openExternal: (url) => shell.openExternal(url),
     });
     desktopConversationViews.registerWindow(window.webContents, windowSurface.isVisible() && !windowSurface.isMinimized());
-    const refreshConversationVisibility = () => { const visible = windowSurface.isVisible() && !windowSurface.isMinimized(); desktopConversationViews.setVisible(window.webContents, visible); if (!visible) { liveAudio.disposeWindow(window.webContents.id); browserObservation.disposeWindow(window.webContents.id); prediction.disposeWindow(window.webContents.id); } };
+    const refreshConversationVisibility = () => { const visible = windowSurface.isVisible() && !windowSurface.isMinimized(); desktopConversationViews.setVisible(window.webContents, visible); dictationAudio.setVisible(window.webContents.id, visible); if (!visible) { liveAudio.disposeWindow(window.webContents.id); browserObservation.disposeWindow(window.webContents.id); prediction.disposeWindow(window.webContents.id); } };
     const resetConversationVisibility = () => desktopConversationViews.reset(window.webContents);
+    const retainDictation = () => dictationAudio.retainWindow(window.webContents.id);
     const cancelRemotePreparation = () => { void remoteIpc.cancelPending().catch(() => {}); };
     const cancelRemoteNavigation = (_event: unknown, _url: string, isInPlace: boolean, isMainFrame: boolean) => { if (isMainFrame && !isInPlace) cancelRemotePreparation(); };
     const removeConversationVisibility = () => desktopConversationViews.remove(window.webContents);
@@ -698,6 +741,7 @@ export async function main(): Promise<void> {
     window.webContents.on("did-start-navigation", resetConversationVisibility);
     window.webContents.on("did-start-navigation", cancelRemoteNavigation);
     window.webContents.on("render-process-gone", cancelRemotePreparation);
+    window.webContents.on("render-process-gone", retainDictation);
     window.webContents.on("destroyed", cancelRemotePreparation);
     window.webContents.on("destroyed", removeConversationVisibility);
     ipcMain.handle(CONVERSATION_VIEW_CHANNEL, ({ sender }, input: unknown) =>
@@ -772,10 +816,18 @@ export async function main(): Promise<void> {
     });
     const disposeSkillshareTokens = registerSkillshareTokenIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, directory: activeMediaDirectory });
     const disposeMediaUploads = registerMediaUploadIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, manager: mediaUploads });
+    const disposeDictationAudio = registerDictationAudioIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, manager: dictationAudio, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
     const disposeLiveAudio = registerLiveAudioIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, manager: liveAudio, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
     const disposePrediction = registerPredictionIpc({ipcMain,isTrustedSender: isTrustedLocalSender,manager:prediction,isVisible:sender=>{const owner=BrowserWindow.fromWebContents(sender as WebContents);return !!owner&&owner.isVisible()&&!owner.isMinimized();}});
     const disposeBrowserObservation = registerBrowserObservationIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, manager: browserObservation, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
+    const disposeManagedBrowser = registerManagedBrowserIpc({ ipcMain, isTrustedSender, isLocal: () => true, manager: managedBrowser });
     const disposeComputerCapture = registerComputerCaptureIpc({ ipcMain, isTrustedSender: isTrustedLocalSender, directory: activeMediaDirectory, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
+    const disposeComputerFrames = registerComputerFrameIpc({
+      ipcMain,
+      store: new ComputerFrameStore({ directory: activeMediaDirectory, library: activeArtifactLibrary }),
+      isTrustedSender: isTrustedLocalSender,
+      isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); },
+    });
     const disposeImage = registerChromeImageIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -829,6 +881,7 @@ export async function main(): Promise<void> {
       manager: terminalManager,
       remote: remoteTerminals,
       activeRemote: () => remoteConnections.activeId,
+      resolveWorkspaceCwd: workspaceId => hostFactory.resolveWorkspaceCwd(workspaceId),
       recordings: terminalRecordings,
     });
     const disposeWorkspaceShell = registerWorkspaceShellIpc({
@@ -842,7 +895,7 @@ export async function main(): Promise<void> {
       },
       isTrustedSender,
       actions: {
-        resolveWorkspaceCwd: (workspaceId) => { if (remoteConnections.activeId !== null) throw new Error("SSH 工作区不支持本机文件打开操作"); return hostFactory.resolveWorkspaceCwd(workspaceId); },
+        resolveWorkspaceCwd: (workspaceId) => hostFactory.resolveWorkspaceCwd(workspaceId),
         openInExternalEditor,
         revealInFileManager: async (cwd) => {
           const error = await shell.openPath(cwd);
@@ -934,7 +987,7 @@ export async function main(): Promise<void> {
     // real quit path releases this through `isQuitting`.
     // macOS always hides to the Dock; a full-screen window leaves its Space first.
     window.on("close", (event) => {
-      if (context.isQuitting() || !(closeToTrayEnabled || process.platform === "darwin")) return;
+      if (context.isQuitting() || !(closeToTrayEnabled || process.platform === "darwin" || floatingWindows.hasWindows())) return;
       event.preventDefault();
       if (process.platform === "darwin" && window.isFullScreen()) {
         window.once("leave-full-screen", () => window.hide());
@@ -966,6 +1019,7 @@ export async function main(): Promise<void> {
         windowSurface.close();
       },
       dispose: () => {
+        floatingWindows.dispose();
         disposeUpdates.dispose();
         disposeUnifiedUpdates?.();
         updateCoordinator?.dispose();
@@ -977,11 +1031,15 @@ export async function main(): Promise<void> {
         disposeArtifacts.dispose();
         disposeMediaUploads.dispose();
         disposeSkillshareTokens.dispose();
+        disposeDictationAudio.dispose();
         disposeLiveAudio.dispose();
         disposePrediction.dispose();
         disposeBrowserObservation.dispose();
+        disposeManagedBrowser.dispose();
         disposeComputerCapture.dispose();
+        disposeComputerFrames.dispose();
         disposeServiceDefinitions.dispose();
+        disposeMemoryCredentials.dispose();
         disposeLogs.dispose();
         disposeMetrics.dispose();
         disposePerformance.dispose();
@@ -995,6 +1053,7 @@ export async function main(): Promise<void> {
         window.webContents.removeListener("did-start-navigation", resetConversationVisibility);
         window.webContents.removeListener("did-start-navigation", cancelRemoteNavigation);
         window.webContents.removeListener("render-process-gone", cancelRemotePreparation);
+        window.webContents.removeListener("render-process-gone", retainDictation);
         window.webContents.removeListener("destroyed", cancelRemotePreparation);
         window.webContents.removeListener("destroyed", removeConversationVisibility);
         removeConversationVisibility();
@@ -1014,7 +1073,7 @@ export async function main(): Promise<void> {
     : undefined;
 
   const application = createDesktopApplication({
-    beforeShutdown: async () => { remoteTerminals.disposeAll(); await remoteConnections.close(); remoteVault.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await remoteConnections.close(); remoteVault.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
     platform: process.platform,

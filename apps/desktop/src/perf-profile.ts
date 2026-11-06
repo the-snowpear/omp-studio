@@ -28,12 +28,8 @@
  * applied there (they can only tighten the policy, never loosen the evidence).
  */
 
-import {
-  parsePerfProfileSnapshot,
-  type PerfMotion,
-  type PerfProfileSnapshot,
-  type PerfTier,
-} from "./perf-profile-shared.js";
+import { parsePerfProfileSnapshot } from "./perf-profile-cache.js";
+import type { PerfMotion, PerfProfileSnapshot, PerfTier } from "./perf-profile-shared.js";
 
 /** ≤ this many logical cores counts as low spec (Win11 minimum is 2C). */
 export const PERF_LOW_SPEC_CORES = 2;

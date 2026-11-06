@@ -192,6 +192,8 @@ describe("conversation live projector Bridge wiring", () => {
 		const assistantId = manager.appendMessage(assistantMessage("done"));
 		expect(toolId).not.toBe(reserved);
 		expect(assistantId).toBe(reserved);
+		expect(manager.getEntry(assistantId)?.runtime).toEqual(manager.getEntry(toolId)?.runtime);
+		expect(manager.getEntry(assistantId)?.runtime).toBeDefined();
 	});
 
 	test("compaction completed itemId matches persist-before-end SessionEntry and transcript itemId", () => {
@@ -310,6 +312,8 @@ describe("conversation live projector Bridge wiring", () => {
 		const nextCompactReserved = manager.reserveCompactionId();
 		const laterCompactId = manager.appendCompaction("later compact", "later", userId, 4);
 		expect(laterCompactId).toBe(nextCompactReserved);
+		expect(manager.getEntry(laterCompactId)?.runtime).toEqual(manager.getEntry(userId)?.runtime);
+		expect(manager.getEntry(laterCompactId)?.runtime).toBeDefined();
 		expect(laterCompactId).not.toBe(assistantReserved);
 		expect(
 			manager.getBranch().some(entry => entry.type === "compaction" && entry.summary === "should not persist"),

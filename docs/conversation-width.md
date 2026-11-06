@@ -2,7 +2,7 @@
 
 ## 使用对话宽度设置
 
-打开 **设置 → 常规 → 对话宽度**，可选择：
+打开 **设置 → 外观与布局 → 对话宽度**，可选择：
 
 - **标准**：最大阅读宽度 768px，兼容原有布局。
 - **宽屏**：最大阅读宽度 1024px。
@@ -38,7 +38,7 @@
 
 ## English
 
-Open **Settings → General → Conversation width** to choose Standard (768px), Wide (1024px), Full width, or a Custom width from 640px to 1440px in 32px steps. Custom width is preserved when switching presets. A narrow window temporarily clamps the effective width without overwriting the saved preference.
+Open **Settings → Appearance and layout → Conversation width** to choose Standard (768px), Wide (1024px), Full width, or a Custom width from 640px to 1440px in 32px steps. Custom width is preserved when switching presets. A narrow window temporarily clamps the effective width without overwriting the saved preference.
 
 The workbench conversation menu exposes the same choices. Preview changes stay in demo memory and never write the real preference.
 

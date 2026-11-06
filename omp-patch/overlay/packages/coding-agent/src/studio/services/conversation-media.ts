@@ -12,6 +12,26 @@ export function projectToolMedia(content: unknown, rawDetails: unknown): { data?
 	if (Array.isArray(content))
 		for (const block of content) {
 			if (!block || typeof block !== "object" || (block as { type?: unknown }).type !== "image") continue;
+			const reference = (
+				block as { computerFrame?: { frameId?: unknown; sessionId?: unknown; toolCallId?: unknown } }
+			).computerFrame;
+			if (
+				reference &&
+				typeof reference.frameId === "string" &&
+				typeof reference.sessionId === "string" &&
+				media.length < 50
+			) {
+				media.push({
+					type: "image",
+					mimeType: "image/png",
+					computerFrame: {
+						frameId: reference.frameId,
+						sessionId: reference.sessionId,
+						...(typeof reference.toolCallId === "string" ? { toolCallId: reference.toolCallId } : {}),
+					},
+				});
+				continue;
+			}
 			const { mimeType, data } = block as { mimeType?: unknown; data?: unknown };
 			if (
 				typeof mimeType !== "string" ||

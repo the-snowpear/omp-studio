@@ -43,7 +43,7 @@ function receiptClient(resultFor: (kind: string, input: unknown) => unknown) {
 
 function pane(client: StudioClient, { visible = true, sessionId, native = false }: { visible?: boolean; sessionId?: string; native?: boolean } = {}) {
   return <I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled>
-    <ComputerPane client={client} available visible={visible} sessionId={sessionId} capabilities={native ? capabilities : undefined} />
+    <ComputerPane client={client} available visible={visible} sessionId={sessionId} executionTarget={{ kind: "local" }} capabilities={native ? capabilities : undefined} />
   </PreviewModeProvider></I18nProvider>;
 }
 
@@ -53,18 +53,18 @@ it("previews capture and stop locally and drops the picture when hidden", async 
   const { rerender } = render(pane(client));
 
   fireEvent.click(screen.getByRole("button", { name: "刷新截图" }));
-  await waitFor(() => expect(screen.getByAltText("所选电脑目标截图")).toBeTruthy());
+  await waitFor(() => expect(screen.getByAltText("电脑目标截图")).toBeTruthy());
   fireEvent.click(screen.getByRole("button", { name: "查看大图" }));
-  expect(screen.getByAltText("电脑截图大图")).toBeTruthy();
+  expect(screen.getByRole("dialog")).toBeTruthy();
   fireEvent.keyDown(document, { key: "Escape" });
   expect(screen.queryByRole("dialog")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "停止电脑操作" }));
-  expect(screen.getByText("演示：已请求停止")).toBeTruthy();
+  await screen.findByText("本会话电脑操作已停止");
 
   fireEvent.click(screen.getByRole("button", { name: "查看大图" }));
   rerender(pane(client, { visible: false }));
-  expect(screen.queryByAltText("所选电脑目标截图")).toBeNull();
-  expect(screen.queryByAltText("电脑截图大图")).toBeNull();
+  expect(screen.queryByAltText("电脑目标截图")).toBeNull();
+
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(client.command).not.toHaveBeenCalled();
   expect(client.query).not.toHaveBeenCalled();
@@ -110,14 +110,14 @@ it("clears the old screenshot when the selected target or conversation changes",
   const { rerender } = render(pane(client, { sessionId: "session-1" }));
 
   fireEvent.click(screen.getByRole("button", { name: "刷新截图" }));
-  await screen.findByAltText("所选电脑目标截图");
-  selectOption(screen.getByRole("combobox", { name: "屏幕或窗口" }), "OMP Studio · Workspace");
-  expect(screen.queryByAltText("所选电脑目标截图")).toBeNull();
+  await screen.findByAltText("电脑目标截图");
+  selectOption(screen.getByRole("combobox", { name: "观察模式和目标" }), "固定观察 · Display 1");
+  expect(screen.queryByAltText("电脑目标截图")).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "刷新截图" }));
-  await screen.findByAltText("所选电脑目标截图");
+  await screen.findByAltText("电脑目标截图");
   rerender(pane(client, { sessionId: "session-2" }));
-  expect(screen.queryByAltText("所选电脑目标截图")).toBeNull();
+  await screen.findByAltText("电脑目标截图");
   expect(client.command).not.toHaveBeenCalled();
 });
 

@@ -11,13 +11,19 @@ export interface StudioBrowserTab {
 	reason?: string;
 }
 export type BrowserObservationOperation =
+	| { kind: "browser.managed.prepare"; sessionId: string }
 	| { kind: "browser.tabs.get"; sessionId: string }
 	| { kind: "browser.observe.prepare"; sessionId: string; tabId: string };
 export interface BrowserObservationResultMap {
+	"browser.managed.prepare": { sessionId: string; descriptorId: string };
 	"browser.tabs.get": { tabs: StudioBrowserTab[] };
 	"browser.observe.prepare": { observationId: string; sessionId: string; tabId: string; expiresAt: number };
 }
-export const BROWSER_OBSERVATION_KINDS = ["browser.tabs.get", "browser.observe.prepare"] as const;
+export const BROWSER_OBSERVATION_KINDS = [
+	"browser.tabs.get",
+	"browser.observe.prepare",
+	"browser.managed.prepare",
+] as const;
 export function isBrowserObservationKind(kind: string): kind is BrowserObservationOperation["kind"] {
 	return (BROWSER_OBSERVATION_KINDS as readonly string[]).includes(kind);
 }
@@ -93,6 +99,7 @@ export function validateBrowserObservationOperation(value: unknown): void {
 	else object(row, ["kind", "sessionId"]);
 }
 export function validateBrowserObservationResult(kind: BrowserObservationOperation["kind"], value: unknown): void {
+	if (kind === "browser.managed.prepare") return;
 	if (kind === "browser.observe.prepare") {
 		const row = object(value, ["observationId", "sessionId", "tabId", "expiresAt"]);
 		id(row.observationId);

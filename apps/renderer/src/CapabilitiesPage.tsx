@@ -15,7 +15,7 @@ import type {
   StudioClient,
 } from "@omp-studio/client-contract";
 import type { OperatorCommandManifest } from "@omp-studio/studio-protocol";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import { ToastHost } from "./ToastHost";
 import { tabPaneClass, tabPaneRole, useOverlappingTabs } from "./pageTransition";
 import { SlidingTabs } from "./SlidingTabs";
@@ -49,7 +49,7 @@ export { CAP_INTENT_KEY, setCapIntent, type CapTab } from "./pageIntents";
 /** Translation function signature shared by module-scope display builders. */
 type TFunc = (key: string, params?: TranslationParams) => string;
 
-const TABS: ReadonlyArray<readonly [CapTab, string]> = [
+const TABS: ReadonlyArray<readonly [CapTab, IconName]> = [
   ["skills", "book"],
   ["plugins", "package"],
   ["mcp", "plug"],
@@ -142,7 +142,7 @@ function Stepper({ loaded, session, configuredOnly }: { loaded: boolean; session
   );
 }
 
-function Provide({ icon, label, count, items }: { icon: string; label: string; count: number; items: string[] }) {
+function Provide({ icon, label, count, items }: { icon: IconName; label: string; count: number; items: string[] }) {
   const { t } = useI18n();
   return (
     <div className="cap-provide">
@@ -211,7 +211,7 @@ export function CapabilitiesPage({
   onPinCompleted?: () => Promise<void>;
 }) {
   const { t } = useI18n();
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
   const [skillsView,setSkillsView] = useState<"local"|"registry">("local");
   const [mcpView,setMcpView] = useState<"config"|"runtime">("config");
@@ -362,7 +362,7 @@ export function CapabilitiesPage({
 
   const revealSkill = async (skill: SkillPreview) => {
     if (preview) {
-      toast(t("capabilities.demoOpenedDir"));
+      if (marks) toast(t("capabilities.demoOpenedDir"));
       return;
     }
     try {
@@ -376,7 +376,7 @@ export function CapabilitiesPage({
 
   const revealSkillRoot = async () => {
     if (preview) {
-      toast(t("capabilities.demoOpenedDir"));
+      if (marks) toast(t("capabilities.demoOpenedDir"));
       return;
     }
     try {
@@ -390,7 +390,7 @@ export function CapabilitiesPage({
 
   const refreshMcp = async (item: McpServerRecord | PreviewMcp) => {
     if (preview) {
-      toast(t("capabilities.demoRefreshed"));
+      if (marks) toast(t("capabilities.demoRefreshed"));
       return;
     }
     if ("status" in item && item.status === "shadowed") return;
@@ -409,7 +409,7 @@ export function CapabilitiesPage({
   const testMcp = async (item: McpServerRecord | PreviewMcp) => {
     if (preview) {
       const tools = "tools" in item && typeof item.tools === "number" ? item.tools : 0;
-      toast(t("capabilities.demoConnected", { count: tools }));
+      if (marks) toast(t("capabilities.demoConnected", { count: tools }));
       return;
     }
     if ("status" in item && item.status === "shadowed") return;
@@ -447,7 +447,7 @@ export function CapabilitiesPage({
 
   const runSlash = async (row: PreviewSlash) => {
     if (preview) {
-      toast(t("capabilities.demoRanSlash", { name: row.name }));
+      if (marks) toast(t("capabilities.demoRanSlash", { name: row.name }));
       return;
     }
     const command = lookupSlashCommand(slashBareName(row.name), slashCatalog);
@@ -966,8 +966,8 @@ export function CapabilitiesPage({
         <div>
           <h1 style={{ fontSize: 18 }}>{t("capabilities.pageTitle")}</h1>
           <p className="muted small">{t("capabilities.pageSubtitle")}</p>
-          {preview || loadError ? (
-            <p className="tiny muted">{preview ? t("capabilities.previewSubtitle") : loadError}</p>
+          {(preview && marks) || loadError ? (
+            <p className="tiny muted">{preview && marks ? t("capabilities.previewSubtitle") : loadError}</p>
           ) : null}
         </div>
         <span className="spacer" />

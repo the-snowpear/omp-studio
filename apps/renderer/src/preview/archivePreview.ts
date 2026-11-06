@@ -6,7 +6,7 @@ import type {
 export function previewArchiveSessions(): NativeArchiveSession[] {
   return [
     {
-      id: "demo-archive-queue",
+      id: "sess-7c2e91",
       title: "完善消息队列的图片恢复",
       project: "omp-studio",
       created: "2026-10-07T08:30:00.000Z",
@@ -17,7 +17,7 @@ export function previewArchiveSessions(): NativeArchiveSession[] {
       truncated: false,
     },
     {
-      id: "demo-archive-browser",
+      id: "sess-4a8f20",
       title: "检查浏览器观察与人工接管",
       project: "omp-studio",
       created: "2026-10-07T09:00:00.000Z",
@@ -39,7 +39,7 @@ export function previewArchiveTexts(
           ? "队列恢复和图片附件已验证。仍需检查断连期间的实际状态。"
           : "请检查消息队列恢复后是否保留图片。",
       at: "2026-10-08T00:40:00.000Z",
-      sessionId: "demo-archive-queue",
+      sessionId: "sess-7c2e91",
       project: "omp-studio",
       ...(view === "prompts" ? { uses: 2 } : {}),
       truncated: false,
@@ -50,7 +50,7 @@ export function previewArchiveTexts(
           ? "浏览器观察已接入同一原生目标，等待多会话验收。"
           : "检查浏览器人工接管和租约释放。",
       at: "2026-10-07T12:00:00.000Z",
-      sessionId: "demo-archive-browser",
+      sessionId: "sess-4a8f20",
       project: "omp-studio",
       truncated: false,
     },

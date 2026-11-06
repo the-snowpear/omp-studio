@@ -33,10 +33,6 @@ it("preview applies and clears a title override without writing Runtime configur
   const field = await screen.findByRole("combobox", { name: "标题图标" });
   const row = field.closest(".set-row")!;
   selectOption(field, "仅标题");
-  fireEvent.click(
-    within(row as HTMLElement).getByRole("button", { name: "应用" }),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "确认" }));
   await waitFor(() =>
     expect(
       within(row as HTMLElement).getByRole("button", { name: "清除临时覆盖" }),
@@ -45,7 +41,6 @@ it("preview applies and clears a title override without writing Runtime configur
   fireEvent.click(
     within(row as HTMLElement).getByRole("button", { name: "清除临时覆盖" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "确认" }));
   await waitFor(() =>
     expect((field as HTMLButtonElement).textContent).toBe("Emoji"),
   );

@@ -1,6 +1,7 @@
 import type { JsonValue } from "@omp-studio/client-contract";
 
 import { demoPath } from "./demoPaths";
+import { PREVIEW_COMPUTER_TOOL_MEDIA } from "./computerPreview";
 
 /**
  * Preview-only copy of ver1 `D.nativeToolGallery` (scene 42).
@@ -110,9 +111,15 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
     output: "ok · 1 node",
   },
   {
-    kind: "computer", name: "Computer", target: "screenshot + click", status: "done", dur: "4.2s",
-    code: "await click(\"Allow once\")", shots: 1,
-    output: "clicked Allow once",
+    kind: "computer", name: "Computer", target: "target frame", status: "done", dur: "4.2s",
+    code: "const frame = await computer.screenshot()", shots: 1,
+    output: "Captured the target window. No input was sent.",
+    media: PREVIEW_COMPUTER_TOOL_MEDIA,
+  },
+  {
+    kind: "eval", name: "Eval", target: "Computer · target frame", status: "done", dur: "1.1s", lang: "javascript",
+    cells: [{ code: "await computer.screenshot()", stdout: "Captured the target window.", status: "completed" }],
+    media: PREVIEW_COMPUTER_TOOL_MEDIA,
   },
   {
     kind: "checkpoint", name: "Checkpoint", target: "调查 Mermaid 类型错误前", status: "done", dur: "0.9s",

@@ -1,8 +1,15 @@
+import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
+import { GitHubReferencePreview } from "./GitHubReferencePreview";
+import type { GitHubReferenceSnapshot } from "./githubReference";
+import type { GitCommitReferenceSnapshot } from "./gitCommitReference";
+import type { BrowserReferenceSnapshot } from "./browserReference";
+import { parseChipPayload } from "./ingest";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { useWordPrediction, type ComposerPrediction } from "./useWordPrediction";
 import { isPrimaryModifier } from "../keyboard/shortcuts";
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -18,7 +25,7 @@ import {
 import type { ComposerChip, ComposerSnapshot, MentionCandidate, PromptImage } from "./types";
 import type { PredictionResult } from "@omp-studio/studio-protocol";
 import { emptySnapshot, newChipId } from "./types";
-import { snapshotFromDoc, snapshotIsEmpty } from "./serialize";
+import { snapshotFromDoc, snapshotIsEmpty, displayDocFromSerializedText } from "./serialize";
 import { fileToPromptImage, imagePreviewUrl, isImageFile } from "./ingest";
 import {
   chipRemoveTarget,
@@ -51,23 +58,33 @@ import {
   type StudioSlashCommand,
 } from "./commands";
 
-export type ChipComposerHandle = {
+import { DictationEditor, insertDictationText } from "./dictationEditor";
+import { DictationKeyboard } from "./dictationKeyboard";
+import type { ComposerDictationBinding, ComposerDictationHandle } from "./dictationTypes";
+
+export type ChipComposerHandle = ComposerDictationHandle & {
+  setDictationBinding(binding: ComposerDictationBinding | undefined): void;
   focus(options?: FocusOptions): void;
   clear(): void;
   getSnapshot(): ComposerSnapshot;
-  setSnapshot(snapshot: ComposerSnapshot): void;
+  setSnapshot(snapshot: ComposerSnapshot, options?: { preserveFocus?: boolean }): void;
   insertChip(chip: Omit<ComposerChip, "id"> & { id?: string }): void;
   removeSkillChip(name: string): void;
   openFilePicker(): void;
+  waitForAttachments?(): Promise<boolean>;
   openMention(trigger: "@" | "^"): void;
   openCommandMenu(): void;
   isEmpty(): boolean;
 };
 
 type Props = {
+  dictation?: ComposerDictationBinding;
  prediction?:ComposerPrediction;
   predict?: (before:string,prefix:string,version:number)=>Promise<PredictionResult>;
   id?: string;
+  ariaLabel?: string;
+  fileAccept?: string;
+  resolveImagePaste?: ((text: string) => Promise<readonly PromptImage[] | undefined>) | undefined;
   placeholder?: string;
   disabled?: boolean;
   compact?: boolean;
@@ -76,7 +93,7 @@ type Props = {
   loadMentions?: (trigger: "@" | "/" | "^", query: string) => Promise<readonly MentionCandidate[]>;
   /** Explicit slash catalog. Omitted callers keep the static builtin fallback. */
   slashCatalog?: readonly StudioSlashCommand[];
-  onRunCommand?: (command: StudioSlashCommand, args: string) => void;
+  onRunCommand?: (command: StudioSlashCommand, args: string, images?: readonly PromptImage[]) => void;
   onChange?: (snapshot: ComposerSnapshot) => void;
   onSubmit?: () => void;
   onQueue?: () => void;
@@ -160,9 +177,13 @@ async function resolveOsPaths(
 export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipComposer(
   {
     id,
+    ariaLabel,
+    fileAccept,
+    resolveImagePaste,
     placeholder,
     disabled,
     compact,
+    dictation,
     prediction,
     workspaceId,
     describedBy,
@@ -183,13 +204,85 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   },
   ref,
 ) {
+  const document = useSurfaceDocument(), window = surfaceWindow(document);
   const executionTarget = useExecutionTarget();
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const [githubPreview, setGithubPreview] = useState<GitHubReferenceSnapshot | GitCommitReferenceSnapshot | BrowserReferenceSnapshot>();
+  const savedCaret = useRef<Range | null>(null);
+  useEffect(() => {
+    const remember = () => {
+      const selection = window.getSelection();
+      if (selection?.rangeCount && editorRef.current?.contains(selection.anchorNode) && editorRef.current.contains(selection.focusNode)) savedCaret.current = selection.getRangeAt(0).cloneRange();
+    };
+    document.addEventListener("selectionchange", remember);
+    return () => document.removeEventListener("selectionchange", remember);
+  }, [document, window]);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const imagesRef = useRef(new Map<string, PromptImage>());
+  const attachmentEpoch = useRef(0);
+  const pendingAttachments = useRef<Promise<boolean> | null>(null);
+  useEffect(() => () => { attachmentEpoch.current++; }, []);
   const composingRef = useRef(false);
+  const dictationEditorRef = useRef<DictationEditor | null>(null);
+  const dictationKeyboardRef = useRef<DictationKeyboard | null>(null);
+  const dictationBindingRef = useRef(dictation);
+  const committingDictationRef = useRef(false);
+  const emitRef = useRef<() => ComposerSnapshot>(() => emptySnapshot());
+  const keyboardBlockedRef = useRef(false);
+  useEffect(() => {
+    if (dictation === undefined) return;
+    dictationBindingRef.current = dictation;
+    dictationKeyboardRef.current?.bindingChanged();
+  }, [dictation]);
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const transaction = new DictationEditor(editor);
+    dictationEditorRef.current = transaction;
+    const keyboard = new DictationKeyboard(editor, {
+      binding: () => dictationBindingRef.current,
+      blocked: () => keyboardBlockedRef.current,
+      composing: () => composingRef.current,
+      insertText: (text) => {
+        insertDictationText(editor, text);
+        emitRef.current();
+      },
+    });
+    dictationKeyboardRef.current = keyboard;
+    const remember = () => transaction.rememberSelection();
+    const beforeEdit = () => { if (!committingDictationRef.current) transaction.beforeEdit(); };
+    editor.addEventListener("beforeinput", beforeEdit);
+    editor.ownerDocument.addEventListener("selectionchange", remember);
+    editor.ownerDocument.addEventListener("keyup", keyboard.keyup, true);
+    editor.ownerDocument.addEventListener("visibilitychange", keyboard.visibilityChange);
+    editor.ownerDocument.defaultView?.addEventListener("blur", keyboard.interrupt);
+    return () => {
+      keyboard.dispose();
+      transaction.invalidate();
+      dictationEditorRef.current = null;
+      dictationKeyboardRef.current = null;
+      editor.removeEventListener("beforeinput", beforeEdit);
+      editor.ownerDocument.removeEventListener("selectionchange", remember);
+      editor.ownerDocument.removeEventListener("keyup", keyboard.keyup, true);
+      editor.ownerDocument.removeEventListener("visibilitychange", keyboard.visibilityChange);
+      editor.ownerDocument.defaultView?.removeEventListener("blur", keyboard.interrupt);
+    };
+  }, []);
   const chipSignatureRef = useRef("");
   const imageChipKeyRef = useRef("");
+  const truncationFrame = useRef(0);
+  const scheduleTruncation = useCallback(() => {
+    if (truncationFrame.current !== 0) return;
+    truncationFrame.current = requestAnimationFrame(() => {
+      truncationFrame.current = 0;
+      const editor = editorRef.current;
+      if (editor !== null) syncChipTruncation(editor);
+    });
+  }, []);
+  useEffect(() => () => {
+    if (truncationFrame.current !== 0) cancelAnimationFrame(truncationFrame.current);
+    truncationFrame.current = 0;
+  }, []);
   const [documentVersion,setDocumentVersion]=useState(0);
   const predictionVersion=useRef(0);
   const predictionBusy=useRef(false);
@@ -212,6 +305,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   };
 
   const emit = (): ComposerSnapshot => {
+    dictationEditorRef.current?.noteEdit();
     invalidatePrediction();
     const editor = editorRef.current;
     if (!editor) return emptySnapshot();
@@ -222,10 +316,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       renumberImageChips(editor);
       chipSignatureRef.current = chipSignature(editor);
       syncChipTruncation(editor);
-      // Wrapping/scrollbars settle one frame later; re-measure once then.
-      requestAnimationFrame(() => {
-        if (editorRef.current === editor) syncChipTruncation(editor);
-      });
+      // Wrapping/scrollbars settle one frame later; coalesce capsule and resize work.
+      scheduleTruncation();
     }
     const snapshot = snapshotOf(editor, imagesRef.current);
     const typed = typedSlashSource(snapshot.doc);
@@ -261,6 +353,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     return snapshot;
   };
 
+  emitRef.current = emit;
+
   const insertChip = (draft: Omit<ComposerChip, "id"> & { id?: string }): void => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -273,14 +367,27 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         name,
         label: draft.label.replace(/^\//u, "") || name,
       };
-      editor.insertBefore(createChipElement(chip), editor.firstChild);
+      editor.insertBefore(createChipElement(chip, document), editor.firstChild);
       placeCaretAtEnd(editor);
       emit();
       return;
     }
+    dictationEditorRef.current?.beforeEdit();
     const chip: ComposerChip = { ...draft, id: draft.id ?? newChipId() };
+    if ((chip.kind === "github" || chip.kind === "git-commit" || chip.kind === "browser") && chip.reference) {
+      for (const element of editor.querySelectorAll<HTMLElement>(".cm-chip")) {
+        const prior = parseChipPayload(element.dataset.chip ?? "");
+        if (prior?.reference?.key !== chip.reference.key) continue;
+        element.replaceWith(createChipElement({ ...chip, id: prior.id }));
+        editor.focus(); emit(); return;
+      }
+      const caret = savedCaret.current;
+      if (caret && editor.contains(caret.commonAncestorContainer)) {
+        editor.focus(); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(caret);
+      }
+    }
     if (chip.image) imagesRef.current.set(chip.id, chip.image);
-    insertNodesAtCaret(editor, [createChipElement(chip), document.createTextNode(" ")]);
+    insertNodesAtCaret(editor, [createChipElement(chip, document), document.createTextNode(" ")]);
     emit();
   };
 
@@ -290,10 +397,22 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     emit();
   };
 
-  const ingestFiles = async (fileList: FileList | File[]): Promise<void> => {
+  const enqueueAttachment = (work: (current: () => boolean) => Promise<boolean>): Promise<boolean> => {
+    const epoch = attachmentEpoch.current;
+    const current = () => attachmentEpoch.current === epoch;
+    const next = (pendingAttachments.current ?? Promise.resolve(true)).then(() => current() ? work(current) : false).catch(cause => {
+      if (current()) onError?.(cause instanceof Error ? cause.message : String(cause));
+      return false;
+    });
+    pendingAttachments.current = next;
+    void next.then(() => { if (pendingAttachments.current === next) pendingAttachments.current = null; });
+    return next;
+  };
+  const readFiles = async (fileList: FileList | File[], current: () => boolean): Promise<boolean> => {
     const files = Array.from(fileList);
-    if (files.length === 0) return;
+    if (files.length === 0) return true;
     const resolved = workspaceId && executionTarget.id === null ? await resolveOsPaths(workspaceId, files) : new Map();
+    if (!current()) return false;
     let skipped = 0;
     for (const file of files) {
       const meta = resolved.get(file);
@@ -301,6 +420,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       // reaches the image branch; extension sniffing is only the fallback.
       if (meta ? meta.kind === "image" : isImageFile(file)) {
         const image = await fileToPromptImage(file).catch(() => null);
+        if (!current()) return false;
         // Disk-backed images travel as @path. Preview bytes are optional: a
         // read failure must not drop the capsule. SVG is the exception: @path
         // would make the Runtime read it as text, so it always travels as
@@ -327,6 +447,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         continue;
       }
       if (meta) {
+        if (!current()) return false;
         insertChip({
           kind: meta.kind === "dir" ? "dir" : "file",
           label: meta.name,
@@ -343,6 +464,11 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           ? "有些文件读不到，未添加为胶囊：可能已被移动或是快捷方式。"
           : "当前环境无法解析磁盘路径，只有图片可以附件。");
     }
+    return skipped === 0;
+  };
+  const ingestFiles = (files: FileList | File[]) => {
+    const captured = Array.from(files);
+    return enqueueAttachment(current => readFiles(captured, current));
   };
 
   useEffect(() => {
@@ -361,31 +487,50 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     const editor = editorRef.current;
     if (editor === null || typeof ResizeObserver === "undefined") return undefined;
     let width = editor.clientWidth;
-    let frame = 0;
     const observer = new ResizeObserver((entries) => {
       const next = entries[0]?.contentRect.width ?? editor.clientWidth;
       if (Math.abs(next - width) < 0.5) return;
       width = next;
-      if (frame !== 0) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        if (editorRef.current === editor) syncChipTruncation(editor);
-      });
+      scheduleTruncation();
     });
     observer.observe(editor);
-    return () => {
-      if (frame !== 0) cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-  }, []);
+    return () => observer.disconnect();
+  }, [scheduleTruncation]);
 
   useImperativeHandle(ref, () => ({
+    setDictationBinding(binding) {
+      dictationBindingRef.current = binding;
+      dictationKeyboardRef.current?.bindingChanged();
+    },
+    beginDictation(id) {
+      if (disabled) return false;
+      invalidatePrediction();
+      return dictationEditorRef.current?.begin(id) ?? false;
+    },
+    updateDictation(id, committedText, partialText) {
+      dictationEditorRef.current?.update(id, committedText, partialText);
+    },
+    commitDictation(id, text) {
+      committingDictationRef.current = true;
+      try {
+        const result = dictationEditorRef.current?.commit(id, text) ?? { applied: false, unchanged: false };
+        if (result.applied) emit();
+        return result;
+      } finally {
+        committingDictationRef.current = false;
+      }
+    },
+    cancelDictation(id) {
+      dictationEditorRef.current?.cancel(id);
+    },
     focus(options) {
       editorRef.current?.focus(options);
     },
     clear() {
+      attachmentEpoch.current++;
       const editor = editorRef.current;
       if (!editor) return;
+      dictationEditorRef.current?.invalidate();
       imagesRef.current.clear();
       editor.replaceChildren();
       emit();
@@ -395,13 +540,15 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       if (!editor) return emptySnapshot();
       return snapshotOf(editor, imagesRef.current);
     },
-    setSnapshot(snapshot) {
+    setSnapshot(snapshot, options) {
+      attachmentEpoch.current++;
       const editor = editorRef.current;
       if (!editor) return;
+      dictationEditorRef.current?.invalidate();
       imagesRef.current.clear();
       writeDoc(editor, snapshot.doc, imagesRef.current);
       emit();
-      placeCaretAtEnd(editor);
+      if (!options?.preserveFocus || editor.ownerDocument.activeElement === editor) placeCaretAtEnd(editor);
     },
     insertChip,
     removeSkillChip(name) {
@@ -411,6 +558,15 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     },
     openFilePicker() {
       fileRef.current?.click();
+    },
+    async waitForAttachments() {
+      let pending = pendingAttachments.current;
+      while (pending) {
+        if (!await pending) return false;
+        if (pendingAttachments.current === pending) return true;
+        pending = pendingAttachments.current;
+      }
+      return true;
     },
     openMention(trigger: "@" | "^") {
       const editor = editorRef.current;
@@ -478,7 +634,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       ...(item.path === undefined ? {} : { path: item.path }),
       ...(item.name === undefined ? {} : { name: item.name }),
     };
-    const el = createChipElement(chip);
+    const el = createChipElement(chip, document);
     if (at) replaceMention(at, el);
     else insertNodesAtCaret(editor, [el, document.createTextNode(" ")]);
     setMention(null);
@@ -492,6 +648,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const writeCommandText = (text: string): void => {
     const editor = editorRef.current;
     if (!editor) return;
+    dictationEditorRef.current?.invalidate();
     imagesRef.current.clear();
     writeDoc(editor, { nodes: [{ type: "text", value: text }] }, imagesRef.current);
     emit();
@@ -505,6 +662,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       ? filterSlashCommands(slashDraft.name, slashCatalog)
       : [];
   const commandOpen = (detachedCommand || slashDraft !== null) && mention === null && !commandDismissed;
+  keyboardBlockedRef.current = !!disabled || !!mention || commandOpen || !!legacyPrediction;
   useEffect(()=>{
     setPrediction(null);
     if(!predict||disabled||composingRef.current||mention||commandOpen)return;
@@ -559,7 +717,9 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       setCommandIndex(0);
       return;
     }
-    onRunCommand?.(item, args);
+    if (!overlay && (item.name === "btw" || item.side) && editorRef.current) {
+      onRunCommand?.(item, args, snapshotOf(editorRef.current, imagesRef.current).images);
+    } else onRunCommand?.(item, args);
     setDetachedCommand(false);
     if (!overlay) writeCommandText("");
   };
@@ -574,6 +734,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const predictionState=useWordPrediction(editorRef,prediction,!!disabled || !!mention || commandOpen);
 
   const onInput = (_event: FormEvent<HTMLDivElement>): void => {
+    if (committingDictationRef.current) return;
     emit();
     refreshMention();
   };
@@ -591,7 +752,23 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     const editor = editorRef.current;
     const text = data.getData("text/plain");
     if (!editor || text.length === 0) return;
-    insertPlainText(editor, text);
+    if (resolveImagePaste && /\.(?:png|jpe?g|gif|webp|svg|svgz|bmp|tiff?|avif|heic|heif)["']?\s*$/iu.test(text)) {
+      void enqueueAttachment(async current => {
+        let images: readonly PromptImage[] | undefined;
+        try { images = await resolveImagePaste(text); }
+        catch (cause) { if (current()) { insertPlainText(editor, text); emit(); } throw cause; }
+        if (!current()) return false;
+        if (images?.length) for (const image of images) insertChip({ kind: "image", label: "图", image });
+        else { insertPlainText(editor, text); emit(); }
+        return true;
+      });
+      return;
+    }
+    dictationEditorRef.current?.beforeEdit();
+    if (text.includes("<github-reference ") || text.includes("<git-commit-reference ") || text.includes("<browser-reference ")) {
+      const doc = displayDocFromSerializedText(text);
+      insertNodesAtCaret(editor, doc.nodes.map(node => node.type === "text" ? document.createTextNode(node.value) : createChipElement(node.chip, document)));
+    } else insertPlainText(editor, text);
     emit();
     refreshMention();
   };
@@ -606,6 +783,12 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if ((event.key === "Enter" || event.key === " ") && event.target instanceof HTMLElement) {
+      const capsule = event.target.closest<HTMLElement>(".cm-chip-github, .cm-chip-git-commit, .cm-chip-browser");
+      const reference = capsule && parseChipPayload(capsule.dataset.chip ?? "")?.reference;
+      if (reference) { event.preventDefault(); setGithubPreview(reference); return; }
+    }
+    if (dictationKeyboardRef.current?.keydown(event.nativeEvent)) { event.preventDefault(); return; }
     if(composingRef.current||event.nativeEvent.isComposing||event.keyCode===229)return;
     if(legacyPrediction&&!mention&&!commandOpen&&(event.key==="Tab"||event.key==="Escape")){
       event.preventDefault();const accepted=legacyPrediction;predictionVersion.current++;setPrediction(null);
@@ -753,6 +936,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         className="chip-composer-editor"
         contentEditable={disabled ? false : true}
         role="textbox"
+        aria-label={ariaLabel}
         aria-multiline="true"
         aria-placeholder={placeholder}
         aria-describedby={describedBy}
@@ -763,13 +947,17 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         onDrop={onDrop}
         onDragOver={(event) => event.preventDefault()}
         onKeyDown={onKeyDown}
-        onMouseUp={invalidatePrediction}
+        onMouseUp={() => { invalidatePrediction(); dictationEditorRef.current?.rememberSelection(); }}
         // The capsule × is a control, not a spot in the text: swallowing the
         // mousedown keeps the caret and the focus where the user left them.
         onMouseDown={(event) => {
           if (chipRemoveTarget(event.target) !== null) event.preventDefault();
         }}
         onClick={(event) => {
+          const target = event.target as HTMLElement;
+          const capsule = target.closest<HTMLElement>(".cm-chip-github, .cm-chip-git-commit, .cm-chip-browser");
+          const payload = capsule ? parseChipPayload(capsule.dataset.chip ?? "") : null;
+          if (payload?.reference && !target.closest(".cm-chip-x")) setGithubPreview(payload.reference);
           const chipId = chipRemoveTarget(event.target);
           if (chipId === null) return;
           event.preventDefault();
@@ -782,6 +970,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           onFocus?.(event);
         }}
         onBlur={(event) => {
+          dictationEditorRef.current?.rememberSelection();
+          dictationKeyboardRef.current?.editorBlur();
           invalidatePrediction();
           setMention(null);
           const next = event.relatedTarget;
@@ -794,10 +984,12 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         }}
         onPointerDown={onPointerDown}
         onCompositionStart={() => {
+          dictationKeyboardRef.current?.compositionStart();
           composingRef.current = true;
           invalidatePrediction();
         }}
         onCompositionEnd={() => {
+          dictationKeyboardRef.current?.compositionEnd();
           composingRef.current = false;
           invalidatePrediction();
           refreshMention();
@@ -827,6 +1019,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       <input
         ref={fileRef}
         type="file"
+        accept={fileAccept}
         hidden
         multiple
         onChange={(event) => {
@@ -841,6 +1034,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           {...(onError === undefined ? {} : { onError })}
         />
       ) : null}
+    {githubPreview ? <GitHubReferencePreview reference={githubPreview} onSaveBrowser={reference => { insertChip({ kind: "browser", label: reference.title, reference }); }} onClose={() => setGithubPreview(undefined)} /> : null}
     </div>
   );
 });

@@ -8,10 +8,14 @@
  * - 预览卡与图库沿用同一组变量与 `.bg-media`，避免预览和真实两套画法。
  */
 
-/* `.app` 是背景层的定位与层叠上下文：媒体层用 z-index:-1，低于所有界面。 */
+/* 背景的负层级收在 body 内。不能隔离 .app：Dock 正文及浮窗在其外部
+   挂载，隔离会让它们盖过 .app 内所有 modal / 遮罩，与 z-index 大小无关。 */
+body {
+  isolation: isolate;
+}
+
 .app {
   position: relative;
-  isolation: isolate;
 }
 
 :root {
@@ -125,6 +129,16 @@
   background: color-mix(in srgb, var(--bd-surface-base) 94%, transparent);
 }
 
+/* 折叠握把骑在内容上：它得盖住身后那条 1px 边框线和底下的文字，所以按「瞬态
+   阅读面」处理。用卡片那套 40% 表面会把 rail 的边线漏在按钮正中间——按钮本来
+   就是为了遮住边线才画成骑在线上的。 */
+:root[data-backdrop="on"] .app-rail-handle {
+  background: color-mix(in srgb, var(--bd-surface-base) 94%, transparent);
+}
+:root[data-backdrop="on"] .app-rail-handle:hover {
+  background: color-mix(in srgb, var(--bd-surface-2-base) 94%, transparent);
+}
+
 /* 左侧 minimap 是常驻 chrome，别在玻璃界面里留一条纯白。 */
 :root[data-backdrop="on"] .minimap {
   background: color-mix(in srgb, var(--bg) 35%, transparent);
@@ -151,6 +165,7 @@
 }
 
 :root[data-backdrop="on"] .topbar,
+:root[data-backdrop="on"] .cw-tab-strip,
 :root[data-backdrop="on"] .composer-region,
 :root[data-backdrop="on"] .bottom-panel,
 :root[data-backdrop="on"] .side-panel {

@@ -7,11 +7,16 @@ Public documentation for OMP Studio.
 | [../README.md](../README.md) | 中文总览 |
 | [../README.en.md](../README.en.md) | English overview |
 | [getting-started.md](getting-started.md) | Run from source |
+| [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |
 | [../doc/ssh-workspace-test-prompt.md](../doc/ssh-workspace-test-prompt.md) | SSH 与账密功能的独立测试交接提示词 |
 | [model-adaptation.md](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |
 | [workbench-docking.md](workbench-docking.md) | 工具停靠、浮窗、会话布局和预设 |
+| [browser.md](browser.md) | 聊天浏览器、人工接管、元素引用、登录空间和恢复 |
+| [computer-use.md](computer-use.md) | 电脑操作工作区、画面与步骤、安全停止、界面结构和隐私 |
 | [dock-delivery-2026-10-29.md](dock-delivery-2026-10-29.md) | 停靠工作台实现与验收记录、未验证边界 |
+| [dictation.md](dictation.md) | 工作台与 BTW 语音输入、原生模式、麦克风配置和内存恢复 |
+| [btw.md](btw.md) | BTW 原生功能对齐、话题历史、图片、子代理与快捷键 |
 | [fonts.md](fonts.md) | Independent interface, terminal and output font preferences |
 | [releases/v0.1.11.md](releases/v0.1.11.md) | 0.1.11 发布页文案、三平台下载与升级说明 |
 | [releases/v0.1.10.md](releases/v0.1.10.md) | 0.1.10 发布页文案、三平台下载与升级说明 |
@@ -43,3 +48,5 @@ Public documentation for OMP Studio.
 when they disagree with `architecture.md` or the TypeScript contracts.
 
 - [OMP 18.4.4 与 macOS 整合、修复和验收](integration-18.4.4-macos.md)
+
+- [评测工作区](evaluation.md)：原生基准、指令遵循、评判与 Ratchet，后台运行、历史复跑与导出。

@@ -21,7 +21,6 @@ it("requires selection and confirmation for the optional model and keeps preview
     </I18nProvider>,
   );
   selectOption(screen.getByRole("combobox", { name: "引擎" }), "SmolLM2-135M");
-  fireEvent.click(screen.getByRole("button", { name: "保存" }));
   expect(screen.getByRole("dialog", { name: "下载本地预测模型" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "确认并下载" }));
   await screen.findByText("演示设置已更新，不会下载模型。");
@@ -43,7 +42,7 @@ it("does not query or configure an old Runtime without prediction capabilities",
     </I18nProvider>,
   );
   expect(
-    (screen.getByRole("button", { name: "保存" }) as HTMLButtonElement)
+    (screen.getByRole("combobox", { name: "引擎" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
   expect(client.command).not.toHaveBeenCalled();
@@ -59,6 +58,7 @@ it("preserves the selected prediction engine when switching settings tabs", () =
   );
   const mounted = render(view(true));
   selectOption(screen.getByRole("combobox", { name: "引擎" }), "SmolLM2-135M");
+  fireEvent.click(screen.getByRole("button", { name: "确认并下载" }));
   mounted.rerender(view(false));
   mounted.rerender(view(true));
   expect(

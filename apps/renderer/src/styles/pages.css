@@ -467,11 +467,28 @@ img.profile-edit-avatar-img { display: block; }
 .tk-chart .tk-pt.total { fill: var(--accent); }
 
 /* 日历：7 行 × 53 列（一年 GitHub 风格）。
-   紧凑模式：单元格方形 13×13px，gap 2px → 行列步进均 15px（横向 = 纵向）。
+   紧凑模式：单元格方形 13×13px，gap 5px → 横向步进 18px。
    容器 width: max-content + 父容器中 margin auto，整体水平居中。
-   容器宽度 = 13 × 53 + 2 × 52 = 793px。 */
-.tk-cal-wrap { width: max-content; max-width: 100%; margin: var(--sp-8) auto 0; }
-.tk-cal { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 13px); grid-template-columns: repeat(var(--weeks, 53), 13px); gap: 5px; }
+   容器宽度 = 13 × 53 + 5 × 52 = 949px。
+   列宽固定、不会收窄，所以窄窗口下由 .tk-cal-wrap 自己横滚：以前这里只有
+   max-width: 100%，949px 的列直接从卡片里画出去，被最外层 .page-body
+   （overflow-y: auto，横向因此也是 auto）算成整页的横向溢出——1000px 窗口整页
+   多滚 52px、820px 多滚 212px，首页莫名其妙挂一条横向滚动条。 */
+.tk-cal-wrap { width: max-content; max-width: 100%; margin: var(--sp-8) auto 0; overflow-x: auto; }
+.tk-cal {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 13px);
+  grid-template-columns: repeat(var(--weeks, 53), 13px);
+  gap: 5px;
+  /* max-content：盒子取列的自然宽（949px）交给 .tk-cal-wrap 滚，而不是被卡片
+     宽度截断成 850px 再把列画到外面。clip 只裁 .tk-hi 的 scale(1.3) 外扩
+     （13px 格每边约 2px 加 1px 光环）：那 2px 否则会一直算进 wrap 的可滚动
+     溢出，宽到放得下 949px 的窗口也照样挂一条滚动条。 */
+  width: max-content;
+  overflow: clip;
+  overflow-clip-margin: 4px;
+}
 /* 月份标签层：放在日历下方，与日历同一列公式对齐。grid-column 由 inline 决定
    到具体的周列；min-width 0 允许月份字截断/溢出而不撑开整列。 */
 .tk-cal-months {
@@ -1101,6 +1118,37 @@ img.profile-edit-avatar-img { display: block; }
 
 /* ---------- 设置 ---------- */
 .set-layout { display: flex; gap: var(--sp-24); align-items: stretch; }
+.settings-sidebar { width: 200px; flex: 0 0 200px; min-width: 0; display: flex; flex-direction: column; }
+.settings-sidebar .page-tabs--vertical { width: 100%; min-height: 0; flex: 1 1 auto; }
+.settings-sidebar .cap-side[role="tablist"] > [role="tab"] { height: auto; min-height: var(--tab-height); white-space: normal; }
+.settings-sidebar .page-tab-label { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.25; }
+.set-layout .cap-pane-stage[hidden] { display: none; }
+.settings-search-label { display: block; font-size: var(--fs-11); color: var(--text-3); margin-bottom: var(--sp-4); }
+.settings-search { width: 100%; margin-bottom: var(--sp-12); }
+.settings-search-results { min-width: 0; }
+.settings-search-result { width: 100%; text-align: left; display: flex; justify-content: space-between; gap: var(--sp-12); padding: var(--sp-12); border: 1px solid var(--border); background: var(--surface); color: var(--text-1); cursor: pointer; }
+.settings-search-result + .settings-search-result { border-top: 0; }
+.settings-search-result:hover, .settings-search-result:focus-visible { background: var(--surface-hover, var(--surface)); outline: 2px solid var(--accent); outline-offset: -2px; }
+.settings-search-result small { color: var(--text-3); }
+.settings-search-highlight { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--r-8); }
+.settings-pending-row { padding: var(--sp-10) var(--sp-14); border: 1px solid var(--border); background: var(--surface); }
+.settings-pending-row + .settings-pending-row { border-top: 0; }
+.settings-pending-row p, .settings-pending-row span { display: block; font-size: var(--fs-11); color: var(--text-3); margin-top: var(--sp-4); }
+.runtime-setting-control { display: grid; grid-template-columns: auto auto; align-items: center; gap: var(--sp-6); min-width: 200px; max-width: 420px; }
+.runtime-setting-control .small, .runtime-setting-control textarea { grid-column: 1 / -1; }
+.runtime-setting-control .select { grid-column: 1 / -1; }
+.memory-credential-control { display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-6); width: 300px; max-width: 100%; }
+.set-row .memory-credential-control .input { width: 100%; }
+.memory-credential-actions { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
+.settings-scope { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8); margin-bottom: var(--sp-8); }
+.settings-scope .select { width: 240px; max-width: 100%; }
+.settings-link-row { display: flex; flex-wrap: wrap; gap: var(--sp-8); margin-top: var(--sp-12); }
+@media (max-width: 760px) {
+  .set-layout { gap: var(--sp-12); }
+  .settings-sidebar { width: 145px; flex-basis: 145px; }
+  .set-row { align-items: stretch; flex-wrap: wrap; }
+  .set-row .sr-control { margin-left: 0; max-width: 100%; }
+}
 .set-group { margin-bottom: 0; }
 .set-group[hidden] { display: none; }
 .set-group > h3 {
@@ -1123,6 +1171,7 @@ img.profile-edit-avatar-img { display: block; }
 .set-row .sr-desc { font-size: var(--fs-11); color: var(--text-3); margin-top: 1px; }
 .set-row .sr-control { margin-left: auto; flex: none; display: flex; align-items: center; gap: var(--sp-8); }
 .set-row .select, .set-row .input { width: 200px; }
+@media (max-width: 760px) { .set-row .sr-control { margin-left: 0; } }
 
 /* Phase 1 IA 重构：分节 / 来源徽标 / 尚未接入态 / 演示提示。 */
 .set-section { margin-top: var(--sp-16); }

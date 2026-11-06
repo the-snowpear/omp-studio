@@ -1,4 +1,48 @@
-import type { StudioComputerStatus } from "@omp-studio/studio-protocol";
+import type { ComputerAction, ComputerFrame, ComputerStructureSnapshot, ComputerWorkspaceSnapshot, FeatureSettingRow, StudioComputerStatus } from "@omp-studio/studio-protocol";
+
+export const COMPUTER_PREVIEW_SCENARIOS = ["running", "disabled", "observe-only", "waiting", "stopped", "history", "target-gone", "locked", "asleep", "permission-denied", "expired", "unconfirmed"] as const;
+export type ComputerPreviewScenario = typeof COMPUTER_PREVIEW_SCENARIOS[number];
+export const COMPUTER_PREVIEW_SCENARIO_LABELS: Record<ComputerPreviewScenario, string> = {
+  running: "执行中", disabled: "未启用", "observe-only": "仅可观察", waiting: "等待审批", stopped: "已停止", history: "历史画面", "target-gone": "目标消失", locked: "已锁屏", asleep: "休眠", "permission-denied": "权限撤销", expired: "图像过期", unconfirmed: "停止未确认",
+};
+export const COMPUTER_PREVIEW_TIME = Date.parse("2026-11-05T11:24:00+08:00");
+export function previewComputerFrame(sessionId: string, index = 1): ComputerFrame {
+  return { frameId: `computer-preview-frame-${index}`, sessionId, source: "execution", capturedAt: COMPUTER_PREVIEW_TIME + index * 2000,
+    targetId: "demo-window", targetName: "OMP Studio · Workspace", runId: "computer-preview-run", actionId: `computer-preview-action-${index}`,
+    toolCallId: "computer-preview-eval", width: 1280, height: 800, coordinateWidth: 1280, coordinateHeight: 800, screenLocked: false, delivered: true, availability: "available" };
+}
+export function buildComputerPreview(sessionId: string, scenario: ComputerPreviewScenario = "running"): { snapshot: ComputerWorkspaceSnapshot; actions: ComputerAction[] } {
+  const frames = [previewComputerFrame(sessionId, 1), previewComputerFrame(sessionId, 2)];
+  const actions: ComputerAction[] = [
+    { id: "computer-preview-action-0", sessionId, runId: "computer-preview-run", toolCallId: "computer-preview-eval", method: "windows", mode: "read", status: "completed", startedAt: COMPUTER_PREVIEW_TIME - 1000, endedAt: COMPUTER_PREVIEW_TIME, frameIds: [] },
+    ...frames.map((frame, i): ComputerAction => ({ id: frame.actionId!, sessionId, runId: frame.runId!, toolCallId: frame.toolCallId!, method: i ? "observe" : "screenshot", targetId: frame.targetId, targetName: frame.targetName!, mode: "read", status: "completed", startedAt: frame.capturedAt - 800, endedAt: frame.capturedAt, frameIds: [frame.frameId] })),
+  ];
+  const active: ComputerAction[] = scenario === "running" || scenario === "waiting" ? [{ id: "computer-preview-action-3", sessionId: `${sessionId}:child`, agentId: "ui-check", agentName: "界面检查", runId: "computer-preview-child", toolCallId: "computer-preview-child-eval", method: "run", targetId: "demo-window", targetName: "OMP Studio · Workspace", mode: "unknown", status: scenario === "waiting" ? "waiting" : "running", startedAt: COMPUTER_PREVIEW_TIME + 5000, frameIds: [] }] : [];
+  const snapshot: ComputerWorkspaceSnapshot = { version: 1, sessionId, revision: 8, updatedAt: COMPUTER_PREVIEW_TIME + 5000, enabled: scenario !== "disabled", preludeAvailable: scenario !== "observe-only", backend: "win32",
+    capabilities: { capture: scenario !== "permission-denied", input: scenario !== "observe-only", accessibility: scenario !== "observe-only", globalEscape: false, observationOnly: true },
+    permissions: { capture: scenario === "permission-denied" ? "denied" : "granted", input: scenario === "observe-only" ? "denied" : "granted", accessibility: scenario === "observe-only" ? "unavailable" : "granted" },
+    screen: { locked: scenario === "locked", asleep: scenario === "asleep", known: true },
+    control: { status: scenario === "stopped" ? "stopped" : scenario === "unconfirmed" ? "unconfirmed" : "allowed", revision: 3, updatedAt: COMPUTER_PREVIEW_TIME, foreground: scenario === "waiting" ? "requested" : "unknown" },
+    targets: scenario === "target-gone" ? [] : PREVIEW_COMPUTER.targets, active, frames: scenario === "disabled" ? [] : frames,
+    ...(scenario === "target-gone" ? { reason: "所选窗口已关闭。请选择仍然存在的观察目标。" } : scenario === "permission-denied" ? { reason: "屏幕录制权限已撤销。请在系统设置中重新授权。" } : {}),
+  };
+  if (scenario === "expired") snapshot.frames = frames.map(frame => ({ ...frame, availability: "expired" }));
+  return { snapshot, actions: [...actions, ...active] };
+}
+export function previewComputerStructure(sessionId: string, targetId: string): ComputerStructureSnapshot {
+  return { snapshotId: "computer-preview-structure", sessionId, targetId, capturedAt: COMPUTER_PREVIEW_TIME, coordinateSpace: "frame", frame: { ...previewComputerFrame(sessionId, 2), targetId }, truncated: false, nodes: [
+    { id: "root", role: "window", name: "OMP Studio · Workspace", enabled: true, bounds: { x: 82, y: 82, width: 1116, height: 625 }, children: [
+      { id: "explorer", role: "tree", name: "Explorer", enabled: true, bounds: { x: 82, y: 125, width: 220, height: 554 }, children: [] },
+      { id: "editor", role: "text", name: "ComputerPane.tsx", enabled: true, bounds: { x: 302, y: 161, width: 896, height: 385 }, children: [] },
+    ] },
+  ] };
+}
+export const PREVIEW_COMPUTER_TOOL_MEDIA = [{ type: "image", mimeType: "image/png", computerFrame: { frameId: "computer-preview-frame-1", sessionId: "preview", toolCallId: "computer-preview-eval" } }];
+export const PREVIEW_COMPUTER_SETTINGS: FeatureSettingRow[] = [
+  { key: "computer.enabled", value: true, source: "runtime" }, { key: "computer.display", value: "active", source: "default" },
+  { key: "computer.maxWidth", value: 3840, source: "default" }, { key: "computer.maxHeight", value: 2400, source: "default" },
+  { key: "computer.backgroundFallback", value: "refuse", source: "global" },
+];
 
 export const PREVIEW_COMPUTER: StudioComputerStatus = {
   enabled: true, available: true, backend: "demo",

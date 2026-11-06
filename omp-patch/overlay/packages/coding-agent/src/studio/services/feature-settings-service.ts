@@ -19,9 +19,18 @@ import {
 	cfgRetryFallbackOn,
 	cfgSessionWorktreeScope,
 } from "../../session/settings";
-import { cfgAsyncWidgets, cfgComputerBackgroundFallback, cfgToolsRestrictedFolders } from "../../tools/settings";
+import {
+	cfgAsyncWidgets,
+	cfgComputerBackgroundFallback,
+	cfgComputerEnabled,
+	cfgComputerDisplay,
+	cfgComputerMaxWidth,
+	cfgComputerMaxHeight,
+	cfgToolsRestrictedFolders,
+} from "../../tools/settings";
+import type { StudioComputerWorkspaceService } from "./computer-workspace-service";
 import { cfgExtensionHandlersModeControl } from "../../extensibility/settings";
-import { cfgSttEnabled, cfgSttLanguage } from "../../stt/settings";
+import { cfgSttEnabled, cfgSttLanguage, cfgSttSubmitTrigger } from "../../stt/settings";
 import { cfgBashGitGuard } from "../../exec/settings";
 import { cfgComposerPredictions, cfgRecapEnabled, cfgRecapIdleSeconds } from "../../modes/settings";
 import { cfgSpeechSpeed, cfgTtsLocalSpeed } from "../../tts/settings";
@@ -41,6 +50,7 @@ import {
 	type PoolAccountOption,
 } from "../feature-settings-protocol";
 import { SessionControlError } from "./session-control-service";
+import { StudioSessionCompactionService } from "./session-compaction-service";
 
 const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"task.agentAccountPools": cfgTaskAgentAccountPools,
@@ -59,6 +69,10 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"prewalk.auto": cfgPrewalkAuto,
 	"prewalk.autoTarget": cfgPrewalkAutoTarget,
 	"async.widgets": cfgAsyncWidgets,
+	"computer.enabled": cfgComputerEnabled,
+	"computer.display": cfgComputerDisplay,
+	"computer.maxWidth": cfgComputerMaxWidth,
+	"computer.maxHeight": cfgComputerMaxHeight,
 	"computer.backgroundFallback": cfgComputerBackgroundFallback,
 	"tools.restrictedFolders": cfgToolsRestrictedFolders,
 	"extensionHandlers.modeControl": cfgExtensionHandlersModeControl,
@@ -71,10 +85,14 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"session.worktreeScope": cfgSessionWorktreeScope,
 	"stt.enabled": cfgSttEnabled,
 	"stt.language": cfgSttLanguage,
+	"stt.submitTrigger": cfgSttSubmitTrigger,
 };
 
 export class StudioFeatureSettingsService {
-	constructor(readonly session: AgentSession) {}
+	constructor(
+		readonly session: AgentSession,
+		readonly computer?: StudioComputerWorkspaceService,
+	) {}
 	#row(key: FeatureSettingKey): FeatureSettingRow {
 		const setting = HANDLES[key],
 			value: unknown = structuredClone(setting.get(this.session.settings));
@@ -84,6 +102,9 @@ export class StudioFeatureSettingsService {
 	async execute(operation: FeatureSettingsOperation): Promise<unknown> {
 		if (operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "Settings session changed");
+		if (operation.kind === "session.compaction.get") return new StudioSessionCompactionService(this.session).get();
+		if (operation.kind === "session.compaction.set")
+			return new StudioSessionCompactionService(this.session).set(operation.input);
 		if (operation.kind === "preferences.features.get")
 			return { settings: FEATURE_SETTING_KEYS.map(key => this.#row(key)) };
 		if (operation.kind === "accounts.pool.options") {
@@ -136,10 +157,30 @@ export class StudioFeatureSettingsService {
 			);
 		if (operation.kind === "preferences.features.clearOverride") {
 			setting.clearOverride(this.session.settings);
+			if (operation.key === "computer.enabled" && !cfgComputerEnabled.get(this.session.settings))
+				await this.computer?.stop("disable");
 			this.session.refreshIdleMaintenance?.();
 			return this.#row(operation.key);
 		}
 		setting.assertWritable(operation.value);
+		if (operation.key === "computer.enabled") {
+			if (operation.value === true && this.computer && !this.computer.preludeAvailable())
+				throw new SessionControlError("CAPABILITY_UNAVAILABLE", "Native Computer Eval prelude is unavailable");
+			if (operation.scope === "session" && operation.value === false) await this.computer?.stop("disable");
+		}
+		if (
+			(operation.key === "computer.maxWidth" || operation.key === "computer.maxHeight") &&
+			(!Number.isInteger(operation.value) || (operation.value as number) < 1 || (operation.value as number) > 16384)
+		)
+			throw new SessionControlError(
+				"INVALID_ARGUMENT",
+				"Computer image dimensions must be integers from 1 to 16384",
+			);
+		if (
+			operation.key === "computer.display" &&
+			(typeof operation.value !== "string" || !operation.value.trim() || operation.value.length > 512)
+		)
+			throw new SessionControlError("INVALID_ARGUMENT", "A native display id, active, or all is required");
 		if (operation.scope === "session") setting.override(this.session.settings, operation.value);
 		else {
 			setting.set(this.session.settings, operation.value);

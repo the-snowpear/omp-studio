@@ -5,6 +5,7 @@ import { useFeatureSettings, type FeatureSettingsProps } from "../settings/useFe
 import { PREVIEW_POOL_ACCOUNTS } from "../preview/featureSettingsPreview";
 import { createPreviewAgentDefinitions } from "../preview/subagentsPreview";
 import { useI18n } from "../i18n";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { hostErrorMessage } from "../hostError";
 import "../settings/featureSettings.css";
 
@@ -14,6 +15,7 @@ function pools(value: FeatureSettingValue | undefined): Pools {
 }
 export function AgentPoolsPane(props: FeatureSettingsProps) {
   const state = useFeatureSettings(props), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
+  const { marks } = usePreviewMode();
   const [accounts, setAccounts] = useState<PoolAccountOption[]>([]), [agents, setAgents] = useState<string[]>([]);
   const [agent, setAgent] = useState(""), [provider, setProvider] = useState("");
   const [mode, setMode] = useState("unrestricted"), [selected, setSelected] = useState<string[]>([]), [error, setError] = useState("");
@@ -53,7 +55,7 @@ export function AgentPoolsPane(props: FeatureSettingsProps) {
     void state.save("task.agentAccountPools", next, "global");
   }
   return <section className="feature-settings" aria-label={zh ? "代理账号池" : "Agent account pools"}>
-    <header className="feature-settings-head"><div><span className="feature-eyebrow">{zh ? "账号使用范围" : "ACCOUNT SCOPE"}{state.preview ? " · DEMO" : ""}</span><h3>{zh ? "代理账号池" : "Agent account pools"}</h3></div></header>
+    <header className="feature-settings-head"><div><span className="feature-eyebrow">{zh ? "账号使用范围" : "ACCOUNT SCOPE"}{state.preview && marks ? " · DEMO" : ""}</span><h3>{zh ? "代理账号池" : "Agent account pools"}</h3></div></header>
     <p className="feature-status">{zh ? "按代理限制 OAuth 账号；限制内的任务、Advisor 与后续子代理由原生引擎执行账号规则，不回退到范围外账号或 API Key。保存后用于新启动的代理。" : "Restrict OAuth accounts per agent. Native restrictions cover associated work and never fall back to outside accounts or API keys. Changes apply to newly started agents."}</p>
     {!state.enabled ? <p className="feature-status">{zh ? "连接支持账号池的 Runtime 后可配置。" : "Connect a Runtime with account pool support."}</p> : null}
     <div className="feature-split"><nav className="feature-list" aria-label={zh ? "选择代理账号配置" : "Agent account configuration"}>{agents.map(name => <button key={name} type="button" aria-pressed={name === agent} onClick={() => setAgent(name)}><strong>{name}</strong><span className="small">{Object.keys(saved[name] ?? {}).length || "—"}</span></button>)}</nav>

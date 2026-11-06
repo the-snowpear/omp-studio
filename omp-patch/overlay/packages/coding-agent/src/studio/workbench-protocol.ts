@@ -1,4 +1,10 @@
 import {
+	EVALUATION_WORKSPACE_KINDS,
+	isEvaluationWorkspaceKind,
+	type EvaluationWorkspaceOperation,
+	type EvaluationWorkspaceResultMap,
+} from "./evaluation-workspace-protocol";
+import {
 	ADVISOR_CONFIG_KINDS,
 	isAdvisorConfigKind,
 	type AdvisorConfigOperation,
@@ -130,6 +136,12 @@ import {
 	type RatchetOperation,
 	type RatchetResultMap,
 } from "./ratchet-protocol";
+import {
+	COMPUTER_WORKSPACE_COMMAND_KINDS,
+	isComputerWorkspaceCommand,
+	type ComputerWorkspaceCommand,
+	type ComputerWorkspaceResultMap,
+} from "./computer-workspace-protocol";
 import {
 	COMPUTER_OBSERVATION_KINDS,
 	isComputerObservationKind,
@@ -285,6 +297,7 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
+	| EvaluationWorkspaceOperation
 	| AdvisorConfigOperation
 	| LocalResourceOperation
 	| DictationOperation
@@ -303,6 +316,7 @@ export type WorkbenchOperation =
 	| NativePlanReviewOperation
 	| RatchetOperation
 	| ComputerObservationOperation
+	| ComputerWorkspaceCommand
 	| BrowserObservationOperation
 	| StudioIdaOperation
 	| SessionOptionsOperation
@@ -331,6 +345,7 @@ export type WorkbenchOperation =
 
 export interface WorkbenchResultMap
 	extends
+		EvaluationWorkspaceResultMap,
 		SessionTitlesResultMap,
 		PredictionResultMap,
 		MaintenanceResultMap,
@@ -346,6 +361,7 @@ export interface WorkbenchResultMap
 		NativePlanReviewResultMap,
 		RatchetResultMap,
 		ComputerObservationResultMap,
+		Pick<ComputerWorkspaceResultMap, ComputerWorkspaceCommand["kind"]>,
 		BrowserObservationResultMap,
 		StudioIdaResultMap,
 		SessionOptionsResultMap,
@@ -376,6 +392,7 @@ export interface WorkbenchResultMap
 	"runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
 export const WORKBENCH_OPERATION_KINDS = [
+	...EVALUATION_WORKSPACE_KINDS,
 	...ADVISOR_CONFIG_KINDS,
 	...LOCAL_RESOURCE_KINDS,
 	...DICTATION_KINDS,
@@ -394,6 +411,7 @@ export const WORKBENCH_OPERATION_KINDS = [
 	...NATIVE_PLAN_REVIEW_KINDS,
 	...RATCHET_OPERATION_KINDS,
 	...COMPUTER_OBSERVATION_KINDS,
+	...COMPUTER_WORKSPACE_COMMAND_KINDS,
 	...BROWSER_OBSERVATION_KINDS,
 	...IDA_OPERATION_KINDS,
 	...SESSION_OPTIONS_KINDS,
@@ -421,7 +439,17 @@ export const WORKBENCH_OPERATION_KINDS = [
 	"runtime.models.describe",
 ] as const;
 export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
+	...COMPUTER_WORKSPACE_COMMAND_KINDS,
+	"evaluation.runtime.plan",
+	"evaluation.runtime.read",
+	"evaluation.runtime.rows",
+	"evaluation.runtime.report",
+	"evaluation.runtime.patch",
+	"evaluation.runtime.control",
 	"prediction.status",
+	"dictation.inspect",
+	"dictation.status",
+	"dictation.cancel",
 	"prediction.prepare",
 	"prediction.release",
 	...MAINTENANCE_READ_KINDS,
@@ -446,6 +474,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 	"computer.observe.release",
 	"browser.tabs.get",
 	"browser.observe.prepare",
+	"browser.managed.prepare",
 	"ida.status.details",
 	"ida.database.cancel",
 	"session.speed.get",
@@ -541,6 +570,8 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	if (!value || typeof value !== "object") throw new Error("Invalid workbench operation");
 	const kind = (value as Record<string, unknown>).kind;
 	if (typeof kind !== "string" || !isWorkbenchOperationKind(kind)) throw new Error("Unknown workbench operation");
+	if (isComputerWorkspaceCommand(kind)) return;
+	if (isEvaluationWorkspaceKind(kind)) return;
 	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
 	if (isSessionTitlesKind(kind)) {
 		validateSessionTitlesOperation(value);
@@ -664,6 +695,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	const fields: Record<
 		Exclude<
 			WorkbenchOperation["kind"],
+			| EvaluationWorkspaceOperation["kind"]
 			| AdvisorConfigOperation["kind"]
 			| LocalResourceOperation["kind"]
 			| DictationOperation["kind"]
@@ -682,6 +714,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 			| NativePlanReviewOperation["kind"]
 			| RatchetOperation["kind"]
 			| ComputerObservationOperation["kind"]
+			| ComputerWorkspaceCommand["kind"]
 			| BrowserObservationOperation["kind"]
 			| StudioIdaOperation["kind"]
 			| SessionOptionsOperation["kind"]
@@ -761,6 +794,8 @@ function serviceRow(value: unknown): void {
 	if (row.ownerAgentId !== undefined) text(row.ownerAgentId);
 }
 export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value: unknown): void {
+	if (isComputerWorkspaceCommand(kind)) return;
+	if (isEvaluationWorkspaceKind(kind)) return;
 	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
 	if (isSessionTitlesKind(kind)) {
 		validateSessionTitlesResult(kind, value);

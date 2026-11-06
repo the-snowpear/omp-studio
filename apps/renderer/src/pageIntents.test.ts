@@ -28,7 +28,7 @@ it("keeps navigation intents until their page consumes them once", () => {
 
   expect(takeModelConfigIntent()).toEqual({ tab: "roles", role: "vision", assign: "provider/model" });
   expect(takeCapIntent()).toEqual({ tab: "mcp", name: "server" });
-  expect(takeSettingsIntent()).toBe("permissions");
+  expect(takeSettingsIntent()).toEqual({ group: "permissions" });
   expect(takeDiagnosticsIntent()).toBe("check-update");
   expect(takeModelConfigIntent()).toBeNull();
   expect(takeCapIntent()).toBeNull();

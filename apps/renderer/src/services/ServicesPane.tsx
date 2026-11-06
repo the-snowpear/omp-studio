@@ -58,7 +58,7 @@ export function ServicesPane({
   available: boolean;
   capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage: locale } = useI18n();
   const label = (zh: string, en: string) => (locale === "zh" ? zh : en);
   const lifetimeLabel = (mode: StudioServiceSpec["mode"]) =>
@@ -204,7 +204,7 @@ export function ServicesPane({
     if (!visible || !open || !selected) return;
     const load = async () => {
       if (preview) {
-        setLogs("[demo] Server ready\n[demo] Watching workspace files…");
+        setLogs(marks ? "[demo] Server ready\n[demo] Watching workspace files…" : "Server ready\nWatching workspace files…");
         return;
       }
       try {
@@ -366,7 +366,7 @@ export function ServicesPane({
       title={
         <>
           {label("服务", "Services")}
-          {preview ? (
+          {preview && marks ? (
             <span className="chip gray">{label("演示", "Demo")}</span>
           ) : null}
           <span className="muted">
@@ -546,7 +546,7 @@ export function ServicesPane({
                   event.preventDefault();
                   void run(async () => {
                     if (preview)
-                      setLogs((current) => current + "\n[demo] " + input);
+                      setLogs((current) => current + "\n" + (marks ? "[demo] " : "") + input);
                     else
                       await invoke("services.send", {
                         name: selected.name,

@@ -6,6 +6,10 @@
 import { PLATFORM } from "../platform";
 import { demoPath } from "./demoPaths";
 import type { TreeGitStatus } from "../git/treeStatus";
+import type { IconName } from "../icons";
+import type { ShellEventLogEntry } from "../shellMemory";
+import type { LedgerCommandRow } from "../panels/types";
+import type { CommandName, EventCursor } from "@omp-studio/client-contract";
 
 export const PREVIEW_SSH_TARGETS = [
   { id: "demo-linux", name: "dev-linux", platform: "linux" as const },
@@ -149,7 +153,7 @@ export type PreviewTtNode = {
   restorable?: boolean;
 };
 
-export type PreviewActivity = { icon: string; color: string; text: string; time: string };
+export type PreviewActivity = { icon: IconName; color: string; text: string; time: string };
 
 export type PreviewSideAgent = {
   id: string;
@@ -182,7 +186,7 @@ export const PREVIEW_PROJECTS: PreviewProject[] = [
       { id: "t3", title: "选择 gemini3.6flash 随意发送消息后报错…", time: "4d ago", msgs: 1337, status: "idle", wait: "plan", hasSub: true, unread: 1 },
       { id: "t4", title: "修复 Git Bash 路径未找到问题", time: "4d ago", msgs: 8, status: "idle", wait: "approval" },
       { id: "t5", title: "重构 session 存储层 (session)", time: "6d ago", msgs: 156, status: "archived" },
-      { id: "t9", title: "补齐预览模式的会话分页演示", time: "7d ago", msgs: 5, status: "idle" },
+      { id: "t9", title: "补齐会话分页加载", time: "7d ago", msgs: 5, status: "idle" },
       { id: "t10", title: "清理历史遗留的 mock 分支", time: "9d ago", msgs: 21, status: "idle" },
       { id: "t11", title: "侧栏会话行悬停操作样式走查", time: "11d ago", msgs: 3, status: "idle" },
       { id: "t12", title: "修 MermaidBlock 的 TS2322（中途停止）", time: "1h ago", msgs: 7, status: "idle" },
@@ -403,7 +407,7 @@ export const PREVIEW_GIT_LOG = {
 } as const;
 
 export const PREVIEW_GIT = {
-  branch: "main",
+  branch: "fix/mermaid-theme",
   ahead: 2,
   behind: 0,
   staged: [
@@ -641,3 +645,82 @@ export const PREVIEW_STATS_TOTALS = {
   errors: 239,
   costEstimate: 1_121.8,
 } as const;
+
+/**
+ * Preview-mode OMP Logs rows for one session: runtime attach, snapshot, session
+ * open, the first prompt, a plan review whose approval lease expires, then the
+ * rejected `interaction.respond` receipt that follows it. Cursors are contiguous
+ * (no gap, so no resync banner) and time gaps stay between 36 ms and 3 s.
+ */
+const previewEventCursor = (value: number): EventCursor => String(value) as EventCursor;
+
+export const PREVIEW_SHELL_EVENTS: readonly ShellEventLogEntry[] = [
+  { cursor: previewEventCursor(41821), kind: "runtime.changed", occurredAt: "2026-10-30T14:58:01.204Z" },
+  { cursor: previewEventCursor(41822), kind: "snapshot", occurredAt: "2026-10-30T14:58:01.252Z" },
+  { cursor: previewEventCursor(41823), kind: "residents.changed", occurredAt: "2026-10-30T14:58:01.488Z" },
+  { cursor: previewEventCursor(41824), kind: "diagnostics.changed", occurredAt: "2026-10-30T14:58:01.890Z" },
+  { cursor: previewEventCursor(41825), kind: "command.accepted", occurredAt: "2026-10-30T14:58:03.774Z" },
+  { cursor: previewEventCursor(41826), kind: "command.receipt", occurredAt: "2026-10-30T14:58:04.286Z" },
+  { cursor: previewEventCursor(41827), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:04.324Z" },
+  { cursor: previewEventCursor(41828), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:04.598Z" },
+  { cursor: previewEventCursor(41829), kind: "residents.changed", occurredAt: "2026-10-30T14:58:05.804Z" },
+  { cursor: previewEventCursor(41830), kind: "command.accepted", occurredAt: "2026-10-30T14:58:07.922Z" },
+  { cursor: previewEventCursor(41831), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:07.958Z" },
+  { cursor: previewEventCursor(41832), kind: "operation.progress", occurredAt: "2026-10-30T14:58:08.702Z" },
+  { cursor: previewEventCursor(41833), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:10.020Z" },
+  { cursor: previewEventCursor(41834), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:12.106Z" },
+  { cursor: previewEventCursor(41835), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:12.918Z" },
+  { cursor: previewEventCursor(41836), kind: "git.repository.changed", occurredAt: "2026-10-30T14:58:14.562Z" },
+  { cursor: previewEventCursor(41837), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:14.966Z" },
+  { cursor: previewEventCursor(41838), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:16.088Z" },
+  { cursor: previewEventCursor(41839), kind: "diagnostics.changed", occurredAt: "2026-10-30T14:58:17.974Z" },
+  { cursor: previewEventCursor(41840), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:18.590Z" },
+  { cursor: previewEventCursor(41841), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:20.998Z" },
+  { cursor: previewEventCursor(41842), kind: "command.accepted", occurredAt: "2026-10-30T14:58:22.500Z" },
+  { cursor: previewEventCursor(41843), kind: "interaction.required", occurredAt: "2026-10-30T14:58:22.738Z" },
+  { cursor: previewEventCursor(41844), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:24.502Z" },
+  { cursor: previewEventCursor(41845), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:27.504Z" },
+  { cursor: previewEventCursor(41846), kind: "interaction.resolved", occurredAt: "2026-10-30T14:58:27.722Z" },
+  { cursor: previewEventCursor(41847), kind: "command.accepted", occurredAt: "2026-10-30T14:58:28.564Z" },
+  { cursor: previewEventCursor(41848), kind: "command.receipt", occurredAt: "2026-10-30T14:58:28.928Z" },
+  { cursor: previewEventCursor(41849), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:30.024Z" },
+  { cursor: previewEventCursor(41850), kind: "command.accepted", occurredAt: "2026-10-30T14:58:32.288Z" },
+  { cursor: previewEventCursor(41851), kind: "command.receipt", occurredAt: "2026-10-30T14:58:32.976Z" },
+  { cursor: previewEventCursor(41852), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:33.017Z" },
+  { cursor: previewEventCursor(41853), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:34.751Z" },
+  { cursor: previewEventCursor(41854), kind: "git.repository.changed", occurredAt: "2026-10-30T14:58:37.067Z" },
+  { cursor: previewEventCursor(41855), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:37.639Z" },
+  { cursor: previewEventCursor(41856), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:39.047Z" },
+  { cursor: previewEventCursor(41857), kind: "command.accepted", occurredAt: "2026-10-30T14:58:40.233Z" },
+  { cursor: previewEventCursor(41858), kind: "command.receipt", occurredAt: "2026-10-30T14:58:41.165Z" },
+  { cursor: previewEventCursor(41859), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:41.212Z" },
+  { cursor: previewEventCursor(41860), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:42.736Z" },
+  { cursor: previewEventCursor(41861), kind: "diagnostics.changed", occurredAt: "2026-10-30T14:58:43.804Z" },
+  { cursor: previewEventCursor(41862), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:44.510Z" },
+  { cursor: previewEventCursor(41863), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:45.852Z" },
+  { cursor: previewEventCursor(41864), kind: "command.accepted", occurredAt: "2026-10-30T14:58:47.760Z" },
+  { cursor: previewEventCursor(41865), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:48.772Z" },
+  { cursor: previewEventCursor(41866), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:51.526Z" },
+  { cursor: previewEventCursor(41867), kind: "residents.changed", occurredAt: "2026-10-30T14:58:52.572Z" },
+  { cursor: previewEventCursor(41868), kind: "conversation.changed", occurredAt: "2026-10-30T14:58:52.906Z" },
+];
+
+/**
+ * Preview-mode Output ledger rows, newest first. All seven client lifecycle
+ * statuses appear so the panel's status runes and tone are visible at once;
+ * only terminal non-completed rows carry a one-line `detail`. `at` is the time
+ * of the row's current status (issued / accepted / receipt), so the clock
+ * column reads as a compressed command trail.
+ */
+type PreviewLedgerRow = Omit<LedgerCommandRow, "commandName"> & { readonly commandName: CommandName };
+
+export const PREVIEW_LEDGER_COMMANDS: readonly LedgerCommandRow[] = [
+  { requestId: "req_c41a08", commandName: "session.model.set", status: "local_pending", at: "2026-10-30T14:58:52.404Z" },
+  { requestId: "req_b27e50", commandName: "permissions.mode.set", status: "interaction_required", at: "2026-10-30T14:58:49.612Z" },
+  { requestId: "req_9c1d02", commandName: "core.prompt", status: "accepted", at: "2026-10-30T14:58:47.318Z" },
+  { requestId: "req_5d8f61", commandName: "interaction.respond", status: "rejected", at: "2026-10-30T14:58:40.906Z", detail: "Interaction lease expired before the response reached the Host." },
+  { requestId: "req_2ab94f", commandName: "mode.plan.enter", status: "completed", at: "2026-10-30T14:58:33.274Z" },
+  { requestId: "req_7f3a1c", commandName: "loop.enable", status: "failed", at: "2026-10-30T14:58:26.118Z", detail: "Loop rejected: maxIterations must be at least 2." },
+  { requestId: "req_e60b3d", commandName: "operator.invoke", status: "outcome_unknown", at: "2026-10-30T14:58:17.552Z", detail: "Runtime restarted before the invocation receipt arrived." },
+  { requestId: "req_3fa2c7", commandName: "session.create", status: "completed", at: "2026-10-30T14:58:09.104Z" },
+] satisfies readonly PreviewLedgerRow[];

@@ -1,7 +1,8 @@
+import { useSurfaceDocument } from "../dock/SurfaceContext";
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { SlidingTabs, type SlidingTabItem } from "../SlidingTabs";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 import { useI18n } from "../i18n";
 import "./workspace.css";
 
@@ -110,6 +111,8 @@ export function WorkspaceSection({
 
 const STATE_LABELS: Record<string, [string, string]> = {
   unavailable: ["不可用", "Unavailable"],
+  preparing: ["准备中", "Preparing"],
+  partial: ["部分成功", "Partial success"],
   inactive: ["未运行", "Inactive"],
   scheduled: ["等待保温", "Scheduled"],
   refreshing: ["保温中", "Refreshing"],
@@ -185,7 +188,7 @@ export function WorkspaceEmpty({
 }: {
   title: string;
   children?: ReactNode;
-  icon?: string;
+  icon?: IconName;
 }) {
   return (
     <div className="workspace-empty">
@@ -206,6 +209,7 @@ export function WorkspaceDialog({
   children: ReactNode;
 }) {
   const { resolvedLanguage } = useI18n();
+  const document = useSurfaceDocument();
   const element = useRef<HTMLElement>(null),
     close = useRef(onClose);
   close.current = onClose;

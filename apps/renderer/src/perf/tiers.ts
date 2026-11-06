@@ -35,10 +35,16 @@ export type PerfTier = (typeof PERF_TIERS)[number];
 /** The only DOM state the tiering system owns. */
 export const PERF_TIER_ATTRIBUTE = "data-perf-tier";
 
+const TIER_LAYERS: Readonly<Record<PerfTier, readonly PerfTier[]>> = {
+  L0: [], L1: ["L1"], L2: ["L2", "L1"], L3: ["L3", "L2", "L1"],
+};
+const TIER_ATTRIBUTES: Readonly<Record<PerfTier, string>> = {
+  L0: "L0", L1: "L1", L2: "L2 L1", L3: "L3 L2 L1",
+};
+
 /** Every layer a tier includes, most aggressive first: `L2` → `L2 L1`. */
 export function tierLayers(tier: PerfTier): readonly PerfTier[] {
-  const index = PERF_TIERS.indexOf(tier);
-  return PERF_TIERS.slice(1, index + 1).reverse();
+  return TIER_LAYERS[tier];
 }
 
 export function isPerfTier(value: unknown): value is PerfTier {
@@ -55,18 +61,15 @@ function elementOf(root: Element | Document | null | undefined): Element | null 
 /**
  * Write `tier` onto `root` (normally `document.documentElement`).
  *
- * Idempotent and cheap: `setAttribute` with an unchanged value does not
- * invalidate style, so this can run on every profile change. A `null` root is
- * tolerated because the renderer entry runs before React mounts and tests use
- * detached elements.
+ * Idempotent: repeated snapshots leave the attribute untouched, including DOM
+ * observers. A `null` root is tolerated before React mounts and in tests.
  */
 export function applyTier(root: Element | Document | null | undefined, tier: PerfTier): void {
   const element = elementOf(root);
   if (element === null) return;
-  const layers = tierLayers(tier);
-  // `L0` has no layers, and CSS has no rule for it — the attribute is still
-  // written so the DOM always states the current tier instead of omitting it.
-  element.setAttribute(PERF_TIER_ATTRIBUTE, layers.length === 0 ? tier : layers.join(" "));
+  const value = TIER_ATTRIBUTES[tier];
+  // L0 still states the tier explicitly even though it has no degradation layer.
+  if (element.getAttribute(PERF_TIER_ATTRIBUTE) !== value) element.setAttribute(PERF_TIER_ATTRIBUTE, value);
 }
 
 /** The painted tier, or `null` when the attribute is absent or unreadable. */

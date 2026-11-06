@@ -47,7 +47,7 @@ export function McpRuntimePane({
   visible = true,
   authAvailable = false,
 }: Props & { authAvailable?: boolean | undefined }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [status, setStatus] = useState<McpRuntimeStatus>();
@@ -103,7 +103,7 @@ export function McpRuntimePane({
     >
       <h3>
         {zh ? "当前 Runtime" : "Current Runtime"}
-        {preview ? (zh ? " · 演示" : " · Demo") : ""}
+        {preview && marks ? (zh ? " · 演示" : " · Demo") : ""}
       </h3>
       <p className="small muted">
         {zh
@@ -206,7 +206,7 @@ export function PromptTemplatesPane({
   visible = true,
   onInsert,
 }: Props & { onInsert?: ((text: string) => void) | undefined }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [rows, setRows] = useState<PromptTemplateRow[]>([]);
@@ -295,7 +295,7 @@ export function PromptTemplatesPane({
       <div className="runtime-template-toolbar">
         <h3>
           {zh ? "提示词模板" : "Prompt templates"}
-          {preview ? (zh ? " · 演示" : " · Demo") : ""}
+          {preview && marks ? (zh ? " · 演示" : " · Demo") : ""}
         </h3>
         <button
           className="btn small outline"

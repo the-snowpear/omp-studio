@@ -1,8 +1,10 @@
 import { useId, useState, type ReactNode } from "react";
 import { GIT_STATUS_META, type TreeGitStatus } from "../git/treeStatus";
 import { Icon } from "../icons";
+import { fileTypeOf, iconNameFor, isSensitive } from "../explorer-types";
 import { splitDisplayPath } from "./toolMeta";
 import { useI18n } from "../i18n";
+import { usePreviewMode } from "../preview/PreviewContext";
 
 export type ChangesDiffLine =
   | { readonly kind: "row"; readonly mark: "+" | "-" | " "; readonly oldLn: string; readonly newLn: string; readonly text: string }
@@ -28,12 +30,6 @@ export type ChangesTurnOption = {
   readonly del: number;
 };
 
-const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|css|scss|html?|json|md|py|rs|go|vue|svelte)$/i;
-
-function fileIcon(path: string): "file-code" | "file" {
-  return CODE_FILE.test(path) ? "file-code" : "file";
-}
-
 export function FileStat({ status }: { status: TreeGitStatus | undefined }) {
   if (!status) return null;
   const meta = GIT_STATUS_META[status];
@@ -56,7 +52,7 @@ export function ChangeDelta({ add, del }: { add: number; del: number }) {
   );
 }
 
-function DiffLine({ line, split }: { line: ChangesDiffLine; split: boolean }) {
+export function DiffLine({ line, split }: { line: ChangesDiffLine; split: boolean }) {
   if (line.kind === "collapse") {
     return <div className="dl collapse"><Icon name="chevron-ud" extra="sm" /> {line.label}</div>;
   }
@@ -79,6 +75,18 @@ function DiffLine({ line, split }: { line: ChangesDiffLine; split: boolean }) {
       <span className="lc">{line.text}</span>
     </div>
   );
+}
+
+export function DiffDisplayMode({ split, onSplit }: { split: boolean; onSplit: (next: boolean) => void }) {
+  const { t } = useI18n();
+  return <span className="seg" role="radiogroup" aria-label={t("changes.diffDisplayMode")}>
+    <button type="button" role="radio" aria-checked={!split} aria-label={t("changes.unifiedDiff")} data-tip={t("changes.unified")} className={split ? "" : "active"} onClick={() => onSplit(false)}>
+      <Icon name="rows" extra="sm" />
+    </button>
+    <button type="button" role="radio" aria-checked={split} aria-label={t("changes.splitDiff")} data-tip={t("changes.split")} className={split ? "active" : ""} onClick={() => onSplit(true)}>
+      <Icon name="columns" extra="sm" />
+    </button>
+  </span>;
 }
 
 function FileDiff({ file, split }: { file: ChangesDiffFile; split: boolean }) {
@@ -196,43 +204,29 @@ export function ChangesPanel({
   empty?: ReactNode;
 }) {
   const { t } = useI18n();
+  const { marks } = usePreviewMode();
   return (
-    <>
+    <div className="changes-panel">
       <div className="ch-toolbar">
         <TurnPicker turns={turns} turnId={turnId} onTurnChange={onTurnChange} />
-        {demo === true ? <span className="chip gray xs">{t("common.demo")}</span> : null}
+        {demo === true && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}
         <span className="spacer" />
-        <span className="seg" role="radiogroup" aria-label={t("changes.diffDisplayMode")}>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={!split}
-            aria-label={t("changes.unifiedDiff")}
-            data-tip={t("changes.unified")}
-            className={split ? "" : "active"}
-            onClick={() => onSplit(false)}
-          >
-            <Icon name="rows" extra="sm" />
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={split}
-            aria-label={t("changes.splitDiff")}
-            data-tip={t("changes.split")}
-            className={split ? "active" : ""}
-            onClick={() => onSplit(true)}
-          >
-            <Icon name="columns" extra="sm" />
-          </button>
-        </span>
+        <DiffDisplayMode split={split} onSplit={onSplit} />
       </div>
       <div className="ch-list">
         {files.length === 0 ? empty : files.map((file) => {
           const open = expanded.has(file.file);
           const display = splitDisplayPath(file.file);
+          // 类型判定必须吃 basename：`config/.env` 走完整路径会落空，
+          // `docs/README.md` 也拿不到「书」这个旗舰形。
+          const ftype = fileTypeOf(display.name);
           return (
-            <div key={file.file} className={`ch-item${open ? " open" : ""}`}>
+            <div
+              key={file.file}
+              className={`ch-item${open ? " open" : ""}`}
+              data-ftype={ftype ?? undefined}
+              data-secret={isSensitive(display.name) || undefined}
+            >
               <button
                 type="button"
                 className="ch-row"
@@ -243,7 +237,7 @@ export function ChangesPanel({
               >
                 <Icon name="chevron-r" extra="sm ch-row-chev" />
                 <span className="ch-row-icon" aria-hidden="true">
-                  <Icon name={fileIcon(file.file)} extra="sm" />
+                  <Icon name={iconNameFor(ftype, display.name)} extra="sm" />
                 </span>
                 <span className="ch-file-meta">
                   <span className="ch-file-name">{display.name}</span>
@@ -260,6 +254,6 @@ export function ChangesPanel({
           );
         })}
       </div>
-    </>
+    </div>
   );
 }

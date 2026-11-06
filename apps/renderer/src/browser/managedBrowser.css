@@ -1,0 +1,198 @@
+/* Chat browser. The page is the content: chrome is one quiet row that continues
+   the active dock tab, and the only loud signal is who drives the page (the
+   "我" segment and the accent frame around the page light up together).
+   Nothing may be drawn over the page area itself: a native page sits on top. */
+
+.managed-browser { container: managed-browser / inline-size; position: relative; display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; overflow: hidden; color: var(--text); background: var(--bg-inset); font-size: var(--fs-12); }
+.managed-browser[hidden] { display: none; }
+.managed-browser button { cursor: pointer; }
+.managed-browser button:disabled, .managed-browser button[aria-disabled="true"] { cursor: default; }
+
+/* ---- Toolbar ------------------------------------------------------------ */
+.mb-toolbar { position: relative; display: flex; flex: none; align-items: center; gap: 6px; height: 38px; box-sizing: border-box; padding: 0 6px 0 4px; border-bottom: 1px solid var(--border); background: var(--bg-inset); }
+.mb-toolbar.is-start { padding-left: 12px; }
+.mb-toolbar-title { flex: 1 1 auto; min-width: 0; color: var(--text-2); font-weight: var(--fw-medium); }
+.mb-nav, .mb-actions { display: flex; flex: none; align-items: center; gap: 2px; }
+.mb-actions { gap: 4px; }
+.mb-actions > .chip { margin-right: 2px; }
+.mb-toolbar .icon-btn:disabled { opacity: .38; }
+.mb-toolbar .icon-btn.active { background: var(--accent-soft); color: var(--accent); }
+
+/* Address field: host reads first, the path recedes; editing shows the full URL. */
+.mb-omnibox { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 64px; height: 28px; box-sizing: border-box; padding: 0 4px 0 9px; border: 1px solid transparent; border-radius: var(--r-6); background: var(--surface-2); color: var(--text-3); transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
+.mb-omnibox:hover { border-color: var(--border); }
+.mb-omnibox.is-focused { border-color: var(--accent-border); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-softer); }
+.mb-omnibox.is-readonly .mb-omnibox-input { cursor: default; }
+.mb-omnibox[data-status="error"] .mb-omnibox-lead, .mb-omnibox[data-status="crashed"] .mb-omnibox-lead { color: var(--red); }
+.mb-omnibox-lead { display: inline-flex; flex: none; color: var(--text-3); }
+.mb-omnibox-field { position: relative; display: flex; flex: 1 1 auto; min-width: 0; height: 100%; }
+.mb-omnibox-input { flex: 1 1 auto; width: 0; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-12); }
+.mb-omnibox-input::placeholder { color: var(--text-faint); }
+/* Fields inside a framed control show focus on the frame, not on themselves. */
+.mb-omnibox-input:focus-visible, .mb-start-input:focus-visible { outline: none; }
+.mb-omnibox-input.is-masked { color: transparent; }
+.mb-omnibox-display { position: absolute; inset: 0; display: flex; align-items: center; overflow: hidden; white-space: nowrap; pointer-events: none; font-size: var(--fs-12); }
+.mb-omnibox-host { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.mb-omnibox-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); }
+.mb-omnibox-chip { display: inline-flex; flex: none; align-items: center; height: 18px; max-width: 96px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--r-4); background: var(--surface); color: var(--text-2); font: inherit; font-size: var(--fs-11); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.mb-omnibox-chip:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+.mb-omnibox-chip.is-space { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 30%, transparent); background: var(--blue-soft); }
+
+/* Who drives the page. Agent is the resting state; "我" is the one accent fill. */
+.mb-control { flex: none; }
+.mb-control button { height: 22px; padding: 0 8px; border: 1px solid transparent; white-space: nowrap; }
+.mb-control.is-compact button { padding: 0 6px; }
+/* Outranks the dark theme's .seg active fill, so "我" keeps the accent in both themes. */
+.managed-browser .mb-control.seg button[data-who="human"].active { background: var(--accent); border-color: transparent; color: var(--text-on-accent); }
+.mb-control button[aria-busy="true"] { color: var(--accent); }
+.mb-control button[aria-disabled="true"] { opacity: .55; }
+
+/* The bar sweeps while loading and fills once when the page settles. */
+.mb-loadbar { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden; pointer-events: none; }
+.mb-loadbar::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 34%; background: var(--accent); opacity: 0; transform: translateX(-100%); }
+.mb-loadbar.is-loading::after { opacity: 1; animation: mb-load 1.15s var(--ease-ios) infinite; }
+.mb-loadbar.is-done::after { width: 100%; transform: none; animation: mb-load-done .36s var(--ease-out) forwards; }
+@keyframes mb-load { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+@keyframes mb-load-done { from { opacity: 1; } to { opacity: 0; } }
+
+.mb-spinner { display: inline-block; flex: none; box-sizing: border-box; width: 12px; height: 12px; border: 1.5px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; border-radius: 50%; animation: mb-spin .8s linear infinite; }
+@keyframes mb-spin { to { transform: rotate(360deg); } }
+
+/* ---- Contextual bars: only present while they have something to say ------ */
+.mb-bar { display: flex; flex: none; align-items: center; gap: 8px; min-height: 32px; box-sizing: border-box; padding: 3px 6px 3px 10px; border-bottom: 1px solid var(--border); background: var(--bg-inset); line-height: 1.45; }
+.mb-bar > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.mb-bar > .icon { flex: none; color: var(--text-3); }
+.mb-bar.is-picking { background: var(--accent-softer); color: var(--text); }
+.mb-bar.is-picking > .icon { color: var(--accent); }
+.mb-bar.is-error { background: var(--red-soft); }
+.mb-bar.is-error > .icon { color: var(--red); }
+.mb-bar.is-find { gap: 4px; }
+.mb-find-input { flex: 1 1 auto; min-width: 0; height: 24px; padding: 0 8px; margin-right: 4px; border: 1px solid var(--border); border-radius: var(--r-4); background: var(--surface); color: var(--text); font: inherit; outline: 0; }
+.mb-find-input:focus { border-color: var(--accent-border); }
+.mb-find-input:focus-visible, .mb-ref-note:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-softer); }
+
+/* ---- Page area ----------------------------------------------------------- */
+/* A constant 2px gutter: taking control only changes its colour, never the page size. */
+.mb-stage { position: relative; flex: 1 1 0; min-height: 0; padding: 2px; background: var(--bg-inset); transition: background var(--dur) var(--ease); }
+.managed-browser.is-human .mb-stage { background: var(--accent); }
+.mb-viewport { position: relative; height: 100%; min-height: 72px; overflow: hidden; background: var(--surface); }
+.managed-browser.is-start .mb-stage { padding: 0; }
+.managed-browser.is-start .mb-viewport { background: var(--bg-inset); }
+
+.mb-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 16px; color: var(--text-3); text-align: center; }
+.mb-placeholder img, .mb-placeholder .icon { width: 20px; height: 20px; object-fit: contain; opacity: .8; }
+.mb-placeholder strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.mb-placeholder span { font-size: var(--fs-11); }
+
+.mb-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 20px; overflow: auto; text-align: center; background: var(--bg-inset); }
+.mb-state-mark { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 4px; border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface-2); color: var(--text-3); }
+.mb-state.is-failed .mb-state-mark, .mb-state.is-read-failed .mb-state-mark { border-color: color-mix(in srgb, var(--red) 25%, transparent); background: var(--red-soft); color: var(--red); }
+.mb-state strong { font-size: var(--fs-14); font-weight: var(--fw-semibold); }
+.mb-state p { max-width: 42ch; margin: 0; color: var(--text-2); line-height: 1.6; overflow-wrap: anywhere; }
+.mb-state-url { max-width: min(100%, 52ch); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-11); }
+.mb-state .btn { margin-top: 6px; gap: 6px; }
+
+/* ---- New tab ------------------------------------------------------------- */
+.mb-start { position: absolute; inset: 0; overflow: auto; background: var(--bg-inset); }
+.mb-start-column { display: flex; flex-direction: column; align-items: flex-start; max-width: 520px; margin: 0 auto; padding: clamp(24px, 11%, 88px) 24px 32px; }
+.mb-start-mark { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface-2); color: var(--text-3); }
+.mb-start-title { margin: 14px 0 16px; font-size: var(--fs-16); font-weight: var(--fw-semibold); letter-spacing: -.01em; }
+.mb-start-address { display: flex; align-items: center; gap: 8px; align-self: stretch; height: 40px; box-sizing: border-box; padding: 0 5px 0 12px; border: 1px solid var(--border-strong); border-radius: var(--r-8); background: var(--surface); color: var(--text-3); transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
+.mb-start-address:focus-within { border-color: var(--accent-border); box-shadow: 0 0 0 3px var(--accent-softer); }
+.mb-start-input { flex: 1 1 auto; width: 0; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-14); }
+.mb-start-input::placeholder { color: var(--text-faint); }
+.mb-start-input:disabled { cursor: not-allowed; }
+.mb-start-address .btn { flex: none; gap: 6px; }
+.mb-start-hint { max-width: 46ch; margin: 12px 0 0; color: var(--text-3); line-height: 1.65; }
+.mb-start-error { display: flex; align-items: flex-start; gap: 6px; margin: 10px 0 0; color: var(--red); line-height: 1.5; overflow-wrap: anywhere; }
+.mb-start-error .icon { flex: none; margin-top: 2px; }
+.mb-start-request { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; align-self: stretch; margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--accent-border); border-radius: var(--r-8); background: var(--accent-softer); }
+.mb-start-request-body { display: flex; flex: 1 1 220px; flex-direction: column; gap: 2px; min-width: 0; }
+.mb-start-request-body span { color: var(--text-3); font-size: var(--fs-11); }
+.mb-start-request-body strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-medium); }
+.mb-start-request-actions { display: flex; flex: none; gap: 6px; margin-left: auto; }
+.mb-start-pages { align-self: stretch; margin-top: 28px; }
+.mb-start-pages h3 { margin: 0 0 6px; color: var(--text-2); font-size: var(--fs-12); font-weight: var(--fw-semibold); }
+.mb-start-pages ul { margin: 0 -8px; padding: 0; list-style: none; }
+.mb-start-pages button { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: var(--r-6); background: transparent; color: var(--text); font: inherit; text-align: left; }
+.mb-start-pages button:hover { background: var(--surface-hover); }
+.mb-site-mark { flex: none; width: 14px; height: 14px; object-fit: contain; border-radius: 2px; }
+.mb-start-pages .icon { flex: none; color: var(--text-3); }
+.mb-start-page-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-start-page-host { flex: 0 1 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-11); }
+
+/* ---- Selected elements -------------------------------------------------- */
+.mb-tray { display: flex; flex: none; flex-direction: column; max-height: clamp(110px, 38%, 280px); border-top: 1px solid var(--border); background: var(--bg-inset); }
+.mb-tray-header { display: flex; flex: none; align-items: center; gap: 6px; min-height: 36px; padding: 0 8px 0 4px; }
+.mb-tray-toggle { display: inline-flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; height: 26px; padding: 0 6px; border: 0; border-radius: var(--r-4); background: transparent; color: var(--text); font: inherit; font-weight: var(--fw-medium); text-align: left; }
+.mb-tray-toggle:hover { background: var(--surface-hover); }
+.mb-tray-toggle .icon { color: var(--text-3); }
+.mb-tray-list { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0 0 4px; overflow-y: auto; overscroll-behavior: contain; list-style: none; }
+.mb-ref { display: grid; grid-template-columns: 56px minmax(0, 1fr) 22px; gap: 10px; align-items: start; padding: 8px 8px 8px 10px; border-top: 1px solid var(--border); }
+.mb-ref-shot { display: grid; place-items: center; width: 56px; height: 40px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-4); background: var(--surface-2); color: var(--text-3); }
+.mb-ref-shot img { width: 100%; height: 100%; object-fit: contain; }
+.mb-ref-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mb-ref-selector { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-family: var(--font-mono); font-size: var(--fs-11); }
+.mb-ref-text { display: -webkit-box; margin: 0; overflow: hidden; color: var(--text-2); line-height: 1.5; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.mb-ref-stale { display: flex; align-items: center; gap: 4px; margin: 0; color: var(--amber); font-size: var(--fs-11); }
+.mb-ref-note { width: 100%; height: 26px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--r-4); background: var(--surface); color: var(--text); font: inherit; outline: 0; }
+.mb-ref-note::placeholder { color: var(--text-faint); }
+.mb-ref-note:focus { border-color: var(--accent-border); }
+
+/* ---- Downloads and settings ---------------------------------------------- */
+.mb-view { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg-inset); }
+.mb-view-header { display: flex; flex: none; align-items: center; gap: 6px; height: 38px; padding: 0 12px 0 4px; border-bottom: 1px solid var(--border); }
+.mb-view-header h2 { margin: 0; font-size: var(--fs-12); font-weight: var(--fw-semibold); }
+.mb-view-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 16px 20px; }
+.mb-view-empty { margin: 14px 0 0; color: var(--text-3); line-height: 1.6; }
+.mb-list { margin: 8px 0 0; padding: 0; list-style: none; }
+.mb-download, .mb-permission { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.mb-download-mark { display: grid; flex: none; place-items: center; width: 26px; height: 26px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text-3); }
+.mb-download[data-state="completed"] .mb-download-mark { background: var(--green-soft); color: var(--green); }
+.mb-download[data-state="progressing"] .mb-download-mark { background: var(--accent-soft); color: var(--accent); }
+.mb-download-body, .mb-permission-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 4px; min-width: 0; }
+.mb-download-body strong, .mb-permission-body strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-medium); }
+.mb-download-status, .mb-permission-space { color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.mb-download-progress { display: block; height: 3px; overflow: hidden; border-radius: var(--r-full); background: var(--surface-3); }
+.mb-download-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.mb-row-actions { display: flex; flex: none; align-items: center; gap: 4px; }
+.mb-permission-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mb-settings { display: flex; flex-direction: column; }
+.mb-section { display: flex; flex-direction: column; gap: 10px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.mb-section:last-child { border-bottom: 0; }
+.mb-section h3 { margin: 0; font-size: var(--fs-12); font-weight: var(--fw-semibold); }
+.mb-section > p { max-width: 60ch; margin: -4px 0 0; color: var(--text-3); line-height: 1.6; }
+.mb-field { display: grid; grid-template-columns: minmax(110px, 38%) minmax(0, 1fr); gap: 12px; align-items: center; color: var(--text-2); }
+.mb-field-switch { grid-template-columns: minmax(0, 1fr) auto; }
+.mb-settings .input { height: 28px; padding: 0 8px; font-size: var(--fs-12); }
+.mb-settings .mb-field-number { width: 96px; }
+.mb-inline { display: flex; align-items: center; gap: 6px; }
+.mb-inline .input { flex: 1 1 auto; width: 0; }
+.mb-inline .btn, .mb-section-actions .btn { gap: 4px; }
+.mb-section-actions { display: flex; justify-content: flex-end; }
+
+/* ---- More menu ------------------------------------------------------------ */
+.mb-menu { min-width: 244px; }
+.mb-menu-zoom { display: flex; align-items: center; gap: 4px; padding: 3px 4px 3px 8px; color: var(--text-2); font-size: var(--fs-12); }
+.mb-menu-zoom > span { flex: 1 1 auto; }
+.mb-menu-zoom > .icon { color: var(--text-3); margin-right: 4px; }
+.mb-menu-zoom-value { min-width: 50px; height: 22px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--r-4); background: transparent; color: var(--text); font: inherit; font-variant-numeric: tabular-nums; }
+.mb-menu-zoom-value:hover:not(:disabled) { background: var(--surface-hover); }
+.mb-menu-zoom-value:disabled { color: var(--text-3); }
+
+.browser-link-menu { padding: 5px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px #0003; }
+
+/* ---- Narrow docks --------------------------------------------------------- */
+@container managed-browser (max-width: 420px) {
+  .mb-toolbar { gap: 4px; padding-right: 4px; }
+  .mb-omnibox-chip { display: none; }
+  .mb-start-column { padding-left: 16px; padding-right: 16px; }
+  .mb-field { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .mb-field-switch { grid-template-columns: minmax(0, 1fr) auto; }
+}
+@container managed-browser (max-width: 320px) {
+  .mb-nav .icon-btn:nth-child(2) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mb-loadbar.is-loading::after { animation: none; transform: none; width: 100%; opacity: .45; }
+}

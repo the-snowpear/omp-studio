@@ -59,6 +59,19 @@ class GithubFixtureRunner extends HostProcessRunner {
 
   override async run(options: ProcessRunOptions): Promise<ProcessRunResult> {
     this.calls.push(options);
+    const result = (value: unknown): ProcessRunResult => ({ stdout: JSON.stringify(value), stderr: "", exitCode: 0 });
+    if (options.command === "git" && options.args.length === 1 && options.args[0] === "remote") return { stdout: "origin\nupstream\n", stderr: "", exitCode: 0 };
+    if (options.command === "git" && options.args.includes("upstream")) return { stdout: "https://github.com/upstream/project.git\n", stderr: "", exitCode: 0 };
+    if (options.command === "gh" && options.args.includes("graphql")) {
+      const row = { number: 7, title: "Fixture PR", body: "Source body", url: "https://github.com/acme/repo/pull/7", state: "OPEN", author: { login: "fixture" }, updatedAt: "2026-11-01T00:00:00Z", labels: { nodes: [{ name: "bug" }] }, comments: { totalCount: 1 }, isDraft: false, headRefName: "feature", baseRefName: "main", headRefOid: "abc123", reviewDecision: "APPROVED", additions: 2, deletions: 1, changedFiles: 1 };
+      return options.args.some(arg => arg.startsWith("q=")) ? result({ data: { search: { issueCount: 51, nodes: [row], pageInfo: { hasNextPage: !options.args.includes("cursor=page2"), endCursor: "page2" } } } }) : result({ data: { repository: { item: row } } });
+    }
+    if (options.command === "gh" && options.args[0] === "api" && !options.args.includes("POST")) {
+      const endpoint = options.args[3] ?? "";
+      if (endpoint.includes("/files?")) return result([{ filename: "src/file.ts", status: "modified", additions: 2, deletions: 1, patch: "@@ -1 +1 @@\n-old\n+new" }]);
+      if (endpoint.endsWith("/pulls/7")) return result({ head: { sha: "abc123" } });
+      return result([{ id: 1, user: { login: "reviewer" }, body: "Review text", created_at: "2026-11-01T00:00:00Z", html_url: "https://github.com/upstream/project/pull/7#comment", ...(endpoint.includes("pulls/7/comments") ? { path: "src/file.ts", line: 2 } : {}) }]);
+    }
     if (options.command === "git" && options.args[0] === "remote") return { stdout: "https://github.com/acme/repo.git\n", stderr: "", exitCode: 0 };
     if (options.command === "git" && options.args[0] === "rev-parse") return { stdout: ".git\n", stderr: "", exitCode: 0 };
     if (options.command === "gh" && options.args[0] === "auth") return { stdout: '{"hosts":{"github.com":[{"state":"success","active":true,"login":"fixture","gitProtocol":"https"}]}}', stderr: "", exitCode: 0 };
@@ -91,13 +104,46 @@ test("DesktopGithubService uses gh JSON reads and sends PR bodies through stdin"
     assert.ok(!comment.args.join(" ").includes("body kept out of argv"));
     assert.equal(comment.args.includes("--body-file"), true);
     await service.execute({ workspaceId, operation: { kind: "pr.close", number: 7, comment: "close reason" } }, "github-close" as CommandRequestId);
-    const closeComment = runner.calls.find((call) => call.command === "gh" && call.args[0] === "api");
+    const closeComment = runner.calls.find((call) => call.command === "gh" && call.args[0] === "api" && call.args.includes("POST"));
     assert.ok(closeComment);
     assert.equal(closeComment.stdin, JSON.stringify({ body: "close reason" }));
     assert.ok(!closeComment.args.join(" ").includes("close reason"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("GitHub browser keeps upstream scope through pagination, discussion, diffs and PR actions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-github-browse-"));
+  const registry = new WorkspaceRegistry(join(root, "registry.json"));
+  try {
+    const stored = await registry.upsertByPath(root);
+    const runner = new GithubFixtureRunner();
+    const service = createDesktopGithubService({ registry, runner });
+    const target = { workspaceId: stored.workspaceId as WorkspaceId, remote: "upstream" };
+    const remotes = await service.repositories(target);
+    assert.deepEqual(remotes.repositories.map(row => row.remote), ["origin", "upstream"]);
+    const first = await service.items({ ...target, kind: "pr", label: "bug", assignedToMe: true, reviewRequested: true, search: "theme" });
+    assert.equal(first.repository.ownerRepo, "upstream/project");
+    assert.equal(first.nextCursor, "page2");
+    await service.items({ ...target, kind: "pr", cursor: first.nextCursor });
+    const search = runner.calls.find(call => call.args.some(arg => arg.startsWith("q=")))!.args.join(" ");
+    assert.match(search, /repo:upstream\/project/);
+    assert.match(search, /assignee:@me/);
+    assert.match(search, /review-requested:@me/);
+    assert.ok(runner.calls.some(call => call.args.includes("cursor=page2")));
+    const discussion = await service.discussion({ ...target, kind: "pr", number: 7 });
+    assert.deepEqual(discussion.comments.map(row => row.kind), ["comment", "review", "inline"]);
+    assert.equal(discussion.comments[2]?.path, "src/file.ts");
+    const files = await service.files({ ...target, number: 7, headOid: "abc123" });
+    assert.equal(files.files[0]?.path, "src/file.ts");
+    const diff = await service.fileDiff({ ...target, number: 7, path: "src/file.ts", headOid: "abc123" });
+    assert.match(diff.patch, /\+new/);
+    await assert.rejects(service.fileDiff({ ...target, number: 7, path: "src/file.ts", headOid: "older" }), /PR_HEAD_CHANGED/);
+    await service.execute({ ...target, operation: { kind: "pr.ready", number: 7 } }, "upstream-ready" as CommandRequestId);
+    const ready = runner.calls.find(call => call.args[0] === "pr" && call.args[1] === "ready");
+    assert.ok(ready?.args.includes("github.com/upstream/project"));
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("DesktopGitService performs real repository, branch, worktree and safety flows", async (context) => {

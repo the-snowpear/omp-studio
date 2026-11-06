@@ -3,11 +3,14 @@ import { createPortal } from "react-dom";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type { SeanceResult } from "@omp-studio/studio-protocol";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import "./seance.css";
 
 const DEMO_ANSWER =
   "演示回答 / Demo answer: the session settled on keeping the bridge typed, deferred the macOS signing work, and left one open question about retry budgets.";
+const DEMO_ANSWER_PLAIN =
+  "The session settled on keeping the bridge typed, deferred the macOS signing work, and left one open question about retry budgets.";
 
 /**
  * Read-only consult of a saved session (upstream `/seance`). The source is read through a
@@ -31,6 +34,7 @@ export function SeanceDialog({
   onClose(): void;
 }) {
   const { resolvedLanguage } = useI18n();
+  const { marks } = usePreviewMode();
   const zh = resolvedLanguage === "zh";
   const [question, setQuestion] = useState("");
   const [model, setModel] = useState("");
@@ -48,7 +52,8 @@ export function SeanceDialog({
     try {
       let result: SeanceResult;
       if (preview) {
-        result = { text: DEMO_ANSWER, sourceSessionId: source, state: "completed", model: model.trim() || "demo/model" };
+        const chosenModel = model.trim() || (marks ? "demo/model" : "");
+        result = { text: marks ? DEMO_ANSWER : DEMO_ANSWER_PLAIN, sourceSessionId: source, state: "completed", ...(chosenModel ? { model: chosenModel } : {}) };
       } else {
         const handle = await client!.command("seance.ask", {
           sessionId: sessionId!,
@@ -78,7 +83,7 @@ export function SeanceDialog({
         <div className="modal-head">
           {zh ? "只读咨询：" : "Consult (read-only): "}
           {title}
-          {preview ? <span className="chip gray xs seance-demo">{zh ? "演示" : "Demo"}</span> : null}
+          {preview && marks ? <span className="chip gray xs seance-demo">{zh ? "演示" : "Demo"}</span> : null}
         </div>
         <div className="modal-body seance-body">
           <p className="small muted">

@@ -25,7 +25,7 @@ function fakePicker(dirs: string[]): () => Promise<string | undefined> {
   };
 }
 
-test("pick registers the folder; the public list JSON never contains the absolute path", async () => {
+test("pick registers the folder and returns its canonical root for display", async () => {
   const profile = await mkdtemp(join(tmpdir(), "omp-ws-service-"));
   const picked = await mkdtemp(join(tmpdir(), "omp-ws-picked-"));
   try {
@@ -43,10 +43,7 @@ test("pick registers the folder; the public list JSON never contains the absolut
     assert.equal(model.workspaces[0]!.name, basename(picked));
     assert.equal(model.workspaces[0]!.active, true);
     assert.equal(model.activeWorkspaceId, model.workspaces[0]!.workspaceId);
-    const json = JSON.stringify(model);
-    assert.ok(!json.includes(picked), "public workspace list must not contain the absolute path");
-    assert.ok(!json.includes("C:\\"), "public workspace list must not leak a drive path");
-    assert.ok(!json.includes("/Users"), "public workspace list must not leak a home path");
+    assert.equal(model.workspaces[0]!.root, await canonicalWorkspacePath(picked));
   } finally {
     await rm(profile, { recursive: true, force: true });
     await rm(picked, { recursive: true, force: true });

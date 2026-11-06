@@ -28,9 +28,10 @@ export const PREVIEW_FEATURE_SETTINGS: FeatureSettingRow[] = [
   { key: "session.worktreeScope", value: "repo", source: "default" },
   { key: "stt.enabled", value: false, source: "default" },
   { key: "stt.language", value: "zh", source: "global" },
+  { key: "stt.submitTrigger", value: "never", source: "default" },
 ];
 export const PREVIEW_POOL_ACCOUNTS: PoolAccountOption[] = [
   { provider: "anthropic", identityKey: "email:review@example.test", label: "Review · Team" },
   { provider: "anthropic", identityKey: "email:personal@example.test", label: "Personal" },
-  { provider: "openai-codex", identityKey: "account:studio-demo", label: "Studio · Pro" },
+  { provider: "openai-codex", identityKey: "account:studio-pro", label: "Studio · Pro" },
 ];

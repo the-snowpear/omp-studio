@@ -1,7 +1,7 @@
 /**
  * 设置页预览 fixtures（Phase 1）。
  *
- * 预览模式下设置页读这里：App 级设置演示值 + 「尚未接入」Runtime 行的
+ * 预览模式下设置页读这里：App 级设置演示值 + Runtime 设置的
  * 演示状态。演示控件只改本地 UI 状态，不写 appSettings 存储、不调
  * Host、不伪造 Studio Bridge 能力。真实模式不 import 本模块的运行态。
  */
@@ -27,6 +27,8 @@ export const PREVIEW_APP_SETTINGS: AppSettings = {
   language: "system",
   theme: "dark",
   density: "compact",
+  agentRosterDensity: "standard",
+  fileTypePalette: "cat",
   conversationWidthMode: "standard",
   conversationCustomWidth: 1024,
   uiFontFamily: "",
@@ -47,6 +49,8 @@ export const PREVIEW_APP_SETTINGS: AppSettings = {
   notifyErrors: true,
   notifyConfirmations: true,
   notifyLongTasks: true,
+  dictationDeviceId: "",
+  dictationToggleShortcut: "",
   showThinkingSummary: true,
   showToolIntent: true,
   showTokenUsage: false,
@@ -86,83 +90,7 @@ export const PREVIEW_RUNTIME_SETTINGS: Readonly<Record<string, string | boolean>
   "images.describeForTextModels": true,
   "images.questionTimeoutMs": "300000",
   "tools.speculativeExecution.enabled": false,
-  "input.steering": "一次处理一条",
-  "input.followup": "一次处理全部",
-  "input.interrupt": "立即中断",
-  "input.paste": "自动转文件",
-  "input.autocomplete": "8 条",
-  "input.emoji": true,
-  "reply.style": "Pragmatic",
-  "reply.detail": "Concise",
-  "tool.fileRead": "允许",
-  "tool.fileWrite": "允许",
-  "tool.outside": "询问",
-  "tool.bash": "允许",
-  "tool.network": "询问",
-  "tool.browser": "询问",
-  "tool.computer": "禁止",
-  "tool.github": "询问",
-  "tool.fetch": "允许",
-  "tool.mcp": "询问",
-  "security.outside": "每次询问",
-  "security.bashRules": "默认规则集",
-  "compact.auto": true,
-  "compact.strategy": "Snapcompact",
-  "compact.threshold": "80%",
-  "compact.midTurn": false,
-  "compact.idle": true,
-  "compact.promote": false,
-  "compact.pruneReads": true,
-  "workspace.extraDirs": "已配置 2 个目录",
-  "workspace.tree": true,
-  "workspace.restore": true,
-  "memory.backend": "Hindsight",
-  "memory.recall": true,
-  "memory.retain": true,
-  "memory.injectLimit": "8 条",
-  "memory.debug": false,
-  "edit.mode": "Hashline",
-  "edit.fuzzy": true,
-  "edit.fuzzyThreshold": "默认",
-  "edit.guardGenerated": true,
-  "edit.seenLine": true,
-  "read.lineNumbers": true,
-  "read.limit": "2000 行",
-  "read.summary": true,
-  "read.markdown": "渲染",
-  "read.previewLength": "标准",
-  "lsp.enabled": true,
-  "lsp.lazy": true,
-  "lsp.shared": true,
-  "lsp.formatOnWrite": false,
-  "lsp.diagOnWrite": true,
-  "lsp.diagOnEdit": true,
-  "shell.enabled": true,
-  "shell.longCommand": true,
-  "shell.direnv": true,
-  "shell.minimizer": true,
-  "shell.runtimes": "自动检测",
-  "plan.enabled": true,
-  "plan.default": true,
-  "goal.enabled": true,
-  "goal.status": true,
-  "goal.autoplay": "自动继续",
-  "loop.mode": "Compact",
-  "exec.async": true,
-  "exec.toolTimeout": "10 分钟",
-  "exec.maxConcurrency": "4",
-  "exec.polling": "自适应",
-  "task.maxConcurrency": "8",
-  "task.maxDepth": "3",
-  "task.maxRuntime": "30 分钟",
-  "task.budget": "默认",
-  "task.preferDelegate": true,
-  "task.isolation": "共享工作区",
-  "task.merge": "Patch",
-  "advanced.retry": "指数退避",
-  "advanced.retryCount": "3",
-  "advanced.loopGuard": true,
-  "advanced.repeatThreshold": "10",
+
 };
 
 /** 预览模式的审批模式演示值。 */
@@ -183,7 +111,7 @@ export function usePreviewAppSettings(): {
   return { app, patch };
 }
 
-/** Runtime「尚未接入」行的演示读写面。 */
+/** Runtime 设置的演示读写面。 */
 export function useRuntimeDemo(): RuntimeDemoApi {
   const [state, setState] = useState<Record<string, string | boolean>>({ ...PREVIEW_RUNTIME_SETTINGS });
   const value = useCallback((key: string): string => {

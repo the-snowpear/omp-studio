@@ -1,3 +1,4 @@
+import { useConversationDom } from "../conversationWorkspace/Context";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { beforeConversationLayoutChange, afterConversationLayoutChange } from "../conversation/conversationReflow";
 import { fitWorkbench, type LayoutPanel, type WorkbenchLayout, type WorkbenchPreferences } from "./workbenchLayout";
@@ -11,6 +12,7 @@ function sameVisibility(a: LayoutVisibility, b: LayoutVisibility): boolean {
 }
 
 export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean) {
+  const { document, window } = useConversationDom();
   const rootRef = useRef<HTMLDivElement>(null);
   const [priority, setPriority] = useState<LayoutPanel | null>(null);
   const [visibility, setVisibility] = useState<LayoutVisibility>(() => visibilityOf(fitWorkbench(prefs, { width: window.innerWidth, height: window.innerHeight - 80, composerHeight: 160 })));
@@ -160,7 +162,7 @@ export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean)
     };
     inertSiblings(root);
     const key = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || document.querySelector('[aria-modal="true"]') || document.querySelector('.menu:not([hidden]), .title-menu-popover')) return;
+      if (event.defaultPrevented || (event.key === "Escape" && document.body.classList.contains("dock-dragging")) || document.querySelector('[aria-modal="true"]') || document.querySelector('.menu:not([hidden]), .title-menu-popover')) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); dismissOverlay(); }
       if (event.key !== "Tab") return;
       const available = nodes();

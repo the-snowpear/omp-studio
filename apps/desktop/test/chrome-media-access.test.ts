@@ -35,6 +35,21 @@ test("Windows leaves the microphone to Chromium", async () => {
   assert.deepEqual(windows.asked, []);
 });
 
+test("Windows opens its fixed microphone privacy page without accepting a renderer URL", async () => {
+  const handlers = new Map<string, (event: { sender: { isDestroyed(): boolean; getURL(): string } }) => unknown>();
+  const opened: string[] = [];
+  const sender = { isDestroyed: () => false, getURL: () => "file:///app/index.html" };
+  const registration = registerMediaAccessIpc({
+    ipcMain: { handle: (channel, listener) => handlers.set(channel, listener), removeHandler: channel => handlers.delete(channel) },
+    isTrustedSender: value => value === sender,
+    platform: "win32", preferences: preferences("denied").value,
+    openExternal: async url => { opened.push(url); },
+  });
+  assert.equal(await handlers.get(CHROME_MEDIA_ACCESS_CHANNELS.openMicrophoneSettings)?.({ sender }), true);
+  assert.deepEqual(opened, ["ms-settings:privacy-microphone"]);
+  registration.dispose();
+});
+
 test("the IPC serves the trusted renderer only and opens a fixed settings URL", async () => {
   const handlers = new Map<string, (event: { sender: { isDestroyed(): boolean; getURL(): string } }) => unknown>();
   const opened: string[] = [];

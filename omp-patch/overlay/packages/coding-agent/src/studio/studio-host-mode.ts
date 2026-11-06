@@ -5,6 +5,7 @@ import { StudioExtensionModes } from "./services/extension-modes";
 import { StudioCfgService } from "./services/cfg-service";
 import { createStudioAuthBroker } from "./services/auth-broker-service";
 import { cfgLoopConditionTimeoutMs, cfgLoopMode } from "../modes/settings";
+import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "../plan-mode/settings";
 import { cfgTaskEnableLsp } from "../task/settings";
 import { StudioLiveAudioService } from "./services/live-audio-service";
 import { expandModelMentionTags } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
@@ -233,6 +234,8 @@ export interface StudioHostModeDependencies {
 	setToolUIContext?: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
 	/** Recreate the main AgentSession from its persisted session file. */
 	recreateSession?: (sessionFile: string) => Promise<AgentSession>;
+	/** The Host launched a fresh session, rather than resuming a previous one. */
+	freshSession?: boolean;
 	workerIdleSleepMs?: number;
 	workerIdleRecycleMs?: number;
 	nowMs?: () => number;
@@ -905,6 +908,7 @@ export function createStudioHostRuntime(
 				if (typeof manager.reserveMessageId === "function") return manager.reserveMessageId(input.role);
 				return crypto.randomUUID().slice(-8);
 			},
+			reserveCustomMessageId: input => manager.reserveCustomMessageId(input.customType, input.timestamp),
 			reserveCompactionId: () => {
 				if (typeof manager.reserveCompactionId === "function") return manager.reserveCompactionId();
 				return crypto.randomUUID().slice(-8);
@@ -1146,6 +1150,7 @@ function createStudioMainWorkerSupervisor(
 			runtime.services.workbench.ida.running ||
 			runtime.services.workbench.agentBtw.running ||
 			runtime.services.workbench.benchmarks.running ||
+			runtime.services.workbench.evaluations.running ||
 			runtime.services.workbench.media.running ||
 			runtime.services.workbench.prediction.running ||
 			runtime.services.workbench.portability.running ||
@@ -1153,7 +1158,14 @@ function createStudioMainWorkerSupervisor(
 			runtime.services.workbench.worktrees.running
 		)
 			return true;
-		if (slot.isStreaming || slot.isCompacting || slot.hasPostPromptWork || slot.queuedMessageCount > 0) return true;
+		if (
+			slot.isStreaming ||
+			slot.isCompacting ||
+			slot.hasPostPromptWork ||
+			slot.queuedMessageCount > 0 ||
+			slot.hasHeldQueuedMessages
+		)
+			return true;
 		if (runtime.services.interaction.pending() !== undefined) return true;
 		return runtime.services.jobs
 			.list({
@@ -1349,6 +1361,18 @@ export async function runStudioHostMode(
 	try {
 		await hydratePersistedStudioAgents(AgentRegistry.global(), sessionFileOf(slot));
 		await runtime.services.commands.refresh();
+		// A headless Studio worker has no InteractiveMode to apply this default.
+		// Revivals, resumes, handoffs and sessions with an explicit mode keep their state.
+		if (
+			dependencies.freshSession &&
+			!(process.stdin.isTTY && process.stdout.isTTY) &&
+			cfgPlanEnabled.get(slot.settings) &&
+			cfgPlanDefaultOnStartup.get(slot.settings) &&
+			slot.sessionManager.buildSessionContext().messages.length === 0 &&
+			!slot.sessionManager.getEntries().some(entry => entry.type === "mode_change")
+		) {
+			await runtime.services.modes.enterPlan();
+		}
 		await bridge.start(runtime);
 		// Install the Remote UI factory so Ask / tool dialogs surface as
 		// interaction cards on the Bridge (plan §2.5). The interactive TUI

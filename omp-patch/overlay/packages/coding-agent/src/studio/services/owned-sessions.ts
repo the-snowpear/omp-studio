@@ -18,6 +18,9 @@ function ownedRefs(session: AgentSession): AgentRef[] {
 		}
 	});
 }
+export function ownedStudioSessionAgent(session: AgentSession, sessionId: string): AgentRef | undefined {
+	return ownedRefs(session).find(ref => ref.session?.sessionId === sessionId);
+}
 export function ownedStudioAgent(session: AgentSession, agentId: string): AgentRef | undefined {
 	return ownedRefs(session).find(ref => ref.id === agentId);
 }

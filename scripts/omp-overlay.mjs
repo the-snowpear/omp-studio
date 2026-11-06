@@ -83,9 +83,32 @@ export async function removeOverlay(targetDirectory = ompSourceDirectory, root =
   return files;
 }
 
+function isStudioOwnedFile(file) {
+  return file.startsWith("packages/coding-agent/src/studio/") ||
+    (file.startsWith("packages/coding-agent/test/") && file.split("/").some(part => part.startsWith("studio-")));
+}
+
+/** Include newly authored Studio files, not just paths that already exist in the overlay. */
+async function newOverlayFiles(targetDirectory) {
+  const paths = ["packages/coding-agent/src/studio", "packages/coding-agent/test"];
+  if (existsSync(join(targetDirectory, ".git"))) {
+    const lines = text => text.split("\0").filter(Boolean);
+    const upstream = new Set(lines(run("git", ["-C", targetDirectory, "ls-tree", "-rz", "--name-only", "HEAD", "--", ...paths], { capture: true })));
+    const files = lines(run("git", ["-C", targetDirectory, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...paths], { capture: true }));
+    return files.filter(file => isStudioOwnedFile(file) && !upstream.has(file));
+  }
+  // Plain fixture/source directories have no index. Only the two owned namespaces are eligible.
+  const files = [];
+  for (const path of paths) {
+    try { files.push(...await listRelativeFiles(targetDirectory, join(targetDirectory, ...path.split("/")))); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+  return files.filter(isStudioOwnedFile);
+}
+
 /** Copy vendor-tree overlay files back into the repository. Reports what actually changed. */
 export async function captureOverlay(targetDirectory = ompSourceDirectory, root = overlayRoot) {
-  const files = await overlayFiles(root);
+  const files = [...new Set([...await overlayFiles(root), ...await newOverlayFiles(targetDirectory)])].sort();
   const changed = [];
   const missing = [];
   for (const file of files) {
@@ -98,8 +121,9 @@ export async function captureOverlay(targetDirectory = ompSourceDirectory, root 
       missing.push(file);
       continue;
     }
-    const stored = await readFile(destination);
-    if (!current.equals(stored)) {
+    const stored = await readFile(destination).catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
+    if (stored === undefined || !current.equals(stored)) {
+      await mkdir(dirname(destination), { recursive: true });
       await copyFile(source, destination);
       changed.push(file);
     }

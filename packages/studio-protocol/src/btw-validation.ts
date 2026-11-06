@@ -1,10 +1,8 @@
 import { ContractValidationError } from "./contract-error.js";
 import {
   BTW_ERROR_CODES,
-  BTW_ERROR_MESSAGE_MAX_CHARS,
   BTW_ID_MAX_CHARS,
   BTW_STATUSES,
-  BTW_TEXT_MAX_CHARS,
   type BtwError,
   type BtwErrorCode,
   type BtwSnapshot,
@@ -44,7 +42,7 @@ function parseBtwError(value: unknown, path: string): BtwError {
   if (!(BTW_ERROR_CODES as readonly string[]).includes(input.code as string)) {
     throw new ContractValidationError("unsupported BTW error code", `${path}.code`);
   }
-  boundedString(input.message, `${path}.message`, BTW_ERROR_MESSAGE_MAX_CHARS);
+  boundedString(input.message, `${path}.message`, Number.POSITIVE_INFINITY);
   return input as unknown as BtwError;
 }
 
@@ -56,15 +54,15 @@ function parseBtwError(value: unknown, path: string): BtwError {
  */
 export function parseBtwSnapshot(value: unknown, path = "$snapshot"): BtwSnapshot {
   const input = record(value, path);
-  exactKeys(input, ["ephemeralId", "status", "text", "copy", "error", "sessionId", "topicId", "question", "title"], path);
+  exactKeys(input, ["ephemeralId", "status", "text", "copy", "error", "sessionId", "topicId", "question", "title", "turnIndex"], path);
   for (const key of ["sessionId", "topicId"] as const) if (input[key] !== undefined) boundedNonEmptyString(input[key], path + "." + key, BTW_ID_MAX_CHARS);
-  if (input.question !== undefined) boundedString(input.question, path + ".question", 65536);
+  if (input.question !== undefined) boundedString(input.question, path + ".question", Number.POSITIVE_INFINITY);
   boundedNonEmptyString(input.ephemeralId, `${path}.ephemeralId`, BTW_ID_MAX_CHARS);
   if (!(BTW_STATUSES as readonly string[]).includes(input.status as string)) {
     throw new ContractValidationError("unsupported BTW status", `${path}.status`);
   }
-  boundedString(input.text, `${path}.text`, BTW_TEXT_MAX_CHARS);
-  if (input.copy !== undefined) boundedString(input.copy, `${path}.copy`, BTW_TEXT_MAX_CHARS);
+  boundedString(input.text, `${path}.text`, Number.POSITIVE_INFINITY);
+  if (input.copy !== undefined) boundedString(input.copy, `${path}.copy`, Number.POSITIVE_INFINITY);
   if (input.error !== undefined) parseBtwError(input.error, `${path}.error`);
   return input as unknown as BtwSnapshot;
 }

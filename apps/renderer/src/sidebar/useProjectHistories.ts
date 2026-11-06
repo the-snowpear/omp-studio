@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type {
   SessionId,
   SessionHistoryReadModel,
@@ -50,6 +50,18 @@ export function projectHistoryEntries(
 
 type HistoryClient = Pick<StudioClient, "query">;
 
+export class ProjectHistoryStore {
+  cache: ProjectHistoryCache = {};
+  requests: Record<string, number> = {};
+  private listeners = new Set<() => void>();
+  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  getSnapshot = () => this.cache;
+  setCache = (action: ProjectHistoryCache | ((previous: ProjectHistoryCache) => ProjectHistoryCache)) => {
+    this.cache = typeof action === "function" ? action(this.cache) : action;
+    for (const listener of this.listeners) listener();
+  };
+}
+
 /**
  * Per-workspace active-history cache for the sidebar.
  *
@@ -61,9 +73,11 @@ type HistoryClient = Pick<StudioClient, "query">;
 export function useProjectHistories({
   client,
   preview,
+  shared,
 }: {
   readonly client: HistoryClient;
   readonly preview: boolean;
+  readonly shared?: ProjectHistoryStore | undefined;
 }): {
   readonly cache: ProjectHistoryCache;
   readonly load: (workspaceId: WorkspaceId, limit?: number) => Promise<SessionHistoryReadModel | undefined>;
@@ -71,11 +85,13 @@ export function useProjectHistories({
   readonly loadMore: (workspaceId: WorkspaceId) => Promise<SessionHistoryReadModel | undefined>;
   readonly clear: (workspaceId?: WorkspaceId) => void;
 } {
-  const [cache, setCache] = useState<ProjectHistoryCache>({});
-  const cacheRef = useRef<ProjectHistoryCache>({});
-  const requestRef = useRef<Record<string, number>>({});
+  const [own] = useState(() => new ProjectHistoryStore());
+  const store = shared ?? own;
+  const cache = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const setCache = store.setCache;
+  const cacheRef = useMemo(() => ({ get current() { return store.cache; }, set current(value: ProjectHistoryCache) { store.cache = value; } }), [store]);
+  const requestRef = useMemo(() => ({ get current() { return store.requests; }, set current(value: Record<string, number>) { store.requests = value; } }), [store]);
   const previousPreviewRef = useRef(preview);
-  cacheRef.current = cache;
 
   useEffect(() => {
     if (previousPreviewRef.current === preview) return;

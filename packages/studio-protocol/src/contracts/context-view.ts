@@ -1,14 +1,54 @@
 export type ContextCategoryId = "system-prompt" | "skills" | "built-in-tools" | "custom-tools" | "user-messages" | "assistant-messages" | "assistant-thinking" | "tool-calls" | "tool-output";
-export interface ContextEntrySummary { id: string; label: string; tokens: number; bytes: number; info?: string; path?: string; tool?: string; interrupted?: boolean }
-export interface ContextCategorySummary { id: ContextCategoryId; label: string; tokens: number; entries: number }
+
+/** Shared reasoning weight of one assistant message with several thinking blocks; member entries carry zero. */
+export interface ContextThinkingGroupSummary { id: string; label: string; tokens: number; interrupted?: boolean }
+
+export interface ContextEntrySummary {
+  id: string;
+  label: string;
+  /** Native estimate for this entry; zero for members of a thinking group, whose weight sits on the group. */
+  tokens: number;
+  bytes: number;
+  info?: string;
+  path?: string;
+  interrupted?: boolean;
+  /** Source message timestamp, epoch milliseconds. */
+  timestamp?: number;
+  callId?: string;
+  /** Owning group key, for example `tool-output/tool-0`. */
+  childKey?: string;
+  thinkingGroup?: ContextThinkingGroupSummary;
+  /** Redacted head of the body, so the list previews without fetching every entry. */
+  preview?: string;
+}
+
+export interface ContextCategorySummary {
+  id: ContextCategoryId;
+  label: string;
+  tokens: number;
+  entries: number;
+  /** Group key; present on children such as one tool's output group. */
+  key?: string;
+  /** Overview-only label when the weight differs from the content, for example "System Prompt (excluding Skills)". */
+  overviewLabel?: string;
+  /** Listed with its weight but never opened. */
+  openable?: false;
+  children?: ContextCategorySummary[];
+}
+
+export interface ContextSnapcompactSummary { visionCapable: boolean; savedTokens: number }
+export interface ContextModelSummary { id: string; name?: string }
+
 export interface ContextViewIndex {
   sessionId: string; snapshotId: string; capturedAt: string;
   contextWindow: number; usedTokens: number; freeTokens: number; bufferTokens: number; thresholdTokens: number | null;
   savedTokens: number; truncated: boolean; categories: ContextCategorySummary[];
+  model?: ContextModelSummary;
+  snapcompact?: ContextSnapcompactSummary;
 }
 export type ContextViewOperation =
   | { kind: "context.view.open"; sessionId: string }
-  | { kind: "context.view.list"; sessionId: string; snapshotId: string; category: ContextCategoryId; offset?: number; search?: string }
+  | { kind: "context.view.list"; sessionId: string; snapshotId: string; category: ContextCategoryId; childKey?: string; offset?: number; search?: string }
   | { kind: "context.view.entry"; sessionId: string; snapshotId: string; entryId: string; offset?: number }
   | { kind: "context.view.release"; sessionId: string; snapshotId: string };
 export interface ContextViewResultMap {

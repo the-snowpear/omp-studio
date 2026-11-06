@@ -89,6 +89,16 @@ test("context viewer redacts credentials, pages a frozen body and expires it on 
 			snapshotId: index.snapshotId,
 			entryId: list.entries[0]!.id,
 		});
+		// Overview weights and group metadata come from the native descriptor, not from the renderer.
+		expect(index.categories.find(category => category.id === "system-prompt")?.overviewLabel).toBe(
+			"System Prompt (excluding Skills)",
+		);
+		expect(index.categories.find(category => category.id === "skills")?.openable).toBe(false);
+		expect(index.model?.id).toBe(model.id);
+		// The list carries a redacted preview and the source timestamp, so no per-entry body read is needed.
+		expect(list.entries[0]!.preview?.length).toBeLessThanOrEqual(480);
+		expect(list.entries[0]!.timestamp).toBe(1);
+		expect(list.entries[0]!.childKey).toBeUndefined();
 		expect(first.text).not.toContain("ghp_" + "Ab3Z".repeat(10));
 		expect(first.nextOffset).toBeGreaterThan(0);
 		let text = first.text,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../icons";
+import { usePreviewMode } from "../preview/PreviewContext";
 import {
   userMessageTreeConfirmCopy,
   type UserMessageTreeConfirmKind,
@@ -18,6 +19,7 @@ export function UserMessageTreeConfirmDialog({
   readonly onConfirm: () => void;
 }): ReactNode {
   const copy = userMessageTreeConfirmCopy(kind);
+  const { marks } = usePreviewMode();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -45,7 +47,7 @@ export function UserMessageTreeConfirmDialog({
           <button type="button" className="icon-btn" aria-label="关闭" onClick={onCancel}><Icon name="x" /></button>
         </div>
         <div className="create-project-body">
-          <p className="create-branch-hint">{preview ? copy.hintPreview : copy.hint}</p>
+          <p className="create-branch-hint">{preview && marks ? copy.hintPreview : copy.hint}</p>
         </div>
         <div className="create-project-foot">
           <button type="button" className="btn outline" onClick={onCancel}>取消</button>

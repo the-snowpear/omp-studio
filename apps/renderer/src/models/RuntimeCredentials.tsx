@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { StudioClient, RuntimeAuthProvider } from "@omp-studio/client-contract";
 import { invokeUpgrade, useUpgradeAvailable } from "../runtimeUpgrade";
 import { useI18n } from "../i18n";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { hostErrorMessage } from "../hostError";
 export function RuntimeCredentials({ client, preview, providers = ["typesafe"] }: {
  client: StudioClient | null; preview: boolean; providers?: readonly RuntimeAuthProvider[];
@@ -13,6 +14,7 @@ export function RuntimeCredentials({ client, preview, providers = ["typesafe"] }
 }
 function CredentialRow({ client, preview, provider }: { client: StudioClient | null; preview: boolean; provider: RuntimeAuthProvider }) {
  const { t } = useI18n();
+ const { marks } = usePreviewMode();
  const available = useUpgradeAvailable(client, preview, "runtime.auth.set");
  const [configured, setConfigured] = useState<boolean | null>(null);
  const [key, setKey] = useState("");
@@ -40,7 +42,7 @@ function CredentialRow({ client, preview, provider }: { client: StudioClient | n
   <strong>{provider === "typesafe" ? "TypeSafe" : provider === "exa" ? "Exa" : "Ollama Cloud"}</strong>
   <span className="small muted">{!available ? t("runtimeUpgrade.unavailable") : configured === null ? t("common.loading") : configured ? t("runtimeUpgrade.authConfigured") : t("runtimeUpgrade.authMissing")}</span>
   {lastJudgment ? <span className="small muted">{t("runtimeUpgrade.lastJudgment")} {lastJudgment}</span> : null}
-  {preview ? <span className="chip gray xs">{t("common.demo")}</span> : null}
+  {preview && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}
   <input className="input" type="password" autoComplete="new-password" aria-label={provider + " " + t("runtimeUpgrade.authKey")} value={key} disabled={!available || busy} onChange={event => setKey(event.target.value)} />
   <button className="btn small" disabled={!available || busy || !key.trim()} onClick={() => void save(false)}>{t("common.save")}</button>
   <button className="btn small" disabled={!available || busy || !configured} onClick={() => void save(true)}>{t("common.delete")}</button>
@@ -50,8 +52,9 @@ function CredentialRow({ client, preview, provider }: { client: StudioClient | n
 }
 export function VisionModelStatus({client,preview}:{client:StudioClient|null;preview:boolean}) {
  const {t}=useI18n();
+ const {marks}=usePreviewMode();
  const available=useUpgradeAvailable(client,preview,"session.models.mentions");
  const [image,setImage]=useState<boolean|null>(null);
  useEffect(()=>{let closed=false;setImage(null);if(preview){setImage(true);return;}if(client&&available)void invokeUpgrade(client,"session.models.mentions",{}).then(result=>{if(!closed)setImage(result.activeModelImage);}).catch(()=>{});return()=>{closed=true;};},[client,preview,available]);
- return <p className="small muted">{image===null?t("runtimeUpgrade.unavailable"):image?t("runtimeUpgrade.visionNative"):t("runtimeUpgrade.visionText")}{preview?" · "+t("common.demo"):""}</p>;
+ return <p className="small muted">{image===null?t("runtimeUpgrade.unavailable"):image?t("runtimeUpgrade.visionNative"):t("runtimeUpgrade.visionText")}{preview&&marks?" · "+t("common.demo"):""}</p>;
 }

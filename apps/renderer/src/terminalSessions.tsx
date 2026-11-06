@@ -1,10 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
+import { utf8ByteLength } from "@omp-studio/client-contract";
 import { TerminalGraphicsDecoder, type TerminalGraphic } from "./terminalGraphics";
 
 type Api = NonNullable<typeof globalThis.ompStudioTerminal>;
 export interface TerminalSession {
+  readonly conversationId?: string;
   readonly targetId: string | null;
   readonly workspaceId?: string;
   readonly sessionId?: string;
@@ -40,7 +42,7 @@ export const PENDING_MAX_BYTES = 3 * 1024 * 1024;
  */
 export function utf8Length(text: string): number {
   if (/^[\u0000-\u007f]*$/u.test(text)) return text.length;
-  return new TextEncoder().encode(text).length;
+  return utf8ByteLength(text);
 }
 
 interface PendingBatch {
@@ -125,6 +127,7 @@ export class TerminalSessions {
   readonly activeIds = new Map<string | null, string>();
   readonly #decoders = new Map<string, TerminalGraphicsDecoder>();
   readonly #listeners = new Set<() => void>();
+  readonly #sessionIds = new Set<string>();
   readonly #earlyExits = new Set<string>();
   readonly #acked = new Map<string, number>();
   /**
@@ -153,30 +156,30 @@ export class TerminalSessions {
   snapshot = (): TerminalState => this.#state;
   subscribe = (listener: () => void): (() => void) => { this.#listeners.add(listener); return () => { this.#listeners.delete(listener); }; };
 
-  async create(targetId: string | null, workspaceId?: string, sessionId?: string): Promise<string> {
+  async create(targetId: string | null, workspaceId?: string, sessionId?: string, conversationId?: string): Promise<string> {
     if (!this.api || this.#closed) throw new Error("Terminal is unavailable");
     this.#listen();
     this.#creating++;
     try {
       // `flowControl: true` is the opt-in handshake: Main then pauses the PTY
       // when this store falls behind, and resumes on our ACKs below.
-      const info = await this.api.create({ cols: 80, rows: 24, ...(this.api.ack ? { flowControl: true } : {}), ...(targetId ? { targetId, ...(workspaceId ? { workspaceId } : {}) } : {}) });
+      const info = await this.api.create({ cols: 80, rows: 24, ...(this.api.ack ? { flowControl: true } : {}), ...(workspaceId ? { workspaceId } : {}), ...(targetId ? { targetId } : {}) });
       if (this.#closed) { await this.api.dispose(info.id); throw new Error("Terminal window has closed"); }
-      const session: TerminalSession = { ...info, targetId, status: this.#earlyExits.delete(info.id) ? "ended" : "running", ...(workspaceId ? { workspaceId } : {}), ...(sessionId ? { sessionId } : {}) };
+      const session: TerminalSession = { ...info, targetId, ...(conversationId ? { conversationId } : {}), status: this.#earlyExits.delete(info.id) ? "ended" : "running", ...(workspaceId ? { workspaceId } : {}), ...(sessionId ? { sessionId } : {}) };
       this.#publish({ ...this.#state, sessions: [...this.#state.sessions, session] });
-      this.activeIds.set(targetId, info.id);
+      this.activeIds.set(terminalOwnerKey(targetId, workspaceId, conversationId ?? sessionId), info.id);
       return info.id;
     } finally {
       this.#creating--;
       if (!this.#creating) {
-        for (const id of this.pending.keys()) if (!this.#state.sessions.some(session => session.id === id)) this.pending.delete(id);
+        for (const id of this.pending.keys()) if (!this.#sessionIds.has(id)) this.pending.delete(id);
         this.#earlyExits.clear();
       }
     }
   }
 
   async remove(id: string): Promise<void> {
-    if (!this.#state.sessions.some(session => session.id === id)) return;
+    if (!this.#sessionIds.has(id)) return;
     this.#removing.add(id);
     try {
       await this.api?.dispose(id);
@@ -200,6 +203,7 @@ export class TerminalSessions {
     this.pending.clear();
     this.#acked.clear();
     this.#creditsClosed.clear();
+    this.#sessionIds.clear();
     this.#decoders.clear();
     this.#listeners.clear();
   }
@@ -211,17 +215,14 @@ export class TerminalSessions {
   attachHost(id: string, host: TerminalScreenHost): void {
     if (this.#removing.has(id)) return;
     this.hosts.set(id, host);
-    // An ended terminal still owes the user everything it printed: replay the
-    // backlog without crediting it, because the flow-control session is gone.
-    if (this.#creditsClosed.has(id)) this.#deliverEnded(id);
-    else this.#drain(id);
+    this.#drain(id);
   }
 
   #listen(): void {
     if (!this.api || this.#off) return;
     const offData = this.api.onData(event => {
       if (this.#removing.has(event.id)) return;
-      if (!this.#creating && !this.#state.sessions.some(session => session.id === event.id)) return;
+      if (!this.#creating && !this.#sessionIds.has(event.id)) return;
       // An ended terminal still accepts output: Main keeps the batcher open for
       // one window after the exit notification because ConPTY can hand over the
       // shell's last line afterwards. Those bytes are shown (or queued, still
@@ -251,7 +252,7 @@ export class TerminalSessions {
         // Credited once xterm has written it, not when it was received - and
         // never after the process is gone (there is nothing left to credit).
         if (this.#creditsClosed.has(event.id)) host.term.write(text);
-        else host.term.write(text, () => this.#ack(event.id, bytes));
+        else host.term.write(text, this.#consumed(event.id, bytes));
         return;
       }
       // No xterm yet: keep it, in order, and do NOT acknowledge. The missing
@@ -262,14 +263,14 @@ export class TerminalSessions {
       if (queue.truncated) this.#notifyTruncation(event.id);
     });
     const offExit = this.api.onExit(event => {
-      if (this.#creating && !this.#state.sessions.some(session => session.id === event.id)) this.#earlyExits.add(event.id);
-      // The process ended; the tab did not. Stop crediting (Main closed the
-      // batcher, and a late xterm callback must not ACK a dead session) but keep
+      if (this.#creating && !this.#sessionIds.has(event.id)) this.#earlyExits.add(event.id);
+      // The process ended; the tab did not. Stop crediting even while Main's
+      // tail window is draining; a late xterm callback must not ACK it. Keep
       // the backlog until a screen exists: an unmounted terminal that printed
       // its error message and exited must still show it when the user opens it.
       this.#creditsClosed.add(event.id);
       this.#acked.delete(event.id);
-      this.#deliverEnded(event.id);
+      this.#drain(event.id);
       this.#publish({ ...this.#state, sessions: this.#state.sessions.map(session => session.id === event.id ? { ...session, status: "ended" } : session) });
     });
     this.#off = () => { offData(); offExit(); };
@@ -281,17 +282,24 @@ export class TerminalSessions {
     return queue;
   }
 
-  /** Deliver the backlog in arrival order, crediting each batch as it is written. */
+  /** Only scalar credit is retained while xterm queues a potentially large write. */
+  #consumed(id: string, bytes: number): () => void {
+    return () => this.#ack(id, bytes);
+  }
+
+  /** Ended and running terminals share ordered replay; only running ones credit. */
   #drain(id: string): void {
     const host = this.hosts.get(id);
     const queue = this.pending.get(id);
     if (host === undefined || queue === undefined) return;
+    const ended = this.#creditsClosed.has(id);
+    if (ended) this.pending.delete(id);
     for (const batch of queue.take()) {
-      // xterm keeps its own ordered write queue, so issuing every batch here
-      // preserves order; each callback credits exactly one batch.
-      host.term.write(batch.text, () => this.#ack(id, batch.bytes));
+      // xterm owns the write queue and preserves the original batch order.
+      host.term.write(batch.text, ended ? undefined : this.#consumed(id, batch.bytes));
     }
-    this.#creditDropped(id, queue);
+    if (ended) queue.clear();
+    else this.#creditDropped(id, queue);
   }
 
   /**
@@ -306,27 +314,6 @@ export class TerminalSessions {
     const dropped = queue.droppedBytes;
     queue.droppedBytes = 0;
     this.#ack(id, dropped);
-  }
-
-  /**
-   * Display an ended terminal's backlog, in arrival order, without crediting it
-   * (the flow-control session is over) and without touching its account.
-   *
-   * With no screen attached the backlog stays queued - still bounded by
-   * `PENDING_MAX_BYTES` - for the first attach; releasing it here is exactly the
-   * bug this method replaced. The truncation notice, if any, stays in state
-   * until the user closes the terminal, so a loss that happened before the exit
-   * stays visible.
-   */
-  #deliverEnded(id: string): void {
-    const queue = this.pending.get(id);
-    if (queue === undefined) return;
-    const host = this.hosts.get(id);
-    if (host === undefined) return;
-    this.pending.delete(id);
-    const text = queue.text;
-    queue.clear();
-    if (text.length > 0) host.term.write(text);
   }
 
   #notifyTruncation(id: string): void {
@@ -349,7 +336,7 @@ export class TerminalSessions {
     // Only a live terminal may credit. A disposed/ended session must not ACK,
     // and xterm callbacks queued before teardown can still fire afterwards.
     if (this.#creditsClosed.has(id) || this.#removing.has(id)) return;
-    if (this.#creating === 0 && !this.#state.sessions.some(session => session.id === id)) return;
+    if (this.#creating === 0 && !this.#sessionIds.has(id)) return;
     this.#acked.set(id, (this.#acked.get(id) ?? 0) + bytes);
     if (this.#ackScheduled) return;
     this.#ackScheduled = true;
@@ -387,10 +374,18 @@ export class TerminalSessions {
     // unknown-session guard blocks later output on its own.
     this.#removing.delete(id);
   }
-  #publish(state: TerminalState): void { this.#state = state; for (const listener of this.#listeners) listener(); }
+  #publish(state: TerminalState): void {
+    if (state.sessions !== this.#state.sessions) {
+      this.#sessionIds.clear();
+      for (const session of state.sessions) this.#sessionIds.add(session.id);
+    }
+    this.#state = state;
+    for (const listener of this.#listeners) listener();
+  }
 }
 
 const Context = createContext<TerminalSessions | undefined>(undefined);
+export const terminalOwnerKey = (targetId: string | null, workspaceId?: string, sessionId?: string) => JSON.stringify([targetId, workspaceId ?? null, sessionId ?? null]);
 export function TerminalSessionsProvider({ children }: { children: ReactNode }) {
   const store = useMemo(() => new TerminalSessions(globalThis.ompStudioTerminal), []);
   useEffect(() => () => store.close(), [store]);

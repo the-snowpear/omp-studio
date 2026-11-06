@@ -1,3 +1,6 @@
+import type { GitHubReferenceSnapshot } from "./githubReference";
+import type { GitCommitReferenceSnapshot } from "./gitCommitReference";
+import type { BrowserReferenceSnapshot } from "./browserReference";
 /**
  * Composer inline chips: files, folders, images, skills, agents, and session modes.
  * File/skill/agent serialize to Runtime tokens; mode capsules are omitted from prompt text.
@@ -15,10 +18,11 @@ export type PromptImage = {
   readonly data: string;
 };
 
-export type ComposerChipKind = "file" | "dir" | "image" | "skill" | "agent" | "model" | "mode";
+export type ComposerChipKind = "file" | "dir" | "image" | "skill" | "agent" | "model" | "mode" | "github" | "git-commit" | "browser";
 
 export type ComposerChip = {
   readonly id: string;
+  readonly reference?: GitHubReferenceSnapshot | GitCommitReferenceSnapshot | BrowserReferenceSnapshot;
   readonly kind: ComposerChipKind;
   /** Short label shown in the capsule (stem may fade; extension stays). */
   readonly label: string;

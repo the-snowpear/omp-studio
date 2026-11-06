@@ -76,6 +76,38 @@ describe("SkillsDrawer real-mode draft join", () => {
     expect(onRemoveSkill).toHaveBeenCalledWith("commit-msg");
   });
 
+  it("keeps search and scroll position while reopening and returns focus on close", async () => {
+    const client = clientOf();
+    const onClose = vi.fn();
+    const view = (open: boolean) => <PreviewModeProvider switchEnabled>
+      <button type="button">技能&插件</button>
+      <SkillsDrawer open={open} client={client} onClose={onClose} />
+    </PreviewModeProvider>;
+    const { rerender } = render(view(false));
+    const trigger = screen.getByRole("button", { name: "技能&插件" });
+    trigger.focus();
+    rerender(view(true));
+    await screen.findByRole("option", { name: /commit-msg/ });
+    const search = screen.getByRole("textbox", { name: "搜索技能与插件" });
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    fireEvent.change(search, { target: { value: "commit" } });
+    const drawer = screen.getByRole("dialog");
+    const body = drawer.querySelector<HTMLElement>(".sd-body")!;
+    body.scrollTop = 28;
+
+    rerender(view(false));
+    expect(document.activeElement).toBe(trigger);
+    expect(drawer.hasAttribute("inert")).toBe(true);
+    expect(drawer.hidden).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    rerender(view(true));
+    expect(screen.getByRole("textbox", { name: "搜索技能与插件" })).toBe(search);
+    expect((search as HTMLInputElement).value).toBe("commit");
+    expect(body.scrollTop).toBe(28);
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    expect(drawer.hasAttribute("inert")).toBe(false);
+  });
+
   it("shows a used-in-conversation mark from the transcript set", async () => {
     render(
       <PreviewModeProvider switchEnabled>

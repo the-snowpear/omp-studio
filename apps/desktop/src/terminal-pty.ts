@@ -13,7 +13,7 @@ import { win32 } from "node:path";
 import { randomBytes } from "node:crypto";
 
 import { processGroupSpawnOptions, terminateProcessTree } from "./platform/process-tree.js";
-import { TERMINAL_BATCH_MS, TerminalOutputBatcher, type TerminalBatchTimers, type TerminalFlowStats } from "./terminal-batch.js";
+import { TerminalOutputBatcher, type TerminalBatchTimers, type TerminalFlowStats } from "./terminal-batch.js";
 
 import { TERMINAL_MAX_SESSIONS, type TerminalSessionInfo, type TerminalSize } from "./terminal-shared.js";
 
@@ -303,10 +303,12 @@ export interface TerminalSessionListeners {
   onExit(event: { id: string }): void;
 }
 
-interface LiveSession {
+interface TerminalSessionRecord {
+  readonly windowId: number;
   readonly info: TerminalSessionInfo;
   readonly proc: PtyProcess;
-  ended: boolean;
+  readonly listeners: TerminalSessionListeners;
+  lifecycle: "running" | "draining";
   size: TerminalSize;
 }
 
@@ -335,16 +337,13 @@ export interface TerminalSessionManagerOptions {
 }
 
 export class TerminalSessionManager {
-  readonly #windows = new Map<number, Map<string, LiveSession>>();
+  readonly #sessions = new Map<string, TerminalSessionRecord>();
   readonly #spawner: PtySpawner;
   readonly #resolveShell: () => ResolvedShell;
   readonly #resolveCwd: () => string;
   readonly #newId: () => string;
   readonly #recording: TerminalSessionManagerOptions["recording"];
   readonly #batcher: TerminalOutputBatcher;
-  readonly #timers: TerminalBatchTimers;
-  /** Where a batched payload for `id` goes (window + that session's listeners). */
-  readonly #wiring = new Map<string, { readonly windowId: number; readonly listeners: TerminalSessionListeners }>();
   #capFlushes = 0;
 
   constructor(options: TerminalSessionManagerOptions) {
@@ -354,31 +353,31 @@ export class TerminalSessionManager {
     this.#newId = options.newId ?? (() => randomBytes(16).toString("base64url"));
     this.#recording = options.recording;
     const output = options.output;
-    this.#timers = output?.timers ?? {
-      setTimeout: (handler, ms) => setTimeout(handler, ms),
-      clearTimeout: (handle) => {
-        clearTimeout(handle as ReturnType<typeof setTimeout>);
-      },
-    };
     this.#batcher = new TerminalOutputBatcher({
       sink: {
         send: (id, data, bytes) => {
-          this.#wiring.get(id)?.listeners.onData({ id, data, bytes });
+          this.#sessions.get(id)?.listeners.onData({ id, data, bytes });
         },
         record: (id, data) => {
-          const wiring = this.#wiring.get(id);
-          if (wiring !== undefined) this.#recording?.output(wiring.windowId, id, data);
+          const session = this.#sessions.get(id);
+          if (session !== undefined) this.#recording?.output(session.windowId, id, data);
         },
         pauseSource: (id, paused) => {
-          const proc = this.#sessionById(id)?.proc;
+          const proc = this.#sessions.get(id)?.proc;
           if (paused) proc?.pause?.();
           else proc?.resume?.();
         },
         capReached: () => {
           this.#capFlushes += 1;
         },
+        release: (id) => {
+          const session = this.#sessions.get(id);
+          if (session === undefined) return;
+          this.#sessions.delete(id);
+          this.#recording?.end(session.windowId, id);
+        },
       },
-      timers: this.#timers,
+      ...(output?.timers === undefined ? {} : { timers: output.timers }),
       ...(output?.batchMs === undefined ? {} : { batchMs: output.batchMs }),
       ...(output?.highWaterBytes === undefined ? {} : { highWaterBytes: output.highWaterBytes }),
       ...(output?.lowWaterBytes === undefined ? {} : { lowWaterBytes: output.lowWaterBytes }),
@@ -395,13 +394,17 @@ export class TerminalSessionManager {
     windowId: number,
     size: TerminalSize & { readonly flowControl?: boolean },
     listeners: TerminalSessionListeners,
+    workspaceCwd?: string,
   ): TerminalSessionInfo {
-    const bucket = this.#bucket(windowId);
-    if (bucket.size >= TERMINAL_MAX_SESSIONS) {
+    let running = 0;
+    for (const session of this.#sessions.values()) {
+      if (session.windowId === windowId && session.lifecycle === "running") running++;
+    }
+    if (running >= TERMINAL_MAX_SESSIONS) {
       throw new Error(`terminal: at most ${TERMINAL_MAX_SESSIONS} sessions per window`);
     }
     const shell = this.#resolveShell();
-    const cwd = this.#resolveCwd();
+    const cwd = workspaceCwd ?? this.#resolveCwd();
     const id = this.#newId();
     const info: TerminalSessionInfo = { id, name: shell.name, cwd };
     const proc = this.#spawner.spawn({
@@ -411,36 +414,22 @@ export class TerminalSessionManager {
       cols: size.cols,
       rows: size.rows,
     });
-    const session: LiveSession = { info, proc, ended: false, size };
-    this.#wiring.set(id, { windowId, listeners });
+    const session: TerminalSessionRecord = { windowId, info, proc, listeners, lifecycle: "running", size };
+    this.#sessions.set(id, session);
     // `flowControl` is only true when the Renderer acknowledges xterm writes.
     this.#batcher.open(id, { flowControl: size.flowControl === true });
     proc.onData((data) => {
-      // Not gated on `session.ended`: a platform can hand over a final chunk
-      // after the exit notification, and the batcher still holds the id for
-      // one batch window (see `onExit`). Once it is closed, pushes are no-ops.
+      // Draining records still accept ConPTY's late output for one window.
       this.#batcher.push(id, data);
     });
-    proc.onExit(() => {
-      // Deliver what is buffered, then let one batch window pass before the id
-      // is released: ConPTY can hand over a final chunk after the exit
-      // notification, and the shell's last line is part of the output.
-      this.#batcher.flush(id);
-      this.#markEnded(windowId, id, listeners);
-      this.#timers.setTimeout(() => {
-        this.#batcher.close(id);
-        this.#recording?.end(windowId, id);
-        this.#wiring.delete(id);
-      }, TERMINAL_BATCH_MS);
-    });
-    bucket.set(id, session);
+    proc.onExit(() => this.#markEnded(id));
     return info;
   }
 
   /** Renderer wrote `bytes` of this terminal's output to xterm (flow control). */
   acknowledge(windowId: number, id: string, bytes: number): void {
-    const wiring = this.#wiring.get(id);
-    if (wiring === undefined || wiring.windowId !== windowId) return;
+    const session = this.#sessions.get(id);
+    if (session?.windowId !== windowId) return;
     this.#batcher.acknowledge(id, bytes);
   }
 
@@ -450,128 +439,86 @@ export class TerminalSessionManager {
   }
 
   write(windowId: number, id: string, data: string): void {
-    // A session that has exited is deleted from the registry (see `#markEnded`),
-    // so a late write must be a no-op rather than "unknown session": the
-    // Renderer cannot have observed the exit before it sent this.
-    const session = this.#windows.get(windowId)?.get(id);
-    if (session === undefined || session.ended) return;
+    // A write sent before the renderer observes exit must remain a no-op.
+    const session = this.#sessions.get(id);
+    if (session?.windowId !== windowId || session.lifecycle !== "running") return;
     session.proc.write(data);
   }
 
   resize(windowId: number, id: string, cols: number, rows: number): void {
-    const session = this.#windows.get(windowId)?.get(id);
-    if (session === undefined || session.ended) return;
-    // Deliver pending output before recording the resize, otherwise the
-    // recording would apply the new geometry to earlier output.
+    const session = this.#sessions.get(id);
+    if (session?.windowId !== windowId || session.lifecycle !== "running") return;
+    // Earlier output belongs to the old recording geometry.
     this.#batcher.flush(id);
     session.proc.resize(cols, rows);
-    session.size = { cols, rows }; this.#recording?.resize(windowId, id, cols, rows);
+    session.size = { cols, rows };
+    this.#recording?.resize(windowId, id, cols, rows);
   }
 
   recordingTarget(windowId: number, id: string): TerminalSize & { name: string; backend: "pty" | "pipes" } {
     const session = this.#require(windowId, id);
-    if (session.ended) throw new Error("Terminal has exited");
+    if (session.lifecycle !== "running") throw new Error("Terminal has exited");
     return { ...session.size, name: session.info.name, backend: session.proc.backend ?? "pipes" };
   }
 
   dispose(windowId: number, id: string, listeners?: TerminalSessionListeners): void {
-    const bucket = this.#windows.get(windowId);
-    const session = bucket?.get(id);
-    if (session === undefined) return;
-    this.#kill(session, windowId, id, listeners);
+    const session = this.#sessions.get(id);
+    if (session?.windowId === windowId) this.#kill(session, id, listeners);
   }
 
   /** Recording boundaries drain output while the recording is still open. */
   flushOutput(windowId: number, id?: string): void {
-    for (const [terminalId, wiring] of this.#wiring) {
-      if (wiring.windowId === windowId && (id === undefined || id === terminalId)) this.#batcher.flush(terminalId);
+    if (id !== undefined) {
+      if (this.#sessions.get(id)?.windowId === windowId) this.#batcher.flush(id);
+      return;
+    }
+    for (const [terminalId, session] of this.#sessions) {
+      if (session.windowId === windowId) this.#batcher.flush(terminalId);
     }
   }
 
   disposeWindow(windowId: number): void {
-    this.flushOutput(windowId);
+    for (const [id, session] of this.#sessions) {
+      if (session.windowId === windowId) this.#kill(session, id);
+    }
     this.#recording?.disposeWindow(windowId);
-    const bucket = this.#windows.get(windowId);
-    if (bucket !== undefined) {
-      for (const [id, session] of bucket) {
-        this.#kill(session, windowId, id);
-      }
-      this.#windows.delete(windowId);
-    }
-    // Sessions whose exit is still draining their buffer are no longer in the
-    // bucket; release them here so a closed window leaves nothing behind.
-    for (const [id, wiring] of [...this.#wiring]) {
-      if (wiring.windowId !== windowId) continue;
-      this.#batcher.close(id);
-      this.#wiring.delete(id);
-    }
   }
 
   disposeAll(): void {
-    for (const windowId of [...this.#windows.keys()]) {
-      this.disposeWindow(windowId);
+    const windows = new Set<number>();
+    for (const [id, session] of this.#sessions) {
+      windows.add(session.windowId);
+      this.#kill(session, id);
     }
-    for (const id of [...this.#wiring.keys()]) {
-      this.#batcher.close(id);
-      this.#wiring.delete(id);
-    }
-    this.#batcher.closeAll();
+    for (const windowId of windows) this.#recording?.disposeWindow(windowId);
   }
 
-  #bucket(windowId: number): Map<string, LiveSession> {
-    const existing = this.#windows.get(windowId);
-    if (existing !== undefined) return existing;
-    const created = new Map<string, LiveSession>();
-    this.#windows.set(windowId, created);
-    return created;
-  }
-
-  #sessionById(id: string): LiveSession | undefined {
-    for (const bucket of this.#windows.values()) {
-      const session = bucket.get(id);
-      if (session !== undefined) return session;
-    }
-    return undefined;
-  }
-
-  #require(windowId: number, id: string): LiveSession {
-    const session = this.#windows.get(windowId)?.get(id);
-    if (session === undefined) {
-      throw new Error("terminal: unknown session");
-    }
+  #require(windowId: number, id: string): TerminalSessionRecord {
+    const session = this.#sessions.get(id);
+    if (session?.windowId !== windowId) throw new Error("terminal: unknown session");
     return session;
   }
 
-  /**
-   * A shell that exits on its own must free its registry slot, not just flip a
-   * flag: the bucket is capped at `TERMINAL_MAX_SESSIONS`, so leaving dead rows
-   * behind made `create` throw after that many natural exits. `#kill` already
-   * deletes; this is the same cleanup for the path where the process is already
-   * gone.
-   */
-  #markEnded(windowId: number, id: string, listeners: TerminalSessionListeners): void {
-    const session = this.#windows.get(windowId)?.get(id);
-    if (session === undefined || session.ended) return;
-    session.ended = true;
-    this.#windows.get(windowId)?.delete(id);
-    listeners.onExit({ id });
+  /** Draining records retain their sink but no longer occupy a running slot. */
+  #markEnded(id: string): void {
+    const session = this.#sessions.get(id);
+    if (session === undefined || session.lifecycle !== "running") return;
+    session.lifecycle = "draining";
+    this.#batcher.finish(id);
+    session.listeners.onExit({ id });
   }
 
-  #kill(session: LiveSession, windowId: number, id: string, listeners?: TerminalSessionListeners): void {
-    if (!session.ended) {
-      session.ended = true;
-      // Stop batching and deliver the tail *before* the exit event, so the
-      // renderer never sees "exited" ahead of the shell's last output.
-      this.#batcher.close(id);
-      this.#wiring.delete(id);
-      this.#recording?.end(windowId, id);
-      try {
-        session.proc.kill();
-      } catch {
-        // Process may already have exited.
-      }
-      listeners?.onExit({ id });
+  #kill(session: TerminalSessionRecord, id: string, listeners?: TerminalSessionListeners): void {
+    const running = session.lifecycle === "running";
+    session.lifecycle = "draining";
+    // Output, recording end and release precede process termination / exit.
+    this.#batcher.close(id);
+    if (!running) return;
+    try {
+      session.proc.kill();
+    } catch {
+      // Process may already have exited.
     }
-    this.#windows.get(windowId)?.delete(id);
+    listeners?.onExit({ id });
   }
 }

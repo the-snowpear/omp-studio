@@ -132,6 +132,7 @@ export function applyLiveSubagentRoster(
       ...(agent.task === undefined ? {} : { task: agent.task }),
       ...(agent.activity === undefined ? {} : { activity: agent.activity }),
       ...(agent.currentTool === undefined ? {} : { currentTool: agent.currentTool }),
+      ...(agent.latestActivity === undefined ? {} : { latestActivity: agent.latestActivity }),
       ...(agent.dur === undefined ? {} : { dur: agent.dur }),
       ...(tokens === undefined ? {} : { tokens }),
       ...(agent.tools === undefined ? {} : { tools: agent.tools }),
@@ -146,6 +147,7 @@ export function applyLiveSubagentRoster(
   const dur = (liveDur !== undefined && liveDur !== "" ? liveDur : undefined) ?? agent.dur;
   const agentId = agent.agentId ?? (isRealSubagentId(live.agentId) ? live.agentId : undefined);
   const task = live.assignment ?? agent.task;
+  const latestActivity = live.stage ?? live.summary ?? agent.latestActivity;
   return {
     name: live.displayName || agent.name,
     status: live.status,
@@ -154,13 +156,14 @@ export function applyLiveSubagentRoster(
     ...(task === undefined ? {} : { task }),
     ...(agent.activity === undefined ? {} : { activity: agent.activity }),
     ...(agent.currentTool === undefined ? {} : { currentTool: agent.currentTool }),
+    ...(latestActivity === undefined ? {} : { latestActivity }),
     ...(dur === undefined ? {} : { dur }),
     ...(agent.files === undefined ? {} : { files: agent.files }),
     ...metrics,
   };
 }
 
-export function SubagentMetrics({ tokens, tools, requests, files, cost, generationTps }: SubagentMetricValues) {
+export function SubagentMetrics({ tokens, tools, requests, files, cost, generationTps, showTooltips = true }: SubagentMetricValues & { showTooltips?: boolean }) {
   if (tokens === undefined && tools === undefined && requests === undefined && files === undefined && !cost) {
     return null;
   }
@@ -179,7 +182,7 @@ export function SubagentMetrics({ tokens, tools, requests, files, cost, generati
       {requests !== undefined ? <span className="hub-num"><i>req</i><b>{requests}</b></span> : null}
       {files !== undefined ? <span className="hub-num"><i>files</i><b>{files}</b></span> : null}
       {generationTps === undefined ? null : <span className="sa-tok">{generationTps.toFixed(1)} tok/s</span>}
-      {cost ? <span className="sa-cost" title="API-equivalent estimate; billed cost unavailable / API 等价估算，实际扣费未知">{cost}</span> : null}
+      {cost ? <span className="sa-cost" title={showTooltips ? "API-equivalent estimate; billed cost unavailable / API 等价估算，实际扣费未知" : undefined}>{cost}</span> : null}
     </div>
   );
 }

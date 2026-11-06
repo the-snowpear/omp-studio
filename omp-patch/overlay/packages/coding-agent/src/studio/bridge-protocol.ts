@@ -1,4 +1,5 @@
 import type { SessionOwnerOperation } from "./session-owner-protocol";
+import { COMPUTER_WORKSPACE_QUERY_KINDS } from "./computer-workspace-protocol";
 import { CONTEXT_VIEW_KINDS, isContextViewKind, type ContextViewOperation } from "./context-view-protocol";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import {
@@ -88,7 +89,7 @@ export type StudioOperation =
 	| UpgradeOperation
 	| EvaluationOperation
 	| { kind: "runtime.snapshot" }
-	| { kind: "runtime.settings.get"; keys?: StudioRuntimeSettingKey[] }
+	| { kind: "runtime.settings.get"; keys?: StudioRuntimeSettingKey[]; checkHindsight?: boolean }
 	| { kind: "runtime.settings.set"; key: StudioRuntimeSettingKey; value: unknown; persist: boolean }
 	| { kind: "runtime.pause" }
 	| { kind: "runtime.resume"; expectedPauseEpoch: number }
@@ -347,6 +348,7 @@ export interface StudioEventEnvelope {
 		| StudioInteractionRequiredEvent
 		| StudioInteractionResolvedEvent
 		| { kind: "btw.changed"; snapshot: StudioBtwSnapshot }
+		| { kind: "evaluation.changed"; id: string; revision: number }
 		| { kind: "session.telemetry.changed"; sessionId: string; telemetry: StudioSessionTelemetry }
 		| ConversationRuntimeEvent;
 }
@@ -641,7 +643,9 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			exactKeys(operation, ["kind"]);
 			break;
 		case "runtime.settings.get":
-			exactKeys(operation, ["kind", "keys"]);
+			exactKeys(operation, ["kind", "keys", "checkHindsight"]);
+			if (operation.checkHindsight !== undefined && typeof operation.checkHindsight !== "boolean")
+				throw new Error("Invalid Hindsight check flag");
 			if (operation.keys !== undefined) {
 				if (
 					!Array.isArray(operation.keys) ||
@@ -1141,6 +1145,7 @@ export function stableEmptyManifestHash(kind: "capabilities" | "commands"): stri
 }
 
 export const STUDIO_IMPLEMENTED_CAPABILITIES = [
+	...COMPUTER_WORKSPACE_QUERY_KINDS,
 	...CONTEXT_VIEW_KINDS,
 	"settings.approval",
 	"prediction.query",
@@ -1150,6 +1155,7 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	"runtime.pause",
 	"runtime.resume",
 	"runtime.snapshot",
+	"session.owner.update",
 	"runtime.settings.get",
 	"runtime.settings.set",
 	"runtime.shutdown",

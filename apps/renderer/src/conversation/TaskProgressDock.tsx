@@ -1,5 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { Icon } from "../icons";
+import { usePreviewMode } from "../preview/PreviewContext";
+import { fileTypeOf, iconNameFor, isSensitive } from "../explorer-types";
 import {
   groupTodosByPhase,
   isTodoPhaseComplete,
@@ -11,8 +13,6 @@ import {
   type TodoTask,
   type TurnFileChange,
 } from "./toolMeta";
-
-const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|css|scss|html?|json|md|py|rs|go|vue|svelte)$/i;
 
 function reducedMotion(): boolean {
   return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -37,10 +37,6 @@ export function scrollCurrentTodoIntoList(list: HTMLElement, row: HTMLElement): 
     return;
   }
   list.scrollTop = next;
-}
-
-function fileIcon(name: string): "file-code" | "file" {
-  return CODE_FILE.test(name) ? "file-code" : "file";
 }
 
 function ProgressRing({ completed, total }: { completed: number; total: number }) {
@@ -191,6 +187,7 @@ export function TaskProgressDock({
   onOpen?: (path: string) => void;
 }) {
   const panelId = useId();
+  const { marks } = usePreviewMode();
   const [open, setOpen] = useState(false);
   const [phaseOpen, setPhaseOpen] = useState<Record<string, boolean>>({});
   const listRef = useRef<HTMLUListElement>(null);
@@ -311,16 +308,23 @@ export function TaskProgressDock({
             {files.length > 0 ? (
               <section className="task-dock-col" aria-label="文件修改">
                 <ul className="task-dock-file-list">
-                  {files.map((file) => (
-                    <li key={file.path} className="task-dock-file">
+                  {files.map((file) => {
+                    const ftype = fileTypeOf(file.name);
+                    return (
+                    <li
+                      key={file.path}
+                      className="task-dock-file"
+                      data-ftype={ftype ?? undefined}
+                      data-secret={isSensitive(file.name) || undefined}
+                    >
                       <span className="task-dock-file-icon" aria-hidden="true">
-                        <Icon name={fileIcon(file.name)} extra="sm" />
+                        <Icon name={iconNameFor(ftype, file.name)} extra="sm" />
                       </span>
                       <button
                         type="button"
                         className="task-dock-file-open"
-                        aria-label={demo === true ? `打开 ${file.path}（演示）` : `打开 ${file.path}`}
-                        data-tip={demo === true ? "打开（演示）" : "打开"}
+                        aria-label={demo === true && marks ? `打开 ${file.path}（演示）` : `打开 ${file.path}`}
+                        data-tip={demo === true && marks ? "打开（演示）" : "打开"}
                         onClick={() => onOpen?.(file.path)}
                       >
                         <span className="task-dock-file-name">{file.name}</span>
@@ -333,7 +337,8 @@ export function TaskProgressDock({
                         </span>
                       ) : null}
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </section>
             ) : null}
@@ -359,14 +364,14 @@ export function TaskProgressDock({
                 <span className="del">-{del}</span>
               </span>
             ) : null}
-            {demo === true ? <span className="chip gray xs">演示</span> : null}
+            {demo === true && marks ? <span className="chip gray xs">演示</span> : null}
           </button>
           {open && files.length > 0 ? (
             <button
               type="button"
               className="btn small task-dock-review"
               onClick={onReview}
-              data-tip={demo === true ? "Changes（演示）" : "Changes"}
+              data-tip={demo === true && marks ? "Changes（演示）" : "Changes"}
             >
               <Icon name="diff" extra="sm" />
               审核

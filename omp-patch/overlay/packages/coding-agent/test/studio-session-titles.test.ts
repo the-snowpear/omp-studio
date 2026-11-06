@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { expect, test, spyOn } from "bun:test";
 import { SessionManager } from "../src/session/session-manager";
 import { MemorySessionStorage } from "../src/session/session-storage";
+import { serializeTitleSlot } from "../src/session/session-title-slot";
 import type { AgentSession } from "../src/session/agent-session";
 import { StudioSessionTitlesService } from "../src/studio/services/session-titles-service";
 import { validateSessionTitlesOperation, validateSessionTitlesResult } from "../src/studio/session-titles-protocol";
@@ -45,6 +46,46 @@ test("saved title metadata follows the latest native rename and never changes th
 		await manager.close();
 	}
 });
+test("large saved sessions read the current title slot and legacy cards without loading conversation bodies", async () => {
+	const manager = SessionManager.inMemory();
+	const storage = new MemorySessionStorage();
+	const file = "/sessions/large.jsonl";
+	const title = "🔎 NEW: Current title";
+	const body = JSON.stringify({ type: "message", message: { role: "user", content: "x".repeat(9 * 1024 * 1024) } });
+	const header = JSON.stringify({ ...manager.getHeader(), title: "Old title", titleSource: "auto" });
+	storage.writeTextSync(
+		file,
+		serializeTitleSlot({ title, source: "user", updatedAt: new Date().toISOString() }) + header + "\n" + body + "\n",
+	);
+	const fullRead = spyOn(storage, "readText");
+	try {
+		expect(await SessionManager.peekSessionTitle(file, storage)).toMatchObject({
+			sessionId: manager.getSessionId(),
+			title,
+			source: "user",
+			card: { code: "NEW", emoji: "🔎" },
+		});
+		expect(fullRead).not.toHaveBeenCalled();
+		storage.writeTextSync(
+			file,
+			header +
+				"\n" +
+				body +
+				"\n" +
+				JSON.stringify({ type: "title_change", title: "Old title", card: { code: "OLD", emoji: "📁" } }) +
+				"\n",
+		);
+		expect(await SessionManager.peekSessionTitle(file, storage)).toMatchObject({
+			title: "Old title",
+			card: { code: "OLD", emoji: "📁" },
+		});
+		expect(fullRead).not.toHaveBeenCalled();
+	} finally {
+		fullRead.mockRestore();
+		await manager.close();
+	}
+});
+
 test("title query rejects a different session and malformed targets instead of opening them", async () => {
 	const manager = SessionManager.inMemory(),
 		id = manager.getSessionId();

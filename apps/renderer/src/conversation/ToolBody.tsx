@@ -9,6 +9,8 @@ import { ChunkedRows, ChunkedText } from "./textChunks";
 import { jsonRecord, jsonString, type ToolView } from "./conversationViewModel";
 import {
   askAnswer,
+  computerToolMedia,
+  hasComputerMedia,
   jsonNumber,
   jsonStringArray,
   parseTaskBrief,
@@ -20,6 +22,7 @@ import { ToolCardScroll } from "./useToolCardFollowScroll";
 import { CompletionRing, JobTile, type JobTileData } from "./JobWidget";
 import { MarkdownText } from "./markdown";
 import type { JobWidgetView } from "@omp-studio/studio-protocol";
+import { ComputerToolMedia } from "../computer/ComputerToolMedia";
 
 const ToolCardLive = createContext(false);
 
@@ -64,9 +67,11 @@ function MediaList({ value, alt = "Image / 图片" }: { value: unknown; alt?: st
 
 function ToolMedia({ tool }: { tool: ToolView }) {
   const data = jsonRecord(tool.result?.data);
+  const computer = hasComputerMedia(tool);
+  const items = useMemo(() => computer ? computerToolMedia(tool) : [], [computer, tool]);
   const graphics = useMemo(() => new TerminalGraphicsDecoder().push(tool.result?.output ?? tool.output ?? ""), [tool.result?.output, tool.output]);
   return <>
-    <MediaList value={data?.media} />
+    {computer ? <ComputerToolMedia items={items} /> : toolKind(tool) !== "eval" ? <MediaList value={data?.media} /> : null}
     {graphics.images.map((image, index) => <TerminalGraphicView key={index} image={image} />)}
     {graphics.errors.map((error, index) => <p role="status" key={index}>{error}</p>)}
     {typeof data?.mediaOmitted === "number" ? <p role="status">{data.mediaOmitted} image(s) omitted: unsupported format or size limit / 图片超限或格式不受支持</p> : null}
@@ -302,10 +307,12 @@ function ReadBody({ tool }: { tool: ToolView }) {
   const displayContent = jsonRecord(fields.displayContent);
   const preview = stringLines(fields.preview) ?? stringLines(displayContent?.text);
   const summary = jsonString(fields.summary);
+  const markdownLines = fields.contentType === "text/markdown" ? (preview ?? tool.output?.split("\n")) : undefined;
+  const markdown = markdownLines?.slice(0, TOOL_ROWS_MAX).join("\n");
   return (
     <>
       <Kv pairs={[["行", fields.lines ?? fields.totalLines], ["编码", fields.encoding], ["大小", fields.size ?? fields.fileSize], ["问题", fields.q ?? fields.question]]} />
-      {preview ? <CodeLines lines={preview} start={offset ?? 1} /> : summary ? <div className="tc-summary">{summary}</div> : tool.output ? <CodeLines lines={tool.output.split("\n")} start={offset ?? 1} /> : null}
+      {markdown !== undefined ? <ScrollPane className="tc-markdown tool-card-scroll" data-tool-scroll="both"><MarkdownText text={markdown} />{markdownLines && markdownLines.length > TOOL_ROWS_MAX ? <OmittedRows count={markdownLines.length - TOOL_ROWS_MAX} /> : null}</ScrollPane> : preview ? <CodeLines lines={preview} start={offset ?? 1} /> : summary ? <div className="tc-summary">{summary}</div> : tool.output ? <CodeLines lines={tool.output.split("\n")} start={offset ?? 1} /> : null}
       <MediaList value={fields.media ?? fields.image ?? fields.images} alt="读取结果" />
     </>
   );
@@ -763,7 +770,7 @@ function EvalBody({ tool }: { tool: ToolView }) {
   return (
     <div className="tc-eval">
       <Kv pairs={[["status", fields.status], ["id", fields.id], ["duration", fields.durationMs]]} />
-      <MediaList value={fields.media ?? fields.image ?? fields.images ?? fields.screenshot ?? (fields.screenshotData !== undefined ? { data: fields.screenshotData, mimeType: fields.mimeType } : undefined)} alt="评估结果" />
+      {!hasComputerMedia(tool) ? <MediaList value={fields.media ?? fields.image ?? fields.images ?? fields.screenshot ?? (fields.screenshotData !== undefined ? { data: fields.screenshotData, mimeType: fields.mimeType } : undefined)} alt="评估结果" /> : null}
       {cells.map((entry, index) => {
         const cell = jsonRecord(entry) ?? {};
         const code = jsonString(cell.code) ?? "";
@@ -882,7 +889,7 @@ function ComputerBody({ tool }: { tool: ToolView }) {
         </>
       ) : null}
       {jsonString(fields.output) ? <ScrollPane className="codeblock">{jsonString(fields.output)}</ScrollPane> : null}
-      <MediaList value={fields.media ?? fields.images ?? fields.screenshot ?? fields.shots} alt="Computer evaluation" />
+      {/* Computer/Eval frames render through the single ToolMedia outlet below. */}
     </>
   );
 }

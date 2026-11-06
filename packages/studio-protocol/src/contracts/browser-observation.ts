@@ -1,12 +1,14 @@
 export interface StudioBrowserTab { id: string; name: string; title: string; url: string; kind: string; ownerSessionId: string; busy: boolean; frozen: boolean; observable: boolean; reason?: string; }
 export type BrowserObservationOperation =
+  | { kind: "browser.managed.prepare"; sessionId: string }
   | { kind: "browser.tabs.get"; sessionId: string }
   | { kind: "browser.observe.prepare"; sessionId: string; tabId: string };
 export interface BrowserObservationResultMap {
+  "browser.managed.prepare": { sessionId: string; descriptorId: string };
   "browser.tabs.get": { tabs: StudioBrowserTab[] };
   "browser.observe.prepare": { observationId: string; sessionId: string; tabId: string; expiresAt: number };
 }
-export const BROWSER_OBSERVATION_KINDS = ["browser.tabs.get", "browser.observe.prepare"] as const;
+export const BROWSER_OBSERVATION_KINDS = ["browser.tabs.get", "browser.observe.prepare", "browser.managed.prepare"] as const;
 export function isBrowserObservationKind(kind: string): kind is BrowserObservationOperation["kind"] { return (BROWSER_OBSERVATION_KINDS as readonly string[]).includes(kind); }
 /** Private window-owned channel. These events never enter the conversation or public snapshot. */
 export type BrowserObservationEvent =
@@ -36,6 +38,7 @@ export function validateBrowserObservationOperation(value: unknown): void {
   text(row.sessionId, 512); if (!row.sessionId) throw new Error("Session identity required"); if (row.kind === "browser.observe.prepare") id(row.tabId); else object(row, ["kind", "sessionId"]);
 }
 export function validateBrowserObservationResult(kind: BrowserObservationOperation["kind"], value: unknown): void {
+  if (kind === "browser.managed.prepare") return;
   if (kind === "browser.observe.prepare") { const row = object(value, ["observationId", "sessionId", "tabId", "expiresAt"]); id(row.observationId); id(row.tabId); text(row.sessionId, 512); number(row.expiresAt, 0, Number.MAX_SAFE_INTEGER); return; }
   const row = object(value, ["tabs"]); if (!Array.isArray(row.tabs) || row.tabs.length > 128) throw new Error("Invalid browser tab list");
   for (const item of row.tabs) { const tab = object(item, ["id", "name", "title", "url", "kind", "ownerSessionId", "busy", "frozen", "observable", "reason"]); id(tab.id); for (const key of ["name", "title", "url", "kind", "ownerSessionId"]) text(tab[key]); for (const key of ["busy", "frozen", "observable"]) if (typeof tab[key] !== "boolean") throw new Error("Invalid browser tab state"); if (tab.reason !== undefined) text(tab.reason); }

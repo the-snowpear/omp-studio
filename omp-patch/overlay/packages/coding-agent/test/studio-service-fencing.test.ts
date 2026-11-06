@@ -116,6 +116,42 @@ describe("Studio service instance fencing", () => {
 				timeoutMs: 1000,
 			});
 			expect(stopped.op === "stop" && stopped.daemon.state).toBe("exited");
+			const waitingStart = client.request({
+				op: "start",
+				spec: {
+					name: "readiness",
+					application: process.execPath,
+					args: ["-e", "setInterval(() => {}, 1000)"],
+					cwd: projectDir,
+					env: {},
+					pty: false,
+					restart: "no",
+					persist: false,
+					detached: false,
+					ready: { log: "NEVER", timeoutMs: 10000 },
+				},
+			});
+			const deadline = Date.now() + 5000;
+			let startingInstance: string | undefined;
+			while (!startingInstance && Date.now() < deadline) {
+				const listed = await client.request({ op: "list" });
+				const daemon =
+					listed.op === "list" && listed.daemons.find(row => row.name === "readiness" && row.state === "starting");
+				if (daemon) startingInstance = projectService(daemon).instanceId;
+				else await Bun.sleep(10);
+			}
+			expect(startingInstance).toBeDefined();
+			const stopTime = Date.now();
+			const interrupted = await client.request({
+				op: "stop",
+				name: "readiness",
+				expectedInstanceId: startingInstance,
+				timeoutMs: 1000,
+			});
+			expect(Date.now() - stopTime).toBeLessThan(5000);
+			expect(interrupted.op === "stop" && interrupted.daemon.state).toBe("exited");
+			const completedStart = await waitingStart;
+			expect(completedStart.op === "start" && completedStart.readyTimedOut).toBe(false);
 		} finally {
 			await client.request({ op: "stop", name: "readiness", timeoutMs: 1000 }).catch(() => {});
 			await client.request({ op: "stop", name: "server", timeoutMs: 1000 }).catch(() => {});

@@ -85,6 +85,9 @@
   min-width: 0;
   overflow: hidden;
 }
+/* 对话工具区开关就贴在「右侧栏」开关左边，两者并排，圆角与内距要跟 .icon-btn 一致，
+   否则 26px 的两个方块半径差 2px，挨在一起会看成两个不同层级的控件。 */
+.topbar .tb-right .dock-rail-toggle { padding: 0; border-radius: var(--r-6); }
 
 /* ---------- Session Telemetry（紧凑 · 扁平化：无边框无背景，纯文字） ---------- */
 .telemetry {
@@ -123,10 +126,13 @@
 .telemetry .anchored-pop { display: inline-flex; }
 .telemetry .t-group:hover,
 .telemetry .t-group.open { background: var(--accent-soft); }
-.telemetry .t-group:hover b,
-.telemetry .t-group.open b { color: var(--accent); }
+.telemetry .t-group:hover :is(b, .t-tok-icon),
+.telemetry .t-group.open :is(b, .t-tok-icon) { color: var(--accent); }
 .telemetry .t-item { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .telemetry .t-item b { color: var(--text-2); font-weight: var(--fw-medium); }
+/* 压缩档用一张条形图图标替掉整串数字（切换规则在 App.css 的 chrome-size 段），
+   宽档不占位，dom 里的数字读数保持完整。 */
+.telemetry .t-tok-icon { display: none; align-items: center; }
 .telemetry .t-sep { width: 1px; height: 12px; background: var(--border-strong); opacity: 0.6; }
 .telemetry .ctx-ring {
   width: 16px; height: 16px; border-radius: var(--r-full); flex: none;
@@ -167,90 +173,7 @@
   font-weight: var(--fw-semibold);
 }
 
-/* ---------- Token 用量弹窗 ----------
-   Redesigned from a flat 2x5 grid of equal cells: cost and cache hit rate
-   were competing with retry count for attention. Now three tiers —
-   headline figures, an input/output split bar, then a detail list. */
-.tok-pop { width: 372px; }
-
-/* Tier 1 — the two numbers you actually opened this for. */
-.tok-hero {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1px;
-  background: var(--border);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-.tok-hero .th-cell {
-  background: var(--surface);
-  padding: var(--sp-10) var(--sp-14) var(--sp-12);
-}
-.tok-hero .th-k {
-  font-size: var(--fs-11);
-  color: var(--text-3);
-  display: flex; align-items: center; gap: 4px;
-}
-.tok-hero .th-v {
-  font-family: var(--font-mono);
-  font-size: calc(21px * var(--text-font-scale));
-  line-height: 1.15;
-  font-weight: var(--fw-semibold);
-  color: var(--text);
-  margin-top: 5px;
-  font-variant-numeric: tabular-nums;
-}
-.tok-hero .th-sub { font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-3); margin-top: 3px; }
-.tok-hero .th-sub b { color: var(--green); font-weight: var(--fw-semibold); }
-
-/* Tier 2 — input vs output as proportion, not two unrelated numbers. */
-.tok-split { padding: var(--sp-12) var(--sp-14) var(--sp-10); }
-.tok-split .ts-top {
-  display: flex; align-items: baseline; justify-content: space-between;
-  font-size: var(--fs-11); color: var(--text-2);
-}
-.tok-split .ts-top b {
-  font-family: var(--font-mono); color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.tok-bar {
-  display: flex; height: 6px; gap: 2px;
-  margin: var(--sp-8) 0 var(--sp-6);
-}
-.tok-bar i { display: block; height: 100%; border-radius: var(--r-full); }
-.tok-bar .tb-in { background: var(--blue); }
-.tok-bar .tb-out { background: var(--accent); }
-.tok-bar .tb-cache { background: var(--green); }
-.tok-bar .tb-none,
-.ctxbar .cb-none {
-  flex: 1 0 100%;
-  width: 100%;
-  min-width: 100%;
-  background: var(--surface-3);
-}
-.tok-keys { display: flex; gap: var(--sp-12); font-size: calc(10.5px * var(--text-font-scale)); color: var(--text-3); }
-.tok-keys span { display: flex; align-items: center; gap: 4px; }
-.tok-keys i { width: 7px; height: 7px; border-radius: 2px; flex: none; }
-
-/* Tier 3 — the rest, as rows. Cheap to scan, cheap to ignore. */
-.tok-rows {
-  padding: var(--sp-4) var(--sp-14) var(--sp-10);
-  border-top: 1px solid var(--border);
-}
-.tok-rows .tr-row {
-  display: flex; align-items: center;
-  height: 24px;
-  font-size: var(--fs-11);
-  color: var(--text-2);
-}
-.tok-rows .tr-row .tr-v {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.tok-rows .tr-row .tr-v.ok { color: var(--green); }
-.tok-rows .tr-row .tr-v.dim { color: var(--text-3); }
+.ctxbar .cb-none { flex: 1 0 100%; width: 100%; background: var(--surface-3); }
 
 .tp-grid { padding: 0 var(--sp-14) var(--sp-10); display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .tp-cell { background: var(--surface); padding: var(--sp-8) var(--sp-10); }
@@ -297,6 +220,30 @@
   display: flex;
   flex-direction: column;
   position: relative;
+}
+/* Runtime 状态条：浮在对话区顶部，不占布局高度。左右让开 minimap 与停靠栏，
+   避免盖住可点击的圆点轨道 / 图标；红条在 surface 上混一点红做底，保持扁平配色。 */
+.convo-wrap > .banner.is-floating {
+  position: absolute;
+  top: var(--sp-10);
+  left: calc(var(--minimap-w) + var(--sp-10));
+  right: var(--sp-10);
+  z-index: calc(var(--z-rail-tools) + 1);
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-8);
+  background: var(--surface);
+  padding: 8px var(--sp-12);
+  animation: omp-toast-in-top var(--dur-fast) var(--ease-out);
+}
+.convo-wrap.is-empty > .banner.is-floating,
+.convo-wrap[data-reading-minimap="off"] > .banner.is-floating {
+  left: var(--sp-10);
+}
+.convo-wrap:has(> .dock-rail-compact) > .banner.is-floating { right: calc(var(--sp-10) + 48px); }
+.convo-wrap:has(> .dock-rail-expanded) > .banner.is-floating { right: calc(var(--dock-rail-w, 320px) + var(--sp-12) + var(--sp-8)); }
+.convo-wrap > .banner.is-floating.red {
+  background: color-mix(in srgb, var(--red) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--red) 30%, var(--border-float));
 }
 .convo-scroll {
   flex: 1;
@@ -379,30 +326,30 @@
 }
 /* Code/table/diff own their horizontal scroll. Never use the virtual list as a
    crop to hide an over-wide row: ordinary text/URLs wrap, media fit their row. */
-.convo-wrap[data-reading-column] > .convo-scroll .convo-virtual-list { overflow: visible; }
-.convo-wrap[data-reading-column] > .convo-scroll :is(.convo-body, .convo-virtual-row, .ev, .ev-copy-host, .ev-body) {
+:is(.convo-wrap[data-reading-column] > .convo-scroll, .conversation-surface) .convo-virtual-list { overflow: visible; }
+:is(.convo-wrap[data-reading-column] > .convo-scroll, .conversation-surface) :is(.convo-body, .convo-virtual-row, .ev, .ev-copy-host, .ev-body) {
   min-width: 0;
 }
-.convo-wrap[data-reading-column] > .convo-scroll :is(.convo-body, .convo-virtual-row, .ev) { max-width: 100%; }
-.convo-wrap[data-reading-column] > .convo-scroll .ev-body { overflow-wrap: anywhere; }
-.convo-wrap[data-reading-column] > .convo-scroll .ev-body :not(pre) > .chip-code {
+:is(.convo-wrap[data-reading-column] > .convo-scroll, .conversation-surface) :is(.convo-body, .convo-virtual-row, .ev) { max-width: 100%; }
+:is(.convo-wrap[data-reading-column] > .convo-scroll, .conversation-surface) .ev-body { overflow-wrap: anywhere; }
+:is(.convo-wrap[data-reading-column] > .convo-scroll, .conversation-surface) .ev-body :not(pre) > .chip-code {
   white-space: break-spaces;
   overflow-wrap: anywhere;
 }
-.convo-wrap[data-reading-column] > .convo-scroll .ev-body :is(img, svg:not(.icon)) {
+:is(.convo-wrap[data-reading-column] > .convo-scroll, .conversation-surface) .ev-body :is(img, svg:not(.icon)) {
   max-width: 100%;
   height: auto;
 }
-.convo-wrap[data-reading-column] > .convo-scroll :is(.md-code, .md-code-pre, .md-table-wrap, .tc-code, .tc-diff, .codeblock) {
+:is(.convo-wrap[data-reading-column] > .convo-scroll, .conversation-surface) :is(.md-code, .md-code-pre, .md-table-wrap, .tc-code, .tc-diff, .codeblock) {
   min-width: 0;
   max-width: 100%;
   overflow-wrap: normal;
   word-break: normal;
 }
-.convo-wrap[data-reading-column] > .convo-scroll :is(.md-code-pre, .md-table-wrap, .tc-code, .tc-diff, .codeblock) {
+:is(.convo-wrap[data-reading-column] > .convo-scroll, .conversation-surface) :is(.md-code-pre, .md-table-wrap, .tc-code, .tc-diff, .codeblock) {
   overflow-x: auto;
 }
-.convo-wrap[data-reading-column] > .convo-scroll .md-table-wrap table { min-width: max-content; }
+:is(.convo-wrap[data-reading-column] > .convo-scroll, .conversation-surface) .md-table-wrap table { min-width: max-content; }
 
 /* ============================================================
    会话切换过场：正文淡出 → 骨架兜住空窗 → 交叉溶解淡入
@@ -1031,25 +978,36 @@
 .subagent-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-  gap: var(--sp-6);
-  margin: 0 0 var(--sp-8);
+  gap: var(--sp-10);
+  margin: var(--sp-4) 0 var(--sp-12);
 }
 .subagent-strip .sa-card {
+  --sa-accent: var(--text-3);
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   align-self: stretch;
   justify-self: stretch;
-  gap: 3px;
+  gap: var(--sp-8);
   min-width: 0;
+  min-height: 84px;
   width: 100%;
   box-sizing: border-box;
-  padding: 6px 8px 8px 10px;
+  padding: var(--sp-10) var(--sp-12) var(--sp-8) var(--sp-14);
   border: 1px solid var(--border);
-  border-left: 2.5px solid var(--border-strong);
   border-radius: var(--r-8);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--sa-accent) 2%, var(--surface));
   text-align: left;
+  transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast);
+}
+.subagent-strip .sa-card::before {
+  content: "";
+  position: absolute;
+  inset: var(--sp-14) auto var(--sp-14) -1px;
+  width: 3px;
+  border-radius: var(--r-full);
+  background: var(--sa-accent);
 }
 .subagent-strip .sa-card.is-inspectable {
   appearance: none;
@@ -1058,49 +1016,147 @@
   font: inherit;
   color: inherit;
 }
-.subagent-strip .sa-card.is-inspectable:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-2, var(--surface));
+.subagent-strip .sa-card.is-inspectable:hover,
+.subagent-strip .sa-card.is-inspectable:focus-visible {
+  border-color: color-mix(in srgb, var(--sa-accent) 38%, var(--border));
+  background: color-mix(in srgb, var(--sa-accent) 5%, var(--surface));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--sa-accent) 7%, transparent);
+}
+.subagent-strip .sa-card.is-inspectable:focus-visible {
+  outline: 2px solid var(--sa-accent);
+  outline-offset: 2px;
 }
 .subagent-strip .sa-card.running,
 .subagent-strip .sa-card.starting,
-.subagent-strip .sa-card.reviving { border-left-color: var(--blue); }
-.subagent-strip .sa-card.waiting { border-left-color: var(--amber); }
+.subagent-strip .sa-card.reviving { --sa-accent: var(--blue); }
+.subagent-strip .sa-card[data-activity="thinking"] { --sa-accent: var(--accent); }
+.subagent-strip .sa-card.waiting,
+.subagent-strip .sa-card[data-activity="waiting"] { --sa-accent: var(--amber); }
 .subagent-strip .sa-card.idle,
 .subagent-strip .sa-card.done,
 .subagent-strip .sa-card.succeeded,
 .subagent-strip .sa-card.completed,
-.subagent-strip .sa-card.released { border-left-color: var(--green); }
-.subagent-strip .sa-card.parked { border-left-color: var(--border-strong); }
+.subagent-strip .sa-card.released { --sa-accent: var(--green); }
 .subagent-strip .sa-card.error,
 .subagent-strip .sa-card.failed,
-.subagent-strip .sa-card.aborted { border-left-color: var(--red); }
+.subagent-strip .sa-card.aborted,
+.subagent-strip .sa-card[data-activity="aborted"] { --sa-accent: var(--red); }
 .subagent-strip .sa-top {
   display: flex;
-  align-items: center;
-  gap: var(--sp-8);
+  align-items: flex-start;
+  gap: var(--sp-10);
   width: 100%;
   min-width: 0;
 }
-.subagent-strip .hub-act { height: 18px; padding: 0 8px; font-size: calc(10.5px * var(--text-font-scale)); }
+.subagent-strip .sa-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-6);
+  color: var(--sa-accent);
+  background: color-mix(in srgb, var(--sa-accent) 9%, transparent);
+}
+.subagent-strip .sa-avatar .icon { width: 20px; height: 20px; }
+.subagent-strip .sa-identity {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: var(--sp-4);
+}
+.subagent-strip .sa-heading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 22px;
+  gap: var(--sp-8);
+}
 .subagent-strip .sa-name {
   flex: 1;
   min-width: 0;
-  font-size: var(--fs-12);
+  font-size: var(--fs-14);
   font-weight: var(--fw-semibold);
+  line-height: 1.3;
   color: var(--text);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.subagent-strip .sa-card .hub-act {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+  height: 20px;
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--sa-accent) 10%, transparent);
+  color: var(--sa-accent);
+  font-size: var(--fs-11);
+  line-height: 1.3;
+}
+.subagent-strip .sa-status-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.subagent-strip .sa-status-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .subagent-strip .sa-dur {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
   flex: none;
   font-family: var(--font-mono);
-  font-size: calc(10.5px * var(--text-font-scale));
+  font-size: var(--fs-11);
   font-variant-numeric: tabular-nums;
-  color: var(--text-faint);
+  color: var(--text-3);
+  white-space: nowrap;
 }
-/* token / tools / cost：对话卡第二行与检查卡标题共用 */
+.subagent-strip .sa-dur .icon { width: 12px; height: 12px; opacity: .7; }
+.subagent-strip .sa-open {
+  flex: none;
+  color: var(--text-faint);
+  opacity: .5;
+  transition: color var(--dur-fast), opacity var(--dur-fast), transform var(--dur-fast);
+}
+.subagent-strip .sa-card:is(:hover, :focus-visible) .sa-open {
+  color: var(--sa-accent);
+  opacity: 1;
+  transform: translateX(2px);
+}
+.subagent-strip .sa-brief {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.subagent-strip .sa-task {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.subagent-strip .sa-task {
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  line-height: 1.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .subagent-strip .sa-card,
+  .subagent-strip .sa-open { transition: none; }
+  .subagent-strip .sa-card:is(:hover, :focus-visible) .sa-open { transform: none; }
+}
+/* token / tools / cost：对话卡底栏与检查卡标题共用 */
 .sa-metrics {
   display: flex;
   align-items: baseline;
@@ -1112,9 +1168,29 @@
 }
 .subagent-strip .sa-metrics {
   flex-wrap: wrap;
+  gap: var(--sp-6) var(--sp-12);
   width: 100%;
+  margin-top: auto;
+  padding-top: var(--sp-6);
+  border-top: 1px solid color-mix(in srgb, var(--sa-accent) 8%, var(--border));
+  line-height: 1.3;
 }
-.subagent-strip .sa-cost { margin-left: auto; }
+.subagent-strip .sa-metrics > span { white-space: nowrap; }
+.subagent-strip .sa-metrics .hub-num b { order: -1; }
+.subagent-strip .sa-metrics :is(.sa-tok, .hub-num) b {
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+.subagent-strip .sa-metrics :is(.sa-tok, .hub-num) i {
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.subagent-strip .sa-metrics .sa-tok b { color: var(--text); }
+.subagent-strip .sa-cost {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+}
 .sa-tok { display: inline-flex; align-items: baseline; gap: 4px; }
 .sa-tok b {
   font-family: var(--font-mono);
@@ -1130,71 +1206,7 @@
   color: var(--text-faint);
   line-height: 1;
 }
-/* 全页变暗：独立一层，避免写在 .sa-inspect 上把弹窗自己淡掉。
-   position:fixed 盖住侧栏 / 顶栏 / 对话；z-index 高于侧栏 --z-panel。 */
-.sa-inspect-dim {
-  --dur-sa-inspect: 480ms;
-  --dur-sa-inspect-leave: 260ms;
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal);
-  background: rgba(15, 15, 25, 0.45);
-  animation: sa-inspect-dim-in var(--dur-toast) var(--ease-out) both;
-}
-:root[data-theme="dark"] .sa-inspect-dim {
-  background: rgba(0, 0, 0, 0.55);
-}
-.sa-inspect-dim.is-leave {
-  pointer-events: none;
-  animation: sa-inspect-dim-out var(--dur-sa-inspect-leave) var(--ease-out) both;
-}
-.sa-inspect {
-  --dur-sa-inspect: 480ms;
-  --dur-sa-inspect-leave: 260ms;
-  position: absolute;
-  left: calc(var(--sp-16) + var(--minimap-w) + 8px - 24px);
-  right: calc(var(--sp-16) - 24px);
-  /* 固定约 82% 工作区高（视口 − 标题栏 36px − 顶栏），底边贴 Composer，不随对话列伸缩。 */
-  top: auto;
-  bottom: var(--sp-8);
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  width: auto;
-  max-width: calc(var(--doc-max-w) + 48px);
-  height: calc((100dvh - 36px - var(--topbar-h)) * 0.82);
-  max-height: calc((100dvh - 36px - var(--topbar-h)) * 0.82);
-  overflow: hidden;
-  z-index: calc(var(--z-modal) + 1);
-  transform-origin: 50% 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--r-12, 12px);
-  background: var(--surface);
-  box-shadow:
-    0 0 22px 4px color-mix(in srgb, var(--accent) 16%, transparent),
-    0 12px 36px rgba(15, 17, 26, 0.14),
-    0 3px 12px rgba(15, 17, 26, 0.08);
-  animation: dock-genie-in var(--dur-sa-inspect) var(--ease-nav) both;
-}
-:root[data-theme="dark"] .sa-inspect {
-  box-shadow:
-    0 0 26px 4px color-mix(in srgb, var(--accent) 22%, transparent),
-    0 12px 36px rgba(0, 0, 0, 0.45),
-    0 3px 12px rgba(0, 0, 0, 0.30);
-}
-.sa-inspect.is-leave {
-  pointer-events: none;
-  animation: dock-genie-out var(--dur-sa-inspect-leave) var(--ease-out) both;
-}
-@keyframes sa-inspect-dim-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes sa-inspect-dim-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-/* 底边变形浮入/收起：子 Agent 检查卡与 Ask 卡共用。 */
+/* Ask 卡的底边变形浮入/收起。 */
 @keyframes dock-genie-in {
   from {
     opacity: 0;
@@ -1215,32 +1227,6 @@
     transform: translateY(10%) scale3d(0.42, 0.16, 1);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .sa-inspect-dim,
-  .sa-inspect,
-  .sa-inspect-dim.is-leave,
-  .sa-inspect.is-leave {
-    animation: none;
-  }
-}
-.sa-inspect-head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-8);
-  flex: none;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
-}
-.sa-inspect-title-wrap { flex: 1; min-width: 0; }
-.sa-inspect-head .sa-metrics { margin-left: auto; }
-.sa-inspect-title {
-  margin: 0;
-  font-size: var(--fs-14);
-  font-weight: var(--fw-semibold);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
 .sa-inspect-scroll {
   position: relative;
   flex: 1;
@@ -1255,16 +1241,9 @@
   flex: 1;
   min-height: 0;
 }
-/* 检查卡固定高度：剩余空间交给滚动区。 */
-.sa-inspect .subagent-convo,
-.sa-inspect .sa-inspect-scroll {
-  flex: 1 1 0;
-}
 /* 直接子选择器：面板根的直接子按钮才是悬浮位；排队栏头行里的同名按钮
    （qs-head-slot）不能被钉到面板右下角。 */
-.sa-inspect > .new-content-pill,
 .subagent-convo > .new-content-pill { position: absolute; right: 16px; left: auto; margin: 0; bottom: 16px; }
-.sa-inspect.has-composer > .new-content-pill,
 .subagent-convo.has-composer > .new-content-pill { bottom: 112px; }
 .sa-inspect-composer {
   flex: none;
@@ -3406,8 +3385,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   .plan-review-dialog { transition: none; }
 }
 /* Deck 激活时被覆盖的 composer：变暗并禁止交互（参照 ver1） */
-.composer-region:has(.deck.active) .composer,
-.convo-wrap:has(.sa-inspect) .composer {
+.composer-region:has(.deck.active) .composer {
   opacity: 0.35;
   pointer-events: none;
   box-shadow: none;
@@ -3611,44 +3589,134 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   place-items: center;
   padding: var(--sp-24);
   background: rgba(0, 0, 0, 0.72);
+  -webkit-app-region: no-drag;
 }
 .img-preview-dialog {
   position: relative;
-  display: grid;
-  place-items: center;
-  max-width: 90vw;
-  max-height: 90vh;
-}
-.img-preview-close {
-  position: fixed;
-  top: 48px;
-  right: 16px;
-  z-index: calc(var(--z-modal) + 1);
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-10);
   background: var(--surface);
   color: var(--text);
-  border: 1px solid var(--border-float);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-modal);
+  font-family: var(--font-ui);
+  font-size: var(--fs-12);
 }
-.img-preview-close:hover {
-  color: var(--text);
-  background: var(--surface-hover);
+.img-preview-header,
+.img-preview-actions,
+.img-preview-zoom {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+.img-preview-header {
+  flex: none;
+  flex-wrap: wrap;
+  padding: var(--sp-8) var(--sp-12);
+  border-bottom: 1px solid var(--border);
+}
+.img-preview-title {
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--fw-semibold);
+}
+.img-preview-actions {
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.img-preview-dialog .btn {
+  min-width: var(--tap-min);
+  min-height: max(var(--tap-min), 32px);
+  padding: var(--sp-4) var(--sp-8);
+  white-space: nowrap;
+}
+.img-preview-dialog .btn[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+.img-preview-dialog .btn:focus-visible,
+.img-preview-viewport:focus-visible,
+.img-preview-menu:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.img-preview-zoom {
+  flex: none;
+  flex-wrap: wrap;
+  padding: var(--sp-6) var(--sp-12);
+  border-bottom: 1px solid var(--border);
+}
+.img-preview-scale {
+  min-width: 5ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.img-preview-viewport {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+  user-select: none;
+}
+.img-preview-viewport.is-pannable { cursor: grab; }
+.img-preview-viewport.is-dragging { cursor: grabbing; }
+.img-preview-canvas {
+  display: grid;
+  place-items: center;
+  width: max-content;
+  height: max-content;
+  min-width: 100%;
+  min-height: 100%;
 }
 .img-preview-image {
   display: block;
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: var(--r-8);
-  box-shadow: var(--shadow-modal);
+  max-width: none;
+  max-height: none;
   background: var(--surface-2);
+  /* Deliberately no scaling transition: inspect the received pixels, not an animation. */
 }
+.img-preview-footer {
+  flex: none;
+  max-height: 25%;
+  overflow: auto;
+  padding: var(--sp-6) var(--sp-12);
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.img-preview-footer p { margin: 0; }
+.img-preview-footer [role="status"]:empty { display: none; }
+.img-preview-footer .img-preview-error { color: var(--red); }
 .img-preview-menu {
   position: fixed;
-  z-index: calc(var(--z-modal) + 2);
+  z-index: var(--z-menu);
   min-width: 140px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+}
+@media (max-width: 480px), (max-height: 420px) {
+  .img-preview-backdrop { padding: var(--sp-8); }
+  .img-preview-header,
+  .img-preview-zoom { gap: var(--sp-4); padding: var(--sp-4) var(--sp-8); }
+}
+@media (pointer: coarse) {
+  .img-preview-dialog .btn,
+  .img-preview-menu .menu-item { min-height: 44px; min-width: 44px; }
 }
 .chip-composer-editor {
   position: relative;
@@ -4014,7 +4082,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   .magic-kw.is-animated .magic-kw-ch { animation: none; }
 }
 .composer-bar {
-  display: flex; align-items: center; gap: var(--sp-4);
+  display: flex; flex-wrap: nowrap; align-items: center; gap: var(--sp-4);
   padding: var(--sp-4) var(--sp-8) var(--sp-8);
   min-width: 0;
 }
@@ -4125,6 +4193,41 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   overflow: hidden;
 }
 .cmp-mode-menu { min-width: 260px; overflow: visible; z-index: var(--z-menu); }
+.cmp-tools-wrap > .icon-btn { position: relative; }
+.cmp-tools-active {
+  display: none;
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 4px;
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+.composer-bar[data-collapse]:not([data-collapse="full"]) .cmp-tools-active { display: block; }
+.cmp-tools-menu {
+  min-width: 0;
+  width: min(240px, calc(100vw - 24px));
+  max-height: var(--cmp-menu-max-height, 380px);
+  padding: 3px;
+  gap: 1px;
+  border-radius: var(--r-8);
+}
+.cmp-tools-menu .menu-item { width: 100%; min-height: 28px; padding: 4px 6px; gap: 6px; }
+.cmp-tools-menu .approval-menu-item { padding: 4px 6px; gap: 1px; }
+.cmp-tools-menu .menu-label { padding: 3px 6px; }
+.cmp-tools-menu .cmp-menu-sep { margin-block: 3px; }
+.cmp-tools-menu .cmp-mode-check { padding: 4px 6px; gap: 6px; }
+.cmp-tools-menu .cmp-mode-params { padding: 0 6px 4px 26px; gap: 4px; }
+.cmp-tools-category > span { flex: 1; text-align: left; }
+.cmp-tools-category > .icon:last-child { color: var(--text-faint); }
+.cmp-tools-options {
+  min-height: 0;
+  max-height: calc(var(--cmp-menu-max-height, 380px) - 48px);
+  overflow-y: auto;
+}
+.cmp-tools-options > .am-desc { margin: 3px 6px; font-size: var(--fs-11); line-height: 1.4; }
+.cmp-tools-menu:has(> .cmp-tools-options) > .cmp-mode-menu-scroll { flex: none; }
 .menu.rms-pop.cmp-flyout.cmp-mode-flyout {
   width: 280px;
   padding: var(--sp-4);
@@ -4232,43 +4335,34 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .composer-bar .cmp-compact-icon { display: none; }
 
-/* Composer 根据真实内容碰撞分两步收紧：先将权限 / 模型 / 思考收为图标，
-   再折叠模式胶囊并允许换行。
+/* Composer 根据真实内容碰撞依次收紧：左侧入口与模式胶囊收进加号，
+   然后缩短模型 / 思考；最窄时权限仍独立可点。工具栏始终保持一行。
    data-measuring 只在同步测量期间恢复胶囊自然宽度，避免 flex 裁切掩盖碰撞。 */
 .composer-bar[data-measuring="true"] .mode-chip { flex: none; }
-.composer-bar:is([data-collapse="compact"], [data-collapse="modes"]) .cmp-responsive-pill {
+.composer-bar[data-collapse]:not([data-collapse="full"]) :is(.cb-shortcuts, .cmp-mode-cluster) { display: none; }
+.composer-bar[data-collapse]:not([data-collapse="full"]) .cmp-tools-wrap { order: -1; }
+.composer-bar:is([data-collapse="compact"], [data-collapse="minimal"]) .cmp-pill-wrap .cmp-responsive-pill,
+.composer-bar[data-collapse="minimal"] .approval-pill-wrap > .cmp-responsive-pill {
   width: 24px;
   padding-inline: 0;
   justify-content: center;
   gap: 0;
   position: relative;
 }
-.composer-bar:is([data-collapse="compact"], [data-collapse="modes"]) .cmp-pill-label,
-.composer-bar:is([data-collapse="compact"], [data-collapse="modes"]) .cmp-responsive-pill .cmp-pill-caret { display: none; }
-.composer-bar:is([data-collapse="compact"], [data-collapse="modes"]) .cmp-compact-icon { display: block; }
-.composer-bar:is([data-collapse="compact"], [data-collapse="modes"]) .cmp-task-dot {
+.composer-bar:is([data-collapse="compact"], [data-collapse="minimal"]) .cmp-pill-wrap :is(.cmp-pill-label, .cmp-pill-caret),
+.composer-bar[data-collapse="minimal"] .approval-pill-wrap > .cmp-responsive-pill .cmp-pill-label { display: none; }
+.composer-bar:is([data-collapse="compact"], [data-collapse="minimal"]) .cmp-compact-icon { display: block; }
+.composer-bar:is([data-collapse="compact"], [data-collapse="minimal"]) .cmp-task-dot {
   position: absolute;
   top: 2px;
   right: 2px;
 }
-/* Keep every control reachable when shortening labels still cannot fit a row. */
-.composer-bar[data-collapse="modes"] { flex-wrap: wrap; }
-.composer-bar[data-collapse="modes"] .cmp-mode-cluster {
-  gap: var(--sp-2);
-  flex: none;
-  max-width: 100%;
-  flex-wrap: wrap;
-}
 .composer-bar .composer-tier { flex: none; }
-.composer-bar[data-collapse="modes"] .mode-chip {
-  width: 24px;
-  max-width: 24px;
-  padding-inline: 0;
-  justify-content: center;
-  flex: none;
+.composer-bar[data-collapse="minimal"] {
+  gap: var(--sp-2);
+  padding-inline: var(--sp-4);
 }
-.composer-bar[data-collapse="modes"] .mode-chip-label-full { display: none; }
-.composer-bar[data-collapse="modes"] .mode-chip-label-initial { display: block; }
+.composer-bar[data-collapse]:not([data-collapse="full"]) .queue-edit .qe-label { display: none; }
 .cmp-menu {
   position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 41;
   min-width: 250px; padding: var(--sp-4);
@@ -5026,6 +5120,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   z-index: var(--z-fab);
   background: var(--surface);
   border: 1px solid var(--border);
+  /* 对话工具区的卡片压到这个角时，由 useBottomToggleClearance 写入让位距离。 */
+  --bp-reveal-shift: 0px;
+  transform: translateX(calc(-1 * var(--bp-reveal-shift)));
+  transition: transform var(--dur-fast) var(--ease);
 }
 .bp-head {
   flex: none;
@@ -5300,6 +5398,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) {
   .side-panel,
   .side-panel.open { transition: none; }
+  .bp-reveal { transition: none; }
 }
 
 /* Host-backed Git surface. Paths are repository-relative public values. */
@@ -5666,15 +5765,28 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .git-graph-more { margin: 8px 10px; }
 
 /* Changes
+   One document root (`.changes-panel`), like `.git-panel`: the dock body is a
+   flex column and `.dock-panel-content > :is(div, …)` forces every direct child
+   to `height: 100%`. Rendered as bare sibling divs, the toolbar claimed the
+   whole body and the list collapsed to zero height — the panel looked empty.
    The three wrapper divs here carried their layout as inline style attributes
    (flex:none / flex:1;overflow-y:auto / flex:none), which put structural layout
    in the render string where it could not be themed or overridden. */
+.changes-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
 .ch-toolbar {
   flex: none;
   display: flex; align-items: center; gap: var(--sp-6);
   padding: var(--sp-8) var(--sp-12);
   border-bottom: 1px solid var(--border);
 }
+/* 分段控件优先保住命中面积：空间不够时压文字标签，不压这两个按钮。 */
+.ch-toolbar .seg { flex: none; }
 .ch-toolbar .seg button { padding: 0 6px; }
 .ch-list { flex: 1; min-height: 0; overflow-y: auto; }
 .ch-turn {
@@ -5682,7 +5794,11 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: flex;
   align-items: center;
   min-width: 0;
-  flex: 1;
+  /* 按内容占宽，别和右侧 .spacer 平分：轮次标签是固定短词（「最近一轮」），
+     一上来就抢 1fr 会在面板稍窄时先把它压成「最…」。只有整条工具栏真的
+     装不下（flex-shrink 生效）才允许省略。 */
+  flex: 0 1 auto;
+  max-width: 100%;
 }
 .ch-turn-btn {
   display: inline-flex;
@@ -5703,6 +5819,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .ch-turn-btn:hover { background: var(--surface-hover); }
 .ch-turn-btn:disabled { opacity: 0.55; cursor: default; }
+/* 唯一可压缩的是文字标签：图标与 +/− 计数本身都是 `flex: none`。 */
 .ch-turn-label { min-width: 0; }
 .ch-turn-backdrop {
   position: fixed;
@@ -5744,6 +5861,31 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   align-items: center;
   justify-content: center;
   color: var(--glyph-faint);
+}
+/* 文件类型色 —— 与 Explorer 共用同一套 token（spec §4.5）。形与色是两轴：
+   形由 iconNameFor() 决定，色由行上的 data-ftype 派生。所以改动列表里
+   README.md 是「中性文档色 + 书形」，.env 是「红 + 钥匙形」，与树里同源。
+   四个容器：改动侧栏 .ch-item / 轮次 diff 卡 .turn-diff-row /
+   任务进度 .task-dock-file / git 面板 .git-change-line。
+   只染图标、不染文件名：这里 +/− 与 diff 才是主角，整行转色会和「删除」混淆；
+   敏感文件靠 data-secret 抢同一档红，形状（key / shield-key）仍独立可辨。
+   tri 与系统高对比无需另写规则：--ftype-* 在根元素被覆盖，这里自动跟随。 */
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="code"] { --file-ink: var(--ftype-code); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="markup"] { --file-ink: var(--ftype-markup); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="style"] { --file-ink: var(--ftype-style); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="data"] { --file-ink: var(--ftype-data); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="doc"] { --file-ink: var(--ftype-doc); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="config"] { --file-ink: var(--ftype-config); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="script"] { --file-ink: var(--ftype-script); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="test"] { --file-ink: var(--ftype-test); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="package"] { --file-ink: var(--ftype-package); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="lock"] { --file-ink: var(--ftype-lock); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="image"] { --file-ink: var(--ftype-image); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="secret"] { --file-ink: var(--ftype-secret); }
+/* 敏感文件优先于类型色：.npmrc 这类即便归到别的类，图标也必须红。 */
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-secret] { --file-ink: var(--ftype-secret); }
+:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line):is([data-ftype], [data-secret]) :is(.ch-row-icon, .turn-diff-icon, .task-dock-file-icon) {
+  color: var(--file-ink);
 }
 .ch-file-meta {
   flex: 1;
@@ -5917,6 +6059,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   border-bottom: 1px solid var(--border);
   font-size: var(--fs-12);
 }
+.diff-toolbar .seg { flex-shrink: 0; }
 .diff-scroll { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-mono); font-size: var(--fs-11); line-height: 1.65; }
 .diff-head-row {
   padding: var(--sp-6) var(--sp-12);
@@ -6057,6 +6200,18 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
    icon buttons, which is nested interactive content. The name block is the
    button that opens details, so the three controls are siblings. Hover moves to
    the row via :focus-within so the whole row still highlights. */
+/* 卡片正文只能有一个根：停靠宿主把 `.dock-panel-content` 的直接子块撑成
+   `height: 100%`。以前这里直接返回多行，卡片被手动拉高后每行会等分整卡高度，
+   行间出现大片空白、最后一行被裁掉。列表只按内容长高，超出部分交给宿主滚动。 */
+.dock-panel-content > .agents-panel {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: auto;
+  min-height: 100%;
+  min-width: 0;
+}
+.agents-panel > .agent-row { flex: 0 0 auto; }
 .agent-row {
   display: flex; gap: var(--sp-10);
   padding: var(--sp-10) var(--sp-12);
@@ -6523,19 +6678,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   font-size: var(--fs-14);
   color: var(--text-3);
 }
-.ce-runtime-actions {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-8);
-  margin: calc(var(--sp-12) * -1) 0 var(--sp-24);
-}
-.ce-runtime-actions .action-progress {
-  flex: 1 1 100%;
-  max-width: 360px;
-}
-
 .ce-heat { width: 100%; margin: 0 0 var(--sp-24); overflow-x: auto; }
 .ce-heat-head {
   display: flex;
@@ -6611,6 +6753,16 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   grid-auto-flow: column;
   grid-auto-columns: var(--ce-cell);
   gap: var(--ce-gap);
+  /* 网格本身不滚动。入场扫光的 ::after 会一路 translateX 到网格外（末帧停在
+     240%，约 975px），而被 transform 推出去的绘制算进祖先 .ce-heat 的
+     scrollable overflow：这块用量区在 1440 宽下明明放得下（739px 网格 / 896px
+     容器），动画结束却常驻一条横向滚动条（实测 scrollWidth 1470 vs
+     clientWidth 896）。clip 只裁绘制、不建滚动容器，也不计入祖先的滚动范围；
+     16px 余量留给 hover 的 scale(1.4) 外扩（每边 0.2 格）与 10px 阴影。
+     这里只能写真长：Chromium 的 overflow-clip-margin 不接受 calc()/var()，
+     用 calc 会整条失效回 0（CSS.supports 直接为 false）。 */
+  overflow: clip;
+  overflow-clip-margin: 16px;
 }
 /* 入场扫光：一条渐变带 + `transform: translateX`（合成属性），扫一遍就停在
    容器外。原来是 `background-position` 的无限动画——非合成属性，每帧重绘整块
@@ -6803,13 +6955,11 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .cmp-mode-flyout > .am-desc { margin:4px 8px; }
 
 /* 最窄主列按自己的容器宽度兜底，不按窗口宽度误判侧栏/右分栏。
-   Composer 的内容碰撞 hook 仍决定 normal / compact / modes，这里不另造折叠策略。
+   Composer 的内容碰撞 hook 仍决定 full / tools / compact / minimal，这里不另造折叠策略。
    用 hook 实测的 data-reading-narrow 而不是 @container：container-type 会带来
    layout containment，令 .convo-wrap 变成 position:fixed 后代的包含块，Composer
    选单的点击遮罩与图片灯箱就不再贴住视口（点侧栏/topbar 关不掉菜单）。 */
 .convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .composer .composer-bar {
-  flex-wrap: wrap;
-  row-gap: var(--sp-6);
   padding-inline: var(--sp-4);
 }
 .convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .ctx-strip {

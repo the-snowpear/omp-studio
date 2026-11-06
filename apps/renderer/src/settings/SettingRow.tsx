@@ -1,10 +1,6 @@
 /**
- * 设置页共享行组件：来源徽标 + 分节标题 + 受控开关 / 占位枚举。
- *
- * 来源徽标是本轮采纳的「逐行来源」模型：每行标注 当前值来自哪里
- * （默认值 / 用户 / 项目 / 运行时覆盖），尚未接入 Host 的行统一
- * 「尚未接入」并在悬停时给出原因。Runtime 设置接入 settings contract
- * 后（Phase 2+），同一条 Row 换 source 与真实控件即可，不再改版式。
+ * 设置页共享行组件：来源徽标、分节标题和受控开关。
+ * 缺少运行能力时同时提供可见原因，供鼠标和键盘用户阅读。
  */
 
 import { AppSelect } from "../AppSelect";
@@ -52,12 +48,13 @@ export function SettingRow({
 }) {
   const { t } = useI18n();
   return (
-    <div className={`set-row${source === "unavailable" ? " is-unavailable" : ""}`} data-tip={source === "unavailable" ? (reason ?? `（${t("common.notImplemented")}）`) : undefined}>
+    <div className={`set-row${source === "unavailable" ? " is-unavailable" : ""}`} data-setting-label={label} data-tip={source === "unavailable" ? (reason ?? `（${t("common.notImplemented")}）`) : undefined}>
       <div>
         <div className="sr-label">
           {label} {source ? <SourceBadge source={source} reason={reason} /> : null}
         </div>
         {desc ? <div className="sr-desc">{desc}</div> : null}
+        {source === "unavailable" && reason ? <div className="sr-desc" role="note">{reason}</div> : null}
       </div>
       <div className="sr-control">{children}</div>
     </div>

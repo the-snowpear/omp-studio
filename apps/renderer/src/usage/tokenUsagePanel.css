@@ -1,0 +1,57 @@
+/* One scroll region keeps expanded tools inside the viewport; the footer stays reachable. */
+.menu.tok-pop {
+  width: 372px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - var(--popover-top, 82px) - 12px);
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--r-12);
+}
+.usage-panel { display: flex; flex-direction: column; max-height: inherit; min-height: 0; color: var(--text); font-size: var(--fs-12); }
+.usage-header { display: flex; align-items: center; gap: 7px; flex: none; padding: 12px 14px 10px; }
+.usage-header > .icon { color: var(--accent); }
+.usage-header h2 { font-size: var(--fs-13); font-weight: var(--fw-semibold); margin-right: auto; }
+.usage-status { color: var(--text-3); font-size: var(--fs-10); }
+.usage-header .usage-close { width: 24px; height: 24px; flex: none; }
+.usage-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.usage-totals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 6px 16px 16px; }
+.usage-totals > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.usage-totals > div + div { padding-left: 18px; border-left: 1px solid var(--border); }
+.usage-label, .usage-section-label { font-size: var(--fs-11); color: var(--text-3); }
+.usage-totals strong { font-family: var(--font-mono); font-size: calc(23px * var(--text-font-scale)); font-weight: var(--fw-semibold); line-height: 1.4; letter-spacing: -0.04em; overflow-wrap: anywhere; }
+.usage-sub { color: var(--text-3); font-size: var(--fs-10); }
+.usage-sub b { font-weight: var(--fw-medium); font-family: var(--font-mono); color: var(--text-2); }
+.usage-sub .usage-cache-hit { color: var(--green); }
+.usage-composition { margin: 0 16px; padding: 12px 0; border-top: 1px solid var(--border); }
+.usage-bar { display: flex; gap: 3px; height: 5px; margin: 9px 0 10px; border-radius: var(--r-full); overflow: hidden; background: var(--surface-3); }
+.usage-bar i { flex-basis: 0; min-width: 3px; border-radius: var(--r-full); }
+.usage-input { background: var(--blue); }
+.usage-output { background: var(--accent); }
+.usage-cache { background: var(--green); }
+.usage-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.usage-legend dt { display: flex; align-items: center; gap: 5px; color: var(--text-3); font-size: var(--fs-10); }
+.usage-legend dt i { width: 6px; height: 6px; flex: none; border-radius: 2px; }
+.usage-legend dd { font-family: var(--font-mono); font-size: var(--fs-12); margin-top: 2px; }
+.usage-round { margin: 0 16px; padding: 9px 0 12px; border-top: 1px solid var(--border); }
+.usage-rows { display: grid; gap: 6px; }
+.usage-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); align-items: baseline; gap: 12px; font-size: var(--fs-11); line-height: 1.6; }
+.usage-row dt { color: var(--text-3); overflow-wrap: anywhere; }
+.usage-row dd { text-align: right; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.usage-panel :is(strong, dd) { font-variant-numeric: tabular-nums; }
+.usage-disclosure { border-top: 1px solid var(--border); }
+.usage-disclosure > summary { display: flex; align-items: center; gap: 8px; min-height: 39px; padding: 9px 16px; list-style: none; cursor: pointer; color: var(--text-2); font-size: var(--fs-11); transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.usage-disclosure > summary::-webkit-details-marker { display: none; }
+.usage-disclosure > summary:hover { background: var(--surface-hover); color: var(--text); }
+.usage-disclosure > summary:focus-visible { outline-offset: -3px; }
+.usage-chevron { margin-left: auto; transition: transform var(--dur-fast) var(--ease); }
+.usage-disclosure[open] > summary .usage-chevron { transform: rotate(90deg); }
+.usage-disclosure-body { padding: 2px 16px 14px; }
+.telemetry-footer { flex: none; padding: 8px; border-top: 1px solid var(--border); background: var(--surface-2); }
+.telemetry-footer button { display: flex; align-items: center; gap: 8px; padding: 8px; width: 100%; border-radius: var(--r-6); text-align: left; font-size: var(--fs-11); color: var(--text-2); transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.telemetry-footer button > .icon:last-child { margin-left: auto; }
+.telemetry-footer button:hover { background: var(--accent-softer); color: var(--accent); }
+.usage-empty { display: grid; justify-items: center; gap: 7px; padding: 26px 18px 30px; text-align: center; }
+.usage-empty > .icon, .usage-empty p { color: var(--text-3); }
+.usage-empty strong { font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.usage-empty p { font-size: var(--fs-11); }
+@media (prefers-reduced-motion: reduce) { .usage-panel * { transition: none; } }

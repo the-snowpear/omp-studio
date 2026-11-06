@@ -1,6 +1,7 @@
 import type { ClientBootstrap, ClientCommandAccepted, ClientCommandRequest, ClientEvent, ClientQueryRequest, ClientQueryResponse, CommandName, QueryName, WorkspaceListReadModel } from "@omp-studio/client-contract";
 
 export const REMOTE_CHANNELS = {
+  openContext: "omp-studio:remote:open-context", closeContext: "omp-studio:remote:close-context",
   installRuntime: "omp-studio:remote:install-runtime",
   approve: "omp-studio:remote:approve", retryNetwork: "omp-studio:remote:retry-network",
   list: "omp-studio:remote:list", save: "omp-studio:remote:save", remove: "omp-studio:remote:remove", connect: "omp-studio:remote:connect", disconnect: "omp-studio:remote:disconnect", select: "omp-studio:remote:select",
@@ -48,11 +49,13 @@ export interface RemoteApi {
   installRuntime(id: string): Promise<{ installed: boolean }>;
   disconnect(id: string): Promise<void>;
   select(id: string | null): Promise<void>;
-  bootstrap(id: string): Promise<ClientBootstrap>;
-  query<T extends QueryName>(id: string, request: ClientQueryRequest<T>): Promise<ClientQueryResponse<T>>;
-  command<T extends CommandName>(id: string, request: ClientCommandRequest<T>): Promise<ClientCommandAccepted<T>>;
+  openContext?(id: string, scope: import("@omp-studio/client-contract").ClientContextScope): Promise<string>;
+  closeContext?(id: string, contextId: string): Promise<void>;
+  bootstrap(id: string, contextId?: string): Promise<ClientBootstrap>;
+  query<T extends QueryName>(id: string, request: ClientQueryRequest<T>, contextId?: string): Promise<ClientQueryResponse<T>>;
+  command<T extends CommandName>(id: string, request: ClientCommandRequest<T>, contextId?: string): Promise<ClientCommandAccepted<T>>;
   directories(id: string, path?: string): Promise<RemoteDirectoryList>;
   register(id: string, path: string): Promise<WorkspaceListReadModel>;
-  onEvent(listener: (event: { id: string; generation: number; event: ClientEvent }) => void): () => void;
+  onEvent(listener: (event: { id: string; generation: number; contextId?: string; event: ClientEvent }) => void): () => void;
   onChanged(listener: () => void): () => void;
 }

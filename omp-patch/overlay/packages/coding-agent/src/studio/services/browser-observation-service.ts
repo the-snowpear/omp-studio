@@ -110,7 +110,9 @@ export class StudioBrowserObservationService {
 				: {}),
 		};
 	}
-	async execute(operation: BrowserObservationOperation): Promise<unknown> {
+	async execute(
+		operation: Exclude<BrowserObservationOperation, { kind: "browser.managed.prepare" }>,
+	): Promise<unknown> {
 		if (this.#disposed || operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "The active session changed; reload browser targets");
 		const tabs = this.#tabs();

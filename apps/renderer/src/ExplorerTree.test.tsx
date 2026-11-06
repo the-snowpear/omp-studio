@@ -415,6 +415,69 @@ describe("RealFileTree", () => {
     expect(addContext).toHaveBeenCalledWith("package.json", "file");
   });
 
+  it("marks file rows with data-ftype / data-secret and noise containers with data-noise (T4)", async () => {
+    const query = vi.fn(async () => tree([
+      { type: "dir", name: "node_modules", path: "node_modules" },
+      { type: "dir", name: "src", path: "src" },
+      { type: "file", name: "package.json", path: "package.json" },
+      { type: "file", name: ".env", path: ".env" },
+    ]));
+    const client = { query } as unknown as StudioClient;
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} />);
+    await screen.findByText("package.json");
+
+    const fileRow = screen.getByText("package.json").closest<HTMLDivElement>("[role=treeitem]");
+    expect(fileRow!.getAttribute("data-ftype")).toBe("package");
+    // 普通文件不该被标成敏感或噪音
+    expect(fileRow!.hasAttribute("data-secret")).toBe(false);
+    expect(fileRow!.hasAttribute("data-noise")).toBe(false);
+
+    const secretRow = screen.getByText(".env").closest<HTMLDivElement>("[role=treeitem]");
+    expect(secretRow!.getAttribute("data-ftype")).toBe("secret");
+    expect(secretRow!.hasAttribute("data-secret")).toBe(true);
+
+    // 噪音只落在容器本身，子孙不继承（整棵子树灰掉会让人以为加载失败）
+    const noiseRow = screen.getByRole("treeitem", { name: "node_modules 文件夹" });
+    expect(noiseRow.hasAttribute("data-noise")).toBe(true);
+    expect(noiseRow.hasAttribute("data-ftype")).toBe(false);
+    const plainDir = screen.getByRole("treeitem", { name: "src 文件夹" });
+    expect(plainDir.hasAttribute("data-noise")).toBe(false);
+  });
+
+  it("gives every file row a stable accessible name (T5/F2)", async () => {
+    const query = vi.fn(async () => tree([
+      { type: "dir", name: "src", path: "src" },
+      { type: "file", name: "package.json", path: "package.json" },
+    ]));
+    const client = { query } as unknown as StudioClient;
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} />);
+
+    // 之前文件行没有 aria-label，可访问名由 .fname + git sr-only + live dot +
+    // @ 按钮 + ⋯ 按钮串起来，findByRole 根本召不回。纯增量，不影响 getByText。
+    const fileRow = await screen.findByRole("treeitem", { name: "package.json 文件" });
+    expect(fileRow).toBeTruthy();
+    expect(screen.getByText("package.json").closest("[role=treeitem]")).toBe(fileRow);
+  });
+
+  it("omits data-ftype for suffixes outside the type table (T6)", async () => {
+    const query = vi.fn(async () => tree([
+      { type: "file", name: "blob.xyz", path: "blob.xyz" },
+      { type: "file", name: "NOTICE", path: "NOTICE" },
+    ]));
+    const client = { query } as unknown as StudioClient;
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} />);
+    await screen.findByText("blob.xyz");
+
+    for (const name of ["blob.xyz", "NOTICE"]) {
+      const row = screen.getByText(name).closest<HTMLDivElement>("[role=treeitem]");
+      expect(row!.hasAttribute("data-ftype")).toBe(false);
+      expect(row!.hasAttribute("data-secret")).toBe(false);
+    }
+  });
+
   it("opens the file ⋯ menu with the standard items and dispatches actions", async () => {
     const query = vi.fn(async () => tree([
       { type: "dir", name: "src", path: "src" },

@@ -1,3 +1,4 @@
+import type { QueryInput, QueryResult } from "@omp-studio/client-contract";
 import type { ModelAdaptationInput, ModelAdaptationResult, ModelCatalogRefreshResult } from "@omp-studio/client-contract";
 /**
  * Injected service ports consumed by {@link StudioHostClientFacade}.
@@ -302,6 +303,9 @@ export interface HostRuntimeAccess {
   readonly onTelemetryEvent?: (listener: (event: StudioTelemetryForward) => void) => () => void;
   readonly onInteractionEvent?: (listener: (event: StudioInteractionForward) => void) => () => void;
   readonly onBtwEvent?: (listener: (event: StudioBtwForward) => void) => () => void;
+  /** Optional for older Runtime/composition roots; no command/receipt fallback. */
+  readonly readComputer?: StudioRuntimeSessionController["readComputer"];
+  readonly onComputerEvent?: (listener: (event: import("@omp-studio/studio-host").StudioComputerForward) => void) => () => void;
 }
 
 /** Authority-level resident Runtime projection supplied by the Host broker. */
@@ -359,6 +363,7 @@ export interface HostSessionCatalogProvider {
 
 /** Runtime-independent persistent transcript reader owned by the Host/Broker. */
 export interface HostSessionArchiveProvider {
+  readCompaction?(sessionId: string): Promise<import("@omp-studio/studio-protocol").SessionCompactionRead>;
   readPage(input: {
     readonly sessionId: string;
     readonly agentId?: string;
@@ -583,10 +588,16 @@ export interface HostGitService {
 
 /** Host-owned GitHub CLI adapter. Tokens and gh configuration never cross this port. */
 export interface HostGitHubService {
-  auth(input: { readonly workspaceId?: WorkspaceId }): GitHubAuthReadModel | Promise<GitHubAuthReadModel>;
-  pullRequests(input: { readonly workspaceId: WorkspaceId; readonly state?: "open" | "closed" | "merged" | "all" }): GitHubPullRequestListReadModel | Promise<GitHubPullRequestListReadModel>;
-  pullRequest(input: { readonly workspaceId: WorkspaceId; readonly number: number }): GitHubPullRequestDetailReadModel | Promise<GitHubPullRequestDetailReadModel>;
-  checks(input: { readonly workspaceId: WorkspaceId; readonly number: number }): GitHubChecksReadModel | Promise<GitHubChecksReadModel>;
+  auth(input: QueryInput<"github.auth.get">): QueryResult<"github.auth.get"> | Promise<QueryResult<"github.auth.get">>;
+  pullRequests(input: QueryInput<"github.pr.list">): QueryResult<"github.pr.list"> | Promise<QueryResult<"github.pr.list">>;
+  pullRequest(input: QueryInput<"github.pr.get">): QueryResult<"github.pr.get"> | Promise<QueryResult<"github.pr.get">>;
+  checks(input: QueryInput<"github.pr.checks">): QueryResult<"github.pr.checks"> | Promise<QueryResult<"github.pr.checks">>;
+  repositories(input: QueryInput<"github.repositories.list">): QueryResult<"github.repositories.list"> | Promise<QueryResult<"github.repositories.list">>;
+  items(input: QueryInput<"github.items.list">): QueryResult<"github.items.list"> | Promise<QueryResult<"github.items.list">>;
+  item(input: QueryInput<"github.items.get">): QueryResult<"github.items.get"> | Promise<QueryResult<"github.items.get">>;
+  discussion(input: QueryInput<"github.discussion.list">): QueryResult<"github.discussion.list"> | Promise<QueryResult<"github.discussion.list">>;
+  files(input: QueryInput<"github.pr.files">): QueryResult<"github.pr.files"> | Promise<QueryResult<"github.pr.files">>;
+  fileDiff(input: QueryInput<"github.pr.diff">): QueryResult<"github.pr.diff"> | Promise<QueryResult<"github.pr.diff">>;
   execute(input: GitHubExecuteInput, requestId: CommandRequestId): GitHubOperationResult | Promise<GitHubOperationResult>;
   cancelAll?(): void | Promise<void>;
   onProgress?(listener: (progress: OperationProgress) => void): () => void;

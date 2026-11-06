@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../icons";
+import { usePreviewMode } from "../preview/PreviewContext";
 import {
   formatElapsed,
   formatRetry,
@@ -158,6 +159,7 @@ export function ActivityLine({
   /** Preview mode: data comes from fixtures. */
   demo?: boolean;
 }) {
+  const { marks } = usePreviewMode();
   const elapsed = useElapsed(startedAt, status.retry?.nextRetryAt !== undefined);
   const live = isLiveActivityPhase(status.phase) && status.retry?.nextRetryAt === undefined;
   const showOperation = live || status.phase === "queued" || (status.phase === "waiting" && status.label !== WORKING_LABEL);
@@ -189,7 +191,7 @@ export function ActivityLine({
           </>
         ) : null}
       </span>
-      {demo === true ? <span className="chip gray xs">演示</span> : null}
+      {demo === true && marks ? <span className="chip gray xs">演示</span> : null}
     </div>
   );
 }

@@ -5,12 +5,31 @@ import { dirname, join, sep } from "node:path";
 import process from "node:process";
 
 import { bundlePreload } from "./preload-bundle.mjs";
+import { startLiveUiPreview } from "./preview-live-ui.mjs";
 
 const root = process.cwd();
 const previewHost = "127.0.0.1";
 const previewPort = process.env.OMP_PREVIEW_PORT ?? "5173";
 const previewUrl = `http://${previewHost}:${previewPort}`;
+/** 生产预览的 CDP 端口：用于在重建后触发渲染层重载。 */
+const previewCdpPort = process.env.OMP_PREVIEW_CDP_PORT ?? "9333";
 const previewAumid = "com.ompstudio.desktop.preview";
+/**
+ * 生产预览（OMP_PREVIEW_MODE=production）必须复现已安装形态：改名的 exe
+ * 让 Electron 报告 app.isPackaged === true，桌面端才会走托管 Runtime 的
+ * 发现、验签与激活路径。开发预览必须保持 isPackaged === false，否则
+ * rendererDevServerUrl() 会丢掉 OMP_RENDERER_DEV_URL，Vite HMR 形同虚设。
+ */
+const production = process.env.OMP_PREVIEW_MODE === "production";
+/**
+ * 预览数据（OMP_PREVIEW_DATA=1）：渲染层收到 `?preview=1` 后强制走演示
+ * fixture，和顶栏预览开关是同一条路径（apps/renderer/src/preview/PreviewContext.tsx）。
+ * 同时带上 `marks=off`：隐藏所有「演示 / 预览」提示，把 fixture 当真实页面展示。
+ * 只在 dev server 形态下可用——生产预加载的是 file:// 构建产物，没有查询串可挂。
+ */
+const previewData = process.env.OMP_PREVIEW_DATA === "1";
+/** 渲染层入口地址；预览数据时带上强制预览与隐藏提示的查询串。 */
+const rendererEntryUrl = previewData ? `${previewUrl}/?preview=1&marks=off` : previewUrl;
 // A Homebrew or nvm Node on macOS keeps npm outside dirname(node); `npm run` names the CLI it runs.
 const npmCli = process.env.OMP_NPM_CLI
   ?? (process.platform === "win32" ? undefined : process.env.npm_execpath)
@@ -203,6 +222,11 @@ Add-Type -TypeDefinition $code -Language CSharp
 }
 
 async function stagePreviewRuntime() {
+  // 开发预览的 exe 保持 electron.exe 这个名字，app.isPackaged === false，
+  // 桌面端不会读 <previewElectronDir>/runtime，改从 AppData 的已装 Runtime
+  // 与 repo 内产物发现。因此这里无需 stage，也就不必要求已签名产物存在。
+  if (!production) return;
+
   if (!existsSync(previewRuntimePayload)) {
     throw new Error(
       "Signed Runtime payload is missing. Run `npm run pack:win:prepare`, then retry.",
@@ -266,11 +290,25 @@ async function preparePreviewElectron() {
     await rm(staleRuntimeDir, { recursive: true, force: true });
     console.log(`[preview] Removed a stale Runtime tree from the Electron distribution: ${staleRuntimeDir}`);
   }
-  await rename(join(previewElectronDir, "electron.exe"), previewElectronExe);
+
+  /**
+   * 生产预览必须改名：Electron 只看可执行文件名决定 isPackaged。改名后
+   * app.isPackaged === true，桌面端才会走托管 Runtime 的发现、验签与激活
+   * 路径，与已安装形态一致。
+   *
+   * 开发预览必须保持 electron.exe 这个名字：isPackaged === false 时
+   * rendererDevServerUrl() 才会采纳 OMP_RENDERER_DEV_URL，渲染层才会真的
+   * 走 Vite dev server，HMR / Fast Refresh 才有意义。改名会让 dev server
+   * 白起，渲染层仍读 file:// 构建产物。
+   */
+  const exePath = production ? previewElectronExe : join(previewElectronDir, "electron.exe");
+  if (production) {
+    await rename(join(previewElectronDir, "electron.exe"), previewElectronExe);
+  }
   await stagePreviewRuntime();
 
   await run(rceditExe, [
-    previewElectronExe,
+    exePath,
     "--set-icon",
     appIcon,
     "--set-version-string",
@@ -288,7 +326,7 @@ async function preparePreviewElectron() {
   ]);
 
   await registerWindowsPreviewShortcut();
-  return previewElectronExe;
+  return exePath;
 }
 
 async function main() {
@@ -297,6 +335,12 @@ async function main() {
   }
   if (!existsSync(join(root, "node_modules", "electron", "package.json"))) {
     throw new Error("Dependencies are missing. Run `npm install` once, then retry.");
+  }
+
+  if (production && previewData) {
+    throw new Error(
+      "OMP_PREVIEW_DATA=1 only applies to the Renderer dev server. Unset OMP_PREVIEW_MODE=production to open the preview with demo data.",
+    );
   }
 
   console.log("[preview] Building workspace...");
@@ -311,10 +355,12 @@ async function main() {
    * 生产模式（OMP_PREVIEW_MODE=production）：跳过 vite dev server。改名后的
    * exe 报告 app.isPackaged === true，桌面端会忽略 OMP_RENDERER_DEV_URL、
    * 直接加载刚构建的 apps/renderer/dist——dev server 从未被它使用，白占一个
-   * node 进程（内存 + 文件监听 CPU）和启动等待。保留 dev 模式默认值不变，
-   * 供需要 HMR 调试 renderer 的场景使用。
+   * node 进程（内存 + 文件监听 CPU）和启动等待。
+   *
+   * 开发模式（默认）：exe 保持 electron.exe 这个名字，app.isPackaged 为
+   * false，桌面端才会采纳 OMP_RENDERER_DEV_URL，渲染层真正走 dev server，
+   * 改 UI 源码即时热更新，无需重启。
    */
-  const production = process.env.OMP_PREVIEW_MODE === "production";
   let renderer = null;
   if (!production) {
     console.log(`[preview] Starting Renderer dev server at ${previewUrl}...`);
@@ -333,14 +379,36 @@ async function main() {
     await waitForRenderer(renderer);
   }
 
-  console.log(`[preview] Opening OMP Studio Desktop (${production ? "production bundle" : "dev server"})...`);
-  const desktop = start(electronExecutable, [join(root, "apps", "desktop")], {
+  console.log(`[preview] Opening OMP Studio Desktop (${production ? "production bundle" : previewData ? "dev server, preview data" : "dev server"})...`);
+  const desktopArgs = [join(root, "apps", "desktop")];
+  if (production) {
+    // 生产预览的实时 UI 更新靠 CDP 触发渲染层重载。
+    desktopArgs.push(`--remote-debugging-port=${previewCdpPort}`);
+  }
+  const desktop = start(electronExecutable, desktopArgs, {
     env: {
       ...process.env,
       OMP_APP_USER_MODEL_ID: previewAumid,
-      ...(production ? {} : { OMP_RENDERER_DEV_URL: previewUrl }),
+      ...(production ? {} : { OMP_RENDERER_DEV_URL: rendererEntryUrl }),
     },
   });
+
+  /**
+   * 生产预览的 UI 实时预览：改源码 → 重建 renderer → 重载渲染层。
+   *
+   * 这里启动的是打包形态（改名后的 exe，isPackaged === true），渲染层加载
+   * 的是 file:// 的构建产物，改 UI 源码本不会自动反映到窗口。生产预览刻意
+   * 保留这个形态（要复现已安装路径），所以「重建 + 重载」这一步在预览进程
+   * 侧完成，桌面端代码与 Studio Bridge 契约都不动。
+   */
+  if (production) {
+    await startLiveUiPreview({
+      rendererRoot: join(root, "apps", "renderer"),
+      devServerPort: previewCdpPort,
+      repoRoot: root,
+      npmCli,
+    });
+  }
 
   const exitCode = await new Promise((resolve, reject) => {
     desktop.once("error", reject);

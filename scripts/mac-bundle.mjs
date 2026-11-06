@@ -51,6 +51,7 @@ export function macUpdateZipFileName(version) {
  * those requests to this app.
  */
 export const MAC_USAGE_DESCRIPTIONS = Object.freeze({
+  NSCameraUsageDescription: "Websites in the Studio browser can use the camera after you grant permission.",
   NSMicrophoneUsageDescription: "OMP Studio uses the microphone for voice input and Live conversations.",
   NSLocalNetworkUsageDescription: "OMP Studio connects to development servers and tools on your local network.",
   NSAppleEventsUsageDescription: "The OMP agent can control other apps when you ask it to automate a task.",
@@ -63,6 +64,7 @@ export const MAC_USAGE_DESCRIPTIONS = Object.freeze({
 
 /** Simplified Chinese prompts (zh_CN.lproj/InfoPlist.strings); same keys as MAC_USAGE_DESCRIPTIONS. */
 export const MAC_USAGE_DESCRIPTIONS_ZH = Object.freeze({
+  NSCameraUsageDescription: "Studio 浏览器中的网站可在你授权后使用摄像头。",
   NSMicrophoneUsageDescription: "OMP Studio 使用麦克风进行语音输入和 Live 对话。",
   NSLocalNetworkUsageDescription: "OMP Studio 需要连接本地网络中的开发服务器和工具。",
   NSAppleEventsUsageDescription: "当你让 OMP 智能体自动化某项任务时，它可以控制其他应用。",

@@ -26,6 +26,22 @@ interface ExecutionTargetContextValue {
 }
 const Context = createContext<ExecutionTargetContextValue>({ id: null, name: "此计算机", inventory: { profiles: [], statuses: [] }, api: undefined, inventoryError: "", syncRevision: 0, syncError: "", refresh: async () => {}, connect: async () => {}, cancelConnection: async () => {}, select: async () => {}, openDirectory: () => {}, directoryRequest: 0, memory: new Map() });
 export function useExecutionTarget() { return useContext(Context); }
+interface TargetRegistry {
+  client(id: string | null): StudioClient;
+  readyClient(id: string | null): Promise<StudioClient>;
+  scope(id: string | null, memoryKey: string): ExecutionTargetContextValue;
+}
+const Registry = createContext<TargetRegistry | null>(null);
+export function useExecutionTargets() {
+  const value = useContext(Registry);
+  if (!value) throw new Error("ExecutionTargets is required");
+  return value;
+}
+export function ExecutionTargetScope({ id, memoryKey, onSelect, children }: { id: string | null; memoryKey: string; onSelect?: (id: string | null) => Promise<void>; children: ReactNode }) {
+  const registry = useExecutionTargets();
+  const value = registry.scope(id, memoryKey);
+  return <Context.Provider value={onSelect ? { ...value, select: onSelect } : value}>{children}</Context.Provider>;
+}
 export function useTargetMemory<T>(key: string, initial: () => T) {
   const { memory } = useExecutionTarget();
   const [value, setValue] = useState<T>(() => memory.has(key) ? memory.get(key) as T : initial());
@@ -260,9 +276,20 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
   const preparing = rawInventory.statuses.find(status => ["connecting", "awaiting-approval", "synchronizing"].includes(status.state) && connectionLock.current === status.id);
   const preparingProfile = preparing && rawInventory.profiles.find(profile => profile.id === preparing.id);
   const activeClient = id === null ? client : clientFor(id);
-  return <Context.Provider value={value}>
+  const registry: TargetRegistry = {
+    client: target => target === null ? client : clientFor(target),
+    readyClient: async target => { if (target === null) return client; await synchronize(target); return clientFor(target); },
+    scope: (target, key) => {
+      const memoryKey = `${target ?? "local"}:document:${key}`;
+      if (!memories.current.has(memoryKey)) memories.current.set(memoryKey, new Map());
+      const state = target === null ? undefined : stateFor(target);
+      return { ...value, id: target, name: target === null ? "此计算机" : inventory.profiles.find(profile => profile.id === target)?.name ?? "SSH",
+        memory: memories.current.get(memoryKey)!, syncRevision: state?.syncRevision ?? 0, syncError: state?.error ?? "" };
+    },
+  };
+  return <Registry.Provider value={registry}><Context.Provider value={value}>
     {ready ? children(activeClient, `${id ?? "local"}:${generation}`) : <div className="empty" role="status"><p>{inventoryError || "正在恢复工作位置…"}</p>{inventoryError ? <button className="btn outline" onClick={() => globalThis.location.reload()}>重新加载</button> : null}</div>}
     {passwordProfile ? <SshPasswordDialog profile={passwordProfile} onSubmit={finishPassword} onCancel={() => finishPassword(null)} /> : null}
     {preparing && preparingProfile && !passwordProfile ? <SshPreparationDialog profile={preparingProfile} status={preparing} onApprove={() => { void api?.approveDeployment(preparing.id).catch(() => {}); }} onCancel={() => { void cancelConnection(preparing.id).catch(() => {}); }} /> : null}
-  </Context.Provider>;
+  </Context.Provider></Registry.Provider>;
 }

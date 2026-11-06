@@ -13,6 +13,10 @@ function scrollBox(element: HTMLElement, metrics: Metrics): ScrollState {
   return state;
 }
 
+function enableRailMoves(slot: HTMLElement): void {
+  Object.defineProperty(slot, "moveBefore", { configurable: true, value: (node: Node, before: Node | null) => slot.insertBefore(node, before) });
+}
+
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); document.body.innerHTML = ""; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -56,7 +60,188 @@ function wheel(target: EventTarget, init: WheelEventInit = {}) {
   return event;
 }
 
+describe("floating body corners", () => {
+  it("follows the floating and maximized state of the window that owns its slot", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 50, 300, 200));
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([new DOMRect(100, 50, 300, 200)] as unknown as DOMRectList);
+    const { hosts, host, slot } = fixture();
+    const floating = document.createElement("section");
+    floating.dataset.dockFloat = "test-float";
+    floating.append(slot);
+    document.body.append(floating);
+    hosts.flush();
+    expect(host.element.dataset.dockRegion).toBe("float");
+    expect(host.element.hasAttribute("data-dock-maximized")).toBe(false);
+    floating.classList.add("is-maximized"); hosts.flush();
+    expect(host.element.hasAttribute("data-dock-maximized")).toBe(true);
+    floating.classList.remove("is-maximized"); hosts.flush();
+    expect(host.element.hasAttribute("data-dock-maximized")).toBe(false);
+  });
+
+  it("matches rail card corners while preserving scroll clipping and clears them after moving", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.matches(".dock-card, .dock-rail-overlay")) return new DOMRect(100, 0, 300, 257);
+      if (this.dataset.dockSlot === "files") return new DOMRect(100, 50, 300, 200);
+      if (this.classList.contains("dock-card-list")) return new DOMRect(0, 0, 500, 120);
+      return new DOMRect(0, 0, 2000, 2000);
+    });
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([new DOMRect(100, 50, 300, 200)] as unknown as DOMRectList);
+    const { hosts, host, slot, list } = fixture();
+    list.dataset.dockCards = "rail";
+    const card = slot.closest<HTMLElement>(".dock-card")!;
+    card.parentElement!.parentElement!.classList.add("dock-card-region-rail");
+    card.style.border = "1px solid black"; card.style.borderBottomLeftRadius = card.style.borderBottomRightRadius = "16px";
+    hosts.flush();
+    // The viewport currently cuts off the rounded part of the card entirely.
+    expect(host.element.getAttribute("style")).toContain("clip-path:inset(0px 0px 130px 0px)");
+    list.style.overflowY = "visible";
+    hosts.flush();
+    expect(host.element.style.clipPath).toContain("polygon(");
+    expect(host.element.style.clipPath).toContain("297px 200px, 3px 200px");
+
+    const overlay = document.createElement("section");
+    overlay.className = "dock-rail-overlay"; overlay.dataset.dockCards = "rail";
+    overlay.style.border = "1px solid black"; overlay.style.borderBottomLeftRadius = overlay.style.borderBottomRightRadius = "16px";
+    overlay.append(slot); document.body.append(overlay);
+    vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 0, 300, 251));
+    hosts.flush();
+    expect(host.element.style.clipPath).toContain("polygon(");
+    expect(host.element.style.clipPath).toContain("285px 200px, 15px 200px");
+
+    document.querySelector(".adaptive-workbench")!.append(slot);
+    hosts.flush();
+    expect(host.element.style.clipPath).toContain("inset(");
+  });
+});
+
 describe("dock wheel handoff", () => {
+  it("keeps a fixed host when the browser cannot move live content without resetting it", () => {
+    const { hosts, host, layer, slot, list, pane, body, column, release } = fixture();
+    release();
+    list.dataset.dockCards = "rail";
+    list.parentElement!.className = "dock-card-region dock-card-region-rail";
+    Object.defineProperty(slot, "moveBefore", { configurable: true, value: undefined });
+    const releaseRail = hosts.slot("files", slot);
+    cleanups.push(releaseRail);
+    expect(host.element.parentElement).toBe(layer);
+    body.scrollTop = 700;
+    expect(wheel(pane).defaultPrevented).toBe(true);
+    expect(column.scrollTop).toBe(100);
+  });
+
+  it("lets an expanded rail card and its list use the same native scroll chain", () => {
+    const { hosts, host, slot, list, pane, body, release } = fixture();
+    release();
+    list.dataset.dockCards = "rail";
+    list.parentElement!.className = "dock-card-region dock-card-region-rail";
+    enableRailMoves(slot);
+    const releaseRail = hosts.slot("files", slot);
+    cleanups.push(releaseRail);
+    expect(host.element.parentElement).toBe(slot);
+    expect(host.element.hasAttribute("data-dock-embedded")).toBe(true);
+    body.scrollTop = 700;
+    // The browser, rather than the fixed-layer wheel handler, owns this event.
+    expect(wheel(pane).defaultPrevented).toBe(false);
+  });
+
+  it("keeps nested wheel steps moving the rail after the inner scrollport reaches its edge", () => {
+    const { hosts, host, slot, list, pane, body, column, release } = fixture();
+    release();
+    list.dataset.dockCards = "rail";
+    list.parentElement!.className = "dock-card-region dock-card-region-rail";
+    enableRailMoves(slot);
+    const releaseRail = hosts.slot("files", slot);
+    const detachWheel = hosts.attachRailScroll(list);
+    cleanups.push(releaseRail, detachWheel);
+    const inner = document.createElement("div");
+    inner.style.overflowY = "auto";
+    inner.append(pane);
+    host.element.append(inner);
+    const nested = scrollBox(inner, { clientHeight: 100, scrollHeight: 500 });
+    body.scrollTop = 700;
+    expect(wheel(pane).defaultPrevented).toBe(false);
+    expect(column.scrollTop).toBe(0);
+    nested.scrollTop = 400;
+    expect(wheel(pane).defaultPrevented).toBe(true);
+    expect(wheel(pane).defaultPrevented).toBe(true);
+    expect(column.scrollTop).toBe(200);
+    expect(wheel(pane, { ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(wheel(pane, { shiftKey: true }).defaultPrevented).toBe(false);
+    expect(wheel(pane, { deltaX: 120, deltaY: 20 }).defaultPrevented).toBe(false);
+    inner.style.overscrollBehaviorY = "contain";
+    expect(wheel(pane).defaultPrevented).toBe(false);
+  });
+
+  it("preserves fractional trackpad movement when scroll offsets round to pixels", () => {
+    const { hosts, host, slot, list, pane, body, column, release } = fixture();
+    release();
+    list.dataset.dockCards = "rail";
+    list.parentElement!.className = "dock-card-region dock-card-region-rail";
+    enableRailMoves(slot);
+    const releaseRail = hosts.slot("files", slot);
+    const detachWheel = hosts.attachRailScroll(list);
+    cleanups.push(releaseRail, detachWheel);
+    Object.defineProperty(list, "scrollTop", { configurable: true, get: () => column.scrollTop, set: (value: number) => { column.scrollTop = Math.round(value); } });
+    const inner = document.createElement("div");
+    inner.style.overflowY = "auto";
+    inner.append(pane);
+    host.element.append(inner);
+    const nested = scrollBox(inner, { clientHeight: 100, scrollHeight: 500 });
+    nested.scrollTop = 400;
+    body.scrollTop = 700;
+    for (let i = 0; i < 4; i++) wheel(pane, { deltaY: 0.25 });
+    expect(column.scrollTop).toBe(1);
+  });
+
+  it("keeps the same rail body when borrowing it for a drag preview", () => {
+    const { hosts, host, layer, slot, list, pane, body, release } = fixture();
+    release();
+    list.dataset.dockCards = "rail";
+    list.parentElement!.className = "dock-card-region dock-card-region-rail";
+    enableRailMoves(slot);
+    const releaseRail = hosts.slot("files", slot);
+    cleanups.push(releaseRail);
+    body.scrollTop = 37;
+    const preview = document.createElement("div");
+    document.body.append(preview);
+    const releasePreview = hosts.previewSlot("files", preview);
+    expect(host.element.parentElement).toBe(layer);
+    expect(host.element.hasAttribute("data-dock-embedded")).toBe(false);
+    releasePreview();
+    expect(host.element.parentElement).toBe(slot);
+    expect(host.element.contains(pane)).toBe(true);
+    expect(body.scrollTop).toBe(37);
+    releaseRail();
+    expect(host.element.parentElement).toBe(layer);
+  });
+
+  it("restores the body and inner scroll positions after a rail card is reopened", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 300, 300));
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([new DOMRect(0, 0, 300, 300)] as unknown as DOMRectList);
+    const { hosts, host, slot, list, body, release } = fixture();
+    release();
+    list.dataset.dockCards = "rail";
+    list.parentElement!.className = "dock-card-region dock-card-region-rail";
+    enableRailMoves(slot);
+    const inner = document.createElement("div");
+    host.element.append(inner);
+    const nested = scrollBox(inner, { clientHeight: 100, scrollHeight: 500 });
+    const releaseRail = hosts.slot("files", slot);
+    hosts.flush();
+    body.scrollTop = 37;
+    nested.scrollTop = 54;
+    releaseRail();
+    hosts.flush();
+    // Browsers may clear offsets while moving a hidden scroll container.
+    body.scrollTop = 0;
+    nested.scrollTop = 0;
+    const reopen = hosts.slot("files", slot);
+    cleanups.push(reopen);
+    hosts.flush();
+    expect(body.scrollTop).toBe(37);
+    expect(nested.scrollTop).toBe(54);
+  });
+
   it("leaves the event to native scrolling while the body still has room", () => {
     const { pane, column, body } = fixture();
     const event = wheel(pane);
@@ -225,6 +410,20 @@ describe("dock geometry observation", () => {
     hosts.schedule();
     flush();
     expect(host.element.getAttribute("style")).toBe("sentinel");
+  });
+
+  it("does not let an old toolbar cleanup release a newer preview owner", () => {
+    const hosts = new PanelHosts();
+    const host = hosts.get("files");
+    const toolbar = document.createElement("span");
+    const release = hosts.toolbar("files", toolbar);
+    const old = hosts.previewToolbar("files", null);
+    const current = hosts.previewToolbar("files", null);
+    old();
+    expect(host.toolbarSnapshot()).toBeNull();
+    current();
+    expect(host.toolbarSnapshot()).toBe(toolbar);
+    release();
   });
 
   it("ignores panel-body mutations but still measures dock geometry changes", async () => {

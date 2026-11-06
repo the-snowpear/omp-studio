@@ -1,3 +1,5 @@
+import type { GitHubTarget, GitHubRepositories, QueryInput } from "@omp-studio/client-contract";
+import { GithubReads } from "./github-reads.js";
 import type {
   ClientError,
   CommandRequestId,
@@ -34,6 +36,8 @@ interface GithubRepository {
   readonly host: string;
   readonly ownerRepo: string;
   readonly commonDir: string;
+  readonly remote: string;
+  readonly url: string;
 }
 
 function clientError(code: ClientError["code"], message: string): ClientError { return { code, message }; }
@@ -102,6 +106,35 @@ function checkRecord(value: unknown): GitHubCheckRecord {
 export class DesktopGithubService implements HostGitHubService {
   readonly #runner: HostProcessRunner;
   readonly #queue: GitWriteQueue;
+  readonly #reads = new GithubReads(
+    input => this.#repository(input.workspaceId, input.remote),
+    async <T>(repo: { host: string; cwd: string }, args: readonly string[]): Promise<T> => {
+      const result = await this.#run(["api", "--hostname", repo.host, ...args], { cwd: repo.cwd });
+      const value = JSON.parse(result.stdout);
+      if (value.errors?.length) throw clientError("INTERNAL_ERROR", value.errors.map((error: { message: string }) => error.message).join("; "));
+      return value as T;
+    },
+    async input => (await this.checks(input)).checks,
+  );
+  items(input: QueryInput<"github.items.list">) { return this.#reads.items(input); }
+  item(input: QueryInput<"github.items.get">) { return this.#reads.item(input); }
+  discussion(input: QueryInput<"github.discussion.list">) { return this.#reads.discussion(input); }
+  files(input: QueryInput<"github.pr.files">) { return this.#reads.files(input); }
+  fileDiff(input: QueryInput<"github.pr.diff">) { return this.#reads.fileDiff(input); }
+  async repositories(input: GitHubTarget): Promise<GitHubRepositories> {
+    const workspace = this.options.registry.get(input.workspaceId);
+    if (!workspace) throw clientError("INVALID_ARGUMENT", "Unknown workspace id");
+    const names = await this.#runner.run({ command: "git", args: ["remote"], cwd: workspace.canonicalPath, readOnly: true, timeoutMs: 15_000 });
+    const repositories = [];
+    for (const remote of names.stdout.trim().split(/\r?\n/u).filter(Boolean)) {
+      const result = await this.#runner.run({ command: "git", args: ["remote", "get-url", "--", remote], cwd: workspace.canonicalPath, readOnly: true, timeoutMs: 15_000 });
+      const parsed = parseRemote(result.stdout);
+      if (parsed && (parsed.host === "github.com" || parsed.host.includes("github") || parsed.host.endsWith(".ghe.com"))) {
+        repositories.push({ ...parsed, remote, url: `https://${parsed.host}/${parsed.ownerRepo}` });
+      }
+    }
+    return { workspaceId: input.workspaceId, repositories };
+  }
   constructor(readonly options: GithubServiceOptions) { this.#runner = options.runner ?? new HostProcessRunner(); this.#queue = options.queue ?? new GitWriteQueue(); }
   onProgress(listener: (progress: OperationProgress) => void): () => void {
     return this.#runner.onProgress((progress) => { if (progress.domain === "github") listener(progress); });
@@ -114,14 +147,14 @@ export class DesktopGithubService implements HostGitHubService {
     } catch (error) { throw safeMessage(error, options.cwd); }
   }
 
-  async #repository(workspaceId: WorkspaceId): Promise<GithubRepository> {
+  async #repository(workspaceId: WorkspaceId, remoteName = "origin"): Promise<GithubRepository> {
     const workspace = this.options.registry.get(workspaceId);
     if (workspace === undefined) throw clientError("INVALID_ARGUMENT", "Unknown workspace id");
     let remote: string;
     let commonDir: string;
     try {
       const [remoteResult, commonResult] = await Promise.all([
-        this.#runner.run({ command: "git", args: ["remote", "get-url", "origin"], cwd: workspace.canonicalPath, timeoutMs: 15_000, readOnly: true }),
+        this.#runner.run({ command: "git", args: ["remote", "get-url", "--", remoteName], cwd: workspace.canonicalPath, timeoutMs: 15_000, readOnly: true }),
         this.#runner.run({ command: "git", args: ["rev-parse", "--git-common-dir"], cwd: workspace.canonicalPath, timeoutMs: 15_000, readOnly: true }),
       ]);
       remote = remoteResult.stdout;
@@ -131,15 +164,15 @@ export class DesktopGithubService implements HostGitHubService {
     } catch (error) { throw safeMessage(error, workspace.canonicalPath); }
     const parsed = parseRemote(remote);
     if (parsed === undefined || (!parsed.host.endsWith("github.com") && !parsed.host.includes("github"))) {
-      throw clientError("CAPABILITY_UNAVAILABLE", "The origin remote is not a GitHub repository");
+      throw clientError("CAPABILITY_UNAVAILABLE", "The selected remote is not a GitHub repository");
     }
-    return { cwd: workspace.canonicalPath, host: parsed.host, ownerRepo: parsed.ownerRepo, commonDir };
+    return { cwd: workspace.canonicalPath, host: parsed.host, ownerRepo: parsed.ownerRepo, commonDir, remote: remoteName, url: `https://${parsed.host}/${parsed.ownerRepo}` };
   }
 
-  async auth(input: { readonly workspaceId?: WorkspaceId }): Promise<GitHubAuthReadModel> {
+  async auth(input: QueryInput<"github.auth.get">): Promise<GitHubAuthReadModel> {
     let host = "github.com";
     if (input.workspaceId !== undefined) {
-      try { host = (await this.#repository(input.workspaceId)).host; } catch { /* use github.com */ }
+      try { host = (await this.#repository(input.workspaceId, input.remote)).host; } catch { /* use github.com */ }
     }
     try {
       const result = await this.#run(["auth", "status", "--hostname", host, "--json", "hosts"], { allowedExitCodes: [1] });
@@ -161,26 +194,25 @@ export class DesktopGithubService implements HostGitHubService {
     }
   }
 
-  async pullRequests(input: { readonly workspaceId: WorkspaceId; readonly state?: "open" | "closed" | "merged" | "all" }): Promise<GitHubPullRequestListReadModel> {
-    const repo = await this.#repository(input.workspaceId);
-    const state = input.state === undefined || input.state === "all" ? "all" : input.state;
-    const result = await this.#run(["pr", "list", "--repo", `${repo.host}/${repo.ownerRepo}`, "--state", state, "--limit", "100", "--json", PR_FIELDS], { cwd: repo.cwd });
-    const rows = JSON.parse(result.stdout) as unknown;
-    if (!Array.isArray(rows)) throw clientError("INTERNAL_ERROR", "GitHub CLI returned an invalid PR list");
-    return { workspaceId: input.workspaceId, pullRequests: rows.map(pullRequest) };
+  async pullRequests(input: QueryInput<"github.pr.list">): Promise<GitHubPullRequestListReadModel> {
+    const result = await this.items({ ...input, kind: "pr" });
+    return { workspaceId: input.workspaceId, totalCount: result.totalCount,
+      ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+      pullRequests: result.items.map(row => ({ ...row, draft: row.draft ?? false, headBranch: row.headBranch ?? "", baseBranch: row.baseBranch ?? "" })) };
   }
 
-  async pullRequest(input: { readonly workspaceId: WorkspaceId; readonly number: number }): Promise<GitHubPullRequestDetailReadModel> {
-    const repo = await this.#repository(input.workspaceId);
+  async pullRequest(input: QueryInput<"github.pr.get">): Promise<GitHubPullRequestDetailReadModel> {
+    const repo = await this.#repository(input.workspaceId, input.remote);
     const result = await this.#run(["pr", "view", String(input.number), "--repo", `${repo.host}/${repo.ownerRepo}`, "--json", PR_FIELDS], { cwd: repo.cwd });
     const checks = await this.checks(input);
     return { workspaceId: input.workspaceId, pullRequest: pullRequest(JSON.parse(result.stdout)), checks: checks.checks };
   }
 
-  async checks(input: { readonly workspaceId: WorkspaceId; readonly number: number }): Promise<GitHubChecksReadModel> {
-    const repo = await this.#repository(input.workspaceId);
-    const result = await this.#run(["pr", "checks", String(input.number), "--repo", `${repo.host}/${repo.ownerRepo}`, "--json", "bucket,name,state,link,workflow"], { cwd: repo.cwd, allowedExitCodes: [8] });
-    const rows = JSON.parse(result.stdout) as unknown;
+  async checks(input: QueryInput<"github.pr.checks">): Promise<GitHubChecksReadModel> {
+    const repo = await this.#repository(input.workspaceId, input.remote);
+    const result = await this.#run(["pr", "checks", String(input.number), "--repo", `${repo.host}/${repo.ownerRepo}`, "--json", "bucket,name,state,link,workflow"], { cwd: repo.cwd, allowedExitCodes: [8, 1] });
+    if (result.exitCode === 1 && !result.stdout.trim() && !/no checks reported/iu.test(result.stderr)) throw clientError("INTERNAL_ERROR", result.stderr || "Unable to read PR checks");
+    const rows = result.stdout.trim() ? JSON.parse(result.stdout) as unknown : [];
     const checks = Array.isArray(rows) ? rows.map(checkRecord) : [];
     const overall = checks.some((item) => item.bucket === "fail") ? "fail" : checks.some((item) => item.bucket === "pending") ? "pending" : checks.length > 0 && checks.every((item) => item.bucket === "pass" || item.bucket === "skipping") ? "pass" : "neutral";
     return { workspaceId: input.workspaceId, pullRequestNumber: input.number, checks, overall };
@@ -204,7 +236,7 @@ export class DesktopGithubService implements HostGitHubService {
         return { operation: operation.kind, message: "GitHub account signed out" };
       }
       if (input.workspaceId === undefined) throw clientError("INVALID_ARGUMENT", "workspaceId is required for PR operations");
-      const repo = await this.#repository(input.workspaceId);
+      const repo = await this.#repository(input.workspaceId, input.remote);
       const repoArg = `${repo.host}/${repo.ownerRepo}`;
       let args: string[];
       let stdin: string | undefined;
@@ -233,7 +265,7 @@ export class DesktopGithubService implements HostGitHubService {
           if (match) number = Number(match[1]);
         }
         this.#runner.assertNotCancelled(requestId);
-        const detail = number === undefined ? undefined : await this.pullRequest({ workspaceId: input.workspaceId!, number });
+        const detail = number === undefined ? undefined : await this.pullRequest({ workspaceId: input.workspaceId!, ...(input.remote ? { remote: input.remote } : {}), number });
         return { operation: operation.kind, message: `${operation.kind} completed`, ...(detail === undefined ? {} : { pullRequest: detail.pullRequest, url: detail.pullRequest.url }) };
       });
     } finally {

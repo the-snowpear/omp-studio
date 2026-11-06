@@ -1,22 +1,111 @@
-# 浏览器侧栏实时观看接入计划
+# 浏览器侧栏接入：计划与实际实现
 
-日期：2026-09-23。状态：方案已整理，尚未实施或完成浏览器兼容性实测。
+立项：2026-09-23。2026-11-04 升级为原生托管浏览器，**实现与 Windows 自动验收已完成**；完整扩展检查的遗留项及人工验收边界见 §0.6。
 
-目标是在 OMP Studio 右侧直接观看 agent 正在操作的同一浏览器标签页，保留 Runtime 现有浏览器工具、执行方式与资源生命周期。实现依据 OMP 自身源码及 Chromium 协议，独立编写，不复制、移植或改写 zcode 源代码。
+本轮目标是应用内的开发与 Agent 协作浏览器：人与 Agent 操作同一张真实网页，每个聊天保存自己的标签，网页由 Desktop 持有。原来的实时画面观察适配器保留给兼容环境。**§0 记录本轮方案与交付；§1–§10 完整保留上一版的历史依据，其中的观察租约、帧预算及排除项不约束本轮原生托管方案。**
+
+实现依据 OMP 自身源码、Electron 原生视图和 Chromium 协议独立编写，不复制、移植或改写 ZCode 源代码。
+
+## 0. 实际实现（as-built）
+
+### 0.1 已确认的产品决定
+
+| 项目 | 上一版观察方案 | 本轮托管方案 |
+|---|---|---|
+| 网页与交互 | Runtime 网页的截图与输入转发 | Desktop 的 `WebContentsView`；原生文字选择、输入、右键、上传和页面交互 |
+| 标签范围 | 查看 Runtime 已创建标签 | 每聊天多标签，人工和 Agent 共用；默认上限 16，可在浏览器选项中调整 |
+| 控制权 | 单标签短时租约 | 每聊天 `agent / waiting / human`；先阻止新操作，再等待在途操作结束 |
+| 子 Agent | 查询可证明的父子标签归属 | registry 父子链上的普通与工作树隔离子任务使用父聊天的连接、标签命名和接管限制 |
+| Runtime 退出 | 资源随 Runtime 清理 | Worker 借用页面，Runtime 退出保留网页、登录、表单和 JS 状态；显式关闭才关闭标签 |
+| 应用重启 | 没有页面恢复 | 保存标签顺序、URL、选中标签和缩放；查看聊天时恢复当前标签，其他标签按需加载 |
+| 登录空间 | Runtime 浏览器配置 | 默认共享持久空间，可新建隔离空间；权限与登录均按空间保存 |
+| DevTools | 不提供 | 自动人工接管并解除 Agent 调试连接；关闭后仍需显式归还 |
+| 引用 | 未实现 | 选元素 → 截图与备注 → Composer 引用及图片附件；可编辑备注、恢复和复制粘贴 |
+| 链接 | 系统浏览器 | 消息与终端中的网页链接进入聊天浏览器；上下文菜单可选系统浏览器，其他外部链接沿用系统浏览器 |
+
+控制权只阻止该聊天的浏览器操作，其他 Agent 工作继续。面板隐藏、停靠和独立浮窗移动都不关闭网页。崩溃保留标签及原因，由用户重载。下载完成后通知，默认保存到系统下载目录，也可修改目录或每次询问。
+
+### 0.2 架构与私有连接
+
+Desktop 永久持有页面及其 Chromium Session。Renderer 只发送固定类型的状态、操作及原生视图位置，通过 `ManagedBrowserApi` 管理标签、控制权、选区和下载；Renderer 不连接 CDP、不导入 Node / Electron。
+
+每个本地 Runtime 启动带随机令牌的 loopback relay，在私有媒体目录写入 session / generation 描述文件。Desktop 选择最新仍存活的代次，连接 relay，并把同一份 `webContents.debugger` 的 CDP 操作转发给 Runtime 的既有 Puppeteer worker。Runtime 的浏览器工具优先使用此托管后端；清理 worker 时不拥有、更不销毁 Desktop 页面。显式 `browser.close` 仍关闭所选托管标签。
+
+页面实例不依赖 Renderer 宿主：隐藏时停放在不可见原生窗口，跨窗口时迁移同一个视图。菜单或弹窗覆盖网页区域时临时隐藏原生视图，结束后重新呈现。Agent 控制时用原生遮挡层阻止人工输入，Agent 的 CDP 输入继续走同一网页。
+
+Bridge 的 `browser.managed.prepare` 只暴露准备能力与描述文件身份，认证令牌和 CDP 端点不进入 Renderer、对话文本或持久标签记录。元素截图仅在用户「加入输入框」时成为图片附件。
+
+### 0.3 数据、权限与恢复
+
+- 本机 `browser/browser.json` 保存标签元数据、空间、控制权、设置和已记住权限；Cookies 与站点存储由对应持久 Chromium partition 保存。
+- 普通 Runtime 重启保持活页面；新 Runtime 使用自己的认证代次重新连接现有标签，旧代次退出不会注销新的浏览器服务。
+- 完整应用重启或「释放此对话的页面」会丢失未保存表单、JS 内存与页面导航历史，但保留标签记录和登录空间。
+- 接管中的 Runtime 重连恢复人工控制；中断的 `waiting` 恢复为人工控制，等待显式归还。
+- 网站权限弹出原生询问，可选择仅本次允许或在该空间按来源记住；麦克风与摄像头分别记忆，记忆可撤销。macOS 仍受系统 TCC 控制。
+- 同源 iframe 可选内部元素，开放 Shadow DOM 保留宿主路径；跨域 iframe 及关闭的 Shadow DOM 以外层元素区域为引用边界。
+- 页面导航更新文档身份并结束选择模式；旧引用保留采集时的内容和截图，页面改变后显示提示，不自动改写引用。
+
+### 0.4 代码落点
+
+| 层 | 文件 |
+|---|---|
+| Renderer | `apps/renderer/src/browser/{BrowserPane,ManagedBrowserPane}.tsx`、`useBrowserPresentation.ts`、`managedBrowser.css`、`browserLinks.tsx`、`terminalBrowserLinks.ts` |
+| 预览 | `apps/renderer/src/preview/managedBrowserPreview.ts`；预览只改本地状态，不调用 Host 或托管 API |
+| 引用 | `apps/renderer/src/composer/browserReference.ts`、`types.ts`、`serialize.ts`、`ingest.ts`、`ChipComposer.tsx`；`App.tsx` 添加独立图片附件 |
+| 协议 | `packages/studio-protocol/src/contracts/managed-browser.ts`；固定 Desktop preload API 在 `chrome-api.ts` |
+| Runtime overlay | `omp-patch/overlay/.../studio/services/managed-browser-service.ts`、`workbench-service.ts`、`workbench-protocol.ts` |
+| Runtime 接缝 | vendor `tools/browser.ts`、`tools/browser/{registry,tab-supervisor,tab-protocol,tab-worker,downloads}.ts`、`tools/browser/relay/{kind,protocol,server,bridge}.ts`；由 regen 回收 |
+| Desktop | `apps/desktop/src/managed-browser{,-store,-relay,-ipc,-shared,-picker,-address}.ts`；`main.ts` 与 `floating-windows.ts` 管理窗口卸载 |
+| 验收 | `scripts/browser-native-smoke.cjs`、`scripts/browser-managed-runtime.ts`；Desktop store / address、Composer 引用测试及 `browser-harness.html` |
+| macOS | `packaging/mac/entitlements.mac{,.inherit}.plist`、`scripts/mac-bundle.mjs` 的摄像头用途声明 |
+
+### 0.5 本轮验收
+
+验收覆盖 Windows 的真实 Electron 页面、OMP `browser` worker 和认证 relay；测试使用本地网页，不调用付费模型。证据输出到 `outputs/browser-native-smoke/win32.json` 和 `.png`，不作为源码提交。
+
+已实测的核心路径包括：原生页面和 CDP 同页读写、停靠 / 浮窗迁移后的同一 `webContents` 与 JS / 表单 / 历史、隐藏页面截图、人工接管和归还、DevTools、元素截图、同源 iframe / 开放 Shadow DOM、跨域 frame 区域、Esc 和导航终止选择、popup / opener、关闭其他标签、原生与 Runtime 下载、registry 子任务共享与 Runtime 代次重绑、权限来源 / 空间隔离与撤销、崩溃重载，以及完整退出后在新 Electron 进程中按需恢复标签与登录。
+
+| 验证 | 最终结果 |
+|---|---|
+| `npm run check -- --production` | 通过：架构、选择器、全部类型、核心测试、preload、Renderer 与远端 Host 生产构建 |
+| `node scripts/check.mjs --only renderer --all` | 渲染层全量通过；输入框性能与终端链接回归也通过 |
+| Desktop preload、浏览器 store / address 专项 | 29/29 通过 |
+| `node scripts/check.mjs --only desktop --all` | 738 通过、7 跳过；1 个现有工作区断言失败，见 §0.6 |
+| Runtime coding-agent 类型与 `studio-managed-browser.test.ts` | 类型通过，2/2 通过 |
+| `node scripts/browser-native-smoke.cjs` | Windows / Electron 43.4.0，14 个实测场景通过；包含两个独立 Electron 进程的完整重启恢复 |
+| Playwright 验收入口 | 窄屏深 / 浅色、选择 → 备注 → Composer 胶囊 → 编辑并保存备注通过；截图在 `output/playwright/` |
+| `npm run test:tooling` | 106/106 通过；最终产物模块另验 19/19 通过 |
+| `npm run omp:build:host -- --skip-build` | 原生构建、编译、smoke、身份探测和签名产物生成通过；身份为 `18.13.2-studio.38`，能力哈希与打包定义一致 |
+| 实际签名 Runtime 产物 | 清单、校验和与签名已生成；实际签名和入口 / 清单校验和验证通过 |
+| overlay / 接缝重放 | 临时干净 checkout 成功应用 240 个 overlay 文件和 4 组接缝；核验后的 checkout 恢复干净 |
+
+Windows Runtime 产物位于 `packages/runtime-installer/dist/artifacts/win32-x64/18.13.2-studio.38/`，包含 `omp.exe`、`runtime-manifest.json`、`checksums.json` 和 `runtime-signature.json`。构建产物和验收截图不进入源码提交。
+
+本轮收尾额外修复了：重叠描述文件反复换连接、旧 Runtime 退出注销新服务、弹窗丢弃 Electron 提供的页面实例、旧浏览器空间监听器取消后续下载、权限查询与请求的来源 / 空间查找不一致、崩溃后向已销毁 frame 注入停止脚本，以及输入时无关 DOM 变动触发停靠布局测量。打包清单同时补齐浏览器能力，并与实际 Runtime 的能力序列对齐。
+
+### 0.6 明确的验收边界
+
+完整 Desktop 扩展测试仍有工作区旧断言失败：`apps/desktop/test/workspace-service.test.ts` 要求公开工作区 JSON 不含绝对路径，而现有 `WorkspaceRecord.root` 已用于展示地址。这是本轮浏览器之外的契约冲突。
+
+`npm run omp:verify:patches -- --source <临时 checkout>` 的补丁应用与清理均成功，但完整 Runtime 检查在三个既有文件的格式门禁处停止：`studio/services/context-view-service.ts`、`evaluation-ratchet-runner.ts`、`evaluation-workspace-service.ts`。其后的 Runtime 全量测试未执行；本轮浏览器文件格式、coding-agent 类型与专项测试通过。
+
+本机为 Windows；macOS 真实 GUI、签名应用的 TCC 询问、物理中文输入法候选窗、系统文件拖放、鼠标命中原生遮挡层和跨屏混合 DPI 仍需对应环境人工验收。自动测试的 CDP 中文输入不等同于物理输入法验收。
+
+Web UI、SSH 和外接浏览器继续使用现有能力与诚实空态，本轮原生托管面只适用于本地 Desktop。录屏 / 回放与跨域 frame 内部选择不列入本轮完成条件。
 
 ## 1. 已确认的范围
 
 | 项目 | 已确认决定 |
 |---|---|
 | 接入方式 | 显示 Runtime 现有浏览器的实时画面，不另建一份网页 |
-| 第一版交互 | 仅观看；允许选择观看哪个标签页、显示状态、展开和收起 |
-| 侧栏入口 | 用“浏览器”替换现有 Preview 标签 |
+| 第一版交互 | 原计划仅观看；实际已加入人工接管与键鼠输入，见 §0 |
+| 侧栏入口 | 用“浏览器”替换现有 Preview 标签（实际做成独立 dock 面板，旧 `preview` 入口重定向到它） |
 | Runtime | 保留 browser 工具及 browser.open / tab.run 等原有调用方式，避免重做后端 |
 | 后续能力 | 为元素选择、备注和上下文附件留边界，本次不实现 |
 | 执行方式 | 单人顺序实施，不使用子代理 |
 | 代码来源 | 不复用 zcode 代码；也不以改名或改写方式规避其许可 |
 
-本版不提供地址栏导航、刷新网页、后退、点击、输入、滚轮转发、登录接管、选中文字、关闭真实标签页、录屏或浏览器历史回放。“重新连接画面”只重连观察连接，不刷新网页、不恢复会话、不重新启动 Runtime。
+立项时的排除项中，**地址导航、点击、滚轮和键盘输入已在实现中放开，但只在人工接管租约内可用**。仍然不提供：刷新、后退/前进、历史、关闭标签页、选中文字、录屏或回放。“重新连接画面”只重连观察连接，不刷新网页、不恢复会话、不重新启动 Runtime。
 
 全局“预览模式”开关保持原义：开启时使用带“演示”标记的本地 fixture，关闭时只显示真实浏览器数据或诚实空态。被替换的是侧栏 Preview 标签，不是全局预览模式。
 
@@ -126,7 +215,9 @@ changed 只含作用域、目录 revision 和有限生命周期信息，不含�
 
 Main 只使用已认证 Runtime 返回且经过后端策略验证的 CDP 地址。首版仅允许自有 Chromium 的 loopback ws 端点，校验协议、主机和端口；拒绝 Renderer 传入的地址、端口、CDP 方法、脚本或任意 targetId。共享 daemon 的端点即便相同，也只允许附加到本次目录授权的目标。
 
-固定 CDP 集合围绕 target attach/detach、目标信息、Page enable/disable、帧起停/确认、必要的只读布局查询展开。禁止导航、reload、输入派发、执行脚本、setDeviceMetricsOverride、bringToFront、activateTarget、setWebLifecycleState、Browser.close、Target.closeTarget。首版也不注入“只读”的 DOM 选择脚本。
+固定 CDP 集合围绕 target 附加、目标信息、Page enable、帧起停/确认、布局查询展开。**实现中另开了导航与输入派发，但只在人工接管租约成立后可用**（`take` 之后、`release` 之前），且每个输入都带帧序号，帧过期或视口变化即拒绝。
+
+仍然禁止：`Runtime.evaluate`（不注入任何 DOM 选择脚本）、`Target.closeTarget`、`Browser.close`、`bringToFront` / `activateTarget`、`setDeviceMetricsOverride`、`setWebLifecycleState`、reload。
 
 只对当前正在观看的一个 target 建立图像连接，不为所有 resident、所有标签长期维持 CDP 或捕获。目录监听只消费低频元数据。
 
@@ -190,9 +281,11 @@ observe 绑定当前受信窗口和请求中的 workspace/session 作用域，�
 
 ### 6.2 观看交互
 
-顶部为可滚动的标签列表和只读标题/地址，主体是按比例适配的实时画面，底部提供状态与必要的重连观察入口。用户选标签只是切换“看哪个页面”，不激活 Chromium 页、不改变 agent 后续 tab.run 的目标。
+**实际实现**：顶部是一个标签下拉（显示 `kind · title`）和「观察」按钮；点「观察」后出现地址栏、状态行和实时画面。地址栏在未接管时只读，接管后解锁并可回车导航。状态行显示「观察模式」「你正在控制」「等待当前动作结束」「其他窗口正在控制」，以及「· 页面已暂停」。底部是「人工接管 / 归还控制」和「停止观察」。
 
-自动展示按以下规则实施：
+选标签只切换“看哪个页面”，不激活 Chromium 页、不改变 agent 后续 `tab.run` 的目标。接管会占住这个标签：agent 侧调用被拒绝，另一个 Studio 窗口同时接管会被拒。
+
+以下自动展示规则**未实现**，保留为后续设计：
 
 - 当前查看会话首次出现可观看标签时，自动打开“浏览器”。后台会话的变化不能切换当前会话或抢侧栏。
 - 用户本次会话手动关闭浏览器侧栏或切到其他标签后，后续浏览器活动只更新轻量提示，不反复抢回。手动重新打开可恢复观看。
@@ -245,7 +338,7 @@ CDP 帧元数据含 DIP 尺寸、pageScaleFactor、CSS 滚动偏移等，它们�
 
 ## 8. 顺序实施清单
 
-所有路径是计划落点，未存在的文件在此阶段才创建。文件拆分可按最终类型大小调整，职责与验收不可省略。
+下面是立项时的分阶段落点，保留作为实施顺序的记录；B1–B5 已落地并合入主分支，实际文件位置见 §0.4。B0 的技术验证结论已体现在 §0.3 的参数取舍上。
 
 | 阶段 | 主要落点 | 交付和完成条件 |
 |---|---|---|
@@ -308,9 +401,11 @@ npm run omp:verify:patches
 
 紧急回退先关闭桌面内部功能开关、清理观察连接并显示不可用状态；不关闭或更换 agent 的浏览器，不主动重启 Runtime。旧 Runtime 持续可用。撤回源码改动时只撤回本功能文件，按备份 README 和 git diff 核对，不覆盖其他性能优化。
 
-功能完成需要 B0–B5 全部验收，并且用户能在“浏览器”侧栏看到 agent 的同一页面；原 browser 工具继续工作；收起后资源释放；会话隔离正确；预览/真实互斥；没有实现或暗中开启人工输入、元素选择或备注。
+交付判定：用户能在「浏览器」面板看到 agent 操作的同一页面；原 `browser` 工具不受影响；收起面板即释放观察与解码资源；会话与子代理归属正确；预览/真实互斥。上述均已实现。原计划中「没有实现人工输入」一条已被推翻——人工输入现在是交付范围，入口是显式「人工接管」租约，而不是默认放开。
 
-**本次计划编写完成的范围：**恢复原会话中已确认的决定、核对当前 OMP/Studio 源码、确定接入边界与顺序、记录兼容性风险和验收。尚未编写产品实现，未运行真实 CDP 双连接实验，未声称已经支持实时观看。
+**已实现：**§0 列出的能力面、预算与代码落点。
+**未实现：**元素选择、备注、Composer 附件、标签新建/关闭、多标签同屏、自动展开、外部浏览器观察。
+**未做实测：**跨后端兼容矩阵（`connected` / `relay` / `cmux`）、长时间多路观察的性能基线、Windows 高 DPI 下的坐标精度。
 
 ## 10. 依据与后续核对
 

@@ -1,3 +1,4 @@
+import { GitHubReferencePreview } from "../composer/GitHubReferencePreview";
 import {
   useLayoutEffect,
   useMemo,
@@ -44,13 +45,17 @@ function UserCapsule({
   chip: ComposerChip;
   onOpenImage?: (subject: ImagePreviewSubject) => void;
 }) {
+  const [githubOpen, setGithubOpen] = useState(false);
   const copy = chipCopyToken(chip);
   const clickable = chip.kind === "image" && chip.image !== undefined && onOpenImage !== undefined;
-  return (
+  return (<>
     <span
       className={`cm-chip cm-chip-${chip.kind} is-static`}
       title={chip.path ?? chip.name ?? chip.label}
       data-copy={copy}
+      {...(chip.reference ? { role: "button", tabIndex: 0, onClick: () => setGithubOpen(true), onKeyDown: (event: KeyboardEvent<HTMLSpanElement>) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setGithubOpen(true); }
+      } } : {})}
       {...(clickable
         ? {
             role: "button" as const,
@@ -81,6 +86,8 @@ function UserCapsule({
       {chip.kind === "mode" ? null : <Icon name={chipIconName(chip.kind)} extra="sm" />}
       <ChipLabel label={chip.label} />
     </span>
+    {githubOpen && chip.reference ? <GitHubReferencePreview reference={chip.reference} onClose={() => setGithubOpen(false)} /> : null}
+    </>
   );
 }
 
@@ -227,7 +234,7 @@ export function UserMessageBody({
   const thumbsRow = subjects.length === 0 ? null : (
     <div className="ev-thumbs cm-thumbs" aria-label="已附加的图片">
       {subjects.map((thumb) => (
-        <figure key={`${thumb.label}-${thumb.data.slice(0, 12)}`} className="cm-thumb">
+        <figure key={`${thumb.label}-${thumb.data?.slice(0, 12) ?? thumb.url}`} className="cm-thumb">
           <button
             type="button"
             className="cm-thumb-open"

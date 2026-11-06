@@ -16,8 +16,7 @@
 //         transport-desktop, transport-web, runtime-installer, platform,
 //         platform-win32, platform-darwin, testkit, desktop, renderer
 //
-// A failing step prints only the tail of its output. The full log stays in the
-// terminal scrollback, which keeps a 20-line type error readable.
+// A failing step prints only the tail of its output.
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
@@ -93,17 +92,18 @@ function suiteFiles(key, all) {
   const unit = byKey.get(key);
   if (key === "renderer") return CORE_RENDERER_SUITES;
   if (all) {
-    const dir = join(root, unit.dir, "dist", "test");
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir)
-      .filter(name => name.endsWith(".test.js"))
-      .sort()
-      .map(name => `${unit.dir}/dist/test/${name}`);
+    return [["dist/test", ".test.js"], ["test", ".test.mjs"]].flatMap(([relative, extension]) => {
+      const dir = join(root, unit.dir, relative);
+      return existsSync(dir) ? readdirSync(dir)
+        .filter(name => name.endsWith(extension))
+        .sort()
+        .map(name => `${unit.dir}/${relative}/${name}`) : [];
+    });
   }
   return CORE_NODE_SUITES.filter(suite => suite.startsWith(`${unit.dir}/`));
 }
 
-function testStep(key, all) {
+function testStep(key, all, filters = []) {
   const unit = byKey.get(key);
   // Without file arguments Vitest runs the whole renderer suite, which is what
   // `--all` asks for; the default stays on the core list.
@@ -111,11 +111,12 @@ function testStep(key, all) {
     return {
       name: "test:renderer",
       command: process.execPath,
-      args: [vitestBin, "run", `--maxWorkers=${concurrency}`, ...(all ? [] : CORE_RENDERER_SUITES)],
+      args: [vitestBin, "run", `--maxWorkers=${concurrency}`, ...(filters.length ? filters : all ? [] : CORE_RENDERER_SUITES)],
       cwd: join(root, unit.dir),
     };
   }
-  const files = suiteFiles(key, all);
+  const files = suiteFiles(key, all || filters.length > 0).filter(file => !filters.length || filters.some(filter => file.toLowerCase().includes(filter.toLowerCase())));
+  if (!files.length && filters.length) throw new Error('No test suite matches ' + filters.join(', ') + ' in ' + key);
   if (!files.length) return null;
   return { name: `test:${key}`, command: process.execPath, args: ["--test", `--test-concurrency=${concurrency}`, ...files] };
 }
@@ -171,7 +172,7 @@ async function pool(steps, failures) {
 }
 
 function usage() {
-  console.log(`Usage: node scripts/check.mjs [--fast] [--all] [--production] [--only <target>] [--list]
+  console.log(`Usage: node scripts/check.mjs [--fast] [--all] [--production] [--only <target>] [--suite <fragment>] [--list]
 
   (no options)   arch + selects + compile + core suites
   --fast         arch + selects + compile only
@@ -179,6 +180,7 @@ function usage() {
   --production   also build the renderer bundle and the remote host bundle
   --only <x>     one group (arch, selects, types, packages, renderer, production)
                  or one unit (studio-host, client, renderer, ...)
+  --suite <x>    filter test filenames in one --only unit; repeat for multiple fragments
   --list         print groups and units`);
 }
 
@@ -194,12 +196,17 @@ function list() {
 
 const argv = process.argv.slice(2);
 let only = null;
+const suiteFilters = [];
 const flags = new Set();
 for (let index = 0; index < argv.length; index += 1) {
   const arg = argv[index];
   if (arg === "--only") only = argv[(index += 1)];
   else if (arg.startsWith("--only=")) only = arg.slice("--only=".length);
-  else flags.add(arg);
+  else if (arg === "--suite" || arg.startsWith("--suite=")) {
+    const value = arg === "--suite" ? argv[(index += 1)] : arg.slice("--suite=".length);
+    if (!value || value.startsWith("-")) { console.error("--suite needs a test filename fragment"); process.exit(2); }
+    suiteFilters.push(value);
+  } else flags.add(arg);
 }
 
 if (flags.has("--help") || flags.has("-h")) {
@@ -213,6 +220,11 @@ if (flags.has("--list")) {
 if (argv.some(arg => arg === "--only" || arg.startsWith("--only=")) && !only) {
   console.error("--only needs a group or unit name");
   usage();
+  process.exit(2);
+}
+
+if (suiteFilters.length && (!only || !byKey.has(only))) {
+  console.error("--suite requires --only with a specific unit, such as renderer or desktop");
   process.exit(2);
 }
 
@@ -297,16 +309,12 @@ if (plan.build.size) {
 
 const suites = [];
 for (const key of plan.test) {
-  const step = testStep(key, flags.has("--all"));
-  if (step) suites.push(step);
-}
-if (plan.renderer && !suites.some(step => step.name === "test:renderer")) {
-  const step = testStep("renderer", false);
+  const step = testStep(key, flags.has("--all"), suiteFilters);
   if (step) suites.push(step);
 }
 if (suites.length && !buildFailed) await pool(suites, failures);
 
-if (plan.production) {
+if (plan.production && !buildFailed) {
   const steps = [
     { name: "bundle:renderer", command: process.execPath, args: [viteBin, "build"], cwd: join(root, "apps", "renderer") },
     {

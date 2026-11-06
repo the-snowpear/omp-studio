@@ -10,7 +10,7 @@ import type { SessionOptionsProps } from "./SessionOptionsPane";
 import "./sessionOptions.css";
 
 export function ModelPresetsPane({ client, sessionId, available, visible = true, capabilities }: SessionOptionsProps) {
-  const { preview } = usePreviewMode(); const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
+  const { preview, marks } = usePreviewMode(); const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
   const [rows, setRows] = useState<ModelPresetRow[]>([]); const [selected, setSelected] = useState<string>();
   const [name, setName] = useState(""); const [error, setError] = useState(""); const [result, setResult] = useState<ModelPresetResult>();
   const [busy, setBusy] = useState(false); const [confirm, setConfirm] = useState<{ kind: "models.presets.save" | "models.presets.apply" | "models.presets.delete"; name: string }>();
@@ -46,7 +46,7 @@ export function ModelPresetsPane({ client, sessionId, available, visible = true,
   const picked = rows.find(row => row.name === selected) ?? rows.find(row => row.active) ?? rows[0];
   const outcomeLabel = result ? ({ saved: zh ? "预设已保存" : "Preset saved", deleted: zh ? "预设已删除" : "Preset deleted", switched: zh ? "预设已切换" : "Preset applied", missing: zh ? "预设不存在" : "Preset missing", project: zh ? "此预设仍由项目或覆盖配置定义，请在对应配置中删除。" : "This preset remains defined in a project or overlay. Remove it in that configuration.", invalid: zh ? "预设配置无效" : "Invalid preset", unavailable: zh ? "预设模型不可用，当前会话保持不变。" : "Preset model unavailable. Current session preserved.", failed: zh ? "切换失败，请检查已写入的角色配置。" : "Switch failed. Review the role configuration that was saved." })[result.outcome] : "";
   return <div className="model-presets-pane">
-    <p className="muted">{zh ? "预设保存完整角色链和推理档位。切换时由原生配置层级决定生效值，并报告覆盖冲突。" : "Presets save role chains and thinking levels. Native configuration scopes determine effective values and report conflicts."}{preview ? zh ? " · 演示" : " · Demo" : ""}</p>
+    <p className="muted">{zh ? "预设保存完整角色链和推理档位。切换时由原生配置层级决定生效值，并报告覆盖冲突。" : "Presets save role chains and thinking levels. Native configuration scopes determine effective values and report conflicts."}{preview && marks ? zh ? " · 演示" : " · Demo" : ""}</p>
     {!enabled ? <p role="status">{zh ? "连接支持模型预设的 Runtime 后可管理预设。" : "Connect a Runtime with model preset support to manage presets."}</p> : null}
     <div className="session-options-row"><label>{zh ? "保存当前配置为" : "Save current setup as"}<input className="input" value={name} maxLength={128} onChange={event => setName(event.target.value)} placeholder={zh ? "名称：以字母开头" : "Name: start with a letter"} /></label><button className="btn primary" disabled={!enabled || busy || !supports("models.presets.save") || !/^[a-zA-Z][\w-]*$/u.test(name)} onClick={() => setConfirm({ kind: "models.presets.save", name })}>{zh ? "保存预设" : "Save preset"}</button></div>
     {error ? <p className="session-options-error" role="alert">{error}</p> : null}

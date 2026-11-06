@@ -12,7 +12,7 @@ export function previewModelAdaptation(input: ModelAdaptationInput): ModelAdapta
   const candidates = entries.filter(row => row.api === input.api && [input.modelId, input.name].some(name => name && [row.id, row.name, ...(row.aliases ?? [])].some(alias => normalize(name) === normalize(alias))));
   const values = mergeModelParameters(candidates.length === 1 ? candidates[0]!.values : {}, input.endpoint ?? {});
   return {
-    catalogVersion: "demo-v1", status: candidates.length === 1 ? "matched" : candidates.length ? "ambiguous" : "none", candidates, values,
-    sources: Object.fromEntries(MODEL_PARAMETER_FIELDS.filter(field => values[field] !== undefined).map(field => [field, input.endpoint?.[field] !== undefined ? { source: "endpoint" } : { source: "catalog", catalogVersion: "demo-v1", catalogModel: candidates[0]?.key }])),
+    catalogVersion: "2026.10", status: candidates.length === 1 ? "matched" : candidates.length ? "ambiguous" : "none", candidates, values,
+    sources: Object.fromEntries(MODEL_PARAMETER_FIELDS.filter(field => values[field] !== undefined).map(field => [field, input.endpoint?.[field] !== undefined ? { source: "endpoint" } : { source: "catalog", catalogVersion: "2026.10", catalogModel: candidates[0]?.key }])),
   };
 }

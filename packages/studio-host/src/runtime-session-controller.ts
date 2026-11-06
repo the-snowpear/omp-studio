@@ -1,5 +1,9 @@
 import type { SessionOwnerState } from "@omp-studio/studio-protocol";
-import type { ContextViewOperation, ContextViewResultMap } from "@omp-studio/studio-protocol";
+import type { ContextViewOperation, ContextViewResultMap, ComputerWorkspaceQuery, ComputerWorkspaceResultMap, StudioComputerEventEnvelope } from "@omp-studio/studio-protocol";
+
+export interface StudioComputerForward {
+  readonly envelope: StudioComputerEventEnvelope;
+}
 import type {
   AgentTranscriptPage,
   CommandId,
@@ -44,6 +48,8 @@ const RESYNC_SNAPSHOT_RETRY_MS = 250;
 export class StudioRuntimeSessionController {
   readonly #unsubscribeProjection: () => void;
   readonly #unsubscribeEvent: () => void;
+  readonly #unsubscribeComputer: (() => void) | undefined;
+  readonly #computerListeners = new Set<(event: StudioComputerForward) => void>();
   readonly #unsubscribeResync: () => void;
   readonly #conversation: ConversationEventFanout;
   readonly #interaction = new InteractionEventFanout();
@@ -70,6 +76,14 @@ export class StudioRuntimeSessionController {
       this.#telemetry.forward(envelope);
       this.#btw.forward(envelope);
       this.#interaction.forward(envelope, (commandId) => this.requestIdForCommandId(commandId));
+    });
+    this.#unsubscribeComputer = bridge.onComputerEvent?.((envelope) => {
+      const snapshot = this.publications.current()?.snapshot;
+      if (bridge.state !== "ready" || !snapshot || envelope.runtimeEpoch !== snapshot.runtimeEpoch || envelope.event.sessionId !== snapshot.sessionId) return;
+      const event: StudioComputerForward = { envelope };
+      for (const listener of [...this.#computerListeners]) {
+        try { listener(event); } catch { /* Isolate Computer consumers. */ }
+      }
     });
     this.#unsubscribeResync = bridge.onResyncRequired(() => {
       this.#conversation.flush();
@@ -139,6 +153,10 @@ export class StudioRuntimeSessionController {
     return this.#publish(structuredClone(response.snapshot));
   }
 
+  onEvaluationChanged(listener: () => void): () => void {
+    return this.bridge.onEvent(event => { if ((event.event as { kind?: string }).kind === "evaluation.changed") listener(); });
+  }
+
   async invoke(request: StudioRequest): Promise<StudioReceipt> {
     const snapshot = this.bridge.projectionSnapshot();
     if (snapshot === undefined) throw new Error("Runtime snapshot is required before command invocation");
@@ -174,6 +192,23 @@ export class StudioRuntimeSessionController {
     const result = await this.bridge.readContext(operation);
     if (this.bridge.projectionSnapshot()?.sessionId !== operation.sessionId) throw new StudioHostError("CURSOR_STALE", "Session changed during context read");
     return result;
+  }
+
+  async readComputer<K extends ComputerWorkspaceQuery["kind"]>(operation: Extract<ComputerWorkspaceQuery, { kind: K }>): Promise<ComputerWorkspaceResultMap[K]> {
+    const snapshot = this.publications.current()?.snapshot;
+    if (!snapshot || snapshot.sessionId !== operation.sessionId) throw new StudioHostError("CURSOR_STALE", "Computer session is not active");
+    if (!this.bridge.readComputer) throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Computer workspace queries are not supported");
+    const result = await this.bridge.readComputer(operation);
+    const current = this.publications.current()?.snapshot;
+    if (this.bridge.state !== "ready" || current?.runtimeEpoch !== snapshot.runtimeEpoch || current.sessionId !== operation.sessionId) {
+      throw new StudioHostError("CURSOR_STALE", "Session changed during Computer read");
+    }
+    return result;
+  }
+
+  onComputerEvent(listener: (event: StudioComputerForward) => void): () => void {
+    this.#computerListeners.add(listener);
+    return () => this.#computerListeners.delete(listener);
   }
 
   async predict(input:PredictionQuery):Promise<PredictionResult> {
@@ -384,6 +419,8 @@ export class StudioRuntimeSessionController {
     this.#resyncTimer = undefined;
     this.#unsubscribeProjection();
     this.#unsubscribeEvent();
+    this.#unsubscribeComputer?.();
+    this.#computerListeners.clear();
     this.#unsubscribeResync();
     this.#publicationListeners.clear();
     this.#conversation.dispose();

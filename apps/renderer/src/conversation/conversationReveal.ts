@@ -1,6 +1,35 @@
 import { scrollOffsetToCenter } from "./ConversationMinimap";
 
 const FLASH_MS = 900;
+export const CONVERSATION_REVEAL = "omp-conversation-reveal";
+export type ConversationRevealRequest = {
+  toolCallId?: string;
+  itemId?: string;
+  offset?: number;
+  flash?: boolean;
+  finish: (found: boolean) => void;
+};
+
+/** The transcript resolves data identity before the virtualizer mounts the row. */
+export function revealConversationTarget(scroller: HTMLElement | null, target: Omit<ConversationRevealRequest, "finish">): Promise<boolean> {
+  if (scroller === null) return Promise.resolve(false);
+  return new Promise(resolve => {
+    const request: ConversationRevealRequest = { ...target, finish: resolve };
+    if (scroller.dispatchEvent(new CustomEvent(CONVERSATION_REVEAL, { detail: request, cancelable: true }))) resolve(false);
+  });
+}
+
+export function revealMountedConversationItem(scroller: HTMLElement, request: ConversationRevealRequest): void {
+  const item = request.itemId === undefined ? null : scroller.querySelector<HTMLElement>(`[data-item-id="${cssEscape(request.itemId)}"]`);
+  const tool = request.toolCallId === undefined ? null : scroller.querySelector<HTMLElement>(`[data-tool-call-id="${cssEscape(request.toolCallId)}"]`);
+  const node = tool ?? item;
+  if (node === null) { request.finish(false); return; }
+  const top = request.offset === undefined ? scrollOffsetToCenter(scroller, node)
+    : scroller.scrollTop + node.getBoundingClientRect().top - scroller.getBoundingClientRect().top - request.offset;
+  scroller.scrollTop = top;
+  if (request.flash !== false) flashRow(node);
+  request.finish(true);
+}
 
 function cssEscape(value: string): string {
   if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);

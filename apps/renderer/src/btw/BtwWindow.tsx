@@ -86,6 +86,7 @@ export function BtwWindow({
       </header>
       <BtwPanel
         session={session}
+        onClose={win.hide}
         {...(demo === true ? { demo: true } : {})}
         {...(onDemoNext === undefined ? {} : { onDemoNext })}
       />

@@ -14,6 +14,7 @@
 
 import type {
   BtwSnapshot,
+  ComputerWorkspaceChange,
   ConversationRuntimeEvent,
   OperatorStateSnapshot,
   SessionTelemetrySnapshot,
@@ -204,6 +205,9 @@ export interface ClientEventBase {
 
 /** Discriminated event stream delivered through `StudioClient.subscribe`. */
 export type ClientEvent =
+  /** Computer metadata only; consumers keep target-local state outside the global reducer. */
+  | (ClientEventBase & { readonly kind: "computer.changed"; readonly change: ComputerWorkspaceChange })
+  | (ClientEventBase & { readonly kind: "evaluations.changed" })
   | (ClientEventBase & { readonly kind: "snapshot"; readonly snapshot: OperatorStateSnapshot })
   | (ClientEventBase & { readonly kind: "state.changed" })
   | (ClientEventBase & { readonly kind: "command.accepted"; readonly accepted: ClientCommandAccepted })

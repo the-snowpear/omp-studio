@@ -86,9 +86,12 @@ import type {
   DesktopRuntimeSessionPort,
 } from "./host-composition.js";
 import type { HostLog } from "./host-log.js";
+import { startMemoryCredentialBroker, type MemoryCredentialProvider } from "./memory-credentials.js";
 import { UpdateRestartBlockedError, updateRestartBlockerForSnapshot } from "./update-restart.js";
 
 export interface DesktopRuntimeSessionPortOptions {
+  readonly managedBrowser?: boolean;
+  readonly memoryCredentials?: MemoryCredentialProvider;
   /** Bridge token state lives under `<profile>/<bridgeDirectoryName>`; defaults to `bridge`. */
   readonly bridgeDirectoryName?: string;
   /** Injectable current-user ACL provider for the bridge directory/token. */
@@ -233,6 +236,7 @@ export function createDesktopRuntimeSessionPort(
   }
   const ownerId = options.ownerId ?? `desktop-${process.pid}-${randomUUID()}`;
   const residents = new Map<string, ResidentRuntime>();
+  const evaluationSessions = new Set<string>();
   let socketSweep: Promise<void> | undefined;
   const workerOptions: DesktopRuntimeSessionPortOptions = {
     ...options,
@@ -301,7 +305,7 @@ export function createDesktopRuntimeSessionPort(
   };
 
   const listResidents = (): ResidentsReadModel => ({
-    residents: [...residents.values()]
+    residents: [...residents.values()].filter(r => !evaluationSessions.has(r.sessionId))
       .sort((left, right) => right.lastSelected - left.lastSelected || left.sessionId.localeCompare(right.sessionId))
       .map(residentRow),
     ...(activeSessionId === undefined
@@ -500,6 +504,7 @@ export function createDesktopRuntimeSessionPort(
       options.log?.write("warn", "runtime.worker.lease-release-failed", errorDetail(error));
     }
     residents.delete(resident.sessionId);
+    evaluationSessions.delete(resident.sessionId);
     if (activeSessionId === resident.sessionId) activeSessionId = undefined;
     emitResidents();
   };
@@ -535,6 +540,8 @@ export function createDesktopRuntimeSessionPort(
     launchWorkspace?: { workspaceId: string; cwd: string },
     model?: string,
     noContextFiles?: boolean,
+    evaluation = false,
+    background = false,
   ): Promise<DesktopRuntimeSession | undefined> => {
     const launchContext = context;
     const selected = launchWorkspace ?? workspace;
@@ -595,6 +602,7 @@ export function createDesktopRuntimeSessionPort(
         heartbeatTimer: undefined,
         idleTimer: undefined,
       };
+      if (evaluation) evaluationSessions.add(snapshot.sessionId);
       residents.set(snapshot.sessionId, resident);
       trackResidentPublication(resident, session);
       emitResidents();
@@ -626,7 +634,7 @@ export function createDesktopRuntimeSessionPort(
         }, leaseHeartbeatIntervalMs);
         resident.heartbeatTimer.unref?.();
       }
-      setActiveSession(snapshot.sessionId);
+      if (!evaluation && !background) setActiveSession(snapshot.sessionId);
       options.log?.write("info", "runtime.worker.resident", `session=${snapshot.sessionId} count=${residents.size}`);
       rememberUnavailable(undefined);
       rememberDisconnect(undefined);
@@ -791,6 +799,30 @@ export function createDesktopRuntimeSessionPort(
 
   return {
     supportsConcurrentSessions: true,
+    sessionFor(sessionId) { return residents.get(sessionId)?.session; },
+    openContextSession(target, intent) {
+      return serialized(async () => {
+        const id = intent.kind === "resume" ? intent.sessionId : undefined;
+        const resident = id === undefined ? undefined : residents.get(id);
+        if (resident?.session.hello()) {
+          if (resident.workspace.workspaceId !== target.workspaceId) throw new Error("Session belongs to another workspace");
+          return resident.session;
+        }
+        if (resident) await stopResident(resident);
+        return launchWorker(id, target, intent.kind === "resume" ? intent.model : undefined,
+          intent.kind === "fresh" ? intent.noContextFiles : undefined, false, true);
+      });
+    },
+    evaluationSession(sessionId) { return residents.get(sessionId)?.session; },
+    openEvaluation(target) {
+      return serialized(() => launchWorker(undefined, target, undefined, true, true));
+    },
+    releaseEvaluation(sessionId) {
+      return serialized(async () => {
+        const resident = residents.get(sessionId);
+        if (resident && evaluationSessions.has(sessionId)) await stopResident(resident);
+      });
+    },
     start(launchContext): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
         context = launchContext;
@@ -1160,6 +1192,7 @@ function createSingleDesktopRuntimeSessionPort(
   /** Start context (profile directory) captured by `start`; needed by `rebind`. */
   let context: DesktopRuntimeSessionContext | undefined;
   let processPort: NodeRuntimeProcessPort | undefined;
+  let memoryBroker: Awaited<ReturnType<typeof startMemoryCredentialBroker>> | undefined;
   let bridge: StudioBridgeClient | undefined;
   let bundle: DesktopRuntimeSession | undefined;
   let sessionController: StudioRuntimeSessionController | undefined;
@@ -1307,6 +1340,8 @@ function createSingleDesktopRuntimeSessionPort(
     if (port !== undefined) {
       await port.stop();
     }
+    await memoryBroker?.close();
+    memoryBroker = undefined;
     bridge?.close();
     bridge = undefined;
     draining = false;
@@ -1437,6 +1472,7 @@ function createSingleDesktopRuntimeSessionPort(
     bridge = client;
 
     try {
+      if (options.memoryCredentials) memoryBroker = await startMemoryCredentialBroker(options.memoryCredentials, bridgeBootstrap.token);
       const extra = ["--cwd", selected.cwd];
       if (noContextFiles) extra.push("--no-context-files");
       if (resumeModel !== undefined) extra.push("--model", resumeModel);
@@ -1468,7 +1504,9 @@ function createSingleDesktopRuntimeSessionPort(
           ...process.env,
           ...(socketDirectory === undefined || process.env.OMP_AUTH_BROKER_URL ? {} : { OMP_STUDIO_AUTH_BROKER_FILE: join(socketDirectory, "auth-broker.json") }),
           OMP_STUDIO_MEDIA_ROOT: mediaDirectory,
+          ...(options.managedBrowser ? { OMP_STUDIO_MANAGED_BROWSER: "1" } : {}),
           ...(socketDirectory === undefined ? {} : { OMP_STUDIO_SOCKET_DIR: socketDirectory }),
+          ...(memoryBroker === undefined ? {} : { OMP_STUDIO_MEMORY_CREDENTIAL_BROKER: memoryBroker.url }),
           // The Runtime's parent watchdog is enabled on macOS only for now.
           ...(process.platform === "darwin" ? { OMP_STUDIO_PARENT_PID: String(process.pid) } : {}),
         },

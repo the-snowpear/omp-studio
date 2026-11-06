@@ -47,8 +47,15 @@ describe("applyTier", () => {
     const root = document.createElement("html");
     applyTier(root, "L2");
     const first = root.outerHTML;
+    const observer = new MutationObserver(() => {});
+    observer.observe(root, { attributes: true });
     applyTier(root, "L2");
     expect(root.outerHTML).toBe(first);
+    expect(observer.takeRecords()).toEqual([]);
+    root.setAttribute(PERF_TIER_ATTRIBUTE, "L1");
+    applyTier(root, "L2");
+    expect(root.getAttribute(PERF_TIER_ATTRIBUTE)).toBe("L2 L1");
+    observer.disconnect();
     expect(() => applyTier(null, "L2")).not.toThrow();
     expect(() => applyTier(undefined, "L2")).not.toThrow();
   });

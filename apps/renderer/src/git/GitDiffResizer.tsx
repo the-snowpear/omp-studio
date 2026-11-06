@@ -1,3 +1,4 @@
+import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
 import { useI18n } from "../i18n";
 import { useCallback, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 
@@ -20,6 +21,7 @@ export function GitDiffResizer({
   readonly height: number;
   readonly onHeight: (px: number) => void;
 }) {
+  const document = useSurfaceDocument(), window = surfaceWindow(document);
   const { t } = useI18n();
   const paneOf = (handle: HTMLElement) => handle.closest(".git-status-pane");
   const slotOf = (pane: Element | null) => pane?.querySelector(".git-diff-slot");

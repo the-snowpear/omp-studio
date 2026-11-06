@@ -141,7 +141,7 @@ export function SkillsharePane({
   available: boolean;
   visible?: boolean;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const t = (cn: string, en: string) => (zh ? cn : en);
@@ -358,12 +358,14 @@ export function SkillsharePane({
           filesTotal: request.type === "publish" ? 2 : 0,
           scripts,
           secrets: [],
-          warnings: [
-            t(
-              "演示操作只更新此界面。",
-              "Demo actions update only this surface.",
-            ),
-          ],
+          warnings: marks
+            ? [
+                t(
+                  "演示操作只更新此界面。",
+                  "Demo actions update only this surface.",
+                ),
+              ]
+            : [],
         });
         return;
       }
@@ -381,10 +383,12 @@ export function SkillsharePane({
           id: review.id,
           type: review.action.type,
           state: "completed",
-          message: t(
-            "演示操作已完成；没有写入本机或注册表。",
-            "Demo completed; no local or registry writes occurred.",
-          ),
+          message: marks
+            ? t(
+                "演示操作已完成；没有写入本机或注册表。",
+                "Demo completed; no local or registry writes occurred.",
+              )
+            : t("操作已完成。", "Completed."),
         });
         setReview(undefined);
         return;
@@ -478,7 +482,7 @@ export function SkillsharePane({
     <section className="skillshare-pane" aria-label="Skillshare">
       <div className="skillshare-toolbar">
         <h3>Skillshare</h3>
-        {preview ? (
+        {preview && marks ? (
           <span className="chip gray">{t("演示", "Demo")}</span>
         ) : null}
         <span className="small muted">

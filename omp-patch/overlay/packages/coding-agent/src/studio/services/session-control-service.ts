@@ -66,6 +66,7 @@ export class SessionControlError extends Error {
 			| "BUSY_STREAMING"
 			| "BUSY_COMPACTING"
 			| "COMMAND_BLOCKED"
+			| "CAPABILITY_UNAVAILABLE"
 			| "INTERACTION_REQUIRED"
 			| "INVALID_ARGUMENT",
 		message: string,

@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { AppSelect } from "../AppSelect";
 import { useI18n } from "../i18n";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { PREVIEW_FONT_FAMILIES } from "../preview/settingsPreview";
 import { DEFAULT_APP_SETTINGS, type AppSettings } from "./appSettings";
 import { SettingSection, SourceBadge } from "./SettingRow";
@@ -74,6 +75,7 @@ function FontGroupSettings({ group, app, families, update, reset }: {
 
 export function FontSettings({ ctl }: { ctl: SettingsCtl }) {
   const { t } = useI18n();
+  const { marks } = usePreviewMode();
   const [families, setFamilies] = useState<readonly string[]>(() => ctl.preview ? PREVIEW_FONT_FAMILIES : cachedFontFamilies() ?? []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -88,7 +90,7 @@ export function FontSettings({ ctl }: { ctl: SettingsCtl }) {
   return <SettingSection title={t("settings.fonts.title")} desc={t("settings.fonts.desc")}>
     <div className="font-toolbar">
       <button type="button" className="btn outline sm" onClick={() => { void load(); }} disabled={loading || (!ctl.preview && !supported)}>{t(loading ? "settings.fonts.loading" : families.length ? "settings.fonts.refresh" : "settings.fonts.load")}</button>
-      <span className="muted small" aria-live="polite">{ctl.preview ? t("settings.fonts.demo") : !supported ? t("settings.fonts.unsupported") : error ? t("settings.fonts.failed") : t("settings.fonts.localHint")}</span>
+      <span className="muted small" aria-live="polite">{ctl.preview && marks ? t("settings.fonts.demo") : !supported ? t("settings.fonts.unsupported") : error ? t("settings.fonts.failed") : t("settings.fonts.localHint")}</span>
     </div>
     <div className="font-groups" style={typographyStyles(ctl.app) as CSSProperties}>
       {GROUPS.map(group => <FontGroupSettings key={group.id} group={group} app={ctl.app} families={families} update={ctl.updateApp} reset={ctl.resetApp} />)}

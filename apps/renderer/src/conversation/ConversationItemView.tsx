@@ -110,7 +110,7 @@ function concludingReplyText(segments: readonly AssistantSegment[]): Extract<Ass
   return last;
 }
 
-function MessageCopyButton({ text }: { text: string }) {
+export function MessageCopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 

@@ -47,7 +47,9 @@ body {
 .page-body.page-in,
 .page.page-in,
 .app-body.page-in {
-  animation: page-in var(--dur-slow) var(--ease) both;
+  /* 结束后释放 transform / opacity 层叠上下文，让页内 modal 与外部 Dock
+     正文使用同一层级标尺；forwards 会把 fixed 遮罩也困在页面矩形内。 */
+  animation: page-in var(--dur-slow) var(--ease) backwards;
 }
 .page-body.page-out,
 .page.page-out,

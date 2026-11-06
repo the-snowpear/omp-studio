@@ -76,6 +76,8 @@ try {
     run(process.execPath, [npmCli, "run", "check"], { cwd: repositoryRoot, env });
   }
   run(bun, ["run", "check:ts"], { cwd: ompSourceDirectory, env });
+  // A clean checkout has no generated HTML tool views, which the Runtime imports.
+  run(bun, ["run", "gen:tool-views"], { cwd: join(ompSourceDirectory, "packages", "coding-agent"), env });
   run(bun, ["test", "packages/coding-agent/test/studio-bridge-server.test.ts"], {
     cwd: ompSourceDirectory,
     env,

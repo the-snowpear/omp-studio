@@ -9,6 +9,70 @@ vi.mock("./runtimeUpgrade",()=>({useUpgradeAvailable:()=>upgradeState.available,
 vi.mock("./hostError", async importOriginal => ({ ...await importOriginal<typeof import("./hostError")>(), waitReceipt: vi.fn() }));
 import { waitReceipt } from "./hostError";
 afterEach(()=>{cleanup();vi.clearAllMocks();upgradeState.available = true;});
+it("activates the viewed archive before reading or asking, without borrowing the live session's BTW", async () => {
+ const steps: string[] = [];
+ const prepareTarget = vi.fn(async () => { steps.push("resume viewed"); });
+ vi.mocked(invokeUpgrade).mockImplementation(async (_client, kind) => {
+  steps.push(kind);
+  if (kind === "btw.history.list") return { sessionId: "viewed", topics: [] };
+  throw Error(kind);
+ });
+ vi.mocked(waitReceipt).mockResolvedValue({ ephemeralId: "viewed-question", branchToken: "token", status: "running" });
+ const client = { command: vi.fn(async () => { steps.push("ask viewed"); return { requestId: "ask" }; }) } as unknown as StudioClient;
+ const { result } = renderHook(() => useBtwSession({
+  snapshot: { sessionId: "other", ephemeralId: "other-btw", status: "running", text: "unrelated answer" },
+  client, preview: false, sessionId: "viewed", targetActive: false, prepareTarget, canCommand: true,
+ }));
+ expect(result.current.snapshot).toBeNull();
+ expect(invokeUpgrade).not.toHaveBeenCalled();
+ await act(async () => { await result.current.refreshHistory?.(); });
+ expect(steps).toEqual(["resume viewed", "btw.history.list"]);
+ steps.length = 0;
+ const question = "a".repeat(70000);
+ await act(async () => { expect(await result.current.ask(question, true)).toBe(true); });
+ expect(steps).toEqual(["resume viewed", "ask viewed"]);
+ expect(client.command).toHaveBeenCalledWith("btw.ask", { question });
+});
+
+it("keeps a receipt-ahead BTW running and cancellable while browsing another topic", async () => {
+ vi.mocked(invokeUpgrade).mockImplementation(async (_client, kind) => {
+  if (kind === "btw.history.list") return { sessionId: "parent", topics: [] };
+  if (kind === "btw.history.read") return { sessionId: "parent", topicId: "topic", turns: [{ question: "first", answer: "answer", status: "complete", createdAt: 1, updatedAt: 2 }] };
+  if (kind === "btw.followUp") return { ephemeralId: "new-running-round", status: "running" };
+  throw Error(kind);
+ });
+ vi.mocked(waitReceipt).mockResolvedValue({ aborted: true });
+ const client = { command: vi.fn().mockResolvedValue({ requestId: "stop" }) } as unknown as StudioClient;
+ const { result } = renderHook(() => useBtwSession({ snapshot: null, client, preview: false, sessionId: "parent", canCommand: true }));
+ await act(async () => { await result.current.selectTopic?.("topic"); });
+ await act(async () => { await result.current.ask("continue"); });
+ await act(async () => { await result.current.selectTopic?.("another-topic"); });
+ expect(result.current.running).toBe(true);
+ expect(result.current.canAsk).toBe(false);
+ expect(result.current.canAbort).toBe(true);
+ await act(async () => { await result.current.abort(); });
+ expect(client.command).toHaveBeenCalledWith("btw.abort", { ephemeralId: "new-running-round" });
+});
+for (const status of ["cancelled", "error", "interrupted"] as const) {
+ it(`continues ${status} BTW history with its images without replacing it with a new topic`, async () => {
+  const image = { type: "image" as const, mimeType: "image/png" as const, data: "aW1hZ2U=" };
+  vi.mocked(invokeUpgrade).mockImplementation(async (_client, kind) => {
+   if (kind === "btw.history.list") return { sessionId: "parent", topics: [] };
+   if (kind === "btw.history.read") return { sessionId: "parent", topicId: "topic", turns: [{ question: "first", images: [image], answer: "partial", status, createdAt: 1, updatedAt: 2 }] };
+   if (kind === "btw.followUp") return { ephemeralId: "next", status: "running" };
+   throw Error(kind);
+  });
+  const client = { command: vi.fn() } as unknown as StudioClient;
+  const { result } = renderHook(() => useBtwSession({ snapshot: null, client, preview: false, sessionId: "parent", canCommand: true }));
+  await act(async () => { await result.current.selectTopic?.("topic"); });
+  expect(result.current.questionImages).toEqual([image]);
+  await act(async () => { expect(await result.current.ask("continue", false, [image])).toBe(true); });
+  expect(result.current.snapshot).toMatchObject({ question: "continue", status: "running", text: "", turnIndex: 1 });
+  expect(result.current.turns?.[0]?.status).toBe(status);
+  expect(invokeUpgrade).toHaveBeenCalledWith(client, "btw.followUp", { topicId: "topic", question: "continue", images: [image] });
+  expect(client.command).not.toHaveBeenCalled();
+ });
+}
 it("real model mentions request current Runtime candidates instead of the file/agent menus",async()=>{
  vi.mocked(invokeUpgrade).mockResolvedValue({sessionId:"parent",mentions:[],available:[{selector:"provider/model",name:"Model",image:true}],activeModelImage:true});
  const client={query:vi.fn()} as unknown as StudioClient;

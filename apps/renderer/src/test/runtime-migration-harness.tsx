@@ -2,10 +2,16 @@
 import { ResumeScopePane } from "../history/ResumeScopePane";
 import { AdvisorConfigPane } from "../settings/AdvisorConfigPane";
 import { LocalFilesPane } from "../capabilities/LocalFilesPane";
-import { DictationControl } from "../composer/DictationControl";
+import { DictationDemo } from "../preview/DictationDemo";
+import "../composer/dictation.css";
 import { createContractFixtureApi } from "@omp-studio/testkit";
 import { StudioClientImpl } from "@omp-studio/client";
-import { ContextInspector } from "../conversation/ContextInspector";
+import { ContextInspector } from "../contextViewer/ContextInspector";
+import { DockPanel, DockProvider, useDock } from "../dock/DockContext";
+import { DockFloatingLayer } from "../dock/DockRegions";
+import { DockStore } from "../dock/store";
+import { locatePanel } from "../dock/model";
+import { WORKBENCH_PANELS } from "../panels/registry";
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 import { I18nProvider } from "../i18n";
@@ -27,17 +33,17 @@ import "../models/sessionOptions.css";
 
 const client = new StudioClientImpl(createContractFixtureApi() as never);
 function Surface() {
-  const [contextOpen, setContextOpen] = useState(false);
+  const { store, layout } = useDock();
   const [answer, setAnswer] = useState<DeckAskAnswer>({ picked: ["保留", "压缩"], custom: "", note: "只压缩旧日志", noteOption: "压缩" });
   const [result, setResult] = useState("");
   const view = approvalFromInteraction({ kind: "approval", interactionId: "qa", sessionId: "qa", leaseGeneration: 1, title: "受限目录操作", approvalType: "read", detail: { source: "restriction", path: "private/credentials", reason: "每次都需批准" } } as never);
-  return <main style={{ padding: 24, maxWidth: 960, margin: "auto", display: "grid", gap: 24 }}>
+  return <main className="adaptive-workbench" style={{ padding: 24, minHeight: "100vh", display: "grid", gap: 24 }}>
     <h1>OMP 18.13.2 · 隔离迁移验收</h1><p>以下控件使用正式组件与预览 fixture；不连接 Host、不写真实配置、不调用模型。</p>
-    <button className="btn outline" onClick={() => setContextOpen(true)}>打开上下文查看器</button><ContextInspector client={client} sessionId="demo-context" visible={contextOpen} onClose={() => setContextOpen(false)} />
+    <button className="btn outline" onClick={() => store.dispatch({ type: "open", panel: "context-viewer" })}>打开上下文查看器</button><DockPanel id="context-viewer">{visibility => <ContextInspector client={client} sessionId="demo-context" opened={!!locatePanel(layout, "context-viewer")} width={visibility.width} height={visibility.height} />}</DockPanel><DockFloatingLayer />
     <ResumeScopePane client={client} />
     <AdvisorConfigPane client={client} visible />
     <LocalFilesPane client={client} available={false} />
-    <DictationControl client={client} available={false} onText={setResult} />
+    <DictationDemo />
     <SessionBudgetPane available={false} />
     <FeatureSettingsPane group="permissions" visible />
     <FeatureSettingsPane group="interaction" visible />
@@ -49,5 +55,5 @@ function Surface() {
 }
 const mounted = createRoot(document.getElementById("root")!);
 document.documentElement.dataset.theme = new URLSearchParams(location.search).get("theme") === "dark" ? "dark" : "light";
-mounted.render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled={new URLSearchParams(location.search).get("preview") === "1"}><Surface /></PreviewModeProvider></I18nProvider>);
+mounted.render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled={new URLSearchParams(location.search).get("preview") === "1"}><DockProvider definitions={WORKBENCH_PANELS} store={new DockStore(null)}><Surface /></DockProvider></PreviewModeProvider></I18nProvider>);
 import.meta.hot?.dispose(() => mounted.unmount());

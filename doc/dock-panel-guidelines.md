@@ -6,8 +6,9 @@
 
 - 模型：`apps/renderer/src/dock/types.ts`、`model.ts`；四个区域 left／rail／right／bottom 加应用内浮窗，所有 13 个工具均可移动，无落点白名单。
 - 存储：`dock/store.ts`；连接目标／项目／会话隔离，草稿交接、预设、同项目新会话继承、20 步撤销、旧布局一次迁移。布局不是运行资源。
-- 内容：`dock/DockContext.tsx`、`PanelRegistration.tsx`、`hosts.ts`；固定 Portal target、首次显示挂载、隐藏 inert、统一几何和裁剪。
+- 内容：`dock/DockContext.tsx`、`PanelRegistration.tsx`、`hosts.ts`；稳定 Portal target、首次显示挂载、隐藏 inert；展开的对话工具卡将宿主嵌入卡片，以原生滚动和裁剪，其余区域使用统一几何和裁剪。
 - 壳与手势：`dock/DockRegions.tsx`、`gestures.ts`；右栏上下最多两组、底栏左右最多两组、卡片／紧凑覆盖／多标签浮窗和胶囊。
+- 2026-10-30 交互修订：左栏改为全宽区段，全部折叠后标题收在底部；完整对话卡片悬在对话容器内部，不再构成独立侧栏。`DockDragPreview.tsx`／`dragPreview.ts` 只订阅拖动几何，借用现有内容宿主呈现真实目的地预览，松手才修改和保存布局。
 - 工具元数据：`panels/registry.ts`；业务入口由 `App.tsx` 的薄注册映射提供。BTW 已纳入统一停靠，旧独立窗口组件不再用于工作台。
 - 有效布局仍由 `layout/workbenchLayout.ts` 和 `useWorkbenchLayout.ts` 计算；窄窗状态不修改持久偏好。
 - 菜单与设置：`dock/DockMenus.tsx`、`DockSettings.tsx`；现有快捷入口调用 open 动作定位当前位置。
@@ -105,7 +106,7 @@
 
 | 编号 | 结论 | 出处 | 本项目落点 |
 |---|---|---|---|
-| R1 | 槽位只画「tab 条 + 占位框」，面板本体常驻在固定宿主层，移动只改 rect | VS Code `grid.ts` / `layout.ts` | `.panel-host` + `.panel-frame` |
+| R1 | 面板本体使用稳定宿主；展开的对话工具卡将宿主嵌入占位框以原生滚动，同文档移动用 `moveBefore` 保留活动状态，其余区域由宿主层按 rect 定位 | VS Code `grid.ts` / `layout.ts` | `.panel-host` + `.panel-frame` |
 | R2 | 布局是可序列化的树/表，只存 `id + 尺寸 + 权重 + 激活项`，不存 React 节点 | Lumino `ILayoutConfig`；rc-dock `SavedLayout` | `DockLayout` |
 | R3 | 隐藏不等于卸载。切 tab、换槽都不能触发 unmount | dockview `onlyWhenVisible` 是反例；Lumino widget attach/detach 是正解 | `visibility` + `inert`，不用 `display:none` |
 | R4 | 每个面板声明允许的落点，不做全自由 | Godot 4.6 dock 限制 | `allowedSlots` |
@@ -458,7 +459,7 @@ function toWorkbenchPrefs(layout: DockLayout): WorkbenchPreferences {
 
 | 现象 | 根因 | 对策 | 验证 |
 |---|---|---|---|
-| 换槽后终端空白 / scrollback 丢失 | 面板被条件渲染或换了父节点，xterm 重建 | 宿主层固定父节点，只改 rect；`visibility` 而非 `display:none` | 终端里 `seq 1 200`，拖到另一槽，内容仍在 |
+| 换槽后终端空白 / scrollback 丢失 | 面板被条件渲染或移动时活动内容重建 | 保留同一宿主；同文档移动使用 `moveBefore`，不可见时保持面板状态 | 终端里 `seq 1 200`，拖到另一槽，内容仍在 |
 | 浏览器 iframe 重新加载 | 同上，DOM 节点被销毁 | 同上；iframe 不换 `src`，不在移动时改 `key` | 打开一个带表单的页面，填字后移动，内容仍在 |
 | 切 tab 后 CodeMirror 失焦/丢撤销栈 | 面板 unmount | 同上 | 在 Git diff 里编辑，切走再切回 |
 | 对话跳位 / 滚动位置乱 | 拖拽每帧改了布局但没通知对话层 | 每个几何写入都包 reflow 钩子 | 长对话滚动到中部，拖右栏宽度，观察是否跳 |

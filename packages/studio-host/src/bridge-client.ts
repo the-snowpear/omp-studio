@@ -1,5 +1,5 @@
 import type { SessionOwnerState } from "@omp-studio/studio-protocol";
-import type { ContextViewOperation, ContextViewResultMap } from "@omp-studio/studio-protocol";
+import type { ContextViewOperation, ContextViewResultMap, ComputerWorkspaceQuery, ComputerWorkspaceResultMap, StudioComputerQueryRequest, StudioComputerQueryResponse, StudioComputerEventEnvelope } from "@omp-studio/studio-protocol";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import {
@@ -99,6 +99,12 @@ export interface StudioBridgeClientOptions {
   onInternalError?: (error: Error, source: "projection" | "event" | "receipt" | "frame") => void;
 }
 
+interface PendingComputerQuery {
+  readonly resolve: (result: unknown) => void;
+  readonly reject: (error: Error) => void;
+  readonly timer: ReturnType<typeof setTimeout>;
+}
+
 interface PendingRequest {
   readonly onReceipt?: (receipt: StudioReceipt) => void;
   readonly resolve: (receipt: StudioReceipt) => void;
@@ -122,6 +128,8 @@ export class StudioBridgeClient {
   #hello: StudioHelloResponse | undefined;
   #readyDataListener: ((chunk: Buffer) => void) | undefined;
   readonly #pendingRequests = new Map<string, PendingRequest>();
+  readonly #pendingComputerQueries = new Map<string, PendingComputerQuery>();
+  readonly #computerListeners = new Set<(event: StudioComputerEventEnvelope) => void>();
   readonly #projectionListeners = new Set<(snapshot: StudioSnapshotResponse["snapshot"]) => void>();
   readonly #eventListeners = new Set<(event: StudioEventEnvelope) => void>();
   readonly #resyncListeners = new Set<() => void>();
@@ -205,7 +213,7 @@ export class StudioBridgeClient {
     if (this.#state !== "negotiated" && this.#state !== "snapshot-required" && this.#state !== "ready") {
       throw new Error(`Cannot request Studio Bridge snapshot from ${this.#state}`);
     }
-    if (this.#pendingRequests.size > 0) throw new Error("Cannot snapshot while Studio Bridge commands are pending");
+    if (this.#pendingRequests.size > 0 || this.#pendingComputerQueries.size > 0) throw new Error("Cannot snapshot while Studio Bridge requests are pending");
     const socket = this.#socket;
     const hello = this.#hello;
     const runtimeEpoch = this.#runtimeEpoch;
@@ -331,6 +339,11 @@ export class StudioBridgeClient {
   }
 
   async updateOwner(state: SessionOwnerState): Promise<void> {
+    // Older Runtimes close the pipe on unknown operations. Owner notifications
+    // are optional and must be negotiated before the first snapshot publishes.
+    if (!this.#hello?.capabilityManifest.capabilities.some(
+      capability => capability.id === "session.owner.update" && capability.grade !== "unavailable",
+    )) return;
     const snapshot = this.#projection.snapshot();
     if (this.#state !== "ready" || !snapshot || this.#runtimeEpoch === undefined) return;
     await this.invoke({ type: "studio.request", requestId: (this.options.createRequestId ?? randomUUID)() as RequestId, runtimeEpoch: this.#runtimeEpoch, operation: { kind: "session.owner.update", sessionId: snapshot.sessionId, state } });
@@ -341,6 +354,40 @@ export class StudioBridgeClient {
     const receipt = await this.invoke({ type: "studio.request", requestId: (this.options.createRequestId ?? randomUUID)() as RequestId, runtimeEpoch: this.#runtimeEpoch, operation });
     if (receipt.status !== "completed") throw new StudioHostError(receipt.error?.code ?? "OUTCOME_UNKNOWN", receipt.error?.message ?? "Context read failed");
     return receipt.result as ContextViewResultMap[K];
+  }
+
+  /** Independent query channel: no StudioReceipt, arbiter command, or ledger entry. */
+  async readComputer<K extends ComputerWorkspaceQuery["kind"]>(operation: Extract<ComputerWorkspaceQuery, { kind: K }>): Promise<ComputerWorkspaceResultMap[K]> {
+    if (!this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === operation.kind && capability.grade !== "unavailable")) {
+      throw new StudioHostError("CAPABILITY_UNAVAILABLE", operation.kind + " is not supported by this Runtime");
+    }
+    const runtimeEpoch = this.#runtimeEpoch;
+    const socket = this.#socket;
+    if (this.#state !== "ready" || runtimeEpoch === undefined || socket === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Computer workspace requires a connected Runtime");
+    }
+    const requestId = (this.options.createRequestId ?? randomUUID)() as RequestId;
+    if (this.#pendingComputerQueries.has(requestId)) throw new Error("Duplicate Computer query request id");
+    const request: StudioComputerQueryRequest<K> = { type: "computer.query", requestId, runtimeEpoch, operation };
+    return new Promise<ComputerWorkspaceResultMap[K]>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#pendingComputerQueries.delete(requestId);
+        reject(new StudioHostError("OUTCOME_UNKNOWN", "Computer workspace query timed out"));
+      }, this.options.requestTimeoutMs ?? 30_000);
+      this.#pendingComputerQueries.set(requestId, { timer, reject, resolve: result => resolve(result as ComputerWorkspaceResultMap[K]) });
+      try {
+        socket.write(encodeFrame("computer-query:" + requestId, runtimeEpoch, request));
+      } catch {
+        clearTimeout(timer);
+        this.#pendingComputerQueries.delete(requestId);
+        reject(new StudioBridgeRequestError("CONNECTION_FAILED"));
+      }
+    });
+  }
+
+  onComputerEvent(listener: (event: StudioComputerEventEnvelope) => void): () => void {
+    this.#computerListeners.add(listener);
+    return () => this.#computerListeners.delete(listener);
   }
 
   async requestCommandManifest(): Promise<OperatorCommandManifest> {
@@ -666,7 +713,40 @@ export class StudioBridgeClient {
     }
   }
 
+  // Private channel validation stops at the envelope; service-owned metadata is
+  // not reparsed or copied into the global Studio projection.
+  #processComputerFrame(frame: DecodedFrame): boolean {
+    if (!frame.body || typeof frame.body !== "object") return false;
+    const body = frame.body as Record<string, unknown>;
+    if (body.type !== "computer.result" && body.type !== "computer.event") return false;
+    if (body.runtimeEpoch !== frame.header.runtimeEpoch) throw new Error("Computer frame epoch mismatch");
+    if (body.runtimeEpoch !== this.#runtimeEpoch) return true;
+    if (body.type === "computer.result") {
+      if (typeof body.requestId !== "string" || typeof body.ok !== "boolean") throw new Error("Invalid Computer result envelope");
+      const response = body as unknown as StudioComputerQueryResponse;
+      if (!response.ok && (!response.error || typeof response.error.code !== "string" || typeof response.error.message !== "string")) {
+        throw new Error("Invalid Computer error envelope");
+      }
+      const pending = this.#pendingComputerQueries.get(response.requestId);
+      if (!pending) return true;
+      clearTimeout(pending.timer);
+      this.#pendingComputerQueries.delete(response.requestId);
+      if (response.ok) pending.resolve(response.result);
+      else pending.reject(new StudioHostError(response.error.code, response.error.message));
+    } else {
+      if (!Number.isSafeInteger(body.stateVersion) || typeof body.occurredAt !== "string" || !body.event || typeof body.event !== "object") {
+        throw new Error("Invalid Computer event envelope");
+      }
+      for (const listener of [...this.#computerListeners]) {
+        try { listener(body as unknown as StudioComputerEventEnvelope); }
+        catch (error) { this.#report(error, "event"); }
+      }
+    }
+    return true;
+  }
+
   #processReadyFrame(frame: DecodedFrame): void {
+    if (this.#processComputerFrame(frame)) return;
     if (
       frame.body !== null &&
       typeof frame.body === "object" &&
@@ -702,6 +782,7 @@ export class StudioBridgeClient {
     const revisionBefore = this.#projection.snapshotRevision();
     const result = this.#projection.applyEvent(event);
     if (result === "gap") {
+      this.#rejectComputerQueries();
       this.#state = "snapshot-required";
       this.#detachReadyListener();
       this.options.onResyncRequired?.();
@@ -762,7 +843,16 @@ export class StudioBridgeClient {
     this.options.onDisconnect?.();
   }
 
+  #rejectComputerQueries(): void {
+    for (const pending of this.#pendingComputerQueries.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new StudioHostError("OUTCOME_UNKNOWN", "Computer workspace connection changed"));
+    }
+    this.#pendingComputerQueries.clear();
+  }
+
   #rejectPending(code: "CONNECTION_FAILED" | "OUTCOME_UNKNOWN"): void {
+    this.#rejectComputerQueries();
     for (const pending of this.#pendingRequests.values()) {
       if (pending.timer !== undefined) clearTimeout(pending.timer);
       pending.reject(new StudioBridgeRequestError(code));

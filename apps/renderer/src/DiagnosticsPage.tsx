@@ -13,7 +13,7 @@ import type {
   StudioClient,
 } from "@omp-studio/client-contract";
 import type { SessionBuildIdentity, SessionBuildProvenance } from "@omp-studio/studio-protocol";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import { ProcessMemoryPanel } from "./ProcessMemoryPanel";
 import { ToastHost } from "./ToastHost";
 import { usePreviewMode } from "./preview/PreviewContext";
@@ -76,9 +76,9 @@ const PREVIEW_CYCLE: ReadonlyArray<{ id: PreviewDiagScenario; labelKey: string }
   { id: "blocked", labelKey: "diagnostics.previewUpdateBlocked" },
 ];
 
-function useNotice(): [notice: { text: string; icon: string } | null, show: (text: string, icon?: string) => void, dismiss: () => void] {
-  const [notice, setNotice] = useState<{ text: string; icon: string } | null>(null);
-  const show = useCallback((text: string, icon = "info") => setNotice({ text, icon }), []);
+function useNotice(): [notice: { text: string; icon: IconName } | null, show: (text: string, icon?: IconName) => void, dismiss: () => void] {
+  const [notice, setNotice] = useState<{ text: string; icon: IconName } | null>(null);
+  const show = useCallback((text: string, icon: IconName = "info") => setNotice({ text, icon }), []);
   const dismiss = useCallback(() => setNotice(null), []);
   return [notice, show, dismiss];
 }
@@ -193,7 +193,7 @@ function previewCapabilities(): CapManifest {
   };
 }
 
-function heroIcon(kind: DiagnosticsHero["kind"]): string {
+function heroIcon(kind: DiagnosticsHero["kind"]): IconName {
   if (kind === "ok") return "check";
   if (kind === "update" || kind === "installing" || kind === "connecting") return "update";
   if (kind === "missing") return "package";
@@ -213,7 +213,7 @@ function primaryLabel(action: DiagnosticsHero["primary"], busy: DiagAction | nul
   return busy?.kind === "recheck" ? t("diagnostics.recheckProgress") : t("diagnostics.recheck");
 }
 
-function primaryIcon(action: DiagnosticsHero["primary"]): string {
+function primaryIcon(action: DiagnosticsHero["primary"]): IconName {
   if (action === "update") return "update";
   if (action === "install") return "package";
   if (action === "reconnect") return "refresh";
@@ -280,7 +280,7 @@ export function DiagnosticsPage({
   /** omp builds that wrote the active session (`snapshot.runtimeIdentity`). */
   buildProvenance?: SessionBuildProvenance;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
  const [workspaceTab,setWorkspaceTab]=useState<"runtime"|"maintenance">("runtime");
   const updates = useUpdates();
   const { t, resolvedLanguage } = useI18n();
@@ -306,7 +306,7 @@ export function DiagnosticsPage({
   const viewCaps = preview ? previewCapabilities() : caps;
   const runtimeUpdate = preview ? undefined : updates.state.check?.runtime;
   const runtimeUpdateBlocker = preview
-    ? scenario === "blocked" ? t("diagnostics.runtimeUpdateBlockerDemo", { version: mock.requiredAppVersion }) : undefined
+    ? scenario === "blocked" ? t(marks ? "diagnostics.runtimeUpdateBlockerDemo" : "diagnostics.runtimeUpdateBlocker", { version: mock.requiredAppVersion }) : undefined
     : runtimeUpdate?.plan === "blocked" ? runtimeUpdate.reason ?? t("diagnostics.runtimeUpdateBlocker") : undefined;
   const blocksLocalUpdate = Boolean(runtimeUpdateBlocker && (preview || !viewEnv?.installer.availableVersion || viewEnv.installer.availableVersion === runtimeUpdate?.runtimeVersion));
   const view = useMemo(() => {
@@ -340,7 +340,7 @@ export function DiagnosticsPage({
 
   const refresh = useCallback(async (mode: "recheck" | "reconnect" = "recheck") => {
     if (preview) {
-      show(mode === "reconnect" ? t("diagnostics.reconnectedRuntimeDemo") : t("diagnostics.recheckedOmpDemo"), "check");
+      if (marks) show(mode === "reconnect" ? t("diagnostics.reconnectedRuntimeDemo") : t("diagnostics.recheckedOmpDemo"), "check");
       return;
     }
     beginAction(
@@ -376,11 +376,11 @@ export function DiagnosticsPage({
     } finally {
       setBusy(null);
     }
-  }, [beginAction, client, preview, show, runtime, env, refreshQueries, t]);
+  }, [beginAction, client, marks, preview, show, runtime, env, refreshQueries, t]);
 
   const checkUpdate = useCallback(async (notify: boolean) => {
     if (preview) {
-      if (notify) {
+      if (notify && marks) {
         show(
           scenario === "update"
             ? t("diagnostics.updateCheckedDemo", { version: mock.availableVersion })
@@ -437,7 +437,7 @@ export function DiagnosticsPage({
     } finally {
       if (notify) setBusy(null);
     }
-  }, [beginAction, client, preview, scenario, mock.availableVersion, show, t]);
+  }, [beginAction, client, marks, preview, scenario, mock.availableVersion, show, t]);
 
   const checkUpdateRef = useRef(checkUpdate);
   checkUpdateRef.current = checkUpdate;
@@ -468,11 +468,11 @@ export function DiagnosticsPage({
     }
     if (preview) {
       if (kind === "import") {
-        show(t("updates.importDemo"), "check");
+        if (marks) show(t("updates.importDemo"), "check");
         return;
       }
       const labels = { install: t("diagnostics.installedRuntimeDemo"), update: t("diagnostics.updatedRuntimeDemo"), reinstall: t("diagnostics.reinstalledRuntimeDemo") };
-      show(labels[kind], "check");
+      if (marks) show(labels[kind], "check");
       return;
     }
     if (kind === "import") {
@@ -607,12 +607,12 @@ export function DiagnosticsPage({
     } finally {
       setBusy(null);
     }
-  }, [beginAction, client, preview, show, t, updates.state.check?.runtime.plan, blocksLocalUpdate, runtimeUpdateBlocker]);
+  }, [beginAction, client, marks, preview, show, t, updates.state.check?.runtime.plan, blocksLocalUpdate, runtimeUpdateBlocker]);
 
   const restartRuntime = useCallback(async () => {
     setConfirmRestart(false);
     if (preview) {
-      show(t("diagnostics.restartedDemo"), "check");
+      if (marks) show(t("diagnostics.restartedDemo"), "check");
       return;
     }
     beginAction({ kind: "restart", label: t("diagnostics.stoppingManagedProcess"), step: 1, steps: 3 });
@@ -629,13 +629,13 @@ export function DiagnosticsPage({
     } finally {
       setBusy(null);
     }
-  }, [beginAction, client, preview, show, refreshQueries]);
+  }, [beginAction, client, marks, preview, show, refreshQueries]);
 
   const maintainRuntime = useCallback(async (kind: "rollback" | "prune") => {
     if (busy !== null) return;
     const label = t(kind === "rollback" ? "updates.rollbackRuntime" : "updates.pruneOld");
     if (preview) {
-      show(`${label} · ${t("appUpdate.demoUpdate")}`, "check");
+      if (marks) show(`${label} · ${t("appUpdate.demoUpdate")}`, "check");
       return;
     }
     const chrome = globalThis.ompStudioChrome;
@@ -652,11 +652,11 @@ export function DiagnosticsPage({
     } catch (error) {
       show(error instanceof Error ? error.message : t("diagnostics.installFailed"), "alert-c");
     } finally { setBusy(null); }
-  }, [busy, preview, t, show, beginAction, refreshQueries]);
+  }, [busy, marks, preview, t, show, beginAction, refreshQueries]);
 
   const openLogDir = useCallback(async () => {
     if (preview) {
-      show(t("diagnostics.openLogsDemoToast"), "folder");
+      if (marks) show(t("diagnostics.openLogsDemoToast"), "folder");
       return;
     }
     const api = window.ompStudioChrome;
@@ -671,11 +671,11 @@ export function DiagnosticsPage({
     } catch (error) {
       show(error instanceof Error ? error.message : t("diagnostics.openLogsFailed"), "alert-c");
     }
-  }, [preview, show]);
+  }, [marks, preview, show]);
 
   const exportLogs = useCallback(async () => {
     if (preview) {
-      show(t("diagnostics.exportLogsDemoToast"), "export");
+      if (marks) show(t("diagnostics.exportLogsDemoToast"), "export");
       return;
     }
     const api = window.ompStudioChrome;
@@ -691,7 +691,7 @@ export function DiagnosticsPage({
     } catch (error) {
       show(error instanceof Error ? error.message : t("diagnostics.exportLogsFailed"), "alert-c");
     }
-  }, [preview, show]);
+  }, [marks, preview, show]);
 
   const runPrimary = useCallback(() => {
     if (view.hero.primary === "install") void installRuntime("install");
@@ -716,7 +716,7 @@ export function DiagnosticsPage({
         `${t("diagnostics.reportAvailableArtifact")}: ${mock.availableVersion}`,
         `${t("diagnostics.reportUpstreamVersion")}: ${mock.upstreamVersion} (${mock.upstreamCommit})`,
         `${t("diagnostics.reportPlatform")}: ${mock.platform} · ${mock.arch}`,
-        `${t("diagnostics.reportDemoScenario")}: ${scenario}`,
+        ...(marks ? [`${t("diagnostics.reportDemoScenario")}: ${scenario}`] : []),
         "",
         `Capabilities: ${mock.capabilities.join(", ")}`,
         "",
@@ -748,7 +748,7 @@ export function DiagnosticsPage({
     } catch {
       show(t("diagnostics.diagReportCopyFailed"), "alert-c");
     }
-  }, [preview, mock, scenario, viewRuntime, viewEnv, viewDiag, viewCaps, show]);
+  }, [marks, preview, mock, scenario, viewRuntime, viewEnv, viewDiag, viewCaps, show]);
 
   const problems = (viewDiag?.entries ?? []).filter((entry) => entry.level === "error" || entry.level === "warning");
   const capList = viewCaps?.capabilities ?? [];
@@ -758,16 +758,16 @@ export function DiagnosticsPage({
 
   return (
     <div className="page-wide diag-page">
-<WorkspaceTabs<"runtime"|"maintenance"> id="diagnostics-workspace" label="Diagnostics" value={workspaceTab} onChange={setWorkspaceTab} items={[{id:"runtime",icon:"activity",label:resolvedLanguage==="zh"?"运行环境":"Runtime"},{id:"maintenance",icon:"settings",label:resolvedLanguage==="zh"?"会话与维护":"Sessions and maintenance"}]}/>
+<WorkspaceTabs<"runtime"|"maintenance"> id="diagnostics-workspace" label="Diagnostics" value={workspaceTab} onChange={setWorkspaceTab} items={[{id:"runtime",icon:"pulse",label:resolvedLanguage==="zh"?"运行环境":"Runtime"},{id:"maintenance",icon:"settings",label:resolvedLanguage==="zh"?"会话与维护":"Sessions and maintenance"}]}/>
 <WorkspacePanel id="diagnostics-workspace" name="runtime" active={workspaceTab==="runtime"}>
       <div className="diag-head">
         <div>
           <h1>{t("diagnostics.title")}</h1>
           <p className="muted small">{t("diagnostics.desc")}</p>
-          {preview ? <p className="tiny muted">{t("diagnostics.previewNote")}</p> : null}
+          {preview && marks ? <p className="tiny muted">{t("diagnostics.previewNote")}</p> : null}
         </div>
         <div className="diag-head-actions">
-          {preview ? (
+          {preview && marks ? (
             <button
               type="button"
               className="btn outline"
@@ -798,7 +798,7 @@ export function DiagnosticsPage({
           </button>
           {view.hero.kind === "down" || view.hero.kind === "failed" ? (
             <button type="button" className="btn outline" disabled={busy !== null || !canReinstall} onClick={() => setConfirmReinstall(true)}>
-              <Icon name="refresh" extra="sm" />{t("diagnostics.reinstallRuntime")}
+              <Icon name="refresh" extra="sm" />{t("diagnostics.reinstall")}
             </button>
           ) : null}
         </div>
@@ -840,7 +840,7 @@ export function DiagnosticsPage({
       <SessionBuildList
         provenance={preview ? PREVIEW_BUILD_PROVENANCE : buildProvenance}
         zh={resolvedLanguage === "zh"}
-        demo={preview}
+        demo={preview && marks}
       />
 
       {viewRuntime?.status === "disconnected" || viewRuntime?.status === "unavailable" ? (

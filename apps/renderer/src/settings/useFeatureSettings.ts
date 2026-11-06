@@ -17,6 +17,7 @@ export function useFeatureSettings({ client, context, visible }: FeatureSettings
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(false);
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
   const epoch = useRef(0), lock = useRef(false);
+  const owner = useRef<{ client: StudioClient | undefined; sessionId: string | undefined; preview: boolean } | undefined>(undefined);
   const supports = (kind: string) => preview || context?.capabilities?.capabilities.some(row => row.id === kind && row.grade !== "unavailable") === true;
   const enabled = preview || !!(client && context?.available && context.sessionId && supports("preferences.features.get"));
   const invoke = useCallback(async <K extends keyof FeatureSettingsResultMap>(kind: K, input: CommandInput<K>): Promise<FeatureSettingsResultMap[K]> => {
@@ -27,7 +28,9 @@ export function useFeatureSettings({ client, context, visible }: FeatureSettings
   useEffect(() => {
     const generation = ++epoch.current;
     lock.current = false; setBusy(false); setError(""); setNotice(""); setLoading(false);
-    setRows(preview ? structuredClone(PREVIEW_FEATURE_SETTINGS) : []);
+    const sameOwner = owner.current?.client === client && owner.current?.sessionId === context?.sessionId && owner.current?.preview === preview;
+    owner.current = { client, sessionId: context?.sessionId, preview };
+    if (!preview || !sameOwner) setRows(preview ? structuredClone(PREVIEW_FEATURE_SETTINGS) : []);
     if (!preview && enabled && visible && context?.sessionId) {
       setLoading(true);
       void invoke("preferences.features.get", { sessionId: context.sessionId }).then(result => {

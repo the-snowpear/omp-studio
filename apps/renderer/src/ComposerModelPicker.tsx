@@ -29,6 +29,7 @@ import { Icon } from "./icons";
 import { useI18n } from "./i18n";
 import { hostErrorMessage } from "./hostError";
 import { MODEL_THINKING, createPreviewModelConfig } from "./preview/modelConfigFixtures";
+import { usePreviewMode } from "./preview/PreviewContext";
 import { ModelPickCaps, ProviderGlyph, ROLE_ICONS, ROLE_TINTS, groupModelsByProvider } from "./models/modelPresentation";
 
 type MenuKind = "none" | "model" | "thinking";
@@ -114,6 +115,7 @@ export function ComposerModelMenu({
   onClose: () => void;
 }) {
   const { t } = useI18n();
+  const { marks } = usePreviewMode();
   const [moreOpen, setMoreOpen] = useState(false);
   const [flyoutSide, setFlyoutSide] = useState<"right" | "left">("right");
   const flyoutTimer = useRef<number | undefined>(undefined);
@@ -298,7 +300,7 @@ export function ComposerModelMenu({
             )}
           </div>
         ) : null}
-        {preview ? (
+        {preview && marks ? (
           <div className="cmp-menu-note">
             <span className="chip gray xs">{t("common.demo")}</span>
             <span>{note ?? t("composer.previewModelNote")}</span>

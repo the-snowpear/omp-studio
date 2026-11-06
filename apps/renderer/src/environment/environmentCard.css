@@ -1,0 +1,53 @@
+/* Project identity, quiet runtime metadata, and two Git shortcuts. */
+.env-card { position: relative; display: flex; flex-direction: column; box-sizing: border-box; min-width: 0; padding: 4px 14px 5px; color: var(--text); font-family: var(--font-ui); }
+.env-hero { display: flex; align-items: center; gap: 10px; min-width: 0; margin: 0 -6px; padding: 3px 6px; border: 0; border-radius: var(--r-6); background: none; color: inherit; font: inherit; text-align: left; }
+.env-project-icon { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: var(--r-4); background: var(--surface-hover); color: var(--text-2); }
+.env-project-icon .icon { width: 16px; height: 16px; }
+.env-project-copy { display: flex; flex: 1; align-items: baseline; gap: 10px; min-width: 0; }
+.env-name, .env-address, .env-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.env-name { flex: 0 1 auto; min-width: 0; font-size: var(--fs-14); font-weight: var(--fw-semibold); line-height: 1.4; }
+.env-project-copy:has(.env-address) .env-name { max-width: 60%; }
+.env-address { flex: 1 1 0; min-width: 0; color: var(--text-3); font-size: var(--fs-11); line-height: 1.4; text-align: right; }
+.env-hero.is-empty .env-name { color: var(--text-3); font-weight: var(--fw-medium); }
+
+.env-list { display: flex; flex-direction: column; min-width: 0; }
+.env-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 10px; box-sizing: border-box; min-width: 0; min-height: 24px; margin: 0 -6px; padding: 2px 6px; border: 0; border-radius: var(--r-4); background: none; color: var(--text-2); font: inherit; font-size: var(--fs-12); text-align: left; }
+.env-row.is-env { margin-top: 2px; font-size: var(--fs-11); color: var(--text-3); }
+.env-row.is-env .env-meta { font-size: var(--fs-11); }
+.env-rule { height: 1px; margin: 4px 0; background: var(--border); }
+.env-glyph { display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); }
+.env-glyph .icon { width: 14px; height: 14px; }
+.env-glyph[data-state="connecting"] { color: var(--amber); }
+.env-glyph[data-state="disconnected"] { color: var(--red); }
+.env-value { display: flex; align-items: center; min-width: 0; }
+.env-text { min-width: 0; }
+.env-text.is-machine { font-family: var(--font-mono); }
+.env-row.is-empty .env-text { color: var(--text-3); }
+.env-meta { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-12); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.env-sync { display: inline-flex; gap: 7px; }
+.env-sync [data-tone="ahead"] { color: var(--text-2); }
+.env-sync [data-tone="behind"], .env-op { color: var(--amber); }
+.env-add { color: var(--git-added); }
+.env-del { color: var(--git-deleted); }
+.env-meter { position: absolute; inset: auto 0 0; display: flex; height: 2px; overflow: hidden; pointer-events: none; }
+.env-meter > i { min-width: 0; transition: flex-grow 200ms var(--ease-out); }
+.env-meter .is-add { background: var(--git-added); }
+.env-meter .is-del { background: var(--git-deleted); }
+
+.env-hero.is-action, .env-row.is-action { cursor: pointer; transition: background 120ms var(--ease); }
+.env-hero.is-action:hover, .env-row.is-action:hover { background: var(--surface-hover); }
+.env-hero.is-action:active, .env-row.is-action:active { background: var(--surface-active); }
+.env-hero:focus-visible, .env-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.env-skeleton { width: 56px; height: 9px; border-radius: var(--r-full); background: var(--surface-active); animation: env-breathe 1.5s var(--ease) infinite; }
+@keyframes env-breathe { 0%, 100% { opacity: 0.4; } 85% { opacity: 0.9; } }
+
+/* Content-sized card; retain the dock header and its controls. */
+.dock-card:has([data-dock-slot="environment"]) > .dock-card-resizer { display: none; }
+/* The body is portalled outside .dock-card, so it needs its own inner radius. */
+.dock-panel-content[data-panel="environment"][data-dock-region="rail"] {
+  border-radius: 0 0 calc(var(--r-10) - 1px) calc(var(--r-10) - 1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .env-hero.is-action, .env-row.is-action, .env-meter > i { transition: none; }
+  .env-skeleton { animation: none; opacity: 0.55; }
+}

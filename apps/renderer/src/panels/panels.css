@@ -1,0 +1,391 @@
+/* ============================================================
+   Dock document panels — Output ledger, OMP Logs transcript
+   ------------------------------------------------------------
+   Both panels were `.bp-page` documents in the pre-dock workbench:
+   an absolutely positioned page that brought its own gutter and
+   scrollbar (`styles/workbench.css`). Docked into a
+   `.dock-panel-content` host — a fixed-size box with `overflow:auto`
+   and `height:100%` children — that page frame disappeared, so the
+   text sat flush against the panel edge and block children were
+   squeezed by the host's flex column.
+
+   A dock document now owns its geometry: a masthead that keeps the
+   panel's identity and count on screen, and one scrollport holding
+   a ledger. Every rule here lives under `.dock-doc` and reaches
+   nothing else, so terminals, trees and graphics panels are
+   untouched.
+   ============================================================ */
+
+.dock-doc {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--bg-inset);
+  font-size: var(--fs-12);
+}
+
+/* ---------- masthead ---------- */
+
+.dock-doc-mast {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 2px var(--sp-12) 2px var(--sp-14);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-inset);
+}
+
+.dock-doc-title {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* Hairline between the panel name and its one-line scope note. */
+.dock-doc-rule {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--border-strong);
+}
+
+.dock-doc-sub {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.dock-metric > b {
+  color: var(--text-2);
+  font-weight: var(--fw-semibold);
+}
+
+/* Preview-on marker (AGENTS.md: demo surfaces must say so). */
+.dock-badge-demo {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-4);
+  background: var(--accent-softer);
+  color: var(--accent);
+  font-size: var(--fs-11);
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* One soft accent flash when the ledger grows: the count is a live ticker,
+   not a static label, and this is the only motion in the panel. */
+.dock-metric.is-tick { animation: dock-metric-tick 560ms var(--ease-out); }
+@keyframes dock-metric-tick {
+  0% { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
+  100% { background: var(--surface-2); border-color: var(--border); color: var(--text-3); }
+}
+
+/* ---------- scrollport ---------- */
+
+.dock-doc-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* ---------- ledger ---------- */
+
+.dock-ledger {
+  --ledger-x: var(--sp-14);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+.dock-ledger--events { --ledger-cols: 132px 44px minmax(0, 1fr); }
+.dock-ledger--commands { --ledger-cols: 132px 128px minmax(0, 1fr); }
+
+.dock-ledger-head,
+.dock-row {
+  display: grid;
+  grid-template-columns: var(--ledger-cols);
+  column-gap: var(--sp-10);
+  align-items: center;
+  box-sizing: border-box;
+  min-width: 0;
+  padding-inline: var(--ledger-x);
+}
+
+.dock-ledger-head {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  height: 22px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dock-row {
+  min-height: 26px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.dock-row:hover {
+  background: var(--surface-hover);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.dock-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dock-cell-time,
+.dock-cell-seq {
+  color: var(--text-faint);
+  font-family: var(--font-output-code);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+.dock-cell-seq { text-align: right; }
+
+/* event domain + leaf, with a severity dot that only appears for states
+   the operator must act on */
+.dock-cell-kind,
+.dock-cell-status,
+.dock-cell-name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+.dock-cell-name { align-items: baseline; gap: var(--sp-8); }
+
+.dock-tone {
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.dock-tone[data-tone="ok"] { background: var(--green); }
+.dock-tone[data-tone="alert"] { background: var(--red); }
+.dock-tone[data-tone="warn"] { background: var(--amber); }
+.dock-tone[data-tone="live"] { background: var(--accent); }
+
+.dock-kind,
+.dock-command {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-output-code);
+  font-size: var(--fs-12);
+}
+.dock-kind > .dock-kind-domain { color: var(--text-faint); }
+.dock-kind > .dock-kind-name { color: var(--text-2); font-weight: var(--fw-medium); }
+/* The command name is identity: it keeps its width and the trailing detail
+   gives way, so a 300px card never shows `loo…`. */
+.dock-command { flex: 0 0 auto; max-width: 100%; color: var(--text); }
+
+.dock-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-family: var(--font-ui);
+  font-size: var(--fs-11);
+}
+
+/* The ledger is mono for machine data; the status word is a label the operator
+   reads, so it keeps the UI ramp (and 19 characters fit the 128px column). */
+.dock-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--fs-11);
+  letter-spacing: 0.01em;
+}
+
+/* ---------- padded body ----------
+   Problems / Tests / Preview Logs keep their own row markup and header bars;
+   they only lost the page gutter when the dock host replaced `.bp-page`. The
+   wrapper must stay content-sized so the host, not the wrapper, scrolls. */
+
+.dock-panel-content > .dock-pad {
+  box-sizing: border-box;
+  height: auto;
+  min-height: 100%;
+  padding: var(--sp-8) var(--sp-12) var(--sp-12);
+}
+
+/* ---------- empty ---------- */
+
+/* Centers the empty card in the scrollport without giving it a fixed height:
+   in card mode the document still grows with its content. */
+.dock-doc-fill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: var(--sp-16);
+}
+
+.dock-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  box-sizing: border-box;
+  width: min(440px, 100%);
+  padding: var(--sp-20) var(--sp-16);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-10);
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  text-align: center;
+}
+.dock-empty .icon {
+  width: 22px;
+  height: 22px;
+  color: var(--glyph-faint);
+}
+.dock-empty strong {
+  color: var(--text-2);
+  font-weight: var(--fw-medium);
+}
+.dock-empty span {
+  max-width: 42ch;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+
+/* ---------- operator console (Output only) ---------- */
+
+.dock-console { border-top: 1px solid var(--border); }
+.dock-console > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-height: 30px;
+  padding-inline: var(--sp-14);
+  color: var(--text-2);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+.dock-console > summary::-webkit-details-marker { display: none; }
+.dock-console > summary:hover { background: var(--surface-hover); color: var(--text); }
+.dock-console > summary .icon {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.dock-console[open] > summary .icon { transform: rotate(90deg); }
+.dock-console-hint {
+  margin-inline-start: auto;
+  color: var(--text-faint);
+  font-weight: var(--fw-regular);
+}
+.dock-console-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-14);
+  padding: var(--sp-4) var(--sp-14) var(--sp-16);
+}
+
+.dock-group-label {
+  margin: 0 0 var(--sp-8);
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dock-group-hint {
+  margin: -4px 0 var(--sp-8);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.dock-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8);
+}
+.dock-form-row .select { flex: 1 1 200px; min-width: 0; }
+.dock-form-row .input {
+  flex: 2 1 240px;
+  min-width: 0;
+  font-family: var(--font-output-code);
+  font-size: var(--fs-12);
+}
+
+/* ---------- narrow panels ----------
+   A dock panel can be a 300px card in the rail or a 2000px bottom dock.
+   Below ~620px the timestamp gutter costs more than it explains, so the
+   ledgers drop to identity + state. */
+
+@container (max-width: 620px) {
+  .dock-ledger--events { --ledger-cols: 40px minmax(0, 1fr); }
+  .dock-ledger--commands { --ledger-cols: 116px minmax(0, 1fr); }
+  .dock-ledger :is(.dock-cell-time) { display: none; }
+  /* Narrow panels keep identity + state; the reason survives as a tooltip. */
+  .dock-detail { display: none; }
+}
+@container (max-width: 380px) {
+  .dock-doc-rule,
+  .dock-doc-sub { display: none; }
+  .dock-doc-mast { padding-inline: var(--sp-10); }
+  .dock-console-hint { display: none; }
+}

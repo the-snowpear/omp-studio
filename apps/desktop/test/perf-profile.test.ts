@@ -28,9 +28,9 @@ import {
 import {
   PERF_PROFILE_CHANNELS,
   createPerfProfileApi,
-  parsePerfProfileSnapshot,
   type PerfProfileSnapshot,
 } from "../src/perf-profile-shared.js";
+import { parsePerfProfileSnapshot } from "../src/perf-profile-cache.js";
 import { registerPerfProfileIpc, type PerfProfileIpcEvent } from "../src/perf-profile-ipc.js";
 
 const GiB = 1024 ** 3;
@@ -497,14 +497,15 @@ describe("registerPerfProfileIpc", () => {
 });
 
 describe("createPerfProfileApi (preload surface)", () => {
-  function makeIpcStub(options: { cached?: unknown; probeResult?: unknown; syncThrows?: boolean }) {
-    const listeners = new Map<string, Set<(event: unknown, payload: unknown) => void>>();
+  function makeIpcStub(options: { cached?: PerfProfileSnapshot | null; probeResult?: PerfProfileSnapshot | null; syncThrows?: boolean; probeThrows?: boolean }) {
+    const listeners = new Map<string, Set<(event: unknown, payload: PerfProfileSnapshot | null | undefined) => void>>();
     const removed: unknown[] = [];
     return {
       removed,
       listeners,
       invoke: async (channel: string) => {
         assert.equal(channel, PERF_PROFILE_CHANNELS.probe);
+        if (options.probeThrows) throw new Error("IPC unavailable");
         return options.probeResult;
       },
       sendSync: (channel: string) => {
@@ -512,7 +513,7 @@ describe("createPerfProfileApi (preload surface)", () => {
         if (options.syncThrows === true) throw new Error("no handler");
         return options.cached;
       },
-      on(channel: string, listener: (event: unknown, payload: unknown) => void) {
+      on(channel: string, listener: (event: unknown, payload: PerfProfileSnapshot | null | undefined) => void) {
         let set = listeners.get(channel);
         if (set === undefined) {
           set = new Set();
@@ -520,7 +521,7 @@ describe("createPerfProfileApi (preload surface)", () => {
         }
         set.add(listener);
       },
-      removeListener(channel: string, listener: (event: unknown, payload: unknown) => void) {
+      removeListener(channel: string, listener: (event: unknown, payload: PerfProfileSnapshot | null | undefined) => void) {
         removed.push(listener);
         listeners.get(channel)?.delete(listener);
       },
@@ -530,19 +531,21 @@ describe("createPerfProfileApi (preload surface)", () => {
   test("cached is read synchronously and survives a missing handler", () => {
     const snapshot = cachedSnapshot();
     assert.deepEqual(createPerfProfileApi(makeIpcStub({ cached: snapshot })).cached, snapshot);
-    assert.equal(createPerfProfileApi(makeIpcStub({ cached: "garbage" })).cached, null);
+    assert.equal(createPerfProfileApi(makeIpcStub({ cached: null })).cached, null);
     assert.equal(createPerfProfileApi(makeIpcStub({ syncThrows: true })).cached, null);
   });
 
-  test("probe validates the response instead of trusting Main blindly", async () => {
+  test("probe returns Main's snapshot and propagates unavailability or IPC failure", async () => {
     const snapshot = cachedSnapshot();
     const api = createPerfProfileApi(makeIpcStub({ probeResult: snapshot }));
     assert.deepEqual(await api.probe(), snapshot);
-    const broken = createPerfProfileApi(makeIpcStub({ probeResult: { tier: "L2" } }));
-    await assert.rejects(() => broken.probe(), /invalid response/u);
+    const unavailable = createPerfProfileApi(makeIpcStub({ probeResult: null }));
+    await assert.rejects(() => unavailable.probe(), /unavailable/u);
+    const broken = createPerfProfileApi(makeIpcStub({ probeThrows: true }));
+    await assert.rejects(() => broken.probe(), /IPC unavailable/u);
   });
 
-  test("onChanged delivers only valid snapshots and unsubscribes the exact listener", () => {
+  test("onChanged delivers Main snapshots and unsubscribes the exact listener", () => {
     const ipc = makeIpcStub({});
     const api = createPerfProfileApi(ipc);
     assert.ok(Object.isFrozen(api));
@@ -551,9 +554,10 @@ describe("createPerfProfileApi (preload surface)", () => {
     const off = api.onChanged((snapshot) => received.push(snapshot));
     const listener = [...(ipc.listeners.get(PERF_PROFILE_CHANNELS.changed) ?? [])][0];
     assert.ok(listener);
-    listener({}, cachedSnapshot());
-    listener({}, { tier: "L2" });
-    assert.equal(received.length, 1);
+    const snapshot = cachedSnapshot();
+    listener({}, snapshot);
+    listener({}, null);
+    assert.deepEqual(received, [snapshot]);
     off();
     assert.equal(ipc.removed[0], listener, "identity removal");
     assert.equal(ipc.listeners.get(PERF_PROFILE_CHANNELS.changed)?.size ?? 0, 0);

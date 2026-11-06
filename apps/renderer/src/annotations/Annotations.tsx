@@ -45,6 +45,7 @@ const id = () => crypto.randomUUID();
 export function AnnotationButton({
   source,
   label,
+  className,
   small = false,
   iconOnly = false,
   menu = false,
@@ -52,6 +53,7 @@ export function AnnotationButton({
 }: {
   source?: AnnotationCapture;
   label?: string;
+  className?: string;
   small?: boolean;
   iconOnly?: boolean;
   menu?: boolean;
@@ -66,13 +68,13 @@ export function AnnotationButton({
       type="button"
       role={menu ? "menuitem" : undefined}
       className={
-        menu
+        className ?? (menu
           ? "menu-item"
           : iconOnly
             ? "icon-btn"
             : small
               ? "ev-msg-copy"
-              : "btn small outline"
+              : "btn small outline")
       }
       aria-label={title}
       data-tip={title}
@@ -131,7 +133,7 @@ export function AnnotationsProvider({
   runtimeSessionId?: string | undefined;
   onInsert(text: string): void;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [bundle, setBundle] = useState<AnnotationBundle>(empty);
@@ -326,7 +328,7 @@ export function AnnotationsProvider({
           if (preview) {
             commit(structuredClone(PREVIEW_ANNOTATION_BUNDLE));
             setSelected("demo-source");
-            setNotice(zh ? "演示快照" : "Demo snapshot");
+            if (marks) setNotice(zh ? "演示快照" : "Demo snapshot");
             return;
           }
           const value = await client.query("artifacts.text.read", {
@@ -342,7 +344,7 @@ export function AnnotationsProvider({
         });
       },
     }),
-    [capture, client, preview, run, commit, zh],
+    [capture, client, marks, preview, run, commit, zh],
   );
   const source =
     bundle.sources.find((item) => item.id === selected) ?? bundle.sources[0];
@@ -375,7 +377,7 @@ export function AnnotationsProvider({
       let prompt: string;
       if (preview)
         prompt =
-          "[演示标注 / Demo annotations]\n" +
+          (marks ? "[演示标注 / Demo annotations]\n" : "") +
           bundle.notes.map((note) => note.note).join("\n\n");
       else {
         const handle = await client.command("annotations.prepare", {
@@ -432,7 +434,7 @@ export function AnnotationsProvider({
             <header>
               <h2 id="annotation-title">
                 {zh ? "标注" : "Annotations"}
-                {preview ? (zh ? " · 演示" : " · Demo") : ""}
+                {preview && marks ? (zh ? " · 演示" : " · Demo") : ""}
               </h2>
               <span className="small muted">
                 {bundle.notes.length} {zh ? "条标注" : "annotations"}
@@ -760,9 +762,10 @@ export function AnnotationsProvider({
                 onClick={() =>
                   void run(async (epoch) => {
                     if (preview) {
-                      setNotice(
-                        zh ? "演示：已保存快照" : "Demo: snapshot saved",
-                      );
+                      if (marks)
+                        setNotice(
+                          zh ? "演示：已保存快照" : "Demo: snapshot saved",
+                        );
                       return;
                     }
                     const value = {

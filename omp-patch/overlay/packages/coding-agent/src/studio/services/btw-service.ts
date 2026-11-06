@@ -1,12 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { BtwHistoryStore, type BtwHistoryRecord, getBtwTurns } from "../../session/btw-history";
+import { BtwHistoryStore, type BtwHistoryRecord, type BtwHistoryTurn, getBtwTurns } from "../../session/btw-history";
+import { beginBtwTurn, runBtwTurn } from "../../session/btw-turn";
+import type { AgentSession } from "../../session/agent-session";
 import type { BtwTopicSummary } from "../runtime-upgrade-protocol";
-import type { AssistantMessage, ImageContent, Message } from "@oh-my-pi/pi-ai";
-import { prompt } from "@oh-my-pi/pi-utils";
-import btwUserPrompt from "../../prompts/system/btw-user.md" with { type: "text" };
+import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
 import { CONVERSATION_LIVE_COALESCE_INTERVAL_MS } from "./conversation-live-projector";
-
-const DEFAULT_MAX_TEXT_BYTES = 256 * 1024;
 
 export type StudioBtwStatus = "running" | "completed" | "failed" | "aborted";
 
@@ -15,6 +13,7 @@ export interface StudioBtwSnapshot {
 	topicId?: string;
 	title?: string;
 	question?: string;
+	turnIndex?: number;
 	ephemeralId: string;
 	status: StudioBtwStatus;
 	text: string;
@@ -23,25 +22,21 @@ export interface StudioBtwSnapshot {
 }
 
 export interface StudioBtwSessionPort {
+	readonly model: AgentSession["model"];
 	readonly isStreaming: boolean;
 	readonly sessionManager: {
 		getSessionId(): string;
 		getLeafId(): string | null;
+		ensureOnDisk(): Promise<void>;
 		getArtifactsDir?(): string | null;
 	};
-	runEphemeralTurn(args: {
-		promptText: string;
-		promptImages?: ImageContent[];
-		history?: readonly Message[];
-		conversationKey?: string;
-		onTextDelta?: (delta: string) => void;
-		signal?: AbortSignal;
-	}): Promise<{ replyText: string; assistantMessage: AssistantMessage }>;
+	runEphemeralTurn: AgentSession["runEphemeralTurn"];
 	branchFromBtw(
 		question: string,
 		assistantMessage: AssistantMessage,
 		leafId: string,
 		sessionId: string,
+		images?: ImageContent[],
 	): Promise<{ cancelled: boolean }>;
 }
 
@@ -58,7 +53,7 @@ export class StudioBtwError extends Error {
 interface StudioBtwRecord {
 	topicId: string;
 	prior?: BtwHistoryRecord;
-	history?: Message[];
+	history?: readonly BtwHistoryTurn[];
 	createdAt: number;
 	conversationKey: string;
 	ephemeralId: string;
@@ -78,6 +73,7 @@ interface StudioBtwRecord {
 }
 
 export interface StudioBtwServiceOptions {
+	historyScope?: string;
 	idGenerator?: () => string;
 	tokenGenerator?: () => string;
 	maxTextBytes?: number;
@@ -102,16 +98,17 @@ export class StudioBtwService {
 	readonly #tokenGenerator: () => string;
 	readonly #maxTextBytes: number;
 	readonly #coalesceIntervalMs: number;
-	#emitTimer: ReturnType<typeof setTimeout> | undefined;
+	#emitTimer: Timer | undefined;
 	#current: StudioBtwRecord | undefined;
 	#store: BtwHistoryStore | undefined;
 	#storeSession: string | undefined;
+	#storeArtifacts: string | undefined;
 	#storePromise: Promise<BtwHistoryStore> | undefined;
 	#writes: Promise<void> = Promise.resolve();
 	#saveError: Error | undefined;
 	#lastSaved: BtwHistoryRecord | undefined;
 	#runs = new Set<Promise<void>>();
-	#lineages = new Map<string, string>();
+	readonly #historyScope: string | undefined;
 
 	constructor(
 		private readonly session: StudioBtwSessionPort,
@@ -119,9 +116,13 @@ export class StudioBtwService {
 	) {
 		this.#idGenerator = options.idGenerator ?? randomUUID;
 		this.#tokenGenerator = options.tokenGenerator ?? randomUUID;
-		this.#maxTextBytes = options.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES;
+		this.#maxTextBytes = options.maxTextBytes ?? Number.POSITIVE_INFINITY;
+		this.#historyScope = options.historyScope;
 		this.#coalesceIntervalMs = options.coalesceIntervalMs ?? CONVERSATION_LIVE_COALESCE_INTERVAL_MS;
-		if (!Number.isSafeInteger(this.#maxTextBytes) || this.#maxTextBytes < 1) {
+		if (
+			this.#maxTextBytes !== Number.POSITIVE_INFINITY &&
+			(!Number.isSafeInteger(this.#maxTextBytes) || this.#maxTextBytes < 1)
+		) {
 			throw new RangeError("BTW text limit must be a positive integer");
 		}
 		if (!Number.isSafeInteger(this.#coalesceIntervalMs) || this.#coalesceIntervalMs < 0) {
@@ -129,38 +130,46 @@ export class StudioBtwService {
 		}
 	}
 
-	async #historyStore(): Promise<BtwHistoryStore> {
+	async #historyStore(fresh = false): Promise<BtwHistoryStore> {
 		const sessionId = this.session.sessionManager.getSessionId();
-		if (this.#storeSession === sessionId && this.#storePromise) return this.#storePromise;
+		const artifacts = this.session.sessionManager.getArtifactsDir?.() ?? undefined;
 		await this.flush();
-		this.#storeSession = sessionId;
-		this.#lineages.clear();
-		this.#storePromise = BtwHistoryStore.open(this.session.sessionManager.getArtifactsDir?.() ?? undefined);
-		try {
-			this.#store = await this.#storePromise;
-		} catch (error) {
-			this.#storePromise = undefined;
-			this.#store = undefined;
-			this.#saveError = error instanceof Error ? error : new Error("History storage unavailable");
-			throw this.#saveError;
+		if (this.#storeSession === sessionId && this.#storeArtifacts === artifacts) {
+			if (this.#storePromise) return this.#storePromise;
+			if (this.#store && (!fresh || this.#isRunning() || artifacts === undefined)) return this.#store;
 		}
-		return this.#store;
+		this.#storeSession = sessionId;
+		this.#storeArtifacts = artifacts;
+		const pending = BtwHistoryStore.open(artifacts, this.#historyScope);
+		this.#storePromise = pending;
+		try {
+			const store = await pending;
+			if (this.#storePromise === pending) this.#store = store;
+			return store;
+		} catch (error) {
+			if (this.#storePromise === pending) {
+				this.#store = undefined;
+				this.#saveError = error instanceof Error ? error : new Error("History storage unavailable");
+			}
+			throw error;
+		} finally {
+			if (this.#storePromise === pending) this.#storePromise = undefined;
+		}
 	}
 
 	async historyList(): Promise<{ sessionId: string; topics: BtwTopicSummary[] }> {
-		const store = await this.#historyStore();
+		const store = await this.#historyStore(true);
 		await this.flush();
 		return {
 			sessionId: this.session.sessionManager.getSessionId(),
 			topics: [...store.getRecords()]
 				.sort((a, b) => b.updatedAt - a.updatedAt)
-				.slice(0, 100)
 				.map(record => {
 					const turns = getBtwTurns(record);
 					return {
 						topicId: record.id,
-						question: record.question.slice(0, 512),
-						...(record.title ? { title: record.title.slice(0, 512) } : {}),
+						question: record.question,
+						...(record.title ? { title: record.title } : {}),
 						updatedAt: record.updatedAt,
 						status: turns[turns.length - 1]?.status ?? record.status,
 						turnCount: turns.length,
@@ -170,7 +179,7 @@ export class StudioBtwService {
 	}
 
 	async historyRead(topicId: string) {
-		const store = await this.#historyStore();
+		const store = await this.#historyStore(true);
 		await this.flush();
 		const record = store.getRecords().find(record => record.id === topicId);
 		if (!record) throw new StudioBtwError("INTERACTION_STALE", "BTW topic is unavailable");
@@ -179,65 +188,35 @@ export class StudioBtwService {
 			topicId,
 			turns: getBtwTurns(record).map(turn => ({
 				question: turn.question,
+				...(turn.images?.length ? { images: turn.images } : {}),
 				answer: turn.answer,
 				status: turn.status,
 				createdAt: turn.createdAt,
 				updatedAt: turn.updatedAt,
-				...(turn.error ? { error: "BTW request failed" } : {}),
+				...(turn.error ? { error: turn.error } : {}),
 			})),
 		};
 	}
 
 	async followUp(topicId: string, question: string, images?: ImageContent[]) {
 		if (this.#isRunning()) throw new StudioBtwError("BUSY_STREAMING", "A BTW answer is running");
-		if (!question.trim() || question.length > 65536)
-			throw new StudioBtwError("INVALID_ARGUMENT", "Invalid BTW question");
-		const store = await this.#historyStore();
+		if (!question.trim()) throw new StudioBtwError("INVALID_ARGUMENT", "Invalid BTW question");
+		const store = await this.#historyStore(true);
 		await this.flush();
 		if (this.#isRunning()) throw new StudioBtwError("BUSY_STREAMING", "A BTW answer is running");
 		const prior = store.getRecords().find(record => record.id === topicId);
 		if (!prior) throw new StudioBtwError("INTERACTION_STALE", "BTW topic is unavailable");
 		const turns = getBtwTurns(prior);
-		if (turns[turns.length - 1]?.status !== "complete")
-			throw new StudioBtwError("COMMAND_BLOCKED", "Only completed topics accept follow-ups");
-		if (
-			turns.length >= 32 ||
-			turns.reduce((sum, t) => sum + Buffer.byteLength(t.answer + t.question, "utf8"), 0) > 512 * 1024
-		)
-			throw new StudioBtwError("COMMAND_BLOCKED", "Start a new topic: this conversation reached its history limit");
-		const history: Message[] = turns.flatMap(turn => [
-			{
-				role: "user" as const,
-				content: turn.images?.length
-					? [{ type: "text" as const, text: turn.question }, ...turn.images]
-					: turn.question,
-				timestamp: turn.createdAt,
-			},
-			{
-				role: "assistant" as const,
-				content: [{ type: "text" as const, text: turn.answer }],
-				api: "openai-completions" as const,
-				provider: "btw",
-				model: "btw",
-				usage: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				},
-				stopReason: "stop" as const,
-				timestamp: turn.updatedAt,
-			},
-		]);
+		if (turns.at(-1)?.status === "running")
+			throw new StudioBtwError("BUSY_STREAMING", "This BTW topic is still running");
+		const { history, conversationKey } = beginBtwTurn(question.trim(), prior.leafId, prior, images);
 		const record: StudioBtwRecord = {
 			ephemeralId: this.#idGenerator(),
 			topicId,
 			prior: structuredClone(prior),
 			history,
 			createdAt: Date.now(),
-			conversationKey: this.#lineages.get(topicId) ?? this.#tokenGenerator(),
+			conversationKey,
 			branchToken: "",
 			branchConsumed: true,
 			question: question.trim(),
@@ -322,8 +301,9 @@ export class StudioBtwService {
 					if (!this.#store) {
 						this.#store = await BtwHistoryStore.open(
 							this.session.sessionManager.getArtifactsDir?.() ?? undefined,
+							this.#historyScope,
 						);
-						this.#storePromise = Promise.resolve(this.#store);
+						this.#storePromise = undefined;
 						this.#storeSession = this.session.sessionManager.getSessionId();
 						if (this.#current) await this.#save(this.#current, this.#store);
 					} else if (this.#lastSaved) await this.#store.retry(this.#lastSaved);
@@ -375,15 +355,14 @@ export class StudioBtwService {
 			);
 		const trimmed = question.trim();
 		if (trimmed.length === 0) throw new StudioBtwError("INVALID_ARGUMENT", "BTW question must not be empty");
-		if (trimmed.length > 64 * 1024) throw new StudioBtwError("INVALID_ARGUMENT", "BTW question is too long");
-		if (this.#isRunning() || this.#runs.size > 0) {
+		if (this.#isRunning()) {
 			throw new StudioBtwError("BUSY_STREAMING", "A BTW request is already running");
 		}
 		const id = this.#idGenerator();
 		const record: StudioBtwRecord = {
 			topicId: id,
 			createdAt: Date.now(),
-			conversationKey: this.#tokenGenerator(),
+			conversationKey: `btw:${id}:0`,
 			ephemeralId: id,
 			branchToken: this.#tokenGenerator(),
 			branchConsumed: false,
@@ -414,7 +393,6 @@ export class StudioBtwService {
 		if (record.status !== "running") throw new StudioBtwError("INTERACTION_STALE", "BTW request is not running");
 		record.status = "aborted";
 		record.abortController.abort();
-		this.#lineages.delete(record.topicId);
 		void this.#save(record).catch(() => {});
 		this.#emit(record);
 		return { aborted: true };
@@ -454,6 +432,7 @@ export class StudioBtwService {
 				record.assistantMessage,
 				record.originalLeafId,
 				record.originalSessionId,
+				record.images,
 			);
 			if (result.cancelled) {
 				record.branchConsumed = false;
@@ -470,7 +449,11 @@ export class StudioBtwService {
 		}
 	}
 
-	branchCurrent(branchToken: string): ReturnType<StudioBtwService["branch"]> {
+	branchCurrent(
+		branchToken: string,
+	): Promise<
+		{ branched: true; newSessionId: string; newLeafId: string | null } | { branched: false; reason: "cancelled" }
+	> {
 		if (this.#current === undefined) {
 			return Promise.reject(new StudioBtwError("INTERACTION_STALE", "BTW request is stale"));
 		}
@@ -485,17 +468,18 @@ export class StudioBtwService {
 
 	async #run(record: StudioBtwRecord): Promise<void> {
 		try {
+			await this.session.sessionManager.ensureOnDisk();
 			const store = await this.#historyStore();
 			await this.#save(record, store);
 			if (record.abortController.signal.aborted || record.status !== "running") {
 				await this.#save(record, store);
 				return;
 			}
-			const result = await this.session.runEphemeralTurn({
+			const result = await runBtwTurn(this.session, {
 				...(record.history ? { history: record.history } : {}),
 				conversationKey: record.conversationKey,
-				promptText: prompt.render(btwUserPrompt, { question: record.question }),
-				...(record.images?.length ? { promptImages: record.images } : {}),
+				question: record.question,
+				...(record.images?.length ? { images: record.images } : {}),
 				signal: record.abortController.signal,
 				onTextDelta: delta => this.#append(record, delta),
 			});
@@ -508,15 +492,14 @@ export class StudioBtwService {
 			record.textBytes = Buffer.byteLength(result.replyText, "utf8");
 			record.assistantMessage = assistantMessageWithReplyText(result.assistantMessage, result.replyText);
 			record.status = "completed";
-			this.#lineages.set(record.topicId, record.conversationKey);
 			this.#emit(record);
-		} catch {
+		} catch (error) {
 			if (this.#current !== record || record.status === "aborted" || record.error?.code === "OUTPUT_LIMIT") return;
 			record.status = "failed";
-			record.error = { code: "INTERNAL_ERROR", message: "BTW request failed" };
+			record.error = { code: "INTERNAL_ERROR", message: error instanceof Error ? error.message : String(error) };
 			this.#emit(record);
 		} finally {
-			if (record.status !== "running") await this.#save(record).catch(() => {});
+			if (this.#current === record && record.status !== "running") await this.#save(record).catch(() => {});
 		}
 	}
 
@@ -548,12 +531,13 @@ export class StudioBtwService {
 	}
 
 	#snapshot(record: StudioBtwRecord): StudioBtwSnapshot {
-		const copy = record.status === "completed" ? record.text.trim() : "";
+		const copy = record.text.trim() ? record.text : "";
 		return {
 			sessionId: record.originalSessionId,
 			topicId: record.topicId,
 			...(record.title ? { title: record.title } : {}),
 			question: record.question,
+			turnIndex: record.history?.length ?? 0,
 			ephemeralId: record.ephemeralId,
 			status: record.status,
 			text: record.text,

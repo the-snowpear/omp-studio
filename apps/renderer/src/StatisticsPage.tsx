@@ -24,7 +24,7 @@ type Phase = "loading" | "ready" | "unavailable";
  * aggregates and says so.
  */
 export function StatisticsPage({ client }: { client: StudioClient }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [phase, setPhase] = useState<Phase>("loading");
@@ -84,11 +84,13 @@ export function StatisticsPage({ client }: { client: StudioClient }) {
     const demo = PREVIEW_STATS_TOTALS;
     return (
       <div className="stats-page">
-        <p className="stats-demo-note">
-          {zh
-            ? "统计面板由本机 OMP Runtime 提供，需关闭预览后查看；下面是演示汇总。"
-            : "The statistics panel is served by the local OMP Runtime. Turn preview off to view it; demo aggregates follow."}
-        </p>
+        {marks ? (
+          <p className="stats-demo-note">
+            {zh
+              ? "统计面板由本机 OMP Runtime 提供，需关闭预览后查看；下面是演示汇总。"
+              : "The statistics panel is served by the local OMP Runtime. Turn preview off to view it; demo aggregates follow."}
+          </p>
+        ) : null}
         <div className="stats-demo">
           <div className="stats-demo-cell"><span className="l">Tokens</span><span className="v">{demo.tokens.toLocaleString()}</span></div>
           <div className="stats-demo-cell"><span className="l">{zh ? "请求" : "Requests"}</span><span className="v">{demo.requests.toLocaleString()}</span></div>

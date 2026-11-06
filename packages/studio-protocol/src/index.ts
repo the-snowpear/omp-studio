@@ -45,6 +45,7 @@ export * from "./contracts/ida.js";
 export * from "./contracts/browser-observation.js";
 
 export * from "./contracts/computer-observation.js";
+export * from "./contracts/computer-workspace.js";
 
 export * from "./contracts/ratchet.js";
 
@@ -76,6 +77,7 @@ export * from "./contracts/ida-details.js";
 export * from "./contracts/prediction-channel.js";
 
 export * from "./contracts/feature-settings.js";
+export * from "./contracts/session-compaction.js";
 
 export * from "./contracts/session-portability.js";
 
@@ -84,3 +86,6 @@ export * from "./contracts/session-compression.js";
 export * from "./contracts/session-worktrees.js";
 
 export * from "./contracts/plan-review.js";
+
+export * from "./contracts/evaluation-workspace.js";
+export * from "./contracts/managed-browser.js";

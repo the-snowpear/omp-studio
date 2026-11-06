@@ -1,8 +1,8 @@
 import { SlidingTabs } from "./SlidingTabs";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { StudioClient } from "@omp-studio/client-contract";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import { toDrawerItems } from "./extensibilityMap";
 import {
   createPreviewDrawerItems,
@@ -176,7 +176,7 @@ function itemScope(item: DrawerItem): SkillScope | "plugin" {
   return item.kind === "skill" ? item.scope : "plugin";
 }
 
-function itemIcon(item: DrawerItem): string {
+function itemIcon(item: DrawerItem): IconName {
   return drawerItemIcon(item);
 }
 
@@ -193,6 +193,7 @@ function itemMeta(item: DrawerItem): string {
 
 export function SkillsDrawer({
   open,
+  drawerRef,
   client,
   onClose,
   onEnabledCountChange,
@@ -204,6 +205,7 @@ export function SkillsDrawer({
   runtimeSessionId,
 }: {
   open: boolean;
+  drawerRef?: RefObject<HTMLElement | null>;
   client: StudioClient;
   onClose: () => void;
   onEnabledCountChange?: (count: number) => void;
@@ -278,7 +280,21 @@ export function SkillsDrawer({
   }, [items, onEnabledCountChange, preview, draftSkills, usedSkills]);
 
   useEffect(() => {
-    if (open) searchRef.current?.focus();
+    if (!open) return;
+    const previous = document.activeElement;
+    const drawer = searchRef.current?.closest("#skillsDrawer");
+    let second = 0;
+    const first = window.requestAnimationFrame(() => {
+      second = window.requestAnimationFrame(() => searchRef.current?.focus({ preventScroll: true }));
+    });
+    return () => {
+      window.cancelAnimationFrame(first);
+      window.cancelAnimationFrame(second);
+      const active = document.activeElement;
+      if (previous instanceof HTMLElement && previous.isConnected && !previous.closest("[hidden], [inert]") && (active === document.body || drawer?.contains(active))) {
+        previous.focus({ preventScroll: true });
+      }
+    };
   }, [open]);
 
   useEffect(() => {
@@ -401,15 +417,16 @@ export function SkillsDrawer({
     });
   };
 
-  return (
+  return createPortal(
     <aside
+      ref={drawerRef}
       className={`sb-drawer-mask${open ? " open" : ""}`}
       id="skillsDrawer"
       role="dialog"
       aria-modal="false"
       aria-labelledby="sdTitle"
       aria-hidden={!open}
-      hidden={!open}
+      inert={!open}
     >
       <div className="sd-head">
         <div className="sd-title" id="sdTitle">
@@ -532,7 +549,8 @@ export function SkillsDrawer({
           <span className="label">{t("skills.enterHub")}</span>
         </a>
       </div>
-    </aside>
+    </aside>,
+    document.body,
   );
 }
 

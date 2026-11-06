@@ -34,8 +34,9 @@ function fixture() {
 	const run = Promise.withResolvers<{ replyText: string; assistantMessage: AssistantMessage }>();
 	const branchCalls: unknown[][] = [];
 	const session: StudioBtwSessionPort = {
+		model: { api: "openai-responses", provider: "openai", id: "test" } as NonNullable<StudioBtwSessionPort["model"]>,
 		isStreaming: false,
-		sessionManager: { getSessionId: () => sessionId, getLeafId: () => leafId },
+		sessionManager: { ensureOnDisk: async () => {}, getSessionId: () => sessionId, getLeafId: () => leafId },
 		runEphemeralTurn: args => {
 			runArgs = args;
 			modelStarted.resolve();
@@ -66,7 +67,8 @@ function fixture() {
 describe("WP-041 StudioBtwService", () => {
 	test("streams path-free state, completes, copies, and branches once", async () => {
 		const { service, run, runArgs, branchCalls, modelStarted } = fixture();
-		const started = service.ask("Why did this fail?");
+		const images = [{ type: "image" as const, mimeType: "image/png", data: "aW1hZ2U=" }];
+		const started = service.ask("Why did this fail?", images);
 		await modelStarted;
 		expect(started).toEqual({ ephemeralId: "ephemeral-1", branchToken: "opaque-branch-token", status: "running" });
 		runArgs()?.onTextDelta?.("partial ");
@@ -89,6 +91,8 @@ describe("WP-041 StudioBtwService", () => {
 			newLeafId: "leaf-2",
 		});
 		expect(branchCalls).toHaveLength(1);
+		expect(branchCalls[0]?.[4]).toEqual(images);
+		expect(runArgs()?.replyMaxBytes).toBe(Number.POSITIVE_INFINITY);
 		expect(JSON.stringify(service.get(started.ephemeralId))).not.toContain("opaque-branch-token");
 		await expect(service.branch(started.ephemeralId, started.branchToken)).rejects.toMatchObject({
 			code: "INTERACTION_STALE",

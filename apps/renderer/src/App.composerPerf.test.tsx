@@ -20,7 +20,9 @@ import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
  *
  * The two counters below are render probes: AppShell renders `RuntimeLossBanner`
  * unconditionally, WorkbenchCanvas renders `DictationControl` unconditionally, and
- * neither is memoized — so a counter tick == a shell/canvas render.
+ * neither is memoized — so a counter tick == a shell/canvas render. Revealing
+ * the provisional sidebar row on the first non-empty draft is a state boundary;
+ * continuing characters must remain out of both surfaces.
  */
 const probe = vi.hoisted(() => ({ shell: 0, canvas: 0, rect: 0, style: 0 }));
 
@@ -106,13 +108,14 @@ async function nextFrame() {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
 }
 
-it("keeps a character out of AppShell and out of the layout engine", async () => {
+it("keeps continuing keystrokes out of AppShell and out of the layout engine", async () => {
   const editor = await mount();
-  // First character crosses the empty → "has text" boundary: the send button has
-  // to flip now, so exactly one workbench render is expected and allowed.
+  // A first draft also reveals its provisional sidebar row: one shell render
+  // is the intended empty → content boundary, not per-character hot-path work.
+  // The send button flips in the same boundary publication.
   await type(editor, "a");
   await nextFrame();
-  expect(probe.shell, "AppShell renders on the first character").toBe(0);
+  expect(probe.shell, "AppShell renders on the first draft boundary").toBe(1);
   expect(probe.canvas, "WorkbenchCanvas renders on the first character").toBe(1);
 
   for (const [index, text] of ["ab", "abc", "abcd"].entries()) {
@@ -145,10 +148,16 @@ it("keeps draft books across execution-target remounts", async () => {
   vi.stubGlobal("ompStudioRemote", {
     list: async () => ({ profiles: [{ id: "remote", name: "Test", host: "test" }], statuses: [{ id: "remote", state: "connected" }] }),
     onChanged: () => () => {}, onEvent: () => () => {}, select: async () => {},
-    bootstrap: async () => ({ ...initial, selected: { ...initial.selected, workspaceId: "ws-default" } }),
+    bootstrap: async () => ({ ...initial, snapshot: null, selected: { ...initial.selected, workspaceId: "ws-default", sessionId: null }, residents: { ...initial.residents, activeSessionId: null, residents: [] } }),
     query: async (_id: string, request: { queryName: string }) => structuredClone((contractFixtures.queryResponses as Record<string, unknown>)[request.queryName]),
   });
   let editor = await mount();
+  const startDraft = async () => {
+    fireEvent.click(document.querySelector<HTMLButtonElement>(".new-convo-btn")!);
+    await waitFor(() => expect(document.querySelector(".execution-picker > button")).not.toBeNull());
+    editor = document.querySelector<HTMLElement>("#composerInput")!;
+  };
+  await startDraft();
   await type(editor, "local draft");
   const choose = async (name: string) => {
     fireEvent.click(document.querySelector<HTMLButtonElement>(".execution-picker > button")!);
@@ -159,6 +168,7 @@ it("keeps draft books across execution-target remounts", async () => {
     editor = document.querySelector<HTMLElement>("#composerInput")!;
   };
   await choose("Test");
+  await startDraft();
   await type(editor, "remote draft");
   await choose("此计算机");
   expect(editor.textContent).toBe("local draft");

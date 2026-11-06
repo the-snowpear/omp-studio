@@ -37,7 +37,7 @@ export function SessionOptionsPane({
   visible = true,
   capabilities,
 }: SessionOptionsProps) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const warmingLabel = (mode: SessionWarmingState["mode"]) =>
@@ -206,7 +206,7 @@ export function SessionOptionsPane({
       <section className="session-options-card">
         <h3>
           {zh ? "处理速度" : "Serving speed"}
-          {preview ? (
+          {preview && marks ? (
             <span className="chip gray xs">{zh ? "演示" : "Demo"}</span>
           ) : null}
         </h3>

@@ -30,7 +30,7 @@ it("preview sign-out requires confirmation and never removes a native credential
   );
   fireEvent.click(await screen.findByRole("button", { name: "退出登录" }));
   expect(
-    screen.getByText("demo@example.com", { selector: "span" }),
+    screen.getByText("mira@studio.dev", { selector: "span" }),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "取消" }));
   expect(screen.queryByRole("dialog")).toBeNull();

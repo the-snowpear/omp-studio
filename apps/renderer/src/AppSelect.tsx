@@ -5,6 +5,7 @@ import {
   type OptionHTMLAttributes, type ReactNode,
 } from "react";
 import { createPortal, flushSync } from "react-dom";
+import { useSurfaceDocument, surfaceWindow } from "./dock/SurfaceContext";
 
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
@@ -57,6 +58,7 @@ function collectOptions(children: ReactNode): SelectOption[] {
 
 /** The ordinary single-select used throughout Studio. Business state stays at the call site. */
 export function AppSelect({ value, onChange, children, placeholder, className = "", disabled, onKeyDown, onClick, ...props }: AppSelectProps) {
+  const document = useSurfaceDocument(), window = surfaceWindow(document);
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const uid = useId();
@@ -115,7 +117,7 @@ export function AppSelect({ value, onChange, children, placeholder, className = 
       left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
       width, maxHeight, above: flip,
     });
-  }, []);
+  }, [window]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -138,7 +140,7 @@ export function AppSelect({ value, onChange, children, placeholder, className = 
       }
     };
     const reposition = (event: Event) => {
-      if (event.target instanceof Node && popup.current?.contains(event.target)) return;
+      if (event.target instanceof window.Node && popup.current?.contains(event.target)) return;
       place();
     };
     document.addEventListener("pointerdown", outside, true);

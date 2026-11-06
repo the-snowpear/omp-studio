@@ -40,7 +40,7 @@ console.log(
     : `Captured ${capture.changed.length}/${capture.total} overlay file(s):\n  ${capture.changed.join("\n  ")}`,
 );
 
-const tracked = run("git", ["-C", ompSourceDirectory, "diff", "--name-only"], { capture: true })
+const tracked = run("git", ["-C", ompSourceDirectory, "diff", "--name-only", series.upstreamCommit, "--"], { capture: true })
   .split(/\r?\n/u)
   .filter(Boolean);
 const grouped = new Set(SEAM_GROUPS.flatMap(group => group.paths));
@@ -61,7 +61,7 @@ for (const group of SEAM_GROUPS) {
     console.log(`No changes for ${group.file}; removed`);
     continue;
   }
-  const diff = run("git", ["-C", ompSourceDirectory, "diff", "--", ...present], { capture: true, trim: false });
+  const diff = run("git", ["-C", ompSourceDirectory, "diff", series.upstreamCommit, "--", ...present], { capture: true, trim: false });
   await writeFile(target, diff, "utf8");
   written.push(group.file);
   console.log(`Wrote ${group.file} (${present.length} file(s))`);

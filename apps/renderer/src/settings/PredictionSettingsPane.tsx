@@ -1,4 +1,5 @@
 import { AppSelect } from "../AppSelect";
+import { useHasSettingsScope, useSettingsScope } from "./SettingsScope";
 import { useEffect, useRef, useState } from "react";
 import type { StudioClient, CommandInput } from "@omp-studio/client-contract";
 import type {
@@ -22,16 +23,17 @@ export function PredictionSettingsPane({
   context?: NativePreferencesContext | undefined;
   visible: boolean;
 }) {
-  const { preview } = usePreviewMode(),
+  const { preview, marks } = usePreviewMode(),
     { resolvedLanguage } = useI18n(),
     zh = resolvedLanguage === "zh";
   const [data, setData] = useState<PredictionSettings>(),
     [method, setMethod] = useState<PredictionMethod>("auto"),
-    [scope, setScope] = useState<"session" | "global">("session");
+    [scope, setScope] = useSettingsScope("session");
   const [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [confirm, setConfirm] = useState<PredictionMethod>();
+  const sharedScope = useHasSettingsScope();
   const epoch = useRef(0),
     dirty = useRef(false),
     lock = useRef(false),
@@ -167,8 +169,8 @@ export function PredictionSettingsPane({
         setData(value);
         setMethod(value.method);
         dirty.current = false;
-        setNotice(
-          preview
+        if (!preview || marks) setNotice(
+          preview && marks
             ? zh
               ? "演示设置已更新，不会下载模型。"
               : "Demo settings updated; no model was downloaded."
@@ -182,13 +184,16 @@ export function PredictionSettingsPane({
         );
       }
     } catch (cause) {
-      if (current === epoch.current)
+      if (current === epoch.current) {
+        setMethod(data?.method ?? "auto");
+        dirty.current = false;
         setError(
           hostErrorMessage(
             cause,
             zh ? "保存预测设置失败" : "Cannot save prediction settings",
           ),
         );
+      }
     } finally {
       if (current === epoch.current) {
         lock.current = false;
@@ -266,11 +271,12 @@ export function PredictionSettingsPane({
   async function importHistory() {
     if (lock.current) return;
     if (preview) {
-      setNotice(
-        zh
-          ? "演示：已识别 158 条提示词，未读取真实历史。"
-          : "Demo: 158 prompt records recognized; real history was not read.",
-      );
+      if (marks)
+        setNotice(
+          zh
+            ? "演示：已识别 158 条提示词，未读取真实历史。"
+            : "Demo: 158 prompt records recognized; real history was not read.",
+        );
       return;
     }
     const chrome = globalThis.ompStudioChrome;
@@ -347,7 +353,7 @@ export function PredictionSettingsPane({
         {zh
           ? "在输入框内显示词语补全。Tab 接受并添加空格，右方向键仅接受补全文字。"
           : "Show inline word completion. Tab accepts with a space; Right Arrow accepts the word only."}
-        {preview ? (zh ? " · 演示" : " · Demo") : ""}
+        {preview && marks ? (zh ? " · 演示" : " · Demo") : ""}
       </p>
       {!enabled ? (
         <p className="tiny muted">
@@ -362,10 +368,13 @@ export function PredictionSettingsPane({
           <AppSelect
             className="select"
             value={method}
-            disabled={!enabled || !!busy}
+            disabled={!has("prediction.configure") || !!busy}
             onChange={(event) => {
+              const next = event.target.value as PredictionMethod;
               dirty.current = true;
-              setMethod(event.target.value as PredictionMethod);
+              setMethod(next);
+              if (next === "smollm" && data?.download.state !== "ready") setConfirm(next);
+              else void save(next);
             }}
           >
             {methods.map(([id, label]) => (
@@ -375,7 +384,7 @@ export function PredictionSettingsPane({
             ))}
           </AppSelect>
         </label>
-        <label>
+        {!sharedScope ? <label>
           {zh ? "保存范围" : "Scope"}
           <AppSelect
             className="select"
@@ -390,18 +399,7 @@ export function PredictionSettingsPane({
               {zh ? "OMP 全局设置" : "Global OMP setting"}
             </option>
           </AppSelect>
-        </label>
-        <button
-          className="btn outline"
-          disabled={!has("prediction.configure") || !!busy}
-          onClick={() =>
-            method === "smollm" && data?.download.state !== "ready"
-              ? setConfirm(method)
-              : void save(method)
-          }
-        >
-          {zh ? "保存" : "Save"}
-        </button>
+        </label> : null}
         <button
           className="btn small ghost"
           disabled={
@@ -486,7 +484,7 @@ export function PredictionSettingsPane({
         </p>
       ) : null}
       {confirm ? (
-        <div className="modal-backdrop" onClick={() => setConfirm(undefined)}>
+        <div className="modal-backdrop" onClick={() => { setConfirm(undefined); setMethod(data?.method ?? "auto"); dirty.current = false; }}>
           <section
             className="modal"
             role="dialog"
@@ -507,7 +505,7 @@ export function PredictionSettingsPane({
             <footer className="modal-foot">
               <button
                 className="btn outline"
-                onClick={() => setConfirm(undefined)}
+                onClick={() => { setConfirm(undefined); setMethod(data?.method ?? "auto"); dirty.current = false; }}
               >
                 {zh ? "取消" : "Cancel"}
               </button>

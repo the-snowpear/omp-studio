@@ -77,10 +77,12 @@ const remoteApi: RemoteApi = {
   installRuntime: id => ipcRenderer.invoke(REMOTE_CHANNELS.installRuntime, id),
   disconnect: id => ipcRenderer.invoke(REMOTE_CHANNELS.disconnect, id),
   select: id => ipcRenderer.invoke(REMOTE_CHANNELS.select, id),
-  bootstrap: id => ipcRenderer.invoke(REMOTE_CHANNELS.bootstrap, id),
-  query: (id, request) => ipcRenderer.invoke(REMOTE_CHANNELS.query, id, request),
-  command: async (id, request) => {
-    const result = await ipcRenderer.invoke(REMOTE_CHANNELS.command, id, request);
+  openContext: (id, scope) => ipcRenderer.invoke(REMOTE_CHANNELS.openContext, id, scope),
+  closeContext: (id, contextId) => ipcRenderer.invoke(REMOTE_CHANNELS.closeContext, id, contextId),
+  bootstrap: (id, contextId) => ipcRenderer.invoke(REMOTE_CHANNELS.bootstrap, id, contextId),
+  query: (id, request, contextId) => ipcRenderer.invoke(REMOTE_CHANNELS.query, id, request, contextId),
+  command: async (id, request, contextId) => {
+    const result = await ipcRenderer.invoke(REMOTE_CHANNELS.command, id, request, contextId);
     if (!result.ok) throw result.error;
     return result.accepted;
   },

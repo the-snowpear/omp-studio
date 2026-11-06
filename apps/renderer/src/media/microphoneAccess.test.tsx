@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { fileManagerName } from "../platformCopy";
-import { MicrophoneDeniedError, ensureMicrophoneAccess } from "./microphoneAccess";
+import { MicrophoneDeniedError, ensureMicrophoneAccess, microphoneFailureMessage } from "./microphoneAccess";
 
 describe("microphone consent", () => {
   it("asks only on the macOS desktop, so capture elsewhere starts in the same tick", () => {
@@ -10,6 +10,16 @@ describe("microphone consent", () => {
     expect(ensureMicrophoneAccess(true, undefined)).toBeUndefined();
     expect(ensureMicrophoneAccess(true, { platform: "darwin" })).toBeUndefined();
     expect(requestMicrophoneAccess).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["NotAllowedError", "系统隐私设置", "system privacy settings"],
+    ["NotFoundError", "没有找到所选麦克风", "not found"],
+    ["NotReadableError", "其它应用占用", "another app"],
+  ])("explains browser %s failures with a recovery action", (name, zh, en) => {
+    const cause = new DOMException("Capture failed", name);
+    expect(microphoneFailureMessage(cause, true)).toContain(zh);
+    expect(microphoneFailureMessage(cause, false)).toContain(en);
   });
 
   it("resolves when macOS grants and rejects with the settings hint when it denies", async () => {

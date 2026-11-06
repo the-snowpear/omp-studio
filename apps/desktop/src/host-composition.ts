@@ -1,5 +1,8 @@
+import { evaluationsFor, closeEvaluations } from "./evaluation-workspace.js";
 import { artifactLibraryForProfile } from "./artifact-library.js";
 import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
+import type { WorkspaceId, SessionId } from "@omp-studio/client-contract";
+
 /**
  * Desktop Host composition (FRONTEND_INTEGRATION.md §9.2).
  *
@@ -95,6 +98,7 @@ import {
   type RuntimeResolverEnvironment,
   SessionTelemetryStore,
   type StudioBtwForward,
+  type StudioComputerForward,
   type StudioConversationForward,
   type StudioTelemetryForward,
   type StudioRuntimeSessionController,
@@ -205,8 +209,13 @@ export interface DesktopRuntimeSessionContext {
  * substitute fakes so no untrusted file is ever executed.
  */
 export interface DesktopRuntimeSessionPort {
+  sessionFor?(sessionId: string): DesktopRuntimeSession | undefined;
+  openContextSession?(workspace: { workspaceId: string; cwd: string }, intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean }): Promise<DesktopRuntimeSession | undefined>;
   /** True when switching the active view keeps sibling Runtime Workers resident. */
   readonly supportsConcurrentSessions?: boolean;
+  openEvaluation?(workspace: { workspaceId: string; cwd: string }): Promise<DesktopRuntimeSession | undefined>;
+  evaluationSession?(sessionId: string): DesktopRuntimeSession | undefined;
+  releaseEvaluation?(sessionId: string): Promise<void>;
   /**
    * Starts (or connects to) the trusted Runtime and returns a ready
    * session bundle, or `undefined` when the Runtime is not ready. Called
@@ -448,6 +457,8 @@ function clearDisconnect(holder: { current: HostRuntimeDisconnect | undefined })
 }
 
 interface FacadeContext {
+  /** All conversation facades share the Host-owned durable evaluation service. */
+  readonly evaluationOwner: object;
   /** One usage adapter per Host: it caches the resolved dashboard endpoint. */
   usage?: HostUsageService;
   readonly authority: PublicAuthorityIdentity;
@@ -474,6 +485,7 @@ interface FacadeContext {
   readonly conversationEvents: IsolatedForwarder<StudioConversationForward>;
   readonly telemetryEvents: IsolatedForwarder<StudioTelemetryForward>;
   readonly btwEvents: IsolatedForwarder<StudioBtwForward>;
+  readonly computerEvents: IsolatedForwarder<StudioComputerForward>;
   readonly conversationResync: IsolatedForwarder<string>;
   readonly interaction: DesktopInteractionHost;
   readonly bindSession: { current: (session: DesktopRuntimeSession | undefined) => void };
@@ -786,6 +798,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     listPersistedAgents: async (sessionId: string) =>
       (await currentArchiveReader().listPersistedAgents(sessionId)).map(toPersistedStudioAgent),
     readRevision: async (sessionId: string) => await currentArchiveReader().readRevision(sessionId),
+    readCompaction: async (sessionId: string) => await currentArchiveReader().readCompaction(sessionId),
     createProbeCopy: async (sessionId: string, destinationDirectory: string) =>
       await currentArchiveReader().createProbeCopy(sessionId, destinationDirectory),
   } satisfies HostSessionArchiveProvider;
@@ -933,6 +946,19 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
           }),
     commands: runtimeCommandService,
     artifacts: artifactLibraryForProfile(context.profileDirectory),
+    evaluations: evaluationsFor(context.evaluationOwner, {
+      revealDirectory: seams.revealDirectory,
+      profileDirectory: context.profileDirectory,
+      runtimes: context.runtimeSession,
+      artifacts: artifactLibraryForProfile(context.profileDirectory),
+      ensureRuntime: async () => { await ensureInstalledRuntime(context); },
+      workspace: async id => {
+        const resolved = await seams.resolveImportWorkspace?.(id);
+        if (resolved) return resolved;
+        const active = seams.getActiveWorkspace?.();
+        return active?.workspaceId === id ? active.cwd : undefined;
+      },
+    }),
     models:
       seams.models ??
       createOmpModelsService({
@@ -991,6 +1017,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       onConversationResync: (listener) => context.conversationResync.subscribe(listener),
       onTelemetryEvent: (listener) => context.telemetryEvents.subscribe(listener),
       onBtwEvent: (listener) => context.btwEvents.subscribe(listener),
+      onComputerEvent: (listener) => context.computerEvents.subscribe(listener),
       onInteractionEvent: (listener) => context.interaction.subscribe(listener),
     } satisfies HostRuntimeAccess,
   };
@@ -1028,7 +1055,124 @@ function assertCompositionOptions(options: DesktopCompositionOptions): void {
   }
 }
 
+/** A view owns a projection and workspace, never the shared worker pool. */
+async function openSessionContext(root: FacadeContext, scope: import("@omp-studio/client-contract").ClientContextScope): Promise<ClientTransport> {
+  await root.startup.ready();
+  root.startup.assertOpen();
+  const pool = root.runtimeSession;
+  if (!pool?.openContextSession || !pool.sessionFor) throw new Error("This Host needs an update to open concurrent conversations.");
+  const resolveWorkspace = async (workspaceId: string) => {
+    const cwd = await root.seams.resolveImportWorkspace?.(workspaceId)
+      ?? (root.selectedWorkspace.current?.workspaceId === workspaceId ? root.selectedWorkspace.current.cwd : undefined);
+    if (!cwd) throw new Error("Unknown workspace id");
+    return { workspaceId, cwd };
+  };
+  const workspace = { current: await resolveWorkspace(scope.workspaceId) };
+  const sessionRef: FacadeContext["sessionRef"] = { current: undefined };
+  const connectionChanges = new IsolatedForwarder<void>();
+  const startup = new DesktopRuntimeStartup(() => connectionChanges.publish(undefined));
+  const interaction = new DesktopInteractionHost(sessionRef);
+  let wanted = scope.sessionId as string | undefined;
+  let subscriptions: Array<() => void> = [];
+  const bind = (session: DesktopRuntimeSession | undefined) => {
+    if (session === sessionRef.current) return;
+    subscriptions.splice(0).forEach(off => off());
+    sessionRef.current = session;
+    if (session) wanted = session.controller.publication()?.snapshot.sessionId ?? wanted;
+    interaction.attach(session?.controller);
+    if (session) {
+      subscriptions.push(session.onPublication(value => context.publications.publish(value)));
+      const controller = session.controller;
+      if (controller.onConversationEvent) subscriptions.push(controller.onConversationEvent(value => context.conversationEvents.publish(value)));
+      if (controller.onConversationResync) subscriptions.push(controller.onConversationResync(value => context.conversationResync.publish(value)));
+      if (controller.onTelemetryEvent) subscriptions.push(controller.onTelemetryEvent(value => context.telemetryEvents.publish(value)));
+      if (controller.onBtwEvent) subscriptions.push(controller.onBtwEvent(value => context.btwEvents.publish(value)));
+      if (controller.onComputerEvent) subscriptions.push(controller.onComputerEvent(value => context.computerEvents.publish(value)));
+      const publication = controller.publication();
+      if (publication) context.publications.publish(publication);
+    }
+    connectionChanges.publish(undefined);
+  };
+  const open = async (intent: Parameters<NonNullable<DesktopRuntimeSessionPort["openContextSession"]>>[1]) => {
+    root.runtimeTouched.current = true;
+    const session = await pool.openContextSession!(workspace.current, intent);
+    bind(session);
+    return session;
+  };
+  const list = async () => {
+    const model = await root.seams.workspaces!.list();
+    return { ...model, activeWorkspaceId: workspace.current.workspaceId as WorkspaceId,
+      workspaces: model.workspaces.map(row => ({ ...row, active: row.workspaceId === workspace.current.workspaceId })) };
+  };
+  const context: FacadeContext = {
+    ...root, sessionRef, startup, connectionChanges, interaction,
+    selectedWorkspace: workspace, workspaceCwd: { current: workspace.current.cwd },
+    lastUnavailable: { current: undefined }, lastDisconnect: { current: undefined },
+    publications: new DesktopPublicationForwarder(),
+    conversationEvents: new IsolatedForwarder<StudioConversationForward>(),
+    conversationResync: new IsolatedForwarder<string>(),
+    telemetryEvents: new IsolatedForwarder<StudioTelemetryForward>(),
+    btwEvents: new IsolatedForwarder<StudioBtwForward>(),
+    computerEvents: new IsolatedForwarder<StudioComputerForward>(),
+    bindSession: { current: bind },
+    runtimeSession: { ...pool,
+      switchSession: open,
+      ensure: () => open(wanted ? { kind: "resume", sessionId: wanted } : { kind: "fresh" }),
+    },
+    seams: { ...root.seams,
+      getActiveWorkspace: () => workspace.current,
+      getWorkspaceCwd: () => workspace.current.cwd,
+      catalog: createWorkspaceSessionCatalog(() => workspace.current.cwd, async id => (await resolveWorkspace(id)).cwd),
+      ...(root.seams.workspaces ? { workspaces: {
+        list,
+        open: async ({ workspaceId }) => {
+          if (workspaceId !== workspace.current.workspaceId) {
+            workspace.current = await resolveWorkspace(workspaceId);
+            context.workspaceCwd.current = workspace.current.cwd;
+            wanted = undefined;
+            bind(undefined);
+          }
+          return list();
+        },
+        pick: async input => {
+          const model = await root.seams.workspaces!.pick(input);
+          if (model.activeWorkspaceId) {
+            workspace.current = await resolveWorkspace(model.activeWorkspaceId);
+            context.workspaceCwd.current = workspace.current.cwd;
+            wanted = undefined; bind(undefined);
+          }
+          return list();
+        },
+      } } : {}),
+    },
+  };
+  const facade = buildFacade(context);
+  if (wanted) bind(pool.sessionFor(wanted));
+  const offResidents = pool.attachResidentsSink?.(() => { if (wanted && !startup.closing) bind(pool.sessionFor!(wanted)); });
+  return {
+    async bootstrap() {
+      if (root.seams.workspaces) await facade.query({ queryName: "projects.list", input: {} });
+      const snapshot = await facade.bootstrap();
+      return { ...snapshot, selected: { ...snapshot.selected, workspaceId: workspace.current.workspaceId as WorkspaceId,
+        ...(wanted ? { sessionId: wanted as SessionId, threadId: threadIdFor(wanted) } : {}) } };
+    },
+    query: request => facade.query(request), command: request => facade.command(request),
+    subscribe: (scope, listener) => facade.subscribe(scope, listener),
+    async close() { await startup.close(); offResidents?.(); subscriptions.splice(0).forEach(off => off()); interaction.attach(undefined); await facade.close(); },
+  };
+}
+
 class DesktopHostCompositionImpl implements DesktopHostComposition {
+  readonly #contexts = new Set<ClientTransport>();
+  #enableContexts(): void {
+    Object.assign(this.#facade, { openContext: async (scope: import("@omp-studio/client-contract").ClientContextScope) => {
+      const transport = await openSessionContext(this.#facadeContext, scope);
+      this.#contexts.add(transport);
+      const close = transport.close.bind(transport);
+      transport.close = async () => { this.#contexts.delete(transport); await close(); };
+      return transport;
+    } });
+  }
   #facade: StudioHostClientFacade;
   #status: DesktopRuntimeStatus;
   #facadeContext: FacadeContext;
@@ -1044,6 +1188,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
   #unsubscribeConversationResync: (() => void) | undefined;
   #unsubscribeTelemetry: (() => void) | undefined;
   #unsubscribeBtw: (() => void) | undefined;
+  #unsubscribeComputer: (() => void) | undefined;
   #closed = false;
   #shutdownStarted = false;
 
@@ -1059,6 +1204,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     this.#facade = options.facade;
     this.#status = options.status;
     this.#facadeContext = options.facadeContext;
+    this.#enableContexts();
     this.#lease = options.lease;
     this.#endpointLease = options.endpointLease;
     this.#runtimeSession = options.runtimeSession;
@@ -1275,6 +1421,8 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     this.#unsubscribeTelemetry = undefined;
     this.#unsubscribeBtw?.();
     this.#unsubscribeBtw = undefined;
+    this.#unsubscribeComputer?.();
+    this.#unsubscribeComputer = undefined;
     this.#facadeContext.interaction.attach(session?.controller);
     if (session === undefined) {
       return;
@@ -1302,6 +1450,9 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
       this.#unsubscribeBtw = controller.onBtwEvent((event) => {
         this.#facadeContext.btwEvents.publish(event);
       });
+    }
+    if (typeof controller.onComputerEvent === "function") {
+      this.#unsubscribeComputer = controller.onComputerEvent(event => this.#facadeContext.computerEvents.publish(event));
     }
     this.#replayCurrentPublication();
     const selectedSessionId = controller.publication()?.snapshot.sessionId;
@@ -1334,6 +1485,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     if (this.#facade.runtimeInstallInProgress) return this;
     await this.#facade.close();
     this.#facade = buildFacade(this.#facadeContext);
+    this.#enableContexts();
     this.#replayCurrentPublication();
     return this;
   }
@@ -1399,8 +1551,10 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     }
     this.#shutdownStarted = true;
     const startupSettled = this.#facadeContext.startup.close();
+    await Promise.all([...this.#contexts].map(context => context.close()));
     await this.#facade.close();
     await startupSettled;
+    await closeEvaluations(this.#facadeContext.evaluationOwner);
     this.#attachSession(undefined);
     // Unlike reload(), shutdown is terminal: detach the Runtime-facing sinks
     // so the composition cannot retain listeners after its facade is gone.
@@ -1480,6 +1634,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
       const residentTerminalOutcomes = new IsolatedForwarder<ReadonlyArray<CommandLedgerEntry>>();
       const interaction = new DesktopInteractionHost(sessionRef);
       const facadeContext: FacadeContext = {
+        evaluationOwner: {},
         authority: authorityIdentityFromLease(lease),
         platform: platform.platform,
         arch,
@@ -1498,6 +1653,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
         conversationEvents: new IsolatedForwarder<StudioConversationForward>(),
         telemetryEvents: new IsolatedForwarder<StudioTelemetryForward>(),
         btwEvents: new IsolatedForwarder<StudioBtwForward>(),
+        computerEvents: new IsolatedForwarder<StudioComputerForward>(),
         conversationResync: new IsolatedForwarder<string>(),
         interaction,
         bindSession: { current: (next) => {

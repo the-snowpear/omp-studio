@@ -238,7 +238,15 @@ test("Runtime settings and compaction projections mirror the closed Runtime seam
   assert.equal(parsed.snapshot.runtimeSettings?.["features.unexpectedStopDetection"], "smart");
   assert.equal(parsed.snapshot.compactionSpeculation, "armed");
 
+  const expanded = parseStudioSnapshotResponse({
+    ...value,
+    snapshot: { ...value.snapshot, runtimeSettings: { ...runtimeSettings, steeringMode: "all", "edit.fuzzyThreshold": 0.9, "compaction.thresholdPercent": -1 } },
+  });
+  assert.equal(expanded.snapshot.runtimeSettings?.["edit.fuzzyThreshold"], 0.9);
+
   const base = { type: "studio.request", requestId: "req-runtime-settings", runtimeEpoch: 1 };
+  assert.equal(parseFoundationStudioRequest({ ...base, operation: { kind: "runtime.settings.set", key: "edit.fuzzyThreshold", value: 0.9, persist: true } }).operation.kind, "runtime.settings.set");
+  assert.throws(() => parseFoundationStudioRequest({ ...base, operation: { kind: "runtime.settings.set", key: "edit.fuzzyThreshold", value: 2, persist: true } }), ContractValidationError);
   assert.equal(
     parseFoundationStudioRequest({ ...base, operation: { kind: "runtime.settings.get" } }).operation.kind,
     "runtime.settings.get",

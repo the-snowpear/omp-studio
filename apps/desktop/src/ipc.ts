@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 /**
  * Main-process Desktop IPC bridge (FRONTEND_INTEGRATION.md §9).
  *
@@ -174,6 +175,13 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
   const ipc = options.ipcMain ?? ipcMain;
   const facade = options.facade;
   const windows = new Map<number, WindowSubscriptions>();
+  const contexts = new Map<string, { owner: number; transport: ClientTransport }>();
+  const targetFor = (sender: DesktopSender, id?: string): ClientTransport => {
+    if (id === undefined) return requireFacade();
+    const entry = contexts.get(id);
+    if (!entry || entry.owner !== sender.id) throw new Error("Conversation context is closed");
+    return entry.transport;
+  };
   const cancelled = new Set<string>();
 
   function assertTrustedSender(sender: DesktopSender): void {
@@ -249,6 +257,7 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
     window.byId.clear();
     for (const detach of window.detachListeners.splice(0)) detach();
     if (windows.get(window.sender.id) === window) windows.delete(window.sender.id);
+    for (const [id, entry] of contexts) if (entry.owner === window.sender.id) { contexts.delete(id); void entry.transport.close(); }
   }
 
   function forward(window: WindowSubscriptions, scope: ScopeSubscription, event: ClientEvent): void {
@@ -275,12 +284,12 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
     return entry;
   }
 
-  function register(sender: DesktopSender, target: ClientTransport, request: { subscriptionId: string; scope: SubscriptionScope }): void {
+  function register(sender: DesktopSender, target: ClientTransport, request: { subscriptionId: string; scope: SubscriptionScope }, contextId?: string): void {
     const window = trackWindow(sender);
     // Same id twice: the first registration stands. Re-registering would
     // double-deliver to that listener and orphan the earlier Host subscription.
     if (window.byId.has(request.subscriptionId)) return;
-    const key = canonicalScopeKey(request.scope);
+    const key = `${contextId ?? "default"}:${canonicalScopeKey(request.scope)}`;
     let scope = window.byScope.get(key);
     if (scope === undefined) {
       scope = openScope(target, window, request.scope);
@@ -329,10 +338,22 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
     return true;
   }
 
-  ipc.handle(DESKTOP_IPC_CHANNELS.bootstrap, async (event: IpcMainInvokeEvent) => {
+  ipc.handle(DESKTOP_IPC_CHANNELS.openContext, async (event: IpcMainInvokeEvent, scope: import("@omp-studio/client-contract").ClientContextScope) => {
+    assertTrustedSender(event.sender);
+    const factory = requireFacade();
+    if (!factory.openContext) throw new Error("This Host needs an update to open concurrent conversations.");
+    const owner = trackWindow(event.sender);
+    const transport = await factory.openContext(scope);
+    if (owner.closed || event.sender.isDestroyed()) { await transport.close(); throw new Error("Window closed"); }
+    const id = randomUUID();
+    contexts.set(id, { owner: event.sender.id, transport });
+    return id;
+  });
+
+  ipc.handle(DESKTOP_IPC_CHANNELS.bootstrap, async (event: IpcMainInvokeEvent, contextId?: string) => {
     assertTrustedSender(event.sender);
     try {
-      const bootstrap = await requireFacade().bootstrap();
+      const bootstrap = await targetFor(event.sender, contextId).bootstrap();
       if (!isPlainObject(bootstrap)) {
         throw new Error("desktop ipc: invalid bootstrap response");
       }
@@ -342,29 +363,29 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
     }
   });
 
-  ipc.handle(DESKTOP_IPC_CHANNELS.query, async (event: IpcMainInvokeEvent, payload: unknown) => {
+  ipc.handle(DESKTOP_IPC_CHANNELS.query, async (event: IpcMainInvokeEvent, payload: unknown, contextId?: string) => {
     assertTrustedSender(event.sender);
     try {
-      return await requireFacade().query(parseClientQueryRequest(payload));
+      return await targetFor(event.sender, contextId).query(parseClientQueryRequest(payload));
     } catch (error) {
       throwIpcError(error);
     }
   });
 
-  ipc.handle(DESKTOP_IPC_CHANNELS.command, async (event: IpcMainInvokeEvent, payload: unknown) => {
+  ipc.handle(DESKTOP_IPC_CHANNELS.command, async (event: IpcMainInvokeEvent, payload: unknown, contextId?: string) => {
     assertTrustedSender(event.sender);
     try {
-      return await requireFacade().command(parseClientCommandRequest(payload));
+      return await targetFor(event.sender, contextId).command(parseClientCommandRequest(payload));
     } catch (error) {
       throwIpcError(error);
     }
   });
 
-  ipc.handle(DESKTOP_IPC_CHANNELS.subscribe, (event: IpcMainInvokeEvent, payload: unknown) => {
+  ipc.handle(DESKTOP_IPC_CHANNELS.subscribe, (event: IpcMainInvokeEvent, payload: unknown, contextId?: string) => {
     const sender = event.sender as unknown as DesktopSender;
     assertTrustedSender(sender);
     const request = parseSubscriptionRegistration(payload);
-    register(sender, requireFacade(), request);
+    register(sender, targetFor(sender, contextId), request, contextId);
     return { ok: true, subscriptionId: request.subscriptionId };
   });
 
@@ -375,8 +396,9 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
     return { ok: true, cancelled: cancel(sender, request.subscriptionId) };
   });
 
-  ipc.handle(DESKTOP_IPC_CHANNELS.close, async (event: IpcMainInvokeEvent) => {
+  ipc.handle(DESKTOP_IPC_CHANNELS.close, async (event: IpcMainInvokeEvent, contextId?: string) => {
     assertTrustedSender(event.sender);
+    if (contextId !== undefined) { const target = targetFor(event.sender, contextId); contexts.delete(contextId); const subscriptions = windows.get(event.sender.id); if (subscriptions) for (const [id, key] of [...subscriptions.byId]) if (key.startsWith(`${contextId}:`)) cancelSubscription(subscriptions, id); await target.close(); return; }
     // Renderer close only drops this window's subscriptions. Host lifetime is
     // owned by Main (`composition.ts`: reload must not touch Host; quit does).
     const window = windows.get((event.sender as unknown as DesktopSender).id);
@@ -388,6 +410,7 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
       for (const window of [...windows.values()]) disposeWindow(window);
       windows.clear();
       cancelled.clear();
+      ipc.removeHandler(DESKTOP_IPC_CHANNELS.openContext);
       ipc.removeHandler(DESKTOP_IPC_CHANNELS.bootstrap);
       ipc.removeHandler(DESKTOP_IPC_CHANNELS.query);
       ipc.removeHandler(DESKTOP_IPC_CHANNELS.command);

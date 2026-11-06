@@ -1,6 +1,7 @@
 import type { RefObject } from "react";
 import { QueuedDeck } from "../deck/QueuedDeck";
 import { PREVIEW_DECK_ITEMS } from "./deckFixtures";
+import { usePreviewMode } from "./PreviewContext";
 
 /**
  * Preview-only Deck above the composer. One window, ver1-style 1/N queue.
@@ -18,12 +19,13 @@ export function PreviewDeck({
   onPlanExpandedChange?: (open: boolean) => void;
   planOriginRef?: RefObject<HTMLElement | null>;
 } = {}) {
+  const { marks } = usePreviewMode();
   return (
     <QueuedDeck
       items={PREVIEW_DECK_ITEMS}
       demo
       previewMark
-      regionLabel="待处理的审批与提问（演示）"
+      regionLabel={marks ? "待处理的审批与提问（演示）" : "待处理的审批与提问"}
       {...(onCurrentKind === undefined ? {} : { onCurrentKind })}
       {...(planExpanded === undefined ? {} : { planExpanded })}
       {...(onPlanExpandedChange === undefined ? {} : { onPlanExpandedChange })}

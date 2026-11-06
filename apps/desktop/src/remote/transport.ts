@@ -41,7 +41,7 @@ export class SshRemoteTransport implements ClientTransport {
   hello: RemoteHello | undefined;
 
   constructor(readonly peer: RemotePeer, readonly terminate: () => void | Promise<void> = () => {}) {
-    const offEvent = peer.onEvent(event => { for (const listener of this.#listeners) listener(event as ClientEvent); });
+    const offEvent = peer.onEvent(event => { if (event && typeof event === "object" && "contextId" in event) return; for (const listener of this.#listeners) listener(event as ClientEvent); });
     peer.onTimeout(method => {
       if (!this.#healthPolicy || method === "ping") return;
       this.#setHealth(false);
@@ -143,6 +143,23 @@ export class SshRemoteTransport implements ClientTransport {
   async bootstrap(): Promise<ClientBootstrap> {
     await this.#ensureSubscription();
     return this.peer.request("bootstrap");
+  }
+  async openContext(scope: import("@omp-studio/client-contract").ClientContextScope): Promise<ClientTransport> {
+    if (!this.hello?.capabilities?.includes("session.contexts")) throw new Error("Update this remote Host to open concurrent conversations.");
+    const contextId = await this.peer.request<string>("context.open", scope);
+    const listeners = new Set<(event: ClientEvent) => void>();
+    const off = this.peer.onEvent(value => {
+      const envelope = value as { contextId?: string; event?: ClientEvent };
+      if (envelope.contextId === contextId && envelope.event) for (const listener of listeners) listener(envelope.event);
+    });
+    await this.peer.request("subscribe", { contextId, input: { scope: "all" } });
+    return {
+      bootstrap: () => this.peer.request("bootstrap", { contextId }),
+      query: input => this.peer.request("query", { contextId, input }),
+      command: input => this.peer.request("command", { contextId, input }),
+      subscribe: (scope, listener) => { const filtered = (event: ClientEvent) => { if (eventMatchesScope(event, scope)) listener(event); }; listeners.add(filtered); return () => { listeners.delete(filtered); }; },
+      close: async () => { off(); listeners.clear(); if (!this.#closed) await this.peer.request("context.close", { contextId }); },
+    };
   }
   query<T extends QueryName>(request: ClientQueryRequest<T>): Promise<ClientQueryResponse<T>> { return this.peer.request("query", request); }
   command<T extends CommandName>(request: ClientCommandRequest<T>): Promise<ClientCommandAccepted<T>> { return this.peer.request("command", request); }

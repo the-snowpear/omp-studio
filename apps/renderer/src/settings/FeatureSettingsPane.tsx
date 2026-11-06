@@ -2,13 +2,16 @@ import { AppSelect } from "../AppSelect";
 import { useEffect, useState } from "react";
 import type { FeatureSettingKey, FeatureSettingRow, FeatureSettingValue } from "@omp-studio/studio-protocol";
 import { useI18n } from "../i18n";
+import { usePreviewMode } from "../preview/PreviewContext";
+import { useHasSettingsScope, useSettingsScope } from "./SettingsScope";
 import { SettingRow, Switch } from "./SettingRow";
 import { useFeatureSettings, type FeatureSettingsProps } from "./useFeatureSettings";
 import "./featureSettings.css";
+import { ComputerSettings, COMPUTER_SETTING_DEFINITIONS } from "../computer/ComputerSettings";
 
-type Group = "interaction" | "context" | "tasks" | "voice" | "maintenance" | "permissions";
+type Group = "interaction" | "context" | "tasks" | "voice" | "dictation" | "maintenance" | "permissions";
 type Definition = { key: FeatureSettingKey; group: Group; zh: string; en: string; hint: string; hintEn: string; options?: Array<[string, string, string]>; text?: boolean; list?: boolean; billed?: boolean; min?: number; max?: number; step?: number };
-const DEFINITIONS: Definition[] = [
+export const FEATURE_SETTINGS_DEFINITIONS: Definition[] = [
   { key: "composer.predictions", group: "interaction", zh: "下一条消息建议", en: "Next-message suggestions", hint: "回答结束后，用当前模型预测下一条消息。会额外调用模型并计入用量；接受建议只填入草稿。", hintEn: "After a reply, predict your next message with the current model. Billed separately; accepting only fills the draft." },
   { key: "contextFiles.extra", group: "context", zh: "额外指令文件", en: "Extra instruction files", hint: "每行一个文件名，与原有项目指令一起加载；下次重新加载上下文时生效。", hintEn: "One filename per line, loaded alongside project instructions when context is reloaded." },
   { key: "retry.fallbackOn", group: "context", zh: "何时切换备用模型", en: "When to use fallbacks", hint: "限制模型候选链的切换条件，不改变当前配置的候选模型。", hintEn: "Limit fallback triggers without changing your model chain.", options: [["any", "所有可回退错误", "Any eligible error"], ["usage-limit", "仅配额不足", "Quota errors only"], ["except-usage-limit", "除配额不足之外", "Except quota errors"]] },
@@ -19,7 +22,7 @@ const DEFINITIONS: Definition[] = [
   { key: "prewalk.auto", group: "tasks", zh: "自动 Prewalk", en: "Automatic prewalk", hint: "用 judge 角色判断每个新任务是否把难点集中在前面；开启后在第一次编辑时交给目标模型继续。需要原生 judge，会额外调用模型。", hintEn: "The judge role classifies whether each new task front-loads its hard reasoning; when on, the turn hands off to the target model at the first edit. Needs a native judge; billed separately.", options: [["off", "关闭", "Off"], ["suggest", "只判断不切换", "Suggest only"], ["on", "自动切换", "On"]] },
   { key: "prewalk.autoTarget", group: "tasks", zh: "Prewalk 目标模型", en: "Prewalk target", hint: "自动 Prewalk 在第一次编辑/写入时交接的模型或角色，例如 @smol 或 provider/model。", hintEn: "Model or role auto-prewalk hands off to at the first edit/write, e.g. @smol or provider/model.", text: true },
   { key: "async.widgets", group: "tasks", zh: "后台任务实时小组件", en: "Live job widgets", hint: "为运行中的后台任务绘制实时图表/进度；由 widget 角色模型（默认 smol）为每个任务生成一次规格。", hintEn: "Draw live charts and meters for running background jobs. The widget model role (default smol) writes one spec per job." },
-  { key: "computer.backgroundFallback", group: "tasks", zh: "电脑操作的后台回退", en: "Computer-use background fallback", hint: "后台输入不可用时：接管前台执行，或拒绝（同时禁止 Agent 自行抢占前台）。", hintEn: "When background window input is unavailable: take over the foreground, or refuse (which also keeps the agent from taking the foreground).", options: [["takeover", "接管前台", "Take over"], ["refuse", "拒绝", "Refuse"]] },
+  ...COMPUTER_SETTING_DEFINITIONS.map(definition => ({ ...definition, group: "tasks" as const })),
   { key: "speech.speed", group: "voice", zh: "实时朗读速度", en: "Live speech speed", hint: "本地 Kokoro 朗读速度，1× 为正常速度。", hintEn: "Local Kokoro speech speed; 1× is normal.", min: .5, max: 2.5, step: .1 },
   { key: "tts.localSpeed", group: "voice", zh: "本地语音生成速度", en: "Local TTS speed", hint: "用于本地 TTS 生成，不改变云端语音服务。", hintEn: "Applies to local TTS, leaving cloud speech settings unchanged.", min: .5, max: 2.5, step: .1 },
   { key: "gc.compress", group: "maintenance", zh: "维护时压缩闲置会话", en: "Compress idle sessions during maintenance", hint: "使用 NTFS/APFS 透明压缩，压缩后仍可恢复和搜索；启用不会立即开始扫描。", hintEn: "Use NTFS/APFS compression. Sessions remain resumable and searchable; enabling does not start a scan." },
@@ -33,22 +36,29 @@ const DEFINITIONS: Definition[] = [
   { key: "compaction.idleTimeoutSeconds", group: "context", zh: "空闲压缩等待时间（秒）", en: "Idle compaction delay (seconds)", hint: "1 小时缓存会改为在缓存到期前压缩；5 分钟缓存仍遵守等待时间，可能产生冷缓存费用。", hintEn: "A one-hour cache compacts before expiry; a five-minute cache keeps this delay and may incur a cold-prefix read.", min: 60, max: 3600, step: 1 },
   { key: "gc.autoCompress", group: "maintenance", zh: "后台自动压缩闲置会话", en: "Automatic idle-session compression", hint: "开启后启动时最多每天运行一次低优先级 NTFS/APFS 压缩。使用原生锁；不支持或无收益时跳过并记录原因。", hintEn: "At launch, run low-priority native NTFS/APFS compression at most once daily. Native locks prevent duplicates; unsupported or ineffective volumes are skipped with a reason." },
   { key: "session.worktreeScope", group: "tasks", zh: "恢复会话的目录范围", en: "Resume directory scope", hint: "选择只看本目录，或包含同仓库的关联 Worktree；不会跨其他项目。", hintEn: "Show only this directory, or related worktrees of the same repository; never unrelated projects.", options: [["directory", "本目录", "This directory"], ["repo", "仓库 Worktree", "Repository worktrees"]] },
-  { key: "stt.enabled", group: "voice", zh: "草稿听写", en: "Draft dictation", hint: "允许 Composer 麦克风听写，只填入草稿，不自动发送。启动前会说明模型下载或云端费用；切换会话关闭麦克风。", hintEn: "Enable Composer dictation into the draft, never automatic submission. Starting explains model downloads or cloud costs; changing sessions closes capture." },
-  { key: "stt.language", group: "voice", zh: "听写语言", en: "Dictation language", hint: "语言代码，如 zh、en；由原生 dictation 角色模型处理。", hintEn: "Language code such as zh or en, handled by the native dictation role.", text: true },
+  { key: "stt.enabled", group: "dictation", zh: "启用语音输入", en: "Enable voice input", hint: "点击麦克风只填草稿；按住空格或使用切换快捷键也可听写。离开时立即停麦，未完成内容只保留在本次应用内存中。", hintEn: "Click to dictate into the draft, hold Space, or use the toggle shortcut. Leaving stops the microphone and retains unfinished audio only in this app's memory." },
+  { key: "stt.language", group: "dictation", zh: "听写语言", en: "Dictation language", hint: "中文与英文技术词混说请选择中文，并使用支持中文的 dictation 角色模型。语言设置不会改变模型本身的语言能力。", hintEn: "Use Chinese with a compatible dictation model for mixed Chinese and English. This setting cannot add language support to a model.", options: [["zh", "中文（可夹英文）", "Chinese (with English terms)"], ["en", "English", "English"], ["", "自动检测（模型需支持）", "Auto-detect (if supported)"]] },
+  { key: "stt.submitTrigger", group: "dictation", zh: "按住 / 快捷键结束后", en: "After hold / shortcut dictation", hint: "默认只填草稿。自动发送只对按住或快捷键录音有效；点击麦克风、恢复录音、手动修改或中断后始终不自动发送。", hintEn: "Draft only by default. Automatic submission applies only to hold or toggle capture, never clicks, recovery, manual edits or interruptions.", options: [["never", "只填草稿，不自动发送", "Fill draft, never auto-submit"], ["release", "松开后发送（至少两个词）", "Submit on release (at least two words)"], ["release-complete", "松开后发送完整句", "Submit complete sentences on release"], ["say-submit", "说出句尾提交指令", "Say the final submit command"]] },
 ];
-const TITLES: Record<Group, [string, string]> = { permissions: ["目录与扩展权限", "Folder and extension permissions"], interaction: ["消息建议", "Message suggestions"], context: ["上下文与回退", "Context and fallback"], tasks: ["任务与工作区策略", "Task and workspace policy"], voice: ["本地语音速度", "Local speech speed"], maintenance: ["会话存储策略", "Session storage policy"] };
+const TITLES: Record<Group, [string, string]> = { permissions: ["目录与扩展权限", "Folder and extension permissions"], interaction: ["消息建议", "Message suggestions"], context: ["上下文与回退", "Context and fallback"], tasks: ["任务与工作区策略", "Task and workspace policy"], voice: ["本地语音速度", "Local speech speed"], dictation: ["语音输入", "Voice input"], maintenance: ["会话存储策略", "Session storage policy"] };
 
-export function FeatureSettingsPane(props: FeatureSettingsProps & { group: Group }) {
+export function FeatureSettingsPane(props: FeatureSettingsProps & { group: Group; keys?: readonly FeatureSettingKey[]; excludeKeys?: readonly FeatureSettingKey[]; onSaved?(): void }) {
   const state = useFeatureSettings(props), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
-  const [scope, setScope] = useState<"session" | "global">("global");
+  const { marks } = usePreviewMode();
+  const [scope, setScope] = useSettingsScope();
+  const sharedScope = useHasSettingsScope();
+  const save = async (key: FeatureSettingKey, value: FeatureSettingValue) => { await state.save(key, value, scope); props.onSaved?.(); };
+  const clear = async (key: FeatureSettingKey) => { await state.clear(key); props.onSaved?.(); };
   return <section className="feature-settings" aria-label={TITLES[props.group][zh ? 0 : 1]}>
-    <header className="feature-settings-head"><div><span className="feature-eyebrow">{zh ? "运行偏好" : "RUNTIME PREFERENCES"}{state.preview ? zh ? " · 演示" : " · DEMO" : ""}</span><h3>{TITLES[props.group][zh ? 0 : 1]}</h3></div>
-      <label className="small muted">{zh ? "保存到" : "Save to"}<AppSelect className="select" aria-label={zh ? "新功能设置保存范围" : "Feature settings scope"} value={scope} disabled={state.busy} onChange={event => setScope(event.target.value as typeof scope)}><option value="global">{zh ? "用户配置" : "User settings"}</option><option value="session">{zh ? "当前会话" : "This session"}</option></AppSelect></label>
+    <header className="feature-settings-head"><div><span className="feature-eyebrow">{zh ? "运行偏好" : "RUNTIME PREFERENCES"}{state.preview && marks ? zh ? " · 演示" : " · DEMO" : ""}</span><h3>{TITLES[props.group][zh ? 0 : 1]}</h3></div>
+      {!sharedScope ? <label className="small muted">{zh ? "保存到" : "Save to"}<AppSelect className="select" aria-label={zh ? "新功能设置保存范围" : "Feature settings scope"} value={scope} disabled={state.busy} onChange={event => setScope(event.target.value as typeof scope)}><option value="global">{zh ? "用户配置" : "User settings"}</option><option value="session">{zh ? "当前会话" : "This session"}</option></AppSelect></label> : null}
     </header>
     {!state.enabled ? <p className="feature-status">{zh ? "连接支持此功能的 Runtime 后可配置。" : "Connect a compatible Runtime to configure these features."}</p> : state.loading ? <p className="feature-status" role="status">{zh ? "正在读取生效配置…" : "Reading effective settings…"}</p> : null}
-    {DEFINITIONS.filter(item => item.group === props.group).map(definition => <FeatureRow key={definition.key} definition={definition} row={state.rows.find(row => row.key === definition.key)} disabled={!state.enabled || state.busy || state.loading} zh={zh} save={value => void state.save(definition.key, value, scope)} clear={() => void state.clear(definition.key)} />)}
+    {state.enabled && !state.supports("preferences.features.set") ? <p className="feature-status">{zh ? "当前 Runtime 只提供读取。" : "This Runtime provides read-only settings."}</p> : null}
+    {FEATURE_SETTINGS_DEFINITIONS.filter(item => !item.key.startsWith("computer.") && item.group === props.group && (!props.keys || props.keys.includes(item.key)) && !props.excludeKeys?.includes(item.key)).map(definition => <FeatureRow key={definition.key} definition={definition} row={state.rows.find(row => row.key === definition.key)} disabled={!state.enabled || !state.supports("preferences.features.set") || state.busy || state.loading} zh={zh} save={value => void save(definition.key, value)} clear={() => void clear(definition.key)} />)}
+    {props.group === "tasks" && (!props.keys || props.keys.some(key => key.startsWith("computer."))) ? <ComputerSettings client={props.client} context={props.context} visible={props.visible} {...(props.onSaved ? { onSaved: props.onSaved } : {})} /> : null}
     {state.error ? <p role="alert" className="feature-error">{state.error}</p> : null}
-    {state.notice ? <p role="status" className="feature-status">{state.preview ? zh ? "演示设置已更新。" : "Demo settings updated." : zh ? "已保存。界面显示当前生效值；项目或会话覆盖仍优先。" : "Saved. Effective values are shown; project and session overrides still take precedence."}</p> : null}
+    {state.notice && (marks || !state.preview) ? <p role="status" className="feature-status">{state.preview ? zh ? "演示设置已更新。" : "Demo settings updated." : zh ? "已保存。界面显示当前生效值；项目或会话覆盖仍优先。" : "Saved. Effective values are shown; project and session overrides still take precedence."}</p> : null}
   </section>;
 }
 function FeatureRow({ definition: d, row, disabled, zh, save, clear }: { definition: Definition; row?: FeatureSettingRow | undefined; disabled: boolean; zh: boolean; save(value: FeatureSettingValue): void; clear(): void }) {

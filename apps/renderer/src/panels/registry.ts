@@ -1,12 +1,18 @@
 import type { PanelDefinition } from "../dock/types";
 
 export const WORKBENCH_PANELS: readonly PanelDefinition[] = [
-  { id: "files", title: "Files", icon: "folder" },
+  { id: "files", title: "Explorer", icon: "file-tree" },
   { id: "changes", title: "Changes", icon: "diff" },
   { id: "git", title: "Git", icon: "branch" },
+  { id: "git-quick", title: "Git", menuTitle: "Git 快捷卡", icon: "branch", initialHeight: 320 },
   { id: "browser", title: "Browser", icon: "globe", initialHeight: 320 },
-  { id: "computer", title: "Computer", icon: "monitor", initialHeight: 320 },
-  { id: "agents", title: "Agents", icon: "bot" },
+  { id: "computer", title: "Computer", menuTitle: "电脑 · Computer", icon: "monitor", minHeight: 180, initialHeight: 440 },
+  { id: "agents", title: "Agents", icon: "bot", meter: true },
+  { id: "agent-detail", title: "子 Agent", icon: "message", initialHeight: 480 },
+  { id: "environment", title: "Environment", icon: "cpu" },
+  { id: "context", title: "Context", icon: "layers", meter: true, initialHeight: 320 },
+  { id: "context-viewer", title: "上下文查看器", icon: "layers", minHeight: 260, initialHeight: 500 },
+  { id: "token-counter", title: "Token 计数", menuTitle: "离线 Token 计数", icon: "code", minHeight: 260, initialHeight: 420 },
   { id: "terminal", title: "Terminal", icon: "terminal", minHeight: 240, initialHeight: 280 },
   { id: "problems", title: "Problems", icon: "alert-c" },
   { id: "tests", title: "Tests", icon: "test" },

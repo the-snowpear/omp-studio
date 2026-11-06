@@ -2,10 +2,12 @@
  * OMP workspace adapter: thin sanitizing seam over the Host-owned
  * {@link WorkspaceRegistry}.
  *
- * The registry is the only place workspace paths exist. This adapter maps
- * stored records to the path-free `WorkspaceListReadModel`: only
- * `workspaceId / name / lastOpenedAt / active` ever cross the boundary —
- * `canonicalPath` is never copied into a return value.
+ * The registry is the only place workspace paths are resolved. This adapter
+ * maps stored records to `WorkspaceListReadModel`: `workspaceId / name /
+ * lastOpenedAt / active` plus `root` — the canonical folder the operator
+ * picked, published for display only (the workbench shows it as the project
+ * address). Nothing in the Host ever reads that field back: every file, tree
+ * and mutation path stays workspace-relative and is resolved here.
  *
  * `pickDirectory` is injected (the Desktop composition root supplies the
  * Electron dialog); returning `undefined` means the user cancelled and the
@@ -40,12 +42,13 @@ export interface OmpWorkspaceAdapterOptions {
 
 const NAME_MAX = 80;
 
-/** Map a stored record to its path-free public row. */
+/** Map a stored record to its public row (`root` is display-only, see the header). */
 function toRecord(stored: StoredWorkspace, activeId: string | undefined): WorkspaceRecord {
   const name = sanitizeDisplayText(stored.name, NAME_MAX) ?? "Untitled project";
   return {
     workspaceId: stored.workspaceId as WorkspaceId,
     name,
+    root: stored.canonicalPath,
     lastOpenedAt: stored.lastOpenedAt,
     active: stored.workspaceId === activeId,
   };

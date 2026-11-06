@@ -4,6 +4,8 @@ import { normalizeDoc } from "./serialize";
 import { splitChipLabel, type ComposerChip, type ComposerDoc, type ComposerNode, type PromptImage } from "./types";
 import { modeChipConflictsWith } from "./commands";
 
+function isElement(node: Node): node is HTMLElement { return node.nodeType === 1; }
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -79,10 +81,15 @@ export function syncChipTruncation(root: ParentNode): void {
   }
 }
 
-export function createChipElement(chip: ComposerChip): HTMLSpanElement {
+export function createChipElement(chip: ComposerChip, document: Document = globalThis.document): HTMLSpanElement {
   const span = document.createElement("span");
   span.className = `cm-chip cm-chip-${chip.kind}`;
   span.contentEditable = "false";
+  if (chip.kind === "github" || chip.kind === "git-commit" || chip.kind === "browser") {
+    span.setAttribute("role", "button");
+    span.tabIndex = 0;
+    span.setAttribute("aria-label", chip.label);
+  }
   span.dataset.chip = chipPayload(chip);
   span.title = chip.path ?? chip.name ?? chip.label;
   const icon = chip.kind === "mode" ? "" : iconSvg(chipIconName(chip.kind), "sm");
@@ -92,8 +99,8 @@ export function createChipElement(chip: ComposerChip): HTMLSpanElement {
 
 /** Capsule id when the event target sits inside a capsule's × button, else `null`. */
 export function chipRemoveTarget(target: EventTarget | null): string | null {
-  if (!(target instanceof Element)) return null;
-  const chip = target.closest(".cm-chip-x")?.closest<HTMLElement>(".cm-chip");
+  if ((target as Node | null)?.nodeType !== 1) return null;
+  const chip = (target as Element).closest(".cm-chip-x")?.closest<HTMLElement>(".cm-chip");
   if (!chip) return null;
   return parseChipPayload(chip.dataset.chip ?? "")?.id ?? null;
 }
@@ -110,7 +117,8 @@ export function readDoc(editor: HTMLElement, images: Map<string, PromptImage>): 
       nodes.push({ type: "text", value: node.textContent ?? "" });
       return;
     }
-    if (!(node instanceof HTMLElement)) return;
+    if (!isElement(node)) return;
+    if (node.hasAttribute("data-composer-dictation")) return;
     if (node.classList.contains("cm-chip")) {
       const parsed = parseChipPayload(node.dataset.chip ?? "");
       if (!parsed) return;
@@ -134,6 +142,8 @@ export function readDoc(editor: HTMLElement, images: Map<string, PromptImage>): 
 }
 
 export function writeDoc(editor: HTMLElement, doc: ComposerDoc, images: Map<string, PromptImage>): void {
+  const document = editor.ownerDocument!;
+  const window = document.defaultView!;
   editor.replaceChildren();
   for (const node of doc.nodes) {
     if (node.type === "text") {
@@ -145,8 +155,8 @@ export function writeDoc(editor: HTMLElement, doc: ComposerDoc, images: Map<stri
       continue;
     }
     if (node.chip.image) images.set(node.chip.id, node.chip.image);
-    editor.append(createChipElement(node.chip));
-    if (node.chip.kind !== "mode") editor.append(document.createTextNode(" "));
+    editor.append(createChipElement(node.chip, document));
+    if (node.chip.kind !== "mode" && node.chip.kind !== "github" && node.chip.kind !== "git-commit" && node.chip.kind !== "browser") editor.append(document.createTextNode(" "));
   }
 }
 
@@ -174,6 +184,8 @@ export function renumberImageChips(editor: HTMLElement): void {
 
 /** Collapses the selection just before `node`, or at the end of `parent`. */
 function placeCaretBefore(parent: Node, node: ChildNode | null): void {
+  const document = parent.ownerDocument!;
+  const window = document.defaultView!;
   const selection = window.getSelection();
   if (!selection) return;
   const index = node === null ? -1 : [...parent.childNodes].indexOf(node);
@@ -186,6 +198,8 @@ function placeCaretBefore(parent: Node, node: ChildNode | null): void {
 
 /** Caret after `node`. Text nodes keep the caret inside so `@` stays a mention. */
 function placeCaretAfter(node: Node): void {
+  const document = node.ownerDocument!;
+  const window = document.defaultView!;
   const selection = window.getSelection();
   if (!selection) return;
   const range = document.createRange();
@@ -208,6 +222,8 @@ function placeCaretAfter(node: Node): void {
  * so typing continues in place instead of jumping to the end of the document.
  */
 export function removeChipById(editor: HTMLElement, id: string): boolean {
+  const document = editor.ownerDocument!;
+  const window = document.defaultView!;
   for (const chip of editor.querySelectorAll<HTMLElement>(".cm-chip")) {
     if (parseChipPayload(chip.dataset.chip ?? "")?.id !== id) continue;
     const spacer = chip.nextSibling;
@@ -255,6 +271,8 @@ export function removeConflictingModeChips(editor: HTMLElement, name: string): b
 }
 
 export function placeCaretAtEnd(editor: HTMLElement): void {
+  const document = editor.ownerDocument!;
+  const window = document.defaultView!;
   const last = editor.lastChild;
   if (last) {
     placeCaretAfter(last);
@@ -270,6 +288,8 @@ export function placeCaretAtEnd(editor: HTMLElement): void {
 }
 
 export function insertNodesAtCaret(editor: HTMLElement, nodes: Node[]): void {
+  const document = editor.ownerDocument!;
+  const window = document.defaultView!;
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || !editor.contains(selection.anchorNode)) {
     for (const node of nodes) editor.append(node);
@@ -291,6 +311,8 @@ export function insertNodesAtCaret(editor: HTMLElement, nodes: Node[]): void {
  * markup that a rich-text paste would otherwise carry in.
  */
 export function insertPlainText(editor: HTMLElement, text: string): void {
+  const document = editor.ownerDocument!;
+  const window = document.defaultView!;
   const nodes: Node[] = [];
   const lines = text.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
   lines.forEach((line, index) => {
@@ -312,8 +334,8 @@ export type MentionQuery = {
 const MENTION_TOKEN = /(?:^|[\s([{<"'])([@^])([^\s]*)$/u;
 
 function inChip(node: Node): boolean {
-  const el = node instanceof Element ? node : node.parentElement;
-  return el?.closest(".cm-chip") !== null;
+  const el = isElement(node) ? node : node.parentElement;
+  return el?.closest(".cm-chip, [data-composer-dictation]") !== null;
 }
 
 function mentionInText(textNode: Text, end: number): MentionQuery | null {
@@ -337,13 +359,15 @@ function mentionEndingAt(node: Node | null): MentionQuery | null {
   if (node.nodeType === Node.TEXT_NODE) {
     return mentionInText(node as Text, (node as Text).data.length);
   }
-  if (node instanceof HTMLElement && !node.classList.contains("cm-chip")) {
+  if (isElement(node) && !node.classList.contains("cm-chip")) {
     return mentionEndingAt(node.lastChild);
   }
   return null;
 }
 
 export function mentionAtCaret(editor: HTMLElement): MentionQuery | null {
+  const document = editor.ownerDocument!;
+  const window = document.defaultView!;
   const selection = window.getSelection();
   if (!selection?.isCollapsed || selection.rangeCount === 0) return null;
   const node = selection.anchorNode;
@@ -364,6 +388,8 @@ export function mentionAtCaret(editor: HTMLElement): MentionQuery | null {
  * token (toolbar `@` button, then pick from the menu).
  */
 export function findMentionToken(editor: HTMLElement, query: string, trigger: "@" | "^" = "@"): MentionQuery | null {
+  const document = editor.ownerDocument!;
+  const window = document.defaultView!;
   const needle = `${trigger}${query}`;
   const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
   let found: MentionQuery | null = null;
@@ -384,6 +410,8 @@ export function findMentionToken(editor: HTMLElement, query: string, trigger: "@
 }
 
 export function replaceMention(mention: MentionQuery, chipEl: HTMLSpanElement): void {
+  const document = mention.textNode.ownerDocument!;
+  const window = document.defaultView!;
   const text = mention.textNode.data;
   const before = text.slice(0, mention.start);
   const after = text.slice(mention.end);
@@ -403,6 +431,5 @@ export function replaceMention(mention: MentionQuery, chipEl: HTMLSpanElement): 
 }
 
 export function editorIsEmpty(editor: HTMLElement): boolean {
-  const text = editor.textContent?.replace(/\u00a0/g, " ").trim() ?? "";
-  return text.length === 0 && editor.querySelector(".cm-chip") === null;
+  return readDoc(editor, new Map()).nodes.every((node) => node.type === "text" && !node.value.replace(/\u00a0/g, " ").trim());
 }

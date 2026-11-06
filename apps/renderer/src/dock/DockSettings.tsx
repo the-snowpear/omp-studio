@@ -3,6 +3,7 @@ import { AppSelect } from "../AppSelect";
 import { Icon } from "../icons";
 import { formatShortcut } from "../keyboard/shortcuts";
 import { PLATFORM } from "../platform";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { SettingRow, SettingSection, Switch } from "../settings/SettingRow";
 import { useOptionalDock } from "./DockContext";
 import { DockPresetNameForm, dockPresetName, useDockCopy } from "./DockMenus";
@@ -22,6 +23,7 @@ export function DockSettings() {
 
 function DockSettingsContent({ dock }: { dock: NonNullable<ReturnType<typeof useOptionalDock>> }) {
   const { layout, preferences, presets, scope, store, preview, modified, canUndo, canRedo } = dock;
+  const { marks } = usePreviewMode();
   const copy = useDockCopy();
   const [selectedId, setSelectedId] = useState(layout.presetId);
   const [editing, setEditing] = useState<"save" | "rename" | "delete" | null>(null);
@@ -42,7 +44,7 @@ function DockSettingsContent({ dock }: { dock: NonNullable<ReturnType<typeof use
   const currentName = current ? dockPresetName(current, copy) : copy("自定义布局", "Custom layout");
   return <div className="dock-settings" data-dock-settings>
     <SettingSection title={copy("工作台布局", "Workbench layout")} desc={copy("每个会话自动保存自己的布局。预设只保存工具位置与显示偏好，不包含会话或运行资源。", "Each session saves its own layout automatically. Presets contain tool positions and display preferences, not sessions or running resources.")}>
-      {preview ? <span className="chip amber xs demo-chip">{copy("演示", "Demo")}</span> : null}
+      {preview && marks ? <span className="chip amber xs demo-chip">{copy("演示", "Demo")}</span> : null}
       <SettingRow label={copy("应用默认预设", "Application default preset")} desc={copy("用于未指定项目默认的新会话及无布局记录的会话；不改变当前会话。", "Used for new sessions and sessions without a saved layout when no project default is set. Does not change this session.")} source={preferences.appDefault === "default" ? "default" : "user"}>
         <AppSelect className="select" aria-label={copy("应用默认预设", "Application default preset")} value={preferences.appDefault} onChange={event => store.updatePreferences({ appDefault: event.target.value })}>{options}</AppSelect>
       </SettingRow>
@@ -103,7 +105,7 @@ function DockSettingsContent({ dock }: { dock: NonNullable<ReturnType<typeof use
       </div>
       <div className="dock-layout-help">
         <strong>{copy("操作与快捷键", "Controls and shortcuts")}</strong>
-        <p>{copy("卡片、标签和组的更多菜单提供移动、排序、拆分、合并和隐藏操作，无需拖动。隐藏工具不会结束任务；用“添加工具”或视图菜单找回。", "Card, tab and group More menus offer moving, reordering, splitting, merging and hiding without dragging. Hiding a tool does not stop its tasks; restore it from Add tool or View.")}</p>
+        <p>{copy("右键标签或浮窗标题栏可移动、排序、拆分、合并和隐藏；标签菜单中的“标签组”提供添加工具和整组操作，右栏不再显示“…”按钮。单页浮窗不显示标签行，拖入第二页才出现；右栏和底栏的组握把只在指针靠近标签行左端时展开。隐藏工具不会结束任务；用“添加工具”或视图菜单找回。", "Right-click a tab or floating title bar to move, reorder, split, merge or hide tools. The tab menu's Tab group section provides Add tool and group actions, replacing the right sidebar's More button. Single-page windows show tabs only after a second tool joins; the right and bottom group grips appear near their strip's left edge. Hiding a tool does not stop its tasks; restore it from Add tool or View.")}</p>
         <dl>
           <div><dt>{copy("左侧栏", "Left sidebar")}</dt><dd><kbd>{formatShortcut({ key: "B" }, "hint")}</kbd></dd></div>
           <div><dt>{copy("底栏", "Bottom bar")}</dt><dd><kbd>{formatShortcut({ key: "J" }, "hint")}</kbd></dd></div>

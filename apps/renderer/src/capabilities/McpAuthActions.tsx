@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type { McpAuthResult } from "@omp-studio/studio-protocol";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { usePreviewMode } from "../preview/PreviewContext";
 import "./mcpAuth.css";
 
 type Action = "reauth" | "unauth" | "reconnect";
@@ -23,6 +24,7 @@ export function McpAuthActions({
   preview: boolean;
   zh: boolean;
 }) {
+  const { marks } = usePreviewMode();
   const [busy, setBusy] = useState<Action>();
   const [confirmUnauth, setConfirmUnauth] = useState(false);
   const [result, setResult] = useState<McpAuthResult>();
@@ -41,8 +43,8 @@ export function McpAuthActions({
           name,
           scope: "user",
           status: action === "reauth" ? "authorized" : action === "unauth" ? "removed" : "connected",
-          message: zh ? "演示：未调用 Runtime。" : "Demo: the Runtime was not called.",
-          ...(action === "reauth" ? { authUrl: "https://auth.example.com/authorize?client_id=demo" } : {}),
+          ...(marks ? { message: zh ? "演示：未调用 Runtime。" : "Demo: the Runtime was not called." } : {}),
+          ...(marks && action === "reauth" ? { authUrl: "https://auth.example.com/authorize?client_id=demo" } : {}),
         });
         return;
       }

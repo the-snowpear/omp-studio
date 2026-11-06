@@ -62,6 +62,7 @@ import { createDesktopGitService } from "./git-service.js";
 import { createDesktopGithubService } from "./github-service.js";
 import { GitWriteQueue, HostProcessRunner } from "./git-process.js";
 import { createDesktopRuntimeSessionPort } from "./runtime-session.js";
+import type { MemoryCredentialProvider } from "./memory-credentials.js";
 import { createWorkspaceFileService } from "./workspace-files.js";
 import { createWorkspaceSessionCatalog } from "./session-commands.js";
 import {
@@ -552,6 +553,8 @@ export interface ProductionDesktopHostFactory extends DesktopHostFactory {
  * Packaged builds keep the live `omp.exe` under `$INSTDIR\runtime`.
  */
 export function createProductionHostFactory(options?: {
+  readonly managedBrowser?: boolean;
+  readonly memoryCredentials?: MemoryCredentialProvider;
   /** Settles once `process.env` is ready to spawn with (the macOS login shell). */
   readonly loginEnvironment?: Promise<LoginEnvironmentStatus>;
   readonly beforeCreate?: () => Promise<void>;
@@ -580,7 +583,7 @@ export function createProductionHostFactory(options?: {
   // Runtime 进程由 Host 生命周期管理；Worker 的停驻/唤醒由 OMP Runtime
   // 内部 AgentLifecycleManager 负责。桌面层不因空闲或容量淘汰 Runtime，
   // 避免后台切换时把 Worker 内存维护表现成 Bridge 断开。
-  const runtimeSession = createDesktopRuntimeSessionPort({ log: hostLog });
+  const runtimeSession = createDesktopRuntimeSessionPort({ log: hostLog, ...(options?.managedBrowser ? { managedBrowser: true } : {}), ...(options?.memoryCredentials ? { memoryCredentials: options.memoryCredentials } : {}) });
   const gitProcessRunner = new HostProcessRunner();
   const gitWriteQueue = new GitWriteQueue();
   const git = createDesktopGitService({

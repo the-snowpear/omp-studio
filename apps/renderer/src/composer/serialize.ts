@@ -1,3 +1,6 @@
+import { nextGithubReference, serializeGithubReference } from "./githubReference";
+import { nextBrowserReference, serializeBrowserReference } from "./browserReference";
+import { gitCommitReferenceLabel, nextGitCommitReference, serializeGitCommitReference } from "./gitCommitReference";
 import type { ComposerChip, ComposerDoc, ComposerSnapshot, PromptImage } from "./types";
 import { emptyDoc, emptySnapshot, fileLabel, newChipId } from "./types";
 
@@ -14,6 +17,9 @@ export function quoteMentionPath(path: string): string {
 
 export function serializeChip(chip: ComposerChip, imageIndex?: number): string {
   switch (chip.kind) {
+    case "github": return chip.reference && chip.reference.kind !== "commit" && chip.reference.kind !== "browser" ? serializeGithubReference(chip.reference) : chip.label;
+    case "browser": return chip.reference?.kind === "browser" ? serializeBrowserReference(chip.reference) : chip.label;
+    case "git-commit": return chip.reference?.kind === "commit" ? serializeGitCommitReference(chip.reference) : chip.label;
     case "file":
       return `@${quoteMentionPath(chip.path ?? chip.label)}`;
     case "dir": {
@@ -63,6 +69,7 @@ export function snapshotFromDoc(doc: ComposerDoc): ComposerSnapshot {
 
 export function snapshotFromText(text: string): ComposerSnapshot {
   if (text.length === 0) return emptySnapshot();
+  if (text.includes("<github-reference ") || text.includes("<git-commit-reference ") || text.includes("<browser-reference ")) return snapshotFromDoc(displayDocFromSerializedText(text));
   if (/(^|\s)\^[^\s^]+\/[^\s^]+/u.test(text)) return snapshotFromDoc(displayDocFromSerializedText(text));
   return { text, images: [], doc: { nodes: [{ type: "text", value: text }] } };
 }
@@ -150,6 +157,13 @@ function nextSerializedToken(
   const consider = (start: number, end: number, chip: ComposerChip): void => {
     if (best === null || start < best.start) best = { start, end, chip };
   };
+  const github = nextGithubReference(text, from);
+  const browser = nextBrowserReference(text, from);
+  if (browser) consider(browser.start, browser.end, { id: newChipId(), kind: "browser", reference: browser.reference, label: browser.reference.title });
+  if (github) consider(github.start, github.end, { id: newChipId(), kind: "github", reference: github.reference,
+    label: `${github.reference.kind === "pr" ? "PR" : "Issue"} #${github.reference.number} ${github.reference.title}` });
+  const commit = nextGitCommitReference(text, from);
+  if (commit) consider(commit.start, commit.end, { id: newChipId(), kind: "git-commit", reference: commit.reference, label: gitCommitReferenceLabel(commit.reference) });
   const model = firstMatch(/\^([^\s^]+\/[^\s^]+)/gu.source, "gu", text, from, match => isSkillBoundary(text, match.index));
   if (model?.[1]) consider(model.index, model.index + model[0].length, { id: newChipId(), kind: "model", name: model[1], label: model[1].slice(model[1].indexOf("/") + 1) });
   const image = firstMatch(IMAGE_TOKEN_RE.source, "gu", text, from);

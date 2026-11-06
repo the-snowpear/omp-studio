@@ -87,26 +87,33 @@ export class StudioAgentBtwService {
 		}
 		const sessionId = session.sessionManager.getSessionId();
 		const artifacts = session.sessionManager.getArtifactsDir?.() ?? null;
-		const service = new StudioBtwService({
-			get isStreaming() {
-				return session.isStreaming;
-			},
-			sessionManager: {
-				getSessionId: () => sessionId,
-				getArtifactsDir: () => artifacts,
-				getLeafId: () => {
+		const service = new StudioBtwService(
+			{
+				get model() {
+					return session.model;
+				},
+				get isStreaming() {
+					return session.isStreaming;
+				},
+				sessionManager: {
+					getSessionId: () => sessionId,
+					ensureOnDisk: () => session.sessionManager.ensureOnDisk(),
+					getArtifactsDir: () => artifacts,
+					getLeafId: () => {
+						this.#assert(entry);
+						return session.sessionManager.getLeafId();
+					},
+				},
+				runEphemeralTurn: args => {
 					this.#assert(entry);
-					return session.sessionManager.getLeafId();
+					return session.runEphemeralTurn(args);
+				},
+				branchFromBtw: async () => {
+					throw new StudioBtwError("COMMAND_BLOCKED", "Branch from the child conversation explicitly");
 				},
 			},
-			runEphemeralTurn: args => {
-				this.#assert(entry);
-				return session.runEphemeralTurn(args);
-			},
-			branchFromBtw: async () => {
-				throw new StudioBtwError("COMMAND_BLOCKED", "Branch from the child conversation explicitly");
-			},
-		});
+			{ historyScope: sessionId },
+		);
 		const entry: Entry = {
 			binding: randomUUID(),
 			agentId: operation.agentId,
@@ -136,11 +143,16 @@ export class StudioAgentBtwService {
 		validateAgentBtwOperation(operation);
 		const entry = this.#entry(operation);
 		if (operation.kind === "agent.btw.ask") {
-			if (operation.topicId) await entry.service.followUp(operation.topicId, operation.question);
-			else entry.service.ask(operation.question);
+			if (operation.topicId) await entry.service.followUp(operation.topicId, operation.question, operation.images);
+			else entry.service.ask(operation.question, operation.images);
 		} else if (operation.kind === "agent.btw.abort") entry.service.abort(operation.ephemeralId);
 		const history = await entry.service.historyList();
-		const topicId = operation.kind !== "agent.btw.abort" ? operation.topicId : undefined;
+		const topicId =
+			operation.kind === "agent.btw.ask"
+				? entry.snapshot?.topicId
+				: operation.kind === "agent.btw.read"
+					? operation.topicId
+					: undefined;
 		const turns = topicId ? (await entry.service.historyRead(topicId)).turns : [];
 		this.#assert(entry);
 		const snapshot = entry.snapshot;
@@ -157,6 +169,8 @@ export class StudioAgentBtwService {
 						text: snapshot.text,
 						...(snapshot.topicId ? { topicId: snapshot.topicId } : {}),
 						...(snapshot.question ? { question: snapshot.question } : {}),
+						...(snapshot.turnIndex === undefined ? {} : { turnIndex: snapshot.turnIndex }),
+						...(snapshot.title ? { title: snapshot.title } : {}),
 						...(snapshot.error ? { error: snapshot.error } : {}),
 					}
 				: null,

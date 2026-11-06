@@ -1,4 +1,5 @@
-import type { ContextViewOperation } from "@omp-studio/studio-protocol";
+import type { EvaluationCoordinator } from "@omp-studio/studio-host";
+import { isComputerWorkspaceCommand, type ComputerWorkspaceQuery, type ContextViewOperation } from "@omp-studio/studio-protocol";
 import { validateArtifactTextInput, validateArtifactIdInput, isWorkbenchOperationKind, isUpgradeOperationKind } from "@omp-studio/studio-protocol";
 import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
 /**
@@ -49,6 +50,7 @@ import type {
   ClientSelection,
   ClientTransport,
   CommandName,
+  CommandInput,
   CommandReceipt,
   CommandRequestId,
   DiagnosticEntry,
@@ -121,7 +123,7 @@ import {
   parseSessionTelemetryReadResult,
   parseSessionTelemetrySnapshot,
 } from "@omp-studio/studio-protocol";
-import type { HostBackend, RuntimePublication, StudioBtwForward, StudioConversationForward, StudioInteractionForward, StudioTelemetryForward } from "@omp-studio/studio-host";
+import type { HostBackend, RuntimePublication, StudioBtwForward, StudioComputerForward, StudioConversationForward, StudioInteractionForward, StudioTelemetryForward } from "@omp-studio/studio-host";
 
 import {
   HostEventBus,
@@ -271,6 +273,7 @@ export interface StudioHostClientFacadeOptions {
   readonly commands?: HostSemanticCommandService;
   /** Optional OMP models.yml / config / login adapter. */
   readonly models?: HostModelsService;
+  readonly evaluations?: EvaluationCoordinator;
   readonly artifacts?: import("./services.js").HostArtifactService;
   /** Optional configured skills/plugins inventory adapter. */
   readonly extensibility?: HostExtensibilityService;
@@ -697,10 +700,12 @@ export class StudioHostClientFacade implements ClientTransport {
   #unsubscribeConversationResync: Unsubscribe | undefined;
   #unsubscribeTelemetry: Unsubscribe | undefined;
   #unsubscribeBtw: Unsubscribe | undefined;
+  #unsubscribeComputer: Unsubscribe | undefined;
   #unsubscribeResidents: Unsubscribe | undefined;
   #unsubscribeResidentTerminalOutcomes: Unsubscribe | undefined;
   #unsubscribeInteraction: Unsubscribe | undefined;
   #unsubscribeGitProgress: Unsubscribe | undefined;
+  #unsubscribeEvaluations: Unsubscribe | undefined;
   #unsubscribeGitExternal: Unsubscribe | undefined;
   #unsubscribeGithubProgress: Unsubscribe | undefined;
   #closed = false;
@@ -757,9 +762,11 @@ export class StudioHostClientFacade implements ClientTransport {
         for (const entry of outcomes) this.#emitLedgerReceipt(entry);
       });
     }
+    this.#unsubscribeEvaluations = options.evaluations?.subscribe(() => this.#bus.emit({ kind: "evaluations.changed", runtimeEpoch: null, stateVersion: null }));
     this.#bindConversation();
     this.#bindTelemetry();
     this.#bindBtw();
+    this.#bindComputer();
     this.#bindInteraction();
     this.#unsubscribeGitProgress = options.git?.onProgress?.((progress) => {
       this.#bus.emit({ kind: "operation.progress", progress });
@@ -846,6 +853,26 @@ export class StudioHostClientFacade implements ClientTransport {
 
   async #dispatchQuery(request: ClientQueryRequest): Promise<ClientQueryResponse> {
     switch (request.queryName) {
+      case "computer.workspace.get":
+      case "computer.activity.list":
+      case "computer.frame.get":
+      case "computer.structure.get": {
+        const operation = { ...request.input, kind: request.queryName } as ComputerWorkspaceQuery;
+        const snapshot = this.#currentSnapshotRef();
+        if (!snapshot) throw unavailableError("Computer workspace requires a connected Runtime");
+        if (snapshot.sessionId !== operation.sessionId) throw clientError("INVALID_ARGUMENT", "Computer session is not active in this context");
+        await this.#requireComputerCapability(request.queryName);
+        const runtime = this.#options.runtime;
+        const session = this.#runtimeSession();
+        const readComputer = runtime?.readComputer?.bind(runtime) ?? session?.readComputer?.bind(session);
+        if (!readComputer) throw clientError("CAPABILITY_UNAVAILABLE", "Computer workspace query channel is not available on this Host");
+        const result = await readComputer(operation);
+        const current = this.#currentSnapshotRef();
+        if (!current || current.runtimeId !== snapshot.runtimeId || current.runtimeEpoch !== snapshot.runtimeEpoch || current.sessionId !== snapshot.sessionId) {
+          throw clientError("STALE_EPOCH", "Runtime session changed during Computer read");
+        }
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "context.view.open":
       case "context.view.list":
       case "context.view.entry":
@@ -911,6 +938,30 @@ export class StudioHostClientFacade implements ClientTransport {
       }
       case "models.get": {
         const result = await this.#queryModels();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "evaluations.exportChunk":
+      case "evaluations.patch":
+      case "evaluations.retrySpec":
+      case "evaluations.context":
+      case "evaluations.list":
+      case "evaluations.read":
+      case "evaluations.rows": {
+        const service = this.#options.evaluations;
+        if (!service) throw clientError("CAPABILITY_UNAVAILABLE", "Evaluation workspace is unavailable on this Host");
+        let result: unknown;
+        if (request.queryName === "evaluations.exportChunk") result = await service.exportChunk(request.input as { artifactId: string; offset?: number });
+        else if (request.queryName === "evaluations.patch") result = await service.patch(request.input as { id: string; offset?: number });
+        else if (request.queryName === "evaluations.retrySpec") result = await service.retrySpec((request.input as { id: string }).id);
+        else if (request.queryName === "evaluations.context") result = await service.context((request.input as { workspaceId: string }).workspaceId);
+        else if (request.queryName === "evaluations.list") result = await service.list(request.input as import("@omp-studio/studio-protocol").EvaluationListInput);
+        else if (request.queryName === "evaluations.rows") result = await service.rows(request.input as { id: string });
+        else {
+          const record = await service.read((request.input as { id: string }).id);
+          const pending = record.interaction;
+          const clientInteraction = pending && record.sessionId ? mapRemoteInteractionToClient(pending.request, record.sessionId as SessionId, pending.leaseGeneration) : undefined;
+          result = { ...record, ...(clientInteraction ? { clientInteraction } : {}) };
+        }
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "artifacts.text.read": {
@@ -1001,6 +1052,12 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = await this.#querySessionTelemetry(telemetryRequest.input);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "session.compaction.read": {
+        const archive = this.#options.archive;
+        if (!archive?.readCompaction) throw unavailableError("Session compaction settings are unavailable");
+        const result = await archive.readCompaction((request as ClientQueryRequest<"session.compaction.read">).input.sessionId);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "git.toolchain.get": {
         const service = this.#requireGit(request.queryName);
         return { ok: true, queryName: request.queryName, result: await service.toolchain() } as ClientQueryResponse;
@@ -1037,6 +1094,12 @@ export class StudioHostClientFacade implements ClientTransport {
         const service = this.#requireGit(request.queryName);
         return { ok: true, queryName: request.queryName, result: await service.commitDiff(request.input as { readonly workspaceId: WorkspaceId; readonly oid: string; readonly path: string }) } as ClientQueryResponse;
       }
+      case "github.repositories.list": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).repositories(request.input as never) } as ClientQueryResponse;
+      case "github.items.list": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).items(request.input as never) } as ClientQueryResponse;
+      case "github.items.get": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).item(request.input as never) } as ClientQueryResponse;
+      case "github.discussion.list": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).discussion(request.input as never) } as ClientQueryResponse;
+      case "github.pr.files": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).files(request.input as never) } as ClientQueryResponse;
+      case "github.pr.diff": return { ok: true, queryName: request.queryName, result: await this.#requireGithub(request.queryName).fileDiff(request.input as never) } as ClientQueryResponse;
       case "github.auth.get": {
         const service = this.#requireGithub(request.queryName);
         return { ok: true, queryName: request.queryName, result: await service.auth(request.input as { readonly workspaceId?: WorkspaceId }) } as ClientQueryResponse;
@@ -1149,6 +1212,25 @@ export class StudioHostClientFacade implements ClientTransport {
       }
       case "usage.openDashboard": {
         return this.#commandUsage(request as ClientCommandRequest<"usage.openDashboard">);
+      }
+      case "evaluations.openWorkspace":
+      case "evaluations.prepare":
+      case "evaluations.start":
+      case "evaluations.control":
+      case "evaluations.export":
+      case "evaluations.respond": {
+        const service = this.#options.evaluations;
+        if (!service) throw clientError("CAPABILITY_UNAVAILABLE", "Evaluation workspace is unavailable on this Host");
+        return this.#commandLocalTask(request, async () => {
+          switch (request.commandName) {
+            case "evaluations.openWorkspace": await service.openWorkspace((request.input as {id: string}).id); return { opened: true };
+            case "evaluations.prepare": return service.prepare(request.input as CommandInput<"evaluations.prepare">);
+            case "evaluations.start": return service.start(request.input as CommandInput<"evaluations.start">);
+            case "evaluations.control": return service.control(request.input as CommandInput<"evaluations.control">);
+            case "evaluations.export": return service.export(request.input as CommandInput<"evaluations.export">);
+            case "evaluations.respond": await service.respond(request.input as CommandInput<"evaluations.respond">); return { responded: true };
+          }
+        });
       }
       case "artifacts.saveText": {
         const service = this.#options.artifacts;
@@ -1282,6 +1364,7 @@ export class StudioHostClientFacade implements ClientTransport {
     const service = this.#options.commands;
     if (service?.invoke === undefined) throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available on this Host`);
     if (!this.#hasSnapshot()) throw unavailableError(`${request.commandName} requires a Runtime snapshot`);
+    if (isComputerWorkspaceCommand(request.commandName)) await this.#requireComputerCapability(request.commandName);
     const operation = { ...request.input, kind: request.commandName } as unknown as StudioOperation;
     const acceptedAt = this.#options.diagnostics.now();
     const replay = this.#registry.accept(request, acceptedAt);
@@ -1326,6 +1409,8 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#unsubscribeTelemetry = undefined;
     this.#unsubscribeBtw?.();
     this.#unsubscribeBtw = undefined;
+    this.#unsubscribeComputer?.();
+    this.#unsubscribeComputer = undefined;
     this.#unsubscribeResidents?.();
     this.#unsubscribeResidents = undefined;
     this.#unsubscribeResidentTerminalOutcomes?.();
@@ -1334,6 +1419,8 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#unsubscribeInteraction = undefined;
     this.#unsubscribeGitProgress?.();
     this.#unsubscribeGitProgress = undefined;
+    this.#unsubscribeEvaluations?.();
+    this.#unsubscribeEvaluations = undefined;
     this.#unsubscribeGitExternal?.();
     this.#unsubscribeGitExternal = undefined;
     this.#unsubscribeGithubProgress?.();
@@ -1752,6 +1839,35 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#options.telemetryStore?.record(event.sessionId, event.telemetry);
   }
 
+  async #requireComputerCapability(kind: string): Promise<void> {
+    const manifest = await this.#queryCapabilities();
+    if (!manifest.capabilities.some(capability => capability.id === kind && capability.grade !== "unavailable")) {
+      throw clientError("CAPABILITY_UNAVAILABLE", kind + " is not supported by this Runtime");
+    }
+  }
+
+  #bindComputer(): void {
+    const runtime = this.#options.runtime;
+    if (runtime?.onComputerEvent) {
+      this.#unsubscribeComputer = runtime.onComputerEvent(event => this.#onComputerForward(event));
+    } else {
+      this.#unsubscribeComputer = this.#runtimeSession()?.onComputerEvent?.(event => this.#onComputerForward(event));
+    }
+  }
+
+  #onComputerForward({ envelope }: StudioComputerForward): void {
+    this.#syncRuntimeEvents();
+    const snapshot = this.#currentSnapshotRef();
+    if (!snapshot || envelope.runtimeEpoch !== snapshot.runtimeEpoch || envelope.event.sessionId !== snapshot.sessionId) return;
+    this.#bus.emit({
+      kind: "computer.changed",
+      runtimeEpoch: envelope.runtimeEpoch,
+      stateVersion: envelope.stateVersion,
+      occurredAt: envelope.occurredAt,
+      change: envelope.event,
+    });
+  }
+
   #bindBtw(): void {
     const runtime = this.#options.runtime;
     if (runtime === undefined) return;
@@ -2099,7 +2215,8 @@ export class StudioHostClientFacade implements ClientTransport {
     const catalog = await this.#options.catalog.list(
       input.workspaceId === undefined ? undefined : { workspaceId: input.workspaceId },
     );
-    const filtered = input.status === undefined ? catalog : catalog.filter((entry) => entry.status === input.status);
+    const visible = catalog.filter(entry => !this.#options.evaluations?.sessionIds().has(entry.sessionId));
+    const filtered = input.status === undefined ? visible : visible.filter((entry) => entry.status === input.status);
     const sorted = [...filtered].sort(
       (left, right) =>
         Number(right.pinned === true) - Number(left.pinned === true) ||

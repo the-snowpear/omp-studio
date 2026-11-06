@@ -161,6 +161,22 @@ test("SSH exit preserves the trailing output until the tail window drains", asyn
   f.manager.disposeAll();
 });
 
+test("closing a naturally ended SSH tab flushes its late tail and emits exit only once", async () => {
+  const f = flowFixture();
+  const terminal = await f.manager.create(1, "target", "workspace", { cols: 80, rows: 24 }, {
+    onData: event => f.events.push(`data:${event.data}`),
+    onExit: () => f.events.push("exit"),
+  });
+  f.exit();
+  f.emit("late tail");
+  f.manager.dispose(1, terminal.id);
+  f.exit();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(f.events, ["exit", "data:late tail"]);
+  assert.equal(f.manager.owns(1, terminal.id), false);
+  f.manager.disposeAll();
+});
+
 test("SSH dispose delivers the buffered tail before the exit event", async () => {
   const f = flowFixture();
   const terminal = await f.manager.create(1, "target", "workspace", { cols: 80, rows: 24, flowControl: true }, {

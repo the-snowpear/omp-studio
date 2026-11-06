@@ -16,6 +16,7 @@
 
 import type {
   ClientBootstrap,
+  ClientContextScope,
   ClientError,
   ClientEvent,
   ClientTransport,
@@ -65,6 +66,13 @@ export class StudioClientImpl implements StudioClient {
   getState(): ClientState {
     return this.state;
   }
+
+  async openContext(scope: ClientContextScope): Promise<StudioClientImpl> {
+    this.assertOpen();
+    if (!this.transport.openContext) throw new Error("This Host needs an update to open concurrent conversations.");
+    return new StudioClientImpl(await this.transport.openContext(scope));
+  }
+  get supportsContexts(): boolean { return this.transport.supportsContexts ?? this.transport.openContext !== undefined; }
 
   async bootstrap(): Promise<ClientBootstrap> {
     this.assertOpen();
@@ -244,7 +252,12 @@ export class StudioClientImpl implements StudioClient {
     const next = reduceClientState(this.state, action);
     if (next !== this.state) {
       this.state = next;
-      for (const listener of this.stateListeners) {
+      // Computer frames only advance the transport cursor. Notify the scoped
+      // event consumers, not every global shell/conversation state subscriber.
+      const computerProgressOnly = action.type === "event" && action.event.kind === "computer.changed"
+        && next.entities === previous.entities && next.commands === previous.commands
+        && next.connection.resyncRequired === previous.connection.resyncRequired;
+      if (!computerProgressOnly) for (const listener of this.stateListeners) {
         listener(this.state);
       }
     }
@@ -277,6 +290,10 @@ export class StudioClientImpl implements StudioClient {
     // resync flag while deliberately dropping the event payload.
     if (next === previous || next.connection.cursor !== event.cursor) {
       return false;
+    }
+    if (event.kind === "computer.changed") {
+      return event.change.sessionId === next.entities.snapshot?.sessionId
+        && next.connection.runtime?.status === "connected";
     }
     return true;
   }

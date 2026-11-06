@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { createNodePtySpawner, type PtyProcess, type PtySpawner, type TerminalSessionListeners } from "../terminal-pty.js";
-import { TERMINAL_BATCH_MS, TerminalOutputBatcher } from "../terminal-batch.js";
+import { TerminalOutputBatcher } from "../terminal-batch.js";
 import { TERMINAL_MAX_SESSIONS, type TerminalSessionInfo, type TerminalSize } from "../terminal-shared.js";
 import { sshArguments, systemSshExecutable, type RemotePlatform } from "./platform.js";
 import type { RemoteConnectionManager } from "./manager.js";
@@ -38,6 +38,9 @@ export class RemoteTerminalManager {
         const process = this.#sessions.get(id)?.process;
         if (paused) process?.pause?.();
         else process?.resume?.();
+      },
+      release: (id) => {
+        this.#sessions.delete(id);
       },
     },
   });
@@ -80,15 +83,11 @@ export class RemoteTerminalManager {
       process.onData(data => this.#batcher.push(id, data));
       process.onExit(() => {
         // Deliver the tail before the exit event, like the local shell.
-        this.#batcher.flush(id);
+        this.#batcher.finish(id);
+        const notify = !session.ended;
         session.ended = true;
         authenticationRequest?.dispose();
-        listeners.onExit({ id });
-        // Keep the sink wired through the same tail window as the local PTY.
-        setTimeout(() => {
-          this.#batcher.close(id);
-          this.#sessions.delete(id);
-        }, TERMINAL_BATCH_MS);
+        if (notify) listeners.onExit({ id });
       });
       return { id, name, cwd: path };
     } finally {
@@ -114,7 +113,6 @@ export class RemoteTerminalManager {
     const session = this.#sessions.get(id)!;
     // Flush the tail while the session is still wired, then release it.
     this.#batcher.close(id);
-    this.#sessions.delete(id);
     session.cancelAuthentication();
     if (!session.ended) session.process.kill();
   }

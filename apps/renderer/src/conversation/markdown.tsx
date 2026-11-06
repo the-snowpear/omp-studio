@@ -11,6 +11,7 @@ import { withMagicKeywordChildren } from "./magicKeywordMarkdown";
 import { LazyMermaid } from "./LazyMermaid";
 import { performanceOptions } from "../performanceOptions";
 import { HighlightedCode } from "../highlight/HighlightedCode";
+import { BrowserLink } from "../browser/browserLinks";
 
 const REMARK: Options["remarkPlugins"] = [remarkGfm];
 const HIGHLIGHT: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]];
@@ -86,7 +87,7 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
     li: ({ children }) => <li>{prose(children)}</li>,
     a: ({ href, children }) => {
       const url = typeof href === "string" ? href.trim() : "";
-      return isSafeMarkdownUrl(url) ? <a href={url} target="_blank" rel="noreferrer noopener">{prose(children)}</a> : <span>{prose(children)}</span>;
+      return isSafeMarkdownUrl(url) ? <BrowserLink href={url}>{prose(children)}</BrowserLink> : <span>{prose(children)}</span>;
     },
     img: ({ src, alt }) => {
       const url = typeof src === "string" ? src.trim() : "";

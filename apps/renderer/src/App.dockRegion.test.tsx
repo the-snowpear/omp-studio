@@ -175,3 +175,67 @@ it("docks the right sidebar in a wide window without an overlay", async () => {
   await toggleRegion("Right sidebar");
   expect(sideShown()).toBe(false);
 });
+
+it("removes the empty left tools area and restores it when a tool returns", async () => {
+  await mount(1440);
+  expect(document.querySelector("#sidebar .dock-left-cards")).not.toBeNull();
+  fireEvent.click(document.querySelector<HTMLElement>('#sidebar [data-dock-card="files"] .dock-menu-button')!);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move to" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Float" }));
+
+  expect(document.querySelector("#sidebar .dock-left-cards, #sidebar .dock-empty")).toBeNull();
+  expect(document.querySelector<HTMLElement>("#sbDivider")?.hidden).toBe(true);
+  expect(document.querySelector<HTMLElement>("#sbProjects")?.style.getPropertyValue("--sb-proj-basis")).toBe("100%");
+  expect(document.querySelector('#sidebar')?.classList.contains("collapsed")).toBe(false);
+
+  expect(document.querySelector('.dock-float .dock-tab-strip')).toBeNull();
+  fireEvent.contextMenu(document.querySelector<HTMLElement>('.dock-float-titlebar')!);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move group to" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Left sidebar" }));
+  expect(document.querySelector('#sidebar [data-dock-card="files"]')).not.toBeNull();
+  expect(document.querySelector<HTMLElement>("#sbDivider")?.hidden).toBe(false);
+});
+
+it("keeps left card headers grip-free, including tools moved into the sidebar", async () => {
+  await mount(1440);
+  const files = document.querySelector<HTMLElement>('#sidebar [data-dock-card="files"]')!;
+  expect(files.querySelector(".dock-card-title")?.textContent).toBe("Explorer");
+  expect(files.querySelector(".dock-grip")).toBeNull();
+  expect(files.querySelector("[data-dock-drag]")).not.toBeNull();
+
+  await toggleRegion("Right sidebar");
+  fireEvent.contextMenu(document.querySelector<HTMLElement>('#sidePanel [data-dock-tab="git"]')!);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move to" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Left sidebar" }));
+  const git = document.querySelector<HTMLElement>('#sidebar [data-dock-card="git"]')!;
+  expect(git.querySelector(".dock-card-title")?.textContent).toBe("Git");
+  expect(git.querySelector(".dock-grip")).toBeNull();
+  expect(git.querySelector("[data-dock-drag]")).not.toBeNull();
+});
+
+it("keeps the right sidebar to one tab row and puts add next to the last tab", async () => {
+  await mount(1440);
+  await toggleRegion("Right sidebar");
+  expect(sideShown()).toBe(true);
+  const right = document.querySelector<HTMLElement>("#sidePanel .dock-group-region-right")!;
+  // The region label row is gone; the tab row is the panel header.
+  expect(right.querySelector(":scope > .dock-region-toolbar")).toBeNull();
+  const strip = right.querySelector<HTMLElement>(".dock-tab-strip")!;
+  expect(strip.querySelector('[role="tablist"]')).not.toBeNull();
+  // New tab hugs the tab list (not the row's far edge) and stays outside it.
+  const add = strip.querySelector(".dock-tab-add")!;
+  expect(add.closest('[role="tablist"]')).toBeNull();
+  expect(add.previousElementSibling).toBe(strip.querySelector('[role="tablist"]'));
+
+  const menuItems = () => Array.from(document.querySelectorAll<HTMLElement>('[data-dock-menu="popup"] button[role="menuitem"]'));
+  expect(strip.querySelector('.dock-menu-button:not(.dock-tab-add)'), "no separate More button").toBeNull();
+  fireEvent.contextMenu(strip);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  fireEvent.click(menuItems().find(node => node.textContent?.trim() === "Add tool")!);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(menuItems().some(node => node.textContent?.trim().startsWith("Terminal")), "Add tool lists the tools").toBe(true);
+
+  fireEvent.click(menuItems().find(node => node.textContent?.trim() === "Hide right sidebar")!);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+  expect(sideShown()).toBe(false);
+});

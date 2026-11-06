@@ -272,6 +272,8 @@ export interface GitHubPullRequestRecord {
 }
 
 export interface GitHubPullRequestListReadModel {
+  readonly nextCursor?: string;
+  readonly totalCount?: number;
   readonly workspaceId: WorkspaceId;
   readonly pullRequests: ReadonlyArray<GitHubPullRequestRecord>;
 }
@@ -305,6 +307,7 @@ export type GitHubOperation =
   | { readonly kind: "cancel"; readonly requestId: CommandRequestId };
 
 export interface GitHubExecuteInput {
+  readonly remote?: string;
   readonly workspaceId?: WorkspaceId;
   readonly operation: GitHubOperation;
 }

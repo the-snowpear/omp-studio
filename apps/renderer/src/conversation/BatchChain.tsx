@@ -1,11 +1,14 @@
-import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject, type PointerEvent as ReactPointerEvent } from "react";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
 import { ToolBody, TruncationMark } from "./ToolBody";
 import { ToolCardScroll } from "./useToolCardFollowScroll";
 import { ChunkedText } from "./textChunks";
+import { usePreviewMode } from "../preview/PreviewContext";
+import { previewAgentDisplay } from "../preview/agentDockPreview";
 import { jsonString, type ToolView } from "./conversationViewModel";
 import { applyLiveSubagentRoster, resolveSubagentMetrics, SubagentMetrics } from "./SubagentMetrics";
+import { useSubagentHoverPreview } from "./SubagentHoverContext";
 import {
   batchSummary,
   chainItemDetail,
@@ -22,6 +25,7 @@ import {
   toolKind,
   toolLabel,
   type SubagentHubTarget,
+  type SubagentView,
   type ThinkView,
 } from "./toolMeta";
 
@@ -38,52 +42,74 @@ function SubagentStrip({
   if (agents.length === 0) return null;
   return (
     <div className="subagent-strip">
-      {agents.map((agent) => {
-        const pill = saPill(agent);
-        const target = resolveSubagentHubTarget(agent);
-        const inspectable = onInspectSubagent !== undefined && target !== undefined;
-        const aria = [agent.name, pill.label, agent.dur, agent.tokens ? `${agent.tokens} tok` : ""]
-          .filter(Boolean)
-          .join("，");
-        const body = (
-          <>
-            <div className="sa-top">
-              <span className={`hub-act ${pill.cls}`}>{pill.label}</span>
-              <span className="sa-name">{agent.name}</span>
-              {agent.dur ? <span className="sa-dur">{agent.dur}</span> : null}
-            </div>
-            <SubagentMetrics {...resolveSubagentMetrics(undefined, agent)} />
-          </>
-        );
-        if (inspectable) {
-          return (
-            <button
-              key={subagentCardKey(agent)}
-              type="button"
-              className={`sa-card is-inspectable ${agent.status}`}
-              aria-label={`${aria}，打开对话`}
-              onClick={(event) => {
-                event.stopPropagation();
-                onInspectSubagent(target);
-              }}
-            >
-              {body}
-            </button>
-          );
-        }
-        return (
-          <div
-            key={subagentCardKey(agent)}
-            className={`sa-card ${agent.status}`}
-            role="group"
-            aria-label={target === undefined ? `${aria}，无法打开对话：缺少 Agent 身份` : aria}
-          >
-            {body}
-          </div>
-        );
-      })}
+      {agents.map(source => <SubagentCard key={subagentCardKey(source)} source={source}
+        {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })} />)}
     </div>
   );
+}
+
+function SubagentCard({ source, onInspectSubagent }: {
+  source: SubagentView;
+  onInspectSubagent?: (target: SubagentHubTarget) => void;
+}) {
+  const { preview } = usePreviewMode();
+  const previewControl = useSubagentHoverPreview();
+  const hover = onInspectSubagent === undefined ? null : previewControl;
+  const anchorRef = useRef<HTMLElement | null>(null);
+  const id = `subagent-preview-${useId()}`;
+  const demo = preview ? previewAgentDisplay(source.agentId ?? "") : undefined;
+  const agent = demo ? { ...source, dur: demo.duration, tokens: demo.tokens, cost: demo.cost } : source;
+  const pill = demo ? { cls: demo.tone === "waiting" ? "waiting" : demo.tone === "failed" ? "aborted" : "thinking", label: demo.status } : saPill(agent);
+  const target = resolveSubagentHubTarget(agent);
+  const inspectable = onInspectSubagent !== undefined && target !== undefined;
+  const card = (anchor: HTMLElement) => ({ anchor, id, agent, pill, inspectable, ...(target === undefined ? {} : { target }) });
+  useLayoutEffect(() => {
+    if (anchorRef.current) hover?.update(card(anchorRef.current));
+  });
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    return () => { if (anchor) hover?.close(anchor); };
+  }, [hover]);
+  const close = () => { if (anchorRef.current) hover?.close(anchorRef.current); };
+  const hoverProps = {
+    onPointerEnter: (event: ReactPointerEvent<HTMLElement>) => { if (event.pointerType !== "touch") hover?.open(card(event.currentTarget)); },
+    onPointerLeave: close,
+    onFocus: () => { if (anchorRef.current) hover?.open(card(anchorRef.current)); },
+    onBlur: close,
+    onClickCapture: close,
+    ...(hover ? { "aria-describedby": id } : {}),
+  };
+  const aria = [agent.name, pill.label, agent.dur, agent.tokens ? `${agent.tokens} tok` : ""].filter(Boolean).join("，");
+  const description = agent.task;
+  const body = <>
+    <div className="sa-top">
+      <span className="sa-avatar" aria-hidden="true"><Icon name="bot" /></span>
+      <div className="sa-identity">
+        <div className="sa-heading">
+          <span className="sa-name">{agent.name}</span>
+          <span className={`hub-act ${pill.cls}`}>
+            <span className="sa-status-dot" aria-hidden="true" />
+            <span className="sa-status-label">{pill.label}</span>
+          </span>
+          {agent.dur ? <span className="sa-dur"><Icon name="clock" extra="sm" />{agent.dur}</span> : null}
+          {inspectable ? <Icon name="chevron-r" extra="sm sa-open" /> : null}
+        </div>
+        {agent.task ? <div className="sa-brief"><div className="sa-task">{agent.task}</div></div> : null}
+      </div>
+    </div>
+    <SubagentMetrics {...resolveSubagentMetrics(undefined, agent)} showTooltips={false} />
+  </>;
+  if (inspectable) return <button ref={anchorRef as RefObject<HTMLButtonElement | null>} type="button"
+    className={`sa-card is-inspectable ${agent.status}`} data-activity={pill.cls}
+    aria-label={`${aria}，打开对话`} aria-description={description} {...hoverProps}
+    onClick={event => { event.stopPropagation(); onInspectSubagent(target); }}>
+    {body}
+  </button>;
+  return <div ref={anchorRef as RefObject<HTMLDivElement | null>} className={`sa-card ${agent.status}`}
+    data-activity={pill.cls} role="group" tabIndex={hover ? 0 : undefined} {...hoverProps}
+    aria-label={target === undefined ? `${aria}，无法打开对话：缺少 Agent 身份` : aria} aria-description={description}>
+    {body}
+  </div>;
 }
 
 /** 收起过渡跑完之后再卸载正文的等待时间（略大于 `--dur-slow` 250ms）。 */

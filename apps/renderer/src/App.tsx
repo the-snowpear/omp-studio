@@ -1,11 +1,28 @@
+import { dragConversation } from "./conversationWorkspace/drag";
+import { ConversationWorkspace } from "./conversationWorkspace/Workspace";
+import { initializeConversationClient, resyncConversationClient } from "./conversationWorkspace/client";
+import { ConversationTitleSurface, SharedSurface, ShellReadinessContext, useAllWindowed, useConversationWorkspace, useConversationView, useConversationDom } from "./conversationWorkspace/Context";
+import { ConversationFloatingHeader, type ConversationHeaderStatus } from "./conversationWorkspace/Header";
+import { EvaluationActivity } from "./evaluation/EvaluationActivity";
+import { GitWorkbench, type GitOpenIntent } from "./git/GitWorkbench";
+import { GitQuickCard } from "./git/GitQuickCard";
+import { GitWorkspaceProvider } from "./git/GitWorkspaceContext";
+import { githubReferenceSnapshot } from "./composer/githubReference";
+import { gitCommitReferenceLabel } from "./composer/gitCommitReference";
+import { browserReferenceSnapshot } from "./composer/browserReference";
+import type { BrowserElementReference } from "@omp-studio/studio-protocol";
 import { DockStore } from "./dock/store";
+import { EnvironmentDockCard } from "./environment/EnvironmentCard";
+import { ContextDockPanel } from "./conversation/ContextCard";
 import { PanelRegistration } from "./dock/PanelRegistration";
-import { DockProvider, DockPanel, useDock, useDockEngine, useOptionalDock } from "./dock/DockContext";
+import { revealMainWindow } from "./dock/SurfaceContext";
+import { DockProvider, DockPanel, DockToolbar, useAgentDockLayout, useDock, useDockEngine, useOptionalDock } from "./dock/DockContext";
 import { WORKBENCH_PANELS } from "./panels/registry";
 import { DockCardRegion, DockGroupRegion, DockRail, DockRailToggle, DockFloatingLayer, DockCapsules, DockKeyboard } from "./dock/DockRegions";
+import { useBottomToggleClearance } from "./dock/revealClearance";
 import { DockViewMenu } from "./dock/DockMenus";
 import { locatePanel } from "./dock/model";
-import type { DockScope, PanelId } from "./dock/types";
+import { agentPanelId, type AgentPanelId, type DockScope, type PanelId } from "./dock/types";
 import "./dock/dock.css";
 import "./dock/menus.css";
 import "./dock/integration.css";
@@ -13,7 +30,7 @@ import { DeferredPanel, LoadWhenVisible, lazyPanel } from "./DeferredPanel";
 import { useModelConnection } from "./models/useModelConnection";
 import { LocalFilesPane } from "./capabilities/LocalFilesPane";
 import { DictationControl } from "./composer/DictationControl";
-import { ContextInspector } from "./conversation/ContextInspector";
+import { ContextInspector } from "./contextViewer/ContextInspector";
 import { SessionBudgetPane } from "./models/SessionBudgetPane";
 import { ExecutionTargets, useExecutionTarget, useTargetMemory } from "./workspaces/ExecutionTargets";
 import { RemoteScopeNotice } from "./workspaces/RemoteScopeNotice";
@@ -27,25 +44,30 @@ import { previewSessionTitle } from "./preview/sessionTitlePreview";
 const EvaluationPage = lazyPanel(() => import("./evaluation/EvaluationPage").then(module => ({ default: module.EvaluationPage })));
 import { SecondaryInteractionDeck } from "./deck/SecondaryInteractionDeck";
 import { BrowserPane } from "./browser/BrowserPane";
-import { ComputerPane } from "./browser/ComputerPane";
+import { BrowserDockInstances } from "./browser/BrowserDockInstances";
+import { ComputerDockPane } from "./computer/ComputerDockPane";
+import { ComputerLinkProvider } from "./computer/links";
+import type { ComputerFrameIntent } from "./computer/types";
 import { AnnotationsProvider, AnnotationButton } from "./annotations/Annotations";
+import { TokenUsagePanel } from "./usage/TokenUsagePanel";
 import { TokenCounterPane } from "./usage/TokenCounterPane";
 const MediaPage = lazyPanel(() => import("./MediaPage").then(module => ({ default: module.MediaPage })));
-import { setMediaIntent, setHubIntent, setCapIntent, setModelConfigIntent, setSettingsIntent, setDiagnosticsIntent, type CapTab } from "./pageIntents";
+import { setHubIntent, setCapIntent, setModelConfigIntent, setSettingsIntent, setDiagnosticsIntent, type CapTab } from "./pageIntents";
 import { modelConfigHasUnsavedChanges } from "./models/modelConfigState";
 import { WorkbenchHealth } from "./WorkbenchHealth";
 import { conversationViewLeases } from "./conversation/conversationViews";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { applyTypography } from "./settings/typography";
 import { ConversationWidthProvider, useConversationWidth } from "./settings/ConversationWidthContext";
 import { ConversationWidthMenu } from "./settings/ConversationWidthSettings";
 import { useReadingColumn } from "./layout/useReadingColumn";
 import { useWorkbenchLayout } from "./layout/useWorkbenchLayout";
+import { useBottomPanelMotion } from "./layout/useBottomPanelMotion";
 import { useCompactTopbar } from "./layout/useCompactTopbar";
 import { beforeConversationLayoutChange } from "./conversation/conversationReflow";
 import { layoutPanelForRegion, panelSize, SIDEBAR_LIMITS, SIDE_PANEL_LIMITS, type DockRegion } from "./layout/workbenchLayout";
-import type { CSSProperties, FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { CSSProperties, FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
 import type {
   AuthorityEpoch,
@@ -55,6 +77,7 @@ import type {
   ClientEvent,
   ClientInteraction,
   CommandName,
+  CommandState,
   CommandInput,
   GitBranchRecord,
   GitOperationResult,
@@ -86,8 +109,9 @@ import {
 } from "./shellMemory";
 import type { ApprovalMode, OperatorStateSnapshot, SessionTelemetrySnapshot, StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import type { OperatorCommandManifest } from "@omp-studio/studio-protocol";
-import { AppIcon, Icon } from "./icons";
-import { FileRowMenu, MenuItem, type FileMenuAction, type FileMenuController, type FileMenuTarget, type FileOpenerOption } from "./menus";
+import { AppIcon, Icon, type IconName } from "./icons";
+import { fileTypeOf, iconNameFor, isNoiseDir, isSensitive } from "./explorer-types";
+import { FileRowMenu, MenuItem, type FileMenuAction, type FileMenuController, type FileMenuTarget, type FileOpenerOption, useRowMenuAnchor } from "./menus";
 import { I18nProvider, useI18n, type TranslationParams } from "./i18n";
 import { SHORTCUTS, formatShortcut, isPrimaryModifier } from "./keyboard/shortcuts";
 import { PLATFORM, nativeMenuOwnsShortcuts } from "./platform";
@@ -141,6 +165,7 @@ import {
 } from "./composer/mentions";
 import { snapshotFromDoc, snapshotFromText, snapshotFromTextAndImages, snapshotIsEmpty } from "./composer/serialize";
 import { createComposerDraftBook } from "./composer/draftStore";
+import { useComposerDraft } from "./composer/useComposerDraft";
 import { emptySnapshot, fileLabel, type ComposerSnapshot } from "./composer/types";
 import { mergeUsedSkills, skillNamesInDoc, skillNamesInText } from "./skills/skillUsage";
 import type { StudioSpeed } from "@omp-studio/studio-protocol";
@@ -164,6 +189,9 @@ const TerminalPane = lazyPanel(() => import("./TerminalPane").then(module => ({ 
 import { TerminalSessionsProvider } from "./terminalSessions";
 import { TipHost } from "./TipHost";
 import { ToastHost } from "./ToastHost";
+import { OmpLogsPanel } from "./panels/OmpLogsPanel";
+import { OutputPanel } from "./panels/OutputPanel";
+import type { LedgerCommandRow } from "./panels/types";
 import { compactNoticeFromOutput } from "./compactNotice";
 import { SkillsDrawer } from "./SkillsDrawer";
 import { CommandPalette, type CommandPaletteHandle } from "./CommandPalette";
@@ -179,13 +207,20 @@ import { useActivityRetry, useAwaitingTurn, useRunStreaming, useRunWindow } from
 import { deriveActivityStatus, hasLiveActivityProgress, isAbortEligible } from "./conversation/activityStatus";
 import { ConversationEmpty } from "./conversation/ConversationEmpty";
 import { ConversationPane } from "./conversation/ConversationPane";
-import { SubagentInspectCard } from "./conversation/SubagentInspectCard";
+import { SubagentHoverProvider } from "./conversation/SubagentHoverPreview";
+import { AgentRosterPanel } from "./agents/AgentRosterPanel";
+import { AgentRosterMeter } from "./agents/AgentRosterMeter";
+import { AgentDetailPanel } from "./agents/AgentDetailPanel";
+import { PREVIEW_DOCK_AGENTS } from "./preview/agentDockPreview";
+import { sharedSubagentViewBook, subagentViewKey } from "./conversation/subagentViewState";
+import { agentPresentation } from "./agents/agentPresentation";
+import "./agents/agents.css";
 import { collectLatestPlanDocument, SESSION_CHANGE_LAST_ID, sessionTaskProgress, type SubagentHubTarget } from "./conversation/toolMeta";
 import { TaskProgressDock } from "./conversation/TaskProgressDock";
 import { SessionChanges } from "./conversation/SessionChanges";
 import { AgentTestsPane } from "./conversation/AgentTestsPane";
 import { agentTestRunSummary, projectAgentTestRuns, rerunTestPrompt } from "./conversation/agentTestRuns";
-import { revealConversationTool } from "./conversation/conversationReveal";
+import { revealConversationTool, revealConversationTarget } from "./conversation/conversationReveal";
 import { useConversation } from "./conversation/useConversation";
 import type { PendingUser } from "./conversation/conversationViewModel";
 import { tailInterrupted } from "./conversation/conversationViewModel";
@@ -212,13 +247,19 @@ import {
 import { desktopNotice, notifyAskConfirmation, clearAskConfirmationNotice } from "./settings/desktopNotice";
 import { StartupNotice } from "./StartupNotice";
 import { AppUpdateDialog } from "./AppUpdateDialog";
+import { AppNavRail, type NavRailRoute } from "./NavRail";
+import { SidebarFooter } from "./SidebarFooter";
+import { transitionDelayMs, transitionMs } from "./motionClock";
+import { useIdentityFlight } from "./useIdentityFlight";
 import { useAppUpdate } from "./settings/appUpdate";
 import { avatarInitial, useOperatorProfile } from "./settings/operatorProfile";
 import {
   PREVIEW_APP_UPDATE,
+  PREVIEW_LEDGER_COMMANDS,
   PREVIEW_PROJECTS,
   PREVIEW_QUEUED_MESSAGES,
   PREVIEW_RUN_ACTIVITY,
+  PREVIEW_SHELL_EVENTS,
   PREVIEW_TODOS,
   PREVIEW_TODO_FILES,
   defaultPreviewSelection,
@@ -230,19 +271,17 @@ import {
   PreviewContextPanel,
   PreviewContextTrigger,
   PreviewFileTree,
-  PreviewGitPanel,
   PreviewLogs,
   PreviewProblems,
-  PreviewSideAgents,
   PreviewSidePreview,
   PreviewSwitch,
   PreviewTests,
-  PreviewTokenPanel,
   PreviewTokenTrigger,
 } from "./preview/surfaces";
 import { PreviewDeck } from "./preview/PreviewDeck";
 import { PREVIEW_DECK_ITEMS } from "./preview/deckFixtures";
 import { PREVIEW_BTW_QUESTION, PREVIEW_BTW_SNAPSHOTS, previewBtwSnapshot } from "./preview/btwPreview";
+import { previewEnvironmentCard } from "./preview/environmentCardPreview";
 import { previewTailInterrupted } from "./preview/conversationFixtures";
 import { BtwPanel } from "./btw/BtwPanel";
 import { useBtwSession, type BtwSessionApi } from "./btw/useBtwSession";
@@ -279,7 +318,6 @@ import {
 import { createResumeGenerationGate, ensureSelectedSessionActive, type NewSessionWaitResult } from "./sessionLifecycle";
 import { createSerialTaskQueue } from "./workspaceActionQueue";
 import { isNewConversationSurface, shouldShowConversationWelcome } from "./conversation/welcomeGate";
-import { GitStatusPanel } from "./git/GitStatusPanel";
 import { useGitRepository } from "./git/useGitRepository";
 import { buildGitStatusLookup, GIT_STATUS_META, type TreeGitStatus } from "./git/treeStatus";
 
@@ -331,7 +369,7 @@ function isSecondary(route: Route): route is SecondaryRoute {
   return route === "home" || route === "history" || route === "agent-hub" || route === "capabilities" || route === "model-config" || route === "settings" || route === "diagnostics" || route === "media" || route === "evaluation" || route === "statistics";
 }
 
-const SECONDARY_META: Record<SecondaryRoute, { titleKey: string; icon: string }> = {
+const SECONDARY_META: Record<SecondaryRoute, { titleKey: string; icon: IconName }> = {
   statistics: {titleKey:"nav.statistics",icon:"pulse"},
   home: { titleKey: "nav.home", icon: "home" },
   history: { titleKey: "nav.history", icon: "history" },
@@ -539,15 +577,6 @@ function switchBlockedFilesOf(error: unknown): SwitchBlockedFile[] | undefined {
   return files.length > 0 ? files : undefined;
 }
 
-function runtimeStatusLabel(runtime?: ClientBootstrap["runtime"], t?: (k: string) => string): { text: string; tone: "ok" | "warn" | "err" } {
-  const tr = t ?? ((k: string) => k);
-  const status = runtime?.status ?? "unavailable";
-  if (status === "connected") return { text: tr("runtime.ready"), tone: "ok" };
-  if (status === "connecting") return { text: tr("common.connecting"), tone: "warn" };
-  if (status === "disconnected") return { text: tr("diagnostics.statusDisconnected"), tone: "err" };
-  return { text: formatRuntimeStatusLabel(status, tr), tone: "err" };
-}
-
 type EditCommand = "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll";
 type ShellDialog = "about" | "shortcuts";
 type WorkspaceCreationKind = "file" | "directory";
@@ -581,6 +610,7 @@ function TitleMenu({ id, label, openId, onToggle, children }: {
   onToggle: (id: string | null) => void;
   children: ReactNode;
 }) {
+  const { document, window } = useConversationDom();
   const open = openId === id;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [anchor, setAnchor] = useState({ top: 0, left: 0 });
@@ -629,7 +659,8 @@ export function AppMenu({ chrome, onRoute }: {
   chrome: ShellChrome;
   onRoute: (route: Route) => void;
 }) {
-  const { preview } = usePreviewMode();
+  const { document, window } = useConversationDom();
+  const { preview, marks } = usePreviewMode();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -721,7 +752,7 @@ export function AppMenu({ chrome, onRoute }: {
               <MenuItem
                 icon="folder-open"
                 {...(preview
-                  ? { disabled: true, title: t("common.unavailableInPreview") }
+                  ? { disabled: true, title: marks ? t("common.unavailableInPreview") : t("common.unavailable") }
                   : { onClick: () => run(chrome.onPickProject) })}
               >{t("nav.openProject")}</MenuItem>
               <MenuItem icon="branch" disabled title={t("common.notImplemented")}>{t("shell.cloneRepo")}</MenuItem>
@@ -876,44 +907,10 @@ function ThreadRowMenu({ id, openId, onToggle, contextPoint, menu }: {
   contextPoint: { x: number; y: number } | null;
   menu: ReactNode;
 }) {
+  const { document, window } = useConversationDom();
   const { t } = useI18n();
   const open = openId === id;
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [anchor, setAnchor] = useState({ top: 0, left: 0 });
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    const place = () => {
-      const pad = 8;
-      const width = menuRef.current?.offsetWidth ?? 208;
-      const height = menuRef.current?.offsetHeight ?? 0;
-      let left: number;
-      let top: number;
-      if (contextPoint !== null) {
-        // 右键：弹层左上角贴光标，越界向左/向上翻。
-        left = contextPoint.x;
-        top = contextPoint.y;
-      } else {
-        const rect = buttonRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        left = rect.right - width;
-        top = rect.bottom + 4;
-      }
-      left = Math.max(pad, Math.min(left, window.innerWidth - width - pad));
-      if (height > 0 && top + height > window.innerHeight - pad) {
-        top = Math.max(pad, window.innerHeight - height - pad);
-      }
-      setAnchor({ top, left });
-    };
-    place();
-    const frame = window.requestAnimationFrame(place);
-    window.addEventListener("resize", place);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener("resize", place);
-    };
-  }, [contextPoint, open]);
+  const { buttonRef, menuRef, anchor } = useRowMenuAnchor(open, contextPoint, window);
 
   return (
     <>
@@ -962,6 +959,7 @@ function AnchoredPop({ id, openId, onToggle, tip, label, align = "start", trigge
   children: ReactNode;
   panel: ReactNode;
 }) {
+  const { document, window } = useConversationDom();
   const open = openId === id;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
@@ -969,12 +967,18 @@ function AnchoredPop({ id, openId, onToggle, tip, label, align = "start", trigge
 
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) return;
-    const rect = buttonRef.current.getBoundingClientRect();
-    const width = popRef.current?.offsetWidth ?? (align === "end" ? 360 : 240);
-    const left = align === "end"
-      ? Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))
-      : Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    setAnchor({ top: rect.bottom + 4, left });
+    const button = buttonRef.current;
+    const place = () => {
+      const rect = button.getBoundingClientRect();
+      const width = popRef.current?.offsetWidth ?? (align === "end" ? 360 : 240);
+      const left = align === "end"
+        ? Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8))
+        : Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+      setAnchor({ top: rect.bottom + 4, left });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
   }, [align, open]);
 
   return (
@@ -998,9 +1002,8 @@ function AnchoredPop({ id, openId, onToggle, tip, label, align = "start", trigge
               className={`menu title-menu-popover${popoverClassName ? ` ${popoverClassName}` : ""}`}
               role="dialog"
               aria-label={label}
-              style={{ top: anchor.top, left: anchor.left }}
+              style={{ top: anchor.top, left: anchor.left, "--popover-top": `${anchor.top}px` } as CSSProperties}
               onMouseDown={(event) => {
-                event.preventDefault();
                 event.stopPropagation();
               }}
             >
@@ -1030,6 +1033,7 @@ function Titlebar({
   sidebarCollapsed?: boolean;
   menus?: ReactNode;
 }) {
+  const { document, window } = useConversationDom();
   const { t } = useI18n();
   const previewMode = usePreviewMode();
   return (
@@ -1095,14 +1099,30 @@ function Deferred({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-function GenericCommandForm({ manifest, busy, enabled, onInvoke }: { manifest: OperatorCommandManifest; busy: boolean; enabled: boolean; onInvoke: (commandId: string, args?: unknown) => void }) {
+/** Flattens the reducer's command states into the ledger's scan-only view. */
+function toLedgerCommand(command: CommandState): LedgerCommandRow {
+  const at = "observedAt" in command ? command.observedAt : "acceptedAt" in command ? command.acceptedAt : "issuedAt" in command ? command.issuedAt : undefined;
+  const detail = "reason" in command ? command.reason : "error" in command ? command.error.message : undefined;
+  return {
+    requestId: command.requestId,
+    commandName: command.commandName,
+    status: command.status,
+    ...(at ? { at } : {}),
+    ...(detail ? { detail } : {}),
+  };
+}
+
+/** Manifest-driven operator entry: one command, one JSON argument object. */
+function OperatorCommandForm({ manifest, busy, enabled, onInvoke }: { manifest: OperatorCommandManifest; busy: boolean; enabled: boolean; onInvoke: (commandId: string, args?: unknown) => void }) {
+  const { t } = useI18n();
   const [selected, setSelected] = useState("");
   const [args, setArgs] = useState("{}");
   const command = manifest.commands.find((entry) => entry.id === selected);
   return (
-    <div className="generic-command">
-      <div className="panel-head"><div><h2>Command form</h2><p className="muted">Manifest-driven operator entry; capability and Host validate the mutation.</p></div></div>
-      <div className="actions">
+    <section>
+      <h3 className="dock-group-label">{t("shell.operatorCommandForm")}</h3>
+      <p className="dock-group-hint">{t("shell.operatorCommandFormHint")}</p>
+      <div className="dock-form-row">
         <AppSelect className="select" value={selected} onChange={(event) => setSelected(event.target.value)}>
           <option value="">Select command</option>
           {manifest.commands.filter((entry) => entry.presentation === "generic-form" && entry.availability === "available").map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
@@ -1110,28 +1130,10 @@ function GenericCommandForm({ manifest, busy, enabled, onInvoke }: { manifest: O
         <input className="input" value={args} onChange={(event) => setArgs(event.target.value)} aria-label="Command arguments JSON" placeholder="{}" />
         <button className="btn primary" disabled={!command || !enabled || busy} onClick={() => { try { onInvoke(command!.id, JSON.parse(args)); } catch { /* malformed JSON stays local */ } }}>Invoke</button>
       </div>
-    </div>
+    </section>
   );
 }
 
-function VirtualEventTranscript({ events }: { events: readonly ShellEventLogEntry[] }) {
-  const [scrollTop, setScrollTop] = useState(0);
-  const { settings } = useAppSettings();
-  const rowHeight = Math.max(32, Math.ceil(32 * settings.outputFontSize / 14));
-  const viewportHeight = 224;
-  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 3);
-  const visible = events.slice(start, start + Math.ceil(viewportHeight / rowHeight) + 6);
-  return (
-    <div className="event-transcript" style={{ height: viewportHeight }} onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
-      <div style={{ height: events.length * rowHeight, position: "relative" }}>
-        {visible.map((event, index) => {
-          const actual = start + index;
-          return <div className="event-row" key={`${event.cursor}-${event.kind}`} style={{ height: rowHeight, transform: `translateY(${actual * rowHeight}px)` }}><span className="mono event-cursor">{event.cursor}</span><span>{event.kind}</span><span className="muted">{event.occurredAt}</span></div>;
-        })}
-      </div>
-    </div>
-  );
-}
 
 const CURRENT_PROJECT = { id: "omp-studio", name: "OMP Studio" } as const;
 
@@ -1452,6 +1454,7 @@ function WorkspaceTreeNodes({
             className={`tree-row${open ? " open" : ""}`}
             data-dir={node.path}
             data-git={gitClass}
+            data-noise={isNoiseDir(node.name) || undefined}
             role="treeitem"
             aria-expanded={open}
             aria-selected={activePath === node.path}
@@ -1497,15 +1500,21 @@ function WorkspaceTreeNodes({
           </div>
         </div>;
       }
-      const code = node.name.endsWith(".tsx") || node.name.endsWith(".ts");
+      // 色与形是两个正交轴：ftype 只决定颜色（CSS 从 data-ftype 派生），
+      // 形状交给 iconNameFor() —— README.md 因此能既是「中性文档」又是「书」。
+      const ftype = fileTypeOf(node.name);
       return <div
         ref={(element) => registerNode(node.path, element)}
         key={node.path}
         className="tree-row"
         data-file={node.path}
         data-git={gitClass}
+        data-ftype={ftype ?? undefined}
+        data-secret={isSensitive(node.name) || undefined}
+        data-noise={isNoiseDir(node.name) || undefined}
         role="treeitem"
         aria-selected={activePath === node.path}
+        aria-label={`${node.name} ${t("nav.file")}`}
         aria-level={depth + 1}
         aria-posinset={index + 1}
         aria-setsize={nodes.length}
@@ -1517,7 +1526,7 @@ function WorkspaceTreeNodes({
         onKeyDown={(event) => onKeyDown(event, node, parentPath)}
       >
         <span className="tw" />
-        <span className="fi"><Icon name={code ? "file-code" : "file"} /></span>
+        <span className="fi"><Icon name={iconNameFor(ftype, node.name)} /></span>
         <span className="fname ellipsis">{node.name}</span>
         <TreeLiveDots reading={live.reading} writing={live.writing} />
         <GitTreeBadge status={gitStat} />
@@ -1890,16 +1899,72 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
   </>;
 }
 
-export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDialog }: { state: ViewState; chrome: ShellChrome; client: StudioClient; onRoute: (route: Route) => void; onOpenAppUpdateDialog: () => void }) {
+/** 左栏底部用户区（rail 收起时的回退位置）用的 Runtime 状态文案与语气。 */
+function runtimeStatusLabel(runtime: ClientBootstrap["runtime"] | undefined, t: (k: string) => string): { text: string; tone: "ok" | "warn" | "err" } {
+  const status = runtime?.status ?? "unavailable";
+  if (status === "connected") return { text: t("runtime.ready"), tone: "ok" };
+  if (status === "connecting") return { text: t("common.connecting"), tone: "warn" };
+  if (status === "disconnected") return { text: t("diagnostics.statusDisconnected"), tone: "err" };
+  return { text: formatRuntimeStatusLabel(status, t), tone: "err" };
+}
+
+export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDialog, ompMenuAnchorRef, railCollapsed = false, avatarRef, footerBoxRef }: { state: ViewState; chrome: ShellChrome; client: StudioClient; onRoute: (route: Route) => void; onOpenAppUpdateDialog: () => void; ompMenuAnchorRef?: RefObject<HTMLButtonElement | null>; /** 左栏（rail）收起时，用户/环境入口回到侧栏底部。 */ railCollapsed?: boolean; /** 底栏里的头像圆本身：壳要量它，才能在收起/展开时把头像交接到位。 */ avatarRef?: RefObject<HTMLElement | null>; /** 底栏盒子本身：壳要用它的底边换算头像落点，这里用它盯实时高度。 */ footerBoxRef?: RefObject<HTMLElement | null> }) {
+  const { document, window } = useConversationDom();
+  const mdi = useConversationView();
   const { t } = useI18n();
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const appUpdate = useAppUpdate();
   const effectiveUpdate = preview ? PREVIEW_APP_UPDATE : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
   const hasUpdate = effectiveUpdate?.available === true;
   const dock = useOptionalDock();
   const hasDockCards = !dock || dock.layout.left.panels.length > 0;
+  const leftCardsExpanded = dock ? dock.layout.left.panels.some(id => !dock.layout.cards[id]!.collapsed) : chrome.explorerOpen;
   const sidebarRef = useRef<HTMLElement>(null);
-  const ompBtnRef = useRef<HTMLButtonElement>(null);
+  const skillsDrawerRef = useRef<HTMLElement>(null);
+  const fallbackFooterRef = useRef<HTMLElement>(null);
+  const footerRef = footerBoxRef ?? fallbackFooterRef;
+  const pinDrawer = useCallback(() => {
+    const sidebar = sidebarRef.current;
+    const drawer = skillsDrawerRef.current;
+    if (sidebar === null || drawer === null) return;
+    const presented = !sidebar.closest("[hidden], [inert]") && sidebar.getClientRects().length > 0;
+    if (drawer.dataset.presented !== String(presented)) drawer.dataset.presented = String(presented);
+    if (!presented) return;
+    const topBar = sidebar.querySelector(".sb-top");
+    if (!(topBar instanceof HTMLElement)) return;
+    const box = sidebar.getBoundingClientRect();
+    const top = topBar.getBoundingClientRect();
+    const foot = sidebar.querySelector(".sb-footer");
+    const footHeight = foot instanceof HTMLElement ? foot.getBoundingClientRect().height : 0;
+    const write = (name: string, value: string) => {
+      if (drawer.style.getPropertyValue(name) !== value) drawer.style.setProperty(name, value);
+    };
+    write("--drawer-left", `${box.left}px`);
+    write("--drawer-width", `${Math.max(0, box.width - 4)}px`);
+    write("--drawer-top", `${Math.max(0, top.bottom)}px`);
+    write("--drawer-bottom", `${Math.max(0, window.innerHeight - box.bottom + footHeight)}px`);
+  }, []);
+  /* 底栏在长高/收回的那 ~250ms 里，对话区与文件区在同一条 flex 里被挤压：分界线自己
+     会平滑移动，但文件面板是 position:fixed 的 body，靠 slot 的 rect 定位，只跟
+     ResizeObserver 会慢一帧。这里逐帧重测，顺便把技能抽屉的下边界钉在底栏实时高度上。 */
+  const previousRailCollapsed = useRef(railCollapsed);
+  const dockHosts = dock?.hosts;
+  useEffect(() => {
+    if (previousRailCollapsed.current === railCollapsed) return;
+    previousRailCollapsed.current = railCollapsed;
+    const footer = footerRef.current;
+    const duration = footer === null ? 250 : transitionMs(footer) + transitionDelayMs(footer);
+    if (duration <= 1) return;
+    const end = performance.now() + duration + 120;
+    let frame = requestAnimationFrame(function step() {
+      dockHosts?.flush();
+      pinDrawer();
+      if (performance.now() < end) frame = requestAnimationFrame(step);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [railCollapsed, dockHosts, pinDrawer, footerRef]);
+  const fallbackOmpBtnRef = useRef<HTMLButtonElement>(null);
+  const ompBtnRef = ompMenuAnchorRef ?? fallbackOmpBtnRef;
   const ompMenuRef = useRef<HTMLDivElement>(null);
   const [ompMenuPos, setOmpMenuPos] = useState<{ left: number; bottom?: number; top?: number }>({ left: 0, bottom: 0 });
   const [fileSearch, setFileSearch] = useState("");
@@ -1957,7 +2022,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     setNewEntryBusy(true);
     setNewEntryError(undefined);
     if (preview) {
-      setPreviewFileMessage(`${t("common.demo")}: ${kind === "file" ? t("shell.newFile") : t("shell.newFolder")} ${path}`);
+      if (marks) setPreviewFileMessage(`${t("common.demo")}: ${kind === "file" ? t("shell.newFile") : t("shell.newFolder")} ${path}`);
       setNewEntryBusy(false);
       setNewEntryKind(null);
       setNewEntryPath("");
@@ -1984,7 +2049,6 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     () => sidebarProjectOrder(state.model.workspaces),
     [state.model.workspaces],
   );
-  const omp = runtimeStatusLabel(runtime, t);
   const liveSnapshot = snapshotFrom(state);
   const titleEntries = chrome.projectHistories?.[chrome.selectedProject?.id ?? ""]?.model?.entries ?? [];
   const titleMetadata = useSessionTitles(client,{sessionId:liveSnapshot?.sessionId,available:runtime?.status === "connected",capabilities:usableCapabilityManifest(state.model.capabilities,state.clientState?.connection.capabilityManifest,state.bootstrap?.capabilityManifest)},titleEntries.flatMap(entry=>entry.sessionId?[{id:entry.sessionId,title:entry.title}]:[]),state.route === "workbench");
@@ -2061,7 +2125,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   }, [gitWorkspaceId, refreshGitRepository]);
   const ompConnected = runtime?.status === "connected";
   const ompVersion = runtime?.runtimeVersion ?? (preview ? "v0.82.1" : "—");
-  const ompMeta = preview ? `${t("runtime.ready")} · ${t("common.demo")}` : (runtime ? formatRuntimeClassification(runtime.classification, (k) => t(k)) : t("common.unavailable"));
+  const ompMeta = preview ? (marks ? `${t("runtime.ready")} · ${t("common.demo")}` : t("runtime.ready")) : (runtime ? formatRuntimeClassification(runtime.classification, (k) => t(k)) : t("common.unavailable"));
+  const ompStatus = runtimeStatusLabel(runtime, t);
   const { profile } = useOperatorProfile();
   useLayoutEffect(() => {
     if (!chrome.ompMenuOpen || !ompBtnRef.current) return;
@@ -2118,25 +2183,17 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   useLayoutEffect(() => {
     const sidebar = sidebarRef.current;
     if (!sidebar) return;
-    const pinDrawer = () => {
-      const topBar = sidebar.querySelector(".sb-top");
-      const foot = sidebar.querySelector(".sb-footer");
-      if (!(topBar instanceof HTMLElement) || !(foot instanceof HTMLElement)) return;
-      const box = sidebar.getBoundingClientRect();
-      const top = topBar.getBoundingClientRect();
-      const bottom = foot.getBoundingClientRect();
-      sidebar.style.setProperty("--drawer-top", `${Math.max(0, Math.round(top.bottom - box.top))}px`);
-      sidebar.style.setProperty("--drawer-bottom", `${Math.max(0, Math.round(box.bottom - bottom.top))}px`);
-    };
     pinDrawer();
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(pinDrawer);
     observer?.observe(sidebar);
+    /* 底栏的高度是动画出来的：盯住它，抽屉下边界才能逐帧跟着收放。 */
+    if (footerRef.current !== null) observer?.observe(footerRef.current);
     window.addEventListener("resize", pinDrawer);
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", pinDrawer);
     };
-  }, [chrome.skillsOpen, chrome.collapsed, chrome.sidebarWidth]);
+  }, [pinDrawer, chrome.skillsOpen, chrome.collapsed, chrome.sidebarWidth, railCollapsed, state.route, footerRef]);
   const onResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (dock?.preferences.locked) return;
     if (chrome.collapsed) return;
@@ -2147,7 +2204,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     handle.setPointerCapture(event.pointerId);
     const startX = event.clientX;
     const startWidth = sidebar instanceof HTMLElement ? sidebar.getBoundingClientRect().width : chrome.sidebarWidth;
-    const root = handle.closest<HTMLElement>(".adaptive-workbench") ?? document.documentElement;
+    const root = handle.closest<HTMLElement>(".conversation-workspace, .adaptive-workbench") ?? document.documentElement;
     const maxWidth = root.dataset.layoutOverlay === "sidebar" ? Math.min(400, root.clientWidth - 24) : Math.min(400, Math.max(200, root.clientWidth - 560));
     beforeConversationLayoutChange();
     document.body.classList.add("is-resizing");
@@ -2185,7 +2242,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   };
   const onSplitPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (dock?.preferences.locked) return;
-    if (!hasDockCards) return;
+    if (!hasDockCards || !leftCardsExpanded) return;
     event.preventDefault();
     window.getSelection()?.removeAllRanges();
     const handle = event.currentTarget;
@@ -2236,7 +2293,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const projectShare = chrome.splitRatio * 100;
   const fileShare = 100 - projectShare;
   return (
-    <aside ref={sidebarRef} className={`sidebar${chrome.collapsed ? " collapsed" : ""}${chrome.explorerOpen ? "" : " explorer-collapsed"}`} id="sidebar" inert={chrome.collapsed} aria-label={t("shell.projectAndChat")}>
+    <aside ref={sidebarRef} className={`sidebar${chrome.collapsed ? " collapsed" : ""}${leftCardsExpanded ? "" : " explorer-collapsed"}`} id="sidebar" inert={chrome.collapsed} aria-label={t("shell.projectAndChat")}>
       <div className="sidebar-resizer" id="sbResizer" role="separator" aria-orientation="vertical" aria-label={t("shell.adjustPanelWidth")} aria-valuemin={200} aria-valuemax={400} aria-valuenow={chrome.sidebarWidth} tabIndex={0} onPointerDown={onResizePointerDown} onKeyDown={onResizeKeyDown} onDoubleClick={() => chrome.onResizeSidebar(272)} />
       <div className="sb-top">
         <AppMenu
@@ -2272,7 +2329,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
           <span className="meta"><span className="count">{chrome.skillsEnabledCount}</span><Icon name="chevron-r" extra="sm chev" /></span>
         </button>
       </div>
-      <section className="sb-section" id="sbProjects" aria-labelledby="sbProjectsTitle" style={{ ["--sb-proj-basis" as string]: hasDockCards ? `${projectShare.toFixed(3)}%` : "100%" }}>
+      <section className="sb-section" id="sbProjects" aria-labelledby="sbProjectsTitle" style={{ ["--sb-proj-basis" as string]: hasDockCards && leftCardsExpanded ? `${projectShare.toFixed(3)}%` : "100%" }}>
         <div className="sb-section-head">
           <h2 id="sbProjectsTitle">{t("shell.projectAndChat")}</h2>
           <div className="sb-head-actions">
@@ -2339,6 +2396,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                           type="button"
                           className={`thread${chrome.previewThreadId === thread.id ? " active" : ""}`}
                           aria-current={chrome.previewThreadId === thread.id ? "page" : undefined}
+                          data-window-drag={mdi ? "" : undefined}
+                          onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: project.id, previewProjectId: project.id, previewThreadId: thread.id }, title: thread.title }); }}
                           onClick={() => chrome.onSelectPreviewThread(thread.id)}
                         >
                           <ThreadSpin running={running} />
@@ -2361,7 +2420,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                   busy={false}
                                   compacting={false}
                                   compactPending={false}
-                                  reason={t("common.unavailableInPreview")}
+                                  reason={marks ? t("common.unavailableInPreview") : t("common.unavailable")}
                                   onRename={() => {}}
                                   onFork={() => {}}
                                   onHandoff={() => {}}
@@ -2453,6 +2512,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                             className={`thread${chrome.activeProvisionalSessionId === thread.sessionId ? " active" : ""}`}
                             {...(chrome.activeProvisionalSessionId === thread.sessionId ? { "aria-current": "page" as const } : {})}
                             aria-label={thread.title}
+                            data-window-drag={mdi ? "" : undefined}
+                            onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) }, title: thread.title }); }}
                             onClick={() => chrome.onSelectProvisionalThread(thread)}
                           >
                             <ThreadSpin running={thread.running} />
@@ -2524,6 +2585,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                             type="button"
                             className={`thread${chrome.selectedHistoryId === entry.historyId || chrome.activeProvisionalSessionId === entry.sessionId ? " active" : ""}`}
                             aria-current={chrome.selectedHistoryId === entry.historyId ? "page" : undefined}
+                            data-window-drag={mdi ? "" : undefined}
+                            onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: workspace.workspaceId, sessionId: entry.sessionId, threadId: entry.threadId, historyId: entry.historyId }, title: sidebarThreadTitle(entry, provisional, t("conversation.untitledSession")) }); }}
                             onClick={() => chrome.onSelectThread(entry, workspace.workspaceId as WorkspaceId)}
                           >
                             <ThreadSpin running={running} />
@@ -2608,7 +2671,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
       </section>
       <div
         className="sb-divider"
-        hidden={!hasDockCards}
+        hidden={!hasDockCards || !leftCardsExpanded}
         id="sbDivider"
         role="separator"
         tabIndex={0}
@@ -2620,7 +2683,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         onPointerDown={onSplitPointerDown}
         onDoubleClick={() => chrome.onResizeSplit(0.5)}
         onKeyDown={(event) => {
-          if (!hasDockCards) return;
+          if (!hasDockCards || !leftCardsExpanded) return;
           const step = event.shiftKey ? 0.15 : 0.05;
           if (event.key === "ArrowUp") { event.preventDefault(); chrome.onResizeSplit(Math.max(0.15, chrome.splitRatio - step)); }
           else if (event.key === "ArrowDown") { event.preventDefault(); chrome.onResizeSplit(Math.min(0.85, chrome.splitRatio + step)); }
@@ -2628,20 +2691,20 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
           else if (event.key === "End") { event.preventDefault(); chrome.onResizeSplit(0.85); }
         }}
       />
-      {/* 左栏最后一个模块被移走时不自动收起：空态（「添加工具或拖动到这里」）
-          要占自然高度。原来的 flex:0 0 0 + overflow:hidden 把它压成 0 高，
-          用户只看到一条空白栏，既没有内容也没有提示。 */}
-      {dock ? <div className="dock-left-cards" style={{ flex: hasDockCards ? `1 1 ${fileShare}%` : "0 0 auto", minHeight: 0, overflow: hasDockCards ? "hidden" : "visible" }}><DockCardRegion region="left" visible={!chrome.collapsed} /></div> : null}
+      {dock && hasDockCards ? <div className={`dock-left-cards${leftCardsExpanded ? "" : " is-folded"}`} style={{ flex: leftCardsExpanded ? `1 1 ${fileShare}%` : "0 0 auto", minHeight: 0, overflow: "hidden" }}><DockCardRegion region="left" visible={!chrome.collapsed} /></div> : null}
       <DockPanel id="files">
       <section className="dock-files-content" id="sbFiles" aria-labelledby="sbFilesTitle" >
         <div className="sb-section-head">
           <h2 id="sbFilesTitle">{t("shell.workspace")}</h2>
-          <div className="sb-head-actions">
+          <DockToolbar id="files"><div className="sb-head-actions">
             <button className={`icon-btn${newEntryKind === "file" ? " active" : ""}`} data-tip={t("shell.newFile")} aria-label={t("shell.newFile")} aria-pressed={newEntryKind === "file"} disabled={!chrome.selectedProject || newEntryBusy} onClick={() => beginWorkspaceEntry("file")}><Icon name="plus" extra="sm" /></button>
             <button className={`icon-btn${newEntryKind === "directory" ? " active" : ""}`} data-tip={t("shell.newFolder")} aria-label={t("shell.newFolder")} aria-pressed={newEntryKind === "directory"} disabled={!chrome.selectedProject || newEntryBusy} onClick={() => beginWorkspaceEntry("directory")}><Icon name="folder" extra="sm" /></button>
             <button className={`icon-btn${fileSearch ? " active" : ""}`} data-tip={t("common.filter")} aria-label={t("shell.filterLoadedFiles")} onClick={() => setFileSearch((value) => value ? "" : " ")}><Icon name="search" extra="sm" /></button>
-            <button className="icon-btn" data-tip={t("common.refresh")} aria-label={t("shell.refreshFileTree")} disabled={!chrome.selectedProject} onClick={() => preview ? setPreviewFileMessage(`${t("common.demo")}: ${t("shell.refreshFileTree")}`) : setFileRefreshToken((value) => value + 1)}><Icon name="refresh" extra="sm" /></button>
-          </div>
+            <button className="icon-btn" data-tip={t("common.refresh")} aria-label={t("shell.refreshFileTree")} disabled={!chrome.selectedProject} onClick={() => {
+              if (!preview) { setFileRefreshToken((value) => value + 1); return; }
+              if (marks) setPreviewFileMessage(`${t("common.demo")}: ${t("shell.refreshFileTree")}`);
+            }}><Icon name="refresh" extra="sm" /></button>
+          </div></DockToolbar>
 
         </div>
         {fileSearch ? <div style={{ padding: "4px 10px" }}><input autoFocus className="input" value={fileSearch.trim()} onChange={(event) => setFileSearch(event.target.value || " ")} placeholder={`${t("shell.filterLoadedFiles")}…`} aria-label={t("shell.filterLoadedFiles")} /></div> : null}
@@ -2696,7 +2759,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
       </section>
       </DockPanel>
       <SkillsDrawer
-        open={chrome.skillsOpen}
+        open={chrome.skillsOpen && !chrome.collapsed && state.route === "workbench"}
+        drawerRef={skillsDrawerRef}
         client={client}
         runtimeSessionId={liveSnapshot?.sessionId ?? null}
         onClose={chrome.onToggleSkills}
@@ -2707,63 +2771,24 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         draftSkills={chrome.draftSkills}
         usedSkills={chrome.usedSkills}
       />
-      <footer className="sb-footer">
-        <button
-          ref={ompBtnRef}
-          type="button"
-          className={`sb-user${hasUpdate ? " has-update" : ""}`}
-          aria-label={`${profile.displayName} · ${hasUpdate ? `${t("appUpdate.foundNewVersion")} v${effectiveUpdate?.version} · ` : ""}OMP 状态与环境菜单`}
-          aria-haspopup="menu"
-          aria-expanded={chrome.ompMenuOpen}
-          onClick={chrome.onToggleOmpMenu}
-        >
-          <div style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
-            {profile.avatarSrc
-              ? <img className="avatar" src={profile.avatarSrc} alt="" draggable={false} />
-              : <span className="avatar" aria-hidden="true">{avatarInitial(profile.displayName)}</span>}
-            {hasUpdate && (
-              <span
-                style={{
-                  position: "absolute",
-                  top: -2,
-                  right: -2,
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  backgroundColor: "var(--accent, #3b82f6)",
-                  boxShadow: "0 0 0 2px var(--bg, #181825)",
-                }}
-                aria-hidden="true"
-              />
-            )}
-          </div>
-          <span>
-            <span className="u-name" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span>{profile.displayName}</span>
-              {hasUpdate && (
-                <span
-                  style={{
-                    fontSize: "0.68rem",
-                    padding: "1px 5px",
-                    borderRadius: 4,
-                    background: "var(--accent, #3b82f6)",
-                    color: "#fff",
-                    fontWeight: 600,
-                    lineHeight: 1.2,
-                  }}
-                >
-                  v{effectiveUpdate?.version}
-                </span>
-              )}
-            </span>
-            <span className={`u-status ${hasUpdate ? "ok" : omp.tone}`} role="status" aria-live="polite">
-              <span className={`dot ${hasUpdate ? "green pulse" : omp.tone === "ok" ? "green pulse" : omp.tone === "err" ? "red" : "amber"}`} aria-hidden="true" />
-              <span>{hasUpdate ? `${t("appUpdate.foundNewVersion")} v${effectiveUpdate?.version}` : omp.text}</span>
-            </span>
-          </span>
-          <Icon name="chevron-ud" extra="sm" />
-        </button>
-      </footer>
+      {/* 左栏收起后，环境/用户入口回到侧栏底部（与 rail 里的头像同一个按钮）。 */}
+      {/* 左栏收起后，环境/用户入口回到侧栏底部（与 rail 里的头像同一个按钮）。
+          这块不自带位移：头像由壳里的幽灵搬运，它只负责把标签从头像右侧展开。
+          收起这一帧就得挂上（壳要在同一帧量到落点），展开时多留一拍做折返。 */}
+      <SidebarFooter
+        railCollapsed={railCollapsed}
+        profile={profile}
+        hasUpdate={hasUpdate}
+        version={effectiveUpdate?.version}
+        status={ompStatus}
+        menuOpen={chrome.ompMenuOpen}
+        onToggleMenu={(anchor) => {
+          if (ompMenuAnchorRef) ompMenuAnchorRef.current = anchor;
+          chrome.onToggleOmpMenu();
+        }}
+        avatarRef={avatarRef}
+        footerRef={footerRef}
+      />
       {chrome.ompMenuOpen
         ? createPortal(
             <div
@@ -2892,15 +2917,6 @@ function formatTelemetryTokens(value: number): string {
   return Math.round(value).toLocaleString("en-US");
 }
 
-function formatTelemetryCost(value: number): string {
-  return Number.isFinite(value) && value>0 ? `≈$${value.toFixed(4)}` : "—";
-}
-
-function formatTelemetryTime(value: string): string {
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleTimeString() : "—";
-}
-
 const TELEMETRY_CONTEXT_PARTS: ReadonlyArray<{ key: keyof NonNullable<SessionTelemetrySnapshot["context"]>; label: string; color: string }> = [
   { key: "systemPromptTokens", label: "系统提示词", color: "#8a919c" },
   { key: "systemContextTokens", label: "系统上下文", color: "#64748b" },
@@ -2909,84 +2925,28 @@ const TELEMETRY_CONTEXT_PARTS: ReadonlyArray<{ key: keyof NonNullable<SessionTel
   { key: "messagesTokens", label: "对话消息", color: "#3b9bd4" },
 ];
 
-function RealTokenTrigger({ telemetry }: { telemetry: SessionTelemetrySnapshot | null }) {
-  if (telemetry === null) {
-    return <><span className="t-item"><Icon name="arrow-u" extra="sm" /><b>—</b></span><span className="t-item"><Icon name="arrow-d" extra="sm" /><b>—</b></span><span className="t-sep" aria-hidden="true" /><span className="t-item"><b>—</b>&nbsp;cache</span></>;
-  }
-  return <><span className="t-item"><Icon name="arrow-u" extra="sm" /><b>{formatTelemetryTokens(telemetry.tokens.input)}</b></span><span className="t-item"><Icon name="arrow-d" extra="sm" /><b>{formatTelemetryTokens(telemetry.tokens.output)}</b></span><span className="t-sep" aria-hidden="true" /><span className="t-item"><b>{formatTelemetryTokens(telemetry.tokens.cacheRead + telemetry.tokens.cacheWrite)}</b>&nbsp;cache</span></>;
+/** 压缩档只剩图标，把被收起的数字放进 tooltip（`.t-tok-icon` 见 App.css）。 */
+function tokenUsageTip(telemetry: SessionTelemetrySnapshot | null): string {
+  if (telemetry === null) return "Token";
+  const t = telemetry.tokens;
+  return `Token ↑${formatTelemetryTokens(t.input)} ↓${formatTelemetryTokens(t.output)} · ${formatTelemetryTokens(t.cacheRead + t.cacheWrite)} cache`;
 }
 
-function telemetrySourceChip(view: ViewedSessionTelemetryState | undefined, fallback: "live" | undefined, t: (key: any) => string): { label: string; cls: string } | undefined {
-  const source = view?.source ?? fallback;
-  if (source === undefined) return undefined;
-  if (source === "live") return { label: t("shell.realtime"), cls: "chip blue xs" };
-  if (source === "persisted") return { label: t("shell.lastRecorded"), cls: "chip blue xs" };
-  if (source === "archive-recomputed") return { label: t("shell.currentEnvRecomputed"), cls: "chip blue xs" };
-  return undefined;
+function RealTokenTrigger({ telemetry }: { telemetry: SessionTelemetrySnapshot | null }) {
+  const compact = <span className="t-tok-icon" data-tip={tokenUsageTip(telemetry)}><Icon name="chart" /></span>;
+  if (telemetry === null) {
+    return <>{compact}<span className="t-item"><Icon name="arrow-u" extra="sm" /><b>—</b></span><span className="t-item"><Icon name="arrow-d" extra="sm" /><b>—</b></span><span className="t-sep" aria-hidden="true" /><span className="t-item"><b>—</b>&nbsp;cache</span></>;
+  }
+  return <>{compact}<span className="t-item"><Icon name="arrow-u" extra="sm" /><b>{formatTelemetryTokens(telemetry.tokens.input)}</b></span><span className="t-item"><Icon name="arrow-d" extra="sm" /><b>{formatTelemetryTokens(telemetry.tokens.output)}</b></span><span className="t-sep" aria-hidden="true" /><span className="t-item"><b>{formatTelemetryTokens(telemetry.tokens.cacheRead + telemetry.tokens.cacheWrite)}</b>&nbsp;cache</span></>;
 }
 
 function formatTelemetryExact(value: number): string {
   return Number.isFinite(value) ? Math.round(value).toLocaleString("en-US") : "—";
 }
 
-function formatTelemetryDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "—";
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${Math.round(seconds - minutes * 60)}s`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes - hours * 60}m`;
-}
-
-function RealTokenPanel({ telemetry, view }: { telemetry: SessionTelemetrySnapshot | null; view: ViewedSessionTelemetryState | undefined }) {
-  const { t: tr } = useI18n();
-  if (telemetry === null) {
-    const reason = view?.status === "unavailable" ? tr("common.unavailable") : view?.status === "loading" ? tr("common.loading") : tr("common.unavailable");
-    return <><div className="tp-head"><Icon name="zap" extra="sm" />{tr("shell.tokenUsage")}<span className="spacer" /><span className="chip gray xs">{view?.status === "loading" ? tr("common.loading") : tr("common.unavailable")}</span></div><div className="tp-ctx"><div className="tiny muted">{reason}</div></div></>;
-  }
-  const t = telemetry.tokens;
-  const turn = telemetry.lastCompletedTurn;
-  const chip = telemetrySourceChip(view, "live", tr);
-  const cacheSavedPct = t.cacheRead + t.input > 0 ? Math.round((t.cacheRead / (t.cacheRead + t.input)) * 100) : 0;
-  const splitTotal = t.input + t.output + t.cacheRead + t.cacheWrite;
-  const splitPct = (value: number): number => (splitTotal > 0 ? Math.min(100, (value / splitTotal) * 100) : 0);
-  return <>
-    <div className="tp-head"><Icon name="zap" extra="sm" />{tr("shell.tokenUsage")}<span className="spacer" />{chip === undefined ? null : <span className={chip.cls}>{chip.label}</span>}</div>
-    <div className="tok-hero"><div className="th-cell"><div className="th-k">{tr("shell.totalTokens")}</div><div className="th-v">{formatTelemetryTokens(t.total)}</div><div className="th-sub">{turn ? `${formatTelemetryTokens(turn.total)}` : "—"}</div></div><div className="th-cell"><div className="th-k">{tr("shell.cost")}</div><div className="th-v">{formatTelemetryCost(t.cost)}</div><div className="th-sub">{tr("shell.cacheSaved")} <b>{cacheSavedPct}%</b></div></div></div>
-    <div className="tok-split">
-      <div className="ts-top"><span>{tr("shell.composition")}</span><b>{formatTelemetryTokens(t.input)} / {formatTelemetryTokens(t.output)}</b></div>
-      <div className="tok-bar">
-        {splitTotal <= 0
-          ? <i className="tb-none" />
-          : <><i className="tb-in" style={{ width: `${splitPct(t.input)}%` }} /><i className="tb-out" style={{ width: `${splitPct(t.output)}%` }} /><i className="tb-cache" style={{ width: `${splitPct(t.cacheRead + t.cacheWrite)}%` }} /></>}
-      </div>
-      <div className="tok-keys">
-        <span><i className="tb-in" />{tr("shell.inputTokens")}</span>
-        <span><i className="tb-out" />{tr("shell.outputTokens")}</span>
-        <span><i className="tb-cache" />{tr("shell.cacheTokens")} {formatTelemetryTokens(t.cacheRead + t.cacheWrite)} · <b>{cacheSavedPct}%</b></span>
-      </div>
-    </div>
-    <div className="tok-rows">
-      <div className="tr-row">{tr("shell.turnInputOutput")}<span className="tr-v">{turn ? `${formatTelemetryTokens(turn.input)} / ${formatTelemetryTokens(turn.output)}` : "—"}</span></div>
-      <div className="tr-row">{tr("shell.turnDuration")}<span className="tr-v">{turn?.durationMs !== undefined ? formatTelemetryDuration(turn.durationMs) : "—"}</span></div>
-      <div className="tr-row">TPS<span className="tr-v">{telemetry.generationTps !== undefined ? telemetry.generationTps.toFixed(1) : turn?.tps !== undefined ? turn.tps.toFixed(1) : "—"}</span></div>
-      {telemetry.advisorCost !== undefined ? <div className="tr-row">Advisor<span className="tr-v">{formatTelemetryCost(telemetry.advisorCost)}</span></div> : null}
-      {telemetry.servedModel && telemetry.servedModel !== telemetry.requestedModel ? <div role="status" className="tr-row">{tr("runtimeUpgrade.servedModel")}<span className="tr-v">{telemetry.servedModel} · {tr("runtimeUpgrade.requestedModel")} {telemetry.requestedModel}</span></div> : null}
-      {telemetry.treeCost !== undefined ? <div className="tr-row">Session tree (USD)<span className="tr-v">${telemetry.treeCost.toFixed(4)}</span></div> : null}
-      {telemetry.budget ? <div role="status" className="tr-row">Budget<span className="tr-v">{telemetry.budget.maxCost === null ? "—" : `$${telemetry.budget.maxCost}`} · {telemetry.budget.limitReached ? "cap reached" : "below cap"}</span></div> : null}
-      {telemetry.editRejections ? Object.entries(telemetry.editRejections).map(([kind, count]) => <div className="tr-row" key={kind}>Edit · {kind}<span className="tr-v">{count}</span></div>) : null}
-      <div className="tr-row">Reasoning<span className="tr-v">{formatTelemetryTokens(t.reasoning)}</span></div>
-      <div className="tr-row">Cache read<span className="tr-v">{formatTelemetryTokens(t.cacheRead)}</span></div>
-      <div className="tr-row">Cache write<span className="tr-v">{formatTelemetryTokens(t.cacheWrite)}</span></div>
-      <div className="tr-row">{tr("shell.lastCompletedTime")}<span className="tr-v">{turn ? formatTelemetryTime(turn.completedAt) : "—"}</span></div>
-    </div>
-  </>;
-}
-
 function RealContextTrigger({ telemetry }: { telemetry: SessionTelemetrySnapshot | null }) {
   const percent = telemetry?.context?.percent;
-  return <><span className="ctx-ring" style={{ ["--p" as string]: percent ?? 0 }} aria-hidden="true" /><span className="t-item"><b>{percent === undefined ? "—" : `${Math.round(percent)}%`}</b></span></>;
+  return <><span className="ctx-ring" style={{ ["--p" as string]: percent ?? 0 }} aria-hidden="true" data-tip={percent === undefined ? "Context" : `Context ${Math.round(percent)}%`} /><span className="t-item"><b>{percent === undefined ? "—" : `${Math.round(percent)}%`}</b></span></>;
 }
 
 function RealContextPanel({ telemetry, view }: { telemetry: SessionTelemetrySnapshot | null; view: ViewedSessionTelemetryState | undefined }) {
@@ -3032,9 +2992,15 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
   /** Bump after compact so Context 构成 re-reads the current session. */
   telemetryRefreshToken?: number;
 }) {
-  const { t } = useI18n();
+  const conversation = useConversationView();
+  const conversationWorkspace = useConversationWorkspace();
+  const { document, window } = useConversationDom();
+  const { t, resolvedLanguage } = useI18n();
+  const dock = useDockEngine();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const { preview } = usePreviewMode();
+  const [floatingDetails, setFloatingDetails] = useState<"tokens" | "context" | null>(null);
+  const executionTarget = useExecutionTarget();
+  const { preview, marks } = usePreviewMode();
   /** 对话动作可用性：写表面始终走真实 API（预览只覆盖读表面），
       因此只看真实 Runtime 快照；无活动会话时诚实禁用并说明原因。 */
   const liveSnapshot = snapshotFrom(state);
@@ -3043,7 +3009,8 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
   const sessionActionReason = !sessionLive ? t("common.unavailable") : t("common.loading");
   const previewProject = findPreviewProject(chrome.previewProjectId);
   const previewHit = findPreviewThread(chrome.previewThreadId);
-  const realActiveWorkspace = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
+  const realActiveWorkspace = state.model.workspaces?.workspaces.find(workspace => workspace.workspaceId === conversation?.document.ref.workspaceId)
+    ?? state.model.workspaces?.workspaces.find(workspace => workspace.active);
   // 与侧栏项目树同一顺序，避免「切换项目」菜单在每次切换后重排。
   const switchProjectOptions = useMemo(
     () => sidebarProjectOrder(state.model.workspaces),
@@ -3061,13 +3028,14 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
   const viewedTelemetry = useViewedSessionTelemetry({
     client: preview ? null : client,
     preview,
-    enabled: openMenu === "tokens" || openMenu === "context" || openMenu === "overflow-tokens" || openMenu === "overflow-context",
+    enabled: floatingDetails !== null || openMenu === "tokens" || openMenu === "context" || openMenu === "overflow-tokens" || openMenu === "overflow-context",
     viewedSessionId,
     liveSessionId: preview ? undefined : snapshotFrom(state)?.sessionId,
     liveTelemetry: preview ? undefined : (state.clientState?.entities.telemetry ?? undefined),
     ...(telemetryRefreshToken === undefined ? {} : { refreshToken: telemetryRefreshToken }),
   });
   const telemetry = preview ? null : (viewedTelemetry.telemetry ?? null);
+  useEffect(() => { if (conversation && !conversation.active) setOpenMenu(null); }, [conversation?.active]);
 
   useEffect(() => {
     if (openMenu === null) return;
@@ -3088,74 +3056,109 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
     action?.();
   };
 
-  const topbarRef = useCompactTopbar();
+  const openTokenCounter = () => run(() => { onRoute("workbench"); dock.store.dispatch({ type: "open", panel: "token-counter" }); });
+  const contextPanel = <>
+    {preview ? <PreviewContextPanel /> : <RealContextPanel telemetry={telemetry} view={viewedTelemetry} />}
+    <footer className="telemetry-footer"><button type="button" onClick={() => run(() => { setSlashUiIntent("context-viewer"); onRoute("workbench"); })}><Icon name="layers" extra="sm" /><span>{t("palette.openContext")}</span><Icon name="arrow-r" extra="sm" /></button></footer>
+  </>;
+  const topbarRef = useCompactTopbar(conversationWorkspace?.titleRow);
+  const windowed = useAllWindowed();
+  const text = (zh: string, en: string) => resolvedLanguage === "zh" ? zh : en;
+  const waiting = preview ? previewHit?.thread.wait : state.clientState?.interaction.pending;
+  const runtimeConnected = (state.clientState?.connection.runtime ?? state.bootstrap?.runtime)?.status === "connected";
+  const floatingStatus: ConversationHeaderStatus | undefined = !preview && !runtimeConnected ? { tone: "error", label: text("未连接", "Disconnected") }
+    : liveSnapshot?.isCompacting && !preview ? { tone: "running", label: text("正在压缩", "Compacting") }
+    : waiting ? { tone: "waiting", label: text("等待处理", "Waiting for input") }
+    : (preview ? previewHit?.thread.status === "running" : liveSnapshot?.isStreaming) ? { tone: "running", label: text("运行中", "Running") } : undefined;
+  /** From a window title row, actions that land in the main window (its panels and pages) bring it forward first. */
+  const inMainWindow = (action: () => void, workbench = true) => () => { revealMainWindow(); if (workbench && state.route !== "workbench") onRoute("workbench"); action(); };
+  /** Project and branch menus, shared by the top bar breadcrumb and (in window mode) each window's title row. */
+  const projectMenu = (finish: (action: () => void) => void, fromWindow = false) => <>
+    <div className="menu-label">{t("shell.switchProject")}</div>
+    {preview ? PREVIEW_PROJECTS.map((project) => (
+      <MenuItem
+        key={project.id}
+        icon="folder-open"
+        current={project.id === chrome.previewProjectId}
+        hint={project.id === chrome.previewProjectId ? t("shell.current") : project.branch}
+        onClick={() => finish(() => chrome.onSelectPreviewProject(project.id))}
+      >
+        {project.name}
+      </MenuItem>
+    )) : (
+      <>
+        {switchProjectOptions.map((workspace) => (
+          <MenuItem
+            key={workspace.workspaceId}
+            icon="folder-open"
+            current={workspace.active}
+            {...(workspace.active ? { hint: t("shell.current") } : {})}
+            onClick={() => finish(() => chrome.onSelectProject({ id: workspace.workspaceId, name: workspace.name }))}
+          >
+            {workspace.name}
+          </MenuItem>
+        ))}
+        {!switchProjectOptions.length ? (
+          <MenuItem icon="folder-open" disabled title={t("shell.noProjects")}>{t("shell.noProjects")}</MenuItem>
+        ) : null}
+      </>
+    )}
+    <div className="menu-sep" />
+    <MenuItem
+      icon="external"
+      disabled={chrome.projectShellUnavailable !== undefined || chrome.projectShellAction !== null}
+      {...(chrome.projectShellUnavailable !== undefined
+        ? { title: chrome.projectShellUnavailable }
+        : chrome.projectShellAction === "editor"
+          ? { title: t("common.loading") }
+          : {})}
+      onClick={() => finish(chrome.onOpenProjectInEditor)}
+    >{t("shell.openInExternalEditor")}</MenuItem>
+    <MenuItem icon="terminal" onClick={() => finish(fromWindow ? inMainWindow(onOpenTerminal) : onOpenTerminal)}>{t("shell.openInTerminal")}</MenuItem>
+    <MenuItem
+      icon="folder-open"
+      disabled={chrome.projectShellUnavailable !== undefined || chrome.projectShellAction !== null}
+      {...(chrome.projectShellUnavailable !== undefined
+        ? { title: chrome.projectShellUnavailable }
+        : chrome.projectShellAction === "directory"
+          ? { title: t("common.loading") }
+          : {})}
+      onClick={() => finish(chrome.onOpenProjectDirectory)}
+    >{t("shell.openProjectDirectory")}</MenuItem>
+    <div className="menu-sep" />
+    <MenuItem icon="home" onClick={() => finish(fromWindow ? inMainWindow(() => onRoute("home"), false) : () => onRoute("home"))}>{t("menu.projectHome")}</MenuItem>
+  </>;
+  const branchMenu = (finish: (action: () => void) => void, fromWindow = false) => {
+    const git = fromWindow ? inMainWindow(onOpenGit) : onOpenGit, changes = fromWindow ? inMainWindow(onOpenChanges) : onOpenChanges;
+    return <>
+      <div className="branch-menu-head">
+        <div className="bmh-title"><Icon name="branch" extra="sm" /><b>{crumbBranch}</b></div>
+        <div className="bmh-meta">{preview ? `${previewProject?.dirty ?? 0} ${t("shell.uncommitted")}${marks ? ` · ${t("common.demo")}` : ""}` : realGit.repository?.isRepository ? `${realGit.repository.changes.length} ${t("shell.uncommitted")} · ↑${realGit.repository.ahead} ↓${realGit.repository.behind}` : (realGit.error ?? t("common.unavailable"))}</div>
+      </div>
+      <MenuItem icon="commit" onClick={() => finish(git)}>{t("shell.uncommittedChanges")}</MenuItem>
+      <div className="menu-sep" />
+      <MenuItem icon="columns" onClick={() => finish(changes)}>{t("shell.viewChanges")}</MenuItem>
+      <MenuItem icon="commit" onClick={() => finish(git)}>{t("shell.createCommit")}</MenuItem>
+      <MenuItem icon="branch" onClick={() => finish(git)}>{t("shell.switchBranch")}</MenuItem>
+      <MenuItem icon="worktree" onClick={() => finish(git)}>{t("shell.newWorktree")}</MenuItem>
+    </>;
+  };
   return (
     <>
-    <header ref={topbarRef} className="topbar">
-      <div className="tb-left">
+    <header ref={topbarRef} className="topbar" onPointerDown={event => {
+      if (!conversationWorkspace) return;
+      const state = conversationWorkspace.store.getSnapshot();
+      const main = state.views.find(view => view.placement === "main" && !view.minimized);
+      if (main && !state.documents.find(record => record.id === state.activeDocumentId)?.page) dragConversation(event, conversationWorkspace.store, { viewId: main.id });
+    }}>
+      {windowed ? null : <div className="tb-left">
         <nav className="tb-crumb" aria-label={t("shell.currentLocation")}>
           <CrumbMenu
             id="project"
             openId={openMenu}
             onToggle={setOpenMenu}
             tip={t("shell.project")}
-            menu={
-              <>
-                <div className="menu-label">{t("shell.switchProject")}</div>
-                {preview ? PREVIEW_PROJECTS.map((project) => (
-                  <MenuItem
-                    key={project.id}
-                    icon="folder-open"
-                    current={project.id === chrome.previewProjectId}
-                    hint={project.id === chrome.previewProjectId ? t("shell.current") : project.branch}
-                    onClick={() => run(() => chrome.onSelectPreviewProject(project.id))}
-                  >
-                    {project.name}
-                  </MenuItem>
-                )) : (
-                  <>
-                    {switchProjectOptions.map((workspace) => (
-                      <MenuItem
-                        key={workspace.workspaceId}
-                        icon="folder-open"
-                        current={workspace.active}
-                        {...(workspace.active ? { hint: t("shell.current") } : {})}
-                        onClick={() => run(() => chrome.onSelectProject({ id: workspace.workspaceId, name: workspace.name }))}
-                      >
-                        {workspace.name}
-                      </MenuItem>
-                    ))}
-                    {!switchProjectOptions.length ? (
-                      <MenuItem icon="folder-open" disabled title={t("shell.noProjects")}>{t("shell.noProjects")}</MenuItem>
-                    ) : null}
-                  </>
-                )}
-                <div className="menu-sep" />
-                <MenuItem
-                  icon="external"
-                  disabled={chrome.projectShellUnavailable !== undefined || chrome.projectShellAction !== null}
-                  {...(chrome.projectShellUnavailable !== undefined
-                    ? { title: chrome.projectShellUnavailable }
-                    : chrome.projectShellAction === "editor"
-                      ? { title: t("common.loading") }
-                      : {})}
-                  onClick={() => run(chrome.onOpenProjectInEditor)}
-                >{t("shell.openInExternalEditor")}</MenuItem>
-                <MenuItem icon="terminal" onClick={() => run(onOpenTerminal)}>{t("shell.openInTerminal")}</MenuItem>
-                <MenuItem
-                  icon="folder-open"
-                  disabled={chrome.projectShellUnavailable !== undefined || chrome.projectShellAction !== null}
-                  {...(chrome.projectShellUnavailable !== undefined
-                    ? { title: chrome.projectShellUnavailable }
-                    : chrome.projectShellAction === "directory"
-                      ? { title: t("common.loading") }
-                      : {})}
-                  onClick={() => run(chrome.onOpenProjectDirectory)}
-                >{t("shell.openProjectDirectory")}</MenuItem>
-                <div className="menu-sep" />
-                <MenuItem icon="home" onClick={() => run(() => onRoute("home"))}>{t("menu.projectHome")}</MenuItem>
-              </>
-            }
+            menu={projectMenu(run)}
           >
             <Icon name="folder-open" extra="sm" />
             <span className="crumb-label crumb-project-label" data-tip={crumbProject}>{crumbProject}</span>
@@ -3167,20 +3170,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
             openId={openMenu}
             onToggle={setOpenMenu}
             tip={t("shell.branch")}
-            menu={
-              <>
-                <div className="branch-menu-head">
-                  <div className="bmh-title"><Icon name="branch" extra="sm" /><b>{crumbBranch}</b></div>
-                  <div className="bmh-meta">{preview ? `${previewProject?.dirty ?? 0} ${t("shell.uncommitted")} · ${t("common.demo")}` : realGit.repository?.isRepository ? `${realGit.repository.changes.length} ${t("shell.uncommitted")} · ↑${realGit.repository.ahead} ↓${realGit.repository.behind}` : (realGit.error ?? t("common.unavailable"))}</div>
-                </div>
-                <MenuItem icon="commit" onClick={() => run(onOpenGit)}>{t("shell.uncommittedChanges")}</MenuItem>
-                <div className="menu-sep" />
-                <MenuItem icon="columns" onClick={() => run(onOpenChanges)}>{t("shell.viewChanges")}</MenuItem>
-                <MenuItem icon="commit" onClick={() => run(onOpenGit)}>{t("shell.createCommit")}</MenuItem>
-                <MenuItem icon="branch" onClick={() => run(onOpenGit)}>{t("shell.switchBranch")}</MenuItem>
-                <MenuItem icon="worktree" onClick={() => run(onOpenGit)}>{t("shell.newWorktree")}</MenuItem>
-              </>
-            }
+            menu={branchMenu(run)}
           >
             <Icon name="branch" extra="sm" />
             <span className="crumb-label crumb-branch-label" data-tip={crumbBranch}>{crumbBranch}</span>
@@ -3227,7 +3217,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
                   }}
                 >{t("history.archiveSession")}</MenuItem>
                 <div className="menu-sep" />
-                <ConversationWidthMenu onSelect={() => setOpenMenu(null)} onOpenSettings={() => { setOpenMenu(null); setSettingsIntent("general"); onRoute("settings"); }} />
+                <ConversationWidthMenu onSelect={() => setOpenMenu(null)} onOpenSettings={() => { setOpenMenu(null); setSettingsIntent("appearance", "conversation.width"); onRoute("settings"); }} />
               </>
             }
           >
@@ -3236,29 +3226,28 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
           </CrumbMenu>
         </nav>
         <button
-          className="icon-btn tb-optional"
+          className="icon-btn"
           data-tip={sessionLive && !sessionBusy ? t("shell.tipForkThread") : sessionActionReason}
           aria-label={t("shell.forkThread")}
           disabled={!sessionLive || sessionBusy}
           onClick={() => run(chrome.onForkThread)}
         ><Icon name="fork" /></button>
         <button
-          className="icon-btn tb-optional"
+          className="icon-btn"
           data-tip={sessionLive && !sessionBusy ? t("shell.tipHandoffThread") : sessionActionReason}
           aria-label={t("shell.handoffThread")}
           disabled={!sessionLive || sessionBusy}
           onClick={() => run(chrome.onHandoffThread)}
         ><Icon name="handoff" /></button>
-      </div>
-      <button className="icon-btn lg tb-optional" data-tip={t("nav.agentHub")} aria-label="Agent Hub" onClick={() => onRoute("agent-hub")}><Icon name="bot" extra="lg" /></button>
-      <button className="icon-btn tb-optional" data-tip={t("nav.history")} aria-label={t("nav.history")} onClick={() => onRoute("history")}><Icon name="history" /></button>
+      </div>}
+      <button className="icon-btn lg" data-tip={t("nav.agentHub")} aria-label="Agent Hub" onClick={() => onRoute("agent-hub")}><Icon name="bot" extra="lg" /></button>
+      <button className="icon-btn" data-tip={t("nav.history")} aria-label={t("nav.history")} onClick={() => onRoute("history")}><Icon name="history" /></button>
       <div className="tb-right">
-        <DockRailToggle />
         <div className="tb-overflow" onMouseDown={event => event.stopPropagation()}>
           <button type="button" className="icon-btn" aria-label={t("common.more")} data-tip={t("common.more")} aria-haspopup="menu" aria-expanded={openMenu === "overflow" || openMenu === "overflow-tokens" || openMenu === "overflow-context"} onClick={() => setOpenMenu(openMenu?.startsWith("overflow") ? null : "overflow")}><Icon name="more" /></button>
           {openMenu?.startsWith("overflow") ? createPortal(
-            <div className="menu title-menu-popover tb-overflow-menu" role="menu" aria-label={t("common.more")} onMouseDown={event => event.stopPropagation()}>
-              {openMenu === "overflow-tokens" ? <>{preview ? <PreviewTokenPanel /> : <RealTokenPanel telemetry={telemetry} view={viewedTelemetry} />}<TokenCounterPane client={client} /></> : openMenu === "overflow-context" ? (preview ? <PreviewContextPanel /> : <RealContextPanel telemetry={telemetry} view={viewedTelemetry} />) : <>
+            <div className={`menu title-menu-popover tb-overflow-menu${openMenu === "overflow-tokens" ? " tok-pop" : openMenu === "overflow-context" ? " telemetry-pop ctx-pop" : ""}`} role={openMenu === "overflow" ? "menu" : "dialog"} aria-label={openMenu === "overflow-tokens" ? t("shell.tokenUsageDetails") : openMenu === "overflow-context" ? t("shell.contextCompositionDetails") : t("common.more")} onMouseDown={event => event.stopPropagation()}>
+              {openMenu === "overflow-tokens" ? <TokenUsagePanel telemetry={telemetry} view={viewedTelemetry} onClose={() => setOpenMenu(null)} onOpenCounter={openTokenCounter} /> : openMenu === "overflow-context" ? contextPanel : <>
                 <MenuItem icon="bot" onClick={() => run(() => onRoute("agent-hub"))}>{t("nav.agentHub")}</MenuItem>
                 <MenuItem icon="history" onClick={() => run(() => onRoute("history"))}>{t("nav.history")}</MenuItem>
                 <MenuItem icon="terminal" onClick={() => run(onOpenTerminal)}>{t("nav.terminal")}</MenuItem>
@@ -3267,6 +3256,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
                 <div className="menu-sep" />
                 <MenuItem onClick={() => setOpenMenu("overflow-tokens")}>{t("shell.tokenUsageDetails")}</MenuItem>
                 <MenuItem onClick={() => setOpenMenu("overflow-context")}>{t("shell.contextCompositionDetails")}</MenuItem>
+                <MenuItem icon="code" onClick={openTokenCounter}>{resolvedLanguage === "zh" ? "离线 Token 计数" : "Offline token counter"}</MenuItem>
                 <MenuItem icon="minimize" disabled={!sessionLive || sessionBusy} onClick={() => run(chrome.onCompactThread)}>{t("shell.compactThread")}</MenuItem>
                 <MenuItem icon="light" onClick={() => run(chrome.onToggleTheme)}>{t("shell.theme")}</MenuItem>
                 <MenuItem icon="home" onClick={() => run(() => onRoute("home"))}>{t("nav.home")}</MenuItem>
@@ -3284,7 +3274,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
             align="end"
             triggerClassName="t-group"
             popoverClassName="telemetry-pop tok-pop"
-            panel={<>{preview ? <PreviewTokenPanel /> : <RealTokenPanel telemetry={telemetry} view={viewedTelemetry} />}<TokenCounterPane key={String(preview)} client={client} /><button className="btn small outline" onClick={() => { setSlashUiIntent("context-viewer"); onRoute("workbench"); }}>{t("palette.openContext")}</button></>}
+            panel={<TokenUsagePanel telemetry={telemetry} view={viewedTelemetry} onClose={() => setOpenMenu(null)} onOpenCounter={openTokenCounter} />}
           >
             {preview ? <PreviewTokenTrigger /> : <RealTokenTrigger telemetry={telemetry} />}
           </AnchoredPop>
@@ -3298,21 +3288,21 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
             align="end"
             triggerClassName="t-group"
             popoverClassName="telemetry-pop ctx-pop"
-            panel={preview ? <PreviewContextPanel /> : <RealContextPanel telemetry={telemetry} view={viewedTelemetry} />}
+            panel={contextPanel}
           >
             {preview ? <PreviewContextTrigger /> : <RealContextTrigger telemetry={telemetry} />}
           </AnchoredPop>
           <span className="t-sep" aria-hidden="true" />
           {chrome.compactPending === true || liveSnapshot?.isCompacting === true ? (
             <button
-              className="tb-compact"
+              className="tb-compact is-pending"
               disabled={!sessionLive}
               data-tip={!sessionLive ? sessionActionReason : t("common.cancel")}
               aria-label={t("common.cancel")}
               onClick={() => run(chrome.onCancelCompact)}
             >
               <Icon name="x" extra="sm" />
-              {t("common.cancel")}
+              <span className="tb-compact-label">{t("common.cancel")}</span>
             </button>
           ) : (
             <button
@@ -3323,27 +3313,36 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
               onClick={() => run(chrome.onCompactThread)}
             >
               <Icon name="minimize" extra="sm" />
-              Compact
+              <span className="tb-compact-label">Compact</span>
             </button>
           )}
         </div>
+        <DockRailToggle />
         <button className={`icon-btn${sideOpen ? " active" : ""}`} data-tip={t("menu.rightPanel")} aria-controls="sidePanel" data-dock-entry="right" aria-expanded={sideOpen} onClick={onToggleSide}><Icon name="panel" /></button>
-        <button className="icon-btn tb-optional" data-tip={t("shell.theme")} onClick={chrome.onToggleTheme} aria-label={t("shell.theme")}>
+        <button className="icon-btn" data-tip={t("shell.theme")} onClick={chrome.onToggleTheme} aria-label={t("shell.theme")}>
           <Icon name={chrome.theme === "dark" ? "moon" : "light"} />
         </button>
-        <button className="icon-btn tb-optional" data-tip={t("nav.home")} onClick={() => onRoute("home")}><Icon name="home" /></button>
+        <button className="icon-btn" data-tip={t("nav.home")} onClick={() => onRoute("home")}><Icon name="home" /></button>
       </div>
     </header>
+    <ConversationFloatingHeader title={crumbThread} titleRow={titleRow}
+      source={{ project: crumbProject, branch: crumbBranch, path: preview ? previewProject?.path : realActiveWorkspace?.root, connection: executionTarget.id === null ? undefined : executionTarget.name }}
+      status={floatingStatus} onDetailsChange={setFloatingDetails}
+      windowed={windowed} projectMenu={close => projectMenu(action => { close(); run(action); }, true)} branchMenu={close => branchMenu(action => { close(); run(action); }, true)}
+      threadActions={{ disabled: preview || !sessionLive || sessionBusy, reason: preview ? t("common.unavailableInPreview") : sessionActionReason, onFork: () => run(chrome.onForkThread), onHandoff: () => run(chrome.onHandoffThread) }}
+      sessionMenu={close => {
+        const finish = (action: () => void) => { close(); run(action); };
+        return <><ThreadActionMenuItems live={!preview && sessionLive} busy={sessionBusy} compacting={liveSnapshot?.isCompacting === true} compactPending={chrome.compactPending} reason={preview ? t("common.unavailableInPreview") : sessionActionReason}
+          onRename={() => finish(chrome.onRenameThread)} onFork={() => finish(chrome.onForkThread)} onHandoff={() => finish(chrome.onHandoffThread)} onCompact={() => finish(chrome.onCompactThread)} onExport={() => finish(chrome.onExportThread)} onHistory={() => finish(() => { revealMainWindow(); onRoute("history"); })} />
+          {chrome.compactPending || liveSnapshot?.isCompacting ? <MenuItem icon="x" disabled={preview || !sessionLive} onClick={() => finish(chrome.onCancelCompact)}>{t("common.cancel")}</MenuItem> : null}
+          <MenuItem icon="archive" disabled={preview ? chrome.hiddenPreviewThreads.has(chrome.previewThreadId) : chrome.archiveTarget === undefined} onClick={() => { if (preview) finish(() => chrome.onArchivePreviewThread(chrome.previewThreadId)); else if (chrome.archiveTarget) finish(() => chrome.onArchiveThread(chrome.archiveTarget!)); }}>{t("history.archiveSession")}</MenuItem>
+          {windowed ? <><div className="menu-sep" /><ConversationWidthMenu onSelect={close} onOpenSettings={() => { close(); revealMainWindow(); setSettingsIntent("appearance", "conversation.width"); onRoute("settings"); }} /></> : null}
+        </>;
+      }}
+      tokenPanel={close => <TokenUsagePanel telemetry={telemetry} view={viewedTelemetry} onClose={close} onOpenCounter={() => { close(); openTokenCounter(); }} />}
+      contextPanel={contextPanel} onOpenTokenCounter={openTokenCounter} />
     </>
   );
-}
-
-/** 击键不重渲工作台：草稿提交合并到停止输入后一次（见 WorkbenchCanvas）。 */
-const COMPOSER_DRAFT_PUBLISH_MS = 140;
-
-/** 渲染真正依赖的草稿边界：空/非空、胶囊、图片。文本本身不在其中。 */
-function draftStatusOf(snapshot: ComposerSnapshot): string {
-  return `${snapshotIsEmpty(snapshot) ? "e" : "t"}${snapshot.images.length > 0 ? "i" : ""}${snapshot.doc.nodes.some((node) => node.type === "chip") ? "c" : ""}`;
 }
 
 function useComposerCollisionCollapse() {
@@ -3378,9 +3377,11 @@ function useComposerCollisionCollapse() {
       };
       setCollapse("full");
       if (!hasPressure()) return;
+      setCollapse("tools");
+      if (!hasPressure()) return;
       setCollapse("compact");
       if (!hasPressure()) return;
-      setCollapse("modes");
+      setCollapse("minimal");
     };
     const schedule = () => {
       if (frame !== undefined) window.cancelAnimationFrame(frame);
@@ -3417,13 +3418,36 @@ const PROMPT_SEND_PHASE_LABEL: Record<PromptSendPhase, string> = {
   initiating: "Initiating",
 };
 
-function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, state, client, onOpenWorktree, selectedSessionId, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwSession, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactPending, onViewedTelemetryRefresh, composerDraft, onComposerDraftChange, composerInsertion, onComposerInsertionApplied }: {
+/**
+ * 底栏外壳。收起/展开时 `useBottomPanelMotion` 要在动画期间保留旧结构，
+ * 这会同步重渲染一次；单独成组件，重渲染就只落在这一小块，不牵动整个工作台。
+ */
+function BottomPanelChrome({ visible, expanded, resizing, height, onResizePointerDown, onResizeDoubleClick, onResizeKeyDown }: {
+  visible: boolean;
+  expanded: boolean;
+  resizing: boolean;
+  height: number;
+  onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onResizeDoubleClick: () => void;
+  onResizeKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
+}) {
+  const { t } = useI18n();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const shown = useBottomPanelMotion(panelRef, visible, expanded, resizing);
+  return <div ref={panelRef} className={`bottom-panel${expanded ? "" : " collapsed"}${visible ? "" : " closed"}${resizing ? " resizing" : ""}`} id="bottomPanel" inert={!visible}>
+    <div className="bp-resizer" id="bpResizer" role="separator" tabIndex={0} aria-orientation="horizontal" aria-label={t("shell.resizeBottomPanel")} aria-valuemin={BOTTOM_PANEL_MIN} aria-valuemax={BOTTOM_PANEL_MAX} aria-valuenow={height} onPointerDown={onResizePointerDown} onDoubleClick={onResizeDoubleClick} onKeyDown={onResizeKeyDown} />
+    <DockGroupRegion region="bottom" visible={shown.visible} expanded={shown.expanded} />
+  </div>;
+}
+
+function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, state, client, onOpenWorktree, selectedSessionId, viewedSessionName, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwSession, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactThread, onCompactPending, onViewedTelemetryRefresh, telemetryRefreshToken, composerDraft, onComposerDraftChange, composerInsertion, onComposerInsertionApplied }: {
   workbenchVisible: boolean;
   railMode: "hidden" | "expanded" | "compact";
   state: ViewState;
   client: ClientStateSource;
   onOpenWorktree?: ((workspaceId: string) => Promise<void>) | undefined;
   selectedSessionId?: string;
+  viewedSessionName?: string;
   viewedAgents?: readonly StudioAgentSnapshot[];
   selectedThreadId?: ThreadId;
   /** Stable renderer view identity; changes even while history entry resolution is pending. */
@@ -3484,45 +3508,43 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   createProjectNonce?: number;
   /** 顶栏 / slash Compact 已发出、命令尚未结束。 */
   compactPending?: boolean;
+  onCompactThread: () => void;
   onCompactPending?: (pending: boolean) => void;
   onViewedTelemetryRefresh?: () => void;
+  telemetryRefreshToken?: number;
   onComposerDraftChange?: (sessionId: string, draft: ComposerSnapshot) => void;
   composerDraft?: ComposerSnapshot;
   composerInsertion?: { owner: string | undefined; text: string } | undefined;
   onComposerInsertionApplied?: () => void;
 }) {
-  const { t } = useI18n();
+  const { document, window } = useConversationDom();
+  const mdi = useConversationView();
+  const { t, resolvedLanguage } = useI18n();
   const executionTarget = useExecutionTarget();
   const [draft, setDraft] = useTargetMemory<ComposerSnapshot>("composer-current-draft", () => composerDraft ?? emptySnapshot());
   const composerDraftRef = useRef<ComposerSnapshot | undefined>(composerDraft);
   composerDraftRef.current = composerDraft;
-  /* 击键路径：快照先进 `draftLive`（不重渲），`draft` 只是「可渲染视图」。
-     渲染真正依赖的边界只有三个布尔（空/胶囊/图片），其余（标题预览、斜杠
-     命令可用性、技能集合）推迟到停止输入后一次提交；发送、清空、恢复等
-     命令式动作照旧同步提交。命令式读取一律走 `draftLive`，不读滞后视图。 */
-  const draftLive = useRef<ComposerSnapshot>(draft);
-  const draftPublish = useRef(0);
-  const publishDraft = useCallback((next: ComposerSnapshot, immediate?: boolean) => {
-    draftLive.current = next;
-    if (draftPublish.current !== 0) {
-      window.clearTimeout(draftPublish.current);
-      draftPublish.current = 0;
-    }
-    if (immediate === true || draftStatusOf(next) !== draftStatusOf(draft)) {
-      setDraft(next);
+  /* 精确草稿不重渲；渲染视图仅在状态边界或停止输入后发布。 */
+  const { draftLive, publishDraft, commitDraft } = useComposerDraft(draft, setDraft);
+  const applyingDraft = useRef(false);
+  const replaceDraft = useCallback((next: ComposerSnapshot) => {
+    const editor = composerRef.current;
+    if (editor === null) {
+      commitDraft(next);
       return;
     }
-    draftPublish.current = window.setTimeout(() => {
-      draftPublish.current = 0;
-      setDraft(draftLive.current);
-    }, COMPOSER_DRAFT_PUBLISH_MS);
-  }, [draft, setDraft]);
-  /** 命令式提交（清空/恢复/插入）：立即发布，同时保持 live 快照一致。 */
-  const commitDraft = useCallback((next: ComposerSnapshot) => publishDraft(next, true), [publishDraft]);
-  useEffect(() => () => {
-    if (draftPublish.current !== 0) window.clearTimeout(draftPublish.current);
-  }, []);
+    applyingDraft.current = true;
+    try {
+      // Both methods emit the normalized document once, including image labels.
+      if (next.doc.nodes.length === 0) editor.clear();
+      else editor.setSnapshot(next);
+    } finally {
+      applyingDraft.current = false;
+    }
+  }, [composerRef, commitDraft]);
   const [submittedPrompt, setSubmittedPrompt] = useState<{ readonly sessionId?: SessionId; readonly title: string } | undefined>(undefined);
+  const [gitIntent, setGitIntent] = useState<{ scope: string; intent: GitOpenIntent }>();
+  const gitIntentSequence = useRef(0);
   const [bottomResizing, setBottomResizing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [planSaveBusy, setPlanSaveBusy] = useState(false);
@@ -3535,6 +3557,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   optimisticPromptRef.current = optimisticPrompt;
   const composerBarRef = useComposerCollisionCollapse();
   const dock = useDockEngine();
+  const agentDockLayout = useAgentDockLayout();
   // 右侧面板拖拽调宽：照左栏 sidebar-resizer 的模式，pointer capture 期间直接写
   // 元素宽度与 --panel-w（收起动画的 margin 偏移量依赖该变量），松手后提交 state。
   // 夹取范围与 .side-panel 的 min/max-width（360/640）保持一致。
@@ -3542,14 +3565,15 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (dock.store.getSnapshot().preferences.locked) return;
     if (!sideOpen) return;
     event.preventDefault();
-    window.getSelection()?.removeAllRanges();
     const handle = event.currentTarget;
+    const document = handle.ownerDocument;
+    document.getSelection()?.removeAllRanges();
     const panel = handle.closest(".side-panel");
     if (!(panel instanceof HTMLElement)) return;
     handle.setPointerCapture(event.pointerId);
     const startX = event.clientX;
     const startWidth = panel.getBoundingClientRect().width;
-    const root = handle.closest<HTMLElement>(".adaptive-workbench") ?? document.documentElement;
+    const root = handle.closest<HTMLElement>(".conversation-workspace, .adaptive-workbench") ?? document.documentElement;
     const maxWidth = root.dataset.layoutOverlay === "side" ? Math.min(640, root.clientWidth - 24) : Math.min(640, Math.max(360, root.clientWidth - 560));
     beforeConversationLayoutChange();
     handle.classList.add("dragging");
@@ -3593,8 +3617,9 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   const onBottomResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (dock.store.getSnapshot().preferences.locked) return;
     event.preventDefault();
-    window.getSelection()?.removeAllRanges();
     const handle = event.currentTarget;
+    const document = handle.ownerDocument;
+    document.getSelection()?.removeAllRanges();
     const panel = handle.closest(".bottom-panel");
     if (!(panel instanceof HTMLElement)) return;
     if (!bottomOpen) onBottomOpenChange(true);
@@ -3602,7 +3627,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     handle.setPointerCapture(event.pointerId);
     const startY = event.clientY;
     const startHeight = panel.getBoundingClientRect().height;
-    const root = handle.closest<HTMLElement>(".adaptive-workbench") ?? document.documentElement;
+    const root = handle.closest<HTMLElement>(".conversation-workspace, .adaptive-workbench") ?? document.documentElement;
     beforeConversationLayoutChange();
     document.body.classList.add("is-resizing");
     document.body.style.cursor = "row-resize";
@@ -3662,7 +3687,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   const composerInputRef = composerRef;
   useEffect(() => {
     const restored = composerDraftRef.current ?? draftLive.current;
-    if (!snapshotIsEmpty(restored)) composerInputRef.current?.setSnapshot(restored);
+    if (!snapshotIsEmpty(restored)) replaceDraft(restored);
   }, []);
   // 流式期间按 Enter 的消息先排本地队列，本轮 run 结束后由 flush effect 按序发送。
   const [queuedMessages, setQueuedMessages] = useTargetMemory<QueuedMessage[]>("composer-queue", () => []);
@@ -3700,10 +3725,11 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   const promptUnsub = useRef<Unsubscribe | undefined>(undefined);
   const promptDispatchGate = useMemo(createComposerDispatchGate, []);
   useEffect(() => () => promptUnsub.current?.(), []);
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const treeConfirm = useUserMessageTreeConfirm(preview);
-  const [inspectTarget, setInspectTarget] = useState<SubagentHubTarget | null>(null);
-  const [contextInspectorOpen, setContextInspectorOpen] = useState(false);
+  const agentViewBook = sharedSubagentViewBook;
+  const contextInspectorOpened = useSyncExternalStore(dock.store.subscribe, () => !!locatePanel(dock.store.getSnapshot().layout, "context-viewer"));
+  const openContextInspector = () => dock.store.dispatch({ type: "open", panel: "context-viewer" });
   const [localFilesOpen, setLocalFilesOpen] = useState(false);
   const [localFileName, setLocalFileName] = useState("");
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
@@ -3713,7 +3739,6 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   const lastAskDeckRef = useRef<ClientInteraction | null>(null);
   const [askDeckLeaving, setAskDeckLeaving] = useState(false);
   useEffect(() => {
-    setInspectTarget(null);
     setRememberedPlan(undefined);
     setPlanDialogOpen(false);
   }, [selectedSessionId]);
@@ -3751,8 +3776,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (inPreview) setPreviewQueue([...result.queue]);
     else setQueuedMessages([...result.queue]);
     setQueueEdit(undefined);
-    commitDraft(result.composer);
-    composerInputRef.current?.setSnapshot(result.composer);
+    replaceDraft(result.composer);
   }, [selectedSessionId, preview]);
   // Composer content belongs to the viewed conversation, not to the workbench
   // shell.  Clear the editor when navigation changes the conversation identity
@@ -3766,10 +3790,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     const previous = composerViewRef.current;
     composerViewRef.current = { sessionId: selectedSessionId, threadId: selectedThreadId, viewIdentity };
     if (previous.sessionId === selectedSessionId && previous.threadId === selectedThreadId && previous.viewIdentity === viewIdentity) return;
-    composerInputRef.current?.clear();
-    const restored = composerDraftRef.current ?? emptySnapshot();
-    commitDraft(restored);
-    if (!snapshotIsEmpty(restored)) composerInputRef.current?.setSnapshot(restored);
+    replaceDraft(composerDraftRef.current ?? emptySnapshot());
     setComposerError(undefined);
     setQueueEdit(undefined);
   }, [selectedSessionId, selectedThreadId, viewIdentity]);
@@ -3779,8 +3800,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (pending === undefined || pending.sessionId !== selectedSessionId) return;
     pendingComposerFillRef.current = undefined;
     const restored = snapshotFromTextAndImages(pending.fill.text ?? "", pending.fill.images);
-    commitDraft(restored);
-    composerInputRef.current?.setSnapshot(restored);
+    replaceDraft(restored);
     setComposerError(undefined);
     queueMicrotask(() => composerInputRef.current?.focus());
   }, [selectedSessionId]);
@@ -3788,7 +3808,20 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   const submittedPromptTitle = submittedPrompt !== undefined && submittedPrompt.sessionId === snapshot?.sessionId
     ? submittedPrompt.title
     : undefined;
-  const rosterAgents = viewedAgents ?? snapshot?.agents;
+  const rosterAgents = viewedAgents ?? (selectedSessionId === undefined || selectedSessionId === snapshot?.sessionId ? snapshot?.agents : undefined);
+  const agentParentSessionId = preview ? `preview:${previewThreadId ?? "current"}` : selectedSessionId ?? snapshot?.sessionId;
+  const agentScope = JSON.stringify([executionTarget.id, workspaceId, agentParentSessionId, preview]);
+  const recentAgentPanel = agentDockLayout.lastAgentPanel;
+  const recentAgent = recentAgentPanel ? agentDockLayout.agentPanels[recentAgentPanel] : undefined;
+  const inspectTarget = recentAgent?.scope === agentScope && recentAgentPanel && locatePanel(agentDockLayout, recentAgentPanel) ? recentAgent.target : null;
+  const dockAgents = useMemo(() => preview ? PREVIEW_DOCK_AGENTS : rosterAgents ?? [], [preview, rosterAgents]);
+  const openedAgentIds = Object.entries(agentDockLayout.agentPanels).filter(([id, descriptor]) => descriptor.scope === agentScope && locatePanel(agentDockLayout, id as PanelId)).map(([, descriptor]) => descriptor.target.agentId);
+  const openAgentDetail = useCallback((target: SubagentHubTarget) => {
+    const agent = dockAgents.find(item => item.agentId === target.agentId);
+    dock.store.dispatch({ type: "agent-open", panel: agentPanelId(agentScope, target.agentId), descriptor: { scope: agentScope, target: { ...target,
+      ...(agent?.resolvedModel === undefined ? {} : { resolvedModel: agent.resolvedModel }),
+      ...(agentParentSessionId === undefined ? {} : { parentSessionId: agentParentSessionId }) } } });
+  }, [agentScope, agentParentSessionId, dock.store, dockAgents]);
   const connection = state.clientState?.connection;
   const runtime = connection?.runtime ?? state.bootstrap?.runtime;
   const commands = state.clientState?.commands ?? {};
@@ -3844,6 +3877,30 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   };
   const conversationClient = useMemo(() => asConversationClient(client), [client]);
   const runtimeConnected = runtime?.status === "connected";
+  // The viewed chat owns the browser pages, matching the dock layout's scope.
+  const browserChatId = preview ? previewThreadId : selectedSessionId ?? snapshot?.sessionId;
+  const insertBrowserReferences = useCallback((references: BrowserElementReference[]) => {
+    revealMainWindow(); onRoute("workbench"); setComposerExpanded(true);
+    for (const element of references) {
+      const reference = browserReferenceSnapshot(element);
+      composerInputRef.current?.insertChip({ kind: "browser", label: reference.title, reference });
+      if (element.screenshot) composerInputRef.current?.insertChip({ kind: "image", label: element.tagName, image: { type: "image", mimeType: element.screenshot.mimeType, data: element.screenshot.data } });
+    }
+    composerInputRef.current?.focus();
+  }, [onRoute]);
+  const agentRosterSource = preview ? "live" : selectedSessionId !== undefined && snapshot?.sessionId !== undefined && selectedSessionId !== snapshot.sessionId ? "history" : !runtimeConnected || connection?.resyncRequired ? "offline" : "live";
+  const openAgentFromCatalog = useCallback((agentId: string) => {
+    const agent = dockAgents.find(item => item.agentId === agentId);
+    openAgentDetail({ agentId, ...(agent?.displayName === undefined ? {} : { displayName: agent.displayName }), ...(agent?.assignment === undefined ? {} : { task: agent.assignment }) });
+  }, [dockAgents, openAgentDetail]);
+  useLayoutEffect(() => {
+    const zh = resolvedLanguage === "zh";
+    dock.setAgentCatalog({ scope: agentScope, open: openAgentFromCatalog, entries: dockAgents.filter(agent => agent.kind !== "main").map(agent => {
+      const presentation = agentPresentation(agent, preview, zh);
+      return { agentId: agent.agentId, name: agent.displayName, model: `${zh ? "模型" : "Model"}: ${presentation.model ?? presentation.modelLabel}`,
+        status: presentation.status, tone: presentation.tone, stale: agentRosterSource !== "live" };
+    }) });
+  }, [dock.setAgentCatalog, agentScope, dockAgents, openAgentFromCatalog, preview, resolvedLanguage, agentRosterSource]);
   // A resident session is activated asynchronously after history selection.
   // Do not start an archive read for it only to throw that work away when the
   // live epoch arrives a moment later.
@@ -3939,6 +3996,28 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   }, [convo.state.notices]);
   /* ConversationPane 内的 minimap 与 transcript 共享同一 scroller。 */
   const convoScrollerRef = useRef<HTMLElement | null>(null);
+  const computerApprovalRef = useRef<HTMLDivElement>(null);
+  const [computerFrameIntent, setComputerFrameIntent] = useState<ComputerFrameIntent>();
+  const computerSessionId = selectedSessionId ?? snapshot?.sessionId;
+  const computerScopeKey = JSON.stringify([executionTarget.id, executionTarget.syncRevision, connection?.authorityEpoch, connection?.runtimeEpoch ?? snapshot?.runtimeEpoch]);
+  const openComputerFrame = useCallback((intent: Omit<ComputerFrameIntent, "id">) => {
+    setComputerFrameIntent({ ...intent, id: crypto.randomUUID() });
+    // Open restores the user's existing Dock location; never force a move to the right rail.
+    dock.store.dispatch({ type: "open", panel: "computer" });
+  }, [dock.store]);
+  useEffect(() => { setComputerFrameIntent(undefined); }, [computerSessionId, computerScopeKey]);
+  const revealComputerAction = async (action?: { sessionId: string; toolCallId?: string; agentId?: string }) => {
+    onRoute("workbench");
+    if (!action) { composerInputRef.current?.focus(); return true; }
+    if (!action.toolCallId) return false;
+    if (!action.agentId && action.sessionId === computerSessionId) return revealConversationTarget(convoScrollerRef.current, { toolCallId: action.toolCallId });
+    const child = action.agentId;
+    if (!child) return false;
+    openAgentDetail({ agentId: child });
+    await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
+    const host = dock.hosts.get(agentPanelId(agentScope, child));
+    return revealConversationTarget(host.element.querySelector<HTMLElement>(".sa-inspect-scroll"), { toolCallId: action.toolCallId });
+  };
   const welcomeGate = {
     preview,
     compacting: compactingNow,
@@ -3950,13 +4029,19 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     ...(selectedSessionId === undefined ? {} : { selectedSessionId }),
   };
   const isNewConversation = isNewConversationSurface(welcomeGate);
+  /* 项目 / 分支 / 执行位置 / 变更统计条只属于「新对话且还没发送」的界面；
+     已开始的对话整条不显示（项目与分支在顶栏里）。 */
+  const showContextStrip = isNewConversation && !composerSubmitted;
   const showWelcome = shouldShowConversationWelcome(welcomeGate);
   /* 在屏面的欢迎态：由 ConversationPane 上报（leaving 期间保留旧屏）。壳层布局类
      跟它走，避免切换瞬间 minimap 占宽把还在淡出的欢迎页向左顶。 */
   const [surfaceWelcome, setSurfaceWelcome] = useState(showWelcome);
   const readingColumnRef = useRef<HTMLDivElement>(null);
+  const bottomRevealRef = useRef<HTMLButtonElement>(null);
+  const conversationWorkspace = useConversationWorkspace();
   const conversationWidth = useConversationWidth();
   useReadingColumn(readingColumnRef, conversationWidth, surfaceWelcome);
+  useBottomToggleClearance(readingColumnRef, bottomRevealRef, !mdi || mdi.active, conversationWorkspace?.slots.bottomReveal);
   const [jumpPill, setJumpPill] = useState<{ visible: boolean; jumpToLatest: () => void } | undefined>(undefined);
   const jumpPillRef = useRef<{ visible: boolean; jumpToLatest: () => void } | undefined>(undefined);
   const jumpToLatestSlot = useCallback((slot: { visible: boolean; jumpToLatest: () => void }) => {
@@ -3965,7 +4050,6 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     jumpPillRef.current = slot;
     setJumpPill(slot);
   }, []);
-  const showContextStrip = isNewConversation && !composerSubmitted;
   const taskProgress = useMemo(() => {
     if (preview) {
       if (isNewConversation) return { todos: [], files: [] };
@@ -4006,6 +4090,8 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   const localBranches = useMemo(() => branchListState.branches.filter((branch) => !branch.remote), [branchListState.branches]);
   const remoteBranches = useMemo(() => branchListState.branches.filter((branch) => branch.remote), [branchListState.branches]);
   const activePreviewProject = preview ? findPreviewProject(previewProjectId ?? "") : undefined;
+  const gitScope = `${preview ? "preview" : "real"}:${executionTarget.id ?? "local"}:${preview ? previewProjectId ?? "none" : activeWorkspace?.workspaceId ?? "none"}`;
+  const gitSharedWorkspaceId = preview ? `preview-${previewProjectId ?? "none"}` as WorkspaceId : activeWorkspace?.workspaceId;
   const contextProjectName = preview
     ? (previewCreatedProject?.name ?? activePreviewProject?.name ?? "未选择项目")
     : (activeWorkspace?.name ?? "未选择项目");
@@ -4028,7 +4114,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     const name = createProjectName.trim();
     setCreateProjectError(undefined);
     if (preview) {
-      setPreviewCreatedProject({ id: `preview-created-${Date.now()}`, name: name || "演示新项目" });
+      setPreviewCreatedProject({ id: `preview-created-${Date.now()}`, name: name || (marks ? "演示新项目" : "新项目") });
       setCreateProjectOpen(false);
       return;
     }
@@ -4216,6 +4302,13 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     }
   }, [can, client, onBranchedSession, onSessionTitleMaybeChanged, pickPlanSaveTarget]);
   const commandRows = useMemo(() => Object.values(commands).slice(-20).reverse(), [commands]);
+  // The bottom dock's two ledgers read demo fixtures while preview is on, so a
+  // reviewer sees the real row types, counts and statuses without a Runtime.
+  const ledgerCommands = useMemo<readonly LedgerCommandRow[]>(
+    () => preview ? PREVIEW_LEDGER_COMMANDS : commandRows.map(toLedgerCommand),
+    [preview, commandRows],
+  );
+  const ledgerEvents: readonly ShellEventLogEntry[] = preview ? PREVIEW_SHELL_EVENTS : state.events;
   const snapshotReady = snapshot !== undefined;
   // A fresh-draft surface (`selectedSessionId === undefined`) does not own the
   // Runtime snapshot until its own `session.create` lands: until then the
@@ -4231,7 +4324,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (!workbenchVisible || !composerInsertion || composerInsertion.owner !== composerOwner || !composerInputRef.current) return;
     const current = composerInputRef.current.getSnapshot();
     const addition = (current.doc.nodes.length ? "\n\n" : "") + composerInsertion.text;
-    composerInputRef.current.setSnapshot(snapshotFromDoc({ nodes: [...current.doc.nodes, { type: "text", value: addition }] }));
+    replaceDraft(snapshotFromDoc({ nodes: [...current.doc.nodes, { type: "text", value: addition }] }));
     composerInputRef.current.focus();
     onComposerInsertionApplied?.();
   }, [composerInsertion, composerOwner, onComposerInsertionApplied, workbenchVisible]);
@@ -4653,7 +4746,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     !sending &&
     sessionCreating !== true &&
     promptTargetReady &&
-    can("core.prompt");
+    (can("core.prompt") || (!!mdi && !runtimeConnected && selectedSessionId !== undefined && selectedThreadId !== undefined));
   const promptEnabled = composerPromptEnabled({
     textReady,
     sending,
@@ -4695,15 +4788,13 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     const pending = convo.state.pendingUsers.find((entry) => entry.requestId === requestId);
     if (!pending) return;
     const restored = pending.doc !== undefined ? snapshotFromDoc(pending.doc) : snapshotFromText(pending.draft);
-    commitDraft(restored);
-    composerInputRef.current?.setSnapshot(restored);
+    replaceDraft(restored);
     setComposerError(undefined);
     convo.dropPending(requestId);
   };
   const applyComposerFill = (fill: UserMessageEditorFill) => {
     const restored = snapshotFromTextAndImages(fill.text ?? "", fill.images);
-    commitDraft(restored);
-    composerInputRef.current?.setSnapshot(restored);
+    replaceDraft(restored);
     setComposerError(undefined);
     queueMicrotask(() => composerInputRef.current?.focus());
   };
@@ -4878,7 +4969,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   const continueTurn = () => {
     if (!continueEnabled) return;
     if (preview) {
-      setStatusToast("预览模式：继续仅演示，不会调用 Runtime");
+      if (marks) setStatusToast("预览模式：继续仅演示，不会调用 Runtime");
       return;
     }
     if (!can("core.continue")) {
@@ -4924,12 +5015,38 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
         pendingComposerFillRef.current = { sessionId, fill };
       },
       clearQueued: clearTreeQueued,
-      onPreviewDone: () => setStatusToast("演示：已从这条消息新建会话（未调用 Host）"),
+      onPreviewDone: () => { if (marks) setStatusToast("演示：已从这条消息新建会话（未调用 Host）"); },
     });
   };
   const promptInputOf = (payload: ComposerSnapshot): { text: string; images?: PromptImageInput[] } => {
     const text = injectMagicKeyword(payload.text.trim(), magicKeyword);
     return payload.images.length === 0 ? { text } : { text, images: [...payload.images] };
+  };
+  const prepareDictationSession = async (signal: AbortSignal): Promise<string> => {
+    const expected = selectedTargetRef.current;
+    signal.throwIfAborted();
+    if (executionTarget.id) throw new Error("远程工作区暂不支持本机听写 / Local dictation is unavailable for remote workspaces");
+    let readySessionId: SessionId | undefined;
+    if (expected.selectedSessionId === undefined) {
+      if (!snapshot) ensureNewSession?.();
+      const ready = await waitForNewSession?.();
+      signal.throwIfAborted();
+      if (ready && !ready.ok) throw new Error(ready.error);
+      readySessionId = ready?.sessionId;
+    }
+    if (worktreeWait.current) await worktreeWait.current.promise;
+    signal.throwIfAborted();
+    const latest = client.getState?.()?.entities.snapshot;
+    await ensureSelectedSessionActive(client, {
+      ...((readySessionId ?? latest?.sessionId) ? { activeSessionId: (readySessionId ?? latest!.sessionId) as SessionId } : {}),
+      ...(expected.selectedSessionId ? { selectedSessionId: expected.selectedSessionId as SessionId } : {}),
+      ...(expected.selectedThreadId ? { selectedThreadId: expected.selectedThreadId } : {}),
+    });
+    signal.throwIfAborted();
+    if (selectedTargetRef.current.selectedSessionId !== expected.selectedSessionId || selectedTargetRef.current.selectedThreadId !== expected.selectedThreadId) throw new Error("听写准备期间已切换会话 / The dictation target changed");
+    const id = expected.selectedSessionId ?? readySessionId ?? client.getState?.()?.entities.snapshot?.sessionId;
+    if (!id) throw new Error("没有可用于听写的会话 / No dictation session is ready");
+    return id;
   };
   // sendPrompt 与排队 flush 共用的发送路径。失败时置 composerError 并返回 false，
   // 草稿恢复方式由调用方决定（输入框草稿回填 vs 排队条目回队）。
@@ -4948,7 +5065,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
           setComposerError("当前回合进行中，斜杠指令请等结束后再发。");
           return false;
         }
-        return await runSlashCommand(plan.command, plan.args);
+        return await runSlashCommand(plan.command, plan.args, payload.images);
       }
       if (plan.kind === "apply-then-prompt") {
         for (const step of plan.apply) {
@@ -5081,6 +5198,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     // A pending create has no queue owner yet. Keep the second draft in the
     // editor until the first dispatch completes, including same-frame Enter.
     if (promptDispatchGate.busy && !composerRunning) return;
+    if (await composerInputRef.current?.waitForAttachments?.() === false) return;
     const payload = composerInputRef.current?.getSnapshot() ?? draftLive.current;
     // OMP 18.11: typing while a tool approval waits denies that call and steers the turn.
     if (
@@ -5097,23 +5215,21 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
       enqueueDraft();
       return;
     }
-    if (!promptEnabled && composerSlashExecute(payload, slashCatalog) === undefined) return;
+    const ready = composerPromptEnabled({ textReady: !snapshotIsEmpty(payload), sending, running: composerRunning, pendingInteraction: pendingInteraction !== null, promptChannelReady, sessionCreating, newConversation: !preview && isNewConversation });
+    if (!ready && composerSlashExecute(payload, slashCatalog) === undefined) return;
     setComposerError(undefined);
-    composerInputRef.current?.clear();
-    commitDraft(emptySnapshot());
+    replaceDraft(emptySnapshot());
     if (!preview && selectedSessionId === undefined && snapshot === undefined) {
       ensureNewSession?.();
     }
     if (!(await dispatchPrompt(payload, { waitForReady: waitForNewSession !== undefined }))) {
-      commitDraft(payload);
-      composerInputRef.current?.setSnapshot(payload);
+      replaceDraft(payload);
     }
   };
   const steerPastApproval = async (payload: ComposerSnapshot) => {
     if (sending) return;
     setComposerError(undefined);
-    composerInputRef.current?.clear();
-    commitDraft(emptySnapshot());
+    replaceDraft(emptySnapshot());
     setSending(true);
     try {
       if (!(await respond("cancel"))) throw new Error("拒绝审批失败 / Could not deny the approval");
@@ -5129,8 +5245,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
       });
       await waitReceipt(client, handle.requestId);
     } catch (error) {
-      commitDraft(payload);
-      composerInputRef.current?.setSnapshot(payload);
+      replaceDraft(payload);
       setComposerError(hostErrorMessage(error, "纠偏失败"));
     } finally {
       setSending(false);
@@ -5140,11 +5255,9 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (!followUpEnabled || promptDispatchGate.busy) return;
     setComposerError(undefined);
     const payload = composerInputRef.current?.getSnapshot() ?? draftLive.current;
-    composerInputRef.current?.clear();
-    commitDraft(emptySnapshot());
+    replaceDraft(emptySnapshot());
     if (!(await dispatchPrompt(payload, { asFollowUp: true }))) {
-      commitDraft(payload);
-      composerInputRef.current?.setSnapshot(payload);
+      replaceDraft(payload);
     }
   };
   const takeComposerSnapshot = (): ComposerSnapshot => composerInputRef.current?.getSnapshot() ?? draftLive.current;
@@ -5171,8 +5284,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (preview) setPreviewQueue([...result.queue]);
     else setQueuedMessages([...result.queue]);
     setQueueEdit(result.editing);
-    commitDraft(result.composer);
-    composerInputRef.current?.setSnapshot(result.composer);
+    replaceDraft(result.composer);
     setComposerError(undefined);
   };
   const commitQueuedEdit = () => {
@@ -5199,8 +5311,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (preview) {
       previewQueueSeqRef.current += 1;
       setPreviewQueue((queue) => [...queue, queueEntryOf(payload, previewQueueSeqRef.current)]);
-      composerInputRef.current?.clear();
-      commitDraft(emptySnapshot());
+      replaceDraft(emptySnapshot());
       setComposerError(undefined);
       return;
     }
@@ -5328,7 +5439,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     onOpenChanges();
   }
   function openSlashUi(ui: SlashNativeUi): void {
-    if (ui === "context-viewer") { setContextInspectorOpen(true); return; }
+    if (ui === "context-viewer") { openContextInspector(); return; }
     if (ui === "local-files") { setLocalFilesOpen(true); return; }
     if (ui === "model-picker") {
       setModelMenuNonce((value) => value + 1);
@@ -5377,7 +5488,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     window.addEventListener("omp-studio-slash-ui", receive);
     return () => window.removeEventListener("omp-studio-slash-ui", receive);
   }, []);
-  async function runSlashCommand(command: StudioSlashCommand, args: string): Promise<boolean> {
+  async function runSlashCommand(command: StudioSlashCommand, args: string, images?: readonly PromptImageInput[]): Promise<boolean> {
     if (command.name === "local") { setLocalFileName(args.trim()); setLocalFilesOpen(true); return true; }
     if (command.availability === "disabled") {
       setComposerError(command.disabledReason ?? `/${command.name} 暂不可用`);
@@ -5396,7 +5507,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     if (command.side && execute.kind === "invoke") {
       dock.store.dispatch({ type: "open", panel: "btw" });
       if (preview) { onBtwPreviewAsk(); return true; }
-      return btwSession.ask(`/${command.name}${args ? ` ${args}` : ""}`, true, undefined, { name: command.name, arguments: args });
+      return btwSession.ask(`/${command.name}${args ? ` ${args}` : ""}`, true, images ? [...images] : undefined, { name: command.name, arguments: args });
     }
     /* BTW 不走通用 run()：ask 的回执带着 branchToken，那是唯一能拿到它的地方，
        而 run() 只回报成败。同时把浮窗唤起来，placement 保持上次的偏好。
@@ -5409,10 +5520,10 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
         if (question.length === 0) return true;
       }
       if (question.length === 0) { await btwSession.refreshHistory?.(); return true; }
-      return await btwSession.ask(question, true);
+      return await btwSession.ask(question, true, images ? [...images] : undefined);
     }
     if (preview) {
-      setStatusToast(`演示：/${command.name}${args ? ` ${args}` : ""}`);
+      if (marks) setStatusToast(`演示：/${command.name}${args ? ` ${args}` : ""}`);
       return true;
     }
     if (execute.kind === "typed") {
@@ -5457,7 +5568,12 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
     return false;
   }
   return (
-    <>
+    <ComputerLinkProvider onOpen={openComputerFrame}>
+    <SubagentHoverProvider scope={JSON.stringify([agentScope, viewIdentity, snapshot?.runtimeEpoch])}
+      enabled={workbenchVisible && !sessionCreating} client={conversationClient} agents={dockAgents}
+      runtimeConnected={runtimeConnected && !connection?.resyncRequired}
+      {...(agentParentSessionId === undefined ? {} : { parentSessionId: agentParentSessionId as SessionId })}
+      {...(snapshot?.sessionId === undefined ? {} : { liveSessionId: snapshot.sessionId })}>
       {remotePlanSave ? <div className="modal-backdrop" onKeyDown={event => { if (event.key === "Escape") { remotePlanSave.resolve(null); setRemotePlanSave(undefined); } }}>
         <section className="modal" role="dialog" aria-modal="true" aria-label="保存远端计划">
           <form onSubmit={event => { event.preventDefault(); remotePlanSave.resolve(remotePlanPath.trim()); setRemotePlanSave(undefined); }}>
@@ -5467,12 +5583,19 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
           </form>
         </section>
       </div> : null}
-      <ContextInspector client={client} sessionId={snapshot?.sessionId} visible={contextInspectorOpen} onClose={() => setContextInspectorOpen(false)} />
       {localFilesOpen ? <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="local://"><button autoFocus className="btn small ghost" onClick={() => setLocalFilesOpen(false)}>{t("common.close")}</button><LocalFilesPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialName={localFileName} /></section></div> : null}
       <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={state.route === "workbench"} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
-      <div className={`workbench${sideOpen ? " split-right" : ""}`} id="workbench">
-        <div ref={readingColumnRef} className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`}>
-          {railMode === "compact" ? <DockRail mode="compact" /> : null}
+      <div className={`workbench${!mdi && sideOpen ? " split-right" : ""}`} id="workbench">
+        <div ref={readingColumnRef} className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`} inert={state.loading}>
+          {state.loading && <div className="cw-content-loading" role="status"><span className="spinner" />正在打开对话…</div>}
+          {!state.loading && <RuntimeLossBanner
+            {...(runtime === undefined ? {} : { runtime })}
+            client={client}
+            preview={preview}
+            floating
+            onOpenDiagnostics={() => onRoute("diagnostics")}
+          />}
+          <DockRail mode={railMode} />
           <DockCapsules />
           <SessionModelRecovery demo={previewThreadId === "t5"} client={client} currentSessionId={snapshot?.sessionId} targetSessionId={selectedSessionId} threadId={selectedThreadId} available={runtimeConnected && !connection?.resyncRequired} capabilities={capabilities} onOpenModels={() => onRoute("model-config")} />
           <ConversationPane
@@ -5492,10 +5615,8 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
             compacting={compactingNow}
             {...(preview ? {} : { onRetryTurn: retryLastTurn })}
             {...(preview || retryTurnDisabledReason === undefined ? {} : { retryTurnDisabledReason })}
-            onInspectSubagent={(target) => {
-              setInspectTarget(target);
-            }}
-            {...(preview || rosterAgents === undefined ? {} : { liveAgents: rosterAgents })}
+            onInspectSubagent={openAgentDetail}
+            liveAgents={dockAgents}
             {...(activity === undefined ? {} : { activity })}
             {...(showWelcome && optimisticPrompt === undefined && convo.state.pendingUsers.length === 0 ? { forceWelcome: true } : {})}
             {...(showWelcome ? {
@@ -5511,12 +5632,11 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                   {...(onSelectPreviewThread === undefined ? {} : { onSelectPreviewThread })}
                   onOpenHistory={() => onRoute("history")}
                   runtimeConnected={runtimeConnected}
-                  onOpenDiagnostics={() => onRoute("diagnostics")}
                 />
               ),
             } : {})}
           />
-          <div className="composer-region">
+          <div className="composer-region" ref={computerApprovalRef}>
             {/* 真实 pending Interaction 永远优先；预览关时 Plan Review 走 snapshot；预览开才用演示 Deck。 */}
             {deckInteraction ? (
               <InteractionDeck
@@ -5565,6 +5685,186 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                 onOpen={(path) => openChanges({ path })}
               />
             ) : null}
+            {createProjectOpen ? (
+              <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (!createProjectBusy) setCreateProjectOpen(false); }}>
+                <section className="modal create-project-modal" role="dialog" aria-modal="true" aria-labelledby="createProjectTitle" onMouseDown={(event) => event.stopPropagation()}>
+                  <div className="create-project-head">
+                    <div>
+                      <span className="create-project-kicker">WORKSPACE</span>
+                      <h2 id="createProjectTitle">{t("shell.createProject")}</h2>
+                    </div>
+                    <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={createProjectBusy} onClick={() => setCreateProjectOpen(false)}><Icon name="x" /></button>
+                  </div>
+                  <div className="create-project-body">
+                    <label className="create-project-name">
+                      <span className="sr-only">{t("shell.projectNamePlaceholder")}</span>
+                      <Icon name="folder-open" />
+                      <input autoFocus value={createProjectName} placeholder={t("shell.projectNamePlaceholder")} maxLength={80} onChange={(event) => setCreateProjectName(event.target.value)} />
+                    </label>
+                    <div className="create-project-label">{t("shell.sourceFolder")}</div>
+                    <button
+                      type="button"
+                      className="create-project-folder"
+                      disabled={createProjectBusy}
+                      onClick={() => void createProject()}
+                    >
+                      <span className="create-folder-icon">
+                        {createProjectBusy ? <span className="spinner" aria-hidden="true" /> : <Icon name="folder-open" />}
+                      </span>
+                      <span className="create-folder-copy">
+                        <b>{createProjectBusy ? t("shell.openingFolderPicker") : t("shell.selectProjectFolder")}</b>
+                        <span>{preview && marks ? t("shell.createProjectDemoTip") : t("shell.createProjectFolderTip")}</span>
+                      </span>
+                      {preview && marks ? <span className="chip purple xs">演示</span> : <Icon name="chevron-r" extra="sm" />}
+                    </button>
+                    {createProjectError ? <div className="create-project-error" role="alert"><Icon name="alert" extra="sm" />{createProjectError}</div> : null}
+                  </div>
+                  <div className="create-project-foot">
+                    <button type="button" className="btn outline" disabled={createProjectBusy} onClick={() => setCreateProjectOpen(false)}>{t("common.cancel")}</button>
+                    <button type="button" className="btn primary" disabled={createProjectBusy} onClick={() => void createProject()}>
+                      {createProjectBusy ? <><span className="spinner" aria-hidden="true" />{t("shell.creating")}</> : t("shell.selectFolderAndCreate")}
+                    </button>
+                  </div>
+                </section>
+              </div>
+            ) : null}
+            {createBranchOpen ? (
+              <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (!createBranchBusy) setCreateBranchOpen(false); }}>
+                <section className="modal create-project-modal create-branch-modal" role="dialog" aria-modal="true" aria-labelledby="createBranchTitle" onMouseDown={(event) => event.stopPropagation()}>
+                  <div className="create-project-head">
+                    <div>
+                      <span className="create-project-kicker">NEW BRANCH</span>
+                      <h2 id="createBranchTitle">{t("shell.createBranchTitle")}</h2>
+                      <p className="create-branch-sub">{t("shell.createBranchSub")}</p>
+                    </div>
+                    <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={createBranchBusy} onClick={() => setCreateBranchOpen(false)}><Icon name="x" /></button>
+                  </div>
+                  <div className="create-project-body">
+                    <label className="create-project-name">
+                      <span className="sr-only">{t("shell.branch")}</span>
+                      <Icon name="branch" />
+                      <input
+                        autoFocus
+                        value={createBranchName}
+                        placeholder={t("shell.branchNamePlaceholder")}
+                        maxLength={120}
+                        aria-describedby="createBranchHint"
+                        onChange={(event) => setCreateBranchName(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                          if (!createBranchBusy && createBranchName.trim()) {
+                            event.preventDefault();
+                            void createBranch();
+                          }
+                        }}
+                      />
+                    </label>
+                    <p className="create-branch-hint" id="createBranchHint">{t("shell.createBranchHint")}</p>
+                    {createBranchError ? <div className="create-project-error" role="alert"><Icon name="alert" extra="sm" />{createBranchError}</div> : null}
+                  </div>
+                  <div className="create-project-foot">
+                    <button type="button" className="btn outline" disabled={createBranchBusy} onClick={() => setCreateBranchOpen(false)}>{t("common.cancel")}</button>
+                    <button type="button" className="btn primary" disabled={!createBranchName.trim() || createBranchBusy} onClick={() => void createBranch()}>
+                      {createBranchBusy ? <><span className="spinner" aria-hidden="true" />{t("shell.creating")}</> : t("shell.createAndSwitch")}
+                    </button>
+                  </div>
+                </section>
+              </div>
+            ) : null}
+            {switchBlock ? (
+              <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (!switchCommitBusy) cancelSwitchBlock(); }}>
+                <section className="modal create-project-modal create-branch-modal switch-block-modal" role="dialog" aria-modal="true" aria-labelledby="switchBlockTitle" onMouseDown={(event) => event.stopPropagation()}>
+                  <div className="create-project-head">
+                    <div>
+                      <span className="create-project-kicker">SWITCH BRANCH</span>
+                      <h2 id="switchBlockTitle">{t("shell.switchBlockTitle", { branch: switchBlock.branch })}</h2>
+                      <p className="create-branch-sub">{t("shell.switchBlockSub")}</p>
+                    </div>
+                    <button type="button" className="icon-btn" aria-label="关闭" disabled={switchCommitBusy} onClick={cancelSwitchBlock}><Icon name="x" /></button>
+                  </div>
+                  <div className="create-project-body">
+                    <ul className="switch-block-files" aria-label={t("shell.switchBlockFilesAria")}>
+                      {switchBlock.files.map((file) => (
+                        <li key={file.path}>
+                          <span className="mono">{file.path}</span>
+                          {file.insertions !== undefined && file.deletions !== undefined ? (
+                            <span className="ctx-diffstat mono" data-tip={t("shell.uncommitted")}>
+                              <b className="ds-add">+{formatDiffCount(file.insertions)}</b>
+                              <b className="ds-del">-{formatDiffCount(file.deletions)}</b>
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                    <label className="create-project-name">
+                      <span className="sr-only">{t("shell.createCommit")}</span>
+                      <Icon name="commit" />
+                      <input
+                        autoFocus
+                        value={switchCommitMessage}
+                        placeholder={t("shell.switchCommitPlaceholder")}
+                        maxLength={200}
+                        aria-describedby="switchBlockHint"
+                        onChange={(event) => setSwitchCommitMessage(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                          if (!switchCommitBusy && switchCommitMessage.trim()) {
+                            event.preventDefault();
+                            void submitSwitchCommit();
+                          }
+                        }}
+                      />
+                    </label>
+                    <p className="create-branch-hint" id="switchBlockHint">{t("shell.switchBlockHint", { count: switchBlock.files.length })}</p>
+                    {switchCommitError ? <div className="create-project-error" role="alert"><Icon name="alert" extra="sm" />{switchCommitError}</div> : null}
+                  </div>
+                  <div className="create-project-foot">
+                    <button type="button" className="btn outline" disabled={switchCommitBusy} onClick={cancelSwitchBlock}>{t("common.cancel")}</button>
+                    <button type="button" className="btn primary" disabled={!switchCommitMessage.trim() || switchCommitBusy} onClick={() => void submitSwitchCommit()}>
+                      {switchCommitBusy ? <><span className="spinner" aria-hidden="true" />{t("shell.committing")}</> : t("shell.commitAndSwitch")}
+                    </button>
+                  </div>
+                </section>
+              </div>
+            ) : null}
+            <div className="composer-queues">
+            {(preview || can("session.queue.get")) ? (<RuntimeQueueBar client={client} sessionId={snapshot?.sessionId} capabilities={capabilities} available={runtimeConnected && executionMatches && !connection?.resyncRequired} pending={snapshot?.pendingMessages ?? 0} running={Boolean(snapshot?.isStreaming)} showDemo={previewThreadId === "t1"} />) : (!preview ? <RuntimeQueue client={client} sessionId={composerOwner} available={can("session.queue.list")} running={Boolean(snapshot?.isStreaming)} pending={snapshot?.pendingMessages ?? 0} hasDraft={() => !snapshotIsEmpty(takeComposerSnapshot())} onRecover={(recovered, owner) => {
+              if (owner !== composerOwner) return;
+              const current = takeComposerSnapshot();
+              const merged = snapshotIsEmpty(current) ? recovered : {
+                text: current.text + "\n" + recovered.text,
+                images: [...current.images, ...recovered.images],
+                doc: { nodes: [...current.doc.nodes, { type: "text" as const, value: "\n" }, ...recovered.doc.nodes] },
+              };
+              replaceDraft(merged); composerInputRef.current?.focus();
+            }} /> : null)}
+            <MessageQueueBar
+              messages={sessionQueue}
+              running={preview ? previewThreadId === "t1" : running}
+              sendEnabled={preview || (running ? steerNowEnabled : promptChannelReady)}
+              {...(preview ? { demo: true } : {})}
+              {...(queueEdit === undefined ? {} : { editingId: queueEdit.entryId })}
+              {...(jumpPill?.visible && sessionQueue.length > 0 ? {
+                headerSlot: (
+                  <button
+                    type="button"
+                    className="new-content-pill queue-jump-latest"
+                    onClick={jumpPill.jumpToLatest}
+                    aria-label="回到最新"
+                    data-tip="回到最新"
+                  >
+                    <Icon name="chevron-d" />
+                  </button>
+                ),
+              } : {})}
+              onEdit={editQueuedMessage}
+              onSendNow={(entry) => void sendQueuedNow(entry)}
+              onRemove={removeQueuedMessage}
+            />
+            </div>
+            {/* 项目 / 分支 / 执行位置 / Git 增删统计：只给还没发送过消息的新对话，贴在
+                Composer 上沿。已开始的对话整条不显示——项目与分支在顶栏里，这一条
+                只服务于「开新对话前先确认上下文」。 */}
             {showContextStrip ? <div className="ctx-strip" role="status" aria-live="polite">
               <span className="ctx-project-wrap">
                 <button
@@ -5598,7 +5898,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                       </label>
                       <div className="ctx-project-list">
                       {previewCreatedProject && previewCreatedProject.name.toLocaleLowerCase().includes(normalizedProjectQuery) ? (
-                        <MenuItem icon="folder-open" current hint={t("common.demo")}>{previewCreatedProject.name}</MenuItem>
+                        <MenuItem icon="folder-open" current {...(marks ? { hint: t("common.demo") } : {})}>{previewCreatedProject.name}</MenuItem>
                       ) : null}
                       {preview ? previewProjectOptions.map((project) => (
                         <MenuItem
@@ -5772,184 +6072,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                   <span>—</span>
                 )}
               </button>
-            </div> : <div className="ctx-strip execution-persistent"><ExecutionTargetPicker /></div>}
-            {createProjectOpen ? (
-              <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (!createProjectBusy) setCreateProjectOpen(false); }}>
-                <section className="modal create-project-modal" role="dialog" aria-modal="true" aria-labelledby="createProjectTitle" onMouseDown={(event) => event.stopPropagation()}>
-                  <div className="create-project-head">
-                    <div>
-                      <span className="create-project-kicker">WORKSPACE</span>
-                      <h2 id="createProjectTitle">{t("shell.createProject")}</h2>
-                    </div>
-                    <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={createProjectBusy} onClick={() => setCreateProjectOpen(false)}><Icon name="x" /></button>
-                  </div>
-                  <div className="create-project-body">
-                    <label className="create-project-name">
-                      <span className="sr-only">{t("shell.projectNamePlaceholder")}</span>
-                      <Icon name="folder-open" />
-                      <input autoFocus value={createProjectName} placeholder={t("shell.projectNamePlaceholder")} maxLength={80} onChange={(event) => setCreateProjectName(event.target.value)} />
-                    </label>
-                    <div className="create-project-label">{t("shell.sourceFolder")}</div>
-                    <button
-                      type="button"
-                      className="create-project-folder"
-                      disabled={createProjectBusy}
-                      onClick={() => void createProject()}
-                    >
-                      <span className="create-folder-icon">
-                        {createProjectBusy ? <span className="spinner" aria-hidden="true" /> : <Icon name="folder-open" />}
-                      </span>
-                      <span className="create-folder-copy">
-                        <b>{createProjectBusy ? t("shell.openingFolderPicker") : t("shell.selectProjectFolder")}</b>
-                        <span>{preview ? t("shell.createProjectDemoTip") : t("shell.createProjectFolderTip")}</span>
-                      </span>
-                      {preview ? <span className="chip purple xs">演示</span> : <Icon name="chevron-r" extra="sm" />}
-                    </button>
-                    {createProjectError ? <div className="create-project-error" role="alert"><Icon name="alert" extra="sm" />{createProjectError}</div> : null}
-                  </div>
-                  <div className="create-project-foot">
-                    <button type="button" className="btn outline" disabled={createProjectBusy} onClick={() => setCreateProjectOpen(false)}>{t("common.cancel")}</button>
-                    <button type="button" className="btn primary" disabled={createProjectBusy} onClick={() => void createProject()}>
-                      {createProjectBusy ? <><span className="spinner" aria-hidden="true" />{t("shell.creating")}</> : t("shell.selectFolderAndCreate")}
-                    </button>
-                  </div>
-                </section>
-              </div>
-            ) : null}
-            {createBranchOpen ? (
-              <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (!createBranchBusy) setCreateBranchOpen(false); }}>
-                <section className="modal create-project-modal create-branch-modal" role="dialog" aria-modal="true" aria-labelledby="createBranchTitle" onMouseDown={(event) => event.stopPropagation()}>
-                  <div className="create-project-head">
-                    <div>
-                      <span className="create-project-kicker">NEW BRANCH</span>
-                      <h2 id="createBranchTitle">{t("shell.createBranchTitle")}</h2>
-                      <p className="create-branch-sub">{t("shell.createBranchSub")}</p>
-                    </div>
-                    <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={createBranchBusy} onClick={() => setCreateBranchOpen(false)}><Icon name="x" /></button>
-                  </div>
-                  <div className="create-project-body">
-                    <label className="create-project-name">
-                      <span className="sr-only">{t("shell.branch")}</span>
-                      <Icon name="branch" />
-                      <input
-                        autoFocus
-                        value={createBranchName}
-                        placeholder={t("shell.branchNamePlaceholder")}
-                        maxLength={120}
-                        aria-describedby="createBranchHint"
-                        onChange={(event) => setCreateBranchName(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-                          if (!createBranchBusy && createBranchName.trim()) {
-                            event.preventDefault();
-                            void createBranch();
-                          }
-                        }}
-                      />
-                    </label>
-                    <p className="create-branch-hint" id="createBranchHint">{t("shell.createBranchHint")}</p>
-                    {createBranchError ? <div className="create-project-error" role="alert"><Icon name="alert" extra="sm" />{createBranchError}</div> : null}
-                  </div>
-                  <div className="create-project-foot">
-                    <button type="button" className="btn outline" disabled={createBranchBusy} onClick={() => setCreateBranchOpen(false)}>{t("common.cancel")}</button>
-                    <button type="button" className="btn primary" disabled={!createBranchName.trim() || createBranchBusy} onClick={() => void createBranch()}>
-                      {createBranchBusy ? <><span className="spinner" aria-hidden="true" />{t("shell.creating")}</> : t("shell.createAndSwitch")}
-                    </button>
-                  </div>
-                </section>
-              </div>
-            ) : null}
-            {switchBlock ? (
-              <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (!switchCommitBusy) cancelSwitchBlock(); }}>
-                <section className="modal create-project-modal create-branch-modal switch-block-modal" role="dialog" aria-modal="true" aria-labelledby="switchBlockTitle" onMouseDown={(event) => event.stopPropagation()}>
-                  <div className="create-project-head">
-                    <div>
-                      <span className="create-project-kicker">SWITCH BRANCH</span>
-                      <h2 id="switchBlockTitle">{t("shell.switchBlockTitle", { branch: switchBlock.branch })}</h2>
-                      <p className="create-branch-sub">{t("shell.switchBlockSub")}</p>
-                    </div>
-                    <button type="button" className="icon-btn" aria-label="关闭" disabled={switchCommitBusy} onClick={cancelSwitchBlock}><Icon name="x" /></button>
-                  </div>
-                  <div className="create-project-body">
-                    <ul className="switch-block-files" aria-label={t("shell.switchBlockFilesAria")}>
-                      {switchBlock.files.map((file) => (
-                        <li key={file.path}>
-                          <span className="mono">{file.path}</span>
-                          {file.insertions !== undefined && file.deletions !== undefined ? (
-                            <span className="ctx-diffstat mono" data-tip={t("shell.uncommitted")}>
-                              <b className="ds-add">+{formatDiffCount(file.insertions)}</b>
-                              <b className="ds-del">-{formatDiffCount(file.deletions)}</b>
-                            </span>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                    <label className="create-project-name">
-                      <span className="sr-only">{t("shell.createCommit")}</span>
-                      <Icon name="commit" />
-                      <input
-                        autoFocus
-                        value={switchCommitMessage}
-                        placeholder={t("shell.switchCommitPlaceholder")}
-                        maxLength={200}
-                        aria-describedby="switchBlockHint"
-                        onChange={(event) => setSwitchCommitMessage(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-                          if (!switchCommitBusy && switchCommitMessage.trim()) {
-                            event.preventDefault();
-                            void submitSwitchCommit();
-                          }
-                        }}
-                      />
-                    </label>
-                    <p className="create-branch-hint" id="switchBlockHint">{t("shell.switchBlockHint", { count: switchBlock.files.length })}</p>
-                    {switchCommitError ? <div className="create-project-error" role="alert"><Icon name="alert" extra="sm" />{switchCommitError}</div> : null}
-                  </div>
-                  <div className="create-project-foot">
-                    <button type="button" className="btn outline" disabled={switchCommitBusy} onClick={cancelSwitchBlock}>{t("common.cancel")}</button>
-                    <button type="button" className="btn primary" disabled={!switchCommitMessage.trim() || switchCommitBusy} onClick={() => void submitSwitchCommit()}>
-                      {switchCommitBusy ? <><span className="spinner" aria-hidden="true" />{t("shell.committing")}</> : t("shell.commitAndSwitch")}
-                    </button>
-                  </div>
-                </section>
-              </div>
-            ) : null}
-            <div className="composer-queues">
-            {(preview || can("session.queue.get")) ? (<RuntimeQueueBar client={client} sessionId={snapshot?.sessionId} capabilities={capabilities} available={runtimeConnected && executionMatches && !connection?.resyncRequired} pending={snapshot?.pendingMessages ?? 0} running={Boolean(snapshot?.isStreaming)} showDemo={previewThreadId === "t1"} />) : (!preview ? <RuntimeQueue client={client} sessionId={composerOwner} available={can("session.queue.list")} running={Boolean(snapshot?.isStreaming)} pending={snapshot?.pendingMessages ?? 0} hasDraft={() => !snapshotIsEmpty(takeComposerSnapshot())} onRecover={(recovered, owner) => {
-              if (owner !== composerOwner) return;
-              const current = takeComposerSnapshot();
-              const merged = snapshotIsEmpty(current) ? recovered : {
-                text: current.text + "\n" + recovered.text,
-                images: [...current.images, ...recovered.images],
-                doc: { nodes: [...current.doc.nodes, { type: "text" as const, value: "\n" }, ...recovered.doc.nodes] },
-              };
-              commitDraft(merged); composerInputRef.current?.setSnapshot(merged); composerInputRef.current?.focus();
-            }} /> : null)}
-            <MessageQueueBar
-              messages={sessionQueue}
-              running={preview ? previewThreadId === "t1" : running}
-              sendEnabled={preview || (running ? steerNowEnabled : promptChannelReady)}
-              {...(preview ? { demo: true } : {})}
-              {...(queueEdit === undefined ? {} : { editingId: queueEdit.entryId })}
-              {...(jumpPill?.visible && sessionQueue.length > 0 ? {
-                headerSlot: (
-                  <button
-                    type="button"
-                    className="new-content-pill queue-jump-latest"
-                    onClick={jumpPill.jumpToLatest}
-                    aria-label="回到最新"
-                    data-tip="回到最新"
-                  >
-                    <Icon name="chevron-d" />
-                  </button>
-                ),
-              } : {})}
-              onEdit={editQueuedMessage}
-              onSendNow={(entry) => void sendQueuedNow(entry)}
-              onRemove={removeQueuedMessage}
-            />
-            </div>
+            </div> : null}
             <div className={`composer${composerRunning ? ` running ${composerExpanded ? "expanded" : "compact"}` : ""}`} id="composer">
               {jumpPill?.visible && sessionQueue.length === 0 ? (
                 <button
@@ -5985,7 +6108,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                   if (owner !== undefined) onComposerDraftChange?.(owner, next);
                   // Keystrokes land in the live ref first; the render-visible
                   // `draft` follows only at a status boundary or a typing pause.
-                  publishDraft(next);
+                  publishDraft(next, applyingDraft.current);
                 }}
                 onSubmit={() => {
                   if (queueEdit !== undefined) {
@@ -6018,13 +6141,6 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                 }}
                 onError={setComposerError}
               />
-              <DictationControl client={client} sessionId={composerOwner} available={runtimeConnected && executionMatches && !worktreeGated} onText={text => {
-                const current = composerInputRef.current?.getSnapshot() ?? draftLive.current;
-                const next = snapshotFromDoc({ nodes: [...current.doc.nodes, { type: "text", value: `${current.text.trim() ? "\n" : ""}${text}` }] });
-                composerInputRef.current?.setSnapshot(next);
-                commitDraft(next);
-                if (composerOwner) onComposerDraftChange?.(composerOwner, next);
-              }} />
               <p className="sr-only" id="composerHint">{
                 queueEdit !== undefined
                   ? t("composer.editingQueuedMessageHint")
@@ -6050,17 +6166,15 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                 </div>
               ) : null}
               <div className="composer-bar" data-collapse="full" ref={composerBarRef}>
-                <div className="cb-group">
+                <div className="cb-group cb-shortcuts">
                   <button className="icon-btn small" data-tip={t("composer.attachFiles")} aria-label={t("composer.attachFilesAria")} onClick={() => { setComposerExpanded(true); composerInputRef.current?.openFilePicker(); }}><Icon name="attach" extra="sm" /></button>
                   <button className="icon-btn small" data-tip={t("composer.mention")} aria-label={t("composer.mentionAria")} onClick={() => { setComposerExpanded(true); composerInputRef.current?.openMention("@"); }}><Icon name="at" extra="sm" /></button>
                   <button className="icon-btn small" data-tip={t("composer.commands")} aria-label={t("composer.commands")} onClick={() => { setComposerExpanded(true); composerInputRef.current?.openCommandMenu(); }}><Icon name="slash" extra="sm" /></button>
-                  <button className="icon-btn small" data-tip={t("media.imageShortcut")} aria-label={t("media.imageShortcut")} onClick={() => { setMediaIntent("image"); onRoute("media"); }}><Icon name="image" extra="sm" /></button>
-                  <button className="icon-btn small" data-tip={t("media.audioShortcut")} aria-label={t("media.audioShortcut")} onClick={() => { setMediaIntent("transcription"); onRoute("media"); }}><Icon name="mic" extra="sm" /></button>
                 </div>
                 {queueEdit !== undefined ? (
                   <span className="pill-btn queue-edit" role="status">
                     <Icon name="pencil" extra="sm" />
-                    {t("composer.editQueued")}
+                    <span className="qe-label">{t("composer.editQueued")}</span>
                     <button
                       type="button"
                       className="qe-x"
@@ -6114,6 +6228,11 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                   }}
                 />
                 <ComposerModePicker
+                  composerActions={{
+                    onAttachFiles: () => { setComposerExpanded(true); composerInputRef.current?.openFilePicker(); },
+                    onMention: () => { setComposerExpanded(true); composerInputRef.current?.openMention("@"); },
+                    onCommands: () => { setComposerExpanded(true); composerInputRef.current?.openCommandMenu(); },
+                  }}
                   {...(preview || (can("session.speed.get") && can("session.speed.set")) ? { speedControl: <ComposerSpeedControl previewSelected={previewSpeeds[previewThreadId ?? "new"] ?? "normal"} onPreviewChange={value => setPreviewSpeeds(values => ({ ...values, [previewThreadId ?? "new"]: value }))} client={client} sessionId={snapshot?.sessionId} modelSelector={snapshot?.model?.selector} available={runtimeConnected && executionMatches && !connection?.resyncRequired} /> } : {})}
                   preview={preview}
                   {...(snapshot === undefined ? {} : { snapshot })}
@@ -6140,97 +6259,74 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                   openNonce={modelMenuNonce}
                 />
                 {!can("session.speed.get") ? <ServiceTierPicker client={client} sessionId={composerOwner} available={can("session.tier.get")} modelKey={JSON.stringify(snapshot?.model)} /> : null}
-                {/* 运行中且没有草稿时，发送位变停止；上一轮停在没有最终汇报的尾巴上时
-                    变播放键（空输入也能点，点了继续）；有草稿时保持"加入排队栏"，
-                    否则会吃掉流式期间唯一的点击排队入口。编辑排队时始终是写回。 */}
-                {composerRunning && !textReady && queueEdit === undefined ? (
-                  <button
-                    className="send-btn abort"
-                    disabled={!abortAllowed}
-                    onClick={() => {
-                      if (preview) return;
-                      void run("core.abort", {}).then((ok) => {
-                        if (ok) setAbortGeneration((generation) => generation + 1);
-                      });
-                    }}
-                    data-tip={t("composer.stop")}
-                    aria-label={t("composer.stopRunning")}
-                  >
-                    <Icon name="stop" extra="sm" />
-                  </button>
-                ) : continueSlot ? (
-                  <button
-                    className="send-btn"
-                    disabled={!continueEnabled}
-                    onClick={continueTurn}
-                    data-tip={continueEnabled ? t("composer.continueTurnAria") : retryTurnDisabledReason ?? t("composer.continueUnavailable")}
-                    aria-label={t("composer.continueTurnAria")}
-                  >
-                    <Icon name="play" extra="sm" />
-                  </button>
-                ) : (
-                  <button
-                    className="send-btn"
-                    disabled={queueEdit === undefined && !(promptEnabled || queueEnabled || slashExecuteReady || (preview && running) || (composerRunning && textReady))}
-                    onClick={() => {
-                      setComposerExpanded(true);
-                      if (queueEdit !== undefined) {
-                        commitQueuedEdit();
-                        return;
+                <div className="cb-group">
+                  <DictationControl client={client} sessionId={composerOwner} draftId="composer" label="工作台 / Composer" available={can("dictation.inspect") && runtimeConnected && !worktreeGated} visible={workbenchVisible} composerRef={composerInputRef} ensureSession={prepareDictationSession} onSubmit={() => { if (queueEdit !== undefined) commitQueuedEdit(); else void sendPrompt(); }} onSettings={() => { setSettingsIntent("voice", "dictation"); onRoute("settings"); }} onModels={() => { setModelConfigIntent({ tab: "roles", role: "dictation" }); onRoute("model-config"); }} />
+                  {/* 运行中且没有草稿时，发送位变停止；上一轮停在没有最终汇报的尾巴上时
+                      变播放键（空输入也能点，点了继续）；有草稿时保持"加入排队栏"，
+                      否则会吃掉流式期间唯一的点击排队入口。编辑排队时始终是写回。 */}
+                  {composerRunning && !textReady && queueEdit === undefined ? (
+                    <button
+                      className="send-btn abort"
+                      disabled={!abortAllowed}
+                      onClick={() => {
+                        if (preview) return;
+                        void run("core.abort", {}).then((ok) => {
+                          if (ok) setAbortGeneration((generation) => generation + 1);
+                        });
+                      }}
+                      data-tip={t("composer.stop")}
+                      aria-label={t("composer.stopRunning")}
+                    >
+                      <Icon name="stop" extra="sm" />
+                    </button>
+                  ) : continueSlot ? (
+                    <button
+                      className="send-btn"
+                      disabled={!continueEnabled}
+                      onClick={continueTurn}
+                      data-tip={continueEnabled ? t("composer.continueTurnAria") : retryTurnDisabledReason ?? t("composer.continueUnavailable")}
+                      aria-label={t("composer.continueTurnAria")}
+                    >
+                      <Icon name="play" extra="sm" />
+                    </button>
+                  ) : (
+                    <button
+                      className="send-btn"
+                      disabled={queueEdit === undefined && !(promptEnabled || queueEnabled || slashExecuteReady || (preview && running) || (composerRunning && textReady))}
+                      onClick={() => {
+                        setComposerExpanded(true);
+                        if (queueEdit !== undefined) {
+                          commitQueuedEdit();
+                          return;
+                        }
+                        const payload = composerInputRef.current?.getSnapshot() ?? draftLive.current;
+                        if (composerSlashExecute(payload, slashCatalog) !== undefined) {
+                          void sendPrompt();
+                          return;
+                        }
+                        if (composerRunning) enqueueDraft();
+                        else void sendPrompt();
+                      }}
+                      data-tip={
+                        queueEdit !== undefined
+                          ? t("composer.commitQueue")
+                          : composerRunning
+                            ? t("composer.enqueue")
+                            : pendingInteraction
+                              ? t("composer.resolvePendingFirst")
+                              : t("composer.send")
                       }
-                      const payload = composerInputRef.current?.getSnapshot() ?? draftLive.current;
-                      if (composerSlashExecute(payload, slashCatalog) !== undefined) {
-                        void sendPrompt();
-                        return;
-                      }
-                      if (composerRunning) enqueueDraft();
-                      else void sendPrompt();
-                    }}
-                    data-tip={
-                      queueEdit !== undefined
-                        ? t("composer.commitQueue")
-                        : composerRunning
-                          ? t("composer.enqueue")
-                          : pendingInteraction
-                            ? t("composer.resolvePendingFirst")
-                            : t("composer.send")
-                    }
-                    aria-label={queueEdit !== undefined ? t("composer.commitQueueAria") : t("composer.send")}
-                  >
-                    <Icon name="arrow-u" extra="sm" />
-                  </button>
-                )}
+                      aria-label={queueEdit !== undefined ? t("composer.commitQueueAria") : t("composer.send")}
+                    >
+                      <Icon name="arrow-u" extra="sm" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-          {/* 定位上下文是 .convo-wrap，不要放回 .composer-region，否则会按错误盒子算高并溢出底栏。 */}
-          {inspectTarget === null ? null : (
-            <SubagentInspectCard
-              target={inspectTarget}
-              preview={preview}
-              client={preview ? null : conversationClient}
-              sendClient={preview ? null : client}
-              agents={rosterAgents ?? []}
-              canSend={
-                can("agent.send")
-                && (selectedSessionId === undefined || snapshot?.sessionId === undefined || selectedSessionId === snapshot.sessionId)
-              }
-              canBtw={can("agent.btw.read") && (selectedSessionId === undefined || selectedSessionId === snapshot?.sessionId)}
-              runtimeConnected={runtimeConnected}
-              {...(selectedSessionId === undefined ? {} : { parentSessionId: selectedSessionId as SessionId })}
-              {...(snapshot?.sessionId === undefined ? {} : { liveSessionId: snapshot.sessionId })}
-              pendingInteraction={pendingInteraction !== null}
-              {...(workspaceId === undefined ? {} : { workspaceId })}
-              loadMentions={fetchMentions}
-              onClose={() => setInspectTarget(null)}
-              onOpenHub={(agentId, tab) => {
-                setHubIntent(agentId, tab ?? "chat");
-                setInspectTarget(null);
-                onRoute("agent-hub");
-              }}
-            />
-          )}
-          <button
+          <SharedSurface region="bottomReveal"><button
+            ref={bottomRevealRef}
             className="icon-btn small bp-reveal"
             data-tip={bottomVisible ? t("shell.collapseBottomBar") : t("shell.expandBottomBar")}
             aria-label={bottomVisible ? t("shell.collapseBottomBar") : t("shell.expandBottomBar")}
@@ -6240,67 +6336,93 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
             onClick={() => onBottomVisibleChange(toggleBottomBarVisible({ visible: bottomVisible, open: bottomOpen }).visible)}
           >
             <Icon name="panel-bottom" extra="sm" />
-          </button>
+          </button></SharedSurface>
         </div>
-        {railMode === "expanded" ? <DockRail mode="expanded" /> : null}
+        <SharedSurface region="right">
         <aside className={`side-panel${sideOpen ? " open" : ""}`} id="sidePanel" inert={!sideOpen} aria-label={t("shell.rightPanel")}>
           <div className="sp-resizer" id="spResizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-label={t("shell.adjustPanelWidth")} aria-valuemin={360} aria-valuemax={640} aria-valuenow={panelWidth} onPointerDown={onPanelResizePointerDown} onKeyDown={onPanelResizeKeyDown} onDoubleClick={() => onResizePanel(480)} />
           <DockGroupRegion region="right" visible={sideOpen} />
         </aside>
+        </SharedSurface>
       </div>
-      <div className={`bottom-panel${bottomOpen ? "" : " collapsed"}${bottomVisible ? "" : " closed"}${bottomResizing ? " resizing" : ""}`} id="bottomPanel" inert={!bottomVisible}>
-        <div className="bp-resizer" id="bpResizer" role="separator" tabIndex={0} aria-orientation="horizontal" aria-label={t("shell.resizeBottomPanel")} aria-valuemin={BOTTOM_PANEL_MIN} aria-valuemax={BOTTOM_PANEL_MAX} aria-valuenow={bottomHeight} onPointerDown={onBottomResizePointerDown} onDoubleClick={() => { onBottomOpenChange(true); onResizeBottom(BOTTOM_PANEL_DEFAULT); }} onKeyDown={onBottomResizeKeyDown} />
-        <DockGroupRegion region="bottom" visible={bottomVisible} expanded={bottomOpen} />
-      </div>
-      <DockFloatingLayer />
+      <SharedSurface region="bottom">
+      <BottomPanelChrome
+        visible={bottomVisible}
+        expanded={bottomOpen}
+        resizing={bottomResizing}
+        height={bottomHeight}
+        onResizePointerDown={onBottomResizePointerDown}
+        onResizeDoubleClick={() => { onBottomOpenChange(true); onResizeBottom(BOTTOM_PANEL_DEFAULT); }}
+        onResizeKeyDown={onBottomResizeKeyDown}
+      />
+      </SharedSurface>
       <DockKeyboard />
+      <AgentRosterMeter agents={dockAgents} ready={preview || rosterAgents !== undefined}
+        source={agentRosterSource} />
+      <ContextDockPanel client={client} viewedSessionId={selectedSessionId as SessionId | undefined} liveSessionId={snapshot?.sessionId}
+        liveTelemetry={state.clientState?.entities.telemetry ?? undefined} refreshToken={telemetryRefreshToken}
+        viewedThreadId={selectedThreadId} previewSessionId={previewThreadId}
+        compactionAvailable={runtimeConnected && !connection?.resyncRequired && !sessionCreating && (executionMatches || selectedSessionId !== undefined) && can("session.compaction.get") && can("session.compaction.set")}
+        compactionRefreshKey={`${snapshot?.model?.selector ?? ""}:${connection?.runtimeEpoch ?? ""}`}
+        onOpenDetails={openContextInspector} onCompact={onCompactThread} compacting={compactingNow}
+        compactDisabled={!runtimeConnected || !snapshot || connection?.resyncRequired === true || snapshot.isStreaming || sessionCreating === true} />
+      <GitWorkspaceProvider key={gitScope} client={client} workspaceId={gitSharedWorkspaceId}>
+        <PanelRegistration panels={{
+        git: visibility => <GitWorkbench key={composerOwner ?? "draft"} client={client} {...(activeWorkspace ? { workspaceId: activeWorkspace.workspaceId, workspaceName: activeWorkspace.name } : {})} visible={visibility.visible}
+          {...(gitIntent?.scope === gitScope ? { intent: gitIntent.intent } : {})}
+          worktrees={<SessionWorktreesPane launcher launcherLabel="Worktree" onOpenWorkspace={onOpenWorktree} client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={visibility.visible} />}
+          onReference={reference => {
+            revealMainWindow(); onRoute("workbench");
+            const captured = githubReferenceSnapshot(reference);
+            composerInputRef.current?.insertChip({ kind: "github", label: `${captured.kind === "pr" ? "PR" : "Issue"} #${captured.number} ${captured.title}`, reference: captured });
+            composerInputRef.current?.focus();
+          }} />,
+        "git-quick": visibility => <GitQuickCard client={client} workspaceId={gitSharedWorkspaceId} workspaceName={activeWorkspace?.name} visible={visibility.visible}
+          worktrees={<SessionWorktreesPane launcher launcherLabel="Worktree" onOpenWorkspace={onOpenWorktree} client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={visibility.visible} />}
+          onOpen={intent => { setGitIntent({ scope: gitScope, intent: { ...intent, key: ++gitIntentSequence.current } }); revealMainWindow(); onRoute("workbench"); onOpenGit(); }}
+          onReference={reference => { revealMainWindow(); onRoute("workbench"); const captured = githubReferenceSnapshot(reference); composerInputRef.current?.insertChip({ kind: "github", label: `${captured.kind === "pr" ? "PR" : "Issue"} #${captured.number} ${captured.title}`, reference: captured }); composerInputRef.current?.focus(); }}
+          onCommitReference={reference => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.insertChip({ kind: "git-commit", label: gitCommitReferenceLabel(reference), reference }); composerInputRef.current?.focus(); }} />,
+        }} />
+      </GitWorkspaceProvider>
       <PanelRegistration panels={{
+        "context-viewer": visibility => <ContextInspector client={client} sessionId={selectedSessionId ?? snapshot?.sessionId} sessionName={viewedSessionName} sourceKey={preview ? previewThreadId : selectedSessionId} opened={contextInspectorOpened} available={runtimeConnected && executionMatches && !connection?.resyncRequired} width={visibility.width} height={visibility.height} />,
+        "token-counter": <TokenCounterPane key={String(preview)} client={client} />,
         changes: <>{preview ? <PreviewChanges {...(changesFocus.path === undefined ? {} : { focusPath: changesFocus.path })} {...(changesFocus.turnId === undefined ? {} : { focusTurnId: changesFocus.turnId })} focusKey={changesFocus.key} /> : <SessionChanges rows={convo.rows} {...(changesFocus.path === undefined ? {} : { focusPath: changesFocus.path })} {...(changesFocus.turnId === undefined ? {} : { focusTurnId: changesFocus.turnId })} focusKey={changesFocus.key} />}</>,
-        git: visibility => <><SessionWorktreesPane launcher onOpenWorkspace={onOpenWorktree} client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={visibility.visible} />
-              {preview ? <PreviewGitPanel /> : <GitStatusPanel client={client} {...(activeWorkspace === undefined ? {} : { workspaceId: activeWorkspace.workspaceId })} />}</>,
-        browser: visibility => <><BrowserPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={visibility.visible} capabilities={capabilities} /></>,
-        computer: visibility => <><ComputerPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={visibility.visible} capabilities={capabilities} /></>,
-        agents: <>{preview ? (
-                <PreviewSideAgents onOpenHub={() => onRoute("agent-hub")} />
-              ) : rosterAgents !== undefined ? (
-                rosterAgents.length ? (
-                  rosterAgents.map((agent) => (
-                    <div className="agent-row" key={agent.agentId}>
-                      <span className="ag-ic" aria-hidden="true"><Icon name="bot" extra="sm" /></span>
-                      <div className="ag-main">
-                        <button
-                          className="ag-open"
-                          type="button"
-                          onClick={() => { setHubIntent(agent.agentId); onRoute("agent-hub"); }}
-                        >
-                          <span className="ag-name">
-                            {agent.displayName}
-                            <span className="chip gray xs">{agent.status}</span>
-                          </span>
-                          <span className="ag-task">{agent.assignment ?? agent.summary ?? "—"}</span>
-                          <span className="ag-meta">gen {agent.generation}{agent.parentAgentId ? ` · of ${agent.parentAgentId}` : ""}</span>
-                        </button>
-                      </div>
-                      <div className="ag-acts">
-                        <button className="btn small outline" type="button" disabled={!agent.hasLiveSession || !can("agent.btw.read")} onClick={() => { setHubIntent(agent.agentId,"btw"); onRoute("agent-hub"); }}>BTW</button>
-                        <button
-                          className="icon-btn small"
-                          type="button"
-                          data-tip="打开"
-                          aria-label={t("shell.openInAgentHubAria")}
-                          onClick={() => { setHubIntent(agent.agentId); onRoute("agent-hub"); }}
-                        >
-                          <Icon name="external" extra="sm" />
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                ) : <Deferred title={t("shell.noAgentsTitle")} detail={t("shell.noAgentsDetail")} />
-              ) : <Deferred title={t("shell.agentsDeferredTitle")} detail={t("shell.agentsDeferredDetail")} />}</>,
-        btw: <><BtwPanel session={btwSession} {...(preview ? { demo: true, onDemoNext: onBtwDemoNext } : {})} /></>,
-        terminal: visibility => <><TerminalPane workspaceId={workspaceId} sessionId={snapshot?.sessionId} visible={visibility.visible} /></>,
-        problems: <>{preview ? <PreviewProblems /> : <Deferred title={t("shell.problemsUnavailableTitle")} detail={t("shell.problemsUnavailableDetail")} />}</>,
-        tests: <>{preview ? <PreviewTests /> : (
+        environment: <EnvironmentDockCard {...(preview
+          ? previewEnvironmentCard(activePreviewProject === undefined ? undefined : { name: activePreviewProject.name, root: activePreviewProject.path })
+          : {
+              target: { remote: executionTarget.id !== null, ...(executionTarget.id === null ? {} : { name: executionTarget.name }) },
+              runtimeStatus: runtime?.status ?? "unavailable",
+              ...(runtime?.runtimeVersion === undefined ? {} : { version: runtime.runtimeVersion }),
+              ...(activeWorkspace === undefined ? {} : { project: { name: activeWorkspace.name, ...(activeWorkspace.root === undefined ? {} : { root: activeWorkspace.root }) } }),
+              repository: realGit,
+            })} />,
+        browser: visibility => <BrowserPane client={client} sessionId={snapshot?.sessionId} chatId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={visibility.visible} capabilities={capabilities} />,
+        computer: visibility => <ComputerDockPane client={client} sessionId={computerSessionId} sessionName={viewedSessionName}
+          scopeKey={computerScopeKey} available={runtimeConnected && executionMatches && !connection?.resyncRequired}
+          visible={visibility.visible} width={visibility.width} height={visibility.height} capabilities={capabilities}
+          executionTarget={{ kind: executionTarget.id === null ? "local" : "remote", id: executionTarget.id ?? "local", name: executionTarget.name }}
+          frameIntent={computerFrameIntent} onRevealConversation={revealComputerAction}
+          onRevealApproval={pendingInteraction ? () => { onRoute("workbench"); const deck = computerApprovalRef.current?.querySelector<HTMLElement>(".deck"); deck?.scrollIntoView({ block: "nearest" }); deck?.querySelector<HTMLElement>("button, input, [tabindex]")?.focus(); } : undefined}
+          onOpenSettings={() => { setSettingsIntent("tasks", "computer.enabled"); onRoute("settings"); }} />,
+        agents: visibility => <AgentRosterPanel agents={dockAgents} ready={preview || rosterAgents !== undefined}
+          source={agentRosterSource} openedIds={openedAgentIds}
+          visible={visibility.visible} {...(inspectTarget === null ? {} : { selectedId: inspectTarget.agentId })}
+          onMain={() => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.focus(); }} onOpen={agent => openAgentDetail({ agentId: agent.agentId, displayName: agent.displayName, ...(agent.assignment === undefined ? {} : { task: agent.assignment }) })} />,
+        "agent-detail": visibility => <AgentDetailPanel target={null} scope={agentScope} agents={dockAgents}
+          visible={visibility.visible} client={client} conversationClient={conversationClient}
+          runtimeConnected={runtimeConnected} canSend={can("agent.send")} canBtw={can("agent.btw.read")}
+          {...(agentParentSessionId === undefined ? {} : { parentSessionId: agentParentSessionId as SessionId })}
+          {...(snapshot?.sessionId === undefined ? {} : { liveSessionId: snapshot.sessionId })}
+          {...(pendingInteraction?.sessionId === undefined ? {} : { pendingInteractionSessionId: pendingInteraction.sessionId })}
+          {...(workspaceId === undefined ? {} : { workspaceId })} loadMentions={fetchMentions}
+          onMain={() => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.focus(); }}
+          onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}
+          onRevealSource={target => target.toolCallId === undefined ? Promise.resolve(false) : revealConversationTarget(convoScrollerRef.current, { toolCallId: target.toolCallId })} />,
+        btw: visibility => <><BtwPanel session={btwSession} onClose={() => dock.store.dispatch({ type: "hide", panels: ["btw"] })} visible={visibility.visible} {...(preview ? { demo: true, onDemoNext: onBtwDemoNext } : {})} /></>,
+        terminal: visibility => <><TerminalPane workspaceId={preview ? state.bootstrap?.selected?.workspaceId : workspaceId} sessionId={snapshot?.sessionId} conversationId={mdi?.document.id} visible={visibility.visible} /></>,
+        problems: <>{preview ? <div className="dock-pad"><PreviewProblems /></div> : <Deferred title={t("shell.problemsUnavailableTitle")} detail={t("shell.problemsUnavailableDetail")} />}</>,
+        tests: <div className="dock-pad">{preview ? <PreviewTests /> : (
               <AgentTestsPane
                 runs={testRuns}
                 rerunDisabled={testRerunDisabled}
@@ -6308,55 +6430,65 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                 onRerun={(command) => { void dispatchPrompt(snapshotFromText(rerunTestPrompt(command))); }}
                 onReveal={(run) => { revealConversationTool(convoScrollerRef.current, run); }}
               />
-            )}</>,
-        output: <><div className="panel-head"><div><h2>Command lifecycle</h2><p className="muted">Semantic command ledger from client state.</p></div></div>
-            {commandRows.length ? (
-              <ul className="lifecycle-list">
-                {commandRows.map((command) => (
-                  <li key={command.requestId}>
-                    <span className="mono">{command.commandName}</span>
-                    <Chip>{command.status}</Chip>
-                    {"reason" in command && <span className="muted">{command.reason}</span>}
-                    {"error" in command && <span className="muted">{command.error.message}</span>}
-                  </li>
-                ))}
-              </ul>
-            ) : <p className="muted">No commands issued.</p>}
-            {preview ? (
+            )}</div>,
+        output: (
+          <OutputPanel
+            commands={ledgerCommands}
+            preview={preview}
+            operator={(preview || commandManifest) ? (
               <>
-            <div className="p4-grid">
-              <div>
-                <h2>Modes</h2>
-                <div className="actions">
-                  <button className="btn outline" disabled={!can("mode.plan") || busy} onClick={() => void run("mode.plan.enter", {})}>Plan</button>
-                  <button className="btn outline" disabled={!can("mode.vibe") || busy} onClick={() => void run("mode.vibe.enter", {})}>Vibe</button>
-                  <button className="btn outline" disabled={!can("mode.plan") || busy} onClick={() => void run("mode.plan.exit", {})}>Exit plan</button>
-                  <button className="btn outline" disabled={!can("mode.vibe") || busy} onClick={() => void run("mode.vibe.exit", {})}>Exit vibe</button>
-                </div>
-              </div>
-              <div>
-                <h2>Goal / loop</h2>
-                <div className="actions">
-                  <button className="btn outline" disabled={!can("goal.create") || busy} onClick={() => void run("goal.create", { objective: "Continue current work" })}>Create goal</button>
-                  <button className="btn outline" disabled={!can("goal.pause") || busy} onClick={() => void run("goal.pause", {})}>Pause goal</button>
-                  <button className="btn outline" disabled={!can("goal.resume") || busy} onClick={() => void run("goal.resume", {})}>Resume goal</button>
-                  <button className="btn outline" disabled={!can("loop.enable") || busy} onClick={() => void run("loop.enable", {})}>Start loop</button>
-                  <button className="btn outline" disabled={!can("loop.pause") || busy} onClick={() => void run("loop.pause", {})}>Pause loop</button>
-                  <button className="btn outline" disabled={!can("loop.disable") || busy} onClick={() => void run("loop.disable", {})}>Stop loop</button>
-                </div>
-              </div>
-            </div>
-            {commandManifest && <GenericCommandForm manifest={commandManifest} busy={busy} enabled={can("operator.invoke")} onInvoke={(commandId, args) => void run("operator.invoke", { commandId, ...(args === undefined ? {} : { arguments: args }) })} />}
-            {runtime?.classification === "limited-system" && <p className="capability-note">Runtime is Limited. P4 mutations are disabled until the capability manifest grants them.</p>}
+                {preview ? (
+                  <>
+                    <section>
+                      <h3 className="dock-group-label">{t("shell.operatorModes")}</h3>
+                      <div className="actions">
+                        <button className="btn outline" disabled={!can("mode.plan") || busy} onClick={() => void run("mode.plan.enter", {})}>Plan</button>
+                        <button className="btn outline" disabled={!can("mode.vibe") || busy} onClick={() => void run("mode.vibe.enter", {})}>Vibe</button>
+                        <button className="btn outline" disabled={!can("mode.plan") || busy} onClick={() => void run("mode.plan.exit", {})}>Exit plan</button>
+                        <button className="btn outline" disabled={!can("mode.vibe") || busy} onClick={() => void run("mode.vibe.exit", {})}>Exit vibe</button>
+                      </div>
+                    </section>
+                    <section>
+                      <h3 className="dock-group-label">{t("shell.operatorGoalLoop")}</h3>
+                      <div className="actions">
+                        <button className="btn outline" disabled={!can("goal.create") || busy} onClick={() => void run("goal.create", { objective: "Continue current work" })}>Create goal</button>
+                        <button className="btn outline" disabled={!can("goal.pause") || busy} onClick={() => void run("goal.pause", {})}>Pause goal</button>
+                        <button className="btn outline" disabled={!can("goal.resume") || busy} onClick={() => void run("goal.resume", {})}>Resume goal</button>
+                        <button className="btn outline" disabled={!can("loop.enable") || busy} onClick={() => void run("loop.enable", {})}>Start loop</button>
+                        <button className="btn outline" disabled={!can("loop.pause") || busy} onClick={() => void run("loop.pause", {})}>Pause loop</button>
+                        <button className="btn outline" disabled={!can("loop.disable") || busy} onClick={() => void run("loop.disable", {})}>Stop loop</button>
+                      </div>
+                    </section>
+                    {runtime?.classification === "limited-system" && <p className="capability-note">Runtime is Limited. P4 mutations are disabled until the capability manifest grants them.</p>}
+                  </>
+                ) : null}
+                {commandManifest && <OperatorCommandForm manifest={commandManifest} busy={busy} enabled={can("operator.invoke")} onInvoke={(commandId, args) => void run("operator.invoke", { commandId, ...(args === undefined ? {} : { arguments: args }) })} />}
               </>
-            ) : null}</>,
-        logs: <><div className="panel-head"><div><h2>OMP Logs</h2><p className="muted">{t("shell.ompLogsVirtualDesc")}</p></div><span className="mono">{t("shell.eventsCount", { count: state.events.length })}</span></div>
-            <VirtualEventTranscript events={state.events} /></>,
-        pvlogs: <>{preview ? <PreviewLogs /> : <Deferred title={t("shell.previewLogsUnavailableTitle")} detail={t("shell.previewLogsUnavailableDetail")} />}</>,
+            ) : undefined}
+          />
+        ),
+        logs: <OmpLogsPanel events={ledgerEvents} preview={preview} />,
+        pvlogs: <>{preview ? <div className="dock-pad"><PreviewLogs /></div> : <Deferred title={t("shell.previewLogsUnavailableTitle")} detail={t("shell.previewLogsUnavailableDetail")} />}</>,
       }} />
+      {Object.entries(agentDockLayout.agentPanels).filter(([id, descriptor]) => (descriptor.scope === agentScope || agentDockLayout.floats.some(group => group.pin && group.panels.includes(id as PanelId))) && locatePanel(agentDockLayout, id as PanelId)).map(([id, descriptor]) =>
+        <DockPanel key={id} id={id as AgentPanelId}>{visibility => <AgentDetailPanel target={descriptor.target} scope={descriptor.scope} agents={descriptor.scope === agentScope ? dockAgents : []}
+          contextAvailable={descriptor.scope === agentScope}
+          visible={visibility.visible} client={client} conversationClient={descriptor.scope === agentScope ? conversationClient : null}
+          runtimeConnected={runtimeConnected && descriptor.scope === agentScope} canSend={can("agent.send") && descriptor.scope === agentScope} canBtw={can("agent.btw.read") && descriptor.scope === agentScope}
+          {...((descriptor.target.parentSessionId ?? agentParentSessionId) === undefined ? {} : { parentSessionId: (descriptor.target.parentSessionId ?? agentParentSessionId) as SessionId })}
+          {...(snapshot?.sessionId === undefined ? {} : { liveSessionId: snapshot.sessionId })}
+          {...(pendingInteraction?.sessionId === undefined ? {} : { pendingInteractionSessionId: pendingInteraction.sessionId })}
+          {...(workspaceId === undefined ? {} : { workspaceId })} loadMentions={fetchMentions}
+          viewState={agentViewBook.get(subagentViewKey(descriptor.scope, descriptor.target.agentId))}
+          onActivate={() => dock.store.dispatch({ type: "agent-focus", panel: id as AgentPanelId })}
+          onMain={() => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.focus(); }}
+          onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}
+          onRevealSource={target => target.toolCallId === undefined ? Promise.resolve(false) : revealConversationTarget(convoScrollerRef.current, { toolCallId: target.toolCallId })} />}</DockPanel>)}
+      <BrowserDockInstances sessionId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} capabilities={capabilities} remote={!!executionTarget.id} onReferences={insertBrowserReferences} />
       <ToastHost message={statusToast} icon="info" onDismiss={() => setStatusToast(null)} />
       {treeConfirm.dialog}
-    </>
+    </SubagentHoverProvider>
+    </ComputerLinkProvider>
   );
 }
 
@@ -6373,12 +6505,16 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   onWorkspacesChange: (workspaces: WorkspaceListReadModel) => void;
   onHistoryChange: (history: SessionHistoryReadModel) => void;
 }) {
+  const { document, window } = useConversationDom();
+  const mdi = useConversationView();
+  const [evaluationIntent, setEvaluationIntent] = useState<{id: string; kind: import("@omp-studio/studio-protocol").EvaluationKind}>();
   const { t } = useI18n();
   const executionTarget = useExecutionTarget();
   const previewMode = usePreviewMode();
   const modelClient = (executionTarget.localClient ?? client) as ClientStateSource;
   const modelConnection = useModelConnection(modelClient);
   const appUpdate = useAppUpdate();
+  const { profile } = useOperatorProfile();
   const effectiveUpdate = previewMode.preview ? PREVIEW_APP_UPDATE : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
   const [showAppUpdateDialog, setShowAppUpdateDialog] = useState(false);
   const [localAppVersion, setLocalAppVersion] = useState<string | null>(null);
@@ -6393,8 +6529,8 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   }, [previewMode.preview, appUpdate.check]);
   const previewOn = () => previewMode.preview;
   const dock = useDock();
-  const collapsed = !dock.layout.left.visible;
-  const setCollapsed = (value: boolean) => dock.store.dispatch({ type: "region", region: "left", visible: !value });
+  const collapsed = mdi ? !mdi.store.getSnapshot().sidebarVisible : !dock.layout.left.visible;
+  const setCollapsed = (value: boolean) => { if (mdi) mdi.store.shared({ sidebarVisible: !value }); dock.store.dispatch({ type: "region", region: "left", visible: !value }); };
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [skillsEnabledCount, setSkillsEnabledCount] = useState(() => previewOn() ? countEnabledDrawerItems(createPreviewDrawerItems()) : 0);
   const [explorerOpen, setExplorerOpen] = useState(() => previewOn());
@@ -6411,7 +6547,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const clearComposerInsertion = useCallback(() => setComposerInsertion(undefined), []);
   const [selectedProvisionalSessionId, setSelectedProvisionalSessionId] = useTargetMemory<string | undefined>("provisional-session", () => undefined);
   const [dockSelection, setDockSelection] = useTargetMemory<DockScope>("dock-selection", () => {
-    const selected = state.bootstrap?.selected;
+    const selected = state.bootstrap?.selected ?? mdi?.document.ref;
     return { target: executionTarget.id ?? "local", project: selected?.workspaceId ?? state.model.workspaces?.activeWorkspaceId ?? null, session: selected?.sessionId ?? "draft:initial", ...(!selected?.sessionId ? { draft: true } : {}) };
   });
   const dockSelectionRef = useRef(dockSelection);
@@ -6465,7 +6601,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   }, [selectedHistoryId]);
   /** 各项目当前展开的会话条数；折叠会话列表时清掉对应键回到默认 6 条。 */
   const [projectThreadLimits, setProjectThreadLimits] = useState<Record<string, number>>({});
-  const projectHistories = useProjectHistories({ client, preview: previewMode.preview });
+  const projectHistories = useProjectHistories({ client, preview: previewMode.preview, shared: mdi?.store.history(executionTarget.id) });
   const {
     cache: projectHistoryCache,
     load: loadProjectHistory,
@@ -6498,26 +6634,26 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   /** 历史页的全量会话模型（含已归档）；进入历史页时懒加载，归档动作后刷新。 */
   const [historyAll, setHistoryAll] = useState<SessionHistoryReadModel | undefined>(undefined);
   const initialPreview = defaultPreviewSelection();
-  const [previewProjectId, setPreviewProjectId] = useState(initialPreview.projectId);
-  const [previewThreadId, setPreviewThreadId] = useState(initialPreview.threadId);
+  const [previewProjectId, setPreviewProjectId] = useState(mdi?.document.ref.previewProjectId ?? initialPreview.projectId);
+  const [previewThreadId, setPreviewThreadId] = useState(mdi?.document.ref.previewThreadId ?? initialPreview.threadId);
   const [previewDeckWait, setPreviewDeckWait] = useState<ThreadWaitKind | undefined>("plan");
   const { settings: appSettings, update: updateAppSettings } = useAppSettings();
   const theme = appSettings.theme;
-  useLayoutEffect(() => { applyTypography(appSettings); }, [appSettings.uiFontFamily, appSettings.uiFontSize, appSettings.terminalFontFamily, appSettings.terminalFontSize, appSettings.outputFontFamily, appSettings.outputFontSize]);
-  const sidebarWidth = dock.layout.left.width;
+  useLayoutEffect(() => { if (!mdi || mdi.active) applyTypography(appSettings); }, [mdi?.active, appSettings.uiFontFamily, appSettings.uiFontSize, appSettings.terminalFontFamily, appSettings.terminalFontSize, appSettings.outputFontFamily, appSettings.outputFontSize]);
+  const sidebarWidth = mdi?.store.getSnapshot().sidebarWidth ?? dock.layout.left.width;
   const splitRatio = dock.layout.left.ratio;
   const sideOpen = dock.layout.right.visible;
   const bottomOpen = dock.layout.bottom.expanded;
   const bottomVisible = dock.layout.bottom.visible;
-  const panelWidth = dock.layout.right.size;
-  const bottomHeight = dock.layout.bottom.size;
-  const setSidebarWidth = (size: number) => dock.store.dispatch({ type: "resize", region: "left", size });
+  const panelWidth = mdi?.store.getSnapshot().panelWidth ?? dock.layout.right.size;
+  const bottomHeight = mdi?.store.getSnapshot().bottomHeight ?? dock.layout.bottom.size;
+  const setSidebarWidth = (size: number) => { if (mdi) mdi.store.shared({ sidebarWidth: size }); dock.store.dispatch({ type: "resize", region: "left", size }); };
   const setSplitRatio = (ratio: number) => dock.store.dispatch({ type: "resize", region: "left", ratio });
   const setSideOpen = (visible: boolean) => dock.store.dispatch({ type: "region", region: "right", visible });
   const setBottomOpen = (expanded: boolean) => dock.store.dispatch({ type: "bottomExpanded", expanded });
   const setBottomVisible = (visible: boolean) => dock.store.dispatch({ type: "region", region: "bottom", visible });
-  const setPanelWidth = (size: number) => dock.store.dispatch({ type: "resize", region: "right", size });
-  const setBottomHeight = (size: number) => dock.store.dispatch({ type: "resize", region: "bottom", size });
+  const setPanelWidth = (size: number) => { if (mdi) mdi.store.shared({ panelWidth: size }); dock.store.dispatch({ type: "resize", region: "right", size }); };
+  const setBottomHeight = (size: number) => { if (mdi) mdi.store.shared({ bottomHeight: size }); dock.store.dispatch({ type: "resize", region: "bottom", size }); };
   const setSideTab = (tab: SideTab) => dock.store.dispatch({ type: "open", panel: tab === "preview" ? "browser" : tab });
   const setBottomTab = (tab: BottomTab) => dock.store.dispatch({ type: "open", panel: tab });
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -6535,7 +6671,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   /** 左上菜单「新建项目」：递增后 WorkbenchCanvas 打开已有创建项目对话框。 */
   const [createProjectNonce, setCreateProjectNonce] = useState(0);
   const sessionCreateWaitRef = useRef<Promise<NewSessionWaitResult> | null>(null);
-  const [shellNotice, setShellNotice] = useState<{ text: string; icon: string } | null>(null);
+  const [shellNotice, setShellNotice] = useState<{ text: string; icon: IconName } | null>(null);
   const [compactPending, setCompactPending] = useState(false);
   /** 用户在压缩回执落地前点了「取消」：压缩命令回执完成后按取消提示，不再误报成功。 */
   const compactCancelRequestedRef = useRef(false);
@@ -6547,6 +6683,27 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const paletteRef = useRef<CommandPaletteHandle>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [ompMenuOpen, setOmpMenuOpen] = useState(false);
+  const ompMenuAnchorRef = useRef<HTMLButtonElement>(null);
+  /** 左栏（rail）折叠态：归壳持有，因为收起后头像要回落到侧栏底部。 */
+  const [localRailCollapsed, setLocalRailCollapsed] = useState(false);
+  const railCollapsed = mdi?.store.getSnapshot().railCollapsed ?? localRailCollapsed;
+  const setRailCollapsed = (value: boolean | ((previous: boolean) => boolean)) => { const next = typeof value === "function" ? value(railCollapsed) : value; if (mdi) mdi.store.shared({ railCollapsed: next }); else setLocalRailCollapsed(next); };
+  /* 头像在两处之间搬家时由固定层的「幽灵」承载：它落在目标头像的矩形上，所以
+     两处真身不必同时可见，也不会跟着侧栏整体位移滑进来。 */
+  const railAvatarRef = useRef<HTMLElement | null>(null);
+  const footerAvatarRef = useRef<HTMLElement | null>(null);
+  const footerBoxRef = useRef<HTMLElement | null>(null);
+  const identityFlight = useIdentityFlight({ collapsed: railCollapsed, profile, railAvatarRef, footerAvatarRef, footerRef: footerBoxRef });
+  const setRailCollapsedWithFlight = (next: boolean) => {
+    /* 先量源头像，再改状态：改完它就被 56px 的裁切带走了。 */
+    identityFlight.begin(next);
+    setRailCollapsed(next);
+  };
+  /* 收起会把锚点按钮搬到侧栏底部，留着打开的菜单会停在旧位置。 */
+  useEffect(() => {
+    if (!railCollapsed) return;
+    setOmpMenuOpen((value) => (value ? false : value));
+  }, [railCollapsed]);
   const [dialog, setDialog] = useState<ShellDialog | null>(null);
   /** 归档确认弹窗：点「归档」只打开此窗，确认后才执行预览隐藏或 session.archive。 */
   const [archivePending, setArchivePending] = useState<ArchivePending | null>(null);
@@ -6561,20 +6718,22 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     if (state.route === "home") navigationGate.next();
   }, [navigationGate, state.route]);
   if (isSecondary(state.route)) lastPageRoute.current = state.route;
-  const wantPage = isSecondary(state.route);
+  const wantPage = isSecondary(state.route) && (!mdi || mdi.active);
   const { shown: showPage, phase: shellPhase } = useDeferredKey(wantPage);
+  const workbenchHidden = showPage && (!mdi || mdi.view?.placement === "main");
+  useLayoutEffect(() => { if (mdi) mdi.store.updateDocument(mdi.document.id, { page: showPage, pagePhase: shellPhase }); }, [mdi?.store, mdi?.document.id, showPage, shellPhase]);
   const pageRoute = isSecondary(state.route) ? state.route : lastPageRoute.current;
   const pageMeta = SECONDARY_META[pageRoute];
   const shellClass = pagePhaseClass(shellPhase);
-  const layout = useWorkbenchLayout({ collapsed, sidebarWidth, sideOpen, panelWidth, bottomVisible, bottomOpen, bottomHeight, railMode: dock.layout.rail.mode, railWidth: dock.layout.rail.width }, !showPage);
+  const layout = useWorkbenchLayout({ collapsed: mdi ? true : collapsed, sidebarWidth, sideOpen: mdi ? false : sideOpen, panelWidth, bottomVisible: mdi ? false : bottomVisible, bottomOpen, bottomHeight, railMode: dock.layout.rail.mode, railWidth: dock.layout.rail.width }, !workbenchHidden);
   const toggleSidebar = useCallback(() => {
     beforeConversationLayoutChange();
     // Closing a panel releases only its own priority: a narrow window may be
     // showing the right panel as a drawer, and collapsing the sidebar must not
     // hand that drawer's priority back to the layout solver.
-    if (layout.sidebarShown) { setCollapsed(true); layout.releaseFocus("sidebar"); }
+    if (mdi ? !collapsed : layout.sidebarShown) { setCollapsed(true); layout.releaseFocus("sidebar"); }
     else { setCollapsed(false); layout.focusPanel("sidebar"); }
-  }, [layout.sidebarShown, layout.focusPanel, layout.releaseFocus]);
+  }, [collapsed, mdi, layout.sidebarShown, layout.focusPanel, layout.releaseFocus]);
   const openSide = useCallback(() => {
     beforeConversationLayoutChange();
     setSideOpen(true);
@@ -6586,9 +6745,9 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     layout.releaseFocus("side");
   }, [layout.releaseFocus]);
   const toggleSide = useCallback(() => {
-    if (layout.sideShown) closeSide();
+    if (mdi ? sideOpen : layout.sideShown) closeSide();
     else openSide();
-  }, [layout.sideShown, closeSide, openSide]);
+  }, [mdi, sideOpen, layout.sideShown, closeSide, openSide]);
   const changeBottomOpen = useCallback((open: boolean) => {
     beforeConversationLayoutChange();
     setBottomOpen(open);
@@ -6608,13 +6767,13 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     }
   }, [layout.bottomVisible, layout.bottomOpen, layout.focusPanel, layout.releaseFocus]);
   const toggleBottom = useCallback(() => {
-    if (!layout.bottomVisible || !layout.bottomOpen) {
+    if (!(mdi ? bottomVisible : layout.bottomVisible) || !(mdi ? bottomOpen : layout.bottomOpen)) {
       setBottomVisible(true);
       changeBottomOpen(true);
       return;
     }
     changeBottomOpen(false);
-  }, [layout.bottomVisible, layout.bottomOpen, changeBottomOpen]);
+  }, [mdi, bottomVisible, bottomOpen, layout.bottomVisible, layout.bottomOpen, changeBottomOpen]);
   useEffect(() => {
     const open = (event: Event) => {
       const panel = (event as CustomEvent<{ panel: PanelId }>).detail.panel;
@@ -6632,6 +6791,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     const region = (event: Event) => {
       const detail = (event as CustomEvent<{ region?: DockRegion; visible?: boolean }>).detail;
       if (detail === undefined || detail.region === undefined) return;
+      if (mdi && detail.region === "left") mdi.store.shared({ sidebarVisible: detail.visible === true });
       const panel = layoutPanelForRegion(detail.region);
       if (panel === null) return;
       if (detail.visible === true) layout.focusPanel(panel);
@@ -6673,23 +6833,53 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       return [];
     }
   }, [previewMode.preview, client, hubFileIndex]);
+  const selected = state.model.history?.entries.find((entry) => entry.historyId === selectedHistoryId)
+    ?? historyAll?.entries.find((entry) => entry.historyId === selectedHistoryId)
+    ?? Object.values(projectHistoryCache).flatMap((historyState) => historyState.model?.entries ?? [])
+      .find((entry) => entry.historyId === selectedHistoryId);
+  const viewedSessionId = selected?.sessionId ?? snapshot?.sessionId;
+  const btwTargetId = selectedProvisionalSessionId ?? viewedSessionId;
+  const btwTargetRef = useRef({ sessionId: btwTargetId, threadId: selected?.threadId });
+  btwTargetRef.current = { sessionId: btwTargetId, threadId: selected?.threadId };
+  const prepareBtwTarget = useCallback(async () => {
+    const target = btwTargetRef.current;
+    await ensureSelectedSessionActive(client, {
+      ...(client.getState?.()?.entities.snapshot?.sessionId ? { activeSessionId: client.getState().entities.snapshot!.sessionId } : {}),
+      ...(target.sessionId ? { selectedSessionId: target.sessionId as SessionId } : {}),
+      ...(target.threadId ? { selectedThreadId: target.threadId } : {}),
+    });
+    if (target.sessionId !== btwTargetRef.current.sessionId) throw new Error("已切换会话，请在当前会话重新提问");
+  }, [client]);
   /* BTW 旁路问答：状态挂在 AppShell 而不是 WorkbenchCanvas —— 回首页会卸载
      WorkbenchCanvas，浮窗不该跟着消失。演示轮次只改本地 UI，不碰 Host。 */
-  const [btwDemoRound, setBtwDemoRound] = useState(0);
+  const [btwDemoRound, setBtwDemoRound] = useState(1);
   const btwOnBranchedRef = useRef<(sessionId: string) => Promise<boolean>>(async () => false);
   const btwSession = useBtwSession({
-    ...(snapshot?.sessionId ? { sessionId: snapshot.sessionId } : {}),
+    ...(btwTargetId ? { sessionId: btwTargetId } : {}),
+    targetActive: !btwTargetId || btwTargetId === snapshot?.sessionId,
+    prepareTarget: prepareBtwTarget,
     snapshot: previewMode.preview
       ? previewBtwSnapshot(btwDemoRound)
       : (state.clientState?.entities.btw ?? null),
     client,
     preview: previewMode.preview,
     previewQuestion: PREVIEW_BTW_QUESTION,
+    mainStreaming: !previewMode.preview && snapshot?.isStreaming === true,
     canCommand: snapshot !== undefined && runtime?.status === "connected",
     onBranched: async (sessionId) => {
       await btwOnBranchedRef.current(sessionId);
     },
   });
+  const previousBtw = useRef<typeof btwSession.snapshot>(null);
+  useEffect(() => {
+    const current = state.clientState?.entities.btw ?? null;
+    const previous = previousBtw.current;
+    previousBtw.current = current;
+    if (!previewMode.preview && current?.status === "completed" && previous?.status === "running"
+      && current.ephemeralId === previous.ephemeralId && !dock.hosts.get("btw").snapshot().visible) {
+      setShellNotice({ text: t("btw.answerReady"), icon: "check" });
+    }
+  }, [state.clientState?.entities.btw?.status, state.clientState?.entities.btw?.ephemeralId, previewMode.preview, dock.hosts, t]);
   /** Approval mode for Settings → Permissions (plan §5.6); never optimistic. */
   const approvalMode: ApprovalMode = snapshot?.approvalMode ?? "yolo";
   const setApprovalMode = useCallback(
@@ -6733,12 +6923,8 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     await waitReceipt(client, handle.requestId);
   }, [client]);
   const runtimeSettings = runtimeSettingsPropsOf(snapshot, runtimeSettingsCanSet, setRuntimeSetting);
-  const selected = state.model.history?.entries.find((entry) => entry.historyId === selectedHistoryId)
-    ?? historyAll?.entries.find((entry) => entry.historyId === selectedHistoryId)
-    ?? Object.values(projectHistoryCache).flatMap((historyState) => historyState.model?.entries ?? [])
-      .find((entry) => entry.historyId === selectedHistoryId);
-  const viewedSessionId = selected?.sessionId ?? snapshot?.sessionId;
   useLayoutEffect(() => {
+    if (state.loading && !previewMode.preview) return;
     if (previewMode.preview) {
       dock.store.switchScope({ target: "preview", project: previewProjectId, session: previewThreadId }, true);
       return;
@@ -6760,7 +6946,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       setDockSelection(scope);
     }
     dock.store.switchScope(scope, false);
-  }, [dock.store, dockSelection, previewMode.preview, previewProjectId, previewThreadId, selected?.sessionId, creatingSession, executionTarget.id, snapshot?.sessionId, state.model.workspaces?.activeWorkspaceId, state.clientState?.connection.selected?.sessionId]);
+  }, [dock.store, dockSelection, previewMode.preview, previewProjectId, previewThreadId, selected?.sessionId, creatingSession, executionTarget.id, snapshot?.sessionId, state.model.workspaces?.activeWorkspaceId, state.clientState?.connection.selected?.sessionId, state.loading]);
 
   const { agents: viewedAgents, ready: persistedAgentsReady } = usePersistedSessionAgents({
     preview: previewMode.preview,
@@ -6838,7 +7024,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const untitledThreadTitle = selectedHistoryId === null
     ? t("conversation.newChat")
     : t("conversation.untitledSession");
-  const threadTitle = previewMode.preview
+  const threadTitle = state.loading && mdi ? mdi.document.title : previewMode.preview
     ? (previewThread?.thread.title ?? "跟踪上游 pi-web 更新到 omp-web")
     : currentThreadTitle ?? (state.route === "history" ? t("menu.history") : state.route === "home" ? t("menu.home") : state.route === "agent-hub" ? "Agent Hub" : state.route === "capabilities" ? t("menu.capabilities") : state.route === "model-config" ? t("menu.modelConfig") : untitledThreadTitle);
   const onProvisionalSessionChange = useCallback((change: {
@@ -6905,9 +7091,17 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   }, [expandProject, expandedProjects, expandedProjectsMemory, loadProjectHistory, previewMode.preview, previewProjectId, state.model.workspaces]);
 
   useEffect(() => {
+    if (mdi && !mdi.active) return;
     document.documentElement.setAttribute("data-theme", appSettings.theme);
     document.documentElement.setAttribute("data-density", appSettings.density);
-  }, [appSettings.theme, appSettings.density]);
+    /* 文件图标着色：tri 时根元素挂 data-palette，CSS 只覆盖 token。
+       注意根元素用 data-palette、树行用 data-ftype，两者不共名。 */
+    if (appSettings.fileTypePalette === "tri") {
+      document.documentElement.dataset.palette = "tri";
+    } else {
+      delete document.documentElement.dataset.palette;
+    }
+  }, [appSettings.theme, appSettings.density, appSettings.fileTypePalette]);
 
   /* Resident changes drive task notifications. A disappeared row is a
      neutral stop/disconnect, never a success notification. */
@@ -7105,6 +7299,18 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     setTrailAt((value) => Math.min(value + 1, TRAIL_MAX - 1));
     return true;
   }, [onRoute, trail, trailAt, state.model.workspaces]);
+  useEffect(() => {
+    const reveal = (event: Event) => { (event as CustomEvent<{ accepted: boolean }>).detail.accepted = go("workbench"); };
+    window.addEventListener("omp:dock-reveal-workbench", reveal);
+    return () => window.removeEventListener("omp:dock-reveal-workbench", reveal);
+  }, [go]);
+
+  /** The rail's workbench entry behaves like Back/Forward: `go` switches the
+   *  route, `enterWorkbench` re-activates the active workspace when needed. */
+  const navigateFromRail = (route: NavRailRoute) => {
+    if (!go(route)) return;
+    if (route === "workbench") enterWorkbench();
+  };
 
   const runMenu = (action: () => void) => {
     setOpenMenu(null);
@@ -7674,6 +7880,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   }, [client, previewMode.preview, runSessionCreate, refreshSessionTitles, workspaceActionQueue]);
 
   const startNewChat = useCallback((noContextFiles?: boolean) => {
+    if (mdi && !noContextFiles) { mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: mdi.document.ref.workspaceId, draftId: crypto.randomUUID() }); return; }
     if (previewMode.preview) {
       go("workbench");
       return;
@@ -7736,11 +7943,11 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
         return true;
       }
       const question = typeof execute.input.question === "string" ? execute.input.question : args.trim();
-      if (question.length === 0) return true;
-      return await btwSession.ask(question);
+      if (question.length === 0) { await btwSession.refreshHistory?.(); return true; }
+      return await btwSession.ask(question, true);
     }
     if (previewMode.preview) {
-      setShellNotice({ text: `演示：/${command.name}${args ? ` ${args}` : ""}`, icon: "info" });
+      if (previewMode.marks) setShellNotice({ text: `演示：/${command.name}${args ? ` ${args}` : ""}`, icon: "info" });
       return true;
     }
     if (execute.kind === "typed") {
@@ -7804,6 +8011,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
    * 并等待回执（Host 在回执前完成 Runtime 重绑），再 session.create，
    * 否则会话会建到旧项目的 cwd 里。 */
   const startNewChatInProject = useCallback((project: SelectedProject) => {
+    if (mdi) { mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: project.id, draftId: crypto.randomUUID() }); return; }
     if (previewMode.preview) {
       // 预览模式：只切换本地演示状态，不调 Host。
       setPreviewProjectId(project.id);
@@ -7852,6 +8060,12 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   /** opts.resumeForAction：行级「打开并执行」——即使无驻留也 resume，让目标会话
       真正成为 Runtime 活动会话；失败时向上抛出，由调用方统一报告并中止后续动作。 */
   const openHistoryEntry = (entry: SessionHistoryEntry, workspaceId?: WorkspaceId, opts?: { resumeForAction?: boolean; skipQueue?: boolean }): Promise<void> => {
+    if (mdi && !opts?.resumeForAction) {
+      const viewId = mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: workspaceId ?? mdi.document.ref.workspaceId, sessionId: entry.sessionId, threadId: entry.threadId, historyId: entry.historyId });
+      mdi.store.updateDocument(mdi.store.documentFor(viewId)!.id, { title: entry.title ?? t("conversation.untitledSession") });
+      globalThis.window.dispatchEvent(new CustomEvent("omp:conversation-focus", { detail: viewId }));
+      return Promise.resolve();
+    }
     if (!onRoute("workbench")) return opts?.resumeForAction ? Promise.reject(new Error("会话切换已取消")) : Promise.resolve();
     const generation = navigationGate.next();
     setSelectedProvisionalSessionId(undefined);
@@ -7933,6 +8147,12 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
 
   const openProvisionalThread = (thread: ProvisionalProjectThread) => {
     if (!onRoute("workbench")) return;
+    if (mdi) {
+      const existing = mdi.store.getSnapshot().documents.find(document => document.ref.targetId === executionTarget.id && document.ref.workspaceId === thread.workspaceId && (document.ref.sessionId === thread.sessionId || document.ref.draftId === thread.sessionId));
+      const viewId = mdi.store.openFromDirectory(existing?.ref ?? { targetId: executionTarget.id, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) });
+      mdi.store.updateDocument(mdi.store.documentFor(viewId)!.id, { title: thread.title });
+      return;
+    }
     // The current Runtime session can be viewed immediately even while its
     // JSONL tail is still being flushed and the history catalog has no row yet.
     // Do not turn that normal live state into the misleading "仍在写入" error.
@@ -7991,7 +8211,8 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       });
       const entry = history.entries.find((item) => item.sessionId === sessionId);
       if (entry === undefined) return false;
-      openHistoryEntry(entry);
+      if (mdi) onSelectThread(entry);
+      else openHistoryEntry(entry);
       return true;
     } catch {
       return false;
@@ -8092,7 +8313,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
         applySlashUi("context-viewer");
         return;
       case "openSettings":
-        setSettingsIntent(action.group);
+        setSettingsIntent(action.group, action.setting);
         setSettingsNonce((value) => value + 1);
         go("settings");
         return;
@@ -8186,6 +8407,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   // macOS menu bar: the same actions as the shortcuts above plus a few menu-only ones.
   const runMenuCommand = useRef<(command: string) => void>(() => {});
   runMenuCommand.current = (command) => {
+    if (mdi && !mdi.active) return;
     switch (command) {
       case "app.settings": go("settings"); return;
       case "file.newChat": startNewChat(); return;
@@ -8354,7 +8576,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const runFileShellAction = (workspaceId: string, action: FileMenuAction, target: FileMenuTarget) => {
     const desktop = globalThis.ompStudioChrome;
     const messageOf = (cause: unknown): string => (cause instanceof Error && cause.message ? cause.message : String(cause));
-    const notice = (text: string, icon: string): void => {
+    const notice = (text: string, icon: IconName): void => {
       setShellNotice({ text, icon });
     };
     if (action.type === "copyRelative") {
@@ -8414,7 +8636,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   };
 
   const chrome: ShellChrome = {
-    collapsed: !layout.sidebarShown,
+    collapsed: mdi ? collapsed : !layout.sidebarShown,
     skillsOpen,
     explorerOpen,
     projectListExpanded,
@@ -8524,6 +8746,12 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       }
     },
     onSelectPreviewThread: (id) => {
+      if (mdi) {
+        const hit = findPreviewThread(id);
+        if (hit) mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: hit.project.id, previewProjectId: hit.project.id, previewThreadId: id });
+        go("workbench");
+        return;
+      }
       setPreviewThreadId(id);
       const hit = findPreviewThread(id);
       if (hit) {
@@ -8584,12 +8812,32 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
     if (!go("workbench")) return;
     setComposerInsertion({ owner: activeComposerOwner, text });
   };
+  const windowAction = mdi?.store.actionFor(mdi.document.id);
+  useEffect(() => {
+    if (!mdi?.active || !windowAction) return;
+    mdi.store.takeAction(mdi.document.id);
+    if (windowAction.kind === "archive") requestArchiveThread(windowAction.entry, windowAction.workspaceId as WorkspaceId);
+    else if (windowAction.kind === "delete") void deleteSessionThread(windowAction.entry);
+    else runThreadRowAction(windowAction.entry, windowAction.workspaceId as WorkspaceId, windowAction.kind);
+  }, [mdi?.active, windowAction?.id]);
+  useEffect(() => {
+    if (!mdi || state.loading) return;
+    const existing = mdi.store.getSnapshot().documents.find(doc => doc.id === mdi.document.id)!;
+    const ref = { ...existing.ref, targetId: executionTarget.id,
+      ...(previewMode.preview ? { workspaceId: previewProjectId, previewProjectId, previewThreadId } : {
+        ...(dockSelection.project ? { workspaceId: dockSelection.project } : {}),
+        ...(viewedSessionId ? { sessionId: viewedSessionId, draftId: undefined } : {}),
+        ...(selected?.threadId ? { threadId: selected.threadId, historyId: selected.historyId } : {}),
+      }) };
+    mdi.store.updateDocument(mdi.document.id, { ref, title: threadTitle, projectName: previewMode.preview ? findPreviewProject(previewProjectId)?.name : selectedProject?.name });
+  }, [mdi?.document.id, threadTitle, viewedSessionId, dockSelection.project, selected?.threadId, selected?.historyId, previewProjectId, previewThreadId, previewMode.preview, executionTarget.id, selectedProject?.name, state.loading]);
   return (
     <AnnotationsProvider client={client} workspaceId={hubWorkspaceId} sessionId={viewedSessionId} runtimeSessionId={snapshot?.sessionId} onInsert={insertPreparedPrompt}>
     <BackgroundProvider key={previewMode.preview ? "background-preview" : "background-real"} preview={previewMode.preview} theme={theme}>
-    <div className="app" id="appRoot">
-      <AppBackgroundLayer route={state.route} theme={theme} />
+    <div className="app" id="appRoot" aria-busy={state.loading}>
+      <SharedSurface region="background"><AppBackgroundLayer route={state.route} theme={theme} /></SharedSurface>
       <a className="skip-link" href="#convoScroll">跳到对话内容</a>
+      <SharedSurface region="title">
       <Titlebar
         canBack={trailAt > 0}
         canForward={trailAt < trail.length - 1}
@@ -8620,7 +8868,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
           }
         }}
         onToggleSidebar={toggleSidebar}
-        sidebarCollapsed={!layout.sidebarShown}
+        sidebarCollapsed={mdi ? collapsed : !layout.sidebarShown}
         menus={
           <>
             <TitleMenu id="file" label={t("menu.file")} openId={openMenu} onToggle={setOpenMenu}>
@@ -8653,13 +8901,13 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
                    偏好为 true 但被裁掉的区域，菜单必须显示未勾选，点一次要抢回
                    聚焦优先级，而不是把偏好关掉。 */
                 regionState={{
-                  left: { visible: dock.layout.left.visible, presented: layout.sidebarShown },
-                  right: { visible: dock.layout.right.visible, presented: layout.sideShown },
+                  left: { visible: mdi ? !collapsed : dock.layout.left.visible, presented: mdi ? !collapsed : layout.sidebarShown },
+                  right: { visible: dock.layout.right.visible, presented: mdi ? sideOpen : layout.sideShown },
                   /* 底栏的`presented`是整条在屏而不是正文展开：折叠态只显示
                      标签行，它仍然是可见区域的真实状态；若用 expanded 判定，菜单会
                      显示未勾选、点一次却只是重复设置 visible（store 无变化），用户
                      看到的是菜单没反应。展开/折叠由标签条上的箭头负责。 */
-                  bottom: { visible: dock.layout.bottom.visible, presented: layout.bottomVisible },
+                  bottom: { visible: dock.layout.bottom.visible, presented: mdi ? bottomVisible : layout.bottomVisible },
                   rail: { visible: dock.layout.rail.mode !== "hidden", presented: dock.layout.rail.mode !== "hidden" },
                 }}
               />
@@ -8674,12 +8922,42 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
           </>
         }
       />
+      </SharedSurface>
       {sessionActionError ? (
         <div className="empty" role="alert" style={{ padding: "8px 16px" }}>
           <p className="muted small">{sessionActionError}</p>
         </div>
       ) : null}
+      {/* The rail lives outside .app-body: sidebar overlays and the workbench
+          width observer must never cover or measure it. */}
+      <div className="app-shell">
+        {identityFlight.ghost}
+        <SharedSurface region="navigation">
+        <AppNavRail
+          activeRoute={state.route}
+          profile={profile}
+          update={effectiveUpdate === null ? null : { ...(effectiveUpdate.version === undefined ? {} : { version: effectiveUpdate.version }) }}
+          demo={previewMode.preview}
+          collapsed={railCollapsed}
+          onToggleCollapsed={() => setRailCollapsedWithFlight(!railCollapsed)}
+          onNavigate={navigateFromRail}
+          onOpenUpdate={() => setShowAppUpdateDialog(true)}
+          menuOpen={chrome.ompMenuOpen}
+          /* The same control lives in the rail (expanded) and in the sidebar
+             footer (collapsed); the menu anchors to whichever one was clicked. */
+          onToggleMenu={(anchor) => {
+            ompMenuAnchorRef.current = anchor;
+            chrome.onToggleOmpMenu();
+          }}
+          /* Dock panels are fixed-position bodies positioned from their slot's
+             rect; a rail width change moves slots without resizing them, so the
+             dock has to be re-measured on every frame of the slide. */
+          onLayoutShift={dock.hosts.flush}
+          avatarRef={railAvatarRef}
+        />
+        </SharedSurface>
       {showPage ? (
+        <SharedSurface region="page">
         <SecondaryPage
           route={pageRoute}
           title={t(pageMeta.titleKey)}
@@ -8687,6 +8965,9 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
           theme={theme}
           className={shellClass}
           onRoute={go}
+          /* 统计页的唯一入口在首页 Token 用量卡右上角，页头返回就回首页；
+             其余二级页仍回工作台。 */
+          backRoute={pageRoute === "statistics" ? "home" : "workbench"}
           onToggleTheme={chrome.onToggleTheme}
         >
           {state.hostError && (
@@ -8764,15 +9045,18 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
           ) : pageRoute === "media" ? (
             <MediaPage client={client} workspaceId={hubWorkspaceId} sessionId={snapshot?.sessionId} runtimeAvailable={hubRuntimeConnected} onInsert={insertPreparedPrompt} />
           ) : pageRoute === "evaluation" ? (
-            <EvaluationPage client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} available={hubRuntimeConnected} capabilities={capabilities} />
+            <EvaluationPage intent={evaluationIntent} onOpenModels={() => go("model-config")} onOpenDiagnostics={() => go("diagnostics")} client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} available={hubRuntimeConnected} capabilities={capabilities} />
           ) : pageRoute === "model-config" ? (
             <ModelConfigPage capabilities={capabilities} onOpenEvaluation={() => go("evaluation")} key={mcNonce} client={modelClient} sessionId={modelConnection.sessionId} workspaceId={modelConnection.workspaceId} runtimeAvailable={modelConnection.runtimeStatus === "connected"} />
           ) : pageRoute === "statistics" ? (
             <StatisticsPage client={client}/>
           ) : pageRoute === "settings" ? (
             <SettingsPage
+              onDictationModels={() => { setModelConfigIntent({ tab: "roles", role: "dictation" }); go("model-config"); }}
+              onOpenModels={(tab) => { setModelConfigIntent({ tab }); go("model-config"); }}
               onOpenWorktree={openManagedWorktree}
               nativeContext={{ sessionId: snapshot?.sessionId, available: hubRuntimeConnected, capabilities }}
+              memoryTargetId={executionTarget.id}
               client={client}
               predictionSessionId={snapshot?.sessionId}
               predictionAvailable={capabilities?.capabilities.some(capability=>capability.id==="prediction.control"&&capability.grade!=="unavailable")??false}
@@ -8799,18 +9083,21 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
           </DeferredPanel>
           <SecondaryInteractionDeck client={client} interaction={pendingInteraction} runtimeConnected={hubRuntimeConnected} resyncRequired={state.clientState?.connection.resyncRequired === true} preview={previewMode.preview} />
         </SecondaryPage>
+        </SharedSurface>
       ) : null}
-      <div hidden={showPage} inert={showPage} ref={layout.rootRef} className={`app-body adaptive-workbench ${shellClass}`} data-layout-overlay={layout.overlay ?? undefined}>
+      <EvaluationActivity client={client} visible={pageRoute !== "evaluation"} onOpen={(id, kind) => { setEvaluationIntent({ id, kind }); go("evaluation"); }} />
+      <div hidden={workbenchHidden} inert={workbenchHidden} ref={layout.rootRef} className={`app-body adaptive-workbench ${mdi ? "" : shellClass}`} data-layout-overlay={layout.overlay ?? undefined}>
         {layout.overlay ? <button type="button" className="layout-overlay-backdrop" aria-label={t("common.close")} onClick={layout.dismissOverlay} /> : null}
-        <AppSidebar state={state} chrome={chrome} client={client} onRoute={go} onOpenAppUpdateDialog={() => setShowAppUpdateDialog(true)} />
+        <SharedSurface region="sidebar"><AppSidebar state={state} chrome={chrome} client={client} onRoute={go} onOpenAppUpdateDialog={() => setShowAppUpdateDialog(true)} ompMenuAnchorRef={ompMenuAnchorRef} railCollapsed={railCollapsed} avatarRef={footerAvatarRef} footerBoxRef={footerBoxRef} /></SharedSurface>
         <div className="main-col">
+          <ConversationTitleSurface>
           <AppTopbar
             state={state}
             client={client}
             chrome={chrome}
             onRoute={go}
             threadTitle={threadTitle}
-            sideOpen={layout.sideShown}
+            sideOpen={mdi ? sideOpen : layout.sideShown}
             onToggleSide={toggleSide}
             onOpenChanges={() => { setSideTab("changes"); }}
             onOpenGit={() => { setSideTab("git"); }}
@@ -8818,6 +9105,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
             viewedSessionId={selected?.sessionId}
             telemetryRefreshToken={telemetryRefreshToken}
           />
+          </ConversationTitleSurface>
           {state.hostError && (
             <div className="banner amber" role="alert">
               <Icon name="alert" />
@@ -8830,14 +9118,9 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
               <span><b>{t("shell.resyncRequired")}</b> · <span className="banner-detail">{t("shell.resyncRequiredDetail")}</span></span>
             </div>
           )}
-          <RuntimeLossBanner
-            {...(runtime === undefined ? {} : { runtime })}
-            client={client}
-            preview={previewMode.preview}
-            onOpenDiagnostics={() => go("diagnostics")}
-          />
           <WorkbenchCanvas
-            workbenchVisible={!showPage}
+            workbenchVisible={!workbenchHidden && (!mdi || mdi.visible)}
+            viewedSessionName={threadTitle}
             railMode={layout.railMode}
             layoutOverlayDismiss={layout.dismissOverlay}
             onOpenWorktree={openManagedWorktree}
@@ -8846,9 +9129,9 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
             viewIdentity={selectedProvisionalSessionId === undefined
               ? (selectedHistoryId === null ? `live:${freshView}` : `history:${selectedHistoryId}`)
               : `draft:${selectedProvisionalSessionId}`}
-             {...((selectedProvisionalSessionId ?? selected?.sessionId) === undefined ? {} : { selectedSessionId: selectedProvisionalSessionId ?? selected?.sessionId as string })}
+             {...((selectedProvisionalSessionId ?? selected?.sessionId ?? (mdi ? mdi.document.ref.sessionId ?? snapshot?.sessionId : undefined)) === undefined ? {} : { selectedSessionId: (selectedProvisionalSessionId ?? selected?.sessionId ?? (mdi ? mdi.document.ref.sessionId ?? snapshot?.sessionId : undefined)) as string })}
             viewedAgents={viewedAgents}
-            {...(selected?.threadId === undefined ? {} : { selectedThreadId: selected.threadId })}
+            {...((selected?.threadId ?? mdi?.document.ref.threadId ?? state.bootstrap?.selected?.threadId) === undefined ? {} : { selectedThreadId: (selected?.threadId ?? mdi?.document.ref.threadId ?? state.bootstrap?.selected?.threadId) as ThreadId })}
             waitForNewSession={waitForNewSession}
             ensureNewSession={ensureNewSession}
             {...(creatingSession ? { sessionCreating: true } : {})}
@@ -8859,12 +9142,12 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
             onSelectThread={openHistoryEntry}
             onBranchedSession={selectBranchedSession}
             hiddenPreviewThreads={chrome.hiddenPreviewThreads}
-            sideOpen={layout.sideShown}
+            sideOpen={mdi ? sideOpen : layout.sideShown}
             panelWidth={panelWidth}
             onResizePanel={setPanelWidth}
-            bottomOpen={layout.bottomOpen}
+            bottomOpen={mdi ? bottomOpen : layout.bottomOpen}
             onBottomOpenChange={changeBottomOpen}
-            bottomVisible={layout.bottomVisible}
+            bottomVisible={mdi ? bottomVisible : layout.bottomVisible}
             onBottomVisibleChange={changeBottomVisible}
             bottomHeight={bottomHeight}
             onResizeBottom={(height) => setBottomHeight(clampBottomHeight(height))}
@@ -8886,13 +9169,16 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
             onBtwDemoNext={() => setBtwDemoRound((round) => (round + 1) % PREVIEW_BTW_SNAPSHOTS.length)}
             onBtwPreviewAsk={() => setBtwDemoRound(0)}
             compactPending={compactPending}
+            onCompactThread={chrome.onCompactThread}
             onCompactPending={setCompactPending}
             onViewedTelemetryRefresh={refreshViewedTelemetry}
+            telemetryRefreshToken={telemetryRefreshToken}
             {...(createProjectNonce === 0 ? {} : { createProjectNonce })}
             {...(dockSelection.project === null ? {} : { workspaceId: dockSelection.project })}
           />
           <span className="sr-only">client contract v{CLIENT_CONTRACT_VERSION}{snapshot ? ` · session ${snapshot.sessionId}` : ""}</span>
         </div>
+      </div>
       </div>
       {renameOpen ? (
         <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (!renameBusy) setRenameOpen(false); }}>
@@ -9060,19 +9346,46 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
 }
 
 export function App({ client }: { readonly client: StudioClient }) {
-  const [dockStore] = useState(() => new DockStore());
-  return <TerminalSessionsProvider><ExecutionTargets client={client}>{(active, key) => <TargetApp key={key} client={active} dockStore={dockStore} />}</ExecutionTargets></TerminalSessionsProvider>;
+  return <PreviewModeProvider><ConversationWidthProvider><I18nProvider><TerminalSessionsProvider>{client.supportsContexts === true || (client.supportsContexts === undefined && client.openContext) ? <ExecutionTargets client={client}>{() => <ConversationWorkspace client={client} renderDocument={renderConversationDocument} />}</ExecutionTargets> : <LegacyWorkbench client={client} />}</TerminalSessionsProvider></I18nProvider></ConversationWidthProvider></PreviewModeProvider>;
+}
+function renderConversationDocument(client: StudioClient) { return <TargetApp client={client} />; }
+function LegacyWorkbench({ client }: { client: StudioClient }) {
+  const [store] = useState(() => new DockStore());
+  return <DockProvider definitions={WORKBENCH_PANELS} store={store}><ExecutionTargets client={client}>{(active, key) => <TargetApp key={key} client={active} />}</ExecutionTargets><DockFloatingLayer /></DockProvider>;
 }
 
-function TargetApp({ client: inputClient, dockStore }: { readonly client: StudioClient; readonly dockStore: DockStore }) {
+function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
+  const mdi = useConversationView();
   const { t } = useI18n();
   const client = inputClient as ClientStateSource;
   const executionTarget = useExecutionTarget();
+  const connectionStatus = executionTarget.inventory.statuses.find(status => status.id === executionTarget.id)?.state;
+  const connectionRevision = useRef(executionTarget.syncRevision);
+  const previousConnectionStatus = useRef(connectionStatus);
+  useEffect(() => {
+    if (!mdi || mdi.store.demo || executionTarget.id === null) return;
+    const previousStatus = previousConnectionStatus.current;
+    previousConnectionStatus.current = connectionStatus;
+    if (connectionStatus !== "connected") {
+      if (connectionStatus === "synchronizing" || connectionStatus === previousStatus) return;
+      (client as StudioClient & { transportLost?(reason: string): void }).transportLost?.("SSH 连接已中断；保留对话与草稿，等待重新同步。");
+      return;
+    }
+    if (connectionRevision.current !== executionTarget.syncRevision) {
+      connectionRevision.current = executionTarget.syncRevision;
+      void resyncConversationClient(client).catch(() => {});
+    }
+  }, [client, executionTarget.id, executionTarget.syncRevision, connectionStatus]);
   const [committedModelScope, setCommittedModelScope] = useState<string | null>(null);
   const [projectsSettled, setProjectsSettled] = useState(false);
-  const [state, dispatch] = useReducer(reduce, { loading: true, model: {}, events: [], route: "workbench" });
+  const [state, dispatch] = useReducer(reduce, undefined, () => {
+    const cached = mdi?.store.catalog(executionTarget.id), workspaceId = mdi?.document.ref.workspaceId;
+    const workspaces = cached && workspaceId ? { ...cached, activeWorkspaceId: workspaceId as WorkspaceId, workspaces: cached.workspaces.map(workspace => ({ ...workspace, active: workspace.workspaceId === workspaceId })) } : cached;
+    return { loading: true, model: workspaces ? { workspaces } : {}, events: [], route: "workbench" as const };
+  });
+  useEffect(() => { if (state.model.workspaces && mdi) mdi.store.rememberCatalog(executionTarget.id, state.model.workspaces); }, [state.model.workspaces, mdi?.store, executionTarget.id]);
   const [route, setRoute] = useTargetMemory<Route>("route", initialRouteFromSettings);
-  const [selectedHistoryId, setSelectedHistoryId] = useTargetMemory<string | null>("selected-history", () => null);
+  const [selectedHistoryId, setSelectedHistoryId] = useTargetMemory<string | null>("selected-history", () => mdi?.document.ref.historyId ?? null);
   const routeRef = useRef(route);
   routeRef.current = route;
   const navigate = useCallback((next: Route) => {
@@ -9090,7 +9403,7 @@ function TargetApp({ client: inputClient, dockStore }: { readonly client: Studio
   useEffect(() => {
     let cancelled = false;
     const offEvent = client.subscribe({ scope: "all" }, (event) => {
-      notifyFromEvent(event, t);
+      if (!mdi?.store.demo || mdi.active) notifyFromEvent(event, t);
       if (!cancelled && shouldRecordShellEvent(event)) dispatch({ type: "event", event });
     });
     let lastShell: ClientState | undefined;
@@ -9105,7 +9418,7 @@ function TargetApp({ client: inputClient, dockStore }: { readonly client: Studio
       setCommittedModelScope(null);
       setProjectsSettled(false);
       try {
-        const bootstrap = await client.bootstrap();
+        const bootstrap = await initializeConversationClient(client);
         if (cancelled) return;
         const clientState = client.getState?.();
         dispatch({ type: "ready", bootstrap, ...(clientState ? { clientState } : {}) });
@@ -9168,6 +9481,12 @@ function TargetApp({ client: inputClient, dockStore }: { readonly client: Studio
   const sessionRestoreTried = useRef(false);
   useEffect(() => {
     if (sessionRestoreTried.current || state.loading || runtimeStatus === "connecting") return;
+    if (mdi?.document.ref.draftId && mdi.document.ref.draftId !== "initial") return;
+    if (mdi?.document.ref.sessionId && !selectedHistoryId) {
+      const entry = state.model.history?.entries.find(entry => entry.sessionId === mdi.document.ref.sessionId);
+      if (entry) { setSelectedHistoryId(entry.historyId); sessionRestoreTried.current = true; }
+      return;
+    }
     if (state.model.history === undefined && runtimeStatus !== "connected") return;
     sessionRestoreTried.current = true;
     if (!getAppSettings().restoreLastSession) return;
@@ -9178,7 +9497,7 @@ function TargetApp({ client: inputClient, dockStore }: { readonly client: Studio
   }, [state.loading, state.clientState, state.model.history, selectedHistoryId, runtimeStatus]);
 
   const routedState = useMemo(() => ({ ...state, route, model: { ...state.model, ...(state.model.environment && runtimeConnection ? { environment: { ...state.model.environment, runtime: runtimeConnection } } : {}) } }), [state, route, runtimeConnection]);
-  const body = state.loading ? (
+  const body = state.loading && !mdi ? (
     <div className="app">
       <Titlebar />
       <div className="main-col">
@@ -9215,16 +9534,12 @@ function TargetApp({ client: inputClient, dockStore }: { readonly client: Studio
     />
   );
   return (
-    <PreviewModeProvider>
-      <ConversationWidthProvider>
-      <I18nProvider>
+    <>
         <RemoteScopeNotice />
-        <DockProvider definitions={WORKBENCH_PANELS} store={dockStore}>{body}</DockProvider>
-        <StartupNotice />
+        <ShellReadinessContext.Provider value={!state.loading}>{body}</ShellReadinessContext.Provider>
+        {(!mdi || mdi.active) ? <StartupNotice /> : null}
         <TipHost />
-      </I18nProvider>
-      </ConversationWidthProvider>
-    </PreviewModeProvider>
+    </>
   );
 }
 import { StatisticsPage } from "./StatisticsPage";

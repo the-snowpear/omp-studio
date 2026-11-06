@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useSurfaceDocument, surfaceWindow } from "./dock/SurfaceContext";
 
 /** Matches `--tip-delay`: wait before showing so a sweep across buttons does not flash. */
 export const TIP_DELAY_MS = 500;
@@ -15,7 +16,7 @@ const PAD = 8;
  * left/right padding, which resolve `env(titlebar-area-x/width)`. In a plain
  * browser both fall back to 10px, so no zone exists and no bubble flips.
  */
-function captionZones(): { height: number; left: number; right: number } {
+function captionZones(document: Document): { height: number; left: number; right: number } {
   const titlebar = document.querySelector<HTMLElement>(".app-titlebar");
   if (titlebar) {
     const style = getComputedStyle(titlebar);
@@ -23,14 +24,14 @@ function captionZones(): { height: number; left: number; right: number } {
     const right = Number.parseFloat(style.paddingRight);
     return { height: titlebar.offsetHeight, left: Number.isFinite(left) ? left : 0, right: Number.isFinite(right) ? right : 140 };
   }
-  return { height: 36, left: 0, right: 140 };
+  return document.body.classList.contains("dock-native-document") ? { height: 0, left: 0, right: 0 } : { height: 36, left: 0, right: 140 };
 }
 
 function readTip(el: Element): string {
   return el.getAttribute("data-tip")?.trim() ?? "";
 }
 
-function tipFromPoint(x: number, y: number): { el: Element; text: string } | null {
+function tipFromPoint(document: Document, x: number, y: number): { el: Element; text: string } | null {
   const hit = document.elementFromPoint(x, y);
   if (!hit) return null;
   if (hit.closest(".omp-tip-bubble")) return null;
@@ -46,6 +47,7 @@ function tipFromPoint(x: number, y: number): { el: Element; text: string } | nul
  * overflow:hidden ancestors cannot clip it. Do not use native `title`.
  */
 export function TipHost() {
+  const document = useSurfaceDocument(), window = surfaceWindow(document);
   const [tip, setTip] = useState<{ el: Element; text: string } | null>(null);
   const [box, setBox] = useState({ top: 0, left: 0 });
   const [ready, setReady] = useState(false);
@@ -88,7 +90,7 @@ export function TipHost() {
     };
 
     const fromPoint = (x: number, y: number) => {
-      const found = tipFromPoint(x, y);
+      const found = tipFromPoint(document, x, y);
       if (!found) hide();
       else arm(found.el, found.text);
     };
@@ -98,8 +100,8 @@ export function TipHost() {
     };
 
     const onFocusIn = (event: FocusEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
+      const target = event.target as Element | null;
+      if (!target || target.nodeType !== 1) return;
       const el = target.closest("[data-tip]");
       const text = el ? readTip(el) : "";
       if (el && text.length > 0 && target.matches(":focus-visible")) arm(el, text);
@@ -125,7 +127,7 @@ export function TipHost() {
       document.removeEventListener("keydown", onKeyDown);
       document.documentElement.removeEventListener("pointerleave", hide);
     };
-  }, []);
+  }, [document, window]);
 
   useLayoutEffect(() => {
     if (!tip || !bubbleRef.current) return;
@@ -139,7 +141,7 @@ export function TipHost() {
     // their zone (e.g. rightmost topbar buttons on Windows, leftmost on macOS)
     // would be covered — flip it below the anchor instead. Only a real
     // titleBarOverlay inset counts; the env() browser fallback (10px) does not.
-    const zone = captionZones();
+    const zone = captionZones(document);
     const overRight = zone.right > 40 && left + bubble.width > window.innerWidth - zone.right;
     const overLeft = zone.left > 40 && left < zone.left;
     if (top < zone.height && (overRight || overLeft)) {

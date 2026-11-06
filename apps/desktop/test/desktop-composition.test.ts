@@ -495,6 +495,46 @@ test("Runtime trial waits for startup terminal success or failure", async () => 
 // Initialization order + no-runtime read-only bootstrap
 // ---------------------------------------------------------------------------
 
+test("separate conversation contexts keep their selected sessions and closing one preserves the shared Host", async () => {
+  await withTempProfile(async profileDirectory => withTempExecutable(async executablePath => {
+    const first = fakeSessionPort({ ready: true, snapshot: { ...SNAPSHOT, sessionId: "context-a" as SessionId } });
+    const second = fakeSessionPort({ ready: true, snapshot: { ...SNAPSHOT, sessionId: "context-b" as SessionId } });
+    const dummy = { profileDirectory } as DesktopRuntimeSessionContext;
+    const a = (await first.port.start(dummy))!, b = (await second.port.start(dummy))!;
+    let evaluationWorkers = 0, releasedEvaluations = 0;
+    a.capabilityManifest = () => ({ ...HELLO.capabilityManifest, capabilities: [
+      { id: "evaluation.runtime.start", grade: "stable", version: 1, evidence: "test" },
+    ] });
+    a.controller.invoke = async () => ({ status: "completed", result: { models: [] } }) as Awaited<ReturnType<StudioRuntimeSessionController["invoke"]>>;
+    const sessions = new Map([["context-a", a], ["context-b", b]]);
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port, authorityLock: fakeAuthorityLock().port,
+      privateEndpoint: fakePrivateEndpoint().port,
+      resolver: { probe: fullParityProbe() }, preference: { kind: "system", executable: executablePath, allowLimited: false },
+      runtimeSession: { ...first.port, ensure: async () => a, sessionFor: id => sessions.get(id), openContextSession: async (_workspace, intent) => intent.kind === "resume" ? sessions.get(intent.sessionId) : undefined,
+        openEvaluation: async () => { evaluationWorkers++; return a; }, releaseEvaluation: async () => { releasedEvaluations++; } },
+      facade: { resolveImportWorkspace: async id => id === "workspace-a" || id === "workspace-b" ? profileDirectory : undefined },
+    });
+    try {
+      const one = await composition.transport.openContext!({ workspaceId: "workspace-a" as WorkspaceId, sessionId: "context-a" as SessionId });
+      const two = await composition.transport.openContext!({ workspaceId: "workspace-b" as WorkspaceId, sessionId: "context-b" as SessionId });
+      const aState = await one.bootstrap(), bState = await two.bootstrap();
+      assert.equal(aState.snapshot?.sessionId, "context-a"); assert.equal(bState.snapshot?.sessionId, "context-b");
+      assert.equal(aState.selected?.workspaceId, "workspace-a"); assert.equal(bState.selected?.workspaceId, "workspace-b");
+      const evaluationContext = { queryName: "evaluations.context" as const, input: { workspaceId: "workspace-a" } };
+      const reads = await Promise.all([composition.transport.query(evaluationContext), one.query(evaluationContext)]);
+      for (const read of reads) { assert.equal(read.ok, true); if (read.ok) assert.equal(read.result.available, true, read.result.reason); }
+      assert.equal(evaluationWorkers, 1, "concurrent conversation facades share one evaluation service");
+      await one.close();
+      assert.equal(releasedEvaluations, 0, "closing a conversation must not release Host-owned evaluations");
+      assert.equal((await two.bootstrap()).snapshot?.sessionId, "context-b");
+      assert.equal(first.calls.includes("session.stop"), false);
+      await two.close();
+    } finally { await composition.shutdown(); }
+    assert.equal(releasedEvaluations, 1, "Host shutdown releases the shared prepared evaluation Worker");
+  }));
+});
+
 test("composition follows the P1 initialization order and bootstraps read-only without a runtime", async () => {
   await withTempProfile(async (profileDirectory) => {
     const platform = fakePlatform(profileDirectory);

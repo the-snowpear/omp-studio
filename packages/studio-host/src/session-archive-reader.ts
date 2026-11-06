@@ -5,6 +5,8 @@ import { isAbsolute, join, resolve } from "node:path";
 
 import {
   CONVERSATION_LIMITS,
+  readSessionCompactionThreshold,
+  type SessionCompactionRead,
   conversationRedactKey,
   publicConversationToolCallId,
   type ConversationContentBlock,
@@ -352,6 +354,13 @@ export class StudioSessionArchiveReader {
     }
     records.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.agentId.localeCompare(right.agentId));
     return records;
+  }
+
+  /** Read conversation settings without resuming a Runtime or projecting the transcript. */
+  async readCompaction(sessionId: string): Promise<SessionCompactionRead> {
+    const file = await this.#locate(sessionId);
+    const snapshot = await this.#readSnapshot(file, sessionId);
+    return { sessionId, threshold: readSessionCompactionThreshold(sessionId, snapshot.entries) };
   }
 
   /** Returns the current archive revision of a session without reading its content. */

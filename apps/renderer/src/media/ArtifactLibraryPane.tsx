@@ -35,7 +35,7 @@ export function ArtifactStorageSettings({
 }: {
   client?: StudioClient | undefined;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { t } = useI18n();
   const [state, setState] = useState<ArtifactStorageState>();
   const [error, setError] = useState("");
@@ -76,7 +76,7 @@ export function ArtifactStorageSettings({
       >
         <span className="small muted">
           {state?.locationName ?? t("media.unavailable")}
-          {preview ? ` · ${t("common.demo")}` : ""}
+          {preview && marks ? ` · ${t("common.demo")}` : ""}
         </span>
         <button
           type="button"
@@ -132,7 +132,7 @@ export function ArtifactLibraryPane({
   refreshKey?: number;
   visible?: boolean;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { t } = useI18n();
   const [rows, setRows] = useState<readonly ArtifactRecord[]>([]);
   const [kind, setKind] = useState<ArtifactKind | "">("");
@@ -233,7 +233,7 @@ export function ArtifactLibraryPane({
     <section className="artifact-library" aria-label={t("media.library")}>
       <div className="media-toolbar">
         <h3>{t("media.library")}</h3>
-        {preview ? <span className="chip gray">{t("common.demo")}</span> : null}
+        {preview && marks ? <span className="chip gray">{t("common.demo")}</span> : null}
         <AppSelect
           className="select"
           aria-label={t("media.filter")}
@@ -309,7 +309,7 @@ export function ArtifactLibraryPane({
                     row.kind === "image"
                       ? "image"
                       : row.kind === "audio"
-                        ? "mic"
+                        ? "pulse"
                         : "file"
                   }
                   extra="sm"

@@ -1,5 +1,6 @@
 import { useRef, type RefObject } from "react";
 import { Icon } from "../icons";
+import { usePreviewMode } from "../preview/PreviewContext";
 
 export type PlanCreatedLink = {
   readonly title?: string;
@@ -21,6 +22,7 @@ export function PlanCreatedCard({
   onOpen: (origin: HTMLElement) => void;
 }) {
   const localRef = useRef<HTMLButtonElement>(null);
+  const { marks } = usePreviewMode();
   const originRef = cardRef ?? localRef;
   return (
     <button
@@ -37,7 +39,7 @@ export function PlanCreatedCard({
         <span className="plan-created-label">已创建计划</span>
         <span className="plan-created-title">{title}</span>
       </span>
-      {demo === true ? <span className="chip gray xs">演示</span> : null}
+      {demo === true && marks ? <span className="chip gray xs">演示</span> : null}
       <Icon name="chevron-r" extra="sm plan-created-chev" />
     </button>
   );

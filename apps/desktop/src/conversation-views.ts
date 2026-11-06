@@ -1,9 +1,15 @@
 import { CONVERSATION_LIMITS } from "@omp-studio/studio-protocol";
 export const CONVERSATION_VIEW_CHANNEL = "omp-studio:chrome:set-conversation-view-state";
-export interface ConversationViewState { runtimeEpoch: number; visibleSessionIds: readonly string[]; blockedSessionIds?: readonly string[] }
+export interface ConversationViewState { runtimeEpoch: number; visibleSessionIds: readonly string[]; blockedSessionIds?: readonly string[]; views?: readonly ConversationViewState[] }
 export function parseConversationViewState(value: unknown): ConversationViewState | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
+  if (Array.isArray(raw.views)) {
+    const views = raw.views.map(parseConversationViewState);
+    if (!views.length || views.some(view => !view)) return undefined;
+    const first = views[0]!;
+    return { ...first, views: views as ConversationViewState[] };
+  }
   if (Object.keys(raw).some(key => !["runtimeEpoch", "visibleSessionIds", "blockedSessionIds"].includes(key)) || !Number.isSafeInteger(raw.runtimeEpoch) || Number(raw.runtimeEpoch) <= 0
     || !Array.isArray(raw.visibleSessionIds) || raw.visibleSessionIds.length > 8
     || raw.visibleSessionIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS)) return undefined;
@@ -27,22 +33,22 @@ export class ConversationViews {
   remove(key: object): void { this.#windows.delete(key); this.refresh(); }
   report(key: object, input: unknown): boolean {
     const view = this.#windows.get(key), state = parseConversationViewState(input);
-    if (view === undefined || state === undefined || ![...this.#controllers.keys()].some((controller) => controller.epoch() === state.runtimeEpoch)) return false;
+    if (view === undefined || state === undefined || ![...this.#controllers.keys()].some((controller) => (state.views ?? [state]).some(report => controller.epoch() === report.runtimeEpoch))) return false;
     view.state = state; this.#hasReport = true; this.refresh(); return true;
   }
   refresh(): void {
     const epochs = new Set([...this.#controllers.keys()].map((controller) => controller.epoch()));
-    for (const view of this.#windows.values()) if (view.state && !epochs.has(view.state.runtimeEpoch)) delete view.state;
+    for (const view of this.#windows.values()) if (view.state && !(view.state.views ?? [view.state]).some(state => epochs.has(state.runtimeEpoch))) delete view.state;
     const legacy = !this.#hasReport || [...this.#windows.values()].some((view) => view.state === undefined);
     for (const [controller, previous] of this.#controllers) {
       const epoch = controller.epoch();
       const visible = new Set<string>();
       const blocked = new Set<string>();
       let ownerKnown = true;
-      for (const view of this.#windows.values()) if (view.visible && view.state !== undefined && view.state.runtimeEpoch === epoch) {
-        for (const id of view.state.visibleSessionIds) visible.add(id);
-        if (view.state.blockedSessionIds === undefined) ownerKnown = false;
-        for (const id of view.state.blockedSessionIds ?? []) blocked.add(id);
+      for (const view of this.#windows.values()) if (view.visible && view.state !== undefined) for (const state of view.state.views ?? [view.state]) if (state.runtimeEpoch === epoch) {
+        for (const id of state.visibleSessionIds) visible.add(id);
+        if (state.blockedSessionIds === undefined) ownerKnown = false;
+        for (const id of state.blockedSessionIds ?? []) blocked.add(id);
       }
       const signature = `${epoch}:${legacy ? "legacy" : [...visible].sort().join("\u0000")}:${ownerKnown}:${[...blocked].sort().join("\u0000")}`;
       if (signature === previous) continue;

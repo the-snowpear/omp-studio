@@ -163,6 +163,11 @@ export function validateRuntimeSettingValue(
   value: unknown,
   path: string,
 ): void {
+  if (isGuiSettingKey(key)) {
+    try { validateGuiSetting(key, value); }
+    catch { throw new ContractValidationError("invalid Runtime setting value", path); }
+    return;
+  }
   switch (key) {
     case "modelRoles.judge":
       if (typeof value !== "string" || value.length > 4096 || /[\u0000-\u001f]/u.test(value)) {
@@ -269,6 +274,9 @@ function validateRuntimeSettingsSnapshot(value: unknown, path: string): void {
   exactKeys(settings, STUDIO_RUNTIME_SETTING_KEYS, path);
   for (const key of STUDIO_RUNTIME_SETTING_KEYS) {
     if (settings[key] === undefined && OPTIONAL_RUNTIME_SETTING_KEYS.has(key)) continue;
+    // Native config may contain values outside the editor's range. The Runtime
+    // clamps those at use time; accepting the snapshot must not disconnect it.
+    if (["read.defaultLimit", "async.maxJobs", "mnemopi.recallLimit", "mnemopi.injectionTokenLimit", "hindsight.recallMaxTokens", "tools.maxTimeout"].includes(key) && typeof settings[key] === "number" && Number.isFinite(settings[key])) continue;
     validateRuntimeSettingValue(key, settings[key], `${path}.${key}`);
   }
 }
@@ -697,7 +705,14 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
   }
   if (input.runtimeSettingsActivation !== undefined) {
     const activation = record(input.runtimeSettingsActivation, "$snapshot.snapshot.runtimeSettingsActivation");
-    exactKeys(activation, ["configured", "restartRequired", "sources"], "$snapshot.snapshot.runtimeSettingsActivation");
+    exactKeys(activation, ["configured", "restartRequired", "sources", "hindsightCredential", "resolvedEditMode"], "$snapshot.snapshot.runtimeSettingsActivation");
+    if (activation.resolvedEditMode !== undefined) oneOf(activation.resolvedEditMode, ["apply_patch", "hashline", "patch", "replace", "sloppy"], "activation.resolvedEditMode");
+    if (activation.hindsightCredential !== undefined) {
+      const credential = record(activation.hindsightCredential, "activation.hindsightCredential");
+      exactKeys(credential, ["configured", "source"], "activation.hindsightCredential");
+      booleanValue(credential.configured, "activation.hindsightCredential.configured");
+      oneOf(credential.source, ["env", "runtime", "overlay", "project", "global", "default"], "activation.hindsightCredential.source");
+    }
     if (activation.sources !== undefined) {
       const sources = record(activation.sources, "activation.sources"); exactKeys(sources, STUDIO_RUNTIME_SETTING_KEYS, "activation.sources");
       for (const source of Object.values(sources)) oneOf(source,["env","runtime","overlay","project","global","default"],"activation.sources");
@@ -835,6 +850,8 @@ export function parseStudioEventEnvelope(value: unknown): StudioEventEnvelope {
     }
     booleanValue(error.retryable, "$event.event.error.retryable");
     if (error.details !== undefined) record(error.details, "$event.event.error.details");
+  } else if (event.kind === "evaluation.changed") {
+    if (typeof event.id !== "string" || typeof event.revision !== "number") throw new Error("Invalid evaluation event");
   } else if (event.kind === "btw.changed") {
     exactKeys(event, ["kind", "snapshot"], "$event.event");
     parseBtwSnapshot(event.snapshot, "$event.event.snapshot");
@@ -1063,9 +1080,10 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "runtime.settings.get": {
-    keys: ["kind", "keys"],
+    keys: ["kind", "keys", "checkHindsight"],
     validate: (operation) => {
       if (operation.keys !== undefined) validateRuntimeSettingsSelection(operation.keys, "$request.operation.keys");
+      if (operation.checkHindsight !== undefined) booleanValue(operation.checkHindsight, "$request.operation.checkHindsight");
     },
   },
   "runtime.settings.set": {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   SESSION_TRANSCRIPT_READ_KIND,
+  isComputerWorkspaceCommand,
   type CommandConcurrency,
   type CommandId,
   type Generation,
@@ -51,7 +52,10 @@ export class StudioHostError extends Error {
 }
 
 export function classifyOperation(operation: StudioOperation): CommandConcurrency {
-  if (["btw.history.list", "btw.history.read", "session.models.mentions", "session.import.list", "session.import.preview", "runtime.auth.get"].includes(operation.kind)) return "read-concurrent";
+  // Observation leases and the emergency control gate must work during a turn.
+  // They do not acquire the session mutation lane.
+  if (isComputerWorkspaceCommand(operation.kind)) return "read-concurrent";
+  if (["btw.history.list", "btw.history.read", "btw.images.resolve", "session.models.mentions", "session.import.list", "session.import.preview", "runtime.auth.get"].includes(operation.kind)) return "read-concurrent";
   if (["btw.ask", "btw.followUp", "btw.abort", "session.import.execute", "runtime.auth.set", "runtime.auth.remove"].includes(operation.kind)) return "queue-compatible";
   if (
     operation.kind === "runtime.snapshot" ||

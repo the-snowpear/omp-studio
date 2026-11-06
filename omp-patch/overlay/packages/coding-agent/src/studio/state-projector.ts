@@ -1,5 +1,6 @@
 import { pauseWorkStatus } from "../slash-commands/builtin-control";
 import { cfgToolsApprovalMode } from "../tools/settings";
+import { cfgHindsightApiToken } from "../hindsight/settings";
 import { logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import {
@@ -87,6 +88,7 @@ function truncatePlanBody(body: string): string {
 }
 
 export class StudioStateProjector {
+	#unsubscribeEvaluations: (() => void) | undefined;
 	readonly #runtime: StudioHostRuntime;
 	readonly #pauseService: StudioPauseService;
 	readonly #loopService: StudioLoopService;
@@ -103,6 +105,7 @@ export class StudioStateProjector {
 	readonly #unsubscribeTaskModel: () => void;
 	readonly #unsubscribeAgents: () => void;
 	#unsubscribeJobs: () => void = () => {};
+	#unsubscribeMemoryCredential: () => void = () => {};
 	readonly #unsubscribeSessionTitle: () => void;
 	readonly #unsubscribeConversation: () => void;
 	readonly #unsubscribeWorker: () => void;
@@ -206,6 +209,15 @@ export class StudioStateProjector {
 			};
 		};
 		bindJobManager();
+		const bindMemoryCredential = (): void => {
+			this.#unsubscribeMemoryCredential();
+			this.#unsubscribeMemoryCredential = runtime.services.settings
+				? cfgHindsightApiToken.listen(runtime.session.settings, () => {
+						this.commitStateChange();
+					})
+				: () => {};
+		};
+		bindMemoryCredential();
 		this.#unsubscribeJobs = () => unsubscribeJobManager();
 		const sessionManager = runtime.sessionManager as SessionTitlePort | undefined;
 		const onSessionNameChanged = sessionManager?.onSessionNameChanged;
@@ -213,11 +225,15 @@ export class StudioStateProjector {
 			typeof onSessionNameChanged === "function" && sessionManager !== undefined
 				? onSessionNameChanged.call(sessionManager, () => this.commitStateChange())
 				: () => {};
+		this.#unsubscribeEvaluations = runtime.services.workbench?.evaluations?.subscribe((id, revision) =>
+			this.#emitEvent({ kind: "evaluation.changed", id, revision }),
+		);
 		this.#unsubscribeConversation =
 			runtime.services.conversation?.onEvent(event => this.#emitConversation(event)) ?? (() => {});
 		this.#unsubscribeWorker =
 			runtime.onWorkerStateChange?.(() => {
 				bindJobManager();
+				bindMemoryCredential();
 				this.commitStateChange();
 			}) ?? (() => {});
 	}
@@ -632,6 +648,7 @@ export class StudioStateProjector {
 	}
 
 	dispose(): void {
+		this.#unsubscribeEvaluations?.();
 		clearInterval(this.#pauseRefresh);
 		if (this.#telemetryTimer !== undefined) clearTimeout(this.#telemetryTimer);
 		this.#telemetryTimer = undefined;
@@ -643,6 +660,7 @@ export class StudioStateProjector {
 		this.#unsubscribeTaskModel();
 		this.#unsubscribeAgents();
 		this.#unsubscribeJobs();
+		this.#unsubscribeMemoryCredential();
 		this.#unsubscribeSessionTitle();
 		this.#unsubscribeConversation();
 		this.#unsubscribeWorker();

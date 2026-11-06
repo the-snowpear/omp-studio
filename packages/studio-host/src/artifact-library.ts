@@ -5,6 +5,12 @@ import { basename, extname, isAbsolute, join } from "node:path";
 import { ARTIFACT_KINDS, ARTIFACT_TEXT_MAX_BYTES, validateArtifactTextInput, type ArtifactTextInput, type ArtifactTextResult, type ArtifactKind, type ArtifactRecord, type ArtifactListInput, type ArtifactPage, type ArtifactStorageState } from "@omp-studio/studio-protocol";
 
 interface StoredArtifact { record: ArtifactRecord; rootId: string; filename: string }
+interface PendingRegistration {
+  item: StoredArtifact;
+  directory: string;
+  resolve(record: ArtifactRecord): void;
+  reject(error: unknown): void;
+}
 interface Catalog {
   version: 1;
   activeRoot: string;
@@ -39,6 +45,8 @@ export class ArtifactLibrary {
   readonly #maxArtifactBytes: number;
   readonly #now: () => Date;
   #tail: Promise<unknown> = Promise.resolve();
+  #pendingRegistrations: PendingRegistration[] = [];
+  #registrationTimer: NodeJS.Timeout | undefined;
 
   constructor(options: ArtifactLibraryOptions) {
     if (!isAbsolute(options.profileDirectory)) throw new Error("Artifact profile must be absolute");
@@ -153,22 +161,51 @@ export class ArtifactLibrary {
           ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
           ...(input.runId === undefined ? {} : { runId: input.runId }),
         };
-        await this.#serial(async () => {
-          const latest = await this.#load();
-          if (input.runId && latest.removedRunIds?.includes(input.runId)) throw new Error("This generated output was explicitly removed from the artifact library");
-          const policy = record.sessionId ? latest.sessionPolicies?.["session:" + record.sessionId] : undefined;
-          if (policy === "delete") throw new Error("The session and its managed artifacts were deleted");
-          if (policy === "retain") { const { sessionId: _sessionId, ...retained } = record; record = retained; }
-          latest.roots[catalog.activeRoot] = directory;
-          latest.artifacts.push({ record, rootId: catalog.activeRoot, filename });
-          await this.#save(latest);
-        });
+        record = await this.#commitRegistration({ record, rootId: catalog.activeRoot, filename }, directory);
         committed = true;
         return structuredClone(record);
       } finally {
         await unlink(temporary).catch(error => { if (!isMissing(error)) throw error; });
         if (!committed) await unlink(target).catch(error => { if (!isMissing(error)) throw error; });
       }
+  }
+
+  /** Coalesce simultaneous frame promotions into one catalog transaction, never one write per preview frame. */
+  #commitRegistration(item: StoredArtifact, directory: string): Promise<ArtifactRecord> {
+    return new Promise((resolve, reject) => {
+      this.#pendingRegistrations.push({ item, directory, resolve, reject });
+      if (this.#registrationTimer) return;
+      this.#registrationTimer = setTimeout(() => {
+        this.#registrationTimer = undefined;
+        const batch = this.#pendingRegistrations;
+        this.#pendingRegistrations = [];
+        void this.#serial(async () => {
+          const latest = await this.#load();
+          const accepted: PendingRegistration[] = [];
+          for (const entry of batch) {
+            const record = entry.item.record;
+            const policy = record.sessionId ? latest.sessionPolicies?.["session:" + record.sessionId] : undefined;
+            if (record.runId && latest.removedRunIds?.includes(record.runId)) {
+              entry.reject(new Error("This generated output was explicitly removed from the artifact library"));
+              continue;
+            }
+            if (policy === "delete") {
+              entry.reject(new Error("The session and its managed artifacts were deleted"));
+              continue;
+            }
+            if (policy === "retain") {
+              const { sessionId: _sessionId, ...retained } = record;
+              entry.item.record = retained;
+            }
+            latest.roots[entry.item.rootId] = entry.directory;
+            latest.artifacts.push(entry.item);
+            accepted.push(entry);
+          }
+          if (accepted.length) await this.#save(latest);
+          for (const entry of accepted) entry.resolve(entry.item.record);
+        }).catch(error => { for (const entry of batch) entry.reject(error); });
+      }, 5);
+    });
   }
 
   registerBytes(input: ArtifactRegistration, bytes: Uint8Array): Promise<ArtifactRecord> {
@@ -256,6 +293,41 @@ export class ArtifactLibrary {
       await unlink(join(catalog.roots[item.rootId]!, item.filename)).catch(error => { if (!isMissing(error)) throw error; });
       catalog.artifacts = catalog.artifacts.filter(row => row !== item);
       await this.#save(catalog);
+    });
+  }
+
+  /** Fence a managed output even if its asynchronous registration has not finished yet. */
+  discardRun(runId: string): Promise<void> {
+    return this.#serial(async () => {
+      const catalog = await this.#load();
+      if (!catalog.removedRunIds?.includes(runId)) {
+        if ((catalog.removedRunIds?.length ?? 0) >= MAX_RECORDS) throw new Error("Artifact deletion history is full");
+        catalog.removedRunIds = [...(catalog.removedRunIds ?? []), runId];
+        await this.#save(catalog);
+      }
+      const discarded = catalog.artifacts.filter(item => item.record.runId === runId && item.record.sessionId !== undefined);
+      for (const item of discarded) await unlink(join(catalog.roots[item.rootId]!, item.filename)).catch(error => { if (!isMissing(error)) throw error; });
+      if (discarded.length) {
+        const ids = new Set(discarded.map(item => item.record.artifactId));
+        catalog.artifacts = catalog.artifacts.filter(item => !ids.has(item.record.artifactId));
+        await this.#save(catalog);
+      }
+    });
+  }
+
+  /** An explicit user save keeps this one artifact independent of session cleanup. */
+  retain(artifactId: string): Promise<ArtifactRecord> {
+    return this.#serial(async () => {
+      if (!ID.test(artifactId)) throw new Error("Invalid artifact ID");
+      const catalog = await this.#load();
+      const item = catalog.artifacts.find(row => row.record.artifactId === artifactId);
+      if (!item) throw new Error("Artifact does not exist");
+      if (item.record.sessionId !== undefined) {
+        const { sessionId: _sessionId, ...retained } = item.record;
+        item.record = retained;
+        await this.#save(catalog);
+      }
+      return structuredClone(item.record);
     });
   }
 

@@ -166,6 +166,22 @@ const context = {
 const WORKSPACE_A = { workspaceId: "workspace-a", cwd: "C:/workspace" };
 const WORKSPACE_B = { workspaceId: "workspace-b", cwd: "C:/other" };
 
+test("opening background conversation contexts preserves foreground and each worker workspace", async () => {
+  const { port, state } = createHarness();
+  try {
+    await port.start(context);
+    const active = port.listResidents!().activeSessionId;
+    const first = await port.openContextSession!(WORKSPACE_A, { kind: "resume", sessionId: "context-a" });
+    const second = await port.openContextSession!(WORKSPACE_B, { kind: "resume", sessionId: "context-b" });
+    assert.equal(port.listResidents!().activeSessionId, active);
+    assert.equal(port.sessionFor!("context-a"), first);
+    assert.equal(port.sessionFor!("context-b"), second);
+    assert.equal(await port.openContextSession!(WORKSPACE_A, { kind: "resume", sessionId: "context-a" }), first);
+    assert.equal(state.launchedIn.find(row => row.sessionId === "context-b")?.cwd, WORKSPACE_B.cwd);
+    assert.equal(state.stopped.length, 0);
+  } finally { await port.stop(); }
+});
+
 function callbackHarness() {
   const workers: Array<{
     session: DesktopRuntimeSession;

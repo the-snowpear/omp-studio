@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The development Runtime pin is `can1357/oh-my-pi` `v18.13.2` at commit `e996e1c7ac476f60e02b8ed9764cf30fa8c00a8e` (Runtime `18.13.2-studio.10`). See the [18.13.2 migration report](../docs/migrations/omp-18.13.2.md). The upgrade baseline was `18.12.6-studio.9`; the [18.12.6 report](../docs/migrations/omp-18.12.6.md) records its original migration, not its later patchset revisions.
+The development Runtime pin is `can1357/oh-my-pi` `v18.13.2` at commit `e996e1c7ac476f60e02b8ed9764cf30fa8c00a8e`. The current Studio revision is recorded in `patches/series.json`. See the [18.13.2 migration report](../docs/migrations/omp-18.13.2.md). The upgrade baseline was `18.12.6-studio.9`; the [18.12.6 report](../docs/migrations/omp-18.12.6.md) records its original migration, not its later patchset revisions.
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
@@ -22,10 +22,10 @@ The overlay is ordinary tracked source in this repository. Editing it is an ordi
 
 | Patch | Upstream subsystem |
 |---|---|
-| `0001-studio-cli-entry.patch` | `main.ts`, `cli.ts`, CLI arg/flag tables, launch help, package manifest |
-| `0002-studio-session-runtime.patch` | `session/**`, `registry/agent-registry.ts`, `plan-mode/approved-plan.ts` |
-| `0003-studio-modes-and-pause.patch` | `modes/**`, `slash-commands/builtin-modes.ts`, `async/job-manager.ts` |
-| `0004-studio-extensibility.patch` | `extensibility/extensions/**`, `sdk.ts`, `tools/context.ts` |
+| `0001-studio-cli-entry.patch` | CLI entry, flags, configuration, launch help, package exports |
+| `0002-studio-session-runtime.patch` | Session/queue persistence and control, registry, tasks/worktrees, archive, prediction |
+| `0003-studio-modes-and-pause.patch` | Interactive/RPC modes, slash controls, pause, jobs, shared chart types |
+| `0004-studio-extensibility.patch` | Extension/SDK hooks, tools/browser, service broker, IDA, media, stats and evaluation |
 
 `scripts/omp-seam.mjs` holds the authoritative path list for each group. Adding a seam file means adding it to a group there and rerunning the regen script — an upstream file that no group claims makes regeneration fail rather than silently dropping the edit.
 
@@ -45,7 +45,11 @@ npm run omp:overlay:apply    # overlay copied in + seam patches applied (idempot
 npm run omp:patches:regen    # overlay captured back, seam patches rewritten, series.json updated
 ```
 
-Never hand-write or hand-edit a `.patch`. Regeneration is the only supported producer; hand edits drift from the group definition and reintroduce the ordering problems this model removes.
+Never hand-write or hand-edit a `.patch`. Regeneration is the only supported producer; hand edits drift from the group definition and reintroduce the ordering problems this model removes. It captures both staged and unstaged vendor changes relative to `series.upstreamCommit`; staging a file must never remove it from the generated patch.
+
+Queue IDs identify prepared groups, including skill and image companions. Legacy Studio queue operations adapt to the same native grouping and mutation methods. Held groups remain outside executable queues and prevent idle Worker recycling until the operator restores or removes them. Service mutations serialize per name, while readiness waits run outside that serialization and remain bound to the launch generation.
+
+Conversation compaction metadata uses a lazy custom-entry index, updated only for newly appended entries and rebuilt when the session entry collection changes. Title inspection reads native header/title slots and checks legacy title entries only when a card is not encoded in the title. IDA list paging formats only the requested records; counting still traverses the metadata iterator. Prediction imports enter the private history database and use the native `sync` operation.
 
 Verify the whole fork from a clean vendor tree:
 

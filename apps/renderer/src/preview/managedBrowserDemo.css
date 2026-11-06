@@ -1,0 +1,48 @@
+/* Preview-only stand-in web pages. They use their own light palette on purpose:
+   a website does not follow the app theme, and the contrast is what makes the
+   page read as a page inside the browser chrome. */
+.mbd-page { position: absolute; inset: 0; overflow: auto; background: #fff; color: #23252b; font: 13px/1.55 "Segoe UI", system-ui, -apple-system, sans-serif; }
+.mbd-page.is-picking [data-demo-pick] { cursor: crosshair; }
+.mbd-page.is-picking [data-demo-pick]:hover { outline: 2px solid #6e56cf; outline-offset: 2px; background-color: rgb(110 86 207 / 8%); }
+.mbd-hint { position: sticky; bottom: 0; margin: 0; padding: 6px 14px; border-top: 1px solid #e7e7ec; background: #f7f6fc; color: #5b4bb3; font-size: 12px; }
+
+.mbd-button { height: 32px; padding: 0 14px; border: 1px solid #5a45b8; border-radius: 7px; background: #6e56cf; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.mbd-button:hover:not(:disabled) { background: #5f48c0; }
+.mbd-button:disabled { opacity: .72; cursor: default; }
+.mbd-button.is-ghost { border-color: #d9d9e0; background: #fff; color: #33353c; font-weight: 500; }
+.mbd-button.is-ghost:hover:not(:disabled) { background: #f4f4f7; }
+
+.mbd-app { display: flex; flex-direction: column; min-height: 100%; }
+.mbd-app-bar { display: flex; align-items: center; gap: 10px; flex: none; height: 44px; padding: 0 16px; border-bottom: 1px solid #ececf1; }
+.mbd-app-logo { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #6e56cf, #a78bfa); }
+.mbd-app-bar nav { display: flex; gap: 14px; margin-left: 14px; color: #6b6e78; }
+.mbd-app-bar nav .is-active { color: #23252b; font-weight: 600; }
+.mbd-app-body { display: flex; flex: 1 1 auto; min-height: 0; }
+.mbd-app-side { display: flex; flex: 0 0 132px; flex-direction: column; gap: 2px; padding: 14px 10px; border-right: 1px solid #ececf1; color: #6b6e78; }
+.mbd-app-side span { padding: 4px 8px; border-radius: 6px; }
+.mbd-app-side .is-active { background: #f1eefb; color: #5a45b8; font-weight: 600; }
+.mbd-app-main { flex: 1 1 auto; min-width: 0; padding: 18px 22px 28px; }
+.mbd-app-crumbs { margin: 0; color: #8a8d97; font-size: 12px; }
+.mbd-app-main h1 { margin: 4px 0 6px; font-size: 24px; font-weight: 650; letter-spacing: -.02em; }
+.mbd-app-lead { max-width: 56ch; margin: 0 0 16px; color: #575a63; }
+.mbd-app-card { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; padding: 18px; border: 1px solid #ececf1; border-radius: 10px; background: #fafafc; }
+.mbd-app-field { display: flex; flex: 1 1 160px; flex-direction: column; gap: 4px; color: #6b6e78; font-size: 12px; }
+.mbd-app-field input { height: 32px; box-sizing: border-box; padding: 0 10px; border: 1px solid #d9d9e0; border-radius: 7px; background: #fff; color: #23252b; font: inherit; font-size: 13px; }
+
+.mbd-doc { max-width: 620px; margin: 0 auto; padding: 26px 24px 36px; }
+.mbd-doc-crumbs { color: #8a8d97; font-size: 12px; }
+.mbd-doc h1 { margin: 8px 0 12px; font-size: 26px; font-weight: 650; letter-spacing: -.02em; }
+.mbd-doc p { margin: 0 0 14px; color: #3f4149; line-height: 1.7; }
+.mbd-callout { margin-bottom: 14px; padding: 10px 12px; border-left: 3px solid #1f6ba3; border-radius: 0 6px 6px 0; background: #eef5fb; color: #1f4e74; }
+.mbd-doc pre { margin: 0; padding: 12px 14px; overflow: auto; border-radius: 8px; background: #22242b; color: #e4e6ec; font: 12px/1.6 Consolas, "JetBrains Mono", monospace; }
+
+.mbd-story { display: flex; min-height: 100%; }
+.mbd-story-tree { display: flex; flex: 0 0 140px; flex-direction: column; gap: 2px; padding: 14px 10px; background: #f6f7f9; color: #5e616b; }
+.mbd-story-tree strong { padding: 0 8px 6px; color: #23252b; }
+.mbd-story-tree span { padding: 3px 8px; border-radius: 5px; }
+.mbd-story-tree .is-active { background: #d94f6c; color: #fff; }
+.mbd-story-canvas { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.mbd-story-stage { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; min-height: 130px; padding: 20px; }
+.mbd-story-args { width: 100%; border-collapse: collapse; border-top: 1px solid #ececf1; font-size: 12px; }
+.mbd-story-args th, .mbd-story-args td { padding: 6px 14px; border-bottom: 1px solid #f0f0f4; text-align: left; font-weight: 500; }
+.mbd-story-args th { width: 34%; color: #6b6e78; }

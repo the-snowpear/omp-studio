@@ -58,7 +58,7 @@ export function MediaWorkbench({
   onInsert?: ((text: string) => void) | undefined;
   onArtifactsChanged(): void;
 }) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const t = (cn: string, en: string) => (zh ? cn : en);
@@ -403,7 +403,7 @@ export function MediaWorkbench({
             ...PREVIEW_MEDIA_DETAIL.job,
             id: crypto.randomUUID(),
             type: review.type,
-            model: review.model ?? "demo/role",
+            model: review.model ?? (marks ? "demo/role" : t("角色链", "Role chain")),
             createdAt: Date.now(),
             updatedAt: Date.now(),
             cost: 0,
@@ -413,10 +413,12 @@ export function MediaWorkbench({
           ...(review.type === "transcription"
             ? { text: PREVIEW_MEDIA_DETAIL.text! }
             : {
-                text: t(
-                  "演示任务已完成。真实结果会保存到产物库。",
-                  "Demo task completed. Real outputs are saved to the artifact library.",
-                ),
+                text: marks
+                  ? t(
+                      "演示任务已完成。真实结果会保存到产物库。",
+                      "Demo task completed. Real outputs are saved to the artifact library.",
+                    )
+                  : "",
               }),
         };
         demos.current.set(value.job.id, value);
@@ -503,7 +505,7 @@ export function MediaWorkbench({
             label: labels[kind],
           }))}
           actions={
-            preview ? (
+            preview && marks ? (
               <span className="chip gray">{t("演示", "Demo")}</span>
             ) : undefined
           }
@@ -514,7 +516,7 @@ export function MediaWorkbench({
           className="media-section-title"
         >
           {labels[type]}
-          {preview ? (
+          {preview && marks ? (
             <span className="chip gray">{t("演示", "Demo")}</span>
           ) : null}
         </h3>
@@ -1178,7 +1180,7 @@ export function MediaWorkbench({
                     ) : null
                   ) : (
                     <p className="muted">
-                      {preview
+                      {preview && marks
                         ? t("演示产物", "Demo artifact")
                         : t(
                             "文件预览需桌面文件通道。",

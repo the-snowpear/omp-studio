@@ -70,25 +70,27 @@ describe("Runtime settings seam", () => {
     expect(screen.getByText(/已保存，需重启 Runtime/)).toBeTruthy();
     expect(onSet).not.toHaveBeenCalled();
     fireEvent.click(toggle);
-    await waitFor(() => expect(onSet).toHaveBeenCalledWith("compaction.experimentalContextManagement", false));
+    await waitFor(() => expect(onSet).toHaveBeenCalledWith("compaction.experimentalContextManagement", false, true));
   });
 
   it("keeps autosave and quota-wait preview controls local", () => {
     const onSet = vi.fn();
     renderSettings({ preview: true, runtimeSettings: { snapshot, onSet } });
-    openTab("任务与执行");
+    openTab("任务与代理");
     fireEvent.click(screen.getByRole("switch", { name: "自动保存已批准计划" }));
+    openTab("模型与服务");
     fireEvent.click(screen.getByRole("switch", { name: "等待模型额度恢复" }));
     expect(onSet).not.toHaveBeenCalled();
   });
   it("keeps available settings disabled without a Runtime snapshot", () => {
     renderSettings();
 
-    openTab("文件与终端");
+    openTab("工具与终端");
     expect((screen.getByRole("switch", { name: "自动修复编辑" }) as HTMLButtonElement).disabled).toBe(true);
 
-    openTab("任务与执行");
+    openTab("任务与代理");
     expect((screen.getByRole("combobox", { name: "意外停止检测" }) as HTMLButtonElement).disabled).toBe(true);
+    openTab("模型与服务");
     expect((screen.getByRole("textbox", { name: "判断模型" }) as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("combobox", { name: "Claude 重置券" }) as HTMLButtonElement).disabled).toBe(true);
 
@@ -97,7 +99,7 @@ describe("Runtime settings seam", () => {
     expect((screen.getByRole("switch", { name: "异步压缩" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("combobox", { name: "压缩方法顺序" }) as HTMLButtonElement).disabled).toBe(true);
 
-    openTab("高级");
+    openTab("模型与服务");
     expect(screen.queryByRole("combobox", { name: "Codex code mode" })).toBeNull();
   });
 
@@ -105,11 +107,11 @@ describe("Runtime settings seam", () => {
     const onSet = vi.fn();
     renderSettings({ runtimeSettings: { snapshot, compactionSpeculation: "running", onSet } });
 
-    openTab("文件与终端");
+    openTab("工具与终端");
     fireEvent.click(screen.getByRole("switch", { name: "自动修复编辑" }));
     await waitFor(() => expect(onSet).toHaveBeenCalledTimes(1));
 
-    openTab("任务与执行");
+    openTab("任务与代理");
     selectOption(screen.getByRole("combobox", { name: "意外停止检测" }), "机械检测");
     await waitFor(() => expect(onSet).toHaveBeenCalledTimes(2));
     selectOption(screen.getByRole("combobox", { name: "意外停止模型" }), "在线模型");
@@ -128,23 +130,23 @@ describe("Runtime settings seam", () => {
     await waitFor(() => expect(onSet).toHaveBeenCalledTimes(6));
     expect(screen.getByText("运行中")).toBeTruthy();
 
-    openTab("高级");
+    openTab("模型与服务");
     expect(screen.queryByRole("combobox", { name: "Codex code mode" })).toBeNull();
 
     expect(onSet.mock.calls).toEqual([
-      ["edit.autoRepair.enabled", false],
-      ["features.unexpectedStopDetection", "mechanical"],
-      ["providers.unexpectedStopModel", "online"],
-      ["extendedContext", false],
-      ["compaction.asyncEnabled", true],
-      ["compaction.methodOrder", ["snapcompact", "remote", "handoff", "shake", "soft"]],
+      ["edit.autoRepair.enabled", false, true],
+      ["features.unexpectedStopDetection", "mechanical", true],
+      ["providers.unexpectedStopModel", "online", true],
+      ["extendedContext", false, true],
+      ["compaction.asyncEnabled", true, true],
+      ["compaction.methodOrder", ["snapcompact", "remote", "handoff", "shake", "soft"], true],
     ]);
   }, 15000);
 
   it("keeps preview writes local and never calls the Host callback", () => {
     const onSet = vi.fn();
     renderSettings({ preview: true, runtimeSettings: { snapshot, onSet } });
-    openTab("文件与终端");
+    openTab("工具与终端");
     const control = screen.getByRole("switch", { name: "自动修复编辑" });
     expect((control as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(control);
@@ -155,12 +157,13 @@ describe("Runtime settings seam", () => {
   it("uses the Runtime schema defaults in preview mode", () => {
     renderSettings({ preview: true });
 
-    openTab("文件与终端");
+    openTab("工具与终端");
     expect((screen.getByRole("switch", { name: "自动修复编辑" }) as HTMLButtonElement).getAttribute("aria-checked")).toBe("false");
 
-    openTab("任务与执行");
+    openTab("任务与代理");
     expect((screen.getByRole("combobox", { name: "意外停止检测" }) as HTMLButtonElement).textContent).toBe("机械检测");
     expect(screen.queryByRole("combobox", { name: "意外停止模型" })).toBeNull();
+    openTab("模型与服务");
     expect((screen.getByRole("combobox", { name: "Claude 重置券" }) as HTMLButtonElement).textContent).toBe("首次使用前询问");
     expect((screen.getByRole("spinbutton", { name: "MCP 启动等待（毫秒）" }) as HTMLInputElement).value).toBe("250");
 
@@ -169,7 +172,7 @@ describe("Runtime settings seam", () => {
     expect((screen.getByRole("switch", { name: "异步压缩" }) as HTMLButtonElement).getAttribute("aria-checked")).toBe("true");
     expect((screen.getByRole("combobox", { name: "压缩方法顺序" }) as HTMLButtonElement).textContent).toBe("Remote → Snapcompact → Handoff → Shake → Soft");
 
-    openTab("高级");
+    openTab("模型与服务");
     expect(screen.queryByRole("combobox", { name: "Codex code mode" })).toBeNull();
   });
 

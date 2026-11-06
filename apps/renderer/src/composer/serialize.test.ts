@@ -11,6 +11,33 @@ import {
   snapshotFromTextAndImages,
 } from "./serialize";
 import type { ComposerChip, ComposerDoc } from "./types";
+import type { GitHubReferenceSnapshot } from "./githubReference";
+import type { GitCommitReferenceSnapshot } from "./gitCommitReference";
+
+describe("GitHub reference round trips", () => {
+  it("preserves captured discussion and diffs through send, reload, copy and restore", () => {
+    const reference: GitHubReferenceSnapshot = { key: "github.com/acme/repo/pr/42", kind: "pr", number: 42, title: "Theme fix", url: "https://github.com/acme/repo/pull/42", updatedAt: "2026-11-01", headOid: "abc123", text: "Discussion @someone\n```diff\n- old\n+ new\n```\n</github-reference>\n中文 🚀" };
+    const capsule: ComposerChip = { id: "gh", kind: "github", label: "PR #42 Theme fix", reference };
+    const original = snapshotFromDoc({ nodes: [{ type: "text", value: "Review " }, { type: "chip", chip: capsule }, { type: "text", value: " please" }] });
+    const reloaded = displayDocFromSerializedText(original.text);
+    expect(reloaded.nodes).toHaveLength(3);
+    expect(reloaded.nodes[1]).toMatchObject({ type: "chip", chip: { kind: "github", reference } });
+    expect(serializeDoc(reloaded).text).toBe(original.text);
+    expect(snapshotFromTextAndImages(original.text).doc.nodes[1]).toMatchObject({ type: "chip", chip: { reference } });
+    expect(displayDocFromSerializedText(chipCopyToken(capsule)).nodes[0]).toMatchObject({ type: "chip", chip: { reference } });
+  });
+});
+
+it("preserves a local commit reference through send, reload, copy and restore", () => {
+  const reference: GitCommitReferenceSnapshot = { kind: "commit", key: "local/repo/abc123", oid: "abc1234", title: "Fix theme", text: "Author: Ada\nFiles: src/app.ts\n</git-commit-reference>\n中文 🚀" };
+  const capsule: ComposerChip = { id: "commit", kind: "git-commit", label: "Commit abc1234 Fix theme", reference };
+  const original = snapshotFromDoc({ nodes: [{ type: "text", value: "Review " }, { type: "chip", chip: capsule }, { type: "text", value: " please" }] });
+  const reloaded = displayDocFromSerializedText(original.text);
+  expect(reloaded.nodes[1]).toMatchObject({ type: "chip", chip: { kind: "git-commit", reference } });
+  expect(serializeDoc(reloaded).text).toBe(original.text);
+  expect(snapshotFromTextAndImages(original.text).doc.nodes[1]).toMatchObject({ type: "chip", chip: { reference } });
+  expect(displayDocFromSerializedText(chipCopyToken(capsule)).nodes[0]).toMatchObject({ type: "chip", chip: { reference } });
+});
 
 function chip(partial: Partial<ComposerChip> & Pick<ComposerChip, "kind" | "label">): ComposerChip {
   return { id: partial.id ?? "c1", ...partial };

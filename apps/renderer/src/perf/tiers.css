@@ -65,6 +65,13 @@
   width: 100% !important;
   opacity: 0.45;
 }
+/* The browser's load bar and spinners hold a static, visible frame instead of a sliver. */
+:root[data-perf-tier~="L1"] .mb-loadbar.is-loading::after {
+  animation: none !important;
+  transform: none !important;
+  width: 100% !important;
+  opacity: 0.45;
+}
 
 /* ---------- L2: software compositing or low-end hardware ------------------- */
 /* Software compositing pays for every translucent blur in the rasterizer and

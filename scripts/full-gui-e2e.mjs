@@ -181,7 +181,10 @@ try{
   if(route==='agent-hub')await page.getByRole('button',{name:'Agent Hub',exact:true}).click();
   else {
    await page.getByRole('button',{name:/^统计$|^Statistics$/}).click();
-   if(route!=='statistics')await page.locator('nav.page-nav [data-nav="'+route+'"]:not([aria-hidden="true"])').click();
+   if(route!=='statistics'){
+    if(['capabilities','settings','model-config','history'].includes(route))await page.locator('nav.app-rail [data-route="'+route+'"]').click();
+    else await page.locator('nav.page-nav [data-nav="'+route+'"]:not([aria-hidden="true"])').click();
+   }
   }
   if(route==='statistics'){
    await page.getByRole('tab',{name:'Frustration',exact:true}).click();

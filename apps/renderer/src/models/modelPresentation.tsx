@@ -1,12 +1,12 @@
 import type { AvailableModelRecord, ModelCatalogEntry, ModelProviderRecord } from "@omp-studio/client-contract";
 import { Brand, hasBrand } from "../brands";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 import { useI18n } from "../i18n";
 
-export const ROLE_ICONS: Record<string, string> = {
+export const ROLE_ICONS: Record<string, IconName> = {
   default: "cpu", smol: "zap", slow: "brain", vision: "eye", plan: "layers",
   designer: "sparkles", commit: "commit", tiny: "box", task: "bot", advisor: "user",
-  memory: "brain", image: "image", web: "globe", speech: "volume", dictation: "mic", judge: "check", widget: "layout",
+  memory: "brain", image: "image", web: "globe", speech: "pulse", dictation: "pulse", judge: "check", widget: "layout",
 };
 
 /** 角色列表卡片的主题色（与 models-roles.css 的 .role-row[data-tint] 对应）。 */

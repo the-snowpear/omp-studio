@@ -1,0 +1,1 @@
+I explicitly allow this session and its agents to resume computer operations for the current task. Continue from the current state; do not replay cancelled input. Native foreground-control approval and physical Escape/user-intervention rules still apply.

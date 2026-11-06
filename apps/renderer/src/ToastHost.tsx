@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
+import { useSurfaceDocument } from "./dock/SurfaceContext";
 
 /** 提示停留时长（ms）。 */
 const SHOW_MS = 2800;
@@ -24,12 +25,13 @@ export function ToastHost({
   onDismiss,
 }: {
   message: string | null;
-  icon?: string;
+  icon?: IconName;
   placement?: "top" | "bottom";
   sticky?: boolean;
   onDismiss: () => void;
 }) {
   const [leaving, setLeaving] = useState(false);
+  const document = useSurfaceDocument();
   const dismissRef = useRef(onDismiss);
   dismissRef.current = onDismiss;
 

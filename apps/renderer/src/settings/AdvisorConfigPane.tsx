@@ -9,7 +9,7 @@ import type { NativePreferencesContext } from "./NativePreferencesPane";
 
 const DEMO: AdvisorConfigView = { scope: "project", version: "demo", warnings: [], active: 0, document: { instructions: "检查任务与验收是否一致。", advisors: [{ name: "Reviewer", model: "demo/reason", enabled: false, scope: "all", includeReasoning: false, tools: ["read", "grep", "glob"], reviewMode: "turn", reviewInterval: 1 }] } };
 export function AdvisorConfigPane({ client, context, visible }: { client?: StudioClient | undefined; context?: NativePreferencesContext | undefined; visible: boolean }) {
-  const { preview } = usePreviewMode(); const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
+  const { preview, marks } = usePreviewMode(); const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
   const [scope, setScope] = useState<"user" | "project">("project"); const [view, setView] = useState<AdvisorConfigView>(); const [selected, setSelected] = useState(0);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [review, setReview] = useState(false); const epoch = useRef(0);
   const available = preview || !!(client && context?.available && context.sessionId && context.capabilities?.capabilities.some(cap => cap.id === "advisors.config.get" && cap.grade !== "unavailable"));
@@ -35,7 +35,7 @@ export function AdvisorConfigPane({ client, context, visible }: { client?: Studi
     finally { if (generation === epoch.current) setBusy(false); }
   };
   return <section className="session-options-card" aria-label={zh ? "WATCHDOG 审阅代理" : "WATCHDOG advisors"}>
-    <h3>WATCHDOG {zh ? "审阅代理" : "advisors"}{preview ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}</h3>
+    <h3>WATCHDOG {zh ? "审阅代理" : "advisors"}{preview && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}</h3>
     <p className="muted">{zh ? "配置原生审阅代理。保存会重载当前会话的原生 roster；启用审阅可能额外调用模型。作用范围不是配置文件的存储范围。" : "Configure native advisors. Saving reloads this session's native roster; enabled reviews may make billed requests. Session scope differs from file storage scope."}</p>
     <label>{zh ? "配置来源" : "Storage scope"}<AppSelect className="select" value={scope} disabled={busy} onChange={event => setScope(event.target.value as typeof scope)}><option value="project">{zh ? "当前项目" : "Project"}</option><option value="user">{zh ? "用户配置" : "User"}</option></AppSelect></label>
     {!available ? <p role="status">{zh ? "连接支持 Advisor 配置的 Runtime 后可用。" : "Connect a compatible Runtime."}</p> : null}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type { Generation } from "@omp-studio/studio-protocol";
 import {
@@ -21,6 +21,7 @@ import type { ChipComposerHandle } from "../composer/ChipComposer";
 import type { QueuedMessage } from "../MessageQueueBar";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { subagentComposerText, type SubagentComposerAgent } from "./subagentComposerGate";
+import { createSubagentViewState, useSubagentViewField, type SubagentViewState } from "./subagentViewState";
 
 export type SubagentComposerClient = Pick<StudioClient, "command" | "subscribe">;
 
@@ -42,18 +43,20 @@ export function useSubagentComposer(input: {
   readonly client: SubagentComposerClient | null;
   readonly agent: SubagentComposerAgent | undefined;
   readonly sessionId: string | undefined;
+  readonly viewState?: SubagentViewState;
 }) {
   const composerRef = useRef<ChipComposerHandle | null>(null);
-  const [draft, setDraft] = useState<ComposerSnapshot>(emptySnapshot);
-  const [queued, setQueued] = useState<QueuedMessage[]>([]);
-  const [queueEdit, setQueueEdit] = useState<QueueEditState | undefined>(undefined);
+  const [localState] = useState(createSubagentViewState);
+  const viewState = input.viewState ?? localState;
+  const [draft, setDraft] = useSubagentViewField(viewState, "draft");
+  const [queued, setQueued] = useSubagentViewField(viewState, "queued");
+  const [queueEdit, setQueueEdit] = useSubagentViewField(viewState, "queueEdit");
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const seqRef = useRef(0);
+  const [error, setError] = useSubagentViewField(viewState, "error");
   const flushBusyRef = useRef(false);
   const [flushTick, setFlushTick] = useState(0);
 
-  const queueKey = input.sessionId ?? input.agent?.agentId;
+  const queueKey = input.sessionId;
   const preview = input.preview === true;
   const pendingInteraction = input.pendingInteraction === true;
   const channelReady = input.enabled && input.agent !== undefined && !sending && (preview || input.client !== null);
@@ -84,6 +87,7 @@ export function useSubagentComposer(input: {
     text: string,
     images?: readonly PromptImage[],
   ): Promise<boolean> => {
+    if (!input.enabled) return false;
     if (input.preview === true) return true;
     const client = input.client;
     const agent = input.agent;
@@ -106,7 +110,7 @@ export function useSubagentComposer(input: {
     } finally {
       setSending(false);
     }
-  }, [input.agent, input.client, input.preview]);
+  }, [input.agent, input.client, input.preview, input.enabled, setError]);
 
   const sendSnapshot = useCallback(async (payload: ComposerSnapshot, mode: "prompt" | "steer" | "followUp"): Promise<boolean> => {
     const parsed = subagentComposerText(payload);
@@ -162,9 +166,10 @@ export function useSubagentComposer(input: {
     }
     const payload = takeSnapshot();
     if (snapshotIsEmpty(payload) || subagentComposerText(payload).kind === "empty") return;
-    if (!input.running || queueKey === undefined) return;
-    seqRef.current += 1;
-    setQueued((queue) => [...queue, queueEntryOf(payload, seqRef.current, queueKey)]);
+    if (!channelReady || !input.running || queueKey === undefined) return;
+    viewState.nextQueueId += 1;
+    setQueued((queue) => [...queue, { ...queueEntryOf(payload, viewState.nextQueueId, queueKey),
+      ...(input.agent?.generation === undefined ? {} : { agentGeneration: input.agent.generation }) }]);
     clearDraft();
     setError(undefined);
   };
@@ -222,20 +227,19 @@ export function useSubagentComposer(input: {
     });
   };
 
-  useEffect(() => {
-    if (!input.enabled) {
-      setQueued([]);
-      setQueueEdit(undefined);
-      setDraft(emptySnapshot());
-      composerRef.current?.clear();
-      setError(undefined);
-    }
-  }, [input.enabled, input.agent?.agentId]);
+  // Restore only when the editor is mounted, never overwrite typing on status updates.
+  useLayoutEffect(() => {
+    const editor = composerRef.current;
+    editor?.setSnapshot(viewState.draft, { preserveFocus: true });
+    return () => { if (editor) viewState.draft = editor.getSnapshot(); };
+  }, [viewState, input.enabled]);
 
   useEffect(() => {
     if (queueKey === undefined || flushBusyRef.current || sending) return;
-    const head = queued.find((entry) => entry.sessionId === queueKey);
+    const head = queued[0];
     if (head === undefined) return;
+    // A revived/replaced instance must not inherit automatic sends from its predecessor.
+    if (head.sessionId !== queueKey || head.agentGeneration !== input.agent?.generation) return;
     if (
       !canFlushQueuedMessage({
         running: input.running,
@@ -257,7 +261,7 @@ export function useSubagentComposer(input: {
       flushBusyRef.current = false;
       setFlushTick((tick) => tick + 1);
     });
-  }, [channelReady, input.running, pendingInteraction, queueEdit, queueKey, queued, sendSnapshot, sending, flushTick]);
+  }, [channelReady, input.running, input.agent?.generation, pendingInteraction, queueEdit, queueKey, queued, sendSnapshot, sending, flushTick, setQueued]);
 
   const rejectSlash = useCallback(() => {
     setError("子 Agent 不支持斜杠指令");
@@ -268,6 +272,7 @@ export function useSubagentComposer(input: {
     draft,
     setDraft,
     queued,
+    staleQueue: queued.some(entry => entry.sessionId !== queueKey || entry.agentGeneration !== input.agent?.generation),
     queueEdit,
     error,
     running: input.running,

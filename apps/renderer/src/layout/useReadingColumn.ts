@@ -1,5 +1,6 @@
+import { useConversationDom } from "../conversationWorkspace/Context";
 import { useLayoutEffect, useRef, type RefObject } from "react";
-import { afterConversationLayoutChange, beforeConversationLayoutChange } from "../conversation/conversationReflow";
+import { afterConversationLayoutChange, beforeConversationLayoutChange, CONVERSATION_LAYOUT_CHANGE } from "../conversation/conversationReflow";
 
 export type ReadingColumnPreference = {
   readonly mode: "standard" | "wide" | "full" | "custom";
@@ -53,6 +54,7 @@ export function useReadingColumn(
   preference: { mode: "standard" | "wide" | "full" | "custom"; customWidth: number },
   welcome: boolean,
 ): void {
+  const { document, window } = useConversationDom();
   const input = useRef({ preference, welcome });
   const measureRef = useRef<(() => void) | null>(null);
 
@@ -67,7 +69,9 @@ export function useReadingColumn(
     let frame: number | null = null;
     const measure = () => {
       const { preference: current, welcome: isWelcome } = input.current;
-      const containerWidth = element.clientWidth;
+      // The floating cards live inside the conversation. Its reading surface
+      // can be narrower than the outer container without creating another Part.
+      const containerWidth = scroller?.offsetWidth ?? element.clientWidth;
       const scale = Number.parseFloat(getComputedStyle(element).getPropertyValue("--density-scale")) || 1;
       const nativeScrollbar = () => scroller === null ? 0 : Math.max(0, scroller.offsetWidth - scroller.clientWidth);
       let geometry = readingColumnGeometry(containerWidth, current, isWelcome, scale, nativeScrollbar());
@@ -116,10 +120,15 @@ export function useReadingColumn(
     if (scroller !== null) observer?.observe(scroller);
     const densityObserver = new MutationObserver(schedule);
     densityObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-density", "style"] });
+    const syncAfterLayout = () => {
+      if (document.documentElement.hasAttribute("data-dock-rail-transition")) measure();
+    };
+    window.addEventListener(CONVERSATION_LAYOUT_CHANGE, syncAfterLayout);
     window.addEventListener("resize", schedule);
     return () => {
       observer?.disconnect();
       densityObserver.disconnect();
+      window.removeEventListener(CONVERSATION_LAYOUT_CHANGE, syncAfterLayout);
       window.removeEventListener("resize", schedule);
       if (frame !== null) cancelAnimationFrame(frame);
       measureRef.current = null;

@@ -1,4 +1,4 @@
-import { PANEL_IDS, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId } from "./types";
+import { PANEL_IDS, agentPanelId, browserPagePanelId, isAgentPanelId, isBrowserPagePanelId, isConversationPanelId, type AgentPanelId, type AgentPanelTarget, type BrowserPagePanelId, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId } from "./types";
 
 const FLOAT_RECT: DockRect = { x: 80, y: 60, width: 560, height: 400 };
 const isPanel = (value: unknown): value is PanelId => typeof value === "string" && (PANEL_IDS as readonly string[]).includes(value);
@@ -11,13 +11,16 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 export function createDefaultLayout(): DockLayout {
   return {
     version: 1,
+    floatCoordinateVersion: 1,
     left: { visible: true, width: 272, ratio: 0.46, panels: ["files"] },
-    rail: { mode: "hidden", lastMode: "expanded", width: 320, panels: ["agents"] },
+    rail: { mode: "hidden", lastMode: "expanded", width: 320, panels: ["environment", "context", "agents"] },
     right: { visible: false, size: 480, ratio: 0.5, groups: [{ id: "right-main", panels: ["changes", "git", "browser", "computer"], active: "changes" }] },
     bottom: { visible: true, expanded: false, size: 240, ratio: 0.5, groups: [{ id: "bottom-main", panels: ["terminal", "problems", "tests", "output", "logs", "pvlogs"], active: "logs" }] },
     floats: [],
-    hidden: { btw: { region: "float", rect: { ...FLOAT_RECT } } },
+    hidden: { btw: { region: "float", rect: { ...FLOAT_RECT } }, "agent-detail": { region: "right" }, "git-quick": { region: "rail" }, "context-viewer": { region: "float" }, "token-counter": { region: "float", rect: { x: 120, y: 90, width: 420, height: 460 } } },
     cards: Object.fromEntries(PANEL_IDS.map(id => [id, { collapsed: false, height: id === "browser" || id === "computer" ? 320 : id === "terminal" ? 240 : null }])) as DockLayout["cards"],
+    agentPanels: {},
+    browserPages: {},
     presetId: "default",
   };
 }
@@ -49,8 +52,10 @@ function copy(layout: DockLayout): DockLayout {
     right: { ...layout.right, groups: layout.right.groups.map(group => ({ ...group, panels: [...group.panels] })) },
     bottom: { ...layout.bottom, groups: layout.bottom.groups.map(group => ({ ...group, panels: [...group.panels] })) },
     floats: layout.floats.map(group => ({ ...group, panels: [...group.panels], rect: { ...group.rect } })),
-    hidden: Object.fromEntries(Object.entries(layout.hidden).map(([id, location]) => [id, { ...location, ...(location.rect ? { rect: { ...location.rect } } : {}) }])),
-    cards: Object.fromEntries(PANEL_IDS.map(id => [id, { ...layout.cards[id] }])) as DockLayout["cards"],
+    hidden: Object.fromEntries(Object.entries(layout.hidden).map(([id, location]) => [id, { ...location!, ...(location!.rect ? { rect: { ...location!.rect } } : {}) }])),
+    cards: Object.fromEntries(Object.entries(layout.cards).map(([id, card]) => [id, { ...card }])) as DockLayout["cards"],
+    agentPanels: Object.fromEntries(Object.entries(layout.agentPanels ?? {}).map(([id, descriptor]) => [id, { ...descriptor!, target: { ...descriptor!.target } }])),
+    browserPages: Object.fromEntries(Object.entries(layout.browserPages ?? {}).map(([id, descriptor]) => [id, { ...descriptor! }])),
   };
 }
 
@@ -83,7 +88,71 @@ function clean(layout: DockLayout): void {
   layout.floats = layout.floats.filter(group => group.panels.length > 0);
 }
 
+export function removePanels(layout: DockLayout, panels: PanelId[]): DockLayout {
+  if (!panels.length) return layout;
+  const next = copy(layout);
+  remove(next, panels);
+  for (const id of panels) delete next.cards[id];
+  clean(next);
+  return next;
+}
+
 const isEmpty = (layout: DockLayout, region: "right" | "bottom"): boolean => layout[region].groups.length === 0;
+
+/** The live list holding a panel: a left/rail card list or a tab group. */
+function holder(layout: DockLayout, id: PanelId): { list: PanelId[]; group?: DockGroup } | undefined {
+  for (const region of ["left", "rail"] as const) if (layout[region].panels.includes(id)) return { list: layout[region].panels };
+  const group = allGroups(layout).find(item => item.panels.includes(id));
+  return group ? { list: group.panels, group } : undefined;
+}
+
+function replaceInPlace(layout: DockLayout, from: PanelId, to: PanelId): void {
+  const found = holder(layout, from);
+  if (!found) return;
+  found.list[found.list.indexOf(from)] = to;
+  if (found.group?.active === from) found.group.active = to;
+}
+
+const orderedPanels = (layout: DockLayout): PanelId[] => [...layout.left.panels, ...layout.rail.panels, ...allGroups(layout).flatMap(group => group.panels)];
+const placedBrowserPages = (layout: DockLayout, sessionId: string): BrowserPagePanelId[] =>
+  orderedPanels(layout).filter((id): id is BrowserPagePanelId => isBrowserPagePanelId(id) && layout.browserPages[id]?.sessionId === sessionId);
+
+/** Passive placement at a remembered address: no region opens and no group changes its tab. */
+function placeAt(layout: DockLayout, panel: PanelId, location: DockLocation): void {
+  if (location.region === "left" || location.region === "rail") {
+    const list = layout[location.region].panels;
+    list.splice(clamp(location.index ?? list.length, 0, list.length), 0, panel);
+    return;
+  }
+  const region = location.region === "float" ? "right" : location.region;
+  const group = (location.region === "float" ? layout.floats.find(item => item.id === location.groupId) : undefined)
+    ?? layout[region].groups.find(item => item.id === location.groupId) ?? layout[region].groups[0];
+  if (group) group.panels.splice(clamp(location.index ?? group.panels.length, 0, group.panels.length), 0, panel);
+  else layout[region].groups.push({ id: groupId(layout, `${region}-main`), panels: [panel], active: panel });
+}
+
+/**
+ * A new page joins its opener, else the focused page, else the chat's other pages.
+ * The chat's first page, or one opened from a showing start page, takes the generic
+ * Browser tab's place so the tab strip does not keep an empty start page beside it.
+ */
+function landBrowserPage(layout: DockLayout, panel: BrowserPagePanelId, sessionId: string, reveal: boolean, after?: BrowserPagePanelId): void {
+  const siblings = placedBrowserPages(layout, sessionId).filter(id => id !== panel);
+  const insertAfter = (reference: PanelId) => { const found = holder(layout, reference)!; found.list.splice(found.list.indexOf(reference) + 1, 0, panel); };
+  const anchor = locatePanel(layout, "browser");
+  const takeAnchor = (location: DockLocation) => {
+    layout.cards[panel] = { ...layout.cards.browser!, collapsed: false };
+    replaceInPlace(layout, "browser", panel);
+    layout.hidden.browser = location;
+  };
+  const showing = anchor && (anchor.region === "left" || anchor.region === "rail" ? !layout.cards.browser?.collapsed : allGroups(layout).find(group => group.id === anchor.groupId)?.active === "browser");
+  if (after && siblings.includes(after)) insertAfter(after);
+  else if (reveal && anchor && showing) takeAnchor(anchor);
+  else if (layout.lastBrowserPage && siblings.includes(layout.lastBrowserPage)) insertAfter(layout.lastBrowserPage);
+  else if (siblings.length) insertAfter(siblings.at(-1)!);
+  else if (anchor) takeAnchor(anchor);
+  else placeAt(layout, panel, layout.hidden.browser ?? { region: "right" });
+}
 
 /**
  * Visibility convergence, only ever applied to a final layout. A region that
@@ -129,9 +198,9 @@ function reveal(layout: DockLayout, location: DockLocation, panel: PanelId): voi
 }
 
 /** target.index is a gap in the original list, before removing the moving panels. */
-function move(layout: DockLayout, requested: PanelId[], target: DockTarget): void {
-  const ordered = [...layout.left.panels, ...layout.rail.panels, ...allGroups(layout).flatMap(group => group.panels), ...PANEL_IDS.filter(id => layout.hidden[id])];
-  const panels = ordered.filter(id => requested.includes(id));
+function move(layout: DockLayout, requested: PanelId[], target: DockTarget, preserveRequestedOrder = false): void {
+  const ordered = [...layout.left.panels, ...layout.rail.panels, ...allGroups(layout).flatMap(group => group.panels), ...Object.keys(layout.hidden) as PanelId[]];
+  const panels = preserveRequestedOrder ? requested.filter(id => ordered.includes(id)) : ordered.filter(id => requested.includes(id));
   if (!panels.length) return;
   const source = allGroups(layout).find(group => panels.every(id => group.panels.includes(id)));
   const active = source && panels.includes(source.active) ? source.active : panels[0]!;
@@ -181,17 +250,92 @@ function move(layout: DockLayout, requested: PanelId[], target: DockTarget): voi
   clean(layout);
 }
 
+/** Git uses a separate compact surface when dropped in the conversation rail. */
+export function panelsAtDockTarget(panels: readonly PanelId[], target: DockTarget): PanelId[] {
+  return target.region === "rail" ? [...new Set(panels.map(panel => panel === "git" ? "git-quick" : panel))] : [...panels];
+}
+
 export function dockReducer(layout: DockLayout, action: DockAction, locked = false): DockLayout {
   if (locked && (action.type === "move" || action.type === "resize")) return layout;
   if (action.type === "apply") return same(layout, action.layout) ? layout : copy(action.layout);
   const next = copy(layout);
   switch (action.type) {
-    case "move": move(next, action.panels, action.target); break;
+    case "move": {
+      // The conversation rail presents Git as the compact card. Keep the full
+      // Git panel at its existing location so the card can open it separately.
+      if (action.target.region === "rail" && action.panels.includes("git")) {
+        const old = locatePanel(next, "git");
+        let target = action.target;
+        if (old?.region === "rail") {
+          remove(next, ["git"]);
+          next.hidden.git = { region: "right", ...(next.right.groups[0] ? { groupId: next.right.groups[0].id } : {}) };
+          next.cards["git-quick"] = { ...next.cards.git! };
+          if (target.index !== undefined && old.index !== undefined && old.index < target.index) target = { ...target, index: target.index - 1 };
+        }
+        move(next, panelsAtDockTarget(action.panels, target), target, true);
+      } else move(next, action.panels, action.target);
+      break;
+    }
+    case "agent-focus": {
+      if (next.agentPanels[action.panel]) next.lastAgentPanel = action.panel;
+      break;
+    }
+    case "agent-open": {
+      const old = next.agentPanels[action.panel];
+      let replaceLegacy = false;
+      next.agentPanels[action.panel] = { scope: action.descriptor.scope, target: { ...old?.target, ...action.descriptor.target } };
+      if (!next.cards[action.panel]) next.cards[action.panel] = { collapsed: false, height: null };
+      if (!locatePanel(next, action.panel) && !next.hidden[action.panel]) {
+        const last = next.lastAgentPanel;
+        const previous = last ? locatePanel(next, last) ?? next.hidden[last] : undefined;
+        const legacy = locatePanel(next, "agent-detail") ?? next.hidden["agent-detail"] ?? { region: "right" as const };
+        const location = previous ?? legacy;
+        next.hidden[action.panel] = location.region === "left" || location.region === "rail"
+          ? { ...location, ...(location.index === undefined ? {} : { index: location.index + (previous ? 1 : 0) }) }
+          : { region: location.region, ...(location.groupId ? { groupId: location.groupId } : {}), ...(location.region === "float" && location.rect ? { rect: location.rect } : {}) };
+        replaceLegacy = !previous && !!locatePanel(next, "agent-detail");
+      }
+      next.lastAgentPanel = action.panel;
+      const opened = dockReducer(next, { type: "open", panel: action.panel }, locked);
+      return replaceLegacy ? dockReducer(opened, { type: "hide", panels: ["agent-detail"] }, locked) : opened;
+    }
+    case "browser-page-open": {
+      const { panel, descriptor } = action;
+      next.browserPages[panel] = { ...next.browserPages[panel], ...descriptor };
+      next.cards[panel] ??= { collapsed: false, height: null };
+      if (!locatePanel(next, panel)) { landBrowserPage(next, panel, descriptor.sessionId, action.reveal, action.after); clean(next); }
+      if (action.reveal) {
+        next.lastBrowserPage = panel;
+        const location = locatePanel(next, panel);
+        if (location) reveal(next, location, panel);
+        next.cards[panel]!.collapsed = false;
+      }
+      break;
+    }
+    case "browser-page-focus": {
+      if (next.browserPages[action.panel]) next.lastBrowserPage = action.panel;
+      break;
+    }
+    case "browser-page-close": {
+      const panels = action.panels.filter(id => next.browserPages[id]);
+      if (!panels.length) break;
+      const focused = next.lastBrowserPage, sessionId = focused ? next.browserPages[focused]?.sessionId : undefined;
+      const group = focused && panels.includes(focused) ? allGroups(next).find(item => item.panels.includes(focused)) : undefined;
+      remove(next, panels);
+      for (const id of panels) { delete next.browserPages[id]; delete next.cards[id]; }
+      clean(next);
+      if (focused && !next.browserPages[focused]) {
+        // The tab that took the closed one's place is the chat's page now.
+        const neighbour = group?.panels.length && isBrowserPagePanelId(group.active) && next.browserPages[group.active]?.sessionId === sessionId ? group.active : sessionId ? placedBrowserPages(next, sessionId)[0] : undefined;
+        if (neighbour) next.lastBrowserPage = neighbour; else delete next.lastBrowserPage;
+      }
+      break;
+    }
     case "hide": {
       const locations = action.panels.map(panel => {
         const location = locatePanel(next, panel);
         if (location?.index !== undefined) {
-          const hiddenSlots = Object.values(next.hidden).filter(old => old.region === location.region && old.groupId === location.groupId && old.index !== undefined).map(old => old.index!).sort((a, b) => a - b);
+          const hiddenSlots = Object.values(next.hidden).filter(old => old!.region === location.region && old!.groupId === location.groupId && old!.index !== undefined).map(old => old!.index!).sort((a, b) => a - b);
           for (const slot of hiddenSlots) if (slot <= location.index) location.index++;
         }
         return [panel, location] as const;
@@ -208,7 +352,7 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
         if (!previous) return layout;
         // A hidden group can be reopened in any order. Its missing earlier tabs
         // still occupy saved slots, but not gaps in the current live strip.
-        const earlierHidden = Object.entries(next.hidden).filter(([id, old]) => id !== action.panel && old.region === previous.region && old.groupId === previous.groupId && old.index !== undefined && previous.index !== undefined && old.index < previous.index).length;
+        const earlierHidden = Object.entries(next.hidden).filter(([id, old]) => id !== action.panel && old!.region === previous.region && old!.groupId === previous.groupId && old!.index !== undefined && previous.index !== undefined && old!.index < previous.index).length;
         const restore: DockTarget = { ...previous, ...(previous.index === undefined ? {} : { index: Math.max(0, previous.index - earlierHidden) }) };
         // A surviving float may have been moved/resized since this tab was
         // hidden. Restore the tab, not stale geometry over its current group.
@@ -217,7 +361,7 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
         location = locatePanel(next, action.panel);
       }
       if (location) reveal(next, location, action.panel);
-      next.cards[action.panel].collapsed = false;
+      next.cards[action.panel]!.collapsed = false;
       break;
     }
     case "activate": {
@@ -238,7 +382,7 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
       if (action.expanded) next.bottom.visible = true;
       break;
     case "card": {
-      const card = next.cards[action.panel];
+      const card = next.cards[action.panel]!;
       if (action.collapsed !== undefined) card.collapsed = action.collapsed;
       if (!locked && action.height !== undefined) card.height = action.height === null ? null : Math.max(action.panel === "terminal" ? 240 : 80, action.height);
       break;
@@ -274,6 +418,97 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
   return same(layout, next) ? layout : next;
 }
 
+/** A preset remembers an Agent landing place, never session-specific identities. */
+export function agentPresetLayout(layout: DockLayout): DockLayout {
+  const ids = Object.keys(layout.agentPanels ?? {}) as AgentPanelId[];
+  if (!ids.length) return copy(layout);
+  const opened = ids.filter(id => locatePanel(layout, id));
+  const last = layout.lastAgentPanel && ids.includes(layout.lastAgentPanel) ? layout.lastAgentPanel : opened[0] ?? ids[0]!;
+  const destination = locatePanel(layout, last) ?? layout.hidden[last] ?? { region: "right" as const };
+  let result = dockReducer(layout, { type: "hide", panels: ids });
+  result = copy(result);
+  for (const id of ids) { delete result.hidden[id]; delete result.cards[id]; delete result.agentPanels[id]; }
+  delete result.lastAgentPanel;
+  result = dockReducer(result, { type: "move", panels: ["agent-detail"], target: destination });
+  if (!opened.length) result = dockReducer(result, { type: "hide", panels: ["agent-detail"] });
+  return result;
+}
+
+/** Applying a preset relocates open Agent views without importing another session's targets. */
+export function applyAgentPreset(preset: DockLayout, current: DockLayout): DockLayout {
+  const ids = Object.keys(current.agentPanels ?? {}) as AgentPanelId[];
+  if (!ids.length) return copy(preset);
+  const ordered = [...current.left.panels, ...current.rail.panels, ...allGroups(current).flatMap(group => group.panels)].filter(isAgentPanelId);
+  let result = copy(preset);
+  for (const id of ordered) {
+    const descriptor = current.agentPanels[id];
+    if (!descriptor) continue;
+    result = dockReducer(result, { type: "agent-open", panel: id, descriptor });
+    result.cards[id] = { ...current.cards[id]! };
+  }
+  for (const id of ids.filter(id => !ordered.includes(id))) {
+    const descriptor = current.agentPanels[id];
+    if (!descriptor) continue;
+    result.agentPanels[id] = descriptor;
+    result.cards[id] = { ...current.cards[id]! };
+    if (current.hidden[id]) result.hidden[id] = { ...current.hidden[id] };
+  }
+  const last = current.lastAgentPanel;
+  if (last && result.agentPanels[last]) {
+    result.lastAgentPanel = last;
+    if (ordered.includes(last)) result = dockReducer(result, { type: "open", panel: last });
+  }
+  return result;
+}
+
+/** Like Agents, a preset keeps one generic Browser tab where the focused page was, never the pages. */
+export function browserPagePresetLayout(layout: DockLayout): DockLayout {
+  const ids = Object.keys(layout.browserPages ?? {}) as BrowserPagePanelId[];
+  if (!ids.length) return copy(layout);
+  const result = copy(layout);
+  const placed = ids.filter(id => locatePanel(result, id));
+  const focused = result.lastBrowserPage && placed.includes(result.lastBrowserPage) ? result.lastBrowserPage : placed[0];
+  if (focused && !locatePanel(result, "browser")) { replaceInPlace(result, focused, "browser"); delete result.hidden.browser; }
+  remove(result, ids);
+  for (const id of ids) { delete result.cards[id]; delete result.browserPages[id]; }
+  delete result.lastBrowserPage;
+  clean(result);
+  settle(result, layout);
+  return result;
+}
+
+/** Applying a preset lands the chat's pages again, in their order, at the preset's Browser place. */
+export function applyBrowserPagePreset(preset: DockLayout, current: DockLayout): DockLayout {
+  if (!Object.keys(current.browserPages ?? {}).length) return copy(preset);
+  let result = copy(preset);
+  for (const id of orderedPanels(current).filter(isBrowserPagePanelId)) {
+    const descriptor = current.browserPages[id];
+    if (!descriptor) continue;
+    result = dockReducer(result, { type: "browser-page-open", panel: id, descriptor, reveal: false });
+    result.cards[id] = { ...current.cards[id]! };
+  }
+  if (current.lastBrowserPage && result.browserPages[current.lastBrowserPage]) result.lastBrowserPage = current.lastBrowserPage;
+  return result;
+}
+
+/** Presets and the "modified" baseline never carry per-session Agents or pages. */
+export const instancePresetLayout = (layout: DockLayout): DockLayout => removePanels(browserPagePresetLayout(agentPresetLayout(layout)), Object.keys(layout.cards).filter(isConversationPanelId));
+export const applyInstancePreset = (preset: DockLayout, current: DockLayout): DockLayout => {
+  let result = applyBrowserPagePreset(applyAgentPreset(preset, current), current);
+  for (const panel of Object.keys(current.cards).filter(isConversationPanelId)) {
+    const location = locatePanel(current, panel) ?? current.hidden[panel];
+    result = { ...result, cards: { ...result.cards, [panel]: current.cards[panel]! }, hidden: { ...result.hidden, [panel]: location ?? { region: "float" } } };
+    if (locatePanel(current, panel)) result = dockReducer(result, { type: "open", panel });
+  }
+  return result;
+};
+
+/** "Browser" in a tools menu shows the chat's focused page when there is one, not a blank start page. */
+export function browserRevealTarget(layout: DockLayout, sessionId?: string): PanelId {
+  const pages = (Object.keys(layout.browserPages ?? {}) as BrowserPagePanelId[]).filter(id => (sessionId === undefined || layout.browserPages[id]!.sessionId === sessionId) && locatePanel(layout, id));
+  return layout.lastBrowserPage && pages.includes(layout.lastBrowserPage) ? layout.lastBrowserPage : pages[0] ?? "browser";
+}
+
 export function builtInPresets(): DockPreset[] {
   const standard = createDefaultLayout();
   const focus = createDefaultLayout();
@@ -300,10 +535,21 @@ export function normalizeLayout(value: unknown): DockLayout {
   const raw = record(value);
   if (raw.version !== 1) return createDefaultLayout();
   const layout = createDefaultLayout();
+  for (const [id, value] of Object.entries(record(raw.agentPanels))) {
+    const descriptor = record(value), target = record(descriptor.target);
+    if (!isAgentPanelId(id) || typeof descriptor.scope !== "string" || typeof target.agentId !== "string" || agentPanelId(descriptor.scope, target.agentId) !== id) continue;
+    layout.agentPanels[id] = { scope: descriptor.scope, target: target as AgentPanelTarget };
+  }
+  for (const [id, value] of Object.entries(record(raw.browserPages))) {
+    const descriptor = record(value);
+    if (!isBrowserPagePanelId(id) || typeof descriptor.sessionId !== "string" || typeof descriptor.pageId !== "string" || browserPagePanelId(descriptor.sessionId, descriptor.pageId) !== id) continue;
+    layout.browserPages[id] = { sessionId: descriptor.sessionId, pageId: descriptor.pageId, ...(typeof descriptor.title === "string" ? { title: descriptor.title } : {}) };
+  }
+  const validPanel = (id: unknown): id is PanelId => isPanel(id) || typeof id === "string" && (isAgentPanelId(id) && !!layout.agentPanels[id] || isBrowserPagePanelId(id) && !!layout.browserPages[id] || isConversationPanelId(id));
   const seen = new Set<PanelId>();
   const ids = new Set<string>();
   const panels = (value: unknown): PanelId[] => Array.isArray(value) ? value.filter((id): id is PanelId => {
-    if (!isPanel(id) || seen.has(id)) return false;
+    if (!validPanel(id) || seen.has(id)) return false;
     seen.add(id);
     return true;
   }) : [];
@@ -323,11 +569,12 @@ export function normalizeLayout(value: unknown): DockLayout {
       const members = panels(group.panels);
       if (!members.length) continue;
       if (result.length === 2) result[1]!.panels.push(...members);
-      else result.push({ id: readId(group.id, `${prefix}-${result.length + 1}`), panels: members, active: isPanel(group.active) && members.includes(group.active) ? group.active : members[0]! });
+      else result.push({ id: readId(group.id, `${prefix}-${result.length + 1}`), panels: members, active: validPanel(group.active) && members.includes(group.active) ? group.active : members[0]! });
     }
     return result;
   };
   const left = record(raw.left), rail = record(raw.rail), right = record(raw.right), bottom = record(raw.bottom);
+  layout.floatCoordinateVersion = raw.floatCoordinateVersion === 1 ? 1 : undefined;
   layout.left = { visible: bool(left.visible, true), width: clamp(number(left.width, 272), 200, 400), ratio: clamp(number(left.ratio, 0.46), 0.15, 0.85), panels: panels(left.panels) };
   const mode = rail.mode === "expanded" || rail.mode === "compact" ? rail.mode : "hidden";
   layout.rail = { mode, lastMode: mode !== "hidden" ? mode : rail.lastMode === "compact" ? "compact" : "expanded", width: clamp(number(rail.width, 320), 280, 480), panels: panels(rail.panels) };
@@ -337,26 +584,57 @@ export function normalizeLayout(value: unknown): DockLayout {
   if (Array.isArray(raw.floats)) for (const item of raw.floats) {
     const group = record(item);
     const members = panels(group.panels);
-    if (members.length) layout.floats.push({ id: readId(group.id, "float"), panels: members, active: isPanel(group.active) && members.includes(group.active) ? group.active : members[0]!, rect: readRect(group.rect), minimized: bool(group.minimized, false), maximized: bool(group.maximized, false) });
+    if (members.length) layout.floats.push({ id: readId(group.id, "float"), panels: members, active: validPanel(group.active) && members.includes(group.active) ? group.active : members[0]!, rect: readRect(group.rect), minimized: bool(group.minimized, false), maximized: bool(group.maximized, false) });
   }
-  // Omitted/new modules stay recoverable without unexpectedly opening new tools.
+  // Migrate both original layouts and layouts saved by versions which introduced
+  // git-quick but still allowed the full Git panel to remain in the rail.
+  const migrateGitCard = layout.rail.panels.includes("git");
+  const quickWasPlaced = seen.has("git-quick");
+  const quickAlreadyInRail = layout.rail.panels.includes("git-quick");
+  if (migrateGitCard) {
+    if (quickAlreadyInRail) layout.rail.panels.splice(layout.rail.panels.indexOf("git"), 1);
+    else {
+      remove(layout, ["git-quick"]);
+      layout.rail.panels[layout.rail.panels.indexOf("git")] = "git-quick";
+    }
+    seen.delete("git");
+    seen.add("git-quick");
+  }
+  // Introduce Context beside Environment once; an explicitly hidden/moved card stays put.
+  if (!seen.has("context") && !("context" in record(raw.hidden))) {
+    const environmentIndex = layout.rail.panels.indexOf("environment");
+    if (environmentIndex >= 0) {
+      layout.rail.panels.splice(environmentIndex + 1, 0, "context");
+      seen.add("context");
+    }
+  }
+  // Other omitted/new modules stay recoverable without opening new tools.
   const defaults = createDefaultLayout();
   const hidden = record(raw.hidden);
   layout.hidden = {};
-  for (const id of PANEL_IDS) {
-    const card = record(record(raw.cards)[id]);
-    layout.cards[id] = { collapsed: bool(card.collapsed, false), height: card.height === null ? null : typeof card.height === "number" && Number.isFinite(card.height) ? Math.max(id === "terminal" ? 240 : 80, card.height) : defaults.cards[id].height };
+  for (const id of [...PANEL_IDS, ...Object.keys(layout.agentPanels) as AgentPanelId[], ...new Set([...Object.keys(record(raw.cards)), ...seen].filter(isConversationPanelId))]) {
+    const card = record(record(raw.cards)[migrateGitCard && !quickWasPlaced && id === "git-quick" ? "git" : id]);
+    layout.cards[id] = { collapsed: bool(card.collapsed, false), height: card.height === null ? null : typeof card.height === "number" && Number.isFinite(card.height) ? Math.max(id === "terminal" ? 240 : 80, card.height) : defaults.cards[id]?.height ?? null };
     if (seen.has(id)) continue;
     const old = record(hidden[id]);
-    const fallback = locatePanel(defaults, id) ?? defaults.hidden[id]!;
-    if (!["left", "rail", "right", "bottom", "float"].includes(String(old.region))) layout.hidden[id] = fallback;
+    const fallback = locatePanel(defaults, id) ?? defaults.hidden[id] ?? { region: "right" as const };
+    if (id === "git" && (migrateGitCard || old.region === "rail")) layout.hidden[id] = { region: "right", ...(layout.right.groups[0] ? { groupId: layout.right.groups[0].id } : {}) };
+    else if (!["left", "rail", "right", "bottom", "float"].includes(String(old!.region))) layout.hidden[id] = fallback;
     else layout.hidden[id] = {
-      region: old.region as DockLocation["region"],
-      ...(typeof old.groupId === "string" ? { groupId: old.groupId } : {}),
-      ...(typeof old.index === "number" && Number.isFinite(old.index) ? { index: Math.max(0, Math.floor(old.index)) } : {}),
-      ...(old.region === "float" ? { rect: readRect(old.rect) } : {}),
+      region: old!.region as DockLocation["region"],
+      ...(typeof old!.groupId === "string" ? { groupId: old!.groupId } : {}),
+      ...(typeof old!.index === "number" && Number.isFinite(old!.index) ? { index: Math.max(0, Math.floor(old!.index)) } : {}),
+      ...(old!.region === "float" && old.rect ? { rect: readRect(old.rect) } : {}),
     };
   }
+  if (typeof raw.lastAgentPanel === "string" && isAgentPanelId(raw.lastAgentPanel) && layout.agentPanels[raw.lastAgentPanel]) layout.lastAgentPanel = raw.lastAgentPanel as AgentPanelId;
+  for (const id of Object.keys(layout.browserPages) as BrowserPagePanelId[]) {
+    // Pages are never hidden: one that lost its place is dropped, and the next sync lands it again.
+    if (!seen.has(id)) { delete layout.browserPages[id]; continue; }
+    const card = record(record(raw.cards)[id]);
+    layout.cards[id] = { collapsed: bool(card.collapsed, false), height: typeof card.height === "number" && Number.isFinite(card.height) ? Math.max(80, card.height) : null };
+  }
+  if (typeof raw.lastBrowserPage === "string" && isBrowserPagePanelId(raw.lastBrowserPage) && layout.browserPages[raw.lastBrowserPage]) layout.lastBrowserPage = raw.lastBrowserPage;
   layout.presetId = typeof raw.presetId === "string" && raw.presetId ? raw.presetId : "default";
   clean(layout);
   // Old configurations could keep an empty region open; the same rule applies here.

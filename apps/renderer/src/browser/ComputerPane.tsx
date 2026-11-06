@@ -4,19 +4,23 @@ import type { ClientBootstrap, CommandInput, StudioClient } from "@omp-studio/cl
 import type { ComputerObservationResultMap, StudioComputerStatus } from "@omp-studio/studio-protocol";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { WorkspaceDialog } from "../workspaces/Workspace";
+import { ImagePreview } from "../composer/ImagePreview";
 import { PREVIEW_COMPUTER, PREVIEW_COMPUTER_IMAGE } from "../preview/computerPreview";
 import "./computer.css";
+import { useSurfaceDocument, useSurfaceChrome } from "../dock/SurfaceContext";
+import { ComputerWorkspace } from "../computer/ComputerWorkspace";
+import { hasComputerCapability, type ComputerPaneProps } from "../computer/types";
 
-type ComputerPaneProps = {
-  client: StudioClient;
-  sessionId?: string | undefined;
-  available: boolean;
-  visible: boolean;
-  capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
-};
+export function ComputerPane(props: ComputerPaneProps) {
+  const { preview } = usePreviewMode();
+  if (preview || hasComputerCapability(props.capabilities, "computer.workspace.get")) {
+    return <ComputerWorkspace key={`${preview}:${props.scopeKey ?? ""}:${props.sessionId ?? ""}:${props.previewScenario ?? "running"}`} {...props} />;
+  }
+  return <LegacyComputerPane key={`${props.scopeKey ?? ""}:${props.sessionId ?? ""}:${props.executionTarget?.kind ?? "unknown"}`} {...props} />;
+}
 
 const PERMISSION_LABELS: Record<string, [string, string]> = {
   granted: ["已授权", "Granted"],
@@ -47,8 +51,9 @@ function ComputerIllustration({ locked, loading }: { locked: boolean; loading: b
   </div>;
 }
 
-export function ComputerPane({ client, sessionId, available, visible, capabilities }: ComputerPaneProps) {
-  const { preview } = usePreviewMode();
+function LegacyComputerPane({ client, sessionId, available, visible, capabilities, executionTarget }: ComputerPaneProps) {
+  const document = useSurfaceDocument(), chrome = useSurfaceChrome();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [status, setStatus] = useState<StudioComputerStatus>();
@@ -67,7 +72,7 @@ export function ComputerPane({ client, sessionId, available, visible, capabiliti
   const currentBlob = useRef<string | undefined>(undefined);
   const can = (kind: string) => preview || (available && !!sessionId && capabilities?.capabilities.some(item => item.id === kind && item.grade !== "unavailable") === true);
   const canRead = can("computer.status");
-  const desktopCapture = preview || !!globalThis.ompStudioChrome?.readComputerCapture;
+  const desktopCapture = preview || (executionTarget?.kind === "local" && !!chrome?.readComputerCapture);
 
   const invoke = useCallback(async <K extends keyof ComputerObservationResultMap>(kind: K, input: CommandInput<K>): Promise<ComputerObservationResultMap[K]> => {
     const handle = await client.command(kind, input);
@@ -142,7 +147,7 @@ export function ComputerPane({ client, sessionId, available, visible, capabiliti
       document.removeEventListener("visibilitychange", onHide);
       release();
     };
-  }, [visible, canRead, preview, sessionId, invoke, clearCapture, applyStatus, zh]);
+  }, [visible, canRead, preview, sessionId, invoke, clearCapture, applyStatus, zh, document]);
 
   const refreshCapture = async () => {
     if (!selected || capturing || !can("computer.capture") || !status?.available || !desktopCapture) return;
@@ -158,7 +163,7 @@ export function ComputerPane({ client, sessionId, available, visible, capabiliti
       }
       const value = await invoke("computer.capture", { sessionId: sessionId!, targetId: selected });
       if (epoch !== captureGeneration.current) return;
-      const result = await globalThis.ompStudioChrome!.readComputerCapture!({ captureId: value.captureId, sessionId: value.sessionId, targetId: value.targetId });
+      const result = await chrome!.readComputerCapture!({ captureId: value.captureId, sessionId: value.sessionId, targetId: value.targetId });
       if (epoch !== captureGeneration.current) return;
       if (!result.ok) throw new Error(result.message);
       clearCapture();
@@ -206,7 +211,7 @@ export function ComputerPane({ client, sessionId, available, visible, capabiliti
     try {
       if (preview) {
         setStatus(value => value ? { ...value, running: 0 } : value);
-        setNotice(zh ? "演示：已请求停止" : "Demo: stop requested");
+        if (marks) setNotice(zh ? "演示：已请求停止" : "Demo: stop requested");
         return;
       }
       await invoke("computer.stop", { sessionId: sessionId! });
@@ -236,7 +241,7 @@ export function ComputerPane({ client, sessionId, available, visible, capabiliti
     { label: zh ? "屏幕录制" : "Screen capture", value: status?.capturePermission, icon: "monitor" },
     { label: zh ? "键鼠输入" : "Mouse & keyboard", value: status?.inputPermission, icon: "keyboard" },
     { label: zh ? "辅助功能" : "Accessibility", value: status?.axPermission, icon: "steering" },
-  ];
+  ] satisfies ReadonlyArray<{ label: string; value: string | undefined; icon: IconName }>;
   const granted = permissionRows.filter(row => row.value === "granted").length;
   const permissionSummary = !status ? zh ? "等待检测" : "Not checked"
     : !status.enabled ? zh ? "启用后检测" : "Checked when enabled"
@@ -275,11 +280,13 @@ export function ComputerPane({ client, sessionId, available, visible, capabiliti
   return <section className="computer-pane" aria-label={zh ? "电脑观察" : "Computer observation"}>
     <header className="computer-heading">
       <span className="computer-heading-icon"><Icon name="monitor" /></span>
-      <div className="computer-heading-copy"><div><h2>Computer Use</h2>{preview ? <span className="computer-demo">{zh ? "演示" : "Demo"}</span> : null}</div><p>{zh ? "屏幕与窗口观察" : "Screens & windows"}</p></div>
+      <div className="computer-heading-copy"><div><h2>Computer Use</h2>{preview && marks ? <span className="computer-demo">{zh ? "演示" : "Demo"}</span> : null}</div><p>{zh ? "屏幕与窗口观察" : "Screens & windows"}</p></div>
       <span className={`computer-state${running ? " is-active" : status?.enabled && status.available ? " is-ready" : ""}`} role="status"><i />{stateLabel}</span>
     </header>
 
     <div className="computer-content">
+      <p className="computer-feedback" role="note">{zh ? "兼容观察模式：此 Runtime 仅支持手动截图，不能跟随原生动作或确认持久停止。停止后再次调用的限制取决于旧版 Runtime，请升级获得完整工作区。" : "Legacy observation: manual captures only, without native action following or confirmed persistent stops. Restrictions on subsequent calls depend on this older Runtime; upgrade for the full workspace."}</p>
+      {executionTarget?.kind === "remote" ? <p className="computer-feedback">{zh ? `执行设备：${executionTarget.name ?? "远端"}。本机图像通道不会用于远端截图。` : `Execution device: ${executionTarget.name ?? "remote"}. The local image channel is never used for remote captures.`}</p> : null}
       <div className="computer-target-section">
         <div className="computer-section-label"><label htmlFor="computer-target">{zh ? "观察目标" : "Observation target"}</label><span>{status?.available ? zh ? `${displays.length} 个屏幕 · ${windows.length} 个窗口` : `${displays.length} displays · ${windows.length} windows` : zh ? "屏幕 / 应用窗口" : "Display / app window"}</span></div>
         <div className="computer-target-tools">
@@ -318,7 +325,7 @@ export function ComputerPane({ client, sessionId, available, visible, capabiliti
         <div className="computer-permission-body">
           <div className="computer-setting"><div><strong>{zh ? "原生电脑能力" : "Native Computer Use"}</strong><p>{zh ? "对所有会话生效，输入遵循原生审批" : "Global preference. Native input approvals apply."}</p></div><button type="button" className="switch" role="switch" aria-label={zh ? "原生电脑能力" : "Native Computer Use"} aria-checked={!!status?.enabled} disabled={!status || !can("computer.configure") || configuring} onClick={() => setConfigureConfirm(!status?.enabled)} /></div>
           <dl>{permissionRows.map(row => <div key={row.icon}><dt><Icon name={row.icon} />{row.label}</dt><dd className={status?.enabled && row.value === "granted" ? "is-granted" : status?.enabled && row.value === "denied" ? "is-denied" : ""}>{!status ? zh ? "未检测" : "Not checked" : !status.enabled ? zh ? "待启用" : "Enable to check" : PERMISSION_LABELS[row.value ?? "unknown"]?.[zh ? 0 : 1] ?? (zh ? "未检测" : "Not checked")}</dd></div>)}</dl>
-          {status?.enabled ? <p className="computer-permission-note">{zh ? "权限由操作系统管理，状态自动更新。" : "Permissions are managed by your OS and update automatically."}{status.backend !== "unavailable" ? <span>{({ win32: "Windows", quartz: "macOS", x11: "X11", wayland: "Wayland", demo: zh ? "演示环境" : "Demo" } as Record<string, string>)[status.backend] ?? status.backend}</span> : null}</p> : null}
+          {status?.enabled ? <p className="computer-permission-note">{zh ? "权限由操作系统管理，状态自动更新。" : "Permissions are managed by your OS and update automatically."}{status.backend !== "unavailable" && (marks || status.backend !== "demo") ? <span>{({ win32: "Windows", quartz: "macOS", x11: "X11", wayland: "Wayland", demo: zh ? "演示环境" : "Demo" } as Record<string, string>)[status.backend] ?? status.backend}</span> : null}</p> : null}
         </div>
       </details>
 
@@ -327,6 +334,6 @@ export function ComputerPane({ client, sessionId, available, visible, capabiliti
     </div>
 
     {configureConfirm !== undefined ? <WorkspaceDialog title={configureConfirm ? zh ? "启用 Computer Use" : "Enable Computer Use" : zh ? "关闭 Computer Use" : "Disable Computer Use"} onClose={() => { if (!configuring) setConfigureConfirm(undefined); }}><div className="computer-confirm"><span className="computer-confirm-icon"><Icon name={configureConfirm ? "monitor" : "lock"} /></span><p>{configureConfirm ? zh ? "启用后，代理可以使用原生电脑工具查看屏幕、操作键鼠。具体操作仍遵循原生工具审批。" : "Allow your agent to view screens and use native mouse and keyboard tools. Native tool approvals still apply." : zh ? "关闭后，不再允许新的电脑调用。中断当前正在执行的操作，请使用「停止操作」。" : "Disable new computer calls. Use Stop actions to interrupt work already in progress."}</p><p className="computer-confirm-note">{zh ? "此设置将保存为所有会话的全局偏好。" : "This preference is saved globally for all sessions."}</p>{error ? <p className="computer-feedback is-error" role="alert">{error}</p> : null}<div className="computer-confirm-actions"><button type="button" className="computer-button" disabled={configuring} onClick={() => setConfigureConfirm(undefined)}>{zh ? "取消" : "Cancel"}</button><button type="button" className="computer-button is-primary" disabled={configuring} onClick={() => void configure(configureConfirm)}>{configuring ? <Icon name="refresh" extra="computer-spin" /> : null}{configuring ? zh ? "保存中…" : "Saving…" : configureConfirm ? zh ? "确认启用" : "Enable" : zh ? "确认关闭" : "Disable"}</button></div></div></WorkspaceDialog> : null}
-    {expanded && capture ? <WorkspaceDialog title={target?.name ?? (zh ? "电脑截图" : "Computer capture")} onClose={() => setExpanded(false)}><div className="computer-expanded"><img src={capture.src} alt={zh ? "电脑截图大图" : "Enlarged computer capture"} /><p>{capture.width} × {capture.height}<span>{new Date(capture.time).toLocaleTimeString(zh ? "zh-CN" : "en-US", { hour12: false })}</span></p></div></WorkspaceDialog> : null}
+    {expanded && capture ? <ImagePreview image={{ url: capture.src, label: target?.name ?? (zh ? "电脑截图" : "Computer capture"), mimeType: "image/png" }} actionsEnabled={!preview} onClose={() => setExpanded(false)} onError={setError} /> : null}
   </section>;
 }

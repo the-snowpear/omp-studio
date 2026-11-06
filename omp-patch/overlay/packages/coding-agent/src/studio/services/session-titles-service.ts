@@ -11,7 +11,6 @@ import type {
 	SessionTitlesResult,
 } from "../session-titles-protocol";
 import { SessionControlError } from "./session-control-service";
-const MAX_BYTES = 8 * 1024 * 1024;
 function clean(value: string, max: number): string {
 	return sanitizeText(value)
 		.replace(/[\x00-\x1f]/g, " ")
@@ -44,7 +43,6 @@ export class StudioSessionTitlesService {
 				: await SessionManager.list(manager.getCwd(), manager.getSessionDir());
 		check();
 		const rows: SessionTitleRow[] = [];
-		let budget = 32 * 1024 * 1024;
 		for (const id of operation.targetSessionIds) {
 			check();
 			if (id === operation.sessionId) {
@@ -67,21 +65,12 @@ export class StudioSessionTitlesService {
 			try {
 				const stat = await fs.stat(target.path);
 				check();
-				if (stat.size > MAX_BYTES || stat.size > budget) {
-					rows.push({
-						sessionId: id,
-						state: "unavailable",
-						reason: "Title metadata exceeds the inspection budget",
-					});
-					continue;
-				}
 				const identity = stat.dev + ":" + stat.ino + ":" + stat.size + ":" + stat.mtimeMs + ":" + stat.ctimeMs,
 					cached = this.#cache.get(target.path);
 				if (cached?.identity === identity && cached.row.sessionId === id) {
 					rows.push(cached.row);
 					continue;
 				}
-				budget -= stat.size;
 				const saved = await SessionManager.peekSessionTitle(target.path);
 				check();
 				const after = await fs.stat(target.path);

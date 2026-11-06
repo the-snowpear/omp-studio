@@ -4,8 +4,6 @@ import { Icon } from "../icons";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useOperatorProfile } from "../settings/operatorProfile";
-import { ensureRuntimeConnection } from "../runtimeEnsure";
-import { ActionProgressBar, type ActionProgress } from "../ActionProgressBar";
 import {
   EMPTY_USAGE,
   buildPreviewUsage,
@@ -36,7 +34,6 @@ export function ConversationEmpty({
   onSelectPreviewThread,
   onOpenHistory,
   runtimeConnected = true,
-  onOpenDiagnostics,
 }: {
   client?: StudioClient;
   history?: SessionHistoryReadModel;
@@ -49,11 +46,10 @@ export function ConversationEmpty({
   onOpenHistory: () => void;
   /** Real-mode subtitle: do not claim Runtime is ready when it is not. */
   runtimeConnected?: boolean;
-  onOpenDiagnostics?: () => void;
 }) {
   const { t, resolvedLanguage } = useI18n();
   const effectiveProjectName = projectName ?? t("conversation.noProjectSelected");
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { profile } = useOperatorProfile();
   const previewUsage = useMemo(() => buildPreviewUsage(), []);
   const [liveUsage, setLiveUsage] = useState<TokenUsageReadModel | null>(null);
@@ -120,20 +116,6 @@ export function ConversationEmpty({
 
   const greet = `${greetingPart(new Date(), resolvedLanguage)}，${profile.displayName}`;
   const usageReason = !preview && liveUsage?.unavailableReason ? liveUsage.unavailableReason : undefined;
-  const [reconnectBusy, setReconnectBusy] = useState(false);
-  const [reconnectNotice, setReconnectNotice] = useState<string | null>(null);
-  const [reconnectProgress, setReconnectProgress] = useState<ActionProgress | null>(null);
-
-  const reconnect = async () => {
-    if (preview || client === undefined) return;
-    setReconnectBusy(true);
-    setReconnectNotice(null);
-    setReconnectProgress({ label: t("conversation.reconnectingRuntime"), step: 1, steps: 2 });
-    const result = await ensureRuntimeConnection(client, {}, setReconnectProgress);
-    setReconnectNotice(result.ok ? t("conversation.reconnectedRuntime") : result.message);
-    setReconnectBusy(false);
-    setReconnectProgress(null);
-  };
 
   return (
     <div className="convo-empty" role="region" aria-labelledby="ceGreet">
@@ -150,33 +132,17 @@ export function ConversationEmpty({
         </svg>
         <h1 className="ce-greet ce-anim" style={{ ["--d" as string]: "500ms" }} id="ceGreet">{greet}</h1>
         <p className="ce-sub ce-anim" style={{ ["--d" as string]: "620ms" }}>
-          {preview
+          {preview && marks
             ? t("home.previewSubtitle")
             : runtimeConnected
               ? t("home.readySubtitle")
               : t("home.disconnectedSubtitle")}
         </p>
-        {!preview && !runtimeConnected ? (
-          <div className="ce-runtime-actions ce-anim" style={{ ["--d" as string]: "680ms" }}>
-            {client !== undefined ? (
-              <button type="button" className="btn primary" disabled={reconnectBusy} onClick={() => void reconnect()}>
-                {reconnectBusy ? t("common.loading") : t("conversation.reconnectRuntime")}
-              </button>
-            ) : null}
-            {onOpenDiagnostics ? (
-              <button type="button" className="btn outline" onClick={onOpenDiagnostics}>{t("conversation.diagnostics")}</button>
-            ) : null}
-            {reconnectNotice ? <span className="tiny muted">{reconnectNotice}</span> : null}
-            {reconnectProgress !== null ? (
-              <ActionProgressBar compact label={reconnectProgress.label} step={reconnectProgress.step} steps={reconnectProgress.steps} />
-            ) : null}
-          </div>
-        ) : null}
       </div>
 
       <section className="ce-heat" aria-labelledby="ceHeatH">
         <div className="ce-heat-head ce-anim" style={{ ["--d" as string]: "700ms" }}>
-          <h2 id="ceHeatH"><span className="ce-heat-pi" aria-hidden="true">π</span>{t("home.activityHeatmap")}{preview ? <span className="chip purple xs">{t("common.demo")}</span> : null}</h2>
+          <h2 id="ceHeatH"><span className="ce-heat-pi" aria-hidden="true">π</span>{t("home.activityHeatmap")}{preview && marks ? <span className="chip purple xs">{t("common.demo")}</span> : null}</h2>
           <span className="ce-heat-stats">
             {usageReason
               ? usageReason

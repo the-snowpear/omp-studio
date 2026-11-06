@@ -10,7 +10,7 @@ import { hostErrorMessage, waitReceipt } from "../hostError";
 import "./sessionCompression.css";
 const size = (bytes: number) => `${(bytes / 1048576).toFixed(2)} MiB`;
 export function SessionCompressionPane(props: FeatureSettingsProps) {
-  const { preview } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
+  const { preview, marks } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const [state, setState] = useState<CompressionState>({ phase: "idle" }), [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [automatic, setAutomatic] = useState<AutoCompressionStatus>();
   const epoch = useRef(0), lock = useRef(false);
@@ -45,7 +45,7 @@ export function SessionCompressionPane(props: FeatureSettingsProps) {
   }
   const summary = state.summary;
   return <section className="compression-pane" aria-label={zh ? "会话存储压缩" : "Session storage compression"}>
-    <header className="feature-settings-head"><div><span className="feature-eyebrow">{zh ? "存储维护" : "STORAGE MAINTENANCE"}{preview ? zh ? " · 演示" : " · DEMO" : ""}</span><h3>{zh ? "压缩闲置会话，保留完整历史" : "Compress idle sessions, retain full history"}</h3></div><button className="btn outline" disabled={!enabled || working} onClick={() => void run(false)}>{working ? zh ? "处理中…" : "Working…" : zh ? "扫描候选文件" : "Scan candidates"}</button></header>
+    <header className="feature-settings-head"><div><span className="feature-eyebrow">{zh ? "存储维护" : "STORAGE MAINTENANCE"}{preview && marks ? zh ? " · 演示" : " · DEMO" : ""}</span><h3>{zh ? "压缩闲置会话，保留完整历史" : "Compress idle sessions, retain full history"}</h3></div><button className="btn outline" disabled={!enabled || working} onClick={() => void run(false)}>{working ? zh ? "处理中…" : "Working…" : zh ? "扫描候选文件" : "Scan candidates"}</button></header>
     <p className="feature-status">{zh ? "使用文件系统透明压缩，不删除会话。原生引擎跳过正在使用的会话；执行前重新检查文件身份，只处理本次预览中的文件。" : "Filesystem compression preserves sessions. Native checks skip active sessions and changed files; only reviewed candidates are processed."}</p>
     {!enabled ? <p className="feature-status">{zh ? "连接支持透明压缩的 Runtime 后可扫描。" : "Connect a Runtime with filesystem compression support."}</p> : null}
     {working ? <div className="transfer-progress" role="status"><progress /><span>{state.phase === "applying" ? zh ? "正在压缩已审核的文件…" : "Compressing reviewed files…" : zh ? "正在检查文件系统和闲置会话…" : "Checking filesystem and idle sessions…"}</span></div> : null}
@@ -58,7 +58,7 @@ export function SessionCompressionPane(props: FeatureSettingsProps) {
     </>}{summary.errors.map((message, index) => <p className="feature-error" role="alert" key={index}>{message}</p>)}</div> : null}
     {error || state.error ? <p className="feature-error" role="alert">{error || state.error}</p> : null}
     <details><summary>{zh ? "最近自动压缩日志" : "Latest automatic compression log"}</summary><button className="btn small outline" onClick={() => {
-      if (preview) { setAutomatic({ enabled: false, log: "演示：compress skipped: unsupported on this filesystem" }); return; }
+      if (preview) { setAutomatic({ enabled: false, log: marks ? "演示：compress skipped: unsupported on this filesystem" : "compress skipped: unsupported on this filesystem" }); return; }
       if (props.client && props.context?.sessionId) void props.client.command("maintenance.compression.auto.status", { sessionId: props.context.sessionId }).then(handle => waitReceipt<{ result: AutoCompressionStatus }>(props.client!, handle.requestId)).then(result => setAutomatic(result.result)).catch(cause => setError(hostErrorMessage(cause, "Compression log unavailable")));
     }}>{zh ? "读取日志" : "Read log"}</button>{automatic ? <><p>{automatic.enabled ? "Enabled" : "Disabled"} · {automatic.ranAt ? new Date(automatic.ranAt).toLocaleString() : "—"}</p><pre>{automatic.log}</pre></> : null}</details>
     <FeatureSettingsPane {...props} group="maintenance" />

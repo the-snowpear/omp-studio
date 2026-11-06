@@ -42,6 +42,40 @@ function setup(): { store: DockStore; storage: MemoryStorage } {
 }
 
 describe("dock persistence and session scope", () => {
+  it("centers and dims the first context viewer, then restores its last location without dimming", () => {
+    const { store, storage } = setup();
+    store.dispatch({ type: "open", panel: "context-viewer" });
+    const first = layout(store).floats.find(group => group.panels.includes("context-viewer"))!;
+    expect(first.rect.width).toBeGreaterThan(0);
+    expect(store.getSnapshot().modalPanel).toBe("context-viewer");
+    const rect = { x: 30, y: 40, width: 500, height: 400 };
+    store.dispatch({ type: "float", groupId: first.id, rect });
+    expect(store.getSnapshot().modalPanel).toBe("context-viewer");
+    store.dispatch({ type: "hide", panels: ["context-viewer"] });
+    expect(store.getSnapshot().modalPanel).toBeNull();
+    store.dispatch({ type: "open", panel: "context-viewer" });
+    expect(layout(store).floats.find(group => group.panels.includes("context-viewer"))?.rect).toEqual(rect);
+    expect(store.getSnapshot().modalPanel).toBeNull();
+    store.flush();
+    const restored = new DockStore(storage);
+    restored.switchScope(a, false);
+    expect(restored.getSnapshot().modalPanel).toBeNull();
+    restored.dispatch({ type: "hide", panels: ["context-viewer"] });
+    restored.dispatch({ type: "open", panel: "context-viewer" });
+    expect(restored.getSnapshot().modalPanel).toBeNull();
+  });
+
+  it("removes the context viewer mask on docking, minimizing or pinning", () => {
+    for (const action of ["dock", "minimize", "pin"] as const) {
+      const { store } = setup();
+      store.dispatch({ type: "open", panel: "context-viewer" });
+      const id = layout(store).floats.find(group => group.panels.includes("context-viewer"))!.id;
+      if (action === "dock") store.dispatch({ type: "move", panels: ["context-viewer"], target: { region: "right" } });
+      if (action === "minimize") store.dispatch({ type: "float", groupId: id, minimized: true });
+      if (action === "pin") store.setPin(id, "application");
+      expect(store.getSnapshot().modalPanel).toBeNull();
+    }
+  });
   it("adopts a real draft completed while preview is displayed without switching namespaces", () => {
     const { store, storage } = setup();
     store.beginDraft(draft);
@@ -375,6 +409,20 @@ describe("dock presets and preview", () => {
     store.switchScope(b, true);
     expect(storage.writes).toEqual([]);
     expect(storage.length).toBe(1);
+  });
+});
+
+describe("shared dock preferences", () => {
+  it("updates snapping and locking across conversation handles while keeping demo preferences separate", () => {
+    const owner = new DockStore(null), first = owner.fork(a), second = owner.fork(b), demo = owner.fork(a, true);
+    const changed = vi.fn();
+    second.subscribe(changed);
+    const before = layout(second);
+    first.updatePreferences({ locked: true, snap: false });
+    expect(second.getSnapshot().preferences).toMatchObject({ locked: true, snap: false });
+    expect(changed).toHaveBeenCalledOnce();
+    expect(layout(second)).toEqual(before);
+    expect(demo.getSnapshot().preferences).toMatchObject({ locked: false, snap: true });
   });
 });
 

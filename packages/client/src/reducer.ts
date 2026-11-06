@@ -171,6 +171,9 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
  * listed explicitly as `false`.
  */
 const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
+ "evaluations.openWorkspace": false,
+ "evaluations.prepare": false, "evaluations.start": true, "evaluations.control": true, "evaluations.export": false, "evaluations.respond": true,
+ "evaluation.runtime.plan": false, "evaluation.runtime.start": true, "evaluation.runtime.read": false, "evaluation.runtime.rows": false, "evaluation.runtime.control": true, "evaluation.runtime.report": false, "evaluation.runtime.patch": false,
  "mode.plan.review.details": false,
  "mode.plan.review.resolve": true,
  "worktrees.session.list": false,
@@ -198,6 +201,8 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
  "accounts.pool.options": false,
  "models.compaction.preview": false,
  "models.compaction.set": true,
+ "session.compaction.get": false,
+ "session.compaction.set": true,
  "session.titles.inspect":false,
  "agent.model.inspect":false,
 "prediction.status": false,
@@ -274,6 +279,11 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "media.resume": true,
   "media.close": true,
   "benchmarks.list": false,
+  "computer.observe.open": false,
+  "computer.observe.close": false,
+  "computer.frame.capture": false,
+  "computer.control.stop": false,
+  "computer.control.continue": true,
   "computer.status": false,
   "computer.configure": true,
   "computer.capture": false,
@@ -281,6 +291,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "computer.observe.release": false,
   "browser.tabs.get": false,
   "browser.observe.prepare": false,
+  "browser.managed.prepare": false,
   "ida.status.details": false,
   "ida.configure": true,
   "ida.open": true,
@@ -294,6 +305,8 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "resource.local.list": false,
   "resource.local.open": false,
   "resource.local.save": true,
+  "dictation.inspect": false,
+  "dictation.open": false,
   "dictation.status": false,
   "dictation.prepare": false,
   "dictation.start": false,
@@ -426,6 +439,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "operator.invoke": true,
   "btw.ask": true,
   "btw.history.list": false,
+  "btw.images.resolve": false,
   "btw.history.read": false,
   "btw.followUp": true,
   "session.models.mentions": false,
@@ -689,6 +703,11 @@ function reduceBootstrap(state: ClientState, bootstrap: ClientBootstrap, occurre
 }
 
 function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
+  // Computer progress cannot establish or switch the active Runtime identity.
+  if (event.kind === "computer.changed" && (
+    event.authorityEpoch !== state.connection.authorityEpoch ||
+    event.runtimeEpoch !== state.connection.runtimeEpoch
+  )) return state;
   // 1) Authority epoch: stale events are ignored; a newer epoch invalidates
   //    all prior state (authority epochs are monotonic generations).
   const authorityEpoch = state.connection.authorityEpoch;
@@ -765,6 +784,7 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
       return reduceSnapshot(state, event);
     case "state.changed":
     case "diagnostics.changed":
+    case "evaluations.changed":
     case "operation.progress":
     case "git.repository.changed":
       return { ...state, connection: advanceConnection(state.connection, event) };
@@ -812,6 +832,7 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
         },
         entities: { ...state.entities, telemetry: null, btw: null },
       };
+    case "computer.changed":
     case "conversation.changed":
       // Conversation payloads are consumed by the bounded, target-scoped
       // renderer store. The global client reducer advances transport identity

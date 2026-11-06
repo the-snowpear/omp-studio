@@ -26,7 +26,7 @@ export function IdaPane({
   visible = true,
   capabilities,
 }: SessionOptionsProps) {
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [showTools, setShowTools] = useState(false);
@@ -132,11 +132,12 @@ export function IdaPane({
     setNotice("");
     try {
       if (preview) {
-        setNotice(
-          zh
-            ? "演示：操作已完成，本机 IDA 和文件未更改。"
-            : "Demo: operation complete. Local IDA and files are unchanged.",
-        );
+        if (marks)
+          setNotice(
+            zh
+              ? "演示：操作已完成，本机 IDA 和文件未更改。"
+              : "Demo: operation complete. Local IDA and files are unchanged.",
+          );
         if (confirm.kind === "close")
           setStatus((current) =>
             current
@@ -217,7 +218,7 @@ export function IdaPane({
 
       <h2>
         IDA{" "}
-        {preview ? (
+        {preview && marks ? (
           <span className="chip gray xs">{zh ? "演示" : "Demo"}</span>
         ) : null}
       </h2>
@@ -392,9 +393,10 @@ export function IdaPane({
                 disabled={(!busy && !db.busy) || !can("ida.database.cancel")}
                 onClick={() => {
                   if (preview) {
-                    setNotice(
-                      zh ? "演示：请求已取消" : "Demo: request cancelled",
-                    );
+                    if (marks)
+                      setNotice(
+                        zh ? "演示：请求已取消" : "Demo: request cancelled",
+                      );
                     return;
                   }
                   void invoke("ida.database.cancel", {

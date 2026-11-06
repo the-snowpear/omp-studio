@@ -1,3 +1,4 @@
+import { EVALUATION_WORKSPACE_KINDS, isEvaluationWorkspaceKind, type EvaluationWorkspaceOperation, type EvaluationWorkspaceResultMap } from "./evaluation-workspace.js";
 import { ADVISOR_CONFIG_KINDS, isAdvisorConfigKind, type AdvisorConfigOperation, type AdvisorConfigResultMap } from "./advisor-config.js";
 import { LOCAL_RESOURCE_KINDS, isLocalResourceKind, type LocalResourceOperation, type LocalResourceResultMap } from "./local-resources.js";
 import { DICTATION_KINDS, isDictationKind, type DictationOperation, type DictationResultMap } from "./dictation.js";
@@ -15,6 +16,7 @@ import { SESSION_RESTORE_KINDS, isSessionRestoreKind, validateSessionRestoreOper
 import { RUNTIME_QUEUE_KINDS, isRuntimeQueueKind, validateRuntimeQueueOperation, validateRuntimeQueueResult, type RuntimeQueueOperation, type RuntimeQueueResultMap } from "./runtime-queue.js";
 import { NATIVE_PREFERENCE_KINDS, isNativePreferenceKind, validateNativePreferenceOperation, validateNativePreferenceResult, type NativePreferenceOperation, type NativePreferenceResultMap } from "./native-preferences.js";
 import { RATCHET_OPERATION_KINDS, isRatchetKind, validateRatchetOperation, validateRatchetResult, type RatchetOperation, type RatchetResultMap } from "./ratchet.js";
+import { COMPUTER_WORKSPACE_COMMAND_KINDS, isComputerWorkspaceCommand, type ComputerWorkspaceCommand, type ComputerWorkspaceResultMap } from "./computer-workspace.js";
 import { COMPUTER_OBSERVATION_KINDS, isComputerObservationKind, validateComputerObservationOperation, validateComputerObservationResult, type ComputerObservationOperation, type ComputerObservationResultMap } from "./computer-observation.js";
 import { BROWSER_OBSERVATION_KINDS, isBrowserObservationKind, validateBrowserObservationOperation, validateBrowserObservationResult, type BrowserObservationOperation, type BrowserObservationResultMap } from "./browser-observation.js";
 import { IDA_OPERATION_KINDS, isIdaOperationKind, validateStudioIdaOperation, validateStudioIdaResult, type StudioIdaOperation, type StudioIdaResultMap } from "./ida-details.js";
@@ -76,6 +78,7 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
+ | EvaluationWorkspaceOperation
  | AdvisorConfigOperation
  | LocalResourceOperation
  | DictationOperation
@@ -94,6 +97,7 @@ export type WorkbenchOperation =
   | NativePlanReviewOperation
   | RatchetOperation
   | ComputerObservationOperation
+  | ComputerWorkspaceCommand
   | BrowserObservationOperation
   | StudioIdaOperation
   | SessionOptionsOperation
@@ -120,7 +124,7 @@ export type WorkbenchOperation =
   | { kind: "runtime.models.describe"; selector: string }
  | { kind: "runtime.models.list"; modelKind?: string; cursor?: string; limit?: number };
 
-export interface WorkbenchResultMap extends AdvisorConfigResultMap, LocalResourceResultMap, DictationResultMap,SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, BrowserObservationResultMap, StudioIdaResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap, RuntimeFeatureResultMap {
+export interface WorkbenchResultMap extends EvaluationWorkspaceResultMap, AdvisorConfigResultMap, LocalResourceResultMap, DictationResultMap,SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceCommand["kind"]>, BrowserObservationResultMap, StudioIdaResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap, RuntimeFeatureResultMap {
   "accounts.status": AccountStatusResult;
  "accounts.status.details": AccountStatusResult;
   "accounts.logout": { loggedOut: true };
@@ -135,7 +139,8 @@ export interface WorkbenchResultMap extends AdvisorConfigResultMap, LocalResourc
   "runtime.models.describe": { model: RuntimeModelChoice };
  "runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
-export const WORKBENCH_OPERATION_KINDS = [...ADVISOR_CONFIG_KINDS, ...LOCAL_RESOURCE_KINDS,...DICTATION_KINDS,...SESSION_GUI_KINDS,
+export const WORKBENCH_OPERATION_KINDS = [
+ ...EVALUATION_WORKSPACE_KINDS,...ADVISOR_CONFIG_KINDS, ...LOCAL_RESOURCE_KINDS,...DICTATION_KINDS,...SESSION_GUI_KINDS,
 ...SESSION_TITLES_KINDS,
  ...PREDICTION_KINDS,
 ...MAINTENANCE_OPERATION_KINDS,
@@ -146,10 +151,13 @@ export const WORKBENCH_OPERATION_KINDS = [...ADVISOR_CONFIG_KINDS, ...LOCAL_RESO
 ...NATIVE_PREFERENCE_KINDS, ...FEATURE_SETTINGS_KINDS, ...SESSION_PORTABILITY_KINDS, ...SESSION_COMPRESSION_KINDS, ...SESSION_WORKTREE_KINDS, ...NATIVE_PLAN_REVIEW_KINDS,
 ...RATCHET_OPERATION_KINDS,
 ...COMPUTER_OBSERVATION_KINDS,
+...COMPUTER_WORKSPACE_COMMAND_KINDS,
 ...BROWSER_OBSERVATION_KINDS,
 ...IDA_OPERATION_KINDS,
 ...SESSION_OPTIONS_KINDS,...SKILLSHARE_OPERATION_KINDS, ...LIVE_AUDIO_OPERATION_KINDS, ...MEDIA_OPERATION_KINDS, ...BENCHMARK_OPERATION_KINDS, ...RUNTIME_CATALOG_OPERATION_KINDS, ...JUDGMENT_OPERATION_KINDS, ...ANNOTATION_OPERATION_KINDS, ...RUNTIME_FEATURE_KINDS, "accounts.status", "accounts.status.details", "accounts.logout", "services.list", "services.start", "services.stop", "services.restart", "services.mode.set", "services.send", "services.logs", "tokens.count", "runtime.models.list", "runtime.models.describe"] as const;
-export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [...SESSION_GUI_READ_KINDS,
+export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
+ "evaluation.runtime.plan", "evaluation.runtime.read", "evaluation.runtime.rows", "evaluation.runtime.report", "evaluation.runtime.patch", "evaluation.runtime.control",...SESSION_GUI_READ_KINDS,
+"dictation.inspect",
 "prediction.status","prediction.prepare","prediction.release",
 ...MAINTENANCE_READ_KINDS,
 ...ARCHIVE_OPERATION_KINDS,
@@ -159,7 +167,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [...S
 "preferences.native.get", ...FEATURE_SETTINGS_READ_KINDS, "session.portability.status", "maintenance.compression.status", "worktrees.session.list", "worktrees.session.startPolicy", "worktrees.session.resume.list", "mode.plan.review.details",
 "ratchet.list", "ratchet.read", "ratchet.stop",
 "computer.status", "computer.capture", "computer.stop", "computer.observe.release",
-"browser.tabs.get", "browser.observe.prepare",
+"browser.tabs.get", "browser.observe.prepare", "browser.managed.prepare",
 "ida.status.details", "ida.database.cancel",
 "session.speed.get", "session.budget.get", "session.warming.get", "models.presets.list","skillshare.status", "skillshare.home", "skillshare.search", "skillshare.package", "skillshare.installed", "skillshare.tokens", "skillshare.action", "live.audio.status", "live.audio.mute", "live.audio.release", "media.models", "media.list", "media.read", "benchmarks.list", "benchmarks.read", ...RUNTIME_CATALOG_OPERATION_KINDS, "judgments.list", "judgments.read", ...ANNOTATION_OPERATION_KINDS, ...RUNTIME_FEATURE_READ_KINDS, "accounts.status", "accounts.status.details", "services.list", "services.logs", "tokens.count", "runtime.models.list", "runtime.models.describe"];
 export function isWorkbenchOperationKind(value: string): value is WorkbenchOperation["kind"] {
@@ -210,7 +218,9 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
   if (!value || typeof value !== "object") throw new Error("Invalid workbench operation");
   const kind = (value as Record<string, unknown>).kind;
   if (typeof kind !== "string" || !isWorkbenchOperationKind(kind)) throw new Error("Unknown workbench operation");
-  if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
+  if (isComputerWorkspaceCommand(kind)) return;
+  if (isEvaluationWorkspaceKind(kind)) return;
+	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
   if (isSessionTitlesKind(kind)) { validateSessionTitlesOperation(value); return; }
  if (isPredictionKind(kind)) { validatePredictionChannelOperation(value); return; }
  if (isMaintenanceKind(kind)) { validateMaintenanceOperation(value); return; }
@@ -242,7 +252,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
   if (isRuntimeCatalogOperationKind(kind)) { validateRuntimeCatalogOperation(value); return; }
   if (isJudgmentOperationKind(kind)) { validateJudgmentOperation(value); return; }
   if (isRuntimeFeatureKind(kind)) { validateRuntimeFeatureOperation(value); return; }
-  const fields: Record<Exclude<WorkbenchOperation["kind"], AdvisorConfigOperation["kind"] | LocalResourceOperation["kind"] | DictationOperation["kind"] | SessionGuiOperation["kind"] | SessionTitlesOperation["kind"] | PredictionChannelOperation["kind"] | MaintenanceOperation["kind"] | ArchiveOperation["kind"] | AgentModelOperation["kind"] | SessionRestoreOperation["kind"] | RuntimeQueueOperation["kind"] | NativePreferenceOperation["kind"] | FeatureSettingsOperation["kind"] | SessionPortabilityOperation["kind"] | SessionCompressionOperation["kind"] | SessionWorktreeOperation["kind"] | NativePlanReviewOperation["kind"] | RatchetOperation["kind"] | ComputerObservationOperation["kind"] | BrowserObservationOperation["kind"] | StudioIdaOperation["kind"] | SessionOptionsOperation["kind"] | SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"] | RuntimeFeatureOperation["kind"]>, readonly string[]> = {
+  const fields: Record<Exclude<WorkbenchOperation["kind"], EvaluationWorkspaceOperation["kind"] | AdvisorConfigOperation["kind"] | LocalResourceOperation["kind"] | DictationOperation["kind"] | SessionGuiOperation["kind"] | SessionTitlesOperation["kind"] | PredictionChannelOperation["kind"] | MaintenanceOperation["kind"] | ArchiveOperation["kind"] | AgentModelOperation["kind"] | SessionRestoreOperation["kind"] | RuntimeQueueOperation["kind"] | NativePreferenceOperation["kind"] | FeatureSettingsOperation["kind"] | SessionPortabilityOperation["kind"] | SessionCompressionOperation["kind"] | SessionWorktreeOperation["kind"] | NativePlanReviewOperation["kind"] | RatchetOperation["kind"] | ComputerWorkspaceCommand["kind"] | ComputerObservationOperation["kind"] | BrowserObservationOperation["kind"] | StudioIdaOperation["kind"] | SessionOptionsOperation["kind"] | SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"] | RuntimeFeatureOperation["kind"]>, readonly string[]> = {
     "accounts.status": ["refresh"],
  "accounts.status.details": ["refresh"],
     "accounts.logout": ["sessionId", "accountId"], "services.list": [], "services.start": ["spec"], "services.stop": ["name", "instanceId"], "services.restart": ["name", "instanceId"],
@@ -274,7 +284,9 @@ function serviceRow(value: unknown): void {
   if (row.ownerAgentId !== undefined) text(row.ownerAgentId);
 }
 export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value: unknown): void {
- if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
+ if (isComputerWorkspaceCommand(kind)) return;
+ if (isEvaluationWorkspaceKind(kind)) return;
+	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
  if (isSessionTitlesKind(kind)) { validateSessionTitlesResult(kind,value); return; }
  if (isPredictionKind(kind)) { validatePredictionChannelResult(kind,value); return; }
  if (isMaintenanceKind(kind)) { validateMaintenanceResult(kind,value); return; }

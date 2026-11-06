@@ -329,15 +329,19 @@ describe("studio-host runtime", () => {
 		expect(later?.updatedAt).toBe(parked?.updatedAt);
 	});
 
-	test("recycles the main Worker without replacing the Runtime identity", async () => {
+	test("keeps held input resident, then recycles the main Worker without replacing the Runtime identity", async () => {
 		using tempDir = TempDir.createSync("@omp-studio-main-worker-");
 		const sessionFile = path.join(tempDir.path(), "main.jsonl");
 		let disposed = 0;
 		let revived = 0;
+		let held = true;
 		const initialListeners = new Set<unknown>();
 		const nextListeners = new Set<unknown>();
 		const initial = {
 			...fakeSession("session-main", { getSessionFile: () => sessionFile }),
+			get hasHeldQueuedMessages() {
+				return held;
+			},
 			subscribe: (listener: unknown) => {
 				initialListeners.add(listener);
 				return () => {
@@ -368,7 +372,11 @@ describe("studio-host runtime", () => {
 				observed = runtime;
 				const listener = () => {};
 				const unsubscribe = runtime.session.subscribe(listener);
-				await Bun.sleep(30);
+				await Bun.sleep(60);
+				expect(runtime.workerResidency?.()).toBe("active");
+				expect(disposed).toBe(0);
+				held = false;
+				await Bun.sleep(60);
 				expect(runtime.workerResidency?.()).toBe("dormant");
 				expect(disposed).toBe(1);
 				await runtime.ensureWorkerLive?.();

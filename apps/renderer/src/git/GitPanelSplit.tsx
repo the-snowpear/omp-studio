@@ -1,10 +1,13 @@
+import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
 import { useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
+import { usePreviewMode } from "../preview/PreviewContext";
 
 export function GitPanelSplit({
   top,
+  view,
   graphOpen,
   splitRatio,
   onToggle,
@@ -14,6 +17,7 @@ export function GitPanelSplit({
   children,
 }: {
   readonly top: ReactNode;
+  readonly view?: "changes" | "history";
   readonly graphOpen: boolean;
   readonly splitRatio: number;
   readonly onToggle: () => void;
@@ -22,7 +26,9 @@ export function GitPanelSplit({
   readonly preview?: boolean;
   readonly children: ReactNode;
 }) {
+  const document = useSurfaceDocument(), window = surfaceWindow(document);
   const { t } = useI18n();
+  const { marks } = usePreviewMode();
   const rootRef = useRef<HTMLDivElement>(null);
   const topShare = graphOpen ? `${(splitRatio * 100).toFixed(3)}%` : "100%";
   const graphShare = graphOpen ? `${((1 - splitRatio) * 100).toFixed(3)}%` : "0%";
@@ -76,6 +82,10 @@ export function GitPanelSplit({
     handle.addEventListener("pointercancel", up);
   };
 
+  if (view) return <div className={`git-single-view ${view}`}>
+    <div className="git-status-pane">{top}</div>
+    {view === "history" ? <section className="git-graph-pane"><div className="gh-list-caption">{t("git.commitHistoryTitle")}</div>{children}</section> : null}
+  </div>;
   return (
     <div ref={rootRef} className={`git-panel${graphOpen ? "" : " graph-collapsed"}`}>
       <div className="git-status-pane" style={{ ["--git-status-basis" as string]: topShare }}>{top}</div>
@@ -99,7 +109,7 @@ export function GitPanelSplit({
       <section className={`git-graph-pane${graphOpen ? "" : " collapse"}`} style={{ ["--git-graph-basis" as string]: graphShare }} aria-labelledby="gitGraphTitle">
         <div className="git-graph-head">
           <h2 id="gitGraphTitle">{t("git.commitHistoryTitle")}</h2>
-          {preview ? <span className="chip gray xs">演示</span> : null}
+          {preview && marks ? <span className="chip gray xs">演示</span> : null}
           {meta}
           <span className="spacer" />
           <button

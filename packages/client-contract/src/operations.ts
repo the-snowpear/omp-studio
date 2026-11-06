@@ -1,4 +1,7 @@
-import type { ContextViewOperation, ContextViewResultMap } from "@omp-studio/studio-protocol";
+import type { EvaluationRecord, EvaluationSpec, EvaluationPlan, EvaluationContext, EvaluationListInput, EvaluationResultPage, EvaluationStartInput, EvaluationControlInput, EvaluationExportInput, EvaluationExportResult } from "@omp-studio/studio-protocol";
+import type { ClientInteraction } from "./lifecycle.js";
+import type { GitHubTarget, GitHubRepositories, GitHubListInput, GitHubItemPage, GitHubItemInput, GitHubItemDetail, GitHubDiscussionPage, GitHubFilesPage, GitHubFileDiff } from "./github.js";
+import type { ContextViewOperation, ContextViewResultMap, ComputerWorkspaceQuery, ComputerWorkspaceResultMap } from "@omp-studio/studio-protocol";
 import type { ModelAdaptationInput, ModelAdaptationResult, ModelCatalogRefreshResult } from "./model-adaptation.js";
 import type { WorkbenchOperation, WorkbenchResultMap } from "@omp-studio/studio-protocol";
 import type { PredictionQuery, PredictionResult } from "@omp-studio/studio-protocol";
@@ -27,6 +30,7 @@ import type {
   OperatorCommandManifest,
   OperatorStateSnapshot,
   SessionTelemetryReadResult,
+  SessionCompactionRead,
   SessionThinkingSelector,
   StudioAgentSnapshot,
   StudioPlanSaveAndQuitResult,
@@ -94,7 +98,16 @@ import type {
 export type EmptyInput = Readonly<Record<string, never>>;
 
 type ContextViewQueryMap = { [K in ContextViewOperation["kind"]]: Omit<Extract<ContextViewOperation, { kind: K }>, "kind"> };
-export interface QueryInputMap extends ContextViewQueryMap {
+type ComputerWorkspaceQueryMap = { [K in ComputerWorkspaceQuery["kind"]]: Omit<Extract<ComputerWorkspaceQuery, { kind: K }>, "kind"> };
+export interface QueryInputMap extends ContextViewQueryMap, ComputerWorkspaceQueryMap {
+  "session.compaction.read": { readonly sessionId: SessionId };
+ "evaluations.exportChunk": { artifactId: string; offset?: number };
+ "evaluations.retrySpec": { id: string };
+ "evaluations.patch": { id: string; offset?: number };
+ "evaluations.context": { workspaceId: string };
+ "evaluations.list": EvaluationListInput;
+ "evaluations.read": { id: string };
+ "evaluations.rows": { id: string; offset?: number; limit?: number };
   "prediction.query": PredictionQuery;
   "artifacts.text.read": { readonly artifactId: string };
   "artifacts.list": import("@omp-studio/studio-protocol").ArtifactListInput;
@@ -154,13 +167,27 @@ export interface QueryInputMap extends ContextViewQueryMap {
   "git.log.list": { readonly workspaceId: WorkspaceId; readonly limit?: number; readonly skip?: number };
   "git.commit.changes": { readonly workspaceId: WorkspaceId; readonly oid: string };
   "git.commit.diff": { readonly workspaceId: WorkspaceId; readonly oid: string; readonly path: string };
-  "github.auth.get": { readonly workspaceId?: WorkspaceId };
-  "github.pr.list": { readonly workspaceId: WorkspaceId; readonly state?: "open" | "closed" | "merged" | "all" };
-  "github.pr.get": { readonly workspaceId: WorkspaceId; readonly number: number };
-  "github.pr.checks": { readonly workspaceId: WorkspaceId; readonly number: number };
+  "github.auth.get": { readonly workspaceId?: WorkspaceId; readonly remote?: string };
+  "github.repositories.list": GitHubTarget;
+  "github.items.list": GitHubListInput;
+  "github.items.get": GitHubItemInput;
+  "github.discussion.list": GitHubItemInput & { readonly page?: number };
+  "github.pr.files": GitHubTarget & { readonly number: number; readonly page?: number; readonly headOid: string };
+  "github.pr.diff": GitHubTarget & { readonly number: number; readonly path: string; readonly headOid: string };
+
+  "github.pr.list": Omit<GitHubListInput, "kind">;
+  "github.pr.get": GitHubTarget & { readonly number: number };
+  "github.pr.checks": GitHubTarget & { readonly number: number };
 }
 
-export interface QueryResultMap extends ContextViewResultMap {
+export interface QueryResultMap extends ContextViewResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceQuery["kind"]> {
+ "evaluations.exportChunk": { data: string; nextOffset: number; total: number; mimeType: string; name: string };
+ "evaluations.retrySpec": EvaluationSpec;
+ "evaluations.patch": { text: string; nextOffset: number; total: number };
+ "evaluations.context": EvaluationContext;
+ "evaluations.list": { records: EvaluationRecord[]; total: number };
+ "evaluations.read": EvaluationRecord & { clientInteraction?: ClientInteraction };
+ "evaluations.rows": EvaluationResultPage;
   "prediction.query": PredictionResult;
   "artifacts.text.read": import("@omp-studio/studio-protocol").ArtifactTextResult;
   "artifacts.list": import("@omp-studio/studio-protocol").ArtifactPage;
@@ -205,6 +232,7 @@ export interface QueryResultMap extends ContextViewResultMap {
   "session.agents.list": { readonly sessionId: SessionId; readonly agents: readonly StudioAgentSnapshot[] };
   /** Session telemetry with provenance. Available independently of Runtime residency. */
   "session.telemetry.read": SessionTelemetryReadResult;
+  "session.compaction.read": SessionCompactionRead;
   "git.toolchain.get": GitToolchainReadModel;
   "git.repository.get": GitRepositoryReadModel;
   "git.diff.get": GitDiffReadModel;
@@ -215,6 +243,13 @@ export interface QueryResultMap extends ContextViewResultMap {
   "git.commit.changes": GitCommitChangesReadModel;
   "git.commit.diff": GitCommitDiffReadModel;
   "github.auth.get": GitHubAuthReadModel;
+  "github.repositories.list": GitHubRepositories;
+  "github.items.list": GitHubItemPage;
+  "github.items.get": GitHubItemDetail;
+  "github.discussion.list": GitHubDiscussionPage;
+  "github.pr.files": GitHubFilesPage;
+  "github.pr.diff": GitHubFileDiff;
+
   "github.pr.list": GitHubPullRequestListReadModel;
   "github.pr.get": GitHubPullRequestDetailReadModel;
   "github.pr.checks": GitHubChecksReadModel;
@@ -387,7 +422,7 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, Upgra
   "queue.enqueue": { readonly text: string };
   "runtime.pause": EmptyInput;
   "runtime.resume": { readonly expectedPauseEpoch: number };
-  "runtime.settings.get": { readonly keys?: ReadonlyArray<StudioRuntimeSettingKey> };
+  "runtime.settings.get": { readonly keys?: ReadonlyArray<StudioRuntimeSettingKey>; readonly checkHindsight?: boolean };
   "runtime.settings.set": StudioRuntimeSettingSetInput;
   "turn.retry": EmptyInput;
   "core.continue": EmptyInput;
@@ -500,6 +535,12 @@ export type InteractionResponseValue =
   | Readonly<Record<string, unknown>>;
 
 interface CoreCommandInputMap {
+ "evaluations.openWorkspace": { id: string };
+ "evaluations.prepare": { workspaceId: string; spec: EvaluationSpec };
+ "evaluations.start": EvaluationStartInput;
+ "evaluations.control": EvaluationControlInput;
+ "evaluations.export": EvaluationExportInput;
+ "evaluations.respond": { id: string; interactionId: string; leaseGeneration: number; decision: "submit" | "cancel"; value?: unknown };
   "artifacts.saveText": import("@omp-studio/studio-protocol").ArtifactTextInput;
   "artifacts.delete": { readonly artifactId: string };
   /** Install or update the trusted runtime (environment page action). */
@@ -692,6 +733,12 @@ interface CoreCommandInputMap {
 export type CommandInputMap = CoreCommandInputMap & RuntimeCommandInputMap;
 
 interface CoreCommandResultMap {
+ "evaluations.openWorkspace": { opened: true };
+ "evaluations.prepare": EvaluationPlan;
+ "evaluations.start": EvaluationRecord;
+ "evaluations.control": EvaluationRecord;
+ "evaluations.export": EvaluationExportResult;
+ "evaluations.respond": { responded: true };
   "artifacts.saveText": import("@omp-studio/studio-protocol").ArtifactRecord;
   "artifacts.delete": { readonly deleted: true; readonly artifactId: string };
   "runtime.install": RuntimeInstallState;

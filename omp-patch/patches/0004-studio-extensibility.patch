@@ -1,7 +1,508 @@
+diff --git a/crates/pi-natives/src/desktop/ax.rs b/crates/pi-natives/src/desktop/ax.rs
+index 51707ede78..a65424141e 100644
+--- a/crates/pi-natives/src/desktop/ax.rs
++++ b/crates/pi-natives/src/desktop/ax.rs
+@@ -8,7 +8,10 @@ use super::{
+ 	backend::AxBackend,
+ 	control,
+ 	error::{CoreResult, DesktopError, ErrorCode},
+-	types::{AxNode, AxQuery, AxSnapshot, AxSnapshotOptions, DesktopWindow},
++	types::{
++		AxNode, AxQuery, AxSnapshot, AxSnapshotOptions, CaptureRegion, DesktopObservationNode,
++		DesktopWindow,
++	},
+ };
+ 
+ #[derive(Clone)]
+@@ -652,17 +655,63 @@ pub fn snapshot(
+ 	window: &DesktopWindow,
+ 	options: &AxSnapshotOptions,
+ ) -> CoreResult<AxSnapshot> {
++	snapshot_observed(backend, registry, window, options, false).map(|(snapshot, _)| snapshot)
++}
++
++pub fn snapshot_observed(
++	backend: &mut dyn AxBackend,
++	registry: &mut AxRegistry,
++	window: &DesktopWindow,
++	options: &AxSnapshotOptions,
++	collect_nodes: bool,
++) -> CoreResult<(AxSnapshot, Option<Vec<DesktopObservationNode>>)> {
+ 	let target = &window.id;
+ 	let generation = registry.begin_snapshot(target);
+ 	let root = backend.window_root(window)?;
+ 	let mut state = WalkState::new(
+ 		options.max_nodes.unwrap_or(800).max(1),
+ 		options.max_depth.unwrap_or(24),
+-		WalkBounds::Skip,
++		if collect_nodes {
++			WalkBounds::Read
++		} else {
++			WalkBounds::Skip
++		},
+ 	);
+ 	let tree = walk_raw(backend, root.clone(), 0, &mut state)?;
+ 	let identities = ReadIdentities::new(&root, tree.as_ref(), &state);
+ 	let root = tree.and_then(|node| filter_node(node, options.all.unwrap_or(false)));
++	let nodes = collect_nodes.then(|| {
++		fn observed(node: &WalkNode, next: &mut u32) -> DesktopObservationNode {
++			*next += 1;
++			DesktopObservationNode {
++				id:       format!("observer-{}", *next),
++				role:     node.props.role.clone(),
++				name:     node
++					.props
++					.title
++					.clone()
++					.or_else(|| node.props.description.clone())
++					.unwrap_or_default(),
++				enabled:  node.props.enabled,
++				bounds:   node.props.bounds.map(|b| CaptureRegion {
++					x:      b.x,
++					y:      b.y,
++					width:  b.width,
++					height: b.height,
++				}),
++				children: node
++					.children
++					.iter()
++					.map(|child| observed(child, next))
++					.collect(),
++			}
++		}
++		let mut next = 0;
++		root
++			.as_ref()
++			.map(|root| vec![observed(root, &mut next)])
++			.unwrap_or_default()
++	});
+ 	let mut text = String::new();
+ 	let mut node_count = 0;
+ 	if let Some(root) = root {
+@@ -692,7 +741,7 @@ pub fn snapshot(
+ 		}
+ 		let _ = write!(text, "… skipped {} unreadable nodes", state.skipped);
+ 	}
+-	Ok(AxSnapshot { text, node_count, truncated: state.truncated })
++	Ok((AxSnapshot { text, node_count, truncated: state.truncated }, nodes))
+ }
+ 
+ pub fn query(
+diff --git a/crates/pi-natives/src/desktop/frame.rs b/crates/pi-natives/src/desktop/frame.rs
+index 7c2b566bff..7afbff63af 100644
+--- a/crates/pi-natives/src/desktop/frame.rs
++++ b/crates/pi-natives/src/desktop/frame.rs
+@@ -362,6 +362,46 @@ impl FrameGeometry {
+ 		}
+ 	}
+ 
++	/// Same captured window origin and extent, not merely the dimensions
++	/// accepted for future input.
++	pub(crate) fn observation_matches(&self, window: &DesktopWindow) -> bool {
++		matches!(self.kind, FrameKind::Window { .. })
++			&& self.regions.first().is_some_and(|region| {
++				region.id == window.id
++					&& region.x == f64::from(window.x)
++					&& region.y == f64::from(window.y)
++					&& region.width == f64::from(window.width)
++					&& region.height == f64::from(window.height)
++			})
++	}
++
++	/// Inverse of the recorded input transform. Rectangles crossing differently
++	/// scaled regions are omitted.
++	pub(crate) fn observation_bounds(&self, bounds: CaptureRegion) -> Option<CaptureRegion> {
++		if ![bounds.x, bounds.y, bounds.width, bounds.height]
++			.into_iter()
++			.all(f64::is_finite)
++			|| bounds.width <= 0.0
++			|| bounds.height <= 0.0
++		{
++			return None;
++		}
++		let region = self.regions.iter().find(|region| {
++			region.width > 0.0
++				&& region.height > 0.0
++				&& bounds.x >= region.x
++				&& bounds.y >= region.y
++				&& bounds.x + bounds.width <= region.x + region.width
++				&& bounds.y + bounds.height <= region.y + region.height
++		})?;
++		Some(CaptureRegion {
++			x:      region.pixel_x + (bounds.x - region.x) * region.pixel_width / region.width,
++			y:      region.pixel_y + (bounds.y - region.y) * region.pixel_height / region.height,
++			width:  bounds.width * region.pixel_width / region.width,
++			height: bounds.height * region.pixel_height / region.height,
++		})
++	}
++
+ 	fn scaled(&mut self, ratio_x: f64, ratio_y: f64, width: u32, height: u32) {
+ 		for region in &mut self.regions {
+ 			region.pixel_x *= ratio_x;
+@@ -550,6 +590,24 @@ mod tests {
+ 			assert_eq!(f.map_point(200.0 * scale, 100.0 * scale, None).unwrap(), (300.0, 150.0));
+ 		}
+ 	}
++	#[test]
++	fn observation_bounds_use_captured_scale_and_reject_moved_windows() {
++		let original = window(10, 20);
++		let mut frame = FrameGeometry::for_window(&original, 800, 600);
++		frame.scaled(0.5, 0.5, 400, 300);
++		let bounds = CaptureRegion { x: 110.0, y: 70.0, width: 40.0, height: 20.0 };
++		assert_eq!(
++			frame.observation_bounds(bounds),
++			Some(CaptureRegion { x: 100.0, y: 50.0, width: 40.0, height: 20.0 })
++		);
++		assert!(frame.observation_matches(&original));
++		assert!(
++			!frame.observation_matches(&window(11, 20)),
++			"input can reanchor, but a historical AX overlay cannot"
++		);
++		assert_eq!(frame.observation_bounds(CaptureRegion { x: -1.0, ..bounds }), None);
++	}
++
+ 	#[test]
+ 	fn moved_window_is_reanchored() {
+ 		let f = FrameGeometry::for_window(&window(10, 20), 800, 600);
+diff --git a/crates/pi-natives/src/desktop/mod.rs b/crates/pi-natives/src/desktop/mod.rs
+index 02f4862e63..f7563d51ec 100644
+--- a/crates/pi-natives/src/desktop/mod.rs
++++ b/crates/pi-natives/src/desktop/mod.rs
+@@ -726,24 +726,25 @@ fn hold_duration(seconds: f64) -> CoreResult<Duration> {
+ }
+ 
+ struct Worker {
+-	backend:       CoreResult<Box<dyn Backend>>,
+-	registry:      AxRegistry,
+-	frames:        HashMap<String, FrameGeometry>,
++	observation_only: bool,
++	backend:          CoreResult<Box<dyn Backend>>,
++	registry:         AxRegistry,
++	frames:           HashMap<String, FrameGeometry>,
+ 	/// Latest capabilities the worker computed, shared with the session so the
+ 	/// getter can answer while an operation holds the worker.
+-	capabilities:  Arc<Mutex<Option<DesktopCapabilities>>>,
+-	display_awake: Arc<DisplayAwake>,
++	capabilities:     Arc<Mutex<Option<DesktopCapabilities>>>,
++	display_awake:    Arc<DisplayAwake>,
+ 	/// The user's own input into the apps this session reads and acts on.
+ 	#[cfg(target_os = "macos")]
+-	listener:      control::intervention::Listener,
++	listener:         control::intervention::Listener,
+ 	/// The app whose window the request being served read, and when the read
+ 	/// began; it shows the user's input only once its reply is delivered.
+ 	#[cfg(target_os = "macos")]
+-	read:          Option<(libc::pid_t, Instant)>,
++	read:             Option<(libc::pid_t, Instant)>,
+ 	/// Windows whose drawing process the user-input watch already looked up;
+ 	/// a window keeps the process that draws it, so each is probed once.
+ 	#[cfg(target_os = "macos")]
+-	drawer_probed: std::collections::HashSet<String>,
++	drawer_probed:    std::collections::HashSet<String>,
+ }
+ 
+ impl Worker {
+@@ -751,9 +752,11 @@ impl Worker {
+ 		selector: DisplaySelector,
+ 		capabilities: Arc<Mutex<Option<DesktopCapabilities>>>,
+ 		display_awake: Arc<DisplayAwake>,
++		observation_only: bool,
+ 	) -> Self {
+ 		let backend = create_backend(selector);
+ 		Self {
++			observation_only,
+ 			backend,
+ 			registry: AxRegistry::default(),
+ 			frames: HashMap::new(),
+@@ -1030,7 +1033,8 @@ impl Worker {
+ 				Err(flume::RecvTimeoutError::Disconnected) => break,
+ 			};
+ 			let close = request.is_close();
+-			let activity = request.is_activity() && self.hold_display_awake(&token);
++			let activity =
++				!self.observation_only && request.is_activity() && self.hold_display_awake(&token);
+ 			self.dispatch(request, &token);
+ 			if close {
+ 				break;
+@@ -1047,6 +1051,11 @@ impl Worker {
+ 			return Ok(Response::Unit);
+ 		}
+ 		token.check()?;
++		if self.observation_only && request.is_mutation() {
++			return Err(DesktopError::permission_denied(
++				"observation-only desktop session refuses mutation",
++			));
++		}
+ 		let _scope = token.enter();
+ 		// Input the user's recent activity holds back fails here, before it
+ 		// takes the input lease.
+@@ -1167,7 +1176,7 @@ impl Worker {
+ 		let Some(access) = request.app_access() else {
+ 			return Ok(AppWatch::default());
+ 		};
+-		if !self.listener.listening() {
++		if self.observation_only || !self.listener.listening() {
+ 			return Ok(AppWatch::default());
+ 		}
+ 		let started = Instant::now();
+@@ -1236,7 +1245,7 @@ impl Worker {
+ 		let Response::Node(Some(node)) = response else {
+ 			return;
+ 		};
+-		if request.app_access().is_some() || !self.listener.listening() {
++		if self.observation_only || request.app_access().is_some() || !self.listener.listening() {
+ 			return;
+ 		}
+ 		if let Ok(Some((pid, input))) = self.element_app(&node.ref_) {
+@@ -1291,8 +1300,51 @@ impl Worker {
+ 			Request::Observe { target, caps, options, .. } => {
+ 				let capture = self.capture_full(target, caps, token)?;
+ 				token.check()?;
+-				let accessibility = self.snapshot(target, options)?;
+-				Ok(Response::Observation(DesktopObservation { capture, accessibility }))
++				let (accessibility, nodes, coordinate_space) = if self.observation_only {
++					let window = self.window(target)?;
++					let geometry = self.frame(target)?;
++					let (backend, registry) = (&mut self.backend, &mut self.registry);
++					let ax = backend
++						.as_mut()
++						.map_err(|error| error.clone())?
++						.ax()
++						.ok_or_else(DesktopError::ax_unsupported)?;
++					let (snapshot, mut nodes) =
++						ax::snapshot_observed(ax, registry, &window, options, true)?;
++					let current = self.window(target)?;
++					let reliable = matches!(target, Target::Window(_))
++						&& geometry.observation_matches(&window)
++						&& geometry.observation_matches(&current)
++						&& self.backend()?.validate_frame_layout(&geometry).is_ok();
++					fn transform(
++						nodes: &mut [DesktopObservationNode],
++						geometry: &FrameGeometry,
++						reliable: bool,
++					) {
++						for node in nodes {
++							node.bounds = if reliable {
++								node
++									.bounds
++									.and_then(|bounds| geometry.observation_bounds(bounds))
++							} else {
++								None
++							};
++							transform(&mut node.children, geometry, reliable);
++						}
++					}
++					if let Some(nodes) = &mut nodes {
++						transform(nodes, &geometry, reliable);
++					}
++					(snapshot, nodes, Some(if reliable { "frame" } else { "unavailable" }.into()))
++				} else {
++					(self.snapshot(target, options)?, None, None)
++				};
++				Ok(Response::Observation(DesktopObservation {
++					capture,
++					accessibility,
++					nodes,
++					coordinate_space,
++				}))
+ 			},
+ 			Request::ListApplications { options, .. } => {
+ 				Ok(Response::Applications(applications::list(options.clone())?))
+@@ -1705,6 +1757,7 @@ struct Lifecycle {
+ 	closed: bool,
+ }
+ struct SessionCore {
++	observation_only:  bool,
+ 	selector:          DisplaySelector,
+ 	lifecycle:         Mutex<Lifecycle>,
+ 	capabilities:      Arc<Mutex<Option<DesktopCapabilities>>>,
+@@ -1726,6 +1779,7 @@ impl SessionCore {
+ 		operation_timeout: Duration,
+ 	) -> Arc<Self> {
+ 		Arc::new(Self {
++			observation_only: false,
+ 			selector,
+ 			lifecycle: Mutex::new(Lifecycle {
+ 				tx:     None,
+@@ -1754,10 +1808,12 @@ impl SessionCore {
+ 		let selector = self.selector.clone();
+ 		let caps = Arc::clone(&self.capabilities);
+ 		let display_awake = Arc::clone(&self.display_awake);
++		let observation_only = self.observation_only;
+ 		let join = thread::Builder::new()
+ 			.name("omp-desktop-session".into())
+ 			.spawn(move || {
+-				Worker::new(selector, caps, display_awake).serve(&rx, DISPLAY_AWAKE_GRACE);
++				Worker::new(selector, caps, display_awake, observation_only)
++					.serve(&rx, DISPLAY_AWAKE_GRACE);
+ 				let _ = done_tx.send(());
+ 			})
+ 			.map_err(|e| {
+@@ -1894,7 +1950,30 @@ impl DesktopSession {
+ 	pub fn new(options: Option<DesktopSessionOptions>) -> Result<Self> {
+ 		let options = options.unwrap_or_default();
+ 		let escape_stops = control::escape_stop_counter(options.escape_stop_key.as_deref());
+-		Ok(Self { core: SessionCore::new(DisplaySelector::parse(options.display), escape_stops) })
++		let mut core = SessionCore::new(DisplaySelector::parse(options.display), escape_stops);
++		Arc::get_mut(&mut core)
++			.expect("new session core is unique")
++			.observation_only = options.observation_only.unwrap_or(false);
++		Ok(Self { core })
++	}
++
++	/// Positive capability probe. Older bindings return no such property.
++	#[napi(getter)]
++	pub fn observation_only(&self) -> bool {
++		self.core.observation_only
++	}
++
++	/// A cancellation barrier that queues behind native input without holding or
++	/// waking the display.
++	#[napi]
++	pub fn settle(&self) -> Result<task::Promise<()>> {
++		let c = Arc::clone(&self.core);
++		let token = c.cancellation.token();
++		Ok(task::blocking("desktop.settle", (), move |_| {
++			c.call(token, |reply| Request::Capabilities { reply })
++				.map(|_| ())
++				.map_err(Into::into)
++		}))
+ 	}
+ 
+ 	/// Asks the worker when it is idle, so permissions are read live. While
+@@ -1935,7 +2014,9 @@ impl DesktopSession {
+ 	/// this when it acts inside a turn.
+ 	#[napi]
+ 	pub fn hold_display_until_released(&self) {
+-		self.core.display_awake.hold_until_released();
++		if !self.core.observation_only {
++			self.core.display_awake.hold_until_released();
++		}
+ 	}
+ 
+ 	/// Lets the display sleep now if a turn holds it, without waiting behind
+@@ -2133,6 +2214,12 @@ impl DesktopSession {
+ 	/// calling this method.
+ 	#[napi]
+ 	pub fn acquire_control(&self) -> Result<task::Promise<DesktopControlState>> {
++		if self.core.observation_only {
++			return Err(
++				DesktopError::permission_denied("observation-only desktop session refuses control")
++					.into(),
++			);
++		}
+ 		let c = Arc::clone(&self.core);
+ 		let token = c.cancellation.token();
+ 		Ok(task::blocking("desktop.acquireControl", (), move |_| {
+@@ -3262,6 +3349,7 @@ mod capture_tests {
+ 	/// so they must not wait for the ownership tests.
+ 	fn unlocked_worker(backend: impl Backend + 'static) -> Worker {
+ 		Worker {
++			observation_only: false,
+ 			backend: Ok(Box::new(backend)),
+ 			registry: AxRegistry::default(),
+ 			frames: HashMap::new(),
+@@ -3324,6 +3412,41 @@ mod capture_tests {
+ 		}
+ 	}
+ 
++	#[test]
++	fn observation_only_never_holds_the_display_or_sends_mutation() {
++		let backend = FakeWaylandBackend::new();
++		let awake = Arc::clone(&backend.awake);
++		let clicks = Arc::clone(&backend.clicks);
++		let mut worker = unlocked_worker(backend);
++		worker.observation_only = true;
++		let source = CancellationSource::default();
++		let (reply, _) = flume::bounded(1);
++		let mutation = Request::RaiseWindow { id: WAYLAND_ID.into(), reply };
++		assert_eq!(
++			worker
++				.execute(&mutation, &source.token())
++				.err()
++				.unwrap()
++				.code,
++			ErrorCode::PermissionDenied
++		);
++		assert!(clicks.lock().is_empty());
++		let (tx, rx) = flume::unbounded();
++		let serving = thread::spawn(move || worker.serve(&rx, Duration::from_millis(1)));
++		send_and_wait(&tx, |reply| Request::ListWindows { reply });
++		send_and_wait(&tx, |reply| Request::Capture {
++			target: Target::Window(WAYLAND_ID.into()),
++			caps: CaptureCaps::default(),
++			reply,
++		});
++		send_and_wait(&tx, |reply| Request::Close { reply });
++		serving.join().unwrap();
++		assert!(
++			awake.lock().is_empty(),
++			"observation must not take even a transient display assertion"
++		);
++	}
++
+ 	#[test]
+ 	fn display_stays_awake_only_until_the_grace_after_the_last_activity() {
+ 		let backend = FakeWaylandBackend::new();
+diff --git a/crates/pi-natives/src/desktop/types.rs b/crates/pi-natives/src/desktop/types.rs
+index 64e1ac9443..9151b1d946 100644
+--- a/crates/pi-natives/src/desktop/types.rs
++++ b/crates/pi-natives/src/desktop/types.rs
+@@ -153,10 +153,12 @@ impl ScreenState {
+ #[napi(object)]
+ #[derive(Debug, Clone, Default)]
+ pub struct DesktopSessionOptions {
+-	pub display:         Option<String>,
++	/// Passive reads: no display hold, wake-up, input listener or mutation.
++	pub observation_only: Option<bool>,
++	pub display:          Option<String>,
+ 	/// Sessions created with the same key share one physical-Escape stop
+ 	/// count, which `desktopEscapeStops` reads after they close.
+-	pub escape_stop_key: Option<String>,
++	pub escape_stop_key:  Option<String>,
+ }
+ 
+ #[napi(object)]
+@@ -241,8 +243,24 @@ pub struct DesktopControlState {
+ 
+ #[napi(object)]
+ pub struct DesktopObservation {
+-	pub capture:       DesktopCapture,
+-	pub accessibility: AxSnapshot,
++	pub capture:          DesktopCapture,
++	pub accessibility:    AxSnapshot,
++	/// Passive observer-local nodes from the same AX walk; never executable
++	/// refs.
++	pub nodes:            Option<Vec<DesktopObservationNode>>,
++	/// Frame pixel bounds are supplied only when native capture geometry and the
++	/// AX window agree.
++	pub coordinate_space: Option<String>,
++}
++
++#[napi(object)]
++pub struct DesktopObservationNode {
++	pub id:       String,
++	pub role:     String,
++	pub name:     String,
++	pub enabled:  bool,
++	pub bounds:   Option<CaptureRegion>,
++	pub children: Vec<DesktopObservationNode>,
+ }
+ 
+ #[napi(object)]
 diff --git a/packages/coding-agent/src/cli/bench-cli.ts b/packages/coding-agent/src/cli/bench-cli.ts
-index 7792fc0316..909a094578 100644
+index 7792fc0316..0b7e25e3bf 100644
 --- a/packages/coding-agent/src/cli/bench-cli.ts
 +++ b/packages/coding-agent/src/cli/bench-cli.ts
+@@ -84,7 +84,7 @@ export type BenchProfile = "mix" | BenchChallengeKind;
+ const CHALLENGE_KINDS = ["chat", "prefill", "generation"] as const;
+ 
+ /** Default max output tokens per challenge kind (`--max-tokens` overrides all). */
+-const CHALLENGE_MAX_TOKENS: Record<BenchChallengeKind, number> = { chat: 512, prefill: 64, generation: 2048 };
++export const CHALLENGE_MAX_TOKENS: Record<BenchChallengeKind, number> = { chat: 512, prefill: 64, generation: 2048 };
+ 
+ /**
+  * One `--detailed` phase, run in order against each model:
 @@ -306,6 +306,9 @@ export interface BenchSummary {
  }
  
@@ -12,6 +513,24 @@ index 7792fc0316..909a094578 100644
  	createRuntime?: () => Promise<BenchRuntime>;
  	randomSessionId?: () => string;
  	writeStdout?: (text: string) => void;
+@@ -397,7 +400,7 @@ function asNonNegativeNumber(value: unknown): number {
+ 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+ }
+ /** Nearest-rank distribution summary; `values` MUST be non-empty. */
+-function metricStats(values: number[]): MetricStats {
++export function metricStats(values: number[]): MetricStats {
+ 	const sorted = [...values].sort((a, b) => a - b);
+ 	const at = (q: number): number =>
+ 		sorted[Math.max(0, Math.min(sorted.length - 1, Math.ceil(q * sorted.length) - 1))]!;
+@@ -469,7 +472,7 @@ function truncateUtf8ByteLength(bytes: Uint8Array, maxBytes: number): number {
+ 	return sequenceLength > end - sequenceStart ? sequenceStart : end;
+ }
+ 
+-async function readBoundedUtf8File(path: string, maxBytes: number): Promise<string> {
++export async function readBoundedUtf8File(path: string, maxBytes: number): Promise<string> {
+ 	const file = Bun.file(path);
+ 	const bytes = new Uint8Array(await file.slice(0, maxBytes).arrayBuffer());
+ 	const end = truncateUtf8ByteLength(bytes, maxBytes);
 @@ -619,12 +622,13 @@ async function runWithConcurrency<T>(
  	count: number,
  	concurrency: number,
@@ -69,7 +588,59 @@ index 7792fc0316..909a094578 100644
  	/** Aggregates over the runs finished so far. */
  	report: BenchModelReport;
  	state: "queued" | "running" | "done";
-@@ -1144,6 +1151,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1024,7 +1031,8 @@ function assertCacheModeSupported(targets: BenchTarget[]): void {
+ 	}
+ }
+ 
+-export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDependencies = {}): Promise<BenchSummary> {
++/** Shared by the CLI and Studio so review counts and execution cannot drift. */
++export function resolveBenchPlan(command: BenchCommandArgs) {
+ 	const cacheMode = command.flags.cache === true;
+ 	const cacheFlagsUsed =
+ 		command.flags.cachePrefixFile !== undefined ||
+@@ -1096,6 +1104,41 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 		? detailedSteps(runsPerStep, par)
+ 		: [{ kinds, runs: runsPerStep, concurrency: par }];
+ 	const runs = cacheMode ? cachePairs! * 2 : steps.reduce((sum, step) => sum + step.runs, 0);
++	return {
++		cacheMode,
++		detailed,
++		profile,
++		cachePairs,
++		cacheConcurrency,
++		runsPerStep,
++		maxTokensOverride,
++		cacheMaxTokens,
++		par,
++		promptOverride,
++		explicitPrefillBytes,
++		kinds,
++		steps,
++		runs,
++	};
++}
++
++export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDependencies = {}): Promise<BenchSummary> {
++	const {
++		cacheMode,
++		detailed,
++		profile,
++		cachePairs,
++		cacheConcurrency,
++		runsPerStep,
++		maxTokensOverride,
++		cacheMaxTokens,
++		par,
++		promptOverride,
++		explicitPrefillBytes,
++		kinds,
++		steps,
++		runs,
++	} = resolveBenchPlan(command);
+ 	const tableSpec = detailed ? detailedTableSpec(par) : profileTableSpec(kinds);
+ 	// Detailed phases each run a single kind under a phase header; only a mixed profile needs per-run kind tags.
+ 	const tagKind = kinds.length > 1;
+@@ -1144,6 +1187,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  					return true;
  				},
  			} satisfies LiveBoardOutput);
@@ -80,7 +651,7 @@ index 7792fc0316..909a094578 100644
  	const print = (text: string): void => {
  		if (board) board.log(text);
  		else writeStdout(`${text}\n`);
-@@ -1171,7 +1182,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1171,7 +1218,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  			state: "queued",
  			progress: { total, completed: 0, failed: 0, inFlight: 0 },
  		}));
@@ -90,7 +661,7 @@ index 7792fc0316..909a094578 100644
  			const row = rows[targetIndex]!;
  			const { progress } = row;
  			if (!json) {
-@@ -1179,7 +1192,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1179,7 +1228,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				print(`${chalk.bold(label)}${selector === label ? "" : chalk.dim(` (${selector})`)}`);
  			}
  			row.state = "running";
@@ -99,7 +670,7 @@ index 7792fc0316..909a094578 100644
  			const results: BenchRunResult[] = [];
  
  			// Preflight check: let's verify credentials before starting any runs.
-@@ -1197,6 +1210,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1197,6 +1246,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				row.report = buildModelReport(selector, model, thinking, results);
  				if (cacheMode) row.report.cachePairs = [];
  				row.state = "done";
@@ -107,7 +678,7 @@ index 7792fc0316..909a094578 100644
  				continue;
  			}
  
-@@ -1208,7 +1222,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1208,7 +1258,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  					async (pairIndex): Promise<BenchCachePairReport> => {
  						const cacheNamespace = randomSessionId();
  						progress.inFlight++;
@@ -116,7 +687,7 @@ index 7792fc0316..909a094578 100644
  						const promptCacheKey = `bench-cache:${cacheNamespace}`;
  						const stablePrefix = renderCacheBenchmarkPrefix(cachePrefix!, cacheNamespace);
  						const coldSuffix = prompt.render(cacheSuffixTemplate, { variant: "A" }).trim();
-@@ -1225,6 +1239,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1225,6 +1275,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						const coldResult = await runBenchRequest(
  							model,
  							{
@@ -124,7 +695,7 @@ index 7792fc0316..909a094578 100644
  								apiKey: credentialResolver,
  								sessionId: credentialAffinitySessionId,
  								messages: cacheBenchmarkMessages(stablePrefix, coldSuffix),
-@@ -1246,6 +1261,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1246,6 +1297,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						const warmResult = await runBenchRequest(
  							model,
  							{
@@ -132,7 +703,7 @@ index 7792fc0316..909a094578 100644
  								apiKey: credentialResolver,
  								sessionId: credentialAffinitySessionId,
  								messages: cacheBenchmarkMessages(stablePrefix, warmSuffix),
-@@ -1264,7 +1280,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1264,7 +1316,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						progress.completed++;
  						if (!coldResult.ok) progress.failed++;
  						if (!warmResult.ok) progress.failed++;
@@ -141,7 +712,7 @@ index 7792fc0316..909a094578 100644
  						return {
  							cold: cacheRunReport("cold", coldResult, coldCapture),
  							warm: cacheRunReport("warm", warmResult, warmCapture),
-@@ -1285,6 +1301,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1285,6 +1337,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				row.report = buildModelReport(selector, model, thinking, results);
  				row.report.cachePairs = pairs;
  				row.state = "done";
@@ -149,7 +720,7 @@ index 7792fc0316..909a094578 100644
  				if (!json) {
  					for (const [index, pair] of pairs.entries()) {
  						print(formatCachePairLine(pair, index, pairs.length));
-@@ -1298,6 +1315,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1298,6 +1351,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  			let offset = 0;
  			// Steps run back to back so one phase's load never skews the next.
  			for (const step of steps) {
@@ -157,7 +728,7 @@ index 7792fc0316..909a094578 100644
  				const { phase } = step;
  				if (!json && phase) {
  					print(
-@@ -1308,51 +1326,57 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1308,51 +1362,57 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				const startedAt = now();
  				// Runs finish out of order under concurrency; lines print in index order.
  				let nextToPrint = 0;
@@ -259,7 +830,7 @@ index 7792fc0316..909a094578 100644
  				// Chat phases close with the combined output rate across every in-flight request.
  				const phaseReport = phase && phase !== "prefill" ? phases[phase] : undefined;
  				if (!json && phaseReport) {
-@@ -1363,6 +1387,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1363,6 +1423,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				offset += step.runs;
  			}
  			row.state = "done";
@@ -267,8 +838,113 @@ index 7792fc0316..909a094578 100644
  		}
  		const reports = rows.map(row => row.report);
  		const failures = reports.reduce((sum, report) => sum + report.results.filter(result => !result.ok).length, 0);
+diff --git a/packages/coding-agent/src/eval/backend.ts b/packages/coding-agent/src/eval/backend.ts
+index ddf90cd34c..7fb638d3d5 100644
+--- a/packages/coding-agent/src/eval/backend.ts
++++ b/packages/coding-agent/src/eval/backend.ts
+@@ -8,6 +8,8 @@ import type { EvalDisplayOutput } from "./types";
+ 
+ /** Per-cell execute() options. */
+ export interface ExecutorBackendExecOptions {
++	/** Genuine outer Eval call identity, not the per-prelude invocation id. */
++	outerToolCallId?: string;
+ 	cwd: string;
+ 	sessionId: string;
+ 	sessionFile: string | undefined;
+diff --git a/packages/coding-agent/src/eval/executor-base.ts b/packages/coding-agent/src/eval/executor-base.ts
+index 7da61e1c5c..e19c259e27 100644
+--- a/packages/coding-agent/src/eval/executor-base.ts
++++ b/packages/coding-agent/src/eval/executor-base.ts
+@@ -63,6 +63,7 @@ export type KernelEnvPatch = Record<string, string | null | undefined>;
+  * interfaces structurally extend this; the base executor only reads these.
+  */
+ export interface KernelExecutorBaseOptions {
++	outerToolCallId?: string;
+ 	cwd?: string;
+ 	filename?: string;
+ 	timeoutMs?: number;
+@@ -498,6 +499,7 @@ export async function executeWithKernelBase<
+ 	const unregisterBridge =
+ 		options?.toolSession && options?.bridgeSessionId
+ 			? registerPyToolBridge(options.bridgeSessionId, runId, {
++					outerToolCallId: options.outerToolCallId,
+ 					toolSession: options.toolSession,
+ 					signal: options.signal,
+ 					shieldedSignal: abortShield.signal,
+diff --git a/packages/coding-agent/src/eval/js/context-manager.ts b/packages/coding-agent/src/eval/js/context-manager.ts
+index 6bf36bf311..a9c56b2146 100644
+--- a/packages/coding-agent/src/eval/js/context-manager.ts
++++ b/packages/coding-agent/src/eval/js/context-manager.ts
+@@ -36,6 +36,7 @@ import type {
+ export { rewriteImports, wrapCode } from "./shared/rewrite-imports";
+ 
+ export interface VmRunState {
++	outerToolCallId?: string;
+ 	signal?: AbortSignal;
+ 	onText?: (chunk: string) => void;
+ 	onDisplay?: (output: EvalDisplayOutput) => void;
+@@ -810,6 +811,7 @@ async function handleToolCall(session: JsSession, msg: Extract<WorkerOutbound, {
+ 	pending.toolCalls.set(msg.id, ctrl);
+ 	try {
+ 		const value = await callSessionTool(msg.name, msg.args, {
++			outerToolCallId: pending.runState.outerToolCallId,
+ 			session: pending.toolSession,
+ 			signal: ctrl.signal,
+ 			identity: msg.identity,
+diff --git a/packages/coding-agent/src/eval/js/executor.ts b/packages/coding-agent/src/eval/js/executor.ts
+index cb0f6e0edd..22e84647f5 100644
+--- a/packages/coding-agent/src/eval/js/executor.ts
++++ b/packages/coding-agent/src/eval/js/executor.ts
+@@ -16,6 +16,7 @@ import type { JsStatusEvent } from "./shared/types";
+ import { cfgEvalAutoProvision } from "../settings";
+ 
+ export interface JsExecutorOptions {
++	outerToolCallId?: string;
+ 	cwd?: string;
+ 	timeoutMs?: number;
+ 	deadlineMs?: number;
+@@ -175,6 +176,7 @@ export async function executeJs(code: string, options: JsExecutorOptions): Promi
+ 			filename: options.filename ?? `js-cell-${crypto.randomUUID()}.js`,
+ 			timeoutMs: runtimeTimeoutMs ?? options.idleTimeoutMs,
+ 			runState: {
++				outerToolCallId: options.outerToolCallId,
+ 				signal,
+ 				onText: chunk => outputSink.push(chunk),
+ 				onDisplay: output => {
+diff --git a/packages/coding-agent/src/eval/js/index.ts b/packages/coding-agent/src/eval/js/index.ts
+index 1983f10bf7..072832868f 100644
+--- a/packages/coding-agent/src/eval/js/index.ts
++++ b/packages/coding-agent/src/eval/js/index.ts
+@@ -39,6 +39,7 @@ export default {
+ 	async execute(code: string, opts: ExecutorBackendExecOptions): Promise<ExecutorBackendResult> {
+ 		const identity = resolveJsKernelIdentity(opts.session);
+ 		const result = await executeJs(code, {
++			outerToolCallId: opts.outerToolCallId,
+ 			cwd: opts.cwd,
+ 			idleTimeoutMs: opts.idleTimeoutMs,
+ 			signal: opts.signal,
+diff --git a/packages/coding-agent/src/eval/js/tool-bridge.ts b/packages/coding-agent/src/eval/js/tool-bridge.ts
+index 628229247c..e8f25385ac 100644
+--- a/packages/coding-agent/src/eval/js/tool-bridge.ts
++++ b/packages/coding-agent/src/eval/js/tool-bridge.ts
+@@ -45,6 +45,7 @@ const DELEGATED_WORK_TOOLS = new Set(["task", "wait"]);
+ export type { JsStatusEvent } from "./shared/types";
+ 
+ export interface ToolBridgeOptions {
++	outerToolCallId?: string;
+ 	session: ToolSession;
+ 	signal?: AbortSignal;
+ 	emitStatus?: (event: JsStatusEvent) => void;
+@@ -221,6 +222,7 @@ export async function callSessionTool(name: string, args: unknown, options: Tool
+ 				invokeEvalPrelude(request.name, request.parameters, {
+ 					session: options.session,
+ 					toolCallId,
++					outerToolCallId: options.outerToolCallId,
+ 					signal: options.signal,
+ 					context: options.session.getToolContext?.(),
+ 				}),
 diff --git a/packages/coding-agent/src/eval/judgment-batch-bridge.ts b/packages/coding-agent/src/eval/judgment-batch-bridge.ts
-index a186773bd7..1751d507b7 100644
+index a186773bd7..ed98f32cc4 100644
 --- a/packages/coding-agent/src/eval/judgment-batch-bridge.ts
 +++ b/packages/coding-agent/src/eval/judgment-batch-bridge.ts
 @@ -172,6 +172,8 @@ function ownerOf(session: ToolSession): string {
@@ -288,7 +964,7 @@ index a186773bd7..1751d507b7 100644
  		this.intent = intent;
  		this.total = inputs.length;
  		this.#inputs = inputs;
-@@ -290,6 +293,29 @@ export class JudgmentBatch {
+@@ -290,6 +293,45 @@ export class JudgmentBatch {
  		return [];
  	}
  
@@ -301,6 +977,22 @@ index a186773bd7..1751d507b7 100644
 +	}
 +
 +	/** Keep the original batch and charge a separate native job for failed inputs only. */
++	studioInput(): {
++		items: Array<{ key: BatchKey; state: JudgmentState; images?: unknown }>;
++		questions: Record<string, Question>;
++		options: BatchOptions;
++	} {
++		return {
++			items: this.#inputs.map(item => ({
++				key: item.key,
++				state: item.state,
++				...(item.imageSources ? { images: item.imageSources } : {}),
++			})),
++			questions: this.#questions,
++			options: this.#options,
++		};
++	}
++
 +	retryFailed(): JudgmentBatch {
 +		if (this.#running) throw invalid("wait for the batch to finish before retrying");
 +		const failed = new Set(this.#settled.filter(item => item.error !== undefined).map(item => item.key));
@@ -318,7 +1010,7 @@ index a186773bd7..1751d507b7 100644
  	results(): Record<string, Record<string, CellAnswer>> {
  		const out: Record<string, Record<string, CellAnswer>> = {};
  		for (const item of this.#settled) if (item.answers) out[String(item.key)] = item.answers;
-@@ -507,6 +533,21 @@ export function getJudgmentBatch(id: string, session: ToolSession): JudgmentBatc
+@@ -507,6 +549,21 @@ export function getJudgmentBatch(id: string, session: ToolSession): JudgmentBatc
  	return batch && batch.ownerId === ownerOf(session) ? batch : undefined;
  }
  
@@ -340,6 +1032,63 @@ index a186773bd7..1751d507b7 100644
  /** Cancel and forget every batch owned by an agent session. */
  export function releaseJudgmentBatches(ownerId: string): void {
  	for (const [id, batch] of batches) {
+diff --git a/packages/coding-agent/src/eval/preludes.ts b/packages/coding-agent/src/eval/preludes.ts
+index 6430241445..71dff0f747 100644
+--- a/packages/coding-agent/src/eval/preludes.ts
++++ b/packages/coding-agent/src/eval/preludes.ts
+@@ -15,6 +15,8 @@ export interface EvalPreludeContext {
+ 	session: ToolSession;
+ 	/** Tool-call-shaped identifier assigned to this individual host invocation. */
+ 	toolCallId: string;
++	/** Genuine enclosing Eval tool call, absent for invocations without an outer tool. */
++	outerToolCallId?: string;
+ 	/** Cancellation signal for the active eval cell. */
+ 	signal?: AbortSignal;
+ 	/** Ordinary agent tool context used for settings, UI, and provider metadata. */
+diff --git a/packages/coding-agent/src/eval/py/executor.ts b/packages/coding-agent/src/eval/py/executor.ts
+index 705916e74d..d5e81dc143 100644
+--- a/packages/coding-agent/src/eval/py/executor.ts
++++ b/packages/coding-agent/src/eval/py/executor.ts
+@@ -115,6 +115,7 @@ export interface PythonExecutorOptions {
+ 	 * not injected and any `tool.foo(...)` raises in Python.
+ 	 */
+ 	toolSession?: ToolSession;
++	outerToolCallId?: string;
+ 	/** Callback for status events emitted by tool bridge invocations. */
+ 	emitStatus?: (event: JsStatusEvent) => void;
+ 	/**
+diff --git a/packages/coding-agent/src/eval/py/index.ts b/packages/coding-agent/src/eval/py/index.ts
+index 570ebd8f4e..0b027fee61 100644
+--- a/packages/coding-agent/src/eval/py/index.ts
++++ b/packages/coding-agent/src/eval/py/index.ts
+@@ -51,6 +51,7 @@ export default {
+ 		const kernelMode = cfgPythonKernelMode.get(opts.session);
+ 		const identity = resolvePythonKernelIdentity(opts.session);
+ 		const executorOptions: PythonExecutorOptions = {
++			outerToolCallId: opts.outerToolCallId,
+ 			cwd: identity.cwd,
+ 			filename: opts.filename,
+ 			idleTimeoutMs: opts.idleTimeoutMs,
+diff --git a/packages/coding-agent/src/eval/py/tool-bridge.ts b/packages/coding-agent/src/eval/py/tool-bridge.ts
+index bdd0f10e63..383153e2d4 100644
+--- a/packages/coding-agent/src/eval/py/tool-bridge.ts
++++ b/packages/coding-agent/src/eval/py/tool-bridge.ts
+@@ -14,6 +14,7 @@ import { bridgeValueFromToolResult, callSessionTool, type JsStatusEvent } from "
+ import type { EvalShadowCellSession } from "../speculation/cell-session";
+ 
+ export interface PyToolBridgeEntry {
++	outerToolCallId?: string;
+ 	toolSession: ToolSession;
+ 	/**
+ 	 * Turn-cancel handed to the tool implementation. Raw and never deferred, so
+@@ -123,6 +124,7 @@ async function callSessionToolPromptOnAbort(
+ 		if (claimed) return bridgeValueFromToolResult(name, args, claimed, entry.emitStatus);
+ 	}
+ 	const call = callSessionTool(name, args, {
++		outerToolCallId: entry.outerToolCallId,
+ 		session: entry.toolSession,
+ 		signal: entry.signal,
+ 		emitStatus: entry.emitStatus,
 diff --git a/packages/coding-agent/src/extensibility/extensions/runner.ts b/packages/coding-agent/src/extensibility/extensions/runner.ts
 index a8e6184a09..3658c6fcd3 100644
 --- a/packages/coding-agent/src/extensibility/extensions/runner.ts
@@ -604,7 +1353,7 @@ index 461e101f89..3af8d02f47 100644
  			return value as T;
  		} finally {
 diff --git a/packages/coding-agent/src/ida/worker.py b/packages/coding-agent/src/ida/worker.py
-index 42a0f382d1..e6df6001c3 100644
+index 42a0f382d1..252280aa6c 100644
 --- a/packages/coding-agent/src/ida/worker.py
 +++ b/packages/coding-agent/src/ida/worker.py
 @@ -12,12 +12,17 @@ import os
@@ -625,16 +1374,89 @@ index 42a0f382d1..e6df6001c3 100644
  # Keep a private handle on the real stdout for protocol frames, then point fd 1 at stderr so
  # kernel messages and stray prints can never corrupt the NDJSON stream.
  _proto = os.fdopen(os.dup(1), "w", encoding="utf-8", buffering=1)
-@@ -577,6 +582,8 @@ def _rpc_open(params):
+@@ -437,21 +442,63 @@ def _view_overview():
+ 
+ 
+ def _view_imports():
+-    return _text(f"0x{ea:x}  {module}!{name}" for ea, module, name in imports())
++    return _text(_view_list("imports")[0])
+ 
+ 
+ def _view_exports():
+-    lines = []
+-    for e in _db().entries.get_all():
+-        line = f"0x{e.address:x}  {e.name}  (ordinal {e.ordinal})"
+-        if e.forwarder_name:
+-            line += f" -> {e.forwarder_name}"
+-        lines.append(line)
+-    return _text(lines)
++    return _text(_view_list("exports")[0])
+ 
+ 
+ def _view_strings():
+-    return _text(f"0x{ea:x}  {json.dumps(s, ensure_ascii=False)}" for ea, s in strings())
++    return _text(_view_list("strings")[0])
++
++
++def _view_list(kind, offset=0, limit=None):
++    db = _db()
++    if kind == "functions":
++        items = db.functions.get_all()
++        def render(item):
++            return f"0x{item.start_ea:x}  {ida_funcs.get_func_name(item.start_ea)}"
++    elif kind == "imports":
++        items = db.imports.get_all_imports()
++        def render(item):
++            return f"0x{item.address:x}  {item.module_name}!{item.name or f'#{item.ordinal}'}"
++    elif kind == "exports":
++        items = db.entries.get_all()
++        def render(item):
++            line = f"0x{item.address:x}  {item.name}  (ordinal {item.ordinal})"
++            return line + (f" -> {item.forwarder_name}" if item.forwarder_name else "")
++    elif kind == "strings":
++        items = db.strings.get_all()
++        def render(item):
++            raw = ida_bytes.get_strlit_contents(item.address, item.length, item.internal_type) or b""
++            return f"0x{item.address:x}  {json.dumps(raw.decode('utf-8', 'replace'), ensure_ascii=False)}"
++    else:
++        raise ValueError(f"unknown list view: {kind}")
++    lines = []
++    total = 0
++    for index, item in enumerate(items):
++        total = index + 1
++        if index >= offset and (limit is None or index < offset + limit):
++            lines.append(render(item).expandtabs(4))
++    return lines, total
++
++
++def _view_page(params, offset, limit, delegate):
++    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
++        raise ValueError("Invalid IDA page")
++    if params.get("kind") in ("functions", "imports", "exports", "strings"):
++        page, total = _view_list(params["kind"], offset, limit)
++    else:
++        lines = delegate(params)["text"].splitlines()
++        total = len(lines)
++        page = lines[offset:offset + limit]
++    if offset > total:
++        raise ValueError("IDA page is out of range")
++    result = {"text": "\n".join(line[:2048] for line in page), "total": total, "offset": offset, "truncated": any(len(line) > 2048 for line in page)}
++    if offset + len(page) < total:
++        result["nextOffset"] = offset + len(page)
++    return result
+ 
+ 
+ def _view_xrefs(target):
+@@ -577,6 +624,8 @@ def _rpc_open(params):
  
  def _rpc_view(params):
      kind = params.get("kind") or "overview"
 +    if kind == "functions":
-+        return {"text": _text(f"0x{ea:x}  {name}" for ea, name in functions())}
++        return {"text": _text(_view_list("functions")[0])}
      if kind in _PLAIN_VIEWS:
          return {"text": _PLAIN_VIEWS[kind]()}
      if kind in _TARGET_VIEWS:
-@@ -588,6 +595,10 @@ def _rpc_view(params):
+@@ -588,6 +637,10 @@ def _rpc_view(params):
  
  
  def _rpc_exec(params):
@@ -645,7 +1467,7 @@ index 42a0f382d1..e6df6001c3 100644
      code = params.get("code") or ""
      buf = io.StringIO()
      value = None
-@@ -632,9 +643,23 @@ def _rpc_save(params):
+@@ -632,9 +685,23 @@ def _rpc_save(params):
      global _DIRTY
      _db()
      p = _idb_path()
@@ -669,7 +1491,7 @@ index 42a0f382d1..e6df6001c3 100644
      return {"idb": p}
  
  
-@@ -759,6 +784,7 @@ def _close_and_exit(save):
+@@ -759,6 +826,7 @@ def _close_and_exit(save):
  
  
  def _handle(line):
@@ -677,7 +1499,7 @@ index 42a0f382d1..e6df6001c3 100644
      _arm_sigint()
      req_id = None
      try:
-@@ -768,8 +794,27 @@ def _handle(line):
+@@ -768,8 +836,27 @@ def _handle(line):
          req_id = req.get("id")
          method = req.get("method")
          params = req.get("params") or {}
@@ -705,7 +1527,7 @@ index 42a0f382d1..e6df6001c3 100644
              try:
                  if DB is not None:
                      DB.close(save=save)
-@@ -777,7 +822,10 @@ def _handle(line):
+@@ -777,7 +864,10 @@ def _handle(line):
                  _send({"id": req_id, "ok": False, "error": _error(e)})
                  traceback.print_exc()
                  sys.exit(1)
@@ -717,7 +1539,7 @@ index 42a0f382d1..e6df6001c3 100644
              sys.exit(0)
          handler = _METHODS.get(method)
          if handler is None:
-@@ -787,6 +835,30 @@ def _handle(line):
+@@ -787,6 +877,21 @@ def _handle(line):
      except BaseException as e:
          _send({"id": req_id, "ok": False, "error": _error(e)})
          return
@@ -728,28 +1550,19 @@ index 42a0f382d1..e6df6001c3 100644
 +            if method in ("exec", "rename", "comment", "set_type", "make_function", "save"):
 +                checkpoint = os.path.abspath(_idb_path()) + ".studio-" + uuid.uuid4().hex + ".backup"
 +                _rpc_save({"studioBackup": checkpoint})
-+            result = delegate(params)
 +            if method == "view":
-+                offset = envelope.get("offset", 0)
-+                limit = envelope.get("limit", 100)
-+                if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
-+                    raise ValueError("Invalid IDA page")
-+                lines = result["text"].splitlines()
-+                if offset > len(lines):
-+                    raise ValueError("IDA page is out of range")
-+                page = lines[offset:offset + limit]
-+                result = {"text": "\n".join(line[:2048] for line in page), "total": len(lines), "offset": offset, "truncated": any(len(line) > 2048 for line in page)}
-+                if offset + len(page) < len(lines):
-+                    result["nextOffset"] = offset + len(page)
-+            elif checkpoint:
-+                result = {"result": result, "backup": checkpoint}
++                result = _view_page(params, envelope.get("offset", 0), envelope.get("limit", 100), delegate)
++            else:
++                result = delegate(params)
++                if checkpoint:
++                    result = {"result": result, "backup": checkpoint}
 +            return {"identity": _STUDIO_IDENTITY, "version": _STUDIO_VERSION, "result": result}
 +        handler = guarded
      ok, result = _run(req_id, handler, params)
      if ok:
          _send({"id": req_id, "ok": True, "result": result, "dirty": _DIRTY})
 diff --git a/packages/coding-agent/src/launch/broker.ts b/packages/coding-agent/src/launch/broker.ts
-index 8be85c28da..0a02a52e63 100644
+index 8be85c28da..166a51b8a9 100644
 --- a/packages/coding-agent/src/launch/broker.ts
 +++ b/packages/coding-agent/src/launch/broker.ts
 @@ -15,6 +15,7 @@ import {
@@ -760,23 +1573,29 @@ index 8be85c28da..0a02a52e63 100644
  	DAEMON_META_FILE,
  	DAEMON_SPEC_FILE,
  	daemonBrokerEndpoint,
-@@ -640,10 +641,35 @@ class DaemonBroker {
+@@ -640,12 +641,41 @@ class DaemonBroker {
  		}
  	}
  
 +	readonly #studioMutationQueues = new Map<string, Promise<unknown>>();
 +
  	async #dispatch(operation: DaemonOperation, socket: IpcConnection, signal?: AbortSignal): Promise<DaemonRpcResult> {
-+		// Fence selection and mutation atomically, including concurrent native CLI calls.
++		if (operation.op === "start") {
++			const { record, generation } = await this.#serializeMutation(operation.spec.name, async () => {
++				const record = await this.#start(operation.spec, operation.owner, operation.replace);
++				return { record, generation: record.generation };
++			});
++			return this.#awaitStarted(record, generation, operation.awaitReady ?? true, signal);
++		}
 +		const name =
-+			operation.op === "start"
-+				? operation.spec.name
-+				: ["send", "stop", "restart", "mode"].includes(operation.op) && "name" in operation
-+					? operation.name
-+					: undefined;
++			["send", "stop", "restart", "mode"].includes(operation.op) && "name" in operation ? operation.name : undefined;
 +		if (name === undefined) return this.#dispatchOperation(operation, socket, signal);
++		return this.#serializeMutation(name, () => this.#dispatchOperation(operation, socket, signal));
++	}
++
++	async #serializeMutation<T>(name: string, operation: () => Promise<T>): Promise<T> {
 +		const previous = this.#studioMutationQueues.get(name) ?? Promise.resolve();
-+		const next = previous.catch(() => {}).then(() => this.#dispatchOperation(operation, socket, signal));
++		const next = previous.catch(() => {}).then(operation);
 +		this.#studioMutationQueues.set(name, next);
 +		try {
 +			return await next;
@@ -786,18 +1605,20 @@ index 8be85c28da..0a02a52e63 100644
 +	}
 +
 +	async #dispatchOperation(
-+		operation: DaemonOperation,
++		operation: Exclude<DaemonOperation, { op: "start" }>,
 +		socket: IpcConnection,
 +		signal?: AbortSignal,
 +	): Promise<DaemonRpcResult> {
  		switch (operation.op) {
  			case "ping":
 -				return { op: "ping", projectDir: this.#projectDir };
+-			case "start":
+-				return this.#start(operation.spec, operation.owner, operation.replace, operation.awaitReady);
 +				return { op: "ping", projectDir: this.#projectDir, instanceFencing: true };
- 			case "start":
- 				return this.#start(operation.spec, operation.owner, operation.replace, operation.awaitReady);
  			case "list": {
-@@ -667,18 +693,18 @@ class DaemonBroker {
+ 				await Promise.all([...this.#records.values()].map(record => this.#refreshDetached(record)));
+ 				return {
+@@ -667,18 +697,18 @@ class DaemonBroker {
  			case "send":
  				return this.#send(operation);
  			case "stop": {
@@ -820,7 +1641,55 @@ index 8be85c28da..0a02a52e63 100644
  				await this.#refreshDetached(record);
  				return { op: "describe", daemon: record.snapshot, spec: record.spec };
  			}
-@@ -790,7 +816,7 @@ class DaemonBroker {
+@@ -687,7 +717,7 @@ class DaemonBroker {
+ 		}
+ 	}
+ 
+-	async #start(spec: DaemonSpec, owner?: string, replace = false, awaitReady = true): Promise<DaemonRpcResult> {
++	async #start(spec: DaemonSpec, owner?: string, replace = false): Promise<ManagedDaemon> {
+ 		if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/.test(spec.name)) {
+ 			throw new Error("Daemon name must be 1-48 letters, numbers, dots, underscores, or hyphens");
+ 		}
+@@ -765,6 +795,17 @@ class DaemonBroker {
+ 			this.#startingNames.delete(spec.name);
+ 		}
+ 		await this.#launch(record);
++		await record.persistQueue;
++		return record;
++	}
++
++	async #awaitStarted(
++		record: ManagedDaemon,
++		generation: number,
++		awaitReady: boolean,
++		signal?: AbortSignal,
++	): Promise<DaemonRpcResult> {
++		const { spec } = record;
+ 		let readyTimedOut = false;
+ 		if (spec.ready && awaitReady && !terminalState(record.snapshot.state)) {
+ 			// Wake on the sticky readyAt marker or any terminal state, not the live
+@@ -774,11 +815,19 @@ class DaemonBroker {
+ 			// wake the wait rather than block for the full timeout.
+ 			const ready = await this.#waitUntil(
+ 				record,
+-				() => record.snapshot.readyAt !== undefined || terminalState(record.snapshot.state),
++				() =>
++					record.generation !== generation ||
++					record.snapshot.state === "restarting" ||
++					record.snapshot.readyAt !== undefined ||
++					terminalState(record.snapshot.state),
+ 				spec.ready.timeoutMs,
++				signal,
+ 			);
+ 			readyTimedOut = !ready;
+ 		}
++		if (signal?.aborted) throw new Error(`Daemon ${spec.name} wait cancelled`);
++		if (spec.ready && awaitReady && (record.generation !== generation || record.snapshot.state === "restarting"))
++			throw new Error(`Daemon ${spec.name} generation ${generation} ended while waiting for readiness`);
+ 		await record.persistQueue;
+ 		return { op: "start", daemon: record.snapshot, readyTimedOut };
+ 	}
+@@ -790,7 +839,7 @@ class DaemonBroker {
  		record.snapshot.state = record.spec.ready ? "starting" : "running";
  		record.snapshot.persist = record.spec.persist;
  		record.snapshot.detached = record.spec.detached;
@@ -829,7 +1698,7 @@ index 8be85c28da..0a02a52e63 100644
  		record.snapshot.readyAt = undefined;
  		record.snapshot.exitedAt = undefined;
  		record.snapshot.exitCode = undefined;
-@@ -1137,7 +1163,7 @@ class DaemonBroker {
+@@ -1137,7 +1186,7 @@ class DaemonBroker {
  	}
  
  	async #logs(operation: Extract<DaemonOperation, { op: "logs" }>, signal?: AbortSignal): Promise<DaemonRpcResult> {
@@ -838,7 +1707,7 @@ index 8be85c28da..0a02a52e63 100644
  		await this.#refreshDetached(record);
  		const cursor = operation.cursor ?? record.snapshot.outputBytes;
  		let timedOut = false;
-@@ -1167,6 +1193,7 @@ class DaemonBroker {
+@@ -1167,6 +1216,7 @@ class DaemonBroker {
  			terminalOutput !== undefined && operation.renderTerminalRows === true
  				? await renderTerminalOutput(terminalOutput, { head: operation.head, maxRows: lines })
  				: undefined;
@@ -846,7 +1715,7 @@ index 8be85c28da..0a02a52e63 100644
  		return {
  			op: "logs",
  			name: record.snapshot.name,
-@@ -1183,7 +1210,7 @@ class DaemonBroker {
+@@ -1183,7 +1233,7 @@ class DaemonBroker {
  	}
  
  	async #wait(operation: Extract<DaemonOperation, { op: "wait" }>, signal?: AbortSignal): Promise<DaemonRpcResult> {
@@ -855,7 +1724,7 @@ index 8be85c28da..0a02a52e63 100644
  		// A wait observes exactly one launch generation. Automatic or explicit
  		// relaunches reuse the managed record, so polling the record without this
  		// binding can hang past an exit or consume the replacement's output.
-@@ -1240,8 +1267,9 @@ class DaemonBroker {
+@@ -1240,8 +1290,9 @@ class DaemonBroker {
  	}
  
  	async #send(operation: Extract<DaemonOperation, { op: "send" }>): Promise<DaemonRpcResult> {
@@ -866,7 +1735,7 @@ index 8be85c28da..0a02a52e63 100644
  		if (terminalState(record.snapshot.state) || record.snapshot.state === "stopping") {
  			throw new Error(`Daemon ${operation.name} is ${record.snapshot.state}`);
  		}
-@@ -1257,6 +1285,7 @@ class DaemonBroker {
+@@ -1257,6 +1308,7 @@ class DaemonBroker {
  			} else throw new Error(`Daemon ${operation.name} stdin is unavailable`);
  		}
  		if (operation.signal) {
@@ -874,7 +1743,7 @@ index 8be85c28da..0a02a52e63 100644
  			if (process.platform === "win32" && record.pty) {
  				if (operation.signal === "SIGINT") record.pty.write("\u0003");
  				else record.pty.kill();
-@@ -1269,8 +1298,9 @@ class DaemonBroker {
+@@ -1269,8 +1321,9 @@ class DaemonBroker {
  		return { op: "send", daemon: record.snapshot };
  	}
  
@@ -885,7 +1754,7 @@ index 8be85c28da..0a02a52e63 100644
  		if (terminalState(record.snapshot.state)) return;
  		record.stopRequested = true;
  		if (record.restartTimer) {
-@@ -1292,9 +1322,9 @@ class DaemonBroker {
+@@ -1292,9 +1345,9 @@ class DaemonBroker {
  		if (!settled && record.pty) record.pty.kill();
  	}
  
@@ -898,7 +1767,7 @@ index 8be85c28da..0a02a52e63 100644
  		await record.log?.close();
  		record.log = await DaemonLog.open(record.dir);
  		record.stopRequested = false;
-@@ -1309,15 +1339,16 @@ class DaemonBroker {
+@@ -1309,15 +1362,16 @@ class DaemonBroker {
  	}
  
  	async #mode(operation: Extract<DaemonOperation, { op: "mode" }>): Promise<DaemonRpcResult> {
@@ -917,7 +1786,7 @@ index 8be85c28da..0a02a52e63 100644
  			}
  		} else {
  			if (record.spec.detached && operation.mode === "session") {
-@@ -1349,9 +1380,16 @@ class DaemonBroker {
+@@ -1349,9 +1403,16 @@ class DaemonBroker {
  		return condition();
  	}
  
@@ -936,7 +1805,7 @@ index 8be85c28da..0a02a52e63 100644
  		const names = [...this.#records.keys()];
  		throw new Error(`Unknown daemon ${name}${names.length ? `. Available: ${names.join(", ")}` : ""}`);
  	}
-@@ -1601,9 +1639,13 @@ export interface DaemonBrokerStartOptions {
+@@ -1601,9 +1662,13 @@ export interface DaemonBrokerStartOptions {
  
  /** Start the detached project or global daemon broker selected by the CLI worker host. */
  export async function startDaemonBrokerFromEnvironment(options: DaemonBrokerStartOptions = {}): Promise<void> {
@@ -1235,7 +2104,7 @@ index d5e2df50d2..d1d038b466 100644
  					this.#reportFailure(error);
  					return;
 diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
-index 388006c09a..c492d474d9 100644
+index 388006c09a..0d3fa290e6 100644
 --- a/packages/coding-agent/src/sdk.ts
 +++ b/packages/coding-agent/src/sdk.ts
 @@ -298,11 +298,11 @@ import {
@@ -1263,7 +2132,16 @@ index 388006c09a..c492d474d9 100644
  	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
  	mcpManager?: MCPManager;
  	/** Warning if session was restored with a different model than saved */
-@@ -4478,7 +4478,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -2583,6 +2583,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 			return getEnabledEvalPreludes(builtins);
+ 		};
+ 		toolSession.getEvalPreludes = getEvalPreludes;
++		toolSession.computerPreludeAvailable = () =>
++			!restrictToolNames && toolRegistry.has("eval") && activeToolNames.has("eval");
+ 		// SessionTools owns the advertised snapshot; before it exists the base
+ 		// prompt is built from, and therefore advertises, the live set.
+ 		toolSession.getAdvertisedEvalPreludes = () => session?.getAdvertisedEvalPreludes() ?? getEvalPreludes();
+@@ -4478,7 +4480,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			await extensionRunner.emitAfterProviderResponse(response, model, signal);
  		};
  
@@ -1316,6 +2194,305 @@ index 6315774c44..950eae2c89 100644
  		} catch (error) {
  			throw new Error(
  				`cannot reach skill registry ${this.registryUrl}: ${error instanceof Error ? error.message : String(error)}`,
+diff --git a/packages/coding-agent/src/stt/models.ts b/packages/coding-agent/src/stt/models.ts
+index b523fd5493..1b3e99dc72 100644
+--- a/packages/coding-agent/src/stt/models.ts
++++ b/packages/coding-agent/src/stt/models.ts
+@@ -25,6 +25,8 @@ interface SttModelBase {
+ 	repo: string;
+ 	/** English-only checkpoint: rejects a configured source `language`. */
+ 	englishOnly: boolean;
++	/** Verified checkpoint language codes, not inferred from a multilingual label. */
++	languages: readonly string[];
+ 	label: string;
+ 	description: string;
+ 	/** Approximate on-disk download size for the shipped weights (UI hint). */
+@@ -56,6 +58,14 @@ export type SttModelSpec = TransformersSttModelSpec | SherpaSttModelSpec;
+  * Whisper uses transformers.js; Parakeet and native streaming Nemotron use
+  * sherpa-onnx.
+  */
++// Whisper tokenizer's 99 language tokens (transformers.js common_whisper).
++const WHISPER_LANGUAGES =
++	"en zh de es ru ko fr ja pt tr pl ca nl ar sv it id hi fi vi he uk el ms cs ro da hu ta no th ur hr bg lt la mi ml cy sk te fa lv bn sr az sl kn et mk br eu is hy ne mn bs kk sq sw gl mr pa si km sn yo so af oc ka be tg sd gu am yi lo uz fo ht ps tk nn mt sa lb my bo tl mg as tt haw ln ha ba jw su".split(
++		" ",
++	);
++// NVIDIA Parakeet TDT 0.6B v3 checkpoint: 25 European languages, not Chinese.
++const PARAKEET_LANGUAGES = "bg hr cs da nl en et fi fr de el hu it lv lt mt pl pt ro ru sk sl es sv uk".split(" ");
++
+ export const STT_MODELS = [
+ 	{
+ 		key: "whisper-base",
+@@ -63,6 +73,7 @@ export const STT_MODELS = [
+ 		repo: "onnx-community/whisper-base",
+ 		dtype: "q8",
+ 		englishOnly: false,
++		languages: WHISPER_LANGUAGES,
+ 		label: "Fast (Whisper base)",
+ 		description: "Whisper base, multilingual. Smallest + fastest; lowest accuracy. Best for low-resource machines.",
+ 		sizeHint: "~60 MB",
+@@ -73,6 +84,7 @@ export const STT_MODELS = [
+ 		repo: "onnx-community/whisper-small",
+ 		dtype: "q8",
+ 		englishOnly: false,
++		languages: WHISPER_LANGUAGES,
+ 		label: "Balanced (Whisper small)",
+ 		description: "Whisper small, multilingual. More accurate than Fast, still light on CPU/RAM.",
+ 		sizeHint: "~190 MB",
+@@ -83,6 +95,7 @@ export const STT_MODELS = [
+ 		repo: "onnx-community/whisper-large-v3-turbo",
+ 		dtype: "q4",
+ 		englishOnly: false,
++		languages: WHISPER_LANGUAGES,
+ 		label: "Turbo (Whisper large-v3)",
+ 		description: "Whisper large-v3-turbo, 99 languages. Widest language coverage; large download, slower.",
+ 		sizeHint: "~600 MB",
+@@ -100,6 +113,7 @@ export const STT_MODELS = [
+ 			tokens: "tokens.txt",
+ 		},
+ 		englishOnly: false,
++		languages: PARAKEET_LANGUAGES,
+ 		label: "Parakeet TDT v3 (SoTA)",
+ 		description:
+ 			"NVIDIA Parakeet TDT 0.6B v3, 25 languages. Open ASR Leaderboard leader — best accuracy and far fastest decoding. Default.",
+@@ -118,6 +132,7 @@ export const STT_MODELS = [
+ 			tokens: "tokens.txt",
+ 		},
+ 		englishOnly: true,
++		languages: ["en"],
+ 		label: "Nemotron 0.6B (live streaming, English)",
+ 		description:
+ 			"NVIDIA Nemotron Speech 0.6B, English only. Native streaming recognition with live words while you speak; 160 ms audio chunks.",
+@@ -159,6 +174,13 @@ export const STT_MODEL_OPTIONS = STT_MODELS.map(({ key, label, description }) =>
+ 	description,
+ })) satisfies ReadonlyArray<{ value: SttModelKey; label: string; description: string }>;
+ 
++export function sttLanguageSupport(spec: SttModelSpec, language: string): "supported" | "unsupported" | "unknown" {
++	// An empty language means auto-detection, not a claim that arbitrary languages work.
++	if (!language.trim()) return "unknown";
++	const code = language.trim().toLowerCase().split(/[-_]/)[0];
++	return spec.languages.includes(code) ? "supported" : "unsupported";
++}
++
+ export function isSttModelKey(value: string): value is SttModelKey {
+ 	return STT_MODELS.some(model => model.key === value);
+ }
+diff --git a/packages/coding-agent/src/stt/stt-controller.ts b/packages/coding-agent/src/stt/stt-controller.ts
+index cae729073f..afa54e338e 100644
+--- a/packages/coding-agent/src/stt/stt-controller.ts
++++ b/packages/coding-agent/src/stt/stt-controller.ts
+@@ -5,12 +5,12 @@ import { AudioCapture } from "@oh-my-pi/pi-natives";
+ import type { ModelBrowserRegistry } from "@oh-my-pi/pi-tui/overlays/model-browser";
+ import { logger } from "@oh-my-pi/pi-utils";
+ import { resolveRoleChain } from "../config/model-resolver";
+-import { roleCandidatePool } from "../config/model-roles";
++import { getRoleInfo, roleCandidatePool } from "../config/model-roles";
+ import { type Settings, settings } from "../config/settings";
+ import { type SttStreamHandle, sttClient } from "./asr-client";
+-import { downloadSttModel, isSttModelCached } from "./downloader";
++import { downloadSttModel, isSttModelCached, type SttDownloadProgress } from "./downloader";
+ import { resolveSttModelSpec, type SttModelKey } from "./models";
+-import { evaluateSubmitTrigger } from "./submit-trigger";
++import { evaluateSubmitTrigger, type SttSubmitTrigger } from "./submit-trigger";
+ import { encodePcm16Wav, floatToPcm16 } from "./wav";
+ 
+ import { cfgSttLanguage, cfgSttSubmitTrigger } from "./settings";
+@@ -24,6 +24,10 @@ export interface SttCallbacks {
+ 	onStateChange(state: SttState): void;
+ 	/** Keep this capture as a draft, without interpreting submit commands. */
+ 	manualSubmit?: boolean;
++	/** Desktop receivers must be hot before the host opens a physical microphone. */
++	waitForModel?: boolean;
++	/** Actual native downloader progress; absent for buffered cloud capture. */
++	onProgress?: (progress: SttDownloadProgress) => void;
+ }
+ 
+ /** The slice of a text input the controller dictates into. */
+@@ -45,10 +49,30 @@ interface SttRegistry extends ModelBrowserRegistry {
+ 	resolver(model: Model<Api>, sessionId?: string): ApiKeyResolver;
+ }
+ 
++export interface SttCaptureConfiguration {
++	model: Model<Api> | undefined;
++	language: string;
++	submitTrigger: SttSubmitTrigger;
++}
++
++/** The same role-chain resolver used by native dictation; inspection can include unauthed models. */
++export function resolveSttRoleModel(
++	settings: Settings,
++	registry: ModelBrowserRegistry,
++	includeUnavailable = false,
++): Model<Api> | undefined {
++	const pool = includeUnavailable
++		? registry.getAll("all").filter(getRoleInfo("dictation", settings).accepts)
++		: roleCandidatePool("dictation", settings, registry);
++	return resolveRoleChain("dictation", settings, pool)[0]?.model;
++}
++
+ export interface STTControllerDependencies {
+ 	settings: Settings;
+ 	registry: SttRegistry;
+ 	getSessionId?: () => string;
++	/** Freeze the model, language and submit policy for one desktop capture. */
++	configuration?: SttCaptureConfiguration;
+ }
+ 
+ /** Coordinates native microphone capture with streaming local or buffered cloud transcription. */
+@@ -64,6 +88,7 @@ export class STTController {
+ 	readonly #settings: Settings;
+ 	readonly #registry: SttRegistry | undefined;
+ 	readonly #getSessionId: (() => string) | undefined;
++	readonly #configuration: SttCaptureConfiguration | undefined;
+ 
+ 	// Live streaming capture.
+ 	#stream: SttStreamHandle | null = null;
+@@ -94,11 +119,13 @@ export class STTController {
+ 			this.#settings = dependencies?.settings ?? settings;
+ 			this.#registry = dependencies?.registry;
+ 			this.#getSessionId = dependencies?.getSessionId;
++			this.#configuration = dependencies?.configuration;
+ 		} else {
+ 			this.#createCapture = onAudio => new AudioCapture(16_000, onAudio);
+ 			this.#settings = createCaptureOrDependencies?.settings ?? settings;
+ 			this.#registry = createCaptureOrDependencies?.registry;
+ 			this.#getSessionId = createCaptureOrDependencies?.getSessionId;
++			this.#configuration = createCaptureOrDependencies?.configuration;
+ 		}
+ 	}
+ 
+@@ -155,9 +182,8 @@ export class STTController {
+ 	}
+ 
+ 	#resolveModel(): Model<Api> | undefined {
+-		if (!this.#registry) return undefined;
+-		const pool = roleCandidatePool("dictation", this.#settings, this.#registry);
+-		return resolveRoleChain("dictation", this.#settings, pool)[0]?.model;
++		if (this.#configuration) return this.#configuration.model;
++		return this.#registry ? resolveSttRoleModel(this.#settings, this.#registry) : undefined;
+ 	}
+ 
+ 	#resolveModelKey(model = this.#resolveModel()): SttModelKey {
+@@ -174,10 +200,10 @@ export class STTController {
+ 			// models can still warm in the background while recording.
+ 			const spec = resolveSttModelSpec(modelKey);
+ 			const online = spec.engine === "sherpa" && spec.mode === "online";
+-			if (!online && (await isSttModelCached(modelKey))) {
++			if (!options.waitForModel && !online && (await isSttModelCached(modelKey))) {
+ 				this.#warmModel(modelKey);
+ 			} else {
+-				await downloadSttModel(modelKey, undefined, { signal });
++				await downloadSttModel(modelKey, options.onProgress, { signal });
+ 			}
+ 			this.#resolvedModelKey = modelKey;
+ 			return modelKey;
+@@ -323,7 +349,13 @@ export class STTController {
+ 		let failed = false;
+ 		let finalText = "";
+ 		try {
+-			const language = cfgSttLanguage.get(this.#settings);
++			if (options.waitForModel && this.#cloudAudio.length === 0) {
++				this.#finishTranscript("", false, options);
++				this.#cleanupCloud();
++				this.#setState("idle", options);
++				return;
++			}
++			const language = this.#configuration?.language ?? cfgSttLanguage.get(this.#settings);
+ 			const result = await transcribeAudio(
+ 				model,
+ 				{
+@@ -379,7 +411,8 @@ export class STTController {
+ 	}
+ 
+ 	async #startStreaming(editor: SttTarget, options: SttCallbacks, modelKey: SttModelKey): Promise<void> {
+-		const language = cfgSttLanguage.get(this.#settings);
++		const configuredLanguage = this.#configuration?.language ?? cfgSttLanguage.get(this.#settings);
++		const language = configuredLanguage.trim().toLowerCase().split(/[-_]/)[0];
+ 		this.#streamEditor = editor;
+ 		this.#streamCallbacks = options;
+ 		this.#streamCommitted = false;
+@@ -504,8 +537,9 @@ export class STTController {
+ 		if (!failed) options.showStatus(this.#streamCommitted ? "" : "No speech detected.");
+ 
+ 		if (!options.manualSubmit && this.#streamCommitted && !failed && this.#streamEditor) {
+-			const trigger = cfgSttSubmitTrigger.get(this.#settings);
+-			const { submit, trimTrailing } = evaluateSubmitTrigger(this.#streamUtterance, trigger);
++			const trigger = this.#configuration?.submitTrigger ?? cfgSttSubmitTrigger.get(this.#settings);
++			const language = this.#configuration?.language ?? cfgSttLanguage.get(this.#settings);
++			const { submit, trimTrailing } = evaluateSubmitTrigger(this.#streamUtterance, trigger, language);
+ 			if (trimTrailing > 0) {
+ 				this.#streamEditor.deleteBeforeCursor(trimTrailing);
+ 			}
+diff --git a/packages/coding-agent/src/stt/submit-trigger.ts b/packages/coding-agent/src/stt/submit-trigger.ts
+index dc2f2331f1..a63b7ffec0 100644
+--- a/packages/coding-agent/src/stt/submit-trigger.ts
++++ b/packages/coding-agent/src/stt/submit-trigger.ts
+@@ -25,7 +25,7 @@ export const STT_SUBMIT_TRIGGER_OPTIONS = [
+ 	{
+ 		value: "say-submit",
+ 		label: "When I Say Submit",
+-		description: "Submit if the utterance ends with a word containing 'submit' (strips that word before submitting).",
++		description: "Submit only for an exact final spoken submit command; trim the command before submitting.",
+ 	},
+ ] satisfies ReadonlyArray<{ value: SttSubmitTrigger; label: string; description: string }>;
+ 
+@@ -36,6 +36,7 @@ export const STT_SUBMIT_TRIGGER_OPTIONS = [
+ export function evaluateSubmitTrigger(
+ 	utterance: string,
+ 	trigger: SttSubmitTrigger,
++	language?: string,
+ ): { submit: boolean; trimTrailing: number } {
+ 	const trimmed = utterance.trim();
+ 	if (!trimmed) {
+@@ -47,10 +48,21 @@ export function evaluateSubmitTrigger(
+ 	}
+ 
+ 	if (trigger === "release") {
+-		// Split by whitespace and count words
+-		const words = trimmed.split(/\s+/).filter(Boolean);
+-		const submit = words.length >= 2;
+-		return { submit, trimTrailing: 0 };
++		// Unicode word boundaries, rather than spaces, preserve the native two-word
++		// safety guard for Chinese and mixed technical vocabulary.
++		let segmenter: Intl.Segmenter;
++		try {
++			segmenter = new Intl.Segmenter(language || (/\p{Script=Han}/u.test(trimmed) ? "zh" : "en"), {
++				granularity: "word",
++			});
++		} catch {
++			segmenter = new Intl.Segmenter("en", { granularity: "word" });
++		}
++		let count = 0;
++		for (const word of segmenter.segment(trimmed)) {
++			if (word.isWordLike && ++count >= 2) return { submit: true, trimTrailing: 0 };
++		}
++		return { submit: false, trimTrailing: 0 };
+ 	}
+ 
+ 	if (trigger === "release-complete") {
+@@ -60,12 +72,18 @@ export function evaluateSubmitTrigger(
+ 	}
+ 
+ 	if (trigger === "say-submit") {
+-		// Matches space followed by any word containing "submit" (case-insensitive), optionally followed by punctuation/spaces
+-		// Also handles the case where "submit" is the only word in the utterance (no leading space)
+-		const match = utterance.match(/(?:^|\s+)(\S*submit\S*)[.?!…。？！]*\s*$/i);
++		// Only complete final commands. "autosubmit"/"submitting", quotations,
++		// and negated instructions are ordinary dictation, never an action.
++		const english = /(?:^|\s+)submit[.?!…。？！]*\s*$/i.exec(utterance);
++		const chinese = /(?:^|\s+|[，,。.!！？?；;：:]\s*)(?:请)?提交[.?!…。？！]*\s*$/u.exec(utterance);
++		const match = english ?? chinese;
+ 		if (match && match.index !== undefined) {
+-			const trimTrailing = utterance.length - match.index;
+-			return { submit: true, trimTrailing };
++			const prefix = utterance.slice(0, match.index).trimEnd();
++			const negated =
++				/(?:\b(?:do\s+not|don['’]?t|not|never|no|without)|不要|不许|別|别|禁止|无需|不用|勿)[\s，,。.!！？?；;：:]*(?:(?:please|ever|to)\s*)?$/iu.test(
++					prefix,
++				);
++			if (!negated) return { submit: true, trimTrailing: utterance.length - match.index };
+ 		}
+ 		return { submit: false, trimTrailing: 0 };
+ 	}
 diff --git a/packages/coding-agent/src/tools/ask.ts b/packages/coding-agent/src/tools/ask.ts
 index 141b8d8a36..902133124c 100644
 --- a/packages/coding-agent/src/tools/ask.ts
@@ -1339,33 +2516,296 @@ index 141b8d8a36..902133124c 100644
  	customInput?: string;
  	note?: string;
 diff --git a/packages/coding-agent/src/tools/browser.ts b/packages/coding-agent/src/tools/browser.ts
-index cff05d8e73..a48228bd43 100644
+index cff05d8e73..245fda9806 100644
 --- a/packages/coding-agent/src/tools/browser.ts
 +++ b/packages/coding-agent/src/tools/browser.ts
-@@ -1,4 +1,5 @@
+@@ -1,4 +1,6 @@
  import { type } from "@oh-my-pi/omptype";
 +import { assertBrowserTabAgentControl } from "../studio/services/browser-tab-control";
++import { managedBrowserFor } from "../studio/services/managed-browser-service";
  import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
  import { isRecord, logger, untilAborted } from "@oh-my-pi/pi-utils";
  import type { EvalPreludeContext, EvalPreludeDefinition } from "../eval/preludes";
-@@ -629,10 +630,12 @@ async function closeBrowser(
+@@ -171,6 +173,8 @@ export function resolveBrowserKind(
+ 	session: ToolSession,
+ 	env: Record<string, string | undefined> = process.env,
+ ): BrowserKind {
++	const managed = managedBrowserFor(session.getSessionId?.() ?? undefined);
++	if (managed?.kind) return managed.kind;
+ 	const app = params.app;
+ 	if (app?.cdp_url) {
+ 		return { kind: "connected", cdpUrl: app.cdp_url.replace(/\/+$/, "") };
+@@ -326,34 +330,57 @@ async function invokeBrowser(
+ 	if (parsed instanceof type.errors) {
+ 		throw new ToolError(`browser received invalid arguments: ${parsed.summary}`);
+ 	}
++	const managed = managedBrowserFor(session.getSessionId?.() ?? undefined);
++	let releaseManaged: (() => void) | undefined;
+ 
+ 	try {
+ 		throwIfAborted(context.signal);
+ 		const timeoutSeconds = clampTimeout("browser", parsed.timeout, cfgToolsMaxTimeout.get(session.settings));
+ 		const timeoutMs = timeoutSeconds * 1000;
+-		const name = parsed.name ?? DEFAULT_TAB_NAME;
+-		const details: BrowserPreludeDetails = { action: parsed.action, name };
++		const signal = managed
++			? AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(context.signal ? [context.signal] : [])])
++			: context.signal;
++		releaseManaged = await managed?.begin(signal);
++		const displayName = parsed.name ?? DEFAULT_TAB_NAME;
++		const name = managed ? managed.name(displayName) : displayName;
++		const details: BrowserPreludeDetails = { action: parsed.action, name: displayName };
+ 
+ 		switch (parsed.action) {
+ 			case "open":
+-				return await openBrowser(session, name, parsed, details, timeoutMs, context.signal);
++				return await openBrowser(session, name, parsed, details, timeoutMs, signal);
+ 			case "close":
+-				return await closeBrowser(name, parsed, details, timeoutMs, context.signal);
++				return await closeBrowser(
++					name,
++					parsed,
++					details,
++					timeoutMs,
++					signal,
++					managed ? candidate => managed.contains(candidate) : undefined,
++				);
+ 			case "tabs":
+-				details.value = listTabs();
++				details.value = listTabs()
++					.filter(tab => !managed || managed.contains(tab.name))
++					.map(tab => (managed ? { ...tab, name: tab.name.slice(managed.name("").length) } : tab));
+ 				return toolResult(details).done();
+ 			case "targets":
+-				return await listTargets(session, parsed, details, timeoutMs, context.signal);
+-			case "run":
+-			case "call":
+-				return await runBrowser(session, name, parsed, details, timeoutMs, context.signal);
++				return await listTargets(session, parsed, details, timeoutMs, signal);
+ 		}
++		return await runBrowser(session, name, parsed, details, timeoutMs, signal);
+ 	} catch (error) {
+ 		if (error instanceof ToolAbortError) throw error;
+ 		if (error instanceof Error && error.name === "AbortError") {
+ 			throw new ToolAbortError();
+ 		}
++		if (managed && error instanceof Error && /\/managed\/[a-f0-9]{64}/u.test(error.message))
++			throw new ToolError(
++				error.message.replace(
++					/(?:https?|wss?):\/\/127\.0\.0\.1:\d+\/managed\/[a-f0-9]{64}[^\s"')`]*/gu,
++					"[Studio browser connection]",
++				),
++			);
+ 		throw error;
++	} finally {
++		releaseManaged?.();
+ 	}
+ }
+ 
+@@ -421,7 +448,7 @@ async function openOnKind(
+ 		);
+ 	}
+ 	// Chrome's extension debugger API exposes no Security domain, so the relay cannot honor the override.
+-	if (params.ignore_https_errors && kind.kind === "relay") {
++	if (params.ignore_https_errors && kind.kind === "relay" && !kind.studioManaged) {
+ 		throw new ToolError(
+ 			"ignore_https_errors is not supported through the Chrome relay: the extension debugger API does not expose the CDP Security domain. Pass app.relay:false to use omp's Chromium instead.",
+ 		);
+@@ -476,7 +503,7 @@ async function openOnKind(
+ 		let relayNotice: string | null = null;
+ 		try {
+ 			// Read before the tab is acquired, so a cancel or the deadline landing during the read leaves no tab to close.
+-			if (kind.kind === "relay") {
++			if (kind.kind === "relay" && !kind.studioManaged) {
+ 				stage = "reading the relay extension version";
+ 				relayNotice = await relayExtensionNotice(normalizeConnectedCdpUrl(kind.cdpUrl), openSignal);
+ 				throwIfAborted(openSignal);
+@@ -547,7 +574,7 @@ async function openOnKind(
+ 		details.viewport = tab.info.viewport;
+ 		const verb = result.created ? "Opened" : "Reused";
+ 		const lines = [
+-			`${verb} tab ${JSON.stringify(name)} on ${describeBrowser(tab)}`,
++			`${verb} tab ${JSON.stringify(details.name)} on ${describeBrowser(tab)}`,
+ 			`URL: ${url}`,
+ 			title ? `Title: ${title}` : null,
+ 			...(tab.backend === "tern" ? ternNotes(tab) : []),
+@@ -626,15 +653,26 @@ async function closeBrowser(
+ 	details: BrowserPreludeDetails,
+ 	timeoutMs: number,
+ 	signal?: AbortSignal,
++	owned?: (name: string) => boolean,
  ): Promise<AgentToolResult<unknown>> {
  	const kill = !!params.kill;
  	if (params.all) {
++		if (owned) {
++			const targets = listTabs().filter(tab => owned(tab.name));
++			for (const target of targets)
++				await untilAborted(signal, () => releaseTab(target.name, { kill, timeoutMs, closeManagedPage: true }));
++			return toolResult(details).text(`Closed ${targets.length} browser tabs`).done();
++		}
 +		for (const tab of listTabs()) assertBrowserTabAgentControl(getTab(tab.name));
  		const count = await untilAborted(signal, () => releaseAllTabs({ kill, timeoutMs }));
  		const text = `Released ${count} managed tab${count === 1 ? "" : "s"}`;
  		return toolResult(details).text(text).done();
  	}
+-	const closed = await untilAborted(signal, () => releaseTab(name, { kill, timeoutMs }));
+-	const text = closed ? `Released managed tab ${JSON.stringify(name)}` : `No tab named ${JSON.stringify(name)}`;
 +	assertBrowserTabAgentControl(getTab(name));
- 	const closed = await untilAborted(signal, () => releaseTab(name, { kill, timeoutMs }));
- 	const text = closed ? `Released managed tab ${JSON.stringify(name)}` : `No tab named ${JSON.stringify(name)}`;
++	const closed = await untilAborted(signal, () => releaseTab(name, { kill, timeoutMs, closeManagedPage: true }));
++	const text = closed
++		? `Released managed tab ${JSON.stringify(details.name)}`
++		: `No tab named ${JSON.stringify(details.name)}`;
  	return toolResult(details).text(text).done();
+ }
+ 
+@@ -725,7 +763,7 @@ function describeBrowser(tab: TabSession): string {
+ 		case "connected":
+ 			return `connected ${handle.cdpUrl ?? handle.kind.cdpUrl}`;
+ 		case "relay":
+-			return `relay ${handle.cdpUrl ?? handle.kind.cdpUrl}`;
++			return handle.kind.studioManaged ? "Studio managed browser" : `relay ${handle.cdpUrl ?? handle.kind.cdpUrl}`;
+ 	}
+ }
+ 
+@@ -757,7 +795,7 @@ function describeKind(kind: BrowserKind): string {
+ 		case "connected":
+ 			return `connected:${kind.cdpUrl}`;
+ 		case "relay":
+-			return `relay:${kind.cdpUrl}`;
++			return kind.studioManaged ? "Studio managed browser" : `relay:${kind.cdpUrl}`;
+ 		case "cmux":
+ 			return `cmux:${kind.surface ?? "split"}`;
+ 		case "tern":
+diff --git a/packages/coding-agent/src/tools/browser/downloads.ts b/packages/coding-agent/src/tools/browser/downloads.ts
+index a10691ffaa..7f67b147ab 100644
+--- a/packages/coding-agent/src/tools/browser/downloads.ts
++++ b/packages/coding-agent/src/tools/browser/downloads.ts
+@@ -6,6 +6,7 @@ import type { Browser, CDPSession, Page } from "puppeteer-core";
+ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+ import { replaceFileAcrossDevices, replaceFileAtomically } from "../../utils/atomic-file";
+ import { devtoolsFrameId } from "./frames";
++import { browserConnection } from "./launch";
+ 
+ /** Completed download metadata returned by tab download helpers. */
+ export interface BrowserDownload {
+@@ -45,6 +46,9 @@ const DOWNLOAD_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
+ 
+ /** Owns tab-scoped Chromium download behavior and completion events. */
+ export class DownloadManager {
++	readonly #managed: boolean;
++	readonly #targetId: string;
++	readonly #claimed = new Set<string>();
+ 	readonly #browser: Browser;
+ 	readonly #page: Page;
+ 	readonly #defaultDirectory: string;
+@@ -64,7 +68,9 @@ export class DownloadManager {
+ 	 * for a browser the user drives (connected, relay): there the folder also receives the user's own downloads, which
+ 	 * would otherwise be saved under bare GUIDs nobody renames.
+ 	 */
+-	constructor(browser: Browser, page: Page, tabId: string, options: { perTab: boolean }) {
++	constructor(browser: Browser, page: Page, tabId: string, options: { perTab: boolean; managed?: boolean }) {
++		this.#managed = options.managed === true;
++		this.#targetId = tabId;
+ 		this.#browser = browser;
+ 		this.#page = page;
+ 		this.#defaultDirectory = path.join(os.tmpdir(), `omp-downloads-${tabId}`);
+@@ -76,6 +82,11 @@ export class DownloadManager {
+ 	 * so tabs never overwrite each other's, and each tab moves its own into its folder under the suggested name.
+ 	 */
+ 	async enable(directory?: string): Promise<void> {
++		if (this.#managed) {
++			await this.#managedCall("enable", directory);
++			this.#directory = directory;
++			return;
++		}
+ 		const resolved = path.resolve(directory ?? this.#defaultDirectory);
+ 		await fs.mkdir(resolved, { recursive: true });
+ 		if (!this.#session) await this.#attach();
+@@ -96,6 +107,28 @@ export class DownloadManager {
+ 
+ 	/** Wait for the next unclaimed completed download. */
+ 	async wait(signal?: AbortSignal): Promise<BrowserDownload> {
++		if (this.#managed) {
++			await untilAborted(signal, this.enable(this.#directory));
++			for (;;) {
++				if (signal?.aborted) throw signal.reason;
++				const downloads = (await untilAborted(signal, this.#managedCall("list"))) as Array<
++					BrowserDownload & { id: string; state: string }
++				>;
++				for (const download of downloads) {
++					if (this.#claimed.has(download.id) || download.state === "progressing") continue;
++					this.#claimed.add(download.id);
++					if (download.state !== "completed")
++						throw new ToolError(`Download ${download.state}: ${download.suggestedFilename}`);
++					return {
++						path: download.path,
++						url: download.url,
++						suggestedFilename: download.suggestedFilename,
++						bytes: download.bytes,
++					};
++				}
++				await untilAborted(signal, Bun.sleep(150));
++			}
++		}
+ 		if (this.#unclaimed.length === 0) {
+ 			// A rejected `arming` nobody awaits would surface as an unhandled rejection.
+ 			if (signal?.aborted) throw signal.reason;
+@@ -131,6 +164,23 @@ export class DownloadManager {
+ 	list(): BrowserDownload[] {
+ 		return this.#completed.map(download => ({ ...download }));
+ 	}
++	async read(): Promise<BrowserDownload[]> {
++		if (!this.#managed) return this.list();
++		const downloads = (await this.#managedCall("list")) as Array<BrowserDownload & { state: string }>;
++		return downloads
++			.filter(download => download.state === "completed")
++			.map(({ path, url, suggestedFilename, bytes }) => ({ path, url, suggestedFilename, bytes }));
++	}
++	async #managedCall(action: "enable" | "list", directory?: string): Promise<unknown> {
++		const connection = browserConnection(this.#browser) as unknown as {
++			send(method: string, params: Record<string, unknown>): Promise<unknown>;
++		};
++		const result = (await connection.send(`Studio.downloads.${action}`, {
++			targetId: this.#targetId,
++			...(directory ? { directory } : {}),
++		})) as { downloads: unknown };
++		return result.downloads;
++	}
+ 
+ 	/** Detach event listeners and reject outstanding waits. */
+ 	async close(): Promise<void> {
 diff --git a/packages/coding-agent/src/tools/browser/registry.ts b/packages/coding-agent/src/tools/browser/registry.ts
-index 78a5bb5f94..ef2c9024f0 100644
+index 78a5bb5f94..79e964ef2a 100644
 --- a/packages/coding-agent/src/tools/browser/registry.ts
 +++ b/packages/coding-agent/src/tools/browser/registry.ts
-@@ -459,6 +459,16 @@ async function disposeBrowserHandle(handle: BrowserHandle, opts: ReleaseBrowserO
+@@ -263,6 +263,26 @@ async function openBrowserHandle(kind: BrowserKind, opts: AcquireBrowserOptions)
+ 	}
+ 	if (kind.kind === "relay") {
+ 		const cdpUrl = normalizeConnectedCdpUrl(kind.cdpUrl);
++		if (kind.studioManaged) {
++			const puppeteer = await loadPuppeteer();
++			const browser = await connectPuppeteer(puppeteer, {
++				browserWSEndpoint: `${cdpUrl.replace(/^http/, "ws")}/cdp`,
++				defaultViewport: null,
++				protocolTimeout: BROWSER_PROTOCOL_TIMEOUT_MS,
++			}).catch(() => {
++				throw new ToolError(
++					"Could not connect to the Studio managed browser. Reconnect the local desktop browser and retry.",
++				);
++			});
++			return {
++				key: browserKey(kind),
++				kind,
++				browser,
++				cdpUrl,
++				refCount: 0,
++				stealth: { browserSession: null, override: null },
++			};
++		}
+ 		// Loopback relays are owned by a machine-global broker and auto-started
+ 		// on demand (the extension dials in on its own). Hosts without a CLI
+ 		// worker entry (bun test, SDK embedding) never spawn brokers. Remote
+@@ -459,6 +479,16 @@ async function disposeBrowserHandle(handle: BrowserHandle, opts: ReleaseBrowserO
  		}
  		return;
  	}
@@ -1382,8 +2822,172 @@ index 78a5bb5f94..ef2c9024f0 100644
  	if (handle.browser.connected) {
  		try {
  			handle.browser.disconnect();
+diff --git a/packages/coding-agent/src/tools/browser/relay/bridge.ts b/packages/coding-agent/src/tools/browser/relay/bridge.ts
+index 15ad5573c0..f44e533d3f 100644
+--- a/packages/coding-agent/src/tools/browser/relay/bridge.ts
++++ b/packages/coding-agent/src/tools/browser/relay/bridge.ts
+@@ -1351,6 +1351,28 @@ export class RelayBridge {
+ 			case "Browser.setDownloadBehavior":
+ 				this.#reply(conn, msg, {});
+ 				return;
++			case "Studio.downloads.enable":
++			case "Studio.downloads.list": {
++				const targetId = typeof msg.params?.targetId === "string" ? msg.params.targetId : "";
++				const parsed = parseTargetId(targetId);
++				const tab = parsed ? this.#tabs.get(parsed.key) : undefined;
++				if (!tab) {
++					this.#replyError(conn, msg, "Managed browser page is unavailable");
++					return;
++				}
++				const directory = typeof msg.params?.directory === "string" ? msg.params.directory : undefined;
++				const result = await this.#rpc(
++					{
++						op: "studioDownloads",
++						tabId: tab.tabId,
++						action: msg.method.endsWith("enable") ? "enable" : "list",
++						...(directory ? { directory } : {}),
++					},
++					this.#instanceFor(tab),
++				);
++				this.#reply(conn, msg, { downloads: result });
++				return;
++			}
+ 			case "Target.createBrowserContext":
+ 				this.#replyError(conn, msg, "Browser contexts are not supported by the omp browser relay");
+ 				return;
+diff --git a/packages/coding-agent/src/tools/browser/relay/kind.ts b/packages/coding-agent/src/tools/browser/relay/kind.ts
+index 81c3d1550a..d3356b9cbe 100644
+--- a/packages/coding-agent/src/tools/browser/relay/kind.ts
++++ b/packages/coding-agent/src/tools/browser/relay/kind.ts
+@@ -12,6 +12,7 @@ import { parseFlag } from "@oh-my-pi/pi-utils";
+ export interface RelayKind {
+ 	kind: "relay";
+ 	cdpUrl: string;
++	studioManaged?: boolean;
+ }
+ 
+ /** Default endpoint of the `omp-browser-relay` CLI. */
+diff --git a/packages/coding-agent/src/tools/browser/relay/protocol.ts b/packages/coding-agent/src/tools/browser/relay/protocol.ts
+index af7ac17c3b..81aa01e015 100644
+--- a/packages/coding-agent/src/tools/browser/relay/protocol.ts
++++ b/packages/coding-agent/src/tools/browser/relay/protocol.ts
+@@ -23,6 +23,7 @@ export interface TabSnapshot {
+ 
+ /** RPCs the relay may ask the extension to perform. */
+ export type RelayRpcRequest =
++	| { op: "studioDownloads"; tabId: number; action: "enable" | "list"; directory?: string }
+ 	| { op: "attach"; tabId: number }
+ 	| { op: "detach"; tabId: number }
+ 	| { op: "send"; tabId: number; sessionId?: string; method: string; params?: Record<string, unknown> }
+diff --git a/packages/coding-agent/src/tools/browser/relay/server.ts b/packages/coding-agent/src/tools/browser/relay/server.ts
+index 57e0d806ad..5ee8228fca 100644
+--- a/packages/coding-agent/src/tools/browser/relay/server.ts
++++ b/packages/coding-agent/src/tools/browser/relay/server.ts
+@@ -26,6 +26,7 @@ import { isOlderOmpVersion } from "./protocol";
+ /** Options for {@link startRelayServer}. */
+ export interface RelayServerOptions {
+ 	port: number;
++	studio?: { token: string; control(mode: "agent" | "human"): Promise<void> };
+ 	/** Shared secret the extension must present as `?token=`; unset disables the check. */
+ 	token?: string;
+ 	/** Group tabs the agent actively drives under one per-window Chrome tab group (default on); `false` disables. */
+@@ -114,7 +115,9 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
+ 	const log = opts.log ?? (() => {});
+ 	const group =
+ 		opts.group === false ? null : opts.group === true || opts.group === undefined ? DEFAULT_GROUP : opts.group;
+-	const updateExtension = extensionUpdaterFor(opts.extensionDir ?? defaultRelayExtensionDir());
++	const updateExtension = opts.studio
++		? undefined
++		: extensionUpdaterFor(opts.extensionDir ?? defaultRelayExtensionDir());
+ 	const bridge = new RelayBridge({ log, group, updateExtension });
+ 	const sockets = new Set<RelayWebSocket>();
+ 	const startedAt = Date.now();
+@@ -131,7 +134,9 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
+ 					? req.url.slice(`http://${rawHost}`.length)
+ 					: req.url;
+ 			const url = new URL(requestUrl, `http://${fallback}`);
+-			const path = url.pathname.replace(/\/+$/, "") || "/";
++			const prefix = opts.studio ? `/managed/${opts.studio.token}` : "";
++			if (prefix && !url.pathname.startsWith(`${prefix}/`)) return new Response("Not found", { status: 404 });
++			const path = url.pathname.slice(prefix.length).replace(/\/+$/, "") || "/";
+ 			if (path === "/cdp") {
+ 				// Browsers set Origin on websocket upgrades; native CDP clients
+ 				// don't. Reject any Origin so a web page can't drive the relay.
+@@ -166,7 +171,7 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
+ 					};
+ 					return Response.json(info, { status: 503 });
+ 				}
+-				return Response.json(bridge.versionInfo(`ws://${host}/cdp`));
++				return Response.json(bridge.versionInfo(`ws://${host}${prefix}/cdp`));
+ 			}
+ 			if (path === "/json" || path === "/json/list") {
+ 				return Response.json(bridge.listTargets());
+@@ -189,6 +194,34 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
+ 			message(ws: RelayWebSocket, message: string | Buffer): void {
+ 				const text = typeof message === "string" ? message : new TextDecoder().decode(message);
+ 				if (ws.data.role === "ext") {
++					if (opts.studio) {
++						let control: { t?: string; id?: number; control?: string };
++						try {
++							control = JSON.parse(text);
++						} catch {
++							ws.close();
++							return;
++						}
++						if (control.t === "studioControl") {
++							if (control.control !== "human" && control.control !== "agent") {
++								ws.close();
++								return;
++							}
++							void opts.studio.control(control.control).then(
++								() => ws.send(JSON.stringify({ t: "studioControlResult", id: control.id, ok: true })),
++								error =>
++									ws.send(
++										JSON.stringify({
++											t: "studioControlResult",
++											id: control.id,
++											ok: false,
++											error: String(error),
++										}),
++									),
++							);
++							return;
++						}
++					}
+ 					bridge.extMessage(ws, text);
+ 				} else if (ws.data.connId !== undefined) {
+ 					bridge.cdpMessage(ws.data.connId, text);
+@@ -215,7 +248,7 @@ export function startRelayServer(opts: RelayServerOptions): RelayServer {
+ 	log("relay listening", { port: opts.port });
+ 	return {
+ 		bridge,
+-		port: opts.port,
++		port: server.port!,
+ 		stop() {
+ 			clearInterval(keepalive);
+ 			server.stop(true);
+diff --git a/packages/coding-agent/src/tools/browser/tab-protocol.ts b/packages/coding-agent/src/tools/browser/tab-protocol.ts
+index 360eaeb693..786ae1c2df 100644
+--- a/packages/coding-agent/src/tools/browser/tab-protocol.ts
++++ b/packages/coding-agent/src/tools/browser/tab-protocol.ts
+@@ -51,6 +51,7 @@ export type AttachPage = { kind: "create"; nearTargetId?: string } | { kind: "ow
+ 
+ /** omp created the payload's page (headless, or a relay tab of its own): closing the tab closes the page. */
+ export function ownsPage(payload: WorkerInitPayload): boolean {
++	if (payload.mode === "attach" && payload.studioManaged) return false;
+ 	return payload.mode === "headless" || payload.page.kind !== "borrowed";
+ }
+ 
+@@ -78,6 +79,7 @@ export type WorkerInitPayload =
+ 	  }
+ 	| {
+ 			mode: "attach";
++			studioManaged?: boolean;
+ 			browserWSEndpoint: string;
+ 			safeDir: string;
+ 			/** The tab's upload staging folder, which outlives a recycled worker; see `UploadStaging`. */
 diff --git a/packages/coding-agent/src/tools/browser/tab-supervisor.ts b/packages/coding-agent/src/tools/browser/tab-supervisor.ts
-index c4e3984dab..2dc05b16f9 100644
+index c4e3984dab..37937d2bc1 100644
 --- a/packages/coding-agent/src/tools/browser/tab-supervisor.ts
 +++ b/packages/coding-agent/src/tools/browser/tab-supervisor.ts
 @@ -57,6 +57,7 @@ import { cfgBrowserScreenshotDir } from "./settings";
@@ -1394,7 +2998,15 @@ index c4e3984dab..2dc05b16f9 100644
  
  // Coding-agent binary/bundle workers route through the CLI entrypoint with a
  // hidden argv mode, so compiled/npm builds only need one JavaScript entry.
-@@ -419,6 +420,7 @@ async function acquireTabImpl(
+@@ -219,6 +220,7 @@ export interface RunInTabOptions {
+ }
+ 
+ export interface ReleaseTabOptions {
++	closeManagedPage?: boolean;
+ 	kill?: boolean;
+ 	/** Maximum time for each asynchronous cleanup resource before close fails with diagnostics. */
+ 	timeoutMs?: number;
+@@ -419,6 +421,7 @@ async function acquireTabImpl(
  	const reattaching = awaitWorkerRecovery(name, opts, "Browser tab open aborted");
  	if (reattaching) await reattaching;
  	const existing = tabs.get(name);
@@ -1402,7 +3014,7 @@ index c4e3984dab..2dc05b16f9 100644
  	if (existing) {
  		if (existing.browser === browser && existing.state === "alive") {
  			const requestedCmuxSurface = "client" in browser ? (opts.cmuxSurface ?? browser.surface) : undefined;
-@@ -460,6 +462,7 @@ async function acquireTabImpl(
+@@ -460,6 +463,7 @@ async function acquireTabImpl(
  				if (tabs.get(name) !== existing || existing.state !== "alive") {
  					return await acquireTabImpl(name, browser, { ...opts, deadlineStartMs: startedAt });
  				}
@@ -1410,7 +3022,7 @@ index c4e3984dab..2dc05b16f9 100644
  				// The creator may opt out later: an explicit `persist` on
  				// reuse by the owning session updates the tab (omitted
  				// leaves it). Reuse by any other session never changes it.
-@@ -926,6 +929,7 @@ async function runInTabWithSnapshot(
+@@ -926,6 +930,7 @@ async function runInTabWithSnapshot(
  			`Tab ${JSON.stringify(name)} is busy: another call on this tab is still running. Await each call before starting the next instead of running them together (Promise.all, asyncio.gather), or group the steps in one tab.run(...)`,
  		);
  	}
@@ -1418,7 +3030,20 @@ index c4e3984dab..2dc05b16f9 100644
  	// An already-aborted call never runs: without this early exit the worker
  	// branch below would send `abort` before `run`, which the worker ignores
  	// for a not-yet-active run and then execute anyway.
-@@ -1484,6 +1488,26 @@ async function findTargetForTab(tab: WorkerTabSession): Promise<Target | undefin
+@@ -1360,7 +1365,11 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
+ 	// close can fail and still report `closed` (its CDP socket broke), and the relay retracts a
+ 	// target whose debugger the user dismissed, so the worker cannot close it at all. A dead
+ 	// tab's page was closed by the teardown that killed it.
+-	if (tab.ownsPage && wasAlive) {
++	if (
++		(tab.ownsPage ||
++			(opts.closeManagedPage && tab.browser.kind.kind === "relay" && tab.browser.kind.studioManaged)) &&
++		wasAlive
++	) {
+ 		try {
+ 			// `false` is "not confirmed closed" (the CDP session could not be
+ 			// created, or `Target.getTargets` failed) — the same unconfirmed
+@@ -1484,6 +1493,26 @@ async function findTargetForTab(tab: WorkerTabSession): Promise<Target | undefin
  	return undefined;
  }
  
@@ -1445,7 +3070,7 @@ index c4e3984dab..2dc05b16f9 100644
  /**
   * Set a tab's web lifecycle state through a supervisor-owned CDP session —
   * no worker-protocol change needed; CDP allows multiple sessions per target.
-@@ -1625,6 +1649,7 @@ export async function freezeTabsForOwner(ownerId: string): Promise<number> {
+@@ -1625,6 +1654,7 @@ export async function freezeTabsForOwner(ownerId: string): Promise<number> {
  	let count = 0;
  	for (const tab of tabs.values()) {
  		if (tab.ownerSessionId !== ownerId) continue;
@@ -1453,11 +3078,170 @@ index c4e3984dab..2dc05b16f9 100644
  		if (await setTabFrozen(tab, true).catch(() => false)) count++;
  	}
  	return count;
+@@ -1840,6 +1870,7 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
+ 	}
+ 	return {
+ 		mode: "attach",
++		studioManaged: browser.kind.kind === "relay" && browser.kind.studioManaged === true,
+ 		browserWSEndpoint,
+ 		safeDir,
+ 		uploadDir,
+@@ -2229,6 +2260,7 @@ async function closeOrphanTarget(tab: WorkerTabSession, budgetMs: number): Promi
+ function closeAbandonedWorkerPage(browser: PuppeteerBrowserHandle, worker: WorkerHandle): void {
+ 	const targetId = workerPageTargets.get(worker);
+ 	workerPageTargets.delete(worker);
++	if (browser.kind.kind === "relay" && browser.kind.studioManaged) return;
+ 	if (!targetId) return;
+ 	// The close outlives its caller, and every caller here may go on to release
+ 	// the last browser reference — `closeTargetById` yields before it looks the
+diff --git a/packages/coding-agent/src/tools/browser/tab-worker.ts b/packages/coding-agent/src/tools/browser/tab-worker.ts
+index 70c19d7c67..eb92e5790e 100644
+--- a/packages/coding-agent/src/tools/browser/tab-worker.ts
++++ b/packages/coding-agent/src/tools/browser/tab-worker.ts
+@@ -1770,7 +1770,7 @@ export class WorkerCore {
+ 			client.on("Page.javascriptDialogClosed", this.#onDialogClosed);
+ 			client.on("OMP.debuggerDetached", this.#onDebuggerDetached);
+ 			this.#page.on("error", this.#onPageCrashed);
+-			if (this.#ownsPage) {
++			if (this.#ownsPage || (payload.mode === "attach" && payload.studioManaged)) {
+ 				// Background Chromium tabs stop producing frames, stalling rAF,
+ 				// IntersectionObserver, and input acknowledgements. Keep owned tabs
+ 				// interactive without raising a window; explicit settle-freeze still applies.
+@@ -1785,6 +1785,7 @@ export class WorkerCore {
+ 			for (const source of payload.initScripts ?? []) await this.#initScripts.add(source);
+ 			this.#downloads = new DownloadManager(this.#browser, this.#page, this.#targetId, {
+ 				perTab: payload.mode === "headless" || payload.userDriven !== true,
++				managed: payload.mode === "attach" && payload.studioManaged === true,
+ 			});
+ 			if (payload.downloadsPath) await this.#downloads.enable(payload.downloadsPath);
+ 			const baseUserAgent = await this.#page.evaluate(() => navigator.userAgent);
+@@ -1812,7 +1813,13 @@ export class WorkerCore {
+ 				await page.close().catch(() => undefined);
+ 			}
+ 			// So would a relay tab it opened in the background.
+-			if (payload.mode === "attach" && payload.page.kind === "create" && page && !page.isClosed()) {
++			if (
++				payload.mode === "attach" &&
++				!payload.studioManaged &&
++				payload.page.kind === "create" &&
++				page &&
++				!page.isClosed()
++			) {
+ 				await page.close().catch(() => undefined);
+ 			}
+ 			this.#transport.send({ type: "init-failed", error: errorPayload(error) });
+@@ -2886,7 +2893,7 @@ export class WorkerCore {
+ 			downloads: () =>
+ 				op("tab.downloads()", quickOpMs, async sig => {
+ 					throwIfAborted(sig);
+-					return this.#requireDownloads().list();
++					return this.#requireDownloads().read();
+ 				}),
+ 			text: (selector = "body") =>
+ 				read(`tab.text(${JSON.stringify(selector)})`, quickOpMs, sig =>
+diff --git a/packages/coding-agent/src/tools/computer.ts b/packages/coding-agent/src/tools/computer.ts
+index dfdbe0e1f2..393e17732b 100644
+--- a/packages/coding-agent/src/tools/computer.ts
++++ b/packages/coding-agent/src/tools/computer.ts
+@@ -17,6 +17,7 @@ import {
+ 	registerComputerController,
+ } from "./computer/supervisor";
+ import type { ToolSession } from "./index";
++import { computerRunPermits, hasComputerScope } from "../studio/computer-runtime-lifecycle";
+ import { renderCallChain, renderFunctionRun } from "./run-code";
+ import { throwIfAborted } from "./tool-errors";
+ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+@@ -270,12 +271,23 @@ async function runComputer(
+ 	params: ComputerRunParams | ComputerCallParams,
+ 	context: EvalPreludeContext,
+ ): Promise<AgentToolResult<unknown>> {
+-	const signal = context.signal;
++	const sessionId = session.getSessionId?.() ?? session.getEvalSessionId?.() ?? "computer";
++	const ownerId = session.getEvalKernelOwnerId?.() ?? undefined;
++	const permits = await computerRunPermits(sessionId, ownerId);
++	const signals = [...permits.map(permit => permit.signal), ...(context.signal ? [context.signal] : [])];
++	const signal = signals.length ? AbortSignal.any(signals) : undefined;
+ 	const code = resolveComputerRunCode(params);
+ 	// Direct inspection calls run read-only so the desktop guard backs the read approval tier.
+ 	const readOnly = params.action === "call" ? isReadOnlyComputerCall(params.chain) : (params.read_only ?? false);
+ 	const timeoutSeconds = clampTimeout("computer", params.timeout, cfgToolsMaxTimeout.get(session.settings));
+ 	const snapshot = buildComputerSnapshot(session, readOnly);
++	if (hasComputerScope(sessionId, ownerId))
++		snapshot.activity = {
++			runId: crypto.randomUUID(),
++			sessionId,
++			toolCallId: context.outerToolCallId,
++			invocationId: context.toolCallId,
++		};
+ 	const run = await controller.run(code, timeoutSeconds * 1000, snapshot, signal, context.context);
+ 	throwIfAborted(signal);
+ 
+diff --git a/packages/coding-agent/src/tools/computer/protocol.ts b/packages/coding-agent/src/tools/computer/protocol.ts
+index f1aedb9785..bb33446680 100644
+--- a/packages/coding-agent/src/tools/computer/protocol.ts
++++ b/packages/coding-agent/src/tools/computer/protocol.ts
+@@ -9,6 +9,8 @@ import screenStateTemplate from "../../prompts/tools/computer-screen-state.md" w
+ 
+ export { COMPUTER_WORKER_ARG } from "../../cli/worker-selectors";
+ 
++import type { ComputerLifecycleEvent, ComputerRunIdentity } from "../../studio/computer-runtime-lifecycle";
++
+ /** Frozen run settings transferred from the host session to the worker. */
+ export interface ComputerSessionSnapshot {
+ 	cwd: string;
+@@ -24,6 +26,8 @@ export interface ComputerSessionSnapshot {
+ 	 * `release-display` rather than for the native grace period after its last request.
+ 	 */
+ 	displayTurn?: number;
++	/** Present only when a host subscribed to typed computer activity. */
++	activity?: ComputerRunIdentity;
+ }
+ 
+ /** Reply envelope for a session tool invoked by desktop JavaScript. */
+@@ -101,6 +105,14 @@ export function screenStateNotice(state: DesktopScreenState | undefined): string
+ 
+ /** Screenshot or zoom emitted during one computer run, with its full input coordinate frame. */
+ export interface ComputerScreenshot {
++	frameId?: string;
++	/** Original PNG digest, available before asynchronous Studio asset persistence. */
++	sha256?: string;
++	sessionId?: string;
++	toolCallId?: string;
++	runId?: string;
++	/** Silent screenshots are not automatically part of a tool result. */
++	emitted?: boolean;
+ 	path: string;
+ 	width: number;
+ 	height: number;
+@@ -125,8 +137,9 @@ export interface RunErrorPayload {
+ 
+ /** Events emitted by the persistent computer worker. */
+ export type ComputerWorkerOutbound =
++	| { type: "activity"; event: ComputerLifecycleEvent }
+ 	| { type: "ready" }
+-	| { type: "control-revoked"; id: string }
++	| { type: "control-revoked"; id: string; error?: RunErrorPayload }
+ 	| { type: "pong"; id: string }
+ 	| { type: "result"; id: string; ok: true; payload: ComputerRunOk }
+ 	| { type: "result"; id: string; ok: false; error: RunErrorPayload }
 diff --git a/packages/coding-agent/src/tools/computer/supervisor.ts b/packages/coding-agent/src/tools/computer/supervisor.ts
-index 3c7d0a6cc7..8d815a565a 100644
+index 3c7d0a6cc7..883fe9e48e 100644
 --- a/packages/coding-agent/src/tools/computer/supervisor.ts
 +++ b/packages/coding-agent/src/tools/computer/supervisor.ts
-@@ -34,6 +34,7 @@ const RESTART_MESSAGE = "computer worker restarted; captures and ax refs were re
+@@ -23,6 +23,12 @@ import {
+ 	type RunErrorPayload,
+ } from "./protocol";
+ 
++import {
++	computerRunPermits,
++	emitComputerLifecycle,
++	type ComputerRunIdentity,
++} from "../../studio/computer-runtime-lifecycle";
++
+ const START_TIMEOUT_MS = 10_000;
+ const CLOSE_TIMEOUT_MS = 1_500;
+ const GRACE_MS = 750;
+@@ -34,6 +40,7 @@ const RESTART_MESSAGE = "computer worker restarted; captures and ax refs were re
  
  /** Runs desktop scripts and owns their persistent worker session. */
  export interface ComputerController {
@@ -1465,7 +3249,16 @@ index 3c7d0a6cc7..8d815a565a 100644
  	run(
  		code: string,
  		timeoutMs: number,
-@@ -167,6 +168,9 @@ function errorFromPayload(payload: RunErrorPayload): Error {
+@@ -41,7 +48,7 @@ export interface ComputerController {
+ 		signal?: AbortSignal,
+ 		context?: AgentToolContext,
+ 	): Promise<ComputerRunOk>;
+-	revokeControl?(): Promise<void>;
++	revokeControl?(strict?: boolean): Promise<void>;
+ 	/** The owner's agent turn `turn` ended: let the display sleep now, keeping control, refs and the worker. */
+ 	releaseDisplay?(turn: number): void;
+ 	/**
+@@ -167,6 +174,9 @@ function errorFromPayload(payload: RunErrorPayload): Error {
  
  /** Supervises one lazy, crash-isolated computer worker per agent session. */
  export class ComputerSupervisor implements ComputerController {
@@ -1475,7 +3268,151 @@ index 3c7d0a6cc7..8d815a565a 100644
  	readonly #session: ToolSession;
  	readonly #createWorker: ComputerWorkerFactory;
  	readonly #callSessionTool: ComputerSessionToolCaller;
-@@ -588,6 +592,12 @@ export class ComputerSupervisor implements ComputerController {
+@@ -177,7 +187,8 @@ export class ComputerSupervisor implements ComputerController {
+ 	#startResolve?: () => void;
+ 	#pendingCapabilities = new Map<string, PendingCapabilities>();
+ 	#pending = new Map<string, PendingRun>();
+-	#revocations = new Map<string, () => void>();
++	#revocations = new Map<string, PromiseWithResolvers<void>>();
++	readonly #requests = new Set<Promise<void>>();
+ 	/**
+ 	 * Snapshots of runs waiting for the worker to start: a resume the worker gets before their `run` would find
+ 	 * nothing to hold, so it moves them to the turn that went on here.
+@@ -185,6 +196,7 @@ export class ComputerSupervisor implements ComputerController {
+ 	readonly #startingRuns = new Set<ComputerSessionSnapshot>();
+ 	#nextId = 0;
+ 	#controlEpoch = 0;
++	#lastIdentity?: ComputerRunIdentity;
+ 	readonly #escapeStops: ComputerEscapeStops;
+ 	/** Key the worker's native sessions count the user's Escape stops under. */
+ 	readonly #escapeKey = `computer-${Snowflake.next()}`;
+@@ -263,6 +275,9 @@ export class ComputerSupervisor implements ComputerController {
+ 		if (this.#closed) throw new ToolError("Computer session is closed");
+ 		if (this.#escapeStopped()) throw new ToolError(ESCAPE_REFUSED_MESSAGE);
+ 		if (signal?.aborted) throw new ToolAbortError();
++		const permits = await computerRunPermits(snapshot.sessionId, this.#session.getEvalKernelOwnerId?.() ?? undefined);
++		if (permits.length)
++			signal = AbortSignal.any([...permits.map(permit => permit.signal), ...(signal ? [signal] : [])]);
+ 		const epoch = this.#controlEpoch;
+ 		const session = { ...snapshot };
+ 		this.#startingRuns.add(session);
+@@ -277,6 +292,10 @@ export class ComputerSupervisor implements ComputerController {
+ 		const { promise, resolve, reject } = Promise.withResolvers<ComputerRunOk>();
+ 		const pending: PendingRun = { resolve, reject, signal, context, toolCalls: new Map() };
+ 		this.#pending.set(id, pending);
++		const identity: ComputerRunIdentity | undefined = session.activity;
++		if (identity) this.#lastIdentity = identity;
++		let phase: "completed" | "failed" | "cancelled" = "failed";
++		if (identity) emitComputerLifecycle({ kind: "run", identity, phase: "running", at: Date.now() });
+ 		const abort = (): void => {
+ 			this.#safeSend({ type: "abort", id });
+ 			for (const controller of pending.toolCalls.values()) controller.abort(signal?.reason);
+@@ -299,6 +318,7 @@ export class ComputerSupervisor implements ComputerController {
+ 				const own = error instanceof Error && !(error instanceof ToolAbortError) ? error.message : undefined;
+ 				throw new ToolError(own ? `${own}\n\n${ESCAPE_STOPPED_MESSAGE}` : ESCAPE_STOPPED_MESSAGE);
+ 			}
++			phase = "completed";
+ 			// The stop landed after the script finished, its input out: keep what it did, led by the user's stop.
+ 			if (this.#escapeStopped()) {
+ 				return { ...result, displays: [{ type: "text", text: ESCAPE_AFTER_CALL_MESSAGE }, ...result.displays] };
+@@ -307,6 +327,13 @@ export class ComputerSupervisor implements ComputerController {
+ 		} finally {
+ 			signal?.removeEventListener("abort", abort);
+ 			this.#pending.delete(id);
++			if (identity)
++				emitComputerLifecycle({
++					kind: "run",
++					identity,
++					phase: signal?.aborted || epoch !== this.#controlEpoch ? "cancelled" : phase,
++					at: Date.now(),
++				});
+ 		}
+ 	}
+ 
+@@ -345,8 +372,14 @@ export class ComputerSupervisor implements ComputerController {
+ 			this.#startReject = undefined;
+ 			return;
+ 		}
++		if (message.type === "activity") {
++			emitComputerLifecycle(message.event);
++			return;
++		}
+ 		if (message.type === "control-revoked") {
+-			this.#revocations.get(message.id)?.();
++			const pending = this.#revocations.get(message.id);
++			if (message.error) pending?.reject(errorFromPayload(message.error));
++			else pending?.resolve();
+ 			this.#revocations.delete(message.id);
+ 			return;
+ 		}
+@@ -369,11 +402,11 @@ export class ComputerSupervisor implements ComputerController {
+ 			return;
+ 		}
+ 		if (message.type === "control-request") {
+-			void this.#confirmControl(message);
++			this.#trackRequest(this.#confirmControl(message));
+ 			return;
+ 		}
+ 		if (message.type === "tool-call") {
+-			void this.#dispatchToolCall(message);
++			this.#trackRequest(this.#dispatchToolCall(message));
+ 		}
+ 	}
+ 
+@@ -429,7 +462,12 @@ export class ComputerSupervisor implements ComputerController {
+ 		}
+ 	}
+ 
+-	async revokeControl(): Promise<void> {
++	#trackRequest(request: Promise<void>): void {
++		this.#requests.add(request);
++		void request.finally(() => this.#requests.delete(request));
++	}
++
++	async revokeControl(strict = false): Promise<void> {
+ 		this.#controlEpoch += 1;
+ 		for (const pending of this.#pending.values()) {
+ 			for (const controller of pending.toolCalls.values()) controller.abort(new ToolAbortError());
+@@ -437,12 +475,24 @@ export class ComputerSupervisor implements ComputerController {
+ 		if (!this.#worker) return;
+ 		const id = `computer-revoke-${++this.#nextId}`;
+ 		const acknowledged = Promise.withResolvers<void>();
+-		this.#revocations.set(id, acknowledged.resolve);
++		this.#revocations.set(id, acknowledged);
+ 		this.#safeSend({ type: "revoke-control", id });
+ 		try {
+-			await withTimeout(acknowledged.promise, CLOSE_TIMEOUT_MS, "Timed out revoking computer control");
++			await withTimeout(
++				Promise.all([acknowledged.promise, ...this.#requests]),
++				CLOSE_TIMEOUT_MS,
++				"Timed out revoking computer control",
++			);
++			if (this.#lastIdentity)
++				emitComputerLifecycle({
++					kind: "control",
++					identity: this.#lastIdentity,
++					foreground: "none",
++					at: Date.now(),
++				});
+ 		} catch (error) {
+ 			await this.#terminate(error);
++			if (strict) throw error;
+ 		} finally {
+ 			this.#revocations.delete(id);
+ 		}
+@@ -552,9 +602,9 @@ export class ComputerSupervisor implements ComputerController {
+ 		this.#pending.clear();
+ 		for (const pending of this.#pendingCapabilities.values()) pending.reject(reason);
+ 		this.#pendingCapabilities.clear();
+-		for (const resolve of this.#revocations.values()) resolve();
++		for (const pending of this.#revocations.values()) pending.reject(reason);
+ 		this.#revocations.clear();
+-		await worker?.terminate().catch(() => undefined);
++		await worker?.terminate();
+ 	}
+ 
+ 	async close(): Promise<void> {
+@@ -588,6 +638,17 @@ export class ComputerSupervisor implements ComputerController {
  const ownedSupervisors = new Map<string, Set<ComputerController>>();
  /** Per owner with agent turns: the turn in flight, or between turns the one that ended last, counted from 1. */
  const ownerTurns = new Map<string, { turn: number; inFlight: boolean }>();
@@ -1485,14 +3422,335 @@ index 3c7d0a6cc7..8d815a565a 100644
 +		? [...(ownedSupervisors.get(ownerId) ?? [])].reduce((total, controller) => total + (controller.running ?? 0), 0)
 +		: 0;
 +}
++
++/** The prelude was installed, even when disabled; this never starts a worker. */
++export function computerPreludeAvailableForOwner(ownerId: string | undefined): boolean {
++	return !!ownerId && (ownedSupervisors.get(ownerId)?.size ?? 0) > 0;
++}
  
  /** Registers a controller for owner-scoped session cleanup. */
  export function registerComputerController(ownerId: string | undefined, controller: ComputerController): () => void {
+@@ -602,11 +663,13 @@ export function registerComputerController(ownerId: string | undefined, controll
+ }
+ 
+ /** Revoke task-scoped foreground ownership without resetting frames or the worker. */
+-export async function revokeComputerControlForOwner(ownerId: string | undefined): Promise<void> {
++export async function revokeComputerControlForOwner(ownerId: string | undefined, strict = false): Promise<void> {
+ 	if (!ownerId) return;
+-	await Promise.allSettled(
+-		Array.from(ownedSupervisors.get(ownerId) ?? [], controller => controller.revokeControl?.()),
++	const revocations = Array.from(ownedSupervisors.get(ownerId) ?? [], controller =>
++		controller.revokeControl?.(strict),
+ 	);
++	if (strict) await Promise.all(revocations);
++	else await Promise.allSettled(revocations);
+ }
+ 
+ /**
+diff --git a/packages/coding-agent/src/tools/computer/worker.ts b/packages/coding-agent/src/tools/computer/worker.ts
+index be6c4e46f5..a7ff487e14 100644
+--- a/packages/coding-agent/src/tools/computer/worker.ts
++++ b/packages/coding-agent/src/tools/computer/worker.ts
+@@ -1,4 +1,5 @@
+ import { AsyncLocalStorage } from "node:async_hooks";
++import * as crypto from "node:crypto";
+ import * as fs from "node:fs/promises";
+ import * as os from "node:os";
+ import * as path from "node:path";
+@@ -57,6 +58,7 @@ import {
+ 	type ToolReply,
+ } from "./protocol";
+ import { describeWindowMiss } from "./window-miss";
++import type { ComputerLifecycleEvent } from "../../studio/computer-runtime-lifecycle";
+ 
+ /** A native input call; resolves to its takeover focus report when it took over. */
+ type InputCall = Promise<DesktopFocusReturn | null | void>;
+@@ -121,6 +123,8 @@ export interface NativeDesktopSession {
+ 	axClick(ref: string, opts?: PointerOptions | null): InputCall;
+ 	axType(ref: string, text: string, opts?: PointerOptions | null): InputCall;
+ 	axKeyChord(ref: string, keys: string[], opts?: PointerOptions | null): InputCall;
++	/** Wait behind cancelled native work without acquiring a display hold. */
++	settle?(): Promise<void>;
+ 	close(): Promise<void>;
+ }
+ 
+@@ -156,6 +160,7 @@ type ObservationResult = ScreenshotResult & { ax: string; nodeCount: number; tru
+ type PendingTool = { resolve(value: unknown): void; reject(reason?: unknown): void };
+ interface ActiveRun {
+ 	id: string;
++	done: PromiseWithResolvers<void>;
+ 	/** Escape stops the user acknowledged; any more stop the run. */
+ 	acknowledgedEscapeStops: number;
+ 	ac: AbortController;
+@@ -174,6 +179,8 @@ interface ComputerRunContext {
+ 	output: RunOutput;
+ 	confirmControl(reason: string): Promise<ControlVerdict>;
+ 	screenshots: ComputerScreenshot[];
++	frameActions: WeakMap<object, string>;
++	emit(event: ComputerLifecycleEvent): void;
+ }
+ 
+ type RunContextAccessor = () => ComputerRunContext;
+@@ -631,7 +638,6 @@ async function emitScreenshot(
+ ): Promise<ScreenshotResult> {
+ 	const destination = path.join(os.tmpdir(), `omp-computer-${Snowflake.next()}.png`);
+ 	await Bun.write(destination, frame.data);
+-	throwIfAborted(context.signal);
+ 	const result: ScreenshotResult = {
+ 		path: destination,
+ 		width: frame.width,
+@@ -642,12 +648,28 @@ async function emitScreenshot(
+ 	};
+ 	if (frame.screenLocked) result.screenLocked = true;
+ 	const scaled = frame.width !== frame.sourceWidth || frame.height !== frame.sourceHeight;
+-	context.screenshots.push({
++	const identity = context.snapshot.activity;
++	const screenshot: ComputerScreenshot = {
+ 		...result,
++		...(identity
++			? {
++					frameId: crypto.randomUUID(),
++					sha256: crypto.createHash("sha256").update(frame.data).digest("hex"),
++					sessionId: identity.sessionId,
++					toolCallId: identity.toolCallId,
++					runId: identity.runId,
++					emitted: !options?.silent,
++				}
++			: {}),
+ 		sourceWidth: frame.sourceWidth,
+ 		sourceHeight: frame.sourceHeight,
+ 		target: frame.target,
+-	});
++	};
++	context.screenshots.push(screenshot);
++	if (identity)
++		context.emit({ kind: "frame", identity, screenshot, actionId: context.frameActions.get(frame), at: Date.now() });
++	// Publish the generated evidence before cancellation; delivery is confirmed only by the outer tool result.
++	throwIfAborted(context.signal);
+ 	if (!options?.silent) {
+ 		const dimensions = `${frame.width}×${frame.height}${scaled ? ` (scaled from ${frame.sourceWidth}×${frame.sourceHeight})` : ""}`;
+ 		const coordinates = `coordinateWidth=${frame.coordinateWidth} coordinateHeight=${frame.coordinateHeight}`;
+@@ -1323,9 +1345,7 @@ export class ComputerWorkerCore {
+ 				if (this.#active?.id === message.id) this.#active.ac.abort(new ToolAbortError());
+ 				return;
+ 			case "revoke-control":
+-				this.#active?.ac.abort(new ToolAbortError("Computer control revoked"));
+-				this.#session?.cancel();
+-				this.#transport.send({ type: "control-revoked", id: message.id });
++				void this.#revoke(message.id);
+ 				return;
+ 			case "release-display":
+ 				this.#releasedTurn = Math.max(this.#releasedTurn, message.turn);
+@@ -1344,6 +1364,27 @@ export class ComputerWorkerCore {
+ 		}
+ 	}
+ 
++	async #revoke(id: string): Promise<void> {
++		const active = this.#active;
++		active?.ac.abort(new ToolAbortError("Computer control revoked"));
++		this.#session?.cancel();
++		try {
++			await active?.done.promise;
++			const session = this.#session;
++			if (session?.settle) await session.settle();
++			else if (session) {
++				// Old bindings cannot acknowledge an input drain. Closing is the only safe barrier.
++				await session.close();
++				this.#session = undefined;
++				this.#guarded = undefined;
++				this.#sessionInit = undefined;
++			}
++			this.#transport.send({ type: "control-revoked", id });
++		} catch (error) {
++			this.#transport.send({ type: "control-revoked", id, error: errorPayload(error) });
++		}
++	}
++
+ 	/** Returns the raw session; the desktop scope gets `#guarded`, which checks for the user's Escape on every access. */
+ 	async #ensureSession(snapshot: ComputerSessionSnapshot, escape: ComputerEscapeScope): Promise<NativeDesktopSession> {
+ 		if (this.#session) return this.#session;
+@@ -1409,6 +1450,7 @@ export class ComputerWorkerCore {
+ 		const signal = AbortSignal.any([timeoutSignal, ac.signal, runAc.signal]);
+ 		const active: ActiveRun = {
+ 			id: message.id,
++			done: Promise.withResolvers<void>(),
+ 			acknowledgedEscapeStops: message.escape.acknowledged,
+ 			ac,
+ 			signal,
+@@ -1434,6 +1476,14 @@ export class ComputerWorkerCore {
+ 			snapshot: message.session,
+ 			output,
+ 			screenshots,
++			frameActions: new WeakMap(),
++			emit: event => {
++				try {
++					this.#transport.send({ type: "activity", event });
++				} catch {
++					/* Metadata is best effort. */
++				}
++			},
+ 			confirmControl: reason =>
+ 				this.#confirmControl(active, reason, deadline - Math.min(CONTROL_ANSWER_RESERVE_MS, message.timeoutMs / 4)),
+ 		};
+@@ -1516,7 +1566,17 @@ export class ComputerWorkerCore {
+ 			if (failure === undefined && !signal.aborted) this.#session?.retire();
+ 			else if (!nativeCancelled) this.#session?.cancel();
+ 			runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Computer run ended")));
++			if (message.session.activity) {
++				let foreground: "held" | "none" | "unknown" = "unknown";
++				try {
++					foreground = this.#session?.controlState().active ? "held" : "none";
++				} catch {
++					/* Control telemetry cannot fail a completed run. */
++				}
++				runContext.emit({ kind: "control", identity: message.session.activity, foreground, at: Date.now() });
++			}
+ 			if (this.#active?.id === message.id) this.#active = null;
++			active.done.resolve();
+ 		}
+ 		if (failure !== undefined) {
+ 			this.#transport.send({
+@@ -1574,19 +1634,109 @@ export class ComputerWorkerCore {
+ 				if (typeof value !== "function") return value;
+ 				return (...args: unknown[]): unknown => {
+ 					this.#checkEscape();
+-					const result = Reflect.apply(value, target, args);
+-					if (!(result instanceof Promise)) return result;
+-					return result.then(
+-						settled => {
+-							// The call finished and its input went out; the stop ends the run after it.
+-							this.#checkEscape(undefined, ESCAPE_AFTER_CALL_MESSAGE);
+-							return settled;
+-						},
+-						error => {
+-							this.#checkEscape(error);
+-							throw error;
+-						},
+-					);
++					const context = this.#runContexts.getStore();
++					if (context) throwIfAborted(context.signal);
++					const identity = context?.snapshot.activity;
++					const method = String(property);
++					const observed =
++						identity &&
++						![
++							"cancel",
++							"retire",
++							"holdDisplayUntilReleased",
++							"releaseDisplayAwake",
++							"setRunDeadline",
++							"controlState",
++							"close",
++							"settle",
++						].includes(method);
++					const actionId = observed ? crypto.randomUUID() : undefined;
++					const reads = [
++						"listDisplays",
++						"listWindows",
++						"listApplications",
++						"capture",
++						"captureRegion",
++						"observe",
++						"axSnapshot",
++						"axQuery",
++						"axElementAt",
++						"axFocused",
++						"axNode",
++						"axAttributes",
++						"axChildren",
++						"axParent",
++					];
++					const read = reads.includes(method);
++					// Only IDs from known target arguments. Never args, key sequences, clipboard or typed text.
++					const targetId =
++						[
++							"capture",
++							"captureRegion",
++							"observe",
++							"click",
++							"moveMouse",
++							"drag",
++							"scroll",
++							"typeText",
++							"keyChord",
++							"holdKeys",
++							"holdMouse",
++							"raiseWindow",
++							"axSnapshot",
++							"axQuery",
++						].includes(method) && typeof args[0] === "string"
++							? args[0]
++							: undefined;
++					const notify = (phase: "running" | "completed" | "failed" | "cancelled", settled?: unknown): void => {
++						if (!identity || !context || !actionId) return;
++						// A native focus-return report proves takeover. Requested takeover alone proves nothing.
++						const takeover = settled !== null && typeof settled === "object" && "frontPid" in settled;
++						context.emit({
++							kind: "action",
++							identity,
++							actionId,
++							method,
++							target: targetId,
++							mode: read ? "read" : takeover ? "takeover" : "unknown",
++							phase,
++							at: Date.now(),
++						});
++						if ((method === "acquireControl" || method === "releaseControl") && phase === "completed")
++							context.emit({
++								kind: "control",
++								identity,
++								foreground: session.controlState().active ? "held" : "none",
++								at: Date.now(),
++							});
++					};
++					notify("running");
++					try {
++						const result = Reflect.apply(value, target, args);
++						if (!(result instanceof Promise)) {
++							notify("completed", result);
++							return result;
++						}
++						return result.then(
++							settled => {
++								if (context && actionId && settled && typeof settled === "object") {
++									const capture = method === "observe" ? (settled as NativeObservation).capture : settled;
++									context.frameActions.set(capture, actionId);
++								}
++								notify("completed", settled);
++								this.#checkEscape(undefined, ESCAPE_AFTER_CALL_MESSAGE);
++								return settled;
++							},
++							error => {
++								notify(context?.signal.aborted ? "cancelled" : "failed");
++								this.#checkEscape(error);
++								throw error;
++							},
++						);
++					} catch (error) {
++						notify(context?.signal.aborted ? "cancelled" : "failed");
++						throw error;
++					}
+ 				};
+ 			},
+ 		});
+@@ -1669,8 +1819,12 @@ export class ComputerWorkerCore {
+ 		const pending = Promise.withResolvers<unknown>();
+ 		active.pendingTools.set(id, pending);
+ 		const timeoutMs = Math.max(0, Math.floor(answerDeadline - performance.now()));
++		const context = this.#runContexts.getStore();
++		const identity = context?.snapshot.activity;
++		if (identity) context.emit({ kind: "control", identity, foreground: "requested", at: Date.now() });
+ 		this.#transport.send({ type: "control-request", id, runId: active.id, reason, timeoutMs });
+ 		const verdict = await pending.promise;
++		if (identity) context.emit({ kind: "control", identity, foreground: "none", at: Date.now() });
+ 		return verdict === "approved" || verdict === "no-ui" || verdict === "unanswered" ? verdict : "denied";
+ 	}
+ 
 diff --git a/packages/coding-agent/src/tools/context.ts b/packages/coding-agent/src/tools/context.ts
-index 34d59bd4ce..4a015a29c9 100644
+index 34d59bd4ce..3e9d6206d0 100644
 --- a/packages/coding-agent/src/tools/context.ts
 +++ b/packages/coding-agent/src/tools/context.ts
-@@ -31,8 +31,21 @@ declare module "@oh-my-pi/pi-agent-core" {
+@@ -31,8 +31,18 @@ declare module "@oh-my-pi/pi-agent-core" {
  	}
  }
  
@@ -1505,16 +3763,13 @@ index 34d59bd4ce..4a015a29c9 100644
 + */
 +export type ToolUiFactory = (toolCall?: ToolCallContext) => ExtensionUIContext;
 +
-+/** Setter shape shared by session creation and the interactive mode. */
-+export type ToolUiContextSetter = (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
-+
  export class ToolContextStore {
  	#uiContext: ExtensionUIContext | undefined;
 +	#uiFactory: ToolUiFactory | undefined;
  	#hasUI = false;
  	#toolNames: string[] = [];
  
-@@ -43,10 +56,17 @@ export class ToolContextStore {
+@@ -43,10 +53,17 @@ export class ToolContextStore {
  	) {}
  
  	getContext(toolCall?: ToolCallContext): AgentToolContext {
@@ -1534,7 +3789,7 @@ index 34d59bd4ce..4a015a29c9 100644
  			toolNames: this.#toolNames,
  			toolCall,
  			// Loop-dispatched calls carry the loop's passive-context sink; direct
-@@ -55,8 +75,14 @@ export class ToolContextStore {
+@@ -55,8 +72,14 @@ export class ToolContextStore {
  		};
  	}
  
@@ -1551,6 +3806,34 @@ index 34d59bd4ce..4a015a29c9 100644
  		this.#hasUI = hasUI;
  	}
  
+diff --git a/packages/coding-agent/src/tools/eval.ts b/packages/coding-agent/src/tools/eval.ts
+index 8ddd45d5c4..39cd181a20 100644
+--- a/packages/coding-agent/src/tools/eval.ts
++++ b/packages/coding-agent/src/tools/eval.ts
+@@ -564,6 +564,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
+ 			}
+ 			const execution = runWithEvalShadowCell(activeShadowCell, () =>
+ 				this.#runCells({
++					outerToolCallId: _toolCallId,
+ 					session,
+ 					cells,
+ 					languages,
+@@ -758,6 +759,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
+ 	 * inside a managed background job (which passes the job's own signal).
+ 	 */
+ 	async #runCells(options: {
++		outerToolCallId?: string;
+ 		session: ToolSession;
+ 		cells: ResolvedEvalCell[];
+ 		languages: EvalLanguage[];
+@@ -903,6 +905,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
+ 				let result: ExecutorBackendResult;
+ 				try {
+ 					result = await backend.execute(cell.code, {
++						outerToolCallId: options.outerToolCallId,
+ 						cwd: session.cwd,
+ 						sessionId,
+ 						sessionFile: sessionFile ?? undefined,
 diff --git a/packages/coding-agent/src/tools/image-gen.ts b/packages/coding-agent/src/tools/image-gen.ts
 index e6d3bdb947..164a2b7172 100644
 --- a/packages/coding-agent/src/tools/image-gen.ts
@@ -1564,6 +3847,19 @@ index e6d3bdb947..164a2b7172 100644
  	modelRegistry: ModelRegistry,
  	selectedModel: Model,
  	activeModel: Model | undefined,
+diff --git a/packages/coding-agent/src/tools/index.ts b/packages/coding-agent/src/tools/index.ts
+index cfbf031926..b86ede0e04 100644
+--- a/packages/coding-agent/src/tools/index.ts
++++ b/packages/coding-agent/src/tools/index.ts
+@@ -348,6 +348,8 @@ export interface ToolSession {
+ 	getEvalKernelOwnerId?: () => string | null;
+ 	/** Current enabled eval prelude definitions. */
+ 	getEvalPreludes?: () => readonly EvalPreludeDefinition[];
++	/** Native availability independent of the user's enabled setting; never initializes a controller. */
++	computerPreludeAvailable?: () => boolean;
+ 	/**
+ 	 * Eval preludes frozen into the system prompt and eval description at the
+ 	 * last base rebuild. Mid-session toggles ride a hidden notice instead of
 diff --git a/packages/coding-agent/test/extensions-runner.test.ts b/packages/coding-agent/test/extensions-runner.test.ts
 index 805ec5c7be..0725f33e91 100644
 --- a/packages/coding-agent/test/extensions-runner.test.ts
@@ -1654,6 +3950,182 @@ index 805ec5c7be..0725f33e91 100644
  		it("emits resolved false when approval is denied", async () => {
  			const events: Array<{ type: string; approved?: boolean; reason?: string }> = [];
  			const extCode = `
+diff --git a/packages/coding-agent/test/stt-preflight.test.ts b/packages/coding-agent/test/stt-preflight.test.ts
+index 7579c56821..3df234759f 100644
+--- a/packages/coding-agent/test/stt-preflight.test.ts
++++ b/packages/coding-agent/test/stt-preflight.test.ts
+@@ -138,6 +138,56 @@ describe("STTController preflight", () => {
+ 		expect(options.showStatus).not.toHaveBeenCalled();
+ 	});
+ 
++	it("desktop waitForModel keeps the receiver closed until offline warmup finishes and reports real progress", async () => {
++		vi.spyOn(downloader, "isSttModelCached").mockResolvedValue(true);
++		const called = Promise.withResolvers<void>();
++		const warmed = Promise.withResolvers<void>();
++		vi.spyOn(downloader, "downloadSttModel").mockImplementation((_key, progress) => {
++			progress?.({ status: "progress", percent: 25, loaded: 250, total: 1000, repo: "test", label: "test" });
++			called.resolve();
++			return warmed.promise;
++		});
++		const capture = vi.fn(() => ({ stop: vi.fn() }));
++		const onProgress = vi.fn();
++		controller = new STTController(capture, { settings, registry });
++		const starting = controller.start(makeEditor(), { ...makeOptions(), waitForModel: true, onProgress });
++		await called.promise;
++		expect(capture).not.toHaveBeenCalled();
++		expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ percent: 25, loaded: 250, total: 1000 }));
++		warmed.resolve();
++		await starting;
++		expect(capture).toHaveBeenCalledTimes(1);
++		expect(controller.state).toBe("recording");
++	});
++
++	it("freezes desktop language and submit policy even when settings change while recording", async () => {
++		vi.spyOn(downloader, "downloadSttModel").mockResolvedValue(undefined);
++		vi.spyOn(asrClient.sttClient, "startStream").mockReturnValue({
++			pushAudio: vi.fn(),
++			cancel: vi.fn(),
++			stop: vi.fn().mockResolvedValue("修复接口，提交。"),
++		});
++		const editor = makeEditor();
++		controller = new STTController(() => ({ stop: vi.fn() }), {
++			settings,
++			registry,
++			configuration: {
++				model: getBundledModel("local", "whisper-base"),
++				language: "zh-CN",
++				submitTrigger: "say-submit",
++			},
++		});
++		await controller.start(editor, { ...makeOptions(), waitForModel: true });
++		settings.setModelRole("dictation", "local/whisper-small");
++		await controller.stop();
++		expect(asrClient.sttClient.startStream).toHaveBeenCalledWith(
++			"whisper-base",
++			expect.objectContaining({ language: "zh" }),
++		);
++		expect(editor.deleteBeforeCursor).toHaveBeenCalledWith(4);
++		expect(editor.submit).toHaveBeenCalledTimes(1);
++	});
++
+ 	it("cached online model: opens the microphone only after the recognizer is ready", async () => {
+ 		settings.setModelRole("dictation", "local/nemotron-streaming-en-0.6b");
+ 		vi.spyOn(downloader, "isSttModelCached").mockResolvedValue(true);
+diff --git a/packages/coding-agent/test/stt-submit-trigger.test.ts b/packages/coding-agent/test/stt-submit-trigger.test.ts
+index d5781da79c..491cf29543 100644
+--- a/packages/coding-agent/test/stt-submit-trigger.test.ts
++++ b/packages/coding-agent/test/stt-submit-trigger.test.ts
+@@ -115,7 +115,7 @@ describe("STT Submit Trigger Evaluation", () => {
+ 	});
+ 
+ 	describe("say-submit trigger", () => {
+-		it("should submit and trim trailing word when last word contains submit", () => {
++		it("submits and trims only an exact final submit command", () => {
+ 			// Single word
+ 			expect(evaluateSubmitTrigger("submit", "say-submit")).toEqual({
+ 				submit: true,
+@@ -150,12 +150,12 @@ describe("STT Submit Trigger Evaluation", () => {
+ 
+ 			// Word containing submit
+ 			expect(evaluateSubmitTrigger("please autosubmit", "say-submit")).toEqual({
+-				submit: true,
+-				trimTrailing: 11, // " autosubmit" has length 11
++				submit: false,
++				trimTrailing: 0, // Ordinary word, not a command
+ 			});
+ 			expect(evaluateSubmitTrigger("please submitting", "say-submit")).toEqual({
+-				submit: true,
+-				trimTrailing: 11,
++				submit: false,
++				trimTrailing: 0,
+ 			});
+ 
+ 			// Negative cases
+@@ -173,6 +173,31 @@ describe("STT Submit Trigger Evaluation", () => {
+ 			});
+ 		});
+ 	});
++	it("uses Chinese word boundaries and never treats negated or quoted submit as commands", () => {
++		expect(evaluateSubmitTrigger("你好", "release", "zh")).toEqual({ submit: false, trimTrailing: 0 });
++		expect(evaluateSubmitTrigger("修复接口", "release", "zh")).toEqual({ submit: true, trimTrailing: 0 });
++		expect(evaluateSubmitTrigger("检查 API 接口", "release", "zh-CN")).toEqual({ submit: true, trimTrailing: 0 });
++		expect(evaluateSubmitTrigger("修复接口。", "release-complete", "zh")).toEqual({ submit: true, trimTrailing: 0 });
++		expect(evaluateSubmitTrigger("修复接口，提交。", "say-submit", "zh")).toEqual({ submit: true, trimTrailing: 4 });
++		expect(evaluateSubmitTrigger("提交", "say-submit", "zh")).toEqual({ submit: true, trimTrailing: 2 });
++		for (const text of [
++			"do not submit",
++			"don't submit",
++			"never submit",
++			"not to submit",
++			"do not, submit",
++			"不要提交",
++			"不要 提交",
++			"请勿提交",
++			"不要，请提交",
++			"不要，提交",
++			"提交代码",
++			"解释 autosubmit",
++			"引用 “submit”",
++			"修复后提交",
++		])
++			expect(evaluateSubmitTrigger(text, "say-submit", "zh")).toEqual({ submit: false, trimTrailing: 0 });
++	});
+ });
+ 
+ describe("STTController submit trigger integration", () => {
+diff --git a/packages/natives/native/index.d.ts b/packages/natives/native/index.d.ts
+index 5a51ff90bd..6a4dba41d9 100644
+--- a/packages/natives/native/index.d.ts
++++ b/packages/natives/native/index.d.ts
+@@ -31,6 +31,13 @@ export declare class AudioPlayback {
+ /** Persistent, serialized native desktop capture/input/accessibility session. */
+ export declare class DesktopSession {
+   constructor(options?: DesktopSessionOptions | undefined | null)
++  /** Positive capability probe. Older bindings return no such property. */
++  get observationOnly(): boolean
++  /**
++   * A cancellation barrier that queues behind native input without holding or
++   * waking the display.
++   */
++  settle(): Promise<undefined>
+   /**
+    * Asks the worker when it is idle, so permissions are read live. While
+    * another operation holds the worker, answers from the snapshot of the
+@@ -1558,6 +1565,25 @@ export interface DesktopMenuItem {
+ export interface DesktopObservation {
+   capture: DesktopCapture
+   accessibility: AxSnapshot
++  /**
++   * Passive observer-local nodes from the same AX walk; never executable
++   * refs.
++   */
++  nodes?: Array<DesktopObservationNode>
++  /**
++   * Frame pixel bounds are supplied only when native capture geometry and the
++   * AX window agree.
++   */
++  coordinateSpace?: string
++}
++
++export interface DesktopObservationNode {
++  id: string
++  role: string
++  name: string
++  enabled: boolean
++  bounds?: CaptureRegion
++  children: Array<DesktopObservationNode>
+ }
+ 
+ export interface DesktopPoint {
+@@ -1575,6 +1601,8 @@ export interface DesktopScreenState {
+ }
+ 
+ export interface DesktopSessionOptions {
++  /** Passive reads: no display hold, wake-up, input listener or mutation. */
++  observationOnly?: boolean
+   display?: string
+   /**
+    * Sessions created with the same key share one physical-Escape stop
 diff --git a/packages/stats/src/db.ts b/packages/stats/src/db.ts
 index ae30ecbeb8..2eaaaf3918 100644
 --- a/packages/stats/src/db.ts

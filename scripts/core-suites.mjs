@@ -14,6 +14,7 @@ export const CORE_NODE_SUITES = [
   "packages/testkit/dist/test/transport-contract.test.js",
   // Opening, recovering, browsing and deleting conversations.
   "packages/studio-host/dist/test/backend-lifecycle.test.js",
+  "packages/studio-host/dist/test/evaluation-coordinator.test.js",
   "packages/studio-host/dist/test/conversation-open.test.js",
   "packages/studio-host/dist/test/conversation-open-slice.test.js",
   "packages/studio-host/dist/test/session-catalog.test.js",
@@ -28,6 +29,7 @@ export const CORE_NODE_SUITES = [
   // Local file writes, Electron boundaries, installation and update recovery.
   "apps/desktop/dist/test/workspace-files.test.js",
   "apps/desktop/dist/test/security.test.js",
+  "apps/desktop/dist/test/floating-windows.test.js",
   "apps/desktop/dist/test/desktop-ipc-subscriptions.test.js",
   "apps/desktop/dist/test/perf-profile.test.js",
   "apps/desktop/dist/test/terminal-batch.test.js",
@@ -40,6 +42,9 @@ export const CORE_NODE_SUITES = [
 ];
 
 export const CORE_RENDERER_SUITES = [
+  "src/conversationWorkspace/workspace.test.tsx",
+  "src/conversationWorkspace/snap.test.ts",
+  "src/conversationWorkspace/Workspace.integration.test.tsx",
   "src/composer/ChipComposer.test.tsx",
   "src/composer/dispatch.test.ts",
   "src/composer/serialize.test.ts",
@@ -54,7 +59,11 @@ export const CORE_RENDERER_SUITES = [
   // App-level suite so a regression in the layout solver fails the gate.
   "src/dock/model.test.ts",
   "src/dock/store.test.ts",
+  "src/dock/pins.test.ts",
+  "src/dock/browserPages.test.ts",
+  "src/browser/browserDockSync.test.ts",
   "src/dock/hosts.test.ts",
+  "src/dock/ownership.test.tsx",
   "src/dock/scrollChain.test.ts",
   "src/App.dockRegion.test.tsx",
   "src/layout/useWorkbenchLayout.test.tsx",

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Icon } from "../icons";
+import { usePreviewMode } from "../preview/PreviewContext";
 
 export type DeckQueue = {
   readonly index: number;
@@ -25,8 +26,8 @@ export function QueueNav({ queue }: { queue?: DeckQueue }) {
   );
 }
 
-export function demoMark(demo?: boolean) {
-  return demo ? <span className="chip gray xs">演示</span> : null;
+export function demoMark(demo?: boolean, marks = true) {
+  return demo && marks ? <span className="chip gray xs">演示</span> : null;
 }
 
 export function PromptHead({
@@ -48,13 +49,14 @@ export function PromptHead({
   /** 队列导航之前的操作（如计划放大）。 */
   end?: ReactNode;
 }) {
+  const { marks } = usePreviewMode();
   return (
     <div className={icon === "message" || icon === "pencil" ? "ask-head" : "approval-head"}>
       <Icon name={icon} extra="sm" />
       {title}
       {chips}
       <span className="dk-head-end">
-        {demoMark(demo)}
+        {demoMark(demo, marks)}
         {meta ? <span className="dk-agent">{meta}</span> : null}
         <QueueNav {...(queue ? { queue } : {})} />
         {end}

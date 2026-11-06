@@ -1,3 +1,5 @@
+import { StudioEvaluationWorkspaceService } from "./evaluation-workspace-service";
+import { isEvaluationWorkspaceKind, type EvaluationWorkspaceOperation } from "../evaluation-workspace-protocol";
 import { StudioAdvisorConfigService } from "./advisor-config-service";
 import { isAdvisorConfigKind, type AdvisorConfigOperation } from "../advisor-config-protocol";
 import { isLocalResourceKind, type LocalResourceOperation } from "../local-resources-protocol";
@@ -46,7 +48,10 @@ import { StudioJudgmentService } from "./judgment-service";
 import { StudioRuntimeFeatureService } from "./runtime-feature-service";
 import { StudioSessionOptionsService } from "./session-options-service";
 import { StudioBrowserObservationService } from "./browser-observation-service";
+import { StudioManagedBrowserService } from "./managed-browser-service";
 import { StudioComputerObservationService } from "./computer-observation-service";
+import { StudioComputerWorkspaceService } from "./computer-workspace-service";
+import { isComputerWorkspaceCommand, type ComputerWorkspaceCommand } from "../computer-workspace-protocol";
 import { isComputerObservationKind, type ComputerObservationOperation } from "../computer-observation-protocol";
 import { isBrowserObservationKind, type BrowserObservationOperation } from "../browser-observation-protocol";
 import { isIdaOperationKind, type StudioIdaOperation } from "../ida-details-protocol";
@@ -101,8 +106,15 @@ function isIdaOperation(operation: WorkbenchOperation): operation is StudioIdaOp
 function isBrowserObservationOperation(operation: WorkbenchOperation): operation is BrowserObservationOperation {
 	return isBrowserObservationKind(operation.kind);
 }
+function isComputerWorkspaceOperation(operation: WorkbenchOperation): operation is ComputerWorkspaceCommand {
+	return isComputerWorkspaceCommand(operation.kind);
+}
 function isComputerObservationOperation(operation: WorkbenchOperation): operation is ComputerObservationOperation {
 	return isComputerObservationKind(operation.kind);
+}
+
+function isEvaluationWorkspaceOperation(operation: WorkbenchOperation): operation is EvaluationWorkspaceOperation {
+	return isEvaluationWorkspaceKind(operation.kind);
 }
 
 function isRatchetOperation(operation: WorkbenchOperation): operation is RatchetOperation {
@@ -145,6 +157,7 @@ export class StudioWorkbenchService {
 	readonly compression: StudioSessionCompressionService;
 	readonly worktrees: StudioSessionWorktreesService;
 	planControl: StudioModeControlService | undefined;
+	readonly evaluations: StudioEvaluationWorkspaceService;
 	readonly ratchet: StudioRatchetService;
 	readonly resources: StudioResourceService;
 	readonly ida: StudioIdaService;
@@ -161,7 +174,9 @@ export class StudioWorkbenchService {
 	readonly sessionOptions: StudioSessionOptionsService;
 	readonly idaDetails: StudioIdaDetailsService;
 	readonly browserObservation: StudioBrowserObservationService;
+	readonly managedBrowser: StudioManagedBrowserService;
 	readonly computerObservation: StudioComputerObservationService;
+	readonly computerWorkspace: StudioComputerWorkspaceService;
 	constructor(
 		readonly session: AgentSession,
 		readonly liveAudio = new StudioLiveAudioService(session),
@@ -177,11 +192,13 @@ export class StudioWorkbenchService {
 		this.sessionRestore = new StudioSessionRestoreService(session);
 		this.runtimeQueue = new StudioRuntimeQueueService(session);
 		this.nativePreferences = new StudioNativePreferencesService(session);
-		this.featureSettings = new StudioFeatureSettingsService(session);
+		this.computerWorkspace = new StudioComputerWorkspaceService(session);
+		this.featureSettings = new StudioFeatureSettingsService(session, this.computerWorkspace);
 		this.portability = new StudioSessionPortabilityService(session);
 		this.compression = new StudioSessionCompressionService(session);
 		this.worktrees = new StudioSessionWorktreesService(session);
 		this.ratchet = new StudioRatchetService(session);
+		this.evaluations = new StudioEvaluationWorkspaceService(session);
 		this.skillshare = new StudioSkillshareService(session);
 		this.sessionGui = new StudioSessionGuiService(session);
 		this.agentBtw = new StudioAgentBtwService(session);
@@ -197,7 +214,8 @@ export class StudioWorkbenchService {
 		this.sessionOptions = new StudioSessionOptionsService(session);
 		this.idaDetails = new StudioIdaDetailsService(session);
 		this.browserObservation = new StudioBrowserObservationService(session);
-		this.computerObservation = new StudioComputerObservationService(session);
+		this.managedBrowser = new StudioManagedBrowserService(session);
+		this.computerObservation = new StudioComputerObservationService(session, undefined, this.computerWorkspace);
 	}
 	dispose(): void {
 		this.contextView.dispose();
@@ -207,8 +225,11 @@ export class StudioWorkbenchService {
 		this.worktrees.dispose();
 		this.maintenance.dispose();
 		this.ratchet.dispose();
+		this.evaluations.dispose();
 		this.computerObservation.dispose();
+		void this.computerWorkspace.dispose().catch(() => {});
 		this.browserObservation.dispose();
+		this.managedBrowser.dispose();
 		this.idaDetails.dispose();
 		this.ida.dispose();
 		this.agentBtw.dispose();
@@ -225,6 +246,7 @@ export class StudioWorkbenchService {
 		return result;
 	}
 	async #execute(operation: WorkbenchOperation): Promise<unknown> {
+		if (isEvaluationWorkspaceOperation(operation)) return this.evaluations.execute(operation);
 		if (isAdvisorConfigOperation(operation)) return this.advisorConfig.execute(operation);
 		if (isLocalResourceOperation(operation)) return this.resources.local(operation);
 		if (isDictationOperation(operation)) return this.liveAudio.dictation(operation);
@@ -246,7 +268,9 @@ export class StudioWorkbenchService {
 		}
 		if (operation.kind === "accounts.logout") return this.accounts.logout(operation.sessionId, operation.accountId);
 		if (isRatchetOperation(operation)) return this.ratchet.execute(operation);
+		if (isComputerWorkspaceOperation(operation)) return this.computerWorkspace.execute(operation);
 		if (isComputerObservationOperation(operation)) return this.computerObservation.execute(operation);
+		if (operation.kind === "browser.managed.prepare") return this.managedBrowser.prepare(operation.sessionId);
 		if (isBrowserObservationOperation(operation)) return this.browserObservation.execute(operation);
 		if (isIdaOperation(operation)) return this.idaDetails.execute(operation);
 		if (isSessionOptionsOperation(operation)) return this.sessionOptions.execute(operation);

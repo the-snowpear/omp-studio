@@ -1,7 +1,8 @@
+import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 import { useI18n } from "../i18n";
 
 export type GitMoreActionItem = {
@@ -12,7 +13,7 @@ export type GitMoreActionItem = {
 export type GitMoreActionGroup = {
   readonly id: string;
   readonly label: string;
-  readonly icon: string;
+  readonly icon: IconName;
   readonly items: readonly GitMoreActionItem[];
   readonly disabled?: boolean;
 };
@@ -151,6 +152,7 @@ export function GitMoreActionsMenu({
   readonly githubDisabled?: boolean;
   readonly onPick?: (value: string) => void;
 }) {
+  const document = useSurfaceDocument(), window = surfaceWindow(document);
   const { t } = useI18n();
   const uid = useId();
   const listId = `${uid}-list`;

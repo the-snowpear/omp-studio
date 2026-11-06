@@ -1,4 +1,5 @@
 import type { BtwSnapshot } from "./btw";
+import type { ComputerWorkspaceChange, ComputerWorkspaceQuery, ComputerWorkspaceResultMap } from "./computer-workspace.js";
 import type { StudioOperation } from "./commands";
 import type { ConversationRuntimeEvent } from "./conversation";
 import type {
@@ -52,6 +53,29 @@ export interface StudioRequest {
   expectedStateVersion?: StateVersion;
   idempotencyKey?: IdempotencyKey;
   operation: StudioOperation;
+}
+
+/** Private, receipt-free Computer reads. They never enter StudioOperation or the command ledger. */
+export interface StudioComputerQueryRequest<K extends ComputerWorkspaceQuery["kind"] = ComputerWorkspaceQuery["kind"]> {
+  type: "computer.query";
+  requestId: RequestId;
+  runtimeEpoch: RuntimeEpoch;
+  operation: Extract<ComputerWorkspaceQuery, { kind: K }>;
+}
+
+export type StudioComputerQueryResponse<K extends ComputerWorkspaceQuery["kind"] = ComputerWorkspaceQuery["kind"]> = {
+  type: "computer.result";
+  requestId: RequestId;
+  runtimeEpoch: RuntimeEpoch;
+} & ({ ok: true; result: ComputerWorkspaceResultMap[K] } | { ok: false; error: StudioProtocolError });
+
+/** Independent from studio.event/eventSeq; change.revision is the Computer workspace revision. */
+export interface StudioComputerEventEnvelope {
+  type: "computer.event";
+  runtimeEpoch: RuntimeEpoch;
+  stateVersion: StateVersion;
+  occurredAt: string;
+  event: ComputerWorkspaceChange;
 }
 
 export type ReceiptStatus =
@@ -139,7 +163,8 @@ export type StudioBridgeEvent =
   | ConversationRuntimeEvent
   | SessionTelemetryEvent
   | { kind: "state.changed"; snapshot: OperatorStateSnapshot }
-  | { kind: "btw.changed"; snapshot: BtwSnapshot };
+  | { kind: "btw.changed"; snapshot: BtwSnapshot }
+  | { kind: "evaluation.changed"; id: string; revision: number };
 
 export type RuntimeLifecycleEvent =
   | { kind: "runtime.ready" }

@@ -1,13 +1,15 @@
+import type { SessionCompactionState } from "./session-compaction.js";
 /** Additive settings surface for Runtime 18.10; the published settings payload stays unchanged. */
 export const FEATURE_SETTING_KEYS = [
   "task.agentAccountPools", "compaction.modelThresholds", "retry.fallbackOn",
   "contextFiles.extra", "task.structured", "bash.gitGuard", "worktree.onStart",
   "worktree.onExit", "composer.predictions", "speech.speed", "tts.localSpeed",
   "gc.compress", "gc.compressAfterDays", "prewalk.auto", "prewalk.autoTarget",
-  "async.widgets", "computer.backgroundFallback", "tools.restrictedFolders",
+  "async.widgets", "computer.enabled", "computer.display", "computer.maxWidth", "computer.maxHeight",
+  "computer.backgroundFallback", "tools.restrictedFolders",
   "extensionHandlers.modeControl", "recap.enabled", "recap.idleSeconds",
   "compaction.idleEnabled", "compaction.idleThresholdTokens", "compaction.idleTimeoutSeconds",
-  "gc.autoCompress", "session.worktreeScope", "stt.enabled", "stt.language",
+  "gc.autoCompress", "session.worktreeScope", "stt.enabled", "stt.language", "stt.submitTrigger",
 ] as const;
 export type FeatureSettingKey = (typeof FEATURE_SETTING_KEYS)[number];
 export type FeatureSettingValue = null | boolean | number | string | FeatureSettingValue[] | { [key: string]: FeatureSettingValue };
@@ -25,6 +27,8 @@ export interface CompactionPreview {
   extended: boolean;
 }
 export type FeatureSettingsOperation =
+  | { kind: "session.compaction.get"; sessionId: string }
+  | { kind: "session.compaction.set"; sessionId: string; input: string }
   | { kind: "preferences.features.get"; sessionId: string }
   | { kind: "preferences.features.set"; sessionId: string; key: FeatureSettingKey; value: FeatureSettingValue; scope: "session" | "global" }
   | { kind: "preferences.features.clearOverride"; sessionId: string; key: FeatureSettingKey }
@@ -32,6 +36,8 @@ export type FeatureSettingsOperation =
   | { kind: "models.compaction.preview"; sessionId: string; selector: string; input: string }
   | { kind: "models.compaction.set"; sessionId: string; selector: string; input: string; confirmed?: boolean };
 export interface FeatureSettingsResultMap {
+  "session.compaction.get": SessionCompactionState;
+  "session.compaction.set": SessionCompactionState;
   "preferences.features.get": { settings: FeatureSettingRow[] };
   "preferences.features.set": FeatureSettingRow;
   "preferences.features.clearOverride": FeatureSettingRow;
@@ -39,8 +45,8 @@ export interface FeatureSettingsResultMap {
   "models.compaction.preview": CompactionPreview;
   "models.compaction.set": { saved: boolean; confirmationRequired: boolean; summary: string };
 }
-export const FEATURE_SETTINGS_KINDS = ["preferences.features.get", "preferences.features.set", "preferences.features.clearOverride", "accounts.pool.options", "models.compaction.preview", "models.compaction.set"] as const;
-export const FEATURE_SETTINGS_READ_KINDS = ["preferences.features.get", "accounts.pool.options", "models.compaction.preview"] as const;
+export const FEATURE_SETTINGS_KINDS = ["session.compaction.get", "session.compaction.set", "preferences.features.get", "preferences.features.set", "preferences.features.clearOverride", "accounts.pool.options", "models.compaction.preview", "models.compaction.set"] as const;
+export const FEATURE_SETTINGS_READ_KINDS = ["session.compaction.get", "preferences.features.get", "accounts.pool.options", "models.compaction.preview"] as const;
 export function isFeatureSettingsKind(kind: string): kind is FeatureSettingsOperation["kind"] {
   return (FEATURE_SETTINGS_KINDS as readonly string[]).includes(kind);
 }
@@ -73,6 +79,7 @@ export function validateFeatureSettingValue(value: unknown, depth = 0): asserts 
   throw Error("Invalid setting value");
 }
 export function validateFeatureSettingsOperation(value: unknown): void {
+  if ((value as FeatureSettingsOperation)?.kind === "session.compaction.get" || (value as FeatureSettingsOperation)?.kind === "session.compaction.set") return;
   const row = record(value, ["kind", "sessionId", "key", "value", "scope", "selector", "input", "confirmed"]);
   if (typeof row.kind !== "string" || !isFeatureSettingsKind(row.kind)) throw Error("Unknown feature settings operation");
   text(row.sessionId, 128);
@@ -101,6 +108,7 @@ function setting(value: unknown): void {
   validateFeatureSettingValue(row.value);
 }
 export function validateFeatureSettingsResult(kind: FeatureSettingsOperation["kind"], value: unknown): void {
+  if (kind === "session.compaction.get" || kind === "session.compaction.set") return;
   if (JSON.stringify(value).length > 131072) throw Error("Feature settings result exceeds limit");
   if (kind === "models.compaction.set") {
     const row = record(value, ["saved", "confirmationRequired", "summary"]);

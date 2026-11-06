@@ -30,6 +30,7 @@ import type {
 } from "@omp-studio/client-contract";
 import type {
   BtwSnapshot,
+  ComputerWorkspaceChange,
   CommandLedgerEntry,
   ConversationRuntimeEvent,
   SessionTelemetrySnapshot,
@@ -54,6 +55,8 @@ export interface HostEventSeedBase {
 
 /** Every ClientEvent kind the facade can emit, minus the shared envelope. */
 export type HostEventSeed =
+  | (HostEventSeedBase & { readonly kind: "computer.changed"; readonly change: ComputerWorkspaceChange })
+  | (HostEventSeedBase & { readonly kind: "evaluations.changed" })
   | (HostEventSeedBase & { readonly kind: "snapshot"; readonly snapshot: OperatorStateSnapshot })
   | (HostEventSeedBase & { readonly kind: "state.changed" })
   | (HostEventSeedBase & { readonly kind: "command.accepted"; readonly accepted: ClientCommandAccepted })
