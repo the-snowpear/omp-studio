@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -10,7 +10,7 @@ async function fixture(context: TestContext) {
   const stores: ManagedBrowserStore[] = [];
   const reopen = async () => { const store = new ManagedBrowserStore({ directory, downloadsDirectory: directory }); stores.push(store); await store.load(); return store; };
   context.after(async () => { for (const store of stores) await store.flush(); await rm(directory, { recursive: true, force: true }); });
-  return { store: await reopen(), reopen };
+  return { directory, store: await reopen(), reopen };
 }
 test("chat tab limits do not evict pages or change another chat's control", async context => {
   const { store } = await fixture(context);
@@ -80,4 +80,42 @@ test("restored tabs keep their site icon but forget who opened them", async cont
   const restored = (await reopen()).state("alpha").pages;
   assert.equal(restored[1]?.favicon, "data:image/png;base64,AAAA");
   assert.ok(restored.every(page => page.opener === undefined));
+});
+
+test("live page status changes do not rewrite saved tabs, but navigation still persists", async context => {
+  const { directory, store, reopen } = await fixture(context);
+  const page = store.create("alpha", "https://example.com", "human");
+  await store.flush();
+  const file = join(directory, "browser.json");
+  const savedAt = new Date("2000-01-01T00:00:00Z");
+  await utimes(file, savedAt, savedAt);
+  let changes = 0;
+  store.options.changed = () => { changes++; };
+  for (let i = 0; i < 25; i++) {
+    store.update(page.id, { title: page.title, url: page.url, status: "loading", documentId: `document-${i}`, canGoBack: true });
+    await store.flush();
+  }
+  assert.equal(changes, 25);
+  assert.equal(store.page(page.id)?.documentId, "document-24");
+  assert.equal(store.page(page.id)?.canGoBack, true);
+  assert.equal((await stat(file)).mtimeMs, savedAt.getTime());
+  store.update(page.id, { title: "Next page", url: "https://example.com/next", status: "ready" });
+  await store.flush();
+  const restored = (await reopen()).state("alpha").pages[0]!;
+  assert.equal(restored.title, "Next page");
+  assert.equal(restored.url, "https://example.com/next");
+  assert.equal(restored.status, "released");
+});
+
+test("reading chats without pages does not grow the browser session archive", async context => {
+  const { directory, store } = await fixture(context);
+  for (let i = 0; i < 1000; i++) {
+    assert.deepEqual(store.state(`unopened-${i}`).pages, []);
+    assert.equal(store.initialControl(`unopened-${i}`), undefined);
+    store.release(`unopened-${i}`);
+  }
+  store.create("opened", "https://example.com", "human");
+  await store.flush();
+  const saved = JSON.parse(await readFile(join(directory, "browser.json"), "utf8"));
+  assert.deepEqual(saved.sessions.map((entry: { sessionId: string }) => entry.sessionId), ["opened"]);
 });

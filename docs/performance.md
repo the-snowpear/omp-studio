@@ -1,5 +1,7 @@
 # 流式性能维护
 
+0.2.0 新功能的持续运行审查见 [2026-11-06 报告](reviews/0.2.0-performance-review-2026-11-06.md)：评测读取合并与隐藏暂停、浏览器存档写入收敛，以及首屏体积、后台网页与大型报告的后续优化空间。
+
 启动/整壳订阅、按需加载和资源体积的后续优化见 [2026-10-29 报告](performance-2026-10-29.md)；第二轮综合审查（打包形态、GPU 软合成、6× 低配、动画 A/B）见 [performance-review-2026-10-29-round2.md](performance-review-2026-10-29-round2.md)。`scripts/startup-perf.mjs` 单独测完整 App 合成夹具，不代替真实 Runtime 启动数据；性能脚本支持用 `PERF_URL` 连接已启动的生产验证页面。
 
 OMP Studio 的流式管线继续使用 Runtime Bridge、Host conversation 事件、Renderer 有界 Store 和现有 Markdown 扫描器。优化不改变持久 transcript，也不删除执行服务的安全检查或 Renderer transport 的克隆隔离；固定可信 Main 输出不重复做逐字段解析。
@@ -45,6 +47,10 @@ Host 仅拼接相邻、目标及块身份一致的 ASCII 文本或工具 append�
 `OMP_*` 在启动 Main 前设置；`VITE_*` 需要在 dev 启动或 build 前设置。Engine 正确释放、校验和诊断字段限制属于正确性要求，不提供使泄漏复现的产品开关。某优化正确性失败必须修复；性能不达标时关闭对应开关，不放宽预算。
 
 ## 本地诊断
+
+评测的 `evaluationPolling.ts` 在每个读取作用域内只保留一个在途读取，期间的多次变更合成一次补读。窗口隐藏时取消计时，重新可见时刷新；状态入口隐藏时不订阅，后台任务仍由 Host 运行。详情维持 1.5 秒兜底、状态入口维持 5 秒兜底，历史列表按事件刷新。
+
+`ManagedBrowserStore` 的页面更新只在持久化字段变化时排队写盘，加载状态、文档 ID、前进后退和 DevTools 状态仍即时通知界面。纯读取不创建空会话；未打开网页的会话释放也不创建记录。现有标签、控制权、权限与设置的保存格式不变。
 
 Main/Host 处于同一 Electron Main 进程，只采样一次。Renderer 使用可用的 Chromium heap API；不可用时字段缺省。Runtime 从进程内部读取内存与已有标量计数，镜像纯数值 helper 由测试与 studio-protocol 钉齐，不读取 transcript、不调用 Bridge query、不触发 `ensureWorkerLive`。
 

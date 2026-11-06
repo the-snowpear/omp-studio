@@ -29,6 +29,7 @@ import { hostErrorMessage, waitReceipt } from "../hostError";
 import { InteractionDeck } from "../InteractionDeck";
 import { Icon } from "../icons";
 import { EvaluationConfig } from "./EvaluationConfig";
+import { startEvaluationPolling } from "./evaluationPolling";
 import { EvaluationResults, EvaluationComparison } from "./EvaluationResults";
 import {
   evaluationNames,
@@ -157,17 +158,10 @@ export function EvaluationPage({
     }
   }, [intent]);
   useEffect(() => {
-    if (preview) return;
-    return client.subscribe({ scope: "all" }, (event) => {
-      if (event.kind === "evaluations.changed") setRefresh((value) => value + 1);
-    });
-  }, [client, preview]);
-  useEffect(() => {
     if (plan) confirmButton.current?.focus();
   }, [plan]);
   useEffect(() => {
     let active = true;
-    let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
       try {
         const list = preview
@@ -207,14 +201,14 @@ export function EvaluationPage({
         if (active) setPage(result);
       } catch (cause) {
         if (active) setError(hostErrorMessage(cause, "Cannot read evaluation"));
-      } finally {
-        if (active && !preview) timer = setTimeout(() => void load(), 1500);
       }
     };
-    void load();
+    let stop: (() => void) | undefined;
+    if (preview) void load();
+    else stop = startEvaluationPolling({ client, load, intervalMs: 1500 });
     return () => {
       active = false;
-      clearTimeout(timer);
+      stop?.();
     };
   }, [client, workspaceId, preview, tab, selected, offset, refresh]);
   useEffect(() => {
@@ -228,25 +222,27 @@ export function EvaluationPage({
       setHistoryTotal(rows.length);
       return;
     }
-    void client
-      .query("evaluations.list", {
-        ...(workspaceId ? { workspaceId } : {}),
-        kind: tab,
-        search,
-        offset: historyOffset,
-        limit: 50,
-      })
-      .then((result) => {
+    const load = async () => {
+      try {
+        const result = await client.query("evaluations.list", {
+          ...(workspaceId ? { workspaceId } : {}),
+          kind: tab,
+          search,
+          offset: historyOffset,
+          limit: 50,
+        });
         if (active) {
           setHistoryRows(result.records);
           setHistoryTotal(result.total);
         }
-      })
-      .catch((cause) => {
+      } catch (cause) {
         if (active) setError(hostErrorMessage(cause, "Cannot read history"));
-      });
+      }
+    };
+    const stop = startEvaluationPolling({ client, load });
     return () => {
       active = false;
+      stop();
     };
   }, [history, search, historyOffset, tab, preview, client, workspaceId, refresh]);
   const action = async (run: () => Promise<void>) => {

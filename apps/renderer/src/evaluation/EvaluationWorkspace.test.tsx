@@ -1,14 +1,60 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { StudioClient } from "@omp-studio/client-contract";
+import type { ClientEvent, StudioClient } from "@omp-studio/client-contract";
 import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
 import { EvaluationPage } from "./EvaluationPage";
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   localStorage.clear();
   sessionStorage.clear();
+});
+
+it("coalesces slow workspace and history reads and resumes them when the window returns", async () => {
+  vi.useFakeTimers();
+  const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+  const listeners = new Set<(event: ClientEvent) => void>();
+  let release!: (value: { records: []; total: number }) => void;
+  const pending = new Promise<{ records: []; total: number }>(resolve => { release = resolve; });
+  const query = vi.fn().mockReturnValueOnce(pending).mockResolvedValue({ records: [], total: 0 });
+  const client = {
+    query,
+    subscribe: (_scope: unknown, listener: (event: ClientEvent) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  } as unknown as StudioClient;
+  const changed = () => { for (const listener of listeners) listener({ kind: "evaluations.changed" } as ClientEvent); };
+  const mounted = render(<I18nProvider forcedLanguage="en"><PreviewModeProvider switchEnabled>
+    <EvaluationPage client={client} available />
+  </PreviewModeProvider></I18nProvider>);
+  for (let i = 0; i < 25; i++) await act(async () => changed());
+  expect(query).toHaveBeenCalledTimes(1);
+  await act(async () => { release({ records: [], total: 0 }); await vi.advanceTimersByTimeAsync(0); });
+  expect(query).toHaveBeenCalledTimes(2);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^History/ })); });
+  expect(query).toHaveBeenCalledTimes(3);
+  await act(async () => {
+    hidden.mockReturnValue(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+    changed();
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+  expect(query).toHaveBeenCalledTimes(3);
+  await act(async () => {
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  expect(query).toHaveBeenCalledTimes(5);
+  await act(async () => { changed(); });
+  expect(query).toHaveBeenCalledTimes(7);
+  mounted.unmount();
+  expect(listeners.size).toBe(0);
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  expect(query).toHaveBeenCalledTimes(7);
 });
 it("four evaluation surfaces remain local in preview, including rerun review and Ratchet approval", async () => {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");

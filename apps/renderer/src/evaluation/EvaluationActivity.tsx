@@ -4,6 +4,7 @@ import type { EvaluationKind, EvaluationRecord } from "@omp-studio/studio-protoc
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { Icon } from "../icons";
+import { startEvaluationPolling } from "./evaluationPolling";
 import "./evaluation.css";
 
 /** Only the status entry is global. Evaluation jobs remain owned by the Host. */
@@ -20,9 +21,8 @@ export function EvaluationActivity({
     { resolvedLanguage } = useI18n();
   const [runs, setRuns] = useState<EvaluationRecord[]>([]);
   useEffect(() => {
-    if (preview) return;
+    if (preview || !visible) return;
     let active = true;
-    let timer: ReturnType<typeof setTimeout>;
     const read = async () => {
       try {
         const result = await client.query("evaluations.list", { limit: 200 });
@@ -34,23 +34,14 @@ export function EvaluationActivity({
           );
       } catch {
         /* Older Hosts expose no evaluation status entry. */
-      } finally {
-        if (active) timer = setTimeout(() => void read(), 5000);
       }
     };
-    const unsubscribe = client.subscribe({ scope: "all" }, (event) => {
-      if (event.kind === "evaluations.changed") {
-        clearTimeout(timer);
-        void read();
-      }
-    });
-    void read();
+    const stop = startEvaluationPolling({ client, load: read, intervalMs: 5000 });
     return () => {
       active = false;
-      clearTimeout(timer);
-      unsubscribe();
+      stop();
     };
-  }, [client, preview]);
+  }, [client, preview, visible]);
   if (!visible || !runs.length || preview) return null;
   const waiting = runs.find((r) => r.interaction),
     target = waiting ?? runs[0]!;

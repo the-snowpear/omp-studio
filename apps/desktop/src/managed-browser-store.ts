@@ -47,10 +47,10 @@ export class ManagedBrowserStore {
     });
   }
   state(sessionId: string): ManagedBrowserState {
-    const session = this.#session(sessionId);
-    return { sessionId, pages: [...session.pages], activePageId: session.activePageId, spaces: [...this.#spaces], control: session.control ?? "human", connection: session.connection, settings: { ...this.#settings }, downloads: [...session.downloads], permissions: [...this.#permissions] };
+    const session = this.#sessions.get(sessionId);
+    return { sessionId, pages: [...(session?.pages ?? [])], activePageId: session?.activePageId ?? null, spaces: [...this.#spaces], control: session?.control ?? "human", connection: session?.connection ?? "disconnected", settings: { ...this.#settings }, downloads: [...(session?.downloads ?? [])], permissions: [...this.#permissions] };
   }
-  initialControl(sessionId: string): ManagedBrowserControl | undefined { return this.#session(sessionId).control; }
+  initialControl(sessionId: string): ManagedBrowserControl | undefined { return this.#sessions.get(sessionId)?.control; }
   create(sessionId: string, url: string, source: "human" | "agent", spaceId = "shared", opener: Omit<ManagedBrowserPageOpener, "source"> = {}): ManagedBrowserPage {
     const session = this.#session(sessionId);
     if (session.pages.length >= this.#settings.maxTabs) throw new Error(`Browser tab limit (${this.#settings.maxTabs}) reached. Close a tab or raise the limit in browser settings.`);
@@ -64,8 +64,11 @@ export class ManagedBrowserStore {
   update(pageId: string, patch: Partial<ManagedBrowserPage>): void {
     const page = this.page(pageId);
     if (!page) return;
+    const savedFields = ["id", "sessionId", "spaceId", "title", "url", "zoom", "favicon"] as const;
+    const persist = savedFields.some(key => key in patch && patch[key] !== page[key]);
     Object.assign(page, patch);
-    this.#changed(page.sessionId);
+    if (persist) this.#queueWrite();
+    this.options.changed?.(page.sessionId);
   }
   page(pageId: string): ManagedBrowserPage | undefined {
     for (const session of this.#sessions.values()) { const page = session.pages.find(candidate => candidate.id === pageId); if (page) return page; }
@@ -87,7 +90,7 @@ export class ManagedBrowserStore {
     this.#changed(sessionId);
   }
   release(sessionId: string): void {
-    for (const page of this.#session(sessionId).pages) {
+    for (const page of this.#sessions.get(sessionId)?.pages ?? []) {
       page.status = "released"; page.canGoBack = false; page.canGoForward = false; page.devtools = false; delete page.error;
     }
     this.options.changed?.(sessionId);
