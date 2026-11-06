@@ -1,4 +1,4 @@
-import { createReadStream } from "node:fs";
+import { readFileDigests } from "./file-digests.js";
 import { createHash, createPublicKey, randomBytes, verify as verifySignature } from "node:crypto";
 import { access, cp, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -51,11 +51,7 @@ export function isInside(root: string, candidate: string): boolean {
 }
 
 export async function sha256File(path: string): Promise<string> {
-  const hash = createHash("sha256");
-  // Runtime binaries are hundreds of MiB; larger bounded reads avoid thousands
-  // of small filesystem round trips without loading the whole file into memory.
-  for await (const chunk of createReadStream(path, { highWaterMark: 1024 * 1024 })) hash.update(chunk);
-  return hash.digest("hex");
+  return (await readFileDigests(path)).digests[0]!;
 }
 
 export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
@@ -138,13 +134,14 @@ export async function verifySignedMetadata<T>(input: {
   readonly coverageMessage?: (file: string, manifest: T) => string;
 }): Promise<{ manifest: T; checksums: ChecksumManifest; signature: RuntimeSignatureManifest }> {
   // Parse exactly the bytes covered by the signature; never reread metadata.
-  const manifestBytes = await readFile(join(input.directory, input.layout.manifestFile));
-  const checksumsBytes = await readFile(join(input.directory, input.layout.checksumsFile));
+  const [manifestBytes, checksumsBytes, signatureText] = await Promise.all([
+    readFile(join(input.directory, input.layout.manifestFile)),
+    readFile(join(input.directory, input.layout.checksumsFile)),
+    readFile(join(input.directory, input.layout.signatureFile), "utf8"),
+  ]);
   const manifest = input.parseManifest(JSON.parse(manifestBytes.toString("utf8")) as unknown);
   const checksums = parseChecksumManifest(JSON.parse(checksumsBytes.toString("utf8")) as unknown);
-  const signature = parseRuntimeSignatureManifest(
-    JSON.parse(await readFile(join(input.directory, input.layout.signatureFile), "utf8")) as unknown,
-  );
+  const signature = parseRuntimeSignatureManifest(JSON.parse(signatureText) as unknown);
 
   const signedPayload = Buffer.concat([manifestBytes, Buffer.from("\0"), checksumsBytes]);
 

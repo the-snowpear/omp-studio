@@ -28,7 +28,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lstat, readFile, rm, mkdir } from "node:fs/promises";
-import { writeJsonAtomic } from "@omp-studio/runtime-installer";
+import { RuntimeInstaller, writeJsonAtomic } from "@omp-studio/runtime-installer";
 import type { Socket } from "node:net";
 import { join, resolve } from "node:path";
 
@@ -36,7 +36,6 @@ import { redactText, type HostRuntimeHelloView, type HostRuntimeDisconnect, type
 import {
   CommandLedger,
   FileSessionLeaseStore,
-  HostBackend,
   NodeRuntimeProcessPort,
   POSIX_PROCESS_GROUP_SPAWN_OPTIONS,
   PosixProcessGroupContainment,
@@ -1372,14 +1371,8 @@ function createSingleDesktopRuntimeSessionPort(
       rememberUnavailable(unavailableFacts("workspace-unusable", "workspace directory is unusable"));
       return undefined;
     }
-    const backend = new HostBackend({
-      stateDirectory: launchContext.profileDirectory,
-      runtimeInstallDirectory:
-        launchContext.runtimeInstallDirectory ?? join(launchContext.profileDirectory, "runtimes"),
-      ...(launchContext.installer === undefined ? {} : { installer: launchContext.installer }),
-    });
-    await backend.initialize();
-    const installed = await backend.installer.currentManifest();
+    const installer = new RuntimeInstaller(launchContext.runtimeInstallDirectory, launchContext.installer);
+    const installed = await installer.currentManifest();
     if (installed === undefined) {
       log?.write("warn", "runtime.launch.skip", "no-managed-install");
       rememberUnavailable(unavailableFacts("not-installed", "managed runtime is not installed"));

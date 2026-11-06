@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
+import { readFileDigests } from "@omp-studio/runtime-installer";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { createReadStream } from "node:fs";
 import { lstat, mkdtemp, realpath, rm, stat } from "node:fs/promises";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -277,18 +276,8 @@ export async function readExecutableDigests(
   platform: NodeJS.Platform,
   absolutePath: string,
 ): Promise<ExecutableDigests> {
-  const identity = createHash("sha256").update(`${platform}\0`);
-  const content = createHash("sha256");
-  let bytes = 0;
-  // Match the installer's bounded bulk reads; both execution-boundary passes
-  // still hash every byte, including the final partial chunk.
-  for await (const chunk of createReadStream(absolutePath, { highWaterMark: 1024 * 1024 })) {
-    const buffer = chunk as Buffer;
-    bytes += buffer.length;
-    identity.update(buffer);
-    content.update(buffer);
-  }
-  return { identity: `sha256:${identity.digest("hex")}`, contentSha256: content.digest("hex"), bytes };
+  const { digests, bytes } = await readFileDigests(absolutePath, [`${platform}\0`, ""]);
+  return { identity: `sha256:${digests[0]!}`, contentSha256: digests[1]!, bytes };
 }
 
 /*

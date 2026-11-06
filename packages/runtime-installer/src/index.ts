@@ -8,3 +8,4 @@ export * from "./runtime-archive.js";
 export * from "./verification-cache.js";
 export * from "./runtime-platform.js";
 export * from "./remote-environment.js";
+export { readFileDigests } from "./file-digests.js";

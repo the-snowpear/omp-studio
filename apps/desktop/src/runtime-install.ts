@@ -494,15 +494,12 @@ export async function seedManagedRuntimeFromArtifact(options: {
   readonly activateOptions?: ActivateOptions;
 }): Promise<SeedManagedRuntimeResult> {
   if (!options.hasTrustedKey) return "skipped";
-  let current;
-  try {
-    current = await options.backend.installer.currentManifest();
-  } catch {
-    current = undefined;
-  }
   const locate = options.locateArtifact ?? locateManagedRuntimeArtifact;
   const channel = effectiveRuntimeChannel(options.channel);
-  const artifactDirectory = await locate({ platform: options.platform, channel });
+  const [current, artifactDirectory] = await Promise.all([
+    Promise.resolve().then(() => options.backend.installer.currentManifest()).catch(() => undefined),
+    locate({ platform: options.platform, channel }),
+  ]);
   if (artifactDirectory === undefined) return current === undefined ? "skipped" : "already-installed";
   const locatedManifest = await readArtifactManifest(artifactDirectory);
   if (locatedManifest !== undefined && locatedManifest.channel !== channel) {

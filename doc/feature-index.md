@@ -265,7 +265,7 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 | SSH 账密认证 / 终端 | `apps/desktop/src/remote/{authentication,terminal}.ts`；`apps/desktop/ssh-askpass/`；`scripts/build-ssh-askpass.mjs`；Renderer `terminalSessions.tsx`；验收交接见 `doc/ssh-workspace-test-prompt.md` |
 | 后台评测任务与报告 | `packages/studio-host/src/evaluation-coordinator.ts`、`apps/desktop/src/evaluation-workspace.ts`；Host 共享所有者由 `host-composition.ts` 的 `evaluationOwner` 传入各对话上下文 |
 | Backend 生命周期 | `packages/studio-host/src/host-backend.ts` |
-| 解析 / 启动 Runtime | `runtime-resolver.ts`、`runtime-session-controller.ts`、`runtime-process-port.ts`；Desktop `runtime-session.ts` 的 `runtime.launch.stage` 分别记录校验、Bridge 准备、握手、快照和命令清单耗时；大文件校验使用 1 MiB 流式读取 |
+| 解析 / 启动 Runtime | `runtime-resolver.ts`、`runtime-session-controller.ts`、`runtime-process-port.ts`；Desktop `runtime-session.ts` 的 `runtime.launch.stage` 分别记录校验、Bridge 准备、握手、快照和命令清单耗时；共用 `packages/runtime-installer/src/file-digests.ts`，Electron 的 ≥32 MiB 文件在短生命周期 Worker 中按 1 MiB 读取校验，其他场景保留主线程异步流 |
 | Bridge 客户端 | `bridge-client.ts`、`bridge-auth.ts` |
 | 状态投影 | `state-projector.ts`、`runtime-projection.ts` |
 | 交互转发 | `interaction-adapter.ts`、`interaction-events.ts` |
