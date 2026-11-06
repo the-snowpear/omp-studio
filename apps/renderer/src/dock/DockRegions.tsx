@@ -1,8 +1,9 @@
 import { WindowFrame } from "./WindowFrame";
+import { MinimizedCapsule } from "./MinimizedCapsule";
 import { WindowSnapButton } from "./SnapLayout";
 import { snapCells } from "./snap";
 import { floatTitle, workbenchBounds as readWorkbenchBounds } from "./workbenchGeometry";
-import { useAllWindowed, useConversationDom, useConversationWorkspace } from "../conversationWorkspace/Context";
+import { useAllWindowed, useConversationDom, useConversationView, useConversationWorkspace } from "../conversationWorkspace/Context";
 import {
   Fragment, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore,
   type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEventHandler, type PointerEvent as ReactPointerEvent,
@@ -955,7 +956,7 @@ function DockModalFocus({ panel }: { panel: PanelId }) {
 export function DockFloatingLayer() {
   const scoped = useConversationDom();
   const document = globalThis.document, window = document.defaultView!;
-  const { layout, store, preview, definitions, modalPanel, conversationTitle, scope } = useDock();
+  const { layout, store, preview, definitions, modalPanel, conversationTitle, scope, preferences } = useDock();
   const workspace = useConversationWorkspace();
   const { t } = useI18n();
   const [error, setError] = useState<string | null>(null);
@@ -1011,17 +1012,18 @@ export function DockFloatingLayer() {
     if (isNativeFloat(group) && globalThis.ompStudioChrome?.prepareFloatWindow) return <NativeFloat key={`${preview}:${group.id}`} group={group} namespace={preview ? "preview" : "real"} onError={message => setError(`${t("dockPin.failed")}：${message}`)} />;
     return bounds && !group.minimized ? <FloatWindow key={group.id} group={group} order={order} bounds={bounds} /> : null;
   })}
-    {!!minimizedPins.length && <div className="dock-pinned-capsules" role="group" aria-label={t("dockPin.minimized")}>{minimizedPins.map(group => <button type="button" className="dock-capsule" key={group.id} onClick={() => store.dispatch({ type: "open", panel: group.active })}><Icon name="pin" extra="sm" /><span className="dock-capsule-title">{floatTitle(definitionFor(definitions, group.active).title, conversationTitle)}</span><Icon name="restore" extra="sm" /></button>)}</div>}
+    {!!minimizedPins.length && <div className="dock-pinned-capsules" role="group" aria-label={t("dockPin.minimized")}>{minimizedPins.map(group => <MinimizedCapsule key={group.id} owner={store.windowManager ?? store} capsuleId={`pin:${preview}:${group.id}`} locked={preferences.locked} onClick={() => store.dispatch({ type: "open", panel: group.active })}><Icon name="pin" extra="sm" /><span className="dock-capsule-title">{floatTitle(definitionFor(definitions, group.active).title, conversationTitle)}</span><Icon name="restore" extra="sm" /></MinimizedCapsule>)}</div>}
   </div>, document.body)}<ToastHost message={error} icon="alert" onDismiss={() => setError(null)} /></>;
 }
 
 export function DockCapsules() {
-  const { layout, store, definitions, conversationTitle } = useDock();
+  const { layout, store, definitions, conversationTitle, scope, preview, preferences } = useDock();
   const text = useLabels();
+  const view = useConversationView();
   const root = useRef<HTMLDivElement>(null);
   const space = useConversationSpace(root);
   // In window mode the window tab bar lists minimized tools instead.
-  const minimized = useAllWindowed() ? [] : layout.floats.filter(group => group.minimized && !group.pin && store.windowManager?.get(store.windowId(group.id))?.content.kind !== "conversation");
+  const minimized = useAllWindowed() || (view && !view.visible) ? [] : layout.floats.filter(group => group.minimized && !group.pin && store.windowManager?.get(store.windowId(group.id))?.content.kind !== "conversation");
   const capacity = Math.max(1, Math.floor(Math.max(0, space.width - 64) / 184)) * 2;
   const overflow = minimized.length > capacity;
   const displayed = overflow ? minimized.slice(0, Math.max(0, capacity - 1)) : minimized;
@@ -1031,11 +1033,11 @@ export function DockCapsules() {
     {displayed.map(group => {
       const definition = definitionFor(definitions, group.active);
       const title = floatTitle(definition.title, conversationTitle);
-      return <button type="button" key={group.id} className="dock-capsule" data-tip={title} onClick={() => restore(group)}
+      return <MinimizedCapsule key={group.id} owner={store.windowManager ?? store} capsuleId={`tool:${scopeKey(scope, preview)}:${group.id}`} locked={preferences.locked} data-tip={title} onClick={() => restore(group)}
         aria-label={text(`还原 ${title}${group.panels.length > 1 ? `（${group.panels.length} 个工具）` : ""}`, `Restore ${title}${group.panels.length > 1 ? ` (${group.panels.length} tools)` : ""}`)}>
         <PanelGlyph definition={definition} /><span className="dock-capsule-title">{title}</span>
         {group.panels.length > 1 && <span className="dock-count">{group.panels.length}</span>}<Icon name="restore" extra="sm" />
-      </button>;
+      </MinimizedCapsule>;
     })}
     {overflow && <AppSelect className="dock-capsule-overflow" value="" placeholder={text(`全部浮窗（${minimized.length}）`, `All windows (${minimized.length})`)}
       aria-label={text("还原最小化浮窗", "Restore minimized window")} onChange={event => {

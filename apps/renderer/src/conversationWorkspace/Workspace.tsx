@@ -9,6 +9,7 @@ import { dockedPanelVisible } from "../dock/conversationPanels";
 import { SurfaceProvider, useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
 import { NativeWindowHost } from "../dock/NativeFloat";
 import { WindowFrame } from "../dock/WindowFrame";
+import { MinimizedCapsule } from "../dock/MinimizedCapsule";
 import { WindowPinButton } from "../dock/DockMenus";
 import { WindowFocusContext, WindowOwnerContext, useWindowOrder } from "../dock/windowOrder";
 import { clampFloat } from "../dock/model";
@@ -102,7 +103,7 @@ export function ConversationWorkspace({ client, renderDocument }: { client: Stud
     </div>
     {createPortal(<div className="dock-floating-layer">{state.views.filter(view => view.placement === "float" || view.placement === "native").map((view, order) => <ConversationWindow key={view.id} view={view} store={store} hosts={hosts} bounds={bounds} order={order} snapLayer={snapLayer} />)}</div>, document.body)}
     <ConversationLayoutPreview store={store} />
-    {!windowed && state.views.some(view => view.minimized && view.placement !== "native") ? <div className="dock-pinned-capsules" role="group" aria-label="最小化的对话">{state.views.filter(view => view.minimized && view.placement !== "native").map(view => <button className="dock-capsule" key={view.id} onClick={() => store.focus(view.id)}><Icon name="message" extra="sm" /><span>{store.documentFor(view.id)?.title}</span><Icon name="restore" extra="sm" /></button>)}</div> : null}
+    {!windowed && state.views.some(view => view.minimized && view.placement !== "native") ? <div className="dock-pinned-capsules" role="group" aria-label="最小化的对话">{state.views.filter(view => view.minimized && view.placement !== "native").map(view => <MinimizedCapsule key={view.id} owner={store} capsuleId={view.id} locked={layoutLocked} onClick={() => store.focus(view.id)}><Icon name="message" extra="sm" /><span className="dock-capsule-title">{store.documentFor(view.id)?.title}</span><Icon name="restore" extra="sm" /></MinimizedCapsule>)}</div> : null}
     {visited.current.real && real.getSnapshot().documents.map(record => <PreviewSurface key={`real:${record.id}`} preview={false}><ConversationDocumentHost enabled={!preview} record={record} client={client} store={real} hosts={real.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
     {visited.current.demo && demo.getSnapshot().documents.map(record => <PreviewSurface key={`demo:${record.id}`} preview><ConversationDocumentHost enabled={preview} record={record} client={client} store={demo} hosts={demo.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
   </WorkspaceContext.Provider></WindowFocusContext.Provider>;
