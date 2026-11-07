@@ -350,6 +350,15 @@ FunctionEnd
     omp_res_done:
   FunctionEnd
 
+  Function ompWriteDone
+    Push $R9
+    FileOpen $R9 "$PLUGINSDIR\done.ini" w
+    FileWriteUTF16LE /BOM $R9 "[Install]$\r$\n"
+    FileClose $R9
+    WriteINIStr "$PLUGINSDIR\done.ini" "Install" "InstDir" "$INSTDIR"
+    Pop $R9
+  FunctionEnd
+
   Function ompHtmlWelcomeShow
     StrCpy $ompHtmlUi "0"
     StrCpy $ompHtmlResolved "0"
@@ -374,6 +383,9 @@ FunctionEnd
       Goto omp_html_fallback
 
     omp_html_write_ini:
+    FileOpen $R9 "$PLUGINSDIR\host.ini" w
+    FileWriteUTF16LE /BOM $R9 "[Setup]$\r$\n"
+    FileClose $R9
     WriteINIStr "$PLUGINSDIR\host.ini" "Setup" "Version" "${VERSION}"
     WriteINIStr "$PLUGINSDIR\host.ini" "Setup" "RuntimeVersion" "${OMP_RUNTIME_VERSION}"
     WriteINIStr "$PLUGINSDIR\host.ini" "Setup" "Arch" "${OMP_TARGET_ARCH}"
@@ -702,5 +714,5 @@ FunctionEnd
       WinShell::SetLnkAUMI "$DESKTOP\OMP Studio.lnk" "${APP_ID}"
     omp_desktop_done:
   ${EndIf}
-  WriteINIStr "$PLUGINSDIR\done.ini" "Install" "InstDir" "$INSTDIR"
+  Call ompWriteDone
 !macroend

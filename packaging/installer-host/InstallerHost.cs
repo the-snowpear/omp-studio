@@ -20,7 +20,10 @@ internal static class UpdateMaintenance
   public static bool IsRunning(string root)
   {
     if (string.IsNullOrEmpty(root)) return false;
-    string prefix = Path.GetFullPath(root).TrimEnd('\\') + "\\";
+    string directory = Path.GetFullPath(root).TrimEnd('\\');
+    StringBuilder longDirectory = new StringBuilder(32768);
+    if (GetLongPathName(directory, longDirectory, longDirectory.Capacity) > 0) directory = longDirectory.ToString();
+    string prefix = directory + "\\";
     foreach (string name in new string[] { "OMP Studio", "omp" })
     foreach (Process process in Process.GetProcessesByName(name))
     {
@@ -47,6 +50,8 @@ internal static class UpdateMaintenance
   static extern IntPtr OpenProcess(uint access, bool inherit, int id);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
   static extern bool QueryFullProcessImageName(IntPtr process, uint flags, StringBuilder path, ref int length);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+  static extern uint GetLongPathName(string path, StringBuilder longPath, int length);
   [DllImport("kernel32.dll")]
   static extern bool CloseHandle(IntPtr handle);
 
@@ -754,8 +759,8 @@ internal static class Ini
 {
   public static string Read(string path, string key, string fallback, string section = "Setup")
   {
-    // Use the same Windows INI API as NSIS: its new INI files use the system
-    // code page, whereas the host writes UTF-16. Both preserve Chinese paths.
+    // NSIS and the host initialize their handshake files as UTF-16 so paths
+    // survive independently of the Windows system code page.
     StringBuilder value = new StringBuilder(32768);
     GetPrivateProfileString(section, key, fallback, value, value.Capacity, path);
     return value.ToString();

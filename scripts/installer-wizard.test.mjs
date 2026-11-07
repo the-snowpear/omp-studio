@@ -62,6 +62,9 @@ Function .onInit
   ReadINIStr $INSTDIR "$EXEDIR\\case.ini" "Case" "Dir"
   StrCpy $ompExistingDir $INSTDIR
   ReadINIStr $ompDirLocked "$EXEDIR\\case.ini" "Case" "Locked"
+  FileOpen $R0 "$PLUGINSDIR\\options.ini" w
+  FileWriteUTF16LE /BOM $R0 "[Install]$\\r$\\n"
+  FileClose $R0
   WriteINIStr "$PLUGINSDIR\\options.ini" "Install" "Dir" "$INSTDIR"
   StrCpy $ompHtmlResolved "1"
   StrCpy $ompHtmlUi "1"
@@ -76,7 +79,7 @@ SectionEnd
 
   // MUI starts copying automatically. Do not click its hidden Next button:
   // the setup must reach the HTML finish callback and exit on its own.
-  for (const [path, locked] of [["D:\\Tools\\Studio Custom", "0"], ["D:\\开发工具\\OMP Studio", "1"]]) {
+  for (const [path, locked] of [["D:\\Tools\\Studio Custom", "0"], ["D:\\开发工具🚀\\OMP Studio", "1"]]) {
     await writeFile(join(directory, "case.ini"), `\ufeff[Case]\r\nDir=${path}\r\nLocked=${locked}\r\n`, "utf16le");
     await writeFile(join(directory, "result.ini"), "\ufeff[Result]\r\n", "utf16le");
     execFileSync(setup, [], { windowsHide: true, timeout: 5_000 });
@@ -108,7 +111,7 @@ static class Host {
   static int Main(string[] args) {
     string root = args[Array.IndexOf(args, "--dir") + 1];
     string result = ${JSON.stringify(join(directory, "host-result.txt"))};
-    string expected = ${JSON.stringify(join(directory, "开发工具", "Studio"))};
+    string expected = ${JSON.stringify(join(directory, "开发工具🚀", "Studio"))};
     string selected = Ini.Read(Path.Combine(root, "host.ini"), "DefaultDir", "missing");
     if (selected != expected) { File.WriteAllText(result, "Bad INI path: " + selected); return 1; }
     File.WriteAllText(Path.Combine(root, "host-ready.txt"), "[Host]\\r\\nPid=" + Process.GetCurrentProcess().Id + "\\r\\n", Encoding.Unicode);
@@ -161,13 +164,13 @@ RequestExecutionLevel user
 !insertmacro customHeader
 Function .onInit
   InitPluginsDir
-  StrCpy $INSTDIR "${join(directory, "开发工具", "Studio")}"
+  StrCpy $INSTDIR "${join(directory, "开发工具🚀", "Studio")}"
   StrCpy $ompExistingVersion ""
   StrCpy $ompExistingDir ""
   StrCpy $ompDirLocked "0"
 FunctionEnd
 Section
-  WriteINIStr "$PLUGINSDIR\\done.ini" "Install" "InstDir" "$INSTDIR"
+  Call ompWriteDone
 SectionEnd
 `, "utf16le");
   execFileSync(compiler.path, ["/V2", script], { env: { ...process.env, ...compiler.env }, windowsHide: true, timeout: 30_000 });
@@ -176,7 +179,7 @@ SectionEnd
   // An actual section Abort must also release the hidden engine. NSIS's
   // .onInstFailed alone runs only after closing its otherwise hidden page.
   await rm(join(directory, "host-result.txt"));
-  const failed = (await readFile(script, "utf16le")).replace('  WriteINIStr "$PLUGINSDIR\\done.ini" "Install" "InstDir" "$INSTDIR"', '  Abort "copy failed"');
+  const failed = (await readFile(script, "utf16le")).replace('  Call ompWriteDone', '  Abort "copy failed"');
   await writeFile(script, failed, "utf16le");
   execFileSync(compiler.path, ["/V2", script], { env: { ...process.env, ...compiler.env }, windowsHide: true, timeout: 30_000 });
   assert.throws(() => execFileSync(setup, [], { windowsHide: true, timeout: 10_000 }), error => error.status === 2);

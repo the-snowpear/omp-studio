@@ -46,6 +46,8 @@ Windows 安装器使用 WebView2 显示 720 × 480 的四步向导，NSIS 负责
 
 每次图形安装使用当前账户下独立的临时 UI 与 WebView2 缓存，退出时清理；不再向所有 Users 授予共享缓存的写权限。握手文件只属于该次 NSIS 实例，进程等待使用该宿主的句柄。
 
+NSIS 与宿主之间传递目录的 INI 文件使用带 BOM 的 UTF-16，中文和 emoji 路径不依赖 Windows 系统代码页。运行中应用检查会展开 8.3 短目录名，使临时目录或手输路径与进程映像中的长路径一致。
+
 ## Windows 构建与验证
 
 ```bash
@@ -77,7 +79,7 @@ npm run pack:mac                  # 已有签名 Runtime 工件时：npm run pac
 npm run pack:mac:audit            # 单独重跑审计
 ```
 
-前置同 `omp:build:host`（Xcode Command Line Tools、Rust、Bun ≥ 1.4.2、原生 arm64 Node），另用到系统自带的 `sips`、`iconutil`、`ditto`、`hdiutil`、`codesign`。产物在 `outputs/installer-mac/`（gitignore）：
+前置同 `omp:build:host`（Xcode Command Line Tools、Rust、Bun ≥ 1.4.4、原生 arm64 Node），另用到系统自带的 `sips`、`iconutil`、`ditto`、`hdiutil`、`codesign`。产物在 `outputs/installer-mac/`（gitignore）：
 
 - `mac-arm64/OMP Studio.app`：ad hoc 签名的 bundle，审计对象。
 - `OMP-Studio-<ver>-macos-arm64.dmg`：首装用，拖进「应用程序」。
