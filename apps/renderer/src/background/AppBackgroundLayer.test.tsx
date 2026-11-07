@@ -197,7 +197,7 @@ describe("AppBackgroundLayer", () => {
     paused = false;
     Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
     document.dispatchEvent(new Event("visibilitychange"));
-    expect(paused).toBe(true);
+    await waitFor(() => expect(paused).toBe(true));
 
     delete (document as unknown as Record<string, unknown>).hidden;
     view.unmount();
