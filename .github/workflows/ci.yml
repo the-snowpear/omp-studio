@@ -49,11 +49,9 @@ jobs:
       - run: npm run check -- --production
       - run: npm run test:built
         if: inputs.scope == 'full'
-      - name: Packaging and update tooling tests
-        if: inputs.scope == 'full'
-        run: node --test scripts/*.test.mjs
 
-      # Native builds and the full Runtime suite are explicitly requested work.
+      # Catalog reproducibility reads the Runtime registry through Bun, including
+      # its native path helpers, so prepare the full Runtime before tooling.
       - uses: oven-sh/setup-bun@v2
         if: inputs.scope == 'full'
         with:
@@ -71,6 +69,11 @@ jobs:
         if: inputs.scope == 'full'
       - run: npm run omp:build:natives
         if: inputs.scope == 'full'
+      - name: Packaging and update tooling tests
+        if: inputs.scope == 'full'
+        run: node --test scripts/*.test.mjs
+
+      # The full Runtime suite is explicitly requested work.
       - run: npm run omp:verify:patches
         if: inputs.scope == 'full'
 

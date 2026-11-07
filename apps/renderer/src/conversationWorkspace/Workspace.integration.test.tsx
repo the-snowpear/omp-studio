@@ -11,6 +11,9 @@ import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
 import { PREVIEW_PROJECTS } from "../preview/fixtures";
 import { WORKSPACE_STORAGE_KEY } from "./store";
 
+// These full workbench flows include animated moves and mounted preview panels.
+vi.setConfig({ testTimeout: 15_000 });
+
 afterEach(() => { cleanup(); localStorage.clear(); window.history.replaceState(null, "", "/"); __resetAppSettingsForTests(null); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 function client(options: { delayContext?: Promise<void>; bootstrap?: () => void; openContext?: () => void } = {}) {
   const workspaceId = contractFixtures.bootstrap.residents!.residents[0]!.workspaceId;
@@ -777,5 +780,5 @@ describe("conversation windows", () => {
     fireEvent.click(within(screen.getByRole("menu", { name: "New tab" })).getByRole("menuitem", { name: "New conversation" }));
     await waitFor(() => expect(windows()).toHaveLength(3));
     expect(windowTabs()).toHaveLength(3);
-  }, 15_000);
+  });
 });
