@@ -16,8 +16,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const MAX_UNIX_SOCKET_PATH_BYTES = 103;
-/** Longest name this module generates (`b-<16 hex>.sock`), with headroom. */
-const SOCKET_NAME_BUDGET = 32;
+/** Longest shared name: `authority-remote-<24 hex>.sock` (46 bytes). */
+const SOCKET_NAME_BUDGET = 46;
 
 function scopeHash(scopeKey: string): string {
   return createHash("sha256").update(scopeKey).digest("hex").slice(0, 10);

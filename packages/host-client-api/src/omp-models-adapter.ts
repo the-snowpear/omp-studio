@@ -87,6 +87,7 @@ const WEB_SEARCH_PROVIDER_CATALOG: ReadonlyArray<{
   { id: "tavily", name: "Tavily", description: "Requires TAVILY_API_KEY", credentialFree: false },
   { id: "firecrawl", name: "Firecrawl", description: "Uses Firecrawl API when FIRECRAWL_API_KEY is set; falls back to keyless mode", credentialFree: false },
   { id: "brave", name: "Brave", description: "Requires BRAVE_API_KEY", credentialFree: false },
+  { id: "deepseek", name: "DeepSeek", description: "DeepSeek Search API using DEEPSEEK_API_KEY or a stored DeepSeek key", credentialFree: false },
   { id: "kimi", name: "Kimi", description: "Kimi Code search (requires a Kimi Code Console key via KIMI_SEARCH_API_KEY/MOONSHOT_SEARCH_API_KEY or /login kimi-code; not MOONSHOT_API_KEY)", credentialFree: false },
   { id: "synthetic", name: "Synthetic", description: "Requires SYNTHETIC_API_KEY", credentialFree: false },
   { id: "ollama", name: "Ollama Cloud", description: "Hosted web search using OLLAMA_CLOUD_API_KEY or Ollama Cloud credentials", credentialFree: false },
@@ -114,6 +115,7 @@ const WEB_SEARCH_ENV_CREDENTIALS: Readonly<Record<string, readonly string[]>> = 
   tavily: ["TAVILY_API_KEY"],
   firecrawl: ["FIRECRAWL_API_KEY"],
   brave: ["BRAVE_API_KEY"],
+  deepseek: ["DEEPSEEK_API_KEY"],
   kimi: ["MOONSHOT_SEARCH_API_KEY", "KIMI_SEARCH_API_KEY"],
   parallel: ["PARALLEL_API_KEY"],
   ollama: ["OLLAMA_CLOUD_API_KEY"],
@@ -140,6 +142,7 @@ const WEB_SEARCH_AUTH_IDS: Readonly<Record<string, readonly string[]>> = {
   tavily: ["tavily"],
   firecrawl: ["firecrawl"],
   brave: ["brave"],
+  deepseek: ["deepseek"],
   perplexity: ["perplexity"],
 };
 
@@ -163,6 +166,7 @@ const WEB_SEARCH_APIKEY_IDS: Readonly<Record<string, string>> = {
   tavily: "tavily",
   firecrawl: "firecrawl",
   brave: "brave",
+  deepseek: "deepseek",
   kimi: "kimi-code",
   parallel: "parallel",
   ollama: "ollama-cloud",

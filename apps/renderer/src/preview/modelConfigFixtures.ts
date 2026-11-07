@@ -232,7 +232,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     }),
   );
 
-  availableModels.push(...["parallel", "perplexity", "exa", "keenable"].map(id => ({ provider: "web", id, selector: "web/" + id, name: id, reasoning: false, kind: "search" as const })),
+  availableModels.push(...["parallel", "perplexity", "exa", "keenable", "deepseek"].map(id => ({ provider: "web", id, selector: "web/" + id, name: id, reasoning: false, kind: "search" as const })),
     { provider: "local", id: "title-model", selector: "local/title-model", name: "Local title model", reasoning: false, kind: "tiny" },
     { provider: "local", id: "rule-judge", selector: "local/rule-judge", name: "Local judge", reasoning: false, kind: "judge" });
 
@@ -288,6 +288,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
         { id: "tavily", name: "Tavily", description: "Requires TAVILY_API_KEY", credentialFree: false, hasCredential: false, envKeys: ["TAVILY_API_KEY"], loginId: "tavily", apiKeyId: "tavily" },
         { id: "firecrawl", name: "Firecrawl", description: "Uses Firecrawl API when FIRECRAWL_API_KEY is set; falls back to keyless mode", credentialFree: false, hasCredential: false },
         { id: "brave", name: "Brave", description: "Requires BRAVE_API_KEY", credentialFree: false, hasCredential: false, envKeys: ["BRAVE_API_KEY"], apiKeyId: "brave" },
+        { id: "deepseek", name: "DeepSeek", description: "DeepSeek Search API using the existing DeepSeek key", credentialFree: false, hasCredential: false, envKeys: ["DEEPSEEK_API_KEY"], apiKeyId: "deepseek" },
         { id: "kimi", name: "Kimi", description: "Kimi Code search (requires a Kimi Code Console key via KIMI_SEARCH_API_KEY/MOONSHOT_SEARCH_API_KEY or /login kimi-code; not MOONSHOT_API_KEY)", credentialFree: false, hasCredential: false, envKeys: ["KIMI_SEARCH_API_KEY", "MOONSHOT_SEARCH_API_KEY"], loginId: "kimi-code", apiKeyId: "kimi-code" },
         { id: "synthetic", name: "Synthetic", description: "Requires SYNTHETIC_API_KEY", credentialFree: false, hasCredential: false },
         { id: "ollama", name: "Ollama Cloud", description: "Hosted web search", credentialFree: false, hasCredential: false, envKeys: ["OLLAMA_CLOUD_API_KEY"], apiKeyId: "ollama-cloud" },

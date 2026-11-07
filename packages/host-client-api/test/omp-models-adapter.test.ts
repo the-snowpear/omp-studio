@@ -1596,6 +1596,19 @@ describe("web search config", () => {
     });
   });
 
+  test("search settings preserve Keenable and DeepSeek with their credential controls", async () => {
+    await withDir(async (_dir, service) => {
+      await service.setWebSearch({ order: ["keenable", "deepseek"] });
+      const ws = (await service.get()).webSearch;
+      assert.equal(ws.routing?.primary, "web/keenable");
+      assert.equal(ws.routing?.fallbacks?.[0], "web/deepseek");
+      const deepseek = ws.providers.find(provider => provider.id === "deepseek");
+      assert.equal(deepseek?.apiKeyId, "deepseek");
+      assert.deepEqual(deepseek?.envKeys, ["DEEPSEEK_API_KEY"]);
+      assert.equal(ws.providers.find(provider => provider.id === "keenable")?.apiKeyId, "keenable");
+    });
+  });
+
   test("setWebSearch clamps timeout to the runtime ceiling", async () => {
     await withDir(async (_dir, service) => {
       await service.setWebSearch({ timeoutSeconds: 9999 });

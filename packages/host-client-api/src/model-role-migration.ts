@@ -29,7 +29,7 @@ export const MODEL_ROLE_PRIORITIES = {
   ]
 };
 /** Pure search engines, including paid engines available for explicit legacy selections. */
-export const REGISTERED_SEARCH_ENGINES = ["perplexity","zai","exa","tinyfish","jina","kagi","tavily","firecrawl","brave","kimi","parallel","synthetic","ollama","searxng","duckduckgo","google","ecosia","startpage","mojeek","public"];
+export const REGISTERED_SEARCH_ENGINES = ["perplexity","zai","exa","tinyfish","keenable","jina","kagi","tavily","firecrawl","brave","deepseek","kimi","parallel","synthetic","ollama","searxng","duckduckgo","google","ecosia","startpage","mojeek","public"];
 function isRegisteredSearchEngine(id: string): boolean { return REGISTERED_SEARCH_ENGINES.includes(id); }
 const MODEL_PRIO = MODEL_ROLE_PRIORITIES;
 export function migrateModelRoleConfig(source: unknown): Record<string, unknown> {
@@ -79,7 +79,7 @@ export function migrateModelRoleConfig(source: unknown): Record<string, unknown>
 					case "anthropic":
 						return ["anthropic/claude-haiku-4-5"];
 					case "codex":
-						return ["openai-codex/gpt-5.6-luna"];
+						return ["openai-codex/gpt-6-luna"];
 					case "xai":
 						return ["xai/grok-4.5"];
 					case "auto":
@@ -200,7 +200,7 @@ export function migrateModelRoleConfig(source: unknown): Record<string, unknown>
 				(typeof legacyUnexpectedStopModel === "string" && legacyUnexpectedStopModel !== "online");
 			if (nonDefaultJudge) {
 				const judgeCandidates: string[] = [];
-				if (legacyJudgmentProvider !== "llm") judgeCandidates.push("typesafe/jev-latest");
+				if (legacyJudgmentProvider !== "llm") judgeCandidates.push("typesafe/jev-1.14.0");
 				if (typeof legacyAutoThinkingModel === "string" && legacyAutoThinkingModel !== "online") {
 					judgeCandidates.push(`local/${legacyAutoThinkingModel}`);
 				}

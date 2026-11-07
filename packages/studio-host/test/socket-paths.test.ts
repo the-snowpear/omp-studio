@@ -105,6 +105,19 @@ test("an over-long temp root falls back to a per-user directory under /tmp", pos
   }
 });
 
+test("the shared socket directory reserves room for a remote Host owner proof", posixOnly, async () => {
+  const tmpRoot = await mkdtemp(join("/tmp", "r".repeat(32)));
+  const directory = await ensurePrivateSocketDirectory(`remote-owner:${tmpRoot}`, { tmpRoot });
+  try {
+    const endpoint = privateSocketPath(directory, `authority-remote-${"a".repeat(24)}.sock`);
+    assert.ok(socketPathFits(endpoint));
+    assert.match(directory, new RegExp(`^/tmp/omp-${process.getuid!()}-[a-f0-9]{10}$`, "u"));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+    await rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("sweep removes sockets left by a killed listener and keeps live ones", posixOnly, async () => {
   const directory = await ensurePrivateSocketDirectory("sweep", { tmpRoot: await shortRoot() });
   const live = privateSocketPath(directory, randomSocketName("b"));

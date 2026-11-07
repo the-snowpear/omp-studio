@@ -57,3 +57,19 @@ test("Gemini legacy selection preserves all native credential routes and GA imag
   assert.equal((root.modelRoles as Record<string, string>).image, "openai/gpt-image-2");
   assert.equal((root.retry as { fallbackChains: Record<string, string[]> }).fallbackChains.image![0], "google/gemini-3-pro-image");
 });
+
+test("explicit Keenable and DeepSeek search choices survive legacy migration and exclusions", () => {
+  const providers = { webSearchOrder: ["keenable", "deepseek"] };
+  const routing = readWebRouting({ providers });
+  assert.equal(routing.primary, "web/keenable");
+  assert.equal(routing.fallbacks?.[0], "web/deepseek");
+  const excluded = readWebRouting({ providers: { ...providers, webSearchExclude: ["keenable"] } });
+  assert.equal(excluded.primary, "web/deepseek");
+  assert.ok(!excluded.fallbacks?.includes("web/keenable"));
+});
+
+test("legacy Codex search and native Judge selection use the pinned Runtime's model IDs", () => {
+  assert.equal(readWebRouting({ providers: { webSearch: "codex" } }).primary, "openai-codex/gpt-6-luna");
+  const root = migrateModelRoleConfig({ providers: { judgmentProvider: "typesafe" } });
+  assert.equal((root.modelRoles as Record<string, string>).judge, "typesafe/jev-1.14.0");
+});

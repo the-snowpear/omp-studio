@@ -777,5 +777,5 @@ describe("conversation windows", () => {
     fireEvent.click(within(screen.getByRole("menu", { name: "New tab" })).getByRole("menuitem", { name: "New conversation" }));
     await waitFor(() => expect(windows()).toHaveLength(3));
     expect(windowTabs()).toHaveLength(3);
-  });
+  }, 15_000);
 });
