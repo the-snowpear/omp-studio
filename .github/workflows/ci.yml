@@ -65,8 +65,6 @@ jobs:
           cache-on-failure: "true"
       - run: npm run omp:install-deps
         if: inputs.scope == 'full'
-      - run: node scripts/unapply-release-overlay.mjs
-        if: inputs.scope == 'full'
       - run: npm run omp:build:natives
         if: inputs.scope == 'full'
       - name: Packaging and update tooling tests
@@ -74,6 +72,8 @@ jobs:
         run: node --test scripts/*.test.mjs
 
       # The full Runtime suite is explicitly requested work.
+      - run: node scripts/unapply-release-overlay.mjs
+        if: inputs.scope == 'full'
       - run: npm run omp:verify:patches
         if: inputs.scope == 'full'
 
