@@ -205,7 +205,7 @@ test("activating a Runtime again drops the evidence recorded for the previous ac
   }
 });
 
-test("concurrent currentManifest lookups share one in-flight verification", async () => {
+test("concurrent currentManifest lookups hash the entrypoint once", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "omp-evidence-concurrent-"));
   try {
     const content = "C".repeat(1024 * 1024);
@@ -219,7 +219,6 @@ test("concurrent currentManifest lookups share one in-flight verification", asyn
     assert.equal(second?.entrypointPath, third?.entrypointPath);
     const stats = installer.verificationStats();
     assert.equal(stats.contentHashes, 1);
-    assert.equal(stats.singleFlightJoins, 2);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

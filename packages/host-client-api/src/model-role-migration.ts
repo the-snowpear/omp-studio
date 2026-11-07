@@ -1,4 +1,4 @@
-/** OMP v18.8.0 native kind-role migration; Host reads without writing user configuration. */
+/** Native kind-role migration with the pinned Runtime's defaults; Host reads without writing user configuration. */
 function isRecord(value: unknown): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value); }
 export const MODEL_ROLE_PRIORITIES = {
   "web": [
@@ -22,7 +22,10 @@ export const MODEL_ROLE_PRIORITIES = {
     "xai-oauth/grok-imagine-image",
     "openrouter/google/gemini-3-pro-image",
     "google/gemini-3-pro-image",
-    "deepinfra/black-forest-labs/FLUX-2-pro"
+    "deepinfra/black-forest-labs/FLUX-2-pro",
+    "factory-droid/gpt-image-2.5-sunburst",
+    "factory-droid/gpt-image-2.5-flare",
+    "factory-droid/gemini-3-pro-image-preview"
   ]
 };
 /** Pure search engines, including paid engines available for explicit legacy selections. */

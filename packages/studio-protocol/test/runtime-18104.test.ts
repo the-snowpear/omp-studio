@@ -24,9 +24,9 @@ test("imports preserve local sessions and cannot claim a replaced result", () =>
   assert.throws(() => validateWorkbenchOperation({ kind: "worktrees.session.remove.apply", sessionId: "session", token: "directory-path" }));
 });
 
-test("next-message predictions carry only editor state on input and keep the longer reply bounded", () => {
+test("next-message predictions accept draft alignment and keep the longer reply bounded", () => {
   validatePredictionInput({ kind: "next", revision: 1, empty: true });
-  assert.throws(() => validatePredictionInput({ kind: "next", revision: 1, empty: true, text: "private draft" }));
+  validatePredictionInput({ kind: "next", revision: 1, empty: false, text: "draft prefix" });
   validatePredictionEvent({ kind: "next", channelId: "00000000-0000-4000-8000-000000000001", revision: 1, suffix: "x".repeat(500) });
   assert.throws(() => validatePredictionEvent({ kind: "next", channelId: "00000000-0000-4000-8000-000000000001", revision: 1, suffix: "x".repeat(501) }));
 });
