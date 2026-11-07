@@ -21,5 +21,5 @@ it("shared Web does not claim microphone capability from Runtime availability", 
   const client = { command: vi.fn() } as unknown as StudioClient;
   render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled={false}><LiveAudioPane client={client} available sessionId="s" /></PreviewModeProvider></I18nProvider>);
   expect(screen.getByRole("button", { name: "准备开始 Live" }).hasAttribute("disabled")).toBe(true);
-  expect(screen.getByText(/Web 客户端暂不可用/)).toBeTruthy(); expect(client.command).not.toHaveBeenCalled();
+  expect(screen.getByText(/桌面音频通道或安全来源中的 WebRTC/)).toBeTruthy(); expect(client.command).not.toHaveBeenCalled();
 });

@@ -37,7 +37,7 @@ function setup(mode: "expanded" | "compact", data: SessionTelemetrySnapshot | un
   const store = new DockStore(null);
   store.dispatch({ type: "railMode", mode });
   store.dispatch({ type: "card", panel: "context", collapsed: true });
-  const query = vi.fn().mockResolvedValue({ sessionId: archivedId, source: "persisted", semantics: "last-observed", telemetry: { ...telemetry(25), sessionId: archivedId } });
+  const query = vi.fn().mockImplementation((kind: string) => Promise.resolve(kind === "session.cache.get" ? { cache: null } : { sessionId: archivedId, source: "persisted", semantics: "last-observed", telemetry: { ...telemetry(25), sessionId: archivedId } }));
   const draw = (next: SessionTelemetrySnapshot | undefined) => <DockProvider definitions={WORKBENCH_PANELS} store={store}><Surface data={next} query={query} viewedSessionId={archived ? archivedId : liveId} /></DockProvider>;
   const rendered = render(draw(data));
   flush(); flush();
@@ -80,7 +80,8 @@ describe("rail title menus and context presentation", () => {
     expect(document.querySelector('.dock-meter-ring-value[data-category="messagesTokens"]')?.getAttribute("stroke-dasharray")).toBe("93 100");
     fireEvent.click(document.querySelector('[data-dock-rail-icon="context"]')!); flush(); flush();
     expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("95");
-    expect(query).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledWith("session.cache.get", { sessionId: liveId });
+    expect(query).toHaveBeenCalledOnce();
   });
 
   it("reads historical usage for a folded header once and shares it with the compact icon", async () => {

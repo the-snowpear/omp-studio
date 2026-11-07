@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MarkdownText } from "../conversation/markdown";
 import type { HighlightResult } from "./pool";
@@ -24,6 +24,7 @@ it("keeps the frame, exact copy text and scroll position as colors arrive", asyn
   const writeText = vi.fn(async () => {});
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
   const { container } = render(<MarkdownText text={'```ts\nconst a = 1;\n```'} />);
+  await waitFor(() => expect(mock.request).toHaveBeenCalledOnce());
   const frame = container.querySelector(".md-code");
   const pre = container.querySelector("pre")!;
   expect(pre.textContent).toBe("const a = 1;\n");
@@ -36,11 +37,12 @@ it("keeps the frame, exact copy text and scroll position as colors arrive", asyn
   await act(async () => {});
   expect(writeText).toHaveBeenCalledWith("const a = 1;");
 });
-it("ignores stale results after source changes and retries a full queue on a slot signal", () => {
+it("ignores stale results after source changes and retries a full queue on a slot signal", async () => {
   let slot!: () => void;
   mock.onSlot.mockImplementation((callback) => { slot = callback; return () => {}; });
   mock.request.mockReturnValueOnce({ status: "full", cancel: () => {} });
   const view = render(<MarkdownText text={'```ts\nfirst\n```'} />);
+  await waitFor(() => expect(mock.request).toHaveBeenCalledOnce());
   act(() => slot());
   const stale = complete;
   expect(mock.request).toHaveBeenCalledTimes(2);
@@ -48,8 +50,9 @@ it("ignores stale results after source changes and retries a full queue on a slo
   act(() => stale({ ok: true, tokens: [{ type: "text", value: "first\n" }] }));
   expect(view.container.querySelector("pre")?.textContent).toBe("second\n");
 });
-it("preserves the enclosing Markdown block eligibility and renders timeout results as plain text", () => {
+it("preserves the enclosing Markdown block eligibility and renders timeout results as plain text", async () => {
   const view = render(<MarkdownText text={'```ts\nplain\n```'} />);
+  await waitFor(() => expect(mock.request).toHaveBeenCalledOnce());
   act(() => complete({ ok: false, reason: "timeout" }));
   expect(view.container.querySelector("pre")?.textContent).toBe("plain\n");
   mock.request.mockClear();

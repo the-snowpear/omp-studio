@@ -296,6 +296,7 @@ export function RuntimeQueueBar({
                       aria-label={zh ? "提升为纠偏" : "Promote to steering"}
                       disabled={
                         busy ||
+                        entry.kind === "compaction" ||
                         entry.state !== "queued" ||
                         entry.queue !== "followUp" ||
                         !can("session.queue.promote")

@@ -47,7 +47,7 @@ describe("ContextCard", () => {
 
 describe("ContextDockCard data sources", () => {
   it("shows OMP's live context and updates from subsequent telemetry without fixture fallback", () => {
-    const query = vi.fn();
+    const query = vi.fn().mockResolvedValue({ cache: null });
     const props = { client: { query } as unknown as StudioClient, visible: true, viewedSessionId: liveId, liveSessionId: liveId, liveTelemetry, onOpenDetails: () => {} };
     const { rerender } = render(<ContextDockCard {...props} />);
     expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("1.875");
@@ -56,7 +56,8 @@ describe("ContextDockCard data sources", () => {
     rerender(<ContextDockCard {...props} liveTelemetry={{ ...liveTelemetry, context: { ...liveTelemetry.context!, usedTokens: 4800, messagesTokens: 3800, percent: 3.75 } }} />);
     expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("3.75");
     expect(screen.getByText("4.8k")).toBeTruthy();
-    expect(query).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledWith("session.cache.get", { sessionId: liveId });
+    expect(query).toHaveBeenCalledOnce();
   });
 
   it("reads the viewed historical session and restores live usage on return", async () => {

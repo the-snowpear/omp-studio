@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
@@ -30,12 +31,13 @@ it("edits submitted preview entries locally and prevents changing in-flight inpu
       </PreviewModeProvider>
     </I18nProvider>,
   );
-  fireEvent.click(await screen.findByRole("button", { name: /已提交 ×2/ }));
- const buttons = await screen.findAllByRole("button", {
-    name: "编辑已提交消息",
-  });
-  expect((buttons[1] as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(buttons[0]!);
+  fireEvent.click(await screen.findByRole("button", { name: /已提交 ×4/ }));
+  const row = within(screen.getByText("检查截图中的布局问题").closest(".runtime-queue-row") as HTMLElement);
+  const compaction = within(screen.getByText("压缩上下文 / Compact context").closest(".runtime-queue-row") as HTMLElement);
+  const inFlight = within(screen.getByText("先保留当前改动，补充验收说明").closest(".runtime-queue-row") as HTMLElement);
+  expect((compaction.getByRole("button", { name: "提升为纠偏" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((inFlight.getByRole("button", { name: "编辑已提交消息" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(row.getByRole("button", { name: "编辑已提交消息" }));
   fireEvent.change(screen.getByRole("textbox", { name: "消息内容" }), {
     target: { value: "修改后的截图说明" },
   });
@@ -43,13 +45,13 @@ it("edits submitted preview entries locally and prevents changing in-flight inpu
   await screen.findByText("修改后的截图说明");
   expect(screen.getByText("1 张图片")).toBeTruthy();
   expect(client.command).not.toHaveBeenCalled();
-  fireEvent.click(screen.getAllByRole("button", { name: "提升为纠偏" })[0]!);
+  fireEvent.click(row.getByRole("button", { name: "提升为纠偏" }));
   await waitFor(() =>
     expect(
       (
-        screen.getAllByRole("button", {
+        row.getByRole("button", {
           name: "提升为纠偏",
-        })[0] as HTMLButtonElement
+        }) as HTMLButtonElement
       ).disabled,
     ).toBe(true),
   );
