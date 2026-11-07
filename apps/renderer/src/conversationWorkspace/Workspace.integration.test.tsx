@@ -539,6 +539,7 @@ describe("conversation windows", () => {
     await mount(true);
     drag(document.querySelector("#projectList .thread:not(.active)")!);
     await waitFor(() => expect(document.querySelector('.dock-conversation-window .cw-document #appRoot[aria-busy="false"]')).not.toBeNull());
+    await landed();
     const floating = document.querySelector<HTMLElement>("[data-conversation-view].dock-conversation-window")!;
     const body = floating.querySelector<HTMLElement>(".cw-document")!;
     const editor = body.querySelector<HTMLElement>("[contenteditable=true]")!;
