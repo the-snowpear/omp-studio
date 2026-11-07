@@ -1,6 +1,6 @@
 # OMP 18.18.0：Runtime 与 Studio 适配
 
-本次从 **OMP 18.13.2-studio.44 / Studio 0.1.17** 升级到上游 **v18.18.0**，固定提交为 `b5a6b2f7e5b6606b6562e678ead83f21738f34a0`。Runtime 的 Studio 修订号以 [`series.json`](../../omp-patch/patches/series.json) 为准，由 `omp:patches:regen` 生成。Studio 产品版本和发布流程没有自动推进。
+本次从 **OMP 18.13.2-studio.44 / Studio 0.1.17** 升级到 **OMP 18.18.0-studio.46**，上游固定为 **v18.18.0**、提交 `b5a6b2f7e5b6606b6562e678ead83f21738f34a0`。Runtime 的 Studio 修订号由 `omp:patches:regen` 生成，记录于 [`series.json`](../../omp-patch/patches/series.json)。Studio 产品版本和发布流程没有自动推进。
 
 两个上游标签之间有 8 次发布、2,189 个提交、4,118 个文件变化。完整列表见 [v18.13.2…v18.18.0](https://github.com/can1357/oh-my-pi/compare/v18.13.2...v18.18.0)。下表按首次引入的版本归类；18.18.0 日志重复列出的部分 18.17.0 功能只计一次。包级细节以目标提交的 [coding-agent](https://github.com/can1357/oh-my-pi/blob/v18.18.0/packages/coding-agent/CHANGELOG.md)、[catalog](https://github.com/can1357/oh-my-pi/blob/v18.18.0/packages/catalog/CHANGELOG.md)、[ai](https://github.com/can1357/oh-my-pi/blob/v18.18.0/packages/ai/CHANGELOG.md) 和 [natives](https://github.com/can1357/oh-my-pi/blob/v18.18.0/packages/natives/CHANGELOG.md) 日志为依据。
 
@@ -61,11 +61,11 @@ TUI 主题、彩色 Markdown、快捷键、motion/spinner/maxFps、scrollback �
 
 ## 验证记录
 
-本节在最终验收后补齐实际结果；源码与产物检查不代替真实账号和设备验收。
+源码、模拟服务与产物检查不代替真实账号和设备验收。
 
 | 检查 | 当前结果 |
 | --- | --- |
-| Runtime 类型与格式 | 全 workspace 通过，coding-agent 检查 5,107 个文件；后续测试调整由干净重放复核。 |
+| Runtime 类型与格式 | 全 workspace 通过；干净重放中 coding-agent 检查 5,108 个文件。 |
 | 9 个并发 Agent | 实际 worker 路径通过：对话、Bash 审批、Ask、暂停/恢复、子会话重命名、BTW、job owner、费用上限、取消和退出清理。 |
 | 压缩 / BTW / out | 针对性回归通过，覆盖图片伴随消息、切换后恢复、注入并发/失败/接纳、中文与 emoji raw delta、持久 ID 和历史重开。 |
 | 模型 / 任务文件 | 原生 exact-model 7 项、task-file-approval 18 项通过；授权撤回、effort 上限及文件/链接替换保留原生行为。 |
@@ -74,6 +74,13 @@ TUI 主题、彩色 Markdown、快捷键、motion/spinner/maxFps、scrollback �
 | Eval | 原生 completion 58 项、kernel-restart 3 项通过；GUI JSON 分支展开和重启提示回归通过。 |
 | 预测 | 一次请求最多四条、Advisor 后定位、编辑/重连不重复请求，以及 Tab/Right/菜单只填草稿的回归通过。 |
 | WebRTC | 本机 Edge 的真实 peer 与测试信令端完成连接、静音、取消、切换和断连，使用合成音频。Chrome 156 在本机未产生 ICE 候选，已确认超时清理。 |
-| 生产检查 / 完整重放 / Windows 产物 / 原生 CI | 集成验收中；最终结果在交付前补充。 |
+| 生产检查 | `npm run check -- --production` 通过：架构、选择器、全量编译、核心包与 Renderer 回归、Vite 生产包及远端 Host bundle。 |
+| 打包工具 | `npm run test:tooling` 的 111 项通过；能力清单顺序修正后，artifact 专项 19 项再次通过。 |
+| 完整补丁重放 | 独立干净 checkout 的 121 个 suite、968 项测试通过，0 失败、5 项按平台/原生 UI 条件跳过；CLI smoke 通过，checkout 已恢复干净。 |
+| Windows 产物 | Bun 1.4.4 / Rust nightly-2026-10-06 构建通过；`--version`、`--smoke-test`、认证握手、快照、命令清单及优雅退出通过；307 个能力的声明顺序与二进制哈希一致；生成本地 canary 验收签名、manifest 和 checksums。 |
+| 隔离提交 | 升级提交独立检出后，架构、选择器与全量编译通过；未包含另一工作流的文件查看器修改。 |
+| 原生 CI | 双平台 full CI 与六平台远端产物验证待工作流完成后记录。 |
+
+Windows 重放中跳过的项目为两项需要原生浏览器观察 UI 的检查、物理桌面截图、Unix 短 socket 目录回退和 Host 被杀后的 watcher 退出。WebMCP 的独立原生浏览器 suite 已单独通过；其覆盖不能替代上述原生窗口观察检查。
 
 未以真实账户测试 Mistral/Devin/Modular 登录、付费模型、Hindsight 服务投递、Codex Live 云端或物理麦克风。Web/SSH 媒体仍需安全来源、权限及目标环境网络可达；实际远端账号与物理音频单列为覆盖限制。没有自动触发产品 Release 或替换用户已安装的 Runtime。
