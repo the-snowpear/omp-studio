@@ -1,3 +1,5 @@
+import { usePreviewMode } from "../preview/PreviewContext";
+import { PREVIEW_DICTATION_PREPARATION } from "../preview/dictationPreview";
 import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -30,7 +32,7 @@ export interface DictationControlProps {
 }
 const LABELS: Record<DictationViewPhase, [string, string]> = {
   off: ["语音输入", "Voice input"], inspecting: ["正在检查听写…", "Checking dictation…"], review: ["准备语音输入", "Set up voice input"],
-  preparing: ["正在准备识别模型…", "Preparing the speech model…"], opening: ["正在打开麦克风…", "Opening the microphone…"],
+  preparing: ["正在准备语音组件与模型…", "Preparing speech components and model…"], opening: ["正在打开麦克风…", "Opening the microphone…"],
   recording: ["正在聆听", "Listening"], transcribing: ["正在完成转写…", "Finishing transcription…"],
   retained: ["有一段听写待处理", "A recording needs your attention"], complete: ["听写完成", "Dictation complete"], error: ["听写未能开始", "Could not start dictation"],
 };
@@ -50,6 +52,8 @@ export function DictationControl({ client, sessionId, draftId, label = "Composer
     available, visible, remote: !!target.id, zh, deviceId: settings.dictationDeviceId,
     editor: () => composerRef.current, ...(ensureSession ? { ensureSession } : {}), ...(onSubmit ? { onSubmit } : {}),
   });
+  const { preview, marks } = usePreviewMode();
+  const preparation = preview && view.phase === "preparing" ? PREVIEW_DICTATION_PREPARATION : view.capture?.progress;
   const [menu, setMenu] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -153,7 +157,7 @@ export function DictationControl({ client, sessionId, draftId, label = "Composer
       <header className="dictation-head"><span className={`dictation-status-mark ${view.phase}`}><Icon name={recovery || view.phase === "error" ? "alert-c" : "mic"} extra="sm" /></span><strong role="status">{phaseLabel}</strong>{view.phase === "recording" ? <time>{clock(elapsed)}</time> : null}<span className="spacer" />{!active ? <button type="button" className="icon-btn small" aria-label={t("收起听写面板", "Close dictation panel")} onClick={() => { setMenu(false); session.dismiss(); setPanelDismissed(true); }}><Icon name="x" extra="sm" /></button> : null}</header>
       {active ? <>
         {view.phase === "recording" ? <><div className="dictation-meter-row"><meter className="dictation-level" min={0} max={1} value={view.level} aria-label={t("录音输入电平", "Recording input level")} /><span className="tiny muted">{view.level < .015 && elapsed > 2500 ? t("没有检测到明显声音", "No clear sound detected") : t("麦克风已打开", "Microphone is on")}</span></div><p className="tiny muted">{modeHint}</p></> : <p className="small muted">{view.phase === "opening" ? t("如出现系统权限提示，请允许麦克风。准备完成前不会显示正在录音。", "Allow microphone access if your system asks. Listening starts only when the input is ready.") : view.capture?.message || (view.phase === "transcribing" ? t("麦克风已关闭，正在处理最后一段。", "The microphone is off. Processing the last phrase.") : t("模型和接收器准备好后才打开麦克风。", "The microphone opens after the model and receiver are ready."))}</p>}
-        {view.capture?.progress ? <div className="dictation-progress"><progress max={100} {...(view.capture.progress.percent === undefined ? {} : { value: view.capture.progress.percent })} aria-label={t("模型准备进度", "Model preparation progress")} /><span>{view.capture.progress.percent === undefined ? t("准备中", "Preparing") : `${view.capture.progress.percent}%`}</span></div> : null}
+        {preparation ? <div className="dictation-progress"><progress max={100} {...(preparation.percent === undefined ? {} : { value: preparation.percent })} aria-label={t("语音准备进度", "Speech preparation progress")} /><span>{preparation.component ? `${preparation.component} · ` : ""}{preview && marks ? "Demo · " : ""}{preparation.percent === undefined ? t("准备中", "Preparing") : `${preparation.percent}%`}</span></div> : null}
         <div className="dictation-actions">{view.phase === "recording" ? <button type="button" className="btn small primary" onClick={() => void session.stop()}>{t("停止并填入草稿", "Stop and fill draft")}</button> : null}<button type="button" className="btn small ghost" onClick={() => void session.cancel()}>{t("取消并丢弃本次", "Cancel and discard")}</button></div>
       </> : recovery && !view.pendingRetry ? <>
         <p className="small">{t("录音已停止，仅保存在本次应用内存中。", "Recording is stopped and retained only in this app's memory.")} {clock(recovery.durationMs)}</p>

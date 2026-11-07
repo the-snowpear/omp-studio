@@ -35,6 +35,8 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
     kind: "bash", name: "Bash", target: "npm run typecheck", status: "done", dur: "11.2s",
     cmd: "npm run typecheck", cwd: demoPath("omp-web"),
     output: [["> tsc --noEmit", "dim"], ["", ""], ["0 errors, 0 warnings", "ok"]], exit: 0,
+    hasExecutionTrace: true,
+    meta: { minimized: { filter: "tsc", inputBytes: 18240, outputBytes: 94, artifactId: "preview-typecheck-output" } },
   },
   {
     kind: "grep", name: "Grep", target: "UPSTREAM in *.md", status: "done", dur: "0.4s",
@@ -84,7 +86,10 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
   {
     kind: "eval", name: "Eval", target: "javascript", status: "done", dur: "0.8s",
     lang: "javascript",
-    cells: [{ code: "const t = getCodeTheme()\nt", stdout: "\"dark\"", status: "ok" }],
+    cells: [{ code: "print(await completion('Check the theme').attempts())", stdout: "{\"attempts\":[{\"model\":\"primary\",\"outcome\":\"failed\"},{\"model\":\"fallback\",\"outcome\":\"succeeded\"}]}", status: "ok",
+      statusEvents: [{ op: "kernel_restart", runtime: "JS", stateLost: true }],
+      views: [{ text: "{\"attempts\":[{\"model\":\"primary\",\"outcome\":\"failed\"},{\"model\":\"fallback\",\"outcome\":\"succeeded\"}]}", view: { kind: "json", value: { attempts: [{ model: "primary", outcome: "failed" }, { model: "fallback", outcome: "succeeded" }] } } }],
+    }],
   },
   {
     kind: "github", name: "GitHub", target: "pr view #812", status: "done", dur: "1.4s",

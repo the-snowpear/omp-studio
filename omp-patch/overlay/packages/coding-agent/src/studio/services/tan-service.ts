@@ -24,7 +24,7 @@ import type { CustomTool } from "../../extensibility/custom-tools/types";
 import type { ToolDefinition } from "../../extensibility/extensions";
 import type { LocalProtocolOptions } from "../../internal-urls";
 import tanContextSwitchPrompt from "../../prompts/system/tan-context-switch.md" with { type: "text" };
-import type { AgentRegistry } from "../../registry/agent-registry";
+import type { AgentRegistryApi } from "../../registry/agent-registry";
 import type { AgentSession } from "../../session/agent-session";
 import type { AuthStorage } from "../../session/auth-storage";
 import type { SessionManager } from "../../session/session-manager";
@@ -165,7 +165,7 @@ export interface StudioTanCreateAgentOptions {
 	parentTaskPrefix: string;
 	parentAgentId: string;
 	/** The registry the created agent must be registered into exactly once. */
-	agentRegistry: AgentRegistry;
+	agentRegistry: AgentRegistryApi;
 	disableExtensionDiscovery: true;
 	localProtocolOptions: LocalProtocolOptions;
 }
@@ -245,7 +245,7 @@ export interface StudioTanPorts {
 	 * same instance the agent creator registers into, typically
 	 * `AgentRegistry.global()`.
 	 */
-	registry: AgentRegistry;
+	registry: AgentRegistryApi;
 	deliver: StudioTanDeliveryPort;
 	cleanup: StudioTanCleanupPorts;
 }

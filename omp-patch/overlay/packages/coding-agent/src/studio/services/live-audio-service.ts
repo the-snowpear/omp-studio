@@ -25,6 +25,7 @@ import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import { inspectDictationConfiguration } from "./dictation-configuration";
 
 interface Controller {
+	readonly sdpAnswer?: string;
 	start(): Promise<void>;
 	stop(): Promise<void>;
 	toggleMute(): void;
@@ -49,6 +50,18 @@ interface Capture {
 	started: boolean;
 	closed: boolean;
 }
+interface WebRtcCapture {
+	kind: "webrtc";
+	id: string;
+	sessionId: string;
+	voice: string;
+	sdpOffer: string;
+	ownerTimer?: NodeJS.Timeout;
+	controller?: Controller;
+	started: boolean;
+	closed: boolean;
+}
+type LiveCaptureTarget = Capture | WebRtcCapture;
 const blank = (available: boolean): LiveAudioState => ({
 	available,
 	attached: false,
@@ -73,6 +86,10 @@ export class StudioLiveAudioService {
 	readonly #available: boolean;
 	readonly #unsubscribe: () => void;
 	#capture: Capture | undefined;
+	#webrtc: WebRtcCapture | undefined;
+	#current(): LiveCaptureTarget | undefined {
+		return this.#webrtc ?? this.#capture;
+	}
 	#dictationKeybindings: KeybindingsManager | undefined;
 	#state: LiveAudioState;
 	#disposed = false;
@@ -87,6 +104,7 @@ export class StudioLiveAudioService {
 			socketDirectory?: string;
 			createController?: (options: LiveSessionControllerOptions) => Controller;
 			prepareTimeoutMs?: number;
+			webRtcOwnerTimeoutMs?: number;
 			dictationFlushTimeoutMs?: number;
 		} = {},
 	) {
@@ -96,13 +114,13 @@ export class StudioLiveAudioService {
 		this.#state = blank(this.#available);
 		this.factory = {
 			create: callbacks => {
-				const capture = this.#capture;
+				const capture = this.#current();
 				if (
 					!capture ||
 					capture.closed ||
 					capture.id !== callbacks.deviceId ||
 					capture.sessionId !== this.session.sessionId ||
-					!capture.socket ||
+					(capture.kind !== "webrtc" && !capture.socket) ||
 					capture.started
 				)
 					throw new StudioLiveError(
@@ -112,39 +130,44 @@ export class StudioLiveAudioService {
 				if (capture.kind === "dictation")
 					throw new StudioLiveError("COMMAND_BLOCKED", "End dictation before starting Live");
 				capture.started = true;
-				if (capture.timer) clearTimeout(capture.timer);
+				if (capture.kind !== "webrtc" && capture.timer) clearTimeout(capture.timer);
 				this.#state.phase = "connecting";
 				const controller = (this.options.createController ?? (options => new LiveSessionController(options)))({
 					session: this.session,
 					voice: capture.voice,
+					sdpOffer: capture.kind === "webrtc" ? capture.sdpOffer : undefined,
 					extractAssistantText: message =>
 						message.content
 							.filter(part => part.type === "text")
 							.map(part => part.text)
 							.join("\n"),
-					createAudioInput: onAudio => {
-						if (capture.closed || !capture.socket) throw new Error("Microphone detached while connecting");
-						capture.onAudio = onAudio;
-						return {
-							stop: () => {
-								capture.onAudio = undefined;
-								this.#closeSocket(capture);
-							},
-						};
-					},
+					createAudioInput:
+						capture.kind === "webrtc"
+							? undefined
+							: onAudio => {
+									if (capture.closed || !capture.socket)
+										throw new Error("Microphone detached while connecting");
+									capture.onAudio = onAudio;
+									return {
+										stop: () => {
+											capture.onAudio = undefined;
+											this.#closeSocket(capture);
+										},
+									};
+								},
 					callbacks: {
 						onPhase: phase => {
-							if (this.#capture !== capture || capture.closed) return;
+							if (this.#current() !== capture || capture.closed) return;
 							this.#state.phase = phase;
 							if (phase === "listening") callbacks.onActive();
 						},
 						onLevels: (input, output) => {
-							if (this.#capture !== capture || capture.closed) return;
+							if (this.#current() !== capture || capture.closed) return;
 							this.#state.inputLevel = input;
 							this.#state.outputLevel = output;
 						},
 						onTranscript: transcript => {
-							if (this.#capture !== capture || capture.closed || !transcript) return;
+							if (this.#current() !== capture || capture.closed || !transcript) return;
 							const item = { ...transcript, text: transcript.text.slice(-2000) };
 							const index = this.#state.transcripts.findIndex(
 								row => row.role === item.role && row.turn === item.turn,
@@ -154,7 +177,7 @@ export class StudioLiveAudioService {
 							this.#state.transcripts = this.#state.transcripts.slice(-40);
 						},
 						onTerminal: error => {
-							if (this.#capture === capture) {
+							if (this.#current() === capture) {
 								this.#state.phase = error ? "error" : "off";
 								if (error)
 									this.#state.error =
@@ -172,9 +195,9 @@ export class StudioLiveAudioService {
 		};
 		this.#unsubscribe =
 			session.registerSessionChangeCallback?.(() => {
-				const capture = this.#capture;
+				const capture = this.#current();
 				if (capture && capture.sessionId !== session.sessionId) {
-					capture.dictation?.input({ kind: "cancel" });
+					if (capture.kind === "dictation") capture.dictation?.input({ kind: "cancel" });
 					void this.#release(capture).catch(() => {});
 				}
 			}) ?? (() => {});
@@ -183,15 +206,82 @@ export class StudioLiveAudioService {
 		this.#control = control;
 	}
 	get running(): boolean {
-		const capture = this.#capture;
+		const capture = this.#current();
 		return (
-			!!capture && (!capture.closed || (capture.kind === "live" && !["off", "error"].includes(this.#state.phase)))
+			!!capture &&
+			(!capture.closed || (capture.kind !== "dictation" && !["off", "error"].includes(this.#state.phase)))
 		);
 	}
 	dispose(): void {
 		this.#disposed = true;
 		this.#unsubscribe();
-		if (this.#capture) void this.#release(this.#capture).catch(() => {});
+		const capture = this.#current();
+		if (capture) void this.#release(capture).catch(() => {});
+	}
+
+	async connectWebRtc(operation: {
+		sessionId: string;
+		audioId: string;
+		sdpOffer: string;
+		voice?: string;
+	}): Promise<{ audioId: string; sdpAnswer: string; state: LiveAudioState }> {
+		const reserve = this.#operations.then(() => {
+			if (this.#disposed || operation.sessionId !== this.session.sessionId)
+				throw new StudioLiveError("COMMAND_BLOCKED", "Live requires the active session");
+			if (!operation.sdpOffer?.trim()) throw new StudioLiveError("INVALID_ARGUMENT", "WebRTC requires an SDP offer");
+			if (this.running)
+				throw new StudioLiveError("COMMAND_BLOCKED", "Stop Live or dictation before starting another call");
+			if (!this.#control) throw new StudioLiveError("CAPABILITY_UNAVAILABLE", "Live controller is unavailable");
+			const capture: WebRtcCapture = {
+				kind: "webrtc",
+				id: operation.audioId,
+				sessionId: operation.sessionId,
+				voice: operation.voice ?? "sol",
+				sdpOffer: operation.sdpOffer,
+				started: false,
+				closed: false,
+			};
+			this.#webrtc = capture;
+			this.#touchWebRtcOwner(capture);
+			this.#state = {
+				...blank(true),
+				audioId: capture.id,
+				voice: capture.voice,
+				attached: true,
+				phase: "connecting",
+			};
+			return capture;
+		});
+		this.#operations = reserve.catch(() => {});
+		const capture = await reserve;
+		try {
+			// Only reservation is serialized: mute/stop can interrupt an in-flight connection.
+			await this.#control!.start(capture.id);
+			if (capture.closed || this.#current() !== capture || capture.sessionId !== this.session.sessionId)
+				throw new StudioLiveError("COMMAND_BLOCKED", "Live connection was cancelled");
+			const sdpAnswer = capture.controller?.sdpAnswer;
+			if (!sdpAnswer)
+				throw new StudioLiveError("CAPABILITY_UNAVAILABLE", "The Live provider did not negotiate WebRTC");
+			return { audioId: capture.id, sdpAnswer, state: structuredClone(this.#state) };
+		} catch (error) {
+			await this.#release(capture);
+			throw error;
+		}
+	}
+
+	webRtcStatus(sessionId: string, audioId?: string): Promise<LiveAudioState> {
+		const capture = this.#webrtc;
+		if (capture && !capture.closed && capture.sessionId === sessionId && capture.id === audioId)
+			this.#touchWebRtcOwner(capture);
+		return this.execute({ kind: "live.audio.status", sessionId });
+	}
+
+	#touchWebRtcOwner(capture: WebRtcCapture): void {
+		if (capture.ownerTimer) clearTimeout(capture.ownerTimer);
+		capture.ownerTimer = setTimeout(() => {
+			void this.#release(capture).catch(() => {});
+		}, this.options.webRtcOwnerTimeoutMs ?? 5000);
+		capture.ownerTimer.unref();
 	}
 
 	async #inspect(): Promise<DictationConfiguration> {
@@ -303,10 +393,10 @@ export class StudioLiveAudioService {
 			if (operation.kind === "live.audio.prepare")
 				await this.#prepare(operation.sessionId, operation.voice ?? "sol");
 			else if (operation.kind !== "live.audio.status") {
-				const capture = this.#capture;
+				const capture = this.#current();
 				if (
 					!capture ||
-					capture.kind !== "live" ||
+					capture.kind === "dictation" ||
 					operation.audioId !== capture.id ||
 					capture.sessionId !== operation.sessionId
 				)
@@ -316,7 +406,7 @@ export class StudioLiveAudioService {
 					if (!this.#control)
 						throw new StudioLiveError("CAPABILITY_UNAVAILABLE", "Live controller is unavailable");
 					void this.#control.start(capture.id).catch(() => {
-						if (this.#capture === capture) {
+						if (this.#current() === capture) {
 							this.#state.phase = "error";
 							this.#state.error = "Live connection failed; check your Codex OAuth account and network.";
 							this.#closeSocket(capture);
@@ -329,7 +419,7 @@ export class StudioLiveAudioService {
 					this.#state.muted = capture.controller.muted;
 				}
 			}
-			const state = this.#capture?.sessionId === operation.sessionId ? this.#state : blank(this.#available);
+			const state = this.#current()?.sessionId === operation.sessionId ? this.#state : blank(this.#available);
 			validateLiveAudioResult(operation.kind, state);
 			return structuredClone(state);
 		});
@@ -374,6 +464,7 @@ export class StudioLiveAudioService {
 			void this.#release(capture).catch(() => {});
 		}, this.options.prepareTimeoutMs ?? 30000);
 		capture.timer.unref?.();
+		this.#webrtc = undefined;
 		this.#capture = capture;
 		this.#state = { ...blank(true), audioId: id, voice, phase: "prepared" };
 		if (configuration) {
@@ -540,7 +631,14 @@ export class StudioLiveAudioService {
 		});
 	}
 
-	#closeSocket(capture: Capture, graceful = false): void {
+	#closeSocket(capture: LiveCaptureTarget, graceful = false): void {
+		if (capture.kind === "webrtc") {
+			if (capture.ownerTimer) clearTimeout(capture.ownerTimer);
+			capture.ownerTimer = undefined;
+			capture.closed = true;
+			if (this.#webrtc === capture) this.#state.attached = false;
+			return;
+		}
 		if (capture.closed) return;
 		capture.closed = true;
 		if (capture.timer) clearTimeout(capture.timer);
@@ -564,10 +662,10 @@ export class StudioLiveAudioService {
 			if (capture.kind === "dictation") this.#state.phase = "off";
 		}
 	}
-	async #release(capture: Capture): Promise<void> {
+	async #release(capture: LiveCaptureTarget): Promise<void> {
 		this.#closeSocket(capture);
 		await capture.controller?.stop();
-		if (this.#capture === capture) {
+		if (this.#current() === capture) {
 			this.#state.phase = "off";
 			this.#state.inputLevel = this.#state.outputLevel = 0;
 			this.#state.muted = false;

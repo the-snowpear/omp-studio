@@ -1,3 +1,4 @@
+import type { RuntimeViewOperation } from "./runtime-views.js";
 import type { SessionOwnerOperation } from "./session-owner";
 import type { ContextViewOperation } from "./context-view";
 import type { WorkbenchOperation } from "./workbench";
@@ -141,6 +142,7 @@ export type TransferOperation = {
 export type StudioOperation =
   | SessionOwnerOperation
   | ContextViewOperation
+  | RuntimeViewOperation
   | PredictionOperation
   | WorkbenchOperation
   | UpgradeOperation

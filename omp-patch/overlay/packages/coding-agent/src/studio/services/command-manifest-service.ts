@@ -31,7 +31,7 @@ export interface StudioOperatorCommandManifest {
 	unclassifiedBuiltins: string[];
 }
 
-const UPSTREAM_COMMIT = "e996e1c7ac476f60e02b8ed9764cf30fa8c00a8e";
+const UPSTREAM_COMMIT = "b5a6b2f7e5b6606b6562e678ead83f21738f34a0";
 const STUDIO_SESSION_TITLE_ENSURE_ID = "studio.session-title.ensure";
 const DESTRUCTIVE = new Set(["delete", "drop", "clear", "fork"]);
 const READ_ONLY = new Set(["help", "version", "stats", "models", "tree", "branch", "goal"]);
@@ -228,7 +228,12 @@ export class StudioCommandManifestService {
 			);
 			return { queued: true, source: command.source };
 		}
-		const started = await this.session.prompt(text);
+		let started: boolean;
+		if (command.source === "file-command") {
+			const source = this.session.slashCommands.find(row => row.name === command.name);
+			if (!source) throw new StudioCommandManifestError("COMMAND_UNKNOWN", "File command is no longer available");
+			started = await this.session.prompt(renderFileSlashCommand(source, argumentText), { runCommands: false });
+		} else started = await this.session.invokeStudioCommand(command.name, argumentText);
 		return { started, consumed: !started, source: command.source };
 	}
 }

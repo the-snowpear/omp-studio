@@ -3,7 +3,7 @@
 import { execFileSync } from "node:child_process";
 import { isRosettaTranslated } from "./target-platform.mjs";
 
-export const MIN_BUN_VERSION = "1.4.2";
+export const MIN_BUN_VERSION = "1.4.4";
 
 export function compareVersions(left, right) {
   const parse = (value) => {

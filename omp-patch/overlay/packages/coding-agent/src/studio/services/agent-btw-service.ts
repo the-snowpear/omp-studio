@@ -1,6 +1,7 @@
+import { isAgentViewSession } from "../../session/agent-session-handle";
 import { randomUUID } from "node:crypto";
 import { AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
-import type { AgentSession } from "../../session/agent-session";
+type StudioChildBtwPort = Omit<StudioBtwSessionPort, "branchFromBtw">;
 import { StudioBtwService, StudioBtwError, type StudioBtwSessionPort, type StudioBtwSnapshot } from "./btw-service";
 import {
 	validateAgentBtwOperation,
@@ -14,7 +15,7 @@ interface Entry {
 	agentId: string;
 	parentId: string;
 	sessionId: string;
-	session: StudioBtwSessionPort;
+	session: StudioChildBtwPort;
 	service: StudioBtwService;
 	snapshot: StudioBtwSnapshot | null;
 	valid: boolean;
@@ -28,14 +29,15 @@ export class StudioAgentBtwService {
 	#disposed = false;
 	constructor(
 		readonly parent: { readonly sessionId: string },
-		private readonly resolveChild: (agentId: string) => StudioBtwSessionPort | undefined = agentId => {
+		private readonly resolveChild: (agentId: string) => StudioChildBtwPort | undefined = agentId => {
 			const registry = AgentRegistry.global();
 			const root = registry.get(MAIN_AGENT_ID);
-			if (root?.session !== parent || agentId === MAIN_AGENT_ID) return;
+			if (root?.session?.sessionManager.getSessionId() !== parent.sessionId || agentId === MAIN_AGENT_ID) return;
 			const target = registry.get(agentId);
 			let ancestor = target?.parentId;
 			for (let hops = 0; ancestor && hops < 64; hops++) {
-				if (ancestor === MAIN_AGENT_ID) return target?.session as AgentSession | undefined;
+				if (ancestor === MAIN_AGENT_ID)
+					return target?.session && isAgentViewSession(target.session) ? target.session : undefined;
 				ancestor = registry.get(ancestor)?.parentId;
 			}
 		},
@@ -153,7 +155,10 @@ export class StudioAgentBtwService {
 				: operation.kind === "agent.btw.read"
 					? operation.topicId
 					: undefined;
-		const turns = topicId ? (await entry.service.historyRead(topicId)).turns : [];
+		// A worker may still be materializing its history on the first ask. The
+		// running snapshot is already authoritative; read turns once the topic exists.
+		const topicReady = operation.kind !== "agent.btw.ask" || history.topics.some(topic => topic.topicId === topicId);
+		const turns = topicId && topicReady ? (await entry.service.historyRead(topicId)).turns : [];
 		this.#assert(entry);
 		const snapshot = entry.snapshot;
 		const result: AgentBtwState = {

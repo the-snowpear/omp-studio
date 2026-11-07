@@ -25,6 +25,7 @@ import {
 } from "../prediction-channel-protocol";
 import { SessionControlError } from "./session-control-service";
 interface Channel {
+	protocolVersion?: 2;
 	id: string;
 	sessionId: string;
 	descriptor: string;
@@ -66,9 +67,16 @@ export class StudioPredictionService {
 	#messagePrediction: StudioMessagePrediction | undefined;
 	enableMessagePrediction(session: AgentSession): void {
 		this.#messagePrediction?.dispose();
-		this.#messagePrediction = new StudioMessagePrediction(session, (channelId, revision, suffix) => {
+		this.#messagePrediction = new StudioMessagePrediction(session, (channelId, revision, suffix, choices, rank) => {
 			const channel = this.#channels.get(channelId);
-			if (channel && !channel.closed) this.#send(channel, { kind: "next", channelId, revision, suffix });
+			if (channel && !channel.closed)
+				this.#send(channel, {
+					kind: "next",
+					channelId,
+					revision,
+					suffix,
+					...(channel.protocolVersion === 2 ? { choices, rank } : {}),
+				});
 		});
 	}
 	readonly #channels = new Map<string, Channel>();
@@ -123,7 +131,7 @@ export class StudioPredictionService {
 	}
 	async execute(operation: PredictionChannelOperation): Promise<unknown> {
 		this.#check(operation.sessionId);
-		if (operation.kind === "prediction.prepare") return this.#prepare();
+		if (operation.kind === "prediction.prepare") return this.#prepare(operation.protocolVersion);
 		if (operation.kind === "prediction.release") {
 			const channel = this.#channels.get(operation.channelId);
 			if (channel && channel.sessionId === operation.sessionId) this.#close(channel);
@@ -152,7 +160,9 @@ export class StudioPredictionService {
 			}
 		return this.#status();
 	}
-	async #prepare(): Promise<{ channelId: string; sessionId: string; expiresAt: number }> {
+	async #prepare(
+		protocolVersion?: 2,
+	): Promise<{ channelId: string; sessionId: string; expiresAt: number; protocolVersion?: 2 }> {
 		if (!this.directory || (!this.socketDirectory && process.platform !== "win32"))
 			throw new SessionControlError("COMMAND_BLOCKED", "Private prediction transport is unavailable");
 		if (this.#channels.size >= 4) throw new SessionControlError("COMMAND_BLOCKED", "Too many prediction channels");
@@ -203,6 +213,7 @@ export class StudioPredictionService {
 			closed: false,
 			provider,
 			importing: false,
+			protocolVersion,
 		};
 		channel.timer.unref();
 		provider.onUpdate = () => this.#suggest(channel);
@@ -224,7 +235,7 @@ export class StudioPredictionService {
 				await fs.unlink(channel.descriptor).catch(() => {});
 				throw new SessionControlError("COMMAND_BLOCKED", "Prediction channel closed");
 			}
-			return { channelId: id, sessionId, expiresAt };
+			return { channelId: id, sessionId, expiresAt, ...(protocolVersion === 2 ? { protocolVersion } : {}) };
 		} catch (error) {
 			this.#close(channel);
 			await fs.unlink(channel.descriptor).catch(() => {});
@@ -307,11 +318,24 @@ export class StudioPredictionService {
 	async #input(channel: Channel, input: PredictionInput): Promise<void> {
 		if (input.kind === "ping") return;
 		if (input.kind === "next") {
-			this.#messagePrediction?.update(channel.id, input.revision, input.empty);
+			this.#messagePrediction?.update(channel.id, input.revision, input.empty, input.text);
+			return;
+		}
+		if (input.kind === "next.shown") {
+			this.#messagePrediction?.shown(channel.id, input.revision);
+			return;
+		}
+		if (input.kind === "next.accepted") {
+			this.#messagePrediction?.accepted(channel.id, input.revision, input.rank);
 			return;
 		}
 		if (input.kind === "update") {
-			this.#messagePrediction?.update(channel.id, input.revision, false);
+			this.#messagePrediction?.update(
+				channel.id,
+				input.revision,
+				false,
+				channel.protocolVersion === 2 ? input.text : undefined,
+			);
 			if (channel.input && input.revision <= channel.input.revision) return;
 			const head = input.text.slice(0, input.caret),
 				line = head.split("\n").length - 1,
@@ -322,7 +346,7 @@ export class StudioPredictionService {
 			return;
 		}
 		if (input.kind === "feedback") {
-			if (this.#messagePrediction?.dismiss(channel.id, input.revision)) return;
+			if (this.#messagePrediction?.dismiss(channel.id, input.revision, input.accepted)) return;
 			const shown = channel.input;
 			if (shown?.revision === input.revision && shown.suffix)
 				channel.provider.wordCompletionFeedback(

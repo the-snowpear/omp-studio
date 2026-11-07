@@ -264,6 +264,14 @@ const BOOTSTRAP: ClientBootstrap = {
 };
 
 const QUERY_INPUTS = {
+  "extensions.links.list": { sessionId: SESSION_ID },
+  "browser.webmcp.list": { sessionId: SESSION_ID, pageId: "page-fixture" },
+  "session.cache.get": { sessionId: SESSION_ID },
+  "shell.view.read": { sessionId: SESSION_ID, toolCallId: "shell-fixture" },
+  "live.webrtc.connect": { sessionId: SESSION_ID, audioId: "rtc-fixture", sdpOffer: "v=0\r\n" },
+  "live.webrtc.status": { sessionId: SESSION_ID },
+  "live.webrtc.mute": { sessionId: SESSION_ID, audioId: "rtc-fixture", muted: true },
+  "live.webrtc.release": { sessionId: SESSION_ID, audioId: "rtc-fixture" },
  "evaluations.exportChunk": { artifactId: "00000000-0000-4000-8000-000000000001" },
  "evaluations.patch": { id: "00000000-0000-4000-8000-000000000001" },
  "evaluations.retrySpec": { id: "00000000-0000-4000-8000-000000000001" },
@@ -331,6 +339,15 @@ const QUERY_INPUTS = {
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
+  "extensions.links.list": { ok: true, queryName: "extensions.links.list", result: { schemes: [] } },
+  "browser.webmcp.list": { ok: true, queryName: "browser.webmcp.list", result: { pageId: "page-fixture", status: "unavailable", tools: [], truncated: false, untrusted: true, invocationAvailable: false, reason: "No connected browser" } },
+  "session.cache.get": { ok: true, queryName: "session.cache.get", result: { cache: null } },
+  "shell.view.read": { ok: true, queryName: "shell.view.read", result: { available: false, reason: "No recorded trace" } },
+  "live.webrtc.connect": { ok: false, queryName: "live.webrtc.connect", error: { code: "UNAVAILABLE", message: "No Live account" } },
+  "live.webrtc.status": { ok: true, queryName: "live.webrtc.status", result: { available: false, attached: false, voice: "sol", phase: "off", muted: false, inputLevel: 0, outputLevel: 0, transcripts: [] } },
+  "live.webrtc.mute": { ok: true, queryName: "live.webrtc.mute", result: { available: false, attached: false, voice: "sol", phase: "off", muted: false, inputLevel: 0, outputLevel: 0, transcripts: [] } },
+  "live.webrtc.release": { ok: true, queryName: "live.webrtc.release", result: { available: false, attached: false, voice: "sol", phase: "off", muted: false, inputLevel: 0, outputLevel: 0, transcripts: [] } },
+
   "computer.workspace.get": { ok: true, queryName: "computer.workspace.get", result: {
     version: 1, sessionId: SESSION_ID, revision: 0, updatedAt: 0, enabled: false, preludeAvailable: false, backend: "unavailable",
     capabilities: { capture: false, input: false, accessibility: false, globalEscape: false, observationOnly: false },

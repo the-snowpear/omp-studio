@@ -461,7 +461,7 @@ export interface HostModelsService {
     readonly expectedHash?: string;
     readonly overlay?: ModelProviderUpsertInput;
   }): ConfigWriteResult | Promise<ConfigWriteResult>;
-  startLogin(input: { readonly providerId: string }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  startLogin(input: { readonly providerId: string; readonly loginId?: string }): ConfigWriteResult | Promise<ConfigWriteResult>;
   logout(input: { readonly providerId: string }): ConfigWriteResult | Promise<ConfigWriteResult>;
   testProvider(input: { readonly providerId?: string; readonly api?: string; readonly endpointUrl?: string; readonly apiKey?: string }): ModelProviderTestResult | Promise<ModelProviderTestResult>;
   probeProvider(input: ModelProviderProbeInput): ModelDiscoveryResult | Promise<ModelDiscoveryResult>;

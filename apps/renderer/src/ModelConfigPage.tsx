@@ -1,3 +1,4 @@
+import type { ModelExecutionMetadata } from "@omp-studio/client-contract";
 import { useListReorder } from "./models/useListReorder";
 import { ModelParameterEditor } from "./models/ModelParameterEditor";
 import { createModelParameterDraft, effectiveModelParameters, effectiveParameterSources, modelParameterDraftError, type ModelParameterDraft } from "./models/modelParameterDraft";
@@ -405,6 +406,8 @@ type DraftOverrideForm = {
   bedrockMessagesApi: "" | "true" | "false";
   requiresThinkingPresence: "" | "true" | "false";
   extendedCacheTtlBeta: "" | "true" | "false";
+  statefulResponses: "" | "true" | "false";
+  preferWebsockets: "" | "true" | "false";
   name: string;
   tools: "" | "true" | "false";
   image: "" | "true" | "false";
@@ -428,6 +431,8 @@ type CustomModelForm = {
   bedrockMessagesApi: "" | "true" | "false";
   requiresThinkingPresence: "" | "true" | "false";
   extendedCacheTtlBeta: "" | "true" | "false";
+  statefulResponses: "" | "true" | "false";
+  preferWebsockets: "" | "true" | "false";
   id: string;
   name: string;
   api: string;
@@ -504,6 +509,8 @@ function blankOverrideForm(from?: DraftOverride): DraftOverrideForm {
     bedrockMessagesApi: from?.bedrockMessagesApi === undefined ? "" : from.bedrockMessagesApi ? "true" : "false",
     requiresThinkingPresence: from?.requiresThinkingPresence === undefined ? "" : from.requiresThinkingPresence ? "true" : "false",
     extendedCacheTtlBeta: from?.extendedCacheTtlBeta === undefined ? "" : from.extendedCacheTtlBeta ? "true" : "false",
+    statefulResponses: from?.statefulResponses === undefined ? "" : from.statefulResponses ? "true" : "false",
+    preferWebsockets: from?.preferWebsockets === undefined ? "" : from.preferWebsockets ? "true" : "false",
     name: from?.name ?? "",
     tools: from?.tools === undefined ? "" : from.tools ? "true" : "false",
     image: from?.image === undefined ? "" : from.image ? "true" : "false",
@@ -529,6 +536,8 @@ function blankCustomForm(from?: ModelCatalogEntry): CustomModelForm {
     bedrockMessagesApi: from?.bedrockMessagesApi === undefined ? "" : from.bedrockMessagesApi ? "true" : "false",
     requiresThinkingPresence: from?.requiresThinkingPresence === undefined ? "" : from.requiresThinkingPresence ? "true" : "false",
     extendedCacheTtlBeta: from?.extendedCacheTtlBeta === undefined ? "" : from.extendedCacheTtlBeta ? "true" : "false",
+    statefulResponses: from?.statefulResponses === undefined ? "" : from.statefulResponses ? "true" : "false",
+    preferWebsockets: from?.preferWebsockets === undefined ? "" : from.preferWebsockets ? "true" : "false",
     id: from?.id ?? "",
     name: from?.name ?? "",
     api: from?.api ?? "inherit",
@@ -565,7 +574,11 @@ function overrideFromForm(form: DraftOverrideForm): DraftOverride | null {
   const requiresThinkingPresence = triState(form.requiresThinkingPresence);
   if (requiresThinkingPresence !== undefined) next.requiresThinkingPresence = requiresThinkingPresence;
   const extendedCacheTtlBeta = triState(form.extendedCacheTtlBeta);
+  const statefulResponses = triState(form.statefulResponses);
+  const preferWebsockets = triState(form.preferWebsockets);
   if (extendedCacheTtlBeta !== undefined) next.extendedCacheTtlBeta = extendedCacheTtlBeta;
+  if (statefulResponses !== undefined) next.statefulResponses = statefulResponses;
+  if (preferWebsockets !== undefined) next.preferWebsockets = preferWebsockets;
   if (form.name.trim()) next.name = form.name.trim();
   const tools = triState(form.tools);
   if (tools !== undefined) next.tools = tools;
@@ -642,6 +655,8 @@ function entryFromCustomForm(providerId: string, form: CustomModelForm): ModelCa
     ...(triState(form.bedrockMessagesApi) === undefined ? {} : { bedrockMessagesApi: triState(form.bedrockMessagesApi)! }),
     ...(triState(form.requiresThinkingPresence) === undefined ? {} : { requiresThinkingPresence: triState(form.requiresThinkingPresence)! }),
     ...(triState(form.extendedCacheTtlBeta) === undefined ? {} : { extendedCacheTtlBeta: triState(form.extendedCacheTtlBeta)! }),
+    ...(triState(form.statefulResponses) === undefined ? {} : { statefulResponses: triState(form.statefulResponses)! }),
+    ...(triState(form.preferWebsockets) === undefined ? {} : { preferWebsockets: triState(form.preferWebsockets)! }),
     ...(premium === undefined ? {} : { premiumMultiplier: premium }),
     ...(imageBudget === undefined ? {} : { imageCountBudget: imageBudget }),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
@@ -810,6 +825,8 @@ function overrideDraftEqual(left: DraftOverride | undefined, right: DraftOverrid
     && left.bedrockMessagesApi === right.bedrockMessagesApi
     && left.requiresThinkingPresence === right.requiresThinkingPresence
     && left.extendedCacheTtlBeta === right.extendedCacheTtlBeta
+    && left.statefulResponses === right.statefulResponses
+    && left.preferWebsockets === right.preferWebsockets
     && left.omitMaxOutputTokens === right.omitMaxOutputTokens
     && left.premiumMultiplier === right.premiumMultiplier
     && left.imageCountBudget === right.imageCountBudget
@@ -964,6 +981,8 @@ function providerUpsertFromDraft(editor: Draft, contentHash?: string): ModelProv
       ...(model.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: model.bedrockMessagesApi }),
       ...(model.requiresThinkingPresence === undefined ? {} : { requiresThinkingPresence: model.requiresThinkingPresence }),
       ...(model.extendedCacheTtlBeta === undefined ? {} : { extendedCacheTtlBeta: model.extendedCacheTtlBeta }),
+      ...(model.statefulResponses === undefined ? {} : { statefulResponses: model.statefulResponses }),
+      ...(model.preferWebsockets === undefined ? {} : { preferWebsockets: model.preferWebsockets }),
       ...(model.premiumMultiplier === undefined ? {} : { premiumMultiplier: model.premiumMultiplier }),
       ...(model.imageCountBudget === undefined ? {} : { imageCountBudget: model.imageCountBudget }),
       ...(model.headers ? { headers: model.headers } : {}),
@@ -2369,7 +2388,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     }
   };
 
-  const startLogin = async (providerId: string) => {
+  const [loginFlowByProvider, setLoginFlowByProvider] = useState<Record<string, string>>({});
+  const startLogin = async (providerId: string, loginId?: string) => {
     if (!providerId.trim()) {
       toast(t("modelConfig.fillProviderId"));
       return;
@@ -2407,7 +2427,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     }
     setBusy(true);
     try {
-      const result = await runWrite(client, "models.login.start", { providerId });
+      const result = await runWrite(client, "models.login.start", { providerId, ...(loginId ? { loginId } : {}) });
       toast(result.message ?? t("modelConfig.toastLoginCompleted"));
       await refresh();
     } catch (error) {
@@ -2996,7 +3016,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                           <span className={`chip ${authed ? "green" : "gray"} xs`}>{authed ? t("modelConfig.credentialValid") : t("modelConfig.notLoggedIn")}</span>
                         </div>
                         <div className="auth-actions">
-                          <button type="button" className={`btn small ${authed ? "outline" : "primary"}`} disabled={busy} onClick={() => void startLogin(editor.id)}>
+                          {login?.flows?.length ? <AppSelect aria-label="登录方式 / Login method" className="select" value={loginFlowByProvider[editor.id] ?? login.flows[0]!.id} disabled={busy} onChange={event => setLoginFlowByProvider(current => ({ ...current, [editor.id]: event.target.value }))}>{login.flows.map(flow => <option key={flow.id} value={flow.id}>{flow.name}</option>)}</AppSelect> : null}
+                          <button type="button" className={`btn small ${authed ? "outline" : "primary"}`} disabled={busy} onClick={() => void startLogin(editor.id, loginFlowByProvider[editor.id] ?? login?.flows?.[0]?.id)}>
                             <Icon name="key" extra="sm" />
                             {authed ? t("modelConfig.relogin") : t("modelConfig.login")}
                           </button>
@@ -3609,6 +3630,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                               </div>
                               <ModelCompatControl label="Requires thinking presence" value={modelEditView.draft.requiresThinkingPresence} onChange={requiresThinkingPresence => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, requiresThinkingPresence } })} />
                               <ModelCompatControl label="Extended cache TTL beta" value={modelEditView.draft.extendedCacheTtlBeta} onChange={extendedCacheTtlBeta => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, extendedCacheTtlBeta } })} />
+                              <NativeTransportFacts facts={data?.availableModels.find(model => model.provider === (modelEditView.providerId ?? editor?.id) && model.id === modelEditView.modelId)?.compatibility} />
+                              <ModelCompatControl label="Stateful Responses (Responses API)" value={modelEditView.draft.statefulResponses} onChange={statefulResponses => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, statefulResponses } })} />
+                              <ModelCompatControl label="Prefer WebSockets" value={modelEditView.draft.preferWebsockets} onChange={preferWebsockets => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, preferWebsockets } })} />
                               <BedrockMessagesControl value={modelEditView.draft.bedrockMessagesApi} onChange={bedrockMessagesApi => setModelEdit({...modelEditView,draft:{...modelEditView.draft,bedrockMessagesApi}})}/>
                               <div className="field"><label>Premium Multiplier</label>
                                 <input className="input mono" placeholder={t("common.inherit")} value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />
@@ -3706,6 +3730,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                               </div>
                               <ModelCompatControl label="Requires thinking presence" value={modelEditView.draft.requiresThinkingPresence} onChange={requiresThinkingPresence => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, requiresThinkingPresence } })} />
                               <ModelCompatControl label="Extended cache TTL beta" value={modelEditView.draft.extendedCacheTtlBeta} onChange={extendedCacheTtlBeta => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, extendedCacheTtlBeta } })} />
+                              <NativeTransportFacts facts={data?.availableModels.find(model => model.provider === (modelEditView.providerId ?? editor?.id) && model.id === modelEditView.draft.id)?.compatibility} />
+                              <ModelCompatControl label="Stateful Responses (Responses API)" value={modelEditView.draft.statefulResponses} onChange={statefulResponses => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, statefulResponses } })} />
+                              <ModelCompatControl label="Prefer WebSockets" value={modelEditView.draft.preferWebsockets} onChange={preferWebsockets => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, preferWebsockets } })} />
                               <BedrockMessagesControl value={modelEditView.draft.bedrockMessagesApi} onChange={bedrockMessagesApi => setModelEdit({...modelEditView,draft:{...modelEditView.draft,bedrockMessagesApi}})}/>
                               <div className="field"><label>Premium Multiplier</label>
                                 <input className="input mono" placeholder={t("common.notSet")} value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />
@@ -4095,4 +4122,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       </div>
     </div>
   );
+}
+
+function NativeTransportFacts({ facts }: { facts: ModelExecutionMetadata["compatibility"] }) {
+  if (facts?.supportsMessageThreads === undefined && facts?.toolNamePrefix === undefined) return null;
+  return <div className="small muted" role="note">{facts.supportsMessageThreads !== undefined ? <p>Message threads · {facts.supportsMessageThreads ? "原生模型声明支持 / Supported by native policy" : "未声明支持 / Not advertised"}</p> : null}{facts.toolNamePrefix !== undefined ? <p>原生工具名前缀 / Native tool prefix · <code>{facts.toolNamePrefix}</code></p> : null}</div>;
 }

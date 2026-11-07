@@ -8,13 +8,14 @@ import type { AgentId, OpaqueCursor, RuntimeEpoch, SessionId } from "./ids.js";
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 
-export type ConversationRole = "user" | "assistant" | "system";
+export type ConversationRole = "user" | "assistant" | "system" | "extension";
 
 export type ConversationContentBlock =
   | { type: "text"; text: string; truncated?: boolean }
   | { type: "thinking"; text: string; truncated?: boolean }
   | {
       type: "toolCall";
+      presentation?: "reply";
       toolCallId: string;
       toolName: string;
       arguments?: JsonValue;
@@ -80,8 +81,9 @@ export type ConversationMessageError = {
  *   `preserveData`, `details`, or provider payloads)
  * - `reset_boundary` → `resetBoundary`
  * - `branch_summary` → **ignored** (`CONVERSATION_BRANCH_SUMMARY_MAPPING`)
- * - `custom` and any other entry type → ignored unless a later contract
- *   revision allow-lists a public kind
+ * - displayed `custom_message` → `message` with the `extension` role; native
+ *   harness and dedicated job/advisor records remain outside this transcript
+ * - `custom` and other entry types → ignored
  *
  * Absolute session file paths, `providerPayload`, secrets, and unfiltered
  * custom data must never appear on this type.
@@ -329,6 +331,7 @@ export type ConversationRuntimeEvent =
     }
   | {
       kind: "conversation.tool.started";
+      presentation?: "reply";
       sessionId: SessionId;
       turnId: string;
       messageId: string;
@@ -339,6 +342,8 @@ export type ConversationRuntimeEvent =
     }
   | {
       kind: "conversation.tool.updated";
+      presentation?: "reply";
+      replies?: readonly string[];
       sessionId: SessionId;
       turnId: string;
       toolCallId: string;

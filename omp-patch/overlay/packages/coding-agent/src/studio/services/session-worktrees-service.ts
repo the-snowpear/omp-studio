@@ -175,7 +175,8 @@ export class StudioSessionWorktreesService {
 		if (operation.kind === "worktrees.session.resume.list" || operation.kind === "worktrees.session.resume.prepare") {
 			const cwd = this.session.sessionManager.getCwd();
 			const scope = operation.scope ?? cfgSessionWorktreeScope.get(this.session.settings);
-			const sessions = await SessionManager.listForPicker(cwd, undefined, new FileSessionStorage(), scope);
+			const listing = await SessionManager.listForPicker(cwd, undefined, new FileSessionStorage(), scope);
+			const sessions = await listing.complete;
 			this.#check(operation.sessionId);
 			if (operation.kind === "worktrees.session.resume.list")
 				return {

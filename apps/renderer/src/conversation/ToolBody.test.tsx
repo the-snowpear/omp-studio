@@ -1,7 +1,24 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToolBody, TOOL_ROWS_MAX } from "./ToolBody";
 import { CHUNK_LINES } from "./textChunks";
+
+it("shows native Eval restart status and structured fallback attempts", async () => {
+  const output = '{"attempts":[{"model":"primary","outcome":"failed"},{"model":"fallback","outcome":"succeeded"}]}';
+  const view = render(<ToolBody tool={{ toolCallId: "eval-restart", toolName: "eval", status: "succeeded", result: {
+    type: "toolResult", toolCallId: "eval-restart", isError: false, data: { cells: [{ code: "print(await handle.attempts())", output,
+      statusEvents: [{ op: "kernel_restart", runtime: "JS", stateLost: true }],
+      views: [{ text: output, view: { kind: "json", value: { attempts: [{ model: "primary", outcome: "failed" }, { model: "fallback", outcome: "succeeded" }] } } }],
+    }] },
+  } }} />);
+  expect(view.getByRole("status").textContent).toMatch(/内核已重启|kernel restarted/);
+  expect(view.container.querySelector(".tc-json details")).not.toBeNull();
+  expect(view.container.textContent).toContain("attempts");
+  fireEvent.click(view.getByText("attempts: [2]"));
+  fireEvent.click(await view.findByText("1: {2}"));
+  await waitFor(() => expect(view.container.textContent).toContain("fallback"));
+  view.unmount();
+});
 
 describe("ToolBody: WebSearchBody", () => {
   afterEach(() => {

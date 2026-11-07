@@ -114,7 +114,7 @@ export const GUI_SECOND_BATCH_SETTINGS = {
 	},
 	"edit.mode": {
 		type: "enum",
-		values: ["apply_patch", "hashline", "patch", "replace", "sloppy"],
+		values: ["apply_patch", "hashline", "patch", "replace", "sloppy", "none"],
 		default: "hashline",
 		zh: "编辑模式",
 		en: "Edit mode",

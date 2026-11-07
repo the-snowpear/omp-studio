@@ -1,3 +1,4 @@
+import type { AgentViewSession } from "../../session/agent-session-handle";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import type { DesktopCapture } from "@oh-my-pi/pi-natives";
@@ -47,7 +48,7 @@ interface StoredFrame {
 export interface ComputerWorkspaceOptions {
 	directory?: string;
 	observer?: () => ComputerObserver;
-	ownedSessions?: () => AgentSession[];
+	ownedSessions?: () => AgentViewSession[];
 	revoke?: (owner: string) => Promise<void>;
 	now?: () => number;
 }
@@ -93,9 +94,7 @@ export class StudioComputerWorkspaceService {
 				const owned =
 					!this.#disposed &&
 					this.#owned().some(
-						session =>
-							session.sessionId === id ||
-							(!!owner && session.studioToolSession?.getEvalKernelOwnerId?.() === owner),
+						session => session.sessionId === id || (!!owner && session.studioEvalKernelOwnerId === owner),
 					);
 				if (owned) this.#bind();
 				return owned;
@@ -103,9 +102,7 @@ export class StudioComputerWorkspaceService {
 			authorize: (id, owner) =>
 				this.#policy.authorize(
 					this.#owned().find(
-						session =>
-							session.sessionId === id ||
-							(!!owner && session.studioToolSession?.getEvalKernelOwnerId?.() === owner),
+						session => session.sessionId === id || (!!owner && session.studioEvalKernelOwnerId === owner),
 					)?.sessionId ?? id,
 				),
 			event: event => this.#activity(event),
@@ -116,7 +113,7 @@ export class StudioComputerWorkspaceService {
 	#now(): number {
 		return this.#options.now?.() ?? Date.now();
 	}
-	#owned(): AgentSession[] {
+	#owned(): AgentViewSession[] {
 		return this.#options.ownedSessions?.() ?? ownedStudioSessions(this.session);
 	}
 	#owns(id: string): boolean {
@@ -177,7 +174,7 @@ export class StudioComputerWorkspaceService {
 				cancel: async () => {
 					await Promise.all(
 						this.#owned()
-							.map(session => session.studioToolSession?.getEvalKernelOwnerId?.())
+							.map(session => session.studioEvalKernelOwnerId)
 							.filter((owner): owner is string => !!owner)
 							.map(owner =>
 								this.#options.revoke ? this.#options.revoke(owner) : revokeComputerControlForOwner(owner, true),
@@ -337,7 +334,7 @@ export class StudioComputerWorkspaceService {
 		return (
 			this.session.studioToolSession?.computerPreludeAvailable?.() ??
 			(this.session.getEvalPreludes().some(prelude => prelude.name === "computer") ||
-				computerPreludeAvailableForOwner(this.session.studioToolSession?.getEvalKernelOwnerId?.() ?? undefined))
+				computerPreludeAvailableForOwner(this.session.studioEvalKernelOwnerId ?? undefined))
 		);
 	}
 	async setEnabled(enabled: boolean): Promise<void> {

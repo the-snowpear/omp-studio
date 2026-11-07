@@ -1,6 +1,7 @@
+import type { AgentRegistryApi } from "../../registry/agent-registry";
 import type { AgentRef, AgentRegistry, RegistryEvent } from "../../registry/agent-registry";
 import { MAIN_AGENT_ID } from "../../registry/agent-registry";
-import type { AgentSession } from "../../session/agent-session";
+import type { AgentSessionHandle } from "../../session/agent-session-handle";
 import type { ConversationRuntimeEvent } from "../conversation-protocol";
 import type { ConversationLiveBindTarget, ConversationLiveProjector } from "./conversation-live-projector";
 
@@ -9,7 +10,7 @@ type LiveListener = (event: ConversationRuntimeEvent) => void;
 export type ConversationChildProjectorFactory = (ref: AgentRef) => ConversationLiveProjector | undefined;
 
 type BoundChild = {
-	session: AgentSession;
+	session: AgentSessionHandle;
 	projector: ConversationLiveProjector;
 	unsubscribe: () => void;
 };
@@ -20,7 +21,7 @@ type BoundChild = {
  */
 export class ConversationProjectorHub {
 	readonly #main: ConversationLiveProjector;
-	readonly #registry: AgentRegistry;
+	readonly #registry: AgentRegistryApi;
 	readonly #createChild: ConversationChildProjectorFactory;
 	readonly #runtimeEpoch: () => number;
 	readonly #listeners = new Set<LiveListener>();
@@ -31,7 +32,7 @@ export class ConversationProjectorHub {
 
 	constructor(options: {
 		main: ConversationLiveProjector;
-		registry: AgentRegistry;
+		registry: AgentRegistryApi;
 		createChild: ConversationChildProjectorFactory;
 		runtimeEpoch: () => number;
 	}) {

@@ -11,6 +11,7 @@ export interface PredictionSettings {
   };
 }
 export interface PredictionChannel {
+  protocolVersion?: 2;
   channelId: string;
   sessionId: string;
   expiresAt: number;
@@ -25,7 +26,7 @@ export type PredictionChannelOperation =
     }
   | { kind: "prediction.clearOverride"; sessionId: string }
   | { kind: "prediction.download.cancel"; sessionId: string }
-  | { kind: "prediction.prepare"; sessionId: string }
+  | { kind: "prediction.prepare"; sessionId: string; protocolVersion?: 2 }
   | { kind: "prediction.release"; sessionId: string; channelId: string };
 export interface PredictionResultMap {
   "prediction.status": PredictionSettings;
@@ -49,13 +50,15 @@ export function isPredictionKind(
   return (PREDICTION_KINDS as readonly string[]).includes(kind);
 }
 export type PredictionInput =
-  | { kind: "next"; revision: number; empty: boolean }
+  | { kind: "next"; revision: number; empty: boolean; text?: string }
+  | { kind: "next.shown"; revision: number }
+  | { kind: "next.accepted"; revision: number; rank: number }
   | { kind: "update"; revision: number; text: string; caret: number }
   | { kind: "feedback"; revision: number; accepted: boolean }
   | { kind: "ping" }
   | { kind: "import"; requestId: string; transferId: string };
 export type PredictionEvent =
-  | { kind: "next"; channelId: string; revision: number; suffix: string | null }
+  | { kind: "next"; channelId: string; revision: number; suffix: string | null; choices?: readonly string[]; rank?: number }
   | {
       kind: "suggestion";
       channelId: string;
@@ -109,6 +112,7 @@ export function validatePredictionChannelOperation(value: unknown): void {
     "method",
     "scope",
     "channelId",
+    "protocolVersion",
   ]);
   if (typeof row.kind !== "string" || !isPredictionKind(row.kind))
     throw new Error("Unknown prediction command");
@@ -132,7 +136,7 @@ export function validatePredictionChannelResult(
   value: unknown,
 ): void {
   if (kind === "prediction.prepare") {
-    const row = object(value, ["channelId", "sessionId", "expiresAt"]);
+    const row = object(value, ["channelId", "sessionId", "expiresAt", "protocolVersion"]);
     id(row.channelId);
     text(row.sessionId, 128);
     integer(row.expiresAt);
@@ -175,11 +179,18 @@ export function validatePredictionInput(
     "requestId",
     "transferId",
     "empty",
+    "rank",
   ]);
   switch (row.kind) {
     case "next":
       integer(row.revision);
       if (typeof row.empty !== "boolean") throw new Error("Invalid next-message state");
+      break;
+    case "next.shown":
+      integer(row.revision);
+      break;
+    case "next.accepted":
+      integer(row.revision); integer(row.rank, 3);
       break;
     case "update":
       integer(row.revision);
@@ -201,7 +212,7 @@ export function validatePredictionInput(
       throw new Error("Invalid prediction message");
   }
   const allowed =
-    row.kind === "next" ? ["kind", "revision", "empty"] : row.kind === "update"
+    row.kind === "next.shown" ? ["kind", "revision"] : row.kind === "next.accepted" ? ["kind", "revision", "rank"] : row.kind === "next" ? ["kind", "revision", "empty", "text"] : row.kind === "update"
       ? ["kind", "revision", "text", "caret"]
       : row.kind === "feedback"
         ? ["kind", "revision", "accepted"]
@@ -222,16 +233,17 @@ export function validatePredictionEvent(
     "requestId",
     "count",
     "truncated",
+    "choices", "rank",
   ]);
   id(row.channelId);
   switch (row.kind) {
     case "next":
-      object(value, ["kind", "channelId", "revision", "suffix"]);
+      object(value, ["kind", "channelId", "revision", "suffix", "choices", "rank"]);
       integer(row.revision);
       if (row.suffix !== null) text(row.suffix, 500, true);
       break;
     case "suggestion":
-      object(value, ["kind", "channelId", "revision", "suffix"]);
+      object(value, ["kind", "channelId", "revision", "suffix", "choices", "rank"]);
       integer(row.revision);
       if (row.suffix !== null) text(row.suffix, 256, true);
       break;

@@ -173,7 +173,8 @@ export function clampRoleThinking(
   thinking: string | undefined,
   model: RoleThinkingModel | undefined,
 ): string | undefined {
-  const current = thinking || undefined;
+  const alias = thinking ? model?.thinkingConfig?.effortMap?.[thinking as ModelConfigThinkingEffort] : undefined;
+  const current = alias && asEffort(alias) ? alias : thinking || undefined;
   if (!model) return current;
   if (!model.reasoning) return current === "off" ? "off" : undefined;
   const efforts = modelEfforts(model);

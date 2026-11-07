@@ -26,6 +26,7 @@ export interface BenchmarkStats {
 	cost: number;
 }
 export interface BenchmarkMeasurement {
+	transport?: "http" | "websocket";
 	workloadPhase?: "single" | "parallel" | "prefill";
 	ok: boolean;
 	challenge?: "chat" | "prefill" | "generation";
@@ -251,6 +252,7 @@ export function validateBenchmarkResult(kind: BenchmarkOperation["kind"], value:
 		for (const item of model.measurements) {
 			const measurement = record(item, [
 				"ok",
+				"transport",
 				"challenge",
 				"error",
 				"phase",
@@ -301,7 +303,7 @@ export function validateBenchmarkResult(kind: BenchmarkOperation["kind"], value:
 			)
 				throw new Error("Invalid cache observation");
 			for (const [key, value] of Object.entries(measurement))
-				if (!["ok", "error", "challenge", "phase", "workloadPhase", "cacheObservations"].includes(key))
+				if (!["ok", "transport", "error", "challenge", "phase", "workloadPhase", "cacheObservations"].includes(key))
 					number(value);
 		}
 	}

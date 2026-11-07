@@ -978,26 +978,26 @@ describe("WP-050/051/053 StudioAgentHubService", () => {
 	});
 });
 
-test("removed per-spawn models are rejected before a task starts, while configured agents still launch", async () => {
+test("per-call selections and task files reach native policy without losing assignment whitespace", async () => {
 	const { service, spawner } = makeHub();
 	try {
-		await expect(
-			service.spawn({
-				definition: "researcher",
-				assignment: "summarize the docs",
-				model: ["@default:high"],
-				callerAgentId: "Main",
-			}),
-		).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
-		expect(spawner.requests()).toHaveLength(0);
+		const assignment = "\nSummarize the docs.  \n\n| file | status |\n";
 		await service.spawn({
 			definition: "researcher",
-			assignment: "summarize the docs",
+			assignment,
+			model: ["mock/exact:high"],
+			callerAgentId: "Main",
+		});
+		expect(spawner.requests()[0]).toMatchObject({ model: ["mock/exact:high"], assignment });
+		await service.spawn({
+			definition: "researcher",
+			taskFile: "local://assignment.md",
 			effort: "hi",
 			callerAgentId: "Main",
 		});
-		expect(spawner.requests()).toHaveLength(1);
-		expect(spawner.requests()[0]!.model).toBeUndefined();
+		expect(spawner.requests()).toHaveLength(2);
+		expect(spawner.requests()[1]).toMatchObject({ taskFile: "local://assignment.md", effort: "hi" });
+		expect(spawner.requests()[1]!.assignment).toBeUndefined();
 	} finally {
 		service.dispose();
 	}

@@ -233,6 +233,10 @@ const STORY_CARDS: readonly { readonly [key: string]: JsonValue }[] = [
 export const PREVIEW_CONVO_ITEMS: readonly ConversationItem[] = [
   RESET,
   {
+    kind: "message", itemId: "preview-extension-notice", parentId: "preview-reset-1", createdAt: at(1), role: "extension",
+    content: [{ type: "text", text: "同步扩展已加载。[查看扩展说明](studio-demo:details)" }],
+  },
+  {
     kind: "message",
     itemId: "preview-user-1",
     parentId: "preview-reset-1",
@@ -250,6 +254,8 @@ export const PREVIEW_CONVO_ITEMS: readonly ConversationItem[] = [
     createdAt: at(4),
     role: "assistant",
     content: [
+      { type: "toolCall", toolCallId: "preview-mid-reply", toolName: "write", presentation: "reply", arguments: { path: "out://", content: "上游差异已核对，接着运行类型检查。[查看扩展说明](studio-demo:details)" } },
+      { type: "toolResult", toolCallId: "preview-mid-reply", toolName: "write", isError: false },
       ...blocksFromCards(STORY_CARDS, "preview-story"),
       {
         type: "text",

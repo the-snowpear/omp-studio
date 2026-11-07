@@ -446,6 +446,7 @@ export function PredictionSettingsPane({
         </div>
       ) : null}
       {data?.download.error ? <p role="alert">{data.download.error}</p> : null}
+      {data && ["failed", "cancelled"].includes(data.download.state) ? <button type="button" className="btn small outline" disabled={!!busy || !has("prediction.configure")} onClick={() => void save("smollm")}>{zh ? "重试准备本地预测" : "Retry local prediction setup"}</button> : null}
       <SettingRow
         source={null}
         label={zh ? "外部提示词历史" : "External prompt history"}

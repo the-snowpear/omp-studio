@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
-import type { MediaKind } from "@omp-studio/studio-protocol";
+import type { MediaKind, CapabilityManifest } from "@omp-studio/studio-protocol";
 import { LiveAudioPane } from "./media/LiveAudioPane";
 import { ArtifactLibraryPane } from "./media/ArtifactLibraryPane";
 import { MediaWorkbench, takeMediaIntent } from "./media/MediaWorkbench";
@@ -19,12 +19,16 @@ export function MediaPage({
   workspaceId,
   sessionId,
   runtimeAvailable = false,
+  remote = false,
+  capabilities,
   onInsert,
 }: {
   client: StudioClient;
   workspaceId?: string | undefined;
   sessionId?: string | undefined;
   runtimeAvailable?: boolean;
+  remote?: boolean;
+  capabilities?: CapabilityManifest | undefined;
   onInsert?: (text: string) => void;
 }) {
   const { resolvedLanguage } = useI18n();
@@ -128,6 +132,8 @@ export function MediaPage({
           active={voiceView === "live"}
         >
           <LiveAudioPane
+            remote={remote}
+            webrtcAvailable={capabilities?.capabilities.some(row => row.id === "live.webrtc.connect" && row.grade !== "unavailable") === true}
             client={client}
             sessionId={sessionId}
             available={runtimeAvailable}

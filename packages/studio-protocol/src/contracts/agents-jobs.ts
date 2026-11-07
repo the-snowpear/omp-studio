@@ -60,6 +60,7 @@ export interface StudioAgentSnapshot {
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface StudioJobSnapshot {
+  caption?: string;
   jobId: JobId;
   generation: Generation;
   ownerAgentId: AgentId;
@@ -94,7 +95,8 @@ export type AgentOperation =
       kind: "agent.spawn";
       definition: string;
       model?: string[];
-      assignment: string;
+      assignment?: string;
+      taskFile?: string;
       solutionSpace?: string;
       context?: string;
       async?: boolean;

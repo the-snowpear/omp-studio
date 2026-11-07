@@ -72,6 +72,7 @@ export interface BtwSessionApi {
   ask(question: string, newTopic?: boolean, images?: import("@omp-studio/client-contract").PromptImageInput[], command?: { name: string; arguments: string }): Promise<boolean>;
   abort(): Promise<void>;
   branch(): Promise<void>;
+  inject?(id?: string): Promise<void>;
   copy(): Promise<void>;
   dismissNotice(): void;
 }
@@ -99,6 +100,8 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   const [branchToken, setBranchToken] = useState<string | null>(null);
   const [tokenEphemeralId, setTokenEphemeralId] = useState<string | null>(null);
   const [branchedId, setBranchedId] = useState<string | null>(null);
+  const [injectionStates, setInjectionStates] = useState<Record<string, "ready" | "sending" | "sent">>({});
+  const injectionAvailable = useUpgradeAvailable(input.client, input.preview, "btw.inject");
 
   const clientRef = useRef(input.client);
   clientRef.current = input.client;
@@ -150,7 +153,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
       if (last) {
         setQuestion(last.question);
         setQuestionImages(last.images ?? []);
-        setHistorySnapshot({ ephemeralId: "history:" + topicId, topicId, question: last.question, text: last.answer, turnIndex: result.turns.length - 1,
+        setHistorySnapshot({ ephemeralId: "history:" + topicId, topicId, question: last.question, text: last.answer, ...(last.injection ? { injection: last.injection } : {}), turnIndex: result.turns.length - 1,
           status: last.status === "complete" ? "completed" : last.status === "running" ? "running" : last.status === "error" ? "failed" : "aborted", ...(last.error ? { error: { code: "INTERNAL_ERROR", message: last.error } } : {}) });
       }
     } catch (cause) { if (generation === selectionGeneration.current) setError(hostErrorMessage(cause, tRef.current("runtimeUpgrade.btwHistoryUnavailable"))); }
@@ -165,7 +168,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
     setStartedAt(null); setBranchedId(null); setError(undefined); setNotice(undefined);
   }, []);
   useEffect(() => {
-    newTopic(); setTopics([]); setBranchToken(null); setTokenEphemeralId(null); setDemoSnapshot(undefined); demoHistory.current = createBtwPreviewHistory(); setNewTopicDraft(false); void refreshHistory(false);
+    newTopic(); setTopics([]); setInjectionStates({}); setBranchToken(null); setTokenEphemeralId(null); setDemoSnapshot(undefined); demoHistory.current = createBtwPreviewHistory(); setNewTopicDraft(false); void refreshHistory(false);
     return () => { selectionGeneration.current++; };
   }, [input.client, input.sessionId, input.preview]);
   useEffect(() => { void refreshHistory(false); }, [refreshHistory, input.snapshot?.status]);
@@ -179,7 +182,8 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   const source = input.preview ? demoSnapshot ?? input.snapshot : input.snapshot;
   const live = input.targetActive !== false && source && (!input.sessionId || !source.sessionId || source.sessionId === input.sessionId) ? source : null;
   const matchingLive = expectedRoundRef.current && live?.ephemeralId !== expectedRoundRef.current ? null : live;
-  const snapshot = newTopicDraft ? null : historyAvailable && selectedTopicId && matchingLive?.topicId !== selectedTopicId ? historySnapshot : matchingLive ?? historySnapshot;
+  const rawSnapshot = newTopicDraft ? null : historyAvailable && selectedTopicId && matchingLive?.topicId !== selectedTopicId ? historySnapshot : matchingLive ?? historySnapshot;
+  const snapshot = rawSnapshot?.injection && injectionStates[rawSnapshot.injection.id] ? { ...rawSnapshot, injection: { ...rawSnapshot.injection, state: injectionStates[rawSnapshot.injection.id]! } } : rawSnapshot;
   const roundId = snapshot?.ephemeralId ?? null;
   useEffect(() => {
     if (!newTopicDraft && !pending && !selectedTopicId && live?.topicId) setSelectedTopicId(live.topicId);
@@ -385,6 +389,26 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
     }
   }, [snapshot?.copy, snapshot?.text, turns]);
 
+  const inject = async (id = snapshot?.injection?.id) => {
+    if (!id || !injectionAvailable || injectionStates[id] === "sending" || injectionStates[id] === "sent") return;
+    const generation = selectionGeneration.current;
+    setError(undefined); setInjectionStates(current => ({ ...current, [id]: "sending" }));
+    try {
+      if (!input.preview) {
+        await input.prepareTarget?.();
+        if (!input.client || !input.sessionId) throw new Error("BTW target unavailable");
+        const handle = await input.client.command("btw.inject", { sessionId: input.sessionId, injectId: id });
+        await waitReceipt(input.client, handle.requestId);
+      }
+      if (generation === selectionGeneration.current) {
+        setInjectionStates(current => ({ ...current, [id]: "sent" }));
+        setTurns(current => current.map(turn => turn.injection?.id === id ? { ...turn, injection: { ...turn.injection, state: "sent" } } : turn));
+      }
+    } catch (cause) {
+      if (generation === selectionGeneration.current) { setInjectionStates(current => ({ ...current, [id]: "ready" })); setError(hostErrorMessage(cause, "注入失败，请重试 / Injection failed; retry")); }
+    }
+  };
+
   const dismissNotice = useCallback(() => setNotice(undefined), []);
 
   return {
@@ -412,6 +436,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
     ask,
     abort,
     branch,
+    ...(injectionAvailable ? { inject } : {}),
     copy,
     dismissNotice,
   };

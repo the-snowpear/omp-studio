@@ -1,3 +1,5 @@
+import type { RuntimeFeatureResultMap } from "@omp-studio/studio-protocol";
+import { PREVIEW_TASK_SPAWN_OPTIONS } from "./preview/taskSpawnPreview";
 import { SlidingTabs } from "./SlidingTabs";
 import { AppSelect } from "./AppSelect";
 import { AgentModelDetails } from "./models/AgentModelDetails";
@@ -116,6 +118,7 @@ type HubAgent = {
 };
 
 type HubJob = {
+  caption?: string | undefined;
   id: string;
   type: string;
   status: StudioJobSnapshot["status"];
@@ -641,6 +644,7 @@ function toHubJob(job: StudioJobSnapshot): HubJob {
     type: job.type,
     status: job.status,
     label: job.label,
+    caption: job.caption,
     durationMs,
     ownerId: job.ownerAgentId,
     ...(job.agentId ? { agentId: job.agentId } : {}),
@@ -1320,6 +1324,11 @@ export function AgentHubPage({
   const [draft, setDraft] = useState("");
   const [spawnTask, setSpawnTask] = useState("");
   const [spawnEffort, setSpawnEffort] = useState("");
+  const [spawnModel, setSpawnModel] = useState("");
+  const [spawnFileMode, setSpawnFileMode] = useState(false);
+  const [spawnFile, setSpawnFile] = useState("");
+  const [spawnOptions, setSpawnOptions] = useState<RuntimeFeatureResultMap["agent.spawn.options"]>();
+  const [spawnOptionsError, setSpawnOptionsError] = useState("");
   const spawnLock = useRef(false);
   const spawnEpoch = useRef(0);
   const [spawnSolutionSpace, setSpawnSolutionSpace] = useState("");
@@ -1403,6 +1412,15 @@ export function AgentHubPage({
       spawnEpoch.current++;
     };
   }, [client, preview, parentSessionId, snapshot?.sessionId]);
+  useEffect(() => {
+    let alive = true;
+    setSpawnOptions(undefined); setSpawnOptionsError(""); setSpawnModel(""); setSpawnFileMode(false);
+    if (modal?.kind !== "spawn" || !spawnDefinition) return;
+    if (preview) { setSpawnOptions(PREVIEW_TASK_SPAWN_OPTIONS); return; }
+    if (!client || !snapshot?.sessionId || missingCap(capabilities, "agent.spawn.options")) return;
+    void client.command("agent.spawn.options", { sessionId: snapshot.sessionId, definition: spawnDefinition }).then(handle => waitReceipt<{ result: RuntimeFeatureResultMap["agent.spawn.options"] }>(client, handle.requestId)).then(({ result }) => { if (alive) setSpawnOptions(result); }).catch(error => { if (alive) setSpawnOptionsError(error instanceof Error ? error.message : String(error)); });
+    return () => { alive = false; };
+  }, [modal?.kind, spawnDefinition, client, snapshot?.sessionId, capabilities, preview]);
   const chatRuntimeConnected = viewingLive && (runtimeConnected ?? connOnline);
   const chatCanSend = (canSend ?? false) && viewingLive && !preview;
   const limited = runtime?.classification === "limited-system";
@@ -2257,6 +2275,7 @@ export function AgentHubPage({
             <span className="ellipsis" style={{ display: "block" }}>
               {job.label}
             </span>
+            {job.caption ? <span className="small muted" style={{ display: "block" }}>{job.caption}</span> : null}
             <span className="mono hub-job-meta">
               {job.id} · {job.type} · {fmtDur(job.durationMs)}
               {agent && job.ownerId !== agent.id ? ` · owner ${job.ownerId}` : ""}
@@ -3059,6 +3078,8 @@ export function AgentHubPage({
                         <label className="tiny muted" htmlFor="naTask">
                           {zh ? "任务描述" : "Assignment"}
                         </label>
+                        <label className="tiny muted"><input type="checkbox" checked={spawnFileMode} disabled={!spawnOptions?.fileEnabled || commandBusy} onChange={event => setSpawnFileMode(event.target.checked)} />{zh ? "使用任务文件" : "Use a task file"}</label>
+                        {spawnFileMode ? <input className="input" id="naTask" value={spawnFile} onChange={event => setSpawnFile(event.target.value)} placeholder={zh ? "当前工作环境中的绝对路径或 local:// 文件" : "Absolute path in this environment or local:// file"} disabled={!spawnAvailable || commandBusy} /> :
                         <textarea
                           className="input"
                           id="naTask"
@@ -3071,7 +3092,7 @@ export function AgentHubPage({
                           value={spawnTask}
                           onChange={(event) => setSpawnTask(event.target.value)}
                           disabled={!spawnAvailable || commandBusy}
-                        />
+                        />}
                       </div>
                     </div>
                     <div className="hub-na-row">
@@ -3142,6 +3163,8 @@ export function AgentHubPage({
                         </AppSelect>
                       </div>
                     </div>
+                    {spawnOptionsError ? <p className="small" role="alert">{spawnOptionsError}</p> : null}
+                    <div className="field"><label className="tiny muted" htmlFor="naModel">{zh ? "单次任务模型" : "Model for this task"}</label><AppSelect id="naModel" className="select" value={spawnModel} disabled={!spawnOptions?.modelSelection || commandBusy} onChange={event => setSpawnModel(event.target.value)}><option value="">{zh ? "使用代理配置" : "Use agent configuration"}</option>{spawnOptions?.models.map(model => <option key={model.selector} value={model.selector}>{model.name} · {model.selector}</option>)}</AppSelect><p className="tiny muted">{spawnOptions?.modelSelection ? (zh ? "只显示原生策略授权的精确模型；本次不会切换到其他模型。" : "Only exact models granted by native policy; this task will not switch to another model.") : (zh ? "可在设置 → 任务中开启单次模型选择。" : "Enable per-call models in Settings → Tasks.")}{spawnOptions ? ` · max effort: ${spawnOptions.maxEffort}` : ""}</p></div>
                     <div className="agent-spawn-config" role="status">
                       <strong>{zh ? "使用代理配置" : "Agent configuration"}</strong>
                       <p className="small muted">{zh
@@ -3173,7 +3196,7 @@ export function AgentHubPage({
                     disabled={
                       !spawnAvailable ||
                       commandBusy ||
-                      !spawnTask.trim() ||
+                      !(spawnFileMode ? spawnFile.trim() : spawnTask.trim()) ||
                       !spawnDefinition
                     }
                     data-tip={
@@ -3219,7 +3242,8 @@ export function AgentHubPage({
                         "agent.spawn",
                         {
                           definition,
-                          assignment: spawnTask.trim(),
+                          ...(spawnFileMode ? { taskFile: spawnFile.trim() } : { assignment: spawnTask }),
+                          ...(spawnModel ? { model: [spawnModel] } : {}),
                           ...(spawnSolutionSpace.trim() ? { solutionSpace: spawnSolutionSpace.trim() } : {}),
                           async: true,
                           ...(spawnEffort ? { effort: spawnEffort } : {}),
@@ -3229,7 +3253,7 @@ export function AgentHubPage({
                         .then((ok) => {
                           if (ok && epoch === spawnEpoch.current) {
                             setModal(null);
-                            setSpawnTask("");
+                            setSpawnTask(""); setSpawnFile(""); setSpawnModel("");
                             setSpawnSolutionSpace("");
                           }
                         })

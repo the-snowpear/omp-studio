@@ -1,10 +1,21 @@
+import type { StudioQueuedCompactionService } from "./queued-compaction-service";
+import type { RuntimeQueueEntry } from "../runtime-queue-protocol";
 import type { AgentSession } from "../../session/agent-session";
 import type { RuntimeQueueOperation, RuntimeQueueResult } from "../runtime-queue-protocol";
 import { SessionControlError } from "./session-control-service";
 export class StudioRuntimeQueueService {
-	constructor(readonly session: AgentSession) {}
+	constructor(
+		readonly session: AgentSession,
+		readonly compaction?: StudioQueuedCompactionService,
+	) {}
 	get(): RuntimeQueueResult {
-		const native = this.session.getQueuedMessageEntries();
+		const messages = this.session.getQueuedMessageEntries();
+		const maintenance = this.compaction?.entry();
+		const native: RuntimeQueueEntry[] = [
+			...messages.filter(row => row.heldFor !== "compaction"),
+			...(maintenance ? [maintenance] : []),
+			...messages.filter(row => row.heldFor === "compaction"),
+		];
 		const entries = [];
 		let size = 0;
 		for (const entry of native.slice(0, 100)) {
@@ -17,12 +28,31 @@ export class StudioRuntimeQueueService {
 			if (size > 512000) break;
 			entries.push(row);
 		}
-		return { entries, total: native.length, truncated: entries.length !== native.length };
+		return {
+			entries,
+			total: native.length,
+			truncated: entries.length !== native.length,
+			...(this.compaction?.error ? { compactionError: this.compaction.error } : {}),
+		};
 	}
 	execute(operation: RuntimeQueueOperation): RuntimeQueueResult {
 		if (operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "The queue belongs to another session");
-		if (operation.kind === "session.queue.get") return this.get();
+		if (operation.kind === "session.queue.get" || operation.kind === "session.compaction.status") return this.get();
+		if (operation.kind === "session.compaction.enqueue") {
+			if (!this.compaction) throw new SessionControlError("COMMAND_BLOCKED", "Queued compaction is unavailable");
+			this.compaction.enqueue(operation.instructions);
+			return this.get();
+		}
+		if (
+			operation.kind === "session.compaction.cancel" ||
+			(operation.kind === "session.queue.entry.remove" && operation.id === this.compaction?.entry()?.id)
+		) {
+			if (operation.id && operation.id !== this.compaction?.entry()?.id)
+				throw new SessionControlError("COMMAND_BLOCKED", "The queued compaction changed");
+			this.compaction?.cancel();
+			return this.get();
+		}
 		if (this.session.isCompacting) throw new SessionControlError("BUSY_COMPACTING", "Wait for compaction to finish");
 		const entry = this.session
 			.getQueuedMessageEntries()

@@ -4,6 +4,20 @@
 
 这是 **功能 → 文件** 的地图，不是架构愿景。协议形状以类型为准，不在这里复述。搬家后改这一份，不要在 `AGENTS.md` 复制表格。
 
+## OMP 18.18.0 适配入口
+
+| 功能 | Renderer / 预览 | Runtime / 协议 |
+| --- | --- | --- |
+| worker 子 Agent、任务文件与精确模型 | `AgentHub.tsx`、`preview/taskSpawnPreview.ts` | overlay `services/studio-thread-service.ts`、`task-options-service.ts`、`agent-hub-service.ts`；`contracts/agents-jobs.ts`、`runtime-upgrade.ts` |
+| 排队压缩、历史重命名/置顶/占用 | `composer/RuntimeQueueBar.tsx`、`HistoryPage.tsx`、`preview/runtimeQueuePreview.ts` | overlay `services/queued-compaction-service.ts`、`compaction-yield.ts`、`upgrade-service.ts`；`contracts/runtime-queue.ts` |
+| 中途回复、扩展、BTW 注入、预测 | `conversation/conversationStore.ts`、`ExtensionLinks.tsx`、`btw/BtwPanel.tsx`、`composer/useWordPrediction.ts`；`preview/conversationFixtures.ts`、`btwPreview.ts`、`nextMessagePreview.ts` | overlay `services/conversation-entry-identity.ts`、`conversation-live-projector.ts`、`session-transcript-service.ts`、`extension-links-service.ts`、`btw-injection.ts`、`message-prediction.ts` |
+| Shell 回放、缓存、Eval 与作业 | `conversation/ShellView.tsx`、`PromptCachePanel.tsx`、`ContextCard.tsx`、`ToolBody.tsx`、`JobInspector.tsx`；`preview/runtimeViewsPreview.ts`、`nativeToolGallery.ts`、`hubPreview.ts` | overlay `services/runtime-view-service.ts`、`job-inspect.ts`；`contracts/runtime-views.ts`、`shell-view.ts`、`runtime-features.ts`、`benchmarks.ts` |
+| 模型与新设置 | `ModelConfigPage.tsx`、`settings/runtime18180Settings.ts`；`preview/modelConfigFixtures.ts`、`featureSettingsPreview.ts` | `scripts/model-catalog.mjs`、Host `omp-models-adapter.ts`、`provider-yaml-draft.ts`；overlay `services/runtime-catalog-service.ts`、`feature-settings-service.ts` |
+| Live WebRTC 与语音准备 | `media/LiveAudioPane.tsx`、`webrtcCapture.ts`、`composer/DictationControl.tsx`；`preview/dictationPreview.ts` | overlay `services/live-audio-service.ts`、`dictation-capture.ts`；瞬时 `contracts/runtime-views.ts`，原生 Live controller |
+| WebMCP | `browser/WebMcpPane.tsx`、`ManagedBrowserPane.tsx`；`preview/webmcpPreview.ts` | overlay `services/managed-browser-service.ts`、原生 `tools/browser/` controller 与 tab bridge；Desktop `managed-browser-relay.ts`；`contracts/webmcp.ts` |
+
+版本变化和验收见 [18.18.0 迁移报告](../docs/migrations/omp-18.18.0.md)。
+
 ## 调用链
 
 ```

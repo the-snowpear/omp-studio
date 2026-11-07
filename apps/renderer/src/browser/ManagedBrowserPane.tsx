@@ -1,3 +1,5 @@
+import type { StudioClient } from "@omp-studio/client-contract";
+import { WebMcpPane } from "./WebMcpPane";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
 import type { BrowserElementReference, ManagedBrowserPage } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
@@ -62,8 +64,8 @@ function Placeholder({ page, copy }: { page: ManagedBrowserPage; copy: Copy }) {
 }
 
 /** One web page of a chat, shown in its own dock tab. */
-export function ManagedBrowserPane({ sessionId, pageId, visible, width = 0, foreign = false, onReferences, onActivate }: {
-  sessionId: string; pageId: string; visible: boolean; width?: number; foreign?: boolean;
+export function ManagedBrowserPane({ client, sessionId, pageId, visible, width = 0, foreign = false, onReferences, onActivate }: {
+  client?: StudioClient | undefined; sessionId: string; pageId: string; visible: boolean; width?: number; foreign?: boolean;
   onReferences?: ((references: BrowserElementReference[]) => void) | undefined; onActivate?: (() => void) | undefined;
 }) {
   const { preview, marks } = usePreviewMode();
@@ -73,7 +75,7 @@ export function ManagedBrowserPane({ sessionId, pageId, visible, width = 0, fore
   const api = useSurfaceChrome()?.managedBrowser, document = useSurfaceDocument();
   const surfaceId = useId();
   const viewport = useRef<HTMLDivElement>(null), address = useRef<HTMLInputElement>(null), findInput = useRef<HTMLInputElement>(null);
-  const [view, setView] = useState<BrowserView | "page">("page");
+  const [view, setView] = useState<BrowserView | "page" | "webmcp">("page");
   const [find, setFind] = useState<string | null>(null);
   const human = snap.state?.control === "human";
   const blank = page?.url === "about:blank" && !page.opener?.popup;
@@ -98,6 +100,7 @@ export function ManagedBrowserPane({ sessionId, pageId, visible, width = 0, fore
   if (!session) content = <BrowserPageState kind="read-failed" copy={copy} />;
   else if (!snap.state) content = <BrowserPageState kind={snap.readFailed ? "read-failed" : "loading"} copy={copy} {...(snap.readFailed ? { onRetry: () => void session.read() } : {})} />;
   else if (!page) content = <BrowserPageState kind="closed" copy={copy} />;
+  else if (view === "webmcp") content = <WebMcpPane client={client} sessionId={sessionId} pageId={pageId} documentId={page.documentId} agentControl={snap.state.control === "agent"} visible={visible} copy={copy} onBack={() => setView("page")} />;
   else if (view !== "page") content = <BrowserViews view={view} session={session} snap={snap} copy={copy} onBack={() => setView("page")} />;
   else if (blank) content = <BrowserStartPage session={session} snap={snap} copy={copy} pageId={page.id} autoFocus={visible} />;
   else if (page.status === "crashed" || page.status === "error") content = <BrowserPageState kind="failed" page={page} copy={copy} busy={snap.busy.includes(page.id)}

@@ -38,6 +38,7 @@ const MAX_RETAINED_WIDGETS = MAX_LIST_LIMIT + RECENT_SETTLED_LIMIT;
 export type StudioJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface StudioJobSnapshot {
+	caption?: string;
 	jobId: string;
 	generation: number;
 	ownerAgentId?: string;
@@ -110,6 +111,7 @@ export interface StudioJobsPort {
 	 * widget shown, which is what lets its spec be authored.
 	 */
 	widgetView?(job: AsyncJob): JobWidgetView | undefined;
+	widgetCaption?(job: AsyncJob): string | undefined;
 }
 
 /** Hierarchy port; structurally compatible with AgentRegistry.get. */
@@ -289,7 +291,8 @@ export class StudioJobService {
 			...(job.ownerId !== undefined ? { ownerAgentId: job.ownerId } : {}),
 			...(job.agentId !== undefined ? { agentId: job.agentId } : {}),
 			type: job.type,
-			label: job.label,
+			label: job.intent ?? job.label,
+			...(this.#jobs.widgetCaption?.(job) ? { caption: this.#jobs.widgetCaption(job) } : {}),
 			status,
 			startedAt: new Date(job.startTime).toISOString(),
 			...(job.status !== "running" && job.endTime !== undefined

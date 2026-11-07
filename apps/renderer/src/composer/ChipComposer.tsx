@@ -996,6 +996,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         }}
       />
       {predictionState.ghost?<span className="cm-prediction" aria-hidden="true" style={{left:predictionState.ghost.left,top:predictionState.ghost.top,maxWidth:predictionState.ghost.width}}>{predictionState.ghost.suffix}<kbd>Tab</kbd></span>:null}
+      {predictionState.menuChoices ? <div className="cm-prediction-options" role="listbox" aria-label="Message suggestions">{predictionState.menuChoices.map((text, index) => <button type="button" role="option" aria-selected={index === predictionState.choiceIndex} key={text} onMouseDown={event => event.preventDefault()} onClick={() => predictionState.choose(index)}>{text}</button>)}</div> : null}
       {predictionState.error?<span className="cm-prediction-error" role="status">{predictionState.error}</span>:null}
       {legacyPrediction?<span aria-hidden="true" data-prediction="true" style={{position:"absolute",left:legacyPrediction.left,top:legacyPrediction.top,opacity:0.45,pointerEvents:"none",whiteSpace:"pre"}}>{legacyPrediction.suffix}</span>:null}
       {commandOpen ? (

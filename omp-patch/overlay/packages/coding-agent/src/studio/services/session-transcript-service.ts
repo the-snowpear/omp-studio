@@ -1,3 +1,4 @@
+import { isReplyWrite } from "@oh-my-pi/pi-tui/chat/reply-write";
 import { readModelMentions } from "../../session/model-mentions";
 import { expandModelMentionTags } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
@@ -91,6 +92,7 @@ function mapContentBlock(block: unknown, fallbackToolCallId: string): Conversati
 			if (args.arguments !== undefined) mapped.arguments = args.arguments;
 			truncated ||= args.truncated;
 		}
+		if (isReplyWrite(toolName.text, record.arguments) === true) mapped.presentation = "reply";
 		if (truncated) mapped.truncated = true;
 		return mapped;
 	}
@@ -151,7 +153,7 @@ function mapMessageEntry(entry: SessionEntry & { type: "message" }): Conversatio
 		return undefined;
 	}
 	if (isHarnessInjectedUserMessage(message)) return undefined;
-	const role = publicConversationRole(message.role);
+	const role = publicConversationRole(message.role, message);
 	if (role === undefined) return undefined;
 	const content: ConversationContentBlock[] = [];
 	if (typeof message.content === "string") {
@@ -199,23 +201,21 @@ function mapCompactionEntry(entry: SessionEntry & { type: "compaction" }): Conve
 }
 
 function projectEntry(entry: SessionEntry): ConversationItem | undefined {
-	if (
-		entry.type === "custom_message" &&
-		entry.customType === "studio-computer-continue" &&
-		entry.display &&
-		entry.attribution === "user"
-	) {
-		const text = sanitizePublicText(
-			typeof entry.content === "string" ? entry.content : "",
-			CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES,
-		);
+	if (entry.type === "custom_message") {
+		const role = publicConversationRole("custom", { ...entry, role: "custom" });
+		if (!role) return undefined;
+		const blocks = typeof entry.content === "string" ? [{ type: "text", text: entry.content }] : entry.content;
+		const content = blocks.flatMap(block => {
+			const mapped = mapContentBlock(block, `extension:${entry.id}`);
+			return mapped ? [mapped] : [];
+		});
 		return {
 			kind: "message",
 			itemId: entry.id,
 			parentId: entry.parentId,
 			createdAt: entry.timestamp,
-			role: "user",
-			content: [{ type: "text", text: text.text }],
+			role,
+			content,
 		};
 	}
 	if (IGNORED_ENTRY_TYPES.has(entry.type)) return undefined;

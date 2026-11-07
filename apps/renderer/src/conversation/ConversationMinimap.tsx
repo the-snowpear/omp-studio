@@ -48,6 +48,7 @@ function now(): number {
 
 export type MinimapMarkType =
   | "user"
+  | "extension"
   | "assistant"
   | "error"
   | "bash"
@@ -74,6 +75,7 @@ export type MinimapMark = {
 
 const MARK_LABEL_KEY: Record<MinimapMarkType, string> = {
   user: "conversation.minimapUser",
+  extension: "conversation.minimapExtension",
   assistant: "conversation.minimapAssistant",
   error: "conversation.minimapError",
   bash: "conversation.minimapBash",
@@ -153,6 +155,7 @@ function assistantPreview(segments: readonly AssistantSegment[]): string {
 const markCache = new WeakMap<TimelineRow, MinimapMark>();
 
 function buildMark(row: TimelineRow, turn: number): MinimapMark {
+  if (row.type === "extension") return { itemId: row.itemId, type: "extension", labelKey: MARK_LABEL_KEY.extension, preview: row.text, turn };
   if (row.type === "user") {
     const failed = row.pending === "failed" || row.error !== undefined;
     return {

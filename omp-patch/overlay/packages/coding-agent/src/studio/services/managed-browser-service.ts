@@ -6,12 +6,34 @@ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import type { AgentSession } from "../../session/agent-session";
 import { startRelayServer, type RelayServer } from "../../tools/browser/relay/server";
 import type { RelayKind } from "../../tools/browser/relay/kind";
+import { acquireBrowser, holdBrowser, releaseBrowser } from "../../tools/browser/registry";
+import { acquireTab, listTabs, runInTab } from "../../tools/browser/tab-supervisor";
+import type { TabWebMcpRequest } from "../../tools/browser/tab-protocol";
+import type {
+	StudioWebMcpCatalog,
+	WebMcpListOptions,
+	WebMcpListResult,
+	WebMcpOperation,
+	WebMcpInvokeResult,
+} from "../webmcp-protocol";
 import { ownedStudioSessions } from "./owned-sessions";
 
 const services = new Map<string, StudioManagedBrowserService>();
 
-export function managedBrowserFor(sessionId: string | undefined): StudioManagedBrowserService | undefined {
+export type StudioManagedBrowserAccess = Pick<
+	StudioManagedBrowserService,
+	"kind" | "begin" | "name" | "contains" | "webMcpList" | "webMcpInvoke"
+>;
+let remoteAccess: ((sessionId: string) => StudioManagedBrowserAccess | undefined) | undefined;
+export function installManagedBrowserAccess(
+	resolve: (sessionId: string) => StudioManagedBrowserAccess | undefined,
+): void {
+	remoteAccess = resolve;
+}
+
+export function managedBrowserFor(sessionId: string | undefined): StudioManagedBrowserAccess | undefined {
 	if (!sessionId) return undefined;
+	if (remoteAccess) return remoteAccess(sessionId);
 	return [...services.values()].find(service =>
 		ownedStudioSessions(service.session).some(session => session.sessionId === sessionId),
 	);
@@ -64,7 +86,7 @@ export class StudioManagedBrowserService {
 		);
 		if (this.#disposed) this.dispose();
 	}
-	async begin(signal?: AbortSignal): Promise<() => void> {
+	async begin(signal?: AbortSignal, readOnly = false): Promise<() => void> {
 		await this.#ready;
 		const deadline = Date.now() + 15000;
 		while (!this.#disposed && (!this.#server?.bridge.ready || !this.#initialized) && Date.now() < deadline) {
@@ -76,7 +98,7 @@ export class StudioManagedBrowserService {
 			throw new ToolError(
 				"The Studio browser is disconnected. Reconnect the local desktop browser before continuing.",
 			);
-		if (this.#control !== "agent")
+		if (!readOnly && this.#control !== "agent")
 			throw new ToolError(
 				"The user controls this chat's browser. Wait for the user to return browser control; other work may continue.",
 			);
@@ -111,6 +133,91 @@ export class StudioManagedBrowserService {
 	}
 	contains(name: string): boolean {
 		return name.startsWith(`${this.session.sessionId}::`);
+	}
+
+	async webMcpList(sessionId: string, pageId: string, options?: WebMcpListOptions): Promise<StudioWebMcpCatalog> {
+		if (!this.kind || sessionId !== this.session.sessionId)
+			return {
+				pageId,
+				status: "unavailable",
+				tools: [],
+				truncated: false,
+				untrusted: true,
+				invocationAvailable: false,
+				reason: "Connect this chat's managed desktop browser to inspect its page tools.",
+			};
+		const { value, documentId, chromiumMajor } = await this.#webMcp(pageId, { action: "list", options });
+		return {
+			...(value as WebMcpListResult),
+			pageId,
+			...(documentId ? { documentId } : {}),
+			invocationAvailable: chromiumMajor >= 149,
+		};
+	}
+
+	async webMcpInvoke(operation: WebMcpOperation): Promise<WebMcpInvokeResult> {
+		if (operation.sessionId !== this.session.sessionId) throw new ToolError("WebMCP belongs to another chat.");
+		const { value } = await this.#webMcp(
+			operation.pageId,
+			{ action: "invoke", name: operation.name, params: operation.params, options: operation.options },
+			operation.documentId,
+		);
+		return value as WebMcpInvokeResult;
+	}
+
+	async #webMcp(
+		pageId: string,
+		operation: TabWebMcpRequest,
+		expectedDocument?: string,
+	): Promise<{ value: unknown; documentId?: string; chromiumMajor: number }> {
+		const timeoutMs = operation.action === "invoke" ? (operation.options?.timeout ?? 10000) : 10000;
+		const signal = AbortSignal.timeout(timeoutMs);
+		const release = await this.begin(signal, operation.action !== "invoke");
+		try {
+			const target = this.#server?.bridge.listTargets().find(row => row.studioPageId === pageId);
+			if (!target || !this.kind) throw new ToolError("This managed page is closed or unavailable.");
+			if (operation.action === "invoke" && (!expectedDocument || target.studioDocumentId !== expectedDocument))
+				throw new ToolError("The page navigated. Refresh its WebMCP tools before invoking one.");
+			const toolSession = this.session.studioToolSession;
+			if (!toolSession) throw new ToolError("The browser tool session is unavailable.");
+			const browser = await acquireBrowser(this.kind, { cwd: toolSession.cwd, signal });
+			holdBrowser(browser);
+			try {
+				const name =
+					listTabs().find(tab => this.contains(tab.name) && tab.targetId === target.id)?.name ??
+					this.name(`webmcp:${pageId}`);
+				await acquireTab(name, browser, {
+					target: target.id,
+					timeoutMs,
+					signal,
+					persist: true,
+					ownerSessionId: this.session.studioEvalKernelOwnerId,
+				});
+				const version = "browser" in browser ? await browser.browser.version() : "";
+				if (
+					operation.action === "invoke" &&
+					this.#server?.bridge.listTargets().find(row => row.studioPageId === pageId)?.studioDocumentId !==
+						expectedDocument
+				)
+					throw new ToolError("The page navigated. Refresh its WebMCP tools before invoking one.");
+				const result = await runInTab(name, {
+					code: "",
+					webmcp: operation,
+					timeoutMs,
+					signal,
+					session: toolSession,
+				});
+				return {
+					value: result.returnValue,
+					...(target.studioDocumentId ? { documentId: target.studioDocumentId } : {}),
+					chromiumMajor: Number(/(?:Chrome|Chromium)\/(\d+)/u.exec(version)?.[1] ?? 0),
+				};
+			} finally {
+				await releaseBrowser(browser, { kill: false });
+			}
+		} finally {
+			release();
+		}
 	}
 	dispose(): void {
 		this.#disposed = true;

@@ -1,3 +1,4 @@
+import { RuntimeToolProvider, type RuntimeToolScope } from "./ShellView";
 import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode, type RefObject } from "react";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
@@ -56,6 +57,7 @@ function prefersReducedMotion(): boolean {
 }
 
 export function ConversationPane({
+  runtimeTools,
   snapshot,
   liveEngine,
   onLoadOlder,
@@ -79,6 +81,7 @@ export function ConversationPane({
   onRetryTurn,
   retryTurnDisabledReason,
 }: {
+  runtimeTools?: RuntimeToolScope | undefined;
   snapshot?: ConversationSnapshot;
   /** Hot token/tool stream. Kept here so animation-frame updates do not
    * re-render the surrounding workbench and composer. */
@@ -339,7 +342,7 @@ export function ConversationPane({
           )}
         </>
       ) : (
-        <ConvoTranscript
+        <RuntimeToolProvider {...runtimeTools} sourceSessionId={state.identity?.sessionId}><ConvoTranscript
           scrollerRef={scrollerRef}
           rows={displayRows}
           demo={demo}
@@ -354,7 +357,7 @@ export function ConversationPane({
           {...(planLink === undefined ? {} : { planLink })}
           {...(onRetryTurn === undefined ? {} : { onRetryTurn })}
           {...(retryTurnDisabledReason === undefined ? {} : { retryTurnDisabledReason })}
-        />
+        /></RuntimeToolProvider>
       )}
       {state.hydrateStatus === "resyncing" ? (
         <div className="convo-notice info" role="status">正在同步</div>

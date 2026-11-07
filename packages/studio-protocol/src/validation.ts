@@ -1,3 +1,4 @@
+import { isRuntimeViewKind } from "./contracts/runtime-views.js";
 import { GUI_SETTING_KEYS, isGuiSettingKey, validateGuiSetting } from "./contracts/gui-settings.js";
 import { isContextViewKind } from "./contracts/context-view.js";
 import { isWorkbenchOperationKind, validateWorkbenchOperation } from "./contracts/workbench.js";
@@ -1379,11 +1380,11 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "agent.spawn": {
-    keys: ["kind", "definition", "assignment", "context", "async", "isolation", "effort", "model", "solutionSpace"],
+    keys: ["kind", "definition", "assignment", "taskFile", "context", "async", "isolation", "effort", "model", "solutionSpace"],
     validate: (operation) => {
       if (operation.model !== undefined && (!Array.isArray(operation.model) || operation.model.length === 0 || operation.model.length > 8 || operation.model.some(value => typeof value !== "string" || !value.trim() || value.length > 1024 || /[\u0000-\u001f]/u.test(value)))) throw new ContractValidationError("invalid per-spawn model chain", "$request.operation.model");
       const definition = nonEmptyString(operation.definition, "$request.operation.definition");
-      const assignment = nonEmptyString(operation.assignment, "$request.operation.assignment");
+      const assignment = operation.assignment === undefined ? "" : nonEmptyString(operation.assignment, "$request.operation.assignment");
       if (operation.solutionSpace !== undefined && nonEmptyString(operation.solutionSpace, "$request.operation.solutionSpace").length > MAX_AGENT_TEXT_LENGTH) throw new ContractValidationError("solutionSpace is too long", "$request.operation.solutionSpace");
       if (definition.length > MAX_AGENT_DEFINITION_LENGTH) {
         throw new ContractValidationError("definition is too long", "$request.operation.definition");
@@ -1586,6 +1587,7 @@ export function parseFoundationStudioRequest(value: unknown): StudioRequest {
   const operation = record(input.operation, "$request.operation");
   const kind = nonEmptyString(operation.kind, "$request.operation.kind");
   if (kind === "session.owner.update") return input as unknown as StudioRequest;
+  if (isRuntimeViewKind(kind)) return input as unknown as StudioRequest;
   if (isContextViewKind(kind)) return input as unknown as StudioRequest;
   if (isWorkbenchOperationKind(kind)) {
     try { validateWorkbenchOperation(operation); } catch (error) { throw new ContractValidationError(error instanceof Error ? error.message : "invalid operation", "$request.operation"); }

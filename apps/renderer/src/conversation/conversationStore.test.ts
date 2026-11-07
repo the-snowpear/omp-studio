@@ -7,7 +7,7 @@ import { timelineStructureToken, tailInterrupted } from "./conversationViewModel
 function item(id: string, role: "user" | "assistant", text: string): ConversationMessageItem {
   return { kind: "message", itemId: id, parentId: null, createdAt: id, role, content: [{ type: "text", text }] };
 }
-function started(sessionId: SessionId, messageId: string, turnId = "turn"): ConversationRuntimeEvent {
+function started(sessionId: SessionId, messageId: string, turnId = "turn"): Extract<ConversationRuntimeEvent, { kind: "conversation.message.started" }> {
   return { kind: "conversation.message.started", sessionId, turnId, messageId, role: "assistant", createdAt: messageId };
 }
 function delta(sessionId: SessionId, messageId: string, value: string, turnId = "turn"): ConversationRuntimeEvent {
@@ -25,6 +25,41 @@ function create(session = "session") {
   const frames = scheduler(); const sessionId = session as SessionId;
   return { sessionId, frames, store: new ConversationStore({ target: { sessionId }, identity: { sessionId }, generation: 1, scheduler: frames.frame }) };
 }
+
+it("keeps extension notifications distinct from assistant replies when the live message is reloaded", () => {
+  const { store, sessionId, frames } = create();
+  const extension: ConversationMessageItem = { ...item("extension", "assistant", "扩展已准备"), role: "extension" };
+  store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
+  store.applyEvent({ ...started(sessionId, "extension"), role: "extension" }, 1);
+  store.applyEvent({ kind: "conversation.message.completed", sessionId, turnId: "turn", messageId: "extension", item: extension }, 2);
+  frames.flush();
+  expect(store.getSnapshot().rows).toMatchObject([{ type: "extension", text: "扩展已准备" }]);
+  store.hydrate({ items: [extension], headCursor: "h2" as never, hasMoreBefore: false });
+  expect(store.getSnapshot().rows).toMatchObject([{ type: "extension", text: "扩展已准备" }]);
+  store.dispose();
+});
+
+it("keeps intermediate replies as prose through streaming, completion and history reload without duplicating them", () => {
+  const { store, sessionId, frames } = create();
+  store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
+  store.applyEvent(started(sessionId, "reply-owner"), 1);
+  const start: ConversationRuntimeEvent = { kind: "conversation.tool.started", sessionId, turnId: "turn", messageId: "reply-owner", toolCallId: "out", toolName: "write", arguments: { path: "out://", content: "中途回复" }, presentation: "reply", startedAt: "now" };
+  store.applyEvent(start, 2);
+  store.applyEvent({ kind: "conversation.tool.updated", sessionId, turnId: "turn", toolCallId: "out", updateMode: "replace", output: "中途回复", presentation: "reply" }, 3);
+  store.applyEvent(start, 4); frames.flush();
+  const prose = () => store.getSnapshot().rows.flatMap(row => row.type === "assistant" ? row.segments.filter(segment => segment.type === "text").map(segment => segment.text) : []);
+  expect(prose()).toEqual(["中途回复"]);
+  const finished: ConversationMessageItem = { kind: "message", itemId: "reply-owner", parentId: null, createdAt: "now", role: "assistant", content: [
+    { type: "toolCall", toolCallId: "out", toolName: "write", presentation: "reply", arguments: { path: "out://", content: "中途回复" } },
+    { type: "text", text: "继续处理" },
+    { type: "toolCall", toolCallId: "shell", toolName: "bash" },
+    { type: "toolResult", toolCallId: "shell", isError: false, data: { replies: ["Shell 中途回复"] } },
+  ] };
+  store.applyEvent({ kind: "conversation.message.completed", sessionId, turnId: "turn", messageId: "reply-owner", item: finished }, 5); frames.flush();
+  expect(prose()).toEqual(["中途回复", "继续处理", "Shell 中途回复"]);
+  store.hydrate({ items: [finished], headCursor: "history" as never, hasMoreBefore: false });
+  expect(prose()).toEqual(["中途回复", "继续处理", "Shell 中途回复"]);
+});
 
 it("keeps a background tool live across the parent turn and applies its final cancellation after hydration", () => {
   const { store, sessionId, frames } = create();

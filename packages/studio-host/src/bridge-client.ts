@@ -1,3 +1,4 @@
+import type { RuntimeViewOperation, RuntimeViewResultMap } from "@omp-studio/studio-protocol";
 import type { SessionOwnerState } from "@omp-studio/studio-protocol";
 import type { ContextViewOperation, ContextViewResultMap, ComputerWorkspaceQuery, ComputerWorkspaceResultMap, StudioComputerQueryRequest, StudioComputerQueryResponse, StudioComputerEventEnvelope } from "@omp-studio/studio-protocol";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -347,6 +348,13 @@ export class StudioBridgeClient {
     const snapshot = this.#projection.snapshot();
     if (this.#state !== "ready" || !snapshot || this.#runtimeEpoch === undefined) return;
     await this.invoke({ type: "studio.request", requestId: (this.options.createRequestId ?? randomUUID)() as RequestId, runtimeEpoch: this.#runtimeEpoch, operation: { kind: "session.owner.update", sessionId: snapshot.sessionId, state } });
+  }
+
+  async readRuntimeView<K extends RuntimeViewOperation["kind"]>(operation: Extract<RuntimeViewOperation, { kind: K }>): Promise<RuntimeViewResultMap[K]> {
+    if (this.#state !== "ready" || this.#runtimeEpoch === undefined) throw new StudioHostError("OUTCOME_UNKNOWN", "Runtime view unavailable");
+    const receipt = await this.invoke({ type: "studio.request", requestId: (this.options.createRequestId ?? randomUUID)() as RequestId, runtimeEpoch: this.#runtimeEpoch, operation });
+    if (receipt.status !== "completed") throw new StudioHostError(receipt.error?.code ?? "OUTCOME_UNKNOWN", receipt.error?.message ?? "Runtime view failed");
+    return receipt.result as RuntimeViewResultMap[K];
   }
 
   async readContext<K extends ContextViewOperation["kind"]>(operation: Extract<ContextViewOperation, { kind: K }>): Promise<ContextViewResultMap[K]> {

@@ -1,3 +1,4 @@
+import type { RuntimeViewOperation, RuntimeViewResultMap } from "@omp-studio/studio-protocol";
 import type { SessionOwnerState } from "@omp-studio/studio-protocol";
 import type { ContextViewOperation, ContextViewResultMap, ComputerWorkspaceQuery, ComputerWorkspaceResultMap, StudioComputerEventEnvelope } from "@omp-studio/studio-protocol";
 
@@ -185,6 +186,14 @@ export class StudioRuntimeSessionController {
    * command: it is not recorded on the command ledger.
    */
   updateOwnerState(state: SessionOwnerState): void { void this.bridge.updateOwner(state).catch(() => {}); }
+
+  async readRuntimeView<K extends RuntimeViewOperation["kind"]>(operation: Extract<RuntimeViewOperation, { kind: K }>): Promise<RuntimeViewResultMap[K]> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (!snapshot || snapshot.sessionId !== operation.sessionId) throw new StudioHostError("OUTCOME_UNKNOWN", "Runtime view session unavailable");
+    const result = await this.bridge.readRuntimeView(operation);
+    if (this.bridge.projectionSnapshot()?.sessionId !== operation.sessionId) throw new StudioHostError("CURSOR_STALE", "Session changed during Runtime view");
+    return result;
+  }
 
   async readContext<K extends ContextViewOperation["kind"]>(operation: Extract<ContextViewOperation, { kind: K }>): Promise<ContextViewResultMap[K]> {
     const snapshot = this.bridge.projectionSnapshot();

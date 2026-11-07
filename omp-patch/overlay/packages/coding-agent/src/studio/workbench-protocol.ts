@@ -1,4 +1,10 @@
 import {
+	EXTENSION_LINK_KINDS,
+	type ExtensionLinkOperation,
+	type ExtensionLinkResultMap,
+} from "./extension-links-protocol";
+import { WEBMCP_KINDS, type WebMcpOperation, type WebMcpResultMap } from "./webmcp-protocol";
+import {
 	EVALUATION_WORKSPACE_KINDS,
 	isEvaluationWorkspaceKind,
 	type EvaluationWorkspaceOperation,
@@ -278,7 +284,14 @@ export interface RuntimeModelChoice {
 	serviceTiers?: string[];
 	promptCache?: { short?: number; long?: number };
 	promptCacheConfig?: { short?: number; long?: number };
-	compatibility?: { preferWebsockets?: boolean; useResponsesLite?: boolean; toolMode?: "code_mode_only" };
+	compatibility?: {
+		supportsMessageThreads?: boolean;
+		toolNamePrefix?: string;
+		statefulResponses?: boolean;
+		preferWebsockets?: boolean;
+		useResponsesLite?: boolean;
+		toolMode?: "code_mode_only";
+	};
 	selector: string;
 	name: string;
 	provider: string;
@@ -297,6 +310,8 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
+	| ExtensionLinkOperation
+	| WebMcpOperation
 	| EvaluationWorkspaceOperation
 	| AdvisorConfigOperation
 	| LocalResourceOperation
@@ -392,6 +407,8 @@ export interface WorkbenchResultMap
 	"runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
 export const WORKBENCH_OPERATION_KINDS = [
+	...EXTENSION_LINK_KINDS,
+	...WEBMCP_KINDS,
 	...EVALUATION_WORKSPACE_KINDS,
 	...ADVISOR_CONFIG_KINDS,
 	...LOCAL_RESOURCE_KINDS,
@@ -457,6 +474,9 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 	"agent.model.inspect",
 	"session.restore.inspect",
 	"session.queue.get",
+	"session.compaction.enqueue",
+	"session.compaction.cancel",
+	"session.compaction.status",
 	"preferences.native.get",
 	...FEATURE_SETTINGS_READ_KINDS,
 	"session.portability.status",
@@ -570,6 +590,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	if (!value || typeof value !== "object") throw new Error("Invalid workbench operation");
 	const kind = (value as Record<string, unknown>).kind;
 	if (typeof kind !== "string" || !isWorkbenchOperationKind(kind)) throw new Error("Unknown workbench operation");
+	if (kind === "extensions.links.activate" || kind === "browser.webmcp.invoke") return;
 	if (isComputerWorkspaceCommand(kind)) return;
 	if (isEvaluationWorkspaceKind(kind)) return;
 	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
@@ -695,6 +716,8 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	const fields: Record<
 		Exclude<
 			WorkbenchOperation["kind"],
+			| ExtensionLinkOperation["kind"]
+			| WebMcpOperation["kind"]
 			| EvaluationWorkspaceOperation["kind"]
 			| AdvisorConfigOperation["kind"]
 			| LocalResourceOperation["kind"]
@@ -794,6 +817,7 @@ function serviceRow(value: unknown): void {
 	if (row.ownerAgentId !== undefined) text(row.ownerAgentId);
 }
 export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value: unknown): void {
+	if (kind === "extensions.links.activate" || kind === "browser.webmcp.invoke") return;
 	if (isComputerWorkspaceCommand(kind)) return;
 	if (isEvaluationWorkspaceKind(kind)) return;
 	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
@@ -988,7 +1012,14 @@ export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value:
 							throw new Error("Invalid prompt cache lifetime");
 				}
 			if (row.compatibility !== undefined) {
-				const compat = record(row.compatibility, ["preferWebsockets", "useResponsesLite", "toolMode"]);
+				const compat = record(row.compatibility, [
+					"preferWebsockets",
+					"useResponsesLite",
+					"toolMode",
+					"supportsMessageThreads",
+					"toolNamePrefix",
+					"statefulResponses",
+				]);
 				for (const field of ["preferWebsockets", "useResponsesLite"])
 					if (compat[field] !== undefined && typeof compat[field] !== "boolean")
 						throw new Error("Invalid model compatibility flag");

@@ -107,6 +107,8 @@ export function JobInspector({
           <dl className="ji-kv">
             <dt>id</dt>
             <dd>{job.id}</dd>
+            {shown.purpose ? <div><dt>{zh ? "用途" : "Purpose"}</dt><dd>{shown.purpose}</dd></div> : null}
+            {shown.caption ? <div><dt>{zh ? "说明" : "Caption"}</dt><dd>{shown.caption}</dd></div> : null}
             {shown.command ? (
               <>
                 <dt>{zh ? "命令" : "command"}</dt>

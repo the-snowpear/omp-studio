@@ -1,3 +1,4 @@
+import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import * as path from "node:path";
 import { directoryExists } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../../session/agent-session";
@@ -48,6 +49,12 @@ export class StudioUpgradeService {
 						selector: model.provider + "/" + model.id,
 						name: model.name,
 						image: model.input.includes("image"),
+						efforts: getSupportedEfforts(model).flatMap(level => {
+							const mention = this.session.resolveModelMention(`${model.provider}/${model.id}:${level}`);
+							return mention?.thinkingLevel === level
+								? [{ selector: mention.selector, name: mention.name }]
+								: [];
+						}),
 					})),
 					activeModelImage: this.session.model?.input.includes("image") === true,
 				};

@@ -31,10 +31,15 @@ export async function inspectStudioJob(session: AgentSession, jobId: string): Pr
 	if (inspection === undefined) {
 		throw new SessionControlError("INVALID_ARGUMENT", `Job "${jobId}" is not in this session's job tree`);
 	}
+	const job = session.asyncJobManager?.getJob(jobId);
+	if (job) session.asyncJobManager?.widgets?.requestCaption(job);
+	const caption = job && session.asyncJobManager?.widgets?.caption(job);
 	const output = inspection.output === undefined ? "" : outputTail(cleanText(shortenHomePath(inspection.output)));
 	const command = inspection.command === undefined ? "" : cleanText(inspection.command).slice(0, MAX_COMMAND_CHARS);
 	return {
 		jobId,
+		...(job?.intent ? { purpose: cleanText(job.intent) } : {}),
+		...(caption ? { caption: cleanText(caption) } : {}),
 		...(command ? { command } : {}),
 		...(inspection.cwd ? { cwd: shortenHomePath(inspection.cwd) } : {}),
 		pids: inspection.pids.filter(pid => Number.isSafeInteger(pid) && pid > 0).slice(0, MAX_PIDS),

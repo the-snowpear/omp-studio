@@ -1,3 +1,4 @@
+import { isAgentViewSession } from "../../session/agent-session-handle";
 /**
  * StudioAgentHubService - presentation-neutral agent roster and control
  * service for the Studio Agent Hub (05_AGENT_HUB_AND_JOBS.md, WP-050..WP-053).
@@ -189,7 +190,8 @@ export interface StudioIrcBusPort {
 export interface StudioAgentSpawnRequest {
 	model?: string[];
 	definition: string;
-	assignment: string;
+	assignment?: string;
+	taskFile?: string;
 	solutionSpace?: string;
 	context?: string;
 	async?: boolean;
@@ -502,7 +504,8 @@ export class StudioAgentHubService {
 	async spawn(args: {
 		model?: string[];
 		definition: string;
-		assignment: string;
+		assignment?: string;
+		taskFile?: string;
 		solutionSpace?: string;
 		context?: string;
 		async?: boolean;
@@ -510,14 +513,12 @@ export class StudioAgentHubService {
 		effort?: string;
 		callerAgentId: string;
 	}): Promise<{ agentId: string; jobId?: string; status: "starting" }> {
-		if (args.model !== undefined) {
-			throw new StudioAgentHubError(
-				"INVALID_ARGUMENT",
-				"Per-spawn models are no longer supported. Configure the agent model chain before starting a task.",
-			);
-		}
+		if (args.model && args.model.length !== 1)
+			throw new StudioAgentHubError("INVALID_ARGUMENT", "Select one exact per-call model");
 		const definition = args.definition.trim();
-		const assignment = args.assignment.trim();
+		const assignment = args.assignment;
+		if (!!assignment?.trim() === !!args.taskFile)
+			throw new StudioAgentHubError("INVALID_ARGUMENT", "Provide inline instructions or a task file");
 		if (
 			args.solutionSpace !== undefined &&
 			(!args.solutionSpace.trim() || args.solutionSpace.length > MAX_MESSAGE_TEXT)
@@ -526,7 +527,7 @@ export class StudioAgentHubService {
 		if (definition.length === 0 || definition.length > MAX_DEFINITION_LENGTH) {
 			throw new StudioAgentHubError("INVALID_ARGUMENT", "Spawn definition must be between 1 and 256 characters");
 		}
-		if (assignment.length === 0 || assignment.length > MAX_MESSAGE_TEXT) {
+		if (assignment !== undefined && (assignment.length === 0 || assignment.length > MAX_MESSAGE_TEXT)) {
 			throw new StudioAgentHubError("INVALID_ARGUMENT", "Spawn assignment must be between 1 and 64 KiB");
 		}
 		if (args.context !== undefined && (args.context.trim().length === 0 || args.context.length > MAX_MESSAGE_TEXT)) {
@@ -542,7 +543,8 @@ export class StudioAgentHubService {
 		try {
 			receipt = await this.#spawner.spawn({
 				definition,
-				assignment,
+				...(assignment ? { assignment } : { taskFile: args.taskFile }),
+				...(args.model ? { model: args.model } : {}),
 				...(args.solutionSpace !== undefined ? { solutionSpace: args.solutionSpace } : {}),
 				...(args.context !== undefined ? { context: args.context } : {}),
 				...(args.async !== undefined ? { async: args.async } : {}),
@@ -551,7 +553,7 @@ export class StudioAgentHubService {
 				callerAgentId: args.callerAgentId,
 			});
 		} catch {
-			throw new StudioAgentHubError("SPAWN_FAILED", "Agent spawn failed; see the runtime log for details");
+			throw new StudioAgentHubError("SPAWN_FAILED", "Agent spawn failed");
 		}
 		this.#validateId(receipt.agentId);
 		this.#pendingSpawns.set(receipt.agentId, {
@@ -819,7 +821,7 @@ export class StudioAgentHubService {
 		const history = ref.history;
 		const liveUsage = this.#telemetry?.liveUsage(agentId);
 		const usage = liveUsage ?? history?.metrics;
-		const rate = ref.session?.tokenRate?.rate();
+		const rate = ref.session && isAgentViewSession(ref.session) ? ref.session.tokenRate?.rate() : undefined;
 		const liveModel = this.#telemetry?.liveModel(agentId);
 		const resolvedModel = liveModel ?? history?.resolvedModel;
 		const summary = ref.activity === undefined ? this.#telemetry?.liveSummary(agentId) : undefined;

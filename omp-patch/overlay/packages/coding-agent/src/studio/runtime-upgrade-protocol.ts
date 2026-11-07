@@ -1,4 +1,9 @@
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { BtwInjection } from "./btw-protocol";
+export interface BtwImage {
+	type: "image";
+	mimeType: string;
+	data: string;
+}
 /** Typed capabilities added with the OMP 18.2 migration. Kept wire-only. */
 export type ForeignSource = "claude" | "codex";
 export type RuntimeAuthProvider = "typesafe" | "exa" | "ollama-cloud";
@@ -6,7 +11,7 @@ export type UpgradeOperation =
 	| { kind: "btw.history.list" }
 	| { kind: "btw.images.resolve"; text: string }
 	| { kind: "btw.history.read"; topicId: string }
-	| { kind: "btw.followUp"; topicId: string; question: string; images?: ImageContent[] }
+	| { kind: "btw.followUp"; topicId: string; question: string; images?: BtwImage[] }
 	| { kind: "session.models.mentions" }
 	| { kind: "session.import.list"; source: ForeignSource }
 	| { kind: "session.import.preview"; source: ForeignSource; sourceId: string }
@@ -22,9 +27,9 @@ export type UpgradeOperation =
 	| { kind: "runtime.auth.remove"; provider: RuntimeAuthProvider };
 export const UPGRADE_OPERATION_KINDS = [
 	"btw.history.list",
-	"btw.images.resolve",
 	"btw.history.read",
 	"btw.followUp",
+	"btw.images.resolve",
 	"session.models.mentions",
 	"session.import.list",
 	"session.import.preview",
@@ -37,7 +42,8 @@ export function isUpgradeOperationKind(kind: string): kind is UpgradeOperation["
 	return (UPGRADE_OPERATION_KINDS as readonly string[]).includes(kind);
 }
 export interface BtwHistoryTurn {
-	images?: readonly ImageContent[];
+	injection?: BtwInjection;
+	images?: readonly BtwImage[];
 	question: string;
 	answer: string;
 	status: "running" | "complete" | "cancelled" | "error" | "interrupted";
@@ -47,8 +53,8 @@ export interface BtwHistoryTurn {
 }
 export interface BtwTopicSummary {
 	topicId: string;
-	title?: string;
 	question: string;
+	title?: string;
 	status: BtwHistoryTurn["status"];
 	updatedAt: number;
 	turnCount: number;
@@ -67,27 +73,26 @@ export interface ModelMentionInfo {
 	agent: string;
 	selector: string;
 	name: string;
+	thinkingLevel?: string;
 }
 export interface UpgradeResultMap {
-	"btw.images.resolve": { images: ImageContent[] };
+	"btw.images.resolve": { images: BtwImage[] };
 	"btw.history.list": { sessionId: string; topics: BtwTopicSummary[] };
 	"btw.history.read": { sessionId: string; topicId: string; turns: BtwHistoryTurn[] };
 	"btw.followUp": { ephemeralId: string; status: "running" };
 	"session.models.mentions": {
 		sessionId: string;
 		mentions: ModelMentionInfo[];
-		available: Array<{ selector: string; name: string; image: boolean }>;
+		available: Array<{
+			selector: string;
+			name: string;
+			image: boolean;
+			efforts?: Array<{ selector: string; name: string }>;
+		}>;
 		activeModelImage: boolean;
 	};
 	"session.import.list": { sessions: ForeignSessionSummary[] };
 	"session.import.preview": { session: ForeignSessionSummary; preview: string };
-	/**
-	 * Public shape after the desktop Host rewrite: the Runtime returns
-	 * `{ imported, sessionId, cwd }` and the Host maps `cwd` onto a registered
-	 * `workspaceId` (apps/desktop/src/session-commands.ts). Do not validate the
-	 * Runtime dispatch path with `validateUpgradeResult` for this kind — it
-	 * would reject the Runtime's own pre-rewrite output.
-	 */
 	"session.import.execute": { imported: true; sessionId: string; workspaceId: string };
 	"runtime.auth.get": {
 		provider: RuntimeAuthProvider;
@@ -111,9 +116,9 @@ export function validateUpgradeOperation(value: unknown): asserts value is Upgra
 	if (typeof op.kind !== "string" || !isUpgradeOperationKind(op.kind)) throw new Error("Unknown Runtime operation");
 	const fields: Record<UpgradeOperation["kind"], string[]> = {
 		"btw.history.list": [],
-		"btw.images.resolve": ["text"],
 		"btw.history.read": ["topicId"],
 		"btw.followUp": ["topicId", "question", "images"],
+		"btw.images.resolve": ["text"],
 		"session.models.mentions": [],
 		"session.import.list": ["source"],
 		"session.import.preview": ["source", "sourceId"],
@@ -148,7 +153,7 @@ export function validateUpgradeOperation(value: unknown): asserts value is Upgra
 
 /** Validate results at the IPC boundary; credentials and native replay payloads have no public field. */
 export function validateUpgradeResult(kind: UpgradeOperation["kind"], value: unknown): void {
-	// BTW history is produced by the service; the transport owns frame limits.
+	// BTW history is produced by the Runtime service; the transport owns frame limits.
 	if (
 		kind === "btw.history.list" ||
 		kind === "btw.history.read" ||
@@ -226,8 +231,16 @@ export function validateUpgradeResult(kind: UpgradeOperation["kind"], value: unk
 		"btw.followUp": shape({ ephemeralId: short, status: enumeration(["running"]) }),
 		"session.models.mentions": shape({
 			sessionId: short,
-			mentions: array(shape({ agent: short, selector: short, name: short }), 1024),
-			available: array(shape({ selector: short, name: short, image: bool }), 10000),
+			mentions: array(shape({ agent: short, selector: short, name: short, "thinkingLevel?": short }), 1024),
+			available: array(
+				shape({
+					selector: short,
+					name: short,
+					image: bool,
+					"efforts?": array(shape({ selector: short, name: short }), 32),
+				}),
+				10000,
+			),
 			activeModelImage: bool,
 		}),
 		"session.import.list": shape({ sessions: array(summary) }),

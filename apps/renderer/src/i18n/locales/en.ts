@@ -644,6 +644,7 @@ export const en: LocaleDictionary = {
     "minimapThinking": "Thinking",
     "minimapCompact": "Context compacted",
     "minimapCheckpoint": "Checkpoint",
+    "minimapExtension": "Extension notice",
     "minimapCompacting": "Compacting",
     "minimapCompactingPreview": "Compacting the current context",
     "minimapCheckpointPreview": "The session restarts here; earlier messages remain available through the session archive.",

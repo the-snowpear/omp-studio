@@ -1,4 +1,4 @@
-import type { DictationConfiguration } from "@omp-studio/studio-protocol";
+import type { DictationConfiguration, DictationProgress } from "@omp-studio/studio-protocol";
 
 export const PREVIEW_DICTATION_CONFIGURATION: DictationConfiguration = {
   protocolVersion: 2,
@@ -16,3 +16,5 @@ export const PREVIEW_DICTATION_CONFIGURATION: DictationConfiguration = {
   sources: { enabled: "global", language: "global", submitTrigger: "default" },
 };
 export const PREVIEW_DICTATION_TEXT = "请检查 session 恢复后，API 配置和附件是否保留。";
+
+export const PREVIEW_DICTATION_PREPARATION: DictationProgress = { stage: "initiate", component: "sherpa-onnx-node", loaded: 0, total: 0 };

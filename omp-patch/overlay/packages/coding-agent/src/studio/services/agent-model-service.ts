@@ -1,3 +1,4 @@
+import { isAgentViewSession } from "../../session/agent-session-handle";
 import type { AgentSession } from "../../session/agent-session";
 import { SessionManager, extractSessionInit, type PersistedSessionInit } from "../../session/session-manager";
 import type { AgentModelInspection, AgentModelOperation } from "../agent-model-protocol";
@@ -18,7 +19,7 @@ export class StudioAgentModelService {
 		const ref = ownedStudioAgent(this.session, operation.agentId);
 		if (!ref)
 			throw new SessionControlError("COMMAND_BLOCKED", "The agent is not available in this session's registry");
-		if (ref.session) {
+		if (ref.session && isAgentViewSession(ref.session)) {
 			const session = ref.session;
 			const model = session.model;
 			const serving = session.servingModel;

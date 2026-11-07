@@ -32,6 +32,7 @@ export interface DictationChannel {
 }
 
 export interface DictationProgress {
+  component?: string;
   stage: string;
   percent?: number;
   loaded?: number;

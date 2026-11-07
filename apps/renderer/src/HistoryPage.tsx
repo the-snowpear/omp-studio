@@ -1,3 +1,4 @@
+import { waitReceipt } from "./hostError";
 import { ResumeScopePane } from "./history/ResumeScopePane";
 import { SessionPortabilityPane } from "./history/SessionPortabilityPane";
 import { SeanceDialog } from "./history/SeanceDialog";
@@ -97,11 +98,15 @@ function HistMoreMenu({
   rect,
   onClose,
   onDelete,
+  onRename, onPin, pinned,
 }: {
   open: boolean;
   rect: { top: number; left: number; width: number; bottom: number } | null;
   onClose: () => void;
   onDelete: () => void;
+  onRename?: (() => void) | undefined;
+  onPin?: (() => void) | undefined;
+  pinned?: boolean | undefined;
 }) {
   const { t } = useI18n();
   const popRef = useRef<HTMLDivElement>(null);
@@ -149,6 +154,8 @@ function HistMoreMenu({
       aria-label={t("common.moreActions")}
       style={{ top: anchor.top, left: anchor.left, minWidth: anchor.width }}
     >
+      {onRename ? <button type="button" role="menuitem" className="menu-item" onClick={onRename}><Icon name="pencil" extra="sm" /><span>{t("conversation.renameThread")}</span></button> : null}
+      {onPin ? <button type="button" role="menuitem" className="menu-item" onClick={onPin}><Icon name="pin" extra="sm" /><span>{pinned ? "取消置顶 / Unpin" : "置顶 / Pin"}</span></button> : null}
       <button type="button" role="menuitem" className="menu-item danger" onClick={onDelete}>
         <Icon name="trash" extra="sm" />
         <span>{t("history.deleteSession")}</span>
@@ -287,13 +294,15 @@ function useConsultLabel(): string {
 }
 
 function HostHistRow({
-  entry, titleRow,
+  entry,
+  lease, titleRow,
   onOpen,
   onUnarchive,
   onMore,
   onConsult,
 }: {
   entry: SessionHistoryEntry;
+  lease?: boolean | null | undefined;
   titleRow?: SessionTitleRow | undefined;
   onOpen: () => void;
   onUnarchive: (() => void) | undefined;
@@ -311,6 +320,7 @@ function HostHistRow({
       <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
       <a className="h-main" href="#!workbench" onClick={(event) => { event.preventDefault(); onOpen(); }}>
         <span className="h-title ellipsis">
+          {lease === true ? <span className="chip blue xs">使用中 / In use</span> : lease === null ? <span className="chip gray xs">占用未知 / Unknown lease</span> : null}
           {entry.pinned === true ? <span className="t-pin" role="img" aria-label={t("history.pinned")}><Icon name="pin" extra="sm" /></span> : null}
           <SessionTitleMark row={titleRow} title={title} />{title}
         </span>
@@ -377,9 +387,12 @@ export function HistoryPage({
   onSelectThread,
   onUnarchive,
   onDeleteSession,
+  onRenameSession, onPinSession,
 }: {
   nativeContext?: NativeHistoryContext;
   client?: StudioClient;
+  onRenameSession?: (entry: SessionHistoryEntry) => void;
+  onPinSession?: (entry: SessionHistoryEntry) => void;
   onImportedOpen?: (sessionId: string, workspaceId: WorkspaceId) => void;
   onImported?: () => void;
   history?: SessionHistoryReadModel;
@@ -398,6 +411,10 @@ export function HistoryPage({
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [notice, show, dismissNotice] = useNotice();
   const q = query.trim().toLowerCase();
+  const [previewMetadata, setPreviewMetadata] = useState<Record<string, { title?: string; pinned?: boolean }>>({});
+  const [previewRename, setPreviewRename] = useState<{ id: string; title: string }>();
+  const [leases, setLeases] = useState<Record<string, boolean | null>>({});
+  const canMetadata = preview || !!(nativeContext?.available && nativeContext.sessionId && nativeContext.capabilities?.capabilities.some(row => row.id === "session.history.rename" && row.grade !== "unavailable"));
   /** 哪个行的「⋮」菜单打开：id + 触发按钮 rect（菜单用 portal 定位到 body）。 */
   const [menu, setMenu] = useState<{ id: string; rect: { top: number; left: number; width: number; bottom: number } | null } | null>(null);
   const [deleteFor, setDeleteFor] = useState<{ title: string; entry?: SessionHistoryEntry } | null>(null);
@@ -448,10 +465,10 @@ export function HistoryPage({
   }, [deleteFor, deleting, marks, preview, onDeleteSession, show, t]);
 
   const previewRows = useMemo(
-    () => PREVIEW_HISTORY
+    () => PREVIEW_HISTORY.map(row => ({ ...row, ...previewMetadata[row.id] })).sort((a,b) => Number(!!b.pinned)-Number(!!a.pinned))
       .filter((row) => `${row.title} ${row.project} ${row.branch}`.toLowerCase().includes(q))
       .filter((row) => matchesStatusTab(row.status, statusTab)),
-    [q, statusTab],
+    [q, statusTab, previewMetadata],
   );
   const hostRows = useMemo(
     () => (history?.entries ?? [])
@@ -459,6 +476,17 @@ export function HistoryPage({
       .filter((entry) => matchesStatusTab(entry.status, statusTab)),
     [history, q, statusTab, t],
   );
+
+  useEffect(() => {
+    let alive = true;
+    setLeases({});
+    if (preview || !client || !nativeContext?.sessionId || !nativeContext.capabilities?.capabilities.some(row => row.id === "session.lease.inspect" && row.grade !== "unavailable")) return;
+    const ids = hostRows.flatMap(row => row.sessionId ? [row.sessionId] : []);
+    void client.command("session.lease.inspect", { sessionId: nativeContext.sessionId, targetSessionIds: ids }).then(handle => waitReceipt<{ result: { held: string[]; unknown: string[] } }>(client, handle.requestId)).then(({ result }) => {
+      if (alive) setLeases(Object.fromEntries(ids.map(id => [id, result.unknown.includes(id) ? null : result.held.includes(id)])));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [preview, client, nativeContext?.sessionId, nativeContext?.capabilities, hostRows]);
 
   const titleMetadata = useSessionTitles(client,nativeContext,hostRows.flatMap(entry=>entry.sessionId?[{id:entry.sessionId,title:entry.title}]:[]),workspaceTab==="catalog");
   const rows = preview ? previewRows : hostRows;
@@ -542,6 +570,7 @@ export function HistoryPage({
               <HostHistRow
                 key={entry.historyId}
                 entry={entry}
+                lease={leases[entry.sessionId ?? ""]}
                 titleRow={titleMetadata.rows.get(entry.sessionId ?? "")}
                 onOpen={() => onSelectThread(entry)}
                 onUnarchive={entry.status === "archived" && onUnarchive !== undefined ? () => onUnarchive(entry) : undefined}
@@ -568,6 +597,17 @@ export function HistoryPage({
         open={menu !== null}
         rect={menu?.rect ?? null}
         onClose={closeMenu}
+        pinned={preview ? previewRows.find(row => row.id === menu?.id)?.pinned : hostRows.find(row => row.historyId === menu?.id)?.pinned}
+        onRename={canMetadata ? () => {
+          if (preview) { const row = previewRows.find(row => row.id === menu?.id); if (row) setPreviewRename({ id: row.id, title: row.title }); }
+          else { const row = hostRows.find(row => row.historyId === menu?.id); if (row) onRenameSession?.(row); }
+          closeMenu();
+        } : undefined}
+        onPin={canMetadata ? () => {
+          if (preview) { const row = previewRows.find(row => row.id === menu?.id); if (row) setPreviewMetadata(current => ({ ...current, [row.id]: { ...current[row.id], pinned: !row.pinned } })); }
+          else { const row = hostRows.find(row => row.historyId === menu?.id); if (row) onPinSession?.(row); }
+          closeMenu();
+        } : undefined}
         onDelete={() => {
           if (menu === null) return;
           const hostEntry = hostRows.find((entry) => entry.historyId === menu.id);
@@ -583,6 +623,7 @@ export function HistoryPage({
           closeMenu();
         }}
       />
+      {previewRename ? <div className="modal-backdrop create-project-backdrop"><form className="modal create-project-modal" role="dialog" aria-label={t("conversation.renameThread")} onSubmit={event => { event.preventDefault(); if (!previewRename.title.trim()) return; setPreviewMetadata(current => ({ ...current, [previewRename.id]: { ...current[previewRename.id], title: previewRename.title.trim() } })); setPreviewRename(undefined); }}><h3>{t("conversation.renameThread")}</h3><input className="input" autoFocus value={previewRename.title} onChange={event => setPreviewRename({ ...previewRename, title: event.target.value })} /><div className="create-project-foot"><button type="button" className="btn outline" onClick={() => setPreviewRename(undefined)}>{t("common.cancel")}</button><button type="submit" className="btn primary" disabled={!previewRename.title.trim()}>{t("common.save")}</button></div></form></div> : null}
       {deleteFor !== null ? (
         <DeleteSessionDialog
           title={deleteFor.title}

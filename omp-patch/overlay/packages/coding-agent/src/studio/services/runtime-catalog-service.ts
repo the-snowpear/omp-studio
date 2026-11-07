@@ -1,3 +1,4 @@
+import type { MCPManager } from "../../mcp/manager";
 import { cfgMcpStartupTimeoutMs } from "../../mcp/settings";
 import { createHash } from "node:crypto";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
@@ -26,7 +27,10 @@ function describe(template: PromptTemplate): PromptTemplateRow {
 }
 /** Loaded Runtime templates and MCP facts, never Host discovery/probe guesses. */
 export class StudioRuntimeCatalogService {
-	constructor(readonly session: AgentSession) {}
+	constructor(
+		readonly session: AgentSession,
+		readonly manager?: MCPManager,
+	) {}
 	async execute(operation: RuntimeCatalogOperation): Promise<unknown> {
 		validateRuntimeCatalogOperation(operation);
 		const cwd = this.session.sessionManager.getCwd();
@@ -40,7 +44,7 @@ export class StudioRuntimeCatalogService {
 	}
 	async #execute(operation: RuntimeCatalogOperation): Promise<unknown> {
 		if (operation.kind === "mcp.runtime.status") {
-			const manager = this.session.studioToolSession?.mcpManager;
+			const manager = this.manager;
 			const startupTimeoutMs = resolveMCPStartupTimeoutMs(cfgMcpStartupTimeoutMs.get(this.session.settings));
 			if (!manager)
 				return { available: false, startupTimeoutMs, ready: false, settled: false, servers: [], total: 0 };

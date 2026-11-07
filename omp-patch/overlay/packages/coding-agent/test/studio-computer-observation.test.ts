@@ -33,7 +33,7 @@ test("computer activity and stop are native owner-scoped and never revoke anothe
 	const session = {
 		sessionId: "s",
 		settings: Settings.isolated({ "computer.enabled": false }),
-		studioToolSession: { getEvalKernelOwnerId: () => "studio-computer-test" },
+		studioEvalKernelOwnerId: "studio-computer-test",
 	} as unknown as AgentSession;
 	const service = new StudioComputerObservationService(session);
 	try {

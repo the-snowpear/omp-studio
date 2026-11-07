@@ -1,3 +1,5 @@
+import { EXTENSION_LINK_KINDS, type ExtensionLinkOperation, type ExtensionLinkResultMap } from "./extension-links.js";
+import { WEBMCP_KINDS, type WebMcpOperation, type WebMcpResultMap } from "./webmcp.js";
 import { EVALUATION_WORKSPACE_KINDS, isEvaluationWorkspaceKind, type EvaluationWorkspaceOperation, type EvaluationWorkspaceResultMap } from "./evaluation-workspace.js";
 import { ADVISOR_CONFIG_KINDS, isAdvisorConfigKind, type AdvisorConfigOperation, type AdvisorConfigResultMap } from "./advisor-config.js";
 import { LOCAL_RESOURCE_KINDS, isLocalResourceKind, type LocalResourceOperation, type LocalResourceResultMap } from "./local-resources.js";
@@ -59,7 +61,7 @@ export interface RuntimeModelChoice {
   serviceTiers?: string[];
   promptCache?: { short?: number; long?: number };
   promptCacheConfig?: { short?: number; long?: number };
-  compatibility?: { preferWebsockets?: boolean; useResponsesLite?: boolean; toolMode?: "code_mode_only" };
+  compatibility?: { supportsMessageThreads?: boolean; toolNamePrefix?: string; statefulResponses?: boolean; preferWebsockets?: boolean; useResponsesLite?: boolean; toolMode?: "code_mode_only" };
   selector: string;
   name: string;
   provider: string;
@@ -78,6 +80,8 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
+ | ExtensionLinkOperation
+ | WebMcpOperation
  | EvaluationWorkspaceOperation
  | AdvisorConfigOperation
  | LocalResourceOperation
@@ -124,7 +128,7 @@ export type WorkbenchOperation =
   | { kind: "runtime.models.describe"; selector: string }
  | { kind: "runtime.models.list"; modelKind?: string; cursor?: string; limit?: number };
 
-export interface WorkbenchResultMap extends EvaluationWorkspaceResultMap, AdvisorConfigResultMap, LocalResourceResultMap, DictationResultMap,SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceCommand["kind"]>, BrowserObservationResultMap, StudioIdaResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap, RuntimeFeatureResultMap {
+export interface WorkbenchResultMap extends ExtensionLinkResultMap, WebMcpResultMap, EvaluationWorkspaceResultMap, AdvisorConfigResultMap, LocalResourceResultMap, DictationResultMap,SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceCommand["kind"]>, BrowserObservationResultMap, StudioIdaResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap, RuntimeFeatureResultMap {
   "accounts.status": AccountStatusResult;
  "accounts.status.details": AccountStatusResult;
   "accounts.logout": { loggedOut: true };
@@ -140,6 +144,7 @@ export interface WorkbenchResultMap extends EvaluationWorkspaceResultMap, Adviso
  "runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
 export const WORKBENCH_OPERATION_KINDS = [
+ ...EXTENSION_LINK_KINDS, ...WEBMCP_KINDS,
  ...EVALUATION_WORKSPACE_KINDS,...ADVISOR_CONFIG_KINDS, ...LOCAL_RESOURCE_KINDS,...DICTATION_KINDS,...SESSION_GUI_KINDS,
 ...SESSION_TITLES_KINDS,
  ...PREDICTION_KINDS,
@@ -163,7 +168,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 ...ARCHIVE_OPERATION_KINDS,
  "agent.model.inspect",
  "session.restore.inspect",
- "session.queue.get",
+ "session.queue.get", "session.compaction.enqueue", "session.compaction.cancel", "session.compaction.status",
 "preferences.native.get", ...FEATURE_SETTINGS_READ_KINDS, "session.portability.status", "maintenance.compression.status", "worktrees.session.list", "worktrees.session.startPolicy", "worktrees.session.resume.list", "mode.plan.review.details",
 "ratchet.list", "ratchet.read", "ratchet.stop",
 "computer.status", "computer.capture", "computer.stop", "computer.observe.release",
@@ -218,7 +223,8 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
   if (!value || typeof value !== "object") throw new Error("Invalid workbench operation");
   const kind = (value as Record<string, unknown>).kind;
   if (typeof kind !== "string" || !isWorkbenchOperationKind(kind)) throw new Error("Unknown workbench operation");
-  if (isComputerWorkspaceCommand(kind)) return;
+  if (kind === "extensions.links.activate" || kind === "browser.webmcp.invoke") return;
+ if (isComputerWorkspaceCommand(kind)) return;
   if (isEvaluationWorkspaceKind(kind)) return;
 	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
   if (isSessionTitlesKind(kind)) { validateSessionTitlesOperation(value); return; }
@@ -252,7 +258,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
   if (isRuntimeCatalogOperationKind(kind)) { validateRuntimeCatalogOperation(value); return; }
   if (isJudgmentOperationKind(kind)) { validateJudgmentOperation(value); return; }
   if (isRuntimeFeatureKind(kind)) { validateRuntimeFeatureOperation(value); return; }
-  const fields: Record<Exclude<WorkbenchOperation["kind"], EvaluationWorkspaceOperation["kind"] | AdvisorConfigOperation["kind"] | LocalResourceOperation["kind"] | DictationOperation["kind"] | SessionGuiOperation["kind"] | SessionTitlesOperation["kind"] | PredictionChannelOperation["kind"] | MaintenanceOperation["kind"] | ArchiveOperation["kind"] | AgentModelOperation["kind"] | SessionRestoreOperation["kind"] | RuntimeQueueOperation["kind"] | NativePreferenceOperation["kind"] | FeatureSettingsOperation["kind"] | SessionPortabilityOperation["kind"] | SessionCompressionOperation["kind"] | SessionWorktreeOperation["kind"] | NativePlanReviewOperation["kind"] | RatchetOperation["kind"] | ComputerWorkspaceCommand["kind"] | ComputerObservationOperation["kind"] | BrowserObservationOperation["kind"] | StudioIdaOperation["kind"] | SessionOptionsOperation["kind"] | SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"] | RuntimeFeatureOperation["kind"]>, readonly string[]> = {
+  const fields: Record<Exclude<WorkbenchOperation["kind"], ExtensionLinkOperation["kind"] | WebMcpOperation["kind"] | EvaluationWorkspaceOperation["kind"] | AdvisorConfigOperation["kind"] | LocalResourceOperation["kind"] | DictationOperation["kind"] | SessionGuiOperation["kind"] | SessionTitlesOperation["kind"] | PredictionChannelOperation["kind"] | MaintenanceOperation["kind"] | ArchiveOperation["kind"] | AgentModelOperation["kind"] | SessionRestoreOperation["kind"] | RuntimeQueueOperation["kind"] | NativePreferenceOperation["kind"] | FeatureSettingsOperation["kind"] | SessionPortabilityOperation["kind"] | SessionCompressionOperation["kind"] | SessionWorktreeOperation["kind"] | NativePlanReviewOperation["kind"] | RatchetOperation["kind"] | ComputerWorkspaceCommand["kind"] | ComputerObservationOperation["kind"] | BrowserObservationOperation["kind"] | StudioIdaOperation["kind"] | SessionOptionsOperation["kind"] | SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"] | RuntimeFeatureOperation["kind"]>, readonly string[]> = {
     "accounts.status": ["refresh"],
  "accounts.status.details": ["refresh"],
     "accounts.logout": ["sessionId", "accountId"], "services.list": [], "services.start": ["spec"], "services.stop": ["name", "instanceId"], "services.restart": ["name", "instanceId"],
@@ -284,6 +290,7 @@ function serviceRow(value: unknown): void {
   if (row.ownerAgentId !== undefined) text(row.ownerAgentId);
 }
 export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value: unknown): void {
+ if (kind === "extensions.links.activate" || kind === "browser.webmcp.invoke") return;
  if (isComputerWorkspaceCommand(kind)) return;
  if (isEvaluationWorkspaceKind(kind)) return;
 	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
@@ -350,7 +357,7 @@ export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value:
       if (row.webSearch !== undefined) text(row.webSearch);
       if (row.serviceTiers !== undefined) { if (!Array.isArray(row.serviceTiers) || row.serviceTiers.length > 32) throw new Error("Invalid service tiers"); row.serviceTiers.forEach(value => text(value,128)); }
       for (const field of ["promptCache", "promptCacheConfig"]) if (row[field] !== undefined) { const cache = record(row[field], ["short", "long"]); for (const key of ["short", "long"]) if (cache[key] !== undefined && (typeof cache[key] !== "number" || !Number.isFinite(cache[key]) || (cache[key] as number) < 0)) throw new Error("Invalid prompt cache lifetime"); }
-      if (row.compatibility !== undefined) { const compat = record(row.compatibility, ["preferWebsockets", "useResponsesLite", "toolMode"]); for (const field of ["preferWebsockets", "useResponsesLite"]) if (compat[field] !== undefined && typeof compat[field] !== "boolean") throw new Error("Invalid model compatibility flag"); if (compat.toolMode !== undefined && compat.toolMode !== "code_mode_only") throw new Error("Invalid model tool mode"); }
+      if (row.compatibility !== undefined) { const compat = record(row.compatibility, ["preferWebsockets", "useResponsesLite", "toolMode", "supportsMessageThreads", "toolNamePrefix", "statefulResponses"]); for (const field of ["preferWebsockets", "useResponsesLite"]) if (compat[field] !== undefined && typeof compat[field] !== "boolean") throw new Error("Invalid model compatibility flag"); if (compat.toolMode !== undefined && compat.toolMode !== "code_mode_only") throw new Error("Invalid model tool mode"); }
 
     }
   }

@@ -80,6 +80,7 @@ const WEB_SEARCH_PROVIDER_CATALOG: ReadonlyArray<{
   { id: "xai", name: "xAI", description: "Grok web search via xAI Responses API (uses SuperGrok/X Premium+ OAuth via /login xai-oauth, or XAI_API_KEY)", credentialFree: false },
   { id: "zai", name: "Z.AI", description: "Calls Z.AI webSearchPrime MCP", credentialFree: false },
   { id: "exa", name: "Exa", description: "API via /login exa or EXA_API_KEY; explicit keyless fallback via MCP", credentialFree: false },
+  { id: "keenable", name: "Keenable", description: "KEENABLE_API_KEY or stored key; explicit selection can use the public keyless endpoint", credentialFree: false },
   { id: "tinyfish", name: "TinyFish", description: "Requires TINYFISH_API_KEY", credentialFree: false },
   { id: "jina", name: "Jina", description: "Requires JINA_API_KEY", credentialFree: false },
   { id: "kagi", name: "Kagi", description: "Requires KAGI_API_KEY and Kagi Search API beta access", credentialFree: false },
@@ -107,6 +108,7 @@ const WEB_SEARCH_ENV_CREDENTIALS: Readonly<Record<string, readonly string[]>> = 
   zai: ["ZAI_API_KEY"],
   exa: ["EXA_API_KEY"],
   tinyfish: ["TINYFISH_API_KEY"],
+  keenable: ["KEENABLE_API_KEY"],
   jina: ["JINA_API_KEY"],
   kagi: ["KAGI_API_KEY"],
   tavily: ["TAVILY_API_KEY"],
@@ -129,6 +131,7 @@ const WEB_SEARCH_AUTH_IDS: Readonly<Record<string, readonly string[]>> = {
   zai: ["zai"],
   exa: ["exa"],
   tinyfish: ["tinyfish"],
+  keenable: ["keenable"],
   kimi: ["kimi-code", "moonshot"],
   kagi: ["kagi"],
   parallel: ["parallel"],
@@ -154,6 +157,7 @@ const WEB_SEARCH_APIKEY_IDS: Readonly<Record<string, string>> = {
   zai: "zai",
   exa: "exa",
   tinyfish: "tinyfish",
+  keenable: "keenable",
   jina: "jina",
   kagi: "kagi",
   tavily: "tavily",
@@ -203,6 +207,8 @@ const PRESET_GROUPS: ReadonlyArray<ModelPresetGroup> = [
   {
     group: "官方 / 主流",
     items: [
+      { id: "mistral", name: "Mistral", desc: "Mistral Vibe 浏览器登录或 API Key", api: "openai-completions", auth: ["oauth", "api-key"], oauth: true, endpoint: "https://api.mistral.ai/v1" },
+      { id: "devin", name: "Devin", desc: "导入 Devin CLI 凭据或使用 Windsurf 企业账号", api: "devin", auth: ["oauth", "api-key"], oauth: true },
       { id: "muse-code", name: "Muse Code", desc: "Muse Spark 订阅、账号模型发现与额度", api: "openai-responses", auth: ["oauth"], oauth: true },
       { id: "anthropic", name: "Anthropic", desc: "Claude 系列模型官方 API", api: "anthropic-messages", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://api.anthropic.com/v1" },
       { id: "openai", name: "OpenAI", desc: "GPT 系列模型官方 API", api: "openai-responses", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://api.openai.com/v1" },
@@ -218,6 +224,7 @@ const PRESET_GROUPS: ReadonlyArray<ModelPresetGroup> = [
   {
     group: "Gateway / 聚合",
     items: [
+      { id: "modular", name: "Modular Cloud", desc: "Modular Cloud 模型与原生推理参数", api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.modular.com/v1" },
       { id: "commandcode", name: "Command Code", desc: "原生 OpenAI / Anthropic 路由、模型发现与价格", api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
       { id: "openrouter", name: "OpenRouter", desc: "一个 Key 访问多家模型", api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
       { id: "github-copilot", name: "GitHub Copilot", desc: "Copilot 订阅额度", api: "openai-responses", auth: ["oauth"], oauth: true },
@@ -438,6 +445,8 @@ function probeImageInput(row: Record<string, unknown>): boolean | undefined {
 /** Reasoning support as reported by the endpoint (OpenRouter / Ollama shapes). */
 function probeReasoning(row: Record<string, unknown>): boolean | undefined {
   const metadata = probeRecord(row.metadata);
+  const capabilities = probeRecord(row.capabilities);
+  if (typeof capabilities?.reasoning === "boolean" && row.reasoning === undefined && metadata?.reasoning === undefined) return capabilities.reasoning;
   if (typeof (metadata?.reasoning ?? row.reasoning) === "boolean") return (metadata?.reasoning ?? row.reasoning) as boolean;
   if (Array.isArray(row.supported_parameters)) {
     return row.supported_parameters.some((item) => typeof item === "string" && item.toLowerCase().includes("reasoning"));
@@ -461,6 +470,7 @@ function probeModelMeta(row: Record<string, unknown>): Omit<ModelDiscoveryModel,
     probePositiveInt(row.context_length) ??
     probePositiveInt(row.max_model_len) ??
     probePositiveInt(row.context_window) ??
+    probePositiveInt(row.max_context_length) ??
     probePositiveInt(row.inputTokenLimit) ??
     probePositiveInt(topProvider?.context_length);
   const maxTokens =
@@ -469,10 +479,10 @@ function probeModelMeta(row: Record<string, unknown>): Omit<ModelDiscoveryModel,
     probePositiveInt(row.outputTokenLimit) ??
     probePositiveInt(row.max_tokens);
   const reasoning = probeReasoning(row);
-  const levels = Array.isArray(row.supported_reasoning_levels) ? row.supported_reasoning_levels.map(value => typeof value === "string" ? value.toLowerCase() : typeof probeRecord(value)?.effort === "string" ? String(probeRecord(value)?.effort).toLowerCase() : "").filter(value => ["low", "medium", "high", "xhigh", "max"].includes(value)) : [];
+  const levels = Array.isArray(row.supported_reasoning_levels) ? row.supported_reasoning_levels.map(value => typeof value === "string" ? value.toLowerCase() : typeof probeRecord(value)?.effort === "string" ? String(probeRecord(value)?.effort).toLowerCase() : "").filter(value => ["minimal", "low", "medium", "high", "xhigh", "max"].includes(value)) : [];
   const defaultLevel = typeof row.default_reasoning_level === "string" ? row.default_reasoning_level.toLowerCase() : undefined;
-  const thinkingConfig = reasoning === false ? undefined : parseModelThinkingConfig({ mode: "effort", efforts: levels, defaultLevel });
-  const image = probeImageInput(row);
+  const thinkingConfig = reasoning === false ? undefined : parseModelThinkingConfig({ mode: "effort", efforts: levels, defaultLevel, effortMap: row.reasoning_effort_map, ...(typeof row.reasoning_required === "boolean" ? { requiresEffort: row.reasoning_required } : {}) });
+  const image = probeImageInput(row) ?? (typeof probeRecord(row.capabilities)?.vision === "boolean" ? probeRecord(row.capabilities)!.vision as boolean : undefined);
   const nativeInfo = probeRecord(row.model_info);
   const judge = row.type === "decision" || row.mode === "decisions" || nativeInfo?.mode === "decisions";
   return {
@@ -512,6 +522,7 @@ export function parseDiscoveryModels(payload: unknown, advertisedReasoning = tru
       if (typeof item === "string") push(item);
       else if (item && typeof item === "object") {
         const row = item as Record<string, unknown>;
+        if (probeRecord(row.capabilities)?.completion_chat === false) continue;
         const rawName = typeof row.name === "string" ? row.name : undefined;
         // Google Generative AI names models `models/<id>` and carries the
         // human label in `displayName`; Ollama's `name` already is the id.
@@ -529,6 +540,7 @@ export function parseDiscoveryModels(payload: unknown, advertisedReasoning = tru
       if (typeof item === "string") push(item);
       else if (item && typeof item === "object") {
         const row = item as Record<string, unknown>;
+        if (probeRecord(row.capabilities)?.completion_chat === false) continue;
         const id = typeof row.id === "string" ? row.id : typeof row.model_name === "string" ? row.model_name : "";
         const meta = probeRecord(row.metadata);
         const label = typeof row.display_name === "string"
@@ -543,6 +555,7 @@ export function parseDiscoveryModels(payload: unknown, advertisedReasoning = tru
       if (typeof item === "string") push(item);
       else if (item && typeof item === "object") {
         const row = item as Record<string, unknown>;
+        if (probeRecord(row.capabilities)?.completion_chat === false) continue;
         const id = typeof row.id === "string" ? row.id : typeof row.name === "string" ? row.name : "";
         push(id, undefined, probeModelMeta(row));
       }
@@ -649,9 +662,11 @@ function hashText(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-function asRecord(value: YamlValue | undefined): Record<string, YamlValue> | undefined {
+function asRecord(value: YamlValue | undefined): Record<string, YamlValue> | undefined;
+function asRecord(value: unknown): Record<string, unknown> | undefined;
+function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (value === null || value === undefined || typeof value !== "object" || Array.isArray(value)) return undefined;
-  return value;
+  return value as Record<string, unknown>;
 }
 
 function stringOf(value: YamlValue | undefined): string | undefined {
@@ -763,8 +778,8 @@ export function executionMetadata(value: unknown): ModelExecutionMetadata {
     return result;
   };
   const promptCache = cache(model.promptCache), promptCacheConfig = cache(model.promptCacheConfig);
-  const source = model.compatibility && typeof model.compatibility === "object" ? model.compatibility as Record<string, unknown> : model;
-  const compatibility = { ...(typeof source.preferWebsockets === "boolean" ? { preferWebsockets: source.preferWebsockets } : {}), ...(typeof source.useResponsesLite === "boolean" ? { useResponsesLite: source.useResponsesLite } : {}), ...(source.toolMode === "code_mode_only" ? { toolMode: "code_mode_only" as const } : {}) };
+  const source = { ...model, ...(asRecord(model.compat) ?? {}), ...(asRecord(model.compatibility) ?? {}) };
+  const compatibility = { ...(typeof source.supportsMessageThreads === "boolean" ? { supportsMessageThreads: source.supportsMessageThreads } : {}), ...(typeof source.toolNamePrefix === "string" ? { toolNamePrefix: source.toolNamePrefix } : {}), ...(typeof source.statefulResponses === "boolean" ? { statefulResponses: source.statefulResponses } : {}), ...(typeof source.preferWebsockets === "boolean" ? { preferWebsockets: source.preferWebsockets } : {}), ...(typeof source.useResponsesLite === "boolean" ? { useResponsesLite: source.useResponsesLite } : {}), ...(source.toolMode === "code_mode_only" ? { toolMode: "code_mode_only" as const } : {}) };
   return { ...(tiers === undefined ? {} : { serviceTiers: tiers }), ...(promptCache === undefined ? {} : { promptCache }), ...(promptCacheConfig === undefined ? {} : { promptCacheConfig }), ...(Object.keys(compatibility).length ? { compatibility } : {}) };
 }
 
@@ -876,6 +891,8 @@ function extrasFromYaml(entry: Record<string, YamlValue>): {
   bedrockMessagesApi?: boolean;
   requiresThinkingPresence?: boolean;
   extendedCacheTtlBeta?: boolean;
+  statefulResponses?: boolean;
+  preferWebsockets?: boolean;
   omitMaxOutputTokens?: boolean;
   premiumMultiplier?: number;
   imageCountBudget?: number;
@@ -896,6 +913,8 @@ function extrasFromYaml(entry: Record<string, YamlValue>): {
   const baseUrl = stringOf(entry.baseUrl);
   return {
     ...(typeof asRecord(entry.compat)?.requiresThinkingPresence === "boolean" ? { requiresThinkingPresence: asRecord(entry.compat)!.requiresThinkingPresence as boolean } : {}),
+    ...(typeof entry.preferWebsockets === "boolean" ? { preferWebsockets: entry.preferWebsockets } : {}),
+    ...(typeof asRecord(entry.compat)?.statefulResponses === "boolean" ? { statefulResponses: asRecord(entry.compat)!.statefulResponses as boolean } : {}),
     ...(typeof asRecord(entry.compat)?.extendedCacheTtlBeta === "boolean" ? { extendedCacheTtlBeta: asRecord(entry.compat)!.extendedCacheTtlBeta as boolean } : {}),
     ...(typeof entry.omitMaxOutputTokens === "boolean" ? { omitMaxOutputTokens: entry.omitMaxOutputTokens } : {}),
     ...(typeof asRecord(entry.compat)?.bedrockMessagesApi === "boolean" ? {bedrockMessagesApi: asRecord(entry.compat)!.bedrockMessagesApi as boolean} : {}),
@@ -961,6 +980,8 @@ function yamlModels(id: string, models: Array<Record<string, YamlValue>> | undef
       ...(extras.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: extras.bedrockMessagesApi }),
       ...(extras.requiresThinkingPresence === undefined ? {} : { requiresThinkingPresence: extras.requiresThinkingPresence }),
       ...(extras.extendedCacheTtlBeta === undefined ? {} : { extendedCacheTtlBeta: extras.extendedCacheTtlBeta }),
+      ...(extras.statefulResponses === undefined ? {} : { statefulResponses: extras.statefulResponses }),
+      ...(extras.preferWebsockets === undefined ? {} : { preferWebsockets: extras.preferWebsockets }),
       ...(extras.premiumMultiplier === undefined ? {} : { premiumMultiplier: extras.premiumMultiplier }),
       ...(extras.imageCountBudget === undefined ? {} : { imageCountBudget: extras.imageCountBudget }),
       ...(extras.headers ? { headers: extras.headers } : {}),
@@ -1002,6 +1023,8 @@ function yamlModelOverrides(raw: YamlValue | undefined): ModelProviderRecord["mo
       ...(extras.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: extras.bedrockMessagesApi }),
       ...(extras.requiresThinkingPresence === undefined ? {} : { requiresThinkingPresence: extras.requiresThinkingPresence }),
       ...(extras.extendedCacheTtlBeta === undefined ? {} : { extendedCacheTtlBeta: extras.extendedCacheTtlBeta }),
+      ...(extras.statefulResponses === undefined ? {} : { statefulResponses: extras.statefulResponses }),
+      ...(extras.preferWebsockets === undefined ? {} : { preferWebsockets: extras.preferWebsockets }),
       ...(extras.premiumMultiplier === undefined ? {} : { premiumMultiplier: extras.premiumMultiplier }),
       ...(extras.imageCountBudget === undefined ? {} : { imageCountBudget: extras.imageCountBudget }),
       ...(extras.headers ? { headers: extras.headers } : {}),
@@ -2293,6 +2316,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
               name: item.name,
               available: Boolean(openUrl),
               authenticated: authenticated.has(item.id),
+              ...(item.id === "devin" ? { flows: [{ id: "devin-cli", name: "导入 Devin CLI / Import Devin CLI" }, { id: "devin-windsurf", name: "Windsurf 企业账号 / Enterprise" }] } : {}),
             }));
           const seen = new Set(fromPresets.map((item) => item.id));
           const fromYaml = providers
@@ -2437,7 +2461,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
               continue;
             }
             if (frame.type === "ready") {
-              child.stdin?.write(`${JSON.stringify({ id: "login-1", type: "login", providerId: input.providerId })}\n`);
+              child.stdin?.write(`${JSON.stringify({ id: "login-1", type: "login", providerId: input.loginId ?? input.providerId })}\n`);
               continue;
             }
             if (frame.type === "extension_ui_request" && frame.method === "open_url") {

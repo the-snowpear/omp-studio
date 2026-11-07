@@ -171,6 +171,10 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
  * listed explicitly as `false`.
  */
 const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
+ "extensions.links.activate": true, "browser.webmcp.invoke": true,
+ "session.compaction.enqueue": true, "session.compaction.cancel": false, "session.compaction.status": false,
+ "session.history.rename": true, "session.history.pin": true, "session.lease.inspect": false,
+ "btw.inject": true, "agent.spawn.options": false,
  "evaluations.openWorkspace": false,
  "evaluations.prepare": false, "evaluations.start": true, "evaluations.control": true, "evaluations.export": false, "evaluations.respond": true,
  "evaluation.runtime.plan": false, "evaluation.runtime.start": true, "evaluation.runtime.read": false, "evaluation.runtime.rows": false, "evaluation.runtime.control": true, "evaluation.runtime.report": false, "evaluation.runtime.patch": false,

@@ -42,7 +42,7 @@ export const GUI_WORKBENCH_SETTINGS = {
 	textVerbosity: {
 		type: "enum",
 		values: ["low", "medium", "high"],
-		default: "medium",
+		default: "low",
 		zh: "回答详略",
 		en: "Response verbosity",
 		note: "仅对支持该参数的 OpenAI Responses 和 Codex 模型生效。",

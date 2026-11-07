@@ -34,7 +34,7 @@ OMP Studio 是 [oh-my-pi](https://github.com/can1357/oh-my-pi)（OMP）的桌面
   <img src="docs/images/workbench.png" alt="OMP Studio 工作台：新建对话欢迎页、活动热力图与 Composer" width="920">
 </p>
 
-0.1.10 适配 OMP 18.10.4，新增会话迁移、Worktree、存储压缩和模型配置能力。查看 [发行说明](docs/releases/v0.1.10.md) 与 [迁移及验收记录](docs/migrations/omp-18.10.4.md)。
+当前开发分支从 OMP 18.13.2-studio.44 / Studio 0.1.17 迁移到 OMP v18.18.0，接入 worker 子 Agent、排队压缩、中途回复、WebRTC Live、Shell 回放和新模型配置。逐版变化、使用入口与实际验证范围见 [18.18.0 迁移报告](docs/migrations/omp-18.18.0.md)；本次源码升级不自动发布产品。
 
 ## 工作台亮点
 

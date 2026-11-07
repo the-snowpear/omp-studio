@@ -31,7 +31,7 @@ export class StudioComputerObservationService {
 	) {}
 	#owners(): string[] {
 		return ownedStudioSessions(this.session)
-			.map(session => session.studioToolSession?.getEvalKernelOwnerId?.())
+			.map(session => session.studioEvalKernelOwnerId)
 			.filter((owner): owner is string => typeof owner === "string");
 	}
 	#ensure(): DesktopSession {

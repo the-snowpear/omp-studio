@@ -173,7 +173,7 @@ export function parseOpaqueConversationCursor(value: unknown, path: string): Opa
 }
 
 function parseRole(value: unknown, path: string): ConversationRole {
-  if (value !== "user" && value !== "assistant" && value !== "system") {
+  if (value !== "user" && value !== "assistant" && value !== "system" && value !== "extension") {
     throw new ContractValidationError("unsupported conversation role", path);
   }
   return value;
@@ -189,7 +189,7 @@ export function parseConversationContentBlock(value: unknown, path: string): Con
     return truncated === undefined ? { type, text } : { type, text, truncated };
   }
   if (type === "toolCall") {
-    exactKeys(input, ["type", "toolCallId", "toolName", "arguments", "truncated"], path);
+    exactKeys(input, ["type", "toolCallId", "toolName", "arguments", "truncated", "presentation"], path);
     const toolCallId = boundedId(input.toolCallId, `${path}.toolCallId`);
     const toolName = boundedUtf8(input.toolName, `${path}.toolName`, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS);
     if (toolName.length === 0) {
@@ -202,6 +202,7 @@ export function parseConversationContentBlock(value: unknown, path: string): Con
       toolName,
     };
     if ("arguments" in input) block.arguments = parseJsonValue(input.arguments, `${path}.arguments`);
+    if (input.presentation === "reply") block.presentation = "reply";
     if (truncated !== undefined) block.truncated = truncated;
     return block;
   }
@@ -562,7 +563,7 @@ function parseConversationRuntimeEventFully(value: unknown, path: string): Conve
     case "conversation.tool.started": {
       exactKeys(
         input,
-        ["kind", "sessionId", "turnId", "messageId", "toolCallId", "toolName", "arguments", "startedAt"],
+        ["kind", "sessionId", "turnId", "messageId", "toolCallId", "toolName", "arguments", "startedAt", "presentation"],
         path,
       );
       const event: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.started" }> = {
@@ -578,10 +579,11 @@ function parseConversationRuntimeEventFully(value: unknown, path: string): Conve
         throw new ContractValidationError("expected a non-empty string", `${path}.toolName`);
       }
       if ("arguments" in input) event.arguments = parseJsonValue(input.arguments, `${path}.arguments`);
+      if (input.presentation === "reply") event.presentation = "reply";
       return event;
     }
     case "conversation.tool.updated": {
-      exactKeys(input, ["kind", "sessionId", "turnId", "toolCallId", "updateMode", "output", "truncated", "progress"], path);
+      exactKeys(input, ["kind", "sessionId", "turnId", "toolCallId", "updateMode", "output", "truncated", "progress", "presentation", "replies"], path);
       if (input.updateMode !== "append" && input.updateMode !== "replace") {
         throw new ContractValidationError("unsupported update mode", `${path}.updateMode`);
       }
@@ -597,6 +599,8 @@ function parseConversationRuntimeEventFully(value: unknown, path: string): Conve
       }
       const truncated = parseTruncated(input.truncated, `${path}.truncated`);
       if (truncated !== undefined) event.truncated = truncated;
+      if (input.presentation === "reply") event.presentation = "reply";
+      if (Array.isArray(input.replies)) event.replies = input.replies.filter((value): value is string => typeof value === "string");
       if (input.progress !== undefined) {
         const raw = input.progress as Record<string, unknown> | null;
         if (

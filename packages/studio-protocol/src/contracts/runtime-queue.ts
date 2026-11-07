@@ -1,4 +1,6 @@
 export interface RuntimeQueueEntry {
+  kind?: "compaction";
+  heldFor?: "compaction";
   id: string;
   text: string;
   queue: "steering" | "followUp";
@@ -7,11 +9,15 @@ export interface RuntimeQueueEntry {
   editable: boolean;
 }
 export interface RuntimeQueueResult {
+  compactionError?: string;
   entries: RuntimeQueueEntry[];
   total: number;
   truncated: boolean;
 }
 export type RuntimeQueueOperation =
+  | { kind: "session.compaction.enqueue"; sessionId: string; instructions?: string }
+  | { kind: "session.compaction.cancel"; sessionId: string; id?: string }
+  | { kind: "session.compaction.status"; sessionId: string }
   | { kind: "session.queue.get"; sessionId: string }
   | {
       kind: "session.queue.entry.remove";
@@ -40,6 +46,9 @@ export type RuntimeQueueOperation =
       text: string;
     };
 export interface RuntimeQueueResultMap {
+  "session.compaction.enqueue": RuntimeQueueResult;
+  "session.compaction.cancel": RuntimeQueueResult;
+  "session.compaction.status": RuntimeQueueResult;
   "session.queue.get": RuntimeQueueResult;
   "session.queue.entry.remove": RuntimeQueueResult;
   "session.queue.promote": RuntimeQueueResult;
@@ -47,6 +56,7 @@ export interface RuntimeQueueResultMap {
   "session.queue.restore": RuntimeQueueResult;
 }
 export const RUNTIME_QUEUE_KINDS = [
+  "session.compaction.enqueue", "session.compaction.cancel", "session.compaction.status",
   "session.queue.get",
   "session.queue.entry.remove",
   "session.queue.promote",
@@ -84,11 +94,13 @@ export function validateRuntimeQueueOperation(value: unknown): void {
     "id",
     "queue",
     "expectedText",
+    "instructions",
     "text",
   ]);
   if (typeof row.kind !== "string" || !isRuntimeQueueKind(row.kind))
     throw new Error("Unknown native queue operation");
   text(row.sessionId, 512);
+  if (String(row.kind).startsWith("session.compaction.")) return;
   if (row.kind === "session.queue.get") {
     record(row, ["kind", "sessionId"]);
     return;
@@ -105,7 +117,7 @@ export function validateRuntimeQueueResult(
   _kind: RuntimeQueueOperation["kind"],
   value: unknown,
 ): void {
-  const row = record(value, ["entries", "total", "truncated"]);
+  const row = record(value, ["entries", "total", "truncated", "compactionError"]);
   if (
     !Array.isArray(row.entries) ||
     row.entries.length > 100 ||
@@ -123,6 +135,7 @@ export function validateRuntimeQueueResult(
       "state",
       "imageCount",
       "editable",
+      "kind", "heldFor",
     ]);
     text(item.id, 128);
     text(item.text, 32768, true);

@@ -1,3 +1,6 @@
+import { StudioQueuedCompactionService } from "./queued-compaction-service";
+import { StudioRuntimeViews } from "./runtime-view-service";
+import type { MCPManager } from "../../mcp/manager";
 import { StudioEvaluationWorkspaceService } from "./evaluation-workspace-service";
 import { isEvaluationWorkspaceKind, type EvaluationWorkspaceOperation } from "../evaluation-workspace-protocol";
 import { StudioAdvisorConfigService } from "./advisor-config-service";
@@ -49,6 +52,7 @@ import { StudioRuntimeFeatureService } from "./runtime-feature-service";
 import { StudioSessionOptionsService } from "./session-options-service";
 import { StudioBrowserObservationService } from "./browser-observation-service";
 import { StudioManagedBrowserService } from "./managed-browser-service";
+import { activateStudioExtensionLink } from "./extension-links-service";
 import { StudioComputerObservationService } from "./computer-observation-service";
 import { StudioComputerWorkspaceService } from "./computer-workspace-service";
 import { isComputerWorkspaceCommand, type ComputerWorkspaceCommand } from "../computer-workspace-protocol";
@@ -151,6 +155,7 @@ export class StudioWorkbenchService {
 	readonly agentModels: StudioAgentModelService;
 	readonly sessionRestore: StudioSessionRestoreService;
 	readonly runtimeQueue: StudioRuntimeQueueService;
+	readonly queuedCompaction: StudioQueuedCompactionService;
 	readonly nativePreferences: StudioNativePreferencesService;
 	readonly featureSettings: StudioFeatureSettingsService;
 	readonly portability: StudioSessionPortabilityService;
@@ -166,6 +171,7 @@ export class StudioWorkbenchService {
 	readonly skillshare: StudioSkillshareService;
 	readonly media: StudioMediaService;
 	readonly benchmarks: StudioBenchmarkService;
+	readonly views: StudioRuntimeViews;
 	readonly catalog: StudioRuntimeCatalogService;
 	readonly judgments: StudioJudgmentService;
 	readonly runtimeFeatures: StudioRuntimeFeatureService;
@@ -180,6 +186,7 @@ export class StudioWorkbenchService {
 	constructor(
 		readonly session: AgentSession,
 		readonly liveAudio = new StudioLiveAudioService(session),
+		mcpManager?: MCPManager,
 	) {
 		this.advisorConfig = new StudioAdvisorConfigService(session);
 		this.contextView = new StudioContextViewService(session);
@@ -190,7 +197,8 @@ export class StudioWorkbenchService {
 		this.archive = new StudioArchiveService(session);
 		this.agentModels = new StudioAgentModelService(session);
 		this.sessionRestore = new StudioSessionRestoreService(session);
-		this.runtimeQueue = new StudioRuntimeQueueService(session);
+		this.queuedCompaction = new StudioQueuedCompactionService(session);
+		this.runtimeQueue = new StudioRuntimeQueueService(session, this.queuedCompaction);
 		this.nativePreferences = new StudioNativePreferencesService(session);
 		this.computerWorkspace = new StudioComputerWorkspaceService(session);
 		this.featureSettings = new StudioFeatureSettingsService(session, this.computerWorkspace);
@@ -206,8 +214,9 @@ export class StudioWorkbenchService {
 		this.resources = new StudioResourceService(session);
 		this.accounts = new StudioAccountStatusService(session);
 		this.judgments = new StudioJudgmentService(session);
-		this.runtimeFeatures = new StudioRuntimeFeatureService(session);
-		this.catalog = new StudioRuntimeCatalogService(session);
+		this.runtimeFeatures = new StudioRuntimeFeatureService(session, mcpManager);
+		this.catalog = new StudioRuntimeCatalogService(session, mcpManager);
+		this.views = new StudioRuntimeViews(session, liveAudio);
 		this.benchmarks = new StudioBenchmarkService(session);
 		this.media = new StudioMediaService(session);
 		this.annotations = new StudioAnnotationService(session);
@@ -218,6 +227,7 @@ export class StudioWorkbenchService {
 		this.computerObservation = new StudioComputerObservationService(session, undefined, this.computerWorkspace);
 	}
 	dispose(): void {
+		this.queuedCompaction.dispose();
 		this.contextView.dispose();
 		this.prediction.dispose();
 		this.portability.dispose();
@@ -271,6 +281,8 @@ export class StudioWorkbenchService {
 		if (isComputerWorkspaceOperation(operation)) return this.computerWorkspace.execute(operation);
 		if (isComputerObservationOperation(operation)) return this.computerObservation.execute(operation);
 		if (operation.kind === "browser.managed.prepare") return this.managedBrowser.prepare(operation.sessionId);
+		if (operation.kind === "browser.webmcp.invoke") return this.managedBrowser.webMcpInvoke(operation);
+		if (operation.kind === "extensions.links.activate") return activateStudioExtensionLink(this.session, operation);
 		if (isBrowserObservationOperation(operation)) return this.browserObservation.execute(operation);
 		if (isIdaOperation(operation)) return this.idaDetails.execute(operation);
 		if (isSessionOptionsOperation(operation)) return this.sessionOptions.execute(operation);
@@ -468,6 +480,7 @@ function isRuntimeQueueOperation(operation: WorkbenchOperation): operation is Ru
 
 /** Public model facts only; endpoints, headers and credential material stay in Runtime. */
 export function projectRuntimeModel(model: Model, includeExecution = false): RuntimeModelChoice {
+	const compat = model.compat as Record<string, unknown> | undefined;
 	return {
 		selector: model.provider + "/" + model.id,
 		name: model.name,
@@ -484,6 +497,13 @@ export function projectRuntimeModel(model: Model, includeExecution = false): Run
 					...(model.promptCache ? { promptCache: { ...model.promptCache } } : {}),
 					...(model.promptCacheConfig ? { promptCacheConfig: { ...model.promptCacheConfig } } : {}),
 					compatibility: {
+						...(typeof compat?.supportsMessageThreads === "boolean"
+							? { supportsMessageThreads: compat.supportsMessageThreads }
+							: {}),
+						...(typeof compat?.toolNamePrefix === "string" ? { toolNamePrefix: compat.toolNamePrefix } : {}),
+						...(typeof compat?.statefulResponses === "boolean"
+							? { statefulResponses: compat.statefulResponses }
+							: {}),
 						...(model.preferWebsockets === undefined ? {} : { preferWebsockets: model.preferWebsockets }),
 						...(model.useResponsesLite === undefined ? {} : { useResponsesLite: model.useResponsesLite }),
 					},

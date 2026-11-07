@@ -214,6 +214,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
             ? ["low", "medium", "high", "max"]
             : ["minimal", "low", "medium", "high"];
       return {
+        ...(item.id === "anthropic" ? { compatibility: { supportsMessageThreads: true } } : {}),
         provider: item.id,
         id: model.id,
         selector: model.selector,
@@ -231,17 +232,23 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     }),
   );
 
-  availableModels.push(...["parallel", "perplexity", "exa"].map(id => ({ provider: "web", id, selector: "web/" + id, name: id, reasoning: false, kind: "search" as const })),
+  availableModels.push(...["parallel", "perplexity", "exa", "keenable"].map(id => ({ provider: "web", id, selector: "web/" + id, name: id, reasoning: false, kind: "search" as const })),
     { provider: "local", id: "title-model", selector: "local/title-model", name: "Local title model", reasoning: false, kind: "tiny" },
     { provider: "local", id: "rule-judge", selector: "local/rule-judge", name: "Local judge", reasoning: false, kind: "judge" });
 
   return {
     providers,
-    presets: MODEL_PRESETS,
+    presets: [...MODEL_PRESETS, { group: "登录与云服务", items: [
+      { id: "mistral", name: "Mistral", desc: "Vibe 浏览器登录或 API Key", api: "openai-completions", auth: ["oauth", "api-key"], oauth: true, endpoint: "https://api.mistral.ai/v1" },
+      { id: "devin", name: "Devin", desc: "Devin CLI / Windsurf 企业账号", api: "devin", auth: ["oauth", "api-key"], oauth: true },
+      { id: "modular", name: "Modular Cloud", desc: "云端模型", api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.modular.com/v1" },
+    ] }],
     roles,
     cycleOrder: ["smol", "default", "slow"],
     availableModels,
     loginProviders: [
+      { id: "mistral", name: "Mistral", available: true, authenticated: false },
+      { id: "devin", name: "Devin", available: true, authenticated: false, flows: [{ id: "devin-cli", name: "导入 Devin CLI / Import Devin CLI" }, { id: "devin-windsurf", name: "Windsurf 企业账号 / Enterprise" }] },
       { id: "anthropic", name: "Anthropic", available: true, authenticated: true },
       { id: "openai", name: "OpenAI", available: true, authenticated: false },
       { id: "google-gemini", name: "Google Gemini", available: true, authenticated: true },
@@ -274,6 +281,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
         { id: "xai", name: "xAI", description: "Grok web search via xAI Responses API (uses SuperGrok/X Premium+ OAuth via /login xai-oauth, or XAI_API_KEY)", credentialFree: false, hasCredential: false },
         { id: "zai", name: "Z.AI", description: "Calls Z.AI webSearchPrime MCP", credentialFree: false, hasCredential: false },
         { id: "exa", name: "Exa", description: "API via /login exa or EXA_API_KEY; explicit keyless fallback via MCP", credentialFree: false, hasCredential: false },
+        { id: "keenable", name: "Keenable", description: "API key or explicit keyless search", credentialFree: false, hasCredential: false, envKeys: ["KEENABLE_API_KEY"], apiKeyId: "keenable" },
         { id: "tinyfish", name: "TinyFish", description: "Requires TINYFISH_API_KEY", credentialFree: false, hasCredential: false },
         { id: "jina", name: "Jina", description: "Requires JINA_API_KEY", credentialFree: false, hasCredential: false },
         { id: "kagi", name: "Kagi", description: "Requires KAGI_API_KEY and Kagi Search API beta access", credentialFree: false, hasCredential: false },

@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { ComposerPredictionController } from "../../modes/controllers/composer-prediction-controller";
+import { ComposerPredictionController, predictionAnchor } from "../../modes/controllers/composer-prediction-controller";
 import type { AgentSession } from "../../session/agent-session";
 import { cfgComposerPredictions } from "../../modes/settings";
 
@@ -9,14 +9,20 @@ export class StudioMessagePrediction {
 	readonly #tried = new WeakSet<AgentMessage>();
 	readonly #unsubscribe: () => void;
 	readonly #unsubscribeSettings: () => void;
-	#active: { channelId: string; revision: number; empty: boolean } | undefined;
+	#active: { channelId: string; revision: number; text: string } | undefined;
 	#disposed = false;
 	get running(): boolean {
 		return this.#controller.running;
 	}
 	constructor(
 		readonly session: AgentSession,
-		readonly publish: (channelId: string, revision: number, text: string | null) => void,
+		readonly publish: (
+			channelId: string,
+			revision: number,
+			text: string | null,
+			choices?: readonly string[],
+			rank?: number,
+		) => void,
 	) {
 		const owner = this;
 		this.#controller = new ComposerPredictionController({
@@ -26,7 +32,7 @@ export class StudioMessagePrediction {
 			get viewSession() {
 				return session;
 			},
-			editor: { getText: () => (this.#active?.empty ? "" : "draft") },
+			editor: { getText: () => this.#active?.text ?? "draft" },
 			ui: {
 				requestRender() {
 					owner.#show();
@@ -34,7 +40,12 @@ export class StudioMessagePrediction {
 			},
 		});
 		this.#unsubscribe = session.subscribe(event => {
-			if (event.type === "agent_start" || event.type === "auto_compaction_start") this.#controller.cancel();
+			if (
+				event.type === "agent_start" ||
+				event.type === "auto_compaction_start" ||
+				event.type === "manual_compaction_start"
+			)
+				this.#controller.cancel();
 			if (event.type === "agent_end" && event.isTerminal !== false) {
 				void session
 					.waitForIdle()
@@ -46,41 +57,60 @@ export class StudioMessagePrediction {
 			if (!cfgComposerPredictions.get(session.settings)) this.#controller.cancel();
 		});
 	}
-	update(channelId: string, revision: number, empty: boolean): void {
+	update(channelId: string, revision: number, empty: boolean, text?: string): void {
 		if (this.#active?.channelId === channelId && revision < this.#active.revision) return;
-		if (this.#active?.channelId !== channelId || !empty) this.#controller.cancel();
-		this.#active = { channelId, revision, empty };
-		if (empty) {
-			this.#show();
-			this.#request();
-		}
+		const prefix = text?.trimEnd() ?? (empty ? "" : "draft");
+		if (
+			this.#active?.channelId !== channelId ||
+			(prefix && !this.#controller.choices?.some(choice => choice.startsWith(prefix)))
+		)
+			this.#controller.cancel();
+		this.#active = { channelId, revision, text: prefix };
+		this.#show();
+		if (!prefix) this.#request();
+	}
+	shown(channelId: string, revision: number): void {
+		if (this.#active?.channelId === channelId && this.#active.revision === revision) this.#controller.shown();
+	}
+	accepted(channelId: string, revision: number, rank: number): void {
+		if (this.#active?.channelId === channelId && this.#active.revision === revision) this.#controller.accepted(rank);
 	}
 	release(channelId: string): void {
 		if (this.#active?.channelId !== channelId) return;
 		this.#active = undefined;
 		this.#controller.cancel();
 	}
-	dismiss(channelId: string, revision: number): boolean {
-		if (this.#active?.channelId !== channelId || this.#active.revision !== revision || !this.#active.empty)
+	dismiss(channelId: string, revision: number, accepted = false): boolean {
+		if (this.#active?.channelId !== channelId || this.#active.revision !== revision || !this.#controller.choices)
 			return false;
+		if (accepted) this.#controller.accepted(0);
 		this.release(channelId);
 		return true;
 	}
 	#show(): void {
 		const active = this.#active;
-		if (!this.#disposed && active?.empty)
-			this.publish(active.channelId, active.revision, this.#controller.text ?? null);
+		if (this.#disposed || !active) return;
+		const choices = this.#controller.choices;
+		const rank = choices?.findIndex(choice => choice.startsWith(active.text)) ?? -1;
+		this.publish(
+			active.channelId,
+			active.revision,
+			rank >= 0 ? choices![rank]!.slice(active.text.length) : null,
+			choices,
+			rank >= 0 ? rank : undefined,
+		);
 	}
 	#request(): void {
 		if (
 			this.#disposed ||
-			!this.#active?.empty ||
+			!this.#active ||
+			this.#active.text !== "" ||
 			!cfgComposerPredictions.get(this.session.settings) ||
 			this.session.isStreaming ||
 			this.session.isCompacting
 		)
 			return;
-		const last = this.session.messages.at(-1);
+		const last = predictionAnchor(this.session);
 		if (!last || last.role !== "assistant" || this.#tried.has(last)) return;
 		this.#tried.add(last);
 		this.#controller.request();

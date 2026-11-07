@@ -1,3 +1,17 @@
+import { cfgAsyncEnabled } from "../tools/settings";
+import { cfgTaskIsolationMerge } from "../task/settings";
+import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
+import { cfgBtwInject } from "../modes/settings";
+import { sendStudioBtwInjection } from "./services/btw-injection";
+import {
+	isAgentViewSession,
+	isLocalAgentSession,
+	type AgentSessionHandle,
+	type AgentViewSession,
+} from "../session/agent-session-handle";
+import { readModelMentions } from "../session/model-mentions";
+import type { AgentRegistryApi } from "../registry/agent-registry";
+import type { MCPManager } from "../mcp/manager";
 import { cfgGcAutoCompress } from "../cli/gc-settings";
 import { scheduleGcAutoCompress } from "../cli/gc-auto-compress";
 import { StudioIdleMaintenance } from "./services/idle-maintenance-service";
@@ -45,6 +59,7 @@ import type { ToolUiFactory } from "../tools/context";
 import { StudioBridgeServer } from "./bridge-server";
 import { StudioRuntimeCommandError } from "./command-arbiter";
 import { createStudioRemoteUiFactory } from "./remote-extension-ui";
+import { setStudioThreadInteraction } from "./services/studio-thread-service";
 import { reconstructSessionBranch, StudioAgentConversationService } from "./services/agent-conversation-service";
 import {
 	StudioAgentHubService,
@@ -221,6 +236,7 @@ export type RunStudioHostMode = (
 ) => Promise<void>;
 
 export interface StudioHostModeDependencies {
+	mcpManager?: MCPManager;
 	resumedFromSessionId?: string;
 	createBridge?: () => StudioBridgeLifecycle;
 	createRuntimeId?: () => string;
@@ -276,7 +292,7 @@ function sessionFileOf(session: AgentSession): string | null {
 }
 
 async function hydratePersistedStudioAgents(
-	registry: AgentRegistry,
+	registry: AgentRegistryApi,
 	sessionFile: string | null,
 	shouldContinue?: () => boolean,
 ): Promise<void> {
@@ -338,11 +354,11 @@ function studioToolSession(session: AgentSession): ToolSession {
 	return new Proxy(session, {
 		get(target, property) {
 			if (property === "cwd") return target.sessionManager.getCwd();
-			if (property === "hasUI") return false;
 			if (property === "getSessionFile") return () => target.sessionManager.getSessionFile() ?? null;
 			if (property === "getSessionSpawns") return () => "*";
-			const value = Reflect.get(target, property, target) as unknown;
-			return typeof value === "function" ? value.bind(target) : value;
+			const source = target.studioToolSession ?? target;
+			const value = Reflect.get(source, property, source) as unknown;
+			return typeof value === "function" ? value.bind(source) : value;
 		},
 	}) as unknown as ToolSession;
 }
@@ -365,11 +381,11 @@ interface StudioAgentTelemetryCache {
  * once the session is gone. Without it a parked agent reports no usage at all
  * and the Hub can only show `usage —`.
  */
-function createStudioAgentTelemetry(registry: AgentRegistry): StudioAgentTelemetryPort {
+function createStudioAgentTelemetry(registry: AgentRegistryApi): StudioAgentTelemetryPort {
 	const cache = new Map<string, StudioAgentTelemetryCache>();
 	const retained = new Map<string, { createdAt: number; usage: StudioAgentUsage }>();
 	const listeners = new Map<string, Set<() => void>>();
-	const attachedSessions = new Map<string, { session: AgentSession; unsubscribe: () => void }>();
+	const attachedSessions = new Map<string, { session: AgentSessionHandle; unsubscribe: () => void }>();
 
 	const notify = (agentId: string): void => {
 		cache.delete(agentId);
@@ -424,7 +440,7 @@ function createStudioAgentTelemetry(registry: AgentRegistry): StudioAgentTelemet
 			const model = session.model?.id;
 			if (model !== undefined && model.length > 0) result.model = model;
 			try {
-				const entries = session.sessionManager.getEntries();
+				const entries = isAgentViewSession(session) ? session.sessionManager.getEntries() : [];
 				for (let index = entries.length - 1; index >= 0; index -= 1) {
 					const last = studioTranscriptMessage(entries[index]!).find(message => message.role === "assistant");
 					if (last && last.text.length > 0) {
@@ -496,6 +512,7 @@ export function createStudioHostRuntime(
 		onChange: () => () => {},
 	},
 	resumedFromSessionId?: string,
+	mcpManager?: MCPManager,
 ): StudioHostRuntime {
 	const credentialBroker = createStudioAuthBroker(session);
 	if (cfgGcAutoCompress.get(session.settings))
@@ -539,7 +556,7 @@ export function createStudioHostRuntime(
 	const modes = new StudioModeControlService(session);
 	const extensionModes = new StudioExtensionModes(session, modes, loop);
 	const models = new StudioModelControlService(session);
-	const workbench = new StudioWorkbenchService(session, liveAudio);
+	const workbench = new StudioWorkbenchService(session, liveAudio, mcpManager);
 	workbench.planControl = modes;
 	const permissions = new StudioPermissionControlService(session);
 	const settings = new StudioRuntimeSettingsService(session);
@@ -550,7 +567,9 @@ export function createStudioHostRuntime(
 		await modes.applyPending();
 		await permissions.applyPending();
 	});
-	const interaction = new StudioInteractionGateway();
+	const interaction = new StudioInteractionGateway((message, level) =>
+		session.emitNotice(level, message, "extension"),
+	);
 	const idleMaintenance = new StudioIdleMaintenance(
 		session,
 		loop,
@@ -585,7 +604,11 @@ export function createStudioHostRuntime(
 	const handoff = new StudioHandoffService(session);
 	const fastPrewalk = new StudioFastPrewalkService(session);
 	const commands = new StudioCommandManifestService(session);
-	const btw = new StudioBtwService(session);
+	const btw = new StudioBtwService(session, {
+		injectEnabled: () => cfgBtwInject.get(session.settings),
+		sendInjection: (text, sessionId) => sendStudioBtwInjection(session, text, sessionId),
+	});
+	workbench.runtimeFeatures.injectBtw = id => btw.inject(id);
 	let pendingRuleWrite: { filePath: string; previous: Uint8Array | undefined; existed: boolean } | undefined;
 	const clearPendingRuleWrite = () => {
 		pendingRuleWrite = undefined;
@@ -779,6 +802,7 @@ export function createStudioHostRuntime(
 		getAllJobs: filter => session.asyncJobManager?.getAllJobs(filter) ?? [],
 		cancel: (id, filter) => session.asyncJobManager?.cancel(id, filter) ?? false,
 		widgetView: job => session.asyncJobManager?.widgets?.view(job),
+		widgetCaption: job => session.asyncJobManager?.widgets?.caption(job),
 	};
 	const agentsRef = { current: undefined as StudioAgentHubService | undefined };
 	const jobs = new StudioJobService(jobsPort, registry, {
@@ -813,39 +837,54 @@ export function createStudioHostRuntime(
 		irc,
 		{
 			spawn: async request => {
-				const effort = request.effort as TaskEffort | undefined;
-				const isolation =
-					request.isolation === undefined
-						? undefined
-						: { requested: true, merge: request.isolation as "patch" | "branch" };
-				if (request.async === false || isolation !== undefined) {
-					const result = await runStructuredSubagent({
-						session: toolSession,
-						invocationKind: "task",
-						assignment: request.assignment,
-						// Until Studio has a separate rationale field, retain assignment-based auto effort.
-						solutionSpace: request.solutionSpace ?? request.assignment,
-						agent: request.definition,
-						...(request.context === undefined ? {} : { context: request.context }),
-						...(effort === undefined ? {} : { effort }),
-						...(isolation === undefined ? {} : { isolation }),
-						...(request.async === false ? {} : { detached: true }),
-						keepAlive: true,
-						enableLsp: cfgTaskEnableLsp.get(session.settings) !== false,
-					});
-					return { agentId: result.result.id };
-				}
-				const task = await TaskTool.create(toolSession);
-				const result = await task.execute(crypto.randomUUID(), {
-					agent: request.definition,
-					task: request.assignment,
-					solutionSpace: request.solutionSpace ?? request.assignment,
-					...(request.context === undefined ? {} : { context: request.context }),
-					...(effort === undefined ? {} : { effort }),
-					...(request.isolation === undefined ? {} : { isolated: true }),
+				const settings = session.settings.overlay();
+				if (request.async !== undefined) cfgAsyncEnabled.override(settings, request.async);
+				if (request.isolation !== undefined)
+					cfgTaskIsolationMerge.override(settings, request.isolation as "patch" | "branch");
+				const spawningSession = new Proxy(toolSession, {
+					get(target, property) {
+						return property === "settings" ? settings : Reflect.get(target, property, target);
+					},
 				});
+				const task = await TaskTool.create(spawningSession);
+				const parameters = {
+					agent: request.definition,
+					...(request.taskFile ? { taskFile: request.taskFile } : { task: request.assignment }),
+					solutionSpace: request.solutionSpace ?? request.assignment ?? request.taskFile,
+					...(request.model ? { model: request.model[0] } : {}),
+					...(request.context === undefined ? {} : { context: request.context }),
+					...(request.effort === undefined ? {} : { effort: request.effort as TaskEffort }),
+					...(request.isolation === undefined ? {} : { isolated: true }),
+				};
+				if (request.taskFile && !session.extensionRunner)
+					throw new Error("Task files require the native approval host");
+				const toolCallId = crypto.randomUUID();
+				const context = spawningSession.getToolContext?.();
+				const result =
+					request.taskFile && session.extensionRunner
+						? await new ExtensionToolWrapper(
+								{
+									name: task.name,
+									label: task.label,
+									description: task.description,
+									parameters: task.parameters,
+									approval: task.approval,
+									bindApprovalTargets: task.bindApprovalTargets,
+									approvalRestrictionPaths: task.approvalRestrictionPaths,
+									formatApprovalDetails: task.formatApprovalDetails,
+									execute: task.execute.bind(task),
+								},
+								session.extensionRunner,
+							).execute(toolCallId, parameters, undefined, undefined, context)
+						: await task.execute(toolCallId, parameters);
 				const first = result.details?.progress?.[0] ?? result.details?.results?.[0];
-				if (!first?.id) throw new Error("Task spawn did not return an agent identity");
+				if (!first?.id)
+					throw new Error(
+						result.content
+							.filter(item => item.type === "text")
+							.map(item => item.text)
+							.join("\n") || "Task spawn did not return an agent identity",
+					);
 				return {
 					agentId: first.id,
 					...(result.details?.async?.jobId === undefined ? {} : { jobId: result.details.async.jobId }),
@@ -856,11 +895,12 @@ export function createStudioHostRuntime(
 			read: async ({ agentId, offset, limit }) => {
 				const ref = registry.get(agentId);
 				if (!ref) throw new Error("Unknown agent");
-				const entries = ref.session
-					? [...ref.session.sessionManager.getBranch()]
-					: ref.sessionFile
-						? (reconstructSessionBranch(await loadEntriesFromFile(ref.sessionFile))?.branch ?? [])
-						: [];
+				const entries =
+					ref.session && isAgentViewSession(ref.session)
+						? [...ref.session.sessionManager.getBranch()]
+						: ref.sessionFile
+							? (reconstructSessionBranch(await loadEntriesFromFile(ref.sessionFile))?.branch ?? [])
+							: [];
 				const messages = entries.flatMap(entry => studioTranscriptMessage(entry));
 				return { messages: messages.slice(offset, offset + limit), eof: offset + limit >= messages.length };
 			},
@@ -894,27 +934,29 @@ export function createStudioHostRuntime(
 		sessionManager: session.sessionManager,
 		toolResult: toolCallId => mainConversation.toolResult(session.sessionManager.getSessionId(), toolCallId),
 	}));
-	const createConversationProjector = (target: AgentSession, runtimeEpoch: number): ConversationLiveProjector => {
+	const createConversationProjector = (target: AgentViewSession, runtimeEpoch: number): ConversationLiveProjector => {
 		const manager = target.sessionManager;
+		const localManager = isLocalAgentSession(target) ? target.sessionManager : undefined;
 		const projector = new ConversationLiveProjector({
 			restoreModelMentions: text =>
 				expandModelMentionTags(
 					text,
-					agent => target.modelMentions.find(mention => mention.agent === agent)?.selector,
+					agent => readModelMentions(manager.getBranch()).find(mention => mention.agent === agent)?.selector,
 				),
 			sessionId: manager.getSessionId(),
 			runtimeEpoch,
 			reserveMessageId: input => {
-				if (typeof manager.reserveMessageId === "function") return manager.reserveMessageId(input.role);
+				if (localManager) return localManager.reserveMessageId(input.role);
 				return crypto.randomUUID().slice(-8);
 			},
-			reserveCustomMessageId: input => manager.reserveCustomMessageId(input.customType, input.timestamp),
+			reserveCustomMessageId: input =>
+				localManager?.reserveCustomMessageId(input.customType, input.timestamp) ?? crypto.randomUUID().slice(-8),
 			reserveCompactionId: () => {
-				if (typeof manager.reserveCompactionId === "function") return manager.reserveCompactionId();
+				if (localManager) return localManager.reserveCompactionId();
 				return crypto.randomUUID().slice(-8);
 			},
 			releaseCompactionId: id => {
-				if (typeof manager.releaseCompactionId === "function") manager.releaseCompactionId(id);
+				localManager?.releaseCompactionId(id);
 			},
 			lookupPersistedCompactionId: ({ summary }) => {
 				if (typeof manager.getBranch !== "function") return undefined;
@@ -935,7 +977,7 @@ export function createStudioHostRuntime(
 		registry,
 		runtimeEpoch: () => bridgeConfig.runtimeEpoch as number,
 		createChild: ref =>
-			ref.session === null
+			ref.session === null || !isAgentViewSession(ref.session)
 				? undefined
 				: createConversationProjector(ref.session, bridgeConfig.runtimeEpoch as number),
 	});
@@ -1341,6 +1383,7 @@ export async function runStudioHostMode(
 			onChange: listener => supervisorRef.current?.onChange(listener) ?? (() => {}),
 		},
 		dependencies.resumedFromSessionId,
+		dependencies.mcpManager,
 	);
 	const supervisor: StudioMainWorkerSupervisor =
 		dependencies.recreateSession === undefined
@@ -1381,6 +1424,7 @@ export async function runStudioHostMode(
 		// interaction cards on the Bridge (plan §2.5). The interactive TUI
 		// branch (TTY) replaces it with its own UIContext when it starts.
 		dependencies.setToolUIContext?.(createStudioRemoteUiFactory(runtime.services.interaction), true);
+		setStudioThreadInteraction(runtime.services.interaction);
 		await runTui(runtime);
 	} finally {
 		stopParentWatch();
@@ -1392,6 +1436,7 @@ export async function runStudioHostMode(
 			// Invalidate the factory so late tool contexts fail closed instead
 			// of opening interactions on a dead bridge.
 			dependencies.setToolUIContext?.(undefined, false);
+			setStudioThreadInteraction(undefined);
 			await supervisor.dispose();
 			runtime.dispose();
 		}

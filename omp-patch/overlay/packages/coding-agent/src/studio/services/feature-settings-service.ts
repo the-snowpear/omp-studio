@@ -1,3 +1,40 @@
+import { outRepliesActive } from "../../internal-urls/out-protocol";
+import { cfgMagicKeyword, cfgMagicKeywordsEnabled } from "../../modes/settings";
+import { cfgOutEnabled, cfgToolsXdevNotices } from "../../tools/settings";
+import {
+	cfgBtwInject,
+	cfgComposerPredictionAlternatives,
+	cfgDisplayShellVisualization,
+	cfgDisplayAdvisorCollapsedLines,
+} from "../../modes/settings";
+import { cfgTitleRefreshAfterPrompts } from "../../utils/title-settings";
+import {
+	cfgTaskFile,
+	cfgTaskPerCallModel,
+	cfgTaskPerCallModelAllow,
+	cfgTaskWorkerThreads,
+	cfgOvnfsPath,
+} from "../../task/settings";
+import {
+	cfgPrewalkFrom,
+	cfgPrewalkInto,
+	cfgRetryRateLimitWalksChain,
+	cfgProvidersOpenaiResponsesWebsockets,
+	cfgProvidersOpenaiCodexDaybreak,
+} from "../../session/settings";
+import { cfgJudgmentAttemptTimeoutMs } from "../../config/model-settings";
+import { cfgSkillsManualSkills } from "../../extensibility/settings";
+import { cfgHindsightGlobalScope } from "../../hindsight/settings";
+import {
+	cfgSpotlightExperimentEnabled,
+	cfgSpotlightUrl,
+	cfgSpotlightModel,
+	cfgSpotlightThinking,
+	cfgSpotlightTimeoutMs,
+	cfgSpotlightExperimentHoldout,
+	cfgSpotlightExperimentScoreFree,
+	cfgSpotlightExperimentTools,
+} from "../../spotlight/settings";
 import { resolveCredentialIdentityKey } from "@oh-my-pi/pi-ai";
 import type { AnySetting } from "../../config/registry";
 import {
@@ -53,6 +90,37 @@ import { SessionControlError } from "./session-control-service";
 import { StudioSessionCompactionService } from "./session-compaction-service";
 
 const HANDLES: Record<FeatureSettingKey, AnySetting> = {
+	"magicKeywords.enabled": cfgMagicKeywordsEnabled,
+	"magicKeywords.chillax": cfgMagicKeyword.chillax,
+	"out.enabled": cfgOutEnabled,
+	"btw.inject": cfgBtwInject,
+	"composer.predictionAlternatives": cfgComposerPredictionAlternatives,
+	"display.shellVisualization": cfgDisplayShellVisualization,
+	"title.refreshAfterPrompts": cfgTitleRefreshAfterPrompts,
+	"display.advisorCollapsedLines": cfgDisplayAdvisorCollapsedLines,
+	"task.file": cfgTaskFile,
+	"task.perCallModel": cfgTaskPerCallModel,
+	"task.perCallModelAllow": cfgTaskPerCallModelAllow,
+	"task.workerThreads": cfgTaskWorkerThreads,
+	"ovnfs.path": cfgOvnfsPath,
+	"prewalk.from": cfgPrewalkFrom,
+	"prewalk.into": cfgPrewalkInto,
+	"retry.rateLimitWalksChain": cfgRetryRateLimitWalksChain,
+	"providers.openaiResponsesWebsockets": cfgProvidersOpenaiResponsesWebsockets,
+	"providers.openai-codex.daybreak": cfgProvidersOpenaiCodexDaybreak,
+	"judgment.attemptTimeoutMs": cfgJudgmentAttemptTimeoutMs,
+	"skills.manualSkills": cfgSkillsManualSkills,
+	"hindsight.globalScope": cfgHindsightGlobalScope,
+	"tools.xdevNotices": cfgToolsXdevNotices,
+	"spotlight.experiment.enabled": cfgSpotlightExperimentEnabled,
+	"spotlight.url": cfgSpotlightUrl,
+	"spotlight.model": cfgSpotlightModel,
+	"spotlight.thinking": cfgSpotlightThinking,
+	"spotlight.timeoutMs": cfgSpotlightTimeoutMs,
+	"spotlight.experiment.holdout": cfgSpotlightExperimentHoldout,
+	"spotlight.experiment.scoreFree": cfgSpotlightExperimentScoreFree,
+	"spotlight.experiment.tools": cfgSpotlightExperimentTools,
+
 	"task.agentAccountPools": cfgTaskAgentAccountPools,
 	"compaction.modelThresholds": cfgCompactionModelThresholds,
 	"retry.fallbackOn": cfgRetryFallbackOn,
@@ -95,7 +163,10 @@ export class StudioFeatureSettingsService {
 	) {}
 	#row(key: FeatureSettingKey): FeatureSettingRow {
 		const setting = HANDLES[key],
-			value: unknown = structuredClone(setting.get(this.session.settings));
+			value: unknown =
+				key === "out.enabled"
+					? outRepliesActive(this.session.settings, this.session.studioToolSession?.replyTranscript === true)
+					: structuredClone(setting.get(this.session.settings) ?? null);
 		validateFeatureSettingValue(value);
 		return { key, value, source: this.session.settings.getProvenance(setting) };
 	}

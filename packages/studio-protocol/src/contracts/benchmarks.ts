@@ -9,6 +9,7 @@ export interface BenchmarkStats {
   inputTokens: number; outputTokens: number; cost: number;
 }
 export interface BenchmarkMeasurement {
+  transport?: "http" | "websocket";
   workloadPhase?: "single" | "parallel" | "prefill";
   ok: boolean; challenge?: "chat" | "prefill" | "generation"; error?: string;
   phase?: "cold" | "warm" | "single" | "parallel" | "prefill"; cacheReadTokens?: number; cacheWriteTokens?: number;
@@ -97,14 +98,14 @@ export function validateBenchmarkResult(kind: BenchmarkOperation["kind"], value:
     const groups = record(model.byChallenge, ["chat", "prefill", "generation"]); Object.values(groups).forEach(stats);
     if (!Array.isArray(model.measurements) || model.measurements.length > 80) throw new Error("Invalid measurements");
     for (const item of model.measurements) {
-      const measurement = record(item, ["ok", "challenge", "error", "phase", "workloadPhase", "cacheReadTokens", "cacheWriteTokens", "cacheObservations", "ttftMs", "durationMs", "generationMs", "inputTokens", "outputTokens", "tokensPerSecond", "generationTps", "prefillTps", "cost"]);
+      const measurement = record(item, ["ok", "transport", "challenge", "error", "phase", "workloadPhase", "cacheReadTokens", "cacheWriteTokens", "cacheObservations", "ttftMs", "durationMs", "generationMs", "inputTokens", "outputTokens", "tokensPerSecond", "generationTps", "prefillTps", "cost"]);
       if (measurement.workloadPhase !== undefined && !["single", "parallel", "prefill"].includes(measurement.workloadPhase as string)) throw new Error("Invalid workload phase");
       if (typeof measurement.ok !== "boolean") throw new Error("Invalid measurement");
       if (measurement.error !== undefined) text(measurement.error, 4000);
       if (measurement.challenge !== undefined && !["chat", "prefill", "generation"].includes(measurement.challenge as string)) throw new Error("Invalid challenge");
       if (measurement.phase !== undefined && !["cold", "warm", "single", "parallel", "prefill"].includes(measurement.phase as string)) throw new Error("Invalid benchmark phase");
       if (measurement.cacheObservations !== undefined && (!Array.isArray(measurement.cacheObservations) || measurement.cacheObservations.length > 4 || measurement.cacheObservations.some(item => !["prompt_cache_read_observed", "prompt_cache_write_observed", "response_cache_hit_observed", "no_provider_proof"].includes(item)))) throw new Error("Invalid cache observation");
-      for (const [key, value] of Object.entries(measurement)) if (!["ok", "error", "challenge", "phase", "workloadPhase", "cacheObservations"].includes(key)) number(value);
+      for (const [key, value] of Object.entries(measurement)) if (!["ok", "transport", "error", "challenge", "phase", "workloadPhase", "cacheObservations"].includes(key)) number(value);
     }
   }
 }

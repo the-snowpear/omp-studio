@@ -3,7 +3,7 @@ import { SvgFigureImage } from "../graphics/SvgFigureImage";
 import { GraphicPreview } from "../graphics/GraphicPreview";
 import { graphicFormat } from "../graphics/graphic-types";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import ReactMarkdown, { type Components, type Options } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { scanStreamingMarkdown, type StreamingCodeFence, type StreamingMarkdownScan } from "./markdownBlocks";
@@ -11,7 +11,7 @@ import { withMagicKeywordChildren } from "./magicKeywordMarkdown";
 import { LazyMermaid } from "./LazyMermaid";
 import { performanceOptions } from "../performanceOptions";
 import { HighlightedCode } from "../highlight/HighlightedCode";
-import { BrowserLink } from "../browser/browserLinks";
+import { ExtensionAwareLink } from "./ExtensionLinks";
 
 const REMARK: Options["remarkPlugins"] = [remarkGfm];
 const HIGHLIGHT: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]];
@@ -87,7 +87,7 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
     li: ({ children }) => <li>{prose(children)}</li>,
     a: ({ href, children }) => {
       const url = typeof href === "string" ? href.trim() : "";
-      return isSafeMarkdownUrl(url) ? <BrowserLink href={url}>{prose(children)}</BrowserLink> : <span>{prose(children)}</span>;
+      return <ExtensionAwareLink href={url} safe={isSafeMarkdownUrl(url)}>{prose(children)}</ExtensionAwareLink>;
     },
     img: ({ src, alt }) => {
       const url = typeof src === "string" ? src.trim() : "";
@@ -117,7 +117,7 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
 const MarkdownBlock = memo(function MarkdownBlock({ text, streaming, magic }: { text: string; streaming: boolean; magic: boolean }) {
   const highlightEligible = !streaming && text.length <= MAX_HIGHLIGHT_CHARS;
   const plugins = highlightEligible && !performanceOptions.highlightWorker ? HIGHLIGHT : undefined;
-  return <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={plugins} components={componentsFor(streaming, magic, highlightEligible)}>{text}</ReactMarkdown>;
+  return <ReactMarkdown urlTransform={(url, key) => key === "href" ? url : defaultUrlTransform(url)} remarkPlugins={REMARK} rehypePlugins={plugins} components={componentsFor(streaming, magic, highlightEligible)}>{text}</ReactMarkdown>;
 });
 
 const NO_CLOSED_BLOCKS: readonly string[] = [];
@@ -169,5 +169,5 @@ export const MarkdownText = memo(function MarkdownText({ text, streaming = false
 });
 
 export const MarkdownInline = memo(function MarkdownInline({ text, magicKeywords = false }: { text: string; magicKeywords?: boolean; k?: string }) {
-  return <span className="md-inline"><ReactMarkdown remarkPlugins={REMARK} components={componentsFor(false, magicKeywords)} unwrapDisallowed>{text}</ReactMarkdown></span>;
+  return <span className="md-inline"><ReactMarkdown urlTransform={(url, key) => key === "href" ? url : defaultUrlTransform(url)} remarkPlugins={REMARK} components={componentsFor(false, magicKeywords)} unwrapDisallowed>{text}</ReactMarkdown></span>;
 });

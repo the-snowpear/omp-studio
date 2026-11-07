@@ -1,3 +1,5 @@
+import type { BtwInjection } from "@omp-studio/studio-protocol";
+import "./BtwInjection.css";
 import { AppSelect } from "../AppSelect";
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from "react";
 import { ChipComposer, type ChipComposerHandle } from "../composer/ChipComposer";
@@ -39,6 +41,7 @@ export function BtwPanel({ session, demo, onDemoNext, onClose, visible = true }:
   useEffect(() => { const node = bodyRef.current; if (node && followRef.current) node.scrollTop = node.scrollHeight; }, [text]);
   const onScroll = () => { const node = bodyRef.current; if (node) followRef.current = node.scrollHeight - node.scrollTop - node.clientHeight <= FOLLOW_SLACK_PX; };
   const shortcuts = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.altKey && event.key.toLowerCase() === "i" && snapshot?.injection?.state === "ready" && session.inject) { event.preventDefault(); void session.inject(snapshot.injection.id); return; }
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing) return;
     if ((event.target as HTMLElement).closest("input, textarea, button, [contenteditable='true'], [role='combobox']")) return;
     const key = event.key.toLowerCase();
@@ -71,7 +74,7 @@ export function BtwPanel({ session, demo, onDemoNext, onClose, visible = true }:
         <div className="ev ev-assistant">
           <div className="ev-head"><span className="who"><span className="role-badge a">π</span>OMP</span><HistoryStatus status={turn.status} /></div>
           <div className="ev-copy-host">
-            <MarkdownText text={turn.answer} />
+            <BtwAnswer text={turn.answer} injection={turn.injection} session={session} />
             <div className="ev-msg-actions"><MessageCopyButton text={turn.answer} /></div>
           </div>
           {turn.error ? <div className="ev-provider-error"><p className="ev-provider-error-text">{turn.error}</p></div> : null}
@@ -86,7 +89,7 @@ export function BtwPanel({ session, demo, onDemoNext, onClose, visible = true }:
         <div className="ev ev-assistant">
           <div className="ev-head"><span className="who"><span className="role-badge a">π</span>OMP</span>{session.historyStatus ? <HistoryStatus status={session.historyStatus} /> : <BtwStatusLine snapshot={snapshot} startedAt={session.startedAt} compact />}</div>
           <div className="ev-copy-host">
-            {!text && running ? <div className="btw-thinking" aria-label={t("common.loading")}><span /><span /><span /></div> : <MarkdownText text={text} {...(running ? { streaming: true } : {})} />}
+            {!text && running ? <div className="btw-thinking" aria-label={t("common.loading")}><span /><span /><span /></div> : <BtwAnswer text={text} injection={snapshot.injection} session={session} streaming={running} />}
             {text || session.canCopy ? <div className="ev-msg-actions">
               <button type="button" className="ev-msg-copy" aria-label={t("common.copy")} data-tip={t("common.copy")} onClick={() => void session.copy()}><Icon name="copy" extra="sm" /></button>
               <button type="button" className="ev-msg-copy" aria-label={t("runtimeUpgrade.btwFollow")} disabled={session.canAsk === false} data-tip={t("runtimeUpgrade.btwFollow")} onClick={() => composer.current?.focus()}><Icon name="message" extra="sm" /></button>
@@ -103,6 +106,12 @@ export function BtwPanel({ session, demo, onDemoNext, onClose, visible = true }:
       <BtwComposer session={session} visible={visible} composer={composer} onCancel={() => bodyRef.current?.focus()} />
     </div>
   </div>;
+}
+
+function BtwAnswer({ text, injection, session, streaming }: { text: string; injection?: BtwInjection | undefined; session: BtwSessionApi; streaming?: boolean }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
+  if (!injection) return <MarkdownText text={text} {...(streaming ? { streaming: true } : {})} />;
+  return <><MarkdownText text={injection.before} /><div className={`btw-injection ${injection.state}`}><MarkdownText text={injection.text} /><button type="button" className="btn small outline" disabled={!session.inject || injection.state !== "ready"} onClick={() => void session.inject?.(injection.id)}>{injection.state === "sent" ? zh ? "已注入主会话" : "Injected into main session" : injection.state === "sending" ? zh ? "正在发送…" : "Sending…" : zh ? "注入主会话 · Alt+I" : "Inject into main · Alt+I"}</button></div><MarkdownText text={injection.after} /></>;
 }
 
 function BtwQuestion({ question, images, createdAt }: { question: string; images?: readonly PromptImageInput[] | undefined; createdAt?: number | undefined }) {

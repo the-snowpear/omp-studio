@@ -8,9 +8,9 @@ import type {
 
 const RECEIPT_TIMEOUT_MS = 120_000;
 
-type ReceiptClient = StudioClient;
+type ReceiptClient = Pick<StudioClient, "subscribe">;
 
-function commandStateOf(client: StudioClient, requestId: string): CommandState | undefined {
+function commandStateOf(client: ReceiptClient, requestId: string): CommandState | undefined {
   const getState = (client as { getState?: () => { readonly commands?: Readonly<Record<string, CommandState>> } }).getState;
   if (typeof getState !== "function") return undefined;
   try {
@@ -65,12 +65,12 @@ function settleReceipt<T>(receipt: CommandReceipt, resolve: (value: T) => void, 
   reject({ code: "INTERNAL_ERROR", message: receipt.reason });
 }
 
-type StateWatchClient = StudioClient & {
+type StateWatchClient = ReceiptClient & {
   getState?: () => { readonly commands?: Readonly<Record<string, CommandState>> };
   onState?: (listener: () => void) => Unsubscribe;
 };
 
-const stateWatchClient = (client: StudioClient): StateWatchClient => client as StateWatchClient;
+const stateWatchClient = (client: ReceiptClient): StateWatchClient => client as StateWatchClient;
 
 export async function waitReceipt<T>(client: ReceiptClient, requestId: string, timeoutMs: number | null = RECEIPT_TIMEOUT_MS): Promise<T> {
   const watched = stateWatchClient(client);

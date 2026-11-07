@@ -1,3 +1,4 @@
+import { RUNTIME_VIEW_KINDS } from "./runtime-views-protocol";
 import { CONTEXT_VIEW_KINDS } from "./context-view-protocol";
 import { isComputerWorkspaceQuery, type ComputerWorkspaceQuery } from "./computer-workspace-protocol";
 import { SessionControlError } from "./services/session-control-service";
@@ -22,14 +23,14 @@ import {
 import { StudioStateProjector } from "./state-projector";
 import type { StudioBridgeLifecycle, StudioHostRuntime } from "./studio-host-mode";
 
-const UPSTREAM_COMMIT = "e996e1c7ac476f60e02b8ed9764cf30fa8c00a8e";
+const UPSTREAM_COMMIT = "b5a6b2f7e5b6606b6562e678ead83f21738f34a0";
 /**
  * Must match `omp-patch/patches/series.json` `patchsetVersion`. The Runtime
  * reports `${VERSION}-${PATCHSET_VERSION}` in its Studio Hello, and packaging
  * refuses to sign an artifact whose probed identity disagrees with the series,
  * so a stale value here fails the build (see `scripts/build-omp-host.mjs`).
  */
-const PATCHSET_VERSION = "studio.44";
+const PATCHSET_VERSION = "studio.46";
 
 /** Reads and interrupts must not wait for `core.prompt` to finish. Prompt holds
  *  `#dispatchQueue` for the whole turn, including 503 auto-retry backoff. */
@@ -37,6 +38,7 @@ const CONCURRENT_DISPATCH_OPERATION_KINDS = new Set<string>([
 	"prediction.query",
 	...WORKBENCH_OPERATION_KINDS,
 	...CONTEXT_VIEW_KINDS,
+	...RUNTIME_VIEW_KINDS,
 	"session.owner.update",
 	"runtime.snapshot",
 	"session.transcript.read",

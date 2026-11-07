@@ -1,3 +1,4 @@
+import { isRuntimeViewKind, type RuntimeViewOperation } from "./runtime-views-protocol";
 import { isContextViewKind, type ContextViewOperation } from "./context-view-protocol";
 import { isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, type WorkbenchOperation } from "./workbench-protocol";
 import { isUpgradeOperationKind, UPGRADE_OPERATION_KINDS, type UpgradeOperation } from "./runtime-upgrade-protocol";
@@ -380,6 +381,23 @@ export class StudioBridgeDispatcher {
 					);
 				}
 			})();
+			return;
+		}
+		if (isRuntimeViewKind(operation.kind)) {
+			void this.runtime.services.workbench.views.execute(operation as RuntimeViewOperation).then(
+				result => {
+					send(`view:${request.requestId}`, {
+						type: "studio.receipt",
+						requestId: request.requestId,
+						commandId: crypto.randomUUID(),
+						runtimeEpoch: this.runtime.runtimeEpoch,
+						stateVersion: this.projector.stateVersion,
+						status: "completed",
+						result,
+					});
+				},
+				error => this.#reject(request, protocolError(error), send, false),
+			);
 			return;
 		}
 		if (isContextViewKind(operation.kind)) {

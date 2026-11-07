@@ -17,11 +17,11 @@ import type {
 	TerminalInputHandler,
 } from "../extensibility/extensions/types";
 import { getExtensionUISelectOptionLabel } from "../extensibility/extensions/types";
-import { defaultThemes } from "@oh-my-pi/pi-tui/theme/defaults";
-import { createTheme } from "@oh-my-pi/pi-tui/theme/loader";
+import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
 import type { ThemeJson } from "@oh-my-pi/pi-tui/theme/schema";
 import type { Theme } from "@oh-my-pi/pi-tui/theme/theme";
 import type { ToolUiFactory } from "../tools/context";
+import { ignoreSettle } from "../thread/services/support";
 import { StudioInteractionError, type StudioInteractionGateway } from "./services/interaction-port";
 
 /**
@@ -31,11 +31,17 @@ import { StudioInteractionError, type StudioInteractionGateway } from "./service
 export const REMOTE_CUSTOM_INPUT_ID = "custom-input";
 const OPTION_ID_PREFIX = "option:";
 
-function toolCallCommandId(toolCall: ToolCallContext | undefined): string {
-	if (toolCall === undefined) return `studio-tool:${crypto.randomUUID()}`;
+function toolCallCommandId(toolCall: ToolCallContext | undefined, sessionId?: string): string {
+	const prefix = `studio-tool:${sessionId ? `${sessionId}:` : ""}`;
+	if (toolCall === undefined) return `${prefix}${crypto.randomUUID()}`;
 	const current = toolCall.toolCalls[toolCall.index];
-	return `studio-tool:${current?.id ?? "unknown"}`;
+	return `${prefix}${current?.id ?? "unknown"}`;
 }
+
+export type StudioUiGateway = Pick<
+	StudioInteractionGateway,
+	"select" | "ask" | "confirm" | "input" | "approve" | "editor" | "cancelCommand" | "notify"
+>;
 
 function isOtherOption(option: ExtensionUISelectItem): boolean {
 	return typeof option === "string" ? option === "Other (type your own)" : option.label === "Other (type your own)";
@@ -141,10 +147,16 @@ export function mapAskDialogValue(
  * never touch the Bridge.
  */
 export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
+	// Stock React rendering keeps the original transcript; TUI component redraws have no effect.
+	rerenderMessage(_timestamp: number): void {}
+	refreshTranscript(_ids: readonly string[]): void {}
+	getLinkClicksAvailable(): boolean {
+		return true;
+	}
 	#fallbackTheme: Theme | undefined;
 
 	constructor(
-		private readonly gateway: StudioInteractionGateway,
+		private readonly gateway: StudioUiGateway,
 		private readonly commandId: string,
 	) {}
 
@@ -290,8 +302,8 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		);
 	}
 
-	notify(_message: string, _type?: "info" | "warning" | "error"): void {
-		// Non-blocking UI is a safe no-op on the Remote surface.
+	notify(message: string, type?: "info" | "warning" | "error"): void {
+		ignoreSettle(this.gateway.notify(message, type));
 	}
 
 	onTerminalInput(_handler: TerminalInputHandler): () => void {
@@ -356,7 +368,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		// default so Ask helpers (e.g. the "Done selecting" label) never
 		// dereference an uninitialized global.
 		if (this.#fallbackTheme === undefined) {
-			const firstDefault = Object.values(defaultThemes)[0];
+			const firstDefault = Object.values(getBuiltinThemes())[0];
 			this.#fallbackTheme = createTheme(firstDefault as ThemeJson);
 		}
 		return this.#fallbackTheme;
@@ -417,7 +429,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 
 	#cancel(reason: string, outcome: "aborted" | "expired" = "aborted"): void {
 		try {
-			this.gateway.cancel(reason, outcome);
+			this.gateway.cancelCommand(this.commandId, reason, outcome);
 		} catch {
 			// Interaction already resolved or closed; nothing to cancel.
 		}
@@ -429,7 +441,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
  * call gets a Remote UI context bound to an internal `studio-tool:<id>`
  * commandId reused across that call's questions.
  */
-export function createStudioRemoteUiFactory(gateway: StudioInteractionGateway): ToolUiFactory {
-	return (toolCall?: ToolCallContext) => new StudioRemoteExtensionUiContext(gateway, toolCallCommandId(toolCall));
+export function createStudioRemoteUiFactory(gateway: StudioUiGateway): ToolUiFactory {
+	return (toolCall, sessionId) => new StudioRemoteExtensionUiContext(gateway, toolCallCommandId(toolCall, sessionId));
 }
 import { validateAskAnswerPayload } from "./ask-attachments-protocol";

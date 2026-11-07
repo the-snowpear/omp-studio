@@ -1,3 +1,4 @@
+import { RuntimeToolProvider } from "./ShellView";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { SHORTCUTS, formatShortcut } from "../keyboard/shortcuts";
 import type { SessionId } from "@omp-studio/client-contract";
@@ -213,7 +214,7 @@ function SubagentConversationSurface({
               <p>正在读取子 Agent 对话…</p>
             </div>
           ) : (
-            <ConvoTranscript scrollerRef={scrollerRef} rows={snapshot.rows} {...(snapshot.demo ? { demo: true } : {})} />
+            <RuntimeToolProvider client={client} actions={sendClient} sessionId={liveSessionId} sourceSessionId={snapshot.state.identity?.sessionId} agentId={parentSessionId === liveSessionId ? target.agentId : undefined} enabled={visible && (preview || runtimeConnected)}><ConvoTranscript scrollerRef={scrollerRef} rows={snapshot.rows} {...(snapshot.demo ? { demo: true } : {})} /></RuntimeToolProvider>
           )}
           {state.hydrateStatus === "resyncing" ? (
             <div className="convo-notice info" role="status">正在同步</div>

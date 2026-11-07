@@ -1,0 +1,3 @@
+.btw-injection { margin: var(--sp-12) 0; padding: var(--sp-12); border-left: 3px solid var(--purple); border-radius: var(--r-4); background: color-mix(in srgb, var(--purple) 7%, transparent); }
+.btw-injection.sent { border-left-color: var(--green); background: color-mix(in srgb, var(--green) 7%, transparent); }
+.btw-injection .btn { margin-top: var(--sp-8); }

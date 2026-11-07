@@ -14,9 +14,14 @@ test("agent model details use native routing and only inspect descendants of the
 		tools: [],
 		retryFallback: { primary: "primary/model:high", chain: ["backup/model:medium"] },
 	});
-	const main = { sessionId: "parent" } as AgentSession;
+	const main = {
+		sessionId: "parent",
+		sessionManager: { getSessionId: () => "parent" },
+		activeToolExecutionUpdates: () => [],
+	} as unknown as AgentSession;
 	const child = {
 		sessionId: "child",
+		activeToolExecutionUpdates: () => [],
 		sessionManager: manager,
 		model: getBundledModel("anthropic", "claude-sonnet-4-5")!,
 		servingModel: { selector: "backup/model:medium", modelIdentity: "backup/model", isFallback: true },
@@ -26,9 +31,9 @@ test("agent model details use native routing and only inspect descendants of the
 	const refs = [
 		{ id: "Main", session: main },
 		{ id: "Child", parentId: "Main", session: child },
-		{ id: "Other", session: { sessionId: "other" } },
+		{ id: "Other", session: { sessionId: "other", sessionManager: { getSessionId: () => "other" } } },
 		{ id: "Foreign", parentId: "Other", session: child },
-	] as AgentRef[];
+	] as unknown as AgentRef[];
 	const registry = AgentRegistry.global();
 	const list = spyOn(registry, "list").mockReturnValue(refs);
 	const get = spyOn(registry, "get").mockImplementation(id => refs.find(ref => ref.id === id));
@@ -59,9 +64,13 @@ test("agent model details use native routing and only inspect descendants of the
 });
 
 test("parked agents expose saved configuration and reject results after registry ownership changes", async () => {
-	const main = { sessionId: "parent" } as AgentSession;
+	const main = {
+		sessionId: "parent",
+		sessionManager: { getSessionId: () => "parent" },
+		activeToolExecutionUpdates: () => [],
+	} as unknown as AgentSession;
 	const parked = { id: "Parked", parentId: "Main", sessionFile: "/saved.jsonl" } as AgentRef;
-	const refs = [{ id: "Main", session: main } as AgentRef, parked];
+	const refs = [{ id: "Main", session: main } as unknown as AgentRef, parked];
 	const registry = AgentRegistry.global();
 	const list = spyOn(registry, "list").mockReturnValue(refs);
 	const get = spyOn(registry, "get").mockImplementation(id => refs.find(ref => ref.id === id));

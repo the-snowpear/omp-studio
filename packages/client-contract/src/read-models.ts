@@ -376,6 +376,7 @@ export interface StatsDashboardReadModel {
 
 /** Wire API used by a provider or custom model in `models.yml`. */
 export type ModelApiKind =
+  | "devin"
   | "openai-completions"
   | "openai-responses"
   | "openai-codex-responses"
@@ -472,6 +473,8 @@ export interface ModelOverridePatch {
   readonly bedrockMessagesApi?: boolean;
   readonly requiresThinkingPresence?: boolean;
   readonly extendedCacheTtlBeta?: boolean;
+  readonly statefulResponses?: boolean;
+  readonly preferWebsockets?: boolean;
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly name?: string;
@@ -497,7 +500,7 @@ export interface ModelExecutionMetadata {
   readonly serviceTiers?: ReadonlyArray<string>;
   readonly promptCache?: { readonly short?: number; readonly long?: number };
   readonly promptCacheConfig?: { readonly short?: number; readonly long?: number };
-  readonly compatibility?: { readonly preferWebsockets?: boolean; readonly useResponsesLite?: boolean; readonly toolMode?: "code_mode_only" };
+  readonly compatibility?: { readonly supportsMessageThreads?: boolean; readonly toolNamePrefix?: string; readonly statefulResponses?: boolean; readonly preferWebsockets?: boolean; readonly useResponsesLite?: boolean; readonly toolMode?: "code_mode_only" };
 }
 export interface ModelCatalogEntry extends ModelExecutionMetadata {
   readonly thinkingConfig?: ModelThinkingConfig | null;
@@ -506,6 +509,8 @@ export interface ModelCatalogEntry extends ModelExecutionMetadata {
   readonly bedrockMessagesApi?: boolean;
   readonly requiresThinkingPresence?: boolean;
   readonly extendedCacheTtlBeta?: boolean;
+  readonly statefulResponses?: boolean;
+  readonly preferWebsockets?: boolean;
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly id: string;
@@ -628,6 +633,7 @@ export interface AvailableModelRecord extends ModelExecutionMetadata {
 }
 
 export interface ModelLoginProviderRecord {
+  readonly flows?: ReadonlyArray<{ readonly id: string; readonly name: string }>;
   readonly id: string;
   readonly name: string;
   readonly available: boolean;

@@ -130,8 +130,8 @@ describe("WP-044 Studio command manifest", () => {
 			mcpPromptCommands: [],
 			skills: [],
 			setSlashCommands: () => {},
-			prompt: async (text: string) => {
-				prompts.push(text);
+			invokeStudioCommand: async (name: string, args: string) => {
+				prompts.push(`${name} ${args}`);
 				return true;
 			},
 		} as unknown as AgentSession;
@@ -158,7 +158,7 @@ describe("WP-044 Studio command manifest", () => {
 		expect(await service.invoke("prompt-template.custom:hello", { args: "team" })).toMatchObject({
 			source: "prompt-template",
 		});
-		expect(prompts).toEqual(["/ext:hello world", "/custom:hello team"]);
+		expect(prompts).toEqual(["ext:hello world", "custom:hello team"]);
 	});
 
 	test("hashes only the builtin baseline, never environment-derived commands", async () => {

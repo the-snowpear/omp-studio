@@ -6,7 +6,7 @@ import type { ManagedBrowserPage } from "@omp-studio/studio-protocol";
 import type { DesktopManagedBrowser, ManagedBrowserRuntime } from "./managed-browser.js";
 
 interface Descriptor { version: number; sessionId: string; generation: string; endpoint: string; pid: number; }
-interface TabSnapshot { tabId: number; url: string; title: string; active: boolean; discarded: boolean; windowId: number; pinned: boolean; groupId: number; }
+interface TabSnapshot { studioPageId: string; studioDocumentId?: string; tabId: number; url: string; title: string; active: boolean; discarded: boolean; windowId: number; pinned: boolean; groupId: number; }
 interface RelayRequest { t: "rpc"; id: number; op: string; tabId?: number; sessionId?: string; method?: string; params?: Record<string, unknown>; url?: string; active?: boolean; action?: "enable" | "list"; directory?: string; }
 interface Attached { contents: WebContents; message: (event: Electron.Event, method: string, params: Record<string, unknown>, sessionId?: string) => void; detach: (event: Electron.Event, reason: string) => void; }
 interface Link {
@@ -82,7 +82,7 @@ export class ManagedBrowserRelay implements ManagedBrowserRuntime {
     return number;
   }
   #snapshot(page: ManagedBrowserPage): TabSnapshot {
-    return { tabId: this.#number(page), url: page.url, title: page.title, active: this.options.manager.store.state(page.sessionId).activePageId === page.id, discarded: page.status === "crashed" || page.devtools || this.options.manager.isReleased(page.id), windowId: 1, pinned: false, groupId: -1 };
+    return { studioPageId: page.id, ...(page.documentId ? { studioDocumentId: page.documentId } : {}), tabId: this.#number(page), url: page.url, title: page.title, active: this.options.manager.store.state(page.sessionId).activePageId === page.id, discarded: page.status === "crashed" || page.devtools || this.options.manager.isReleased(page.id), windowId: 1, pinned: false, groupId: -1 };
   }
   #send(link: Link, message: unknown): void { if (link.socket.readyState === WebSocket.OPEN) link.socket.send(JSON.stringify(message)); }
   #connect(descriptor: Descriptor): void {

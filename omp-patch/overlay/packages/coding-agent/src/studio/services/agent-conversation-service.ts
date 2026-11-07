@@ -1,3 +1,5 @@
+import { isAgentViewSession } from "../../session/agent-session-handle";
+import type { AgentRegistryApi } from "../../registry/agent-registry";
 import { randomBytes } from "node:crypto";
 import type { AgentRef, AgentRegistry } from "../../registry/agent-registry";
 import type { FileEntry, SessionEntry } from "../../session/session-entries";
@@ -78,7 +80,7 @@ export function reconstructSessionBranch(entries: readonly FileEntry[]): Reconst
 }
 
 export class StudioAgentConversationService {
-	readonly #registry: AgentRegistry;
+	readonly #registry: AgentRegistryApi;
 	readonly #runtimeEpoch: () => number;
 	readonly #loadEntries: StudioAgentConversationLoadEntries;
 	/**
@@ -92,7 +94,7 @@ export class StudioAgentConversationService {
 	readonly #toolResult: ((sessionId: string) => StudioToolResultResolver) | undefined;
 
 	constructor(options: {
-		registry: AgentRegistry;
+		registry: AgentRegistryApi;
 		runtimeEpoch: () => number;
 		loadEntries?: StudioAgentConversationLoadEntries;
 		toolResult?: (sessionId: string) => StudioToolResultResolver;
@@ -191,6 +193,8 @@ export class StudioAgentConversationService {
 		branchLeafId: string;
 		branch: readonly SessionEntry[];
 	} {
+		if (!isAgentViewSession(session))
+			throw new StudioAgentConversationError("TRANSCRIPT_UNAVAILABLE", "Agent view is unavailable on this thread");
 		const manager = session.sessionManager;
 		const sessionId = manager.getSessionId();
 		if (typeof sessionId !== "string" || sessionId.length === 0) {

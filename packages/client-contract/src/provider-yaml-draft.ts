@@ -146,14 +146,15 @@ function bedrockCompatNode(previous:Record<string,unknown>|undefined,enabled:boo
 
 export function providerModelYamlNode(model: ModelCatalogEntry | ModelProviderModelInput, previous: Record<string, unknown> | undefined): Record<string, unknown> {
   const row: Record<string, unknown> = { ...previous, id: model.id };
-  for (const key of ["name", "kind", "webSearch", "api", "baseUrl", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "input", "supportsTools", "cost", "omitMaxOutputTokens", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction", "thinking"]) delete row[key];
+  for (const key of ["name", "kind", "webSearch", "api", "baseUrl", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "input", "supportsTools", "cost", "omitMaxOutputTokens", "preferWebsockets", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction", "thinking"]) delete row[key];
   const parameters = modelParameterValues(model);
   Object.assign(row,bedrockCompatNode(previous,model.bedrockMessagesApi));
   const compat = { ...nestedNode(row.compat) };
-  for (const key of ["requiresThinkingPresence", "extendedCacheTtlBeta"] as const) {
+  for (const key of ["requiresThinkingPresence", "extendedCacheTtlBeta", "statefulResponses"] as const) {
     if (model[key] === undefined) delete compat[key]; else compat[key] = model[key];
   }
   if (Object.keys(compat).length) row.compat = compat; else delete row.compat;
+  if (model.preferWebsockets !== undefined) row.preferWebsockets = model.preferWebsockets;
   if (model.name) row.name = model.name;
   if (model.kind) row.kind = model.kind;
   if (model.webSearch) row.webSearch = model.webSearch;
@@ -183,13 +184,14 @@ export function providerModelYamlNode(model: ModelCatalogEntry | ModelProviderMo
 /** One `modelOverrides:` row, sparse like the Host writer. */
 export function providerOverrideYamlNode(override: ModelOverridePatch, previous: Record<string, unknown> | undefined): Record<string, unknown> {
   const row: Record<string, unknown> = { ...previous };
-  for (const key of ["name", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "thinking", "supportsTools", "input", "cost", "omitMaxOutputTokens", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction"]) delete row[key];
+  for (const key of ["name", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "thinking", "supportsTools", "input", "cost", "omitMaxOutputTokens", "preferWebsockets", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction"]) delete row[key];
   Object.assign(row,bedrockCompatNode(previous,override.bedrockMessagesApi));
   const compat = { ...nestedNode(row.compat) };
-  for (const key of ["requiresThinkingPresence", "extendedCacheTtlBeta"] as const) {
+  for (const key of ["requiresThinkingPresence", "extendedCacheTtlBeta", "statefulResponses"] as const) {
     if (override[key] === undefined) delete compat[key]; else compat[key] = override[key];
   }
   if (Object.keys(compat).length) row.compat = compat; else delete row.compat;
+  if (override.preferWebsockets !== undefined) row.preferWebsockets = override.preferWebsockets;
   if (override.name !== undefined) row.name = override.name;
   if (override.contextWindow !== undefined) row.contextWindow = override.contextWindow;
   if (override.maxContextWindow !== undefined) row.maxContextWindow = override.maxContextWindow;

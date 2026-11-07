@@ -8,6 +8,7 @@ import type {
 import { usePreviewMode } from "../preview/PreviewContext";
 import { waitReceipt } from "../hostError";
 import { insertPlainText } from "./editorDom";
+import { PREVIEW_NEXT_MESSAGES } from "../preview/nextMessagePreview";
 import "./prediction.css";
 export interface ComposerPrediction {
   client: StudioClient;
@@ -68,6 +69,8 @@ function previewSuffix(text: string, caret: number): string | null {
   return full?.slice(word.length) ?? null;
 }
 type Ghost = {
+  next?: boolean;
+  rank?: number | undefined;
   suffix: string;
   revision: number;
   draft: string;
@@ -85,6 +88,10 @@ export function useWordPrediction(
   const { preview } = usePreviewMode();
   const [ghost, setGhost] = useState<Ghost>(),
     [error, setError] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false), [choiceIndex, setChoiceIndex] = useState(0);
+  const [alternatives, setAlternatives] = useState<{ values: readonly string[]; revision: number }>();
+  const offers = useRef(alternatives); offers.current = alternatives;
+  const installed = useRef<string | undefined>(undefined);
   const shown = useRef<Ghost | undefined>(undefined);
   shown.current = ghost;
   const inputPort = useRef<
@@ -96,6 +103,7 @@ export function useWordPrediction(
     const editor = editorRef.current;
     const current = ++generation.current;
     setGhost(undefined);
+    setAlternatives(undefined); setMenuOpen(false); installed.current = undefined;
     setError("");
     if (
       !editor ||
@@ -139,7 +147,7 @@ export function useWordPrediction(
           ?.detachPrediction?.({ channelId: previous.channelId })
           .catch(() => {});
     };
-    const show = (suffix: string | null, version: number) => {
+    const show = (suffix: string | null, version: number, next = false, rank?: number) => {
       const draft = lastDraft;
       if (
         generation.current !== current ||
@@ -155,6 +163,7 @@ export function useWordPrediction(
       }
       const now = predictionDraft(editor);
       if (!now || now.text !== draft.text || now.caret !== draft.caret) return;
+      if (!next && offers.current?.values.some(value => value.startsWith(now.text.trimEnd()))) return;
       const selection = window.getSelection();
       if (!selection?.rangeCount) return;
       const range = selection.getRangeAt(0).cloneRange();
@@ -188,6 +197,7 @@ export function useWordPrediction(
         return;
       }
       setGhost({
+        next, rank,
         suffix,
         revision: version,
         draft: draft.text,
@@ -206,7 +216,13 @@ export function useWordPrediction(
             generation.current !== current
           )
             return;
-          if (event.kind === "next") { show(event.suffix, event.revision); return; }
+          if (event.kind === "next") {
+            if (event.revision !== lastDraft?.revision) return;
+            const next = event.choices?.length ? { values: event.choices, revision: event.revision } : undefined;
+            offers.current = next; setAlternatives(next);
+            show(event.suffix, event.revision, true, event.rank);
+            return;
+          }
           if (event.kind === "suggestion") {
             if (event.revision === 0) {
               setGhost(undefined);
@@ -229,6 +245,7 @@ export function useWordPrediction(
       connecting = (async () => {
         const handle = await options.client.command("prediction.prepare", {
           sessionId: options.sessionId!,
+          protocolVersion: 2,
         });
         const prepared = (
           await waitReceipt<{ result: PredictionChannel }>(
@@ -293,7 +310,12 @@ export function useWordPrediction(
             const version = ++revision.current;
             lastDraft = { ...draft, revision: version };
             if (preview) {
-              show(previewSuffix(draft.text, draft.caret), version);
+              const rank = options.nextMessageAvailable ? PREVIEW_NEXT_MESSAGES.findIndex(value => value.startsWith(draft.text.trimEnd())) : -1;
+              if (rank >= 0) {
+                const next = { values: PREVIEW_NEXT_MESSAGES, revision: version };
+                offers.current = next; setAlternatives(next);
+                show(PREVIEW_NEXT_MESSAGES[rank]!.slice(draft.text.trimEnd().length), version, true, rank);
+              } else { offers.current = undefined; setAlternatives(undefined); show(previewSuffix(draft.text, draft.caret), version); }
               return;
             }
             await ensure();
@@ -315,6 +337,7 @@ export function useWordPrediction(
     const blur = () => {
       clearTimeout(timer);
       setGhost(undefined);
+      setMenuOpen(false); setAlternatives(undefined); offers.current = undefined;
       close();
     };
     const start = () => {
@@ -380,9 +403,35 @@ export function useWordPrediction(
     document,
     window,
   ]);
+  useEffect(() => {
+    if (!ghost?.next || !alternatives) return;
+    const frame = window.requestAnimationFrame(() => inputPort.current?.({ kind: "next.shown", revision: ghost.revision }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [ghost?.revision, ghost?.next, alternatives, window]);
+  function choose(index: number): boolean {
+    const editor = editorRef.current, offer = offers.current, value = offer?.values[index];
+    if (!editor || !offer || !value || editor.querySelector(".cm-chip,[contenteditable=false]")) return false;
+    const draft = predictionDraft(editor);
+    if (!draft || (!value.startsWith(draft.text.trimEnd()) && draft.text.trimEnd() !== installed.current)) return false;
+    inputPort.current?.({ kind: "next.accepted", revision: offer.revision, rank: index });
+    const range = document.createRange(); range.selectNodeContents(editor);
+    const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
+    insertPlainText(editor, value);
+    installed.current = value; setChoiceIndex(index); setMenuOpen(false); setGhost(undefined);
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  }
   function key(key: string): boolean {
+    if (menuOpen && offers.current) {
+      if (key === "Escape") { setMenuOpen(false); return true; }
+      if (key === "ArrowDown" || key === "ArrowUp") { setChoiceIndex(value => (value + (key === "ArrowDown" ? 1 : offers.current!.values.length - 1)) % offers.current!.values.length); return true; }
+      if (key === "Enter" || key === "Tab") return choose(choiceIndex);
+    }
     const current = shown.current,
       editor = editorRef.current;
+    if (key === "Tab" && editor && installed.current && offers.current && offers.current.values.length > 1 && predictionDraft(editor)?.text.trimEnd() === installed.current) {
+      setMenuOpen(true); return true;
+    }
     if (!current || !editor) return false;
     const draft = predictionDraft(editor);
     if (draft?.text !== current.draft || draft.caret !== current.caret) {
@@ -399,6 +448,7 @@ export function useWordPrediction(
       return true;
     }
     if (key !== "Tab" && key !== "ArrowRight") return false;
+    if (current.next && offers.current) return choose(current.rank ?? 0);
     inputPort.current?.({
       kind: "feedback",
       revision: current.revision,
@@ -409,5 +459,5 @@ export function useWordPrediction(
     editor.dispatchEvent(new Event("input", { bubbles: true }));
     return true;
   }
-  return { ghost, error, key };
+  return { ghost, error, key, choose, choiceIndex, menuChoices: menuOpen ? alternatives?.values : undefined };
 }

@@ -38,19 +38,37 @@ export interface ComputerScopeHook {
 	deliver?(sessionId: string, toolCallId: string, result: unknown): void;
 }
 const scopes = new Set<ComputerScopeHook>();
+
+export interface ComputerScopeBridge {
+	has(sessionId: string, ownerId?: string): boolean;
+	permits(sessionId: string, ownerId?: string): Promise<ComputerRunPermit[]>;
+	event(event: ComputerLifecycleEvent): void;
+	consumeIntent(sessionId: string, message: unknown): void;
+	deliver(sessionId: string, toolCallId: string, result: unknown): void;
+}
+let bridge: ComputerScopeBridge | undefined;
+export function installComputerScopeBridge(value: ComputerScopeBridge): void {
+	bridge = value;
+}
 export function registerComputerScope(hook: ComputerScopeHook): () => void {
 	scopes.add(hook);
 	return () => scopes.delete(hook);
 }
 export async function computerRunPermits(sessionId: string, ownerId?: string): Promise<ComputerRunPermit[]> {
+	if (bridge) return bridge.permits(sessionId, ownerId);
 	return Promise.all(
 		[...scopes].filter(scope => scope.owns(sessionId, ownerId)).map(scope => scope.authorize(sessionId, ownerId)),
 	);
 }
 export function hasComputerScope(sessionId: string, ownerId?: string): boolean {
+	if (bridge) return bridge.has(sessionId, ownerId);
 	return [...scopes].some(scope => scope.owns(sessionId, ownerId));
 }
 export function emitComputerLifecycle(event: ComputerLifecycleEvent): void {
+	if (bridge) {
+		bridge.event(event);
+		return;
+	}
 	for (const scope of scopes) {
 		if (!scope.owns(event.identity.sessionId)) continue;
 		try {
@@ -62,8 +80,16 @@ export function emitComputerLifecycle(event: ComputerLifecycleEvent): void {
 }
 /** Called only at the actual AgentSession message/result boundary, not on enqueue. */
 export function computerUserMessageStarted(sessionId: string, message: unknown): void {
+	if (bridge) {
+		bridge.consumeIntent(sessionId, message);
+		return;
+	}
 	for (const scope of scopes) if (scope.owns(sessionId)) scope.consumeIntent?.(sessionId, message);
 }
 export function computerToolResultDelivered(sessionId: string, toolCallId: string, result: unknown): void {
+	if (bridge) {
+		bridge.deliver(sessionId, toolCallId, result);
+		return;
+	}
 	for (const scope of scopes) if (scope.owns(sessionId)) scope.deliver?.(sessionId, toolCallId, result);
 }

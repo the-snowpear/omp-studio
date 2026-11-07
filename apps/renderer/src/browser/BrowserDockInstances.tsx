@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import type { ClientBootstrap } from "@omp-studio/client-contract";
+import type { ClientBootstrap, StudioClient } from "@omp-studio/client-contract";
 import type { BrowserElementReference } from "@omp-studio/studio-protocol";
 import { useConversationDom } from "../conversationWorkspace/Context";
 import { DockPanel, useBrowserPagesLayout, useDockEngine } from "../dock/DockContext";
@@ -29,8 +29,8 @@ function useSessionSnapshots(sessions: readonly BrowserSession[]): readonly Brow
  * the browser, describes them (title, site icon, state, close) and hosts each
  * page's pane. Message and terminal links for this chat open here as well.
  */
-export function BrowserDockInstances({ sessionId, available, capabilities, remote, onReferences }: {
-  sessionId: string | undefined; available: boolean; capabilities: ClientBootstrap["capabilityManifest"] | undefined; remote: boolean;
+export function BrowserDockInstances({ client, sessionId, available, capabilities, remote, onReferences }: {
+  client?: StudioClient | undefined; sessionId: string | undefined; available: boolean; capabilities: ClientBootstrap["capabilityManifest"] | undefined; remote: boolean;
   onReferences: (references: BrowserElementReference[]) => void;
 }) {
   const { preview } = usePreviewMode();
@@ -123,6 +123,6 @@ export function BrowserDockInstances({ sessionId, available, capabilities, remot
   }, [conversationWindow, remote, session, bound, store]);
 
   return <>{tabs.map(([id, descriptor]) => <DockPanel key={id} id={id as PanelId}>{visibility =>
-    <ManagedBrowserPane sessionId={descriptor.sessionId} pageId={descriptor.pageId} visible={visibility.visible} width={visibility.width} foreign={descriptor.sessionId !== sessionId}
+    <ManagedBrowserPane client={available && descriptor.sessionId === sessionId && capabilities?.capabilities.some(item => item.id === "browser.webmcp.list" && item.grade !== "unavailable") ? client : undefined} sessionId={descriptor.sessionId} pageId={descriptor.pageId} visible={visibility.visible} width={visibility.width} foreign={descriptor.sessionId !== sessionId}
       onReferences={onReferences} onActivate={() => { if (store.getSnapshot().layout.lastBrowserPage !== id) store.dispatch({ type: "browser-page-focus", panel: id }); }} />}</DockPanel>)}</>;
 }

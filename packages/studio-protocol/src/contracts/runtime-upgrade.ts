@@ -1,3 +1,4 @@
+import type { BtwInjection } from "./btw.js";
 export interface BtwImage { type: "image"; mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/svg+xml"; data: string }
 /** Typed capabilities added with the OMP 18.2 migration. Kept wire-only. */
 export type ForeignSource = "claude" | "codex";
@@ -23,6 +24,7 @@ export function isUpgradeOperationKind(kind: string): kind is UpgradeOperation["
  return (UPGRADE_OPERATION_KINDS as readonly string[]).includes(kind);
 }
 export interface BtwHistoryTurn {
+  injection?: BtwInjection;
  images?: readonly BtwImage[];
  question: string; answer: string; status: "running" | "complete" | "cancelled" | "error" | "interrupted";
  createdAt: number; updatedAt: number; error?: string;
@@ -34,13 +36,13 @@ export interface ForeignSessionSummary {
  source: ForeignSource; sourceId: string; title: string; directoryName: string; cwdExists: boolean;
  modifiedAt: string; messageCount?: number; firstMessage?: string;
 }
-export interface ModelMentionInfo { agent: string; selector: string; name: string }
+export interface ModelMentionInfo { agent: string; selector: string; name: string; thinkingLevel?: string }
 export interface UpgradeResultMap {
  "btw.images.resolve": { images: BtwImage[] };
  "btw.history.list": { sessionId: string; topics: BtwTopicSummary[] };
  "btw.history.read": { sessionId: string; topicId: string; turns: BtwHistoryTurn[] };
  "btw.followUp": { ephemeralId: string; status: "running" };
- "session.models.mentions": { sessionId: string; mentions: ModelMentionInfo[]; available: Array<{ selector: string; name: string; image: boolean }>; activeModelImage: boolean };
+ "session.models.mentions": { sessionId: string; mentions: ModelMentionInfo[]; available: Array<{ selector: string; name: string; image: boolean; efforts?: Array<{ selector: string; name: string }> }>; activeModelImage: boolean };
  "session.import.list": { sessions: ForeignSessionSummary[] };
  "session.import.preview": { session: ForeignSessionSummary; preview: string };
  "session.import.execute": { imported: true; sessionId: string; workspaceId: string };
@@ -99,7 +101,7 @@ export function validateUpgradeResult(kind: UpgradeOperation["kind"], value: unk
   "btw.history.list": shape({sessionId:short,topics:array(shape({topicId:short,question:short,"title?":short,status,updatedAt:number,turnCount:number}),100)}),
   "btw.history.read": shape({sessionId:short,topicId:short,turns:array(shape({question:text,answer:text,status,createdAt:number,updatedAt:number,"error?":short}),32)}),
   "btw.followUp": shape({ephemeralId:short,status:enumeration(["running"])}),
-  "session.models.mentions": shape({sessionId:short,mentions:array(shape({agent:short,selector:short,name:short}),1024),available:array(shape({selector:short,name:short,image:bool}),10000),activeModelImage:bool}),
+  "session.models.mentions": shape({sessionId:short,mentions:array(shape({agent:short,selector:short,name:short,"thinkingLevel?":short}),1024),available:array(shape({selector:short,name:short,image:bool,"efforts?":array(shape({selector:short,name:short}),32)}),10000),activeModelImage:bool}),
   "session.import.list": shape({sessions:array(summary)}),
   "session.import.preview": shape({session:summary,preview:text}),
   "session.import.execute": shape({imported:v=>{if(v!==true)throw new Error("Invalid import result");},sessionId:short,workspaceId:short}),

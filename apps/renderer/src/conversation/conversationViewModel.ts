@@ -17,7 +17,7 @@ export type ToolProgress = { readonly progress: number; readonly total?: number;
 export type ToolStatus = "queued" | "running" | "succeeded" | "failed" | "aborted" | "missing";
 export type LiveBlock = { readonly blockId: string; readonly blockType: "text" | "thinking"; readonly text: string; readonly truncated?: boolean };
 export type LiveMessage = { readonly messageId: string; readonly turnId: string; readonly role: ConversationMessageItem["role"]; readonly createdAt: string; readonly blocks: readonly LiveBlock[]; readonly aborted: boolean };
-export type LiveTool = { readonly toolCallId: string; readonly messageId: string; readonly turnId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly truncated?: boolean; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus; readonly progress?: ToolProgress };
+export type LiveTool = { readonly presentation?: "reply" | undefined; readonly replies?: readonly string[] | undefined; readonly toolCallId: string; readonly messageId: string; readonly turnId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly truncated?: boolean; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus; readonly progress?: ToolProgress };
 export type PendingUser = { readonly requestId: string; readonly text: string; readonly draft: string; readonly status: "pending" | "failed"; readonly knownItemIds: readonly string[]; readonly error?: string; readonly doc?: ComposerDoc };
 export type ConversationNotice = { readonly id: string; readonly level: "info" | "warning" | "error"; readonly message: string; readonly source?: string };
 export type HydrateStatus = "idle" | "loading" | "ready" | "error" | "resyncing" | "unavailable";
@@ -33,13 +33,14 @@ export type ConversationState = {
   readonly userDisplays: { readonly [itemId: string]: ComposerDoc }; readonly userThumbs: UserThumbMap; readonly openTurnItems: { readonly [itemId: string]: string };
   readonly compacting?: { readonly action: string }; readonly messageErrors?: { readonly [messageId: string]: ConversationMessageError };
 };
-export type ToolView = { readonly toolCallId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus; readonly truncated?: boolean; readonly progress?: ToolProgress };
+export type ToolView = { readonly presentation?: "reply" | undefined; readonly replies?: readonly string[] | undefined; readonly toolCallId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus; readonly truncated?: boolean; readonly progress?: ToolProgress };
 export type AssistantSegment =
   | { readonly type: "text"; readonly key: string; readonly text: string; readonly truncated?: boolean; readonly streaming?: boolean }
   | { readonly type: "thinking"; readonly key: string; readonly text: string; readonly truncated?: boolean }
   | { readonly type: "batch"; readonly key: string; readonly tools: readonly ToolView[] };
 export type TimelineRow =
   | { readonly type: "user"; readonly itemId: string; readonly createdAt: string; readonly text: string; readonly pending?: PendingUser["status"]; readonly requestId?: string; readonly error?: string; readonly doc?: ComposerDoc; readonly thumbs?: readonly UserMessageThumb[] }
+  | { readonly type: "extension"; readonly itemId: string; readonly createdAt: string; readonly text: string }
   | { readonly type: "assistant"; readonly itemId: string; readonly createdAt: string; readonly segments: readonly AssistantSegment[]; readonly status: "streaming" | "completed" | "aborted" | "error"; readonly presentation?: "process" | "reply"; readonly turnOpen?: boolean; readonly error?: ConversationMessageError }
   | { readonly type: "compaction"; readonly item: ConversationCompactionItem }
   | { readonly type: "compacting"; readonly action?: string }
@@ -151,6 +152,8 @@ function toolViews(content: readonly ConversationContentBlock[], live: readonly 
     const result = backgroundToolState(persistedResult) || backgroundToolState(liveTool?.result) ? liveTool?.result ?? persistedResult : persistedResult ?? liveTool?.result;
     const status = liveTool && backgroundToolState(result) ? liveTool.status : result !== undefined ? toolResultStatus(result) : liveTool?.status ?? (turnOpen ? "running" : "missing");
     return {
+      presentation: liveTool?.presentation ?? call.presentation,
+      replies: liveTool?.replies,
       toolCallId: call.toolCallId,
       toolName: call.toolName,
       ...(call.arguments === undefined ? {} : { arguments: call.arguments }),
@@ -162,17 +165,44 @@ function toolViews(content: readonly ConversationContentBlock[], live: readonly 
     };
   });
   const known = new Set(persisted.map((tool) => tool.toolCallId));
-  return [...persisted, ...live.filter((tool) => !known.has(tool.toolCallId)).map((tool): ToolView => ({ toolCallId: tool.toolCallId, toolName: tool.toolName, ...(tool.arguments === undefined ? {} : { arguments: tool.arguments }), ...(tool.output === undefined ? {} : { output: tool.output }), ...(tool.result === undefined ? {} : { result: tool.result }), status: tool.status, ...(tool.truncated ? { truncated: true } : {}), ...(tool.progress === undefined || tool.status !== "running" ? {} : { progress: tool.progress }) }))];
+  return [...persisted, ...live.filter((tool) => !known.has(tool.toolCallId)).map((tool): ToolView => ({ presentation: tool.presentation, replies: tool.replies, toolCallId: tool.toolCallId, toolName: tool.toolName, ...(tool.arguments === undefined ? {} : { arguments: tool.arguments }), ...(tool.output === undefined ? {} : { output: tool.output }), ...(tool.result === undefined ? {} : { result: tool.result }), status: tool.status, ...(tool.truncated ? { truncated: true } : {}), ...(tool.progress === undefined || tool.status !== "running" ? {} : { progress: tool.progress }) }))];
 }
 function assistantSegments(content: readonly ConversationContentBlock[], liveTools: readonly LiveTool[], turnOpen: boolean, streaming = false): readonly AssistantSegment[] {
   const segments: AssistantSegment[] = [];
-  for (let index = 0; index < content.length; index += 1) {
+  const tools = toolViews(content, liveTools, turnOpen), byId = new Map(tools.map(tool => [tool.toolCallId, tool]));
+  const seen = new Set<string>();
+  let batch: ToolView[] = [];
+  const flush = () => { if (batch.length) { segments.push({ type: "batch", key: `tools-${batch.map(tool => tool.toolCallId).join("-")}`, tools: batch }); batch = []; } };
+  const appendTool = (tool: ToolView) => {
+    seen.add(tool.toolCallId);
+    if (tool.presentation === "reply") {
+      flush();
+      const text = tool.status === "running" ? tool.output ?? jsonString(jsonRecord(tool.arguments)?.content) ?? "" : jsonString(jsonRecord(tool.arguments)?.content) ?? tool.output ?? "";
+      if (text) segments.push({ type: "text", key: `reply-${tool.toolCallId}`, text, ...(tool.status === "running" ? { streaming: true } : {}), ...(tool.truncated ? { truncated: true } : {}) });
+      if (tool.result?.isError) { batch.push(tool); flush(); }
+      return;
+    }
+    batch.push(tool);
+    const raw = jsonRecord(tool.result?.data)?.replies;
+    const persisted = Array.isArray(raw) ? raw.filter((value): value is string => typeof value === "string") : [];
+    const replies = persisted.length >= (tool.replies?.length ?? 0) ? persisted : tool.replies ?? [];
+    if (replies.length) {
+      flush();
+      for (const [index, text] of replies.entries()) segments.push({ type: "text", key: `reply-${tool.toolCallId}-${index}`, text, ...(tool.truncated ? { truncated: true } : {}) });
+    }
+  };
+  for (let index = 0; index < content.length; index++) {
     const block = content[index]!;
-    if (block.type === "text" && !isEmptyMessageProtocolPlaceholder(block.text)) segments.push({ type: "text", key: `text-${index}`, text: block.text, ...(block.truncated ? { truncated: true } : {}), ...(streaming ? { streaming: true } : {}) });
-    else if (block.type === "thinking") segments.push({ type: "thinking", key: `thinking-${index}`, text: block.text, ...(block.truncated ? { truncated: true } : {}) });
+    if (block.type === "text" && !isEmptyMessageProtocolPlaceholder(block.text)) {
+      flush(); segments.push({ type: "text", key: `text-${index}`, text: block.text, ...(block.truncated ? { truncated: true } : {}), ...(streaming ? { streaming: true } : {}) });
+    } else if (block.type === "thinking") {
+      flush(); segments.push({ type: "thinking", key: `thinking-${index}`, text: block.text, ...(block.truncated ? { truncated: true } : {}) });
+    } else if (block.type === "toolCall") {
+      const tool = byId.get(block.toolCallId); if (tool && !seen.has(tool.toolCallId)) appendTool(tool);
+    }
   }
-  const tools = toolViews(content, liveTools, turnOpen);
-  if (tools.length > 0) segments.push({ type: "batch", key: `tools-${tools.map((tool) => tool.toolCallId).join("-")}`, tools });
+  for (const tool of tools) if (!seen.has(tool.toolCallId)) appendTool(tool);
+  flush();
   return segments;
 }
 
@@ -184,6 +214,7 @@ function liveToolsByMessage(state: ConversationState): Map<string, LiveTool[]> {
 
 function persistedTimelineRow(state: ConversationState, item: ConversationItem, tools: readonly LiveTool[], cache: TimelineRowCache): TimelineRow {
   if (item.kind === "compaction" || item.kind === "resetBoundary") return cachedRow(cache, item.itemId, [item], () => item.kind === "compaction" ? { type: "compaction", item } : { type: "resetBoundary", item });
+  if (item.role === "extension") return cachedRow(cache, item.itemId, [item], () => ({ type: "extension", itemId: item.itemId, createdAt: item.createdAt, text: messageText(item) }));
   if (item.role === "user") {
     const doc = state.userDisplays[item.itemId]; const thumbs = state.userThumbs[item.itemId];
     return cachedRow(cache, item.itemId, [item, doc, thumbs], () => ({ type: "user", itemId: item.itemId, createdAt: item.createdAt, text: messageText(item), ...(doc === undefined ? {} : { doc }), ...(thumbs === undefined ? {} : { thumbs }) }));
@@ -213,6 +244,10 @@ export function buildTransientTimeline(state: ConversationState, persistedIds: R
   const liveByMessage = liveToolsByMessage(state);
   for (const messageId of state.liveOrder) {
     if (persistedIds.has(messageId)) continue; const message = state.liveMessages[messageId]; if (message === undefined) continue;
+    if (message.role === "extension") {
+      rows.push(cachedRow(cache, messageId, [message], () => ({ type: "extension", itemId: messageId, createdAt: message.createdAt, text: message.blocks.filter(block => block.blockType === "text").map(block => block.text).join("\n") })));
+      continue;
+    }
     const tools = liveByMessage.get(messageId) ?? []; const content: ConversationContentBlock[] = message.blocks.map((block) => ({ type: block.blockType, text: block.text, ...(block.truncated ? { truncated: true } : {}) }));
     rows.push(cachedRow(cache, messageId, [message, ...tools], () => message.role === "user" ? { type: "user", itemId: message.messageId, createdAt: message.createdAt, text: message.blocks.filter((block) => block.blockType === "text").map((block) => block.text).join("\n") } : { type: "assistant", itemId: message.messageId, createdAt: message.createdAt, segments: assistantSegments(content, tools, true, true), status: message.aborted ? "aborted" : "streaming", presentation: "process", turnOpen: true }));
   }

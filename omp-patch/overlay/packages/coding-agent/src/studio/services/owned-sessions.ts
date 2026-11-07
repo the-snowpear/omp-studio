@@ -1,9 +1,10 @@
+import { isAgentViewSession, type AgentViewSession } from "../../session/agent-session-handle";
 import { AgentRegistry, type AgentRef } from "../../registry/agent-registry";
 import type { AgentSession } from "../../session/agent-session";
 /** Agent identities proven by the registry's parent chain, including parked descendants. */
 function ownedRefs(session: AgentSession): AgentRef[] {
 	const registry = AgentRegistry.global();
-	const main = registry.list().find(ref => ref.session?.sessionId === session.sessionId);
+	const main = registry.list().find(ref => ref.session?.sessionManager.getSessionId() === session.sessionId);
 	if (!main) return [];
 	return registry.list().filter(candidate => {
 		const seen = new Set<string>();
@@ -19,14 +20,16 @@ function ownedRefs(session: AgentSession): AgentRef[] {
 	});
 }
 export function ownedStudioSessionAgent(session: AgentSession, sessionId: string): AgentRef | undefined {
-	return ownedRefs(session).find(ref => ref.session?.sessionId === sessionId);
+	return ownedRefs(session).find(ref => ref.session?.sessionManager.getSessionId() === sessionId);
 }
 export function ownedStudioAgent(session: AgentSession, agentId: string): AgentRef | undefined {
 	return ownedRefs(session).find(ref => ref.id === agentId);
 }
 /** Live descendants plus the current main session; no foreign session can be controlled. */
-export function ownedStudioSessions(session: AgentSession): AgentSession[] {
-	const sessions = new Map([[session.sessionId, session]]);
-	for (const ref of ownedRefs(session)) if (ref.session) sessions.set(ref.session.sessionId, ref.session);
+export function ownedStudioSessions(session: AgentSession): AgentViewSession[] {
+	const sessions = new Map<string, AgentViewSession>([[session.sessionId, session]]);
+	for (const ref of ownedRefs(session))
+		if (ref.session && isAgentViewSession(ref.session))
+			sessions.set(ref.session.sessionManager.getSessionId(), ref.session);
 	return [...sessions.values()];
 }

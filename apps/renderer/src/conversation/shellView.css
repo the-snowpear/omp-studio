@@ -1,0 +1,24 @@
+.shell-view { border-top: 1px solid var(--border); padding: var(--sp-6) 0; }
+.shell-view-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); padding: var(--sp-6); font-size: var(--fs-11); color: var(--text-3); }
+.shell-view-controls label { display: inline-flex; align-items: center; gap: 3px; }
+.shell-view-controls input[type="range"] { min-width: 90px; flex: 1; accent-color: var(--accent); }
+.shell-view-panes { display: grid; min-width: 0; }
+.shell-view-panes.split { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-8); }
+.shell-view-code, .shell-view-output { overflow: auto; max-height: 280px; margin: 0; padding: var(--sp-8); background: var(--bg-2); border-radius: var(--r-4); font: var(--fs-12)/1.7 var(--font-mono); white-space: pre; }
+.shell-view-row { min-height: 1.7em; }
+.shell-token.keyword { color: var(--purple); }
+.shell-token.string { color: var(--green); }
+.shell-token.number, .shell-token.variable { color: var(--blue); }
+.shell-token[data-state="running"] { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.shell-token[data-state="fail"], .shell-view-row[data-state="fail"] { color: var(--red); }
+.shell-view-value { margin-inline-start: 10px; color: var(--text-3); font-size: var(--fs-11); }
+.context-cache { padding: var(--sp-8) 0; font-size: var(--fs-11); color: var(--text-3); }
+.context-cache summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
+.context-cache p { margin: var(--sp-6) 0 0; }
+.json-tree summary { cursor: pointer; color: var(--text-2); padding: 2px 0; }
+.json-tree-children { margin-inline-start: 14px; border-inline-start: 1px solid var(--border); padding-inline-start: 10px; }
+.json-tree-leaf { white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0; }
+.json-tree-key { color: var(--text-3); }
+
+.md-extension-link { color: var(--accent); background: none; border: 0; padding: 0; font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.md-extension-link:disabled { opacity: .6; cursor: wait; }

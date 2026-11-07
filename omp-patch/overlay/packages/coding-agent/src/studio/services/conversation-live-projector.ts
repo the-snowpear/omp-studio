@@ -1,9 +1,12 @@
+import { isReplyWrite, toolResultReplies } from "@oh-my-pi/pi-tui/chat/reply-write";
 import { asyncJobState } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { projectToolMedia } from "./conversation-media";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, AssistantMessageEvent, ToolCall } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
-import type { AgentSessionEvent } from "../../session/agent-session-events";
+import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import { decodeStreamedToolArgs, streamingStringKeysForTool } from "../../modes/controllers/tool-args-reveal";
+import type { StudioAgentSessionEvent as AgentSessionEvent } from "./conversation-entry-identity";
 import {
 	CONVERSATION_LIMITS,
 	type ConversationContentBlock,
@@ -15,11 +18,7 @@ import {
 	parseConversationRuntimeEvent,
 } from "../conversation-protocol";
 import { publicToolCallId, sanitizePublicText, sanitizeToolArguments, utf8ByteLength } from "./conversation-sanitizer";
-import {
-	isComputerContinueMessage,
-	isHarnessInjectedUserMessage,
-	publicConversationRole,
-} from "./conversation-visibility";
+import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
 
 export const CONVERSATION_LIVE_COALESCE_INTERVAL_MS = 16;
 export const CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD = 64;
@@ -47,7 +46,7 @@ export interface ConversationLiveProjectorOptions {
 	restoreModelMentions?: (text: string) => string;
 	sessionId: string;
 	runtimeEpoch: number;
-	reserveMessageId: (input: { role: ConversationRole; createdAt: string }) => string;
+	reserveMessageId: (input: { role: Exclude<ConversationRole, "extension">; createdAt: string }) => string;
 	reserveCustomMessageId?: (input: { customType: string; timestamp: number }) => string;
 	/** Non-message entries (compaction). Must not consume the message-id FIFO. */
 	allocateEntryId?: () => string;
@@ -75,6 +74,8 @@ type PendingDelta = {
 /** Buffered tool output: the full text lives in `#toolOutput`, so a pending
  *  entry only records which tool is dirty and whether it hit its cap. */
 type PendingToolOutput = {
+	presentation?: "reply";
+	replies?: readonly string[];
 	turnId: string;
 	truncated: boolean;
 	/** Newest MCP progress notification not yet sent. */
@@ -102,6 +103,7 @@ function mcpProgressOf(details: unknown): ConversationToolProgress | undefined {
 }
 
 type SentToolOutput = {
+	replies?: readonly string[];
 	text: string;
 	truncated: boolean;
 };
@@ -114,6 +116,7 @@ type OpenMessage = {
 	parentId: string | null;
 	blocks: Map<string, { blockType: "text" | "thinking"; text: string; bytes: number; truncated: boolean }>;
 	toolCalls: Map<string, Extract<ConversationContentBlock, { type: "toolCall" }>>;
+	rawReplyArgs: Map<string, string>;
 	completed: boolean;
 };
 
@@ -182,7 +185,7 @@ function createdAtOf(message: AgentMessage, fallbackIso: string): string {
 }
 
 function userText(message: AgentMessage): string {
-	if (message.role !== "user" && !isComputerContinueMessage(message)) return "";
+	if (message.role !== "user" && message.role !== "custom" && message.role !== "hookMessage") return "";
 	if (!("content" in message)) return "";
 	if (typeof message.content === "string") return message.content;
 	if (!Array.isArray(message.content)) return "";
@@ -360,13 +363,13 @@ export class ConversationLiveProjector {
 				this.#onAgentEnd(event);
 				return;
 			case "message_start":
-				this.#onMessageStart(event.message);
+				this.#onMessageStart(event.message, event.studioEntryId);
 				return;
 			case "message_update":
 				this.#onMessageUpdate(event.message, event.assistantMessageEvent);
 				return;
 			case "message_end":
-				this.#onMessageEnd(event.message);
+				this.#onMessageEnd(event.message, event.studioEntryId);
 				return;
 			case "tool_execution_start":
 				this.#onToolStart(event);
@@ -377,9 +380,13 @@ export class ConversationLiveProjector {
 			case "tool_execution_end":
 				this.#onToolEnd(event);
 				return;
-			case "auto_compaction_start":
-				this.#onCompactionStart(event.action);
+			case "manual_compaction_start":
+				this.#onCompactionStart("compact", event.studioEntryId);
 				return;
+			case "auto_compaction_start":
+				this.#onCompactionStart(event.action, event.studioEntryId);
+				return;
+			case "manual_compaction_end":
 			case "auto_compaction_end":
 				this.#onCompactionEnd(event);
 				return;
@@ -442,7 +449,7 @@ export class ConversationLiveProjector {
 		this.#clearTerminalTurnState();
 	}
 
-	#onMessageStart(message: AgentMessage): void {
+	#onMessageStart(message: AgentMessage, entryId?: string): void {
 		if (isHarnessInjectedUserMessage(message)) return;
 		const role = publicConversationRole(message.role, message);
 		if (role === undefined) {
@@ -452,15 +459,20 @@ export class ConversationLiveProjector {
 		if (this.#turnAborted) return;
 		const turnId = this.#ensureTurnId();
 		const createdAt = createdAtOf(message, this.#clock.nowIso());
-		const messageId =
-			isComputerContinueMessage(message) && "customType" in message
-				? (this.#options.reserveCustomMessageId?.({
+		let messageId = entryId;
+		if (messageId === undefined) {
+			if (message.role === "custom" || message.role === "hookMessage") {
+				messageId =
+					this.#options.reserveCustomMessageId?.({
 						customType: message.customType,
 						timestamp: Date.parse(createdAt),
 					}) ??
 					this.#options.allocateEntryId?.() ??
-					crypto.randomUUID())
-				: this.#options.reserveMessageId({ role, createdAt });
+					crypto.randomUUID();
+			} else if (role === "user" || role === "assistant" || role === "system") {
+				messageId = this.#options.reserveMessageId({ role, createdAt });
+			} else return;
+		}
 		const open: OpenMessage = {
 			messageId,
 			turnId,
@@ -469,6 +481,7 @@ export class ConversationLiveProjector {
 			parentId: this.#lastItemId,
 			blocks: new Map(),
 			toolCalls: new Map(),
+			rawReplyArgs: new Map(),
 			completed: false,
 		};
 		this.#rememberBoundedMap(this.#openMessages, messageId, open);
@@ -498,7 +511,27 @@ export class ConversationLiveProjector {
 			this.#blockId(open.messageId, stream.contentIndex, blockType);
 			return;
 		}
+		if (stream.type === "toolcall_start" || stream.type === "toolcall_delta") {
+			const call = message.content[stream.contentIndex];
+			if (call?.type === "toolCall" && call.name === "write" && isReplyWrite(call.name, call.arguments) !== false) {
+				// Worker events omit provider-local Symbols. Their native deltas rebuild
+				// the same buffer, so a lagging provider parse cannot stall out:// prose.
+				const raw =
+					getStreamingPartialJson(call) ??
+					(open.rawReplyArgs.get(call.id) ?? "") + (stream.type === "toolcall_delta" ? stream.delta : "");
+				open.rawReplyArgs.set(call.id, raw);
+				const { __partialJson: _partial, ...args } = decodeStreamedToolArgs(raw, {
+					rawInput: false,
+					fullArgs: call.arguments,
+					streamingStringKeys: streamingStringKeysForTool(call.name, false),
+				});
+				this.#publishReplyWrite(open, { ...call, arguments: args });
+			}
+			return;
+		}
 		if (stream.type === "toolcall_end") {
+			open.rawReplyArgs.delete(stream.toolCall.id);
+			this.#publishReplyWrite(open, stream.toolCall);
 			this.#recordToolCall(open, stream.toolCall);
 			this.#emitToolStarted({
 				messageId: open.messageId,
@@ -510,7 +543,33 @@ export class ConversationLiveProjector {
 		}
 	}
 
-	#onMessageEnd(message: AgentMessage): void {
+	#publishReplyWrite(open: OpenMessage, call: ToolCall): void {
+		if (isReplyWrite(call.name, call.arguments) !== true) return;
+		const id = publicToolCallId(call.id, "").id;
+		if (!id) return;
+		const content = typeof call.arguments.content === "string" ? call.arguments.content : "";
+		const first = !open.toolCalls.has(id);
+		if (!first && this.#toolOutput.get(id) === content) return;
+		this.#recordToolCall(open, call);
+		if (first)
+			this.#emitToolStarted({
+				messageId: open.messageId,
+				turnId: open.turnId,
+				toolCallId: id,
+				toolName: call.name,
+				args: call.arguments,
+			});
+		const output = sanitizePublicText(content, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+		this.#rememberBoundedMap(this.#toolOutput, id, output.text);
+		this.#rememberBoundedMap(this.#toolPending, id, {
+			turnId: open.turnId,
+			truncated: output.truncated,
+			presentation: "reply",
+		});
+		this.#scheduleCoalesce();
+	}
+
+	#onMessageEnd(message: AgentMessage, entryId?: string): void {
 		if (isHarnessInjectedUserMessage(message)) return;
 		const role = publicConversationRole(message.role, message);
 		if (role === undefined) {
@@ -518,15 +577,16 @@ export class ConversationLiveProjector {
 			return;
 		}
 		let open =
-			role === "assistant"
+			(entryId ? this.#openMessages.get(entryId) : undefined) ??
+			(role === "assistant"
 				? this.#openAssistant()
-				: [...this.#openMessages.values()].find(item => item.role === role && !item.completed);
+				: [...this.#openMessages.values()].find(item => item.role === role && !item.completed));
 		if (open === undefined) {
 			const alreadyCompleted = [...this.#openMessages.values()].some(
 				item => item.role === role && item.completed && item.turnId === this.#turnId,
 			);
 			if (alreadyCompleted || this.#turnAborted) return;
-			this.#onMessageStart(message);
+			this.#onMessageStart(message, entryId);
 			open =
 				role === "assistant"
 					? this.#openAssistant()
@@ -534,6 +594,7 @@ export class ConversationLiveProjector {
 		}
 		if (open === undefined) return;
 		this.#hydrateFromMessage(open, message);
+		open.rawReplyArgs.clear();
 		this.#completeMessage(open, message, messageErrorOf(message));
 		if (isAssistant(message) && message.stopReason === "aborted") this.#turnAborted = true;
 		if (role === "assistant") this.#openAssistantId = undefined;
@@ -594,12 +655,19 @@ export class ConversationLiveProjector {
 		const sanitized = sanitizePublicText(extracted.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
 		const truncated = sanitized.truncated || extracted.truncated === true;
 		const progress = mcpProgressOf(partial?.details);
-		if (sanitized.text.length === 0 && !truncated && progress === undefined) return;
+		const nativeReplies = toolResultReplies(extracted.data);
+		const replies = nativeReplies.length ? nativeReplies : undefined;
+		if (sanitized.text.length === 0 && !truncated && progress === undefined && replies === undefined) return;
 		const previous = this.#toolOutput.get(toolCallId);
 		const pending = this.#toolPending.get(toolCallId);
 		const sent = this.#toolSent.get(toolCallId);
+		const priorReplies = pending?.replies ?? sent?.replies;
+		const sameReplies =
+			replies === undefined ||
+			(priorReplies?.length === replies.length && replies.every((text, index) => text === priorReplies[index]));
 		if (
 			progress === undefined &&
+			sameReplies &&
 			previous === sanitized.text &&
 			(!truncated || pending?.truncated === true || sent?.truncated === true)
 		)
@@ -615,6 +683,7 @@ export class ConversationLiveProjector {
 		this.#rememberBoundedMap(this.#toolPending, toolCallId, {
 			turnId: background?.turnId ?? pending?.turnId ?? this.#ensureTurnId(),
 			truncated: truncated || pending?.truncated === true,
+			...((replies ?? pending?.replies) ? { replies: replies ?? pending?.replies } : {}),
 			...((progress ?? pending?.progress) === undefined ? {} : { progress: progress ?? pending?.progress }),
 		});
 		const sentText = sent?.text ?? "";
@@ -688,9 +757,9 @@ export class ConversationLiveProjector {
 		});
 	}
 
-	#onCompactionStart(action: string): void {
+	#onCompactionStart(action: string, entryId?: string): void {
 		this.#releaseOpenCompaction();
-		this.#openCompactionId = this.#reserveCompactionId();
+		this.#openCompactionId = entryId ?? this.#reserveCompactionId();
 		this.#emitParsed({
 			kind: "conversation.compaction.started",
 			sessionId: this.#sessionId,
@@ -698,7 +767,9 @@ export class ConversationLiveProjector {
 		});
 	}
 
-	#onCompactionEnd(event: Extract<AgentSessionEvent, { type: "auto_compaction_end" }>): void {
+	#onCompactionEnd(
+		event: Extract<AgentSessionEvent, { type: "auto_compaction_end" | "manual_compaction_end" }>,
+	): void {
 		this.#flushPending();
 		const aborted = event.aborted === true;
 		const hasPersistedAuthority =
@@ -721,6 +792,7 @@ export class ConversationLiveProjector {
 		const summary = sanitizePublicText(result.summary, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES);
 		const itemId =
 			this.#openCompactionId ??
+			event.studioEntryId ??
 			this.#options.lookupPersistedCompactionId?.({ summary: result.summary }) ??
 			this.#reserveCompactionId();
 		this.#openCompactionId = undefined;
@@ -811,7 +883,7 @@ export class ConversationLiveProjector {
 	}
 
 	#hydrateFromMessage(open: OpenMessage, message: AgentMessage): void {
-		if (message.role === "user" || isComputerContinueMessage(message)) {
+		if (message.role === "user" || message.role === "custom" || message.role === "hookMessage") {
 			const raw = userText(message);
 			const text = this.#options.restoreModelMentions?.(raw) ?? raw;
 			if (text.length > 0) {
@@ -868,7 +940,7 @@ export class ConversationLiveProjector {
 	}
 
 	#contentFromMessage(open: OpenMessage, message: AgentMessage): ConversationContentBlock[] {
-		if (message.role === "user" || isComputerContinueMessage(message)) {
+		if (message.role === "user" || message.role === "custom" || message.role === "hookMessage") {
 			const raw = userText(message);
 			const text = this.#options.restoreModelMentions?.(raw) ?? raw;
 			const sanitized = sanitizePublicText(text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
@@ -906,6 +978,12 @@ export class ConversationLiveProjector {
 	#recordToolCall(open: OpenMessage, toolCall: ToolCall): void {
 		const publicId = publicToolCallId(toolCall.id, "");
 		if (publicId.id.length === 0) return;
+		const previousOwner = this.#toolOwners.get(publicId.id);
+		if (previousOwner && previousOwner !== open.messageId && !this.#backgroundTools.has(publicId.id)) {
+			this.#toolOutput.delete(publicId.id);
+			this.#toolPending.delete(publicId.id);
+			this.#toolSent.delete(publicId.id);
+		}
 		const args = sanitizeToolArguments(toolCall.arguments);
 		const toolName = sanitizePublicText(toolCall.name, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS).text;
 		if (toolName.length === 0) return;
@@ -915,6 +993,7 @@ export class ConversationLiveProjector {
 			toolName,
 		};
 		if (args.arguments !== undefined) block.arguments = args.arguments;
+		if (isReplyWrite(toolCall.name, toolCall.arguments) === true) block.presentation = "reply";
 		if (args.truncated || publicId.truncated) block.truncated = true;
 		open.toolCalls.set(publicId.id, block);
 		this.#rememberBoundedMap(this.#toolOwners, publicId.id, open.messageId);
@@ -951,6 +1030,7 @@ export class ConversationLiveProjector {
 			startedAt: this.#clock.nowIso(),
 		};
 		if (args.arguments !== undefined) started.arguments = args.arguments;
+		if (isReplyWrite(input.toolName, input.args) === true) started.presentation = "reply";
 		this.#rememberBoundedMap(this.#toolOwners, publicId.id, input.messageId);
 		this.#lastAssistantId = input.messageId;
 		this.#emitParsed(started);
@@ -1098,7 +1178,14 @@ export class ConversationLiveProjector {
 		const append = textChanged && sent !== undefined && full.startsWith(sent.text) && full.length > sent.text.length;
 		const output = !textChanged ? "" : append ? full.slice(sent.text.length) : full;
 		const truncatedChanged = pending.truncated && sent?.truncated !== true;
-		if (output.length === 0 && !truncatedChanged && pending.progress === undefined) return;
+		if (
+			output.length === 0 &&
+			!truncatedChanged &&
+			pending.progress === undefined &&
+			pending.replies === undefined &&
+			pending.presentation === undefined
+		)
+			return;
 		const updated: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.updated" }> = {
 			kind: "conversation.tool.updated",
 			sessionId: this.#sessionId,
@@ -1110,8 +1197,11 @@ export class ConversationLiveProjector {
 		if (output.length > 0) updated.output = output;
 		if (truncatedChanged) updated.truncated = true;
 		if (pending.progress !== undefined) updated.progress = pending.progress;
+		if (pending.presentation) updated.presentation = pending.presentation;
+		if (pending.replies) updated.replies = pending.replies;
 		this.#rememberBoundedMap(this.#toolSent, toolCallId, {
 			text: full,
+			...((pending.replies ?? sent?.replies) ? { replies: pending.replies ?? sent?.replies } : {}),
 			truncated: sent?.truncated === true || pending.truncated,
 		});
 		this.#emitParsed(updated);

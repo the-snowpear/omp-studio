@@ -5,7 +5,7 @@
  * lowercase standalone prose only; skip fenced/inline code and HTML/XML.
  */
 
-export const MAGIC_KEYWORDS = ["ultrathink", "orchestrate", "workflowz"] as const;
+export const MAGIC_KEYWORDS = ["ultrathink", "chillax", "orchestrate", "workflowz"] as const;
 
 export type MagicKeywordId = (typeof MAGIC_KEYWORDS)[number];
 
@@ -23,12 +23,14 @@ const FENCE = /^( {0,3})([`~]{3,})/;
 
 const PROBES: Readonly<Record<MagicKeywordId, RegExp>> = {
   ultrathink: /ultrathink/,
+  chillax: /chillax/,
   orchestrate: /orchestrate/,
   workflowz: /workflowz/,
 };
 
 const HIGHLIGHTS: Readonly<Record<MagicKeywordId, RegExp>> = {
   ultrathink: magicKeywordRegex("ultrathink", "g"),
+  chillax: magicKeywordRegex("chillax", "g"),
   orchestrate: magicKeywordRegex("orchestrate", "g"),
   workflowz: magicKeywordRegex("workflowz", "g"),
 };
@@ -236,7 +238,7 @@ export function containsMagicKeyword(text: string, keyword: MagicKeywordId): boo
 
 /** Cheap gate: substring probe then prose-aware check. */
 export function hasMagicKeyword(text: string): boolean {
-  if (!text.includes("ultrathink") && !text.includes("orchestrate") && !text.includes("workflowz")) {
+  if (!MAGIC_KEYWORDS.some(keyword => text.includes(keyword))) {
     return false;
   }
   return MAGIC_KEYWORDS.some((keyword) => containsMagicKeyword(text, keyword));
@@ -244,7 +246,7 @@ export function hasMagicKeyword(text: string): boolean {
 
 /** All prose matches, sorted by start; overlapping later keywords skipped. */
 export function findMagicKeywordMatches(text: string): MagicKeywordMatch[] {
-  if (!text.includes("ultrathink") && !text.includes("orchestrate") && !text.includes("workflowz")) {
+  if (!MAGIC_KEYWORDS.some(keyword => text.includes(keyword))) {
     return [];
   }
   const masked = maskNonProse(text);

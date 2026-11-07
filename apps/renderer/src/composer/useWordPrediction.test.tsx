@@ -10,6 +10,7 @@ import type { StudioClient } from "@omp-studio/client-contract";
 import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
+import { PREVIEW_NEXT_MESSAGES } from "../preview/nextMessagePreview";
 import { ChipComposer } from "./ChipComposer";
 import { predictionDraft } from "./useWordPrediction";
 afterEach(() => {
@@ -49,7 +50,7 @@ it("keeps hidden chip content out of prediction and skips oversized drafts", () 
     editor.remove();
   }
 });
-it("accepts preview ghost text with Tab without sending a request or losing typed text", async () => {
+it("inserts word and alternative message predictions into the draft without submitting", async () => {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
   const original = Object.getOwnPropertyDescriptor(
     Range.prototype,
@@ -63,12 +64,14 @@ it("accepts preview ghost text with Tab without sending a request or losing type
     new DOMRect(0, 0, 400, 200),
   );
   const client = { command: vi.fn() } as unknown as StudioClient;
+  const submit = vi.fn();
   try {
     const mounted = render(
       <I18nProvider forcedLanguage="en">
         <PreviewModeProvider switchEnabled>
           <ChipComposer
-            prediction={{ client, sessionId: "s", available: true }}
+            prediction={{ client, sessionId: "s", available: true, nextMessageAvailable: true }}
+            onSubmit={submit}
           />
         </PreviewModeProvider>
       </I18nProvider>,
@@ -84,6 +87,16 @@ it("accepts preview ghost text with Tab without sending a request or losing type
     );
     fireEvent.keyDown(editor, { key: "Tab" });
     expect(editor.textContent).toBe("please review ");
+    editor.textContent = ""; caret(editor); fireEvent.input(editor);
+    await waitFor(() => expect(mounted.container.querySelector(".cm-prediction")?.textContent).toContain(PREVIEW_NEXT_MESSAGES[0]));
+    fireEvent.keyDown(editor, { key: "ArrowRight" });
+    expect(editor.textContent).toBe(PREVIEW_NEXT_MESSAGES[0]);
+    fireEvent.keyDown(editor, { key: "Tab" });
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+    fireEvent.keyDown(editor, { key: "ArrowDown" });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(editor.textContent).toBe(PREVIEW_NEXT_MESSAGES[1]);
+    expect(submit).not.toHaveBeenCalled();
     expect(client.command).not.toHaveBeenCalled();
   } finally {
     if (original)

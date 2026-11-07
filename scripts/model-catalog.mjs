@@ -2,9 +2,11 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { findBun, toolingEnvironment } from "./omp-tooling.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const apis = new Set(["openai-completions", "openai-responses", "openai-codex-responses", "azure-openai-responses", "anthropic-messages", "bedrock-converse-stream", "google-generative-ai", "google-gemini-cli", "google-vertex"]);
+const apis = new Set(["devin", "openai-completions", "openai-responses", "openai-codex-responses", "azure-openai-responses", "anthropic-messages", "bedrock-converse-stream", "google-generative-ai", "google-gemini-cli", "google-vertex"]);
 const thinkingFields = ["mode", "efforts", "defaultLevel", "effortMap", "supportsDisplay", "requiresEffort"];
 const runtimeThinkingFields = ["effortRouting", "effortBudgets", "suppressWhenOff", "prefixBinding", "unverified"];
 
@@ -41,7 +43,16 @@ export function buildModelCatalog(models, upstreamCommit, aliases = {}) {
 
 export async function generateModelCatalog(check = false) {
   const pin = JSON.parse(await readFile(resolve(root, "omp-patch/upstream.json"), "utf8"));
-  const models = JSON.parse(await readFile(resolve(root, "omp-patch/vendor/oh-my-pi/packages/catalog/src/models.json"), "utf8"));
+  // Upstream stores a compact, interned catalog. Its registry materializes the
+  // provider records and owns the format; Studio only consumes those records.
+  const models = JSON.parse(execFileSync(findBun(), ["--eval", `
+    import { getBundledProviders, getBundledModels } from "./packages/catalog/src/models";
+    console.log(JSON.stringify(Object.fromEntries(getBundledProviders().map(provider =>
+      [provider, Object.fromEntries(getBundledModels(provider).map(model => [model.id, model]))]))));
+  `], {
+    cwd: resolve(root, "omp-patch/vendor/oh-my-pi"),
+    env: toolingEnvironment(), encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024,
+  }));
   const aliases = JSON.parse(await readFile(resolve(root, "catalog/model-aliases.json"), "utf8"));
   const catalog = buildModelCatalog(models, pin.commit, aliases);
   const outputs = [

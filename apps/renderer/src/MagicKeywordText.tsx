@@ -9,6 +9,7 @@ import { findMagicKeywordMatches, type MagicKeywordId } from "./magicKeywords";
 
 const HUE: Readonly<Record<MagicKeywordId, (t: number) => number>> = {
   ultrathink: (t) => t * 330,
+  chillax: (t) => 180 + t * 55,
   orchestrate: (t) => 150 + t * 130,
   workflowz: (t) => 30 + t * 120,
 };
@@ -21,6 +22,7 @@ function paintKeyword(keyword: MagicKeywordId, word: string, animated: boolean, 
     const hue = Math.round(HUE[keyword](t));
     const style = {
       "--magic-hue": String(hue),
+      ...(keyword === "chillax" ? { "--magic-lightness": `${62 - 17 * t}%` } : {}),
       "--magic-i": String(i),
     } as CSSProperties;
     chars.push(

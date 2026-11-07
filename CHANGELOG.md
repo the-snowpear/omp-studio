@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 接入 OMP 18.18.0 的 worker 子 Agent、任务文件与受原生配置约束的单次模型选择、排队压缩、历史重命名/置顶/占用查询、中途回复、BTW 注入和最多四条输入预测。
+- 对话新增原生 Shell Raw/Pseudo 回放、提示缓存状态、作业用途/说明、工具精简统计、Eval JSON 与内核重启提示；扩展链接交回所属扩展，正文继续由 React 渲染。
+- Web/SSH Live 使用浏览器 WebRTC 音频；本地语音准备显示组件进度和重试。托管浏览器接入原生 WebMCP，模型与设置补齐 Mistral/Devin 登录、Modular/Keenable、reasoning 映射、手动 Skills 和全局记忆。详见 [18.18.0 迁移报告](docs/migrations/omp-18.18.0.md)。
 - 支持并排对话和独立对话窗口；工具浮窗可固定在工作区、跨页面保留、独立显示或置顶，重启恢复布局，移动窗口保留草稿和终端状态。详见[工作台停靠说明](docs/workbench-docking.md)。
 - 聊天浏览器支持原生网页、多标签、人工与 Agent 控制交接、DevTools、元素截图引用、持久登录空间、下载与网站权限。网页链接可在聊天内打开，应用重启按需恢复标签。详见[浏览器使用说明](docs/browser.md)。
 - 电脑工作区支持动作与截图联动、历史画面、按会话停止与显式继续、只读界面结构和诊断；图片查看器支持原始尺寸、缩放、平移与保存。详见[电脑操作说明](docs/computer-use.md)。

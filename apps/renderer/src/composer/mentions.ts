@@ -1,3 +1,4 @@
+import type { UpgradeResultMap } from "@omp-studio/studio-protocol";
 import { invokeUpgrade } from "../runtimeUpgrade";
 import { loadRuntimeSkills } from "../skills/runtimeSkills";
 import { createPreviewModelConfig } from "../preview/modelConfigFixtures";
@@ -239,7 +240,7 @@ const PREVIEW_ENTRIES: ReadonlyArray<WorkspaceEntry> = [
 ];
 
 export function previewMentions(trigger: "@" | "/" | "^", query: string): MentionCandidate[] {
-  if (trigger === "^") return filterMentions(createPreviewModelConfig().availableModels.map(model => ({ kind: "model", id: model.selector, name: model.selector, label: model.name, detail: model.selector })), query);
+  if (trigger === "^") { const models = createPreviewModelConfig().availableModels; return modelMentionCandidates(models.map(model => ({ selector: model.selector, name: model.name, image: model.image === true, efforts: (model.thinking ?? []).filter(level => !models.some(other => other.selector === `${model.selector}:${level}`)).map(level => ({ selector: `${model.selector}:${level}`, name: `${model.name} · ${level}` })) })), query); }
   if (trigger === "/") return [];
   const agents = filterMentions(PREVIEW_AGENTS, query);
   const skills = query.trim().length === 0 ? [] : filterMentions(PREVIEW_SKILLS, query);
@@ -256,22 +257,27 @@ export function previewMentions(trigger: "@" | "/" | "^", query: string): Mentio
  */
 const MODEL_MENTION_CACHE_TTL_MS = 60_000;
 
-type ModelMentionCacheEntry = { readonly at: number; readonly value: Promise<MentionCandidate[]> };
+type ModelMentionChoices = UpgradeResultMap["session.models.mentions"]["available"];
+type ModelMentionCacheEntry = { readonly at: number; readonly value: Promise<ModelMentionChoices> };
 
 const modelMentionCache = new WeakMap<StudioClient, ModelMentionCacheEntry>();
 
-function loadModelMentionCandidates(client: StudioClient): Promise<MentionCandidate[]> {
+function modelMentionCandidates(models: ModelMentionChoices, query: string): MentionCandidate[] {
+  const rows = models.map((model): MentionCandidate => ({ kind: "model", id: model.selector, name: model.selector, label: model.name, detail: model.selector }));
+  const colon = query.lastIndexOf(":");
+  if (colon > 0) {
+    const base = models.find(model => model.selector === query.slice(0, colon));
+    for (const effort of base?.efforts ?? []) rows.push({ kind: "model", id: effort.selector, name: effort.selector, label: effort.name, detail: effort.selector });
+  }
+  return filterMentions(rows, query);
+}
+function loadModelMentionCandidates(client: StudioClient, query: string): Promise<MentionCandidate[]> {
   const cached = modelMentionCache.get(client);
-  if (cached !== undefined && Date.now() - cached.at < MODEL_MENTION_CACHE_TTL_MS) return cached.value;
-  const value = invokeUpgrade(client, "session.models.mentions", {}).then((result) =>
-    result.available.map(
-      (model): MentionCandidate => ({ kind: "model", id: model.selector, name: model.selector, label: model.name, detail: model.selector }),
-    ),
-  );
-  // The cached promise is shared by later keystrokes; never leave it unhandled.
+  if (cached !== undefined && Date.now() - cached.at < MODEL_MENTION_CACHE_TTL_MS) return cached.value.then(models => modelMentionCandidates(models, query));
+  const value = invokeUpgrade(client, "session.models.mentions", {}).then(result => result.available);
   value.catch(() => {});
   modelMentionCache.set(client, { at: Date.now(), value });
-  return value;
+  return value.then(models => modelMentionCandidates(models, query));
 }
 
 export async function loadMentions(
@@ -282,7 +288,7 @@ export async function loadMentions(
   runtimeSessionId?: string | null,
 ): Promise<MentionCandidate[]> {
   if (trigger === "^") {
-    return filterMentions(await loadModelMentionCandidates(client), query);
+    return loadModelMentionCandidates(client, query);
   }
   if (trigger === "/") return [];
   const needle = query.trim();

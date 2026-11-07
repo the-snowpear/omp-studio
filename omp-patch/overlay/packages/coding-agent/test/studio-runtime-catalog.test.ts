@@ -1,3 +1,4 @@
+import type { MCPManager } from "../src/mcp/manager";
 import { beforeEach } from "bun:test";
 import { resetSettingsForTest } from "../src/config/settings";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -62,7 +63,10 @@ it("reports native startup readiness without connecting, probing or exposing cre
 		studioToolSession: { mcpManager: manager },
 		getAllToolInfos: () => [{ name: "tool", mcpServerName: "ready", mcpToolName: "tool", mcpReadOnlyHint: true }],
 	};
-	const service = new StudioRuntimeCatalogService(session as unknown as AgentSession);
+	const service = new StudioRuntimeCatalogService(
+		session as unknown as AgentSession,
+		manager as unknown as MCPManager,
+	);
 	const result = (await service.execute({ kind: "mcp.runtime.status", sessionId: "s" })) as McpRuntimeStatus;
 	expect(waits).toEqual([1]);
 	expect(result.ready).toBe(false);

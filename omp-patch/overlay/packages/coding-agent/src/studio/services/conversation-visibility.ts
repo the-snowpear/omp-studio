@@ -1,8 +1,8 @@
 import type { ConversationRole } from "../conversation-protocol";
 
 /**
- * Roles the operator conversation surface may show. Runtime harness traffic
- * uses `developer` / `custom` / etc. and must not be mapped onto `system`.
+ * Roles the operator conversation surface may show. Native harness traffic
+ * stays hidden; explicitly displayed extension messages retain their own role.
  */
 export function isComputerContinueMessage(value: unknown): boolean {
 	if (!value || typeof value !== "object") return false;
@@ -17,6 +17,19 @@ export function isComputerContinueMessage(value: unknown): boolean {
 export function publicConversationRole(role: unknown, message?: unknown): ConversationRole | undefined {
 	if (isComputerContinueMessage(message)) return "user";
 	if (role === "user" || role === "assistant" || role === "system") return role;
+	if ((role === "custom" || role === "hookMessage") && message && typeof message === "object") {
+		const custom = message as { display?: unknown; customType?: unknown };
+		// These native records already have dedicated Studio surfaces, or carry
+		// agent-to-agent context rather than an extension's operator-facing body.
+		if (
+			custom.display === true &&
+			typeof custom.customType === "string" &&
+			custom.customType !== "advisor" &&
+			custom.customType !== "async-result" &&
+			!custom.customType.startsWith("irc:")
+		)
+			return "extension";
+	}
 	return undefined;
 }
 

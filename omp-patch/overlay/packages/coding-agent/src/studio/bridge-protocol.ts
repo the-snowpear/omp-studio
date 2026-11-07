@@ -1,3 +1,4 @@
+import { RUNTIME_VIEW_KINDS, isRuntimeViewKind, type RuntimeViewOperation } from "./runtime-views-protocol";
 import type { SessionOwnerOperation } from "./session-owner-protocol";
 import { COMPUTER_WORKSPACE_QUERY_KINDS } from "./computer-workspace-protocol";
 import { CONTEXT_VIEW_KINDS, isContextViewKind, type ContextViewOperation } from "./context-view-protocol";
@@ -84,6 +85,7 @@ import { isEvaluationOperationKind, validateEvaluationOperation } from "./evalua
 export type StudioOperation =
 	| SessionOwnerOperation
 	| ContextViewOperation
+	| RuntimeViewOperation
 	| PredictionOperation
 	| WorkbenchOperation
 	| UpgradeOperation
@@ -168,7 +170,8 @@ export type StudioOperation =
 			kind: "agent.spawn";
 			definition: string;
 			model?: string[];
-			assignment: string;
+			assignment?: string;
+			taskFile?: string;
 			solutionSpace?: string;
 			context?: string;
 			async?: boolean;
@@ -611,6 +614,7 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 		throw new StudioFrameError("Invalid Studio request");
 	}
 	if (operation.kind === "session.owner.update") return input as unknown as StudioRequest;
+	if (isRuntimeViewKind(operation.kind)) return input as unknown as StudioRequest;
 	if (isContextViewKind(operation.kind)) return input as unknown as StudioRequest;
 	if (isEvaluationOperationKind(operation.kind)) {
 		validateEvaluationOperation(operation);
@@ -877,6 +881,7 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 				"kind",
 				"definition",
 				"assignment",
+				"taskFile",
 				"context",
 				"async",
 				"isolation",
@@ -903,7 +908,10 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 				(!nonEmptyString(operation.solutionSpace) || operation.solutionSpace.length > 65536)
 			)
 				throw new StudioFrameError("Invalid solution space");
-			if (!nonEmptyString(operation.definition) || !nonEmptyString(operation.assignment)) {
+			if (
+				!nonEmptyString(operation.definition) ||
+				(operation.assignment !== undefined && !nonEmptyString(operation.assignment))
+			) {
 				throw new StudioFrameError("Invalid agent spawn request");
 			}
 			if (operation.context !== undefined && !nonEmptyString(operation.context)) {
@@ -1147,6 +1155,7 @@ export function stableEmptyManifestHash(kind: "capabilities" | "commands"): stri
 export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	...COMPUTER_WORKSPACE_QUERY_KINDS,
 	...CONTEXT_VIEW_KINDS,
+	...RUNTIME_VIEW_KINDS,
 	"settings.approval",
 	"prediction.query",
 	"composer.predictions",

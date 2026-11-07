@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The development Runtime pin is `can1357/oh-my-pi` `v18.13.2` at commit `e996e1c7ac476f60e02b8ed9764cf30fa8c00a8e`. The current Studio revision is recorded in `patches/series.json`. See the [18.13.2 migration report](../docs/migrations/omp-18.13.2.md). The upgrade baseline was `18.12.6-studio.9`; the [18.12.6 report](../docs/migrations/omp-18.12.6.md) records its original migration, not its later patchset revisions.
+The development Runtime pin is `can1357/oh-my-pi` `v18.18.0` at commit `b5a6b2f7e5b6606b6562e678ead83f21738f34a0`. The current Studio revision is recorded in `patches/series.json`. This upgrade starts at `18.13.2-studio.44` / Studio 0.1.17; see the [18.18.0 migration report](../docs/migrations/omp-18.18.0.md) for changes, GUI coverage and validation. Earlier reports describe their original migrations, not later patchset revisions.
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
@@ -33,7 +33,7 @@ The overlay is ordinary tracked source in this repository. Editing it is an ordi
 
 ## Windows build toolchain
 
-The v18.13.2 Windows bytecode bundle uses the upstream-pinned Bun **1.4.4**, including its certificate/Brotli fixes. Set `BUN_EXE` to a separately installed 1.4.4 executable before building; the global Bun installation need not change. Use the upstream-pinned Rust `nightly-2026-10-06` toolchain. Release signing uses the existing GitHub Environment; the isolated local `canary` test artifact is not a release identity and is not installed automatically.
+The v18.18.0 Windows bytecode bundle uses the upstream-pinned Bun **1.4.4**, including its certificate/Brotli fixes. Set `BUN_EXE` to a separately installed 1.4.4 executable before building; the global Bun installation need not change. Use the upstream-pinned Rust `nightly-2026-10-06` toolchain. Release signing uses the existing GitHub Environment; the isolated local `canary` test artifact is not a release identity and is not installed automatically.
 
 ## Working loop
 

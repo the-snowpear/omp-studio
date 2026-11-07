@@ -24,7 +24,7 @@ export const GUI_SETTING_DEFINITIONS = {
   },
   "providers.openaiLiveSteering": {
     "type": "boolean",
-    "default": true,
+    "default": false,
     "zh": "OpenAI 实时纠偏",
     "en": "OpenAI live steering"
   },

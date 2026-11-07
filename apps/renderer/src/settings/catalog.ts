@@ -102,7 +102,7 @@ export const SETTINGS_CATALOG: readonly SettingSearchItem[] = [
   })),
   ...FEATURE_SETTINGS_DEFINITIONS.map(def => ({
     id:def.key,
-    group:({ interaction:"interaction", context:def.key === "retry.fallbackOn" ? "models" : "context", tasks:def.key === "bash.gitGuard" ? "permissions" : "tasks", permissions:"permissions", voice:"voice", dictation:"voice", maintenance:"maintenance" } as const)[def.group],
+    group:({ interaction:"interaction", context:def.key === "retry.fallbackOn" ? "models" : "context", tasks:def.key === "bash.gitGuard" ? "permissions" : "tasks", permissions:"permissions", voice:"voice", dictation:"voice", maintenance:"maintenance", models:"models", experimental:"maintenance" } as const)[def.group],
     zh:def.zh, en:def.en, targetZh:def.zh, targetEn:def.en, keywords:`${def.key} ${def.hint} ${def.hintEn}`,
   })),
   ...Object.entries(nativePreferenceDescriptions).map(([key, value]) => ({

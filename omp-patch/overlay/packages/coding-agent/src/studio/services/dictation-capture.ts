@@ -223,7 +223,8 @@ export class StudioDictationCapture {
 						this.#patch({
 							progress: {
 								stage: progress.status,
-								percent: progress.percent,
+								component: progress.component ?? progress.label,
+								percent: progress.total > 0 ? progress.percent : undefined,
 								loaded: progress.loaded,
 								total: progress.total,
 							},

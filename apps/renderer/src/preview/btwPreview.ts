@@ -18,6 +18,7 @@ export const PREVIEW_BTW_SNAPSHOTS: readonly BtwSnapshot[] = [
   },
   {
     ephemeralId: "btw-demo-completed",
+    injection: { id: "demo-live-topic:0", state: "ready", before: "重命名需要保留旧路径与新路径，并在会话恢复后验证。", text: "请补齐 SessionChanges 的重命名字段，并验证新增、删除与重命名在恢复会话后仍正确显示。", after: "", },
     topicId: "demo-live-topic", question: PREVIEW_BTW_QUESTION, turnIndex: 0,
     status: "completed",
     text: [
@@ -50,7 +51,7 @@ export function previewBtwSnapshot(index: number): BtwSnapshot {
 
 export const PREVIEW_BTW_TOPICS = [{ topicId: "demo-live-topic", question: PREVIEW_BTW_QUESTION, status: "complete" as const, updatedAt: 1789171204000, turnCount: 1 }, { topicId: "demo-topic", question: PREVIEW_BTW_QUESTION, status: "complete" as const, updatedAt: 1789171200000, turnCount: 2 }, { topicId: "demo-interrupted-topic", question: PREVIEW_BTW_QUESTION, status: "interrupted" as const, updatedAt: 1789171205000, turnCount: 2 }];
 export const PREVIEW_BTW_TURNS = [
- { question: PREVIEW_BTW_QUESTION, answer: PREVIEW_BTW_SNAPSHOTS[1]!.text, status: "complete" as const, createdAt: 1789171200000, updatedAt: 1789171201000 },
+ { question: PREVIEW_BTW_QUESTION, answer: PREVIEW_BTW_SNAPSHOTS[1]!.text, injection: PREVIEW_BTW_SNAPSHOTS[1]!.injection!, status: "complete" as const, createdAt: 1789171200000, updatedAt: 1789171201000 },
  { question: "应该怎样验证？", answer: "覆盖重命名、增删文件与会话恢复后的 diff 展示。", status: "complete" as const, createdAt: 1789171202000, updatedAt: 1789171203000 },
 ];
 

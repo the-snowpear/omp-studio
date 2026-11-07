@@ -1,3 +1,5 @@
+import { splitBtwInject, formatBtwInjectText } from "@oh-my-pi/pi-tui/overlays/btw-history";
+import type { BtwInjection } from "../btw-protocol";
 import { randomUUID } from "node:crypto";
 import { BtwHistoryStore, type BtwHistoryRecord, type BtwHistoryTurn, getBtwTurns } from "../../session/btw-history";
 import { beginBtwTurn, runBtwTurn } from "../../session/btw-turn";
@@ -9,6 +11,7 @@ import { CONVERSATION_LIVE_COALESCE_INTERVAL_MS } from "./conversation-live-proj
 export type StudioBtwStatus = "running" | "completed" | "failed" | "aborted";
 
 export interface StudioBtwSnapshot {
+	injection?: BtwInjection;
 	sessionId?: string;
 	topicId?: string;
 	title?: string;
@@ -51,6 +54,7 @@ export class StudioBtwError extends Error {
 }
 
 interface StudioBtwRecord {
+	injectEnabled: boolean;
 	topicId: string;
 	prior?: BtwHistoryRecord;
 	history?: readonly BtwHistoryTurn[];
@@ -73,6 +77,8 @@ interface StudioBtwRecord {
 }
 
 export interface StudioBtwServiceOptions {
+	injectEnabled?: () => boolean;
+	sendInjection?: (text: string, sessionId: string) => Promise<void>;
 	historyScope?: string;
 	idGenerator?: () => string;
 	tokenGenerator?: () => string;
@@ -93,6 +99,11 @@ export interface StudioBtwServiceOptions {
  * and cancels the pending frame.
  */
 export class StudioBtwService {
+	readonly #injections = new Map<
+		string,
+		{ record: StudioBtwRecord; value: BtwInjection; pending?: Promise<{ sent: true }> }
+	>();
+	readonly #injectionOptions: StudioBtwServiceOptions;
 	readonly #listeners = new Set<(snapshot: StudioBtwSnapshot) => void>();
 	readonly #idGenerator: () => string;
 	readonly #tokenGenerator: () => string;
@@ -114,6 +125,7 @@ export class StudioBtwService {
 		private readonly session: StudioBtwSessionPort,
 		options: StudioBtwServiceOptions = {},
 	) {
+		this.#injectionOptions = options;
 		this.#idGenerator = options.idGenerator ?? randomUUID;
 		this.#tokenGenerator = options.tokenGenerator ?? randomUUID;
 		this.#maxTextBytes = options.maxTextBytes ?? Number.POSITIVE_INFINITY;
@@ -186,7 +198,11 @@ export class StudioBtwService {
 		return {
 			sessionId: this.session.sessionManager.getSessionId(),
 			topicId,
-			turns: getBtwTurns(record).map(turn => ({
+			turns: getBtwTurns(record).map((turn, index, turns) => ({
+				...(this.#injections.get(`${topicId}:${index}`) &&
+				(index === turns.length - 1 || this.#injections.get(`${topicId}:${index}`)?.value.state === "sent")
+					? { injection: { ...this.#injections.get(`${topicId}:${index}`)!.value } }
+					: {}),
 				question: turn.question,
 				...(turn.images?.length ? { images: turn.images } : {}),
 				answer: turn.answer,
@@ -211,6 +227,7 @@ export class StudioBtwService {
 			throw new StudioBtwError("BUSY_STREAMING", "This BTW topic is still running");
 		const { history, conversationKey } = beginBtwTurn(question.trim(), prior.leafId, prior, images);
 		const record: StudioBtwRecord = {
+			injectEnabled: this.#injectionOptions.injectEnabled?.() ?? false,
 			ephemeralId: this.#idGenerator(),
 			topicId,
 			prior: structuredClone(prior),
@@ -360,6 +377,7 @@ export class StudioBtwService {
 		}
 		const id = this.#idGenerator();
 		const record: StudioBtwRecord = {
+			injectEnabled: this.#injectionOptions.injectEnabled?.() ?? false,
 			topicId: id,
 			createdAt: Date.now(),
 			conversationKey: `btw:${id}:0`,
@@ -460,10 +478,41 @@ export class StudioBtwService {
 		return this.branch(this.#current.ephemeralId, branchToken);
 	}
 
+	async inject(id: string): Promise<{ sent: true }> {
+		const entry = this.#injections.get(id),
+			send = this.#injectionOptions.sendInjection;
+		if (!entry || !send || entry.record.originalSessionId !== this.session.sessionManager.getSessionId())
+			throw new StudioBtwError("INTERACTION_STALE", "This BTW answer cannot be injected in the current session");
+		if (entry.value.state === "sent") return { sent: true };
+		if (entry.pending) return entry.pending;
+		const change = (state: BtwInjection["state"]) => {
+			entry.value = { ...entry.value, state };
+			if (this.#current === entry.record) this.#emit(entry.record);
+		};
+		change("sending");
+		entry.pending = (async () => {
+			const saved = (await this.#historyStore(true)).getRecords().find(record => record.id === entry.record.topicId);
+			if (!saved || getBtwTurns(saved).length - 1 !== (entry.record.history?.length ?? 0))
+				throw new StudioBtwError("INTERACTION_STALE", "A newer follow-up replaced this injection");
+			await send(entry.value.text, entry.record.originalSessionId);
+			change("sent");
+			return { sent: true as const };
+		})()
+			.catch(error => {
+				change("ready");
+				throw error;
+			})
+			.finally(() => {
+				entry.pending = undefined;
+			});
+		return entry.pending;
+	}
+
 	dispose(): void {
 		if (this.#isRunning()) this.abort(this.#current!.ephemeralId);
 		this.#clearEmitTimer();
 		this.#listeners.clear();
+		this.#injections.clear();
 	}
 
 	async #run(record: StudioBtwRecord): Promise<void> {
@@ -476,6 +525,7 @@ export class StudioBtwService {
 				return;
 			}
 			const result = await runBtwTurn(this.session, {
+				inject: record.injectEnabled,
 				...(record.history ? { history: record.history } : {}),
 				conversationKey: record.conversationKey,
 				question: record.question,
@@ -492,6 +542,15 @@ export class StudioBtwService {
 			record.textBytes = Buffer.byteLength(result.replyText, "utf8");
 			record.assistantMessage = assistantMessageWithReplyText(result.assistantMessage, result.replyText);
 			record.status = "completed";
+			const parts = record.injectEnabled ? splitBtwInject(record.text) : undefined;
+			const text = parts?.closed ? formatBtwInjectText(parts.inject) : "";
+			if (parts?.closed && text) {
+				const id = `${record.topicId}:${record.history?.length ?? 0}`;
+				this.#injections.set(id, {
+					record,
+					value: { id, text, before: parts.before, after: parts.after, state: "ready" },
+				});
+			}
 			this.#emit(record);
 		} catch (error) {
 			if (this.#current !== record || record.status === "aborted" || record.error?.code === "OUTPUT_LIMIT") return;
@@ -533,6 +592,9 @@ export class StudioBtwService {
 	#snapshot(record: StudioBtwRecord): StudioBtwSnapshot {
 		const copy = record.text.trim() ? record.text : "";
 		return {
+			...(this.#injections.get(`${record.topicId}:${record.history?.length ?? 0}`)
+				? { injection: { ...this.#injections.get(`${record.topicId}:${record.history?.length ?? 0}`)!.value } }
+				: {}),
 			sessionId: record.originalSessionId,
 			topicId: record.topicId,
 			...(record.title ? { title: record.title } : {}),

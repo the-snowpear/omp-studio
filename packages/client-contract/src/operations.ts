@@ -1,3 +1,5 @@
+import type { RuntimeViewOperation, RuntimeViewResultMap } from "@omp-studio/studio-protocol";
+type RuntimeViewQueryMap = { [K in RuntimeViewOperation["kind"]]: Omit<Extract<RuntimeViewOperation, { kind: K }>, "kind"> };
 import type { EvaluationRecord, EvaluationSpec, EvaluationPlan, EvaluationContext, EvaluationListInput, EvaluationResultPage, EvaluationStartInput, EvaluationControlInput, EvaluationExportInput, EvaluationExportResult } from "@omp-studio/studio-protocol";
 import type { ClientInteraction } from "./lifecycle.js";
 import type { GitHubTarget, GitHubRepositories, GitHubListInput, GitHubItemPage, GitHubItemInput, GitHubItemDetail, GitHubDiscussionPage, GitHubFilesPage, GitHubFileDiff } from "./github.js";
@@ -99,7 +101,7 @@ export type EmptyInput = Readonly<Record<string, never>>;
 
 type ContextViewQueryMap = { [K in ContextViewOperation["kind"]]: Omit<Extract<ContextViewOperation, { kind: K }>, "kind"> };
 type ComputerWorkspaceQueryMap = { [K in ComputerWorkspaceQuery["kind"]]: Omit<Extract<ComputerWorkspaceQuery, { kind: K }>, "kind"> };
-export interface QueryInputMap extends ContextViewQueryMap, ComputerWorkspaceQueryMap {
+export interface QueryInputMap extends RuntimeViewQueryMap, ContextViewQueryMap, ComputerWorkspaceQueryMap {
   "session.compaction.read": { readonly sessionId: SessionId };
  "evaluations.exportChunk": { artifactId: string; offset?: number };
  "evaluations.retrySpec": { id: string };
@@ -180,7 +182,7 @@ export interface QueryInputMap extends ContextViewQueryMap, ComputerWorkspaceQue
   "github.pr.checks": GitHubTarget & { readonly number: number };
 }
 
-export interface QueryResultMap extends ContextViewResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceQuery["kind"]> {
+export interface QueryResultMap extends RuntimeViewResultMap, ContextViewResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceQuery["kind"]> {
  "evaluations.exportChunk": { data: string; nextOffset: number; total: number; mimeType: string; name: string };
  "evaluations.retrySpec": EvaluationSpec;
  "evaluations.patch": { text: string; nextOffset: number; total: number };
@@ -499,7 +501,8 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, Upgra
   "agent.spawn": {
     readonly model?: string[];
     readonly definition: string;
-    readonly assignment: string;
+    readonly assignment?: string;
+    readonly taskFile?: string;
     readonly solutionSpace?: string;
     readonly context?: string;
     readonly async?: boolean;
@@ -619,7 +622,7 @@ interface CoreCommandInputMap {
     readonly overlay?: ModelProviderUpsertInput;
   };
   /** Start an OAuth login through a short-lived OMP RPC sidecar. */
-  "models.login.start": { readonly providerId: string };
+  "models.login.start": { readonly providerId: string; readonly loginId?: string };
   /** Soft-delete stored credentials for a provider in local `agent.db`. */
   "models.login.logout": { readonly providerId: string };
   /** Non-persisting connectivity smoke test against a provider endpoint. */

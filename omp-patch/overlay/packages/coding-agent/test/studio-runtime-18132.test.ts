@@ -39,7 +39,7 @@ test("session budget blocks the next tree request, null masks inherited caps and
 	cfgSessionWarnCost.set(settings, 1);
 	const notices: string[] = [];
 	const gate = new CostGate(settings, 0, message => notices.push(message));
-	const session = { sessionId: "budget", settings, costGate: gate } as AgentSession;
+	const session = { sessionId: "budget", settings, costGate: gate } as unknown as AgentSession;
 	const service = new StudioSessionOptionsService(session);
 	gate.record(2.5);
 	expect(gate.check()?.cap).toBe(2);

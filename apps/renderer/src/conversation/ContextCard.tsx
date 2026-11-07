@@ -1,3 +1,4 @@
+import { PromptCachePanel } from "./PromptCachePanel";
 import type { SessionId, SessionTelemetrySnapshot } from "@omp-studio/studio-protocol";
 import type { StudioClient, ThreadId } from "@omp-studio/client-contract";
 import { useMemo, useSyncExternalStore, type ReactNode } from "react";
@@ -27,7 +28,7 @@ function tokens(value: number): string {
   return value.toLocaleString();
 }
 
-export function ContextCard({ context, status = "live", source, demo = false, onOpenDetails, onCompact, compactDisabled = false, compacting = false, thresholdControl, thresholdPercent }: {
+export function ContextCard({ context, status = "live", source, demo = false, onOpenDetails, onCompact, compactDisabled = false, compacting = false, thresholdControl, thresholdPercent, cacheControl, queueInstead = false }: {
   context: ContextUsage | null | undefined;
   status?: ViewedSessionTelemetryState["status"];
   source?: ViewedSessionTelemetryState["source"];
@@ -37,6 +38,8 @@ export function ContextCard({ context, status = "live", source, demo = false, on
   compactDisabled?: boolean | undefined;
   compacting?: boolean | undefined;
   thresholdControl?: ReactNode;
+  cacheControl?: ReactNode;
+  queueInstead?: boolean | undefined;
   thresholdPercent?: number | null | undefined;
 }) {
   const { resolvedLanguage } = useI18n();
@@ -77,13 +80,14 @@ export function ContextCard({ context, status = "live", source, demo = false, on
         <span className="context-card-percent">{(row.tokens / capacity * 100).toFixed(1)}%</span>
       </div>)}
     </div>
+    {cacheControl}
     <footer className="context-card-footer">
       {thresholdControl ?? <span className="context-card-source">{provenance}</span>}
       <div className="context-card-actions">
         {onCompact ? <button type="button" className="context-card-compact" onClick={onCompact} disabled={compactDisabled || compacting}
           aria-label={compacting ? zh ? "正在压缩上下文" : "Compacting context" : zh ? "压缩上下文" : "Compact context"}
-          aria-busy={compacting} data-tip={compacting ? zh ? "正在压缩上下文" : "Compacting context" : zh ? "立即压缩当前会话的上下文" : "Compact this session's context now"}>
-          <Icon name={compacting ? "clock" : "restore"} extra="sm" /><span>{compacting ? zh ? "压缩中" : "Compacting" : zh ? "压缩" : "Compact"}</span>
+          aria-busy={compacting} data-tip={compacting ? zh ? "正在压缩上下文" : "Compacting context" : queueInstead ? zh ? "当前工作结束后压缩" : "Compact after current work yields" : zh ? "立即压缩当前会话的上下文" : "Compact this session's context now"}>
+          <Icon name={compacting ? "clock" : "restore"} extra="sm" /><span>{compacting ? zh ? "压缩中" : "Compacting" : queueInstead ? zh ? "排队压缩" : "Queue compaction" : zh ? "压缩" : "Compact"}</span>
         </button> : null}
         {onOpenDetails ? <button type="button" className="context-card-details" onClick={onOpenDetails}
           aria-label={zh ? "查看详情" : "View details"} data-tip={zh ? "查看详情" : "View details"}>
@@ -108,10 +112,11 @@ type ContextSourceProps = {
   viewedThreadId?: ThreadId | undefined;
   compactionAvailable?: boolean | undefined;
   previewSessionId?: string | undefined;
+  queueInstead?: boolean | undefined;
   compactionRefreshKey?: string | undefined;
 };
 
-export function ContextDockCard({ client, visible, viewedSessionId, liveSessionId, liveTelemetry, refreshToken, onOpenDetails, onCompact, compactDisabled, compacting, viewedThreadId, compactionAvailable = false, previewSessionId, compactionRefreshKey, render }: ContextSourceProps & {
+export function ContextDockCard({ client, visible, viewedSessionId, liveSessionId, liveTelemetry, refreshToken, onOpenDetails, onCompact, compactDisabled, compacting, viewedThreadId, compactionAvailable = false, previewSessionId, compactionRefreshKey, queueInstead, render }: ContextSourceProps & {
   visible: boolean;
   render?: (card: ReactNode, context: ContextUsage | null | undefined) => ReactNode;
 }) {
@@ -126,7 +131,8 @@ export function ContextDockCard({ client, visible, viewedSessionId, liveSessionI
   const triggerPercent = compaction.state?.automatic && compaction.state.triggerTokens && context?.contextWindow
     ? compaction.state.triggerTokens / context.contextWindow * 100 : null;
   const card = <ContextCard context={context} status={view.status} source={view.source} demo={preview && marks} onOpenDetails={canInspect ? onOpenDetails : undefined}
-    onCompact={onCompact} compactDisabled={compactDisabled} compacting={compacting} thresholdPercent={triggerPercent}
+    cacheControl={canInspect ? <PromptCachePanel client={client} sessionId={liveSessionId} visible={visible} /> : undefined}
+    queueInstead={queueInstead} onCompact={onCompact} compactDisabled={compactDisabled} compacting={compacting} thresholdPercent={triggerPercent}
     thresholdControl={<SessionCompactionInput key={`${preview}:${sessionId}`} {...compaction} onSave={compaction.save} enabled={preview || compactionAvailable && !!sessionId} />} />;
   return render ? render(card, context) : card;
 }

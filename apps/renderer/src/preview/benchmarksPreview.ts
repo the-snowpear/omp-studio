@@ -9,7 +9,7 @@ export function previewBenchmark(spec: BenchmarkSpec): BenchmarkSnapshot {
 export const PREVIEW_BENCHMARK: BenchmarkSnapshot = {
   run: { id: "bench-7c2e", sessionId: "preview", createdAt: 1, finishedAt: 3001, state: "completed", spec: { models: ["anthropic/claude-haiku-4.5", "anthropic/claude-opus-4.1"], profile: "chat", runs: 3, concurrency: 1 } },
   models: [
-    { selector: "anthropic/claude-haiku-4.5", model: "anthropic/claude-haiku-4.5", state: "done", total: 3, completed: 3, failed: 0, inFlight: 0, stats: stats(240, 120), byChallenge: { chat: stats(240, 120) }, measurements: [] },
+    { selector: "anthropic/claude-haiku-4.5", model: "anthropic/claude-haiku-4.5", state: "done", total: 3, completed: 3, failed: 0, inFlight: 0, stats: stats(240, 120), byChallenge: { chat: stats(240, 120) }, measurements: [{ ok: true, transport: "http", challenge: "chat", ttftMs: 240, tokensPerSecond: 120 }] },
     { selector: "anthropic/claude-opus-4.1", model: "anthropic/claude-opus-4.1", state: "done", total: 3, completed: 3, failed: 0, inFlight: 0, stats: stats(580, 75), byChallenge: { chat: stats(580, 75) }, measurements: [] },
   ],
 };

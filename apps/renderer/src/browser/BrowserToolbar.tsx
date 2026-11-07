@@ -79,7 +79,7 @@ export function BrowserControlToggle({ session, snap, copy, compact }: { session
 
 export function BrowserMoreMenu({ session, snap, page, human, compact, copy, onFind, onView, onPick }: {
   session: BrowserSession; snap: BrowserSessionSnapshot; page: ManagedBrowserPage; human: boolean; compact: boolean; copy: Copy;
-  onFind: () => void; onView: (view: "downloads" | "settings") => void; onPick: () => void;
+  onFind: () => void; onView: (view: "downloads" | "settings" | "webmcp") => void; onPick: () => void;
 }) {
   const document = useSurfaceDocument();
   const state = snap.state!;
@@ -109,6 +109,7 @@ export function BrowserMoreMenu({ session, snap, page, human, compact, copy, onF
       <MenuItem icon="eye-off" disabled={!state.pages.length} title={copy("关闭活页面以释放内存，标签和登录状态保留", "Free page memory; tabs and sign-ins stay")} onClick={() => { void session.execute({ action: "release" }); close(); }}>{copy("释放此对话的网页", "Release this chat's pages")}</MenuItem>
       <div className="menu-sep" />
       <MenuItem icon="download" {...(active ? { hint: copy(`${active} 个进行中`, `${active} active`) } : state.downloads.length ? { hint: String(state.downloads.length) } : {})} onClick={() => { onView("downloads"); close(); }}>{copy("下载", "Downloads")}</MenuItem>
+      <MenuItem icon="code" onClick={() => { onView("webmcp"); close(); }}>WebMCP</MenuItem>
       <MenuItem icon="settings" onClick={() => { onView("settings"); close(); }}>{copy("浏览器设置", "Browser settings")}</MenuItem>
     </>}
   </DockPopupButton>;
@@ -116,7 +117,7 @@ export function BrowserMoreMenu({ session, snap, page, human, compact, copy, onF
 
 export function BrowserToolbar({ session, snap, page, human, compact, copy, addressRef, demo = false, onFind, onView }: {
   session: BrowserSession; snap: BrowserSessionSnapshot; page: ManagedBrowserPage; human: boolean; compact: boolean; copy: Copy;
-  addressRef: RefObject<HTMLInputElement | null>; demo?: boolean; onFind: () => void; onView: (view: "downloads" | "settings") => void;
+  addressRef: RefObject<HTMLInputElement | null>; demo?: boolean; onFind: () => void; onView: (view: "downloads" | "settings" | "webmcp") => void;
 }) {
   const busy = snap.busy.includes(page.id);
   const loading = page.status === "loading";

@@ -1,3 +1,4 @@
+import { isRecord } from "@oh-my-pi/pi-utils";
 import { CONVERSATION_LIMITS, type JsonValue } from "../conversation-protocol";
 import { sanitizeJsonValue, utf8ByteLength } from "./conversation-sanitizer";
 
@@ -54,6 +55,12 @@ export function projectToolMedia(content: unknown, rawDetails: unknown): { data?
 			media.push(image);
 			bytes += size;
 		}
+	// The opaque native trace stays in the Runtime. The viewport reads semantic
+	// rows on demand instead of copying the multi-megabyte journal into every event.
+	if (isRecord(rawDetails) && isRecord(rawDetails.trace) && rawDetails.trace.v === 1) {
+		const { trace: _trace, ...rest } = rawDetails;
+		rawDetails = { ...rest, hasExecutionTrace: true };
+	}
 	const details = sanitizeJsonValue(rawDetails, { maxBytes: CONVERSATION_LIMITS.JSON_VALUE_MAX_BYTES - bytes - 1024 });
 	if (media.length === 0 && omitted === 0)
 		return {

@@ -87,6 +87,11 @@ interface PendingInteraction {
 	reject: (error: Error) => void;
 }
 
+interface WaitingInteraction {
+	input: Omit<StudioRemoteInteractionRequest, "interactionId">;
+	deferred: PromiseWithResolvers<unknown>;
+}
+
 export class StudioInteractionError extends Error {
 	constructor(
 		readonly code: "INTERACTION_STALE" | "NOT_OWNER" | "INVALID_ARGUMENT",
@@ -100,6 +105,12 @@ export class StudioInteractionError extends Error {
 /** Late-bound bridge between the Runtime-owned TUI and the active bridge dispatcher. */
 export class StudioInteractionGateway implements StudioInteractionPort {
 	#port: StudioRemoteInteractionPort | undefined;
+
+	constructor(readonly onNotice?: (message: string, level: "info" | "warning" | "error") => void) {}
+
+	notify(message: string, level: "info" | "warning" | "error" = "info"): void {
+		this.onNotice?.(message, level);
+	}
 
 	bind(port: StudioRemoteInteractionPort): void {
 		if (this.#port !== undefined && this.#port !== port) {
@@ -180,6 +191,14 @@ export class StudioInteractionGateway implements StudioInteractionPort {
 		this.#port.cancel(reason, outcome);
 	}
 
+	cancelCommand(
+		commandId: string,
+		reason = "Runtime interaction was cancelled",
+		outcome: "aborted" | "expired" = "aborted",
+	): void {
+		this.#port?.cancelCommand(commandId, reason, outcome);
+	}
+
 	respondFromTui(operation: Extract<StudioOperation, { kind: "interaction.respond" }>): void {
 		this.#requirePort().respond(operation, "tui");
 	}
@@ -195,6 +214,7 @@ export class StudioInteractionGateway implements StudioInteractionPort {
 /** Bridge-backed Runtime interaction port. It owns no presentation state. */
 export class StudioRemoteInteractionPort implements StudioInteractionPort {
 	#pending: PendingInteraction | undefined;
+	#waiting: WaitingInteraction[] = [];
 
 	constructor(
 		private readonly arbiter: StudioRuntimeCommandArbiter,
@@ -262,18 +282,11 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 		input: { commandId: string; title: string; details: unknown },
 		timeoutMs: number,
 	): Promise<CfgApproval> {
-		const deadline = Date.now() + timeoutMs;
-		while (this.#pending !== undefined && Date.now() < deadline) await Bun.sleep(20);
-		if (Date.now() >= deadline) return "timeout";
 		let timedOut = false;
-		const timer = setTimeout(
-			() => {
-				if (this.#pending?.request.commandId !== input.commandId) return;
-				timedOut = true;
-				this.cancel("Configuration approval expired", "expired");
-			},
-			Math.max(1, deadline - Date.now()),
-		);
+		const timer = setTimeout(() => {
+			timedOut = true;
+			this.cancelCommand(input.commandId, "Configuration approval expired", "expired");
+		}, timeoutMs);
 		try {
 			const request = { kind: "approval" as const, approvalType: "configuration", ...input };
 			const value = await this.#request(request);
@@ -319,6 +332,7 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 			outcome: operation.decision === "cancel" ? "cancelled" : "submitted",
 		});
 		pending.resolve(operation.decision === "cancel" ? undefined : operation.value);
+		this.#drain();
 	}
 
 	transfer(
@@ -350,6 +364,27 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 	}
 
 	cancel(reason = "Runtime interaction was cancelled", outcome: "aborted" | "expired" = "aborted"): void {
+		for (const queued of this.#waiting)
+			queued.deferred.reject(new StudioInteractionError("INTERACTION_STALE", reason));
+		this.#waiting = [];
+		this.#cancelPending(reason, outcome);
+	}
+
+	cancelCommand(
+		commandId: string,
+		reason = "Runtime interaction was cancelled",
+		outcome: "aborted" | "expired" = "aborted",
+	): void {
+		this.#waiting = this.#waiting.filter(queued => {
+			if (queued.input.commandId !== commandId) return true;
+			queued.deferred.reject(new StudioInteractionError("INTERACTION_STALE", reason));
+			return false;
+		});
+		if (this.#pending?.request.commandId === commandId) this.#cancelPending(reason, outcome);
+		this.#drain();
+	}
+
+	#cancelPending(reason: string, outcome: "aborted" | "expired"): void {
 		const pending = this.#pending;
 		if (pending === undefined) return;
 		this.arbiter.completeInteraction(
@@ -387,9 +422,25 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 	}
 
 	#request(input: Omit<StudioRemoteInteractionRequest, "interactionId">): Promise<unknown> {
-		if (this.#pending !== undefined) {
-			throw new StudioInteractionError("INTERACTION_STALE", "Another interaction is already pending");
+		const deferred = Promise.withResolvers<unknown>();
+		this.#waiting.push({ input, deferred });
+		this.#drain();
+		return deferred.promise;
+	}
+
+	#drain(): void {
+		if (this.#pending) return;
+		const queued = this.#waiting.shift();
+		if (!queued) return;
+		try {
+			this.#open(queued.input).then(queued.deferred.resolve, queued.deferred.reject);
+		} catch (error) {
+			queued.deferred.reject(error);
+			this.#drain();
 		}
+	}
+
+	#open(input: Omit<StudioRemoteInteractionRequest, "interactionId">): Promise<unknown> {
 		const lease = this.arbiter.openInteraction(input.commandId, "gui");
 		const request = { ...input, interactionId: lease.interactionId } as StudioRemoteInteractionRequest;
 		const deferred = Promise.withResolvers<unknown>();
@@ -410,8 +461,8 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 				leaseGeneration: lease.generation,
 			});
 		} catch (error) {
-			this.cancel("Interaction publication failed");
-			throw error;
+			this.#cancelPending("Interaction publication failed", "aborted");
+			this.#drain();
 		}
 		return deferred.promise;
 	}

@@ -29,10 +29,13 @@ export class StudioMcpAuthService {
 	interaction?: StudioInteractionGateway;
 	#inFlight = new Set<string>();
 
-	constructor(readonly session: AgentSession) {}
+	constructor(
+		readonly session: AgentSession,
+		readonly manager?: MCPManager,
+	) {}
 
 	get #manager(): MCPManager | undefined {
-		return this.session.studioToolSession?.mcpManager;
+		return this.manager;
 	}
 
 	async #find(name: string): Promise<FoundMcpServer> {

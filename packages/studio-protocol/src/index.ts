@@ -1,3 +1,5 @@
+export * from "./contracts/runtime-views.js";
+export * from "./contracts/shell-view.js";
 export * from "./contracts/advisor-config.js";
 export * from "./contracts/local-resources.js";
 export * from "./contracts/session-owner.js";
@@ -89,3 +91,6 @@ export * from "./contracts/plan-review.js";
 
 export * from "./contracts/evaluation-workspace.js";
 export * from "./contracts/managed-browser.js";
+
+export * from "./contracts/extension-links.js";
+export * from "./contracts/webmcp.js";

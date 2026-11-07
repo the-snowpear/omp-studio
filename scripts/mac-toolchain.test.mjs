@@ -22,20 +22,20 @@ const READY = {
 };
 
 test("version comparison handles prefixes and missing parts", () => {
-  assert.equal(compareVersions("1.4.2", MIN_BUN_VERSION), 0);
-  assert.equal(compareVersions("v1.10.0", "1.4.2"), 1);
-  assert.equal(compareVersions("1.3.14", "1.4.2"), -1);
+  assert.equal(compareVersions("1.4.4", MIN_BUN_VERSION), 0);
+  assert.equal(compareVersions("v1.10.0", "1.4.4"), 1);
+  assert.equal(compareVersions("1.3.14", "1.4.4"), -1);
   assert.equal(compareVersions("1.4", "1.4.0"), 0);
 });
 
 test("a ready Apple Silicon toolchain reports no problems", () => {
   const { run } = runner(READY);
-  assert.deepEqual(macToolchainProblems({ rust: true, bunVersion: "1.4.2", arch: "arm64", translated: false, run }), []);
+  assert.deepEqual(macToolchainProblems({ rust: true, bunVersion: "1.4.4", arch: "arm64", translated: false, run }), []);
 });
 
 test("a native Intel toolchain can build the x64 remote Runtime", () => {
   const { run } = runner({ ...READY, "rustc -vV": "host: x86_64-apple-darwin\n" });
-  assert.deepEqual(macToolchainProblems({ rust: true, bunVersion: "1.4.2", arch: "x64", targetArch: "x64", translated: false, run }), []);
+  assert.deepEqual(macToolchainProblems({ rust: true, bunVersion: "1.4.4", arch: "x64", targetArch: "x64", translated: false, run }), []);
 });
 
 test("missing Command Line Tools never touches the shims that pop the install dialog", () => {
@@ -51,7 +51,7 @@ test("every problem is reported at once", () => {
   const problems = macToolchainProblems({ rust: true, bunVersion: "1.3.14", arch: "x64", translated: true, run });
   assert.equal(problems.length, 3);
   assert.match(problems[0], /native arm64/u);
-  assert.match(problems[1], /Bun 1\.4\.2 or newer/u);
+  assert.match(problems[1], /Bun 1\.4\.4 or newer/u);
   assert.match(problems[2], /aarch64-apple-darwin; rustc host is x86_64-apple-darwin/u);
   assert.throws(() => assertMacToolchain({ rust: true, bunVersion: "1.3.14", arch: "x64", translated: true, run }), /toolchain is not ready:\n- /u);
 });

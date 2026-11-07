@@ -24,7 +24,7 @@ describe("StudioAgentConversationService", () => {
 			id: "agent-019fcb01",
 			displayName: "deps",
 			kind: "sub",
-			session: { sessionManager: manager } as AgentSession,
+			session: { sessionManager: manager, activeToolExecutionUpdates: () => [] } as unknown as AgentSession,
 			sessionFile: manager.getSessionFile() ?? null,
 		});
 		const service = new StudioAgentConversationService({

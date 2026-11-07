@@ -7,7 +7,7 @@ export class StudioConversationError extends Error {
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
-export type ConversationRole = "user" | "assistant" | "system";
+export type ConversationRole = "user" | "assistant" | "system" | "extension";
 /** MCP `notifications/progress`: `progress` of an optional `total`, with an optional phase message. */
 export interface ConversationToolProgress {
 	progress: number;
@@ -20,6 +20,7 @@ export type ConversationContentBlock =
 	| { type: "thinking"; text: string; truncated?: boolean }
 	| {
 			type: "toolCall";
+			presentation?: "reply";
 			toolCallId: string;
 			toolName: string;
 			arguments?: JsonValue;
@@ -167,6 +168,7 @@ export type ConversationRuntimeEvent =
 	  }
 	| {
 			kind: "conversation.tool.started";
+			presentation?: "reply";
 			sessionId: string;
 			turnId: string;
 			messageId: string;
@@ -177,6 +179,8 @@ export type ConversationRuntimeEvent =
 	  }
 	| {
 			kind: "conversation.tool.updated";
+			presentation?: "reply";
+			replies?: readonly string[];
 			sessionId: string;
 			turnId: string;
 			toolCallId: string;
@@ -310,7 +314,7 @@ export function parseSessionTranscriptReadLimit(value: unknown): number {
 }
 
 function parseRole(value: unknown): ConversationRole {
-	if (value !== "user" && value !== "assistant" && value !== "system") {
+	if (value !== "user" && value !== "assistant" && value !== "system" && value !== "extension") {
 		throw new StudioConversationError("Invalid conversation role");
 	}
 	return value;
@@ -327,7 +331,7 @@ function parseBlock(value: unknown): ConversationContentBlock {
 		return input as unknown as ConversationContentBlock;
 	}
 	if (input.type === "toolCall") {
-		exactKeys(input, ["type", "toolCallId", "toolName", "arguments", "truncated"]);
+		exactKeys(input, ["type", "toolCallId", "toolName", "arguments", "truncated", "presentation"]);
 		boundedId(input.toolCallId);
 		boundedUtf8(input.toolName, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS);
 		if (!nonEmptyString(input.toolName)) throw new StudioConversationError("Invalid tool name");
@@ -458,6 +462,7 @@ export function parseConversationRuntimeEvent(value: unknown): ConversationRunti
 				"toolName",
 				"arguments",
 				"startedAt",
+				"presentation",
 			]);
 			boundedId(input.turnId);
 			boundedId(input.messageId);
@@ -478,6 +483,8 @@ export function parseConversationRuntimeEvent(value: unknown): ConversationRunti
 				"output",
 				"truncated",
 				"progress",
+				"presentation",
+				"replies",
 			]);
 			if (input.progress !== undefined) {
 				const progress = input.progress as Record<string, unknown> | null;

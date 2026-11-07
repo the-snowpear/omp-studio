@@ -142,6 +142,8 @@ export function previewJobInspections(now = Date.now()): Record<string, JobInspe
   return {
     "job-91": {
       jobId: "job-91",
+      purpose: "验证本次 Runtime 升级与 Renderer 适配",
+      caption: "正在检查协议包和 Agent Hub 的类型兼容性",
       command: "bunx tsc --noEmit -p tsconfig.json",
       cwd: "~/projects/omp-studio",
       pids: [48213, 48220],

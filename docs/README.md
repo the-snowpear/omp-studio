@@ -21,6 +21,7 @@ Public documentation for OMP Studio.
 | [releases/v0.1.11.md](releases/v0.1.11.md) | 0.1.11 发布页文案、三平台下载与升级说明 |
 | [releases/v0.1.10.md](releases/v0.1.10.md) | 0.1.10 发布页文案、三平台下载与升级说明 |
 | [migrations/omp-18.13.2.md](migrations/omp-18.13.2.md) | 18.12.6 → 18.13.2 正式版本变化、完整 Runtime / GUI 迁移与无付费验收 |
+| [migrations/omp-18.18.0.md](migrations/omp-18.18.0.md) | 从 18.13.2-studio.44 升级至 18.18.0：逐版变化、worker / 队列 / Shell / WebRTC / WebMCP 适配与验证 |
 | [migrations/omp-18.12.6.md](migrations/omp-18.12.6.md) | 18.10.4 → 18.12.6 版本概览、Runtime 适配与新功能 GUI 入口 |
 | [migrations/omp-18.10.4.md](migrations/omp-18.10.4.md) | 18.8.0 → 18.10.4 完整版本概览、GUI 入口与验收 |
 | [migrations/omp-18.8.0.md](migrations/omp-18.8.0.md) | Studio 0.1.9 / OMP 18.8.0 changes, compatibility and acceptance boundaries |

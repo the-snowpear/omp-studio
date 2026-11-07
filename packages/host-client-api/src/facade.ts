@@ -1,3 +1,4 @@
+import type { RuntimeViewOperation } from "@omp-studio/studio-protocol";
 import type { EvaluationCoordinator } from "@omp-studio/studio-host";
 import { isComputerWorkspaceCommand, type ComputerWorkspaceQuery, type ContextViewOperation } from "@omp-studio/studio-protocol";
 import { validateArtifactTextInput, validateArtifactIdInput, isWorkbenchOperationKind, isUpgradeOperationKind } from "@omp-studio/studio-protocol";
@@ -871,6 +872,19 @@ export class StudioHostClientFacade implements ClientTransport {
         if (!current || current.runtimeId !== snapshot.runtimeId || current.runtimeEpoch !== snapshot.runtimeEpoch || current.sessionId !== snapshot.sessionId) {
           throw clientError("STALE_EPOCH", "Runtime session changed during Computer read");
         }
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "session.cache.get":
+      case "extensions.links.list":
+      case "browser.webmcp.list":
+      case "shell.view.read":
+      case "live.webrtc.connect":
+      case "live.webrtc.status":
+      case "live.webrtc.mute":
+      case "live.webrtc.release": {
+        const session = this.#runtimeSession();
+        if (!session) throw unavailableError("Runtime view requires a connected Runtime");
+        const result = await session.readRuntimeView({ kind: request.queryName, ...request.input } as RuntimeViewOperation);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "context.view.open":
@@ -3024,7 +3038,7 @@ export class StudioHostClientFacade implements ClientTransport {
           result = await service.writeModelsYml(request.input as never);
           break;
         case "models.login.start":
-          result = await service.startLogin(request.input as { readonly providerId: string });
+          result = await service.startLogin(request.input as { readonly providerId: string; readonly loginId?: string });
           break;
         case "models.login.logout":
           result = await service.logout(request.input as { readonly providerId: string });

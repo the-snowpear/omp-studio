@@ -830,7 +830,7 @@ function CrumbMenu({ id, openId, onToggle, tip, current, children, menu }: {
 
 /** 顶栏「对话选项」与侧栏会话行 ⋯ 菜单共用的会话动作项（归档项作用目标不同，由调用方各自追加）。
     live/busy/compacting 语义与顶栏一致，只是取值来源不同：顶栏看当前会话，行菜单看所在行。 */
-function ThreadActionMenuItems({ live, busy, compacting, compactPending, reason, onRename, onFork, onHandoff, onCompact, onExport, onHistory }: {
+function ThreadActionMenuItems({ live, busy, compacting, compactPending, reason, onRename, onFork, onHandoff, onCompact, onExport, onHistory, onPin, pinned }: {
   live: boolean;
   busy: boolean;
   compacting: boolean;
@@ -838,6 +838,8 @@ function ThreadActionMenuItems({ live, busy, compacting, compactPending, reason,
   /** 禁用时的悬停原因（无 Runtime / 加载中 / 预览不可用）。 */
   reason: string;
   onRename: () => void;
+  onPin?: (() => void) | undefined;
+  pinned?: boolean | undefined;
   onFork: () => void;
   onHandoff: () => void;
   onCompact: () => void;
@@ -853,6 +855,7 @@ function ThreadActionMenuItems({ live, busy, compacting, compactPending, reason,
         {...(live ? {} : { title: reason })}
         onClick={onRename}
       >{t("conversation.renameThread")}</MenuItem>
+      {onPin ? <MenuItem icon="pin" disabled={!live} onClick={onPin}>{pinned ? "取消置顶 / Unpin" : "置顶 / Pin"}</MenuItem> : null}
       <MenuItem
         icon="fork"
         disabled={!live || busy}
@@ -1152,7 +1155,7 @@ function clampBottomHeight(px: number): number {
 }
 
 /** 侧栏会话行 ⋯ 菜单可执行的会话动作（与顶栏「对话选项」同一套）。 */
-type ThreadRowActionKind = "rename" | "fork" | "handoff" | "compact" | "export";
+type ThreadRowActionKind = "rename" | "pin" | "fork" | "handoff" | "compact" | "export";
 
 type ShellChrome = {
   collapsed: boolean;
@@ -2601,6 +2604,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                     compacting={liveSnapshot?.sessionId === entry.sessionId && liveSnapshot?.isCompacting === true}
                                     compactPending={chrome.compactPending}
                                     reason={rowActionReason}
+                                    pinned={entry.pinned}
+                                    onPin={() => runRowAction(() => chrome.onThreadRowAction(entry, workspace.workspaceId as WorkspaceId, "pin"))}
                                     onRename={() => runRowAction(() => chrome.onThreadRowAction(entry, workspace.workspaceId as WorkspaceId, "rename"))}
                                     onFork={() => runRowAction(() => chrome.onThreadRowAction(entry, workspace.workspaceId as WorkspaceId, "fork"))}
                                     onHandoff={() => runRowAction(() => chrome.onThreadRowAction(entry, workspace.workspaceId as WorkspaceId, "handoff"))}
@@ -5577,6 +5582,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
           <DockCapsules />
           <SessionModelRecovery demo={previewThreadId === "t5"} client={client} currentSessionId={snapshot?.sessionId} targetSessionId={selectedSessionId} threadId={selectedThreadId} available={runtimeConnected && !connection?.resyncRequired} capabilities={capabilities} onOpenModels={() => onRoute("model-config")} />
           <ConversationPane
+            runtimeTools={{ client, actions: client, sessionId: snapshot?.sessionId, enabled: preview || runtimeConnected && executionMatches && can("shell.view.read") }}
             snapshot={convo}
             liveEngine={convo.engine}
             {...(jumpToLatestSlot === undefined ? {} : { jumpToLatestSlot })}
@@ -5806,7 +5812,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
               </div>
             ) : null}
             <div className="composer-queues">
-            {(preview || can("session.queue.get")) ? (<RuntimeQueueBar client={client} sessionId={snapshot?.sessionId} capabilities={capabilities} available={runtimeConnected && executionMatches && !connection?.resyncRequired} pending={snapshot?.pendingMessages ?? 0} running={Boolean(snapshot?.isStreaming)} showDemo={previewThreadId === "t1"} />) : (!preview ? <RuntimeQueue client={client} sessionId={composerOwner} available={can("session.queue.list")} running={Boolean(snapshot?.isStreaming)} pending={snapshot?.pendingMessages ?? 0} hasDraft={() => !snapshotIsEmpty(takeComposerSnapshot())} onRecover={(recovered, owner) => {
+            {(preview || can("session.queue.get")) ? (<RuntimeQueueBar client={client} sessionId={snapshot?.sessionId} capabilities={capabilities} available={runtimeConnected && executionMatches && !connection?.resyncRequired} pending={snapshot?.pendingMessages ?? 0} running={Boolean(snapshot?.isStreaming || snapshot?.isCompacting)} showDemo={previewThreadId === "t1"} />) : (!preview ? <RuntimeQueue client={client} sessionId={composerOwner} available={can("session.queue.list")} running={Boolean(snapshot?.isStreaming)} pending={snapshot?.pendingMessages ?? 0} hasDraft={() => !snapshotIsEmpty(takeComposerSnapshot())} onRecover={(recovered, owner) => {
               if (owner !== composerOwner) return;
               const current = takeComposerSnapshot();
               const merged = snapshotIsEmpty(current) ? recovered : {
@@ -6343,7 +6349,8 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
         compactionAvailable={runtimeConnected && !connection?.resyncRequired && !sessionCreating && (executionMatches || selectedSessionId !== undefined) && can("session.compaction.get") && can("session.compaction.set")}
         compactionRefreshKey={`${snapshot?.model?.selector ?? ""}:${connection?.runtimeEpoch ?? ""}`}
         onOpenDetails={openContextInspector} onCompact={onCompactThread} compacting={compactingNow}
-        compactDisabled={!runtimeConnected || !snapshot || connection?.resyncRequired === true || snapshot.isStreaming || sessionCreating === true} />
+        queueInstead={snapshot?.isStreaming === true && can("session.compaction.enqueue")}
+        compactDisabled={!runtimeConnected || !snapshot || connection?.resyncRequired === true || snapshot.isStreaming && !can("session.compaction.enqueue") || sessionCreating === true} />
       <GitWorkspaceProvider key={gitScope} client={client} workspaceId={gitSharedWorkspaceId}>
         <PanelRegistration panels={{
         git: visibility => <GitWorkbench key={composerOwner ?? "draft"} client={client} {...(activeWorkspace ? { workspaceId: activeWorkspace.workspaceId, workspaceName: activeWorkspace.name } : {})} visible={visibility.visible}
@@ -6462,7 +6469,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
           onMain={() => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.focus(); }}
           onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}
           onRevealSource={target => target.toolCallId === undefined ? Promise.resolve(false) : revealConversationTarget(convoScrollerRef.current, { toolCallId: target.toolCallId })} />}</DockPanel>)}
-      <BrowserDockInstances sessionId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} capabilities={capabilities} remote={!!executionTarget.id} onReferences={insertBrowserReferences} />
+      <BrowserDockInstances client={client} sessionId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} capabilities={capabilities} remote={!!executionTarget.id} onReferences={insertBrowserReferences} />
       <ToastHost message={statusToast} icon="info" onDismiss={() => setStatusToast(null)} />
       {treeConfirm.dialog}
     </SubagentHoverProvider>
@@ -7707,7 +7714,21 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
 
   /** 顶栏 Compact：与 Composer 发送一样，先 ensureSelectedSessionActive（历史会话
       只读打开时 Runtime 仍停在空会话上），再 operator.invoke builtin.compact。 */
+  const can = (id: string) => {
+    const connection = state.clientState?.connection;
+    const manifest = usableCapabilityManifest(state.model.capabilities, connection?.capabilityManifest, state.bootstrap?.capabilityManifest);
+    return !connection?.resyncRequired && (connection?.runtime ?? state.bootstrap?.runtime)?.classification !== "limited-system"
+      && manifest?.capabilities.some(capability => capability.id === id && capability.grade !== "unavailable") === true;
+  };
   const compactThread = (target?: { sessionId?: SessionId; threadId?: ThreadId }) => {
+    const current = snapshotFrom(state), targetId = target?.sessionId ?? selected?.sessionId;
+    if (current?.sessionId && current.isStreaming && (!targetId || targetId === current.sessionId) && can("session.compaction.enqueue")) {
+      void workspaceActionQueue.enqueue(async () => {
+        try { const handle = await client.command("session.compaction.enqueue", { sessionId: current.sessionId! }); await waitReceipt(client, handle.requestId); setShellNotice({ text: "已排队压缩；后续消息将在压缩后发送", icon: "queue" }); }
+        catch (error) { setShellNotice({ text: hostErrorMessage(error, "排队压缩失败"), icon: "alert" }); }
+      });
+      return;
+    }
     setCompactPending(true);
     void workspaceActionQueue.enqueue(async () => {
       const live = snapshotFrom(state);
@@ -7785,15 +7806,19 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
   const runThreadRowAction = (entry: SessionHistoryEntry, workspaceId: WorkspaceId | undefined, action: ThreadRowActionKind) => {
     void workspaceActionQueue.enqueue(async () => {
       try {
+        if (action === "rename") {
+          openRenameDialog(entry.title ?? t("conversation.untitledSession"), { ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }), threadId: entry.threadId, ...(workspaceId === undefined ? {} : { workspaceId }) });
+          return;
+        }
+        if (action === "pin") {
+          if (!snapshot?.sessionId || !entry.sessionId) throw new Error("请先连接 Runtime / Connect a Runtime first");
+          const handle = await client.command("session.history.pin", { sessionId: snapshot.sessionId, targetSessionId: entry.sessionId, pinned: !entry.pinned });
+          await waitReceipt(client, handle.requestId);
+          await refreshHistoryModels();
+          return;
+        }
         await openHistoryEntry(entry, workspaceId, { resumeForAction: true, skipQueue: true });
         switch (action) {
-          case "rename":
-            openRenameDialog(entry.title ?? t("conversation.untitledSession"), {
-              ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
-              threadId: entry.threadId,
-              ...(workspaceId === undefined ? {} : { workspaceId }),
-            });
-            break;
           case "fork":
             forkThread();
             break;
@@ -8430,6 +8455,15 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
         const targetSessionId = context?.sessionId ?? renameTargetSessionId;
         const targetThreadId = context?.threadId ?? selected?.threadId;
         const targetWorkspaceId = context?.workspaceId ?? renameTargetWorkspaceId;
+        if (!generate && targetSessionId && snapshot?.sessionId && can("session.history.rename")) {
+          const handle = await client.command("session.history.rename", { sessionId: snapshot.sessionId, targetSessionId, title: next });
+          const outcome = await waitReceipt<{ result: { targetSessionId: string; title: string } }>(client, handle.requestId);
+          await refreshHistoryAfterTitle(targetWorkspaceId);
+          setProvisionalThreadsBySession(current => current[targetSessionId] ? { ...current, [targetSessionId]: resolveProvisionalHistoryTitle(current[targetSessionId]!, outcome.result.title) } : current);
+          setShellNotice({ text: `已重命名为「${outcome.result.title}」`, icon: "check" });
+          setRenameOpen(false);
+          return;
+        }
         let renamedSessionId = targetSessionId;
         if (renameNeedsSessionResume({
           hasViewedHistory: context !== undefined || selected !== undefined,
@@ -8998,6 +9032,8 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
                   onSelectThread={chrome.onSelectThread}
                   onUnarchive={chrome.onUnarchiveThread}
                   onDeleteSession={chrome.onDeleteSessionThread}
+                  onRenameSession={entry => runThreadRowAction(entry, undefined, "rename")}
+                  onPinSession={entry => runThreadRowAction(entry, undefined, "pin")}
                 />
               );
             })()
@@ -9021,7 +9057,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
               onOpenMain={() => go("workbench")}
             />
           ) : pageRoute === "media" ? (
-            <MediaPage client={client} workspaceId={hubWorkspaceId} sessionId={snapshot?.sessionId} runtimeAvailable={hubRuntimeConnected} onInsert={insertPreparedPrompt} />
+            <MediaPage remote={!!executionTarget.id} capabilities={capabilities} client={client} workspaceId={hubWorkspaceId} sessionId={snapshot?.sessionId} runtimeAvailable={hubRuntimeConnected} onInsert={insertPreparedPrompt} />
           ) : pageRoute === "evaluation" ? (
             <EvaluationPage intent={evaluationIntent} onOpenModels={() => go("model-config")} onOpenDiagnostics={() => go("diagnostics")} client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} available={hubRuntimeConnected} capabilities={capabilities} />
           ) : pageRoute === "model-config" ? (

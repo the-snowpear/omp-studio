@@ -3999,10 +3999,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   font: inherit;
 }
 .magic-kw-ch {
-  color: hsl(var(--magic-hue, 200) 90% 52%);
+  color: hsl(var(--magic-hue, 200) 90% var(--magic-lightness, 52%));
 }
 [data-theme="dark"] .magic-kw-ch {
-  color: hsl(var(--magic-hue, 200) 90% 68%);
+  color: hsl(var(--magic-hue, 200) 90% var(--magic-lightness, 68%));
 }
 @media (prefers-reduced-motion: reduce) {
   .magic-kw.is-animated .magic-kw-ch { animation: none; }
