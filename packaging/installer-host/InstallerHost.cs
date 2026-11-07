@@ -20,12 +20,8 @@ internal static class UpdateMaintenance
   public static bool IsRunning(string root)
   {
     if (string.IsNullOrEmpty(root)) return false;
-    string directory = Path.GetFullPath(root).TrimEnd('\\');
-    StringBuilder longDirectory = new StringBuilder(32768);
-    if (GetLongPathName(directory, longDirectory, longDirectory.Capacity) > 0) directory = longDirectory.ToString();
-    string prefix = directory + "\\";
-    foreach (string name in new string[] { "OMP Studio", "omp" })
-    foreach (Process process in Process.GetProcessesByName(name))
+    string prefix = ExpandPath(Path.GetFullPath(root).TrimEnd('\\')) + "\\";
+    foreach (Process process in Process.GetProcesses())
     {
       using (process)
       {
@@ -37,13 +33,25 @@ internal static class UpdateMaintenance
         {
           StringBuilder path = new StringBuilder(32768);
           int length = path.Capacity;
-          if (QueryFullProcessImageName(handle, 0, path, ref length)
-            && path.ToString().StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
+          if (QueryFullProcessImageName(handle, 0, path, ref length))
+          {
+            string image = ExpandPath(path.ToString());
+            if (!image.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            string name = Path.GetFileNameWithoutExtension(image);
+            if (string.Equals(name, "OMP Studio", StringComparison.OrdinalIgnoreCase)
+              || string.Equals(name, "omp", StringComparison.OrdinalIgnoreCase)) return true;
+          }
         }
         finally { CloseHandle(handle); }
       }
     }
     return false;
+  }
+
+  static string ExpandPath(string path)
+  {
+    StringBuilder expanded = new StringBuilder(32768);
+    return GetLongPathName(path, expanded, expanded.Capacity) > 0 ? expanded.ToString() : path;
   }
 
   [DllImport("kernel32.dll")]

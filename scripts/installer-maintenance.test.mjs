@@ -15,11 +15,14 @@ test("legacy migration waits on the real NSIS process and checks the uninstall r
   const path = join(directory, "MaintenanceTest.cs"), exe = join(directory, "MaintenanceTest.exe");
   const harness = `
 internal static class Harness {
-  static void Check(bool value) { if (!value) throw new Exception("Maintenance regression"); }
+  static int checkNumber;
+  static void Check(bool value) { checkNumber++; if (!value) throw new Exception("Maintenance regression at check " + checkNumber); }
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
   static extern uint GetShortPathName(string path, StringBuilder shortPath, int length);
   static int Main(string[] args) {
-    ProcessStartInfo other = new ProcessStartInfo(Path.Combine(args[0], "other install", "OMP Studio.exe"));
+    StringBuilder shortExecutable = new StringBuilder(32768);
+    Check(GetShortPathName(Path.Combine(args[0], "other install", "OMP Studio.exe"), shortExecutable, shortExecutable.Capacity) > 0);
+    ProcessStartInfo other = new ProcessStartInfo(shortExecutable.ToString());
     other.UseShellExecute = false; other.CreateNoWindow = true;
     using (Process child = Process.Start(other)) {
       try {

@@ -1,3 +1,5 @@
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import {
 	discoverAdvisorConfigs,
 	resolveAdvisorConfigEditPath,
@@ -19,6 +21,7 @@ export class StudioAdvisorConfigService {
 			projectDir: this.session.sessionManager.getCwd(),
 			agentDir: this.session.settings.getAgentDir(),
 		});
+		if (operation.kind === "advisors.config.save") await mkdir(dirname(file), { recursive: true });
 		const lock = operation.kind === "advisors.config.save" ? await acquireFileLock(file) : undefined;
 		try {
 			const raw = await this.#source(file);
