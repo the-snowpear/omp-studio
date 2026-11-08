@@ -15,6 +15,14 @@ export function retainConversationWhileRemounting(current: ConversationSnapshot,
 export function useConversation(input: UseConversationInput): UseConversationResult {
   const engine = useMemo(() => createConversationEngine(defaultConversationEngineInput(input)), [input.preview, input.client, input.identity?.sessionId, input.identity?.runtimeEpoch, input.identity?.transcriptRevision, input.canRead, input.runtimeConnected, input.deferHydrate, input.previewThreadId]);
   useEffect(() => { engine.start(); return () => engine.dispose(); }, [engine]);
+  useEffect(() => {
+    if (input.preview) return;
+    const restored = (event: Event) => {
+      if ((event as CustomEvent<{ sessionId: string }>).detail.sessionId === input.identity?.sessionId) void engine.reload();
+    };
+    window.addEventListener("omp-time-travel-restored", restored);
+    return () => window.removeEventListener("omp-time-travel-restored", restored);
+  }, [engine, input.preview, input.identity?.sessionId]);
   const lastSync = useRef({ engine, revision: input.syncRevision });
   useEffect(() => {
     const previous = lastSync.current;

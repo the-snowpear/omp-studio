@@ -386,6 +386,17 @@ export interface HostSessionArchiveProvider {
   }>;
 }
 
+export interface HostTimeTravelService {
+  isRestoring(): boolean;
+  settings(): Promise<import("@omp-studio/client-contract").TimeTravelSettings>;
+  storage(): Promise<{ readonly snapshots: number; readonly bytes: number }>;
+  cleanup(scope: "expired" | "all"): Promise<{ readonly removed: number }>;
+  updateSettings(input: Partial<import("@omp-studio/client-contract").TimeTravelSettings>): Promise<import("@omp-studio/client-contract").TimeTravelSettings>;
+  timeline(input: { readonly sessionId: import("@omp-studio/client-contract").SessionId; readonly branchLeafId?: string; readonly cursor?: string }): Promise<import("@omp-studio/client-contract").TimeTravelTimeline>;
+  preview(input: { readonly sessionId: import("@omp-studio/client-contract").SessionId; readonly snapshotId: string }): Promise<import("@omp-studio/client-contract").TimeTravelRestorePreview>;
+  restore(input: import("@omp-studio/client-contract").TimeTravelRestoreInput): Promise<import("@omp-studio/client-contract").TimeTravelRestoreResult>;
+}
+
 /** Minimal "last observed" telemetry persistence surface consumed by the facade. */
 export interface HostSessionTelemetryStorePort {
   record(sessionId: string, telemetry: SessionTelemetrySnapshot): void;

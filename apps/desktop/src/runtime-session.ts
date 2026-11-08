@@ -54,6 +54,7 @@ import {
   type SessionLeaseStore,
   type WindowsBridgeAclPort,
 } from "@omp-studio/studio-host";
+import { timeTravelService } from "./time-travel-service.js";
 import { registerPerformanceController } from "./desktop-performance.js";
 import { desktopSocketTmpRoot } from "./platform/desktop-paths.js";
 import type {
@@ -1433,6 +1434,16 @@ function createSingleDesktopRuntimeSessionPort(
     const client = new StudioBridgeClient({
       endpoint: bridgeBootstrap.endpoint,
       token: bridgeBootstrap.token,
+      onTimeTravelCapture: async (request) => {
+        const active = controller?.publication()?.snapshot;
+        if (!active || active.sessionId !== request.sessionId) throw new Error("Session changed before the snapshot was saved");
+        try {
+          await timeTravelService(launchContext.profileDirectory).capture({ workspace: request.cwd, sessionId: request.sessionId, leafId: request.leafId, phase: request.phase });
+        } catch (error) {
+          log?.write("warn", "time-travel.capture.failed", errorDetail(error));
+          throw new Error("Could not save the workspace snapshot; see Host diagnostics");
+        }
+      },
       ...(options.supportedProtocolVersions === undefined
         ? {}
         : { supportedProtocolVersions: options.supportedProtocolVersions }),

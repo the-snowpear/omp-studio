@@ -149,6 +149,8 @@ Runtime 投影：overlay `services/conversation-live-projector.ts`、`conversati
 
 ## 会话、归档、Telemetry
 
+Time Travel：`history/TimeTravel{Activation,Dialog,Pane}.tsx`、`history/useTimeTravelSettings.ts`、`history/timeTravel.css`、`settings/TimeTravelSettings.tsx`；预览 `preview/timeTravelPreview.ts`，验收入口 `time-travel-harness.html?preview=1`。Host `time-travel-service.ts` / `time-travel-port.ts` 组装 `studio-host/time-travel-store.ts` 与 `session-archive-reader.ts`；契约 `client-contract/time-travel.ts`、`studio-protocol/contracts/time-travel.ts`；Runtime overlay `services/time-travel-boundary.ts`、`tree-service.ts`，回合边界接缝在 `agent-session.ts`。说明见 [Time Travel](../docs/time-travel.md)。
+
 | 功能 | Host / Desktop | Runtime overlay |
 |---|---|---|
 | 创建 / 恢复 / 删除 | `apps/desktop/src/session-commands.ts` | `services/session-control-service.ts` |

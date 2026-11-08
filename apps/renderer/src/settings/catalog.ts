@@ -72,6 +72,7 @@ const localKeys: Array<[string, ActiveSettingsGroup, string, string?]> = [
 ];
 
 const extras: SettingSearchItem[] = [
+  { id: "time-travel", group: "general", zh: "启用 Time Travel", en: "Enable Time Travel", targetZh: "启用 Time Travel", targetEn: "Enable Time Travel", keywords: "time travel 时间旅行 检查点 快照 恢复 备份 保留期限 排除规则" },
   { id: "file-viewer", group: "files", zh: "文件查看器", en: "File viewer", targetZh: "文件查看器", targetEn: "File viewer", keywords: "文件窗口 归属 保存 文件编辑" },
   { id: "office-preview", group: "maintenance", zh: "Office 文档预览", en: "Office document preview", targetZh: "Office 文档预览", targetEn: "Office document preview", keywords: "可选组件 Word PPT LibreOffice 安装 卸载" },
   { id:"hindsight.token", group:"context", zh:"Hindsight 令牌", en:"Hindsight token", targetZh:"Hindsight 令牌", targetEn:"Hindsight token", keywords:"hindsight.apiToken credential secret 凭据 令牌" },

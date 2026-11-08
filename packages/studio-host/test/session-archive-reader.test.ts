@@ -76,6 +76,23 @@ function textOf(item: { readonly kind: string } & Record<string, unknown>): stri
   return content.filter((block) => block.type === "text").map((block) => block.text ?? "").join("");
 }
 
+test("Time Travel reads the selected branch, preserves later branches, and pages older events", async () => {
+  const lines = Array.from({ length: 130 }, (_, index) => userLine(`m-${index}`, `message ${index}`, index ? `m-${index - 1}` : null));
+  lines.push(`${JSON.stringify({ type: "custom", customType: "studio-time-travel", id: "restore", parentId: "m-2", timestamp: "2026-08-16T11:00:00.000Z", data: { targetId: "m-2" } })}\n`);
+  const { reader } = await fixture(lines);
+  const active = await reader.readTimeTravel({ sessionId: "session-a" });
+  assert.equal(active.activeLeafId, "restore");
+  assert.deepEqual(active.events.map(event => event.id), ["m-0", "m-1", "m-2"]);
+  assert.deepEqual(new Set(active.branches.map(branch => branch.leafId)), new Set(["m-129", "restore"]));
+  const later = await reader.readTimeTravel({ sessionId: "session-a", branchLeafId: "m-129" });
+  assert.equal(later.events.length, 120);
+  assert.ok(later.olderCursor);
+  const earlier = await reader.readTimeTravel({ sessionId: "session-a", branchLeafId: "m-129", cursor: later.olderCursor });
+  assert.equal(earlier.events.length, 10);
+  assert.equal(earlier.olderCursor, undefined);
+  assert.equal(later.activeLeafId, "restore");
+});
+
 test("rejects a non-positive parsed snapshot cache budget", () => {
   assert.throws(
     () => new StudioSessionArchiveReader({ allowedCwd: "C:/workspace", snapshotCacheMaxBytes: 0 }),

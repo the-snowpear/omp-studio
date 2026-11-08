@@ -651,6 +651,15 @@ test("runtime.ensure remains Host-owned through connecting, reconnect and force-
   assert.equal(state.commands[REQ_1]?.status, "completed");
 });
 
+test("Time Travel restore keeps its receipt while resuming a session in a different Runtime", () => {
+  let state = issue(bootedState(), "timeTravel.restore", REQ_1);
+  state = reduceClientState(state, { type: "event", event: { ...base("11"), kind: "command.accepted", accepted: { commandName: "timeTravel.restore", requestId: REQ_1, status: "accepted", acceptedAt: TS } } });
+  state = reduceClientState(state, { type: "event", event: runtimeChanged(12, { status: "connected", classification: "managed", runtimeId: "other" as RuntimeId, runtimeEpoch: 2 as RuntimeEpoch }) });
+  assert.equal(state.commands[REQ_1]?.status, "accepted");
+  state = reduceClientState(state, { type: "event", event: { ...base("13"), kind: "command.receipt", receipt: { commandName: "timeTravel.restore", requestId: REQ_1, status: "completed", observedAt: TS, result: { codeRestored: false, conversationRestored: true } } } });
+  assert.equal(state.commands[REQ_1]?.status, "completed");
+});
+
 test("same-version snapshot restores the client slice after deferred connecting fenced its identity", () => {
   let state = bootedState(bootstrap(4));
   state = reduceClientState(state, { type: "event", event: runtimeChanged(11, { status: "connecting", classification: "unavailable" }) });

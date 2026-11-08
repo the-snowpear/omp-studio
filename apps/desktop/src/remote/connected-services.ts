@@ -7,8 +7,9 @@ import type { LiveRemote, RemoteConnectionManager } from "./manager.js";
 import type { RemoteConnectionStatus } from "./shared.js";
 import { RemoteConnectionError } from "./errors.js";
 import type { MemoryCredentialStore } from "../memory-credentials.js";
+import type { TimeTravelService } from "../time-travel-service.js";
 
-export async function connectRemoteServices(manager: RemoteConnectionManager, id: string, remote: LiveRemote, signal: AbortSignal, report: (patch: Partial<RemoteConnectionStatus>) => void, vault: LocalCredentialVault, resolveProxy: (url: string) => Promise<string>, memoryCredentials?: MemoryCredentialStore): Promise<() => void> {
+export async function connectRemoteServices(manager: RemoteConnectionManager, id: string, remote: LiveRemote, signal: AbortSignal, report: (patch: Partial<RemoteConnectionStatus>) => void, vault: LocalCredentialVault, resolveProxy: (url: string) => Promise<string>, memoryCredentials?: MemoryCredentialStore, timeTravel?: TimeTravelService): Promise<() => void> {
   const profile = manager.profile(id);
   const attachment = (remote as LiveRemote & { attachment: { key: string; sequence: number } }).attachment;
   const transport = await attachRemote(profile, remote.environment, remote, signal, manager.authentication(id), attachment, true);
@@ -27,6 +28,18 @@ export async function connectRemoteServices(manager: RemoteConnectionManager, id
   };
   let syncing = Promise.resolve();
   let memorySync = Promise.resolve();
+  let timeTravelSync = Promise.resolve();
+  const supportsTimeTravel = remote.transport.hello?.capabilities?.includes("timeTravel.settings") === true;
+  const synchronizeTimeTravel = () => {
+    report({ timeTravelSync: "pending" });
+    timeTravelSync = timeTravelSync.catch(() => {}).then(async () => {
+      if (closed || !timeTravel) return;
+      await remote.transport.peer.request("timeTravel.settings.sync", await timeTravel.settings());
+      if (!closed) report({ timeTravelSync: "synced" });
+    }).catch(() => { if (!closed) report({ timeTravelSync: "error" }); });
+    return timeTravelSync;
+  };
+  const offTimeTravel = supportsTimeTravel ? timeTravel?.subscribe(synchronizeTimeTravel) : undefined;
   const synchronizeMemory = async () => {
     if (!closed && memoryCredentials && remote.transport.hello?.capabilities?.includes("memory.credentials")) {
       await remote.transport.peer.request("memory.credentials.replace", await memoryCredentials.list(`ssh:${id}`));
@@ -39,8 +52,10 @@ export async function connectRemoteServices(manager: RemoteConnectionManager, id
   try {
     await remote.transport.peer.request("network.configure", { mode: profile.networkMode ?? "remote-first" });
     await synchronize();
+    if (timeTravel && supportsTimeTravel) await synchronizeTimeTravel();
+    else if (timeTravel) report({ timeTravelSync: "unsupported" });
     await synchronizeMemory().catch(() => { report({ networkMessage: "Hindsight 凭据同步失败，请检查加密存储" }); });
     transport.onDisconnect(() => { if (!closed) remote.transport.peer.close(new RemoteConnectionError("network", "本机联网通道已断开，需要重新同步")); });
-  } catch (error) { closed = true; offMemory?.(); off(); offRoute(); streams.close(); await transport.close(); throw error; }
-  return () => { closed = true; offMemory?.(); off(); offRoute(); streams.close(); void transport.close(); };
+  } catch (error) { closed = true; offTimeTravel?.(); offMemory?.(); off(); offRoute(); streams.close(); await transport.close(); throw error; }
+  return () => { closed = true; offTimeTravel?.(); offMemory?.(); off(); offRoute(); streams.close(); void transport.close(); };
 }

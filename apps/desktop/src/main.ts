@@ -8,6 +8,7 @@ import { registerRemoteIpc } from "./remote/ipc.js";
 import { RemoteEnvironmentInstaller } from "./remote/environment-installer.js";
 import { LocalCredentialVault } from "./remote/local-vault.js";
 import { connectRemoteServices } from "./remote/connected-services.js";
+import { timeTravelService } from "./time-travel-service.js";
 import { RuntimeInstaller } from "@omp-studio/runtime-installer";
 import { defaultOmpAgentDir } from "@omp-studio/studio-host";
 import { DesktopPrediction, registerPredictionIpc } from "./prediction.js";
@@ -395,7 +396,7 @@ export async function main(): Promise<void> {
   const remoteConnections: RemoteConnectionManager = new RemoteConnectionManager(join(desktopPaths().stateRoot, "ssh-connections.json"), remoteBundle, undefined, remoteHelpers, undefined, {
     requireApproval: true,
     prepare: (profile, environment, authentication, signal, progress) => remoteInstaller.prepare(profile, environment, authentication, signal, progress),
-    connected: (id, remote, signal, report) => connectRemoteServices(remoteConnections, id, remote, signal, report, remoteVault, url => session.defaultSession.resolveProxy(url), memoryCredentials),
+    connected: (id, remote, signal, report) => connectRemoteServices(remoteConnections, id, remote, signal, report, remoteVault, url => session.defaultSession.resolveProxy(url), memoryCredentials, timeTravelService(activeProfileDirectory())),
   });
   const remoteTerminals = new RemoteTerminalManager(remoteConnections);
   const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);

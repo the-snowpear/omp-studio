@@ -1071,7 +1071,7 @@ function validateAgentLifecycleMutation(operation: Record<string, unknown>): voi
 }
 
 const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
-  "runtime.snapshot": { keys: ["kind"] },
+  "runtime.snapshot": { keys: ["kind", "timeTravelCapture"] },
   "prediction.query": { keys: ["kind", "sessionId", "version", "before", "prefix"], validate: operation => { const { kind, ...input } = operation; validatePredictionQuery(input); } },
   "runtime.pause": { keys: ["kind"] },
   "runtime.resume": {
@@ -1240,7 +1240,7 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "session.tree.navigate": {
-    keys: ["kind", "targetId", "summarize", "customInstructions", "reanswer"],
+    keys: ["kind", "targetId", "summarize", "customInstructions", "reanswer", "exactLeaf", "restoreRoot"],
     validate: (operation) => {
       nonEmptyString(operation.targetId, "$request.operation.targetId");
       if (operation.summarize !== undefined && typeof operation.summarize !== "boolean") {
@@ -1249,6 +1249,8 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
       if (operation.customInstructions !== undefined) {
         nonEmptyString(operation.customInstructions, "$request.operation.customInstructions");
       }
+      if (operation.exactLeaf !== undefined && typeof operation.exactLeaf !== "boolean") throw new ContractValidationError("expected a boolean", "$request.operation.exactLeaf");
+      if (operation.restoreRoot !== undefined && typeof operation.restoreRoot !== "boolean") throw new ContractValidationError("expected a boolean", "$request.operation.restoreRoot");
     },
   },
   "session.tree.branch": {

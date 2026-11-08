@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 会话历史接入真实 Time Travel：按回合保存工作区快照，预览文件变化后恢复代码、对话或两者，并保留恢复前备份和后续会话分支。功能默认关闭，会话页可在阅读代价与风险后开启；设置支持保留期限、排除规则、存储清理与远程同步。详见 [Time Travel](docs/time-travel.md)。
 - 接入 OMP 18.18.0 的 worker 子 Agent、任务文件与受原生配置约束的单次模型选择、排队压缩、历史重命名/置顶/占用查询、中途回复、BTW 注入和最多四条输入预测。
 - 对话新增原生 Shell Raw/Pseudo 回放、提示缓存状态、作业用途/说明、工具精简统计、Eval JSON 与内核重启提示；扩展链接交回所属扩展，正文继续由 React 渲染。
 - Web/SSH Live 使用浏览器 WebRTC 音频；本地语音准备显示组件进度和重试。托管浏览器接入原生 WebMCP，模型与设置补齐 Mistral/Devin 登录、Modular/Keenable、reasoning 映射、手动 Skills 和全局记忆。详见 [18.18.0 迁移报告](docs/migrations/omp-18.18.0.md)。
