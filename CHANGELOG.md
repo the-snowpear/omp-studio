@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 桌面壳支持在 Linux 上从源码运行（开发预览，未提供 Linux 安装包）：路径改用 XDG（`$XDG_CONFIG_HOME/omp-studio`，默认 `~/.config`），复用 POSIX 平台端口与 authority lock，外部打开走 `xdg-open`；Runtime 签名密钥目录同步改到 XDG。无 StatusNotifier host 的桌面不再因托盘创建失败而终止启动（[#5](https://github.com/the-snowpear/omp-studio/issues/5)）。
+
 ## [0.1.17] - 2026-10-29
 
 ### Fixed

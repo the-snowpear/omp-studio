@@ -242,6 +242,11 @@ async function preparePreviewElectron() {
   if (!existsSync(electronDist)) {
     throw new Error("Electron distribution is missing. Run `npm install` once, then retry.");
   }
+  if (process.platform === "linux") {
+    // The npm Electron distribution ships the binary at dist/electron; an
+    // unpackaged run reports app.isPackaged === false, so no Runtime staging.
+    return join(electronDist, "electron");
+  }
   if (process.platform !== "win32") {
     return join(electronDist, "Electron.app", "Contents", "MacOS", "Electron");
   }
@@ -292,8 +297,8 @@ async function preparePreviewElectron() {
 }
 
 async function main() {
-  if (process.platform !== "win32" && process.platform !== "darwin") {
-    throw new Error("The current preview launcher supports Windows and macOS Electron builds.");
+  if (process.platform !== "win32" && process.platform !== "darwin" && process.platform !== "linux") {
+    throw new Error("The current preview launcher supports Windows, macOS and Linux Electron builds.");
   }
   if (!existsSync(join(root, "node_modules", "electron", "package.json"))) {
     throw new Error("Dependencies are missing. Run `npm install` once, then retry.");
@@ -334,7 +339,10 @@ async function main() {
   }
 
   console.log(`[preview] Opening OMP Studio Desktop (${production ? "production bundle" : "dev server"})...`);
-  const desktop = start(electronExecutable, [join(root, "apps", "desktop")], {
+  // A repo-local Electron build has no setuid chrome-sandbox helper; run
+  // without the sandbox in preview only (never for a packaged install).
+  const desktopArgs = [join(root, "apps", "desktop"), ...(process.platform === "linux" ? ["--no-sandbox"] : [])];
+  const desktop = start(electronExecutable, desktopArgs, {
     env: {
       ...process.env,
       OMP_APP_USER_MODEL_ID: previewAumid,
