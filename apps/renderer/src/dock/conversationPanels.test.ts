@@ -4,7 +4,7 @@ import { WorkbenchWindows } from "./windows";
 import { conversationPanelId } from "./types";
 import { instancePresetLayout, locatePanel } from "./model";
 
-afterEach(() => localStorage.clear());
+afterEach(() => { window.dispatchEvent(new Event("pagehide")); localStorage.clear(); });
 
 function setup(storage: Storage | null = null) {
   const manager = new WorkbenchWindows();

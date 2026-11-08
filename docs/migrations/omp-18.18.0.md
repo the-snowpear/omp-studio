@@ -1,6 +1,6 @@
 # OMP 18.18.0：Runtime 与 Studio 适配
 
-本次从 **OMP 18.13.2-studio.44 / Studio 0.1.17** 升级到 **OMP 18.18.0-studio.47**，上游固定为 **v18.18.0**、提交 `b5a6b2f7e5b6606b6562e678ead83f21738f34a0`。Runtime 的 Studio 修订号由 `omp:patches:regen` 生成，记录于 [`series.json`](../../omp-patch/patches/series.json)。Studio 产品版本和发布流程没有自动推进。
+本次从 **OMP 18.13.2-studio.44 / Studio 0.1.17** 升级到 **OMP 18.18.0-studio.48**，上游固定为 **v18.18.0**、提交 `b5a6b2f7e5b6606b6562e678ead83f21738f34a0`。`studio.47` 完成首次双平台与六平台产物验收，合并前审查将 Runtime 推进至 `studio.48`，修正记录见文末。Runtime 的 Studio 修订号由 `omp:patches:regen` 生成，记录于 [`series.json`](../../omp-patch/patches/series.json)。Studio 产品版本和发布流程没有自动推进。
 
 两个上游标签之间有 8 次发布、2,189 个提交、4,118 个文件变化。完整列表见 [v18.13.2…v18.18.0](https://github.com/can1357/oh-my-pi/compare/v18.13.2...v18.18.0)。下表按首次引入的版本归类；18.18.0 日志重复列出的部分 18.17.0 功能只计一次。包级细节以目标提交的 [coding-agent](https://github.com/can1357/oh-my-pi/blob/v18.18.0/packages/coding-agent/CHANGELOG.md)、[catalog](https://github.com/can1357/oh-my-pi/blob/v18.18.0/packages/catalog/CHANGELOG.md)、[ai](https://github.com/can1357/oh-my-pi/blob/v18.18.0/packages/ai/CHANGELOG.md) 和 [natives](https://github.com/can1357/oh-my-pi/blob/v18.18.0/packages/natives/CHANGELOG.md) 日志为依据。
 
@@ -91,8 +91,40 @@ JSDOM 的共享可见性替身、缓存读取、多项队列、WebRTC 条件和�
 | 原生 CI | [macOS arm64 full job](https://github.com/the-snowpear/omp-studio/actions/runs/42410033397/job/128515963221) 与 [Windows 独立 full CI](https://github.com/the-snowpear/omp-studio/actions/runs/42413586730) 均已完成并通过：生产检查、全部应用测试、原生模块构建、打包/更新工具测试及完整补丁重放。Windows CI 提交 `65a7675` 仅调整平台矩阵，产品源码与 `b6f5ec6` 一致。 |
 | 六平台远端环境 | [studio.47 原生构建与环境验收](https://github.com/the-snowpear/omp-studio/actions/runs/42410036495) 全部通过：Windows、Linux、macOS 的 x64 / arm64；验证目标架构、签名、checksums、Runtime 身份及完整环境包。 |
 
-2026-11-08 已完成验收收尾。macOS arm64 与六平台环境验收使用提交 `3edc0f6`；最终产品源码为 `b6f5ec6`，两者只相差背景视频可见性和多窗口流程两项测试的等待修正，产品代码、Runtime overlay 与接缝相同。功能索引已同步模型默认迁移与受原生授权约束的单次模型/effort 入口。
+2026-11-08 已完成 `studio.47` 验收收尾。macOS arm64 与六平台环境验收使用提交 `3edc0f6`；该次产品源码为 `b6f5ec6`，两者只相差背景视频可见性和多窗口流程两项测试的等待修正，产品代码、Runtime overlay 与接缝相同。功能索引已同步模型默认迁移与受原生授权约束的单次模型/effort 入口。
 
 Windows 重放中跳过的项目为两项需要原生浏览器观察 UI 的检查、物理桌面截图、Unix 短 socket 目录回退和 Host 被杀后的 watcher 退出。WebMCP 的独立原生浏览器 suite 已单独通过；其覆盖不能替代上述原生窗口观察检查。
 
 未以真实账户测试 Mistral/Devin/Modular 登录、付费模型、Hindsight 服务投递、Codex Live 云端或物理麦克风。Web/SSH 媒体仍需安全来源、权限及目标环境网络可达；实际远端账号与物理音频单列为覆盖限制。没有自动触发产品 Release 或替换用户已安装的 Runtime。
+
+## 0.2.0 合并前审查
+
+审查覆盖 Studio 适配增量、四组接缝、渲染数据流与 Runtime 读取生命周期，重点检查包体积、重复读取、回放开销和内存保留。修正使用现有瞬时 query 和原生解析，Studio npm 依赖、通用校验层及发布流程均未新增。此次 Runtime 改动全部位于 overlay，四份接缝补丁与 `studio.47` 相同，修订号由 regen 推进至 `studio.48`。
+
+| 问题 | 修正 |
+| --- | --- |
+| WebMCP 选择工具后列表缩为单项，快速切换时旧元数据覆盖新选择 | 保留完整工具目录，复用现有请求序号，只接受当前选择的参数信息。 |
+| 历史占用随搜索重复探测，并将读取写入命令账本 | `session.lease.read` 按真实目录读取，搜索只过滤 UI；占用集合使用 Set 查找。任务选项使用 `agent.spawn.options.read`。两个 query 与原有 command 名称分开，保留旧 command 的返回格式。 |
+| Shell 每个回放步骤重新扫描会话、读取完整文件和恢复 native trace | 同一打开命令共用一次文件读取与一份原生回放对象；关闭、隐藏、切换来源和 Runtime dispose 释放。已从活动上下文移除的命令可从原会话文件回放。 |
+| 慢回放请求仍按定时器持续入队，关闭的卡片也创建观察器 | 收到上一帧后再推进；只在展开时建立可见性观察器。 |
+| BTW 注入记录间接保留整轮记录、图片和上下文 | 仅保留身份、回合索引与显示文本，发送、重试和历史状态沿用既有行为。 |
+| Dock 测试结束后尚有保存定时器 | 测试退出前触发既有 pagehide 保存流程，产品 Dock 代码无需新增环境检查。 |
+
+生产包对比使用 `0.2.0` 基线 `59185f6` 与审查后的源码。首屏统计 HTML 入口及其静态 JavaScript 导入闭包；每份文件采用同一 gzip 参数。
+
+| 指标 | 0.2.0 基线 | 审查后 |
+| --- | ---: | ---: |
+| 首屏 JS 模块数 | 5 | 5 |
+| 首屏 JS gzip | 955,876 字节 | 967,458 字节（+11.3 KiB，+1.2%） |
+| 全部 JS chunk 数 | 29 | 29 |
+| 全部 JS gzip | 2,661,743 字节 | 2,678,255 字节（+0.6%） |
+
+新增回归覆盖 WebMCP 切换、目录过滤、慢回放帧与释放、活动上下文移除后的回放。连续三次回放只读取一次会话文件，关闭后再打开重新读取；预览与真实通道沿用同一 UI。
+
+| 验证 | 结果 |
+| --- | --- |
+| Studio | 架构、选择器、全部 workspace 编译、全部 Node/桌面测试通过；Renderer 全量复验通过。最终窗口可见性改动另通过 ShellView 回归与生产检查。Vite、preload 与远端 Host bundle 均通过。 |
+| Runtime 干净重放 | 独立 checkout 与自己的 workspace 依赖完成 Runtime 类型检查、122 个 suite、969 项通过、0 失败、5 项原有平台/设备跳过；CLI smoke 通过，checkout 恢复干净。 |
+| Windows Runtime | 使用已验收且源码未变的同源 native addon，重新构建 `studio.48`；`--version`、`--smoke-test`、认证握手、命令清单、快照与优雅退出通过。身份为 `18.18.0-studio.48`，上游仍为 `b5a6b2f7e5b6606b6562e678ead83f21738f34a0`。 |
+
+此次审查保留原有真实账号和设备覆盖限制。六平台签名产物记录属于 `studio.47`；`studio.48` 的发行产物由后续发布构建按当前源代码生成。

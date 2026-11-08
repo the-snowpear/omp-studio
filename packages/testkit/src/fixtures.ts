@@ -264,10 +264,13 @@ const BOOTSTRAP: ClientBootstrap = {
 };
 
 const QUERY_INPUTS = {
+  "agent.spawn.options.read": { sessionId: SESSION_ID, definition: "reviewer" },
+  "session.lease.read": { sessionId: SESSION_ID, targetSessionIds: [SESSION_ID] },
   "extensions.links.list": { sessionId: SESSION_ID },
   "browser.webmcp.list": { sessionId: SESSION_ID, pageId: "page-fixture" },
   "session.cache.get": { sessionId: SESSION_ID },
   "shell.view.read": { sessionId: SESSION_ID, toolCallId: "shell-fixture" },
+  "shell.view.release": { sessionId: SESSION_ID, toolCallId: "shell-fixture" },
   "live.webrtc.connect": { sessionId: SESSION_ID, audioId: "rtc-fixture", sdpOffer: "v=0\r\n" },
   "live.webrtc.status": { sessionId: SESSION_ID },
   "live.webrtc.mute": { sessionId: SESSION_ID, audioId: "rtc-fixture", muted: true },
@@ -339,10 +342,13 @@ const QUERY_INPUTS = {
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
+  "agent.spawn.options.read": { ok: true, queryName: "agent.spawn.options.read", result: { fileEnabled: false, modelSelection: false, maxEffort: "max", models: [] } },
+  "session.lease.read": { ok: true, queryName: "session.lease.read", result: { held: [SESSION_ID], unknown: [] } },
   "extensions.links.list": { ok: true, queryName: "extensions.links.list", result: { schemes: [] } },
   "browser.webmcp.list": { ok: true, queryName: "browser.webmcp.list", result: { pageId: "page-fixture", status: "unavailable", tools: [], truncated: false, untrusted: true, invocationAvailable: false, reason: "No connected browser" } },
   "session.cache.get": { ok: true, queryName: "session.cache.get", result: { cache: null } },
   "shell.view.read": { ok: true, queryName: "shell.view.read", result: { available: false, reason: "No recorded trace" } },
+  "shell.view.release": { ok: true, queryName: "shell.view.release", result: { released: true } },
   "live.webrtc.connect": { ok: false, queryName: "live.webrtc.connect", error: { code: "UNAVAILABLE", message: "No Live account" } },
   "live.webrtc.status": { ok: true, queryName: "live.webrtc.status", result: { available: false, attached: false, voice: "sol", phase: "off", muted: false, inputLevel: 0, outputLevel: 0, transcripts: [] } },
   "live.webrtc.mute": { ok: true, queryName: "live.webrtc.mute", result: { available: false, attached: false, voice: "sol", phase: "off", muted: false, inputLevel: 0, outputLevel: 0, transcripts: [] } },

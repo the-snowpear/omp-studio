@@ -1,5 +1,5 @@
 import { isRecord } from "@oh-my-pi/pi-utils";
-import { isShellTrace } from "@oh-my-pi/pi-wire/shell-trace";
+import { isShellTrace, type ShellTrace } from "@oh-my-pi/pi-wire/shell-trace";
 import {
 	defaultShellVizPreferences,
 	readShellPresentation,
@@ -7,6 +7,7 @@ import {
 } from "@oh-my-pi/pi-tui/tools/shell-viz";
 import type { AgentSession } from "../../session/agent-session";
 import { SessionManager } from "../../session/session-manager";
+import { probeSessionLeases } from "../../session/session-storage";
 import { loadEntriesFromFile } from "../../session/session-loader";
 import { isAgentViewSession } from "../../session/agent-session-handle";
 import { cfgDisplayShellVisualization } from "../../modes/settings";
@@ -16,17 +17,32 @@ import { ownedStudioAgent } from "./owned-sessions";
 import { SessionControlError } from "./session-control-service";
 import { studioLinkTarget } from "./extension-links-service";
 import { managedBrowserFor } from "./managed-browser-service";
+import { readStudioTaskOptions } from "./task-options-service";
+
+type ShellRead = Extract<RuntimeViewOperation, { kind: "shell.view.read" }>;
+function shellKey(operation: Pick<ShellRead, "sessionId" | "sourceSessionId" | "agentId" | "toolCallId">): string {
+	return JSON.stringify([operation.sessionId, operation.sourceSessionId, operation.agentId, operation.toolCallId]);
+}
 
 /** Reads native state and negotiates media without recording transient payloads. */
 export class StudioRuntimeViews {
+	// One open recorded command shares its journal load and native visualization across replay steps.
+	#recordedShell: { key: string; trace: Promise<ShellTrace | undefined> } | undefined;
 	constructor(
 		readonly session: AgentSession,
 		readonly audio: StudioLiveAudioService,
 	) {}
+	dispose(): void {
+		this.#recordedShell = undefined;
+	}
 	async execute(operation: RuntimeViewOperation): Promise<unknown> {
 		if (operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "The Runtime view belongs to another session");
 		switch (operation.kind) {
+			case "agent.spawn.options.read":
+				return readStudioTaskOptions(this.session, operation.definition);
+			case "session.lease.read":
+				return probeSessionLeases(operation.targetSessionIds);
 			case "extensions.links.list":
 				return { schemes: studioLinkTarget(this.session, operation)?.getStudioLinkSchemes() ?? [] };
 			case "browser.webmcp.list": {
@@ -53,6 +69,9 @@ export class StudioRuntimeViews {
 				return this.audio.execute({ ...operation, kind: "live.audio.mute" });
 			case "live.webrtc.release":
 				return this.audio.execute({ ...operation, kind: "live.audio.release" });
+			case "shell.view.release":
+				if (this.#recordedShell?.key === shellKey(operation)) this.#recordedShell = undefined;
+				return { released: true };
 			case "shell.view.read": {
 				if (!cfgDisplayShellVisualization.get(this.session.settings))
 					return { available: false, reason: "Shell visualization is disabled." };
@@ -60,19 +79,7 @@ export class StudioRuntimeViews {
 				const target = operation.agentId ? ref?.session : this.session;
 				const useLive =
 					!operation.sourceSessionId || operation.sourceSessionId === target?.sessionManager.getSessionId();
-				let messages = target?.messages ?? [];
-				let archived = ref?.sessionFile ?? undefined;
-				if (operation.sourceSessionId && operation.sourceSessionId !== target?.sessionManager.getSessionId()) {
-					const entry = (await SessionManager.listAll()).find(row => row.id === operation.sourceSessionId);
-					if (!entry)
-						throw new SessionControlError("COMMAND_BLOCKED", "The recorded shell session is unavailable");
-					archived = entry.path;
-					messages = [];
-				}
-				if (messages.length === 0 && archived)
-					messages = (await loadEntriesFromFile(archived)).flatMap(entry =>
-						entry.type === "message" ? [entry.message] : [],
-					);
+				const messages = useLive ? (target?.messages ?? []) : [];
 				const result = messages.findLast(
 					message => message.role === "toolResult" && message.toolCallId === operation.toolCallId,
 				);
@@ -86,9 +93,16 @@ export class StudioRuntimeViews {
 					const job = this.session.asyncJobManager?.getJob(details.async.jobId);
 					if (job?.latestDetails) details = job.latestDetails;
 				}
-				const trace = isRecord(details) ? details.trace : undefined;
-				if (!isShellTrace(trace))
-					return { available: false, reason: "This command has no recorded execution trace." };
+				const liveTrace = isRecord(details) ? details.trace : undefined;
+				let trace: ShellTrace | undefined;
+				if (isShellTrace(liveTrace)) {
+					trace = liveTrace;
+					this.#recordedShell = undefined;
+				} else {
+					const file = useLive ? (ref?.sessionFile ?? target?.sessionManager.getSessionFile()) : undefined;
+					if (!useLive || file) trace = await this.#readRecordedShell(operation, file);
+				}
+				if (!trace) return { available: false, reason: "This command has no recorded execution trace." };
 				const presentation = readShellPresentation(
 					shellVisualization(trace),
 					operation.preferences ?? defaultShellVizPreferences(),
@@ -97,5 +111,37 @@ export class StudioRuntimeViews {
 				return { available: true, presentation };
 			}
 		}
+	}
+
+	async #readRecordedShell(operation: ShellRead, file?: string): Promise<ShellTrace | undefined> {
+		const key = shellKey(operation);
+		let cached = this.#recordedShell;
+		if (cached?.key !== key) {
+			cached = { key, trace: this.#loadRecordedShell(operation, file) };
+			this.#recordedShell = cached;
+		}
+		try {
+			const trace = await cached.trace;
+			if (!trace && this.#recordedShell === cached) this.#recordedShell = undefined;
+			return trace;
+		} catch (error) {
+			if (this.#recordedShell === cached) this.#recordedShell = undefined;
+			throw error;
+		}
+	}
+
+	async #loadRecordedShell(operation: ShellRead, file?: string): Promise<ShellTrace | undefined> {
+		const source = file ?? (await SessionManager.listAll()).find(row => row.id === operation.sourceSessionId)?.path;
+		if (!source) throw new SessionControlError("COMMAND_BLOCKED", "The recorded shell session is unavailable");
+		const entries = await loadEntriesFromFile(source);
+		const entry = entries.findLast(
+			row =>
+				row.type === "message" &&
+				row.message.role === "toolResult" &&
+				row.message.toolCallId === operation.toolCallId,
+		);
+		const details =
+			entry?.type === "message" && entry.message.role === "toolResult" ? entry.message.details : undefined;
+		return isRecord(details) && isShellTrace(details.trace) ? details.trace : undefined;
 	}
 }

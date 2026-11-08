@@ -1418,7 +1418,7 @@ export function AgentHubPage({
     if (modal?.kind !== "spawn" || !spawnDefinition) return;
     if (preview) { setSpawnOptions(PREVIEW_TASK_SPAWN_OPTIONS); return; }
     if (!client || !snapshot?.sessionId || missingCap(capabilities, "agent.spawn.options")) return;
-    void client.command("agent.spawn.options", { sessionId: snapshot.sessionId, definition: spawnDefinition }).then(handle => waitReceipt<{ result: RuntimeFeatureResultMap["agent.spawn.options"] }>(client, handle.requestId)).then(({ result }) => { if (alive) setSpawnOptions(result); }).catch(error => { if (alive) setSpawnOptionsError(error instanceof Error ? error.message : String(error)); });
+    void client.query("agent.spawn.options.read", { sessionId: snapshot.sessionId, definition: spawnDefinition }).then(result => { if (alive) setSpawnOptions(result); }).catch(error => { if (alive) setSpawnOptionsError(error instanceof Error ? error.message : String(error)); });
     return () => { alive = false; };
   }, [modal?.kind, spawnDefinition, client, snapshot?.sessionId, capabilities, preview]);
   const chatRuntimeConnected = viewingLive && (runtimeConnected ?? connOnline);

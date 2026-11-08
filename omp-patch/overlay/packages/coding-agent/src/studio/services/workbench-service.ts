@@ -227,6 +227,7 @@ export class StudioWorkbenchService {
 		this.computerObservation = new StudioComputerObservationService(session, undefined, this.computerWorkspace);
 	}
 	dispose(): void {
+		this.views.dispose();
 		this.queuedCompaction.dispose();
 		this.contextView.dispose();
 		this.prediction.dispose();

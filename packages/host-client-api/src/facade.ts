@@ -874,10 +874,13 @@ export class StudioHostClientFacade implements ClientTransport {
         }
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "agent.spawn.options.read":
+      case "session.lease.read":
       case "session.cache.get":
       case "extensions.links.list":
       case "browser.webmcp.list":
       case "shell.view.read":
+      case "shell.view.release":
       case "live.webrtc.connect":
       case "live.webrtc.status":
       case "live.webrtc.mute":

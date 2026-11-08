@@ -27,11 +27,11 @@ export function WebMcpPane({ client, sessionId, pageId, documentId, agentControl
     return () => { epoch.current++; };
   }, [client, sessionId, pageId, documentId, visible, preview, revision]);
   const choose = async (tool: WebMcpToolRecord) => {
-    const current = epoch.current; setSelected(tool); setInput("{}"); setResult(undefined); setError("");
+    const current = ++epoch.current; setSelected(tool); setInput("{}"); setResult(undefined); setError("");
     if (preview || !client) return;
     try {
       const value = await client.query("browser.webmcp.list", { sessionId, pageId, options: { name: tool.name, frame: tool.frameId } });
-      if (current === epoch.current) { setCatalog(value); setSelected(value.tools[0]); }
+      if (current === epoch.current) { setCatalog({ ...value, tools: catalog!.tools }); setSelected(value.tools[0]); }
     } catch (cause) { if (current === epoch.current) setError(hostErrorMessage(cause, "Tool metadata unavailable")); }
   };
   const invoke = async () => {

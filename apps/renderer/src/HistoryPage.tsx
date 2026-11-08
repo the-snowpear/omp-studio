@@ -1,4 +1,3 @@
-import { waitReceipt } from "./hostError";
 import { ResumeScopePane } from "./history/ResumeScopePane";
 import { SessionPortabilityPane } from "./history/SessionPortabilityPane";
 import { SeanceDialog } from "./history/SeanceDialog";
@@ -476,17 +475,19 @@ export function HistoryPage({
       .filter((entry) => matchesStatusTab(entry.status, statusTab)),
     [history, q, statusTab, t],
   );
+  const historySessionIds = useMemo(() => (history?.entries ?? []).flatMap(row => row.sessionId ? [row.sessionId] : []), [history?.entries]);
+  const leaseAvailable = !!nativeContext?.available && !!nativeContext.capabilities?.capabilities.some(row => row.id === "session.lease.inspect" && row.grade !== "unavailable");
 
   useEffect(() => {
     let alive = true;
     setLeases({});
-    if (preview || !client || !nativeContext?.sessionId || !nativeContext.capabilities?.capabilities.some(row => row.id === "session.lease.inspect" && row.grade !== "unavailable")) return;
-    const ids = hostRows.flatMap(row => row.sessionId ? [row.sessionId] : []);
-    void client.command("session.lease.inspect", { sessionId: nativeContext.sessionId, targetSessionIds: ids }).then(handle => waitReceipt<{ result: { held: string[]; unknown: string[] } }>(client, handle.requestId)).then(({ result }) => {
-      if (alive) setLeases(Object.fromEntries(ids.map(id => [id, result.unknown.includes(id) ? null : result.held.includes(id)])));
+    if (preview || workspaceTab !== "catalog" || !client || !nativeContext?.sessionId || !leaseAvailable || !historySessionIds.length) return;
+    void client.query("session.lease.read", { sessionId: nativeContext.sessionId, targetSessionIds: historySessionIds }).then(result => {
+      const held = new Set(result.held), unknown = new Set(result.unknown);
+      if (alive) setLeases(Object.fromEntries(historySessionIds.map(id => [id, unknown.has(id) ? null : held.has(id)])));
     }).catch(() => {});
     return () => { alive = false; };
-  }, [preview, client, nativeContext?.sessionId, nativeContext?.capabilities, hostRows]);
+  }, [preview, client, nativeContext?.sessionId, leaseAvailable, historySessionIds, workspaceTab]);
 
   const titleMetadata = useSessionTitles(client,nativeContext,hostRows.flatMap(entry=>entry.sessionId?[{id:entry.sessionId,title:entry.title}]:[]),workspaceTab==="catalog");
   const rows = preview ? previewRows : hostRows;

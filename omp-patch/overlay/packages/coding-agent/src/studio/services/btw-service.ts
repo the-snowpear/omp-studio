@@ -101,7 +101,14 @@ export interface StudioBtwServiceOptions {
 export class StudioBtwService {
 	readonly #injections = new Map<
 		string,
-		{ record: StudioBtwRecord; value: BtwInjection; pending?: Promise<{ sent: true }> }
+		{
+			ephemeralId: string;
+			sessionId: string;
+			topicId: string;
+			turn: number;
+			value: BtwInjection;
+			pending?: Promise<{ sent: true }>;
+		}
 	>();
 	readonly #injectionOptions: StudioBtwServiceOptions;
 	readonly #listeners = new Set<(snapshot: StudioBtwSnapshot) => void>();
@@ -481,20 +488,20 @@ export class StudioBtwService {
 	async inject(id: string): Promise<{ sent: true }> {
 		const entry = this.#injections.get(id),
 			send = this.#injectionOptions.sendInjection;
-		if (!entry || !send || entry.record.originalSessionId !== this.session.sessionManager.getSessionId())
+		if (!entry || !send || entry.sessionId !== this.session.sessionManager.getSessionId())
 			throw new StudioBtwError("INTERACTION_STALE", "This BTW answer cannot be injected in the current session");
 		if (entry.value.state === "sent") return { sent: true };
 		if (entry.pending) return entry.pending;
 		const change = (state: BtwInjection["state"]) => {
 			entry.value = { ...entry.value, state };
-			if (this.#current === entry.record) this.#emit(entry.record);
+			if (this.#current?.ephemeralId === entry.ephemeralId) this.#emit(this.#current);
 		};
 		change("sending");
 		entry.pending = (async () => {
-			const saved = (await this.#historyStore(true)).getRecords().find(record => record.id === entry.record.topicId);
-			if (!saved || getBtwTurns(saved).length - 1 !== (entry.record.history?.length ?? 0))
+			const saved = (await this.#historyStore(true)).getRecords().find(record => record.id === entry.topicId);
+			if (!saved || getBtwTurns(saved).length - 1 !== entry.turn)
 				throw new StudioBtwError("INTERACTION_STALE", "A newer follow-up replaced this injection");
-			await send(entry.value.text, entry.record.originalSessionId);
+			await send(entry.value.text, entry.sessionId);
 			change("sent");
 			return { sent: true as const };
 		})()
@@ -547,7 +554,10 @@ export class StudioBtwService {
 			if (parts?.closed && text) {
 				const id = `${record.topicId}:${record.history?.length ?? 0}`;
 				this.#injections.set(id, {
-					record,
+					ephemeralId: record.ephemeralId,
+					sessionId: record.originalSessionId,
+					topicId: record.topicId,
+					turn: record.history?.length ?? 0,
 					value: { id, text, before: parts.before, after: parts.after, state: "ready" },
 				});
 			}

@@ -2,7 +2,8 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SessionHistoryEntry, SessionHistoryReadModel } from "@omp-studio/client-contract";
+import type { SessionHistoryEntry, SessionHistoryReadModel, StudioClient } from "@omp-studio/client-contract";
+import type { NativeHistoryContext } from "./history/NativeArchivePane";
 import { HistoryPage } from "./HistoryPage";
 import { I18nProvider } from "./i18n";
 import { PreviewModeProvider } from "./preview/PreviewContext";
@@ -35,6 +36,24 @@ const ACTIVE_ENTRY = {
   messageCount: 3,
   status: "active" as const,
 } satisfies SessionHistoryEntry;
+
+it("keeps lease status while filtering the catalog without repeated lease reads or lease commands", async () => {
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  const query = vi.fn(async (_kind: string, _input?: unknown) => ({ held: ["session-a"], unknown: [] })), command = vi.fn();
+  const nativeContext: NativeHistoryContext = { sessionId: "live", available: true, capabilities: {
+    profile: "limited", generatedAt: "2026-11-08T00:00:00.000Z", hash: "test", capabilities: [{ id: "session.lease.inspect", grade: "stable", version: 1, evidence: "test" }],
+  } };
+  render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><HistoryPage
+    history={{ entries: [ACTIVE_ENTRY], total: 1 }} nativeContext={nativeContext} client={{ query, command, subscribe: () => () => {} } as unknown as StudioClient}
+    onRoute={() => undefined} onSelectThread={() => undefined} /></PreviewModeProvider></I18nProvider>);
+  await screen.findByText("使用中 / In use");
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "No match" } });
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Deletable" } });
+  expect(screen.getByText("使用中 / In use")).toBeTruthy();
+  expect(query.mock.calls.filter(([kind]) => kind === "session.lease.read")).toHaveLength(1);
+  expect(query).toHaveBeenCalledWith("session.lease.read", { sessionId: "live", targetSessionIds: ["session-a"] });
+  expect(command).not.toHaveBeenCalledWith("session.lease.inspect", expect.anything());
+});
 
 describe("HistoryPage session pins", () => {
   it("renders the localized fallback for missing and blank Host titles", () => {

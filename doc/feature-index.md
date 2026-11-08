@@ -8,8 +8,8 @@
 
 | 功能 | Renderer / 预览 | Runtime / 协议 |
 | --- | --- | --- |
-| worker 子 Agent、任务文件与精确模型 | `AgentHub.tsx`、`preview/taskSpawnPreview.ts` | overlay `services/studio-thread-service.ts`、`task-options-service.ts`、`agent-hub-service.ts`；`contracts/agents-jobs.ts`、`runtime-upgrade.ts` |
-| 排队压缩、历史重命名/置顶/占用 | `composer/RuntimeQueueBar.tsx`、`HistoryPage.tsx`、`preview/runtimeQueuePreview.ts` | overlay `services/queued-compaction-service.ts`、`compaction-yield.ts`、`upgrade-service.ts`；`contracts/runtime-queue.ts` |
+| worker 子 Agent、任务文件与精确模型 | `AgentHub.tsx`、`preview/taskSpawnPreview.ts` | overlay `services/studio-thread-service.ts`、`task-options-service.ts`、`agent-hub-service.ts`；`contracts/agents-jobs.ts`、`runtime-upgrade.ts`；可选项瞬时 query `agent.spawn.options.read` |
+| 排队压缩、历史重命名/置顶/占用 | `composer/RuntimeQueueBar.tsx`、`HistoryPage.tsx`、`preview/runtimeQueuePreview.ts` | overlay `services/queued-compaction-service.ts`、`compaction-yield.ts`、`upgrade-service.ts`；`contracts/runtime-queue.ts`；占用瞬时 query `session.lease.read` |
 | 中途回复、扩展、BTW 注入、预测 | `conversation/conversationStore.ts`、`ExtensionLinks.tsx`、`btw/BtwPanel.tsx`、`composer/useWordPrediction.ts`；`preview/conversationFixtures.ts`、`btwPreview.ts`、`nextMessagePreview.ts` | overlay `services/conversation-entry-identity.ts`、`conversation-live-projector.ts`、`session-transcript-service.ts`、`extension-links-service.ts`、`btw-injection.ts`、`message-prediction.ts` |
 | Shell 回放、缓存、Eval 与作业 | `conversation/ShellView.tsx`、`PromptCachePanel.tsx`、`ContextCard.tsx`、`ToolBody.tsx`、`JobInspector.tsx`；`preview/runtimeViewsPreview.ts`、`nativeToolGallery.ts`、`hubPreview.ts` | overlay `services/runtime-view-service.ts`、`job-inspect.ts`；`contracts/runtime-views.ts`、`shell-view.ts`、`runtime-features.ts`、`benchmarks.ts` |
 | 模型与新设置 | `ModelConfigPage.tsx`、`settings/runtime18180Settings.ts`；`preview/modelConfigFixtures.ts`、`featureSettingsPreview.ts` | `scripts/model-catalog.mjs`、Host `omp-models-adapter.ts` / `model-role-migration.ts`、`provider-yaml-draft.ts`；overlay `services/runtime-catalog-service.ts`、`feature-settings-service.ts` |
@@ -17,6 +17,8 @@
 | WebMCP | `browser/WebMcpPane.tsx`、`ManagedBrowserPane.tsx`；`preview/webmcpPreview.ts` | overlay `services/managed-browser-service.ts`、原生 `tools/browser/` controller 与 tab bridge；Desktop `managed-browser-relay.ts`；`contracts/webmcp.ts` |
 
 版本变化和验收见 [18.18.0 迁移报告](../docs/migrations/omp-18.18.0.md)。
+
+瞬时读取契约在 `contracts/runtime-views.ts`。历史 Shell 在 `runtime-view-service.ts` 仅保留当前命令的一份回放数据，`shell.view.release` 与 Runtime dispose 释放；Renderer 关闭、隐藏或切换来源时释放，回放等上一帧完成后再推进。
 
 ## 调用链
 

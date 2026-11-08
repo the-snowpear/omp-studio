@@ -1,6 +1,7 @@
 import type { WebMcpListOptions, StudioWebMcpCatalog } from "./webmcp-protocol";
 import type { LiveAudioState } from "./live-audio-protocol";
 import type { ShellVizPreferences, ShellVizPresentation } from "./shell-view-protocol";
+import type { RuntimeFeatureResultMap } from "./runtime-features-protocol";
 
 export interface PromptCacheStatus {
 	state: "warm" | "cold";
@@ -19,6 +20,8 @@ export interface PromptCacheStatus {
 
 /** Transient reads and media negotiation: no payload is persisted in the command ledger. */
 export type RuntimeViewOperation =
+	| { kind: "agent.spawn.options.read"; sessionId: string; definition: string }
+	| { kind: "session.lease.read"; sessionId: string; targetSessionIds: string[] }
 	| { kind: "extensions.links.list"; sessionId: string; sourceSessionId?: string; agentId?: string }
 	| { kind: "browser.webmcp.list"; sessionId: string; pageId: string; options?: WebMcpListOptions }
 	| { kind: "session.cache.get"; sessionId: string }
@@ -30,25 +33,32 @@ export type RuntimeViewOperation =
 			toolCallId: string;
 			preferences?: ShellVizPreferences;
 	  }
+	| { kind: "shell.view.release"; sessionId: string; sourceSessionId?: string; agentId?: string; toolCallId: string }
 	| { kind: "live.webrtc.connect"; sessionId: string; audioId: string; sdpOffer: string; voice?: string }
 	| { kind: "live.webrtc.status"; sessionId: string; audioId?: string }
 	| { kind: "live.webrtc.mute"; sessionId: string; audioId: string; muted: boolean }
 	| { kind: "live.webrtc.release"; sessionId: string; audioId: string };
 export interface RuntimeViewResultMap {
+	"agent.spawn.options.read": RuntimeFeatureResultMap["agent.spawn.options"];
+	"session.lease.read": RuntimeFeatureResultMap["session.lease.inspect"];
 	"extensions.links.list": { schemes: string[] };
 	"browser.webmcp.list": StudioWebMcpCatalog;
 	"session.cache.get": { cache: PromptCacheStatus | null };
 	"shell.view.read": { available: boolean; presentation?: ShellVizPresentation; reason?: string };
+	"shell.view.release": { released: true };
 	"live.webrtc.connect": { audioId: string; sdpAnswer: string; state: LiveAudioState };
 	"live.webrtc.status": LiveAudioState;
 	"live.webrtc.mute": LiveAudioState;
 	"live.webrtc.release": LiveAudioState;
 }
 export const RUNTIME_VIEW_KINDS = [
+	"agent.spawn.options.read",
+	"session.lease.read",
 	"extensions.links.list",
 	"browser.webmcp.list",
 	"session.cache.get",
 	"shell.view.read",
+	"shell.view.release",
 	"live.webrtc.connect",
 	"live.webrtc.status",
 	"live.webrtc.mute",

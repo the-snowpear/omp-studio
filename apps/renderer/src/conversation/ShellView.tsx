@@ -21,26 +21,36 @@ export function ShellView({ toolCallId, running, maxRows }: { toolCallId: string
   const scope = useContext(RuntimeToolContext), { preview, marks } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const [open, setOpen] = useState(false), [visible, setVisible] = useState(false), [preferences, setPreferences] = useState(initialShellPreferences);
   const [view, setView] = useState<ShellVizPresentation>(), [error, setError] = useState("");
-  const host = useRef<HTMLDivElement>(null);
-  useEffect(() => { const element = host.current; if (!element || (!scope.client && !preview)) return; const observer = new IntersectionObserver(entries => setVisible(entries.some(entry => entry.isIntersecting))); observer.observe(element); return () => observer.disconnect(); }, [scope.client, preview]);
+  const host = useRef<HTMLDivElement>(null), presentedPreferences = useRef<ShellVizPreferences | undefined>(undefined);
+  useEffect(() => { setVisible(false); const element = host.current; if (!open || !element || (!scope.client && !preview)) return; const observer = new IntersectionObserver(entries => setVisible(entries.some(entry => entry.isIntersecting))); observer.observe(element); return () => observer.disconnect(); }, [open, scope.client, preview]);
+  useEffect(() => {
+    if (!open || !visible || preview || scope.enabled === false || !scope.client || !scope.sessionId) return;
+    const client = scope.client, input = { sessionId: scope.sessionId, toolCallId, ...(scope.sourceSessionId ? { sourceSessionId: scope.sourceSessionId } : {}), ...(scope.agentId ? { agentId: scope.agentId } : {}) };
+    return () => { void client.query("shell.view.release", input).catch(() => {}); };
+  }, [open, visible, preview, scope.enabled, scope.client, scope.sessionId, scope.sourceSessionId, scope.agentId, toolCallId]);
   useEffect(() => {
     if (!open || !visible || scope.enabled === false) return;
-    if (preview) { setView(previewShellPresentation(preferences)); setError(""); return; }
+    presentedPreferences.current = undefined;
+    if (preview) { presentedPreferences.current = preferences; setView(previewShellPresentation(preferences)); setError(""); return; }
     if (!scope.client || !scope.sessionId) { setError(zh ? "需要已连接的 Runtime" : "A connected Runtime is required"); return; }
+    const ownerDocument = host.current!.ownerDocument;
+    const input = { sessionId: scope.sessionId, toolCallId, ...(scope.sourceSessionId ? { sourceSessionId: scope.sourceSessionId } : {}), ...(scope.agentId ? { agentId: scope.agentId } : {}) };
     let alive = true; let timer: ReturnType<typeof setTimeout>;
     const read = async () => {
-      if (host.current?.ownerDocument.hidden) { if (alive && running) timer = setTimeout(() => void read(), 1000); return; }
+      if (ownerDocument.hidden) return;
       try {
-        const result = await scope.client!.query("shell.view.read", { sessionId: scope.sessionId!, toolCallId, ...(scope.sourceSessionId ? { sourceSessionId: scope.sourceSessionId } : {}), ...(scope.agentId ? { agentId: scope.agentId } : {}), preferences });
-        if (alive) { setView(result.presentation); setError(result.available ? "" : result.reason ?? "Execution trace unavailable"); }
+        const result = await scope.client!.query("shell.view.read", { ...input, preferences });
+        if (alive) { presentedPreferences.current = preferences; setView(result.presentation); setError(result.available ? "" : result.reason ?? "Execution trace unavailable"); }
       } catch (cause) { if (alive) setError(cause instanceof Error ? cause.message : String(cause)); }
-      finally { if (alive && running && preferences.cursor === undefined) timer = setTimeout(() => void read(), 400); }
+      finally { if (alive && !ownerDocument.hidden && running && preferences.cursor === undefined) timer = setTimeout(() => void read(), 400); }
     };
+    const visibility = () => { clearTimeout(timer); if (ownerDocument.hidden) void scope.client!.query("shell.view.release", input).catch(() => {}); else void read(); };
+    ownerDocument.addEventListener("visibilitychange", visibility);
     void read();
-    return () => { alive = false; clearTimeout(timer); };
+    return () => { alive = false; clearTimeout(timer); ownerDocument.removeEventListener("visibilitychange", visibility); };
   }, [scope, toolCallId, running, open, visible, preferences, preview, zh]);
   useEffect(() => {
-    if (!preferences.playing || !view || !open || !visible) return;
+    if (!preferences.playing || !view || !open || !visible || host.current?.ownerDocument.hidden || presentedPreferences.current !== preferences) return;
     const timer = setTimeout(() => setPreferences(current => {
       const cursor = Math.min(view.timeline.length, (current.cursor ?? 0) + 1);
       return { ...current, cursor, playing: cursor < view.timeline.length };
