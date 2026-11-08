@@ -35,7 +35,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rm, unlink, writeFile, type FileHandle } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { app, dialog } from "electron";
@@ -106,9 +106,9 @@ export interface DesktopHostFactoryOptionsWin32 {
   readonly facade?: DesktopFacadeSeams;
 }
 
-/** Injectable inputs for {@link createDesktopHostFactory} (macOS). */
+/** Injectable inputs for {@link createDesktopHostFactory} (macOS and Linux). */
 export interface DesktopHostFactoryOptionsDarwin {
-  readonly platform: "darwin";
+  readonly platform: "darwin" | "linux";
   /** Native platform operations backing DarwinPlatformPort. */
   readonly services: DarwinPlatformServices;
   /** Native filesystem/liveness/clock/random operations backing the authority lock. */
@@ -158,7 +158,7 @@ export function createDesktopHostFactory(options: DesktopHostFactoryOptions): De
         });
         privateEndpoint = new Win32PrivateEndpoint(options.endpointProviders);
       } else {
-        platform = new DarwinPlatformPort(options.services);
+        platform = new DarwinPlatformPort(options.services, options.platform);
         const profileDirectory = await platform.appDataDirectory();
         await mkdir(profileDirectory, { recursive: true });
         authorityLock = new Win32AuthorityLock({
@@ -252,8 +252,8 @@ function createProductionWin32PlatformServices(): Win32PlatformServices {
   };
 }
 
-/** Production pure-Node realizations of the native platform operations (macOS). */
-function createProductionDarwinPlatformServices(): DarwinPlatformServices {
+/** Production pure-Node realizations of the native platform operations (POSIX). */
+function createProductionDarwinPlatformServices(platform: "darwin" | "linux" = "darwin"): DarwinPlatformServices {
   return {
     async appDataDirectory(): Promise<string> {
       return desktopPaths().stateRoot;
@@ -276,9 +276,17 @@ function createProductionDarwinPlatformServices(): DarwinPlatformServices {
       return authority;
     },
     async revealInFinder(path: string): Promise<void> {
+      if (platform === "linux") {
+        await execFileAsync("xdg-open", [dirname(path)]);
+        return;
+      }
       await execFileAsync("open", ["-R", path]);
     },
     async openExternal(url: string): Promise<void> {
+      if (platform === "linux") {
+        await execFileAsync("xdg-open", [url]);
+        return;
+      }
       await execFileAsync("open", [url]);
     },
     // Runtime containment is a native milestone; nothing in P1
@@ -681,20 +689,20 @@ export function createProductionHostFactory(options?: {
     managedInstall: productionManagedInstall(hostLog),
     facade,
   };
-  if (process.platform !== "win32" && process.platform !== "darwin") {
+  if (process.platform !== "win32" && process.platform !== "darwin" && process.platform !== "linux") {
     throw new Error(`OMP Studio does not support ${process.platform}`);
   }
   const factory = createDesktopHostFactory({
-    ...(process.platform === "darwin"
+    ...(process.platform === "win32"
       ? {
-          platform: "darwin" as const,
-          services: createProductionDarwinPlatformServices(),
-          endpointProviders: createProductionDarwinEndpointProviders(),
-        }
-      : {
           platform: "win32" as const,
           services: createProductionWin32PlatformServices(),
           endpointProviders: createProductionWin32EndpointProviders(),
+        }
+      : {
+          platform: process.platform,
+          services: createProductionDarwinPlatformServices(process.platform),
+          endpointProviders: createProductionDarwinEndpointProviders(),
         }),
     ...baseOptions,
   });

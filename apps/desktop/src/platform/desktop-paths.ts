@@ -70,6 +70,22 @@ export function resolveDesktopPaths(input: DesktopPathInputs): DesktopPaths {
       endpointRegistryRoot: posix.join(appDataRoot, ENDPOINT_REGISTRY_DIRECTORY_NAME),
     };
   }
+  if (input.platform === "linux") {
+    // XDG: config and state live under $XDG_CONFIG_HOME (~/.config), mirroring
+    // the macOS single-root layout so logs, keys and runtimes stay together.
+    const appDataRoot = env.XDG_CONFIG_HOME ?? posix.join(home, ".config");
+    const stateRoot = posix.join(appDataRoot, STATE_DIRECTORY_NAME);
+    return {
+      appDataRoot,
+      stateRoot,
+      logsRoot: posix.join(stateRoot, "logs"),
+      keysRoot: posix.join(stateRoot, "keys"),
+      runtimesRoot: posix.join(stateRoot, "runtimes"),
+      updatesV2Root: posix.join(stateRoot, "updates-v2"),
+      legacyStagingRoot: posix.join(stateRoot, "updates"),
+      endpointRegistryRoot: posix.join(appDataRoot, ENDPOINT_REGISTRY_DIRECTORY_NAME),
+    };
+  }
   throw new Error(`Unsupported desktop platform: ${input.platform}`);
 }
 
@@ -96,6 +112,13 @@ export function packagedResourcePaths(input: {
   }
   if (input.platform === "darwin") {
     if (input.resourcesPath === undefined) throw new Error("macOS bundle resources path is required");
+    return {
+      bundledRuntimeRoot: posix.join(input.resourcesPath, "runtime", "versions"),
+      bundledKeysRoot: posix.join(input.resourcesPath, "runtime-keys"),
+    };
+  }
+  if (input.platform === "linux") {
+    if (input.resourcesPath === undefined) throw new Error("Linux package resources path is required");
     return {
       bundledRuntimeRoot: posix.join(input.resourcesPath, "runtime", "versions"),
       bundledKeysRoot: posix.join(input.resourcesPath, "runtime-keys"),
