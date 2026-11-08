@@ -756,7 +756,7 @@ index 8728626367..ac779a20ff 100644
  	attribution?: MessageAttribution;
  	/** Called synchronously with the messages pushed onto the steering queue. See {@link PromptOptions.onPromptQueued}. */
 diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
-index e07b344ddf..69bf87af1d 100644
+index e07b344ddf..e3f260bc71 100644
 --- a/packages/coding-agent/src/session/agent-session.ts
 +++ b/packages/coding-agent/src/session/agent-session.ts
 @@ -142,6 +142,7 @@ import { getEditStore } from "../edit/store";
@@ -816,18 +816,19 @@ index e07b344ddf..69bf87af1d 100644
  
  	// Event subscription state
  	#unsubscribeAgent?: () => void;
-@@ -1377,6 +1399,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -1377,6 +1399,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 *  incremented, so `isStreaming` alone cannot tell a host that a submission is admitted. */
  	#admittedSubmissionCount = 0;
  	#admittedSubmissionsSettled: PromiseWithResolvers<void> | undefined;
 +	#beforeNextUserTurn: (() => Promise<void>) | undefined;
++	#afterUserTurn: (() => Promise<void>) | undefined;
 +	#resetConsentHandler:
 +		| ((input: { provider: "anthropic" | "openai-codex"; message: string }) => Promise<"Yes" | "No" | undefined>)
 +		| undefined;
  	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
  	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
  	// checks in #handleAgentEvent) still fire on the original schedule — only the
-@@ -2067,11 +2093,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -2067,11 +2094,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/**
  	 * Cancel only this session's pending prewalk without changing the active model or settings, and keep
@@ -843,7 +844,7 @@ index e07b344ddf..69bf87af1d 100644
  	}
  
  	/** Restore a planning model and re-arm prewalk without partially applying a rejected restart. */
-@@ -2090,7 +2117,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -2090,7 +2118,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		if (!state?.enabled) {
  			throw new ToolError("Plan mode is not active.");
  		}
@@ -856,7 +857,7 @@ index e07b344ddf..69bf87af1d 100644
  			suppliedTitle: title,
  			statePlanFilePath: state.planFilePath,
  			readPlan: url => this.#readPlanFile(url),
-@@ -2098,7 +2129,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -2098,7 +2130,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		});
  		return {
  			content: [{ type: "text", text: "Plan ready for review." }],
@@ -865,7 +866,7 @@ index e07b344ddf..69bf87af1d 100644
  		};
  	}
  
-@@ -2124,7 +2155,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -2124,7 +2156,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		this.#reseedTokenRate();
  		this.agent.setQueuedMessageGrouping(
  			(previous, next) =>
@@ -876,7 +877,7 @@ index e07b344ddf..69bf87af1d 100644
  		);
  		this.sessionManager = config.sessionManager;
  		this.settings = config.settings;
-@@ -4102,6 +4135,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -4102,6 +4136,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * the recovery wait always sees the in-flight handler and blocks until it — and
  	 * everything it schedules — settles. */
  	#dispatchAgentEvent = async (event: AgentEvent): Promise<void> => {
@@ -886,7 +887,7 @@ index e07b344ddf..69bf87af1d 100644
  		// Revoke before the first await: delayed end-of-turn maintenance must
  		// never revoke a foreground-control grant acquired by a later prompt.
  		const computerControlRevocation =
-@@ -5381,7 +5417,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -5381,7 +5418,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  					return;
  				}
  			}
@@ -895,7 +896,7 @@ index e07b344ddf..69bf87af1d 100644
  				options?.onSkip?.("aborted");
  				return;
  			}
-@@ -5524,6 +5560,14 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -5524,6 +5561,14 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  					this.#skipAgentContinue("should-continue-false", request);
  					return;
  				}
@@ -910,7 +911,7 @@ index e07b344ddf..69bf87af1d 100644
  
  				for (;;) {
  					const active = this.#activeAgentContinue;
-@@ -5612,6 +5656,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -5612,6 +5657,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  				delayMs: 100,
  				generation: options.generation,
  				shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -918,7 +919,7 @@ index e07b344ddf..69bf87af1d 100644
  			});
  			return true;
  		}
-@@ -5655,6 +5700,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -5655,6 +5701,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  						source: "auto-continue-queued-message",
  						generation,
  						shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -926,7 +927,15 @@ index e07b344ddf..69bf87af1d 100644
  					});
  					return;
  				}
-@@ -5961,6 +6007,28 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -5856,6 +5903,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		options?: AgentEndSettleOptions,
+ 	): Promise<void> {
+ 		this.#settledAgentEnd = event;
++		if (!options?.willContinue) await this.#afterUserTurn?.();
+ 		this.#emitRunState("idle");
+ 		// Tagged isTerminal so subscribers can tell final settles from scheduled
+ 		// continuations, and `yielded` so they can tell the agent's own follow-up
+@@ -5961,6 +6009,33 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		await this.#extensionRunner.emit(mapped);
  	}
  
@@ -937,6 +946,11 @@ index e07b344ddf..69bf87af1d 100644
 +	 */
 +	setBeforeNextUserTurn(hook: (() => Promise<void>) | undefined): void {
 +		this.#beforeNextUserTurn = hook;
++	}
++
++	/** Studio persists its workspace boundary before publishing the completed turn. */
++	setAfterUserTurn(hook: (() => Promise<void>) | undefined): void {
++		this.#afterUserTurn = hook;
 +	}
 +
 +	/** Presentation-neutral reset consent; undefined retains native TUI behavior. */
@@ -955,7 +969,7 @@ index e07b344ddf..69bf87af1d 100644
  	/**
  	 * Subscribe to agent events.
  	 * Session persistence is handled internally (saves messages on message_end).
-@@ -6801,6 +6869,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -6801,6 +6876,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/** Drop the in-memory conversation state after the terminal dispose flush. */
  	#releaseRetainedSessionMemory(): void {
@@ -963,7 +977,7 @@ index e07b344ddf..69bf87af1d 100644
  		this.#releaseQueuedTtsrReservations();
  		this.agent.reset();
  		this.#tools.releaseRestoredTranscript();
-@@ -7628,6 +7697,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -7628,6 +7704,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/** Cancel active manual, automatic, and handoff maintenance, preserving an optional source reason. */
  	abortCompaction(reason?: unknown): void {
@@ -971,7 +985,7 @@ index e07b344ddf..69bf87af1d 100644
  		void this.#maintenance.abortCompaction(reason);
  	}
  
-@@ -7683,6 +7753,30 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -7683,6 +7760,30 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	}
  
  	/** All messages including custom types like BashExecutionMessage */
@@ -1002,7 +1016,7 @@ index e07b344ddf..69bf87af1d 100644
  	get messages(): AgentMessage[] {
  		return this.agent.state.messages;
  	}
-@@ -8564,9 +8658,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -8564,9 +8665,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  		const promptAttribution = options?.attribution ?? (options?.synthetic ? "agent" : "user");
  
@@ -1015,7 +1029,7 @@ index e07b344ddf..69bf87af1d 100644
  			if (!streamingBehavior) {
  				// Busy because the agent owns a turn: that turn supersedes the interrupted
  				// one (after compaction it is the queued-message drain). Busy only from
-@@ -8581,7 +8675,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -8581,7 +8682,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			const queued = await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
  				timestamp: submittedAt,
  				attribution: promptAttribution,
@@ -1024,7 +1038,7 @@ index e07b344ddf..69bf87af1d 100644
  				rawText: typedText,
  				onPromptQueued: options?.onPromptQueued,
  				onPromptAdmitted: options?.onPromptAdmitted,
-@@ -8713,21 +8807,17 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -8713,21 +8814,17 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		let dispatched = false;
  		const refusalBeforeDispatch = this.#costCapRefusal;
  		try {
@@ -1054,7 +1068,7 @@ index e07b344ddf..69bf87af1d 100644
  			});
  		} catch (error) {
  			turnError = error;
-@@ -9126,6 +9216,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9126,6 +9223,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			acceptTerminalEmptyStop?: boolean;
  		},
  	): Promise<boolean> {
@@ -1064,7 +1078,7 @@ index e07b344ddf..69bf87af1d 100644
  		// Returns false when the prompt was dropped before reaching the agent —
  		// every pre-dispatch bail (generation bump from abort, disposal, usage
  		// preflight denial) exits silently, and prompt() uses the outcome to hand
-@@ -9410,19 +9503,28 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9410,19 +9510,28 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * `onRouted` fires once the command is found, before its handler runs.
  	 */
  	async #tryExecuteExtensionCommand(text: string, onRouted?: () => void): Promise<boolean> {
@@ -1096,7 +1110,7 @@ index e07b344ddf..69bf87af1d 100644
  
  		try {
  			await this.#extensionRunner.runScoped(() => command.handler(args, ctx));
-@@ -9530,12 +9632,28 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9530,12 +9639,28 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * If the command returns void, returns empty string to indicate it was handled.
  	 */
  	async #tryExecuteCustomCommand(text: string): Promise<string | null> {
@@ -1127,7 +1141,7 @@ index e07b344ddf..69bf87af1d 100644
  
  		// Find matching command
  		const loaded =
-@@ -9547,6 +9665,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9547,6 +9672,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		const baseCtx = this.#createCommandContext();
  		const ctx = {
  			...baseCtx,
@@ -1135,7 +1149,7 @@ index e07b344ddf..69bf87af1d 100644
  			hasQueuedMessages: baseCtx.hasPendingMessages,
  		} as unknown as CustomCommandContext;
  
-@@ -9589,6 +9708,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9589,6 +9715,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		await this.#queueUserMessage(expandedText, images, "steer", {
  			timestamp: submittedAt,
  			attribution: options?.attribution,
@@ -1143,7 +1157,7 @@ index e07b344ddf..69bf87af1d 100644
  			rawText: text,
  			onPromptQueued: options?.onPromptQueued,
  		});
-@@ -9615,6 +9735,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9615,6 +9742,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			await this.#queueUserMessage(expandedText, images, "followUp", {
  				timestamp: submittedAt,
  				attribution: options?.attribution,
@@ -1151,7 +1165,7 @@ index e07b344ddf..69bf87af1d 100644
  				rawText: text,
  				onPromptQueued: options?.onPromptQueued,
  			});
-@@ -9870,13 +9991,21 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9870,13 +9998,21 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		) {
  			return false;
  		}
@@ -1179,7 +1193,7 @@ index e07b344ddf..69bf87af1d 100644
  			this.#irc.queueAside(records);
  			options?.onPromptAdmitted?.();
  			// The awaits above (image normalization / vision description) can span the run's
-@@ -9886,56 +10015,28 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9886,56 +10022,28 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			this.#resumeStrandedIrcAsides();
  			return true;
  		}
@@ -1245,7 +1259,7 @@ index e07b344ddf..69bf87af1d 100644
  		options?.onPromptAdmitted?.();
  		// joinActiveTurn admission must never start an autonomous turn: the
  		// live run owns delivery, and an idle queue stays put until the host
-@@ -10105,6 +10206,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10105,6 +10213,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		this.#queuedMessageDrainScheduled = true;
  		this.#scheduleAgentContinue({
  			source: "queued-message-drain",
@@ -1253,7 +1267,7 @@ index e07b344ddf..69bf87af1d 100644
  			shouldContinue: () => {
  				this.#queuedMessageDrainScheduled = false;
  				return (
-@@ -10364,6 +10466,16 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10364,6 +10473,16 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			this.#resumeStrandedIrcAsides();
  			return;
  		}
@@ -1270,7 +1284,7 @@ index e07b344ddf..69bf87af1d 100644
  		this.#allowQueuedMessageDrainRetry();
  		// Keyword notices and their user message must enter the queue in one synchronous phase.
  		if (deliverAs === "followUp") {
-@@ -10697,15 +10809,24 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10697,15 +10816,24 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 *  `forInterrupt` also withdraws input the run already dequeued but never recorded — live-steered
  	 *  into the aborted response, or taken for its next model call — and treats it as queued ahead of
  	 *  the rest (it was queued first). */
@@ -1298,7 +1312,7 @@ index e07b344ddf..69bf87af1d 100644
  		const recordable = (m: AgentMessage): boolean =>
  			m.role !== "developer" && isDisplayableQueuedMessage(m) && !isUserAuthoredQueuedMessage(m);
  		const recordedOnInterrupt = new Set<AgentMessage>();
-@@ -10759,6 +10880,39 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10759,6 +10887,39 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		);
  	}
  
@@ -1338,7 +1352,7 @@ index e07b344ddf..69bf87af1d 100644
  	/** Whether an empty submit should interrupt the streaming turn: displayable input is
  	 *  queued, or live steering sits in the in-flight response, which the abort requeues
  	 *  for the continuation turn. */
-@@ -10768,17 +10922,154 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10768,17 +10929,154 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/** Chip texts for the queue display. Steering live steering took for the streaming response
  	 *  stays listed until the transcript records it, when the model actually switches to it. */
@@ -1499,7 +1513,7 @@ index e07b344ddf..69bf87af1d 100644
  	/** Last {@link getQueuedMessages} snapshot emitted as a `queue_update` event.
  	 *  Coalesces the agent's internal `onQueueChange` notification down to the
  	 *  externally observable transitions RPC/ACP/TUI subscribers actually care
-@@ -10821,7 +11112,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10821,7 +11119,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * already delivered target changes nothing; repeated calls may remove further
  	 * duplicates.
  	 */
@@ -1508,7 +1522,7 @@ index e07b344ddf..69bf87af1d 100644
  		return this.takeQueuedMessage(text, queue) !== undefined;
  	}
  
-@@ -10843,7 +11134,19 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10843,7 +11141,19 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * {@link removeQueuedMessage}, returning the removed message as editor-restorable
  	 * content (its chip text and images); undefined when nothing matched.
  	 */
@@ -1529,7 +1543,7 @@ index e07b344ddf..69bf87af1d 100644
  		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
  		const index = this.#findQueuedUserMessage(selected, text);
  		if (index < 0) return undefined;
-@@ -10860,7 +11163,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10860,7 +11170,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * {@link removeQueuedMessage}; agent-attributed handoffs are never promoted. A missing
  	 * or already delivered target changes nothing; repeated calls may promote duplicates.
  	 */
@@ -1538,7 +1552,7 @@ index e07b344ddf..69bf87af1d 100644
  		const followUp = this.agent.peekFollowUpQueue();
  		const index = this.#findQueuedUserMessage(followUp, text);
  		if (index < 0) return false;
-@@ -10886,7 +11189,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10886,7 +11196,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * matches the raw text the caller originally submitted first, then the queued chip text
  	 * itself (exact); -1 when nothing matches.
  	 */
@@ -1551,7 +1565,7 @@ index e07b344ddf..69bf87af1d 100644
  		let index = queue.findIndex(
  			message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageRawText.get(message) === text,
  		);
-@@ -10899,7 +11206,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10899,7 +11213,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	/** Companions are inserted contiguously before their user; this is where that group starts. */
  	#queuedUserGroupStart(queue: readonly AgentMessage[], userIndex: number): number {
  		let start = userIndex;
@@ -1566,7 +1580,7 @@ index e07b344ddf..69bf87af1d 100644
  		return start;
  	}
  
-@@ -11643,7 +11956,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11643,7 +11963,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		deliverQueuedMessages?: boolean;
  		/** Internal `/compact` startup keeps the manual-compaction marker alive while aborting the active turn. */
  		preserveCompaction?: boolean;
@@ -1578,7 +1592,7 @@ index e07b344ddf..69bf87af1d 100644
  		const userInterrupt = options?.reason === USER_INTERRUPT_LABEL;
  		this.#pendingAbortErrorId = userInterrupt ? AIError.create(AIError.Flag.UserInterrupt) : undefined;
  		// Latch only when the interrupt stops something; an idle Esc would otherwise fold
-@@ -11755,6 +12072,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11755,6 +12079,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  				} else this.#recordWithoutTurn([message]);
  			}
  		} finally {
@@ -1586,7 +1600,7 @@ index e07b344ddf..69bf87af1d 100644
  			this.#abortInProgress = false;
  			this.#drainStrandedQueuedMessages();
  			if (forceQueuedDelivery) this.#forcedQueuedMessageDeliveryCount--;
-@@ -12907,6 +13225,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -12907,6 +13232,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/** Retry the last failed assistant turn when the session is idle. */
  	async retry(): Promise<boolean> {
@@ -1596,7 +1610,43 @@ index e07b344ddf..69bf87af1d 100644
  		const didRetry = await this.#recovery.retry();
  		// A manual retry is the user resuming the run they interrupted, so it lifts the
  		// interrupt's auto-resume suppression the same way a typed prompt does.
-@@ -14824,7 +15145,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -14218,6 +14546,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		options: {
+ 			summarize?: boolean;
+ 			customInstructions?: string;
++			exactLeaf?: boolean;
++			restoreRoot?: boolean;
+ 			/**
+ 			 * Opts into the two-phase `ask` toolResult re-answer protocol
+ 			 * (issue #5642): set only by the interactive `/tree` selector, which
+@@ -14269,7 +14599,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		// navigated straight onto the ask result), and must still return
+ 		// `reopenAsk` / branch the new answer instead of silently reporting a
+ 		// no-op (chatgpt-codex review on #5895).
+-		if (targetId === oldLeafId && !targetIsUserMessage && !(options.allowAskReopen && targetIsAskResult)) {
++		if (
++			targetId === oldLeafId &&
++			(options.exactLeaf || !targetIsUserMessage) &&
++			!options.restoreRoot &&
++			!(options.allowAskReopen && targetIsAskResult)
++		) {
+ 			return { cancelled: false };
+ 		}
+ 
+@@ -14411,7 +14746,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		// model consumes it, mirroring a live `ask` completion (issue #6483).
+ 		let isAskReanswerCompletion = false;
+ 
+-		if (isTranscriptEntry(targetEntry) && isUserRequestEntry(targetEntry)) {
++		if (options.restoreRoot) {
++			newLeafId = null;
++		} else if (options.exactLeaf) {
++			newLeafId = targetId;
++		} else if (isTranscriptEntry(targetEntry) && isUserRequestEntry(targetEntry)) {
+ 			// User request (plain prompt, or a user-invoked skill/collab prompt): leaf = parent
+ 			// (null if root), the draft the user typed goes back to the editor with its images.
+ 			newLeafId = targetEntry.parentId;
+@@ -14824,7 +15163,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		const settingsKey = provider === "anthropic" ? "claudeResets.autoRedeem" : "codexResets.autoRedeem";
  		const source = provider === "anthropic" ? "claude-auto-reset" : "codex-auto-reset";
  		const runner = this.#extensionRunner;
@@ -1605,7 +1655,7 @@ index e07b344ddf..69bf87af1d 100644
  			const approved = headlessApprovedResetActions(actions);
  			const waiting = actions.find(action => !approved.some(spend => spend.attemptKey === action.attemptKey));
  			if (waiting && !coordinator.notifiedKeys.has(waiting.attemptKey)) {
-@@ -14866,16 +15187,18 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -14866,16 +15205,18 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  				? `Spend a saved ${providerLabel} rate-limit reset?\n${lines[0]}`
  				: `Spend ${actions.length} saved ${providerLabel} rate-limit resets?\n${lines.join("\n")}`;
  		try {
@@ -1634,7 +1684,7 @@ index e07b344ddf..69bf87af1d 100644
  			if (choice === "Yes") {
  				if (provider === "anthropic") cfgClaudeResetsAutoRedeem.set(this.settings, "yes");
  				else cfgCodexResetsAutoRedeem.set(this.settings, "yes");
-@@ -15434,7 +15757,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15434,7 +15775,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * @returns the archive path and member names, or `undefined` when the main
  	 * session has no messages.
  	 */
@@ -1643,7 +1693,7 @@ index e07b344ddf..69bf87af1d 100644
  		const messages = this.messages;
  		if (messages.length === 0) return undefined;
  		const entries: Array<readonly [string, string]> = [["session.md", `${this.formatSessionAsText()}\n`]];
-@@ -15477,7 +15800,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15477,7 +15818,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			entries.push([`subagents/${key}.md`, `${text}\n`]);
  			subagentCount++;
  		}

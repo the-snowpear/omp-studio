@@ -88,6 +88,16 @@ export interface SessionArchiveRevision {
   readonly transcriptRevision: string;
 }
 
+export interface SessionTimeTravelRead {
+  readonly sessionId: SessionId;
+  readonly activeLeafId: string | null;
+  readonly selectedLeafId: string | null;
+  readonly ancestors: readonly string[];
+  readonly branches: readonly { readonly leafId: string; readonly createdAt: string; readonly current: boolean }[];
+  readonly events: readonly { readonly id: string; readonly parentId: string | null; readonly createdAt: string; readonly kind: "user" | "assistant" | "tool" | "compaction" | "system"; readonly title: string; readonly detail: string }[];
+  readonly olderCursor?: string;
+}
+
 /**
  * A validated, crash-tail-trimmed copy of an archived session transcript.
  * `temporarySessionFile` is Host-internal: it must never reach the Client
@@ -333,6 +343,59 @@ export class StudioSessionArchiveReader {
       page = pageOf();
     }
     return page;
+  }
+
+  async readTimeTravel(input: { readonly sessionId: string; readonly branchLeafId?: string; readonly cursor?: string }): Promise<SessionTimeTravelRead> {
+    const file = await this.#locate(input.sessionId);
+    await this.#assertParentWorkspace(file, input.sessionId);
+    const snapshot = await this.#readSnapshot(file, input.sessionId, { requireCwd: true });
+    const selectedLeafId = input.branchLeafId ?? snapshot.branchLeafId;
+    if (selectedLeafId !== null && !snapshot.byId.has(selectedLeafId)) throw new SessionArchiveError("CURSOR_INVALID", "Session branch is not available");
+    const branch = activeBranch(snapshot.byId, selectedLeafId);
+    let end = branch.length;
+    if (input.cursor !== undefined) {
+      const cursor = this.#decodeCursor(input.cursor as OpaqueCursor);
+      if (cursor.sessionId !== snapshot.sessionId || cursor.transcriptRevision !== snapshot.transcriptRevision || cursor.branchLeafId !== (selectedLeafId ?? "")) {
+        throw new SessionArchiveError("CURSOR_STALE", "Timeline changed; reload the session");
+      }
+      end = branch.findIndex(entry => entry.id === cursor.boundary);
+      if (end < 0) throw new SessionArchiveError("CURSOR_STALE", "Timeline boundary is unavailable");
+    }
+    const start = Math.max(0, end - 120);
+    const page = branch.slice(start, end);
+    const parents = new Set(snapshot.entries.filter(entry => entry.type !== "active_leaf").map(entry => entry.parentId));
+    const leaves = snapshot.entries.filter(entry => entry.type !== "active_leaf" && !parents.has(entry.id));
+    if (snapshot.branchLeafId && !leaves.some(entry => entry.id === snapshot.branchLeafId)) {
+      const active = snapshot.byId.get(snapshot.branchLeafId);
+      if (active) leaves.push(active);
+    }
+    const branches = leaves.map(entry => ({ leafId: entry.id, createdAt: typeof entry.timestamp === "string" ? entry.timestamp : new Date(0).toISOString(), current: entry.id === snapshot.branchLeafId }));
+    const events = page.flatMap<SessionTimeTravelRead["events"][number]>(entry => {
+      const createdAt = typeof entry.timestamp === "string" ? entry.timestamp : new Date(0).toISOString();
+      const base = { id: entry.id, parentId: entry.parentId, createdAt };
+      if (entry.type === "message" && isRecord(entry.message) && entry.message.role === "toolResult") {
+        const result = projectToolResult(entry.message, `tool:${entry.id}`);
+        return [{ ...base, kind: "tool" as const, title: result.toolName ?? "tool", detail: (result.output ?? "").slice(0, 500) }];
+      }
+      const projected = projectEntry(entry);
+      if (!projected) return [];
+      if (projected.kind === "compaction") return [{ ...base, kind: "compaction" as const, title: "Compaction", detail: projected.summary.slice(0, 500) }];
+      if (projected.kind !== "message") return [{ ...base, kind: "system" as const, title: "Context reset", detail: "" }];
+      const text = projected.content.filter(block => block.type === "text").map(block => block.text).join("\n").slice(0, 500);
+      const calls = projected.content.filter(block => block.type === "toolCall").map(block => block.toolName).join(", ");
+      const kind = projected.role === "user" ? "user" as const : projected.role === "assistant" ? "assistant" as const : "system" as const;
+      return [{ ...base, kind, title: calls || (kind === "user" ? "User" : kind === "assistant" ? "Assistant" : "System"), detail: text }];
+    });
+    const boundary = page[0]?.id;
+    return {
+      sessionId: snapshot.sessionId as SessionId,
+      activeLeafId: snapshot.branchLeafId,
+      selectedLeafId,
+      ancestors: branch.map(entry => entry.id),
+      branches,
+      events,
+      ...(start > 0 && boundary ? { olderCursor: this.#encodeCursor({ sessionId: snapshot.sessionId, transcriptRevision: snapshot.transcriptRevision, branchLeafId: selectedLeafId ?? "", boundary }) } : {}),
+    };
   }
 
   /**

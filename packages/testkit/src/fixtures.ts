@@ -265,6 +265,10 @@ const BOOTSTRAP: ClientBootstrap = {
 };
 
 const QUERY_INPUTS = {
+  "timeTravel.settings.get": {},
+  "timeTravel.storage.get": {},
+  "timeTravel.timeline.read": { sessionId: SESSION_ID },
+  "timeTravel.restore.preview": { sessionId: SESSION_ID, snapshotId: "snapshot-fixture" },
   "agent.spawn.options.read": { sessionId: SESSION_ID, definition: "reviewer" },
   "session.lease.read": { sessionId: SESSION_ID, targetSessionIds: [SESSION_ID] },
   "extensions.links.list": { sessionId: SESSION_ID },
@@ -346,6 +350,10 @@ const QUERY_INPUTS = {
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
+  "timeTravel.settings.get": { ok: true, queryName: "timeTravel.settings.get", result: { enabled: false, retentionDays: null, exclusions: [] } },
+  "timeTravel.storage.get": { ok: true, queryName: "timeTravel.storage.get", result: { snapshots: 0, bytes: 0 } },
+  "timeTravel.timeline.read": { ok: true, queryName: "timeTravel.timeline.read", result: { sessionId: SESSION_ID, activeLeafId: null, selectedLeafId: null, branches: [], events: [], points: [] } },
+  "timeTravel.restore.preview": { ok: true, queryName: "timeTravel.restore.preview", result: { snapshotId: "snapshot-fixture", revision: "fixture", changes: [] } },
   "agent.spawn.options.read": { ok: true, queryName: "agent.spawn.options.read", result: { fileEnabled: false, modelSelection: false, maxEffort: "max", models: [] } },
   "session.lease.read": { ok: true, queryName: "session.lease.read", result: { held: [SESSION_ID], unknown: [] } },
   "extensions.links.list": { ok: true, queryName: "extensions.links.list", result: { schemes: [] } },

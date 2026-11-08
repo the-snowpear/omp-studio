@@ -254,6 +254,7 @@ export interface StudioHostClientFacadeOptions {
   readonly catalog: HostSessionCatalogProvider;
   /** Optional Runtime-independent persistent transcript reader. */
   readonly archive?: HostSessionArchiveProvider;
+  readonly timeTravel?: import("./services.js").HostTimeTravelService;
   /** Optional "last observed" telemetry persistence for archived sessions. */
   readonly telemetryStore?: HostSessionTelemetryStorePort;
   /** Optional one-shot OMP probe for archived-session telemetry. */
@@ -854,6 +855,26 @@ export class StudioHostClientFacade implements ClientTransport {
 
   async #dispatchQuery(request: ClientQueryRequest): Promise<ClientQueryResponse> {
     switch (request.queryName) {
+      case "timeTravel.settings.get": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return { ok: true, queryName: request.queryName, result: await service.settings() } as ClientQueryResponse;
+      }
+      case "timeTravel.storage.get": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return { ok: true, queryName: request.queryName, result: await service.storage() } as ClientQueryResponse;
+      }
+      case "timeTravel.timeline.read": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return { ok: true, queryName: request.queryName, result: await service.timeline(request.input as import("@omp-studio/client-contract").QueryInput<"timeTravel.timeline.read">) } as ClientQueryResponse;
+      }
+      case "timeTravel.restore.preview": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return { ok: true, queryName: request.queryName, result: await service.preview(request.input as import("@omp-studio/client-contract").QueryInput<"timeTravel.restore.preview">) } as ClientQueryResponse;
+      }
       case "computer.workspace.get":
       case "computer.activity.list":
       case "computer.frame.get":
@@ -1169,7 +1190,25 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #dispatchCommand(request: ClientCommandRequest): Promise<ClientCommandAccepted> {
+    if (this.#options.timeTravel?.isRestoring() && request.commandName !== "timeTravel.settings.set" && request.commandName !== "timeTravel.cleanup" && request.commandName !== "core.abort") {
+      throw unavailableError("Time Travel restore is in progress; wait for it to finish");
+    }
     switch (request.commandName) {
+      case "timeTravel.settings.set": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return this.#commandLocalTask(request, () => service.updateSettings(request.input as import("@omp-studio/client-contract").CommandInput<"timeTravel.settings.set">));
+      }
+      case "timeTravel.restore": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return this.#commandLocalTask(request, () => service.restore(request.input as import("@omp-studio/client-contract").TimeTravelRestoreInput));
+      }
+      case "timeTravel.cleanup": {
+        const service = this.#options.timeTravel;
+        if (!service) throw unavailableError("Time Travel is unavailable");
+        return this.#commandLocalTask(request, () => service.cleanup((request.input as import("@omp-studio/client-contract").CommandInput<"timeTravel.cleanup">).scope));
+      }
       case "runtime.install": {
         // The switch verified the discriminant; TS cannot re-narrow the envelope type.
         const installRequest = request as ClientCommandRequest<"runtime.install">;

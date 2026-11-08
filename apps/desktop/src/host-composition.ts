@@ -1,6 +1,9 @@
+import { createTimeTravelPort } from "./time-travel-port.js";
 import { evaluationsFor, closeEvaluations } from "./evaluation-workspace.js";
 import { artifactLibraryForProfile } from "./artifact-library.js";
 import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
+import { timeTravelService } from "./time-travel-service.js";
+import { randomUUID } from "node:crypto";
 import type { WorkspaceId, SessionId } from "@omp-studio/client-contract";
 
 /**
@@ -882,6 +885,30 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       },
     });
   const installRuntime = seams.install ?? managedRuntimeInstallService(context);
+  const timeTravelPort = createTimeTravelPort({
+    service: timeTravelService(context.profileDirectory),
+    workspace: () => {
+      const cwd = context.workspaceCwd.current;
+      if (!cwd) throw new Error("Time Travel requires a workspace");
+      return cwd;
+    },
+    reader: currentArchiveReader,
+    assertIdle: () => {
+      const activeWorkspaceId = context.selectedWorkspace.current?.workspaceId;
+      const snapshot = sessionRef.current?.controller.publication()?.snapshot;
+      if (snapshot?.isStreaming || snapshot?.isCompacting || snapshot?.jobs.some(job => job.status === "running" || job.status === "queued") || snapshot?.agents.some(agent => ["starting", "running", "reviving"].includes(agent.status)) || context.runtimeSession?.listResidents?.().residents.some(row => row.workspaceId === activeWorkspaceId && row.phase !== "idle")) throw new Error("Wait for the workspace's running sessions and jobs to finish before restoring");
+    },
+    prepareSession: async sessionId => {
+      if (sessionRef.current?.controller.publication()?.snapshot?.sessionId !== sessionId) await runtimeCommandService.resume({ threadId: threadIdFor(sessionId) });
+      const snapshot = sessionRef.current?.controller.publication()?.snapshot;
+      if (!snapshot || snapshot.sessionId !== sessionId || snapshot.isStreaming || snapshot.isCompacting) throw new Error("The selected session is not ready to restore");
+      if (!runtimeCommandService.invoke) throw new Error("Session tree restoration is unavailable");
+      const tree = await sessionRef.current!.controller.invoke({ type: "studio.request", requestId: randomUUID() as import("@omp-studio/studio-protocol").RequestId, runtimeEpoch: snapshot.runtimeEpoch, operation: { kind: "session.tree.get" } });
+      if (tree.status !== "completed") throw new Error("Unable to read the current session branch");
+      return tree.result as { leafId: string | null; supportsExactRestore?: boolean };
+    },
+    navigate: async leafId => await runtimeCommandService.invoke!({ kind: "session.tree.navigate", targetId: leafId ?? "root", exactLeaf: true, restoreRoot: leafId === null }, randomUUID() as import("@omp-studio/client-contract").CommandRequestId) as { cancelled?: boolean },
+  });
   const options: StudioHostClientFacadeOptions = {
     authority: context.authority,
     platform: context.platform,
@@ -892,6 +919,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     catalog,
     residents,
     archive,
+    timeTravel: timeTravelPort,
     telemetryStore,
     telemetryProbe,
     telemetryProbeWorkspace,

@@ -36,6 +36,7 @@ export interface RemoteConnectionStatus {
   totalBytes?: number;
   networkRoute?: "remote" | "local";
   networkMessage?: string;
+  timeTravelSync?: "pending" | "synced" | "unsupported" | "error";
 }
 export interface RemoteInventory { profiles: RemoteConnectionProfile[]; statuses: RemoteConnectionStatus[]; activeId?: string | null; }
 export interface RemoteDirectoryList { path: string; parent: string; directories: { name: string; path: string }[]; }

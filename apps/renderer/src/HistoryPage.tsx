@@ -1,3 +1,4 @@
+import { timeTravelPreview } from "./preview/timeTravelPreview";
 import { ResumeScopePane } from "./history/ResumeScopePane";
 import { SessionPortabilityPane } from "./history/SessionPortabilityPane";
 import { SeanceDialog } from "./history/SeanceDialog";
@@ -8,7 +9,7 @@ import { previewSessionTitle } from "./preview/sessionTitlePreview";
 import { NativeArchivePane, type NativeHistoryContext } from "./history/NativeArchivePane";
 import { WorkspaceTabs, WorkspacePanel } from "./workspaces/Workspace";
 import { SessionImportPanel } from "./SessionImportPanel";
-import type { StudioClient, WorkspaceId } from "@omp-studio/client-contract";
+import type { StudioClient, SessionId, WorkspaceId } from "@omp-studio/client-contract";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SessionHistoryEntry, SessionHistoryReadModel, SessionHistoryStatus } from "@omp-studio/client-contract";
@@ -18,12 +19,13 @@ import type { PageRoute } from "./HomePage";
 import { usePreviewMode } from "./preview/PreviewContext";
 import {
   PREVIEW_HISTORY,
-  PREVIEW_TIME_TRAVEL,
   type PreviewHistoryRow,
   type PreviewHistoryStatus,
-  type PreviewTtNode,
 } from "./preview/fixtures";
 import { useI18n } from "./i18n";
+import { useTimeTravelSettings } from "./history/useTimeTravelSettings";
+import { TimeTravelPane } from "./history/TimeTravelPane";
+import { TimeTravelEntry } from "./history/TimeTravelActivation";
 
 /** 工具栏状态筛选：纯客户端过滤已加载的会话模型，不涉及 Host 契约。 */
 type StatusTab = "all" | "active" | "archived";
@@ -51,12 +53,6 @@ const HOST_STATUS: Record<SessionHistoryStatus, { chip: string; key: string }> =
   archived: { chip: "gray", key: "history.archived" },
   closed: { chip: "gray", key: "history.closed" },
 };
-
-const TT_RESTORE = {
-  code: "history.restoreCodeOnly",
-  convo: "history.restoreConvoOnly",
-  both: "history.restoreBoth",
-} as const;
 
 function formatHostTime(value: string, t: (key: string) => string): string {
   const then = Date.parse(value);
@@ -299,6 +295,7 @@ function HostHistRow({
   onUnarchive,
   onMore,
   onConsult,
+  onTimeTravel,
 }: {
   entry: SessionHistoryEntry;
   lease?: boolean | null | undefined;
@@ -308,6 +305,7 @@ function HostHistRow({
   onMore: (event: React.MouseEvent<HTMLButtonElement>) => void;
   /** Undefined when no live session can run the consult (or this is the live session). */
   onConsult: (() => void) | undefined;
+  onTimeTravel: (() => void) | undefined;
 }) {
   const status = HOST_STATUS[entry.status];
   const archived = entry.status === "archived";
@@ -331,6 +329,7 @@ function HostHistRow({
       </a>
       <span className={`chip ${status.chip}`}>{t(status.key)}</span>
       <div className="h-acts">
+        {onTimeTravel ? <button type="button" className="icon-btn small" data-tip="Time Travel" aria-label="Time Travel" onClick={onTimeTravel}><Icon name="history" extra="sm" /></button> : null}
         <button
           type="button"
           className="icon-btn small"
@@ -350,37 +349,10 @@ function HostHistRow({
   );
 }
 
-function TimeTravelRail({ onRestore }: { onRestore: (kind: keyof typeof TT_RESTORE) => void }) {
-  const { t } = useI18n();
-  return (
-    <div className="tt-rail">
-      {PREVIEW_TIME_TRAVEL.map((node: PreviewTtNode, index) => (
-        <div className={`tt-node ${node.kind}`} key={`${node.kind}-${node.time}-${index}`}>
-          <div className="tt-card">
-            <div className="tt-card-head">
-              <b>{node.title}</b>
-              <span className="tiny muted mono">{node.time}</span>
-              {node.restorable ? <span className="chip purple xs">{t("history.restorable")}</span> : null}
-              {node.restorable ? <span className="spacer" /> : null}
-              {node.restorable ? (
-                <>
-                  <button type="button" className="btn small outline" onClick={() => onRestore("code")}>{t("history.btnRestoreCode")}</button>
-                  <button type="button" className="btn small outline" onClick={() => onRestore("convo")}>{t("history.btnRestoreConvo")}</button>
-                  <button type="button" className="btn small primary" onClick={() => onRestore("both")}>{t("history.btnRestoreBoth")}</button>
-                </>
-              ) : null}
-            </div>
-            <div className="small muted tt-card-body">{node.detail}</div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function HistoryPage({
  nativeContext,
   client, onImportedOpen, onImported,
+  workspaceId,
   history,
   onRoute,
   onSelectThread,
@@ -390,6 +362,7 @@ export function HistoryPage({
 }: {
   nativeContext?: NativeHistoryContext;
   client?: StudioClient;
+  workspaceId?: string | undefined;
   onRenameSession?: (entry: SessionHistoryEntry) => void;
   onPinSession?: (entry: SessionHistoryEntry) => void;
   onImportedOpen?: (sessionId: string, workspaceId: WorkspaceId) => void;
@@ -403,6 +376,7 @@ export function HistoryPage({
   onDeleteSession?: (entry: SessionHistoryEntry, deleteManagedArtifacts?: boolean) => Promise<boolean> | boolean;
 }) {
   const { preview, marks } = usePreviewMode();
+  const timeTravelSettings = useTimeTravelSettings(client);
   const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [workspaceTab,setWorkspaceTab] = useState<"catalog"|"archive"|"transfer">("catalog");
@@ -420,6 +394,7 @@ export function HistoryPage({
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>(undefined);
   const [consult, setConsult] = useState<{ source: string; title: string } | null>(null);
+  const [timeTravelSession, setTimeTravelSession] = useState<SessionId>();
   const canConsult = !!(nativeContext?.available && nativeContext.sessionId && nativeContext.capabilities?.capabilities.some((item) => item.id === "seance.ask" && item.grade !== "unavailable"));
 
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -476,6 +451,14 @@ export function HistoryPage({
     [history, q, statusTab, t],
   );
   const historySessionIds = useMemo(() => (history?.entries ?? []).flatMap(row => row.sessionId ? [row.sessionId] : []), [history?.entries]);
+  useEffect(() => {
+    setTimeTravelSession(undefined);
+  }, [workspaceId]);
+  useEffect(() => {
+    if (timeTravelSession && historySessionIds.includes(timeTravelSession)) return;
+    setTimeTravelSession(historySessionIds.find(id => id === nativeContext?.sessionId) ?? historySessionIds[0]);
+  }, [historySessionIds, nativeContext?.sessionId, timeTravelSession]);
+  const timeTravelEntry = history?.entries.find(row => row.sessionId === timeTravelSession);
   const leaseAvailable = !!nativeContext?.available && !!nativeContext.capabilities?.capabilities.some(row => row.id === "session.lease.inspect" && row.grade !== "unavailable");
 
   useEffect(() => {
@@ -577,23 +560,13 @@ export function HistoryPage({
                 onUnarchive={entry.status === "archived" && onUnarchive !== undefined ? () => onUnarchive(entry) : undefined}
                 onMore={(event) => openMenu(entry.historyId, event)}
                 onConsult={canConsult && entry.sessionId && entry.sessionId !== nativeContext?.sessionId ? () => setConsult({ source: entry.sessionId!, title: hostHistoryTitle(entry, t("conversation.untitledSession")) }) : undefined}
+                onTimeTravel={timeTravelSettings.settings?.enabled && entry.sessionId ? () => setTimeTravelSession(entry.sessionId) : undefined}
               />
             ))
             : <HistEmpty text={history ? t("history.noMatches") : t("history.catalogUnavailable")} />)}
         <div className="sr-only" role="status" aria-live="polite">{live}</div>
       </section>
-      <section aria-labelledby="ttHeading">
-        <h2 className="tt-heading" id="ttHeading">Time Travel</h2>
-        <p className="muted small tt-desc">{t("history.timeTravelDesc")}</p>
-        {preview ? (
-          <TimeTravelRail onRestore={(kind) => { if (marks) show(t("history.demoRestoreToast", { desc: t(TT_RESTORE[kind]) }), "history"); }} />
-        ) : (
-          <div className="empty">
-            <Icon name="history" />
-            {t("shell.previewUnavailableDetail")}
-          </div>
-        )}
-      </section>
+      {!timeTravelSettings.settings?.enabled ? <TimeTravelEntry client={client} expanded /> : <TimeTravelPane key={`${workspaceId}:${timeTravelEntry?.sessionId}:${preview}`} client={client} entry={preview ? timeTravelPreview.entry : timeTravelEntry} onOpen={() => { if (timeTravelEntry) onSelectThread(timeTravelEntry); }} />}
       <HistMoreMenu
         open={menu !== null}
         rect={menu?.rect ?? null}

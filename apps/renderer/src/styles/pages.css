@@ -675,6 +675,9 @@ img.profile-edit-avatar-img { display: block; }
 
 /* Time Travel */
 .tt-rail { position: relative; padding-left: 28px; }
+.tt-actions { display: flex; flex-wrap: wrap; gap: var(--sp-8); margin-top: var(--sp-8); }
+.tt-branches { width: 100%; margin-bottom: var(--sp-12); }
+.tt-restore-list { max-height: 45vh; overflow: auto; overflow-wrap: anywhere; }
 .tt-rail::before {
   content: ""; position: absolute; left: 9px; top: 6px; bottom: 6px;
   width: 2px; background: var(--border-strong); border-radius: 2px;

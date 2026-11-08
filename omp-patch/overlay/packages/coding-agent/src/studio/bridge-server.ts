@@ -30,7 +30,7 @@ const UPSTREAM_COMMIT = "b5a6b2f7e5b6606b6562e678ead83f21738f34a0";
  * refuses to sign an artifact whose probed identity disagrees with the series,
  * so a stale value here fails the build (see `scripts/build-omp-host.mjs`).
  */
-const PATCHSET_VERSION = "studio.48";
+const PATCHSET_VERSION = "studio.51";
 
 /** Reads and interrupts must not wait for `core.prompt` to finish. Prompt holds
  *  `#dispatchQueue` for the whole turn, including 503 auto-retry backoff. */
@@ -117,6 +117,8 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 	#dispatcher: StudioBridgeDispatcher | undefined;
 	#unsubscribeProjector: (() => void) | undefined;
 	#unsubscribeComputer: (() => void) | undefined;
+	#unsubscribeTimeTravel: (() => void) | undefined;
+	#timeTravelCapture = false;
 	#dispatchQueue = Promise.resolve();
 	#firstSnapshot: PromiseWithResolvers<"ready" | "stopped" | "timeout"> | undefined;
 	#stopped = false;
@@ -140,6 +142,18 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 		this.#runtime = runtime;
 		this.#projector = new StudioStateProjector(runtime);
 		this.#dispatcher = new StudioBridgeDispatcher(runtime, this.#projector, () => {});
+		this.#unsubscribeTimeTravel = runtime.services.timeTravel?.subscribe(request => {
+			if (!this.#timeTravelCapture) {
+				runtime.services.timeTravel?.complete(request.requestId);
+				return;
+			}
+			const socket = this.#authenticatedSocket;
+			if (!socket || socket.destroyed) {
+				runtime.services.timeTravel?.complete(request.requestId, "Host is disconnected");
+				return;
+			}
+			socket.write(encodeStudioFrame(`time-travel:${request.requestId}`, runtime.runtimeEpoch, request));
+		});
 		this.#unsubscribeProjector = this.#projector.onEvent(event => {
 			try {
 				const socket = this.#authenticatedSocket;
@@ -215,6 +229,8 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 		this.#runtime = undefined;
 		this.#unsubscribeComputer?.();
 		this.#unsubscribeComputer = undefined;
+		this.#unsubscribeTimeTravel?.();
+		this.#unsubscribeTimeTravel = undefined;
 		this.#unsubscribeProjector?.();
 		this.#unsubscribeProjector = undefined;
 		this.#projector?.dispose();
@@ -265,6 +281,8 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 			this.#sockets.delete(socket);
 			if (this.#authenticatedSocket === socket) {
 				this.#authenticatedSocket = undefined;
+				this.#timeTravelCapture = false;
+				this.#runtime?.services.timeTravel?.disconnect();
 				// Congestion is a property of one peer; a reconnect starts even.
 				this.#congested = false;
 				this.#droppedEvents = 0;
@@ -284,6 +302,22 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 							frame.header.runtimeEpoch !== runtime.runtimeEpoch
 						)
 							throw new Error("Stale Runtime epoch");
+						if (
+							frame.body &&
+							typeof frame.body === "object" &&
+							"type" in frame.body &&
+							frame.body.type === "timeTravel.capture.result"
+						) {
+							const result = frame.body as unknown as {
+								requestId: string;
+								runtimeEpoch: number;
+								error?: string;
+							};
+							if (result.runtimeEpoch !== runtime.runtimeEpoch || typeof result.requestId !== "string")
+								throw new Error("Invalid snapshot result");
+							runtime.services.timeTravel?.complete(result.requestId, result.error);
+							continue;
+						}
 						const computer = frame.body as {
 							type?: string;
 							requestId?: string;
@@ -327,6 +361,8 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 						}
 						const request = parseStudioRequest(frame.body);
 						if (request.runtimeEpoch !== runtime.runtimeEpoch) throw new Error("Stale Runtime epoch");
+						if (request.operation.kind === "runtime.snapshot")
+							this.#timeTravelCapture = request.operation.timeTravelCapture === true;
 						const dispatch = () =>
 							dispatcher.dispatch(request, (frameId, body) => {
 								if (socket.destroyed || this.#authenticatedSocket !== socket) return;

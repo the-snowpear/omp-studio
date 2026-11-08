@@ -87,6 +87,7 @@ import { StudioRuntimeSettingsService } from "./services/runtime-settings-servic
 import { StudioSessionTranscriptService } from "./services/session-transcript-service";
 import { StudioTanError, StudioTanService } from "./services/tan-service";
 import { StudioTreeService } from "./services/tree-service";
+import { StudioTimeTravelBoundary } from "./services/time-travel-boundary";
 import { watchStudioParentFromEnv } from "./parent-watchdog";
 
 export interface StudioBridgeConfiguration {
@@ -106,6 +107,7 @@ interface StudioSessionSlot extends AgentSession {
 function createSessionSlot(initial: AgentSession): StudioSessionSlot {
 	let current = initial;
 	let beforeNextUserTurn: ((...args: never[]) => unknown) | undefined;
+	let afterUserTurn: (() => Promise<void>) | undefined;
 	let resetConsentHandler: Parameters<AgentSession["setResetConsentHandler"]>[0];
 	const subscriptions = new Map<(...args: never[]) => unknown, () => void>();
 	const sessionChangeCallbacks = new Map<(...args: never[]) => unknown, () => void>();
@@ -121,6 +123,7 @@ function createSessionSlot(initial: AgentSession): StudioSessionSlot {
 			sessionChangeCallbacks.set(listener, nextUnsubscribe);
 		}
 		if (next.setBeforeNextUserTurn) next.setBeforeNextUserTurn(beforeNextUserTurn as never);
+		next.setAfterUserTurn?.(afterUserTurn);
 		next.setResetConsentHandler?.(resetConsentHandler);
 	};
 	const slot = new Proxy(initial as StudioSessionSlot, {
@@ -159,6 +162,12 @@ function createSessionSlot(initial: AgentSession): StudioSessionSlot {
 				return (callback: ((...args: never[]) => unknown) | undefined) => {
 					beforeNextUserTurn = callback;
 					current.setBeforeNextUserTurn?.(callback as never);
+				};
+			}
+			if (property === "setAfterUserTurn") {
+				return (callback: (() => Promise<void>) | undefined) => {
+					afterUserTurn = callback;
+					current.setAfterUserTurn?.(callback);
 				};
 			}
 			if (property === "setResetConsentHandler") {
@@ -214,6 +223,7 @@ export interface StudioHostRuntime {
 		transcript: StudioSessionTranscriptService;
 		agentConversation: StudioAgentConversationService;
 		conversation?: ConversationProjectorHub;
+		timeTravel?: StudioTimeTravelBoundary;
 	}>;
 	readonly bridgeConfig: Readonly<StudioBridgeConfiguration>;
 	waitForShutdown(): Promise<void>;
@@ -561,12 +571,16 @@ export function createStudioHostRuntime(
 	const permissions = new StudioPermissionControlService(session);
 	const settings = new StudioRuntimeSettingsService(session);
 	const prediction = workbench.prediction;
+	const timeTravel = new StudioTimeTravelBoundary(session, bridgeConfig.runtimeEpoch as number);
 	session.setBeforeNextUserTurn(async () => {
 		await workbench.worktrees.ensureStartResolved();
 		await models.applyPending();
 		await modes.applyPending();
 		await permissions.applyPending();
+		attachQueueCapture();
+		await timeTravel.capture("before");
 	});
+	session.setAfterUserTurn?.(() => timeTravel.capture("after"));
 	const interaction = new StudioInteractionGateway((message, level) =>
 		session.emitNotice(level, message, "extension"),
 	);
@@ -1004,9 +1018,22 @@ export function createStudioHostRuntime(
 	let shutdownRequested = false;
 	let disposed = false;
 	let loopSessionId = session.sessionManager.getSessionId();
+	let unsubscribeQueueCapture = () => {};
+	const attachQueueCapture = () => {
+		unsubscribeQueueCapture();
+		const agent = session.agent;
+		unsubscribeQueueCapture =
+			agent?.addBeforeQueuedMessageDequeueHook?.(async () => {
+				const queued = [...agent.peekSteeringQueue(), ...agent.peekFollowUpQueue()];
+				if (!queued.some(message => message.role === "user")) return;
+				await timeTravel.capture("before");
+			}) ?? (() => {});
+	};
+	attachQueueCapture();
 	const unsubscribeSessionChange =
 		typeof session.registerSessionChangeCallback === "function"
 			? session.registerSessionChangeCallback(() => {
+					attachQueueCapture();
 					const nextSessionId = session.sessionManager.getSessionId();
 					if (nextSessionId !== loopSessionId) {
 						loopSessionId = nextSessionId;
@@ -1023,7 +1050,9 @@ export function createStudioHostRuntime(
 				})
 			: () => {};
 	const unsubscribe = session.subscribe(event => {
-		if (event.type === "agent_end") loop.scheduleNext();
+		if (event.type === "agent_end") {
+			loop.scheduleNext();
+		}
 	});
 	return Object.freeze({
 		runtimeId: createRuntimeId(),
@@ -1102,6 +1131,7 @@ export function createStudioHostRuntime(
 			transcript,
 			agentConversation,
 			conversation,
+			timeTravel,
 		}),
 		bridgeConfig: Object.freeze({ ...bridgeConfig }),
 		waitForShutdown: () => shutdownSignal.promise,
@@ -1115,7 +1145,10 @@ export function createStudioHostRuntime(
 			disposed = true;
 			credentialBroker.close();
 			performanceSampler.dispose();
+			unsubscribeQueueCapture();
+			timeTravel.dispose();
 			session.setBeforeNextUserTurn(undefined);
+			session.setAfterUserTurn?.(undefined);
 			session.setResetConsentHandler?.(undefined);
 			cfg.dispose();
 			unsubscribe();

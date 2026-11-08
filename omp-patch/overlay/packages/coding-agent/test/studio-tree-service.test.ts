@@ -25,6 +25,7 @@ describe("WP-034 StudioTreeService", () => {
 		} as unknown as AgentSession;
 		const result = new StudioTreeService(session, new StudioScriptedInteractionPort([])).getTree();
 		expect(result).toEqual({
+			supportsExactRestore: true,
 			leafId: "entry-1",
 			roots: [
 				{

@@ -1,0 +1,422 @@
+.tt-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 3px 8px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-6);
+  font: inherit;
+  font-size: var(--fs-11);
+  white-space: nowrap;
+  transition:
+    background 140ms,
+    border-color 140ms;
+}
+.tt-entry:hover {
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+.tt-entry:disabled {
+  opacity: 0.5;
+}
+.tt-entry-state {
+  padding-left: 6px;
+  border-left: 1px solid var(--border-strong);
+  color: var(--accent);
+}
+.tt-entry.is-enabled .tt-entry-state {
+  color: var(--text-2);
+}
+.tt-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-2);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+}
+.tt-muted {
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 1.6;
+}
+.tt-error {
+  padding: 10px 12px;
+  color: var(--red);
+  background: var(--red-soft);
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.tt-intro {
+  align-self: start;
+  padding: 28px 24px;
+  border-left: 1px solid var(--border);
+}
+.tt-intro-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 24px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-8);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.tt-intro-icon .icon {
+  width: 22px;
+  height: 22px;
+}
+.tt-intro h2 {
+  max-width: 22ch;
+  margin: 10px 0 12px;
+  color: var(--text);
+  font-size: 21px;
+  font-weight: var(--fw-semibold);
+  line-height: 1.5;
+  letter-spacing: -0.02em;
+}
+.tt-intro p {
+  max-width: 40ch;
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 1.8;
+}
+.tt-intro > small {
+  display: block;
+  margin-top: 12px;
+  color: var(--text-2);
+  font-size: var(--fs-11);
+}
+.tt-intro-flow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 30px 0;
+  color: var(--text-2);
+}
+.tt-intro-flow > span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-11);
+}
+.tt-intro-flow > i {
+  height: 1px;
+  flex: 1;
+  max-width: 36px;
+  background: var(--border-strong);
+}
+.tt-dialog {
+  margin: auto;
+  padding: 0;
+  width: min(580px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-10);
+  font: inherit;
+  box-shadow: 0 24px 80px #0003;
+}
+.tt-dialog[open] {
+  animation: tt-dialog-in 180ms ease-out;
+}
+.tt-dialog::backdrop {
+  background: #10101780;
+  animation: tt-fade-in 160ms ease-out;
+}
+.tt-dialog-head {
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+  padding: 24px 24px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.tt-dialog-head .icon-btn {
+  flex-shrink: 0;
+  align-self: start;
+}
+.tt-dialog-head h2 {
+  margin: 10px 0 8px;
+  font-size: 21px;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+  font-weight: var(--fw-semibold);
+}
+.tt-dialog-head p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 1.7;
+}
+.tt-dialog-body {
+  padding: 0 24px 20px;
+}
+.tt-dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 24px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+  position: sticky;
+  bottom: 0;
+}
+.tt-risk-list > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+.tt-risk-list > div:last-child {
+  border-bottom: 0;
+}
+.tt-risk-list > div > .icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-2);
+}
+.tt-risk-list h3 {
+  margin: 0 0 6px;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+}
+.tt-risk-list p,
+.tt-note p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 1.75;
+}
+.tt-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: var(--r-6);
+}
+.tt-note > .icon {
+  margin-top: 3px;
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+.tt-storage {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+}
+.tt-storage > .icon {
+  color: var(--text-2);
+  width: 24px;
+  height: 24px;
+}
+.tt-storage > div {
+  flex: 1;
+}
+.tt-storage strong {
+  font-size: 18px;
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.tt-storage p {
+  margin: 4px 0 0;
+  font-size: var(--fs-11);
+  color: var(--text-2);
+}
+.tt-exclusions {
+  width: min(240px, 100%);
+  font-family: var(--font-mono);
+  resize: vertical;
+}
+.tt-pane {
+  min-width: 0;
+}
+.tt-pane-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.tt-pane-head h2 {
+  font-size: var(--fs-14);
+  margin: 0 0 6px;
+}
+.tt-pane-head p {
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.tt-pane .tt-rail {
+  padding-left: 24px;
+}
+.tt-pane .tt-rail::before {
+  width: 1px;
+  left: 5px;
+}
+.tt-pane .tt-node::before {
+  width: 8px;
+  height: 8px;
+  left: -23px;
+  top: 17px;
+}
+.tt-pane .tt-node .tt-card {
+  background: transparent;
+  border-color: transparent;
+  padding: 12px 14px;
+}
+.tt-pane .tt-node.checkpoint .tt-card {
+  background: var(--surface);
+  border-color: var(--accent-border);
+}
+.tt-pane .tt-node.checkpoint::before {
+  width: 10px;
+  height: 10px;
+  left: -24px;
+  background: var(--accent-soft);
+}
+.tt-pane .tt-card-body {
+  margin-top: 7px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tt-pane .tt-card-body.tt-event-detail {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tt-pane .tt-card-head {
+  gap: 6px 10px;
+}
+.tt-pane .tt-card-head time {
+  margin-left: auto;
+  color: var(--text-2);
+}
+.tt-pane .tt-event-restore {
+  margin-top: 8px;
+}
+.tt-pane .tt-actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.tt-state {
+  padding: 28px 0;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 1.8;
+}
+.tt-change-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 20px 0 12px;
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+.tt-change-summary b {
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+}
+.tt-file-list {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+}
+.tt-file-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-12);
+}
+.tt-file-row:last-child {
+  border-bottom: 0;
+}
+.tt-file-row code {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.tt-file-row > span {
+  font-size: var(--fs-11);
+  color: var(--text-2);
+}
+.tt-file-row.add > span {
+  color: var(--green);
+}
+.tt-file-row.delete > span {
+  color: var(--red);
+}
+@keyframes tt-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes tt-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (max-width: 600px) {
+  .tt-dialog-head,
+  .tt-dialog-body {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .tt-dialog-foot {
+    padding: 14px 18px;
+  }
+  .tt-intro {
+    padding: 20px 0;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .tt-entry > span:not(.tt-entry-state) {
+    display: none;
+  }
+  .tt-storage {
+    flex-wrap: wrap;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tt-dialog[open],
+  .tt-dialog::backdrop {
+    animation: none;
+  }
+  .tt-entry {
+    transition: none;
+  }
+}

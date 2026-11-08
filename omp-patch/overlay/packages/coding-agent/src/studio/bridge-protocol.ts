@@ -90,7 +90,7 @@ export type StudioOperation =
 	| WorkbenchOperation
 	| UpgradeOperation
 	| EvaluationOperation
-	| { kind: "runtime.snapshot" }
+	| { kind: "runtime.snapshot"; timeTravelCapture?: boolean }
 	| { kind: "runtime.settings.get"; keys?: StudioRuntimeSettingKey[]; checkHindsight?: boolean }
 	| { kind: "runtime.settings.set"; key: StudioRuntimeSettingKey; value: unknown; persist: boolean }
 	| { kind: "runtime.pause" }
@@ -122,6 +122,8 @@ export type StudioOperation =
 			summarize?: boolean;
 			customInstructions?: string;
 			reanswer?: unknown;
+			exactLeaf?: boolean;
+			restoreRoot?: boolean;
 	  }
 	| { kind: "session.tree.branch"; targetId: string }
 	| { kind: "turn.retry" }
@@ -643,6 +645,8 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			break;
 		}
 		case "runtime.snapshot":
+			exactKeys(operation, ["kind", "timeTravelCapture"]);
+			break;
 		case "runtime.pause":
 			exactKeys(operation, ["kind"]);
 			break;
@@ -1047,7 +1051,15 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			exactKeys(operation, ["kind"]);
 			break;
 		case "session.tree.navigate":
-			exactKeys(operation, ["kind", "targetId", "summarize", "customInstructions", "reanswer"]);
+			exactKeys(operation, [
+				"kind",
+				"targetId",
+				"summarize",
+				"customInstructions",
+				"reanswer",
+				"exactLeaf",
+				"restoreRoot",
+			]);
 			if (!nonEmptyString(operation.targetId)) throw new StudioFrameError("Invalid tree target");
 			if (operation.summarize !== undefined && typeof operation.summarize !== "boolean") {
 				throw new StudioFrameError("Invalid tree summarize option");
@@ -1055,6 +1067,10 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			if (operation.customInstructions !== undefined && !nonEmptyString(operation.customInstructions)) {
 				throw new StudioFrameError("Invalid tree instructions");
 			}
+			if (operation.exactLeaf !== undefined && typeof operation.exactLeaf !== "boolean")
+				throw new StudioFrameError("Invalid exact leaf option");
+			if (operation.restoreRoot !== undefined && typeof operation.restoreRoot !== "boolean")
+				throw new StudioFrameError("Invalid root option");
 			break;
 		case "session.tree.branch":
 			exactKeys(operation, ["kind", "targetId"]);
@@ -1153,6 +1169,7 @@ export function stableEmptyManifestHash(kind: "capabilities" | "commands"): stri
 }
 
 export const STUDIO_IMPLEMENTED_CAPABILITIES = [
+	"timeTravel.capture",
 	...COMPUTER_WORKSPACE_QUERY_KINDS,
 	...CONTEXT_VIEW_KINDS,
 	...RUNTIME_VIEW_KINDS,

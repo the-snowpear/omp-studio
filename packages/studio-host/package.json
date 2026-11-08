@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@omp-studio/runtime-installer": "0.1.17",
-    "@omp-studio/studio-protocol": "0.1.17"
+    "@omp-studio/studio-protocol": "0.1.17",
+    "ignore": "^7.0.6"
   }
 }

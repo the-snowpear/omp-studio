@@ -21,6 +21,7 @@ export * from "./runtime-pty-transport.js";
 export * from "./runtime-resolver.js";
 export * from "./runtime-session-controller.js";
 export * from "./telemetry-events.js";
+export * from "./time-travel-store.js";
 export * from "./session-catalog.js";
 export * from "./session-archive-reader.js";
 export * from "./session-archive-service.js";

@@ -19,6 +19,7 @@ export const CORE_NODE_SUITES = [
   "packages/studio-host/dist/test/conversation-open-slice.test.js",
   "packages/studio-host/dist/test/session-catalog.test.js",
   "packages/studio-host/dist/test/session-delete-service.test.js",
+  "packages/studio-host/dist/test/time-travel-store.test.js",
   "packages/host-client-api/dist/test/conversation-open.test.js",
   "packages/host-client-api/dist/test/facade-history.test.js",
   "packages/host-client-api/dist/test/snapshot-clone.test.js",
@@ -26,6 +27,8 @@ export const CORE_NODE_SUITES = [
   "apps/desktop/dist/test/runtime-session.test.js",
   "apps/desktop/dist/test/runtime-multi-session.test.js",
   "apps/desktop/dist/test/session-commands.test.js",
+  "apps/desktop/dist/test/time-travel-service.test.js",
+  "apps/desktop/dist/test/time-travel-port.test.js",
   // Local file writes, Electron boundaries, installation and update recovery.
   "apps/desktop/dist/test/workspace-files.test.js",
   "apps/desktop/dist/test/file-resources.test.js",

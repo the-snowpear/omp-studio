@@ -86,8 +86,9 @@ export class StudioTreeService {
 		return expandModelMentionTags(text, agent => selectors.get(agent));
 	}
 
-	getTree(): { leafId: string | null; roots: StudioTreeNode[] } {
+	getTree(): { leafId: string | null; roots: StudioTreeNode[]; supportsExactRestore: true } {
 		return {
+			supportsExactRestore: true,
 			leafId: this.session.sessionManager.getLeafId(),
 			roots: this.session.sessionManager.getTree().map(projectNode),
 		};
@@ -95,15 +96,26 @@ export class StudioTreeService {
 
 	async navigate(
 		commandId: string,
-		input: { targetId: string; summarize?: boolean; customInstructions?: string },
+		input: {
+			targetId: string;
+			summarize?: boolean;
+			customInstructions?: string;
+			exactLeaf?: boolean;
+			restoreRoot?: boolean;
+		},
 	): Promise<unknown> {
 		if (this.session.isStreaming) throw new StudioTreeError("BUSY_STREAMING", "Runtime is streaming");
 		if (this.session.isCompacting) throw new StudioTreeError("BUSY_COMPACTING", "Runtime is compacting");
 		const mentions = [...(this.session.modelMentions ?? [])];
-		let result = await this.session.navigateTree(input.targetId, {
+		const targetId = input.restoreRoot ? this.session.sessionManager.getLeafId() : input.targetId;
+		if (targetId === null) return { cancelled: false, leafId: null };
+		let result = await this.session.navigateTree(targetId, {
 			summarize: input.summarize,
 			customInstructions: input.customInstructions,
-			allowAskReopen: true,
+			allowAskReopen: !input.exactLeaf && !input.restoreRoot,
+			exactLeaf: input.exactLeaf,
+			restoreRoot: input.restoreRoot,
+			requireIdle: input.exactLeaf || input.restoreRoot,
 		});
 		if (result.reopenAsk !== undefined) {
 			if (this.interaction === undefined) {
@@ -129,6 +141,13 @@ export class StudioTreeService {
 			});
 		}
 		if (result.askReanswerCommitted) this.session.resumeAfterAskReanswer();
+		if (!result.cancelled && (input.exactLeaf || input.restoreRoot)) {
+			// A metadata child makes the chosen branch survive a restart without truncating history.
+			this.session.sessionManager.appendCustomEntry("studio-time-travel", {
+				targetId: this.session.sessionManager.getLeafId(),
+			});
+			await this.session.sessionManager.flush();
+		}
 		const editorImages = editorImagesFrom(result.editorImages);
 		return {
 			cancelled: result.cancelled,

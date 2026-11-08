@@ -1,3 +1,4 @@
+import { TimeTravelSettings } from "./settings/TimeTravelSettings";
 import { FileViewerSettings, OfficeComponentSettings } from "./files/FileViewerSettings";
 import { SessionWorktreesPane } from "./workspaces/SessionWorktreesPane";
 import { BackgroundSettingsPane } from "./settings/BackgroundSettingsPane";
@@ -290,7 +291,7 @@ function SettingsPageContent({
   const groupContent = (id: GroupId) => {
     const visible = group === id;
     switch (id) {
-      case "general": return <LocalSettings ctl={ctl} section="general" />;
+      case "general": return <><LocalSettings ctl={ctl} section="general" /><TimeTravelSettings client={client} visible={visible} /></>;
       case "appearance": return <><LocalSettings ctl={ctl} section="appearance" /><BackgroundSettingsPane ctl={ctl} visible={visible} onDemoAction={flashDemo} /></>;
       case "interaction": return <>
         <LocalSettings ctl={ctl} section="interaction" />

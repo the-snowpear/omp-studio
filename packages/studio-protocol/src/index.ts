@@ -1,4 +1,5 @@
 export * from "./contracts/runtime-views.js";
+export * from "./contracts/time-travel.js";
 export * from "./contracts/shell-view.js";
 export * from "./contracts/advisor-config.js";
 export * from "./contracts/local-resources.js";

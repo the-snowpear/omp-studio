@@ -19,6 +19,7 @@ import { remotePlatform, secureRemoteDirectory } from "./platform.js";
 import { RemoteNetworkProxy } from "./network-proxy.js";
 import { applyRemoteProvisioning, type RemoteProvisioning } from "./provisioning.js";
 import { TransientMemoryCredentials, type MemoryCredentialEntry } from "../memory-credentials.js";
+import { timeTravelService, type TimeTravelSettings } from "../time-travel-service.js";
 
 export interface RemoteHostOptions {
   readonly stateDirectory: string;
@@ -27,6 +28,7 @@ export interface RemoteHostOptions {
 }
 
 export interface RemoteHost {
+  updateTimeTravelSettings?(settings: TimeTravelSettings): Promise<void>;
   readonly network?: RemoteNetworkProxy;
   provision?(input: RemoteProvisioning): Promise<void>;
   replaceMemoryCredentials?(entries: MemoryCredentialEntry[]): void;
@@ -107,6 +109,7 @@ export async function createRemoteHost(options: RemoteHostOptions): Promise<Remo
     });
     const host = composition;
     return {
+      updateTimeTravelSettings: async settings => { await timeTravelService(stateDirectory).updateSettings(settings); },
       network,
       provision: input => applyRemoteProvisioning(stateDirectory, network.brokerUrl, input),
       replaceMemoryCredentials: entries => memoryCredentials.replace(entries),

@@ -171,6 +171,7 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
  * listed explicitly as `false`.
  */
 const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
+ "timeTravel.settings.set": true, "timeTravel.restore": true, "timeTravel.cleanup": true,
  "extensions.links.activate": true, "browser.webmcp.invoke": true,
  "session.compaction.enqueue": true, "session.compaction.cancel": false, "session.compaction.status": false,
  "session.history.rename": true, "session.history.pin": true, "session.lease.inspect": false,
@@ -628,7 +629,10 @@ function markPendingOutcomeUnknown(
  * Some of them intentionally stop or replace a Runtime while still in flight,
  * so a Runtime identity change cannot make their outcome ambiguous. */
 function preserveHostOwnedCommand(command: CommandState): boolean {
-  return command.commandName === "runtime.ensure"
+  return command.commandName === "timeTravel.restore"
+    || command.commandName === "timeTravel.settings.set"
+    || command.commandName === "timeTravel.cleanup"
+    || command.commandName === "runtime.ensure"
     || command.commandName === "workspace.open"
     || command.commandName === "workspace.pick"
     || command.commandName === "session.archive"

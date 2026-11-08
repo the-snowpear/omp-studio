@@ -8,6 +8,7 @@ Public documentation for OMP Studio.
 | [../README.en.md](../README.en.md) | English overview |
 | [getting-started.md](getting-started.md) | Run from source |
 | [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
+| [time-travel.md](time-travel.md) | Time Travel 开启、检查点、代码/对话恢复、存储与限制 |
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |
 | [../doc/ssh-workspace-test-prompt.md](../doc/ssh-workspace-test-prompt.md) | SSH 与账密功能的独立测试交接提示词 |
 | [model-adaptation.md](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |

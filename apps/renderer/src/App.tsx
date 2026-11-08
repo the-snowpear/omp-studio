@@ -6,6 +6,7 @@ import { ConversationWorkspace } from "./conversationWorkspace/Workspace";
 import { initializeConversationClient, resyncConversationClient } from "./conversationWorkspace/client";
 import { ConversationTitleSurface, SharedSurface, ShellReadinessContext, useAllWindowed, useConversationWorkspace, useConversationView, useConversationDom } from "./conversationWorkspace/Context";
 import { ConversationFloatingHeader, type ConversationHeaderStatus } from "./conversationWorkspace/Header";
+import { TimeTravelEntry } from "./history/TimeTravelActivation";
 import { EvaluationActivity } from "./evaluation/EvaluationActivity";
 import { GitWorkbench, type GitOpenIntent } from "./git/GitWorkbench";
 import { GitQuickCard } from "./git/GitQuickCard";
@@ -3319,6 +3320,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
       </div>
     </header>
     <ConversationFloatingHeader title={crumbThread} titleRow={titleRow}
+      timeTravel={<TimeTravelEntry client={client ?? undefined} onOpen={() => { revealMainWindow(); onRoute("history"); }} />}
       source={{ project: crumbProject, branch: crumbBranch, path: preview ? previewProject?.path : realActiveWorkspace?.root, connection: executionTarget.id === null ? undefined : executionTarget.name }}
       status={floatingStatus} onDetailsChange={setFloatingDetails}
       windowed={windowed} projectMenu={close => projectMenu(action => { close(); run(action); }, true)} branchMenu={close => branchMenu(action => { close(); run(action); }, true)}
@@ -9054,6 +9056,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
               return (
                 <HistoryPage
                   nativeContext={{ sessionId:snapshot?.sessionId, available:hubRuntimeConnected, capabilities }}
+                  workspaceId={hubWorkspaceId}
                   client={client}
                   onImported={() => void refreshHistoryModels()}
                   onImportedOpen={(sessionId, workspaceId) => { void client.query("history.list", { workspaceId, limit: PROJECT_THREADS_QUERY_MAX }).then(history => { const entry = history.entries.find(item => item.sessionId === sessionId); if (entry) void openHistoryEntry(entry, workspaceId); else setSessionActionError("Imported session is not yet available; refresh history"); }); }}

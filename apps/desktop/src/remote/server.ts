@@ -61,7 +61,7 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
     }).catch(() => { idleSince = Date.now(); }).finally(() => { checkingIdle = false; });
   }, 60_000);
   idleTimer.unref();
-  const hello: RemoteHello = { protocolVersion: REMOTE_PROTOCOL_VERSION, platform: remotePlatform(process.platform), arch: process.arch, bundleVersion, instanceId: name, capabilities: [...(host.replaceMemoryCredentials ? ["memory.credentials"] : []), ...(host.composition.transport.openContext ? ["session.contexts"] : [])] };
+  const hello: RemoteHello = { protocolVersion: REMOTE_PROTOCOL_VERSION, platform: remotePlatform(process.platform), arch: process.arch, bundleVersion, instanceId: name, capabilities: [...(host.replaceMemoryCredentials ? ["memory.credentials"] : []), ...(host.composition.transport.openContext ? ["session.contexts"] : []), ...(host.updateTimeTravelSettings ? ["timeTravel.settings"] : [])] };
   const server = createServer(socket => {
     const peer = new RemotePeer(socket, socket);
     peers.add(peer);
@@ -134,6 +134,11 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
           host.network?.configure(mode); return { configured: true };
         }
         case "network.reset": host.network?.reset(); return { reset: true };
+        case "timeTravel.settings.sync": {
+          if (!host.updateTimeTravelSettings) throw new Error("Time Travel settings are unavailable");
+          await host.updateTimeTravelSettings(input as import("../time-travel-service.js").TimeTravelSettings);
+          return { applied: true };
+        }
         case "provisioning.apply": {
           if (!host.provision) throw new Error("Remote provisioning is unavailable");
           await host.provision(input as RemoteProvisioning); return { applied: true };

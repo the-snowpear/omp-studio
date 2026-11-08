@@ -136,6 +136,7 @@ async function listenForHello(
     snapshot?: (requestId: string, hello: StudioHelloResponse) => StudioSnapshotResponse;
     onRequest?: (request: StudioRequest, socket: Socket, hello: StudioHelloResponse) => void;
     onComputerQuery?: (request: StudioComputerQueryRequest, socket: Socket, hello: StudioHelloResponse) => void;
+    onTimeTravelResult?: (result: { requestId: string; error?: string }) => void;
   } = {},
 ): Promise<{
   endpoint: string;
@@ -171,6 +172,10 @@ async function listenForHello(
             hooks.onComputerQuery(frame.body as StudioComputerQueryRequest, socket, negotiated);
             continue;
           }
+          if ((frame.body as { type?: unknown }).type === "timeTravel.capture.result" && negotiated && hooks.onTimeTravelResult) {
+            hooks.onTimeTravelResult(frame.body as { requestId: string; error?: string });
+            continue;
+          }
           const request = parseFoundationStudioRequest(frame.body);
           if (negotiated === undefined) throw new Error("Not ready");
           if (request.operation.kind !== "runtime.snapshot") {
@@ -203,6 +208,34 @@ async function listenForHello(
     },
   };
 }
+
+test("Time Travel waits for Host capture and reports its failure over the same Bridge", async () => {
+  const token = "time-travel-test";
+  let finish!: () => void;
+  let requested!: () => void;
+  let received!: (result: { requestId: string; error?: string }) => void;
+  const captureStarted = new Promise<void>(resolve => { requested = resolve; });
+  const resultReceived = new Promise<{ requestId: string; error?: string }>(resolve => { received = resolve; });
+  const bridge = await listenForHello(hello => helloResponse(hello, token), {
+    afterSnapshot: response => [encodeFrame("capture", response.snapshot.runtimeEpoch, { type: "timeTravel.capture.request", requestId: "capture-1", runtimeEpoch: response.snapshot.runtimeEpoch, sessionId: response.snapshot.sessionId, cwd: "workspace", leafId: null, phase: "before" })],
+    onTimeTravelResult: received,
+  });
+  let count = 0;
+  const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token, onTimeTravelCapture: async request => {
+    count++;
+    assert.equal(request.phase, "before");
+    requested();
+    await new Promise<void>(resolve => { finish = resolve; });
+    throw new Error("snapshot disk full");
+  } });
+  try {
+    await client.connect(); await client.requestSnapshot(); await captureStarted;
+    assert.equal(count, 1);
+    finish();
+    assert.deepEqual(await resultReceived, { type: "timeTravel.capture.result", requestId: "capture-1", runtimeEpoch: 1, error: "snapshot disk full" });
+    assert.equal(client.state, "ready");
+  } finally { client.close(); await bridge.close(); }
+});
 
 test("WP-012 applies an event coalesced after the initial snapshot before READY publication", async () => {
   const token = "bridge-token-snapshot-event";

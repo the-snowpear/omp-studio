@@ -38,6 +38,7 @@ export type {
   HostSemanticCommandService,
   HostSessionCatalogProvider,
   HostSessionArchiveProvider,
+  HostTimeTravelService,
   HostSessionTelemetryProbePort,
   HostSessionTelemetryStorePort,
   HostTelemetryProbeWorkspacePort,

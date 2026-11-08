@@ -1,4 +1,5 @@
 import type { RuntimeViewOperation, RuntimeViewResultMap } from "@omp-studio/studio-protocol";
+import type { TimeTravelCaptureRequest, TimeTravelCaptureResult } from "@omp-studio/studio-protocol";
 import type { SessionOwnerState } from "@omp-studio/studio-protocol";
 import type { ContextViewOperation, ContextViewResultMap, ComputerWorkspaceQuery, ComputerWorkspaceResultMap, StudioComputerQueryRequest, StudioComputerQueryResponse, StudioComputerEventEnvelope } from "@omp-studio/studio-protocol";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -92,6 +93,7 @@ export interface StudioBridgeClientOptions {
   onResyncRequired?: () => void;
   onProjectionChanged?: (snapshot: StudioSnapshotResponse["snapshot"]) => void;
   onDisconnect?: () => void;
+  onTimeTravelCapture?: (request: TimeTravelCaptureRequest) => Promise<void>;
   requestTimeoutMs?: number;
   /**
    * Diagnose non-fatal consumer/protocol-frame problems without tearing down
@@ -229,7 +231,7 @@ export class StudioBridgeClient {
       type: "studio.request",
       requestId: requestId as RequestId,
       runtimeEpoch,
-      operation: { kind: "runtime.snapshot" },
+      operation: { kind: "runtime.snapshot", ...(this.options.onTimeTravelCapture && this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === "timeTravel.capture" && capability.grade !== "unavailable") ? { timeTravelCapture: true } : {}) },
     };
 
     return new Promise<StudioSnapshotResponse>((resolve, reject) => {
@@ -260,6 +262,8 @@ export class StudioBridgeClient {
           return;
         }
         if (frames.length === 0) return;
+        // Boundary requests can arrive while a fresh snapshot is in flight. Reply now so the Runtime can settle.
+        frames = frames.filter(frame => !this.#processTimeTravelFrame(frame));
         const snapshotIndex = frames.findIndex(
           (frame) =>
             frame.body !== null &&
@@ -753,8 +757,24 @@ export class StudioBridgeClient {
     return true;
   }
 
+  #processTimeTravelFrame(frame: DecodedFrame): boolean {
+    if (frame.body && typeof frame.body === "object" && "type" in frame.body && frame.body.type === "timeTravel.capture.request") {
+      const request = frame.body as TimeTravelCaptureRequest;
+      if (request.runtimeEpoch !== this.#runtimeEpoch || frame.header.runtimeEpoch !== this.#runtimeEpoch) return true;
+      const socket = this.#socket;
+      const send = (error?: string) => {
+        if (!socket || socket.destroyed || socket !== this.#socket) return;
+        const result: TimeTravelCaptureResult = { type: "timeTravel.capture.result", requestId: request.requestId, runtimeEpoch: request.runtimeEpoch, ...(error === undefined ? {} : { error }) };
+        socket.write(encodeFrame(`time-travel:${request.requestId}`, request.runtimeEpoch as RuntimeEpoch, result));
+      };
+      void Promise.resolve().then(() => this.options.onTimeTravelCapture?.(request)).then(() => send(), error => send(error instanceof Error ? error.message : String(error)));
+      return true;
+    }
+    return false;
+  }
+
   #processReadyFrame(frame: DecodedFrame): void {
-    if (this.#processComputerFrame(frame)) return;
+    if (this.#processComputerFrame(frame) || this.#processTimeTravelFrame(frame)) return;
     if (
       frame.body !== null &&
       typeof frame.body === "object" &&

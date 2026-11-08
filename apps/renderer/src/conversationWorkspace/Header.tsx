@@ -26,6 +26,7 @@ type HeaderProps = {
   sessionMenu: (close: () => void) => ReactNode;
   tokenPanel: (close: () => void) => ReactNode;
   contextPanel: ReactNode;
+  timeTravel?: ReactNode;
   onOpenTokenCounter: () => void;
   onDetailsChange: (details: "tokens" | "context" | null) => void;
 };
@@ -70,7 +71,7 @@ function ConversationWindowTitle({ title, titleRow, source, status, windowed, pr
   </>;
 }
 
-function ConversationWindowActions({ tokenPanel, contextPanel, onOpenTokenCounter, onDetailsChange }: HeaderProps) {
+function ConversationWindowActions({ tokenPanel, contextPanel, onOpenTokenCounter, onDetailsChange, timeTravel }: HeaderProps) {
   const conversation = useConversationView()!;
   const { t, resolvedLanguage } = useI18n();
   const text = (zh: string, en: string) => resolvedLanguage === "zh" ? zh : en;
@@ -78,7 +79,7 @@ function ConversationWindowActions({ tokenPanel, contextPanel, onOpenTokenCounte
   const [open, setOpen] = useState(false);
   useEffect(() => { onDetailsChange(open ? details : null); }, [open, details, onDetailsChange]);
   const closeLabel = text("对话窗口选项", "Conversation window options");
-  return <><DockRailToggle />
+  return <>{timeTravel}<DockRailToggle />
     <DockPopupButton className="cw-window-more" label={details === "tokens" ? t("shell.tokenUsageDetails") : details === "context" ? t("shell.contextCompositionDetails") : closeLabel} icon="more" popupRole={details ? "dialog" : "menu"} popupClassName={details === "tokens" ? "cw-window-details tok-pop" : details === "context" ? "cw-window-details telemetry-pop ctx-pop" : ""} onOpen={() => setDetails(null)} onOpenChange={setOpen}>
       {close => details === "tokens" ? tokenPanel(close) : details === "context" ? contextPanel : <>
         <AnnotationButton menu onActivate={close} />

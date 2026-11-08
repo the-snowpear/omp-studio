@@ -1,4 +1,5 @@
 import type { RuntimeViewOperation, RuntimeViewResultMap } from "@omp-studio/studio-protocol";
+import type { TimeTravelSettings, TimeTravelTimeline, TimeTravelRestorePreview, TimeTravelRestoreInput, TimeTravelRestoreResult } from "./time-travel.js";
 type RuntimeViewQueryMap = { [K in RuntimeViewOperation["kind"]]: Omit<Extract<RuntimeViewOperation, { kind: K }>, "kind"> };
 import type { EvaluationRecord, EvaluationSpec, EvaluationPlan, EvaluationContext, EvaluationListInput, EvaluationResultPage, EvaluationStartInput, EvaluationControlInput, EvaluationExportInput, EvaluationExportResult } from "@omp-studio/studio-protocol";
 import type { ClientInteraction } from "./lifecycle.js";
@@ -102,6 +103,10 @@ export type EmptyInput = Readonly<Record<string, never>>;
 type ContextViewQueryMap = { [K in ContextViewOperation["kind"]]: Omit<Extract<ContextViewOperation, { kind: K }>, "kind"> };
 type ComputerWorkspaceQueryMap = { [K in ComputerWorkspaceQuery["kind"]]: Omit<Extract<ComputerWorkspaceQuery, { kind: K }>, "kind"> };
 export interface QueryInputMap extends RuntimeViewQueryMap, ContextViewQueryMap, ComputerWorkspaceQueryMap {
+  "timeTravel.settings.get": EmptyInput;
+  "timeTravel.storage.get": EmptyInput;
+  "timeTravel.timeline.read": { readonly sessionId: SessionId; readonly branchLeafId?: string; readonly cursor?: string };
+  "timeTravel.restore.preview": { readonly sessionId: SessionId; readonly snapshotId: string };
   "session.compaction.read": { readonly sessionId: SessionId };
  "evaluations.exportChunk": { artifactId: string; offset?: number };
  "evaluations.retrySpec": { id: string };
@@ -186,6 +191,10 @@ export interface QueryInputMap extends RuntimeViewQueryMap, ContextViewQueryMap,
 }
 
 export interface QueryResultMap extends RuntimeViewResultMap, ContextViewResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceQuery["kind"]> {
+  "timeTravel.settings.get": TimeTravelSettings;
+  "timeTravel.storage.get": { readonly snapshots: number; readonly bytes: number };
+  "timeTravel.timeline.read": TimeTravelTimeline;
+  "timeTravel.restore.preview": TimeTravelRestorePreview;
  "evaluations.exportChunk": { data: string; nextOffset: number; total: number; mimeType: string; name: string };
  "evaluations.retrySpec": EvaluationSpec;
  "evaluations.patch": { text: string; nextOffset: number; total: number };
@@ -544,6 +553,9 @@ export type InteractionResponseValue =
   | Readonly<Record<string, unknown>>;
 
 interface CoreCommandInputMap {
+  "timeTravel.settings.set": Partial<TimeTravelSettings>;
+  "timeTravel.cleanup": { readonly scope: "expired" | "all" };
+  "timeTravel.restore": TimeTravelRestoreInput;
  "evaluations.openWorkspace": { id: string };
  "evaluations.prepare": { workspaceId: string; spec: EvaluationSpec };
  "evaluations.start": EvaluationStartInput;
@@ -743,6 +755,9 @@ interface CoreCommandInputMap {
 export type CommandInputMap = CoreCommandInputMap & RuntimeCommandInputMap;
 
 interface CoreCommandResultMap {
+  "timeTravel.settings.set": TimeTravelSettings;
+  "timeTravel.cleanup": { readonly removed: number };
+  "timeTravel.restore": TimeTravelRestoreResult;
  "evaluations.openWorkspace": { opened: true };
  "evaluations.prepare": EvaluationPlan;
  "evaluations.start": EvaluationRecord;
