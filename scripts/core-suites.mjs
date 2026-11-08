@@ -28,6 +28,7 @@ export const CORE_NODE_SUITES = [
   "apps/desktop/dist/test/session-commands.test.js",
   // Local file writes, Electron boundaries, installation and update recovery.
   "apps/desktop/dist/test/workspace-files.test.js",
+  "apps/desktop/dist/test/file-resources.test.js",
   "apps/desktop/dist/test/security.test.js",
   "apps/desktop/dist/test/floating-windows.test.js",
   "apps/desktop/dist/test/desktop-ipc-subscriptions.test.js",
@@ -61,6 +62,9 @@ export const CORE_RENDERER_SUITES = [
   "src/dock/store.test.ts",
   "src/dock/pins.test.ts",
   "src/dock/browserPages.test.ts",
+  "src/dock/fileViews.test.ts",
+  "src/files/fileTypes.test.ts",
+  "src/files/fileDocuments.test.ts",
   "src/browser/browserDockSync.test.ts",
   "src/dock/hosts.test.ts",
   "src/dock/ownership.test.tsx",

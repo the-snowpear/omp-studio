@@ -136,6 +136,9 @@ export interface QueryInputMap extends RuntimeViewQueryMap, ContextViewQueryMap,
   "projects.list": EmptyInput;
   /** Lists one directory level. Omit path for the workspace root. */
   "workspace.fileTree": { readonly workspaceId: WorkspaceId; readonly path?: string };
+  "workspace.file.inspect": import("./files.js").WorkspaceFileTarget;
+  "workspace.file.readText": import("./files.js").WorkspaceFileTarget;
+  "workspace.file.readChunk": import("./files.js").WorkspaceFileChunkInput;
   "usage.get": EmptyInput;
   /** Native dashboard endpoint the statistics page embeds; starts it if needed. */
   "stats.dashboard": EmptyInput;
@@ -218,6 +221,9 @@ export interface QueryResultMap extends RuntimeViewResultMap, ContextViewResultM
   /** Host workspace inventory. Paths never leave the Host registry. */
   "projects.list": WorkspaceListReadModel;
   "workspace.fileTree": WorkspaceFileTreeReadModel;
+  "workspace.file.inspect": import("./files.js").WorkspaceFileInfo;
+  "workspace.file.readText": import("./files.js").WorkspaceFileText;
+  "workspace.file.readChunk": import("./files.js").WorkspaceFileChunk;
   /** Homepage token heatmap / curve. Aggregates from omp stats.db only. */
   "usage.get": TokenUsageReadModel;
   /** Loopback URL of the native statistics dashboard, for in-app embedding. */
@@ -646,6 +652,7 @@ interface CoreCommandInputMap {
   "workspace.pick": { readonly name?: string };
   /** Create an empty file inside the selected workspace. */
   "workspace.file.create": { readonly workspaceId: WorkspaceId; readonly path: string };
+  "workspace.file.writeText": import("./files.js").WorkspaceFileWrite;
   /** Create a directory inside the selected workspace. */
   "workspace.directory.create": { readonly workspaceId: WorkspaceId; readonly path: string };
   /**
@@ -783,6 +790,7 @@ interface CoreCommandResultMap {
   "workspace.open": WorkspaceListReadModel;
   "workspace.pick": WorkspaceListReadModel;
   "workspace.file.create": WorkspaceFileMutationResult;
+  "workspace.file.writeText": import("./files.js").WorkspaceFileSaveResult;
   "workspace.directory.create": WorkspaceFileMutationResult;
   "plugins.setEnabled": ConfigWriteResult;
   "skills.setEnabled": ConfigWriteResult;

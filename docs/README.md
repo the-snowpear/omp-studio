@@ -51,3 +51,5 @@ when they disagree with `architecture.md` or the TypeScript contracts.
 - [OMP 18.4.4 与 macOS 整合、修复和验收](integration-18.4.4-macos.md)
 
 - [评测工作区](evaluation.md)：原生基准、指令遵循、评判与 Ratchet，后台运行、历史复跑与导出。
+
+- [文件查看器](file-viewer.md)：工作台文件窗口、文本编辑、本地 / SSH 读取与可选 Office 组件。

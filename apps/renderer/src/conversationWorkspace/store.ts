@@ -60,6 +60,17 @@ export class ConversationWorkspaceStore {
     }
     this.state = this.snapshot();
     this.manager.visible = record => conversationVisible({ ...asView(record), documentId: record.content.documentId }, this.state);
+    this.windows.resolveOwner = (id, ownerId) => {
+      const record = this.manager.get(id);
+      if (record?.content.kind !== "tools") return ownerId;
+      const { documentId, groupId } = record.content;
+      const layout = this.hosts.get(documentId).tools?.store.getSnapshot().layout;
+      const group = layout?.floats.find(group => group.id === groupId);
+      const file = group ? layout?.fileViews[group.active] : undefined;
+      const active = this.metadata.documents.find(document => document.id === this.metadata.activeDocumentId);
+      if (file && (file.scope === "workspace" || group?.pin?.mode === "workspace") && active?.ref.workspaceId === file.workspaceId && (active.ref.targetId ?? null) === file.targetId) return active.id;
+      return ownerId;
+    };
     this.manager.subscribe(() => this.publish());
     this.windows.subscribe(() => {
       const activeDocumentId = this.windows.getSnapshot().ownerId;

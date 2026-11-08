@@ -1,3 +1,4 @@
+import { isFilePanelId } from "./types";
 import { WindowFrame } from "./WindowFrame";
 import { MinimizedCapsule } from "./MinimizedCapsule";
 import { WindowSnapButton } from "./SnapLayout";
@@ -878,7 +879,7 @@ export function FloatWindow({ group: storedGroup, bounds, order, nativeKey }: { 
   const containsConversation = group.panels.some(id => definitionFor(definitions, id).content);
   const content = <WindowFrame title={title} icon={definitionFor(definitions, group.active).icon}
     titleContent={definitionFor(definitions, group.active).glyph ? <><PanelGlyph definition={definitionFor(definitions, group.active)} /><span>{title}</span></> : undefined}
-    {...(closesPages ? { closeLabel: containsConversation ? text("关闭整个浮窗", "Close window group") : group.panels.length > 1 ? text("关闭网页并隐藏其余工具", "Close pages and hide other tools") : text("关闭网页", "Close page") } : {})} rect={rect} bounds={bounds} minHeight={minHeight} minWidth={manager ? 360 : 320} resizable={!snapped}
+    {...(closesPages ? { closeLabel: group.panels.every(isFilePanelId) ? text("关闭文件", "Close file") : containsConversation ? text("关闭整个浮窗", "Close window group") : group.panels.length > 1 ? text("关闭网页并隐藏其余工具", "Close pages and hide other tools") : text("关闭网页", "Close page") } : {})} rect={rect} bounds={bounds} minHeight={minHeight} minWidth={manager ? 360 : 320} resizable={!snapped}
     maximizeButton={!nativeKey && managed && manager ? <WindowSnapButton manager={manager} window={managed} locked={preferences.locked} onMaximize={() => control("maximize")} /> : undefined}
     frameRef={frame} nativeKey={nativeKey} maximized={group.maximized} locked={preferences.locked} order={order} windowId={`tool:${store.documentId ?? "standalone"}:${group.id}`} visible={!group.minimized}
     onTitleDrag={dragTitle} onTitleContextMenu={event => menu.onContextMenu(event, group.panels, group.id)} onTitleKeyDown={event => menu.onKeyDown(event, group.panels, group.id)}

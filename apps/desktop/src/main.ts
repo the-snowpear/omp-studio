@@ -1,3 +1,6 @@
+import { FileResources } from "./file-resources.js";
+import { OfficeComponent } from "./office-component.js";
+import { registerFileViewerIpc } from "./file-viewer-ipc.js";
 import { installRemoteRuntime } from "./remote/install.js";
 import { RemoteTerminalManager } from "./remote/terminal.js";
 import { RemoteConnectionManager } from "./remote/manager.js";
@@ -138,6 +141,7 @@ import { TerminalRecordingManager } from "./terminal-recording.js";
 import { MediaUploadManager, registerMediaUploadIpc } from "./media-upload.js";
 
 protocol.registerSchemesAsPrivileged([
+  { scheme: "omp-file", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
   { scheme: "omp-artifact", privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } },
   { scheme: "omp-graphics", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
 ]);
@@ -152,6 +156,9 @@ const PROJECT_REPOSITORY_URL = "https://github.com/the-snowpear/omp-studio";
  * itself, so offer the move once. true when the app is relaunching from
  * /Applications and this instance must stop.
  */
+let fileResources: FileResources | undefined;
+let fileViewerIpc: ReturnType<typeof registerFileViewerIpc> | undefined;
+
 async function offerMoveToApplications(): Promise<boolean> {
   if (process.platform !== "darwin" || !app.isPackaged) return false;
   const marker = moveToApplicationsMarkerPath(desktopPaths().stateRoot);
@@ -339,7 +346,7 @@ export async function main(): Promise<void> {
       repo: "the-snowpear/omp-studio", platform: `${process.platform}-${process.arch}`, appVersion: app.getVersion(), keys: trustedKeys,
       prefs: createUpdatePrefsStore({ appDataDirectory: join(app.getPath("appData"), "omp-studio") }),
       snapshotChanged: (snapshot: UnifiedUpdateSnapshot) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send(CHROME_UPDATES_CHANNELS.changed, snapshot); },
-      isBusy: () => hostFactory.isBusy(), getRestartBlocker: () => hostFactory.updateRestartBlocker(),
+      isBusy: () => hostFactory.isBusy(), getRestartBlocker: () => fileViewerIpc?.hasDirty() ? "请先保存或关闭有未保存修改的文件，再重启更新。" : hostFactory.updateRestartBlocker(),
       beforeQuit: (onShutdownStarted: () => void) => hostFactory.shutdownForUpdate(onShutdownStarted),
       fetcher: net.fetch.bind(net) as typeof fetch, log: hostFactory.log,
       restart: () => { app.relaunch({ args: relaunchArguments(process.argv) }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
@@ -576,6 +583,8 @@ export async function main(): Promise<void> {
     if (!(await protocol.isProtocolHandled("omp-graphics"))) {
       protocol.handle("omp-graphics", request => graphicRendererDist === undefined ? new Response(null, { status: 503 }) : graphicAssetResponse(request, graphicRendererDist));
     }
+    fileResources = new FileResources(id => { const transport = id ? remoteConnections.get(id).transport : context.transport; if (!transport) throw new Error("文件服务尚未连接"); return transport; });
+    if (!(await protocol.isProtocolHandled("omp-file"))) protocol.handle("omp-file", request => fileResources ? fileResources.response(request, target.kind === "url" ? new URL(target.url).origin : "null") : new Response(null, { status: 503 }));
     if (!(await protocol.isProtocolHandled("omp-artifact"))) {
       const origin = target.kind === "url" ? new URL(target.url).origin : "null";
       protocol.handle("omp-artifact", request => artifactResponse(request, activeArtifactLibrary(), origin));
@@ -882,6 +891,12 @@ export async function main(): Promise<void> {
       resolveWorkspaceCwd: workspaceId => hostFactory.resolveWorkspaceCwd(workspaceId),
       recordings: terminalRecordings,
     });
+    fileViewerIpc = registerFileViewerIpc({
+      ipc: ipcMain, trusted: isTrustedSender, resources: fileResources!,
+      office: new OfficeComponent(join(app.getPath("userData"), "components", "office-preview"), trustedKeys),
+      pickExport: async name => { const result = await dialog.showSaveDialog({ defaultPath: name }); return result.canceled ? undefined : result.filePath; },
+      show: () => { window.show(); window.focus(); },
+    });
     const disposeWorkspaceShell = registerWorkspaceShellIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -1023,6 +1038,7 @@ export async function main(): Promise<void> {
         updateCoordinator?.dispose();
         disposeAppUpdate.dispose();
         payloadHealth.dispose();
+        fileViewerIpc?.dispose(); fileViewerIpc = undefined;
         disposeWorkspaceShell.dispose();
         disposeTerminal.dispose();
         disposeImage.dispose();
@@ -1071,6 +1087,7 @@ export async function main(): Promise<void> {
     : undefined;
 
   const application = createDesktopApplication({
+    confirmBeforeQuit: () => fileViewerIpc?.requestClose() ?? Promise.resolve(true),
     beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await remoteConnections.close(); remoteVault.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,

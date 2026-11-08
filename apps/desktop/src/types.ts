@@ -186,6 +186,7 @@ export interface DesktopApplicationDeps {
     requestQuit(): void;
   }) => DesktopTray | undefined;
   /** Native confirmation before a tray-initiated quit while sessions are busy. */
+  readonly confirmBeforeQuit?: () => Promise<boolean>;
   readonly confirmQuitWhileBusy?: () => Promise<boolean>;
   /** Actually quit the app (Electron `app.quit()` in production). */
   readonly quit: () => void;

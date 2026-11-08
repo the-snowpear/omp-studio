@@ -1,3 +1,4 @@
+import { useOpenFile } from "../files/fileLinks";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type { GitCommitChangesReadModel, GitCommitDiffReadModel, GitLogListReadModel, WorkspaceId } from "@omp-studio/client-contract";
 import { useI18n } from "../i18n";
@@ -136,13 +137,14 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction,
   );
 }
 
-export function PreviewFileTree({ label, search, onContext, onFileAction }: { label: string; search?: string; onContext?: (path: string, kind: "file" | "dir") => void; onFileAction?: (action: FileMenuAction, target: FileMenuTarget) => void }) {
+export function PreviewFileTree({ label, search, onContext, onFileAction, workspaceId = "preview-workspace" }: { workspaceId?: string; label: string; search?: string; onContext?: (path: string, kind: "file" | "dir") => void; onFileAction?: (action: FileMenuAction, target: FileMenuTarget) => void }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     const next = new Set<string>();
     collectOpen(PREVIEW_FILE_TREE, "", next);
     return next;
   });
+  const openInViewer = useOpenFile();
   // 行「⋯ 更多」菜单：与真实树同一 FileRowMenu；演示路径不执行桌面动作
   // （打开/打开方式/资源管理器/绝对路径禁用），仅保留复制相对路径与添加上下文。
   const [fileMenuOpenId, setFileMenuOpenId] = useState<string | null>(null);
@@ -191,6 +193,7 @@ export function PreviewFileTree({ label, search, onContext, onFileAction }: { la
         onToggle(target.path);
         return;
       }
+      if (action.type === "open") { openInViewer({ workspaceId, path: target.path }); return; }
       onFileAction?.(action, target);
     },
   };
@@ -199,7 +202,7 @@ export function PreviewFileTree({ label, search, onContext, onFileAction }: { la
     : PREVIEW_FILE_TREE;
   return (
     <div className="tree" role="tree" aria-label={`${label} 文件树`}>
-      <TreeNodes nodes={visible} depth={0} prefix="" expanded={expanded} onToggle={onToggle} onFile={() => {}} onAction={(path, action) => {
+      <TreeNodes nodes={visible} depth={0} prefix="" expanded={expanded} onToggle={onToggle} onFile={path => { openInViewer({ workspaceId, path }); }} onAction={(path, action) => {
         if (action === "context" || action === "context-dir") {
           onContext?.(path, action === "context-dir" ? "dir" : "file");
         }

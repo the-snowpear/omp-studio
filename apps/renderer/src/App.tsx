@@ -1,3 +1,6 @@
+import { FileCloseDialog } from "./files/FileCloseDialog";
+import { FileDockInstances } from "./files/FileDockInstances";
+import { useOpenFile } from "./files/fileLinks";
 import { dragConversation } from "./conversationWorkspace/drag";
 import { ConversationWorkspace } from "./conversationWorkspace/Workspace";
 import { initializeConversationClient, resyncConversationClient } from "./conversationWorkspace/client";
@@ -1590,6 +1593,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
   /** 除「目录展开 / 添加上下文」外的菜单动作分发（App 侧统一 toast 与桌面调用）。 */
   onFileAction?: (action: FileMenuAction, target: FileMenuTarget) => void;
 }) {
+  const openInViewer = useOpenFile();
   const executionTarget = useExecutionTarget();
   const [model, setModel] = useState<WorkspaceFileTreeReadModel | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -1723,7 +1727,8 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
   }, []);
   const openFile = useCallback((path: string) => {
     setActivePath(path);
-  }, []);
+    openInViewer({ workspaceId: String(workspaceId), path });
+  }, [workspaceId, openInViewer]);
   const selectPath = useCallback((path: string) => {
     setActivePath(path);
     const node = model === null ? undefined : findWorkspaceNode(model.nodes, path);
@@ -1841,8 +1846,9 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
       toggle(target.path);
       return;
     }
+    if (action.type === "open") { openFile(target.path); return; }
     onFileAction?.(action, target);
-  }, [onAddContext, onFileAction, toggle]);
+  }, [onAddContext, onFileAction, toggle, openFile]);
   const fileMenu = useMemo<TreeFileMenu>(() => ({
     openId: fileMenuOpenId,
     point: fileMenuPoint,
@@ -2705,6 +2711,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         <div className="sb-scroll">
           {preview ? (
             <PreviewFileTree
+              workspaceId={chrome.previewProjectId ?? "preview-workspace"}
               label={findPreviewProject(chrome.previewProjectId)?.name ?? t("shell.project")}
               search={fileSearch.trim()}
               onContext={(path, kind) => chrome.onAddComposerContext({ kind, path, label: fileLabel(path) })}
@@ -6469,6 +6476,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
           onMain={() => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.focus(); }}
           onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}
           onRevealSource={target => target.toolCallId === undefined ? Promise.resolve(false) : revealConversationTarget(convoScrollerRef.current, { toolCallId: target.toolCallId })} />}</DockPanel>)}
+      <FileDockInstances client={client} workspaceId={workspaceId ? String(workspaceId) : undefined} targetId={executionTarget.id} onSettings={() => { setSettingsIntent("maintenance", "Office 文档预览"); onRoute("settings"); }} />
       <BrowserDockInstances client={client} sessionId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} capabilities={capabilities} remote={!!executionTarget.id} onReferences={insertBrowserReferences} />
       <ToastHost message={statusToast} icon="info" onDismiss={() => setStatusToast(null)} />
       {treeConfirm.dialog}
@@ -8583,7 +8591,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       cancelled = true;
     };
   }, [realActiveWorkspace]);
-  const fileShellUnavailable = globalThis.ompStudioChrome?.openFile === undefined ? "仅桌面端可用" : undefined;
+  const fileShellUnavailable = executionTarget.id ? "远程文件请先下载，再使用系统应用打开" : globalThis.ompStudioChrome?.openFile === undefined ? "仅桌面端可用" : undefined;
 
   const runFileShellAction = (workspaceId: string, action: FileMenuAction, target: FileMenuTarget) => {
     const desktop = globalThis.ompStudioChrome;
@@ -8627,7 +8635,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
         })
         .catch((cause) => notice(`操作失败：${messageOf(cause)}`, "alert"));
     };
-    if (action.type === "open") {
+    if (action.type === "open" || action.type === "openSystem") {
       const open = desktop?.openFile;
       if (open === undefined) return;
       run(() => open(input), `已用默认程序打开 ${target.name}`);
@@ -9348,6 +9356,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
           onApply={() => appUpdate.apply()}
           {...(!previewMode.preview ? { onCancel: () => appUpdate.cancel() } : {})}
           {...(!previewMode.preview ? { onSkip: async () => { await appUpdate.skip(); setShowAppUpdateDialog(false); } } : {})}
+          onOpenComponents={() => { setShowAppUpdateDialog(false); setSettingsIntent("maintenance", "Office 文档预览"); onRoute("settings"); }}
           onClose={() => setShowAppUpdateDialog(false)}
           onDownloadAndInstall={() => appUpdate.downloadAndInstall()}
         />
@@ -9360,7 +9369,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
 }
 
 export function App({ client }: { readonly client: StudioClient }) {
-  return <PreviewModeProvider><ConversationWidthProvider><I18nProvider><TerminalSessionsProvider>{client.supportsContexts === true || (client.supportsContexts === undefined && client.openContext) ? <ExecutionTargets client={client}>{() => <ConversationWorkspace client={client} renderDocument={renderConversationDocument} />}</ExecutionTargets> : <LegacyWorkbench client={client} />}</TerminalSessionsProvider></I18nProvider></ConversationWidthProvider></PreviewModeProvider>;
+  return <PreviewModeProvider><FileCloseDialog /><ConversationWidthProvider><I18nProvider><TerminalSessionsProvider>{client.supportsContexts === true || (client.supportsContexts === undefined && client.openContext) ? <ExecutionTargets client={client}>{() => <ConversationWorkspace client={client} renderDocument={renderConversationDocument} />}</ExecutionTargets> : <LegacyWorkbench client={client} />}</TerminalSessionsProvider></I18nProvider></ConversationWidthProvider></PreviewModeProvider>;
 }
 function renderConversationDocument(client: StudioClient) { return <TargetApp client={client} />; }
 function LegacyWorkbench({ client }: { client: StudioClient }) {

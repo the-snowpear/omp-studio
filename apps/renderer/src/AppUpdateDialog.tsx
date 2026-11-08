@@ -39,6 +39,7 @@ export interface AppUpdateDialogProps {
   readonly totalBytes?: number | undefined;
   readonly readyToApply?: boolean;
   readonly onClose: () => void;
+  readonly onOpenComponents?: () => void;
   readonly onDownloadAndInstall?: () => Promise<boolean | void>;
   readonly onApply?: () => Promise<boolean>;
   readonly onSkip?: () => Promise<void>;
@@ -77,6 +78,7 @@ export function AppUpdateDialog({
   totalBytes,
   readyToApply = false,
   onClose,
+  onOpenComponents,
   onDownloadAndInstall,
   onApply,
   onSkip,
@@ -229,6 +231,7 @@ export function AppUpdateDialog({
             >
               {update.releaseNotes?.trim() || t("appUpdate.noReleaseNotes")}
             </div>
+            {update.component !== "runtime" && onOpenComponents ? <div className="file-release-note"><p>文件现在可以在工作台中打开。Word 和 PPT 使用单独安装的 Office 文档预览组件，Excel / CSV 已内置支持。</p><button className="btn small outline" disabled={busy} onClick={onOpenComponents}>管理可选组件</button></div> : null}
           </div>
 
           {([

@@ -72,6 +72,8 @@ const localKeys: Array<[string, ActiveSettingsGroup, string, string?]> = [
 ];
 
 const extras: SettingSearchItem[] = [
+  { id: "file-viewer", group: "files", zh: "文件查看器", en: "File viewer", targetZh: "文件查看器", targetEn: "File viewer", keywords: "文件窗口 归属 保存 文件编辑" },
+  { id: "office-preview", group: "maintenance", zh: "Office 文档预览", en: "Office document preview", targetZh: "Office 文档预览", targetEn: "Office document preview", keywords: "可选组件 Word PPT LibreOffice 安装 卸载" },
   { id:"hindsight.token", group:"context", zh:"Hindsight 令牌", en:"Hindsight token", targetZh:"Hindsight 令牌", targetEn:"Hindsight token", keywords:"hindsight.apiToken credential secret 凭据 令牌" },
   { id:"dock", group:"appearance", zh:"工作台布局", en:"Workbench layout", targetZh:"工作台布局", targetEn:"Workbench layout", keywords:"dock layout 工作台布局 停靠 面板" },
   { id:"dictation", group:"voice", zh:"语音输入", en:"Voice input", targetZh:"语音输入", targetEn:"Voice input", keywords:"dictation microphone 听写 麦克风 快捷键" },

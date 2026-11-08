@@ -53,6 +53,7 @@ export type FileMenuTarget = {
 export type FileMenuAction =
   | { readonly type: "ida" }
   | { readonly type: "open" }
+  | { readonly type: "openSystem" }
   | { readonly type: "openWith"; readonly openerId: string }
   | { readonly type: "reveal" }
   | { readonly type: "copyAbsolute" }
@@ -165,13 +166,13 @@ export function FileMenuContent({ target, openers, onRun, desktopActionsReason }
   return (
     <>
       <MenuItem
-        icon={target.kind === "dir" ? "folder-open" : "external"}
+        icon={target.kind === "dir" ? "folder-open" : "file"}
         onClick={() => onRun({ type: "open" })}
         // 目录的「打开」是树内展开/收起，纯本地，不受桌面能力限制。
-        {...(target.kind === "file" ? desktopOnly : {})}
       >
         {t("shell.fileOpen")}
       </MenuItem>
+      {target.kind === "file" ? <MenuItem icon="external" {...desktopOnly} onClick={() => onRun({ type: "openSystem" })}>使用系统应用打开</MenuItem> : null}
       <OpenWithZone
         // The native resource resolver validates the selected workspace path before IDA sees it.
         openers={openers}

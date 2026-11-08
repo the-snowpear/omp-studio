@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { graphicVendorPlugin } from "./graphic-vendor-plugin";
+import { fileViewerVendorPlugin } from "./file-viewer-vendor-plugin";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
@@ -11,7 +12,7 @@ import react from "@vitejs/plugin-react";
 // any source there replaces the `default-src` fallback.
 // Vite dev still needs HMR.
 const PACKAGED_RENDERER_CSP =
-  "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: omp-artifact:; media-src 'self' blob: omp-artifact:; font-src 'self' data:; connect-src 'self' omp-artifact:; frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847; object-src 'none'; base-uri 'self'; form-action 'self'";
+  "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: omp-artifact: omp-file:; media-src 'self' blob: omp-artifact: omp-file:; font-src 'self' data:; connect-src 'self' omp-artifact: omp-file:; frame-src 'self' omp-graphics://viewer http://127.0.0.1:3847; object-src 'none'; base-uri 'self'; form-action 'self'";
 
 function packagedCspPlugin() {
   return {
@@ -31,7 +32,7 @@ function packagedCspPlugin() {
 // relative base keeps the same bundle loadable from any origin the shell
 // later serves it from (including file:// during early desktop bring-up).
 export default defineConfig({
-  plugins: [react(), packagedCspPlugin(), graphicVendorPlugin()],
+  plugins: [react(), packagedCspPlugin(), graphicVendorPlugin(), fileViewerVendorPlugin()],
   base: "./",
   server: { cors: { origin: ["null", /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/] } },
   test: {
@@ -52,6 +53,10 @@ export default defineConfig({
           if (!id.includes("node_modules")) return;
           if (id.includes("/three/") || id.includes("\\three\\")) return "three";
           if (id.includes("@xterm")) return "xterm";
+          if (/[\/]xlsx[\/]/.test(id)) return "spreadsheet-parser";
+          if (id.includes("pdfjs-dist")) return "pdf-viewer";
+          const language = /@codemirror[/\\](lang-[^/\\]+|legacy-modes|language-data)/.exec(id);
+          if (language) return `codemirror-${language[1]}`;
           if (id.includes("@codemirror") || id.includes("@lezer") || /node_modules[/\\]codemirror[/\\]/.test(id)) {
             return "codemirror";
           }

@@ -1,0 +1,92 @@
+name: Optional Office preview component
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Component version (use a new version for changed bytes)
+        default: '26.8.2'
+        required: true
+      engine_version:
+        description: Official LibreOffice version
+        default: '26.8.2'
+        required: true
+      publish:
+        description: Publish signed optional component assets
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: win32-x64
+          - runner: windows-11-arm
+            platform: win32-arm64
+          - runner: macos-15
+            platform: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build the separate signed engine archive
+        shell: bash
+        env:
+          COMPONENT_VERSION: ${{ inputs.version }}
+          ENGINE_VERSION: ${{ inputs.engine_version }}
+          COMPONENT_PLATFORM: ${{ matrix.platform }}
+          OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFile, readFile, unlink } from 'node:fs/promises';
+          import { join } from 'node:path';
+          import { buildOfficeComponent } from './scripts/office-component.mjs';
+          const keyId = JSON.parse(await readFile('packaging/keys/trusted-keys.json', 'utf8')).activeKeyId;
+          await buildOfficeComponent({ platform: process.env.COMPONENT_PLATFORM, version: process.env.COMPONENT_VERSION, engineVersion: process.env.ENGINE_VERSION, output: join(process.cwd(), 'outputs/office-component'), key: process.env.OMP_SIGNING_SECRET, keyId });
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: office-preview-${{ matrix.platform }}
+          path: |
+            outputs/office-component/*.zip
+            outputs/office-component/*.json
+          if-no-files-found: error
+  publish:
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: office-preview-*
+          path: outputs/office-component
+          merge-multiple: true
+      - name: Snapshot previous release metadata and component manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p outputs/office-release-before
+          if gh release view office-preview --json databaseId,tagName,name,body,assets > outputs/office-release-before/release.json; then
+            gh release download office-preview --pattern '*.json' --dir outputs/office-release-before
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: office-release-before
+          path: outputs/office-release-before
+      - name: Publish immutable archives followed by current signed manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view office-preview >/dev/null 2>&1; then
+            gh release create office-preview --title 'Office 文档预览组件' --notes-file docs/office-component-release-notes.md --latest=false
+          fi
+          gh release upload office-preview outputs/office-component/*.zip
+          gh release upload office-preview outputs/office-component/*.json --clobber

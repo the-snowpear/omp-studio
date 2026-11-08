@@ -79,6 +79,7 @@ const ENVIRONMENT_ID = "env-0001" as EnvironmentId;
 const THREAD_ID = "thr-0001" as ThreadId;
 const SESSION_ID = "sess-0001" as SessionId;
 const WORKSPACE_ID = "ws-0001" as WorkspaceId;
+const WORKSPACE_FILE = { workspaceId: WORKSPACE_ID, path: "src/index.ts", id: "file-fixture", name: "index.ts", mime: "text/typescript", size: 5, version: "file-v1", writable: true };
 const AGENT_ID = "agent-0001" as AgentId;
 const GIT_REPOSITORY_ID = "repo-0001" as GitRepositoryId;
 const GIT_WORKTREE_ID = "worktree-0001" as GitWorktreeId;
@@ -303,6 +304,9 @@ const QUERY_INPUTS = {
   "agents.definitions.get": {},
   "projects.list": {},
   "workspace.fileTree": { workspaceId: WORKSPACE_ID },
+  "workspace.file.inspect": { workspaceId: WORKSPACE_ID, path: "src/index.ts" },
+  "workspace.file.readText": { workspaceId: WORKSPACE_ID, path: "src/index.ts" },
+  "workspace.file.readChunk": { workspaceId: WORKSPACE_ID, path: "src/index.ts", version: "file-v1", offset: 0, length: 5 },
   "usage.get": {},
   "stats.dashboard": {},
   "conversation.open": { target: { kind: "session", sessionId: SESSION_ID }, limit: 50 },
@@ -341,6 +345,9 @@ const QUERY_INPUTS = {
 const QUERY_RESPONSES = {
   "extensions.links.list": { ok: true, queryName: "extensions.links.list", result: { schemes: [] } },
   "browser.webmcp.list": { ok: true, queryName: "browser.webmcp.list", result: { pageId: "page-fixture", status: "unavailable", tools: [], truncated: false, untrusted: true, invocationAvailable: false, reason: "No connected browser" } },
+  "workspace.file.inspect": { ok: true, queryName: "workspace.file.inspect", result: WORKSPACE_FILE },
+  "workspace.file.readText": { ok: true, queryName: "workspace.file.readText", result: { file: WORKSPACE_FILE, text: "hello", encoding: "utf8", bom: false, lineEnding: "lf" } },
+  "workspace.file.readChunk": { ok: true, queryName: "workspace.file.readChunk", result: { data: "aGVsbG8=", bytes: 5 } },
   "session.cache.get": { ok: true, queryName: "session.cache.get", result: { cache: null } },
   "shell.view.read": { ok: true, queryName: "shell.view.read", result: { available: false, reason: "No recorded trace" } },
   "live.webrtc.connect": { ok: false, queryName: "live.webrtc.connect", error: { code: "UNAVAILABLE", message: "No Live account" } },

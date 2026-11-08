@@ -557,6 +557,10 @@ export interface HostWorkspaceService {
 
 /** Host-owned workspace-relative file tree and mutation adapter. */
 export interface HostWorkspaceFileService {
+  inspect?(input: import("@omp-studio/client-contract").WorkspaceFileTarget): Promise<import("@omp-studio/client-contract").WorkspaceFileInfo>;
+  readText?(input: import("@omp-studio/client-contract").WorkspaceFileTarget): Promise<import("@omp-studio/client-contract").WorkspaceFileText>;
+  readChunk?(input: import("@omp-studio/client-contract").WorkspaceFileChunkInput): Promise<import("@omp-studio/client-contract").WorkspaceFileChunk>;
+  writeText?(input: import("@omp-studio/client-contract").WorkspaceFileWrite): Promise<import("@omp-studio/client-contract").WorkspaceFileSaveResult>;
   get(input: { readonly workspaceId: WorkspaceId; readonly path?: string }): WorkspaceFileTreeReadModel | Promise<WorkspaceFileTreeReadModel>;
   createFile(input: { readonly workspaceId: WorkspaceId; readonly path: string }): WorkspaceFileMutationResult | Promise<WorkspaceFileMutationResult>;
   createDirectory(input: { readonly workspaceId: WorkspaceId; readonly path: string }): WorkspaceFileMutationResult | Promise<WorkspaceFileMutationResult>;
