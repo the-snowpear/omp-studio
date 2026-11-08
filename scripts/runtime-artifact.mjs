@@ -52,6 +52,7 @@ export const MANAGED_ENTRYPOINT = RUNTIME_ENTRYPOINTS.win32;
 export const STUDIO_PROTOCOL_RANGE = Object.freeze({ min: 1, max: 1 });
 
 export const IMPLEMENTED_CAPABILITIES = Object.freeze([
+  "timeTravel.capture",
   "computer.workspace.get",
   "computer.activity.list",
   "computer.frame.get",
