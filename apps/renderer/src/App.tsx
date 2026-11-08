@@ -169,6 +169,7 @@ import { snapshotFromDoc, snapshotFromText, snapshotFromTextAndImages, snapshotI
 import { createComposerDraftBook } from "./composer/draftStore";
 import { useComposerDraft } from "./composer/useComposerDraft";
 import { emptySnapshot, fileLabel, type ComposerSnapshot } from "./composer/types";
+import type { FileViewerActions } from "./files/fileActions";
 import { mergeUsedSkills, skillNamesInDoc, skillNamesInText } from "./skills/skillUsage";
 import type { StudioSpeed } from "@omp-studio/studio-protocol";
 import { ComposerSpeedControl } from "./composer/ComposerSpeedControl";
@@ -3432,7 +3433,7 @@ function BottomPanelChrome({ visible, expanded, resizing, height, onResizePointe
   </div>;
 }
 
-function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, state, client, onOpenWorktree, selectedSessionId, viewedSessionName, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwSession, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactThread, onCompactPending, onViewedTelemetryRefresh, telemetryRefreshToken, composerDraft, onComposerDraftChange, composerInsertion, onComposerInsertionApplied }: {
+function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, state, client, onOpenWorktree, selectedSessionId, viewedSessionName, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwSession, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactThread, onCompactPending, onViewedTelemetryRefresh, telemetryRefreshToken, composerDraft, onComposerDraftChange, composerInsertion, onComposerInsertionApplied, fileViewerActions }: {
   workbenchVisible: boolean;
   railMode: "hidden" | "expanded" | "compact";
   state: ViewState;
@@ -3508,6 +3509,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   composerDraft?: ComposerSnapshot;
   composerInsertion?: { owner: string | undefined; text: string } | undefined;
   onComposerInsertionApplied?: () => void;
+  fileViewerActions?: FileViewerActions;
 }) {
   const { document, window } = useConversationDom();
   const mdi = useConversationView();
@@ -6476,7 +6478,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
           onMain={() => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.focus(); }}
           onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}
           onRevealSource={target => target.toolCallId === undefined ? Promise.resolve(false) : revealConversationTarget(convoScrollerRef.current, { toolCallId: target.toolCallId })} />}</DockPanel>)}
-      <FileDockInstances client={client} workspaceId={workspaceId ? String(workspaceId) : undefined} targetId={executionTarget.id} onSettings={() => { setSettingsIntent("maintenance", "Office 文档预览"); onRoute("settings"); }} />
+      <FileDockInstances client={client} workspaceId={workspaceId ? String(workspaceId) : undefined} targetId={executionTarget.id} onSettings={() => { setSettingsIntent("maintenance", "Office 文档预览"); onRoute("settings"); }} actions={fileViewerActions} />
       <BrowserDockInstances client={client} sessionId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} capabilities={capabilities} remote={!!executionTarget.id} onReferences={insertBrowserReferences} />
       <ToastHost message={statusToast} icon="info" onDismiss={() => setStatusToast(null)} />
       {treeConfirm.dialog}
@@ -8654,6 +8656,26 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       run(() => reveal(input), target.kind === "dir" ? `已在${manager}中打开 ${target.name}` : `已在${manager}中定位 ${target.name}`);
     }
   };
+  // File windows reuse the Explorer shell actions and the Composer capsule chain; a line range follows the capsule as plain text.
+  const fileViewerActions: FileViewerActions = {
+    openers: fileOpeners,
+    runShell: runFileShellAction,
+    addContext: ({ path, label, lines }) => {
+      const composer = composerRef.current;
+      if (!composer) return;
+      const id = `file-context-${crypto.randomUUID()}`;
+      composer.insertChip({ id, kind: /\.(png|jpe?g|gif|webp)$/iu.test(path) ? "image" : "file", label, path });
+      if (lines) {
+        const snapshot = composer.getSnapshot(), nodes = [...snapshot.doc.nodes];
+        const index = nodes.findIndex((node) => node.type === "chip" && node.chip.id === id);
+        if (index >= 0) {
+          nodes.splice(index + 1, 0, { type: "text", value: ` L${lines[0]}${lines[1] === lines[0] ? "" : `-L${lines[1]}`} ` });
+          composer.setSnapshot({ ...snapshot, doc: { nodes } });
+        }
+      }
+      composer.focus();
+    },
+  };
 
   const chrome: ShellChrome = {
     collapsed: mdi ? collapsed : !layout.sidebarShown,
@@ -9181,6 +9203,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
              onComposerDraftChange={onComposerDraftChange}
              composerInsertion={composerInsertion}
              onComposerInsertionApplied={clearComposerInsertion}
+            fileViewerActions={fileViewerActions}
             onDraftSkillsChange={onDraftSkillsChange}
             onUsedSkillsChange={onUsedSkillsChange}
             onSessionTitleMaybeChanged={() => refreshSessionTitles(selectedProject?.id as WorkspaceId | undefined)}

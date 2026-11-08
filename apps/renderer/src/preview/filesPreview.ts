@@ -10,6 +10,13 @@ export function previewFileText(file: WorkspaceFileInfo): WorkspaceFileText {
   const text = /\.[ct]sv$/i.test(file.name) ? CSV : /\.md$/i.test(file.name) ? README : /\.json$/i.test(file.name) ? '{\n  "name": "omp-studio",\n  "private": true\n}\n' : "// OMP Studio\nexport function hello(name: string) {\n  return `Hello, ${name}`;\n}\n";
   return { file, text, encoding: "utf8", bom: false, lineEnding: "lf" };
 }
+/** Demo working-tree patches so the Git gutter and Diff view have something to show; other files read as clean. */
+export function previewFilePatch(path: string): string {
+  const name = path.replaceAll("\\", "/");
+  if (/(^|\/)main\.ts$/i.test(name)) return [`diff --git a/${name} b/${name}`, `--- a/${name}`, `+++ b/${name}`, "@@ -1,5 +1,4 @@", " // OMP Studio", "-export function hello(name) {", "+export function hello(name: string) {", "   return `Hello, ${name}`;", " }", "-// TODO: type the argument", ""].join("\n");
+  if (/\.md$/i.test(name)) return [`diff --git a/${name} b/${name}`, `--- a/${name}`, `+++ b/${name}`, "@@ -5,4 +5,5 @@", " ## 文件窗口", " ", " - 文件树单击打开", " - 拖动标题栏停靠", "+- Ctrl / Cmd + S 保存文本", ""].join("\n");
+  return "";
+}
 export const PREVIEW_OFFICE_COMPONENT = { id: "office-preview" as const, status: "not-installed" as const, availableVersion: "26.8.2", downloadBytes: 350 * 1024 * 1024 };
 let officeInstalled = false;
 const officeListeners = new Set<() => void>();

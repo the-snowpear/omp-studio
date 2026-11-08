@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AppSelect } from "../AppSelect";
+import { Icon } from "../icons";
 import { useSurfaceDocument } from "../dock/SurfaceContext";
 
 type Cell = { row: number; column: number; text: string; formula?: string };
@@ -45,9 +46,10 @@ export default function SpreadsheetPane({ url }: { url: string }) {
     const text = await request<string>({ kind: "copy", sheet, startRow: Math.min(selection.r, selection.endR), endRow: Math.max(selection.r, selection.endR), startColumn: Math.min(selection.c, selection.endC), endColumn: Math.max(selection.c, selection.endC) });
     await surface.defaultView?.navigator.clipboard.writeText(text);
   };
-  return <div className="file-spreadsheet"><div className="file-toolbar"><AppSelect className="file-sheet-select" aria-label="工作表" value={String(sheet)} disabled={!sheets.length} onChange={event => setSheet(Number(event.target.value))}>{sheets.map((name, index) => <option key={name} value={index}>{name}</option>)}</AppSelect><span>{meta.rows.toLocaleString()} 行 · {meta.columns.toLocaleString()} 列</span><button className="btn small outline" disabled={!sheets.length} onClick={() => { void copy().catch(error => setError(String(error))); }}>复制选区</button><span className="file-muted">只读 · 公式显示已保存的结果</span></div>
-    {error ? <p className="file-error" role="alert">{error}</p> : null}
-    {!sheets.length && !error ? <div className="file-empty">正在读取表格…</div> : null}
+  const selected = `${columnName(Math.min(selection.c, selection.endC))}${Math.min(selection.r, selection.endR) + 1}${selection.r !== selection.endR || selection.c !== selection.endC ? `:${columnName(Math.max(selection.c, selection.endC))}${Math.max(selection.r, selection.endR) + 1}` : ""}`;
+  return <div className="file-spreadsheet"><div className="file-subbar">{sheets.length > 1 ? <AppSelect className="file-sheet-select" aria-label="工作表" value={String(sheet)} onChange={event => setSheet(Number(event.target.value))}>{sheets.map((name, index) => <option key={name} value={index}>{name}</option>)}</AppSelect> : <span className="file-subbar-title"><Icon name="table" extra="sm" />{sheets[0] ?? "表格"}</span>}<span className="file-subbar-meta">{meta.rows.toLocaleString()} 行 · {meta.columns.toLocaleString()} 列</span><span className="file-subbar-spacer" /><span className="file-cell-ref" data-tip="当前选区">{selected}</span><button type="button" className="icon-btn" aria-label="复制选区" data-tip="复制选区（Ctrl C）" disabled={!sheets.length} onClick={() => { void copy().catch(error => setError(String(error))); }}><Icon name="copy" extra="sm" /></button><span className="file-tag" data-tip="公式显示已保存的结果"><Icon name="lock" extra="sm" />只读</span></div>
+    {error ? <div className="file-banner is-error" role="alert"><Icon name="alert-c" extra="sm" /><span>{error}</span></div> : null}
+    {!sheets.length && !error ? <div className="file-empty"><span className="file-badge is-large tone-green is-loading" aria-hidden="true">XLS</span><h3>正在读取表格…</h3></div> : null}
     <div ref={scroll} className="file-grid-scroll" role="grid" tabIndex={0} aria-label="文件表格" aria-rowcount={meta.rows} aria-colcount={meta.columns} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") { event.preventDefault(); void copy().catch(error => setError(String(error))); } }}>
       <div className="file-grid-canvas" style={{ height: rows.getTotalSize(), width: columns.getTotalSize() }}>
         {visibleColumns.map(column => <div role="columnheader" key={`c${column.index}`} className="file-grid-cell file-grid-header" style={{ left: column.start, top: 0, width: column.size }}>{columnName(column.index)}</div>)}

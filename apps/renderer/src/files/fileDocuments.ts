@@ -8,18 +8,21 @@ export type FileDocumentIdentity = Pick<WorkspaceFileInfo, "workspaceId" | "path
 export interface FileDocumentSnapshot {
   file: FileDocumentIdentity; text: string; baseline: string; loaded: boolean; loading: boolean; saving: boolean;
   dirty: boolean; error: string; external?: WorkspaceFileInfo | undefined; diskText?: string | undefined;
+  /** Encoding and line endings of the last read; saves write them back unchanged. */
+  format: TextFormat;
 }
+export type TextFormat = Pick<WorkspaceFileText, "encoding" | "bom" | "lineEnding">;
 export class FileDocument {
   private state: FileDocumentSnapshot;
   private listeners = new Set<() => void>();
-  private format: Pick<WorkspaceFileText, "encoding" | "bom" | "lineEnding"> = { encoding: "utf8", bom: false, lineEnding: "lf" };
+  private format: TextFormat = { encoding: "utf8", bom: false, lineEnding: "lf" };
   private refreshing = false;
   private pendingSave: string | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private visible = new Set<string>();
   private closedViews = new Set<string>();
   constructor(file: FileDocumentIdentity, public client: () => Promise<StudioClient>, readonly preview = false) {
-    this.state = { file, text: "", baseline: "", loaded: false, loading: false, saving: false, dirty: false, error: "" };
+    this.state = { file, text: "", baseline: "", loaded: false, loading: false, saving: false, dirty: false, error: "", format: this.format };
   }
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -33,7 +36,7 @@ export class FileDocument {
       this.format = { encoding: value.encoding, bom: value.bom, lineEnding: value.lineEnding };
       // A background read must never replace typing that began while it was in flight.
       if (!discard && this.state.dirty) { this.patch({ external: value.file }); return; }
-      this.patch({ file: value.file, text: value.text, baseline: value.text, loaded: true, dirty: false, external: undefined, diskText: undefined });
+      this.patch({ file: value.file, text: value.text, baseline: value.text, loaded: true, dirty: false, external: undefined, diskText: undefined, format: this.format });
     } catch (error) { this.patch({ error: message(error) }); }
     finally { this.patch({ loading: false }); }
   }

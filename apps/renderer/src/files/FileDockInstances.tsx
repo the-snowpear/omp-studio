@@ -12,6 +12,7 @@ import { getFileDocument, releaseFileDocument, type FileDocument, type FileDocum
 import { readFileScope } from "./filePreferences";
 import { registerFileOpener, type FileOpenIntent } from "./fileLinks";
 import { requestFileClose } from "./FileCloseDialog";
+import type { FileViewerActions } from "./fileActions";
 import "./files.css";
 
 const FilePane = lazy(() => import("./FilePane"));
@@ -19,7 +20,7 @@ type Catalog = { store: DockStore; preview: boolean; documents: Map<string, File
 const catalogs = new Set<Catalog>();
 const closingFiles = new Set<FilePanelId>();
 
-export function FileDockInstances({ client, workspaceId, targetId, onSettings }: { client: StudioClient; workspaceId?: string | undefined; targetId: string | null; onSettings: () => void }) {
+export function FileDockInstances({ client, workspaceId, targetId, onSettings, actions }: { client: StudioClient; workspaceId?: string | undefined; targetId: string | null; onSettings: () => void; actions?: FileViewerActions | undefined }) {
   const { preview } = usePreviewMode(), view = useConversationView(), targets = useExecutionTargets();
   const { store, setFileViewDefinitions } = useDockEngine();
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
@@ -100,5 +101,5 @@ export function FileDockInstances({ client, workspaceId, targetId, onSettings }:
   });
   useLayoutEffect(() => { setFileViewDefinitions(definitions); });
   useLayoutEffect(() => () => setFileViewDefinitions([]), [setFileViewDefinitions]);
-  return <>{descriptors.map(([id, descriptor]) => <DockPanel key={id} id={id}>{visibility => <Suspense fallback={<div className="file-empty">正在打开文件…</div>}><FilePane id={id} descriptor={descriptor} session={sessionFor(descriptor)} visible={visibility.visible} onSettings={onSettings} onOpen={reference => { void open({ ...reference, workspaceId: descriptor.workspaceId }); }} onViewState={patch => store.dispatch({ type: "file-state", panel: id, patch })} /></Suspense>}</DockPanel>)}</>;
+  return <>{descriptors.map(([id, descriptor]) => <DockPanel key={id} id={id}>{visibility => <Suspense fallback={<div className="file-empty">正在打开文件…</div>}><FilePane id={id} descriptor={descriptor} session={sessionFor(descriptor)} visible={visibility.visible} onSettings={onSettings} onOpen={reference => { void open({ ...reference, workspaceId: descriptor.workspaceId }); }} onViewState={patch => store.dispatch({ type: "file-state", panel: id, patch })} actions={actions} /></Suspense>}</DockPanel>)}</>;
 }
