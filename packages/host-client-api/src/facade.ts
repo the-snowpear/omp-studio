@@ -1016,6 +1016,16 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = await this.#queryProjects();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "workspace.file.inspect":
+      case "workspace.file.readText":
+      case "workspace.file.readChunk": {
+        const service = this.#options.workspaceFiles;
+        const input = request.input as import("@omp-studio/client-contract").WorkspaceFileChunkInput;
+        if (!service?.inspect || !service.readText || !service.readChunk) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持文件查看，请更新 Host");
+        const result = request.queryName === "workspace.file.inspect" ? await service.inspect(input)
+          : request.queryName === "workspace.file.readText" ? await service.readText(input) : await service.readChunk(input);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "workspace.fileTree": {
         const service = this.#options.workspaceFiles;
         if (service === undefined) throw clientError("CAPABILITY_UNAVAILABLE", "workspace.fileTree is not available on this Host");
@@ -1223,9 +1233,10 @@ export class StudioHostClientFacade implements ClientTransport {
       case "workspace.pick": {
         return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick">);
       }
+      case "workspace.file.writeText":
       case "workspace.file.create":
       case "workspace.directory.create": {
-        return this.#commandWorkspaceFile(request as ClientCommandRequest<"workspace.file.create" | "workspace.directory.create">);
+        return this.#commandWorkspaceFile(request as ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">);
       }
       case "usage.openDashboard": {
         return this.#commandUsage(request as ClientCommandRequest<"usage.openDashboard">);
@@ -3330,7 +3341,7 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #commandWorkspaceFile(
-    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create">,
+    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">,
   ): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
     const service = this.#options.workspaceFiles;
@@ -3350,14 +3361,15 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #runWorkspaceFileCommand(
-    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create">,
+    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">,
     service: HostWorkspaceFileService,
   ): Promise<void> {
     try {
       const input = request.input as { readonly workspaceId: WorkspaceId; readonly path: string };
-      const result: WorkspaceFileMutationResult = request.commandName === "workspace.file.create"
-        ? await service.createFile(input)
-        : await service.createDirectory(input);
+      if (request.commandName === "workspace.file.writeText" && !service.writeText) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持文件保存，请更新 Host");
+      const result = request.commandName === "workspace.file.writeText"
+        ? await service.writeText!(request.input as import("@omp-studio/client-contract").WorkspaceFileWrite)
+        : request.commandName === "workspace.file.create" ? await service.createFile(input) : await service.createDirectory(input);
       this.#emitTerminal(request.requestId, {
         requestId: request.requestId,
         commandName: request.commandName,

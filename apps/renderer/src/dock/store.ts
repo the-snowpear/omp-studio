@@ -1,5 +1,5 @@
 import type { LayoutMemory } from "../settings/appSettings";
-import { applyInstancePreset, builtInPresets, clampFloat, createDefaultLayout, dockReducer, instancePresetLayout, locatePanel, normalizeLayout, removePanels } from "./model";
+import { preserveFileViews, applyInstancePreset, builtInPresets, clampFloat, createDefaultLayout, dockReducer, instancePresetLayout, locatePanel, normalizeLayout, removePanels } from "./model";
 import { projectConversationPanel } from "./conversationPanels";
 import { workbenchBounds } from "./workbenchGeometry";
 import { pinWorkspace, pinsForScope, putPin, readPins, subtractPinPanels, withPins } from "./pins";
@@ -7,7 +7,7 @@ import type { DockFloat, DockPinMode, DockRect } from "./types";
 import { WorkbenchWindows, toolWindowId, type WorkbenchWindow } from "./windows";
 import { WINDOW_MINIMUM } from "./snap";
 import { WORKBENCH_PANELS } from "../panels/registry";
-import { PANEL_IDS, conversationPanelId, isConversationPanelId, isAgentPanelId, isBrowserPagePanelId, type DockAction, type DockLayout, type DockPreferences, type DockPreset, type DockScope, type DockSnapshot, type PanelId } from "./types";
+import { isFilePanelId, PANEL_IDS, conversationPanelId, isConversationPanelId, isAgentPanelId, isBrowserPagePanelId, type DockAction, type DockLayout, type DockPreferences, type DockPreset, type DockScope, type DockSnapshot, type PanelId } from "./types";
 
 const STORAGE_KEY = "omp.dock.v1";
 /** One manual-recovery snapshot of the last good payload; never rewritten. */
@@ -31,10 +31,10 @@ function scopeKey(scope: DockScope): string {
 }
 
 /** A pin carries the descriptors of the Agents and pages it holds, so it can render them in any session. */
-function withPinnedInstances<Pin extends object>(pin: Pin, panels: readonly PanelId[], layout: DockLayout): Pin & { agentPanels: DockLayout["agentPanels"]; browserPages?: DockLayout["browserPages"] } {
+function withPinnedInstances<Pin extends object>(pin: Pin, panels: readonly PanelId[], layout: DockLayout): Pin & { agentPanels: DockLayout["agentPanels"]; browserPages?: DockLayout["browserPages"]; fileViews?: DockLayout["fileViews"] } {
   const pick = <Value,>(source: Record<string, Value>, keep: (id: PanelId) => boolean) => Object.fromEntries(panels.filter(keep).flatMap(id => source[id] ? [[id, source[id]]] : [])) as Record<string, Value>;
   const browserPages = pick(layout.browserPages ?? {}, isBrowserPagePanelId);
-  return { ...pin, agentPanels: pick(layout.agentPanels, isAgentPanelId), ...(Object.keys(browserPages).length ? { browserPages } : {}) };
+  return { ...pin, fileViews: pick(layout.fileViews ?? {}, isFilePanelId), agentPanels: pick(layout.agentPanels, isAgentPanelId), ...(Object.keys(browserPages).length ? { browserPages } : {}) };
 }
 
 function defaultPreferences(): DockPreferences {
@@ -289,7 +289,7 @@ export class DockStore {
         const definition = WORKBENCH_PANELS.find(value => value.id === group.active);
         const conversationActive = isConversationPanelId(group.active);
         const minimum = { width: WINDOW_MINIMUM.width, height: Math.max(WINDOW_MINIMUM.height, Math.max(definition?.minHeight ?? 0, conversationActive ? 280 : group.active === "terminal" ? 240 : 0) + 42 + (group.panels.length > 1 ? 36 : 0)) };
-        const title = conversationActive ? this.conversationTitle : `${definition?.title ?? this.snapshot?.layout.agentPanels[group.active]?.target.displayName ?? (isBrowserPagePanelId(group.active) ? this.snapshot?.layout.browserPages[group.active]?.title || "Browser" : group.active)}${this.conversationTitle ? ` · ${this.conversationTitle}` : ""}`;
+        const title = conversationActive ? this.conversationTitle : `${definition?.title ?? this.snapshot?.layout.agentPanels[group.active]?.target.displayName ?? (isFilePanelId(group.active) ? this.snapshot?.layout.fileViews[group.active]?.title || "File" : isBrowserPagePanelId(group.active) ? this.snapshot?.layout.browserPages[group.active]?.title || "Browser" : group.active)}${this.conversationTitle ? ` · ${this.conversationTitle}` : ""}`;
         if (!manager.get(id)) {
           if (group.pin ? group.pin.coordinateVersion !== 1 : this.layout.floatCoordinateVersion !== 1) this.unmigratedWindows.add(id);
           manager.register({ id, content: { kind: "tools", documentId: this.documentId!, groupId: group.id }, title, minimum, placement: pin === "window" || pin === "topmost" ? "native" : "float", pin, rect: group.rect, minimized: group.minimized, maximized: group.maximized, ...(group.pin?.windowRect ? { nativeRect: group.pin.windowRect } : {}) });
@@ -556,8 +556,21 @@ export class DockStore {
       } finally { this.reconcilingWindows = false; }
     }
     // Page tabs follow the browser's own state, so undo must never restore a closed page or drop an open one.
-    if (base !== this.layout) this.commit(base, action.type !== "activate" && action.type !== "raise" && action.type !== "agent-focus" && !action.type.startsWith("browser-page-"), conversation);
+    if (base !== this.layout) this.commit(base, action.type !== "activate" && action.type !== "raise" && action.type !== "agent-focus" && !action.type.startsWith("browser-page-") && !action.type.startsWith("file-"), conversation);
     else if (pinsChanged) { this.queue(); this.publish(); }
+    if (action.type === "file-close") {
+      this.state.pins = subtractPinPanels(this.state.pins, action.panels);
+      for (const [key, layout] of this.state.layouts) {
+        const next = dockReducer(layout, action);
+        if (next === layout) continue;
+        this.state.layouts.set(key, next);
+        if (this.state.saved.has(key)) this.state.saved.set(key, next);
+      }
+      for (const [key, recent] of this.state.recent) this.state.recent.set(key, { ...recent, layout: dockReducer(recent.layout, action) });
+      if (!this.preview) this.dirty = true;
+      this.queue();
+      for (const handle of this.handles) if (handle.preview === this.preview) handle.publish();
+    }
     // One contract for every region switch, whichever menu or button caused it.
     if (action.type === "region" && typeof window !== "undefined") {
       (this.eventWindow ?? window).dispatchEvent(new CustomEvent("omp:dock-region", { detail: { documentId: this.documentId, region: action.region, visible: action.visible } }));
@@ -579,6 +592,10 @@ export class DockStore {
         if (descriptor && !base.agentPanels[panel]) base = dockReducer(base, { type: "agent-open", panel, descriptor });
       }
       // Another chat's pages go home to that chat's layout instead of joining this one.
+      for (const panel of group.panels) if (isFilePanelId(panel) && !base.fileViews[panel]) {
+        const descriptor = this.snapshot.layout.fileViews[panel];
+        if (descriptor) base = dockReducer(base, { type: "file-open", panel, descriptor });
+      }
       const panels = group.panels.filter(panel => !isBrowserPagePanelId(panel) || this.snapshot.layout.browserPages[panel]?.sessionId === this.scope.session);
       for (const panel of panels) if (isBrowserPagePanelId(panel) && !base.browserPages[panel]) base = dockReducer(base, { type: "browser-page-open", panel, descriptor: this.snapshot.layout.browserPages[panel]!, reveal: false });
       let next = panels.length ? dockReducer(base, { type: "move", panels, target: { region: "float", groupId: group.id, rect: group.rect } }) : base;
@@ -594,6 +611,11 @@ export class DockStore {
     this.windowManager?.setPin(this.windowId(groupId), mode);
     if (!this.preview) this.dirty = true;
     this.queue(); this.publish();
+    if (mode === "workspace" || mode === "none") for (const panel of group.panels) {
+      if (isFilePanelId(panel) && this.snapshot.layout.fileViews[panel]?.scope !== (mode === "workspace" ? "workspace" : "conversation")) {
+        this.dispatch({ type: "file-state", panel, patch: { scope: mode === "workspace" ? "workspace" : "conversation" } });
+      }
+    }
   }
 
   setNativeState(groupId: string, state: { rect: DockRect; minimized: boolean; maximized: boolean }): void {
@@ -698,7 +720,7 @@ export class DockStore {
     if (!entry) return;
     this.modalPanel = null;
     history.redo.push({ layout: this.layout, conversation: this.conversationWindow() });
-    this.save(this.scope, entry.layout);
+    this.save(this.scope, preserveFileViews(entry.layout, this.layout));
     if (entry.conversation) this.windowManager?.patch(entry.conversation.id, entry.conversation);
     this.flush();
     this.publish();
@@ -710,7 +732,7 @@ export class DockStore {
     if (!entry) return;
     this.modalPanel = null;
     history.undo.push({ layout: this.layout, conversation: this.conversationWindow() });
-    this.save(this.scope, entry.layout);
+    this.save(this.scope, preserveFileViews(entry.layout, this.layout));
     if (entry.conversation) this.windowManager?.patch(entry.conversation.id, entry.conversation);
     this.flush();
     this.publish();

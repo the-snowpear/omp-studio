@@ -1,4 +1,4 @@
-import { PANEL_IDS, agentPanelId, browserPagePanelId, isAgentPanelId, isBrowserPagePanelId, isConversationPanelId, type AgentPanelId, type AgentPanelTarget, type BrowserPagePanelId, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId } from "./types";
+import { isFilePanelId, type FilePanelId, type FilePanelDescriptor, PANEL_IDS, agentPanelId, browserPagePanelId, isAgentPanelId, isBrowserPagePanelId, isConversationPanelId, type AgentPanelId, type AgentPanelTarget, type BrowserPagePanelId, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId } from "./types";
 
 const FLOAT_RECT: DockRect = { x: 80, y: 60, width: 560, height: 400 };
 const isPanel = (value: unknown): value is PanelId => typeof value === "string" && (PANEL_IDS as readonly string[]).includes(value);
@@ -21,6 +21,7 @@ export function createDefaultLayout(): DockLayout {
     cards: Object.fromEntries(PANEL_IDS.map(id => [id, { collapsed: false, height: id === "browser" || id === "computer" ? 320 : id === "terminal" ? 240 : null }])) as DockLayout["cards"],
     agentPanels: {},
     browserPages: {},
+    fileViews: {},
     presetId: "default",
   };
 }
@@ -47,6 +48,7 @@ export function locatePanel(layout: DockLayout, id: PanelId): DockLocation | und
 function copy(layout: DockLayout): DockLayout {
   return {
     ...layout,
+    fileViews: { ...layout.fileViews },
     left: { ...layout.left, panels: [...layout.left.panels] },
     rail: { ...layout.rail, panels: [...layout.rail.panels] },
     right: { ...layout.right, groups: layout.right.groups.map(group => ({ ...group, panels: [...group.panels] })) },
@@ -299,6 +301,22 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
       const opened = dockReducer(next, { type: "open", panel: action.panel }, locked);
       return replaceLegacy ? dockReducer(opened, { type: "hide", panels: ["agent-detail"] }, locked) : opened;
     }
+    case "file-open": {
+      next.fileViews[action.panel] = { ...next.fileViews[action.panel], ...action.descriptor };
+      next.cards[action.panel] ??= { collapsed: false, height: null };
+      if (!locatePanel(next, action.panel) && !next.hidden[action.panel]) next.hidden[action.panel] = { region: "float", groupId: `float-${action.panel}`, rect: action.rect ?? { x: 100, y: 70, width: 800, height: 640 } };
+      return dockReducer(next, { type: "open", panel: action.panel }, locked);
+    }
+    case "file-close": {
+      remove(next, action.panels);
+      for (const id of action.panels) { delete next.fileViews[id]; delete next.cards[id]; }
+      clean(next);
+      break;
+    }
+    case "file-state": {
+      if (next.fileViews[action.panel]) next.fileViews[action.panel] = { ...next.fileViews[action.panel]!, ...action.patch };
+      break;
+    }
     case "browser-page-open": {
       const { panel, descriptor } = action;
       next.browserPages[panel] = { ...next.browserPages[panel], ...descriptor };
@@ -492,9 +510,28 @@ export function applyBrowserPagePreset(preset: DockLayout, current: DockLayout):
 }
 
 /** Presets and the "modified" baseline never carry per-session Agents or pages. */
-export const instancePresetLayout = (layout: DockLayout): DockLayout => removePanels(browserPagePresetLayout(agentPresetLayout(layout)), Object.keys(layout.cards).filter(isConversationPanelId));
+export const instancePresetLayout = (layout: DockLayout): DockLayout => {
+  const result = removePanels(browserPagePresetLayout(agentPresetLayout(layout)), Object.keys(layout.cards).filter(id => isConversationPanelId(id) || isFilePanelId(id)));
+  result.fileViews = {};
+  return result;
+};
+export function preserveFileViews(layout: DockLayout, current: DockLayout): DockLayout {
+  let result = copy(layout);
+  const closedFiles = Object.keys(result.fileViews ?? {}).filter(id => !current.fileViews[id]) as FilePanelId[];
+  result = removePanels(result, closedFiles);
+  for (const id of closedFiles) delete result.fileViews[id];
+  for (const [id, descriptor] of Object.entries(current.fileViews ?? {})) {
+    if (result.fileViews[id]) { result.fileViews[id] = descriptor; continue; }
+    result = dockReducer(result, { type: "file-open", panel: id as FilePanelId, descriptor });
+    const location = locatePanel(current, id as FilePanelId) ?? current.hidden[id as FilePanelId];
+    if (location) result = dockReducer(result, { type: "move", panels: [id as FilePanelId], target: location });
+    if (!locatePanel(current, id as FilePanelId)) result = dockReducer(result, { type: "hide", panels: [id as FilePanelId] });
+  }
+  return result;
+}
+
 export const applyInstancePreset = (preset: DockLayout, current: DockLayout): DockLayout => {
-  let result = applyBrowserPagePreset(applyAgentPreset(preset, current), current);
+  let result = preserveFileViews(applyBrowserPagePreset(applyAgentPreset(preset, current), current), current);
   for (const panel of Object.keys(current.cards).filter(isConversationPanelId)) {
     const location = locatePanel(current, panel) ?? current.hidden[panel];
     result = { ...result, cards: { ...result.cards, [panel]: current.cards[panel]! }, hidden: { ...result.hidden, [panel]: location ?? { region: "float" } } };
@@ -545,7 +582,11 @@ export function normalizeLayout(value: unknown): DockLayout {
     if (!isBrowserPagePanelId(id) || typeof descriptor.sessionId !== "string" || typeof descriptor.pageId !== "string" || browserPagePanelId(descriptor.sessionId, descriptor.pageId) !== id) continue;
     layout.browserPages[id] = { sessionId: descriptor.sessionId, pageId: descriptor.pageId, ...(typeof descriptor.title === "string" ? { title: descriptor.title } : {}) };
   }
-  const validPanel = (id: unknown): id is PanelId => isPanel(id) || typeof id === "string" && (isAgentPanelId(id) && !!layout.agentPanels[id] || isBrowserPagePanelId(id) && !!layout.browserPages[id] || isConversationPanelId(id));
+  for (const [id, value] of Object.entries(record(raw.fileViews))) {
+    const descriptor = record(value);
+    if (isFilePanelId(id) && typeof descriptor.workspaceId === "string" && typeof descriptor.path === "string" && typeof descriptor.fileId === "string") layout.fileViews[id] = descriptor as FilePanelDescriptor;
+  }
+  const validPanel = (id: unknown): id is PanelId => isPanel(id) || typeof id === "string" && (isAgentPanelId(id) && !!layout.agentPanels[id] || isBrowserPagePanelId(id) && !!layout.browserPages[id] || isConversationPanelId(id) || isFilePanelId(id) && !!layout.fileViews[id]);
   const seen = new Set<PanelId>();
   const ids = new Set<string>();
   const panels = (value: unknown): PanelId[] => Array.isArray(value) ? value.filter((id): id is PanelId => {
@@ -635,6 +676,10 @@ export function normalizeLayout(value: unknown): DockLayout {
     layout.cards[id] = { collapsed: bool(card.collapsed, false), height: typeof card.height === "number" && Number.isFinite(card.height) ? Math.max(80, card.height) : null };
   }
   if (typeof raw.lastBrowserPage === "string" && isBrowserPagePanelId(raw.lastBrowserPage) && layout.browserPages[raw.lastBrowserPage]) layout.lastBrowserPage = raw.lastBrowserPage;
+  for (const id of Object.keys(layout.fileViews) as FilePanelId[]) {
+    layout.cards[id] = { collapsed: false, height: null };
+    if (!locatePanel(layout, id)) layout.hidden[id] = { region: "float", groupId: `float-${id}` };
+  }
   layout.presetId = typeof raw.presetId === "string" && raw.presetId ? raw.presetId : "default";
   clean(layout);
   // Old configurations could keep an empty region open; the same rule applies here.

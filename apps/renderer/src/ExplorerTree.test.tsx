@@ -536,7 +536,8 @@ describe("RealFileTree", () => {
     await screen.findByText("package.json");
 
     fireEvent.click(screen.getByRole("button", { name: /更多操作/ }));
-    expect((screen.getByRole("menuitem", { name: "打开" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: "打开" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("menuitem", { name: "使用系统应用打开" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("menuitem", { name: "在资源管理器中打开" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("menuitem", { name: "复制绝对路径" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("menuitem", { name: "打开方式" }) as HTMLButtonElement).disabled).toBe(true);

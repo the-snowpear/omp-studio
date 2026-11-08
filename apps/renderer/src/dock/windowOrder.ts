@@ -5,6 +5,8 @@ type WindowRegistration = { ownerId: string | null; surface: Document; floating:
 type WindowFocusSnapshot = { activeId: string | null; ownerId: string | null; order: readonly string[] };
 
 export class WindowFocusStore {
+  /** A workspace-owned file keeps the active conversation while taking keyboard focus. */
+  resolveOwner?: (id: string, ownerId: string | null) => string | null;
   private registrations = new Map<string, WindowRegistration>();
   private recent: string[] = [];
   private history: { id: string; ownerId: string | null }[] = [];
@@ -28,7 +30,7 @@ export class WindowFocusStore {
   register(id: string, registration: WindowRegistration) {
     this.registrations.set(id, registration);
     const order = registration.floating ? !this.state.order.includes(id) ? [...this.state.order, id] : this.state.order : this.state.order.includes(id) ? this.state.order.filter(value => value !== id) : this.state.order;
-    const ownerId = this.state.activeId === id ? registration.ownerId : this.state.ownerId;
+    const ownerId = this.state.activeId === id ? this.resolveOwner?.(id, registration.ownerId) ?? registration.ownerId : this.state.ownerId;
     if (order !== this.state.order || ownerId !== this.state.ownerId) this.publish({ ...this.state, order, ownerId });
     return () => {
       if (this.registrations.get(id) !== registration) return;
@@ -41,6 +43,7 @@ export class WindowFocusStore {
   }
   activate(id: string, ownerId = this.registrations.get(id)?.ownerId) {
     if (ownerId === undefined) return;
+    ownerId = this.resolveOwner?.(id, ownerId) ?? ownerId;
     const floating = this.registrations.get(id)?.floating ?? id.startsWith("conversation:");
     const order = floating ? [...this.state.order.filter(value => value !== id), id] : this.state.order;
     this.recent = [...this.recent.filter(value => value !== id), id];

@@ -57,6 +57,7 @@ declare global {
 
   var ompStudioChrome:
     | (Partial<import("../../desktop/src/dictation-audio-shared").DictationAudioApi> & {
+        files?: import("../../desktop/src/file-viewer-shared").FileViewerDesktopApi;
         prepareFloatWindow?(input: import("../../desktop/src/floating-windows-shared").FloatWindowPrepare): Promise<import("../../desktop/src/floating-windows-shared").FloatWindowTicket>;
         controlFloatWindow?(input: import("../../desktop/src/floating-windows-shared").FloatWindowControl): Promise<void>;
         onFloatWindow?(listener: (event: import("../../desktop/src/floating-windows-shared").FloatWindowEvent) => void): () => void;

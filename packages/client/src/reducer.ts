@@ -405,6 +405,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "workspace.open": true,
   "workspace.pick": true,
   "workspace.file.create": true,
+  "workspace.file.writeText": true,
   "workspace.directory.create": true,
   "usage.openDashboard": true,
   "git.execute": true,

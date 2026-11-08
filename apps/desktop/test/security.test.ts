@@ -551,7 +551,7 @@ describe("RENDERER_CSP: no unsafe-eval", () => {
 test("rendererCspFor keeps packaged CSP strict and permits Vite refresh only in dev", () => {
   const packaged = rendererCspFor({ kind: "file", path: "C:\\app\\index.html" });
   assert.match(packaged, /script-src 'self'(?:;|\s)/u);
-  assert.match(packaged, /connect-src 'self' omp-artifact:;/u);
+  assert.match(packaged, /connect-src 'self' omp-artifact: omp-file:;/u);
   assert.equal(packaged.includes("localhost"), false);
   // Loopback stays closed for code and data in packaged builds. The one
   // deliberate exception is the statistics frame, pinned to the single port

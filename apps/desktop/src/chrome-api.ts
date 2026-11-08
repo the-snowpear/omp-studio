@@ -1,3 +1,4 @@
+import { FILE_VIEWER_CHANNELS, type FileViewerDesktopApi } from "./file-viewer-shared.js";
 import { PREDICTION_CHANNELS, type PredictionAttach, type PredictionControl, type PredictionResult, type PredictionEvent } from "./prediction-shared.js";
 import { validatePredictionEvent } from "@omp-studio/studio-protocol";
 import { FLOAT_WINDOW_CHANNELS, type FloatWindowPrepare, type FloatWindowTicket, type FloatWindowControl, type FloatWindowEvent } from "./floating-windows-shared.js";
@@ -100,6 +101,20 @@ export function subscribeChannel<T>(
 
 export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?: WebUtilsLike, platform: string = process.platform) {
   return Object.freeze({
+    files: Object.freeze<FileViewerDesktopApi>({
+      open: input => ipcRenderer.invoke(FILE_VIEWER_CHANNELS.open, input) as ReturnType<FileViewerDesktopApi["open"]>,
+      release: id => ipcRenderer.invoke(FILE_VIEWER_CHANNELS.release, id) as Promise<void>,
+      export: input => ipcRenderer.invoke(FILE_VIEWER_CHANNELS.export, input) as Promise<boolean>,
+      officeState: check => ipcRenderer.invoke(FILE_VIEWER_CHANNELS.officeState, check) as ReturnType<FileViewerDesktopApi["officeState"]>,
+      officeInstall: () => ipcRenderer.invoke(FILE_VIEWER_CHANNELS.officeInstall) as ReturnType<FileViewerDesktopApi["officeInstall"]>,
+      officeCancel: () => ipcRenderer.invoke(FILE_VIEWER_CHANNELS.officeCancel) as Promise<void>,
+      officeUninstall: () => ipcRenderer.invoke(FILE_VIEWER_CHANNELS.officeUninstall) as ReturnType<FileViewerDesktopApi["officeUninstall"]>,
+      officePreview: id => ipcRenderer.invoke(FILE_VIEWER_CHANNELS.officePreview, id) as ReturnType<FileViewerDesktopApi["officePreview"]>,
+      onOfficeState: listener => subscribeChannel(ipcRenderer, FILE_VIEWER_CHANNELS.officeChanged, listener),
+      setDirty: count => ipcRenderer.invoke(FILE_VIEWER_CHANNELS.dirty, count) as Promise<void>,
+      onCloseRequested: listener => subscribeChannel(ipcRenderer, FILE_VIEWER_CHANNELS.closeRequested, listener),
+      finishClose: (id, allow) => ipcRenderer.invoke(FILE_VIEWER_CHANNELS.finishClose, id, allow) as Promise<void>,
+    }),
     prepareFloatWindow(input: FloatWindowPrepare): Promise<FloatWindowTicket> { return ipcRenderer.invoke(FLOAT_WINDOW_CHANNELS.prepare, input) as Promise<FloatWindowTicket>; },
     controlFloatWindow(input: FloatWindowControl): Promise<void> { return ipcRenderer.invoke(FLOAT_WINDOW_CHANNELS.control, input) as Promise<void>; },
     onFloatWindow(listener: (event: FloatWindowEvent) => void): () => void { return subscribeChannel(ipcRenderer, FLOAT_WINDOW_CHANNELS.changed, listener); },

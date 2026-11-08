@@ -185,3 +185,7 @@ Renderer → StudioClient → Desktop IPC → Host facade
 [MIT](LICENSE)。第三方声明见 [NOTICE](NOTICE)。
 
 钉住的 Runtime 来自 [oh-my-pi](https://github.com/can1357/oh-my-pi)（MIT；Pi by Mario Zechner，omp by Can Bölük）。Studio 的 overlay 与接缝补丁是本仓库的独立工作，同样以 MIT 授权。
+
+### 文件查看器
+
+文件树单击或点击对话中的文件引用，可在通用工作台窗口阅读文件。支持文本编辑、Markdown、PDF、图片、音视频与 Excel/CSV；Word/PPT 通过 **设置 → 更新与维护 → 可选组件** 中的 Office 文档预览组件打开，组件默认不安装、不随主程序打包。详见[文件查看器说明](docs/file-viewer.md)。

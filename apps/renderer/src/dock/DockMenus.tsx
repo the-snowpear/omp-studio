@@ -1,3 +1,4 @@
+import { isFilePanelId } from "./types";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "../icons";
@@ -249,7 +250,9 @@ function DockPanelActions({ panels, groupId, onClose }: PanelMenuProps) {
       <MenuItem icon="restore" disabled={locked || layout.cards[first]!.height === null} title={locked ? lockReason : undefined} onClick={() => run({ type: "card", panel: first, height: null })}>{copy("恢复自动高度", "Restore automatic height")}</MenuItem>
     </> : null}
     <div className="menu-sep" />
-    {panels.some(panel => definitions.find(definition => definition.id === panel)?.content) ? <MenuItem icon="x" onClick={() => { closePanels(store, definitions, panels); onClose?.(); }}>{wholeGroup ? copy("关闭标签组", "Close tab group") : copy("关闭对话视图", "Close conversation view")}</MenuItem> : panels.some(isBrowserPagePanelId)
+    {panels.some(panel => definitions.find(definition => definition.id === panel)?.content) ? <MenuItem icon="x" onClick={() => { closePanels(store, definitions, panels); onClose?.(); }}>{wholeGroup ? copy("关闭标签组", "Close tab group") : copy("关闭对话视图", "Close conversation view")}</MenuItem> : panels.some(isFilePanelId)
+      ? <MenuItem icon="x" onClick={() => { closePanels(store, definitions, panels); onClose?.(); }}>{wholeGroup ? copy("关闭标签组", "Close tab group") : copy("关闭文件", "Close file")}</MenuItem>
+      : panels.some(isBrowserPagePanelId)
       ? <MenuItem icon="x" onClick={() => { closePanels(store, definitions, panels); onClose?.(); }}>{wholeGroup ? panels.every(isBrowserPagePanelId) ? copy("关闭整组网页", "Close all pages in group") : copy("关闭网页并隐藏其余工具", "Close pages and hide other tools") : copy("关闭网页", "Close page")}</MenuItem>
       : <MenuItem icon="eye-off" disabled={panels.length === 0} onClick={() => run({ type: "hide", panels })}>{wholeGroup ? copy("隐藏整组", "Hide group") : copy("隐藏工具", "Hide tool")}</MenuItem>}
     {wholeGroup && source?.region === "right" ? <MenuItem icon="x" onClick={() => run({ type: "region", region: "right", visible: false })}>{copy("隐藏右侧栏", "Hide right sidebar")}</MenuItem> : null}

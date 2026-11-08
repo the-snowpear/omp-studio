@@ -37,6 +37,8 @@
     "conversation:e2e:manual": "node scripts/real-conversation-e2e.mjs",
     "perf:streaming": "node scripts/streaming-perf-gate.mjs",
     "check": "node scripts/check.mjs",
+    "components:office:pack": "node scripts/office-component.mjs",
+    "components:office:smoke": "node scripts/office-component-smoke.mjs",
     "check:fast": "node scripts/check.mjs --fast",
     "check:build": "node scripts/check.mjs --production",
     "check:selects": "node scripts/check-renderer-selects.mjs",

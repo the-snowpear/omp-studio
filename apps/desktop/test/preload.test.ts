@@ -495,6 +495,7 @@ describe("createOmpStudioChromeApi: fixed named surface, frozen object", () => {
     assert.ok(Object.isFrozen(chromeApi));
 
     const expectedMethods = [
+      "files",
       "platform",
       "onMenuCommand",
       "requestMicrophoneAccess",

@@ -27,10 +27,10 @@ export const RENDERER_CSP =
   "script-src 'self'; " +
   "worker-src 'self'; " +
   "style-src 'self' 'unsafe-inline'; " +
-  "img-src 'self' data: blob: omp-artifact:; " +
-  "media-src 'self' blob: omp-artifact:; " +
+  "img-src 'self' data: blob: omp-artifact: omp-file:; " +
+  "media-src 'self' blob: omp-artifact: omp-file:; " +
   "font-src 'self' data:; " +
-  "connect-src 'self' omp-artifact:; " +
+  "connect-src 'self' omp-artifact: omp-file:; " +
   "object-src 'none'; " +
   "base-uri 'self'; " +
   "form-action 'self'; " +

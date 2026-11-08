@@ -12,9 +12,10 @@ export function withPins(layout: DockLayout, pins: readonly DockFloat[]): DockLa
   const panels = pins.flatMap(group => group.panels);
   const agentPanels = Object.assign({}, ...pins.map(group => group.pin?.agentPanels ?? {}), layout.agentPanels) as DockLayout["agentPanels"];
   const browserPages = Object.assign({}, ...pins.map(group => group.pin?.browserPages ?? {}), layout.browserPages) as DockLayout["browserPages"];
+  const fileViews = Object.assign({}, ...pins.map(group => group.pin?.fileViews ?? {}), layout.fileViews) as DockLayout["fileViews"];
   const cards = { ...layout.cards };
-  for (const id of [...Object.keys(agentPanels), ...Object.keys(browserPages)] as PanelId[]) cards[id] ??= { collapsed: false, height: null };
-  const next = dockReducer({ ...layout, agentPanels, browserPages, cards }, { type: "hide", panels });
+  for (const id of [...Object.keys(agentPanels), ...Object.keys(browserPages), ...Object.keys(fileViews)] as PanelId[]) cards[id] ??= { collapsed: false, height: null };
+  const next = dockReducer({ ...layout, agentPanels, browserPages, fileViews, cards }, { type: "hide", panels });
   const hidden = { ...next.hidden };
   for (const panel of panels) delete hidden[panel];
   return { ...next, hidden, floats: [...next.floats, ...pins] };
@@ -27,7 +28,7 @@ export function subtractPinPanels(pins: readonly DockFloat[], panels: readonly P
     if (!remaining.length) return [];
     const keep = <Value,>(source: Record<string, Value> | undefined) => Object.fromEntries(Object.entries(source ?? {}).filter(([id]) => remaining.includes(id as PanelId)));
     let pin = group.pin;
-    if (pin) { const { browserPages, ...rest } = pin; const pages = keep(browserPages); pin = { ...rest, agentPanels: keep(pin.agentPanels), ...(Object.keys(pages).length ? { browserPages: pages } : {}) }; }
+    if (pin) { const { browserPages, fileViews, ...rest } = pin; const pages = keep(browserPages); pin = { ...rest, fileViews: keep(fileViews), agentPanels: keep(pin.agentPanels), ...(Object.keys(pages).length ? { browserPages: pages } : {}) }; }
     return [{ ...group, panels: remaining, active: remaining.includes(group.active) ? group.active : remaining[0]!, ...(pin ? { pin } : {}) }];
   });
 }
@@ -49,12 +50,12 @@ export function readPins(value: unknown): DockFloat[] {
     if (pin.mode === "workspace" && typeof pin.workspace !== "string") continue;
     const blank = createDefaultLayout();
     blank.left.panels = []; blank.rail.panels = []; blank.right.groups = []; blank.bottom.groups = []; blank.hidden = {};
-    const normalized = normalizeLayout({ ...blank, floats: [entry], agentPanels: pin.agentPanels ?? {}, browserPages: pin.browserPages ?? {} });
+    const normalized = normalizeLayout({ ...blank, floats: [entry], agentPanels: pin.agentPanels ?? {}, browserPages: pin.browserPages ?? {}, fileViews: pin.fileViews ?? {} });
     const group = normalized.floats[0];
     if (!group) continue;
     let windowRect;
     if (pin.windowRect && ["x", "y", "width", "height"].every(key => typeof pin.windowRect[key] === "number" && Number.isFinite(pin.windowRect[key]))) windowRect = { ...pin.windowRect };
-    group.pin = { mode: pin.mode, ...(pin.coordinateVersion === 1 ? { coordinateVersion: 1 } : {}), ...(typeof pin.owner === "string" ? { owner: pin.owner } : {}), ...(pin.mode === "workspace" ? { workspace: pin.workspace } : {}), ...(windowRect ? { windowRect } : {}), agentPanels: normalized.agentPanels, ...(Object.keys(normalized.browserPages).length ? { browserPages: normalized.browserPages } : {}), ...(["none", "workspace", "application"].includes(pin.returnMode) ? { returnMode: pin.returnMode } : {}) };
+    group.pin = { mode: pin.mode, ...(pin.coordinateVersion === 1 ? { coordinateVersion: 1 } : {}), ...(typeof pin.owner === "string" ? { owner: pin.owner } : {}), ...(pin.mode === "workspace" ? { workspace: pin.workspace } : {}), ...(windowRect ? { windowRect } : {}), agentPanels: normalized.agentPanels, fileViews: normalized.fileViews, ...(Object.keys(normalized.browserPages).length ? { browserPages: normalized.browserPages } : {}), ...(["none", "workspace", "application"].includes(pin.returnMode) ? { returnMode: pin.returnMode } : {}) };
     result = putPin(result, group);
   }
   return result;

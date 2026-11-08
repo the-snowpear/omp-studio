@@ -1,3 +1,6 @@
+import { FileCloseDialog } from "./files/FileCloseDialog";
+import { FileDockInstances } from "./files/FileDockInstances";
+import { useOpenFile } from "./files/fileLinks";
 import { dragConversation } from "./conversationWorkspace/drag";
 import { ConversationWorkspace } from "./conversationWorkspace/Workspace";
 import { initializeConversationClient, resyncConversationClient } from "./conversationWorkspace/client";
@@ -166,6 +169,7 @@ import { snapshotFromDoc, snapshotFromText, snapshotFromTextAndImages, snapshotI
 import { createComposerDraftBook } from "./composer/draftStore";
 import { useComposerDraft } from "./composer/useComposerDraft";
 import { emptySnapshot, fileLabel, type ComposerSnapshot } from "./composer/types";
+import type { FileViewerActions } from "./files/fileActions";
 import { mergeUsedSkills, skillNamesInDoc, skillNamesInText } from "./skills/skillUsage";
 import type { StudioSpeed } from "@omp-studio/studio-protocol";
 import { ComposerSpeedControl } from "./composer/ComposerSpeedControl";
@@ -1590,6 +1594,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
   /** 除「目录展开 / 添加上下文」外的菜单动作分发（App 侧统一 toast 与桌面调用）。 */
   onFileAction?: (action: FileMenuAction, target: FileMenuTarget) => void;
 }) {
+  const openInViewer = useOpenFile();
   const executionTarget = useExecutionTarget();
   const [model, setModel] = useState<WorkspaceFileTreeReadModel | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -1723,7 +1728,8 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
   }, []);
   const openFile = useCallback((path: string) => {
     setActivePath(path);
-  }, []);
+    openInViewer({ workspaceId: String(workspaceId), path });
+  }, [workspaceId, openInViewer]);
   const selectPath = useCallback((path: string) => {
     setActivePath(path);
     const node = model === null ? undefined : findWorkspaceNode(model.nodes, path);
@@ -1841,8 +1847,9 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
       toggle(target.path);
       return;
     }
+    if (action.type === "open") { openFile(target.path); return; }
     onFileAction?.(action, target);
-  }, [onAddContext, onFileAction, toggle]);
+  }, [onAddContext, onFileAction, toggle, openFile]);
   const fileMenu = useMemo<TreeFileMenu>(() => ({
     openId: fileMenuOpenId,
     point: fileMenuPoint,
@@ -2705,6 +2712,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         <div className="sb-scroll">
           {preview ? (
             <PreviewFileTree
+              workspaceId={chrome.previewProjectId ?? "preview-workspace"}
               label={findPreviewProject(chrome.previewProjectId)?.name ?? t("shell.project")}
               search={fileSearch.trim()}
               onContext={(path, kind) => chrome.onAddComposerContext({ kind, path, label: fileLabel(path) })}
@@ -3425,7 +3433,7 @@ function BottomPanelChrome({ visible, expanded, resizing, height, onResizePointe
   </div>;
 }
 
-function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, state, client, onOpenWorktree, selectedSessionId, viewedSessionName, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwSession, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactThread, onCompactPending, onViewedTelemetryRefresh, telemetryRefreshToken, composerDraft, onComposerDraftChange, composerInsertion, onComposerInsertionApplied }: {
+function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, state, client, onOpenWorktree, selectedSessionId, viewedSessionName, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwSession, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactThread, onCompactPending, onViewedTelemetryRefresh, telemetryRefreshToken, composerDraft, onComposerDraftChange, composerInsertion, onComposerInsertionApplied, fileViewerActions }: {
   workbenchVisible: boolean;
   railMode: "hidden" | "expanded" | "compact";
   state: ViewState;
@@ -3501,6 +3509,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   composerDraft?: ComposerSnapshot;
   composerInsertion?: { owner: string | undefined; text: string } | undefined;
   onComposerInsertionApplied?: () => void;
+  fileViewerActions?: FileViewerActions;
 }) {
   const { document, window } = useConversationDom();
   const mdi = useConversationView();
@@ -6469,6 +6478,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
           onMain={() => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.focus(); }}
           onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}
           onRevealSource={target => target.toolCallId === undefined ? Promise.resolve(false) : revealConversationTarget(convoScrollerRef.current, { toolCallId: target.toolCallId })} />}</DockPanel>)}
+      <FileDockInstances workspaceId={workspaceId ? String(workspaceId) : undefined} targetId={executionTarget.id} onSettings={() => { setSettingsIntent("maintenance", "Office 文档预览"); onRoute("settings"); }} actions={fileViewerActions} />
       <BrowserDockInstances client={client} sessionId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} capabilities={capabilities} remote={!!executionTarget.id} onReferences={insertBrowserReferences} />
       <ToastHost message={statusToast} icon="info" onDismiss={() => setStatusToast(null)} />
       {treeConfirm.dialog}
@@ -8583,7 +8593,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       cancelled = true;
     };
   }, [realActiveWorkspace]);
-  const fileShellUnavailable = globalThis.ompStudioChrome?.openFile === undefined ? "仅桌面端可用" : undefined;
+  const fileShellUnavailable = executionTarget.id ? "远程文件请先下载，再使用系统应用打开" : globalThis.ompStudioChrome?.openFile === undefined ? "仅桌面端可用" : undefined;
 
   const runFileShellAction = (workspaceId: string, action: FileMenuAction, target: FileMenuTarget) => {
     const desktop = globalThis.ompStudioChrome;
@@ -8627,7 +8637,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
         })
         .catch((cause) => notice(`操作失败：${messageOf(cause)}`, "alert"));
     };
-    if (action.type === "open") {
+    if (action.type === "open" || action.type === "openSystem") {
       const open = desktop?.openFile;
       if (open === undefined) return;
       run(() => open(input), `已用默认程序打开 ${target.name}`);
@@ -8645,6 +8655,26 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       const manager = PLATFORM === "darwin" ? "访达" : "资源管理器";
       run(() => reveal(input), target.kind === "dir" ? `已在${manager}中打开 ${target.name}` : `已在${manager}中定位 ${target.name}`);
     }
+  };
+  // File windows reuse the Explorer shell actions and the Composer capsule chain; a line range follows the capsule as plain text.
+  const fileViewerActions: FileViewerActions = {
+    openers: fileOpeners,
+    runShell: runFileShellAction,
+    addContext: ({ path, label, lines }) => {
+      const composer = composerRef.current;
+      if (!composer) return;
+      const id = `file-context-${crypto.randomUUID()}`;
+      composer.insertChip({ id, kind: /\.(png|jpe?g|gif|webp)$/iu.test(path) ? "image" : "file", label, path });
+      if (lines) {
+        const snapshot = composer.getSnapshot(), nodes = [...snapshot.doc.nodes];
+        const index = nodes.findIndex((node) => node.type === "chip" && node.chip.id === id);
+        if (index >= 0) {
+          nodes.splice(index + 1, 0, { type: "text", value: ` L${lines[0]}${lines[1] === lines[0] ? "" : `-L${lines[1]}`} ` });
+          composer.setSnapshot({ ...snapshot, doc: { nodes } });
+        }
+      }
+      composer.focus();
+    },
   };
 
   const chrome: ShellChrome = {
@@ -9173,6 +9203,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
              onComposerDraftChange={onComposerDraftChange}
              composerInsertion={composerInsertion}
              onComposerInsertionApplied={clearComposerInsertion}
+            fileViewerActions={fileViewerActions}
             onDraftSkillsChange={onDraftSkillsChange}
             onUsedSkillsChange={onUsedSkillsChange}
             onSessionTitleMaybeChanged={() => refreshSessionTitles(selectedProject?.id as WorkspaceId | undefined)}
@@ -9348,6 +9379,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
           onApply={() => appUpdate.apply()}
           {...(!previewMode.preview ? { onCancel: () => appUpdate.cancel() } : {})}
           {...(!previewMode.preview ? { onSkip: async () => { await appUpdate.skip(); setShowAppUpdateDialog(false); } } : {})}
+          onOpenComponents={() => { setShowAppUpdateDialog(false); setSettingsIntent("maintenance", "Office 文档预览"); onRoute("settings"); }}
           onClose={() => setShowAppUpdateDialog(false)}
           onDownloadAndInstall={() => appUpdate.downloadAndInstall()}
         />
@@ -9360,7 +9392,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
 }
 
 export function App({ client }: { readonly client: StudioClient }) {
-  return <PreviewModeProvider><ConversationWidthProvider><I18nProvider><TerminalSessionsProvider>{client.supportsContexts === true || (client.supportsContexts === undefined && client.openContext) ? <ExecutionTargets client={client}>{() => <ConversationWorkspace client={client} renderDocument={renderConversationDocument} />}</ExecutionTargets> : <LegacyWorkbench client={client} />}</TerminalSessionsProvider></I18nProvider></ConversationWidthProvider></PreviewModeProvider>;
+  return <PreviewModeProvider><FileCloseDialog /><ConversationWidthProvider><I18nProvider><TerminalSessionsProvider>{client.supportsContexts === true || (client.supportsContexts === undefined && client.openContext) ? <ExecutionTargets client={client}>{() => <ConversationWorkspace client={client} renderDocument={renderConversationDocument} />}</ExecutionTargets> : <LegacyWorkbench client={client} />}</TerminalSessionsProvider></I18nProvider></ConversationWidthProvider></PreviewModeProvider>;
 }
 function renderConversationDocument(client: StudioClient) { return <TargetApp client={client} />; }
 function LegacyWorkbench({ client }: { client: StudioClient }) {
