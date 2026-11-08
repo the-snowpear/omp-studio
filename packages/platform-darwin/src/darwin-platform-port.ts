@@ -1,5 +1,6 @@
 import {
   privateEndpoint,
+  type Platform,
   type PlatformPort,
   type PrivateEndpoint,
   type ResourceHandle,
@@ -33,20 +34,21 @@ const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/u;
 const ALLOWED_EXTERNAL_SCHEMES: readonly string[] = ["http:", "https:", "mailto:"];
 
 /**
- * P0 macOS implementation of {@link PlatformPort}.
+ * POSIX implementation of {@link PlatformPort} (macOS and Linux).
  *
  * All native behavior is injected through {@link DarwinPlatformServices} and
  * owned by the composition root, so this class performs pure delegation plus
  * boundary validation and never touches the OS directly.
  */
 export class DarwinPlatformPort implements PlatformPort {
-  readonly platform = "darwin" as const;
+  readonly platform: Platform;
 
   readonly #services: DarwinPlatformServices;
 
-  constructor(services: DarwinPlatformServices) {
+  constructor(services: DarwinPlatformServices, platform: "darwin" | "linux" = "darwin") {
     assertDarwinPlatformServices(services);
     this.#services = services;
+    this.platform = platform;
   }
 
   async appDataDirectory(): Promise<string> {

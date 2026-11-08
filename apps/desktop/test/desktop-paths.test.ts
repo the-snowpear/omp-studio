@@ -41,9 +41,24 @@ test("macOS keeps every writable location under Application Support", () => {
   });
 });
 
-test("unsupported platforms fail instead of borrowing the Windows layout", () => {
-  assert.throws(() => resolveDesktopPaths({ platform: "linux", env: {}, homedir: "/home/me" }), /Unsupported desktop platform: linux/u);
-  assert.throws(() => packagedResourcePaths({ platform: "linux", execPath: "/opt/omp/omp-studio" }), /Unsupported/u);
+test("Linux keeps every writable location under XDG_CONFIG_HOME", () => {
+  const paths = resolveDesktopPaths({ platform: "linux", env: { XDG_CONFIG_HOME: "/home/me/.config-custom" }, homedir: "/home/me" });
+  assert.deepEqual(paths, {
+    appDataRoot: "/home/me/.config-custom",
+    stateRoot: "/home/me/.config-custom/omp-studio",
+    logsRoot: "/home/me/.config-custom/omp-studio/logs",
+    keysRoot: "/home/me/.config-custom/omp-studio/keys",
+    runtimesRoot: "/home/me/.config-custom/omp-studio/runtimes",
+    updatesV2Root: "/home/me/.config-custom/omp-studio/updates-v2",
+    legacyStagingRoot: "/home/me/.config-custom/omp-studio/updates",
+    endpointRegistryRoot: "/home/me/.config-custom/omp-studio-endpoints",
+  });
+  assert.equal(resolveDesktopPaths({ platform: "linux", env: {}, homedir: "/home/me" }).stateRoot, "/home/me/.config/omp-studio");
+});
+
+test("unsupported platforms fail instead of borrowing another platform's layout", () => {
+  assert.throws(() => resolveDesktopPaths({ platform: "freebsd", env: {}, homedir: "/home/me" }), /Unsupported desktop platform: freebsd/u);
+  assert.throws(() => packagedResourcePaths({ platform: "freebsd", execPath: "/opt/omp/omp-studio" }), /Unsupported/u);
 });
 
 test("bundled seeds sit next to the exe on Windows and in Contents/Resources on macOS", () => {

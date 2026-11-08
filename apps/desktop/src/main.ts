@@ -1127,36 +1127,43 @@ export async function main(): Promise<void> {
       app.on("window-all-closed", listener);
     },
     createTray: ({ openWindow, requestQuit }) => {
-      const tray = createAppTray({
-        electron: {
-          createImageFromPath: (iconPath) => nativeImage.createFromPath(iconPath),
-          buildMenu: (template) => Menu.buildFromTemplate([...template]),
-          createTrayFromImage: (image) => {
-            const electronTray = new Tray(image as NativeImage);
-            return {
-              setToolTip: (toolTip: string) => electronTray.setToolTip(toolTip),
-              setContextMenu: (menu: object) => electronTray.setContextMenu(menu as Menu),
-              on: (event: "click", listener: () => void) => electronTray.on(event, listener),
-              displayBalloon: (options: { icon?: object; title: string; content: string }) =>
-                electronTray.displayBalloon({ ...options, icon: image as NativeImage }),
-              isDestroyed: () => electronTray.isDestroyed(),
-              destroy: () => electronTray.destroy(),
-            };
+      // A Linux desktop without a StatusNotifier host throws from `new Tray`;
+      // that must not abort startup, the window simply keeps quit-on-close.
+      try {
+        const tray = createAppTray({
+          electron: {
+            createImageFromPath: (iconPath) => nativeImage.createFromPath(iconPath),
+            buildMenu: (template) => Menu.buildFromTemplate([...template]),
+            createTrayFromImage: (image) => {
+              const electronTray = new Tray(image as NativeImage);
+              return {
+                setToolTip: (toolTip: string) => electronTray.setToolTip(toolTip),
+                setContextMenu: (menu: object) => electronTray.setContextMenu(menu as Menu),
+                on: (event: "click", listener: () => void) => electronTray.on(event, listener),
+                displayBalloon: (options: { icon?: object; title: string; content: string }) =>
+                  electronTray.displayBalloon({ ...options, icon: image as NativeImage }),
+                isDestroyed: () => electronTray.isDestroyed(),
+                destroy: () => electronTray.destroy(),
+              };
+            },
           },
-        },
-        iconPath: resolveTrayIconPath({ appPath: app.getAppPath(), platform: process.platform }),
-        persistRoot: resolveProfilePersistRoot(app.getPath("appData")),
-        locale: app.getLocale(),
-        onOpen: openWindow,
-        onQuit: requestQuit,
-      });
-      if (tray === undefined) {
-        console.log("[omp-studio] tray unavailable; window close keeps quit behavior");
+          iconPath: resolveTrayIconPath({ appPath: app.getAppPath(), platform: process.platform }),
+          persistRoot: resolveProfilePersistRoot(app.getPath("appData")),
+          locale: app.getLocale(),
+          onOpen: openWindow,
+          onQuit: requestQuit,
+        });
+        if (tray === undefined) {
+          console.log("[omp-studio] tray unavailable; window close keeps quit behavior");
+          return undefined;
+        }
+        closeToTrayEnabled = true;
+        trayRef = tray;
+        return tray;
+      } catch (error) {
+        console.warn(`[omp-studio] tray unavailable: ${String(error)}`);
         return undefined;
       }
-      closeToTrayEnabled = true;
-      trayRef = tray;
-      return tray;
     },
     confirmQuitWhileBusy: async () => {
       const options = quitBusyMessageBoxOptions(quitBusyDialogStrings(app.getLocale()));

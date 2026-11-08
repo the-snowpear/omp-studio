@@ -1,7 +1,8 @@
 /**
  * Local managed-Runtime signing keys.
  *
- * Lives under the Host profile (`%APPDATA%\omp-studio\keys` on Windows),
+ * Lives under the Host profile (`%APPDATA%\omp-studio\keys` on Windows,
+ * `$XDG_CONFIG_HOME/omp-studio/keys` — `~/.config` by default — on Linux),
  * never in the git repository. Env vars still win when both are set.
  *
  *   npm run omp:keys
@@ -21,6 +22,9 @@ export const DEFAULT_RUNTIME_KEY_ID = "omp-studio-local";
 export function defaultRuntimeKeysDirectory() {
   if (process.platform === "darwin") {
     return join(homedir(), "Library", "Application Support", "omp-studio", "keys");
+  }
+  if (process.platform === "linux") {
+    return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "omp-studio", "keys");
   }
   return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "omp-studio", "keys");
 }
