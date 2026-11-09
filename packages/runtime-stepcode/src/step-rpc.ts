@@ -45,6 +45,7 @@ export class StepRpc {
   readonly #child: ChildProcessWithoutNullStreams;
   readonly #pending = new Map<string, Pending>();
   #seq = 0;
+  #exited = false;
 
   constructor(
     options: StepRpcOptions,
@@ -84,6 +85,9 @@ export class StepRpc {
 
   request(type: string, payload: Record<string, unknown> = {}, timeoutMs = 5000): Promise<Record<string, unknown>> {
     const id = `req-${++this.#seq}`;
+    // A CLI that already exited will never answer; waiting out the timeout
+    // only delays the failure the caller is about to report anyway.
+    if (this.#exited) return Promise.reject(new Error(`step runtime is not running (${type})`));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
@@ -104,7 +108,10 @@ export class StepRpc {
 
   /** Fires once when the CLI process goes away, however it goes away. */
   onExit(handler: (detail: { code: number | null; signal: NodeJS.Signals | null }) => void): void {
-    this.#child.once("exit", (code, signal) => handler({ code, signal }));
+    this.#child.once("exit", (code, signal) => {
+      this.#exited = true;
+      handler({ code, signal });
+    });
   }
 
   /**

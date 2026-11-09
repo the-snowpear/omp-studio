@@ -517,8 +517,16 @@ async function buildSnapshot(): Promise<Record<string, unknown>> {
   };
 }
 
+// Terminal outcomes outlive any one socket: a reconnect must be able to
+// recover a receipt the dropped connection never delivered.
+const terminalReceipts: Array<Record<string, unknown>> = [];
+
 const server = createServer(socket => {
-  const connection = new BridgeConnection(socket, runtimeEpoch);
+  // One runtime serves one Host. A second connection means the previous one is
+  // stale; keeping it would orphan whichever client the single event slot
+  // points at.
+  activeConnection?.close();
+  const connection = new BridgeConnection(socket, runtimeEpoch, terminalReceipts);
   activeConnection = connection;
 
   socket.on("error", () => {
@@ -649,7 +657,7 @@ const server = createServer(socket => {
           // Reporting 0 here resets the Host's projection watermark and turns
           // the next event into a gap, which forces a resync.
           lastEventSeq: connection.lastEventSeq,
-          terminalReceipts: [],
+          terminalReceipts: connection.terminalReceipts,
         });
       });
       return;

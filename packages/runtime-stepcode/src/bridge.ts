@@ -19,6 +19,9 @@ export function sha256(value: string): string {
 }
 
 /** One authenticated bridge connection: framed JSON in, framed JSON out. */
+/** How many terminal receipts a reconnect can recover. */
+const TERMINAL_RECEIPT_HISTORY = 64;
+
 export class BridgeConnection {
   #decoder = new FrameDecoder();
   #seq = 0;
@@ -26,6 +29,12 @@ export class BridgeConnection {
   constructor(
     private readonly socket: Socket,
     private readonly runtimeEpoch: number,
+    /**
+     * Terminal outcomes shared across connections. A reconnect gets a new
+     * BridgeConnection, so history kept per connection would be empty exactly
+     * when the Host needs it.
+     */
+    private readonly sharedTerminalReceipts: Array<Record<string, unknown>> = [],
   ) {}
 
   /** Highest eventSeq emitted on this connection; a snapshot must report it. */
@@ -39,6 +48,11 @@ export class BridgeConnection {
         handler(frame.body as Record<string, unknown>);
       }
     });
+  }
+
+  /** Drop this connection; the runtime itself stays alive for the next Host. */
+  close(): void {
+    this.socket.destroy();
   }
 
   send(body: unknown): void {
@@ -58,7 +72,7 @@ export class BridgeConnection {
   }
 
   failedReceipt(requestId: string, message: string, code = "INTERNAL_ERROR"): void {
-    this.send({
+    this.#terminal({
       type: "studio.receipt",
       requestId,
       commandId: randomUUID(),
@@ -70,7 +84,7 @@ export class BridgeConnection {
   }
 
   receipt(requestId: string, status: "accepted" | "completed" | "rejected" | "failed" | "outcome_unknown", result?: unknown): void {
-    this.send({
+    const receipt: Record<string, unknown> = {
       type: "studio.receipt",
       requestId,
       commandId: randomUUID(),
@@ -78,6 +92,25 @@ export class BridgeConnection {
       stateVersion: 0,
       status,
       ...(result === undefined ? {} : { result }),
-    });
+    };
+    // Only terminal outcomes settle a command; `accepted` is not one, and
+    // replaying it would resolve nothing.
+    if (status !== "accepted") this.#terminal(receipt);
+    else this.send(receipt);
+  }
+
+  /**
+   * Terminal outcomes a reconnect may have missed. The Host reconciles only
+   * receipts for commands it issued, so replaying history is safe; without it a
+   * receipt lost in transit leaves that command pending forever.
+   */
+  get terminalReceipts(): ReadonlyArray<Record<string, unknown>> {
+    return this.sharedTerminalReceipts;
+  }
+
+  #terminal(receipt: Record<string, unknown>): void {
+    this.sharedTerminalReceipts.push(receipt);
+    if (this.sharedTerminalReceipts.length > TERMINAL_RECEIPT_HISTORY) this.sharedTerminalReceipts.shift();
+    this.send(receipt);
   }
 }

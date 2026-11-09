@@ -77,9 +77,10 @@ test("real studio-host client negotiates and streams a prompt", async () => {
 
     const snapshot = await client.requestSnapshot();
 
+    const promptId = randomUUID();
     const receipt = await client.invoke({
       type: "studio.request",
-      requestId: randomUUID(),
+      requestId: promptId,
       runtimeEpoch: hello.runtimeEpoch,
       operation: { kind: "core.prompt", text: "hi" },
     });
@@ -256,6 +257,21 @@ test("real studio-host client negotiates and streams a prompt", async () => {
     const doomed = await step("die", { kind: "core.prompt", text: "die" });
     assert.equal(doomed.status, "failed");
     assert.match(doomed.error?.message ?? "", /step runtime exited/u);
+
+    // A reconnect must be able to recover a receipt the dropped socket never
+    // delivered: the Host reconciles `terminalReceipts` on refresh.
+    const recovered = new StudioBridgeClient({
+      endpoint: socketPath,
+      token,
+      requestTimeoutMs: 8000,
+    });
+    const rehello = await recovered.connect();
+    const refreshed = await recovered.requestSnapshot();
+    const replayed = refreshed.terminalReceipts.filter(receipt => receipt.requestId === promptId);
+    assert.equal(replayed.length, 1, "the completed prompt receipt must survive a reconnect");
+    assert.equal(replayed[0]?.status, "completed");
+    assert.ok(rehello.runtimeEpoch === hello.runtimeEpoch, "the runtime instance is unchanged across a reconnect");
+    recovered.disconnect();
 
     client.disconnect();
   } finally {
