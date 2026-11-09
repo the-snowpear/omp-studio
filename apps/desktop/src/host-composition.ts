@@ -165,6 +165,11 @@ function runtimePreferenceFrom(options: { readonly preference?: RuntimePreferenc
   return { kind: "custom", executable, allowLimited: true };
 }
 
+/** The executable a resolved preference names, when it names one. */
+function executableOf(preference: RuntimePreference): string | undefined {
+  return preference.kind === "custom" ? preference.executable : undefined;
+}
+
 /** Opaque authority lease; structurally satisfied by Win32AuthorityLock's lease. */
 export interface DesktopAuthorityLease {
   readonly authorityId: string;
@@ -220,6 +225,13 @@ export interface DesktopRuntimeSessionContext {
    * Unpackaged / tests: `%APPDATA%\omp-studio\runtimes` (or the temp profile).
    */
   readonly runtimeInstallDirectory: string;
+  /**
+   * Explicitly configured executable for a non-managed runtime source. Absent
+   * means the managed install supplies it. When present, the resolver's live
+   * probe is the only verification that happened, so there is no manifest to
+   * read identity from.
+   */
+  readonly executable?: string;
   /** Installer trust material, so the launch path can verify what it resolves. */
   readonly installer?: HostBackendOptions["installer"];
   /** Persisted or newly selected workspace; absent means honest read-only. */
@@ -478,6 +490,8 @@ interface FacadeContext {
   readonly platform: PlatformId;
   readonly arch: ArchId;
   readonly backend: HostBackend;
+  /** Preference the bootstrap resolved; the reconnect path must reuse it. */
+  readonly preference: RuntimePreference;
   readonly seams: DesktopFacadeSeams;
   /** Live session-bundle holder; the facade's runtime access reads it. */
   readonly sessionRef: { current: DesktopRuntimeSession | undefined };
@@ -579,9 +593,9 @@ async function ensureInstalledRuntime(
 }
 
 async function installedRuntimeContext(context: FacadeContext): Promise<DesktopRuntimeSessionContext> {
-  // The reconnect path has no composition options; the env override is the
-  // same source of truth the bootstrap path reads.
-  const preference = runtimePreferenceFrom({});
+  // Reuse the preference the bootstrap resolved: re-deriving it here would let
+  // a reconnect fall back to the managed install.
+  const preference = context.preference;
   const accepted = acceptedClassifications(preference);
   const resolution: RuntimeResolution = await context.backend.resolve(preference);
   context.seams.hostLog?.write(
@@ -594,9 +608,13 @@ async function installedRuntimeContext(context: FacadeContext): Promise<DesktopR
     throw new Error(resolution.rejectionReason ?? "Runtime was not accepted");
   }
   const workspace = context.seams.getActiveWorkspace?.();
+  const executable = executableOf(preference);
   return {
     resolution,
     endpoint: context.endpoint,
+    // The reconnect path re-reads the same override the bootstrap read, so a
+    // reconnect cannot fall back to the managed install.
+    ...(executable === undefined ? {} : { executable }),
     profileDirectory: context.profileDirectory,
     runtimeInstallDirectory: context.runtimeInstallDirectory,
     ...(context.installerOptions === undefined ? {} : { installer: context.installerOptions }),
@@ -1004,7 +1022,7 @@ function assertCompositionOptions(options: DesktopCompositionOptions): void {
   if (arch !== undefined && arch !== "x64" && arch !== "arm64") {
     throw new TypeError("desktop composition arch must be 'x64' or 'arm64'");
   }
-  const preference = options.preference;
+  const preference = runtimePreferenceFrom(options);
   if (
     preference !== undefined &&
     (preference === null || typeof preference !== "object" || !("kind" in preference) || typeof preference.kind !== "string")
@@ -1387,6 +1405,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
       // 5. Runtime resolution with the injected resolver/probe.
       const preference = runtimePreferenceFrom(options);
       const accepted = acceptedClassifications(preference);
+      const executable = executableOf(preference);
       const resolved = await backend.resolve(preference);
       const resolution = seedFailure !== undefined && resolved.classification === "rejected"
         ? { ...resolved, rejectionReason: seedFailure }
@@ -1415,6 +1434,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
             endpoint: endpointLease.endpoint,
             profileDirectory,
             runtimeInstallDirectory,
+            ...(executable === undefined ? {} : { executable }),
             ...(installerOptions === undefined ? {} : { installer: installerOptions }),
             ...(activeWorkspace === undefined ? {} : { workspace: activeWorkspace }),
           });
@@ -1465,6 +1485,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
         platform: platform.platform,
         arch,
         backend,
+        preference,
         seams,
         sessionRef,
         lastUnavailable: { current: lastUnavailable },

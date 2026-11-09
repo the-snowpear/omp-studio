@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import { BridgeConnection, PROTOCOL_VERSION, challengeProof, sha256 } from "./bridge.js";
@@ -160,7 +160,10 @@ function settlePrompt(error: string | undefined): void {
 }
 
 const stepCommand = process.env["STEP_STUDIO_RUNTIME_CMD"] ?? "step";
-const parts = stepCommand.split(" ");
+// A whole-string path is an executable, not a command plus arguments: Windows
+// install paths routinely contain spaces, and splitting those produces a
+// command that does not exist.
+const parts = existsSync(stepCommand) ? [stepCommand] : stepCommand.split(" ");
 const rpc = new StepRpc(
   {
     command: parts[0]!,

@@ -24,6 +24,9 @@ export const CORE_NODE_SUITES = [
   "packages/host-client-api/dist/test/facade-history.test.js",
   "packages/host-client-api/dist/test/session-delete-command.test.js",
   "apps/desktop/dist/test/runtime-session.test.js",
+  // Runtime resolution and the trust gate: which runtime earns a controller,
+  // and which executable actually gets spawned.
+  "apps/desktop/dist/test/desktop-composition.test.js",
   "apps/desktop/dist/test/runtime-multi-session.test.js",
   "apps/desktop/dist/test/session-commands.test.js",
   // Local file writes, Electron boundaries, installation and update recovery.

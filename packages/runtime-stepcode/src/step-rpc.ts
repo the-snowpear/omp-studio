@@ -6,6 +6,28 @@ export interface StepRpcOptions {
   args: string[];
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  /** Injectable for tests; defaults to the running platform. */
+  platform?: NodeJS.Platform;
+}
+
+/** Extensions Windows resolves for a bare command name, in PATHEXT order. */
+const WINDOWS_EXECUTABLE_EXTENSIONS = [".com", ".exe", ".bat", ".cmd"] as const;
+
+/**
+ * Resolve the command the adapter spawns.
+ *
+ * Step ships through npm, and npm's Windows bin shim is `step.cmd`. Node's
+ * `spawn` executes `CreateProcess` directly and cannot run a `.cmd` without a
+ * shell, so a bare `step` is ENOENT on Windows while working everywhere else.
+ * Naming the shim explicitly keeps `shell: false`, which matters because the
+ * arguments are ours and a shell would requote them.
+ */
+export function resolveStepCommand(command: string, platform: NodeJS.Platform): string {
+  if (platform !== "win32") return command;
+  const hasExtension = WINDOWS_EXECUTABLE_EXTENSIONS.some(extension => command.toLowerCase().endsWith(extension));
+  const isPath = command.includes("\\") || command.includes("/");
+  if (hasExtension || isPath) return command;
+  return `${command}.cmd`;
 }
 
 interface Pending {
@@ -28,7 +50,7 @@ export class StepRpc {
     options: StepRpcOptions,
     onEvent: (event: Record<string, unknown>) => void,
   ) {
-    this.#child = spawn(options.command, options.args, {
+    this.#child = spawn(resolveStepCommand(options.command, options.platform ?? process.platform), options.args, {
       cwd: options.cwd,
       env: options.env ?? process.env,
       stdio: "pipe",

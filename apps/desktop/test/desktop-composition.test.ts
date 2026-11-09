@@ -263,6 +263,8 @@ function fakeSessionPort(options: {
         if (options.startError !== undefined) {
           throw options.startError;
         }
+        // Recorded verbatim: the launcher spawns this, so a test that only
+        // checks the classification would still pass while omp.exe is spawned.
         contexts.push(context);
         if (!options.ready) {
           return undefined;
@@ -419,6 +421,7 @@ test("a trusted resolution creates the runtime session and bootstraps ready", as
       const context = session.contexts[0];
       assert.ok(context);
       assert.equal(context.resolution.classification, "compatible-system");
+      assert.equal(context.executable, undefined);
       assert.equal(context.endpoint.kind, "in-memory");
       assert.equal(context.profileDirectory, profileDirectory);
       assert.equal(context.runtimeInstallDirectory, join(profileDirectory, "runtimes"));
@@ -459,6 +462,9 @@ test("a custom preference lets a limited runtime earn a session controller", asy
     const context = session.contexts[0];
     assert.ok(context);
     assert.equal(context.resolution.classification, "limited-system");
+    // The launcher must spawn the configured executable, not the managed
+    // install's omp.exe: the resolver never proved anything about that file.
+    assert.equal(context.executable, executablePath);
 
     const bootstrap = await composition.facade.bootstrap();
     assert.equal(bootstrap.runtime.status, "connected");
@@ -760,7 +766,11 @@ for (const rejectedContext of [false, true]) {
   });
 }
 
-test("managedInstall.prepareStaging reaches the installer when the keys come from the packaged directory", async () => {
+// Resolves the packaged runtime-keys directory, which only exists on the
+// platforms the desktop shell ships for.
+const desktopPlatformOnly = { skip: process.platform === "win32" || process.platform === "darwin" ? false : "packaged desktop paths" };
+
+test("managedInstall.prepareStaging reaches the installer when the keys come from the packaged directory", desktopPlatformOnly, async () => {
   await withTempProfile(async (profileDirectory) => {
     const { artifact, publicKey } = await writeSignedRuntimeArtifact(profileDirectory);
     const keys = join(profileDirectory, "runtime-keys");

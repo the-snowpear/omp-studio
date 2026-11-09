@@ -1320,12 +1320,33 @@ function createSingleDesktopRuntimeSessionPort(
       ...(launchContext.installer === undefined ? {} : { installer: launchContext.installer }),
     });
     await backend.initialize();
-    const installed = await backend.installer.currentManifest();
-    if (installed === undefined) {
+    // An explicitly configured runtime has no managed manifest. The resolver's
+    // live probe is what verified it, so identity comes from the resolution and
+    // the executable from the override — reading a manifest here would spawn
+    // omp.exe for a runtime that was never probed.
+    const explicit = launchContext.executable;
+    const installed = explicit === undefined ? await backend.installer.currentManifest() : undefined;
+    if (explicit === undefined && installed === undefined) {
       log?.write("warn", "runtime.launch.skip", "no-managed-install");
       rememberUnavailable(unavailableFacts("not-installed", "managed runtime is not installed"));
       return undefined;
     }
+    const identity =
+      installed === undefined
+        ? {
+            runtimeVersion: launchContext.resolution.runtimeVersion ?? "0.0.0",
+            upstreamVersion: launchContext.resolution.upstreamVersion ?? "unknown",
+            upstreamCommit: launchContext.resolution.upstreamCommit ?? "unknown",
+            capabilityHash: launchContext.resolution.capabilityHash ?? "",
+            commandManifestHash: launchContext.resolution.commandManifestHash ?? "",
+          }
+        : {
+            runtimeVersion: installed.manifest.runtimeVersion,
+            upstreamVersion: installed.manifest.upstreamVersion,
+            upstreamCommit: installed.manifest.upstreamCommit,
+            capabilityHash: installed.manifest.capabilityHash,
+            commandManifestHash: installed.manifest.commandManifestHash,
+          };
 
     const launchGeneration = ++generation;
     lastExit = undefined;
@@ -1431,11 +1452,7 @@ function createSingleDesktopRuntimeSessionPort(
         runtimeEpoch: launchEpoch as RuntimeEpoch,
         classification: launchContext.resolution.classification,
         backend: "studio-host",
-        runtimeVersion: installed.manifest.runtimeVersion,
-        upstreamVersion: installed.manifest.upstreamVersion,
-        upstreamCommit: installed.manifest.upstreamCommit,
-        capabilityHash: installed.manifest.capabilityHash,
-        commandManifestHash: installed.manifest.commandManifestHash,
+        ...identity,
       };
 
       const port = new NodeRuntimeProcessPort({
@@ -1447,7 +1464,7 @@ function createSingleDesktopRuntimeSessionPort(
           // The Runtime's parent watchdog is enabled on macOS only for now.
           ...(process.platform === "darwin" ? { OMP_STUDIO_PARENT_PID: String(process.pid) } : {}),
         },
-        executable: installed.entrypointPath,
+        executable: explicit ?? installed!.entrypointPath,
         cwd: selected.cwd,
         args: () => buildProcessProbeArgs(extra, bridgeBootstrap, launchEpoch),
         containment,
