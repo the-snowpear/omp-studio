@@ -20,7 +20,10 @@ Renderer → @omp-studio/client → transport-desktop → apps/desktop (IPC)
 ```
 
 - Studio Bridge 握手（HMAC challenge proof）、`runtime.snapshot`、`core.prompt`、
-  `core.abort`、`runtime.shutdown`
+  `core.steer`/`core.followUp`、`core.abort`、`runtime.shutdown`
+- `session.model.set` / `session.thinking.set` / `session.fork` /
+  `session.transcript.read`，映射到 Step 的 `set_model`、`set_thinking_level`、
+  `fork`、`get_entries`
 - 流式正文与思考分 block 走 `conversation.message.delta`，全部经
   `parseConversationRuntimeEvent` 校验
 - provider 报错时立刻返回 failed receipt 并带上 CLI 原始错误（Step 之后还会自动重试
@@ -58,8 +61,9 @@ STUDIO_RUNTIME_EXECUTABLE=/path/to/step-studio-runtime npm run preview
 - **品牌替换**：窗口标题、关于对话框、`%APPDATA%\<name>`、安装器产品名仍是
   `omp-studio`。包名（`@omp-studio/*`）不改——它们是复用的依赖，改名会破坏整个
   依赖图和架构约束
-- **其余命令映射**：`session.model`、`session.thinking`、fork、usage、interaction
-  在 capability manifest 里已声明，但适配器还没实现
+- **其余命令映射**：`turn.retry`、`session.drop`、`session.clearContext`、
+  `session.handoff`、`mode.plan.*` 未实现
+- **Agent Hub / Skills / MCP / 用量面板**：需要各自的 Step 适配器
 - **Step 没有的能力**：`tui.transfer`、`vibe.mode`、`omfg.commit`、`prewalk`、
   `operator`、`tan` 标为 `unavailable`，Renderer 会隐藏它们
 - **Agent Hub / Skills / MCP 的真实数据**：目前这些面板读的是 OMP 侧的 read model，

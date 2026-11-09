@@ -74,13 +74,32 @@ echo '{"local-gateway":{"type":"api_key","key":"magpie"}}' \
 STEP_STUDIO_RUNTIME_CMD=/path/to/step npm run demo -- "reply with exactly: PONG"
 ```
 
+## 已实现的命令
+
+| Studio 操作 | Step RPC | 说明 |
+|---|---|---|
+| `core.prompt` | `prompt` | `accepted` receipt，回合结束才 `completed` |
+| `core.steer` / `core.followUp` | `steer` / `follow_up` | 入队即回 `completed` |
+| `core.abort` | `abort` | 附 `conversation.turn.aborted` |
+| `runtime.snapshot` | `get_state` | 含 `model`（selector/provider/id）与思考等级 |
+| `session.model.set` | `set_model` | `provider/id` 或裸 id（走 catalog 解析） |
+| `session.thinking.set` | `set_thinking_level` | `auto` 映射到模型第一个可用等级 |
+| `session.fork` | `fork` | 在当前 leaf 上fork |
+| `session.transcript.read` | `get_entries` | 单页；异代 cursor 返回 `CURSOR_STALE` |
+| `runtime.shutdown` | — | 结束 CLI 进程 |
+
+manifest 只声明**真正实现**的 capability id，grade 如实标注；没声明的一律按
+unavailable 处理，Renderer 会隐藏。
+
 ## 尚未完成
 
 - Windows 命名管道实测（当前只验证过 Unix domain socket）
-- `session.model` / `session.thinking` / fork / usage / interaction 等命令映射
+- `turn.retry`、`session.drop`、`session.clearContext`、`session.handoff`、
+  `mode.plan.*` 等命令映射
+- Agent Hub / Skills / MCP / 用量面板的真实数据（Step 侧没有对应 read model）
 - Electron 界面与品牌替换（工作区里其余部分仍是 OMP 的壳）
 - `tui.transfer`、`vibe.mode`、`omfg.commit`、`prewalk`、`operator`、`tan`
-  在 manifest 里标为 `unavailable`：Step Code 没有对应能力
+  未声明：Step Code 没有对应能力
 
 ## 结构
 
