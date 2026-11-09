@@ -106,6 +106,11 @@ STEP_STUDIO_RUNTIME_CMD=/path/to/step npm run demo -- "reply with exactly: PONG"
 | `session.models.list` | `get_available_models` | 模型目录；Host 的 `models.get` 优先用它 |
 | `runtime.shutdown` | — | 结束 CLI 进程 |
 
+对话事件覆盖：`message.started/delta/completed`（正文与思考分 block）、
+`tool.started/completed`、`turn.completed/aborted`、`compaction.started/completed`。
+快照里的 `lastEventSeq` 必须报真实已发序列——报 0 会把宿主的 watermark 打回零，
+下一个事件就变成 gap，之后全部事件被丢弃。
+
 manifest 只声明**真正实现**的 capability id，grade 如实标注；没声明的一律按
 unavailable 处理，Renderer 会隐藏。
 
