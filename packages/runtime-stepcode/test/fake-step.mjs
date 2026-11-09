@@ -103,6 +103,11 @@ rl.on("line", line => {
         10,
       );
     }
+    // A tool call and its result, the way the real CLI streams them.
+    write({ type: "message_update", usage: {}, assistantMessageEvent: { type: "toolcall_start", contentIndex: 0, id: "call-1", toolName: "list_directory" } });
+    write({ type: "message_update", usage: {}, assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall: { type: "toolCall", id: "call-1", name: "list_directory", arguments: { path: "." } } } });
+    write({ type: "tool_execution_start", toolCallId: "call-1", toolName: "list_directory", args: { path: "." } });
+    write({ type: "tool_execution_end", toolCallId: "call-1", toolName: "list_directory", result: { content: [{ type: "text", text: "dir apps/" }], isError: false } });
     setTimeout(
       () =>
         write({

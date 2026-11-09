@@ -105,6 +105,21 @@ test("real studio-host client negotiates and streams a prompt", async () => {
     }
     assert.equal(started.length, 2, "expected user and assistant messages");
 
+    // Tool activity must reach the conversation surface, or a turn that acted
+    // looks like a turn that only thought.
+    const tools = conversation
+      .map(event => parseConversationRuntimeEvent(event.event))
+      .filter(parsed => parsed.kind.startsWith("conversation.tool."));
+    assert.deepEqual(
+      tools.map(parsed => parsed.kind),
+      ["conversation.tool.started", "conversation.tool.completed"],
+    );
+    const completed = tools[1] as Extract<ReturnType<typeof parseConversationRuntimeEvent>, { kind: "conversation.tool.completed" }>;
+    assert.equal(completed.result.toolCallId, completed.toolCallId);
+    assert.equal(completed.result.toolName, "list_directory");
+    assert.equal(completed.result.output, "dir apps/");
+    assert.equal(completed.result.isError, false);
+
     // Both selector forms must reach the same model. The id itself contains a
     // slash, so splitting on the first one would read provider `zed`.
     for (const selector of ["zed/claude-haiku-5-5", "local-gateway/zed/claude-haiku-5-5"]) {

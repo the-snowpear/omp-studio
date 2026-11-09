@@ -272,6 +272,48 @@ const rpc = new StepRpc(
       return;
     }
 
+    // Tool execution is the agent's actual work; without these the renderer
+    // shows a turn that thinks and answers but never acts.
+    if (type === "tool_execution_start") {
+      emit(
+        {
+          kind: "conversation.tool.started",
+          sessionId: sessionId(),
+          turnId: currentTurnId,
+          messageId: openMessage?.id ?? `m${messageSeq}`,
+          toolCallId: String(event["toolCallId"] ?? ""),
+          toolName: String(event["toolName"] ?? ""),
+          arguments: (event["args"] ?? {}) as Record<string, unknown>,
+          startedAt: new Date().toISOString(),
+        },
+        false,
+      );
+      return;
+    }
+
+    if (type === "tool_execution_end") {
+      const result = event["result"] as Record<string, unknown> | undefined;
+      const content = Array.isArray(result?.["content"]) ? (result["content"] as Array<Record<string, unknown>>) : [];
+      emit(
+        {
+          kind: "conversation.tool.completed",
+          sessionId: sessionId(),
+          turnId: currentTurnId,
+          toolCallId: String(event["toolCallId"] ?? ""),
+          result: {
+            type: "toolResult",
+            toolCallId: String(event["toolCallId"] ?? ""),
+            toolName: String(event["toolName"] ?? ""),
+            output: content.map(block => String(block["text"] ?? "")).join(""),
+            isError: Boolean(result?.["isError"]),
+          },
+          completedAt: new Date().toISOString(),
+        },
+        true,
+      );
+      return;
+    }
+
     if (type === "turn_end") {
       emit({ kind: "conversation.turn.completed", sessionId: sessionId(), turnId: currentTurnId }, true);
       return;
