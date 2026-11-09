@@ -16,6 +16,12 @@ Step Code 的 Studio Bridge 适配器。它接受与 OMP 运行时相同的启�
 sessionId 来自 CLI 的 `get_state`；prompt 在没有 provider 凭据时会把
 CLI 的原始错误作为 failed receipt 返回。
 
+已知上游限制：`models.json` 里的自定义 provider 能被 `ModelRuntime.getAvailable()`
+读到，但 RPC 的 `get_available_models` / `set_model` 走的是
+`getAvailableSnapshot()`，自定义模型不会出现在该快照里，因此
+`--mode rpc` 目前无法选中自定义 provider 的模型。绕开方式是用 SDK
+in-process（`createStepAgentSession`）或给 Step 上游提 issue。
+
 尚未完成：provider 登录/凭据（本机无账号）、Windows 命名管道实测、
 模型/思考/fork/用量等其余命令、Electron 界面。
 
