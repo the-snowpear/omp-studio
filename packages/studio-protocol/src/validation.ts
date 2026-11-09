@@ -33,6 +33,7 @@ import {
   type StudioRuntimeSettingKey,
 } from "./contracts/runtime-settings.js";
 import type { OperatorCommandManifest } from "./contracts/manifests.js";
+import type { SessionModelsListResult } from "./contracts/commands.js";
 import {
   isConversationRuntimeEventKind,
   parseConversationRuntimeEvent,
@@ -65,6 +66,35 @@ export {
   parseSessionTelemetryReadResult,
   parseSessionTelemetrySnapshot,
 } from "./telemetry-validation.js";
+
+export function parseSessionModelsListResult(value: unknown): SessionModelsListResult {
+  const input = record(value, "$models.result");
+  if (!Array.isArray(input.models)) {
+    throw new ContractValidationError("expected an array", "$models.result.models");
+  }
+  const models = input.models.map((entry, index) => {
+    const path = `$models.result.models[${index}]`;
+    const model = record(entry, path);
+    exactKeys(model, ["provider", "id", "selector", "name", "reasoning", "contextWindow", "maxTokens", "api"], path);
+    const provider = nonEmptyString(model.provider, `${path}.provider`);
+    const id = nonEmptyString(model.id, `${path}.id`);
+    const selector = nonEmptyString(model.selector, `${path}.selector`);
+    if (selector !== `${provider}/${id}`) {
+      throw new ContractValidationError("selector must be provider/id", `${path}.selector`);
+    }
+    return {
+      provider,
+      id,
+      selector,
+      ...(model.name === undefined ? {} : { name: nonEmptyString(model.name, `${path}.name`) }),
+      ...(model.reasoning === undefined ? {} : { reasoning: booleanValue(model.reasoning, `${path}.reasoning`) }),
+      ...(model.contextWindow === undefined ? {} : { contextWindow: positiveInteger(model.contextWindow, `${path}.contextWindow`) }),
+      ...(model.maxTokens === undefined ? {} : { maxTokens: positiveInteger(model.maxTokens, `${path}.maxTokens`) }),
+      ...(model.api === undefined ? {} : { api: nonEmptyString(model.api, `${path}.api`) }),
+    };
+  });
+  return { models };
+}
 
 function record(value: unknown, path: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -1209,6 +1239,7 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "session.tree.get": { keys: ["kind"] },
+  "session.models.list": { keys: ["kind"] },
   [SESSION_TRANSCRIPT_READ_KIND]: {
     keys: ["kind", "cursor", "limit"],
     validate: (operation) => {

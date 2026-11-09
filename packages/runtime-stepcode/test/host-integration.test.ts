@@ -168,6 +168,21 @@ test("real studio-host client negotiates and streams a prompt", async () => {
     assert.equal(items[1]?.itemId, items[1]?.itemId);
     assert.ok(items.every(item => item.itemId.length > 0), "every item carries an entry id");
 
+    // The model picker's catalog. Step ids carry their own slash, so the
+    // selector the Host hands back must still read as `provider/id`.
+    const models = await client.invoke({
+      type: "studio.request",
+      requestId: randomUUID(),
+      runtimeEpoch: hello.runtimeEpoch,
+      operation: { kind: "session.models.list" },
+    });
+    const listed = (models.result as { models: Array<{ provider: string; id: string; selector: string }> }).models;
+    assert.deepEqual(
+      listed.map(model => model.selector),
+      ["local-gateway/stepfun-cn/step-3.7-flash", "local-gateway/zed/claude-haiku-5-5"],
+    );
+    for (const model of listed) assert.equal(model.selector, `${model.provider}/${model.id}`);
+
     // A cursor from another generation is refused under its own code: the Host
     // turns CURSOR_STALE into a resync, which a generic failure would not.
     const stale = await client.invoke({

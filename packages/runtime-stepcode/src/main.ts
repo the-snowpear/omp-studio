@@ -37,6 +37,7 @@ const capabilities = [
   { id: "session.state", grade: "stable", version: 1, evidence: "runtime-stepcode" },
   { id: "session.history", grade: "stable", version: 1, evidence: "runtime-stepcode" },
   { id: "session.model.set", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "session.models.list", grade: "stable", version: 1, evidence: "runtime-stepcode" },
   {
     id: "session.thinking.set",
     grade: "limited",
@@ -71,6 +72,7 @@ const commandManifestHash = sha256(
     "session.model.set",
     "session.thinking.set",
     "session.fork",
+    "session.models.list",
     "session.transcript.read",
   ]),
 );
@@ -515,6 +517,32 @@ const server = createServer(socket => {
       void forkSession().then(
         () => connection.receipt(requestId, "completed", { ok: true }),
         error => connection.failedReceipt(requestId, String(error), error instanceof BridgeFailure ? error.code : undefined),
+      );
+      return;
+    }
+
+    if (operation["kind"] === "session.models.list") {
+      void rpc.request("get_available_models").then(
+        catalog => {
+          const models = Array.isArray(catalog["models"]) ? (catalog["models"] as Array<Record<string, unknown>>) : [];
+          connection.receipt(requestId, "completed", {
+            models: models.map(model => {
+              const provider = String(model["provider"] ?? "");
+              const id = String(model["id"] ?? "");
+              return {
+                provider,
+                id,
+                selector: `${provider}/${id}`,
+                ...(typeof model["name"] === "string" ? { name: model["name"] } : {}),
+                ...(typeof model["reasoning"] === "boolean" ? { reasoning: model["reasoning"] } : {}),
+                ...(typeof model["contextWindow"] === "number" ? { contextWindow: model["contextWindow"] } : {}),
+                ...(typeof model["maxTokens"] === "number" ? { maxTokens: model["maxTokens"] } : {}),
+                ...(typeof model["api"] === "string" ? { api: model["api"] } : {}),
+              };
+            }),
+          });
+        },
+        error => connection.failedReceipt(requestId, String(error)),
       );
       return;
     }

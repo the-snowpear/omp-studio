@@ -65,6 +65,7 @@ import type {
   InteractionId,
   ModelConfigReadModel,
   ModelDiscoveryResult,
+  AvailableModelRecord,
   ModelProviderTestResult,
   OperatorInvokeOutcome,
   SessionTreeCommandOutcome,
@@ -903,7 +904,12 @@ export class StudioHostClientFacade implements ClientTransport {
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "models.get": {
-        const result = await this.#queryModels();
+        // A Runtime that can list its own models wins over the config-file
+        // view: only it knows what it filtered out for missing credentials.
+        const runtimeModels = await this.#queryRuntimeModels();
+        const result = runtimeModels === undefined
+          ? await this.#queryModels()
+          : { ...(await this.#queryModels()), availableModels: runtimeModels, unavailableReason: undefined };
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "artifacts.text.read": {
@@ -2438,6 +2444,32 @@ export class StudioHostClientFacade implements ClientTransport {
       };
     }
     return service.get();
+  }
+
+  /**
+   * Models the live Runtime reports as selectable, or undefined when it cannot
+   * answer. A Runtime that does not implement `session.models.list` — every OMP
+   * build — leaves the config-file view in charge, unchanged.
+   */
+  async #queryRuntimeModels(): Promise<ReadonlyArray<AvailableModelRecord> | undefined> {
+    const session = this.#runtimeSession();
+    if (session?.readModels === undefined) return undefined;
+    try {
+      const result = await session.readModels();
+      return result.models.map(model => ({
+        provider: model.provider,
+        id: model.id,
+        selector: model.selector,
+        name: model.name ?? model.id,
+        reasoning: model.reasoning ?? false,
+        ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+        ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
+        ...(model.api === undefined ? {} : { api: model.api }),
+      }));
+    } catch {
+      // Not implemented, or the Runtime refused: the config view answers.
+      return undefined;
+    }
   }
 
   async #queryModels(): Promise<ModelConfigReadModel> {

@@ -53,6 +53,13 @@ export type SessionOperation =
    */
   | { kind: "session.taskModel.set"; selector: string | null }
   | { kind: "session.tree.get" }
+  /**
+   * List the models the live Runtime can actually select. The Host's own model
+   * config view reads a config file, which cannot know what a Runtime filtered
+   * out for missing credentials — and re-deriving that in the Host duplicates
+   * the Runtime's resolution rules.
+   */
+  | { kind: "session.models.list" }
   | {
       kind: "session.tree.navigate";
       targetId: string;
@@ -74,6 +81,23 @@ export type SessionOperation =
   | { kind: "session.prewalk.disarm" }
   | { kind: "session.prewalk.restart" }
   | SessionTranscriptRead;
+
+/** One model the Runtime reported as selectable. */
+export interface SessionModelRecord {
+  readonly provider: string;
+  readonly id: string;
+  /** Canonical `provider/id`, as `SessionModelState.selector` spells it. */
+  readonly selector: string;
+  readonly name?: string;
+  readonly reasoning?: boolean;
+  readonly contextWindow?: number;
+  readonly maxTokens?: number;
+  readonly api?: string;
+}
+
+export interface SessionModelsListResult {
+  readonly models: readonly SessionModelRecord[];
+}
 
 export type ModeOperation =
   | { kind: "mode.plan.enter"; initialPrompt?: string }

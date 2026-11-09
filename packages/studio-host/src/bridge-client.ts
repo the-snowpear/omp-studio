@@ -8,6 +8,7 @@ import {
   encodeFrame,
   parseAgentTranscriptPage,
   parseConversationTranscriptPage,
+  parseSessionModelsListResult,
   parseStudioEventEnvelope,
   parseStudioHelloResponse,
   parseOperatorCommandManifest,
@@ -16,6 +17,7 @@ import {
   type AgentId,
   type AgentTranscriptPage,
   type ConversationTranscriptPage,
+  type SessionModelsListResult,
   type OpaqueCursor,
   type RequestId,
   type DecodedFrame,
@@ -359,6 +361,29 @@ export class StudioBridgeClient {
     const receipt = await this.invoke({type:"studio.request",requestId:(this.options.createRequestId ?? randomUUID)() as RequestId,runtimeEpoch:this.#runtimeEpoch,operation:{kind:"prediction.query",...input}});
     if(receipt.status !== "completed") throw new StudioHostError("OUTCOME_UNKNOWN", "Prediction unavailable");
     validatePredictionResult(receipt.result); return receipt.result;
+  }
+
+  /**
+   * Models the live Runtime can select. A Runtime that does not answer this
+   * operation leaves the Host's own config-file view in charge.
+   */
+  async readModels(): Promise<SessionModelsListResult> {
+    if (this.#state !== "ready" || this.#runtimeEpoch === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Studio Bridge is not ready for a model list");
+    }
+    const receipt = await this.invoke({
+      type: "studio.request",
+      requestId: (this.options.createRequestId ?? randomUUID)() as RequestId,
+      runtimeEpoch: this.#runtimeEpoch,
+      operation: { kind: "session.models.list" },
+    });
+    if (receipt.status === "rejected" || receipt.status === "failed") {
+      throw new StudioHostError(receipt.error?.code ?? "OUTCOME_UNKNOWN", receipt.error?.message ?? "session.models.list failed");
+    }
+    if (receipt.status !== "completed" || receipt.result === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "session.models.list did not complete");
+    }
+    return parseSessionModelsListResult(receipt.result);
   }
 
   async readTranscript(

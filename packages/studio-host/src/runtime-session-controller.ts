@@ -1,5 +1,5 @@
 import type { SessionOwnerState } from "@omp-studio/studio-protocol";
-import type { ContextViewOperation, ContextViewResultMap } from "@omp-studio/studio-protocol";
+import type { ContextViewOperation, ContextViewResultMap, SessionModelsListResult } from "@omp-studio/studio-protocol";
 import type {
   AgentTranscriptPage,
   CommandId,
@@ -180,6 +180,14 @@ export class StudioRuntimeSessionController {
     const snapshot=this.bridge.projectionSnapshot();
     if(!snapshot || snapshot.sessionId!==input.sessionId)throw new StudioHostError("OUTCOME_UNKNOWN","Prediction session unavailable");
     return this.bridge.predict(input);
+  }
+
+  /**
+   * Models the Runtime can select. Unlike the Host's config-file view this
+   * reflects what the Runtime actually filtered as selectable.
+   */
+  async readModels(): Promise<SessionModelsListResult> {
+    return this.bridge.readModels();
   }
 
   async readTranscript(
