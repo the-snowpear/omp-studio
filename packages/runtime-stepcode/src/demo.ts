@@ -46,10 +46,11 @@ try {
     token,
     requestTimeoutMs: 30_000,
     onEvent: event => {
-      const payload = event.event as { kind?: string; delta?: string };
-      if (payload.kind === "conversation.message.delta" && typeof payload.delta === "string") {
-        process.stdout.write(payload.delta);
-      }
+      const payload = event.event as { kind?: string; delta?: string; blockType?: string };
+      if (payload.kind !== "conversation.message.delta" || typeof payload.delta !== "string") return;
+      // Reasoning streams in its own block; keep it off the answer line.
+      if (payload.blockType === "thinking") process.stderr.write(`(thinking) ${payload.delta}`);
+      else process.stdout.write(payload.delta);
     },
   });
 

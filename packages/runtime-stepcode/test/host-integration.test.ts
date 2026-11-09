@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseConversationRuntimeEvent } from "@omp-studio/studio-protocol";
 
 // Type-only path resolves from this source file; the runtime path resolves
 // from the package working directory so the compiled dist/test layout works.
@@ -79,6 +80,21 @@ test("real studio-host client negotiates and streams a prompt", async () => {
       .map(event => event.event.delta)
       .join("");
     assert.equal(deltas, "hello!");
+
+    // Every conversation event must parse under the real contract, and the
+    // completed item must reuse the id the started event announced.
+    const conversation = events.filter(event => String(event.event?.kind ?? "").startsWith("conversation."));
+    assert.ok(conversation.length > 0, "expected conversation events");
+    const started: string[] = [];
+    for (const event of conversation) {
+      const parsed = parseConversationRuntimeEvent(event.event);
+      if (parsed.kind === "conversation.message.started") started.push(parsed.messageId);
+      if (parsed.kind === "conversation.message.completed") {
+        assert.equal(parsed.item.itemId, parsed.messageId);
+        assert.ok(started.includes(parsed.messageId), "completed a message that never started");
+      }
+    }
+    assert.equal(started.length, 2, "expected user and assistant messages");
 
     client.disconnect();
   } finally {
