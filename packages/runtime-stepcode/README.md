@@ -86,10 +86,17 @@ STEP_STUDIO_RUNTIME_CMD=/path/to/step npm run demo -- "reply with exactly: PONG"
 | `session.thinking.set` | `set_thinking_level` | `auto` 映射到模型第一个可用等级 |
 | `session.fork` | `fork` | 在当前 leaf 上fork |
 | `session.transcript.read` | `get_entries` | 单页；异代 cursor 返回 `CURSOR_STALE` |
+| `session.models.list` | `get_available_models` | 模型目目录；Host 的 `models.get` 优先用它 |
 | `runtime.shutdown` | — | 结束 CLI 进程 |
 
 manifest 只声明**真正实现**的 capability id，grade 如实标注；没声明的一律按
 unavailable 处理，Renderer 会隐藏。
+
+`session.models.list` 是新增的 Studio 操作：Host 原本只从 OMP 的 `models.yml`
+读模型目录，Step Studio 没有这个文件。让 Runtime 自己答，是因为把 Step 的
+配置解析复制进 Host 就会重新引入"config root 与 agent dir 不是同一个
+models.json"那个静默返回 0 模型的坑。不实现该操作的 Runtime（所有 OMP 构建）
+会回 `COMMAND_UNKNOWN`，Host 捕获后沿用原路径，行为不变。
 
 ## 尚未完成
 
