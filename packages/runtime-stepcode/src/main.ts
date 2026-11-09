@@ -286,6 +286,13 @@ const rpc = new StepRpc(
   },
 );
 
+// A CLI that dies mid-turn must not leave the prompt waiting for a receipt
+// that can never arrive: the client would sit until its own timeout and
+// report an outcome it cannot distinguish from a hang.
+rpc.onExit(({ code, signal }) => {
+  settlePrompt(`step runtime exited (code=${code ?? "null"} signal=${signal ?? "none"})`);
+});
+
 /** Step thinking levels, minus Studio's `auto`, which has no Step equivalent. */
 const STEP_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 

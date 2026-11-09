@@ -76,6 +76,11 @@ rl.on("line", line => {
   }
   if (message.type === "prompt") {
     const text = String(message.message ?? "");
+    // Mid-turn death: no agent_settled will ever follow.
+    if (text === "die") {
+      setTimeout(() => process.exit(3), 5);
+      return;
+    }
     write({ type: "agent_start" });
     const userEntry = appendEntry("message", { message: userMessage(text) });
     write({ type: "message_start", message: userMessage(text) });
@@ -115,4 +120,5 @@ rl.on("line", line => {
   if (message.type === "abort") {
     write({ type: "agent_settled", aborted: true });
   }
+
 });

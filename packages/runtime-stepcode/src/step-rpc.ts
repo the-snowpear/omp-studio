@@ -49,6 +49,7 @@ export class StepRpc {
   constructor(
     options: StepRpcOptions,
     onEvent: (event: Record<string, unknown>) => void,
+    onExit?: (detail: { code: number | null; signal: NodeJS.Signals | null }) => void,
   ) {
     this.#child = spawn(resolveStepCommand(options.command, options.platform ?? process.platform), options.args, {
       cwd: options.cwd,
@@ -99,6 +100,11 @@ export class StepRpc {
 
   abort(): void {
     this.#write({ type: "abort" });
+  }
+
+  /** Fires once when the CLI process goes away, however it goes away. */
+  onExit(handler: (detail: { code: number | null; signal: NodeJS.Signals | null }) => void): void {
+    this.#child.once("exit", (code, signal) => handler({ code, signal }));
   }
 
   kill(): void {

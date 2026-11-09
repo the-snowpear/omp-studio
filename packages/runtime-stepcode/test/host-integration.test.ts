@@ -179,6 +179,16 @@ test("real studio-host client negotiates and streams a prompt", async () => {
     assert.equal(stale.status, "failed");
     assert.equal(stale.error?.code, "CURSOR_STALE");
 
+    // A CLI that dies mid-turn must fail the prompt, not leave it hanging.
+    const doomed = await client.invoke({
+      type: "studio.request",
+      requestId: randomUUID(),
+      runtimeEpoch: hello.runtimeEpoch,
+      operation: { kind: "core.prompt", text: "die" },
+    });
+    assert.equal(doomed.status, "failed");
+    assert.match(doomed.error?.message ?? "", /step runtime exited/u);
+
     client.disconnect();
   } finally {
     child.kill();
