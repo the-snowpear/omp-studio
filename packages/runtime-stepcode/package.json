@@ -8,7 +8,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test \"dist/test/*.test.js\""
+    "test": "npm run build && node --test \"dist/test/*.test.js\"",
+    "demo": "npm run build && node dist/src/demo.js"
   },
   "dependencies": {
     "@omp-studio/studio-protocol": "file:../studio-protocol"

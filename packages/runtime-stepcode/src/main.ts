@@ -120,6 +120,34 @@ const server = createServer(socket => {
       return;
     }
 
+    if (operation["kind"] === "runtime.snapshot") {
+      connection.send({
+        type: "studio.snapshot",
+        requestId,
+        snapshot: {
+          runtimeId: runtimeInstanceId,
+          runtimeEpoch,
+          stateVersion,
+          sessionId: "spike",
+          isStreaming: false,
+          isCompacting: false,
+          activeMode: "normal",
+          approvalMode: "always-ask",
+          pendingMessages: 0,
+          activeCommandIds: [],
+          agentsRevision: 0,
+          jobsRevision: 0,
+          agents: [],
+          jobs: [],
+        },
+        commandManifestHash,
+        capabilityHash: capabilityManifest.hash,
+        lastEventSeq: 0,
+        terminalReceipts: [],
+      });
+      return;
+    }
+
     if (operation["kind"] === "runtime.shutdown") {
       rpc?.kill();
       connection.receipt(requestId, "completed");
