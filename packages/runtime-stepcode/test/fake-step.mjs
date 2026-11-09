@@ -5,6 +5,15 @@ const write = value => process.stdout.write(JSON.stringify(value) + "\n");
 
 rl.on("line", line => {
   const message = JSON.parse(line);
+  if (message.type === "get_state") {
+    write({
+      type: "response",
+      command: "get_state",
+      id: message.id,
+      success: true,
+      data: { sessionId: "fake-session", isStreaming: false, isCompacting: false, pendingMessageCount: 0 },
+    });
+  }
   if (message.type === "prompt") {
     write({ type: "message_start", messageId: "m1" });
     for (const delta of ["he", "llo", "!"]) {

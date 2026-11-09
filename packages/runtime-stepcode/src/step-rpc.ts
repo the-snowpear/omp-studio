@@ -8,12 +8,21 @@ export interface StepRpcOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+interface Pending {
+  resolve: (value: Record<string, unknown>) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 /**
- * Thin JSONL client for `step --mode rpc`. The spike only needs prompt and
- * abort; the full adapter will add the remaining commands from rpc-types.ts.
+ * JSONL client for `step --mode rpc`. Events go to the callback; request()
+ * correlates a response by id. The spike needs get_state, prompt and abort;
+ * the full adapter will add the remaining commands from rpc-types.ts.
  */
 export class StepRpc {
   readonly #child: ChildProcessWithoutNullStreams;
+  readonly #pending = new Map<string, Pending>();
+  #seq = 0;
 
   constructor(
     options: StepRpcOptions,
@@ -27,11 +36,38 @@ export class StepRpc {
     createInterface({ input: this.#child.stdout }).on("line", line => {
       const text = line.trim();
       if (text === "") return;
+      let message: Record<string, unknown>;
       try {
-        onEvent(JSON.parse(text) as Record<string, unknown>);
+        message = JSON.parse(text) as Record<string, unknown>;
       } catch {
-        // Non-JSON stdout is diagnostic noise, not protocol data.
+        return; // Non-JSON stdout is diagnostic noise.
       }
+      if (message["type"] === "response" && typeof message["id"] === "string") {
+        const pending = this.#pending.get(message["id"]);
+        if (pending !== undefined) {
+          clearTimeout(pending.timer);
+          this.#pending.delete(message["id"]);
+          if (message["success"] === false) {
+            pending.reject(new Error(JSON.stringify(message["error"] ?? "rpc error")));
+          } else {
+            pending.resolve((message["data"] ?? {}) as Record<string, unknown>);
+          }
+        }
+        return;
+      }
+      onEvent(message);
+    });
+  }
+
+  request(type: string, payload: Record<string, unknown> = {}, timeoutMs = 5000): Promise<Record<string, unknown>> {
+    const id = `req-${++this.#seq}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#pending.delete(id);
+        reject(new Error(`step rpc timeout: ${type}`));
+      }, timeoutMs);
+      this.#pending.set(id, { resolve, reject, timer });
+      this.#write({ ...payload, type, id });
     });
   }
 
@@ -44,6 +80,11 @@ export class StepRpc {
   }
 
   kill(): void {
+    for (const pending of this.#pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("step rpc closed"));
+    }
+    this.#pending.clear();
     this.#child.kill();
   }
 

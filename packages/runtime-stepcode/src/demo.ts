@@ -28,7 +28,7 @@ const runtime = spawn(
     "--cwd", dir,
   ],
   {
-    env: { ...process.env, STEP_STUDIO_RUNTIME_CMD: `${process.execPath} ${fakeStep}` },
+    env: { ...process.env, STEP_STUDIO_RUNTIME_CMD: process.env.STEP_STUDIO_RUNTIME_CMD ?? `${process.execPath} ${fakeStep}` },
     stdio: ["ignore", "ignore", "inherit"],
   },
 );
@@ -44,6 +44,7 @@ try {
   const client = new StudioBridgeClient({
     endpoint: socketPath,
     token,
+    requestTimeoutMs: 30_000,
     onEvent: event => {
       const payload = event.event as { kind?: string; delta?: string };
       if (payload.kind === "conversation.message.delta" && typeof payload.delta === "string") {
@@ -53,17 +54,22 @@ try {
   });
 
   const hello = await client.connect();
-  await client.requestSnapshot();
+  const snapshot = await client.requestSnapshot();
   console.log(`connected: profile=${hello.capabilityManifest.profile} runtime=${hello.runtimeVersion}`);
+  console.log(`session: ${snapshot.snapshot.sessionId}`);
   process.stdout.write(`> ${prompt}\n`);
 
-  const receipt = await client.invoke({
-    type: "studio.request",
-    requestId: randomUUID(),
-    runtimeEpoch: hello.runtimeEpoch,
-    operation: { kind: "core.prompt", text: prompt },
-  });
-  console.log(`\n[${receipt.status}]`);
+  try {
+    const receipt = await client.invoke({
+      type: "studio.request",
+      requestId: randomUUID(),
+      runtimeEpoch: hello.runtimeEpoch,
+      operation: { kind: "core.prompt", text: prompt },
+    });
+    console.log(`\n[${receipt.status}]${receipt.error ? ` ${receipt.error.message}` : ""}`);
+  } catch (error) {
+    console.log(`\n[error] ${String(error)}`);
+  }
   client.disconnect();
 } finally {
   runtime.kill();

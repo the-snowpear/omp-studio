@@ -52,6 +52,18 @@ export class BridgeConnection {
     });
   }
 
+  failedReceipt(requestId: string, message: string): void {
+    this.send({
+      type: "studio.receipt",
+      requestId,
+      commandId: randomUUID(),
+      runtimeEpoch: this.runtimeEpoch,
+      stateVersion: 0,
+      status: "failed",
+      error: { code: "INTERNAL_ERROR", message, retryable: false },
+    });
+  }
+
   receipt(requestId: string, status: "accepted" | "completed" | "rejected" | "failed" | "outcome_unknown", result?: unknown): void {
     this.send({
       type: "studio.receipt",

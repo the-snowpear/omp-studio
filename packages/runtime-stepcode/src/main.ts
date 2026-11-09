@@ -13,7 +13,7 @@ function arg(name: string): string | undefined {
 
 const endpoint = arg("--bridge-endpoint");
 const tokenFile = arg("--bridge-token-file");
-const runtimeEpoch = Number(arg("--bridge-runtime-epoch") ?? "0");
+const runtimeEpoch = Number(arg("--bridge-runtime-epoch") ?? "1");
 const cwd = arg("--cwd") ?? process.cwd();
 
 if (endpoint === undefined || tokenFile === undefined) {
@@ -24,20 +24,18 @@ if (endpoint === undefined || tokenFile === undefined) {
 const token = readFileSync(tokenFile, "utf8").trim();
 const runtimeInstanceId = randomUUID();
 
-// The spike advertises only what it implements. Everything else is declared
-// unavailable so the shell hides it instead of offering a dead control.
 const capabilities = [
-  { id: "agent.send", grade: "stable", version: 1, evidence: "spike" },
-  { id: "session.model", grade: "stable", version: 1, evidence: "spike" },
-  { id: "session.thinking", grade: "stable", version: 1, evidence: "spike" },
-  { id: "interaction.approve", grade: "stable", version: 1, evidence: "spike" },
-  { id: "usage.read", grade: "stable", version: 1, evidence: "spike" },
-  { id: "tui.transfer", grade: "unavailable", version: 1, evidence: "spike" },
-  { id: "vibe.mode", grade: "unavailable", version: 1, evidence: "spike" },
-  { id: "omfg.commit", grade: "unavailable", version: 1, evidence: "spike" },
-  { id: "prewalk", grade: "unavailable", version: 1, evidence: "spike" },
-  { id: "operator", grade: "unavailable", version: 1, evidence: "spike" },
-  { id: "tan", grade: "unavailable", version: 1, evidence: "spike" },
+  { id: "agent.send", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "session.model", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "session.thinking", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "interaction.approve", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "usage.read", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "tui.transfer", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
+  { id: "vibe.mode", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
+  { id: "omfg.commit", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
+  { id: "prewalk", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
+  { id: "operator", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
+  { id: "tan", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
 ] as const;
 
 const capabilityManifest = {
@@ -47,13 +45,69 @@ const capabilityManifest = {
   capabilities,
 };
 
-const commandManifestHash = sha256(JSON.stringify(["core.prompt", "core.abort", "runtime.shutdown"]));
+const commandManifestHash = sha256(JSON.stringify(["core.prompt", "core.abort", "runtime.snapshot", "runtime.shutdown"]));
 
 let stateVersion = 0;
+let activeConnection: BridgeConnection | undefined;
+let pendingPromptId: string | undefined;
+let lastState: Record<string, unknown> = {};
+
+const stepCommand = process.env["STEP_STUDIO_RUNTIME_CMD"] ?? "step";
+const parts = stepCommand.split(" ");
+const rpc = new StepRpc(
+  { command: parts[0]!, args: [...parts.slice(1), "--mode", "rpc"], cwd },
+  event => {
+    const connection = activeConnection;
+    if (connection === undefined) return;
+    if (event["type"] === "message_update" && typeof event["delta"] === "string") {
+      stateVersion += 1;
+      connection.event(
+        {
+          kind: "conversation.message.delta",
+          sessionId: String(lastState["sessionId"] ?? "step-session"),
+          turnId: "t1",
+          messageId: String(event["messageId"] ?? "m1"),
+          blockId: "b1",
+          blockType: "text",
+          delta: event["delta"],
+        },
+        stateVersion,
+      );
+    }
+    if (event["type"] === "agent_settled" && pendingPromptId !== undefined) {
+      connection.receipt(pendingPromptId, "completed", { ok: true });
+      pendingPromptId = undefined;
+    }
+  },
+);
+
+async function buildSnapshot(): Promise<Record<string, unknown>> {
+  try {
+    lastState = await rpc.request("get_state");
+  } catch {
+    // A CLI that cannot answer get_state still gets a minimal snapshot.
+  }
+  return {
+    runtimeId: runtimeInstanceId,
+    runtimeEpoch,
+    stateVersion,
+    sessionId: String(lastState["sessionId"] ?? "step-session"),
+    isStreaming: Boolean(lastState["isStreaming"] ?? false),
+    isCompacting: Boolean(lastState["isCompacting"] ?? false),
+    activeMode: "normal",
+    approvalMode: "always-ask",
+    pendingMessages: Number(lastState["pendingMessageCount"] ?? 0),
+    activeCommandIds: [],
+    agentsRevision: 0,
+    jobsRevision: 0,
+    agents: [],
+    jobs: [],
+  };
+}
 
 const server = createServer(socket => {
   const connection = new BridgeConnection(socket, runtimeEpoch);
-  let rpc: StepRpc | undefined;
+  activeConnection = connection;
 
   socket.on("error", () => {
     // A dropped socket only ends this connection; the runtime stays alive.
@@ -65,9 +119,9 @@ const server = createServer(socket => {
         type: "studio.hello.result",
         requestId: body["requestId"],
         selectedProtocolVersion: PROTOCOL_VERSION,
-        runtimeVersion: "0.0.0-spike",
+        runtimeVersion: "0.0.0-step-bridge",
         upstreamVersion: "step-code",
-        upstreamCommit: "spike",
+        upstreamCommit: "0.1.0",
         runtimeInstanceId,
         runtimeEpoch,
         capabilityManifest,
@@ -85,71 +139,37 @@ const server = createServer(socket => {
 
     if (operation["kind"] === "core.prompt") {
       connection.receipt(requestId, "accepted");
-      const command = process.env["STEP_STUDIO_RUNTIME_CMD"] ?? "step";
-      const parts = command.split(" ");
-      rpc = new StepRpc(
-        { command: parts[0]!, args: [...parts.slice(1), "--mode", "rpc"], cwd },
-        event => {
-          if (event["type"] === "message_update" && typeof event["delta"] === "string") {
-            stateVersion += 1;
-            connection.event(
-              {
-                kind: "conversation.message.delta",
-                sessionId: "spike",
-                turnId: "t1",
-                messageId: String(event["messageId"] ?? "m1"),
-                blockId: "b1",
-                blockType: "text",
-                delta: event["delta"],
-              },
-              stateVersion,
-            );
-          }
-          if (event["type"] === "agent_settled") {
-            connection.receipt(requestId, "completed", { ok: true });
-          }
-        },
-      );
-      rpc.prompt(String(operation["text"] ?? ""));
+      pendingPromptId = requestId;
+      rpc.request("prompt", { message: String(operation["text"] ?? "") }, 120_000).catch(error => {
+        if (pendingPromptId === requestId) pendingPromptId = undefined;
+        connection.failedReceipt(requestId, String(error));
+      });
       return;
     }
 
     if (operation["kind"] === "core.abort") {
-      rpc?.abort();
+      rpc.abort();
       connection.receipt(requestId, "completed", { aborted: true });
       return;
     }
 
     if (operation["kind"] === "runtime.snapshot") {
-      connection.send({
-        type: "studio.snapshot",
-        requestId,
-        snapshot: {
-          runtimeId: runtimeInstanceId,
-          runtimeEpoch,
-          stateVersion,
-          sessionId: "spike",
-          isStreaming: false,
-          isCompacting: false,
-          activeMode: "normal",
-          approvalMode: "always-ask",
-          pendingMessages: 0,
-          activeCommandIds: [],
-          agentsRevision: 0,
-          jobsRevision: 0,
-          agents: [],
-          jobs: [],
-        },
-        commandManifestHash,
-        capabilityHash: capabilityManifest.hash,
-        lastEventSeq: 0,
-        terminalReceipts: [],
+      void buildSnapshot().then(snapshot => {
+        connection.send({
+          type: "studio.snapshot",
+          requestId,
+          snapshot,
+          commandManifestHash,
+          capabilityHash: capabilityManifest.hash,
+          lastEventSeq: 0,
+          terminalReceipts: [],
+        });
       });
       return;
     }
 
     if (operation["kind"] === "runtime.shutdown") {
-      rpc?.kill();
+      rpc.kill();
       connection.receipt(requestId, "completed");
       connection.event({ kind: "runtime.shutdownComplete" }, stateVersion);
       socket.end();
