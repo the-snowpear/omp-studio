@@ -1,0 +1,20 @@
+{
+  "name": "@step-studio/runtime-stepcode",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "step-studio-runtime": "./dist/src/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"dist/test/*.test.js\""
+  },
+  "dependencies": {
+    "@omp-studio/studio-protocol": "file:../studio-protocol"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  }
+}
