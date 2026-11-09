@@ -18,6 +18,10 @@ Step Code 的 Studio Bridge 适配器。它接受与 OMP 运行时相同的启�
 的 `item.itemId` 与 `message.started` 的 `messageId` 一致。思考与正文是不同
 block，不会混进答案文本。
 
+**已通过 Host 真实探针**（`test/probe.test.ts`）：hello、snapshot smoke、shutdown 后
+干净退出（exit 0）。shutdown 失败会被判 *rejected* 而不是 limited，所以这一条比其它
+都硬。command manifest 缺席——limited 运行时允许不带。
+
 ### 让真实 CLI 看到自定义 provider
 
 Step 的**产品入口**（`apps/cli`）与**库默认值**读的不是同一个 models.json：
@@ -32,6 +36,19 @@ $STEP_CODING_AGENT_DIR/agent/             # 会话、技能等仍在这里
 
 放错位置时 CLI 静默返回 0 个模型，库直读却能读到——这是定位这个问题时最容易
 踩的坑。详见 `docs/step-rpc-integration.md`。
+
+## 启动器
+
+Host 直接 spawn `executablePath --mode studio-host ...`，所以适配器必须是可执行文件，
+不能是 Node 脚本（node 收到 `--mode` 会 exit 9）。`bin/step-studio-runtime` 转调到
+构建产物：
+
+```bash
+STUDIO_RUNTIME_EXECUTABLE=$PWD/bin/step-studio-runtime npm run preview
+```
+
+Windows 还需要一个 `.cmd`（或走仓库原有的 native 构建管线产出单文件可执行文件）；
+POSIX 启动器是这台机器上能验证的那一半。
 
 ## 运行
 

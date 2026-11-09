@@ -28,6 +28,8 @@ Renderer → @omp-studio/client → transport-desktop → apps/desktop (IPC)
   `parseConversationRuntimeEvent` 校验
 - provider 报错时立刻返回 failed receipt 并带上 CLI 原始错误（Step 之后还会自动重试
   很久，不等它）
+- 通过 Host 的**真实探针**（hello + snapshot smoke + shutdown 后干净退出）；
+  shutdown 失败会被判 rejected 而不是 limited，所以这条最硬
 - 整个 `npm run check` 门禁通过：架构约束、全部包编译（含 renderer）、核心测试
 
 ## 跑起来
@@ -49,8 +51,10 @@ cd packages/runtime-stepcode && npm run demo -- "hello"
 桌面壳启动适配器：
 
 ```bash
-STUDIO_RUNTIME_EXECUTABLE=/path/to/step-studio-runtime npm run preview
+STUDIO_RUNTIME_EXECUTABLE=$PWD/packages/runtime-stepcode/bin/step-studio-runtime npm run preview
 ```
+
+Host 直接 spawn 这个可执行文件并传 `--mode studio-host ...`，所以它不能是 Node 脚本。
 
 不设该变量时行为与 OMP Studio 完全一致（仍走 managed 安装的 OMP 运行时）。
 
