@@ -114,6 +114,7 @@ import type {
   CapabilityManifest,
   CommandLedgerEntry,
   OperatorCommandManifest,
+  RuntimeClassification,
   RuntimePreference,
   StudioAgentSnapshot,
 } from "@omp-studio/studio-protocol";
@@ -135,6 +136,34 @@ import { UpdateRestartBlockedError, updateRestartBlockerForSnapshot } from "./up
 
 /** Default Runtime resolution preference for the P1 managed slice. */
 const DEFAULT_RUNTIME_PREFERENCE: RuntimePreference = { kind: "managed" };
+
+/**
+ * Classifications that earn a session controller for a given preference.
+ *
+ * Managed installs are the only trusted source for OMP Studio: the resolver's
+ * live probe must produce full-parity evidence. Step Studio ships its own
+ * Runtime Bridge adapter instead of an OMP install, and that adapter is limited
+ * by design — Step Code has no OMP tools, approvals or operators. An operator
+ * naming the executable explicitly is what earns `limited-system` a controller;
+ * a limited runtime found on PATH still gets none.
+ */
+function acceptedClassifications(preference: RuntimePreference): ReadonlySet<RuntimeClassification> {
+  if (preference.kind === "custom") {
+    return new Set<RuntimeClassification>(["managed", "compatible-system", "limited-system"]);
+  }
+  return new Set<RuntimeClassification>(["managed", "compatible-system"]);
+}
+
+/**
+ * Step Studio runs its own Runtime Bridge adapter rather than the managed OMP
+ * install. Point `STUDIO_RUNTIME_EXECUTABLE` at it and the resolver takes the
+ * custom source; unset keeps the managed slice exactly as it was.
+ */
+function runtimePreferenceFrom(options: { readonly preference?: RuntimePreference }): RuntimePreference {
+  const executable = process.env["STUDIO_RUNTIME_EXECUTABLE"]?.trim();
+  if (executable === undefined || executable === "") return options.preference ?? DEFAULT_RUNTIME_PREFERENCE;
+  return { kind: "custom", executable, allowLimited: true };
+}
 
 /** Opaque authority lease; structurally satisfied by Win32AuthorityLock's lease. */
 export interface DesktopAuthorityLease {
@@ -550,15 +579,19 @@ async function ensureInstalledRuntime(
 }
 
 async function installedRuntimeContext(context: FacadeContext): Promise<DesktopRuntimeSessionContext> {
-  const resolution: RuntimeResolution = await context.backend.resolve({ kind: "managed" });
+  // The reconnect path has no composition options; the env override is the
+  // same source of truth the bootstrap path reads.
+  const preference = runtimePreferenceFrom({});
+  const accepted = acceptedClassifications(preference);
+  const resolution: RuntimeResolution = await context.backend.resolve(preference);
   context.seams.hostLog?.write(
-    resolution.classification === "managed" ? "info" : "warn",
+    accepted.has(resolution.classification) ? "info" : "warn",
     "runtime.resolve",
     `classification=${resolution.classification}${resolution.rejectionReason === undefined ? "" : ` reason=${resolution.rejectionReason}`}`,
   );
-  if (resolution.classification !== "managed") {
+  if (!accepted.has(resolution.classification)) {
     rememberUnavailable(context.lastUnavailable, undefined, undefined, classificationUnavailable(resolution));
-    throw new Error(resolution.rejectionReason ?? "Installed Runtime was not accepted as managed");
+    throw new Error(resolution.rejectionReason ?? "Runtime was not accepted");
   }
   const workspace = context.seams.getActiveWorkspace?.();
   return {
@@ -1351,13 +1384,15 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
         }
       }
 
-      // 5. Managed Runtime resolution with the injected resolver/probe.
-      const resolved = await backend.resolve(options.preference ?? DEFAULT_RUNTIME_PREFERENCE);
+      // 5. Runtime resolution with the injected resolver/probe.
+      const preference = runtimePreferenceFrom(options);
+      const accepted = acceptedClassifications(preference);
+      const resolved = await backend.resolve(preference);
       const resolution = seedFailure !== undefined && resolved.classification === "rejected"
         ? { ...resolved, rejectionReason: seedFailure }
         : resolved;
       seams.hostLog?.write(
-        resolution.classification === "managed" || resolution.classification === "compatible-system" ? "info" : "warn",
+        accepted.has(resolution.classification) ? "info" : "warn",
         "runtime.resolve",
         `classification=${resolution.classification}${resolution.rejectionReason === undefined ? "" : ` reason=${resolution.rejectionReason}`}`,
       );
@@ -1372,7 +1407,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
       const classification = resolution.classification;
       const activeWorkspace = seams.getActiveWorkspace?.();
       let lastUnavailable: HostRuntimeUnavailable | undefined;
-      if ((classification === "managed" || classification === "compatible-system") && runtimeSession !== undefined) {
+      if (accepted.has(classification) && runtimeSession !== undefined) {
         sessionStarted = true;
         try {
           session = await runtimeSession.start({
@@ -1414,7 +1449,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
           session = undefined;
           lastUnavailable = runtimeSession.lastUnavailable?.() ?? unavailableFromError(error);
         }
-      } else if (classification !== "managed" && classification !== "compatible-system") {
+      } else if (!accepted.has(classification)) {
         lastUnavailable = classificationUnavailable(resolution);
       } else {
         lastUnavailable = { code: "not-wired", reason: "runtime session port is not wired" };
