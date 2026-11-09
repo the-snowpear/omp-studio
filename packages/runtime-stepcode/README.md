@@ -12,7 +12,11 @@ Step Code 的 Studio Bridge 适配器。它接受与 OMP 运行时相同的启�
 - `core.prompt` → 流式 `conversation.message.delta` → 完成 receipt
 - `core.abort`、`runtime.shutdown`
 
-尚未接入：真实 `step` CLI（需要安装与账号）、Windows 命名管道实测、
+真实 Step Code CLI 已接入：适配器启动 `step --mode rpc`，快照里的
+sessionId 来自 CLI 的 `get_state`；prompt 在没有 provider 凭据时会把
+CLI 的原始错误作为 failed receipt 返回。
+
+尚未完成：provider 登录/凭据（本机无账号）、Windows 命名管道实测、
 模型/思考/fork/用量等其余命令、Electron 界面。
 
 ## 运行
@@ -24,8 +28,14 @@ npm test          # 协议级测试 + 真实 studio-host 客户端集成测试
 npm run demo -- "hello from step studio"
 ```
 
-demo 会用 `test/fake-step.mjs` 冒充 Step 运行时；设置
-`STEP_STUDIO_RUNTIME_CMD="step"` 可换成真实 CLI。
+默认用 `test/fake-step.mjs` 冒充 Step 运行时；接入真实 CLI：
+
+```bash
+STEP_STUDIO_RUNTIME_CMD=/path/to/step npm run demo -- "hello"
+```
+
+真实 CLI 的 `get_state` 会给出真实 sessionId；没有 provider 凭据时
+prompt 会返回 CLI 的 "No API key found" 错误（属于环境限制，不是桥接问题）。
 
 ## 结构
 
