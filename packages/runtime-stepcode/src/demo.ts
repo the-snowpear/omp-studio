@@ -56,8 +56,12 @@ try {
 
   const hello = await client.connect();
   const snapshot = await client.requestSnapshot();
+  const model = snapshot.snapshot.model;
   console.log(`connected: profile=${hello.capabilityManifest.profile} runtime=${hello.runtimeVersion}`);
   console.log(`session: ${snapshot.snapshot.sessionId}`);
+  if (model !== undefined) {
+    console.log(`model: ${model.selector}${model.thinking === undefined ? "" : ` thinking=${model.thinking}`}`);
+  }
   process.stdout.write(`> ${prompt}\n`);
 
   try {
@@ -71,6 +75,18 @@ try {
   } catch (error) {
     console.log(`\n[error] ${String(error)}`);
   }
+
+  // The transcript read is what the Renderer calls on open: prove it returns
+  // the turn that just ran, not an empty page.
+  const page = await client.invoke({
+    type: "studio.request",
+    requestId: randomUUID(),
+    runtimeEpoch: hello.runtimeEpoch,
+    operation: { kind: "session.transcript.read" },
+  });
+  const items = (page.result as { items: Array<{ role: string }> } | undefined)?.items ?? [];
+  console.log(`transcript: ${items.map(item => item.role).join(", ")}`);
+
   client.disconnect();
 } finally {
   runtime.kill();

@@ -85,6 +85,20 @@ let currentTurnId = "t0";
 let openMessage: { id: string; role: string } | undefined;
 let turnError: string | undefined;
 
+/**
+ * Step timestamps are epoch milliseconds on live messages and ISO strings on
+ * persisted entries; `Number()` of an ISO string is NaN and `toISOString()`
+ * then throws.
+ */
+function toIso(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value)) return new Date(value).toISOString();
+  if (typeof value === "string" && value !== "") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return new Date().toISOString();
+}
+
 /** Studio block types the conversation contract accepts. */
 function blockTypeOf(eventType: string): "text" | "thinking" | undefined {
   if (eventType.startsWith("thinking")) return "thinking";
@@ -172,7 +186,7 @@ const rpc = new StepRpc(
       // `custom` entries (runtime-context reminders, activity capabilities) are
       // ignored by the conversation contract; tool results have no public role.
       if (role !== "user" && role !== "assistant") return;
-      const createdAt = new Date(Number(message?.["timestamp"] ?? Date.now())).toISOString();
+      const createdAt = toIso(message?.["timestamp"]);
 
       if (type === "message_start") {
         messageSeq += 1;
@@ -282,17 +296,27 @@ async function refreshState(): Promise<void> {
 }
 
 /**
- * `provider/id` selector, resolved against the live catalog when the provider
- * is omitted — the Composer sends whichever form the picker handed it.
+ * Resolve a selector against the live catalog.
+ *
+ * Step model ids routinely contain a slash of their own
+ * (`zed/claude-haiku-5-5` under provider `local-gateway`), so a canonical
+ * `provider/id` selector is ambiguous: splitting on the first slash reads that
+ * as provider `zed`. Matching the whole string as an id first, and only then
+ * falling back to `provider/id`, accepts both forms the Composer can send.
  */
 async function resolveModelSelector(selector: string): Promise<{ provider: string; modelId: string }> {
-  const slash = selector.indexOf("/");
-  if (slash > 0) return { provider: selector.slice(0, slash), modelId: selector.slice(slash + 1) };
   const catalog = await rpc.request("get_available_models");
   const models = Array.isArray(catalog["models"]) ? (catalog["models"] as Array<Record<string, unknown>>) : [];
-  const match = models.find(model => model["id"] === selector);
-  if (match === undefined) throw new Error(`model not found: ${selector}`);
-  return { provider: String(match["provider"] ?? ""), modelId: String(match["id"] ?? selector) };
+  const byId = models.find(model => model["id"] === selector);
+  if (byId !== undefined) return { provider: String(byId["provider"] ?? ""), modelId: selector };
+  const slash = selector.indexOf("/");
+  if (slash > 0) {
+    const provider = selector.slice(0, slash);
+    const modelId = selector.slice(slash + 1);
+    const match = models.find(model => model["provider"] === provider && model["id"] === modelId);
+    if (match !== undefined) return { provider, modelId };
+  }
+  throw new Error(`model not found: ${selector}`);
 }
 
 async function setSessionModel(selector: string, thinking: unknown): Promise<void> {
@@ -354,7 +378,7 @@ async function readTranscript(cursor: unknown, limit: unknown): Promise<Record<s
       kind: "message",
       itemId,
       parentId: typeof entry["parentId"] === "string" ? entry["parentId"] : null,
-      createdAt: new Date(Number(entry["timestamp"] ?? Date.now())).toISOString(),
+      createdAt: toIso(entry["timestamp"]),
       role,
       content: toStudioBlocks(message?.["content"]),
     });

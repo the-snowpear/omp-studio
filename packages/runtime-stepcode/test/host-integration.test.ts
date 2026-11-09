@@ -105,17 +105,29 @@ test("real studio-host client negotiates and streams a prompt", async () => {
     }
     assert.equal(started.length, 2, "expected user and assistant messages");
 
-    // A bare id resolves through the catalog; the snapshot then reports the
-    // model the CLI actually switched to.
-    await client.invoke({
-      type: "studio.request",
-      requestId: randomUUID(),
-      runtimeEpoch: hello.runtimeEpoch,
-      operation: { kind: "session.model.set", selector: "zed/claude-haiku-5-5" },
-    });
+    // Both selector forms must reach the same model. The id itself contains a
+    // slash, so splitting on the first one would read provider `zed`.
+    for (const selector of ["zed/claude-haiku-5-5", "local-gateway/zed/claude-haiku-5-5"]) {
+      const receipt = await client.invoke({
+        type: "studio.request",
+        requestId: randomUUID(),
+        runtimeEpoch: hello.runtimeEpoch,
+        operation: { kind: "session.model.set", selector },
+      });
+      assert.equal(receipt.status, "completed", `${selector} was rejected`);
+    }
     const afterModel = await client.requestSnapshot();
     assert.equal(afterModel.snapshot.sessionId, snapshot.snapshot.sessionId);
     assert.equal(afterModel.snapshot.model?.selector, "local-gateway/zed/claude-haiku-5-5");
+    assert.equal(afterModel.snapshot.model?.id, "zed/claude-haiku-5-5");
+
+    const unknown = await client.invoke({
+      type: "studio.request",
+      requestId: randomUUID(),
+      runtimeEpoch: hello.runtimeEpoch,
+      operation: { kind: "session.model.set", selector: "no/such-model" },
+    });
+    assert.equal(unknown.status, "failed");
 
     await client.invoke({
       type: "studio.request",

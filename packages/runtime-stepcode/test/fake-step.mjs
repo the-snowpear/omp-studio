@@ -16,7 +16,7 @@ const CATALOG = {
 
 const state = {
   sessionId: "fake-session",
-  model: "stepfun-cn/step-3.7-flash",
+  model: { provider: "local-gateway", modelId: "stepfun-cn/step-3.7-flash" },
   thinkingLevel: "off",
   entries: [],
 };
@@ -40,7 +40,7 @@ rl.on("line", line => {
         isStreaming: false,
         isCompacting: false,
         pendingMessageCount: 0,
-        model: { id: state.model, provider: "local-gateway" },
+        model: { id: state.model.modelId, provider: state.model.provider },
         thinkingLevel: state.thinkingLevel,
       },
     });
@@ -52,7 +52,13 @@ rl.on("line", line => {
     write({ type: "response", command: "get_available_thinking_levels", id: message.id, success: true, data: { levels: ["off", "low", "high"] } });
   }
   if (message.type === "set_model") {
-    state.model = `${message.provider}/${message.modelId}`;
+    // Validate like the real CLI, so a mis-split selector fails here too.
+    const known = CATALOG.models.some((m) => m.provider === message.provider && m.id === message.modelId);
+    if (!known) {
+      write({ type: "response", command: "set_model", id: message.id, success: false, error: `Model not found: ${message.provider}/${message.modelId}` });
+      return;
+    }
+    state.model = { provider: message.provider, modelId: message.modelId };
     write({ type: "response", command: "set_model", id: message.id, success: true });
   }
   if (message.type === "set_thinking_level") {
