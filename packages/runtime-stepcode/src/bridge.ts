@@ -28,6 +28,11 @@ export class BridgeConnection {
     private readonly runtimeEpoch: number,
   ) {}
 
+  /** Highest eventSeq emitted on this connection; a snapshot must report it. */
+  get lastEventSeq(): number {
+    return this.#seq;
+  }
+
   onFrame(handler: (body: Record<string, unknown>) => void): void {
     this.socket.on("data", chunk => {
       for (const frame of this.#decoder.push(chunk)) {

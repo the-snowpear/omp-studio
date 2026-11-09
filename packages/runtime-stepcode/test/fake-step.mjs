@@ -81,6 +81,13 @@ rl.on("line", line => {
       setTimeout(() => process.exit(3), 5);
       return;
     }
+    // Compaction is Runtime-initiated, not a Host command.
+    if (text === "compact") {
+      write({ type: "compaction_start", reason: "auto" });
+      setTimeout(() => write({ type: "compaction_end", reason: "auto", aborted: false, willRetry: false }), 5);
+      setTimeout(() => write({ type: "agent_settled" }), 10);
+      return;
+    }
     write({ type: "agent_start" });
     const userEntry = appendEntry("message", { message: userMessage(text) });
     write({ type: "message_start", message: userMessage(text) });
@@ -125,5 +132,6 @@ rl.on("line", line => {
   if (message.type === "abort") {
     write({ type: "agent_settled", aborted: true });
   }
+
 
 });

@@ -39,6 +39,13 @@ const capabilities = [
   { id: "session.model.set", grade: "stable", version: 1, evidence: "runtime-stepcode" },
   { id: "session.models.list", grade: "stable", version: 1, evidence: "runtime-stepcode" },
   {
+    id: "conversation.compaction",
+    grade: "limited",
+    version: 1,
+    evidence: "runtime-stepcode",
+    limitations: ["completion carries no summary; Step's compaction event does not include one"],
+  },
+  {
     id: "session.thinking.set",
     grade: "limited",
     version: 1,
@@ -268,6 +275,24 @@ const rpc = new StepRpc(
           delta,
         },
         false,
+      );
+      return;
+    }
+
+    // A compacted context is visible to the user: the transcript shortens and
+    // the model forgets. Silence here looks like the app lost messages.
+    if (type === "compaction_start") {
+      emit(
+        { kind: "conversation.compaction.started", sessionId: sessionId(), action: String(event["reason"] ?? "auto") },
+        false,
+      );
+      return;
+    }
+
+    if (type === "compaction_end") {
+      emit(
+        { kind: "conversation.compaction.completed", sessionId: sessionId(), aborted: Boolean(event["aborted"]) },
+        true,
       );
       return;
     }
@@ -621,7 +646,9 @@ const server = createServer(socket => {
           snapshot,
           commandManifestHash,
           capabilityHash: capabilityManifest.hash,
-          lastEventSeq: 0,
+          // Reporting 0 here resets the Host's projection watermark and turns
+          // the next event into a gap, which forces a resync.
+          lastEventSeq: connection.lastEventSeq,
           terminalReceipts: [],
         });
       });

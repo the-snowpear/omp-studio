@@ -64,6 +64,7 @@ test("real studio-host client negotiates and streams a prompt", async () => {
 
     const events: any[] = [];
     const client = new StudioBridgeClient({
+      // eslint-disable-next-line no-console
       endpoint: socketPath,
       token,
       // A missing receipt fails here instead of hanging the runner.
@@ -90,6 +91,7 @@ test("real studio-host client negotiates and streams a prompt", async () => {
       .join("");
     assert.equal(deltas, "hello!");
 
+
     // Every conversation event must parse under the real contract, and the
     // completed item must reuse the id the started event announced.
     const conversation = events.filter(event => String(event.event?.kind ?? "").startsWith("conversation."));
@@ -105,6 +107,20 @@ test("real studio-host client negotiates and streams a prompt", async () => {
     }
     assert.equal(started.length, 2, "expected user and assistant messages");
 
+    // A snapshot taken after events must report the sequence it has actually
+    // emitted. Reporting 0 resets the Host's watermark, and the next event then
+    // reads as a gap — which silently stops every later event.
+    const midStream = await client.requestSnapshot();
+    assert.ok(midStream.lastEventSeq > 0, "snapshot must carry the emitted event sequence");
+    const eventsBefore = events.length;
+    await client.invoke({
+      type: "studio.request",
+      requestId: randomUUID(),
+      runtimeEpoch: hello.runtimeEpoch,
+      operation: { kind: "core.prompt", text: "again" },
+    });
+    assert.ok(events.length > eventsBefore, "events after a mid-stream snapshot must still arrive");
+
     // Tool activity must reach the conversation surface, or a turn that acted
     // looks like a turn that only thought.
     const tools = conversation
@@ -119,6 +135,18 @@ test("real studio-host client negotiates and streams a prompt", async () => {
     assert.equal(completed.result.toolName, "list_directory");
     assert.equal(completed.result.output, "dir apps/");
     assert.equal(completed.result.isError, false);
+
+    const step = async (label: string, operation: Record<string, unknown>) => {
+      console.error(`STEP ${label}`);
+      const receipt = await client.invoke({
+        type: "studio.request",
+        requestId: randomUUID(),
+        runtimeEpoch: hello.runtimeEpoch,
+        operation,
+      } as never);
+      console.error(`STEP ${label} -> ${receipt.status}`);
+      return receipt;
+    };
 
     // Both selector forms must reach the same model. The id itself contains a
     // slash, so splitting on the first one would read provider `zed`.
@@ -176,8 +204,10 @@ test("real studio-host client negotiates and streams a prompt", async () => {
       operation: { kind: "session.transcript.read" },
     });
     const items = (page.result as { items: Array<{ kind: string; itemId: string; role: string }> }).items;
+    // The earlier watermark check added a turn, so match the tail rather than
+    // the whole page.
     assert.deepEqual(
-      items.map(item => `${item.kind}:${item.role}`),
+      items.slice(-2).map(item => `${item.kind}:${item.role}`),
       ["message:user", "message:assistant"],
     );
     assert.equal(items[1]?.itemId, items[1]?.itemId);
@@ -209,13 +239,21 @@ test("real studio-host client negotiates and streams a prompt", async () => {
     assert.equal(stale.status, "failed");
     assert.equal(stale.error?.code, "CURSOR_STALE");
 
+    // Compaction shortens the transcript; silence would look like lost messages.
+    // It is Runtime-initiated, so it arrives without the Host asking.
+    await step("compact", { kind: "core.prompt", text: "compact" });
+    const compaction = events
+      .filter(event => String(event.event?.kind ?? "").startsWith("conversation.compaction."))
+      .map(event => parseConversationRuntimeEvent(event.event))
+      .filter(parsed => parsed.kind.startsWith("conversation.compaction."));
+    assert.deepEqual(
+      compaction.map(parsed => parsed.kind),
+      ["conversation.compaction.started", "conversation.compaction.completed"],
+    );
+    assert.equal((compaction[1] as { aborted: boolean }).aborted, false);
+
     // A CLI that dies mid-turn must fail the prompt, not leave it hanging.
-    const doomed = await client.invoke({
-      type: "studio.request",
-      requestId: randomUUID(),
-      runtimeEpoch: hello.runtimeEpoch,
-      operation: { kind: "core.prompt", text: "die" },
-    });
+    const doomed = await step("die", { kind: "core.prompt", text: "die" });
     assert.equal(doomed.status, "failed");
     assert.match(doomed.error?.message ?? "", /step runtime exited/u);
 
