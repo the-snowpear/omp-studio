@@ -16,7 +16,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { PassThrough } from "node:stream";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { mock, test } from "node:test";
 
 import type { ClientBootstrap, ClientError, CommandRequestId, EventCursor, IdempotencyKey, ResidentsReadModel, WorkspaceId } from "@omp-studio/client-contract";
@@ -123,6 +123,35 @@ function fullParityProbe(): RuntimeProbePort {
       return {
         hello: HELLO,
         commandManifest: COMMAND_MANIFEST,
+        smoke: "passed" as const,
+        shutdown: "passed" as const,
+      };
+    },
+  };
+}
+
+/**
+ * Step Studio's Runtime Bridge adapter answers with the limited profile: Step
+ * Code has no OMP tools, approvals or operators, so full-parity evidence can
+ * never exist for it.
+ */
+const LIMITED_HELLO: StudioHelloResponse = {
+  ...HELLO,
+  capabilityManifest: {
+    profile: "limited",
+    generatedAt: T0,
+    hash: "cap-hash-limited",
+    capabilities: [{ id: "agent.send", grade: "stable", version: 1, evidence: "runtime-stepcode" }],
+  },
+  commandManifestHash: "cmd-hash-limited",
+};
+
+function limitedProbe(): RuntimeProbePort {
+  return {
+    async probe() {
+      return {
+        hello: LIMITED_HELLO,
+        commandManifest: { ...COMMAND_MANIFEST, hash: "cmd-hash-limited" },
         smoke: "passed" as const,
         shutdown: "passed" as const,
       };
@@ -250,7 +279,9 @@ function fakeSessionPort(options: {
             publication: () => ({ commitSeq: 1, publishedAt: T0, snapshot, terminalOutcomes: [] }),
             dispose: () => {},
           } as unknown as StudioRuntimeSessionController,
-          hello: () => HELLO_VIEW,
+          // Report the classification the resolver actually reached, so a
+          // limited runtime is visible as limited through bootstrap too.
+          hello: () => ({ ...HELLO_VIEW, classification: context.resolution.classification }),
           capabilityManifest: () => undefined,
           commandManifest: () => undefined,
           onPublication: () => () => {},
@@ -278,6 +309,11 @@ async function withTempProfile(run: (profileDirectory: string) => Promise<void>)
   } finally {
     await rm(profileDirectory, { recursive: true, force: true });
   }
+}
+
+/** Profile directory that lives beside the fake executable under test. */
+function profileDirectoryFor(executablePath: string): string {
+  return dirname(executablePath);
 }
 
 async function withTempExecutable(run: (executablePath: string) => Promise<void>): Promise<void> {
@@ -396,6 +432,63 @@ test("a trusted resolution creates the runtime session and bootstraps ready", as
       assert.equal(lock.released, false);
       assert.deepEqual(endpoint.calls, ["endpoint.create"]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Explicitly named limited runtime (Step Studio)
+// ---------------------------------------------------------------------------
+
+test("a custom preference lets a limited runtime earn a session controller", async () => {
+  await withTempExecutable(async (executablePath) => {
+    const platform = fakePlatform(profileDirectoryFor(executablePath));
+    const lock = fakeAuthorityLock();
+    const endpoint = fakePrivateEndpoint();
+    const session = fakeSessionPort({ ready: true });
+    const composition = await createDesktopHostComposition({
+      platform: platform.port,
+      authorityLock: lock.port,
+      privateEndpoint: endpoint.port,
+      runtimeSession: session.port,
+      resolver: { probe: limitedProbe() },
+      preference: { kind: "custom", executable: executablePath, allowLimited: true },
+    });
+
+    assert.equal(composition.status, "ready");
+    assert.equal(session.contexts.length, 1);
+    const context = session.contexts[0];
+    assert.ok(context);
+    assert.equal(context.resolution.classification, "limited-system");
+
+    const bootstrap = await composition.facade.bootstrap();
+    assert.equal(bootstrap.runtime.status, "connected");
+    assert.equal(bootstrap.runtime.classification, "limited-system");
+  });
+});
+
+test("a limited runtime without an explicit preference stays read-only", async () => {
+  await withTempExecutable(async (executablePath) => {
+    const platform = fakePlatform(profileDirectoryFor(executablePath));
+    const lock = fakeAuthorityLock();
+    const endpoint = fakePrivateEndpoint();
+    const session = fakeSessionPort({ ready: true });
+    const composition = await createDesktopHostComposition({
+      platform: platform.port,
+      authorityLock: lock.port,
+      privateEndpoint: endpoint.port,
+      runtimeSession: session.port,
+      resolver: { probe: limitedProbe() },
+      // `system` is a discovery source, not an operator decision: limited
+      // runtimes found this way must not earn a controller.
+      preference: { kind: "system", executable: executablePath, allowLimited: true },
+    });
+
+    assert.equal(composition.status, "read-only");
+    assert.deepEqual(session.contexts, []);
+
+    const bootstrap = await composition.facade.bootstrap();
+    assert.equal(bootstrap.runtime.status, "unavailable");
+    assert.equal(bootstrap.runtime.unavailableCode, "resolution-limited");
   });
 });
 
