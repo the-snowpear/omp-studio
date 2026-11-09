@@ -22,6 +22,8 @@ export const CORE_NODE_SUITES = [
   "packages/studio-host/dist/test/session-delete-service.test.js",
   "packages/host-client-api/dist/test/conversation-open.test.js",
   "packages/host-client-api/dist/test/facade-history.test.js",
+  // Which model catalog the composer sees: the Runtime's, or the config file's.
+  "packages/host-client-api/dist/test/runtime-models.test.js",
   "packages/host-client-api/dist/test/session-delete-command.test.js",
   "apps/desktop/dist/test/runtime-session.test.js",
   // Runtime resolution and the trust gate: which runtime earns a controller,
