@@ -1,0 +1,17 @@
+#!/bin/sh
+# Launcher for the Step Code Studio Bridge adapter.
+#
+# The Host spawns `executablePath --mode studio-host ...` directly, so the
+# adapter needs to *be* an executable rather than a Node script. Keeping the
+# launcher separate means a git checkout works without installing the package.
+set -e
+here=$(dirname "$0")
+while [ -L "$here" ]; do
+  link=$(readlink "$here")
+  case "$link" in
+    /*) here="$link" ;;
+    *) here="$(dirname "$here")/$link" ;;
+  esac
+done
+root=$(CDPATH= cd "$here/.." && pwd)
+exec node "$root/dist/src/main.js" "$@"

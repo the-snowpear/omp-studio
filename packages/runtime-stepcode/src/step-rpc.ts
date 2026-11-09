@@ -107,6 +107,15 @@ export class StepRpc {
     this.#child.once("exit", (code, signal) => handler({ code, signal }));
   }
 
+  /**
+   * A spawn failure (`step` not on PATH, bad interpreter) emits `error` on the
+   * child. Unhandled, that event takes the whole adapter down before it can
+   * answer the Host — so route it through the same exit path.
+   */
+  onSpawnError(handler: (error: Error) => void): void {
+    this.#child.on("error", error => handler(error));
+  }
+
   kill(): void {
     for (const pending of this.#pending.values()) {
       clearTimeout(pending.timer);

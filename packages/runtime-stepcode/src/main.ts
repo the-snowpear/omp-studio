@@ -295,6 +295,12 @@ rpc.onExit(({ code, signal }) => {
   settlePrompt(`step runtime exited (code=${code ?? "null"} signal=${signal ?? "none"})`);
 });
 
+// A CLI that never started must not crash the adapter: the Host would see a
+// dead process instead of a runtime that reported why it could not run.
+rpc.onSpawnError(error => {
+  settlePrompt(`step runtime could not start: ${error.message}`);
+});
+
 /** Step thinking levels, minus Studio's `auto`, which has no Step equivalent. */
 const STEP_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
