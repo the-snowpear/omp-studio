@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OMP Studio - oh-my-pi 的桌面工作台</title>
+    <meta name="description" content="OMP Studio 是 oh-my-pi 的桌面工作台。界面直连类型化 Studio Bridge，不解析 TUI 文本、ANSI 或按键宏。开源，MIT，支持 Windows 与 macOS。" />
+    <meta name="theme-color" content="#0a0a0c" />
+    <link rel="icon" href="../favicon.ico" />
+    <link rel="preload" as="fetch" crossorigin="anonymous" href="../media/still/shot-chat-00592.webp" fetchpriority="high" />
+    <script type="module" crossorigin src="../assets/c-Bftyzd4d.js"></script>
+    <link rel="modulepreload" crossorigin href="../assets/modulepreload-polyfill-P2Xu9kJm.js">
+    <link rel="modulepreload" crossorigin href="../assets/release-BNdNipZP.js">
+    <link rel="stylesheet" crossorigin href="../assets/c-RN1BoMhn.css">
+  </head>
+  <body>
+    <a class="skip" href="#download">跳到下载</a>
+    <header class="nav" id="nav">
+      <a class="brand" href="#top" aria-label="OMP Studio 回到顶部"><span class="brand-pi" data-pi></span><span>OMP Studio</span></a>
+      <nav class="nav-links" aria-label="页面导航">
+        <a href="#resolve-chapters">工作台</a>
+        <a href="#bridge">Bridge</a>
+        <a href="#features">功能</a>
+        <a href="#download">下载</a>
+      </nav>
+      <div class="nav-end">
+        <a class="nav-gh" href="https://github.com/the-snowpear/omp-studio" rel="noopener">GitHub<span id="stars" class="stars"></span></a>
+        <button type="button" class="palette-hint" id="palette-open" aria-haspopup="dialog">命令<kbd id="palette-key">Ctrl K</kbd></button>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="resolve" id="resolve" aria-label="产品总览">
+        <div class="stage" id="stage">
+          <canvas class="stage-gl" id="stage-gl" aria-hidden="true"></canvas>
+          <div class="hero" id="hero">
+            <canvas class="hero-pi" id="pi-gl" aria-hidden="true"></canvas>
+            <h1 class="px hero-title" id="hero-title">别再解析终端了</h1>
+            <p class="hero-sub">OMP Studio 是 oh-my-pi 的桌面工作台。界面直连类型化 Bridge，不读 ANSI，也不模拟按键。</p>
+            <div class="cta">
+              <a class="btn btn-primary" href="#download" data-key="d">下载<kbd>D</kbd></a>
+              <a class="btn" href="https://github.com/the-snowpear/omp-studio" rel="noopener" data-key="g">看源码<kbd>G</kbd></a>
+            </div>
+          </div>
+          <div class="captions" id="resolve-chapters"></div>
+          <div class="rail" id="rail" role="group" aria-label="跳到产品画面"></div>
+        </div>
+      </section>
+
+      <section class="section bridge" id="bridge" aria-labelledby="bridge-title">
+        <div class="wrap">
+          <h2 class="px section-title" id="bridge-title">中间隔着一层类型</h2>
+          <p class="lede">OMP Studio 不读屏幕上的字。Renderer 发类型化请求，Runtime 回带状态的回执，谁都不用猜对方的意思。</p>
+          <ul class="nopes" id="nopes" aria-label="OMP Studio 没有采用的做法">
+            <li><s>解析 TUI 文本</s></li>
+            <li><s>解析 ANSI 序列</s></li>
+            <li><s>模拟按键宏</s></li>
+            <li class="yes">Studio Bridge</li>
+          </ul>
+          <div class="inspector" id="inspector">
+            <ol class="layers" id="layers" aria-label="一条消息经过的层"></ol>
+            <div class="payload box" id="payload-box">
+              <span class="box-title" id="payload-title"></span>
+              <pre class="code" id="payload-code" tabindex="0" aria-live="polite"></pre>
+              <p class="payload-note" id="payload-note"></p>
+              <div class="stepper">
+                <button type="button" class="btn btn-sm" id="step-prev">上一步<kbd>←</kbd></button>
+                <button type="button" class="btn btn-sm" id="step-next">下一步<kbd>→</kbd></button>
+                <button type="button" class="btn btn-sm btn-warn" id="step-kill">拔掉 Runtime<kbd>X</kbd></button>
+              </div>
+            </div>
+          </div>
+          <p class="source-note">字段名取自 <code>packages/client-contract</code> 与 <code>packages/studio-protocol</code>，类型和文档冲突时以类型为准。</p>
+        </div>
+      </section>
+
+      <section class="section features" id="features" aria-labelledby="features-title">
+        <div class="wrap">
+          <h2 class="px section-title" id="features-title">剩下的也在这扇窗里</h2>
+          <div class="tabs">
+            <div class="tablist" id="tablist" role="tablist" aria-label="功能" aria-orientation="vertical"></div>
+            <div class="tabpanel" id="tabpanel" role="tabpanel">
+              <div class="clip">
+                <video id="clip" muted playsinline loop preload="metadata"></video>
+                <canvas id="clip-gl" class="clip-gl" aria-hidden="true"></canvas>
+              </div>
+              <p class="clip-note" id="clip-note"></p>
+            </div>
+          </div>
+          <p class="next-up"><span class="tag">下个版本</span>聊天内浏览器、电脑操作工作区、语音输入和自由浮窗。还没发布，进度看<a href="https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md" rel="noopener">更新日志</a>。</p>
+        </div>
+      </section>
+
+      <section class="section download" id="download" aria-labelledby="download-title">
+        <div class="wrap">
+          <h2 class="px section-title" id="download-title">选一个，回车</h2>
+          <p class="lede" id="download-meta">最新版本 0.1.17，发布于 2026-10-29。MIT 开源。</p>
+          <ul class="picker" id="picker" role="listbox" aria-label="选择安装包" aria-orientation="vertical"></ul>
+          <p class="install-note box" id="install-note"></p>
+          <p class="device-note" id="device-note" hidden></p>
+          <div class="source box">
+            <span class="box-title">从源码运行</span>
+            <pre class="code" id="source-code">git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git
+cd omp-studio
+npm install
+npm run omp:overlay:apply
+npm run preview</pre>
+            <button type="button" class="btn btn-sm copy" id="copy-source">复制命令</button>
+          </div>
+          <p class="after">需要 Node.js 22+。模型与登录沿用 OMP 的 <code>models.yml</code> 和 <code>omp login</code>，本仓库不内置任何供应商密钥。</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="wrap foot-in">
+        <nav aria-label="外部链接" class="foot-links">
+          <a href="https://github.com/the-snowpear/omp-studio" rel="noopener">GitHub</a>
+          <a href="https://github.com/the-snowpear/omp-studio/blob/main/docs/README.md" rel="noopener">文档</a>
+          <a href="https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md" rel="noopener">更新日志</a>
+          <a href="https://github.com/can1357/oh-my-pi" rel="noopener">oh-my-pi</a>
+          <a href="https://linux.do/" rel="noopener">LINUX DO</a>
+        </nav>
+        <p>产品画面来自预览模式，其中的会话、用量和子 Agent 都是演示数据。</p>
+        <p>MIT 许可。Runtime 来自 oh-my-pi（Pi by Mario Zechner，omp by Can Bölük）。</p>
+      </div>
+    </footer>
+
+    <div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="命令面板" hidden>
+      <div class="palette-box box">
+        <label class="sr" for="palette-input">输入命令</label>
+        <input id="palette-input" type="text" autocomplete="off" spellcheck="false" placeholder="跳转、下载、复制..." role="combobox" aria-expanded="true" aria-controls="palette-list" />
+        <ul id="palette-list" role="listbox" aria-label="命令"></ul>
+        <p class="palette-foot">↑↓ 选择，回车执行，Esc 关闭</p>
+      </div>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
