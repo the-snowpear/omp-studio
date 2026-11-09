@@ -86,7 +86,7 @@ STEP_STUDIO_RUNTIME_CMD=/path/to/step npm run demo -- "reply with exactly: PONG"
 | `session.thinking.set` | `set_thinking_level` | `auto` 映射到模型第一个可用等级 |
 | `session.fork` | `fork` | 在当前 leaf 上fork |
 | `session.transcript.read` | `get_entries` | 单页；异代 cursor 返回 `CURSOR_STALE` |
-| `session.models.list` | `get_available_models` | 模型目目录；Host 的 `models.get` 优先用它 |
+| `session.models.list` | `get_available_models` | 模型目录；Host 的 `models.get` 优先用它 |
 | `runtime.shutdown` | — | 结束 CLI 进程 |
 
 manifest 只声明**真正实现**的 capability id，grade 如实标注；没声明的一律按
