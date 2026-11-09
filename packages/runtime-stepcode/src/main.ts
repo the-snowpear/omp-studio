@@ -24,18 +24,33 @@ if (endpoint === undefined || tokenFile === undefined) {
 const token = readFileSync(tokenFile, "utf8").trim();
 const runtimeInstanceId = randomUUID();
 
+// Only ids the adapter actually implements. Anything absent is treated as
+// unavailable by Host and Renderer, which is the honest default: Step Code has
+// no OMP operators, agents, jobs or permissions model to expose.
 const capabilities = [
-  { id: "agent.send", grade: "stable", version: 1, evidence: "runtime-stepcode" },
-  { id: "session.model", grade: "stable", version: 1, evidence: "runtime-stepcode" },
-  { id: "session.thinking", grade: "stable", version: 1, evidence: "runtime-stepcode" },
-  { id: "interaction.approve", grade: "stable", version: 1, evidence: "runtime-stepcode" },
-  { id: "usage.read", grade: "stable", version: 1, evidence: "runtime-stepcode" },
-  { id: "tui.transfer", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
-  { id: "vibe.mode", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
-  { id: "omfg.commit", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
-  { id: "prewalk", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
-  { id: "operator", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
-  { id: "tan", grade: "unavailable", version: 1, evidence: "runtime-stepcode" },
+  { id: "core.prompt", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "core.steer", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "core.followUp", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "core.abort", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "core.stream", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "runtime.snapshot", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "session.state", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "session.history", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  { id: "session.model.set", grade: "stable", version: 1, evidence: "runtime-stepcode" },
+  {
+    id: "session.thinking.set",
+    grade: "limited",
+    version: 1,
+    evidence: "runtime-stepcode",
+    limitations: ["`auto` has no Step equivalent; it maps to the model's first supported level"],
+  },
+  {
+    id: "session.fork",
+    grade: "limited",
+    version: 1,
+    evidence: "runtime-stepcode",
+    limitations: ["forks at the latest entry only; the Studio tree/branch surface is not implemented"],
+  },
 ] as const;
 
 const capabilityManifest = {
@@ -45,7 +60,20 @@ const capabilityManifest = {
   capabilities,
 };
 
-const commandManifestHash = sha256(JSON.stringify(["core.prompt", "core.abort", "runtime.snapshot", "runtime.shutdown"]));
+const commandManifestHash = sha256(
+  JSON.stringify([
+    "core.prompt",
+    "core.steer",
+    "core.followUp",
+    "core.abort",
+    "runtime.snapshot",
+    "runtime.shutdown",
+    "session.model.set",
+    "session.thinking.set",
+    "session.fork",
+    "session.transcript.read",
+  ]),
+);
 
 let stateVersion = 0;
 let activeConnection: BridgeConnection | undefined;
@@ -94,6 +122,18 @@ function emit(event: Record<string, unknown>, advanceState: boolean): void {
 
 function sessionId(): string {
   return String(lastState["sessionId"] ?? "step-session");
+}
+
+/**
+ * A failure that must reach the client under its own protocol code: the Host
+ * maps `CURSOR_STALE` to a resync, `INTERNAL_ERROR` to a plain failure, and
+ * collapsing them loses that distinction.
+ */
+class BridgeFailure extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = "BridgeFailure";
+  }
 }
 
 /** Close the in-flight prompt request with its terminal outcome. */
@@ -229,12 +269,116 @@ const rpc = new StepRpc(
   },
 );
 
+/** Step thinking levels, minus Studio's `auto`, which has no Step equivalent. */
+const STEP_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+/** Refresh the cached state so snapshots and events carry the new session id. */
+async function refreshState(): Promise<void> {
+  try {
+    lastState = await rpc.request("get_state");
+  } catch {
+    // A CLI that cannot answer get_state keeps its last known state.
+  }
+}
+
+/**
+ * `provider/id` selector, resolved against the live catalog when the provider
+ * is omitted — the Composer sends whichever form the picker handed it.
+ */
+async function resolveModelSelector(selector: string): Promise<{ provider: string; modelId: string }> {
+  const slash = selector.indexOf("/");
+  if (slash > 0) return { provider: selector.slice(0, slash), modelId: selector.slice(slash + 1) };
+  const catalog = await rpc.request("get_available_models");
+  const models = Array.isArray(catalog["models"]) ? (catalog["models"] as Array<Record<string, unknown>>) : [];
+  const match = models.find(model => model["id"] === selector);
+  if (match === undefined) throw new Error(`model not found: ${selector}`);
+  return { provider: String(match["provider"] ?? ""), modelId: String(match["id"] ?? selector) };
+}
+
+async function setSessionModel(selector: string, thinking: unknown): Promise<void> {
+  const { provider, modelId } = await resolveModelSelector(selector);
+  await rpc.request("set_model", { provider, modelId });
+  // `thinking` pins a level alongside the switch; omitted keeps the target
+  // model's own default.
+  if (typeof thinking === "string") await setThinkingLevel(thinking);
+  await refreshState();
+}
+
+async function setThinkingLevel(level: string): Promise<void> {
+  if (!STEP_THINKING_LEVELS.has(level)) {
+    if (level !== "auto") throw new Error(`unsupported thinking level: ${level}`);
+    // `auto` has no Step equivalent: take the model's first supported level.
+    const catalog = await rpc.request("get_available_thinking_levels");
+    const levels = Array.isArray(catalog["levels"]) ? (catalog["levels"] as string[]) : [];
+    if (levels.length === 0) throw new Error("model reports no thinking levels");
+    await rpc.request("set_thinking_level", { level: levels[0] });
+    await refreshState();
+    return;
+  }
+  await rpc.request("set_thinking_level", { level });
+  await refreshState();
+}
+
+/** Fork at the current leaf; the Studio tree surface is not implemented. */
+async function forkSession(): Promise<void> {
+  const entries = await rpc.request("get_entries");
+  const leafId = entries["leafId"];
+  if (typeof leafId !== "string" || leafId === "") throw new Error("session has no entry to fork from");
+  await rpc.request("fork", { entryId: leafId });
+  await refreshState();
+}
+
+/**
+ * One page of the active branch. Step exposes no pagination cursor, so the
+ * head cursor is a generation token and any other cursor is stale.
+ */
+async function readTranscript(cursor: unknown, limit: unknown): Promise<Record<string, unknown>> {
+  const entries = await rpc.request("get_entries");
+  const list = Array.isArray(entries["entries"]) ? (entries["entries"] as Array<Record<string, unknown>>) : [];
+  const leafId = typeof entries["leafId"] === "string" ? (entries["leafId"] as string) : null;
+  const headCursor = `step-1:${String(leafId ?? "empty")}`;
+  if (typeof cursor === "string" && cursor !== "" && cursor !== headCursor) {
+    throw new BridgeFailure("CURSOR_STALE", "transcript cursor does not match the active session");
+  }
+  const max = typeof limit === "number" && limit > 0 ? limit : list.length;
+  const items: Array<Record<string, unknown>> = [];
+  for (const entry of list.slice(Math.max(0, list.length - max))) {
+    // The conversation contract ignores model/thinking changes, custom
+    // entries, labels and branch summaries.
+    if (entry["type"] !== "message") continue;
+    const message = entry["message"] as Record<string, unknown> | undefined;
+    const role = String(message?.["role"] ?? "");
+    if (role !== "user" && role !== "assistant") continue;
+    const itemId = String(entry["id"] ?? "");
+    items.push({
+      kind: "message",
+      itemId,
+      parentId: typeof entry["parentId"] === "string" ? entry["parentId"] : null,
+      createdAt: new Date(Number(entry["timestamp"] ?? Date.now())).toISOString(),
+      role,
+      content: toStudioBlocks(message?.["content"]),
+    });
+  }
+  return {
+    runtimeEpoch,
+    sessionId: sessionId(),
+    branchLeafId: leafId,
+    items,
+    headCursor,
+    hasMoreBefore: false,
+  };
+}
+
 async function buildSnapshot(): Promise<Record<string, unknown>> {
   try {
     lastState = await rpc.request("get_state");
   } catch {
     // A CLI that cannot answer get_state still gets a minimal snapshot.
   }
+  const model = lastState["model"] as Record<string, unknown> | undefined;
+  const provider = typeof model?.["provider"] === "string" ? (model["provider"] as string) : undefined;
+  const modelId = typeof model?.["id"] === "string" ? (model["id"] as string) : undefined;
+  const thinkingLevel = typeof lastState["thinkingLevel"] === "string" ? (lastState["thinkingLevel"] as string) : undefined;
   return {
     runtimeId: runtimeInstanceId,
     runtimeEpoch,
@@ -244,6 +388,17 @@ async function buildSnapshot(): Promise<Record<string, unknown>> {
     isCompacting: Boolean(lastState["isCompacting"] ?? false),
     activeMode: "normal",
     approvalMode: "always-ask",
+    ...(provider !== undefined && modelId !== undefined
+      ? {
+          model: {
+            selector: `${provider}/${modelId}`,
+            provider,
+            id: modelId,
+            ...(thinkingLevel === undefined ? {} : { thinking: thinkingLevel }),
+            ...(thinkingLevel === undefined ? {} : { configuredThinking: thinkingLevel }),
+          },
+        }
+      : {}),
     pendingMessages: Number(lastState["pendingMessageCount"] ?? 0),
     activeCommandIds: [],
     agentsRevision: 0,
@@ -292,6 +447,49 @@ const server = createServer(socket => {
         if (pendingPromptId === requestId) pendingPromptId = undefined;
         connection.failedReceipt(requestId, String(error));
       });
+      return;
+    }
+
+    if (operation["kind"] === "core.steer" || operation["kind"] === "core.followUp") {
+      const type = operation["kind"] === "core.steer" ? "steer" : "follow_up";
+      // Queueing is synchronous upstream, so this answers `completed` — only
+      // `core.prompt` stays `accepted`, because its turn outlives the reply.
+      rpc.request(type, { message: String(operation["text"] ?? "") }).then(
+        () => connection.receipt(requestId, "completed", { queued: true }),
+        error => connection.failedReceipt(requestId, String(error)),
+      );
+      return;
+    }
+
+    if (operation["kind"] === "session.model.set") {
+      void setSessionModel(String(operation["selector"] ?? ""), operation["thinking"]).then(
+        () => connection.receipt(requestId, "completed", { ok: true }),
+        error => connection.failedReceipt(requestId, String(error), error instanceof BridgeFailure ? error.code : undefined),
+      );
+      return;
+    }
+
+    if (operation["kind"] === "session.thinking.set") {
+      void setThinkingLevel(String(operation["level"] ?? "")).then(
+        () => connection.receipt(requestId, "completed", { ok: true }),
+        error => connection.failedReceipt(requestId, String(error), error instanceof BridgeFailure ? error.code : undefined),
+      );
+      return;
+    }
+
+    if (operation["kind"] === "session.fork") {
+      void forkSession().then(
+        () => connection.receipt(requestId, "completed", { ok: true }),
+        error => connection.failedReceipt(requestId, String(error), error instanceof BridgeFailure ? error.code : undefined),
+      );
+      return;
+    }
+
+    if (operation["kind"] === "session.transcript.read") {
+      void readTranscript(operation["cursor"], operation["limit"]).then(
+        page => connection.receipt(requestId, "completed", page),
+        error => connection.failedReceipt(requestId, String(error), error instanceof BridgeFailure ? error.code : undefined),
+      );
       return;
     }
 

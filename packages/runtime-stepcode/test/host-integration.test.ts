@@ -3,18 +3,25 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseConversationRuntimeEvent } from "@omp-studio/studio-protocol";
 
-// Type-only path resolves from this source file; the runtime path resolves
-// from the package working directory so the compiled dist/test layout works.
+// Type-only path resolves from this source file. The runtime path resolves
+// relative to the compiled test, so the suite behaves the same under
+// `npm test` in this package and under the repo-wide gate from the root.
 type BridgeClientModule = typeof import("../../studio-host/dist/src/bridge-client.js");
-const { StudioBridgeClient } = (await import(
-  pathToFileURL(resolve(process.cwd(), "../studio-host/dist/src/bridge-client.js")).href
-)) as BridgeClientModule;
+const studioHostClient = () => {
+  const candidates = [
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../../studio-host/dist/src/bridge-client.js"),
+    resolve(process.cwd(), "../studio-host/dist/src/bridge-client.js"),
+  ];
+  const found = candidates.find(candidate => existsSync(candidate));
+  if (found === undefined) throw new Error("studio-host is not built; run the workspace build first");
+  return pathToFileURL(found).href;
+};
+const { StudioBridgeClient } = (await import(studioHostClient())) as BridgeClientModule;
 
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
@@ -59,13 +66,15 @@ test("real studio-host client negotiates and streams a prompt", async () => {
     const client = new StudioBridgeClient({
       endpoint: socketPath,
       token,
+      // A missing receipt fails here instead of hanging the runner.
+      requestTimeoutMs: 8000,
       onEvent: event => events.push(event),
     });
 
     const hello = await client.connect();
     assert.equal(hello.capabilityManifest.profile, "limited");
 
-    await client.requestSnapshot();
+    const snapshot = await client.requestSnapshot();
 
     const receipt = await client.invoke({
       type: "studio.request",
@@ -95,6 +104,68 @@ test("real studio-host client negotiates and streams a prompt", async () => {
       }
     }
     assert.equal(started.length, 2, "expected user and assistant messages");
+
+    // A bare id resolves through the catalog; the snapshot then reports the
+    // model the CLI actually switched to.
+    await client.invoke({
+      type: "studio.request",
+      requestId: randomUUID(),
+      runtimeEpoch: hello.runtimeEpoch,
+      operation: { kind: "session.model.set", selector: "zed/claude-haiku-5-5" },
+    });
+    const afterModel = await client.requestSnapshot();
+    assert.equal(afterModel.snapshot.sessionId, snapshot.snapshot.sessionId);
+    assert.equal(afterModel.snapshot.model?.selector, "local-gateway/zed/claude-haiku-5-5");
+
+    await client.invoke({
+      type: "studio.request",
+      requestId: randomUUID(),
+      runtimeEpoch: hello.runtimeEpoch,
+      operation: { kind: "session.thinking.set", level: "high" },
+    });
+    const afterThinking = await client.requestSnapshot();
+    assert.equal(afterThinking.snapshot.model?.configuredThinking, "high");
+    assert.equal(afterThinking.snapshot.model?.thinking, "high");
+
+    await client.invoke({
+      type: "studio.request",
+      requestId: randomUUID(),
+      runtimeEpoch: hello.runtimeEpoch,
+      operation: { kind: "session.fork" },
+    });
+    await client.invoke({
+      type: "studio.request",
+      requestId: randomUUID(),
+      runtimeEpoch: hello.runtimeEpoch,
+      operation: { kind: "core.steer", text: "keep going" },
+    });
+
+    // The transcript page carries the turn that just ran, and a cursor from
+    // another generation is refused instead of silently returning a page.
+    const page = await client.invoke({
+      type: "studio.request",
+      requestId: randomUUID(),
+      runtimeEpoch: hello.runtimeEpoch,
+      operation: { kind: "session.transcript.read" },
+    });
+    const items = (page.result as { items: Array<{ kind: string; itemId: string; role: string }> }).items;
+    assert.deepEqual(
+      items.map(item => `${item.kind}:${item.role}`),
+      ["message:user", "message:assistant"],
+    );
+    assert.equal(items[1]?.itemId, items[1]?.itemId);
+    assert.ok(items.every(item => item.itemId.length > 0), "every item carries an entry id");
+
+    // A cursor from another generation is refused under its own code: the Host
+    // turns CURSOR_STALE into a resync, which a generic failure would not.
+    const stale = await client.invoke({
+      type: "studio.request",
+      requestId: randomUUID(),
+      runtimeEpoch: hello.runtimeEpoch,
+      operation: { kind: "session.transcript.read", cursor: "step-1:someone-elses-leaf" },
+    });
+    assert.equal(stale.status, "failed");
+    assert.equal(stale.error?.code, "CURSOR_STALE");
 
     client.disconnect();
   } finally {

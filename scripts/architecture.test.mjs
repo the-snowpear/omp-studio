@@ -12,6 +12,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const scopes = ["@omp-studio/", "@step-studio/"];
 const scope = "@omp-studio/";
 const builtins = new Set(builtinModules.map(name => name.replace(/^node:/, "")));
 
@@ -29,6 +30,8 @@ const ALLOWED_INTERNAL_DEPS = {
   "runtime-installer": ["studio-protocol"],
   "studio-host": ["runtime-installer", "studio-protocol"],
   "host-client-api": ["client-contract", "studio-host", "studio-protocol"],
+  // Step Code's Studio Bridge adapter: protocol only, never the Host or client.
+  "runtime-stepcode": ["studio-protocol"],
 };
 
 function readUnits() {
@@ -41,7 +44,8 @@ function readUnits() {
       const manifest = join(dir, "package.json");
       if (!existsSync(manifest)) continue;
       const pkg = JSON.parse(readFileSync(manifest, "utf8"));
-      if (!pkg.name?.startsWith(scope)) continue;
+      const scope = scopes.find(prefix => pkg.name?.startsWith(prefix));
+      if (scope === undefined) continue;
       const declared = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
       found.push({
         key: pkg.name.slice(scope.length),

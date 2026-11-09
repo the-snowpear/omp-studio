@@ -52,7 +52,7 @@ export class BridgeConnection {
     });
   }
 
-  failedReceipt(requestId: string, message: string): void {
+  failedReceipt(requestId: string, message: string, code = "INTERNAL_ERROR"): void {
     this.send({
       type: "studio.receipt",
       requestId,
@@ -60,7 +60,7 @@ export class BridgeConnection {
       runtimeEpoch: this.runtimeEpoch,
       stateVersion: 0,
       status: "failed",
-      error: { code: "INTERNAL_ERROR", message, retryable: false },
+      error: { code, message, retryable: false },
     });
   }
 

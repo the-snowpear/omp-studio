@@ -14,7 +14,8 @@
 // Groups: arch, selects, types, packages, renderer, production
 // Units:  studio-protocol, client, client-contract, studio-host, host-client-api,
 //         transport-desktop, transport-web, runtime-installer, platform,
-//         platform-win32, platform-darwin, testkit, desktop, renderer
+//         platform-win32, platform-darwin, testkit, desktop, renderer,
+//         runtime-stepcode
 //
 // A failing step prints only the tail of its output. The full log stays in the
 // terminal scrollback, which keeps a 20-line type error readable.
@@ -26,7 +27,8 @@ import { fileURLToPath } from "node:url";
 import { CORE_NODE_SUITES, CORE_RENDERER_SUITES } from "./core-suites.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const scope = "@omp-studio/";
+// The fork adds its own scope for Step-specific packages; both are workspace-local.
+const scopes = ["@omp-studio/", "@step-studio/"];
 const tscBin = join(root, "node_modules", "typescript", "bin", "tsc");
 const vitestBin = join(root, "node_modules", "vitest", "vitest.mjs");
 const viteBin = join(root, "node_modules", "vite", "bin", "vite.js");
@@ -45,7 +47,8 @@ function readUnits() {
       const manifest = join(root, dir, "package.json");
       if (!existsSync(manifest)) continue;
       const pkg = JSON.parse(readFileSync(manifest, "utf8"));
-      if (!pkg.name?.startsWith(scope)) continue;
+      const scope = scopes.find(prefix => pkg.name?.startsWith(prefix));
+      if (scope === undefined) continue;
       const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })
         .filter(dep => dep.startsWith(scope))
         .map(dep => dep.slice(scope.length));
