@@ -38,6 +38,12 @@ async function until(condition, description) {
   assert.fail(description);
 }
 let manager, main, server;
+const pageEvents = [];
+const observePage = (pageId, contents) => {
+  for (const event of ["did-start-loading", "did-stop-loading", "dom-ready", "did-finish-load", "render-process-gone", "destroyed"]) {
+    contents.on(event, () => { pageEvents.push({ at: Date.now(), pageId, event }); if (pageEvents.length > 100) pageEvents.shift(); });
+  }
+};
 async function run() {
   await app.whenReady();
   server = createServer((request, response) => {
@@ -53,16 +59,21 @@ async function run() {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const url = `http://127.0.0.1:${server.address().port}`;
   main = new BrowserWindow({ show: false, width: 800, height: 600, webPreferences: { sandbox: true, contextIsolation: true } });
-  await main.loadURL("about:blank"); main.showInactive();
+  await main.loadURL("about:blank"); main.show(); main.focus();
   const { DesktopManagedBrowser } = await import("../apps/desktop/dist/src/managed-browser.js");
   manager = new DesktopManagedBrowser({ directory: path.join(temporary, "browser"), downloadsDirectory: path.join(temporary, "downloads"), windowFor: () => main });
   const page = await manager.create("activity", url, "human");
   const contents = manager.contents(page.id), identity = contents.id;
+  observePage(page.id, contents);
   await until(() => manager.store.page(page.id).status === "ready", "Fixture did not load");
   const presentation = { sessionId: "activity", surfaceId: "native-activity", pageId: page.id, visible: true, bounds: { x: 0, y: 0, width: 700, height: 500 }, clip: { x: 0, y: 0, width: 700, height: 500 } };
   await manager.present(presentation);
+  // Establish an actual compositor frame before timing visible vs parked work.
+  // On Windows a newly shown native view can still have no display surface.
+  assert.equal((await manager.capture(page.id)).isEmpty(), false);
   await contents.executeJavaScript("draft.value='retained';window.retained={value:42}");
   const sample = () => contents.executeJavaScript("({frames:window.frameCount,ticks:window.ticks})");
+  await until(async () => (await sample()).frames > 0, "The foreground fixture did not paint");
   const before = await sample(); await delay(1200); const active = await sample();
   assert.ok(active.frames > before.frames);
   await manager.present({ ...presentation, visible: false });
@@ -117,6 +128,7 @@ async function run() {
       if (cycle % 4 === 1) assert.equal((await manager.capture(page.id)).isEmpty(), false);
       if (cycle % 4 === 2) {
         const extra = await manager.create("activity", url, "human");
+        observePage(extra.id, manager.contents(extra.id));
         await until(() => manager.store.page(extra.id).status === "ready", "Soak page did not load");
         await manager.close("activity", extra.id);
       }
@@ -132,7 +144,16 @@ async function run() {
   assert.equal(manager.contents(page.id), undefined);
   report.status = "passed";
 }
-run().catch(error => { report.status = "failed"; report.failure = error.stack; console.error(error); }).finally(async () => {
+run().catch(async error => {
+  report.status = "failed"; report.failure = error.stack;
+  report.pageEvents = pageEvents;
+  report.pages = manager?.pages("activity").map(page => {
+    const contents = manager.contents(page.id);
+    return { id: page.id, status: page.status, error: page.error, loading: contents?.isLoading(), loadingMain: contents?.isLoadingMainFrame(), throttled: contents?.getBackgroundThrottling(), url: contents?.getURL(), destroyed: contents?.isDestroyed() };
+  });
+  report.freeMemoryBytesAtFailure = os.freemem();
+  console.error(error); console.error(JSON.stringify(report.pages));
+}).finally(async () => {
   try { await manager?.dispose(); } finally {
     if (main && !main.isDestroyed()) main.destroy();
     server?.closeAllConnections(); server?.close();
