@@ -114,7 +114,14 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
             command: native_runtime_command(&repo_root),
         };
 
-        trace(&format!("launching adapter at {}", launch.adapter_script));
+        // Name what actually runs: `command` wins over the Node script, and the
+        // script path alone reads as if the native binary were ignored.
+        let launched = if launch.command.is_empty() {
+            format!("node {}", launch.adapter_script)
+        } else {
+            launch.command.join(" ")
+        };
+        trace(&format!("launching adapter: {launched}"));
         let session = match BridgeSession::connect(&launch) {
             Ok(session) => Arc::new(session),
             Err(error) => {

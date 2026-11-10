@@ -53,6 +53,11 @@ pub struct App {
     /// stops calling `update` once nothing asks for a repaint, which would
     /// strand every event that arrives after the app goes idle.
     busy: bool,
+    /// The resumed history has not arrived yet, so a prompt sent now would be
+    /// wiped when it does.
+    restored: bool,
+    /// A prompt that arrived before the history; sent once it is in place.
+    pending_prompt: Option<String>,
     to_bridge: Option<std::sync::mpsc::Sender<Command>>,
     from_bridge: Option<Receiver<Event>>,
 }
@@ -72,6 +77,8 @@ impl App {
             // transcript all land after the first frame, and the loop has to
             // stay awake long enough to read them.
             busy: true,
+            restored: false,
+            pending_prompt: None,
             status: Status::Connecting,
             status_detail: "starting runtime".to_string(),
             session_id: String::new(),
@@ -214,7 +221,13 @@ impl App {
             }
             Event::Transcript { items } => {
                 self.busy = false;
+                self.restored = true;
                 self.restore(&items);
+                // A prompt that arrived while the history was still loading
+                // belongs after it, not under it.
+                if let Some(text) = self.pending_prompt.take() {
+                    self.push_turn(text);
+                }
             }
             Event::NewSession { session_id } => {
                 self.busy = false;
@@ -256,6 +269,15 @@ impl App {
         if text.trim().is_empty() {
             return;
         }
+        if !self.restored {
+            self.pending_prompt = Some(text);
+            return;
+        }
+        self.push_turn(text);
+    }
+
+    /// Open a turn and hand it to the runtime.
+    fn push_turn(&mut self, text: String) {
         self.busy = true;
         self.turns.push(Turn {
             user: text.clone(),
@@ -311,6 +333,14 @@ fn block_text(blocks: Option<&Vec<serde_json::Value>>, kind: &str) -> String {
         .collect()
 }
 
+/// State without a bridge thread, before the resumed history has landed.
+pub fn app_loading() -> App {
+    App {
+        restored: false,
+        ..app_for_test()
+    }
+}
+
 /// State without a bridge thread, for reducer tests.
 pub fn app_for_test() -> App {
     App {
@@ -323,6 +353,8 @@ pub fn app_for_test() -> App {
         composer: String::new(),
         show_thinking: true,
         busy: false,
+        restored: true,
+        pending_prompt: None,
         to_bridge: None,
         from_bridge: None,
     }

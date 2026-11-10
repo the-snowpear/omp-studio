@@ -227,6 +227,29 @@ fn restoring_replaces_what_was_already_there() {
     assert!(app.turns[0].assistant.text.is_empty());
 }
 
+/// A prompt sent before the history arrives would be wiped by the restore that
+/// follows, so it has to wait. `--prompt` fires before the first frame, which is
+/// exactly that window.
+#[test]
+fn a_prompt_sent_before_the_history_waits_for_it() {
+    let mut app = step_studio_shell::app::app_loading();
+    app.apply(Event::Ready {
+        session_id: "s".to_string(),
+        model: None,
+    });
+    app.send("asked too early".to_string());
+    assert!(app.turns.is_empty(), "the restore has not run yet, so nothing may show");
+
+    app.apply(Event::Transcript {
+        items: vec![serde_json::json!({ "role": "user", "content": [{ "type": "text", "text": "from the session" }] })],
+    });
+
+    assert_eq!(app.turns.len(), 2, "the history, then the held prompt");
+    assert_eq!(app.turns[0].user, "from the session");
+    assert_eq!(app.turns[1].user, "asked too early");
+    assert_eq!(app.turns[1].assistant.text, "");
+}
+
 #[test]
 fn an_empty_prompt_is_not_sent() {
     let mut app = app_without_runtime();
