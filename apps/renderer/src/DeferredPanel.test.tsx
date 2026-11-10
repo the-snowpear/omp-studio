@@ -26,3 +26,17 @@ it("allows a failed chunk load to retry without reloading the workbench", async 
     expect(load).toHaveBeenCalledTimes(2);
   } finally { log.mockRestore(); }
 });
+it("shares an in-flight module across instances and renders as soon as it resolves", async () => {
+  let resolve!: (module: { default: () => React.ReactNode }) => void;
+  const load = vi.fn(() => new Promise<{ default: () => React.ReactNode }>(done => { resolve = done; }));
+  const Panel = lazyPanel(load);
+  const first = render(<Panel />);
+  render(<Panel />);
+  expect(load).toHaveBeenCalledOnce();
+  first.unmount();
+  await act(async () => { resolve({ default: () => <span>Shared module</span> }); });
+  expect(screen.getByText("Shared module")).toBeTruthy();
+  render(<Panel />);
+  expect(screen.getAllByText("Shared module")).toHaveLength(2);
+  expect(load).toHaveBeenCalledOnce();
+});

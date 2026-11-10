@@ -1,4 +1,4 @@
-import { Component, Suspense, lazy, useState, type ComponentProps, type ComponentType, type ReactNode } from "react";
+import { Component, Suspense, useEffect, useState, type ComponentProps, type ComponentType, type ReactNode } from "react";
 import { useI18n } from "./i18n";
 import { reportWorkbenchFailure } from "./WorkbenchHealth";
 
@@ -18,13 +18,31 @@ export function DeferredPanel({ children }: { children: ReactNode }) {
 }
 
 export function lazyPanel<T extends ComponentType<any>>(load: () => Promise<{ default: T }>) {
-  const initial = lazy(load);
+  let loaded: T | undefined;
+  let pending: Promise<T> | undefined;
+  const resolve = () => pending ??= load().then(module => {
+    loaded = module.default;
+    return loaded;
+  }).finally(() => { pending = undefined; });
   return function LazyPanel(props: ComponentProps<T>) {
     const [generation, setGeneration] = useState(0);
-    const [Panel, setPanel] = useState(() => initial);
+    const [Panel, setPanel] = useState<T | undefined>(() => loaded);
+    const [failed, setFailed] = useState(false);
     const { resolvedLanguage } = useI18n();
-    const retry = () => { setPanel(() => lazy(load)); setGeneration(value => value + 1); };
-    return <PanelError key={generation} failed={<div className="empty" role="alert"><p>{resolvedLanguage === "zh" ? "面板加载失败，工作台和草稿仍保留。" : "The panel could not load. Your workbench and draft remain open."}</p><button type="button" className="btn" onClick={retry}>{resolvedLanguage === "zh" ? "重试" : "Retry"}</button></div>}><Panel {...props} /></PanelError>;
+    useEffect(() => {
+      if (loaded) { setPanel(() => loaded); return; }
+      let mounted = true;
+      // A local state update shows a resolved chunk immediately; throwing its
+      // promise into Suspense adds React's fallback retry delay to first open.
+      void resolve().then(component => { if (mounted) setPanel(() => component); }, () => {
+        if (mounted) { reportWorkbenchFailure(); setFailed(true); }
+      });
+      return () => { mounted = false; };
+    }, [generation]);
+    const retry = () => { setFailed(false); setGeneration(value => value + 1); };
+    const failure = <div className="empty" role="alert"><p>{resolvedLanguage === "zh" ? "面板加载失败，工作台和草稿仍保留。" : "The panel could not load. Your workbench and draft remain open."}</p><button type="button" className="btn" onClick={retry}>{resolvedLanguage === "zh" ? "重试" : "Retry"}</button></div>;
+    if (failed) return failure;
+    return <PanelError key={generation} failed={failure}>{Panel ? <Panel {...props} /> : <div className="empty" role="status"><span className="spinner" /><p>{resolvedLanguage === "zh" ? "正在加载面板…" : "Loading panel…"}</p></div>}</PanelError>;
   };
 }
 
