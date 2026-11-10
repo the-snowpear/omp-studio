@@ -181,7 +181,7 @@ export class DesktopManagedBrowser {
     this.#windowStops.set(window, stop);
   }
   #newPage(page: ManagedBrowserPage, options?: Electron.WebContentsViewConstructorOptions): LivePage {
-    const webPreferences = { ...options?.webPreferences, session: this.#space(page.spaceId), sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInSubFrames: false, webSecurity: true, allowRunningInsecureContent: false, webviewTag: false, backgroundThrottling: true };
+    const webPreferences = { ...options?.webPreferences, session: this.#space(page.spaceId), sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInSubFrames: false, webSecurity: true, allowRunningInsecureContent: false, webviewTag: false, backgroundThrottling: false };
     delete webPreferences.preload;
     const view = new WebContentsView({ ...options, webPreferences });
     const clip = new View();
@@ -192,6 +192,9 @@ export class DesktopManagedBrowser {
     const focusEmulation = new Set<string>();
     const activity = new BrowserPageActivity(throttled => {
       const contents = view.webContents;
+      // A new page already starts awake. Capturing its initial empty document can
+      // compete with the first navigation; only real state transitions need it.
+      if (contents.getBackgroundThrottling() === throttled) return;
       // Chromium keeps the old visibility after changing throttling on a parked view.
       // A capture reapplies visibility without navigating or replacing the live page.
       const refreshVisibility = () => { void contents.capturePage(undefined, { stayHidden: throttled }).catch(error => {
