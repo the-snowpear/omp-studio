@@ -39,11 +39,9 @@ fn main() -> eframe::Result {
     let mut step_command = std::env::var("STEP_STUDIO_STEP_CMD")
         .or_else(|_| std::env::var("STEP_STUDIO_RUNTIME_CMD"))
         .unwrap_or_else(|_| find_step_cli());
-    let mut repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("repo root")
-        .to_path_buf();
+    // The project the agent works in. Defaults to where the shell was started:
+    // a build-time path is meaningless once the binary is copied somewhere else.
+    let mut repo_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {

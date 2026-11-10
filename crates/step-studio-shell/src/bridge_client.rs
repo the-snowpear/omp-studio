@@ -72,10 +72,21 @@ pub struct ModelRecord {
 }
 
 /// The native runtime binary, or an empty command to fall back to Node.
+///
+/// Next to the shell first: that is where a packaged pair sits, and where
+/// `cargo build` puts both. The `target/` lookup is for a shell run against a
+/// checkout it does not live in.
 fn native_runtime_command(repo_root: &std::path::Path) -> Vec<String> {
-    for profile in ["release", "debug"] {
-        let candidate = repo_root.join(format!("target/{profile}/step-studio-runtime"));
-        if candidate.exists() {
+    let beside_exe = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("step-studio-runtime")));
+    let candidates = beside_exe
+        .into_iter()
+        .chain(["release", "debug"].map(|profile| {
+            repo_root.join(format!("target/{profile}/step-studio-runtime"))
+        }));
+    for candidate in candidates {
+        if candidate.is_file() {
             return vec![candidate.to_string_lossy().to_string()];
         }
     }
@@ -89,6 +100,15 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
     let (to_ui, from_bridge) = std::sync::mpsc::channel::<Event>();
 
     thread::spawn(move || {
+        // A path that does not exist is a configuration mistake, and the adapter
+        // would only report it as a closed socket after the handshake. Say what
+        // is wrong while the shell can still show it.
+        if step_command.contains('/') && !std::path::Path::new(&step_command).is_file() {
+            let _ = to_ui.send(Event::Disconnected(format!(
+                "Step CLI not found at {step_command}; install it or pass --step-cmd"
+            )));
+            return;
+        }
         let session_dir = cwd.join(".step-studio");
         let _ = std::fs::create_dir_all(&session_dir);
         let launch = AdapterLaunch {

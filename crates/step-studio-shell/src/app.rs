@@ -287,6 +287,11 @@ impl App {
             }
             Event::Disconnected(detail) => {
                 self.busy = false;
+                // Nothing will ever arrive to release a held prompt, and the
+                // bridge thread is gone, so the app must stop waiting for a
+                // history that is not coming.
+                self.restored = true;
+                self.pending_prompt = None;
                 self.status = Status::Failed;
                 self.status_detail = detail;
             }
@@ -311,8 +316,21 @@ impl App {
             user: text.clone(),
             assistant: AssistantTurn::default(),
         });
-        if let Some(sender) = self.to_bridge.as_ref() {
-            let _ = sender.send(Command::Prompt(text));
+        // A dead bridge must not leave a turn that streams forever: the frame
+        // loop would keep it alive with nothing coming.
+        let sent = self
+            .to_bridge
+            .as_ref()
+            .map(|sender| sender.send(Command::Prompt(text)).is_ok())
+            .unwrap_or(false);
+        if !sent {
+            if let Some(turn) = self.turns.last_mut() {
+                turn.assistant.done = true;
+                turn.assistant.error = Some("the runtime connection is gone".to_string());
+            }
+            self.busy = false;
+            self.status = Status::Failed;
+            self.status_detail = "the runtime connection is gone".to_string();
         }
     }
 
@@ -370,7 +388,14 @@ pub fn app_loading() -> App {
 }
 
 /// State without a bridge thread, for reducer tests.
+///
+/// The command channel is real but has no reader: `send` must succeed, or every
+/// reducer test would exercise the dead-bridge path instead of the turn it means
+/// to describe.
 pub fn app_for_test() -> App {
+    let (to_bridge, receiver) = std::sync::mpsc::channel();
+    // Kept alive for the process, so the channel never reads as disconnected.
+    std::mem::forget(receiver);
     App {
         status: Status::Connecting,
         status_detail: String::new(),
@@ -383,7 +408,7 @@ pub fn app_for_test() -> App {
         busy: false,
         restored: true,
         pending_prompt: None,
-        to_bridge: None,
+        to_bridge: Some(to_bridge),
         from_bridge: None,
     }
 }
@@ -402,5 +427,34 @@ impl eframe::App for App {
         self.render_chrome(ctx);
         self.render_conversation(ctx);
         self.render_composer(ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The bridge thread is gone. A turn must fail at once: leaving it
+    /// "streaming" would keep the frame loop alive forever with nothing coming,
+    /// and the Stop button would talk to a channel nobody reads.
+    #[test]
+    fn a_send_with_no_bridge_fails_the_turn_instead_of_streaming_forever() {
+        let (to_bridge, receiver) = std::sync::mpsc::channel();
+        drop(receiver);
+        let mut app = App {
+            to_bridge: Some(to_bridge),
+            ..app_for_test()
+        };
+
+        app.send("hello".to_string());
+
+        let turn = &app.turns[0];
+        assert!(turn.assistant.done, "the turn must not stay open");
+        assert_eq!(
+            turn.assistant.error.as_deref(),
+            Some("the runtime connection is gone")
+        );
+        assert_eq!(app.status, Status::Failed);
+        assert!(!app.streaming());
     }
 }

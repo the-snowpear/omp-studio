@@ -295,6 +295,23 @@ fn a_prompt_sent_before_the_history_waits_for_it() {
     assert_eq!(app.turns[1].assistant.text, "");
 }
 
+/// If the connection never comes up, nothing will deliver the history a held
+/// prompt is waiting for. Holding it forever would swallow what the user typed.
+#[test]
+fn a_disconnect_releases_a_prompt_held_for_the_history() {
+    let mut app = step_studio_shell::app::app_loading();
+    app.send("typed before the runtime died".to_string());
+    assert!(app.turns.is_empty());
+
+    app.apply(Event::Disconnected("Step CLI not found at /nope".to_string()));
+
+    assert_eq!(app.status, step_studio_shell::app::Status::Failed);
+    // The app is usable again: the next prompt is attempted rather than held.
+    app.send("second".to_string());
+    assert_eq!(app.turns.len(), 1);
+    assert_eq!(app.turns[0].user, "second");
+}
+
 #[test]
 fn an_empty_prompt_is_not_sent() {
     let mut app = app_without_runtime();
