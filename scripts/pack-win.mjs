@@ -136,7 +136,7 @@ async function main() {
   console.log("[pack:win] electron-builder NSIS...");
   run(
     process.execPath,
-    [electronBuilderCli, "--config", "packaging/electron-builder.yml", `--config.directories.output=${outputDirectory}`, "--win", "nsis", `--${targetArch}`, "--publish", "never"],
+    [electronBuilderCli, "--config", "packaging/electron-builder-win.cjs", `--config.directories.output=${outputDirectory}`, "--win", "nsis", `--${targetArch}`, "--publish", "never"],
     { env },
   );
 

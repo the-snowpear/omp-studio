@@ -37,6 +37,7 @@ Windows 安装器使用 WebView2 显示 720 × 480 的四步向导，NSIS 负责
 | 文件 | 职责 |
 |---|---|
 | `electron-builder.yml` | 打包布局、当前用户模式、NSIS 配置 |
+| `electron-builder-win.cjs` | 从同一份 YAML 派生 Windows 文件清单，再排除非目标平台／架构的 PTY 预编译文件；Windows 的 `files` 会覆盖通用清单，不能只填写额外排除项 |
 | `ui/index.html`、`styles.css`、`wizard.js` | 图形向导与明确标记的演示模式 |
 | `installer-host/InstallerHost.cs` | WebView2、目录/磁盘读取、安装握手与原生进度读取 |
 | `nsis/custom.nsh` | 安装与卸载钩子、原生回退页、完成退出 |
