@@ -219,7 +219,7 @@ function ContextDockChrome({ context, children }: { context: ContextUsage | null
 
 /** Live usage can feed a folded header; expensive archive probes require an open body. */
 export function ContextDockPanel(props: ContextSourceProps) {
-  const { hosts, layout } = useDock();
+  const { hosts } = useDock();
   const host = hosts.get("context");
   const visibility = useSyncExternalStore(host.subscribe, host.snapshot);
   const visible = visibility.visible;

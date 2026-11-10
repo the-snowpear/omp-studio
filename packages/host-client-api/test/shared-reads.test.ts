@@ -1,6 +1,46 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SharedArchiveTelemetry, SharedProjectReads } from "../src/shared-reads.js";
+import { createDefaultHostDiagnosticsFactory, StudioHostClientFacade, type HostExtensibilityService } from "../src/index.js";
+import type { HostBackend } from "@omp-studio/studio-host";
+
+test("switching projects before a queued read starts cannot cache the next project's settings under the previous project", async () => {
+  let workspace = "project-a", reads = 0;
+  const extensibility = Object.defineProperty({}, "get", { get() {
+    const selected = workspace;
+    return () => { reads++; return { skills: [], plugins: [], warnings: [], generatedAt: "2026-11-10T00:00:00Z", unavailableReason: selected }; };
+  } }) as HostExtensibilityService;
+  const facade = new StudioHostClientFacade({
+    authority: { authorityId: "authority" as never, authorityEpoch: 1 as never }, platform: "win32", arch: "x64", backend: {} as HostBackend,
+    capabilityManifest: () => undefined, commandManifest: () => undefined, catalog: { list: () => [] },
+    diagnostics: createDefaultHostDiagnosticsFactory(), install: async () => ({ status: "installed", signature: "unknown" }),
+    workspaceCwd: () => workspace, extensibility, projectReads: new SharedProjectReads(),
+  });
+  try {
+    const first = facade.query({ queryName: "skills.get", input: {} });
+    workspace = "project-b";
+    const second = facade.query({ queryName: "skills.get", input: {} });
+    const firstResult = await first, secondResult = await second;
+    assert.ok(firstResult.ok); assert.equal(firstResult.result.unavailableReason, "project-a");
+    assert.ok(secondResult.ok); assert.equal(secondResult.result.unavailableReason, "project-b");
+    workspace = "project-a";
+    const cached = await facade.query({ queryName: "skills.get", input: {} });
+    assert.ok(cached.ok); assert.equal(cached.result.unavailableReason, "project-a"); assert.equal(reads, 2);
+  } finally { await facade.close(); }
+});
+
+test("environment changes bypass old telemetry flights and invalidate their completed results", async () => {
+  const reads = new SharedArchiveTelemetry<number>(), signal = new AbortController().signal;
+  let finish!: (n: number) => void;
+  const first = reads.read("session:revision", signal, () => new Promise<number>(resolve => { finish = resolve; }));
+  await new Promise(resolve => setImmediate(resolve));
+  reads.invalidate();
+  const second = reads.read("session:revision", signal, async () => 2);
+  finish(1); assert.equal(await first, 1); assert.equal(await second, 2);
+  assert.equal(await reads.read("session:revision", signal, async () => 3), 2);
+  reads.invalidate(); assert.equal(await reads.read("session:revision", signal, async () => 4), 4);
+  await reads.dispose();
+});
 
 test("two views share project reads; invalidated in-flight results cannot repopulate the cache", async () => {
   const reads = new SharedProjectReads();

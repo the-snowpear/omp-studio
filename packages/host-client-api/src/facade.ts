@@ -978,7 +978,7 @@ export class StudioHostClientFacade implements ClientTransport {
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "models.get": {
-        const result = await this.#sharedProjectRead("models", () => this.#queryModels());
+        const result = await this.#queryModels();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "evaluations.exportChunk":
@@ -1021,7 +1021,7 @@ export class StudioHostClientFacade implements ClientTransport {
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "skills.get": {
-        const result = await this.#sharedProjectRead("skills", () => this.#querySkills());
+        const result = await this.#querySkills();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "mcp.get": {
@@ -2619,14 +2619,11 @@ export class StudioHostClientFacade implements ClientTransport {
         sessionId,
         sessionFile: copy.temporarySessionFile,
         allowedCwd,
-        transcriptRevision,
         signal,
       });
       if (!outcome.ok) return undefined;
       const telemetry = parseSessionTelemetrySnapshot(outcome.telemetry);
       if (telemetry.sessionId !== sessionId) return undefined;
-      // The Runtime may have resumed this exact session while the probe ran;
-      // live data wins over a recomputed archive estimate.
       return this.#telemetryReadResult(sessionId, "archive-recomputed", "current-environment-recomputed", telemetry);
     } catch {
       return undefined;
@@ -2648,8 +2645,8 @@ export class StudioHostClientFacade implements ClientTransport {
     return parseSessionTelemetryReadResult({ sessionId, source, semantics, telemetry: snapshot });
   }
 
-  #sharedProjectRead<T>(name: string, run: () => Promise<T>): Promise<T> {
-    return this.#options.projectReads?.read(`${this.#options.workspaceCwd?.()}\0${name}`, run) ?? run();
+  #sharedProjectRead<T>(name: string, run: () => T | Promise<T>): Promise<T> {
+    return this.#options.projectReads?.read(`${this.#options.workspaceCwd?.()}\0${name}`, run) ?? Promise.resolve(run());
   }
 
   async #querySkills(): Promise<ExtensibilityReadModel> {
@@ -2663,7 +2660,7 @@ export class StudioHostClientFacade implements ClientTransport {
         unavailableReason: "Host 未接入技能 / 插件适配器。",
       };
     }
-    return service.get();
+    return this.#sharedProjectRead("skills", service.get.bind(service));
   }
 
   async #queryMcp(): Promise<McpReadModel> {
@@ -2735,7 +2732,7 @@ export class StudioHostClientFacade implements ClientTransport {
         },
       };
     }
-    return service.get();
+    return this.#sharedProjectRead("models", service.get.bind(service));
   }
 
   async #currentInstalledManifest(): Promise<{ readonly manifest: RuntimeInstallationManifest } | undefined> {
@@ -3702,9 +3699,12 @@ export class StudioHostClientFacade implements ClientTransport {
 
   /** Publish a terminal receipt exactly once per requestId. */
   #emitTerminal(requestId: CommandRequestId, receipt: CommandReceipt): void {
-    if (receipt.status === "completed" && /^(models\.|skills\.|plugins\.|runtime\.install|config\.)/.test(receipt.commandName)) this.#options.projectReads?.invalidate();
     if (this.#terminalEmitted.has(requestId)) {
       return;
+    }
+    if (receipt.status === "completed" && /^(models\.|skills\.|plugins\.|runtime\.install|config\.)/.test(receipt.commandName)) {
+      this.#options.projectReads?.invalidate();
+      this.#options.archiveTelemetry?.invalidate();
     }
     this.#terminalEmitted.add(requestId);
     evictOldestKeys(this.#terminalEmitted, DEDUPE_KEY_CAPACITY);

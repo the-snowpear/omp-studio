@@ -4,16 +4,15 @@ import { hostErrorMessage } from "../hostError";
 
 /** The breadcrumb never needs file revisions, diffs or untracked line counts. */
 export function useGitSummary(client: StudioClient, workspaceId?: WorkspaceId) {
-  const [value, setValue] = useState<{ workspaceId: WorkspaceId; repository: QueryResult<"git.repository.summary"> }>();
-  const [error, setError] = useState<string>();
+  const [value, setValue] = useState<{ client: StudioClient; workspaceId: WorkspaceId; repository?: QueryResult<"git.repository.summary">; error?: string }>();
   useEffect(() => {
     if (!workspaceId) return;
     let active = true, generation = 0;
     const read = () => {
       const token = ++generation;
       void client.query("git.repository.summary", { workspaceId }).then(repository => {
-        if (active && token === generation) setValue({ workspaceId, repository });
-      }).catch(cause => { if (active && token === generation) setError(hostErrorMessage(cause, "无法读取 Git 摘要")); });
+        if (active && token === generation) setValue({ client, workspaceId, repository });
+      }).catch(cause => { if (active && token === generation) setValue({ client, workspaceId, error: hostErrorMessage(cause, "无法读取 Git 摘要") }); });
     };
     read();
     const off = client.subscribe({ scope: "all" }, event => {
@@ -21,5 +20,6 @@ export function useGitSummary(client: StudioClient, workspaceId?: WorkspaceId) {
     });
     return () => { active = false; off(); };
   }, [client, workspaceId]);
-  return { repository: value?.workspaceId === workspaceId ? value?.repository : undefined, error };
+  const current = value?.client === client && value.workspaceId === workspaceId ? value : undefined;
+  return { repository: current?.repository, error: current?.error };
 }

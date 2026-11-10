@@ -825,7 +825,7 @@ export class DesktopGitService implements HostGitService {
       ...(repository?.headOid === undefined ? {} : { headOid: repository.headOid }),
       ...(repository?.upstream === undefined ? {} : { upstream: repository.upstream }),
     });
-    const repository = await this.#readRepository(input);
+    const repository = await this.repository(input);
     if (!repository.isRepository || repository.unborn) return empty(repository);
     const identity = await this.#identity(input.workspaceId);
     const limit = Math.min(200, Math.max(1, input.limit ?? 80));

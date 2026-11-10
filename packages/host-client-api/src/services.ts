@@ -415,7 +415,6 @@ export interface HostSessionTelemetryProbePort {
     readonly sessionId: string;
     readonly sessionFile: string;
     readonly allowedCwd: string;
-    readonly transcriptRevision: string;
     readonly signal?: AbortSignal;
   }): Promise<{ readonly ok: true; readonly telemetry: SessionTelemetrySnapshot } | { readonly ok: false; readonly reason: "UNAVAILABLE" }>;
 }

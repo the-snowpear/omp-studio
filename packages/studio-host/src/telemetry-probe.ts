@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
 
 import { parseSessionTelemetrySnapshot, type SessionTelemetrySnapshot } from "@omp-studio/studio-protocol";
 
@@ -13,8 +12,6 @@ export interface SessionTelemetryProbeRunInput {
   readonly sessionId: string;
   readonly sessionFile: string;
   readonly allowedCwd: string;
-  /** Part of the in-memory cache key together with session and executable identity. */
-  readonly transcriptRevision: string;
   readonly signal?: AbortSignal;
 }
 
@@ -35,7 +32,6 @@ export interface NodeSessionTelemetryProbeOptions {
   readonly timeoutMs?: number;
   readonly maxStdoutBytes?: number;
   readonly maxStderrBytes?: number;
-  readonly cacheTtlMs?: number;
   readonly now?: () => number;
   readonly spawnProcess?: SpawnFunction;
   /**
@@ -74,7 +70,6 @@ interface ProbeStdioLine {
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_STDOUT_BYTES = 64 * 1024;
 const DEFAULT_MAX_STDERR_BYTES = 16 * 1024;
-const DEFAULT_CACHE_TTL_MS = 30_000;
 const PROBE_ARG = "--studio-session-telemetry-probe";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -89,9 +84,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * the request id and match the requested session id. Every deviation —
  * timeout, oversized output, non-zero exit, malformed JSON, identity mismatch
  * — collapses to a safe `UNAVAILABLE`; raw stderr never leaves this module.
- * Successful results are memoized for 30s per `sessionId + revision +
- * executable identity`, and concurrent requests with the same key share one
- * in-flight child process. The probe process is NOT a session worker: it is
+ * The Host owns caching and sharing for the entire copy/probe/cleanup task.
+ * This port owns only one child per call. The probe process is not a session worker: it is
  * never registered with the Session Broker and cannot touch leases, the
  * current selection, or the runtime epoch.
  */
@@ -101,11 +95,8 @@ export function createNodeSessionTelemetryProbe(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxStdoutBytes = options.maxStdoutBytes ?? DEFAULT_MAX_STDOUT_BYTES;
   const maxStderrBytes = options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES;
-  const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const now = options.now ?? (() => Date.now());
   const spawnProcess = options.spawnProcess ?? spawn;
-  const cache = new Map<string, { readonly expiresAt: number; readonly telemetry: SessionTelemetrySnapshot }>();
-  const inFlight = new Map<string, Promise<SessionTelemetryProbeOutcome>>();
   const children = new Set<ReturnType<SpawnFunction>>();
   let disposed = false;
   const emitDiagnostic = (info: SessionTelemetryProbeDiagnostic): void => {
@@ -113,15 +104,6 @@ export function createNodeSessionTelemetryProbe(
       options.onDiagnostic?.(info);
     } catch {
       // Diagnostics must never affect the probe outcome.
-    }
-  };
-
-  const executableIdentity = async (executable: string): Promise<string> => {
-    try {
-      const metadata = await stat(executable);
-      return `${executable}:${metadata.size}:${metadata.mtimeMs}`;
-    } catch {
-      return executable;
     }
   };
 
@@ -163,7 +145,6 @@ export function createNodeSessionTelemetryProbe(
     let stderrBytes = 0;
     let overflowed = false;
     const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
     let settled = false;
     const result = new Promise<SessionTelemetryProbeOutcome>((resolve) => {
       const timer = setTimeout(() => {
@@ -283,30 +264,14 @@ export function createNodeSessionTelemetryProbe(
       return { ok: false, reason: "UNAVAILABLE" };
     }
     const executable = await options.executablePath();
+    if (disposed || input.signal?.aborted) return { ok: false, reason: "UNAVAILABLE" };
     if (executable === undefined || executable.length === 0) {
       emitDiagnostic({ result: "unavailable", reason: "no-executable", durationMs: 0 });
       return { ok: false, reason: "UNAVAILABLE" };
     }
-    const identity = await executableIdentity(executable);
-    const cacheKey = `${input.sessionId}\0${input.transcriptRevision}\0${identity}`;
-    const cached = cache.get(cacheKey);
-    if (cached !== undefined && cached.expiresAt > now()) return { ok: true, telemetry: cached.telemetry };
-    const pending = inFlight.get(cacheKey);
-    if (pending !== undefined) return pending;
-    const flight = spawnOnce(input, executable)
-      .then((outcome) => {
-        emitDiagnostic(outcome.diagnostic);
-        if (outcome.ok) {
-          cache.set(cacheKey, { expiresAt: now() + cacheTtlMs, telemetry: outcome.telemetry });
-          while (cache.size > 16) cache.delete(cache.keys().next().value!);
-        }
-        return outcome;
-      })
-      .finally(() => {
-        inFlight.delete(cacheKey);
-      });
-    inFlight.set(cacheKey, flight);
-    return flight;
+    const { diagnostic, ...outcome } = await spawnOnce(input, executable);
+    emitDiagnostic(diagnostic);
+    return outcome;
   };
 
   return {
@@ -314,7 +279,6 @@ export function createNodeSessionTelemetryProbe(
     dispose(): void {
       disposed = true;
       for (const child of children) child.kill();
-      cache.clear();
     },
   };
 }

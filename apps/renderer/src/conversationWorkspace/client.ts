@@ -35,11 +35,12 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
   let selectedSession: import("@omp-studio/client-contract").SessionId | undefined;
   let capabilitiesRead: Promise<ClientBootstrap["capabilityManifest"]> | undefined;
   const selectRootProject = (workspaceId: import("@omp-studio/client-contract").WorkspaceId | undefined) => {
-    if (!allowRootProject || owned || closed || !workspaceId || !value?.openContext || project?.workspaceId === workspaceId) return;
+    if (!allowRootProject || owned || closed || !workspaceId || !value?.openContext || project?.workspaceId === workspaceId) return false;
     releaseProject?.();
     const shared = acquireProjectReads(value, workspaceId);
     project = shared.reads; releaseProject = shared.release; bindProjectReads(client, project);
     requestAnimationFrame(() => { if (!closed) project?.warm(selectedSession); });
+    return true;
   };
   const initial = createInitialClientState();
   const subscriptions = new Set<{ scope: SubscriptionScope; listener: (event: ClientEvent) => void }>();
@@ -62,9 +63,9 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
     bootstrap: () => measureSessionOperation("client.bootstrap", async () => {
       const result = await initializeConversationClient(await ready()); capabilities = result.capabilityManifest;
       selectedSession = result.selected?.sessionId;
-      selectRootProject(result.selected?.workspaceId);
+      const projectChanged = selectRootProject(result.selected?.workspaceId);
       if (!result.selected?.sessionId) releaseBody();
-      if (!waitForBody && project) requestAnimationFrame(() => { if (!closed) project?.warm(selectedSession); });
+      if (!projectChanged && !waitForBody && project) requestAnimationFrame(() => { if (!closed) project?.warm(selectedSession); });
       return result;
     }),
     query: (name, input) => measureSessionOperation(`query.${name}`, async () => {

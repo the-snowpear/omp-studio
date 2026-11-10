@@ -24,7 +24,8 @@ test("workspace readers share one retention budget and eviction does not invalid
   const older = await readers[0]!.readPage({ sessionId: "session-a", cursor: first.olderCursor!, limit: 1 });
   assert.equal(older.items[0]?.itemId, "m-1");
   assert.equal(await readers[0]!.prefetch("session-a"), undefined);
-  budget.clear(); assert.equal(budget.diagnostics().rawBytes, 0);
+  for (const reader of readers) reader.clearCache();
+  assert.equal(budget.diagnostics().rawBytes, 0);
 });
 
 function userLine(id: string, text: string, parentId: string | null): string {

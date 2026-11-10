@@ -154,7 +154,7 @@ export class SessionArchiveCacheBudget {
   retain(key: object, raw: number, projected: boolean, release: () => void): void {
     this.#entries.delete(key);
     this.#entries.set(key, { raw, estimated: raw * (projected ? 6 : 4), release });
-    while (this.#entries.size > 8 || this.diagnostics().rawBytes > 32 * 1024 * 1024 || this.diagnostics().estimatedBytes > 64 * 1024 * 1024) {
+    while (this.#entries.size > DEFAULT_SNAPSHOT_CACHE_SIZE || this.diagnostics().rawBytes > 32 * 1024 * 1024 || this.diagnostics().estimatedBytes > 64 * 1024 * 1024) {
       const first = this.#entries.entries().next().value!;
       this.#entries.delete(first[0]); first[1].release();
     }
@@ -164,7 +164,6 @@ export class SessionArchiveCacheBudget {
     if (entry) { this.#entries.delete(key); this.#entries.set(key, entry); }
   }
   release(key: object): void { this.#entries.delete(key); }
-  clear(): void { const entries = [...this.#entries.values()]; this.#entries.clear(); for (const entry of entries) entry.release(); }
   diagnostics() {
     let rawBytes = 0, estimatedBytes = 0;
     for (const entry of this.#entries.values()) { rawBytes += entry.raw; estimatedBytes += entry.estimated; }
@@ -701,34 +700,31 @@ export class StudioSessionArchiveReader {
     if (pending !== undefined && pending.version === indexedVersion && !pending.task.controller.signal.aborted) return pending.task.join(options.signal);
     /* 文件变过：优先按追加续读（只解析新增字节），失败再整档重读。 */
     const task = new SharedRead(async signal => {
-    const load = cached?.consumed === undefined
-      ? this.#readSnapshotUncached(path, expectedSessionId, { ...options, signal })
-      : this.#appendSnapshot(path, expectedSessionId, cached, signal).then(
-          (appended) => appended ?? this.#readSnapshotUncached(path, expectedSessionId, { ...options, signal }),
-        );
-    return load
-      .then(({ snapshot, version, consumed, weight }) => {
-        signal.throwIfAborted();
-        this.#dropCachedSnapshot(path);
-        if (weight <= this.#snapshotCacheMaxBytes) {
-          this.#snapshotCache.set(path, { snapshot, version, weight, ...(consumed === undefined ? {} : { consumed }) });
-          this.#snapshotCacheBytes += weight;
-          this.#budget.retain(this.#snapshotCache.get(path)!, weight, false, () => this.#dropCachedSnapshot(path));
-        }
-        while (
-          this.#snapshotCache.size > DEFAULT_SNAPSHOT_CACHE_SIZE
-          || this.#snapshotCacheBytes > this.#snapshotCacheMaxBytes
-        ) {
-          const oldest = this.#snapshotCache.keys().next().value as string | undefined;
-          if (oldest === undefined) break;
-          this.#dropCachedSnapshot(oldest);
-        }
-        this.#index.versions.set(path, version);
-        return { snapshot, version };
-      })
-      .finally(() => {
-        if (this.#snapshotInFlight.get(path)?.task === task) this.#snapshotInFlight.delete(path);
-      });
+      const load = cached?.consumed === undefined
+        ? this.#readSnapshotUncached(path, expectedSessionId, { ...options, signal })
+        : this.#appendSnapshot(path, expectedSessionId, cached, signal).then(
+            (appended) => appended ?? this.#readSnapshotUncached(path, expectedSessionId, { ...options, signal }),
+          );
+      return load
+        .then(({ snapshot, version, consumed, weight }) => {
+          signal.throwIfAborted();
+          this.#dropCachedSnapshot(path);
+          if (weight <= this.#snapshotCacheMaxBytes) {
+            this.#snapshotCache.set(path, { snapshot, version, weight, ...(consumed === undefined ? {} : { consumed }) });
+            this.#snapshotCacheBytes += weight;
+            this.#budget.retain(this.#snapshotCache.get(path)!, weight, false, () => this.#dropCachedSnapshot(path));
+          }
+          while (this.#snapshotCacheBytes > this.#snapshotCacheMaxBytes) {
+            const oldest = this.#snapshotCache.keys().next().value as string | undefined;
+            if (oldest === undefined) break;
+            this.#dropCachedSnapshot(oldest);
+          }
+          this.#index.versions.set(path, version);
+          return { snapshot, version };
+        })
+        .finally(() => {
+          if (this.#snapshotInFlight.get(path)?.task === task) this.#snapshotInFlight.delete(path);
+        });
     });
     this.#snapshotInFlight.set(path, { version: indexedVersion, task });
     return task.join(options.signal);
@@ -848,11 +844,6 @@ export class StudioSessionArchiveReader {
       this.#projectionCache.set(path, { leafId: snapshot.branchLeafId, branch, state });
       const retained = this.#snapshotCache.get(path)!;
       this.#budget.retain(retained, retained.weight, true, () => this.#dropCachedSnapshot(path));
-    }
-    while (this.#projectionCache.size > DEFAULT_SNAPSHOT_CACHE_SIZE) {
-      const oldest = this.#projectionCache.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
-      this.#projectionCache.delete(oldest);
     }
     return state.items;
   }
@@ -1273,8 +1264,7 @@ function completeJsonlPrefix(bytes: Buffer): { bytes: Buffer; byteLength: number
 /**
  * 逐行 JSON 解析，按时间片让出事件循环。
  *
- * 这一步在 Electron 主进程上跑：一个十几 MB 的会话整档解析要几百毫秒，同步做会把 Bridge
- * 事件、command 回执和别的 IPC 一起堵住。每 8ms 让一次，总 CPU 不变，但主进程不再假死。
+ * Desktop 在共享 Worker 中运行；定期让出，使取消消息能在整档解析完成前生效。
  */
 async function parseCompleteJsonlYielding(bytes: Buffer, signal?: AbortSignal): Promise<unknown[]> {
   signal?.throwIfAborted();

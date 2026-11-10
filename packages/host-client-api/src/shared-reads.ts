@@ -4,7 +4,7 @@ export class SharedProjectReads {
   #pending = new Map<string, Promise<unknown>>();
   #epoch = 0;
   #bytes = 0;
-  async read<T>(key: string, run: () => Promise<T>, ttl = 30_000): Promise<T> {
+  async read<T>(key: string, run: () => T | Promise<T>, ttl = 30_000): Promise<T> {
     const cached = this.#values.get(key);
     if (cached && cached.expires > Date.now()) {
       this.#values.delete(key); this.#values.set(key, cached); return cached.value as T;
@@ -40,8 +40,11 @@ export class SharedArchiveTelemetry<T> {
   #flights = new Map<string, Flight<T>>();
   #cache = new Map<string, { value: T; expires: number }>();
   #tail: Promise<unknown> = Promise.resolve();
+  #epoch = 0;
   read(key: string, signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>, refresh = false): Promise<T> {
     if (signal.aborted) return Promise.reject(signal.reason);
+    const epoch = this.#epoch;
+    key = `${epoch}\0${key}`;
     const cached = this.#cache.get(key);
     if (!refresh && cached && cached.expires > Date.now()) return Promise.resolve(cached.value);
     let flight = this.#flights.get(key);
@@ -51,7 +54,7 @@ export class SharedArchiveTelemetry<T> {
       created.promise = this.#tail.catch(() => {}).then(() => {
         controller.signal.throwIfAborted(); return run(controller.signal);
       }).then(value => {
-        if (value !== undefined && !controller.signal.aborted) {
+        if (value !== undefined && !controller.signal.aborted && epoch === this.#epoch) {
           this.#cache.delete(key); this.#cache.set(key, { value, expires: Date.now() + 60_000 });
           while (this.#cache.size > 16) this.#cache.delete(this.#cache.keys().next().value!);
         }
@@ -72,6 +75,7 @@ export class SharedArchiveTelemetry<T> {
       current.promise.then(resolve, reject).finally(release);
     });
   }
+  invalidate(): void { this.#epoch++; this.#cache.clear(); }
   async dispose(): Promise<void> {
     const flights = [...this.#flights.values()];
     for (const flight of flights) flight.controller.abort();

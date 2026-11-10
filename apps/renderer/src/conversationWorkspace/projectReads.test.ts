@@ -1,9 +1,47 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { contractFixtures } from "@omp-studio/testkit";
-import type { ConversationTranscriptReadPage, SessionId, StudioClient, WorkspaceId } from "@omp-studio/client-contract";
+import type { ClientEvent, ConversationTranscriptReadPage, SessionId, StudioClient, WorkspaceId } from "@omp-studio/client-contract";
 import { acquireProjectReads, DisplayCache } from "./projectReads";
 
 afterEach(() => vi.useRealTimers());
+
+it("a configuration write prevents an older read from replacing the new settings", async () => {
+  vi.useFakeTimers();
+  let resolveOld!: (value: object) => void;
+  const query = vi.fn().mockReturnValueOnce(new Promise<object>(resolve => { resolveOld = resolve; })).mockResolvedValue({ version: "new" });
+  const target = { subscribe: () => () => {}, openContext: async () => ({ query, close: async () => {}, subscribe: () => () => {} }) } as unknown as StudioClient;
+  const handle = acquireProjectReads(target, "workspace" as WorkspaceId);
+  const old = handle.reads.read("models.get", {});
+  await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(1));
+  handle.reads.observe({ kind: "command.receipt", authorityEpoch: 1, receipt: { status: "completed", commandName: "models.roles.write" } } as ClientEvent);
+  const fresh = handle.reads.read("models.get", {});
+  await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+  resolveOld({ version: "old" });
+  await old; expect(await fresh).toEqual({ version: "new" });
+  expect(await handle.reads.read("models.get", {})).toEqual({ version: "new" });
+  handle.release(); await vi.runAllTimersAsync();
+});
+
+it("a late context opening cannot subscribe or replace a reopened project's connection", async () => {
+  vi.useFakeTimers();
+  let finishOld!: (client: StudioClient) => void;
+  const old = { query: vi.fn(), close: vi.fn(async () => {}), subscribe: vi.fn(() => () => {}) };
+  const current = { query: vi.fn(async () => ({})), close: vi.fn(async () => {}), subscribe: vi.fn(() => () => {}) };
+  const openContext = vi.fn().mockReturnValueOnce(new Promise<StudioClient>(resolve => { finishOld = resolve; })).mockResolvedValue(current);
+  const target = { subscribe: () => () => {}, openContext } as unknown as StudioClient;
+  const first = acquireProjectReads(target, "workspace" as WorkspaceId);
+  const pending = first.reads.read("models.get", {});
+  const rejected = expect(pending).rejects.toThrow("closed while opening");
+  first.release(); await vi.advanceTimersByTimeAsync(30_001);
+  const second = acquireProjectReads(target, "workspace" as WorkspaceId);
+  await second.reads.read("skills.get", {});
+  finishOld(old as unknown as StudioClient); await rejected;
+  await second.reads.read("history.list", {});
+  expect(openContext).toHaveBeenCalledTimes(2);
+  expect(old.close).toHaveBeenCalledTimes(1); expect(old.subscribe).not.toHaveBeenCalled(); expect(old.query).not.toHaveBeenCalled();
+  expect(current.subscribe).toHaveBeenCalledTimes(1);
+  second.release(); await vi.runAllTimersAsync(); expect(current.close).toHaveBeenCalledTimes(1);
+});
 
 it("reopening a conversation reuses project data and releases the project context after grace", async () => {
   vi.useFakeTimers();

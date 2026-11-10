@@ -69,16 +69,26 @@ class ConnectionReads {
   authorityEpoch: string | undefined;
   #offRoot: (() => void) | undefined;
   #rootTimer: ReturnType<typeof setTimeout> | undefined;
+  #unregister: (() => void) | undefined;
   constructor(readonly target: StudioClient) {}
   retainRoot() {
     clearTimeout(this.#rootTimer);
     this.#offRoot ??= this.target.subscribe({ scope: "all" }, event => { for (const project of this.projects.values()) project.observe(event); });
+    this.#unregister ??= sessionSwitchPerformance.register(() => ({
+      projectReadConsumers: [...this.projects.values()].reduce((sum, project) => sum + project.users, 0),
+      projectMetadataBytes: this.metadata.bytes, transcriptCacheBytes: this.pages.bytes,
+      transcriptCacheEntries: this.pages.entries.size, projectReadFlights: this.pending.size,
+    }));
   }
   releaseRoot() {
     if ([...this.projects.values()].some(project => project.users > 0)) return;
-    this.#rootTimer = setTimeout(() => { this.#offRoot?.(); this.#offRoot = undefined; }, 30_000);
+    this.#rootTimer = setTimeout(() => {
+      this.#offRoot?.(); this.#offRoot = undefined;
+      this.#unregister?.(); this.#unregister = undefined;
+    }, 30_000);
   }
-  invalidate() { this.epoch++; this.metadata.clear(); this.pages.clear(); this.pending.clear(); }
+  invalidateMetadata() { this.epoch++; this.metadata.clear(); this.pending.clear(); }
+  invalidate() { this.invalidateMetadata(); this.pages.clear(); }
   trim() {
     this.metadata.prune(); this.pages.prune();
     const inactive = [...this.projects.values()].filter(project => project.users === 0).sort((a, b) => a.used - b.used);
@@ -105,14 +115,10 @@ export class ProjectReads {
   #closeTimer: ReturnType<typeof setTimeout> | undefined;
   #expiryTimer: ReturnType<typeof setTimeout> | undefined;
   #warm: AbortController | undefined;
-  #unregister: (() => void) | undefined;
   constructor(readonly owner: ConnectionReads, readonly workspaceId: WorkspaceId) {}
   retain(): void {
     this.users++; this.used = Date.now(); clearTimeout(this.#closeTimer); clearTimeout(this.#expiryTimer);
     this.owner.retainRoot();
-    this.#unregister ??= sessionSwitchPerformance.register(() => ({ projectReadConsumers: this.users,
-      projectMetadataBytes: this.owner.metadata.bytes, transcriptCacheBytes: this.owner.pages.bytes,
-      transcriptCacheEntries: this.owner.pages.entries.size, projectReadFlights: this.owner.pending.size }));
   }
   release(): void {
     this.users--; this.used = Date.now();
@@ -127,7 +133,6 @@ export class ProjectReads {
     this.#off?.(); this.#off = undefined;
     const client = this.#client; this.#client = undefined;
     if (client) void client.then(value => value.close()).catch(() => {});
-    this.#unregister?.(); this.#unregister = undefined;
   }
   dispose(): void {
     clearTimeout(this.#closeTimer); clearTimeout(this.#expiryTimer); this.#warm?.abort(); this.#close();
@@ -136,10 +141,17 @@ export class ProjectReads {
     for (const key of this.owner.pages.entries.keys()) if (key.startsWith(`${this.workspaceId}\0`)) this.owner.pages.delete(key);
   }
   async client(): Promise<StudioClient> {
-    return this.#client ??= this.owner.target.openContext!({ workspaceId: this.workspaceId }).then(client => {
+    if (this.#client) return this.#client;
+    const opening = this.owner.target.openContext!({ workspaceId: this.workspaceId }).then(async client => {
+      if (this.#client !== opening) {
+        await client.close();
+        throw new Error("Project context was closed while opening");
+      }
       this.#off = client.subscribe({ scope: "all" }, event => this.observe(event));
       return client;
-    }).catch(error => { this.#client = undefined; throw error; });
+    }).catch(error => { if (this.#client === opening) this.#client = undefined; throw error; });
+    this.#client = opening;
+    return opening;
   }
   observe(event: ClientEvent): void {
     const authority = String(event.authorityEpoch);
@@ -149,7 +161,7 @@ export class ProjectReads {
     if (event.kind === "git.repository.changed") this.invalidate("git.");
     if (event.kind === "command.receipt" && event.receipt.status === "completed") {
       const name = event.receipt.commandName;
-      if (/^(models\.|skills\.|plugins\.|config\.|runtime\.install)/.test(name)) this.owner.metadata.clear();
+      if (/^(models\.|skills\.|plugins\.|config\.|runtime\.install)/.test(name)) this.owner.invalidateMetadata();
       if (/^(session\.|timeTravel\.|core\.prompt)/.test(name)) { this.invalidate("history.list"); this.owner.pages.clear(); }
       if (/^(git\.|github\.|workspace\.)/.test(name)) { this.invalidate("git."); this.invalidate("workspace.fileTree"); this.invalidate("projects.list"); }
     }

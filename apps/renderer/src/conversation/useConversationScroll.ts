@@ -107,10 +107,6 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
   scrollerRef: RefObject<HTMLElement | null>; identityKey: string; itemCount: number; loadingOlder: boolean; pin?: "top" | "bottom"; contentKey?: string; settling?: boolean;
 }) {
   const pinned = useRef(pin === "bottom");
-  /** scroller 几何缓存：scroll 事件里读 scrollHeight/clientHeight 是强制同步布局
-   *  （事件通常紧跟贴底写 scrollTop 之后），流式期间每帧一次。缓存由 stickToTail
-   *  （doc RO 触发，本就要读）刷新；onScroll 只读 scrollTop（不触发布局）。 */
-  const metricsRef = useRef<{ scrollHeight: number; clientHeight: number }>({ scrollHeight: 0, clientHeight: 0 });
   const anchor = useRef<ScrollAnchor | null>(null);
   const previousFirst = useRef<string | null>(null);
   /** 上一拍 scrollTop：onScroll 判方向用。回钉只认「向下运动」，向上滚动期间
@@ -140,9 +136,7 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     el.scrollTop = el.scrollHeight;
     lastStickTop.current = el.scrollTop;
     lastScrollTop.current = el.scrollTop;
-    metricsRef.current = { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
   }, [scrollerRef]);
-  const resizeFollow = useRef(false);
   /* 脱离即亮「回到最新」：读者主动离开尾部（手势/锚定/加载更早），不管之后有没有
      新内容到达，按钮都要出现——它此刻的功能是「回去的入口」，不只是「新内容提示」。
      （按钮已外发为宿主 slot，固定在输入框右上角；此处状态与 sticky 时代一致。）
@@ -205,7 +199,6 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
       return;
     }
     const distance = distanceFromBottom(el);
-    metricsRef.current = { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
     const movingDown = el.scrollTop > lastScrollTop.current + 0.5;
     lastScrollTop.current = el.scrollTop;
     // 原生滚动条 / minimap 向上拖动没有滚轮手势，在此脱离跟随。
@@ -247,11 +240,7 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     // position, so a switch away from a bottom-pinned transcript lands the
     // welcome at its top instead of wherever the transcript was scrolled.
     if (pin === "top") el.scrollTop = 0;
-    if (doc === null || typeof ResizeObserver !== "function") {
-      resizeFollow.current = false;
-      return;
-    }
-    resizeFollow.current = true;
+    if (doc === null || typeof ResizeObserver !== "function") return;
     const handleResize = () => {
       if (el.scrollHeight <= el.clientHeight + 1 && !isConversationReflowing(el)) {
         if (pin === "bottom") {
@@ -269,7 +258,6 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     observer.observe(el);
     stickToTail();
     return () => {
-      resizeFollow.current = false;
       observer.disconnect();
     };
   }, [identityKey, pin, scrollerRef, stickToTail]);

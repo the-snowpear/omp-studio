@@ -804,7 +804,6 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
   const telemetryProbe =
     seams.telemetryProbe ??
     createNodeSessionTelemetryProbe({
-      cacheTtlMs: 0, // The authority owns the whole copy/probe/cleanup cache.
       executablePath: probeExecutable,
       ...(seams.hostLog === undefined
         ? {}
