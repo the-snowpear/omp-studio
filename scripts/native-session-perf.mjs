@@ -19,6 +19,7 @@ const smoke = process.argv.includes("--smoke");
 const cpuProfile = process.argv.includes("--cpu-profile");
 const acceptance = process.argv.includes("--acceptance");
 const trace = process.argv.includes("--trace");
+const verifyReading = process.argv.includes("--verify-reading");
 const outputRoot = resolve(process.env.OMP_NATIVE_PERF_OUTPUT ?? join(root, "outputs/perf/native-session-switch"));
 await mkdir(outputRoot, { recursive: true });
 const output = await mkdtemp(join(outputRoot, smoke ? "smoke-" : "run-"));
@@ -216,6 +217,27 @@ try {
       for (let interval = 0; interval < 4; interval++) await pause(30_000);
       entry.idleProcessMetrics = await app.evaluate(({ app }) => app.getAppMetrics().map(row => ({ pid: row.pid, type: row.type, memory: row.memory, cpu: row.cpu })));
     });
+  }
+  if (verifyReading) {
+    await select(0);
+    await page.evaluate(() => {
+      const scroller = document.querySelector(".cw-main-conversation .convo-scroll");
+      scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, bubbles: true }));
+      scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight - 1200);
+    });
+    await pause(500);
+    const anchor = await page.evaluate(() => {
+      const scroller = document.querySelector(".cw-main-conversation .convo-scroll"), top = scroller.getBoundingClientRect().top;
+      const row = [...scroller.querySelectorAll("[data-item-id]")].find(row => row.getBoundingClientRect().bottom >= top);
+      return { itemId: row.dataset.itemId, offset: row.getBoundingClientRect().top - top };
+    });
+    await select(1); await select(0, { tail: false });
+    await page.waitForFunction(anchor => {
+      const scroller = document.querySelector(".cw-main-conversation .convo-scroll");
+      const row = [...scroller.querySelectorAll("[data-item-id]")].find(row => row.dataset.itemId === anchor.itemId);
+      return row && Math.abs(row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - anchor.offset) <= 3;
+    }, anchor, { timeout: 5000 });
+    report.readingRestoration = { passed: true, tolerancePx: 3 };
   }
   report.recording = await page.evaluate(() => window.ompSessionPerf.snapshot(true));
   report.finalCounters = await page.evaluate(() => window.ompSessionPerf.snapshot(true).counters);
