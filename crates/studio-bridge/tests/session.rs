@@ -67,6 +67,45 @@ fn session_handshakes_snapshots_and_runs_a_turn() {
 }
 
 #[test]
+fn events_reach_the_caller_before_the_receipt() {
+    // The fake CLI holds the receipt 1.4 s after the last delta, so a caller
+    // that buffers events until the receipt shows the turn ~1.4 s late. This is
+    // the difference between a chat that types out and one that is blank and
+    // then complete, and it is invisible to any assertion on the final text.
+    let mut session = BridgeSession::connect(&launch("stream")).expect("connect");
+    let _ = session.snapshot().expect("snapshot");
+
+    let (first, seen) = std::sync::mpsc::channel::<std::time::Duration>();
+    let handle = std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let receipt = session.invoke_with(
+            serde_json::json!({ "kind": "core.prompt", "text": "slow" }),
+            |event| {
+                if event.get("kind") == Some(&serde_json::json!("conversation.message.delta")) {
+                    let _ = first.send(started.elapsed());
+                }
+            },
+        )?;
+        Ok::<_, step_studio_bridge::BridgeError>((receipt, started.elapsed()))
+    });
+
+    let at_first_delta = seen
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("no event arrived before the receipt");
+    let (receipt, at_receipt) = handle.join().expect("invoke thread").expect("receipt");
+
+    assert_eq!(
+        receipt.get("status").and_then(|s| s.as_str()),
+        Some("completed")
+    );
+    let gap = at_receipt.saturating_sub(at_first_delta);
+    assert!(
+        gap > std::time::Duration::from_millis(500),
+        "the last event arrived only {gap:?} before the receipt: events are being buffered"
+    );
+}
+
+#[test]
 fn the_handshake_token_comes_from_the_file_the_session_writes() {
     // `connect` owns the token file: it writes the secret and the adapter reads
     // it back, so a client cannot be pointed at somebody else's token by

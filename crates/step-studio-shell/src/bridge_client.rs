@@ -197,16 +197,12 @@ fn run_turn(
     to_ui: &Sender<Event>,
     text: &str,
 ) -> Result<(), step_studio_bridge::BridgeError> {
-    let (receipt, events) = session.invoke(serde_json::json!({
+    // Stream: each event reaches the UI as it arrives, so the answer types out
+    // instead of appearing whole once the turn is over.
+    let receipt = session.invoke_with(serde_json::json!({
         "kind": "core.prompt",
         "text": text,
-    }))?;
-
-    // Events are collected by `invoke`; replay them in order so the UI sees the
-    // same sequence the runtime emitted.
-    for event in events {
-        dispatch(to_ui, &event);
-    }
+    }), |event| dispatch(to_ui, event))?;
 
     match receipt.get("status").and_then(|s| s.as_str()) {
         Some("completed") => {

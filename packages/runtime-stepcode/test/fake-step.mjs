@@ -88,6 +88,9 @@ rl.on("line", line => {
       setTimeout(() => write({ type: "agent_settled" }), 10);
       return;
     }
+    // A long gap between the last delta and the receipt, so a test can tell
+    // streaming from buffering without depending on machine speed.
+    const settleAfter = text === "slow" ? 1500 : 70;
     write({ type: "agent_start" });
     const userEntry = appendEntry("message", { message: userMessage(text) });
     write({ type: "message_start", message: userMessage(text) });
@@ -127,7 +130,7 @@ rl.on("line", line => {
       write({ type: "turn_end", messageRole: "assistant", toolResultCount: 0 });
       write({ type: "agent_end", willRetry: false, messageCount: 3 });
       write({ type: "agent_settled" });
-    }, 70);
+    }, settleAfter);
   }
   if (message.type === "abort") {
     write({ type: "agent_settled", aborted: true });

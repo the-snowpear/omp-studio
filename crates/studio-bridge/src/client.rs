@@ -189,7 +189,26 @@ impl BridgeSession {
     }
 
     /// Run a command and collect events until its terminal receipt.
+    ///
+    /// Every event is buffered, so the caller sees the turn only once it is
+    /// over. Use [`BridgeSession::invoke_with`] when the consumer can render as
+    /// events arrive.
     pub fn invoke(&mut self, operation: Value) -> Result<(Value, Vec<Value>), BridgeError> {
+        let mut events = Vec::new();
+        let receipt = self.invoke_with(operation, |event| events.push(event.clone()))?;
+        Ok((receipt, events))
+    }
+
+    /// Run a command, handing each event to `on_event` the moment it arrives,
+    /// and return the terminal receipt.
+    ///
+    /// Streaming is not cosmetic: a turn takes seconds, and buffering means the
+    /// UI shows nothing for all of them and then the whole answer at once.
+    pub fn invoke_with(
+        &mut self,
+        operation: Value,
+        mut on_event: impl FnMut(&Value),
+    ) -> Result<Value, BridgeError> {
         let request_id = self.next_request_id();
         let request = json!({
             "type": "studio.request",
@@ -198,22 +217,20 @@ impl BridgeSession {
             "operation": operation,
         });
         write_frame(&mut self.stream, self.epoch, &request)?;
-        let mut events = Vec::new();
         loop {
             let frame = self.next_frame()?;
             match frame.body.get("type").and_then(|t| t.as_str()) {
-                Some("studio.event") => events.push(
+                Some("studio.event") => on_event(
                     frame
                         .body
                         .get("event")
-                        .cloned()
-                        .unwrap_or(Value::Null),
+                        .unwrap_or(&Value::Null),
                 ),
                 Some("studio.receipt")
                     if frame.body.get("requestId") == Some(&json!(request_id))
                         && is_terminal(frame.body.get("status").and_then(|s| s.as_str())) =>
                 {
-                    return Ok((frame.body, events));
+                    return Ok(frame.body);
                 }
                 _ => {}
             }
