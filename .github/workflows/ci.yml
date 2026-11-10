@@ -72,6 +72,24 @@ jobs:
       - run: npm run omp:verify:patches
         if: inputs.scope == 'full'
 
+  rust:
+    # The crates carry the Studio Bridge wire codec and the runtime adapter,
+    # which `npm run check` does not build. The shell is excluded: it links
+    # winit and would need the X libraries for no test coverage.
+    name: Rust crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: studio-crates
+      - run: cargo test -p step-studio-bridge -p step-studio-runtime
+      - run: cargo clippy -p step-studio-bridge -p step-studio-runtime --all-targets -- -D warnings
+
   macos-package:
     name: macOS test package (arm64)
     if: github.event_name == 'workflow_dispatch' && inputs.scope == 'macos-package'
