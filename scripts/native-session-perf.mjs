@@ -13,8 +13,12 @@ import { bundlePreload } from "./preload-bundle.mjs";
 
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL("..", import.meta.url));
+const appRoot = resolve(process.env.OMP_NATIVE_PERF_APP_ROOT ?? root);
 const { _electron } = require(process.env.PLAYWRIGHT_MODULE ?? "playwright-core");
 const smoke = process.argv.includes("--smoke");
+const cpuProfile = process.argv.includes("--cpu-profile");
+const acceptance = process.argv.includes("--acceptance");
+const trace = process.argv.includes("--trace");
 const outputRoot = resolve(process.env.OMP_NATIVE_PERF_OUTPUT ?? join(root, "outputs/perf/native-session-switch"));
 await mkdir(outputRoot, { recursive: true });
 const output = await mkdtemp(join(outputRoot, smoke ? "smoke-" : "run-"));
@@ -32,15 +36,19 @@ for (const key of Object.keys(env)) {
 }
 // A dev-server comparison is explicit; never inherit an unrelated renderer URL.
 if (process.env.OMP_NATIVE_PERF_DEV_URL) env.OMP_RENDERER_DEV_URL = process.env.OMP_NATIVE_PERF_DEV_URL;
+// Stop Git walking out of the synthetic workspace into the source repository.
+execFileSync("git", ["init", "--quiet"], { cwd: workspace, env, windowsHide: true });
+await Promise.all(Array.from({ length: 32 }, (_, index) => writeFile(join(workspace, `change-${index}.txt`), "Synthetic untracked line\n".repeat(100), { flag: "wx" })));
 const seedManifest = join(output, "fixtures.json");
 const count = smoke ? 16 : Number(process.env.OMP_NATIVE_PERF_SESSIONS ?? 24);
 const turns = smoke ? 8 : Number(process.env.OMP_NATIVE_PERF_TURNS ?? 80);
 console.log("Seeding isolated native archives");
 execFileSync(findBun(), [join(root, "scripts/native-session-perf-seed.mjs"), workspace, join(agent, "sessions/synthetic"), seedManifest, String(count), String(turns)], { cwd: root, env, windowsHide: true, stdio: "inherit", timeout: 180_000 });
 const fixture = JSON.parse(await readFile(seedManifest, "utf8"));
-const desktop = join(root, "apps/desktop");
+const desktop = join(appRoot, "apps/desktop");
 await writeFile(join(profile, "bootstrap.cjs"), [
   "const { app, dialog } = require('electron');",
+  "const inspector = require('node:inspector'); global.__switchInspector = new inspector.Session(); global.__switchInspector.connect(); global.__switchProfile = (method) => new Promise((resolve, reject) => global.__switchInspector.post(method, (error, value) => error ? reject(error) : resolve(value)));",
   `app.getAppPath = () => ${JSON.stringify(desktop)};`,
   `app.setPath('appData', ${JSON.stringify(roaming)});`,
   `app.setPath('userData', ${JSON.stringify(join(profile, "user-data"))});`,
@@ -56,7 +64,7 @@ const report = { version: 1, status: "running", smoke, startedAtUnixMs: Date.now
   fixture: { sessions: fixture.count, messagesPerSession: fixture.turns * 2, bytes: fixture.bytes },
   notes: ["Synthetic native JSONL archives; real Desktop IPC and Host, no fixture transport", "Fresh isolated profile, no Runtime intentionally installed and no model request", "nextTaskMs is event-loop responsiveness, not paint; readyMs includes loading and the UI transition", "No forced garbage collection; JS heap estimates differ from working set and private commit", "Playwright driver, PowerShell sampler and any separate Vite server are not included in the Electron process tree"],
   phases: [], samples: [], errors: [], warnings: [] };
-let app, page, sampler, samplerDone, interval;
+let app, page, sampler, samplerDone, interval, cdp;
 let sampling = false, phase = "startup", logBytes = 0;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const save = () => writeFile(join(output, "report.json"), JSON.stringify(report, null, 2));
@@ -77,11 +85,11 @@ async function sample() {
 }
 async function select(index, { wait = true, tail = true } = {}) {
   const title = fixture.sessions[index].title;
-  await page.evaluate(() => { window.ompSessionPerf.stop(); window.ompSessionPerf.start(); });
   const timing = await page.evaluate(async title => {
     const button = [...document.querySelectorAll("#projectList .thread")].find(element => element.textContent?.includes(title));
     if (!button || !button.checkVisibility() || button.closest("[inert]")) throw new Error(`Fixture row is not visible and interactive: ${title}`);
     const start = performance.now();
+    performance.mark("session-switch-input");
     window.__nativeSwitchStart = start;
     button.click();
     const dispatchMs = performance.now() - start;
@@ -104,7 +112,7 @@ async function runPhase(name, operation) {
   const entry = { name, startUnixMs: Date.now(), steps: [] };
   report.phases.push(entry);
   console.log(`Phase: ${name}`);
-  await page.evaluate(() => { window.ompSessionPerf.stop(); window.ompSessionPerf.start(); });
+  await page.evaluate(index => window.ompSessionPerf.phase?.(index), report.phases.length);
   await sample();
   await operation(entry);
   entry.endUnixMs = Date.now();
@@ -152,6 +160,7 @@ try {
   report.catalogTotal = (await query("history.list", { limit: 1 })).total;
   report.viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, devicePixelRatio }));
   report.gpu = await app.evaluate(({ app }) => app.getGPUFeatureStatus());
+  report.webContents = await app.evaluate(({ webContents }) => webContents.getAllWebContents().map(contents => ({ id: contents.id, pid: contents.getOSProcessId(), type: contents.getType() })));
   report.gpuInfo = await app.evaluate(async ({ app }) => {
     const info = await app.getGPUInfo("complete");
     return { devices: (info.gpuDevice ?? []).map(device => ({ active: device.active, vendorId: device.vendorId, deviceId: device.deviceId, driverVendor: device.driverVendor, driverVersion: device.driverVersion })),
@@ -160,15 +169,30 @@ try {
   await page.bringToFront();
   await app.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) { window.show(); window.focus(); } });
   interval = setInterval(() => { void sample(); }, 1000);
+  await page.evaluate(() => { window.ompSessionPerf.stop(); window.ompSessionPerf.start(); });
   await select(0);
   await page.screenshot({ path: join(output, "native-initial.png") });
   await runPhase("idle-before", async () => { await pause(smoke ? 2000 : 20_000); });
   await runPhase("cold-sequential", async entry => {
+    if (trace) { cdp = await page.context().newCDPSession(page); await cdp.send("Tracing.start", { categories: "devtools.timeline,blink.user_timing,disabled-by-default-devtools.timeline", transferMode: "ReturnAsStream" }); }
+    if (cpuProfile) await app.evaluate(async () => { await global.__switchProfile("Profiler.enable"); await global.__switchProfile("Profiler.start"); });
     for (let index = 1; index <= (smoke ? 3 : 12); index++) { entry.steps.push(await select(index)); await pause(smoke ? 100 : 600); }
+    if (cpuProfile) {
+      const profile = await app.evaluate(async () => (await global.__switchProfile("Profiler.stop")).profile);
+      await writeFile(join(output, "main-cold.cpuprofile"), JSON.stringify(profile));
+    }
   });
   await runPhase("warm-alternating", async entry => {
     for (let index = 0; index < (smoke ? 4 : 24); index++) { entry.steps.push(await select(index % 2)); await pause(smoke ? 100 : 400); }
   });
+  if (trace && cdp) {
+    const completed = new Promise(resolve => cdp.once("Tracing.tracingComplete", resolve));
+    await cdp.send("Tracing.end"); const { stream } = await completed;
+    let content = "", done = false;
+    while (!done) { const chunk = await cdp.send("IO.read", { handle: stream }); content += chunk.data; done = chunk.eof; }
+    await cdp.send("IO.close", { handle: stream });
+    await writeFile(join(output, "renderer-switch.trace.json"), content);
+  }
   if (!smoke) {
     await runPhase("rapid-switching", async entry => {
       for (let index = 0; index < 36; index++) { entry.steps.push(await select(index % 12, { wait: false })); await pause(70); }
@@ -177,6 +201,15 @@ try {
     });
     await runPhase("idle-after", async () => { await pause(45_000); });
   }
+  if (acceptance) for (let round = 0; round < 5; round++) {
+    await runPhase(`memory-round-${round + 1}`, async entry => {
+      for (let index = 0; index < 20; index++) entry.steps.push(await select(index % 14));
+      await select(0);
+      for (let interval = 0; interval < 4; interval++) await pause(30_000);
+      entry.idleProcessMetrics = await app.evaluate(({ app }) => app.getAppMetrics().map(row => ({ pid: row.pid, type: row.type, memory: row.memory, cpu: row.cpu })));
+    });
+  }
+  report.recording = await page.evaluate(() => window.ompSessionPerf.snapshot(true));
   report.finalCounters = await page.evaluate(() => window.ompSessionPerf.snapshot(true).counters);
   if (report.finalCounters["engines.active"] !== 1 || report.finalCounters["real.mountedDocuments"] !== 1 || report.finalCounters["real.detachedNodes"] !== 0) throw new Error("Native residency regression: expected one mounted engine and no detached conversation nodes");
   await page.screenshot({ path: join(output, "native-final.png") });
