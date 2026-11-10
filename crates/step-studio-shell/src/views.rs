@@ -127,15 +127,28 @@ impl App {
     pub(crate) fn render_composer(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("composer").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                // The action swaps to Stop mid-turn: the runtime can abort a
+                // turn in flight, and a second prompt would compete with the
+                // running one for the shared event stream.
+                let streaming = self.streaming();
+                let (label, width) = if streaming {
+                    ("Stop", 52.0)
+                } else {
+                    ("Send", 60.0)
+                };
                 let response = ui.add_sized(
-                    [ui.available_width() - 76.0, 28.0],
+                    [ui.available_width() - width - 8.0, 28.0],
                     egui::TextEdit::singleline(&mut self.composer)
                         .hint_text("message Step…")
                         .id(egui::Id::new("composer")),
                 );
                 let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let clicked = ui.button("Send").clicked();
-                if (enter || clicked) && !self.composer.trim().is_empty() && !self.streaming() {
+                let clicked = ui.button(label).clicked();
+                if streaming {
+                    if clicked {
+                        self.abort();
+                    }
+                } else if (enter || clicked) && !self.composer.trim().is_empty() {
                     let text = std::mem::take(&mut self.composer);
                     self.send(text);
                     response.request_focus();

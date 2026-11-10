@@ -104,6 +104,28 @@ fn repeated_tool_calls_are_paired_by_name_not_position() {
     assert_eq!(tools[1].output, "second");
 }
 
+/// Aborting is the one command the reducer must *not* act on: the runtime
+/// settles the turn and sends the receipt, so marking it done here would race
+/// the real outcome and hide a turn that was still streaming.
+#[test]
+fn an_abort_leaves_the_turn_streaming_until_the_runtime_settles_it() {
+    let mut app = app_without_runtime();
+    app.apply(Event::Ready {
+        session_id: "s".to_string(),
+        model: None,
+    });
+    app.send("hello".to_string());
+    app.apply(Event::Text("partial".to_string()));
+
+    app.abort();
+    assert!(app.streaming(), "the runtime owns the turn's receipt, not the reducer");
+    assert_eq!(app.turns[0].assistant.text, "partial", "abort must not discard what streamed");
+
+    app.apply(Event::TurnCompleted);
+    assert!(!app.streaming());
+    assert_eq!(app.turns[0].assistant.text, "partial");
+}
+
 #[test]
 fn an_empty_prompt_is_not_sent() {
     let mut app = app_without_runtime();

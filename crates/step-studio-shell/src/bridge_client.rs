@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
 use std::thread;
 
 use step_studio_bridge::{AdapterLaunch, BridgeSession};
@@ -19,6 +20,9 @@ fn trace(message: &str) {
 #[derive(Debug, Clone)]
 pub enum Command {
     Prompt(String),
+    /// Stop the turn in flight. Emits no events, so it does not compete with
+    /// the turn for the session's shared event stream.
+    Abort,
     SetModel(String),
     RefreshModels,
 }
@@ -98,8 +102,8 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
         };
 
         trace(&format!("launching adapter at {}", launch.adapter_script));
-        let mut session = match BridgeSession::connect(&launch) {
-            Ok(session) => session,
+        let session = match BridgeSession::connect(&launch) {
+            Ok(session) => Arc::new(session),
             Err(error) => {
                 trace(&format!("connect failed: {error}"));
                 let _ = to_ui.send(Event::Disconnected(error.to_string()));
@@ -127,14 +131,29 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
         };
         trace(&format!("ready, session={session_id}"));
         let _ = to_ui.send(Event::Ready { session_id, model });
-        let _ = refresh_models(&mut session, &to_ui);
+        let _ = refresh_models(&session, &to_ui);
 
         while let Ok(command) = from_ui.recv() {
             match command {
                 Command::Prompt(text) => {
-                    if let Err(error) = run_turn(&mut session, &to_ui, &text) {
-                        let _ = to_ui.send(Event::TurnFailed(error.to_string()));
-                    }
+                    // The turn runs on its own thread. It would otherwise hold
+                    // this loop for its whole length, and an abort queued behind
+                    // it would arrive only after the turn was already over.
+                    let session = Arc::clone(&session);
+                    let to_ui = to_ui.clone();
+                    thread::spawn(move || {
+                        if let Err(error) = run_turn(&session, &to_ui, &text) {
+                            let _ = to_ui.send(Event::TurnFailed(error.to_string()));
+                        }
+                    });
+                }
+                Command::Abort => {
+                    let session = Arc::clone(&session);
+                    thread::spawn(move || {
+                        // The adapter settles the pending prompt itself, so
+                        // there is nothing to relay here.
+                        let _ = session.invoke(serde_json::json!({ "kind": "core.abort" }));
+                    });
                 }
                 Command::SetModel(selector) => {
                     // The Studio operation takes the canonical `provider/id`
@@ -158,7 +177,7 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
                     }
                 }
                 Command::RefreshModels => {
-                    let _ = refresh_models(&mut session, &to_ui);
+                    let _ = refresh_models(&session, &to_ui);
                 }
             }
         }
@@ -168,7 +187,7 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
 }
 
 fn refresh_models(
-    session: &mut BridgeSession,
+    session: &BridgeSession,
     to_ui: &Sender<Event>,
 ) -> Result<(), step_studio_bridge::BridgeError> {
     let (receipt, _) = session.invoke(serde_json::json!({ "kind": "session.models.list" }))?;
@@ -193,7 +212,7 @@ fn refresh_models(
 
 /// Run one turn, streaming events as they arrive.
 fn run_turn(
-    session: &mut BridgeSession,
+    session: &BridgeSession,
     to_ui: &Sender<Event>,
     text: &str,
 ) -> Result<(), step_studio_bridge::BridgeError> {

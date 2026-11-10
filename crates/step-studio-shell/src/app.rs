@@ -174,6 +174,14 @@ impl App {
         }
     }
 
+    /// Stop the running turn. The runtime settles the prompt itself, so the
+    /// turn thread reports the outcome; nothing here waits for it.
+    pub fn abort(&mut self) {
+        if let Some(sender) = self.to_bridge.as_ref() {
+            let _ = sender.send(Command::Abort);
+        }
+    }
+
     pub fn set_model(&mut self, selector: String) {
         if let Some(sender) = self.to_bridge.as_ref() {
             let _ = sender.send(Command::SetModel(selector));
