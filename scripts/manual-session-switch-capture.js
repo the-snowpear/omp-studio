@@ -15,7 +15,6 @@
   let current, finished = false;
   function capture() {
     if (!current) return;
-    perf.stop();
     phases.push({ name: current.name, startedAtUnixMs: current.startedAtUnixMs, endedAtUnixMs: Date.now(),
       visibility: document.visibilityState, focused: document.hasFocus(),
       viewport: { width: innerWidth, height: innerHeight }, recording: perf.snapshot(true) });
@@ -33,8 +32,9 @@
     capture();
     const endedAtUnixMs = Date.now();
     cancel();
-    const result = { version: 1, kind: "manual-session-switch", startedAtUnixMs, endedAtUnixMs,
-      plannedDurationMs: 60_000, completed: endedAtUnixMs - startedAtUnixMs >= 60_000, phases };
+    const result = { version: 2, kind: "manual-session-switch", startedAtUnixMs, endedAtUnixMs,
+      plannedDurationMs: 60_000, completed: endedAtUnixMs - startedAtUnixMs >= 60_000, phases,
+      recording: perf.snapshot(true) };
     const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -47,10 +47,11 @@
     if (finished) return;
     capture();
     current = { name: stage.name, startedAtUnixMs: Date.now() };
-    perf.start();
+    perf.phase(schedule.indexOf(stage));
     console.info(`采样阶段：${stage.name}`);
   }
   perf.stop();
+  perf.start();
   window.ompManualSessionCapture = { cancel, finish };
   window.addEventListener("pagehide", cancel, { once: true });
   begin(schedule[0]);

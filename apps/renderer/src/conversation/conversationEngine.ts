@@ -1,4 +1,4 @@
-import type { ClientEvent, ConversationItem, ConversationRuntimeEvent } from "@omp-studio/client-contract";
+import type { ClientEvent, ConversationItem, ConversationRuntimeEvent, ConversationTranscriptReadPage } from "@omp-studio/client-contract";
 import { CONVERSATION_LIMITS, utf8ByteLength } from "@omp-studio/client-contract";
 import type { ConversationTarget } from "@omp-studio/studio-protocol";
 import { PREVIEW_CONVO_IDENTITY, PREVIEW_CONVO_LIVE, previewConversationItems } from "../preview/conversationFixtures";
@@ -8,6 +8,8 @@ import { ConversationStore } from "./conversationStore";
 import type { ConversationState, PendingUser, TimelineRow } from "./conversationViewModel";
 import { getDefaultThumbStore, type UserThumbStore } from "./userMessageThumbs";
 import { registerRendererResource } from "../rendererResources";
+import { projectReadsFor } from "../conversationWorkspace/projectReads";
+import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
 
 export type ConversationEngineInput = {
   readonly preview: boolean; readonly client: ConversationClient | null; readonly identity: ConversationIdentity | null;
@@ -45,12 +47,13 @@ const OPEN_BUFFER_MAX_BYTES = 2 * 1024 * 1024;
 export function createConversationEngine(input: ConversationEngineInput): ConversationEngine {
   const generation = nextGeneration++;
   activeEngines += 1;
-  const identity = input.preview ? PREVIEW_CONVO_IDENTITY : input.identity;
+  const identity: ConversationIdentity | null = input.preview ? PREVIEW_CONVO_IDENTITY : input.identity;
   const store = new ConversationStore({ target: { sessionId: identity?.sessionId ?? ("unavailable" as ConversationIdentity["sessionId"]) }, identity, generation });
   const listeners = new Set<() => void>();
   const metadataListeners = new Set<() => void>();
   let transportUnsubscribe: (() => void) | undefined;
   let started = false; let disposed = false; let loadingOlder = false; let run = 0;
+  let initialCachedPage: ConversationTranscriptReadPage | undefined;
   const storeUnsubscribe = store.subscribe(() => publish());
   let metadataSnapshot: ConversationSnapshot;
   const storeMetadataUnsubscribe = store.subscribeMetadata(() => {
@@ -108,7 +111,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
       store.setLoading(resyncing); store.hydrate({ items: input.previewItems, headCursor: "preview" as never, hasMoreBefore: false }, (input.previewLive ?? []).map((update, index) => ({ streamSeq: index + 1, update })), input.previewLive?.length ?? 0); return;
     }
     if (!input.canRead || input.client === null) { store.setUnavailable("当前环境无法读取对话。"); return; }
-    store.setLoading(resyncing);
+    store.setLoading(resyncing || initialCachedPage !== undefined);
     const source = createConversationSource(input.client);
     liveTarget = { kind: "session", sessionId: identity.sessionId };
     try {
@@ -128,7 +131,9 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
         for (const event of buffered) if (event.sessionId === conversationSessionId) applyLiveEvent(event);
       } else {
         const page = await source.readArchive(identity.sessionId, undefined, undefined, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);
-        if (disposed || token !== run) return; conversationSessionId = identity.sessionId; store.hydrate(page);
+        if (disposed || token !== run) return; conversationSessionId = identity.sessionId;
+        if (token === 1 && page === initialCachedPage) store.confirmHydrated(); else store.hydrate(page);
+        initialCachedPage = undefined;
       }
       void loadThumbs(token, identity.sessionId);
     } catch (cause) {
@@ -147,6 +152,11 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
       if (!disposed && token === run) store.prepend(page);
     } catch (cause) { const error = asClientError(cause); if (isStaleCursorError(error)) await hydrate(true); else if (!disposed && token === run) store.setError(error); }
     finally { if (!disposed && token === run) { loadingOlder = false; publish(); metadataSnapshot = { ...store.getMetadataSnapshot(), demo: input.preview, loadingOlder, identityKey: identityKey(store.getMetadataSnapshot().state.identity) }; for (const listener of metadataListeners) listener(); } }
+  }
+
+  if (!input.preview && input.client && identity && !input.runtimeConnected) {
+    const cached = projectReadsFor(input.client)?.page(identity.sessionId, identity.transcriptRevision);
+    if (cached) { initialCachedPage = cached; store.hydrate(cached); store.setLoading(true); sessionSwitchPerformance.mark("conversation.cacheDisplay", { rows: cached.items.length }); }
   }
 
   return {
@@ -177,6 +187,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
       snapshot = empty; metadataSnapshot = empty;
       buffer = []; bufferBytes = 0; bufferOverflowed = false; loadingOlder = false;
       liveTarget = undefined; conversationSessionId = undefined; watermark = 0;
+      initialCachedPage = undefined;
       activeEngines -= 1;
     },
     getDiagnostics: () => ({ disposed: disposed ? 1 : 0, rows: snapshot.rows.length, listeners: listeners.size, metadataListeners: metadataListeners.size, openBufferEvents: buffer.length, openBufferBytes: bufferBytes }),

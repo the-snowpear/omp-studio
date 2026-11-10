@@ -25,7 +25,7 @@ it("records switch timings, outcomes and numeric resources without operation pay
   recorder.mark("switch.commit");
   const result = recorder.snapshot();
   expect(result.events.filter(row => row.event === "switch.dispatch.end")).toEqual([
-    { atMs: 125, event: "switch.dispatch.end", sequence: 1, values: { durationMs: 125, failed: 1 } },
+    { atMs: 125, event: "switch.dispatch.end", sequence: 1, values: { operationId: 1, durationMs: 125, failed: 1 } },
   ]);
   expect(result.counters).toEqual({ heapUsedBytes: 123456789, documents: 3, views: 1 });
   expect(vi.getTimerCount()).toBe(1);
@@ -40,8 +40,8 @@ it("bounds retained samples and ignores completion from a stopped recording", ()
   const recorder = createSessionSwitchRecorder();
   recorder.start();
   const late = recorder.span("client.bootstrap");
-  for (let index = 0; index < 900; index++) recorder.mark("switch.commit", { count: index });
-  expect(recorder.snapshot().events).toHaveLength(600);
+  for (let index = 0; index < 6500; index++) recorder.mark("switch.commit", { count: index });
+  expect(recorder.snapshot().events).toHaveLength(6000);
   expect(recorder.snapshot().dropped).toBeGreaterThan(0);
   recorder.stop(); recorder.start(); late();
   expect(recorder.snapshot().events.map(row => row.event)).toEqual(["sample"]);

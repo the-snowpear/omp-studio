@@ -13,15 +13,17 @@ await mkdir(directory, { recursive: false });
 const paragraphs = Array.from({ length: 12 }, (_, index) => `Paragraph ${index + 1}: this is bounded, synthetic text for an offline conversation-switch measurement. It contains no user conversation, repository content, or credentials. Switching should release the old view while retaining only the draft, layout, and scalar reading anchor.\n\n`).join("");
 const text = `## Synthetic archive\n\n${paragraphs}\n- Archive read through the real Host\n- No prompt or tool command is sent\n\n\`\`\`ts\nconst sample = { offline: true, bounded: true };\n\`\`\`\n`;
 const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+const largeBytes = Number(process.env.OMP_NATIVE_PERF_LARGE_BYTES ?? 0);
 const sessions = [];
 const now = Date.now();
 for (let index = count - 1; index >= 0; index--) {
   const title = `Native performance session ${String(index + 1).padStart(3, "0")}`;
+  const body = largeBytes > 0 && (index === 1 || index === 2) ? text.repeat(Math.ceil(largeBytes / turns / Buffer.byteLength(text))) : text;
   const manager = SessionManager.create(workspace, directory, undefined, { studioOrigin: "studio-host" });
   try {
     for (let turn = 0; turn < turns; turn++) {
       manager.appendMessage({ role: "user", content: `Synthetic request ${turn + 1}: inspect the offline fixture without executing anything.`, timestamp: now - (turns - turn) * 1000 });
-      manager.appendMessage({ role: "assistant", content: [{ type: "text", text: `${text}\n\n${turn === turns - 1 ? `Fixture complete: ${title}` : `Synthetic turn ${turn + 1}`}` }], api: "openai-completions", provider: "test", model: "fixture", usage, stopReason: "stop", timestamp: now - (turns - turn) * 1000 + 500 });
+      manager.appendMessage({ role: "assistant", content: [{ type: "text", text: `${body}\n\n${turn === turns - 1 ? `Fixture complete: ${title}` : `Synthetic turn ${turn + 1}`}` }], api: "openai-completions", provider: "test", model: "fixture", usage, stopReason: "stop", timestamp: now - (turns - turn) * 1000 + 500 });
     }
     await manager.flush();
     await manager.setSessionName(title, "user");

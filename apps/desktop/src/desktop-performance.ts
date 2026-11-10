@@ -6,6 +6,10 @@ import { ConversationViews } from "./conversation-views.js";
 export const desktopConversationViews = new ConversationViews();
 
 const controllers = new Set<StudioRuntimeSessionController>();
+const readDiagnostics = new Set<() => Readonly<Record<string, number>>>();
+export function registerHostReadDiagnostics(read: () => Readonly<Record<string, number>>): () => void {
+  readDiagnostics.add(read); return () => { readDiagnostics.delete(read); };
+}
 let sink: HostLog | undefined;
 let nextInstance = 0;
 export function registerPerformanceController(controller: StudioRuntimeSessionController): () => void {
@@ -17,6 +21,7 @@ export function registerPerformanceController(controller: StudioRuntimeSessionCo
 }
 export function collectHostPerformanceCounters(): Readonly<Record<string, number>> {
   const result: Record<string, number> = { residents: controllers.size };
+  for (const read of readDiagnostics) for (const [key, value] of Object.entries(read())) result[key] = (result[key] ?? 0) + value;
   for (const controller of controllers) {
     for (const [key, value] of Object.entries(controller.getConversationDiagnostics())) result[key] = (result[key] ?? 0) + value;
   }

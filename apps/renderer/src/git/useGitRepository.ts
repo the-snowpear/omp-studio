@@ -2,6 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { GitRepositoryReadModel, StudioClient, WorkspaceId } from "@omp-studio/client-contract";
 import { hostErrorMessage } from "../hostError";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
+import { projectReadsFor } from "../conversationWorkspace/projectReads";
 
 type RepositorySnapshot = {
   readonly repository?: GitRepositoryReadModel;
@@ -63,6 +64,7 @@ function createRepositoryStore(client: StudioClient, workspaceId: WorkspaceId, r
   };
   const refresh = (): Promise<void> => {
     if (listeners.size === 0) return Promise.resolve();
+    projectReadsFor(client)?.invalidate("git.");
     generation += 1;
     // Reads not yet started already include this refresh; running reads do not.
     if (reading) dirty = true;

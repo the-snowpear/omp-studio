@@ -19,6 +19,7 @@ import {
 import { GzipFileError, readGunzipCapped, readGunzipPrefix } from "./gzip-file.js";
 import { defaultOmpArchiveRoot } from "./session-catalog.js";
 import { sameWorkspacePath } from "./workspace-path.js";
+import { SharedRead } from "./shared-read.js";
 
 const CURSOR_NAMESPACE = "session.archive.v1";
 const DEFAULT_MAX_SESSION_BYTES = 512 * 1024 * 1024;
@@ -133,6 +134,41 @@ export interface SessionArchiveReaderOptions {
   readonly maxScanFiles?: number;
   readonly snapshotCacheMaxBytes?: number;
   readonly cursorSecret?: Buffer;
+  readonly cacheBudget?: SessionArchiveCacheBudget;
+  /** Shared only between readers with the same roots and file limits. */
+  readonly index?: SessionArchiveIndex;
+}
+
+export class SessionArchiveIndex {
+  paths: readonly string[] | undefined;
+  sessions = new Map<string, string[]>();
+  versions = new Map<string, string>();
+  building: Promise<void> | undefined;
+}
+
+/** One Host budget, including projections, across every workspace reader.
+ * Estimates deliberately count parsed strings/objects at 4x raw and projections
+ * at another 2x. These are retention limits, not process RSS measurements. */
+export class SessionArchiveCacheBudget {
+  #entries = new Map<object, { raw: number; estimated: number; release: () => void }>();
+  retain(key: object, raw: number, projected: boolean, release: () => void): void {
+    this.#entries.delete(key);
+    this.#entries.set(key, { raw, estimated: raw * (projected ? 6 : 4), release });
+    while (this.#entries.size > DEFAULT_SNAPSHOT_CACHE_SIZE || this.diagnostics().rawBytes > 32 * 1024 * 1024 || this.diagnostics().estimatedBytes > 64 * 1024 * 1024) {
+      const first = this.#entries.entries().next().value!;
+      this.#entries.delete(first[0]); first[1].release();
+    }
+  }
+  touch(key: object): void {
+    const entry = this.#entries.get(key);
+    if (entry) { this.#entries.delete(key); this.#entries.set(key, entry); }
+  }
+  release(key: object): void { this.#entries.delete(key); }
+  diagnostics() {
+    let rawBytes = 0, estimatedBytes = 0;
+    for (const entry of this.#entries.values()) { rawBytes += entry.raw; estimatedBytes += entry.estimated; }
+    return { entries: this.#entries.size, rawBytes, estimatedBytes };
+  }
 }
 
 type ArchiveEntry = Record<string, unknown> & {
@@ -221,21 +257,20 @@ export class StudioSessionArchiveReader {
   readonly #maxScanFiles: number;
   readonly #snapshotCacheMaxBytes: number;
   readonly #cursorSecret: Buffer;
+  readonly #budget: SessionArchiveCacheBudget;
   /** Directory enumeration is cheap; header reads are not. Keep the index while paths are stable. */
-  #indexedPaths: readonly string[] | undefined;
-  #sessionIndex = new Map<string, string[]>();
-  #indexedVersions = new Map<string, FileVersion>();
-  #indexBuildInFlight: Promise<void> | undefined;
+  readonly #index: SessionArchiveIndex;
   /** Parsed snapshots are shared by paging and repeated session switches. */
   #snapshotCache = new Map<string, CachedSnapshot>();
   #snapshotCacheBytes = 0;
-  #snapshotInFlight = new Map<string, { version: FileVersion | undefined; promise: Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> }>();
+  #snapshotInFlight = new Map<string, { version: FileVersion | undefined; task: SharedRead<{ snapshot: ArchiveSnapshot; version: FileVersion }> }>();
   /**
    * 投影（entries → ConversationItem）结果。一次切换里 `readPage` / `readRevision` /
    * `listPersistedAgents` 会读同一份快照，翻页还会再读一次：投影是这条路径上最贵的一步
    * （每个字符串都要 sanitize、每个工具参数都要 JSON 序列化），不能每次重算。
    */
   #projectionCache = new Map<string, CachedProjection>();
+  #projectionInFlight = new Map<string, { snapshot: ArchiveSnapshot; task: SharedRead<readonly ConversationItem[]> }>();
 
   constructor(options: SessionArchiveReaderOptions) {
     if (options.allowedCwd.length === 0) throw new TypeError("allowedCwd is required");
@@ -246,6 +281,8 @@ export class StudioSessionArchiveReader {
     this.#maxScanFiles = options.maxScanFiles ?? DEFAULT_MAX_SCAN_FILES;
     this.#snapshotCacheMaxBytes = options.snapshotCacheMaxBytes ?? DEFAULT_SNAPSHOT_CACHE_MAX_BYTES;
     this.#cursorSecret = options.cursorSecret ?? randomBytes(32);
+    this.#budget = options.cacheBudget ?? new SessionArchiveCacheBudget();
+    this.#index = options.index ?? new SessionArchiveIndex();
     if (!Number.isSafeInteger(this.#maxSessionBytes) || this.#maxSessionBytes <= 0) {
       throw new TypeError("maxSessionBytes must be positive");
     }
@@ -257,7 +294,17 @@ export class StudioSessionArchiveReader {
     }
   }
 
-  async readPage(input: SessionArchiveReadInput): Promise<SessionArchiveTranscriptPage> {
+  clearCache(): void { for (const path of this.#snapshotCache.keys()) this.#dropCachedSnapshot(path); }
+
+  async prefetch(sessionId: string): Promise<SessionArchiveTranscriptPage | undefined> {
+    const path = await this.#locate(sessionId);
+    if (isCompressedSessionPath(path) || (await lstat(path)).size > 4 * 1024 * 1024) return undefined;
+    const page = await this.readPage({ sessionId });
+    return Buffer.byteLength(JSON.stringify(page), "utf8") <= 2 * 1024 * 1024 ? page : undefined;
+  }
+
+  async readPage(input: SessionArchiveReadInput, signal?: AbortSignal): Promise<SessionArchiveTranscriptPage> {
+    signal?.throwIfAborted();
     if (input.sessionId.length === 0) throw new SessionArchiveError("SESSION_NOT_FOUND", "Session id is required");
     const limit = input.limit ?? CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT;
     if (
@@ -276,8 +323,9 @@ export class StudioSessionArchiveReader {
         : await this.#locatePersistedAgent(parentFile, input.agentId);
     const snapshot = await this.#readSnapshot(located.path, located.sessionId, {
       requireCwd: input.agentId === undefined,
+      ...(signal ? { signal } : {}),
     });
-    const items = await this.#projectedItems(located.path, snapshot);
+    const items = await this.#projectedItems(located.path, snapshot, signal);
     let endExclusive = items.length;
     if (input.cursor !== undefined) {
       const cursor = this.#decodeCursor(input.cursor);
@@ -596,26 +644,26 @@ export class StudioSessionArchiveReader {
   async #locate(sessionId: string): Promise<string> {
     // Hot reads should use the already-built identity index. Directory walking is
     // reserved for a cache miss (new session) or an in-place replacement.
-    let matches = this.#sessionIndex.get(sessionId) ?? [];
+    let matches = this.#index.sessions.get(sessionId) ?? [];
     let candidates: string[] | undefined;
-    if (matches.length === 0 || this.#indexedPaths === undefined) {
+    if (matches.length === 0 || this.#index.paths === undefined) {
       candidates = await listSessionFiles({ sessions: this.#sessionsRoot, archive: this.#archiveRoot }, this.#maxScanFiles);
       await this.#ensureIndex(candidates);
-      matches = this.#sessionIndex.get(sessionId) ?? [];
+      matches = this.#index.sessions.get(sessionId) ?? [];
     }
     if (matches.length === 1) {
       const path = matches[0]!;
       const currentVersion = await readFileVersion(path, this.#maxSessionBytes);
-      if (currentVersion === this.#indexedVersions.get(path)) return path;
+      if (currentVersion === this.#index.versions.get(path)) return path;
       const header = await readHeader(path, Math.min(this.#maxSessionBytes, 64 * 1024), this.#maxSessionBytes);
       if (header?.id === sessionId) {
-        this.#indexedVersions.set(path, header.version);
+        this.#index.versions.set(path, header.version);
         return path;
       }
       // A file was replaced in place. Rebuild once so the new identity is visible.
       candidates ??= await listSessionFiles({ sessions: this.#sessionsRoot, archive: this.#archiveRoot }, this.#maxScanFiles);
       await this.#ensureIndex(candidates, true);
-      matches = this.#sessionIndex.get(sessionId) ?? [];
+      matches = this.#index.sessions.get(sessionId) ?? [];
     }
     if (matches.length === 0) throw new SessionArchiveError("SESSION_NOT_FOUND", "Session is not available");
     if (matches.length > 1) {
@@ -627,7 +675,7 @@ export class StudioSessionArchiveReader {
   async #readSnapshot(
     path: string,
     expectedSessionId: string,
-    options: { requireCwd?: boolean } = {},
+    options: { requireCwd?: boolean; signal?: AbortSignal } = {},
   ): Promise<ArchiveSnapshot> {
     const { snapshot } = await this.#readSnapshotVersioned(path, expectedSessionId, options);
     return snapshot;
@@ -636,51 +684,55 @@ export class StudioSessionArchiveReader {
   async #readSnapshotVersioned(
     path: string,
     expectedSessionId: string,
-    options: { requireCwd?: boolean } = {},
+    options: { requireCwd?: boolean; signal?: AbortSignal } = {},
   ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> {
+    options.signal?.throwIfAborted();
     const cached = this.#snapshotCache.get(path);
-    const indexedVersion = this.#indexedVersions.get(path);
+    const indexedVersion = this.#index.versions.get(path);
     if (cached !== undefined && indexedVersion === cached.version) {
       // 命中也要刷新 LRU 顺序：否则热会话会被读过一遍的冷会话挤出缓存。
       this.#snapshotCache.delete(path);
       this.#snapshotCache.set(path, cached);
+      this.#budget.touch(cached);
       return { snapshot: cached.snapshot, version: cached.version };
     }
     const pending = this.#snapshotInFlight.get(path);
-    if (pending !== undefined && pending.version === indexedVersion) return pending.promise;
+    if (pending !== undefined && pending.version === indexedVersion && !pending.task.controller.signal.aborted) return pending.task.join(options.signal);
     /* 文件变过：优先按追加续读（只解析新增字节），失败再整档重读。 */
-    const load = cached?.consumed === undefined
-      ? this.#readSnapshotUncached(path, expectedSessionId, options)
-      : this.#appendSnapshot(path, expectedSessionId, cached).then(
-          (appended) => appended ?? this.#readSnapshotUncached(path, expectedSessionId, options),
-        );
-    const read = load
-      .then(({ snapshot, version, consumed, weight }) => {
-        this.#dropCachedSnapshot(path);
-        if (weight <= this.#snapshotCacheMaxBytes) {
-          this.#snapshotCache.set(path, { snapshot, version, weight, ...(consumed === undefined ? {} : { consumed }) });
-          this.#snapshotCacheBytes += weight;
-        }
-        while (
-          this.#snapshotCache.size > DEFAULT_SNAPSHOT_CACHE_SIZE
-          || this.#snapshotCacheBytes > this.#snapshotCacheMaxBytes
-        ) {
-          const oldest = this.#snapshotCache.keys().next().value as string | undefined;
-          if (oldest === undefined) break;
-          this.#dropCachedSnapshot(oldest);
-        }
-        this.#indexedVersions.set(path, version);
-        return { snapshot, version };
-      })
-      .finally(() => {
-        if (this.#snapshotInFlight.get(path)?.promise === read) this.#snapshotInFlight.delete(path);
-      });
-    this.#snapshotInFlight.set(path, { version: indexedVersion, promise: read });
-    return read;
+    const task = new SharedRead(async signal => {
+      const load = cached?.consumed === undefined
+        ? this.#readSnapshotUncached(path, expectedSessionId, { ...options, signal })
+        : this.#appendSnapshot(path, expectedSessionId, cached, signal).then(
+            (appended) => appended ?? this.#readSnapshotUncached(path, expectedSessionId, { ...options, signal }),
+          );
+      return load
+        .then(({ snapshot, version, consumed, weight }) => {
+          signal.throwIfAborted();
+          this.#dropCachedSnapshot(path);
+          if (weight <= this.#snapshotCacheMaxBytes) {
+            this.#snapshotCache.set(path, { snapshot, version, weight, ...(consumed === undefined ? {} : { consumed }) });
+            this.#snapshotCacheBytes += weight;
+            this.#budget.retain(this.#snapshotCache.get(path)!, weight, false, () => this.#dropCachedSnapshot(path));
+          }
+          while (this.#snapshotCacheBytes > this.#snapshotCacheMaxBytes) {
+            const oldest = this.#snapshotCache.keys().next().value as string | undefined;
+            if (oldest === undefined) break;
+            this.#dropCachedSnapshot(oldest);
+          }
+          this.#index.versions.set(path, version);
+          return { snapshot, version };
+        })
+        .finally(() => {
+          if (this.#snapshotInFlight.get(path)?.task === task) this.#snapshotInFlight.delete(path);
+        });
+    });
+    this.#snapshotInFlight.set(path, { version: indexedVersion, task });
+    return task.join(options.signal);
   }
 
   #dropCachedSnapshot(path: string): void {
     const cached = this.#snapshotCache.get(path);
+    if (cached) this.#budget.release(cached);
     if (cached !== undefined) this.#snapshotCacheBytes = Math.max(0, this.#snapshotCacheBytes - cached.weight);
     this.#snapshotCache.delete(path);
     this.#projectionCache.delete(path);
@@ -694,6 +746,7 @@ export class StudioSessionArchiveReader {
     path: string,
     expectedSessionId: string,
     cached: CachedSnapshot,
+    signal?: AbortSignal,
   ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion; consumed: ConsumedPrefix; weight: number } | undefined> {
     const consumed = cached.consumed;
     if (consumed === undefined || isCompressedSessionPath(path)) return undefined;
@@ -723,10 +776,10 @@ export class StudioSessionArchiveReader {
       const seen = buffer.subarray(0, Math.min(overlap, offset));
       if (!seen.equals(consumed.tail.subarray(consumed.tail.length - seen.length))) return undefined;
       const appended = completeJsonlPrefix(buffer.subarray(overlap, offset));
-      const entries = cached.snapshot.entries;
-      const byId = cached.snapshot.byId;
+      const entries = [...cached.snapshot.entries];
+      const byId = new Map(cached.snapshot.byId);
       if (appended.byteLength > 0) {
-        const values = await parseCompleteJsonlYielding(appended.bytes);
+        const values = await parseCompleteJsonlYielding(appended.bytes, signal);
         for (const value of values) {
           const entry = parseEntry(value);
           if (entry === undefined) continue;
@@ -734,8 +787,8 @@ export class StudioSessionArchiveReader {
           byId.set(entry.id, entry);
         }
       }
-      const hash = consumed.hash;
-      if (appended.byteLength > 0) await updateHashYielding(hash, appended.bytes);
+      const hash = consumed.hash.copy();
+      if (appended.byteLength > 0) await updateHashYielding(hash, appended.bytes, signal);
       const nextConsumed: ConsumedPrefix = {
         bytes: consumed.bytes + appended.byteLength,
         hash,
@@ -763,24 +816,34 @@ export class StudioSessionArchiveReader {
   /**
    * 分支投影，带可续算缓存。新分支只是旧分支的追加时接着折叠，其余情况整条重折。
    */
-  async #projectedItems(path: string, snapshot: ArchiveSnapshot): Promise<readonly ConversationItem[]> {
+  async #projectedItems(path: string, snapshot: ArchiveSnapshot, signal?: AbortSignal): Promise<readonly ConversationItem[]> {
+    signal?.throwIfAborted();
+    const pending = this.#projectionInFlight.get(path);
+    if (pending?.snapshot === snapshot && !pending.task.controller.signal.aborted) return pending.task.join(signal);
+    const task = new SharedRead(taskSignal => this.#projectSnapshot(path, snapshot, taskSignal).catch(error => {
+      if (this.#projectionInFlight.get(path)?.task === task) this.#projectionCache.delete(path); throw error;
+    }).finally(() => {
+      if (this.#projectionInFlight.get(path)?.task === task) this.#projectionInFlight.delete(path);
+    }));
+    this.#projectionInFlight.set(path, { snapshot, task }); return task.join(signal);
+  }
+
+  async #projectSnapshot(path: string, snapshot: ArchiveSnapshot, signal: AbortSignal): Promise<readonly ConversationItem[]> {
     const branch = activeBranch(snapshot.byId, snapshot.branchLeafId);
     const cached = this.#projectionCache.get(path);
     const reusable =
       cached !== undefined && cached.leafId === snapshot.branchLeafId && isBranchPrefix(cached.branch, branch);
-    const state = reusable ? cached.state : createProjectionState();
+    if (reusable && cached.branch.length === branch.length) return cached.state.items;
+    const state = reusable ? { items: [...cached.state.items], toolOwners: new Map(cached.state.toolOwners), modelMentions: new Map(cached.state.modelMentions) } : createProjectionState();
     const from = reusable ? cached.branch.length : 0;
-    if (!reusable || from < branch.length) await foldBranch(state, branch, from);
+    if (!reusable || from < branch.length) await foldBranch(state, branch, from, signal);
     this.#projectionCache.delete(path);
     // A projection retains the parsed branch. Do not let it smuggle an
     // oversized, deliberately uncached snapshot back into long-lived memory.
     if (this.#snapshotCache.get(path)?.snapshot === snapshot) {
       this.#projectionCache.set(path, { leafId: snapshot.branchLeafId, branch, state });
-    }
-    while (this.#projectionCache.size > DEFAULT_SNAPSHOT_CACHE_SIZE) {
-      const oldest = this.#projectionCache.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
-      this.#projectionCache.delete(oldest);
+      const retained = this.#snapshotCache.get(path)!;
+      this.#budget.retain(retained, retained.weight, true, () => this.#dropCachedSnapshot(path));
     }
     return state.items;
   }
@@ -866,11 +929,11 @@ export class StudioSessionArchiveReader {
   async #readSnapshotUncached(
     path: string,
     expectedSessionId: string,
-    options: { requireCwd?: boolean } = {},
+    options: { requireCwd?: boolean; signal?: AbortSignal } = {},
   ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion; consumed?: ConsumedPrefix; weight: number }> {
     const { bytes, identity, version } = await this.#readWholeFile(path);
     const complete = completeJsonlPrefix(bytes);
-    const values = await parseCompleteJsonlYielding(complete.bytes);
+    const values = await parseCompleteJsonlYielding(complete.bytes, options.signal);
     const header = values.find((value) => isRecord(value) && value.type === "session");
     const requireCwd = options.requireCwd !== false;
     if (!isRecord(header) || typeof header.id !== "string" || (requireCwd && typeof header.cwd !== "string")) {
@@ -896,7 +959,7 @@ export class StudioSessionArchiveReader {
       .update("\0")
       .update(header.id)
       .update("\0");
-    await updateHashYielding(hash, complete.bytes);
+    await updateHashYielding(hash, complete.bytes, options.signal);
     return {
       snapshot: {
         sessionId: header.id,
@@ -963,10 +1026,10 @@ export class StudioSessionArchiveReader {
   }
 
   async #ensureIndex(paths: readonly string[], force = false): Promise<void> {
-    if (!force && this.#indexedPaths !== undefined && samePaths(this.#indexedPaths, paths)) return;
-    if (this.#indexBuildInFlight !== undefined) {
-      await this.#indexBuildInFlight;
-      if (!force && this.#indexedPaths !== undefined && samePaths(this.#indexedPaths, paths)) return;
+    if (!force && this.#index.paths !== undefined && samePaths(this.#index.paths, paths)) return;
+    if (this.#index.building !== undefined) {
+      await this.#index.building;
+      if (!force && this.#index.paths !== undefined && samePaths(this.#index.paths, paths)) return;
     }
     const build = (async () => {
       const index = new Map<string, string[]>();
@@ -979,13 +1042,13 @@ export class StudioSessionArchiveReader {
         else list.push(candidate);
         versions.set(candidate, header.version);
       }
-      this.#sessionIndex = index;
-      this.#indexedVersions = versions;
-      this.#indexedPaths = paths.slice();
+      this.#index.sessions = index;
+      this.#index.versions = versions;
+      this.#index.paths = paths.slice();
     })().finally(() => {
-      this.#indexBuildInFlight = undefined;
+      this.#index.building = undefined;
     });
-    this.#indexBuildInFlight = build;
+    this.#index.building = build;
     await build;
   }
 }
@@ -1201,10 +1264,10 @@ function completeJsonlPrefix(bytes: Buffer): { bytes: Buffer; byteLength: number
 /**
  * 逐行 JSON 解析，按时间片让出事件循环。
  *
- * 这一步在 Electron 主进程上跑：一个十几 MB 的会话整档解析要几百毫秒，同步做会把 Bridge
- * 事件、command 回执和别的 IPC 一起堵住。每 8ms 让一次，总 CPU 不变，但主进程不再假死。
+ * Desktop 在共享 Worker 中运行；定期让出，使取消消息能在整档解析完成前生效。
  */
-async function parseCompleteJsonlYielding(bytes: Buffer): Promise<unknown[]> {
+async function parseCompleteJsonlYielding(bytes: Buffer, signal?: AbortSignal): Promise<unknown[]> {
+  signal?.throwIfAborted();
   const values: unknown[] = [];
   let checkpoint = Date.now();
   let start = 0;
@@ -1224,6 +1287,7 @@ async function parseCompleteJsonlYielding(bytes: Buffer): Promise<unknown[]> {
     }
     if ((line & PARSE_YIELD_MASK) === 0 && Date.now() - checkpoint >= PARSE_YIELD_MS) {
       await yieldToEventLoop();
+      signal?.throwIfAborted();
       checkpoint = Date.now();
     }
   }
@@ -1231,13 +1295,15 @@ async function parseCompleteJsonlYielding(bytes: Buffer): Promise<unknown[]> {
 }
 
 /** 分片喂哈希：sha256 十几 MB 是一次几十毫秒的同步调用，切开让出。 */
-async function updateHashYielding(hash: Hash, bytes: Buffer): Promise<void> {
+async function updateHashYielding(hash: Hash, bytes: Buffer, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   const chunk = 1 << 20;
   let checkpoint = Date.now();
   for (let offset = 0; offset < bytes.length; offset += chunk) {
     hash.update(bytes.subarray(offset, Math.min(bytes.length, offset + chunk)));
     if (Date.now() - checkpoint >= PARSE_YIELD_MS) {
       await yieldToEventLoop();
+      signal?.throwIfAborted();
       checkpoint = Date.now();
     }
   }
@@ -1361,7 +1427,8 @@ function createProjectionState(): ProjectionState {
  * 把 `branch[from..]` 折进投影状态。这是一次纯前向折叠：中间结果只有 items 与
  * toolOwners，所以追加的分支可以接着上次的状态往下折，结果和整条重折一致。
  */
-async function foldBranch(state: ProjectionState, branch: readonly ArchiveEntry[], from: number): Promise<void> {
+async function foldBranch(state: ProjectionState, branch: readonly ArchiveEntry[], from: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   const { items, toolOwners } = state;
   let checkpoint = Date.now();
   for (let cursor = from; cursor < branch.length; cursor += 1) {
@@ -1371,6 +1438,7 @@ async function foldBranch(state: ProjectionState, branch: readonly ArchiveEntry[
     }
     if ((cursor & PARSE_YIELD_MASK) === 0 && Date.now() - checkpoint >= PARSE_YIELD_MS) {
       await yieldToEventLoop();
+      signal?.throwIfAborted();
       checkpoint = Date.now();
     }
     if (entry.type === "message") {

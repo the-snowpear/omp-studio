@@ -255,6 +255,7 @@ export function ConversationPane({
     loadingOlder,
     pin: held?.pin ?? livePin,
     contentKey: held?.contentKey ?? liveContentKey,
+    settling: switchState.phase === "settling" || switchState.phase === "revealing" || state.hydrateStatus === "loading" || state.hydrateStatus === "resyncing",
   });
   useConversationReading({ memory: readingMemory,
     // Wait for the existing two-frame initial layout before restoring the anchor offset.
@@ -327,12 +328,12 @@ export function ConversationPane({
   ) : (
     <>
       {demo ? null : <StatusBanner state={state} />}
-      {state.hasMoreBefore && state.hydrateStatus === "ready" ? (
+      {state.hasMoreBefore && (state.hydrateStatus === "ready" || state.hydrateStatus === "resyncing" && displayRows.length > 0) ? (
         <div className="convo-load-earlier">
           <button
             type="button"
             className="btn small outline"
-            disabled={loadingOlder}
+            disabled={loadingOlder || state.hydrateStatus !== "ready"}
             onClick={loadOlder}
           >
             {loadingOlder ? "正在加载更早消息…" : "加载更早消息"}

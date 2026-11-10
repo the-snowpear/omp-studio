@@ -261,6 +261,8 @@ export interface StudioHostClientFacadeOptions {
   readonly telemetryProbe?: HostSessionTelemetryProbePort;
   /** Optional scratch-directory factory for probe transcript copies. */
   readonly telemetryProbeWorkspace?: HostTelemetryProbeWorkspacePort;
+  readonly projectReads?: SharedProjectReads;
+  readonly archiveTelemetry?: SharedArchiveTelemetry<SessionTelemetryReadResult | undefined>;
   /** Resolves the active workspace cwd used to scope probe requests. */
   readonly workspaceCwd?: () => string | undefined;
   readonly diagnostics: HostDiagnosticsFactory;
@@ -711,6 +713,7 @@ export class StudioHostClientFacade implements ClientTransport {
   #unsubscribeGitExternal: Unsubscribe | undefined;
   #unsubscribeGithubProgress: Unsubscribe | undefined;
   #closed = false;
+  readonly #readLifetime = new AbortController();
   #lastHello: HostRuntimeHelloView | undefined;
   #lastEmittedConnection: RuntimeConnection | undefined;
   #lastPublishedVersion: StateVersion | undefined;
@@ -1090,6 +1093,10 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = await this.#queryArchiveTranscript(archiveRequest.input);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "session.transcript.prefetch": {
+        const page = await this.#options.archive?.prefetch?.((request as ClientQueryRequest<"session.transcript.prefetch">).input.sessionId);
+        return { ok: true, queryName: request.queryName, result: page ? { status: "ready", page } : { status: "skipped" } } as ClientQueryResponse;
+      }
       case "session.agents.list": {
         const agentsRequest = request as ClientQueryRequest<"session.agents.list">;
         const result = await this.#queryPersistedAgents(agentsRequest.input);
@@ -1113,6 +1120,11 @@ export class StudioHostClientFacade implements ClientTransport {
       case "git.repository.get": {
         const service = this.#requireGit(request.queryName);
         return { ok: true, queryName: request.queryName, result: await service.repository(request.input as { readonly workspaceId: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "git.repository.summary": {
+        const service = this.#requireGit(request.queryName);
+        if (!service.summary) throw unavailableError("Git summary is unavailable on this Host");
+        return { ok: true, queryName: request.queryName, result: await service.summary(request.input as { workspaceId: WorkspaceId }) } as ClientQueryResponse;
       }
       case "git.diff.get": {
         const service = this.#requireGit(request.queryName);
@@ -1464,6 +1476,7 @@ export class StudioHostClientFacade implements ClientTransport {
       return;
     }
     this.#closed = true;
+    this.#readLifetime.abort();
     this.#unsubscribeConnection?.();
     this.#unsubscribeConnection = undefined;
     this.#unsubscribePublication?.();
@@ -2443,7 +2456,7 @@ export class StudioHostClientFacade implements ClientTransport {
       throw unavailableError("session.transcript.readPage is not available");
     }
     try {
-      return await archive.readPage(input);
+      return await archive.readPage(input, this.#readLifetime.signal);
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === "SESSION_NOT_FOUND" || code === "AGENT_NOT_FOUND") {
@@ -2525,7 +2538,7 @@ export class StudioHostClientFacade implements ClientTransport {
    * one-shot OMP probe over a temporary transcript copy. The probe copy and
    * any absolute path stay Host-internal.
    */
-  async #querySessionTelemetry(input: { readonly sessionId: SessionId }): Promise<SessionTelemetryReadResult> {
+  async #querySessionTelemetry(input: { readonly sessionId: SessionId; readonly refresh?: boolean }): Promise<SessionTelemetryReadResult> {
     const archive = this.#options.archive;
     if (archive === undefined || archive.readRevision === undefined || archive.createProbeCopy === undefined) {
       throw unavailableError("session.telemetry.read requires the session archive");
@@ -2549,13 +2562,18 @@ export class StudioHostClientFacade implements ClientTransport {
       throw unavailableError("session is not available");
     }
     const store = this.#options.telemetryStore;
-    if (store !== undefined) {
+    if (store !== undefined && !input.refresh) {
       const persisted = await this.#readPersistedTelemetry(store, input.sessionId, revision.transcriptRevision);
       if (persisted !== undefined) {
         return this.#telemetryReadResult(input.sessionId, "persisted", "last-observed", persisted);
       }
     }
-    const probed = await this.#probeSessionTelemetry(input.sessionId, revision.transcriptRevision);
+    const run = (signal: AbortSignal) => this.#probeSessionTelemetry(input.sessionId, revision.transcriptRevision, signal);
+    const probed = this.#options.archiveTelemetry
+      ? await this.#options.archiveTelemetry.read(`${this.#options.workspaceCwd?.()}\0${input.sessionId}\0${revision.transcriptRevision}`, this.#readLifetime.signal, run, input.refresh)
+      : await run(this.#readLifetime.signal);
+    const latest = this.#currentSnapshotRef();
+    if (latest?.sessionId === input.sessionId && latest.telemetry) return this.#telemetryReadResult(input.sessionId, "live", "current-live", latest.telemetry);
     if (probed !== undefined) return probed;
     throw unavailableError("session telemetry is not available for this session");
   }
@@ -2575,7 +2593,7 @@ export class StudioHostClientFacade implements ClientTransport {
     }
   }
 
-  async #probeSessionTelemetry(sessionId: SessionId, transcriptRevision: string): Promise<SessionTelemetryReadResult | undefined> {
+  async #probeSessionTelemetry(sessionId: SessionId, transcriptRevision: string, signal: AbortSignal): Promise<SessionTelemetryReadResult | undefined> {
     const probe = this.#options.telemetryProbe;
     const workspace = this.#options.telemetryProbeWorkspace;
     const archive = this.#options.archive;
@@ -2591,23 +2609,21 @@ export class StudioHostClientFacade implements ClientTransport {
     }
     let directory: string | undefined;
     try {
+      signal.throwIfAborted();
       directory = await workspace.create();
+      signal.throwIfAborted();
       const copy = await archive.createProbeCopy(sessionId, directory);
+      if (copy.transcriptRevision !== transcriptRevision) return undefined;
+      signal.throwIfAborted();
       const outcome = await probe.run({
         sessionId,
         sessionFile: copy.temporarySessionFile,
         allowedCwd,
-        transcriptRevision,
+        signal,
       });
       if (!outcome.ok) return undefined;
       const telemetry = parseSessionTelemetrySnapshot(outcome.telemetry);
       if (telemetry.sessionId !== sessionId) return undefined;
-      // The Runtime may have resumed this exact session while the probe ran;
-      // live data wins over a recomputed archive estimate.
-      const liveSnapshot = this.#currentSnapshotRef();
-      if (liveSnapshot !== undefined && liveSnapshot.sessionId === sessionId && liveSnapshot.telemetry !== undefined) {
-        return this.#telemetryReadResult(sessionId, "live", "current-live", structuredClone(liveSnapshot.telemetry));
-      }
       return this.#telemetryReadResult(sessionId, "archive-recomputed", "current-environment-recomputed", telemetry);
     } catch {
       return undefined;
@@ -2629,6 +2645,10 @@ export class StudioHostClientFacade implements ClientTransport {
     return parseSessionTelemetryReadResult({ sessionId, source, semantics, telemetry: snapshot });
   }
 
+  #sharedProjectRead<T>(name: string, run: () => T | Promise<T>): Promise<T> {
+    return this.#options.projectReads?.read(`${this.#options.workspaceCwd?.()}\0${name}`, run) ?? Promise.resolve(run());
+  }
+
   async #querySkills(): Promise<ExtensibilityReadModel> {
     const service = this.#options.extensibility;
     if (service === undefined) {
@@ -2640,7 +2660,7 @@ export class StudioHostClientFacade implements ClientTransport {
         unavailableReason: "Host 未接入技能 / 插件适配器。",
       };
     }
-    return service.get();
+    return this.#sharedProjectRead("skills", service.get.bind(service));
   }
 
   async #queryMcp(): Promise<McpReadModel> {
@@ -2712,7 +2732,7 @@ export class StudioHostClientFacade implements ClientTransport {
         },
       };
     }
-    return service.get();
+    return this.#sharedProjectRead("models", service.get.bind(service));
   }
 
   async #currentInstalledManifest(): Promise<{ readonly manifest: RuntimeInstallationManifest } | undefined> {
@@ -3682,6 +3702,10 @@ export class StudioHostClientFacade implements ClientTransport {
     if (this.#terminalEmitted.has(requestId)) {
       return;
     }
+    if (receipt.status === "completed" && /^(models\.|skills\.|plugins\.|runtime\.install|config\.)/.test(receipt.commandName)) {
+      this.#options.projectReads?.invalidate();
+      this.#options.archiveTelemetry?.invalidate();
+    }
     this.#terminalEmitted.add(requestId);
     evictOldestKeys(this.#terminalEmitted, DEDUPE_KEY_CAPACITY);
     this.#registry.recordTerminal(requestId, receipt);
@@ -3699,3 +3723,4 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 }
 import { validatePredictionQuery } from "@omp-studio/studio-protocol";
+import type { SharedProjectReads, SharedArchiveTelemetry } from "./shared-reads.js";

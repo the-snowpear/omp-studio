@@ -65,3 +65,4 @@ export { mapRemoteInteractionToClient, sanitizeApprovalDetail } from "./interact
 
 export { HostEventBus, HostEventCursor, eventMatchesScope } from "./events.js";
 export type { HostEventContext, HostEventSeed, HostEventSeedBase } from "./events.js";
+export * from "./shared-reads.js";

@@ -380,6 +380,10 @@ class GitPreferencesStore {
 }
 
 export class DesktopGitService implements HostGitService {
+  readonly #repositoryReads = new Map<WorkspaceId, Promise<GitRepositoryReadModel>>();
+  readonly #summaryReads = new Map<WorkspaceId, Promise<import("@omp-studio/client-contract").QueryResult<"git.repository.summary">>>();
+  readonly #identities = new Map<WorkspaceId, { cwd: string; expires: number; read: Promise<RepositoryIdentity> }>();
+  readonly #statuses = new Map<WorkspaceId, Promise<{ identity: RepositoryIdentity; stdout: string; parsed: ReturnType<typeof parseStatus> }>>();
   readonly #runner: HostProcessRunner;
   readonly #queue: GitWriteQueue;
   readonly #preferences: GitPreferencesStore;
@@ -404,6 +408,7 @@ export class DesktopGitService implements HostGitService {
   }
 
   dispose(): void {
+    this.#identities.clear(); this.#statuses.clear(); this.#repositoryReads.clear(); this.#summaryReads.clear();
     for (const entry of this.#repoWatches.values()) {
       if (entry.timer !== undefined) clearTimeout(entry.timer);
       for (const handle of entry.handles) handle.close();
@@ -501,6 +506,17 @@ export class DesktopGitService implements HostGitService {
   }
 
   async #identity(workspaceId: WorkspaceId): Promise<RepositoryIdentity> {
+    const cwd = this.#workspace(workspaceId).canonicalPath;
+    const cached = this.#identities.get(workspaceId);
+    if (cached?.cwd === cwd && cached.expires > Date.now()) return cached.read;
+    const entry = { cwd, expires: Date.now() + 120_000, read: this.#readIdentity(workspaceId) };
+    void entry.read.catch(() => { entry.expires = Date.now() + 2000; });
+    this.#identities.delete(workspaceId); this.#identities.set(workspaceId, entry);
+    while (this.#identities.size > 16) this.#identities.delete(this.#identities.keys().next().value!);
+    return entry.read;
+  }
+
+  async #readIdentity(workspaceId: WorkspaceId): Promise<RepositoryIdentity> {
     const workspace = this.#workspace(workspaceId);
     const cwd = workspace.canonicalPath;
     const [top, common, gitDir] = await Promise.all([
@@ -524,13 +540,50 @@ export class DesktopGitService implements HostGitService {
   }
 
   async repository(input: { readonly workspaceId: WorkspaceId }): Promise<GitRepositoryReadModel> {
+    const existing = this.#repositoryReads.get(input.workspaceId);
+    if (existing) return existing;
+    const read = this.#readRepository(input, true).finally(() => { if (this.#repositoryReads.get(input.workspaceId) === read) this.#repositoryReads.delete(input.workspaceId); });
+    this.#repositoryReads.set(input.workspaceId, read);
+    return read;
+  }
+
+  async summary(input: { readonly workspaceId: WorkspaceId }): Promise<import("@omp-studio/client-contract").QueryResult<"git.repository.summary">> {
+    const existing = this.#summaryReads.get(input.workspaceId);
+    if (existing) return existing;
+    const read = this.#readSummary(input).finally(() => { if (this.#summaryReads.get(input.workspaceId) === read) this.#summaryReads.delete(input.workspaceId); });
+    this.#summaryReads.set(input.workspaceId, read); return read;
+  }
+
+  async #readSummary(input: { readonly workspaceId: WorkspaceId }): Promise<import("@omp-studio/client-contract").QueryResult<"git.repository.summary">> {
     const workspace = this.#workspace(input.workspaceId);
     try {
-      const identity = await this.#identity(input.workspaceId);
+      const { identity, parsed } = await this.#status(input.workspaceId, true);
+      return { workspaceId: input.workspaceId, isRepository: true, repositoryId: identity.repositoryId,
+        ...(parsed.branch === undefined ? {} : { branch: parsed.branch }), ...(parsed.headOid === undefined ? {} : { headOid: parsed.headOid }),
+        detached: parsed.detached, ahead: parsed.ahead, behind: parsed.behind, changedFiles: parsed.changes.length, sampledAt: new Date().toISOString() };
+    } catch (error) {
+      const mapped = displayError(error, workspace.canonicalPath);
+      return { workspaceId: input.workspaceId, isRepository: false, detached: false, ahead: 0, behind: 0, changedFiles: 0, sampledAt: new Date().toISOString(), unavailableReason: mapped.message };
+    }
+  }
+
+  #status(workspaceId: WorkspaceId, share: boolean) {
+    const existing = share ? this.#statuses.get(workspaceId) : undefined;
+    if (existing) return existing;
+    const read = this.#identity(workspaceId).then(async identity => {
       const result = await this.#git(identity.cwd, ["status", "--porcelain=v2", "--branch", "--show-stash", "--untracked-files=all", "-z"], { readOnly: true, timeoutMs: READ_TIMEOUT, outputLimit: 16 * 1024 * 1024 });
-      const parsed = parseStatus(result.stdout);
+      return { identity, stdout: result.stdout, parsed: parseStatus(result.stdout) };
+    }).finally(() => { if (this.#statuses.get(workspaceId) === read) this.#statuses.delete(workspaceId); });
+    if (share) this.#statuses.set(workspaceId, read);
+    return read;
+  }
+
+  async #readRepository(input: { readonly workspaceId: WorkspaceId }, share = false): Promise<GitRepositoryReadModel> {
+    const workspace = this.#workspace(input.workspaceId);
+    try {
+      const { identity, parsed, stdout } = await this.#status(input.workspaceId, share);
       const operation = await this.#operation(identity);
-      const revision = await this.#repositoryRevision(identity, result.stdout, parsed.changes, operation);
+      const revision = await this.#repositoryRevision(identity, stdout, parsed.changes, operation);
       const stats = await this.#uncommittedStats(identity, parsed.changes, parsed.unborn).catch(() => undefined);
       return {
         workspaceId: input.workspaceId,
@@ -849,11 +902,12 @@ export class DesktopGitService implements HostGitService {
   }
 
   async #assertRevision(workspaceId: WorkspaceId, expected: string): Promise<void> {
-    const current = await this.repository({ workspaceId });
+    const current = await this.#readRepository({ workspaceId });
     if (current.revision !== expected) throw clientError("STATE_VERSION_CONFLICT", "Repository state changed; review the operation again");
   }
 
   async execute(input: GitExecuteInput, requestId: CommandRequestId): Promise<GitOperationResult> {
+    if (input.workspaceId) { this.#identities.delete(input.workspaceId); this.#repositoryReads.delete(input.workspaceId); this.#summaryReads.delete(input.workspaceId); this.#statuses.delete(input.workspaceId); }
     const operation = input.operation;
     if (operation.kind === "cancel") {
       const cancelled = this.#runner.cancel(operation.requestId);
@@ -867,7 +921,7 @@ export class DesktopGitService implements HostGitService {
       if (operation.kind === "init") {
         const workspace = this.#workspace(input.workspaceId);
         await this.#git(workspace.canonicalPath, ["init"], { requestId, timeoutMs: WRITE_TIMEOUT, phase: "initializing" });
-        return { operation: operation.kind, message: "Repository initialized", repository: await this.repository({ workspaceId: input.workspaceId }), workspaceId: input.workspaceId };
+        return { operation: operation.kind, message: "Repository initialized", repository: await this.#readRepository({ workspaceId: input.workspaceId }), workspaceId: input.workspaceId };
       }
       const identity = await this.#identity(input.workspaceId);
       return await this.#queue.run(identity.commonDir, async () => {
@@ -876,6 +930,7 @@ export class DesktopGitService implements HostGitService {
       });
     } finally {
       this.#runner.untrack(requestId);
+      if (input.workspaceId) { this.#repositoryReads.delete(input.workspaceId); this.#summaryReads.delete(input.workspaceId); this.#statuses.delete(input.workspaceId); }
       if (input.workspaceId !== undefined) this.#externalSuppressUntil.set(input.workspaceId, Date.now() + EXTERNAL_SUPPRESS_AFTER_COMMAND_MS);
     }
   }
@@ -895,7 +950,7 @@ export class DesktopGitService implements HostGitService {
     }
     const stored = await this.options.registry.upsertByPath(target);
     const workspaceId = stored.workspaceId as WorkspaceId;
-    return { operation: operation.kind, message: "Repository cloned", createdWorkspaceId: workspaceId, workspaceId, repository: await this.repository({ workspaceId }) };
+    return { operation: operation.kind, message: "Repository cloned", createdWorkspaceId: workspaceId, workspaceId, repository: await this.#readRepository({ workspaceId }) };
   }
 
   async #executeQueued(identity: RepositoryIdentity, workspaceId: WorkspaceId, operation: GitOperation, requestId: CommandRequestId): Promise<GitOperationResult> {
@@ -907,14 +962,14 @@ export class DesktopGitService implements HostGitService {
       case "stage": args = ["add", "--", ...operation.paths.map(normalizeRelativePath)]; break;
       case "unstage": {
         const paths = operation.paths.map(normalizeRelativePath);
-        const current = await this.repository({ workspaceId });
+        const current = await this.#readRepository({ workspaceId });
         args = current.unborn
           ? ["rm", "--cached", "-r", "--ignore-unmatch", "--", ...paths]
           : ["restore", "--staged", "--", ...paths];
         break;
       }
       case "discard": {
-        const current = await this.repository({ workspaceId });
+        const current = await this.#readRepository({ workspaceId });
         if (current.revision !== operation.expectedRevision) throw clientError("STATE_VERSION_CONFLICT", "Repository state changed; review the operation again");
         const paths = operation.paths.map(normalizeRelativePath);
         const untrackedPaths = new Set(current.changes.filter((change) => change.worktree === "untracked").map((change) => change.path));
@@ -922,7 +977,7 @@ export class DesktopGitService implements HostGitService {
         const tracked = paths.filter((path) => !untrackedPaths.has(path));
         if (tracked.length > 0) await this.#git(identity.cwd, ["restore", "--worktree", "--", ...tracked], { requestId, timeoutMs, phase: operation.kind });
         if (untracked.length > 0) await this.#git(identity.cwd, ["clean", "-f", "--", ...untracked], { requestId, timeoutMs, phase: operation.kind });
-        return { operation: operation.kind, message: `${operation.kind} completed`, workspaceId, repository: await this.repository({ workspaceId }) };
+        return { operation: operation.kind, message: `${operation.kind} completed`, workspaceId, repository: await this.#readRepository({ workspaceId }) };
       }
       case "commit": {
         if (operation.paths !== undefined && operation.amend === true) throw clientError("INVALID_ARGUMENT", "Cannot combine amend with a path-limited commit");
@@ -946,7 +1001,7 @@ export class DesktopGitService implements HostGitService {
           }
           throw clientError("INVALID_ARGUMENT", [SWITCH_BLOCKED_HEADER, ...lines].join("\n"));
         }
-        return { operation: operation.kind, message: "branch.switch completed", workspaceId, repository: await this.repository({ workspaceId }) };
+        return { operation: operation.kind, message: "branch.switch completed", workspaceId, repository: await this.#readRepository({ workspaceId }) };
       }
       case "branch.rename": args = ["branch", "-m", ...(operation.oldName ? [assertRef(operation.oldName)] : []), assertRef(operation.newName)]; break;
       case "branch.delete": if (operation.force) { if (!operation.expectedRevision) throw clientError("INVALID_ARGUMENT", "Force delete requires a reviewed repository revision"); await this.#assertRevision(workspaceId, operation.expectedRevision); } args = ["branch", operation.force ? "-D" : "-d", assertRef(operation.name)]; break;
@@ -957,7 +1012,7 @@ export class DesktopGitService implements HostGitService {
         const inside = relative(identity.topLevel, canonical);
         if (!inside.startsWith("..") && !isAbsolute(inside)) throw clientError("INVALID_ARGUMENT", "Worktree root must be outside the current worktree");
         await this.#preferences.set(identity.repositoryId, canonical);
-        return { operation: operation.kind, message: "Worktree root saved", workspaceId, repository: await this.repository({ workspaceId }) };
+        return { operation: operation.kind, message: "Worktree root saved", workspaceId, repository: await this.#readRepository({ workspaceId }) };
       }
       case "worktree.create": {
         const root = await this.#preferences.get(identity.repositoryId);
@@ -970,7 +1025,7 @@ export class DesktopGitService implements HostGitService {
         await this.#git(identity.cwd, args, { requestId, timeoutMs: WRITE_TIMEOUT, phase: "creating-worktree" });
         const stored = await this.options.registry.upsertByPath(target);
         createdWorkspaceId = stored.workspaceId as WorkspaceId;
-        return { operation: operation.kind, message: "Worktree created", workspaceId, createdWorkspaceId, repository: await this.repository({ workspaceId }) };
+        return { operation: operation.kind, message: "Worktree created", workspaceId, createdWorkspaceId, repository: await this.#readRepository({ workspaceId }) };
       }
       case "worktree.lock": { const target = await this.#resolveWorktree(identity, operation.worktreeId); args = ["worktree", "lock", ...(operation.reason ? ["--reason", operation.reason] : []), target]; break; }
       case "worktree.unlock": { const target = await this.#resolveWorktree(identity, operation.worktreeId); args = ["worktree", "unlock", target]; break; }
@@ -1005,7 +1060,7 @@ export class DesktopGitService implements HostGitService {
       case "cancel": throw clientError("INVALID_ARGUMENT", "Operation is not valid in this context");
     }
     await this.#git(identity.cwd, args, { requestId, ...(stdin === undefined ? {} : { stdin }), timeoutMs, phase: operation.kind });
-    return { operation: operation.kind, message: `${operation.kind} completed`, workspaceId, ...(createdWorkspaceId === undefined ? {} : { createdWorkspaceId }), repository: await this.repository({ workspaceId }) };
+    return { operation: operation.kind, message: `${operation.kind} completed`, workspaceId, ...(createdWorkspaceId === undefined ? {} : { createdWorkspaceId }), repository: await this.#readRepository({ workspaceId }) };
   }
 
   async #resolveWorktree(identity: RepositoryIdentity, worktreeId: GitWorktreeId): Promise<string> {

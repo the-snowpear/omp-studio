@@ -37,6 +37,7 @@ try {
       }
     } catch { <# Optional Windows counter; omit unavailable values rather than report a false zero. #> }
     $groups = @{}
+    $processes = @()
     foreach ($row in $rows) {
       if (-not $ids.Contains([int]$row.ProcessId)) { continue }
       $process = Get-Process -Id $row.ProcessId -ErrorAction SilentlyContinue
@@ -46,6 +47,7 @@ try {
         elseif ($command.Contains('--type=gpu-process')) { 'gpu' }
         elseif ($command.Contains('--type=renderer')) { 'renderer' }
         elseif ($command.Contains('network.mojom.NetworkService')) { 'network' }
+        elseif ($command.Contains('--studio-session-telemetry-probe')) { 'telemetry-probe' }
         elseif ($row.Name -eq 'omp.exe' -or $command.Contains('--mode studio-host')) { 'runtime' }
         else { 'other-child' }
       if (-not $groups.ContainsKey($role)) { $groups[$role] = @{ count = 0; workingSetBytes = 0L; privateWorkingSetBytes = 0L; privateCommitBytes = 0L; cpuCorePercent = 0.0; cpuMachinePercent = 0.0 } }
@@ -66,8 +68,12 @@ try {
         }
       }
       $previous[$key] = @{ at = $stamp; cpu = $cpu }
+      $processes += @{ pid = [int]$row.ProcessId; parentPid = [int]$row.ParentProcessId; role = $role;
+        startedAtUnixMs = if ($row.CreationDate) { ([DateTimeOffset]$row.CreationDate).ToUnixTimeMilliseconds() } else { $null };
+        workingSetBytes = $process.WorkingSet64; privateCommitBytes = $process.PrivateMemorySize64;
+        privateWorkingSetBytes = $privateWorkingSets[[int]$row.ProcessId]; cpuTotalMs = $cpu }
     }
-    $writer.WriteLine((@{ type = 'sample'; atMs = $watch.ElapsedMilliseconds; roles = $groups } | ConvertTo-Json -Compress -Depth 5))
+    $writer.WriteLine((@{ type = 'sample'; atMs = $watch.ElapsedMilliseconds; roles = $groups; processes = $processes } | ConvertTo-Json -Compress -Depth 5))
     $writer.Flush()
     Start-Sleep -Seconds $IntervalSeconds
   }

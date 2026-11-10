@@ -164,12 +164,15 @@ export interface QueryInputMap extends RuntimeViewQueryMap, ContextViewQueryMap,
   "session.agents.list": {
     readonly sessionId: SessionId;
   };
+  "session.transcript.prefetch": { readonly sessionId: SessionId };
   /** Read-only telemetry for a session: live snapshot, persisted record, or recomputed archive probe. */
   "session.telemetry.read": {
     readonly sessionId: SessionId;
+    readonly refresh?: boolean;
   };
   "git.toolchain.get": EmptyInput;
   "git.repository.get": { readonly workspaceId: WorkspaceId };
+  "git.repository.summary": { readonly workspaceId: WorkspaceId };
   "git.diff.get": { readonly workspaceId: WorkspaceId; readonly path: string; readonly target: GitDiffTarget };
   "git.branches.list": { readonly workspaceId: WorkspaceId };
   "git.worktrees.list": { readonly workspaceId: WorkspaceId };
@@ -245,6 +248,7 @@ export interface QueryResultMap extends RuntimeViewResultMap, ContextViewResultM
   "agent.conversation.read": ConversationTranscriptPage;
   /** Persisted transcript page. Available independently of Runtime residency. */
   "session.transcript.readPage": ConversationTranscriptReadPage;
+  "session.transcript.prefetch": { readonly status: "ready"; readonly page: ConversationTranscriptReadPage } | { readonly status: "skipped" };
   /** Persisted child-agent roster for an explicit parent session. */
   "session.agents.list": { readonly sessionId: SessionId; readonly agents: readonly StudioAgentSnapshot[] };
   /** Session telemetry with provenance. Available independently of Runtime residency. */
@@ -252,6 +256,7 @@ export interface QueryResultMap extends RuntimeViewResultMap, ContextViewResultM
   "session.compaction.read": SessionCompactionRead;
   "git.toolchain.get": GitToolchainReadModel;
   "git.repository.get": GitRepositoryReadModel;
+  "git.repository.summary": Pick<GitRepositoryReadModel, "workspaceId" | "isRepository" | "repositoryId" | "branch" | "headOid" | "detached" | "ahead" | "behind" | "unavailableReason"> & { readonly changedFiles: number; readonly sampledAt: string };
   "git.diff.get": GitDiffReadModel;
   "git.branches.list": GitBranchListReadModel;
   "git.worktrees.list": GitWorktreeListReadModel;

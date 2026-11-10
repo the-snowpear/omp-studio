@@ -7,7 +7,7 @@ import type { SessionId, SessionTelemetryReadResult, SessionTelemetrySnapshot, S
  * can pass a plain object without constructing a full StudioClient.
  */
 export type ViewedTelemetryClient = {
-  query(name: "session.telemetry.read", input: { readonly sessionId: SessionId }): Promise<SessionTelemetryReadResult>;
+  query(name: "session.telemetry.read", input: { readonly sessionId: SessionId; readonly refresh?: boolean }): Promise<SessionTelemetryReadResult>;
 };
 
 export type ViewedSessionTelemetryStatus = "preview" | "live" | "idle" | "loading" | "ready" | "unavailable";
@@ -102,7 +102,7 @@ export function useViewedSessionTelemetry(options: {
         const existing = inFlightRef.current.get(targetSessionId);
         let request = existing?.refreshToken === refreshToken ? existing : undefined;
         if (request === undefined) {
-          const promise = client.query("session.telemetry.read", { sessionId: targetSessionId }).then((result) => {
+          const promise = client.query("session.telemetry.read", { sessionId: targetSessionId, ...(refreshToken > 0 ? { refresh: true } : {}) }).then((result) => {
             const entry: CachedResult = { source: result.source, telemetry: result.telemetry, refreshToken };
             // A superseded refresh must not overwrite its newer result. A read
             // completed after navigation is still useful in the bounded cache.

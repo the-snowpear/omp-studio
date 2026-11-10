@@ -52,3 +52,14 @@ it("backfills an old anchor without repeatedly reading when Store retention stop
   await waitFor(() => expect(detach).toHaveBeenCalledOnce());
   expect(loadOlder).toHaveBeenCalledOnce();
 });
+
+it("restores an anchor from cached rows before the refresh completes", async () => {
+  const value = snapshot(), itemId = timelineRowKey(value.rows[0]!);
+  const memory: ConversationReadingMemory = { reading: { anchor: { itemId, offset: 0, scrollTop: 350, scrollHeight: 1200 }, following: false, rows: value.rows.length } };
+  const node = scroller(itemId), detach = vi.fn(), loadOlder = vi.fn();
+  const cached = { ...value, state: { ...value.state, hydrateStatus: "resyncing" as const } };
+  const mounted = renderHook(({ current }) => useConversationReading({ memory, visible: true, snapshot: current, scrollerRef: node, follow: false, detachFromLatest: detach, loadOlder }), { initialProps: { current: cached as typeof value } });
+  await waitFor(() => expect(node.current.scrollTop).toBe(350));
+  mounted.rerender({ current: value });
+  expect(detach).toHaveBeenCalledOnce(); expect(loadOlder).not.toHaveBeenCalled();
+});

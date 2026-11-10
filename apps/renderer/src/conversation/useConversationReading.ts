@@ -46,11 +46,13 @@ export function useConversationReading({ memory, visible, snapshot, scrollerRef,
   }, [visible, memory, save]);
   useLayoutEffect(() => beforeDetach?.(save), [beforeDetach, save]);
   useEffect(() => {
-    if (snapshot.state.hydrateStatus === "loading" || snapshot.state.hydrateStatus === "resyncing") {
+    const refreshing = snapshot.state.hydrateStatus === "loading" || snapshot.state.hydrateStatus === "resyncing";
+    if (refreshing && snapshot.rows.length === 0) {
       restored.current = false;
       previousCount.current = -1;
     }
-    if (!visible || !memory || snapshot.state.hydrateStatus !== "ready" || snapshot.loadingOlder || restored.current) return;
+    const ready = snapshot.state.hydrateStatus === "ready";
+    if (!visible || !memory || (!ready && !(refreshing && snapshot.rows.length > 0)) || snapshot.loadingOlder || restored.current) return;
     const reading = pending.current;
     if (!reading || reading.following || (reading.conversationSessionId && reading.conversationSessionId !== snapshot.state.identity?.sessionId)) {
       restored.current = true;
@@ -59,6 +61,7 @@ export function useConversationReading({ memory, visible, snapshot, scrollerRef,
     const anchor = reading.anchor;
     // Re-read older pages only until the anchor is found or Store retention stops growing.
     if (anchor?.itemId && !snapshot.rows.some(row => timelineRowKey(row) === anchor.itemId) && snapshot.state.hasMoreBefore && snapshot.state.items.length > previousCount.current) {
+      if (!ready) return; // Cached cursors must be revalidated before backfilling.
       previousCount.current = snapshot.state.items.length;
       loadOlder();
       return;

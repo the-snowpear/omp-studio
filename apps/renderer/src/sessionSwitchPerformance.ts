@@ -4,7 +4,7 @@ import { collectRendererResources } from "./rendererResources";
 type Counters = Readonly<Record<string, number>>;
 type Reader = (deep: boolean) => Counters;
 type Sample = { atMs: number; event: string; sequence: number; values: Counters };
-const CAPACITY = 600;
+const CAPACITY = 6000;
 const STORAGE_KEY = "omp.sessionSwitchPerformance";
 const noop = () => {};
 
@@ -16,7 +16,7 @@ export function createSessionSwitchRecorder(options: {
   const now = options.now ?? (() => performance.now());
   const readers = new Set<Reader>();
   let events: Sample[] = [];
-  let active = false, generation = 0, sequence = 0, dropped = 0;
+  let active = false, generation = 0, sequence = 0, dropped = 0, operation = 0;
   let startedAt = 0, lastSampleAt = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
   let observer: PerformanceObserver | undefined;
@@ -39,18 +39,18 @@ export function createSessionSwitchRecorder(options: {
     span(event: string) {
       if (!active) return noop;
       if (event === "switch.dispatch") sequence++;
-      const token = generation, eventSequence = sequence, start = now();
-      record(`${event}.start`, {}, eventSequence);
+      const token = generation, eventSequence = sequence, start = now(), operationId = ++operation;
+      record(`${event}.start`, { operationId }, eventSequence);
       let ended = false;
       return (failed = false) => {
         if (ended || token !== generation) return;
         ended = true;
-        record(`${event}.end`, { durationMs: now() - start, failed: Number(failed) }, eventSequence);
+        record(`${event}.end`, { operationId, durationMs: now() - start, failed: Number(failed) }, eventSequence);
       };
     },
     start() {
       if (active) return;
-      active = true; generation++; sequence = 0; dropped = 0; events = [];
+      active = true; generation++; sequence = 0; operation = 0; dropped = 0; events = [];
       startedAt = now(); lastSampleAt = startedAt;
       record("sample", counters(false));
       timer = setInterval(() => {
@@ -105,6 +105,7 @@ const browserApi = {
     sessionSwitchPerformance.stop();
   },
   snapshot: (deep = false) => sessionSwitchPerformance.snapshot(deep),
+  phase: (index: number) => sessionSwitchPerformance.mark("capture.phase", { index }),
   download() {
     const blob = new Blob([JSON.stringify(sessionSwitchPerformance.snapshot(true), null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob), anchor = document.createElement("a");

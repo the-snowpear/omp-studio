@@ -217,11 +217,11 @@ function ContextDockChrome({ context, children }: { context: ContextUsage | null
   return <><DockPanelMeter id="context" value={meter} /><DockPanel id="context">{children}</DockPanel></>;
 }
 
-/** Keep the data source alive for folded headers and floating icons, with one read for all three views. */
+/** Live usage can feed a folded header; expensive archive probes require an open body. */
 export function ContextDockPanel(props: ContextSourceProps) {
-  const { hosts, layout } = useDock();
+  const { hosts } = useDock();
   const host = hosts.get("context");
   const visibility = useSyncExternalStore(host.subscribe, host.snapshot);
-  const visible = visibility.visible || (layout.rail.mode !== "hidden" && layout.rail.panels.includes("context"));
+  const visible = visibility.visible;
   return <ContextDockCard {...props} visible={visible} render={(card, context) => <ContextDockChrome context={context}>{card}</ContextDockChrome>} />;
 }

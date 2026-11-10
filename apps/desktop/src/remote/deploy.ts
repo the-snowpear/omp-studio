@@ -55,25 +55,49 @@ export async function probeRemote(connection: SshConnection, signal?: AbortSigna
   return detectRemoteEnvironment(connection, signal, authentication);
 }
 
-export async function deployRemote(connection: SshConnection, environment: RemoteEnvironment, bundleDirectory: string, signal?: AbortSignal, authentication?: SshAuthentication): Promise<RemoteInstallation> {
+export async function loadRemoteBundle(bundleDirectory: string): Promise<{ sha256: string; payloadHash: string; payload: Buffer }> {
   const bytes = await readFile(join(bundleDirectory, "host.mjs"));
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const result = JSON.parse(await runSsh(connection, nodeRemoteCommand(`
+  const manifest = JSON.parse(await readFile(join(bundleDirectory, "host.json"), "utf8")) as { files?: { name: string; sha256: string }[] };
+  const files = [];
+  for (const entry of manifest.files ?? []) {
+    if (!/^archive-worker-[a-f0-9]{64}\.mjs$/.test(entry.name)) throw new Error("Unexpected Host worker artifact");
+    const data = await readFile(join(bundleDirectory, entry.name));
+    if (createHash("sha256").update(data).digest("hex") !== entry.sha256) throw new Error("Host worker checksum mismatch");
+    files.push({ name: entry.name, sha256: entry.sha256, content: data.toString("base64") });
+  }
+  files.push({ name: "host.mjs", sha256, content: bytes.toString("base64") });
+  const payload = Buffer.from(JSON.stringify({ files }));
+  return { sha256, payload, payloadHash: createHash("sha256").update(payload).digest("hex") };
+}
+
+export function remoteInstallScript(root: string, hash: string, payloadHash: string): string {
+  return `
     const fs=require('node:fs'),p=require('node:path'),crypto=require('node:crypto'),cp=require('node:child_process');
-    const root=${JSON.stringify(environment.root)},hash=${JSON.stringify(sha256)};
+    const root=${JSON.stringify(root)},hash=${JSON.stringify(hash)},payloadHash=${JSON.stringify(payloadHash)};
     const dir=p.join(root,'versions',hash),entry=p.join(dir,'host.mjs'),state=p.join(root,'state');
     const chunks=[];let size=0;
     process.stdin.on('data',c=>{size+=c.length;if(size>16*1024*1024)throw Error('Host bundle too large');chunks.push(c)});
     process.stdin.on('end',()=>{
-      const data=Buffer.concat(chunks);if(crypto.createHash('sha256').update(data).digest('hex')!==hash)throw Error('Host bundle checksum mismatch');
+      const data=Buffer.concat(chunks);if(crypto.createHash('sha256').update(data).digest('hex')!==payloadHash)throw Error('Host bundle checksum mismatch');
       fs.mkdirSync(dir,{recursive:true,mode:448});
-      if(fs.existsSync(entry)){if(crypto.createHash('sha256').update(fs.readFileSync(entry)).digest('hex')!==hash)throw Error('Installed Host bundle is corrupt');}
-      else fs.writeFileSync(entry,data,{flag:'wx',mode:384});
+      for(const file of JSON.parse(data).files){
+        if(file.name!=='host.mjs'&&!/^archive-worker-[a-f0-9]{64}\\.mjs$/.test(file.name))throw Error('Unexpected Host artifact');
+        const target=p.join(dir,file.name),content=Buffer.from(file.content,'base64');
+        if(crypto.createHash('sha256').update(content).digest('hex')!==file.sha256)throw Error('Host artifact checksum mismatch');
+        if(fs.existsSync(target)){if(crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex')!==file.sha256)throw Error('Installed Host bundle is corrupt');}
+        else fs.writeFileSync(target,content,{flag:'wx',mode:384});
+      }
       try { cp.execFileSync(process.execPath,[entry,'start','--state',state],{timeout:90000,stdio:['ignore','pipe','pipe'],windowsHide:true}); }
       catch(error){process.stderr.write(String(error.stderr||error.message));process.exitCode=1;return;}
       process.stdout.write(JSON.stringify({entry,state,bundleVersion:hash}));
     });
-  `, environment.node), bytes, 105_000, signal, authentication)) as RemoteInstallation;
+  `;
+}
+
+export async function deployRemote(connection: SshConnection, environment: RemoteEnvironment, bundleDirectory: string, signal?: AbortSignal, authentication?: SshAuthentication): Promise<RemoteInstallation> {
+  const { sha256, payloadHash, payload } = await loadRemoteBundle(bundleDirectory);
+  const result = JSON.parse(await runSsh(connection, nodeRemoteCommand(remoteInstallScript(environment.root, sha256, payloadHash), environment.node), payload, 105_000, signal, authentication)) as RemoteInstallation;
   return result;
 }
 

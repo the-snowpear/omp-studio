@@ -363,13 +363,14 @@ export interface HostSessionCatalogProvider {
 
 /** Runtime-independent persistent transcript reader owned by the Host/Broker. */
 export interface HostSessionArchiveProvider {
+  prefetch?(sessionId: string): Promise<ConversationTranscriptReadPage | undefined>;
   readCompaction?(sessionId: string): Promise<import("@omp-studio/studio-protocol").SessionCompactionRead>;
   readPage(input: {
     readonly sessionId: string;
     readonly agentId?: string;
     readonly cursor?: OpaqueCursor;
     readonly limit?: number;
-  }): ConversationTranscriptReadPage | Promise<ConversationTranscriptReadPage>;
+  }, signal?: AbortSignal): ConversationTranscriptReadPage | Promise<ConversationTranscriptReadPage>;
   /** Optional persisted child roster for a parent session. */
   listPersistedAgents?(sessionId: string): Promise<readonly StudioAgentSnapshot[]> | readonly StudioAgentSnapshot[];
   /** Optional current-revision lookup for archived-session telemetry. */
@@ -414,7 +415,7 @@ export interface HostSessionTelemetryProbePort {
     readonly sessionId: string;
     readonly sessionFile: string;
     readonly allowedCwd: string;
-    readonly transcriptRevision: string;
+    readonly signal?: AbortSignal;
   }): Promise<{ readonly ok: true; readonly telemetry: SessionTelemetrySnapshot } | { readonly ok: false; readonly reason: "UNAVAILABLE" }>;
 }
 
@@ -579,6 +580,7 @@ export interface HostWorkspaceFileService {
 
 /** Host-owned system Git adapter. Repository paths and process details never cross this port. */
 export interface HostGitService {
+  summary?(input: QueryInput<"git.repository.summary">): Promise<QueryResult<"git.repository.summary">>;
   toolchain(): GitToolchainReadModel | Promise<GitToolchainReadModel>;
   repository(input: { readonly workspaceId: WorkspaceId }): GitRepositoryReadModel | Promise<GitRepositoryReadModel>;
   diff(input: { readonly workspaceId: WorkspaceId; readonly path: string; readonly target: "working" | "staged" }): GitDiffReadModel | Promise<GitDiffReadModel>;
