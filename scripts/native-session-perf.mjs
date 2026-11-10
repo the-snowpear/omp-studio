@@ -180,7 +180,7 @@ try {
   await page.evaluate(() => { window.ompSessionPerf.stop(); window.ompSessionPerf.start(); });
   await select(0);
   await page.screenshot({ path: join(output, "native-initial.png") });
-  await runPhase("idle-before", async () => { await pause(smoke ? 2000 : 20_000); });
+  await runPhase("idle-before", async () => { await pause(Number(process.env.OMP_NATIVE_PERF_IDLE_MS ?? (smoke ? 2000 : 20_000))); });
   await runPhase("cold-sequential", async entry => {
     if (trace) { cdp = await page.context().newCDPSession(page); await cdp.send("Tracing.start", { categories: "devtools.timeline,blink.user_timing,disabled-by-default-devtools.timeline", transferMode: "ReturnAsStream" }); }
     if (cpuProfile) await app.evaluate(async () => { await global.__switchProfile("Profiler.enable"); await global.__switchProfile("Profiler.start"); });
@@ -220,7 +220,9 @@ try {
   report.recording = await page.evaluate(() => window.ompSessionPerf.snapshot(true));
   report.finalCounters = await page.evaluate(() => window.ompSessionPerf.snapshot(true).counters);
   if (report.finalCounters["engines.active"] !== 1 || report.finalCounters["real.mountedDocuments"] !== 1 || report.finalCounters["real.detachedNodes"] !== 0) throw new Error("Native residency regression: expected one mounted engine and no detached conversation nodes");
-  await page.screenshot({ path: join(output, "native-final.png") });
+  await page.screenshot({ path: join(output, "native-final.png"), timeout: 5000 }).catch(error => {
+    report.warnings.push({ kind: "final-screenshot", message: String(error).slice(0, 300) });
+  });
   report.status = "passed";
 } catch (error) {
   report.status = "failed";

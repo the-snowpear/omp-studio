@@ -42,6 +42,9 @@ export function bindTailGestures(el: HTMLElement, pinned: () => boolean, unpin: 
   const key = (event: KeyboardEvent) => {
     if (pinned() && canScroll() && keyScrollDirection(event.key) === "up") unpin();
   };
+  const scrollbar = (event: PointerEvent) => {
+    if (event.target === el && pinned() && canScroll() && event.clientX >= el.getBoundingClientRect().right - Math.max(12, el.offsetWidth - el.clientWidth)) unpin();
+  };
   let touchY: number | null = null;
   const touchStart = (event: TouchEvent) => { touchY = event.touches[0]?.clientY ?? null; };
   const touchMove = (event: TouchEvent) => {
@@ -51,11 +54,13 @@ export function bindTailGestures(el: HTMLElement, pinned: () => boolean, unpin: 
   };
   el.addEventListener("wheel", wheel, { passive: true });
   el.addEventListener("keydown", key);
+  el.addEventListener("pointerdown", scrollbar);
   el.addEventListener("touchstart", touchStart, { passive: true });
   el.addEventListener("touchmove", touchMove, { passive: true });
   return () => {
     el.removeEventListener("wheel", wheel);
     el.removeEventListener("keydown", key);
+    el.removeEventListener("pointerdown", scrollbar);
     el.removeEventListener("touchstart", touchStart);
     el.removeEventListener("touchmove", touchMove);
   };
@@ -98,8 +103,8 @@ export function conversationFollowKey(state: { readonly liveTools: Record<string
   for (const message of Object.values(state.liveMessages)) for (const block of message.blocks) { blocks++; chars += block.text.length; }
   return `${tools}:${toolChars}|${blocks}:${chars}`;
 }
-export function useConversationScroll({ scrollerRef, identityKey, itemCount, loadingOlder, pin = "bottom", contentKey = "" }: {
-  scrollerRef: RefObject<HTMLElement | null>; identityKey: string; itemCount: number; loadingOlder: boolean; pin?: "top" | "bottom"; contentKey?: string;
+export function useConversationScroll({ scrollerRef, identityKey, itemCount, loadingOlder, pin = "bottom", contentKey = "", settling = false }: {
+  scrollerRef: RefObject<HTMLElement | null>; identityKey: string; itemCount: number; loadingOlder: boolean; pin?: "top" | "bottom"; contentKey?: string; settling?: boolean;
 }) {
   const pinned = useRef(pin === "bottom");
   /** scroller 几何缓存：scroll 事件里读 scrollHeight/clientHeight 是强制同步布局
@@ -204,7 +209,9 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     const movingDown = el.scrollTop > lastScrollTop.current + 0.5;
     lastScrollTop.current = el.scrollTop;
     // 原生滚动条 / minimap 向上拖动没有滚轮手势，在此脱离跟随。
-    if (pinned.current && !movingDown && el.scrollTop < lastStickTop.current - 24 && distance > FOLLOW_THRESHOLD_PX) {
+    // Cached text exists before the first measured viewport. Replacing its
+    // estimates can clamp scrollTop; that correction is not a user gesture.
+    if (!settling && pinned.current && !movingDown && el.scrollTop < lastStickTop.current - 24 && distance > FOLLOW_THRESHOLD_PX) {
       setPinned(false);
       return;
     }
@@ -220,7 +227,7 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     } else if (movingDown && (!cooling && shouldFollow(distance))) {
       setPinned(true);
     }
-  }, [pin, setPinned]);
+  }, [pin, setPinned, settling]);
   useEffect(() => { const el = scrollerRef.current; return el ? bindTailGestures(el, () => pinned.current, () => setPinned(false)) : undefined; }, [identityKey, scrollerRef, setPinned]);
   /* Identity reset must run before the initial ResizeObserver stick. A reader
      may have left the previous session halfway up; the new session still opens
@@ -289,6 +296,6 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
         setHasNewContent(false);
       }
     }
-  }, [contentKey, itemCount, loadingOlder, pin, scrollerRef, stickToTail]);
+  }, [contentKey, itemCount, loadingOlder, pin, scrollerRef, stickToTail, settling]);
   return { follow, hasNewContent, onScroll, jumpToLatest, preparePrepend, detachFromLatest };
 }

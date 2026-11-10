@@ -4,6 +4,22 @@ import { describe, expect, it, vi } from "vitest";
 import { bindTailGestures, captureAnchor, restoreAnchor, useConversationScroll } from "./useConversationScroll";
 
 describe("conversation scroll primitives", () => {
+  it("keeps a warm initial viewport at the tail while estimates settle, but respects upward gestures", () => {
+    const scroller = document.createElement("div");
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 2000 });
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 200 });
+    Object.defineProperty(scroller, "scrollTop", { configurable: true, writable: true, value: 0 });
+    const hook = renderHook(({ settling }) => useConversationScroll({ scrollerRef: { current: scroller }, identityKey: "warm", itemCount: 50, loadingOlder: false, settling }), { initialProps: { settling: true } });
+    scroller.scrollTop = 700;
+    act(() => hook.result.current.onScroll({ currentTarget: scroller } as unknown as UIEvent<HTMLElement>));
+    expect(hook.result.current.follow).toBe(true);
+    hook.rerender({ settling: false });
+    expect(scroller.scrollTop).toBe(2000);
+    hook.rerender({ settling: true });
+    act(() => scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 })));
+    expect(hook.result.current.follow).toBe(false);
+    hook.unmount();
+  });
   it("detaches synchronously on an upward wheel gesture when scrollable and disposes listeners", () => {
     const el = document.createElement("div");
     Object.defineProperty(el, "scrollHeight", { configurable: true, value: 1000 });
