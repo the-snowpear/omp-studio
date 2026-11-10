@@ -11,6 +11,8 @@ export const CORE_NODE_SUITES = [
   // Step Code's Studio Bridge adapter, driven by the real studio-host client.
   "packages/runtime-stepcode/dist/test/host-integration.test.js",
   "packages/runtime-stepcode/dist/test/spike.test.js",
+  // Skips when no Step CLI is installed; exercises the real binary when one is.
+  "packages/runtime-stepcode/dist/test/real-cli.test.js",
   "packages/studio-protocol/dist/test/conversation.test.js",
   "packages/client/dist/test/reducer.test.js",
   "packages/client/dist/test/receipt-selectors.test.js",
