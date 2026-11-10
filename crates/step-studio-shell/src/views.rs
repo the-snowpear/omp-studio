@@ -3,6 +3,7 @@
 use eframe::egui;
 
 use crate::app::{App, Status};
+use crate::markdown::{classify, Line};
 
 impl App {
     pub(crate) fn render_chrome(&mut self, ctx: &egui::Context) {
@@ -89,9 +90,9 @@ impl App {
                         if self.show_thinking && !assistant.thinking.is_empty() {
                             ui.horizontal_top(|ui| {
                                 ui.label(egui::RichText::new("thinking").weak());
-                                ui.label(
-                                    egui::RichText::new(&assistant.thinking).weak().small(),
-                                );
+                                // The reasoning stream is markdown too, and a
+                                // literal `##` in it reads as noise.
+                                render_markdown_weak(ui, &assistant.thinking);
                             });
                         }
                         for tool in &assistant.tools {
@@ -120,7 +121,7 @@ impl App {
                                         .strong()
                                         .color(egui::Color32::LIGHT_GREEN),
                                 );
-                                ui.label(&assistant.text);
+                                render_markdown(ui, &assistant.text);
                             });
                         }
                         if let Some(error) = &assistant.error {
@@ -162,6 +163,52 @@ impl App {
                 }
             });
         });
+    }
+}
+
+/// Render one assistant message. egui has no markdown widget, and the model
+/// emits it constantly, so headings, lists and fenced code get real styling and
+/// everything else is left as the plain text it is.
+fn render_markdown(ui: &mut egui::Ui, text: &str) {
+    render_markdown_styled(ui, text, false);
+}
+
+/// The same, dimmed: reasoning is context, not the answer.
+fn render_markdown_weak(ui: &mut egui::Ui, text: &str) {
+    render_markdown_styled(ui, text, true);
+}
+
+fn render_markdown_styled(ui: &mut egui::Ui, text: &str, weak: bool) {
+    let dim = |rich: egui::RichText| {
+        if weak {
+            rich.weak().small()
+        } else {
+            rich
+        }
+    };
+    let mut fenced = false;
+    for line in text.lines() {
+        match classify(line, &mut fenced) {
+            Line::Blank => ui.add_space(4.0),
+            Line::Code(code) => {
+                ui.label(dim(egui::RichText::new(code).monospace()));
+            }
+            Line::Heading(level, title) => {
+                // Six levels is more than a chat pane needs; compress them.
+                let size = 15.0 - f32::from(level) * 0.8;
+                ui.label(dim(egui::RichText::new(title).strong().size(size.max(11.0))));
+            }
+            Line::ListItem(item) => {
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space(12.0);
+                    ui.label(dim(egui::RichText::new("•")));
+                    ui.label(dim(egui::RichText::new(item)));
+                });
+            }
+            Line::Paragraph(paragraph) => {
+                ui.label(dim(egui::RichText::new(paragraph)));
+            }
+        }
     }
 }
 
