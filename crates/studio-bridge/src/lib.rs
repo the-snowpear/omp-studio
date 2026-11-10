@@ -5,6 +5,7 @@
 pub mod client;
 pub mod frame;
 pub mod handshake;
+pub mod transport;
 
 pub use frame::{FrameDecoder, FrameEncoder};
 pub use handshake::{challenge_proof, PROTOCOL_VERSION};

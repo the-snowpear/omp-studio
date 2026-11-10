@@ -3,14 +3,10 @@
 //! would only prove it agrees with itself.
 
 use std::io::BufReader;
-use std::os::unix::net::UnixStream;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
-/// The transport the Host actually uses on POSIX. Windows would be a named
-/// pipe, which `std` does not speak — that needs its own client, not a TCP
-/// stand-in the adapter never supported.
-type Transport = UnixStream;
+use step_studio_bridge::transport::{self, Transport};
 
 use step_studio_bridge::frame::{read_frame, write_frame};
 use step_studio_bridge::handshake::{challenge_proof, verify_hello, PROTOCOL_VERSION};
@@ -76,7 +72,7 @@ impl Adapter {
     fn connect(&self) -> Transport {
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
-            match UnixStream::connect(&self.socket_path) {
+            match transport::connect(&self.socket_path.to_string_lossy()) {
                 Ok(stream) => return stream,
                 Err(error) => {
                     if Instant::now() >= deadline {
@@ -105,8 +101,9 @@ struct Session {
 
 impl Session {
     fn connect(adapter: &Adapter) -> Self {
-        let stream = adapter.connect();
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+        #[allow(unused_mut)]
+        let mut stream = adapter.connect();
+        let _ = transport::set_read_timeout(&stream, Some(Duration::from_secs(30)));
         let challenge = "rust-challenge-1";
         let hello = serde_json::json!({
             "type": "studio.hello",
@@ -115,8 +112,18 @@ impl Session {
             "requiredProfile": "limited",
             "challenge": challenge,
         });
-        write_frame(&mut (&stream), 1, &hello).expect("write hello");
-        let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+        // A Unix socket duplicates for the reader; a Windows pipe handle cannot,
+        // so the reader opens its own pipe to the same name.
+        #[cfg(unix)]
+        let reader = transport::duplicate(&stream).expect("duplicate");
+        #[cfg(windows)]
+        let reader = transport::reopen(&adapter.socket_path.to_string_lossy())
+            .expect("reopen the pipe");
+        #[cfg(unix)]
+        write_frame(&mut transport::handshake_writer(&stream), 1, &hello).expect("write hello");
+        #[cfg(windows)]
+        write_frame(&mut transport::handshake_writer(&mut stream), 1, &hello).expect("write hello");
+        let mut reader = BufReader::new(reader);
         let frame = read_frame(&mut reader)
             .expect("read hello")
             .expect("hello frame");

@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 use std::io::{BufReader, Write};
-use std::os::unix::net::UnixStream;
+use crate::transport::{self, Stream};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use crate::frame::{read_frame, write_frame, FrameError};
+#[cfg(windows)]
+use named_pipe;
 use crate::handshake::{verify_hello, PROTOCOL_VERSION};
 
 /// Receipt statuses that settle a command.
@@ -87,7 +89,7 @@ pub struct BridgeSession {
     child: Option<Child>,
     /// Only the write half is used here; the read half belongs to the reader
     /// thread. A mutex, because two commands may write concurrently.
-    stream: Mutex<UnixStream>,
+    stream: Mutex<Stream>,
     shared: Arc<Shared>,
     epoch: u64,
     instance_id: String,
@@ -133,20 +135,16 @@ impl BridgeSession {
             let _ = std::fs::remove_file(&launch.socket_path);
             Some(Self::spawn(launch)?)
         };
-        let stream = wait_for_socket(&launch.socket_path, Duration::from_secs(20))?;
-        stream
-            .set_read_timeout(Some(Duration::from_secs(300)))
+        #[allow(unused_mut)]
+        let mut stream = wait_for_socket(&launch.socket_path, Duration::from_secs(20))?;
+        transport::set_read_timeout(&stream, Some(Duration::from_secs(300)))
             .map_err(|e| BridgeError::Io(e.to_string()))?;
 
         // Handshake. The challenge is ours; the runtime must prove it holds the
         // token before anything else is trusted. This frame is read directly,
         // before the reader thread exists, so exactly one owner touches the
         // socket at a time.
-        let mut reader = BufReader::new(
-            stream
-                .try_clone()
-                .map_err(|e| BridgeError::Io(e.to_string()))?,
-        );
+        let mut reader = BufReader::new(stream_clone(&stream)?);
         let challenge = format!("shell-{}", launch.runtime_epoch);
         let hello = json!({
             "type": "studio.hello",
@@ -155,7 +153,14 @@ impl BridgeSession {
             "requiredProfile": "limited",
             "challenge": challenge,
         });
-        write_frame(&mut (&stream), 1, &hello)?;
+        // The shape differs per platform: a Unix socket is duplicable, so this
+        // is a second handle; a Windows pipe handle is not, so the one already
+        // held is lent. Either way this is the only frame written before the
+        // reader thread takes over.
+        #[cfg(unix)]
+        write_frame(&mut transport::handshake_writer(&stream), 1, &hello)?;
+        #[cfg(windows)]
+        write_frame(&mut transport::handshake_writer(&mut stream), 1, &hello)?;
         let frame = read_frame(&mut reader)?
             .ok_or_else(|| BridgeError::Protocol("adapter closed before hello".to_string()))?;
         let verified = verify_hello(&frame.body, &token, &challenge).map_err(BridgeError::Protocol)?;
@@ -163,10 +168,7 @@ impl BridgeSession {
         // From here on a reader thread owns the socket: it demultiplexes
         // frames into the shared inbox and wakes whoever is waiting.
         let shared = Arc::new(Shared::default());
-        let reader_stream = stream
-            .try_clone()
-            .map_err(|e| BridgeError::Io(e.to_string()))?;
-        spawn_reader(reader_stream, Arc::clone(&shared));
+        spawn_reader(stream_clone(&stream)?, Arc::clone(&shared));
 
         Ok(Self {
             child,
@@ -353,7 +355,7 @@ impl Drop for BridgeSession {
 }
 
 /// Own the read half of the socket and file every frame into the shared inbox.
-fn spawn_reader(stream: UnixStream, shared: Arc<Shared>) {
+fn spawn_reader(stream: Stream, shared: Arc<Shared>) {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stream);
         loop {
@@ -401,18 +403,52 @@ fn spawn_reader(stream: UnixStream, shared: Arc<Shared>) {
 }
 
 /// Poll for the socket file; the adapter creates it after binding.
-fn wait_for_socket(path: &str, timeout: Duration) -> Result<UnixStream, BridgeError> {
+fn wait_for_socket(path: &str, timeout: Duration) -> Result<Stream, BridgeError> {
     let deadline = Instant::now() + timeout;
     loop {
-        if std::path::Path::new(path).exists() {
-            if let Ok(stream) = UnixStream::connect(path) {
-                return Ok(stream);
+        // On Windows the pipe is named, not pathed, so it has no file to wait
+        // for: the connect itself is the wait, and a missing pipe fails fast
+        // rather than hanging until the deadline.
+        let target = transport::endpoint_for_bind(path);
+        match connect(&target) {
+            Ok(stream) => return Ok(stream),
+            Err(error) if Instant::now() >= deadline => {
+                return Err(BridgeError::TimedOut(format!("adapter socket: {error}")));
             }
+            Err(_) => std::thread::sleep(Duration::from_millis(40)),
         }
-        if Instant::now() >= deadline {
-            return Err(BridgeError::TimedOut("adapter socket".to_string()));
-        }
-        std::thread::sleep(Duration::from_millis(40));
+    }
+}
+
+fn connect(endpoint: &str) -> Result<Stream, BridgeError> {
+    #[cfg(unix)]
+    {
+        std::os::unix::net::UnixStream::connect(endpoint)
+            .map_err(|e| BridgeError::Io(e.to_string()))
+    }
+    #[cfg(windows)]
+    {
+        named_pipe::PipeClient::connect(endpoint).map_err(|e| BridgeError::Io(e.to_string()))
+    }
+}
+
+/// A second handle on the same socket, so the reader thread can own one while
+/// the session writes through the other.
+#[allow(unused_variables)]
+fn stream_clone(stream: &Stream) -> Result<Stream, BridgeError> {
+    #[cfg(unix)]
+    {
+        stream
+            .try_clone()
+            .map_err(|e| BridgeError::Io(e.to_string()))
+    }
+    #[cfg(windows)]
+    {
+        // A pipe handle is single-threaded for reads and writes together, so the
+        // reader thread is given a fresh connection to the same pipe instead.
+        connect(&transport::endpoint_for_bind(
+            &std::env::var("STEP_STUDIO_TRANSPORT_ENDPOINT").unwrap_or_default(),
+        ))
     }
 }
 

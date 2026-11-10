@@ -90,6 +90,27 @@ jobs:
       - run: cargo test -p step-studio-bridge -p step-studio-runtime
       - run: cargo clippy -p step-studio-bridge -p step-studio-runtime --all-targets -- -D warnings
 
+  rust-windows:
+    # The transport is the only platform-specific code: Unix sockets here, named
+    # pipes on Windows. Nothing in CI used to compile for Windows, so the pipe
+    # path could rot unnoticed — this job is what keeps it honest.
+    name: Rust crates (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: studio-crates-windows
+      # Compile and lint only. The runtime is unverified on Windows: no Step CLI
+      # is installed here, so the end-to-end tests would skip rather than prove
+      # anything, and a GUI shell cannot run on a hosted runner.
+      - run: cargo clippy -p step-studio-bridge -p step-studio-runtime --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+
   macos-package:
     name: macOS test package (arm64)
     if: github.event_name == 'workflow_dispatch' && inputs.scope == 'macos-package'

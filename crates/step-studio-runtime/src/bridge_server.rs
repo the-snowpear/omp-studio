@@ -5,7 +5,7 @@
 //! whichever client it belonged to.
 
 use std::io::BufReader;
-use std::os::unix::net::{UnixListener, UnixStream};
+use step_studio_bridge::transport::{self, Accepted};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
@@ -53,36 +53,87 @@ impl Runtime {
     /// Serve until the process is asked to shut down.
     pub fn serve(&self) -> Result<(), String> {
         let _ = std::fs::remove_file(&self.config.endpoint);
-        let listener = UnixListener::bind(&self.config.endpoint)
+        // A Unix socket is a file, so a stale one has to go first; a Windows
+        // pipe is named, and there is nothing to remove.
+        #[cfg(unix)]
+        let _ = std::fs::remove_file(&self.config.endpoint);
+        let bind_at = transport::endpoint_for_bind(&self.config.endpoint);
+        let listener = transport::bind(&bind_at)
             .map_err(|e| format!("could not bind {}: {e}", self.config.endpoint))?;
         eprintln!("step-studio-runtime listening on {}", self.config.endpoint);
 
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    let config = AdapterConfig {
-                        endpoint: self.config.endpoint.clone(),
-                        token: self.config.token.clone(),
-                        runtime_epoch: self.config.runtime_epoch,
-                        cwd: self.config.cwd.clone(),
-                        step_command: self.config.step_command.clone(),
-                        step_env: self.config.step_env.clone(),
-                        continue_session: self.config.continue_session,
-                    };
-                    let terminal = Arc::clone(&self.terminal);
-                    std::thread::spawn(move || {
-                        if let Err(error) = serve_connection(stream, config, terminal) {
-                            eprintln!("step-studio-runtime: connection ended: {error}");
-                        }
-                    });
-                }
-                Err(error) => {
-                    eprintln!("step-studio-runtime: accept failed: {error}");
+        // One connection at a time.
+        //
+        // On Unix the listener persists and `accept` blocks on it, so this loops
+        // for as long as the process runs. On Windows a single-instance pipe
+        // serves exactly one client, so `bind` has already waited by the time it
+        // returns: the first connection is served, and each one after that is a
+        // fresh `bind`.
+        // `accept` blocks on a Unix listener, so the unix arm loops forever and
+        // never reaches the tail; on Windows each connection needs a fresh bind,
+        // so that arm returns when it can no longer make one.
+        #[cfg(unix)]
+        {
+            // The listener is borrowed: it outlives every connection it accepts.
+            loop {
+                match transport::accept(listener.try_clone().expect("the listener duplicates")) {
+                    Ok(connection) => serve_one(connection, &self.config, &self.terminal),
+                    Err(error) => {
+                        eprintln!("step-studio-runtime: accept failed: {error}");
+                    }
                 }
             }
+            // Never reached: the loop above runs for the life of the process.
+            #[allow(unreachable_code)]
+            Ok(())
         }
-        Ok(())
+        #[cfg(windows)]
+        {
+            // The listener is consumed: a single-instance pipe serves one client
+            // and is then recreated for the next.
+            let mut listener = listener;
+            loop {
+                let connection = match transport::accept(listener) {
+                    Ok(connection) => connection,
+                    Err(error) => {
+                        eprintln!("step-studio-runtime: accept failed: {error}");
+                        return Ok(());
+                    }
+                };
+                listener = match transport::bind(&bind_at) {
+                    Ok(next) => next,
+                    Err(error) => {
+                        eprintln!("step-studio-runtime: rebind failed: {error}");
+                        return Ok(());
+                    }
+                };
+                serve_one(connection, &self.config, &self.terminal);
+            }
+        }
     }
+}
+
+/// Hand one accepted connection to its own thread.
+fn serve_one(
+    connection: transport::Accepted,
+    config: &AdapterConfig,
+    terminal: &Arc<Mutex<Vec<Value>>>,
+) {
+    let config = AdapterConfig {
+        endpoint: config.endpoint.clone(),
+        token: config.token.clone(),
+        runtime_epoch: config.runtime_epoch,
+        cwd: config.cwd.clone(),
+        step_command: config.step_command.clone(),
+        step_env: config.step_env.clone(),
+        continue_session: config.continue_session,
+    };
+    let terminal = Arc::clone(terminal);
+    std::thread::spawn(move || {
+        if let Err(error) = serve_connection(connection, config, terminal) {
+            eprintln!("step-studio-runtime: connection ended: {error}");
+        }
+    });
 }
 
 /// The tail, not the head: a UUIDv7's first characters are its timestamp, so
@@ -94,7 +145,7 @@ fn short(id: &str) -> &str {
 
 /// A live session: the Host socket plus the CLI it drives.
 struct Session {
-    stream: UnixStream,
+    stream: transport::Accepted,
     step: StepRpc,
     epoch: u64,
     seq: u64,
@@ -546,7 +597,7 @@ enum HostFrame {
 }
 
 fn serve_connection(
-    stream: UnixStream,
+    stream: transport::Accepted,
     config: AdapterConfig,
     terminal: Arc<Mutex<Vec<Value>>>,
 ) -> Result<(), String> {
@@ -578,10 +629,12 @@ fn serve_connection(
     // Handshake: the runtime must prove it holds the token before anything else
     // is trusted. This one frame is read directly, before the reader thread
     // exists, so there is exactly one owner of the socket.
-    let mut hello_reader = BufReader::new(session.stream.try_clone().map_err(|e| e.to_string())?);
-    let frame = read_frame(&mut hello_reader)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "host closed before hello".to_string())?;
+    let frame = {
+        let mut hello_reader = BufReader::new(transport::handshake_reader(&mut session.stream));
+        read_frame(&mut hello_reader)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "host closed before hello".to_string())?
+    };
     let body = frame.body;
     if body.get("type").and_then(|v| v.as_str()) != Some("studio.hello") {
         return Err("first frame was not a studio.hello".to_string());
@@ -667,13 +720,32 @@ fn serve_connection(
     }
 }
 
-/// A second handle on the Host socket for the reader thread. `UnixStream` is
-/// duplicable, which is the only way to read and write it concurrently.
-fn stream_for_reader(session: &Session) -> Result<UnixStream, String> {
-    session
-        .stream
-        .try_clone()
-        .map_err(|e| format!("could not duplicate the bridge socket: {e}"))
+/// A second handle on the Host socket for the reader thread.
+#[cfg(unix)]
+fn stream_for_reader(session: &Session) -> Result<Accepted, String> {
+    // A UnixStream is duplicable, which is the only way to read and write one
+    // concurrently.
+    // The session holds an `Accepted`, whose stream arm is the Unix socket.
+    match &session.stream {
+        Accepted::Stream(stream) => transport::duplicate(stream).map(Accepted::Stream),
+    }
+    .map_err(|e| format!("could not duplicate the bridge socket: {e}"))
+}
+
+/// On Windows a pipe handle is one direction, so the reader takes the accepted
+/// connection and the writer keeps a second one it opened itself.
+#[cfg(windows)]
+#[allow(unused_variables)]
+fn stream_for_reader(session: &Session) -> Result<Accepted, String> {
+    // The Host already holds the other end of the accepted pipe, and a pipe
+    // handle is one direction: the reader keeps the connection it was handed and
+    // the writer opens its own. Both ends name the same pipe.
+    let endpoint = transport::endpoint_for_bind(
+        &std::env::var("STEP_STUDIO_TRANSPORT_ENDPOINT").unwrap_or_default(),
+    );
+    transport::reopen(&endpoint)
+        .map(Accepted::Stream)
+        .map_err(|e| format!("could not open the bridge pipe: {e}"))
 }
 
 /// Errors from the CLI that must not crash the adapter.
