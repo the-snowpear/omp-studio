@@ -130,7 +130,12 @@ Electron 那 280–470 MB 是实打实省掉了。剩下的 373 MB 里运行时�
 - **step CLI 167 MB + MCP 85 MB**：Step Code 自身，要动就得改上游。
 - **壳 118 MB**：egui/winit 加 Mesa 软件光栅化（无头 Xvfb 下）。真实 GPU 上更低。
 
-Windows 还需要命名管道传输（`std` 不支持），这台机器无法验证那一半。
+Windows 的传输已接上：`crates/studio-bridge/src/transport.rs` 是唯一放平台差异的地方，
+Unix domain socket / Windows 命名管道。两个目标都过 `clippy --all-targets -D warnings`
+（33 个 Unix 测试照旧通过，Windows 那边 CI 新增了一个 job 只做编译和 lint）。
+
+**Windows 上的运行时行为仍未验证**——没有真机，交叉编译证明不了握手、帧编解码和
+`--continue` 在管道上真的能跑。这一条从「编译不过」变成了「编译过但没跑过」。
 
 ### 续接是怎么接上的
 
