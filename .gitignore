@@ -90,3 +90,6 @@ packaging/resources/installer-host/
 # Alternate package manager artifacts (repo uses npm / package-lock.json)
 pnpm-lock.yaml
 pnpm-workspace.yaml
+
+# Rust
+/target

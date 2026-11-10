@@ -1,0 +1,116 @@
+//! The reducer, driven with the exact event sequence a real turn produces.
+//! Captured from the adapter against the real Step CLI, so a drift in either
+//! the adapter or this mapping fails here.
+
+use step_studio_shell::app::App;
+use step_studio_shell::bridge_client::Event;
+
+fn app_without_runtime() -> App {
+    // `connect` spawns a thread; these tests only exercise the pure reducer, so
+    // build the state directly instead.
+    step_studio_shell::app::app_for_test()
+}
+
+#[test]
+fn a_full_turn_lands_in_order() {
+    let mut app = app_without_runtime();
+    app.apply(Event::Ready {
+        session_id: "01abc".to_string(),
+        model: Some("local-gateway/stepfun-cn/step-3.7-flash".to_string()),
+    });
+    app.send("reply with exactly: PONG".to_string());
+
+    // The order the adapter emitted them in.
+    app.apply(Event::Thinking("The".to_string()));
+    app.apply(Event::Thinking(" user wants".to_string()));
+    app.apply(Event::ToolStarted {
+        name: "list_directory".to_string(),
+    });
+    app.apply(Event::ToolCompleted {
+        name: "list_directory".to_string(),
+        output: "dir apps/".to_string(),
+        is_error: false,
+    });
+    app.apply(Event::Text("PONG".to_string()));
+    app.apply(Event::TurnCompleted);
+
+    assert_eq!(app.turns.len(), 1);
+    let turn = &app.turns[0];
+    assert_eq!(turn.user, "reply with exactly: PONG");
+    assert_eq!(turn.assistant.thinking, "The user wants");
+    assert_eq!(turn.assistant.text, "PONG");
+    assert!(turn.assistant.done);
+    assert!(turn.assistant.error.is_none());
+    assert_eq!(turn.assistant.tools.len(), 1);
+    assert_eq!(turn.assistant.tools[0].name, "list_directory");
+    assert_eq!(turn.assistant.tools[0].output, "dir apps/");
+    assert!(turn.assistant.tools[0].done);
+    assert!(!app.streaming(), "the turn is finished");
+}
+
+#[test]
+fn a_provider_failure_marks_the_turn_and_the_shell() {
+    let mut app = app_without_runtime();
+    app.apply(Event::Ready {
+        session_id: "01abc".to_string(),
+        model: None,
+    });
+    app.send("hello".to_string());
+    app.apply(Event::TurnFailed("429: Credits exhausted".to_string()));
+
+    let turn = &app.turns[0];
+    assert!(turn.assistant.done);
+    assert_eq!(
+        turn.assistant.error.as_deref(),
+        Some("429: Credits exhausted")
+    );
+    // The shell must report the failure too, or the chrome still reads "ready".
+    assert_eq!(app.status, step_studio_shell::app::Status::Failed);
+    assert_eq!(app.status_detail, "429: Credits exhausted");
+}
+
+#[test]
+fn a_disconnect_is_reported_rather_than_silently_hanging() {
+    let mut app = app_without_runtime();
+    app.apply(Event::Disconnected("step runtime could not start: spawn step ENOENT".to_string()));
+    assert_eq!(app.status, step_studio_shell::app::Status::Failed);
+    assert!(app.status_detail.contains("ENOENT"));
+}
+
+#[test]
+fn repeated_tool_calls_are_paired_by_name_not_position() {
+    let mut app = app_without_runtime();
+    app.apply(Event::Ready {
+        session_id: "s".to_string(),
+        model: None,
+    });
+    app.send("go".to_string());
+    app.apply(Event::ToolStarted { name: "read".to_string() });
+    app.apply(Event::ToolStarted { name: "read".to_string() });
+    app.apply(Event::ToolCompleted {
+        name: "read".to_string(),
+        output: "first".to_string(),
+        is_error: false,
+    });
+    app.apply(Event::ToolCompleted {
+        name: "read".to_string(),
+        output: "second".to_string(),
+        is_error: false,
+    });
+
+    let tools = &app.turns[0].assistant.tools;
+    assert_eq!(tools.len(), 2);
+    assert_eq!(tools[0].output, "first");
+    assert_eq!(tools[1].output, "second");
+}
+
+#[test]
+fn an_empty_prompt_is_not_sent() {
+    let mut app = app_without_runtime();
+    app.apply(Event::Ready {
+        session_id: "s".to_string(),
+        model: None,
+    });
+    app.send("   ".to_string());
+    assert!(app.turns.is_empty(), "whitespace must not open a turn");
+}
