@@ -49,6 +49,10 @@ pub struct App {
     pub turns: Vec<Turn>,
     pub composer: String,
     pub show_thinking: bool,
+    /// A command is outstanding, so the bridge thread may still deliver. egui
+    /// stops calling `update` once nothing asks for a repaint, which would
+    /// strand every event that arrives after the app goes idle.
+    busy: bool,
     to_bridge: Option<std::sync::mpsc::Sender<Command>>,
     from_bridge: Option<Receiver<Event>>,
 }
@@ -69,6 +73,7 @@ impl App {
             turns: Vec::new(),
             composer: String::new(),
             show_thinking: true,
+            busy: false,
             to_bridge: Some(to_bridge),
             from_bridge: Some(from_bridge),
         }
@@ -104,7 +109,10 @@ impl App {
                     self.model = model;
                 }
             }
-            Event::Models(models) => self.models = models,
+            Event::Models(models) => {
+                self.busy = false;
+                self.models = models;
+            }
             Event::Thinking(delta) => {
                 if let Some(turn) = self.turns.last_mut() {
                     turn.assistant.thinking.push_str(&delta);
@@ -141,12 +149,27 @@ impl App {
                     }
                 }
             }
+            Event::NewSession { session_id } => {
+                self.busy = false;
+                // The runtime dropped the transcript, so the local copy of it
+                // has to go too: leaving it would show a conversation the
+                // runtime no longer has.
+                self.turns.clear();
+                self.composer.clear();
+                if !session_id.is_empty() {
+                    self.session_id = session_id;
+                }
+                self.status = Status::Ready;
+                self.status_detail = String::new();
+            }
             Event::TurnCompleted => {
+                self.busy = false;
                 if let Some(turn) = self.turns.last_mut() {
                     turn.assistant.done = true;
                 }
             }
             Event::TurnFailed(message) => {
+                self.busy = false;
                 self.status = Status::Failed;
                 self.status_detail = message.clone();
                 if let Some(turn) = self.turns.last_mut() {
@@ -155,6 +178,7 @@ impl App {
                 }
             }
             Event::Disconnected(detail) => {
+                self.busy = false;
                 self.status = Status::Failed;
                 self.status_detail = detail;
             }
@@ -165,12 +189,21 @@ impl App {
         if text.trim().is_empty() {
             return;
         }
+        self.busy = true;
         self.turns.push(Turn {
             user: text.clone(),
             assistant: AssistantTurn::default(),
         });
         if let Some(sender) = self.to_bridge.as_ref() {
             let _ = sender.send(Command::Prompt(text));
+        }
+    }
+
+    /// Drop the transcript and start a fresh session.
+    pub fn new_session(&mut self) {
+        self.busy = true;
+        if let Some(sender) = self.to_bridge.as_ref() {
+            let _ = sender.send(Command::NewSession);
         }
     }
 
@@ -183,9 +216,16 @@ impl App {
     }
 
     pub fn set_model(&mut self, selector: String) {
+        self.busy = true;
         if let Some(sender) = self.to_bridge.as_ref() {
             let _ = sender.send(Command::SetModel(selector));
         }
+    }
+
+    /// True while a command is outstanding, so the frame loop must keep
+    /// running. See the field.
+    pub fn busy(&self) -> bool {
+        self.busy
     }
 
     /// The turn currently streaming, if any.
@@ -205,6 +245,7 @@ pub fn app_for_test() -> App {
         turns: Vec::new(),
         composer: String::new(),
         show_thinking: true,
+        busy: false,
         to_bridge: None,
         from_bridge: None,
     }

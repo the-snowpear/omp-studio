@@ -53,6 +53,12 @@ const capabilities = [
     limitations: ["`auto` has no Step equivalent; it maps to the model's first supported level"],
   },
   {
+    id: "session.new",
+    grade: "stable",
+    version: 1,
+    evidence: "runtime-stepcode",
+  },
+  {
     id: "session.fork",
     grade: "limited",
     version: 1,
@@ -78,6 +84,7 @@ const commandManifestHash = sha256(
     "runtime.shutdown",
     "session.model.set",
     "session.thinking.set",
+    "session.new",
     "session.fork",
     "session.models.list",
     "session.transcript.read",
@@ -591,6 +598,21 @@ const server = createServer(socket => {
         () => connection.receipt(requestId, "completed", { ok: true }),
         error => connection.failedReceipt(requestId, String(error), error instanceof BridgeFailure ? error.code : undefined),
       );
+      return;
+    }
+
+    if (operation["kind"] === "session.new") {
+      // Step calls this `new_session`: it mints a fresh session id and drops the
+      // transcript. The mapping counters reset with it, so entry ids from the
+      // old session cannot leak into the new one.
+      void rpc.request("new_session", {}).then(async () => {
+        turnSeq = 0;
+        messageSeq = 0;
+        currentTurnId = "t0";
+        openMessage = undefined;
+        await refreshState();
+        connection.receipt(requestId, "completed", { ok: true });
+      }, error => connection.failedReceipt(requestId, String(error)));
       return;
     }
 

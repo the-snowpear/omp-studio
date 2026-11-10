@@ -217,3 +217,78 @@ fn aborting_settles_the_turn_the_rust_adapter_is_still_running() {
         receipt.pointer("/error/message").and_then(|m| m.as_str()).unwrap_or("unknown")
     );
 }
+
+#[test]
+fn a_new_session_mints_a_fresh_session_id() {
+    // Probed against the real CLI first: `new_session` returns
+    // `{"cancelled":false}` and the next `get_state` reports a different id with
+    // the transcript reset. Anything else would make the shell's New button
+    // clear a conversation that is still there.
+    let Some(step) = find_step() else {
+        eprintln!("skipping: no Step CLI installed");
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("rust-new-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let (config, _) = config_in(&dir, step);
+
+    let runtime = Runtime::new(AdapterConfig {
+        endpoint: config.endpoint.clone(),
+        token: config.token.clone(),
+        runtime_epoch: config.runtime_epoch,
+        cwd: config.cwd.clone(),
+        step_command: config.step_command.clone(),
+        step_env: config.step_env.clone(),
+    });
+    std::thread::spawn(move || {
+        let _ = runtime.serve();
+    });
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !std::path::Path::new(&config.endpoint).exists() {
+        assert!(std::time::Instant::now() < deadline, "the adapter never bound its socket");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let session = BridgeSession::connect(&AdapterLaunch {
+        node: String::new(),
+        adapter_script: String::new(),
+        socket_path: config.endpoint.clone(),
+        token_file: String::new(),
+        cwd: config.cwd.clone(),
+        runtime_epoch: config.runtime_epoch,
+        env: Vec::new(),
+        token: Some(config.token.clone()),
+        command: Vec::new(),
+    })
+    .expect("connect to the Rust adapter");
+
+    let before = session
+        .snapshot()
+        .expect("snapshot")
+        .pointer("/snapshot/sessionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    assert!(!before.is_empty(), "no session id before the reset");
+
+    let receipt = session
+        .invoke(serde_json::json!({ "kind": "session.new" }))
+        .expect("session.new")
+        .0;
+    assert_eq!(
+        receipt.get("status").and_then(|s| s.as_str()),
+        Some("completed"),
+        "session.new failed: {}",
+        receipt.pointer("/error/message").and_then(|m| m.as_str()).unwrap_or("unknown")
+    );
+
+    let after = session
+        .snapshot()
+        .expect("snapshot after the reset")
+        .pointer("/snapshot/sessionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    assert_ne!(before, after, "session.new kept the old session id");
+}

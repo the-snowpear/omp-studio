@@ -126,6 +126,63 @@ fn an_abort_leaves_the_turn_streaming_until_the_runtime_settles_it() {
     assert_eq!(app.turns[0].assistant.text, "partial");
 }
 
+/// The runtime drops the transcript when a new session starts, so the local
+/// copy has to go with it — otherwise the shell keeps showing a conversation
+/// the runtime no longer has.
+#[test]
+fn a_new_session_drops_the_local_transcript() {
+    let mut app = app_without_runtime();
+    app.apply(Event::Ready {
+        session_id: "01aaa".to_string(),
+        model: Some("local-gateway/stepfun-cn/step-3.7-flash".to_string()),
+    });
+    app.send("first".to_string());
+    app.apply(Event::Text("an answer".to_string()));
+    app.apply(Event::TurnCompleted);
+    assert_eq!(app.turns.len(), 1);
+
+    app.apply(Event::NewSession {
+        session_id: "01bbb".to_string(),
+    });
+    assert!(app.turns.is_empty(), "the transcript must go with the session");
+    assert!(app.composer.is_empty());
+    assert_eq!(app.session_id, "01bbb");
+    assert_eq!(app.status, step_studio_shell::app::Status::Ready);
+    assert!(!app.streaming());
+}
+
+/// The frame loop keeps running only while a command is outstanding. egui
+/// stops calling `update` once nothing asks for a repaint, so a reply that
+/// lands after the app idles is never read — which is how the New button
+/// silently did nothing for a while.
+#[test]
+fn the_app_stays_busy_until_a_command_answers() {
+    let mut app = app_without_runtime();
+    app.apply(Event::Ready {
+        session_id: "s".to_string(),
+        model: None,
+    });
+    assert!(!app.busy(), "nothing is outstanding at rest");
+
+    app.new_session();
+    assert!(app.busy(), "a command went out, so the loop must keep running");
+
+    app.apply(Event::NewSession {
+        session_id: "s2".to_string(),
+    });
+    assert!(!app.busy(), "the reply landed, so the loop may idle again");
+
+    app.send("hello".to_string());
+    assert!(app.busy());
+    app.apply(Event::TurnCompleted);
+    assert!(!app.busy());
+
+    // A failure has to clear it too, or a failed turn pins the loop open.
+    app.send("again".to_string());
+    app.apply(Event::TurnFailed("boom".to_string()));
+    assert!(!app.busy());
+}
+
 #[test]
 fn an_empty_prompt_is_not_sent() {
     let mut app = app_without_runtime();

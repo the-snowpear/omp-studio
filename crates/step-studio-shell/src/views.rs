@@ -46,8 +46,15 @@ impl App {
                     });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.small(format!("session {}", short_id(&self.session_id)));
+                    // Disabled mid-turn: the runtime keeps the old transcript
+                    // until the turn settles, so a clear now would be undone by
+                    // whatever the turn is still streaming.
+                    ui.add_enabled(!self.streaming(), egui::Button::new("New"))
+                        .on_disabled_hover_text("stop the turn first")
+                        .clicked()
+                        .then(|| self.new_session());
                     ui.checkbox(&mut self.show_thinking, "thinking");
+                    ui.small(format!("session {}", short_id(&self.session_id)));
                 });
             });
         });

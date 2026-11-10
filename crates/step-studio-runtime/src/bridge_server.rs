@@ -82,6 +82,13 @@ impl Runtime {
     }
 }
 
+/// The tail, not the head: a UUIDv7's first characters are its timestamp, so
+/// two sessions minted seconds apart look identical there.
+fn short(id: &str) -> &str {
+    let start = id.len().saturating_sub(8);
+    &id[start..]
+}
+
 /// A live session: the Host socket plus the CLI it drives.
 struct Session {
     stream: UnixStream,
@@ -241,6 +248,23 @@ impl Session {
                     Err(error) => self.failed(&request_id, error),
                 }
             }
+            "session.new" => {
+                // Step exposes this as `new_session`; it mints a fresh session
+                // id and drops the transcript. The mapping state is reset with
+                // it, so entry ids from the old session cannot leak into the
+                // new one.
+                if std::env::var_os("STEP_STUDIO_TRACE").is_some() {
+                    eprintln!("[runtime] session.new requested");
+                }
+                match self.step.request("new_session", json!({}), std::time::Duration::from_secs(15)) {
+                    Ok(_) => {
+                        self.context = MapContext::new(String::new());
+                        self.refresh_state();
+                        self.receipt(&request_id, "completed", Some(json!({ "ok": true })));
+                    }
+                    Err(error) => self.failed(&request_id, error.to_string()),
+                }
+            }
             "session.fork" => match fork_session(&mut self.step) {
                 Ok(()) => {
                     self.refresh_state();
@@ -292,7 +316,10 @@ impl Session {
     fn refresh_state(&mut self) {
         if let Ok(state) = self.step.request("get_state", json!({}), std::time::Duration::from_secs(10)) {
             if let Some(id) = state.get("sessionId").and_then(|v| v.as_str()) {
-                if !id.is_empty() {
+                if !id.is_empty() && id != self.session_id {
+                    if std::env::var_os("STEP_STUDIO_TRACE").is_some() {
+                        eprintln!("[runtime] session {} -> {}", short(&self.session_id), short(id));
+                    }
                     self.session_id = id.to_string();
                 }
             }

@@ -21,6 +21,7 @@ const CAPABILITIES: &[(&str, &str, &str)] = &[
     ("runtime.snapshot", "stable", ""),
     ("session.state", "stable", ""),
     ("session.history", "stable", ""),
+    ("session.new", "stable", ""),
     ("session.model.set", "stable", ""),
     ("session.models.list", "stable", ""),
     (
@@ -49,6 +50,7 @@ const COMMANDS: &[&str] = &[
     "runtime.shutdown",
     "session.model.set",
     "session.thinking.set",
+    "session.new",
     "session.fork",
     "session.models.list",
     "session.transcript.read",

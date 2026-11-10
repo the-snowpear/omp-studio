@@ -23,6 +23,8 @@ pub enum Command {
     /// Stop the turn in flight. Emits no events, so it does not compete with
     /// the turn for the session's shared event stream.
     Abort,
+    /// Drop the transcript and start a fresh session.
+    NewSession,
     SetModel(String),
     RefreshModels,
 }
@@ -47,6 +49,10 @@ pub enum Event {
     },
     TurnCompleted,
     TurnFailed(String),
+    /// The runtime started a fresh session; the transcript is gone.
+    NewSession {
+        session_id: String,
+    },
     Disconnected(String),
 }
 
@@ -178,6 +184,31 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
                 }
                 Command::RefreshModels => {
                     let _ = refresh_models(&session, &to_ui);
+                }
+                Command::NewSession => {
+                    // The adapter resets its own mapping state, so the only
+                    // thing to relay is the new session identity.
+                    trace("new session requested");
+                    let session = Arc::clone(&session);
+                    let to_ui = to_ui.clone();
+                    thread::spawn(move || {
+                        match session.invoke(serde_json::json!({ "kind": "session.new" })) {
+                            Ok((receipt, _)) => {
+                                trace(&format!("new session receipt: {}", pointer_str(&receipt, "/status").unwrap_or_default()));
+                                if let Ok(snapshot) = session.snapshot() {
+                                    let id = pointer_str(&snapshot, "/snapshot/sessionId").unwrap_or_default();
+                                    trace(&format!("new session id: {id}"));
+                                    let _ = to_ui.send(Event::NewSession { session_id: id });
+                                } else {
+                                    trace("new session: snapshot failed");
+                                }
+                            }
+                            Err(error) => {
+                                trace(&format!("new session failed: {error}"));
+                                let _ = to_ui.send(Event::TurnFailed(error.to_string()));
+                            }
+                        }
+                    });
                 }
             }
         }

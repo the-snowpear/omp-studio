@@ -27,7 +27,9 @@ impl ShellApp {
 
 impl eframe::App for ShellApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.app.pump() || self.app.streaming() {
+        // `busy` is what keeps the loop alive between a command and its reply:
+        // without it egui idles out and the reply is never read.
+        if self.app.pump() || self.app.streaming() || self.app.busy() {
             ctx.request_repaint();
         }
         self.app.render_chrome(ctx);
