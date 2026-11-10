@@ -156,11 +156,10 @@ session。现在用 repo 根目录。
   依赖图和架构约束
 - **其余命令映射**：`turn.retry`、`session.drop`、`session.clearContext`、
   `session.handoff`、`mode.plan.*` 未实现
-- **Agent Hub / Skills / MCP / 用量面板**：需要各自的 Step 适配器
+- **Agent Hub 的子 agent 编排**：Step 有并行 subagent，但 RPC 没暴露列表与状态
 - **Step 没有的能力**：`tui.transfer`、`vibe.mode`、`omfg.commit`、`prewalk`、
   `operator`、`tan` 标为 `unavailable`，Renderer 会隐藏它们
-- **Agent Hub / Skills / MCP 的真实数据**：目前这些面板读的是 OMP 侧的 read model，
-  接 Step 需要各自的适配器
+- **用量面板**：`step.usage_provenance` 条目里已有 token/耗时/成本，尚未接到界面
 
 ## 结构差异
 
