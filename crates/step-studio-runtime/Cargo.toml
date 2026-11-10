@@ -1,0 +1,20 @@
+[package]
+name = "step-studio-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+step-studio-bridge = { path = "../studio-bridge" }
+serde.workspace = true
+serde_json.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+base64.workspace = true
+
+[[bin]]
+name = "step-studio-runtime"
+path = "src/main.rs"

@@ -36,6 +36,9 @@ fn launch(tag: &str) -> AdapterLaunch {
                     .to_string_lossy()
             ),
         )],
+        // This session spawns the adapter, so it owns the token file.
+        token: None,
+        command: Vec::new(),
     }
 }
 

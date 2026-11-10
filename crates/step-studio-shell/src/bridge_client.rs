@@ -53,6 +53,17 @@ pub struct ModelRecord {
     pub reasoning: bool,
 }
 
+/// The native runtime binary, or an empty command to fall back to Node.
+fn native_runtime_command(repo_root: &std::path::Path) -> Vec<String> {
+    for profile in ["release", "debug"] {
+        let candidate = repo_root.join(format!("target/{profile}/step-studio-runtime"));
+        if candidate.exists() {
+            return vec![candidate.to_string_lossy().to_string()];
+        }
+    }
+    Vec::new()
+}
+
 /// Spawn the session thread. Returns the control channels; the thread owns the
 /// adapter process and dies with it.
 pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<Command>, Receiver<Event>) {
@@ -72,7 +83,18 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
             token_file: session_dir.join("token").to_string_lossy().to_string(),
             cwd: cwd.to_string_lossy().to_string(),
             runtime_epoch: 1,
-            env: vec![("STEP_STUDIO_RUNTIME_CMD".to_string(), step_command)],
+            // Both names: the Rust adapter reads STEP_STUDIO_STEP_CMD, the
+            // TypeScript fallback reads STEP_STUDIO_RUNTIME_CMD.
+            env: vec![
+                ("STEP_STUDIO_STEP_CMD".to_string(), step_command.clone()),
+                ("STEP_STUDIO_RUNTIME_CMD".to_string(), step_command),
+            ],
+            // The shell launches the adapter, so it owns the token file.
+            token: None,
+            // Prefer the native Rust runtime: it is 1 MB against the Node
+            // adapter's 64 MB, and speaks the same protocol. Fall back to the
+            // TypeScript adapter when the binary has not been built.
+            command: native_runtime_command(&repo_root),
         };
 
         trace(&format!("launching adapter at {}", launch.adapter_script));

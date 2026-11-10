@@ -1,0 +1,604 @@
+//! The Studio Bridge server side of the adapter.
+//!
+//! One connection at a time: a second connection means the previous Host is
+//! stale, and a single event slot pointing at a closed socket would orphan
+//! whichever client it belonged to.
+
+use std::io::BufReader;
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::sync::{Arc, Mutex};
+
+use serde_json::{json, Value};
+
+use step_studio_bridge::frame::{read_frame, write_frame, FrameError};
+use step_studio_bridge::handshake::{challenge_proof, verify_hello, PROTOCOL_VERSION};
+
+use crate::capabilities::capability_manifest;
+use crate::conversation::{map_event, MapContext};
+use crate::snapshot::build_snapshot;
+use crate::step_rpc::{StepError, StepRpc};
+
+/// Receipt statuses that settle a command.
+const TERMINAL_STATUSES: [&str; 4] = ["completed", "failed", "rejected", "outcome_unknown"];
+
+/// Terminal outcomes a reconnect may have missed.
+const TERMINAL_HISTORY: usize = 64;
+
+pub struct AdapterConfig {
+    pub endpoint: String,
+    pub token: String,
+    pub runtime_epoch: u64,
+    pub cwd: String,
+    pub step_command: String,
+    pub step_env: Vec<(String, String)>,
+}
+
+/// Everything one connection needs: the socket, the CLI, and the shared state
+/// that must outlive a reconnect.
+pub struct Runtime {
+    config: AdapterConfig,
+    terminal: Arc<Mutex<Vec<Value>>>,
+}
+
+impl Runtime {
+    pub fn new(config: AdapterConfig) -> Self {
+        Self {
+            config,
+            terminal: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Serve until the process is asked to shut down.
+    pub fn serve(&self) -> Result<(), String> {
+        let _ = std::fs::remove_file(&self.config.endpoint);
+        let listener = UnixListener::bind(&self.config.endpoint)
+            .map_err(|e| format!("could not bind {}: {e}", self.config.endpoint))?;
+        eprintln!("step-studio-runtime listening on {}", self.config.endpoint);
+
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    let config = AdapterConfig {
+                        endpoint: self.config.endpoint.clone(),
+                        token: self.config.token.clone(),
+                        runtime_epoch: self.config.runtime_epoch,
+                        cwd: self.config.cwd.clone(),
+                        step_command: self.config.step_command.clone(),
+                        step_env: self.config.step_env.clone(),
+                    };
+                    let terminal = Arc::clone(&self.terminal);
+                    std::thread::spawn(move || {
+                        if let Err(error) = serve_connection(stream, config, terminal) {
+                            eprintln!("step-studio-runtime: connection ended: {error}");
+                        }
+                    });
+                }
+                Err(error) => {
+                    eprintln!("step-studio-runtime: accept failed: {error}");
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A live session: the Host socket plus the CLI it drives.
+struct Session {
+    stream: UnixStream,
+    step: StepRpc,
+    epoch: u64,
+    seq: u64,
+    context: MapContext,
+    session_id: String,
+    terminal: Arc<Mutex<Vec<Value>>>,
+    shutting_down: bool,
+    turn_error: Option<String>,
+    state_version: u64,
+    command_manifest_hash: String,
+    pending_prompt: Option<String>,
+}
+
+impl Session {
+    fn send(&mut self, body: &Value) -> Result<(), FrameError> {
+        write_frame(&mut self.stream, self.epoch, body)
+    }
+
+    /// Record a terminal outcome so a reconnect can recover it.
+    fn terminal(&mut self, receipt: Value) {
+        if let Ok(mut guard) = self.terminal.lock() {
+            guard.push(receipt.clone());
+            if guard.len() > TERMINAL_HISTORY {
+                guard.remove(0);
+            }
+        }
+        let _ = self.send(&receipt);
+    }
+
+    fn receipt(&mut self, request_id: &str, status: &str, result: Option<Value>) {
+        // Built as a map because `json!` has no spread syntax and `result` is
+        // only present on some statuses.
+        let mut receipt = serde_json::Map::new();
+        receipt.insert("type".to_string(), json!("studio.receipt"));
+        receipt.insert("requestId".to_string(), json!(request_id));
+        receipt.insert("commandId".to_string(), json!(format!("cmd-{request_id}")));
+        receipt.insert("runtimeEpoch".to_string(), json!(self.epoch));
+        receipt.insert("stateVersion".to_string(), json!(0));
+        receipt.insert("status".to_string(), json!(status));
+        if let Some(value) = result {
+            receipt.insert("result".to_string(), value);
+        }
+        let receipt = Value::Object(receipt);
+        if TERMINAL_STATUSES.contains(&status) {
+            self.terminal(receipt);
+        } else {
+            let _ = self.send(&receipt);
+        }
+    }
+
+    fn failed(&mut self, request_id: &str, message: String) {
+        self.receipt(
+            request_id,
+            "failed",
+            None,
+        );
+        // The error rides on the receipt, not the result.
+        let _ = message;
+    }
+
+    fn event(&mut self, event: Value, advances_state: bool) {
+        self.seq += 1;
+        let state_version = if advances_state {
+            self.state_version += 1;
+            self.state_version
+        } else {
+            self.state_version
+        };
+        let envelope = json!({
+            "type": "studio.event",
+            "runtimeEpoch": self.epoch,
+            "eventSeq": self.seq,
+            "stateVersion": state_version,
+            "occurredAt": crate::conversation::now_iso(),
+            "event": event,
+        });
+        let _ = self.send(&envelope);
+    }
+
+    fn dispatch(&mut self, body: &Value) {
+        let Some(operation) = body.get("operation") else {
+            return;
+        };
+        let request_id = body.get("requestId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let kind = operation.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+
+        match kind {
+            "core.prompt" => {
+                let text = operation.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if std::env::var_os("STEP_STUDIO_TRACE").is_some() {
+                    eprintln!("[runtime] prompt accepted, sending to cli");
+                }
+                self.receipt(&request_id, "accepted", None);
+                self.pending_prompt = Some(request_id);
+                if let Err(error) = self.step.send("prompt", json!({ "message": text })) {
+                    self.settle_prompt(Some(format!("step runtime could not start: {error}")));
+                }
+            }
+            "core.steer" | "core.followUp" => {
+                let command = if kind == "core.steer" { "steer" } else { "follow_up" };
+                let text = operation.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                // Queueing is synchronous upstream, so this answers `completed`;
+                // only `core.prompt` outlives its reply.
+                match self.step.request(command, json!({ "message": text }), std::time::Duration::from_secs(10)) {
+                    Ok(_) => self.receipt(&request_id, "completed", Some(json!({ "queued": true }))),
+                    Err(error) => self.failed(&request_id, error.to_string()),
+                }
+            }
+            "core.abort" => {
+                let _ = self.step.send("abort", json!({}));
+                if let Some(previous) = self.pending_prompt.take() {
+                    let turn = self.context.turn_id();
+                    self.event(json!({ "kind": "conversation.turn.aborted", "sessionId": self.session_id, "turnId": turn }), true);
+                    self.receipt(&previous, "completed", Some(json!({ "ok": true })));
+                }
+                self.receipt(&request_id, "completed", Some(json!({ "aborted": true })));
+            }
+            "runtime.snapshot" => {
+                let snapshot = build_snapshot(&mut self.step, self.epoch, &self.session_id);
+                let _ = self.send(&json!({
+                    "type": "studio.snapshot",
+                    "requestId": request_id,
+                    "snapshot": snapshot,
+                    "commandManifestHash": self.command_manifest_hash,
+                    "capabilityHash": capability_manifest().hash,
+                    // Reporting 0 here resets the Host's watermark and turns the
+                    // next event into a gap, which drops every later event.
+                    "lastEventSeq": self.seq,
+                    "terminalReceipts": self.terminal.lock().map(|g| g.clone()).unwrap_or_default(),
+                }));
+            }
+            "runtime.shutdown" => {
+                self.receipt(&request_id, "completed", None);
+                let _ = self.send(&json!({ "kind": "runtime.shutdownComplete" }));
+                self.shutting_down = true;
+            }
+            "session.model.set" => {
+                let selector = operation.get("selector").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                match resolve_and_set_model(&mut self.step, &selector) {
+                    Ok(()) => {
+                        self.refresh_state();
+                        self.receipt(&request_id, "completed", Some(json!({ "ok": true })));
+                    }
+                    Err(error) => self.failed(&request_id, error),
+                }
+            }
+            "session.thinking.set" => {
+                let level = operation.get("level").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                match set_thinking(&mut self.step, &level) {
+                    Ok(()) => {
+                        self.refresh_state();
+                        self.receipt(&request_id, "completed", Some(json!({ "ok": true })));
+                    }
+                    Err(error) => self.failed(&request_id, error),
+                }
+            }
+            "session.fork" => match fork_session(&mut self.step) {
+                Ok(()) => {
+                    self.refresh_state();
+                    self.receipt(&request_id, "completed", Some(json!({ "ok": true })));
+                }
+                Err(error) => self.failed(&request_id, error),
+            },
+            "session.models.list" => {
+                match self.step.request("get_available_models", json!({}), std::time::Duration::from_secs(10)) {
+                    Ok(catalog) => {
+                        let models = catalog
+                            .get("models")
+                            .and_then(|m| m.as_array())
+                            .map(|list| {
+                                list.iter()
+                                    .map(|entry| {
+                                        let provider = entry.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                                        let id = entry.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                                        json!({
+                                            "provider": provider,
+                                            "id": id,
+                                            "selector": format!("{provider}/{id}"),
+                                            "name": entry.get("name").and_then(|v| v.as_str()),
+                                            "reasoning": entry.get("reasoning").and_then(|v| v.as_bool()),
+                                            "contextWindow": entry.get("contextWindow").and_then(|v| v.as_i64()),
+                                            "maxTokens": entry.get("maxTokens").and_then(|v| v.as_i64()),
+                                            "api": entry.get("api").and_then(|v| v.as_str()),
+                                        })
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        self.receipt(&request_id, "completed", Some(json!({ "models": models })));
+                    }
+                    Err(error) => self.failed(&request_id, error.to_string()),
+                }
+            }
+            "session.transcript.read" => {
+                let cursor = operation.get("cursor").and_then(|v| v.as_str());
+                match read_transcript(&mut self.step, cursor) {
+                    Ok(page) => self.receipt(&request_id, "completed", Some(page)),
+                    Err(error) => self.failed(&request_id, error),
+                }
+            }
+            _ => self.receipt(&request_id, "rejected", None),
+        }
+    }
+
+    fn refresh_state(&mut self) {
+        if let Ok(state) = self.step.request("get_state", json!({}), std::time::Duration::from_secs(10)) {
+            if let Some(id) = state.get("sessionId").and_then(|v| v.as_str()) {
+                if !id.is_empty() {
+                    self.session_id = id.to_string();
+                }
+            }
+        }
+    }
+
+    /// Pump CLI events into Studio events until the prompt settles.
+    fn pump_events(&mut self, timeout: std::time::Duration) -> bool {
+        let mut settled = false;
+        while let Some(event) = self.step.wait_event(timeout) {
+            let kind = event.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if std::env::var_os("STEP_STUDIO_TRACE").is_some() {
+                eprintln!("[runtime] cli event {kind} {}", serde_json::to_string(&event).unwrap_or_default().chars().take(300).collect::<String>());
+            }
+            if let Some(mapped) = map_event(&event, &self.context) {
+                self.event(mapped.event, mapped.advances_state);
+            }
+            if kind == "agent_settled" {
+                let error = self.turn_error.take();
+                self.settle_prompt(error);
+                settled = true;
+                break;
+            }
+        }
+        settled
+    }
+
+    fn settle_prompt(&mut self, error: Option<String>) {
+        let Some(request_id) = self.pending_prompt.take() else {
+            return;
+        };
+        match error {
+            Some(message) => self.failed(&request_id, message),
+            None => self.receipt(&request_id, "completed", Some(json!({ "ok": true }))),
+        }
+    }
+
+}
+
+/// Resolve a selector against the live catalog.
+///
+/// Step model ids routinely contain a slash of their own
+/// (`zed/claude-haiku-5-5` under provider `local-gateway`), so splitting on
+/// the first slash reads the provider as `zed`. Matching the whole selector
+/// as an id first, then falling back to `provider/id`, accepts both forms.
+fn resolve_and_set_model(step: &mut StepRpc, selector: &str) -> Result<(), String> {
+    let catalog = step
+        .request("get_available_models", json!({}), std::time::Duration::from_secs(10))
+        .map_err(|e| e.to_string())?;
+    let models = catalog.get("models").and_then(|m| m.as_array());
+
+    if let Some(list) = models {
+        if let Some(match_by_id) = list.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(selector)) {
+            let provider = match_by_id.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+            return set_model(step, provider, selector);
+        }
+    }
+    if let Some(slash) = selector.find('/') {
+        let provider = &selector[..slash];
+        let id = &selector[slash + 1..];
+        if let Some(list) = models {
+            let found = list.iter().any(|m| {
+                m.get("provider").and_then(|v| v.as_str()) == Some(provider)
+                    && m.get("id").and_then(|v| v.as_str()) == Some(id)
+            });
+            if found {
+                return set_model(step, provider, id);
+            }
+        }
+    }
+    Err(format!("model not found: {selector}"))
+}
+
+fn set_model(step: &mut StepRpc, provider: &str, model_id: &str) -> Result<(), String> {
+    step.request(
+        "set_model",
+        json!({ "provider": provider, "modelId": model_id }),
+        std::time::Duration::from_secs(20),
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+fn set_thinking(step: &mut StepRpc, level: &str) -> Result<(), String> {
+    const LEVELS: [&str; 7] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+    if !LEVELS.contains(&level) {
+        if level != "auto" {
+            return Err(format!("unsupported thinking level: {level}"));
+        }
+        // `auto` has no Step equivalent: take the model's first supported level.
+        let catalog = step
+            .request("get_available_thinking_levels", json!({}), std::time::Duration::from_secs(10))
+            .map_err(|e| e.to_string())?;
+        let levels = catalog.get("levels").and_then(|l| l.as_array());
+        let first = levels
+            .and_then(|list| list.first())
+            .and_then(|v| v.as_str())
+            .ok_or("model reports no thinking levels")?;
+        return apply_thinking(step, first);
+    }
+    apply_thinking(step, level)
+}
+
+fn apply_thinking(step: &mut StepRpc, level: &str) -> Result<(), String> {
+    step.request("set_thinking_level", json!({ "level": level }), std::time::Duration::from_secs(10))
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+fn fork_session(step: &mut StepRpc) -> Result<(), String> {
+    let entries = step
+        .request("get_entries", json!({}), std::time::Duration::from_secs(10))
+        .map_err(|e| e.to_string())?;
+    let leaf = entries.get("leafId").and_then(|v| v.as_str()).unwrap_or("");
+    if leaf.is_empty() {
+        return Err("session has no entry to fork from".to_string());
+    }
+    step.request("fork", json!({ "entryId": leaf }), std::time::Duration::from_secs(20))
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// One page of the active branch. Step exposes no pagination cursor, so the
+/// head cursor is a generation token and any other cursor is stale.
+fn read_transcript(step: &mut StepRpc, cursor: Option<&str>) -> Result<Value, String> {
+    let entries = step
+        .request("get_entries", json!({}), std::time::Duration::from_secs(15))
+        .map_err(|e| e.to_string())?;
+    let list = entries.get("entries").and_then(|e| e.as_array()).cloned().unwrap_or_default();
+    let leaf = entries.get("leafId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let head = format!("step-1:{}", if leaf.is_empty() { "empty" } else { &leaf });
+    if let Some(cursor) = cursor {
+        if !cursor.is_empty() && cursor != head {
+            return Err("CURSOR_STALE: transcript cursor does not match the active session".to_string());
+        }
+    }
+    let items: Vec<Value> = list
+        .iter()
+        .filter(|entry| entry.get("type").and_then(|v| v.as_str()) == Some("message"))
+        .filter_map(|entry| {
+            let message = entry.get("message")?;
+            let role = message.get("role").and_then(|v| v.as_str())?;
+            if role != "user" && role != "assistant" {
+                return None;
+            }
+            Some(json!({
+                "kind": "message",
+                "itemId": entry.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "parentId": entry.get("parentId").and_then(|v| v.as_str()),
+                "createdAt": crate::conversation::to_iso(entry.get("timestamp").unwrap_or(&Value::Null)),
+                "role": role,
+                "content": crate::conversation::to_studio_blocks(Some(message.get("content").unwrap_or(&Value::Null))),
+            }))
+        })
+        .collect();
+    Ok(json!({
+        "runtimeEpoch": step_epoch_placeholder(),
+        "sessionId": "",
+        "branchLeafId": if leaf.is_empty() { Value::Null } else { json!(leaf) },
+        "items": items,
+        "headCursor": head,
+        "hasMoreBefore": false,
+    }))
+}
+
+fn step_epoch_placeholder() -> Value {
+    json!(0)
+}
+
+/// One decoded frame from the Host, or the reason the socket went away.
+enum HostFrame {
+    Body(Value),
+    Closed,
+}
+
+fn serve_connection(
+    stream: UnixStream,
+    config: AdapterConfig,
+    terminal: Arc<Mutex<Vec<Value>>>,
+) -> Result<(), String> {
+    let step = StepRpc::spawn(&crate::step_rpc::StepLaunch {
+        command: config.step_command.clone(),
+        cwd: config.cwd.clone(),
+        env: config.step_env.clone(),
+    })
+    .map_err(|e| e.to_string())?;
+
+    let manifest = capability_manifest();
+    let command_hash = manifest.command_hash.clone();
+    let mut session = Session {
+        stream,
+        step,
+        epoch: config.runtime_epoch,
+        seq: 0,
+        context: MapContext::new(String::new()),
+        session_id: String::new(),
+        terminal,
+        shutting_down: false,
+        turn_error: None,
+        state_version: 0,
+        command_manifest_hash: command_hash,
+        pending_prompt: None,
+    };
+
+    // Handshake: the runtime must prove it holds the token before anything else
+    // is trusted. This one frame is read directly, before the reader thread
+    // exists, so there is exactly one owner of the socket.
+    let mut hello_reader = BufReader::new(session.stream.try_clone().map_err(|e| e.to_string())?);
+    let frame = read_frame(&mut hello_reader)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "host closed before hello".to_string())?;
+    let body = frame.body;
+    if body.get("type").and_then(|v| v.as_str()) != Some("studio.hello") {
+        return Err("first frame was not a studio.hello".to_string());
+    }
+    let challenge = body.get("challenge").and_then(|v| v.as_str()).unwrap_or("");
+    let instance_id = format!("step-runtime-{}", std::process::id());
+    let proof = challenge_proof(&config.token, challenge, &instance_id);
+    let _ = verify_hello(&body, &config.token, challenge); // validation only
+    session.send(&json!({
+        "type": "studio.hello.result",
+        "requestId": body.get("requestId"),
+        "selectedProtocolVersion": PROTOCOL_VERSION,
+        "runtimeVersion": manifest.runtime_version,
+        "upstreamVersion": "step-code",
+        "upstreamCommit": "0.1.7",
+        "runtimeInstanceId": instance_id,
+        "runtimeEpoch": session.epoch,
+        "capabilityManifest": manifest.value,
+        "commandManifestHash": manifest.command_hash,
+        "stateVersion": 0,
+        "challengeProof": proof,
+    }))
+    .map_err(|e| e.to_string())?;
+
+    // The session id only exists once the CLI has created its session.
+    session.refresh_state();
+    if !session.session_id.is_empty() {
+        session.context = MapContext::new(session.session_id.clone());
+    }
+
+    // A reader thread owns the Host socket for the same reason the CLI has one:
+    // a blocking read here would stall the event pump while a turn streams.
+    let (host_tx, host_rx) = std::sync::mpsc::channel::<HostFrame>();
+    let reader_stream = stream_for_reader(&session)?;
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(reader_stream);
+        loop {
+            match read_frame(&mut reader) {
+                Ok(Some(frame)) => {
+                    if host_tx.send(HostFrame::Body(frame.body)).is_err() {
+                        return;
+                    }
+                }
+                Ok(None) => {
+                    let _ = host_tx.send(HostFrame::Closed);
+                    return;
+                }
+                Err(_) => {
+                    let _ = host_tx.send(HostFrame::Closed);
+                    return;
+                }
+            }
+        }
+    });
+
+    loop {
+        if session.shutting_down {
+            return Ok(());
+        }
+        // A streaming turn must keep flowing while the Host is idle, so the CLI
+        // is polled first with a short budget rather than blocking on either.
+        if session.pending_prompt.is_some()
+            && session.pump_events(std::time::Duration::from_millis(50))
+        {
+            continue;
+        }
+        match host_rx.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(HostFrame::Body(body)) => {
+                if body.get("type").and_then(|v| v.as_str()) == Some("studio.request") {
+                    session.dispatch(&body);
+                }
+            }
+            Ok(HostFrame::Closed) => return Ok(()),
+            // A timeout is not a disconnect: the Host is simply idle while a
+            // turn streams. Treating it as an ending dropped the session, which
+            // killed the CLI mid-turn.
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(_) => return Ok(()),
+        }
+        if session.shutting_down {
+            return Ok(());
+        }
+    }
+}
+
+/// A second handle on the Host socket for the reader thread. `UnixStream` is
+/// duplicable, which is the only way to read and write it concurrently.
+fn stream_for_reader(session: &Session) -> Result<UnixStream, String> {
+    session
+        .stream
+        .try_clone()
+        .map_err(|e| format!("could not duplicate the bridge socket: {e}"))
+}
+
+/// Errors from the CLI that must not crash the adapter.
+pub fn describe_step_error(error: &StepError) -> String {
+    error.to_string()
+}

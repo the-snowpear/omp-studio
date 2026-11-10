@@ -4,13 +4,41 @@ use std::path::PathBuf;
 
 use eframe::egui;
 
+/// The installed Step Code CLI, resolved when neither environment variable
+/// names it. `PATH` first; then the installer's default location, which it
+/// does not add to `PATH`.
+fn find_step_cli() -> String {
+    if let Some(found) = find_on_path("step") {
+        return found;
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let installed = PathBuf::from(home).join(".stepcode/bin/step");
+        if installed.is_file() {
+            return installed.to_string_lossy().to_string();
+        }
+    }
+    "step".to_string()
+}
+
+/// First `name` on `PATH` that is a file, so a directory named `step` never
+/// wins.
+fn find_on_path(name: &str) -> Option<String> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+        .map(|found| found.to_string_lossy().to_string())
+}
+
 fn main() -> eframe::Result {
     // `--prompt` sends one turn on start, which is how the shell is driven from
     // a script; `--step-cmd` names the Step Code runtime to bridge to;
     // `--screenshot` captures the frame after the turn settles and exits.
     let mut prompt: Option<String> = None;
     let mut screenshot: Option<PathBuf> = None;
-    let mut step_command = std::env::var("STEP_STUDIO_STEP_CMD").unwrap_or_else(|_| "step".to_string());
+    let mut step_command = std::env::var("STEP_STUDIO_STEP_CMD")
+        .or_else(|_| std::env::var("STEP_STUDIO_RUNTIME_CMD"))
+        .unwrap_or_else(|_| find_step_cli());
     let mut repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)

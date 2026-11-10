@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/studio-bridge", "crates/step-studio-shell"]
+members = ["crates/studio-bridge", "crates/step-studio-shell", "crates/step-studio-runtime"]
 
 [workspace.package]
 version = "0.1.0"

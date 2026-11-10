@@ -43,7 +43,7 @@ impl From<FrameError> for BridgeError {
 
 /// One live session. Owns the socket and the adapter child process.
 pub struct BridgeSession {
-    child: Child,
+    child: Option<Child>,
     stream: UnixStream,
     reader: BufReader<UnixStream>,
     epoch: u64,
@@ -61,36 +61,35 @@ pub struct AdapterLaunch {
     pub runtime_epoch: u64,
     /// Extra environment for the adapter, e.g. `STEP_STUDIO_RUNTIME_CMD`.
     pub env: Vec<(String, String)>,
+    /// The bridge token, when the peer already holds it. Set this and
+    /// `token_file` may be empty: the session writes the file only when it is
+    /// the one launching the runtime.
+    pub token: Option<String>,
+    /// Full command to run instead of `node <adapter_script>`. Used when the
+    /// runtime is a native binary rather than a Node script.
+    pub command: Vec<String>,
 }
 
 impl BridgeSession {
     /// Launch the adapter, wait for its socket, and complete the handshake.
     pub fn connect(launch: &AdapterLaunch) -> Result<Self, BridgeError> {
-        std::fs::write(&launch.token_file, "step-studio")
-            .map_err(|e| BridgeError::Io(format!("token file: {e}")))?;
-        let _ = std::fs::remove_file(&launch.socket_path);
+        let token = match launch.token.clone() {
+            Some(token) => token,
+            None => {
+                std::fs::write(&launch.token_file, "step-studio")
+                    .map_err(|e| BridgeError::Io(format!("token file: {e}")))?;
+                "step-studio".to_string()
+            }
+        };
 
-        let mut command = Command::new(&launch.node);
-        command
-            .arg(&launch.adapter_script)
-            .arg("--mode")
-            .arg("studio-host")
-            .arg("--bridge-endpoint")
-            .arg(&launch.socket_path)
-            .arg("--bridge-token-file")
-            .arg(&launch.token_file)
-            .arg("--bridge-runtime-epoch")
-            .arg(launch.runtime_epoch.to_string())
-            .arg("--cwd")
-            .arg(&launch.cwd);
-        for (key, value) in &launch.env {
-            command.env(key, value);
-        }
-        let child = command
-            .stdout(std::process::Stdio::null())
-            .spawn()
-            .map_err(|e| BridgeError::Io(format!("spawn adapter: {e}")))?;
-
+        // An empty `node` means the peer is already running and this session is
+        // only a client — used when the runtime under test is not one we spawn.
+        let child = if launch.node.is_empty() {
+            None
+        } else {
+            let _ = std::fs::remove_file(&launch.socket_path);
+            Some(Self::spawn(launch)?)
+        };
         let stream = wait_for_socket(&launch.socket_path, Duration::from_secs(20))?;
         stream
             .set_read_timeout(Some(Duration::from_secs(120)))
@@ -114,8 +113,7 @@ impl BridgeSession {
         write_frame(&mut (&stream), 1, &hello)?;
         let frame = read_frame(&mut reader)?
             .ok_or_else(|| BridgeError::Protocol("adapter closed before hello".to_string()))?;
-        let verified = verify_hello(&frame.body, "step-studio", &challenge)
-            .map_err(BridgeError::Protocol)?;
+        let verified = verify_hello(&frame.body, &token, &challenge).map_err(BridgeError::Protocol)?;
 
         Ok(Self {
             child,
@@ -125,6 +123,41 @@ impl BridgeSession {
             instance_id: verified.runtime_instance_id,
             request_seq: 0,
         })
+    }
+
+    /// Launch the adapter process. Separated so a client-only session can skip
+    /// it entirely.
+    fn spawn(launch: &AdapterLaunch) -> Result<Child, BridgeError> {
+        let mut command = if launch.command.is_empty() {
+            let mut command = Command::new(&launch.node);
+            command.arg(&launch.adapter_script);
+            command
+        } else {
+            let mut parts = launch.command.iter();
+            let mut command = Command::new(parts.next().expect("command is non-empty"));
+            for arg in parts {
+                command.arg(arg);
+            }
+            command
+        };
+        command
+            .arg("--mode")
+            .arg("studio-host")
+            .arg("--bridge-endpoint")
+            .arg(&launch.socket_path)
+            .arg("--bridge-token-file")
+            .arg(&launch.token_file)
+            .arg("--bridge-runtime-epoch")
+            .arg(launch.runtime_epoch.to_string())
+            .arg("--cwd")
+            .arg(&launch.cwd);
+        for (key, value) in &launch.env {
+            command.env(key, value);
+        }
+        command
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| BridgeError::Io(format!("spawn adapter: {e}")))
     }
 
     pub fn epoch(&self) -> u64 {
@@ -210,16 +243,19 @@ impl Drop for BridgeSession {
         });
         let _ = write_frame(&mut self.stream, self.epoch, &request);
         let _ = self.stream.flush();
+        let Some(child) = self.child.as_mut() else {
+            return;
+        };
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline {
-            match self.child.try_wait() {
+            match child.try_wait() {
                 Ok(Some(_)) => return,
                 Ok(None) => std::thread::sleep(Duration::from_millis(50)),
                 Err(_) => break,
             }
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 
