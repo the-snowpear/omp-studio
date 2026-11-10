@@ -296,3 +296,67 @@ fn a_new_session_mints_a_fresh_session_id() {
         .to_string();
     assert_ne!(before, after, "session.new kept the old session id");
 }
+
+#[test]
+fn a_turn_settles_when_the_cli_dies_mid_turn() {
+    // The fake CLI exits on the word "die" without settling. Nothing will ever
+    // produce `agent_settled` then, so without an explicit check the Host waits
+    // forever and the shell sits on "streaming" with a Stop button that talks
+    // to a dead process. The TypeScript adapter settles on exit; this pins the
+    // same guarantee for the Rust one.
+    let dir = std::env::temp_dir().join(format!("rust-die-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let (config, _) = config_in(&dir, fake_step_wrapper(&dir).to_string_lossy().to_string());
+
+    let runtime = Runtime::new(AdapterConfig {
+        endpoint: config.endpoint.clone(),
+        token: config.token.clone(),
+        runtime_epoch: config.runtime_epoch,
+        cwd: config.cwd.clone(),
+        step_command: config.step_command.clone(),
+        step_env: config.step_env.clone(),
+        continue_session: false,
+    });
+    std::thread::spawn(move || {
+        let _ = runtime.serve();
+    });
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !std::path::Path::new(&config.endpoint).exists() {
+        assert!(std::time::Instant::now() < deadline, "the adapter never bound its socket");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let session = BridgeSession::connect(&AdapterLaunch {
+        node: String::new(),
+        adapter_script: String::new(),
+        socket_path: config.endpoint.clone(),
+        token_file: String::new(),
+        cwd: config.cwd.clone(),
+        runtime_epoch: config.runtime_epoch,
+        env: Vec::new(),
+        token: Some(config.token.clone()),
+        command: Vec::new(),
+    })
+    .expect("connect to the Rust adapter");
+
+    // The client's own read timeout is the backstop: without the fix this call
+    // hangs rather than returning, so the test fails by timing out.
+    let (receipt, _) = session
+        .invoke(serde_json::json!({ "kind": "core.prompt", "text": "die" }))
+        .expect("the turn never settled after the CLI died");
+
+    assert_eq!(
+        receipt.get("status").and_then(|s| s.as_str()),
+        Some("failed"),
+        "a dead CLI is a failed turn, not a completed one: {receipt}"
+    );
+    let message = receipt
+        .pointer("/error/message")
+        .and_then(|m| m.as_str())
+        .unwrap_or("");
+    assert!(
+        message.contains("exited"),
+        "the failure must say the CLI died, not something generic: {message}"
+    );
+}

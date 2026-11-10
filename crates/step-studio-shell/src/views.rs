@@ -79,7 +79,7 @@ impl App {
                     }
                     for turn in &self.turns {
                         ui.add_space(10.0);
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(
                                 egui::RichText::new("you").strong().color(egui::Color32::LIGHT_BLUE),
                             );
@@ -88,12 +88,13 @@ impl App {
 
                         let assistant = &turn.assistant;
                         if self.show_thinking && !assistant.thinking.is_empty() {
-                            ui.horizontal_top(|ui| {
-                                ui.label(egui::RichText::new("thinking").weak());
-                                // The reasoning stream is markdown too, and a
-                                // literal `##` in it reads as noise.
-                                render_markdown_weak(ui, &assistant.thinking);
-                            });
+                            // The reasoning stream is markdown too, and a
+                            // literal `##` in it reads as noise. It stacks under
+                            // its caption: a horizontal row would lay every line
+                            // out to the right of the last, which is what made a
+                            // long turn render as a blank column.
+                            ui.label(egui::RichText::new("thinking").weak().small());
+                            render_markdown_weak(ui, &assistant.thinking);
                         }
                         for tool in &assistant.tools {
                             let colour = if tool.is_error {
@@ -128,7 +129,13 @@ impl App {
                                         .strong()
                                         .color(egui::Color32::LIGHT_GREEN),
                                 );
-                                render_markdown(ui, &assistant.text);
+                                // The body needs its own vertical column: inside
+                                // a horizontal layout each line would be placed
+                                // beside the previous one, not below it.
+                                ui.vertical(|ui| {
+                                    ui.set_max_width(ui.available_width());
+                                    render_markdown(ui, &assistant.text);
+                                });
                             });
                         }
                         if let Some(error) = &assistant.error {

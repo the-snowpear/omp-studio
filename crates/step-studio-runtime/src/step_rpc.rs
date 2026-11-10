@@ -8,7 +8,9 @@
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -59,6 +61,10 @@ pub struct StepRpc {
     pending: VecDeque<Value>,
     seq: u64,
     exited: bool,
+    /// Set by the reader thread when the CLI's stdout ends. An empty channel and
+    /// a dead CLI look the same to a timed receive, and the difference decides
+    /// whether a turn is still streaming or will never settle.
+    closed: Arc<AtomicBool>,
 }
 
 impl StepRpc {
@@ -89,6 +95,8 @@ impl StepRpc {
         // A reader thread owns stdout so the connection handler never blocks on
         // the CLI while it is supposed to be serving the Host.
         let (sender, events) = channel();
+        let closed = Arc::new(AtomicBool::new(false));
+        let reader_closed = Arc::clone(&closed);
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
@@ -122,11 +130,13 @@ impl StepRpc {
                     }
                     Err(error) => {
                         trace(&format!("reader thread exiting: {error}"));
+                        reader_closed.store(true, Ordering::SeqCst);
                         return;
                     }
                 }
             }
             trace("reader thread: stdout closed");
+            reader_closed.store(true, Ordering::SeqCst);
         });
 
         Ok(Self {
@@ -136,6 +146,7 @@ impl StepRpc {
             pending: VecDeque::new(),
             seq: 0,
             exited: false,
+            closed,
         })
     }
 
@@ -218,6 +229,11 @@ impl StepRpc {
             return Some(event);
         }
         self.events.recv_timeout(timeout).ok()
+    }
+
+    /// True once the CLI can no longer answer — it exited, or its stdout ended.
+    pub fn closed(&self) -> bool {
+        self.exited || self.closed.load(Ordering::SeqCst)
     }
 
     pub fn kill(&mut self) {

@@ -125,6 +125,16 @@ impl Session {
     }
 
     fn receipt(&mut self, request_id: &str, status: &str, result: Option<Value>) {
+        self.receipt_with_error(request_id, status, result, None);
+    }
+
+    fn receipt_with_error(
+        &mut self,
+        request_id: &str,
+        status: &str,
+        result: Option<Value>,
+        error: Option<String>,
+    ) {
         // Built as a map because `json!` has no spread syntax and `result` is
         // only present on some statuses.
         let mut receipt = serde_json::Map::new();
@@ -137,6 +147,14 @@ impl Session {
         if let Some(value) = result {
             receipt.insert("result".to_string(), value);
         }
+        if let Some(message) = error {
+            // The Host and the shell both read the reason off the receipt; a
+            // bare `failed` tells the user nothing.
+            receipt.insert(
+                "error".to_string(),
+                json!({ "code": "INTERNAL_ERROR", "message": message, "retryable": false }),
+            );
+        }
         let receipt = Value::Object(receipt);
         if TERMINAL_STATUSES.contains(&status) {
             self.terminal(receipt);
@@ -146,13 +164,8 @@ impl Session {
     }
 
     fn failed(&mut self, request_id: &str, message: String) {
-        self.receipt(
-            request_id,
-            "failed",
-            None,
-        );
         // The error rides on the receipt, not the result.
-        let _ = message;
+        self.receipt_with_error(request_id, "failed", None, Some(message));
     }
 
     fn event(&mut self, event: Value, advances_state: bool) {
@@ -346,6 +359,16 @@ impl Session {
                 settled = true;
                 break;
             }
+        }
+        // The CLI can die mid-turn. Nothing will ever settle the prompt then,
+        // so the Host would wait forever and the shell would sit on "streaming"
+        // with a Stop button that talks to a dead process. The TypeScript
+        // adapter settles on exit; this is the same guarantee.
+        if !settled && self.step.closed() {
+            self.settle_prompt(Some(
+                "the Step CLI exited before the turn finished".to_string(),
+            ));
+            settled = true;
         }
         settled
     }
