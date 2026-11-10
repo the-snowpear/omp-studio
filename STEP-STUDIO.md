@@ -82,9 +82,29 @@ cargo run --bin step-studio-shell -- \
 challenge proof）。第一版我写成了小端 + 只含 body 的长度 + 两键头——对着 mock 全能过，
 是对着真实适配器的端到端测试抓出来的。
 
-实测（release，Linux）：壳 118 MB、适配器 64 MB、Step Code 自身 466 MB。
-Electron 那份没了，但 **Step Code 现在是主要开销**——它是 tsx/Node 应用，还会自己拉
-MCP 服务。下一个收益点在运行时层，不在壳。
+实测（release，Linux）。**发布形态**（`node dist/main.js`，无 pnpm/tsx）：
+
+| 进程 | RSS |
+|---|---|
+| 壳（Rust/egui） | 118 MB |
+| 适配器（TS） | 64 MB |
+| Step CLI 本体 | 257 MB |
+| steppage-mcp（Step 自己拉的） | 85 MB |
+| **合计** | **524 MB** |
+
+性能开销方面 CPU 几乎为零：一次回合 5.7 秒里只用了 0.2 秒 CPU（单核 3%），
+瓶颈完全在等模型。冷启动到首个快照 3.4 秒，绝大部分是 Step CLI 自己启动。
+
+> 开发形态（`pnpm step` 走 tsx 现编 TypeScript）实测 631 MB——tsx + pnpm 的纯开发
+> 开销 225 MB。早先一版文档把 322 MB 报成 Step CLI 的占用，那是被开发工具污染的
+> 数字，已更正。
+
+Electron 那 280–470 MB 没了，省的是实打实的。但运行时仍占 78%，其中：
+
+- **适配器 64 MB**：整个 Node 进程只做帧编解码 + JSONL 转发。用 Rust 重写约 600 行，
+  预计降到 ~5 MB——这是性价比最高的一步。
+- **Step CLI 257 MB + MCP 85 MB**：这是 Step Code 自身，要动就得改上游或在 in-process
+  SDK 里跑。
 
 Windows 还需要命名管道传输（`std` 不支持），这台机器无法验证那一半。
 
