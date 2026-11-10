@@ -9,7 +9,7 @@ import { ConversationTitleSurface, SharedSurface, ShellReadinessContext, useAllW
 import { ConversationFloatingHeader, type ConversationHeaderStatus } from "./conversationWorkspace/Header";
 import { TimeTravelEntry } from "./history/TimeTravelActivation";
 import { EvaluationActivity } from "./evaluation/EvaluationActivity";
-import { GitWorkbench, type GitOpenIntent } from "./git/GitWorkbench";
+import type { GitOpenIntent } from "./git/GitWorkbench";
 import { GitQuickCard } from "./git/GitQuickCard";
 import { GitDockMeter } from "./git/GitDockMeter";
 import { GitWorkspaceProvider } from "./git/GitWorkspaceContext";
@@ -33,10 +33,12 @@ import "./dock/dock.css";
 import "./dock/menus.css";
 import "./dock/integration.css";
 import { DeferredPanel, lazyPanel } from "./DeferredPanel";
+const GitWorkbench = lazyPanel(() => import("./git/GitWorkbench").then(module => ({ default: module.GitWorkbench })));
+const LocalFilesPane = lazyPanel(() => import("./capabilities/LocalFilesPane").then(module => ({ default: module.LocalFilesPane })));
+const ContextInspector = lazyPanel(() => import("./contextViewer/ContextInspector").then(module => ({ default: module.ContextInspector })));
+const ComputerDockPane = lazyPanel(() => import("./computer/ComputerDockPane").then(module => ({ default: module.ComputerDockPane })));
 import { useModelConnection } from "./models/useModelConnection";
-import { LocalFilesPane } from "./capabilities/LocalFilesPane";
 import { DictationControl } from "./composer/DictationControl";
-import { ContextInspector } from "./contextViewer/ContextInspector";
 
 import { ExecutionTargets, useExecutionTarget, useTargetMemory } from "./workspaces/ExecutionTargets";
 import { RemoteScopeNotice } from "./workspaces/RemoteScopeNotice";
@@ -51,7 +53,6 @@ const EvaluationPage = lazyPanel(() => import("./evaluation/EvaluationPage").the
 import { SecondaryInteractionDeck } from "./deck/SecondaryInteractionDeck";
 import { BrowserPane } from "./browser/BrowserPane";
 import { BrowserDockInstances } from "./browser/BrowserDockInstances";
-import { ComputerDockPane } from "./computer/ComputerDockPane";
 import { ComputerLinkProvider } from "./computer/links";
 import type { ComputerFrameIntent } from "./computer/types";
 import { AnnotationsProvider, AnnotationButton } from "./annotations/Annotations";
@@ -5593,7 +5594,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
           </form>
         </section>
       </div> : null}
-      {localFilesOpen ? <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="local://"><button autoFocus className="btn small ghost" onClick={() => setLocalFilesOpen(false)}>{t("common.close")}</button><LocalFilesPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialName={localFileName} /></section></div> : null}
+      {localFilesOpen ? <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="local://"><button autoFocus className="btn small ghost" onClick={() => setLocalFilesOpen(false)}>{t("common.close")}</button><DeferredPanel><LocalFilesPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialName={localFileName} /></DeferredPanel></section></div> : null}
       <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={state.route === "workbench"} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
       <div className={`workbench${!mdi && sideOpen ? " split-right" : ""}`} id="workbench">
         <div ref={readingColumnRef} className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`} inert={state.loading}>

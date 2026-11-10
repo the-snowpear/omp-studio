@@ -1,3 +1,4 @@
+import "./styles/models-roles.css";
 import type { ModelExecutionMetadata } from "@omp-studio/client-contract";
 import { useListReorder } from "./models/useListReorder";
 import { ModelParameterEditor } from "./models/ModelParameterEditor";

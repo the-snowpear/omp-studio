@@ -1,6 +1,6 @@
 # 工作台精简重构实施记录
 
-基线：`be2673b`。独立工作树分支：`codex/studio-streamline`。用户明确要求本次不另做备份；原工作树保留不动。
+基线：`be2673b`。独立工作树分支：`codex/studio-streamline`，目录 `D:\Project\.worktrees\omp-studio-streamline`。用户明确要求本次不另做备份；原工作树保留不动。
 
 ## 已确认的边界
 
@@ -27,4 +27,17 @@
 
 ## 结果
 
-实施中；此处仅在测量与验证完成后填写结论。
+### 首批加载精简
+
+Git、上下文查看器、Computer 正文复用 Dock 首次可见才挂载的机制；本地资源编辑器只在对话框打开时加载，具备局部失败重试。模型配置页样式随该页面加载，所有 harness 同步移除提前导入，避免测试入口与产品入口采用不同加载策略。
+
+| 实际生产入口 | 基线 | 首批加载修改 | 变化 |
+| --- | ---: | ---: | ---: |
+| 静态 JS，raw bytes | 4,391,054 | 3,211,131 | −26.9% |
+| 首屏 CSS，raw bytes | 764,829 | 652,801 | −14.6% |
+
+CodeMirror 及语言目录不再出现在首屏静态依赖中。以上不是启动时间或完整安装包的缩减比例。原始记录位于 `outputs/streamline/{baseline,loading}/assets.json`。
+
+`npm run check -- --only renderer --suite DeferredPanel --suite App --suite ModelConfigPage` 通过；Renderer 生产构建通过。基线合成工作台五次采样完成，其启动时间包含自动化启动成本，最终性能结论等待同条件对照。
+
+其余阶段仍在实施；尚未执行的验收不计为通过。
