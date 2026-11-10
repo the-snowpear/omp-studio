@@ -75,6 +75,9 @@ doc/qa/
 
 # Local agent/IDE config (project skills live under repo .claude only on dev machines)
 .claude/
+.serena/
+.claude-flow/
+ruvector.db
 skills-lock.json
 
 # Local generated installer public key (never the private signing key)
