@@ -25,6 +25,8 @@ pub enum Command {
     Abort,
     /// Drop the transcript and start a fresh session.
     NewSession,
+    /// Reload the extensions and command catalogs.
+    RefreshCatalog,
     SetModel(String),
     RefreshModels,
 }
@@ -60,6 +62,14 @@ pub enum Event {
     /// A transcript page, for restoring a resumed session into the view.
     Transcript {
         items: Vec<serde_json::Value>,
+    },
+    /// Installed extensions and the MCP servers they declare.
+    Extensions {
+        extensions: Vec<serde_json::Value>,
+    },
+    /// The runtime's command catalog: the skills surface.
+    Commands {
+        commands: Vec<serde_json::Value>,
     },
     Disconnected(String),
 }
@@ -241,6 +251,32 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
                 }
                 Command::RefreshModels => {
                     let _ = refresh_models(&session, &to_ui);
+                }
+                Command::RefreshCatalog => {
+                    let session = Arc::clone(&session);
+                    let to_ui = to_ui.clone();
+                    thread::spawn(move || {
+                        if let Ok((page, _)) =
+                            session.invoke(serde_json::json!({ "kind": "session.extensions.list" }))
+                        {
+                            let extensions = page
+                                .pointer("/result/extensions")
+                                .and_then(|e| e.as_array())
+                                .cloned()
+                                .unwrap_or_default();
+                            let _ = to_ui.send(Event::Extensions { extensions });
+                        }
+                        if let Ok((page, _)) =
+                            session.invoke(serde_json::json!({ "kind": "session.commands.list" }))
+                        {
+                            let commands = page
+                                .pointer("/result/commands")
+                                .and_then(|c| c.as_array())
+                                .cloned()
+                                .unwrap_or_default();
+                            let _ = to_ui.send(Event::Commands { commands });
+                        }
+                    });
                 }
                 Command::NewSession => {
                     // The adapter resets its own mapping state, so the only

@@ -33,6 +33,7 @@ impl eframe::App for ShellApp {
             ctx.request_repaint();
         }
         self.app.render_chrome(ctx);
+        self.app.render_catalog(ctx);
         self.app.render_conversation(ctx);
         self.app.render_composer(ctx);
 

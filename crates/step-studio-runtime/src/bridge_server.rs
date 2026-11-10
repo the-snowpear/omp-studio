@@ -396,6 +396,21 @@ impl Session {
                 let snapshot = build_snapshot(&mut self.step, self.epoch, &self.session_id);
                 self.receipt(&request_id, "completed", Some(json!({ "snapshot": snapshot })));
             }
+            // Extensions and their MCP servers are facts on disk; the command
+            // catalog is one RPC away. Neither needs a bespoke adapter.
+            "session.extensions.list" => {
+                let root = crate::extensions::config_root();
+                let extensions = crate::extensions::list_extensions(root.as_deref());
+                self.receipt(&request_id, "completed", Some(json!({ "extensions": extensions })));
+            }
+            "session.commands.list" => {
+                match crate::extensions::list_commands(&mut self.step) {
+                    Ok(commands) => {
+                        self.receipt(&request_id, "completed", Some(json!({ "commands": commands })))
+                    }
+                    Err(error) => self.failed(&request_id, error),
+                }
+            }
             _ => self.receipt(&request_id, "rejected", None),
         }
     }

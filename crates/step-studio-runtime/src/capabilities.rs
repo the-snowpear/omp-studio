@@ -26,6 +26,8 @@ const CAPABILITIES: &[(&str, &str, &str)] = &[
         "Step exposes no pagination cursor, so the page is the whole branch",
     ),
     ("session.new", "stable", ""),
+    ("session.extensions.list", "stable", ""),
+    ("session.commands.list", "stable", ""),
     ("session.model.set", "stable", ""),
     ("session.models.list", "stable", ""),
     (
@@ -55,6 +57,8 @@ const COMMANDS: &[&str] = &[
     "session.model.set",
     "session.thinking.set",
     "session.new",
+    "session.extensions.list",
+    "session.commands.list",
     "session.fork",
     "session.models.list",
 ];

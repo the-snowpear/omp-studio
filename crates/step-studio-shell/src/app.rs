@@ -54,6 +54,10 @@ pub struct App {
     pub turns: Vec<Turn>,
     pub composer: String,
     pub show_thinking: bool,
+    /// The extensions and command catalogs, and whether the drawer is open.
+    pub extensions: Vec<serde_json::Value>,
+    pub commands: Vec<serde_json::Value>,
+    pub catalog_open: bool,
     /// A command is outstanding, so the bridge thread may still deliver. egui
     /// stops calling `update` once nothing asks for a repaint, which would
     /// strand every event that arrives after the app goes idle.
@@ -92,6 +96,9 @@ impl App {
             turns: Vec::new(),
             composer: String::new(),
             show_thinking: true,
+            extensions: Vec::new(),
+            commands: Vec::new(),
+            catalog_open: false,
             to_bridge: Some(to_bridge),
             from_bridge: Some(from_bridge),
         }
@@ -247,6 +254,14 @@ impl App {
                     }
                 }
             }
+            Event::Extensions { extensions } => {
+                self.extensions = extensions;
+                self.busy = false;
+            }
+            Event::Commands { commands } => {
+                self.commands = commands;
+                self.busy = false;
+            }
             Event::Transcript { items } => {
                 self.busy = false;
                 self.restored = true;
@@ -334,6 +349,17 @@ impl App {
         }
     }
 
+    /// Open or close the extensions drawer, loading it on first open.
+    pub fn toggle_catalog(&mut self) {
+        self.catalog_open = !self.catalog_open;
+        if self.catalog_open && self.extensions.is_empty() {
+            self.busy = true;
+            if let Some(sender) = self.to_bridge.as_ref() {
+                let _ = sender.send(Command::RefreshCatalog);
+            }
+        }
+    }
+
     /// Drop the transcript and start a fresh session.
     pub fn new_session(&mut self) {
         self.busy = true;
@@ -405,6 +431,9 @@ pub fn app_for_test() -> App {
         turns: Vec::new(),
         composer: String::new(),
         show_thinking: true,
+        extensions: Vec::new(),
+        commands: Vec::new(),
+        catalog_open: false,
         busy: false,
         restored: true,
         pending_prompt: None,

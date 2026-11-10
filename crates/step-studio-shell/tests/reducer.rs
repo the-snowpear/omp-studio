@@ -312,6 +312,29 @@ fn a_disconnect_releases_a_prompt_held_for_the_history() {
     assert_eq!(app.turns[0].user, "second");
 }
 
+/// The drawer loads on first open and then keeps what it fetched, so a second
+/// open does not re-read the disk and the RPC.
+#[test]
+fn the_catalog_loads_once_and_then_stays_put() {
+    let mut app = app_without_runtime();
+    app.apply(Event::Extensions {
+        extensions: vec![serde_json::json!({ "id": "steppage", "name": "StepPage", "installed": true })],
+    });
+    app.apply(Event::Commands {
+        commands: vec![serde_json::json!({ "name": "mcp", "description": "Show configured MCP servers" })],
+    });
+
+    assert!(!app.catalog_open);
+    app.toggle_catalog();
+    assert!(app.catalog_open, "the drawer opens");
+    assert_eq!(app.extensions.len(), 1, "what was fetched is still shown");
+    assert_eq!(app.commands.len(), 1);
+
+    app.toggle_catalog();
+    assert!(!app.catalog_open, "and closes again");
+    assert_eq!(app.extensions.len(), 1, "closing does not drop the catalog");
+}
+
 #[test]
 fn an_empty_prompt_is_not_sent() {
     let mut app = app_without_runtime();

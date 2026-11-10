@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import { BridgeConnection, PROTOCOL_VERSION, challengeProof, sha256 } from "./bridge.js";
 import { StepRpc } from "./step-rpc.js";
+import { configRoot, listCommands, listExtensions } from "./extensions.js";
 
 const argv = process.argv.slice(2);
 
@@ -54,6 +55,18 @@ const capabilities = [
     limitations: ["`auto` has no Step equivalent; it maps to the model's first supported level"],
   },
   {
+    id: "session.extensions.list",
+    grade: "stable",
+    version: 1,
+    evidence: "runtime-stepcode",
+  },
+  {
+    id: "session.commands.list",
+    grade: "stable",
+    version: 1,
+    evidence: "runtime-stepcode",
+  },
+  {
     id: "session.new",
     grade: "stable",
     version: 1,
@@ -85,6 +98,8 @@ const commandManifestHash = sha256(
     "runtime.shutdown",
     "session.model.set",
     "session.thinking.set",
+    "session.extensions.list",
+    "session.commands.list",
     "session.new",
     "session.fork",
     "session.models.list",
@@ -687,6 +702,23 @@ const server = createServer(socket => {
         const snapshot = await buildSnapshot();
         connection.receipt(requestId, "completed", { snapshot });
       });
+      return;
+    }
+
+    // Extensions and their MCP servers are facts on disk; the command catalog is
+    // one RPC away. Neither needs a bespoke adapter.
+    if (operation["kind"] === "session.extensions.list") {
+      connection.receipt(requestId, "completed", {
+        extensions: listExtensions(configRoot()),
+      });
+      return;
+    }
+
+    if (operation["kind"] === "session.commands.list") {
+      void listCommands(rpc).then(
+        commands => connection.receipt(requestId, "completed", { commands }),
+        error => connection.failedReceipt(requestId, String(error)),
+      );
       return;
     }
 

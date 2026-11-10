@@ -57,11 +57,112 @@ impl App {
                         .on_disabled_hover_text("stop the turn first")
                         .clicked()
                         .then(|| self.new_session());
+                    if ui
+                        .button(if self.catalog_open { "Close" } else { "Catalog" })
+                        .clicked()
+                    {
+                        self.toggle_catalog();
+                    }
                     ui.checkbox(&mut self.show_thinking, "thinking");
                     ui.small(format!("session {}", short_id(&self.session_id)));
                 });
             });
         });
+    }
+
+    /// Extensions, the MCP servers they declare, and the command catalog. All
+    /// three are facts Step already has — plugin manifests on disk and one RPC —
+    /// so the panel reads rather than reimplements them.
+    pub(crate) fn render_catalog(&mut self, ctx: &egui::Context) {
+        if !self.catalog_open {
+            return;
+        }
+        egui::SidePanel::right("catalog")
+            .default_width(320.0)
+            .resizable(true)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.heading("Extensions");
+                    if self.extensions.is_empty() {
+                        ui.small("none found");
+                    }
+                    for extension in &self.extensions {
+                        let name = extension
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("(unnamed)");
+                        let version = extension
+                            .get("version")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        ui.horizontal_wrapped(|ui| {
+                            ui.strong(name);
+                            ui.small(version);
+                            // A catalog entry is a server the user could enable;
+                            // an installed one is running. They are not the same
+                            // fact, so the panel does not pretend they are.
+                            let installed = extension
+                                .get("installed")
+                                .and_then(|i| i.as_bool())
+                                .unwrap_or(true);
+                            ui.small(if installed { "installed" } else { "available" });
+                        });
+                        if let Some(description) =
+                            extension.get("description").and_then(|d| d.as_str())
+                        {
+                            if !description.is_empty() {
+                                ui.small(description);
+                            }
+                        }
+                        let servers = extension
+                            .get("mcpServers")
+                            .and_then(|s| s.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+                        if servers.is_empty() {
+                            ui.small("  no MCP servers");
+                        }
+                        for server in &servers {
+                            let server_name = server
+                                .get("name")
+                                .and_then(|n| n.as_str())
+                                .unwrap_or("");
+                            let command = server
+                                .get("command")
+                                .and_then(|c| c.as_str())
+                                .unwrap_or("");
+                            ui.horizontal_wrapped(|ui| {
+                                ui.add_space(12.0);
+                                ui.colored_label(
+                                    egui::Color32::LIGHT_BLUE,
+                                    format!("⚙ {server_name}"),
+                                );
+                                ui.small(command);
+                            });
+                        }
+                        ui.add_space(6.0);
+                    }
+
+                    ui.separator();
+                    ui.heading("Commands");
+                    if self.commands.is_empty() {
+                        ui.small("none reported");
+                    }
+                    for command in &self.commands {
+                        let name = command.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                        let description = command
+                            .get("description")
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("");
+                        ui.horizontal_wrapped(|ui| {
+                            ui.monospace(format!("/{name}"));
+                        });
+                        if !description.is_empty() {
+                            ui.small(description);
+                        }
+                    }
+                });
+            });
     }
 
     pub(crate) fn render_conversation(&mut self, ctx: &egui::Context) {
