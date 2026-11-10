@@ -20,6 +20,8 @@ pub struct AssistantTurn {
 
 #[derive(Debug, Default, Clone)]
 pub struct ToolCall {
+    /// Step's id for the call, so a restored transcript can pair its result.
+    pub call_id: String,
     pub name: String,
     pub output: String,
     pub is_error: bool,
@@ -134,6 +136,24 @@ impl App {
                         },
                     });
                 }
+                "toolResult" => {
+                    // Step pairs a result to its call by id, so this is exact
+                    // rather than the positional guess the live path makes.
+                    let call_id = item.get("toolCallId").and_then(|v| v.as_str()).unwrap_or("");
+                    let Some(turn) = self.turns.last_mut() else {
+                        continue;
+                    };
+                    if let Some(tool) = turn
+                        .assistant
+                        .tools
+                        .iter_mut()
+                        .find(|tool| tool.call_id == call_id)
+                    {
+                        tool.output = block_text(blocks, "text");
+                        tool.is_error = item.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
+                        tool.done = true;
+                    }
+                }
                 "assistant" => {
                     // A transcript that opens with an assistant entry has no
                     // turn to attach to; dropping it is better than inventing an
@@ -148,16 +168,20 @@ impl App {
                             continue;
                         }
                         turn.assistant.tools.push(ToolCall {
+                            call_id: block
+                                .get("toolCallId")
+                                .and_then(|n| n.as_str())
+                                .unwrap_or_default()
+                                .to_string(),
                             name: block
                                 .get("toolName")
                                 .and_then(|n| n.as_str())
                                 .unwrap_or_default()
                                 .to_string(),
-                            // Tool results are separate entries the transcript
-                            // drops, so a restored call has no output.
                             output: String::new(),
                             is_error: false,
-                            done: true,
+                            // Set when its `toolResult` entry arrives.
+                            done: false,
                         });
                     }
                 }
@@ -193,9 +217,10 @@ impl App {
                     turn.assistant.text.push_str(&delta);
                 }
             }
-            Event::ToolStarted { name } => {
+            Event::ToolStarted { call_id, name } => {
                 if let Some(turn) = self.turns.last_mut() {
                     turn.assistant.tools.push(ToolCall {
+                        call_id,
                         name,
                         output: String::new(),
                         is_error: false,
@@ -203,16 +228,11 @@ impl App {
                     });
                 }
             }
-            Event::ToolCompleted { name, output, is_error } => {
+            Event::ToolCompleted { call_id, output, is_error } => {
+                // By id, not by name: a turn can run the same tool twice, and
+                // two calls of one tool can be in flight together.
                 if let Some(turn) = self.turns.last_mut() {
-                    // Match the oldest unfinished call of this name: a turn can
-                    // run the same tool more than once.
-                    if let Some(tool) = turn
-                        .assistant
-                        .tools
-                        .iter_mut()
-                        .find(|tool| !tool.done && tool.name == name)
-                    {
+                    if let Some(tool) = turn.assistant.tools.iter_mut().find(|tool| tool.call_id == call_id) {
                         tool.output = output;
                         tool.is_error = is_error;
                         tool.done = true;

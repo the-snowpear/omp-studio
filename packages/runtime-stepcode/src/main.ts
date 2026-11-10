@@ -474,16 +474,26 @@ async function readTranscript(cursor: unknown, limit: unknown): Promise<Record<s
     if (entry["type"] !== "message") continue;
     const message = entry["message"] as Record<string, unknown> | undefined;
     const role = String(message?.["role"] ?? "");
-    if (role !== "user" && role !== "assistant") continue;
+    // `toolResult` is a message too, and dropping it left a restored conversation
+    // showing tool calls with no output.
+    if (role !== "user" && role !== "assistant" && role !== "toolResult") continue;
     const itemId = String(entry["id"] ?? "");
-    items.push({
+    const item: Record<string, unknown> = {
       kind: "message",
       itemId,
       parentId: typeof entry["parentId"] === "string" ? entry["parentId"] : null,
       createdAt: toIso(entry["timestamp"]),
       role,
       content: toStudioBlocks(message?.["content"]),
-    });
+    };
+    if (role === "toolResult") {
+      // Step pairs a result to its call by id, so the shell can match it exactly
+      // rather than by position.
+      item["toolCallId"] = String(message?.["toolCallId"] ?? "");
+      item["toolName"] = String(message?.["toolName"] ?? "");
+      item["isError"] = message?.["isError"] === true;
+    }
+    items.push(item);
   }
   return {
     runtimeEpoch,

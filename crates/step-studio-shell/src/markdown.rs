@@ -63,6 +63,54 @@ pub fn classify<'a>(line: &'a str, fenced: &mut bool) -> Line<'a> {
     Line::Paragraph(trimmed)
 }
 
+/// One run of styled text within a line.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Span<'a> {
+    Plain(&'a str),
+    Bold(&'a str),
+    Code(&'a str),
+}
+
+/// Split a line into `**bold**` and `` `code` `` runs. An unclosed marker is
+/// emitted literally — a stray asterisk should look like one.
+pub fn spans(line: &str) -> Vec<Span<'_>> {
+    let mut out = Vec::new();
+    let mut rest = line;
+    loop {
+        let bold = rest.find("**");
+        let code = rest.find('`');
+        let at = match (bold, code) {
+            (Some(b), Some(c)) => b.min(c),
+            (Some(b), None) => b,
+            (None, Some(c)) => c,
+            (None, None) => break,
+        };
+        if at > 0 {
+            out.push(Span::Plain(&rest[..at]));
+        }
+        let marker = if rest[at..].starts_with("**") { "**" } else { "`" };
+        let after = &rest[at + marker.len()..];
+        // An empty run is a marker with nothing between it, which should stay
+        // literal rather than disappear from the line.
+        let Some(close) = after.find(marker).filter(|close| *close > 0) else {
+            out.push(Span::Plain(&rest[at..at + marker.len()]));
+            rest = after;
+            continue;
+        };
+        let inner = &after[..close];
+        out.push(if marker == "**" {
+            Span::Bold(inner)
+        } else {
+            Span::Code(inner)
+        });
+        rest = &after[close + marker.len()..];
+    }
+    if !rest.is_empty() {
+        out.push(Span::Plain(rest));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,5 +145,50 @@ mod tests {
         assert_eq!(classify("```", &mut fenced), Line::Blank);
         assert!(!fenced);
         assert_eq!(classify("## a heading again", &mut fenced), Line::Heading(2, "a heading again"));
+    }
+}
+
+#[cfg(test)]
+mod span_tests {
+    use super::*;
+
+    #[test]
+    fn plain_text_is_one_span() {
+        assert_eq!(spans("just words"), vec![Span::Plain("just words")]);
+    }
+
+    #[test]
+    fn bold_and_code_split_a_line() {
+        assert_eq!(
+            spans("count is **2** and `x` done"),
+            vec![
+                Span::Plain("count is "),
+                Span::Bold("2"),
+                Span::Plain(" and "),
+                Span::Code("x"),
+                Span::Plain(" done"),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unclosed_marker_stays_literal() {
+        assert_eq!(
+            spans("2 ** 3"),
+            vec![Span::Plain("2 "), Span::Plain("**"), Span::Plain(" 3")]
+        );
+        assert_eq!(
+            spans("a `b"),
+            vec![Span::Plain("a "), Span::Plain("`"), Span::Plain("b")]
+        );
+    }
+
+    #[test]
+    fn adjacent_markers_do_not_lose_text() {
+        assert_eq!(
+            spans("**a****b**"),
+            vec![Span::Bold("a"), Span::Bold("b")]
+        );
+        assert_eq!(spans("``"), vec![Span::Plain("`"), Span::Plain("`")]);
     }
 }

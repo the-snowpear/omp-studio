@@ -24,10 +24,11 @@ fn a_full_turn_lands_in_order() {
     app.apply(Event::Thinking("The".to_string()));
     app.apply(Event::Thinking(" user wants".to_string()));
     app.apply(Event::ToolStarted {
+        call_id: "c1".to_string(),
         name: "list_directory".to_string(),
     });
     app.apply(Event::ToolCompleted {
-        name: "list_directory".to_string(),
+        call_id: "c1".to_string(),
         output: "dir apps/".to_string(),
         is_error: false,
     });
@@ -77,31 +78,72 @@ fn a_disconnect_is_reported_rather_than_silently_hanging() {
     assert!(app.status_detail.contains("ENOENT"));
 }
 
+/// Paired by call id, not by name. A turn can run the same tool twice, and two
+/// calls of one tool can be in flight together — matching by name put the first
+/// result on whichever call happened to be listed first.
 #[test]
-fn repeated_tool_calls_are_paired_by_name_not_position() {
+fn tool_results_are_paired_by_call_id_not_name() {
     let mut app = app_without_runtime();
     app.apply(Event::Ready {
         session_id: "s".to_string(),
         model: None,
     });
     app.send("go".to_string());
-    app.apply(Event::ToolStarted { name: "read".to_string() });
-    app.apply(Event::ToolStarted { name: "read".to_string() });
-    app.apply(Event::ToolCompleted {
+    app.apply(Event::ToolStarted {
+        call_id: "c1".to_string(),
         name: "read".to_string(),
-        output: "first".to_string(),
+    });
+    app.apply(Event::ToolStarted {
+        call_id: "c2".to_string(),
+        name: "read".to_string(),
+    });
+    // Out of order, which is what a concurrent pair looks like on the wire.
+    app.apply(Event::ToolCompleted {
+        call_id: "c2".to_string(),
+        output: "second".to_string(),
         is_error: false,
     });
     app.apply(Event::ToolCompleted {
-        name: "read".to_string(),
-        output: "second".to_string(),
-        is_error: false,
+        call_id: "c1".to_string(),
+        output: "first".to_string(),
+        is_error: true,
     });
 
     let tools = &app.turns[0].assistant.tools;
     assert_eq!(tools.len(), 2);
     assert_eq!(tools[0].output, "first");
+    assert!(tools[0].is_error);
     assert_eq!(tools[1].output, "second");
+    assert!(!tools[1].is_error);
+    assert!(tools.iter().all(|tool| tool.done));
+}
+
+/// A restored transcript pairs its results the same way, by the id Step stores
+/// on both the call and the result.
+#[test]
+fn a_restored_transcript_fills_in_tool_results() {
+    let mut app = app_without_runtime();
+    app.restore(&[
+        serde_json::json!({ "role": "user", "content": [{ "type": "text", "text": "list /tmp" }] }),
+        serde_json::json!({ "role": "assistant", "content": [
+            { "type": "toolCall", "toolCallId": "c1", "toolName": "list_directory" },
+            { "type": "toolCall", "toolCallId": "c2", "toolName": "read" },
+        ]}),
+        serde_json::json!({ "role": "toolResult", "toolCallId": "c2", "toolName": "read", "isError": false,
+                            "content": [{ "type": "text", "text": "the second file" }] }),
+        serde_json::json!({ "role": "toolResult", "toolCallId": "c1", "toolName": "list_directory", "isError": true,
+                            "content": [{ "type": "text", "text": "no such directory" }] }),
+    ]);
+
+    let tools = &app.turns[0].assistant.tools;
+    assert_eq!(tools.len(), 2);
+    assert_eq!(tools[0].name, "list_directory");
+    assert_eq!(tools[0].output, "no such directory");
+    assert!(tools[0].is_error, "a failed call must restore as failed");
+    assert_eq!(tools[1].name, "read");
+    assert_eq!(tools[1].output, "the second file");
+    assert!(!tools[1].is_error);
+    assert!(tools.iter().all(|tool| tool.done));
 }
 
 /// Aborting is the one command the reducer must *not* act on: the runtime

@@ -40,10 +40,11 @@ pub enum Event {
     Thinking(String),
     Text(String),
     ToolStarted {
+        call_id: String,
         name: String,
     },
     ToolCompleted {
-        name: String,
+        call_id: String,
         output: String,
         is_error: bool,
     },
@@ -320,12 +321,13 @@ fn dispatch(to_ui: &Sender<Event>, event: &serde_json::Value) {
         }
         Some("conversation.tool.started") => {
             let _ = to_ui.send(Event::ToolStarted {
+                call_id: pointer_str(event, "/toolCallId").unwrap_or_default(),
                 name: pointer_str(event, "/toolName").unwrap_or_default(),
             });
         }
         Some("conversation.tool.completed") => {
             let _ = to_ui.send(Event::ToolCompleted {
-                name: pointer_str(event, "/result/toolName").unwrap_or_default(),
+                call_id: pointer_str(event, "/result/toolCallId").unwrap_or_default(),
                 output: pointer_str(event, "/result/output").unwrap_or_default(),
                 is_error: event
                     .pointer("/result/isError")

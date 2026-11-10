@@ -83,7 +83,7 @@ cargo build --release
 | 能力 | 状态 |
 |---|---|
 | 流式正文 / 思考分块 | 实时逐字，不等到回合结束 |
-| markdown | 标题、列表、代码块有真实样式（egui 没有 markdown 控件） |
+| markdown | 标题、列表、代码块、行内 `**粗体**` / `` `代码` `` 都有真实样式（egui 没有 markdown 控件） |
 | 模型切换 | 顶栏下拉，来自 CLI 的实时 catalog |
 | 停止 | 流式中 Send 变 Stop，发 `core.abort` |
 | 新会话 | 顶栏 New，调 Step 的 `new_session` |

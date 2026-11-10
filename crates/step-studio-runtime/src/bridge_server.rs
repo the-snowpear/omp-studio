@@ -465,17 +465,38 @@ fn read_transcript(step: &mut StepRpc, cursor: Option<&str>) -> Result<Value, St
         .filter_map(|entry| {
             let message = entry.get("message")?;
             let role = message.get("role").and_then(|v| v.as_str())?;
-            if role != "user" && role != "assistant" {
+            // `toolResult` is a message too, and dropping it left a restored
+            // conversation showing tool calls with no output.
+            if !matches!(role, "user" | "assistant" | "toolResult") {
                 return None;
             }
-            Some(json!({
+            let mut item = json!({
                 "kind": "message",
                 "itemId": entry.get("id").and_then(|v| v.as_str()).unwrap_or(""),
                 "parentId": entry.get("parentId").and_then(|v| v.as_str()),
                 "createdAt": crate::conversation::to_iso(entry.get("timestamp").unwrap_or(&Value::Null)),
                 "role": role,
                 "content": crate::conversation::to_studio_blocks(Some(message.get("content").unwrap_or(&Value::Null))),
-            }))
+            });
+            if role == "toolResult" {
+                // Step pairs a result to its call by id, so the shell can match
+                // it exactly rather than by position.
+                if let Some(object) = item.as_object_mut() {
+                    object.insert(
+                        "toolCallId".to_string(),
+                        json!(message.get("toolCallId").and_then(|v| v.as_str()).unwrap_or("")),
+                    );
+                    object.insert(
+                        "toolName".to_string(),
+                        json!(message.get("toolName").and_then(|v| v.as_str()).unwrap_or("")),
+                    );
+                    object.insert(
+                        "isError".to_string(),
+                        json!(message.get("isError").and_then(|v| v.as_bool()).unwrap_or(false)),
+                    );
+                }
+            }
+            Some(item)
         })
         .collect();
     Ok(json!({

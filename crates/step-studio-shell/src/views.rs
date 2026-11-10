@@ -3,7 +3,7 @@
 use eframe::egui;
 
 use crate::app::{App, Status};
-use crate::markdown::{classify, Line};
+use crate::markdown::{classify, spans, Line, Span};
 
 impl App {
     pub(crate) fn render_chrome(&mut self, ctx: &egui::Context) {
@@ -202,13 +202,27 @@ fn render_markdown_styled(ui: &mut egui::Ui, text: &str, weak: bool) {
                 ui.horizontal_wrapped(|ui| {
                     ui.add_space(12.0);
                     ui.label(dim(egui::RichText::new("•")));
-                    ui.label(dim(egui::RichText::new(item)));
+                    rich_spans(ui, item, &dim);
                 });
             }
             Line::Paragraph(paragraph) => {
-                ui.label(dim(egui::RichText::new(paragraph)));
+                ui.horizontal_wrapped(|ui| rich_spans(ui, paragraph, &dim));
             }
         }
+    }
+}
+
+/// Emit one line's spans. Consecutive labels in a wrapping horizontal layout
+/// flow inline, which is what makes `**bold**` and `` `code` `` read as part of
+/// the sentence instead of as separate blocks.
+fn rich_spans(ui: &mut egui::Ui, text: &str, dim: &impl Fn(egui::RichText) -> egui::RichText) {
+    for span in spans(text) {
+        let rich = match span {
+            Span::Plain(plain) => egui::RichText::new(plain),
+            Span::Bold(bold) => egui::RichText::new(bold).strong(),
+            Span::Code(code) => egui::RichText::new(code).monospace(),
+        };
+        ui.label(dim(rich));
     }
 }
 
