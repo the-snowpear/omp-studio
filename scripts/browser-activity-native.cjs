@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { createHash } = require("node:crypto");
 const soak = process.argv.includes("--soak");
 if (!process.versions.electron) {
   const environment = { ...process.env }; delete environment.ELECTRON_RUN_AS_NODE;
@@ -22,7 +23,14 @@ console.log(JSON.stringify({ output }));
 app.setPath("userData", temporary);
 app.on("window-all-closed", () => {});
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
-const report = { status: "running", electron: process.versions.electron, started: Date.now(), profile: temporary, checks: [] };
+const digest = file => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+const report = { status: "running", electron: process.versions.electron, started: Date.now(), profile: temporary,
+  identity: {
+    revision: require("node:child_process").execFileSync("git", ["rev-parse", "HEAD"], { cwd: path.join(__dirname, ".."), encoding: "utf8", windowsHide: true }).trim(),
+    script: digest(__filename),
+    manager: digest(path.join(__dirname, "../apps/desktop/dist/src/managed-browser.js")),
+    activity: digest(path.join(__dirname, "../apps/desktop/dist/src/managed-browser-activity.js")),
+  }, checks: [] };
 const save = () => fs.writeFileSync(path.join(output, "report.json"), JSON.stringify(report, null, 2));
 const record = (name, values = {}) => { report.checks.push({ name, ...values }); console.log(name, JSON.stringify(values)); save(); };
 async function until(condition, description) {

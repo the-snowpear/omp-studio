@@ -1,5 +1,5 @@
 /** Inspect a real unpacked Electron directory; this is not an installer-size estimate. */
-import { readFile, readdir, stat, mkdir, writeFile } from "node:fs/promises";
+import { readdir, stat, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
