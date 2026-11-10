@@ -132,7 +132,7 @@ function ConversationDocumentHost({ enabled, record, client: initialClient, stor
     const shared = acquireProjectReads(target, workspaceId as WorkspaceId);
     return { client: opened, owned: true, project: shared.reads, releaseProject: shared.release };
   }, !!record.ref.sessionId && !store.demo,
-  !store.demo && record.ref.workspaceId ? cachedProjectReads(record.ref.targetId === null ? initialClient : registryRef.current.client(record.ref.targetId), record.ref.workspaceId as WorkspaceId) : undefined));
+  !store.demo && record.ref.workspaceId ? cachedProjectReads(record.ref.targetId === null ? initialClient : registryRef.current.client(record.ref.targetId), record.ref.workspaceId as WorkspaceId) : undefined, !store.demo));
   const host = hosts.get(record.id);
   const surface = useSyncExternalStore(useCallback(listener => { host.listeners.add(listener); return () => { host.listeners.delete(listener); }; }, [host]), () => host.surface);
   const view = state.views.find(view => view.documentId === record.id);

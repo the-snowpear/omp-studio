@@ -3,7 +3,7 @@ import type { ClientBootstrap, ClientEvent, StudioClient, SubscriptionScope, Uns
 import { CONVERSATION_LIMITS } from "@omp-studio/client-contract";
 
 import { measureSessionOperation } from "../sessionSwitchPerformance";
-import { bindBodyReady, bindProjectReads, isAuxiliaryRead, isProjectRead, type ProjectReads } from "./projectReads";
+import { acquireProjectReads, bindBodyReady, bindProjectReads, isAuxiliaryRead, isProjectRead, type ProjectReads } from "./projectReads";
 
 type StatefulClient = StudioClient & { getState?(): ClientState; onState?(listener: (state: ClientState) => void): Unsubscribe; transportLost?(reason: string): void; resync?(): Promise<ClientBootstrap> };
 const initializations = new WeakMap<StudioClient, Promise<ClientBootstrap>>();
@@ -23,7 +23,7 @@ export async function resyncConversationClient(client: StudioClient) {
   return result;
 }
 
-export function createConversationClient(open: () => Promise<{ client: StudioClient; owned: boolean; project?: ProjectReads; releaseProject?: () => void }>, waitForBody = false, cachedProject?: ProjectReads): StatefulClient {
+export function createConversationClient(open: () => Promise<{ client: StudioClient; owned: boolean; project?: ProjectReads; releaseProject?: () => void }>, waitForBody = false, cachedProject?: ProjectReads, allowRootProject = false): StatefulClient {
   let value: StatefulClient | undefined;
   let opening: Promise<StatefulClient> | undefined;
   let owned = false, closed = false;
@@ -34,6 +34,13 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
   let capabilities: ClientBootstrap["capabilityManifest"] | undefined;
   let selectedSession: import("@omp-studio/client-contract").SessionId | undefined;
   let capabilitiesRead: Promise<ClientBootstrap["capabilityManifest"]> | undefined;
+  const selectRootProject = (workspaceId: import("@omp-studio/client-contract").WorkspaceId | undefined) => {
+    if (!allowRootProject || owned || closed || !workspaceId || !value?.openContext || project?.workspaceId === workspaceId) return;
+    releaseProject?.();
+    const shared = acquireProjectReads(value, workspaceId);
+    project = shared.reads; releaseProject = shared.release; bindProjectReads(client, project);
+    requestAnimationFrame(() => { if (!closed) project?.warm(selectedSession); });
+  };
   const initial = createInitialClientState();
   const subscriptions = new Set<{ scope: SubscriptionScope; listener: (event: ClientEvent) => void }>();
   const stateListeners = new Set<(state: ClientState) => void>();
@@ -55,6 +62,7 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
     bootstrap: () => measureSessionOperation("client.bootstrap", async () => {
       const result = await initializeConversationClient(await ready()); capabilities = result.capabilityManifest;
       selectedSession = result.selected?.sessionId;
+      selectRootProject(result.selected?.workspaceId);
       if (!result.selected?.sessionId) releaseBody();
       if (!waitForBody && project) requestAnimationFrame(() => { if (!closed) project?.warm(selectedSession); });
       return result;
@@ -71,13 +79,14 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
       }
       const epoch = project?.owner.epoch;
       const result = await measureSessionOperation(`query.${name}.request`, async () => {
-        if (project && isProjectRead(name)) return project.read(name, input);
+        if (project && isProjectRead(name) && !(allowRootProject && !owned && name === "projects.list")) return project.read(name, input);
         const foreground = project && (name === "session.transcript.readPage" || name === "conversation.open") ? project.owner : undefined;
         if (foreground) foreground.foreground++;
         try { return await target.query(name, input); }
         finally { if (foreground) foreground.foreground--; }
       });
       const pageInput = input as { cursor?: string; agentId?: string; limit?: number };
+      if (name === "projects.list") selectRootProject((result as import("@omp-studio/client-contract").WorkspaceListReadModel).activeWorkspaceId);
       if (!closed && epoch === project?.owner.epoch && name === "session.transcript.readPage" && !pageInput.cursor && !pageInput.agentId && (pageInput.limit ?? CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT) === CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT) {
         return (project?.savePage(result as import("@omp-studio/client-contract").ConversationTranscriptReadPage) ?? result) as never;
       }

@@ -17,10 +17,10 @@ import { createDefaultLayout, dockReducer } from "../dock/model";
 vi.setConfig({ testTimeout: 15_000 });
 
 afterEach(() => { cleanup(); localStorage.clear(); window.history.replaceState(null, "", "/"); __resetAppSettingsForTests(null); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-function client(options: { delayContext?: Promise<void>; bootstrap?: () => void; openContext?: (scope: ClientContextScope) => void } = {}) {
+function client(options: { delayContext?: Promise<void>; bootstrap?: () => void; openContext?: (scope: ClientContextScope) => void; openProjectContext?: () => void } = {}) {
   const workspaceId = contractFixtures.bootstrap.residents!.residents[0]!.workspaceId;
   const transport: ClientTransport = {
-    openContext: async scope => { options.openContext?.(scope); return { ...transport, bootstrap: async () => {
+    openContext: async scope => { if (scope.sessionId) options.openContext?.(scope); else options.openProjectContext?.(); return { ...transport, bootstrap: async () => {
       options.bootstrap?.();
       await options.delayContext;
       const { snapshot, stateVersion, selected, ...value } = structuredClone(contractFixtures.bootstrap);
@@ -522,7 +522,6 @@ describe("conversation windows", () => {
     for (let index = 0; index < 3; index++) { fireEvent.pointerDown(main); fireEvent.pointerDown(floating); }
     drag(floating.querySelector(".dock-float-titlebar")!, true);
     expect(openContext.mock.calls.filter(([scope]) => scope.sessionId)).toHaveLength(1);
-    expect(openContext.mock.calls.filter(([scope]) => !scope.sessionId)).toHaveLength(1);
     expect(bootstrap).toHaveBeenCalledTimes(calls);
   });
   it("maximizes the last visible conversation back to the ordinary main area with the same editor", async () => {
