@@ -693,8 +693,23 @@ function managedRuntimeInstallService(context: FacadeContext): HostRuntimeInstal
   };
 }
 
+/** Keep the shared adapters' closure chain outside buildFacade: retaining its
+ * lexical scope would also retain a closed view's sessionRef and event owners. */
+function projectAdapterFactories(backend: HostBackend, openUrl: DesktopFacadeSeams["openUrl"], revealDirectory: DesktopFacadeSeams["revealDirectory"]) {
+  return {
+    models: (cwd: string | undefined) => createOmpModelsService({
+      locateOmp: async () => (await backend.installer.currentManifest())?.entrypointPath ?? (await defaultLocateOmp()),
+      getCwd: () => cwd, ...(openUrl ? { openUrl } : {}),
+    }),
+    skills: (cwd: string | undefined) => createOmpExtensibilityService({ getCwd: () => cwd, ...(revealDirectory ? { revealDirectory } : {}) }),
+    mcp: (cwd: string | undefined) => createOmpMcpService({ getCwd: () => cwd }),
+    agents: (cwd: string | undefined) => createOmpAgentDefinitionsService({ getCwd: () => cwd }),
+  };
+}
+
 function buildFacade(context: FacadeContext): StudioHostClientFacade {
   const seams = context.seams;
+  const projectAdapters = projectAdapterFactories(context.backend, seams.openUrl, seams.revealDirectory);
   const sessionRef = context.sessionRef;
   const catalog = seams.catalog ?? createWorkspaceSessionCatalog(() => context.workspaceCwd.current);
   const residents: HostResidentsService = seams.residents ?? {
@@ -953,26 +968,16 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     }),
     models:
       seams.models ??
-      context.projectReads.scoped("models", () => context.workspaceCwd.current, cwd => createOmpModelsService({
-        locateOmp: async () => {
-          const manifest = await context.backend.installer.currentManifest();
-          return manifest?.entrypointPath ?? (await defaultLocateOmp());
-        },
-        ...(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
-        getCwd: () => cwd,
-      })),
+      context.projectReads.scoped("models", () => context.workspaceCwd.current, projectAdapters.models),
     extensibility:
       seams.extensibility ??
-      context.projectReads.scoped("skills", () => context.workspaceCwd.current, cwd => createOmpExtensibilityService({
-        getCwd: () => cwd,
-        ...(seams.revealDirectory === undefined ? {} : { revealDirectory: seams.revealDirectory }),
-      })),
+      context.projectReads.scoped("skills", () => context.workspaceCwd.current, projectAdapters.skills),
     mcp:
       seams.mcp ??
-      context.projectReads.scoped("mcp", () => context.workspaceCwd.current, cwd => createOmpMcpService({ getCwd: () => cwd })),
+      context.projectReads.scoped("mcp", () => context.workspaceCwd.current, projectAdapters.mcp),
     agentDefinitions:
       seams.agentDefinitions ??
-      context.projectReads.scoped("agents", () => context.workspaceCwd.current, cwd => createOmpAgentDefinitionsService({ getCwd: () => cwd })),
+      context.projectReads.scoped("agents", () => context.workspaceCwd.current, projectAdapters.agents),
     ...(seams.workspaces === undefined ? {} : { workspaces: seams.workspaces }),
     ...(seams.workspaceFiles === undefined ? {} : { workspaceFiles: seams.workspaceFiles }),
     ...(seams.git === undefined ? {} : { git: seams.git }),
