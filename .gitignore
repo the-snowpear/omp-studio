@@ -78,6 +78,8 @@ doc/qa/
 .serena/
 .claude-flow/
 .swarm/
+# The shell drops its bridge socket and token here.
+.step-studio/
 ruvector.db
 skills-lock.json
 
