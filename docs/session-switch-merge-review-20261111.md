@@ -30,3 +30,11 @@
 验证使用项目 `scripts/check.mjs`：上述定向套件、完整 `--production`、归档/探测专项及 Desktop Git/远端部署专项。产物另外通过 standalone remote Worker 和 Electron ASAR Worker 检查。合并后的主工作树再运行完整生产检查与新增回归，避免仅验证实验工作树。
 
 性能结论沿用 [重构实测报告](session-switch-refactor-20261110.md)：本次修复针对正确性、生命周期和重复代码，不把既有未达到的长任务/开发版峰值门槛改写为通过。macOS 原生验收仍需在对应设备上完成。
+
+## 合并结果
+
+- 审查修复提交：`678a807`。
+- 已合并到本地 `0.2.0`，合并提交：`75814a3`，无冲突。合并前恢复点：`codex/pre-session-switch-merge-20261111`（`7ae8772`）。
+- 主工作树完整 `node scripts/check.mjs --production` 通过；新增 Host/Renderer 回归、归档/探测/远端部署专项和两项 Worker 产物检查通过。
+- 合并提交上的原生 Electron `--smoke --verify-reading` 通过。46 个采样点全部前台、页面错误 0；快速切换后同一消息偏移完全一致，满足 3 px 门槛。结束时引擎 1、Store 1、脱离对话 DOM 0、未完成项目读取 0。
+- 原始合并验收：`outputs/perf/session-switch-merge-review-20261111/smoke-CbbVX8/report.json`；这是功能/资源生命周期冒烟，不替代前一轮完整性能对照。
