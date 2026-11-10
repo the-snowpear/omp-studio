@@ -32,12 +32,18 @@ describe("conversation resource lifetime", () => {
     const page = contractFixtures.queryResponses["session.transcript.readPage"];
     if (!page.ok) throw new Error("fixture");
     shared.reads.savePage(page.result);
-    const open = vi.fn(async () => ({ client: target(), owned: true }));
+    const owned = target();
+    vi.mocked(owned.query).mockResolvedValue(structuredClone(page.result) as never);
+    const open = vi.fn(async () => ({ client: owned, owned: true, project: shared.reads }));
     const client = createConversationClient(open, true, shared.reads);
     const engine = createConversationEngine({ preview: false, client, identity: { sessionId: page.result.sessionId }, canRead: true, runtimeConnected: false, previewItems: [] });
     expect(engine.getSnapshot().rows.length).toBeGreaterThan(0);
     expect(engine.getSnapshot().state.hydrateStatus).toBe("resyncing");
     expect(open).not.toHaveBeenCalled();
+    const rows = engine.getSnapshot().rows;
+    engine.start();
+    await vi.waitFor(() => expect(engine.getSnapshot().state.hydrateStatus).toBe("ready"));
+    expect(engine.getSnapshot().rows).toBe(rows);
     engine.dispose(); await client.close(); shared.release(); await vi.runAllTimersAsync(); vi.useRealTimers();
   });
   it("holds auxiliary reads until body presentation and drops queued reads when the view closes", async () => {

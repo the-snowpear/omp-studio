@@ -179,7 +179,13 @@ export class ConversationStore {
     this.identity = { ...(this.identity ?? {}), sessionId: sessionId as ConversationIdentity["sessionId"], ...(runtimeEpoch === undefined ? {} : { runtimeEpoch }) };
   }
 
-  setLoading(resyncing = false): void { this.status = resyncing ? "resyncing" : "loading"; this.error = undefined; this.resyncRequired = false; this.publishNow(); }
+  setLoading(resyncing = false): void {
+    const status = resyncing ? "resyncing" : "loading";
+    if (this.status === status && this.error === undefined && !this.resyncRequired) return;
+    this.status = status; this.error = undefined; this.resyncRequired = false; this.publishNow();
+  }
+  /** The revalidated archive is the exact cached page already on screen. */
+  confirmHydrated(): void { this.status = "ready"; this.error = undefined; this.resyncRequired = false; this.publishNow(); }
   setUnavailable(reason: string): void { this.status = "unavailable"; this.unavailableReason = reason; this.publishNow(); }
   setError(error: { readonly code: string; readonly message: string }): void { this.status = "error"; this.error = error; this.publishNow(); }
   requireResync(reason: string): void { this.status = "resyncing"; this.resyncRequired = true; this.notices = [...this.notices.slice(-(NOTICE_LIMIT - 1)), { id: `resync:${this.generation}:${Date.now()}`, level: "warning", message: reason, source: "conversation" }]; this.publishNow(); }
@@ -498,7 +504,10 @@ export class ConversationStore {
     const index = this.items.findIndex((item) => item.itemId === itemId && item.kind === "message" && item.role === "user"); if (index < 0) return false;
     this.items = this.items.slice(0, index); this.markStructureChanged(); this.trimAncillary(); this.publishNow(); return true;
   }
-  setUserThumbs(thumbs: UserThumbMap): void { this.userThumbs = thumbs; this.markStructureChanged(); this.trimAncillary(); this.publishNow(); }
+  setUserThumbs(thumbs: UserThumbMap): void {
+    if (Object.keys(thumbs).length === 0 && Object.keys(this.userThumbs).length === 0) return;
+    this.userThumbs = thumbs; this.markStructureChanged(); this.trimAncillary(); this.publishNow();
+  }
   getOlderCursor(): OpaqueCursor | undefined { return this.olderCursor; }
 
   private materializeMessages(): Record<string, LiveMessage> {
