@@ -44,6 +44,7 @@ const bindings = new WeakMap<ReadClient, ProjectReads>();
 const bodySignals = new WeakMap<ReadClient, () => void>();
 export function bindProjectReads(client: ReadClient, reads: ProjectReads): void { bindings.set(client, reads); }
 export function projectReadsFor(client: ReadClient): ProjectReads | undefined { return bindings.get(client); }
+export function cachedProjectReads(target: StudioClient, workspaceId: WorkspaceId): ProjectReads | undefined { return targets.get(target)?.projects.get(workspaceId); }
 export function bindBodyReady(client: ReadClient, ready: () => void): void { bodySignals.set(client, ready); }
 export function conversationBodyReady(client: ReadClient): void { bodySignals.get(client)?.(); }
 
@@ -128,7 +129,12 @@ export class ProjectReads {
     if (client) void client.then(value => value.close()).catch(() => {});
     this.#unregister?.(); this.#unregister = undefined;
   }
-  dispose(): void { clearTimeout(this.#closeTimer); clearTimeout(this.#expiryTimer); this.#warm?.abort(); this.#close(); }
+  dispose(): void {
+    clearTimeout(this.#closeTimer); clearTimeout(this.#expiryTimer); this.#warm?.abort(); this.#close();
+    this.owner.epoch++;
+    for (const key of this.owner.metadata.entries.keys()) if (key.startsWith(`${this.workspaceId}\0`)) this.owner.metadata.delete(key);
+    for (const key of this.owner.pages.entries.keys()) if (key.startsWith(`${this.workspaceId}\0`)) this.owner.pages.delete(key);
+  }
   async client(): Promise<StudioClient> {
     return this.#client ??= this.owner.target.openContext!({ workspaceId: this.workspaceId }).then(client => {
       this.#off = client.subscribe({ scope: "all" }, event => this.observe(event));

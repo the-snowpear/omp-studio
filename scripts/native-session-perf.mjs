@@ -41,7 +41,7 @@ execFileSync("git", ["init", "--quiet"], { cwd: workspace, env, windowsHide: tru
 await Promise.all(Array.from({ length: 32 }, (_, index) => writeFile(join(workspace, `change-${index}.txt`), "Synthetic untracked line\n".repeat(100), { flag: "wx" })));
 const seedManifest = join(output, "fixtures.json");
 const count = smoke ? 16 : Number(process.env.OMP_NATIVE_PERF_SESSIONS ?? 24);
-const turns = smoke ? 8 : Number(process.env.OMP_NATIVE_PERF_TURNS ?? 80);
+const turns = Number(process.env.OMP_NATIVE_PERF_TURNS ?? (smoke ? 8 : 80));
 console.log("Seeding isolated native archives");
 execFileSync(findBun(), [join(root, "scripts/native-session-perf-seed.mjs"), workspace, join(agent, "sessions/synthetic"), seedManifest, String(count), String(turns)], { cwd: root, env, windowsHide: true, stdio: "inherit", timeout: 180_000 });
 const fixture = JSON.parse(await readFile(seedManifest, "utf8"));
@@ -83,8 +83,16 @@ async function sample() {
   } catch (error) { if (app) report.warnings.push(String(error).slice(0, 240)); }
   finally { sampling = false; }
 }
-async function select(index, { wait = true, tail = true } = {}) {
+async function select(index, { wait = true, tail = !process.env.OMP_NATIVE_PERF_LARGE_BYTES } = {}) {
   const title = fixture.sessions[index].title;
+  // A session shell can restore the sidebar's initial six-row page. Expand
+  // before the timed click so list pagination is not counted as switching.
+  await page.waitForFunction(title => {
+    const row = [...document.querySelectorAll("#projectList .thread")].find(element => element.textContent?.includes(title));
+    if (row?.checkVisibility() && !row.closest("[inert]")) return true;
+    for (const button of document.querySelectorAll("#projectList button")) if (/Expand|展开/.test(button.textContent ?? "")) button.click();
+    return false;
+  }, title, { timeout: 20_000, polling: 100 });
   const timing = await page.evaluate(async title => {
     const button = [...document.querySelectorAll("#projectList .thread")].find(element => element.textContent?.includes(title));
     if (!button || !button.checkVisibility() || button.closest("[inert]")) throw new Error(`Fixture row is not visible and interactive: ${title}`);
@@ -98,9 +106,9 @@ async function select(index, { wait = true, tail = true } = {}) {
   }, title);
   if (wait) {
     await page.waitForFunction(({ title, tail }) => {
-      const row = [...document.querySelectorAll("#projectList .thread.active")].find(element => element.textContent?.includes(title));
       const body = document.querySelector(".cw-main-conversation .convo-body");
-      return !!row && !document.querySelector(".cw-main-conversation #appRoot[aria-busy=true]") && body?.getAttribute("data-phase") === "idle" && !!body.querySelector("[data-item-id]") && (!tail || body.textContent.includes(`Fixture complete: ${title}`));
+      const titleVisible = document.querySelector(".cw-conversation-title-row")?.textContent.includes(title);
+      return (tail || titleVisible) && !document.querySelector(".cw-main-conversation #appRoot[aria-busy=true]") && body?.getAttribute("data-phase") === "idle" && !!body.querySelector("[data-item-id]") && (!tail || body.textContent.includes(`Fixture complete: ${title}`));
     }, { title, tail }, { timeout: 30_000, polling: 30 });
   }
   const result = await page.evaluate(() => ({ atUnixMs: Date.now(), readyMs: performance.now() - window.__nativeSwitchStart,

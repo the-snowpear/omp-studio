@@ -9,6 +9,7 @@ import type { ConversationState, PendingUser, TimelineRow } from "./conversation
 import { getDefaultThumbStore, type UserThumbStore } from "./userMessageThumbs";
 import { registerRendererResource } from "../rendererResources";
 import { projectReadsFor } from "../conversationWorkspace/projectReads";
+import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
 
 export type ConversationEngineInput = {
   readonly preview: boolean; readonly client: ConversationClient | null; readonly identity: ConversationIdentity | null;
@@ -152,7 +153,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
 
   if (!input.preview && input.client && identity && !input.runtimeConnected) {
     const cached = projectReadsFor(input.client)?.page(identity.sessionId, identity.transcriptRevision);
-    if (cached) { store.hydrate(cached); store.setLoading(true); }
+    if (cached) { store.hydrate(cached); store.setLoading(true); sessionSwitchPerformance.mark("conversation.cacheDisplay", { rows: cached.items.length }); }
   }
 
   return {

@@ -69,7 +69,7 @@ try {
       }
       $previous[$key] = @{ at = $stamp; cpu = $cpu }
       $processes += @{ pid = [int]$row.ProcessId; parentPid = [int]$row.ParentProcessId; role = $role;
-        startedAtUnixMs = ([DateTimeOffset]$process.StartTime).ToUnixTimeMilliseconds();
+        startedAtUnixMs = if ($row.CreationDate) { ([DateTimeOffset]$row.CreationDate).ToUnixTimeMilliseconds() } else { $null };
         workingSetBytes = $process.WorkingSet64; privateCommitBytes = $process.PrivateMemorySize64;
         privateWorkingSetBytes = $privateWorkingSets[[int]$row.ProcessId]; cpuTotalMs = $cpu }
     }

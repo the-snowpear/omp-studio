@@ -22,7 +22,7 @@ export async function resyncConversationClient(client: StudioClient) {
   return result;
 }
 
-export function createConversationClient(open: () => Promise<{ client: StudioClient; owned: boolean; project?: ProjectReads; releaseProject?: () => void }>, waitForBody = false): StatefulClient {
+export function createConversationClient(open: () => Promise<{ client: StudioClient; owned: boolean; project?: ProjectReads; releaseProject?: () => void }>, waitForBody = false, cachedProject?: ProjectReads): StatefulClient {
   let value: StatefulClient | undefined;
   let opening: Promise<StatefulClient> | undefined;
   let owned = false, closed = false;
@@ -43,7 +43,7 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
     if (project) bindProjectReads(client, project);
     if (closed) { releaseProject?.(); if (owned) await value.close(); throw new Error("Conversation client is closed"); }
     offEvents = value.subscribe({ scope: "all" }, event => {
-      if (event.kind === "runtime.changed" || event.kind === "resync.required") capabilities = undefined;
+      if (event.kind === "runtime.changed" || event.kind === "resync.required") { capabilities = undefined; capabilitiesRead = undefined; }
       project?.observe(event);
       for (const subscription of subscriptions) if (eventMatchesScope(event, subscription.scope)) subscription.listener(event);
     });
@@ -63,12 +63,19 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
       if (isAuxiliaryRead(name)) await measureSessionOperation(`query.${name}.queueWait`, () => body);
       if (closed) throw new Error("Conversation client is closed");
       if (name === "capabilities.get") {
-        if (capabilities) return capabilities as never;
+        const published = (target as StatefulClient).getState?.().connection.capabilityManifest;
+        if (published ?? capabilities) return (published ?? capabilities) as never;
         capabilitiesRead ??= target.query("capabilities.get", {}).finally(() => { capabilitiesRead = undefined; });
         return await capabilitiesRead as never;
       }
       const epoch = project?.owner.epoch;
-      const result = await measureSessionOperation(`query.${name}.request`, () => project && isProjectRead(name) ? project.read(name, input) : target.query(name, input));
+      const result = await measureSessionOperation(`query.${name}.request`, async () => {
+        if (project && isProjectRead(name)) return project.read(name, input);
+        const foreground = project && (name === "session.transcript.readPage" || name === "conversation.open") ? project.owner : undefined;
+        if (foreground) foreground.foreground++;
+        try { return await target.query(name, input); }
+        finally { if (foreground) foreground.foreground--; }
+      });
       if (!closed && epoch === project?.owner.epoch && name === "session.transcript.readPage" && !(input as { cursor?: string; agentId?: string }).cursor && !(input as { agentId?: string }).agentId) {
         return (project?.savePage(result as import("@omp-studio/client-contract").ConversationTranscriptReadPage) ?? result) as never;
       }
@@ -89,8 +96,13 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
     // a scheduling marker; paint latency is measured by the browser trace.
     requestAnimationFrame(() => setTimeout(() => {
       releaseBody();
-      if (!closed) project?.warm(selectedSession);
+      if (!closed) void ready().then(target => initializeConversationClient(target)).then(bootstrap => {
+        if (!closed) project?.warm(bootstrap.selected?.sessionId);
+      }).catch(() => {});
     }, 0));
   });
+  // A warm view may paint pure cached text before its new IPC context opens.
+  // The actual project consumer is acquired by open(), outside React render.
+  if (cachedProject) bindProjectReads(client, cachedProject);
   return client;
 }

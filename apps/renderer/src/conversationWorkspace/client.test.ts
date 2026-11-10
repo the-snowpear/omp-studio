@@ -2,12 +2,27 @@ import { describe, expect, it, vi } from "vitest";
 import { contractFixtures } from "@omp-studio/testkit";
 import type { StudioClient } from "@omp-studio/client-contract";
 import { createConversationClient, initializeConversationClient, resyncConversationClient } from "./client";
-import { conversationBodyReady } from "./projectReads";
+import { acquireProjectReads, conversationBodyReady } from "./projectReads";
+import { createConversationEngine } from "../conversation/conversationEngine";
 
 function target() {
   return { bootstrap: vi.fn(async () => structuredClone(contractFixtures.bootstrap)), subscribe: vi.fn(() => () => {}), query: vi.fn(), command: vi.fn(), close: vi.fn(), transportLost: vi.fn() } as unknown as StudioClient & { bootstrap: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> };
 }
 describe("conversation resource lifetime", () => {
+  it("a warm conversation can show its own cached page before opening its next context", async () => {
+    vi.useFakeTimers();
+    const shared = acquireProjectReads(target(), "workspace" as never);
+    const page = contractFixtures.queryResponses["session.transcript.readPage"];
+    if (!page.ok) throw new Error("fixture");
+    shared.reads.savePage(page.result);
+    const open = vi.fn(async () => ({ client: target(), owned: true }));
+    const client = createConversationClient(open, true, shared.reads);
+    const engine = createConversationEngine({ preview: false, client, identity: { sessionId: page.result.sessionId }, canRead: true, runtimeConnected: false, previewItems: [] });
+    expect(engine.getSnapshot().rows.length).toBeGreaterThan(0);
+    expect(engine.getSnapshot().state.hydrateStatus).toBe("resyncing");
+    expect(open).not.toHaveBeenCalled();
+    engine.dispose(); await client.close(); shared.release(); await vi.runAllTimersAsync(); vi.useRealTimers();
+  });
   it("holds auxiliary reads until body presentation and drops queued reads when the view closes", async () => {
     vi.useFakeTimers();
     const owned = target();
