@@ -73,10 +73,24 @@ crates/step-studio-shell/   应用：后台桥接线程 + 纯归约器 + egui �
 ```
 
 ```bash
-cargo test                                    # 12 个测试，含对真实适配器的端到端
-cargo run --bin step-studio-shell -- \
-  --step-cmd "/path/to/step" --prompt "hello"
+cargo build --release
+./target/release/step-studio-shell            # step 自己从 PATH 或 ~/.stepcode/bin 找
+./target/release/step-studio-shell --prompt "hello"
 ```
+
+壳已经是可以直接用的聊天界面，不是协议探针：
+
+| 能力 | 状态 |
+|---|---|
+| 流式正文 / 思考分块 | 实时逐字，不等到回合结束 |
+| markdown | 标题、列表、代码块有真实样式（egui 没有 markdown 控件） |
+| 模型切换 | 顶栏下拉，来自 CLI 的实时 catalog |
+| 停止 | 流式中 Send 变 Stop，发 `core.abort` |
+| 新会话 | 顶栏 New，调 Step 的 `new_session` |
+| 会话续接 | 重启后自动 `--continue`，从 transcript 重建历史 |
+|  thinking 档位 | **没有 UI**：当前模型只报 `off` 一个档位，manifest 里已如实标 limited |
+
+`cargo test` 25 个测试，含对真实适配器与真实 CLI 的端到端。
 
 帧编解码与 `@omp-studio/studio-protocol` 逐字节兼容（大端长度前缀、五键帧头、HMAC
 challenge proof）。第一版我写成了小端 + 只含 body 的长度 + 两键头——对着 mock 全能过，
@@ -118,6 +132,15 @@ Electron 那 280–470 MB 是实打实省掉了。剩下的 373 MB 里运行时�
 
 Windows 还需要命名管道传输（`std` 不支持），这台机器无法验证那一半。
 
+### 续接是怎么接上的
+
+Step 按 project 存 session，所以壳传给 agent 的工作目录**必须跨启动稳定**——
+最初用的是 per-PID 临时目录，每次启动都是新 project，`--continue` 永远找不到上一个
+session。现在用 repo 根目录。
+
+适配器通过 `STEP_STUDIO_SESSION=continue` 选择性开启；桌面 Host spawn 时不带这个变量，
+行为不变。
+
 ## 尚未完成
 
 - **Windows 命名管道与打包实测**：适配器只在 Linux 上验过 Unix domain socket；
@@ -139,6 +162,7 @@ Windows 还需要命名管道传输（`std` 不支持），这台机器无法验
 |---|---|
 | `packages/runtime-stepcode/` | 新增：Step Code 的 Studio Bridge 适配器（TypeScript，现为回退路径） |
 | `crates/step-studio-runtime/` | 新增：同一适配器的 Rust 实现，壳优先使用 |
+| `crates/step-studio-shell/src/markdown.rs` | 新增：markdown 行分类，与渲染分开以便无窗口测试 |
 | `apps/desktop/src/host-composition.ts` | 改：`STUDIO_RUNTIME_EXECUTABLE` 选择 custom runtime 源，并让显式指定的 limited 运行时获得 session controller |
 | `package-lock.json` | 改：登记 `@step-studio/runtime-stepcode` workspace 链接 |
 | 其余 | 与上游一致 |
