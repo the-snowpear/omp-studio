@@ -1,3 +1,5 @@
+/** Explicit native artifact check; keep Electron GUI startup out of the tooling unit gate.
+ * Run: node --test scripts/archive-worker-asar.smoke.mjs */
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";

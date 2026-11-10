@@ -71,12 +71,43 @@ node scripts/check.mjs --production
 node scripts/check.mjs --only studio-host --suite session-archive --suite session-telemetry-probe
 node scripts/check.mjs --only desktop --suite remote-deploy --suite git-service
 node --test scripts/archive-worker-bundle.test.mjs
+node --test scripts/archive-worker-asar.smoke.mjs
 PLAYWRIGHT_MODULE=../outputs/perf/native-tools/node_modules/playwright-core node scripts/native-session-perf.mjs --cpu-profile --trace --acceptance
 ```
 
 `--acceptance` 增加 5 轮，每轮 20 次切换、回到同一会话、静置 120 秒，不强制 GC。开发版通过 `OMP_NATIVE_PERF_DEV_URL` 指向 Vite；基线通过 `OMP_NATIVE_PERF_APP_ROOT` 指向对照工作树。大档使用 `OMP_NATIVE_PERF_TURNS=160 OMP_NATIVE_PERF_LARGE_BYTES=52428800`，单独报告，不混入小会话 p95。
 
 性能实验不加入默认门禁。macOS 的窗口、内存与发布产物需要在 macOS 设备上独立验证。
+
+## 实测验收结果
+
+可直接阅读的报告：`D:\Project\omp-studio\outputs\perf\session-switch-refactor-20261110\index.html`。
+同目录的 `summary.json`、`analyze.py`、原始报告、逐进程曲线、CPU profile 与 Chromium trace 可用于复核。
+
+标准场景为 24 个合成会话、每个 160 条消息。表中 Paint 指正文提交后的首次 trace Paint，是绘制代理指标，不保证等于 compositor 最终呈现时间。
+
+| 指标 | 原生产版 | 重构生产版 | 原开发版 | 重构开发版 |
+| --- | ---: | ---: | ---: | ---: |
+| 首次顺序打开：正文提交中位数 | 512.6 ms | 172.3 ms | 678.7 ms | 393.3 ms |
+| 首次顺序打开：Paint p95 | 753.4 ms | 431.4 ms | 1122.1 ms | 799.8 ms |
+| A/B 全部 24 次：Paint p95 | 649.3 ms | 259.0 ms | 990.5 ms | 483.0 ms |
+| A/B 两次准备后的 22 次：Paint p95 | 615.1 ms | 177.1 ms | 990.5 ms | 321.0 ms |
+| 切换期私有工作集峰值 | 750.5 MiB | 694.7 MiB | 1137.5 MiB | 1215.9 MiB |
+| 峰值相对预热后空闲增量 | 297.4 MiB | 203.1 MiB | 534.6 MiB | 568.8 MiB |
+| 首次顺序打开：长任务占比 | 11.5% | 15.0% | 39.9% | 44.8% |
+| A/B 往返：长任务占比 | 8.2% | 13.2% | 41.4% | 40.3% |
+
+这是同机小样本对照，不能当作总体 p95 保证。首次顺序打开阶段可包含启动预热命中；A/B 的前两次可能未命中缓存，因此同时保留完整 24 次与其后 22 次的结果。原生产版所有计时阶段完成，最终辅助截图超时；该限制已在 HTML 中单列，其他失败中间运行不纳入最终结论。
+
+五轮稳定性测试每轮切换 20 次、回到同一会话、静置 120 秒，不强制 GC。静置最后 10 秒的私有工作集中位数依次为 **427.3 / 418.0 / 422.5 / 408.4 / 412.9 MiB**，第 5 轮比第 1 轮低 14.4 MiB。875 个样本均前台，页面错误为 0；结束时引擎 1、Store 1、脱离对话 DOM 0，首屏缓存按 TTL 到期释放。该长稳记录覆盖共享缓存/Worker 实现；其后的启动预热、相同页确认和 40 px 阅读偏移修复另跑了完整对照与专项回归。
+
+最终生产版 165 个样本、开发版 198 个样本均前台，页面错误为 0。两种构建均通过快速切换后的阅读恢复，同一条消息的实际偏移与期望偏移一致（门槛 3 px）。约 10.57 / 50.75 MiB 的独立大归档运行通过，主进程 profile 中不再出现归档解析、哈希和投影函数。大归档短流程不用于判断 120 秒内存回落，也不混入小会话 p95。
+
+最终代码检查包括完整 `check --production` 与后续变更的相关切片、Host 组合层、共享请求、归档取消/游标/Worker、Renderer 窗口与滚动回归、远端部署/运行环境文件复制、实际 Electron ASAR Worker 启动。原生 ASAR 检查单独运行，不进入默认 tooling 单元门禁。性能主对照的代码为 `5511996`，随后 `9dab88e` 只收紧共享适配器的闭包归属；该最终 Host 另通过组合层、架构、bundle、ASAR 与原生冒烟复核。
+
+**没有达到全部初始门槛。** 缓存命中后的绘制代理 p95 和五轮内存增长达到目标；选择提交延迟、长任务占比和开发版瞬时峰值仍未达到目标。生产版峰值增量约 203 MiB，略高于 200 MiB；开发版峰值在这组对照中还有约 78 MiB 的增加。不能把正文更早可见或内存回落，表述为所有卡顿和内存开销已经解决。
+
+下一优先项应是持久化项目级工作台壳，减少切换时整棵 `TargetApp` 的挂载和布局测量，只替换会话正文与订阅；继续用同一采样方法验证。该结构调整尚未实施，不通过增大 Runtime 驻留池代替。
 
 ## 参考
 
