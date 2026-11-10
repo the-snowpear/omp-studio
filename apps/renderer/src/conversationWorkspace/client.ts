@@ -1,5 +1,6 @@
 import { createInitialClientState, eventMatchesScope, type ClientState } from "@omp-studio/client";
 import type { ClientBootstrap, ClientEvent, StudioClient, SubscriptionScope, Unsubscribe } from "@omp-studio/client-contract";
+import { CONVERSATION_LIMITS } from "@omp-studio/client-contract";
 
 import { measureSessionOperation } from "../sessionSwitchPerformance";
 import { bindBodyReady, bindProjectReads, isAuxiliaryRead, isProjectRead, type ProjectReads } from "./projectReads";
@@ -76,7 +77,8 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
         try { return await target.query(name, input); }
         finally { if (foreground) foreground.foreground--; }
       });
-      if (!closed && epoch === project?.owner.epoch && name === "session.transcript.readPage" && !(input as { cursor?: string; agentId?: string }).cursor && !(input as { agentId?: string }).agentId) {
+      const pageInput = input as { cursor?: string; agentId?: string; limit?: number };
+      if (!closed && epoch === project?.owner.epoch && name === "session.transcript.readPage" && !pageInput.cursor && !pageInput.agentId && (pageInput.limit ?? CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT) === CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT) {
         return (project?.savePage(result as import("@omp-studio/client-contract").ConversationTranscriptReadPage) ?? result) as never;
       }
       return result;

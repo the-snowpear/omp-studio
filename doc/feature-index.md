@@ -149,6 +149,8 @@ Host 侧对话事件：`packages/studio-host/src/conversation-events.ts`。
 Runtime 投影：overlay `services/conversation-live-projector.ts`、`conversation-projector-hub.ts`；流式 block 实时限制 256 KiB，完成后释放正文/工具输出，只保留固定容量的幂等 tombstone。合流缓冲有两份且都是无损的：文本按 block（16ms 或 64 字符），工具输出按 tool call（16ms 或 4 KiB 未发送尾部），append / replace 按「客户端已收到的前缀」决定；控制事件与工具结束先 flush，顺序不变。投递是同步的（无队列）：慢 listener 反压 Runtime，不丢事件。
 持久 transcript：overlay `services/session-transcript-service.ts`；Host `session-archive-reader.ts`（`session.transcript.readPage`）。
 
+会话切换数据入口：Renderer `conversationWorkspace/projectReads.ts`、`client.ts`；Host `apps/desktop/src/project-read-services.ts`、`packages/host-client-api/src/shared-reads.ts`；归档 `session-archive-{reader,pool,worker}.ts`。说明：[会话切换重构](../docs/session-switch-refactor-20261110.md)。
+
 ## 会话、归档、Telemetry
 
 Time Travel：`history/TimeTravel{Activation,Dialog,Pane}.tsx`、`history/useTimeTravelSettings.ts`、`history/timeTravel.css`、`settings/TimeTravelSettings.tsx`；预览 `preview/timeTravelPreview.ts`，验收入口 `time-travel-harness.html?preview=1`。Host `time-travel-service.ts` / `time-travel-port.ts` 组装 `studio-host/time-travel-store.ts` 与 `session-archive-reader.ts`；契约 `client-contract/time-travel.ts`、`studio-protocol/contracts/time-travel.ts`；Runtime overlay `services/time-travel-boundary.ts`、`tree-service.ts`，回合边界接缝在 `agent-session.ts`。说明见 [Time Travel](../docs/time-travel.md)。

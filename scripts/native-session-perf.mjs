@@ -138,7 +138,7 @@ try {
   if (process.platform === "win32") {
     // Playwright can expose a Windows launcher process; sample Electron's actual main PID.
     const rootPid = await app.evaluate(() => process.pid);
-    sampler = spawn("powershell.exe", ["-NoProfile", "-File", join(root, "scripts/sample-session-processes.ps1"), "-RootProcessId", String(rootPid), "-DurationSeconds", "900", "-OutputPath", join(output, "processes.jsonl")], { cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    sampler = spawn("powershell.exe", ["-NoProfile", "-File", join(root, "scripts/sample-session-processes.ps1"), "-RootProcessId", String(rootPid), "-DurationSeconds", acceptance ? "1800" : "900", "-OutputPath", join(output, "processes.jsonl")], { cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     samplerDone = new Promise(resolve => { sampler.once("error", error => resolve({ error: String(error) })); sampler.once("exit", code => resolve({ code })); });
     for (const stream of [sampler.stdout, sampler.stderr]) stream.on("data", chunk => { void appendFile(join(output, "sampler.log"), chunk).catch(() => {}); });
   }

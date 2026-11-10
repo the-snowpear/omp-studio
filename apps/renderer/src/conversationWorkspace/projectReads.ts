@@ -181,7 +181,7 @@ export class ProjectReads {
   }
   savePage(page: ConversationTranscriptReadPage): ConversationTranscriptReadPage {
     const key = `${this.workspaceId}\0${page.sessionId}`, previous = this.owner.pages.get(key);
-    if (previous?.transcriptRevision === page.transcriptRevision && previous.headCursor === page.headCursor) {
+    if (previous?.transcriptRevision === page.transcriptRevision && previous.headCursor === page.headCursor && previous.olderCursor === page.olderCursor && previous.items.length === page.items.length) {
       this.owner.pages.set(key, previous, 60_000); return previous;
     }
     // Full-page reconciliation only; streaming deltas never stringify/compare rows.

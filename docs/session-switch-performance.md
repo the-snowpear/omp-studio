@@ -31,7 +31,7 @@
    window.ompSessionPerf.stop()
    ```
 
-导出包含最多 600 条记录，满后淘汰最旧条目；`dropped` 表示已淘汰条数。每秒采样一次，记录切换派发、React 提交、客户端打开、bootstrap、只读 query、正文加载状态和浏览器长任务。query 只记协议名称，不记录参数、结果或异常文本。不会输出会话 ID、标题、路径、正文、密钥、调用堆栈或截图。
+导出包含最多 6000 条记录，满后淘汰最旧条目；`dropped` 表示已淘汰条数。每秒采样一次，记录切换派发、React 提交、客户端打开、bootstrap、只读 query、正文加载状态和浏览器长任务。query 只记协议名称，不记录参数、结果或异常文本。不会输出会话 ID、标题、路径、正文、密钥、调用堆栈或截图。
 
 常见字段：
 
@@ -58,7 +58,7 @@
 powershell.exe -NoProfile -File scripts/sample-session-processes.ps1 -RootProcessId <OMP主进程PID> -DurationSeconds 60
 ```
 
-脚本只采样目标进程树的性能数值，不启动、停止或重启应用。默认按约 1 秒间隔输出主进程、Renderer、GPU、网络和 Runtime 分类数值，实际间隔以 `atMs` 为准；结果默认写入 `outputs/perf/session-processes-*.jsonl`。PID 只用于在本机找到进程，不写入结果。目标退出时停止，已存在的输出文件不会覆盖。
+脚本只采样目标进程树的性能数值，不启动、停止或重启应用。默认按约 1 秒间隔输出主进程、Renderer、GPU、网络和 Runtime 分类数值，实际间隔以 `atMs` 为准；结果默认写入 `outputs/perf/session-processes-*.jsonl`。结果保留 PID、父 PID 和启动时间用于与 webContents 对齐，不记录命令行。目标退出时停止，已存在的输出文件不会覆盖。
 
 `workingSetBytes` 是包含共享页面的工作集；`privateWorkingSetBytes` 是 Windows 性能计数器提供的私有工作集（计数器不可用时省略，不填假零）；`privateCommitBytes` 是进程私有提交量，不是私有工作集。共享页面可能重复计入多个工作集，不能将其相加作为精确物理内存总量。`cpuCorePercent` 以一个逻辑核为 100%，`cpuMachinePercent` 再除以逻辑核数。
 
@@ -126,3 +126,5 @@ PLAYWRIGHT_MODULE=../outputs/perf/native-tools/node_modules/playwright-core node
 ```bash
 npm run check -- --only renderer --suite sessionSwitchPerformance --suite rendererPerformance --suite conversationWorkspace/client --suite conversationWorkspace/Workspace.integration --suite conversationWorkspace/workspace
 ```
+
+共享缓存、正文优先、预热与 Worker 实现见 [会话切换重构](session-switch-refactor-20261110.md)。整轮录制不重启 recorder，操作通过 `values.operationId` 配对；原生脚本支持 `--cpu-profile`、`--trace` 与 `--acceptance`。
