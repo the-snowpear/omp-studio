@@ -328,12 +328,12 @@ export function ConversationPane({
   ) : (
     <>
       {demo ? null : <StatusBanner state={state} />}
-      {state.hasMoreBefore && state.hydrateStatus === "ready" ? (
+      {state.hasMoreBefore && (state.hydrateStatus === "ready" || state.hydrateStatus === "resyncing" && displayRows.length > 0) ? (
         <div className="convo-load-earlier">
           <button
             type="button"
             className="btn small outline"
-            disabled={loadingOlder}
+            disabled={loadingOlder || state.hydrateStatus !== "ready"}
             onClick={loadOlder}
           >
             {loadingOlder ? "正在加载更早消息…" : "加载更早消息"}

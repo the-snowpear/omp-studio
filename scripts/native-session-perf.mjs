@@ -60,6 +60,8 @@ await writeFile(join(profile, "bootstrap.cjs"), [
 await writeFile(join(profile, "package.json"), JSON.stringify({ name: "omp-native-perf", version: "0.1.0", main: "bootstrap.cjs" }), { flag: "wx" });
 bundlePreload();
 const report = { version: 1, status: "running", smoke, startedAtUnixMs: Date.now(),
+  source: { revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: appRoot, encoding: "utf8", windowsHide: true }).trim(),
+    dirty: Boolean(execFileSync("git", ["status", "--porcelain"], { cwd: appRoot, encoding: "utf8", windowsHide: true }).trim()) },
   build: `${env.OMP_RENDERER_DEV_URL ? "development" : "production"}-renderer/development-electron-shell`, modelCalls: 0,
   machine: { platform: process.platform, release: release(), logicalCores: cpus().length, cpu: cpus()[0]?.model, physicalMemoryBytes: totalmem() },
   fixture: { sessions: fixture.count, messagesPerSession: fixture.turns * 2, bytes: fixture.bytes },
@@ -202,13 +204,13 @@ try {
     await cdp.send("IO.close", { handle: stream });
     await writeFile(join(output, "renderer-switch.trace.json"), content);
   }
-  if (!smoke) {
+  if (!smoke || verifyReading) {
     await runPhase("rapid-switching", async entry => {
       for (let index = 0; index < 36; index++) { entry.steps.push(await select(index % 12, { wait: false })); await pause(70); }
       entry.steps.push(await select(13));
       await pause(2000);
     });
-    await runPhase("idle-after", async () => { await pause(45_000); });
+    await runPhase("idle-after", async () => { await pause(smoke ? 2000 : 45_000); });
   }
   if (acceptance) for (let round = 0; round < 5; round++) {
     await runPhase(`memory-round-${round + 1}`, async entry => {
@@ -231,13 +233,19 @@ try {
       const row = [...scroller.querySelectorAll("[data-item-id]")].find(row => row.getBoundingClientRect().bottom >= top);
       return { itemId: row.dataset.itemId, offset: row.getBoundingClientRect().top - top };
     });
+    report.readingRestoration = { passed: false, tolerancePx: 3, expected: anchor };
     await select(1); await select(0, { tail: false });
+    report.readingRestoration.actual = await page.evaluate(anchor => {
+      const scroller = document.querySelector(".cw-main-conversation .convo-scroll");
+      const row = [...scroller.querySelectorAll("[data-item-id]")].find(row => row.dataset.itemId === anchor.itemId);
+      return { found: !!row, offset: row ? row.getBoundingClientRect().top - scroller.getBoundingClientRect().top : null, scrollTop: scroller.scrollTop, scrollHeight: scroller.scrollHeight };
+    }, anchor);
     await page.waitForFunction(anchor => {
       const scroller = document.querySelector(".cw-main-conversation .convo-scroll");
       const row = [...scroller.querySelectorAll("[data-item-id]")].find(row => row.dataset.itemId === anchor.itemId);
       return row && Math.abs(row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - anchor.offset) <= 3;
     }, anchor, { timeout: 5000 });
-    report.readingRestoration = { passed: true, tolerancePx: 3 };
+    report.readingRestoration.passed = true;
   }
   report.recording = await page.evaluate(() => window.ompSessionPerf.snapshot(true));
   report.finalCounters = await page.evaluate(() => window.ompSessionPerf.snapshot(true).counters);
