@@ -218,6 +218,7 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
                     });
                 }
                 Command::SetModel(selector) => {
+                    trace(&format!("set model {selector}"));
                     // The Studio operation takes the canonical `provider/id`
                     // selector; the adapter resolves it against its catalog.
                     match session.invoke(serde_json::json!({

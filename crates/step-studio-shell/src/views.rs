@@ -8,7 +8,10 @@ use crate::markdown::{classify, spans, Line, Span};
 impl App {
     pub(crate) fn render_chrome(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("chrome").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
+            // Not `horizontal_wrapped`: when the row wraps, the model ComboBox
+            // lands on a second line whose popup falls outside the panel's clip
+            // rect, and every click on it is swallowed.
+            ui.horizontal(|ui| {
                 ui.heading("Step Studio");
                 let (label, colour) = match self.status {
                     Status::Connecting => ("connecting…", egui::Color32::YELLOW),

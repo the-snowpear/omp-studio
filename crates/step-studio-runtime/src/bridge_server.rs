@@ -245,6 +245,9 @@ impl Session {
                 self.shutting_down = true;
             }
             "session.model.set" => {
+                if std::env::var_os("STEP_STUDIO_TRACE").is_some() {
+                    eprintln!("[runtime] model.set {}", operation.get("selector").and_then(|v| v.as_str()).unwrap_or("?"));
+                }
                 let selector = operation.get("selector").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 match resolve_and_set_model(&mut self.step, &selector) {
                     Ok(()) => {
