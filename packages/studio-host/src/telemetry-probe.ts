@@ -15,6 +15,7 @@ export interface SessionTelemetryProbeRunInput {
   readonly allowedCwd: string;
   /** Part of the in-memory cache key together with session and executable identity. */
   readonly transcriptRevision: string;
+  readonly signal?: AbortSignal;
 }
 
 export type SessionTelemetryProbeOutcome =
@@ -51,6 +52,7 @@ export interface SessionTelemetryProbeDiagnostic {
   readonly reason?:
     | "no-executable"
     | "disposed"
+    | "cancelled"
     | "spawn-error"
     | "timeout"
     | "overflow"
@@ -104,6 +106,7 @@ export function createNodeSessionTelemetryProbe(
   const spawnProcess = options.spawnProcess ?? spawn;
   const cache = new Map<string, { readonly expiresAt: number; readonly telemetry: SessionTelemetrySnapshot }>();
   const inFlight = new Map<string, Promise<SessionTelemetryProbeOutcome>>();
+  const children = new Set<ReturnType<SpawnFunction>>();
   let disposed = false;
   const emitDiagnostic = (info: SessionTelemetryProbeDiagnostic): void => {
     try {
@@ -141,8 +144,15 @@ export function createNodeSessionTelemetryProbe(
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
+    children.add(child);
+    const closed = new Promise<void>(resolve => child.once("close", () => { children.delete(child); resolve(); }));
+    let cancelled = input.signal?.aborted === true;
+    const abort = () => { cancelled = true; failure.reason = "cancelled"; child.kill(); };
+    input.signal?.addEventListener("abort", abort, { once: true });
     if (child.stdin === null || child.stdout === null || child.stderr === null) {
       child.kill();
+      await closed;
+      input.signal?.removeEventListener("abort", abort);
       return {
         ok: false,
         reason: "UNAVAILABLE",
@@ -193,6 +203,7 @@ export function createNodeSessionTelemetryProbe(
         }
       });
       child.on("close", (exitCode) => {
+        if (cancelled) { failure.reason = "cancelled"; finish({ ok: false, reason: "UNAVAILABLE" }); return; }
         if (overflowed) {
           finish({ ok: false, reason: "UNAVAILABLE" });
           return;
@@ -249,7 +260,11 @@ export function createNodeSessionTelemetryProbe(
         "utf8",
       );
     });
+    if (cancelled) abort();
     const outcome = await result;
+    // Scratch files belong to the whole child lifetime, including timeout/kill.
+    await closed;
+    input.signal?.removeEventListener("abort", abort);
     const diagnostic: SessionTelemetryProbeDiagnostic = outcome.ok
       ? { result: "ok", durationMs: now() - startedAt }
       : {
@@ -262,6 +277,7 @@ export function createNodeSessionTelemetryProbe(
   };
 
   const run = async (input: SessionTelemetryProbeRunInput): Promise<SessionTelemetryProbeOutcome> => {
+    if (input.signal?.aborted) return { ok: false, reason: "UNAVAILABLE" };
     if (disposed) {
       emitDiagnostic({ result: "unavailable", reason: "disposed", durationMs: 0 });
       return { ok: false, reason: "UNAVAILABLE" };
@@ -282,6 +298,7 @@ export function createNodeSessionTelemetryProbe(
         emitDiagnostic(outcome.diagnostic);
         if (outcome.ok) {
           cache.set(cacheKey, { expiresAt: now() + cacheTtlMs, telemetry: outcome.telemetry });
+          while (cache.size > 16) cache.delete(cache.keys().next().value!);
         }
         return outcome;
       })
@@ -296,6 +313,7 @@ export function createNodeSessionTelemetryProbe(
     run,
     dispose(): void {
       disposed = true;
+      for (const child of children) child.kill();
       cache.clear();
     },
   };

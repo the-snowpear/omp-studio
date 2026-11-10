@@ -1,14 +1,31 @@
 import assert from "node:assert/strict";
 import { appendFile, mkdir, mkdtemp, writeFile, truncate } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { CONVERSATION_LIMITS } from "@omp-studio/studio-protocol";
 
-import { SessionArchiveError, StudioSessionArchiveReader } from "../src/index.js";
+import { SessionArchiveCacheBudget, SessionArchiveError, StudioSessionArchiveReader } from "../src/index.js";
 
 const HEADER = { type: "session", version: 3, id: "session-a", cwd: "", timestamp: "2026-08-16T10:00:00.000Z" };
+
+test("workspace readers share one retention budget and eviction does not invalidate paging cursors", async () => {
+  const budget = new SessionArchiveCacheBudget(), cursorSecret = Buffer.alloc(32, 7);
+  const readers: StudioSessionArchiveReader[] = [];
+  for (let index = 0; index < 3; index++) {
+    const data = await fixture([userLine("m-1", "x".repeat(4 * 1024 * 1024), null), userLine("m-2", "tail", "m-1")]);
+    readers.push(new StudioSessionArchiveReader({ allowedCwd: data.workspace, sessionsRoot: dirname(dirname(data.sessionFile)), cursorSecret, cacheBudget: budget }));
+  }
+  const first = await readers[0]!.readPage({ sessionId: "session-a", limit: 1 });
+  for (const reader of readers.slice(1)) await reader.readPage({ sessionId: "session-a", limit: 1 });
+  assert.ok(budget.diagnostics().entries <= 2);
+  assert.ok(budget.diagnostics().estimatedBytes <= 64 * 1024 * 1024);
+  const older = await readers[0]!.readPage({ sessionId: "session-a", cursor: first.olderCursor!, limit: 1 });
+  assert.equal(older.items[0]?.itemId, "m-1");
+  assert.equal(await readers[0]!.prefetch("session-a"), undefined);
+  budget.clear(); assert.equal(budget.diagnostics().rawBytes, 0);
+});
 
 function userLine(id: string, text: string, parentId: string | null): string {
   return `${JSON.stringify({
@@ -108,6 +125,21 @@ test("reads the persisted tail page without a Runtime", async () => {
   assert.equal(page.items.length, 1);
   assert.equal(page.hasMoreBefore, false);
   assert.equal(textOf(page.items[0] as never), "hello");
+});
+
+test("closing one archive reader consumer preserves the other and a cancelled append does not corrupt the next read", async () => {
+  const { reader, sessionFile } = await fixture();
+  const controller = new AbortController();
+  const cancelled = reader.readPage({ sessionId: "session-a" }, controller.signal);
+  const remaining = reader.readPage({ sessionId: "session-a" });
+  const rejected = assert.rejects(cancelled, { name: "AbortError" });
+  controller.abort(); await rejected;
+  assert.equal((await remaining).items.length, 1);
+  await appendFile(sessionFile, userLine("m-2", "second", "m-1"));
+  const another = new AbortController();
+  const append = reader.readPage({ sessionId: "session-a" }, another.signal);
+  const appendRejected = assert.rejects(append, { name: "AbortError" }); another.abort(); await appendRejected;
+  assert.equal((await reader.readPage({ sessionId: "session-a" })).items.length, 2);
 });
 
 test("an appended session is re-read incrementally and keeps earlier items intact", async () => {

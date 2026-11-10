@@ -25,11 +25,11 @@ function fixture(beforeBootstrap?: () => Promise<void>) {
   if (!history.ok) throw new Error("Expected history fixture");
   const entries = Array.from({ length: 6 }, (_, index) => ({ ...history.result.entries[0]!,
     historyId: `residency-history-${index}`, threadId: `residency-thread-${index}`, sessionId: `residency-session-${index}`, title: `Residency session ${index}` }));
-  const counts = { opened: 0, closed: 0 };
+  const counts = { opened: 0, closed: 0, projectsOpened: 0, projectsClosed: 0 };
   function transport(scope?: ClientContextScope): ClientTransport {
     let closed = false;
     return {
-      openContext: async next => { counts.opened++; return transport(next); },
+      openContext: async next => { if (next.sessionId) counts.opened++; else counts.projectsOpened++; return transport(next); },
       bootstrap: async () => {
         if (scope) await beforeBootstrap?.();
         const { snapshot: _snapshot, stateVersion: _version, ...base } = structuredClone(contractFixtures.bootstrap);
@@ -48,7 +48,7 @@ function fixture(beforeBootstrap?: () => Promise<void>) {
       },
       command: async () => { throw new Error("Residency tests do not execute commands"); },
       subscribe: () => () => {},
-      close: async () => { if (!closed) { closed = true; if (scope) counts.closed++; } },
+      close: async () => { if (!closed) { closed = true; if (scope?.sessionId) counts.closed++; else if (scope) counts.projectsClosed++; } },
     };
   }
   return { counts, client: new StudioClientImpl(transport()) };
@@ -137,6 +137,7 @@ it("keeps only the displayed conversation engine and closes replaced contexts wh
     await waitFor(() => expect(window.ompSessionPerf.snapshot().counters["real.hosts"]).toBe(1));
   }
   expect(input.counts.opened).toBe(6);
+  expect(input.counts.projectsOpened).toBe(1);
   expect(window.ompSessionPerf.snapshot().counters["real.mountedDocuments"]).toBe(1);
   expect(window.ompSessionPerf.snapshot(true).counters["real.detachedNodes"]).toBe(0);
 });

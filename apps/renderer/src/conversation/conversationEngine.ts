@@ -8,6 +8,7 @@ import { ConversationStore } from "./conversationStore";
 import type { ConversationState, PendingUser, TimelineRow } from "./conversationViewModel";
 import { getDefaultThumbStore, type UserThumbStore } from "./userMessageThumbs";
 import { registerRendererResource } from "../rendererResources";
+import { projectReadsFor } from "../conversationWorkspace/projectReads";
 
 export type ConversationEngineInput = {
   readonly preview: boolean; readonly client: ConversationClient | null; readonly identity: ConversationIdentity | null;
@@ -45,7 +46,7 @@ const OPEN_BUFFER_MAX_BYTES = 2 * 1024 * 1024;
 export function createConversationEngine(input: ConversationEngineInput): ConversationEngine {
   const generation = nextGeneration++;
   activeEngines += 1;
-  const identity = input.preview ? PREVIEW_CONVO_IDENTITY : input.identity;
+  const identity: ConversationIdentity | null = input.preview ? PREVIEW_CONVO_IDENTITY : input.identity;
   const store = new ConversationStore({ target: { sessionId: identity?.sessionId ?? ("unavailable" as ConversationIdentity["sessionId"]) }, identity, generation });
   const listeners = new Set<() => void>();
   const metadataListeners = new Set<() => void>();
@@ -147,6 +148,11 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
       if (!disposed && token === run) store.prepend(page);
     } catch (cause) { const error = asClientError(cause); if (isStaleCursorError(error)) await hydrate(true); else if (!disposed && token === run) store.setError(error); }
     finally { if (!disposed && token === run) { loadingOlder = false; publish(); metadataSnapshot = { ...store.getMetadataSnapshot(), demo: input.preview, loadingOlder, identityKey: identityKey(store.getMetadataSnapshot().state.identity) }; for (const listener of metadataListeners) listener(); } }
+  }
+
+  if (!input.preview && input.client && identity && !input.runtimeConnected) {
+    const cached = projectReadsFor(input.client)?.page(identity.sessionId, identity.transcriptRevision);
+    if (cached) { store.hydrate(cached); store.setLoading(true); }
   }
 
   return {

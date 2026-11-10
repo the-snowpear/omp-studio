@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import type { ConversationClient, ConversationIdentity } from "./conversationHost";
 import { createConversationEngine, defaultConversationEngineInput, type ConversationEngine, type ConversationSnapshot } from "./conversationEngine";
 import type { PendingUser } from "./conversationViewModel";
 import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
+import { conversationBodyReady } from "../conversationWorkspace/projectReads";
 
 export type UseConversationInput = { readonly preview: boolean; readonly client: ConversationClient | null; readonly identity: ConversationIdentity | null; readonly canRead: boolean; readonly runtimeConnected: boolean; readonly syncRevision?: number; readonly deferHydrate?: boolean; readonly previewThreadId?: string };
 export type UseConversationResult = ConversationSnapshot & { readonly engine: ConversationEngine; loadOlder: () => void; reload: () => Promise<void>; restoreFromUser: (itemId: string) => boolean; trackPending: (pending: PendingUser) => void; failPending: (requestId: string, error: string) => void; dropPending: (requestId: string) => void; settleOpenTurns: () => boolean };
@@ -33,6 +34,16 @@ export function useConversation(input: UseConversationInput): UseConversationRes
   // The workbench consumes only low-frequency metadata. Token/tool deltas are
   // subscribed inside ConversationPane so they cannot wake the whole canvas.
   const current = useSyncExternalStore(engine.subscribeMetadata, engine.getMetadataSnapshot, engine.getMetadataSnapshot);
+  const firstBody = useRef(false);
+  useLayoutEffect(() => {
+    if (firstBody.current || input.preview || !(current.rows.length > 0 || current.state.hydrateStatus === "ready")) return;
+    firstBody.current = true;
+    sessionSwitchPerformance.mark("conversation.bodyCommit", { rows: current.rows.length });
+    if (sessionSwitchPerformance.enabled()) performance.mark("conversation-body-commit");
+  }, [input.preview, current.rows.length, current.state.hydrateStatus]);
+  useEffect(() => {
+    if (!input.preview && input.client && (current.rows.length > 0 || ["ready", "error", "unavailable"].includes(current.state.hydrateStatus))) conversationBodyReady(input.client);
+  }, [input.client, input.preview, current.rows.length, current.state.hydrateStatus]);
   useEffect(() => { sessionSwitchPerformance.mark(`conversation.${current.state.hydrateStatus}`, { rows: current.rows.length }); }, [engine, current.state.hydrateStatus]);
   /* The hold exists only for a same-session engine remount (transcript
      revision / epoch / client swap). It is dropped as soon as the remount has

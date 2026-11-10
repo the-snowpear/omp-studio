@@ -1,4 +1,5 @@
 import { createTimeTravelPort } from "./time-travel-port.js";
+import { ProjectReadServices } from "./project-read-services.js";
 import { evaluationsFor, closeEvaluations } from "./evaluation-workspace.js";
 import { artifactLibraryForProfile } from "./artifact-library.js";
 import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
@@ -460,6 +461,7 @@ function clearDisconnect(holder: { current: HostRuntimeDisconnect | undefined })
 }
 
 interface FacadeContext {
+  readonly projectReads: ProjectReadServices;
   /** All conversation facades share the Host-owned durable evaluation service. */
   readonly evaluationOwner: object;
   /** One usage adapter per Host: it caches the resolved dashboard endpoint. */
@@ -705,16 +707,10 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     onChanged: (listener) => context.residents.subscribe(listener),
     onTerminalOutcomes: (listener) => context.residentTerminalOutcomes.subscribe(listener),
   };
-  let archiveCwd: string | undefined;
-  let archiveReader: StudioSessionArchiveReader | undefined;
   const currentArchiveReader = (): StudioSessionArchiveReader => {
     const cwd = context.workspaceCwd.current;
     if (cwd === undefined) throw new Error("Persistent transcript requires an active workspace");
-    if (archiveReader === undefined || archiveCwd !== cwd) {
-      archiveCwd = cwd;
-      archiveReader = new StudioSessionArchiveReader({ allowedCwd: cwd });
-    }
-    return archiveReader;
+    return context.projectReads.archive(cwd);
   };
   let archiveServiceCwd: string | undefined;
   let archiveService: StudioSessionArchiveService | undefined;
@@ -757,13 +753,17 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     directory: join(context.profileDirectory, "broker", "session-leases"),
   });
   const archive = seams.archive ?? {
+    prefetch: async (sessionId: string) => {
+      if (context.runtimeSession?.isResident?.(sessionId)) return undefined;
+      return await currentArchiveReader().prefetch(sessionId) as ConversationTranscriptReadPage | undefined;
+    },
     readPage: async (input: {
       readonly sessionId: string;
       readonly agentId?: string;
       readonly cursor?: string;
       readonly limit?: number;
-    }) => {
-      const page = await currentArchiveReader().readPage(input as unknown as SessionArchiveReadInput);
+    }, signal?: AbortSignal) => {
+      const page = await currentArchiveReader().readPage(input as unknown as SessionArchiveReadInput, signal);
       return page as unknown as ConversationTranscriptReadPage;
     },
     listPersistedAgents: async (sessionId: string) =>
@@ -775,19 +775,13 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
   } satisfies HostSessionArchiveProvider;
   // Archived-session telemetry: persisted "last observed" records plus the
   // one-shot OMP probe. The probe scratch dir lives under the Host profile.
-  const telemetryStore =
-    seams.telemetryStore ??
-    new SessionTelemetryStore({
-      rootDirectory: join(context.profileDirectory, "session-telemetry", "v1"),
-      resolveRevision: async (sessionId) => {
-        if (context.workspaceCwd.current === undefined) return undefined;
-        try {
-          return (await currentArchiveReader().readRevision(sessionId)).transcriptRevision;
-        } catch {
-          return undefined;
-        }
-      },
-    });
+  const telemetryStore = seams.telemetryStore ?? {
+    record: (id, telemetry) => { const cwd = context.workspaceCwd.current; if (cwd) context.projectReads.store(cwd, context.profileDirectory).record(id, telemetry); },
+    read: async (id, revision) => { const cwd = context.workspaceCwd.current; return cwd ? context.projectReads.store(cwd, context.profileDirectory).read(id, revision) : undefined; },
+    flush: async () => { const cwd = context.workspaceCwd.current; if (cwd) await context.projectReads.store(cwd, context.profileDirectory).flush(); },
+    remove: async id => { const cwd = context.workspaceCwd.current; if (cwd) await context.projectReads.store(cwd, context.profileDirectory).remove(id); },
+    dispose: () => {},
+  } satisfies HostSessionTelemetryStorePort;
   const probeExecutable = async (): Promise<string | undefined> => {
     const installed = await context.backend.installer.currentManifest().catch(() => undefined);
     if (installed !== undefined && installed.entrypointPath.length > 0) return installed.entrypointPath;
@@ -796,6 +790,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
   const telemetryProbe =
     seams.telemetryProbe ??
     createNodeSessionTelemetryProbe({
+      cacheTtlMs: 0, // The authority owns the whole copy/probe/cleanup cache.
       executablePath: probeExecutable,
       ...(seams.hostLog === undefined
         ? {}
@@ -923,6 +918,8 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     telemetryStore,
     telemetryProbe,
     telemetryProbeWorkspace,
+    projectReads: context.projectReads.metadata,
+    archiveTelemetry: context.projectReads.telemetry,
     workspaceCwd: () => context.workspaceCwd.current,
     diagnostics: seams.diagnostics ?? createDefaultHostDiagnosticsFactory(),
     install: (channel) => context.startup.run(async () => {
@@ -957,30 +954,26 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     }),
     models:
       seams.models ??
-      createOmpModelsService({
+      context.projectReads.scoped("models", () => context.workspaceCwd.current, cwd => createOmpModelsService({
         locateOmp: async () => {
           const manifest = await context.backend.installer.currentManifest();
           return manifest?.entrypointPath ?? (await defaultLocateOmp());
         },
         ...(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
-        getCwd: () => seams.getWorkspaceCwd?.() ?? context.workspaceCwd.current,
-      }),
+        getCwd: () => cwd,
+      })),
     extensibility:
       seams.extensibility ??
-      createOmpExtensibilityService({
-        getCwd: () => seams.getWorkspaceCwd?.() ?? context.workspaceCwd.current,
+      context.projectReads.scoped("skills", () => context.workspaceCwd.current, cwd => createOmpExtensibilityService({
+        getCwd: () => cwd,
         ...(seams.revealDirectory === undefined ? {} : { revealDirectory: seams.revealDirectory }),
-      }),
+      })),
     mcp:
       seams.mcp ??
-      createOmpMcpService({
-        getCwd: () => seams.getWorkspaceCwd?.() ?? context.workspaceCwd.current,
-      }),
+      context.projectReads.scoped("mcp", () => context.workspaceCwd.current, cwd => createOmpMcpService({ getCwd: () => cwd })),
     agentDefinitions:
       seams.agentDefinitions ??
-      createOmpAgentDefinitionsService({
-        getCwd: () => seams.getWorkspaceCwd?.() ?? context.workspaceCwd.current,
-      }),
+      context.projectReads.scoped("agents", () => context.workspaceCwd.current, cwd => createOmpAgentDefinitionsService({ getCwd: () => cwd })),
     ...(seams.workspaces === undefined ? {} : { workspaces: seams.workspaces }),
     ...(seams.workspaceFiles === undefined ? {} : { workspaceFiles: seams.workspaceFiles }),
     ...(seams.git === undefined ? {} : { git: seams.git }),
@@ -1551,6 +1544,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     await this.#facade.close();
     await startupSettled;
     await closeEvaluations(this.#facadeContext.evaluationOwner);
+    await this.#facadeContext.projectReads.dispose();
     this.#attachSession(undefined);
     // Unlike reload(), shutdown is terminal: detach the Runtime-facing sinks
     // so the composition cannot retain listeners after its facade is gone.
@@ -1630,6 +1624,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
       const residentTerminalOutcomes = new IsolatedForwarder<ReadonlyArray<CommandLedgerEntry>>();
       const interaction = new DesktopInteractionHost(sessionRef);
       const facadeContext: FacadeContext = {
+        projectReads: new ProjectReadServices(),
         evaluationOwner: {},
         authority: authorityIdentityFromLease(lease),
         platform: platform.platform,

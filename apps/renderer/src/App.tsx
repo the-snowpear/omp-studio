@@ -329,6 +329,7 @@ import {
 import { createResumeGenerationGate, ensureSelectedSessionActive, type NewSessionWaitResult } from "./sessionLifecycle";
 import { createSerialTaskQueue } from "./workspaceActionQueue";
 import { isNewConversationSurface, shouldShowConversationWelcome } from "./conversation/welcomeGate";
+import { useGitSummary } from "./git/useGitSummary";
 import { useGitRepository } from "./git/useGitRepository";
 import { buildGitStatusLookup, GIT_STATUS_META, type TreeGitStatus } from "./git/treeStatus";
 
@@ -3026,7 +3027,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
     () => sidebarProjectOrder(state.model.workspaces),
     [state.model.workspaces],
   );
-  const realGit = useGitRepository(client, preview ? undefined : realActiveWorkspace?.workspaceId);
+  const realGit = useGitSummary(client, preview ? undefined : realActiveWorkspace?.workspaceId);
   const crumbProject = preview
     ? (previewProject?.name ?? "omp-web")
     : (realActiveWorkspace?.name ?? t("conversation.noProjectSelected"));
@@ -3143,7 +3144,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
     return <>
       <div className="branch-menu-head">
         <div className="bmh-title"><Icon name="branch" extra="sm" /><b>{crumbBranch}</b></div>
-        <div className="bmh-meta">{preview ? `${previewProject?.dirty ?? 0} ${t("shell.uncommitted")}${marks ? ` · ${t("common.demo")}` : ""}` : realGit.repository?.isRepository ? `${realGit.repository.changes.length} ${t("shell.uncommitted")} · ↑${realGit.repository.ahead} ↓${realGit.repository.behind}` : (realGit.error ?? t("common.unavailable"))}</div>
+        <div className="bmh-meta">{preview ? `${previewProject?.dirty ?? 0} ${t("shell.uncommitted")}${marks ? ` · ${t("common.demo")}` : ""}` : realGit.repository?.isRepository ? `${realGit.repository.changedFiles} ${t("shell.uncommitted")} · ↑${realGit.repository.ahead} ↓${realGit.repository.behind}` : (realGit.error ?? t("common.unavailable"))}</div>
       </div>
       <MenuItem icon="commit" onClick={() => finish(git)}>{t("shell.uncommittedChanges")}</MenuItem>
       <div className="menu-sep" />
