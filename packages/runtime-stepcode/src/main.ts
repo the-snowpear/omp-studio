@@ -639,8 +639,12 @@ const server = createServer(socket => {
     if (operation["kind"] === "core.abort") {
       rpc.abort();
       if (pendingPromptId !== undefined) {
-        pendingPromptId = undefined;
+        // Settle the turn the Host is still waiting on. Clearing the id without
+        // answering leaves that request without a terminal receipt until the
+        // prompt RPC times out, which is minutes later.
         emit({ kind: "conversation.turn.aborted", sessionId: sessionId(), turnId: currentTurnId }, true);
+        connection.receipt(pendingPromptId, "completed", { aborted: true });
+        pendingPromptId = undefined;
       }
       connection.receipt(requestId, "completed", { aborted: true });
       return;

@@ -90,7 +90,8 @@ rl.on("line", line => {
     }
     // A long gap between the last delta and the receipt, so a test can tell
     // streaming from buffering without depending on machine speed.
-    const settleAfter = text === "slow" ? 1500 : 70;
+    // `null` means the turn never settles on its own: only an abort ends it.
+    const settleAfter = text === "slow" ? 1500 : text === "hang" ? null : 70;
     write({ type: "agent_start" });
     const userEntry = appendEntry("message", { message: userMessage(text) });
     write({ type: "message_start", message: userMessage(text) });
@@ -126,11 +127,13 @@ rl.on("line", line => {
         }),
       60,
     );
-    setTimeout(() => {
-      write({ type: "turn_end", messageRole: "assistant", toolResultCount: 0 });
-      write({ type: "agent_end", willRetry: false, messageCount: 3 });
-      write({ type: "agent_settled" });
-    }, settleAfter);
+    if (settleAfter !== null) {
+      setTimeout(() => {
+        write({ type: "turn_end", messageRole: "assistant", toolResultCount: 0 });
+        write({ type: "agent_end", willRetry: false, messageCount: 3 });
+        write({ type: "agent_settled" });
+      }, settleAfter);
+    }
   }
   if (message.type === "abort") {
     write({ type: "agent_settled", aborted: true });
