@@ -3,6 +3,7 @@
 //! becomes ready.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use step_studio_bridge::{AdapterLaunch, BridgeSession};
 
@@ -44,7 +45,7 @@ fn launch(tag: &str) -> AdapterLaunch {
 
 #[test]
 fn session_handshakes_snapshots_and_runs_a_turn() {
-    let mut session = BridgeSession::connect(&launch("full")).expect("connect");
+    let session = BridgeSession::connect(&launch("full")).expect("connect");
 
     let snapshot = session.snapshot().expect("snapshot");
     let session_id = snapshot
@@ -72,7 +73,7 @@ fn events_reach_the_caller_before_the_receipt() {
     // that buffers events until the receipt shows the turn ~1.4 s late. This is
     // the difference between a chat that types out and one that is blank and
     // then complete, and it is invisible to any assertion on the final text.
-    let mut session = BridgeSession::connect(&launch("stream")).expect("connect");
+    let session = BridgeSession::connect(&launch("stream")).expect("connect");
     let _ = session.snapshot().expect("snapshot");
 
     let (first, seen) = std::sync::mpsc::channel::<std::time::Duration>();
@@ -102,6 +103,57 @@ fn events_reach_the_caller_before_the_receipt() {
     assert!(
         gap > std::time::Duration::from_millis(500),
         "the last event arrived only {gap:?} before the receipt: events are being buffered"
+    );
+}
+
+#[test]
+fn an_abort_reaches_a_turn_that_is_still_running() {
+    // The turn is one the fake CLI never settles on its own, so a receipt can
+    // only come from the abort. That makes the test deterministic: no timing
+    // threshold, and a regression fails by producing nothing at all.
+    //
+    // It also fails to compile against the old session, which took `&mut self`
+    // and so could not be used from two threads at once.
+    let session = Arc::new(BridgeSession::connect(&launch("abort")).expect("connect"));
+    let _ = session.snapshot().expect("snapshot");
+
+    let (first, started) = std::sync::mpsc::channel::<()>();
+    let turn = Arc::clone(&session);
+    let handle = std::thread::spawn(move || {
+        turn.invoke_with(serde_json::json!({ "kind": "core.prompt", "text": "hang" }), |event| {
+            if event.get("kind") == Some(&serde_json::json!("conversation.message.delta")) {
+                let _ = first.send(());
+            }
+        })
+    });
+
+    started
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the turn never started");
+
+    // From another thread, while the turn is still streaming. This is the whole
+    // point: a queued abort would only run once the turn had already ended.
+    let receipt = session
+        .invoke(serde_json::json!({ "kind": "core.abort" }))
+        .expect("abort was refused")
+        .0;
+    assert_eq!(
+        receipt.get("status").and_then(|s| s.as_str()),
+        Some("completed")
+    );
+
+    let turn_receipt = handle
+        .join()
+        .expect("turn thread")
+        .expect("the turn never settled");
+    assert_eq!(
+        turn_receipt.get("status").and_then(|s| s.as_str()),
+        Some("completed"),
+        "the aborted turn did not settle: {}",
+        turn_receipt
+            .pointer("/error/message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown")
     );
 }
 

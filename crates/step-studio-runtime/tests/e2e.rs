@@ -28,22 +28,47 @@ fn find_step() -> Option<String> {
     installed.exists().then(|| installed.to_string_lossy().to_string())
 }
 
+/// A wrapper that runs the shared fake CLI, so the adapter can be pointed at a
+/// script instead of a single executable.
+fn fake_step_wrapper(dir: &std::path::Path) -> PathBuf {
+    let fake = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("repo root")
+        .join("packages/runtime-stepcode/test/fake-step.mjs");
+    let wrapper = dir.join("fake-step");
+    std::fs::write(&wrapper, format!("#!/bin/sh\nexec node {} \"$@\"\n", fake.display()))
+        .expect("write wrapper");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755));
+    }
+    wrapper
+}
+
 fn launch(tag: &str) -> (AdapterConfig, PathBuf) {
     let dir = std::env::temp_dir().join(format!("rust-rt-{tag}-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let step = find_step().expect("no Step CLI installed");
-    let config = AdapterConfig {
-        endpoint: dir.join("bridge.sock").to_string_lossy().to_string(),
-        token: "rust-runtime-token".to_string(),
-        runtime_epoch: 1,
-        cwd: dir.to_string_lossy().to_string(),
-        step_command: step,
+    config_in(&dir, step)
+}
+
+fn config_in(dir: &std::path::Path, step_command: String) -> (AdapterConfig, PathBuf) {
+    {
+        let config = AdapterConfig {
+            endpoint: dir.join("bridge.sock").to_string_lossy().to_string(),
+            token: "rust-runtime-token".to_string(),
+            runtime_epoch: 1,
+            cwd: dir.to_string_lossy().to_string(),
+            step_command,
         // The whole environment, the same way the production config path passes
         // it: the CLI resolves its config dir and credentials from more than a
         // prefix, and filtering it here silently starves the turn.
         step_env: std::env::vars().collect(),
     };
-    (config, dir)
+    (config, dir.to_path_buf())
+    }
 }
 
 #[test]
@@ -74,7 +99,7 @@ fn the_rust_adapter_drives_the_real_step_cli() {
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    let mut session = BridgeSession::connect(&AdapterLaunch {
+    let session = BridgeSession::connect(&AdapterLaunch {
         node: String::new(),
         adapter_script: String::new(),
         socket_path: config.endpoint.clone(),
@@ -122,5 +147,73 @@ fn the_rust_adapter_drives_the_real_step_cli() {
     assert!(
         items.iter().any(|item| item.get("role") == Some(&serde_json::json!("assistant"))),
         "the transcript lost the assistant turn"
+    );
+}
+
+#[test]
+fn aborting_settles_the_turn_the_rust_adapter_is_still_running() {
+    // The fake CLI has a turn that never settles on its own, so the receipt can
+    // only come from the abort. The TypeScript adapter used to drop the turn's
+    // receipt here and leave the Host waiting for the prompt RPC to time out.
+    let dir = std::env::temp_dir().join(format!("rust-abort-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let (config, _) = config_in(&dir, fake_step_wrapper(&dir).to_string_lossy().to_string());
+
+    let runtime = Runtime::new(AdapterConfig {
+        endpoint: config.endpoint.clone(),
+        token: config.token.clone(),
+        runtime_epoch: config.runtime_epoch,
+        cwd: config.cwd.clone(),
+        step_command: config.step_command.clone(),
+        step_env: config.step_env.clone(),
+    });
+    std::thread::spawn(move || {
+        let _ = runtime.serve();
+    });
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !std::path::Path::new(&config.endpoint).exists() {
+        assert!(std::time::Instant::now() < deadline, "the adapter never bound its socket");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let session = std::sync::Arc::new(
+        BridgeSession::connect(&AdapterLaunch {
+            node: String::new(),
+            adapter_script: String::new(),
+            socket_path: config.endpoint.clone(),
+            token_file: String::new(),
+            cwd: config.cwd.clone(),
+            runtime_epoch: config.runtime_epoch,
+            env: Vec::new(),
+            token: Some(config.token.clone()),
+            command: Vec::new(),
+        })
+        .expect("connect to the Rust adapter"),
+    );
+
+    let (first, started) = std::sync::mpsc::channel::<()>();
+    let turn = std::sync::Arc::clone(&session);
+    let handle = std::thread::spawn(move || {
+        turn.invoke_with(serde_json::json!({ "kind": "core.prompt", "text": "hang" }), |event| {
+            if event.get("kind") == Some(&serde_json::json!("conversation.message.delta")) {
+                let _ = first.send(());
+            }
+        })
+    });
+
+    started
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the turn never started");
+    session
+        .invoke(serde_json::json!({ "kind": "core.abort" }))
+        .expect("abort was refused");
+
+    let receipt = handle.join().expect("turn thread").expect("the turn never settled");
+    assert_eq!(
+        receipt.get("status").and_then(|s| s.as_str()),
+        Some("completed"),
+        "the aborted turn did not settle: {}",
+        receipt.pointer("/error/message").and_then(|m| m.as_str()).unwrap_or("unknown")
     );
 }
