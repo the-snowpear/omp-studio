@@ -100,13 +100,12 @@ import {
   type RuntimePublication,
   type RuntimeResolution,
   type RuntimeResolverEnvironment,
-  SessionTelemetryStore,
   type StudioBtwForward,
   type StudioComputerForward,
   type StudioConversationForward,
   type StudioTelemetryForward,
   type StudioRuntimeSessionController,
-  StudioSessionArchiveReader,
+  type SessionArchiveReaderPort,
   StudioSessionArchiveService,
   StudioSessionDeleteService,
   FileSessionLeaseStore,
@@ -707,7 +706,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     onChanged: (listener) => context.residents.subscribe(listener),
     onTerminalOutcomes: (listener) => context.residentTerminalOutcomes.subscribe(listener),
   };
-  const currentArchiveReader = (): StudioSessionArchiveReader => {
+  const currentArchiveReader = (): SessionArchiveReaderPort => {
     const cwd = context.workspaceCwd.current;
     if (cwd === undefined) throw new Error("Persistent transcript requires an active workspace");
     return context.projectReads.archive(cwd);

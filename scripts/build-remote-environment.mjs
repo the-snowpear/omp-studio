@@ -62,7 +62,7 @@ export async function buildRemoteEnvironment(options = {}) {
     assertExecutableTarget(nodePath, platform);
     const identity = execFileSync(nodePath, ["-p", "JSON.stringify({platform:process.platform,arch:process.arch,version:process.versions.node})"], { encoding: "utf8", windowsHide: true });
     if (JSON.parse(identity).version !== PRIVATE_NODE_VERSION) throw new Error("Private Node version mismatch");
-    await cp(join(root, "apps/desktop/dist/remote-host/host.mjs"), join(payload, "host.mjs"));
+    await copyRemoteHostBundle(join(root, "apps/desktop/dist/remote-host"), payload);
     await mkdir(join(payload, "runtime"));
     for (const name of ["runtime-manifest.json", "runtime-signature.json", "checksums.json", verified.manifest.entrypoint]) await cp(join(runtime, name), join(payload, "runtime", name));
     if (os !== "win32") await chmod(join(payload, "runtime", verified.manifest.entrypoint), 0o755);
@@ -84,3 +84,4 @@ export async function buildRemoteEnvironment(options = {}) {
   } finally { await rm(stage, { recursive: true, force: true }); }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await buildRemoteEnvironment();
+import { copyRemoteHostBundle } from "./bundle-remote-host.mjs";

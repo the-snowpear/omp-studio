@@ -1,12 +1,12 @@
 import type { HostTimeTravelService } from "@omp-studio/host-client-api";
-import type { StudioSessionArchiveReader } from "@omp-studio/studio-host";
+import type { SessionArchiveReaderPort } from "@omp-studio/studio-host";
 import type { SessionId } from "@omp-studio/client-contract";
 import type { TimeTravelService } from "./time-travel-service.js";
 
 export function createTimeTravelPort(options: {
   service: TimeTravelService;
   workspace(): string;
-  reader(): StudioSessionArchiveReader;
+  reader(): SessionArchiveReaderPort;
   assertIdle(): void;
   prepareSession(
     sessionId: SessionId,

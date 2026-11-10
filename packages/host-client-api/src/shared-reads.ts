@@ -72,6 +72,10 @@ export class SharedArchiveTelemetry<T> {
       current.promise.then(resolve, reject).finally(release);
     });
   }
-  dispose(): void { for (const flight of this.#flights.values()) flight.controller.abort(); this.#cache.clear(); }
+  async dispose(): Promise<void> {
+    const flights = [...this.#flights.values()];
+    for (const flight of flights) flight.controller.abort();
+    await Promise.allSettled(flights.map(flight => flight.promise)); this.#cache.clear();
+  }
   diagnostics() { return { entries: this.#cache.size, inFlight: this.#flights.size }; }
 }

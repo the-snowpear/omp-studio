@@ -1,17 +1,14 @@
-import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
-import { SessionArchiveCacheBudget, SessionTelemetryStore, StudioSessionArchiveReader } from "@omp-studio/studio-host";
+import { SessionArchiveWorkerPool, SessionTelemetryStore, type SessionArchiveReaderPort } from "@omp-studio/studio-host";
 import { SharedArchiveTelemetry, SharedProjectReads } from "@omp-studio/host-client-api";
 import type { QueryResult } from "@omp-studio/client-contract";
 import { registerHostReadDiagnostics } from "./desktop-performance.js";
 
 /** Authority lifetime; workspace paths are captured, never read from a mutable selection. */
 export class ProjectReadServices {
-  readonly archiveBudget = new SessionArchiveCacheBudget();
+  readonly archiveBudget = new SessionArchiveWorkerPool();
   readonly metadata = new SharedProjectReads();
   readonly telemetry = new SharedArchiveTelemetry<QueryResult<"session.telemetry.read"> | undefined>();
-  readonly #cursorSecret = randomBytes(32);
-  readonly #readers = new Map<string, StudioSessionArchiveReader>();
   readonly #stores = new Map<string, SessionTelemetryStore>();
   readonly #services = new Map<string, object>();
   readonly #unregister = registerHostReadDiagnostics(() => {
@@ -20,16 +17,8 @@ export class ProjectReadServices {
       for (const [key, value] of Object.entries(source.diagnostics())) counters[`${name}.${key}`] = value;
     return counters;
   });
-  archive(cwd: string): StudioSessionArchiveReader {
-    const key = resolve(cwd);
-    let reader = this.#readers.get(key);
-    if (!reader) reader = new StudioSessionArchiveReader({ allowedCwd: key, cacheBudget: this.archiveBudget, cursorSecret: this.#cursorSecret });
-    this.#readers.delete(key); this.#readers.set(key, reader);
-    while (this.#readers.size > 8) {
-      const [oldest, entry] = this.#readers.entries().next().value!;
-      entry.clearCache(); this.#readers.delete(oldest);
-    }
-    return reader;
+  archive(cwd: string): SessionArchiveReaderPort {
+    return this.archiveBudget.reader(cwd);
   }
   /** Bind once per method call; an awaited read cannot follow a later cwd change. */
   scoped<T extends object>(kind: string, current: () => string | undefined, create: (cwd: string | undefined) => T): T {
@@ -59,9 +48,10 @@ export class ProjectReadServices {
   }
   async dispose(): Promise<void> {
     this.#unregister();
-    this.telemetry.dispose(); this.metadata.invalidate(); this.archiveBudget.clear(); this.#readers.clear();
+    await this.telemetry.dispose(); this.metadata.invalidate();
     this.#services.clear();
     await Promise.all([...this.#stores.values()].map(async store => { await store.flush(); store.dispose(); }));
     this.#stores.clear();
+    await this.archiveBudget.dispose();
   }
 }

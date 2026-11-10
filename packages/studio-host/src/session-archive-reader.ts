@@ -135,6 +135,15 @@ export interface SessionArchiveReaderOptions {
   readonly snapshotCacheMaxBytes?: number;
   readonly cursorSecret?: Buffer;
   readonly cacheBudget?: SessionArchiveCacheBudget;
+  /** Shared only between readers with the same roots and file limits. */
+  readonly index?: SessionArchiveIndex;
+}
+
+export class SessionArchiveIndex {
+  paths: readonly string[] | undefined;
+  sessions = new Map<string, string[]>();
+  versions = new Map<string, string>();
+  building: Promise<void> | undefined;
 }
 
 /** One Host budget, including projections, across every workspace reader.
@@ -251,10 +260,7 @@ export class StudioSessionArchiveReader {
   readonly #cursorSecret: Buffer;
   readonly #budget: SessionArchiveCacheBudget;
   /** Directory enumeration is cheap; header reads are not. Keep the index while paths are stable. */
-  #indexedPaths: readonly string[] | undefined;
-  #sessionIndex = new Map<string, string[]>();
-  #indexedVersions = new Map<string, FileVersion>();
-  #indexBuildInFlight: Promise<void> | undefined;
+  readonly #index: SessionArchiveIndex;
   /** Parsed snapshots are shared by paging and repeated session switches. */
   #snapshotCache = new Map<string, CachedSnapshot>();
   #snapshotCacheBytes = 0;
@@ -277,6 +283,7 @@ export class StudioSessionArchiveReader {
     this.#snapshotCacheMaxBytes = options.snapshotCacheMaxBytes ?? DEFAULT_SNAPSHOT_CACHE_MAX_BYTES;
     this.#cursorSecret = options.cursorSecret ?? randomBytes(32);
     this.#budget = options.cacheBudget ?? new SessionArchiveCacheBudget();
+    this.#index = options.index ?? new SessionArchiveIndex();
     if (!Number.isSafeInteger(this.#maxSessionBytes) || this.#maxSessionBytes <= 0) {
       throw new TypeError("maxSessionBytes must be positive");
     }
@@ -638,26 +645,26 @@ export class StudioSessionArchiveReader {
   async #locate(sessionId: string): Promise<string> {
     // Hot reads should use the already-built identity index. Directory walking is
     // reserved for a cache miss (new session) or an in-place replacement.
-    let matches = this.#sessionIndex.get(sessionId) ?? [];
+    let matches = this.#index.sessions.get(sessionId) ?? [];
     let candidates: string[] | undefined;
-    if (matches.length === 0 || this.#indexedPaths === undefined) {
+    if (matches.length === 0 || this.#index.paths === undefined) {
       candidates = await listSessionFiles({ sessions: this.#sessionsRoot, archive: this.#archiveRoot }, this.#maxScanFiles);
       await this.#ensureIndex(candidates);
-      matches = this.#sessionIndex.get(sessionId) ?? [];
+      matches = this.#index.sessions.get(sessionId) ?? [];
     }
     if (matches.length === 1) {
       const path = matches[0]!;
       const currentVersion = await readFileVersion(path, this.#maxSessionBytes);
-      if (currentVersion === this.#indexedVersions.get(path)) return path;
+      if (currentVersion === this.#index.versions.get(path)) return path;
       const header = await readHeader(path, Math.min(this.#maxSessionBytes, 64 * 1024), this.#maxSessionBytes);
       if (header?.id === sessionId) {
-        this.#indexedVersions.set(path, header.version);
+        this.#index.versions.set(path, header.version);
         return path;
       }
       // A file was replaced in place. Rebuild once so the new identity is visible.
       candidates ??= await listSessionFiles({ sessions: this.#sessionsRoot, archive: this.#archiveRoot }, this.#maxScanFiles);
       await this.#ensureIndex(candidates, true);
-      matches = this.#sessionIndex.get(sessionId) ?? [];
+      matches = this.#index.sessions.get(sessionId) ?? [];
     }
     if (matches.length === 0) throw new SessionArchiveError("SESSION_NOT_FOUND", "Session is not available");
     if (matches.length > 1) {
@@ -682,7 +689,7 @@ export class StudioSessionArchiveReader {
   ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> {
     options.signal?.throwIfAborted();
     const cached = this.#snapshotCache.get(path);
-    const indexedVersion = this.#indexedVersions.get(path);
+    const indexedVersion = this.#index.versions.get(path);
     if (cached !== undefined && indexedVersion === cached.version) {
       // 命中也要刷新 LRU 顺序：否则热会话会被读过一遍的冷会话挤出缓存。
       this.#snapshotCache.delete(path);
@@ -716,7 +723,7 @@ export class StudioSessionArchiveReader {
           if (oldest === undefined) break;
           this.#dropCachedSnapshot(oldest);
         }
-        this.#indexedVersions.set(path, version);
+        this.#index.versions.set(path, version);
         return { snapshot, version };
       })
       .finally(() => {
@@ -1028,10 +1035,10 @@ export class StudioSessionArchiveReader {
   }
 
   async #ensureIndex(paths: readonly string[], force = false): Promise<void> {
-    if (!force && this.#indexedPaths !== undefined && samePaths(this.#indexedPaths, paths)) return;
-    if (this.#indexBuildInFlight !== undefined) {
-      await this.#indexBuildInFlight;
-      if (!force && this.#indexedPaths !== undefined && samePaths(this.#indexedPaths, paths)) return;
+    if (!force && this.#index.paths !== undefined && samePaths(this.#index.paths, paths)) return;
+    if (this.#index.building !== undefined) {
+      await this.#index.building;
+      if (!force && this.#index.paths !== undefined && samePaths(this.#index.paths, paths)) return;
     }
     const build = (async () => {
       const index = new Map<string, string[]>();
@@ -1044,13 +1051,13 @@ export class StudioSessionArchiveReader {
         else list.push(candidate);
         versions.set(candidate, header.version);
       }
-      this.#sessionIndex = index;
-      this.#indexedVersions = versions;
-      this.#indexedPaths = paths.slice();
+      this.#index.sessions = index;
+      this.#index.versions = versions;
+      this.#index.paths = paths.slice();
     })().finally(() => {
-      this.#indexBuildInFlight = undefined;
+      this.#index.building = undefined;
     });
-    this.#indexBuildInFlight = build;
+    this.#index.building = build;
     await build;
   }
 }
