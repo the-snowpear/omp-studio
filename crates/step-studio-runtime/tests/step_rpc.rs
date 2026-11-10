@@ -33,6 +33,7 @@ fn step_rpc_runs_a_turn_against_the_real_cli() {
         command: step,
         cwd: dir.to_string_lossy().to_string(),
         env: std::env::vars().collect(),
+        continue_session: false,
     })
     .expect("spawn step");
 

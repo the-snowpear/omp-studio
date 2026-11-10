@@ -67,6 +67,12 @@ pub fn parse_args(args: impl Iterator<Item = String>) -> Result<AdapterConfig, S
     // then produced no assistant reply at all.
     let step_command = std::env::var("STEP_STUDIO_STEP_CMD").unwrap_or_else(|_| "step".to_string());
     let step_env: Vec<(String, String)> = std::env::vars().collect();
+    // Opt-in, and only here: the desktop Host spawns this adapter without it and
+    // must keep starting a fresh session. An env var rather than a flag because
+    // the Host builds the argument list and should not have to learn about it.
+    let continue_session = std::env::var("STEP_STUDIO_SESSION")
+        .map(|value| value == "continue")
+        .unwrap_or(false);
 
     Ok(AdapterConfig {
         endpoint,
@@ -75,5 +81,6 @@ pub fn parse_args(args: impl Iterator<Item = String>) -> Result<AdapterConfig, S
         cwd,
         step_command,
         step_env,
+        continue_session,
     })
 }

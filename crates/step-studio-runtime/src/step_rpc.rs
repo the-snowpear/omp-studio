@@ -46,6 +46,9 @@ pub struct StepLaunch {
     pub command: String,
     pub cwd: String,
     pub env: Vec<(String, String)>,
+    /// Pick the previous session back up instead of starting a fresh one, so a
+    /// relaunch continues the conversation rather than losing it.
+    pub continue_session: bool,
 }
 
 /// A running Step CLI plus the channels to talk to it.
@@ -66,8 +69,11 @@ impl StepRpc {
         command
             .arg("--mode")
             .arg("rpc")
-            .arg("--include-live-events")
-            .current_dir(&launch.cwd);
+            .arg("--include-live-events");
+        if launch.continue_session {
+            command.arg("--continue");
+        }
+        command.current_dir(&launch.cwd);
         for (key, value) in &launch.env {
             command.env(key, value);
         }

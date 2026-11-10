@@ -183,6 +183,50 @@ fn the_app_stays_busy_until_a_command_answers() {
     assert!(!app.busy());
 }
 
+/// A resumed session arrives as a transcript page, and the runtime is the only
+/// place that history lives. Without the fold the conversation reappears empty
+/// after a relaunch.
+#[test]
+fn a_transcript_page_rebuilds_the_turns() {
+    let mut app = app_without_runtime();
+    app.restore(&[
+        // A reply split across entries, the way Step stores it: thinking, then
+        // text, then a tool call. All three belong to one turn.
+        serde_json::json!({ "role": "user", "content": [{ "type": "text", "text": "what files are here?" }] }),
+        serde_json::json!({ "role": "assistant", "content": [{ "type": "thinking", "text": "let me look" }] }),
+        serde_json::json!({ "role": "assistant", "content": [{ "type": "text", "text": "Listing." }] }),
+        serde_json::json!({ "role": "assistant", "content": [{ "type": "toolCall", "toolCallId": "c1", "toolName": "list_directory" }] }),
+        serde_json::json!({ "role": "user", "content": [{ "type": "text", "text": "thanks" }] }),
+        serde_json::json!({ "role": "assistant", "content": [{ "type": "text", "text": "You are welcome." }] }),
+    ]);
+
+    assert_eq!(app.turns.len(), 2, "two user messages, two turns");
+    let first = &app.turns[0];
+    assert_eq!(first.user, "what files are here?");
+    assert_eq!(first.assistant.thinking, "let me look");
+    assert_eq!(first.assistant.text, "Listing.");
+    assert_eq!(first.assistant.tools.len(), 1);
+    assert_eq!(first.assistant.tools[0].name, "list_directory");
+    assert!(first.assistant.done, "a restored turn is not still streaming");
+    assert_eq!(app.turns[1].assistant.text, "You are welcome.");
+    assert!(!app.streaming());
+}
+
+/// The fold replaces rather than merges, so a stale local turn cannot survive
+/// next to the restored history.
+#[test]
+fn restoring_replaces_what_was_already_there() {
+    let mut app = app_without_runtime();
+    app.send("a turn that never reached the runtime".to_string());
+    app.apply(Event::Text("half an answer".to_string()));
+
+    app.restore(&[serde_json::json!({ "role": "user", "content": [{ "type": "text", "text": "from the session" }] })]);
+
+    assert_eq!(app.turns.len(), 1);
+    assert_eq!(app.turns[0].user, "from the session");
+    assert!(app.turns[0].assistant.text.is_empty());
+}
+
 #[test]
 fn an_empty_prompt_is_not_sent() {
     let mut app = app_without_runtime();

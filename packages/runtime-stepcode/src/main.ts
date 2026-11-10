@@ -180,12 +180,22 @@ const stepCommand = process.env["STEP_STUDIO_RUNTIME_CMD"] ?? "step";
 // install paths routinely contain spaces, and splitting those produces a
 // command that does not exist.
 const parts = existsSync(stepCommand) ? [stepCommand] : stepCommand.split(" ");
+// Resume the previous session, so a relaunch continues the conversation instead
+// of losing it. Opt-in: the desktop Host spawns this adapter without the
+// variable and must keep starting fresh.
+const continueSession = process.env["STEP_STUDIO_SESSION"] === "continue";
 const rpc = new StepRpc(
   {
     command: parts[0]!,
     // Live frames are opt-in upstream; without them the RPC stream carries only
     // lifecycle events and the renderer would never see text as it streams.
-    args: [...parts.slice(1), "--mode", "rpc", "--include-live-events"],
+    args: [
+      ...parts.slice(1),
+      "--mode",
+      "rpc",
+      "--include-live-events",
+      ...(continueSession ? ["--continue"] : []),
+    ],
     cwd,
   },
   event => {

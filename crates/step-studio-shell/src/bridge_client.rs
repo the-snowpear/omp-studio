@@ -53,6 +53,10 @@ pub enum Event {
     NewSession {
         session_id: String,
     },
+    /// A transcript page, for restoring a resumed session into the view.
+    Transcript {
+        items: Vec<serde_json::Value>,
+    },
     Disconnected(String),
 }
 
@@ -98,6 +102,9 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
             env: vec![
                 ("STEP_STUDIO_STEP_CMD".to_string(), step_command.clone()),
                 ("STEP_STUDIO_RUNTIME_CMD".to_string(), step_command),
+                // Resume the previous session: the shell rebuilds the view from
+                // the transcript once it is ready.
+                ("STEP_STUDIO_SESSION".to_string(), "continue".to_string()),
             ],
             // The shell launches the adapter, so it owns the token file.
             token: None,
@@ -138,6 +145,24 @@ pub fn spawn(repo_root: PathBuf, cwd: PathBuf, step_command: String) -> (Sender<
         trace(&format!("ready, session={session_id}"));
         let _ = to_ui.send(Event::Ready { session_id, model });
         let _ = refresh_models(&session, &to_ui);
+
+        // A resumed session already has a history, and the runtime is the only
+        // place it lives: without this the conversation reappears empty.
+        // Answered either way: the app is waiting on this to stop the frame
+        // loop, so a failure has to release it too.
+        let items = match session.invoke(serde_json::json!({ "kind": "session.transcript.read" })) {
+            Ok((page, _)) => page
+                .pointer("/result/items")
+                .and_then(|items| items.as_array())
+                .cloned()
+                .unwrap_or_default(),
+            Err(error) => {
+                trace(&format!("transcript failed: {error}"));
+                Vec::new()
+            }
+        };
+        trace(&format!("transcript: {} items", items.len()));
+        let _ = to_ui.send(Event::Transcript { items });
 
         while let Ok(command) = from_ui.recv() {
             match command {

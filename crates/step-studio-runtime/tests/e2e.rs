@@ -66,6 +66,7 @@ fn config_in(dir: &std::path::Path, step_command: String) -> (AdapterConfig, Pat
         // it: the CLI resolves its config dir and credentials from more than a
         // prefix, and filtering it here silently starves the turn.
         step_env: std::env::vars().collect(),
+        continue_session: false,
     };
     (config, dir.to_path_buf())
     }
@@ -87,6 +88,7 @@ fn the_rust_adapter_drives_the_real_step_cli() {
         cwd: config.cwd.clone(),
         step_command: config.step_command.clone(),
         step_env: config.step_env.clone(),
+        continue_session: false,
     });
     std::thread::spawn(move || {
         let _ = runtime.serve();
@@ -166,6 +168,7 @@ fn aborting_settles_the_turn_the_rust_adapter_is_still_running() {
         cwd: config.cwd.clone(),
         step_command: config.step_command.clone(),
         step_env: config.step_env.clone(),
+        continue_session: false,
     });
     std::thread::spawn(move || {
         let _ = runtime.serve();
@@ -239,6 +242,7 @@ fn a_new_session_mints_a_fresh_session_id() {
         cwd: config.cwd.clone(),
         step_command: config.step_command.clone(),
         step_env: config.step_env.clone(),
+        continue_session: false,
     });
     std::thread::spawn(move || {
         let _ = runtime.serve();

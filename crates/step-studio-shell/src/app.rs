@@ -60,11 +60,18 @@ pub struct App {
 impl App {
     /// Build the app and start the bridge thread.
     pub fn connect(repo_root: PathBuf, step_command: String) -> Self {
-        let cwd = std::env::temp_dir().join(format!("step-studio-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&cwd);
+        // The repo is the agent's working directory, and it has to be stable
+        // across launches: Step files sessions per project, so a per-process
+        // temp dir made every launch a new project that `--continue` could
+        // never find the previous session in.
+        let cwd = repo_root.clone();
         let (to_bridge, from_bridge) =
             crate::bridge_client::spawn(repo_root.clone(), cwd, step_command.clone());
         Self {
+            // Startup is work in flight: the snapshot, the model catalog and the
+            // transcript all land after the first frame, and the loop has to
+            // stay awake long enough to read them.
+            busy: true,
             status: Status::Connecting,
             status_detail: "starting runtime".to_string(),
             session_id: String::new(),
@@ -73,7 +80,6 @@ impl App {
             turns: Vec::new(),
             composer: String::new(),
             show_thinking: true,
-            busy: false,
             to_bridge: Some(to_bridge),
             from_bridge: Some(from_bridge),
         }
@@ -94,6 +100,63 @@ impl App {
         }
         self.from_bridge = Some(receiver);
         changed
+    }
+
+    /// Rebuild the view from a transcript page.
+    ///
+    /// The runtime is the source of truth for what happened, so this replaces
+    /// the local turns rather than merging into them. Assistant entries append
+    /// to the turn their user message opened, which is how a reply split across
+    /// several entries (thinking, then text, then tools) lands in one place.
+    pub fn restore(&mut self, items: &[serde_json::Value]) {
+        self.turns.clear();
+        for item in items {
+            let role = item.get("role").and_then(|r| r.as_str()).unwrap_or("");
+            let blocks = item.get("content").and_then(|c| c.as_array());
+            match role {
+                "user" => {
+                    let text = block_text(blocks, "text");
+                    if text.trim().is_empty() {
+                        continue;
+                    }
+                    self.turns.push(Turn {
+                        user: text,
+                        assistant: AssistantTurn {
+                            done: true,
+                            ..AssistantTurn::default()
+                        },
+                    });
+                }
+                "assistant" => {
+                    // A transcript that opens with an assistant entry has no
+                    // turn to attach to; dropping it is better than inventing an
+                    // empty user bubble.
+                    let Some(turn) = self.turns.last_mut() else {
+                        continue;
+                    };
+                    turn.assistant.thinking.push_str(&block_text(blocks, "thinking"));
+                    turn.assistant.text.push_str(&block_text(blocks, "text"));
+                    for block in blocks.into_iter().flatten() {
+                        if block.get("type").and_then(|t| t.as_str()) != Some("toolCall") {
+                            continue;
+                        }
+                        turn.assistant.tools.push(ToolCall {
+                            name: block
+                                .get("toolName")
+                                .and_then(|n| n.as_str())
+                                .unwrap_or_default()
+                                .to_string(),
+                            // Tool results are separate entries the transcript
+                            // drops, so a restored call has no output.
+                            output: String::new(),
+                            is_error: false,
+                            done: true,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Fold one event. Pure, so it can be tested without a socket.
@@ -148,6 +211,10 @@ impl App {
                         tool.done = true;
                     }
                 }
+            }
+            Event::Transcript { items } => {
+                self.busy = false;
+                self.restore(&items);
             }
             Event::NewSession { session_id } => {
                 self.busy = false;
@@ -232,6 +299,16 @@ impl App {
     pub fn streaming(&self) -> bool {
         self.turns.last().map(|turn| !turn.assistant.done).unwrap_or(false)
     }
+}
+
+/// Concatenated text of every block of one type in a Studio content array.
+fn block_text(blocks: Option<&Vec<serde_json::Value>>, kind: &str) -> String {
+    blocks
+        .into_iter()
+        .flatten()
+        .filter(|block| block.get("type").and_then(|t| t.as_str()) == Some(kind))
+        .filter_map(|block| block.get("text").and_then(|t| t.as_str()))
+        .collect()
 }
 
 /// State without a bridge thread, for reducer tests.

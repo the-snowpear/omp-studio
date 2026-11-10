@@ -31,6 +31,8 @@ pub struct AdapterConfig {
     pub cwd: String,
     pub step_command: String,
     pub step_env: Vec<(String, String)>,
+    /// Resume the previous session instead of starting a fresh one.
+    pub continue_session: bool,
 }
 
 /// Everything one connection needs: the socket, the CLI, and the shared state
@@ -65,6 +67,7 @@ impl Runtime {
                         cwd: self.config.cwd.clone(),
                         step_command: self.config.step_command.clone(),
                         step_env: self.config.step_env.clone(),
+                        continue_session: self.config.continue_session,
                     };
                     let terminal = Arc::clone(&self.terminal);
                     std::thread::spawn(move || {
@@ -504,6 +507,7 @@ fn serve_connection(
         command: config.step_command.clone(),
         cwd: config.cwd.clone(),
         env: config.step_env.clone(),
+        continue_session: config.continue_session,
     })
     .map_err(|e| e.to_string())?;
 
