@@ -3,18 +3,19 @@ import { createPortal } from "react-dom";
 import { useSurfaceDocument } from "../dock/SurfaceContext";
 import { useI18n } from "../i18n";
 
-export interface BrowserLinkIntent { url: string; handled: boolean; }
+export interface BrowserLinkOptions { reuse?: boolean; reuseKey?: string | undefined; sessionId?: string | undefined; documentId?: string | undefined; preview?: boolean; }
+export interface BrowserLinkIntent extends BrowserLinkOptions { url: string; handled: boolean; }
 export function isLocalDevelopmentUrl(value: string): boolean {
   let url: URL;
   try { url = new URL(value); } catch { return false; }
   if (!["http:", "https:"].includes(url.protocol)) return false;
   return url.hostname === "localhost" || url.hostname.endsWith(".localhost") || url.hostname === "[::1]" || url.hostname === "0.0.0.0" || /^127(?:\.\d{1,3}){3}$/u.test(url.hostname) || (!!url.port && /^(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})$/u.test(url.hostname));
 }
-export function routeBrowserLink(url: string, internal = false): boolean {
+export function routeBrowserLink(url: string, internal = false, options: BrowserLinkOptions = {}): boolean {
   if (!/^https?:\/\//iu.test(url) || (!internal && !isLocalDevelopmentUrl(url))) return false;
   const parsed = new URL(url);
   if (parsed.hostname === "0.0.0.0") parsed.hostname = "127.0.0.1";
-  const intent: BrowserLinkIntent = { url: parsed.href, handled: false };
+  const intent: BrowserLinkIntent = { url: parsed.href, handled: false, ...options };
   window.dispatchEvent(new CustomEvent("omp:browser-link", { detail: intent }));
   return intent.handled;
 }

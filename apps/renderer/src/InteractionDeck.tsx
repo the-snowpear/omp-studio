@@ -9,6 +9,7 @@ import {
   askToDeckView,
   NO_ASK_ANSWER,
   nextPicked,
+  patchAskAnswer,
   selectToAskView,
   submitAskValue,
   submitSelectValue,
@@ -88,7 +89,7 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
     const view = selectToAskView(interaction);
     const pick = (label: string) => {
       if (busy) return;
-      setAnswer((previous) => ({ ...previous, picked: nextPicked(view.question, previous.picked, label) }));
+      setAnswer(previous => patchAskAnswer(view.question, previous, { picked: nextPicked(view.question, previous.picked, label) }));
     };
     const send = () => {
       const value = submitSelectValue(view, answer, interaction.multiple);
@@ -109,7 +110,7 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
           answer={answer}
           {...(busy ? { disabled: true } : {})}
           onPick={pick}
-          onCustom={(value) => setAnswer((previous) => ({ ...previous, custom: value }))}
+          onCustom={custom => setAnswer(previous => patchAskAnswer(view.question, previous, { custom }))}
           onSubmit={send}
         />
         {retryNote}

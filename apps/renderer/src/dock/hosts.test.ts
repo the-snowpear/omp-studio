@@ -215,6 +215,21 @@ describe("dock wheel handoff", () => {
     expect(host.element.parentElement).toBe(layer);
   });
 
+  it("keeps automatic height owned by the destination when a preview is released", () => {
+    const { hosts, host } = fixture();
+    const source = hosts.autoHeight("files");
+    const preview = document.createElement("div");
+    document.body.append(preview);
+    const releasePreview = hosts.previewSlot("files", preview, true);
+    source();
+    expect(host.element.dataset.dockAutoHeight).toBe("true");
+    const destination = hosts.autoHeight("files");
+    releasePreview();
+    expect(host.element.dataset.dockAutoHeight).toBe("true");
+    destination();
+    expect(host.element.hasAttribute("data-dock-auto-height")).toBe(false);
+  });
+
   it("restores the body and inner scroll positions after a rail card is reopened", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 300, 300));
     vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([new DOMRect(0, 0, 300, 300)] as unknown as DOMRectList);
@@ -460,5 +475,19 @@ describe("dock geometry observation", () => {
     body.remove();
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(frames.length).toBeGreaterThan(0);
+  });
+
+  it("gives every instance its own host and exposes the tool base", () => {
+    document.body.innerHTML = `<div class="dock-host-layer"></div>`;
+    const layer = document.querySelector<HTMLElement>(".dock-host-layer")!;
+    const hosts = new PanelHosts();
+    cleanups.push(hosts.attach(layer));
+    const primary = hosts.get("files");
+    const second = hosts.get("files@2");
+    expect(second.element).not.toBe(primary.element);
+    expect(primary.element.dataset.panel).toBe("files");
+    expect(second.element.dataset.panel).toBe("files@2");
+    expect(primary.element.dataset.dockBase).toBe("files");
+    expect(second.element.dataset.dockBase).toBe("files");
   });
 });

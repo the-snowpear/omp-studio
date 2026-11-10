@@ -1,5 +1,6 @@
 import { planScroll, readChain, scrollChain } from "./scrollChain";
 import type { PanelId, PanelVisibility } from "./types";
+import { panelBaseId } from "./types";
 
 type Host = { element: HTMLDivElement; surface: Document; surfaceSnapshot: () => Document; visibility: PanelVisibility; toolbar: HTMLElement | null; listeners: Set<() => void>; subscribe: (listener: () => void) => () => void; snapshot: () => PanelVisibility; toolbarSnapshot: () => HTMLElement | null; signature: string; pendingScroll?: { element: Element; top: number; left: number }[] };
 type MoveTarget = HTMLElement & { moveBefore?: (node: Node, before: Node | null) => void };
@@ -40,6 +41,8 @@ export class PanelHosts {
   private hosts = new Map<PanelId, Host>();
   private slots = new Map<PanelId, HTMLElement>();
   private previewSlots = new Map<PanelId, HTMLElement>();
+  private autoHeightOwners = new Map<PanelId, Set<symbol>>();
+  private previewAutoHeight = new Map<PanelId, boolean>();
   private previewToolbars = new Map<PanelId, { node: HTMLElement | null }>();
   private detachListeners = new Set<() => void>();
   private layer: HTMLElement | null = null;
@@ -60,7 +63,8 @@ export class PanelHosts {
       const element = document.createElement("div");
       element.className = BODY;
       element.dataset.panel = id;
-      if (id === "context-viewer") element.id = "dock-context-viewer-content";
+      element.dataset.dockBase = panelBaseId(id);
+      if (id === "context-viewer" || id === "annotations") element.id = `dock-${id}-content`;
       element.inert = true;
       element.hidden = true;
       host = { element, surface: document, surfaceSnapshot: () => host!.surface, visibility: EMPTY, toolbar: null, listeners: new Set(), subscribe: listener => { host!.listeners.add(listener); return () => { host!.listeners.delete(listener); }; }, snapshot: () => host!.visibility, toolbarSnapshot: () => this.previewToolbars.has(id) ? this.previewToolbars.get(id)!.node : host!.toolbar, signature: "0|" };
@@ -77,6 +81,8 @@ export class PanelHosts {
     if (slot) this.observer?.unobserve(slot);
     this.slots.delete(id);
     this.previewSlots.delete(id);
+    this.autoHeightOwners.delete(id);
+    this.previewAutoHeight.delete(id);
     this.previewToolbars.delete(id);
     host.element.remove();
     this.hosts.delete(id);
@@ -95,7 +101,9 @@ export class PanelHosts {
     this.schedule();
     return () => {
       for (const listener of this.detachListeners) listener();
-      this.previewSlots.clear(); this.previewToolbars.clear();
+      const previews = [...this.previewSlots.keys()];
+      this.previewSlots.clear(); this.previewAutoHeight.clear(); this.previewToolbars.clear();
+      for (const id of previews) this.syncAutoHeight(id);
       layer.removeEventListener("wheel", this.wheel);
       this.observer?.disconnect(); this.mutations?.disconnect();
       this.observer = this.mutations = undefined;
@@ -179,10 +187,30 @@ export class PanelHosts {
       for (const listener of host.listeners) listener();
     };
   }
-  previewSlot(id: PanelId, node: HTMLElement) {
-    this.previewSlots.set(id, node); this.placeHost(id); this.observer?.observe(node); this.schedule();
+  private syncAutoHeight(id: PanelId) {
+    const element = this.hosts.get(id)?.element;
+    if (!element) return;
+    const automatic = this.previewAutoHeight.get(id) ?? !!this.autoHeightOwners.get(id)?.size;
+    if (automatic) element.dataset.dockAutoHeight = "true"; else delete element.dataset.dockAutoHeight;
+  }
+  autoHeight(id: PanelId) {
+    this.get(id);
+    const owners = this.autoHeightOwners.get(id) ?? new Set<symbol>();
+    const owner = Symbol();
+    owners.add(owner); this.autoHeightOwners.set(id, owners); this.syncAutoHeight(id);
     return () => {
-      if (this.previewSlots.get(id) === node) { this.previewSlots.delete(id); this.placeHost(id); }
+      owners.delete(owner);
+      if (!owners.size && this.autoHeightOwners.get(id) === owners) this.autoHeightOwners.delete(id);
+      this.syncAutoHeight(id);
+    };
+  }
+  previewSlot(id: PanelId, node: HTMLElement, autoHeight = false) {
+    this.previewSlots.set(id, node); this.previewAutoHeight.set(id, autoHeight); this.syncAutoHeight(id);
+    this.placeHost(id); this.observer?.observe(node); this.schedule();
+    return () => {
+      if (this.previewSlots.get(id) === node) {
+        this.previewSlots.delete(id); this.previewAutoHeight.delete(id); this.syncAutoHeight(id); this.placeHost(id);
+      }
       this.observer?.unobserve(node); this.schedule();
     };
   }
@@ -292,6 +320,8 @@ export class PanelHosts {
           if (clipsY) { top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom); }
         }
       }
+      // A full-screen group is portalled to the body (DockLauncher.tsx): above the workbench, below menus.
+      const fullscreen = !!slot?.closest("[data-dock-fullscreen]");
       const width = rect?.width ?? host.visibility.width;
       const height = rect?.height ?? host.visibility.height;
       // Embedded rail hosts are clipped by the card list itself. Keep the
@@ -315,7 +345,7 @@ export class PanelHosts {
       const regionNode = slot?.closest<HTMLElement>("[data-dock-cards], [data-dock-region]");
       const region = floating ? "float" : regionNode?.dataset.dockCards ?? regionNode?.dataset.dockRegion ?? "";
       const maximized = floating?.classList.contains("is-maximized") ?? false;
-      const z = preview ? 58 : floating?.hasAttribute("data-dock-modal") ? 82 : floating ? 32 + Number(floating.dataset.dockOrder ?? 0) * 2 : overlay ? 30 : drawer ? 42 : 12;
+      const z = preview ? 58 : fullscreen ? 53 : floating?.hasAttribute("data-dock-modal") ? 82 : floating ?32 + Number(floating.dataset.dockOrder ?? 0) * 2 : overlay ? 30 : drawer ? 42 : 12;
       const clippedLeft = rect ? Math.max(0, left - rect.left) : 0;
       const clippedTop = rect ? Math.max(0, top - rect.top) : 0;
       const clippedRight = rect ? Math.min(width, right - rect.left) : width;

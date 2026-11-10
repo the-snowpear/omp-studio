@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { AskActions, AskBody, AskHead } from "./AskCard";
 import { ASK_GENIE_HOLD_MS, ASK_GENIE_MS, prefersReducedMotion } from "./askGenie";
-import { askAnswered, nextPicked } from "./askContent";
+import { askAnswered, nextPicked, patchAskAnswer } from "./askContent";
 import { PlanCard } from "./PlanCard";
 import { type DeckQueue } from "./PromptHead";
 import { NO_ASK_ANSWER, type AskHeader, type DeckAskAnswer, type DeckAskQuestion } from "./types";
@@ -292,15 +292,13 @@ export function QueuedDeck({
     setAnswers((prev) => {
       const at = prev[item.id] ?? NO_ASK_ANSWER;
       const picked = nextPicked(item.question, at.picked, label);
-      const { noteOption: previousNoteOption, ...rest } = at;
-      const noteOption = picked.includes(label) ? label : previousNoteOption && picked.includes(previousNoteOption) ? previousNoteOption : picked[0];
-      return { ...prev, [item.id]: { ...rest, picked, ...(noteOption ? { noteOption } : {}) } };
+      return { ...prev, [item.id]: patchAskAnswer(item.question, at, { picked }) };
     });
   }, [editsLocked]);
 
-  const writeCustom = useCallback((id: string, custom: string) => {
+  const patchAnswer = useCallback((item: QueuedAskItem, patch: Partial<DeckAskAnswer>) => {
     if (editsLocked) return;
-    setAnswers((prev) => ({ ...prev, [id]: { ...(prev[id] ?? NO_ASK_ANSWER), custom } }));
+    setAnswers(prev => ({ ...prev, [item.id]: patchAskAnswer(item.question, prev[item.id] ?? NO_ASK_ANSWER, patch) }));
   }, [editsLocked]);
 
   if (!current) {
@@ -327,8 +325,8 @@ export function QueuedDeck({
       answer={answers[item.id] ?? NO_ASK_ANSWER}
       {...(editsLocked ? { disabled: true } : {})}
       onPick={(label) => pick(item, label)}
-      onCustom={(value) => writeCustom(item.id, value)}
-      onPatch={patch=>setAnswers(prev=>({...prev,[item.id]:{...(prev[item.id]??NO_ASK_ANSWER),...patch}}))}
+      onCustom={custom => patchAnswer(item, { custom })}
+      onPatch={patch => patchAnswer(item, patch)}
       onSubmit={() => { void dismissAsk(item, "submit"); }}
     />
   );

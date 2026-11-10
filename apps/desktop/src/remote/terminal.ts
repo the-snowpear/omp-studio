@@ -2,16 +2,25 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { createNodePtySpawner, type PtyProcess, type PtySpawner, type TerminalSessionListeners } from "../terminal-pty.js";
 import { TerminalOutputBatcher } from "../terminal-batch.js";
-import { TERMINAL_MAX_SESSIONS, type TerminalSessionInfo, type TerminalSize } from "../terminal-shared.js";
+import { TERMINAL_MAX_SESSIONS, type TerminalSessionInfo, type TerminalSize, type TerminalCommand } from "../terminal-shared.js";
+import { commandArguments } from "../terminal-command.js";
 import { sshArguments, systemSshExecutable, type RemotePlatform } from "./platform.js";
 import type { RemoteConnectionManager } from "./manager.js";
 import { sshAuthenticationRequest } from "./authentication.js";
 
-export function remoteTerminalCommand(platform: RemotePlatform, path: string): string {
+export function remoteTerminalCommand(platform: RemotePlatform, path: string, command?: TerminalCommand): string {
+  const args = command ? commandArguments(command) : undefined;
   if (platform === "win32") {
-    const script = `$ErrorActionPreference='Stop'; try { Set-Location -LiteralPath '${path.replaceAll("'", "''")}' } catch { [Console]::Error.WriteLine($_); exit 1 }`;
-    return `"powershell.exe -NoLogo -NoExit -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}"`;
+    let script = `$ErrorActionPreference='Stop'; try { Set-Location -LiteralPath '${path.replaceAll("'", "''")}' } catch { [Console]::Error.WriteLine($_); exit 1 }`;
+    if (command && args) {
+      const executable = command.shell === "powershell" ? `(Get-Command pwsh.exe,powershell.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source`
+        : command.shell === "zsh" ? `(Get-Command zsh.exe -ErrorAction Stop).Source`
+        : `(Join-Path (Split-Path (Split-Path (Get-Command git.exe -ErrorAction Stop).Source)) 'bin\\${command.shell}.exe')`;
+      script += `; & ${executable} ${args.map(arg => `'${arg.replaceAll("'", "''")}'`).join(" ")}; exit $LASTEXITCODE`;
+    }
+    return `"powershell.exe -NoLogo ${command ? "" : "-NoExit "}-EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}"`;
   }
+  if (command && args) return `cd '${path.replaceAll("'", "'\\''")}' && exec ${command.shell === "powershell" ? "pwsh" : command.shell} ${args.map(arg => `'${arg.replaceAll("'", "'\\''")}'`).join(" ")}`;
   return `cd '${path.replaceAll("'", "'\\''")}' && exec "\${SHELL:-/bin/sh}" -l`;
 }
 
@@ -52,7 +61,7 @@ export class RemoteTerminalManager {
     windowId: number,
     targetId: string,
     workspaceId: string,
-    size: TerminalSize & { readonly flowControl?: boolean },
+    size: TerminalSize & { readonly flowControl?: boolean; readonly command?: TerminalCommand },
     listeners: TerminalSessionListeners,
   ): Promise<TerminalSessionInfo> {
     if (this.#closed) throw new Error("Terminal manager is closed");
@@ -70,7 +79,7 @@ export class RemoteTerminalManager {
       if (this.connections.get(targetId) !== remote) throw new Error("SSH connection changed while opening the terminal");
       const args = sshArguments(profile);
       args[0] = "-tt";
-      args.push(remoteTerminalCommand(remote.environment.platform, path));
+      args.push(remoteTerminalCommand(remote.environment.platform, path, size.command));
       const name = `SSH · ${profile.name}`;
       const authenticationRequest = sshAuthenticationRequest(profile, this.connections.authentication(targetId));
       let process: PtyProcess;
@@ -80,6 +89,7 @@ export class RemoteTerminalManager {
       const session: RemoteSession = { windowId, targetId, process, listeners, ended: false, cancelAuthentication: () => authenticationRequest?.dispose() };
       this.#sessions.set(id, session);
       this.#batcher.open(id, { flowControl: size.flowControl === true });
+      if (size.command) this.#batcher.push(id, size.command.text.replace(/\r?\n/g, "\r\n") + "\r\n\r\n");
       process.onData(data => this.#batcher.push(id, data));
       process.onExit(() => {
         // Deliver the tail before the exit event, like the local shell.

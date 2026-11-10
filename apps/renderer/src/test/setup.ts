@@ -1,3 +1,9 @@
+import { __setOnboardingAutoOpenForTests } from "../onboarding/onboardingState";
+
+// App 级测试会挂整棵应用并清空 localStorage；首启教程是强制模态，
+// 默认关掉自动弹出，教程自己的测试再打开。
+__setOnboardingAutoOpenForTests(false);
+
 if (typeof globalThis.navigator !== "undefined") {
   Object.defineProperty(globalThis.navigator, "language", {
     value: "zh-CN",

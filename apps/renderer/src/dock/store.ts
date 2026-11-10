@@ -1,5 +1,5 @@
 import type { LayoutMemory } from "../settings/appSettings";
-import { preserveFileViews, applyInstancePreset, builtInPresets, clampFloat, createDefaultLayout, dockReducer, instancePresetLayout, locatePanel, normalizeLayout, removePanels } from "./model";
+import { preserveFileViews, applyBrowserPagePreset, applyInstancePreset, builtInPresets, clampFloat, createDefaultLayout, dockReducer, instancePresetLayout, locatePanel, moveConflicts, normalizeLayout, removePanels, resolveOpenIn } from "./model";
 import { projectConversationPanel } from "./conversationPanels";
 import { workbenchBounds } from "./workbenchGeometry";
 import { pinWorkspace, pinsForScope, putPin, readPins, subtractPinPanels, withPins } from "./pins";
@@ -7,7 +7,7 @@ import type { DockFloat, DockPinMode, DockRect } from "./types";
 import { WorkbenchWindows, toolWindowId, type WorkbenchWindow } from "./windows";
 import { WINDOW_MINIMUM } from "./snap";
 import { WORKBENCH_PANELS } from "../panels/registry";
-import { isFilePanelId, PANEL_IDS, conversationPanelId, isConversationPanelId, isAgentPanelId, isBrowserPagePanelId, type DockAction, type DockLayout, type DockPreferences, type DockPreset, type DockScope, type DockSnapshot, type PanelId } from "./types";
+import { isFilePanelId, PANEL_IDS, conversationPanelId, isConversationPanelId, isAgentPanelId, isBrowserPagePanelId, panelBaseId, type DockAction, type DockLayout, type DockPreferences, type DockPreset, type DockScope, type DockSnapshot, type DockTarget, type PanelId } from "./types";
 
 const STORAGE_KEY = "omp.dock.v1";
 /** One manual-recovery snapshot of the last good payload; never rewritten. */
@@ -20,6 +20,12 @@ const object = (value: unknown): Record<string, unknown> => value !== null && ty
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const cloneLayout = (layout: DockLayout): DockLayout => dockReducer(createDefaultLayout(), { type: "apply", layout });
 const panelId = (value: unknown): value is PanelId => typeof value === "string" && (PANEL_IDS as readonly string[]).includes(value);
+
+export function toolWindowMinimum(active: PanelId, panelCount: number) {
+  const definition = WORKBENCH_PANELS.find(value => value.id === panelBaseId(active));
+  const body = Math.max(definition?.minHeight ?? 0, isConversationPanelId(active) ? 280 : active === "terminal" ? 240 : 0);
+  return { width: WINDOW_MINIMUM.width, height: Math.max(WINDOW_MINIMUM.height, body + 42 + (panelCount > 1 ? 36 : 0)) };
+}
 
 /** Shared by the project-default setting and inheritance; no display names or epochs. */
 export function dockProjectKey(scope: Pick<DockScope, "target" | "project">): string {
@@ -53,14 +59,13 @@ type StoreState = {
   recent: Map<string, Recent>;
   histories: Map<string, History>;
   drafts: Map<string, string>;
-  contextOpened: Set<string>;
 };
 
 function emptyState(): StoreState {
-  return { pins: [], preferences: defaultPreferences(), presets: builtInPresets(), layouts: new Map(), saved: new Map(), recent: new Map(), histories: new Map(), drafts: new Map(), contextOpened: new Set() };
+  return { pins: [], preferences: defaultPreferences(), presets: builtInPresets(), layouts: new Map(), saved: new Map(), recent: new Map(), histories: new Map(), drafts: new Map() };
 }
 
-function centeredContextRect(): DockRect {
+function centeredFocusRect(): DockRect {
   const box = typeof document === "undefined" ? undefined : workbenchBounds();
   const width = box?.width || (typeof window === "undefined" ? 1280 : window.innerWidth);
   const height = box?.height || (typeof window === "undefined" ? 900 : window.innerHeight);
@@ -101,7 +106,12 @@ function legacyPreset(value: unknown, source: string, id: string): DockPreset | 
   const numberFields = ["sidebarWidth", "splitRatio", "panelWidth", "bottomHeight", "btwX", "btwY", "btwW", "btwH"];
   if (!booleanFields.some(key => typeof raw[key] === "boolean") && !numberFields.some(key => typeof raw[key] === "number" && Number.isFinite(raw[key])) && !panelId(raw.sideTab) && !panelId(raw.bottomTab) && raw.btwPlacement !== "float" && raw.btwPlacement !== "docked") return undefined;
   const memory = raw as Partial<LayoutMemory>;
-  let layout = createDefaultLayout();
+  // Legacy memory described the old populated right sidebar.
+  let layout = dockReducer(createDefaultLayout(), { type: "move", panels: ["changes", "git", "browser", "computer"], target: { region: "right", groupId: "right-main" } });
+  layout.right.visible = false;
+  layout.rail.mode = "hidden";
+  layout.bottom.visible = true;
+  layout.cards.agents.collapsed = false;
   if (typeof memory.collapsed === "boolean") layout.left.visible = !memory.collapsed;
   if (typeof memory.sidebarWidth === "number") layout.left.width = memory.sidebarWidth;
   if (typeof memory.splitRatio === "number") layout.left.ratio = memory.splitRatio;
@@ -176,7 +186,6 @@ export class DockStore {
     const stored = object(read(this.storage, STORAGE_KEY));
     this.real.pins = readPins(stored.pins);
     if (stored.version === 1) {
-      if (Array.isArray(stored.contextOpened)) this.real.contextOpened = new Set(stored.contextOpened.filter((key): key is string => typeof key === "string"));
       const ids = new Set(this.real.presets.map(preset => preset.id));
       if (Array.isArray(stored.presets)) for (const item of stored.presets) {
         const preset = object(item);
@@ -222,6 +231,16 @@ export class DockStore {
     return store;
   }
 
+  /** Release a mounted fork, retaining only its shared layout/undo data. */
+  dispose(): void {
+    if (!this.handles.delete(this)) return;
+    this.flush();
+    this.listeners.clear();
+    delete this.windowManager;
+    delete this.eventWindow;
+    this.unmigratedWindows.clear();
+  }
+
   getSnapshot = (): DockSnapshot => this.snapshot;
   windowId(groupId: string) { return isConversationPanelId(groupId) ? groupId.slice("conversation:".length) : toolWindowId(this.documentId ?? "standalone", groupId); }
   private conversationWindow() { return this.windowManager?.getSnapshot().records.find(record => record.content.kind === "conversation" && record.content.documentId === this.documentId); }
@@ -239,6 +258,14 @@ export class DockStore {
     }
     this.dispatch({ type: "move", panels, target: { region: "float", ...(rect ? { rect } : {}) } });
     return this.snapshot.layout.floats.find(value => panels.every(panel => value.panels.includes(panel)))?.id;
+  }
+  /** A region's "add tool" entry: keep an existing instance elsewhere and open a second one here. */
+  openIn(panel: PanelId, target: DockTarget): void {
+    if (this.state.preferences.locked) return;
+    const resolved = resolveOpenIn(this.layout, panel, target);
+    if (resolved.kind === "focus") { this.dispatch({ type: "reveal", panel: resolved.panel }); return; }
+    this.dispatch({ type: "move", panels: [resolved.panel], target });
+    this.dispatch({ type: "reveal", panel: resolved.panel });
   }
   bindWindows(manager: WorkbenchWindows, documentId: string, title: string) {
     this.windowManager = manager;
@@ -286,9 +313,9 @@ export class DockStore {
       for (const record of manager.getSnapshot().records) if (record.content.kind === "tools" && record.content.documentId === this.documentId && !ids.has(record.id)) manager.remove(record.id);
       for (const group of groups) {
         const id = this.windowId(group.id), pin = group.pin?.mode ?? "none";
-        const definition = WORKBENCH_PANELS.find(value => value.id === group.active);
+        const definition = WORKBENCH_PANELS.find(value => value.id === panelBaseId(group.active));
         const conversationActive = isConversationPanelId(group.active);
-        const minimum = { width: WINDOW_MINIMUM.width, height: Math.max(WINDOW_MINIMUM.height, Math.max(definition?.minHeight ?? 0, conversationActive ? 280 : group.active === "terminal" ? 240 : 0) + 42 + (group.panels.length > 1 ? 36 : 0)) };
+        const minimum = toolWindowMinimum(group.active, group.panels.length);
         const title = conversationActive ? this.conversationTitle : `${definition?.title ?? this.snapshot?.layout.agentPanels[group.active]?.target.displayName ?? (isFilePanelId(group.active) ? this.snapshot?.layout.fileViews[group.active]?.title || "File" : isBrowserPagePanelId(group.active) ? this.snapshot?.layout.browserPages[group.active]?.title || "Browser" : group.active)}${this.conversationTitle ? ` · ${this.conversationTitle}` : ""}`;
         if (!manager.get(id)) {
           if (group.pin ? group.pin.coordinateVersion !== 1 : this.layout.floatCoordinateVersion !== 1) this.unmigratedWindows.add(id);
@@ -324,10 +351,12 @@ export class DockStore {
     const state = this.state;
     const history = state.histories.get(scopeKey(this.scope));
     const layout = this.layout;
+    const preset = state.presets.find(preset => preset.id === layout.presetId)?.layout;
+    const baseline = preset && Object.keys(layout.browserPages).length ? instancePresetLayout(applyBrowserPagePreset(preset, layout)) : preset;
     return {
       layout: this.projectLayout(withPins(layout, pinsForScope(state.pins, this.scope))), preferences: state.preferences, presets: state.presets, scope: this.scope, preview: this.preview, modalPanel: this.modalPanel,
       canUndo: !!history?.undo.length, canRedo: !!history?.redo.length,
-      modified: !equal(instancePresetLayout(layout), state.presets.find(preset => preset.id === layout.presetId)?.layout),
+      modified: !equal(instancePresetLayout(layout), baseline),
     };
   }
 
@@ -370,7 +399,6 @@ export class DockStore {
       pins: this.real.pins,
       preferences: this.real.preferences,
       presets: this.real.presets.filter(preset => !preset.builtin),
-      contextOpened: [...this.real.contextOpened],
       sessions: Object.fromEntries(this.real.saved),
       recent: degraded ? {} : Object.fromEntries(this.real.recent),
     }, (_key, value: unknown) => {
@@ -485,6 +513,12 @@ export class DockStore {
   dispatch(action: DockAction): void {
     const manager = this.windowManager;
     if (action.type === "move" && action.target.region === "rail" && action.panels.some(isConversationPanelId)) return;
+    // A tool lives once per region: dropping it onto its own twin focuses the
+    // twin instead of creating a second copy (and never enters the undo stack).
+    if (action.type === "move" && !this.state.preferences.locked) {
+      const conflict = moveConflicts(this.layout, action.panels, action.target);
+      if (conflict.length && action.panels.length === 1) action = { type: "reveal", panel: conflict[0]! };
+    }
     if (manager && action.type === "raise") { manager.activate(this.windowId(action.groupId)); return; }
     if (manager && action.type === "float") {
       if (this.snapshot.preferences.locked && action.rect) return;
@@ -497,23 +531,14 @@ export class DockStore {
       });
       return;
     }
-    if (manager && (action.type === "open" || action.type === "browser-page-open" && action.reveal)) {
+    if (manager && (action.type === "open" || action.type === "reveal" || action.type === "browser-page-open" && action.reveal)) {
       const group = this.snapshot.layout.floats.find(value => value.panels.includes(action.panel));
       if (group) manager.activate(this.windowId(group.id));
     }
-    if (action.type === "open" && action.panel === "context-viewer") {
-      const key = scopeKey(this.scope);
-      if (!this.state.contextOpened.has(key)) {
-        this.state.contextOpened.add(key);
-        if (!this.preview) this.dirty = true;
-        const location = locatePanel(this.snapshot.layout, action.panel);
-        const previous = this.layout.hidden[action.panel];
-        if (!location && previous?.region === "float" && !previous.rect && !previous.groupId) {
-          this.save(this.scope, { ...this.layout, hidden: { ...this.layout.hidden, [action.panel]: { region: "float", rect: centeredContextRect() } } });
-          this.modalPanel = action.panel;
-        }
-        this.queue();
-      }
+    if (action.type === "open" && (action.panel === "context-viewer" || action.panel === "annotations")
+      && !locatePanel(this.snapshot.layout, action.panel)) {
+      this.save(this.scope, { ...this.layout, hidden: { ...this.layout.hidden, [action.panel]: { region: "float", rect: centeredFocusRect() } } });
+      this.modalPanel = action.panel;
     }
     const activePins = pinsForScope(this.state.pins, this.scope);
     const effective = dockReducer(this.snapshot.layout, action, this.state.preferences.locked);
@@ -556,7 +581,7 @@ export class DockStore {
       } finally { this.reconcilingWindows = false; }
     }
     // Page tabs follow the browser's own state, so undo must never restore a closed page or drop an open one.
-    if (base !== this.layout) this.commit(base, action.type !== "activate" && action.type !== "raise" && action.type !== "agent-focus" && !action.type.startsWith("browser-page-") && !action.type.startsWith("file-"), conversation);
+    if (base !== this.layout) this.commit(base, action.type !== "activate" && action.type !== "reveal" && action.type !== "raise" && action.type !== "agent-focus" && !action.type.startsWith("browser-page-") && !action.type.startsWith("file-"), conversation);
     else if (pinsChanged) { this.queue(); this.publish(); }
     if (action.type === "file-close") {
       this.state.pins = subtractPinPanels(this.state.pins, action.panels);
@@ -575,7 +600,7 @@ export class DockStore {
     if (action.type === "region" && typeof window !== "undefined") {
       (this.eventWindow ?? window).dispatchEvent(new CustomEvent("omp:dock-region", { detail: { documentId: this.documentId, region: action.region, visible: action.visible } }));
     }
-    if ((action.type === "open" || action.type === "agent-open" || action.type === "browser-page-open" && action.reveal) && typeof window !== "undefined") requestAnimationFrame(() => {
+    if ((action.type === "open" || action.type === "reveal" || action.type === "agent-open" || action.type === "browser-page-open" && action.reveal) && typeof window !== "undefined") requestAnimationFrame(() => {
       (this.eventWindow ?? window).dispatchEvent(new CustomEvent("omp:dock-open", { detail: { documentId: this.documentId, panel: action.panel } }));
     });
   }
@@ -684,7 +709,6 @@ export class DockStore {
     if (this.owner) state.pins = state.pins.map(group => group.pin?.owner === draftKey ? { ...group, pin: { ...group.pin, owner: key } } : group);
     const history = state.histories.get(draftKey);
     const adopted = cloneLayout(draft);
-    if (state.contextOpened.delete(draftKey)) state.contextOpened.add(key);
     state.layouts.set(key, adopted);
     state.saved.set(key, adopted);
     if (formal.project !== null) state.recent.set(project, { scopeKey: key, layout: adopted });
@@ -705,7 +729,6 @@ export class DockStore {
     state.saved.delete(key);
     state.layouts.delete(key);
     state.histories.delete(key);
-    state.contextOpened.delete(key);
     const project = dockProjectKey(formal);
     if (state.recent.get(project)?.scopeKey === key) state.recent.delete(project);
     if (scopeKey(this.scope) === key) state.layouts.set(key, this.startingLayout(formal));

@@ -5,6 +5,7 @@ import { ProjectHistoryStore } from "../sidebar/useProjectHistories";
 import { WorkbenchWindows, type WindowLayout, type WorkbenchWindow } from "../dock/windows";
 import { clampFloat } from "../dock/model";
 import { DocumentHosts } from "./hosts";
+import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
 import { snapTree, WINDOW_MINIMUM, type SnapRatios, type SnapNode, type SnapTemplate, type WindowSnapLayout } from "../dock/snap";
 
 export type ConversationAction = { id: string; kind: "rename" | "fork" | "handoff" | "compact" | "export" | "archive" | "delete"; entry: SessionHistoryEntry; workspaceId: string };
@@ -89,6 +90,17 @@ export class ConversationWorkspaceStore {
     return { ...this.metadata, views: layout.records.filter(record => record.content.kind === "conversation").map(asView), snap: layout.snap, snapAssistCell: layout.assist };
   }
   getSnapshot = () => this.state;
+  /** Keep lightweight identity/draft memory, not a mounted application per past selection. */
+  mountedDocuments() {
+    const referenced = new Set(this.manager.getSnapshot().records.map(record => record.content.documentId));
+    return this.state.documents.filter(document => referenced.has(document.id));
+  }
+  getDiagnostics(deep = false) {
+    const referenced = new Set(this.manager.getSnapshot().records.map(record => record.content.documentId));
+    return { documents: this.state.documents.length, mountedDocuments: this.mountedDocuments().length, views: this.state.views.length,
+      unreferencedDocuments: this.state.documents.filter(document => !referenced.has(document.id)).length,
+      listeners: this.listeners.size, ...this.hosts.getDiagnostics(deep) };
+  }
   enablePersistence() { this.persistenceEnabled = true; }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish(save = true) {
@@ -103,7 +115,7 @@ export class ConversationWorkspaceStore {
     if (this.demo || !this.persistenceEnabled) return;
     const windowLayout = this.manager.getSnapshot();
     const open = new Set(windowLayout.records.map(record => record.content.documentId));
-    const documents = this.metadata.documents.filter(doc => open.has(doc.id)).map(({ page, pagePhase, ...doc }) => doc.ref.sessionId || doc.ref.historyId ? doc : { ...doc, title: "新对话" });
+    const documents = this.metadata.documents.filter(doc => open.has(doc.id)).map(({ page, pagePhase, route, ...doc }) => doc.ref.sessionId || doc.ref.historyId ? doc : { ...doc, title: "新对话" });
     const records = windowLayout.records.map(record => record.content.kind === "conversation" ? { ...record, title: documents.find(doc => doc.id === record.content.documentId)!.title } : record);
     const state = { ...this.metadata, documents, windowLayout: { ...windowLayout, records, assist: null }, focus: this.windows.checkpoint() };
     try { this.storage?.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(state)); } catch {}
@@ -177,17 +189,22 @@ export class ConversationWorkspaceStore {
     return clampFloat({ x: canvas.x - workbench.x + (canvas.width - width) / 2 + offset, y: canvas.y - workbench.y + Math.min(64, (canvas.height - height) / 2) + offset, width, height }, { width: workbench.width, height: workbench.height }, 280);
   }
   openFromDirectory(ref: ConversationRef): string {
-    const existing = this.viewFor(ref);
-    if (existing) { this.focus(existing.id); return existing.id; }
-    return this.isWindowed() ? this.open(ref, "float", this.nextWindowRect()) : this.open(ref);
+    const finish = sessionSwitchPerformance.span("switch.dispatch");
+    try {
+      const existing = this.viewFor(ref);
+      if (existing) return this.open(ref);
+      return this.isWindowed() ? this.open(ref, "float", this.nextWindowRect()) : this.open(ref);
+    } finally { finish(); }
   }
   open(ref: ConversationRef, placement: "current" | "float" = "current", rect?: Rect): string {
     if (this.demo && ref.draftId && ref.draftId !== "initial") ref = { ...ref, previewThreadId: "t0", previewProjectId: ref.workspaceId ?? this.documentFor(this.state.activeViewId)?.ref.previewProjectId };
     const key = conversationKey(ref);
-    const document = this.state.documents.find(doc => conversationKey(doc.ref) === key) ?? { id: crypto.randomUUID(), ref, title: "新对话" };
+    // Only the startup document defers to startupPage; an explicit open reveals the conversation, including cached documents.
+    const document: ConversationDocument = this.state.documents.find(doc => conversationKey(doc.ref) === key) ?? { id: crypto.randomUUID(), ref, title: "新对话", route: ref.draftId === "initial" ? undefined : "workbench" };
+    if (!this.metadata.documents.includes(document)) this.metadata = { ...this.metadata, documents: [...this.metadata.documents, document] };
+    else this.updateDocument(document.id, { route: "workbench" });
     const existing = this.state.views.find(view => view.documentId === document.id);
     if (existing) { if (placement === "float" && existing.placement === "main") this.float(existing.id, rect); this.focus(existing.id); return existing.id; }
-    if (!this.metadata.documents.includes(document)) this.metadata = { ...this.metadata, documents: [...this.metadata.documents, document] };
     // A minimized view is not "current": reusing it would swap out a conversation the user only put away.
     const current = this.state.views.find(view => view.id === this.state.activeViewId && !view.minimized);
     if (placement === "current" && current) {
@@ -200,7 +217,7 @@ export class ConversationWorkspaceStore {
     this.activate(id);
     return id;
   }
-  updateDocument(id: string, patch: Partial<Pick<ConversationDocument, "ref" | "title" | "projectName" | "page" | "pagePhase">>) {
+  updateDocument(id: string, patch: Partial<Pick<ConversationDocument, "ref" | "title" | "projectName" | "route" | "page" | "pagePhase">>) {
     const current = this.metadata.documents.find(doc => doc.id === id);
     if (!current || JSON.stringify({ ...current, ...patch }) === JSON.stringify(current)) return;
     this.metadata = { ...this.metadata, documents: this.metadata.documents.map(doc => doc.id === id ? { ...doc, ...patch } : doc) };

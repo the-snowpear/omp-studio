@@ -54,7 +54,7 @@ body.dock-modal-active .dock-menu-popover { z-index: 87; }
 /* Rail bodies share the card list's native scroll chain and clipping. */
 .dock-card-region-rail .dock-slot { position: relative; }
 .dock-panel-content[data-dock-embedded] { position: absolute; inset: 0; width: 100%; height: 100%; }
-.dock-panel-content[data-dock-embedded] :is(.dock-doc-scroll, #sbFiles > .sb-scroll, .btw-transcript) { overscroll-behavior-y: auto; }
+.dock-panel-content[data-dock-embedded] :is(.dock-doc-scroll, .dock-files-content > .sb-scroll, .btw-transcript) { overscroll-behavior-y: auto; }
 .dock-icon-button,
 .dock-card-title,
 .dock-tab > button,
@@ -164,19 +164,23 @@ body.dock-modal-active .dock-menu-popover { z-index: 87; }
 .dock-card-region-left .dock-card + .dock-card { border-top: 1px solid var(--border); }
 .dock-card-region-left .dock-card-header { padding-inline: var(--sp-8); background: transparent; }
 .dock-card-region-left .dock-card-title { font-size: var(--fs-11); font-weight: var(--fw-semibold); color: var(--text-3); }
-.dock-card-region-left .dock-card-body { border-top: 0; }
-.dock-card-region-left .dock-card:only-child:not(.is-collapsed) { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
-.dock-card-region-left .dock-card:only-child > .dock-card-body { flex: 1 1 0; min-height: 0; }
-.dock-card-region-left .dock-card:only-child > .dock-card-body > .dock-slot { height: 100% !important; }
-.dock-card-region-left .dock-card:only-child > .dock-card-resizer { display: none; }
+/* Only real panes divide the space. Folded titles collect below the expanded panes. */
+.dock-card-region-left .dock-card:not(.is-collapsed):not(.is-drag-away) { display: flex; flex-direction: column; flex: var(--dock-left-share, 1) 1 auto; min-height: 74px; }
+.dock-card-region-left .dock-card-header { flex: 0 0 auto; }
+.dock-card-region-left .dock-card-body { border-top: 0; flex: 1 1 0; min-height: 0; }
+.dock-card-region-left .dock-card-body > .dock-slot { height: 100% !important; }
+.dock-card-region-left > .dock-card-list > .dock-card > .dock-card-resizer { display: block; flex: 0 0 6px; }
+.dock-card-region-left > .dock-card-list[data-dock-cards] > .dock-card:not(:has(~ .dock-card:not(.is-collapsed):not(.is-drag-away))) > .dock-card-resizer { display: none; }
+.dock-card-region-left .dock-card-placeholder:not(.is-collapsed) { height: auto !important; flex-basis: 34px; }
 .dock-left-cards.is-folded :is(.dock-card-region, .dock-card-list) { flex: 0 0 auto; height: auto; }
 .dock-left-cards.is-folded { border-top: 1px solid var(--border); }
 .dock-card-actions { display: flex; flex: 0 0 auto; }
 .dock-card-actions .icon-btn { width: 20px; height: 20px; }
 .dock-card-header:is(:hover, :focus-within) .sb-head-actions { opacity: 1; }
-.dock-panel-content[data-dock-region="left"][data-panel="files"] > #sbFiles { display: flex; flex-direction: column; height: 100%; }
-.dock-panel-content[data-dock-region="left"] #sbFiles > .sb-section-head { display: none; }
-.dock-panel-content[data-dock-region="left"] #sbFiles > .sb-scroll { flex: 1 1 0; min-height: 0; overflow: auto; }
+.dock-files-content { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
+.dock-panel-content[data-dock-region="left"][data-dock-base="files"] > .dock-files-content { display: flex; flex-direction: column; height: 100%; }
+.dock-panel-content[data-dock-region="left"] .dock-files-content > .sb-section-head { display: none; }
+.dock-panel-content[data-dock-region="left"] .dock-files-content > .sb-scroll { flex: 1 1 0; min-height: 0; overflow: auto; }
 /* 卡片底部不画可调条：这一行仍是卡片自身的一部分（透明背景），底边就是普通卡片
    的圆角边框。只有指针进入这几像素时把光标换成 ns-resize；拖动、双击恢复自动
    高度、键盘调整与焦点框都走原来的 resizer，不另造交互。 */
@@ -422,6 +426,9 @@ body.dock-modal-active .dock-menu-popover { z-index: 87; }
 .dock-capsule-overflow { max-width: 180px; height: 32px; pointer-events: auto; }
 .dock-drag-preview { position: fixed; box-sizing: border-box; pointer-events: none; z-index: 57; border-radius: var(--r-8); background: var(--bg-inset); color: var(--text); box-shadow: 0 12px 40px rgb(0 0 0 / 18%); transform-origin: top left; transition-property: none; transition-duration: var(--dur); transition-timing-function: var(--ease-out); }
 .dock-drag-preview * { pointer-events: none !important; }
+.dock-drag-preview.is-left-stack { background: transparent; box-shadow: none; outline: none; }
+.dock-drag-preview.is-left-stack .dock-card { background: var(--bg-inset); box-shadow: 0 12px 40px rgb(0 0 0 / 18%); }
+.dock-drag-preview.is-left-stack.is-snapped .dock-card { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dock-layout-preview { position: fixed; z-index: 31; pointer-events: none; }
 .dock-layout-preview * { pointer-events: none !important; }
 .dock-drag-preview.is-snapped { outline: 2px solid var(--accent); outline-offset: 2px; }

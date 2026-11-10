@@ -8,6 +8,8 @@ import type {
 import type { JsonValue } from "@omp-studio/client-contract";
 import type { TimelineRow } from "../conversation/conversationViewModel";
 import { NATIVE_TOOL_GALLERY } from "./nativeToolGallery";
+import { PREVIEW_THREAD_ITEMS } from "./conversationScenarios";
+import { PREVIEW_CONTENT_GALLERY_ITEMS } from "./contentGallery";
 
 const epoch = 1 as RuntimeEpoch;
 const session = "preview-session" as SessionId;
@@ -259,7 +261,17 @@ export const PREVIEW_CONVO_ITEMS: readonly ConversationItem[] = [
       ...blocksFromCards(STORY_CARDS, "preview-story"),
       {
         type: "text",
-        text: "文档已经写到 `docs/UPSTREAM-SYNC.md`，README 加了入口。Studio Bridge 和会话目录都没动。接下来跑 typecheck。",
+        text: [
+          "## 同步结果",
+          "文档已经写到 `docs/UPSTREAM-SYNC.md`，README 加了入口。Studio Bridge 和会话目录保持原路径。",
+          "| 检查项 | 状态 | 说明 |\n| --- | --- | --- |\n| 依赖版本 | 已核对 | 对齐上游 v0.8.1 |\n| 同步文档 | 已完成 | 补充变更与回退步骤 |\n| 类型检查 | 待复查 | Mermaid 主题参数需要确认 |",
+          "> 接下来先处理类型错误，再检查全屏缩放；文档完成不代表验收完成。",
+          "### 复查命令",
+          "```bash\n# 类型与对话渲染回归\nnpm run check -- --only renderer --suite CommandBlock --suite markdownWorker --suite markdownBlocks\n```",
+          "PowerShell 可以先核对工作目录和可用解释器：",
+          "```pwsh\nGet-Location\nGet-Command git, pwsh | Select-Object Name, Source\n```",
+          "- [x] 更新同步记录与 README\n- [x] 核对本地路径\n- [ ] 复查类型错误\n- [ ] 确认缩放交互",
+        ].join("\n\n"),
       },
     ],
   },
@@ -299,12 +311,15 @@ export function previewTailInterrupted(threadId: string | undefined): boolean {
   return threadId !== undefined && PREVIEW_INTERRUPTED_THREADS.has(threadId);
 }
 
-/** Small transcript variants used by the composer preview states. */
+const PREVIEW_GALLERY_ITEMS = previewGalleryItems();
+
+/** Independent transcripts, selected through the existing preview sidebar. */
 export function previewConversationItems(threadId = "t1"): readonly ConversationItem[] {
   if (threadId === "t0") return [];
-  if (threadId === "t4") return PREVIEW_CONVO_ITEMS.slice(0, 2);
   if (previewTailInterrupted(threadId)) return PREVIEW_INTERRUPTED_ITEMS;
-  return PREVIEW_CONVO_ITEMS;
+  if (threadId === "t10") return PREVIEW_GALLERY_ITEMS;
+  if (threadId === "t15") return PREVIEW_CONTENT_GALLERY_ITEMS;
+  return PREVIEW_THREAD_ITEMS[threadId] ?? PREVIEW_CONVO_ITEMS;
 }
 
 export const PREVIEW_CONVO_LIVE: readonly ConversationRuntimeEvent[] = [

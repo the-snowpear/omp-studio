@@ -1,3 +1,4 @@
+import { StudioSearchCredentialsService } from "./search-credentials-service";
 import { StudioQueuedCompactionService } from "./queued-compaction-service";
 import { StudioRuntimeViews } from "./runtime-view-service";
 import type { MCPManager } from "../../mcp/manager";
@@ -71,7 +72,7 @@ import { StudioAccountStatusService } from "./account-status-service";
 import * as path from "node:path";
 import { realpath } from "node:fs/promises";
 import { Encoding, countTokens } from "@oh-my-pi/pi-natives";
-import type { DaemonSnapshot } from "@oh-my-pi/pi-tui/tools/daemon";
+import type { DaemonSnapshot } from "../../launch/protocol";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { listServices, requestService, startService } from "../../launch/services";
 import type { AgentSession } from "../../session/agent-session";
@@ -134,12 +135,14 @@ export function projectService(daemon: DaemonSnapshot): StudioServiceRow {
 		instanceId: daemon.id + ":" + daemon.startedAt,
 		state: daemon.state,
 		startedAt: daemon.startedAt,
+		...(daemon.previewUrl === undefined ? {} : { previewUrl: daemon.previewUrl }),
+		...(daemon.pid === undefined ? {} : { pid: daemon.pid }),
 		...(daemon.readyAt === undefined ? {} : { readyAt: daemon.readyAt }),
 		...(daemon.exitedAt === undefined ? {} : { exitedAt: daemon.exitedAt }),
 		...(daemon.exitCode === undefined ? {} : { exitCode: daemon.exitCode }),
 		restartCount: daemon.restartCount,
 		outputBytes: daemon.outputBytes,
-		...(daemon.owner ? { ownerAgentId: daemon.owner } : {}),
+		...(daemon.owner === undefined ? {} : { ownerId: daemon.owner, ownerAgentId: daemon.owner }),
 		mode: daemon.detached ? "detached" : daemon.persist ? "persist" : "session",
 	};
 }
@@ -257,6 +260,12 @@ export class StudioWorkbenchService {
 		return result;
 	}
 	async #execute(operation: WorkbenchOperation): Promise<unknown> {
+		if (
+			operation.kind === "search.credentials.list" ||
+			operation.kind === "search.credentials.set" ||
+			operation.kind === "search.credentials.remove"
+		)
+			return new StudioSearchCredentialsService(this.session).execute(operation);
 		if (isEvaluationWorkspaceOperation(operation)) return this.evaluations.execute(operation);
 		if (isAdvisorConfigOperation(operation)) return this.advisorConfig.execute(operation);
 		if (isLocalResourceOperation(operation)) return this.resources.local(operation);

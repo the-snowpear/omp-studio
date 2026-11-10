@@ -17,12 +17,50 @@ export type ToolTabInfo = { windowId: string; title: string; mark: PanelDefiniti
 
 export class DocumentHosts {
   private hosts = new Map<string, ConversationHost>();
+  private owners = new Map<string, symbol>();
+  private detachListeners = new Map<string, Set<() => void>>();
+  onBeforeDetach(id: string, listener: () => void) {
+    const listeners = this.detachListeners.get(id) ?? new Set<() => void>();
+    listeners.add(listener); this.detachListeners.set(id, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (!listeners.size && this.detachListeners.get(id) === listeners) this.detachListeners.delete(id);
+    };
+  }
+  /** A replacement mount may claim the same identity before the old cleanup runs. */
+  retain(id: string) {
+    const owner = Symbol();
+    this.owners.set(id, owner);
+    return () => {
+      if (this.owners.get(id) !== owner) return;
+      this.owners.delete(id);
+      const host = this.hosts.get(id);
+      if (host) {
+        host.element.remove(); host.title.remove(); host.actions.remove();
+        host.listeners.clear(); delete host.tools;
+      }
+      this.hosts.delete(id); this.slots.delete(id); this.previews.delete(id);
+      this.detachListeners.delete(id);
+      this.tabs.delete(id); this.toolTabs.delete(id);
+      this.notifyTabs();
+    };
+  }
   private slots = new Map<string, Partial<ConversationHostSlots>>();
   private previews = new Map<string, Partial<ConversationHostSlots>>();
   private tabs = new Map<string, ConversationTabInfo>();
   private toolTabs = new Map<string, readonly ToolTabInfo[]>();
   private tabListeners = new Set<() => void>();
   private tabRevision = 0;
+  getDiagnostics(deep = false) {
+    const result = { hosts: this.hosts.size, detachedHosts: 0, detachedNodes: 0 };
+    for (const host of this.hosts.values()) {
+      if (host.element.isConnected) continue;
+      result.detachedHosts++;
+      // Enumerate full subtrees only during an explicit diagnostic export.
+      if (deep) result.detachedNodes += host.element.querySelectorAll("*").length;
+    }
+    return result;
+  }
   tab(id: string) { return this.tabs.get(id); }
   setTab(id: string, info: ConversationTabInfo) {
     if (JSON.stringify(this.tabs.get(id)) === JSON.stringify(info)) return;
@@ -57,6 +95,7 @@ export class DocumentHosts {
     return host;
   }
   attach(id: string, slot: HTMLElement, part: Part = "element") {
+    this.get(id);
     const slots = this.slots.get(id) ?? {};
     slots[part] = slot; this.slots.set(id, slots);
     this.place(id, part);
@@ -66,6 +105,7 @@ export class DocumentHosts {
     };
   }
   preview(id: string, slots: Partial<ConversationHostSlots>) {
+    this.get(id);
     this.previews.set(id, slots);
     for (const part of ["element", "title", "actions"] as const) this.place(id, part);
     return () => {
@@ -80,8 +120,13 @@ export class DocumentHosts {
     return () => { if (host.tools === tools) delete host.tools; };
   }
   private place(id: string, part: Part) {
-    const host = this.get(id), element = host[part];
+    const host = this.hosts.get(id);
+    if (!host) return; // Late slot cleanup must not recreate a released host.
+    const element = host[part];
     const destination = this.previews.get(id)?.[part] ?? this.slots.get(id)?.[part];
+    if (part === "element" && element.isConnected && element.parentElement !== destination) {
+      for (const listener of this.detachListeners.get(id) ?? []) listener();
+    }
     if (destination && element.parentElement !== destination) {
       const scroll = [element, ...element.querySelectorAll<HTMLElement>("*")].filter(node => node.scrollTop || node.scrollLeft).map(node => ({ node, top: node.scrollTop, left: node.scrollLeft }));
       const movable = destination as HTMLElement & { moveBefore?: (node: Node, before: Node | null) => void };

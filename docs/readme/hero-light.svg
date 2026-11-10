@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="460" viewBox="0 0 1280 460" font-family="'Segoe UI Variable Display','Segoe UI',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif">
+<title>OMP Studio — 随你摆放的 Agent 工作台</title>
+<defs>
+  <linearGradient id="hlbrand" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#7c4dff"/>
+    <stop offset=".55" stop-color="#d946ef"/>
+    <stop offset="1" stop-color="#0ea5e9"/>
+  </linearGradient>
+  <linearGradient id="hlbrandShift" x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+    <stop offset="0" stop-color="#7c4dff"/>
+    <stop offset=".35" stop-color="#d946ef"/>
+    <stop offset=".7" stop-color="#0ea5e9"/>
+    <stop offset="1" stop-color="#7c4dff"/>
+    <animateTransform attributeName="gradientTransform" type="translate" values="-1 0;0 0" dur="6s" repeatCount="indefinite"/>
+  </linearGradient>
+  <pattern id="hldots" width="22" height="22" patternUnits="userSpaceOnUse">
+    <circle cx="1.5" cy="1.5" r="1.2" fill="#7c4dff" opacity="0.24"/>
+  </pattern>
+  <filter id="hlsoft" x="-20%" y="-20%" width="140%" height="160%">
+    <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#3b2a7a" flood-opacity="0.16"/>
+  </filter>
+  <filter id="hlblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="40"/></filter>
+  <clipPath id="hlclip"><rect width="1280" height="460" rx="28"/></clipPath>
+  <linearGradient id="hlfade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity=".0"/><stop offset=".55" stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#fff"/></linearGradient>
+  <mask id="hlgridmask"><rect width="1280" height="460" fill="url(#hlfade)"/></mask>
+</defs>
+<g clip-path="url(#hlclip)">
+  <rect width="1280" height="460" fill="#fbfaff"/>
+  <g filter="url(#hlblur)" opacity="0.55">
+    <circle cx="180" cy="40" r="170" fill="#7c4dff" opacity=".45"><animate attributeName="cx" values="160;300;160" dur="14s" repeatCount="indefinite"/></circle>
+    <circle cx="1080" cy="420" r="190" fill="#0ea5e9" opacity=".35"><animate attributeName="cy" values="430;360;430" dur="11s" repeatCount="indefinite"/></circle>
+    <circle cx="820" cy="40" r="150" fill="#d946ef" opacity=".30"><animate attributeName="cx" values="760;900;760" dur="16s" repeatCount="indefinite"/></circle>
+  </g>
+  <rect width="1280" height="460" fill="url(#hldots)" mask="url(#hlgridmask)"/>
+</g>
+<rect x=".5" y=".5" width="1279" height="459" rx="28" fill="none" stroke="#e4def4"/>
+
+<!-- copy -->
+<g>
+  <rect x="64" y="64" width="246" height="30" rx="15" fill="#ffffff" stroke="url(#hlbrand)" stroke-width="1.5"/>
+  <circle cx="82" cy="79" r="4.5" fill="#16a34a"><animate attributeName="opacity" values="1;.25;1" dur="1.8s" repeatCount="indefinite"/></circle>
+  <text x="94" y="84" font-size="13.5" font-weight="700" fill="#554d70">0.2.0 · 全新窗口化工作台</text>
+  <text x="62" y="172" font-size="76" font-weight="800" letter-spacing="-2.5" fill="url(#hlbrandShift)">OMP Studio</text>
+  <text x="64" y="226" font-size="30" font-weight="700" fill="#17122b" letter-spacing="-.5">把 Agent 装进一张随你摆放的工作台</text>
+  <text x="64" y="270" font-size="19" fill="#554d70">oh-my-pi 的桌面控制台 —— 对话、工具和窗口</text>
+  <text x="64" y="300" font-size="19" fill="#554d70">都能拖出、吸附、停靠，并排跑多个 Agent。</text>
+  <rect x="64" y="356" width="159.4" height="30" rx="15" fill="#ffffff" stroke="#d4cbee"/><text x="143.7" y="376" text-anchor="middle" font-size="13" fill="#554d70" font-weight="600">Windows x64 · ARM64</text><rect x="233.4" y="356" width="159.4" height="30" rx="15" fill="#ffffff" stroke="#d4cbee"/><text x="313.1" y="376" text-anchor="middle" font-size="13" fill="#554d70" font-weight="600">macOS Apple Silicon</text><rect x="402.8" y="356" width="98.6" height="30" rx="15" fill="#ffffff" stroke="#d4cbee"/><text x="452.1" y="376" text-anchor="middle" font-size="13" fill="#554d70" font-weight="600">MIT License</text>
+</g>
+
+<!-- mini workbench -->
+<g filter="url(#hlsoft)">
+  <rect x="690" y="54" width="548" height="352" rx="16" fill="#f3f0fd" stroke="#d4cbee"/>
+</g>
+<rect x="690" y="54" width="548" height="26" rx="16" fill="#ffffff"/>
+<rect x="690" y="70" width="548" height="10" fill="#ffffff"/>
+<rect x="690" y="80" width="548" height="1" fill="#e4def4"/>
+<rect x="702" y="64" width="30" height="6" rx="3" fill="#d4cbee"/>
+<rect x="740" y="64" width="22" height="6" rx="3" fill="#e4def4"/>
+<rect x="770" y="64" width="22" height="6" rx="3" fill="#e4def4"/>
+<rect x="728" y="81" width="1" height="325" fill="#e4def4"/>
+<rect x="702" y="98" width="14" height="14" rx="4" fill="#7c4dff"/><rect x="702" y="124" width="14" height="14" rx="4" fill="#e4def4"/><rect x="702" y="150" width="14" height="14" rx="4" fill="#e4def4"/><rect x="702" y="176" width="14" height="14" rx="4" fill="#e4def4"/><rect x="702" y="202" width="14" height="14" rx="4" fill="#e4def4"/>
+<rect x="800" y="81" width="1" height="325" fill="#e4def4"/>
+<rect x="734" y="96" width="50" height="9" rx="4.5" fill="url(#hlbrand)" opacity=".85"/>
+<rect x="734" y="124" width="58" height="7" rx="3.5" fill="#d4cbee"/><rect x="734" y="146" width="46" height="7" rx="3.5" fill="#e4def4"/><rect x="734" y="168" width="62" height="7" rx="3.5" fill="#a78bfa"/><rect x="734" y="190" width="40" height="7" rx="3.5" fill="#e4def4"/><rect x="734" y="212" width="54" height="7" rx="3.5" fill="#e4def4"/><rect x="734" y="234" width="36" height="7" rx="3.5" fill="#e4def4"/>
+<rect x="808" y="88" width="422" height="310" rx="10" fill="#fbfaff" stroke="#e4def4" stroke-dasharray="3 4"/>
+<rect x="808" y="88" width="208.0" height="310" rx="10" fill="#7c4dff" fill-opacity=".12" stroke="#7c4dff" stroke-dasharray="6 5" stroke-width="1.5" opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.2083;0.2292;0.2667;0.2833;1" values="0;0;1;1;0;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect><rect x="1022.0" y="88" width="208.0" height="152.0" rx="10" fill="#7c4dff" fill-opacity=".12" stroke="#7c4dff" stroke-dasharray="6 5" stroke-width="1.5" opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.4;0.4208;0.4583;0.475;1" values="0;0;1;1;0;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect><rect x="1022.0" y="246.0" width="208.0" height="152.0" rx="10" fill="#7c4dff" fill-opacity=".12" stroke="#7c4dff" stroke-dasharray="6 5" stroke-width="1.5" opacity="0">
+      <animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.5917;0.6125;0.65;0.6667;1" values="0;0;1;1;0;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect>
+
+    <g opacity="1"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.0833;0.1583;0.225;0.275;0.8833;0.95;1" values="1;1;1;1;1;1;1;1" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+    <svg x="808" y="88" width="422" height="310" overflow="hidden">
+      <animate attributeName="x" dur="12s" repeatCount="indefinite" keyTimes="0;0.0833;0.1583;0.225;0.275;0.8833;0.95;1" values="808;808;878;828;808;808;808;808" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /><animate attributeName="y" dur="12s" repeatCount="indefinite" keyTimes="0;0.0833;0.1583;0.225;0.275;0.8833;0.95;1" values="88;88;128;158;88;88;88;88" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.0833;0.1583;0.225;0.275;0.8833;0.95;1" values="422;422;250;250;208.0;208.0;422;422" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /><animate attributeName="height" dur="12s" repeatCount="indefinite" keyTimes="0;0.0833;0.1583;0.225;0.275;0.8833;0.95;1" values="310;310;210;210;310;310;310;310" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+      <rect width="100%" height="100%" rx="10" fill="#ffffff"/>
+      <rect width="100%" height="28" fill="#7c4dff" opacity=".13"/>
+      <rect x="0" y="27.5" width="100%" height="1" fill="#e4def4"/>
+      <circle cx="14" cy="14" r="4" fill="#7c4dff"/>
+      <rect x="24" y="11" width="80" height="6" rx="3" fill="#554d70" opacity=".7"/>
+      <svg x="100%" overflow="visible"><g transform="translate(-50,0)" fill="none" stroke="#9890b2" stroke-width="1.4" stroke-linecap="round">
+        <path d="M6 14h8"/><rect x="20" y="10" width="8" height="8" rx="1.5"/><path d="M34 10l8 8M42 10l-8 8"/></g></svg>
+
+      <rect x="14" y="40" width="120" height="7" rx="3.5" fill="#d4cbee"/>
+      <rect x="14" y="54" width="84" height="7" rx="3.5" fill="#e4def4"/>
+      <rect x="14" y="76" width="160" height="34" rx="9" fill="#f6f4fc" stroke="#e4def4"/>
+      <rect x="24" y="86" width="96" height="6" rx="3" fill="#d4cbee"/>
+      <rect x="24" y="97" width="60" height="6" rx="3" fill="#e4def4"/>
+      <svg x="100%" y="122" overflow="visible"><g transform="translate(-14,0)">
+        <rect x="-128" y="0" width="128" height="26" rx="10" fill="#7c4dff" opacity=".9"/>
+        <rect x="-116" y="10" width="84" height="6" rx="3" fill="#fff" opacity=".85"/></g></svg>
+      <rect x="14" y="162" width="140" height="7" rx="3.5" fill="#d4cbee"/>
+      <rect x="14" y="176" width="190" height="7" rx="3.5" fill="#e4def4"/>
+      <rect x="14" y="190" width="110" height="7" rx="3.5" fill="#e4def4"/>
+      <svg y="100%" overflow="visible"><g transform="translate(0,-40)">
+        <rect x="12" y="0" width="0" height="28" rx="9" fill="#ffffff" stroke="#7c4dff" stroke-opacity=".55">
+          <animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.0833;0.1583;0.225;0.275;0.8833;0.95;1" values="398;398;226;226;184.0;184.0;398;398" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+        </rect>
+        <circle cx="0" cy="14" r="6" fill="#7c4dff"><animate attributeName="cx" dur="12s" repeatCount="indefinite" keyTimes="0;0.0833;0.1583;0.225;0.275;0.8833;0.95;1" values="396;396;224;224;182.0;182.0;396;396" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></circle>
+      </g></svg>
+      <rect width="100%" height="100%" rx="10" fill="none" stroke="#7c4dff" stroke-opacity=".55" stroke-width="1.5"/>
+    </svg></g>
+
+    <g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.3417;0.4167;0.4667;0.8833;0.9333;1" values="0;0;1;1;1;1;0;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+    <svg x="958" y="168" width="230" height="190" overflow="hidden">
+      <animate attributeName="x" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.3417;0.4167;0.4667;0.8833;0.9333;1" values="958;958;958;1008;1022.0;1022.0;1022.0;1022.0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /><animate attributeName="y" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.3417;0.4167;0.4667;0.8833;0.9333;1" values="168;168;148;108;88;88;88;88" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.3417;0.4167;0.4667;0.8833;0.9333;1" values="230;230;230;230;208.0;208.0;208.0;208.0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /><animate attributeName="height" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.3417;0.4167;0.4667;0.8833;0.9333;1" values="190;190;190;190;152.0;152.0;152.0;152.0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+      <rect width="100%" height="100%" rx="10" fill="#ffffff"/>
+      <rect width="100%" height="28" fill="#d946ef" opacity=".13"/>
+      <rect x="0" y="27.5" width="100%" height="1" fill="#e4def4"/>
+      <circle cx="14" cy="14" r="4" fill="#d946ef"/>
+      <rect x="24" y="11" width="64" height="6" rx="3" fill="#554d70" opacity=".7"/>
+      <svg x="100%" overflow="visible"><g transform="translate(-50,0)" fill="none" stroke="#9890b2" stroke-width="1.4" stroke-linecap="round">
+        <path d="M6 14h8"/><rect x="20" y="10" width="8" height="8" rx="1.5"/><path d="M34 10l8 8M42 10l-8 8"/></g></svg>
+
+      <rect x="14" y="40" width="120" height="7" rx="3.5" fill="#d4cbee"/>
+      <rect x="14" y="54" width="84" height="7" rx="3.5" fill="#e4def4"/>
+      <rect x="14" y="76" width="160" height="34" rx="9" fill="#f6f4fc" stroke="#e4def4"/>
+      <rect x="24" y="86" width="96" height="6" rx="3" fill="#d4cbee"/>
+      <rect x="24" y="97" width="60" height="6" rx="3" fill="#e4def4"/>
+      <svg x="100%" y="122" overflow="visible"><g transform="translate(-14,0)">
+        <rect x="-128" y="0" width="128" height="26" rx="10" fill="#d946ef" opacity=".9"/>
+        <rect x="-116" y="10" width="84" height="6" rx="3" fill="#fff" opacity=".85"/></g></svg>
+      <rect x="14" y="162" width="140" height="7" rx="3.5" fill="#d4cbee"/>
+      <rect x="14" y="176" width="190" height="7" rx="3.5" fill="#e4def4"/>
+      <rect x="14" y="190" width="110" height="7" rx="3.5" fill="#e4def4"/>
+      <svg y="100%" overflow="visible"><g transform="translate(0,-40)">
+        <rect x="12" y="0" width="0" height="28" rx="9" fill="#ffffff" stroke="#d946ef" stroke-opacity=".55">
+          <animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.3417;0.4167;0.4667;0.8833;0.9333;1" values="206;206;206;206;184.0;184.0;184.0;184.0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+        </rect>
+        <circle cx="0" cy="14" r="6" fill="#d946ef"><animate attributeName="cx" dur="12s" repeatCount="indefinite" keyTimes="0;0.3;0.3417;0.4167;0.4667;0.8833;0.9333;1" values="204;204;204;204;182.0;182.0;182.0;182.0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></circle>
+      </g></svg>
+      <rect width="100%" height="100%" rx="10" fill="none" stroke="#d946ef" stroke-opacity=".55" stroke-width="1.5"/>
+    </svg></g>
+
+    <g opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.4917;0.5333;0.6083;0.6583;0.8833;0.9333;1" values="0;0;1;1;1;1;0;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+    <svg x="928" y="208" width="220" height="170" overflow="hidden">
+      <animate attributeName="x" dur="12s" repeatCount="indefinite" keyTimes="0;0.4917;0.5333;0.6083;0.6583;0.8833;0.9333;1" values="928;928;928;998;1022.0;1022.0;1022.0;1022.0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /><animate attributeName="y" dur="12s" repeatCount="indefinite" keyTimes="0;0.4917;0.5333;0.6083;0.6583;0.8833;0.9333;1" values="208;208;188;228;246.0;246.0;246.0;246.0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.4917;0.5333;0.6083;0.6583;0.8833;0.9333;1" values="220;220;220;220;208.0;208.0;208.0;208.0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /><animate attributeName="height" dur="12s" repeatCount="indefinite" keyTimes="0;0.4917;0.5333;0.6083;0.6583;0.8833;0.9333;1" values="170;170;170;170;152.0;152.0;152.0;152.0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+      <rect width="100%" height="100%" rx="10" fill="#ffffff"/>
+      <rect width="100%" height="28" fill="#0ea5e9" opacity=".13"/>
+      <rect x="0" y="27.5" width="100%" height="1" fill="#e4def4"/>
+      <circle cx="14" cy="14" r="4" fill="#0ea5e9"/>
+      <rect x="24" y="11" width="52" height="6" rx="3" fill="#554d70" opacity=".7"/>
+      <svg x="100%" overflow="visible"><g transform="translate(-50,0)" fill="none" stroke="#9890b2" stroke-width="1.4" stroke-linecap="round">
+        <path d="M6 14h8"/><rect x="20" y="10" width="8" height="8" rx="1.5"/><path d="M34 10l8 8M42 10l-8 8"/></g></svg>
+      <rect y="28" width="100%" height="100%" fill="#14111f"/><rect x="14" y="42" width="70" height="6" rx="3" fill="#16a34a" opacity=".85"/><rect x="22" y="55" width="150" height="6" rx="3" fill="#e9e5f7" opacity=".85"/><rect x="22" y="68" width="120" height="6" rx="3" fill="#9890b2" opacity=".85"/><rect x="14" y="81" width="90" height="6" rx="3" fill="#0ea5e9" opacity=".85"/><rect x="22" y="94" width="170" height="6" rx="3" fill="#e9e5f7" opacity=".85"/><rect x="22" y="107" width="60" height="6" rx="3" fill="#d97706" opacity=".85"/><rect x="14" y="120" width="130" height="6" rx="3" fill="#9890b2" opacity=".85"/><rect x="22" y="133" width="100" height="6" rx="3" fill="#16a34a" opacity=".85"/><rect x="22" y="146" width="150" height="6" rx="3" fill="#e9e5f7" opacity=".85"/><rect x="14" y="159" width="80" height="6" rx="3" fill="#9890b2" opacity=".85"/>
+      <rect width="100%" height="100%" rx="10" fill="none" stroke="#0ea5e9" stroke-opacity=".55" stroke-width="1.5"/>
+    </svg></g>
+<g>
+  <animateTransform attributeName="transform" type="translate" dur="12s" repeatCount="indefinite" keyTimes="0;0.0667;0.0833;0.1583;0.2250;0.2750;0.3417;0.4167;0.4667;0.5333;0.6083;0.6583;0.7500;1" values="1140 208;1058 102;1058 102;998 142;948 172;948 172;1078 162;1128 122;1138 106;1048 202;1118 242;1138 262.0;1170 368;1140 208" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1"/>
+  <circle r="13" fill="#7c4dff" fill-opacity=".18" stroke="#7c4dff" stroke-opacity=".7" opacity="0"><animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.0833;0.0875;0.275;0.2792;0.3375;0.3417;0.4667;0.4708;0.5292;0.5333;0.6583;0.6625;1" values="0;0;1;1;0;0;1;1;0;0;1;1;0;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></circle>
+  <path d="M0 0v17.5l4.4-4.2 2.9 6.6 2.9-1.3-2.9-6.5h6.4z" fill="#17122b" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round"/>
+</g>
+</svg>

@@ -110,7 +110,7 @@ const CHAPTERS: Chapter[] = [
   { key: "Token", title: "Token 与成本", text: "用量曲线和热力图按年、月、周、日切换。缓存命中和 TPS 在对话顶栏随时展开。", op: 'query("usage.get")', img: "shot-tokens-00761", focusX: .5, focusY: .72 },
   { key: "模型", title: "模型与角色", text: "@default、@plan、@task 各配各的模型和思考强度。上游支持 60+ 供应商，统一收在一页。", op: 'query("models.get")', img: "shot-models-00437", focusX: .4, focusY: .4 },
 ];
-const stillUrl = (name: string) => `/media/still/${name}.webp`;
+const stillUrl = (name: string) => `../media/still/${name}.webp`;
 
 function buildChapters(): HTMLElement[] {
   const host = $("resolve-chapters");
@@ -616,14 +616,14 @@ function initFeatures(): void {
     note.textContent = f.note;
     if (narrow()) tabs[i]!.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
     video.pause();
-    video.poster = `/media/poster/${f.clip}.webp`;
-    video.src = `/media/clip/${f.clip}.mp4`;
+    video.poster = `../media/poster/${f.clip}.webp`;
+    video.src = `../media/clip/${f.clip}.mp4`;
     if (r) {
       tl?.kill();
       let tex = posters.get(i);
       if (!tex) {
         try {
-          const bmp = await loadBitmap(`/media/poster/${f.clip}.webp`);
+          const bmp = await loadBitmap(`../media/poster/${f.clip}.webp`);
           tex = r.upload(bmp);
           bmp.close();
           posters.set(i, tex);

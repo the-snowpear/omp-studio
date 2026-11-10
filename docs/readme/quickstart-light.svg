@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="270" viewBox="0 0 920 270" font-family="'Cascadia Code','JetBrains Mono','SF Mono',Consolas,'Microsoft YaHei',monospace">
+<title>从源码运行 OMP Studio</title>
+<defs>
+  <linearGradient id="tlbrand" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#7c4dff"/>
+    <stop offset=".55" stop-color="#d946ef"/>
+    <stop offset="1" stop-color="#0ea5e9"/>
+  </linearGradient>
+  <linearGradient id="tlbrandShift" x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+    <stop offset="0" stop-color="#7c4dff"/>
+    <stop offset=".35" stop-color="#d946ef"/>
+    <stop offset=".7" stop-color="#0ea5e9"/>
+    <stop offset="1" stop-color="#7c4dff"/>
+    <animateTransform attributeName="gradientTransform" type="translate" values="-1 0;0 0" dur="6s" repeatCount="indefinite"/>
+  </linearGradient>
+  <pattern id="tldots" width="22" height="22" patternUnits="userSpaceOnUse">
+    <circle cx="1.5" cy="1.5" r="1.2" fill="#7c4dff" opacity="0.24"/>
+  </pattern>
+  <filter id="tlsoft" x="-20%" y="-20%" width="140%" height="160%">
+    <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#3b2a7a" flood-opacity="0.16"/>
+  </filter>
+  <filter id="tlblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="40"/></filter></defs>
+<rect x="8" y="6" width="904" height="254" rx="14" fill="#14111f" stroke="#2a2340"/>
+<rect x="8" y="6" width="904" height="38" rx="14" fill="#ffffff" fill-opacity=".04"/>
+<circle cx="32" cy="25" r="6" fill="#ff5f57"/><circle cx="52" cy="25" r="6" fill="#febc2e"/><circle cx="72" cy="25" r="6" fill="#28c840"/>
+<text x="460.0" y="30" text-anchor="middle" font-size="12.5" fill="#8e86a8" font-family="'Segoe UI Variable Display','Segoe UI',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif">omp-studio — Terminal</text>
+<rect x="8" y="44" width="904" height="1" fill="#ffffff" fill-opacity=".07"/>
+<clipPath id="tlc0"><rect x="58" y="64" height="26" width="0"><animate attributeName="width" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.0429;0.2904;0.96;1" values="0;0;658.65;658.65;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect></clipPath>
+<g opacity="0"><animate attributeName="opacity" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.0419;0.0429;0.96;1" values="0;0;1;1;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+<text x="34" y="82" font-size="14" font-weight="700" fill="#a78bfa">$</text></g>
+<text x="58" y="82" font-size="14" fill="#e9e5f7" clip-path="url(#tlc0)" xml:space="preserve">git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git</text><clipPath id="tlc1"><rect x="58" y="94" height="26" width="0"><animate attributeName="width" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.3296;0.4196;0.96;1" values="0;0;244.59999999999997;244.59999999999997;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect></clipPath>
+<g opacity="0"><animate attributeName="opacity" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.3286;0.3296;0.96;1" values="0;0;1;1;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+<text x="34" y="112" font-size="14" font-weight="700" fill="#a78bfa">$</text></g>
+<text x="58" y="112" font-size="14" fill="#e9e5f7" clip-path="url(#tlc1)" xml:space="preserve">cd omp-studio &amp;&amp; npm install</text><clipPath id="tlc2"><rect x="58" y="124" height="26" width="0"><animate attributeName="width" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.4589;0.5393;0.96;1" values="0;0;219.24999999999997;219.24999999999997;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect></clipPath>
+<g opacity="0"><animate attributeName="opacity" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.4579;0.4589;0.96;1" values="0;0;1;1;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+<text x="34" y="142" font-size="14" font-weight="700" fill="#a78bfa">$</text></g>
+<text x="58" y="142" font-size="14" fill="#e9e5f7" clip-path="url(#tlc2)" xml:space="preserve">npm run omp:overlay:apply</text><clipPath id="tlc3"><rect x="58" y="154" height="26" width="0"><animate attributeName="width" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.5786;0.6268;0.96;1" values="0;0;134.75;134.75;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect></clipPath>
+<g opacity="0"><animate attributeName="opacity" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.5776;0.5786;0.96;1" values="0;0;1;1;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+<text x="34" y="172" font-size="14" font-weight="700" fill="#a78bfa">$</text></g>
+<text x="58" y="172" font-size="14" fill="#e9e5f7" clip-path="url(#tlc3)" xml:space="preserve">npm run preview</text><clipPath id="tlc4"><rect x="58" y="184" height="26" width="0"><animate attributeName="width" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.6661;0.6839;0.96;1" values="0;0;481.19999999999993;481.19999999999993;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect></clipPath>
+<g opacity="0"><animate attributeName="opacity" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.6651;0.6661;0.96;1" values="0;0;1;1;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" />
+<text x="34" y="202" font-size="14" font-weight="700" fill="#16a34a">✓</text></g>
+<text x="58" y="202" font-size="14" fill="#16a34a" clip-path="url(#tlc4)" xml:space="preserve">Electron 工作台已启动  ·  拖动对话顶栏，开始摆放你的窗口</text><rect x="539.1999999999999" y="189" width="8" height="16" fill="#a78bfa" opacity="0"><animate attributeName="opacity" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.6839;0.6849;0.96;1" values="0;0;1;1;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /><animate attributeName="fill-opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/></rect>
+</svg>

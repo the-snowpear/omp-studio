@@ -1,3 +1,4 @@
+import { SEARCH_CREDENTIAL_KINDS, isSearchCredentialsKind, type SearchCredentialsOperation, type SearchCredentialsResultMap } from "./search-credentials.js";
 import { EXTENSION_LINK_KINDS, type ExtensionLinkOperation, type ExtensionLinkResultMap } from "./extension-links.js";
 import { WEBMCP_KINDS, type WebMcpOperation, type WebMcpResultMap } from "./webmcp.js";
 import { EVALUATION_WORKSPACE_KINDS, isEvaluationWorkspaceKind, type EvaluationWorkspaceOperation, type EvaluationWorkspaceResultMap } from "./evaluation-workspace.js";
@@ -54,6 +55,12 @@ export interface StudioServiceRow {
   exitCode?: number;
   restartCount: number;
   outputBytes: number;
+  /** Agent-declared canonical HTTP(S) preview URL, when this is a web service. */
+  previewUrl?: string;
+  pid?: number;
+  /** Raw native owner: normally a session ID, or a legacy agent ID. */
+  ownerId?: string;
+  /** Compatibility alias for ownerId; not necessarily an agent ID. */
   ownerAgentId?: string;
   mode: "session" | "persist" | "detached";
 }
@@ -80,6 +87,7 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
+ | SearchCredentialsOperation
  | ExtensionLinkOperation
  | WebMcpOperation
  | EvaluationWorkspaceOperation
@@ -128,7 +136,7 @@ export type WorkbenchOperation =
   | { kind: "runtime.models.describe"; selector: string }
  | { kind: "runtime.models.list"; modelKind?: string; cursor?: string; limit?: number };
 
-export interface WorkbenchResultMap extends ExtensionLinkResultMap, WebMcpResultMap, EvaluationWorkspaceResultMap, AdvisorConfigResultMap, LocalResourceResultMap, DictationResultMap,SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceCommand["kind"]>, BrowserObservationResultMap, StudioIdaResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap, RuntimeFeatureResultMap {
+export interface WorkbenchResultMap extends SearchCredentialsResultMap, ExtensionLinkResultMap, WebMcpResultMap, EvaluationWorkspaceResultMap, AdvisorConfigResultMap, LocalResourceResultMap, DictationResultMap,SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceCommand["kind"]>, BrowserObservationResultMap, StudioIdaResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap, RuntimeFeatureResultMap {
   "accounts.status": AccountStatusResult;
  "accounts.status.details": AccountStatusResult;
   "accounts.logout": { loggedOut: true };
@@ -144,6 +152,7 @@ export interface WorkbenchResultMap extends ExtensionLinkResultMap, WebMcpResult
  "runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
 export const WORKBENCH_OPERATION_KINDS = [
+ ...SEARCH_CREDENTIAL_KINDS,
  ...EXTENSION_LINK_KINDS, ...WEBMCP_KINDS,
  ...EVALUATION_WORKSPACE_KINDS,...ADVISOR_CONFIG_KINDS, ...LOCAL_RESOURCE_KINDS,...DICTATION_KINDS,...SESSION_GUI_KINDS,
 ...SESSION_TITLES_KINDS,
@@ -161,6 +170,7 @@ export const WORKBENCH_OPERATION_KINDS = [
 ...IDA_OPERATION_KINDS,
 ...SESSION_OPTIONS_KINDS,...SKILLSHARE_OPERATION_KINDS, ...LIVE_AUDIO_OPERATION_KINDS, ...MEDIA_OPERATION_KINDS, ...BENCHMARK_OPERATION_KINDS, ...RUNTIME_CATALOG_OPERATION_KINDS, ...JUDGMENT_OPERATION_KINDS, ...ANNOTATION_OPERATION_KINDS, ...RUNTIME_FEATURE_KINDS, "accounts.status", "accounts.status.details", "accounts.logout", "services.list", "services.start", "services.stop", "services.restart", "services.mode.set", "services.send", "services.logs", "tokens.count", "runtime.models.list", "runtime.models.describe"] as const;
 export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
+ "search.credentials.list",
  "evaluation.runtime.plan", "evaluation.runtime.read", "evaluation.runtime.rows", "evaluation.runtime.report", "evaluation.runtime.patch", "evaluation.runtime.control",...SESSION_GUI_READ_KINDS,
 "dictation.inspect",
 "prediction.status","prediction.prepare","prediction.release",
@@ -223,6 +233,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
   if (!value || typeof value !== "object") throw new Error("Invalid workbench operation");
   const kind = (value as Record<string, unknown>).kind;
   if (typeof kind !== "string" || !isWorkbenchOperationKind(kind)) throw new Error("Unknown workbench operation");
+ if (isSearchCredentialsKind(kind)) return;
   if (kind === "extensions.links.activate" || kind === "browser.webmcp.invoke") return;
  if (isComputerWorkspaceCommand(kind)) return;
   if (isEvaluationWorkspaceKind(kind)) return;
@@ -258,7 +269,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
   if (isRuntimeCatalogOperationKind(kind)) { validateRuntimeCatalogOperation(value); return; }
   if (isJudgmentOperationKind(kind)) { validateJudgmentOperation(value); return; }
   if (isRuntimeFeatureKind(kind)) { validateRuntimeFeatureOperation(value); return; }
-  const fields: Record<Exclude<WorkbenchOperation["kind"], ExtensionLinkOperation["kind"] | WebMcpOperation["kind"] | EvaluationWorkspaceOperation["kind"] | AdvisorConfigOperation["kind"] | LocalResourceOperation["kind"] | DictationOperation["kind"] | SessionGuiOperation["kind"] | SessionTitlesOperation["kind"] | PredictionChannelOperation["kind"] | MaintenanceOperation["kind"] | ArchiveOperation["kind"] | AgentModelOperation["kind"] | SessionRestoreOperation["kind"] | RuntimeQueueOperation["kind"] | NativePreferenceOperation["kind"] | FeatureSettingsOperation["kind"] | SessionPortabilityOperation["kind"] | SessionCompressionOperation["kind"] | SessionWorktreeOperation["kind"] | NativePlanReviewOperation["kind"] | RatchetOperation["kind"] | ComputerWorkspaceCommand["kind"] | ComputerObservationOperation["kind"] | BrowserObservationOperation["kind"] | StudioIdaOperation["kind"] | SessionOptionsOperation["kind"] | SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"] | RuntimeFeatureOperation["kind"]>, readonly string[]> = {
+  const fields: Record<Exclude<WorkbenchOperation["kind"], SearchCredentialsOperation["kind"] | ExtensionLinkOperation["kind"] | WebMcpOperation["kind"] | EvaluationWorkspaceOperation["kind"] | AdvisorConfigOperation["kind"] | LocalResourceOperation["kind"] | DictationOperation["kind"] | SessionGuiOperation["kind"] | SessionTitlesOperation["kind"] | PredictionChannelOperation["kind"] | MaintenanceOperation["kind"] | ArchiveOperation["kind"] | AgentModelOperation["kind"] | SessionRestoreOperation["kind"] | RuntimeQueueOperation["kind"] | NativePreferenceOperation["kind"] | FeatureSettingsOperation["kind"] | SessionPortabilityOperation["kind"] | SessionCompressionOperation["kind"] | SessionWorktreeOperation["kind"] | NativePlanReviewOperation["kind"] | RatchetOperation["kind"] | ComputerWorkspaceCommand["kind"] | ComputerObservationOperation["kind"] | BrowserObservationOperation["kind"] | StudioIdaOperation["kind"] | SessionOptionsOperation["kind"] | SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"] | RuntimeFeatureOperation["kind"]>, readonly string[]> = {
     "accounts.status": ["refresh"],
  "accounts.status.details": ["refresh"],
     "accounts.logout": ["sessionId", "accountId"], "services.list": [], "services.start": ["spec"], "services.stop": ["name", "instanceId"], "services.restart": ["name", "instanceId"],
@@ -290,6 +301,7 @@ function serviceRow(value: unknown): void {
   if (row.ownerAgentId !== undefined) text(row.ownerAgentId);
 }
 export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value: unknown): void {
+ if (isSearchCredentialsKind(kind)) return;
  if (kind === "extensions.links.activate" || kind === "browser.webmcp.invoke") return;
  if (isComputerWorkspaceCommand(kind)) return;
  if (isEvaluationWorkspaceKind(kind)) return;

@@ -3,6 +3,7 @@ import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import { utf8ByteLength } from "@omp-studio/client-contract";
 import { TerminalGraphicsDecoder, type TerminalGraphic } from "./terminalGraphics";
+import type { TerminalCommand } from "../../desktop/src/terminal-shared";
 
 type Api = NonNullable<typeof globalThis.ompStudioTerminal>;
 export interface TerminalSession {
@@ -156,18 +157,18 @@ export class TerminalSessions {
   snapshot = (): TerminalState => this.#state;
   subscribe = (listener: () => void): (() => void) => { this.#listeners.add(listener); return () => { this.#listeners.delete(listener); }; };
 
-  async create(targetId: string | null, workspaceId?: string, sessionId?: string, conversationId?: string): Promise<string> {
+  async create(targetId: string | null, workspaceId?: string, sessionId?: string, conversationId?: string, command?: TerminalCommand): Promise<string> {
     if (!this.api || this.#closed) throw new Error("Terminal is unavailable");
     this.#listen();
     this.#creating++;
     try {
       // `flowControl: true` is the opt-in handshake: Main then pauses the PTY
       // when this store falls behind, and resumes on our ACKs below.
-      const info = await this.api.create({ cols: 80, rows: 24, ...(this.api.ack ? { flowControl: true } : {}), ...(workspaceId ? { workspaceId } : {}), ...(targetId ? { targetId } : {}) });
+      const info = await this.api.create({ cols: 80, rows: 24, ...(this.api.ack ? { flowControl: true } : {}), ...(workspaceId ? { workspaceId } : {}), ...(targetId ? { targetId } : {}), ...(command ? { command } : {}) });
       if (this.#closed) { await this.api.dispose(info.id); throw new Error("Terminal window has closed"); }
       const session: TerminalSession = { ...info, targetId, ...(conversationId ? { conversationId } : {}), status: this.#earlyExits.delete(info.id) ? "ended" : "running", ...(workspaceId ? { workspaceId } : {}), ...(sessionId ? { sessionId } : {}) };
-      this.#publish({ ...this.#state, sessions: [...this.#state.sessions, session] });
       this.activeIds.set(terminalOwnerKey(targetId, workspaceId, conversationId ?? sessionId), info.id);
+      this.#publish({ ...this.#state, sessions: [...this.#state.sessions, session] });
       return info.id;
     } finally {
       this.#creating--;
@@ -391,9 +392,13 @@ export function TerminalSessionsProvider({ children }: { children: ReactNode }) 
   useEffect(() => () => store.close(), [store]);
   return <Context.Provider value={store}>{children}</Context.Provider>;
 }
-export function useTerminalSessions() {
+export function useTerminalStore() {
   const store = useContext(Context);
   if (!store) throw new Error("Terminal sessions need their window provider");
+  return store;
+}
+export function useTerminalSessions() {
+  const store = useTerminalStore();
   const state = useSyncExternalStore(store.subscribe, store.snapshot);
   return { store, ...state };
 }

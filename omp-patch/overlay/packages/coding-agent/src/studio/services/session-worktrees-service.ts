@@ -181,13 +181,25 @@ export class StudioSessionWorktreesService {
 			if (operation.kind === "worktrees.session.resume.list")
 				return {
 					scope,
-					sessions: sessions.slice(0, 200).map(info => ({
-						sessionId: info.id,
-						title: sessionDisplayName(info),
-						modifiedAt: info.modified.toISOString(),
-						currentDirectory: path.resolve(info.cwd) === path.resolve(cwd),
-						...(info.continuationOf ? { continuationOf: info.continuationOf } : {}),
-					})),
+					sessions: sessions.slice(0, 200).map(info => {
+						// Match the native picker's bounded first-prompt and conversation preview.
+						const first = info.firstMessage === "(no messages)" ? "" : info.firstMessage.trim();
+						const rest = info.allMessagesText.startsWith(info.firstMessage)
+							? info.allMessagesText.slice(info.firstMessage.length).trim()
+							: "";
+						return {
+							sessionId: info.id,
+							title: sessionDisplayName(info),
+							modifiedAt: info.modified.toISOString(),
+							currentDirectory: path.resolve(info.cwd) === path.resolve(cwd),
+							directoryName: path.basename(info.cwd),
+							messageCount: info.messageCount,
+							...(info.status ? { status: info.status } : {}),
+							...(first ? { firstMessage: first.length > 1200 ? `${first.slice(0, 1200)}…` : first } : {}),
+							...(rest ? { conversationExcerpt: rest.length > 1200 ? `…${rest.slice(-1200)}` : rest } : {}),
+							...(info.continuationOf ? { continuationOf: info.continuationOf } : {}),
+						};
+					}),
 					truncated: sessions.length > 200,
 				};
 			const selected = sessions.find(info => info.id === operation.targetSessionId);

@@ -14,3 +14,40 @@
 .token-counter-results th { color: var(--text-3); font-weight: var(--fw-medium); }
 .token-counter-results td { font-family: var(--font-mono); }
 .token-counter-results :is(th, td):last-child { text-align: right; }
+
+/* Wide (TOKEN_COUNTER_WIDE_MIN): text on the left, results on the right. */
+.token-counter.is-wide { display: flex; flex-direction: column; align-items: center; }
+.token-counter.is-wide > * { box-sizing: border-box; width: min(100%, 1180px); }
+.token-counter.is-wide .token-counter-header { padding: clamp(20px, 6vh, 56px) 24px 12px; font-size: var(--fs-14); }
+.token-counter.is-wide .token-counter-body {
+  flex: 1 1 0;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 12px 24px;
+  padding: 0 24px 24px;
+}
+.token-counter.is-wide .token-counter-body > * { grid-column: 1; min-width: 0; }
+.token-counter.is-wide .token-counter-help { font-size: var(--fs-11); }
+.token-counter.is-wide .token-counter-input { height: 100%; min-height: 240px; max-height: none; resize: none; padding: 12px 14px; font-size: var(--fs-12); }
+.token-counter.is-wide .token-counter-actions { font-size: var(--fs-11); }
+.token-counter.is-wide :is(.token-counter-result, .token-counter-empty) {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  align-self: start;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--bg);
+}
+.token-counter.is-wide .token-counter-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 20px; text-align: center; line-height: 1.6; }
+.token-counter.is-wide .token-counter-empty .icon { width: 22px; height: 22px; color: var(--text-faint); }
+.token-counter-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.token-counter-stats > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface); }
+.token-counter-stats strong { color: var(--text); font-size: var(--fs-16); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.token-counter-stats span { color: var(--text-3); font-size: var(--fs-11); }
+.token-counter.is-wide .token-counter-results { font-size: var(--fs-12); }
+.token-counter.is-wide .token-counter-results :is(th, td) { padding: 8px 0; }
+.token-counter.is-wide .token-counter-results td.token-counter-bar { width: 42%; padding-inline: 12px; }
+.token-counter-bar > i { display: block; height: 6px; border-radius: var(--r-full); background: var(--accent); opacity: 0.7; }

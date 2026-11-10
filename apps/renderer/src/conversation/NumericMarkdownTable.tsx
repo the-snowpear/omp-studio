@@ -4,6 +4,7 @@ import { useI18n } from "../i18n";
 import { graphicLeasePool } from "../graphics/graphic-pool";
 import type { NumericTableData } from "../graphics/native-table-chart";
 import { SvgFigureImage } from "../graphics/SvgFigureImage";
+import { afterPreviewScroll, usePreviewVisibility } from "../graphics/previewActivity";
 function content(node: ElementContent): string {
   return node.type === "text"
     ? node.value
@@ -53,27 +54,14 @@ export function NumericMarkdownTable({
   const { resolvedLanguage } = useI18n(),
     zh = resolvedLanguage === "zh",
     host = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false),
-    [open, setOpen] = useState(true),
+  const visible = usePreviewVisibility(host, true);
+  const [open, setOpen] = useState(true),
     [figure, setFigure] = useState<{ svg: string; alt: string }>(),
     [error, setError] = useState("");
   useEffect(() => {
-    if (!host.current) return;
-    if (typeof IntersectionObserver === "undefined") {
-      setVisible(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (rows) => setVisible(rows.some((row) => row.isIntersecting)),
-      { rootMargin: "100px" },
-    );
-    observer.observe(host.current);
-    return () => observer.disconnect();
-  }, []);
-  useEffect(() => {
     setError("");
     setFigure(undefined);
-    if (streaming || !visible || !open || typeof Worker === "undefined") return;
+    if (streaming || !visible || typeof Worker === "undefined") return;
     let data: NumericTableData | undefined;
     try {
       data = tableData(node);
@@ -87,6 +75,7 @@ export function NumericMarkdownTable({
       worker: Worker | undefined,
       timer: number | undefined,
       release = () => {};
+    let cancelCommit = () => {};
     const fail = (message: string) => {
       failed = true;
       if (current) setError(message);
@@ -108,10 +97,11 @@ export function NumericMarkdownTable({
               error?: string;
             }>,
           ) => {
-            if (current) {
+            cancelCommit = afterPreviewScroll(host.current!, () => {
+              if (!current) return;
               if (event.data.ok) setFigure(event.data.figure);
               else setError(event.data.error ?? "Chart unavailable");
-            }
+            });
             worker?.terminate();
             clearTimeout(timer);
             release();
@@ -138,11 +128,12 @@ export function NumericMarkdownTable({
     }
     return () => {
       current = false;
+      cancelCommit();
       worker?.terminate();
       clearTimeout(timer);
       release();
     };
-  }, [node, streaming, visible, open, zh]);
+  }, [node, streaming, visible, zh]);
   return (
     <div ref={host}>
       <div className="md-table-wrap">

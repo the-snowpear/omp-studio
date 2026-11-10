@@ -19,7 +19,9 @@ const TRANSITIONS: Readonly<Record<LedgerStatus, ReadonlySet<LedgerStatus>>> = {
   completed: new Set(),
   failed: new Set(),
   rejected: new Set(),
-  outcome_unknown: new Set(),
+  // Loss fences replay, but is not proof of an actual Runtime outcome. A late
+  // terminal receipt may settle it; an accepted receipt must never reopen it.
+  outcome_unknown: new Set(["completed", "failed", "rejected"]),
 };
 
 /**
@@ -126,6 +128,12 @@ export class CommandLedger {
       ...(options.errorMessage === undefined ? {} : { errorMessage: options.errorMessage }),
       ...(TERMINAL.has(status) ? { terminalAt: this.now() } : {}),
     };
+    if (current.status === "outcome_unknown") {
+      // Replace the loss diagnosis with the actual receipt, including success
+      // or a failure that carries no message. Never retain OUTCOME_UNKNOWN.
+      if (options.errorCode === undefined) delete next.errorCode;
+      if (options.errorMessage === undefined) delete next.errorMessage;
+    }
     // Terminal rows move to the end of insertion order so that, among terminal
     // rows, iteration order *is* terminalization order. `#evictTerminal` drops
     // from the front, which therefore drops the longest-settled row and never
@@ -183,14 +191,22 @@ export class CommandLedger {
       if (this.#evictedRequestIds.has(receipt.requestId)) return undefined;
       throw new Error(`Unknown request id ${receipt.requestId}`);
     }
-    if (receipt.commandId !== undefined && receipt.commandId !== current.commandId) {
-      current = this.#rebindCommandId(current, receipt.commandId);
+    if (receipt.runtimeEpoch !== current.runtimeEpoch) {
+      throw new Error(`Receipt runtime epoch mismatch for request ${receipt.requestId}`);
+    }
+    if (receipt.commandId !== undefined && receipt.commandId !== current.commandId && current.commandId !== current.requestId) {
+      throw new Error(`Receipt command id mismatch for request ${receipt.requestId}`);
     }
     if (TERMINAL.has(current.status)) {
-      if (current.status !== receipt.status) {
+      if (current.status === receipt.status) return current;
+      if (current.status !== "outcome_unknown" || !TRANSITIONS.outcome_unknown.has(receipt.status)) {
         throw new Error(`Conflicting terminal receipt ${current.status} -> ${receipt.status}`);
       }
-      return current;
+    }
+    // Only the request-id placeholder may acquire a Runtime command id. Check
+    // identity and outcome first so a conflicting receipt cannot mutate the row.
+    if (receipt.commandId !== undefined && receipt.commandId !== current.commandId) {
+      current = this.#rebindCommandId(current, receipt.commandId);
     }
     if (receipt.status === "accepted" && current.status === "accepted") return current;
     if (receipt.status === "completed" && current.status === "requested") {

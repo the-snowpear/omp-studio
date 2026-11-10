@@ -42,35 +42,41 @@ function setup(): { store: DockStore; storage: MemoryStorage } {
 }
 
 describe("dock persistence and session scope", () => {
-  it("centers and dims the first context viewer, then restores its last location without dimming", () => {
+  it.each(["context-viewer", "annotations"] as const)("centers and dims %s again after closing, including after a restart", panel => {
     const { store, storage } = setup();
-    store.dispatch({ type: "open", panel: "context-viewer" });
-    const first = layout(store).floats.find(group => group.panels.includes("context-viewer"))!;
+    store.dispatch({ type: "open", panel });
+    const first = layout(store).floats.find(group => group.panels.includes(panel))!;
+    const centered = { ...first.rect };
     expect(first.rect.width).toBeGreaterThan(0);
-    expect(store.getSnapshot().modalPanel).toBe("context-viewer");
+    expect(store.getSnapshot().modalPanel).toBe(panel);
     const rect = { x: 30, y: 40, width: 500, height: 400 };
     store.dispatch({ type: "float", groupId: first.id, rect });
-    expect(store.getSnapshot().modalPanel).toBe("context-viewer");
-    store.dispatch({ type: "hide", panels: ["context-viewer"] });
+    expect(store.getSnapshot().modalPanel).toBe(panel);
+    store.endModalFocus(panel);
+    store.dispatch({ type: "open", panel });
+    expect(layout(store).floats.find(group => group.panels.includes(panel))?.rect).toEqual(rect);
     expect(store.getSnapshot().modalPanel).toBeNull();
-    store.dispatch({ type: "open", panel: "context-viewer" });
-    expect(layout(store).floats.find(group => group.panels.includes("context-viewer"))?.rect).toEqual(rect);
+    store.dispatch({ type: "hide", panels: [panel] });
     expect(store.getSnapshot().modalPanel).toBeNull();
+    store.dispatch({ type: "open", panel });
+    expect(layout(store).floats.find(group => group.panels.includes(panel))?.rect).toEqual(centered);
+    expect(store.getSnapshot().modalPanel).toBe(panel);
     store.flush();
     const restored = new DockStore(storage);
     restored.switchScope(a, false);
     expect(restored.getSnapshot().modalPanel).toBeNull();
-    restored.dispatch({ type: "hide", panels: ["context-viewer"] });
-    restored.dispatch({ type: "open", panel: "context-viewer" });
-    expect(restored.getSnapshot().modalPanel).toBeNull();
+    restored.dispatch({ type: "hide", panels: [panel] });
+    restored.dispatch({ type: "open", panel });
+    expect(layout(restored).floats.find(group => group.panels.includes(panel))?.rect).toEqual(centered);
+    expect(restored.getSnapshot().modalPanel).toBe(panel);
   });
 
-  it("removes the context viewer mask on docking, minimizing or pinning", () => {
+  it.each(["context-viewer", "annotations"] as const)("removes the %s mask on docking, minimizing or pinning", panel => {
     for (const action of ["dock", "minimize", "pin"] as const) {
       const { store } = setup();
-      store.dispatch({ type: "open", panel: "context-viewer" });
-      const id = layout(store).floats.find(group => group.panels.includes("context-viewer"))!.id;
-      if (action === "dock") store.dispatch({ type: "move", panels: ["context-viewer"], target: { region: "right" } });
+      store.dispatch({ type: "open", panel });
+      const id = layout(store).floats.find(group => group.panels.includes(panel))!.id;
+      if (action === "dock") store.dispatch({ type: "move", panels: [panel], target: { region: "right" } });
       if (action === "minimize") store.dispatch({ type: "float", groupId: id, minimized: true });
       if (action === "pin") store.setPin(id, "application");
       expect(store.getSnapshot().modalPanel).toBeNull();
@@ -148,6 +154,7 @@ describe("dock persistence and session scope", () => {
 
   it("has 20 undo entries per scope, excludes browsing/focus, and persists undo without saving history", () => {
     const { store, storage } = setup();
+    openGit(store);
     for (let index = 1; index <= 25; index++) store.dispatch({ type: "resize", region: "left", size: 272 + index });
     store.dispatch({ type: "activate", groupId: "right-main", panel: "git" });
     store.dispatch({ type: "raise", groupId: "not-a-float" });
@@ -178,7 +185,10 @@ describe("dock persistence and session scope", () => {
 
   it("preserves tab selection and float raising without offering an undo step", () => {
     const { store, storage } = setup();
-    store.dispatch({ type: "activate", groupId: "right-main", panel: "git" });
+    store.updatePreferences({ appDefault: "debug" });
+    store.switchScope(b, false);
+    storage.writes = [];
+    store.dispatch({ type: "activate", groupId: "right-changes", panel: "browser" });
     expect(store.getSnapshot().canUndo).toBe(false);
     store.flush();
     expect(storage.writes).toHaveLength(1);
@@ -413,6 +423,19 @@ describe("dock presets and preview", () => {
 });
 
 describe("shared dock preferences", () => {
+  it("drops released conversation handles without deleting their saved layout", () => {
+    const owner = new DockStore(null), first = owner.fork(a);
+    first.dispatch({ type: "hide", panels: ["files"] });
+    const saved = layout(first);
+    const previousSnapshot = first.getSnapshot();
+    first.dispose(); first.dispose();
+    owner.updatePreferences({ locked: true });
+    expect(first.getSnapshot()).toBe(previousSnapshot);
+    const reopened = owner.fork(a);
+    expect(layout(reopened)).toEqual(saved);
+    expect(reopened.getSnapshot().preferences.locked).toBe(true);
+    reopened.dispose();
+  });
   it("updates snapping and locking across conversation handles while keeping demo preferences separate", () => {
     const owner = new DockStore(null), first = owner.fork(a), second = owner.fork(b), demo = owner.fork(a, true);
     const changed = vi.fn();
@@ -441,7 +464,7 @@ describe("legacy layout migration", () => {
     const presets = store.getSnapshot().presets.filter(preset => !preset.builtin);
     expect(presets).toHaveLength(2);
     const global = presets.find(preset => preset.name.includes("全局"))!;
-    expect(global.layout).toMatchObject({ left: { visible: false, width: 310, ratio: 0.63, panels: ["files", "agents"] }, right: { visible: true, size: 610, groups: [{ active: "git" }] }, bottom: { visible: true, expanded: true, size: 330, groups: [{ active: "terminal" }] }, cards: { files: { collapsed: true } }, floats: [{ rect: { x: 222, y: 165, width: 680, height: 450 }, minimized: true, panels: ["btw"] }] });
+    expect(global.layout).toMatchObject({ left: { visible: false, width: 310, ratio: 0.63, panels: ["agents", "files"] }, right: { visible: true, size: 610, groups: [{ active: "git" }] }, bottom: { visible: true, expanded: true, size: 330, groups: [{ active: "terminal" }] }, cards: { files: { collapsed: true } }, floats: [{ rect: { x: 222, y: 165, width: 680, height: 450 }, minimized: true, panels: ["btw"] }] });
     const project = presets.find(preset => preset.name.includes("project:sample"))!;
     expect(project.layout.hidden.btw).toMatchObject({ region: "float", rect: { x: 100, y: 140, width: 570, height: 350 } });
     expect(JSON.stringify(project.layout)).not.toContain("project:sample");
@@ -534,7 +557,7 @@ describe("dock storage failures", () => {
     store.dispatch({ type: "move", panels: ["terminal"], target: { region: "left" } });
     const savedA = layout(store);
     store.switchScope(b, false);
-    store.dispatch({ type: "region", region: "right", visible: true });
+    openGit(store);
     const savedB = layout(store);
     store.switchScope(c, false);
     store.dispatch({ type: "card", panel: "files", collapsed: true, height: 320 });
@@ -676,6 +699,7 @@ describe("dock region events", () => {
 describe("dock auto-collapse and history", () => {
   it("undo restores the region a move collapsed, redo collapses it again", () => {
     const { store } = setup();
+    openGit(store);
     const panels = layout(store).right.groups[0]!.panels;
     store.dispatch({ type: "region", region: "right", visible: true });
     const opened = layout(store);
@@ -690,6 +714,7 @@ describe("dock auto-collapse and history", () => {
 
   it("keeps the menu state and the layout in agreement after a hidden empty region", () => {
     const { store } = setup();
+    openGit(store);
     const panels = layout(store).right.groups[0]!.panels;
     store.dispatch({ type: "region", region: "right", visible: true });
     store.dispatch({ type: "hide", panels });
@@ -700,5 +725,46 @@ describe("dock auto-collapse and history", () => {
     expect(layout(store).right).toMatchObject({ visible: true, groups: [] });
     store.dispatch({ type: "region", region: "right", visible: false });
     expect(layout(store).right.visible).toBe(false);
+  });
+});
+
+describe("per-region panel instances", () => {
+  it("opens a second Explorer in another region and keeps the first", () => {
+    const { store } = setup();
+    store.openIn("files", { region: "right" });
+    expect(locatePanel(layout(store), "files")?.region).toBe("left");
+    expect(locatePanel(layout(store), "files@2")?.region).toBe("right");
+    expect(store.getSnapshot().canUndo).toBe(true);
+  });
+
+  it("focusing the region's instance adds no undo step", () => {
+    const { store } = setup();
+    store.openIn("files", { region: "right" });
+    const undo = store.getSnapshot().canUndo;
+    store.openIn("files", { region: "right" });
+    expect(store.getSnapshot().canUndo).toBe(undo);
+  });
+
+  it("undo removes a newly created instance but keeps the canonical tool", () => {
+    const { store } = setup();
+    store.openIn("files", { region: "right" });
+    store.undo();
+    expect(locatePanel(layout(store), "files@2")).toBeUndefined();
+    expect(locatePanel(layout(store), "files")?.region).toBe("left");
+  });
+
+  it("dropping a tool onto a region that already owns it focuses the twin without history", () => {
+    const { store } = setup();
+    store.dispatch({ type: "open", panel: "changes" });
+    store.openIn("files", { region: "right" });
+    const group = layout(store).right.groups[0]!;
+    store.dispatch({ type: "activate", groupId: group.id, panel: "changes" });
+    const undo = store.getSnapshot().canUndo;
+    store.dispatch({ type: "move", panels: ["files@2"], target: { region: "left" } });
+    expect(locatePanel(layout(store), "files@2")?.region).toBe("right");
+    // The drop focuses the region's own Explorer; the twin stays where it was.
+    expect(layout(store).right.groups[0]!.active).toBe("changes");
+    expect(layout(store).cards.files.collapsed).toBe(false);
+    expect(store.getSnapshot().canUndo).toBe(undo);
   });
 });

@@ -77,3 +77,23 @@
 .ji-output { max-height: 280px; overflow: auto; margin: 0; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-2); border-radius: 6px; padding: 8px; }
 .ji-note { font-size: 12px; color: var(--text-3); }
 .ji-error { font-size: 12px; color: var(--red); }
+
+/* The process view is an output reader, not an interactive terminal. */
+.job-inspector.is-process { min-width: 0; }
+.ji-process-command { display: flex; align-items: baseline; gap: .75em; min-width: 0; color: var(--text-2); }
+.ji-process-command > span { flex-shrink: 0; color: var(--text-3); }
+.ji-process-command code { min-width: 0; font-family: var(--font-mono, monospace); font-size: inherit; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.ji-process-output { min-width: 0; overflow: hidden; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; }
+.ji-process-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5em; padding: .5em .75em; border-bottom: 1px solid var(--border); }
+.ji-process-label { font-weight: 600; color: var(--text-2); }
+.ji-process-actions { display: flex; align-items: center; justify-content: flex-end; gap: .5em; margin-left: auto; min-height: 2em; }
+.ji-process-terminal { height: clamp(12em, 34vh, 28em); min-width: 0; overflow: auto; overscroll-behavior: contain; scroll-behavior: auto; padding: .75em; color: var(--text); user-select: text; }
+.ji-process-terminal .ji-output { max-height: none; overflow: visible; border-radius: 0; padding: 0; font-family: var(--font-mono, monospace); line-height: 1.6; background: transparent; }
+.ji-process-terminal .ji-error, .ji-process-terminal .ji-note { margin-bottom: .5em; overflow-wrap: anywhere; }
+.ji-process-terminal:focus-visible, .ji-process-details > summary:focus-visible { outline: 2px solid var(--accent-border); outline-offset: -2px; }
+.ji-process-limit { padding: .5em .75em; border-top: 1px solid var(--border); color: var(--text-3); font-size: 12px; }
+.ji-process-details { min-width: 0; }
+.ji-process-details > summary { padding: .35em 0; cursor: pointer; color: var(--text-2); }
+.ji-process-details > summary:hover { color: var(--text); }
+.ji-process-details .ji-kv { margin: .75em 0 .25em; }
+.ji-process-widget { padding-top: .75em; border-top: 1px solid var(--border); }

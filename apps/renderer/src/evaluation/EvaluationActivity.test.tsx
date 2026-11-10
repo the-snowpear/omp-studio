@@ -4,6 +4,7 @@ import type { ClientEvent, StudioClient } from "@omp-studio/client-contract";
 import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { EvaluationActivity } from "./EvaluationActivity";
+import { ConversationViewContext } from "../conversationWorkspace/Context";
 
 afterEach(() => {
   cleanup();
@@ -32,6 +33,24 @@ function view(client: StudioClient, visible = true) {
     <EvaluationActivity client={client} visible={visible} onOpen={() => {}} />
   </PreviewModeProvider></I18nProvider>;
 }
+
+it("only the active conversation polls the global activity while other views remain mounted", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+  const first = activityClient(), second = activityClient();
+  const pair = (active: number) => <>{[first, second].map((source, index) =>
+    <ConversationViewContext.Provider key={index} value={{ active: index === active } as never}>{view(source.client)}</ConversationViewContext.Provider>,
+  )}</>;
+  const mounted = render(pair(0));
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(first.query).toHaveBeenCalledTimes(2);
+  expect(second.query).not.toHaveBeenCalled();
+  await act(async () => { mounted.rerender(pair(1)); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(first.query).toHaveBeenCalledTimes(2);
+  expect(second.query).toHaveBeenCalledTimes(2);
+  expect(first.listeners.size).toBe(0);
+});
 
 it("coalesces progress received during a slow read and keeps one polling chain", async () => {
   vi.useFakeTimers();

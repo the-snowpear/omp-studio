@@ -29,8 +29,8 @@ afterEach(async () => {
 });
 
 /** 预览数据默认落在已有消息的会话 t1；侧栏第一行是空白新对话 t0。 */
-async function mountPreview() {
-  window.history.replaceState(null, "", "/?preview=1&marks=off");
+async function mountWorkbench(preview = true) {
+  window.history.replaceState(null, "", preview ? "/?preview=1&marks=off" : "/");
   localStorage.setItem(STARTUP_NOTICE_STORAGE_KEY, STARTUP_NOTICE_ID);
   __resetAppSettingsForTests(JSON.stringify({ language: "zh", startupPage: "workbench", rememberLayout: false, restoreLastSession: false }));
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
@@ -54,15 +54,16 @@ async function mountPreview() {
 }
 
 it("hides the whole context strip in a started conversation", async () => {
-  await mountPreview();
+  await mountWorkbench();
   const region = document.querySelector(".composer-region");
   expect(region).not.toBeNull();
   expect(region!.querySelector(".ctx-strip")).toBeNull();
   expect(region!.querySelector(".execution-picker")).toBeNull();
+  expect(document.querySelector(".dock-rail-expanded, .dock-rail-compact")).not.toBeNull();
 });
 
 it("shows the full context strip attached above the composer on a new conversation", async () => {
-  await mountPreview();
+  await mountWorkbench();
   const blank = [...document.querySelectorAll<HTMLElement>(".thread")]
     .find((row) => row.textContent?.includes("新建对话（空白）"));
   expect(blank).toBeTruthy();
@@ -87,4 +88,28 @@ it("shows the full context strip attached above the composer on a new conversati
   const children = [...region!.children];
   expect(children.indexOf(queues!)).toBeLessThan(children.indexOf(strip!));
   expect(children[children.indexOf(strip!) + 1]).toBe(composer);
+  expect(document.querySelector(".dock-rail-expanded, .dock-rail-compact")).toBeNull();
+});
+
+it.each([false, true])("keeps a fresh conversation free of tool cards while typing and restores them on an existing conversation (preview=%s)", async preview => {
+  await mountWorkbench(preview);
+  if (preview) {
+    const blank = [...document.querySelectorAll<HTMLElement>(".thread")].find(row => row.textContent?.includes("新建对话（空白）"));
+    fireEvent.click(blank!);
+  } else {
+    fireEvent.click(document.querySelector(".new-convo-btn")!);
+  }
+  await waitFor(() => expect(document.querySelector(".composer-region > .ctx-strip")).not.toBeNull());
+  expect(document.querySelector(".dock-rail-expanded, .dock-rail-compact")).toBeNull();
+  const editor = document.querySelector<HTMLElement>('.composer [contenteditable="true"]')!;
+  editor.textContent = "新对话草稿";
+  fireEvent.input(editor);
+  expect(document.querySelector(".dock-rail-expanded, .dock-rail-compact")).toBeNull();
+
+  if (preview) {
+    const started = [...document.querySelectorAll<HTMLElement>(".thread")].find(row => row.textContent?.includes("Audit and fix OSS"));
+    fireEvent.click(started!);
+    await waitFor(() => expect(document.querySelector(".dock-rail-expanded, .dock-rail-compact")).not.toBeNull());
+    expect(document.querySelector(".composer-region > .ctx-strip")).toBeNull();
+  }
 });

@@ -299,10 +299,21 @@
      原生滚动条仍在 inline-end（右）侧，只有 minimap 关掉时才需要 Composer 额外扣一次。 */
   --reading-doc-start: calc(var(--reading-gutter) + var(--reading-rail));
   --reading-composer-end: calc(var(--reading-gutter) + var(--reading-scrollbar));
+  --composer-overlap: calc(var(--composer-queues-height, 0px) + var(--sp-10));
 }
 .convo-wrap[data-reading-column] > .convo-scroll {
   min-height: 0;
   min-width: 0;
+}
+/* Scroll behind the floating queue tray, fading only at the input's top edge.
+   Matching tail padding keeps the latest message above the tray when pinned. */
+.convo-wrap[data-reading-column]:not(.is-empty) > .convo-scroll {
+  margin-bottom: calc(-1 * var(--composer-overlap));
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--sp-32)), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--sp-32)), transparent);
+}
+.convo-wrap[data-reading-column]:not(.is-empty) > .convo-scroll > .convo-doc {
+  padding-bottom: calc(var(--sp-32) + var(--composer-overlap));
 }
 /* Anchor restoration belongs to conversationReflow, not a second browser correction. */
 .convo-scroll,
@@ -917,9 +928,14 @@
 .ev-body .md-code-hint { color: var(--text-faint); }
 .ev-body .md-code-err { color: var(--red); }
 .ev-body .md-code-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   border: none;
   background: transparent;
-  padding: 2px 8px;
+  padding: 4px;
   border-radius: var(--r-4);
   font-size: var(--fs-11);
   color: var(--text-faint);
@@ -2212,31 +2228,39 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .new-content-pill {
   pointer-events: auto;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   display: flex; align-items: center; justify-content: center;
-  background: var(--accent-soft);
+  background: var(--surface);
   color: var(--accent);
-  border: none;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-full);
-  box-shadow: var(--shadow-menu);
+  box-shadow:
+    0 6px 18px rgba(15, 17, 26, 0.10),
+    0 1px 4px rgba(15, 17, 26, 0.06);
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
   animation: omp-toast-in var(--dur) var(--ease-out);
 }
-/* 挂在 .composer（position:relative）右上角的「回到最新」：恒定不随对话滚动。
-   整枚悬在输入框上缘之外（36px 高 + 6px 间隙 → top:-44px），不遮输入内容；
-   与 sticky 时代的按钮共用外观与入场动画。 */
-/* 只对 composer 内的直接子元素生效：同名按钮在排队栏头行（qs-head-slot）里是
-   常规流式布局，不能继承这里的绝对定位。 */
-.composer > .new-content-pill.composer-jump-latest {
+:root[data-theme="dark"] .new-content-pill {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.40), 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+/* 主输入区的「回到最新」挂在 .composer-queues（排队托盘 + 输入框组合的上沿）右上方，
+   整枚浮在组合之外：排队托盘出现与否，它都不会压到任何一栏或挤进头行。 */
+.composer-queues > .new-content-pill.composer-jump-latest {
   position: absolute;
-  top: -44px;
-  right: 10px;
+  right: 0;
+  bottom: calc(100% + var(--sp-8));
   z-index: calc(var(--z-scroll-aid) + 1);
 }
+/* 任务进度展开成整宽面板时，右下角是它的「审阅」位；回到最新先让开。 */
+.composer-region:has(> .task-dock.open) > .composer-queues > .new-content-pill.composer-jump-latest {
+  display: none;
+}
 .new-content-pill:hover {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  border-color: var(--accent-border);
   color: var(--accent-hover);
 }
 .new-content-pill:focus-visible { outline-color: var(--accent); }
@@ -2322,6 +2346,12 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   min-width: 0;
   padding-left: var(--reading-doc-start);
   padding-right: var(--reading-composer-end);
+  background: transparent;
+  pointer-events: none;
+}
+/* The empty space around the tray belongs to the conversation beneath it. */
+.composer-region > :not(.task-dock, .composer-queues) {
+  pointer-events: auto;
 }
 .convo-wrap[data-reading-column] > .composer-region > :is(.composer, .composer-queues, .queue-strip) {
   min-width: 0;
@@ -4969,6 +4999,130 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .qs-item:focus-within .qs-editing {
   visibility: hidden;
 }
+/* 计数徽标：替代「×N」，与标题同一行、同一视觉层级下的次要信息。 */
+.qs-count {
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.runtime-queue .qs-count { background: var(--blue-soft); color: var(--blue); }
+
+/* ---------- 主输入区排队卡片 ----------
+   已提交（Runtime）与本地草稿合成一张浮起的白卡片，与输入框同宽、隔 8px 悬在其上方；
+   外观与任务进度胶囊同一家族（白底、细边、柔和投影），两栏之间只有一条发丝线。
+   卡片自身限高滚动，「回到最新」挂在 .composer-queues 上，不受卡片滚动裁切。 */
+.composer-queues {
+  position: relative;
+  /* Include the tray's bottom gap in its measured overlap height. */
+  display: flow-root;
+  max-width: var(--doc-max-w);
+  margin: 0 auto;
+}
+.composer-tray:has(> .queue-strip) {
+  display: flex;
+  pointer-events: auto;
+  flex-direction: column;
+  margin: 0 0 var(--sp-8);
+  max-height: min(28vh, 240px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  box-shadow:
+    0 6px 20px rgba(15, 17, 26, 0.07),
+    0 1px 4px rgba(15, 17, 26, 0.05);
+}
+:root[data-theme="dark"] .composer-tray:has(> .queue-strip) {
+  border-color: var(--border-strong);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+.composer-tray > .queue-strip {
+  max-width: none;
+  margin: 0;
+  padding: 0 var(--sp-12);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.composer-tray > .queue-strip + .queue-strip { border-top: 1px solid var(--border); }
+.composer-tray .qs-head-row {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: auto;
+  margin: 0 calc(-1 * var(--sp-12));
+  align-items: center;
+  background: var(--surface);
+}
+.composer-tray .qs-head {
+  min-height: 34px;
+  gap: var(--sp-8);
+  padding: 0 var(--sp-8) 0 var(--sp-12);
+  border-radius: 0;
+}
+.composer-tray > .queue-strip:first-child .qs-head { border-radius: var(--r-8) var(--r-8) 0 0; }
+.composer-tray > .queue-strip:last-child:not(:has(.qs-list)) .qs-head,
+.composer-tray > .queue-strip.collapsed:last-child .qs-head { border-radius: 0 0 var(--r-8) var(--r-8); }
+.composer-tray > .queue-strip:only-child:not(:has(.qs-list)) .qs-head,
+.composer-tray > .queue-strip.collapsed:only-child .qs-head { border-radius: var(--r-8); }
+.composer-tray .qs-head:hover { background: var(--surface-hover); }
+.composer-tray .qs-head > .icon { color: var(--accent); }
+.composer-tray .runtime-queue .qs-head > .icon { color: var(--blue); }
+.composer-tray .qs-title { color: var(--text); }
+.composer-tray .qs-note {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.composer-tray .qs-toggle {
+  color: var(--text-3);
+  border-radius: var(--r-4);
+}
+.composer-tray .qs-head:hover .qs-toggle { color: var(--text); }
+/* 条目：正文与标题文字左对齐（缩进 = 图标 + 间距），行间不画线，悬停整行浅底。 */
+.composer-tray .qs-list {
+  padding: 0 0 var(--sp-6);
+  gap: 1px;
+}
+.composer-tray .qs-list > .qs-item,
+.composer-tray .runtime-queue .runtime-queue-row > .qs-item {
+  margin: 0 calc(-1 * var(--sp-6));
+  padding: 5px 92px 5px calc(var(--sp-6) + 22px);
+  border: 0;
+  border-radius: var(--r-6);
+}
+.composer-tray .runtime-queue .runtime-queue-row > .qs-item {
+  padding-right: var(--sp-6);
+}
+.composer-tray .qs-list > .qs-item:hover,
+.composer-tray .qs-list > .qs-item:focus-within,
+.composer-tray .runtime-queue .runtime-queue-row > .qs-item:hover,
+.composer-tray .runtime-queue .runtime-queue-row > .qs-item:focus-within {
+  background: var(--surface-hover);
+}
+.composer-tray .qs-list > .qs-item.editing {
+  background: var(--accent-softer);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.composer-tray .qs-status { right: var(--sp-6); }
+.composer-tray .runtime-queue .qs-status { right: auto; }
+.composer-tray .runtime-queue-row + .runtime-queue-row { border-top: 0; }
+.composer-tray .runtime-queue > p {
+  padding: 0 0 var(--sp-6) 22px;
+  font-size: var(--fs-11);
+}
 .composer-bar .pill-btn.queue-edit {
   background: var(--accent-soft);
   color: var(--accent);
@@ -5204,6 +5358,14 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .prob-row .pfile { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-3); margin-left: auto; }
 .prob-at { height: 20px; flex: none; }
+/* Problems and Tests in a wide body: a centred list, so a problem's location and
+   a suite's rerun button stay next to what they belong to. */
+.dock-panel-content:is([data-dock-base="problems"], [data-dock-base="tests"]):not([data-dock-auto-height]) { container: list-panel / inline-size; }
+@container list-panel (min-width: 1000px) {
+  .dock-panel-content:not([data-dock-auto-height]) > .dock-pad { width: min(100%, 1120px); margin-inline: auto; padding-top: var(--sp-16); }
+  .prob-row { min-height: 34px; }
+  .test-row { padding-block: var(--sp-10); }
+}
 
 /* Severity tint. Was an inline style="color:var(--red)" on the icon wrapper,
    which put a token reference in the render string; as a class the stylesheet
@@ -5704,6 +5866,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   height: 100%;
   min-width: 0;
   min-height: 0;
+  container: changes / inline-size;
 }
 .ch-toolbar {
   flex: none;
@@ -5796,21 +5959,21 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
    只染图标、不染文件名：这里 +/− 与 diff 才是主角，整行转色会和「删除」混淆；
    敏感文件靠 data-secret 抢同一档红，形状（key / shield-key）仍独立可辨。
    tri 与系统高对比无需另写规则：--ftype-* 在根元素被覆盖，这里自动跟随。 */
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="code"] { --file-ink: var(--ftype-code); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="markup"] { --file-ink: var(--ftype-markup); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="style"] { --file-ink: var(--ftype-style); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="data"] { --file-ink: var(--ftype-data); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="doc"] { --file-ink: var(--ftype-doc); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="config"] { --file-ink: var(--ftype-config); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="script"] { --file-ink: var(--ftype-script); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="test"] { --file-ink: var(--ftype-test); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="package"] { --file-ink: var(--ftype-package); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="lock"] { --file-ink: var(--ftype-lock); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="image"] { --file-ink: var(--ftype-image); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="secret"] { --file-ink: var(--ftype-secret); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="code"] { --file-ink: var(--ftype-code); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="markup"] { --file-ink: var(--ftype-markup); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="style"] { --file-ink: var(--ftype-style); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="data"] { --file-ink: var(--ftype-data); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="doc"] { --file-ink: var(--ftype-doc); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="config"] { --file-ink: var(--ftype-config); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="script"] { --file-ink: var(--ftype-script); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="test"] { --file-ink: var(--ftype-test); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="package"] { --file-ink: var(--ftype-package); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="lock"] { --file-ink: var(--ftype-lock); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="image"] { --file-ink: var(--ftype-image); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="secret"] { --file-ink: var(--ftype-secret); }
 /* 敏感文件优先于类型色：.npmrc 这类即便归到别的类，图标也必须红。 */
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line)[data-secret] { --file-ink: var(--ftype-secret); }
-:where(.ch-item, .turn-diff-row, .task-dock-file, .git-change-line):is([data-ftype], [data-secret]) :is(.ch-row-icon, .turn-diff-icon, .task-dock-file-icon) {
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-secret] { --file-ink: var(--ftype-secret); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line):is([data-ftype], [data-secret]) :is(.ch-row-icon, .turn-diff-icon, .task-dock-file-icon) {
   color: var(--file-ink);
 }
 .ch-file-meta {
@@ -5890,6 +6053,83 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   flex: 1 0 auto;
   min-width: max-content;
 }
+/* 宽版（ChangesPanel 的 CHANGES_WIDE_MIN）：左侧改动文件列表，右侧单个文件的完整 Diff，
+   像审阅页一样逐个文件看；窄版仍是可展开的手风琴列表。 */
+.changes-panel.is-wide .ch-toolbar { min-height: 44px; padding-inline: var(--sp-16) var(--sp-12); }
+.ch-toolbar-summary {
+  display: inline-flex; align-items: baseline; gap: var(--sp-8);
+  margin-right: var(--sp-8);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+.ch-browser {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: clamp(260px, 24%, 360px) minmax(0, 1fr);
+}
+.ch-browser-list {
+  display: flex; flex-direction: column; gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-8);
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  scrollbar-width: thin;
+}
+.ch-browser-row {
+  position: relative;
+  flex: none;
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-8);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--sp-6) var(--sp-10);
+  border: 0;
+  border-radius: var(--r-6);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ch-browser-row:hover { background: var(--surface-hover); }
+.ch-browser-row.is-active { background: var(--accent-soft); }
+.ch-browser-row.is-active::before {
+  content: "";
+  position: absolute; left: 0; top: 11px; bottom: 11px;
+  width: 2px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+.ch-browser-row:focus-visible { outline: 1.5px solid var(--accent-border); outline-offset: -1px; }
+.ch-browser-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ch-browser-name,
+.ch-browser-dir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-browser-name { color: var(--text); font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.ch-browser-dir { color: var(--text-faint); font-size: var(--fs-11); }
+.ch-browser-row .ch-delta { font-weight: var(--fw-semibold); }
+.ch-browser-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ch-detail-head {
+  flex: none;
+  display: flex; align-items: center; gap: var(--sp-10);
+  min-width: 0;
+  min-height: 48px;
+  padding: var(--sp-8) var(--sp-12) var(--sp-8) var(--sp-16);
+  border-bottom: 1px solid var(--border);
+}
+.ch-detail-head > .ch-row-icon { width: 18px; }
+.ch-detail-head > .ch-row-icon .icon { width: 16px; height: 16px; }
+.ch-detail-title { display: flex; align-items: baseline; gap: var(--sp-8); min-width: 0; }
+.ch-detail-name,
+.ch-detail-dir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-detail-name { flex: none; max-width: 60%; color: var(--text); font-size: var(--fs-14); font-weight: var(--fw-semibold); }
+.ch-detail-dir { min-width: 0; color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-11); }
+.ch-detail-head .ch-delta { font-weight: var(--fw-semibold); }
+.ch-detail-nav { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.ch-detail-position { margin-right: var(--sp-6); color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.ch-browser-detail > .ch-file-diff { flex: 1 1 0; min-height: 0; max-height: none; font-size: var(--fs-12); }
+.ch-browser-detail > .ch-file-diff .ch-file-diff-empty { padding: var(--sp-24) var(--sp-16); }
 @media (prefers-reduced-motion: reduce) {
   .ch-row-chev { transition: none; }
 }

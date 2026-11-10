@@ -23,6 +23,9 @@ import { isTransientStatusNotice } from "./transientStatusNotice";
 import type { SubagentHubTarget } from "./toolMeta";
 import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
 import { useConversationViewLease } from "./conversationViews";
+import { useConversationView } from "../conversationWorkspace/Context";
+import { useExecutionTarget } from "../workspaces/ExecutionTargets";
+import { useConversationReading, type ConversationReadingMemory } from "./useConversationReading";
 
 const FALLBACK_SNAPSHOT: ConversationSnapshot = {
   state: resetConversation(0, null, "unavailable", "当前没有活动会话。"),
@@ -80,6 +83,7 @@ export function ConversationPane({
   jumpToLatestSlot,
   onRetryTurn,
   retryTurnDisabledReason,
+  supplement,
 }: {
   runtimeTools?: RuntimeToolScope | undefined;
   snapshot?: ConversationSnapshot;
@@ -118,9 +122,22 @@ export function ConversationPane({
   /** 链尾失败/中止轮的「重试上一轮」；预览模式不传即不渲染。 */
   onRetryTurn?: () => void;
   retryTurnDisabledReason?: string;
+  /** Display-only content following the transcript, captured with its switch transition. */
+  supplement?: ReactNode;
 }) {
   const localScrollerRef = useRef<HTMLElement | null>(null);
   const scrollerRef = externalScrollerRef ?? localScrollerRef;
+  const conversation = useConversationView();
+  const execution = useExecutionTarget();
+  const [readingMemory] = useState<ConversationReadingMemory | undefined>(() => {
+    if (!conversation) return undefined;
+    let memory = execution.memory.get("conversation-reading") as ConversationReadingMemory | undefined;
+    if (!memory) { memory = {}; execution.memory.set("conversation-reading", memory); }
+    return memory;
+  });
+  const beforeDetach = useMemo(() => conversation ? (save: () => void) =>
+    conversation.store.hosts.onBeforeDetach(conversation.document.id, save) : undefined,
+  [conversation?.store, conversation?.document.id]);
   const liveSnapshot = useSyncExternalStore(
     liveEngine?.subscribe ?? NOOP_SUBSCRIBE,
     liveEngine?.getSnapshot ?? EMPTY_SNAPSHOT,
@@ -239,6 +256,11 @@ export function ConversationPane({
     pin: held?.pin ?? livePin,
     contentKey: held?.contentKey ?? liveContentKey,
   });
+  useConversationReading({ memory: readingMemory,
+    // Wait for the existing two-frame initial layout before restoring the anchor offset.
+    visible: (conversation?.visible ?? true) && (switchState.phase === "idle" || switchState.phase === "revealing"),
+    snapshot: effectiveSnapshot ?? FALLBACK_SNAPSHOT, scrollerRef, follow: scroll.follow,
+    detachFromLatest: scroll.detachFromLatest, loadOlder: onLoadOlder, beforeDetach });
   const prevLoading = useRef(loadingOlder);
   const paintableRef = useRef(paintable);
   paintableRef.current = paintable;
@@ -359,6 +381,7 @@ export function ConversationPane({
           {...(retryTurnDisabledReason === undefined ? {} : { retryTurnDisabledReason })}
         /></RuntimeToolProvider>
       )}
+      {displayRows.length > 0 ? supplement : null}
       {state.hydrateStatus === "resyncing" ? (
         <div className="convo-notice info" role="status">正在同步</div>
       ) : null}

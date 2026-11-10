@@ -84,7 +84,7 @@ function fakeClient(): StudioClient & {
     });
     return () => undefined;
   });
-  return { command, subscribe, bootstrap: vi.fn(), query: vi.fn(), close: vi.fn() } as unknown as StudioClient & {
+  return { command, subscribe, bootstrap: vi.fn(), query: vi.fn(async () => ({ capabilities: [] })), close: vi.fn() } as unknown as StudioClient & {
     readonly command: ReturnType<typeof vi.fn>;
     readonly subscribe: ReturnType<typeof vi.fn>;
   };
@@ -163,7 +163,7 @@ describe("WebSearchPanel", () => {
   });
 
   it("filters the library by credential state and search query", () => {
-    mount();
+    mount(readModel(), fakeClient(), true);
     fireEvent.click(screen.getByRole("button", { name: /未配置/ }));
     expect(screen.getByText(DESC.brave!)).toBeTruthy();
     expect(screen.getByText(DESC.tavily!)).toBeTruthy();
@@ -179,7 +179,7 @@ describe("WebSearchPanel", () => {
     expect(document.querySelector('.wsx-pmark img[src*="brave"]')).toBeTruthy();
   });
 
-  it("opens the credential modal and saves a direct API key (preview mutates the demo read model)", () => {
+  it("opens the credential modal and saves a direct API key locally in preview", async () => {
     const { client, onPreviewSave } = mount(readModel(), fakeClient(), true);
     // Open Brave's modal from its library row.
     fireEvent.click(credButtonInRow(".wsx-pool-row", DESC.brave!));
@@ -193,33 +193,10 @@ describe("WebSearchPanel", () => {
     expect(keyInput).toBeTruthy();
     fireEvent.change(keyInput!, { target: { value: "bsk-test" } });
     fireEvent.click(withinText(dialog, /保存密钥|Save key/));
-    expect(onPreviewSave).toHaveBeenCalledTimes(1);
-    const next = onPreviewSave.mock.calls[0]![0] as WebSearchConfigReadModel;
-    const brave = next.providers.find((p) => p.id === "brave");
-    expect(brave?.hasCredential).toBe(true);
-    expect(brave?.credentialKind).toBe("api-key");
+    await waitFor(() => expect(dialog.textContent).toContain("已就绪"));
+    expect(keyInput!.value).toBe("");
+    expect(onPreviewSave).not.toHaveBeenCalled();
     expect(client.command).not.toHaveBeenCalled();
-  });
-
-  it("saves a direct API key through models.webSearch.credential.set in real mode", async () => {
-    const { client, onSaved } = mount();
-    fireEvent.click(credButtonInRow(".wsx-pool-row", DESC.brave!));
-    const dialog = screen.getByRole("dialog");
-    const keyInput = dialog.querySelector<HTMLInputElement>(".wsx-modal-keyrow input");
-    fireEvent.change(keyInput!, { target: { value: "bsk-live" } });
-    fireEvent.click(withinText(dialog, /保存密钥|Save key/));
-    await waitFor(() => expect(client.command).toHaveBeenCalledWith("models.webSearch.credential.set", { providerId: "brave", apiKey: "bsk-live" }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalled());
-  });
-
-  it("logs out through models.login.logout in real mode", async () => {
-    const { client, onSaved } = mount();
-    // Perplexity sits in the priority chain and already has a credential → modal offers 登出.
-    fireEvent.click(credButtonInRow(".wsx-chain-row", "perplexity"));
-    const dialog = screen.getByRole("dialog");
-    fireEvent.click(withinText(dialog, /登出|Log out/));
-    await waitFor(() => expect(client.command).toHaveBeenCalledWith("models.login.logout", { providerId: "perplexity" }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalled());
   });
 
   it("saves through models.webSearch.set with the full payload (real mode)", async () => {

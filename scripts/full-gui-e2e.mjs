@@ -195,7 +195,8 @@ try{
    await page.getByRole('region',{name:/模型压缩阈值|Model compaction thresholds/}).scrollIntoViewIfNeeded();
    await capture((preview?'preview-':'real-')+'model-compaction');
    await page.locator('#mcTabSubagents').click();
-   await page.getByRole('region',{name:/代理账号池|Agent account pools/}).scrollIntoViewIfNeeded();
+   await page.locator('#mcPanelSubagents .sa-card-main').filter({has:page.getByText('reviewer',{exact:true})}).click();
+   await page.getByRole('region',{name:/账号使用策略|Account rules/}).scrollIntoViewIfNeeded();
   }
   if(route==='settings'){
    await page.locator('#setTab-tasks').click();

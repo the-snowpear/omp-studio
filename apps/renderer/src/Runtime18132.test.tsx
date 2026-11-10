@@ -14,6 +14,8 @@ import { submitAskValue } from "./deck/askContent";
 import type { DeckAskAnswer } from "./deck/types";
 import { selectOption } from "./test/selectOption";
 
+vi.mock("./capabilities/CapabilityEditor", () => ({ CapabilityEditor: ({ label, value, onChange, readOnly }: { label: string; value: string; onChange?: (value: string) => void; readOnly?: boolean }) => <textarea aria-label={label} value={value} readOnly={readOnly} onChange={event => onChange?.(event.target.value)} /> }));
+
 const command = vi.fn(), query = vi.fn();
 const client = { command, query } as unknown as StudioClient;
 beforeEach(() => {
@@ -27,7 +29,7 @@ it("keeps budget and local-file demo edits off the Host", async () => {
   fireEvent.change(screen.getByRole("spinbutton", { name: "费用上限（USD）" }), { target: { value: "1" } });
   fireEvent.click(screen.getByRole("button", { name: "保存预算" }));
   await screen.findByText(/已到上限/);
-  selectOption(screen.getByRole("combobox", { name: "选择本地文件" }), /PLAN.md/);
+  fireEvent.click(screen.getByRole("button", { name: /PLAN.md/ }));
   fireEvent.change(await screen.findByRole("textbox", { name: "本地文件正文" }), { target: { value: "changed draft" } });
   fireEvent.click(screen.getByRole("button", { name: "保存到原文件" }));
   await waitFor(() => expect((screen.getByRole("button", { name: "保存到原文件" }) as HTMLButtonElement).disabled).toBe(true));

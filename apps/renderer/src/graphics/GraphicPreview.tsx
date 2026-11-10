@@ -1,9 +1,11 @@
 import { SvgFigureImage } from "./SvgFigureImage";
 import { graphicLeasePool } from "./graphic-pool";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { GRAPHIC_MAX_BYTES, type GraphicResult } from "./graphic-types";
 import { useI18n } from "../i18n";
 import { LazyMermaid } from "../conversation/LazyMermaid";
+import { afterPreviewScroll, usePreviewVisibility } from "./previewActivity";
+import { graphicResultCache, type GraphicResultLease } from "./graphic-result-cache";
 import "./graphics.css";
 const GraphicScene = lazy(() => import("./GraphicScene"));
 export function GraphicPreview({
@@ -18,27 +20,27 @@ export function GraphicPreview({
   const host = useRef<HTMLDivElement>(null);
   const failure = useRef<(reason: string) => void>(() => {});
   const renderFailure = useCallback((reason: string) => failure.current(reason), []);
-  const [visible, setVisible] = useState(false);
+  const visible = usePreviewVisibility(host);
   const [collapsed, setCollapsed] = useState(false);
   const [result, setResult] = useState<GraphicResult>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [poster, setPoster] = useState<string>();
+  const posterUrl = useRef<string | undefined>(undefined);
+  const capturePoster = useCallback((blob: Blob) => {
+    const next = URL.createObjectURL(blob);
+    if (posterUrl.current) URL.revokeObjectURL(posterUrl.current);
+    posterUrl.current = next;
+    setPoster(next);
+  }, []);
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   useEffect(() => {
-    const node = host.current;
-    if (!node) return;
-    if (typeof IntersectionObserver === "undefined") {
-      setVisible(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => setVisible(entries.some((entry) => entry.isIntersecting)),
-      { rootMargin: "100px" },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
+    setResult(undefined); setPoster(undefined);
+    if (posterUrl.current) URL.revokeObjectURL(posterUrl.current);
+    posterUrl.current = undefined;
+    return () => { if (posterUrl.current) URL.revokeObjectURL(posterUrl.current); };
+  }, [name, src, text]);
   useEffect(() => {
     if (!visible || collapsed) return;
     if (typeof Worker === "undefined") {
@@ -51,10 +53,11 @@ export function GraphicPreview({
     let current: GraphicResult | undefined;
     const abort = new AbortController();
     let worker: Worker | undefined;
+    let cached: GraphicResultLease | undefined;
+    let cancelCommit = () => {};
     let releaseSlot = () => {};
     setBusy(true);
     setError("");
-    setResult(undefined);
     let deadline: ReturnType<typeof setTimeout> | undefined;
     const release = (value: GraphicResult | undefined) => {
       if (value?.kind === "scene")
@@ -67,13 +70,27 @@ export function GraphicPreview({
         setResult(undefined);
       }
       clearTimeout(deadline);
+      cancelCommit();
       abort.abort();
       worker?.terminate();
       releaseSlot();
-      release(current); current = undefined;
+      if (cached) cached.release();
+      else release(current);
+      cached = undefined; current = undefined;
     };
     failure.current = fail;
+    const commit = (result: GraphicResult) => {
+      current = result;
+      cancelCommit = afterPreviewScroll(host.current!, () => {
+        if (!active) return;
+        cached = graphicResultCache.store(name, text ?? src ?? "", result);
+        current = undefined;
+        setResult(cached.result); setBusy(false);
+      });
+    };
     const startWorker = () => {
+      cached = graphicResultCache.read(name, text ?? src ?? "");
+      if (cached) { setResult(cached.result); setBusy(false); return; }
       worker = new Worker(new URL("./graphic.worker.ts", import.meta.url), {
         type: "module",
       });
@@ -94,9 +111,7 @@ export function GraphicPreview({
           fail(event.data.error ?? "Graphic parsing failed");
           return;
         }
-        current = event.data.result;
-        setResult(current);
-        setBusy(false);
+        commit(event.data.result);
       };
       worker.onerror = () =>
         fail(zh ? "图形解析失败" : "Graphic parsing failed");
@@ -169,11 +184,13 @@ export function GraphicPreview({
       if (failure.current === fail) failure.current = () => {};
       abort.abort();
       clearTimeout(deadline);
+      cancelCommit();
       worker?.terminate();
       releaseSlot();
-      release(current);
+      if (cached) cached.release();
+      else release(current);
       setBusy(false);
-      setResult(undefined);
+      setResult(result => result?.kind === "document" && !["wrl", "x3dv"].includes(result.bundle.format) ? result : undefined);
     };
   }, [visible, collapsed, name, src, text, zh]);
   return (
@@ -193,32 +210,32 @@ export function GraphicPreview({
               : "Close preview"}
         </button>
       </div>
-      {busy ? (
-        <p role="status">{zh ? "正在准备预览…" : "Preparing preview…"}</p>
-      ) : null}
-      {error ? (
-        <div role="alert" className="graphic-failure"><strong>{zh ? "无法显示此图形" : "This graphic could not be displayed"}</strong><p>{error}</p></div>
-      ) : null}
+      {!collapsed ? <div className="graphic-view">
+      {poster && !result ? <img className="graphic-poster" src={poster} alt={name} decoding="async" /> : null}
+      {busy && !poster ? <p role="status">{zh ? "正在准备预览…" : "Preparing preview…"}</p> : null}
+      {error ? <div role="alert" className="graphic-failure"><strong>{zh ? "无法显示此图形" : "This graphic could not be displayed"}</strong><p>{error}</p></div> : null}
       {visible && !collapsed && result?.kind === "scene" ? (
         <Suspense fallback={<p>{zh ? "加载预览…" : "Loading preview…"}</p>}>
-          <GraphicScene data={result} onFailure={renderFailure} />
+          <GraphicScene data={result} onFailure={renderFailure} onPoster={capturePoster} />
           {result.warnings.map((warning) => (
             <p className="muted small" key={warning}>
               {warning}
             </p>
           ))}
         </Suspense>
-      ) : visible && !collapsed && result?.kind === "document" ? (
-        <GraphicDocument result={result} onFailure={renderFailure} />
+      ) : result?.kind === "document" && (visible || !["wrl", "x3dv"].includes(result.bundle.format)) ? (
+        <GraphicDocument result={result} onFailure={renderFailure} onPoster={capturePoster} />
       ) : null}
+      </div> : null}
     </div>
   );
 }
-function GraphicDocument({
-  result, onFailure,
+const GraphicDocument = memo(function GraphicDocument({
+  result, onFailure, onPoster,
 }: {
   result: Extract<GraphicResult, { kind: "document" }>;
   onFailure: (reason: string) => void;
+  onPoster: (blob: Blob) => void;
 }) {
   const { bundle } = result;
   const source = new TextDecoder().decode(bundle.bytes);
@@ -232,9 +249,10 @@ function GraphicDocument({
       source={source}
       resources={bundle.resources}
       name={bundle.name}
+      onPoster={onPoster}
     />
   );
-}
+});
 function GraphicParseFailure({ message, onFailure }: { message: string; onFailure: (reason: string) => void }) {
  useEffect(() => onFailure(message), [message, onFailure]);
  return null;
@@ -276,7 +294,7 @@ function NumericChart({ source, onFailure }: { source: string; onFailure: (reaso
       "var(--text-3)",
     ];
     return (
-      <div>
+      <div className="graphic-numeric">
         <svg
           className="graphic-chart"
           viewBox="0 0 600 320"
@@ -333,12 +351,13 @@ function NumericChart({ source, onFailure }: { source: string; onFailure: (reaso
 function X3DPreview({
   source,
   resources,
-  name, onFailure,
+  name, onFailure, onPoster,
 }: {
   onFailure: (reason: string) => void;
   source: string;
   resources: Record<string, Uint8Array>;
   name: string;
+  onPoster: (blob: Blob) => void;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [error, setError] = useState("");
@@ -364,6 +383,8 @@ function X3DPreview({
       } else if (event.data?.kind === "graphic-loaded") {
         clearTimeout(timer);
         setReady(true);
+      } else if (event.data?.kind === "graphic-poster") {
+        onPoster(event.data.blob);
       } else if (event.data?.kind === "graphic-error") {
         clearTimeout(timer);
         onFailure(String(event.data.message).slice(0, 2048));
@@ -375,7 +396,7 @@ function X3DPreview({
       clearTimeout(timer);
       window.removeEventListener("message", receive);
     };
-  }, [source, resources, name, zh, onFailure]);
+  }, [source, resources, name, zh, onFailure, onPoster]);
   return (
     <div className="graphic-scene">
       <iframe

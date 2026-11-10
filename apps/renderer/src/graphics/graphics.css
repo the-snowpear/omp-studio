@@ -1,5 +1,4 @@
 .graphic-preview {
-  min-height: 160px;
   min-width: 0;
   width: 100%;
   margin: var(--sp-12) 0;
@@ -8,6 +7,25 @@
   overflow: hidden;
   background: var(--surface-2);
 }
+.graphic-view {
+  position: relative;
+  height: calc(min(360px, 55vh) + 40px);
+  contain: layout paint;
+  overflow: hidden;
+}
+.graphic-view > .graphic-scene,
+.graphic-view > .graphic-numeric { height: 100%; }
+.graphic-view > p { padding: var(--sp-12); }
+.graphic-poster {
+  display: block;
+  width: 100%;
+  height: calc(100% - 40px);
+  object-fit: contain;
+}
+.graphic-view > .graphic-svg { height: 100%; }
+.graphic-view .mermaid-box { max-height: 100%; box-sizing: border-box; overflow: auto; }
+.graphic-numeric { display: flex; flex-direction: column; }
+.graphic-numeric .graphic-chart { height: calc(100% - 40px); flex: 1; min-height: 0; }
 .graphic-preview > p {
   padding: var(--sp-12);
   overflow-wrap: anywhere;

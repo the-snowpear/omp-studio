@@ -1,4 +1,15 @@
-export interface SessionResumeRow { sessionId: string; title: string; modifiedAt: string; currentDirectory: boolean; continuationOf?: string }
+export interface SessionResumeRow {
+  sessionId: string;
+  title: string;
+  modifiedAt: string;
+  currentDirectory: boolean;
+  continuationOf?: string;
+  directoryName?: string;
+  messageCount?: number;
+  status?: "complete" | "interrupted" | "aborted" | "error" | "pending" | "unknown";
+  firstMessage?: string;
+  conversationExcerpt?: string;
+}
 export interface SessionWorktreeRow { id: string; branch: string; directory: string; sessionId: string; current: boolean; dirty: boolean; hasCommits: boolean; detached: boolean; missing: boolean; reason?: string }
 export interface WorktreeStartPolicy { eligible: boolean; policy: "off" | "ask" | "create"; reason?: string }
 export interface WorktreeRemovalPreview { token: string; expiresAt: number; worktree: SessionWorktreeRow; keepBranch: boolean }

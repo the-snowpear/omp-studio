@@ -1,8 +1,11 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GitFileChange, GitRepositoryReadModel, WorkspaceId } from "@omp-studio/client-contract";
-import { EnvironmentCard } from "./EnvironmentCard";
+import { EnvironmentCard, EnvironmentDockCard } from "./EnvironmentCard";
 import { parentAddress } from "./environmentCardModel";
+import { DockProvider } from "../dock/DockContext";
+import { DockStore } from "../dock/store";
+import { WORKBENCH_PANELS } from "../panels/registry";
 
 afterEach(cleanup);
 
@@ -88,7 +91,7 @@ describe("EnvironmentCard", () => {
     renderCard({ repository: { repository: repositoryWithout(["branch"], { isRepository: false }), loading: false } });
     expect(screen.getByText("非 Git 仓库")).toBeTruthy();
     expect(screen.queryByText("main")).toBeNull();
-    expect(screen.queryByRole("button", { name: /查看未提交变更/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /打开 Changes 改动/ })).toBeNull();
   });
 
   it("shows a detached HEAD and a rebase in flight instead of a stale branch name", () => {
@@ -98,14 +101,14 @@ describe("EnvironmentCard", () => {
     expect(screen.queryByText("↑2")).toBeNull();
   });
 
-  it("opens the project in the file tree and the working tree in Git", () => {
+  it("opens the project in the file tree and the changes row in Changes", () => {
     const onOpenProject = vi.fn();
-    const onOpenGit = vi.fn();
-    renderCard({ onOpenProject, onOpenGit });
+    const onOpenChanges = vi.fn();
+    renderCard({ onOpenProject, onOpenChanges });
     screen.getByRole("button", { name: /omp-studio/ }).click();
-    screen.getByRole("button", { name: /查看未提交变更/ }).click();
+    screen.getByRole("button", { name: /打开 Changes 改动/ }).click();
     expect(onOpenProject).toHaveBeenCalledTimes(1);
-    expect(onOpenGit).toHaveBeenCalledTimes(1);
+    expect(onOpenChanges).toHaveBeenCalledTimes(1);
   });
 
   it("uses the branch row as the Git shortcut, titled with its upstream", () => {
@@ -113,6 +116,21 @@ describe("EnvironmentCard", () => {
     renderCard({ onOpenGit });
     screen.getByRole("button", { name: /上游 origin\/main/ }).click();
     expect(onOpenGit).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the dock wiring's changes row to the Changes panel, not Git", () => {
+    const store = new DockStore(null);
+    // Start on the Git tab so the assertion proves the click switched surfaces.
+    store.dispatch({ type: "activate", groupId: "right-main", panel: "git" });
+    render(<DockProvider definitions={WORKBENCH_PANELS} store={store}>
+      <EnvironmentDockCard target={{ remote: false }} runtimeStatus="connected"
+        project={{ name: "omp-studio", root: "D:\\Project\\omp-studio" }}
+        repository={{ repository: repository(), loading: false }} />
+    </DockProvider>);
+    screen.getByRole("button", { name: /打开 Changes 改动/ }).click();
+    const layout = store.getSnapshot().layout;
+    expect(layout.right.groups[0]!.active).toBe("changes");
+    expect(layout.right.visible).toBe(true);
   });
 
   it("tints the machine glyph and names the state when the Runtime is not up", () => {

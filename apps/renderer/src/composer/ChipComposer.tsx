@@ -942,6 +942,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         aria-describedby={describedBy}
         data-placeholder={placeholder}
         data-empty={empty ? "true" : "false"}
+        data-prediction-visible={predictionState.ghost ? "true" : undefined}
         onInput={onInput}
         onPaste={onPaste}
         onDrop={onDrop}

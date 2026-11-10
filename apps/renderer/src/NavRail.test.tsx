@@ -1,11 +1,18 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { createPortal } from "react-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { iconSvg } from "./icons";
 import { I18nProvider } from "./i18n";
 import { AppNavRail } from "./NavRail";
 
-afterEach(cleanup);
+beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", class {
+    observe() {}
+    disconnect() {}
+  });
+});
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 /** The shell owns the collapsed flag (the avatar falls back to the sidebar
  *  footer while the rail is away), so the tests hold it the same way. */
@@ -147,6 +154,36 @@ describe("AppNavRail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show navigation" }));
     const reopened = screen.getByRole("navigation", { name: "Primary" });
     expect(within(reopened).getByRole("button", { name: "Workbench" })).toBeTruthy();
+  });
+
+  it("reveals the handle after the window shell attaches a detached navigation host", async () => {
+    const notifyResize: Array<() => void> = [];
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) {
+        notifyResize.push(() => callback([], this as unknown as ResizeObserver));
+      }
+      observe() {}
+      disconnect() {}
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.isConnected ? new DOMRect(0, 36, 56, 684) : new DOMRect();
+    });
+    const host = document.createElement("div");
+    render(createPortal(<I18nProvider forcedLanguage="en"><StatefulRail /></I18nProvider>, host));
+    try {
+      document.body.append(host);
+      act(() => { for (const notify of notifyResize) notify(); });
+      fireEvent.pointerMove(window, { clientX: 56, clientY: 400 });
+      const handle = screen.getByRole("button", { name: "Collapse navigation" });
+      await waitFor(() => expect(handle.classList.contains("is-near")).toBe(true));
+      fireEvent.click(handle);
+      expect(screen.getByRole("button", { name: "Show navigation" })).toBe(handle);
+      fireEvent.click(handle);
+      expect(screen.getByRole("navigation", { name: "Primary" })).toBeTruthy();
+    } finally {
+      host.remove();
+    }
   });
 
   it("hands the environment-menu anchor back to the shell", () => {

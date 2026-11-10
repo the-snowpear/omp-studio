@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="150" viewBox="0 0 1200 150" font-family="'Segoe UI Variable Display','Segoe UI',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif">
+<defs>
+  <linearGradient id="flbrand" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#7c4dff"/>
+    <stop offset=".55" stop-color="#d946ef"/>
+    <stop offset="1" stop-color="#0ea5e9"/>
+  </linearGradient>
+  <linearGradient id="flbrandShift" x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+    <stop offset="0" stop-color="#7c4dff"/>
+    <stop offset=".35" stop-color="#d946ef"/>
+    <stop offset=".7" stop-color="#0ea5e9"/>
+    <stop offset="1" stop-color="#7c4dff"/>
+    <animateTransform attributeName="gradientTransform" type="translate" values="-1 0;0 0" dur="6s" repeatCount="indefinite"/>
+  </linearGradient>
+  <pattern id="fldots" width="22" height="22" patternUnits="userSpaceOnUse">
+    <circle cx="1.5" cy="1.5" r="1.2" fill="#7c4dff" opacity="0.24"/>
+  </pattern>
+  <filter id="flsoft" x="-20%" y="-20%" width="140%" height="160%">
+    <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#3b2a7a" flood-opacity="0.16"/>
+  </filter>
+  <filter id="flblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="40"/></filter><clipPath id="flc"><rect width="1200" height="150" rx="22"/></clipPath></defs>
+<g clip-path="url(#flc)">
+<rect width="1200" height="150" fill="#fbfaff"/>
+<path d="M0 92.0 L40 97.7 L80 102.4 L120 105.3 L160 105.9 L200 104.1 L240 100.2 L280 94.9 L320 89.1 L360 83.8 L400 79.9 L440 78.1 L480 78.7 L520 81.6 L560 86.3 L600 92.0 L640 97.7 L680 102.4 L720 105.3 L760 105.9 L800 104.1 L840 100.2 L880 94.9 L920 89.1 L960 83.8 L1000 79.9 L1040 78.1 L1080 78.7 L1120 81.6 L1160 86.3 L1200 92.0 L1240 97.7 L1280 102.4 L1320 105.3 L1360 105.9 L1400 104.1 L1440 100.2 L1480 94.9 L1520 89.1 L1560 83.8 L1600 79.9 L1640 78.1 L1680 78.7 L1720 81.6 L1760 86.3 L1800 92.0 L1840 97.7 L1880 102.4 L1920 105.3 L1960 105.9 L2000 104.1 L2040 100.2 L2080 94.9 L2120 89.1 L2160 83.8 L2200 79.9 L2240 78.1 L2280 78.7 L2320 81.6 L2360 86.3 L2400 92.0 L2400 150 L0 150Z" fill="#7c4dff" opacity="0.35"><animateTransform attributeName="transform" type="translate" values="0 0;-1200 0" dur="18s" repeatCount="indefinite"/></path>
+<path d="M0 114.0 L40 113.0 L80 110.5 L120 106.8 L160 102.7 L200 98.7 L240 95.7 L280 94.2 L320 94.3 L360 96.1 L400 99.3 L440 103.2 L480 107.4 L520 110.9 L560 113.3 L600 114.0 L640 113.0 L680 110.5 L720 106.8 L760 102.7 L800 98.7 L840 95.7 L880 94.2 L920 94.3 L960 96.1 L1000 99.3 L1040 103.2 L1080 107.4 L1120 110.9 L1160 113.3 L1200 114.0 L1240 113.0 L1280 110.5 L1320 106.8 L1360 102.7 L1400 98.7 L1440 95.7 L1480 94.2 L1520 94.3 L1560 96.1 L1600 99.3 L1640 103.2 L1680 107.4 L1720 110.9 L1760 113.3 L1800 114.0 L1840 113.0 L1880 110.5 L1920 106.8 L1960 102.7 L2000 98.7 L2040 95.7 L2080 94.2 L2120 94.3 L2160 96.1 L2200 99.3 L2240 103.2 L2280 107.4 L2320 110.9 L2360 113.3 L2400 114.0 L2400 150 L0 150Z" fill="#d946ef" opacity="0.3"><animateTransform attributeName="transform" type="translate" values="0 0;-1200 0" dur="13s" repeatCount="indefinite"/></path>
+<path d="M0 116.3 L40 113.1 L80 110.3 L120 108.5 L160 108.0 L200 108.9 L240 111.0 L280 114.0 L320 117.3 L360 120.4 L400 122.8 L440 123.9 L480 123.7 L520 122.2 L560 119.6 L600 116.3 L640 113.1 L680 110.3 L720 108.5 L760 108.0 L800 108.9 L840 111.0 L880 114.0 L920 117.3 L960 120.4 L1000 122.8 L1040 123.9 L1080 123.7 L1120 122.2 L1160 119.6 L1200 116.3 L1240 113.1 L1280 110.3 L1320 108.5 L1360 108.0 L1400 108.9 L1440 111.0 L1480 114.0 L1520 117.3 L1560 120.4 L1600 122.8 L1640 123.9 L1680 123.7 L1720 122.2 L1760 119.6 L1800 116.3 L1840 113.1 L1880 110.3 L1920 108.5 L1960 108.0 L2000 108.9 L2040 111.0 L2080 114.0 L2120 117.3 L2160 120.4 L2200 122.8 L2240 123.9 L2280 123.7 L2320 122.2 L2360 119.6 L2400 116.3 L2400 150 L0 150Z" fill="#0ea5e9" opacity="0.35"><animateTransform attributeName="transform" type="translate" values="0 0;-1200 0" dur="9s" repeatCount="indefinite"/></path>
+</g>
+<text x="600.0" y="54" text-anchor="middle" font-size="22" font-weight="800" fill="url(#flbrandShift)">Give your agents room to work.</text>
+<text x="600.0" y="80" text-anchor="middle" font-size="13" fill="#554d70">OMP Studio · 为 oh-my-pi 打造的桌面工作台 · MIT</text>
+</svg>

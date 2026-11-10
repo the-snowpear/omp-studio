@@ -1,10 +1,14 @@
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { GIT_STATUS_META, type TreeGitStatus } from "../git/treeStatus";
 import { Icon } from "../icons";
 import { fileTypeOf, iconNameFor, isSensitive } from "../explorer-types";
 import { splitDisplayPath } from "./toolMeta";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
+import { useWideLayout } from "../layout/useWideLayout";
+
+/** From this body width the panel reads like a review page: file list beside one file's diff. */
+const CHANGES_WIDE_MIN = 820;
 
 export type ChangesDiffLine =
   | { readonly kind: "row"; readonly mark: "+" | "-" | " "; readonly oldLn: string; readonly newLn: string; readonly text: string }
@@ -89,13 +93,14 @@ export function DiffDisplayMode({ split, onSplit }: { split: boolean; onSplit: (
   </span>;
 }
 
-function FileDiff({ file, split }: { file: ChangesDiffFile; split: boolean }) {
+/** `bare`: the wide detail pane shows the truncation chip in its own header. */
+function FileDiff({ file, split, bare = false }: { file: ChangesDiffFile; split: boolean; bare?: boolean }) {
   const { t } = useI18n();
   const lines = file.hunks.flatMap((hunk) => hunk.lines);
   return (
     <div className={`ch-file-diff diff-scroll${split ? " diff-split" : ""}`}>
       <div className="ch-file-diff-inner">
-        {file.truncated ? <span className="chip gray xs">{t("changes.truncated")}</span> : null}
+        {file.truncated && !bare ? <span className="chip gray xs">{t("changes.truncated")}</span> : null}
         {lines.length === 0 ? (
           <div className="ch-file-diff-empty">{t("changes.noDiffToShow")}</div>
         ) : (
@@ -205,15 +210,17 @@ export function ChangesPanel({
 }) {
   const { t } = useI18n();
   const { marks } = usePreviewMode();
+  const [rootRef, wide] = useWideLayout<HTMLDivElement>(CHANGES_WIDE_MIN);
   return (
-    <div className="changes-panel">
+    <div className={`changes-panel${wide ? " is-wide" : ""}`} ref={rootRef}>
       <div className="ch-toolbar">
         <TurnPicker turns={turns} turnId={turnId} onTurnChange={onTurnChange} />
         {demo === true && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}
         <span className="spacer" />
+        {wide && files.length > 0 ? <span className="ch-toolbar-summary">{t("changes.fileCount", { count: files.length })}</span> : null}
         <DiffDisplayMode split={split} onSplit={onSplit} />
       </div>
-      <div className="ch-list">
+      {wide && files.length > 0 ? <ChangesBrowser files={files} expanded={expanded} split={split} /> : <div className="ch-list">
         {files.length === 0 ? empty : files.map((file) => {
           const open = expanded.has(file.file);
           const display = splitDisplayPath(file.file);
@@ -253,7 +260,87 @@ export function ChangesPanel({
             </div>
           );
         })}
+      </div>}
+    </div>
+  );
+}
+
+/**
+ * Wide layout: every changed file in a list, the selected one's whole diff beside it.
+ * Selection is local to this view; a focus request from the conversation ("审核")
+ * arrives as a one-file `expanded` set and moves the selection to that file.
+ */
+function ChangesBrowser({ files, expanded, split }: { files: readonly ChangesDiffFile[]; expanded: ReadonlySet<string>; split: boolean }) {
+  const { t } = useI18n();
+  const [picked, setPicked] = useState<string>();
+  const listRef = useRef<HTMLDivElement>(null);
+  const focused = files.find((file) => expanded.has(file.file))?.file;
+  useEffect(() => { if (focused !== undefined) setPicked(focused); }, [expanded, focused]);
+  const found = files.findIndex((file) => file.file === picked);
+  const index = found < 0 ? 0 : found;
+  const selected = files[index]!;
+  const select = (next: number, focus: boolean) => {
+    const file = files[Math.max(0, Math.min(files.length - 1, next))];
+    if (!file) return;
+    setPicked(file.file);
+    if (focus) requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>(`[data-file="${CSS.escape(file.file)}"]`)?.focus({ preventScroll: false }));
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = event.key === "ArrowDown" || event.key === "j" ? 1 : event.key === "ArrowUp" || event.key === "k" ? -1 : 0;
+    if (step) { event.preventDefault(); select(index + step, true); return; }
+    if (event.key === "Home" || event.key === "End") { event.preventDefault(); select(event.key === "Home" ? 0 : files.length - 1, true); }
+  };
+  const display = splitDisplayPath(selected.file);
+  const ftype = fileTypeOf(display.name);
+  return (
+    <div className="ch-browser">
+      <div className="ch-browser-list" role="listbox" aria-label={t("changes.fileList")} ref={listRef} onKeyDown={onKeyDown}>
+        {files.map((file, position) => {
+          const row = splitDisplayPath(file.file);
+          const rowType = fileTypeOf(row.name);
+          const active = position === index;
+          return (
+            <button
+              key={file.file}
+              type="button"
+              role="option"
+              aria-selected={active}
+              tabIndex={active ? 0 : -1}
+              data-file={file.file}
+              data-tip={file.file}
+              className={`ch-browser-row${active ? " is-active" : ""}`}
+              data-ftype={rowType ?? undefined}
+              data-secret={isSensitive(row.name) || undefined}
+              onClick={() => select(position, false)}
+            >
+              <span className="ch-row-icon" aria-hidden="true"><Icon name={iconNameFor(rowType, row.name)} extra="sm" /></span>
+              <span className="ch-browser-copy">
+                <span className="ch-browser-name">{row.name}</span>
+                {row.dir ? <span className="ch-browser-dir">{row.dir}</span> : null}
+              </span>
+              <ChangeDelta add={file.add} del={file.del} />
+            </button>
+          );
+        })}
       </div>
+      <section className="ch-browser-detail" aria-label={selected.file} data-ftype={ftype ?? undefined} data-secret={isSensitive(display.name) || undefined}>
+        <header className="ch-detail-head">
+          <span className="ch-row-icon" aria-hidden="true"><Icon name={iconNameFor(ftype, display.name)} /></span>
+          <span className="ch-detail-title">
+            <span className="ch-detail-name">{display.name}</span>
+            {display.dir ? <span className="ch-detail-dir">{display.dir}</span> : null}
+          </span>
+          <ChangeDelta add={selected.add} del={selected.del} />
+          {selected.truncated ? <span className="chip gray xs">{t("changes.truncated")}</span> : null}
+          <span className="spacer" />
+          {files.length > 1 ? <span className="ch-detail-nav">
+            <span className="ch-detail-position">{index + 1} / {files.length}</span>
+            <button type="button" className="icon-btn small" aria-label={t("changes.previousFile")} data-tip={t("changes.previousFile")} disabled={index === 0} onClick={() => select(index - 1, false)}><Icon name="chevron-u" extra="sm" /></button>
+            <button type="button" className="icon-btn small" aria-label={t("changes.nextFile")} data-tip={t("changes.nextFile")} disabled={index === files.length - 1} onClick={() => select(index + 1, false)}><Icon name="chevron-d" extra="sm" /></button>
+          </span> : null}
+        </header>
+        <FileDiff key={selected.file} file={selected} split={split} bare />
+      </section>
     </div>
   );
 }

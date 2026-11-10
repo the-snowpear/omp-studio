@@ -25,10 +25,11 @@ import type { GraphicResult } from "./graphic-types";
 import { graphicTexture } from "./graphic-texture";
 import { useI18n } from "../i18n";
 export default function GraphicScene({
-  data, onFailure,
+  data, onFailure, onPoster,
 }: {
   data: Extract<GraphicResult, { kind: "scene" }>;
   onFailure: (reason: string) => void;
+  onPoster: (blob: Blob) => void;
 }) {
   const mount = useRef<HTMLDivElement>(null);
   const fit = useRef(() => {});
@@ -42,6 +43,8 @@ export default function GraphicScene({
     let controls: OrbitControls | undefined;
     let observer: ResizeObserver | undefined;
     let frame = 0;
+    let active = true;
+    let needsPoster = true;
     const geometries: BufferGeometry[] = [];
     const materials: Array<
       MeshStandardMaterial | LineBasicMaterial | PointsMaterial
@@ -134,9 +137,20 @@ export default function GraphicScene({
         frame = requestAnimationFrame(() => {
           frame = 0;
           renderer?.render(scene, camera);
+          if (needsPoster && renderer) {
+            needsPoster = false;
+            const source = renderer.domElement;
+            const poster = host.ownerDocument.createElement("canvas");
+            const scale = Math.min(1, 720 / source.width);
+            poster.width = Math.max(1, Math.round(source.width * scale));
+            poster.height = Math.max(1, Math.round(source.height * scale));
+            poster.getContext("2d")!.drawImage(source, 0, 0, poster.width, poster.height);
+            poster.toBlob(blob => { if (active && blob) onPoster(blob); }, "image/webp", 0.8);
+          }
         });
       };
       fit.current = () => {
+        needsPoster = true;
         camera.position.copy(center).add(new Vector3(span, span * 0.65, span));
         camera.near = Math.max(span / 10000, 0.0001);
         camera.far = span * 100;
@@ -146,6 +160,7 @@ export default function GraphicScene({
         draw();
       };
       controls.addEventListener("change", draw);
+      controls.addEventListener("end", () => { needsPoster = true; draw(); });
       fit.current();
       observer = new ResizeObserver(() => {
         const width = Math.max(1, host.clientWidth),
@@ -161,6 +176,7 @@ export default function GraphicScene({
       onFailure(cause instanceof Error ? cause.message : String(cause));
     }
     return () => {
+      active = false;
       cancelAnimationFrame(frame);
       observer?.disconnect();
       controls?.dispose();
@@ -172,7 +188,7 @@ export default function GraphicScene({
       renderer?.domElement.remove();
       fit.current = () => {};
     };
-  }, [data, onFailure]);
+  }, [data, onFailure, onPoster]);
   return (
     <div className="graphic-scene">
       <div

@@ -84,3 +84,38 @@ it("opens local links from the chat as a new page tab when the user may open pag
   await waitFor(() => expect(browser.commands.at(-1)).toMatchObject({ action: "create", url: "http://localhost:5173/" }));
   await waitFor(() => expect(store.getSnapshot().layout.right.groups[0]!.active).toMatch(/^browser-page:/));
 });
+
+it("focuses an Agent service page without duplicating it, even after SPA navigation", async () => {
+  const initial: ManagedBrowserState = { sessionId: "chat", pages: [page("dev", { url: "http://localhost:5173/" })], activePageId: "dev", spaces: [{ id: "shared", name: "Shared" }], control: "agent", connection: "connected", settings: { maxTabs: 16, downloadDirectory: "", askDownloadLocation: false }, downloads: [], permissions: [] };
+  const browser = fakeBrowser(initial);
+  const store = mount(browser);
+  await screen.findByRole("tab", { name: "dev" });
+  act(() => store.dispatch({ type: "region", region: "right", visible: false }));
+  act(() => { expect(routeBrowserLink("http://localhost:5173/", true, { reuse: true, reuseKey: "service-instance", sessionId: "chat", preview: false })).toBe(true); });
+  await waitFor(() => expect(browser.commands.some(command => command.action === "select" && command.pageId === "dev")).toBe(true));
+  expect(store.getSnapshot().layout.right.visible).toBe(true);
+  browser.set({ ...initial, pages: [page("dev", { url: "http://localhost:5173/settings" })] });
+  act(() => { expect(routeBrowserLink("http://localhost:5173/", true, { reuse: true, reuseKey: "service-instance", sessionId: "chat", preview: false })).toBe(true); });
+  expect(browser.commands.filter(command => command.action === "create")).toHaveLength(0);
+  expect(browser.commands.filter(command => command.action === "select").at(-1)).toMatchObject({ pageId: "dev" });
+  expect(browser.commands.some(command => command.action === "take")).toBe(false);
+});
+
+it("does not route another conversation or preview service into the real browser", async () => {
+  const browser = fakeBrowser({ sessionId: "chat", pages: [page("dev")], activePageId: "dev", spaces: [{ id: "shared", name: "Shared" }], control: "human", connection: "connected", settings: { maxTabs: 16, downloadDirectory: "", askDownloadLocation: false }, downloads: [], permissions: [] });
+  mount(browser);
+  await screen.findByRole("tab", { name: "dev" });
+  const count = browser.commands.length;
+  expect(routeBrowserLink("http://localhost:5173/", true, { reuse: true, sessionId: "other", preview: false })).toBe(false);
+  expect(routeBrowserLink("http://localhost:5173/", true, { reuse: true, sessionId: "chat", preview: true })).toBe(false);
+  expect(browser.commands).toHaveLength(count);
+});
+
+it("finds the page an Agent is already debugging under the service base URL", async () => {
+  const browser = fakeBrowser({ sessionId: "chat", pages: [page("dev", { url: "http://localhost:5173/app/settings" })], activePageId: "dev", spaces: [{ id: "shared", name: "Shared" }], control: "agent", connection: "connected", settings: { maxTabs: 16, downloadDirectory: "", askDownloadLocation: false }, downloads: [], permissions: [] });
+  mount(browser);
+  await screen.findByRole("tab", { name: "dev" });
+  act(() => { expect(routeBrowserLink("http://localhost:5173/app/", true, { reuse: true, reuseKey: "agent-server", sessionId: "chat", preview: false })).toBe(true); });
+  await waitFor(() => expect(browser.commands.some(command => command.action === "select" && command.pageId === "dev")).toBe(true));
+  expect(browser.commands.some(command => command.action === "create" || command.action === "take")).toBe(false);
+});

@@ -56,6 +56,22 @@ export function predictionDraft(
   if (text.length > 4096) return;
   return { text, caret: Math.min(head.length, text.length) };
 }
+function currentDraft(editor: HTMLElement, allowEmpty: boolean): { text: string; caret: number } | undefined {
+  if (allowEmpty && !editor.textContent && !editor.querySelector(".cm-chip,[contenteditable=false]")) {
+    const text = plain(editor);
+    if (text === "" || text === "\n") return { text: "", caret: 0 };
+  }
+  if (editor.ownerDocument.activeElement !== editor) return;
+  const draft = predictionDraft(editor);
+  const selection = editor.ownerDocument.defaultView!.getSelection();
+  if (!draft || !selection?.rangeCount) return;
+  const after = selection.getRangeAt(0).cloneRange();
+  after.selectNodeContents(editor);
+  after.setStart(selection.focusNode!, selection.focusOffset);
+  const remaining = after.cloneContents();
+  if (remaining.textContent || remaining.querySelector("br,.cm-chip,[contenteditable=false]")) return;
+  return draft;
+}
 function previewSuffix(text: string, caret: number): string | null {
   const before = text.slice(0, caret),
     word = before.match(/[\p{L}]+$/u)?.[0];
@@ -93,6 +109,7 @@ export function useWordPrediction(
   const offers = useRef(alternatives); offers.current = alternatives;
   const installed = useRef<string | undefined>(undefined);
   const shown = useRef<Ghost | undefined>(undefined);
+  const acknowledged = useRef<number | undefined>(undefined);
   shown.current = ghost;
   const inputPort = useRef<
     ((input: Exclude<PredictionInput, { kind: "import" }>) => void) | undefined
@@ -103,6 +120,7 @@ export function useWordPrediction(
     const editor = editorRef.current;
     const current = ++generation.current;
     setGhost(undefined);
+    offers.current = undefined;
     setAlternatives(undefined); setMenuOpen(false); installed.current = undefined;
     setError("");
     if (
@@ -131,11 +149,15 @@ export function useWordPrediction(
           .then((result) => {
             if (!result.ok && generation.current === current) {
               setError(result.message ?? "Prediction unavailable");
+              offers.current = undefined; setAlternatives(undefined);
               setGhost(undefined);
             }
           })
           .catch(() => {
-            if (generation.current === current) setGhost(undefined);
+            if (generation.current === current) {
+              offers.current = undefined; setAlternatives(undefined);
+              setGhost(undefined);
+            }
           });
     };
     inputPort.current = send;
@@ -151,38 +173,43 @@ export function useWordPrediction(
       const draft = lastDraft;
       if (
         generation.current !== current ||
+        version !== revision.current ||
         !draft ||
         draft.revision !== version ||
-        document.activeElement !== editor ||
-        document.hidden
+        composing ||
+        (!next && (document.activeElement !== editor || document.hidden))
       )
         return;
       if (!suffix) {
         setGhost(undefined);
         return;
       }
-      const now = predictionDraft(editor);
+      const now = currentDraft(editor, !!options.nextMessageAvailable);
       if (!now || now.text !== draft.text || now.caret !== draft.caret) return;
       if (!next && offers.current?.values.some(value => value.startsWith(now.text.trimEnd()))) return;
-      const selection = window.getSelection();
-      if (!selection?.rangeCount) return;
-      const range = selection.getRangeAt(0).cloneRange();
-      let rect = range.getBoundingClientRect();
-      if (
-        !rect.height &&
-        range.startContainer.nodeType === Node.TEXT_NODE &&
-        range.startOffset > 0
-      ) {
-        range.setStart(range.startContainer, range.startOffset - 1);
-        rect = range.getBoundingClientRect();
-        rect = new DOMRect(rect.right, rect.top, 0, rect.height);
-      }
       const editorBounds = editor.getBoundingClientRect();
-      if (!rect.height && !draft.text) {
-        const style = getComputedStyle(editor);
+      const previous = shown.current;
+      if (next && !draft.text && editorBounds.width < 20 && previous?.next && !previous.draft) {
+        setGhost({ ...previous, suffix, rank, revision: version });
+        return;
+      }
+      const style = window.getComputedStyle(editor);
+      const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5 || 20;
+      let rect: DOMRect;
+      if (!draft.text) {
         rect = new DOMRect(editorBounds.left + (parseFloat(style.paddingLeft) || 0),
           editorBounds.top + (parseFloat(style.paddingTop) || 0), 0,
-          parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5 || 20);
+          lineHeight);
+      } else {
+        const selection = window.getSelection();
+        if (!selection?.rangeCount) return;
+        const range = selection.getRangeAt(0).cloneRange();
+        rect = range.getBoundingClientRect();
+        if (!rect.height && range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset > 0) {
+          range.setStart(range.startContainer, range.startOffset - 1);
+          rect = range.getBoundingClientRect();
+          rect = new DOMRect(rect.right, rect.top, 0, rect.height);
+        }
       }
       if (rect.bottom < editorBounds.top || rect.top > editorBounds.bottom) {
         setGhost(undefined);
@@ -190,8 +217,8 @@ export function useWordPrediction(
       }
       const parent = editor.parentElement!.getBoundingClientRect();
       const left = Math.max(0, rect.left - parent.left),
-        top = rect.top - parent.top,
-        width = Math.max(0, parent.width - left - 8);
+        top = rect.top - parent.top - (lineHeight - rect.height) / 2,
+        width = Math.max(0, editorBounds.right - (parseFloat(style.paddingRight) || 0) - rect.left);
       if (width < 20 || !rect.height) {
         setGhost(undefined);
         return;
@@ -217,7 +244,7 @@ export function useWordPrediction(
           )
             return;
           if (event.kind === "next") {
-            if (event.revision !== lastDraft?.revision) return;
+            if (event.revision !== lastDraft?.revision || event.revision !== revision.current) return;
             const next = event.choices?.length ? { values: event.choices, revision: event.revision } : undefined;
             offers.current = next; setAlternatives(next);
             show(event.suffix, event.revision, true, event.rank);
@@ -225,17 +252,19 @@ export function useWordPrediction(
           }
           if (event.kind === "suggestion") {
             if (event.revision === 0) {
-              setGhost(undefined);
+              if (!shown.current?.next) setGhost(undefined);
               return;
             }
             show(event.suffix, event.revision);
           }
           if (event.kind === "error" && !event.requestId) {
             setError(event.message);
+            offers.current = undefined; setAlternatives(undefined);
             setGhost(undefined);
           }
           if (event.kind === "closed") {
             channel = undefined;
+            offers.current = undefined; setAlternatives(undefined);
             setGhost(undefined);
           }
         });
@@ -255,7 +284,7 @@ export function useWordPrediction(
         ).result;
         if (
           generation.current !== current ||
-          document.activeElement !== editor ||
+          !currentDraft(editor, !!options.nextMessageAvailable) ||
           document.hidden
         ) {
           void options.client
@@ -270,7 +299,7 @@ export function useWordPrediction(
         if (
           !attached.ok ||
           generation.current !== current ||
-          document.activeElement !== editor ||
+          !currentDraft(editor, !!options.nextMessageAvailable) ||
           document.hidden
         ) {
           void chrome!.detachPrediction!({
@@ -299,13 +328,30 @@ export function useWordPrediction(
     };
     const update = () => {
       clearTimeout(timer);
+      const previous = shown.current;
+      const draft = currentDraft(editor, !!options.nextMessageAvailable);
+      if (!composing && previous?.next && !previous.draft && lastDraft?.revision === previous.revision && draft?.text === "") {
+        show(previous.suffix, previous.revision, true, previous.rank);
+        return;
+      }
+      const offer = offers.current;
+      if (!composing && !document.hidden && options.nextMessageAvailable && draft?.text === "" && offer?.values.length && (preview || channel)) {
+        const version = ++revision.current;
+        lastDraft = { ...draft, revision: version };
+        const next = { values: offer.values, revision: version };
+        offers.current = next; setAlternatives(next);
+        if (!preview) send({ kind: "next", revision: version, empty: true });
+        show(next.values[0]!, version, true, 0);
+        return;
+      }
+      lastDraft = undefined;
       setGhost(undefined);
-      if (composing || document.hidden || document.activeElement !== editor)
+      if (composing || document.hidden)
         return;
       timer = window.setTimeout(
         () =>
           void (async () => {
-            const draft = predictionDraft(editor);
+            const draft = currentDraft(editor, !!options.nextMessageAvailable);
             if (!draft || (!draft.text.trim() && !options.nextMessageAvailable)) return;
             const version = ++revision.current;
             lastDraft = { ...draft, revision: version };
@@ -315,7 +361,10 @@ export function useWordPrediction(
                 const next = { values: PREVIEW_NEXT_MESSAGES, revision: version };
                 offers.current = next; setAlternatives(next);
                 show(PREVIEW_NEXT_MESSAGES[rank]!.slice(draft.text.trimEnd().length), version, true, rank);
-              } else { offers.current = undefined; setAlternatives(undefined); show(previewSuffix(draft.text, draft.caret), version); }
+              } else {
+                if (!options.nextMessageAvailable) { offers.current = undefined; setAlternatives(undefined); }
+                show(previewSuffix(draft.text, draft.caret), version);
+              }
               return;
             }
             await ensure();
@@ -324,26 +373,41 @@ export function useWordPrediction(
               lastDraft?.revision !== version
             )
               return;
-            const latest = predictionDraft(editor);
+            const latest = currentDraft(editor, !!options.nextMessageAvailable);
             if (latest?.text !== draft.text || latest.caret !== draft.caret)
               return;
             if (!draft.text && options.nextMessageAvailable && !editor.querySelector(".cm-chip,[contenteditable=false]")) {
               send({ kind: "next", revision: version, empty: true });
-            } else send({ kind: "update", revision: version, ...draft });
+            } else {
+              if (offers.current && !offers.current.values.some(value => value.startsWith(draft.text.trimEnd()))) {
+                offers.current = undefined; setAlternatives(undefined);
+              }
+              send({ kind: "update", revision: version, ...draft });
+            }
           })(),
         140,
       );
     };
     const blur = () => {
+      setMenuOpen(false);
+      if (options.nextMessageAvailable && currentDraft(editor, true)?.text === "" && !document.hidden) {
+        update();
+        return;
+      }
       clearTimeout(timer);
+      lastDraft = undefined;
       setGhost(undefined);
-      setMenuOpen(false); setAlternatives(undefined); offers.current = undefined;
+      setAlternatives(undefined); offers.current = undefined;
       close();
     };
     const start = () => {
-      if (options.nextMessageAvailable) send({ kind: "next", revision: ++revision.current, empty: false });
+      if (options.nextMessageAvailable) {
+        send({ kind: "next", revision: ++revision.current, empty: false });
+        if (!preview && channel) { offers.current = undefined; setAlternatives(undefined); }
+      }
       composing = true;
       clearTimeout(timer);
+      lastDraft = undefined;
       setGhost(undefined);
     };
     const end = () => {
@@ -351,8 +415,13 @@ export function useWordPrediction(
       update();
     };
     const visibility = () => {
-      if (document.hidden) blur();
-      else update();
+      if (document.hidden) {
+        clearTimeout(timer);
+        setMenuOpen(false);
+      } else update();
+    };
+    const selectionChange = () => {
+      if (document.activeElement === editor) update();
     };
     const observer = new MutationObserver(update);
     observer.observe(editor, {
@@ -360,17 +429,19 @@ export function useWordPrediction(
       characterData: true,
       subtree: true,
     });
+    const sizeObserver = window.ResizeObserver ? new window.ResizeObserver(update) : undefined;
+    sizeObserver?.observe(editor);
     editor.addEventListener("input", update);
     editor.addEventListener("focus", update);
     editor.addEventListener("blur", blur);
     editor.addEventListener("scroll", update);
     editor.addEventListener("compositionstart", start);
     editor.addEventListener("compositionend", end);
-    document.addEventListener("selectionchange", update);
+    document.addEventListener("selectionchange", selectionChange);
     document.addEventListener("visibilitychange", visibility);
     window.addEventListener("resize", update);
     const ping = window.setInterval(() => {
-      if (document.activeElement === editor && !document.hidden)
+      if (channel && !document.hidden)
         send({ kind: "ping" });
     }, 15000);
     update();
@@ -382,13 +453,14 @@ export function useWordPrediction(
       unsubscribe?.();
       inputPort.current = undefined;
       observer.disconnect();
+      sizeObserver?.disconnect();
       editor.removeEventListener("input", update);
       editor.removeEventListener("focus", update);
       editor.removeEventListener("blur", blur);
       editor.removeEventListener("scroll", update);
       editor.removeEventListener("compositionstart", start);
       editor.removeEventListener("compositionend", end);
-      document.removeEventListener("selectionchange", update);
+      document.removeEventListener("selectionchange", selectionChange);
       document.removeEventListener("visibilitychange", visibility);
       window.removeEventListener("resize", update);
     };
@@ -404,14 +476,19 @@ export function useWordPrediction(
     window,
   ]);
   useEffect(() => {
-    if (!ghost?.next || !alternatives) return;
-    const frame = window.requestAnimationFrame(() => inputPort.current?.({ kind: "next.shown", revision: ghost.revision }));
+    if (!ghost?.next || !alternatives || acknowledged.current === ghost.revision) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (!document.hidden && (editorRef.current?.getBoundingClientRect().width ?? 0) >= 20) {
+        acknowledged.current = ghost.revision;
+        inputPort.current?.({ kind: "next.shown", revision: ghost.revision });
+      }
+    });
     return () => window.cancelAnimationFrame(frame);
-  }, [ghost?.revision, ghost?.next, alternatives, window]);
+  }, [ghost, alternatives, document, editorRef, window]);
   function choose(index: number): boolean {
     const editor = editorRef.current, offer = offers.current, value = offer?.values[index];
     if (!editor || !offer || !value || editor.querySelector(".cm-chip,[contenteditable=false]")) return false;
-    const draft = predictionDraft(editor);
+    const draft = currentDraft(editor, !!options?.nextMessageAvailable);
     if (!draft || (!value.startsWith(draft.text.trimEnd()) && draft.text.trimEnd() !== installed.current)) return false;
     inputPort.current?.({ kind: "next.accepted", revision: offer.revision, rank: index });
     const range = document.createRange(); range.selectNodeContents(editor);
@@ -433,7 +510,7 @@ export function useWordPrediction(
       setMenuOpen(true); return true;
     }
     if (!current || !editor) return false;
-    const draft = predictionDraft(editor);
+    const draft = currentDraft(editor, !!options?.nextMessageAvailable);
     if (draft?.text !== current.draft || draft.caret !== current.caret) {
       setGhost(undefined);
       return false;
@@ -444,6 +521,8 @@ export function useWordPrediction(
         revision: current.revision,
         accepted: false,
       });
+      revision.current++;
+      offers.current = undefined; setAlternatives(undefined);
       setGhost(undefined);
       return true;
     }

@@ -6,7 +6,7 @@ import { Icon } from "../icons";
 import { fileTypeOf, iconNameFor, isNoiseDir, isSensitive } from "../explorer-types";
 import { FileRowMenu, type FileMenuAction, type FileMenuController, type FileMenuTarget } from "../menus";
 import { GitCommitGraph } from "../git/GitCommitGraph";
-import { GitDiffResizer, useGitDiffHeight } from "../git/GitDiffResizer";
+import { GitDiffPlaceholder, GitDiffResizer, useGitDiffHeight } from "../git/GitDiffResizer";
 import { GitMoreActionsMenu } from "../git/GitMoreActionsMenu";
 import { GitPanelSplit } from "../git/GitPanelSplit";
 import { GitTip } from "../git/GitTip";
@@ -29,6 +29,7 @@ import { splitDisplayPath } from "../conversation/toolMeta";
 import { ConvoTranscript } from "../conversation/ConvoTranscript";
 import { GIT_STATUS_META } from "../git/treeStatus";
 import { previewConversationRows } from "./conversationFixtures";
+import { PREVIEW_FILE_DIFFS } from "./changeDiffsPreview";
 import { usePreviewMode } from "./PreviewContext";
 
 function collectOpen(nodes: PreviewFileNode[], prefix: string, into: Set<string>): void {
@@ -287,26 +288,28 @@ function previewDelta(rows: readonly { add: number; del: number }[]): { add: num
 }
 
 function previewDiffFiles(rows: readonly { file: string; add: number; del: number }[]): ChangesDiffFile[] {
-  const d = PREVIEW_DIFF;
-  return rows.map((row) => ({
-    file: row.file,
-    add: row.add,
-    del: row.del,
-    hunks: row.file === d.file ? [{
-      hunkLabel: "hunk 1/2",
-      lines: d.lines.map((line) => (
-        line[0] === "collapse"
-          ? { kind: "collapse" as const, label: line[1] }
-          : {
-            kind: "row" as const,
-            mark: line[0] === "+" || line[0] === "-" ? line[0] : " ",
-            oldLn: line[1],
-            newLn: line[2],
-            text: line[3],
-          }
-      )),
-    }] : [],
-  }));
+  return rows.map((row) => {
+    const d = PREVIEW_FILE_DIFFS[row.file];
+    return {
+      file: row.file,
+      add: row.add,
+      del: row.del,
+      hunks: d ? [{
+        hunkLabel: "变更摘录",
+        lines: d.lines.map((line) => (
+          line[0] === "collapse"
+            ? { kind: "collapse" as const, label: line[1] }
+            : {
+              kind: "row" as const,
+              mark: line[0] === "+" || line[0] === "-" ? line[0] : " ",
+              oldLn: line[1],
+              newLn: line[2],
+              text: line[3],
+            }
+        )),
+      }] : [],
+    };
+  });
 }
 
 const PREVIEW_TURN_LAST = "last";
@@ -393,7 +396,7 @@ export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes
   const known = shared.repository?.changes.some((row) => row.path === selected);
   const active = known ? selected : null;
   useEffect(() => { if (focusPath) setSelected(focusPath); }, [focusPath, focusKey]);
-  const d = PREVIEW_DIFF;
+  const d = PREVIEW_FILE_DIFFS[active ?? ""];
   const previewLog = useMemo<GitLogListReadModel>(() => ({
     workspaceId: "preview-git" as WorkspaceId,
     commits: PREVIEW_GIT_LOG.commits.map(({ files: _files, patch: _patch, ...commit }) => commit),
@@ -488,7 +491,7 @@ export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes
         <textarea placeholder={marks ? "Commit message（演示）" : "Commit message"} rows={1} value={shared.draft} onChange={event => shared.setDraft(event.target.value)} />
         <button type="button" className="btn small primary" disabled={shared.busy || !staged.length || !shared.draft.trim()} onClick={() => { const submitted = shared.draft; const message = submitted.trim(); if (message) void shared.execute({ kind: "commit", message }).then(ok => { if (ok) shared.setDraft(current => current === submitted ? "" : current); }); }}>Commit</button>
       </div>
-      {active !== null ? (
+      {active !== null && d ? (
         <>
         <GitDiffResizer height={diffHeight} onHeight={setDiffHeight} />
         <div className="ch-diff-slot git-diff-slot" style={{ height: diffHeight }}>
@@ -512,7 +515,7 @@ export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes
           </div>
         </div>
         </>
-      ) : null}
+      ) : <GitDiffPlaceholder />}
         </>
       )}
       graphOpen={graphLayout.open}

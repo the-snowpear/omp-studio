@@ -1625,10 +1625,10 @@ index ca30045d94..20750ddd16 100644
  }
  
 diff --git a/packages/coding-agent/src/launch/broker.ts b/packages/coding-agent/src/launch/broker.ts
-index 8be85c28da..166a51b8a9 100644
+index 8be85c28da..0a96b32dc9 100644
 --- a/packages/coding-agent/src/launch/broker.ts
 +++ b/packages/coding-agent/src/launch/broker.ts
-@@ -15,6 +15,7 @@ import {
+@@ -15,13 +15,14 @@ import {
  } from "@oh-my-pi/pi-tui/tools/streaming-output";
  import { workerEnvFromParent } from "../subprocess/worker-client";
  import {
@@ -1636,7 +1636,24 @@ index 8be85c28da..166a51b8a9 100644
  	DAEMON_META_FILE,
  	DAEMON_SPEC_FILE,
  	daemonBrokerEndpoint,
-@@ -640,12 +641,41 @@ class DaemonBroker {
+ 	readStoredDaemonRecord,
+ 	writeDaemonScopeMeta,
+ } from "./paths";
+-import type { DaemonReadySpec, DaemonSnapshot, DaemonSpec } from "@oh-my-pi/pi-tui/tools/daemon";
++import type { DaemonReadySpec } from "@oh-my-pi/pi-tui/tools/daemon";
+ import { hasLiveDaemonProjectPresence, pruneDeadDaemonRuntimeDirs } from "./presence";
+ import {
+ 	DAEMON_IDLE_GRACE_ENV,
+@@ -33,6 +34,8 @@ import {
+ 	type DaemonOperation,
+ 	type DaemonRpcResult,
+ 	type DaemonSignal,
++	type DaemonSnapshot,
++	type DaemonSpec,
+ 	type DaemonWireRequest,
+ 	parseDaemonSnapshot,
+ 	parseDaemonSpec,
+@@ -640,12 +643,41 @@ class DaemonBroker {
  		}
  	}
  
@@ -1677,11 +1694,11 @@ index 8be85c28da..166a51b8a9 100644
 -				return { op: "ping", projectDir: this.#projectDir };
 -			case "start":
 -				return this.#start(operation.spec, operation.owner, operation.replace, operation.awaitReady);
-+				return { op: "ping", projectDir: this.#projectDir, instanceFencing: true };
++				return { op: "ping", projectDir: this.#projectDir, instanceFencing: true, previewUrls: true };
  			case "list": {
  				await Promise.all([...this.#records.values()].map(record => this.#refreshDetached(record)));
  				return {
-@@ -667,18 +697,18 @@ class DaemonBroker {
+@@ -667,18 +699,18 @@ class DaemonBroker {
  			case "send":
  				return this.#send(operation);
  			case "stop": {
@@ -1704,16 +1721,35 @@ index 8be85c28da..166a51b8a9 100644
  				await this.#refreshDetached(record);
  				return { op: "describe", daemon: record.snapshot, spec: record.spec };
  			}
-@@ -687,7 +717,7 @@ class DaemonBroker {
+@@ -687,7 +719,18 @@ class DaemonBroker {
  		}
  	}
  
 -	async #start(spec: DaemonSpec, owner?: string, replace = false, awaitReady = true): Promise<DaemonRpcResult> {
 +	async #start(spec: DaemonSpec, owner?: string, replace = false): Promise<ManagedDaemon> {
++		if (spec.previewUrl !== undefined) {
++			let url: URL;
++			try {
++				url = new URL(spec.previewUrl);
++			} catch {
++				throw new Error("previewUrl must be an absolute HTTP(S) URL without embedded credentials");
++			}
++			if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password)
++				throw new Error("previewUrl must be an absolute HTTP(S) URL without embedded credentials");
++			spec = { ...spec, previewUrl: url.href };
++		}
  		if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/.test(spec.name)) {
  			throw new Error("Daemon name must be 1-48 letters, numbers, dots, underscores, or hyphens");
  		}
-@@ -765,6 +795,17 @@ class DaemonBroker {
+@@ -734,6 +777,7 @@ class DaemonBroker {
+ 				spec,
+ 				snapshot: {
+ 					name: spec.name,
++					...(spec.previewUrl === undefined ? {} : { previewUrl: spec.previewUrl }),
+ 					id: crypto.randomUUID(),
+ 					state: "starting",
+ 					createdAt: now,
+@@ -765,6 +809,17 @@ class DaemonBroker {
  			this.#startingNames.delete(spec.name);
  		}
  		await this.#launch(record);
@@ -1731,7 +1767,7 @@ index 8be85c28da..166a51b8a9 100644
  		let readyTimedOut = false;
  		if (spec.ready && awaitReady && !terminalState(record.snapshot.state)) {
  			// Wake on the sticky readyAt marker or any terminal state, not the live
-@@ -774,11 +815,19 @@ class DaemonBroker {
+@@ -774,11 +829,19 @@ class DaemonBroker {
  			// wake the wait rather than block for the full timeout.
  			const ready = await this.#waitUntil(
  				record,
@@ -1752,7 +1788,7 @@ index 8be85c28da..166a51b8a9 100644
  		await record.persistQueue;
  		return { op: "start", daemon: record.snapshot, readyTimedOut };
  	}
-@@ -790,7 +839,7 @@ class DaemonBroker {
+@@ -790,7 +853,7 @@ class DaemonBroker {
  		record.snapshot.state = record.spec.ready ? "starting" : "running";
  		record.snapshot.persist = record.spec.persist;
  		record.snapshot.detached = record.spec.detached;
@@ -1761,7 +1797,7 @@ index 8be85c28da..166a51b8a9 100644
  		record.snapshot.readyAt = undefined;
  		record.snapshot.exitedAt = undefined;
  		record.snapshot.exitCode = undefined;
-@@ -1137,7 +1186,7 @@ class DaemonBroker {
+@@ -1137,7 +1200,7 @@ class DaemonBroker {
  	}
  
  	async #logs(operation: Extract<DaemonOperation, { op: "logs" }>, signal?: AbortSignal): Promise<DaemonRpcResult> {
@@ -1770,7 +1806,7 @@ index 8be85c28da..166a51b8a9 100644
  		await this.#refreshDetached(record);
  		const cursor = operation.cursor ?? record.snapshot.outputBytes;
  		let timedOut = false;
-@@ -1167,6 +1216,7 @@ class DaemonBroker {
+@@ -1167,6 +1230,7 @@ class DaemonBroker {
  			terminalOutput !== undefined && operation.renderTerminalRows === true
  				? await renderTerminalOutput(terminalOutput, { head: operation.head, maxRows: lines })
  				: undefined;
@@ -1778,7 +1814,7 @@ index 8be85c28da..166a51b8a9 100644
  		return {
  			op: "logs",
  			name: record.snapshot.name,
-@@ -1183,7 +1233,7 @@ class DaemonBroker {
+@@ -1183,7 +1247,7 @@ class DaemonBroker {
  	}
  
  	async #wait(operation: Extract<DaemonOperation, { op: "wait" }>, signal?: AbortSignal): Promise<DaemonRpcResult> {
@@ -1787,7 +1823,7 @@ index 8be85c28da..166a51b8a9 100644
  		// A wait observes exactly one launch generation. Automatic or explicit
  		// relaunches reuse the managed record, so polling the record without this
  		// binding can hang past an exit or consume the replacement's output.
-@@ -1240,8 +1290,9 @@ class DaemonBroker {
+@@ -1240,8 +1304,9 @@ class DaemonBroker {
  	}
  
  	async #send(operation: Extract<DaemonOperation, { op: "send" }>): Promise<DaemonRpcResult> {
@@ -1798,7 +1834,7 @@ index 8be85c28da..166a51b8a9 100644
  		if (terminalState(record.snapshot.state) || record.snapshot.state === "stopping") {
  			throw new Error(`Daemon ${operation.name} is ${record.snapshot.state}`);
  		}
-@@ -1257,6 +1308,7 @@ class DaemonBroker {
+@@ -1257,6 +1322,7 @@ class DaemonBroker {
  			} else throw new Error(`Daemon ${operation.name} stdin is unavailable`);
  		}
  		if (operation.signal) {
@@ -1806,7 +1842,7 @@ index 8be85c28da..166a51b8a9 100644
  			if (process.platform === "win32" && record.pty) {
  				if (operation.signal === "SIGINT") record.pty.write("\u0003");
  				else record.pty.kill();
-@@ -1269,8 +1321,9 @@ class DaemonBroker {
+@@ -1269,8 +1335,9 @@ class DaemonBroker {
  		return { op: "send", daemon: record.snapshot };
  	}
  
@@ -1817,7 +1853,7 @@ index 8be85c28da..166a51b8a9 100644
  		if (terminalState(record.snapshot.state)) return;
  		record.stopRequested = true;
  		if (record.restartTimer) {
-@@ -1292,9 +1345,9 @@ class DaemonBroker {
+@@ -1292,9 +1359,9 @@ class DaemonBroker {
  		if (!settled && record.pty) record.pty.kill();
  	}
  
@@ -1830,7 +1866,7 @@ index 8be85c28da..166a51b8a9 100644
  		await record.log?.close();
  		record.log = await DaemonLog.open(record.dir);
  		record.stopRequested = false;
-@@ -1309,15 +1362,16 @@ class DaemonBroker {
+@@ -1309,15 +1376,16 @@ class DaemonBroker {
  	}
  
  	async #mode(operation: Extract<DaemonOperation, { op: "mode" }>): Promise<DaemonRpcResult> {
@@ -1849,7 +1885,7 @@ index 8be85c28da..166a51b8a9 100644
  			}
  		} else {
  			if (record.spec.detached && operation.mode === "session") {
-@@ -1349,9 +1403,16 @@ class DaemonBroker {
+@@ -1349,9 +1417,16 @@ class DaemonBroker {
  		return condition();
  	}
  
@@ -1868,7 +1904,7 @@ index 8be85c28da..166a51b8a9 100644
  		const names = [...this.#records.keys()];
  		throw new Error(`Unknown daemon ${name}${names.length ? `. Available: ${names.join(", ")}` : ""}`);
  	}
-@@ -1601,9 +1662,13 @@ export interface DaemonBrokerStartOptions {
+@@ -1601,9 +1676,13 @@ export interface DaemonBrokerStartOptions {
  
  /** Start the detached project or global daemon broker selected by the CLI worker host. */
  export async function startDaemonBrokerFromEnvironment(options: DaemonBrokerStartOptions = {}): Promise<void> {
@@ -1885,10 +1921,38 @@ index 8be85c28da..166a51b8a9 100644
  	delete process.env[DAEMON_RUNTIME_DIR_ENV];
  	const rawGrace = process.env[DAEMON_IDLE_GRACE_ENV];
 diff --git a/packages/coding-agent/src/launch/protocol.ts b/packages/coding-agent/src/launch/protocol.ts
-index 0dea6ba4c7..ac84447884 100644
+index 0dea6ba4c7..66784154d5 100644
 --- a/packages/coding-agent/src/launch/protocol.ts
 +++ b/packages/coding-agent/src/launch/protocol.ts
-@@ -42,6 +42,7 @@ export type DaemonOperation =
+@@ -3,8 +3,8 @@ import {
+ 	type DaemonState,
+ 	type DaemonRestartPolicy,
+ 	type DaemonReadySpec,
+-	type DaemonSpec,
+-	type DaemonSnapshot,
++	type DaemonSpec as NativeDaemonSpec,
++	type DaemonSnapshot as NativeDaemonSnapshot,
+ } from "@oh-my-pi/pi-tui/tools/daemon";
+ /**
+  * Cross-process daemon broker protocol shared by the tool, client, and broker.
+@@ -27,6 +27,16 @@ export const DAEMON_IDLE_GRACE_ENV = "OMP_DAEMON_IDLE_GRACE_MS";
+ /** Signals accepted by daemon input operations. */
+ export type DaemonSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "SIGQUIT" | "SIGKILL";
+ 
++/** Broker-owned metadata; never forwarded to the native process APIs. */
++export interface DaemonSpec extends NativeDaemonSpec {
++	previewUrl?: string;
++}
++
++/** Only explicitly declared preview URLs are published; never inferred from output. */
++export interface DaemonSnapshot extends NativeDaemonSnapshot {
++	previewUrl?: string;
++}
++
+ /** Typed broker operation sent over the authenticated socket. */
+ export type DaemonOperation =
+ 	| { op: "ping" }
+@@ -42,6 +52,7 @@ export type DaemonOperation =
  	| {
  			op: "logs";
  			name: string;
@@ -1896,7 +1960,7 @@ index 0dea6ba4c7..ac84447884 100644
  			lines: number;
  			head: boolean;
  			grep?: string;
-@@ -51,25 +52,26 @@ export type DaemonOperation =
+@@ -51,25 +62,26 @@ export type DaemonOperation =
  			renderTerminalRows?: boolean;
  			timeoutMs: number;
  	  }
@@ -1928,11 +1992,27 @@ index 0dea6ba4c7..ac84447884 100644
  /** Typed broker result decoded before it reaches tool code. */
  export type DaemonRpcResult =
 -	| { op: "ping"; projectDir: string }
-+	| { op: "ping"; projectDir: string; instanceFencing?: boolean }
++	| { op: "ping"; projectDir: string; instanceFencing?: boolean; previewUrls?: boolean }
  	| { op: "start"; daemon: DaemonSnapshot; readyTimedOut: boolean }
  	| { op: "list"; daemons: DaemonSnapshot[] }
  	| {
-@@ -330,6 +332,7 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
+@@ -219,6 +231,7 @@ export function parseDaemonSpec(value: unknown): DaemonSpec {
+ 	const detached = source.detached === undefined ? false : booleanValue(source.detached, "spec.detached");
+ 	return {
+ 		name: stringValue(source.name, "spec.name"),
++		...(source.previewUrl === undefined ? {} : { previewUrl: rawString(source.previewUrl, "spec.previewUrl") }),
+ 		application: stringValue(source.application, "spec.application"),
+ 		args: stringArray(source.args, "spec.args"),
+ 		env: stringRecord(source.env, "spec.env"),
+@@ -236,6 +249,7 @@ export function parseDaemonSnapshot(value: unknown): DaemonSnapshot {
+ 	const source = record(value, "daemon snapshot");
+ 	return {
+ 		name: stringValue(source.name, "daemon.name"),
++		...(source.previewUrl === undefined ? {} : { previewUrl: rawString(source.previewUrl, "daemon.previewUrl") }),
+ 		id: stringValue(source.id, "daemon.id"),
+ 		state: daemonState(source.state),
+ 		pid: optionalNumber(source.pid, "daemon.pid"),
+@@ -330,6 +344,7 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
  			return {
  				op,
  				name: stringValue(source.name, "operation.name"),
@@ -1940,7 +2020,7 @@ index 0dea6ba4c7..ac84447884 100644
  				lines: numberValue(source.lines, "operation.lines"),
  				head: booleanValue(source.head, "operation.head"),
  				grep: optionalString(source.grep, "operation.grep"),
-@@ -347,6 +350,7 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
+@@ -347,6 +362,7 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
  			return {
  				op,
  				name: stringValue(source.name, "operation.name"),
@@ -1948,7 +2028,7 @@ index 0dea6ba4c7..ac84447884 100644
  				for: target,
  				pattern: optionalString(source.pattern, "operation.pattern"),
  				timeoutMs: numberValue(source.timeoutMs, "operation.timeoutMs"),
-@@ -356,6 +360,7 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
+@@ -356,6 +372,7 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
  			return {
  				op,
  				name: stringValue(source.name, "operation.name"),
@@ -1956,7 +2036,7 @@ index 0dea6ba4c7..ac84447884 100644
  				data: optionalString(source.data, "operation.data"),
  				signal: source.signal === undefined ? undefined : daemonSignal(source.signal),
  			};
-@@ -363,19 +368,29 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
+@@ -363,19 +380,29 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
  			return {
  				op,
  				name: stringValue(source.name, "operation.name"),
@@ -1988,7 +2068,7 @@ index 0dea6ba4c7..ac84447884 100644
  		}
  		default:
  			throw new Error(`Unknown daemon operation: ${op}`);
-@@ -387,7 +402,11 @@ export function parseDaemonRpcResult(operation: DaemonOperation, value: unknown)
+@@ -387,7 +414,12 @@ export function parseDaemonRpcResult(operation: DaemonOperation, value: unknown)
  	const source = record(value, `${operation.op} result`);
  	switch (operation.op) {
  		case "ping":
@@ -1997,15 +2077,38 @@ index 0dea6ba4c7..ac84447884 100644
 +				op: "ping",
 +				projectDir: stringValue(source.projectDir, "result.projectDir"),
 +				instanceFencing: source.instanceFencing === true,
++				previewUrls: source.previewUrls === true,
 +			};
  		case "start":
  			return {
  				op: "start",
 diff --git a/packages/coding-agent/src/launch/services.ts b/packages/coding-agent/src/launch/services.ts
-index 865ce7e70f..9392a9b64f 100644
+index 865ce7e70f..5f102c709c 100644
 --- a/packages/coding-agent/src/launch/services.ts
 +++ b/packages/coding-agent/src/launch/services.ts
-@@ -29,6 +29,11 @@ export interface ServiceStart {
+@@ -1,13 +1,12 @@
+ /** Session-scoped service supervision through the shared project broker. */
+ import * as path from "node:path";
+ import { TERMINAL_STATES } from "@oh-my-pi/pi-tui/apps/ps-data";
+-import type { DaemonSnapshot, DaemonSpec } from "@oh-my-pi/pi-tui/tools/daemon";
+ import { formatDuration, replaceTabs } from "@oh-my-pi/pi-tui/render/render-utils";
+ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+ import { getDaemonRuntimeDir, logger, sanitizeText } from "@oh-my-pi/pi-utils";
+ import { type DaemonBrokerClient, daemonClientForProject } from "./client";
+ import { canonicalProjectDir } from "./paths";
+-import type { DaemonOperation, DaemonRpcResult } from "./protocol";
++import type { DaemonOperation, DaemonRpcResult, DaemonSnapshot, DaemonSpec } from "./protocol";
+ import { renderTerminalOutputIsolated } from "./terminal-output-worker-client";
+ import type { ToolSession } from "../tools";
+ import { resolveToCwd } from "../tools/path-utils";
+@@ -24,11 +23,18 @@ export interface ServiceReady {
+ export interface ServiceStart {
+ 	name: string;
+ 	command: string;
++	/** Agent-declared HTTP(S) preview URL for web development servers. */
++	previewUrl?: string;
+ 	cwd?: string;
+ 	pty?: boolean;
  	ready?: ServiceReady;
  	/** Overlay on the configured shell env; wins over it. */
  	env?: Record<string, string>;
@@ -2017,7 +2120,7 @@ index 865ce7e70f..9392a9b64f 100644
  }
  
  const serviceStateKey = Symbol("ownedServices");
-@@ -107,11 +112,15 @@ function subscribe(session: ToolSession, client: DaemonBrokerClient): void {
+@@ -107,11 +113,15 @@ function subscribe(session: ToolSession, client: DaemonBrokerClient): void {
  	});
  }
  
@@ -2034,7 +2137,7 @@ index 865ce7e70f..9392a9b64f 100644
  	const client = await daemonClientForProject(session.cwd);
  	subscribe(session, client);
  	const result = await client.request(operation, signal);
-@@ -124,7 +133,7 @@ async function request(
+@@ -124,7 +134,7 @@ async function request(
  }
  
  export async function listServices(session: ToolSession, signal?: AbortSignal): Promise<DaemonSnapshot[]> {
@@ -2043,7 +2146,7 @@ index 865ce7e70f..9392a9b64f 100644
  	if (result.op !== "list") throw new Error("Unexpected daemon list response");
  	return result.daemons;
  }
-@@ -177,7 +186,7 @@ export async function serviceLogsWithRows(
+@@ -177,7 +187,7 @@ export async function serviceLogsWithRows(
  	name: string,
  	signal?: AbortSignal,
  ): Promise<{ text: string; terminalRows?: string[] }> {
@@ -2052,7 +2155,12 @@ index 865ce7e70f..9392a9b64f 100644
  		session,
  		{
  			op: "logs",
-@@ -240,7 +249,7 @@ export async function startService(
+@@ -236,11 +246,12 @@ export async function startService(
+ 	const shell = session.settings.getShellConfig();
+ 	const spec: DaemonSpec = {
+ 		name: params.name,
++		...(params.previewUrl === undefined ? {} : { previewUrl: params.previewUrl }),
+ 		application: shell.shell,
  		args: [...shell.args, `${shell.prefix ? `${shell.prefix} ` : ""}${params.command}`],
  		env: { ...shell.env, ...params.env },
  		cwd: resolveToCwd(params.cwd ?? session.cwd, session.cwd),
@@ -2061,7 +2169,7 @@ index 865ce7e70f..9392a9b64f 100644
  		ready: ready
  			? {
  					log: ready.log,
-@@ -249,18 +258,18 @@ export async function startService(
+@@ -249,18 +260,27 @@ export async function startService(
  					timeoutMs: Math.round(Math.max(0.05, Math.min(3_600, ready.timeout ?? 30)) * 1_000),
  				}
  			: undefined,
@@ -2073,6 +2181,15 @@ index 865ce7e70f..9392a9b64f 100644
 +		detached: params.mode === "detached",
  	};
 -	const result = await request(
++	// Older resident brokers discard unknown spec fields. Refuse before sending
++	// a start/replace instead of claiming the Agent registered a preview URL.
++	if (params.previewUrl !== undefined) {
++		const capabilities = await requestService(session, { op: "ping" }, signal);
++		if (capabilities.op !== "ping" || !capabilities.previewUrls)
++			throw new ToolError(
++				"This project broker does not support preview URLs. Restart it with the updated Runtime before launching web services; no service was started or replaced.",
++			);
++	}
 +	const result = await requestService(
  		session,
  		{
@@ -2086,7 +2203,7 @@ index 865ce7e70f..9392a9b64f 100644
  		},
  		signal,
  	);
-@@ -278,7 +287,7 @@ export async function startService(
+@@ -278,7 +298,7 @@ export async function startService(
  		return { daemon: launched, readyTimedOut: result.readyTimedOut, readyInterrupted: false };
  	const timeoutMs = Math.max(0, spec.ready.timeoutMs - (Date.now() - launched.startedAt));
  	try {
@@ -2095,7 +2212,7 @@ index 865ce7e70f..9392a9b64f 100644
  			session,
  			{ op: "wait", name: params.name, for: "ready", timeoutMs },
  			signal ? AbortSignal.any([signal, readyInterrupt]) : readyInterrupt,
-@@ -304,13 +313,13 @@ export async function sendService(
+@@ -304,13 +324,13 @@ export async function sendService(
  	signal?: AbortSignal,
  ): Promise<DaemonSnapshot> {
  	const data = /[\r\n]$/.test(content) ? content : `${content}\r`;
@@ -2111,7 +2228,7 @@ index 865ce7e70f..9392a9b64f 100644
  	if (result.op !== "stop") throw new Error("Unexpected daemon stop response");
  	return result.daemon;
  }
-@@ -321,11 +330,7 @@ export async function modeService(
+@@ -321,11 +341,7 @@ export async function modeService(
  	mode: "persist" | "session" | "detached",
  	signal?: AbortSignal,
  ): Promise<DaemonSnapshot> {
@@ -2166,6 +2283,17 @@ index 41efccc370..2b6357c677 100644
  				if (error) {
  					this.#reportFailure(error);
  					return;
+diff --git a/packages/coding-agent/src/prompts/tools/bash.md b/packages/coding-agent/src/prompts/tools/bash.md
+index 2319d2bf65..f0a6d88af9 100644
+--- a/packages/coding-agent/src/prompts/tools/bash.md
++++ b/packages/coding-agent/src/prompts/tools/bash.md
+@@ -4,5 +4,5 @@ Persistent shell: one fact command/pipeline; dependencies use `&&`.
+ Internal URIs work as paths for builtins/coreutils, redirects, globs.
+ {{#if asyncEnabled}}`async` defers finite results but keeps the deadline (default {{defaultTimeoutSec}}s); `timeout: 0` for watchers and long jobs.{{/if}}
+ No `head`/`tail`/redirection; output trunc by default, full result at `artifact://<id>`.
+-{{#if hasLaunch}}Long-lived services: unique name; ready requires name; no async/timeout; pty defaults true. ready needs log regex or port (both if given); host defaults 127.0.0.1, ready.timeout 30s.{{/if}}
++{{#if hasLaunch}}Long-lived services: unique name; ready requires name; no async/timeout; pty defaults true. ready needs log regex or port (both if given); host defaults 127.0.0.1, ready.timeout 30s. For web development servers, always supply `previewUrl` with the real absolute HTTP(S) URL (no embedded credentials); Studio discovers it automatically. Choose the actual server port/path yourself, never ask the human to enter a URL or associate the service manually. Non-web services omit `previewUrl`.{{/if}}
+ {{#if autoBackgroundEnabled}}Non-`pty` calls still running after {{autoBackgroundSeconds}}s (or 1s before `timeout`, if sooner) usually move to background job `bg_N` and keep running to `timeout` (not when the client terminal runs the command or the job cap is reached); the result arrives automatically as a follow-up message. NEVER poll.{{/if}}
 diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
 index 64e5d68a44..45d0820053 100644
 --- a/packages/coding-agent/src/sdk.ts
@@ -2690,6 +2818,54 @@ index 8897536e35..33deb8e921 100644
  			timeoutStartsOnPresentation: extensionUi.timeoutStartsOnPresentation,
  			select: (prompt, options, dialogOptions) => extensionUi.select(prompt, options, dialogOptions),
  			editor: (title, prefill, dialogOptions, editorOptions) =>
+diff --git a/packages/coding-agent/src/tools/bash.ts b/packages/coding-agent/src/tools/bash.ts
+index 9e01fc2bcf..65846c12b0 100644
+--- a/packages/coding-agent/src/tools/bash.ts
++++ b/packages/coding-agent/src/tools/bash.ts
+@@ -356,6 +356,9 @@ const bashSchemaWithService = type({
+ 	"cwd?": "string",
+ 	"pty?": "boolean",
+ 	"name?": "string <= 48",
++	"previewUrl?": type("string").describe(
++		"Real HTTP(S) preview URL for a named web development server; no embedded credentials",
++	),
+ 	"ready?": type({
+ 		"log?": "string",
+ 		"port?": "number",
+@@ -371,6 +374,9 @@ const bashSchemaWithAsyncAndService = type({
+ 	"pty?": "boolean",
+ 	"async?": "boolean",
+ 	"name?": "string <= 48",
++	"previewUrl?": type("string").describe(
++		"Real HTTP(S) preview URL for a named web development server; no embedded credentials",
++	),
+ 	"ready?": type({
+ 		"log?": "string",
+ 		"port?": "number",
+@@ -390,6 +396,7 @@ export interface BashToolInput {
+ 	timeout?: number;
+ 	cwd?: string;
+ 	name?: string;
++	previewUrl?: string;
+ 	ready?: ServiceReady;
+ 	async?: boolean;
+ 	pty?: boolean;
+@@ -1200,6 +1207,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 			timeout: rawTimeout,
+ 			cwd,
+ 			name: rawName,
++			previewUrl,
+ 			ready: rawReady,
+ 			async: rawAsync,
+ 			pty,
+@@ -1326,6 +1334,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 				this.session,
+ 				{
+ 					name,
++					previewUrl,
+ 					command,
+ 					cwd: commandCwd,
+ 					pty: pty ?? true,
 diff --git a/packages/coding-agent/src/tools/browser.ts b/packages/coding-agent/src/tools/browser.ts
 index 53f46a6627..9641daddb0 100644
 --- a/packages/coding-agent/src/tools/browser.ts

@@ -12,7 +12,11 @@ import type { SubagentHubTarget } from "../conversation/toolMeta";
 import type { SubagentConversationClient } from "../conversation/subagentConversationEngine";
 import type { SubagentViewState } from "../conversation/subagentViewState";
 import { AgentBtwPane } from "../btw/AgentBtwPane";
+import { useWideLayout } from "../layout/useWideLayout";
 import { agentStatusText } from "./agentPresentation";
+
+/** From this body width the details move out of their tab into a column beside the conversation. */
+const AGENT_DETAIL_WIDE_MIN = 1080;
 
 export function AgentDetailPanel({ target, ...props }: AgentDetailProps) {
   const { resolvedLanguage } = useI18n();
@@ -52,6 +56,9 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
   const [tab, setTab] = useState<"chat" | "details" | "btw">(viewState?.contentTab ?? "chat");
   const [btwVisited, setBtwVisited] = useState(viewState?.btwVisited ?? false);
   const [sourceMissing, setSourceMissing] = useState(false);
+  const [rootRef, wide] = useWideLayout<HTMLElement>(AGENT_DETAIL_WIDE_MIN);
+  // Wide: the details column is always beside the conversation, so its tab goes away.
+  const shown = wide && tab === "details" ? "chat" : tab;
   const agent = agents.find(row => row.agentId === target.agentId);
   const parent = agents.find(row => row.agentId === agent?.parentAgentId);
   const demo = preview ? previewAgentDisplay(target.agentId) : undefined;
@@ -73,7 +80,26 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
     [zh ? "补丁" : "Patch", agent?.patchPath],
     [zh ? "分支" : "Branch", agent?.branchName],
   ];
-  return <section className="agent-detail" data-live={visible && (preview || runtimeConnected && !historical) || undefined} aria-label={zh ? `子 Agent ${target.agentId}` : `Agent ${target.agentId}`} onPointerDownCapture={onActivate} onFocusCapture={onActivate}>
+  const metric = (index: number) => metrics[index]![1];
+  const present = (rows: readonly (readonly [string, string | undefined])[]) => rows.filter((row): row is readonly [string, string] => row[1] !== undefined && row[1] !== "");
+  const runRows = present([
+    [zh ? "状态" : "Status", status],
+    [zh ? "模型" : "Model", metric(3)],
+    [zh ? "模型角色" : "Role", agent?.modelRole],
+    [zh ? "父 Agent" : "Parent", metric(1)],
+    [zh ? "请求" : "Requests", agent?.usage?.requests.toLocaleString()],
+    [zh ? "工具调用" : "Tool calls", agent?.usage?.tools.toLocaleString()],
+    ["ID", target.agentId],
+  ]);
+  const outputRows = present([[zh ? "产出" : "Output", metric(7)], [zh ? "补丁" : "Patch", metric(8)], [zh ? "分支" : "Branch", metric(9)]]);
+  const chooseTab = (next: typeof tab) => {
+    setTab(next);
+    if (viewState) viewState.contentTab = next;
+    if (next === "btw") { setBtwVisited(true); if (viewState) viewState.btwVisited = true; }
+  };
+  // The conversation keeps one stable position in the tree in both layouts, so a
+  // resize across the threshold never remounts it (no lost scroll or subscription).
+  return <section className={`agent-detail${wide ? " is-wide" : ""}`} ref={rootRef} data-live={visible && (preview || runtimeConnected && !historical) || undefined} aria-label={zh ? `子 Agent ${target.agentId}` : `Agent ${target.agentId}`} onPointerDownCapture={onActivate} onFocusCapture={onActivate}>
     <header className="agent-detail-head">
       <div className="agent-detail-identity">
         <span className="agent-avatar"><Icon name="bot" extra="sm" /></span>
@@ -93,24 +119,37 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
     </header>
     <div className="agent-detail-nav">
       <div className="agent-detail-tabs" role="tablist" aria-label={zh ? "子 Agent 内容" : "Agent content"}>
-        {([['chat', zh ? '对话' : 'Conversation'], ['details', zh ? '详情' : 'Details'], ...(preview || canBtw ? [['btw', 'BTW']] : [])] as const).map(([id, label]) =>
-          <button type="button" key={id} role="tab" aria-selected={tab === id} onClick={() => { const next = id as typeof tab; setTab(next); if (viewState) viewState.contentTab = next; if (id === "btw") { setBtwVisited(true); if (viewState) viewState.btwVisited = true; } }}>{label}</button>)}
+        {([['chat', zh ? '对话' : 'Conversation'], ...(wide ? [] : [['details', zh ? '详情' : 'Details']] as const), ...(preview || canBtw ? [['btw', 'BTW']] : [])] as const).map(([id, label]) =>
+          <button type="button" key={id} role="tab" aria-selected={shown === id} onClick={() => chooseTab(id as typeof tab)}>{label}</button>)}
       </div>
       <div className="agent-detail-actions">
         {target.toolCallId && contextAvailable ? <button type="button" className="btn small ghost" aria-label={zh ? "定位委派" : "Show delegation"} title={zh ? "定位委派" : "Show delegation"} onClick={() => { void onRevealSource(target).then(found => setSourceMissing(!found)); }}><Icon name="undo" extra="sm" /><span>{zh ? "定位委派" : "Show delegation"}</span></button> : null}
         <button type="button" className="btn small ghost" aria-label="Agent Hub" title={zh ? "前往 Agent Hub" : "Open Agent Hub"} onClick={() => onOpenHub(target.agentId)}><Icon name="external" extra="sm" /><span>Agent Hub</span></button>
       </div>
     </div>
-    <div className="agent-detail-conversation" hidden={tab !== "chat"}>
-      <SubagentConversationPane target={target} preview={preview} previewComposer visible={visible && tab === "chat"}
+    <div className="agent-detail-conversation" hidden={shown !== "chat"}>
+      <SubagentConversationPane target={target} preview={preview} previewComposer visible={visible && shown === "chat"}
         client={preview ? null : conversationClient} sendClient={preview ? null : client} agents={agents}
         canSend={canSend && !historical} runtimeConnected={runtimeConnected}
         {...(parentSessionId === undefined ? {} : { parentSessionId })} {...(liveSessionId === undefined ? {} : { liveSessionId })}
         {...(viewState === undefined ? {} : { viewState })} {...(workspaceId === undefined ? {} : { workspaceId })}
         {...(loadMentions === undefined ? {} : { loadMentions })} {...(pendingInteractionSessionId === undefined ? {} : { pendingInteractionSessionId })} />
     </div>
-    {tab === "details" ? <div className="agent-detail-metadata"><dl>{metrics.filter(([, value]) => value !== undefined && value !== "").map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div> : null}
-    {btwVisited ? <div className="agent-detail-btw" hidden={tab !== "btw"}><AgentBtwPane client={preview ? undefined : client} sessionId={parentSessionId} agentId={target.agentId} {...(viewState ? { viewState: viewState.btw } : {})}
-      available={visible && tab === "btw" && canBtw && runtimeConnected && !historical && agent?.hasLiveSession === true} /></div> : null}
+    {shown === "details" ? <div className="agent-detail-metadata"><dl>{metrics.filter(([, value]) => value !== undefined && value !== "").map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div> : null}
+    {btwVisited ? <div className="agent-detail-btw" hidden={shown !== "btw"}><AgentBtwPane client={preview ? undefined : client} sessionId={parentSessionId} agentId={target.agentId} {...(viewState ? { viewState: viewState.btw } : {})}
+      available={visible && shown === "btw" && canBtw && runtimeConnected && !historical && agent?.hasLiveSession === true} /></div> : null}
+    {wide ? <aside className="agent-detail-aside" aria-label={zh ? "子 Agent 详情" : "Agent details"}>
+      <div className="agent-detail-stats">
+        {([[zh ? "运行时间" : "Duration", metric(4)], ["Tokens", metric(5)], [zh ? "费用" : "Cost", metric(6)]] as const).map(([label, stat]) =>
+          <div key={label} className="agent-detail-stat"><span>{label}</span><strong>{stat || "—"}</strong></div>)}
+      </div>
+      {task ? <section className="agent-detail-section"><h3>{zh ? "任务" : "Task"}</h3><p className="agent-detail-assignment">{task}</p></section> : null}
+      {runRows.length ? <section className="agent-detail-section"><h3>{zh ? "运行" : "Run"}</h3>
+        <dl className="agent-detail-props">{runRows.map(([label, text]) => <div key={label}><dt>{label}</dt><dd>{text}</dd></div>)}</dl>
+      </section> : null}
+      {outputRows.length ? <section className="agent-detail-section"><h3>{zh ? "产出" : "Outputs"}</h3>
+        <dl className="agent-detail-props is-paths">{outputRows.map(([label, text]) => <div key={label}><dt>{label}</dt><dd title={text}>{text}</dd></div>)}</dl>
+      </section> : null}
+    </aside> : null}
   </section>;
 }

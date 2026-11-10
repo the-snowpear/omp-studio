@@ -1,4 +1,5 @@
 import type { PanelId } from "./types";
+import { panelTransitionName } from "./model";
 
 /** Named snapshots leave the scrolling list. Clip their animated groups back to
  * its viewport, including the moving card frames and the separate body hosts. */
@@ -7,9 +8,9 @@ export function railTransitionClip(panels: readonly PanelId[], document: Documen
   const window = surface.defaultView!;
   const style = surface.createElement("style");
   style.dataset.dockTransitionClip = "";
-  style.textContent = panels.map(id => `:root[data-dock-rail-transition] .dock-panel-content[data-panel="${id}"][data-dock-region="rail"][data-dock-rail-transition-active] { view-transition-name: dock-rail-body-${id}; }`).join("\n");
+  style.textContent = panels.map(id => `:root[data-dock-rail-transition] .dock-panel-content[data-panel="${id}"][data-dock-region="rail"][data-dock-rail-transition-active] { view-transition-name: dock-rail-body-${panelTransitionName(id)}; }`).join("\n");
   surface.head.append(style);
-  const names = panels.flatMap(id => [`dock-rail-${id}`, `dock-rail-heading-${id}`, `dock-rail-body-${id}`]);
+  const names = panels.flatMap(id => { const name = panelTransitionName(id); return [`dock-rail-${name}`, `dock-rail-heading-${name}`, `dock-rail-body-${name}`]; });
   const rules = names.map(name => {
     const sheet = style.sheet!;
     const index = sheet.insertRule(`:root[data-dock-rail-transition]::view-transition-group(${name}) {}`, sheet.cssRules.length);

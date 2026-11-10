@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { mermaidBudget, MermaidQueue } from "./mermaidQueue";
+import { afterPreviewScroll, usePreviewVisibility } from "../graphics/previewActivity";
 
 let renderId = 0;
 export const mermaidQueue = new MermaidQueue({
   hidden: () => typeof document !== "undefined" && document.hidden,
   render: async (code, config, active) => {
     const { default: mermaid } = await import("mermaid");
+    await new Promise<void>(resolve => afterPreviewScroll(document.documentElement, resolve));
     if (!active() || !mermaidBudget(code).allowed) return undefined;
     mermaid.initialize(config);
     const container = document.createElement("div");
@@ -26,28 +28,23 @@ export function LazyMermaid({ code, onFailure }: { code: string; onFailure?: (me
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const host = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(typeof IntersectionObserver === "undefined");
+  const visible = usePreviewVisibility(host, true);
   const [result, setResult] = useState<{ code: string; svg: string | null }>();
   const budget = mermaidBudget(code);
-  useEffect(() => {
-    if (host.current === null || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting)), { rootMargin: "240px" });
-    observer.observe(host.current);
-    return () => observer.disconnect();
-  }, []);
   useEffect(() => {
     if (!visible || !budget.allowed || result?.code === code) return;
     let alive = true;
     let cancel: (() => void) | undefined;
+    let cancelCommit = () => {};
     const request = () => {
       if (cancel !== undefined) return;
       const response = mermaidQueue.request(code, { active: () => alive,
-        result: (svg) => { if (alive) setResult({ code, svg }); } });
+        result: (svg) => { cancelCommit = afterPreviewScroll(host.current!, () => { if (alive) setResult({ code, svg }); }); } });
       if (response.status === "accepted") cancel = response.cancel;
     };
     const offSlot = mermaidQueue.onSlot(request);
     request();
-    return () => { alive = false; cancel?.(); offSlot(); };
+    return () => { alive = false; cancel?.(); cancelCommit(); offSlot(); };
   }, [code, visible, budget.allowed, result?.code]);
   const svg = result?.code === code ? result.svg : undefined;
   useEffect(() => { if (svg === null || !budget.allowed) onFailure?.(budget.reason ?? (zh ? "图表无法渲染" : "Diagram could not be rendered")); }, [svg, budget.allowed, budget.reason, onFailure, zh]);

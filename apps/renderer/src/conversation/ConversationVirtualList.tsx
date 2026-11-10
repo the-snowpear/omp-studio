@@ -118,10 +118,14 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
     const frame = requestAnimationFrame(() => {
       revealPending.current = null;
       mounted();
+      // The callback applies an exact anchor offset or centers a tool. End the
+      // index-alignment retry so it cannot snap that position back to the row top.
+      const scroller = scrollerRef?.current;
+      if (scroller) virtualizer.scrollToOffset(scroller.scrollTop, { align: "start" });
       setRevealKey(null);
     });
     return () => cancelAnimationFrame(frame);
-  }, [revealKey]);
+  }, [revealKey, scrollerRef, virtualizer]);
   /** Record on mount and on TanStack's existing row observer; do not create a
    * second per-row observer. Keep a bounded mounted-node registry for reflows. */
   const measureRow = useCallback((el: HTMLElement | null) => {

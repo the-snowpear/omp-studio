@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { ConversationWorkspaceStore } from "../conversationWorkspace/store";
-import { DockStore } from "./store";
+import { DockStore, toolWindowMinimum } from "./store";
 import { snapCells, snapDividers, resizeSnapTree, windowSnapHit, SNAP_TEMPLATES, snapTemplateFits, snapTree } from "./snap";
+
+afterEach(() => window.dispatchEvent(new Event("pagehide")));
 
 const ref = (name: string) => ({ targetId: null, workspaceId: "workspace", sessionId: name, historyId: name });
 function setup() {
@@ -19,6 +21,20 @@ function floatTool(dock: DockStore, panel: "changes" | "terminal") {
 }
 
 describe("unified workbench windows", () => {
+  it.each(["context-viewer", "annotations"] as const)("recenters %s and restores its backdrop after its managed window closes", panel => {
+    const { dock, manager } = setup();
+    dock.dispatch({ type: "open", panel });
+    const initial = dock.getSnapshot().layout.floats.find(group => group.panels.includes(panel))!;
+    const centered = { ...initial.rect };
+    manager.float(dock.windowId(initial.id), { x: 30, y: 40, width: 600, height: 480 });
+    dock.endModalFocus(panel);
+    dock.dispatch({ type: "hide", panels: [panel] });
+    dock.dispatch({ type: "open", panel });
+    const reopened = dock.getSnapshot().layout.floats.find(group => group.panels.includes(panel))!;
+    expect(reopened.rect).toEqual(centered);
+    expect(manager.get(dock.windowId(reopened.id))?.rect).toEqual(centered);
+    expect(dock.getSnapshot().modalPanel).toBe(panel);
+  });
   it.each([
     { side: "left", bottom: false, template: "stack-left", cell: 0 },
     { side: "left", bottom: true, template: "stack-left", cell: 1 },
@@ -230,6 +246,19 @@ describe("unified workbench windows", () => {
     manager.geometry.canvas = { x: 260, y: 80, width: 500, height: 300 };
     expect(manager.size().height).toBeGreaterThan(300);
     expect(manager.getSnapshot().snap!.tree).toBe(tree);
+  });
+  it("uses the incoming tool minimum for the same preview and final partition geometry", () => {
+    const { manager, dock } = setup();
+    manager.geometry.canvas = { x: 260, y: 80, width: 1200, height: 600 };
+    const target = { template: "stack-left" as const, cell: 0, splitSide: "left" as const };
+    const preview = manager.project(dock.windowId("pending"), target);
+    const size = manager.size(preview.snap, { 0: toolWindowMinimum("context-viewer", 1) });
+    expect(size.height).toBe(604);
+    dock.dispatch({ type: "move", panels: ["context-viewer"], target: { region: "float" } });
+    const group = dock.getSnapshot().layout.floats.find(value => value.panels.includes("context-viewer"))!;
+    manager.snap(dock.windowId(group.id), target);
+    expect(manager.size()).toEqual(size);
+    expect(snapCells(preview.snap!.template, preview.snap!.tree, size)[0]).toEqual(snapCells(manager.getSnapshot().snap!.template, manager.getSnapshot().snap!.tree, manager.size())[0]);
   });
   it("offers six valid templates including both mirrored three-window arrangements", () => {
     expect(SNAP_TEMPLATES).toHaveLength(6);

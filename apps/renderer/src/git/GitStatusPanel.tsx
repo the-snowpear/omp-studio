@@ -23,7 +23,7 @@ import { DiffDisplayMode } from "../conversation/ChangesPanel";
 import { splitDisplayPath } from "../conversation/toolMeta";
 
 import { GitCommitGraph } from "./GitCommitGraph";
-import { GitDiffResizer, useGitDiffHeight } from "./GitDiffResizer";
+import { GitDiffPlaceholder, GitDiffResizer, useGitDiffHeight } from "./GitDiffResizer";
 import { GitPatch } from "./GitPatch";
 import { GitMoreActionsMenu } from "./GitMoreActionsMenu";
 import { GitPanelSplit } from "./GitPanelSplit";
@@ -412,6 +412,6 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
           <div className={`diff-scroll${splitDiff ? " diff-split" : ""}`}>{diff ? (diff.binary ? <div className="empty">Binary diff</div> : diff.patch.length === 0 && repository.changes.some((change) => change.path === selected.path && change.worktree === "untracked") ? <div className="empty">{t("git.untrackedNoDiff")}</div> : <GitPatch patch={diff.patch} split={splitDiff} />) : <div className="empty">{t("git.readingDiff")}</div>}</div>
         </div>
       </>
-    ) : null}
+    ) : <GitDiffPlaceholder />}
   </>);
 }

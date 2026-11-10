@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { StudioClientImpl } from "@omp-studio/client";
 import { contractFixtures } from "@omp-studio/testkit";
@@ -204,6 +204,7 @@ it("keeps left card headers grip-free, including tools moved into the sidebar", 
   expect(files.querySelector("[data-dock-drag]")).not.toBeNull();
 
   await toggleRegion("Right sidebar");
+  fireEvent.click(within(document.querySelector<HTMLElement>("#sidePanel")!).getByRole("button", { name: /^Git Branches/ }));
   fireEvent.contextMenu(document.querySelector<HTMLElement>('#sidePanel [data-dock-tab="git"]')!);
   fireEvent.click(screen.getByRole("menuitem", { name: "Move to" }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Left sidebar" }));
@@ -217,6 +218,7 @@ it("keeps the right sidebar to one tab row and puts add next to the last tab", a
   await mount(1440);
   await toggleRegion("Right sidebar");
   expect(sideShown()).toBe(true);
+  fireEvent.click(within(document.querySelector<HTMLElement>("#sidePanel")!).getByRole("button", { name: /^Git Branches/ }));
   const right = document.querySelector<HTMLElement>("#sidePanel .dock-group-region-right")!;
   // The region label row is gone; the tab row is the panel header.
   expect(right.querySelector(":scope > .dock-region-toolbar")).toBeNull();

@@ -125,8 +125,19 @@
   color: inherit;
   margin: 0;
 }
-#sbFilesTitle {
+#sbFilesTitle,
+.dock-files-title {
   letter-spacing: 0.1em;
+}
+/* Explorer in a wide body (maximised window, full-screen group): a centred,
+   framed tree so names and their Git marks stay within one reading span. */
+.dock-files-content { container: files-panel / inline-size; }
+@container files-panel (min-width: 760px) {
+  .dock-files-content > * { box-sizing: border-box; width: min(100% - 48px, 920px); margin-inline: auto; }
+  .dock-files-content > .sb-section-head { min-height: 52px; padding: clamp(12px, 4vh, 40px) 4px 10px; }
+  .dock-files-content > .sb-section-head .sb-head-actions { opacity: 1; }
+  .dock-files-content > .sb-scroll { flex: 1 1 0; min-height: 0; margin-bottom: 24px; padding: 6px; border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface); }
+  .dock-files-content .tree-row { height: 30px; gap: 7px; font-size: var(--fs-12); }
 }
 .sb-section-head .icon-btn { width: 20px; height: 20px; margin-left: auto; }
 .sb-section-head .icon-btn + .icon-btn { margin-left: 0; }

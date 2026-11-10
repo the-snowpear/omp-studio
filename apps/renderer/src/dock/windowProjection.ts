@@ -1,12 +1,13 @@
 import { focusWindowId, type WorkbenchWindows, type WindowLayout } from "./windows";
 import { snapCells } from "./snap";
+import type { DockRect } from "./types";
 
-export function previewWindowLayout(manager: WorkbenchWindows, layout: WindowLayout, sourceId: string, surface: Document) {
+export function previewWindowLayout(manager: WorkbenchWindows, layout: WindowLayout, sourceId: string, surface: Document, size?: Pick<DockRect, "width" | "height">) {
   if (!layout.snap) return () => {};
   const canvas = surface.querySelector<HTMLElement>("[data-conversation-canvas]");
   if (!canvas) return () => {};
   const bounds = canvas.getBoundingClientRect(), viewport = canvas.querySelector<HTMLElement>(".cw-snap-viewport");
-  const cells = snapCells(layout.snap.template, layout.snap.tree, manager.size(layout.snap));
+  const cells = snapCells(layout.snap.template, layout.snap.tree, size ?? manager.size(layout.snap));
   const restore: Array<() => void> = [];
   for (const [cell, id] of Object.entries(layout.snap.members)) {
     if (id === sourceId) continue;

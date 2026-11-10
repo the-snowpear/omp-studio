@@ -1,3 +1,4 @@
+import { setAskText } from "./test/askEditor";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ClientInteraction, InteractionId, SessionId } from "@omp-studio/client-contract";
@@ -102,7 +103,7 @@ describe("InteractionDeck real cards", () => {
   it("select custom answer submits the typed text", () => {
     const onRespond = vi.fn();
     render(<InteractionPrompt interaction={select("Which backend?", ["SQLite"])} onRespond={onRespond} />);
-    fireEvent.change(screen.getByLabelText("自定义回答"), { target: { value: "neither" } });
+    setAskText(screen.getByLabelText("自定义回答"), "neither");
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
     expect(onRespond).toHaveBeenCalledWith("submit", "neither");
   });

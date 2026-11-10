@@ -14,6 +14,7 @@ export const APP_MENU_COMMANDS = Object.freeze([
   "view.toggleBottomPanel",
   "view.toggleSkills",
   "help.shortcuts",
+  "help.tutorial",
 ] as const);
 
 export type AppMenuCommand = (typeof APP_MENU_COMMANDS)[number];

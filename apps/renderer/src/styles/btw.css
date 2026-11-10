@@ -197,6 +197,112 @@
   .btw-compose-area { padding-inline: var(--sp-12); }
   .btw-toolbar { padding-inline: var(--sp-10); }
 }
+
+/* ---------------- 宽版（BTW_WIDE_MIN） ----------------
+   话题从下拉框挪到左侧列表，对话与输入框收进阅读列居中。只做网格摆放，
+   正文与输入框的 DOM 不动（窄版同一份），跨阈值不会重挂。 */
+.btw-panel.btw-conversation.is-wide .btw-transcript { padding: var(--sp-24) max(var(--sp-24), calc((100% - var(--doc-max-w)) / 2)); }
+.btw-panel.btw-conversation.is-wide .btw-compose-area { padding: var(--sp-12) max(var(--sp-24), calc((100% - var(--doc-max-w)) / 2)) var(--sp-20); }
+.btw-panel.btw-conversation.has-topics {
+  display: grid;
+  grid-template-columns: clamp(240px, 22%, 300px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.btw-panel.has-topics > :is(.btw-running-topic, .btw-transcript, .btw-compose-area) { grid-column: 2; min-width: 0; }
+.btw-panel.has-topics > .btw-running-topic { grid-row: 1; }
+.btw-panel.has-topics > .btw-transcript { grid-row: 2; }
+.btw-panel.has-topics > .btw-compose-area { grid-row: 3; }
+.btw-topics {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+}
+.btw-topics-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-height: 44px;
+  padding: var(--sp-8) var(--sp-10) var(--sp-4) var(--sp-16);
+}
+.btw-topics-title { color: var(--text-3); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: 0.04em; }
+.btw-topics-head .spacer { flex: 1; }
+.btw-topics-new {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  margin: var(--sp-4) var(--sp-10) var(--sp-8);
+  padding: var(--sp-8) var(--sp-10);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-6);
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+.btw-topics-new:hover:not(:disabled) { border-color: var(--accent-border); color: var(--accent); }
+.btw-topics-new:disabled { opacity: 0.55; cursor: default; }
+.btw-topics-list {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--sp-8) var(--sp-12);
+  scrollbar-width: thin;
+}
+.btw-topic-item {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: var(--sp-8) var(--sp-10);
+  border: 0;
+  border-radius: var(--r-6);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.btw-topic-item:hover:not(:disabled) { background: var(--surface-hover); }
+.btw-topic-item.is-active { background: var(--accent-soft); cursor: default; }
+.btw-topic-item:disabled:not(.is-active) { opacity: 0.6; cursor: default; }
+.btw-topic-item:focus-visible, .btw-topics-new:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.btw-topic-name {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.btw-topic-meta { overflow: hidden; color: var(--text-3); font-size: var(--fs-11); text-overflow: ellipsis; white-space: nowrap; }
+.btw-topic-item.is-error .btw-topic-meta { color: var(--red); }
+.btw-topic-item.is-running .btw-topic-meta::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: var(--sp-6);
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 1px;
+  animation: btw-pulse 1.4s ease-in-out infinite;
+}
+.btw-topics-empty { margin: var(--sp-8) var(--sp-6); color: var(--text-3); font-size: var(--fs-11); line-height: 1.6; }
 @media (prefers-reduced-motion: reduce) {
   .btw-thinking > span { animation: none; }
+  .btw-topic-item.is-running .btw-topic-meta::before { animation: none; }
 }

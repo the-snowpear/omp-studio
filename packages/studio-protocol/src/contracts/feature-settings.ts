@@ -49,6 +49,12 @@ export interface FeatureSettingRow {
   source: "env" | "runtime" | "overlay" | "project" | "global" | "default";
 }
 export interface PoolAccountOption { provider: string; identityKey: string; label: string }
+export type ProviderAccountPools = Record<string, string[]>;
+export type AgentAccountPools = Record<string, ProviderAccountPools | null>;
+export interface AgentAccountPoolState {
+  global: AgentAccountPools;
+  effective: AgentAccountPools;
+}
 export interface CompactionPreview {
   valid: boolean;
   summary?: string;
@@ -63,6 +69,8 @@ export type FeatureSettingsOperation =
   | { kind: "preferences.features.set"; sessionId: string; key: FeatureSettingKey; value: FeatureSettingValue; scope: "session" | "global" }
   | { kind: "preferences.features.clearOverride"; sessionId: string; key: FeatureSettingKey }
   | { kind: "accounts.pool.options"; sessionId: string }
+  | { kind: "accounts.pool.get"; sessionId: string }
+  | { kind: "accounts.pool.set"; sessionId: string; agent: string; pools: ProviderAccountPools | null }
   | { kind: "models.compaction.preview"; sessionId: string; selector: string; input: string }
   | { kind: "models.compaction.set"; sessionId: string; selector: string; input: string; confirmed?: boolean };
 export interface FeatureSettingsResultMap {
@@ -72,11 +80,13 @@ export interface FeatureSettingsResultMap {
   "preferences.features.set": FeatureSettingRow;
   "preferences.features.clearOverride": FeatureSettingRow;
   "accounts.pool.options": { accounts: PoolAccountOption[]; truncated: boolean };
+  "accounts.pool.get": AgentAccountPoolState;
+  "accounts.pool.set": AgentAccountPoolState;
   "models.compaction.preview": CompactionPreview;
   "models.compaction.set": { saved: boolean; confirmationRequired: boolean; summary: string };
 }
-export const FEATURE_SETTINGS_KINDS = ["session.compaction.get", "session.compaction.set", "preferences.features.get", "preferences.features.set", "preferences.features.clearOverride", "accounts.pool.options", "models.compaction.preview", "models.compaction.set"] as const;
-export const FEATURE_SETTINGS_READ_KINDS = ["session.compaction.get", "preferences.features.get", "accounts.pool.options", "models.compaction.preview"] as const;
+export const FEATURE_SETTINGS_KINDS = ["session.compaction.get", "session.compaction.set", "preferences.features.get", "preferences.features.set", "preferences.features.clearOverride", "accounts.pool.options", "accounts.pool.get", "accounts.pool.set", "models.compaction.preview", "models.compaction.set"] as const;
+export const FEATURE_SETTINGS_READ_KINDS = ["session.compaction.get", "preferences.features.get", "accounts.pool.options", "accounts.pool.get", "models.compaction.preview"] as const;
 export function isFeatureSettingsKind(kind: string): kind is FeatureSettingsOperation["kind"] {
   return (FEATURE_SETTINGS_KINDS as readonly string[]).includes(kind);
 }
@@ -109,6 +119,7 @@ export function validateFeatureSettingValue(value: unknown, depth = 0): asserts 
   throw Error("Invalid setting value");
 }
 export function validateFeatureSettingsOperation(value: unknown): void {
+  if ((value as FeatureSettingsOperation)?.kind === "accounts.pool.get" || (value as FeatureSettingsOperation)?.kind === "accounts.pool.set") return;
   if ((value as FeatureSettingsOperation)?.kind === "session.compaction.get" || (value as FeatureSettingsOperation)?.kind === "session.compaction.set") return;
   const row = record(value, ["kind", "sessionId", "key", "value", "scope", "selector", "input", "confirmed"]);
   if (typeof row.kind !== "string" || !isFeatureSettingsKind(row.kind)) throw Error("Unknown feature settings operation");
@@ -138,6 +149,7 @@ function setting(value: unknown): void {
   validateFeatureSettingValue(row.value);
 }
 export function validateFeatureSettingsResult(kind: FeatureSettingsOperation["kind"], value: unknown): void {
+  if (kind === "accounts.pool.get" || kind === "accounts.pool.set") return;
   if (kind === "session.compaction.get" || kind === "session.compaction.set") return;
   if (JSON.stringify(value).length > 131072) throw Error("Feature settings result exceeds limit");
   if (kind === "models.compaction.set") {

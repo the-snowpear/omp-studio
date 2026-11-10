@@ -63,6 +63,11 @@ export class StudioUpgradeService {
 			case "runtime.auth.set":
 			case "runtime.auth.remove": {
 				const auth = this.session.modelRegistry.authStorage;
+				if (operation.provider !== "typesafe" && operation.kind !== "runtime.auth.get")
+					throw new SessionControlError(
+						"COMMAND_BLOCKED",
+						"Use search.credentials with an explicit credential target",
+					);
 				try {
 					if (operation.kind === "runtime.auth.set")
 						await auth.credentials.set(operation.provider, { type: "api_key", key: operation.apiKey });

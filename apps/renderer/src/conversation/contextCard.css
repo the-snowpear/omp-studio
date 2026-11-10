@@ -49,6 +49,38 @@
 .context-card-empty p { margin: 6px 0 0; font-size: var(--fs-11); }
 .dock-panel-content[data-panel="context"][data-dock-region="rail"] { border-radius: 0 0 calc(var(--r-10) - 1px) calc(var(--r-10) - 1px); }
 
+/* Wide (CONTEXT_WIDE_MIN in ContextCard.tsx): a ring beside the full breakdown,
+   cache and controls below. Same data and controls as the card. */
+.context-card.is-wide { padding: 0; overflow: auto; }
+.context-card-empty.is-wide { align-items: center; justify-content: center; text-align: center; }
+.context-dash { box-sizing: border-box; display: flex; flex-direction: column; gap: 18px; width: min(100%, 1040px); margin: 0 auto; padding: clamp(20px, 7vh, 72px) 24px 20px; }
+.context-dash-main { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: clamp(24px, 4vw, 56px); padding: 24px 28px; border: 1px solid var(--border); border-radius: var(--r-10); background: var(--surface); }
+.context-ring { position: relative; width: 212px; height: 212px; }
+.context-ring svg { display: block; width: 100%; height: 100%; transform: rotate(-90deg); }
+.context-ring circle { fill: none; stroke-width: 14; }
+.context-ring circle:not(.context-ring-track) { transition: stroke-dasharray var(--dur-slow) var(--ease-out), stroke-dashoffset var(--dur-slow) var(--ease-out); }
+.context-ring-track { stroke: var(--context-free); }
+.context-ring-marker { stroke: var(--text-2); stroke-width: 2.5; stroke-linecap: round; }
+.context-ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; pointer-events: none; }
+.context-ring-label > strong { color: var(--text); font-size: 44px; font-weight: var(--fw-medium); letter-spacing: -1.5px; line-height: 1; font-variant-numeric: tabular-nums; }
+.context-ring-label > strong > span { margin-left: 2px; font-size: 20px; letter-spacing: 0; }
+.context-ring-label > span { color: var(--text-3); font-size: var(--fs-12); }
+.context-ring[data-tone="warning"] .context-ring-label > strong { color: var(--amber); }
+.context-ring[data-tone="danger"] .context-ring-label > strong { color: var(--red); }
+.context-dash-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.context-dash-capacity { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; color: var(--text-3); font-size: var(--fs-12); }
+.context-dash-capacity > b { color: var(--text); font-family: var(--font-mono); font-size: var(--fs-18); font-weight: var(--fw-medium); }
+.context-dash-capacity > span:not(.context-dash-source) { font-family: var(--font-mono); }
+.context-dash-source { margin-left: auto; padding: 2px 8px; border-radius: var(--r-full); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-11); }
+.context-dash-rows { display: flex; flex-direction: column; gap: 2px; }
+.context-dash-row { display: grid; grid-template-columns: 10px minmax(84px, 0.9fr) minmax(80px, 1.6fr) 64px 52px; align-items: center; gap: 12px; min-height: 30px; font-size: var(--fs-12); }
+.context-dash-row.is-free { margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); color: var(--text-3); }
+.context-dash-bar { height: 6px; overflow: hidden; border-radius: var(--r-full); background: var(--surface-2); }
+.context-dash-row.is-free .context-dash-bar { background: none; }
+.context-dash-bar > i { display: block; height: 100%; border-radius: inherit; }
+.context-dash-row .context-card-tokens, .context-dash-row .context-card-percent { font-size: var(--fs-12); }
+.context-card.is-wide .context-card-footer { padding: 12px 4px 0; border-top: 1px solid var(--border); }
+
 .context-threshold { display: flex; align-items: center; gap: 6px; min-width: 0; height: 24px; }
 .context-threshold-title, .context-threshold input { font: inherit; line-height: 1.4; }
 .context-threshold-title { display: block; color: var(--text-3); cursor: text; flex-shrink: 0; }
@@ -86,7 +118,7 @@
 .context-threshold-pop button:disabled { cursor: default; opacity: .4; }
 .context-threshold-pop button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @keyframes context-threshold-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-@media (prefers-reduced-motion: reduce) { .context-threshold-pop { animation: none; } .context-threshold-control { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .context-threshold-pop { animation: none; } .context-threshold-control { transition: none; } .context-ring circle { transition: none; } }
 @container (max-width: 260px) {
   .context-card-actions { gap: 4px; }
   .context-card-details .context-card-details-text { display: none; }

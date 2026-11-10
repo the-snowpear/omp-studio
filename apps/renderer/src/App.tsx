@@ -3,6 +3,7 @@ import { FileDockInstances } from "./files/FileDockInstances";
 import { useOpenFile } from "./files/fileLinks";
 import { dragConversation } from "./conversationWorkspace/drag";
 import { ConversationWorkspace } from "./conversationWorkspace/Workspace";
+import type { WorkspaceRoute } from "./conversationWorkspace/model";
 import { initializeConversationClient, resyncConversationClient } from "./conversationWorkspace/client";
 import { ConversationTitleSurface, SharedSurface, ShellReadinessContext, useAllWindowed, useConversationWorkspace, useConversationView, useConversationDom } from "./conversationWorkspace/Context";
 import { ConversationFloatingHeader, type ConversationHeaderStatus } from "./conversationWorkspace/Header";
@@ -10,6 +11,7 @@ import { TimeTravelEntry } from "./history/TimeTravelActivation";
 import { EvaluationActivity } from "./evaluation/EvaluationActivity";
 import { GitWorkbench, type GitOpenIntent } from "./git/GitWorkbench";
 import { GitQuickCard } from "./git/GitQuickCard";
+import { GitDockMeter } from "./git/GitDockMeter";
 import { GitWorkspaceProvider } from "./git/GitWorkspaceContext";
 import { githubReferenceSnapshot } from "./composer/githubReference";
 import { gitCommitReferenceLabel } from "./composer/gitCommitReference";
@@ -18,7 +20,7 @@ import type { BrowserElementReference } from "@omp-studio/studio-protocol";
 import { DockStore } from "./dock/store";
 import { EnvironmentDockCard } from "./environment/EnvironmentCard";
 import { ContextDockPanel } from "./conversation/ContextCard";
-import { PanelRegistration } from "./dock/PanelRegistration";
+import { PanelInstances, PanelRegistration } from "./dock/PanelRegistration";
 import { revealMainWindow } from "./dock/SurfaceContext";
 import { DockProvider, DockPanel, DockToolbar, useAgentDockLayout, useDock, useDockEngine, useOptionalDock } from "./dock/DockContext";
 import { WORKBENCH_PANELS } from "./panels/registry";
@@ -211,9 +213,11 @@ import { useActivityRetry, useAwaitingTurn, useRunStreaming, useRunWindow } from
 import { deriveActivityStatus, hasLiveActivityProgress, isAbortEligible } from "./conversation/activityStatus";
 import { ConversationEmpty } from "./conversation/ConversationEmpty";
 import { ConversationPane } from "./conversation/ConversationPane";
+import { CommandBlockProvider } from "./conversation/CommandBlock";
 import { SubagentHoverProvider } from "./conversation/SubagentHoverPreview";
 import { AgentRosterPanel } from "./agents/AgentRosterPanel";
 import { AgentRosterMeter } from "./agents/AgentRosterMeter";
+import { BackgroundTasksDock } from "./backgroundTasks/BackgroundTasksDock";
 import { AgentDetailPanel } from "./agents/AgentDetailPanel";
 import { PREVIEW_DOCK_AGENTS } from "./preview/agentDockPreview";
 import { sharedSubagentViewBook, subagentViewKey } from "./conversation/subagentViewState";
@@ -222,6 +226,7 @@ import "./agents/agents.css";
 import { collectLatestPlanDocument, SESSION_CHANGE_LAST_ID, sessionTaskProgress, type SubagentHubTarget } from "./conversation/toolMeta";
 import { TaskProgressDock } from "./conversation/TaskProgressDock";
 import { SessionChanges } from "./conversation/SessionChanges";
+import { ChangesDockMeter } from "./conversation/ChangesDockMeter";
 import { AgentTestsPane } from "./conversation/AgentTestsPane";
 import { projectAgentTestRuns, rerunTestPrompt } from "./conversation/agentTestRuns";
 import { revealConversationTool, revealConversationTarget } from "./conversation/conversationReveal";
@@ -250,6 +255,8 @@ import {
 } from "./settings/appSettings";
 import { desktopNotice, notifyAskConfirmation, clearAskConfirmationNotice } from "./settings/desktopNotice";
 import { StartupNotice } from "./StartupNotice";
+import { OnboardingHost } from "./onboarding/OnboardingTour";
+import { openOnboardingTour } from "./onboarding/onboardingState";
 import { AppUpdateDialog } from "./AppUpdateDialog";
 import { AppNavRail, type NavRailRoute } from "./NavRail";
 import { SidebarFooter } from "./SidebarFooter";
@@ -282,6 +289,7 @@ import {
   PreviewTokenTrigger,
 } from "./preview/surfaces";
 import { PreviewDeck } from "./preview/PreviewDeck";
+import { ContentGallerySamples } from "./preview/ContentGallerySamples";
 import { PREVIEW_DECK_ITEMS } from "./preview/deckFixtures";
 import { PREVIEW_BTW_QUESTION, PREVIEW_BTW_SNAPSHOTS, previewBtwSnapshot } from "./preview/btwPreview";
 import { previewEnvironmentCard } from "./preview/environmentCardPreview";
@@ -365,7 +373,7 @@ type ClientStateSource = StudioClient & {
   onState?: (listener: (state: ClientState) => void) => Unsubscribe;
 };
 
-type Route = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media" | "evaluation" | "statistics";
+type Route = WorkspaceRoute;
 type SecondaryRoute = Exclude<Route, "workbench">;
 
 function isSecondary(route: Route): route is SecondaryRoute {
@@ -1970,6 +1978,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const [fileRefreshToken, setFileRefreshToken] = useState(0);
   const [previewFileMessage, setPreviewFileMessage] = useState<string | undefined>(undefined);
   const [newEntryKind, setNewEntryKind] = useState<WorkspaceCreationKind | null>(null);
+  const [newEntryPanel, setNewEntryPanel] = useState<PanelId | null>(null);
   const [newEntryPath, setNewEntryPath] = useState("");
   const [selectedDirectoryPath, setSelectedDirectoryPath] = useState<string | undefined>(undefined);
   const [newEntryParentPath, setNewEntryParentPath] = useState<string | undefined>(undefined);
@@ -1980,12 +1989,14 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     setSelectedDirectoryPath(undefined);
     setNewEntryParentPath(undefined);
     setNewEntryKind(null);
+    setNewEntryPanel(null);
     setNewEntryPath("");
     setNewEntryError(undefined);
   }, [chrome.selectedProject?.id]);
-  const beginWorkspaceEntry = (kind: WorkspaceCreationKind) => {
+  const beginWorkspaceEntry = (kind: WorkspaceCreationKind, panel: PanelId = "files") => {
     if (!chrome.selectedProject || newEntryBusy) return;
     setNewEntryKind(kind);
+    setNewEntryPanel(panel);
     setNewEntryPath("");
     setNewEntryParentPath(selectedDirectoryPath);
     setFileSearch("");
@@ -1994,6 +2005,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const cancelWorkspaceEntry = () => {
     if (newEntryBusy) return;
     setNewEntryKind(null);
+    setNewEntryPanel(null);
     setNewEntryPath("");
     setNewEntryParentPath(undefined);
     setNewEntryError(undefined);
@@ -2024,6 +2036,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
       if (marks) setPreviewFileMessage(`${t("common.demo")}: ${kind === "file" ? t("shell.newFile") : t("shell.newFolder")} ${path}`);
       setNewEntryBusy(false);
       setNewEntryKind(null);
+      setNewEntryPanel(null);
       setNewEntryPath("");
       setNewEntryParentPath(undefined);
       return;
@@ -2033,6 +2046,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
       await waitReceipt(client, handle.requestId);
       setFileRefreshToken((value) => value + 1);
       setNewEntryKind(null);
+      setNewEntryPanel(null);
       setNewEntryPath("");
       setNewEntryParentPath(undefined);
     } catch (error) {
@@ -2693,13 +2707,14 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         }}
       />
       {dock && hasDockCards ? <div className={`dock-left-cards${leftCardsExpanded ? "" : " is-folded"}`} style={{ flex: leftCardsExpanded ? `1 1 ${fileShare}%` : "0 0 auto", minHeight: 0, overflow: "hidden" }}><DockCardRegion region="left" visible={!chrome.collapsed} /></div> : null}
-      <DockPanel id="files">
-      <section className="dock-files-content" id="sbFiles" aria-labelledby="sbFilesTitle" >
+      <PanelInstances base="files">{id => {
+        const suffix = id === "files" ? "" : `-${id.slice(id.indexOf("@") + 1)}`;
+        return <section className="dock-files-content" id={`sbFiles${suffix}`} aria-labelledby={`sbFilesTitle${suffix}`} >
         <div className="sb-section-head">
-          <h2 id="sbFilesTitle">{t("shell.workspace")}</h2>
-          <DockToolbar id="files"><div className="sb-head-actions">
-            <button className={`icon-btn${newEntryKind === "file" ? " active" : ""}`} data-tip={t("shell.newFile")} aria-label={t("shell.newFile")} aria-pressed={newEntryKind === "file"} disabled={!chrome.selectedProject || newEntryBusy} onClick={() => beginWorkspaceEntry("file")}><Icon name="plus" extra="sm" /></button>
-            <button className={`icon-btn${newEntryKind === "directory" ? " active" : ""}`} data-tip={t("shell.newFolder")} aria-label={t("shell.newFolder")} aria-pressed={newEntryKind === "directory"} disabled={!chrome.selectedProject || newEntryBusy} onClick={() => beginWorkspaceEntry("directory")}><Icon name="folder" extra="sm" /></button>
+          <h2 id={`sbFilesTitle${suffix}`} className="dock-files-title">{t("shell.workspace")}</h2>
+          <DockToolbar id={id}><div className="sb-head-actions">
+            <button className={`icon-btn${newEntryPanel === id && newEntryKind === "file" ? " active" : ""}`} data-tip={t("shell.newFile")} aria-label={t("shell.newFile")} aria-pressed={newEntryPanel === id && newEntryKind === "file"} disabled={!chrome.selectedProject || newEntryBusy} onClick={() => beginWorkspaceEntry("file", id)}><Icon name="plus" extra="sm" /></button>
+            <button className={`icon-btn${newEntryPanel === id && newEntryKind === "directory" ? " active" : ""}`} data-tip={t("shell.newFolder")} aria-label={t("shell.newFolder")} aria-pressed={newEntryPanel === id && newEntryKind === "directory"} disabled={!chrome.selectedProject || newEntryBusy} onClick={() => beginWorkspaceEntry("directory", id)}><Icon name="folder" extra="sm" /></button>
             <button className={`icon-btn${fileSearch ? " active" : ""}`} data-tip={t("common.filter")} aria-label={t("shell.filterLoadedFiles")} onClick={() => setFileSearch((value) => value ? "" : " ")}><Icon name="search" extra="sm" /></button>
             <button className="icon-btn" data-tip={t("common.refresh")} aria-label={t("shell.refreshFileTree")} disabled={!chrome.selectedProject} onClick={() => {
               if (!preview) { setFileRefreshToken((value) => value + 1); return; }
@@ -2708,7 +2723,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
           </div></DockToolbar>
 
         </div>
-        {fileSearch ? <div style={{ padding: "4px 10px" }}><input autoFocus className="input" value={fileSearch.trim()} onChange={(event) => setFileSearch(event.target.value || " ")} placeholder={`${t("shell.filterLoadedFiles")}…`} aria-label={t("shell.filterLoadedFiles")} /></div> : null}
+        {fileSearch ? <div style={{ padding: "4px 10px" }}><input autoFocus={id === "files"} className="input" value={fileSearch.trim()} onChange={(event) => setFileSearch(event.target.value || " ")} placeholder={`${t("shell.filterLoadedFiles")}…`} aria-label={t("shell.filterLoadedFiles")} /></div> : null}
         {preview && previewFileMessage ? <div className="muted tiny" role="status" style={{ padding: "2px 12px 6px" }}>{previewFileMessage}</div> : null}
         <div className="sb-scroll">
           {preview ? (
@@ -2735,7 +2750,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
               search={fileSearch.trim()}
               gitStatus={gitStatusLookup}
               fileActivity={fileActivity}
-              createKind={newEntryKind}
+              createKind={newEntryPanel === id ? newEntryKind : null}
               createParentPath={newEntryParentPath}
               createName={newEntryPath}
               createBusy={newEntryBusy}
@@ -2758,8 +2773,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
             <div className="empty">{t("conversation.noProjectSelected")}</div>
           )}
         </div>
-      </section>
-      </DockPanel>
+      </section>;
+      }}
+      </PanelInstances>
       <SkillsDrawer
         open={chrome.skillsOpen && !chrome.collapsed && state.route === "workbench"}
         drawerRef={skillsDrawerRef}
@@ -5267,8 +5283,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
   };
   const snapshotOfEntry = (entry: QueuedMessage): ComposerSnapshot => snapshotOfQueued(entry);
   const activeQueue = (): QueuedMessage[] => (preview ? previewQueue : queuedMessages);
-  /** 排队栏当前要显示的条目。「回到最新」按钮在排队栏可见时移入其头行
-   *  （qs-head-slot），否则浮在输入框右上角——两个位置互斥，避免按钮压在栏身上。 */
+  /** 排队栏当前要显示的条目（本会话的本地草稿；预览时为演示队列）。 */
   const sessionQueue = preview ? previewQueue : visibleQueuedMessages(queuedMessages, composerOwner);
   const applyQueueEditResult = (result: {
     readonly queue: readonly QueuedMessage[];
@@ -5589,10 +5604,12 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
             floating
             onOpenDiagnostics={() => onRoute("diagnostics")}
           />}
-          <DockRail mode={railMode} />
+          <DockRail mode={showContextStrip ? "hidden" : railMode} />
           <DockCapsules />
           <SessionModelRecovery demo={previewThreadId === "t5"} client={client} currentSessionId={snapshot?.sessionId} targetSessionId={selectedSessionId} threadId={selectedThreadId} available={runtimeConnected && !connection?.resyncRequired} capabilities={capabilities} onOpenModels={() => onRoute("model-config")} />
+          <CommandBlockProvider workspaceId={workspaceId} sessionId={snapshot?.sessionId} conversationId={mdi?.document.id}>
           <ConversationPane
+            {...(preview && previewThreadId === "t15" ? { supplement: <ContentGallerySamples /> } : {})}
             runtimeTools={{ client, actions: client, sessionId: snapshot?.sessionId, enabled: preview || runtimeConnected && executionMatches && can("shell.view.read") }}
             snapshot={convo}
             liveEngine={convo.engine}
@@ -5631,6 +5648,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
               ),
             } : {})}
           />
+          </CommandBlockProvider>
           <div className="composer-region" ref={computerApprovalRef}>
             {/* 真实 pending Interaction 永远优先；预览关时 Plan Review 走 snapshot；预览开才用演示 Deck。 */}
             {deckInteraction ? (
@@ -5822,7 +5840,21 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
                 </section>
               </div>
             ) : null}
+            {/* 排队托盘：已提交（Runtime）与本地草稿合成一张贴在输入框上沿的托盘；
+                「回到最新」浮在整个托盘 + 输入框组合的右上方，不再挤进任何一栏的头行。 */}
             <div className="composer-queues">
+            {jumpPill?.visible ? (
+              <button
+                type="button"
+                className="new-content-pill composer-jump-latest"
+                onClick={jumpPill.jumpToLatest}
+                aria-label="回到最新"
+                data-tip="回到最新"
+              >
+                <Icon name="chevron-d" />
+              </button>
+            ) : null}
+            <div className="composer-tray">
             {(preview || can("session.queue.get")) ? (<RuntimeQueueBar client={client} sessionId={snapshot?.sessionId} capabilities={capabilities} available={runtimeConnected && executionMatches && !connection?.resyncRequired} pending={snapshot?.pendingMessages ?? 0} running={Boolean(snapshot?.isStreaming || snapshot?.isCompacting)} showDemo={previewThreadId === "t1"} />) : (!preview ? <RuntimeQueue client={client} sessionId={composerOwner} available={can("session.queue.list")} running={Boolean(snapshot?.isStreaming)} pending={snapshot?.pendingMessages ?? 0} hasDraft={() => !snapshotIsEmpty(takeComposerSnapshot())} onRecover={(recovered, owner) => {
               if (owner !== composerOwner) return;
               const current = takeComposerSnapshot();
@@ -5839,23 +5871,11 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
               sendEnabled={preview || (running ? steerNowEnabled : promptChannelReady)}
               {...(preview ? { demo: true } : {})}
               {...(queueEdit === undefined ? {} : { editingId: queueEdit.entryId })}
-              {...(jumpPill?.visible && sessionQueue.length > 0 ? {
-                headerSlot: (
-                  <button
-                    type="button"
-                    className="new-content-pill queue-jump-latest"
-                    onClick={jumpPill.jumpToLatest}
-                    aria-label="回到最新"
-                    data-tip="回到最新"
-                  >
-                    <Icon name="chevron-d" />
-                  </button>
-                ),
-              } : {})}
               onEdit={editQueuedMessage}
               onSendNow={(entry) => void sendQueuedNow(entry)}
               onRemove={removeQueuedMessage}
             />
+            </div>
             </div>
             {/* 项目 / 分支 / 执行位置 / Git 增删统计：只给还没发送过消息的新对话，贴在
                 Composer 上沿。已开始的对话整条不显示——项目与分支在顶栏里，这一条
@@ -6069,17 +6089,6 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
               </button>
             </div> : null}
             <div className={`composer${composerRunning ? ` running ${composerExpanded ? "expanded" : "compact"}` : ""}`} id="composer">
-              {jumpPill?.visible && sessionQueue.length === 0 ? (
-                <button
-                  type="button"
-                  className="new-content-pill composer-jump-latest"
-                  onClick={jumpPill.jumpToLatest}
-                  aria-label="回到最新"
-                  data-tip="回到最新"
-                >
-                  <Icon name="chevron-d" />
-                </button>
-              ) : null}
               <div className="composer-ctx" aria-label="已引用的上下文" role="group" />
               <label className="sr-only" htmlFor="composerInput">消息输入框。发送给 Runtime 的文本。</label>
               <ChipComposer
@@ -6354,6 +6363,12 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
       <DockKeyboard />
       <AgentRosterMeter agents={dockAgents} ready={preview || rosterAgents !== undefined}
         source={agentRosterSource} />
+      <ChangesDockMeter rows={convo.rows} />
+      <BackgroundTasksDock client={client} snapshot={snapshot} sessionId={selectedSessionId ?? snapshot?.sessionId}
+        scopeKey={`${executionTarget.id ?? "local"}:${workspaceId ?? ""}:${selectedSessionId ?? snapshot?.sessionId ?? ""}:${connection?.runtimeEpoch ?? ""}:${preview ? previewThreadId ?? "preview" : "real"}`}
+        available={runtimeConnected && executionMatches && !connection?.resyncRequired && !sessionCreating}
+        jobsReady={preview || (executionMatches && !!snapshot)} workbenchVisible={workbenchVisible && !showContextStrip}
+        canListServices={can("services.list")} canStopServices={can("services.stop")} canCancelJobs={can("job.cancel")} />
       <ContextDockPanel client={client} viewedSessionId={selectedSessionId as SessionId | undefined} liveSessionId={snapshot?.sessionId}
         liveTelemetry={state.clientState?.entities.telemetry ?? undefined} refreshToken={telemetryRefreshToken}
         viewedThreadId={selectedThreadId} previewSessionId={previewThreadId}
@@ -6363,6 +6378,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
         queueInstead={snapshot?.isStreaming === true && can("session.compaction.enqueue")}
         compactDisabled={!runtimeConnected || !snapshot || connection?.resyncRequired === true || snapshot.isStreaming && !can("session.compaction.enqueue") || sessionCreating === true} />
       <GitWorkspaceProvider key={gitScope} client={client} workspaceId={gitSharedWorkspaceId}>
+        <GitDockMeter />
         <PanelRegistration panels={{
         git: visibility => <GitWorkbench key={composerOwner ?? "draft"} client={client} {...(activeWorkspace ? { workspaceId: activeWorkspace.workspaceId, workspaceName: activeWorkspace.name } : {})} visible={visibility.visible}
           {...(gitIntent?.scope === gitScope ? { intent: gitIntent.intent } : {})}
@@ -8432,6 +8448,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
       case "view.toggleBottomPanel": toggleBottom(); return;
       case "view.toggleSkills": setSkillsOpen((value) => !value); return;
       case "help.shortcuts": openDialog("shortcuts"); return;
+      case "help.tutorial": openOnboardingTour(); return;
     }
   };
   useEffect(() => globalThis.ompStudioChrome?.onMenuCommand?.((command) => runMenuCommand.current(command)), []);
@@ -8959,6 +8976,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
               <button className="menu-item" role="menuitem" onClick={() => runMenu(() => chrome.onToggleTheme())}>{theme === "dark" ? t("menu.lightTheme") : t("menu.darkTheme")}</button>
             </TitleMenu>
             <TitleMenu id="help" label={t("menu.help")} openId={openMenu} onToggle={setOpenMenu}>
+              <button className="menu-item" role="menuitem" onClick={() => { setOpenMenu(null); openOnboardingTour(); }}>{t("menu.tutorial")}</button>
               <button className="menu-item" role="menuitem" onClick={() => openDialog("shortcuts")}>{t("menu.shortcuts")}</button>
               <button className="menu-item" role="menuitem" onClick={() => openDialog("about")}>{t("menu.about")}</button>
               <button className="menu-item" role="menuitem" disabled data-tip={t("menu.documentation")}>{t("menu.documentation")}</button>
@@ -9094,7 +9112,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
           ) : pageRoute === "evaluation" ? (
             <EvaluationPage intent={evaluationIntent} onOpenModels={() => go("model-config")} onOpenDiagnostics={() => go("diagnostics")} client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} available={hubRuntimeConnected} capabilities={capabilities} />
           ) : pageRoute === "model-config" ? (
-            <ModelConfigPage capabilities={capabilities} onOpenEvaluation={() => go("evaluation")} key={mcNonce} client={modelClient} sessionId={modelConnection.sessionId} workspaceId={modelConnection.workspaceId} runtimeAvailable={modelConnection.runtimeStatus === "connected"} />
+            <ModelConfigPage capabilities={capabilities} key={mcNonce} client={modelClient} sessionId={modelConnection.sessionId} workspaceId={modelConnection.workspaceId} runtimeAvailable={modelConnection.runtimeStatus === "connected"} />
           ) : pageRoute === "statistics" ? (
             <StatisticsPage client={client}/>
           ) : pageRoute === "settings" ? (
@@ -9433,7 +9451,12 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
     return { loading: true, model: workspaces ? { workspaces } : {}, events: [], route: "workbench" as const };
   });
   useEffect(() => { if (state.model.workspaces && mdi) mdi.store.rememberCatalog(executionTarget.id, state.model.workspaces); }, [state.model.workspaces, mdi?.store, executionTarget.id]);
-  const [route, setRoute] = useTargetMemory<Route>("route", initialRouteFromSettings);
+  const [targetRoute, setTargetRoute] = useTargetMemory<Route>("route", initialRouteFromSettings);
+  const route = mdi?.document.route ?? targetRoute;
+  const setRoute = useCallback((next: Route) => {
+    if (mdi) mdi.store.updateDocument(mdi.document.id, { route: next });
+    else setTargetRoute(next);
+  }, [mdi?.store, mdi?.document.id, setTargetRoute]);
   const [selectedHistoryId, setSelectedHistoryId] = useTargetMemory<string | null>("selected-history", () => mdi?.document.ref.historyId ?? null);
   const routeRef = useRef(route);
   routeRef.current = route;
@@ -9586,7 +9609,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
     <>
         <RemoteScopeNotice />
         <ShellReadinessContext.Provider value={!state.loading}>{body}</ShellReadinessContext.Provider>
-        {(!mdi || mdi.active) ? <StartupNotice /> : null}
+        {(!mdi || mdi.active) ? <OnboardingHost /> : null}
         <TipHost />
     </>
   );

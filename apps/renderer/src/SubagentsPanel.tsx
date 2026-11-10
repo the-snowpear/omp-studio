@@ -22,6 +22,9 @@ import { parseJsonOrYaml, StructuredEditor } from "./structured-editor";
 import { ComposerModelMenu } from "./ComposerModelPicker";
 import { createPreviewModelConfig } from "./preview/modelConfigFixtures";
 import { usePreviewMode } from "./preview/PreviewContext";
+import { AgentAccountRules, AgentPoolSummary } from "./models/AgentAccountRules";
+import { useAgentAccountPools } from "./models/useAgentAccountPools";
+import type { NativePreferencesContext } from "./settings/NativePreferencesPane";
 import {
   AGENT_THINKING,
   createPreviewAgentDefinitions,
@@ -227,16 +230,26 @@ export function SubagentsPanel({
   models,
   initialAgent,
   onCount,
+  context,
+  visible = true,
+  onAccountDirtyChange,
+  onManageAccounts,
 }: {
   client: StudioClient;
   preview: boolean;
   models: ModelConfigReadModel | null;
   initialAgent?: string;
   onCount?: (count: number) => void;
+  context?: NativePreferencesContext | undefined;
+  visible?: boolean;
+  onAccountDirtyChange?: (dirty: boolean) => void;
+  onManageAccounts?: () => void;
 }) {
   const { t, resolvedLanguage } = useI18n();
   const { marks } = usePreviewMode();
   const zh = resolvedLanguage === "zh";
+  const accountPools = useAgentAccountPools({ client, context, preview, visible });
+  useEffect(() => { onAccountDirtyChange?.(accountPools.hasChanges); }, [accountPools.hasChanges, onAccountDirtyChange]);
   const [data, setData] = useState<AgentDefinitionsReadModel | null>(preview ? createPreviewAgentDefinitions() : null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -359,6 +372,24 @@ export function SubagentsPanel({
     event?.preventDefault();
     const draft = draftRef.current;
     if (!draft) return;
+    if (accountPools.invalid(draft.name)) {
+      toast(zh ? "请为指定账号策略至少选择一个账号。" : "Choose at least one account for the selected-accounts policy.");
+      return;
+    }
+    const original = agents.find(agent => agent.name === draft.name);
+    if (original && accountPools.dirty(draft.name) && JSON.stringify(draft) === JSON.stringify(draftFromAgent(original, Boolean(data?.projectScopeAvailable)))) {
+      setBusy(true);
+      try {
+        const overridden = await accountPools.save(draft.name);
+        toast(overridden
+          ? (zh ? "已保存全局规则；当前会话仍有项目或会话配置覆盖。" : "Global rules saved. Project or session overrides still apply.")
+          : (zh ? "账号规则已保存" : "Account rules saved"));
+        setDraft(null);
+      } catch (cause) {
+        toast(hostErrorMessage(cause, t("modelConfig.saveFailed")));
+      } finally { setBusy(false); }
+      return;
+    }
     const name = draft.name.trim();
     const description = draft.description.trim();
     if (!name || !description) {
@@ -420,6 +451,7 @@ export function SubagentsPanel({
     };
 
     if (preview) {
+      await accountPools.save(name);
       if (draft.editable) {
         const record: AgentDefinitionRecord = {
           name: upsert.name,
@@ -491,7 +523,10 @@ export function SubagentsPanel({
           advisorOverride: draft.advisorOverride.trim() ? draft.advisorOverride.trim() : null,
         });
       }
-      toast(draft.editable ? t("subagents.savedAgent") : t("subagents.savedOverride"));
+      const accountOverride = await accountPools.save(name);
+      toast(accountOverride
+        ? (zh ? "已保存全局规则；当前会话仍有项目或会话配置覆盖。" : "Global rules saved. Project or session overrides still apply.")
+        : draft.editable ? t("subagents.savedAgent") : t("subagents.savedOverride"));
       setDraft(null);
       await refresh();
     } catch (error) {
@@ -602,12 +637,15 @@ export function SubagentsPanel({
       {draft ? (
       <form className="mp-editor" noValidate onSubmit={(event) => void saveDraft(event)}>
         <div className="mr-toolbar">
-          <button type="button" className="icon-btn" onClick={() => { setModelMenuOpen(false); setDraft(null); }}>
+          <button type="button" className="icon-btn" aria-label={zh ? "返回子代理列表" : "Back to agents"} disabled={busy || accountPools.busy} onClick={() => { setModelMenuOpen(false); setDraft(null); }}>
             <Icon name="arrow-l" />
           </button>
           <b style={{ fontSize: "var(--fs-14)" }}>{draft.existing ? t("subagents.editSubagent", { name: draft.name }) : t("subagents.newSubagent")}</b>
           {draft.source ? <span className={`chip ${SOURCE_CHIP[draft.source]} xs`}>{sourceLabel(draft.source, t)}</span> : <span className="chip purple xs">{t("common.custom") || "Custom"}</span>}
           {preview && marks ? <span className="chip purple xs">{t("common.demo")}</span> : null}
+          <button type="submit" className="btn small primary sa-editor-save" aria-label={zh ? "保存子代理" : "Save agent"} disabled={busy || accountPools.busy || accountPools.invalid(draft.name) || (accountPools.dirty(draft.name) && !accountPools.available)}>
+            <Icon name="check" extra="sm" />{busy || accountPools.busy ? t("common.saving") : t("common.save")}
+          </button>
         </div>
         <ToastHost message={flash} onDismiss={() => setFlash(null)} />
 
@@ -721,6 +759,8 @@ export function SubagentsPanel({
             </div>
           </div>
         </div>
+
+        {draft.existing ? <AgentAccountRules key={draft.name} agent={draft.name} state={accountPools} models={models} disabled={busy} onManageAccounts={onManageAccounts} /> : null}
 
         <div className="mp-sec">
           <h3>{t("subagents.promptSectionTitle")}</h3>
@@ -901,11 +941,11 @@ export function SubagentsPanel({
           ) : null}
           {draft.canFork ? <button type="button" className="btn outline" onClick={forkDraft}>{t("subagents.forkAndCustomize")}</button> : null}
           <div className="right">
-            <button type="button" className="btn outline" onClick={() => setDraft(null)}>{t("common.cancel")}</button>
+            <button type="button" className="btn outline" disabled={busy || accountPools.busy} onClick={() => { accountPools.discard(draft.name); setDraft(null); }}>{t("common.cancel")}</button>
             <button
               type="submit"
               className="btn primary"
-              disabled={busy}
+              disabled={busy || accountPools.busy || accountPools.invalid(draft.name) || (accountPools.dirty(draft.name) && !accountPools.available)}
               onClick={(event) => {
                 event.preventDefault();
                 void saveDraft();
@@ -974,6 +1014,7 @@ export function SubagentsPanel({
                       {agent.advisor === true || typeof agent.advisor === "string" ? <span className="chip blue xs">advisor</span> : null}
                       {agent.blocking ? <span className="chip amber xs">blocking</span> : null}
                       {agent.structured ? <span className="chip blue xs">structured</span> : null}
+                      {accountPools.settings ? <AgentPoolSummary pools={accountPools.settings.effective[agent.name]} dirty={accountPools.dirty(agent.name)} /> : null}
                     </div>
                   </button>
                   <div className="sa-card-act">

@@ -12,7 +12,7 @@ import { closePanels } from "./panelChrome";
 import { groupToolPanels } from "./toolGroups";
 import { useSurfaceDocument, surfaceWindow, revealMainWindow } from "./SurfaceContext";
 import type { DockFloat, DockPinMode } from "./types";
-import { isBrowserPagePanelId, isInstancePanelId, type AgentPanelId, type BrowserPagePanelId, type DockAction, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRegionId, type PanelId } from "./types";
+import { isBrowserPagePanelId, isInstancePanelId, isScopedPanelId, type AgentPanelId, type BrowserPagePanelId, type DockAction, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRegionId, type PanelId } from "./types";
 import { useWindowFocus } from "./windowOrder";
 import "./menus.css";
 
@@ -36,7 +36,7 @@ function regionName(region: DockLocation["region"], copy: Copy) {
 function groupAt(layout: DockLayout, id?: string): DockGroup | undefined {
   return [...layout.right.groups, ...layout.bottom.groups, ...layout.floats].find(group => group.id === id);
 }
-function locationDescription(layout: DockLayout, panel: PanelId, copy: Copy) {
+export function locationDescription(layout: DockLayout, panel: PanelId, copy: Copy) {
   const placed = locatePanel(layout, panel);
   const location = placed ?? layout.hidden[panel];
   if (!location) return copy("隐藏", "Hidden");
@@ -91,7 +91,7 @@ export function DockPresetNameForm({ initialName = "", onSave, onCancel }: { ini
 function DockToolItems({ onClose, onPick, exclude }: { onClose?: (() => void) | undefined; onPick?: ((panel: PanelId) => void) | undefined; exclude?: readonly PanelId[] | undefined }) {
   const { layout, definitions, store, agentCatalog, scope } = useDock();
   const copy = useDockCopy();
-  const available = definitions.filter(panel => panel.id !== "agent-detail" && !isInstancePanelId(panel.id) && !exclude?.includes(panel.id));
+  const available = definitions.filter(panel => panel.id !== "agent-detail" && !isInstancePanelId(panel.id) && !isScopedPanelId(panel.id) && !exclude?.includes(panel.id));
   const byId = new Map(available.map(panel => [panel.id, panel]));
   const entries = agentCatalog?.entries ?? [];
   const known = Object.entries(layout.agentPanels).filter(([, descriptor]) => !entries.some(entry => entry.agentId === descriptor.target.agentId));

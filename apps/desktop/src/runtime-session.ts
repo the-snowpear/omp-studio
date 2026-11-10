@@ -114,7 +114,8 @@ export interface DesktopRuntimeSessionPortOptions {
   readonly supportedProtocolVersions?: readonly number[];
   readonly handshakeTimeoutMs?: number;
   readonly requestTimeoutMs?: number;
-  /** Automatic relaunch after an unexpected drop; default 1. Zero disables. */
+  /** Consecutive automatic reconnect/relaunch attempts; default 1, zero disables.
+   * Reset after 30 seconds connected or an explicit manual activation. */
   readonly autoRespawnLimit?: number;
   /** Delay before an automatic relaunch; default 500ms. */
   readonly autoRespawnDelayMs?: number;
@@ -1214,6 +1215,10 @@ function createSingleDesktopRuntimeSessionPort(
   let draining = false;
   let autoRespawns = 0;
   let respawnScheduledFor = 0;
+  let respawnTimer: ReturnType<typeof setTimeout> | undefined;
+  // Measure uninterrupted uptime, not successful handshakes. A Worker that
+  // drops just after becoming ready must still consume its recovery budget.
+  let readySince: number | undefined;
 
   const rememberUnavailable = (facts: HostRuntimeUnavailable | undefined): void => {
     lastUnavailable = facts;
@@ -1237,6 +1242,12 @@ function createSingleDesktopRuntimeSessionPort(
     return run;
   }
 
+  function cancelAutoRespawn(): void {
+    if (respawnTimer !== undefined) clearTimeout(respawnTimer);
+    respawnTimer = undefined;
+    respawnScheduledFor = 0;
+  }
+
   function scheduleAutoRespawn(fromGeneration: number): void {
     const limit = options.autoRespawnLimit ?? 1;
     if (stopping || draining || limit <= 0) {
@@ -1255,9 +1266,10 @@ function createSingleDesktopRuntimeSessionPort(
     if (lastDisconnect !== undefined) rememberDisconnect({ ...lastDisconnect, autoRespawn: "scheduled" });
     const delay = options.autoRespawnDelayMs ?? 500;
     log?.write("warn", "runtime.respawn.schedule", `generation=${fromGeneration} attempt=${autoRespawns}`);
-    const timer = setTimeout(() => {
+    respawnTimer = setTimeout(() => {
+      respawnTimer = undefined;
       void serialized(async () => {
-        if (stopping || fromGeneration !== generation) return;
+        if (stopping || fromGeneration !== generation || respawnScheduledFor !== fromGeneration) return;
         if (alive && bundle?.hello() !== undefined) return;
 
         // A backgrounded Windows window can lose the named-pipe connection
@@ -1273,9 +1285,13 @@ function createSingleDesktopRuntimeSessionPort(
             await currentBridge.reconnect();
             alive = true;
             await currentBundle.controller.refresh();
+            if (bridge?.state !== "ready" || lastExit !== undefined) {
+              throw new Error("Studio Bridge disconnected or Runtime exited during reconnect");
+            }
             rememberUnavailable(undefined);
             rememberDisconnect(undefined);
-            autoRespawns = 0;
+            readySince = performance.now();
+            respawnScheduledFor = 0;
             log?.write("info", "runtime.reconnect.ok", `generation=${generation}`);
             sessionSink?.(currentBundle);
             return;
@@ -1287,36 +1303,43 @@ function createSingleDesktopRuntimeSessionPort(
 
         await stopCurrent("replace");
         const next = await launch();
-        if (next !== undefined) {
-          autoRespawns = 0;
-        } else if (lastDisconnect !== undefined) {
-          rememberDisconnect({ ...lastDisconnect, autoRespawn: autoRespawns >= (options.autoRespawnLimit ?? 1) ? "exhausted" : "failed" });
+        if (next === undefined && lastDisconnect !== undefined) {
+          rememberDisconnect({ ...lastDisconnect, autoRespawn: autoRespawns >= limit ? "exhausted" : "failed" });
         }
         sessionSink?.(next);
       }).catch((error) => {
-        if (lastDisconnect !== undefined) rememberDisconnect({ ...lastDisconnect, autoRespawn: "failed" });
+        if (lastDisconnect !== undefined) rememberDisconnect({ ...lastDisconnect, autoRespawn: autoRespawns >= limit ? "exhausted" : "failed" });
         sessionSink?.(undefined);
         log?.write("error", "runtime.respawn.fail", errorDetail(error));
+      }).finally(() => {
+        if (respawnScheduledFor === fromGeneration) respawnScheduledFor = 0;
       });
     }, delay);
-    timer.unref?.();
+    respawnTimer.unref?.();
   }
 
   function noteUnexpectedLoss(preferred: HostRuntimeDisconnect): void {
     if (stopping || draining) return;
+    // Only a full 30 seconds without a loss replenishes automatic recovery.
+    // Check at the next loss instead of keeping a separate stability timer.
+    if (readySince !== undefined && performance.now() - readySince >= 30_000) autoRespawns = 0;
+    readySince = undefined;
     if (lastExit !== undefined) {
       rememberDisconnect({
+        ...lastDisconnect,
         code: "process-exit",
         reason: `Runtime process exited (code=${lastExit.code ?? "null"}, signal=${lastExit.signal ?? "none"})`,
       });
     } else if (lastDisconnect === undefined || lastDisconnect.code === "pipe-closed") {
-      rememberDisconnect(preferred);
+      rememberDisconnect({ ...lastDisconnect, ...preferred });
     }
     scheduleAutoRespawn(generation);
   }
 
   async function stopCurrent(reason: "host-stop" | "replace" = "replace"): Promise<void> {
     draining = true;
+    cancelAutoRespawn();
+    readySince = undefined;
     if (reason === "host-stop") {
       stopping = true;
       rememberDisconnect({ code: "host-stop", reason: "Host stopped the Runtime" });
@@ -1624,8 +1647,7 @@ function createSingleDesktopRuntimeSessionPort(
       rememberUnavailable(undefined);
       rememberDisconnect(undefined);
       lastExit = undefined;
-      autoRespawns = 0;
-      stopping = false;
+      readySince = performance.now();
       return session;
     } catch (error) {
       log?.write("error", "runtime.launch.fail", `generation=${launchGeneration} ${errorDetail(error)}`);
@@ -1638,6 +1660,9 @@ function createSingleDesktopRuntimeSessionPort(
   return {
     start(launchContext: DesktopRuntimeSessionContext): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
+        stopping = false;
+        autoRespawns = 0;
+        cancelAutoRespawn();
         context = launchContext;
         if (launchContext.workspace !== undefined) {
           workspace = launchContext.workspace;
@@ -1652,6 +1677,8 @@ function createSingleDesktopRuntimeSessionPort(
     },
 
     stop(): Promise<void> {
+      stopping = true;
+      cancelAutoRespawn();
       return serialized(() => stopCurrent("host-stop"));
     },
 
@@ -1659,6 +1686,7 @@ function createSingleDesktopRuntimeSessionPort(
       return serialized(async () => {
         log?.write("info", "runtime.rebind", `generation=${generation}`);
         stopping = false;
+        autoRespawns = 0;
         await stopCurrent("replace");
         resumeSessionId = undefined;
         workspace = next;
@@ -1672,6 +1700,7 @@ function createSingleDesktopRuntimeSessionPort(
         const previousModel = resumeModel;
         log?.write("info", "runtime.switch.begin", `kind=${intent.kind} generation=${generation}`);
         stopping = false;
+        autoRespawns = 0;
         await stopCurrent("replace");
         resumeSessionId = intent.kind === "resume" ? intent.sessionId : undefined;
         resumeModel = intent.kind === "resume" ? intent.model : undefined;
@@ -1757,6 +1786,7 @@ function createSingleDesktopRuntimeSessionPort(
           }
         }
         stopping = false;
+        autoRespawns = 0;
         await stopCurrent("replace");
         const active = await launch();
         sessionSink?.(active);
@@ -1772,9 +1802,9 @@ function createSingleDesktopRuntimeSessionPort(
           return bundle;
         }
         stopping = false;
+        autoRespawns = 0;
         await stopCurrent("replace");
         const next = await launch();
-        if (next !== undefined) autoRespawns = 0;
         sessionSink?.(next);
         return next;
       });

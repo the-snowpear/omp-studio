@@ -21,7 +21,8 @@ import {
   PREVIEW_SERVICES,
   PREVIEW_SERVICE_SPEC,
 } from "../preview/servicesPreview";
-import { hostErrorMessage, waitReceipt } from "../hostError";
+import { hostErrorMessage } from "../hostError";
+import { invokeServiceCommand, type ServiceCommandKind } from "./serviceCommands";
 import { useI18n } from "../i18n";
 import "./services.css";
 
@@ -100,22 +101,10 @@ export function ServicesPane({
         (item) => item.id === "services.start" && item.grade !== "unavailable",
       ) === true);
   const invoke = useCallback(
-    async <K extends keyof WorkbenchResultMap>(
+    async <K extends ServiceCommandKind>(
       kind: K,
       payload: CommandInput<K>,
-    ): Promise<WorkbenchResultMap[K]> => {
-      if (!client) throw new Error("Runtime is unavailable");
-      const handle = await client.command(kind, payload);
-      const value = await waitReceipt<{ result: WorkbenchResultMap[K] }>(
-        client,
-        handle.requestId,
-        kind === "services.start"
-          ? ((payload as CommandInput<"services.start">).spec.ready
-              ?.timeoutMs ?? 30000) + 15000
-          : 120000,
-      );
-      return value.result;
-    },
+    ): Promise<WorkbenchResultMap[K]> => invokeServiceCommand(client, kind, payload),
     [client],
   );
   const refresh = useCallback(async () => {

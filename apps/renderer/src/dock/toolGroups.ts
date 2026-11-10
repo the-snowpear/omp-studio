@@ -27,8 +27,8 @@ export interface ToolGroup {
 export const TOOL_GROUPS: readonly ToolGroup[] = [
   { id: "common", icon: "zap", tint: "orange", label: ["常用", "Common"], panels: ["files", "changes", "git-quick", "browser", "computer", "terminal", "agents", "btw"] },
   { id: "workspace", icon: "branch", tint: "blue", label: ["工作区与版本", "Workspace & Git"], panels: ["git", "environment"] },
-  { id: "session", icon: "layers", tint: "violet", label: ["会话与上下文", "Session & context"], panels: ["context", "context-viewer", "token-counter"] },
-  { id: "automation", icon: "globe", tint: "teal", label: ["自动化", "Automation"], panels: [] },
+  { id: "session", icon: "layers", tint: "violet", label: ["会话与上下文", "Session & context"], panels: ["context", "context-viewer", "annotations", "token-counter"] },
+  { id: "automation", icon: "globe", tint: "teal", label: ["自动化", "Automation"], panels: ["jobs"] },
   { id: "diagnostics", icon: "wrench", tint: "rose", label: ["诊断与输出", "Diagnostics & output"], panels: ["problems", "tests", "output", "logs", "pvlogs"] },
 ];
 

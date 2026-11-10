@@ -11,12 +11,17 @@ export type DeckAskQuestion = {
   readonly header?: string;
   readonly options: readonly DeckAskOption[];
   readonly multi?: boolean;
+  /** Legacy select returns either option IDs or custom text, never both. */
+  readonly customExclusive?: boolean;
   readonly recommended?: number;
 };
 
 export type DeckAskAnswer = {
+  /** Renderer-only documents preserve inline image positions across question navigation. */
+  readonly customDoc?: import("../composer/types").ComposerDoc;
+  readonly noteDoc?: import("../composer/types").ComposerDoc;
   readonly note?: string;
-  readonly noteOption?: string;
+  readonly noteOption?: string | undefined;
   readonly customInputImages?: readonly import("@omp-studio/studio-protocol").AskImage[];
   readonly noteImages?: readonly import("@omp-studio/studio-protocol").AskImage[];
   readonly picked: readonly string[];

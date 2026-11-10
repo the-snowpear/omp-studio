@@ -34,6 +34,7 @@ export const APP_MENU_ACCELERATORS: Readonly<Record<AppMenuCommand, string | und
   "view.toggleBottomPanel": "Command+J",
   "view.toggleSkills": "Shift+Command+K",
   "help.shortcuts": undefined,
+  "help.tutorial": undefined,
 });
 
 interface MenuStrings {
@@ -75,6 +76,7 @@ interface MenuStrings {
   readonly front: string;
   readonly help: string;
   readonly shortcuts: string;
+  readonly tutorial: string;
   readonly repository: string;
 }
 
@@ -88,7 +90,7 @@ export function appMenuStrings(locale: string, appName = "OMP Studio"): MenuStri
       toggleSidebar: "显示/隐藏侧栏", toggleBottomPanel: "显示/隐藏底部面板", skills: "Skills", actualSize: "实际大小",
       zoomIn: "放大", zoomOut: "缩小", fullScreen: "进入全屏幕", reload: "重新载入", forceReload: "强制重新载入",
       devTools: "开发者工具", window: "窗口", minimize: "最小化", zoom: "缩放", front: "前置全部窗口", help: "帮助",
-      shortcuts: "键盘快捷键", repository: `GitHub 上的 ${appName}`,
+      shortcuts: "键盘快捷键", tutorial: "使用教程", repository: `GitHub 上的 ${appName}`,
     };
   }
   return {
@@ -99,7 +101,7 @@ export function appMenuStrings(locale: string, appName = "OMP Studio"): MenuStri
     commandPalette: "Command Palette", toggleSidebar: "Toggle Sidebar", toggleBottomPanel: "Toggle Bottom Panel",
     skills: "Skills", actualSize: "Actual Size", zoomIn: "Zoom In", zoomOut: "Zoom Out", fullScreen: "Enter Full Screen",
     reload: "Reload", forceReload: "Force Reload", devTools: "Developer Tools", window: "Window", minimize: "Minimize",
-    zoom: "Zoom", front: "Bring All to Front", help: "Help", shortcuts: "Keyboard Shortcuts",
+    zoom: "Zoom", front: "Bring All to Front", help: "Help", shortcuts: "Keyboard Shortcuts", tutorial: "Tutorial",
     repository: `${appName} on GitHub`,
   };
 }
@@ -178,7 +180,7 @@ export function buildApplicationMenuTemplate(options: AppMenuOptions): MenuItemC
     {
       label: s.help,
       role: "help",
-      submenu: [command(s.shortcuts, "help.shortcuts"), { label: s.repository, click: () => options.openRepository() }],
+      submenu: [command(s.tutorial, "help.tutorial"), command(s.shortcuts, "help.shortcuts"), { label: s.repository, click: () => options.openRepository() }],
     },
   ];
 }

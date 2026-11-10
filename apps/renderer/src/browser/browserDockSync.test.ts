@@ -24,7 +24,7 @@ function settle(layout: DockLayout, browser: ManagedBrowserState, memory?: Brows
 describe("browser pages and their dock tabs", () => {
   it("restores existing pages quietly and reveals a page the user opens", () => {
     let { layout, memory } = settle(createDefaultLayout(), state([page("a"), page("b")], "a"));
-    expect(layout.right.groups[0]!.panels).toEqual(["changes", "git", tab("a"), tab("b"), "computer"]);
+    expect(layout.right.groups[0]!.panels).toEqual([tab("a"), tab("b")]);
     expect(layout.right.visible).toBe(false);
     ({ layout, memory } = settle(layout, state([page("a"), page("b"), page("c", { opener: { source: "human", pageId: "a" } })], "c"), memory));
     expect(layout.right.visible).toBe(true);
@@ -33,7 +33,7 @@ describe("browser pages and their dock tabs", () => {
   });
 
   it("follows the Agent to a new page only where this chat's pages are already showing", () => {
-    let { layout, memory } = settle(dockReducer(createDefaultLayout(), { type: "region", region: "right", visible: true }), state([page("a")], "a"));
+    let { layout, memory } = settle(dockReducer(createDefaultLayout(), { type: "open", panel: "git" }), state([page("a")], "a"));
     layout = dockReducer(layout, { type: "activate", groupId: "right-main", panel: tab("a") });
     ({ layout, memory } = settle(layout, state([page("a"), page("agent", { opener: { source: "agent" } })], "agent"), memory));
     expect(layout.right.groups[0]!.active).toBe(tab("agent"));

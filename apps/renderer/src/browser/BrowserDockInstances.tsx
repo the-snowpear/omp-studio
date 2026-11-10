@@ -3,7 +3,7 @@ import type { ClientBootstrap, StudioClient } from "@omp-studio/client-contract"
 import type { BrowserElementReference } from "@omp-studio/studio-protocol";
 import { useConversationDom } from "../conversationWorkspace/Context";
 import { DockPanel, useBrowserPagesLayout, useDockEngine } from "../dock/DockContext";
-import type { BrowserPagePanelId, PanelDefinition, PanelId } from "../dock/types";
+import { browserPagePanelId, type BrowserPagePanelId, type PanelDefinition, type PanelId } from "../dock/types";
 import { usePreviewMode } from "../preview/PreviewContext";
 import type { BrowserLinkIntent } from "./browserLinks";
 import { planBrowserDockSync, type BrowserDockMemory } from "./browserDockSync";
@@ -109,18 +109,47 @@ export function BrowserDockInstances({ client, sessionId, available, capabilitie
 
   useEffect(() => {
     if (remote || !session || !bound) return;
+    let listening = true;
+    const openingLinks = new Set<string>();
+    const current = () => listening && store.getSnapshot().scope.session === session.id;
+    const revealPage = (pageId: string) => {
+      if (!current()) return;
+      const page = session.getSnapshot().state?.pages.find(value => value.id === pageId);
+      if (!page) return;
+      const panel = browserPagePanelId(session.id, pageId);
+      store.dispatch({ type: "browser-page-open", panel, descriptor: { sessionId: session.id, pageId, title: page.title || page.url }, reveal: true });
+      store.dispatch({ type: "browser-page-focus", panel });
+    };
     const open = (event: Event) => {
       const detail = (event as CustomEvent<BrowserLinkIntent>).detail;
+      if (detail.handled || detail.sessionId !== undefined && detail.sessionId !== session.id || detail.preview !== undefined && detail.preview !== preview) return;
       detail.handled = true;
-      const later = () => { session.setPendingLink({ id: crypto.randomUUID(), url: detail.url }); store.dispatch({ type: "open", panel: "browser" }); };
+      const linkKey = detail.reuse ? detail.reuseKey ?? detail.url : undefined;
+      if (linkKey && openingLinks.has(linkKey)) return;
+      const existing = linkKey ? session.linkedPage(detail.url, linkKey) : undefined;
+      if (existing) {
+        const pending = session.getSnapshot().pendingLink;
+        if (pending && (pending.url === detail.url || pending.reuseKey === linkKey)) session.setPendingLink(null);
+        void session.select(existing.id); revealPage(existing.id); return;
+      }
+      const later = () => {
+        if (!current()) return;
+        session.setPendingLink({ id: crypto.randomUUID(), url: detail.url, reuseKey: linkKey });
+        store.dispatch({ type: "open", panel: "browser" });
+      };
       const state = session.getSnapshot().state;
       // Opening directly needs the user in control, unless this is the chat's first page.
-      if (state && (state.control === "human" || !state.pages.length)) void session.create(detail.url).then(result => { if (!result) later(); });
-      else later();
+      if (state && (state.control === "human" || !state.pages.length)) {
+        if (linkKey) openingLinks.add(linkKey);
+        void session.create(detail.url, { linkKey }).then(result => {
+          if (!result) later();
+          else if (detail.reuse && result.activePageId) revealPage(result.activePageId);
+        }).finally(() => { if (linkKey) openingLinks.delete(linkKey); });
+      } else later();
     };
     conversationWindow.addEventListener("omp:browser-link", open);
-    return () => conversationWindow.removeEventListener("omp:browser-link", open);
-  }, [conversationWindow, remote, session, bound, store]);
+    return () => { listening = false; conversationWindow.removeEventListener("omp:browser-link", open); };
+  }, [conversationWindow, remote, session, bound, store, preview]);
 
   return <>{tabs.map(([id, descriptor]) => <DockPanel key={id} id={id as PanelId}>{visibility =>
     <ManagedBrowserPane client={available && descriptor.sessionId === sessionId && capabilities?.capabilities.some(item => item.id === "browser.webmcp.list" && item.grade !== "unavailable") ? client : undefined} sessionId={descriptor.sessionId} pageId={descriptor.pageId} visible={visibility.visible} width={visibility.width} foreign={descriptor.sessionId !== sessionId}

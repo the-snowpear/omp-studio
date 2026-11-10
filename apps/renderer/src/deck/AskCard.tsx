@@ -1,10 +1,11 @@
 import { AppSelect } from "../AppSelect";
 import { MarkdownInline } from "../conversation/markdown";
 import { PLATFORM } from "../platform";
-import {useState,useEffect} from "react";
+import {useState,useEffect,useRef,useId} from "react";
+import type { ChipComposerHandle } from "../composer/ChipComposer";
 import {AskImages} from "./AskImages";
 import { PromptHead, type DeckQueue } from "./PromptHead";
-import { askAnswered } from "./askContent";
+import { askAnswered, askNoteOption, hasCustomAnswer } from "./askContent";
 import type { AskHeader, DeckAskAnswer, DeckAskQuestion } from "./types";
 
 /** 常驻标题行：换页时高亮胶囊与 1/N 就地更新，行本身不重建、不平移。 */
@@ -57,14 +58,7 @@ export function AskHead({
 
 /** 换页时唯一会动的那一段：问题正文 + 选项 + 自定义回答。 */
 export function AskBody({
-  question,
-  answer,
-  disabled,
-  onPick,
-  onCustom,
-  onPatch,
-  onSubmit,
-  onBusy,
+  question, answer, disabled, onPick, onCustom, onPatch, onSubmit, onBusy,
 }: {
   onBusy?: (busy: boolean) => void;
   question: DeckAskQuestion;
@@ -72,28 +66,48 @@ export function AskBody({
   disabled?: boolean;
   onPick: (label: string) => void;
   onCustom: (value: string) => void;
-  onPatch?: (patch:Partial<DeckAskAnswer>)=>void;
+  onPatch?: (patch: Partial<DeckAskAnswer>) => void;
   onSubmit: () => void;
 }) {
-  const [customFiles,setCustomFiles]=useState<readonly File[]>();const [noteFiles,setNoteFiles]=useState<readonly File[]>();
-  const [customBusy,setCustomBusy]=useState(false);const [noteBusy,setNoteBusy]=useState(false);
-  useEffect(()=>{onBusy?.(customBusy||noteBusy);return()=>onBusy?.(false);},[customBusy,noteBusy,onBusy]);
+  const [customBusy, setCustomBusy] = useState(false);
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [customEditing, setCustomEditing] = useState(false);
+  const inputRef = useRef<ChipComposerHandle>(null);
+  const noteId = useId();
+  const hasCustom = hasCustomAnswer(answer);
+  const exclusive = !question.multi || question.customExclusive === true;
+  const customActive = hasCustom || (customEditing && exclusive);
+  const picked = exclusive && hasCustom ? [] : answer.picked;
+  const imagesAllowed = question.acceptImages === true && onPatch !== undefined;
+  const choicesDisabled = disabled || customBusy || noteBusy;
+  const noteDisabled = disabled || !askAnswered(answer);
+  const owner = askNoteOption(answer);
+  const noteOption = owner !== undefined && picked.includes(owner) ? owner : hasCustom ? undefined : picked[0];
+  const noteTargetCount = picked.length + (hasCustom ? 1 : 0);
+  useEffect(() => { onBusy?.(customBusy || noteBusy); return () => onBusy?.(false); }, [customBusy, noteBusy, onBusy]);
+
+  const chooseCustom = () => {
+    if (!exclusive && hasCustom) {
+      setCustomEditing(false);
+      onPatch?.({ custom: "", customInputImages: [] });
+      return;
+    }
+    setCustomEditing(true);
+    if (!hasCustom) onCustom("");
+    inputRef.current?.focus();
+  };
+
   return (
     <div className="ask-body">
       <div className="dk-sub"><MarkdownInline text={question.question} k={`q-${question.id}`} /></div>
+      <p className="ask-selection-hint">
+        {question.multi ? exclusive ? "多选 · 自定义回答会替代已选项" : "多选 · 可同时选择选项和自定义回答" : "单选 · 选择一项，或填写自定义回答"}
+      </p>
       <div className="dk-opts" role={question.multi ? "group" : "radiogroup"} aria-label={question.question}>
         {question.options.map((option, index) => {
-          const on = answer.picked.includes(option.label);
+          const on = picked.includes(option.label);
           return (
-            <button
-              key={option.label}
-              type="button"
-              className={`dk-opt${on ? " sel" : ""}`}
-              role={question.multi ? "checkbox" : "radio"}
-              aria-checked={on}
-              disabled={disabled}
-              onClick={() => onPick(option.label)}
-            >
+            <button key={option.label} type="button" className={`dk-opt${on ? " sel" : ""}`} role={question.multi ? "checkbox" : "radio"} aria-checked={on} disabled={choicesDisabled} onClick={() => { setCustomEditing(false); onPick(option.label); }}>
               <span className="dk-opt-row">
                 <span className={question.multi ? "o-check" : "o-radio"} aria-hidden="true" />
                 <span className="o-label">{option.label}</span>
@@ -104,24 +118,40 @@ export function AskBody({
             </button>
           );
         })}
+        <div className={`ask-custom-choice${customActive ? " is-active" : ""}`}>
+          <AskImages
+            heading={<button type="button" className="ask-custom-toggle" role={exclusive ? "radio" : "checkbox"} aria-label="自定义回答选项" aria-checked={customActive} disabled={choicesDisabled} onClick={chooseCustom}><span className={exclusive ? "o-radio" : "o-check"} aria-hidden="true" /><span>自定义回答</span></button>}
+            allowImages={imagesAllowed} onBusy={setCustomBusy} label="回答 / Answer" ariaLabel="自定义回答"
+            text={answer.custom} images={answer.customInputImages ?? []} doc={answer.customDoc} editorRef={inputRef} disabled={disabled}
+            placeholder={imagesAllowed ? "填写其他答案，也可粘贴图片…" : "填写其他答案…"}
+            onChange={value => {
+              setCustomEditing(true);
+              if (onPatch) onPatch({ custom: value.text, customInputImages: value.images, customDoc: value.doc });
+              else onCustom(value.text);
+            }}
+            onSubmit={() => { if (!customBusy && !noteBusy && askAnswered(answer)) onSubmit(); }}
+          />
+        </div>
       </div>
-      <div className="dk-custom" style={{display:"grid",gridTemplateColumns:"minmax(0, 1fr)",gap:8}}>
-        <input
-          className="input dk-input"
-          value={answer.custom}
-          placeholder="自定义回答…"
-          aria-label="自定义回答"
-          disabled={disabled}
-          onChange={(event) => onCustom(event.target.value)}
-          onPaste={event=>{if(question.acceptImages&&event.clipboardData.files.length){event.preventDefault();setCustomFiles([...event.clipboardData.files]);}}}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.nativeEvent.isComposing && !customBusy && !noteBusy && askAnswered(answer)) onSubmit();
-          }}
+      {question.acceptImages !== undefined && onPatch ? (
+        <AskImages
+          multiline allowImages={imagesAllowed} heading={<span className="ask-note-title">补充说明 <span>可选</span></span>}
+          hint={<div id={noteId} className="ask-note-target" data-tip="补充说明附加在当前回答后，不会替代回答">
+            {noteTargetCount ? <>
+              <span>附加到</span>
+              {noteTargetCount > 1 ? <AppSelect className="select" aria-label="备注对象 / Note on" value={noteOption === undefined ? "custom" : `option:${picked.indexOf(noteOption)}`} disabled={choicesDisabled} data-tip="选择这条补充说明的归属" onChange={event => onPatch({ noteOption: event.target.value === "custom" ? undefined : picked[Number(event.target.value.slice(7))] })}>
+                {picked.map((label, index) => <option key={label} value={`option:${index}`}>{label}</option>)}
+                {hasCustom ? <option value="custom">自定义回答</option> : null}
+              </AppSelect> : <strong data-tip={noteOption ?? "自定义回答"}>{noteOption ?? "自定义回答"}</strong>}
+              <span>· 不替代回答</span>
+            </> : <span>先选择或填写回答</span>}
+          </div>}
+          onBusy={setNoteBusy} label="备注 / Note" ariaLabel="备注 / Note" describedBy={noteId}
+          text={answer.note ?? ""} images={answer.noteImages ?? []} doc={answer.noteDoc} disabled={noteDisabled}
+          placeholder={imagesAllowed ? "补充细节，也可粘贴图片…" : "补充细节…"}
+          onChange={value => onPatch({ note: value.text, noteImages: value.images, noteDoc: value.doc })}
         />
-        {question.acceptImages&&onPatch?<AskImages onBusy={setCustomBusy} label="回答 / Answer" images={answer.customInputImages??[]} onChange={customInputImages=>onPatch({customInputImages})} files={customFiles} disabled={disabled}/>:null}
-        {question.acceptImages !== undefined && onPatch && answer.picked.length > 0 && !answer.custom.trim() && !(answer.customInputImages?.length) ? <label className="small muted">备注对象 / Note on<AppSelect className="select" aria-label="备注对象 / Note on" value={answer.noteOption && answer.picked.includes(answer.noteOption) ? answer.noteOption : answer.picked[0] ?? ""} disabled={disabled} onChange={event => onPatch({ noteOption: event.target.value })}>{answer.picked.map(label => <option key={label} value={label}>{label}</option>)}</AppSelect></label> : null}
-        {question.acceptImages!==undefined&&onPatch?<><textarea className="input" aria-label="备注 / Note" placeholder="备注 / Note" value={answer.note??""} disabled={disabled} onChange={event=>onPatch({note:event.target.value})} onPaste={event=>{if(question.acceptImages&&event.clipboardData.files.length){event.preventDefault();setNoteFiles([...event.clipboardData.files]);}}}/>{question.acceptImages?<AskImages onBusy={setNoteBusy} label="备注 / Note" images={answer.noteImages??[]} onChange={noteImages=>onPatch({noteImages})} files={noteFiles} disabled={disabled}/>:null}</>:null}
-      </div>
+      ) : null}
     </div>
   );
 }

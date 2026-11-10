@@ -14,7 +14,7 @@ export function withPins(layout: DockLayout, pins: readonly DockFloat[]): DockLa
   const browserPages = Object.assign({}, ...pins.map(group => group.pin?.browserPages ?? {}), layout.browserPages) as DockLayout["browserPages"];
   const fileViews = Object.assign({}, ...pins.map(group => group.pin?.fileViews ?? {}), layout.fileViews) as DockLayout["fileViews"];
   const cards = { ...layout.cards };
-  for (const id of [...Object.keys(agentPanels), ...Object.keys(browserPages), ...Object.keys(fileViews)] as PanelId[]) cards[id] ??= { collapsed: false, height: null };
+  for (const id of [...panels, ...Object.keys(agentPanels), ...Object.keys(browserPages), ...Object.keys(fileViews)] as PanelId[]) cards[id] ??= { collapsed: false, height: null };
   const next = dockReducer({ ...layout, agentPanels, browserPages, fileViews, cards }, { type: "hide", panels });
   const hidden = { ...next.hidden };
   for (const panel of panels) delete hidden[panel];

@@ -9,7 +9,7 @@ export const DIAGNOSTICS_INTENT_KEY = "omp.diagnosticsIntent";
 export const HUB_INTENT_KEY = "omp.hubIntent";
 export const MEDIA_INTENT_KEY = "omp.mediaIntent";
 
-export type McTab = "providers" | "roles" | "subagents" | "websearch" | "presets" | "accounts" | "benchmark";
+export type McTab = "providers" | "roles" | "subagents" | "websearch" | "presets" | "accounts";
 export type McIntent = { tab?: McTab; edit?: string; role?: string; assign?: string; agent?: string };
 export type CapTab = "skills" | "plugins" | "mcp" | "slash" | "ida" | "resources";
 export type CapIntent = { tab?: CapTab; name?: string };

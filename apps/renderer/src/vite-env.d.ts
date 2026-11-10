@@ -99,7 +99,7 @@ declare global {
         /** Fixed by the preload; read it through `src/platform.ts`. Absent on older installs. */
         readonly platform?: "win32" | "darwin" | "linux";
         /** macOS menu bar commands (allowlisted ids from Main). */
-        onMenuCommand?(listener: (command: "app.settings" | "file.newChat" | "file.openProject" | "view.commandPalette" | "view.toggleSidebar" | "view.toggleBottomPanel" | "view.toggleSkills" | "help.shortcuts") => void): () => void;
+        onMenuCommand?(listener: (command: "app.settings" | "file.newChat" | "file.openProject" | "view.commandPalette" | "view.toggleSidebar" | "view.toggleBottomPanel" | "view.toggleSkills" | "help.shortcuts" | "help.tutorial") => void): () => void;
         /** macOS microphone permission (TCC); Windows always reports granted. */
         requestMicrophoneAccess?(): Promise<"granted" | "denied">;
         /** Opens System Settings › Privacy & Security › Microphone (macOS only). */
@@ -301,7 +301,7 @@ declare global {
    */
   var ompStudioTerminal:
     | {
-        create(size?: { cols?: number; rows?: number; targetId?: string; workspaceId?: string; flowControl?: boolean }): Promise<{ id: string; name: string; cwd: string }>;
+        create(size?: { cols?: number; rows?: number; targetId?: string; workspaceId?: string; flowControl?: boolean; command?: import("../../desktop/src/terminal-shared").TerminalCommand }): Promise<{ id: string; name: string; cwd: string }>;
         write(id: string, data: string): Promise<void>;
         resize(id: string, cols: number, rows: number): Promise<void>;
         dispose(id: string): Promise<void>;

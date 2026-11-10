@@ -64,8 +64,10 @@ export function useReadingColumn(
     // The scroller is stable for the lifetime of this workbench, even while its
     // virtual rows/session body change. Locate it once, not on stream updates.
     const scroller = element.querySelector<HTMLElement>(":scope > .convo-scroll");
+    const queues = element.querySelector<HTMLElement>(":scope > .composer-region > .composer-queues");
     let previous: ReadingColumnGeometry | null = null;
     let previousHeight = -1;
+    let previousQueueHeight = -1;
     let frame: number | null = null;
     const measure = () => {
       const { preference: current, welcome: isWelcome } = input.current;
@@ -108,6 +110,13 @@ export function useReadingColumn(
         previousHeight = height;
         element.style.setProperty("--reading-height", `${height}px`);
       }
+      // Extend the scroller beneath the tray while reserving the same space at
+      // the transcript tail. Collapsing either queue keeps the latest row clear.
+      const queueHeight = queues?.offsetHeight ?? 0;
+      if (queueHeight !== previousQueueHeight) {
+        previousQueueHeight = queueHeight;
+        element.style.setProperty("--composer-queues-height", `${queueHeight}px`);
+      }
     };
     const schedule = () => {
       if (frame !== null) return;
@@ -118,6 +127,7 @@ export function useReadingColumn(
     observer?.observe(element);
     // A native scrollbar/height change need not resize the outer workbench.
     if (scroller !== null) observer?.observe(scroller);
+    if (queues !== null) observer?.observe(queues);
     const densityObserver = new MutationObserver(schedule);
     densityObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-density", "style"] });
     const syncAfterLayout = () => {

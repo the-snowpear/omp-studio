@@ -10,6 +10,8 @@ import { STARTUP_NOTICE_ID, STARTUP_NOTICE_STORAGE_KEY } from "../settings/start
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
 import { PREVIEW_PROJECTS } from "../preview/fixtures";
 import { WORKSPACE_STORAGE_KEY } from "./store";
+import { dragPreview } from "../dock/dragPreview";
+import { createDefaultLayout, dockReducer } from "../dock/model";
 
 // These full workbench flows include animated moves and mounted preview panels.
 vi.setConfig({ testTimeout: 15_000 });
@@ -40,10 +42,24 @@ async function mount(preview = false, input = client()) {
   window.history.replaceState(null, "", preview ? "?preview=1&marks=off" : "/");
   localStorage.setItem(STARTUP_NOTICE_STORAGE_KEY, STARTUP_NOTICE_ID);
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, preview ? "1" : "0");
+  // Window flows start from an existing tabbed workspace; factory defaults
+  // are covered separately by the layout and App-level region suites.
+  let layout = dockReducer(createDefaultLayout(), { type: "hide", panels: ["git-quick", "jobs"] });
+  layout = dockReducer(layout, { type: "move", panels: ["changes", "git", "browser", "computer"], target: { region: "right", groupId: "right-main" } });
+  layout.right.visible = false;
+  layout.rail.mode = "hidden";
+  layout.bottom.visible = true;
+  for (const panel of ["context", "git-quick", "agents"] as const) layout.cards[panel].collapsed = false;
+  layout.presetId = "window-flows";
+  localStorage.setItem("omp.dock.v1", JSON.stringify({ version: 1, migrated: true, preferences: { appDefault: layout.presetId }, presets: [{ id: layout.presetId, name: "Tabbed workspace", layout }] }));
   __resetAppSettingsForTests(JSON.stringify({ language: "en", restoreLastSession: false, startupPage: "workbench" }));
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("PointerEvent", MouseEvent);
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  vi.stubGlobal("URL", class extends URL {
+    static createObjectURL = () => "blob:content-gallery";
+    static revokeObjectURL = () => {};
+  });
   HTMLElement.prototype.scrollIntoView = vi.fn();
   HTMLElement.prototype.scrollTo = vi.fn();
   render(<App client={input} />);
@@ -339,6 +355,117 @@ describe("conversation windows", () => {
     await waitFor(() => expect(document.querySelectorAll(".cw-snap-surface > .dock-float")).toHaveLength(3));
     expect(document.querySelectorAll('#bottomPanel [data-dock-tab="terminal"]')).toHaveLength(0);
     expect(document.querySelectorAll("#sidebar, #sidePanel, #bottomPanel, .bp-reveal")).toHaveLength(4);
+  });
+  it.each([false, true])("shows the full canvas when a tool is dragged to maximize (preview=%s)", async preview => {
+    await mount(preview);
+    const canvas = document.querySelector<HTMLElement>("[data-conversation-canvas]")!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(new DOMRect(300, 40, 1100, 800));
+    vi.spyOn(document.querySelector<HTMLElement>("[data-dock-workbench]")!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 40, 1400, 900));
+    Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [] });
+    const terminal = document.querySelector('#bottomPanel [data-dock-tab="terminal"] [role="tab"]')!;
+    fireEvent.pointerDown(terminal, { button: 0, clientX: 600, clientY: 850 });
+    fireEvent.pointerMove(window, { clientX: 850, clientY: 60 });
+    await waitFor(() => expect(document.querySelector<HTMLElement>(".dock-drag-preview")?.style.width).toBe("1100px"));
+    expect(document.querySelector<HTMLElement>(".dock-drag-preview")?.style.height).toBe("800px");
+    fireEvent.pointerUp(window, { clientX: 850, clientY: 60 });
+    await waitFor(() => expect(document.querySelector(".dock-float.is-maximized")).not.toBeNull());
+  });
+  it("returns from a window preview to the conversation tools under the pointer", async () => {
+    await mount(true);
+    const canvas = document.querySelector<HTMLElement>("[data-conversation-canvas]")!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(new DOMRect(300, 40, 1100, 800));
+    vi.spyOn(document.querySelector<HTMLElement>("[data-dock-workbench]")!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 40, 1400, 900));
+    fireEvent.click(screen.getByRole("button", { name: /^Conversation tools$/ }));
+    const rail = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>(".dock-rail-expanded, .dock-rail-compact");
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    const list = rail.querySelector<HTMLElement>('.dock-card-list[data-dock-cards="rail"], .dock-rail-icon-list')!;
+    const toolbar = rail.querySelector<HTMLElement>(".dock-rail-toolbar")!;
+    vi.spyOn(rail, "getBoundingClientRect").mockReturnValue(new DOMRect(1080, 40, 320, 800));
+    vi.spyOn(list, "getBoundingClientRect").mockReturnValue(new DOMRect(1080, 80, 320, 760));
+    vi.spyOn(list, "getClientRects").mockReturnValue([new DOMRect(1080, 80, 320, 760)] as unknown as DOMRectList);
+    Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: (x: number) => x >= 1080 ? [toolbar] : [] });
+    const terminal = document.querySelector('#bottomPanel [data-dock-tab="terminal"] [role="tab"]')!;
+    fireEvent.pointerDown(terminal, { button: 0, clientX: 600, clientY: 850 });
+    fireEvent.pointerMove(window, { clientX: 420, clientY: 170 });
+    await waitFor(() => expect(document.querySelector(".dock-layout-preview")).not.toBeNull());
+    fireEvent.pointerMove(window, { clientX: 1300, clientY: 60 });
+    await waitFor(() => expect(dragPreview.snapshot()?.target.region).toBe("rail"));
+    expect(document.querySelector(".dock-layout-preview")).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+  });
+  it.each([false, true])("restores the expanded rail before hit-testing a drag from the right sidebar (preview=%s)", async preview => {
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(function(this: Element) {
+      return this.matches(".adaptive-workbench") ? this.closest(".dock-layout-preview") ? 694 : 1392 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
+      if (this.matches("[data-dock-workbench]")) return new DOMRect(56, 36, 2144, 964);
+      if (this.matches(".cw-navigation-slot")) return new DOMRect(0, 36, 56, 964);
+      if (this.matches("[data-conversation-canvas]")) return new DOMRect(328, 80, 1392, 884);
+      const projected = !!this.closest(".dock-layout-preview");
+      if (this.matches(".adaptive-workbench, .convo-wrap")) return new DOMRect(328, 80, projected ? 694 : 1392, 884);
+      const rail = this.closest(".dock-rail-expanded, .dock-rail-compact");
+      if (rail) {
+        const compact = rail.classList.contains("dock-rail-compact");
+        const width = compact ? 40 : 320;
+        const x = (projected ? 1010 : 1708) - width;
+        if (this === rail) return new DOMRect(x, 88, width, 864);
+        const card = this.closest<HTMLElement>("[data-dock-card]");
+        const index = card ? [...card.parentElement!.children].indexOf(card) : 0;
+        return new DOMRect(x + 1, 130 + index * 56, width - 2, card ? 46 : 700);
+      }
+      return new DOMRect(1720, 80, 480, 884);
+    });
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function(this: HTMLElement) {
+      return [this.getBoundingClientRect()] as unknown as DOMRectList;
+    });
+    await mount(preview);
+    fireEvent.click(screen.getByRole("button", { name: /^Conversation tools$/ }));
+    await waitFor(() => expect(document.querySelector(".dock-rail-expanded")).not.toBeNull());
+    Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: (x: number, y: number) => {
+      const list = document.querySelector('.dock-card-list[data-dock-cards="rail"], .dock-rail-icon-list');
+      const rect = list?.getBoundingClientRect();
+      return rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom ? [list!] : [];
+    } });
+    const body = document.querySelector(".cw-main-conversation .cw-document");
+    const git = document.querySelector('#sidePanel [data-dock-tab="git"] [role="tab"]')!;
+    for (const cancel of [true, false]) {
+      fireEvent.pointerDown(git, { button: 0, clientX: 1880, clientY: 96 });
+      fireEvent.pointerMove(window, { clientX: 1700, clientY: 400 });
+      await waitFor(() => expect(dragPreview.snapshot()?.label).toBe("停留以吸附到右侧分栏"));
+      fireEvent.pointerMove(window, { clientX: 1690, clientY: 400 });
+      await waitFor(() => expect(dragPreview.snapshot()?.target.region).toBe("rail"));
+      expect(dragPreview.snapshot()?.snapKey).toBeUndefined();
+      fireEvent.pointerMove(window, { clientX: 1700, clientY: 400 });
+      await waitFor(() => expect(document.querySelector(".dock-layout-preview")).not.toBeNull());
+      const snapped = dragPreview.snapshot()!.snapKey;
+      for (const x of [1699, 1701, 1700]) {
+        const previous = dragPreview.snapshot();
+        fireEvent.pointerMove(window, { clientX: x, clientY: 400 });
+        await waitFor(() => expect(dragPreview.snapshot()).not.toBe(previous));
+        expect(dragPreview.snapshot()?.snapKey).toBe(snapped);
+        expect(document.querySelector(".dock-layout-preview")).not.toBeNull();
+      }
+      // The borrowed conversation is narrower; deliver its pending layout measurement.
+      fireEvent.resize(window);
+      await waitFor(() => expect(document.querySelector(".dock-rail-compact")).not.toBeNull());
+      for (const x of [1650, 1651, 1650, 1651]) {
+        const previous = dragPreview.snapshot();
+        fireEvent.pointerMove(window, { clientX: x, clientY: 400 });
+        await waitFor(() => expect(dragPreview.snapshot()).not.toBe(previous));
+        expect(dragPreview.snapshot()?.target.region).toBe("rail");
+        expect(dragPreview.snapshot()?.cards?.icons).toBe(false);
+        expect(dragPreview.snapshot()?.rect.width).toBe(318);
+        expect(document.querySelector(".dock-layout-preview")).toBeNull();
+      }
+      if (cancel) fireEvent.keyDown(window, { key: "Escape" });
+      else fireEvent.pointerUp(window, { clientX: 1651, clientY: 400 });
+      await waitFor(() => expect(dragPreview.snapshot()).toBeNull());
+      expect(document.querySelector(".cw-main-conversation .cw-document")).toBe(body);
+      expect(document.querySelector('.dock-rail-expanded [data-dock-card="git-quick"]') !== null).toBe(!cancel);
+    }
   });
   it.each([false, true])("opens a sidebar conversation in another window without replacing the focused body (preview=%s)", async preview => {
     await mount(preview);

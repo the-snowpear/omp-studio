@@ -965,16 +965,16 @@ export function CapabilitiesPage({
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
         <div>
           <h1 style={{ fontSize: 18 }}>{t("capabilities.pageTitle")}</h1>
-          <p className="muted small">{t("capabilities.pageSubtitle")}</p>
+          <p className="muted small">{tab === "ida" || tab === "resources" ? (zh ? "管理技能、工具、数据库与会话资源。" : "Manage skills, tools, databases and session resources.") : t("capabilities.pageSubtitle")}</p>
           {(preview && marks) || loadError ? (
             <p className="tiny muted">{preview && marks ? t("capabilities.previewSubtitle") : loadError}</p>
           ) : null}
         </div>
         <span className="spacer" />
-        <button type="button" className="btn outline" onClick={() => void revealSkillRoot()}>
+        {tab === "skills" || tab === "plugins" ? <><button type="button" className="btn outline" onClick={() => void revealSkillRoot()}>
           <Icon name="folder" extra="sm" />{t("capabilities.openSourceDir")}
         </button>
-        <Disabled className="btn primary" tip={CONTRACT.create}><Icon name="plus" extra="sm" />{t("capabilities.createSkill")}</Disabled>
+        <Disabled className="btn primary" tip={CONTRACT.create}><Icon name="plus" extra="sm" />{t("capabilities.createSkill")}</Disabled></> : null}
       </div>
       <ToastHost
         message={mcpTesting.size === 0 ? flash : t("capabilities.mcpTesting", { name: [...mcpTesting].join(", ") })}
@@ -994,7 +994,7 @@ export function CapabilitiesPage({
             label: t(TAB_LABELS[id]),
             buttonId: `capTab-${id}`,
             panelId: `cap-${id}`,
-            badge: id === "ida" ? null : <span className="cnt">{counts[id]}<span className="sr-only"> {t("capabilities.catItemCount", { count: counts[id] })}</span></span>,
+            badge: id === "ida" || id === "resources" ? null : <span className="cnt">{counts[id]}<span className="sr-only"> {t("capabilities.catItemCount", { count: counts[id] })}</span></span>,
           }))}
         />
         <div className="cap-main" id="capMain">

@@ -1,8 +1,20 @@
 import type { ReactNode, PointerEvent } from "react";
 import type { IconName } from "../icons";
 
-export const PANEL_IDS = ["files", "changes", "git", "git-quick", "browser", "computer", "agents", "agent-detail", "environment", "context", "context-viewer", "token-counter", "terminal", "problems", "tests", "output", "logs", "pvlogs", "btw"] as const;
+export const PANEL_IDS = ["files", "changes", "git", "git-quick", "browser", "computer", "agents", "agent-detail", "environment", "context", "context-viewer", "annotations", "token-counter", "terminal", "jobs", "problems", "tests", "output", "logs", "pvlogs", "btw"] as const;
 export type FixedPanelId = typeof PANEL_IDS[number];
+/** Tools that may be open once per dock region; a second region gets its own instance. */
+export const REPEATABLE_PANEL_IDS = ["files", "changes", "git", "agents", "jobs", "environment", "token-counter", "problems", "tests", "output", "logs", "pvlogs"] as const;
+export type RepeatablePanelId = typeof REPEATABLE_PANEL_IDS[number];
+export type ScopedPanelId = `${RepeatablePanelId}@${number}`;
+export const isRepeatablePanelId = (id: string): id is RepeatablePanelId => (REPEATABLE_PANEL_IDS as readonly string[]).includes(id);
+export const isScopedPanelId = (id: string): id is ScopedPanelId => {
+  const at = id.indexOf("@");
+  return at > 0 && /^[1-9]\d*$/.test(id.slice(at + 1)) && isRepeatablePanelId(id.slice(0, at));
+};
+/** The registered tool behind an instance id; every other id is its own base. */
+export const panelBaseId = (id: PanelId): PanelId => isScopedPanelId(id) ? id.slice(0, id.indexOf("@")) as PanelId : id;
+export const scopedPanelId = (base: RepeatablePanelId, index: number): ScopedPanelId => `${base}@${index}`;
 export type AgentPanelId = `agent-detail:${string}`;
 /** One managed-browser web page, qualified by the chat (session) that owns it. */
 export type BrowserPagePanelId = `browser-page:${string}`;
@@ -14,7 +26,7 @@ export const isFilePanelId = (id: string): id is FilePanelId => id.startsWith("f
 export type FilePanelDescriptor = { targetId: string | null; workspaceId: string; path: string; fileId: string; title: string; scope: "conversation" | "workspace"; line?: number; column?: number; jump?: number; page?: number; scroll?: number; mode?: FileViewMode; time?: number };
 /** `preview` renders Markdown or the CSV grid; `split` is Markdown source beside its preview; `diff` is the working-tree patch. */
 export type FileViewMode = "preview" | "source" | "split" | "diff";
-export type PanelId = FixedPanelId | AgentPanelId | BrowserPagePanelId | ConversationPanelId | FilePanelId;
+export type PanelId = FixedPanelId | ScopedPanelId | AgentPanelId | BrowserPagePanelId | ConversationPanelId | FilePanelId;
 export const isAgentPanelId = (id: string): id is AgentPanelId => id.startsWith("agent-detail:");
 export const isBrowserPagePanelId = (id: string): id is BrowserPagePanelId => id.startsWith("browser-page:");
 /** Panels created per Agent or per web page rather than registered once. */
@@ -46,7 +58,7 @@ export type DockPinMode = "none" | "workspace" | "application" | "window" | "top
 export type DockPin = { mode: Exclude<DockPinMode, "none">; owner?: string; workspace?: string; windowRect?: DockRect; coordinateVersion?: 1; returnMode?: "none" | "workspace" | "application"; agentPanels?: DockLayout["agentPanels"]; browserPages?: DockLayout["browserPages"]; fileViews?: DockLayout["fileViews"] };
 export type DockFloat = DockGroup & { rect: DockRect; minimized: boolean; maximized: boolean; pin?: DockPin; windowId?: string };
 export type DockLocation = { region: DockRegionId | "float"; groupId?: string; index?: number; rect?: DockRect };
-export type CardPreferences = { collapsed: boolean; height: number | null };
+export type CardPreferences = { collapsed: boolean; height: number | null; leftShare?: number };
 export type DockLayout = {
   version: 1;
   floatCoordinateVersion?: 1 | undefined;
@@ -81,6 +93,8 @@ export type DockAction =
   | { type: "file-state"; panel: FilePanelId; patch: Partial<FilePanelDescriptor> }
   | { type: "move"; panels: PanelId[]; target: DockTarget }
   | { type: "open"; panel: PanelId }
+  /** Shows an existing instance without changing the layout (no undo entry). */
+  | { type: "reveal"; panel: PanelId }
   | { type: "agent-open"; panel: AgentPanelId; descriptor: AgentPanelDescriptor }
   | { type: "agent-focus"; panel: AgentPanelId }
   /** Adds or refreshes a page tab. Passive opens (Agent, popups, restore) never reveal hidden regions. */
@@ -94,6 +108,7 @@ export type DockAction =
   | { type: "railMode"; mode: RailMode }
   | { type: "bottomExpanded"; expanded: boolean }
   | { type: "card"; panel: PanelId; collapsed?: boolean; height?: number | null }
+  | { type: "left-card-shares"; shares: Partial<Record<PanelId, number | null>> }
   | { type: "resize"; region: DockRegionId; size?: number; ratio?: number }
   | { type: "float"; groupId: string; rect?: DockRect; minimized?: boolean; maximized?: boolean }
   | { type: "raise"; groupId: string }

@@ -5,6 +5,7 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { startEvaluationPolling } from "./evaluationPolling";
+import { useConversationView } from "../conversationWorkspace/Context";
 import "./evaluation.css";
 
 /** Only the status entry is global. Evaluation jobs remain owned by the Host. */
@@ -19,9 +20,12 @@ export function EvaluationActivity({
 }) {
   const { preview } = usePreviewMode(),
     { resolvedLanguage } = useI18n();
+  const conversation = useConversationView();
+  // This entry is global chrome, not one background poller per open/minimized chat.
+  const shown = visible && (conversation?.active ?? true);
   const [runs, setRuns] = useState<EvaluationRecord[]>([]);
   useEffect(() => {
-    if (preview || !visible) return;
+    if (preview || !shown) return;
     let active = true;
     const read = async () => {
       try {
@@ -41,8 +45,8 @@ export function EvaluationActivity({
       active = false;
       stop();
     };
-  }, [client, preview, visible]);
-  if (!visible || !runs.length || preview) return null;
+  }, [client, preview, shown]);
+  if (!shown || !runs.length || preview) return null;
   const waiting = runs.find((r) => r.interaction),
     target = waiting ?? runs[0]!;
   return (

@@ -10,6 +10,7 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { PREVIEW_CONTEXT_CARD } from "../preview/contextCardPreview";
 import { useViewedSessionTelemetry, type ViewedSessionTelemetryState } from "../telemetry/useViewedSessionTelemetry";
 import "./contextCard.css";
+import { useWideLayout } from "../layout/useWideLayout";
 import { SessionCompactionInput } from "./SessionCompactionInput";
 import { useSessionCompaction } from "./useSessionCompaction";
 
@@ -21,6 +22,11 @@ const PARTS = [
   { key: "systemPromptTokens", zh: "系统提示词", en: "System prompt", color: "#8b9098" },
   { key: "skillsTokens", zh: "技能目录", en: "Skills", color: "#9380c8" },
 ] as const;
+
+/** From this width the card is a dashboard: a ring beside the full breakdown. */
+const CONTEXT_WIDE_MIN = 640;
+const RING_RADIUS = 52;
+const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
 
 function tokens(value: number): string {
   if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(2))}M`;
@@ -44,7 +50,8 @@ export function ContextCard({ context, status = "live", source, demo = false, on
 }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
-  if (!context) return <div className="context-card context-card-empty" role="status">
+  const [rootRef, wide] = useWideLayout<HTMLDivElement>(CONTEXT_WIDE_MIN);
+  if (!context) return <div className={`context-card context-card-empty${wide ? " is-wide" : ""}`} ref={rootRef} role="status">
     <span>{status === "loading" ? zh ? "正在读取上下文…" : "Reading context…" : zh ? "暂无上下文用量" : "Context usage unavailable"}</span>
     <p>{zh ? "当前会话尚未提供可用的上下文数据。" : "This session has not reported context usage."}</p>
     {thresholdControl ? <footer className="context-card-footer">{thresholdControl}</footer> : null}
@@ -60,7 +67,73 @@ export function ContextCard({ context, status = "live", source, demo = false, on
     : context.anchored ? zh ? "已按实际用量校准" : "Calibrated to usage"
     : zh ? "原生估算" : "Native estimate";
 
-  return <div className="context-card">
+  const footer = <footer className="context-card-footer">
+      {thresholdControl ?? <span className="context-card-source">{provenance}</span>}
+      <div className="context-card-actions">
+        {onCompact ? <button type="button" className="context-card-compact" onClick={onCompact} disabled={compactDisabled || compacting}
+          aria-label={compacting ? zh ? "正在压缩上下文" : "Compacting context" : zh ? "压缩上下文" : "Compact context"}
+          aria-busy={compacting} data-tip={compacting ? zh ? "正在压缩上下文" : "Compacting context" : queueInstead ? zh ? "当前工作结束后压缩" : "Compact after current work yields" : zh ? "立即压缩当前会话的上下文" : "Compact this session's context now"}>
+          <Icon name={compacting ? "clock" : "restore"} extra="sm" /><span>{compacting ? zh ? "压缩中" : "Compacting" : queueInstead ? zh ? "排队压缩" : "Queue compaction" : zh ? "压缩" : "Compact"}</span>
+        </button> : null}
+        {onOpenDetails ? <button type="button" className="context-card-details" onClick={onOpenDetails}
+          aria-label={zh ? "查看详情" : "View details"} data-tip={zh ? "查看详情" : "View details"}>
+          <span className="context-card-details-text">{zh ? "查看详情" : "View details"}</span>
+          <Icon name="chevron-r" extra="sm" />
+        </button> : null}
+      </div>
+    </footer>;
+
+  if (wide) {
+    const tone = percent >= 90 ? "danger" : percent >= 75 ? "warning" : "normal";
+    const largest = Math.max(1, ...rows.filter(row => row.id !== "free").map(row => row.tokens));
+    let offset = 0;
+    const arcs = rows.filter(row => row.id !== "free" && row.tokens > 0).map(row => {
+      const length = Math.min(RING_LENGTH - offset, row.tokens / capacity * RING_LENGTH);
+      const arc = { row, length, offset };
+      offset += length;
+      return arc;
+    });
+    const marker = thresholdPercent == null ? null : Math.min(100, thresholdPercent) / 100 * 2 * Math.PI;
+    return <div className="context-card is-wide" ref={rootRef}>
+      <div className="context-dash">
+        <section className="context-dash-main">
+          <div className="context-ring" data-tone={tone}>
+            <svg viewBox="0 0 132 132" role="meter" aria-label={zh ? "上下文占用" : "Context usage"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, percent)} aria-valuetext={`${percent.toFixed(1)}%`}>
+              <circle className="context-ring-track" cx="66" cy="66" r={RING_RADIUS} />
+              {arcs.map(({ row, length, offset: start }) => <circle key={row.id} cx="66" cy="66" r={RING_RADIUS} stroke={row.color}
+                strokeDasharray={`${length} ${RING_LENGTH - length}`} strokeDashoffset={-start}><title>{`${row.label} · ${tokens(row.tokens)} tokens`}</title></circle>)}
+              {marker === null ? null : <line className="context-ring-marker" x1={66 + (RING_RADIUS - 10) * Math.sin(marker)} y1={66 - (RING_RADIUS - 10) * Math.cos(marker)}
+                x2={66 + (RING_RADIUS + 10) * Math.sin(marker)} y2={66 - (RING_RADIUS + 10) * Math.cos(marker)}>
+                <title>{zh ? `压缩触发点 · ${thresholdPercent!.toFixed(1)}%` : `Compaction trigger · ${thresholdPercent!.toFixed(1)}%`}</title></line>}
+            </svg>
+            <div className="context-ring-label">
+              <strong>{Math.round(percent)}<span>%</span></strong>
+              <span>{zh ? "已使用" : "used"}</span>
+            </div>
+          </div>
+          <div className="context-dash-side">
+            <div className="context-dash-capacity" title={`${context.usedTokens.toLocaleString()} / ${capacity.toLocaleString()} tokens`}>
+              <b>{tokens(context.usedTokens)}</b><span>/ {tokens(capacity)} tokens</span>
+              <span className="context-dash-source">{provenance}</span>
+            </div>
+            <div className="context-dash-rows" role="list" aria-label={zh ? "上下文构成" : "Context composition"}>
+              {rows.map(row => <div key={row.id} className={`context-dash-row${row.id === "free" ? " is-free" : ""}`} role="listitem">
+                <i className="context-card-dot" style={{ background: row.color }} aria-hidden="true" />
+                <span className="context-card-label">{row.label}</span>
+                <span className="context-dash-bar" aria-hidden="true">{row.id === "free" ? null : <i style={{ width: `${row.tokens / largest * 100}%`, background: row.color }} />}</span>
+                <span className="context-card-tokens" title={`${row.tokens.toLocaleString()} tokens`}>{tokens(row.tokens)}</span>
+                <span className="context-card-percent">{(row.tokens / capacity * 100).toFixed(1)}%</span>
+              </div>)}
+            </div>
+          </div>
+        </section>
+        {cacheControl}
+        {footer}
+      </div>
+    </div>;
+  }
+
+  return <div className="context-card" ref={rootRef}>
     <div className="context-card-summary">
       <div className="context-card-used" data-tone={percent >= 90 ? "danger" : percent >= 75 ? "warning" : "normal"}>
         <strong>{Math.round(percent)}<span>%</span></strong><span data-tip={provenance}>{zh ? "已使用" : "used"}</span>
@@ -81,21 +154,7 @@ export function ContextCard({ context, status = "live", source, demo = false, on
       </div>)}
     </div>
     {cacheControl}
-    <footer className="context-card-footer">
-      {thresholdControl ?? <span className="context-card-source">{provenance}</span>}
-      <div className="context-card-actions">
-        {onCompact ? <button type="button" className="context-card-compact" onClick={onCompact} disabled={compactDisabled || compacting}
-          aria-label={compacting ? zh ? "正在压缩上下文" : "Compacting context" : zh ? "压缩上下文" : "Compact context"}
-          aria-busy={compacting} data-tip={compacting ? zh ? "正在压缩上下文" : "Compacting context" : queueInstead ? zh ? "当前工作结束后压缩" : "Compact after current work yields" : zh ? "立即压缩当前会话的上下文" : "Compact this session's context now"}>
-          <Icon name={compacting ? "clock" : "restore"} extra="sm" /><span>{compacting ? zh ? "压缩中" : "Compacting" : queueInstead ? zh ? "排队压缩" : "Queue compaction" : zh ? "压缩" : "Compact"}</span>
-        </button> : null}
-        {onOpenDetails ? <button type="button" className="context-card-details" onClick={onOpenDetails}
-          aria-label={zh ? "查看详情" : "View details"} data-tip={zh ? "查看详情" : "View details"}>
-          <span className="context-card-details-text">{zh ? "查看详情" : "View details"}</span>
-          <Icon name="chevron-r" extra="sm" />
-        </button> : null}
-      </div>
-    </footer>
+    {footer}
   </div>;
 }
 

@@ -59,6 +59,7 @@ export class StudioRuntimeSessionController {
   readonly #publicationListeners = new Set<(publication: RuntimePublication) => void>();
   #resyncTimer: ReturnType<typeof setTimeout> | undefined;
   #resyncInFlight = false;
+  #disposed = false;
   #publishedTerminalRevision = -1;
   #publishedTerminalOutcomes: CommandLedgerEntry[] = [];
 
@@ -102,19 +103,19 @@ export class StudioRuntimeSessionController {
    */
   #recoverFromGap(): void {
     if (this.#resyncInFlight || this.#resyncTimer !== undefined) return;
-    if (this.bridge.state !== "snapshot-required") return;
+    if (this.#disposed || this.bridge.state !== "snapshot-required") return;
     this.#resyncInFlight = true;
     // Deferred by one microtask: the resync fires from inside the Bridge's socket
     // data handler, and `requestSnapshot` swaps that very handler out.
     void Promise.resolve()
       .then(async () => {
-        if (this.bridge.state !== "snapshot-required") return;
+        if (this.#disposed || this.bridge.state !== "snapshot-required") return;
         await this.refresh();
       })
       .catch(() => {
         // A snapshot is refused while commands are pending. Keep asking for as
         // long as the Bridge still needs one: giving up would leave it wedged.
-        if (this.bridge.state !== "snapshot-required") return;
+        if (this.#disposed || this.bridge.state !== "snapshot-required") return;
         this.#resyncTimer = setTimeout(() => {
           this.#resyncTimer = undefined;
           this.#recoverFromGap();
@@ -147,7 +148,11 @@ export class StudioRuntimeSessionController {
   async refresh(): Promise<RuntimePublication> {
     const response = await this.bridge.requestSnapshot();
     for (const receipt of response.terminalReceipts) {
-      if (this.ledger.getByRequestId(receipt.requestId) !== undefined) this.ledger.reconcileReceipt(receipt);
+      const entry = this.ledger.getByRequestId(receipt.requestId);
+      // The authenticated snapshot can settle only work owned by this Runtime
+      // and epoch. A new Runtime cannot resolve its predecessor's unknown work.
+      if (entry === undefined || entry.runtimeId !== response.snapshot.runtimeId || entry.runtimeEpoch !== response.snapshot.runtimeEpoch) continue;
+      this.ledger.reconcileReceipt(receipt);
     }
     // `response` is also handed back to `requestSnapshot`'s caller, so the store
     // cannot take ownership of its snapshot — see `RuntimePublicationStore.publish`.
@@ -424,6 +429,7 @@ export class StudioRuntimeSessionController {
   }
 
   dispose(): void {
+    this.#disposed = true;
     if (this.#resyncTimer !== undefined) clearTimeout(this.#resyncTimer);
     this.#resyncTimer = undefined;
     this.#unsubscribeProjection();

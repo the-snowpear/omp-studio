@@ -199,7 +199,7 @@ export interface DockLayout {
 
 不变量（reducer 必须保证，测试要钉住）：
 
-1. `PanelId` 全局唯一：同一时刻只能出现在一个 segment、一个 floating 或 `closed` 之一。
+1. 一个 `PanelId` 全局唯一：同一时刻只能出现在一个 segment、一个 floating 或 `closed` 之一。可重复工具用 `base@n` 实例 id（如 `files@2`），同一区域每个 base 最多一个。
 2. `projects` 永远在 `slots.left.segments[0].panels`，且永不为空。
 3. 每个 segment 的 `active` 必须属于它的 `panels`；`panels` 为空时该 segment 被移除（最多保留 2 段）。
 4. `slots.*.size` 必须落在对应 limits 内；`weight` ∈ (0, 1)。

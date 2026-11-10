@@ -660,7 +660,9 @@ export interface WebSearchProviderRecord {
   readonly loginId?: string;
   /** agent.db provider id the engine reads an api_key from; absent when there is no direct key path. */
   readonly apiKeyId?: string;
-  /** How the currently detected credential is satisfied (env takes precedence, like the runtime). */
+  /** Native credential identities accepted by this engine. */
+  readonly credentialProviders?: ReadonlyArray<string>;
+  /** Host fallback metadata; the search UI reads effective credential state from Runtime. */
   readonly credentialKind?: "api-key" | "oauth" | "env";
 }
 
@@ -745,9 +747,7 @@ export interface ModelWebSearchSetInput {
 }
 
 /**
- * Studio-managed web-search credential write: stores an `api_key` credential
- * for the engine in the local OMP credential store (agent.db) so the runtime
- * picks it up natively — no `omp login` and no environment variables needed.
+ * Deprecated disk-write request. Use search.credentials.set with the connected Runtime.
  */
 export interface ModelWebSearchCredentialSetInput {
   /** Search engine id (catalog id, e.g. `tavily`). */
@@ -756,7 +756,7 @@ export interface ModelWebSearchCredentialSetInput {
   readonly apiKey: string;
 }
 
-/** Soft-deletes the Studio-managed api_key credential of a search engine. */
+/** Deprecated bulk removal. Use search.credentials.remove with a credential id. */
 export interface ModelWebSearchCredentialRemoveInput {
   readonly providerId: string;
 }

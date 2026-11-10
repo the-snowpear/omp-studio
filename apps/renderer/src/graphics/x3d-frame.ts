@@ -3,6 +3,7 @@ import { imageMeta } from "image-meta";
 import { checkTextGraphic, normalizeGraphicPath } from "./graphic-bundle";
 let browser: X3D.X3DBrowser | undefined;
 let loaded = false;
+let capturePoster = () => {};
 // The opaque sandbox intentionally has no persistent storage; the viewer receives a per-frame memory store.
 const memory: Record<string, string> = Object.create(null);
 const storage = {
@@ -41,6 +42,7 @@ window.addEventListener("message", (event) => {
   if (event.source !== parent) return;
   if (event.data?.kind === "graphic-fit") {
     browser?.viewAll(undefined, 0);
+    capturePoster();
     return;
   }
   if (event.data?.kind !== "graphic-load" || loaded) return;
@@ -77,6 +79,16 @@ async function load(input: {
   browser.setBrowserOption("XRSessionMode", "NONE");
   browser.setBrowserOption("MaximumFrameRate", 30);
   browser.setBrowserOption("PrimitiveQuality", "LOW");
+  let posterTimer: ReturnType<typeof setTimeout>;
+  capturePoster = () => {
+    clearTimeout(posterTimer);
+    posterTimer = setTimeout(() => {
+      canvas.toBlob(blob => { if (blob) parent.postMessage({ kind: "graphic-poster", blob }, "*"); }, "image/webp", 0.8);
+    }, 180);
+  };
+  canvas.addEventListener("pointerup", capturePoster);
+  canvas.addEventListener("wheel", capturePoster, { passive: true });
+  window.addEventListener("pagehide", () => clearTimeout(posterTimer), { once: true });
   let nodes = 0;
   let drawables = 0;
   let totalText = 0;
@@ -215,6 +227,7 @@ async function load(input: {
   await browser.replaceWorld(scene);
   browser.viewAll(undefined, 0);
   report("graphic-loaded");
+  capturePoster();
 }
 window.addEventListener("pagehide", () => browser?.endUpdate());
 report("graphic-ready");

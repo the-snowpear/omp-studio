@@ -78,7 +78,8 @@ export function TipHost() {
       pendingRef.current = el;
       timerRef.current = window.setTimeout(() => {
         const next = readTip(el);
-        if (next.length === 0) {
+        // A click can unmount the anchor before the delay ends (it measures 0×0 at the corner).
+        if (next.length === 0 || !el.isConnected) {
           hide();
           return;
         }

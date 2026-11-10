@@ -16,9 +16,12 @@ import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import type { BtwSessionApi } from "./useBtwSession";
 import { BtwStatusLine } from "./BtwStatusLine";
+import { useWideLayout } from "../layout/useWideLayout";
 
 const FOLLOW_SLACK_PX = 48;
 const BTW_IMAGE_ACCEPT = [...IMAGE_MIME_TYPES, ".svgz"].join(",");
+/** From this width topics move out of the dropdown into a list beside a centred conversation. */
+const BTW_WIDE_MIN = 900;
 
 /** Shared by floating and docked BTW; input attachments use the regular Composer capsules. */
 export function BtwPanel({ session, demo, onDemoNext, onClose, visible = true }: { session: BtwSessionApi; demo?: boolean; onDemoNext?: () => void; onClose?: () => void; visible?: boolean }) {
@@ -29,6 +32,8 @@ export function BtwPanel({ session, demo, onDemoNext, onClose, visible = true }:
   const { t, resolvedLanguage } = useI18n();
   const { marks } = usePreviewMode();
   const composer = useRef<ChipComposerHandle>(null);
+  const [rootRef, wide] = useWideLayout<HTMLDivElement>(BTW_WIDE_MIN);
+  const topicList = wide && (session.historyAvailable === true || demo === true);
   useEffect(() => { if (visible) void session.refreshHistory?.(); }, [visible, session.draftScope, session.historyAvailable]);
   const text = snapshot?.text ?? "";
   const running = snapshot?.status === "running";
@@ -53,8 +58,12 @@ export function BtwPanel({ session, demo, onDemoNext, onClose, visible = true }:
     else return;
     event.preventDefault(); event.stopPropagation();
   };
-  return <div className="btw-panel btw-conversation" onKeyDown={shortcuts}>
-    {session.historyAvailable || (demo && marks) ? <header className="btw-toolbar">
+  const newTopic = () => { session.newTopic?.(); composer.current?.focus(); };
+  const demoChip = demo && marks ? onDemoNext ? <button type="button" className="chip gray xs btw-demo-next" onClick={onDemoNext}>{t("common.demo")}</button> : <span className="chip gray xs">{t("common.demo")}</span> : null;
+  // Children keep fixed positions (null when absent) so the transcript and the
+  // composer are never remounted when the panel crosses the wide threshold.
+  return <div className={`btw-panel btw-conversation${wide ? " is-wide" : ""}${topicList ? " has-topics" : ""}`} ref={rootRef} onKeyDown={shortcuts}>
+    {!topicList && (session.historyAvailable || (demo && marks)) ? <header className="btw-toolbar">
       {session.historyAvailable ? <div className="btw-topic-row">
         <Icon name="history" extra="sm btw-topic-icon" />
         <AppSelect disabled={session.pending} className="btw-topic-select" aria-label={t("runtimeUpgrade.btwHistory")} value={session.selectedTopicId ?? ""} onChange={event => { if (event.target.value) void session.selectTopic?.(event.target.value); else session.newTopic?.(); }}>
@@ -65,7 +74,7 @@ export function BtwPanel({ session, demo, onDemoNext, onClose, visible = true }:
         <button type="button" className="btn ghost small btw-new-topic" disabled={anyRunning || session.pending} onClick={() => { session.newTopic?.(); composer.current?.focus(); }}><Icon name="plus" extra="sm" />{t("runtimeUpgrade.btwNew")}</button>
         <button type="button" className="icon-btn small" aria-label={t("common.refresh")} data-tip={t("common.refresh")} onClick={() => void session.refreshHistory?.()}><Icon name="refresh" extra="sm" /></button>
       </div> : null}
-      {demo && marks ? onDemoNext ? <button type="button" className="chip gray xs btw-demo-next" onClick={onDemoNext}>{t("common.demo")}</button> : <span className="chip gray xs">{t("common.demo")}</span> : null}
+      {demoChip}
     </header> : null}
     {anyRunning && session.activeTopicId && session.activeTopicId !== session.selectedTopicId ? <button type="button" className="btw-running-topic" onClick={() => void session.selectTopic?.(session.activeTopicId!)}><Icon name="asterisk" extra="sm" />{t("btw.backgroundAnswer")}</button> : null}
     <div className="btw-transcript" ref={bodyRef} onScroll={onScroll} tabIndex={0} aria-label={t("btw.conversation")}>
@@ -105,6 +114,32 @@ export function BtwPanel({ session, demo, onDemoNext, onClose, visible = true }:
       {session.notice ? <div className="btw-feedback" role="status"><span>{session.notice}</span><button type="button" className="icon-btn small" aria-label={t("common.close")} onClick={session.dismissNotice}><Icon name="x" extra="sm" /></button></div> : null}
       <BtwComposer session={session} visible={visible} composer={composer} onCancel={() => bodyRef.current?.focus()} />
     </div>
+    {topicList ? <aside className="btw-topics" aria-label={t("runtimeUpgrade.btwHistory")}>
+      <div className="btw-topics-head">
+        <span className="btw-topics-title">{t("runtimeUpgrade.btwHistory")}</span>
+        {demoChip}
+        <span className="spacer" />
+        {session.historyAvailable ? <button type="button" className="icon-btn small" aria-label={t("common.refresh")} data-tip={t("common.refresh")} onClick={() => void session.refreshHistory?.()}><Icon name="refresh" extra="sm" /></button> : null}
+      </div>
+      <button type="button" className="btw-topics-new" disabled={anyRunning || session.pending} onClick={newTopic}><Icon name="plus" extra="sm" />{t("runtimeUpgrade.btwNew")}</button>
+      <div className="btw-topics-list" role="listbox" aria-label={t("runtimeUpgrade.btwHistory")}>
+        {!session.selectedTopicId && snapshot || session.selectedTopicId && !topics.some(topic => topic.topicId === session.selectedTopicId)
+          ? <button type="button" role="option" aria-selected="true" className={`btw-topic-item is-active${anyRunning && !session.selectedTopicId ? " is-running" : ""}`}>
+            <span className="btw-topic-name">{topicLabel || t("btw.currentTopic")}</span>
+            <span className="btw-topic-meta">{t("btw.currentTopic")}</span>
+          </button> : null}
+        {topics.map(topic => {
+          const active = topic.topicId === session.selectedTopicId;
+          return <button type="button" role="option" aria-selected={active} key={topic.topicId} disabled={session.pending}
+            className={`btw-topic-item${active ? " is-active" : ""}${anyRunning && topic.topicId === session.activeTopicId ? " is-running" : ""}${topic.status === "error" ? " is-error" : ""}`}
+            onClick={() => { if (!active) void session.selectTopic?.(topic.topicId); }}>
+            <span className="btw-topic-name">{topic.title ?? topic.question}</span>
+            <span className="btw-topic-meta">{t("btw.turnCount", { count: topic.turnCount })} · {t(historyStatusKey(topic.status))} · {new Date(topic.updatedAt).toLocaleDateString(resolvedLanguage, { month: "short", day: "numeric" })}</span>
+          </button>;
+        })}
+        {topics.length === 0 && !snapshot ? <p className="btw-topics-empty">{t("runtimeUpgrade.btwEmpty")}</p> : null}
+      </div>
+    </aside> : null}
   </div>;
 }
 

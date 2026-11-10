@@ -42,11 +42,40 @@
 @keyframes env-breathe { 0%, 100% { opacity: 0.4; } 85% { opacity: 0.9; } }
 
 /* Content-sized card; retain the dock header and its controls. */
-.dock-card:has([data-dock-slot="environment"]) > .dock-card-resizer { display: none; }
+.dock-card:has([data-dock-base="environment"]) > .dock-card-resizer { display: none; }
 /* The body is portalled outside .dock-card, so it needs its own inner radius. */
-.dock-panel-content[data-panel="environment"][data-dock-region="rail"] {
+.dock-panel-content[data-dock-base="environment"][data-dock-region="rail"] {
   border-radius: 0 0 calc(var(--r-10) - 1px) calc(var(--r-10) - 1px);
 }
+
+/* Wide (ENVIRONMENT_WIDE_MIN): a project overview, identity above three tiles. */
+.env-card.is-wide { height: 100%; padding: 0; overflow: auto; }
+.env-dash { box-sizing: border-box; display: flex; flex-direction: column; gap: 20px; width: min(100%, 1040px); margin: 0 auto; padding: clamp(20px, 7vh, 72px) 24px 24px; }
+.env-dash-hero { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.env-dash-icon { display: grid; place-items: center; flex: 0 0 48px; height: 48px; border: 1px solid var(--border); border-radius: var(--r-8); background: linear-gradient(140deg, color-mix(in srgb, var(--accent) 12%, var(--surface)), var(--surface) 70%); color: var(--accent); }
+.env-dash-icon .icon { width: 22px; height: 22px; }
+.env-dash-title { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.env-dash-title h2 { margin: 0; overflow: hidden; color: var(--text); font-size: var(--fs-22); font-weight: var(--fw-semibold); letter-spacing: -0.01em; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.env-dash-title > span { overflow: hidden; color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-12); text-overflow: ellipsis; white-space: nowrap; }
+.env-dash-hero.is-empty h2 { color: var(--text-3); font-weight: var(--fw-medium); }
+.env-dash-hero > .btn { flex: none; gap: 6px; }
+.env-dash-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.env-tile { position: relative; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box; min-width: 0; min-height: 112px; padding: 14px 16px 16px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface); color: inherit; font: inherit; text-align: left; }
+.env-tile.is-action { cursor: pointer; transition: border-color 120ms var(--ease), background 120ms var(--ease); }
+.env-tile.is-action:hover { border-color: var(--border-strong); background: color-mix(in srgb, var(--surface-hover) 60%, var(--surface)); }
+.env-tile.is-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.env-tile-label { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: 0.02em; }
+.env-tile-label .icon { width: 13px; height: 13px; }
+.env-tile-label .env-tile-go { margin-left: auto; opacity: 0; transition: opacity 120ms var(--ease), transform 160ms var(--ease-out); }
+.env-tile.is-action:is(:hover, :focus-visible) .env-tile-go { opacity: 1; transform: translateX(2px); }
+.env-tile[data-state="connecting"] .env-tile-label .icon { color: var(--amber); }
+.env-tile[data-state="disconnected"] .env-tile-label .icon { color: var(--red); }
+.env-tile-value { overflow: hidden; color: var(--text); font-size: var(--fs-16); font-weight: var(--fw-semibold); line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.env-tile-value.is-machine { font-family: var(--font-mono); font-size: var(--fs-14); }
+.env-tile-value.is-empty { color: var(--text-3); font-weight: var(--fw-medium); }
+.env-tile-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: auto; color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.env-tile-tip { font-family: var(--font-ui); }
+.env-tile > .env-meter { height: 3px; }
 @media (prefers-reduced-motion: reduce) {
   .env-hero.is-action, .env-row.is-action, .env-meter > i { transition: none; }
   .env-skeleton { animation: none; opacity: 0.55; }

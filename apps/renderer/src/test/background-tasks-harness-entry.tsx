@@ -1,0 +1,14 @@
+import { createRoot } from "react-dom/client";
+import { BackgroundTasksHarness } from "./background-tasks-harness";
+import "../styles/tokens.css";
+import "../styles/base.css";
+import "../styles/components.css";
+import "../styles/sidebar.css";
+import "../styles/workbench.css";
+import "../styles/typography.css";
+import "../styles/tabs.css";
+import "../App.css";
+import "../dock/menus.css";
+import "../dock/integration.css";
+document.documentElement.dataset.platform = "win32";
+createRoot(document.getElementById("root")!).render(<BackgroundTasksHarness />);

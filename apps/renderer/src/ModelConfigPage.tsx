@@ -6,7 +6,6 @@ import { previewModelAdaptation } from "./preview/modelAdaptationPreview";
 import { thinkingForRoleModel, sameModelParameter, modelParameterValues } from "@omp-studio/client-contract";
 import { AppSelect } from "./AppSelect";
 import { SlidingTabs } from "./SlidingTabs";
-import { AgentPoolsPane } from "./models/AgentPoolsPane";
 import { ModelCompactionPane } from "./models/ModelCompactionPane";
 import { ModelPresetsPane } from "./models/ModelPresetsPane";
 import { SessionOptionsPane } from "./models/SessionOptionsPane";
@@ -94,7 +93,6 @@ const TAB_BUTTON_ID: Record<McTab, string> = {
   websearch: "mcTabWebSearch",
   presets: "mcTabPresets",
   accounts: "mcTabAccounts",
-  benchmark: "mcTabBenchmark",
 };
 
 const STATUS_META: Record<string, { label: string; chip: string; dot: string }> = {
@@ -1639,7 +1637,7 @@ function formatProviderStatusDetail(detail: string | undefined, t: (k: string) =
   return detail;
 }
 
-export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailable = false, onOpenEvaluation, capabilities }: { capabilities?: ClientBootstrap["capabilityManifest"] | undefined; onOpenEvaluation?: () => void; client: StudioClient; sessionId?: string | undefined; workspaceId?: string | undefined; runtimeAvailable?: boolean }) {
+export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailable = false, capabilities }: { capabilities?: ClientBootstrap["capabilityManifest"] | undefined; client: StudioClient; sessionId?: string | undefined; workspaceId?: string | undefined; runtimeAvailable?: boolean }) {
   const { resolvedLanguage } = useI18n();
   const [, updatePricingClock] = useState(0);
   useEffect(() => {
@@ -1686,6 +1684,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [assignModCounts, setAssignModCounts] = useState<Record<string, number>>({});
   const [roleAssignDraft, setRoleAssignDraft] = useState<Record<string, string[]>>({});
   const [agentIntent, setAgentIntent] = useState<string | undefined>(undefined);
+  const [accountPoolsDirty, setAccountPoolsDirty] = useState(false);
   const [agentCount, setAgentCount] = useState(preview ? createPreviewAgentDefinitions().agents.length : 0);
   const [testResult, setTestResult] = useState<TestResultView | null>(null);
   const [testing, setTesting] = useState(false);
@@ -1755,7 +1754,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   useEffect(() => {
     const generation = ++nativeLoad.current;
     setRuntimeModels([]);
-    if (preview || (tab !== "roles" && tab !== "websearch" && tab !== "benchmark")) return;
+    if (preview || (tab !== "roles" && tab !== "websearch")) return;
     void loadRuntimeModels(client, () => generation === nativeLoad.current)
       .then(rows => { if (generation === nativeLoad.current) setRuntimeModels(rows); })
       .catch(() => { /* Disk configuration remains usable when Runtime is unavailable. */ });
@@ -1838,7 +1837,6 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     if (intent.tab === "roles" || intent.role || intent.assign) setTab("roles");
     if (intent.tab === "subagents" || intent.agent) setTab("subagents");
     if (intent.tab === "websearch") setTab("websearch");
-    if (intent.tab === "benchmark") setTab("benchmark");
     if (intent.tab === "presets" || intent.tab === "accounts") setTab(intent.tab);
     if (intent.edit) {
       setTab("providers");
@@ -1865,7 +1863,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   useEffect(() => { fetchGeneration.current += 1; setCandidates(null); setFetching(false); }, [currentFetchIdentity]);
   const providers = data?.providers ?? [];
   const roles = data?.roles ?? [];
-  const webSearchReadyCount = data?.webSearch.providers.filter((provider) => provider.credentialFree || provider.hasCredential).length ?? 0;
+  const [webSearchReadyCount, setWebSearchReadyCount] = useState(0);
   const presets = data?.presets ?? [];
   const modelEditListProvider = modelEditView?.providerId
     ? providers.find((item) => item.id === modelEditView.providerId)
@@ -1968,11 +1966,11 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const ymlCardsDirty = providerFormDirty || roleFormDirty || modelsYmlEdited || configYmlEdited || fallbackDirty;
 
   useEffect(() => {
-    setModelConfigDirty(ymlCardsDirty);
+    setModelConfigDirty(ymlCardsDirty || accountPoolsDirty);
     return () => {
       setModelConfigDirty(false);
     };
-  }, [ymlCardsDirty]);
+  }, [ymlCardsDirty, accountPoolsDirty]);
 
   const mutateLocal = (recipe: (current: ModelConfigReadModel) => ModelConfigReadModel) => {
     setData((current) => recipe(current ?? createPreviewModelConfig()));
@@ -2867,13 +2865,11 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     return map;
   }, [data, providers, runtimeModels]);
 
+  const catalogStatus = preview && marks ? t("modelAdaptation.demo") : data?.catalog?.version ?? t("modelAdaptation.catalogUnknown");
+
   return (
     <div className="page-wide" id="mcRoot">
       <a className="skip-link" href="#mcPanels">{t("common.skipToContent")}</a>
-      <div className="mc-catalog-update">
-        <span className="small muted">{t("modelAdaptation.catalog")} · {preview && marks ? t("modelAdaptation.demo") : data?.catalog?.version ?? t("modelAdaptation.unknown")}</span>
-        <button type="button" className="btn small outline" disabled={catalogUpdating || (!preview && !data)} onClick={() => void updateModelCatalog()}>{t(catalogUpdating ? "modelAdaptation.updating" : "modelAdaptation.update")}</button>
-      </div>
       <div className="mc-tabbar">
         <SlidingTabs<McTab>
           id="mcTabs"
@@ -2889,9 +2885,17 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             { id: "websearch", icon: "globe", label: t("modelConfig.webSearchTab"), buttonId: TAB_BUTTON_ID.websearch, panelId: "mcPanelWebSearch", badge: <span className={`chip ${webSearchReadyCount === 0 ? "amber" : "gray"} xs`}>{webSearchReadyCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchReadyCount })}</span></span> },
             { id: "presets", icon: "layers", label: resolvedLanguage === "zh" ? "预设" : "Presets", buttonId: TAB_BUTTON_ID.presets, panelId: "mcPanelPresets" },
             { id: "accounts", icon: "user", label: resolvedLanguage === "zh" ? "账户" : "Accounts", buttonId: TAB_BUTTON_ID.accounts, panelId: "mcPanelAccounts" },
-            { id: "benchmark", icon: "pulse", label: t("modelConfig.benchmarkTab"), buttonId: TAB_BUTTON_ID.benchmark, panelId: "mcPanelBenchmark" },
           ]}
         />
+        <div className="mc-catalog-update">
+          <span className="mc-catalog-status" data-tip={`${t("modelAdaptation.catalogHint")} ${catalogStatus}`}>
+            <span>{t("modelAdaptation.catalog")}</span>
+            <span className="mc-catalog-version" aria-live="polite">{catalogStatus}</span>
+          </span>
+          <button type="button" className="icon-btn mc-catalog-refresh" aria-label={t(catalogUpdating ? "modelAdaptation.updating" : "modelAdaptation.update")} data-tip={t(catalogUpdating ? "modelAdaptation.updating" : "modelAdaptation.update")} disabled={catalogUpdating || (!preview && !data)} onClick={() => void updateModelCatalog()}>
+            {catalogUpdating ? <span className="spinner" aria-hidden="true" /> : <Icon name="refresh" extra="sm" />}
+          </button>
+        </div>
       </div>
 
       <ToastHost message={flash} onDismiss={() => setFlash(null)} />
@@ -2915,7 +2919,6 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
           <SessionOptionsPane client={client} sessionId={sessionId} available={runtimeAvailable} capabilities={capabilities} visible={shownTab === "accounts"} />
           <RuntimeCredentials client={client} preview={preview} />
         </section>
-        <section id="mcPanelBenchmark" role="tabpanel" aria-labelledby="mcTabBenchmark" hidden={shownTab !== "benchmark"} className={tabPanelClass("benchmark")}>{shownTab === "benchmark" ? <div className="workspace-empty"><Icon name="pulse" /><strong>{t("nav.evaluation")}</strong><p>{resolvedLanguage === "zh" ? "模型基准与判断批次已整合到评测工作区。" : "Model benchmarks and judgment batches are now in Evaluation."}</p><button className="btn primary" type="button" disabled={!onOpenEvaluation} onClick={onOpenEvaluation}>{t("nav.evaluation")} <Icon name="arrow-r" /></button></div> : null}</section>
         <section id="mcPanelProviders" role="tabpanel" aria-labelledby="mcTabProviders" hidden={shownTab !== "providers"} className={tabPanelClass("providers")}>
           <div className={editorLive ? `mc-view ${pagePhaseClass(editorPhase)}` : "mc-view"}>
           {editor ? (
@@ -4099,15 +4102,20 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             preview={preview}
             models={data}
             onCount={setAgentCount}
+            context={{ sessionId, available: runtimeAvailable, capabilities }}
+            visible={shownTab === "subagents"}
+            onAccountDirtyChange={setAccountPoolsDirty}
+            onManageAccounts={() => setTab("accounts")}
             {...(agentIntent === undefined ? {} : { initialAgent: agentIntent })}
           />
-        <AgentPoolsPane client={client} context={{ sessionId, available: runtimeAvailable, capabilities }} visible={shownTab === "subagents"} />
 </section>
         <section id="mcPanelWebSearch" role="tabpanel" aria-labelledby="mcTabWebSearch" hidden={shownTab !== "websearch"} className={tabPanelClass("websearch")}>
-          <RuntimeCredentials client={client} preview={preview} providers={["exa", "ollama-cloud"]} />
           {data?.webSearch ? (
             <WebSearchPanel
               models={usable}
+              sessionId={sessionId}
+              visible={shownTab === "websearch"}
+              onReadyCount={setWebSearchReadyCount}
               client={client}
               preview={preview}
               webSearch={data.webSearch}

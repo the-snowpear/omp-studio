@@ -1,7 +1,10 @@
 import { common, createLowlight } from "lowlight";
+import { commandLanguages } from "./commandLanguages";
 import { TOKEN_MAX_DEPTH, TOKEN_MAX_NODES, validTokenClass, validateTokens, type HighlightToken } from "./protocol";
 
 const lowlight = createLowlight(common);
+lowlight.register(commandLanguages);
+lowlight.registerAlias({ powershell: ["pwsh", "ps1"] });
 /** This module is imported only by the Worker and equivalence tests. */
 export function computeHighlight(language: string, code: string): HighlightToken[] {
   if (!lowlight.registered(language)) throw new Error("unknown-language");

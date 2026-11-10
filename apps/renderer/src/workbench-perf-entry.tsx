@@ -3,6 +3,7 @@ import { StudioClientImpl } from "@omp-studio/client";
 import { createContractFixtureApi } from "@omp-studio/testkit";
 import type { ClientEvent, ClientTransport } from "@omp-studio/client-contract";
 import { STARTUP_NOTICE_ID, STARTUP_NOTICE_STORAGE_KEY } from "./settings/startupNotice";
+import { ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_ID } from "./onboarding/onboardingState";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/components.css";
@@ -16,6 +17,7 @@ import "./styles/typography.css";
 import "./App.css";
 
 localStorage.setItem(STARTUP_NOTICE_STORAGE_KEY, STARTUP_NOTICE_ID);
+localStorage.setItem(ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_ID);
 localStorage.setItem("omp.appSettings", JSON.stringify({ language: "en", theme: "light", startupPage: "workbench", restoreLastSession: false, rememberLayout: false }));
 localStorage.setItem("omp.lastRoute", "workbench");
 localStorage.removeItem("omp.background");

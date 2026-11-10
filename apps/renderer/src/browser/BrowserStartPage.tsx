@@ -35,7 +35,7 @@ export function BrowserStartPage({ session, snap, copy, pageId, unbound = false,
     setWorking(true);
     try {
       if (needsTakeover && !await session.setControl("human")) return;
-      const result = pageId ? await session.execute({ action: "navigate", pageId, url: url.trim() }) : await session.create(url.trim());
+      const result = pageId ? await session.execute({ action: "navigate", pageId, url: url.trim() }) : await session.create(url.trim(), { linkKey: pending?.url === url.trim() ? pending.reuseKey : undefined });
       if (result) { setValue(""); if (pending) session.setPendingLink(null); }
     } finally { setWorking(false); }
   };

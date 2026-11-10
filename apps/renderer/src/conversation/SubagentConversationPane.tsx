@@ -1,5 +1,5 @@
 import { RuntimeToolProvider } from "./ShellView";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { SHORTCUTS, formatShortcut } from "../keyboard/shortcuts";
 import type { SessionId } from "@omp-studio/client-contract";
 import { ChipComposer } from "../composer/ChipComposer";
@@ -14,15 +14,15 @@ import {
   type SubagentComposerAgent,
 } from "./subagentComposerGate";
 import { useSubagentComposer, type SubagentComposerClient } from "./useSubagentComposer";
-import { captureAnchor, conversationFollowKey, useConversationScroll } from "./useConversationScroll";
+import { conversationFollowKey, useConversationScroll } from "./useConversationScroll";
 import { useSubagentConversation } from "./useSubagentConversation";
 import type { SubagentConversationClient } from "./subagentConversationEngine";
 import type { SubagentHubTarget } from "./toolMeta";
 import { useConversationViewLease } from "./conversationViews";
 import { createSubagentViewBook, subagentViewKey, type SubagentViewState } from "./subagentViewState";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
-import { timelineRowKey } from "./conversationViewModel";
-import { revealConversationTarget } from "./conversationReveal";
+import { useConversationReading } from "./useConversationReading";
+
 
 export function SubagentConversationPane(props: Parameters<typeof SubagentConversationSurface>[0]) {
   const execution = useExecutionTarget();
@@ -125,50 +125,8 @@ function SubagentConversationSurface({
     prevLoading.current = snapshot.loadingOlder;
   }, [snapshot.loadingOlder, scroll]);
 
-  const pendingReading = useRef(viewState?.reading);
-  const readingRestored = useRef(false);
-  const restoreItemCount = useRef(-1);
-  const readingNow = useRef({ snapshot, follow: scroll.follow });
-  readingNow.current = { snapshot, follow: scroll.follow };
-  useLayoutEffect(() => {
-    const scroller = scrollerRef.current;
-    if (visible && viewState) pendingReading.current = viewState.reading;
-    return () => {
-      const current = readingNow.current;
-      if (viewState && scroller && readingRestored.current && current.snapshot.rows.length) {
-        viewState.reading = { anchor: captureAnchor(scroller), following: current.follow, rows: current.snapshot.rows.length,
-          ...(current.snapshot.state.identity?.sessionId === undefined ? {} : { conversationSessionId: current.snapshot.state.identity.sessionId }) };
-      }
-      readingRestored.current = false;
-      restoreItemCount.current = -1;
-    };
-  }, [visible, viewState]);
-  useEffect(() => {
-    if (snapshot.state.hydrateStatus === "loading" || snapshot.state.hydrateStatus === "resyncing") {
-      readingRestored.current = false;
-      restoreItemCount.current = -1;
-    }
-    if (!visible || snapshot.state.hydrateStatus !== "ready" || snapshot.loadingOlder || readingRestored.current) return;
-    const reading = pendingReading.current;
-    if (!reading || reading.following || (reading.conversationSessionId && reading.conversationSessionId !== snapshot.state.identity?.sessionId)) {
-      readingRestored.current = true;
-      return;
-    }
-    const anchor = reading.anchor;
-    // New messages may have pushed the previous anchor beyond the first page.
-    // Continue while the bounded Store can retain more history, not merely up
-    // to the old row count; stop once its retention window stops growing.
-    if (anchor?.itemId && !snapshot.rows.some(row => timelineRowKey(row) === anchor.itemId) && snapshot.state.hasMoreBefore && snapshot.state.items.length > restoreItemCount.current) {
-      restoreItemCount.current = snapshot.state.items.length;
-      snapshot.loadOlder();
-      return;
-    }
-    scroll.detachFromLatest();
-    readingRestored.current = true;
-    if (anchor) void revealConversationTarget(scrollerRef.current, { itemId: anchor.itemId, offset: anchor.offset, flash: false }).then(found => {
-      if (!found && scrollerRef.current) scrollerRef.current.scrollTop = anchor.scrollTop;
-    });
-  }, [visible, snapshot, scroll.detachFromLatest]);
+  useConversationReading({ memory: viewState, visible, snapshot, scrollerRef,
+    follow: scroll.follow, detachFromLatest: scroll.detachFromLatest, loadOlder: snapshot.loadOlder });
 
   /* Anchor on the click, before the prepended page can reach the DOM. */
   function loadOlder(): void {

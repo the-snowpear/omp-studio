@@ -5,6 +5,7 @@ import type { ClientContextScope, ClientTransport } from "@omp-studio/client-con
 import { contractFixtures } from "@omp-studio/testkit";
 import { App } from "../App";
 import { STARTUP_NOTICE_ID, STARTUP_NOTICE_STORAGE_KEY } from "../settings/startupNotice";
+import { ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_ID } from "../onboarding/onboardingState";
 import "../styles/tokens.css";
 import "../styles/base.css";
 import "../styles/components.css";
@@ -33,6 +34,7 @@ function transport(scope?: ClientContextScope): ClientTransport {
 }
 if (!new URL(location.href).searchParams.has("dockHost")) {
   localStorage.setItem(STARTUP_NOTICE_STORAGE_KEY, STARTUP_NOTICE_ID);
+  localStorage.setItem(ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_ID);
   document.documentElement.dataset.platform = "win32";
   createRoot(document.getElementById("root")!).render(<App client={new StudioClientImpl(transport())} />);
 }

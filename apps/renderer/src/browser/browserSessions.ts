@@ -25,7 +25,7 @@ export interface BrowserSessionSnapshot {
   picking: string | null;
   references: readonly BrowserElementReference[];
   /** A link that could not open directly; the start page offers to take control and open it. */
-  pendingLink: { id: string; url: string } | null;
+  pendingLink: { id: string; url: string; reuseKey?: string | undefined } | null;
   /** Ctrl+L / Ctrl+F pressed inside a native page; only that page's pane reacts. */
   shortcut: { id: number; pageId: string; action: "address" | "find" } | null;
   newTabSpaceId: string;
@@ -38,6 +38,7 @@ let shortcuts = 0;
 /** One chat's browser as every pane, tab and the dock sync see it; survives panes unmounting. */
 export class BrowserSession {
   #snapshot = EMPTY;
+  #linkedPages = new Map<string, { pageId: string; url: string }>();
   #listeners = new Set<() => void>();
   #version = 0;
   #reading = false;
@@ -50,6 +51,10 @@ export class BrowserSession {
   };
   getSnapshot = (): BrowserSessionSnapshot => this.#snapshot;
   #set(patch: Partial<BrowserSessionSnapshot>): void {
+    if (patch.state) {
+      const live = new Set(patch.state.pages.map(page => page.id));
+      for (const [key, link] of this.#linkedPages) if (!live.has(link.pageId)) this.#linkedPages.delete(key);
+    }
     this.#snapshot = { ...this.#snapshot, ...patch };
     for (const listener of this.#listeners) listener();
   }
@@ -105,8 +110,37 @@ export class BrowserSession {
     try { await this.backend.execute({ action: "select", pageId, sessionId: this.id }); }
     catch (cause) { this.#set({ error: message(cause) }); }
   }
-  create(url: string, options: { openerPageId?: string | undefined; spaceId?: string | undefined } = {}): Promise<ManagedBrowserState | null> {
-    return this.execute({ action: "create", url, spaceId: options.spaceId ?? this.#snapshot.newTabSpaceId, ...(options.openerPageId ? { openerPageId: options.openerPageId } : {}) });
+  /** Remember the page, not its current SPA path, for an explicit service link. */
+  linkedPage(url: string, key: string): ManagedBrowserState["pages"][number] | undefined {
+    const pages = this.#snapshot.state?.pages ?? [];
+    const link = this.#linkedPages.get(key);
+    const cached = link?.url === url ? pages.find(page => page.id === link.pageId) : undefined;
+    let target: URL;
+    try { target = new URL(url); } catch { return undefined; }
+    const base = target.pathname.endsWith("/") ? target.pathname.slice(0, -1) : target.pathname;
+    const belongsToService = (page: ManagedBrowserState["pages"][number]) => {
+      try {
+        const actual = new URL(page.url);
+        return actual.origin === target.origin && (!target.search || actual.search === target.search)
+          && (actual.pathname === base || actual.pathname.startsWith(base + "/"));
+      } catch { return false; }
+    };
+    const exact = pages.find(page => { try { return new URL(page.url).href === target.href; } catch { return false; } });
+    const active = pages.find(page => page.id === this.#snapshot.state?.activePageId && belongsToService(page));
+    const page = cached ?? exact ?? active ?? pages.find(belongsToService);
+    if (page) this.#rememberLink(key, url, page.id);
+    return page;
+  }
+  #rememberLink(key: string, url: string, pageId: string): void {
+    this.#linkedPages.delete(key);
+    this.#linkedPages.set(key, { pageId, url });
+    if (this.#linkedPages.size > 100) this.#linkedPages.delete(this.#linkedPages.keys().next().value!);
+  }
+  create(url: string, options: { openerPageId?: string | undefined; spaceId?: string | undefined; linkKey?: string | undefined } = {}): Promise<ManagedBrowserState | null> {
+    return this.execute({ action: "create", url, spaceId: options.spaceId ?? this.#snapshot.newTabSpaceId, ...(options.openerPageId ? { openerPageId: options.openerPageId } : {}) }).then(state => {
+      if (options.linkKey && state?.activePageId) this.#rememberLink(options.linkKey, url, state.activePageId);
+      return state;
+    });
   }
   async startPicking(pageId: string): Promise<void> {
     if (this.#snapshot.picking && this.#snapshot.picking !== pageId) await this.stopPicking();
@@ -127,7 +161,7 @@ export class BrowserSession {
     this.clearReferences(pageId);
     return taken;
   }
-  setPendingLink(link: { id: string; url: string } | null): void { this.#set({ pendingLink: link }); }
+  setPendingLink(link: { id: string; url: string; reuseKey?: string | undefined } | null): void { this.#set({ pendingLink: link }); }
   dismissError(): void { this.#set({ error: "" }); }
   reportError(error: string): void { this.#set({ error }); }
   setNewTabSpace(spaceId: string): void { this.#set({ newTabSpaceId: spaceId }); }

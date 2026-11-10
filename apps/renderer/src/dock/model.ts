@@ -1,4 +1,4 @@
-import { isFilePanelId, type FilePanelId, type FilePanelDescriptor, PANEL_IDS, agentPanelId, browserPagePanelId, isAgentPanelId, isBrowserPagePanelId, isConversationPanelId, type AgentPanelId, type AgentPanelTarget, type BrowserPagePanelId, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId } from "./types";
+import { isFilePanelId, isRepeatablePanelId, isScopedPanelId, panelBaseId, scopedPanelId, type FilePanelId, type FilePanelDescriptor, PANEL_IDS, agentPanelId, browserPagePanelId, isAgentPanelId, isBrowserPagePanelId, isConversationPanelId, type AgentPanelId, type AgentPanelTarget, type BrowserPagePanelId, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId, type ScopedPanelId } from "./types";
 
 const FLOAT_RECT: DockRect = { x: 80, y: 60, width: 560, height: 400 };
 const isPanel = (value: unknown): value is PanelId => typeof value === "string" && (PANEL_IDS as readonly string[]).includes(value);
@@ -13,12 +13,12 @@ export function createDefaultLayout(): DockLayout {
     version: 1,
     floatCoordinateVersion: 1,
     left: { visible: true, width: 272, ratio: 0.46, panels: ["files"] },
-    rail: { mode: "hidden", lastMode: "expanded", width: 320, panels: ["environment", "context", "agents"] },
-    right: { visible: false, size: 480, ratio: 0.5, groups: [{ id: "right-main", panels: ["changes", "git", "browser", "computer"], active: "changes" }] },
-    bottom: { visible: true, expanded: false, size: 240, ratio: 0.5, groups: [{ id: "bottom-main", panels: ["terminal", "problems", "tests", "output", "logs", "pvlogs"], active: "logs" }] },
+    rail: { mode: "expanded", lastMode: "expanded", width: 320, panels: ["environment", "context", "git-quick", "agents", "jobs"] },
+    right: { visible: false, size: 480, ratio: 0.5, groups: [] },
+    bottom: { visible: false, expanded: false, size: 240, ratio: 0.5, groups: [{ id: "bottom-main", panels: ["terminal", "problems", "tests", "output", "logs", "pvlogs"], active: "logs" }] },
     floats: [],
-    hidden: { btw: { region: "float", rect: { ...FLOAT_RECT } }, "agent-detail": { region: "right" }, "git-quick": { region: "rail" }, "context-viewer": { region: "float" }, "token-counter": { region: "float", rect: { x: 120, y: 90, width: 420, height: 460 } } },
-    cards: Object.fromEntries(PANEL_IDS.map(id => [id, { collapsed: false, height: id === "browser" || id === "computer" ? 320 : id === "terminal" ? 240 : null }])) as DockLayout["cards"],
+    hidden: { changes: { region: "right", groupId: "right-main", index: 0 }, git: { region: "right", groupId: "right-main", index: 1 }, browser: { region: "right", groupId: "right-main", index: 2 }, computer: { region: "right", groupId: "right-main", index: 3 }, btw: { region: "float", rect: { ...FLOAT_RECT } }, "agent-detail": { region: "right" }, "context-viewer": { region: "float" }, annotations: { region: "float" }, "token-counter": { region: "float", rect: { x: 120, y: 90, width: 420, height: 460 } } },
+    cards: Object.fromEntries(PANEL_IDS.map(id => [id, { collapsed: id === "context" || id === "git-quick" || id === "agents", height: id === "browser" || id === "computer" ? 320 : id === "terminal" ? 240 : null }])) as DockLayout["cards"],
     agentPanels: {},
     browserPages: {},
     fileViews: {},
@@ -62,6 +62,75 @@ function copy(layout: DockLayout): DockLayout {
 }
 
 const allGroups = (layout: DockLayout): DockGroup[] => [...layout.right.groups, ...layout.bottom.groups, ...layout.floats];
+
+/** The live panels a dock target can collide with: a region as a whole, or one floating window. */
+function regionPanels(layout: DockLayout, target: DockTarget): PanelId[] {
+  if (target.region === "left" || target.region === "rail") return layout[target.region].panels;
+  if (target.region === "right" || target.region === "bottom") return layout[target.region].groups.flatMap(group => group.panels);
+  return (target.groupId ? layout.floats.find(group => group.id === target.groupId) : undefined)?.panels ?? [];
+}
+
+/** Every scoped instance the layout remembers, including closed ones with a return address. */
+export function scopedPanelIds(layout: DockLayout): ScopedPanelId[] {
+  const found = new Set<ScopedPanelId>();
+  const add = (ids: Iterable<string>) => { for (const id of ids) if (isScopedPanelId(id)) found.add(id); };
+  add(layout.left.panels);
+  add(layout.rail.panels);
+  for (const group of allGroups(layout)) add(group.panels);
+  add(Object.keys(layout.hidden));
+  add(Object.keys(layout.cards));
+  const key = (id: string) => [id.slice(0, id.indexOf("@")), Number(id.slice(id.indexOf("@") + 1))] as const;
+  return [...found].sort((a, b) => key(a)[0].localeCompare(key(b)[0]) || key(a)[1] - key(b)[1]);
+}
+
+/** The canonical tool plus every extra instance of it. */
+export const panelInstanceIds = (layout: DockLayout, base: PanelId): PanelId[] => [base, ...scopedPanelIds(layout).filter(id => panelBaseId(id) === base)];
+
+export const anyInstancePlaced = (layout: DockLayout, base: PanelId): boolean => panelInstanceIds(layout, base).some(id => !!locatePanel(layout, id));
+
+/** A same-tool instance already sitting in the target region; tools stay unique per region. */
+export function instancesInRegion(layout: DockLayout, base: PanelId, target: DockTarget): { panel: PanelId; location: DockLocation } | undefined {
+  const panel = regionPanels(layout, target).find(id => panelBaseId(id) === panelBaseId(base));
+  const location = panel ? locatePanel(layout, panel) : undefined;
+  return panel && location ? { panel, location } : undefined;
+}
+
+/** Panels a move cannot place because their tool already owns the destination region. */
+export function moveConflicts(layout: DockLayout, panels: readonly PanelId[], target: DockTarget): PanelId[] {
+  const moving = new Set(panels);
+  const bases = new Set(panels.map(panelBaseId));
+  return regionPanels(layout, target).filter(id => !moving.has(id) && bases.has(panelBaseId(id)));
+}
+
+/** Extra instances are numbered; the canonical id has no suffix. */
+export function allocateScopedId(layout: DockLayout, base: PanelId): PanelId {
+  if (!isRepeatablePanelId(base)) return base;
+  const used = new Set(panelInstanceIds(layout, base));
+  let index = 2;
+  while (used.has(scopedPanelId(base, index))) index++;
+  return scopedPanelId(base, index);
+}
+
+export type OpenInResolution = { kind: "focus"; panel: PanelId; location: DockLocation } | { kind: "place"; panel: PanelId };
+
+/** CSS view-transition names reject `@` (scoped ids) and `:` (instance ids). */
+export const panelTransitionName = (id: PanelId): string => id.replace(/[@:]/g, "-");
+
+/**
+ * "Open this tool here" from a region: focus the region's own instance, reuse a
+ * closed one, allocate a second instance when the tool already shows elsewhere,
+ * and otherwise fall back to today's move/restore.
+ */
+export function resolveOpenIn(layout: DockLayout, panel: PanelId, target: DockTarget): OpenInResolution {
+  const tool = panelsAtDockTarget([panelBaseId(panel)], target)[0] ?? panelBaseId(panel);
+  const existing = instancesInRegion(layout, tool, target);
+  if (existing) return { kind: "focus", ...existing };
+  if (!isRepeatablePanelId(tool)) return { kind: "place", panel: tool };
+  if (!anyInstancePlaced(layout, tool)) return { kind: "place", panel: tool };
+  const hidden = panelInstanceIds(layout, tool).find(id => !!layout.hidden[id] && !locatePanel(layout, id));
+  return { kind: "place", panel: hidden ?? allocateScopedId(layout, tool) };
+}
+
 function groupId(layout: DockLayout, base: string): string {
   const ids = new Set(allGroups(layout).map(group => group.id));
   if (!ids.has(base)) return base;
@@ -200,10 +269,17 @@ function reveal(layout: DockLayout, location: DockLocation, panel: PanelId): voi
 }
 
 /** target.index is a gap in the original list, before removing the moving panels. */
-function move(layout: DockLayout, requested: PanelId[], target: DockTarget, preserveRequestedOrder = false): void {
+function move(layout: DockLayout, requested: PanelId[], target: DockTarget, preserveRequestedOrder = false): PanelId[] {
   const ordered = [...layout.left.panels, ...layout.rail.panels, ...allGroups(layout).flatMap(group => group.panels), ...Object.keys(layout.hidden) as PanelId[]];
-  const panels = preserveRequestedOrder ? requested.filter(id => ordered.includes(id)) : ordered.filter(id => requested.includes(id));
-  if (!panels.length) return;
+  // A brand-new instance has no return address yet; it becomes known here.
+  const known = new Set(ordered);
+  for (const id of requested) if (isScopedPanelId(id) && !known.has(id)) { ordered.push(id); known.add(id); }
+  const conflicts = moveConflicts(layout, requested, target);
+  const conflictBases = new Set(conflicts.map(panelBaseId));
+  const allowed = requested.filter(id => !conflictBases.has(panelBaseId(id)));
+  if (!allowed.length) return [];
+  const panels = preserveRequestedOrder ? allowed.filter(id => known.has(id)) : ordered.filter(id => allowed.includes(id));
+  if (!panels.length) return [];
   const source = allGroups(layout).find(group => panels.every(id => group.panels.includes(id)));
   const active = source && panels.includes(source.active) ? source.active : panels[0]!;
   const wholeGroup = source && source.panels.length === panels.length ? source.id : undefined;
@@ -218,6 +294,7 @@ function move(layout: DockLayout, requested: PanelId[], target: DockTarget, pres
   const gap = target.index === undefined ? originalList.length : clamp(target.index, 0, originalList.length);
   const index = gap - originalList.slice(0, gap).filter(id => panels.includes(id)).length;
   remove(layout, panels);
+  for (const id of panels) if (isScopedPanelId(id)) layout.cards[id] ??= { collapsed: false, height: layout.cards[panelBaseId(id)]?.height ?? null };
   if (target.region === "left" || target.region === "rail") {
     layout[target.region].panels.splice(index, 0, ...panels);
     reveal(layout, { region: target.region }, active);
@@ -250,6 +327,7 @@ function move(layout: DockLayout, requested: PanelId[], target: DockTarget, pres
     reveal(layout, { region: target.region, groupId: destination.id }, active);
   }
   clean(layout);
+  return panels;
 }
 
 /** Git uses a separate compact surface when dropped in the conversation rail. */
@@ -258,13 +336,14 @@ export function panelsAtDockTarget(panels: readonly PanelId[], target: DockTarge
 }
 
 export function dockReducer(layout: DockLayout, action: DockAction, locked = false): DockLayout {
-  if (locked && (action.type === "move" || action.type === "resize")) return layout;
+  if (locked && (action.type === "move" || action.type === "resize" || action.type === "left-card-shares")) return layout;
   if (action.type === "apply") return same(layout, action.layout) ? layout : copy(action.layout);
   const next = copy(layout);
   switch (action.type) {
     case "move": {
       // The conversation rail presents Git as the compact card. Keep the full
       // Git panel at its existing location so the card can open it separately.
+      let moved: PanelId[];
       if (action.target.region === "rail" && action.panels.includes("git")) {
         const old = locatePanel(next, "git");
         let target = action.target;
@@ -274,8 +353,9 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
           next.cards["git-quick"] = { ...next.cards.git! };
           if (target.index !== undefined && old.index !== undefined && old.index < target.index) target = { ...target, index: target.index - 1 };
         }
-        move(next, panelsAtDockTarget(action.panels, target), target, true);
-      } else move(next, action.panels, action.target);
+        moved = move(next, panelsAtDockTarget(action.panels, target), target, true);
+      } else moved = move(next, action.panels, action.target);
+      if (!moved.length) return layout;
       break;
     }
     case "agent-focus": {
@@ -382,6 +462,14 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
       next.cards[action.panel]!.collapsed = false;
       break;
     }
+    case "reveal": {
+      const location = locatePanel(next, action.panel);
+      if (!location) break;
+      reveal(next, location, action.panel);
+      next.cards[action.panel] ??= { collapsed: false, height: null };
+      next.cards[action.panel]!.collapsed = false;
+      break;
+    }
     case "activate": {
       const group = allGroups(next).find(item => item.id === action.groupId);
       if (group?.panels.includes(action.panel)) group.active = action.panel;
@@ -402,7 +490,18 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
     case "card": {
       const card = next.cards[action.panel]!;
       if (action.collapsed !== undefined) card.collapsed = action.collapsed;
-      if (!locked && action.height !== undefined) card.height = action.height === null ? null : Math.max(action.panel === "terminal" ? 240 : 80, action.height);
+      if (!locked && action.height !== undefined) {
+        card.height = action.height === null ? null : Math.max(action.panel === "terminal" ? 240 : 80, action.height);
+        if (action.height === null) delete card.leftShare;
+      }
+      break;
+    }
+    case "left-card-shares": {
+      for (const id of next.left.panels) {
+        const share = action.shares[id];
+        if (share === null) delete next.cards[id]!.leftShare;
+        else if (share !== undefined) next.cards[id]!.leftShare = share;
+      }
       break;
     }
     case "resize": {
@@ -432,6 +531,8 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
   }
   // Only the committed result is judged; move() reorders inside a region and
   // briefly empties it on the way, so settling there would drop live regions.
+  // Folding moves only the title down; the remaining panes reclaim the body space.
+  next.left.panels.sort((a, b) => Number(next.cards[a]!.collapsed) - Number(next.cards[b]!.collapsed));
   settle(next, layout);
   return same(layout, next) ? layout : next;
 }
@@ -551,11 +652,14 @@ export function builtInPresets(): DockPreset[] {
   const focus = createDefaultLayout();
   focus.presetId = "focus";
   focus.left.visible = false;
+  focus.rail.mode = "hidden";
   focus.bottom.visible = false;
   const debug = createDefaultLayout();
   debug.presetId = "debug";
   debug.right.visible = true;
   debug.right.groups = [{ id: "right-git", panels: ["git"], active: "git" }, { id: "right-changes", panels: ["changes", "browser", "computer"], active: "changes" }];
+  for (const panel of ["changes", "git", "browser", "computer"] as const) delete debug.hidden[panel];
+  debug.bottom.visible = true;
   debug.bottom.expanded = true;
   debug.bottom.groups = [{ id: "bottom-terminal", panels: ["terminal", "problems", "tests", "output"], active: "terminal" }, { id: "bottom-logs", panels: ["logs", "pvlogs"], active: "logs" }];
   debug.rail.mode = debug.rail.lastMode = "compact";
@@ -586,7 +690,7 @@ export function normalizeLayout(value: unknown): DockLayout {
     const descriptor = record(value);
     if (isFilePanelId(id) && typeof descriptor.workspaceId === "string" && typeof descriptor.path === "string" && typeof descriptor.fileId === "string") layout.fileViews[id] = descriptor as FilePanelDescriptor;
   }
-  const validPanel = (id: unknown): id is PanelId => isPanel(id) || typeof id === "string" && (isAgentPanelId(id) && !!layout.agentPanels[id] || isBrowserPagePanelId(id) && !!layout.browserPages[id] || isConversationPanelId(id) || isFilePanelId(id) && !!layout.fileViews[id]);
+  const validPanel = (id: unknown): id is PanelId => isPanel(id) || typeof id === "string" && (isAgentPanelId(id) && !!layout.agentPanels[id] || isBrowserPagePanelId(id) && !!layout.browserPages[id] || isConversationPanelId(id) || isFilePanelId(id) && !!layout.fileViews[id] || isScopedPanelId(id));
   const seen = new Set<PanelId>();
   const ids = new Set<string>();
   const panels = (value: unknown): PanelId[] => Array.isArray(value) ? value.filter((id): id is PanelId => {
@@ -627,6 +731,22 @@ export function normalizeLayout(value: unknown): DockLayout {
     const members = panels(group.panels);
     if (members.length) layout.floats.push({ id: readId(group.id, "float"), panels: members, active: validPanel(group.active) && members.includes(group.active) ? group.active : members[0]!, rect: readRect(group.rect), minimized: bool(group.minimized, false), maximized: bool(group.maximized, false) });
   }
+  // A tool may hold one instance per region. Keep the first one in a payload
+  // that somehow ended up with a duplicate scoped id.
+  const uniqueInstances = (list: PanelId[]): PanelId[] => {
+    const bases = new Set<PanelId>();
+    return list.filter(id => {
+      const base = panelBaseId(id);
+      if (!bases.has(base)) { bases.add(base); return true; }
+      seen.delete(id);
+      delete layout.cards[id];
+      delete layout.hidden[id];
+      return false;
+    });
+  };
+  layout.left.panels = uniqueInstances(layout.left.panels);
+  layout.rail.panels = uniqueInstances(layout.rail.panels);
+  for (const group of [...layout.right.groups, ...layout.bottom.groups, ...layout.floats]) group.panels = uniqueInstances(group.panels);
   // Migrate both original layouts and layouts saved by versions which introduced
   // git-quick but still allowed the full Git panel to remain in the rail.
   const migrateGitCard = layout.rail.panels.includes("git");
@@ -653,9 +773,13 @@ export function normalizeLayout(value: unknown): DockLayout {
   const defaults = createDefaultLayout();
   const hidden = record(raw.hidden);
   layout.hidden = {};
-  for (const id of [...PANEL_IDS, ...Object.keys(layout.agentPanels) as AgentPanelId[], ...new Set([...Object.keys(record(raw.cards)), ...seen].filter(isConversationPanelId))]) {
+  const scoped = new Set<ScopedPanelId>(scopedPanelIds(layout));
+  for (const id of Object.keys(hidden)) if (isScopedPanelId(id)) scoped.add(id);
+  for (const id of Object.keys(record(raw.cards))) if (isScopedPanelId(id)) scoped.add(id);
+  for (const id of [...PANEL_IDS, ...scoped, ...Object.keys(layout.agentPanels) as AgentPanelId[], ...new Set([...Object.keys(record(raw.cards)), ...seen].filter(isConversationPanelId))]) {
+    const base = panelBaseId(id);
     const card = record(record(raw.cards)[migrateGitCard && !quickWasPlaced && id === "git-quick" ? "git" : id]);
-    layout.cards[id] = { collapsed: bool(card.collapsed, false), height: card.height === null ? null : typeof card.height === "number" && Number.isFinite(card.height) ? Math.max(id === "terminal" ? 240 : 80, card.height) : defaults.cards[id]?.height ?? null };
+    layout.cards[id] = { collapsed: bool(card.collapsed, false), height: card.height === null ? null : typeof card.height === "number" && Number.isFinite(card.height) ? Math.max(base === "terminal" ? 240 : 80, card.height) : defaults.cards[base]?.height ?? null };
     if (seen.has(id)) continue;
     const old = record(hidden[id]);
     const fallback = locatePanel(defaults, id) ?? defaults.hidden[id] ?? { region: "right" as const };
@@ -680,6 +804,11 @@ export function normalizeLayout(value: unknown): DockLayout {
     layout.cards[id] = { collapsed: false, height: null };
     if (!locatePanel(layout, id)) layout.hidden[id] = { region: "float", groupId: `float-${id}` };
   }
+  for (const [id, preference] of Object.entries(layout.cards)) {
+    const share = record(record(raw.cards)[id]).leftShare;
+    if (typeof share === "number" && Number.isFinite(share) && share > 0) preference.leftShare = share;
+  }
+  layout.left.panels.sort((a, b) => Number(layout.cards[a]!.collapsed) - Number(layout.cards[b]!.collapsed));
   layout.presetId = typeof raw.presetId === "string" && raw.presetId ? raw.presetId : "default";
   clean(layout);
   // Old configurations could keep an empty region open; the same rule applies here.

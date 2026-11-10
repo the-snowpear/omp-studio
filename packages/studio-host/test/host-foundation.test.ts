@@ -442,7 +442,7 @@ test("WP-013 renderer refresh reconciles terminal receipt tail from READY", asyn
   });
   const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
   const ledger = new CommandLedger(() => "2026-08-11T00:00:00.000Z");
-  ledger.request("request-tail" as CommandId, request({ kind: "runtime.pause" }, "request-tail"), runtimeId);
+  ledger.request("request-tail" as CommandId, request({ kind: "runtime.pause" }, "request-tail"), "runtime-instance-1" as RuntimeId);
   const controller = new StudioRuntimeSessionController(client, ledger);
   try {
     await client.connect();
@@ -579,39 +579,229 @@ test("RT-002 Bridge command-manifest probe parses and returns the advertised man
   }
 });
 
-test("PR-009 disconnect after accepted publishes outcome_unknown without fake completion", async () => {
-  const token = "bridge-token-accepted-crash";
-  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
-    onRequest(request, socket, hello) {
-      socket.write(
-        encodeFrame("receipt:accepted-before-crash", hello.runtimeEpoch, {
-          type: "studio.receipt",
-          requestId: request.requestId,
-          commandId: "runtime-command-crash",
-          runtimeEpoch: hello.runtimeEpoch,
-          stateVersion: 0,
-          status: "accepted",
-        }),
-        () => socket.destroy(),
-      );
+for (const acceptedBeforeLoss of [false, true]) {
+  test(`reconnect resolves a lost ${acceptedBeforeLoss ? "accepted" : "requested"} command from terminal receipts without replay`, async () => {
+    const token = "bridge-token-late-terminal";
+    let invocations = 0;
+    const terminalReceipt = {
+      type: "studio.receipt" as const,
+      requestId: "request-crash" as RequestId,
+      commandId: "runtime-command-crash" as CommandId,
+      runtimeEpoch: epoch,
+      stateVersion: 1 as StateVersion,
+      status: "completed" as const,
+    };
+    const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+      snapshot(requestId, hello) {
+        const response = snapshotResponse(requestId, hello);
+        if (invocations === 0) return response;
+        return {
+          ...response,
+          snapshot: {
+            ...response.snapshot,
+            stateVersion: 1 as StateVersion,
+            pause: { paused: true, pauseEpoch: 1, pausedAt: "2026-11-09T00:00:01.000Z" },
+          },
+          terminalReceipts: [terminalReceipt],
+        };
+      },
+      onRequest(request, socket, hello) {
+        invocations += 1;
+        if (!acceptedBeforeLoss) {
+          socket.destroy();
+          return;
+        }
+        socket.write(
+          encodeFrame("receipt:accepted-before-loss", hello.runtimeEpoch, {
+            ...terminalReceipt,
+            requestId: request.requestId,
+            stateVersion: 0,
+            status: "accepted",
+          }),
+          () => socket.destroy(),
+        );
+      },
+    });
+    const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
+    const ledger = new CommandLedger(() => "2026-11-09T00:00:00.000Z");
+    const controller = new StudioRuntimeSessionController(client, ledger);
+    try {
+      await client.connect();
+      await controller.refresh();
+      await assert.rejects(() => controller.invoke(request({ kind: "runtime.pause" }, "request-crash")));
+      assert.equal(ledger.getByRequestId("request-crash")?.commandId, acceptedBeforeLoss ? "runtime-command-crash" : "request-crash");
+      assert.equal(ledger.getByRequestId("request-crash")?.status, "outcome_unknown");
+      assert.equal(controller.publication()?.terminalOutcomes[0]?.status, "outcome_unknown");
+
+      await client.reconnect();
+      const recovered = await controller.refresh();
+      assert.equal(client.state, "ready");
+      assert.equal(recovered.snapshot.pause?.paused, true);
+      assert.equal(recovered.terminalOutcomes[0]?.commandId, "runtime-command-crash");
+      assert.equal(recovered.terminalOutcomes[0]?.status, "completed");
+      assert.equal(recovered.terminalOutcomes[0]?.stateVersionAfter, 1);
+      assert.equal(recovered.terminalOutcomes[0]?.errorCode, undefined);
+      const revision = ledger.terminalRevision;
+      assert.equal((await controller.refresh()).terminalOutcomes[0]?.status, "completed");
+      assert.equal(ledger.terminalRevision, revision, "duplicate terminal tails are idempotent");
+      assert.equal(invocations, 1, "snapshot recovery must not replay the command");
+    } finally {
+      controller.dispose();
+      client.close();
+      await bridge.close();
+    }
+  });
+}
+
+for (const status of ["completed", "failed", "rejected"] as const) {
+  test(`late ${status} receipt replaces the unknown outcome and its loss diagnosis`, () => {
+    let now = "2026-11-09T00:00:00.000Z";
+    const ledger = new CommandLedger(() => now);
+    const commandId = "late-command" as CommandId;
+    ledger.request(commandId, request({ kind: "runtime.pause" }, "late-request"), runtimeId);
+    ledger.transition(commandId, "accepted");
+    ledger.markRuntimeLost(runtimeId, epoch);
+    const revision = ledger.terminalRevision;
+    now = "2026-11-09T00:00:01.000Z";
+    const receipt = {
+      type: "studio.receipt" as const,
+      requestId: "late-request" as RequestId,
+      commandId,
+      runtimeEpoch: epoch,
+      stateVersion: 2 as StateVersion,
+      status,
+      ...(status === "completed" ? {} : {
+        error: { code: "INVALID_ARGUMENT" as const, message: "  Runtime rejected the operation  ", retryable: false },
+      }),
+    };
+    const settled = ledger.reconcileReceipt(receipt);
+    assert.equal(settled?.status, status);
+    assert.equal(settled?.stateVersionAfter, 2);
+    assert.equal(settled?.terminalAt, now);
+    assert.equal(settled?.errorCode, status === "completed" ? undefined : "INVALID_ARGUMENT");
+    assert.equal(settled?.errorMessage, status === "completed" ? undefined : "Runtime rejected the operation");
+    assert.equal(ledger.terminalRevision, revision + 1);
+    assert.deepEqual(ledger.reconcileReceipt(receipt), settled);
+    assert.equal(ledger.terminalRevision, revision + 1);
+  });
+}
+
+test("late receipts preserve request identity, epoch fences and known terminal outcomes", () => {
+  const ledger = new CommandLedger();
+  const commandId = "bound-command" as CommandId;
+  ledger.request(commandId, request({ kind: "runtime.pause" }, "lost-request"), runtimeId);
+  ledger.transition(commandId, "accepted");
+  ledger.markRuntimeLost(runtimeId, epoch);
+  const unknown = ledger.snapshot();
+  const receipt = {
+    type: "studio.receipt" as const,
+    requestId: "lost-request" as RequestId,
+    commandId,
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    status: "completed" as const,
+  };
+  assert.throws(() => ledger.reconcileReceipt({ ...receipt, requestId: "another-request" as RequestId }), /Unknown request id/u);
+  assert.throws(() => ledger.reconcileReceipt({ ...receipt, commandId: "another-command" as CommandId }), /command id mismatch/u);
+  assert.throws(() => ledger.reconcileReceipt({ ...receipt, runtimeEpoch: 2 as RuntimeEpoch }), /runtime epoch mismatch/u);
+  assert.throws(() => ledger.reconcileReceipt({ ...receipt, status: "accepted" }), /Conflicting terminal receipt/u);
+  assert.deepEqual(ledger.snapshot(), unknown, "untrusted or nonterminal receipts cannot mutate the fenced row");
+
+  ledger.reconcileReceipt(receipt);
+  const completed = ledger.snapshot();
+  assert.throws(() => ledger.reconcileReceipt({ ...receipt, status: "failed" }), /Conflicting terminal receipt completed -> failed/u);
+  assert.deepEqual(ledger.snapshot(), completed);
+});
+
+test("snapshot recovery fences other Runtime instances and epochs without hiding real conflicts", async () => {
+  const token = "bridge-token-recovery-fences";
+  const connectedRuntime = "runtime-instance-1" as RuntimeId;
+  const currentEpoch = 2 as RuntimeEpoch;
+  let conflict = false;
+  const bridge = await listenForHello(hello => ({ ...helloResponse(hello, token), runtimeEpoch: currentEpoch }), {
+    snapshot(requestId, hello) {
+      const response = snapshotResponse(requestId, hello);
+      return {
+        ...response,
+        snapshot: { ...response.snapshot, stateVersion: 1 as StateVersion },
+        terminalReceipts: ["previous-epoch", "previous-runtime", "current"].map(id => ({
+          type: "studio.receipt" as const,
+          requestId: id as RequestId,
+          commandId: id as CommandId,
+          runtimeEpoch: currentEpoch,
+          stateVersion: 1 as StateVersion,
+          status: conflict && id === "current" ? "failed" as const : "completed" as const,
+        })),
+      };
     },
   });
+  const ledger = new CommandLedger();
+  for (const entry of [
+    { id: "previous-epoch", runtimeId: connectedRuntime, runtimeEpoch: epoch },
+    { id: "previous-runtime", runtimeId: "retired-runtime" as RuntimeId, runtimeEpoch: currentEpoch },
+    { id: "current", runtimeId: connectedRuntime, runtimeEpoch: currentEpoch },
+  ]) {
+    ledger.request(entry.id as CommandId, { ...request({ kind: "runtime.pause" }, entry.id), runtimeEpoch: entry.runtimeEpoch }, entry.runtimeId);
+    ledger.markRuntimeLost(entry.runtimeId, entry.runtimeEpoch);
+  }
   const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
-  const ledger = new CommandLedger(() => "2026-08-11T00:00:00.000Z");
   const controller = new StudioRuntimeSessionController(client, ledger);
   try {
     await client.connect();
-    await controller.refresh();
-    await assert.rejects(() => controller.invoke(request({ kind: "runtime.pause" }, "request-crash")));
-    assert.equal(ledger.getByRequestId("request-crash")?.commandId, "runtime-command-crash");
-    assert.equal(ledger.getByRequestId("request-crash")?.status, "outcome_unknown");
-    assert.equal(controller.publication()?.terminalOutcomes[0]?.status, "outcome_unknown");
+    const recovered = await controller.refresh();
+    assert.equal(recovered.snapshot.runtimeEpoch, currentEpoch);
+    assert.equal(ledger.getByRequestId("previous-epoch")?.status, "outcome_unknown");
+    assert.equal(ledger.getByRequestId("previous-runtime")?.status, "outcome_unknown");
+    assert.equal(ledger.getByRequestId("current")?.status, "completed");
+    conflict = true;
+    await assert.rejects(() => controller.refresh(), /Conflicting terminal receipt completed -> failed/u);
+    assert.equal(ledger.getByRequestId("current")?.status, "completed");
   } finally {
     controller.dispose();
     client.close();
     await bridge.close();
   }
 });
+
+for (const phase of ["failed", "pending"] as const) {
+  test(`disposed controller does not retry a ${phase} gap refresh`, async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let resync = () => {};
+    let rejectSnapshot!: (error: Error) => void;
+    let snapshots = 0;
+    const bridge = {
+      state: "snapshot-required",
+      onProjectionChanged: () => () => {},
+      onEvent: () => () => {},
+      onResyncRequired(listener: () => void) {
+        resync = listener;
+        return () => { resync = () => {}; };
+      },
+      requestSnapshot() {
+        snapshots += 1;
+        return new Promise<StudioSnapshotResponse>((_resolve, reject) => { rejectSnapshot = reject; });
+      },
+    } as unknown as StudioBridgeClient;
+    const controller = new StudioRuntimeSessionController(bridge, new CommandLedger());
+    try {
+      resync();
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(snapshots, 1);
+      if (phase === "failed") {
+        rejectSnapshot(new Error("snapshot blocked by pending requests"));
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      controller.dispose();
+      if (phase === "pending") rejectSnapshot(new Error("snapshot blocked by pending requests"));
+      await new Promise<void>(resolve => setImmediate(resolve));
+      t.mock.timers.tick(1_000);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(snapshots, 1, "retired controllers must not resume background snapshot traffic");
+    } finally {
+      controller.dispose();
+    }
+  });
+}
 
 test("connectUntilReady retries CONNECTION_FAILED until the pipe accepts", async () => {
   const token = "bridge-token-retry";

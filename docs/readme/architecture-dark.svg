@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" font-family="'Segoe UI Variable Display','Segoe UI',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif">
+<title>OMP Studio 架构：Renderer → StudioClient → Desktop IPC → Host facade → 本机服务 / Studio Bridge → OMP Runtime</title>
+<defs>
+  <linearGradient id="adbrand" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#a78bfa"/>
+    <stop offset=".55" stop-color="#f472b6"/>
+    <stop offset="1" stop-color="#38bdf8"/>
+  </linearGradient>
+  <linearGradient id="adbrandShift" x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+    <stop offset="0" stop-color="#a78bfa"/>
+    <stop offset=".35" stop-color="#f472b6"/>
+    <stop offset=".7" stop-color="#38bdf8"/>
+    <stop offset="1" stop-color="#a78bfa"/>
+    <animateTransform attributeName="gradientTransform" type="translate" values="-1 0;0 0" dur="6s" repeatCount="indefinite"/>
+  </linearGradient>
+  <pattern id="addots" width="22" height="22" patternUnits="userSpaceOnUse">
+    <circle cx="1.5" cy="1.5" r="1.2" fill="#a78bfa" opacity="0.192"/>
+  </pattern>
+  <filter id="adsoft" x="-20%" y="-20%" width="140%" height="160%">
+    <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.55"/>
+  </filter>
+  <filter id="adblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="40"/></filter></defs>
+<rect width="1200" height="600" rx="24" fill="#0d0b15"/>
+<rect width="1200" height="600" rx="24" fill="url(#addots)" opacity=".6"/>
+<rect x=".5" y=".5" width="1199" height="599" rx="24" fill="none" stroke="#2c2640"/>
+<text x="40" y="62" font-size="27" font-weight="800" fill="#f2effc">一条类型化通路，而不是解析终端输出</text>
+<text x="40" y="94" font-size="16" fill="#b9b2d2">类型和文档冲突时，以 packages/studio-protocol 与 client-contract 为准。</text><rect x="22" y="118" width="276" height="190" rx="20" fill="#fb7185" fill-opacity=".04" stroke="#fb7185" stroke-opacity=".6" stroke-dasharray="8 6"/>
+<text x="40" y="142" font-size="14" font-weight="800" fill="#fb7185">信任边界</text>
+<text x="40" y="350" font-size="16" fill="#b9b2d2">Renderer 拿不到 Bridge token、</text>
+<text x="40" y="376" font-size="16" fill="#b9b2d2">进程句柄、OMP 会话路径和</text>
+<text x="40" y="402" font-size="16" fill="#b9b2d2">本机绝对路径。</text>
+<text x="40" y="446" font-size="16" fill="#b9b2d2">未知 mutation 一律失败关闭；</text>
+<text x="40" y="472" font-size="16" fill="#b9b2d2">accepted 不等于成功。</text><path d="M280 202.0H326" stroke="#3a3352" stroke-width="2.5" fill="none"/><path d="M326 226.0H280" stroke="#3a3352" stroke-width="2.5" fill="none"/><path d="M566 202.0H612" stroke="#3a3352" stroke-width="2.5" fill="none"/><path d="M612 226.0H566" stroke="#3a3352" stroke-width="2.5" fill="none"/><path d="M852 202.0H898" stroke="#3a3352" stroke-width="2.5" fill="none"/><path d="M898 226.0H852" stroke="#3a3352" stroke-width="2.5" fill="none"/><path d="M978.0 278C978.0 338 732.0 324 732.0 384" stroke="#3a3352" stroke-width="2.5" fill="none"/><path d="M1058.0 278V384" stroke="#a78bfa" stroke-opacity=".6" stroke-width="2.5" fill="none" stroke-dasharray="7 6"><animate attributeName="stroke-dashoffset" values="26;0" dur="1s" repeatCount="indefinite"/></path><g filter="url(#adsoft)"><rect x="40" y="150" width="240" height="128" rx="16" fill="#1a1626" stroke="#3a3352"/></g>
+<rect x="40" y="164" width="5" height="100" rx="2.5" fill="#a78bfa"/>
+<text x="64" y="188" font-size="21" font-weight="800" fill="#f2effc">Renderer</text>
+<text x="64" y="218" font-size="16" fill="#b9b2d2">React + Vite 工作台</text><text x="64" y="242" font-size="16" fill="#b9b2d2">只拿到不透明 id</text><g filter="url(#adsoft)"><rect x="326" y="150" width="240" height="128" rx="16" fill="#1a1626" stroke="#3a3352"/></g>
+<rect x="326" y="164" width="5" height="100" rx="2.5" fill="#f472b6"/>
+<text x="350" y="188" font-size="21" font-weight="800" fill="#f2effc">StudioClient</text>
+<text x="350" y="218" font-size="16" fill="#b9b2d2">类型化 query / command</text><text x="350" y="242" font-size="16" fill="#b9b2d2">client-contract</text><g filter="url(#adsoft)"><rect x="612" y="150" width="240" height="128" rx="16" fill="#1a1626" stroke="#3a3352"/></g>
+<rect x="612" y="164" width="5" height="100" rx="2.5" fill="#38bdf8"/>
+<text x="636" y="188" font-size="21" font-weight="800" fill="#f2effc">Desktop IPC</text>
+<text x="636" y="218" font-size="16" fill="#b9b2d2">Electron preload</text><text x="636" y="242" font-size="16" fill="#b9b2d2">只检查信封形状</text><g filter="url(#adsoft)"><rect x="898" y="150" width="240" height="128" rx="16" fill="#1a1626" stroke="#3a3352"/></g>
+<rect x="898" y="164" width="5" height="100" rx="2.5" fill="#4ade80"/>
+<text x="922" y="188" font-size="21" font-weight="800" fill="#f2effc">Host facade</text>
+<text x="922" y="218" font-size="16" fill="#b9b2d2">参数校验的唯一入口</text><text x="922" y="242" font-size="16" fill="#b9b2d2">能力协商 · epoch</text><g filter="url(#adsoft)"><rect x="612" y="384" width="240" height="136" rx="16" fill="#1a1626" stroke="#3a3352"/></g>
+<rect x="612" y="398" width="5" height="108" rx="2.5" fill="#fbbf24"/>
+<text x="636" y="422" font-size="21" font-weight="800" fill="#f2effc">本机服务</text>
+<text x="636" y="452" font-size="16" fill="#b9b2d2">会话目录 · 工作区</text><text x="636" y="476" font-size="16" fill="#b9b2d2">Git · 文件 · 终端 PTY</text><text x="636" y="500" font-size="16" fill="#b9b2d2">通知 · 托管浏览器</text><g filter="url(#adsoft)"><rect x="898" y="384" width="240" height="136" rx="16" fill="#1a1626" stroke="#3a3352"/></g>
+<rect x="898" y="398" width="5" height="108" rx="2.5" fill="#a78bfa"/>
+<text x="922" y="422" font-size="21" font-weight="800" fill="#f2effc">OMP Runtime</text>
+<text x="922" y="452" font-size="16" fill="#b9b2d2">omp --mode studio-host</text><text x="922" y="476" font-size="16" fill="#b9b2d2">oh-my-pi 子模块</text><text x="922" y="500" font-size="16" fill="#b9b2d2">+ overlay + 接缝补丁</text><rect x="998.0" y="318" width="120" height="34" rx="17" fill="#1a1626" stroke="#a78bfa" stroke-opacity=".6"/>
+<text x="1058.0" y="340" text-anchor="middle" font-size="14.5" font-weight="800" fill="#a78bfa">Studio Bridge</text><circle r="5.5" fill="#a78bfa"><animateMotion dur="2.2s" repeatCount="indefinite" begin="0.0s" path="M280 202.0H326"/></circle><circle r="5.5" fill="#38bdf8"><animateMotion dur="2.2s" repeatCount="indefinite" begin="1.1s" path="M326 226.0H280"/></circle><circle r="5.5" fill="#a78bfa"><animateMotion dur="2.2s" repeatCount="indefinite" begin="0.3s" path="M566 202.0H612"/></circle><circle r="5.5" fill="#38bdf8"><animateMotion dur="2.2s" repeatCount="indefinite" begin="1.4000000000000001s" path="M612 226.0H566"/></circle><circle r="5.5" fill="#a78bfa"><animateMotion dur="2.2s" repeatCount="indefinite" begin="0.6s" path="M852 202.0H898"/></circle><circle r="5.5" fill="#38bdf8"><animateMotion dur="2.2s" repeatCount="indefinite" begin="1.7000000000000002s" path="M898 226.0H852"/></circle><circle r="5.5" fill="#a78bfa"><animateMotion dur="1.8s" repeatCount="indefinite" begin=".5s" path="M978.0 278C978.0 338 732.0 324 732.0 384"/></circle><circle r="5.5" fill="#a78bfa"><animateMotion dur="1.8s" repeatCount="indefinite" begin="1.2s" path="M1058.0 278V384"/></circle><g transform="translate(40,552)">
+<circle cx="7" cy="7" r="6" fill="#a78bfa"/><text x="22" y="12.5" font-size="15" fill="#b9b2d2">query / command：语义指令，不拼 shell、不模拟按键</text>
+<circle cx="560" cy="7" r="6" fill="#38bdf8"/><text x="575" y="12.5" font-size="15" fill="#b9b2d2">events / snapshot：Runtime 断开即封旧 epoch</text></g>
+</svg>

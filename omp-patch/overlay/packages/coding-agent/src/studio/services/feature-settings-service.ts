@@ -85,6 +85,8 @@ import {
 	type FeatureSettingRow,
 	type FeatureSettingsOperation,
 	type PoolAccountOption,
+	type AgentAccountPools,
+	type AgentAccountPoolState,
 } from "../feature-settings-protocol";
 import { SessionControlError } from "./session-control-service";
 import { StudioSessionCompactionService } from "./session-compaction-service";
@@ -161,6 +163,15 @@ export class StudioFeatureSettingsService {
 		readonly session: AgentSession,
 		readonly computer?: StudioComputerWorkspaceService,
 	) {}
+	#accountPools(): AgentAccountPoolState {
+		const task = this.session.settings.getGlobalSettings().task as
+			| { agentAccountPools?: AgentAccountPools }
+			| undefined;
+		return {
+			global: task?.agentAccountPools ?? {},
+			effective: cfgTaskAgentAccountPools.get(this.session.settings) as AgentAccountPools,
+		};
+	}
 	#row(key: FeatureSettingKey): FeatureSettingRow {
 		const setting = HANDLES[key],
 			value: unknown =
@@ -173,6 +184,13 @@ export class StudioFeatureSettingsService {
 	async execute(operation: FeatureSettingsOperation): Promise<unknown> {
 		if (operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "Settings session changed");
+		if (operation.kind === "accounts.pool.get") return this.#accountPools();
+		if (operation.kind === "accounts.pool.set") {
+			// Use the CLI's entry writer: never copy merged project/session policy into the global map.
+			cfgTaskAgentAccountPools.setEntry(this.session.settings, operation.agent, operation.pools ?? undefined);
+			await this.session.settings.flush();
+			return this.#accountPools();
+		}
 		if (operation.kind === "session.compaction.get") return new StudioSessionCompactionService(this.session).get();
 		if (operation.kind === "session.compaction.set")
 			return new StudioSessionCompactionService(this.session).set(operation.input);

@@ -8,10 +8,15 @@ const open = (layout: DockLayout, pageId: string, options: { reveal?: boolean; a
   type: "browser-page-open", panel: page(pageId, options.sessionId), descriptor: { sessionId: options.sessionId ?? "chat-a", pageId }, reveal: options.reveal ?? false, ...(options.after ? { after: options.after } : {}),
 });
 const strip = (layout: DockLayout, panel: BrowserPagePanelId) => layout.right.groups.concat(layout.bottom.groups, layout.floats).find(group => group.panels.includes(panel))!;
+function browserTabsLayout(): DockLayout {
+  const layout = dockReducer(createDefaultLayout(), { type: "move", panels: ["changes", "git", "browser", "computer"], target: { region: "right" } });
+  layout.right.visible = false;
+  return layout;
+}
 
 describe("web pages as dock tabs", () => {
   it("lets the first page take the Browser tab's place and puts later pages beside the focused one", () => {
-    let layout = open(createDefaultLayout(), "docs");
+    let layout = open(browserTabsLayout(), "docs");
     expect(layout.right.groups[0]!.panels).toEqual(["changes", "git", page("docs"), "computer"]);
     expect(locatePanel(layout, "browser")).toBeUndefined();
     layout = open(layout, "api");
@@ -23,7 +28,7 @@ describe("web pages as dock tabs", () => {
   });
 
   it("keeps Agent pages out of sight while a page the user opens comes to the front", () => {
-    let layout = open(createDefaultLayout(), "agent");
+    let layout = open(browserTabsLayout(), "agent");
     expect(layout.right.visible).toBe(false);
     expect(layout.right.groups[0]!.active).toBe("changes");
     layout = open(layout, "mine", { reveal: true });
@@ -85,7 +90,7 @@ describe("web pages as dock tabs", () => {
     expect(JSON.stringify(saved.layout)).not.toContain("browser-page:");
     expect(locatePanel(saved.layout, "browser")?.region).toBe("bottom");
     store.applyPreset("default");
-    expect(store.getSnapshot().layout.right.groups[0]!.panels).toEqual(["changes", "git", page("docs"), page("api"), "computer"]);
+    expect(store.getSnapshot().layout.right.groups[0]!.panels).toEqual([page("docs"), page("api")]);
     store.applyPreset(preset);
     expect(locatePanel(store.getSnapshot().layout, page("docs"))?.region).toBe("bottom");
     expect(locatePanel(store.getSnapshot().layout, page("api"))?.region).toBe("bottom");

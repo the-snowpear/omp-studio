@@ -17,9 +17,10 @@ export type DragPreview = {
   rect: DockRect;
   label: string;
   snapped: boolean;
+  snapKey?: string;
   cards?: CardPlacement;
   settling?: boolean;
-  workspace?: { manager: WorkbenchWindows; layout: WindowLayout; sourceId: string };
+  workspace?: { manager: WorkbenchWindows; layout: WindowLayout; sourceId: string; size?: Pick<DockRect, "width" | "height"> };
   conversation?: {
     title: string;
     documentId?: string | undefined;

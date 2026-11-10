@@ -1,6 +1,6 @@
 import { createCounterRegistry, createDiagnosticsSampler, createMemorySampleGate, formatMemorySampleLine, type MemorySample, type MemorySampleGateDecision } from "@omp-studio/studio-protocol";
 import type { StudioRuntimeSessionController } from "@omp-studio/studio-host";
-import type { HostLog } from "./host-log.js";
+import { performanceSampleNumericFields, type HostLog } from "./host-log.js";
 import { ConversationViews } from "./conversation-views.js";
 
 export const desktopConversationViews = new ConversationViews();
@@ -23,7 +23,7 @@ export function collectHostPerformanceCounters(): Readonly<Record<string, number
   return result;
 }
 export function logRendererPerformance(sample: MemorySample, decision: MemorySampleGateDecision, instance: number): void {
-  sink?.write("info", "performance.sample", formatMemorySampleLine(sample, { prefix: { instance, seq: decision.seq, reason: decision.reason ?? "first" } }));
+  sink?.write("info", "performance.sample", formatMemorySampleLine(sample, { prefix: { instance, seq: decision.seq, reason: decision.reason ?? "first" } }), performanceSampleNumericFields(sample));
 }
 export function startHostPerformance(log: HostLog): () => void {
   sink = log;
@@ -34,7 +34,7 @@ export function startHostPerformance(log: HostLog): () => void {
     gate: createMemorySampleGate({ now: Date.now }),
     sample: () => { const memory = process.memoryUsage(); return { role: "main-host", rssBytes: memory.rss, heapUsedBytes: memory.heapUsed,
       heapTotalBytes: memory.heapTotal, externalBytes: memory.external, arrayBuffersBytes: memory.arrayBuffers, counters: registry.collect() }; },
-    emit: (sample, decision) => log.write("info", "performance.sample", formatMemorySampleLine(sample, { prefix: { instance, seq: decision.seq, reason: decision.reason ?? "first" } })),
+    emit: (sample, decision) => log.write("info", "performance.sample", formatMemorySampleLine(sample, { prefix: { instance, seq: decision.seq, reason: decision.reason ?? "first" } }), performanceSampleNumericFields(sample)),
     setInterval: (callback, ms) => setInterval(callback, ms), clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
     onScheduled: (handle) => (handle as { unref?: () => void }).unref?.(),
   });

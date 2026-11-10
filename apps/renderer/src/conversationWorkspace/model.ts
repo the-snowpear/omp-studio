@@ -1,5 +1,6 @@
 import type { DockPinMode, DockRect } from "../dock/types";
 import type { ConversationSnapLayout, SnapTemplate } from "./snap";
+export type WorkspaceRoute = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media" | "evaluation" | "statistics";
 export type ConversationRef = { targetId: string | null; workspaceId?: string | undefined; sessionId?: string | undefined; draftId?: string | undefined; threadId?: string | undefined; historyId?: string | undefined; previewThreadId?: string | undefined; previewProjectId?: string | undefined };
 export type ConversationViewId = string;
 export type Rect = DockRect;
@@ -9,7 +10,7 @@ export type ConversationView = {
   nativeRect?: Rect;
   restoreSnap?: { template: SnapTemplate; cell: number } | undefined;
 };
-export type ConversationDocument = { id: string; ref: ConversationRef; title: string; projectName?: string | undefined; page?: boolean; pagePhase?: "in" | "out" };
+export type ConversationDocument = { id: string; ref: ConversationRef; title: string; projectName?: string | undefined; route?: WorkspaceRoute | undefined; page?: boolean; pagePhase?: "in" | "out" };
 export type ConversationWorkspaceLayout = {
   version: 4; coordinateVersion: 1; views: ConversationView[]; documents: ConversationDocument[];
   snap: ConversationSnapLayout | null; snapAssistCell: number | null;

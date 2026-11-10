@@ -654,9 +654,9 @@ interface CoreCommandInputMap {
   "models.cycleOrder.set": { readonly order: ReadonlyArray<string> };
   /** Targeted web-search config write (web_search.* / providers.webSearch* / searxng.* / exa.*). */
   "models.webSearch.set": ModelWebSearchSetInput;
-  /** Store a search engine api_key in the local credential store (agent.db). */
+  /** Deprecated: use search.credentials.set; disk writes are rejected. */
   "models.webSearch.credential.set": ModelWebSearchCredentialSetInput;
-  /** Soft-delete a search engine's Studio-managed api_key credential. */
+  /** Deprecated: use search.credentials.remove with a credential id. */
   "models.webSearch.credential.remove": ModelWebSearchCredentialRemoveInput;
   /** Activate a known workspace (Host-owned registry; never a path). */
   "workspace.open": { readonly workspaceId: WorkspaceId };

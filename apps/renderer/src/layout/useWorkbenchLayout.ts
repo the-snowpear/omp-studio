@@ -3,6 +3,12 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { beforeConversationLayoutChange, afterConversationLayoutChange } from "../conversation/conversationReflow";
 import { fitWorkbench, type LayoutPanel, type WorkbenchLayout, type WorkbenchPreferences } from "./workbenchLayout";
 
+const measurements = new WeakMap<HTMLElement, () => void>();
+/** A drag restores a borrowed body and needs its responsive regions immediately. */
+export function measureWorkbenchLayout(root: HTMLElement | null) {
+  if (root) measurements.get(root)?.();
+}
+
 type LayoutVisibility = Pick<WorkbenchLayout, "sidebarShown" | "sideShown" | "bottomVisible" | "bottomOpen" | "overlay" | "railMode">;
 function visibilityOf(layout: WorkbenchLayout): LayoutVisibility {
   return { sidebarShown: layout.sidebarShown, sideShown: layout.sideShown, bottomVisible: layout.bottomVisible, bottomOpen: layout.bottomOpen, overlay: layout.overlay, railMode: layout.railMode };
@@ -97,6 +103,7 @@ export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean)
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(sync);
     };
+    measurements.set(root, () => { cancelAnimationFrame(frame); sync(); });
     sync();
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(schedule);
     observer?.observe(root);
@@ -108,6 +115,7 @@ export function useWorkbenchLayout(prefs: WorkbenchPreferences, active: boolean)
     return () => {
       if (frame) cancelAnimationFrame(frame);
       observer?.disconnect();
+      measurements.delete(root);
       window.removeEventListener("resize", schedule);
     };
   }, [active, prefs.collapsed, prefs.sidebarWidth, prefs.sideOpen, prefs.panelWidth, prefs.bottomVisible, prefs.bottomOpen, prefs.bottomHeight, prefs.railMode, prefs.railWidth, priority]);

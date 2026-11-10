@@ -56,6 +56,7 @@ import { resolveAppIconPath, resolveAppUserModelId, resolveTrayIconPath } from "
 import { APP_MENU_COMMAND_CHANNEL, type AppMenuCommand } from "./app-menu-shared.js";
 import { registerMediaAccessIpc } from "./chrome-media-access.js";
 import { buildApplicationMenuTemplate } from "./platform/app-menu.js";
+import { installDevelopmentTools } from "./development-tools.js";
 import { moveToApplicationsMarkerPath, moveToApplicationsStrings, relaunchArguments, shouldOfferMoveToApplications } from "./platform/app-lifecycle.js";
 import { startAppNapGuard } from "./platform/app-nap.js";
 import { windowChromeOptions } from "./platform/window-chrome.js";
@@ -620,6 +621,7 @@ export async function main(): Promise<void> {
       openExternal: (url) => { void shell.openExternal(url); },
     });
     const windowSurface = window as typeof window & DesktopWindowSurface;
+    installDevelopmentTools((window as BrowserWindow).webContents, process.platform === "win32" && !app.isPackaged);
     if (validAppIcon !== undefined && typeof window.setIcon === "function") {
       window.setIcon(validAppIcon);
     }

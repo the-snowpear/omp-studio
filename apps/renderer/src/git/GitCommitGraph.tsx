@@ -4,8 +4,17 @@ import type { GitCommitChangeRecord, GitCommitChangesReadModel, GitCommitDiffRea
 
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
+import { useWideLayout } from "../layout/useWideLayout";
+import { fileTypeOf, iconNameFor } from "../explorer-types";
+import { DiffDisplayMode } from "../conversation/ChangesPanel";
+import { splitDisplayPath } from "../conversation/toolMeta";
+import { GitPatch } from "./GitPatch";
 
 import { buildGitGraphRows, GRAPH_COLORS, renderGraphRow, renderGraphThroughLanes, SWIMLANE_HEIGHT, SWIMLANE_WIDTH, type GraphRow } from "./gitGraphLayout";
+
+/** From this width the history becomes a log beside the selected commit's files and diff. */
+const GIT_GRAPH_WIDE_MIN = 860;
+const FILE_STATUS: Record<GitCommitChangeRecord["status"], string> = { added: "A", modified: "M", deleted: "D", renamed: "R", copied: "C" };
 
 export function gitRefClass(ref: GitLogRef): string {
   if (ref.kind === "head" || (ref.kind === "local" && ref.current)) return "git-ref local";
@@ -106,6 +115,7 @@ export function GitCommitGraph({
   const { t } = useI18n();
   const [branchOid, setBranchOid] = useState<string>();
   const [branchName, setBranchName] = useState("");
+  const [rootRef, wide] = useWideLayout<HTMLDivElement>(GIT_GRAPH_WIDE_MIN);
 
   const copyOid = async (oid: string) => {
     try { await navigator.clipboard.writeText(oid); } catch { /* clipboard blocked */ }
@@ -122,6 +132,7 @@ export function GitCommitGraph({
   if (!model || rows.length === 0) return <div className="empty" style={{ padding: 12 }}>{t("git.noCommitHistory")}</div>;
 
   return (
+    <div className={`git-graph${wide ? " is-wide" : ""}`} ref={rootRef}>
     <div className="git-graph-list">
       {rows.map((row) => {
         const synthetic = row.kind === "incoming-changes" || row.kind === "outgoing-changes";
@@ -203,7 +214,7 @@ export function GitCommitGraph({
                 <button type="button" className="btn small outline" onClick={() => setBranchOid(undefined)}>{t("common.cancel")}</button>
               </form>
             ) : null}
-            {selected && !synthetic ? (
+            {selected && !synthetic && !wide ? (
               <div className="git-graph-details">
                 {row.commit ? <div className="tiny muted">{row.commit.authorName} · {row.commit.oid.slice(0, 7)}</div> : null}
                 {changesLoading ? <div className="empty" style={{ padding: 8 }}>{t("git.readingFileList")}</div> : null}
@@ -239,5 +250,88 @@ export function GitCommitGraph({
         <button type="button" className="btn small outline git-graph-more" disabled={loading || preview} onClick={onLoadMore}>加载更多</button>
       ) : null}
     </div>
+    {wide ? <CommitDetail row={rows.find((row) => row.id === selectedOid && row.commit !== undefined)} changes={changes} changesLoading={changesLoading}
+      selectedPath={selectedPath} diff={diff} onSelectFile={onSelectFile} onCopy={(oid) => void copyOid(oid)} fileLabel={fileLabel} /> : null}
+    </div>
+  );
+}
+
+/**
+ * Wide history: the selected commit as a page — subject, author and refs, the
+ * files it touched, and the chosen file's diff with line numbers. The same
+ * reads as the inline details (`git.commit.changes` / `git.commit.diff`).
+ */
+function CommitDetail({ row, changes, changesLoading, selectedPath, diff, onSelectFile, onCopy, fileLabel }: {
+  readonly row: GraphRow | undefined;
+  readonly changes: GitCommitChangesReadModel | undefined;
+  readonly changesLoading: boolean | undefined;
+  readonly selectedPath: string | undefined;
+  readonly diff: GitCommitDiffReadModel | undefined;
+  readonly onSelectFile: (path: string | undefined) => void;
+  readonly onCopy: (oid: string) => void;
+  readonly fileLabel: (file: GitCommitChangeRecord) => string;
+}) {
+  const { t, resolvedLanguage } = useI18n();
+  const [split, setSplit] = useState(false);
+  const commit = row?.commit;
+  if (!row || !commit) {
+    return <section className="git-commit-detail is-empty"><div className="git-commit-placeholder"><Icon name="history" /><p>{t("git.pickCommit")}</p></div></section>;
+  }
+  const files = changes?.oid === row.id ? changes.files : undefined;
+  const shownDiff = selectedPath && diff && diff.oid === row.id && diff.path === selectedPath ? diff : undefined;
+  const date = new Date(commit.authorDate);
+  const pills = row.refs.filter((ref) => ref.kind !== "head");
+  return (
+    <section className="git-commit-detail" aria-label={commit.subject}>
+      <header className="git-commit-head">
+        <h3 title={commit.subject}>{commit.subject}</h3>
+        <div className="git-commit-meta">
+          <span className="git-commit-author"><Icon name="user" extra="sm" />{commit.authorName}</span>
+          {Number.isNaN(date.getTime()) ? null : <time dateTime={commit.authorDate}>{date.toLocaleString(resolvedLanguage, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</time>}
+          <button type="button" className="git-commit-oid" data-tip={t("git.copyHash")} aria-label={`${t("git.copyHash")} ${commit.oid}`} onClick={() => onCopy(commit.oid)}>
+            <Icon name="copy" extra="sm" />{commit.oid.slice(0, 7)}
+          </button>
+          {commit.insertions !== undefined || commit.deletions !== undefined ? <span className="ch-delta">
+            {commit.insertions ? <span className="ch-add">+{commit.insertions}</span> : null}
+            {commit.deletions ? <span className="ch-del">−{commit.deletions}</span> : null}
+          </span> : null}
+          {pills.length ? <span className="git-commit-refs">{pills.map((ref) => <span key={`${ref.kind}-${ref.name}`} className={gitRefClass(ref)} style={ref.kind === "remote" ? { background: GRAPH_COLORS.remote } : ref.current ? { background: GRAPH_COLORS.local } : undefined}>
+            <span className="git-ref-sizer" aria-hidden="true">{ref.name}</span>
+            <span className="git-ref-clip"><span className="git-ref-scroll">{ref.name}</span></span>
+          </span>)}</span> : null}
+        </div>
+      </header>
+      <div className="git-commit-files">
+        <div className="git-commit-files-head">{t("git.commitFiles")}{files ? <span className="ch-count">{files.length}</span> : null}</div>
+        {changesLoading && !files ? <div className="git-commit-note">{t("git.readingFileList")}</div> : null}
+        {files?.length === 0 ? <div className="git-commit-note">{t("git.noFileChanges")}</div> : null}
+        {files?.length ? <div className="git-commit-file-list" role="listbox" aria-label={t("git.commitFiles")}>
+          {files.map((file) => {
+            const display = splitDisplayPath(file.path);
+            const ftype = fileTypeOf(display.name);
+            const active = selectedPath === file.path;
+            return <button type="button" role="option" aria-selected={active} key={file.path} className={`git-commit-file${active ? " is-active" : ""}`}
+              data-ftype={ftype ?? undefined} data-tip={fileLabel(file)} onClick={() => onSelectFile(active ? undefined : file.path)}>
+              <span className={`git-commit-file-status is-${file.status}`} aria-label={file.status}>{FILE_STATUS[file.status]}</span>
+              <span className="ch-row-icon" aria-hidden="true"><Icon name={iconNameFor(ftype, display.name)} extra="sm" /></span>
+              <span className="git-commit-file-name">{display.name}</span>
+              <span className="git-commit-file-dir">{file.status === "renamed" && file.originalPath ? `${file.originalPath} →` : display.dir}</span>
+            </button>;
+          })}
+        </div> : null}
+      </div>
+      <div className="git-commit-diff">
+        {shownDiff ? <>
+          <div className="diff-toolbar">
+            <Icon name="file-code" extra="sm" /><span className="mono small ellipsis">{shownDiff.path}</span>
+            {shownDiff.truncated ? <span className="chip gray xs">{t("common.truncated")}</span> : null}
+            <span className="spacer" /><DiffDisplayMode split={split} onSplit={setSplit} />
+          </div>
+          <div className={`diff-scroll${split ? " diff-split" : ""}`}>
+            {shownDiff.binary ? <div className="empty">Binary diff</div> : shownDiff.patch.length === 0 ? <div className="empty">{t("git.noDiff")}</div> : <GitPatch patch={shownDiff.patch} split={split} />}
+          </div>
+        </> : <div className="git-commit-placeholder"><Icon name="diff" /><p>{selectedPath ? t("git.readingDiff") : t("git.pickCommitFile")}</p></div>}
+      </div>
+    </section>
   );
 }

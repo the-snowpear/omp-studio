@@ -84,6 +84,12 @@ export interface PoolAccountOption {
 	identityKey: string;
 	label: string;
 }
+export type ProviderAccountPools = Record<string, string[]>;
+export type AgentAccountPools = Record<string, ProviderAccountPools | null>;
+export interface AgentAccountPoolState {
+	global: AgentAccountPools;
+	effective: AgentAccountPools;
+}
 export interface CompactionPreview {
 	valid: boolean;
 	summary?: string;
@@ -104,6 +110,8 @@ export type FeatureSettingsOperation =
 	  }
 	| { kind: "preferences.features.clearOverride"; sessionId: string; key: FeatureSettingKey }
 	| { kind: "accounts.pool.options"; sessionId: string }
+	| { kind: "accounts.pool.get"; sessionId: string }
+	| { kind: "accounts.pool.set"; sessionId: string; agent: string; pools: ProviderAccountPools | null }
 	| { kind: "models.compaction.preview"; sessionId: string; selector: string; input: string }
 	| { kind: "models.compaction.set"; sessionId: string; selector: string; input: string; confirmed?: boolean };
 export interface FeatureSettingsResultMap {
@@ -113,6 +121,8 @@ export interface FeatureSettingsResultMap {
 	"preferences.features.set": FeatureSettingRow;
 	"preferences.features.clearOverride": FeatureSettingRow;
 	"accounts.pool.options": { accounts: PoolAccountOption[]; truncated: boolean };
+	"accounts.pool.get": AgentAccountPoolState;
+	"accounts.pool.set": AgentAccountPoolState;
 	"models.compaction.preview": CompactionPreview;
 	"models.compaction.set": { saved: boolean; confirmationRequired: boolean; summary: string };
 }
@@ -123,6 +133,8 @@ export const FEATURE_SETTINGS_KINDS = [
 	"preferences.features.set",
 	"preferences.features.clearOverride",
 	"accounts.pool.options",
+	"accounts.pool.get",
+	"accounts.pool.set",
 	"models.compaction.preview",
 	"models.compaction.set",
 ] as const;
@@ -130,6 +142,7 @@ export const FEATURE_SETTINGS_READ_KINDS = [
 	"session.compaction.get",
 	"preferences.features.get",
 	"accounts.pool.options",
+	"accounts.pool.get",
 	"models.compaction.preview",
 ] as const;
 export function isFeatureSettingsKind(kind: string): kind is FeatureSettingsOperation["kind"] {
@@ -176,6 +189,11 @@ export function validateFeatureSettingValue(value: unknown, depth = 0): asserts 
 }
 export function validateFeatureSettingsOperation(value: unknown): void {
 	if (
+		(value as FeatureSettingsOperation)?.kind === "accounts.pool.get" ||
+		(value as FeatureSettingsOperation)?.kind === "accounts.pool.set"
+	)
+		return;
+	if (
 		(value as FeatureSettingsOperation)?.kind === "session.compaction.get" ||
 		(value as FeatureSettingsOperation)?.kind === "session.compaction.set"
 	)
@@ -219,6 +237,7 @@ function setting(value: unknown): void {
 	validateFeatureSettingValue(row.value);
 }
 export function validateFeatureSettingsResult(kind: FeatureSettingsOperation["kind"], value: unknown): void {
+	if (kind === "accounts.pool.get" || kind === "accounts.pool.set") return;
 	if (kind === "session.compaction.get" || kind === "session.compaction.set") return;
 	if (JSON.stringify(value).length > 131072) throw Error("Feature settings result exceeds limit");
 	if (kind === "models.compaction.set") {

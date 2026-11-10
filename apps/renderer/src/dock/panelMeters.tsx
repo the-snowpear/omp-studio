@@ -1,10 +1,12 @@
 import { createContext, useContext, useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { PanelId } from "./types";
+import { panelBaseId } from "./types";
 
 export type PanelMeterSegment = { id: string; percent: number; color: string; label: string };
-export type PanelStatusCount = { id: string; count: number; color: string; label: string };
+/** `prefix` sits in front of the number, for signed figures such as `+42` / `−17`. */
+export type PanelStatusCount = { id: string; count: number; color: string; label: string; prefix?: string };
 type MeterLabels = { tone: "normal" | "warning" | "danger"; label: string; detail?: string };
-export type PanelStatusMeter = MeterLabels & { kind: "status"; total: number; counts: readonly PanelStatusCount[]; emptyLabel: string; note?: string; stale: boolean };
+export type PanelStatusMeter = MeterLabels & { kind: "status"; total: number; counts: readonly PanelStatusCount[]; emptyLabel: string; note?: string; stale: boolean; badge?: number };
 export type PanelMeter = (MeterLabels & { kind?: "usage"; percent: number | null; segments?: readonly PanelMeterSegment[] }) | PanelStatusMeter;
 type Entry = { value: PanelMeter | null; listeners: Set<() => void> };
 
@@ -30,12 +32,13 @@ export function DockMetersProvider({ children }: { children: ReactNode }) {
 }
 export function DockPanelMeter({ id, value }: { id: PanelId; value: PanelMeter }) {
   const meters = useContext(Context)!;
-  useLayoutEffect(() => { meters.publish(id, value); }, [meters, id, value]);
-  useLayoutEffect(() => () => meters.publish(id, null), [meters, id]);
+  const panel = panelBaseId(id);
+  useLayoutEffect(() => { meters.publish(panel, value); }, [meters, panel, value]);
+  useLayoutEffect(() => () => meters.publish(panel, null), [meters, panel]);
   return null;
 }
 export function usePanelMeter(id: PanelId) {
-  const entry = useContext(Context)!.get(id);
+  const entry = useContext(Context)!.get(panelBaseId(id));
   return useSyncExternalStore(listener => { entry.listeners.add(listener); return () => { entry.listeners.delete(listener); }; }, () => entry.value);
 }
 
@@ -43,7 +46,7 @@ export function DockMeterSummary({ meter }: { meter: PanelMeter | null }) {
   if (meter?.kind === "status") return <span className="dock-status-summary" data-stale={meter.stale || undefined} aria-label={meter.label}>
     {meter.note ? <span className="dock-status-note">{meter.note}</span> : null}
     {meter.counts.length ? meter.counts.map(item => <span className="dock-status-count" key={item.id} data-status={item.id} style={{ color: item.color }}>
-      <i aria-hidden="true" /><b>{item.count}</b><span>{item.label}</span>
+      <i aria-hidden="true" /><b>{item.prefix ?? ""}{item.count}</b>{item.label ? <span>{item.label}</span> : null}
     </span>) : <span className="dock-status-note">{meter.emptyLabel}</span>}
   </span>;
   const percent = meter?.percent;
@@ -69,6 +72,7 @@ export function DockMeterRing({ meter }: { meter: PanelMeter | null }) {
 }
 
 export function DockMeterBadge({ meter }: { meter: PanelMeter | null }) {
-  return meter?.kind === "status" && meter.total > 0
-    ? <span className="dock-meter-badge" aria-hidden="true">{meter.total > 99 ? "99+" : meter.total}</span> : null;
+  const total = meter?.kind === "status" ? meter.badge ?? meter.total : 0;
+  return total > 0
+    ? <span className="dock-meter-badge" aria-hidden="true">{total > 99 ? "99+" : total}</span> : null;
 }

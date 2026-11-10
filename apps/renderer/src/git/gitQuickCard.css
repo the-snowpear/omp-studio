@@ -100,3 +100,22 @@
   .git-quick-commit-row time { visibility: hidden; }
   .git-quick-tree-main { padding-right: 27px; }
 }
+
+/* Wide body (a maximised window or a full-screen group): the quick card stays a
+   card — a centred, framed summary — instead of stretching a rail layout. */
+.dock-panel-content[data-dock-base="git-quick"]:not([data-dock-auto-height]) { container: git-quick-host / inline-size; }
+@container git-quick-host (min-width: 760px) {
+  .dock-panel-content > .git-quick {
+    width: min(100% - 48px, 720px);
+    height: auto;
+    max-height: calc(100% - 48px);
+    margin: clamp(16px, 7vh, 72px) auto 24px;
+    padding: 14px 18px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-10);
+    background: var(--surface);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 12px 32px -18px rgb(0 0 0 / 22%);
+    font-size: var(--fs-12);
+  }
+  .git-quick-body { flex: 0 1 auto; }
+}

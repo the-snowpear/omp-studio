@@ -11,6 +11,8 @@ import { createRequire } from "node:module";
 import { homedir, userInfo } from "node:os";
 import { win32 } from "node:path";
 import { randomBytes } from "node:crypto";
+import { commandArguments, resolveCommandShell } from "./terminal-command.js";
+import type { TerminalCommand } from "./terminal-shared.js";
 
 import { processGroupSpawnOptions, terminateProcessTree } from "./platform/process-tree.js";
 import { TerminalOutputBatcher, type TerminalBatchTimers, type TerminalFlowStats } from "./terminal-batch.js";
@@ -392,7 +394,7 @@ export class TerminalSessionManager {
 
   create(
     windowId: number,
-    size: TerminalSize & { readonly flowControl?: boolean },
+    size: TerminalSize & { readonly flowControl?: boolean; readonly command?: TerminalCommand },
     listeners: TerminalSessionListeners,
     workspaceCwd?: string,
   ): TerminalSessionInfo {
@@ -403,12 +405,14 @@ export class TerminalSessionManager {
     if (running >= TERMINAL_MAX_SESSIONS) {
       throw new Error(`terminal: at most ${TERMINAL_MAX_SESSIONS} sessions per window`);
     }
-    const shell = this.#resolveShell();
+    const args = size.command ? commandArguments(size.command) : undefined;
+    const shell = size.command ? resolveCommandShell(size.command) : this.#resolveShell();
     const cwd = workspaceCwd ?? this.#resolveCwd();
     const id = this.#newId();
     const info: TerminalSessionInfo = { id, name: shell.name, cwd };
     const proc = this.#spawner.spawn({
       file: shell.file,
+      ...(args ? { args } : {}),
       name: shell.name,
       cwd,
       cols: size.cols,
@@ -418,6 +422,7 @@ export class TerminalSessionManager {
     this.#sessions.set(id, session);
     // `flowControl` is only true when the Renderer acknowledges xterm writes.
     this.#batcher.open(id, { flowControl: size.flowControl === true });
+    if (size.command) this.#batcher.push(id, size.command.text.replace(/\r?\n/g, "\r\n") + "\r\n\r\n");
     proc.onData((data) => {
       // Draining records still accept ConPTY's late output for one window.
       this.#batcher.push(id, data);

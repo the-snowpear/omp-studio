@@ -1,10 +1,9 @@
-import { selectOption } from "./test/selectOption";
+import { setAskText } from "./test/askEditor";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { FeatureSettingsPane } from "./settings/FeatureSettingsPane";
-import { AgentPoolsPane } from "./models/AgentPoolsPane";
 import { SessionPortabilityPane } from "./history/SessionPortabilityPane";
 import { SessionCompressionPane } from "./diagnostics/SessionCompressionPane";
 import { SessionWorktreesPane } from "./workspaces/SessionWorktreesPane";
@@ -28,19 +27,6 @@ it("makes billed message prediction an explicit opt-in and keeps demo changes lo
   fireEvent.click(toggle);
   await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
   expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
-});
-
-it("distinguishes blocking a provider from an unrestricted agent pool", async () => {
-  preview(<AgentPoolsPane client={client} visible />);
-  const policy = screen.getByRole("combobox", { name: "账号池策略" });
-  selectOption(policy, "禁止此提供商");
-  fireEvent.click(screen.getByRole("button", { name: "保存账号范围" }));
-  await screen.findByText("已保存，当前显示生效配置。");
-  expect((policy as HTMLButtonElement).textContent).toBe("禁止此提供商");
-  selectOption(policy, "不限制");
-  fireEvent.click(screen.getByRole("button", { name: "保存账号范围" }));
-  await waitFor(() => expect((policy as HTMLButtonElement).textContent).toBe("不限制"));
-  expect(command).not.toHaveBeenCalled();
 });
 
 it("requires archive inspection before import and shows preservation of the local copy", async () => {
@@ -79,18 +65,18 @@ it("protects dirty worktrees and requires an explicit removal review", async () 
 it("folds a pending Ask without submitting and preserves its draft on reopening", async () => {
   const submit = vi.fn(), cancel = vi.fn();
   preview(<QueuedDeck demo items={[{ kind: "ask", id: "question", question: { id: "question", question: "Which option?", options: [{ label: "A", description: "First" }], multi: false } }]} regionLabel="questions" onAskSubmit={submit} onAskCancel={cancel} />);
-  fireEvent.change(screen.getByRole("textbox", { name: "自定义回答" }), { target: { value: "Keep this draft" } });
+  setAskText(screen.getByRole("textbox", { name: "自定义回答" }), "Keep this draft");
   fireEvent.click(screen.getByRole("button", { name: "收起 / Hide" }));
   expect(screen.queryByRole("textbox", { name: "自定义回答" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "展开 / Show" }));
-  expect((screen.getByRole("textbox", { name: "自定义回答" }) as HTMLInputElement).value).toBe("Keep this draft");
+  expect(screen.getByRole("textbox", { name: "自定义回答" }).textContent).toBe("Keep this draft");
   expect(submit).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
 });
 
 it("recognizes macOS Option+H by physical key and ignores composition and key repeat", () => {
   const submit = vi.fn();
   preview(<QueuedDeck demo items={[{ kind: "ask", id: "option-h", question: { id: "option-h", question: "Keep this answer?", options: [], multi: false } }]} regionLabel="questions" onAskSubmit={submit} />);
-  fireEvent.change(screen.getByRole("textbox", { name: "自定义回答" }), { target: { value: "Unsaved answer" } });
+  setAskText(screen.getByRole("textbox", { name: "自定义回答" }), "Unsaved answer");
   const optionH = { key: "˙", code: "KeyH", altKey: true };
   fireEvent.keyDown(window, { ...optionH, isComposing: true });
   expect(screen.queryByRole("button", { name: "展开 / Show" })).toBeNull();
@@ -99,6 +85,6 @@ it("recognizes macOS Option+H by physical key and ignores composition and key re
   fireEvent.keyDown(window, { ...optionH, repeat: true });
   expect(screen.getByRole("button", { name: "展开 / Show" })).toBeTruthy();
   fireEvent.keyDown(window, optionH);
-  expect((screen.getByRole("textbox", { name: "自定义回答" }) as HTMLInputElement).value).toBe("Unsaved answer");
+  expect(screen.getByRole("textbox", { name: "自定义回答" }).textContent).toBe("Unsaved answer");
   expect(submit).not.toHaveBeenCalled();
 });

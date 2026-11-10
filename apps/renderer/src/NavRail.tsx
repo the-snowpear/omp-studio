@@ -125,8 +125,13 @@ export function AppNavRail({
   }, [collapsed, measureLine, onLayoutShift]);
 
   useEffect(() => {
+    const observer = new ResizeObserver(measureLine);
+    observer.observe(railRef.current!);
     window.addEventListener("resize", measureLine);
-    return () => window.removeEventListener("resize", measureLine);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measureLine);
+    };
   }, [measureLine]);
 
   /* The handle is revealed by pointer proximity rather than by an overlay band:

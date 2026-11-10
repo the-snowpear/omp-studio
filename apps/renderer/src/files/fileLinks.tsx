@@ -45,5 +45,5 @@ export function LocalFileImage({ src, alt }: { src: string; alt: string }) {
     void api.open({ targetId, workspaceId, path }).then(resource => { id = resource.id; if (active) setUrl(resource.url); else void api.release(id); }).catch(() => { if (active) setUrl(undefined); });
     return () => { active = false; if (id) void api.release(id); };
   }, [src, context?.basePath, preview, targetId, workspaceId]);
-  return url ? <img src={url} alt={alt} loading="lazy" /> : <span className="file-muted">{alt || src}</span>;
+  return url ? <img src={url} alt={alt} decoding="async" /> : <span className="file-muted">{alt || src}</span>;
 }

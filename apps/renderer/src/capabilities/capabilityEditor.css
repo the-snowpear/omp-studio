@@ -1,0 +1,5 @@
+.capability-editor { min-width: 0; overflow: hidden; background: var(--code-bg); }
+.capability-editor .cm-editor { height: 300px; font-size: var(--fs-12); }
+.capability-editor .cm-scroller { overscroll-behavior: contain; }
+.capability-editor:focus-within { box-shadow: inset 0 0 0 1px var(--accent-border); }
+.capability-editor .cm-content[aria-readonly="true"] { caret-color: transparent; }

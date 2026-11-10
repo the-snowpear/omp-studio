@@ -52,6 +52,8 @@ export class StudioHostError extends Error {
 }
 
 export function classifyOperation(operation: StudioOperation): CommandConcurrency {
+  if (operation.kind === "search.credentials.list") return "read-concurrent";
+  if (operation.kind === "search.credentials.set" || operation.kind === "search.credentials.remove") return "queue-compatible";
   // Observation leases and the emergency control gate must work during a turn.
   // They do not acquire the session mutation lane.
   if (isComputerWorkspaceCommand(operation.kind)) return "read-concurrent";

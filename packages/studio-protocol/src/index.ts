@@ -95,3 +95,5 @@ export * from "./contracts/managed-browser.js";
 
 export * from "./contracts/extension-links.js";
 export * from "./contracts/webmcp.js";
+
+export * from "./contracts/search-credentials.js";

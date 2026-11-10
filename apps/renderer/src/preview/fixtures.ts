@@ -181,14 +181,17 @@ export const PREVIEW_PROJECTS: PreviewProject[] = [
     attention: true, preview: "running", pinned: true,
     threads: [
       { id: "t0", title: "新建对话（空白）", time: "now", msgs: 0, status: "idle" },
+      { id: "t15", title: "内容图鉴：全部工具卡与正文格式", time: "now", msgs: 58, status: "idle", pinned: true },
       { id: "t1", title: "跟踪上游 pi-web 更新到 omp-web", time: "32m ago", msgs: 45, status: "running", pinned: true, hasSub: true, unread: 3 },
       { id: "t2", title: "Audit and fix OSS repository issues", time: "2h ago", msgs: 12, status: "idle", wait: "ask", unread: 0 },
-      { id: "t3", title: "选择 gemini3.6flash 随意发送消息后报错…", time: "4d ago", msgs: 1337, status: "idle", wait: "plan", hasSub: true, unread: 1 },
+      { id: "t3", title: "Mermaid 全屏缩放计划与交互确认", time: "4d ago", msgs: 16, status: "idle", wait: "plan", hasSub: true, unread: 1 },
       { id: "t4", title: "修复 Git Bash 路径未找到问题", time: "4d ago", msgs: 8, status: "idle", wait: "approval" },
       { id: "t5", title: "重构 session 存储层 (session)", time: "6d ago", msgs: 156, status: "archived" },
       { id: "t9", title: "补齐会话分页加载", time: "7d ago", msgs: 5, status: "idle" },
-      { id: "t10", title: "清理历史遗留的 mock 分支", time: "9d ago", msgs: 21, status: "idle" },
-      { id: "t11", title: "侧栏会话行悬停操作样式走查", time: "11d ago", msgs: 3, status: "idle" },
+      { id: "t10", title: "工具图鉴：文件、搜索、Agent 与结构化结果", time: "9d ago", msgs: 2, status: "idle" },
+      { id: "t11", title: "正文排版：表格、列表、代码与图片", time: "12m ago", msgs: 4, status: "idle" },
+      { id: "t13", title: "命令块：Bash / PowerShell 多行与着色", time: "8m ago", msgs: 4, status: "idle" },
+      { id: "t14", title: "工具检查：失败修复、空结果与长日志", time: "5m ago", msgs: 6, status: "idle", hasSub: false },
       { id: "t12", title: "修 MermaidBlock 的 TS2322（中途停止）", time: "1h ago", msgs: 7, status: "idle" },
     ],
   },
@@ -254,6 +257,8 @@ export const PREVIEW_FILE_TREE: PreviewFileNode[] = [
   { type: "dir", name: "docs", children: [
     { type: "file", name: "UPSTREAM-SYNC.md", status: "added" },
     { type: "file", name: "README.md", status: "modified", turn: true },
+    { type: "file", name: "上游同步检查记录 v0.8.1.md", status: "untracked" },
+    { type: "dir", name: "screenshots", children: [{ type: "file", name: "mermaid-dark.png" }, { type: "file", name: "mermaid-light.png" }] },
   ] },
   { type: "dir", name: "hooks", children: [
     { type: "file", name: "useCodeTheme.ts", status: "modified" },
@@ -262,6 +267,11 @@ export const PREVIEW_FILE_TREE: PreviewFileNode[] = [
   { type: "dir", name: "lib", children: [
     { type: "file", name: "rpc.ts", diagnostic: "warn" },
     { type: "file", name: "graft.ts", status: "renamed" },
+  ] },
+  { type: "dir", name: "tests", children: [
+    { type: "dir", name: "fixtures", children: [{ type: "file", name: "session with spaces.json" }, { type: "file", name: "empty-session.json" }] },
+    { type: "dir", name: "snapshots", children: [] },
+    { type: "file", name: "conversation-workspace-restore-reading-position.test.tsx", diagnostic: "warn" },
   ] },
   { type: "file", name: ".gitignore" },
   { type: "file", name: "AGENTS.md" },
@@ -429,7 +439,7 @@ export const PREVIEW_DIFF = {
     [" ", "142", "142", "  const renderMermaid = useCallback(async (theme: MermaidTheme) => {"],
     [" ", "143", "143", "    const mermaid = await import(\"mermaid\");"],
     ["-", "144", "", "    const codeTheme = getCodeTheme() as string;"],
-    ["+", "", "144", "    const codeTheme = getCodeTheme() as const;"],
+    ["+", "", "144", "    const codeTheme = getCodeTheme();"],
     [" ", "145", "145", "    mermaid.initialize({"],
     ["-", "146", "", "      theme: codeTheme,"],
     ["+", "", "146", "      theme: codeTheme satisfies MermaidTheme,"],
@@ -464,12 +474,17 @@ export const PREVIEW_PROBLEMS: PreviewProblem[] = [
   { sev: "warn", src: "ESLint", msg: "React Hook useCallback has a missing dependency", file: "hooks/useCodeTheme.ts", line: 31 },
   { sev: "info", src: "OMP 诊断", msg: "RPC capability \"preview.dom\" 协商成功 (v2)", file: null, line: null },
   { sev: "warn", src: "Git", msg: "config.yml 未被跟踪，可能被意外提交", file: "config.yml", line: null },
+  { sev: "error", src: "Vitest", msg: "切换会话后阅读位置未恢复：expected scrollTop 842, received 0", file: "tests/conversation-workspace-restore-reading-position.test.tsx", line: 128 },
+  { sev: "info", src: "文档", msg: "检查记录含中文和空格文件名，等待补充 macOS 验收结果", file: "docs/上游同步检查记录 v0.8.1.md", line: 24 },
 ];
 
 export const PREVIEW_TESTS: PreviewTest[] = [
   { suite: "lib/graft.test.ts", total: 12, pass: 12, fail: 0, time: "0.42s", status: "pass" },
   { suite: "lib/rpc.test.ts", total: 27, pass: 26, fail: 1, time: "1.18s", status: "fail", failDetail: "rpc › should negotiate capability v2\n  Expected: \"preview.dom\"\n  Received: undefined" },
   { suite: "components/DirectoryPicker.test.tsx", total: 8, pass: 8, fail: 0, time: "0.67s", status: "pass" },
+  { suite: "components/CommandBlock.test.tsx", total: 18, pass: 18, fail: 0, time: "0.92s", status: "pass" },
+  { suite: "components/MarkdownBody.test.tsx", total: 24, pass: 24, fail: 0, time: "1.46s", status: "pass" },
+  { suite: "tests/conversation-workspace-restore-reading-position.test.tsx", total: 9, pass: 8, fail: 1, time: "2.31s", status: "fail", failDetail: "切换会话 › 保留长正文的阅读位置\n  Expected scrollTop: 842\n  Received scrollTop: 0\n\n  126 | await switchConversation('notes');\n  127 | await switchConversation('review');\n> 128 | expect(view.scrollTop).toBe(842);\n      |                        ^\n\n  at tests/conversation-workspace-restore-reading-position.test.tsx:128:24" },
 ];
 
 export const PREVIEW_PV_LOGS = [
@@ -481,6 +496,12 @@ export const PREVIEW_PV_LOGS = [
   { tone: "", text: "[omp] preview attached, session=019fac94 · dom snapshot ok" },
   { tone: "muted", text: "[network] GET /api/session → 200 (18ms)" },
   { tone: "muted", text: "[network] GET /api/threads → 200 (9ms)" },
+  { tone: "warn", text: "[bridge] preview.dom unavailable · using compatible read path" },
+  { tone: "muted", text: "[session] reading-position checkpoint · thread=review · item=assistant-12 · offset=842" },
+  { tone: "err", text: "[tests] conversation restore failed · expected 842px, received 0px · tests/conversation-workspace-restore-reading-position.test.tsx:128" },
+  { tone: "ok", text: "[files] opened docs/上游同步检查记录 v0.8.1.md · UTF-8 · 2.4 KB" },
+  { tone: "ok", text: "[checks] command blocks: bash / pwsh / powershell / ps1 · 18 passed" },
+  { tone: "", text: "[summary] 6 suites · 98 checks · 96 passed · 2 failed" },
 ];
 
 export const PREVIEW_HISTORY: PreviewHistoryRow[] = [

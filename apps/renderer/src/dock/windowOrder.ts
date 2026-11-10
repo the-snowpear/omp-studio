@@ -90,6 +90,13 @@ export const WindowOwnerContext = createContext<string | null>(null);
 const standalone = new WeakMap<Document, WindowFocusStore>();
 export function useWindowFocus() { return useContext(WindowFocusContext); }
 
+/** The same focus authority used by floating frames, including standalone harnesses. */
+export function useWindowFocusStore() {
+  const surface = useSurfaceDocument(), shared = useWindowFocus();
+  if (!standalone.has(surface)) standalone.set(surface, new WindowFocusStore());
+  return shared ?? standalone.get(surface)!;
+}
+
 export function useWindowOrder(order: number, options?: { id?: string | undefined; floating?: boolean; ownerId?: string | null; visible?: boolean }) {
   const surface = useSurfaceDocument(), generatedId = useId();
   const owner = useContext(WindowOwnerContext), shared = useWindowFocus();

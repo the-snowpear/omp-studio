@@ -1,7 +1,8 @@
 import { conversationDocument } from "../conversationWorkspace/dom";
+import { measureWorkbenchLayout } from "../layout/useWorkbenchLayout";
 import { flushSync } from "react-dom";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { DockStore } from "./store";
+import { toolWindowMinimum, type DockStore } from "./store";
 import type { DockLayout, DockRect, DockTarget, PanelDefinition, PanelId } from "./types";
 import { WORKBENCH_PANELS } from "../panels/registry";
 import { beginPointerDrag } from "./pointerDrag";
@@ -9,23 +10,33 @@ import { workbenchBounds } from "./workbenchGeometry";
 import { clampFloat, dockReducer, panelsAtDockTarget } from "./model";
 import { dragPreview, type DragSource, type DragPreview } from "./dragPreview";
 import type { PanelHosts } from "./hosts";
-import { cardList, cardPlacementRect, measureCardPlacement, type CardPlacement } from "./cardDrag";
+import { cardLayoutRect, cardList, cardPlacementRect, measureCardPlacement, type CardPlacement } from "./cardDrag";
 import { snapCells, WindowSnapTracker, type WindowSnapTarget } from "./snap";
 import { previewWindowLayout } from "./windowProjection";
 
 const NAMES = { left: "左侧栏", rail: "对话工具区", right: "右侧栏", bottom: "底栏", float: "浮窗" };
+const WINDOW_EDGE_WIDTH = 24;
+const WINDOW_EDGE_DWELL = 160;
+function railDropBounds(document: Document) {
+  const rail = document.querySelector<HTMLElement>(".dock-rail-expanded, .dock-rail-compact");
+  if (!rail || rail.closest('.dock-drag-preview, .dock-layout-preview')) return null;
+  const rect = rail.getBoundingClientRect();
+  const conversation = rail.closest(".convo-wrap")?.getBoundingClientRect();
+  // Keep the outer edge available for window splitting, separate from cards.
+  return new DOMRect(rect.left, rect.top, Math.max(rect.right, conversation ? conversation.right - WINDOW_EDGE_WIDTH : rect.right) - rect.left, rect.height);
+}
 function cardHit(list: HTMLElement, region: "left" | "rail", y: number, layout?: DockLayout) {
   const cards = [...list.querySelectorAll<HTMLElement>(":scope > [data-dock-card]")];
   const state = dragPreview.snapshot();
   const gap = cards.find(card => {
-    const rect = card.getBoundingClientRect();
+    const rect = cardLayoutRect(card);
     return card.classList.contains("dock-drag-source") && rect.height > 0 && y >= rect.top && y <= rect.bottom;
   });
-  if (gap && state?.cards?.region === region) return { target: state.target, rect: gap.getBoundingClientRect(), label: `移入${NAMES[region]}` };
-  const next = cards.filter(card => !card.classList.contains("dock-drag-source")).find(card => { const rect = card.getBoundingClientRect(); return y < rect.top + rect.height / 2; });
+  if (gap && state?.cards?.region === region) return { target: state.target, rect: cardLayoutRect(gap), label: `移入${NAMES[region]}` };
+  const next = cards.filter(card => !card.classList.contains("dock-drag-source")).find(card => { const rect = cardLayoutRect(card); return y < rect.top + rect.height / 2; });
   const original = layout?.[region].panels ?? cards.map(card => card.dataset.dockCard as PanelId);
   const index = next ? original.indexOf(next.dataset.dockCard as PanelId) : original.length;
-  const rect = next?.getBoundingClientRect() ?? list.getBoundingClientRect();
+  const rect = next ? cardLayoutRect(next) : list.getBoundingClientRect();
   return { target: { region, index }, rect: new DOMRect(rect.left, next ? rect.top : rect.bottom - 3, rect.width, 3), label: next ? `插入 ${next.dataset.dockCard} 上方` : `移至${NAMES[region]}底部` };
 }
 export function dockHitTest(x: number, y: number, snap: boolean, ignoredFloat?: string, layout?: DockLayout, document: Document = globalThis.document, ownerId?: string, surface: Document = globalThis.document): { target: DockTarget; rect: DOMRect; label: string } | null {
@@ -50,7 +61,7 @@ function readDockTarget(x: number, y: number, snap: boolean, ignoredFloat: strin
     const elements = elementsAtPoint();
     let blocked = false;
     for (let element of elements) {
-      if (element.closest('.dock-drag-preview, .dock-drag-source, .dock-panel-content.is-drag-preview')) continue;
+      if (element.closest('.dock-drag-preview, .dock-layout-preview, .dock-drag-source, .dock-panel-content.is-drag-preview')) continue;
       const owner = element.closest<HTMLElement>("[data-conversation-owner], [data-conversation-document]");
       const targetOwner = owner?.dataset.conversationOwner ?? owner?.dataset.conversationDocument;
       if (ownerId && targetOwner && targetOwner !== ownerId) { blocked = true; break; }
@@ -108,8 +119,7 @@ function readDockTarget(x: number, y: number, snap: boolean, ignoredFloat: strin
         break;
       }
     }
-    const rail = !blocked ? root?.querySelector<HTMLElement>(".dock-rail-expanded, .dock-rail-compact") : null;
-    const railBox = rail?.getBoundingClientRect();
+    const railBox = !blocked ? railDropBounds(document) : null;
     if (railBox && x >= railBox.left && x <= railBox.right && y >= railBox.top && y <= railBox.bottom) {
       const list = cardList("rail", document);
       if (list) return cardHit(list, "rail", y, layout);
@@ -175,8 +185,17 @@ export function previewBounds(hit: NonNullable<ReturnType<typeof dockHitTest>>, 
   }
   // Hidden region buttons name destinations but aren't the destination's geometry.
   if (hit.rect.width < 80 || hit.rect.height < 48) {
-    if (target.region === "right") return { x: root.right - Math.min(layout.right.size, root.width), y: root.top, width: Math.min(layout.right.size, root.width), height: root.height };
-    if (target.region === "bottom") return { x: root.left, y: root.bottom - Math.min(layout.bottom.size, root.height), width: root.width, height: Math.min(layout.bottom.size, root.height) };
+    const workbench = surface.querySelector<HTMLElement>(".cw-workbench")?.getBoundingClientRect() ?? root;
+    const main = surface.querySelector<HTMLElement>(".cw-shell-main")?.getBoundingClientRect() ?? root;
+    if (target.region === "right") {
+      const visible = surface.querySelector<HTMLElement>(".cw-right-slot")?.getBoundingClientRect();
+      const width = visible?.width || Math.min(layout.right.size, workbench.width);
+      return { x: workbench.right - width, y: workbench.top, width, height: workbench.height };
+    }
+    if (target.region === "bottom") {
+      const height = Math.min(layout.bottom.size, main.height);
+      return { x: main.left, y: main.bottom - height, width: main.width, height };
+    }
   }
   return hit.rect;
 }
@@ -190,12 +209,12 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
   if (dragPreview.snapshot()?.settling) flushSync(() => dragPreview.show(null));
   const sourceRect = (source.closest<HTMLElement>('[data-dock-card], [data-dock-group], [data-dock-float]') ?? source).getBoundingClientRect();
   const sourceCards = [...document.querySelectorAll<HTMLElement>('.adaptive-workbench .dock-card-list > [data-dock-card], .adaptive-workbench .dock-rail-icon-list > [data-dock-card]')];
+  const sourceRail = railDropBounds(document);
   const dragSource: DragSource = {
     hosts, panels, rect: sourceRect, snapped: !source.closest('[data-dock-float]'),
     cards: Object.fromEntries(sourceCards.map(card => [card.dataset.dockCard, card.getBoundingClientRect()])),
   };
   const possiblePanels = panels.includes("git") ? [...panels, "git-quick" as PanelId] : panels;
-  const unmeasured = new Set(possiblePanels.filter(id => hosts.get(id).element.children.length === 0));
   const scope = store.getSnapshot().scope;
   const previewMode = store.getSnapshot().preview;
   const start = { x: event.clientX, y: event.clientY };
@@ -206,9 +225,17 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
   let hit: ReturnType<typeof dockHitTest> = null;
   let windowTarget: WindowSnapTarget | null = null;
   const snapTracker = new WindowSnapTracker();
+  let edgeAnchor: typeof start | null = null, edgeSince = 0, edgeTimer = 0, edgeArmed = false;
+  const resetEdge = () => { edgeAnchor = null; edgeArmed = false; surface.defaultView!.clearTimeout(edgeTimer); edgeTimer = 0; };
   let restoreWindowPreview = () => {};
   let projected: DockLayout | null = null, projectionKey = "";
   let cardPlacement: CardPlacement | undefined;
+  let contentChanged = false;
+  const contentObserver = new MutationObserver(() => {
+    if (cardPlacement) { contentChanged = true; gesture.schedule(); }
+  });
+  // Reused content can be mounted but hidden before the preview borrows it.
+  for (const id of possiblePanels) contentObserver.observe(hosts.get(id).element, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
   let finished = false;
   let synchronous = true;
   let unsubscribe = () => {}, detach = () => {};
@@ -217,32 +244,61 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
     if (finished) return;
     const snapshot = store.getSnapshot();
     if (!source.isConnected || snapshot.scope !== scope || snapshot.preview !== previewMode) { cancel(); return; }
-    hit = dockHitTest(point.x, point.y, store.getSnapshot().preferences.snap && !suspended, floatingId, snapshot.layout, document, store.documentId, surface);
     const manager = store.windowManager;
     const canvas = surface.querySelector<HTMLElement>("[data-conversation-canvas]");
+    const box = canvas?.getBoundingClientRect();
+    const atRailEdge = sourceRail && box && point.x >= box.right - WINDOW_EDGE_WIDTH && point.x <= box.right + 24 && point.y >= sourceRail.top && point.y <= sourceRail.bottom;
+    if (dragPreview.snapshot()?.workspace && sourceRail && !atRailEdge && point.x >= sourceRail.left && point.x <= sourceRail.right && point.y >= sourceRail.top && point.y <= sourceRail.bottom) {
+      const top = surface.elementsFromPoint(point.x, point.y).find(element => !element.closest('.dock-drag-preview, .dock-layout-preview, .dock-drag-source, .dock-panel-content.is-drag-preview'));
+      const owner = top?.closest<HTMLElement>("[data-conversation-owner], [data-conversation-document]");
+      const targetOwner = owner?.dataset.conversationOwner ?? owner?.dataset.conversationDocument;
+      if (!targetOwner || targetOwner === store.documentId) {
+        flushSync(() => dragPreview.show(null));
+        flushSync(() => measureWorkbenchLayout(document.querySelector<HTMLElement>(".adaptive-workbench")));
+      }
+    }
+    hit = dockHitTest(point.x, point.y, store.getSnapshot().preferences.snap && !suspended, floatingId, snapshot.layout, document, store.documentId, surface);
     let workspace: DragPreview["workspace"];
     windowTarget = null;
-    if (manager && canvas && snapshot.preferences.snap && !suspended) {
-      const box = canvas.getBoundingClientRect(), area = workbenchBounds(surface)!;
+    if (manager && canvas && box && snapshot.preferences.snap && !suspended) {
+      const area = workbenchBounds(surface)!;
       manager.geometry = { workbench: area, canvas: { x: box.x, y: box.y, width: box.width, height: box.height } };
-      const top = surface.elementsFromPoint(point.x, point.y).find(element => !element.closest('.dock-drag-preview, .dock-drag-source, .dock-panel-content.is-drag-preview'));
-      const explicitDock = top?.closest('[data-dock-entry], .dock-tabs, [data-dock-cards], [data-dock-empty]');
       const id = store.windowId(wholeWindow ? floatingId! : "pending");
-      if (explicitDock) snapTracker.reset();
+      const edgeRail = atRailEdge && hit?.target.region === "rail";
+      if (hit && (hit.target.region !== "float" || hit.target.groupId) && !edgeRail) snapTracker.reset();
       else windowTarget = snapTracker.hit(point.x, point.y, box, manager.getSnapshot().snap, !!manager.mainConversation(id));
+      if (windowTarget && atRailEdge) {
+        // The wider edge overlaps the rail: it becomes a window destination
+        // after a dwell, and stays selected while moving inside that edge.
+        if (edgeRail) hit = dockHitTest(point.x, point.y, false, floatingId, snapshot.layout, document, store.documentId, surface);
+        if (!edgeAnchor || (!edgeArmed && (point.x !== edgeAnchor.x || point.y !== edgeAnchor.y))) {
+          resetEdge(); edgeAnchor = point; edgeSince = performance.now();
+          edgeTimer = surface.defaultView!.setTimeout(() => gesture.schedule(), WINDOW_EDGE_DWELL);
+        }
+        if (performance.now() - edgeSince < WINDOW_EDGE_DWELL) {
+          windowTarget = null;
+          if (hit) hit.label = "停留以吸附到右侧分栏";
+        } else edgeArmed = true;
+      } else resetEdge();
       if (windowTarget) {
         const projection = "maximize" in windowTarget ? null : manager.project(id, windowTarget);
-        if (projection) {
-          restoreWindowPreview = previewWindowLayout(manager, projection, id, surface);
-          workspace = { manager, layout: projection, sourceId: id };
-        }
         const candidate = projection?.snap;
-        const rect = candidate && !("maximize" in windowTarget) ? snapCells(candidate.template, candidate.tree, manager.size(candidate))[windowTarget.cell]! : { ...manager.geometry.canvas, x: 0, y: 0 };
+        const sourceGroups = [...snapshot.layout.right.groups, ...snapshot.layout.bottom.groups, ...snapshot.layout.floats];
+        const sourceGroup = sourceGroups.find(group => panels.every(panel => group.panels.includes(panel)));
+        const active = sourceGroup && panels.includes(sourceGroup.active) ? sourceGroup.active : panels[0]!;
+        const size = candidate && !("maximize" in windowTarget)
+          ? manager.size(candidate, { [windowTarget.cell]: manager.get(id)?.minimum ?? toolWindowMinimum(active, panels.length) })
+          : undefined;
+        if (projection) {
+          restoreWindowPreview = previewWindowLayout(manager, projection, id, surface, size);
+          workspace = { manager, layout: projection, sourceId: id, ...(size ? { size } : {}) };
+        }
+        const rect = candidate && size && !("maximize" in windowTarget) ? snapCells(candidate.template, candidate.tree, size)[windowTarget.cell]! : { ...manager.geometry.canvas, x: 0, y: 0 };
         const viewport = canvas.querySelector<HTMLElement>(".cw-snap-viewport");
-        const visibleRect = candidate ? { ...rect, x: box.x + rect.x - (viewport?.scrollLeft ?? 0), y: box.y + rect.y - (viewport?.scrollTop ?? 0) } : box;
+        const visibleRect = candidate ? { ...rect, x: box.x + rect.x - (viewport?.scrollLeft ?? 0), y: box.y + rect.y - (viewport?.scrollTop ?? 0) } : { x: box.x, y: box.y, width: box.width, height: box.height };
         hit = { target: { region: "float", rect: { ...visibleRect, x: visibleRect.x - area.x, y: visibleRect.y - area.y } }, rect: new DOMRect(visibleRect.x, visibleRect.y, visibleRect.width, visibleRect.height), label: candidate ? "吸附窗口" : "最大化窗口" };
       }
-    } else snapTracker.reset();
+    } else { snapTracker.reset(); resetEdge(); }
     if (hit) {
       const destinationPanels = panelsAtDockTarget(panels, hit.target);
       const snapshot = store.getSnapshot();
@@ -259,9 +315,10 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
         hit.target.rect = clampFloat(desired, { width: root.width, height: root.height }, minimumHeight);
       }
       const key = JSON.stringify(hit.target);
-      if (projectionKey !== key) {
+      if (projectionKey !== key || contentChanged) {
         projected = dockReducer(snapshot.layout, { type: "move", panels, target: hit.target });
         projectionKey = key;
+        contentChanged = false;
         cardPlacement = hit.target.region === "left" || hit.target.region === "rail"
           ? measureCardPlacement(hit.target.region, projected, destinationPanels, hosts, definitions, document)
           : undefined;
@@ -269,28 +326,34 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
       // Borrow only destination geometry. The saved layout is unchanged until pointerup.
       const fallback = previewBounds(hit, projected!, destinationPanels, document, surface);
       const rect = cardPlacement ? cardPlacementRect(cardPlacement, projected!, destinationPanels, fallback, document) : fallback;
-      flushSync(() => dragPreview.show({ source: dragSource, hosts, layout: projected!, panels: destinationPanels, target: hit!.target, rect, ...(cardPlacement ? { cards: cardPlacement } : {}), label: destinationPanels.length > 1 && cardPlacement ? `${hit!.label} · 拆为 ${destinationPanels.length} 张卡片` : hit!.label, snapped: !!windowTarget || hit!.target.region !== "float" || !!hit!.target.groupId, ...(workspace ? { workspace } : {}) }));
+      flushSync(() => dragPreview.show({ source: dragSource, hosts, layout: projected!, panels: destinationPanels, target: hit!.target, rect, ...(cardPlacement ? { cards: cardPlacement } : {}), label: destinationPanels.length > 1 && cardPlacement ? `${hit!.label} · 拆为 ${destinationPanels.length} 张卡片` : hit!.label, snapped: !!windowTarget || hit!.target.region !== "float" || !!hit!.target.groupId, ...(windowTarget ? { snapKey: JSON.stringify(windowTarget) } : {}), ...(workspace ? { workspace } : {}) }));
       if (cardPlacement) {
-        const mounted = destinationPanels.filter(id => unmeasured.has(id) && hosts.get(id).element.children.length > 0);
-        if (mounted.length) {
-          mounted.forEach(id => unmeasured.delete(id));
-          const refreshed = measureCardPlacement(cardPlacement.region, projected!, destinationPanels, hosts, definitions, document);
-          cardPlacement = refreshed;
-          flushSync(() => dragPreview.show({ ...dragPreview.snapshot()!, cards: refreshed }));
-        }
         const list = cardList(cardPlacement.region, document);
-        const gaps = destinationPanels.map(id => list?.querySelector<HTMLElement>(`:scope > [data-dock-card="${id}"]`)?.getBoundingClientRect());
+        const gaps = destinationPanels.map(id => {
+          const card = list?.querySelector<HTMLElement>(`:scope > [data-dock-card="${id}"]`);
+          return card ? cardLayoutRect(card) : undefined;
+        });
+        const present = gaps.filter((gap): gap is DOMRect => !!gap && gap.width > 0 && gap.height > 0);
         const first = gaps[0], last = gaps.at(-1);
-        if (first && last && first.width > 0 && first.height > 0) {
+        if (cardPlacement.region === "left" && present.length === destinationPanels.length) {
+          // Folded titles land at the bottom, so a mixed group need not stay contiguous.
+          const top = Math.min(...present.map(gap => gap.top));
+          const placed = { x: present[0]!.x, y: top, width: present[0]!.width, height: Math.max(...present.map(gap => gap.bottom)) - top };
+          cardPlacement = { ...cardPlacement, rects: Object.fromEntries(destinationPanels.map((id, index) => {
+            const gap = gaps[index]!;
+            return [id, { x: gap.x, y: gap.y, width: gap.width, height: gap.height }];
+          })) };
+          flushSync(() => dragPreview.show({ ...dragPreview.snapshot()!, rect: placed, cards: cardPlacement! }));
+        } else if (first && last && first.width > 0 && first.height > 0) {
           const placed = { x: first.x, y: first.y, width: first.width, height: last.bottom - first.top };
-          if (placed.x !== rect.x || placed.y !== rect.y || placed.width !== rect.width || placed.height !== rect.height) flushSync(() => dragPreview.show({ ...dragPreview.snapshot()!, rect: placed }));
+          if (Math.abs(placed.x - rect.x) >= 0.5 || Math.abs(placed.y - rect.y) >= 0.5 || Math.abs(placed.width - rect.width) >= 0.5 || Math.abs(placed.height - rect.height) >= 0.5) flushSync(() => dragPreview.show({ ...dragPreview.snapshot()!, rect: placed }));
         }
       }
     } else flushSync(() => dragPreview.show(null));
     const under = document.elementsFromPoint(point.x, point.y);
     let scroll: HTMLElement | null = null;
     for (const element of under) {
-      if (element.closest('.dock-drag-preview, .dock-drag-source, .dock-panel-content.is-drag-preview')) continue;
+      if (element.closest('.dock-drag-preview, .dock-layout-preview, .dock-drag-source, .dock-panel-content.is-drag-preview')) continue;
       const host = element.closest<HTMLElement>('[data-panel]');
       const slot = host ? document.querySelector<HTMLElement>(`[data-dock-slot="${host.dataset.panel}"]`) : element;
       scroll = slot?.closest<HTMLElement>('.dock-card-list, .dock-tabs') ?? null;
@@ -301,13 +364,19 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
       const horizontal = scroll.classList.contains("dock-tabs");
       const p = horizontal ? point.x : point.y, a = horizontal ? rect.left : rect.top, b = horizontal ? rect.right : rect.bottom;
       const delta = p - a < 28 ? -10 : b - p < 28 ? 10 : 0;
-      if (delta) { if (horizontal) scroll.scrollLeft += delta; else scroll.scrollTop += delta; return true; }
+      if (delta) {
+        const before = horizontal ? scroll.scrollLeft : scroll.scrollTop;
+        if (horizontal) scroll.scrollLeft += delta; else scroll.scrollTop += delta;
+        return (horizontal ? scroll.scrollLeft : scroll.scrollTop) !== before;
+      }
     }
   };
   const cleanup = (synchronous = true, settle = false) => {
     restoreWindowPreview(); restoreWindowPreview = () => {};
     if (finished) return;
     finished = true;
+    resetEdge();
+    contentObserver.disconnect();
     unsubscribe(); detach();
     if (dragPreview.snapshot()?.source === dragSource) {
       if (synchronous) flushSync(() => { if (settle) dragPreview.settle(); else dragPreview.show(null); });

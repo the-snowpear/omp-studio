@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" font-family="'Segoe UI Variable Display','Segoe UI',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif">
+<title>五种停靠位置：工具可以在左侧栏、对话工具区、右侧栏、底栏和浮窗之间移动</title>
+<defs>
+  <linearGradient id="zdbrand" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#a78bfa"/>
+    <stop offset=".55" stop-color="#f472b6"/>
+    <stop offset="1" stop-color="#38bdf8"/>
+  </linearGradient>
+  <linearGradient id="zdbrandShift" x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+    <stop offset="0" stop-color="#a78bfa"/>
+    <stop offset=".35" stop-color="#f472b6"/>
+    <stop offset=".7" stop-color="#38bdf8"/>
+    <stop offset="1" stop-color="#a78bfa"/>
+    <animateTransform attributeName="gradientTransform" type="translate" values="-1 0;0 0" dur="6s" repeatCount="indefinite"/>
+  </linearGradient>
+  <pattern id="zddots" width="22" height="22" patternUnits="userSpaceOnUse">
+    <circle cx="1.5" cy="1.5" r="1.2" fill="#a78bfa" opacity="0.192"/>
+  </pattern>
+  <filter id="zdsoft" x="-20%" y="-20%" width="140%" height="160%">
+    <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.55"/>
+  </filter>
+  <filter id="zdblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="40"/></filter></defs>
+<rect width="1200" height="600" rx="24" fill="#0d0b15"/>
+<rect width="1200" height="600" rx="24" fill="url(#zddots)" opacity=".7"/>
+<g filter="url(#zdsoft)"><rect x="40" y="40" width="1120" height="520" rx="16" fill="#14111f" stroke="#3a3352"/></g>
+<rect x="40" y="40" width="1120" height="36" rx="16" fill="#1a1626"/><rect x="40" y="60" width="1120" height="16" fill="#1a1626"/>
+<rect x="40" y="76" width="1120" height="1" fill="#2c2640"/>
+<text x="58" y="63" font-size="15" font-weight="700" fill="#b9b2d2">OMP Studio · 工作台</text>
+<rect x="52" y="90" width="20" height="20" rx="6" fill="#a78bfa"/>
+<rect x="52" y="122" width="20" height="20" rx="6" fill="#2c2640"/><rect x="52" y="154" width="20" height="20" rx="6" fill="#2c2640"/><rect x="52" y="186" width="20" height="20" rx="6" fill="#2c2640"/><rect x="52" y="218" width="20" height="20" rx="6" fill="#2c2640"/><rect x="52" y="250" width="20" height="20" rx="6" fill="#2c2640"/>
+<g>
+  <rect x="90" y="82" width="198" height="472" rx="10" fill="#a78bfa" fill-opacity=".06" stroke="#a78bfa" stroke-opacity=".35" stroke-dasharray="5 5"/>
+  <g transform="translate(100,94)">
+    <circle cx="12" cy="12" r="12" fill="#a78bfa"/><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="800" fill="#fff">1</text>
+    <text x="32" y="18" font-size="18" font-weight="800" fill="#f2effc">左侧栏</text>
+    <text x="32" y="42" font-size="14.5" fill="#b9b2d2">导航固定，工具成卡片</text>
+  </g></g>
+<rect x="106" y="160" width="120" height="8" rx="4" fill="#2c2640"/><rect x="106" y="184" width="90" height="8" rx="4" fill="#2c2640"/><rect x="106" y="208" width="140" height="8" rx="4" fill="#3a3352"/><rect x="106" y="232" width="70" height="8" rx="4" fill="#2c2640"/><rect x="106" y="256" width="110" height="8" rx="4" fill="#2c2640"/><rect x="106" y="280" width="96" height="8" rx="4" fill="#2c2640"/>
+<g>
+  <rect x="300" y="82" width="458" height="342" rx="10" fill="#b9b2d2" fill-opacity=".06" stroke="#b9b2d2" stroke-opacity=".35" stroke-dasharray="5 5"/>
+  <g transform="translate(310,94)">
+    <circle cx="12" cy="12" r="12" fill="#b9b2d2"/><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="800" fill="#fff">★</text>
+    <text x="32" y="18" font-size="18" font-weight="800" fill="#f2effc">对话</text>
+    <text x="32" y="42" font-size="14.5" fill="#b9b2d2">正文 + Composer，可拖成窗口</text>
+  </g></g>
+
+  <rect x="334" y="146" width="230" height="8" rx="4" fill="#3a3352"/>
+  <rect x="334" y="162" width="170" height="8" rx="4" fill="#2c2640"/>
+  <rect x="494" y="306" width="220" height="36" rx="12" fill="#a78bfa" opacity=".85"/>
+  <rect x="334" y="376" width="300" height="8" rx="4" fill="#2c2640"/>
+  <rect x="324" y="378" width="410" height="40" rx="12" fill="#1a1626" stroke="#a78bfa" stroke-opacity=".5"/>
+<g>
+  <rect x="770" y="82" width="138" height="342" rx="10" fill="#f472b6" fill-opacity=".06" stroke="#f472b6" stroke-opacity=".35" stroke-dasharray="5 5"/>
+  <g transform="translate(780,94)">
+    <circle cx="12" cy="12" r="12" fill="#f472b6"/><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="800" fill="#fff">2</text>
+    <text x="32" y="18" font-size="18" font-weight="800" fill="#f2effc">对话工具区</text>
+    <text x="32" y="42" font-size="14.5" fill="#b9b2d2">贴在对话旁</text>
+  </g></g>
+<rect x="780" y="160" width="118" height="46" rx="9" fill="#1a1626" stroke="#2c2640"/><rect x="780" y="216" width="118" height="46" rx="9" fill="#1a1626" stroke="#2c2640"/><rect x="780" y="272" width="118" height="46" rx="9" fill="#1a1626" stroke="#2c2640"/><rect x="780" y="328" width="118" height="46" rx="9" fill="#1a1626" stroke="#2c2640"/>
+<g>
+  <rect x="920" y="82" width="234" height="472" rx="10" fill="#38bdf8" fill-opacity=".06" stroke="#38bdf8" stroke-opacity=".35" stroke-dasharray="5 5"/>
+  <g transform="translate(930,94)">
+    <circle cx="12" cy="12" r="12" fill="#38bdf8"/><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="800" fill="#fff">3</text>
+    <text x="32" y="18" font-size="18" font-weight="800" fill="#f2effc">右侧栏</text>
+    <text x="32" y="42" font-size="14.5" fill="#b9b2d2">标签组，最多上下两组</text>
+  </g></g>
+<rect x="930" y="154" width="58" height="22" rx="7" fill="#211c30" stroke="#2c2640"/><rect x="996" y="154" width="58" height="22" rx="7" fill="#1a1626" stroke="#2c2640"/><rect x="1062" y="154" width="58" height="22" rx="7" fill="#1a1626" stroke="#2c2640"/>
+<g>
+  <rect x="300" y="436" width="608" height="118" rx="10" fill="#4ade80" fill-opacity=".06" stroke="#4ade80" stroke-opacity=".35" stroke-dasharray="5 5"/>
+  <g transform="translate(310,448)">
+    <circle cx="12" cy="12" r="12" fill="#4ade80"/><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="800" fill="#fff">4</text>
+    <text x="32" y="18" font-size="18" font-weight="800" fill="#f2effc">底栏</text>
+    <text x="32" y="42" font-size="14.5" fill="#b9b2d2">终端、日志等标签，最多左右两组</text>
+  </g></g>
+<rect x="594" y="452" width="62" height="20" rx="7" fill="#1a1626" stroke="#2c2640"/><rect x="664" y="452" width="62" height="20" rx="7" fill="#1a1626" stroke="#2c2640"/><rect x="734" y="452" width="62" height="20" rx="7" fill="#1a1626" stroke="#2c2640"/><rect x="804" y="452" width="62" height="20" rx="7" fill="#1a1626" stroke="#2c2640"/>
+<g filter="url(#zdsoft)"><rect x="380" y="190" width="280" height="190" rx="12" fill="#1a1626" stroke="#fbbf24" stroke-opacity=".7"/></g>
+<rect x="380" y="190" width="280" height="34" rx="12" fill="#fbbf24" fill-opacity=".12"/>
+<g transform="translate(394,197)"><circle cx="12" cy="10" r="12" fill="#fbbf24"/><text x="12" y="15" text-anchor="middle" font-size="14" font-weight="800" fill="#fff">5</text>
+<text x="32" y="16" font-size="18" font-weight="700" fill="#f2effc">浮窗</text></g>
+<text x="396" y="254" font-size="14.5" fill="#b9b2d2">自由移动、吸附分屏、多标签成组，</text>
+<text x="396" y="276" font-size="14.5" fill="#b9b2d2">还能 Pin 成独立系统窗口或置顶。</text>
+<rect x="396" y="298" width="220" height="7" rx="3.5" fill="#2c2640"/><rect x="396" y="314" width="180" height="7" rx="3.5" fill="#2c2640"/><rect x="396" y="330" width="200" height="7" rx="3.5" fill="#2c2640"/><rect x="396" y="346" width="140" height="7" rx="3.5" fill="#2c2640"/>
+<rect x="920" y="82" width="234" height="472" rx="10" fill="#a78bfa" fill-opacity=".10" stroke="url(#zdbrand)" stroke-width="3" opacity="1"><animate attributeName="opacity" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.11;0.14;1" values="1;1;0;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect><rect x="386" y="196" width="268" height="178" rx="10" fill="#a78bfa" fill-opacity=".10" stroke="url(#zdbrand)" stroke-width="3" opacity="0"><animate attributeName="opacity" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.2;0.23;0.31;0.34;1" values="0;0;1;1;0;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect><rect x="770" y="82" width="138" height="342" rx="10" fill="#a78bfa" fill-opacity=".10" stroke="url(#zdbrand)" stroke-width="3" opacity="0"><animate attributeName="opacity" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.4;0.43;0.51;0.54;1" values="0;0;1;1;0;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect><rect x="300" y="436" width="608" height="118" rx="10" fill="#a78bfa" fill-opacity=".10" stroke="url(#zdbrand)" stroke-width="3" opacity="0"><animate attributeName="opacity" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.6;0.63;0.71;0.74;1" values="0;0;1;1;0;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect><rect x="90" y="82" width="198" height="472" rx="10" fill="#a78bfa" fill-opacity=".10" stroke="url(#zdbrand)" stroke-width="3" opacity="0"><animate attributeName="opacity" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.8;0.83;0.91;0.94;1" values="0;0;1;1;0;0" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1" /></rect>
+<g>
+  <animateTransform attributeName="transform" type="translate" dur="14.0s" repeatCount="indefinite" keyTimes="0;0.1100;0.2000;0.3100;0.4000;0.5100;0.6000;0.7100;0.8000;0.9100;1" values="984 98;984 98;576 207;576 207;839 196;839 196;594 454;594 454;189 436;189 436;984 98" calcMode="spline" keySplines="0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1;0.45 0 0.2 1"/>
+  <g filter="url(#zdsoft)"><rect x="-62" y="-18" width="124" height="36" rx="10" fill="#1a1626" stroke="url(#zdbrand)" stroke-width="2"/></g>
+  <g transform="translate(-46,-8)" fill="none" stroke="#a78bfa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="4" cy="3" r="2.6"/><circle cx="4" cy="13" r="2.6"/><circle cx="13" cy="6" r="2.6"/><path d="M4 5.6v4.8M13 8.6c0 3-4.2 2.8-8 3.2"/></g>
+  <text x="-20" y="6" font-size="16" font-weight="800" fill="#f2effc">Git</text>
+  <text x="13" y="6" font-size="13" fill="#6f6890">· 拖动</text>
+</g>
+</svg>

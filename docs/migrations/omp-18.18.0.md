@@ -54,7 +54,7 @@ TUI 主题、彩色 Markdown、快捷键、motion/spinner/maxFps、scrollback �
 - 手动/自动压缩共享等待及进度；Eval 用原生 status event 传递重启状态，不解析终端输出推断控制状态。
 - 四组 `.patch` 都由 regen 生成，Studio 自有文件回收为 overlay。模型目录使用 bundled registry API；构建使用隔离 Bun 1.4.4 和 Rust `nightly-2026-10-06`。
 - 恢复点为 `codex/backup-omp-18.13.2-studio.44-20261107`，开发分支为 `codex/omp-18.18.0`。其他工作流新增的文件查看器及未提交内容保留。
-- 2026-11-08 收尾前另建 `codex/backup-omp-18.18.0-continuation-20261108`，并在 `tmp/omp-18.18.0-continuation/` 保存当时 78 个未提交文件的差异与文件副本；备份和测试产物均不提交。
+- 2026-11-08 收尾前另建 `codex/backup-omp-18.18.0-continuation-20261108`，并在 `tmp/omp-18.18.0-continuation/` 保存当时 78 个未提交文件的差异与文件副本；备份和测试产物均不提交。该备份分支与本地证据目录已在同日分支清理中删除，内容已随 `0.2.0` 合入并推送。
 
 ## 默认值
 

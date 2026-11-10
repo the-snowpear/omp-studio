@@ -1,4 +1,5 @@
 import { isFilePanelId } from "./types";
+import { leftCardResize, type LeftCardShares } from "./leftCards";
 import { WindowFrame } from "./WindowFrame";
 import { MinimizedCapsule } from "./MinimizedCapsule";
 import { WindowSnapButton } from "./SnapLayout";
@@ -19,6 +20,7 @@ import { transitionMs } from "../motionClock";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { DockSlot, useDock, useDockEngine } from "./DockContext";
 import { DockMenuButton, DockToolsButton, DockPinButton, useDockContextMenu } from "./DockMenus";
+import { DockFullscreen, DockFullscreenButton, DockLauncher, LAUNCHER_FULLSCREEN } from "./DockLauncher";
 import { NativeFloat } from "./NativeFloat";
 import { isNativeFloat } from "./pins";
 import { useSurfaceDocument, surfaceWindow } from "./SurfaceContext";
@@ -26,10 +28,11 @@ import { ToastHost } from "../ToastHost";
 import { DockMeterBadge, DockMeterRing, DockMeterSummary, usePanelMeter } from "./panelMeters";
 import { beginDockDrag, beginDockResize } from "./gestures";
 import { beforeConversationLayoutChange, afterConversationLayoutChange, CONVERSATION_LAYOUT_CHANGE } from "../conversation/conversationReflow";
-import { clampFloat, locatePanel } from "./model";
+import { clampFloat, locatePanel, panelTransitionName } from "./model";
 import { dragPreview, sourceActive, useDragRegion, useDragSource, type DragSource } from "./dragPreview";
+import { contextCardGeometry, usesNaturalHeight } from "./cardDrag";
 import { railTransitionClip } from "./railClip";
-import { isAgentPanelId, isInstancePanelId, type DockAction, type DockFloat, type DockGroup, type DockRect, type PanelDefinition, type PanelId, type RailMode } from "./types";
+import { isAgentPanelId, isInstancePanelId, panelBaseId, type DockAction, type DockFloat, type DockGroup, type DockRect, type PanelDefinition, type PanelId, type RailMode } from "./types";
 import { PanelGlyph, closePanels, definitionFor, focusInstancePanel } from "./panelChrome";
 import "./dock.css";
 
@@ -39,24 +42,6 @@ const POPUP = '[data-dock-menu], .menu, [role="menu"], [role="dialog"], dialog, 
 const scopeKey = (scope: { target: string; project: string | null; session: string }, preview: boolean) => JSON.stringify([scope.target, scope.project, scope.session, preview]);
 const minimumBody = (definition: PanelDefinition) => Math.max(definition.minHeight ?? 64, definition.id === "terminal" ? 240 : 0);
 const initialBody = (definition: PanelDefinition) => Math.max(minimumBody(definition), definition.initialHeight ?? (definition.id === "browser" || definition.id === "computer" ? 320 : 280));
-const usesNaturalHeight = (id: PanelId) => id !== "terminal" && id !== "browser" && id !== "computer" && id !== "agent-detail" && !isInstancePanelId(id);
-function contextCardGeometry(host: HTMLElement) {
-  const card = host.querySelector<HTMLElement>(".context-card");
-  const rows = card?.querySelector<HTMLElement>(".context-card-rows");
-  if (!card || !rows) return null;
-  const pixels = (value: string) => Number.parseFloat(value) || 0;
-  const css = getComputedStyle(card);
-  let fixed = pixels(css.paddingTop) + pixels(css.paddingBottom);
-  for (const child of [...card.children].filter(child => child !== rows)) {
-    const style = getComputedStyle(child);
-    fixed += child.getBoundingClientRect().height + pixels(style.marginTop) + pixels(style.marginBottom);
-  }
-  const content = [...rows.children].reduce((height, row) => {
-    const style = getComputedStyle(row);
-    return height + row.getBoundingClientRect().height + pixels(style.marginTop) + pixels(style.marginBottom);
-  }, 0);
-  return { minimum: Math.ceil(fixed), natural: Math.ceil(fixed + content) };
-}
 function useLabels() {
   const { resolvedLanguage } = useI18n();
   return (zh: string, en: string) => resolvedLanguage === "zh" ? zh : en;
@@ -105,8 +90,8 @@ function useAutomaticCardHeights(list: RefObject<HTMLDivElement | null>, panels:
     const schedule = () => { if (!frame) frame = requestAnimationFrame(measure); };
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(schedule);
     const mutations = new MutationObserver(schedule);
+    const releaseAutoHeight = entries.filter(({ id }) => layout.cards[id]!.height === null).map(({ id }) => hosts.autoHeight(id));
     for (const { id, host } of entries) {
-      if (layout.cards[id]!.height === null) host.dataset.dockAutoHeight = "true";
       observer?.observe(host);
       mutations.observe(host, { subtree: true, childList: true, characterData: true });
     }
@@ -118,7 +103,8 @@ function useAutomaticCardHeights(list: RefObject<HTMLDivElement | null>, panels:
     return () => {
       window.removeEventListener(CONVERSATION_LAYOUT_CHANGE, syncAfterLayout);
       cancelAnimationFrame(frame); observer?.disconnect(); mutations.disconnect();
-      for (const { id, host } of entries) { hosts.rememberScroll(id); delete host.dataset.dockAutoHeight; }
+      for (const { id } of entries) hosts.rememberScroll(id);
+      for (const release of releaseAutoHeight) release();
     };
   }, [hosts, definitions, ids, list]);
 }
@@ -181,7 +167,7 @@ function useCardReorder(list: RefObject<HTMLDivElement | null>, panels: PanelId[
     if (animate && duration > 1) {
       for (const { node, id, offset, top } of readings) {
         const delta = (before.get(id) ?? top) + (starting ? 0 : offset) - top;
-        if (Math.abs(delta) < 0.5 || source?.panels.includes(id) || typeof node.animate !== "function") continue;
+        if (Math.abs(delta) < 0.5 || node.classList.contains("dock-drag-source") || typeof node.animate !== "function") continue;
         const animation = node.animate([{ transform: `translateY(${delta}px)` }, { transform: "none" }], { duration, easing: getComputedStyle(root).transitionTimingFunction });
         animations.current.set(node, animation);
         animation.onfinish = () => { if (animations.current.get(node) === animation) animations.current.delete(node); };
@@ -214,7 +200,7 @@ function resizeCeiling(card: HTMLElement, region: "left" | "rail"): number {
   return Math.max(0, Math.floor(boundary - rect.top - (rect.height - slotHeight)));
 }
 
-function DockCard({ id, region }: { id: PanelId; region: "left" | "rail" }) {
+function DockCard({ id, region, lastExpanded = false }: { id: PanelId; region: "left" | "rail"; lastExpanded?: boolean }) {
   const { document, window } = useConversationDom();
   const drag = useDockDrag();
   const contextMenu = useDockContextMenu();
@@ -240,8 +226,22 @@ function DockCard({ id, region }: { id: PanelId; region: "left" | "rail" }) {
   const resizeMinimum = () => {
     return Math.max(minimumBody(definition), id === "context" ? contextCardGeometry(hosts.get(id).element)?.minimum ?? 0 : 0);
   };
-  const resize = (event: ReactPointerEvent<HTMLElement>) => {
+  const resetSize = () => {
     if (preferences.locked) return;
+    if (region === "left") store.dispatch({ type: "left-card-shares", shares: Object.fromEntries(layout.left.panels.map(panel => [panel, null])) });
+    else store.dispatch({ type: "card", panel: id, height: null });
+  };
+  const resize = (event: ReactPointerEvent<HTMLElement>) => {
+    if (preferences.locked || event.button !== 0) return;
+    if (region === "left") {
+      const sizing = card.current && leftCardResize(card.current);
+      if (!sizing) return;
+      let shares: LeftCardShares = {};
+      beginDockResize(event, (_dx, dy) => { shares = sizing.update(dy); hosts.flush(); },
+        () => store.dispatch({ type: "left-card-shares", shares }),
+        () => { sizing.cancel(); hosts.flush(); });
+      return;
+    }
     const slot = card.current?.querySelector<HTMLElement>(".dock-slot");
     if (!slot) return;
     const previous = slot.style.height;
@@ -258,14 +258,14 @@ function DockCard({ id, region }: { id: PanelId; region: "left" | "rail" }) {
     }, () => store.dispatch({ type: "card", panel: id, height }), () => { slot.style.height = previous; });
   };
   return <section className={`dock-card${preference.collapsed ? " is-collapsed" : ""}${summary ? " has-meter-summary" : ""}${source?.panels.includes(id) ? ` dock-drag-source${destination !== region ? " is-drag-away" : ""}` : ""}`} data-dock-card={id} ref={card}
-    style={region === "rail" && !isInstancePanelId(id) ? { viewTransitionName: `dock-rail-${id}` } : undefined}>
+    style={region === "left" ? { "--dock-left-share": preference.leftShare ?? 1 } as CSSProperties : !isInstancePanelId(id) ? { viewTransitionName: `dock-rail-${panelTransitionName(id)}` } : undefined}>
     <header className="dock-card-header" onPointerDown={event => drag(event, [id])}
       onContextMenu={region === "rail" ? event => contextMenu.onContextMenu(event, [id]) : undefined}
       onKeyDown={region === "rail" ? event => contextMenu.onKeyDown(event, [id]) : undefined}
       onClick={event => { if (!(event.target as Element).closest("button")) toggle(); }}>
       <button type="button" className="dock-card-title" data-dock-drag="" aria-expanded={!preference.collapsed} aria-controls={bodyId}
         aria-label={summary && meter ? `${definition.title} · ${meter.label}` : definition.title} aria-keyshortcuts={region === "rail" ? "Shift+F10" : undefined}
-        onClick={toggle} data-tip={summary ? meter?.detail ?? definition.title : definition.detail ?? definition.title}>
+        onClick={toggle} data-tip={definition.title}>
         {region === "rail" ? <>
           <PanelGlyph definition={definition} /><span>{definition.title}</span>
           <Icon name={preference.collapsed ? "chevron-r" : "chevron-d"} extra="sm dock-card-chevron" />
@@ -285,15 +285,20 @@ function DockCard({ id, region }: { id: PanelId; region: "left" | "rail" }) {
     {!preference.collapsed && <div id={bodyId} className="dock-card-body">
       <DockSlot id={id} height={preference.height ?? (usesNaturalHeight(id) ? minimumBody(definition) : initialBody(definition))} />
     </div>}
-    {!preference.collapsed && <div className="dock-card-resizer" role="separator" aria-orientation="horizontal"
+    {!preference.collapsed && (region !== "left" || !lastExpanded) && <div className="dock-card-resizer" role="separator" aria-orientation="horizontal"
       aria-label={text(`调整 ${definition.title} 高度；双击恢复自动高度`, `Resize ${definition.title}; double-click for automatic height`)}
       aria-disabled={preferences.locked} tabIndex={preferences.locked ? -1 : 0} onPointerDown={resize}
-      onDoubleClick={() => { if (!preferences.locked) store.dispatch({ type: "card", panel: id, height: null }); }}
+      onDoubleClick={resetSize}
       onKeyDown={event => {
         if (preferences.locked || event.nativeEvent.isComposing || event.defaultPrevented) return;
-        if (event.key === "Home") { event.preventDefault(); store.dispatch({ type: "card", panel: id, height: null }); }
+        if (event.key === "Home") { event.preventDefault(); resetSize(); }
         else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
           event.preventDefault();
+          if (region === "left") {
+            const sizing = card.current && leftCardResize(card.current);
+            if (sizing) store.dispatch({ type: "left-card-shares", shares: sizing.update((event.key === "ArrowDown" ? 1 : -1) * (event.shiftKey ? 48 : 16)) });
+            return;
+          }
           const current = card.current?.querySelector(".dock-slot")?.getBoundingClientRect().height ?? initialBody(definition);
           const ceiling = card.current ? Math.max(current, Math.min(window.innerHeight * 2, resizeCeiling(card.current, region))) : window.innerHeight * 2;
           const natural = id === "context" ? contextCardGeometry(hosts.get(id).element)?.natural : undefined;
@@ -317,7 +322,8 @@ export function DockCardRegion({ region, visible = true }: { region: "left" | "r
   });
   const placement = useSyncExternalStore(dragPreview.subscribe, () => { const state = dragPreview.snapshot(); return state?.hosts === hosts && state.cards?.region === region ? state.cards : null; });
   const panels = visible ? projected : [];
-  useAutomaticCardHeights(list, panels.filter(id => layout[region].panels.includes(id)));
+  const lastExpanded = [...panels].reverse().find(id => !layout.cards[id]!.collapsed);
+  useAutomaticCardHeights(list, region === "rail" ? panels.filter(id => layout[region].panels.includes(id)) : []);
   useCardReorder(list, panels, placement ? panels.map(id => placement.sizes[id]?.height ?? 0).join(",") : "");
   useEffect(() => {
     let frame = 0;
@@ -334,9 +340,10 @@ export function DockCardRegion({ region, visible = true }: { region: "left" | "r
     aria-label={region === "left" ? text("左侧工具", "Left tools") : text("对话工具区", "Conversation tools")}>
     {preview && marks && <span className="dock-demo">{text("演示", "Demo")}</span>}
     <div className="dock-card-list" ref={list} data-dock-cards={region} data-dock-empty={region}>
-      {panels.map(id => layout[region].panels.includes(id) ? <DockCard id={id} region={region} key={id} />
-        : <div key={id} className="dock-card dock-card-placeholder dock-drag-source" data-dock-card={id} style={{ height: placement!.sizes[id]!.height }} />)}
-      {!panels.length && <div className="dock-empty"><span>{text("添加工具或拖动到这里", "Add a tool or drag it here")}</span><DockToolsButton /></div>}
+      {panels.map(id => layout[region].panels.includes(id) ? <DockCard id={id} region={region} key={id} lastExpanded={id === lastExpanded} />
+        : <div key={id} className={`dock-card dock-card-placeholder dock-drag-source${layout.cards[id]!.collapsed ? " is-collapsed" : ""}`} data-dock-card={id}
+          style={{ height: placement!.sizes[id]!.height, ...(region === "left" ? { "--dock-left-share": layout.cards[id]!.leftShare ?? 1, flexBasis: layout.cards[id]!.collapsed ? undefined : id === lastExpanded ? 34 : 40 } : {}) } as CSSProperties} />)}
+      {!panels.length && <div className="dock-empty"><span>{text("添加工具或拖动到这里", "Add a tool or drag it here")}</span><DockToolsButton onPick={panel => store.openIn(panel, { region })} /></div>}
     </div>
   </div>;
 }
@@ -352,7 +359,7 @@ function DockCloseButton({ definition, className = "dock-icon-button dock-card-c
 
 /** `trailing` is the one per-region control that still belongs on the tab row
  * (today: the group picker when the right region cannot show both groups). */
-function DockTabs({ group, region, expanded = true, trailing }: { group: DockGroup; region: "right" | "bottom" | "float"; expanded?: boolean; trailing?: ReactNode }) {
+function DockTabs({ group, region, expanded = true, trailing, fullscreen }: { group: DockGroup; region: "right" | "bottom" | "float"; expanded?: boolean; trailing?: ReactNode; fullscreen?: { active: boolean; toggle: () => void } | undefined }) {
   const document = useSurfaceDocument();
   const drag = useDockDrag();
   const { store, definitions, preferences, hosts } = useDock();
@@ -413,10 +420,11 @@ function DockTabs({ group, region, expanded = true, trailing }: { group: DockGro
     // The menu only offers tools this group does not own yet; keep the guard so
     // a stale menu (layout changed under it) activates instead of reordering.
     if (group.panels.includes(panel)) { activate(panel, true); return; }
-    store.dispatch({ type: "move", panels: [panel], target: { region, groupId: group.id } });
+    store.openIn(panel, { region, groupId: group.id });
   };
   return <div className={`dock-tab-strip${region !== "float" ? " has-reveal-grip" : ""}${region !== "float" && gripVisible ? " is-grip-visible" : ""}`} tabIndex={-1}
     onContextMenu={event => menu.onContextMenu(event, group.panels, group.id)} onKeyDown={event => menu.onKeyDown(event, group.panels, group.id)}
+    onDoubleClick={fullscreen ? event => { const target = event.target as Element; if (target === event.currentTarget || target === tabs.current) fullscreen.toggle(); } : undefined}
     onPointerMove={region !== "float" ? event => {
       const rect = event.currentTarget.getBoundingClientRect();
       const x = event.clientX - rect.left;
@@ -456,6 +464,7 @@ function DockTabs({ group, region, expanded = true, trailing }: { group: DockGro
       onChange={event => activate(event.target.value as PanelId, true)}>
       {group.panels.map(id => <option value={id} key={id}>{definitionFor(definitions, id).title}</option>)}
     </AppSelect>
+    {fullscreen && <DockFullscreenButton active={fullscreen.active} onToggle={fullscreen.toggle} />}
     {trailing}
     {menu.menu}
   </div>;
@@ -472,6 +481,25 @@ export function DockGroupRegion({ region, visible, expanded = true }: { region: 
   const [selected, setSelected] = useState<string | null>(null);
   const identity = scopeKey(scope, preview);
   useEffect(() => setSelected(null), [identity]);
+  // 全屏只是显示状态，不进布局：哪个组（或空态新标签页）铺满窗口。
+  const [fullscreen, setFullscreen] = useState<string | null>(null);
+  const fullscreenAnchor = useRef<HTMLDivElement>(null);
+  // 在全屏的新标签页里选了工具：新建的组接着全屏，不闪回原位。
+  const fullId = fullscreen === LAUNCHER_FULLSCREEN ? groups[0]?.id ?? LAUNCHER_FULLSCREEN
+    : fullscreen && groups.some(group => group.id === fullscreen) ? fullscreen : null;
+  useEffect(() => { if (fullscreen !== fullId) setFullscreen(fullId); }, [fullscreen, fullId]);
+  useEffect(() => setFullscreen(null), [identity]);
+  useEffect(() => { if (!visible) setFullscreen(null); }, [visible]);
+  const toggleFullscreen = (key: string, force?: boolean) => {
+    const next = force === false || fullId === key ? null : key;
+    if (next === fullId) return;
+    setFullscreen(next);
+    // 组在原位和全屏框之间换了一份 DOM，焦点跟到新的切换按钮上。
+    requestAnimationFrame(() => {
+      const scope = key === LAUNCHER_FULLSCREEN ? `[data-dock-launcher="${region}"]` : `[data-dock-group="${key}"]`;
+      document.querySelector<HTMLElement>(`${scope} .dock-fullscreen-toggle`)?.focus({ preventScroll: true });
+    });
+  };
   useEffect(() => {
     const open = (event: Event) => {
       const panel = (event as CustomEvent<{ panel: PanelId }>).detail.panel;
@@ -510,6 +538,23 @@ export function DockGroupRegion({ region, visible, expanded = true }: { region: 
   const groupPicker = constrained ? <AppSelect className="dock-group-picker" value={chosen?.id} aria-label={text("切换标签组（空间不足）", "Choose group (limited space)")}
     onChange={event => setSelected(event.target.value)}>{groups.map((group, index) => <option value={group.id} key={group.id}>
       {`${index + 1} · ${definitionFor(definitions, group.active).title}`}</option>)}</AppSelect> : null;
+  const renderGroup = (group: DockGroup) => {
+    const full = fullId === group.id;
+    const active = sourceActive(group, source);
+    const open = expanded || full;
+    return <div className={`dock-group${source && group.panels.every(id => source.panels.includes(id)) ? " dock-drag-source" : ""}`} data-dock-group={group.id} data-dock-region={region} hidden={!full && constrained && group !== chosen}>
+      <DockTabs group={{ ...group, active }} region={region} expanded={open} trailing={region === "right" && !full ? groupPicker : null}
+        fullscreen={{ active: full, toggle: () => toggleFullscreen(group.id) }} />
+      {open && (full || !constrained || group === chosen) && <div className="dock-group-body" role="tabpanel" id={`dock-body-${group.id}`} aria-labelledby={`dock-tab-${active}`}>
+        <DockSlot id={active} />
+      </div>}
+    </div>;
+  };
+  const launcher = !groups.length ? <DockLauncher region={region} expanded={expanded}
+    onExpand={() => { if (region === "bottom" && !expanded) store.dispatch({ type: "bottomExpanded", expanded: true }); }}
+    fullscreen={fullId === LAUNCHER_FULLSCREEN} onFullscreen={() => toggleFullscreen(LAUNCHER_FULLSCREEN)} /> : null;
+  const fullGroup = groups.find(group => group.id === fullId);
+  const fullLabel = region === "right" ? text("右侧栏 · 全屏", "Right sidebar · Full screen") : text("底栏 · 全屏", "Bottom panel · Full screen");
   return <section className={`dock-group-region dock-group-region-${region}${!expanded ? " is-folded" : ""}`} hidden={!visible}
     data-dock-focus-region={region} tabIndex={-1} aria-label={region === "right" ? text("右侧栏", "Right sidebar") : text("底栏", "Bottom panel")}>
     {/* The right region starts with its tab row. The bottom region keeps a
@@ -539,14 +584,11 @@ export function DockGroupRegion({ region, visible, expanded = true }: { region: 
             if (event.key === "Home" || event.key === "Enter") { event.preventDefault(); store.dispatch({ type: "resize", region, ratio: 0.5 }); }
             else if (event.key === negative || event.key === positive) { event.preventDefault(); store.dispatch({ type: "resize", region, ratio: clamp(ratio + (event.key === positive ? 1 : -1) * (event.shiftKey ? 0.1 : 0.025), minimumRatio, maximumRatio) }); }
           }} />}
-        <div className={`dock-group${source && group.panels.every(id => source.panels.includes(id)) ? " dock-drag-source" : ""}`} data-dock-group={group.id} data-dock-region={region} hidden={constrained && group !== chosen}>
-          <DockTabs group={{ ...group, active: sourceActive(group, source) }} region={region} expanded={expanded} trailing={region === "right" ? groupPicker : null} />
-          {expanded && (!constrained || group === chosen) && <div className="dock-group-body" role="tabpanel" id={`dock-body-${group.id}`} aria-labelledby={`dock-tab-${sourceActive(group, source)}`}>
-            <DockSlot id={sourceActive(group, source)} />
-          </div>}
-        </div>
+        {fullId === group.id ? <div className="dock-group-placeholder" ref={fullscreenAnchor} aria-hidden="true" /> : renderGroup(group)}
       </Fragment>)}
-      {!groups.length && <div className="dock-empty"><span>{text("添加工具或拖动到这里", "Add a tool or drag it here")}</span><DockToolsButton /></div>}
+      {launcher && (fullId === LAUNCHER_FULLSCREEN ? <div className="dock-group-placeholder" ref={fullscreenAnchor} aria-hidden="true" /> : launcher)}
+      {(fullGroup || (launcher && fullId === LAUNCHER_FULLSCREEN)) && <DockFullscreen key={fullId} anchor={fullscreenAnchor} label={fullLabel}
+        onExit={() => toggleFullscreen(fullId!, false)}>{fullGroup ? renderGroup(fullGroup) : launcher}</DockFullscreen>}
     </div>
   </section>;
 }
@@ -711,7 +753,7 @@ function ExpandedRail() {
         if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); store.dispatch({ type: "resize", region: "rail", size: clamp(layout.rail.width + (event.key === "ArrowLeft" ? 16 : -16), 280, 480) }); }
       }} />
     <div className="dock-region-toolbar dock-rail-toolbar"><span className="dock-toolbar-spacer" />
-      <DockToolsButton />
+      <DockToolsButton onPick={panel => store.openIn(panel, { region: "rail" })} />
       <button type="button" className="dock-icon-button" data-tip={text("切换为悬浮图标", "Switch to floating icons")} aria-label={text("切换为悬浮图标", "Switch to floating icons")}
         onClick={() => transition({ type: "railMode", mode: "compact" }, "compact")}><Icon name="layout" extra="sm" /></button>
       <button type="button" className="dock-icon-button" data-tip={text("隐藏对话工具区", "Hide conversation tools")} aria-label={text("隐藏对话工具区", "Hide conversation tools")}
@@ -774,7 +816,7 @@ function CompactRail() {
   }, [active, hosts]);
   return <div className="dock-rail-compact" ref={root} style={{ top: space.top, bottom: space.bottom }} data-dock-focus-region="rail" tabIndex={-1} aria-label={text("对话工具区", "Conversation tools")}>
     <div className="dock-region-toolbar dock-rail-toolbar"><span className="dock-toolbar-spacer" />
-      <DockToolsButton />
+      <DockToolsButton onPick={panel => store.openIn(panel, { region: "rail" })} />
       <button type="button" className="dock-icon-button" aria-label={text("切换为完整卡片列", "Switch to expanded cards")} data-tip={text("完整卡片列", "Expanded cards")}
         onClick={() => transition({ type: "railMode", mode: "expanded" }, "expanded")}><Icon name="columns" extra="sm" /></button>
       <button type="button" className="dock-icon-button" aria-label={text("隐藏对话工具区", "Hide conversation tools")} data-tip={text("隐藏", "Hide")}
@@ -816,7 +858,7 @@ function RailIcon({ definition, active, overlayId, onPointerDown, onClick, onCon
   const label = definition.meter && meter ? `${definition.title} · ${meter.label}` : definition.title;
   return <button type="button" className={`dock-rail-icon${active ? " is-active" : ""}${definition.meter ? " has-meter" : ""}${source?.panels.includes(definition.id) ? ` dock-drag-source${destination !== "rail" ? " is-drag-away" : ""}` : ""}`}
     data-dock-drag="" data-dock-card={definition.id} data-dock-rail-icon={definition.id} data-tip={definition.meter ? meter?.detail ?? label : definition.detail ?? label} aria-label={label}
-    style={isInstancePanelId(definition.id) ? undefined : { viewTransitionName: `dock-rail-${definition.id}` }} aria-expanded={active} aria-controls={active ? overlayId : undefined}
+    style={isInstancePanelId(definition.id) ? undefined : { viewTransitionName: `dock-rail-${panelTransitionName(definition.id)}` }} aria-expanded={active} aria-controls={active ? overlayId : undefined}
     onPointerDown={onPointerDown} onClick={onClick} onContextMenu={onContextMenu} onKeyDown={onKeyDown}>
     {definition.meter ? <DockMeterRing meter={meter} /> : null}{isAgentPanelId(definition.id) ? <><span className="dock-agent-abbr">{definition.compactLabel}</span><PanelGlyph definition={definition} /></> : <PanelGlyph definition={definition} size="" />}
     {definition.meter ? <DockMeterBadge meter={meter} /> : null}
@@ -878,6 +920,7 @@ export function FloatWindow({ group: storedGroup, bounds, order, nativeKey }: { 
   const closesPages = group.panels.some(id => definitionFor(definitions, id).close);
   const containsConversation = group.panels.some(id => definitionFor(definitions, id).content);
   const content = <WindowFrame title={title} icon={definitionFor(definitions, group.active).icon}
+    {...(group.panels.length === 1 && group.active === "annotations" ? { closeLabel: text("关闭标注", "Close annotations") } : {})}
     titleContent={definitionFor(definitions, group.active).glyph ? <><PanelGlyph definition={definitionFor(definitions, group.active)} /><span>{title}</span></> : undefined}
     {...(closesPages ? { closeLabel: group.panels.every(isFilePanelId) ? text("关闭文件", "Close file") : containsConversation ? text("关闭整个浮窗", "Close window group") : group.panels.length > 1 ? text("关闭网页并隐藏其余工具", "Close pages and hide other tools") : text("关闭网页", "Close page") } : {})} rect={rect} bounds={bounds} minHeight={minHeight} minWidth={manager ? 360 : 320} resizable={!snapped}
     maximizeButton={!nativeKey && managed && manager ? <WindowSnapButton manager={manager} window={managed} locked={preferences.locked} onMaximize={() => control("maximize")} /> : undefined}
@@ -885,7 +928,7 @@ export function FloatWindow({ group: storedGroup, bounds, order, nativeKey }: { 
     onTitleDrag={dragTitle} onTitleContextMenu={event => menu.onContextMenu(event, group.panels, group.id)} onTitleKeyDown={event => menu.onKeyDown(event, group.panels, group.id)}
     onControl={control} onClose={() => closePanels(store, definitions, group.panels)}
     onRectChange={rect => store.dispatch({ type: "float", groupId: group.id, rect })} onMeasure={() => hosts.flush()}
-    frameProps={{ role: modal ? "dialog" : "region", "aria-modal": modal || undefined, "aria-owns": modal ? "dock-context-viewer-content" : undefined,
+    frameProps={{ role: modal ? "dialog" : "region", "aria-modal": modal || undefined, "aria-owns": modal ? `dock-${modalPanel}-content` : undefined,
       "aria-label": modal ? title : text(`${title} 浮窗`, `${title} floating window`),
       className: `${snapped ? "is-snapped " : ""}${source && group.panels.every(id => source.panels.includes(id)) ? "dock-drag-source" : ""}`,
       style: { ...(modal ? { zIndex: 81 } : {}), ...(snapped ? { position: "absolute" } : {}) },
@@ -917,11 +960,6 @@ function DockModalFocus({ panel }: { panel: PanelId }) {
       if (!allowed(event.target as Element | null)) focusFrame();
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !doc.body.classList.contains("dock-dragging") && !doc.body.classList.contains("dock-resizing") && !doc.querySelector("[data-dock-menu='popup']")) {
-        event.preventDefault(); event.stopImmediatePropagation();
-        store.dispatch({ type: "hide", panels: [panel] });
-        return;
-      }
       if (event.key !== "Tab") return;
       const popup = doc.querySelector<HTMLElement>("[data-dock-menu='popup']");
       const roots = popup ? [popup] : [frame(), host].filter((node): node is HTMLElement => !!node);
@@ -932,6 +970,10 @@ function DockModalFocus({ panel }: { panel: PanelId }) {
       else if (!event.shiftKey && (current < 0 || current === items.length - 1)) { event.preventDefault(); items[0]!.focus(); }
     };
     const onBubble = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented && !doc.body.classList.contains("dock-dragging") && !doc.body.classList.contains("dock-resizing") && !doc.querySelector("[data-dock-menu='popup']")) {
+        event.preventDefault();
+        store.dispatch({ type: "hide", panels: [panel] });
+      }
       event.stopPropagation();
     };
     doc.addEventListener("focusin", onFocus, true);

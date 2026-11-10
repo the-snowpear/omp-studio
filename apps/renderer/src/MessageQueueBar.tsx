@@ -43,7 +43,8 @@ export function MessageQueueBar({ messages, running, sendEnabled, demo, editingI
           onClick={() => setOpen((value) => !value)}
         >
           <Icon name="queue" extra="sm" />
-          <span className="qs-title">本地草稿 ×{messages.length}</span>
+          <span className="qs-title">本地草稿</span>
+          <span className="qs-count">{messages.length}</span>
           <span className="qs-note">{running ? "本轮结束后自动按序发送" : "空闲后自动发送"}</span>
           {demo === true && marks ? <span className="chip gray xs">演示</span> : null}
           <span className="qs-toggle" aria-hidden="true">

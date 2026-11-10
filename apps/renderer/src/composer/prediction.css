@@ -1,3 +1,7 @@
+.chip-composer-editor[data-empty="true"][data-prediction-visible="true"]::before {
+  content: none;
+}
+
 .cm-prediction {
   position: absolute;
   pointer-events: none;
@@ -7,7 +11,9 @@
   color: var(--text-3);
   opacity: 0.72;
   font: inherit;
-  line-height: 1.7;
+  font-family: var(--font-ui);
+  font-size: var(--fs-14);
+  line-height: 20px;
 }
 .cm-prediction kbd {
   margin-left: var(--sp-6);

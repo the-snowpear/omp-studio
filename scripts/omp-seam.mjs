@@ -144,6 +144,8 @@ export const SEAM_GROUPS = Object.freeze([
       "packages/coding-agent/src/launch/services.ts",
       "packages/coding-agent/src/launch/protocol.ts",
       "packages/coding-agent/src/launch/broker.ts",
+      "packages/coding-agent/src/tools/bash.ts",
+      "packages/coding-agent/src/prompts/tools/bash.md",
       "packages/coding-agent/src/eval/judgment-batch-bridge.ts",
       "packages/coding-agent/src/cli/bench-cli.ts",
       "packages/coding-agent/src/tools/image-gen.ts",

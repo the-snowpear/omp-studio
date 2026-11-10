@@ -7,8 +7,8 @@ import { PanelHosts } from "./hosts";
 import { DockDragPreview } from "./DockDragPreview";
 import { DockMetersProvider } from "./panelMeters";
 import { SurfaceProvider } from "./SurfaceContext";
-import { locatePanel } from "./model";
-import { isBrowserPagePanelId, isInstancePanelId, type DockLayout, type PanelDefinition, type PanelId, type PanelVisibility } from "./types";
+import { locatePanel, panelInstanceIds, scopedPanelIds } from "./model";
+import { isBrowserPagePanelId, isInstancePanelId, isScopedPanelId, panelBaseId, type DockLayout, type FixedPanelId, type PanelDefinition, type PanelId, type PanelVisibility, type ScopedPanelId } from "./types";
 
 export type AgentDockEntry = { agentId: string; name: string; model: string; status: string; tone: string; stale: boolean };
 export type AgentDockCatalog = { scope: string; entries: readonly AgentDockEntry[]; open: (agentId: string) => void };
@@ -24,6 +24,20 @@ function samePageDefinitions(a: BrowserPageDefinitions, b: BrowserPageDefinition
   });
 }
 type DockEngine = { store: DockStore; hosts: PanelHosts; definitions: readonly PanelDefinition[]; conversationTitle?: string | undefined; agentCatalog: AgentDockCatalog | null; setAgentCatalog: (catalog: AgentDockCatalog | null) => void; setFileViewDefinitions: (definitions: BrowserPageDefinitions) => void; setBrowserPageDefinitions: (definitions: BrowserPageDefinitions) => void };
+/** Extra instances reuse the registered tool's chrome, never its content adapter. */
+function scopedDefinition(id: ScopedPanelId, base: PanelDefinition): PanelDefinition {
+  return {
+    id,
+    title: base.title,
+    icon: base.icon,
+    ...(base.menuTitle === undefined ? {} : { menuTitle: base.menuTitle }),
+    ...(base.meter === undefined ? {} : { meter: base.meter }),
+    ...(base.minHeight === undefined ? {} : { minHeight: base.minHeight }),
+    ...(base.initialHeight === undefined ? {} : { initialHeight: base.initialHeight }),
+    ...(base.detail === undefined ? {} : { detail: base.detail }),
+    ...(base.compactLabel === undefined ? {} : { compactLabel: base.compactLabel }),
+  };
+}
 const Context = createContext<DockEngine | null>(null);
 export function DockProvider({ children, definitions, store, ownerId, conversationTitle }: { children: ReactNode; definitions: readonly PanelDefinition[]; store?: DockStore; ownerId?: string; conversationTitle?: string }) {
   const { resolvedLanguage } = useI18n();
@@ -37,15 +51,24 @@ export function DockProvider({ children, definitions, store, ownerId, conversati
   const [pageDefinitions, setPages] = useState<BrowserPageDefinitions>([]);
   // Definitions carry close callbacks; only a visible change (title, icon, state, pending) replaces them.
   const setBrowserPageDefinitions = useCallback((next: BrowserPageDefinitions) => setPages(previous => samePageDefinitions(previous, next) ? previous : next), []);
-  const dynamicKey = JSON.stringify([snapshot.layout.agentPanels, agentCatalog?.scope, agentCatalog?.entries, snapshot.layout.browserPages, snapshot.layout.fileViews]);
-  const allDefinitions = useMemo(() => [...definitions.map(definition => definition.id === "git-quick" && resolvedLanguage === "en" ? { ...definition, menuTitle: "Git Quick" } : definition.id === "context-viewer" && resolvedLanguage === "en" ? { ...definition, title: "Context viewer" } : definition), ...Object.entries(snapshot.layout.agentPanels).map(([id, descriptor]) => {
-    const entry = descriptor.scope === agentCatalog?.scope ? agentCatalog.entries.find(item => item.agentId === descriptor.target.agentId) : undefined;
-    const duplicates = entry && (agentCatalog?.entries.filter(item => item.name === entry.name).length ?? 0) > 1;
-    const title = `${entry?.name ?? descriptor.target.displayName ?? descriptor.target.agentId}${duplicates ? ` · ${descriptor.target.agentId.slice(-5)}` : ""}`;
-    return { id: id as PanelId, title, icon: "message" as const, initialHeight: 480, ...(entry ? { status: entry.tone, stale: entry.stale } : {}),
-      compactLabel: (entry?.name ?? descriptor.target.displayName ?? descriptor.target.agentId).slice(0, 2), detail: entry ? `${title}\n${entry.status}\n${entry.model}` : descriptor.target.resolvedModel ? `${title}\n${resolvedLanguage === "zh" ? "最近记录模型" : "Last recorded model"}: ${descriptor.target.resolvedModel}` : title };
-  }), ...Object.entries(snapshot.layout.browserPages).map(([id, descriptor]): PanelDefinition => pageDefinitions.find(definition => definition.id === id)
-    ?? { id: id as PanelId, title: descriptor.title || "Browser", icon: "globe", initialHeight: 320, minHeight: 180, compactLabel: (descriptor.title || "Browser").slice(0, 2) }), ...Object.entries(snapshot.layout.fileViews ?? {}).map(([id, descriptor]): PanelDefinition => fileDefinitions.find(definition => definition.id === id) ?? { id: id as PanelId, title: descriptor.title, icon: "file" })], [definitions, dynamicKey, resolvedLanguage, pageDefinitions, fileDefinitions]);
+  const scopedIds = scopedPanelIds(snapshot.layout);
+  // Instance membership only; card geometry must not rebuild every definition.
+  const scopedKey = scopedIds.join(",");
+  const dynamicKey = JSON.stringify([snapshot.layout.agentPanels, agentCatalog?.scope, agentCatalog?.entries, snapshot.layout.browserPages, snapshot.layout.fileViews, scopedKey]);
+  const allDefinitions = useMemo(() => {
+    const bases = definitions.map(definition => definition.id === "git-quick" && resolvedLanguage === "en" ? { ...definition, menuTitle: "Git Quick" } : definition.id === "context-viewer" && resolvedLanguage === "en" ? { ...definition, title: "Context viewer" } : definition.id === "annotations" && resolvedLanguage === "en" ? { ...definition, title: "Annotations" } : definition);
+    return [...bases, ...scopedIds.flatMap((id): PanelDefinition[] => {
+      const base = bases.find(definition => definition.id === panelBaseId(id));
+      return base ? [scopedDefinition(id, base)] : [];
+    }), ...Object.entries(snapshot.layout.agentPanels).map(([id, descriptor]) => {
+      const entry = descriptor.scope === agentCatalog?.scope ? agentCatalog.entries.find(item => item.agentId === descriptor.target.agentId) : undefined;
+      const duplicates = entry && (agentCatalog?.entries.filter(item => item.name === entry.name).length ?? 0) > 1;
+      const title = `${entry?.name ?? descriptor.target.displayName ?? descriptor.target.agentId}${duplicates ? ` · ${descriptor.target.agentId.slice(-5)}` : ""}`;
+      return { id: id as PanelId, title, icon: "message" as const, initialHeight: 480, ...(entry ? { status: entry.tone, stale: entry.stale } : {}),
+        compactLabel: (entry?.name ?? descriptor.target.displayName ?? descriptor.target.agentId).slice(0, 2), detail: entry ? `${title}\n${entry.status}\n${entry.model}` : descriptor.target.resolvedModel ? `${title}\n${resolvedLanguage === "zh" ? "最近记录模型" : "Last recorded model"}: ${descriptor.target.resolvedModel}` : title };
+    }), ...Object.entries(snapshot.layout.browserPages).map(([id, descriptor]): PanelDefinition => pageDefinitions.find(definition => definition.id === id)
+      ?? { id: id as PanelId, title: descriptor.title || "Browser", icon: "globe", initialHeight: 320, minHeight: 180, compactLabel: (descriptor.title || "Browser").slice(0, 2) }), ...Object.entries(snapshot.layout.fileViews ?? {}).map(([id, descriptor]): PanelDefinition => fileDefinitions.find(definition => definition.id === id) ?? { id: id as PanelId, title: descriptor.title, icon: "file" })];
+  }, [definitions, dynamicKey, scopedKey, resolvedLanguage, pageDefinitions, fileDefinitions]);
   const value = useMemo(() => ({ ...engine, definitions: allDefinitions, conversationTitle, agentCatalog, setAgentCatalog, setFileViewDefinitions, setBrowserPageDefinitions }), [engine, allDefinitions, conversationTitle, agentCatalog, setAgentCatalog, setFileViewDefinitions, setBrowserPageDefinitions]);
   const layer = useRef<HTMLDivElement>(null);
   const localLayer = useRef<HTMLDivElement>(null);
@@ -104,7 +127,7 @@ export function DockPanel({ id, children }: { id: PanelId; children: ReactNode |
   const host = hosts.get(id);
   const visibility = useSyncExternalStore(host.subscribe, host.snapshot);
   const surface = useSyncExternalStore(host.subscribe, host.surfaceSnapshot);
-  useLayoutEffect(() => () => { if (isInstancePanelId(id) && !store.isPinned(id)) hosts.release(id, host.element); }, [hosts, host.element, id, store]);
+  useLayoutEffect(() => () => { if ((isInstancePanelId(id) || isScopedPanelId(id)) && !store.isPinned(id)) hosts.release(id, host.element); }, [hosts, host.element, id, store]);
   const mounted = useRef(false);
   if (visibility.visible) mounted.current = true;
   return mounted.current ? createPortal(<SurfaceProvider document={surface}><DeferredPanel>{typeof children === "function" ? children(visibility) : children}</DeferredPanel></SurfaceProvider>, host.element, id) : null;
@@ -121,5 +144,11 @@ export function DockSlot({ id, height, className = "" }: { id: PanelId; height?:
   const content = definitions.find(definition => definition.id === id)?.content;
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => content ? content.attach(ref.current!, false) : hosts.slot(id, ref.current!), [hosts, id, content]);
-  return <div className={`dock-slot ${className}`} data-dock-slot={id} ref={ref} onPointerDownCapture={content?.activate} onFocusCapture={content?.activate} style={height === undefined ? undefined : { height }} />;
+  return <div className={`dock-slot ${className}`} data-dock-slot={id} data-dock-base={panelBaseId(id)} ref={ref} onPointerDownCapture={content?.activate} onFocusCapture={content?.activate} style={height === undefined ? undefined : { height }} />;
+}
+/** Mounts one body per instance of a repeatable tool (canonical id plus `base@n`). */
+export function usePanelInstances(base: FixedPanelId): PanelId[] {
+  const { store } = useDockEngine();
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  return panelInstanceIds(snapshot.layout, base);
 }

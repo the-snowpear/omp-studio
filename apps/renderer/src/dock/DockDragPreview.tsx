@@ -11,29 +11,12 @@ import { WindowFrame } from "./WindowFrame";
 import { PanelGlyph, definitionFor } from "./panelChrome";
 import { useI18n } from "../i18n";
 import { floatTitle } from "./workbenchGeometry";
+import { usesNaturalHeight } from "./cardDrag";
 
-type FreeMotion = { rect: DockRect; velocity: DockRect; time: number; response: number };
-
-function advanceFreeMotion(motion: FreeMotion, target: DockRect, now: number) {
-  const elapsed = Math.max(0, now - motion.time);
-  const omega = 6 / motion.response;
-  const decay = Math.exp(-omega * elapsed);
-  let settled = true;
-  for (const key of ["x", "y", "width", "height"] as const) {
-    const distance = motion.rect[key] - target[key];
-    const impulse = motion.velocity[key] + omega * distance;
-    motion.rect[key] = target[key] + (distance + impulse * elapsed) * decay;
-    motion.velocity[key] = (motion.velocity[key] - omega * impulse * elapsed) * decay;
-    if (Math.abs(motion.rect[key] - target[key]) > 0.5 || Math.abs(motion.velocity[key]) > 0.02) settled = false;
-  }
-  motion.time = now;
-  return settled;
-}
-
-function PreviewSlot({ id, hosts, height, definition }: { id: PanelId; hosts: PanelHosts; height?: number; definition?: PanelDefinition }) {
+function PreviewSlot({ id, hosts, height, definition, autoHeight = false }: { id: PanelId; hosts: PanelHosts; height?: number; definition?: PanelDefinition; autoHeight?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const content = definition?.content;
-  useLayoutEffect(() => content ? content.attach(ref.current!, true) : hosts.previewSlot(id, ref.current!), [hosts, id, content]);
+  useLayoutEffect(() => content ? content.attach(ref.current!, true) : hosts.previewSlot(id, ref.current!, autoHeight), [hosts, id, content, autoHeight]);
   return <div className="dock-slot" data-dock-slot={id} ref={ref} style={height === undefined ? undefined : { height }} />;
 }
 
@@ -61,7 +44,7 @@ function PreviewIcon({ panel }: { panel: PanelDefinition }) {
 export function DockDragPreview({ hosts, definitions, conversationTitle }: { hosts: PanelHosts; definitions: readonly PanelDefinition[]; conversationTitle?: string }) {
   const state = useSyncExternalStore(dragPreview.subscribe, dragPreview.snapshot);
   const preview = useRef<HTMLDivElement>(null);
-  const motion = useRef<{ state: DragPreview | null; rect: DockRect | null; animation: Animation | null; free: FreeMotion | null; frame: number; end: number }>({ state: null, rect: null, animation: null, free: null, frame: 0, end: 0 });
+  const motion = useRef<{ state: DragPreview | null; rect: DockRect | null; animation: Animation | null; frame: number; end: number }>({ state: null, rect: null, animation: null, frame: 0, end: 0 });
   useLayoutEffect(() => {
     const current = motion.current;
     const element = preview.current;
@@ -72,7 +55,6 @@ export function DockDragPreview({ hosts, definitions, conversationTitle }: { hos
       current.state = null;
       current.rect = null;
       current.animation = null;
-      current.free = null;
       current.frame = 0;
       hosts.flush();
       return;
@@ -81,60 +63,19 @@ export function DockDragPreview({ hosts, definitions, conversationTitle }: { hos
     const from = sameSource ? current.rect ?? previous.rect : state.source.rect;
     const destinationChanged = !sameSource ? state.snapped : (previous.snapped || state.snapped) && (
       previous.snapped !== state.snapped || previous.target.region !== state.target.region || previous.target.groupId !== state.target.groupId ||
-      previous.target.index !== state.target.index || previous.target.split !== state.target.split
+      previous.target.index !== state.target.index || previous.target.split !== state.target.split || previous.snapKey !== state.snapKey
     );
-    const rectChanged = !sameSource || previous.rect.x !== state.rect.x || previous.rect.y !== state.rect.y || previous.rect.width !== state.rect.width || previous.rect.height !== state.rect.height;
-    const leaving = !state.snapped && (sameSource ? previous.snapped : state.source.snapped);
-    const free = current.free;
-    if (!state.snapped && (leaving || free)) {
-      const now = performance.now();
-      const response = free?.response ?? transitionMs(element);
-      if (free) advanceFreeMotion(free, previous?.rect ?? state.rect, now);
+    const rectChanged = !sameSource || Math.abs(previous.rect.x - state.rect.x) >= 0.5 || Math.abs(previous.rect.y - state.rect.y) >= 0.5 || Math.abs(previous.rect.width - state.rect.width) >= 0.5 || Math.abs(previous.rect.height - state.rect.height) >= 0.5;
+    if (!state.snapped) {
+      cancelAnimationFrame(current.frame);
+      current.frame = 0;
+      current.animation?.cancel();
+      current.animation = null;
+      element.style.removeProperty("transform");
       current.state = state;
-      if (response > 1 && from.width > 0 && from.height > 0 && state.rect.width > 0 && state.rect.height > 0) {
-        current.animation?.cancel();
-        current.animation = null;
-        if (!free) {
-          cancelAnimationFrame(current.frame);
-          current.frame = 0;
-          current.free = { rect: { x: from.x, y: from.y, width: from.width, height: from.height }, velocity: { x: 0, y: 0, width: 0, height: 0 }, time: now, response };
-        }
-        const paint = () => {
-          const rect = current.free!.rect;
-          const target = current.state!.rect;
-          element.style.transform = `translate(${rect.x - target.x}px, ${rect.y - target.y}px) scale(${rect.width / target.width}, ${rect.height / target.height})`;
-          hosts.flush();
-          current.rect = { ...rect };
-        };
-        const follow = () => {
-          current.frame = 0;
-          if (!current.free || !current.state) return;
-          // Retarget a single damped motion, retaining velocity instead of restarting a shrinking timer.
-          if (advanceFreeMotion(current.free, current.state.rect, performance.now())) {
-            current.free = null;
-            element.style.removeProperty("transform");
-            hosts.flush();
-            current.rect = element.getBoundingClientRect();
-            if (current.state.settling) dragPreview.show(null);
-          } else {
-            paint();
-            current.frame = requestAnimationFrame(follow);
-          }
-        };
-        paint();
-        if (!current.frame) current.frame = requestAnimationFrame(follow);
-        return;
-      }
-      cancelAnimationFrame(current.frame);
-      current.free = null;
-      current.frame = 0;
-      element.style.removeProperty("transform");
-    }
-    if (current.free) {
-      cancelAnimationFrame(current.frame);
-      current.frame = 0;
-      current.free = null;
-      element.style.removeProperty("transform");
+      if (state.settling) dragPreview.show(null);
+      else { hosts.flush(); current.rect = element.getBoundingClientRect(); }
+      return;
     }
     current.state = state;
     if (state.settling) {
@@ -187,11 +128,13 @@ export function DockDragPreview({ hosts, definitions, conversationTitle }: { hos
   </div>, document.body);
   const definition = (id: PanelId) => definitionFor(definitions, id);
   const cards = target.region === "left" || target.region === "rail";
+  const leftRects = target.region === "left" ? state.cards?.rects : undefined;
+  const lastLeftExpanded = [...layout.left.panels].reverse().find(id => !layout.cards[id]!.collapsed);
   const location = locatePanel(layout, panels[0]!);
   const groups = target.region === "right" || target.region === "bottom" ? layout[target.region].groups : layout.floats;
   const group: DockGroup = groups.find(item => item.id === location?.groupId) ?? { id: "drag", panels, active: panels[0]! };
   const title = definition(group.active);
-  return createPortal(<div ref={preview} className={`dock-drag-preview${state.snapped ? " is-snapped" : ""}`} aria-hidden="true"
+  return createPortal(<div ref={preview} className={`dock-drag-preview${state.snapped ? " is-snapped" : ""}${leftRects ? " is-left-stack" : ""}`} aria-hidden="true"
     style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}>
     {state.cards?.icons ? <div className="dock-rail-icon-list">{panels.map(id => <PreviewIcon key={id} panel={definition(id)} />)}</div> : cards ? <div className={`dock-card-region dock-card-region-${target.region}`} data-dock-cards={target.region}>
       <div className="dock-card-list">
@@ -199,10 +142,12 @@ export function DockDragPreview({ hosts, definitions, conversationTitle }: { hos
           const panel = definition(id);
           const preference = layout.cards[id]!;
           const height = state.cards!.sizes[id]!.body;
-          return <section className={`dock-card${preference.collapsed ? " is-collapsed" : ""}`} key={id}>
+          const placed = leftRects?.[id];
+          return <section className={`dock-card${preference.collapsed ? " is-collapsed" : ""}`} key={id}
+            style={placed ? { position: "absolute", left: placed.x - rect.x, top: placed.y - rect.y, width: placed.width, height: placed.height, minHeight: 0 } : undefined}>
             <header className="dock-card-header"><PreviewTitle panel={panel} collapsed={preference.collapsed} rail={target.region === "rail"} /><PreviewToolbar id={id} hosts={hosts} left={target.region === "left"} />{target.region === "left" && <span className="dock-icon-button"><Icon name="more" extra="sm" /></span>}</header>
-            {!preference.collapsed && <div className="dock-card-body"><PreviewSlot id={id} hosts={hosts} height={height} definition={panel} /></div>}
-            {!preference.collapsed && <div className="dock-card-resizer" />}
+            {!preference.collapsed && <div className="dock-card-body"><PreviewSlot id={id} hosts={hosts} height={height} definition={panel} autoHeight={target.region === "rail" && preference.height === null && usesNaturalHeight(id)} /></div>}
+            {!preference.collapsed && (target.region !== "left" || id !== lastLeftExpanded) && <div className="dock-card-resizer" />}
           </section>;
         })}
       </div>

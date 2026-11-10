@@ -7,6 +7,7 @@ import { graphicFormat } from "../graphics/graphic-types";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
+import { commandLanguages } from "../highlight/commandLanguages";
 import remarkGfm from "remark-gfm";
 import { scanStreamingMarkdown, type StreamingCodeFence, type StreamingMarkdownScan } from "./markdownBlocks";
 import { withMagicKeywordChildren } from "./magicKeywordMarkdown";
@@ -14,9 +15,11 @@ import { LazyMermaid } from "./LazyMermaid";
 import { performanceOptions } from "../performanceOptions";
 import { HighlightedCode } from "../highlight/HighlightedCode";
 import { ExtensionAwareLink } from "./ExtensionLinks";
+import { CommandBlock, commandShell } from "./CommandBlock";
+import { Icon } from "../icons";
 
 const REMARK: Options["remarkPlugins"] = [remarkGfm];
-const HIGHLIGHT: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]];
+const HIGHLIGHT: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"], languages: commandLanguages, aliases: { powershell: ["pwsh", "ps1"] } }]];
 const MAX_HIGHLIGHT_CHARS = 96 * 1024;
 
 export function isSafeMarkdownUrl(value: string, image = false): boolean {
@@ -64,16 +67,17 @@ function CodeFrame({ language, text, children, streaming }: { language: string; 
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current); }, []);
+  if (commandShell(language)) return <CommandBlock language={language} text={text} streaming={streaming}>{children}</CommandBlock>;
   return <div className="md-code">
     <div className="md-code-head">
       <span className="md-code-lang">{language || "text"}</span>
-      {streaming ? <span className="md-code-hint">流式输出中</span> : <button type="button" className="md-code-copy" onClick={() => {
+      {streaming ? <span className="md-code-hint">流式输出中</span> : <button type="button" className="md-code-copy" aria-label={copied ? "已复制" : "复制代码"} data-tip={copied ? "已复制" : "复制代码"} onClick={() => {
         void navigator.clipboard?.writeText(text).then(() => {
           setCopied(true);
           if (timer.current !== null) clearTimeout(timer.current);
           timer.current = setTimeout(() => setCopied(false), 1500);
         }).catch(() => {});
-      }}>{copied ? "已复制" : "复制"}</button>}
+      }}><Icon name={copied ? "check" : "copy"} /></button>}
     </div>
     <pre className="codeblock md-code-pre">{children}</pre>
   </div>;

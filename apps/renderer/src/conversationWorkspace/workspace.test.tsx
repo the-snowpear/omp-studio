@@ -4,6 +4,28 @@ import { ConversationWorkspaceStore, WORKSPACE_STORAGE_KEY } from "./store";
 const a = { targetId: null, workspaceId: "a", sessionId: "chat-a" };
 const b = { targetId: "ssh-b", workspaceId: "b", sessionId: "chat-b" };
 describe("conversation workspace", () => {
+  it("mounts only referenced documents while keeping identities for draft restoration", () => {
+    const store = new ConversationWorkspaceStore(null);
+    const first = store.open(a);
+    const remembered = store.documentFor(first)!;
+    for (let index = 0; index < 30; index++) store.openFromDirectory({ ...a, sessionId: `history-${index}` });
+    expect(store.mountedDocuments()).toHaveLength(1);
+    expect(store.getSnapshot().documents).toContain(remembered);
+    store.openFromDirectory(a);
+    expect(store.mountedDocuments()).toEqual([remembered]);
+  });
+  it("keeps a document mounted for its minimized conversation or an owned tool window", () => {
+    const store = new ConversationWorkspaceStore(null);
+    const first = store.open(a), firstDoc = store.documentFor(first)!;
+    const second = store.open(b, "float"), secondDoc = store.documentFor(second)!;
+    store.setWindow(second, { minimized: true });
+    store.manager.register({ id: "owned-tool", content: { kind: "tools", documentId: firstDoc.id, groupId: "tool" }, title: "Tool", minimum: { width: 280, height: 200 }, placement: "float", pin: "application", rect: { x: 0, y: 0, width: 400, height: 400 }, minimized: false, maximized: false });
+    store.close(first);
+    expect(store.mountedDocuments()).toContain(firstDoc);
+    expect(store.mountedDocuments()).toContain(secondDoc);
+    store.manager.remove("owned-tool");
+    expect(store.mountedDocuments()).not.toContain(firstDoc);
+  });
   it("opens sidebar selections in new windows once windowed, keeping existing documents and partitions", () => {
     const store = new ConversationWorkspaceStore(null);
     const first = store.openFromDirectory(a);

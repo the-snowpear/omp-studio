@@ -79,13 +79,13 @@ const WEB_SEARCH_PROVIDER_CATALOG: ReadonlyArray<{
   { id: "codex", name: "OpenAI", description: "OpenAI's native web_search (uses ChatGPT OAuth via /login openai-codex)", credentialFree: false },
   { id: "xai", name: "xAI", description: "Grok web search via xAI Responses API (uses SuperGrok/X Premium+ OAuth via /login xai-oauth, or XAI_API_KEY)", credentialFree: false },
   { id: "zai", name: "Z.AI", description: "Calls Z.AI webSearchPrime MCP", credentialFree: false },
-  { id: "exa", name: "Exa", description: "API via /login exa or EXA_API_KEY; explicit keyless fallback via MCP", credentialFree: false },
+  { id: "exa", name: "Exa", description: "API via /login exa or EXA_API_KEY; public MCP without a key", credentialFree: true },
   { id: "keenable", name: "Keenable", description: "KEENABLE_API_KEY or stored key; explicit selection can use the public keyless endpoint", credentialFree: false },
   { id: "tinyfish", name: "TinyFish", description: "Requires TINYFISH_API_KEY", credentialFree: false },
   { id: "jina", name: "Jina", description: "Requires JINA_API_KEY", credentialFree: false },
   { id: "kagi", name: "Kagi", description: "Requires KAGI_API_KEY and Kagi Search API beta access", credentialFree: false },
   { id: "tavily", name: "Tavily", description: "Requires TAVILY_API_KEY", credentialFree: false },
-  { id: "firecrawl", name: "Firecrawl", description: "Uses Firecrawl API when FIRECRAWL_API_KEY is set; falls back to keyless mode", credentialFree: false },
+  { id: "firecrawl", name: "Firecrawl", description: "Uses Firecrawl API when FIRECRAWL_API_KEY is set; falls back to keyless mode", credentialFree: true },
   { id: "brave", name: "Brave", description: "Requires BRAVE_API_KEY", credentialFree: false },
   { id: "deepseek", name: "DeepSeek", description: "DeepSeek Search API using DEEPSEEK_API_KEY or a stored DeepSeek key", credentialFree: false },
   { id: "kimi", name: "Kimi", description: "Kimi Code search (requires a Kimi Code Console key via KIMI_SEARCH_API_KEY/MOONSHOT_SEARCH_API_KEY or /login kimi-code; not MOONSHOT_API_KEY)", credentialFree: false },
@@ -127,14 +127,14 @@ const WEB_SEARCH_ENV_CREDENTIALS: Readonly<Record<string, readonly string[]>> = 
 /** agent.db auth ids that satisfy a search provider's credential (OAuth/登录). */
 const WEB_SEARCH_AUTH_IDS: Readonly<Record<string, readonly string[]>> = {
   anthropic: ["anthropic"],
-  gemini: ["google-gemini-cli", "google-antigravity", "google-gemini", "gemini", "google"],
+  gemini: ["google-gemini-cli", "google-antigravity", "google"],
   codex: ["openai-codex"],
-  xai: ["xai"],
+  xai: ["xai-oauth", "xai"],
   zai: ["zai"],
   exa: ["exa"],
   tinyfish: ["tinyfish"],
   keenable: ["keenable"],
-  kimi: ["kimi-code", "moonshot"],
+  kimi: ["kimi-code"],
   kagi: ["kagi"],
   parallel: ["parallel"],
   ollama: ["ollama-cloud"],
@@ -197,10 +197,8 @@ const WEB_SEARCH_OAUTH_LOGIN_IDS: ReadonlySet<string> = new Set([
 
 function hasWebSearchCredential(
   providerId: string,
-  catalogEntry: { credentialFree: boolean },
   authenticated: ReadonlySet<string>,
 ): boolean {
-  if (catalogEntry.credentialFree) return true;
   const envNames = WEB_SEARCH_ENV_CREDENTIALS[providerId] ?? [];
   if (envNames.some((name) => (process.env[name] ?? "").length > 0)) return true;
   const authIds = WEB_SEARCH_AUTH_IDS[providerId] ?? [];
@@ -596,9 +594,7 @@ function webSearchProviderRecord(
   const hasApiKeyRow = Boolean(apiKeyId && authKinds.get(apiKeyId)?.has("api_key"))
     || authIds.some((id) => authKinds.get(id)?.has("api_key"));
   const hasOAuthRow = authIds.some((id) => authKinds.get(id)?.has("oauth"));
-  const credentialKind = provider.credentialFree
-    ? undefined
-    : hasEnv
+  const credentialKind = hasEnv
       ? "env" as const
       : hasApiKeyRow
         ? "api-key" as const
@@ -610,8 +606,9 @@ function webSearchProviderRecord(
     name: provider.name,
     description: provider.description,
     credentialFree: provider.credentialFree,
-    hasCredential: hasWebSearchCredential(provider.id, provider, authenticated),
+    hasCredential: hasWebSearchCredential(provider.id, authenticated),
     envKeys,
+    credentialProviders: [...new Set([...(apiKeyId ? [apiKeyId] : []), ...authIds])],
     ...(loginId !== undefined ? { loginId } : {}),
     ...(apiKeyId !== undefined ? { apiKeyId } : {}),
     ...(credentialKind !== undefined ? { credentialKind } : {}),
@@ -2077,61 +2074,6 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     return { authenticated, authKinds };
   }
 
-  /**
-   * Store an api_key credential for a search engine in agent.db, mirroring the
-   * upstream `upsertAuthCredentialForProvider` row shape (identity_key NULL,
-   * data = JSON credential). Reviving a disabled row keeps one key per engine.
-   */
-  async function upsertSearchApiKey(agentDir: string, authId: string, apiKey: string): Promise<void> {
-    const db = await openAuthDb(agentDir, false);
-    if (!db) throw { code: "UNAVAILABLE", message: "未找到本机 auth 存储（agent.db），无法保存密钥。" };
-    try {
-      const data = JSON.stringify({ type: "api_key", key: apiKey });
-      const existing = db
-        .prepare("SELECT id FROM auth_credentials WHERE provider = ? AND credential_type = 'api_key' ORDER BY id LIMIT 1")
-        .get(authId) as { id: number } | undefined;
-      if (existing) {
-        db.prepare(
-          "UPDATE auth_credentials SET data = ?, disabled_cause = NULL, updated_at = strftime('%s','now') WHERE id = ?",
-        ).run(data, existing.id);
-      } else {
-        db.prepare(
-          "INSERT INTO auth_credentials (provider, credential_type, data, identity_key, created_at, updated_at) VALUES (?, 'api_key', ?, NULL, strftime('%s','now'), strftime('%s','now'))",
-        ).run(authId, data);
-      }
-    } catch {
-      throw { code: "UNAVAILABLE", message: "无法写入 auth 存储（agent.db）。请确认磁盘可写且没有其他 omp 进程占用。" };
-    } finally {
-      try {
-        db.close();
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
-  /** Soft-delete the api_key credential of a search engine (same tombstone style as logout). */
-  async function removeSearchApiKey(agentDir: string, authId: string): Promise<number> {
-    const db = await openAuthDb(agentDir, false);
-    if (!db) throw { code: "UNAVAILABLE", message: "未找到本机 auth 存储（agent.db）。" };
-    try {
-      const result = db
-        .prepare(
-          "UPDATE auth_credentials SET disabled_cause = ?, updated_at = strftime('%s','now') WHERE provider = ? AND credential_type = 'api_key' AND disabled_cause IS NULL",
-        )
-        .run("removed by omp-studio", authId) as { changes?: number };
-      return typeof result.changes === "number" ? result.changes : 0;
-    } catch {
-      throw { code: "UNAVAILABLE", message: "无法更新 auth 存储（agent.db）。" };
-    } finally {
-      try {
-        db.close();
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
   async function logoutAuth(agentDir: string, providerId: string): Promise<number> {
     const db = await openAuthDb(agentDir, false);
     if (!db) throw { code: "UNAVAILABLE", message: "未找到本机 auth 存储（agent.db）。请在终端运行 /logout。" };
@@ -3019,28 +2961,12 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       return { ...WRITE_OK, message: "已保存网络搜索配置" };
     },
 
-    async setWebSearchApiKey(input: ModelWebSearchCredentialSetInput): Promise<ConfigWriteResult> {
-      const apiKey = input.apiKey.trim();
-      if (apiKey.length === 0) throw { code: "INVALID_INPUT", message: "API 密钥不能为空。" };
-      const apiKeyId = WEB_SEARCH_APIKEY_IDS[input.providerId];
-      if (apiKeyId === undefined) {
-        throw { code: "UNAVAILABLE", message: `${input.providerId} 不支持直接配置 API 密钥（仅 OAuth 或免凭证）。` };
-      }
-      const paths = await resolvePaths();
-      if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
-      await upsertSearchApiKey(paths.agentDir, apiKeyId, apiKey);
-      return { ...WRITE_OK, message: `已保存 ${input.providerId} 的 API 密钥` };
+    async setWebSearchApiKey(_input: ModelWebSearchCredentialSetInput): Promise<ConfigWriteResult> {
+      throw { code: "CAPABILITY_UNAVAILABLE", message: "Search credentials must be saved through the connected Runtime." };
     },
 
-    async removeWebSearchApiKey(input: ModelWebSearchCredentialRemoveInput): Promise<ConfigWriteResult> {
-      const apiKeyId = WEB_SEARCH_APIKEY_IDS[input.providerId];
-      if (apiKeyId === undefined) {
-        throw { code: "UNAVAILABLE", message: `${input.providerId} 没有可直接移除的 API 密钥。` };
-      }
-      const paths = await resolvePaths();
-      if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
-      const changes = await removeSearchApiKey(paths.agentDir, apiKeyId);
-      return { ...WRITE_OK, message: changes > 0 ? `已删除 ${input.providerId} 的 API 密钥` : `${input.providerId} 没有已保存的 API 密钥` };
+    async removeWebSearchApiKey(_input: ModelWebSearchCredentialRemoveInput): Promise<ConfigWriteResult> {
+      throw { code: "CAPABILITY_UNAVAILABLE", message: "Select a stored search credential in the connected Runtime to remove it." };
     },
   };
 }

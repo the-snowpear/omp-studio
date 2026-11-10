@@ -13,7 +13,8 @@ const open = (layout: DockLayout, agentId: string, toolCallId?: string) => dockR
 
 describe("multiple agent dock views", () => {
   it("replaces a visible legacy detail in its existing split without moving other tools", () => {
-    let layout = dockReducer(createDefaultLayout(), { type: "open", panel: "agent-detail" });
+    let layout = dockReducer(createDefaultLayout(), { type: "open", panel: "changes" });
+    layout = dockReducer(layout, { type: "open", panel: "agent-detail" });
     layout = dockReducer(layout, { type: "move", panels: ["agent-detail"], target: { region: "right", split: "after" } });
     const oldLocation = locatePanel(layout, "agent-detail");
     const otherPanels = [...layout.right.groups[0]!.panels];

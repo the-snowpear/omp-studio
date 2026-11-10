@@ -7,6 +7,10 @@ import { formatSubagentDuration, metricsFromUsage, subagentDurationMs } from "..
 import { useAppSettings, type AgentRosterDensity } from "../settings/appSettings";
 import { agentPresentation } from "./agentPresentation";
 import type { AgentRosterSource } from "./AgentRosterMeter";
+import { useWideLayout } from "../layout/useWideLayout";
+
+/** From this width the roster is a table: one column per fact instead of stacked lines. */
+const ROSTER_WIDE_MIN = 760;
 
 /** Stable parent-first ordering; lifecycle/usage updates never reorder siblings. */
 export function agentRosterRows(agents: readonly StudioAgentSnapshot[]) {
@@ -48,13 +52,14 @@ export function AgentRosterPanel({ agents, selectedId, openedIds = [], visible, 
   const minimal = density === "minimal";
   const setDensity = (next: AgentRosterDensity) => preview ? setDemoDensity(next) : update({ agentRosterDensity: next });
   const [now, setNow] = useState(Date.now);
+  const [rootRef, wide] = useWideLayout<HTMLElement>(ROSTER_WIDE_MIN);
   const ticking = !preview && !minimal && source === "live" && visible && agents.some(agent => ["starting", "running", "reviving"].includes(agent.status));
   useEffect(() => {
     if (!ticking) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [ticking]);
-  return <section className="agent-roster" data-density={density} data-live={visible && (preview || source === "live") || undefined} aria-label={zh ? "Agent 名册" : "Agent roster"}>
+  return <section className={`agent-roster${wide ? " is-wide" : ""}`} ref={rootRef} data-density={density} data-live={visible && (preview || source === "live") || undefined} aria-label={zh ? "Agent 名册" : "Agent roster"}>
     <div className="agent-roster-summary"><span>{!preview && source === "history" ? zh ? "历史会话" : "History" : !preview && source === "offline" ? zh ? "上次状态" : "Last received" : zh ? "当前会话" : "Current session"}</span><span className="agent-roster-count">{agents.length}</span>
       {preview && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
       <span className="agent-roster-density" role="group" aria-label={zh ? "Agent 列表密度" : "Agent list density"}>
@@ -63,7 +68,9 @@ export function AgentRosterPanel({ agents, selectedId, openedIds = [], visible, 
       </span>
     </div>
     {agents.length === 0 ? <div className="empty"><Icon name="bot" /><p>{!ready ? (zh ? "正在读取 Agent…" : "Loading agents…") : (zh ? "当前会话还没有 Agent" : "No agents in this session")}</p></div>
-      : <div className="agent-roster-list">{agentRosterRows(agents).map(({ agent, depth }) => {
+      : <div className="agent-roster-list">{wide ? <div className="agent-roster-head" aria-hidden="true">
+        <span>Agent</span><span>{zh ? "状态" : "Status"}</span><span>{zh ? "模型" : "Model"}</span><span>{zh ? "当前活动" : "Activity"}</span><span>{zh ? "运行时间" : "Time"}</span><span>Tokens</span>
+      </div> : null}{agentRosterRows(agents).map(({ agent, depth }) => {
         const { demo, status, compactStatus, tone, model, modelLabel } = agentPresentation(agent, preview, zh);
         const duration = subagentDurationMs(agent, now);
         const time = demo?.duration ?? (duration === undefined ? undefined : formatSubagentDuration(duration));
@@ -74,11 +81,19 @@ export function AgentRosterPanel({ agents, selectedId, openedIds = [], visible, 
           agent.modelRole, agent.assignment, activity, time, tokens ? `${tokens} tokens` : undefined].filter(Boolean).join("\n");
         return <button key={agent.agentId} type="button" className={`agent-roster-row${selectedId === agent.agentId ? " is-selected" : ""}${openedIds.includes(agent.agentId) ? " is-opened" : ""}${depth ? " is-child" : ""}`}
           title={detail}
-          style={{ marginLeft: Math.min(depth, 3) * 12 }} aria-pressed={!main && selectedId === agent.agentId}
+          style={wide ? { ["--depth" as string]: Math.min(depth, 3) } : { marginLeft: Math.min(depth, 3) * 12 }} aria-pressed={!main && selectedId === agent.agentId}
           aria-label={main ? (zh ? "返回主 Agent 对话" : "Return to main conversation") : `${zh ? "打开子 Agent" : "Open agent"} ${agent.displayName}`}
           onClick={() => main ? onMain() : onOpen(agent)}>
           <span className={`agent-avatar${main ? " is-main" : ""}`}><Icon name={main ? "network" : "bot"} extra="sm" /></span>
-          {minimal ? <>
+          {wide ? <>
+            <span className="agent-roster-cell is-identity"><strong title={agent.displayName}>{agent.displayName}</strong>
+              {!minimal && agent.assignment ? <span className="agent-roster-task" title={agent.assignment}>{agent.assignment}</span> : null}</span>
+            <span className="agent-roster-cell"><span className={`agent-status is-${tone}`} title={status}><span>{status}</span></span></span>
+            <span className="agent-roster-cell agent-roster-model" title={`${zh ? "实际模型" : "Actual model"}: ${model ?? modelLabel}`}><span>{modelLabel}</span>{agent.modelIsFallback ? <Icon name="undo" extra="sm" /> : null}</span>
+            <span className="agent-roster-cell agent-roster-activity" title={activity}>{activity ? <><Icon name="terminal" extra="sm" /><span>{activity}</span></> : <span className="agent-roster-none">—</span>}</span>
+            <span className="agent-roster-cell is-number">{time ?? "—"}</span>
+            <span className="agent-roster-cell is-number">{tokens ?? "—"}</span>
+          </> : minimal ? <>
             <strong className="agent-roster-name">{agent.displayName}</strong>
             <span className="agent-roster-model" title={`${zh ? "实际模型" : "Actual model"}: ${model ?? modelLabel}`}><span>{modelLabel}</span>{agent.modelIsFallback ? <Icon name="undo" extra="sm" /> : null}</span>
             <span className={`agent-status is-${tone}`} title={status}><span>{compactStatus}</span></span>

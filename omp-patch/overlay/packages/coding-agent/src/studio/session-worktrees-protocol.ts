@@ -4,6 +4,11 @@ export interface SessionResumeRow {
 	modifiedAt: string;
 	currentDirectory: boolean;
 	continuationOf?: string;
+	directoryName?: string;
+	messageCount?: number;
+	status?: "complete" | "interrupted" | "aborted" | "error" | "pending" | "unknown";
+	firstMessage?: string;
+	conversationExcerpt?: string;
 }
 export interface SessionWorktreeRow {
 	id: string;

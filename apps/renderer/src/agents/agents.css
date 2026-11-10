@@ -79,6 +79,53 @@
 .agent-roster-model .icon { flex: none; }
 .agent-roster[data-density="minimal"] .agent-status { max-width: 7em; }
 .agent-roster-row:focus-visible, .agent-roster-density button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Wide roster (ROSTER_WIDE_MIN in AgentRosterPanel.tsx): a table. Every row is its
+   own grid on the same fixed/fr tracks, so the columns line up without a <table>;
+   avatar and name share the first cell so nesting indents them together. */
+.agent-roster.is-wide { --roster-cols: minmax(220px, 2.2fr) minmax(112px, 1fr) minmax(120px, 1.1fr) minmax(180px, 2.2fr) 88px 88px; align-items: center; }
+.agent-roster.is-wide > * { width: 100%; max-width: 1480px; box-sizing: border-box; }
+.agent-roster.is-wide .agent-roster-summary { padding: var(--sp-12) var(--sp-16) var(--sp-8); }
+.agent-roster.is-wide .agent-roster-list { flex: 1 1 0; min-height: 0; gap: 0; padding: 0 var(--sp-8) var(--sp-12); }
+.agent-roster-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: var(--roster-cols);
+  align-items: center;
+  column-gap: var(--sp-16);
+  flex: none;
+  height: 32px;
+  margin-bottom: var(--sp-4);
+  padding: 0 var(--sp-12);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+}
+.agent-roster-head > span:nth-child(n + 5) { text-align: right; }
+.agent-roster.is-wide .agent-roster-row {
+  display: grid;
+  grid-template-columns: var(--roster-cols);
+  align-items: center;
+  column-gap: var(--sp-16);
+  min-height: 54px;
+  margin: 0;
+  padding: var(--sp-6) var(--sp-12);
+}
+.agent-roster.is-wide[data-density="minimal"] .agent-roster-row { height: auto; min-height: 38px; padding-block: var(--sp-4); }
+.agent-roster.is-wide .agent-roster-row > .agent-avatar { grid-column: 1; grid-row: 1; margin-left: calc(var(--depth, 0) * 18px); }
+.agent-roster.is-wide .agent-roster-row.is-child::before { left: calc(var(--sp-12) + (var(--depth, 1) - 1) * 18px + 11.5px); }
+.agent-roster-cell { min-width: 0; font-size: var(--fs-12); }
+.agent-roster-cell.is-identity { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 1px; padding-left: calc(var(--depth, 0) * 18px + 34px); }
+.agent-roster-cell.is-identity > strong { overflow: hidden; font-size: var(--fs-12); font-weight: var(--fw-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.agent-roster-cell.is-identity > .agent-roster-task { margin: 0; font-size: var(--fs-11); color: var(--text-3); }
+.agent-roster-cell .agent-status { max-width: 100%; }
+.agent-roster-cell.agent-roster-model { font-size: var(--fs-11); }
+.agent-roster-cell.agent-roster-activity { font-size: var(--fs-11); }
+.agent-roster-none { color: var(--text-faint); }
+.agent-roster-cell.is-number { color: var(--text-2); font-size: var(--fs-11); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .agent-detail { container: agent-detail / size; overflow: hidden; }
 .agent-detail-head { padding: var(--sp-8) var(--sp-12) var(--sp-4); flex: none; }
 .agent-detail-breadcrumb { display: flex; align-items: center; gap: var(--sp-4); font-size: var(--fs-11); color: var(--text-3); min-width: 0; max-width: 35%; }
@@ -115,6 +162,25 @@
 .subagent-convo .convo-doc.sa-inspect-doc { padding: var(--sp-16) var(--sp-16) var(--sp-24); max-width: calc(var(--doc-max-w) + 32px); width: 100%; }
 .subagent-convo .sa-inspect-composer { padding: var(--sp-10) var(--sp-12) var(--sp-12); }
 .subagent-convo .sa-inspect-composer .composer-bar { justify-content: space-between; }
+@container agent-detail (min-width: 800px) {
+  .agent-detail-head, .agent-detail-nav, .agent-detail-metadata, .agent-detail-btw {
+    padding-inline: max(var(--sp-16), calc((100% - var(--doc-max-w)) / 2));
+  }
+  .subagent-convo > .new-content-pill {
+    right: max(var(--sp-16), calc((100% - var(--doc-max-w)) / 2));
+  }
+}
+@container agent-detail (min-width: 800px) and (min-height: 401px) {
+  .subagent-convo .sa-inspect-composer {
+    width: min(calc(100% - 32px), var(--doc-max-w));
+    margin: 0 auto var(--sp-16);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-10);
+  }
+  .subagent-convo .sa-inspect-composer:focus-within {
+    box-shadow: 0 0 0 3px var(--accent-softer);
+  }
+}
 @container agent-detail (max-width: 440px) {
   .agent-detail-actions .btn > span { display: none; }
   .agent-detail-actions .btn { width: 28px; padding: var(--sp-4); }
@@ -148,3 +214,65 @@
   .subagent-convo .sa-inspect-composer .queue-strip { grid-column: 1 / -1; grid-row: 2; max-height: 72px; overflow: auto; margin: 0; }
   .subagent-convo .sa-inspect-composer > .muted, .subagent-convo .sa-inspect-composer .composer-error { grid-column: 1 / -1; }
 }
+/* Wide (AGENT_DETAIL_WIDE_MIN in AgentDetailPanel.tsx): the conversation keeps its
+   reading column and the details tab becomes an inspector beside it. Grid placement
+   only; the conversation element never moves, so it is not remounted on resize. */
+.agent-detail.is-wide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(288px, 24%, 360px);
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+.agent-detail.is-wide > :is(.agent-detail-head, .agent-detail-nav, .agent-detail-conversation, .agent-detail-btw) { grid-column: 1; min-width: 0; }
+.agent-detail.is-wide > .agent-detail-head { grid-row: 1; padding-top: var(--sp-12); }
+.agent-detail.is-wide > .agent-detail-nav { grid-row: 2; }
+.agent-detail.is-wide > :is(.agent-detail-conversation, .agent-detail-btw) { grid-row: 3; }
+/* The task reads in full in the inspector; the header keeps identity and status. */
+.agent-detail.is-wide .agent-detail-task { display: none; }
+.agent-detail.is-wide .agent-detail-breadcrumb { max-width: none; }
+.agent-detail.is-wide .agent-detail-model { max-width: none; }
+.agent-detail-aside {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-20);
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-16) var(--sp-16) var(--sp-24);
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  scrollbar-width: thin;
+}
+.agent-detail-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-6); }
+.agent-detail-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--sp-8) var(--sp-10);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--surface);
+}
+.agent-detail-stat > span { color: var(--text-3); font-size: var(--fs-11); white-space: nowrap; }
+.agent-detail-stat > strong { overflow: hidden; color: var(--text); font-size: var(--fs-14); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.agent-detail-section { display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; }
+.agent-detail-section > h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+}
+.agent-detail-section > h3::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.agent-detail-assignment { margin: 0; color: var(--text); font-size: var(--fs-12); line-height: 1.65; overflow-wrap: anywhere; white-space: pre-wrap; }
+.agent-detail-props { display: flex; flex-direction: column; gap: var(--sp-6); margin: 0; }
+.agent-detail-props > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: baseline; gap: var(--sp-10); font-size: var(--fs-12); line-height: 1.5; }
+.agent-detail-props dt { color: var(--text-3); white-space: nowrap; }
+.agent-detail-props dd { margin: 0; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+.agent-detail-props.is-paths > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.agent-detail-props.is-paths dd { padding: var(--sp-4) var(--sp-8); border-radius: var(--r-4); background: var(--surface-2); color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-11); }

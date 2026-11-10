@@ -1,24 +1,45 @@
 import { describe, expect, it } from "vitest";
-import { builtInPresets, clampFloat, createDefaultLayout, dockReducer, locatePanel, normalizeLayout } from "./model";
-import { PANEL_IDS, type DockAction, type DockLayout } from "./types";
+import { builtInPresets, clampFloat, createDefaultLayout, dockReducer, locatePanel, normalizeLayout, resolveOpenIn, scopedPanelIds } from "./model";
+import { PANEL_IDS, isScopedPanelId, panelBaseId, type DockAction, type DockLayout, type PanelId } from "./types";
 
 function expectSingletons(layout: DockLayout): void {
   const groups = [...layout.right.groups, ...layout.bottom.groups, ...layout.floats];
   const all = [...layout.left.panels, ...layout.rail.panels, ...groups.flatMap(group => group.panels), ...Object.keys(layout.hidden)];
-  expect(all.slice().sort()).toEqual([...PANEL_IDS].sort());
+  expect(new Set(all).size).toBe(all.length);
+  expect(all.filter(id => (PANEL_IDS as readonly string[]).includes(id)).sort()).toEqual([...PANEL_IDS].sort());
+  for (const id of all) expect((PANEL_IDS as readonly string[]).includes(id) || isScopedPanelId(id)).toBe(true);
+  // A tool may own several instances, but each region holds at most one.
+  for (const list of [layout.left.panels, layout.rail.panels, ...groups.map(group => group.panels)]) {
+    const bases = list.map(panelBaseId);
+    expect(new Set(bases).size).toBe(bases.length);
+  }
   expect(layout.right.groups.length).toBeLessThanOrEqual(2);
   expect(layout.bottom.groups.length).toBeLessThanOrEqual(2);
   expect(new Set(groups.map(group => group.id)).size).toBe(groups.length);
   for (const group of groups) expect(group.panels).toContain(group.active);
 }
 
+/** Existing tabbed workspaces used by migration, ordering and group-move scenarios. */
+function tabbedLayout(): DockLayout {
+  const layout = createDefaultLayout();
+  layout.rail.mode = "hidden";
+  layout.rail.panels = ["environment", "context", "agents"];
+  layout.right.groups = [{ id: "right-main", panels: ["changes", "git", "browser", "computer"], active: "changes" }];
+  layout.bottom.visible = true;
+  for (const panel of layout.right.groups[0]!.panels) delete layout.hidden[panel];
+  layout.hidden["git-quick"] = { region: "rail" };
+  layout.hidden.jobs = { region: "float", rect: { x: 80, y: 60, width: 560, height: 400 } };
+  for (const card of Object.values(layout.cards)) card.collapsed = false;
+  return layout;
+}
+
 function reduce(...actions: DockAction[]): DockLayout {
-  return actions.reduce((layout, action) => dockReducer(layout, action), createDefaultLayout());
+  return actions.reduce((layout, action) => dockReducer(layout, action), tabbedLayout());
 }
 
 describe("dock layouts", () => {
   it("migrates a legacy Git rail card once while retaining its size and a separate full Git panel", () => {
-    const legacy = createDefaultLayout();
+    const legacy = tabbedLayout();
     legacy.right.groups[0]!.panels = legacy.right.groups[0]!.panels.filter(panel => panel !== "git");
     legacy.rail.panels.splice(1, 0, "git");
     legacy.cards.git = { collapsed: true, height: 345 };
@@ -38,7 +59,7 @@ describe("dock layouts", () => {
   });
 
   it("repairs saved Git rail cards from the first quick-card release", () => {
-    const saved = createDefaultLayout();
+    const saved = tabbedLayout();
     saved.right.groups[0]!.panels = saved.right.groups[0]!.panels.filter(panel => panel !== "git");
     saved.rail.panels.splice(1, 0, "git");
     saved.cards.git = { collapsed: false, height: 380 };
@@ -52,7 +73,7 @@ describe("dock layouts", () => {
   });
 
   it("puts the quick card in the conversation rail when Git is dragged there", () => {
-    const original = createDefaultLayout();
+    const original = tabbedLayout();
     const moved = dockReducer(original, { type: "move", panels: ["git"], target: { region: "rail", index: 1 } });
     expect(moved.rail.panels[1]).toBe("git-quick");
     expect(locatePanel(moved, "git")?.region).toBe("right");
@@ -63,7 +84,7 @@ describe("dock layouts", () => {
   });
 
   it("keeps the original tab order when a group including Git is dropped in the rail", () => {
-    const original = createDefaultLayout();
+    const original = tabbedLayout();
     const moved = dockReducer(original, { type: "move", panels: ["changes", "git", "browser"], target: { region: "rail", index: 1 } });
     expect(moved.rail.panels.slice(1, 4)).toEqual(["changes", "git-quick", "browser"]);
     expect(locatePanel(moved, "git")?.region).toBe("right");
@@ -71,7 +92,7 @@ describe("dock layouts", () => {
   });
 
   it("keeps a hidden legacy Git card hidden and restores the full view to the sidebar", () => {
-    const saved = createDefaultLayout();
+    const saved = tabbedLayout();
     saved.right.groups[0]!.panels = saved.right.groups[0]!.panels.filter(panel => panel !== "git");
     saved.hidden.git = { region: "rail", index: 1 };
     const restored = normalizeLayout(saved);
@@ -106,12 +127,14 @@ describe("dock layouts", () => {
     expect(layout.floats[0]).toMatchObject({ id: group.id, rect: group.rect, minimized: false });
     expectSingletons(layout);
   });
-  it("starts with Files, a hidden Environment+Context+Agents rail, collapsed right and Logs bottom, hidden BTW", () => {
+  it("starts with Explorer, expanded Environment and Background tasks, collapsed Context/Git/Agents and hidden empty right and populated bottom", () => {
     const layout = createDefaultLayout();
     expect(layout.left).toMatchObject({ visible: true, width: 272, ratio: 0.46, panels: ["files"] });
-    expect(layout.rail).toMatchObject({ mode: "hidden", lastMode: "expanded", width: 320, panels: ["environment", "context", "agents"] });
-    expect(layout.right).toMatchObject({ visible: false, groups: [{ active: "changes", panels: ["changes", "git", "browser", "computer"] }] });
-    expect(layout.bottom).toMatchObject({ visible: true, expanded: false, groups: [{ active: "logs" }] });
+    expect(layout.rail).toMatchObject({ mode: "expanded", lastMode: "expanded", width: 320, panels: ["environment", "context", "git-quick", "agents", "jobs"] });
+    for (const panel of ["files", "environment", "jobs"] as const) expect(layout.cards[panel].collapsed).toBe(false);
+    for (const panel of ["context", "git-quick", "agents"] as const) expect(layout.cards[panel].collapsed).toBe(true);
+    expect(layout.right).toMatchObject({ visible: false, groups: [] });
+    expect(layout.bottom).toMatchObject({ visible: false, expanded: false, groups: [{ active: "logs", panels: ["terminal", "problems", "tests", "output", "logs", "pvlogs"] }] });
     expect(layout.floats).toEqual([]);
     expect(layout.hidden.btw?.region).toBe("float");
     expectSingletons(layout);
@@ -132,7 +155,7 @@ describe("dock layouts", () => {
   });
 
   it("moves the whole Terminal module and reorders tabs without duplicating or mutating it", () => {
-    const original = createDefaultLayout();
+    const original = tabbedLayout();
     const saved = JSON.stringify(original);
     let layout = dockReducer(original, { type: "move", panels: ["terminal"], target: { region: "right", groupId: "right-main", index: 1 } });
     expect(layout.right.groups[0]!.panels).toEqual(["changes", "terminal", "git", "browser", "computer"]);
@@ -222,6 +245,18 @@ describe("dock layouts", () => {
     expect(layout.floats.at(-1)).toMatchObject({ id, minimized: false, maximized: true });
   });
 
+  it("persists multi-pane shares without changing free-card heights", () => {
+    let layout = reduce({ type: "move", panels: ["changes", "problems"], target: { region: "left" } });
+    layout = dockReducer(layout, { type: "left-card-shares", shares: { files: 1.2, changes: 0.8, problems: 1 } });
+    layout = dockReducer(layout, { type: "card", panel: "changes", collapsed: true });
+    expect(layout.left.panels).toEqual(["files", "problems", "changes"]);
+    const restored = normalizeLayout(JSON.parse(JSON.stringify(layout)));
+    expect(restored.cards.changes).toEqual({ collapsed: true, height: null, leftShare: 0.8 });
+    expect(restored.left.panels).toEqual(["files", "problems", "changes"]);
+    expect(dockReducer(restored, { type: "left-card-shares", shares: { files: 2 } }, true)).toBe(restored);
+    expect(dockReducer(restored, { type: "card", panel: "changes", height: null }).cards.changes.leftShare).toBeUndefined();
+  });
+
   it("keeps card height and collapse preferences across moves", () => {
     const layout = reduce({ type: "card", panel: "files", height: 370, collapsed: true }, { type: "move", panels: ["files"], target: { region: "bottom" } }, { type: "move", panels: ["files"], target: { region: "rail" } });
     expect(layout.cards.files).toEqual({ collapsed: true, height: 370 });
@@ -303,7 +338,7 @@ describe("dock layouts", () => {
 });
 
 describe("dock empty regions", () => {
-  const rightPanels = createDefaultLayout().right.groups[0]!.panels;
+  const rightPanels = tabbedLayout().right.groups[0]!.panels;
   const bottomPanels = createDefaultLayout().bottom.groups[0]!.panels;
 
   it("collapses the right region when its last group leaves, keeping size and other regions", () => {
@@ -396,5 +431,75 @@ describe("dock empty regions", () => {
     // A region closed by the user but still holding modules keeps its state.
     expect(normalizeLayout(builtInPresets()[1]!.layout).left.visible).toBe(false);
     expect(normalizeLayout(builtInPresets()[1]!.layout).bottom.visible).toBe(false);
+  });
+
+  it("opens a second Explorer in another region without stealing the first", () => {
+    const base = createDefaultLayout();
+    expect(resolveOpenIn(base, "files", { region: "right" })).toEqual({ kind: "place", panel: "files@2" });
+    const layout = dockReducer(base, { type: "move", panels: ["files@2"], target: { region: "right" } });
+    expect(locatePanel(layout, "files")?.region).toBe("left");
+    expect(locatePanel(layout, "files@2")?.region).toBe("right");
+    expect(layout.cards["files@2"]).toEqual({ collapsed: false, height: null });
+    expect(scopedPanelIds(layout)).toEqual(["files@2"]);
+    expectSingletons(layout);
+  });
+
+  it("focuses the instance a region already owns instead of allocating another", () => {
+    let layout = dockReducer(createDefaultLayout(), { type: "move", panels: ["files@2"], target: { region: "right" } });
+    expect(resolveOpenIn(layout, "files", { region: "right" })).toMatchObject({ kind: "focus", panel: "files@2" });
+    // The region is the unit, not the tab group: a second group focuses the first's instance.
+    layout = dockReducer(layout, { type: "move", panels: ["changes"], target: { region: "right", split: "after" } });
+    expect(layout.right.groups).toHaveLength(2);
+    expect(resolveOpenIn(layout, "files", { region: "right", groupId: layout.right.groups[1]!.id })).toMatchObject({ kind: "focus", panel: "files@2" });
+  });
+
+  it("moves the canonical tool while no instance is on screen", () => {
+    const hidden = dockReducer(createDefaultLayout(), { type: "hide", panels: ["files"] });
+    expect(resolveOpenIn(hidden, "files", { region: "right" })).toEqual({ kind: "place", panel: "files" });
+    const layout = dockReducer(hidden, { type: "move", panels: ["files"], target: { region: "right" } });
+    expect(locatePanel(layout, "files")?.region).toBe("right");
+    expect(scopedPanelIds(layout)).toEqual([]);
+  });
+
+  it("keeps the rail's Git compact card when Git is opened there", () => {
+    expect(resolveOpenIn(createDefaultLayout(), "git", { region: "rail" })).toMatchObject({ kind: "focus", panel: "git-quick", location: { region: "rail" } });
+  });
+
+  it("never puts two instances of one tool in the same region", () => {
+    const base = dockReducer(createDefaultLayout(), { type: "move", panels: ["files@2"], target: { region: "right" } });
+    const attempted = dockReducer(base, { type: "move", panels: ["files@2"], target: { region: "left" } });
+    expect(attempted).toBe(base);
+    const mixed = dockReducer(base, { type: "move", panels: ["files@2", "problems"], target: { region: "left" } });
+    expect(locatePanel(mixed, "files@2")?.region).toBe("right");
+    expect(locatePanel(mixed, "problems")?.region).toBe("left");
+    expectSingletons(mixed);
+  });
+
+  it("reveals an instance without adding or removing panels", () => {
+    const closed = dockReducer(tabbedLayout(), { type: "region", region: "right", visible: false });
+    const revealed = dockReducer(closed, { type: "reveal", panel: "git" });
+    expect(revealed.right.visible).toBe(true);
+    expect(revealed.right.groups[0]!.active).toBe("git");
+    expect(revealed.right.groups[0]!.panels).toEqual(closed.right.groups[0]!.panels);
+    expect(locatePanel(revealed, "git")?.region).toBe("right");
+  });
+
+  it("persists scoped instances, drops invalid ones and dedupes a region", () => {
+    const base = createDefaultLayout();
+    const layout = dockReducer(base, { type: "move", panels: ["files@2"], target: { region: "right" } });
+    layout.cards["files@2"] = { collapsed: true, height: 320 };
+    const restored = normalizeLayout(layout);
+    expect(restored.cards["files@2"]).toEqual({ collapsed: true, height: 320 });
+    expect(locatePanel(restored, "files@2")?.region).toBe("right");
+    expect(normalizeLayout(restored)).toEqual(restored);
+    expect(normalizeLayout(createDefaultLayout())).toEqual(createDefaultLayout());
+
+    const raw = tabbedLayout();
+    raw.right.groups[0]!.panels.push("files@2", "files@3", "terminal@2" as PanelId);
+    const normalized = normalizeLayout(raw);
+    expect(normalized.right.groups[0]!.panels.filter(id => panelBaseId(id) === "files")).toEqual(["files@2"]);
+    expect(normalized.right.groups[0]!.panels).not.toContain("terminal@2");
+    expect(normalized.cards["files@2"]).toBeDefined();
+    expect(normalized.cards["files@3"]).toBeUndefined();
   });
 });

@@ -49,7 +49,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
   const targetStatus = executionTarget.inventory.statuses.find(status => status.id === executionTarget.id);
   const canCreate = !targetId || (targetStatus?.state === "connected" && !targetStatus.operation);
   const selectSession = (id: string): void => { store.activeIds.set(ownerKey, id); setActiveId(id); };
-  useEffect(() => { setActiveId(store.activeIds.get(ownerKey) ?? null); bootstrapped.current = sessions.length > 0; }, [ownerKey]);
+  useEffect(() => { setActiveId(store.activeIds.get(ownerKey) ?? null); bootstrapped.current = sessions.length > 0; }, [ownerKey, allSessions, store]);
 
   const createSession = useCallback(async () => {
     if (!api || createLock.current || !canCreate) return;

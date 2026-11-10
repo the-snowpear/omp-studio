@@ -11,6 +11,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { redactText } from "@omp-studio/host-client-api";
+import type { MemorySample } from "@omp-studio/studio-protocol";
 
 import { desktopPaths } from "./platform/desktop-paths.js";
 
@@ -34,22 +35,37 @@ export function defaultHostLogsDirectory(): string {
 }
 
 export interface HostLog {
-  write(level: HostLogLevel, event: string, detail?: string): void;
+  /** Only complete numeric values under these fields may bypass PID-like text redaction. */
+  write(level: HostLogLevel, event: string, detail?: string, numericFields?: ReadonlySet<string>): void;
 }
 
 const ANSI = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/gu;
 const EVENT_NAME = /^[a-z][a-z0-9._-]{0,63}$/u;
 const MAX_DETAIL = 2_000;
+const MEMORY_NUMERIC_FIELDS = ["rssBytes", "heapUsedBytes", "heapTotalBytes", "externalBytes", "arrayBuffersBytes"];
+// The Runtime's dedicated numeric sampler emits this fixed subset over stderr.
+const RUNTIME_PERFORMANCE_FIELDS = new Set([
+  ...MEMORY_NUMERIC_FIELDS, "seq", "workerResidency", "workerGeneration", "projectors", "messages", "tools", "pending", "blockBytes", "listeners",
+]);
+const SENSITIVE_NUMERIC_FIELD = /pid|process|path|token|secret|password|endpoint|pipe|auth|bearer|credential/iu;
+
+/** Opt in the fields produced by formatMemorySampleLine, not arbitrary event text. */
+export function performanceSampleNumericFields(sample: MemorySample): ReadonlySet<string> {
+  return new Set([...MEMORY_NUMERIC_FIELDS, "instance", "seq", ...Object.keys(sample.counters)]);
+}
 
 export function formatHostLogLine(
   now: Date,
   level: HostLogLevel,
   event: string,
   detail?: string,
+  numericFields?: ReadonlySet<string>,
 ): string {
   const safeEvent = EVENT_NAME.test(event) ? event : "host.invalid_event";
   const raw = detail === undefined ? "" : stripControl(detail);
-  const redacted = raw.length === 0 ? "" : redactFully(raw).slice(0, MAX_DETAIL);
+  const fields = numericFields ?? (safeEvent === "runtime.stderr" && /^\[studio\.performance\] role=runtime(?: |$)/u.test(raw)
+    ? RUNTIME_PERFORMANCE_FIELDS : undefined);
+  const redacted = raw.length === 0 ? "" : (fields === undefined ? redactFully(raw) : redactNumericFields(raw, fields)).slice(0, MAX_DETAIL);
   const suffix = redacted.length === 0 ? "" : ` ${redacted}`;
   return `${now.toISOString()} ${level} ${safeEvent}${suffix}\n`;
 }
@@ -120,11 +136,11 @@ export function createHostFileLog(options: {
   };
 
   return {
-    write(level, event, detail) {
+    write(level, event, detail, numericFields) {
       const stamp = now();
       const day = stamp.toISOString().slice(0, 10);
       const path = join(options.directory, `host-${day}.log`);
-      const line = formatHostLogLine(stamp, level, event, detail);
+      const line = formatHostLogLine(stamp, level, event, detail, numericFields);
       if (pending.length >= MAX_PENDING_LINES) {
         dropped += 1;
         return;
@@ -137,6 +153,23 @@ export function createHostFileLog(options: {
 
 function stripControl(value: string): string {
   return value.replace(ANSI, "").replace(/[\r\n\t]+/gu, " ").trim();
+}
+
+function redactNumericFields(value: string, fields: ReadonlySet<string>): string {
+  const field = /(^|\s)([a-z][A-Za-z0-9_.-]{0,79})=(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?=\s|$)/gu;
+  const parts: string[] = [];
+  let from = 0;
+  for (let match = field.exec(value); match !== null; match = field.exec(value)) {
+    const key = match[2] ?? "";
+    const number = match[3] ?? "";
+    if (!fields.has(key) || SENSITIVE_NUMERIC_FIELD.test(key) || !Number.isFinite(Number(number))) continue;
+    const start = match.index + match[0].length - number.length;
+    // Only the number is exempt: keys and all surrounding text still redact.
+    parts.push(redactFully(value.slice(from, start)), number);
+    from = start + number.length;
+  }
+  parts.push(redactFully(value.slice(from)));
+  return parts.join("");
 }
 
 /** `redactText` only replaces the first path-like match; logs may contain several. */

@@ -1,4 +1,10 @@
 import {
+	SEARCH_CREDENTIAL_KINDS,
+	isSearchCredentialsKind,
+	type SearchCredentialsOperation,
+	type SearchCredentialsResultMap,
+} from "./search-credentials-protocol";
+import {
 	EXTENSION_LINK_KINDS,
 	type ExtensionLinkOperation,
 	type ExtensionLinkResultMap,
@@ -277,6 +283,12 @@ export interface StudioServiceRow {
 	exitCode?: number;
 	restartCount: number;
 	outputBytes: number;
+	/** Agent-declared canonical HTTP(S) preview URL, when this is a web service. */
+	previewUrl?: string;
+	pid?: number;
+	/** Raw native owner: normally a session ID, or a legacy agent ID. */
+	ownerId?: string;
+	/** Compatibility alias for ownerId; not necessarily an agent ID. */
 	ownerAgentId?: string;
 	mode: "session" | "persist" | "detached";
 }
@@ -310,6 +322,7 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
+	| SearchCredentialsOperation
 	| ExtensionLinkOperation
 	| WebMcpOperation
 	| EvaluationWorkspaceOperation
@@ -360,6 +373,7 @@ export type WorkbenchOperation =
 
 export interface WorkbenchResultMap
 	extends
+		SearchCredentialsResultMap,
 		EvaluationWorkspaceResultMap,
 		SessionTitlesResultMap,
 		PredictionResultMap,
@@ -407,6 +421,7 @@ export interface WorkbenchResultMap
 	"runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
 export const WORKBENCH_OPERATION_KINDS = [
+	...SEARCH_CREDENTIAL_KINDS,
 	...EXTENSION_LINK_KINDS,
 	...WEBMCP_KINDS,
 	...EVALUATION_WORKSPACE_KINDS,
@@ -456,6 +471,7 @@ export const WORKBENCH_OPERATION_KINDS = [
 	"runtime.models.describe",
 ] as const;
 export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
+	"search.credentials.list",
 	...COMPUTER_WORKSPACE_COMMAND_KINDS,
 	"evaluation.runtime.plan",
 	"evaluation.runtime.read",
@@ -590,6 +606,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	if (!value || typeof value !== "object") throw new Error("Invalid workbench operation");
 	const kind = (value as Record<string, unknown>).kind;
 	if (typeof kind !== "string" || !isWorkbenchOperationKind(kind)) throw new Error("Unknown workbench operation");
+	if (isSearchCredentialsKind(kind)) return;
 	if (kind === "extensions.links.activate" || kind === "browser.webmcp.invoke") return;
 	if (isComputerWorkspaceCommand(kind)) return;
 	if (isEvaluationWorkspaceKind(kind)) return;
@@ -716,6 +733,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	const fields: Record<
 		Exclude<
 			WorkbenchOperation["kind"],
+			| SearchCredentialsOperation["kind"]
 			| ExtensionLinkOperation["kind"]
 			| WebMcpOperation["kind"]
 			| EvaluationWorkspaceOperation["kind"]
@@ -817,6 +835,7 @@ function serviceRow(value: unknown): void {
 	if (row.ownerAgentId !== undefined) text(row.ownerAgentId);
 }
 export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value: unknown): void {
+	if (isSearchCredentialsKind(kind)) return;
 	if (kind === "extensions.links.activate" || kind === "browser.webmcp.invoke") return;
 	if (isComputerWorkspaceCommand(kind)) return;
 	if (isEvaluationWorkspaceKind(kind)) return;

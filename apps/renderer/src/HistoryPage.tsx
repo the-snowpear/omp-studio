@@ -481,10 +481,14 @@ export function HistoryPage({
 <WorkspaceTabs<"catalog"|"archive"|"transfer"> id="history-workspace" label={zh ? "历史" : "History"} value={workspaceTab} onChange={setWorkspaceTab} items={[{id:"catalog",icon:"history",label:zh?"会话目录":"Session catalog"},{id:"archive",icon:"archive",label:"Archive / Recap"},{id:"transfer",icon:"export",label:zh?"迁移与导出":"Transfer & export"}]}/>
 <WorkspacePanel id="history-workspace" name="catalog" active={workspaceTab==="catalog"}>
 <div className="hist-layout">
-      <section aria-labelledby="histHeading">
-        <h2 className="sr-only" id="histHeading">{t("history.listHeading")}</h2>
-        <SessionImportPanel client={client ?? null} onOpen={onImportedOpen ?? (() => {})} {...(onImported ? { onImported } : {})} />
-        <ResumeScopePane client={client} context={nativeContext} onOpen={onImportedOpen} />
+      <section className="history-catalog" aria-labelledby="histHeading">
+        <header className="history-catalog-heading">
+          <div className="history-catalog-title"><h2 id="histHeading">{zh ? "项目会话" : "Project sessions"}</h2><span className="history-catalog-count">{t("history.conversationsCount", { count: rows.length })}</span></div>
+          <div className="history-catalog-actions">
+            <ResumeScopePane key={nativeContext?.sessionId ?? "no-live-session"} client={client} context={nativeContext} onOpen={onImportedOpen} onPreviewOpen={() => onRoute("workbench")} />
+            <SessionImportPanel client={client ?? null} onOpen={onImportedOpen ?? (() => {})} {...(onImported ? { onImported } : {})} onPreviewOpen={() => onRoute("workbench")} />
+          </div>
+        </header>
         <div className="hist-toolbar">
           <label className="sr-only" htmlFor="histSearch">{t("history.searchLabel")}</label>
           <input
@@ -507,20 +511,10 @@ export function HistoryPage({
               >{t(tab.key)}</button>
             ))}
           </div>
-          {preview
-            ? (
-              <>
-                <button type="button" className="btn outline" onClick={() => { if (marks) show(t("history.demoExportToast"), "export"); }}>
-                  <Icon name="export" extra="sm" />{t("history.export")}
-                </button>
-                {marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}
-              </>
-            )
-            : (
-              <button type="button" className="btn outline" disabled data-tip={t("history.exportNotImplemented")}>
-                <Icon name="export" extra="sm" />{t("history.export")}
-              </button>
-            )}
+          <button type="button" className="btn outline" onClick={() => setWorkspaceTab("transfer")}>
+            <Icon name="export" extra="sm" />{t("history.export")}
+          </button>
+          {preview && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}
         </div>
         {preview
           ? (previewRows.length

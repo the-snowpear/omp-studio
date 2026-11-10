@@ -134,3 +134,23 @@ it("shows a truncation notice instead of dropping a large background backlog sil
 function screenText(): string {
   return document.body.textContent ?? "";
 }
+
+it("selects a command terminal created outside the pane and keeps the existing shell", async () => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  const api = {
+    create: vi.fn().mockResolvedValueOnce({ id: "manual-shell", name: "Manual", cwd: "D:/workspace" })
+      .mockResolvedValueOnce({ id: "command-shell", name: "bash", cwd: "D:/workspace" }),
+    write: vi.fn().mockResolvedValue(undefined), resize: vi.fn().mockResolvedValue(undefined), dispose: vi.fn().mockResolvedValue(undefined),
+    onData: vi.fn(() => () => {}), onExit: vi.fn(() => () => {}),
+  };
+  vi.stubGlobal("ompStudioTerminal", api);
+  let store!: ReturnType<typeof useTerminalSessions>["store"];
+  function Probe() { store = useTerminalSessions().store; return null; }
+  const view = render(<TerminalSessionsProvider><Probe /><TerminalPane workspaceId="work" sessionId="session" conversationId="chat" visible /></TerminalSessionsProvider>);
+  await waitFor(() => expect(mocks.terminals).toHaveLength(1));
+  await act(async () => { await store.create(null, "work", "session", "chat", { shell: "bash", text: "pwd" }); });
+  await waitFor(() => expect(view.container.querySelector('[role="option"][aria-selected="true"]')?.textContent).toContain("bash"));
+  expect(mocks.terminals).toHaveLength(2);
+  expect(api.dispose).not.toHaveBeenCalled();
+  expect(api.write).not.toHaveBeenCalled();
+});

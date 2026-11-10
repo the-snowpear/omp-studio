@@ -1,8 +1,9 @@
 import { previewModelAdaptation } from "./preview/modelAdaptationPreview";
 import { dragList } from "./test/drag-list";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type {
+  ClientEvent,
   CommandReceipt,
   CommandRequestId,
   ModelConfigReadModel,
@@ -194,6 +195,76 @@ function fakeClient(probe: ModelDiscoveryResult | Error = PROBE_OK, modelConfig?
     readonly command: ReturnType<typeof vi.fn>;
   };
 }
+
+it("updates the catalog from the model navigation without a duplicate evaluation tab", async () => {
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  const client = fakeClient(PROBE_OK, {
+    ...readModel(),
+    catalog: { version: "old-version", upstreamCommit: "old", source: "builtin" },
+  });
+  vi.mocked(client.subscribe).mockImplementation((scope, listener) => {
+    if (scope.scope === "command") {
+      queueMicrotask(() => listener({
+        kind: "command.receipt",
+        receipt: {
+          requestId: scope.requestId,
+          commandName: "models.catalog.refresh",
+          status: "completed",
+          result: { updated: true, catalog: { version: "new-version", upstreamCommit: "new", source: "updated" }, message: "模型目录已更新" },
+          observedAt: T0,
+        },
+      } as unknown as ClientEvent));
+    }
+    return () => undefined;
+  });
+  render(<PreviewModeProvider switchEnabled><ModelConfigPage client={client} /></PreviewModeProvider>);
+
+  expect(await screen.findByText("old-version")).toBeTruthy();
+  expect(screen.queryByRole("tab", { name: "基准测试" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "检查并更新目录" }));
+  expect(await screen.findByText("new-version")).toBeTruthy();
+  expect(client.command).toHaveBeenCalledWith("models.catalog.refresh", {});
+});
+
+it("keeps catalog updates local in unmarked preview mode", async () => {
+  const url = window.location.href;
+  window.history.replaceState({}, "", "?marks=off");
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
+  const client = fakeClient();
+  try {
+    render(<PreviewModeProvider switchEnabled><ModelConfigPage client={client} /></PreviewModeProvider>);
+    expect(await screen.findByText("2026.10")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "检查并更新目录" }));
+    expect(client.command).not.toHaveBeenCalled();
+    expect(screen.queryByText("演示模式：已模拟目录更新，当前草稿和真实配置保持不变。")).toBeNull();
+  } finally {
+    window.history.replaceState({}, "", url);
+  }
+});
+
+it("manages search credentials only in the provider library and keeps preview local", async () => {
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
+  const client = fakeClient();
+  render(<PreviewModeProvider switchEnabled><ModelConfigPage client={client} /></PreviewModeProvider>);
+  fireEvent.click(await screen.findByRole("tab", { name: /网络搜索/ }));
+  const providerName = await screen.findByText("Exa", { selector: ".wsx-pool-row .wsx-provider-name" });
+  expect(screen.queryByText("搜索凭据")).toBeNull();
+  const row = providerName.closest(".wsx-pool-row") as HTMLElement;
+  expect(within(row).getByText("免凭证")).toBeTruthy();
+  fireEvent.click(await within(row).findByRole("button", { name: "配置凭证" }));
+  const modal = screen.getByRole("dialog", { name: "配置 Exa 凭证" });
+  const input = within(modal).getByLabelText("API 密钥") as HTMLInputElement;
+  expect(input.type).toBe("password");
+  expect(within(modal).queryByRole("button", { name: "登录" })).toBeNull();
+  fireEvent.change(input, { target: { value: "preview-key" } });
+  fireEvent.click(within(modal).getByRole("button", { name: "保存密钥" }));
+  await waitFor(() => expect(within(modal).getByText("已就绪")).toBeTruthy());
+  expect(input.value).toBe("");
+  expect(within(row).getByText("已就绪")).toBeTruthy();
+  fireEvent.click(within(modal).getByRole("button", { name: "删除凭据 API key" }));
+  await waitFor(() => expect(within(row).getByText("免凭证")).toBeTruthy());
+  expect(client.command).not.toHaveBeenCalled();
+});
 
 async function openEditor(options: { preview?: boolean; client?: StudioClient; modelConfig?: ModelConfigReadModel } = {}) {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview ? "1" : "0");

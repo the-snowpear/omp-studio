@@ -1,23 +1,16 @@
 import { AppSelect } from "../AppSelect";
 import { WebRoleChain } from "./WebRoleChain";
+import { explicitSearchChain, searchChain } from "./webSearchChain";
 /**
- * Web Search configuration panel (4th tab of the model-config page).
- *
- * Dual-zone layout mirroring the runtime's chain semantics: a hero card that
- * previews the *effective* chain (explicit `providers.webSearchOrder` first,
- * then the auto chain of credential-ready engines in built-in order), a
- * priority-chain list re-ordered with the same pointer-drag mechanics as the
- * provider cards, and a searchable provider library with credential filters
- * and real brand marks. Credentials are edited in an in-place modal (OAuth
- * login/logout via `models.login.*` plus env-var hints) instead of jumping
- * to the providers tab. All writes go through the single
- * `models.webSearch.set` command; preview mode only mutates the demo read
- * model.
+ * Search-chain drafts and provider credential management.
+ * Search settings use models.webSearch.set; API keys and selected credential
+ * removal use the connected Runtime's native auth store. Preview stays local.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useListReorder } from "./useListReorder";
 import { createPortal } from "react-dom";
+import { modelAcceptsRole } from "@omp-studio/client-contract";
 import type { ModelWebSearchSetInput, StudioClient, WebSearchConfigReadModel, WebSearchProviderRecord } from "@omp-studio/client-contract";
 import { Brand, hasBrand } from "../brands";
 import { Icon } from "../icons";
@@ -25,6 +18,7 @@ import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { ToastHost } from "../ToastHost";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { credentialProviders, useSearchCredentials } from "./useSearchCredentials";
 
 const TIMEOUT_OPTIONS = [30, 60, 120, 180, 300];
 
@@ -97,6 +91,9 @@ function sameList(left: ReadonlyArray<string>, right: ReadonlyArray<string>): bo
 
 interface WebSearchPanelProps {
   readonly client: StudioClient;
+  readonly sessionId?: string | undefined;
+  readonly visible?: boolean;
+  readonly onReadyCount?: (count: number) => void;
   readonly preview: boolean;
   readonly webSearch: WebSearchConfigReadModel;
   readonly models?: readonly import("@omp-studio/client-contract").AvailableModelRecord[];
@@ -108,27 +105,56 @@ interface WebSearchPanelProps {
   readonly onPreviewSave: (next: WebSearchConfigReadModel) => void;
 }
 
-type CredState = "ready" | "missing" | "free";
+type CredState = "ready" | "missing" | "free" | "unknown";
+type SearchProvider = WebSearchProviderRecord & { credentialUnknown?: boolean };
 type PoolFilter = "all" | "ready" | "missing" | "free" | "excluded";
 
-function credStateOf(provider: WebSearchProviderRecord | undefined): CredState {
+function credStateOf(provider: SearchProvider | undefined): CredState {
   if (!provider) return "missing";
+  if (provider.hasCredential) return "ready";
   if (provider.credentialFree) return "free";
-  return provider.hasCredential ? "ready" : "missing";
+  return provider.credentialUnknown ? "unknown" : "missing";
 }
 
-export function WebSearchPanel({ client, preview, webSearch, models = [], loginAvailable, onSaved, onPreviewSave }: WebSearchPanelProps) {
+export function WebSearchPanel({ client, preview, sessionId, visible = true, onReadyCount, webSearch, models = [], loginAvailable, onSaved, onPreviewSave }: WebSearchPanelProps) {
   const { t } = useI18n();
   const { marks } = usePreviewMode();
   const [draft, setDraft] = useState<Draft>(() => draftFromReadModel(webSearch));
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [routingDraft, setRoutingDraft] = useState(webSearch.routing);
+  const [chainPickerId, setChainPickerId] = useState<string | null>(null);
+  const [chainPickerSelector, setChainPickerSelector] = useState("");
+  useEffect(() => { setRoutingDraft(webSearch.routing); }, [webSearch.routing]);
+  const searchModels = useMemo(() => models.filter(model => modelAcceptsRole("web", model)), [models]);
+  const choicesFor = (id: string) => searchModels.filter(model => model.provider === "web" && model.id === id || model.webSearch === id);
+  const currentChain = routingDraft ? searchChain(routingDraft, searchModels) : [];
+  const addToChain = (selector: string) => {
+    setRoutingDraft(current => current ? explicitSearchChain(current, [...new Set([...searchChain(current, searchModels), selector])]) : current);
+    setChainPickerId(null);
+    setFlash(t("modelConfig.webSearchChainDraftUpdated"));
+  };
+  const chainButton = (selector: string) => <button type="button" className="btn small outline"
+    disabled={!selector || currentChain.includes(selector)} onClick={() => addToChain(selector)}>
+    {currentChain.includes(selector) ? <Icon name="check" extra="sm" /> : <Icon name="plus" extra="sm" />}
+    {t(currentChain.includes(selector) ? "modelConfig.webSearchInChain" : "modelConfig.webSearchAddToChain")}
+  </button>;
   const [poolQuery, setPoolQuery] = useState("");
   const [poolFilter, setPoolFilter] = useState<PoolFilter>("all");
   const [credModalId, setCredModalId] = useState<string | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
+  const credentials = useSearchCredentials(client, preview, sessionId, visible, webSearch.providers);
+  const providers = useMemo<SearchProvider[]>(() => webSearch.providers.map(provider => {
+    const ids = credentialProviders(provider);
+    const states = ids.flatMap(id => credentials.statuses.get(id) ?? []);
+    return { ...provider, hasCredential: states.some(row => row.configured),
+      credentialUnknown: ids.length > 0 && !credentials.loaded };
+  }), [webSearch.providers, credentials.statuses, credentials.loaded]);
+  useEffect(() => { onReadyCount?.(providers.filter(provider => provider.credentialFree || provider.hasCredential).length); }, [providers, onReadyCount]);
+  const credLabel = (state: CredState) => t(state === "ready" ? "modelConfig.webSearchCredReady" : state === "free" ? "modelConfig.webSearchCredFree" : state === "unknown" ? "modelConfig.webSearchCredUnknown" : "modelConfig.webSearchCredMissing");
+
 
   // Re-sync the draft when the read model changes (real save refresh).
   useEffect(() => {
@@ -148,7 +174,7 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
     },
   });
 
-  const byId = useMemo(() => new Map(webSearch.providers.map((provider) => [provider.id, provider])), [webSearch.providers]);
+  const byId = useMemo(() => new Map(providers.map((provider) => [provider.id, provider])), [providers]);
 
   const dirty = useMemo(() => {
     const base = draftFromReadModel(webSearch);
@@ -179,7 +205,7 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
   const priorityChain = draft.order
     .map((id) => byId.get(id))
     .filter((provider): provider is WebSearchProviderRecord => Boolean(provider));
-  const autoChain = webSearch.providers.filter(
+  const autoChain = providers.filter(
     (provider) => !inOrder.has(provider.id) && !inExclude.has(provider.id) && (provider.credentialFree || provider.hasCredential),
   );
 
@@ -187,21 +213,21 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
     let ready = 0;
     let missing = 0;
     let free = 0;
-    for (const provider of webSearch.providers) {
+    for (const provider of providers) {
       const cred = credStateOf(provider);
       if (cred === "ready") ready += 1;
       else if (cred === "free") free += 1;
-      else missing += 1;
+      else if (cred === "missing") missing += 1;
     }
     return { ready, missing, free, excluded: draft.exclude.length };
-  }, [webSearch.providers, draft.exclude]);
+  }, [providers, draft.exclude]);
 
   const libraryRows = useMemo(() => {
     const orderSet = new Set(draft.order);
-    const excludeSet = new Set(draft.exclude);
+    const excludeSet = new Set(webSearch.routing ? [] : draft.exclude);
     const query = poolQuery.trim().toLowerCase();
-    return webSearch.providers
-      .filter((provider) => !orderSet.has(provider.id))
+    return providers
+      .filter((provider) => Boolean(webSearch.routing) || !orderSet.has(provider.id))
       .filter((provider) => {
         if (poolFilter === "excluded") return excludeSet.has(provider.id);
         // "all" keeps excluded rows visible (dimmed, sunk to the bottom).
@@ -220,7 +246,7 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
           || provider.description.toLowerCase().includes(query);
       })
       .sort((left, right) => Number(excludeSet.has(left.id)) - Number(excludeSet.has(right.id)));
-  }, [webSearch.providers, poolQuery, poolFilter, draft.order, draft.exclude]);
+  }, [providers, webSearch.routing, poolQuery, poolFilter, draft.order, draft.exclude]);
 
   const move = (index: number, delta: -1 | 1) => {
     const target = index + delta;
@@ -246,97 +272,28 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
   const openCredModal = (id: string) => {
     setApiKeyDraft("");
     setCredModalId(id);
+    void credentials.reload();
   };
 
-  const setProviderCredential = (id: string, hasCredential: boolean, kind?: "api-key" | "oauth") => {
-    onPreviewSave({
-      ...webSearch,
-      providers: webSearch.providers.map((provider) => {
-        if (provider.id !== id) return provider;
-        const { credentialKind: _previous, ...rest } = provider;
-        return { ...rest, hasCredential, ...(kind !== undefined ? { credentialKind: kind } : {}) };
-      }),
-    });
-  };
-
-  const runApiKeySave = async (providerId: string) => {
+  const runApiKeySave = async (provider: string) => {
     const apiKey = apiKeyDraft.trim();
-    if (apiKey.length === 0) return;
-    if (preview) {
-      setProviderCredential(providerId, true, "api-key");
-      setApiKeyDraft("");
-      setFlash(t("modelConfig.webSearchApiKeySaved"));
-      return;
-    }
-    setLoginBusy(true);
-    try {
-      const handle = await client.command("models.webSearch.credential.set", { providerId, apiKey } as never);
-      await waitReceipt(client, handle.requestId);
-      setApiKeyDraft("");
-      setFlash(t("modelConfig.webSearchApiKeySaved"));
-      onSaved();
-    } catch (error) {
-      setFlash(hostErrorMessage(error, t("modelConfig.saveFailed")));
-    } finally {
-      setLoginBusy(false);
-    }
+    setApiKeyDraft("");
+    if (await credentials.save(provider, apiKey)) setFlash(t("modelConfig.webSearchApiKeySaved"));
   };
-
-  const runApiKeyRemove = async (providerId: string) => {
-    if (preview) {
-      setProviderCredential(providerId, false);
-      setFlash(t("modelConfig.webSearchApiKeyRemoved"));
-      return;
-    }
-    setLoginBusy(true);
-    try {
-      const handle = await client.command("models.webSearch.credential.remove", { providerId } as never);
-      await waitReceipt(client, handle.requestId);
-      setFlash(t("modelConfig.webSearchApiKeyRemoved"));
-      onSaved();
-    } catch (error) {
-      setFlash(hostErrorMessage(error, t("modelConfig.saveFailed")));
-    } finally {
-      setLoginBusy(false);
-    }
+  const runCredentialRemove = async (provider: string, credentialId: number) => {
+    if (await credentials.remove(provider, credentialId)) setFlash(t("modelConfig.webSearchApiKeyRemoved"));
   };
-
-  const runLogin = async (loginId: string, id: string) => {
-    if (preview) {
-      setProviderCredential(id, true, "oauth");
-      if (marks) setFlash(t("modelConfig.toastDemoLogin"));
-      return;
-    }
+  const runLogin = async (loginId: string) => {
+    if (preview) { if (marks) setFlash(t("modelConfig.toastDemoLogin")); return; }
     setLoginBusy(true);
     try {
-      const handle = await client.command("models.login.start", { providerId: loginId } as never);
+      const handle = await client.command("models.login.start", { providerId: loginId });
       await waitReceipt(client, handle.requestId);
+      await credentials.reload();
       setFlash(t("modelConfig.webSearchLoginDone"));
-      onSaved();
     } catch (error) {
       setFlash(hostErrorMessage(error, t("modelConfig.toastLoginFailed", { providerId: loginId })));
-    } finally {
-      setLoginBusy(false);
-    }
-  };
-
-  const runLogout = async (loginId: string, id: string) => {
-    if (preview) {
-      setProviderCredential(id, false);
-      if (marks) setFlash(t("modelConfig.toastDemoLogout"));
-      return;
-    }
-    setLoginBusy(true);
-    try {
-      const handle = await client.command("models.login.logout", { providerId: loginId } as never);
-      await waitReceipt(client, handle.requestId);
-      setFlash(t("modelConfig.webSearchLogoutDone"));
-      onSaved();
-    } catch (error) {
-      setFlash(hostErrorMessage(error, t("modelConfig.toastLogoutFailed", { providerId: loginId })));
-    } finally {
-      setLoginBusy(false);
-    }
+    } finally { setLoginBusy(false); }
   };
 
   const copyEnvKeys = (keys: ReadonlyArray<string>) => {
@@ -431,15 +388,14 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
     const provider = credModalProvider;
     const cred = credStateOf(provider);
     const envKeys = provider.envKeys ?? [];
-    const loginId = provider.loginId;
+    const states = credentialProviders(provider).flatMap(id => credentials.statuses.get(id) ?? []);
     const apiKeyId = provider.apiKeyId;
-    const kindLabel = provider.credentialKind === "api-key"
-      ? t("modelConfig.webSearchCredKindApiKey")
-      : provider.credentialKind === "oauth"
-        ? t("modelConfig.webSearchCredKindOauth")
-        : provider.credentialKind === "env"
-          ? t("modelConfig.webSearchCredKindEnv")
-          : null;
+    const keyState = apiKeyId ? credentials.statuses.get(apiKeyId) : undefined;
+    const loginState = provider.loginId ? credentials.statuses.get(provider.loginId) : undefined;
+    const loginId = loginState && !loginState.apiKeyLogin ? provider.loginId : undefined;
+    const source = states.find(state => state.configured);
+    const kindLabel = source?.source ? t("modelConfig.webSearchSource_" + source.source) : null;
+    const canEdit = credentials.available && credentials.loaded && !credentials.busy && !loginBusy;
     return (
       <div className="wsx-modal-backdrop" onClick={() => setCredModalId(null)}>
         <div
@@ -464,82 +420,60 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
               <span className="wsx-modal-status-right">
                 {kindLabel ? <span className="wsx-modal-kind">{kindLabel}</span> : null}
                 <span className={`wsx-cred-chip is-${cred}`}>
-                  {cred === "ready" ? t("modelConfig.webSearchCredReady") : cred === "free" ? t("modelConfig.webSearchCredFree") : t("modelConfig.webSearchCredMissing")}
+                  {credLabel(cred)}
                 </span>
               </span>
             </div>
-            {provider.credentialFree ? (
-              <p className="wsx-modal-hint">{t("modelConfig.webSearchFreeNoCred")}</p>
-            ) : (
-              <>
-                {apiKeyId !== undefined ? (
-                  <div className="wsx-modal-keysec">
-                    <span className="wsx-modal-keylabel">{t("modelConfig.webSearchApiKeyLabel")}</span>
-                    <div className="wsx-modal-keyrow">
-                      <input
-                        type="password"
-                        value={apiKeyDraft}
-                        placeholder={t("modelConfig.webSearchApiKeyPlaceholder", { name: provider.name })}
-                        autoComplete="off"
-                        onChange={(event) => setApiKeyDraft(event.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className="btn small primary"
-                        disabled={loginBusy || apiKeyDraft.trim().length === 0}
-                        onClick={() => void runApiKeySave(provider.id)}
-                      >
-                        {t("modelConfig.webSearchApiKeySave")}
-                      </button>
-                      {provider.credentialKind === "api-key" ? (
-                        <button type="button" className="btn small outline" disabled={loginBusy} onClick={() => void runApiKeyRemove(provider.id)}>
-                          {t("modelConfig.webSearchApiKeyRemove")}
-                        </button>
-                      ) : null}
-                    </div>
-                    <p className="wsx-modal-hint">{t("modelConfig.webSearchApiKeyHint")}</p>
+            {!credentials.available && credentialProviders(provider).length > 0 ? <p className="wsx-modal-hint">{t("modelConfig.webSearchRuntimeRequired")}</p> : null}
+            {credentials.error ? <p className="wsx-modal-error" role="alert">{credentials.error}</p> : null}
+            {provider.credentialFree ? <p className="wsx-modal-hint">{t(apiKeyId ? "modelConfig.webSearchOptionalKey" : "modelConfig.webSearchFreeNoCred")}</p> : null}
+            {apiKeyId ? (
+              <div className="wsx-modal-keysec">
+                <div className="wsx-modal-keyheading">
+                  <label className="wsx-modal-keylabel" htmlFor="search-api-key">{t("modelConfig.webSearchApiKeyLabel")}</label>
+                  {keyState?.keyUrl ? <button type="button" className="btn small" onClick={() => { if (!preview) void window.ompStudioChrome?.openUrl({ url: keyState.keyUrl! }); }}>{t("runtimeUpgrade.authWebsite")}<Icon name="external" extra="sm" /></button> : null}
+                </div>
+                <div className="wsx-modal-keyrow">
+                  <input id="search-api-key" type="password" value={apiKeyDraft} disabled={!canEdit}
+                    placeholder={t("modelConfig.webSearchApiKeyPlaceholder", { name: provider.name })}
+                    autoComplete="new-password" onChange={event => setApiKeyDraft(event.target.value)} />
+                  <button type="button" className="btn small primary" disabled={!canEdit || !apiKeyDraft.trim()} onClick={() => void runApiKeySave(apiKeyId)}>
+                    {credentials.busy ? t("common.saving") : t("modelConfig.webSearchApiKeySave")}
+                  </button>
+                </div>
+                <p className="wsx-modal-hint">{t("modelConfig.webSearchApiKeyHint")}</p>
+              </div>
+            ) : provider.id === "searxng" ? <p className="wsx-modal-hint">{t("modelConfig.webSearchSearxngHint")}</p> : null}
+            {states.some(state => state.credentials.length > 0) ? (
+              <div className="wsx-modal-saved">
+                <b className="wsx-modal-keylabel">{t("modelConfig.webSearchStoredCredentials")}</b>
+                {states.flatMap(state => state.credentials.map(row => (
+                  <div className="wsx-modal-credential" key={state.provider + ":" + row.id}>
+                    <span><b>{row.label}</b><small>{state.provider} · {row.type === "api_key" ? "API Key" : "OAuth"}</small></span>
+                    <button type="button" className="btn small outline" disabled={!canEdit}
+                      aria-label={t("modelConfig.webSearchRemoveCredential", { name: row.label })}
+                      onClick={() => void runCredentialRemove(state.provider, row.id)}>{t("common.delete")}</button>
                   </div>
-                ) : provider.id === "searxng" ? (
-                  <p className="wsx-modal-hint">{t("modelConfig.webSearchSearxngHint")}</p>
-                ) : null}
-                {loginId !== undefined || envKeys.length > 0 ? (
-                  <div className="wsx-modal-alt">
-                    <span className="wsx-modal-alt-label">{t("modelConfig.webSearchOtherWays")}</span>
-                    {loginId !== undefined ? (
-                      <div className="wsx-modal-actions">
-                        {cred === "ready" && provider.credentialKind !== "api-key" ? (
-                          <button type="button" className="btn small outline" disabled={loginBusy} onClick={() => void runLogout(loginId, provider.id)}>
-                            <Icon name="x" extra="sm" />{t("modelConfig.webSearchLogout")}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn small outline"
-                            disabled={loginBusy || (!preview && !loginAvailable)}
-                            title={!preview && !loginAvailable ? t("modelConfig.webSearchLoginUnavailable", { id: loginId }) : undefined}
-                            onClick={() => void runLogin(loginId, provider.id)}
-                          >
-                            {t("modelConfig.webSearchLogin")}
-                          </button>
-                        )}
-                      </div>
-                    ) : null}
-                    {!preview && !loginAvailable && loginId !== undefined ? (
-                      <p className="wsx-modal-hint">{t("modelConfig.webSearchLoginUnavailable", { id: loginId })}</p>
-                    ) : null}
-                    {envKeys.length > 0 ? (
-                      <div className="wsx-modal-env">
-                        <span>{t("modelConfig.webSearchEnvHint")}</span>
-                        <code>{envKeys.join(" · ")}</code>
-                        <button type="button" className="btn small outline" onClick={() => copyEnvKeys(envKeys)}>
-                          <Icon name="copy" extra="sm" />{t("modelConfig.webSearchCopyEnv")}
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </>
-            )}
+                )))}
+                <p className="wsx-modal-hint">{t("modelConfig.webSearchRemoveHint")}</p>
+              </div>
+            ) : null}
+            {provider.id === "ollama" ? <p className="wsx-modal-hint">{t("modelConfig.webSearchOllamaShared")}</p> : null}
+            {loginId || envKeys.length > 0 ? (
+              <div className="wsx-modal-alt">
+                <span className="wsx-modal-alt-label">{t("modelConfig.webSearchOtherWays")}</span>
+                {loginId ? <div className="wsx-modal-actions">
+                  <button type="button" className="btn small outline" disabled={!canEdit || (!preview && !loginAvailable)} onClick={() => void runLogin(loginId)}>
+                    {t("modelConfig.webSearchLogin")}
+                  </button>
+                  {!preview && !loginAvailable ? <span className="wsx-modal-hint">{t("modelConfig.webSearchLoginUnavailable", { id: loginId })}</span> : null}
+                </div> : null}
+                {envKeys.length > 0 ? <div className="wsx-modal-env">
+                  <span>{t("modelConfig.webSearchEnvHint")}</span><code>{envKeys.join(" · ")}</code>
+                  <button type="button" className="btn small outline" onClick={() => copyEnvKeys(envKeys)}><Icon name="copy" extra="sm" />{t("modelConfig.webSearchCopyEnv")}</button>
+                </div> : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -571,7 +505,7 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
         </div>}
       </section>
 
-      {webSearch.routing ? <WebRoleChain client={client} preview={preview} routing={webSearch.routing} models={models} onSaved={onSaved} onPreviewSave={routing => onPreviewSave({ ...webSearch, routing })} /> : (
+      {routingDraft ? <WebRoleChain client={client} preview={preview} routing={routingDraft} onChange={setRoutingDraft} models={models} onSaved={onSaved} onPreviewSave={routing => onPreviewSave({ ...webSearch, routing })} /> : (
 <section className="wsx-section">
         <div className="wsx-section-head">
           <div>
@@ -602,7 +536,7 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
                   <span className="wsx-provider-id">{provider.id}</span>
                 </span>
                 <span className={`wsx-cred-chip is-${credStateOf(provider)}`}>
-                  {credStateOf(provider) === "ready" ? t("modelConfig.webSearchCredReady") : credStateOf(provider) === "free" ? t("modelConfig.webSearchCredFree") : t("modelConfig.webSearchCredMissing")}
+                  {credLabel(credStateOf(provider))}
                 </span>
                 <span className="wsx-row-actions">
                   <button type="button" className="icon-btn small" aria-label={t("modelConfig.moveUp")} disabled={index === 0} onClick={() => move(index, -1)}><Icon name="chevron-u" extra="sm" /></button>
@@ -622,7 +556,7 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
         <div className="wsx-section-head">
           <div>
             <b>{t("modelConfig.webSearchLibraryTitle")}</b>
-            <span className="wsx-sub">{t("modelConfig.webSearchLibrarySubtitle")}</span>
+            <span className="wsx-sub">{t("modelConfig.webSearchLibrarySubtitle", { count: webSearch.providers.length })}</span>
           </div>
         </div>
         <div className="wsx-pool-toolbar">
@@ -647,7 +581,8 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
         <div className="wsx-pool-list">
           {libraryRows.map((provider) => {
             const cred = credStateOf(provider);
-            const excluded = inExclude.has(provider.id);
+            const excluded = !webSearch.routing && inExclude.has(provider.id);
+            const choices = choicesFor(provider.id);
             return (
               <div className={`wsx-pool-row${excluded ? " is-excluded" : ""}`} key={provider.id}>
                 <ProviderMark id={provider.id} />
@@ -657,10 +592,16 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
                 </span>
                 <span className="wsx-provider-desc" title={provider.description}>{provider.description}</span>
                 <span className={`wsx-cred-chip is-${cred}`}>
-                  {cred === "ready" ? t("modelConfig.webSearchCredReady") : cred === "free" ? t("modelConfig.webSearchCredFree") : t("modelConfig.webSearchCredMissing")}
+                  {credLabel(cred)}
                 </span>
                 <span className="wsx-row-actions">
-                  {webSearch.routing ? null : excluded ? (
+                  {webSearch.routing ? choices.length === 1 ? chainButton(choices[0]!.selector) : (
+                    <button type="button" className="btn small outline" disabled={choices.length === 0 || choices.every(model => currentChain.includes(model.selector))}
+                      data-tip={choices.length ? undefined : t("modelConfig.webSearchNoModels")}
+                      onClick={() => { setChainPickerId(chainPickerId === provider.id ? null : provider.id); setChainPickerSelector(choices.find(model => !currentChain.includes(model.selector))!.selector); }}>
+                      {t(!choices.length ? "modelConfig.webSearchNoModels" : choices.every(model => currentChain.includes(model.selector)) ? "modelConfig.webSearchInChain" : "modelConfig.webSearchAddToChain")}
+                    </button>
+                  ) : excluded ? (
                     <>
                       <span className="wsx-excluded-label">{t("modelConfig.webSearchExcludedLabel")}</span>
                       <button type="button" className="btn small outline" onClick={() => restore(provider.id)}><Icon name="refresh" extra="sm" />{t("modelConfig.webSearchRestore")}</button>
@@ -671,8 +612,14 @@ export function WebSearchPanel({ client, preview, webSearch, models = [], loginA
                       <button type="button" className="icon-btn small" aria-label={t("modelConfig.webSearchExclude", { name: provider.name })} data-tip={t("modelConfig.webSearchExclude", { name: provider.name })} onClick={() => addExclude(provider.id)}><Icon name="x" extra="sm" /></button>
                     </>
                   )}
-                  <button type="button" className="btn small outline" onClick={() => openCredModal(provider.id)}><Icon name="pencil" extra="sm" />{t("modelConfig.webSearchConfigure")}</button>
+                  <button type="button" className="btn small outline" onClick={() => openCredModal(provider.id)}><Icon name="key" extra="sm" />{t("modelConfig.webSearchConfigure")}</button>
                 </span>
+                {chainPickerId === provider.id ? <div className="wsx-pool-choice">
+                  <AppSelect aria-label={t("modelConfig.webSearchChooseProviderModel", { name: provider.name })} value={chainPickerSelector} onChange={event => setChainPickerSelector(event.target.value)}>
+                    {choices.filter(model => !currentChain.includes(model.selector)).map(model => <option value={model.selector} key={model.selector}>{model.name} · {model.selector}</option>)}
+                  </AppSelect>
+                  {chainButton(chainPickerSelector)}
+                </div> : null}
               </div>
             );
           })}

@@ -32,6 +32,7 @@ import { WorkspaceEmpty } from "./WorkspaceEmpty";
 import { ToolWindowTabs, WindowTabAdd, WindowTabs } from "./Tabs";
 import { ConversationLayoutPreview } from "./LayoutPreview";
 import { useWorkbenchPageMotion } from "./pageMotion";
+import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
 import "./workspace.css";
 
 export function ConversationWorkspace({ client, renderDocument }: { client: StudioClient; renderDocument: (client: StudioClient) => ReactNode }) {
@@ -53,6 +54,13 @@ export function ConversationWorkspace({ client, renderDocument }: { client: Stud
   const slotRefs = useMemo(() => Object.fromEntries((["title", "navigation", "sidebar", "conversationTitle", "right", "bottom", "bottomReveal", "page", "background"] as SharedRegion[]).map(region => [region, (node: HTMLDivElement | null) => { if (node) setSlots(previous => previous[region] === node ? previous : { ...previous, [region]: node }); }])) as Record<SharedRegion, (node: HTMLDivElement | null) => void>, []);
   useEffect(() => { window.addEventListener("pagehide", store.flush); return () => { window.removeEventListener("pagehide", store.flush); store.flush(); }; }, [store]);
   useEffect(() => () => store.cancelDrag?.(), [store]);
+  useEffect(() => sessionSwitchPerformance.register(deep => {
+    const counters: Record<string, number> = {};
+    for (const [name, owner] of [["real", real], ["demo", demo]] as const) {
+      for (const [key, value] of Object.entries(owner.getDiagnostics(deep))) counters[`${name}.${key}`] = value;
+    }
+    return counters;
+  }), [real, demo]);
   const main = state.views.find(view => view.placement === "main");
   const canvas = useRef<HTMLDivElement>(null);
   const canvasRef = useCallback((node: HTMLDivElement | null) => { canvas.current = node; slotRefs.bottomReveal(node); }, [slotRefs]);
@@ -104,8 +112,8 @@ export function ConversationWorkspace({ client, renderDocument }: { client: Stud
     {createPortal(<div className="dock-floating-layer">{state.views.filter(view => view.placement === "float" || view.placement === "native").map((view, order) => <ConversationWindow key={view.id} view={view} store={store} hosts={hosts} bounds={bounds} order={order} snapLayer={snapLayer} />)}</div>, document.body)}
     <ConversationLayoutPreview store={store} />
     {!windowed && state.views.some(view => view.minimized && view.placement !== "native") ? <div className="dock-pinned-capsules" role="group" aria-label="最小化的对话">{state.views.filter(view => view.minimized && view.placement !== "native").map(view => <MinimizedCapsule key={view.id} owner={store} capsuleId={view.id} locked={layoutLocked} onClick={() => store.focus(view.id)}><Icon name="message" extra="sm" /><span className="dock-capsule-title">{store.documentFor(view.id)?.title}</span><Icon name="restore" extra="sm" /></MinimizedCapsule>)}</div> : null}
-    {visited.current.real && real.getSnapshot().documents.map(record => <PreviewSurface key={`real:${record.id}`} preview={false}><ConversationDocumentHost enabled={!preview} record={record} client={client} store={real} hosts={real.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
-    {visited.current.demo && demo.getSnapshot().documents.map(record => <PreviewSurface key={`demo:${record.id}`} preview><ConversationDocumentHost enabled={preview} record={record} client={client} store={demo} hosts={demo.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
+    {visited.current.real && real.mountedDocuments().map(record => <PreviewSurface key={`real:${record.id}`} preview={false}><ConversationDocumentHost enabled={!preview} record={record} client={client} store={real} hosts={real.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
+    {visited.current.demo && demo.mountedDocuments().map(record => <PreviewSurface key={`demo:${record.id}`} preview><ConversationDocumentHost enabled={preview} record={record} client={client} store={demo} hosts={demo.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
   </WorkspaceContext.Provider></WindowFocusContext.Provider>;
 }
 
@@ -125,6 +133,7 @@ function ConversationDocumentHost({ enabled, record, client: initialClient, stor
   const surface = useSyncExternalStore(useCallback(listener => { host.listeners.add(listener); return () => { host.listeners.delete(listener); }; }, [host]), () => host.surface);
   const view = state.views.find(view => view.documentId === record.id);
   const active = enabled && record.id === state.activeDocumentId;
+  useLayoutEffect(() => { if (active) sessionSwitchPerformance.mark("switch.commit"); }, [active, record.id]);
   const [localDock] = useState(() => dock.fork({ target: record.ref.targetId ?? "local", project: record.ref.workspaceId ?? null, session: record.ref.sessionId ?? record.ref.draftId ?? record.id, ...(!record.ref.sessionId ? { draft: true } : {}) }, store.demo));
   const dockedVisible = useSyncExternalStore(localDock.subscribe, () => view?.placement !== "docked" || active && dockedPanelVisible(localDock.getSnapshot().layout, conversationPanelId(view.id)));
   const visible = enabled && !!view && conversationVisible(view, state) && dockedVisible;
@@ -158,10 +167,15 @@ function ConversationDocumentHost({ enabled, record, client: initialClient, stor
     close: { run: () => store.close(view.id), label: resolvedLanguage === "zh" ? `关闭 ${record.title}` : `Close ${record.title}`, tip: resolvedLanguage === "zh" ? "关闭对话视图" : "Close conversation view" },
   }], [view?.id, content, record.title, store, resolvedLanguage]);
   const releaseClient = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const releaseHost = hosts.retain(record.id);
     clearTimeout(releaseClient.current);
-    return () => { releaseClient.current = setTimeout(() => { void client.close(); }, 0); };
-  }, [client]);
+    return () => { releaseClient.current = setTimeout(() => {
+      void client.close();
+      localDock.dispose();
+      releaseHost();
+    }, 0); };
+  }, [client, localDock, hosts, record.id]);
   const onSelectTarget = async (targetId: string | null) => {
     const target = await registryRef.current.readyClient(targetId);
     const bootstrap = await target.bootstrap();

@@ -14,6 +14,8 @@ import { PanelRegistration } from "../dock/PanelRegistration";
 import { DockStore } from "../dock/store";
 import { createDefaultLayout } from "../dock/model";
 import { GitQuickCard } from "../git/GitQuickCard";
+import { GitDockMeter } from "../git/GitDockMeter";
+import { ChangesDockMeter } from "../conversation/ChangesDockMeter";
 import { GitWorkbench, type GitOpenIntent } from "../git/GitWorkbench";
 import { GitWorkspaceProvider } from "../git/GitWorkspaceContext";
 import { I18nProvider } from "../i18n";
@@ -64,8 +66,11 @@ function makeStore() {
     return fresh;
   }
   fresh.dispatch({ type: "hide", panels: ["environment", ...(params.has("spacingCards") ? [] : ["context" as const]), ...(params.has("cornerCards") ? [] : ["agents" as const])] });
-  fresh.dispatch({ type: "move", panels: ["git-quick"], target: { region: "rail" } });
+  fresh.dispatch({ type: "move", panels: params.has("foldedCards") ? ["git-quick", "changes"] : ["git-quick"], target: { region: "rail" } });
   if (params.has("spacingCards")) fresh.dispatch({ type: "move", panels: ["context"], target: { region: "rail" } });
+  if (params.has("foldedCards")) {
+    for (const panel of ["git-quick", "changes"] as const) fresh.dispatch({ type: "card", panel, collapsed: true });
+  }
   fresh.dispatch({ type: "railMode", mode: "expanded" });
   return fresh;
 }
@@ -82,6 +87,8 @@ function Surface() {
     composer.current?.focus();
   };
   return <GitWorkspaceProvider client={client}>
+    <GitDockMeter />
+    <ChangesDockMeter rows={[]} />
     <div style={{ padding: 10, display: "flex", gap: 8 }}>
       {[280, 320, 480].map(width => <button key={width} className="btn small outline" onClick={() => dock.dispatch({ type: "resize", region: "rail", size: width })}>{width}px</button>)}
       <button className="btn small outline" onClick={() => dock.dispatch({ type: "region", region: "right", visible: false })}>关闭侧栏</button>

@@ -23,7 +23,7 @@ export function ConversationLayoutPreview({ store }: { store: ConversationWorksp
   if (cell === undefined) return null;
   const canvas = document.querySelector<HTMLElement>("[data-conversation-canvas]")!;
   const bounds = canvas.getBoundingClientRect(), viewport = canvas.querySelector<HTMLElement>(".cw-snap-viewport");
-  const rect = snapCells(layout.template, layout.tree, store.manager.size(layout))[Number(cell)]!;
+  const rect = snapCells(layout.template, layout.tree, workspace?.size ?? store.manager.size(layout))[Number(cell)]!;
   return createPortal(<div className="dock-layout-preview" aria-hidden="true" style={{ left: bounds.x + rect.x - (viewport?.scrollLeft ?? 0), top: bounds.y + rect.y - (viewport?.scrollTop ?? 0), width: rect.width, height: rect.height }}>
     <ConversationPreview content={content} rect={rect} />
   </div>, document.body);

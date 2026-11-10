@@ -1,5 +1,6 @@
 import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
 import { useI18n } from "../i18n";
+import { Icon } from "../icons";
 import { useCallback, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { clampGitDiffHeight, GIT_DIFF_DEFAULT, GIT_DIFF_MIN, readGitDiffHeight, writeGitDiffHeight } from "./gitDiffMemory";
@@ -100,4 +101,10 @@ export function GitDiffResizer({
       onKeyDown={onKeyDown}
     />
   );
+}
+
+/** Wide Git keeps a diff column open; with no file picked it says how to fill it. Hidden when narrow. */
+export function GitDiffPlaceholder() {
+  const { t } = useI18n();
+  return <div className="git-diff-placeholder"><Icon name="diff" /><p>{t("git.pickFileForDiff")}</p></div>;
 }

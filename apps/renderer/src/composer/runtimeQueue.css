@@ -56,25 +56,10 @@
   border-top: 1px solid var(--border);
 }
 
-.composer-queues:has(.runtime-queue) {
-  max-height: min(24vh, 172px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  max-width: var(--doc-max-w);
-  margin: 0 auto;
-  scrollbar-gutter: stable;
-}
-.composer-queues .runtime-queue .qs-list {
+/* Inside the composer tray the tray itself scrolls; the list stays in flow. */
+.composer-tray .runtime-queue .qs-list {
   max-height: none;
   overflow: visible;
-}
-.composer-queues:has(.runtime-queue) .queue-strip {
-  margin-inline: 0;
-}
-/* Only the primary composer adopts the measured reading column. Hub/inspect
-   queue instances keep their own container and the legacy --doc-max-w cap. */
-.convo-wrap[data-reading-column] > .composer-region > .composer-queues:has(.runtime-queue) {
-  max-width: var(--conversation-width);
 }
 .convo-wrap[data-reading-column] > .composer-region > .composer-queues .runtime-queue .qs-text {
   overflow-wrap: anywhere;

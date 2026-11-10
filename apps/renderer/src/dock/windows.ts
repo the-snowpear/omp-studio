@@ -110,7 +110,7 @@ export class WorkbenchWindows {
   minimums(layout = this.state.snap): WindowMinimums {
     return Object.fromEntries(Object.entries(layout?.members ?? {}).map(([cell, id]) => [cell, this.get(id)?.minimum ?? WINDOW_MINIMUM]));
   }
-  size(layout = this.state.snap) { return layout ? snapSurfaceSize(layout.template, layout.tree, this.geometry.canvas, this.minimums(layout)) : this.geometry.canvas; }
+  size(layout = this.state.snap, additionalMinimums: WindowMinimums = {}) { return layout ? snapSurfaceSize(layout.template, layout.tree, this.geometry.canvas, { ...this.minimums(layout), ...additionalMinimums }) : this.geometry.canvas; }
   project(id: string, target: Exclude<WindowSnapTarget, { maximize: true }>): WindowLayout {
     const previous = this.state.snap;
     const same = previous?.template === target.template;

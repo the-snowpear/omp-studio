@@ -2,12 +2,13 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useEffect } from "react";
 import { DockProvider, DockPanel, DockSlot, useDock, useDockEngine } from "./DockContext";
+import { PanelInstances, PanelRegistration } from "./PanelRegistration";
 import { DockCardRegion, DockFloatingLayer, DockGroupRegion, DockRail } from "./DockRegions";
 import { dragPreview } from "./dragPreview";
 import { WORKBENCH_PANELS } from "../panels/registry";
-import { beginDockDrag, dockHitTest } from "./gestures";
+import { beginDockDrag, dockHitTest, previewBounds } from "./gestures";
 import { DockStore } from "./store";
-import { locatePanel } from "./model";
+import { createDefaultLayout, locatePanel } from "./model";
 import type { DockRegionId } from "./types";
 import type { PanelHosts } from "./hosts";
 
@@ -28,49 +29,56 @@ function geometry() {
 }
 
 describe("dock content lifetime", () => {
-  it("removes the context viewer backdrop as soon as a title drag starts", () => {
+  it.each(["context-viewer", "annotations"] as const)("removes the %s backdrop as soon as a title drag starts", panel => {
     geometry();
     const store = new DockStore(null);
     render(<DockProvider definitions={WORKBENCH_PANELS} store={store}>
       <div className="adaptive-workbench" />
-      <DockPanel id="context-viewer"><input aria-label="context draft" defaultValue="keep" /></DockPanel>
+      <DockPanel id={panel}><input aria-label="context draft" defaultValue="keep" /></DockPanel>
       <DockFloatingLayer />
     </DockProvider>);
-    act(() => store.dispatch({ type: "open", panel: "context-viewer" }));
+    act(() => store.dispatch({ type: "open", panel }));
     flush(); flush();
     const title = document.querySelector<HTMLElement>("[data-dock-modal] .dock-float-titlebar")!;
-    const rect = locatePanel(store.getSnapshot().layout, "context-viewer")?.rect;
+    const rect = locatePanel(store.getSnapshot().layout, panel)?.rect;
     const input = document.querySelector<HTMLInputElement>('[aria-label="context draft"]')!;
     fireEvent.pointerDown(title, { button: 0, pointerId: 1, clientX: 100, clientY: 40 });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 103, clientY: 40 });
-    expect(store.getSnapshot().modalPanel).toBe("context-viewer");
+    expect(store.getSnapshot().modalPanel).toBe(panel);
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 110, clientY: 40 });
     expect(store.getSnapshot().modalPanel).toBeNull();
     expect(document.querySelector(".dock-modal-backdrop")).toBeNull();
     expect(document.querySelector('[aria-label="context draft"]')).toBe(input);
     fireEvent.keyDown(window, { key: "Escape" });
     flush();
-    expect(locatePanel(store.getSnapshot().layout, "context-viewer")?.rect).toEqual(rect);
+    expect(locatePanel(store.getSnapshot().layout, panel)?.rect).toEqual(rect);
     expect(store.getSnapshot().modalPanel).toBeNull();
+    act(() => store.dispatch({ type: "hide", panels: [panel] }));
+    act(() => store.dispatch({ type: "open", panel }));
+    flush(); flush();
+    expect(store.getSnapshot().modalPanel).toBe(panel);
+    expect(document.querySelector(".dock-modal-backdrop")).not.toBeNull();
+    expect(locatePanel(store.getSnapshot().layout, panel)?.rect).toEqual(rect);
+    expect(document.querySelector('[aria-label="context draft"]')).toBe(input);
   });
 
-  it("keeps focus in the first context viewer and returns it when Esc closes the window", () => {
+  it.each(["context-viewer", "annotations"] as const)("keeps focus in the first %s and returns it when Esc closes the window", panel => {
     geometry();
     const store = new DockStore(null);
     const view = render(<DockProvider definitions={WORKBENCH_PANELS} store={store}>
       <div className="adaptive-workbench"><button aria-label="Context 构成详情">Context</button></div>
-      <DockPanel id="context-viewer"><button>Refresh snapshot</button></DockPanel>
+      <DockPanel id={panel}><button>Refresh snapshot</button></DockPanel>
       <DockFloatingLayer />
     </DockProvider>);
     const entry = view.getByRole("button", { name: "Context 构成详情" });
     entry.focus();
-    act(() => store.dispatch({ type: "open", panel: "context-viewer" }));
+    act(() => store.dispatch({ type: "open", panel }));
     flush(); flush();
     const dialog = document.querySelector<HTMLElement>('[data-dock-modal]')!;
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     expect(document.querySelector(".dock-modal-backdrop")).not.toBeNull();
     fireEvent.click(document.querySelector(".dock-modal-backdrop")!);
-    expect(store.getSnapshot().modalPanel).toBe("context-viewer");
+    expect(store.getSnapshot().modalPanel).toBe(panel);
     act(() => entry.focus());
     expect(document.activeElement).not.toBe(entry);
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
@@ -113,6 +121,7 @@ describe("dock tab chrome", () => {
   function setup() {
     geometry();
     const store = new DockStore(null);
+    store.dispatch({ type: "move", panels: ["changes", "git", "browser", "computer"], target: { region: "right" } });
     store.dispatch({ type: "move", panels: ["files"], target: { region: "float" } });
     const mounted = vi.fn(), unmounted = vi.fn();
     function Body() { useEffect(() => { mounted(); return unmounted; }, []); return <input aria-label="floating draft" defaultValue="keep" />; }
@@ -243,6 +252,7 @@ describe("conversation rail", () => {
     } });
     try {
       const store = new DockStore(null);
+      store.dispatch({ type: "card", panel: "agents", collapsed: false });
       store.dispatch({ type: "railMode", mode: "expanded" });
       function Surface() {
         const { layout } = useDock();
@@ -291,6 +301,7 @@ describe("conversation rail", () => {
   it("opens compact tools and retains drafts when switching the rail mode", () => {
     geometry();
     const store = new DockStore(null);
+    store.dispatch({ type: "card", panel: "agents", collapsed: false });
     store.dispatch({ type: "railMode", mode: "compact" });
     function Surface() {
       const { layout } = useDock();
@@ -351,6 +362,7 @@ describe("live dock drag", () => {
       return new DOMRect(60, 50, 400, 280);
     });
     const store = new DockStore(null);
+    store.dispatch({ type: "open", panel: "changes" });
     store.dispatch({ type: "move", panels: partial ? ["files", "git"] : ["files"], target: { region: "float", rect: { x: 0, y: 0, width: 560, height: 400 } } });
     let hosts!: PanelHosts;
     const mounted = vi.fn(), unmounted = vi.fn();
@@ -492,45 +504,45 @@ describe("live dock drag", () => {
     }
   });
 
-  it("keeps a fast large-distance exit moving after release, then hands back the same host", () => {
-    const { store, host, input, move } = setup(false, true);
-    let now = 0;
-    vi.spyOn(performance, "now").mockImplementation(() => now);
-    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: () => ({ cancel() {}, onfinish: null }) });
+  it("does not restart a landing animation for subpixel layout rounding", () => {
+    const animation = { cancel: vi.fn(), onfinish: null as (() => void) | null };
+    const animate = vi.fn(() => animation);
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
     try {
+      const { move } = setup(false, true);
       move(200, 200);
-      now = 16;
-      move(800, 400);
-      const preview = document.querySelector<HTMLElement>(".dock-drag-preview")!;
-      expect(preview.style.transform).toContain("translate(");
-      now = 32;
-      flush();
-      const renderedX = () => Number.parseFloat(preview.style.left) + Number.parseFloat(preview.style.transform.match(/translate\(([-\d.]+)px/)![1]!);
-      const beforeRetarget = renderedX();
-      move(1100, 600);
-      expect(renderedX()).toBeCloseTo(beforeRetarget);
-      now = 48;
-      flush();
-      expect(renderedX()).toBeGreaterThan(beforeRetarget);
-      fireEvent.pointerUp(window, { pointerId: 1, clientX: 1100, clientY: 600 });
-      expect(store.getSnapshot().layout.floats[0]!.rect).toMatchObject({ x: 840, y: 500 });
-      expect(dragPreview.snapshot()?.settling).toBe(true);
-      expect(host.classList.contains("is-drag-preview")).toBe(true);
-      for (let i = 0; i < 60 && dragPreview.snapshot(); i++) { now += 16; flush(); }
-      flush();
-      expect(dragPreview.snapshot()).toBeNull();
-      expect(document.querySelector(".dock-drag-preview")).toBeNull();
-      expect(host.classList.contains("is-drag-preview")).toBe(false);
-      expect(document.querySelector('[data-panel="files"]')).toBe(host);
-      expect(document.querySelector('[aria-label="live draft"]')).toBe(input);
-      expect(input.value).toBe("edited");
-      expect(host.scrollTop).toBe(37);
-    } finally {
-      delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
-    }
+      const preview = dragPreview.snapshot()!;
+      for (const delta of [0.00002, -0.00002, 0.00001]) {
+        act(() => dragPreview.show({ ...preview, rect: { ...preview.rect, y: preview.rect.y + delta } }));
+      }
+      expect(animate).toHaveBeenCalledOnce();
+      expect(animation.cancel).not.toHaveBeenCalled();
+      fireEvent.keyDown(window, { key: "Escape" });
+    } finally { delete (HTMLElement.prototype as Partial<HTMLElement>).animate; }
   });
 
-  it("animates a card dragged directly out of the sidebar and cancels cleanly", () => {
+  it("keeps a fast exit under the pointer and hands back the same host on release", () => {
+    const { store, host, input, move } = setup(false, true);
+    move(200, 200);
+    move(800, 400);
+    const preview = document.querySelector<HTMLElement>(".dock-drag-preview")!;
+    expect(preview.style.transform).toBe("");
+    expect(preview.style.left).toBe("790px");
+    expect(preview.style.top).toBe("390px");
+    move(1100, 600);
+    expect(preview.style.left).toBe("900px");
+    expect(preview.style.top).toBe("550px");
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 1100, clientY: 600 });
+    expect(store.getSnapshot().layout.floats[0]!.rect).toMatchObject({ x: 840, y: 500 });
+    expect(dragPreview.snapshot()).toBeNull();
+    expect(host.classList.contains("is-drag-preview")).toBe(false);
+    expect(document.querySelector('[data-panel="files"]')).toBe(host);
+    expect(document.querySelector('[aria-label="live draft"]')).toBe(input);
+    expect(input.value).toBe("edited");
+    expect(host.scrollTop).toBe(37);
+  });
+
+  it("keeps a card dragged out of the sidebar under the pointer and cancels cleanly", () => {
     const { store, host, input } = setup(false, true);
     fireEvent.keyDown(window, { key: "Escape" });
     act(() => store.dispatch({ type: "move", panels: ["files"], target: { region: "left" } }));
@@ -539,7 +551,10 @@ describe("live dock drag", () => {
     const source = document.querySelector<HTMLElement>('.sidebar [data-dock-card="files"] .dock-card-header')!;
     fireEvent.pointerDown(source, { pointerId: 2, button: 0, clientX: 100, clientY: 100 });
     fireEvent.pointerMove(window, { pointerId: 2, clientX: 950, clientY: 500 }); flush();
-    expect(document.querySelector<HTMLElement>(".dock-drag-preview")!.style.transform).toContain("translate(");
+    const preview = document.querySelector<HTMLElement>(".dock-drag-preview")!;
+    expect(preview.style.transform).toBe("");
+    expect(preview.style.left).toBe("790px");
+    expect(preview.style.top).toBe("482px");
     expect(store.getSnapshot().layout).toBe(start);
     fireEvent.keyDown(window, { key: "Escape" });
     flush();
@@ -548,6 +563,21 @@ describe("live dock drag", () => {
     expect(document.querySelector('[data-panel="files"]')).toBe(host);
     expect(document.querySelector('[aria-label="live draft"]')).toBe(input);
     expect(store.getSnapshot().layout).toBe(start);
+  });
+
+  it("stops scheduling drag updates when a tab strip cannot scroll further", () => {
+    const { move } = setup();
+    const strip = document.querySelector<HTMLElement>('.dock-group-region-right .dock-tabs')!;
+    Object.defineProperty(strip, "scrollLeft", { configurable: true, get: () => 0, set: () => {} });
+    Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [strip] });
+    const listener = vi.fn();
+    const release = dragPreview.subscribe(listener);
+    move(70, 100);
+    const updates = listener.mock.calls.length;
+    for (let index = 0; index < 4; index++) flush();
+    expect(listener).toHaveBeenCalledTimes(updates);
+    fireEvent.keyDown(window, { key: "Escape" });
+    release();
   });
 
   it("restores the same live host when cancelling a left snap", () => {
@@ -616,6 +646,20 @@ describe("dock pointer protocol", () => {
     Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [target] });
     return { store, source };
   }
+  it("previews hidden shared regions within their actual workbench area", () => {
+    geometry();
+    render(<div data-dock-workbench><div className="cw-navigation-slot" /><div className="cw-shell-main"><div className="cw-workbench"><div className="cw-right-slot" /></div></div></div>);
+    const box = (selector: string, rect: DOMRect) => vi.spyOn(document.querySelector<HTMLElement>(selector)!, "getBoundingClientRect").mockReturnValue(rect);
+    box("[data-dock-workbench]", new DOMRect(0, 36, 1600, 964));
+    box(".cw-navigation-slot", new DOMRect(0, 36, 56, 964));
+    box(".cw-shell-main", new DOMRect(328, 36, 1272, 964));
+    box(".cw-workbench", new DOMRect(328, 80, 1272, 884));
+    box(".cw-right-slot", new DOMRect(1600, 80, 0, 884));
+    const layout = createDefaultLayout();
+    const entry = new DOMRect(1300, 40, 32, 32);
+    expect(previewBounds({ target: { region: "right" }, rect: entry, label: "" }, layout, ["output"])).toEqual({ x: 1120, y: 80, width: 480, height: 884 });
+    expect(previewBounds({ target: { region: "bottom" }, rect: entry, label: "" }, layout, ["output"])).toEqual({ x: 328, y: 760, width: 1272, height: 240 });
+  });
   it("accepts the whole visible left sidebar while retaining precise dock targets", () => {
     geometry();
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
@@ -666,5 +710,47 @@ describe("dock pointer protocol", () => {
       document.querySelector<HTMLElement>('[data-dock-entry]')!.dataset.dockEntry = region;
       expect(dockHitTest(200, 100, true)?.target.region).toBe(region);
     }
+  });
+
+  it("gives every tool instance its own body and keeps their drafts apart", () => {
+    geometry();
+    const store = new DockStore(null);
+    render(<DockProvider definitions={WORKBENCH_PANELS} store={store}>
+      <div className="adaptive-workbench">
+        <div><DockSlot id="files" /></div>
+        <div><DockSlot id="files@2" /></div>
+      </div>
+      <PanelInstances base="files">{id => <input aria-label={`draft ${id}`} defaultValue="" />}</PanelInstances>
+    </DockProvider>);
+    flush(); flush();
+    const primary = document.querySelector<HTMLInputElement>('[aria-label="draft files"]')!;
+    fireEvent.change(primary, { target: { value: "left" } });
+    act(() => store.openIn("files", { region: "right" }));
+    flush(); flush();
+    const second = document.querySelector<HTMLInputElement>('[aria-label="draft files@2"]')!;
+    expect(second).not.toBe(primary);
+    expect(primary.isConnected).toBe(true);
+    fireEvent.change(second, { target: { value: "right" } });
+    expect(primary.value).toBe("left");
+    expect(document.querySelectorAll('[data-panel="files"]')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-panel="files@2"]')).toHaveLength(1);
+  });
+
+  it("registers the same body for a tool's extra instance", () => {
+    geometry();
+    const store = new DockStore(null);
+    store.dispatch({ type: "open", panel: "changes" });
+    render(<DockProvider definitions={WORKBENCH_PANELS} store={store}>
+      <div className="adaptive-workbench">
+        <div><DockSlot id="changes" /></div>
+        <div><DockSlot id="changes@2" /></div>
+      </div>
+      <PanelRegistration panels={{ changes: <input aria-label="changes body" /> }} />
+    </DockProvider>);
+    flush(); flush();
+    act(() => store.openIn("changes", { region: "left" }));
+    flush(); flush();
+    expect(document.querySelectorAll('[data-panel="changes@2"]')).toHaveLength(1);
+    expect(document.querySelectorAll('input[aria-label="changes body"]')).toHaveLength(2);
   });
 });

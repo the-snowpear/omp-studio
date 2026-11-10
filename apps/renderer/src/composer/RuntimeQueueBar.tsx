@@ -224,15 +224,17 @@ export function RuntimeQueueBar({
           onClick={() => setOpen(!open)}
         >
           <Icon name="queue" extra="sm" />
-          <span className="qs-title">
-            {zh ? "已提交" : "Submitted"} ×{result.total}
-          </span>
+          <span className="qs-title">{zh ? "已提交" : "Submitted"}</span>
+          <span className="qs-count">{result.total}</span>
           <span className="qs-note">
             {zh ? "由 Runtime 排队和执行" : "Queued and executed by Runtime"}
           </span>
           {preview && marks ? (
             <span className="chip gray xs">{zh ? "演示" : "Demo"}</span>
           ) : null}
+          <span className="qs-toggle" aria-hidden="true">
+            <Icon name={open ? "chevron-d" : "chevron-u"} extra="sm" />
+          </span>
         </button>
       </div>
       {error || result.compactionError ? <p role="alert">{error || result.compactionError}</p> : null}

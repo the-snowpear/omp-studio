@@ -31,6 +31,9 @@
   position: sticky;
   top: 0;
   z-index: var(--z-base);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
   /* .page-body 有 32px 左右内边距。用负外边距把这条栏铺满滚动区宽度，
      再用等量内边距把内容推回原位，这样它是一条不透明的横栏，而不是一块
      浮在内容上的方块。 */
@@ -2316,5 +2319,42 @@ body.is-wsx-sorting { cursor: grabbing; }
 .mc-thinking-config summary { cursor: pointer; font-size: 12px; }
 .mc-thinking-efforts { display: flex; flex-wrap: wrap; gap: 12px; }
 .mc-thinking-efforts label { display: inline-flex; align-items: center; gap: 5px; font-weight: 400; }
-.mc-catalog-update { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-block: 12px; }
+.mc-catalog-update { display: flex; flex: none; align-items: center; gap: var(--sp-4); margin-left: auto; color: var(--text-3); font-size: var(--fs-11); }
+.mc-catalog-status { display: inline-flex; align-items: baseline; gap: var(--sp-6); white-space: nowrap; }
+.mc-catalog-version { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+.mc-catalog-refresh { flex: none; }
+@media (max-width: 700px) {
+  .mc-catalog-version { display: none; }
+}
 .mc-thinking-adjustment { font-size: 11px; color: var(--text-muted, #868995); }
+
+
+/* Search credentials share the provider inspector; only saved rows can be removed. */
+.wsx-cred-chip.is-unknown { color: var(--text-3); background: var(--surface-2); }
+.wsx-cred-chip.is-unknown::before { background: var(--text-3); }
+.wsx-modal { max-height: min(720px, 80vh); overflow-y: auto; }
+.wsx-modal-keyheading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); }
+.wsx-modal-saved { display: flex; flex-direction: column; gap: var(--sp-8); padding-top: var(--sp-10); border-top: 1px solid var(--border); }
+.wsx-modal-credential { display: flex; align-items: center; gap: var(--sp-8); }
+.wsx-modal-credential > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.wsx-modal-credential b { font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.wsx-modal-credential small { color: var(--text-3); font-size: var(--fs-11); }
+.wsx-modal-error { margin: 0; color: var(--red); font-size: var(--fs-12); }
+
+.wsx-pool-choice { grid-column: 2 / -1; display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-8) 0; }
+.wsx-pool-choice .app-select { flex: 1; min-width: 0; }
+.wsx-pool-choice .wsx-row-actions { min-width: 0; }
+@media (max-width: 1100px) {
+  .wsx-pool-row { grid-template-columns: 26px minmax(120px, 1fr) 92px max-content; }
+  .wsx-pool-row .wsx-provider-desc { display: none; }
+}
+@media (max-width: 800px) {
+  .wsx-pool-row { grid-template-columns: 26px minmax(0, 1fr) 92px; padding-block: var(--sp-10); }
+  .wsx-pool-row > .wsx-row-actions { grid-column: 2 / -1; justify-content: flex-start; flex-wrap: wrap; }
+  .wsx-pool-choice { flex-wrap: wrap; }
+  .wsx-pool-choice .app-select { flex-basis: 100%; }
+}
+
+.wsx-chain-heading { display: flex; align-items: center; gap: var(--sp-12); }
+.wsx-chain-heading > .wsx-section-head { flex: 1; min-width: 0; }
+.wsx-chain-heading > .btn { flex: none; }

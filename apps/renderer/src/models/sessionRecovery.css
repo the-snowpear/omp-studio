@@ -39,8 +39,14 @@
   margin-inline-start: 8px;
 }
 
-/* minimap 轨道在 .convo-wrap 左边缘：卡片让出左侧，别压在轨道上。 */
+/* minimap 与停靠工具栏都浮在 .convo-wrap 内，恢复卡片须同时让出两侧。 */
 .session-model-recovery {
   min-width: 0;
   margin-left: calc(var(--sp-16) + var(--minimap-w) + 8px);
+}
+.convo-wrap:has(> .dock-rail-expanded) > .session-model-recovery {
+  margin-right: calc(var(--dock-rail-w, 320px) + var(--sp-12) + var(--sp-16));
+}
+.convo-wrap:has(> .dock-rail-compact) > .session-model-recovery {
+  margin-right: calc(48px + var(--sp-16));
 }
