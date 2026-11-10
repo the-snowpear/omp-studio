@@ -89,6 +89,7 @@ cargo build --release
 | 新会话 | 顶栏 New，调 Step 的 `new_session` |
 | 会话续接 | 重启后自动 `--continue`，从 transcript 重建历史 |
 |  thinking 档位 | **没有 UI**：当前模型只报 `off` 一个档位，manifest 里已如实标 limited |
+| 扩展 / MCP / 命令 | 顶栏 `Catalog` 抽屉：读 `step.plugin.json` 的 `mcpServers` + 一次 `get_commands` RPC |
 
 `cargo test` 25 个测试，含对真实适配器与真实 CLI 的端到端。
 
