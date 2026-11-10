@@ -2,6 +2,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
+const desktopModules = path.resolve(process.env.OMP_BROWSER_SMOKE_DESKTOP_MODULES ?? path.join(__dirname, "../apps/desktop/dist/src"));
+const importDesktop = file => import(pathToFileURL(path.join(desktopModules, file)).href);
 
 if (!process.versions.electron) {
   const { spawnSync } = require("node:child_process");
@@ -49,9 +52,11 @@ async function run() {
   await new Promise(resolve => server.listen(recovery ? Number(new URL(recovery.url).port) : 0, "127.0.0.1", resolve));
   const url = `http://127.0.0.1:${server.address().port}`;
   if (recovery) {
-    const { DesktopManagedBrowser } = await import("../apps/desktop/dist/src/managed-browser.js");
+    const { DesktopManagedBrowser } = await importDesktop("managed-browser.js");
     const main = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
     windows.push(main);
+    // Initialize the native host document just as the first-process fixture does.
+    await main.loadURL("about:blank");
     const manager = new DesktopManagedBrowser({ directory: recovery.directory, downloadsDirectory: path.join(temporary, "recovery-downloads"), windowFor: () => main });
     try {
       await manager.ready;
@@ -63,7 +68,10 @@ async function run() {
       assert.equal(manager.contents(recovery.active), undefined);
       await manager.present({ sessionId: "restore-chat", surfaceId: "restore", pageId: recovery.active, visible: true, bounds: { x: 0, y: 0, width: 640, height: 400 }, clip: { x: 0, y: 0, width: 640, height: 400 } });
       assert.equal(manager.contents(recovery.dormant), undefined);
-      await settle(() => manager.store.page(recovery.active).status === "ready", "Active page did not restore after full Electron restart");
+      await settle(() => manager.store.page(recovery.active).status === "ready", "Active page did not restore after full Electron restart").catch(error => {
+        console.error("Restore state", JSON.stringify({ page: manager.store.page(recovery.active), loading: manager.contents(recovery.active)?.isLoading() }));
+        throw error;
+      });
       const active = manager.contents(recovery.active);
       assert.equal(await active.executeJavaScript("document.cookie.includes('browser_login=retained')"), true);
       assert.equal(await active.executeJavaScript("document.querySelector('#text').value"), "");
@@ -159,7 +167,7 @@ async function run() {
   assert.equal(await evaluate("retained.value"), 42);
   record("DevTools handoff", `opened, closed and CDP available on same page; debugger detached=${detached}`);
 
-  const { DesktopManagedBrowser } = await import("../apps/desktop/dist/src/managed-browser.js");
+  const { DesktopManagedBrowser } = await importDesktop("managed-browser.js");
   const manager = new DesktopManagedBrowser({ directory: path.join(temporary, "managed"), downloadsDirectory: path.join(temporary, "downloads"), windowFor: () => main });
   try {
     const managed = await manager.create("native-chat", url, "human");
@@ -299,7 +307,7 @@ async function run() {
     fs.writeFileSync(path.join(temporary, "recovery.json"), JSON.stringify({ directory: recoveryDirectory, active: shared.id, dormant: isolated.id, url }));
   } finally { dialog.showMessageBox = originalDialog; await recoveryManager.dispose(); }
 
-  const { ManagedBrowserRelay } = await import("../apps/desktop/dist/src/managed-browser-relay.js");
+  const { ManagedBrowserRelay } = await importDesktop("managed-browser-relay.js");
   const { spawn } = require("node:child_process");
   const runtimeDirectory = path.join(temporary, "runtime");
   fs.mkdirSync(runtimeDirectory, { recursive: true });

@@ -40,4 +40,15 @@ CodeMirror 及语言目录不再出现在首屏静态依赖中。以上不是启
 
 `npm run check -- --only renderer --suite DeferredPanel --suite App --suite ModelConfigPage` 通过；Renderer 生产构建通过。基线合成工作台五次采样完成，其启动时间包含自动化启动成本，最终性能结论等待同条件对照。
 
-其余阶段仍在实施；尚未执行的验收不计为通过。
+### 托管网页活动
+
+`BrowserPageActivity` 归每个实际网页实例所有。可见窗口、加载、媒体、声音、DevTools、元素选择和在途操作阻止节流；最后一个保护结束后等待 30 秒。普通目录读取不续期。隐藏只降低调度，不导航、不销毁页面；真正关闭时清理计时器和窗口监听。所有 CDP 请求、attach 和截图都有活动生命周期，下载在完成／取消后释放保护。
+
+Electron 原生实验确认，单独设置后台节流不会立即更新停放页面的可见性。切换时通过一次原生 capture 同步可见性；Agent 的焦点模拟也随睡眠暂停、唤醒恢复。没有增加常驻轮询。
+
+- 单元回归覆盖 30 秒宽限期、所有保护条件、重复状态通知、重叠请求和退出清理。
+- 隔离原生页面：同一 1.2 秒采样窗口，动画 292 → 0 帧、10 ms 计时器 121 → 1 次。页面 ID、表单和 JavaScript 状态保留；35 秒 Agent 请求、错误清理、媒体、下载、最小化截图和恢复通过。这个数字属于受控 fixture，不是所有网站的 CPU 节省比例。
+- 真实 Runtime relay 验收覆盖正常／隔离子 Agent、接管、下载、Runtime 代次切换、关闭和重启；基线与当前代码各自使用全新配置完成完整流程。
+- 原冒烟夹具缺少当前 Runtime 的 SessionManager 身份、view-session 能力和 Eval owner；补齐后保持所有原断言。重启夹具还漏了首次进程已有的宿主 `about:blank` 初始化；基线同样超时，补齐初始化后通过，没有放宽超时或产品检查。
+
+证据：`outputs/streamline/browser/{baseline-full,current-full}.json`、`native-*/report.json` 与对应日志。失败实验保留原文件。两小时浏览器生命周期记录仍在运行；结束后另记结果。

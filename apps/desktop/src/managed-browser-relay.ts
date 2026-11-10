@@ -167,17 +167,20 @@ export class ManagedBrowserRelay implements ManagedBrowserRuntime {
   async #attach(link: Link, tabId: number): Promise<WebContents> {
     const page = this.#page(link, tabId);
     const contents = await this.options.manager.ensure(page.id);
-    if (link.attached.has(tabId) && contents.debugger.isAttached()) return contents;
-    if (contents.isDevToolsOpened()) throw new Error("DevTools is open. Return browser control after closing DevTools.");
-    if (!contents.debugger.isAttached()) contents.debugger.attach("1.3");
-    const message = (_event: Electron.Event, method: string, params: Record<string, unknown>, sessionId?: string) => this.#send(link, { t: "cdpEvent", tabId, method, params, ...(sessionId ? { sessionId } : {}) });
-    const detach = (_event: Electron.Event, reason: string) => {
-      contents.debugger.removeListener("message", message); link.attached.delete(tabId);
-      this.#send(link, { t: "detached", tabId, reason, relayInitiated: this.options.manager.store.state(page.sessionId).control !== "agent" });
-    };
-    link.attached.set(tabId, { contents, message, detach });
-    contents.debugger.on("message", message); contents.debugger.once("detach", detach);
-    return contents;
+    const release = this.options.manager.holdActivity(page.id);
+    try {
+      if (link.attached.has(tabId) && contents.debugger.isAttached()) return contents;
+      if (contents.isDevToolsOpened()) throw new Error("DevTools is open. Return browser control after closing DevTools.");
+      if (!contents.debugger.isAttached()) contents.debugger.attach("1.3");
+      const message = (_event: Electron.Event, method: string, params: Record<string, unknown>, sessionId?: string) => this.#send(link, { t: "cdpEvent", tabId, method, params, ...(sessionId ? { sessionId } : {}) });
+      const detach = (_event: Electron.Event, reason: string) => {
+        contents.debugger.removeListener("message", message); link.attached.delete(tabId);
+        this.#send(link, { t: "detached", tabId, reason, relayInitiated: this.options.manager.store.state(page.sessionId).control !== "agent" });
+      };
+      link.attached.set(tabId, { contents, message, detach });
+      contents.debugger.on("message", message); contents.debugger.once("detach", detach);
+      return contents;
+    } finally { release(); }
   }
   #detach(link: Link, tabId: number): void {
     const attached = link.attached.get(tabId);
