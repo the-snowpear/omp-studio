@@ -63,17 +63,17 @@ Host 直接 spawn 这个可执行文件并传 `--mode studio-host ...`，所以�
 Electron 的 Chromium 进程占整个应用 280–470 MB。`crates/` 下新增 egui/winit 壳把它们
 全部去掉：无 webview、无 Electron，release 二进制 16 MB。
 
-分工是故意的：**运行时保持 TypeScript**（适配器和 Studio Bridge 协议是此前端到端跑通的
-部分，重写等于扔掉），Rust 只拥有窗口、平台集成和 Bridge 客户端——也就是 Chromium 的
-内存真正花掉的地方。
+分工是故意的：**协议、平台、壳、适配器全部 Rust**，TypeScript 只剩 Renderer。此前
+端到端跑通的 TypeScript 适配器保留为回退，壳优先用 Rust 版本，没构建出来时才落到 Node。
 
 ```
-crates/studio-bridge/     wire 协议：帧编解码、HMAC 握手、会话客户端
-crates/step-studio-shell/ 应用：后台桥接线程 + 纯归约器 + egui 视图
+crates/studio-bridge/       wire 协议：帧编解码、HMAC 握手、会话客户端
+crates/step-studio-runtime/ Studio Bridge 适配器：驱动 step --mode rpc
+crates/step-studio-shell/   应用：后台桥接线程 + 纯归约器 + egui 视图
 ```
 
 ```bash
-cargo test                                    # 18 个测试，含对真实适配器的端到端
+cargo test                                    # 12 个测试，含对真实适配器的端到端
 cargo run --bin step-studio-shell -- \
   --step-cmd "/path/to/step" --prompt "hello"
 ```
@@ -86,11 +86,15 @@ challenge proof）。第一版我写成了小端 + 只含 body 的长度 + 两�
 
 | 进程 | RSS |
 |---|---|
-| 壳（Rust/egui） | 118 MB |
-| 适配器（TS） | 64 MB |
-| step CLI（真实二进制） | 160 MB |
-| steppage-mcp（Step 自己拉的） | 85 MB |
-| **应用合计** | **426 MB** |
+| 壳（Rust/egui） | 118.0 MB |
+| 适配器（Rust） | 2.8 MB |
+| step CLI（真实二进制） | 167.1 MB |
+| steppage-mcp（Step 自己拉的） | 84.9 MB |
+| **应用合计** | **372.8 MB** |
+
+同一链路换回 TypeScript 适配器是 118 + 64.4 + 167 + 85 = **434 MB**，即 Rust 适配器
+省掉 61 MB（14%）。壳在 `target/{release,debug}/step-studio-runtime` 存在时优先用它，
+否则回退 Node 适配器。
 
 （另加 Xvfb 67 MB，仅无头测试需要，Windows 上没有。）
 
@@ -104,11 +108,13 @@ challenge proof）。第一版我写成了小端 + 只含 body 的长度 + 两�
 > - **160 MB 才是官方安装的真实二进制**——打包成单文件可执行文件（114 MB），
 >   比 node + 一堆模块文件省 100 MB。
 
-Electron 那 280–470 MB 是实打实省掉了。运行时仍占 72%，其中：
+Electron 那 280–470 MB 是实打实省掉了。剩下的 373 MB 里运行时占 68%，且已经榨到
+底：
 
-- **适配器 64 MB**：整个 Node 进程只做帧编解码 + JSONL 转发，约 600 行逻辑。
-  用 Rust 重写预计降到 ~5 MB——性价比最高的一步。
-- **step CLI 160 MB + MCP 85 MB**：Step Code 自身，要动就得改上游。
+- **适配器 2.8 MB**：原来是 64 MB 的 Node 进程，只做帧编解码 + JSONL 转发，约 600 行
+  逻辑，已用 `crates/step-studio-runtime/` 重写。
+- **step CLI 167 MB + MCP 85 MB**：Step Code 自身，要动就得改上游。
+- **壳 118 MB**：egui/winit 加 Mesa 软件光栅化（无头 Xvfb 下）。真实 GPU 上更低。
 
 Windows 还需要命名管道传输（`std` 不支持），这台机器无法验证那一半。
 
@@ -131,7 +137,8 @@ Windows 还需要命名管道传输（`std` 不支持），这台机器无法验
 
 | 路径 | 说明 |
 |---|---|
-| `packages/runtime-stepcode/` | 新增：Step Code 的 Studio Bridge 适配器 |
+| `packages/runtime-stepcode/` | 新增：Step Code 的 Studio Bridge 适配器（TypeScript，现为回退路径） |
+| `crates/step-studio-runtime/` | 新增：同一适配器的 Rust 实现，壳优先使用 |
 | `apps/desktop/src/host-composition.ts` | 改：`STUDIO_RUNTIME_EXECUTABLE` 选择 custom runtime 源，并让显式指定的 limited 运行时获得 session controller |
 | `package-lock.json` | 改：登记 `@step-studio/runtime-stepcode` workspace 链接 |
 | 其余 | 与上游一致 |
