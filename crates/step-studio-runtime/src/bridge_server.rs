@@ -379,6 +379,23 @@ impl Session {
                     Err(error) => self.failed(&request_id, error),
                 }
             }
+            // `session.history` is the paged form of the transcript: Studio's
+            // Renderer asks for it with a cursor, and this adapter has no
+            // pagination upstream, so the whole branch is the page.
+            "session.history" => {
+                let cursor = operation.get("cursor").and_then(|v| v.as_str());
+                match read_transcript(&mut self.step, cursor) {
+                    Ok(page) => self.receipt(&request_id, "completed", Some(page)),
+                    Err(error) => self.failed(&request_id, error),
+                }
+            }
+            // The same branch, as one object rather than a page: what the shell
+            // restores a resumed session from.
+            "session.state" => {
+                self.refresh_state();
+                let snapshot = build_snapshot(&mut self.step, self.epoch, &self.session_id);
+                self.receipt(&request_id, "completed", Some(json!({ "snapshot": snapshot })));
+            }
             _ => self.receipt(&request_id, "rejected", None),
         }
     }

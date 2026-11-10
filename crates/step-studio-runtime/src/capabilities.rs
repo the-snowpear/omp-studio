@@ -17,10 +17,14 @@ const CAPABILITIES: &[(&str, &str, &str)] = &[
     ("core.steer", "stable", ""),
     ("core.followUp", "stable", ""),
     ("core.abort", "stable", ""),
-    ("core.stream", "stable", ""),
     ("runtime.snapshot", "stable", ""),
     ("session.state", "stable", ""),
     ("session.history", "stable", ""),
+    (
+        "session.transcript.read",
+        "limited",
+        "Step exposes no pagination cursor, so the page is the whole branch",
+    ),
     ("session.new", "stable", ""),
     ("session.model.set", "stable", ""),
     ("session.models.list", "stable", ""),
@@ -36,8 +40,8 @@ const CAPABILITIES: &[(&str, &str, &str)] = &[
     ),
     (
         "conversation.compaction",
-        "limited",
-        "completion carries no summary; Step's compaction event does not include one",
+        "unavailable",
+        "Step compacts on its own; it arrives as an event, not as a command a client can invoke",
     ),
 ];
 
@@ -53,7 +57,6 @@ const COMMANDS: &[&str] = &[
     "session.new",
     "session.fork",
     "session.models.list",
-    "session.transcript.read",
 ];
 
 pub fn capability_manifest() -> Manifest {

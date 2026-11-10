@@ -360,3 +360,54 @@ fn a_turn_settles_when_the_cli_dies_mid_turn() {
         "the failure must say the CLI died, not something generic: {message}"
     );
 }
+
+/// The manifest is a promise: anything it grades `stable` or `limited` must
+/// actually be dispatched, or the Host sends a command the runtime rejects.
+///
+/// Four capabilities were declared and rejected — `core.stream`,
+/// `session.state`, `session.history` and a `conversation.compaction` that is
+/// really an event — which reads as "the runtime supports this" and fails at
+/// runtime instead. This walks the same match the dispatcher does.
+#[test]
+fn every_declared_capability_is_actually_dispatched() {
+    let manifest = step_studio_runtime::capabilities::capability_manifest();
+    let declared: Vec<(String, String)> = manifest
+        .value
+        .pointer("/capabilities")
+        .and_then(|list| list.as_array())
+        .expect("capabilities")
+        .iter()
+        .map(|entry| {
+            (
+                entry.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                entry.get("grade").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+    assert!(!declared.is_empty(), "the manifest declared nothing");
+
+    // The dispatch arms, read from the source rather than restated here: a test
+    // that duplicates the list would agree with itself.
+    let source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/bridge_server.rs"
+    ))
+    .expect("read the dispatcher");
+
+    let undelivered: Vec<String> = declared
+        .iter()
+        .filter(|(_, grade)| grade != "unavailable")
+        .filter(|(id, _)| {
+            let quoted = format!("\"{id}\"");
+            !source.contains(&format!("{quoted} =>"))
+                && !source.contains(&format!("| {quoted}"))
+                && !source.contains(&format!("{quoted} |"))
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    assert!(
+        undelivered.is_empty(),
+        "declared but never dispatched: {undelivered:?}"
+    );
+}

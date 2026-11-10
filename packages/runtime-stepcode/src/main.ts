@@ -32,7 +32,6 @@ const capabilities = [
   { id: "core.steer", grade: "stable", version: 1, evidence: "runtime-stepcode" },
   { id: "core.followUp", grade: "stable", version: 1, evidence: "runtime-stepcode" },
   { id: "core.abort", grade: "stable", version: 1, evidence: "runtime-stepcode" },
-  { id: "core.stream", grade: "stable", version: 1, evidence: "runtime-stepcode" },
   { id: "runtime.snapshot", grade: "stable", version: 1, evidence: "runtime-stepcode" },
   { id: "session.state", grade: "stable", version: 1, evidence: "runtime-stepcode" },
   { id: "session.history", grade: "stable", version: 1, evidence: "runtime-stepcode" },
@@ -40,10 +39,12 @@ const capabilities = [
   { id: "session.models.list", grade: "stable", version: 1, evidence: "runtime-stepcode" },
   {
     id: "conversation.compaction",
-    grade: "limited",
+    grade: "unavailable",
     version: 1,
     evidence: "runtime-stepcode",
-    limitations: ["completion carries no summary; Step's compaction event does not include one"],
+    limitations: [
+      "Step compacts on its own; it arrives as an event, not as a command a client can invoke",
+    ],
   },
   {
     id: "session.thinking.set",
@@ -667,6 +668,25 @@ const server = createServer(socket => {
         },
         error => connection.failedReceipt(requestId, String(error)),
       );
+      return;
+    }
+
+    // `session.history` is the paged form of the transcript: the Renderer asks
+    // for it with a cursor, and Step has no pagination, so the branch is the page.
+    if (operation["kind"] === "session.history") {
+      void readTranscript(operation["cursor"], operation["limit"]).then(
+        page => connection.receipt(requestId, "completed", page),
+        error => connection.failedReceipt(requestId, String(error), error instanceof BridgeFailure ? error.code : undefined),
+      );
+      return;
+    }
+
+    if (operation["kind"] === "session.state") {
+      // The same branch as one object, which is what a resumed session restores from.
+      void refreshState().then(async () => {
+        const snapshot = await buildSnapshot();
+        connection.receipt(requestId, "completed", { snapshot });
+      });
       return;
     }
 
