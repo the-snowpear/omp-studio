@@ -58,6 +58,36 @@ Host 直接 spawn 这个可执行文件并传 `--mode studio-host ...`，所以�
 
 不设该变量时行为与 OMP Studio 完全一致（仍走 managed 安装的 OMP 运行时）。
 
+## 原生 Rust 壳（无 webview）
+
+Electron 的 Chromium 进程占整个应用 280–470 MB。`crates/` 下新增 egui/winit 壳把它们
+全部去掉：无 webview、无 Electron，release 二进制 16 MB。
+
+分工是故意的：**运行时保持 TypeScript**（适配器和 Studio Bridge 协议是此前端到端跑通的
+部分，重写等于扔掉），Rust 只拥有窗口、平台集成和 Bridge 客户端——也就是 Chromium 的
+内存真正花掉的地方。
+
+```
+crates/studio-bridge/     wire 协议：帧编解码、HMAC 握手、会话客户端
+crates/step-studio-shell/ 应用：后台桥接线程 + 纯归约器 + egui 视图
+```
+
+```bash
+cargo test                                    # 18 个测试，含对真实适配器的端到端
+cargo run --bin step-studio-shell -- \
+  --step-cmd "/path/to/step" --prompt "hello"
+```
+
+帧编解码与 `@omp-studio/studio-protocol` 逐字节兼容（大端长度前缀、五键帧头、HMAC
+challenge proof）。第一版我写成了小端 + 只含 body 的长度 + 两键头——对着 mock 全能过，
+是对着真实适配器的端到端测试抓出来的。
+
+实测（release，Linux）：壳 118 MB、适配器 64 MB、Step Code 自身 466 MB。
+Electron 那份没了，但 **Step Code 现在是主要开销**——它是 tsx/Node 应用，还会自己拉
+MCP 服务。下一个收益点在运行时层，不在壳。
+
+Windows 还需要命名管道传输（`std` 不支持），这台机器无法验证那一半。
+
 ## 尚未完成
 
 - **Windows 命名管道与打包实测**：适配器只在 Linux 上验过 Unix domain socket；
