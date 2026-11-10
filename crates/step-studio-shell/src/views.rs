@@ -105,6 +105,13 @@ impl App {
                             };
                             ui.horizontal_top(|ui| {
                                 ui.colored_label(colour, format!("⚙ {}", tool.name));
+                                if !tool.arguments.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new(truncate(&tool.arguments, 90))
+                                            .weak()
+                                            .small(),
+                                    );
+                                }
                                 if tool.done && !tool.output.is_empty() {
                                     ui.label(
                                         egui::RichText::new(truncate(&tool.output, 400))

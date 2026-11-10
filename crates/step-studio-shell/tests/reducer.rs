@@ -26,6 +26,7 @@ fn a_full_turn_lands_in_order() {
     app.apply(Event::ToolStarted {
         call_id: "c1".to_string(),
         name: "list_directory".to_string(),
+        arguments: "{}".to_string(),
     });
     app.apply(Event::ToolCompleted {
         call_id: "c1".to_string(),
@@ -92,10 +93,12 @@ fn tool_results_are_paired_by_call_id_not_name() {
     app.apply(Event::ToolStarted {
         call_id: "c1".to_string(),
         name: "read".to_string(),
+        arguments: "{}".to_string(),
     });
     app.apply(Event::ToolStarted {
         call_id: "c2".to_string(),
         name: "read".to_string(),
+        arguments: "{}".to_string(),
     });
     // Out of order, which is what a concurrent pair looks like on the wire.
     app.apply(Event::ToolCompleted {

@@ -23,6 +23,9 @@ pub struct ToolCall {
     /// Step's id for the call, so a restored transcript can pair its result.
     pub call_id: String,
     pub name: String,
+    /// Compact JSON of the arguments: a turn can call the same tool several
+    /// times, and the name alone does not say which.
+    pub arguments: String,
     pub output: String,
     pub is_error: bool,
     pub done: bool,
@@ -178,6 +181,10 @@ impl App {
                                 .and_then(|n| n.as_str())
                                 .unwrap_or_default()
                                 .to_string(),
+                            arguments: serde_json::to_string(
+                                block.get("arguments").unwrap_or(&serde_json::Value::Null),
+                            )
+                            .unwrap_or_default(),
                             output: String::new(),
                             is_error: false,
                             // Set when its `toolResult` entry arrives.
@@ -217,11 +224,12 @@ impl App {
                     turn.assistant.text.push_str(&delta);
                 }
             }
-            Event::ToolStarted { call_id, name } => {
+            Event::ToolStarted { call_id, name, arguments } => {
                 if let Some(turn) = self.turns.last_mut() {
                     turn.assistant.tools.push(ToolCall {
                         call_id,
                         name,
+                        arguments,
                         output: String::new(),
                         is_error: false,
                         done: false,

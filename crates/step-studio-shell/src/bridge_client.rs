@@ -42,6 +42,9 @@ pub enum Event {
     ToolStarted {
         call_id: String,
         name: String,
+        /// Compact JSON of the call's arguments, so the view can show what the
+        /// tool was pointed at.
+        arguments: String,
     },
     ToolCompleted {
         call_id: String,
@@ -320,9 +323,14 @@ fn dispatch(to_ui: &Sender<Event>, event: &serde_json::Value) {
             let _ = to_ui.send(kind);
         }
         Some("conversation.tool.started") => {
+            let arguments = event
+                .pointer("/arguments")
+                .map(|value| serde_json::to_string(value).unwrap_or_default())
+                .unwrap_or_default();
             let _ = to_ui.send(Event::ToolStarted {
                 call_id: pointer_str(event, "/toolCallId").unwrap_or_default(),
                 name: pointer_str(event, "/toolName").unwrap_or_default(),
+                arguments,
             });
         }
         Some("conversation.tool.completed") => {
