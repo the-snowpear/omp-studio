@@ -17,6 +17,7 @@ import "./styles/sidebar.css";
 import "./styles/workbench.css";
 import "./styles/pages.css";
 import "./styles/agent-hub.css";
+import "./styles/model-picker.css";
 import "./App.css";
 import "./styles/tabs.css";
 
