@@ -26,7 +26,7 @@ import { TipHost } from "./TipHost";
 import "./agents/agents.css";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { getAppSettings, writeLastRoute } from "./settings/appSettings";
-import { OnboardingHost } from "./onboarding/OnboardingTour";
+import { OnboardingHost } from "./onboarding/OnboardingHost";
 import { type ClientStateSource, type Route } from "./workbench/types";
 import { asError, initialRouteFromSettings, notifyFromEvent, reduce, unavailableBootstrap } from "./workbench/shellState";
 import { Titlebar } from "./workbench/Titlebar";

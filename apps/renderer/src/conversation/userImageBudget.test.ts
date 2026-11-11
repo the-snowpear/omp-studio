@@ -77,7 +77,7 @@ describe("缩略图落盘", () => {
     const store = createMemoryThumbStore();
     const small = THUMBNAIL_PASSTHROUGH_MAX_BYTES - 16;
     await store.save("session-1", "item-1", [thumb("icon.png", small)]);
-    const loaded = await store.load("session-1");
+    const loaded = await store.load("session-1", ["item-1"]);
     expect(loaded["item-1"]?.[0]?.image.data.length).toBe(small);
   });
 
@@ -86,7 +86,7 @@ describe("缩略图落盘", () => {
     // 这正是要断言的行为：宁可这条消息只剩附件占位，也不要把 4 MiB 钉在内存里。
     const store = createMemoryThumbStore();
     await store.save("session-1", "item-1", [thumb("shot.png", 4 * 1024 * 1024)]);
-    const loaded = await store.load("session-1");
+    const loaded = await store.load("session-1", ["item-1"]);
     const retained = thumbsImageBytes(loaded["item-1"] ?? []);
     expect(retained).toBeLessThanOrEqual(THUMBNAIL_PASSTHROUGH_MAX_BYTES);
   });
@@ -95,6 +95,25 @@ describe("缩略图落盘", () => {
     const store = createMemoryThumbStore();
     await store.save("session-1", "item-1", [thumb("icon.png", 1024)]);
     await store.dropSession("session-1");
-    expect(await store.load("session-1")).toEqual({});
+    expect(await store.load("session-1", ["item-1"])).toEqual({});
+  });
+
+  it("loads only the requested message thumbnails", async () => {
+    const store = createMemoryThumbStore();
+    await store.save("session-1", "first", [thumb("first.png", 1024)]);
+    await store.save("session-1", "second", [thumb("second.png", 1024)]);
+    await store.save("session-2", "second", [thumb("other.png", 1024)]);
+    expect(Object.keys(await store.load("session-1", ["second", "missing"]))).toEqual(["second"]);
+    expect(await store.load("session-1", [])).toEqual({});
+  });
+
+  it("retains the image budget while reading a large visible message window", async () => {
+    const store = createMemoryThumbStore();
+    const ids = Array.from({ length: 160 }, (_, index) => `item-${index}`);
+    for (const id of ids) await store.save("session-1", id, [thumb("shot.png", 64 * 1024)]);
+    const loaded = await store.load("session-1", ids);
+    expect(Object.values(loaded).reduce((bytes, images) => bytes + thumbsImageBytes(images), 0)).toBeLessThanOrEqual(USER_IMAGE_BUDGET_BYTES);
+    expect(loaded["item-159"]).toBeDefined();
+    expect(loaded["item-0"]).toBeUndefined();
   });
 });

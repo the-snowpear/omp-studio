@@ -7,6 +7,7 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Lenis from "lenis";
 import { INSTALL_NOTES, RELEASES_URL, SNAPSHOT, detectPlatform, formatSize, loadRelease, type Asset, type Platform, type Release } from "../shared/release";
 import { createGlass } from "./glass";
+import { createFrameWindow } from "./frameWindow";
 import windowsIcon from "@phosphor-icons/core/assets/fill/windows-logo-fill.svg?raw";
 import appleIcon from "@phosphor-icons/core/assets/fill/apple-logo-fill.svg?raw";
 import githubIcon from "@phosphor-icons/core/assets/fill/github-logo-fill.svg?raw";
@@ -235,52 +236,26 @@ function buildPassage(): void {
     }
   };
 
-  /* Frames: decode progressively; always draw the nearest one that is ready. */
+  /* Decode only the nearby scrub frames; the canvas holds its last image during a jump. */
   const FRAME_COUNT = 170;
-  const frames: (HTMLImageElement | null)[] = new Array(FRAME_COUNT).fill(null);
   let shown = -1;
   let wanted = 0;
+  const frames = createFrameWindow({
+    count: FRAME_COUNT,
+    async load(index, signal) {
+      const response = await fetch(`../media/seq/chat/${String(index).padStart(4, "0")}.webp`, { signal });
+      return createImageBitmap(await response.blob());
+    },
+    onReady: () => draw(wanted),
+  });
   const draw = (i: number) => {
-    let k = i;
-    for (let d = 0; d < FRAME_COUNT; d++) {
-      if (frames[i - d]) { k = i - d; break; }
-      if (frames[i + d]) { k = i + d; break; }
-    }
-    if (!frames[k] || k === shown) return;
-    ctx.drawImage(frames[k]!, 0, 0, seq.width, seq.height);
-    shown = k;
+    const nearest = frames.nearest(i);
+    if (nearest === undefined || nearest.index === shown) return;
+    ctx.drawImage(nearest.frame, 0, 0, seq.width, seq.height);
+    shown = nearest.index;
   };
-  const loadFrame = async (i: number) => {
-    const img = new Image();
-    img.src = `../media/seq/chat/${String(i).padStart(4, "0")}.webp`;
-    try {
-      await img.decode();
-      frames[i] = img;
-      if (shown < 0 || Math.abs(i - wanted) < Math.abs(shown - wanted)) draw(wanted);
-    } catch {
-      /* a missing frame just holds the previous one */
-    }
-  };
-  let loading = false;
-  const startLoading = async () => {
-    if (loading) return;
-    loading = true;
-    await loadFrame(0);
-    // Coarse pass first so any scrub position has something close, then fill in.
-    for (const step of [16, 8, 4, 2, 1]) {
-      const batch: Promise<void>[] = [];
-      for (let i = step; i < FRAME_COUNT; i += step) {
-        if (frames[i]) continue;
-        batch.push(loadFrame(i));
-        if (batch.length >= 6) {
-          await Promise.all(batch);
-          batch.length = 0;
-        }
-      }
-      await Promise.all(batch);
-    }
-  };
-  ScrollTrigger.create({ trigger: ".passage", start: "top 300%", once: true, onEnter: () => void startLoading() });
+  ScrollTrigger.create({ trigger: ".passage", start: "top 300%", once: true, onEnter: () => frames.setActive(true) });
+  addEventListener("pagehide", () => frames.dispose(), { once: true });
 
   /* Camera inside the window: the frame stays put, the recording pushes in on what matters. */
   const KEYS = [
@@ -327,6 +302,7 @@ function buildPassage(): void {
     const fp = clamp((p - SEQ[0]) / (SEQ[1] - SEQ[0]));
     const f = fp * (FRAME_COUNT - 1);
     wanted = Math.round(f);
+    frames.setTarget(wanted);
     draw(wanted);
     const cam = camera(f);
     const W = seq.clientWidth;
@@ -351,8 +327,10 @@ function buildPassage(): void {
     pin: ".stage",
     pinSpacing: true,
     anticipatePin: 1,
-    onEnter: () => gsap.set(".stage", { autoAlpha: 1 }),
-    onLeaveBack: () => gsap.set(".stage", { autoAlpha: 0 }),
+    onEnter: () => { gsap.set(".stage", { autoAlpha: 1 }); frames.setActive(true); },
+    onEnterBack: () => frames.setActive(true),
+    onLeave: () => frames.setActive(false),
+    onLeaveBack: () => { gsap.set(".stage", { autoAlpha: 0 }); frames.setActive(false); },
     onUpdate: (self) => render(self.progress),
     onRefresh: (self) => {
       gsap.set(".stage", { autoAlpha: self.progress > 0 || scrollY >= self.start ? 1 : 0 });

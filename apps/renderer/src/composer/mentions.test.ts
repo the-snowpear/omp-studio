@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { StudioClient } from "@omp-studio/client-contract";
+import type { ClientEvent, StudioClient, WorkspaceId } from "@omp-studio/client-contract";
 
 import {
   createWorkspaceFileIndex,
+  followWorkspaceFileIndex,
   filterMentions,
   loadMentions,
   previewMentions,
@@ -108,6 +109,45 @@ describe("createWorkspaceFileIndex", () => {
 
     const roots = list.mock.calls.filter(([path]) => path === undefined);
     expect(roots).toHaveLength(1);
+  });
+
+  it("refreshes created and deleted files after a workspace change notification", async () => {
+    let rows: WorkspaceEntry[] = [{ type: "file", name: "old.ts", path: "old.ts" }];
+    const list = vi.fn(async () => rows);
+    const index = createWorkspaceFileIndex(list);
+    let notify!: (event: ClientEvent) => void;
+    const unsubscribe = vi.fn();
+    const stop = followWorkspaceFileIndex({ subscribe: (_scope, listener) => { notify = listener; return unsubscribe; } }, "workspace" as WorkspaceId, index);
+    expect((await index.search("old")).map(item => item.path)).toEqual(["old.ts"]);
+    rows = [{ type: "file", name: "new.ts", path: "new.ts" }];
+    notify({ kind: "git.repository.changed", repository: { workspaceId: "workspace" } } as ClientEvent);
+    expect((await index.search("new")).map(item => item.path)).toEqual(["new.ts"]);
+    expect(await index.search("old")).toEqual([]);
+    stop();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("refreshes non-Git folders after a short cache expiry", async () => {
+    let now = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      let rows: WorkspaceEntry[] = [{ type: "file", name: "old.ts", path: "old.ts" }];
+      const index = createWorkspaceFileIndex(async () => rows);
+      await index.search("old");
+      rows = [{ type: "file", name: "new.ts", path: "new.ts" }];
+      expect(await index.search("new")).toEqual([]);
+      now = 6_000;
+      expect((await index.search("new")).map(item => item.path)).toEqual(["new.ts"]);
+      expect(await index.search("old")).toEqual([]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it("retries a directory read after a temporary failure", async () => {
+    const list = vi.fn().mockRejectedValueOnce(new Error("temporarily offline")).mockResolvedValue([{ type: "file", name: "new.ts", path: "new.ts" }]);
+    const index = createWorkspaceFileIndex(list);
+    expect(await index.search("new")).toEqual([]);
+    expect((await index.search("new")).map(item => item.path)).toEqual(["new.ts"]);
+    expect(list).toHaveBeenCalledTimes(2);
   });
 });
 

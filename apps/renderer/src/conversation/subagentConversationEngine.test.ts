@@ -67,6 +67,26 @@ describe("subagentConversationEngine", () => {
     expect(query).toHaveBeenLastCalledWith("session.transcript.readPage", { sessionId: "history", agentId: "worker", cursor: "older", limit: 50 });
     engine.dispose();
   });
+
+  it("can load older child messages after a stale cursor refreshes the archive", async () => {
+    let olderReads = 0;
+    const query = vi.fn(async (_name: string, input: { cursor?: string }) => {
+      if (input.cursor === undefined) return { ...conversationPages.userAssistant, olderCursor: "older", hasMoreBefore: true };
+      if (++olderReads === 1) throw { code: "RESYNC_REQUIRED", message: "cursor expired" };
+      return { ...conversationPages.userAssistant, items: [{ kind: "message", itemId: "earlier-child", parentId: null, createdAt: "then", role: "user", content: [{ type: "text", text: "earlier child" }] }], hasMoreBefore: false };
+    });
+    const engine = createSubagentConversationEngine({ preview: false, previewItems: [], client: { query: query as never, subscribe: () => () => {} }, target: { agentId: "worker" },
+      parentSessionId: "history" as SessionId, liveSessionId: "another" as SessionId, runtimeConnected: true });
+    try {
+      engine.start();
+      await vi.waitFor(() => expect(engine.getSnapshot().state.hydrateStatus).toBe("ready"));
+      await engine.loadOlder();
+      expect(engine.getSnapshot().loadingOlder).toBe(false);
+      await engine.loadOlder();
+      expect(olderReads).toBe(2);
+      expect(engine.getSnapshot().rows.map(row => row.type === "user" ? row.text : "")).toContain("earlier child");
+    } finally { engine.dispose(); }
+  });
   it("opens a live child with explicit parent, agent, and child-session identity", async () => {
     const parentSessionId = "parent" as SessionId;
     const agentId = "worker" as AgentId;

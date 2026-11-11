@@ -16,7 +16,7 @@ export type UserMessageThumb = {
 export type UserThumbMap = { readonly [itemId: string]: readonly UserMessageThumb[] };
 
 export type UserThumbStore = {
-  load(sessionId: string): Promise<UserThumbMap>;
+  load(sessionId: string, itemIds: readonly string[]): Promise<UserThumbMap>;
   save(sessionId: string, itemId: string, thumbs: readonly UserMessageThumb[]): Promise<void>;
   dropSession(sessionId: string): Promise<void>;
 };
@@ -181,15 +181,32 @@ function recordId(sessionId: string, itemId: string): string {
   return `${sessionId}\u0000${itemId}`;
 }
 
+/** Read newest visible messages first, retaining the same image budget as the conversation. */
+async function loadSelectedThumbs(
+  itemIds: readonly string[],
+  read: (itemId: string) => Promise<readonly UserMessageThumb[] | undefined>,
+): Promise<UserThumbMap> {
+  const kept: Array<readonly [string, readonly UserMessageThumb[]]> = [];
+  let spent = 0;
+  for (let index = itemIds.length - 1; index >= 0; index -= 1) {
+    const itemId = itemIds[index]!;
+    const images = await read(itemId);
+    if (images === undefined || images.length === 0) continue;
+    const bytes = thumbsImageBytes(images);
+    if (spent + bytes > USER_IMAGE_BUDGET_BYTES) continue;
+    spent += bytes;
+    kept.push([itemId, images]);
+  }
+  return Object.fromEntries(kept.reverse());
+}
+
 export function createMemoryThumbStore(): UserThumbStore {
   const sessions = new Map<string, Map<string, readonly UserMessageThumb[]>>();
   return {
-    async load(sessionId) {
+    async load(sessionId, itemIds) {
       const rows = sessions.get(sessionId);
       if (rows === undefined) return {};
-      const out: { [itemId: string]: readonly UserMessageThumb[] } = {};
-      for (const [itemId, thumbs] of rows) out[itemId] = thumbs;
-      return out;
+      return loadSelectedThumbs(itemIds, async itemId => rows.get(itemId));
     },
     async save(sessionId, itemId, thumbs) {
       if (thumbs.length === 0) return;
@@ -238,16 +255,12 @@ export function createIndexedDbThumbStore(): UserThumbStore {
     }
   };
   return {
-    async load(sessionId) {
-      return withStore("readonly", async (store) => {
-        const index = store.index("sessionId");
-        const rows = await requestValue(index.getAll(sessionId)) as StoredRow[];
-        const out: { [itemId: string]: readonly UserMessageThumb[] } = {};
-        for (const row of rows) {
-          if (row.images.length > 0) out[row.itemId] = row.images;
-        }
-        return out;
-      });
+    async load(sessionId, itemIds) {
+      if (itemIds.length === 0) return {};
+      return withStore("readonly", store => loadSelectedThumbs(itemIds, async itemId => {
+        const row = await requestValue(store.get(recordId(sessionId, itemId))) as StoredRow | undefined;
+        return row?.images;
+      }));
     },
     async save(sessionId, itemId, thumbs) {
       if (thumbs.length === 0) return;
@@ -262,9 +275,16 @@ export function createIndexedDbThumbStore(): UserThumbStore {
     },
     async dropSession(sessionId) {
       await withStore("readwrite", async (store) => {
-        const index = store.index("sessionId");
-        const rows = await requestValue(index.getAll(sessionId)) as StoredRow[];
-        for (const row of rows) await requestValue(store.delete(row.id));
+        await new Promise<void>((resolve, reject) => {
+          const cursor = store.index("sessionId").openKeyCursor(sessionId);
+          cursor.onerror = () => reject(cursor.error ?? new Error("IndexedDB cursor failed"));
+          cursor.onsuccess = () => {
+            const row = cursor.result;
+            if (row === null) { resolve(); return; }
+            store.delete(row.primaryKey);
+            row.continue();
+          };
+        });
       });
     },
   };

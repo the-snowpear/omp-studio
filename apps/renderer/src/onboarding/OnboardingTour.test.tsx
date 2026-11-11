@@ -30,9 +30,9 @@ describe("workbench onboarding tour", () => {
     __resetOnboardingForTests();
   });
 
-  it("first run cannot be dismissed until every step has been shown", () => {
+  it("first run cannot be dismissed until every step has been shown", async () => {
     mount();
-    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(await screen.findByRole("dialog")).toBeTruthy();
     expect(closeButton()).toBeNull();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.getByRole("dialog")).toBeTruthy();
@@ -50,21 +50,22 @@ describe("workbench onboarding tour", () => {
     expect(localStorage.getItem(ONBOARDING_STORAGE_KEY)).toBe(ONBOARDING_TOUR_ID);
   });
 
-  it("does not open again once completed, and Help reopens it as closable at any step", () => {
+  it("does not open again once completed, and Help reopens it as closable at any step", async () => {
     localStorage.setItem(ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_ID);
     mount();
     expect(screen.queryByRole("dialog")).toBeNull();
 
     act(() => openOnboardingTour());
-    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(await screen.findByRole("dialog")).toBeTruthy();
     expect(closeButton()).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("shows the startup notice only after the first-run tour is finished", () => {
+  it("shows the startup notice only after the first-run tour is finished", async () => {
     localStorage.removeItem(STARTUP_NOTICE_STORAGE_KEY);
     mount();
+    await screen.findByRole("dialog");
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     for (let step = 1; step < ONBOARDING_STEPS.length; step += 1) {
       fireEvent.keyDown(window, { key: "ArrowRight" });

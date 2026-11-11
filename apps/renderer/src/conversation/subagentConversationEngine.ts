@@ -64,7 +64,7 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
   }
   async function hydrate(resyncing = false): Promise<void> {
     if (disposed || !active) return;
-    const current = ++token; buffered = []; bufferedBytes = 0; bufferOverflowed = false; conversationSessionId = undefined; watermark = 0;
+    const current = ++token; loadingOlder = false; buffered = []; bufferedBytes = 0; bufferOverflowed = false; conversationSessionId = undefined; watermark = 0;
     if (input.target === null) { store.setUnavailable("没有可读取的子 Agent 对话。"); return; }
     store.setLoading(resyncing);
     if (input.preview) {
@@ -113,7 +113,7 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
     if (disposed || !active || loadingOlder || input.client === null || input.target === null || parentSessionId === undefined) return;
     const cursor = store.getOlderCursor(); if (cursor === undefined) return; loadingOlder = true; publish(); const current = token; const source = createConversationSource(input.client);
     try { const page = liveTarget !== undefined && connected ? await source.readLiveOlder(liveTarget, cursor, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT) : await source.readArchive(parentSessionId, input.target.agentId, cursor, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT); if (!disposed && current === token) store.prepend(page); }
-    catch (cause) { const error = asClientError(cause); if (isStaleCursorError(error)) await hydrate(true); else if (!disposed && current === token) store.setError(error); }
+    catch (cause) { if (disposed || current !== token) return; const error = asClientError(cause); if (isStaleCursorError(error)) await hydrate(true); else store.setError(error); }
     finally { if (!disposed && current === token) { loadingOlder = false; publish(); } }
   }
   function setActive(next: boolean, online: boolean): void {

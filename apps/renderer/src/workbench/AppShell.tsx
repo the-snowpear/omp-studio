@@ -25,12 +25,11 @@ import { AppIcon, Icon, type IconName } from "../icons";
 import { useI18n } from "../i18n";
 import { SHORTCUTS, formatShortcut, isPrimaryModifier } from "../keyboard/shortcuts";
 import { nativeMenuOwnsShortcuts } from "../platform";
-import { HomePage, SecondaryPage } from "../HomePage";
-import { HistoryPage } from "../HistoryPage";
+import { SecondaryPage } from "../SecondaryPage";
 import { type ChipComposerHandle } from "../composer/ChipComposer";
 import { bindSlashTypedCommand, isDestructiveMemoryClear, resolveSlashExecute, type SlashNativeUi, type StudioSlashCommand } from "../composer/commands";
 import { composerOwnerSessionId } from "../composer/dispatch";
-import { createWorkspaceFileIndex, loadMentions, previewMentions, workspaceDirectoryLister } from "../composer/mentions";
+import { createWorkspaceFileIndex, followWorkspaceFileIndex, loadMentions, previewMentions, workspaceDirectoryLister } from "../composer/mentions";
 import { createComposerDraftBook } from "../composer/draftStore";
 import { type ComposerSnapshot } from "../composer/types";
 import type { FileViewerActions } from "../files/fileActions";
@@ -71,7 +70,6 @@ import { type ThreadWaitKind } from "../sidebar/threadWait";
 import { streamingProjectHistoryRefreshKey, useProjectHistories } from "../sidebar/useProjectHistories";
 import { createResumeGenerationGate, ensureSelectedSessionActive, type NewSessionWaitResult } from "../sessionLifecycle";
 import { createSerialTaskQueue } from "../workspaceActionQueue";
-import { StatisticsPage } from "../StatisticsPage";
 import { type ArchivePending, type ClientStateSource, type ProjectShellActionResult, type Route, type SecondaryRoute, type ShellChrome, type ShellDialog, type ThreadRowActionKind, type ViewState } from "./types";
 import { CURRENT_PROJECT, PROJECT_THREADS_INITIAL, PROJECT_THREADS_PAGE, PROJECT_THREADS_QUERY_MAX, type SelectedProject } from "./sessionSelection";
 import { SECONDARY_META, isSecondary, snapshotFrom } from "./shellState";
@@ -84,6 +82,12 @@ import { AppTopbar } from "./AppTopbar";
 import { WorkbenchCanvas } from "./WorkbenchCanvas";
 import { clampBottomHeight } from "./BottomPanelChrome";
 import { useSessionRename } from "../history/useSessionRename";
+
+const HomePage = lazyPanel(() => import("../HomePage").then(module => ({ default: module.HomePage })));
+
+const HistoryPage = lazyPanel(() => import("../HistoryPage").then(module => ({ default: module.HistoryPage })));
+
+const StatisticsPage = lazyPanel(() => import("../StatisticsPage").then(module => ({ default: module.StatisticsPage })));
 
 const EvaluationPage = lazyPanel(() => import("../evaluation/EvaluationPage").then(module => ({ default: module.EvaluationPage })));
 
@@ -442,6 +446,10 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       : createWorkspaceFileIndex(workspaceDirectoryLister(client, hubWorkspaceId as WorkspaceId))),
     [previewMode.preview, client, hubWorkspaceId],
   );
+  useEffect(() => {
+    if (hubFileIndex === undefined || hubWorkspaceId === undefined) return;
+    return followWorkspaceFileIndex(client, hubWorkspaceId as WorkspaceId, hubFileIndex);
+  }, [client, hubWorkspaceId, hubFileIndex]);
   const fetchHubMentions = useCallback(async (trigger: "@" | "/" | "^", query: string) => {
     if (trigger === "/") return [];
     if (previewMode.preview) return previewMentions(trigger, query);

@@ -13,7 +13,7 @@ npm run build   # 产物在 dist/，可部署到任意静态托管（base 为相
 | 路径 | 方案 | 技术要点 |
 |---|---|---|
 | `/` | 方案入口 | 只用于比稿，定稿后删除 |
-| `/a/` | 穿越 | WebGL2 光线步进玻璃 π（`a/glass.ts`），CSS 3D 穿越，170 帧滚动序列 |
+| `/a/` | 穿越 | WebGL2 光线步进玻璃 π（`a/glass.ts`），CSS 3D 穿越，170 帧滚动序列；`a/frameWindow.ts` 保留 13 个邻近帧、最多 3 个在途加载，跳转或离开时释放位图 |
 | `/b/` | 活窗 | 同源 iframe 嵌入真实 renderer，导览驱动真实 DOM（选择器集中在 `b/tour.ts` 文件头） |
 | `/c/` | 解析 | WebGL2 字形解析着色器（`c/resolve.ts`），Bridge 检视器，命令面板 |
 

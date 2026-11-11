@@ -65,6 +65,7 @@ export type DirectoryLister = (path?: string) => Promise<ReadonlyArray<Workspace
 
 export type WorkspaceFileIndex = {
   search(query: string): Promise<MentionCandidate[]>;
+  invalidate(): void;
 };
 
 /* 行为清单不在这里维护：`explorer-types.ts` 是唯一来源，视觉层的灰显消费同一个
@@ -77,6 +78,8 @@ const WALK_ENTRY_BUDGET = 6_000;
 const WALK_DEPTH_BUDGET = 8;
 /** Directories listed concurrently per BFS level. */
 const WALK_BATCH = 8;
+/** Non-Git workspaces still refresh without a separate filesystem watcher. */
+const WORKSPACE_INDEX_CACHE_MS = 5_000;
 
 function depthOf(path: string): number {
   return path.length === 0 ? 0 : path.split("/").length;
@@ -112,6 +115,7 @@ async function walkWorkspace(list: DirectoryLister): Promise<WorkspaceEntry[]> {
     for (const level of levels) {
       for (const entry of level) {
         if (!mentionable(entry)) continue;
+        if (entries.length >= WALK_ENTRY_BUDGET) break;
         entries.push(entry);
         if (entry.type === "dir" && descendable(entry) && depthOf(entry.path) < WALK_DEPTH_BUDGET) {
           next.push(entry.path);
@@ -175,21 +179,33 @@ function dedupeById(items: readonly MentionCandidate[]): MentionCandidate[] {
 
 /**
  * Caches one bounded workspace walk and filters it locally, so typing after `@`
- * does not re-hit the Host per keystroke. A query containing `/` also lists that
- * directory on demand, which reaches paths beyond the walk budget.
+ * does not re-hit the Host per keystroke. Git changes invalidate it immediately;
+ * a short expiry also covers non-Git folders. A query containing `/` lists that
+ * directory on demand, reaching paths beyond the walk budget.
  */
 export function createWorkspaceFileIndex(list: DirectoryLister): WorkspaceFileIndex {
   let walk: Promise<WorkspaceEntry[]> | null = null;
   const dirCache = new Map<string, Promise<ReadonlyArray<WorkspaceEntry>>>();
+  let expiresAt = 0;
+  const invalidate = () => {
+    walk = null;
+    dirCache.clear();
+    expiresAt = Date.now() + WORKSPACE_INDEX_CACHE_MS;
+  };
   const listDir = (path: string): Promise<ReadonlyArray<WorkspaceEntry>> => {
     const cached = dirCache.get(path);
     if (cached) return cached;
-    const request = list(path === "" ? undefined : path).catch(() => [] as WorkspaceEntry[]);
+    const request = list(path === "" ? undefined : path).catch(() => {
+      if (dirCache.get(path) === request) { dirCache.delete(path); walk = null; }
+      return [] as WorkspaceEntry[];
+    });
     dirCache.set(path, request);
     return request;
   };
   return {
+    invalidate,
     async search(query: string): Promise<MentionCandidate[]> {
+      if (Date.now() >= expiresAt) invalidate();
       const raw = query.trim().replaceAll("\\", "/");
       const needle = raw.toLowerCase();
       const slash = raw.lastIndexOf("/");
@@ -204,6 +220,12 @@ export function createWorkspaceFileIndex(list: DirectoryLister): WorkspaceFileIn
       return rankEntries(await walk, needle).slice(0, MENTION_LIMIT);
     },
   };
+}
+
+export function followWorkspaceFileIndex(client: Pick<StudioClient, "subscribe">, workspaceId: WorkspaceId, index: WorkspaceFileIndex): () => void {
+  return client.subscribe({ scope: "all" }, event => {
+    if (event.kind === "git.repository.changed" && event.repository.workspaceId === workspaceId) index.invalidate();
+  });
 }
 
 /** Wraps the `workspace.fileTree` query as a directory lister. */

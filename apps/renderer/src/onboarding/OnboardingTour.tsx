@@ -3,15 +3,9 @@ import { createPortal } from "react-dom";
 import { Icon, type IconName } from "../icons";
 import { useI18n } from "../i18n";
 import { PLATFORM } from "../platform";
-import { StartupNotice } from "../StartupNotice";
 import { OnboardingScene, overviewSlotDelay, SCENE_DURATION, type OnboardingSceneId } from "./scenes";
 import { sceneKeyframes } from "./timelines";
 import {
-  closeOnboardingTour,
-  markOnboardingCompleted,
-  openOnboardingTour,
-  shouldAutoOpenOnboarding,
-  useOnboardingTourMode,
   type OnboardingMode,
 } from "./onboardingState";
 import "./onboarding.css";
@@ -247,21 +241,4 @@ export function OnboardingTour({ mode, onClose }: { readonly mode: OnboardingMod
  * 首启门控：先放教程，看完再放启动提示，避免两个模态叠在一起；
  * 「帮助 → 使用教程」重开时也挂在这里。
  */
-export function OnboardingHost(): ReactNode {
-  const mode = useOnboardingTourMode();
-  const [noticeReady, setNoticeReady] = useState(() => !shouldAutoOpenOnboarding());
-  useEffect(() => {
-    if (shouldAutoOpenOnboarding()) openOnboardingTour("first-run");
-  }, []);
-  const onClose = useCallback((completed: boolean) => {
-    if (completed) markOnboardingCompleted();
-    closeOnboardingTour();
-    setNoticeReady(true);
-  }, []);
-  return (
-    <>
-      {mode !== null ? <OnboardingTour mode={mode} onClose={onClose} /> : null}
-      {noticeReady ? <StartupNotice /> : null}
-    </>
-  );
-}
+export { OnboardingHost } from "./OnboardingHost";

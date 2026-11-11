@@ -78,6 +78,69 @@ describe("createConversationEngine", () => {
     await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(2));
     engine.dispose();
   });
+
+  it("can paginate again after a stale cursor reloads the conversation", async () => {
+    let olderReads = 0;
+    const paged = { ...opened, page: { ...page, olderCursor: "older" as never, hasMoreBefore: true } };
+    const query = vi.fn(async (name: string) => {
+      if (name === "conversation.open") return paged;
+      if (++olderReads === 1) throw { code: "RESYNC_REQUIRED", message: "cursor expired" };
+      return { ...page, items: [{ kind: "message", itemId: "earlier", parentId: null, createdAt: "then", role: "user", content: [{ type: "text", text: "earlier" }] }] };
+    });
+    const engine = createConversationEngine({ preview: false, client: client(query as unknown as ConversationClient["query"]), identity: { sessionId, runtimeEpoch: epoch }, canRead: true, runtimeConnected: true, previewItems: [] });
+    try {
+      engine.start();
+      await vi.waitFor(() => expect(engine.getSnapshot().state.hydrateStatus).toBe("ready"));
+      await engine.loadOlder();
+      expect(engine.getSnapshot().loadingOlder).toBe(false);
+      expect(engine.getMetadataSnapshot().loadingOlder).toBe(false);
+      expect(query.mock.calls.filter(([name]) => name === "conversation.open")).toHaveLength(2);
+      await engine.loadOlder();
+      expect(olderReads).toBe(2);
+      expect(engine.getSnapshot().rows.map(row => row.type === "user" ? row.text : "")).toContain("earlier");
+    } finally { engine.dispose(); }
+  });
+
+  it("does not let an older failed page interrupt pagination after a reload", async () => {
+    let rejectOld!: (cause: unknown) => void;
+    let resolveNew!: (value: unknown) => void;
+    let reads = 0;
+    const query = vi.fn(async (name: string) => {
+      if (name === "conversation.open") return { ...opened, page: { ...page, olderCursor: "older" as never, hasMoreBefore: true } };
+      if (++reads === 1) return new Promise((_resolve, reject) => { rejectOld = reject; });
+      return new Promise(resolve => { resolveNew = resolve; });
+    });
+    const engine = createConversationEngine({ preview: false, client: client(query as unknown as ConversationClient["query"]), identity: { sessionId, runtimeEpoch: epoch }, canRead: true, runtimeConnected: true, previewItems: [] });
+    try {
+      engine.start();
+      await vi.waitFor(() => expect(engine.getSnapshot().state.hydrateStatus).toBe("ready"));
+      const oldPage = engine.loadOlder();
+      await engine.reload();
+      const newPage = engine.loadOlder();
+      rejectOld({ code: "RESYNC_REQUIRED", message: "old cursor" });
+      await oldPage;
+      expect(engine.getSnapshot().loadingOlder).toBe(true);
+      expect(query.mock.calls.filter(([name]) => name === "conversation.open")).toHaveLength(2);
+      resolveNew(page);
+      await newPage;
+      expect(engine.getSnapshot().loadingOlder).toBe(false);
+    } finally { engine.dispose(); }
+  });
+
+  it("reads thumbnails only for loaded user messages and restores earlier thumbnails on pagination", async () => {
+    const load = vi.fn(async (_sessionId: string, _itemIds: readonly string[]) => ({}));
+    const thumbStore = { load, save: vi.fn(async () => undefined), dropSession: vi.fn(async () => undefined) };
+    const query = vi.fn(async (name: string) => name === "conversation.open"
+      ? { ...opened, page: { ...page, olderCursor: "older" as never, hasMoreBefore: true } }
+      : { ...page, items: [{ kind: "message", itemId: "earlier", parentId: null, createdAt: "then", role: "user", content: [{ type: "text", text: "earlier" }] }] });
+    const engine = createConversationEngine({ preview: false, client: client(query as unknown as ConversationClient["query"]), identity: { sessionId, runtimeEpoch: epoch }, canRead: true, runtimeConnected: true, previewItems: [], thumbStore });
+    try {
+      engine.start();
+      await vi.waitFor(() => expect(load).toHaveBeenCalledWith(sessionId, ["user"]));
+      await engine.loadOlder();
+      expect(load).toHaveBeenLastCalledWith(sessionId, ["earlier", "user"]);
+    } finally { engine.dispose(); }
+  });
 });
 
 describe("createConversationEngine dispose (W03)", () => {

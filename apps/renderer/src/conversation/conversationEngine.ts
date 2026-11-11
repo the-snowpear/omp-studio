@@ -52,7 +52,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
   const listeners = new Set<() => void>();
   const metadataListeners = new Set<() => void>();
   let transportUnsubscribe: (() => void) | undefined;
-  let started = false; let disposed = false; let loadingOlder = false; let run = 0;
+  let started = false; let disposed = false; let loadingOlder = false; let run = 0; let thumbRead = 0;
   let initialCachedPage: ConversationTranscriptReadPage | undefined;
   const storeUnsubscribe = store.subscribe(() => publish());
   let metadataSnapshot: ConversationSnapshot;
@@ -100,11 +100,13 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     applyLiveEvent(event);
   }
   async function loadThumbs(token: number, sessionId: string): Promise<void> {
-    try { const thumbs = await (input.thumbStore ?? getDefaultThumbStore()).load(sessionId); if (!disposed && token === run) store.setUserThumbs(thumbs); } catch { /* local decoration never blocks transcript */ }
+    const current = ++thumbRead;
+    const itemIds = store.getSnapshot().state.items.filter(item => item.kind === "message" && item.role === "user").map(item => item.itemId);
+    try { const thumbs = await (input.thumbStore ?? getDefaultThumbStore()).load(sessionId, itemIds); if (!disposed && token === run && current === thumbRead) store.setUserThumbs(thumbs); } catch { /* local decoration never blocks transcript */ }
   }
   async function hydrate(resyncing = false): Promise<void> {
     if (disposed) return;
-    const token = ++run; buffer = []; bufferBytes = 0; bufferOverflowed = false; conversationSessionId = undefined; watermark = 0;
+    const token = ++run; loadingOlder = false; buffer = []; bufferBytes = 0; bufferOverflowed = false; conversationSessionId = undefined; watermark = 0;
     if (identity === null) { store.setUnavailable("当前没有活动会话。"); return; }
     if (input.deferHydrate) { store.setLoading(false); return; }
     if (input.preview) {
@@ -149,8 +151,8 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     loadingOlder = true; publish(); metadataSnapshot = { ...store.getMetadataSnapshot(), demo: input.preview, loadingOlder, identityKey: identityKey(store.getMetadataSnapshot().state.identity) }; for (const listener of metadataListeners) listener(); const token = run; const source = createConversationSource(input.client);
     try {
       const page = liveTarget !== undefined && input.runtimeConnected ? await source.readLiveOlder(liveTarget, cursor, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT) : await source.readArchive(identity!.sessionId, undefined, cursor, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);
-      if (!disposed && token === run) store.prepend(page);
-    } catch (cause) { const error = asClientError(cause); if (isStaleCursorError(error)) await hydrate(true); else if (!disposed && token === run) store.setError(error); }
+      if (!disposed && token === run) { store.prepend(page); void loadThumbs(token, identity!.sessionId); }
+    } catch (cause) { if (disposed || token !== run) return; const error = asClientError(cause); if (isStaleCursorError(error)) await hydrate(true); else store.setError(error); }
     finally { if (!disposed && token === run) { loadingOlder = false; publish(); metadataSnapshot = { ...store.getMetadataSnapshot(), demo: input.preview, loadingOlder, identityKey: identityKey(store.getMetadataSnapshot().state.identity) }; for (const listener of metadataListeners) listener(); } }
   }
 

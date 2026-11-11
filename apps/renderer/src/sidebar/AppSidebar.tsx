@@ -264,7 +264,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   // Explorer git 徽章：真实模式读取选中项目的仓库状态；预览模式的徽章来自 fixtures，不查 Host。
   const gitWorkspaceId = preview || !chrome.selectedProject ? undefined : (chrome.selectedProject.id as WorkspaceId);
   const { repository: gitRepository, refresh: refreshGitRepository } = useGitRepository(client, gitWorkspaceId);
-  const gitStatusLookup = useMemo(() => buildGitStatusLookup(gitRepository?.changes ?? []), [gitRepository]);
+  const gitStatusLookup = useMemo(() => buildGitStatusLookup(gitRepository?.changes ?? [], gitRepository?.workspacePrefix), [gitRepository]);
   // Conversation-owned tool activity is published by the target-scoped store.
   // Until the workbench target is mounted, the explorer has no live activity.
   const fileActivity = EMPTY_EXPLORER_FILE_ACTIVITY;

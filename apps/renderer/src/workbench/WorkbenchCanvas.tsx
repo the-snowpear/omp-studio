@@ -48,7 +48,7 @@ import { ChipComposer, type ChipComposerHandle } from "../composer/ChipComposer"
 import { bindSlashTypedCommand, composerSlashExecute, isDestructiveMemoryClear, mergeSlashCatalogWithManifest, planComposerSend, resolveSlashExecute, type SlashNativeUi, type StudioSlashCommand } from "../composer/commands";
 import { composerFollowUpEnabled, composerOwnerSessionId, composerOwnsLiveSnapshot, composerPromptEnabled, composerQueueEnabled, composerRunningForTarget, createComposerDispatchGate, visibleQueuedMessages } from "../composer/dispatch";
 import { beginQueueEdit, cancelQueueEdit, commitQueueEdit, parkQueueEdit, snapshotOfQueued, switchQueueEdit, type QueueEditState } from "../composer/queueEdit";
-import { createWorkspaceFileIndex, loadMentions, previewMentions, workspaceDirectoryLister } from "../composer/mentions";
+import { createWorkspaceFileIndex, followWorkspaceFileIndex, loadMentions, previewMentions, workspaceDirectoryLister } from "../composer/mentions";
 import { snapshotFromDoc, snapshotFromText, snapshotFromTextAndImages, snapshotIsEmpty } from "../composer/serialize";
 import { useComposerDraft } from "../composer/useComposerDraft";
 import { emptySnapshot, type ComposerSnapshot } from "../composer/types";
@@ -1883,13 +1883,17 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       setSending(false);
     }
   };
-  // 一次有界遍历后本地过滤，`@` 的每次击键不再回打 Host；换项目才重建索引。
+  // 一次有界遍历后本地过滤；Git 变更立即失效，非 Git 目录短期到期后重读。
   const fileIndex = useMemo(
     () => (preview || workspaceId === undefined
       ? undefined
       : createWorkspaceFileIndex(workspaceDirectoryLister(client, workspaceId as WorkspaceId))),
     [preview, client, workspaceId],
   );
+  useEffect(() => {
+    if (fileIndex === undefined || workspaceId === undefined) return;
+    return followWorkspaceFileIndex(client, workspaceId as WorkspaceId, fileIndex);
+  }, [client, workspaceId, fileIndex]);
   const fetchMentions = useCallback(async (trigger: "@" | "/" | "^", query: string) => {
     if (trigger === "/") return [];
     if (preview) return previewMentions(trigger, query);
