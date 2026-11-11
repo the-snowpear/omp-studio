@@ -188,11 +188,7 @@
   box-shadow: var(--shadow-menu);
   padding: var(--sp-6);
   z-index: var(--z-menu);
-  animation: omp-menu-in var(--dur-fast) var(--ease-out);
-}
-@keyframes omp-menu-in {
-  from { opacity: 0; transform: translateY(-3px) scale(0.99); }
-  to { opacity: 1; transform: none; }
+  animation: var(--motion-pop);
 }
 .menu-item {
   display: flex;
@@ -375,11 +371,7 @@
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.35), transparent);
-  animation: action-progress-sheen 1.2s ease-in-out infinite;
-}
-@keyframes action-progress-sheen {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
+  animation: omp-sweep var(--loop-pulse) var(--ease-loop) infinite;
 }
 
 /* ---------- Modal ---------- */
@@ -395,14 +387,20 @@
   justify-content: center;
   padding-top: 12vh;
   z-index: var(--z-modal);
-  animation: omp-fade-in var(--dur-fast) var(--ease-out);
+  animation: var(--motion-fade);
   /* Long modal content (checkpoint scope lists) was unreachable — the backdrop
      is a fixed full-viewport box with no scroll, so overflow was clipped. */
   overflow-y: auto;
   padding-bottom: var(--sp-24);
 }
 :root[data-theme="dark"] .modal-backdrop { background: rgba(0, 0, 0, 0.6); }
-@keyframes omp-fade-in { from { opacity: 0; } to { opacity: 1; } }
+/* Leaving: the host keeps the dialog mounted for MOTION_MS.fast (see
+   useOverlayPresence) while both layers go. */
+.modal-backdrop.is-leaving {
+  animation: var(--motion-fade-out);
+  pointer-events: none;
+}
+.modal-backdrop.is-leaving .modal { animation: var(--motion-sheet-out); }
 .modal {
   width: 480px;
   max-width: calc(100vw - 48px);
@@ -410,7 +408,7 @@
   border: 1px solid var(--border-float);
   border-radius: var(--r-10);
   box-shadow: var(--shadow-modal);
-  animation: omp-menu-in var(--dur) var(--ease-out);
+  animation: var(--motion-sheet);
 }
 .modal-head {
   padding: var(--sp-16) var(--sp-20) 0;
@@ -454,36 +452,15 @@
   font-size: var(--fs-12);
   line-height: 1.45;
   color: var(--text);
-  animation: omp-toast-in var(--dur-toast) var(--ease-out);
+  animation: var(--motion-toast);
 }
 .toast > .icon { flex: none; margin-top: 1px; }
 .toast > span { min-width: 0; }
 .toast.is-busy { align-items: center; }
-.toast.leaving {
-  animation: omp-toast-out var(--dur-toast) var(--ease-in) forwards;
-}
-@keyframes omp-toast-in {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: none; }
-}
-.toast-wrap.is-top .toast {
-  animation-name: omp-toast-in-top;
-}
-.toast-wrap.is-top .toast.leaving {
-  animation-name: omp-toast-out-top;
-}
-@keyframes omp-toast-in-top {
-  from { opacity: 0; transform: translateY(-14px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes omp-toast-out-top {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(-14px); }
-}
-@keyframes omp-toast-out {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(14px); }
-}
+/* The host waits MOTION_MS.slow before it clears the message (ToastHost). */
+.toast.leaving { animation: var(--motion-toast-out); }
+/* A notice travels from the edge it is pinned to. */
+.toast-wrap.is-top { --toast-from: -1; }
 
 /* ---------- Tooltip ----------
    Painted by TipHost as a body portal. Do not use native `title` or
@@ -501,7 +478,7 @@
   max-width: 220px;
   text-align: center;
   pointer-events: none;
-  animation: omp-fade-in var(--dur-fast) var(--ease-out);
+  animation: var(--motion-fade);
 }
 
 /* ---------- Form controls ---------- */
@@ -614,7 +591,7 @@ textarea.input { height: auto; min-height: 72px; padding: var(--sp-8) var(--sp-1
   border-radius: var(--r-8);
   background: var(--surface);
   box-shadow: var(--shadow-menu);
-  animation: omp-menu-in var(--dur-fast) var(--ease-out);
+  animation: var(--motion-pop);
 }
 .app-select-popup[data-side="top"] { transform-origin: bottom center; }
 .app-select-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
@@ -668,9 +645,6 @@ textarea.input { height: auto; min-height: 72px; padding: var(--sp-8) var(--sp-1
 .app-select-check { display: inline-flex; flex: none; width: 14px; color: var(--accent); }
 .app-select-group { padding: var(--sp-6) var(--sp-8) var(--sp-4); color: var(--text-faint); font-size: var(--fs-11); font-weight: var(--fw-medium); }
 .app-select-empty { padding: var(--sp-12) var(--sp-8); color: var(--text-3); font-size: var(--fs-12); text-align: center; }
-@media (prefers-reduced-motion: reduce) {
-  .app-select-popup, .app-select-chevron { animation: none; transition: none; }
-}
 
 /* Switch.
    Rendered as <button role="switch"> so it is focusable, operable with
@@ -781,10 +755,6 @@ textarea.input { height: auto; min-height: 72px; padding: var(--sp-8) var(--sp-1
   .switch[aria-checked="true"]::after { background: HighlightText; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .switch,
-  .switch::after { transition: none; }
-}
 
 /* ---------- Empty state ---------- */
 .empty {

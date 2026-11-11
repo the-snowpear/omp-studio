@@ -84,14 +84,22 @@ describe("rail title menus and context presentation", () => {
     expect(query).toHaveBeenCalledOnce();
   });
 
-  it("reads historical usage for a folded header once and shares it with the compact icon", async () => {
+  it("defers historical usage until expansion and shares the result with the folded icon", async () => {
     const { store, query } = setup("expanded", telemetry(10), true);
-    await waitFor(() => expect(document.querySelector('.dock-meter-value')?.textContent).toBe("25%"));
-    expect(query).toHaveBeenCalledWith("session.telemetry.read", { sessionId: archivedId });
+    expect(document.querySelector('.dock-meter-value')?.textContent).toBe("—");
+    expect(query).not.toHaveBeenCalled();
+    expect(document.querySelector(".context-card")).toBeNull();
     act(() => store.dispatch({ type: "railMode", mode: "compact" })); flush();
+    expect(query).not.toHaveBeenCalled();
+    fireEvent.click(document.querySelector('[data-dock-rail-icon="context"]')!); flush(); flush();
+    await waitFor(() => expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("25"));
+    expect(query).toHaveBeenCalledWith("session.telemetry.read", { sessionId: archivedId });
+    fireEvent.click(document.querySelector('[data-dock-rail-icon="context"]')!); flush(); flush();
     expect(document.querySelector('.dock-meter-ring-value[data-category="messagesTokens"]')?.getAttribute("stroke-dasharray")).toBe("23 100");
     expect(query).toHaveBeenCalledOnce();
-    expect(document.querySelector(".context-card")).toBeNull();
+    fireEvent.click(document.querySelector('[data-dock-rail-icon="context"]')!); flush(); flush();
+    await waitFor(() => expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("25"));
+    expect(query).toHaveBeenCalledOnce();
   });
 
   it("draws each native category as a different color and fraction of the full window", () => {

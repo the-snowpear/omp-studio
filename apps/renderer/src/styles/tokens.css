@@ -3,6 +3,11 @@
    Light / Dark 双主题，通过 html[data-theme] 切换
    ============================================================ */
 
+/* The motion patterns travel with the tokens they spend: every entry that
+   loads this file gets the shared keyframes, the surface classes and the
+   reduced-motion policy with it. */
+@import "./motion.css";
+
 :root {
   /* Typography */
   --font-ui-default: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
@@ -84,37 +89,77 @@
   --doc-max-w: 768px;
   --bottom-panel-h: 240px;
 
-  /* Motion — one curve for everything reads as mechanical. Entrances decelerate
-     into place (ease-out), exits accelerate away (ease-in), and exits run at
-     ~65% of entrance duration so dismissing never feels like waiting.
-     Tactile feedback uses a snappier duration to feel immediate. */
-  --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
-  --ease-out: cubic-bezier(0.16, 0.84, 0.44, 1);
-  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);  /* Slight overshoot for playful interactions */
-  /* iOS 风格滑动手感：起步轻快、全程均匀缓出、末尾柔和停下（easeOutCubic 类），
-     给滑动指示器（模型配置标签栏气泡 / 二级页导航气泡）用的丝滑曲线。 */
-  --ease-ios: cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  /* 切换页面标签栏（顶部导航气泡）专用：Apple iOS 弹簧曲线 —— 起步更猛、
-     长尾缓降，曲线感强、无过冲、结尾不戛然而止。 */
-  --ease-nav: cubic-bezier(0.32, 0.72, 0, 1);
-  /* 上面两条曲线的镜像（cubic-bezier(x1,y1,x2,y2) 的反向 =
-     cubic-bezier(1-x2,1-y2,1-x1,1-y1)）。收起动画要「就是展开倒着播」时用它，
-     而不是换成通用的 --ease-in —— 换了曲线就不是同一段动作倒放了。 */
-  --ease-out-rev: cubic-bezier(0.56, 0, 0.84, 0.16);
-  --ease-nav-rev: cubic-bezier(1, 0, 0.68, 0.28);
+  /* ---------------- Motion ----------------
+     Numbers only. The rules that spend them are in styles/motion.css, and
+     src/motion.ts mirrors them for timers and WAAPI
+     (scripts/check-renderer-motion.mjs fails when the two drift), so a value
+     changes here and in that table, and nowhere else.
+
+     Rhythm — six steps, each about ×1.4 of the one before. Pick by what is
+     moving, not by what looks nice in isolation:
+       --dur-tactile   80ms  a press being acknowledged
+       --dur-fast     120ms  colour, hover, anything that stays put; popovers
+       --dur          180ms  one element changing state: chevron, switch, reveal
+       --dur-slow     250ms  a region changing size or place: panel, drawer, card
+       --dur-slower   320ms  a whole surface arriving: page, tab pane, toast
+       --dur-hero     480ms  a morph that carries meaning: ask genie, plan sheet
+     Leaving takes the step below arriving (a 320ms surface leaves in 250ms), so
+     dismissing never feels like waiting. */
+  --dur-tactile: 80ms;
   --dur-fast: 120ms;
   --dur: 180ms;
   --dur-slow: 250ms;
-  --dur-toast: 320ms;  /* 浮窗提示的浮入/浮出动画时长，放慢一些更醒目 */
-  --dur-chart: 420ms;  /* 首页 Token 折线年/月/周/日变形 */
-  --dur-chart-axis: 160ms;  /* 折线坐标刻度交叉淡入淡出 */
+  --dur-slower: 320ms;
+  --dur-hero: 480ms;
+  /* Two durations that are not steps of the ladder, because they are not
+     transitions between states: a highlight left behind to catch the eye and
+     then fade, and a long label scrolling past at reading pace. */
+  --dur-flash: 900ms;
+  --dur-marquee: 3000ms;
+  /* Loops are status, not transitions. Three tempos, by what the loop says:
+     working (a spinner), alive (a pulse, a shimmer, a progress sweep), and
+     ambient (slow breathing at the edge of attention). */
+  --loop-spin: 800ms;
+  --loop-pulse: 1400ms;
+  --loop-drift: 2400ms;
+
+  /* Curves — pick by what the motion means:
+       --ease           state    colour, opacity, anything that stays where it is
+       --ease-out       arrive   one element decelerating into place
+       --ease-in        leave    one element accelerating away
+       --ease-nav       travel   surfaces and indicators crossing the screen:
+                                 brisk start, long soft landing, never overshoots
+       --ease-ios       follow   things answering the user's own gesture: a drag
+                                 settling, an editor growing while you type
+       --ease-emphasis  morph    a large shape that starts and ends at rest: a
+                                 list unfolding, a sheet growing out of a card
+       --ease-spring    settle   a small mark landing. A real damped spring
+                                 (ζ 0.62): one 8% overshoot a third of the way in,
+                                 then it settles; it is the only curve that
+                                 overshoots, so keep it to marks and thumbs.
+       --ease-loop      breathe  loops that go there and back: at rest at both
+                                 ends. Spinners and sweeps stay `linear`. */
+  --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-out: cubic-bezier(0.16, 0.84, 0.44, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+  --ease-nav: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-ios: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-emphasis: cubic-bezier(0.38, 0, 0.08, 1);
+  --ease-loop: cubic-bezier(0.42, 0, 0.58, 1);
+  --ease-spring: linear(0, 0.006 1%, 0.028 2.25%, 0.064 3.5%, 0.122 5%, 0.179 6.25%, 0.241 7.5%, 0.523 12.75%, 0.638 15%, 0.752 17.5%, 0.84 19.75%, 0.913 22%, 0.977 24.5%, 1.024 27%, 1.055 29.5%, 1.07 31.25%, 1.078 33%, 1.083 36.75%, 1.072 41.25%, 1.017 54.5%, 0.998 62.75%, 0.993 72.5%, 1);
+
+  /* Travel — distance says how big the thing is, axis says what kind of move
+     it is: vertical for depth (entering or leaving a level), horizontal for
+     siblings (the next tab, the next question). */
+  --shift-xs: 4px;   /* one element: popover, inline reveal */
+  --shift-sm: 8px;   /* a component, and how far any surface drifts as it leaves */
+  --shift-md: 12px;  /* a surface arriving in depth: page, toast */
+  --shift-lg: 16px;  /* a surface arriving from the side: tab pane, deck cell */
+  /* Gap between the items of a cascade. */
+  --stagger: 40ms;
   /* 悬停提示（data-tip）的出现延迟：指针静止停留后才弹标签，扫过按钮
      时不闪现。与动效时长分开命名，因为它是等待时间而不是动画时间。 */
   --tip-delay: 500ms;
-  --dur-slide: 230ms;  /* 标签栏切换气泡的滑动时长，独立于页面切换的 --dur-slow */
-  --dur-exit: 120ms;
-  --dur-tactile: 80ms;  /* Quick feedback for button presses */
 
   /* Z-index — the scale is the contract; raw values in component files are not.
      Every layer below is referenced by name from the component CSS. */

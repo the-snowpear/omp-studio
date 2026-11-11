@@ -11,7 +11,7 @@
   width: min(420px, 100% - 48px);
   margin: auto;
   padding: 40px 0;
-  animation: cw-idle-enter var(--dur-slow) var(--ease-out) both;
+  animation: var(--motion-reveal);
 }
 .cw-idle-art { position: relative; width: 190px; height: 112px; margin: 0 auto 24px; color: var(--accent); }
 .cw-idle-window { position: absolute; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); transition: transform var(--dur-slow) var(--ease-out); }
@@ -46,18 +46,17 @@
 .cw-idle-recent-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 10px 8px; color: var(--text-3); font-size: var(--fs-11); }
 .cw-idle-recent-heading > span:last-child { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .cw-idle-recent ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 2px; }
-.cw-idle-conversation { display: flex; align-items: center; width: 100%; gap: 12px; padding: 10px; border: 0; border-radius: var(--r-6); color: var(--text); background: transparent; text-align: left; cursor: pointer; transition: background var(--dur-fast); }
+.cw-idle-conversation { display: flex; align-items: center; width: 100%; gap: 12px; padding: 10px; border: 0; border-radius: var(--r-6); color: var(--text); background: transparent; text-align: left; cursor: pointer; transition: background var(--dur-fast) var(--ease); }
 .cw-idle-conversation:hover { background: var(--surface-hover); }
 .cw-idle-conversation-icon { display: grid; place-items: center; color: var(--text-3); flex: none; width: 30px; height: 30px; border: 1px solid var(--border); background: var(--bg-inset); border-radius: 8px; }
 .cw-idle-conversation-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; gap: 4px; }
 .cw-idle-conversation-copy strong { font-size: var(--fs-12); font-weight: var(--fw-medium); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .cw-idle-conversation-copy small { font-size: var(--fs-11); color: var(--text-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.cw-idle-conversation > .cw-idle-reveal { flex: none; color: var(--text-3); opacity: 0; transform: translateX(-4px); transition: transform var(--dur-fast), opacity var(--dur-fast); }
+.cw-idle-conversation > .cw-idle-reveal { flex: none; color: var(--text-3); opacity: 0; transform: translateX(-4px); transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease); }
 .cw-idle-conversation:hover > .cw-idle-reveal, .cw-idle-conversation:focus-visible > .cw-idle-reveal { transform: translateX(0); opacity: 1; }
 .cw-idle-conversation:focus-visible, .cw-idle-actions > .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cw-idle-hint { display: flex; align-items: center; justify-content: center; gap: 7px; font-size: var(--fs-11); color: var(--text-3); margin: 24px 0 0; text-align: center; }
 .cw-idle-hint > .icon { flex: none; width: 13px; height: 13px; }
-@keyframes cw-idle-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @container workspace-idle (max-height: 500px) {
   .cw-idle-inner { padding: 24px 0; }
   .cw-idle-art { transform: scale(.8); height: 90px; margin-bottom: 12px; transform-origin: center top; }
@@ -70,10 +69,4 @@
 @container workspace-idle (max-width: 380px) {
   .cw-idle-inner { width: calc(100% - 32px); }
   .cw-idle-actions { flex-direction: column; gap: 4px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .cw-idle-inner { animation: none; }
-  .cw-idle-window, .cw-idle-conversation, .cw-idle-conversation > .cw-idle-reveal { transition: none; }
-  .cw-idle-inner:hover .cw-idle-window-front { transform: rotate(4deg); }
-  .cw-idle-inner:hover .cw-idle-window-back { transform: rotate(-8deg); }
 }

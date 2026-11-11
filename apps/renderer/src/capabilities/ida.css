@@ -131,4 +131,3 @@
   .ida-facts > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
   .ida-activity, .ida-cancel-row { flex-wrap: wrap; }
 }
-@media (prefers-reduced-motion: reduce) { .ida-database-row { transition: none; } }

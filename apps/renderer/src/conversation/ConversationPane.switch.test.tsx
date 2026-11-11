@@ -43,6 +43,34 @@ describe("ConversationPane session switch", () => {
     vi.restoreAllMocks();
   });
 
+  it("uses the current motion tier after the retained conversation changes preference", () => {
+    vi.useFakeTimers();
+    const root = document.documentElement;
+    const previous = root.getAttribute("data-perf-tier");
+    root.removeAttribute("data-perf-tier");
+    try {
+      const view = mounted([userRow("original")]);
+      const phase = () => view.container.querySelector(".convo-body")?.getAttribute("data-phase");
+      root.setAttribute("data-perf-tier", "L1");
+      view.rerender(pane(snapshot("b", "ready", [userRow("reduced")] )));
+      expect(phase()).toBe("settling");
+      settleLayout();
+      act(() => { vi.advanceTimersByTime(0); });
+      expect(phase()).toBe("idle");
+      root.removeAttribute("data-perf-tier");
+      view.rerender(pane(snapshot("c", "ready", [userRow("normal")] )));
+      expect(phase()).toBe("leaving");
+      act(() => { vi.advanceTimersByTime(SWITCH_LEAVE_MS); });
+      settleLayout();
+      expect(phase()).toBe("revealing");
+      act(() => { vi.advanceTimersByTime(0); });
+      expect(phase()).toBe("revealing");
+    } finally {
+      if (previous === null) root.removeAttribute("data-perf-tier");
+      else root.setAttribute("data-perf-tier", previous);
+    }
+  });
+
   it("cross-dissolves through a switch instead of hard-cutting to a placeholder", () => {
     vi.useFakeTimers();
     const view = mounted([userRow("从前的会话")]);

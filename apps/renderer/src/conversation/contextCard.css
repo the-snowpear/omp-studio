@@ -84,7 +84,7 @@
 .context-threshold { display: flex; align-items: center; gap: 6px; min-width: 0; height: 24px; }
 .context-threshold-title, .context-threshold input { font: inherit; line-height: 1.4; }
 .context-threshold-title { display: block; color: var(--text-3); cursor: text; flex-shrink: 0; }
-.context-threshold-control { display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: max-content; min-width: 0; max-width: 100%; height: 24px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--r-4); background: var(--surface-hover); cursor: text; transition: background 140ms, border-color 140ms, box-shadow 140ms; }
+.context-threshold-control { display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: max-content; min-width: 0; max-width: 100%; height: 24px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: var(--r-4); background: var(--surface-hover); cursor: text; transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
 .context-threshold-control:hover { background: var(--surface-active); }
 .context-threshold.is-open .context-threshold-control { border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 2px var(--accent-softer); }
 /* 隐藏的等字体文本撑开网格，输入框覆盖网格并在超长时自行滚动。 */
@@ -97,7 +97,7 @@
 .context-threshold input[aria-invalid="true"] { color: var(--red); }
 .context-threshold .context-threshold-edit { flex: 0 0 11px; width: 11px; height: 11px; color: var(--text-3); }
 .context-threshold .context-threshold-edit.is-saved { color: var(--green); }
-.context-threshold-pop { position: fixed; z-index: 10000; box-sizing: border-box; max-height: calc(100vh - 24px); overflow-y: auto; padding: 14px; border: 1px solid var(--border); border-radius: var(--r-10); background: var(--bg-elevated, var(--bg)); color: var(--text-2); box-shadow: 0 8px 32px #0002; font-family: var(--font-ui); font-size: var(--fs-11); animation: context-threshold-in 120ms ease-out; }
+.context-threshold-pop { position: fixed; z-index: 10000; box-sizing: border-box; max-height: calc(100vh - 24px); overflow-y: auto; padding: 14px; border: 1px solid var(--border); border-radius: var(--r-10); background: var(--bg-elevated, var(--bg)); color: var(--text-2); box-shadow: 0 8px 32px #0002; font-family: var(--font-ui); font-size: var(--fs-11); animation: var(--motion-pop); }
 .context-threshold-pop header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: var(--fw-medium); color: var(--text); }
 .context-threshold-scope { padding: 2px 5px; border-radius: var(--r-4); background: var(--surface-hover); color: var(--text-3); font-size: var(--fs-10); font-weight: normal; }
 .context-threshold-description { margin: 8px 0 12px; color: var(--text-3); line-height: 1.6; }
@@ -117,8 +117,6 @@
 .context-threshold-apply kbd { opacity: .6; font: inherit; }
 .context-threshold-pop button:disabled { cursor: default; opacity: .4; }
 .context-threshold-pop button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-@keyframes context-threshold-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-@media (prefers-reduced-motion: reduce) { .context-threshold-pop { animation: none; } .context-threshold-control { transition: none; } .context-ring circle { transition: none; } }
 @container (max-width: 260px) {
   .context-card-actions { gap: 4px; }
   .context-card-details .context-card-details-text { display: none; }

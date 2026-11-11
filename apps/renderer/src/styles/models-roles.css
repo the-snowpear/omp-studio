@@ -83,30 +83,16 @@
 /* 面板切换用 [hidden]，浏览器默认即 display:none。这里只保证没有别的规则
    把它 display 回来（.page-wide 下的元素较多）。
    供应商/角色切换的进出场动画：React 端用 useDeferredKey 先让旧面板播放
-   page-out（下坠淡出）再换显新面板播放 page-in（上浮淡入），两段动画都复用
-   base.css 的 page-in / page-out 关键帧 —— 与整页切换同速（--dur-slow
-   250ms）、同缓动、同位移，切页与切面板手感一致。减少动态偏好由 base.css
-   全局压到 0.01ms，这里不用单独处理。
+   page-out 再换显新面板播放 page-in。两个类都是 styles/motion.css 里整页
+   切换的那一对，这里不重新定义；面板是并列关系，所以元素上带
+   data-page-axis="x"，沿标签栏方向横移而不是上下。
    首次进入不打 page-in（见 ModelConfigPage tabMotionLive），避免叠在壳层
    translateY 上再播一次 —— 原生 placeholder 会因此闪一帧字号。 */
 #mcPanels > [hidden] { display: none; }
-#mcPanels > section[role="tabpanel"].page-in {
-  animation: page-in var(--dur-slow) var(--ease) both;
-}
-#mcPanels > section[role="tabpanel"].page-out {
-  animation: page-out var(--dur-slow) var(--ease) both;
-  pointer-events: none;
-}
 
-/* 列表 ↔ 编辑器：与切页 / 切 tab 同一套上浮淡入、下沉淡出。
+/* 列表 ↔ 编辑器（.mc-view）是进一层 / 退一层：同一对 page-in / page-out，
+   纵向；退回列表时元素带 data-page-dir="back"。
    首次进入列表不打 live，避免叠在 tab 的 page-in 上再播一次。 */
-.mc-view.page-in {
-  animation: page-in var(--dur-slow) var(--ease) both;
-}
-.mc-view.page-out {
-  animation: page-out var(--dur-slow) var(--ease) both;
-  pointer-events: none;
-}
 
 /* ---------- 品牌标（真实供应商 Logo） ----------
    与 icons.js 的描边图标不同：品牌标是各公司的真实 Logo，多数是
@@ -413,8 +399,7 @@ body.is-pv-sorting * {
   pointer-events: none;
   transform: none;
 }
-.pv-act.is-testing svg { animation: pv-spin 0.9s linear infinite; }
-@keyframes pv-spin { to { transform: rotate(360deg); } }
+.pv-act.is-testing svg { animation: omp-spin var(--loop-spin) linear infinite; }
 
 /* 开关：槽位必须让出 .switch 的 34×20 轨迹，否则 28×28 盒会把旋钮挤进
    展开箭头的命中区，看起来像开关点不动。 */
@@ -438,21 +423,19 @@ body.is-pv-sorting * {
 .pv-act.is-expand { color: var(--text-3); }
 .pv-expand-chev {
   display: inline-flex;
-  transition: transform 420ms cubic-bezier(0.38, 0, 0.08, 1);
+  transition: transform var(--dur-hero) var(--ease-emphasis);
 }
 .pv-expand-chev.open { transform: rotate(90deg); }
 
-/* 慢启动 → 中段加速 → 长尾减速。收起单独加长，避免 0.65/0.35 那种
-   「前半几乎不动、后半一把拉完」把减速段挤没。 */
+/* 慢启动 → 中段加速 → 长尾减速（--ease-emphasis）。这条曲线两头都要留出
+   余量，所以展开、收起都走 --dur-hero：收起再短就成了「前半几乎不动、
+   后半一把拉完」，减速段被挤没。 */
 .pv-models-shell {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 520ms cubic-bezier(0.38, 0, 0.08, 1);
+  transition: grid-template-rows var(--dur-hero) var(--ease-emphasis);
 }
-.pv-models-shell.open {
-  grid-template-rows: 1fr;
-  transition-duration: 400ms;
-}
+.pv-models-shell.open { grid-template-rows: 1fr; }
 .pv-models-shell:not(.open) { pointer-events: none; }
 .pv-models-shell > .pv-models {
   min-height: 0;
@@ -464,20 +447,21 @@ body.is-pv-sorting * {
   opacity: 0;
   transform: translateX(-18px);
   transition:
-    opacity 480ms cubic-bezier(0.38, 0, 0.08, 1),
-    transform 480ms cubic-bezier(0.38, 0, 0.08, 1);
+    opacity var(--dur-hero) var(--ease-emphasis),
+    transform var(--dur-hero) var(--ease-emphasis);
 }
 .pv-models-shell.open .pm-row,
 .pv-models-shell.open .pm-empty {
   opacity: 1;
   transform: none;
-  transition-duration: 360ms;
-  transition-delay: calc(min(var(--pm-i, 0), 10) * 28ms);
+  /* 逐行跟进；第 8 行以后同时到，长列表不会拖成一条长队。 */
+  transition-duration: var(--dur-slower);
+  transition-delay: calc(min(var(--pm-i, 0), 8) * var(--stagger));
 }
 .pv-models-shell.open .pm-row.is-off { opacity: 0.6; }
 .pv-models-shell:not(.open) .pm-row,
 .pv-models-shell:not(.open) .pm-empty {
-  transition-delay: 0ms;
+  transition-delay: 0s;
 }
 .pm-row {
   display: flex; align-items: center; gap: var(--sp-10);
@@ -673,8 +657,7 @@ body.is-pv-sorting * {
 
 /* 供应商卡片内的测试结果行（pv-head 与 pv-models 之间）。
    外层 .pv-test-shell 是 0fr→1fr 的 grid 行：结果出现时卡片随之向下拉长展开；
-   内层 .pv-test 同时做下滑浮入（translateY + opacity）。reduced-motion 由
-   全局规则收成瞬时。 */
+   内层 .pv-test 同时浮入（--motion-reveal）。 */
 .pv-test-shell {
   display: grid;
   grid-template-rows: 0fr;
@@ -686,12 +669,7 @@ body.is-pv-sorting * {
   min-height: 0;
   margin: 0;
   overflow: hidden;
-  animation: pv-test-in var(--dur-slow) var(--ease-out) both;
-}
-
-@keyframes pv-test-in {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: translateY(0); }
+  animation: var(--motion-reveal);
 }
 
 .pv-test {
@@ -770,17 +748,6 @@ body.is-pv-sorting * {
   white-space: nowrap;
   min-width: 0;
 }
-.chip .icon,
-.chip svg.icon {
-  width: 11px;
-  height: 11px;
-}
-.chip.chip-icon {
-  width: 18px;
-  padding: 0;
-  justify-content: center;
-}
-
 /* 模型编辑弹窗：垂直居中再略上移，避免贴在视口正中或顶栏附近。 */
 .modal-backdrop.mc-model-modal {
   align-items: center;
@@ -793,21 +760,7 @@ body.is-pv-sorting * {
   display: flex;
   flex-direction: column;
 }
-.modal-backdrop.mc-model-modal.is-leaving {
-  animation: mc-modal-fade-out var(--dur-slow) var(--ease) both;
-  pointer-events: none;
-}
-.modal-backdrop.mc-model-modal.is-leaving .modal {
-  animation: mc-modal-out var(--dur-slow) var(--ease) both;
-}
-@keyframes mc-modal-fade-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-@keyframes mc-modal-out {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(10px) scale(0.98); }
-}
+
 .mc-model-modal .modal-head {
   padding-bottom: var(--sp-12);
 }
@@ -1229,167 +1182,6 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
 }
 
 /* 按供应商分组的模型选择器 */
-.rms-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-8);
-  min-width: 0;
-  height: 32px;
-  max-width: 340px;
-  padding: 0 var(--sp-8);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-6);
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
-}
-.rms-trigger:hover { border-color: var(--accent-border); }
-.rms-trigger:focus-visible,
-.rms-trigger.is-open {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-softer);
-}
-.rms-trigger.is-missing { border-color: var(--amber); }
-.rms-trigger .rms-copy {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.rms-trigger .rms-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-12);
-  font-weight: var(--fw-medium);
-}
-.rms-trigger > .icon {
-  flex: none;
-  color: var(--text-faint);
-}
-.rms-brand {
-  width: 22px;
-  height: 22px;
-  border-radius: var(--r-4);
-  background: var(--surface-2);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  color: var(--text-2);
-}
-.rms-brand .brand,
-.rms-brand .icon { width: 13px; height: 13px; }
-.role-row .role-model-section .rms-trigger {
-  flex: none;
-  width: 220px;
-  max-width: 220px;
-  height: 36px;
-  border-color: var(--border);
-  border-radius: var(--r-4);
-  padding: 0 8px;
-}
-.kv-row .rms-trigger {
-  width: 100%;
-  max-width: 340px;
-}
-.menu.rms-pop {
-  position: fixed;
-  max-height: min(420px, calc(100vh - 16px));
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 0 0 4px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  z-index: var(--z-menu);
-}
-.rms-empty {
-  padding: var(--sp-12) var(--sp-10);
-  font-size: var(--fs-12);
-  color: var(--text-3);
-}
-.rms-group {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding-bottom: 4px;
-}
-.rms-group-label {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-8);
-  margin: 0;
-  padding: 8px 10px;
-  border-radius: 0;
-  background: var(--surface-2);
-  box-shadow: 0 1px 0 var(--border);
-  font-size: var(--fs-11);
-  font-weight: var(--fw-semibold);
-  color: var(--text-2);
-}
-.rms-group-name {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.rms-group-count {
-  font-size: var(--fs-11);
-  font-weight: var(--fw-regular);
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-}
-.rms-option {
-  align-items: center;
-  gap: var(--sp-8);
-  padding: 6px 10px 6px 40px;
-}
-.rms-option.is-active { background: var(--surface-hover); color: var(--text); }
-.rms-option.is-on { color: var(--text); background: var(--accent-softer); }
-.rms-option.is-on.is-active { background: var(--accent-softer); }
-.rms-option-copy {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.rms-option-copy b {
-  font-size: var(--fs-12);
-  font-weight: var(--fw-medium);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.rms-option-copy span {
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.rms-option-caps {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  flex: none;
-}
-.rms-option-caps .chip {
-  flex: none;
-}
-.rms-option.is-missing { padding-left: var(--sp-10); }
-.rms-option > .icon { color: var(--accent); flex: none; }
-
 /* 分组标题 */
 .role-group-header {
   display: flex;
@@ -1552,7 +1344,7 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   font-size: var(--fs-12);
   font-weight: var(--fw-medium);
   box-shadow: var(--shadow-sm);
-  transition: all var(--dur-fast) var(--ease);
+  transition: border-color var(--dur-fast) var(--ease);
 }
 .cycle-chip:hover { border-color: var(--accent-border); }
 .cycle-chip .chip-icon { color: var(--accent); }
@@ -1564,7 +1356,7 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   display: flex; align-items: center; justify-content: center;
   color: var(--text-faint);
   cursor: pointer;
-  transition: all var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .cycle-chip .chip-remove:hover { background: var(--red-soft); color: var(--red); }
 .cycle-chip .chip-remove svg { width: 10px; height: 10px; }
@@ -2231,11 +2023,11 @@ body.is-wsx-sorting { cursor: grabbing; }
 .wsx-pool-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-softer); }
 .wsx-pool-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: var(--fs-12); outline: none; }
 .wsx-pool-filters { display: flex; flex-wrap: wrap; gap: 4px; }
-.chip-btn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-inset); color: var(--text-2); font-size: var(--fs-11); cursor: pointer; transition: border-color var(--dur-fast) var(--ease-ios), color var(--dur-fast) var(--ease-ios); }
+.chip-btn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-inset); color: var(--text-2); font-size: var(--fs-11); cursor: pointer; transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .chip-btn:hover { border-color: var(--accent); color: var(--text); }
 .chip-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-softer); }
 .wsx-pool-list { display: flex; flex-direction: column; }
-.wsx-pool-row { display: grid; grid-template-columns: 26px minmax(140px, 210px) minmax(0, 1fr) 92px max-content; align-items: center; gap: var(--sp-10); min-height: 50px; padding: 5px 6px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); transition: background var(--dur-fast) var(--ease-ios); }
+.wsx-pool-row { display: grid; grid-template-columns: 26px minmax(140px, 210px) minmax(0, 1fr) 92px max-content; align-items: center; gap: var(--sp-10); min-height: 50px; padding: 5px 6px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); transition: background var(--dur-fast) var(--ease); }
 .wsx-pool-row:last-child { border-bottom: 0; }
 .wsx-pool-row:hover { background: var(--bg-inset); }
 .wsx-pool-row.is-excluded { opacity: .58; }

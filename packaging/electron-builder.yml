@@ -21,12 +21,20 @@ files:
   - package.json
   - resources/**/*
   - "!dist/test/**"
-  - "!dist/**/*.map"
+  # Debug maps and declarations are not executable inputs, including workspace dependencies.
+  - "!**/*.map"
+  - "!**/*.d.ts"
   - "!**/*.tsbuildinfo"
+  - "!**/*.pdb"
+  - "!**/node-pty/lib/*.test.js"
   # Workspace packages are copied in full; never ship local Runtime artifact caches
   # or package tests inside asar / asar.unpacked.
   - "!**/dist/artifacts/**"
   - "!**/dist/test/**"
+  # Workspace package entrypoints and Workers resolve from dist, never these sources.
+  - "!**/@omp-studio/*/src/**"
+  - "!**/@omp-studio/*/test/**"
+  - "!**/@omp-studio/*/tsconfig*.json"
   - "!**/*.exe"
   - "!dist/ssh-askpass/**"
 

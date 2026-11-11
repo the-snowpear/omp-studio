@@ -8,6 +8,7 @@ import { normalizeBrowserAddress } from "./managed-browser-address.js";
 import { faviconDataUrl, loadFavicon, pickFaviconUrl } from "./managed-browser-favicon.js";
 import { BROWSER_PICKER_POLL, BROWSER_PICKER_START, BROWSER_PICKER_STOP, BROWSER_PICKER_WORLD_ID, type BrowserPickerPoll } from "./managed-browser-picker.js";
 import { ManagedBrowserStore } from "./managed-browser-store.js";
+import { BrowserPageActivity } from "./managed-browser-activity.js";
 
 interface LivePage {
   page: ManagedBrowserPage;
@@ -20,6 +21,8 @@ interface LivePage {
   picking: boolean;
   closed: boolean;
   agentInputs: number;
+  activity: BrowserPageActivity;
+  focusEmulation: Set<string>;
   favicon?: AbortController;
 }
 export interface ManagedBrowserRuntime {
@@ -52,6 +55,7 @@ export class DesktopManagedBrowser {
   readonly #releasedPages = new Set<string>();
   readonly #notifications = new Map<string, Notification>();
   readonly #controlChanges = new Map<string, Promise<void>>();
+  readonly #windowStops = new Map<BrowserWindow, () => void>();
   #parking?: BrowserWindow;
   #runtime?: ManagedBrowserRuntime;
   #disposed = false;
@@ -69,6 +73,12 @@ export class DesktopManagedBrowser {
   }
   isReleased(pageId: string): boolean { return this.#releasedPages.has(pageId); }
   contents(pageId: string): WebContents | undefined { return this.#pages.get(pageId)?.view.webContents; }
+  /** The relay holds this for attach/command work; catalog reads do not wake a page. */
+  holdActivity(pageId: string): () => void {
+    const live = this.#pages.get(pageId);
+    if (!live) throw new Error("Managed browser page is not loaded.");
+    return live.activity.hold();
+  }
   pages(sessionId: string): ManagedBrowserPage[] { return this.store.state(sessionId).pages; }
   #emit(event: ManagedBrowserEvent): void { for (const listener of this.#listeners) listener(event); }
   #changed(sessionId: string): void {
@@ -153,6 +163,23 @@ export class DesktopManagedBrowser {
     void live.view.webContents.loadURL(page.url).catch(error => { if (!live.closed && (error as { code?: string }).code !== "ERR_ABORTED") this.store.update(pageId, { status: "error", error: String(error) }); });
     return live.view.webContents;
   }
+  #updateVisibility(live: LivePage): void {
+    live.activity.update({ visible: live.presentation?.visible === true && !live.parent.isDestroyed() && live.parent.isVisible() && !live.parent.isMinimized() });
+  }
+  #watchWindow(window: BrowserWindow): void {
+    if (this.#windowStops.has(window)) return;
+    const update = () => { for (const live of this.#pages.values()) if (live.parent === window) this.#updateVisibility(live); };
+    const close = () => { update(); stop(); this.#windowStops.delete(window); };
+    const stop = () => {
+      window.removeListener("show", update); window.removeListener("hide", update);
+      window.removeListener("minimize", update); window.removeListener("restore", update);
+      window.removeListener("closed", close);
+    };
+    window.on("show", update); window.on("hide", update);
+    window.on("minimize", update); window.on("restore", update);
+    window.once("closed", close);
+    this.#windowStops.set(window, stop);
+  }
   #newPage(page: ManagedBrowserPage, options?: Electron.WebContentsViewConstructorOptions): LivePage {
     const webPreferences = { ...options?.webPreferences, session: this.#space(page.spaceId), sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInSubFrames: false, webSecurity: true, allowRunningInsecureContent: false, webviewTag: false, backgroundThrottling: false };
     delete webPreferences.preload;
@@ -162,16 +189,41 @@ export class DesktopManagedBrowser {
     view.setBounds({ x: 0, y: 0, width: 1100, height: 720 });
     clip.addChildView(view);
     const parent = this.#parkingWindow(); parent.contentView.addChildView(clip);
-    const live: LivePage = { page, view, clip, parent, picking: false, closed: false, agentInputs: 0 };
+    const focusEmulation = new Set<string>();
+    const activity = new BrowserPageActivity(throttled => {
+      const contents = view.webContents;
+      // A new page already starts awake. Capturing its initial empty document can
+      // compete with the first navigation; only real state transitions need it.
+      if (contents.getBackgroundThrottling() === throttled) return;
+      // Chromium keeps the old visibility after changing throttling on a parked view.
+      // A capture reapplies visibility without navigating or replacing the live page.
+      const refreshVisibility = () => { void contents.capturePage(undefined, { stayHidden: throttled }).catch(error => {
+        if (!contents.isDestroyed()) console.warn("[managed-browser] Could not refresh page visibility", error);
+      }); };
+      if (!throttled) refreshVisibility();
+      contents.setBackgroundThrottling(throttled);
+      if (throttled) refreshVisibility();
+      if (contents.debugger.isAttached()) for (const sessionId of focusEmulation) {
+        void contents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: !throttled }, sessionId || undefined)
+          .catch(() => focusEmulation.delete(sessionId));
+      }
+    });
+    const live: LivePage = { page, view, clip, parent, activity, focusEmulation, picking: false, closed: false, agentInputs: 0 };
     this.#pages.set(page.id, live);
+    this.#watchWindow(parent);
     const contents = view.webContents;
     contents.setZoomFactor(page.zoom);
     const update = () => {
       if (live.closed || contents.isDestroyed()) return;
+      activity.update({ devtools: contents.isDevToolsOpened() });
       this.store.update(page.id, { url: contents.getURL() || page.url, title: contents.getTitle() || page.url, canGoBack: contents.navigationHistory.canGoBack(), canGoForward: contents.navigationHistory.canGoForward(), devtools: contents.isDevToolsOpened() });
     };
-    contents.on("did-start-loading", () => { if (!live.closed) this.store.update(page.id, { status: "loading", error: undefined }); });
-    contents.on("did-stop-loading", () => { if (!live.closed && page.status === "loading") this.store.update(page.id, { status: "ready" }); update(); });
+    contents.on("did-start-loading", () => { activity.update({ loading: true }); if (!live.closed) this.store.update(page.id, { status: "loading", error: undefined }); });
+    contents.on("did-stop-loading", () => { activity.update({ loading: false }); if (!live.closed && page.status === "loading") this.store.update(page.id, { status: "ready" }); update(); });
+    contents.on("media-started-playing", () => activity.update({ media: true }));
+    contents.on("media-paused", () => activity.update({ media: false }));
+    contents.on("audio-state-changed", event => activity.update({ audible: event.audible }));
+    contents.once("destroyed", () => activity.dispose());
     const navigated = () => { if (!live.closed) { this.#stopPicking(live); this.store.update(page.id, { documentId: randomUUID() }); } update(); };
     contents.on("did-navigate", navigated); contents.on("did-navigate-in-page", navigated); contents.on("page-title-updated", update);
     let origin = originOf(page.url);
@@ -183,7 +235,7 @@ export class DesktopManagedBrowser {
     });
     contents.on("page-favicon-updated", (_event, favicons) => void this.#favicon(live, favicons));
     contents.on("did-fail-load", (_event, code, description, _url, mainFrame) => { if (!live.closed && mainFrame && code !== -3) this.store.update(page.id, { status: "error", error: description }); });
-    contents.on("render-process-gone", (_event, details) => { if (!live.closed) { this.#stopPicking(live, false); this.store.update(page.id, { status: "crashed", error: details.reason }); } });
+    contents.on("render-process-gone", (_event, details) => { activity.update({ loading: false, media: false, audible: false }); if (!live.closed) { this.#stopPicking(live, false); this.store.update(page.id, { status: "crashed", error: details.reason }); } });
     contents.on("devtools-opened", update); contents.on("devtools-closed", update);
     contents.on("before-input-event", (event, input) => {
       if (live.agentInputs > 0) return;
@@ -269,6 +321,8 @@ export class DesktopManagedBrowser {
     live.view.setBounds({ x: pixel(bounds.x - clip.x), y: pixel(bounds.y - clip.y), width: pixel(bounds.width), height: pixel(bounds.height) });
     live.presentation = presentation;
     live.clip.setVisible(true);
+    this.#watchWindow(parent);
+    this.#updateVisibility(live);
     this.#inputState(live);
   }
   #park(pageId: string, surfaceId?: string): void {
@@ -276,6 +330,7 @@ export class DesktopManagedBrowser {
     if (!live || (surfaceId && live.presentation?.surfaceId !== surfaceId)) return;
     delete live.presentation;
     live.clip.setVisible(false);
+    this.#updateVisibility(live);
     const parking = this.#parkingWindow();
     if (live.parent !== parking) { if (!live.parent.isDestroyed()) live.parent.contentView.removeChildView(live.clip); parking.contentView.addChildView(live.clip); live.parent = parking; }
   }
@@ -290,7 +345,7 @@ export class DesktopManagedBrowser {
   async #destroyPage(pageId: string): Promise<void> {
     const live = this.#pages.get(pageId);
     if (!live) return;
-    live.closed = true; live.favicon?.abort(); this.#stopPicking(live); this.#pages.delete(pageId);
+    live.closed = true; live.activity.dispose(); live.favicon?.abort(); this.#stopPicking(live); this.#pages.delete(pageId);
     this.#runtime?.closed(pageId);
     if (!live.parent.isDestroyed()) live.parent.contentView.removeChildView(live.clip);
     const children = [live.view, ...(live.shield ? [live.shield] : [])];
@@ -313,7 +368,7 @@ export class DesktopManagedBrowser {
         await this.#runtime?.control(sessionId, control);
         for (const page of this.pages(sessionId)) {
           const contents = this.contents(page.id);
-          if (contents && !contents.isDestroyed() && contents.debugger.isAttached()) await contents.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: control === "agent" });
+          if (contents && !contents.isDestroyed() && contents.debugger.isAttached()) await this.agentCommand(page.id, "Emulation.setFocusEmulationEnabled", { enabled: control === "agent" });
         }
         if (control === "human") for (const page of this.pages(sessionId)) this.#downloadDirectories.delete(page.id);
         this.store.control(sessionId, control);
@@ -400,8 +455,12 @@ export class DesktopManagedBrowser {
     const contents = await this.ensure(pageId), live = this.#pages.get(pageId)!;
     if (contents.isDevToolsOpened()) throw new Error("Close DevTools before selecting page elements.");
     this.#stopPicking(live);
-    await contents.executeJavaScriptInIsolatedWorld(BROWSER_PICKER_WORLD_ID, [{ code: BROWSER_PICKER_START }]);
-    live.picking = true;
+    const release = live.activity.hold();
+    try {
+      await contents.executeJavaScriptInIsolatedWorld(BROWSER_PICKER_WORLD_ID, [{ code: BROWSER_PICKER_START }]);
+      live.picking = true;
+      live.activity.update({ picking: true });
+    } finally { release(); }
     this.#emit({ kind: "picker", sessionId: live.page.sessionId, pageId, active: true });
     let reading = false;
     live.picker = setInterval(() => {
@@ -430,14 +489,16 @@ export class DesktopManagedBrowser {
     const wasPicking = live.picking;
     if (wasPicking) this.#emit({ kind: "picker", sessionId: live.page.sessionId, pageId: live.page.id, active: false });
     live.picking = false;
+    live.activity.update({ picking: false });
     if (live.picker) { clearInterval(live.picker); delete live.picker; }
     if (wasPicking && clearOverlay && !live.closed && !live.view.webContents.isDestroyed()) void live.view.webContents.executeJavaScriptInIsolatedWorld(BROWSER_PICKER_WORLD_ID, [{ code: BROWSER_PICKER_STOP }]).catch(() => undefined);
   }
   async capture(pageId: string, rect?: Electron.Rectangle): Promise<Electron.NativeImage> {
     const contents = await this.ensure(pageId);
+    const release = this.holdActivity(pageId);
     const attached = contents.debugger.isAttached();
-    if (!attached) contents.debugger.attach("1.3");
     try {
+      if (!attached) contents.debugger.attach("1.3");
       const result = await contents.debugger.sendCommand("Page.captureScreenshot", { format: "png", fromSurface: true });
       const image = nativeImage.createFromBuffer(Buffer.from(result.data as string, "base64"));
       if (!rect) return image;
@@ -445,7 +506,7 @@ export class DesktopManagedBrowser {
       const factor = image.getSize().width / (Number(layout.width) * contents.getZoomFactor());
       const size = image.getSize(), x = Math.max(0, Math.round(rect.x * factor)), y = Math.max(0, Math.round(rect.y * factor));
       return image.crop({ x, y, width: Math.max(1, Math.min(size.width - x, Math.round(rect.width * factor))), height: Math.max(1, Math.min(size.height - y, Math.round(rect.height * factor))) });
-    } finally { if (!attached && !contents.isDestroyed() && contents.debugger.isAttached()) contents.debugger.detach(); }
+    } finally { release(); if (!attached && !contents.isDestroyed() && contents.debugger.isAttached()) contents.debugger.detach(); }
   }
   async downloadOperation(pageId: string, action: "enable" | "list", directory?: string): Promise<unknown> {
     const page = this.store.page(pageId);
@@ -456,10 +517,15 @@ export class DesktopManagedBrowser {
   async agentCommand(pageId: string, method: string, params?: Record<string, unknown>, sessionId?: string): Promise<unknown> {
     const live = this.#pages.get(pageId);
     if (!live) throw new Error("Managed browser page is not loaded.");
+    const release = live.activity.hold();
     const input = method.startsWith("Input.");
+    if (method === "Emulation.setFocusEmulationEnabled") {
+      if (params?.enabled === true) live.focusEmulation.add(sessionId ?? "");
+      else live.focusEmulation.delete(sessionId ?? "");
+    }
     if (input) live.agentInputs++;
     try { return await live.view.webContents.debugger.sendCommand(method, params, sessionId); }
-    finally { if (input) live.agentInputs--; }
+    finally { if (input) live.agentInputs--; release(); }
   }
   #download(item: DownloadItem, contents: WebContents): void {
     const page = [...this.#pages.values()].find(live => live.view.webContents === contents)?.page;
@@ -474,9 +540,11 @@ export class DesktopManagedBrowser {
       while (existsSync(target) || [...this.#downloads.values()].some(download => download !== item && download.getSavePath() === target)) target = join(targetDirectory, `${suffix++}-${download.name}`);
       item.setSavePath(target);
     }
+    const release = this.holdActivity(page.id);
     const publish = () => { download.path = item.getSavePath(); download.receivedBytes = item.getReceivedBytes(); download.totalBytes = item.getTotalBytes(); this.store.download(page.sessionId, download); };
     item.on("updated", (_event, state) => { download.state = state === "interrupted" ? "interrupted" : "progressing"; publish(); });
     item.once("done", (_event, state) => {
+      release();
       download.state = state; publish(); this.#downloads.delete(download.id);
       if (state === "completed" && Notification.isSupported()) {
         const notification = new Notification({ title: "下载完成 / Download complete", body: download.name });
@@ -492,6 +560,8 @@ export class DesktopManagedBrowser {
     for (const item of this.#downloads.values()) item.cancel();
     for (const { space, download } of this.#spaces.values()) { space.removeListener("will-download", download); space.setPermissionCheckHandler(null); space.setPermissionRequestHandler(null); }
     this.#spaces.clear();
+    for (const stop of this.#windowStops.values()) stop();
+    this.#windowStops.clear();
     this.#parking?.destroy();
     await this.store.flush();
     this.#listeners.clear();

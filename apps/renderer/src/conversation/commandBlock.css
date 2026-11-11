@@ -31,11 +31,10 @@
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
-  transition: background 120ms, color 120ms;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .ev-body .md-command-actions button:hover { background: var(--surface-hover); color: var(--text); }
 .ev-body .md-command-actions button:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
 .ev-body .md-command-actions button:disabled { opacity: .4; cursor: default; }
 .md-command-demo { font-size: var(--fs-11); color: var(--text-faint); }
 .md-command-notice { padding: 0 14px 10px; font-size: var(--fs-11); color: var(--text-2); overflow-wrap: anywhere; }
-@media (prefers-reduced-motion: reduce) { .ev-body .md-command-actions button { transition: none; } }

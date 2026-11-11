@@ -3,7 +3,7 @@ import type { ChangeEvent as ReactChangeEvent, PointerEvent as ReactPointerEvent
 import type { ClientBootstrap, HomeReadModel, SessionHistoryReadModel, StudioClient, TokenUsageReadModel, WorkspaceListReadModel } from "@omp-studio/client-contract";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 import { Icon, type IconName } from "./icons";
-import { pagePhaseClass, useDeferredKey } from "./pageTransition";
+import { pageDir, pagePhaseClass, useDeferredKey } from "./pageTransition";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_ACTIVITY, PREVIEW_PROJECTS } from "./preview/fixtures";
 import { waitForCommandReceipt } from "./sessionLifecycle";
@@ -49,6 +49,17 @@ const PAGE_NAV_DEFS: ReadonlyArray<{ id: PageRoute; icon: IconName; key: string 
   { id: "diagnostics", icon: "pulse", key: "nav.diagnostics" },
 ];
 
+/** Where a page sits in the navigation order (the header row and the rail list
+ *  the same pages in the same order). Pages are siblings, so a later one
+ *  arrives from the right and an earlier one from the left: the content
+ *  travels the way the active indicator does (see "Space" in styles/motion.css). */
+function pageOrder(route: PageRoute): number {
+  // Statistics opens from the home page's token card and returns to it.
+  if (route === "statistics") return pageOrder("home") + 0.5;
+  const at = PAGE_NAV_DEFS.findIndex((item) => item.id === route);
+  return at < 0 ? PAGE_NAV_DEFS.length : at;
+}
+
 function isAppRoute(id: string): id is Exclude<PageRoute, "agent-hub"> {
   return id === "home" || id === "workbench" || id === "history" || id === "capabilities" || id === "model-config" || id === "settings" || id === "diagnostics" || id === "media" || id === "evaluation" || id === "statistics";
 }
@@ -80,7 +91,7 @@ export function SecondaryPage({
   const winRef = useRef<HTMLSpanElement>(null);
   const mirrorRef = useRef<HTMLSpanElement>(null);
   const heldChildren = useRef(children);
-  const { shown, phase } = useDeferredKey(route);
+  const { shown, phase, dir } = useDeferredKey(route, pageOrder);
   if (route === shown) heldChildren.current = children;
   const body = route === shown ? children : heldChildren.current;
   const bodyMotionLive = useRef(false);
@@ -169,6 +180,8 @@ export function SecondaryPage({
       </header>
       <div
         className={bodyPhase ? `page-body ${pagePhaseClass(bodyPhase)}` : "page-body"}
+        data-page-axis="x"
+        data-page-dir={pageDir(dir)}
         id="pageBody"
         tabIndex={-1}
         data-route={shown}

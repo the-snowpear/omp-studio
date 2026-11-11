@@ -120,7 +120,7 @@ export function ConversationEmpty({
   return (
     <div className="convo-empty" role="region" aria-labelledby="ceGreet">
       <div className="ce-hero">
-        <svg className="ce-pi ce-anim" style={{ ["--d" as string]: "0ms" }} viewBox="0 0 321 309" aria-hidden="true">
+        <svg className="ce-pi ce-anim" style={{ ["--beat" as string]: 0 }} viewBox="0 0 321 309" aria-hidden="true">
           <defs>
             <linearGradient id="piStroke" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0" stopColor="#a78bf0" stopOpacity=".95" />
@@ -130,8 +130,8 @@ export function ConversationEmpty({
           </defs>
           <path className="ce-pi-glyph" d="M20 20 H301 V79 H231 V289 H173 V79 H116 V219 H58 V79 H20 Z" />
         </svg>
-        <h1 className="ce-greet ce-anim" style={{ ["--d" as string]: "500ms" }} id="ceGreet">{greet}</h1>
-        <p className="ce-sub ce-anim" style={{ ["--d" as string]: "620ms" }}>
+        <h1 className="ce-greet ce-anim" style={{ ["--beat" as string]: 3 }} id="ceGreet">{greet}</h1>
+        <p className="ce-sub ce-anim" style={{ ["--beat" as string]: 4 }}>
           {preview && marks
             ? t("home.previewSubtitle")
             : runtimeConnected
@@ -141,7 +141,7 @@ export function ConversationEmpty({
       </div>
 
       <section className="ce-heat" aria-labelledby="ceHeatH">
-        <div className="ce-heat-head ce-anim" style={{ ["--d" as string]: "700ms" }}>
+        <div className="ce-heat-head ce-anim" style={{ ["--beat" as string]: 6 }}>
           <h2 id="ceHeatH"><span className="ce-heat-pi" aria-hidden="true">π</span>{t("home.activityHeatmap")}{preview && marks ? <span className="chip purple xs">{t("common.demo")}</span> : null}</h2>
           <span className="ce-heat-stats">
             {usageReason
@@ -177,7 +177,7 @@ export function ConversationEmpty({
         </div>
       </section>
 
-      <section className="ce-recent ce-anim" style={{ ["--d" as string]: "820ms" }} aria-labelledby="ceRecentH">
+      <section className="ce-recent ce-anim" style={{ ["--beat" as string]: 9 }} aria-labelledby="ceRecentH">
         <div className="ce-recent-head">
           <h2 id="ceRecentH">{t("conversation.recentConversations")}</h2>
           <button type="button" className="ce-history" onClick={onOpenHistory}>

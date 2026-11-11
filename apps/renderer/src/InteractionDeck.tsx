@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { ClientInteraction, InteractionResponseValue } from "@omp-studio/client-contract";
 import { ApprovalCard } from "./deck/ApprovalCard";
 import { AskActions, AskBody, AskHead } from "./deck/AskCard";
-import { ASK_GENIE_MS, prefersReducedMotion } from "./deck/askGenie";
+import { ASK_GENIE_MS } from "./deck/askGenie";
+import { motionReduced } from "./motion";
 import { approvalFromInteraction } from "./deck/approvalContent";
 import {
   askAnswered,
@@ -288,9 +289,9 @@ function PromptDeckShell({
   disabled: boolean;
   leaving: boolean;
 }) {
-  const [enter, setEnter] = useState(() => !prefersReducedMotion());
+  const [enter, setEnter] = useState(() => !motionReduced());
   useEffect(() => {
-    if (prefersReducedMotion()) {
+    if (motionReduced()) {
       setEnter(false);
       return;
     }

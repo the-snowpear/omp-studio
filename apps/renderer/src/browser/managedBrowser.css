@@ -50,13 +50,11 @@ button.mb-omnibox-chip:hover:not(:disabled) { border-color: var(--border-strong)
 /* The bar sweeps while loading and fills once when the page settles. */
 .mb-loadbar { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden; pointer-events: none; }
 .mb-loadbar::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 34%; background: var(--accent); opacity: 0; transform: translateX(-100%); }
-.mb-loadbar.is-loading::after { opacity: 1; animation: mb-load 1.15s var(--ease-ios) infinite; }
-.mb-loadbar.is-done::after { width: 100%; transform: none; animation: mb-load-done .36s var(--ease-out) forwards; }
+.mb-loadbar.is-loading::after { opacity: 1; animation: mb-load var(--loop-pulse) var(--ease-ios) infinite; }
+.mb-loadbar.is-done::after { width: 100%; transform: none; opacity: 1; animation: omp-fade-out var(--dur-slower) var(--ease-out) forwards; }
 @keyframes mb-load { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
-@keyframes mb-load-done { from { opacity: 1; } to { opacity: 0; } }
 
-.mb-spinner { display: inline-block; flex: none; box-sizing: border-box; width: 12px; height: 12px; border: 1.5px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; border-radius: 50%; animation: mb-spin .8s linear infinite; }
-@keyframes mb-spin { to { transform: rotate(360deg); } }
+.mb-spinner { display: inline-block; flex: none; box-sizing: border-box; width: 12px; height: 12px; border: 1.5px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; border-radius: 50%; animation: omp-spin var(--loop-spin) linear infinite; }
 
 /* ---- Contextual bars: only present while they have something to say ------ */
 .mb-bar { display: flex; flex: none; align-items: center; gap: 8px; min-height: 32px; box-sizing: border-box; padding: 3px 6px 3px 10px; border-bottom: 1px solid var(--border); background: var(--bg-inset); line-height: 1.45; }
@@ -192,7 +190,4 @@ button.mb-omnibox-chip:hover:not(:disabled) { border-color: var(--border-strong)
 }
 @container managed-browser (max-width: 320px) {
   .mb-nav .icon-btn:nth-child(2) { display: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .mb-loadbar.is-loading::after { animation: none; transform: none; width: 100%; opacity: .45; }
 }

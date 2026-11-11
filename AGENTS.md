@@ -110,8 +110,8 @@ Git 提交就是版本历史和恢复点，日常改动不再做 `backup/` 快�
 只有一个检查入口：`scripts/check.mjs`。按改动范围选切片，不要每次都跑全量。
 
 ```bash
-npm run check                          # 架构约束 + 选择器规则 + 编译 + 核心包/渲染测试
-npm run check -- --fast                # 只做架构约束、选择器规则和编译
+npm run check                          # 架构约束 + 选择器规则 + 动效规则 + 编译 + 核心包/渲染测试
+npm run check -- --fast                # 只做架构约束、选择器规则、动效规则和编译
 npm run check -- --only studio-host    # 只编译该包依赖闭包，再跑它的核心测试
 npm run check -- --only renderer       # 编译渲染层依赖，再跑核心渲染测试
 npm run check -- --all                 # 跑每个包的全部测试文件，不只核心名单
@@ -119,7 +119,7 @@ npm run check -- --production          # 追加 Vite 生产包与远端 Host 产
 node scripts/check.mjs --list          # 看有哪些组和包
 ```
 
-组：`arch`、`selects`、`types`、`packages`、`renderer`、`production`；`--only` 也接受包名。失败只打末尾 40 行，CI 里会写成错误注解。
+组：`arch`、`selects`、`motion`、`types`、`packages`、`renderer`、`production`；`--only` 也接受包名。失败只打末尾 40 行，CI 里会写成错误注解。
 
 编译是增量的（`tsconfig.base.json` 的 `incremental`，缓存落在各包 `dist/.tsbuildinfo`），全量编译按依赖分层并行。改一个包时用 `--only <包>`，别重编 12 个包。
 
@@ -138,6 +138,17 @@ node scripts/check.mjs --list          # 看有哪些组和包
 - `PREVIEW_MODE_SWITCH_ENABLED` 只有 `preview/mode.ts` 一处定义，只有 `preview/` 读它
 
 改分层是决策不是失误：同一次提交里改表和代码，diff 就是记录。
+
+### 动效规则（`scripts/check-renderer-motion.mjs`）
+
+Renderer 的动效只有一套：数值在 `styles/tokens.css` 的 Motion 段，模式（配方、页面/标签切换、循环、减弱动效）在 `styles/motion.css`，计时器和 WAAPI 用 `src/motion.ts` 里的同一组数。写新动效先读 `styles/motion.css` 头注，按「什么在动」选模式和 token，不要另写时长、曲线、入场关键帧。检查拦的是：
+
+- 组件 CSS 里的字面时长、裸 `ease*` / `cubic-bezier()`、有时长没曲线、`transition: all`
+- 重复、未使用或没有定义的 `@keyframes`
+- `styles/motion.css` 之外的 `prefers-reduced-motion`；TS 里绕过 `motionReduced()` 直接查系统偏好
+- `motion.ts` 的数值表与 `tokens.css` 不一致
+
+减弱动效只有一处（`motion.css` 末段，`data-perf-tier~="L1"`）：过渡是 `0s`，所以不要只靠 `transitionend` 收尾，先问 `motionReduced()`。
 
 其余命令：
 

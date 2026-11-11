@@ -10,6 +10,7 @@ import { formatPlanRefineFeedback, type PlanNotesBySection } from "./planFeedbac
 import { parsePlanSections } from "./planSections";
 import { PromptHead } from "./PromptHead";
 import { PLAN_ACTIONS, type PlanActionDetail, type PlanActionId } from "./types";
+import { MOTION_MS, MOTION_SLACK_MS, motionReduced } from "../motion";
 
 function PlanHeadActions({
   expanded,
@@ -124,12 +125,9 @@ function PlanActions({
 }
 
 type Box = { top: number; left: number; width: number; height: number };
-const PLAN_MORPH_LEAVE_MS = 200;
+/** `.plan-review-overlay.is-leave`：大卡收回原位（--dur-slow）。 */
+const PLAN_MORPH_LEAVE_MS = MOTION_MS.slow;
 const PLAN_CLIP_FULL = "inset(0px 0px 0px 0px round var(--r-10))";
-
-function prefersReducedMotion(): boolean {
-  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
 
 function readBox(el: HTMLElement | null): Box | undefined {
   if (!el) return undefined;
@@ -218,7 +216,7 @@ function PlanReviewDialog({
       if (after) after();
       else onClose();
     };
-    if (!dialog || !overlay || !origin || prefersReducedMotion()) {
+    if (!dialog || !overlay || !origin || motionReduced()) {
       done();
       return;
     }
@@ -231,7 +229,7 @@ function PlanReviewDialog({
     };
     dialog.addEventListener("transitionend", onEnd);
     morphToOrigin(dialog, origin);
-    window.setTimeout(done, PLAN_MORPH_LEAVE_MS + 40);
+    window.setTimeout(done, PLAN_MORPH_LEAVE_MS + MOTION_SLACK_MS);
   }, [fallbackOriginRef, onClose, originRef]);
 
   useLayoutEffect(() => {
@@ -239,7 +237,7 @@ function PlanReviewDialog({
     const overlay = overlayRef.current;
     if (!dialog || !overlay) return;
     const origin = readOrigin(originRef, fallbackOriginRef);
-    if (!origin || prefersReducedMotion()) {
+    if (!origin || motionReduced()) {
       overlay.classList.add("is-open");
       closeRef.current?.focus();
       return;

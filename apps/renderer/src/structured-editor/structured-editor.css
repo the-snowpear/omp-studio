@@ -51,7 +51,7 @@
   inset: 0;
   z-index: var(--z-modal);
   background: rgba(15, 15, 25, 0.5);
-  animation: omp-fade-in var(--dur-fast) var(--ease-out);
+  animation: var(--motion-fade);
 }
 
 :root[data-theme="dark"] .st-expand-scrim {
@@ -70,7 +70,7 @@
   flex-direction: column;
   border-color: var(--border-float);
   box-shadow: var(--shadow-modal);
-  animation: omp-menu-in var(--dur) var(--ease-out);
+  animation: var(--motion-sheet);
 }
 
 .st-card.is-expanded .yml-head {

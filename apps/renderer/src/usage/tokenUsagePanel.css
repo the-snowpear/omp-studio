@@ -54,4 +54,3 @@
 .usage-empty > .icon, .usage-empty p { color: var(--text-3); }
 .usage-empty strong { font-size: var(--fs-12); font-weight: var(--fw-medium); }
 .usage-empty p { font-size: var(--fs-11); }
-@media (prefers-reduced-motion: reduce) { .usage-panel * { transition: none; } }

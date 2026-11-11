@@ -49,9 +49,9 @@
 .task-stage { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 
 .tc-progress { display: flex; flex-direction: column; gap: 3px; margin: 4px 0 8px; }
-.tc-progress .jw-bar-track.indeterminate .jw-bar-fill { width: 30%; animation: tc-progress-slide 1.2s ease-in-out infinite; background: var(--accent); }
+.tc-progress .jw-bar-track.indeterminate .jw-bar-fill { width: 30%; animation: tc-progress-slide var(--loop-pulse) var(--ease-loop) infinite; background: var(--accent); }
 @keyframes tc-progress-slide { 0% { left: -30%; } 100% { left: 100%; } }
-@media (prefers-reduced-motion: reduce) { .tc-progress .jw-bar-track.indeterminate .jw-bar-fill { animation: none; left: 0; } }
+
 .tc-progress-text { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-2); }
 
 .ev-view-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }

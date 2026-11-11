@@ -319,18 +319,21 @@
   position: relative;
 }
 /* Same clock as .nav-window in pages.css: the tab bubble and the rail
-   highlight move together on route changes. */
+   highlight move together on route changes. It travels on `translate`, which
+   the compositor runs by itself: the highlight keeps gliding while the main
+   thread is busy mounting the page it points at. */
 .app-rail-window {
   position: absolute;
-  top: calc(var(--rail-active-index, 0) * var(--rail-step));
+  top: 0;
   left: 50%;
+  translate: 0 calc(var(--rail-active-index, 0) * var(--rail-step));
   width: var(--rail-btn-size);
   height: var(--rail-btn-size);
   transform: translateX(-50%);
   border-radius: 10px;
   background: var(--surface-active);
   pointer-events: none;
-  transition: top var(--dur-slow) var(--ease-nav);
+  transition: translate var(--dur-slow) var(--ease-nav);
 }
 .app-rail-window.is-hidden { display: none; }
 .app-rail-btn {

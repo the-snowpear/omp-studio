@@ -233,7 +233,9 @@
   border-radius: var(--r-8);
   background: var(--surface);
   padding: 8px var(--sp-12);
-  animation: omp-toast-in-top var(--dur-fast) var(--ease-out);
+  /* A notice pinned to the top edge arrives from that edge. */
+  --toast-from: -1;
+  animation: var(--motion-toast);
 }
 .convo-wrap.is-empty > .banner.is-floating,
 .convo-wrap[data-reading-minimap="off"] > .banner.is-floating {
@@ -364,8 +366,9 @@
 
 /* ============================================================
    会话切换过场：正文淡出 → 骨架兜住空窗 → 交叉溶解淡入
-   时长必须与 conversationSwitchPhase.ts 的 SWITCH_LEAVE_MS(140) /
-   SWITCH_REVEAL_MS(320) 对齐：阶段一结束就会摘掉这里的类，动画没跑完就是硬切。
+   时长与 conversationSwitchPhase.ts 的 SWITCH_LEAVE_MS（--dur-fast）/
+   SWITCH_REVEAL_MS（--dur-slower）是同一组 token：阶段一结束就会摘掉这里的类，
+   动画没跑完就是硬切。
    全程只动 opacity。任何 transform 都会进 ConversationVirtualList 的 scrollMargin
    量算（getBoundingClientRect 相对滚动容器），虚拟行被反向补偿，整段 transcript
    在动画期间抖动 —— 位移只允许骨架自己做（它对布局零贡献）。
@@ -374,9 +377,10 @@
 /* 上一段 transcript 原地淡出：ConversationPane 把同一个 ReactNode 引用再交给
    React，整棵子树按引用相等跳过重渲染，DOM／滚动位置／虚拟列表状态全部原样留在
    屏上，只有透明度在走。 */
+/* 后面有人在等的离场：--ease 把变化压在前几帧，点击当下就有回应。 */
 .convo-body[data-phase="leaving"] {
   opacity: 0;
-  transition: opacity 140ms var(--ease-in);
+  transition: opacity var(--dur-fast) var(--ease);
   pointer-events: none;
 }
 .convo-body[data-phase="waiting"] { opacity: 0; transition: none; }
@@ -393,9 +397,8 @@
    否则动画收尾后还有一条过渡在跑，尾巴会二次变亮。 */
 .convo-body[data-phase="revealing"] {
   transition: none;
-  animation: convo-body-in 320ms var(--ease-out);
+  animation: omp-fade-in var(--dur-slower) var(--ease-out);
 }
-@keyframes convo-body-in { from { opacity: 0; } }
 
 /* 骨架屏容器：sticky + height:0 + 绝对定位内层，对文档高度零贡献。
    sticky 让它在任意滚动位置都停在滚动视口顶部；内层高度压在视口高度以下，
@@ -411,17 +414,17 @@
   opacity: 0;
   pointer-events: none;
 }
-/* 入场延迟 60ms 是"快加载不闪"的闸门：读取在这之前落地，骨架一帧都不会亮；
+/* 入场延迟（一拍半，60ms）是"快加载不闪"的闸门：读取在这之前落地，骨架一帧都不会亮；
    稍慢一点也只亮到半途就被下面的淡出接走（transition 从当前值反向插值），
    于是短加载看到的是一次呼吸，只有长加载才看到完整骨架。 */
 .convo-veil[data-in="true"] {
   opacity: 1;
-  transition: opacity 260ms var(--ease-out) 60ms;
+  transition: opacity var(--dur-slow) var(--ease-out) calc(var(--stagger) * 1.5);
 }
 /* 必须排在 [data-in] 之后：同特异度，靠源序压过入场。 */
 .convo-veil[data-leaving="true"] {
   opacity: 0;
-  transition: opacity 200ms var(--ease);
+  transition: opacity var(--dur) var(--ease);
 }
 .cv-groups {
   position: absolute;
@@ -438,8 +441,8 @@
   flex-direction: column;
   gap: var(--sp-8);
   transform: translateY(14px);
-  transition: transform 320ms var(--ease-out);
-  transition-delay: calc(60ms + var(--i) * 45ms);
+  transition: transform var(--dur-slower) var(--ease-out);
+  transition-delay: calc(var(--stagger) * (1.5 + var(--i)));
 }
 .convo-veil[data-in="true"] .cv-group { transform: none; }
 .cv-head { display: flex; align-items: center; gap: var(--sp-8); }
@@ -457,7 +460,7 @@
   background-size: 200% 100%;
 }
 /* shimmer 逐组错相：同相位扫过五组像一整块在闪，错开才像内容在陆续到位。 */
-.cv-group .skeleton { animation-delay: calc(var(--i) * -170ms); }
+.cv-group .skeleton { animation-delay: calc(var(--i) * var(--loop-pulse) / -8); }
 /* 只有慢到 SWITCH_SLOW_MS 才浮出的一行说明，落在骨架已经渐隐的下缘外。 */
 .cv-note {
   position: absolute;
@@ -700,7 +703,7 @@
 .turn-diff-panel {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--dur-exit) var(--ease-in);
+  transition: grid-template-rows var(--dur-fast) var(--ease-in);
 }
 .turn-diff.open .turn-diff-panel {
   grid-template-rows: 1fr;
@@ -1015,7 +1018,7 @@
   border-radius: var(--r-8);
   background: color-mix(in srgb, var(--sa-accent) 2%, var(--surface));
   text-align: left;
-  transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
 .subagent-strip .sa-card::before {
   content: "";
@@ -1143,7 +1146,7 @@
   flex: none;
   color: var(--text-faint);
   opacity: .5;
-  transition: color var(--dur-fast), opacity var(--dur-fast), transform var(--dur-fast);
+  transition: color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease-out);
 }
 .subagent-strip .sa-card:is(:hover, :focus-visible) .sa-open {
   color: var(--sa-accent);
@@ -1167,11 +1170,7 @@
   color: var(--text-2);
   line-height: 1.5;
 }
-@media (prefers-reduced-motion: reduce) {
-  .subagent-strip .sa-card,
-  .subagent-strip .sa-open { transition: none; }
-  .subagent-strip .sa-card:is(:hover, :focus-visible) .sa-open { transform: none; }
-}
+
 /* token / tools / cost：对话卡底栏与检查卡标题共用 */
 .sa-metrics {
   display: flex;
@@ -1224,24 +1223,10 @@
 }
 /* Ask 卡的底边变形浮入/收起。 */
 @keyframes dock-genie-in {
-  from {
-    opacity: 0;
-    transform: translateY(10%) scale3d(0.42, 0.16, 1);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+  from { opacity: 0; transform: translateY(10%) scale3d(0.42, 0.16, 1); }
 }
 @keyframes dock-genie-out {
-  from {
-    opacity: 1;
-    transform: none;
-  }
-  to {
-    opacity: 0;
-    transform: translateY(10%) scale3d(0.42, 0.16, 1);
-  }
+  to { opacity: 0; transform: translateY(10%) scale3d(0.42, 0.16, 1); }
 }
 .sa-inspect-scroll {
   position: relative;
@@ -1594,13 +1579,6 @@
   transition: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .batch-chain,
-  .tl-card {
-    transition: none;
-    transform: none;
-  }
-}
 .tc-tree {
   border: 1px solid var(--border);
   border-radius: var(--r-6);
@@ -1729,7 +1707,7 @@
   overflow: hidden;
   cursor: pointer;
   user-select: none;
-  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
 }
 .tc-cite:hover {
   color: var(--text);
@@ -2188,12 +2166,12 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .mm-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* 视口条可拖动（滑块语义），光标改为双向拖拽提示 */
 .mm-viewport { cursor: ns-resize; }
-/* 跳转目标行 900ms 强调（ver1 flash 语义）：accent 底色淡出 */
+/* 跳转目标行强调（--dur-flash，ver1 flash 语义）：accent 底色淡出 */
 @keyframes omp-mm-flash {
   from { background-color: var(--accent-soft); }
   to { background-color: transparent; }
 }
-.ev.mm-flash { animation: omp-mm-flash 900ms var(--ease-out); border-radius: var(--r-6); }
+.ev.mm-flash { animation: omp-mm-flash var(--dur-flash) var(--ease-out); border-radius: var(--r-6); }
 /* 筛选/跳转菜单：锚在 minimap 工具按钮上方，向对话一侧展开（.menu 本体样式见 components.css） */
 .mm-menu { left: 4px; bottom: 56px; min-width: 208px; }
 /* 预览模式的悬浮预览「演示」chip */
@@ -2212,8 +2190,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
    sticky 把它钉在滚动视口底部，任意滚动态下都悬浮在 composer 上方。
    水平盒子复用 .convo-doc 的补偿式 max-width + 自动居中（含 minimap 让位），
    行内 flex-end 让按钮右缘与 composer 右缘在任意视口宽度下精确对齐；
-   行容器 pointer-events:none 不挡对话点击，按钮自身恢复。
-   不用 transform 定位（omp-toast-in 动画的 transform:none 会覆盖它造成跳动）。 */
+   行容器 pointer-events:none 不挡对话点击，按钮自身恢复。 */
 .new-content-pill-row {
   position: sticky;
   bottom: 12px;
@@ -2241,7 +2218,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
     0 1px 4px rgba(15, 17, 26, 0.06);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
-  animation: omp-toast-in var(--dur) var(--ease-out);
+  animation: var(--motion-reveal);
 }
 :root[data-theme="dark"] .new-content-pill {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.40), 0 1px 4px rgba(0, 0, 0, 0.25);
@@ -2283,9 +2260,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: inline-flex;
   flex: none;
   color: var(--accent);
-  animation: al-turn 3.6s linear infinite;
+  /* 不是加载指示：一圈比 spinner 慢得多，停在余光里。 */
+  animation: omp-spin calc(var(--loop-drift) * 1.5) linear infinite;
 }
-@keyframes al-turn { to { transform: rotate(360deg); } }
 .al-text {
   display: inline-flex;
   align-items: baseline;
@@ -2304,7 +2281,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: al-sweep 2.4s linear infinite;
+  animation: al-sweep var(--loop-drift) linear infinite;
 }
 @keyframes al-sweep {
   from { background-position: 140% 0; }
@@ -2450,8 +2427,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   overflow: hidden;
   pointer-events: none;
   transition:
-    grid-template-rows var(--dur-exit) var(--ease-in),
-    width var(--dur-exit) var(--ease-in);
+    grid-template-rows var(--dur-fast) var(--ease-in),
+    width var(--dur-fast) var(--ease-in);
 }
 .task-dock.open .task-dock-collapse {
   grid-template-rows: 1fr;
@@ -2559,7 +2536,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .task-dock.open .task-dock-panel {
   opacity: 1;
-  transition-delay: 40ms;
+  transition-delay: var(--stagger);
 }
 .task-dock-col {
   display: flex;
@@ -2656,7 +2633,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: grid;
   grid-template-rows: 0fr;
   min-width: 0;
-  transition: grid-template-rows var(--dur-exit) var(--ease-in);
+  transition: grid-template-rows var(--dur-fast) var(--ease-in);
 }
 .task-dock-phase.open .task-dock-phase-fold {
   grid-template-rows: 1fr;
@@ -2778,24 +2755,13 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   .task-dock-panel { grid-template-columns: 1fr; }
   .task-dock-col + .task-dock-col { border-left: none; border-top: 1px solid var(--border); }
 }
-@media (prefers-reduced-motion: reduce) {
-  .task-dock-shell,
-  .task-dock-collapse,
-  .task-dock-panel,
-  .task-dock-bar,
-  .task-dock-pill,
-  .task-dock-phase-fold,
-  .qs-collapse {
-    transition: none;
-  }
-  .task-dock-pill:active { transform: none; }
-}
 
 /* ---------- Deck：底部操作许可浮层（Agent 提问 / 审批请求） ----------
    参照 ver1：浮在输入框上方（最靠近输入，优先处理），不挤占布局；
    激活时 composer 变暗让位。切换动画：
-   · 同一张卡片内切换内容 —— 卡片外壳（.deck-card）常驻，内部轨道（.deck-track）
-     横向平移：旧内容向左推出、新内容从右滑入，不换卡、不闪烁；
+   · 同一张卡片内切换内容 —— 卡片外壳（.deck-card）常驻，正文段（.dk-swap）里
+     新旧两格叠着方向性交叉溶解（.dk-cell-enter-* / -leave-*，与标签页面板
+     同一组动画，见 styles/motion.css）；
    · 高度变化以底部为锚向上展开 —— JS 锁像素高度后交给 height transition，
      新内容更高时向上生长、更矮时向下收起，而不是瞬间跳变。 */
 .deck {
@@ -2820,7 +2786,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
     0 8px 28px rgba(0, 0, 0, 0.45),
     0 2px 8px rgba(0, 0, 0, 0.30);
 }
-.deck.smooth { transition: height var(--dur-slow) var(--ease-out); }
 /* 卡片外壳：常驻的同一张卡片，填满 Deck（top/bottom 都锚定），内容在内部切换 */
 .deck-card {
   position: absolute;
@@ -2832,35 +2797,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   background: var(--surface);
   border-radius: inherit;
 }
-.deck-card.in { animation: deck-in var(--dur-slow) var(--ease-out); }
-.deck-card.out {
-  animation: deck-out 220ms var(--ease-in) both;
-  pointer-events: none;
-}
-@keyframes deck-in {
-  from { opacity: 0; transform: translateX(28px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes deck-out {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateX(-24px); }
-}
-/* 内容轨道：旧 / 新内容并排，transform 决定显示哪一屏；不重叠所以不闪烁 */
-.deck-track {
-  display: flex;
-  align-items: flex-start;
-  height: 100%;
-  transition: transform var(--dur-slow) var(--ease-out);
-  will-change: transform;
-}
-.deck-track.no-anim { transition: none; }
-.deck-cell {
-  flex: 0 0 100%;
-  min-width: 0;
-  max-height: min(420px, 72vh, var(--deck-max-height, 72vh));
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
+
 /* 预览与真实共用 .preview-queue：ver1 队列 1/N，同一窗口切换审批 / 提问，不并排两张卡 */
 .deck.preview-queue {
   height: auto;
@@ -2906,12 +2843,12 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   --reading-deck-cap: max(0px, min(420px, 72vh, var(--deck-max-height, 72vh), calc(var(--reading-height, 100dvh) - var(--sp-16) - var(--sp-8))));
   max-height: var(--reading-deck-cap);
 }
-.convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .deck-cell, .dk-stage) {
+.convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage) {
   min-height: 0;
   max-height: var(--reading-deck-cap);
 }
 .convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage):not([hidden]),
-.convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage, .deck-cell) > :is(.ask-card, .approval-card) {
+.convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage) > :is(.ask-card, .approval-card) {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -2919,7 +2856,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   max-height: var(--reading-deck-cap);
   overflow: hidden;
 }
-.convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage, .deck-cell) > :is(.ask-card, .approval-card) {
+.convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage) > :is(.ask-card, .approval-card) {
   flex: 0 1 auto;
 }
 .convo-wrap[data-reading-column] > .composer-region > .deck :is(.ask-card, .approval-card) > :is(.ask-head, .approval-head, .dk-actions, .ask-error, .dk-steer-hint, .plan-execution) {
@@ -2941,11 +2878,11 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   overflow: visible;
 }
 .deck.is-ask-enter {
-  animation: dock-genie-in 480ms var(--ease-nav) both;
+  animation: dock-genie-in var(--dur-hero) var(--ease-nav) both;
 }
 .deck.is-ask-leave {
   pointer-events: none;
-  animation: dock-genie-out 260ms var(--ease-out) both;
+  animation: dock-genie-out var(--dur-slow) var(--ease-out) both;
 }
 /* ---------- ask 卡之间切换（队列翻页 / 标题行 header 胶囊跳转） ----------
    卡片外壳常驻：标题行（Agent 提问 / 胶囊 / 1-N）和底部操作行（取消 / 提交）
@@ -2960,13 +2897,13 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   position: relative;
   overflow: hidden;
 }
-.dk-stage.smooth { transition: height 300ms var(--ease-nav); }
+.dk-stage.smooth { transition: height var(--dur-slower) var(--ease-nav); }
 /* 正文段：换页时两格在这里叠着交叉溶解，高度过渡也锁在这一段上 */
 .dk-swap {
   position: relative;
   overflow: hidden;
 }
-.dk-swap.smooth { transition: height 300ms var(--ease-nav); }
+.dk-swap.smooth { transition: height var(--dur-slower) var(--ease-nav); }
 /* 当前那一格在流内 —— 锁释放后段落高度重新跟随它，改窗口宽度不需要再量一次 */
 .dk-cell {
   position: relative;
@@ -2982,36 +2919,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   z-index: 0;
   pointer-events: none;
 }
-.dk-cell-enter-fwd { animation: dk-cell-enter-fwd 300ms var(--ease-nav) both; }
-.dk-cell-enter-back { animation: dk-cell-enter-back 300ms var(--ease-nav) both; }
-.dk-cell-leave-fwd { animation: dk-cell-leave-fwd 200ms var(--ease-nav) both; }
-.dk-cell-leave-back { animation: dk-cell-leave-back 200ms var(--ease-nav) both; }
-@keyframes dk-cell-enter-fwd {
-  from { opacity: 0; transform: translate3d(18px, 0, 0); }
-  to { opacity: 1; transform: translate3d(0, 0, 0); }
-}
-@keyframes dk-cell-leave-fwd {
-  from { opacity: 1; transform: translate3d(0, 0, 0); }
-  to { opacity: 0; transform: translate3d(-10px, 0, 0); }
-}
-@keyframes dk-cell-enter-back {
-  from { opacity: 0; transform: translate3d(-18px, 0, 0); }
-  to { opacity: 1; transform: translate3d(0, 0, 0); }
-}
-@keyframes dk-cell-leave-back {
-  from { opacity: 1; transform: translate3d(0, 0, 0); }
-  to { opacity: 0; transform: translate3d(10px, 0, 0); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .dk-stage.smooth,
-  .dk-swap.smooth { transition: none; }
-  .dk-cell-enter-fwd,
-  .dk-cell-enter-back,
-  .dk-cell-leave-fwd,
-  .dk-cell-leave-back,
-  .deck.is-ask-enter,
-  .deck.is-ask-leave { animation: none; }
-}
+
 .dk-head-end {
   margin-left: auto;
   display: inline-flex;
@@ -3238,9 +3146,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
    过去逐帧改 width/height 那样每帧重排、重新折行；窗口缩放时大卡也自己跟。
    收起比展开更短、起步立刻动（ease-out），避免镜像曲线前半段几乎停住。 */
 .plan-review-overlay {
-  /* 展开 / 收起时长：JS 的 PLAN_MORPH_MS / PLAN_MORPH_LEAVE_MS 与它们对齐 */
-  --dur-plan-morph: 340ms;
-  --dur-plan-morph-leave: 200ms;
+  /* 展开 --dur-slower，收起低一档 --dur-slow（PlanCard.tsx 的 PLAN_MORPH_LEAVE_MS
+     等的就是它）。 */
   position: fixed;
   inset: 0;
   z-index: var(--z-modal);
@@ -3257,13 +3164,13 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   inset: 0;
   background: rgba(15, 15, 25, 0.5);
   opacity: 0;
-  transition: opacity var(--dur-toast) var(--ease-out);
+  transition: opacity var(--dur-slower) var(--ease-out);
 }
 .plan-review-overlay.is-open::before { opacity: 1; }
 .plan-review-overlay.is-leave { pointer-events: none; }
 .plan-review-overlay.is-leave::before {
   opacity: 0;
-  transition: opacity var(--dur-plan-morph-leave) var(--ease-out);
+  transition: opacity var(--dur-slow) var(--ease-out);
 }
 :root[data-theme="dark"] .plan-review-overlay::before { background: rgba(0, 0, 0, 0.6); }
 .plan-review-dialog {
@@ -3283,16 +3190,16 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
      两端结构一致才插值得动。 */
   clip-path: inset(0px 0px 0px 0px round var(--r-10));
   transition:
-    clip-path var(--dur-plan-morph) var(--ease-nav),
-    transform var(--dur-plan-morph) var(--ease-nav),
-    opacity 200ms var(--ease-out);
+    clip-path var(--dur-slower) var(--ease-nav),
+    transform var(--dur-slower) var(--ease-nav),
+    opacity var(--dur) var(--ease-out);
   will-change: clip-path, transform, opacity;
 }
 .plan-review-overlay.is-leave .plan-review-dialog {
   transition:
-    clip-path var(--dur-plan-morph-leave) var(--ease-out),
-    transform var(--dur-plan-morph-leave) var(--ease-out),
-    opacity var(--dur-plan-morph-leave) var(--ease-out);
+    clip-path var(--dur-slow) var(--ease-out),
+    transform var(--dur-slow) var(--ease-out),
+    opacity var(--dur-slow) var(--ease-out);
 }
 .plan-review-dialog.no-anim { transition: none; }
 .plan-review-dialog-head {
@@ -3410,10 +3317,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   font-size: var(--fs-13);
 }
 .plan-review-dialog .dk-actions { flex: none; }
-@media (prefers-reduced-motion: reduce) {
-  .plan-review-overlay::before,
-  .plan-review-dialog { transition: none; }
-}
 /* Deck 激活时被覆盖的 composer：变暗并禁止交互（参照 ver1） */
 .composer-region:has(.deck.active) .composer {
   opacity: 0.35;
@@ -3884,7 +3787,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: inline-flex;
   width: max-content;
   transform: translateX(var(--cm-scroll-x));
-  transition: transform var(--cm-scroll-duration) linear 400ms;
+  transition: transform var(--cm-scroll-duration) linear var(--tip-delay);
 }
 .cm-chip-file { color: var(--accent); background: var(--accent-soft); }
 .cm-chip-dir { color: var(--blue); background: var(--blue-soft); }
@@ -4034,9 +3937,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 [data-theme="dark"] .magic-kw-ch {
   color: hsl(var(--magic-hue, 200) 90% var(--magic-lightness, 68%));
 }
-@media (prefers-reduced-motion: reduce) {
-  .magic-kw.is-animated .magic-kw-ch { animation: none; }
-}
 .composer-bar {
   display: flex; flex-wrap: nowrap; align-items: center; gap: var(--sp-4);
   padding: var(--sp-4) var(--sp-8) var(--sp-8);
@@ -4093,7 +3993,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
                0 0 9px color-mix(in srgb, var(--danger-glow) 32%, transparent);
 }
 .composer-bar .pill-btn.danger > span {
-  animation: omp-text-reveal 0.9s var(--ease-out) 1;
+  animation: omp-text-reveal var(--dur-flash) var(--ease-out) 1;
 }
 @keyframes omp-text-reveal {
   from { opacity: 0.3; }
@@ -4109,6 +4009,16 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .approval-menu-backdrop {
   position: fixed; inset: 0; z-index: 0; background: transparent;
 }
+/* The composer's menus open above the pill or the editor that owns them, so
+   they rise out of it instead of dropping (`--pop-from` in styles/motion.css). */
+.approval-menu,
+.cmp-menu,
+.cm-mention,
+.composer-tier > .rms-pop {
+  --pop-from: 1;
+  animation: var(--motion-pop);
+}
+.cmp-menu.cmp-menu-down { --pop-from: -1; }
 .approval-menu {
   position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 1;
   min-width: 220px; padding: var(--sp-4);
@@ -4936,7 +4846,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .queue-strip.collapsed .qs-collapse {
   grid-template-rows: 0fr;
   opacity: 0;
-  transition-duration: var(--dur-exit);
+  transition-duration: var(--dur-fast);
   transition-timing-function: var(--ease-in);
 }
 /* 0fr 折叠项自身不能带 padding：border-box 在指定高度 0 时会被 padding 垫高
@@ -5483,11 +5393,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .sp-page.active { display: flex; }
 
 /* 减少动效：面板直接切换，不做滑动；visibility 随 transition 一并立即生效。 */
-@media (prefers-reduced-motion: reduce) {
-  .side-panel,
-  .side-panel.open { transition: none; }
-  .bp-reveal { transition: none; }
-}
 
 /* Host-backed Git surface. Paths are repository-relative public values. */
 .git-toolbar { flex-wrap: wrap; }
@@ -5711,7 +5616,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .git-graph-row:is(:hover, :focus-within, .is-menu) .git-graph-subject-scroll {
   transform: translateX(min(100cqw - 100% - 18px, 0px));
-  transition: transform 3s linear 800ms;
+  transition: transform var(--dur-marquee) linear calc(var(--tip-delay) + var(--dur-slower));
 }
 .git-graph-row:has(.git-graph-op):is(:hover, :focus-within, .is-menu) .git-graph-subject-scroll {
   transform: translateX(min(100cqw - 100% - 38px, 0px));
@@ -5790,7 +5695,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .git-ref:hover .git-ref-scroll {
   transform: translateX(min(100cqw - 100% - 10px, 0px));
-  transition: transform 3s linear 800ms;
+  transition: transform var(--dur-marquee) linear calc(var(--tip-delay) + var(--dur-slower));
 }
 .git-graph-menu {
   display: flex;
@@ -6130,9 +6035,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .ch-detail-position { margin-right: var(--sp-6); color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
 .ch-browser-detail > .ch-file-diff { flex: 1 1 0; min-height: 0; max-height: none; font-size: var(--fs-12); }
 .ch-browser-detail > .ch-file-diff .ch-file-diff-empty { padding: var(--sp-24) var(--sp-16); }
-@media (prefers-reduced-motion: reduce) {
-  .ch-row-chev { transition: none; }
-}
 /* Diff 区域高度调节条：位于文件列表与 Diff 之间，拖拽/方向键调整高度 */
 .ch-diff-resizer {
   flex: none;
@@ -6438,7 +6340,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   justify-content: center;
   padding: 32px 24px;
   background: rgba(15, 15, 25, 0.28);
-  animation: omp-fade-in var(--dur-fast) var(--ease-out);
+  animation: var(--motion-fade);
 }
 :root[data-theme="dark"] .cmdk-backdrop { background: rgba(0, 0, 0, 0.45); }
 .cmdk-shell {
@@ -6460,7 +6362,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   width: min(680px, calc(100vw - 40px));
   height: min(680px, calc(100vh - 48px));
   flex: none;
-  animation: omp-menu-in var(--dur) var(--ease-out);
+  animation: var(--motion-sheet);
 }
 .cmdk-glow {
   position: absolute;
@@ -6795,13 +6697,14 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   padding: var(--sp-16) 0;
 }
 
+/* 欢迎页入场：一串按拍子（--stagger）依次到位的块。`--beat` 是第几拍，由
+   ConversationEmpty.tsx 写在元素上；这里不出现任何毫秒数。未播放时的样式就是
+   终态，所以减少动效下整页直接就位。 */
 .convo-empty .ce-anim {
-  opacity: 0;
-  transform: translateY(12px);
-  animation: ce-in 0.55s var(--ease-out) forwards;
-  animation-delay: var(--d, 0ms);
+  --enter-y: var(--shift-md);
+  animation: omp-enter var(--dur-hero) var(--ease-out) backwards;
+  animation-delay: calc(var(--beat, 0) * var(--stagger));
 }
-@keyframes ce-in { to { opacity: 1; transform: none; } }
 
 .ce-hero {
   position: relative;
@@ -6889,8 +6792,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   font-size: calc(9.5px * var(--text-font-scale));
   color: var(--text-faint);
   line-height: 1;
-  animation: ce-in 0.4s var(--ease-out) backwards;
-  animation-delay: 740ms;
+  animation: omp-fade-in var(--dur-slower) var(--ease-out) backwards;
+  animation-delay: calc(var(--stagger) * 7);
 }
 .ce-heat-months span {
   position: absolute;
@@ -6905,8 +6808,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   row-gap: var(--ce-gap);
   font-size: calc(9px * var(--text-font-scale));
   color: var(--text-faint);
-  animation: ce-in 0.4s var(--ease-out) backwards;
-  animation-delay: 740ms;
+  animation: omp-fade-in var(--dur-slower) var(--ease-out) backwards;
+  animation-delay: calc(var(--stagger) * 7);
 }
 .ce-heat-days span { grid-column: 1; display: flex; align-items: center; }
 
@@ -6944,7 +6847,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   pointer-events: none;
   background: linear-gradient(100deg, transparent 30%, rgba(228, 216, 255, 0.32) 50%, transparent 70%);
   transform: translateX(-120%);
-  animation: ce-sheen-sweep 3.2s var(--ease-out) 1.4s 1 both;
+  /* 等整页入场落定再扫：两个半 hero 之后，一遍 --loop-drift。 */
+  animation: ce-sheen-sweep var(--loop-drift) var(--ease-out) calc(var(--dur-hero) * 2.5) 1 both;
 }
 @keyframes ce-sheen-sweep {
   from { transform: translateX(-120%); }
@@ -6953,15 +6857,16 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 
 .ce-heat-cells {
   /* 一次性网格淡入，给不参与错峰的格子一个统一入场。 */
-  animation: ce-in 0.36s var(--ease-out) 700ms backwards;
+  animation: omp-fade-in var(--dur-slower) var(--ease-out) calc(var(--stagger) * 7) backwards;
 }
 .ce-hc {
   position: relative;
   border-radius: 2.5px;
   background: var(--ce-l0);
-  transition: transform 0.16s var(--ease-out), box-shadow 0.16s var(--ease-out);
-  animation: ce-hc-in 0.5s var(--ease-out) backwards;
-  animation-delay: calc(760ms + var(--cw) * 10ms + var(--cd) * 5ms);
+  transition: transform var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out);
+  animation: ce-hc-in var(--dur-hero) var(--ease-out) backwards;
+  /* 从左上角斜着铺开：每列晚四分之一拍，每行再晚八分之一拍。 */
+  animation-delay: calc(var(--stagger) * (8 + var(--cw) / 4 + var(--cd) / 8));
 }
 /* 371 格逐个入场 = 371 条并发的一次性动画（各自提升合成层）。只让最前面约
    60 格错峰，其余直接随网格淡入出现：峰值并发动画数 371 → 60。 */
@@ -7089,13 +6994,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   .ce-heat-months, .ce-heat-cells, .ce-heat-legend { grid-column: 1; }
   .ce-row-meta .ce-meta-proj { display: none; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .convo-empty .ce-anim { animation: none; opacity: 1; transform: none; }
-  .ce-pi-glyph { opacity: 0.94; }
-  .ce-hc, .ce-heat-months, .ce-heat-days, .ce-heat-cells { animation: none; }
-  .ce-heat-cells::after { display: none; }
-  .composer-bar .pill-btn.danger > span { animation: none; }
-}
+
 
 .btw-history-toolbar { display:flex; gap:6px; padding:8px; flex-wrap:wrap; }
 .btw-history-toolbar .select { flex:1; min-width:120px; }

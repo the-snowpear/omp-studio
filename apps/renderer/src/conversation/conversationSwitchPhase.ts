@@ -16,12 +16,15 @@
  *   - 很慢 → 骨架完整显示并自己解释在等什么，读完再交叉溶解。
  */
 
-/** 淡出上一段 transcript 的时长；短到不像等待，长到能看出是"离场"而非"消失"。 */
-export const SWITCH_LEAVE_MS = 140;
+import { MOTION_MS } from "../motion";
+
+/** 淡出上一段 transcript 的时长；短到不像等待，长到能看出是"离场"而非"消失"。
+ *  与页面切换的离场是同一档（`.convo-body[data-phase="leaving"]`，--dur-fast）。 */
+export const SWITCH_LEAVE_MS = MOTION_MS.fast;
 /** 新 transcript 隐身完成虚拟列表测高与贴底的帧数。 */
 export const SWITCH_SETTLE_FRAMES = 2;
-/** 新 transcript 淡入（与骨架淡出重叠）的时长。 */
-export const SWITCH_REVEAL_MS = 320;
+/** 新 transcript 淡入（与骨架淡出重叠）的时长：一整块表面到场（--dur-slower）。 */
+export const SWITCH_REVEAL_MS = MOTION_MS.slower;
 
 export type ConversationSwitchPhase = "idle" | "leaving" | "waiting" | "settling" | "revealing";
 

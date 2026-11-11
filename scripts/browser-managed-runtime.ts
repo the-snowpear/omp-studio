@@ -10,24 +10,27 @@ import type { ToolSession } from "../omp-patch/vendor/oh-my-pi/packages/coding-a
 
 const directory = process.argv[2]!;
 const sessionId = process.argv[3]!;
-const rootSession = { sessionId } as AgentSession;
+// Registry ownership now reads the SessionManager identity and the view-session surface.
+// These offline handles do not start an agent loop or make model requests.
+const fixtureSession = (id: string) => ({ sessionId: id, sessionManager: { getSessionId: () => id }, activeToolExecutionUpdates: () => [] }) as unknown as AgentSession;
+const rootSession = fixtureSession(sessionId);
 const registry = AgentRegistry.global();
 const references = [
   registry.register({ id: "smoke-root", displayName: "Root", kind: "main", session: rootSession }),
-  registry.register({ id: "smoke-child", displayName: "Child", kind: "sub", parentId: "smoke-root", session: { sessionId: `${sessionId}-child` } as AgentSession }),
-  registry.register({ id: "smoke-isolated", displayName: "Isolated", kind: "sub", parentId: "smoke-child", session: { sessionId: `${sessionId}-isolated` } as AgentSession, history: { isolated: true } }),
+  registry.register({ id: "smoke-child", displayName: "Child", kind: "sub", parentId: "smoke-root", session: fixtureSession(`${sessionId}-child`) }),
+  registry.register({ id: "smoke-isolated", displayName: "Isolated", kind: "sub", parentId: "smoke-child", session: fixtureSession(`${sessionId}-isolated`), history: { isolated: true } }),
 ];
 let service = new StudioManagedBrowserService(rootSession, { enabled: true, directory });
 const retired: StudioManagedBrowserService[] = [];
 const session: ToolSession = {
-  cwd: directory, hasUI: false, getSessionFile: () => null, getSessionSpawns: () => null, getSessionId: () => sessionId,
+  cwd: directory, hasUI: false, getSessionFile: () => null, getSessionSpawns: () => null, getSessionId: () => sessionId, getEvalKernelOwnerId: () => sessionId,
   settings: Settings.isolated({ "browser.enabled": true, "browser.relay": false, "browser.cmux": false, "browser.tern": false, "browser.screenshotDir": directory, "tools.maxTimeout": 0 }),
 };
 const prelude = createBrowserPrelude(session);
 const sessions = {
   root: session,
-  child: { ...session, getSessionId: () => `${sessionId}-child` },
-  isolated: { ...session, cwd: join(directory, "isolated-worktree"), getSessionId: () => `${sessionId}-isolated` },
+  child: { ...session, getSessionId: () => `${sessionId}-child`, getEvalKernelOwnerId: () => `${sessionId}-child` },
+  isolated: { ...session, cwd: join(directory, "isolated-worktree"), getSessionId: () => `${sessionId}-isolated`, getEvalKernelOwnerId: () => `${sessionId}-isolated` },
 };
 const pending = new Map<number, AbortController>();
 const respond = (value: unknown) => process.stdout.write(JSON.stringify(value) + "\n");

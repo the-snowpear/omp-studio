@@ -12,7 +12,7 @@
   color: var(--text);
   box-shadow: 0 16px 48px rgb(0 0 0 / .16), 0 3px 10px rgb(0 0 0 / .08);
   pointer-events: none;
-  animation: sa-hover-in 120ms ease-out;
+  animation: var(--motion-pop);
 }
 .sa-hover-preview::before {
   content: "";
@@ -140,8 +140,3 @@
 .sa-hover-preview[data-density] .sa-metrics { gap: 4px; }
 .sa-hover-preview[data-density] .sa-metrics :is(.sa-tok, .hub-num) { gap: 3px; }
 .sa-hover-preview[data-density="tight"] .sa-hover-meta { display: none; }
-@keyframes sa-hover-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
-}
-@media (prefers-reduced-motion: reduce) { .sa-hover-preview { animation: none; } }

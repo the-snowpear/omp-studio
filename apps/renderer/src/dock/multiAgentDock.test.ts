@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { agentPresetLayout, createDefaultLayout, dockReducer, locatePanel, normalizeLayout } from "./model";
 import { DockStore } from "./store";
 import { agentPanelId, type DockLayout } from "./types";
@@ -7,6 +7,13 @@ const scope = JSON.stringify(["local", "project", "parent", false]);
 const deps = agentPanelId(scope, "deps");
 const preview = agentPanelId(scope, "preview");
 const tests = agentPanelId(scope, "tests");
+const stores: DockStore[] = [];
+function ownedStore(storage: Storage | null) {
+  const store = new DockStore(storage);
+  stores.push(store);
+  return store;
+}
+afterEach(() => { for (const store of stores.splice(0)) store.dispose(); });
 const open = (layout: DockLayout, agentId: string, toolCallId?: string) => dockReducer(layout, {
   type: "agent-open", panel: agentPanelId(scope, agentId), descriptor: { scope, target: { agentId, ...(toolCallId ? { toolCallId } : {}) } },
 });
@@ -45,14 +52,14 @@ describe("multiple agent dock views", () => {
     storage.clear();
     const first = { target: "local", project: "project", session: "parent" };
     const second = { ...first, session: "other" };
-    const store = new DockStore(storage);
+    const store = ownedStore(storage);
     store.switchScope(first, false);
     store.dispatch({ type: "agent-open", panel: deps, descriptor: { scope, target: { agentId: "deps" } } });
     store.dispatch({ type: "move", panels: [deps], target: { region: "bottom" } });
     store.flush();
     store.switchScope(second, false);
     expect(Object.keys(store.getSnapshot().layout.agentPanels)).toEqual([]);
-    const reload = new DockStore(storage);
+    const reload = ownedStore(storage);
     reload.switchScope(first, false);
     expect(locatePanel(reload.getSnapshot().layout, deps)?.region).toBe("bottom");
     expect(reload.getSnapshot().layout.agentPanels[deps]?.target.agentId).toBe("deps");
@@ -62,7 +69,7 @@ describe("multiple agent dock views", () => {
 
 
   it("saves a generic preset anchor and applies it to existing agent views", () => {
-    const store = new DockStore(null);
+    const store = ownedStore(null);
     store.switchScope({ target: "local", project: "project", session: "parent" }, false);
     for (const agentId of ["deps", "preview"]) store.dispatch({ type: "agent-open", panel: agentPanelId(scope, agentId), descriptor: { scope, target: { agentId } } });
     store.dispatch({ type: "move", panels: [preview], target: { region: "bottom" } });
