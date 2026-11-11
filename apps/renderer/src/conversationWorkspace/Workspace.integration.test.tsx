@@ -152,6 +152,54 @@ describe("conversation windows", () => {
       else Reflect.deleteProperty(Element.prototype, "animate");
     }
   });
+  it.each([false, true])("previews an unopened sidebar conversation over left tools, cancels and floats it (preview=%s)", async preview => {
+    const openContext = vi.fn();
+    await mount(preview, client({ openContext }));
+    const main = document.querySelector<HTMLElement>(".cw-main-conversation .cw-document")!;
+    const editor = main.querySelector<HTMLElement>("[contenteditable=true]")!;
+    editor.textContent = "拖出其他对话时保留草稿"; fireEvent.input(editor);
+    vi.spyOn(document.querySelector<HTMLElement>("[data-conversation-canvas]")!, "getBoundingClientRect").mockReturnValue(new DOMRect(300, 40, 1100, 800));
+    vi.spyOn(document.querySelector<HTMLElement>("[data-dock-workbench]")!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 40, 1400, 900));
+    const left = document.querySelector<HTMLElement>('.cw-shared-sidebar .dock-card-list[data-dock-cards="left"]')!;
+    vi.spyOn(left, "getBoundingClientRect").mockReturnValue(new DOMRect(40, 300, 240, 480));
+    vi.spyOn(left, "getClientRects").mockReturnValue([new DOMRect(40, 300, 240, 480)] as unknown as DOMRectList);
+    const files = left.querySelector<HTMLElement>('[data-dock-card="files"]')!;
+    vi.spyOn(files, "getBoundingClientRect").mockReturnValue(new DOMRect(40, 300, 240, 280));
+    const underPointer = vi.fn((): Element[] => [left]);
+    Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: underPointer });
+    const title = preview ? "Audit and fix OSS" : "Second conversation";
+    const row = await waitFor(() => {
+      const found = [...document.querySelectorAll("#projectList .thread")].find(element => element.textContent?.includes(title));
+      expect(found).toBeDefined();
+      return found!;
+    });
+    const start = async () => {
+      fireEvent.pointerDown(row, { button: 0, clientX: 180, clientY: 250 });
+      fireEvent.pointerMove(window, { clientX: 150, clientY: 600 });
+      await waitFor(() => expect(left.querySelector(".dock-card-placeholder")).not.toBeNull());
+      expect(left.querySelector(".dock-card-placeholder")?.classList.contains("is-collapsed")).toBe(false);
+      expect(document.querySelector(".dock-drag-preview")?.textContent).toContain(title);
+      expect(document.querySelector(".cw-main-conversation .cw-document")).toBe(main);
+      expect(document.querySelectorAll(".cw-document")).toHaveLength(1);
+    };
+    await start();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".dock-drag-preview, .dock-card-placeholder")).toBeNull());
+    expect(document.querySelectorAll("[data-conversation-view].dock-conversation-window")).toHaveLength(0);
+    await start();
+    underPointer.mockReturnValue([]);
+    fireEvent.pointerMove(window, { clientX: 760, clientY: 340 });
+    await waitFor(() => expect(left.querySelector(".dock-card-placeholder")).toBeNull());
+    fireEvent.pointerUp(window, { clientX: 760, clientY: 340 });
+    await waitFor(() => expect(document.querySelectorAll("[data-conversation-view].dock-conversation-window")).toHaveLength(1));
+    await waitFor(() => expect(document.querySelector(".dock-drag-preview, .cw-content-loading")).toBeNull());
+    expect(document.querySelector(".dock-conversation-window .dock-float-titlebar")?.textContent).toContain(title);
+    expect(document.querySelector(".cw-main-conversation [contenteditable=true]")).toBe(editor);
+    expect(editor.textContent).toBe("拖出其他对话时保留草稿");
+    expect(left.querySelector('[data-dock-card="files"]')).toBe(files);
+    if (preview) expect(openContext).not.toHaveBeenCalled();
+    else expect(openContext).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "second-session" }));
+  });
   it("opens a sidebar conversation directly in a tool region and preserves the main conversation", async () => {
     await mount(true);
     const first = document.querySelector(".cw-main-conversation .cw-document")!;

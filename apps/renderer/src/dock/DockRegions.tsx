@@ -318,11 +318,11 @@ export function DockCardRegion({ region, visible = true }: { region: "left" | "r
   const projected = useSyncExternalStore(dragPreview.subscribe, () => {
     const state = dragPreview.snapshot();
     return state?.hosts === hosts && state.cards?.region === region
-      ? state.layout[region].panels : layout[region].panels;
+      ? state.layout : layout;
   });
   const placement = useSyncExternalStore(dragPreview.subscribe, () => { const state = dragPreview.snapshot(); return state?.hosts === hosts && state.cards?.region === region ? state.cards : null; });
-  const panels = visible ? projected : [];
-  const lastExpanded = [...panels].reverse().find(id => !layout.cards[id]!.collapsed);
+  const panels = visible ? projected[region].panels : [];
+  const lastExpanded = [...panels].reverse().find(id => !projected.cards[id]!.collapsed);
   useAutomaticCardHeights(list, region === "rail" ? panels.filter(id => layout[region].panels.includes(id)) : []);
   useCardReorder(list, panels, placement ? panels.map(id => placement.sizes[id]?.height ?? 0).join(",") : "");
   useEffect(() => {
@@ -341,8 +341,8 @@ export function DockCardRegion({ region, visible = true }: { region: "left" | "r
     {preview && marks && <span className="dock-demo">{text("演示", "Demo")}</span>}
     <div className="dock-card-list" ref={list} data-dock-cards={region} data-dock-empty={region}>
       {panels.map(id => layout[region].panels.includes(id) ? <DockCard id={id} region={region} key={id} lastExpanded={id === lastExpanded} />
-        : <div key={id} className={`dock-card dock-card-placeholder dock-drag-source${layout.cards[id]!.collapsed ? " is-collapsed" : ""}`} data-dock-card={id}
-          style={{ height: placement!.sizes[id]!.height, ...(region === "left" ? { "--dock-left-share": layout.cards[id]!.leftShare ?? 1, flexBasis: layout.cards[id]!.collapsed ? undefined : id === lastExpanded ? 34 : 40 } : {}) } as CSSProperties} />)}
+        : <div key={id} className={`dock-card dock-card-placeholder dock-drag-source${projected.cards[id]!.collapsed ? " is-collapsed" : ""}`} data-dock-card={id}
+          style={{ height: placement!.sizes[id]!.height, ...(region === "left" ? { "--dock-left-share": projected.cards[id]!.leftShare ?? 1, flexBasis: projected.cards[id]!.collapsed ? undefined : id === lastExpanded ? 34 : 40 } : {}) } as CSSProperties} />)}
       {!panels.length && <div className="dock-empty"><span>{text("添加工具或拖动到这里", "Add a tool or drag it here")}</span><DockToolsButton onPick={panel => store.openIn(panel, { region })} /></div>}
     </div>
   </div>;
