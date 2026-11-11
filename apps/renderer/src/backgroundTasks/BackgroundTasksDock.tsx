@@ -27,7 +27,7 @@ export function buildBackgroundTasksMeter(source: BackgroundTasksSource, options
     { id: "finished", count: count.total - count.active - count.failed, label: zh ? "结束" : "Finished", color: "var(--text-3)" },
   ].filter(group => group.count > 0);
   const unavailable = !preview && (!available || source.servicesState === "error" || source.servicesState === "unavailable");
-  const emptyLabel = !source.jobsReady || source.servicesState === "loading" ? zh ? "读取中" : "Loading" : zh ? "无任务" : "No tasks";
+  const emptyLabel = !preview && !available ? zh ? "不可读取" : "Unavailable" : !source.jobsReady || source.servicesState === "loading" ? zh ? "读取中" : "Loading" : zh ? "无任务" : "No tasks";
   const note = !preview && !available ? zh ? "非实时" : "Offline" : unavailable ? zh ? "部分不可用" : "Partly unavailable" : undefined;
   const label = ["Background tasks", note, groups.map(group => `${group.count} ${group.label}`).join(" · ") || emptyLabel, preview && marks ? zh ? "演示" : "Demo" : undefined].filter(Boolean).join(" · ");
   return { kind: "status", total: count.total, badge: count.active, counts: groups, emptyLabel, ...(note ? { note } : {}), stale: unavailable,
@@ -124,7 +124,7 @@ export function BackgroundTasksDock({ client, snapshot, sessionId, scopeKey, ava
     return () => { stops.forEach(stop => stop()); docs.forEach(doc => doc.removeEventListener("visibilitychange", changed)); };
   }, [hosts, ids]);
   const bodyVisible = useSyncExternalStore(subscribe, () => ids.some(id => hosts.get(id).snapshot().visible && !hosts.get(id).surfaceSnapshot().hidden));
-  const sourceDocument = useSyncExternalStore(subscribe, () => ids.map(id => hosts.get(id)).find(host => host.snapshot().visible && !host.surfaceSnapshot().hidden)?.surfaceSnapshot() ?? document);
+  const sourceDocument = useSyncExternalStore(subscribe, () => ids.map(id => hosts.get(id)).find(host => host.snapshot().visible && !host.surfaceSnapshot().hidden)?.surfaceSnapshot() ?? originDocument);
   const active = bodyVisible || summaryVisible;
   const source = useBackgroundTasks({
     ...(client ? { client } : {}), ...(sessionId ? { sessionId } : {}), scopeKey,

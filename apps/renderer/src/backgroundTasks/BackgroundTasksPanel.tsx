@@ -32,7 +32,7 @@ export type BackgroundTasksPanelProps = {
   onOpenPreview: (url: string, key: string) => boolean;
 };
 
-function useServiceLogs(task: BackgroundTask | null, props: BackgroundTasksPanelProps, doc: Document, preview: boolean) {
+function useServiceLogs(task: BackgroundTask | null, props: BackgroundTasksPanelProps, doc: Document, preview: boolean, retained: boolean) {
   const service = task?.kind === "service" ? task.service : undefined;
   const [text, setText] = useState("");
   const [error, setError] = useState("");
@@ -42,7 +42,7 @@ function useServiceLogs(task: BackgroundTask | null, props: BackgroundTasksPanel
   useEffect(() => {
     let active = true, busy = false;
     const load = async () => {
-      if (!service || !visible || card || doc.hidden || busy || (!preview && (!client || !available))) return;
+      if (!service || !retained || !visible || card || doc.hidden || busy || (!preview && (!client || !available))) return;
       if (preview) {
         setText(service.state === "exited" ? "Process exited." : "Server ready\nWatching workspace files…");
         return;
@@ -58,10 +58,10 @@ function useServiceLogs(task: BackgroundTask | null, props: BackgroundTasksPanel
     const request = () => { void load(); };
     refresh.current = request;
     request();
-    const timer = service && task?.active && visible && !card && !preview && available ? setInterval(request, 3000) : undefined;
+    const timer = service && retained && task?.active && visible && !card && !preview && available ? setInterval(request, 3000) : undefined;
     doc.addEventListener("visibilitychange", request);
     return () => { active = false; if (timer !== undefined) clearInterval(timer); doc.removeEventListener("visibilitychange", request); refresh.current = () => {}; };
-  }, [client, scopeKey, available, visible, card, doc, preview, service?.name, service?.instanceId, service?.state, task?.active]);
+  }, [client, scopeKey, available, visible, card, doc, preview, retained, service?.name, service?.instanceId, service?.state, task?.active]);
   return { text, error, refresh: () => refresh.current() };
 }
 
@@ -96,7 +96,7 @@ export function BackgroundTasksPanel(props: BackgroundTasksPanelProps) {
   const activeRows = source.rows.filter(row => row.active);
   const recentRows = source.rows.filter(row => !row.active);
   const listHidden = !card && !wide && selected !== null;
-  const logs = useServiceLogs(gone ? null : selected, props, doc, preview);
+  const logs = useServiceLogs(selected, props, doc, preview, !gone);
   const showProcess = (row: BackgroundTask) => {
     if (card) { onOpenWindow(row.key); return; }
     selectedCache.current = row;
@@ -116,7 +116,7 @@ export function BackgroundTasksPanel(props: BackgroundTasksPanelProps) {
     const row = source.rows.find(item => item.key === intent.key);
     if (intent.key && !row) return;
     appliedIntent.current = intent.serial;
-    if (row) { selectedCache.current = row; setSelectedKey(row.key); }
+    if (row) { selectedCache.current = row; setSelectedKey(row.key); if (!row.active) setRecentOpen(true); }
   }, [intent, source.rows, card]);
   useLayoutEffect(() => {
     if (listHidden || !restoreFocus.current) return;
@@ -174,7 +174,7 @@ export function BackgroundTasksPanel(props: BackgroundTasksPanelProps) {
       <div className="bt-list" ref={list} hidden={listHidden} aria-label={zh ? "后台活动列表" : "Background activity list"}>
         {activeRows.map(renderRow)}
         {!activeRows.length ? <div className="bt-empty"><Icon name="terminal" />
-          <span>{!source.jobsReady || source.servicesState === "loading" ? zh ? "正在读取后台活动…" : "Loading background activity…" : missingSource ? zh ? "暂无可用的后台活动" : "No background activity available" : zh ? "暂无正在运行的任务" : "No active background tasks"}</span>
+          <span>{missingSource ? zh ? "暂无可用的后台活动" : "No background activity available" : !source.jobsReady || source.servicesState === "loading" ? zh ? "正在读取后台活动…" : "Loading background activity…" : zh ? "暂无正在运行的任务" : "No active background tasks"}</span>
           {source.jobsReady && source.servicesState !== "loading" ? <small>{zh ? "托管服务和后台任务会统一显示在这里" : "Managed services and background jobs appear here."}</small> : null}
         </div> : null}
         {card || recentRows.length > 0 ? <section className="bt-recent">

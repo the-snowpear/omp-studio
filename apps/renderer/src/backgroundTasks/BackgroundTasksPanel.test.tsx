@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type { StudioJobSnapshot, StudioServiceRow } from "@omp-studio/studio-protocol";
@@ -7,6 +7,7 @@ import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
 import { buildBackgroundTasks } from "./backgroundTasksModel";
 import { BackgroundTasksPanel, type BackgroundTasksPanelProps, type BackgroundTasksSource } from "./BackgroundTasksPanel";
+import * as serviceCommands from "../services/serviceCommands";
 
 const service: StudioServiceRow = { name: "shared", instanceId: "service-one", state: "ready", startedAt: 1000, mode: "session", outputBytes: 100, restartCount: 0 };
 const job = { jobId: "job-one", generation: 1, ownerAgentId: "main", type: "bash", label: "shared", status: "running", startedAt: new Date(1000).toISOString() } as StudioJobSnapshot;
@@ -25,7 +26,7 @@ function setup(extra: Partial<BackgroundTasksPanelProps> = {}) {
   return { value, props, ...mounted };
 }
 beforeEach(() => { localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1"); });
-afterEach(() => { cleanup(); localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY); vi.restoreAllMocks(); vi.useRealTimers(); });
 it("shows services and jobs in one list and keeps failures discoverable when recent entries are folded", () => {
   setup();
   expect(document.querySelectorAll(".bt-list > .bt-row").length).toBe(2);
@@ -78,6 +79,53 @@ it("keeps selected terminal details, then reports native retention instead of si
   expect(screen.getByText(/此记录已移出最近列表/)).toBeTruthy();
   expect(screen.getByText("service-one")).toBeTruthy();
 });
+it("preserves read service logs after retention ends and stops polling until a new selection", async () => {
+  vi.useFakeTimers();
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+  const read = vi.spyOn(serviceCommands, "invokeServiceCommand").mockResolvedValue({ instanceId: service.instanceId, text: "Retained service output", cursor: 1, state: "ready" });
+  const client = { command: vi.fn() } as unknown as StudioClient;
+  const { props, rerender } = setup({ client });
+  fireEvent.click(document.querySelector<HTMLButtonElement>(".bt-row[data-kind='service'] .bt-task-main")!);
+  await act(async () => {});
+  expect(screen.getByText("Retained service output")).toBeTruthy();
+
+  const other = { ...service, name: "other", instanceId: "service-two" };
+  rerender(wrapper({ ...props, source: { ...props.source, rows: buildBackgroundTasks([job], [other]) } }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+  expect(screen.getByText(/此记录已移出最近列表/)).toBeTruthy();
+  expect(screen.getByText("Retained service output")).toBeTruthy();
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "刷新日志" }).hasAttribute("disabled")).toBe(true);
+
+  let resolve!: (value: { instanceId: string; text: string; cursor: number; state: "ready" }) => void;
+  read.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  fireEvent.click(screen.getByRole("button", { name: "返回任务列表" }));
+  fireEvent.click(screen.getByRole("button", { name: "other · 就绪" }));
+  expect(screen.queryByText("Retained service output")).toBeNull();
+  await act(async () => { resolve({ instanceId: other.instanceId, text: "Other service output", cursor: 2, state: "ready" }); });
+  expect(screen.getByText("Other service output")).toBeTruthy();
+});
+
+it("a card intent reveals a finished row and returns keyboard focus to it", () => {
+  const data = source();
+  const finished = data.rows.find(row => row.job?.jobId === failed.jobId)!;
+  setup({ source: data, intent: { key: finished.key, serial: 1 } });
+  expect(screen.getByRole("heading", { name: failed.label })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "返回任务列表" }));
+  expect(screen.getByRole("button", { name: /最近已结束/ }).getAttribute("aria-expanded")).toBe("true");
+  const row = screen.getByRole("button", { name: `${failed.label} · 失败` });
+  expect(document.querySelector<HTMLDivElement>(".bt-list")!.hidden).toBe(false);
+  expect(document.activeElement).toBe(row);
+});
+
+it("an unavailable real source shows an offline empty state instead of perpetual loading", () => {
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  setup({ available: false, source: { ...source(), rows: [], jobsReady: false, servicesState: "unavailable" } });
+  expect(screen.getByText("暂无可用的后台活动")).toBeTruthy();
+  expect(screen.queryByText("正在读取后台活动…")).toBeNull();
+});
+
 it("a real empty source does not fill in demo rows", () => {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
   const empty = { ...source(), rows: [] };

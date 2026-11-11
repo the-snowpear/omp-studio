@@ -106,6 +106,35 @@ index 8b519c9421..43146f0c59 100644
  	}
  
  	/**
+diff --git a/packages/coding-agent/src/job-widgets/registry.ts b/packages/coding-agent/src/job-widgets/registry.ts
+index ca35a902d4..2a9e6144cd 100644
+--- a/packages/coding-agent/src/job-widgets/registry.ts
++++ b/packages/coding-agent/src/job-widgets/registry.ts
+@@ -125,6 +125,11 @@ export class JobWidgets implements JobWidgetRegistry {
+ 		return entry.view;
+ 	}
+ 
++	peek(job: AsyncJob): JobWidgetView | undefined {
++		const entry = this.#entries.get(job.id);
++		return !this.#disposed && this.#enabled() && entry?.job === job ? entry.view : undefined;
++	}
++
+ 	requestCaption(job: AsyncJob): void {
+ 		if (this.#disposed || !job.widgetInputs || job.status !== "running" || !this.#enabled()) return;
+ 		let brief: JobWidgetBrief;
+diff --git a/packages/coding-agent/src/job-widgets/types.ts b/packages/coding-agent/src/job-widgets/types.ts
+index e3d46b7861..0108b1c1bc 100644
+--- a/packages/coding-agent/src/job-widgets/types.ts
++++ b/packages/coding-agent/src/job-widgets/types.ts
+@@ -76,6 +76,8 @@ export interface JobWidgetRegistry {
+ 	 * model start writing its spec.
+ 	 */
+ 	view(job: AsyncJob): JobWidgetView | undefined;
++	/** Last already-observed view, without reading sources or marking the widget shown. */
++	peek?(job: AsyncJob): JobWidgetView | undefined;
+ 	/**
+ 	 * One line on what a command's job does and when it ends, written by the
+ 	 * cheap model once the job has run a while; `undefined` until then, for a
 diff --git a/packages/coding-agent/src/modes/controllers/command-controller.ts b/packages/coding-agent/src/modes/controllers/command-controller.ts
 index aa6aafcfbf..97041ee0bf 100644
 --- a/packages/coding-agent/src/modes/controllers/command-controller.ts

@@ -106,10 +106,7 @@ export interface StudioJobsPort {
 	getRecentJobs(limit?: number, filter?: AsyncJobFilter): AsyncJob[];
 	getAllJobs(filter?: AsyncJobFilter): AsyncJob[];
 	cancel(id: string, filter?: AsyncJobFilter): boolean;
-	/**
-	 * Live widget of a job (`AsyncJobManager.widgets.view`). Reading marks the
-	 * widget shown, which is what lets its spec be authored.
-	 */
+	/** Last observed widget (`AsyncJobManager.widgets.peek`), without starting authoring. */
 	widgetView?(job: AsyncJob): JobWidgetView | undefined;
 	widgetCaption?(job: AsyncJob): string | undefined;
 }
@@ -213,7 +210,7 @@ export class StudioJobService {
 		const ownerFilter = options.ownerAgentId;
 		const visible = [...jobs.values()]
 			.filter(job => this.#canSee(options.callerAgentId, ownerFilter, job))
-			.sort((a, b) => b.startTime - a.startTime);
+			.sort((a, b) => Number(b.status === "running") - Number(a.status === "running") || b.startTime - a.startTime);
 		return visible.slice(0, limit).map(job => this.#snapshot(job));
 	}
 
@@ -252,8 +249,27 @@ export class StudioJobService {
 		if (job.status !== "running") {
 			return { outcome: "already_terminal", snapshot: this.#snapshot(job) };
 		}
+		const ownerId = job.ownerId;
 		await this.#requireConfirmation({ kind: "cancelJob", jobId: args.jobId, generation, risk: "destructive" });
-		const cancelled = this.#jobs.cancel(args.jobId, job.ownerId === undefined ? undefined : { ownerId: job.ownerId });
+		// Confirmation may outlive this run or its manager. Fence the task again
+		// immediately before the synchronous cancellation, not just before waiting.
+		const confirmed = this.#jobs.getJob(args.jobId);
+		if (!confirmed) throw new StudioJobError("JOB_NOT_FOUND", `Job "${args.jobId}" was not found`);
+		if (confirmed !== job || this.#observe(confirmed) !== generation || confirmed.ownerId !== ownerId) {
+			throw new StudioJobError(
+				"JOB_GENERATION_CONFLICT",
+				`Job "${args.jobId}" changed while cancellation was being confirmed`,
+				this.#snapshot(confirmed),
+			);
+		}
+		if (
+			ownerId !== undefined &&
+			args.callerAgentId !== ownerId &&
+			(args.callerAgentId === undefined || !this.#isAncestorOf(args.callerAgentId, ownerId))
+		) {
+			throw new StudioJobError("NOT_OWNER", `Agent "${args.callerAgentId ?? ""}" cannot cancel job "${args.jobId}"`);
+		}
+		const cancelled = this.#jobs.cancel(args.jobId, ownerId === undefined ? undefined : { ownerId });
 		if (!cancelled) {
 			const current = this.#jobs.getJob(args.jobId);
 			if (!current) throw new StudioJobError("JOB_NOT_FOUND", `Job "${args.jobId}" was not found`);
@@ -331,9 +347,9 @@ export class StudioJobService {
 	}
 
 	/**
-	 * Running jobs are read live (which keeps their widgets authored); a settled
-	 * job keeps the last view seen while it ran, so no spec authoring starts for
-	 * a job nobody watched.
+	 * Running jobs project already-observed views; actual inspectors mark widgets
+	 * shown. A settled job keeps the last view seen while it ran, without starting
+	 * spec authoring for a job nobody watched.
 	 */
 	#widget(job: AsyncJob): JobWidgetView | undefined {
 		if (job.status === "running" && job.queued !== true && this.#jobs.widgetView) {

@@ -815,7 +815,7 @@ export function createStudioHostRuntime(
 		getRecentJobs: (limit, filter) => session.asyncJobManager?.getRecentJobs(limit, filter) ?? [],
 		getAllJobs: filter => session.asyncJobManager?.getAllJobs(filter) ?? [],
 		cancel: (id, filter) => session.asyncJobManager?.cancel(id, filter) ?? false,
-		widgetView: job => session.asyncJobManager?.widgets?.view(job),
+		widgetView: job => session.asyncJobManager?.widgets?.peek?.(job),
 		widgetCaption: job => session.asyncJobManager?.widgets?.caption(job),
 	};
 	const agentsRef = { current: undefined as StudioAgentHubService | undefined };

@@ -4,7 +4,11 @@ import {
 	StudioJobError,
 	StudioJobService,
 	type StudioJobsPort,
+	type StudioJobConfirmationGate,
 } from "@oh-my-pi/pi-coding-agent/studio/services/job-service";
+
+import { JobWidgets } from "../src/job-widgets/registry";
+import { TextTap } from "../src/job-widgets/text-tap";
 
 const SECRET = "D:/secret/jobs/private.jsonl";
 
@@ -23,7 +27,7 @@ function job(id: string, overrides: Partial<AsyncJob> = {}): AsyncJob {
 	};
 }
 
-function fixture(options: { confirm?: boolean } = {}) {
+function fixture(options: { confirm?: boolean; confirmationGate?: StudioJobConfirmationGate } = {}) {
 	const jobs = new Map<string, AsyncJob>();
 	const cancelled: string[] = [];
 	const abortedAgents: string[] = [];
@@ -55,7 +59,7 @@ function fixture(options: { confirm?: boolean } = {}) {
 		port,
 		{ get: id => registry.get(id) },
 		{
-			confirmationGate: async () => options.confirm ?? true,
+			confirmationGate: options.confirmationGate ?? (async () => options.confirm ?? true),
 			abortAgent: {
 				abortAgent: async id => {
 					abortedAgents.push(id);
@@ -64,10 +68,44 @@ function fixture(options: { confirm?: boolean } = {}) {
 			summaryLimit: 32,
 		},
 	);
-	return { service, jobs, cancelled, abortedAgents };
+	return { service, jobs, cancelled, abortedAgents, port };
 }
 
 describe("StudioJobService job tree and widgets", () => {
+	test("lists only observed widgets without authoring until an inspector shows the job", async () => {
+		let authored = 0;
+		const widgets = new JobWidgets({
+			now: () => 1_700_000_020_000,
+			authorAfterMs: 0,
+			author: async () => {
+				authored += 1;
+				return { skip: "No chart is needed" };
+			},
+		});
+		const tap = new TextTap("out", "stdout");
+		tap.append("step 1\nstep 2\nstep 3\n");
+		const candidate = job("observed", {
+			type: "bash",
+			agentId: undefined,
+			widgetInputs: { sources: () => [tap], brief: () => ({ kind: "bash", command: "run-long-task" }) },
+		});
+		const h = fixture();
+		h.jobs.set(candidate.id, candidate);
+		h.port.widgetView = value => widgets.peek(value);
+		try {
+			expect(h.service.list({ callerAgentId: "Main" })[0]?.widget).toBeUndefined();
+			await Promise.resolve();
+			expect(authored).toBe(0);
+			widgets.view(candidate);
+			await Promise.resolve();
+			expect(authored).toBe(1);
+			expect(h.service.list({ callerAgentId: "Main" })[0]?.widget).toBeDefined();
+			expect(authored).toBe(1);
+		} finally {
+			widgets.dispose();
+		}
+	});
+
 	test("keeps a settled job's last widget and frozen end, and links owners up to the root", () => {
 		const jobs = new Map<string, AsyncJob>();
 		const views: string[] = [];
@@ -143,6 +181,40 @@ describe("StudioJobService job tree and widgets", () => {
 });
 
 describe("WP-054 StudioJobService", () => {
+	test("keeps running and queued jobs visible when newer settled jobs fill the list", () => {
+		const h = fixture();
+		h.jobs.set("old-shell", job("old-shell", { type: "bash", agentId: undefined }));
+		h.jobs.set("old-queued", job("old-queued", { type: "bash", agentId: undefined, queued: true }));
+		for (let index = 0; index < 100; index++) {
+			const id = `finished-${index}`;
+			h.jobs.set(id, job(id, { status: "completed", startTime: 1_700_000_000_001 + index }));
+		}
+		const rows = h.service.list({ callerAgentId: "Main", includeRecent: true });
+		expect(rows.slice(0, 2).map(row => row.jobId)).toEqual(["old-shell", "old-queued"]);
+		expect(rows.find(row => row.jobId === "old-queued")?.status).toBe("queued");
+		expect(rows.some(row => row.status === "completed")).toBe(true);
+		expect(rows).toHaveLength(100);
+	});
+
+	test("does not cancel a replacement registered while confirmation is pending", async () => {
+		const approval = Promise.withResolvers<boolean>();
+		const h = fixture({ confirmationGate: () => approval.promise });
+		const original = job("reused", { type: "bash", agentId: undefined });
+		h.jobs.set(original.id, original);
+		const cancellation = h.service.cancel({ jobId: original.id, expectedGeneration: 1, callerAgentId: "Main" });
+		const outcome = cancellation.then(
+			() => undefined,
+			cause => cause,
+		);
+		const replacement = job(original.id, { type: "bash", agentId: undefined, startTime: original.startTime + 1 });
+		h.jobs.set(original.id, replacement);
+		approval.resolve(true);
+		expect(await outcome).toMatchObject({ code: "JOB_GENERATION_CONFLICT" });
+		expect(replacement.status).toBe("running");
+		expect(h.cancelled).toEqual([]);
+		expect(h.abortedAgents).toEqual([]);
+	});
+
 	test("lists bounded owner-scoped DTOs without native handles", () => {
 		const h = fixture();
 		h.jobs.set("running", job("running", { label: SECRET }));

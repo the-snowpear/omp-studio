@@ -108,6 +108,8 @@ export const SEAM_GROUPS = Object.freeze([
     title: "Interactive mode, pause screen, mode slash commands, job manager",
     paths: [
       "packages/coding-agent/src/async/job-manager.ts",
+      "packages/coding-agent/src/job-widgets/registry.ts",
+      "packages/coding-agent/src/job-widgets/types.ts",
       "packages/coding-agent/src/thread/services/async-jobs.ts",
       "packages/coding-agent/src/thread/services/async-jobs-protocol.ts",
       "packages/coding-agent/src/thread/services/async-jobs-remote.ts",

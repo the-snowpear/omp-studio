@@ -12,11 +12,15 @@ import { WorkbenchWindows } from "../dock/windows";
 import { createDefaultLayout, locatePanel, normalizeLayout } from "../dock/model";
 import { DockStore } from "../dock/store";
 import { panelBaseId } from "../dock/types";
-import { BackgroundTasksDock } from "./BackgroundTasksDock";
+import { BackgroundTasksDock, buildBackgroundTasksMeter } from "./BackgroundTasksDock";
+import type { BackgroundTasksSource } from "./BackgroundTasksPanel";
+import { SurfaceProvider } from "../dock/SurfaceContext";
+import { DockMeterSummary, usePanelMeter } from "../dock/panelMeters";
+import * as serviceCommands from "../services/serviceCommands";
 
 let frames: FrameRequestCallback[] = [];
 function flush() { act(() => { const pending = frames; frames = []; pending.forEach(callback => callback(0)); }); }
-afterEach(() => { cleanup(); localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY); vi.restoreAllMocks(); vi.unstubAllGlobals(); frames = []; });
+afterEach(() => { cleanup(); localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); frames = []; });
 function Surface({ client }: { client: StudioClient }) {
   const { layout } = useDock();
   return <>
@@ -75,6 +79,53 @@ it("publishes collapsed and icon summaries before the body is ever mounted", () 
   expect(document.querySelector(".dock-meter-badge")?.textContent).toMatch(/\d/);
   expect(client.command).not.toHaveBeenCalled();
 });
+function TaskSummary() {
+  return <DockMeterSummary meter={usePanelMeter("jobs")} />;
+}
+
+it("refreshes a folded native-window summary while the main document is hidden", async () => {
+  vi.useFakeTimers();
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+  const frame = document.createElement("iframe");
+  document.body.append(frame);
+  const nativeDocument = frame.contentDocument!;
+  let nativeHidden = false;
+  vi.spyOn(nativeDocument, "hidden", "get").mockImplementation(() => nativeHidden);
+  const web = { name: "native-web", instanceId: "native-web:one", ownerId: "native-session", state: "ready" as const, startedAt: 1000, restartCount: 0, outputBytes: 0, mode: "session" as const };
+  const read = vi.spyOn(serviceCommands, "invokeServiceCommand").mockResolvedValue({ enabled: true, services: [web] });
+  const store = new DockStore(null);
+  store.dispatch({ type: "card", panel: "jobs", collapsed: true });
+  const client = { command: vi.fn() } as unknown as StudioClient;
+  try {
+    render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><DockProvider definitions={WORKBENCH_PANELS} store={store}><SurfaceProvider document={nativeDocument}>
+      <TaskSummary />
+      <BackgroundTasksDock client={client} sessionId="native-session" scopeKey="native-summary" available jobsReady={false} workbenchVisible canListServices canStopServices={false} canCancelJobs={false} />
+    </SurfaceProvider></DockProvider></PreviewModeProvider></I18nProvider>);
+    await act(async () => {});
+    expect(document.querySelector(".background-tasks")).toBeNull();
+    expect(read).toHaveBeenCalledWith(client, "services.list", {});
+    expect(screen.getByLabelText(/Background tasks.*1 活动/)).toBeTruthy();
+
+    read.mockResolvedValue({ enabled: true, services: [{ ...web, state: "exited", exitedAt: 5000, exitCode: 0 }] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(screen.getByLabelText(/Background tasks.*1 结束/)).toBeTruthy();
+    expect(read).toHaveBeenCalledTimes(2);
+    act(() => { nativeHidden = true; nativeDocument.dispatchEvent(new Event("visibilitychange")); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+    expect(read).toHaveBeenCalledTimes(2);
+    await act(async () => { nativeHidden = false; nativeDocument.dispatchEvent(new Event("visibilitychange")); });
+    expect(read).toHaveBeenCalledTimes(3);
+  } finally { cleanup(); frame.remove(); }
+});
+
+it("shows an unreadable folded summary for an unavailable session instead of loading", () => {
+  const source: BackgroundTasksSource = { rows: [], jobsReady: false, servicesState: "unavailable", servicesError: "", pending: new Set(), actionErrors: new Map(), refresh: vi.fn(async () => {}), stop: vi.fn(async () => {}), canStop: () => false };
+  render(<DockMeterSummary meter={buildBackgroundTasksMeter(source, { available: false, preview: false, marks: false, zh: true })} />);
+  expect(screen.getByText("不可读取")).toBeTruthy();
+  expect(screen.queryByText("读取中")).toBeNull();
+});
+
 it("opens selected details beside the retained card and shares service stop state", () => {
   const { store, client } = setup();
   const card = document.querySelector<HTMLElement>(".background-tasks.is-card")!;
