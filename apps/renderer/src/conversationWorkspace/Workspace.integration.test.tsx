@@ -266,6 +266,62 @@ describe("conversation windows", () => {
     expect(bootstrap).toHaveBeenCalledTimes(initialBootstrapCount);
     expect(openContext).toHaveBeenCalledTimes(initialContextCount);
   });
+  it.each([false, true])("keeps dragging a tool card when the window preview replaces its source with a compact rail (preview=%s)", async preview => {
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(function(this: Element) {
+      return this.matches(".adaptive-workbench") ? this.closest(".dock-layout-preview") ? 694 : 1392 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
+      if (this.matches("[data-dock-workbench]")) return new DOMRect(56, 36, 2144, 964);
+      if (this.matches(".cw-navigation-slot")) return new DOMRect(0, 36, 56, 964);
+      if (this.matches("[data-conversation-canvas]")) return new DOMRect(328, 80, 1392, 884);
+      const projected = !!this.closest(".dock-layout-preview");
+      if (this.matches(".adaptive-workbench, .convo-wrap")) return new DOMRect(328, 80, projected ? 694 : 1392, 884);
+      const rail = this.closest(".dock-rail-expanded, .dock-rail-compact");
+      if (rail) {
+        const width = rail.classList.contains("dock-rail-compact") ? 40 : 320;
+        const x = (projected ? 1010 : 1708) - width;
+        return new DOMRect(x, 130, width, this.matches("[data-dock-card]") ? 46 : 700);
+      }
+      return new DOMRect(1720, 80, 480, 884);
+    });
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function(this: HTMLElement) {
+      return [this.getBoundingClientRect()] as unknown as DOMRectList;
+    });
+    const bootstrap = vi.fn();
+    await mount(preview, client({ bootstrap }));
+    fireEvent.click(screen.getByRole("button", { name: /^Conversation tools$/ }));
+    await waitFor(() => expect(document.querySelector(".dock-rail-expanded")).not.toBeNull());
+    Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [] });
+    const body = document.querySelector<HTMLElement>(".cw-main-conversation .cw-document")!;
+    const editor = body.querySelector<HTMLElement>("[contenteditable=true]")!;
+    editor.textContent = "工具卡吸附保留草稿"; fireEvent.input(editor);
+    const calls = bootstrap.mock.calls.length;
+    for (const cancel of [true, false]) {
+      const source = document.querySelector('.dock-rail-expanded [data-dock-card="environment"] .dock-card-title')!;
+      fireEvent.pointerDown(source, { button: 0, clientX: 1450, clientY: 146 });
+      fireEvent.pointerMove(window, { clientX: 350, clientY: 440 });
+      await waitFor(() => expect(document.querySelector(".dock-layout-preview .cw-document")).toBe(body));
+      fireEvent.resize(window);
+      await waitFor(() => expect(document.querySelector(".dock-rail-compact")).not.toBeNull());
+      expect(source.isConnected).toBe(false);
+      const beforeMove = dragPreview.snapshot();
+      fireEvent.pointerMove(window, { clientX: 352, clientY: 442 });
+      await waitFor(() => expect(dragPreview.snapshot()).not.toBe(beforeMove));
+      expect(dragPreview.snapshot()?.rect.x).toBe(328);
+      expect(document.body.classList.contains("dock-dragging")).toBe(true);
+      expect(document.querySelector(".dock-layout-preview .cw-document")).toBe(body);
+      if (cancel) fireEvent.keyDown(window, { key: "Escape" });
+      else fireEvent.pointerUp(window, { clientX: 352, clientY: 442 });
+      await waitFor(() => expect(dragPreview.snapshot()).toBeNull());
+      fireEvent.resize(window);
+      await waitFor(() => expect(body.closest(cancel ? ".cw-main-conversation" : ".cw-snap-surface .dock-conversation-window")).not.toBeNull());
+      if (cancel) await waitFor(() => expect(document.querySelector(".dock-rail-expanded")).not.toBeNull());
+      else expect(document.querySelector('.cw-snap-surface [data-dock-float] [data-dock-slot="environment"]')).not.toBeNull();
+      expect(body.querySelector("[contenteditable=true]")).toBe(editor);
+      expect(editor.textContent).toBe("工具卡吸附保留草稿");
+    }
+    expect(bootstrap).toHaveBeenCalledTimes(calls);
+  });
   it.each([false, true])("previews and docks the context viewer beside a full-height main conversation without recreating it (preview=%s)", async preview => {
     await mount(preview);
     const canvas = document.querySelector<HTMLElement>("[data-conversation-canvas]")!;

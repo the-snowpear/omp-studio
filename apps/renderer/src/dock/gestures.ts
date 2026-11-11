@@ -243,7 +243,9 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
     restoreWindowPreview(); restoreWindowPreview = () => {};
     if (finished) return;
     const snapshot = store.getSnapshot();
-    if (!source.isConnected || snapshot.scope !== scope || snapshot.preview !== previewMode) { cancel(); return; }
+    // A narrower window preview can replace the source card with a rail icon.
+    // The gesture belongs to the dock scope and hosts, not that title element.
+    if (snapshot.scope !== scope || snapshot.preview !== previewMode) { cancel(); return; }
     const manager = store.windowManager;
     const canvas = surface.querySelector<HTMLElement>("[data-conversation-canvas]");
     const box = canvas?.getBoundingClientRect();
