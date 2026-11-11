@@ -353,15 +353,15 @@
    用 transition 而不是 @keyframes：cqw 写进 keyframes 时 Chromium 可能
    回退按视口解析，终点恒为正、被钳 0，表现为完全不动；普通声明里的
    cqw 在 computed-value 阶段稳定按容器解析。transition 只挂在悬停态，
-   移开悬停基态无过渡，瞬时复位；延时 800ms 比 tooltip 的意图确认
-   （--tip-delay 500ms）再晚一拍，确认是真的在阅读这行才开始滚。 */
+   移开悬停基态无过渡，瞬时复位；延时比 tooltip 的意图确认（--tip-delay）
+   再晚一拍（--dur-slower），确认是真的在阅读这行才开始滚。 */
 .thread .t-scroll {
   display: inline-block;
   white-space: nowrap;
 }
 .thread-row:hover .t-scroll {
   transform: translateX(min(100cqw - 100% - 58px, 0px));
-  transition: transform 3s linear 800ms;
+  transition: transform var(--dur-marquee) linear calc(var(--tip-delay) + var(--dur-slower));
 }
 .thread-row.has-wait:hover .t-scroll {
   transform: translateX(min(100cqw - 100% - 18px, 0px));
@@ -460,7 +460,7 @@
   border: 1.4px solid var(--border-strong);
   border-top-color: var(--accent);
   border-radius: var(--r-full);
-  animation: omp-spin 0.8s linear infinite;
+  animation: omp-spin var(--loop-spin) linear infinite;
 }
 .thread .unread {
   min-width: 15px;
@@ -877,8 +877,8 @@
   transform: translateX(6px);
   /* 延迟按 --dur-slow 的比例写：盒子快长满（缓动前段很陡）时标签才开始，
      否则底栏还在被裁切时标签就已经出现在切口上。 */
-  transition: opacity 200ms var(--ease-out) calc(var(--dur-slow) * 0.5),
-    transform 200ms var(--ease-out) calc(var(--dur-slow) * 0.5);
+  transition: opacity var(--dur) var(--ease-out) calc(var(--dur-slow) * 0.5),
+    transform var(--dur) var(--ease-out) calc(var(--dur-slow) * 0.5);
 }
 .sb-user .u-status {
   font-size: var(--fs-11);
@@ -887,8 +887,8 @@
   gap: 5px;
   opacity: 0;
   transform: translateX(6px);
-  transition: opacity 200ms var(--ease-out) calc(var(--dur-slow) * 0.72),
-    transform 200ms var(--ease-out) calc(var(--dur-slow) * 0.72);
+  transition: opacity var(--dur) var(--ease-out) calc(var(--dur-slow) * 0.72),
+    transform var(--dur) var(--ease-out) calc(var(--dur-slow) * 0.72);
 }
 .sb-footer[data-open="true"] .u-name,
 .sb-footer[data-open="true"] .u-status { opacity: 1; transform: none; }
@@ -916,7 +916,7 @@
   margin-left: auto;
   color: var(--glyph-faint);
   opacity: 0;
-  transition: opacity 160ms var(--ease-out) calc(var(--dur-slow) * 0.88);
+  transition: opacity var(--dur) var(--ease-out) calc(var(--dur-slow) * 0.88);
 }
 .sb-footer[data-open="true"] .sb-chevron { opacity: 1; }
 .sb-footer:not([data-open="true"]) .sb-chevron { transition: opacity calc(var(--dur-slow) * 0.2) var(--ease-in); }
@@ -1221,9 +1221,9 @@
   overflow:hidden;
   transition:
     height calc(var(--dur-slow) + var(--dur-fast)) var(--ease-nav),
-    opacity var(--dur-slide) var(--ease-ios);
+    opacity var(--dur-slow) var(--ease-ios);
 }
-.sk-group-chevron { display:inline-flex; color:var(--text-faint); transition:transform 120ms ease-out; }
+.sk-group-chevron { display:inline-flex; color:var(--text-faint); transition:transform var(--dur-fast) var(--ease-out); }
 .sk-group:not(.is-collapsed) .sk-group-chevron { transform:rotate(90deg); }
 .sk-group-head:hover { color:var(--text); }
 .sk-group-label { font-size: calc(10.5px * var(--text-font-scale)); font-weight:600; letter-spacing:.06em; }
@@ -1232,11 +1232,12 @@
 .sk-group-items {
   --sk-h: 54px;
   --sk-gap: 6px;
-  --sk-stagger-step: 40ms;
-  --sk-leave-slide-d: var(--dur-slide);
+  /* 一次筛选的节拍，全部由节奏阶梯拼出来；SkillsDrawer.tsx 的 FILTER_SETTLE_MS
+     是同一组数相加（进场延迟 + 进场滑入 + 最大错峰）。 */
+  --sk-leave-slide-d: var(--dur-slow);
   --sk-leave-h-d: calc(var(--dur-slow) + var(--dur-fast));
   --sk-enter-h-d: calc(var(--dur-slow) + var(--dur));
-  --sk-enter-slide-d: calc(var(--dur-slow) + var(--dur-slide));
+  --sk-enter-slide-d: var(--dur-hero);
   --sk-leave-h-delay: var(--dur-tactile);
   --sk-enter-h-delay: var(--dur);
   --sk-enter-slide-delay: calc(var(--dur-slow) + var(--dur));
@@ -1270,14 +1271,14 @@
 .sk-slot-clip { min-height: 0; overflow: hidden; }
 .sk-slot .sk-card {
   transition:
-    background 220ms var(--ease-out),
+    background var(--dur) var(--ease),
     transform var(--sk-leave-slide-d) var(--ease-nav),
     opacity var(--sk-leave-slide-d) var(--ease-ios);
 }
 .sk-slot.is-leave {
   grid-template-rows: 0px;
   margin-bottom: 0;
-  transition-delay: calc(var(--sk-leave-h-delay) + (var(--sk-stagger, 0) * var(--sk-stagger-step)));
+  transition-delay: calc(var(--sk-leave-h-delay) + (var(--sk-stagger, 0) * var(--stagger)));
 }
 .sk-slot.is-leave .sk-card {
   transform: translate3d(-16px, 0, 0);
@@ -1286,7 +1287,7 @@
   transition:
     transform var(--sk-leave-slide-d) var(--ease-nav),
     opacity var(--sk-leave-slide-d) var(--ease-ios);
-  transition-delay: calc(var(--sk-stagger, 0) * var(--sk-stagger-step));
+  transition-delay: calc(var(--sk-stagger, 0) * var(--stagger));
 }
 .sk-slot.is-enter {
   grid-template-rows: 0px;
@@ -1304,7 +1305,7 @@
   transition:
     grid-template-rows var(--sk-enter-h-d) var(--ease-nav),
     margin-bottom var(--sk-enter-h-d) var(--ease-nav);
-  transition-delay: calc(var(--sk-enter-h-delay) + (var(--sk-stagger, 0) * var(--sk-stagger-step)));
+  transition-delay: calc(var(--sk-enter-h-delay) + (var(--sk-stagger, 0) * var(--stagger)));
 }
 .sk-slot.is-enter.is-in .sk-card {
   transform: translate3d(0, 0, 0);
@@ -1313,8 +1314,8 @@
     opacity var(--sk-enter-h-d) var(--ease-ios),
     transform var(--sk-enter-slide-d) var(--ease-ios);
   transition-delay:
-    calc(var(--sk-enter-h-delay) + (var(--sk-stagger, 0) * var(--sk-stagger-step))),
-    calc(var(--sk-enter-slide-delay) + (var(--sk-stagger, 0) * var(--sk-stagger-step)));
+    calc(var(--sk-enter-h-delay) + (var(--sk-stagger, 0) * var(--stagger))),
+    calc(var(--sk-enter-slide-delay) + (var(--sk-stagger, 0) * var(--stagger)));
 }
 
 .sk-card {
@@ -1323,7 +1324,7 @@
   position:relative; display:flex; align-items:center; width:100%; height:54px;
   padding:0 8px; gap:10px; border-radius:8px; overflow:hidden;
   background:transparent; border:0; color:var(--text); cursor:pointer; outline:0;
-  transition: background 220ms var(--ease-out);
+  transition: background var(--dur) var(--ease);
 }
 .sk-card[data-tone="purple"], .sk-fly[data-tone="purple"] { --sk-tone: var(--accent); --sk-tone-soft: var(--accent-soft); }
 .sk-card[data-tone="blue"], .sk-fly[data-tone="blue"] { --sk-tone: var(--blue); --sk-tone-soft: var(--blue-soft); }
@@ -1350,7 +1351,7 @@
   content:''; position:absolute; left:0; top:50%; width:2px; height:18px;
   transform:translateY(-50%) scaleY(0.35); opacity:0; transform-origin:center;
   border-radius:0 999px 999px 0; background:var(--sk-tone); pointer-events:none;
-  transition: transform 240ms var(--ease-spring), opacity 160ms var(--ease-out), background 180ms ease;
+  transition: transform var(--dur-slower) var(--ease-spring), opacity var(--dur) var(--ease-out), background var(--dur) var(--ease);
 }
 .sk-card.is-added::before,.sk-card.has-error::before {
   transform:translateY(-50%) scaleY(1); opacity:1;
@@ -1371,7 +1372,7 @@
     inset -1px 1px 0 color-mix(in srgb, #fff 42%, transparent),
     inset 1px -1px 0 color-mix(in srgb, var(--sk-tone) 16%, transparent),
     inset 0 0 0 1px color-mix(in srgb, var(--sk-tone) 18%, transparent);
-  transition: transform 280ms var(--ease-spring), background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+  transition: transform var(--dur-slower) var(--ease-spring), background var(--dur) var(--ease), color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 .sk-icon::after {
   content:""; position:absolute; inset:1px; border-radius:7px; pointer-events:none; z-index:0;
@@ -1411,7 +1412,7 @@
   align-items:center; justify-content:center; width:11px; height:11px; border-radius:999px;
   background:var(--sk-tone); color:#fff; box-shadow:0 0 0 2px var(--bg-inset);
   opacity:0; transform:scale(0.25); pointer-events:none;
-  transition: transform 280ms var(--ease-spring), opacity 160ms var(--ease-out), background 180ms ease;
+  transition: transform var(--dur-slower) var(--ease-spring), opacity var(--dur) var(--ease-out), background var(--dur) var(--ease);
 }
 .sk-card.is-added .sk-added-mark { opacity:1; transform:scale(1); }
 .sk-added-mark .icon { width:7px; height:7px; stroke-width:3.4; }
@@ -1420,7 +1421,7 @@
   align-items:center; justify-content:center; width:11px; height:11px; border-radius:999px;
   background:var(--text-3); color:#fff; box-shadow:0 0 0 2px var(--bg-inset);
   opacity:0; transform:scale(0.25); pointer-events:none;
-  transition: transform 280ms var(--ease-spring), opacity 160ms var(--ease-out), background 180ms ease;
+  transition: transform var(--dur-slower) var(--ease-spring), opacity var(--dur) var(--ease-out), background var(--dur) var(--ease);
 }
 .sk-card.is-used .sk-used-mark { opacity:1; transform:scale(1); }
 .sk-used-mark .icon { width:7px; height:7px; stroke-width:3.4; }
@@ -1446,9 +1447,9 @@
   max-width:0; padding:0;
   overflow:hidden; background:transparent;
   pointer-events:none;
-  transition: max-width 200ms var(--ease-out),
-              padding 200ms var(--ease-out),
-              background 160ms ease;
+  transition: max-width var(--dur) var(--ease-out),
+              padding var(--dur) var(--ease-out),
+              background var(--dur) var(--ease);
 }
 .sk-card:hover .sk-action-zone,
 .sk-card:focus-visible .sk-action-zone,
@@ -1458,7 +1459,7 @@
   padding:0 6px 0 28px;
   background:linear-gradient(to right,transparent 0%,color-mix(in srgb,var(--bg-inset) 70%,var(--surface) 30%) 26px);
 }
-.sk-actions { display:flex; align-items:center; gap:2px; transform:translateX(12px); opacity:0; transition:transform 200ms var(--ease-out),opacity 160ms ease; }
+.sk-actions { display:flex; align-items:center; gap:2px; transform:translateX(12px); opacity:0; transition:transform var(--dur) var(--ease-out),opacity var(--dur) var(--ease); }
 .sk-card:hover .sk-actions,
 .sk-card:focus-visible .sk-actions,
 .sk-card:has(:focus-visible) .sk-actions,
@@ -1477,8 +1478,7 @@
 .sk-actions .icon-btn { width:22px; height:22px; color:var(--text-3); }.sk-actions .icon-btn:hover { background:var(--surface-hover); color:var(--text); }
 .sk-persistent { display:inline-flex; max-width:42px; overflow:hidden; text-overflow:ellipsis; padding-right:3px; color:var(--sk-tone); font-size: calc(10px * var(--text-font-scale)); letter-spacing:.04em; white-space:nowrap; }
 .persistent-retry { opacity:1!important; pointer-events:auto!important; color:var(--red)!important; background:var(--red-soft)!important; }
-.sk-card.is-retrying .sk-icon .icon { animation:sk-row-spin .9s linear infinite; }
-@keyframes sk-row-spin { to { transform:rotate(360deg); } }
+.sk-card.is-retrying .sk-icon .icon { animation:omp-spin var(--loop-spin) linear infinite; }
 
 /* 悬停简介：从卡片右侧浮入工作台，不被抽屉 overflow 裁切 */
 .sk-fly {
@@ -1494,17 +1494,18 @@
   transform-origin: left center;
   opacity: 0;
   transform: translate3d(-6px, 0, 0);
+  /* 离开：SkillsDrawer.tsx 的 FLY_EXIT_MS 等它播完再卸载。 */
   transition:
-    opacity var(--dur-exit) var(--ease-in),
-    transform var(--dur-exit) var(--ease-in);
+    opacity var(--dur-fast) var(--ease-in),
+    transform var(--dur-fast) var(--ease-in);
 }
 .sk-fly.is-open {
   pointer-events: auto;
   opacity: 1;
   transform: translate3d(0, 0, 0);
   transition:
-    opacity var(--dur-slow) var(--ease-ios),
-    transform var(--dur-slow) var(--ease-ios);
+    opacity var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out);
 }
 .sk-fly[data-side="left"] {
   transform-origin: right center;
@@ -1623,24 +1624,4 @@
 .sd-foot-link .kbd {
   font-family: var(--font-mono); font-size: calc(10px * var(--text-font-scale));
   color: var(--text-faint);
-}
-
-/* 减少动效 */
-@media (prefers-reduced-motion: reduce) {
-  .thread .t-spin { animation: none; }
-  .sb-drawer-mask { transition: opacity var(--dur-fast) linear, visibility var(--dur-fast) linear; transform: none; }
-  .sb-drawer-mask.open { transform: none; }
-  .new-convo-btn:active, .skills-btn:active, .add-btn:active { transform: none; }
-  .sk-card, .sk-card::before, .sk-icon, .sk-added-mark, .sk-used-mark { transition: none; }
-  .sk-card.is-added .sk-icon { transform: none; }
-  .sk-slot, .sk-slot.is-leave, .sk-slot.is-enter, .sk-slot.is-enter.is-in,
-  .sk-slot.is-leave .sk-card, .sk-slot.is-enter .sk-card, .sk-slot.is-enter.is-in .sk-card,
-  .sk-group-head, .sk-group.is-leave .sk-group-head, .sk-group.is-enter.is-in .sk-group-head {
-    transition: none;
-  }
-  .sk-fly, .sk-fly.is-open, .sk-fly[data-side="left"], .sk-fly[data-side="left"].is-open {
-    animation: none;
-    transition: opacity var(--dur-fast) linear;
-    transform: none;
-  }
 }

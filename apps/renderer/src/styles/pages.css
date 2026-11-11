@@ -420,17 +420,9 @@ img.profile-edit-avatar-img { display: block; }
 .tk-chart .tk-yt { font-family: var(--font-mono); font-size: calc(9px * var(--text-font-scale)); fill: var(--text-faint); pointer-events: none; }
 .tk-chart .tk-xt { font-size: calc(9.5px * var(--text-font-scale)); fill: var(--text-faint); pointer-events: none; }
 .tk-chart .tk-xt.in,
-.tk-chart .tk-yt.in { animation: tk-axis-in var(--dur-chart-axis) var(--ease) both; }
+.tk-chart .tk-yt.in { animation: omp-fade-in var(--dur) var(--ease) both; }
 .tk-chart .tk-xt.out,
-.tk-chart .tk-yt.out { animation: tk-axis-out var(--dur-chart-axis) var(--ease) both; }
-@keyframes tk-axis-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes tk-axis-out { from { opacity: 1; } to { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .tk-chart .tk-xt.in,
-  .tk-chart .tk-yt.in,
-  .tk-chart .tk-xt.out,
-  .tk-chart .tk-yt.out { animation: none; }
-}
+.tk-chart .tk-yt.out { animation: omp-fade-out var(--dur) var(--ease) both; }
 /* 曲线：基线 1.6px，曲线段需要 round join+cap 才不会出现尖角断开感。 */
 .tk-chart .tk-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .tk-chart .tk-line.m0 { stroke: var(--accent); }
@@ -804,9 +796,9 @@ img.profile-edit-avatar-img { display: block; }
   margin-inline: -20px;
 }
 
-/* 叠层交叉淡入：新旧面板同时在场，透明度做溶解，短距 translateX 只提示方向。
-   进入用 --ease-nav 长尾缓降；离开更短，后半段由新面板主导。
-   时长须与 TAB_PANE_MS 对齐。 */
+/* 叠层交叉淡入：新旧面板同时在场，透明度做溶解，短距横移只提示方向。
+   动画本身（.tab-pane-enter-* / -leave-*）在 styles/motion.css 的 Surfaces
+   一节，与 Agent Hub 换面、Deck 换题共用；这里只管叠放。 */
 .tab-pane {
   position: absolute;
   inset: 0;
@@ -821,39 +813,10 @@ img.profile-edit-avatar-img { display: block; }
   z-index: 1;
   backface-visibility: hidden;
 }
-.tab-pane-enter-fwd {
-  animation: tab-pane-enter-fwd 320ms var(--ease-nav) both;
-}
-.tab-pane-enter-back {
-  animation: tab-pane-enter-back 320ms var(--ease-nav) both;
-}
 .tab-pane-leave-fwd,
 .tab-pane-leave-back {
   z-index: 0;
-  pointer-events: none;
   backface-visibility: hidden;
-}
-.tab-pane-leave-fwd {
-  animation: tab-pane-leave-fwd 240ms var(--ease-nav) both;
-}
-.tab-pane-leave-back {
-  animation: tab-pane-leave-back 240ms var(--ease-nav) both;
-}
-@keyframes tab-pane-enter-fwd {
-  from { opacity: 0; transform: translate3d(16px, 0, 0); }
-  to   { opacity: 1; transform: translate3d(0, 0, 0); }
-}
-@keyframes tab-pane-leave-fwd {
-  from { opacity: 1; transform: translate3d(0, 0, 0); }
-  to   { opacity: 0; transform: translate3d(-8px, 0, 0); }
-}
-@keyframes tab-pane-enter-back {
-  from { opacity: 0; transform: translate3d(-16px, 0, 0); }
-  to   { opacity: 1; transform: translate3d(0, 0, 0); }
-}
-@keyframes tab-pane-leave-back {
-  from { opacity: 1; transform: translate3d(0, 0, 0); }
-  to   { opacity: 0; transform: translate3d(8px, 0, 0); }
 }
 
 /* Tab-level summary row — sits between tabs and the card list.
@@ -1361,9 +1324,8 @@ details.diag-advanced .da-body { padding: 0 var(--sp-14) var(--sp-12); }
 .stats-spinner {
   width: 20px; height: 20px; border-radius: 50%;
   border: 2px solid var(--border); border-top-color: var(--accent);
-  animation: stats-spin .8s linear infinite;
+  animation: omp-spin var(--loop-spin) linear infinite;
 }
-@keyframes stats-spin { to { transform: rotate(360deg); } }
 
 .stats-fallback {
   flex: 1 1 auto; min-height: 0;

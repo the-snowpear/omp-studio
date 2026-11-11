@@ -75,6 +75,27 @@ function drag(element: Element, cancel = false) {
   else fireEvent.pointerUp(window, { clientX: 550, clientY: 200 });
 }
 describe("conversation windows", () => {
+  it("keeps shared sidebar, right and bottom sizes locked for keyboard and double-click resizing", async () => {
+    await mount(true);
+    fireEvent.click(document.querySelector('.topbar button[aria-controls="sidePanel"]')!);
+    const selectors = [".cw-shared-sidebar #sbResizer", ".cw-shared-right #spResizer", ".cw-shared-bottom #bpResizer"];
+    await waitFor(() => expect(document.querySelector(".cw-shared-right .side-panel")?.hasAttribute("inert")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    const lock = screen.getByRole("menuitemcheckbox", { name: "Lock layout" });
+    fireEvent.click(lock);
+    expect(lock.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    for (const selector of selectors) {
+      const control = document.querySelector(selector)!;
+      expect(control).not.toBeNull();
+      const before = control.getAttribute("aria-valuenow");
+      fireEvent.keyDown(control, { key: "End" });
+      expect(control.getAttribute("aria-valuenow")).toBe(before);
+      fireEvent.doubleClick(control);
+      expect(control.getAttribute("aria-valuenow")).toBe(before);
+    }
+  });
+
   it.each([false, true])("opens two dragged conversations with animations enabled and preserves the original draft (preview=%s)", async preview => {
     const originalStyle = getComputedStyle;
     vi.stubGlobal("getComputedStyle", (element: Element) => {

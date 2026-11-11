@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Icon, type IconName } from "./icons";
-import { transitionMs } from "./motionClock";
+import { INSTANT_MS, MOTION_MS, MOTION_SLACK_MS, transitionMs } from "./motion";
 import { useI18n } from "./i18n";
 import { avatarInitial } from "./settings/operatorProfile";
 import { usePreviewMode } from "./preview/PreviewContext";
@@ -107,14 +107,14 @@ export function AppNavRail({
       return;
     }
     const rail = railRef.current;
-    const duration = rail === null ? 250 : transitionMs(rail);
+    const duration = rail === null ? MOTION_MS.slow : transitionMs(rail);
     /* Reduced-motion tiers collapse the duration to ~0: nothing to follow, just
        re-measure once so the panels land on the new layout. */
-    if (duration < 20) {
+    if (duration < INSTANT_MS) {
       onLayoutShift?.();
       return;
     }
-    const total = duration + 80;
+    const total = duration + MOTION_SLACK_MS * 2;
     const start = performance.now();
     let frame = requestAnimationFrame(function step() {
       measureLine();

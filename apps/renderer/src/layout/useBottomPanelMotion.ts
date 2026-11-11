@@ -1,24 +1,15 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { MOTION_EASE, MOTION_MS, motionReduced } from "../motion";
 
 /** 底栏这一刻该按什么结构渲染（`visible` = 整条在屏，`expanded` = 正文展开）。 */
 export type BottomPanelPresentation = { readonly visible: boolean; readonly expanded: boolean };
 
 /** 半像素以内的高低差做不出看得见的动画，直接换。 */
 const MIN_TRAVEL = 0.5;
-const FALLBACK_DURATION = 250;
-const FALLBACK_EASING = "cubic-bezier(0.16, 0.84, 0.44, 1)";
 
-/** 时长、曲线取 CSS token；减少动效（L1 档，含系统偏好）直接不做动画，和侧栏视图切换同一判据。 */
+/** 一块区域改变大小：--dur-slow · --ease-out（styles/motion.css 的 region）。减少动效时不做动画。 */
 function motionTokens(): { duration: number; easing: string } | null {
-  const root = document.documentElement;
-  if (root.matches('[data-perf-tier~="L1"]')) return null;
-  if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return null;
-  const style = getComputedStyle(root);
-  const raw = style.getPropertyValue("--dur-slow").trim();
-  const value = Number.parseFloat(raw);
-  const duration = Number.isFinite(value) ? (raw.endsWith("ms") ? value : value * 1000) : FALLBACK_DURATION;
-  if (!(duration > 0)) return null;
-  return { duration, easing: style.getPropertyValue("--ease-out").trim() || FALLBACK_EASING };
+  return motionReduced() ? null : { duration: MOTION_MS.slow, easing: MOTION_EASE.out };
 }
 
 /**

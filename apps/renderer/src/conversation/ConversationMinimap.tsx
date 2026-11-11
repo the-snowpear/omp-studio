@@ -16,6 +16,7 @@ import { Icon } from "../icons";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { compactMinimapPreview } from "./compactSummary";
+import { MOTION_MS } from "../motion";
 import { batchSummary, toolKind, type ThinkView } from "./toolMeta";
 import { tailStreaming, timelineStructureToken } from "./conversationViewModel";
 import type { AssistantSegment, TimelineRow, ToolView } from "./conversationViewModel";
@@ -29,7 +30,7 @@ const MIN_VIEWPORT_H = 18;
 /** 悬浮预览延迟隐藏（ms），期间可移入弹层。 */
 const PREVIEW_HIDE_DELAY_MS = 250;
 /** 跳转目标行的高亮时长（ms）。 */
-const FLASH_MS = 900;
+const FLASH_MS = MOTION_MS.flash;
 /** 圆点位置全量重测的最小间隔（ms）；见 `requestMeasure`。 */
 export const MEASURE_INTERVAL_MS = 200;
 /**

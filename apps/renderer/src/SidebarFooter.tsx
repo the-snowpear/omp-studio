@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
-import { transitionDelayMs, transitionMs } from "./motionClock";
+import { MOTION_MS, MOTION_SLACK_MS, transitionDelayMs, transitionMs } from "./motion";
 import { avatarInitial } from "./settings/operatorProfile";
 
 /**
@@ -47,7 +47,7 @@ export function SidebarFooter({
     if (railCollapsed || !mounted) return;
     /* 等高度收完（含折回前的 delay）再卸载；减动效档读到的时长是 0，直接卸。 */
     const element = footer.current;
-    const hold = (element === null ? 250 : transitionMs(element) + transitionDelayMs(element)) + 40;
+    const hold = (element === null ? MOTION_MS.slow : transitionMs(element) + transitionDelayMs(element)) + MOTION_SLACK_MS;
     const timer = window.setTimeout(() => setMounted(false), hold);
     return () => window.clearTimeout(timer);
   }, [railCollapsed, mounted, footer]);

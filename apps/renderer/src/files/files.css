@@ -26,18 +26,17 @@
 .icon-btn.file-tool{width:26px;height:26px;border-radius:var(--r-4);color:var(--text-3)}
 .icon-btn.file-tool:hover:not(:disabled){color:var(--text);background:var(--surface-hover)}
 .icon-btn.file-tool.is-active{color:var(--accent);background:var(--accent-soft)}
-.file-save{display:inline-flex;align-items:center;gap:5px;height:24px;margin:0 4px;padding:0 10px;border-radius:var(--r-4);font-size:var(--fs-11);font-weight:600;color:#fff;background:var(--accent);box-shadow:0 1px 2px color-mix(in srgb,var(--accent) 35%,transparent);animation:file-pop .16s ease-out}
+.file-save{display:inline-flex;align-items:center;gap:5px;height:24px;margin:0 4px;padding:0 10px;border-radius:var(--r-4);font-size:var(--fs-11);font-weight:600;color:#fff;background:var(--accent);box-shadow:0 1px 2px color-mix(in srgb,var(--accent) 35%,transparent);animation:var(--motion-pop)}
 .file-save:hover:not(:disabled){filter:brightness(1.08)}
 .file-save:disabled{opacity:.6;cursor:default}
 .file-save .icon{width:12px;height:12px}
-@keyframes file-pop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}
 
 /* File type badge (header, empty states) */
 .file-badge{--tone:var(--text-3);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;min-width:22px;height:18px;padding:0 4px;border-radius:5px;font:700 9px/1 var(--font-mono);letter-spacing:.02em;color:var(--tone);background:color-mix(in srgb,var(--tone) 12%,transparent);border:1px solid color-mix(in srgb,var(--tone) 22%,transparent)}
 .file-badge.tone-blue{--tone:var(--blue)}.file-badge.tone-green{--tone:var(--green)}.file-badge.tone-amber{--tone:var(--amber)}.file-badge.tone-red{--tone:var(--red)}.file-badge.tone-accent{--tone:var(--accent)}.file-badge.tone-gray{--tone:var(--text-3)}
 .file-badge.is-large{min-width:52px;height:52px;padding:0 10px;border-radius:14px;font-size:14px}
 .file-badge.is-large .icon{width:22px;height:22px}
-.file-badge.is-loading{animation:file-breathe 1.4s ease-in-out infinite}
+.file-badge.is-loading{animation:file-breathe var(--loop-pulse) var(--ease-loop) infinite}
 @keyframes file-breathe{50%{opacity:.45;transform:scale(.96)}}
 
 /* ⋯ menu extras */
@@ -84,9 +83,8 @@
 .file-banner.is-error{--tone:var(--red)}
 .file-banner-actions{display:inline-flex;gap:6px;align-items:center;flex-shrink:0}
 .file-error{margin:0;padding:10px 14px;color:var(--red);font-size:var(--fs-12)}
-.file-toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;font-size:var(--fs-11);color:var(--text);background:var(--surface);border:1px solid var(--border-strong);box-shadow:0 6px 24px rgba(0,0,0,.14);pointer-events:none;z-index:5;animation:file-toast .18s ease-out}
+.file-toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;font-size:var(--fs-11);color:var(--text);background:var(--surface);border:1px solid var(--border-strong);box-shadow:0 6px 24px rgba(0,0,0,.14);pointer-events:none;z-index:5;animation:var(--motion-reveal)}
 .file-toast .icon{color:var(--green)}
-@keyframes file-toast{from{opacity:0;transform:translate(-50%,6px)}}
 
 /* ---------- Content ---------- */
 .file-content{position:relative;display:flex;flex:1;min-height:0;min-width:0;overflow:hidden;background:var(--code-bg,var(--surface))}
@@ -105,7 +103,7 @@
 .file-text-editor .cm-scroller{overflow:auto;line-height:1.65}
 .file-text-editor .cm-gutters{border-right:0;padding-right:2px}
 .file-text-editor .cm-lineNumbers .cm-gutterElement{min-width:32px;padding:0 6px 0 12px}
-.file-text-editor .cm-foldGutter .cm-gutterElement{padding:0 2px;color:var(--text-faint);opacity:0;transition:opacity .12s}
+.file-text-editor .cm-foldGutter .cm-gutterElement{padding:0 2px;color:var(--text-faint);opacity:0;transition:opacity var(--dur-fast) var(--ease)}
 .file-text-editor .cm-gutters:hover .cm-foldGutter .cm-gutterElement{opacity:1}
 .cm-git-gutter{width:4px}
 .cm-git-gutter .cm-gutterElement{padding:0!important;position:relative}
@@ -145,7 +143,7 @@
 /* Image / media */
 .file-image-canvas{flex:1;min-height:0;overflow:auto;display:flex;justify-content:safe center;align-items:safe center;padding:16px;cursor:grab;background:var(--surface-2) repeating-conic-gradient(color-mix(in srgb,var(--text) 5%,transparent) 0% 25%,transparent 0% 50%) 0/18px 18px}
 .file-image-canvas:active{cursor:grabbing}
-.file-image-canvas img{object-fit:contain;flex-shrink:0;border-radius:2px;box-shadow:0 2px 14px rgba(0,0,0,.12);transition:transform .18s ease}
+.file-image-canvas img{object-fit:contain;flex-shrink:0;border-radius:2px;box-shadow:0 2px 14px rgba(0,0,0,.12);transition:transform var(--dur) var(--ease)}
 .file-media{display:flex;flex:1;min-height:0;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:12px;background:#0d0e10}
 .file-media.is-audio{background:var(--surface)}
 .file-media video{width:100%;height:100%;min-height:0;object-fit:contain}

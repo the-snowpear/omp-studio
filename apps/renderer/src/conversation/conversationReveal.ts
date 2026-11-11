@@ -1,6 +1,7 @@
 import { scrollOffsetToCenter } from "./ConversationMinimap";
+import { MOTION_MS } from "../motion";
 
-const FLASH_MS = 900;
+const FLASH_MS = MOTION_MS.flash;
 export const CONVERSATION_REVEAL = "omp-conversation-reveal";
 export type ConversationRevealRequest = {
   toolCallId?: string;

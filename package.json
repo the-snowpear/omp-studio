@@ -42,6 +42,7 @@
     "check:fast": "node scripts/check.mjs --fast",
     "check:build": "node scripts/check.mjs --production",
     "check:selects": "node scripts/check-renderer-selects.mjs",
+    "check:motion": "node scripts/check-renderer-motion.mjs",
     "runtime:verify-source": "node scripts/verify-omp-source.mjs",
     "omp:install-deps": "node scripts/install-omp-deps.mjs",
     "omp:keys": "node scripts/runtime-signing-keys.mjs",

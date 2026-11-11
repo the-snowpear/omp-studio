@@ -54,11 +54,9 @@
 .agent-status.is-waiting { color: var(--amber); }
 .agent-status.is-failed { color: var(--red); }
 /* Keep the signal local to the dot: labels and row geometry stay still. */
-@media (prefers-reduced-motion: no-preference) {
-  :is(.agent-roster, .agent-detail)[data-live] .agent-status:is(.is-running, .is-starting, .is-reviving)::before,
-  .dock-status-summary:not([data-stale]) .dock-status-count[data-status="running"] > i {
-    animation: agent-running-breathe 2.4s ease-in-out infinite;
-  }
+:is(.agent-roster, .agent-detail)[data-live] .agent-status:is(.is-running, .is-starting, .is-reviving)::before,
+.dock-status-summary:not([data-stale]) .dock-status-count[data-status="running"] > i {
+  animation: agent-running-breathe var(--loop-drift) var(--ease-loop) infinite;
 }
 @keyframes agent-running-breathe {
   0%, 100% { transform: scale(.8); }

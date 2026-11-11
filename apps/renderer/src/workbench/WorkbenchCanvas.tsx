@@ -106,7 +106,8 @@ import { previewTailInterrupted } from "../preview/conversationFixtures";
 import { BtwPanel } from "../btw/BtwPanel";
 import { type BtwSessionApi } from "../btw/useBtwSession";
 import { InteractionDeck } from "../InteractionDeck";
-import { ASK_GENIE_HOLD_MS, isAskDeckInteraction, prefersReducedMotion } from "../deck/askGenie";
+import { ASK_GENIE_HOLD_MS, isAskDeckInteraction } from "../deck/askGenie";
+import { motionReduced } from "../motion";
 import { interactionDeckDisabled, planReviewDeckDisabled, usableCapabilityManifest } from "../deck/interactionGate";
 import { PlanReviewDeck, PlanViewDialog } from "../deck/PlanCard";
 import { type PlanActionDetail, type PlanActionId } from "../deck/types";
@@ -468,7 +469,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       return;
     }
     if (lastAskDeckRef.current === null) return;
-    if (prefersReducedMotion()) {
+    if (motionReduced()) {
       lastAskDeckRef.current = null;
       setAskDeckLeaving(false);
       return;

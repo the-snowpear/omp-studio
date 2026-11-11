@@ -107,7 +107,7 @@
 
 /* One soft accent flash when the ledger grows: the count is a live ticker,
    not a static label, and this is the only motion in the panel. */
-.dock-metric.is-tick { animation: dock-metric-tick 560ms var(--ease-out); }
+.dock-metric.is-tick { animation: dock-metric-tick var(--dur-hero) var(--ease-out); }
 @keyframes dock-metric-tick {
   0% { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
   100% { background: var(--surface-2); border-color: var(--border); color: var(--text-3); }

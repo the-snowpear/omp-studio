@@ -2,6 +2,7 @@ import { useId, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { Icon } from "../icons";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { fileTypeOf, iconNameFor, isSensitive } from "../explorer-types";
+import { motionReduced } from "../motion";
 import {
   groupTodosByPhase,
   isTodoPhaseComplete,
@@ -14,9 +15,6 @@ import {
   type TurnFileChange,
 } from "./toolMeta";
 
-function reducedMotion(): boolean {
-  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
 
 /** Identity of the todo snapshot; a new array of the same tasks must not retrigger scroll. */
 export function todoListEpoch(todos: readonly TodoTask[]): string {
@@ -33,7 +31,7 @@ export function scrollCurrentTodoIntoList(list: HTMLElement, row: HTMLElement): 
   const top = item.top - port.top + list.scrollTop - Math.max(0, (view - rowSize) / 2);
   const next = Math.max(0, top);
   if (typeof list.scrollTo === "function") {
-    list.scrollTo({ top: next, behavior: reducedMotion() ? "auto" : "smooth" });
+    list.scrollTo({ top: next, behavior: motionReduced() ? "auto" : "smooth" });
     return;
   }
   list.scrollTop = next;

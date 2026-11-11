@@ -16,10 +16,12 @@
    re-derive Main's grading and could contradict it.
 
    Rules of engagement:
-   - Never `animation: none` on everything: spinners, progress bars and running
-     dots are status signals. Like the existing `prefers-reduced-motion` block in
-     base.css, L1 collapses the duration to ~0 with one iteration, which holds
-     the final painted frame instead of making the control disappear.
+   - L1 is reduced motion, and its rules are not here: the one reduced-motion
+     policy for the app is the last section of styles/motion.css, keyed off
+     this same attribute. It never uses `animation: none` on everything —
+     spinners, progress bars and running dots are status signals — it collapses
+     durations to ~0 with one iteration, which holds the final painted frame
+     instead of making the control disappear.
    - `box-shadow: none` is a safe L2 lever because focus rings are drawn with
      `outline` (base.css). The one exception is `.composer:focus-within`, which
      paints its focus state with box-shadow and suppresses the textarea ring —
@@ -29,49 +31,6 @@
      L2 machine is still L2: the layers are cumulative, not exclusive.
    - No `will-change`, no JS observers: everything here is attribute + selector.
    ========================================================================== */
-
-/* ---------- L1: reduced motion -------------------------------------------- */
-:root[data-perf-tier~="L1"] *,
-:root[data-perf-tier~="L1"] *::before,
-:root[data-perf-tier~="L1"] *::after {
-  animation-duration: 0.01ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
-  scroll-behavior: auto !important;
-}
-
-/* Pulse carries "running" through opacity alone; a held frame can land at 0.35
-   and read as disabled, so pin it opaque (same reasoning as base.css). */
-:root[data-perf-tier~="L1"] .dot.pulse {
-  opacity: 1 !important;
-}
-
-/* Skeleton: a frozen mid-sweep gradient looks like a rendering artifact. */
-:root[data-perf-tier~="L1"] .skeleton {
-  background: var(--surface-3) !important;
-}
-:root[data-perf-tier~="L1"] .skeleton::after {
-  display: none !important;
-}
-
-/* Indeterminate progress: the travelling bar is the only cue that something is
-   happening. Keep a visible static block instead of a frozen sliver. */
-:root[data-perf-tier~="L1"] .progress-fill::after,
-:root[data-perf-tier~="L1"] .tc-progress .jw-bar-track.indeterminate .jw-bar-fill {
-  animation: none !important;
-}
-:root[data-perf-tier~="L1"] .tc-progress .jw-bar-track.indeterminate .jw-bar-fill {
-  left: 0 !important;
-  width: 100% !important;
-  opacity: 0.45;
-}
-/* The browser's load bar and spinners hold a static, visible frame instead of a sliver. */
-:root[data-perf-tier~="L1"] .mb-loadbar.is-loading::after {
-  animation: none !important;
-  transform: none !important;
-  width: 100% !important;
-  opacity: 0.45;
-}
 
 /* ---------- L2: software compositing or low-end hardware ------------------- */
 /* Software compositing pays for every translucent blur in the rasterizer and

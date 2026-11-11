@@ -12,8 +12,8 @@
   font-size: var(--fs-11);
   white-space: nowrap;
   transition:
-    background 140ms,
-    border-color 140ms;
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 .tt-entry:hover {
   background: var(--surface-hover);
@@ -129,11 +129,11 @@
   box-shadow: 0 24px 80px #0003;
 }
 .tt-dialog[open] {
-  animation: tt-dialog-in 180ms ease-out;
+  animation: var(--motion-sheet);
 }
 .tt-dialog::backdrop {
   background: #10101780;
-  animation: tt-fade-in 160ms ease-out;
+  animation: var(--motion-fade);
 }
 .tt-dialog-head {
   display: flex;
@@ -372,24 +372,6 @@
 .tt-file-row.delete > span {
   color: var(--red);
 }
-@keyframes tt-dialog-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.99);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@keyframes tt-fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
 @media (max-width: 600px) {
   .tt-dialog-head,
   .tt-dialog-body {
@@ -409,14 +391,5 @@
   }
   .tt-storage {
     flex-wrap: wrap;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .tt-dialog[open],
-  .tt-dialog::backdrop {
-    animation: none;
-  }
-  .tt-entry {
-    transition: none;
   }
 }

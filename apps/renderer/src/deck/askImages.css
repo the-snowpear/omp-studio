@@ -76,4 +76,3 @@
 .ask-custom-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ask-field :is(.ask-image-add, .cm-chip-x, .ask-custom-toggle):disabled { opacity: 0.5; cursor: not-allowed; }
 .ask-image-error { margin: 0; padding: 0 var(--sp-12) var(--sp-10); color: var(--red); font-size: var(--fs-12); overflow-wrap: anywhere; }
-@media (prefers-reduced-motion: reduce) { .ask-field, .ask-image-add { transition: none; } }

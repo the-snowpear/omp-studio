@@ -116,7 +116,7 @@
   grid-template-columns: minmax(0, 58fr) minmax(0, 42fr);
   gap: var(--sp-16);
   align-items: start;
-  transition: grid-template-columns 320ms var(--ease-nav);
+  transition: grid-template-columns var(--dur-slower) var(--ease-nav);
 }
 
 .hub-page.is-chat-preview {
@@ -177,24 +177,13 @@
 .hub-face-enter-back {
   z-index: 1;
 }
+/* 换面的动画（.hub-face-enter-* / -leave-*）与标签页面板是同一组，
+   在 styles/motion.css 的 Surfaces 一节。 */
 .hub-face-leave-fwd,
 .hub-face-leave-back {
   position: absolute;
   inset: 0;
   z-index: 0;
-  pointer-events: none;
-}
-.hub-face-enter-fwd {
-  animation: tab-pane-enter-fwd 320ms var(--ease-nav) both;
-}
-.hub-face-enter-back {
-  animation: tab-pane-enter-back 320ms var(--ease-nav) both;
-}
-.hub-face-leave-fwd {
-  animation: tab-pane-leave-fwd 240ms var(--ease-nav) both;
-}
-.hub-face-leave-back {
-  animation: tab-pane-leave-back 240ms var(--ease-nav) both;
 }
 .hub-chat-bar {
   display: flex;
@@ -218,7 +207,7 @@
 .hub-sd.idle    { background: var(--blue); }
 .hub-sd.parked  { background: var(--glyph-faint); }
 .hub-sd.aborted { background: var(--red); }
-.hub-sd.pulse   { animation: omp-pulse 1.8s var(--ease) infinite; }
+.hub-sd.pulse   { animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
 
 /* ---------- Activity pill：整粒状态色胶囊（软底 + 状态色文字，取消左缘色条） ---------- */
 .hub-act {
@@ -728,10 +717,6 @@
   .hub-main .hm-actions { width: 100%; }
 }
 
-/* ---------- running 状态呼吸（reduced-motion 下 base.css 统一收敛） ---------- */
-.hub-card .hub-sd.pulse,
-.hub-node .hub-sd.pulse,
-.hub-tg-head .hub-sd.pulse { animation-duration: 1.8s; }
 
 /* ============================================================
    增量（2026-08-11 全新实现补充）

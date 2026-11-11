@@ -30,15 +30,15 @@
 .env-add { color: var(--git-added); }
 .env-del { color: var(--git-deleted); }
 .env-meter { position: absolute; inset: auto 0 0; display: flex; height: 2px; overflow: hidden; pointer-events: none; }
-.env-meter > i { min-width: 0; transition: flex-grow 200ms var(--ease-out); }
+.env-meter > i { min-width: 0; transition: flex-grow var(--dur) var(--ease-out); }
 .env-meter .is-add { background: var(--git-added); }
 .env-meter .is-del { background: var(--git-deleted); }
 
-.env-hero.is-action, .env-row.is-action { cursor: pointer; transition: background 120ms var(--ease); }
+.env-hero.is-action, .env-row.is-action { cursor: pointer; transition: background var(--dur-fast) var(--ease); }
 .env-hero.is-action:hover, .env-row.is-action:hover { background: var(--surface-hover); }
 .env-hero.is-action:active, .env-row.is-action:active { background: var(--surface-active); }
 .env-hero:focus-visible, .env-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.env-skeleton { width: 56px; height: 9px; border-radius: var(--r-full); background: var(--surface-active); animation: env-breathe 1.5s var(--ease) infinite; }
+.env-skeleton { width: 56px; height: 9px; border-radius: var(--r-full); background: var(--surface-active); animation: env-breathe var(--loop-pulse) var(--ease-loop) infinite; }
 @keyframes env-breathe { 0%, 100% { opacity: 0.4; } 85% { opacity: 0.9; } }
 
 /* Content-sized card; retain the dock header and its controls. */
@@ -61,12 +61,12 @@
 .env-dash-hero > .btn { flex: none; gap: 6px; }
 .env-dash-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .env-tile { position: relative; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box; min-width: 0; min-height: 112px; padding: 14px 16px 16px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface); color: inherit; font: inherit; text-align: left; }
-.env-tile.is-action { cursor: pointer; transition: border-color 120ms var(--ease), background 120ms var(--ease); }
+.env-tile.is-action { cursor: pointer; transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
 .env-tile.is-action:hover { border-color: var(--border-strong); background: color-mix(in srgb, var(--surface-hover) 60%, var(--surface)); }
 .env-tile.is-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .env-tile-label { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: var(--fs-11); font-weight: var(--fw-semibold); letter-spacing: 0.02em; }
 .env-tile-label .icon { width: 13px; height: 13px; }
-.env-tile-label .env-tile-go { margin-left: auto; opacity: 0; transition: opacity 120ms var(--ease), transform 160ms var(--ease-out); }
+.env-tile-label .env-tile-go { margin-left: auto; opacity: 0; transition: opacity var(--dur-fast) var(--ease), transform var(--dur) var(--ease-out); }
 .env-tile.is-action:is(:hover, :focus-visible) .env-tile-go { opacity: 1; transform: translateX(2px); }
 .env-tile[data-state="connecting"] .env-tile-label .icon { color: var(--amber); }
 .env-tile[data-state="disconnected"] .env-tile-label .icon { color: var(--red); }
@@ -76,7 +76,6 @@
 .env-tile-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: auto; color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
 .env-tile-tip { font-family: var(--font-ui); }
 .env-tile > .env-meter { height: 3px; }
-@media (prefers-reduced-motion: reduce) {
-  .env-hero.is-action, .env-row.is-action, .env-meter > i { transition: none; }
-  .env-skeleton { animation: none; opacity: 0.55; }
+:root[data-perf-tier~="L1"] .env-skeleton {
+  opacity: 0.55;
 }

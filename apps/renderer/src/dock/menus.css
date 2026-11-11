@@ -122,6 +122,3 @@
 .dock-settings .set-row > div:first-child { flex: 1 1 260px; }
 .dock-settings .set-row .sr-control { max-width: 100%; }
 .dock-settings .set-row .select { max-width: 100%; }
-@media (prefers-reduced-motion: reduce) {
-  .dock-menu-popover { animation: none; }
-}

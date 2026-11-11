@@ -34,29 +34,8 @@ body {
      主题切换仍是背景 crossfade（上面的 transition），不受影响。 */
 }
 
-/* 页面切换：淡入淡出 + 上浮进入 / 下沉离开。
+/* 页面切换（.page-in / .page-out）在 styles/motion.css 的 Surfaces 一节：
    二级页只作用在 .page-body（页头不动）；工作台 ↔ 二级页作用在 .page / .app-body。 */
-@keyframes page-in {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes page-out {
-  from { opacity: 1; transform: translateY(0); }
-  to   { opacity: 0; transform: translateY(12px); }
-}
-.page-body.page-in,
-.page.page-in,
-.app-body.page-in {
-  /* 结束后释放 transform / opacity 层叠上下文，让页内 modal 与外部 Dock
-     正文使用同一层级标尺；forwards 会把 fixed 遮罩也困在页面矩形内。 */
-  animation: page-in var(--dur-slow) var(--ease) backwards;
-}
-.page-body.page-out,
-.page.page-out,
-.app-body.page-out {
-  animation: page-out var(--dur-slow) var(--ease) both;
-  pointer-events: none;
-}
 
 ::selection { background: var(--selection); }
 
@@ -225,10 +204,6 @@ code, pre, .mono { font-family: var(--font-mono); }
 .chip-file:hover { border-color: var(--accent-border); color: var(--accent); }
 
 /* Pulsing dot for running states */
-@keyframes omp-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
 .dot {
   width: 7px;
   height: 7px;
@@ -241,17 +216,16 @@ code, pre, .mono { font-family: var(--font-mono); }
 .dot.red { background: var(--red); }
 .dot.blue { background: var(--blue); }
 .dot.purple { background: var(--accent); }
-.dot.pulse { animation: omp-pulse 1.4s var(--ease) infinite; }
+.dot.pulse { animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
 
 /* Spinner */
-@keyframes omp-spin { to { transform: rotate(360deg); } }
 .spinner {
   width: 13px;
   height: 13px;
   border: 1.6px solid var(--border-strong);
   border-top-color: var(--accent);
   border-radius: var(--r-full);
-  animation: omp-spin 0.8s linear infinite;
+  animation: omp-spin var(--loop-spin) linear infinite;
   flex: none;
 }
 
@@ -262,7 +236,6 @@ code, pre, .mono { font-family: var(--font-mono); }
    `::after` and only `transform` moves, which stays on the compositor. Skeletons
    are empty placeholder boxes by construction (ConversationSkeleton), so the
    overlay has no content to cover. */
-@keyframes omp-shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 .skeleton {
   position: relative;
   overflow: hidden;
@@ -274,44 +247,10 @@ code, pre, .mono { font-family: var(--font-mono); }
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--surface-3) 85%, var(--surface-2)), transparent);
-  animation: omp-shimmer 1.4s linear infinite;
+  animation: omp-sweep var(--loop-pulse) linear infinite;
 }
 
 /* Scroll fade for long lists */
 .fade-bottom {
   mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent);
-}
-
-/* ==========================================================================
-   Reduced motion
-   Three animations here loop forever — pulse, spin, shimmer — and each one is
-   a status signal, not decoration. So this does not remove them: it collapses
-   duration to near-zero, which holds the final painted frame. The running dot
-   stays visible, the spinner stays where it is. Transitions become instant
-   rather than absent, so hover and active states still read as state changes.
-   ========================================================================== */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-
-  /* Pulse conveys "running" purely through opacity, so a held frame could
-     land at 0.35 and read as disabled. Pin it opaque instead. */
-  .dot.pulse {
-    opacity: 1 !important;
-  }
-
-  /* Shimmer's gradient is only legible while it travels; frozen mid-sweep it
-     looks like a rendering artifact. Fall back to a flat placeholder tone. */
-  .skeleton {
-    background: var(--surface-3) !important;
-  }
-  .skeleton::after {
-    display: none;
-  }
 }

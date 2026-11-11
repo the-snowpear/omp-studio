@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { pageMotionReduced } from "../pageTransition";
+import { motionReduced } from "../motion";
 import {
   CHART_AXIS_FADE_MS,
   CHART_MORPH_MS,
@@ -26,9 +26,7 @@ export type TokenChartModelPath = {
 
 type SampleMap = Map<string, Array<[number, number]>>;
 
-function chartMotionReduced(): boolean {
-  return typeof window.matchMedia === "function" && pageMotionReduced();
-}
+const chartMotionReduced = motionReduced;
 
 function uniqueIds(left: readonly string[], right: readonly string[]): string[] {
   const seen = new Set<string>();

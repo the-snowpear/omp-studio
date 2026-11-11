@@ -1,8 +1,12 @@
+import { MOTION_EASE, MOTION_MS } from "../motion";
+
 export type ChartPx = readonly [number, number];
 
 export const CHART_SAMPLE_COUNT = 96;
-export const CHART_MORPH_MS = 420;
-export const CHART_AXIS_FADE_MS = 160;
+/** 折线年/月/周/日变形：一段带含义的形变（--dur-hero）。 */
+export const CHART_MORPH_MS = MOTION_MS.hero;
+/** 坐标刻度交叉淡入淡出（`.tk-xt.in` / `.out`，--dur）。 */
+export const CHART_AXIS_FADE_MS = MOTION_MS.base;
 
 type BuiltCurve = {
   readonly xs: number[];
@@ -214,16 +218,17 @@ export function flattenToBaseline(
   return pts.map((point) => [point[0], baselineY]);
 }
 
-/** CSS cubic-bezier(0.25, 0.46, 0.45, 0.94) — matches `--ease-ios`. */
+/** `--ease-ios`, sampled: the chart morph is driven per frame from script. */
+const [IOS_X1, IOS_Y1, IOS_X2, IOS_Y2] = (MOTION_EASE.ios.match(/-?\d*\.?\d+/g) ?? []).map(Number) as [number, number, number, number];
 export function easeIos(t: number): number {
   if (t <= 0) return 0;
   if (t >= 1) return 1;
   let guess = t;
   for (let step = 0; step < 8; step++) {
-    const current = bezier1d(guess, 0.25, 0.45) - t;
-    const deriv = bezier1dDeriv(guess, 0.25, 0.45);
+    const current = bezier1d(guess, IOS_X1, IOS_X2) - t;
+    const deriv = bezier1dDeriv(guess, IOS_X1, IOS_X2);
     if (Math.abs(deriv) < 1e-6) break;
     guess = Math.min(1, Math.max(0, guess - current / deriv));
   }
-  return bezier1d(guess, 0.46, 0.94);
+  return bezier1d(guess, IOS_Y1, IOS_Y2);
 }

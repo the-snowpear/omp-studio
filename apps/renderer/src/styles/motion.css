@@ -1,0 +1,353 @@
+/* ============================================================
+   OMP Studio — Motion
+   ------------------------------------------------------------
+   Everything that moves is one of the patterns below. Component CSS picks a
+   pattern and a token; it does not invent a duration, a curve, an entrance
+   keyframe or a reduced-motion rule of its own (scripts/check-renderer-motion.mjs
+   holds that line). The numbers are in tokens.css; timers and WAAPI read the
+   same numbers from src/motion.ts.
+
+   Pattern   What changes                          Arrive              Leave
+   --------  ------------------------------------  ------------------  ------------------
+   state     colour, opacity, a press              fast · ease         fast · ease
+   element   chevron, switch, popover, dialog,     base · ease-out     fast · ease-in
+             a row revealing                       (popover: fast)
+   region    a panel, a drawer, a card body        slow · ease-out     slow or base · ease-out
+             changing size or place                                    (its neighbours land
+                                                                       too, so it decelerates
+                                                                       both ways)
+   surface   a page, a tab pane, a deck cell,      slower · ease-nav   slow · ease-nav
+             a toast                                                   (fast · ease when the
+                                                                       next thing waits)
+   hero      ask genie, a list unfolding           hero · ease-nav /   slow or slower
+                                                   ease-emphasis
+
+   A leave the next thing waits for (page swap, conversation switch) is a quick
+   dissolve that front-loads its change with --ease, so the click is answered in
+   the first frames. A leave nothing waits for accelerates away with --ease-in.
+
+   Space
+   - Depth runs vertically, and only the upper level travels. A level that
+     opens over another (a page over the workbench, an editor over its list, a
+     sheet, a notice) rises into place and sinks back out the way it came; the
+     level underneath dissolves and returns where it stands.
+   - Siblings run horizontally. The next page, tab, question or step arrives
+     from the right when it comes later in the order the user can see (further
+     along a strip, further down a list) and from the left when it comes
+     earlier; the old one drifts out of the other side, so both halves read as
+     one movement.
+   - Things attached to an anchor (menus, tips) grow out of it; they do not
+     travel.
+   - Distance follows size, --shift-xs for one element up to --shift-lg for a
+     surface. A surface drifts half as far leaving as it travelled arriving.
+
+   Rules
+   - Arrivals animate opacity, translate and scale only. The entrance keyframes
+     have no `to` frame and fill backwards, so nothing stays transformed
+     afterwards: a fixed overlay inside the surface is not trapped in its
+     stacking context once it has landed. They use the individual `translate` /
+     `scale` properties, so they compose with whatever `transform` the element
+     already uses for its own placement.
+   - Layout properties animate only where the layout is the message (a panel
+     resizing, a card unfolding).
+   - Loops are status. They are stilled, never removed.
+   - Reduced motion has one home, at the bottom of this file. Components do not
+     write `@media (prefers-reduced-motion)`; one that needs a different *still*
+     picture keys it off `:root[data-perf-tier~="L1"]`.
+   ============================================================ */
+
+/* ---------- Recipes ----------------------------------------------------------
+   An `animation` value, complete: keyframe, duration, curve and fill travel
+   together, so every popover in the app changes by editing one line.
+     animation: var(--motion-pop); */
+:root {
+  /* Grows out of its anchor: menu, select popup, hover card. */
+  --motion-pop: omp-pop-in var(--dur-fast) var(--ease-out) backwards;
+  /* Content appearing in the flow: a note, a result, an inline panel. */
+  --motion-reveal: omp-rise-in var(--dur) var(--ease-out) backwards;
+  /* A body opening under the header that owns it. */
+  --motion-unfold: omp-drop-in var(--dur) var(--ease-out) backwards;
+  /* Content replaced in place: a detail pane following its list. It starts
+     half visible, so the pane never blinks empty between two selections. */
+  --motion-swap: omp-swap-in var(--dur-fast) var(--ease-out) backwards;
+  /* Floats over the page with nothing to anchor to: modal, dialog, palette. */
+  --motion-sheet: omp-sheet-in var(--dur) var(--ease-out) backwards;
+  --motion-sheet-out: omp-sheet-out var(--dur-fast) var(--ease-in) forwards;
+  /* The layer behind a sheet, and anything else that only fades. */
+  --motion-fade: omp-fade-in var(--dur-fast) var(--ease) backwards;
+  --motion-fade-out: omp-fade-out var(--dur-fast) var(--ease-in) forwards;
+  /* A notice from the window edge. `--toast-from` is the edge: 1 below, -1 above. */
+  --motion-toast: omp-toast-in var(--dur-slower) var(--ease-out) backwards;
+  --motion-toast-out: omp-toast-out var(--dur-slow) var(--ease-in) forwards;
+}
+
+/* `--pop-from` is the side the anchor is on: -1 above (the default: the
+   popover drops out of it), 1 below (a menu that opens upward rises out of it).
+   Registered so it does not inherit: a flyout inside an upward menu keeps its
+   own side. */
+@property --pop-from { syntax: "<number>"; inherits: false; initial-value: -1; }
+@keyframes omp-pop-in {
+  from { opacity: 0; translate: 0 calc(var(--shift-xs) * var(--pop-from)); scale: 0.97; }
+}
+@keyframes omp-rise-in {
+  from { opacity: 0; translate: 0 var(--shift-xs); }
+}
+@keyframes omp-drop-in {
+  from { opacity: 0; translate: 0 calc(var(--shift-xs) * -1); }
+}
+@keyframes omp-swap-in {
+  from { opacity: 0.4; translate: 0 var(--shift-xs); }
+}
+@keyframes omp-sheet-in {
+  from { opacity: 0; translate: 0 var(--shift-sm); scale: 0.98; }
+}
+@keyframes omp-sheet-out {
+  to { opacity: 0; translate: 0 var(--shift-xs); scale: 0.98; }
+}
+@keyframes omp-fade-in {
+  from { opacity: 0; }
+}
+@keyframes omp-fade-out {
+  to { opacity: 0; }
+}
+@keyframes omp-toast-in {
+  from { opacity: 0; translate: 0 calc(var(--shift-md) * var(--toast-from, 1)); }
+}
+@keyframes omp-toast-out {
+  to { opacity: 0; translate: 0 calc(var(--shift-sm) * var(--toast-from, 1)); }
+}
+
+/* ---------- Surfaces ---------------------------------------------------------
+   One pair of keyframes for every surface that arrives from somewhere. The
+   offsets are registered and do not inherit: a page setting `--enter-y` must
+   not hand it to a pane that enters inside the page. */
+@property --enter-x { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --enter-y { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --exit-x { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --exit-y { syntax: "<length>"; inherits: false; initial-value: 0px; }
+
+@keyframes omp-enter {
+  from { opacity: 0; translate: var(--enter-x) var(--enter-y); }
+}
+@keyframes omp-exit {
+  to { opacity: 0; translate: var(--exit-x) var(--exit-y); }
+}
+
+/* A sequential swap: two surfaces that cannot share the layout. The old one
+   dissolves for MOTION_MS.fast (the wait in pageTransition.ts), then the new
+   one arrives. `.page-out` / `.page-in` are set by `pagePhaseClass()`, and
+   `data-page-dir="back"` by `pageDir()` when the swap goes back.
+
+   Depth is the default: opening a level, the one underneath dissolves in place
+   and the new one rises; going back, the upper level sinks the way it came and
+   the one underneath returns in place. */
+.page-in {
+  --enter-y: var(--shift-md);
+  animation: omp-enter var(--dur-slower) var(--ease-nav) backwards;
+}
+.page-out {
+  animation: omp-exit var(--dur-fast) var(--ease) both;
+  pointer-events: none;
+}
+.page-out[data-page-dir="back"] {
+  --exit-y: var(--shift-sm);
+}
+.page-in[data-page-dir="back"] {
+  --enter-y: 0px;
+}
+/* The two fixed roles: the workbench is the ground level every page opens
+   over, and a page's shell is always the upper level (page to page swaps move
+   `.page-body`, not the shell). */
+.app-body.page-in {
+  --enter-y: 0px;
+}
+.page.page-out {
+  --exit-y: var(--shift-sm);
+}
+
+/* Siblings swapped the same way (`data-page-axis="x"`): pages along the
+   navigation, tabs whose panels cannot overlap. Both halves travel sideways. */
+.page-in[data-page-axis="x"] {
+  --enter-y: 0px;
+  --enter-x: var(--shift-lg);
+}
+.page-in[data-page-axis="x"][data-page-dir="back"] {
+  --enter-x: calc(var(--shift-lg) * -1);
+}
+.page-out[data-page-axis="x"] {
+  --exit-y: 0px;
+  --exit-x: calc(var(--shift-sm) * -1);
+}
+.page-out[data-page-axis="x"][data-page-dir="back"] {
+  --exit-x: var(--shift-sm);
+}
+
+/* Siblings that can overlap: two panes cross-fade in place while the same
+   sideways drift says which way the user went. Both are on screen at once, so
+   the old one gets out of the way on the same brisk curve. The overlap window
+   in JS is TAB_PANE_MS. */
+.tab-pane-enter-fwd,
+.hub-face-enter-fwd,
+.dk-cell-enter-fwd {
+  --enter-x: var(--shift-lg);
+}
+.tab-pane-enter-back,
+.hub-face-enter-back,
+.dk-cell-enter-back {
+  --enter-x: calc(var(--shift-lg) * -1);
+}
+.tab-pane-leave-fwd,
+.hub-face-leave-fwd,
+.dk-cell-leave-fwd {
+  --exit-x: calc(var(--shift-sm) * -1);
+}
+.tab-pane-leave-back,
+.hub-face-leave-back,
+.dk-cell-leave-back {
+  --exit-x: var(--shift-sm);
+}
+.tab-pane-enter-fwd,
+.tab-pane-enter-back,
+.hub-face-enter-fwd,
+.hub-face-enter-back,
+.dk-cell-enter-fwd,
+.dk-cell-enter-back {
+  animation: omp-enter var(--dur-slower) var(--ease-nav) backwards;
+}
+.tab-pane-leave-fwd,
+.tab-pane-leave-back,
+.hub-face-leave-fwd,
+.hub-face-leave-back,
+.dk-cell-leave-fwd,
+.dk-cell-leave-back {
+  animation: omp-exit var(--dur-slow) var(--ease-nav) both;
+  pointer-events: none;
+}
+
+/* ---------- Theme ------------------------------------------------------------
+   A theme change is the whole window changing state. Left alone, each surface
+   goes at its own pace (panels snap, the page background and some borders are
+   still fading 250ms later) and the window tears along its panel edges, so the
+   window is cross-faded as one snapshot instead. themeTransition.ts sets the
+   attribute for the length of the dissolve. */
+:root[data-theme-transition]::view-transition-group(*),
+:root[data-theme-transition]::view-transition-old(*),
+:root[data-theme-transition]::view-transition-new(*) {
+  animation-duration: var(--dur-slow);
+  animation-timing-function: var(--ease);
+}
+/* The window stays usable under the dissolve. */
+:root[data-theme-transition]::view-transition {
+  pointer-events: none;
+}
+/* The new theme is painted in one go underneath; a surface still easing its
+   own colours would lag behind the dissolve. */
+:root[data-theme-transition] *,
+:root[data-theme-transition] *::before,
+:root[data-theme-transition] *::after {
+  transition-duration: 0s !important;
+}
+
+/* ---------- Loops ------------------------------------------------------------
+   Status signals. `rotate` / `translate` rather than `transform`, so a loop can
+   sit on an element that is already transformed. */
+@keyframes omp-spin {
+  to { rotate: 360deg; }
+}
+@keyframes omp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes omp-sweep {
+  from { translate: -100% 0; }
+  to { translate: 100% 0; }
+}
+
+/* ==========================================================================
+   Reduced motion
+   --------------------------------------------------------------------------
+   One policy. In the app the OS preference, the `omp.perf.motion` switch and a
+   low machine tier all arrive as `data-perf-tier~="L1"` before the first frame
+   (main.tsx → perf/tierControl.ts). The media query repeats the clamp for a
+   document that never ran tier control (a test harness). src/motion.ts answers
+   the same question for timers (`motionReduced()`), so a JS wait can never
+   outlast the CSS it is waiting for.
+
+   Nothing is removed. Animations collapse to ~0 with a single iteration, which
+   holds the last painted frame: a state change is still a state change, a
+   spinner is still where it was. Entrance delays collapse too, so a cascade
+   lands at once instead of popping in piece by piece; transition delays are
+   left alone, because some of them are how long a pointer must rest before
+   something reacts. Signals that are only legible while they move get a still
+   picture below, next to the rule that takes their motion away.
+
+   Transitions are exactly 0s, not "nearly": this rule reaches every element,
+   and an element that never declared a transition still has
+   `transition-property: all`. Any duration above zero would have each of them
+   start a transition for every inherited value that is recomputed — measured
+   at 1,700–3,100 transitions and frames of 300–1,250ms per click on the
+   workbench, on the tier meant for slow machines. At 0s none is created.
+   Nothing may therefore wait on `transitionend` alone; ask `motionReduced()`.
+   ========================================================================== */
+:root[data-perf-tier~="L1"] *,
+:root[data-perf-tier~="L1"] *::before,
+:root[data-perf-tier~="L1"] *::after,
+:root[data-perf-tier~="L1"] *::backdrop,
+:root[data-perf-tier~="L1"]::view-transition-group(*),
+:root[data-perf-tier~="L1"]::view-transition-image-pair(*),
+:root[data-perf-tier~="L1"]::view-transition-old(*),
+:root[data-perf-tier~="L1"]::view-transition-new(*) {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+  scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after,
+  *::backdrop,
+  ::view-transition-group(*),
+  ::view-transition-image-pair(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Pulse says "running" through opacity alone; a held frame can land at 0.35
+   and read as disabled, so it is pinned opaque. */
+:root[data-perf-tier~="L1"] .dot.pulse {
+  opacity: 1 !important;
+}
+
+/* Skeleton: a band frozen mid-sweep looks like a rendering fault. */
+:root[data-perf-tier~="L1"] .skeleton {
+  background: var(--surface-3) !important;
+}
+:root[data-perf-tier~="L1"] .skeleton::after {
+  display: none !important;
+}
+
+/* Indeterminate progress: the travelling bar is the only cue that something is
+   happening. Hold a visible block instead of a frozen sliver. */
+:root[data-perf-tier~="L1"] .progress-fill::after,
+:root[data-perf-tier~="L1"] .tc-progress .jw-bar-track.indeterminate .jw-bar-fill,
+:root[data-perf-tier~="L1"] .mb-loadbar.is-loading::after {
+  animation: none !important;
+}
+:root[data-perf-tier~="L1"] .tc-progress .jw-bar-track.indeterminate .jw-bar-fill {
+  left: 0 !important;
+  width: 100% !important;
+  opacity: 0.45;
+}
+:root[data-perf-tier~="L1"] .mb-loadbar.is-loading::after {
+  transform: none !important;
+  width: 100% !important;
+  opacity: 0.45;
+}

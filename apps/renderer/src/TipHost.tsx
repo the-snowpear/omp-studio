@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSurfaceDocument, surfaceWindow } from "./dock/SurfaceContext";
+import { TIP_DELAY_MS } from "./motion";
 
-/** Matches `--tip-delay`: wait before showing so a sweep across buttons does not flash. */
-export const TIP_DELAY_MS = 500;
+/** `--tip-delay`: wait before showing so a sweep across buttons does not flash. */
+export { TIP_DELAY_MS };
 
 const GAP = 6;
 const PAD = 8;

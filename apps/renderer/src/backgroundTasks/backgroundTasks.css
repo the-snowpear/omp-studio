@@ -4,13 +4,13 @@
 .bt-activity b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
 .bt-activity > i { width: 5px; height: 5px; border-radius: 50%; background: var(--glyph-faint); }
 .bt-activity > i[data-active] { background: var(--green); }
-.bt-toolbar-action, .bt-back, .bt-stop { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-4); background: transparent; color: var(--text-3); cursor: pointer; transition: color var(--dur-fast), background var(--dur-fast); }
+.bt-toolbar-action, .bt-back, .bt-stop { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-4); background: transparent; color: var(--text-3); cursor: pointer; transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
 .bt-toolbar > .bt-toolbar-action { margin-left: auto; }
 .bt-toolbar-action:hover, .bt-back:hover { background: var(--surface-hover); color: var(--text); }
 .bt-content { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .bt-list { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--sp-6); overscroll-behavior: contain; }
 .bt-list[hidden], .bt-detail[hidden] { display: none; }
-.bt-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0; border-radius: var(--r-6); padding-right: var(--sp-4); margin: 1px 0; min-width: 0; transition: background var(--dur-fast); }
+.bt-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0; border-radius: var(--r-6); padding-right: var(--sp-4); margin: 1px 0; min-width: 0; transition: background var(--dur-fast) var(--ease); }
 .bt-row:hover { background: var(--surface-hover); }
 .bt-row.is-selected { background: var(--surface-active); }
 .bt-task-main { display: flex; flex: 1; align-items: flex-start; gap: var(--sp-10); min-width: 0; min-height: 48px; padding: var(--sp-8) var(--sp-6); padding-left: calc(var(--sp-6) + var(--task-depth, 0) * var(--sp-10)); border: 0; border-radius: inherit; background: transparent; color: inherit; text-align: left; cursor: pointer; }
@@ -69,7 +69,6 @@
 .bt-confirm p { margin: 0 0 var(--sp-20); line-height: 1.7; overflow-wrap: anywhere; }
 .bt-confirm .actions { justify-content: flex-end; }
 @container (max-width: 300px) { .bt-task-context { display: none; } .bt-task-main { gap: var(--sp-6); } .bt-task-meta { gap: var(--sp-6); } }
-@media (prefers-reduced-motion: reduce) { .background-tasks *, .background-tasks *::before { transition: none !important; } }
 
 /* Auto-height cards must measure real block flow, not an indefinite flex percentage. */
 .dock-panel-content[data-dock-auto-height] > .background-tasks.is-card { height: auto; max-height: none; overflow: visible; }

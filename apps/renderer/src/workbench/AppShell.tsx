@@ -50,6 +50,7 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { BackgroundProvider } from "../background/BackgroundProvider";
 import { AppBackgroundLayer } from "../background/AppBackgroundLayer";
 import { useAppSettings } from "../settings/appSettings";
+import { applyTheme } from "../themeTransition";
 import { desktopNotice } from "../settings/desktopNotice";
 import { openOnboardingTour } from "../onboarding/onboardingState";
 import { AppUpdateDialog } from "../AppUpdateDialog";
@@ -259,13 +260,18 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const bottomVisible = dock.layout.bottom.visible;
   const panelWidth = mdi?.store.getSnapshot().panelWidth ?? dock.layout.right.size;
   const bottomHeight = mdi?.store.getSnapshot().bottomHeight ?? dock.layout.bottom.size;
-  const setSidebarWidth = (size: number) => { if (mdi) mdi.store.shared({ sidebarWidth: size }); dock.store.dispatch({ type: "resize", region: "left", size }); };
+  const resizeRegion = (region: "left" | "right" | "bottom", size: number) => {
+    if (dock.store.getSnapshot().preferences.locked) return;
+    if (mdi) mdi.store.shared(region === "left" ? { sidebarWidth: size } : region === "right" ? { panelWidth: size } : { bottomHeight: size });
+    dock.store.dispatch({ type: "resize", region, size });
+  };
+  const setSidebarWidth = (size: number) => resizeRegion("left", size);
   const setSplitRatio = (ratio: number) => dock.store.dispatch({ type: "resize", region: "left", ratio });
   const setSideOpen = (visible: boolean) => dock.store.dispatch({ type: "region", region: "right", visible });
   const setBottomOpen = (expanded: boolean) => dock.store.dispatch({ type: "bottomExpanded", expanded });
   const setBottomVisible = (visible: boolean) => dock.store.dispatch({ type: "region", region: "bottom", visible });
-  const setPanelWidth = (size: number) => { if (mdi) mdi.store.shared({ panelWidth: size }); dock.store.dispatch({ type: "resize", region: "right", size }); };
-  const setBottomHeight = (size: number) => { if (mdi) mdi.store.shared({ bottomHeight: size }); dock.store.dispatch({ type: "resize", region: "bottom", size }); };
+  const setPanelWidth = (size: number) => resizeRegion("right", size);
+  const setBottomHeight = (size: number) => resizeRegion("bottom", size);
   const setSideTab = (tab: SideTab) => dock.store.dispatch({ type: "open", panel: tab === "preview" ? "browser" : tab });
   const setBottomTab = (tab: BottomTab) => dock.store.dispatch({ type: "open", panel: tab });
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -704,16 +710,19 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
 
   useEffect(() => {
     if (mdi && !mdi.active) return;
-    document.documentElement.setAttribute("data-theme", appSettings.theme);
-    document.documentElement.setAttribute("data-density", appSettings.density);
+    // Shared appearance is authoritative in the main document, even when this
+    // shell's conversation surface is in a native window. Floats mirror it.
+    const root = globalThis.document.documentElement;
+    applyTheme(root, appSettings.theme);
+    root.setAttribute("data-density", appSettings.density);
     /* 文件图标着色：tri 时根元素挂 data-palette，CSS 只覆盖 token。
        注意根元素用 data-palette、树行用 data-ftype，两者不共名。 */
     if (appSettings.fileTypePalette === "tri") {
-      document.documentElement.dataset.palette = "tri";
+      root.dataset.palette = "tri";
     } else {
-      delete document.documentElement.dataset.palette;
+      delete root.dataset.palette;
     }
-  }, [appSettings.theme, appSettings.density, appSettings.fileTypePalette]);
+  }, [mdi?.active, appSettings.theme, appSettings.density, appSettings.fileTypePalette]);
 
   /* Resident changes drive task notifications. A disappeared row is a
      neutral stop/disconnect, never a success notification. */

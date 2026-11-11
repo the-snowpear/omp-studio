@@ -1,7 +1,7 @@
 @import "../settings/featureSettings.css";
 .worktree-pane { margin-top:var(--sp-24); padding-block:var(--sp-24); border-top:1px solid var(--border); }
 .worktree-modal-backdrop { position:fixed; inset:0; z-index:10050; display:grid; place-items:center; padding:24px; background:rgba(0,0,0,.42); backdrop-filter:blur(4px); }
-.worktree-modal { width:min(880px,100%); max-height:calc(100vh - 48px); overflow:auto; padding:28px; border:1px solid var(--border); border-radius:14px; background:var(--surface); box-shadow:0 24px 80px #0004; animation:feature-detail-in .18s ease-out; }
+.worktree-modal { width:min(880px,100%); max-height:calc(100vh - 48px); overflow:auto; padding:28px; border:1px solid var(--border); border-radius:14px; background:var(--surface); box-shadow:0 24px 80px #0004; animation:var(--motion-sheet); }
 .worktree-manager-dialog { width:min(880px,calc(100vw - 48px)); max-width:none; max-height:none; margin:auto; padding:0; border:0; border-radius:14px; background:transparent; color:var(--text); overflow:visible; }
 .worktree-manager-dialog::backdrop { background:rgba(0,0,0,.42); backdrop-filter:blur(4px); }
 .worktree-manager-dialog > .worktree-modal { width:100%; }
@@ -19,4 +19,3 @@
 .worktree-empty p { color:var(--text-muted); font-size:var(--fs-12); }
 .worktree-launcher { margin:var(--sp-12); }
 @media(max-width:600px) { .worktree-modal-backdrop { padding:12px; } .worktree-manager-dialog { width:calc(100vw - 24px); } .worktree-modal { padding:20px; max-height:calc(100vh - 24px); } }
-@media(prefers-reduced-motion:reduce) { .worktree-modal { animation:none; } }

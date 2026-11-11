@@ -226,9 +226,7 @@ body.dock-modal-active .dock-menu-popover { z-index: 87; }
 .dock-agent-abbr { font-size: var(--fs-11); font-weight: var(--fw-semibold); max-width: 24px; overflow: hidden; }
 .dock-rail-icon:has(.dock-agent-dot) { position: relative; }
 .dock-rail-icon .dock-agent-dot { position: absolute; right: 2px; bottom: 2px; }
-@media (prefers-reduced-motion: no-preference) {
-  .dock-agent-dot:is([data-status="running"], [data-status="starting"], [data-status="reviving"]):not([data-stale]) { animation: agent-running-breathe 2.4s ease-in-out infinite; }
-}
+.dock-agent-dot:is([data-status="running"], [data-status="starting"], [data-status="reviving"]):not([data-stale]) { animation: agent-running-breathe var(--loop-drift) var(--ease-loop) infinite; }
 .dock-tab .icon { flex: 0 0 auto; }
 .dock-tab > .dock-tab-close { display: flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 26px; padding: 3px; margin: 0 1px; border-radius: var(--r-4); opacity: 0; cursor: pointer; }
 .dock-tab:is(:hover, :focus-within, .is-active) > .dock-tab-close { opacity: 1; }
@@ -239,9 +237,8 @@ body.dock-modal-active .dock-menu-popover { z-index: 87; }
 .dock-glyph-image { display: block; width: 100%; height: 100%; object-fit: contain; border-radius: 2px; }
 .dock-glyph.is-muted { opacity: .5; filter: grayscale(1); }
 .dock-glyph .dock-glyph-error { color: var(--red); }
-.dock-glyph-spinner { display: inline-block; flex: none; box-sizing: border-box; width: 11px; height: 11px; border: 1.5px solid color-mix(in srgb, currentColor 22%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: dock-glyph-spin .8s linear infinite; }
+.dock-glyph-spinner { display: inline-block; flex: none; box-sizing: border-box; width: 11px; height: 11px; border: 1.5px solid color-mix(in srgb, currentColor 22%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: omp-spin var(--loop-spin) linear infinite; }
 .dock-glyph.is-large .dock-glyph-spinner { width: 14px; height: 14px; }
-@keyframes dock-glyph-spin { to { transform: rotate(360deg); } }
 .dock-tab > .dock-tab-close.is-pending, .dock-card-close.is-pending { opacity: 1; cursor: progress; }
 .dock-tab > .dock-tab-close.is-pending:hover, .dock-card-close.is-pending:hover { background: transparent; }
 .dock-tab-close .dock-glyph-spinner, .dock-card-close .dock-glyph-spinner { width: 10px; height: 10px; }
@@ -269,7 +266,9 @@ body.dock-modal-active .dock-menu-popover { z-index: 87; }
 .dock-rail-expanded { position: absolute; right: 12px; display: flex; flex-direction: column; width: var(--dock-rail-w, 320px); min-width: 0; min-height: 0; pointer-events: none; }
 .dock-rail-expanded .dock-card-list { padding: 0 1px; gap: 10px; pointer-events: auto; }
 .dock-card-region-rail .dock-card-list { gap: 10px; }
-.dock-card-list, .dock-rail-icon-list { transition-duration: var(--dur); transition-timing-function: var(--ease); }
+/* A clock, not a transition: DockRegions.tsx and DockDragPreview.tsx read this duration and curve for the
+   reorder animations they run themselves. `none` keeps the lists from transitioning whatever else changes. */
+.dock-card-list, .dock-rail-icon-list { transition-property: none; transition-duration: var(--dur); transition-timing-function: var(--ease); }
 .dock-rail-expanded .dock-card { border-radius: var(--r-10); pointer-events: auto; }
 .dock-rail-expanded .dock-card-region { flex: 0 1 auto; height: auto; max-height: 100%; }
 .dock-rail-expanded .dock-card-list { flex: 0 1 auto; }
@@ -306,13 +305,14 @@ body.dock-modal-active .dock-menu-popover { z-index: 87; }
 :root[data-dock-rail-transition]::view-transition-old(dock-rail-conversation),
 :root[data-dock-rail-transition]::view-transition-old(dock-rail-composer) { animation: dock-rail-slide-out var(--dur-slow) var(--ease-nav) both; }
 :root[data-dock-rail-transition]::view-transition-new(dock-rail-conversation),
-:root[data-dock-rail-transition]::view-transition-new(dock-rail-composer) { animation: dock-rail-slide-in var(--dur-slow) var(--ease-nav) both; }
+:root[data-dock-rail-transition]::view-transition-new(dock-rail-composer) { animation: dock-rail-late-in var(--dur-slow) var(--ease-nav) both; }
 @keyframes dock-rail-slide-out {
   0% { transform: translateX(0); opacity: 1; }
   70% { transform: translateX(var(--dock-rail-shift, 0px)); opacity: 1; }
   100% { transform: translateX(var(--dock-rail-shift, 0px)); opacity: 0; }
 }
-@keyframes dock-rail-slide-in { 0%, 70% { opacity: 0; } 100% { opacity: 1; } }
+/* The new snapshot waits for the old one to finish moving, then takes over. */
+@keyframes dock-rail-late-in { 0%, 70% { opacity: 0; } 100% { opacity: 1; } }
 :root[data-dock-rail-transition]::view-transition-group(dock-rail-minimap) { z-index: 1; }
 :root[data-dock-rail-transition]::view-transition-old(dock-rail-minimap),
 :root[data-dock-rail-transition]::view-transition-old(.dock-rail-heading) { animation: none; opacity: 0; }
@@ -340,9 +340,8 @@ body.dock-modal-active .dock-menu-popover { z-index: 87; }
    原地，新快照会直接画在最终位置。整列 ↔ 图标列切换时只让它随卡片的两端淡入淡出，
    形变交给卡片本身；卡片自身的折叠仍走 .dock-rail-fold。 */
 :root:is([data-dock-rail-transition="compact"], [data-dock-rail-transition="expanded"], [data-dock-rail-transition="hidden"])::view-transition-old(.dock-rail-body) { animation: dock-rail-body-out var(--dur-slow) var(--ease) both; }
-:root:is([data-dock-rail-transition="compact"], [data-dock-rail-transition="expanded"], [data-dock-rail-transition="hidden"])::view-transition-new(.dock-rail-body) { animation: dock-rail-body-in var(--dur-slow) var(--ease) both; }
+:root:is([data-dock-rail-transition="compact"], [data-dock-rail-transition="expanded"], [data-dock-rail-transition="hidden"])::view-transition-new(.dock-rail-body) { animation: dock-rail-late-in var(--dur-slow) var(--ease) both; }
 @keyframes dock-rail-body-out { 0% { opacity: 1; } 35%, 100% { opacity: 0; } }
-@keyframes dock-rail-body-in { 0%, 70% { opacity: 0; } 100% { opacity: 1; } }
 :root:is([data-dock-rail-transition="collapse"], [data-dock-rail-transition="expand"])::view-transition-old(.dock-rail-body),
 :root:is([data-dock-rail-transition="collapse"], [data-dock-rail-transition="expand"])::view-transition-new(.dock-rail-body) { animation: none; }
 :root:is([data-dock-rail-transition="collapse"], [data-dock-rail-transition="expand"])::view-transition-old(.dock-rail-body) { opacity: 0; }
@@ -448,15 +447,6 @@ body.dock-modal-active .dock-menu-popover { z-index: 87; }
 .dock-drag-preview[hidden] { display: none; }
 body.dock-dragging :is(.dock-card-header, .dock-tabs, .dock-float-titlebar, .dock-rail-icon) { cursor: grabbing; }
 body.dock-resizing :is(.dock-card, .dock-group, .dock-float) { user-select: none; }
-@media (prefers-reduced-motion: reduce) {
-  .dock-card-list, .dock-rail-icon-list { transition-duration: 0s; }
-  .dock-drag-preview { transition-duration: 0.01ms; }
-  .dock-grip, .dock-card.has-meter-summary .dock-grip, .dock-tab, .dock-rail-toolbar, .dock-tab-strip.has-reveal-grip > .dock-group-grip { transition: none; }
-  :root[data-dock-rail-transition]::view-transition-group(*),
-  :root[data-dock-rail-transition]::view-transition-image-pair(*),
-  :root[data-dock-rail-transition]::view-transition-old(*),
-  :root[data-dock-rail-transition]::view-transition-new(*) { animation-duration: 0.01ms !important; }
-}
 @media (pointer: coarse) {
   .dock-tab > .dock-tab-close, .dock-grip { opacity: 1; }
   /* No hover on touch: keep the group grip reachable instead of proximity-only. */

@@ -244,7 +244,7 @@ export function draftFromProvider(provider: ModelProviderRecord): Draft {
     discoveryType: provider.discovery?.type ?? "",
     ...(provider.discovery?.advertisedReasoning === undefined ? {} : { advertisedReasoning: provider.discovery.advertisedReasoning }),
     ...(provider.discovery?.timeoutMs === undefined ? {} : { discoveryTimeoutMs: provider.discovery.timeoutMs }),
-    headersText: Object.entries(provider.headers ?? {}).map(([key, value]) => `${key}: ${value}`).join("\n"),
+    headersText: headersTextFrom(provider.headers),
     disableStrictTools: provider.disableStrictTools ?? false,
     transport: provider.transport ?? "",
     remoteCompactionEnabled: provider.remoteCompaction?.enabled ?? false,

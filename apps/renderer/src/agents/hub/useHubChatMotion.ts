@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
-import { pageMotionReduced, TAB_PANE_MS, type SlideDir, type TabPaneRole } from "../../pageTransition";
+import { MOTION_SLACK_MS, motionReduced } from "../../motion";
+import { TAB_PANE_MS, type SlideDir, type TabPaneRole } from "../../pageTransition";
 
 export function hubFaceClass(role: TabPaneRole | null, dir: SlideDir): string {
   return role ? `hub-face hub-face-${role}-${dir}` : "hub-face";
@@ -34,7 +35,7 @@ export function useHubChatCloseMotion(
       return;
     }
     if (incoming !== "detail") return;
-    if (pageMotionReduced() || !el) {
+    if (motionReduced() || !el) {
       fromRef.current = 0;
       if (closing) setClosing(false);
       return;
@@ -73,7 +74,7 @@ export function useHubChatCloseMotion(
       finish();
     };
     el.addEventListener("transitionend", onEnd);
-    const fallback = window.setTimeout(finish, TAB_PANE_MS + 80);
+    const fallback = window.setTimeout(finish, TAB_PANE_MS + MOTION_SLACK_MS);
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(frame);

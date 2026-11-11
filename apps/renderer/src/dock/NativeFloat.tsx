@@ -8,13 +8,29 @@ import { SurfaceProvider } from "./SurfaceContext";
 import { registerConversationSurface } from "../conversation/conversationViews";
 import type { DockFloat, DockRect } from "./types";
 import { useWindowFocus } from "./windowOrder";
+import { applyTheme } from "../themeTransition";
 import { floatTitle, workbenchBounds } from "./workbenchGeometry";
 
 /** Styles and root preferences stay in sync, including dev-server style updates. */
 export function mirrorAppearance(target: Document, bodyClass = "dock-native-document"): () => void {
   const nodes = new Map<Element, Element>();
+  // Preferences are shared; snapshot/flight flags belong to each document.
+  const attributes = ["data-density", "data-palette", "data-platform", "data-perf-tier", "data-backdrop", "data-backdrop-scope", "data-preview", "data-preview-marks", "style", "lang", "dir"];
+  let lastTheme: string | null | undefined;
   const sync = () => {
-    for (const attribute of [...document.documentElement.attributes]) target.documentElement.setAttribute(attribute.name, attribute.value);
+    const sourceRoot = document.documentElement;
+    const targetRoot = target.documentElement;
+    for (const name of attributes) {
+      const value = sourceRoot.getAttribute(name);
+      if (value === null) targetRoot.removeAttribute(name);
+      else targetRoot.setAttribute(name, value);
+    }
+    const theme = sourceRoot.getAttribute("data-theme");
+    if (theme !== lastTheme) {
+      lastTheme = theme;
+      if (theme === null) targetRoot.removeAttribute("data-theme");
+      else applyTheme(targetRoot, theme);
+    }
     target.body.className = bodyClass;
     const sources = new Set(document.head.querySelectorAll('style, link[rel="stylesheet"]'));
     for (const [source, clone] of nodes) if (!sources.has(source)) { clone.remove(); nodes.delete(source); }

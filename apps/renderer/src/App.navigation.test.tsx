@@ -8,6 +8,7 @@ import { __resetAppSettingsForTests } from "./settings/appSettings";
 import { setModelConfigDirty } from "./models/modelConfigState";
 import { STARTUP_NOTICE_ID, STARTUP_NOTICE_STORAGE_KEY } from "./settings/startupNotice";
 import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
+import { SurfaceProvider } from "./dock/SurfaceContext";
 
 vi.mock("./MediaPage", () => ({ MediaPage: ({ onInsert }: { onInsert: (text: string) => void }) => <button onClick={() => onInsert("prepared result")}>Insert prepared result</button> }));
 vi.mock("./ModelConfigPage", () => ({ ModelConfigPage: () => <><h2>Model editor</h2><input aria-label="Model draft" defaultValue="unsaved provider" /><button onClick={() => setModelConfigDirty(true)}>Mark model dirty</button></> }));
@@ -17,7 +18,7 @@ vi.mock("./TerminalPane", () => ({ TerminalPane: () => null }));
 const clients: StudioClientImpl[] = [];
 afterEach(async () => { cleanup(); for (const client of clients.splice(0)) await client.close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); setModelConfigDirty(false); localStorage.clear(); __resetAppSettingsForTests(null); });
 
-async function mount() {
+async function mount(surface: Document = document) {
   localStorage.setItem(STARTUP_NOTICE_STORAGE_KEY, STARTUP_NOTICE_ID);
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
   __resetAppSettingsForTests(JSON.stringify({ language: "en", startupPage: "workbench", rememberLayout: false, restoreLastSession: false }));
@@ -38,8 +39,8 @@ async function mount() {
   } as unknown as ClientTransport;
   const client = new StudioClientImpl(transport);
   clients.push(client);
-  render(<App client={client} />);
-  await waitFor(() => expect(document.querySelector("#workbench")).not.toBeNull());
+  render(<SurfaceProvider document={surface}><App client={client} /></SurfaceProvider>, surface === document ? undefined : { container: surface.body });
+  await waitFor(() => expect(surface.querySelector("#workbench")).not.toBeNull());
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
   return {
     query,
@@ -100,4 +101,53 @@ it("inserts prepared text after returning from media without losing the current 
   fireEvent.click(screen.getByRole("button", { name: "Insert prepared result" }));
   await waitFor(() => expect(document.querySelector('[role="textbox"]')?.textContent).toContain("prepared result"));
   expect(document.querySelector('[role="textbox"]')?.textContent).toContain("existing draft");
+});
+
+it("keeps the application appearance authoritative when the active shell is in another document", async () => {
+  const frame = document.createElement("iframe");
+  document.body.append(frame);
+  const child = frame.contentDocument!;
+  const root = document.documentElement;
+  root.setAttribute("data-theme", "light");
+  try {
+    await mount(child);
+    fireEvent.click(within(child.body).getByRole("button", { name: /theme/i }));
+    await waitFor(() => expect(root.getAttribute("data-theme")).toBe("dark"));
+  } finally {
+    cleanup();
+    frame.remove();
+  }
+});
+
+it.each([false, true])("theme changes use a window dissolve unless reduced motion is active (%s)", async reduced => {
+  await mount();
+  vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  const root = document.documentElement;
+  const previousTier = root.getAttribute("data-perf-tier");
+  const previousTransition = Object.getOwnPropertyDescriptor(document, "startViewTransition");
+  if (reduced) root.setAttribute("data-perf-tier", "L1");
+  else root.removeAttribute("data-perf-tier");
+  let finish!: () => void;
+  const finished = new Promise<void>(resolve => { finish = resolve; });
+  const start = vi.fn((update: () => void) => {
+    update();
+    return { ready: Promise.resolve(), finished, skipTransition: vi.fn() };
+  });
+  Object.defineProperty(document, "startViewTransition", { configurable: true, value: start });
+  try {
+    const before = root.getAttribute("data-theme");
+    fireEvent.click(screen.getByRole("button", { name: /theme/i }));
+    await waitFor(() => expect(root.getAttribute("data-theme")).toBe(before === "dark" ? "light" : "dark"));
+    expect(start).toHaveBeenCalledTimes(reduced ? 0 : 1);
+    expect(root.hasAttribute("data-theme-transition")).toBe(!reduced);
+    await act(async () => finish());
+    expect(root.hasAttribute("data-theme-transition")).toBe(false);
+  } finally {
+    await act(async () => finish());
+    if (previousTransition) Object.defineProperty(document, "startViewTransition", previousTransition);
+    else Reflect.deleteProperty(document, "startViewTransition");
+    if (previousTier === null) root.removeAttribute("data-perf-tier");
+    else root.setAttribute("data-perf-tier", previousTier);
+  }
 });

@@ -17,7 +17,7 @@
   color: var(--accent);
 }
 .btw-status[data-status="running"] .btw-status-glyph {
-  animation: al-turn 3.6s linear infinite;
+  animation: omp-spin calc(var(--loop-drift) * 1.5) linear infinite;
 }
 .btw-status-text {
   display: inline-flex;
@@ -32,7 +32,7 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: al-sweep 2.4s linear infinite;
+  animation: al-sweep var(--loop-drift) linear infinite;
 }
 .btw-status[data-status="failed"] .btw-status-label { color: var(--red); }
 .btw-status[data-status="aborted"] .btw-status-label { color: var(--text-3); }
@@ -43,18 +43,6 @@
 }
 .btw-status.compact { font-size: var(--fs-11); }
 
-@media (prefers-reduced-motion: reduce) {
-  .btw-status[data-status="running"] .btw-status-glyph,
-  .btw-status[data-status="running"] .btw-status-label {
-    animation: none;
-  }
-  .btw-status[data-status="running"] .btw-status-label {
-    color: var(--text);
-    background: none;
-    -webkit-background-clip: border-box;
-    background-clip: border-box;
-  }
-}
 
 .btw-panel {
   display: flex;
@@ -71,10 +59,6 @@
   color: var(--red);
 }
 
-@keyframes btw-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
 
 /* 侧栏页里内容体自己撑满，不再有标题栏与把手。 */
 #spBtw .btw-panel:not(.btw-conversation) { padding: var(--sp-12); }
@@ -189,9 +173,9 @@
 .btw-feedback > span { flex: 1; }
 .btw-compose-area .btw-error { line-height: 1.6; overflow-wrap: anywhere; }
 .btw-thinking { display: flex; align-items: center; gap: 5px; min-height: 28px; }
-.btw-thinking > span { width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); animation: btw-pulse 1.4s ease-in-out infinite; }
-.btw-thinking > span:nth-child(2) { animation-delay: 160ms; }
-.btw-thinking > span:nth-child(3) { animation-delay: 320ms; }
+.btw-thinking > span { width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
+.btw-thinking > span:nth-child(2) { animation-delay: calc(var(--stagger) * 4); }
+.btw-thinking > span:nth-child(3) { animation-delay: calc(var(--stagger) * 8); }
 @container (max-width: 360px) {
   .btw-transcript { padding: var(--sp-16) var(--sp-12); }
   .btw-compose-area { padding-inline: var(--sp-12); }
@@ -299,10 +283,6 @@
   border-radius: 50%;
   background: var(--accent);
   vertical-align: 1px;
-  animation: btw-pulse 1.4s ease-in-out infinite;
+  animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite;
 }
 .btw-topics-empty { margin: var(--sp-8) var(--sp-6); color: var(--text-3); font-size: var(--fs-11); line-height: 1.6; }
-@media (prefers-reduced-motion: reduce) {
-  .btw-thinking > span { animation: none; }
-  .btw-topic-item.is-running .btw-topic-meta::before { animation: none; }
-}

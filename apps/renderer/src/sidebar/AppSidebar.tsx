@@ -25,7 +25,7 @@ import { hostErrorMessage, waitReceipt } from "../hostError";
 import { EMPTY_EXPLORER_FILE_ACTIVITY } from "../conversation/explorerFileActivity";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { SidebarFooter } from "../SidebarFooter";
-import { transitionDelayMs, transitionMs } from "../motionClock";
+import { MOTION_MS, transitionDelayMs, transitionMs } from "../motion";
 import { useAppUpdate } from "../settings/appUpdate";
 import { avatarInitial, useOperatorProfile } from "../settings/operatorProfile";
 import { PREVIEW_APP_UPDATE, PREVIEW_PROJECTS, findPreviewProject } from "../preview/fixtures";
@@ -110,7 +110,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     if (previousRailCollapsed.current === railCollapsed) return;
     previousRailCollapsed.current = railCollapsed;
     const footer = footerRef.current;
-    const duration = footer === null ? 250 : transitionMs(footer) + transitionDelayMs(footer);
+    const duration = footer === null ? MOTION_MS.slow : transitionMs(footer) + transitionDelayMs(footer);
     if (duration <= 1) return;
     const end = performance.now() + duration + 120;
     let frame = requestAnimationFrame(function step() {

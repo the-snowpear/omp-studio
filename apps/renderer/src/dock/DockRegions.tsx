@@ -16,7 +16,7 @@ import { AppSelect } from "../AppSelect";
 import { Icon } from "../icons";
 import { translate, useI18n } from "../i18n";
 import { PLATFORM } from "../platform";
-import { transitionMs } from "../motionClock";
+import { motionReduced, transitionMs } from "../motion";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { DockSlot, useDock, useDockEngine } from "./DockContext";
 import { DockMenuButton, DockToolsButton, DockPinButton, useDockContextMenu } from "./DockMenus";
@@ -657,8 +657,7 @@ function useRailTransition() {
     if (action.type === "card") motion = action.collapsed ? "collapse" : "expand";
     const root = document.documentElement;
     delete root.dataset.dockRailTransition;
-    if (!document.startViewTransition || root.matches('[data-perf-tier~="L1"]')
-      || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    if (!document.startViewTransition || motionReduced()) {
       store.dispatch(action);
       return;
     }
