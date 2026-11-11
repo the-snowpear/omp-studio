@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import {
   TimeTravelStore,
   type TimeTravelSnapshot,
+  type TimeTravelSnapshotMetadata,
 } from "@omp-studio/studio-host";
 
 export interface TimeTravelSettings {
@@ -126,7 +127,7 @@ export class TimeTravelService {
   async list(
     workspace: string,
     sessionId: string,
-  ): Promise<TimeTravelSnapshot[]> {
+  ): Promise<TimeTravelSnapshotMetadata[]> {
     if (!(await this.settings()).enabled)
       throw new Error("Time Travel is disabled");
     return await this.#store.list(workspace, sessionId);

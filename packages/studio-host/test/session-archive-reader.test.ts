@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { appendFile, mkdir, mkdtemp, writeFile, truncate } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, writeFile, truncate, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import test from "node:test";
 
 import { CONVERSATION_LIMITS } from "@omp-studio/studio-protocol";
@@ -154,6 +154,32 @@ test("an appended session is re-read incrementally and keeps earlier items intac
   assert.notEqual(second.transcriptRevision, first.transcriptRevision);
   // 续读必须和整档重读得到同一份投影：itemId / parentId 一并对齐。
   assert.deepEqual(second.items[0], first.items[0]);
+});
+
+test("a persisted child append refreshes its conversation and roster without clearing the cache", async t => {
+  const { reader, sessionFile, workspace } = await fixture();
+  const temporary = await realpath(dirname(workspace));
+  t.after(async () => {
+    const tail = relative(resolve(tmpdir()), temporary);
+    assert.ok(tail && !isAbsolute(tail) && tail !== ".." && !tail.startsWith(`..${sep}`));
+    await rm(temporary, { recursive: true, force: true });
+  });
+  const children = sessionFile.slice(0, -".jsonl".length);
+  await mkdir(children);
+  const childFile = join(children, "child-agent.jsonl");
+  await writeFile(childFile, `${JSON.stringify({ ...HEADER, id: "child-session", cwd: workspace })}\n${userLine("c-1", "first", null)}`);
+  const input = { sessionId: "session-a", agentId: "child-agent" };
+  const first = await reader.readPage(input);
+  assert.equal((await reader.listPersistedAgents("session-a"))[0]?.updatedAt, "2026-08-16T10:00:01.000Z");
+
+  await appendFile(childFile, userLine("c-2", "second", "c-1").replace("2026-08-16T10:00:01.000Z", "2026-08-16T10:01:00.000Z"));
+  const next = await reader.readPage(input);
+  assert.deepEqual(next.items.map(item => item.itemId), ["c-1", "c-2"]);
+  assert.notEqual(next.transcriptRevision, first.transcriptRevision);
+
+  await appendFile(childFile, userLine("c-3", "third", "c-2").replace("2026-08-16T10:00:01.000Z", "2026-08-16T10:02:00.000Z"));
+  assert.equal((await reader.listPersistedAgents("session-a"))[0]?.updatedAt, "2026-08-16T10:02:00.000Z");
+  assert.deepEqual((await reader.readPage(input)).items.map(item => item.itemId), ["c-1", "c-2", "c-3"]);
 });
 
 test("a session rewritten in place falls back to a full read", async () => {

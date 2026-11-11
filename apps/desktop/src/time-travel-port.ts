@@ -44,7 +44,7 @@ export function createTimeTravelPort(options: {
             leafId: row.leafId,
             phase: row.phase,
             createdAt: row.createdAt,
-            fileCount: row.entries.length,
+            fileCount: row.fileCount,
             ...(row.changes ? { changes: row.changes } : {}),
           })),
         ...(archive.olderCursor ? { olderCursor: archive.olderCursor } : {}),

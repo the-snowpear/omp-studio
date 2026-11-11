@@ -973,6 +973,100 @@ test("WP-011 reconnect uses a fresh challenge and requires the same runtime iden
   }
 });
 
+for (const recovery of ["split live receipt", "snapshot receipt tail"] as const) {
+  test(`event-gap recovery settles an in-flight command from its ${recovery}`, { timeout: 2_000 }, async t => {
+    const token = "bridge-gap-with-pending-command";
+    let snapshots = 0;
+    let activeSocket: Socket | undefined;
+    let terminal: StudioSnapshotResponse["terminalReceipts"][number] | undefined;
+    let completedFrame: Buffer = Buffer.alloc(0);
+    const bridge = await listenForHello(hello => helloResponse(hello, token), {
+      snapshot(requestId, hello) {
+        const response = snapshotResponse(requestId, hello);
+        snapshots++;
+        if (snapshots === 1) return response;
+        if (recovery === "split live receipt") activeSocket!.write(completedFrame.subarray(20));
+        return {
+          ...response, lastEventSeq: 2 as StudioSnapshotResponse["lastEventSeq"],
+          snapshot: { ...response.snapshot, stateVersion: 2 as StateVersion },
+          terminalReceipts: recovery === "snapshot receipt tail" ? [terminal!] : [],
+        };
+      },
+      onRequest(command, socket, hello) {
+        activeSocket = socket;
+        terminal = {
+          type: "studio.receipt", requestId: command.requestId,
+          commandId: "runtime-held-command" as CommandId, runtimeEpoch: hello.runtimeEpoch,
+          stateVersion: 2 as StateVersion, status: "completed",
+        };
+        completedFrame = encodeFrame("completed", hello.runtimeEpoch, terminal);
+        const base = snapshotResponse("state", hello).snapshot;
+        socket.write(Buffer.concat([
+          encodeFrame("accepted", hello.runtimeEpoch, { ...terminal, status: "accepted", stateVersion: 0 }),
+          encodeFrame("gap", hello.runtimeEpoch, {
+            type: "studio.event", runtimeEpoch: hello.runtimeEpoch, eventSeq: 2, stateVersion: 1,
+            occurredAt: "2026-11-12T00:00:00.000Z",
+            event: { kind: "state.changed", snapshot: { ...base, stateVersion: 1 } },
+          }),
+          ...(recovery === "split live receipt" ? [completedFrame.subarray(0, 20)] : []),
+        ]));
+      },
+    });
+    const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
+    const ledger = new CommandLedger();
+    const controller = new StudioRuntimeSessionController(client, ledger);
+    t.after(async () => { controller.dispose(); client.close(); await bridge.close(); });
+    let recovered!: () => void;
+    const recoveryDone = new Promise<void>(resolve => { recovered = resolve; });
+    controller.onPublication(publication => {
+      if (client.state === "ready" && publication.snapshot.stateVersion === 2) recovered();
+    });
+    await client.connect();
+    await controller.refresh();
+    const completed = await controller.invoke(request({ kind: "core.prompt", text: "keep working" }, "gap-held"));
+    await recoveryDone;
+    assert.equal(completed.status, "completed");
+    assert.equal(ledger.getByRequestId("gap-held")?.status, "completed");
+    assert.equal(snapshots, 2);
+    assert.equal(client.state, "ready");
+  });
+}
+
+test("another gap behind a recovery snapshot starts a subsequent refresh", { timeout: 2_000 }, async t => {
+  const token = "bridge-consecutive-gaps";
+  let snapshots = 0;
+  const bridge = await listenForHello(hello => helloResponse(hello, token), {
+    snapshot(requestId, hello) {
+      const response = snapshotResponse(requestId, hello);
+      const version = 2 * snapshots++;
+      return { ...response, lastEventSeq: version as StudioSnapshotResponse["lastEventSeq"],
+        snapshot: { ...response.snapshot, stateVersion: version as StateVersion } };
+    },
+    afterSnapshot(response) {
+      if (snapshots >= 3) return [];
+      return [encodeFrame("next-gap", response.snapshot.runtimeEpoch, {
+        type: "studio.event", runtimeEpoch: response.snapshot.runtimeEpoch,
+        eventSeq: response.lastEventSeq + 2, stateVersion: response.snapshot.stateVersion + 1,
+        occurredAt: "2026-11-12T00:00:00.000Z",
+        event: { kind: "state.changed", snapshot: { ...response.snapshot, stateVersion: response.snapshot.stateVersion + 1 } },
+      })];
+    },
+  });
+  const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
+  const controller = new StudioRuntimeSessionController(client, new CommandLedger());
+  t.after(async () => { controller.dispose(); client.close(); await bridge.close(); });
+  let recovered!: () => void;
+  const done = new Promise<void>(resolve => { recovered = resolve; });
+  controller.onPublication(publication => {
+    if (client.state === "ready" && publication.snapshot.stateVersion === 4) recovered();
+  });
+  await client.connect();
+  await controller.refresh();
+  await done;
+  assert.equal(snapshots, 3);
+  assert.equal(client.state, "ready");
+});
+
 test("WP-012 projection fences stale epochs and requests a snapshot on event gaps", () => {
   const token = "projection-token";
   const hello = helloResponse(

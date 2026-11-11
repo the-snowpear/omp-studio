@@ -2,7 +2,7 @@ import { RUNTIME_VIEW_KINDS } from "./runtime-views-protocol";
 import { CONTEXT_VIEW_KINDS } from "./context-view-protocol";
 import { isComputerWorkspaceQuery, type ComputerWorkspaceQuery } from "./computer-workspace-protocol";
 import { SessionControlError } from "./services/session-control-service";
-import { WORKBENCH_OPERATION_KINDS } from "./workbench-protocol";
+import { isConcurrentStudioOperation } from "./command-arbiter";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as net from "node:net";
@@ -30,13 +30,12 @@ const UPSTREAM_COMMIT = "b5a6b2f7e5b6606b6562e678ead83f21738f34a0";
  * refuses to sign an artifact whose probed identity disagrees with the series,
  * so a stale value here fails the build (see `scripts/build-omp-host.mjs`).
  */
-const PATCHSET_VERSION = "studio.62";
+const PATCHSET_VERSION = "studio.63";
 
 /** Reads and interrupts must not wait for `core.prompt` to finish. Prompt holds
  *  `#dispatchQueue` for the whole turn, including 503 auto-retry backoff. */
 const CONCURRENT_DISPATCH_OPERATION_KINDS = new Set<string>([
 	"prediction.query",
-	...WORKBENCH_OPERATION_KINDS,
 	...CONTEXT_VIEW_KINDS,
 	...RUNTIME_VIEW_KINDS,
 	"session.owner.update",
@@ -45,14 +44,6 @@ const CONCURRENT_DISPATCH_OPERATION_KINDS = new Set<string>([
 	"agent.conversation.read",
 	"interaction.respond",
 	"tui.transfer",
-	"core.abort",
-	"core.steer",
-	"core.followUp",
-	"queue.enqueue",
-	"session.model.set",
-	"session.thinking.set",
-	"session.taskModel.set",
-	"btw.abort",
 ]);
 
 /**
@@ -370,7 +361,10 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 									if (body.type === "studio.snapshot") this.#firstSnapshot?.resolve("ready");
 								});
 							});
-						if (CONCURRENT_DISPATCH_OPERATION_KINDS.has(request.operation.kind)) {
+						if (
+							CONCURRENT_DISPATCH_OPERATION_KINDS.has(request.operation.kind) ||
+							isConcurrentStudioOperation(request.operation.kind)
+						) {
 							void dispatch().catch(() => socket.destroy());
 						} else {
 							this.#dispatchQueue = this.#dispatchQueue.then(dispatch).catch(() => {

@@ -560,6 +560,7 @@ export class StudioSessionArchiveReader {
       const path = join(dir, entry.name);
       const header = await readHeader(path, Math.min(this.#maxSessionBytes, 64 * 1024), this.#maxSessionBytes);
       if (header === undefined) continue;
+      this.#index.versions.set(path, header.version);
       return { path, sessionId: header.id };
     }
     for (const entry of entries) {
@@ -638,6 +639,8 @@ export class StudioSessionArchiveReader {
 
   async #headerId(path: string): Promise<string | undefined> {
     const header = await readHeader(path, Math.min(this.#maxSessionBytes, 64 * 1024), this.#maxSessionBytes);
+    if (header) this.#index.versions.set(path, header.version);
+    else this.#index.versions.delete(path);
     return header?.id;
   }
 

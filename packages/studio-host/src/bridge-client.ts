@@ -130,6 +130,7 @@ export class StudioBridgeClient {
   #runtimeEpoch: RuntimeEpoch | undefined;
   #hello: StudioHelloResponse | undefined;
   #readyDataListener: ((chunk: Buffer) => void) | undefined;
+  #readyDecoder: FrameDecoder | undefined;
   readonly #pendingRequests = new Map<string, PendingRequest>();
   readonly #pendingComputerQueries = new Map<string, PendingComputerQuery>();
   readonly #computerListeners = new Set<(event: StudioComputerEventEnvelope) => void>();
@@ -190,6 +191,7 @@ export class StudioBridgeClient {
     if (!["negotiated", "snapshotting", "snapshot-required", "ready"].includes(this.#state)) return;
     this.#state = "disconnected";
     this.#detachReadyListener();
+    this.#readyDecoder = undefined;
     this.#rejectPending("OUTCOME_UNKNOWN");
     this.#socket?.destroy();
     this.#socket = undefined;
@@ -206,6 +208,7 @@ export class StudioBridgeClient {
     if (this.#state === "closed") return;
     this.#state = "closed";
     this.#detachReadyListener();
+    this.#readyDecoder = undefined;
     this.#rejectPending("OUTCOME_UNKNOWN");
     this.#socket?.destroy();
     this.#socket = undefined;
@@ -216,7 +219,6 @@ export class StudioBridgeClient {
     if (this.#state !== "negotiated" && this.#state !== "snapshot-required" && this.#state !== "ready") {
       throw new Error(`Cannot request Studio Bridge snapshot from ${this.#state}`);
     }
-    if (this.#pendingRequests.size > 0 || this.#pendingComputerQueries.size > 0) throw new Error("Cannot snapshot while Studio Bridge requests are pending");
     const socket = this.#socket;
     const hello = this.#hello;
     const runtimeEpoch = this.#runtimeEpoch;
@@ -226,7 +228,9 @@ export class StudioBridgeClient {
     this.#detachReadyListener();
     this.#state = "snapshotting";
     const requestId = (this.options.createRequestId ?? randomUUID)();
-    const decoder = new FrameDecoder();
+    // A gap can leave the beginning of the next frame buffered. Snapshot
+    // recovery changes the listener, not the authenticated byte stream.
+    const decoder = this.#readyDecoder ?? new FrameDecoder();
     const request: StudioRequest = {
       type: "studio.request",
       requestId: requestId as RequestId,
@@ -249,6 +253,8 @@ export class StudioBridgeClient {
         cleanup();
         socket.destroy();
         if (this.#state !== "closed") this.#state = "disconnected";
+        this.#readyDecoder = undefined;
+        this.#rejectPending("OUTCOME_UNKNOWN");
         reject(new StudioBridgeHandshakeError(code));
       };
       const onError = (): void => fail("CONNECTION_FAILED");
@@ -262,8 +268,6 @@ export class StudioBridgeClient {
           return;
         }
         if (frames.length === 0) return;
-        // Boundary requests can arrive while a fresh snapshot is in flight. Reply now so the Runtime can settle.
-        frames = frames.filter(frame => !this.#processTimeTravelFrame(frame));
         const snapshotIndex = frames.findIndex(
           (frame) =>
             frame.body !== null &&
@@ -271,9 +275,14 @@ export class StudioBridgeClient {
             "type" in frame.body &&
             frame.body.type === "studio.snapshot",
         );
-        if (snapshotIndex < 0) return;
         let response: StudioSnapshotResponse;
         try {
+          // In-flight commands and boundary requests remain live while only
+          // their event projection is paused. Do not drop their control frames.
+          for (const frame of frames.slice(0, snapshotIndex < 0 ? frames.length : snapshotIndex)) {
+            this.#processControlFrame(frame);
+          }
+          if (snapshotIndex < 0) return;
           const snapshotFrame = frames[snapshotIndex]!;
           response = parseStudioSnapshotResponse(snapshotFrame.body);
           if (
@@ -291,9 +300,12 @@ export class StudioBridgeClient {
         settled = true;
         cleanup();
         this.#state = "ready";
+        for (const receipt of response.terminalReceipts) {
+          if (receipt.runtimeEpoch === runtimeEpoch) this.#receiveReceipt(receipt);
+        }
         this.#publishProjection(response.snapshot);
         for (const frame of frames.slice(snapshotIndex + 1)) this.#processReadyFrame(frame);
-        if (this.#state === "ready") this.#attachReadyListener(socket, decoder);
+        if (["ready", "snapshot-required"].includes(this.#state)) this.#attachReadyListener(socket, decoder);
         resolve(response);
       };
       socket.on("data", onData);
@@ -602,6 +614,7 @@ export class StudioBridgeClient {
 
   async #handshake(isReconnect: boolean): Promise<StudioHelloResponse> {
     this.#state = "connecting";
+    this.#readyDecoder = undefined;
     const socket = (this.options.connectSocket ?? createConnection)(this.options.endpoint);
     this.#socket = socket;
     const timeoutMs = this.options.handshakeTimeoutMs ?? 10_000;
@@ -690,6 +703,7 @@ export class StudioBridgeClient {
         this.#runtimeInstanceId = response.runtimeInstanceId;
         this.#runtimeEpoch = response.runtimeEpoch;
         this.#hello = response;
+        this.#readyDecoder = decoder;
         this.#projection.beginConnection(response);
         this.#state = "negotiated";
         socket.once("error", () => socket.destroy());
@@ -705,6 +719,7 @@ export class StudioBridgeClient {
   }
 
   #attachReadyListener(socket: Socket, decoder = new FrameDecoder()): void {
+    this.#readyDecoder = decoder;
     const listener = (chunk: Buffer): void => {
       try {
         for (const frame of decoder.push(chunk)) this.#processReadyFrame(frame);
@@ -773,8 +788,24 @@ export class StudioBridgeClient {
     return false;
   }
 
-  #processReadyFrame(frame: DecodedFrame): void {
-    if (this.#processComputerFrame(frame) || this.#processTimeTravelFrame(frame)) return;
+  #receiveReceipt(receipt: StudioReceipt): boolean {
+    const pending = this.#pendingRequests.get(receipt.requestId);
+    if (pending === undefined) return false;
+    try {
+      pending.onReceipt?.(receipt);
+    } catch (error) {
+      this.#report(error, "receipt");
+    }
+    if (TERMINAL_RECEIPT_STATUSES.has(receipt.status)) {
+      if (pending.timer !== undefined) clearTimeout(pending.timer);
+      this.#pendingRequests.delete(receipt.requestId);
+      pending.resolve(receipt);
+    }
+    return true;
+  }
+
+  #processControlFrame(frame: DecodedFrame): boolean {
+    if (this.#processComputerFrame(frame) || this.#processTimeTravelFrame(frame)) return true;
     if (
       frame.body !== null &&
       typeof frame.body === "object" &&
@@ -785,34 +816,27 @@ export class StudioBridgeClient {
       if (frame.header.runtimeEpoch !== receipt.runtimeEpoch || receipt.runtimeEpoch !== this.#runtimeEpoch) {
         throw new Error("Receipt epoch mismatch");
       }
-      const pending = this.#pendingRequests.get(receipt.requestId);
       // A receipt for a request this connection never sent (for example a late
       // reply from the Runtime's previous epoch) carries no state. Ignoring it
       // is safe; throwing here used to destroy the whole Bridge.
-      if (pending === undefined) {
+      if (!this.#receiveReceipt(receipt)) {
         this.#report(new Error("Uncorrelated Studio receipt"), "receipt");
-        return;
       }
-      try {
-        pending.onReceipt?.(receipt);
-      } catch (error) {
-        this.#report(error, "receipt");
-      }
-      if (TERMINAL_RECEIPT_STATUSES.has(receipt.status)) {
-        if (pending.timer !== undefined) clearTimeout(pending.timer);
-        this.#pendingRequests.delete(receipt.requestId);
-        pending.resolve(receipt);
-      }
-      return;
+      return true;
     }
+    return false;
+  }
+
+  #processReadyFrame(frame: DecodedFrame): void {
+    if (this.#processControlFrame(frame)) return;
     const event = parseStudioEventEnvelope(frame.body);
     if (frame.header.runtimeEpoch !== event.runtimeEpoch) throw new Error("Event epoch mismatch");
+    if (this.#state !== "ready") return;
     const revisionBefore = this.#projection.snapshotRevision();
     const result = this.#projection.applyEvent(event);
     if (result === "gap") {
       this.#rejectComputerQueries();
       this.#state = "snapshot-required";
-      this.#detachReadyListener();
       this.options.onResyncRequired?.();
       for (const listener of [...this.#resyncListeners]) {
         try {
@@ -864,7 +888,10 @@ export class StudioBridgeClient {
 
   #handleSocketClosed(socket: Socket): void {
     this.#detachReadyListener(socket);
-    if (this.#socket === socket) this.#socket = undefined;
+    if (this.#socket === socket) {
+      this.#socket = undefined;
+      this.#readyDecoder = undefined;
+    }
     if (this.#state === "closed" || this.#state === "disconnected" || this.#state === "idle") return;
     this.#state = "disconnected";
     this.#rejectPending("OUTCOME_UNKNOWN");

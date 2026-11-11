@@ -43,6 +43,7 @@ test("patch regeneration includes staged and unstaged edits against the upstream
   assert.match(patch, /\+export const unstaged = true;/);
   git("apply", "--reverse", "--check", patchFile);
   const series = await readFile(join(patches, "series.json"), "utf8");
+  git("config", "core.abbrev", "16");
   regenerate();
   assert.equal(await readFile(patchFile, "utf8"), patch);
   assert.equal(await readFile(join(patches, "series.json"), "utf8"), series);

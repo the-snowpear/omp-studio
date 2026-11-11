@@ -128,6 +128,11 @@ const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 	"eval.workpool.status",
 ]);
 
+/** The wire dispatcher and command lease must agree on mid-turn operations. */
+export function isConcurrentStudioOperation(kind: string): boolean {
+	return CONCURRENT_WITH_LEASE_OPERATION_KINDS.has(kind);
+}
+
 const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([
 	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
@@ -277,7 +282,7 @@ export class StudioRuntimeCommandArbiter {
 		if (this.#interaction !== undefined && !DEFERRED_SESSION_PREFERENCE_KINDS.has(request.operation.kind)) {
 			throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "An interaction is active");
 		}
-		if (CONCURRENT_WITH_LEASE_OPERATION_KINDS.has(request.operation.kind)) {
+		if (isConcurrentStudioOperation(request.operation.kind)) {
 			return await execute();
 		}
 		if (this.#lease !== undefined) {

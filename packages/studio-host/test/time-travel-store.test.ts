@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   mkdtemp,
   mkdir,
   readFile,
   readdir,
+  realpath,
   writeFile,
   rm,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { gzipSync } from "node:zlib";
 import test from "node:test";
 import { TimeTravelStore } from "../src/time-travel-store.js";
 
@@ -36,6 +39,45 @@ function git(workspace: string, ...args: string[]): string {
     windowsHide: true,
   });
 }
+
+test("legacy checkpoints expose file counts and remain restorable after metadata migration", async t => {
+  const { workspace, profile, store } = await fixture();
+  const temporary = await realpath(dirname(workspace));
+  t.after(async () => {
+    const tail = relative(resolve(tmpdir()), temporary);
+    assert.ok(tail && !isAbsolute(tail) && tail !== ".." && !tail.startsWith(`..${sep}`));
+    await rm(temporary, { recursive: true, force: true });
+  });
+  const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+  const canonicalWorkspace = await realpath(workspace);
+  const directory = join(profile, "time-travel/v1/sessions", hash(canonicalWorkspace), hash("session"));
+  const contentHash = hash("old content");
+  const blobDirectory = join(profile, "time-travel/v1/blobs", contentHash.slice(0, 2));
+  await mkdir(directory, { recursive: true });
+  await mkdir(blobDirectory, { recursive: true });
+  await writeFile(join(blobDirectory, `${contentHash}.gz`), gzipSync("old content"));
+  const legacy = {
+    id: "legacy-point", sessionId: "session", workspace: hash(canonicalWorkspace),
+    leafId: "legacy-leaf", phase: "after", createdAt: "2026-01-01T00:00:00.000Z",
+    entries: [{ path: "file.txt", kind: "file", hash: contentHash, mode: 0o644 }],
+    changes: { added: 1, modified: 0, deleted: 0 },
+  };
+  await writeFile(join(directory, `${legacy.id}.json`), JSON.stringify(legacy));
+  await writeFile(join(workspace, "file.txt"), "current content");
+
+  const timeline = await store.list(workspace, "session");
+  assert.equal(timeline[0]?.id, legacy.id);
+  assert.equal(timeline[0]?.fileCount, 1);
+  assert.deepEqual(timeline[0]?.changes, legacy.changes);
+  const preview = await store.preview(workspace, "session", legacy.id);
+  const restored = await store.restore({ workspace, sessionId: "session", snapshotId: legacy.id,
+    expectedRevision: preview.revision, leafId: "current-leaf" });
+  assert.equal(restored.restored, true);
+  assert.equal(await readFile(join(workspace, "file.txt"), "utf8"), "old content");
+  assert.equal((await store.list(workspace, "session")).find(row => row.id === restored.backup.id)?.fileCount, 1);
+  await store.cleanup(null);
+  assert.deepEqual(await store.storage(), { snapshots: 0, bytes: 0 });
+});
 
 test("captures untracked files and restores the worktree without changing the index", async () => {
   const { workspace, store } = await fixture();

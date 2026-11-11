@@ -927,6 +927,85 @@ describe("WP-011 Studio Bridge runtime server", () => {
 		).toBe(true);
 	});
 
+	for (const operation of [
+		{ kind: "job.cancel", jobId: "running-job", expectedGeneration: 1 },
+		{ kind: "agent.kill", agentId: "running-agent", expectedGeneration: 1 },
+		{ kind: "btw.ask", question: "What has changed?" },
+	]) {
+		test(`${operation.kind} completes before a held main prompt`, async () => {
+			const fixture = await bridgeFixture();
+			const { runtime, session } = sessionControlRuntime();
+			const releasePrompt = Promise.withResolvers<void>();
+			Object.assign(session, {
+				prompt: async () => {
+					await releasePrompt.promise;
+					return true;
+				},
+			});
+			let interrupts = 0;
+			const interrupt = async () => {
+				interrupts++;
+				return { completed: true };
+			};
+			Object.assign(runtime.services.jobs, { cancel: interrupt });
+			Object.assign(runtime.services.agents, { kill: interrupt });
+			Object.assign(runtime.services.btw, { ask: interrupt });
+			const server = new StudioBridgeServer(fixture.endpoint, fixture.tokenFile);
+			servers.push(server);
+			const started = server.start(runtime);
+			await waitForTokenConsumption(fixture.tokenFile);
+			const socket = await connect(fixture.endpoint);
+			const hello = receiveFrame(socket);
+			sendHello(socket, "challenge-mid-turn");
+			await hello;
+			await exchangeSnapshot(socket, "snapshot-mid-turn");
+			await started;
+			try {
+				const accepted = receiveFrame(socket);
+				socket.write(
+					encodeStudioFrame("held-main", 7, {
+						type: "studio.request",
+						requestId: "held-main",
+						runtimeEpoch: 7,
+						operation: { kind: "core.prompt", text: "keep running" },
+					}),
+				);
+				expect((await accepted).body).toMatchObject({ requestId: "held-main", status: "accepted" });
+				socket.write(
+					encodeStudioFrame("interrupt", 7, {
+						type: "studio.request",
+						requestId: "interrupt",
+						runtimeEpoch: 7,
+						operation,
+					}),
+				);
+				const frames = await collectFramesFor(socket, 400);
+				expect(interrupts).toBe(1);
+				expect(
+					frames.some(frame => {
+						const body = frame.body as { requestId?: string; status?: string };
+						return body.requestId === "interrupt" && body.status === "completed";
+					}),
+				).toBe(true);
+				expect(
+					frames.some(frame => {
+						const body = frame.body as { requestId?: string; status?: string };
+						return body.requestId === "held-main" && body.status === "completed";
+					}),
+				).toBe(false);
+			} finally {
+				releasePrompt.resolve();
+			}
+			const finished = await collectFramesFor(socket, 100);
+			expect(
+				finished.some(frame => {
+					const body = frame.body as { requestId?: string; status?: string };
+					return body.requestId === "held-main" && body.status === "completed";
+				}),
+			).toBe(true);
+		});
+	}
+
 	test("a peer that never drains stops the outbound event backlog from growing", async () => {
 		const fixture = await bridgeFixture();
 		const { runtime } = sessionControlRuntime();

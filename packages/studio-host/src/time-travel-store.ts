@@ -58,6 +58,11 @@ export interface TimeTravelSnapshot {
   };
 }
 
+/** Timeline rows do not retain the checkpoint's complete file manifest. */
+export interface TimeTravelSnapshotMetadata extends Omit<TimeTravelSnapshot, "entries"> {
+  readonly fileCount: number;
+}
+
 export interface TimeTravelChange {
   readonly path: string;
   readonly kind: "add" | "modify" | "delete";
@@ -269,6 +274,66 @@ export class TimeTravelStore {
     return join(this.#root, "sessions", digest(workspace), digest(sessionId));
   }
 
+  #metadataId(name: string): string {
+    return name.slice(name.indexOf("_") + 1, -".json".length);
+  }
+
+  async #writeMetadata(directory: string, snapshot: TimeTravelSnapshot, manifestName: string): Promise<string> {
+    const metadataDirectory = join(directory, ".metadata");
+    await mkdir(metadataDirectory, { recursive: true });
+    const name = `${new Date(snapshot.createdAt).toISOString().replaceAll(":", "-")}_${manifestName}`;
+    const { entries, ...header } = snapshot;
+    const metadata: TimeTravelSnapshotMetadata = { ...header, fileCount: entries.length };
+    const temporary = join(metadataDirectory, `${randomUUID()}.tmp`);
+    try {
+      await writeFile(temporary, JSON.stringify(metadata), { flag: "wx", mode: 0o600 });
+      await rename(temporary, join(metadataDirectory, name));
+    } finally {
+      await rm(temporary, { force: true });
+    }
+    return name;
+  }
+
+  async #readManifest(directory: string, name: string): Promise<TimeTravelSnapshot> {
+    return JSON.parse(await readFile(join(directory, name), "utf8")) as TimeTravelSnapshot;
+  }
+
+  async #readSnapshot(directory: string, snapshotId: string): Promise<TimeTravelSnapshot> {
+    const files = await readdir(directory, { withFileTypes: true }).catch(missingDirectory);
+    // The id comes from a command. Match a directory entry before using its
+    // name as a path, preserving the former list-and-find containment boundary.
+    const file = files.find(entry => entry.isFile() && entry.name === `${snapshotId}.json`);
+    if (!file) throw new Error("Snapshot is not available");
+    return this.#readManifest(directory, file.name);
+  }
+
+  async #metadataFiles(directory: string): Promise<string[]> {
+    const manifests = (await readdir(directory, { withFileTypes: true }).catch(missingDirectory))
+      .filter(file => file.isFile() && file.name.endsWith(".json"))
+      .map(file => file.name);
+    const manifestNames = new Set(manifests);
+    const metadataDirectory = join(directory, ".metadata");
+    const metadata = (await readdir(metadataDirectory).catch(missingDirectory))
+      .filter(name => name.endsWith(".json") && manifestNames.has(`${this.#metadataId(name)}.json`));
+    const indexed = new Set(metadata.map(name => `${this.#metadataId(name)}.json`));
+    const missing = manifests.filter(name => !indexed.has(name));
+    let next = 0;
+    // Old v1 manifests remain readable. Backfill only missing summaries, with
+    // bounded parsing rather than retaining every legacy entries array.
+    await Promise.all(Array.from({ length: Math.min(4, missing.length) }, async () => {
+      for (let index = next++; index < missing.length; index = next++) {
+        const snapshot = await this.#readManifest(directory, missing[index]!);
+        metadata.push(await this.#writeMetadata(directory, snapshot, missing[index]!));
+      }
+    }));
+    return metadata.sort();
+  }
+
+  async #latestSnapshot(directory: string): Promise<TimeTravelSnapshot | undefined> {
+    const latest = (await this.#metadataFiles(directory)).at(-1);
+    return latest === undefined ? undefined : this.#readManifest(directory, `${this.#metadataId(latest)}.json`);
+  }
+
   #blob(hash: string): string {
     return join(this.#root, "blobs", hash.slice(0, 2), `${hash}.gz`);
   }
@@ -389,7 +454,8 @@ export class TimeTravelStore {
       const entry = await this.#entry(workspace, name);
       if (entry) entries.push(entry);
     }
-    const previous = (await this.list(workspace, input.sessionId)).at(-1);
+    const directory = this.#manifestDirectory(workspace, input.sessionId);
+    const previous = await this.#latestSnapshot(directory);
     const oldEntries = new Map(
       previous?.entries.map((entry) => [entry.path, entry]),
     );
@@ -412,7 +478,6 @@ export class TimeTravelStore {
       entries,
       changes,
     };
-    const directory = this.#manifestDirectory(workspace, input.sessionId);
     await mkdir(directory, { recursive: true });
     const temporary = join(directory, `${snapshot.id}.tmp`);
     await writeFile(temporary, JSON.stringify(snapshot), {
@@ -420,6 +485,7 @@ export class TimeTravelStore {
       mode: 0o600,
     });
     await rename(temporary, join(directory, `${snapshot.id}.json`));
+    await this.#writeMetadata(directory, snapshot, `${snapshot.id}.json`);
     return snapshot;
   }
 
@@ -436,26 +502,20 @@ export class TimeTravelStore {
   async list(
     workspacePath: string,
     sessionId: string,
-  ): Promise<TimeTravelSnapshot[]> {
+  ): Promise<TimeTravelSnapshotMetadata[]> {
     const workspace = await this.#workspace(workspacePath);
     const directory = this.#manifestDirectory(workspace, sessionId);
-    const files = await readdir(directory).catch(
-      (error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return [];
-        throw error;
-      },
-    );
+    const files = await this.#metadataFiles(directory);
     const snapshots = await Promise.all(
       files
-        .filter((name) => name.endsWith(".json"))
         .map(
           async (name) =>
             JSON.parse(
-              await readFile(join(directory, name), "utf8"),
-            ) as TimeTravelSnapshot,
+              await readFile(join(directory, ".metadata", name), "utf8"),
+            ) as TimeTravelSnapshotMetadata,
         ),
     );
-    return snapshots.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return snapshots;
   }
 
   async #preview(
@@ -465,10 +525,7 @@ export class TimeTravelStore {
     exclusions: readonly string[],
   ): Promise<TimeTravelRestorePreview> {
     const workspace = await this.#workspace(workspacePath);
-    const snapshot = (await this.list(workspace, sessionId)).find(
-      (row) => row.id === snapshotId,
-    );
-    if (!snapshot) throw new Error("Snapshot is not available");
+    const snapshot = await this.#readSnapshot(this.#manifestDirectory(workspace, sessionId), snapshotId);
     const target = new Map(
       snapshot.entries.map((entry) => [entry.path, entry]),
     );
@@ -678,9 +735,7 @@ export class TimeTravelStore {
           .filter((change) => change.kind !== "add")
           .map((change) => change.path),
       });
-      const snapshot = (await this.list(workspace, input.sessionId)).find(
-        (row) => row.id === input.snapshotId,
-      )!;
+      const snapshot = await this.#readSnapshot(this.#manifestDirectory(workspace, input.sessionId), input.snapshotId);
       const temporary = safePath(this.#root, `tmp/${randomUUID()}`);
       try {
         const desired = await this.#stage(
@@ -732,10 +787,19 @@ export class TimeTravelStore {
   }
   storage(): Promise<{ snapshots: number; bytes: number }> {
     return this.#serial(async () => {
-      const manifests = await this.#allManifests();
+      let snapshots = 0;
       let bytes = 0;
-      for (const manifest of manifests)
-        bytes += (await lstat(manifest.path)).size;
+      for await (const directory of this.#sessionDirectories()) {
+        for (const file of await readdir(directory, { withFileTypes: true })) {
+          if (!file.isFile() || !file.name.endsWith(".json")) continue;
+          snapshots++;
+          bytes += (await lstat(join(directory, file.name))).size;
+        }
+        const metadataDirectory = join(directory, ".metadata");
+        for (const file of await readdir(metadataDirectory, { withFileTypes: true }).catch(missingDirectory)) {
+          if (file.isFile() && file.name.endsWith(".json")) bytes += (await lstat(join(metadataDirectory, file.name))).size;
+        }
+      }
       const blobs = join(this.#root, "blobs");
       for (const prefix of await readdir(blobs, { withFileTypes: true }).catch(
         missingDirectory,
@@ -748,25 +812,47 @@ export class TimeTravelStore {
             bytes += (await lstat(join(blobs, prefix.name, file.name))).size;
         }
       }
-      return { snapshots: manifests.length, bytes };
+      return { snapshots, bytes };
     });
   }
 
   cleanup(olderThan: Date | null): Promise<{ removed: number }> {
     return this.#serial(async () => {
-      const manifests = await this.#allManifests();
       const retained = new Set<string>();
       let removed = 0;
-      for (const { path, snapshot } of manifests) {
-        if (
-          olderThan === null ||
-          Date.parse(snapshot.createdAt) < olderThan.getTime()
-        ) {
-          await rm(path);
-          removed++;
-        } else {
-          for (const entry of snapshot.entries)
-            if (entry.kind === "file") retained.add(entry.hash);
+      for await (const directory of this.#sessionDirectories()) {
+        const metadataDirectory = join(directory, ".metadata");
+        if (olderThan === null) {
+          for (const file of await readdir(directory, { withFileTypes: true })) {
+            if (!file.isFile() || !file.name.endsWith(".json")) continue;
+            await rm(join(directory, file.name));
+            removed++;
+          }
+          for (const file of await readdir(metadataDirectory, { withFileTypes: true }).catch(missingDirectory)) {
+            if (file.isFile() && file.name.endsWith(".json")) await rm(join(metadataDirectory, file.name));
+          }
+          continue;
+        }
+        const retainedIds = new Set<string>();
+        const cutoff = olderThan.toISOString().replaceAll(":", "-");
+        for (const name of await this.#metadataFiles(directory)) {
+          const id = this.#metadataId(name);
+          // The canonical UTC prefix is enough to expire a checkpoint. Only
+          // retained checkpoints need their full entries for blob collection.
+          if (name.slice(0, name.indexOf("_")) < cutoff) {
+            await rm(join(directory, `${id}.json`));
+            removed++;
+          } else {
+            retainedIds.add(id);
+            const snapshot = await this.#readManifest(directory, `${id}.json`);
+            for (const entry of snapshot.entries)
+              if (entry.kind === "file") retained.add(entry.hash);
+          }
+        }
+        // Summaries are derived data. Remove both expired rows and any summary
+        // whose manifest was removed before a previous cleanup could finish.
+        for (const name of await readdir(metadataDirectory).catch(missingDirectory)) {
+          if (name.endsWith(".json") && !retainedIds.has(this.#metadataId(name))) await rm(join(metadataDirectory, name));
         }
       }
       const blobs = join(this.#root, "blobs");
@@ -789,11 +875,8 @@ export class TimeTravelStore {
     });
   }
 
-  async #allManifests(): Promise<
-    Array<{ path: string; snapshot: TimeTravelSnapshot }>
-  > {
+  async *#sessionDirectories(): AsyncGenerator<string> {
     const root = join(this.#root, "sessions");
-    const result: Array<{ path: string; snapshot: TimeTravelSnapshot }> = [];
     for (const workspace of await readdir(root, { withFileTypes: true }).catch(
       missingDirectory,
     )) {
@@ -803,19 +886,8 @@ export class TimeTravelStore {
         withFileTypes: true,
       })) {
         if (!session.isDirectory()) continue;
-        const sessionDir = join(workspaceDir, session.name);
-        for (const file of await readdir(sessionDir, { withFileTypes: true })) {
-          if (!file.isFile() || !file.name.endsWith(".json")) continue;
-          const path = join(sessionDir, file.name);
-          result.push({
-            path,
-            snapshot: JSON.parse(
-              await readFile(path, "utf8"),
-            ) as TimeTravelSnapshot,
-          });
-        }
+        yield join(workspaceDir, session.name);
       }
     }
-    return result;
   }
 }

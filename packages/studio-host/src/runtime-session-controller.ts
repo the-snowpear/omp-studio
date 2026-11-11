@@ -39,10 +39,9 @@ const TERMINAL = new Set<CommandLedgerEntry["status"]>(["completed", "failed", "
 
 /**
  * Delay between snapshot-recovery attempts after an event-sequence gap. The
- * first attempt is immediate; a retry only happens when the Bridge refuses a
- * snapshot because commands are still in flight, so the interval only has to be
- * long enough not to spin — 250 ms matches the Runtime's telemetry debounce, the
- * coarsest cadence the Host already waits on.
+ * first attempt is immediate. Another gap may arrive in the same read as the
+ * recovery snapshot, so subsequent attempts wait long enough not to spin —
+ * 250 ms matches the Runtime's telemetry debounce.
  */
 const RESYNC_SNAPSHOT_RETRY_MS = 250;
 
@@ -96,8 +95,8 @@ export class StudioRuntimeSessionController {
 
   /**
    * Telling the Renderer to re-read transcripts is only half of gap recovery. A
-   * gap also leaves the Bridge in `snapshot-required` with its event listener
-   * detached, and nothing else ever re-requests a snapshot — `refresh()` is
+   * gap also leaves the Bridge's projection in `snapshot-required`, and nothing
+   * else re-requests a snapshot — `refresh()` is
    * called once at startup — so without this the connection stays wedged and no
    * further Runtime event is processed at all.
    */
@@ -112,17 +111,16 @@ export class StudioRuntimeSessionController {
         if (this.#disposed || this.bridge.state !== "snapshot-required") return;
         await this.refresh();
       })
-      .catch(() => {
-        // A snapshot is refused while commands are pending. Keep asking for as
-        // long as the Bridge still needs one: giving up would leave it wedged.
+      .catch(() => undefined)
+      .finally(() => {
+        this.#resyncInFlight = false;
+        // A new gap can be delivered before refresh() settles. Its subscriber
+        // could not start another refresh while this one was still in flight.
         if (this.#disposed || this.bridge.state !== "snapshot-required") return;
         this.#resyncTimer = setTimeout(() => {
           this.#resyncTimer = undefined;
           this.#recoverFromGap();
         }, RESYNC_SNAPSHOT_RETRY_MS);
-      })
-      .finally(() => {
-        this.#resyncInFlight = false;
       });
   }
 
