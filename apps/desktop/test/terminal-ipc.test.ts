@@ -131,6 +131,9 @@ function makeSender(id: number): FakeSender {
       }
       set.add(listener);
     },
+    off(event, listener) {
+      onceListeners.get(event)?.delete(listener);
+    },
     fireOnce(event) {
       for (const listener of [...(onceListeners.get(event) ?? [])]) listener();
       onceListeners.delete(event);
@@ -157,7 +160,7 @@ function makeIpc(): FakeIpc {
   };
 }
 
-function register(trusted: (sender: TerminalSender) => boolean = () => true) {
+function register(trusted: (sender: TerminalSender) => boolean = () => true, resolveWorkspaceCwd?: (workspaceId: string) => Promise<string>) {
   const ipc = makeIpc();
   const ptys: FakePty[] = [];
   const timers = new ManualTimers();
@@ -168,7 +171,7 @@ function register(trusted: (sender: TerminalSender) => boolean = () => true) {
     newId: () => `term-${ptys.length + 1}xxxx`,
     output: { timers },
   });
-  const handle = registerTerminalIpc({ ipcMain: ipc, isTrustedSender: trusted, manager });
+  const handle = registerTerminalIpc({ ipcMain: ipc, isTrustedSender: trusted, manager, ...(resolveWorkspaceCwd ? { resolveWorkspaceCwd } : {}) });
   return {
     ipc,
     ptys,
@@ -300,6 +303,31 @@ describe("registerTerminalIpc", () => {
     assert.ok(ptys.every((pty) => pty.killed));
     handle.dispose();
   });
+
+  for (const event of ["did-navigate", "render-process-gone", "destroyed", "dispose"] as const) {
+    test(`does not spawn a late workspace terminal after ${event}`, async () => {
+      let finish!: (cwd: string) => void;
+      const source = register(() => true, () => new Promise(resolve => { finish = resolve; }));
+      const sender = makeSender(3);
+      try {
+        const opening = source.invoke(TERMINAL_IPC_CHANNELS.create, sender, { workspaceId: "workspace" }) as Promise<unknown>;
+        const rejected = assert.rejects(opening, /window has closed/);
+        if (event === "dispose") source.handle.dispose();
+        else { if (event === "destroyed") sender.destroyed = true; sender.fireOnce(event); }
+        const fresh = event === "did-navigate" || event === "render-process-gone"
+          ? source.invoke(TERMINAL_IPC_CHANNELS.create, sender, {}) as { id: string }
+          : undefined;
+        finish("D:\\late-workspace");
+        await rejected;
+        assert.equal(source.ptys.length, fresh ? 1 : 0);
+        if (fresh) {
+          source.invoke(TERMINAL_IPC_CHANNELS.write, sender, { id: fresh.id, data: "new document\r" });
+          assert.deepEqual(source.ptys[0]?.writes, ["new document\r"]);
+          assert.equal(source.ptys[0]?.killed, false);
+        }
+      } finally { source.handle.dispose(); }
+    });
+  }
 
   test("natural exits free running slots while their tails remain wired", () => {
     const { invoke, ptys, handle, timers } = register();

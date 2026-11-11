@@ -14,7 +14,7 @@ test("browser frames are window-owned and bounded by acknowledgements, with expl
   const directory = await mkdtemp(join(tmpdir(), "omp-bo-")); const id = randomUUID(); const tabId = randomUUID(); const token = randomBytes(32).toString("hex");
   const endpoint = process.platform === "win32" ? "\\\\.\\pipe\\omp-studio-browser-" + id : join(directory, "b-" + createHash("sha256").update(id).digest("hex").slice(0, 16) + ".sock");
   const events: BrowserObservationEvent[] = []; const inputs: string[] = []; let peer: Socket | undefined;
-  const sender: TerminalSender = { id: 7, isDestroyed: () => false, getURL: () => "file:///studio/index.html", send: (_channel, payload) => events.push(payload as BrowserObservationEvent), once: () => {} };
+  const sender: TerminalSender = { id: 7, isDestroyed: () => false, getURL: () => "file:///studio/index.html", send: (_channel, payload) => events.push(payload as BrowserObservationEvent), once: () => {}, off: () => {} };
   const server = createServer(socket => { peer = socket; let pending = ""; let auth = false; socket.on("data", chunk => { pending += chunk.toString(); for (let at = pending.indexOf("\n"); at >= 0; at = pending.indexOf("\n")) { const line = pending.slice(0, at); pending = pending.slice(at + 1); if (!auth) { assert.equal(line, token); auth = true; socket.write("OK\n"); } else inputs.push(line); } }); });
   const manager = new DesktopBrowserObservation({ directory: () => directory, socketDirectory: async () => directory });
   const until = async (predicate: () => boolean) => { for (let n = 0; n < 100 && !predicate(); n++) await delay(5); assert.ok(predicate()); };

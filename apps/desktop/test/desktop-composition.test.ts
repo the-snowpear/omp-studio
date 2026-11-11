@@ -549,23 +549,25 @@ test("composition follows the P1 initialization order and bootstraps read-only w
       resolver: { probe: fullParityProbe() },
     });
 
-    // Managed preference with nothing installed resolves to rejected: the
-    // session port must never be invoked and the composition is read-only.
-    assert.deepEqual(session.calls, []);
-    assert.equal(composition.status, "read-only");
-    assert.deepEqual(platform.calls, ["appDataDirectory"]);
-    assert.deepEqual(lock.calls, ["acquire"]);
-    assert.deepEqual(endpoint.calls, ["endpoint.create"]);
-    assert.deepEqual(session.contexts, []);
+    try {
+      // Managed preference with nothing installed resolves to rejected: the
+      // session port must never be invoked and the composition is read-only.
+      assert.deepEqual(session.calls, []);
+      assert.equal(composition.status, "read-only");
+      assert.deepEqual(platform.calls, ["appDataDirectory"]);
+      assert.deepEqual(lock.calls, ["acquire"]);
+      assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+      assert.deepEqual(session.contexts, []);
 
-    const bootstrap = await composition.facade.bootstrap();
-    assertWithoutSnapshot(bootstrap);
-    assert.equal(bootstrap.runtime.unavailableCode, "resolution-rejected");
-    assert.equal(bootstrap.authority.authorityId, "auth-0001");
-    assert.equal(typeof bootstrap.authority.authorityEpoch, "number");
-    assert.ok(bootstrap.authority.authorityEpoch >= 1);
-    assert.equal(lock.released, false);
-    assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+      const bootstrap = await composition.facade.bootstrap();
+      assertWithoutSnapshot(bootstrap);
+      assert.equal(bootstrap.runtime.unavailableCode, "resolution-rejected");
+      assert.equal(bootstrap.authority.authorityId, "auth-0001");
+      assert.equal(typeof bootstrap.authority.authorityEpoch, "number");
+      assert.ok(bootstrap.authority.authorityEpoch >= 1);
+      assert.equal(lock.released, false);
+      assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+    } finally { await composition.shutdown(); }
   });
 });
 
@@ -589,28 +591,30 @@ test("a trusted resolution creates the runtime session and bootstraps ready", as
         preference: { kind: "system", executable: executablePath, allowLimited: false },
       });
 
-      assert.equal(composition.status, "ready");
-      // Order: profile directory -> lock -> endpoint -> session.
-      assert.deepEqual(platform.calls, ["appDataDirectory"]);
-      assert.deepEqual(lock.calls, ["acquire"]);
-      assert.deepEqual(endpoint.calls, ["endpoint.create"]);
-      assert.deepEqual(session.calls, ["session.start"]);
-      assert.equal(session.contexts.length, 1);
-      const context = session.contexts[0];
-      assert.ok(context);
-      assert.equal(context.resolution.classification, "compatible-system");
-      assert.equal(context.endpoint.kind, "in-memory");
-      assert.equal(context.profileDirectory, profileDirectory);
-      assert.equal(context.runtimeInstallDirectory, join(profileDirectory, "runtimes"));
+      try {
+        assert.equal(composition.status, "ready");
+        // Order: profile directory -> lock -> endpoint -> session.
+        assert.deepEqual(platform.calls, ["appDataDirectory"]);
+        assert.deepEqual(lock.calls, ["acquire"]);
+        assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+        assert.deepEqual(session.calls, ["session.start"]);
+        assert.equal(session.contexts.length, 1);
+        const context = session.contexts[0];
+        assert.ok(context);
+        assert.equal(context.resolution.classification, "compatible-system");
+        assert.equal(context.endpoint.kind, "in-memory");
+        assert.equal(context.profileDirectory, profileDirectory);
+        assert.equal(context.runtimeInstallDirectory, join(profileDirectory, "runtimes"));
 
-      const bootstrap = await composition.facade.bootstrap();
-      assert.equal(bootstrap.runtime.status, "connected");
-      assert.equal(bootstrap.runtime.classification, "compatible-system");
-      assert.equal(bootstrap.runtime.runtimeId, "rt-0001");
-      assertWithSnapshot(bootstrap);
-      assert.equal(bootstrap.stateVersion, 1);
-      assert.equal(lock.released, false);
-      assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+        const bootstrap = await composition.facade.bootstrap();
+        assert.equal(bootstrap.runtime.status, "connected");
+        assert.equal(bootstrap.runtime.classification, "compatible-system");
+        assert.equal(bootstrap.runtime.runtimeId, "rt-0001");
+        assertWithSnapshot(bootstrap);
+        assert.equal(bootstrap.stateVersion, 1);
+        assert.equal(lock.released, false);
+        assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+      } finally { await composition.shutdown(); }
     });
   });
 });
@@ -646,11 +650,16 @@ test("isBusy reports streaming residents first and falls back to the current sna
           runtimeSession: fakeSessionPort({ ready: true, listResidents: () => residentsWith(phase) }).port,
         });
 
+      const assertBusy = async (opening: Promise<DesktopHostComposition>, expected: boolean) => {
+        const composition = await opening;
+        try { assert.equal(composition.isBusy(), expected); }
+        finally { await composition.shutdown(); }
+      };
       // Residents read model is authoritative when the port exposes one.
-      assert.equal((await withResidents("running")).isBusy(), true);
-      assert.equal((await withResidents("compacting")).isBusy(), true);
-      assert.equal((await withResidents("waiting")).isBusy(), false);
-      assert.equal((await withResidents("idle")).isBusy(), false);
+      await assertBusy(withResidents("running"), true);
+      await assertBusy(withResidents("compacting"), true);
+      await assertBusy(withResidents("waiting"), false);
+      await assertBusy(withResidents("idle"), false);
 
       // Without a broker view the current session snapshot decides.
       const withSnapshot = async (snapshot: OperatorStateSnapshot): Promise<DesktopHostComposition> =>
@@ -658,9 +667,9 @@ test("isBusy reports streaming residents first and falls back to the current sna
           ...baseOptions(),
           runtimeSession: fakeSessionPort({ ready: true, snapshot }).port,
         });
-      assert.equal((await withSnapshot({ ...SNAPSHOT, isStreaming: true })).isBusy(), true);
-      assert.equal((await withSnapshot({ ...SNAPSHOT, isCompacting: true })).isBusy(), true);
-      assert.equal((await withSnapshot(SNAPSHOT)).isBusy(), false);
+      await assertBusy(withSnapshot({ ...SNAPSHOT, isStreaming: true }), true);
+      await assertBusy(withSnapshot({ ...SNAPSHOT, isCompacting: true }), true);
+      await assertBusy(withSnapshot(SNAPSHOT), false);
     });
   });
 });
@@ -704,11 +713,13 @@ test("a not-ready session port yields a read-only composition without a fake sna
         resolver: { probe: fullParityProbe() },
         preference: { kind: "system", executable: executablePath, allowLimited: false },
       });
-      assert.equal(composition.status, "read-only");
-      assert.deepEqual(session.calls, ["session.start"]);
-      const bootstrap = await composition.facade.bootstrap();
-      assertWithoutSnapshot(bootstrap);
-      assert.equal(bootstrap.runtime.unavailableCode, "no-workspace");
+      try {
+        assert.equal(composition.status, "read-only");
+        assert.deepEqual(session.calls, ["session.start"]);
+        const bootstrap = await composition.facade.bootstrap();
+        assertWithoutSnapshot(bootstrap);
+        assert.equal(bootstrap.runtime.unavailableCode, "no-workspace");
+      } finally { await composition.shutdown(); }
     });
   });
 });
@@ -723,10 +734,12 @@ test("without a runtime session port the composition stays read-only even with a
         resolver: { probe: fullParityProbe() },
         preference: { kind: "system", executable: executablePath, allowLimited: false },
       });
-      assert.equal(composition.status, "read-only");
-      const bootstrap = await composition.facade.bootstrap();
-      assertWithoutSnapshot(bootstrap);
-      assert.equal(bootstrap.runtime.unavailableCode, "not-wired");
+      try {
+        assert.equal(composition.status, "read-only");
+        const bootstrap = await composition.facade.bootstrap();
+        assertWithoutSnapshot(bootstrap);
+        assert.equal(bootstrap.runtime.unavailableCode, "not-wired");
+      } finally { await composition.shutdown(); }
     });
   });
 });
@@ -969,28 +982,30 @@ test("reload returns the same composition, swaps the facade and leaves Host/Runt
         resolver: { probe: fullParityProbe() },
         preference: { kind: "system", executable: executablePath, allowLimited: false },
       });
-      const oldFacade = composition.facade;
+      try {
+        const oldFacade = composition.facade;
 
-      const reloaded: DesktopHostComposition = await composition.reload();
+        const reloaded: DesktopHostComposition = await composition.reload();
 
-      assert.equal(reloaded, composition);
-      assert.notEqual(composition.facade, oldFacade);
-      assert.deepEqual(session.calls, ["session.start"]);
-      assert.deepEqual(endpoint.calls, ["endpoint.create"]);
-      assert.deepEqual(lock.calls, ["acquire"]);
-      assert.equal(lock.released, false);
+        assert.equal(reloaded, composition);
+        assert.notEqual(composition.facade, oldFacade);
+        assert.deepEqual(session.calls, ["session.start"]);
+        assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+        assert.deepEqual(lock.calls, ["acquire"]);
+        assert.equal(lock.released, false);
 
-      // The old client session is closed; the new one serves a fresh bootstrap.
-      await assert.rejects(
-        () => oldFacade.bootstrap(),
-        (error: unknown) => {
-          assertClosedFacadeError(error);
-          return true;
-        },
-      );
-      const bootstrap = await composition.facade.bootstrap();
-      assert.equal(bootstrap.runtime.status, "connected");
-      assert.equal("snapshot" in bootstrap, true);
+        // The old client session is closed; the new one serves a fresh bootstrap.
+        await assert.rejects(
+          () => oldFacade.bootstrap(),
+          (error: unknown) => {
+            assertClosedFacadeError(error);
+            return true;
+          },
+        );
+        const bootstrap = await composition.facade.bootstrap();
+        assert.equal(bootstrap.runtime.status, "connected");
+        assert.equal("snapshot" in bootstrap, true);
+      } finally { await composition.shutdown(); }
     });
   });
 });
@@ -1220,11 +1235,13 @@ test("the authority identity is stable across reloads for one lease", async () =
       authorityLock: lock.port,
       privateEndpoint: fakePrivateEndpoint().port,
     });
-    const first = await composition.facade.bootstrap();
-    await composition.reload();
-    const second = await composition.facade.bootstrap();
-    assert.deepEqual(first.authority, second.authority);
-    assert.ok(first.authority.authorityEpoch >= 1);
+    try {
+      const first = await composition.facade.bootstrap();
+      await composition.reload();
+      const second = await composition.facade.bootstrap();
+      assert.deepEqual(first.authority, second.authority);
+      assert.ok(first.authority.authorityEpoch >= 1);
+    } finally { await composition.shutdown(); }
   });
 });
 

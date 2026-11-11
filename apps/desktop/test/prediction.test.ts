@@ -34,6 +34,7 @@ test("prediction transport isolates windows and imports only a selected private 
     getURL: () => "file:///studio/index.html",
     send: (_channel, value) => events.push(value as PredictionEvent),
     once: () => {},
+    off: () => {},
   };
   const selected = join(root, "chosen-history.jsonl");
   await writeFile(

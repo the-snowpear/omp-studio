@@ -128,6 +128,9 @@ function makeSender(id: number): FakeSender {
       this.sent.push({ channel, payload });
     },
     once: add,
+    off(event, listener) {
+      listeners.get(event)?.delete(listener);
+    },
     fire(event) {
       for (const listener of [...(listeners.get(event) ?? [])]) listener();
     },

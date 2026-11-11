@@ -18,3 +18,26 @@ test("tab icons accept small images and drop pages, oversized files and failed r
   assert.equal(await loadFavicon("https://example.com/missing.ico", async () => new Response("", { status: 404 }), signal), undefined);
   assert.deepEqual(await loadFavicon(`data:image/svg+xml,${encodeURIComponent(new TextDecoder().decode(svg))}`, async () => { throw new Error("data URLs need no request"); }, signal), svg);
 });
+
+test("oversized chunked icons stop reading and cancel the response at the limit", async () => {
+  let read = 0, canceled = false;
+  const chunk = 64 * 1024, total = 8 * 1024 * 1024;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (read === total) controller.close();
+      else { read += chunk; controller.enqueue(new Uint8Array(chunk)); }
+    },
+    cancel() { canceled = true; },
+  }, { highWaterMark: 0 });
+  const icon = await loadFavicon("https://example.com/chunked.ico", async () => new Response(body), new AbortController().signal);
+  assert.equal(icon, undefined);
+  assert.equal(canceled, true);
+  assert.equal(read, FAVICON_FETCH_LIMIT + chunk);
+});
+
+test("icons retain the bytes from multiple small response chunks", async () => {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(png.slice(0, 4)); controller.enqueue(png.slice(4)); controller.close(); },
+  });
+  assert.deepEqual(await loadFavicon("https://example.com/small.png", async () => new Response(body), new AbortController().signal), png);
+});

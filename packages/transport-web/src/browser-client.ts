@@ -7,7 +7,7 @@ export interface BrowserWebClientOptions { baseUrl: string; contextId?: string; 
 export class BrowserWebClientTransport implements ClientTransport {
   readonly #options: BrowserWebClientOptions; readonly #base: string; readonly #fetch: typeof fetch; readonly #wsFactory?: (url: string) => WebSocketLike; #csrf?: string; #closed=false; #closing: Promise<void> | undefined; readonly #sockets = new Set<WebSocketLike>();
   constructor(options: BrowserWebClientOptions) { this.#options=options; this.#base = options.baseUrl.replace(/\/$/, ''); this.#fetch = options.fetcher ?? fetch; if (options.webSocketFactory) this.#wsFactory = options.webSocketFactory; }
-  async pair(code: string): Promise<void> { const r = await this.#fetch(this.#base+'/api/v1/pair',{method:'POST',credentials:'include',headers:{'content-type':'application/json','Origin': this.#base},body:JSON.stringify({code})}); if(!r.ok) throw new Error('pair_failed'); const b=await r.json() as {csrf?:string}; if(typeof b.csrf!=='string') throw new Error('pair_failed'); this.#csrf=b.csrf; }
+  async pair(code: string): Promise<void> { const r = await this.#fetch(this.#base+'/api/v1/pair',{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({code})}); if(!r.ok) throw new Error('pair_failed'); const b=await r.json() as {csrf?:string}; if(typeof b.csrf!=='string') throw new Error('pair_failed'); this.#csrf=b.csrf; }
   async openContext(scope: import('@omp-studio/client-contract').ClientContextScope): Promise<ClientTransport> {
     const result = await this.req('/api/v1/context/open', 'POST', scope) as { contextId: string };
     const client = new BrowserWebClientTransport({ ...this.#options, contextId: result.contextId });

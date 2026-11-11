@@ -24,7 +24,8 @@ export interface TerminalSender {
   isDestroyed(): boolean;
   getURL(): string;
   send(channel: string, payload: unknown): void;
-  once(event: "destroyed" | "did-navigate", listener: () => void): void;
+  once(event: "destroyed" | "did-navigate" | "render-process-gone", listener: () => void): void;
+  off(event: "destroyed" | "did-navigate" | "render-process-gone", listener: () => void): void;
 }
 
 export interface TerminalIpcMain {
@@ -49,20 +50,20 @@ export interface TerminalIpcHandle {
   dispose(): void;
 }
 
-function listenersFor(sender: TerminalSender): TerminalSessionListeners {
+function listenersFor(sender: TerminalSender, active: () => boolean = () => true): TerminalSessionListeners {
   return {
     onData(event) {
-      if (!sender.isDestroyed()) sender.send(TERMINAL_IPC_CHANNELS.data, event);
+      if (active() && !sender.isDestroyed()) sender.send(TERMINAL_IPC_CHANNELS.data, event);
     },
     onExit(event) {
-      if (!sender.isDestroyed()) sender.send(TERMINAL_IPC_CHANNELS.exit, event);
+      if (active() && !sender.isDestroyed()) sender.send(TERMINAL_IPC_CHANNELS.exit, event);
     },
   };
 }
 
 export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHandle {
   const ipc = options.ipcMain;
-  const tracked = new Set<number>();
+  const tracked = new Map<number, { teardown(): void }>();
 
   function assertTrusted(sender: TerminalSender): void {
     if (sender.isDestroyed() || !options.isTrustedSender(sender)) {
@@ -70,16 +71,21 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
     }
   }
 
-  function track(sender: TerminalSender): void {
-    if (tracked.has(sender.id)) return;
-    tracked.add(sender.id);
-    const teardown = (): void => {
-      if (!tracked.delete(sender.id)) return;
-      options.manager.disposeWindow(sender.id);
-      options.remote?.disposeWindow(sender.id);
+  function track(sender: TerminalSender) {
+    const existing = tracked.get(sender.id);
+    if (existing) return existing;
+    const document = {
+      teardown(): void {
+        if (tracked.get(sender.id) !== document) return;
+        tracked.delete(sender.id);
+        for (const event of ["destroyed", "did-navigate", "render-process-gone"] as const) sender.off(event, document.teardown);
+        options.manager.disposeWindow(sender.id);
+        options.remote?.disposeWindow(sender.id);
+      },
     };
-    sender.once("destroyed", teardown);
-    sender.once("did-navigate", teardown);
+    tracked.set(sender.id, document);
+    for (const event of ["destroyed", "did-navigate", "render-process-gone"] as const) sender.once(event, document.teardown);
+    return document;
   }
 
   ipc.removeHandler(TERMINAL_IPC_CHANNELS.create);
@@ -111,15 +117,19 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
 
   ipc.handle(TERMINAL_IPC_CHANNELS.create, (event, payload) => {
     assertTrusted(event.sender);
-    track(event.sender);
+    const document = track(event.sender);
+    const listeners = listenersFor(event.sender, () => tracked.get(event.sender.id) === document);
     const size = parseCreateInput(payload);
     if (size.targetId) {
       if (!options.remote || !size.workspaceId) throw new Error("SSH terminal requires a remote workspace");
-      return options.remote.create(event.sender.id, size.targetId, size.workspaceId, size, listenersFor(event.sender));
+      return options.remote.create(event.sender.id, size.targetId, size.workspaceId, size, listeners);
     }
-    if (size.workspaceId && options.resolveWorkspaceCwd) return options.resolveWorkspaceCwd(size.workspaceId).then(cwd => options.manager.create(event.sender.id, size, listenersFor(event.sender), cwd));
+    if (size.workspaceId && options.resolveWorkspaceCwd) return options.resolveWorkspaceCwd(size.workspaceId).then(cwd => {
+      if (event.sender.isDestroyed() || tracked.get(event.sender.id) !== document) throw new Error("Terminal window has closed");
+      return options.manager.create(event.sender.id, size, listeners, cwd);
+    });
     if (!size.workspaceId && options.activeRemote?.()) throw new Error("SSH workspace cannot open a local terminal implicitly");
-    return options.manager.create(event.sender.id, size, listenersFor(event.sender));
+    return options.manager.create(event.sender.id, size, listeners);
   });
 
   ipc.handle(TERMINAL_IPC_CHANNELS.write, (event, payload) => {
@@ -156,11 +166,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
 
   return Object.freeze({
     dispose(): void {
-      for (const windowId of [...tracked]) {
-        options.manager.disposeWindow(windowId);
-        options.remote?.disposeWindow(windowId);
-      }
-      tracked.clear();
+      for (const document of [...tracked.values()]) document.teardown();
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.create);
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.write);
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.resize);

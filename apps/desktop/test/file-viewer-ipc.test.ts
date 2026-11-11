@@ -47,3 +47,36 @@ test("closing the renderer during an SSH file inspection cancels the late open",
     await assert.rejects(opening, /窗口已关闭/);
   } finally { source.controller.dispose(); }
 });
+
+for (const event of ["did-navigate", "render-process-gone"] as const) {
+  test(`${event} releases the old files and allows the new document to open files`, async () => {
+    const source = setup();
+    try {
+      const old = await source.invoke(channels.open, { targetId: null, workspaceId: "workspace", path: file.path }) as { id: string; url: string };
+      const signal = source.resources.get(old.id).controller.signal;
+      source.invoke(channels.dirty, 1);
+      const closing = source.controller.requestClose();
+      source.sender.emit(event);
+      assert.equal(await closing, false);
+      assert.equal(source.controller.hasDirty(), false);
+      assert.equal(signal.aborted, true);
+      assert.equal((await source.resources.response(new Request(old.url, { method: "HEAD" }), "null")).status, 404);
+      const fresh = await source.invoke(channels.open, { targetId: null, workspaceId: "workspace", path: file.path }) as { id: string; url: string };
+      assert.equal((await source.resources.response(new Request(fresh.url, { method: "HEAD" }), "null")).status, 200);
+    } finally { source.controller.dispose(); }
+  });
+
+  test(`${event} rejects an old inspection that completes after the new document opens`, async () => {
+    let finish!: (file: WorkspaceFileInfo) => void, reads = 0;
+    const source = setup(() => ++reads === 1 ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(file));
+    try {
+      const opening = source.invoke(channels.open, { targetId: "ssh", workspaceId: "workspace", path: file.path }) as Promise<unknown>;
+      const rejected = assert.rejects(opening, /窗口已关闭/);
+      source.sender.emit(event);
+      const fresh = await source.invoke(channels.open, { targetId: null, workspaceId: "workspace", path: file.path }) as { url: string };
+      finish(file);
+      await rejected;
+      assert.equal((await source.resources.response(new Request(fresh.url, { method: "HEAD" }), "null")).status, 200);
+    } finally { source.controller.dispose(); }
+  });
+}

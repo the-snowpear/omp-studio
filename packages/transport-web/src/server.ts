@@ -44,10 +44,18 @@ export class LoopbackWebAdapter {
   }
   get pairingCode(): string { return this.#pairing.code; }
   private now(): number { return (this.#options.now ?? Date.now)(); }
-  private originAllowed(req: IncomingMessage): boolean { const o = req.headers.origin; return typeof o === "string" && this.#options.origins.includes(o); }
+  private originAllowed(req: IncomingMessage, allowSameOriginGet = false): boolean {
+    const origin = req.headers.origin;
+    if (origin !== undefined) return typeof origin === "string" && this.#options.origins.includes(origin);
+    if (!allowSameOriginGet || req.method !== "GET") return false;
+    const site = req.headers["sec-fetch-site"];
+    if (site !== undefined && site !== "same-origin" && site !== "none") return false;
+    const host = req.headers.host?.toLowerCase();
+    return host !== undefined && this.#options.origins.some(value => value !== "null" && new URL(value).host.toLowerCase() === host);
+  }
   private session(req: IncomingMessage): [string, Session] | undefined { const id = parseCookies(req.headers.cookie).studio_session; if (!id) return; const s = this.#sessions.get(id); if (!s || s.revoked || s.expiresAt <= this.now()) return; return [id,s]; }
   private async body(req: IncomingMessage): Promise<unknown> { const chunks: Buffer[] = []; let n=0; for await (const c of req) { n += Buffer.byteLength(c); if (n > this.#options.maxBodyBytes) throw new Error("body_too_large"); chunks.push(Buffer.from(c)); } if (!n) return {}; return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown; }
-  private auth(req: IncomingMessage, mutate = false): [string,Session] | undefined { if (!this.originAllowed(req)) return; const s = this.session(req); if (!s) return; if (mutate && req.headers["x-studio-csrf"] !== s[1].csrf) return; return s; }
+  private auth(req: IncomingMessage, mutate = false): [string,Session] | undefined { if (!this.originAllowed(req, !mutate && req.method === "GET")) return; const s = this.session(req); if (!s) return; if (mutate && req.headers["x-studio-csrf"] !== s[1].csrf) return; return s; }
   private target(req: IncomingMessage, session: Session): WebAdapterHost {
     const id = req.headers["x-studio-context"] ?? new URL(req.url ?? "/", "http://localhost").searchParams.get("contextId");
     if (!id) return this.#options.host;
@@ -57,7 +65,7 @@ export class LoopbackWebAdapter {
   }
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (req.url === "/health" && req.method === "GET") return json(res, 200, { ok: true, protocolVersion: 1 });
-    if (!this.originAllowed(req)) return json(res, 403, { error: "forbidden" });
+    if (!this.originAllowed(req, req.method === "GET")) return json(res, 403, { error: "forbidden" });
     const path = (req.url ?? "").split("?")[0];
     try {
       if (path === "/api/v1/pair" && req.method === "POST") {

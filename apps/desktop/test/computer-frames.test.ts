@@ -131,7 +131,7 @@ test("private frame IPC refuses hidden/foreign readers and a late image after it
   const env = await setup();
   const handlers = new Map<string, (event: { sender: TerminalSender }, raw?: unknown) => unknown>();
   let visible = true;
-  const sender: TerminalSender = { id: 7, isDestroyed: () => false, getURL: () => "file:///studio/index.html", send() {}, once() {} };
+  const sender: TerminalSender = { id: 7, isDestroyed: () => false, getURL: () => "file:///studio/index.html", send() {}, once() {}, off() {} };
   const ipc = registerComputerFrameIpc({ store: env.store, isTrustedSender: value => value.id === sender.id, isVisible: () => visible, ipcMain: { handle: (channel, handler) => { handlers.set(channel, handler); }, removeHandler: channel => { handlers.delete(channel); } } });
   try {
     const frame = await env.stage("observation");

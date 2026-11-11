@@ -35,13 +35,34 @@ export function faviconDataUrl(bytes: Uint8Array, shrink?: FaviconShrink): strin
 
 export async function loadFavicon(url: string, fetcher: FaviconFetch, signal: AbortSignal): Promise<Uint8Array | undefined> {
   if (/^data:/iu.test(url)) {
+    // Percent-encoded bytes need at most three input characters each.
+    if (url.length > FAVICON_FETCH_LIMIT * 3 + 256) return undefined;
     const match = /^data:[^,]*?(;base64)?,(.*)$/isu.exec(url);
     if (!match) return undefined;
-    const bytes = match[1] ? Buffer.from(match[2]!, "base64") : Buffer.from(decodeURIComponent(match[2]!), "utf8");
+    if (match[1] && match[2]!.length > Math.ceil(FAVICON_FETCH_LIMIT / 3) * 4) return undefined;
+    const content = match[1] ? match[2]! : decodeURIComponent(match[2]!);
+    if (!match[1] && Buffer.byteLength(content, "utf8") > FAVICON_FETCH_LIMIT) return undefined;
+    const bytes = Buffer.from(content, match[1] ? "base64" : "utf8");
     return bytes.length <= FAVICON_FETCH_LIMIT ? new Uint8Array(bytes) : undefined;
   }
   const response = await fetcher(url, { signal, credentials: "include" });
-  if (!response.ok || Number(response.headers.get("content-length") ?? 0) > FAVICON_FETCH_LIMIT) return undefined;
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  return bytes.length && bytes.length <= FAVICON_FETCH_LIMIT ? bytes : undefined;
+  if (!response.ok || Number(response.headers.get("content-length") ?? 0) > FAVICON_FETCH_LIMIT) { await response.body?.cancel(); return undefined; }
+  const reader = response.body?.getReader();
+  if (!reader) return undefined;
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > FAVICON_FETCH_LIMIT) { await reader.cancel(); return undefined; }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  if (!length) return undefined;
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
 }

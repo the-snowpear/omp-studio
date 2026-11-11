@@ -32,6 +32,36 @@ test('health contains no sensitive details', async () => {
   const r = await fetch(`http://127.0.0.1:${server.address().port}/health`); assert.deepEqual(await r.json(), { ok: true, protocolVersion: 1 }); server.close();
 });
 
+test('a paired browser can bootstrap with a normal same-origin GET without an Origin header', async t => {
+  const origins = ['http://localhost'];
+  const adapter = new LoopbackWebAdapter({ host: host(), origins, pairingCode: '1234' });
+  const server = createLoopbackHttpServer(adapter);
+  t.after(() => server.close());
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  origins.push(baseUrl);
+  let cookie = '', getOrigin;
+  const client = new BrowserWebClientTransport({ baseUrl, fetcher: async (url, init = {}) => {
+    const headers = new Headers(init.headers);
+    if (init.method === 'GET') {
+      getOrigin = headers.get('Origin');
+      headers.set('Sec-Fetch-Site', 'same-origin');
+    } else headers.set('Origin', baseUrl);
+    if (cookie) headers.set('Cookie', cookie);
+    const response = await fetch(url, { ...init, headers });
+    if (response.headers.has('set-cookie')) cookie = response.headers.get('set-cookie').split(';')[0];
+    return response;
+  } });
+  await client.pair('1234');
+  assert.deepEqual(await client.bootstrap(), { contractVersion: 2 });
+  assert.equal(getOrigin, null);
+  assert.equal((await client.command({ commandName: 'session.resume' })).status, 'accepted');
+  const crossSite = await fetch(`${baseUrl}/api/v1/bootstrap`, { headers: { Cookie: cookie, 'Sec-Fetch-Site': 'cross-site' } });
+  assert.equal(crossSite.status, 403);
+  assert.equal(adapter.authenticateWebSocket({ url: '/api/v1/events', method: 'GET', headers: { host: new URL(baseUrl).host, cookie } }), undefined);
+  await client.close();
+});
+
 test('closing a context releases local sockets even when the Host is unreachable', async () => {
   let requests = 0, closed = 0;
   const client = new BrowserWebClientTransport({

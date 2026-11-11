@@ -1,12 +1,13 @@
 import { Agent, createServer, request, type IncomingMessage, type ServerResponse, type Server } from "node:http";
-import { connect, isIP, type Socket } from "node:net";
+import { connect, isIP, type Socket, type TcpNetConnectOpts } from "node:net";
+import { randomBytes } from "node:crypto";
 import type { Duplex } from "node:stream";
 import type { NetworkStreams, NetworkDestination } from "./network-stream.js";
 import type { RemoteNetworkMode } from "./shared.js";
 
-export function connectTcp(host: string, port: number, timeoutMs = 10_000): Promise<Socket> {
+export function connectTcp(host: string, port: number, timeoutMs = 10_000, lookup?: TcpNetConnectOpts["lookup"]): Promise<Socket> {
   return new Promise((resolve, reject) => {
-    const socket = connect({ host, port });
+    const socket = connect({ host, port, ...(lookup ? { lookup } : {}) });
     const timeout = setTimeout(() => { socket.destroy(); reject(Object.assign(new Error("连接目标超时"), { code: "ETIMEDOUT" })); }, timeoutMs);
     socket.once("connect", () => { clearTimeout(timeout); socket.off("error", reject); resolve(socket); });
     socket.once("error", error => { clearTimeout(timeout); reject(error); });
@@ -14,7 +15,14 @@ export function connectTcp(host: string, port: number, timeoutMs = 10_000): Prom
 }
 export function remotePrivateHost(host: string): boolean {
   const name = host.replace(/^\[|\]$/gu, "").toLowerCase();
-  return name === "localhost" || name === "::1" || name.endsWith(".local") || /^(?:127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/u.test(name) || isIP(name) === 6 && /^(?:fc|fd|fe80:)/u.test(name);
+  if (name === "localhost" || name.endsWith(".local") || /^(?:0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/u.test(name)) return true;
+  if (isIP(name) !== 6) return false;
+  const address = new URL(`http://[${name}]`).hostname.slice(1, -1);
+  if (address.startsWith("::ffff:")) {
+    const [high, low] = address.slice(7).split(":").map(value => Number.parseInt(value, 16));
+    return remotePrivateHost(`${high! >>> 8}.${high! & 255}.${low! >>> 8}.${low! & 255}`);
+  }
+  return address === "::" || address === "::1" || /^(?:fc|fd|fe[89ab])/u.test(address);
 }
 export class RemoteNetworkProxy {
   private channel: NetworkStreams | undefined;
@@ -23,12 +31,18 @@ export class RemoteNetworkProxy {
   private readonly sockets = new Set<Duplex>();
   private readonly server: Server;
   private readonly broker: Server;
+  private readonly proxyPassword = randomBytes(32).toString("base64url");
+  private readonly proxyAuthorization = `Basic ${Buffer.from(`omp-studio:${this.proxyPassword}`).toString("base64")}`;
   proxyUrl = "";
   brokerUrl = "";
   report: (route: "remote" | "local") => void = () => {};
   constructor(readonly dialRemote = connectTcp) {
-    this.server = createServer((req, res) => { void this.http(req, res); });
+    this.server = createServer((req, res) => {
+      if (!this.authorized(req)) { res.writeHead(407, { "Proxy-Authenticate": "Basic realm=\"OMP Studio\"" }); res.end(); return; }
+      void this.http(req, res);
+    });
     this.server.on("connect", (req, socket, head) => {
+      if (!this.authorized(req)) { socket.end("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"OMP Studio\"\r\nConnection: close\r\n\r\n"); return; }
       void (async () => {
         const url = new URL(`http://${req.url}`);
         const upstream = await this.open({ host: url.hostname.replace(/^\[|\]$/gu, ""), port: Number(url.port || 443) });
@@ -40,8 +54,11 @@ export class RemoteNetworkProxy {
   }
   async start(): Promise<void> {
     const listen = (server: Server) => new Promise<string>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(`http://127.0.0.1:${(server.address() as import("node:net").AddressInfo).port}`); }); });
-    this.proxyUrl = await listen(this.server); this.brokerUrl = await listen(this.broker);
+    const proxy = new URL(await listen(this.server));
+    proxy.username = "omp-studio"; proxy.password = this.proxyPassword;
+    this.proxyUrl = proxy.href.replace(/\/$/u, ""); this.brokerUrl = await listen(this.broker);
   }
+  private authorized(req: IncomingMessage): boolean { return req.headers["proxy-authorization"] === this.proxyAuthorization; }
   attach(channel: NetworkStreams): void { this.channel?.close(); this.channel = channel; }
   configure(mode: RemoteNetworkMode): void { this.mode = mode; this.localHosts.clear(); }
   reset(): void { this.localHosts.clear(); }

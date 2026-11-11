@@ -12,7 +12,7 @@ test("computer captures reject foreign and hidden readers without consuming the 
   const directory = await mkdtemp(join(tmpdir(), "omp-computer-ipc-"));
   let handler: ((event: { sender: TerminalSender }, payload?: unknown) => unknown) | undefined;
   let visible = true;
-  const sender: TerminalSender = { id: 4, isDestroyed: () => false, getURL: () => "file:///studio/index.html", send() {}, once() {} };
+  const sender: TerminalSender = { id: 4, isDestroyed: () => false, getURL: () => "file:///studio/index.html", send() {}, once() {}, off() {} };
   const ipc = registerComputerCaptureIpc({ directory: () => directory, isVisible: () => visible, isTrustedSender: value => value.id === sender.id, ipcMain: { handle(_channel, listener) { handler = listener; }, removeHandler() {} } });
   const captureId = randomUUID(); const request = { captureId, sessionId: "owner", targetId: "screen-1" };
   const metadata = join(directory, "computer", captureId + ".json"); const payload = join(directory, "computer", captureId + ".png");
