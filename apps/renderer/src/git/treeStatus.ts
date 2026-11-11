@@ -10,6 +10,7 @@
  */
 
 import type { GitFileChange } from "@omp-studio/client-contract";
+import { workspacePathForRepositoryFile } from "./workspacePaths";
 
 export type TreeGitStatus = "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
 
@@ -34,17 +35,19 @@ export function combineGitFileState(change: GitFileChange): TreeGitStatus | unde
   return undefined;
 }
 
-export function buildGitStatusLookup(changes: ReadonlyArray<GitFileChange>): ReadonlyMap<string, TreeGitStatus> {
+export function buildGitStatusLookup(changes: ReadonlyArray<GitFileChange>, workspacePrefix = ""): ReadonlyMap<string, TreeGitStatus> {
   const lookup = new Map<string, TreeGitStatus>();
   const raise = (path: string, status: TreeGitStatus): void => {
     const current = lookup.get(path);
     if (current === undefined || PRIORITY[status] > PRIORITY[current]) lookup.set(path, status);
   };
   for (const change of changes) {
+    const path = workspacePathForRepositoryFile(change.path, workspacePrefix);
+    if (path === undefined) continue;
     const status = combineGitFileState(change);
     if (status === undefined) continue;
-    raise(change.path, status);
-    const segments = change.path.split("/");
+    raise(path, status);
+    const segments = path.split("/");
     segments.pop();
     for (let depth = 1; depth <= segments.length; depth += 1) raise(segments.slice(0, depth).join("/"), status);
   }

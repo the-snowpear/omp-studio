@@ -42,6 +42,7 @@ const NETWORK_TIMEOUT = 120_000;
 const EMPTY_TREE_OID = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const UNTRACKED_STAT_FILE_LIMIT = 200;
 const UNTRACKED_STAT_SIZE_LIMIT = 1024 * 1024;
+const IDENTITY_CACHE_LIMIT = 16;
 // External-change watcher: coalesce bursts, and stay quiet while our own
 // commands (which already emit reason:"command" events) touch .git.
 const EXTERNAL_DEBOUNCE_MS = 400;
@@ -55,6 +56,7 @@ const SWITCH_BLOCKED_FILE_LIMIT = 500;
 interface RepositoryIdentity {
   readonly cwd: string;
   readonly topLevel: string;
+  readonly workspacePrefix: string;
   readonly commonDir: string;
   readonly gitDir: string;
   readonly repositoryId: GitRepositoryId;
@@ -104,6 +106,16 @@ function normalizeRelativePath(value: string): string {
     throw clientError("INVALID_ARGUMENT", "Git path escapes the repository");
   }
   return parts.join("/");
+}
+
+/** File operations accept filenames, not Git wildcard or magic expressions. */
+function literalPathspec(path: string): string {
+  return `:(literal)${path}`;
+}
+
+function workspacePrefix(workspace: string, topLevel: string): string {
+  const prefix = relative(topLevel, workspace);
+  return prefix ? normalizeRelativePath(prefix) : "";
 }
 
 function assertRef(value: string): string {
@@ -409,12 +421,18 @@ export class DesktopGitService implements HostGitService {
 
   dispose(): void {
     this.#identities.clear(); this.#statuses.clear(); this.#repositoryReads.clear(); this.#summaryReads.clear();
-    for (const entry of this.#repoWatches.values()) {
+    for (const workspaceId of this.#repoWatches.keys()) this.#releaseRepositoryWatch(workspaceId);
+    this.#externalSuppressUntil.clear();
+  }
+
+  #releaseRepositoryWatch(workspaceId: WorkspaceId): void {
+    const entry = this.#repoWatches.get(workspaceId);
+    if (entry !== undefined) {
       if (entry.timer !== undefined) clearTimeout(entry.timer);
       for (const handle of entry.handles) handle.close();
+      this.#repoWatches.delete(workspaceId);
     }
-    this.#repoWatches.clear();
-    this.#externalSuppressUntil.clear();
+    this.#externalSuppressUntil.delete(workspaceId);
   }
 
   /**
@@ -428,11 +446,7 @@ export class DesktopGitService implements HostGitService {
   #watchRepository(workspaceId: WorkspaceId, identity: RepositoryIdentity): void {
     const existing = this.#repoWatches.get(workspaceId);
     if (existing !== undefined && existing.gitDir === identity.gitDir && existing.commonDir === identity.commonDir) return;
-    if (existing !== undefined) {
-      if (existing.timer !== undefined) clearTimeout(existing.timer);
-      for (const handle of existing.handles) handle.close();
-      this.#repoWatches.delete(workspaceId);
-    }
+    if (existing !== undefined) this.#releaseRepositoryWatch(workspaceId);
     const entry: RepositoryWatchEntry = {
       gitDir: identity.gitDir,
       commonDir: identity.commonDir,
@@ -508,11 +522,22 @@ export class DesktopGitService implements HostGitService {
   async #identity(workspaceId: WorkspaceId): Promise<RepositoryIdentity> {
     const cwd = this.#workspace(workspaceId).canonicalPath;
     const cached = this.#identities.get(workspaceId);
-    if (cached?.cwd === cwd && cached.expires > Date.now()) return cached.read;
+    if (cached?.cwd === cwd && cached.expires > Date.now()) {
+      this.#identities.delete(workspaceId); this.#identities.set(workspaceId, cached);
+      return cached.read;
+    }
     const entry = { cwd, expires: Date.now() + 120_000, read: this.#readIdentity(workspaceId) };
+    entry.read = entry.read.then(identity => {
+      // An evicted or disposed read may finish later; it no longer owns native watchers.
+      if (this.#identities.get(workspaceId) === entry) this.#watchRepository(workspaceId, identity);
+      return identity;
+    });
     void entry.read.catch(() => { entry.expires = Date.now() + 2000; });
     this.#identities.delete(workspaceId); this.#identities.set(workspaceId, entry);
-    while (this.#identities.size > 16) this.#identities.delete(this.#identities.keys().next().value!);
+    while (this.#identities.size > IDENTITY_CACHE_LIMIT) {
+      const oldest = this.#identities.keys().next().value!;
+      this.#identities.delete(oldest); this.#releaseRepositoryWatch(oldest);
+    }
     return entry.read;
   }
 
@@ -524,18 +549,22 @@ export class DesktopGitService implements HostGitService {
       this.#git(cwd, ["rev-parse", "--git-common-dir"], { readOnly: true }),
       this.#git(cwd, ["rev-parse", "--git-dir"], { readOnly: true }),
     ]);
-    const topLevel = await canonicalPath(resolveGitPath(cwd, top.stdout));
-    const commonDir = await canonicalPath(resolveGitPath(cwd, common.stdout));
-    const resolvedGitDir = await canonicalPath(resolveGitPath(cwd, gitDir.stdout));
+    const [topLevel, commonDir, resolvedGitDir, realWorkspace] = await Promise.all([
+      canonicalPath(resolveGitPath(cwd, top.stdout)),
+      canonicalPath(resolveGitPath(cwd, common.stdout)),
+      canonicalPath(resolveGitPath(cwd, gitDir.stdout)),
+      canonicalPath(cwd),
+    ]);
     const identity: RepositoryIdentity = {
-      cwd,
+      // Status and commit paths are repository-relative even for a subdirectory workspace.
+      cwd: topLevel,
       topLevel,
+      workspacePrefix: workspacePrefix(realWorkspace, topLevel),
       commonDir,
       gitDir: resolvedGitDir,
       repositoryId: opaqueId("repo", commonDir) as GitRepositoryId,
       worktreeId: opaqueId("wt", topLevel) as GitWorktreeId,
     };
-    this.#watchRepository(workspaceId, identity);
     return identity;
   }
 
@@ -558,7 +587,9 @@ export class DesktopGitService implements HostGitService {
     const workspace = this.#workspace(input.workspaceId);
     try {
       const { identity, parsed } = await this.#status(input.workspaceId, true);
+      const prefix = identity.workspacePrefix;
       return { workspaceId: input.workspaceId, isRepository: true, repositoryId: identity.repositoryId,
+        ...(prefix ? { workspacePrefix: prefix } : {}),
         ...(parsed.branch === undefined ? {} : { branch: parsed.branch }), ...(parsed.headOid === undefined ? {} : { headOid: parsed.headOid }),
         detached: parsed.detached, ahead: parsed.ahead, behind: parsed.behind, changedFiles: parsed.changes.length, sampledAt: new Date().toISOString() };
     } catch (error) {
@@ -585,11 +616,13 @@ export class DesktopGitService implements HostGitService {
       const operation = await this.#operation(identity);
       const revision = await this.#repositoryRevision(identity, stdout, parsed.changes, operation);
       const stats = await this.#uncommittedStats(identity, parsed.changes, parsed.unborn).catch(() => undefined);
+      const prefix = identity.workspacePrefix;
       return {
         workspaceId: input.workspaceId,
         isRepository: true,
         repositoryId: identity.repositoryId,
         worktreeId: identity.worktreeId,
+        ...(prefix ? { workspacePrefix: prefix } : {}),
         ...(parsed.branch === undefined ? {} : { branch: parsed.branch }),
         ...(parsed.headOid === undefined ? {} : { headOid: parsed.headOid }),
         detached: parsed.detached,
@@ -722,7 +755,7 @@ export class DesktopGitService implements HostGitService {
   async diff(input: { readonly workspaceId: WorkspaceId; readonly path: string; readonly target: "working" | "staged" }): Promise<GitDiffReadModel> {
     const identity = await this.#identity(input.workspaceId);
     const path = normalizeRelativePath(input.path);
-    const args = ["diff", "--no-ext-diff", "--no-color", "--unified=3", ...(input.target === "staged" ? ["--cached"] : []), "--", path];
+    const args = ["diff", "--no-ext-diff", "--no-color", "--unified=3", ...(input.target === "staged" ? ["--cached"] : []), "--", literalPathspec(path)];
     const result = await this.#git(identity.cwd, args, { readOnly: true, outputLimit: DIFF_LIMIT + 1 });
     const patch = result.stdout.slice(0, DIFF_LIMIT);
     return { workspaceId: input.workspaceId, path, target: input.target, patch, binary: /Binary files|GIT binary patch/u.test(patch), truncated: result.stdout.length > DIFF_LIMIT, revision: opaqueId("rev", result.stdout) };
@@ -896,7 +929,7 @@ export class DesktopGitService implements HostGitService {
     const identity = await this.#identity(input.workspaceId);
     const oid = assertRef(input.oid);
     const path = normalizeRelativePath(input.path);
-    const result = await this.#git(identity.cwd, ["show", "--no-ext-diff", "--no-color", "--unified=3", "--format=", "--first-parent", oid, "--", path], { readOnly: true, outputLimit: DIFF_LIMIT + 1 });
+    const result = await this.#git(identity.cwd, ["show", "--no-ext-diff", "--no-color", "--unified=3", "--format=", "--first-parent", oid, "--", literalPathspec(path)], { readOnly: true, outputLimit: DIFF_LIMIT + 1 });
     const patch = result.stdout.slice(0, DIFF_LIMIT);
     return { workspaceId: input.workspaceId, oid, path, patch, binary: /Binary files|GIT binary patch/u.test(patch), truncated: result.stdout.length > DIFF_LIMIT };
   }
@@ -959,13 +992,13 @@ export class DesktopGitService implements HostGitService {
     let timeoutMs = WRITE_TIMEOUT;
     let createdWorkspaceId: WorkspaceId | undefined;
     switch (operation.kind) {
-      case "stage": args = ["add", "--", ...operation.paths.map(normalizeRelativePath)]; break;
+      case "stage": args = ["add", "--", ...operation.paths.map(path => literalPathspec(normalizeRelativePath(path)))]; break;
       case "unstage": {
         const paths = operation.paths.map(normalizeRelativePath);
         const current = await this.#readRepository({ workspaceId });
         args = current.unborn
-          ? ["rm", "--cached", "-r", "--ignore-unmatch", "--", ...paths]
-          : ["restore", "--staged", "--", ...paths];
+          ? ["rm", "--cached", "-r", "--ignore-unmatch", "--", ...paths.map(literalPathspec)]
+          : ["restore", "--staged", "--", ...paths.map(literalPathspec)];
         break;
       }
       case "discard": {
@@ -975,13 +1008,13 @@ export class DesktopGitService implements HostGitService {
         const untrackedPaths = new Set(current.changes.filter((change) => change.worktree === "untracked").map((change) => change.path));
         const untracked = paths.filter((path) => untrackedPaths.has(path));
         const tracked = paths.filter((path) => !untrackedPaths.has(path));
-        if (tracked.length > 0) await this.#git(identity.cwd, ["restore", "--worktree", "--", ...tracked], { requestId, timeoutMs, phase: operation.kind });
-        if (untracked.length > 0) await this.#git(identity.cwd, ["clean", "-f", "--", ...untracked], { requestId, timeoutMs, phase: operation.kind });
+        if (tracked.length > 0) await this.#git(identity.cwd, ["restore", "--worktree", "--", ...tracked.map(literalPathspec)], { requestId, timeoutMs, phase: operation.kind });
+        if (untracked.length > 0) await this.#git(identity.cwd, ["clean", "-f", "--", ...untracked.map(literalPathspec)], { requestId, timeoutMs, phase: operation.kind });
         return { operation: operation.kind, message: `${operation.kind} completed`, workspaceId, repository: await this.#readRepository({ workspaceId }) };
       }
       case "commit": {
         if (operation.paths !== undefined && operation.amend === true) throw clientError("INVALID_ARGUMENT", "Cannot combine amend with a path-limited commit");
-        args = ["commit", "-F", "-", ...(operation.amend ? ["--amend"] : []), ...(operation.sign ? ["--gpg-sign"] : []), ...(operation.paths === undefined ? [] : ["--only", "--", ...operation.paths.map(normalizeRelativePath)])];
+        args = ["commit", "-F", "-", ...(operation.amend ? ["--amend"] : []), ...(operation.sign ? ["--gpg-sign"] : []), ...(operation.paths === undefined ? [] : ["--only", "--", ...operation.paths.map(path => literalPathspec(normalizeRelativePath(path)))])];
         stdin = operation.message;
         break;
       }

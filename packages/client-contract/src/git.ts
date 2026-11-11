@@ -2,7 +2,7 @@
  * Public Git and GitHub read models.
  *
  * The Host owns executable discovery, repository paths and credentials. These
- * shapes contain only opaque ids, workspace-relative paths and bounded display
+ * shapes contain only opaque ids, normalized relative paths and bounded display
  * text; they are safe for Desktop IPC and the browser Renderer.
  */
 
@@ -43,6 +43,8 @@ export interface GitRepositoryReadModel {
   readonly isRepository: boolean;
   readonly repositoryId?: GitRepositoryId;
   readonly worktreeId?: GitWorktreeId;
+  /** Repository-relative workspace directory. Omitted or empty at the repository root. */
+  readonly workspacePrefix?: string;
   readonly branch?: string;
   readonly headOid?: string;
   readonly detached: boolean;

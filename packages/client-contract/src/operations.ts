@@ -256,7 +256,7 @@ export interface QueryResultMap extends RuntimeViewResultMap, ContextViewResultM
   "session.compaction.read": SessionCompactionRead;
   "git.toolchain.get": GitToolchainReadModel;
   "git.repository.get": GitRepositoryReadModel;
-  "git.repository.summary": Pick<GitRepositoryReadModel, "workspaceId" | "isRepository" | "repositoryId" | "branch" | "headOid" | "detached" | "ahead" | "behind" | "unavailableReason"> & { readonly changedFiles: number; readonly sampledAt: string };
+  "git.repository.summary": Pick<GitRepositoryReadModel, "workspaceId" | "isRepository" | "repositoryId" | "workspacePrefix" | "branch" | "headOid" | "detached" | "ahead" | "behind" | "unavailableReason"> & { readonly changedFiles: number; readonly sampledAt: string };
   "git.diff.get": GitDiffReadModel;
   "git.branches.list": GitBranchListReadModel;
   "git.worktrees.list": GitWorktreeListReadModel;

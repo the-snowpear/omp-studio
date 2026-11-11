@@ -5,6 +5,7 @@ import type { FilePanelDescriptor, FileViewMode } from "../dock/types";
 import type { FileResource } from "../../../desktop/src/file-viewer-shared";
 import { MarkdownText } from "../conversation/markdown";
 import { GitPatch } from "../git/GitPatch";
+import { repositoryPathForWorkspaceFile } from "../git/workspacePaths";
 import { DiffDisplayMode } from "../conversation/ChangesPanel";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
@@ -61,8 +62,12 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
     if (!editable) { setPatch(""); return; }
     if (preview) { setPatch(previewFilePatch(descriptor.path)); return; }
     let alive = true;
-    void session.client().then(client => client.query("git.diff.get", { workspaceId: descriptor.workspaceId as WorkspaceId, path: state.file.path, target: "working" }))
-      .then(result => { if (alive) setPatch(result.binary ? "" : result.patch); }, () => { if (alive) setPatch(""); });
+    void session.client().then(async client => {
+      const workspaceId = descriptor.workspaceId as WorkspaceId;
+      const repository = await client.query("git.repository.summary", { workspaceId });
+      if (!alive || !repository.isRepository) return undefined;
+      return client.query("git.diff.get", { workspaceId, path: repositoryPathForWorkspaceFile(state.file.path, repository.workspacePrefix), target: "working" });
+    }).then(result => { if (alive) setPatch(result && !result.binary ? result.patch : ""); }, () => { if (alive) setPatch(""); });
     return () => { alive = false; };
   }, [editable, preview, session, descriptor.path, descriptor.workspaceId, state.file.path, state.file.version, reload, active]);
   useEffect(() => { const element = pane.current; if (!element) return; const observer = new ResizeObserver(([entry]) => { if (entry) setWidth(entry.contentRect.width); }); observer.observe(element); return () => observer.disconnect(); }, []);

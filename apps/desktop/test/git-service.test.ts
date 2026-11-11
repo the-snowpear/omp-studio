@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import fs from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 
@@ -17,6 +19,11 @@ const execFileAsync = promisify(execFile);
 
 async function hasGit(): Promise<boolean> {
   try { await execFileAsync("git", ["--version"]); return true; } catch { return false; }
+}
+
+async function removeGitFixture(root: string): Promise<void> {
+  assert.equal(dirname(resolve(root)), resolve(tmpdir()));
+  await rm(root, { recursive: true, force: true });
 }
 
 test("HostProcessRunner uses argv execution and enforces its output bound", async () => {
@@ -231,6 +238,161 @@ test("DesktopGitService performs real repository, branch, worktree and safety fl
     service?.dispose();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("file operations treat bracketed filenames literally and preserve unselected files", async context => {
+  if (!(await hasGit())) { context.skip("system Git is unavailable"); return; }
+  const root = await mkdtemp(join(tmpdir(), "omp-git-literal-"));
+  const project = join(root, "project"), registry = new WorkspaceRegistry(join(root, "registry.json"));
+  let service: ReturnType<typeof createDesktopGitService> | undefined;
+  try {
+    await mkdir(project);
+    const workspaceId = (await registry.upsertByPath(project)).workspaceId as WorkspaceId;
+    service = createDesktopGitService({ registry, pickDirectory: async () => undefined, preferencesPath: join(root, "preferences.json") });
+    const git = (...args: string[]) => execFileAsync("git", args, { cwd: project });
+    const run = (operation: import("@omp-studio/client-contract").GitOperation) => service!.execute({ workspaceId, operation }, "literal-operation" as CommandRequestId);
+    const selected = "report[1].txt", other = "report1.txt";
+    await git("init", "--quiet"); await git("config", "user.name", "OMP Test"); await git("config", "user.email", "omp@example.invalid"); await git("config", "core.autocrlf", "false");
+    for (const name of [selected, other]) await writeFile(join(project, name), "base\n");
+    await git("add", ".");
+    await run({ kind: "unstage", paths: [selected] });
+    let repository = await service.repository({ workspaceId });
+    assert.equal(repository.changes.find(change => change.path === selected)?.worktree, "untracked");
+    assert.equal(repository.changes.find(change => change.path === other)?.index, "added");
+    await run({ kind: "stage", paths: [selected] }); await run({ kind: "commit", message: "seed" });
+
+    await writeFile(join(project, selected), "selected local\n"); await writeFile(join(project, other), "unselected local\n");
+    const diff = await service.diff({ workspaceId, path: selected, target: "working" });
+    assert.match(diff.patch, /selected local/); assert.doesNotMatch(diff.patch, /unselected local/);
+    await run({ kind: "stage", paths: [selected] });
+    repository = await service.repository({ workspaceId });
+    assert.equal(repository.changes.find(change => change.path === selected)?.index, "modified");
+    assert.equal(repository.changes.find(change => change.path === other)?.index, "unmodified");
+    await run({ kind: "stage", paths: [other] }); await run({ kind: "unstage", paths: [selected] });
+    repository = await service.repository({ workspaceId });
+    assert.equal(repository.changes.find(change => change.path === other)?.index, "modified");
+    await run({ kind: "commit", message: "selected only", paths: [selected] });
+    const committed = await service.commitChanges({ workspaceId, oid: "HEAD" });
+    assert.deepEqual(committed.files.map(file => file.path), [selected]);
+    const committedDiff = await service.commitDiff({ workspaceId, oid: "HEAD", path: selected });
+    assert.match(committedDiff.patch, /selected local/); assert.doesNotMatch(committedDiff.patch, /unselected local/);
+    assert.equal((await git("show", `HEAD:${other}`)).stdout, "base\n");
+
+    await writeFile(join(project, selected), "discard selected\n"); await writeFile(join(project, other), "keep unselected\n");
+    repository = await service.repository({ workspaceId });
+    await run({ kind: "discard", paths: [selected], expectedRevision: repository.revision! });
+    assert.equal(await readFile(join(project, selected), "utf8"), "selected local\n");
+    assert.equal(await readFile(join(project, other), "utf8"), "keep unselected\n");
+    await writeFile(join(project, "new[1].txt"), "remove this\n"); await writeFile(join(project, "new1.txt"), "keep this\n");
+    repository = await service.repository({ workspaceId });
+    await run({ kind: "discard", paths: ["new[1].txt"], expectedRevision: repository.revision! });
+    await assert.rejects(readFile(join(project, "new[1].txt")), { code: "ENOENT" });
+    assert.equal(await readFile(join(project, "new1.txt"), "utf8"), "keep this\n");
+  } finally { service?.dispose(); await removeGitFixture(root); }
+});
+
+test("subdirectory workspaces use repository-relative paths for diffs and writes", async context => {
+  if (!(await hasGit())) { context.skip("system Git is unavailable"); return; }
+  const root = await mkdtemp(join(tmpdir(), "omp-git-subdirectory-"));
+  const project = join(root, "project"), registry = new WorkspaceRegistry(join(root, "registry.json"));
+  let service: ReturnType<typeof createDesktopGitService> | undefined;
+  try {
+    await mkdir(join(project, "src", "src"), { recursive: true });
+    const git = (...args: string[]) => execFileAsync("git", args, { cwd: project });
+    await git("init", "--quiet"); await git("config", "user.name", "OMP Test"); await git("config", "user.email", "omp@example.invalid"); await git("config", "core.autocrlf", "false");
+    await writeFile(join(project, "src/a.txt"), "base\n"); await writeFile(join(project, "src/src/a.txt"), "base\n");
+    await git("add", "."); await git("commit", "--quiet", "-m", "seed");
+    const workspaceId = (await registry.upsertByPath(join(project, "src"))).workspaceId as WorkspaceId;
+    service = createDesktopGitService({ registry, pickDirectory: async () => undefined, preferencesPath: join(root, "preferences.json") });
+    const run = (operation: import("@omp-studio/client-contract").GitOperation) => service!.execute({ workspaceId, operation }, "subdirectory-operation" as CommandRequestId);
+    await writeFile(join(project, "src/a.txt"), "selected edit\n"); await writeFile(join(project, "src/src/a.txt"), "other edit\n");
+    let repository = await service.repository({ workspaceId });
+    assert.equal(repository.workspacePrefix, "src");
+    assert.equal((await service.summary({ workspaceId })).workspacePrefix, "src");
+    assert.deepEqual(repository.changes.map(change => change.path), ["src/a.txt", "src/src/a.txt"]);
+    const diff = await service.diff({ workspaceId, path: "src/a.txt", target: "working" });
+    assert.match(diff.patch, /selected edit/); assert.doesNotMatch(diff.patch, /other edit/);
+    await run({ kind: "discard", paths: ["src/a.txt"], expectedRevision: repository.revision! });
+    assert.equal(await readFile(join(project, "src/a.txt"), "utf8"), "base\n");
+    assert.equal(await readFile(join(project, "src/src/a.txt"), "utf8"), "other edit\n");
+    await writeFile(join(project, "src/a.txt"), "selected commit\n");
+    await run({ kind: "stage", paths: ["src/a.txt"] });
+    repository = await service.repository({ workspaceId });
+    assert.equal(repository.changes.find(change => change.path === "src/a.txt")?.index, "modified");
+    assert.equal(repository.changes.find(change => change.path === "src/src/a.txt")?.index, "unmodified");
+    await run({ kind: "unstage", paths: ["src/a.txt"] });
+    await run({ kind: "commit", message: "selected subdirectory file", paths: ["src/a.txt"] });
+    assert.deepEqual((await service.commitChanges({ workspaceId, oid: "HEAD" })).files.map(file => file.path), ["src/a.txt"]);
+    assert.match((await service.commitDiff({ workspaceId, oid: "HEAD", path: "src/a.txt" })).patch, /selected commit/);
+    assert.equal(await readFile(join(project, "src/src/a.txt"), "utf8"), "other edit\n");
+  } finally { service?.dispose(); await removeGitFixture(root); }
+});
+
+test("macOS short workspace aliases keep Git models usable and preserve prefix casing", async context => {
+  if (!(await hasGit())) { context.skip("system Git is unavailable"); return; }
+  const root = await mkdtemp(join(tmpdir(), "omp-git-mac-alias-"));
+  const project = join(root, "private", "var", "project"), shortProject = join(root, "var", "project");
+  const registry = new WorkspaceRegistry(join(root, "registry.json"));
+  let service: ReturnType<typeof createDesktopGitService> | undefined;
+  try {
+    await mkdir(join(project, "SrcCase"), { recursive: true });
+    await symlink(join(root, "private", "var"), join(root, "var"), process.platform === "win32" ? "junction" : "dir");
+    await execFileAsync("git", ["init", "--quiet"], { cwd: project });
+    await writeFile(join(project, "SrcCase", "file.txt"), "alias edit\n");
+    const rootId = (await registry.upsertByPath(project)).workspaceId as WorkspaceId;
+    const nestedId = (await registry.upsertByPath(join(project, "SrcCase"))).workspaceId as WorkspaceId;
+    const aliases = new Map([[rootId, shortProject], [nestedId, join(shortProject, "SrcCase")]]);
+    const storedWorkspace = registry.get.bind(registry);
+    // The macOS registry stores /var while realpath and Git identify /private/var.
+    context.mock.method(registry, "get", (workspaceId: string) => {
+      const stored = storedWorkspace(workspaceId);
+      return stored ? { ...stored, canonicalPath: aliases.get(workspaceId as WorkspaceId) ?? stored.canonicalPath } : undefined;
+    });
+    service = createDesktopGitService({ registry, pickDirectory: async () => undefined, preferencesPath: join(root, "preferences.json") });
+    for (const [workspaceId, prefix] of [[rootId, undefined], [nestedId, "SrcCase"]] as const) {
+      const repository = await service.repository({ workspaceId });
+      const summary = await service.summary({ workspaceId });
+      assert.equal(repository.isRepository, true); assert.equal(summary.isRepository, true);
+      assert.equal(repository.workspacePrefix, prefix); assert.equal(summary.workspacePrefix, prefix);
+      assert.deepEqual(repository.changes.map(change => change.path), ["SrcCase/file.txt"]);
+    }
+  } finally { service?.dispose(); context.mock.restoreAll(); await removeGitFixture(root); }
+});
+
+test("workspace identity eviction closes native Git watchers and a revisit recreates them", async context => {
+  if (!(await hasGit())) { context.skip("system Git is unavailable"); return; }
+  const root = await mkdtemp(join(tmpdir(), "omp-git-watcher-"));
+  const project = join(root, "project"), registry = new WorkspaceRegistry(join(root, "registry.json"));
+  const nativeWatch = fs.watch;
+  let created = 0, closed = 0, peak = 0;
+  let service: ReturnType<typeof createDesktopGitService> | undefined;
+  try {
+    await mkdir(project);
+    const git = (...args: string[]) => execFileAsync("git", args, { cwd: project });
+    await git("init", "--quiet"); await git("config", "user.name", "OMP Test"); await git("config", "user.email", "omp@example.invalid");
+    await writeFile(join(project, "seed.txt"), "seed\n"); await git("add", "."); await git("commit", "--quiet", "-m", "seed"); await git("pack-refs", "--all");
+    context.mock.method(fs, "watch", (...args: unknown[]) => {
+      const handle = Reflect.apply(nativeWatch, fs, args) as fs.FSWatcher;
+      created++; peak = Math.max(peak, created - closed);
+      const nativeClose = handle.close.bind(handle); let ended = false;
+      handle.close = () => { if (!ended) { ended = true; closed++; } nativeClose(); };
+      return handle;
+    });
+    syncBuiltinESMExports();
+    service = createDesktopGitService({ registry, pickDirectory: async () => undefined, preferencesPath: join(root, "preferences.json") });
+    const workspaces: WorkspaceId[] = [];
+    for (let index = 0; index < 40; index++) {
+      const path = join(project, `workspace-${index}`); await mkdir(path);
+      const workspaceId = (await registry.upsertByPath(path)).workspaceId as WorkspaceId; workspaces.push(workspaceId);
+      await service.repository({ workspaceId });
+    }
+    assert.equal(created, 120); assert.equal(created - closed, 48); assert.equal(peak, 48);
+    await service.repository({ workspaceId: workspaces[39]! });
+    assert.equal(created, 120);
+    await service.repository({ workspaceId: workspaces[0]! });
+    assert.equal(created, 123); assert.equal(created - closed, 48);
+    service.dispose(); assert.equal(closed, created);
+  } finally { service?.dispose(); context.mock.restoreAll(); syncBuiltinESMExports(); await removeGitFixture(root); }
 });
 
 test("DesktopGitService reports external repository changes and stays quiet for its own commands", async (context) => {

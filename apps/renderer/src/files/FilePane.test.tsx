@@ -9,14 +9,15 @@ import { FileDocument } from "./fileDocuments";
 
 const viewer = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn() }));
 vi.mock("./PdfPane", () => ({ default: ({ url }: { url: string }) => { useEffect(() => { viewer.start(); return () => viewer.stop(); }, []); return <div data-testid="pdf-view">{url}</div>; } }));
+vi.mock("./FileTextEditor", () => ({ default: ({ gitMarks }: { gitMarks?: { additions: number } }) => <div data-testid="text-view" data-git-additions={gitMarks?.additions ?? 0} /> }));
 beforeEach(() => { vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} }); viewer.start.mockClear(); viewer.stop.mockClear(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 function setup(path = "report.pdf") {
   let visibility: DocumentVisibilityState = "visible";
   vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
-  const file: WorkspaceFileInfo = { workspaceId: "workspace" as WorkspaceFileInfo["workspaceId"], id: "pdf", path, name: path, mime: path.endsWith("webm") ? "video/webm" : "application/pdf", size: 128, version: "v1", writable: true };
-  const query = vi.fn(async () => file), client = { query } as unknown as StudioClient;
+  const file: WorkspaceFileInfo = { workspaceId: "workspace" as WorkspaceFileInfo["workspaceId"], id: "pdf", path, name: path, mime: path.endsWith("webm") ? "video/webm" : path.endsWith("pdf") ? "application/pdf" : "text/plain", size: 128, version: "v1", writable: true };
+  const query = vi.fn(async (_name?: string, _input?: unknown): Promise<unknown> => file), client = { query } as unknown as StudioClient;
   const session = new FileDocument(file, async () => client), setVisible = vi.spyOn(session, "setVisible");
   const open = vi.fn(async () => ({ id: "lease", url: "omp-file://viewer/lease", file })), release = vi.fn(async () => {});
   vi.stubGlobal("ompStudioChrome", { files: { open, release } });
@@ -56,5 +57,23 @@ it("also releases a visible file panel when its native document becomes hidden",
   act(source.hideDocument);
   expect(source.release).toHaveBeenCalledWith("lease"); expect(viewer.stop).toHaveBeenCalledTimes(1);
   expect(source.setVisible).toHaveBeenLastCalledWith("file-view:pdf", false);
+  view.unmount(); source.session.dispose();
+});
+
+it("reads a file gutter diff using the repository path for a subdirectory workspace", async () => {
+  const source = setup("notes.txt"), file = source.session.getSnapshot().file;
+  source.query.mockImplementation(async (name, input) => {
+    if (name === "workspace.file.inspect") return file;
+    if (name === "workspace.file.readText") return { file, text: "source\n", encoding: "utf8", bom: false, lineEnding: "lf" };
+    if (name === "git.repository.summary") return { workspaceId: "workspace", isRepository: true, workspacePrefix: "src", changedFiles: 1 };
+    if (name === "git.diff.get") {
+      const path = (input as { path: string }).path;
+      return { path, binary: false, patch: path === "src/notes.txt" ? "@@ -1 +1,2 @@\n source\n+added\n" : "" };
+    }
+    throw new Error(`Unexpected query ${name}`);
+  });
+  const view = render(source.pane(true));
+  await waitFor(() => expect(source.query).toHaveBeenCalledWith("git.diff.get", { workspaceId: "workspace", path: "src/notes.txt", target: "working" }));
+  await waitFor(() => expect(screen.getByTestId("text-view").getAttribute("data-git-additions")).toBe("1"));
   view.unmount(); source.session.dispose();
 });
