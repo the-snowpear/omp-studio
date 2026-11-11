@@ -26,6 +26,7 @@ import { useConversationViewLease } from "./conversationViews";
 import { useConversationView } from "../conversationWorkspace/Context";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { useConversationReading, type ConversationReadingMemory } from "./useConversationReading";
+import { motionReduced } from "../motion";
 
 const FALLBACK_SNAPSHOT: ConversationSnapshot = {
   state: resetConversation(0, null, "unavailable", "当前没有活动会话。"),
@@ -55,9 +56,6 @@ type PaintedBody = {
   readonly pin: "top" | "bottom";
 };
 
-function prefersReducedMotion(): boolean {
-  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
 
 export function ConversationPane({
   runtimeTools,
@@ -205,7 +203,7 @@ export function ConversationPane({
   /** 过场只认会话本身：transcript revision / runtime epoch 变化（回溯、分支、重连）
    *  同样会重建 engine，但内容照旧，跟着走过场只会白闪一下。 */
   const switchKey = state.identity?.sessionId ?? (demo ? "demo" : "");
-  const reducedMotion = useMemo(prefersReducedMotion, []);
+  const reducedMotion = useMemo(motionReduced, []);
   const painted = useRef<PaintedBody | null>(null);
   const [switchState, dispatchSwitch] = useReducer(nextConversationSwitch, IDLE_CONVERSATION_SWITCH);
   const canFade = painted.current !== null && !reducedMotion;

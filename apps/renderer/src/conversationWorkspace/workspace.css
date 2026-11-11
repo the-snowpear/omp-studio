@@ -3,7 +3,7 @@
 html[data-workbench-transition] :is(.cw-sidebar-slot,.cw-conversation-title-row,.cw-right-slot,.cw-bottom-slot,.cw-main-conversation,.cw-idle,.cw-shared-bottomReveal>.bp-reveal,.dock-float[data-workbench-surface],body>.dock-host-layer>.dock-panel-content[data-workbench-surface]){opacity:var(--cw-route-opacity)}
 html[data-workbench-transition] :is(.cw-sidebar-slot,.cw-conversation-title-row,.cw-workbench,.cw-bottom-slot,.dock-float[data-workbench-surface]){pointer-events:none}
 .cw-shared-sidebar>.sidebar{z-index:auto}
-.cw-shell{display:flex;flex:1;min-height:0;overflow:hidden}.cw-navigation-slot{display:flex;flex:none}.cw-sidebar-slot{width:var(--sidebar-w);flex:none;min-height:0;overflow:hidden;transition:width var(--dur-fast,120ms)}
+.cw-shell{display:flex;flex:1;min-height:0;overflow:hidden}.cw-navigation-slot{display:flex;flex:none}.cw-sidebar-slot{width:var(--sidebar-w);flex:none;min-height:0;overflow:hidden;transition:width var(--dur-fast) var(--ease-out)}
 .cw-shared-sidebar,.cw-shared-navigation{height:100%;display:flex}.cw-shared-sidebar>.sidebar{width:100%;flex:1}.cw-shared-title>.titlebar{width:100%}
 .cw-shell-main{display:flex;flex:1;min-width:0;min-height:0;flex-direction:column;position:relative}
 .cw-sidebar-slot[hidden],.cw-conversation-title-row[hidden],.cw-right-slot[hidden],.cw-bottom-slot[hidden],.cw-main-conversation[hidden]{display:none}
@@ -38,7 +38,7 @@ html[data-workbench-transition] :is(.cw-sidebar-slot,.cw-conversation-title-row,
 .cw-window-title-menu.dock-icon-button{display:flex;align-items:center;gap:5px;flex:1;width:auto;min-width:60px;padding:0 4px;height:26px;font-size:var(--fs-12);font-weight:var(--fw-medium);text-align:left;cursor:grab;touch-action:none}
 .cw-window-title-menu .session-title-card{margin-right:0}.cw-window-title-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.cw-window-title-menu>.icon:last-child{flex:none;width:11px;height:11px;opacity:.55}
 .cw-window-source{display:flex;flex:0 1 auto;min-width:0;max-width:180px}.cw-window-source-menu.dock-icon-button{width:auto;min-width:0;padding:0 5px;gap:4px;font-size:var(--fs-10);color:var(--text-3);background:var(--surface-2);border-radius:var(--r-4)}.cw-window-source-menu>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.cw-window-status{display:flex;align-items:center;justify-content:center;width:16px;flex:none}.cw-window-status.running .dot{background:var(--green);animation:pulse 1.8s ease-in-out infinite}.cw-window-status.waiting .dot{background:var(--amber)}.cw-window-status.error .dot{background:var(--red)}
+.cw-window-status{display:flex;align-items:center;justify-content:center;width:16px;flex:none}.cw-window-status.running .dot{background:var(--green);animation:omp-pulse var(--loop-pulse) var(--ease-loop) infinite}.cw-window-status.waiting .dot{background:var(--amber)}.cw-window-status.error .dot{background:var(--red)}
 .cw-source-details{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 14px;margin:8px;min-width:200px;max-width:340px;font-size:var(--fs-12)}.cw-source-details dt{color:var(--text-3)}.cw-source-details dd{margin:0;overflow-wrap:anywhere}
 .dock-menu-popover.cw-window-details{width:min(380px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto}
 /* Window mode: project › branch › title with Fork/Handoff right after the title, as in the top bar. */

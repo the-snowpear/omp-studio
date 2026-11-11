@@ -644,7 +644,7 @@ li[data-child] .cv-cat-label {
   height: 10px;
   border-radius: var(--r-full);
   background: var(--accent);
-  animation: cv-pulse 1.1s ease-in-out infinite;
+  animation: cv-pulse var(--loop-pulse) var(--ease-loop) infinite;
 }
 
 .cv-open-state b {
@@ -850,11 +850,3 @@ li[data-child] .cv-cat-label {
 .cv[data-compact] .cv-overview-details[open] { flex: 1 0 100%; }
 .cv[data-compact] .cv-overview-details[open] .cv-facts { margin: var(--sp-8) 0; }
 
-@media (prefers-reduced-motion: reduce) {
-  .cv *,
-  .cv *::before,
-  .cv *::after {
-    transition: none !important;
-    animation: none !important;
-  }
-}

@@ -260,7 +260,8 @@ import { openOnboardingTour } from "./onboarding/onboardingState";
 import { AppUpdateDialog } from "./AppUpdateDialog";
 import { AppNavRail, type NavRailRoute } from "./NavRail";
 import { SidebarFooter } from "./SidebarFooter";
-import { transitionDelayMs, transitionMs } from "./motionClock";
+import { MOTION_MS, motionReduced, transitionDelayMs, transitionMs } from "./motion";
+import { applyTheme } from "./themeTransition";
 import { useIdentityFlight } from "./useIdentityFlight";
 import { useAppUpdate } from "./settings/appUpdate";
 import { avatarInitial, useOperatorProfile } from "./settings/operatorProfile";
@@ -297,7 +298,7 @@ import { previewTailInterrupted } from "./preview/conversationFixtures";
 import { BtwPanel } from "./btw/BtwPanel";
 import { useBtwSession, type BtwSessionApi } from "./btw/useBtwSession";
 import { InteractionDeck } from "./InteractionDeck";
-import { ASK_GENIE_HOLD_MS, isAskDeckInteraction, prefersReducedMotion } from "./deck/askGenie";
+import { ASK_GENIE_HOLD_MS, isAskDeckInteraction } from "./deck/askGenie";
 import { interactionDeckDisabled, planReviewDeckDisabled, usableCapabilityManifest } from "./deck/interactionGate";
 import { PlanReviewDeck, PlanViewDialog } from "./deck/PlanCard";
 import { type PlanActionDetail, type PlanActionId } from "./deck/types";
@@ -1961,7 +1962,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     if (previousRailCollapsed.current === railCollapsed) return;
     previousRailCollapsed.current = railCollapsed;
     const footer = footerRef.current;
-    const duration = footer === null ? 250 : transitionMs(footer) + transitionDelayMs(footer);
+    const duration = footer === null ? MOTION_MS.slow : transitionMs(footer) + transitionDelayMs(footer);
     if (duration <= 1) return;
     const end = performance.now() + duration + 120;
     let frame = requestAnimationFrame(function step() {
@@ -3851,7 +3852,7 @@ function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismiss, sta
       return;
     }
     if (lastAskDeckRef.current === null) return;
-    if (prefersReducedMotion()) {
+    if (motionReduced()) {
       lastAskDeckRef.current = null;
       setAskDeckLeaving(false);
       return;
@@ -7106,7 +7107,7 @@ function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSe
 
   useEffect(() => {
     if (mdi && !mdi.active) return;
-    document.documentElement.setAttribute("data-theme", appSettings.theme);
+    applyTheme(document.documentElement, appSettings.theme);
     document.documentElement.setAttribute("data-density", appSettings.density);
     /* 文件图标着色：tri 时根元素挂 data-palette，CSS 只覆盖 token。
        注意根元素用 data-palette、树行用 data-ftype，两者不共名。 */

@@ -17,7 +17,7 @@ import { Icon } from "./icons";
 import { useI18n } from "./i18n";
 import { ToastHost } from "./ToastHost";
 import { hostErrorMessage, waitReceipt } from "./hostError";
-import { pagePhaseClass, useDeferredPresence } from "./pageTransition";
+import { pageDir, pagePhaseClass, useDeferredPresence } from "./pageTransition";
 import { parseJsonOrYaml, StructuredEditor } from "./structured-editor";
 import { ComposerModelMenu } from "./ComposerModelPicker";
 import { createPreviewModelConfig } from "./preview/modelConfigFixtures";
@@ -255,7 +255,7 @@ export function SubagentsPanel({
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [draftState, setDraft] = useState<AgentDraft | null>(null);
-  const { shown: draft, phase: viewPhase, live: viewLive } = useDeferredPresence(draftState);
+  const { shown: draft, phase: viewPhase, live: viewLive, dir: viewDir } = useDeferredPresence(draftState);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{
@@ -633,7 +633,7 @@ export function SubagentsPanel({
   const definitionLocked = Boolean(draft && !draft.editable);
 
   return (
-    <div className={viewLive ? `mc-view ${pagePhaseClass(viewPhase)}` : "mc-view"}>
+    <div className={viewLive ? `mc-view ${pagePhaseClass(viewPhase)}` : "mc-view"} data-page-dir={pageDir(viewDir)}>
       {draft ? (
       <form className="mp-editor" noValidate onSubmit={(event) => void saveDraft(event)}>
         <div className="mr-toolbar">

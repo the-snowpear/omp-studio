@@ -23,6 +23,7 @@ import {
 import { usePreviewMode } from "./preview/PreviewContext";
 import { useI18n } from "./i18n";
 import { loadRuntimeSkills } from "./skills/runtimeSkills";
+import { MOTION_MS, MOTION_SLACK_MS, STAGGER_MS, motionReduced } from "./motion";
 
 type GroupKey = "workspace" | "global" | "builtin-plugin" | "runtime";
 
@@ -48,13 +49,20 @@ const SCOPE_LABEL: Record<string, string> = {
   plugin: "skills.scopePlugin",
 };
 
+/* 悬停意图：停多久才出简介、离开多久才收。是等待，不是动画时长。 */
 const HOVER_PREVIEW_MS = 420;
 const HOVER_HIDE_MS = 180;
-const FLY_EXIT_MS = 160;
-const FILTER_SETTLE_MS = 1040;
-const ADDED_REPLAY_STAY_MS = 420;
-const ADDED_REPLAY_ENTER_MS = 640;
 const STAGGER_MAX = 3;
+/* 以下几项等的是 sidebar.css `.sk-group-items` 里的同一组 token。 */
+/** `.sk-fly` 收起（--dur-fast）后再卸载。 */
+const FLY_EXIT_MS = MOTION_MS.fast + MOTION_SLACK_MS;
+/** 进场行开始滑入的时刻（--sk-enter-slide-delay）。 */
+const FILTER_ENTER_AT_MS = MOTION_MS.slow + MOTION_MS.base;
+/** 一次筛选全部落定：进场延迟 + 滑入（--sk-enter-slide-d）+ 最大错峰。 */
+const FILTER_SETTLE_MS = FILTER_ENTER_AT_MS + MOTION_MS.hero + STAGGER_MAX * STAGGER_MS + MOTION_SLACK_MS;
+/** 「已添加」标记重播：留下的行与进场行同时起跳，进场行等自己到位。 */
+const ADDED_REPLAY_STAY_MS = FILTER_ENTER_AT_MS;
+const ADDED_REPLAY_ENTER_MS = FILTER_ENTER_AT_MS + MOTION_MS.slow;
 
 type SlotPhase = "stay" | "enter" | "leave";
 
@@ -64,9 +72,6 @@ type FilterSlot = {
   stagger: number;
 };
 
-function prefersReducedMotion(): boolean {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
 
 function mergeVisible(prev: DrawerItem[], next: DrawerItem[]): Array<{ item: DrawerItem; phase: SlotPhase }> {
   const nextIds = new Set(next.map(drawerItemKey));
@@ -336,7 +341,7 @@ export function SkillsDrawer({
 
     if (filterEpoch !== epochAppliedRef.current && filterEpoch > 0) {
       epochAppliedRef.current = filterEpoch;
-      if (prefersReducedMotion()) {
+      if (motionReduced()) {
         setSlots(staySlots(visible));
         return;
       }
@@ -660,7 +665,7 @@ function SkillCard({
   const epochRef = useRef(filterEpoch);
   const [addedPaint, setAddedPaint] = useState(() => {
     if (filterEpoch === 0 || phase === "leave" || !added) return added;
-    if (typeof window !== "undefined" && prefersReducedMotion()) return added;
+    if (typeof window !== "undefined" && motionReduced()) return added;
     return false;
   });
   const cls = ["sk-card"];
@@ -712,7 +717,7 @@ function SkillCard({
       setAddedPaint(Boolean(added && phase !== "leave"));
       return;
     }
-    if (filterEpoch === 0 || prefersReducedMotion()) {
+    if (filterEpoch === 0 || motionReduced()) {
       epochRef.current = filterEpoch;
       setAddedPaint(true);
       return;

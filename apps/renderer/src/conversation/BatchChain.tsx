@@ -9,6 +9,7 @@ import { previewAgentDisplay } from "../preview/agentDockPreview";
 import { jsonString, type ToolView } from "./conversationViewModel";
 import { applyLiveSubagentRoster, resolveSubagentMetrics, SubagentMetrics } from "./SubagentMetrics";
 import { useSubagentHoverPreview } from "./SubagentHoverContext";
+import { MOTION_MS, MOTION_SLACK_MS } from "../motion";
 import {
   batchSummary,
   chainItemDetail,
@@ -112,8 +113,8 @@ function SubagentCard({ source, onInspectSubagent }: {
   </div>;
 }
 
-/** 收起过渡跑完之后再卸载正文的等待时间（略大于 `--dur-slow` 250ms）。 */
-const COLLAPSE_UNMOUNT_MS = 320;
+/** 收起过渡（`.tl-card` / `.batch-chain`，--dur-slow）跑完之后再卸载正文。 */
+const COLLAPSE_UNMOUNT_MS = MOTION_MS.slow + MOTION_SLACK_MS;
 
 /**
  * 卡片展开/收起的三件事：正文按需挂载、首次展开推迟一帧起跳、收起过渡结束后卸载。

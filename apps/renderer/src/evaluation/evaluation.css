@@ -314,7 +314,7 @@
 .eval-result-body {
   padding: 10px 24px 20px;
   background: var(--surface-2);
-  animation: eval-detail-in 150ms ease-out;
+  animation: var(--motion-unfold);
 }
 .eval-result-body h4 {
   font-size: 12px;
@@ -772,16 +772,6 @@
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
-@keyframes eval-detail-in {
-  from {
-    opacity: 0;
-    transform: translateY(-3px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 @media (max-width: 1000px) {
   .eval-header {
     align-items: flex-start;
@@ -835,14 +825,6 @@
     font-size: 21px;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .eval-result-body {
-    animation: none;
-  }
-  .eval-result-toggle {
-    transition: none;
-  }
-}
 
 .eval-ranking {
   justify-content: flex-end;
@@ -864,22 +846,9 @@
   max-height: 100dvh;
   width: min(560px, 100vw);
   border-radius: 0;
-  animation: eval-drawer-in 180ms ease-out;
-}
-@keyframes eval-drawer-in {
-  from {
-    transform: translateX(24px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .modal.workspace-dialog:has(.eval-history-list) {
-    animation: none;
-  }
+  /* A drawer is a region arriving from the edge it is attached to. */
+  --enter-x: var(--shift-lg);
+  animation: omp-enter var(--dur-slow) var(--ease-out) backwards;
 }
 
 .eval-background-entry {

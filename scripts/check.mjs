@@ -3,15 +3,15 @@
 //
 // Usage: node scripts/check.mjs [options]
 //
-//   (no options)      arch + selects + compile + core package suites + core renderer suites
-//   --fast            arch + selects + compile only (no test run)
+//   (no options)      arch + selects + motion + compile + core package suites + core renderer suites
+//   --fast            arch + selects + motion + compile only (no test run)
 //   --all             run every package test file, not only scripts/core-suites.mjs
 //   --production      also run the renderer / remote-host production build
 //   --only <target>   run one group or one unit; a unit rebuilds its dependency
 //                     closure first and then runs that unit's suites
 //   --list            print groups and units
 //
-// Groups: arch, selects, types, packages, renderer, production
+// Groups: arch, selects, motion, types, packages, renderer, production
 // Units:  studio-protocol, client, client-contract, studio-host, host-client-api,
 //         transport-desktop, transport-web, runtime-installer, platform,
 //         platform-win32, platform-darwin, testkit, desktop, renderer
@@ -174,11 +174,11 @@ async function pool(steps, failures) {
 function usage() {
   console.log(`Usage: node scripts/check.mjs [--fast] [--all] [--production] [--only <target>] [--suite <fragment>] [--list]
 
-  (no options)   arch + selects + compile + core suites
-  --fast         arch + selects + compile only
+  (no options)   arch + selects + motion + compile + core suites
+  --fast         arch + selects + motion + compile only
   --all          every package test file, not only the core list
   --production   also build the renderer bundle and the remote host bundle
-  --only <x>     one group (arch, selects, types, packages, renderer, production)
+  --only <x>     one group (arch, selects, motion, types, packages, renderer, production)
                  or one unit (studio-host, client, renderer, ...)
   --suite <x>    filter test filenames in one --only unit; repeat for multiple fragments
   --list         print groups and units`);
@@ -186,7 +186,7 @@ function usage() {
 
 function list() {
   console.log("groups:");
-  for (const group of ["arch", "selects", "types", "packages", "renderer", "production"]) console.log(`  ${group}`);
+  for (const group of ["arch", "selects", "motion", "types", "packages", "renderer", "production"]) console.log(`  ${group}`);
   console.log("units:");
   for (const unit of units) {
     const suite = unit.key === "renderer" ? CORE_RENDERER_SUITES.length : suiteFiles(unit.key, false).length;
@@ -228,12 +228,13 @@ if (suiteFilters.length && (!only || !byKey.has(only))) {
   process.exit(2);
 }
 
-const plan = { arch: false, selects: false, build: new Set(), test: new Set(), production: false };
+const plan = { arch: false, selects: false, motion: false, build: new Set(), test: new Set(), production: false };
 const allUnits = () => units.map(unit => unit.key);
 
 function useEverything() {
   plan.arch = true;
   plan.selects = true;
+  plan.motion = true;
   for (const key of allUnits()) plan.build.add(key);
   for (const key of allUnits()) plan.test.add(key);
 }
@@ -244,6 +245,7 @@ if (only) {
     plan.test.add(only);
   } else if (only === "arch") plan.arch = true;
   else if (only === "selects") plan.selects = true;
+  else if (only === "motion") plan.motion = true;
   else if (only === "types") for (const key of allUnits()) plan.build.add(key);
   else if (only === "packages") {
     for (const key of allUnits()) plan.build.add(key);
@@ -259,6 +261,7 @@ if (only) {
 } else if (flags.has("--fast")) {
   plan.arch = true;
   plan.selects = true;
+  plan.motion = true;
   for (const key of allUnits()) plan.build.add(key);
 } else {
   useEverything();
@@ -285,6 +288,16 @@ if (plan.selects) {
     name: "selects",
     command: process.execPath,
     args: [join(root, "scripts", "check-renderer-selects.mjs")],
+  });
+  report(result);
+  if (!result.ok) failures.push(result.name);
+}
+
+if (plan.motion) {
+  const result = await runStep({
+    name: "motion",
+    command: process.execPath,
+    args: [join(root, "scripts", "check-renderer-motion.mjs")],
   });
   report(result);
   if (!result.ok) failures.push(result.name);

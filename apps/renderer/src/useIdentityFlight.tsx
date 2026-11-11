@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-import { transitionMs } from "./motionClock";
+import { INSTANT_MS, MOTION_EASE, MOTION_MS, transitionMs } from "./motion";
 import { avatarInitial } from "./settings/operatorProfile";
 
 /**
@@ -31,10 +31,6 @@ interface Source {
   readonly ratio: number;
 }
 
-const FALLBACK_MS = 250;
-const FALLBACK_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
-/** 减动效档把过渡压到 0.01ms：此时不飞，直接换。 */
-const INSTANT_MS = 20;
 const DEFAULT_RATIO = 0.4;
 /** 真身在飞行期间隐身，靠这个根类名统一控制（规则写在 App.css）。 */
 const FLOATING_CLASS = "is-identity-floating";
@@ -112,7 +108,8 @@ export function useIdentityFlight({
     pendingRef.current = null;
     if (pending === null) return;
     const rail = document.querySelector<HTMLElement>(".app-rail");
-    const duration = rail === null ? FALLBACK_MS : transitionMs(rail);
+    const duration = rail === null ? MOTION_MS.slow : transitionMs(rail);
+    /* 减动效档把过渡压到 0s：此时不飞，直接换。 */
     if (duration < INSTANT_MS) return;
     const target = collapsed
       ? footerTargetRect(footerRef.current, footerAvatarRef.current)
@@ -148,7 +145,7 @@ export function useIdentityFlight({
       ],
       {
         duration,
-        easing: rail === null ? FALLBACK_EASING : getComputedStyle(rail).transitionTimingFunction,
+        easing: rail === null ? MOTION_EASE.nav : getComputedStyle(rail).transitionTimingFunction,
         fill: "both",
       },
     );

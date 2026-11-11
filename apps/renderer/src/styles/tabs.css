@@ -23,7 +23,7 @@
   background: transparent;
   color: var(--text-3);
   white-space: nowrap;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
 :is(.tabs, .mc-tabs, .workspace-tabs, .sd-tabs, .cap-side, .skillshare-tabs)[role="tablist"] > [role="tab"] {
@@ -79,8 +79,3 @@
   .cap-layout > .page-tabs--vertical { width: auto; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  :is(.tabs, .mc-tabs, .workspace-tabs, .sd-tabs, .cap-side, .skillshare-tabs, .dk-head-chips)[role="tablist"] > [role="tab"] {
-    transition: none;
-  }
-}

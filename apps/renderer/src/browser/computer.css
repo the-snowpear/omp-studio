@@ -55,7 +55,7 @@
 .computer-viewer-head .icon { width: 13px; height: 13px; color: var(--glyph-faint); }
 .computer-viewer-mode { flex: none; font-size: 10px; }
 .computer-canvas { position: relative; display: flex; align-items: center; justify-content: center; flex: 1; min-height: 240px; background: var(--surface-2); overflow: hidden; }
-.computer-empty { display: flex; flex-direction: column; align-items: center; padding: var(--sp-32) var(--sp-20); max-width: 340px; text-align: center; animation: computer-reveal var(--dur-slow) var(--ease-out); }
+.computer-empty { display: flex; flex-direction: column; align-items: center; padding: var(--sp-32) var(--sp-20); max-width: 340px; text-align: center; animation: var(--motion-reveal); }
 .computer-empty h3 { margin-top: var(--sp-24); font-size: var(--fs-14); font-weight: var(--fw-semibold); color: var(--text); line-height: 1.5; }
 .computer-empty > p { margin-top: var(--sp-8); color: var(--text-3); font-size: var(--fs-12); line-height: 1.8; text-wrap: pretty; }
 .computer-empty .computer-button { margin-top: var(--sp-20); }
@@ -73,10 +73,10 @@
 .computer-illustration-stand::before { content: ""; position: absolute; left: 12px; width: 2px; height: 11px; background: var(--accent-border); }
 .computer-illustration-symbol { position: absolute; bottom: 10px; right: -9px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--surface-2); background: var(--accent); color: var(--text-on-accent); }
 .computer-illustration-symbol .icon { width: 13px; height: 13px; }
-.computer-illustration.is-loading .computer-illustration-symbol .icon { animation: computer-spin 1.2s linear infinite; }
+.computer-illustration.is-loading .computer-illustration-symbol .icon { animation: omp-spin var(--loop-spin) linear infinite; }
 .computer-capture-open { display: flex; align-items: center; justify-content: center; align-self: stretch; position: absolute; inset: 0; width: 100%; height: 100%; padding: var(--sp-8); cursor: zoom-in; }
 .computer-capture-open:focus-visible { outline-offset: -4px; }
-.computer-capture-open > img { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; animation: computer-reveal var(--dur-slow) var(--ease-out); }
+.computer-capture-open > img { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; animation: var(--motion-reveal); }
 .computer-enlarge { position: absolute; display: inline-flex; align-items: center; gap: 5px; bottom: var(--sp-16); left: 50%; transform: translate(-50%, 4px); padding: 5px 9px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-6); font-size: var(--fs-11); white-space: nowrap; opacity: 0; transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
 .computer-enlarge .icon { width: 12px; height: 12px; }
 .computer-capture-open:hover .computer-enlarge, .computer-capture-open:focus-visible .computer-enlarge { opacity: 1; transform: translate(-50%, 0); }
@@ -96,7 +96,7 @@
 .computer-permissions summary .icon { width: 14px; height: 14px; color: var(--glyph-faint); }
 .computer-permissions summary > span:last-child .icon { width: 12px; height: 12px; transition: transform var(--dur) var(--ease); }
 .computer-permissions[open] summary > span:last-child .icon { transform: rotate(180deg); }
-.computer-permission-body { padding-bottom: var(--sp-16); animation: computer-reveal var(--dur) var(--ease-out); }
+.computer-permission-body { padding-bottom: var(--sp-16); animation: var(--motion-unfold); }
 .computer-setting { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-12) 0; margin-bottom: var(--sp-6); border-top: 1px solid var(--border); }
 .computer-setting > div { flex: 1; min-width: 0; }
 .computer-setting strong { font-size: var(--fs-12); font-weight: var(--fw-medium); }
@@ -121,7 +121,7 @@
 .computer-stop.is-running:hover:not(:disabled) { background: var(--red-soft); }
 .computer-hint { display: flex; align-items: flex-start; gap: 6px; flex: none; color: var(--text-faint); font-size: 10px; line-height: 1.7; }
 .computer-hint .icon { width: 12px; height: 12px; margin-top: 2px; color: var(--glyph-faint); }
-.computer-feedback { display: flex; align-items: flex-start; gap: var(--sp-8); flex: none; padding: var(--sp-10) var(--sp-12); background: var(--accent-softer); color: var(--text-2); border-radius: var(--r-6); line-height: 1.6; font-size: var(--fs-11); overflow-wrap: anywhere; animation: computer-reveal var(--dur) var(--ease-out); }
+.computer-feedback { display: flex; align-items: flex-start; gap: var(--sp-8); flex: none; padding: var(--sp-10) var(--sp-12); background: var(--accent-softer); color: var(--text-2); border-radius: var(--r-6); line-height: 1.6; font-size: var(--fs-11); overflow-wrap: anywhere; animation: var(--motion-reveal); }
 .computer-feedback .icon { width: 14px; height: 14px; margin-top: 2px; }
 .computer-feedback.is-error { color: var(--red); background: var(--red-soft); }
 
@@ -136,9 +136,7 @@
 .computer-expanded img { display: block; width: 100%; max-height: 75dvh; object-fit: contain; border-radius: var(--r-6); background: var(--surface-2); }
 .computer-expanded p { display: flex; justify-content: space-between; margin-top: var(--sp-12); color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
 
-@keyframes computer-reveal { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes computer-spin { to { transform: rotate(360deg); } }
-.computer-spin { animation: computer-spin 1s linear infinite; }
+.computer-spin { animation: omp-spin var(--loop-spin) linear infinite; }
 
 @container (max-width: 380px) {
   .computer-heading { padding: var(--sp-14) var(--sp-16); }
@@ -151,7 +149,4 @@
   .computer-demo { padding: 0 4px; }
   .computer-heading-copy > div { gap: var(--sp-4); }
   .computer-empty { padding: var(--sp-24) var(--sp-16); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .computer-pane *, .computer-confirm *, .computer-expanded * { animation: none !important; transition: none !important; }
 }

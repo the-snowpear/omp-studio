@@ -14,7 +14,7 @@
   padding: 24px;
   background: color-mix(in srgb, #06070c 46%, transparent);
   backdrop-filter: blur(6px) saturate(1.1);
-  animation: ob-backdrop-in 260ms var(--ease-out) both;
+  animation: omp-fade-in var(--dur-slow) var(--ease-out) backwards;
 }
 
 .ob-dialog {
@@ -29,7 +29,8 @@
   background: var(--surface);
   color: var(--text);
   box-shadow: 0 32px 80px -24px rgba(8, 10, 24, 0.55), 0 4px 18px rgba(8, 10, 24, 0.12);
-  animation: ob-dialog-in 420ms var(--ease-out) both;
+  /* The same entrance as every sheet, at the pace of a first meeting. */
+  animation: omp-sheet-in var(--dur-hero) var(--ease-out) backwards;
 }
 
 .ob-visual {
@@ -145,7 +146,7 @@
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
-  animation: ob-fade-in 240ms var(--ease-out) both;
+  animation: ob-fade-in var(--dur-slow) var(--ease-out) both;
 }
 .ob-close:hover { background: var(--surface-hover); color: var(--text); }
 .ob-close .icon { width: 14px; height: 14px; }
@@ -174,7 +175,7 @@
   background: var(--accent);
   transform: scaleX(0);
   transform-origin: 0 50%;
-  transition: transform 360ms var(--ease-out), opacity var(--dur) var(--ease);
+  transition: transform var(--dur-slower) var(--ease-out), opacity var(--dur) var(--ease);
 }
 .ob-seg.is-seen::after { transform: scaleX(1); opacity: 0.4; }
 .ob-seg.is-current::after { transform: scaleX(1); opacity: 1; }
@@ -187,9 +188,10 @@
   overflow: hidden auto;
   padding: 0 8px;
   margin: 0 -8px;
-  animation: ob-text-in 360ms var(--ease-out) both;
+  --enter-y: var(--shift-sm);
+  animation: omp-enter var(--dur-slower) var(--ease-out) backwards;
 }
-.ob-text[data-dir="back"] { animation-name: ob-text-in-back; }
+.ob-text[data-dir="back"] { --enter-y: calc(var(--shift-sm) * -1); }
 .ob-step-no {
   font-size: var(--fs-11);
   color: var(--text-faint);
@@ -300,17 +302,19 @@
 .ob-scene {
   position: absolute;
   inset: 0;
-  animation: ob-scene-in 420ms var(--ease-out) both;
+  /* Steps are siblings: the next scene arrives from the side it sits on. */
+  --enter-x: var(--shift-lg);
+  animation: omp-enter var(--dur-slower) var(--ease-nav) backwards;
   font-family: var(--font-ui);
 }
-.ob-scene[data-dir="back"] { animation-name: ob-scene-in-back; }
+.ob-scene[data-dir="back"] { --enter-x: calc(var(--shift-lg) * -1); }
 .ob-scene *,
 .ob-scene *::before,
 .ob-scene *::after { box-sizing: border-box; }
 .ob-scene .ob-a {
   animation-duration: var(--ob-d);
   animation-iteration-count: infinite;
-  animation-timing-function: cubic-bezier(0.45, 0.05, 0.25, 1);
+  animation-timing-function: var(--ease-emphasis);
 }
 
 .ob-ln {
@@ -840,31 +844,7 @@
   from { transform: scaleX(0); }
   to { transform: scaleX(1); }
 }
-@keyframes ob-backdrop-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes ob-dialog-in {
-  from { opacity: 0; transform: translateY(14px) scale(0.975); }
-  to { opacity: 1; transform: none; }
-}
 @keyframes ob-fade-in {
   from { opacity: 0; transform: scale(0.85); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes ob-scene-in {
-  from { opacity: 0; transform: translateX(18px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes ob-scene-in-back {
-  from { opacity: 0; transform: translateX(-18px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes ob-text-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes ob-text-in-back {
-  from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: none; }
 }

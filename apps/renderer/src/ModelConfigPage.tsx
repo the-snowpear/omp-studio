@@ -50,7 +50,7 @@ import { Icon } from "./icons";
 import { useI18n } from "./i18n";
 import { ToastHost } from "./ToastHost";
 import { hostErrorMessage, waitReceipt } from "./hostError";
-import { pagePhaseClass, useDeferredKey, useDeferredPresence, useOverlayPresence } from "./pageTransition";
+import { pageDir, pagePhaseClass, useDeferredKey, useDeferredPresence, useOverlayPresence } from "./pageTransition";
 import { extractYamlMapEntry, mergeYamlMapEntry, parseStructured, readYamlMapEntryNode, StructuredEditor } from "./structured-editor";
 import { usePreviewMode } from "./preview/PreviewContext";
 import {
@@ -86,6 +86,7 @@ const PROVIDER_ORDER_KEY = "omp.providerDisplayOrder";
 
 type I18nT = ReturnType<typeof useI18n>["t"];
 
+/* Written in tab-strip order: a tab swap travels the way the strip reads. */
 const TAB_BUTTON_ID: Record<McTab, string> = {
   providers: "mcTabProviders",
   roles: "mcTabRoles",
@@ -94,6 +95,7 @@ const TAB_BUTTON_ID: Record<McTab, string> = {
   presets: "mcTabPresets",
   accounts: "mcTabAccounts",
 };
+const mcTabRank = (tab: McTab): number => Object.keys(TAB_BUTTON_ID).indexOf(tab);
 
 const STATUS_META: Record<string, { label: string; chip: string; dot: string }> = {
   available: { label: "Available", chip: "green", dot: "green" },
@@ -1647,7 +1649,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const { t } = useI18n();
   const { preview, marks } = usePreviewMode();
   const [tab, setTab] = useState<McTab>("providers");
-  const { shown: shownTab, phase: tabPhase } = useDeferredKey(tab);
+  const { shown: shownTab, phase: tabPhase, dir: tabDir } = useDeferredKey(tab, mcTabRank);
   /* First paint must not play tabpanel page-in: it stacks on the shell/page-body
      translateY and Chromium flashes native placeholder glyphs at the wrong size.
      Arm only after a real tab change, same idea as useDeferredPresence `live`.
@@ -1655,7 +1657,10 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
      gets page-out rather than a one-frame page-in flash. */
   const tabMotionLive = useRef(false);
   if (!Object.is(tab, shownTab)) tabMotionLive.current = true;
-  const tabPanelClass = (id: McTab) => (shownTab === id && tabMotionLive.current ? pagePhaseClass(tabPhase) : undefined);
+  /* Tabs are siblings, so the swap runs sideways (data-page-axis) in strip order. */
+  const tabPanelMotion = (id: McTab) => (shownTab === id && tabMotionLive.current
+    ? { className: pagePhaseClass(tabPhase), "data-page-axis": "x", "data-page-dir": pageDir(tabDir) }
+    : {});
   const [runtimeModels, setRuntimeModels] = useState<AvailableModelRecord[]>([]);
   const nativeLoad = useRef(0);
   const [data, setData] = useState<ModelConfigReadModel | null>(preview ? createPreviewModelConfig() : null);
@@ -1667,7 +1672,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editorState, setEditor] = useState<Draft | null>(null);
   const [showKey, setShowKey] = useState(false);
-  const { shown: editor, phase: editorPhase, live: editorLive } = useDeferredPresence(editorState);
+  const { shown: editor, phase: editorPhase, live: editorLive, dir: editorDir } = useDeferredPresence(editorState);
   const [modelsYmlDraft, setModelsYmlDraft] = useState<string | null>(null);
   const [configYmlDraft, setConfigYmlDraft] = useState<string | null>(null);
   const [providerBaseline, setProviderBaseline] = useState<Draft | null>(null);
@@ -1678,7 +1683,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [presetSel, setPresetSel] = useState<string | null>(null);
   const [roleId, setRoleId] = useState<string | null>(null);
   const [roleDraftState, setRoleDraft] = useState<ModelRoleRecord | null>(null);
-  const { shown: roleDraft, phase: rolePhase, live: roleLive } = useDeferredPresence(roleDraftState);
+  const { shown: roleDraft, phase: rolePhase, live: roleLive, dir: roleDir } = useDeferredPresence(roleDraftState);
   const [assignSel, setAssignSel] = useState<string | null>(null);
   const [assignPopSel, setAssignPopSel] = useState<string | null>(null);
   const [assignModCounts, setAssignModCounts] = useState<Record<string, number>>({});
@@ -2911,16 +2916,16 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       {!preview && loadError ? <div className="role-issue-banner mc-page-banner"><Icon name="alert" extra="sm" /><div><div className="rib-title">{t("modelConfig.loadErrorTitle")}</div><div className="rib-text">{loadError}</div></div></div> : null}
 
       <div id="mcPanels" tabIndex={-1}>
-        <section id="mcPanelPresets" role="tabpanel" aria-labelledby="mcTabPresets" hidden={shownTab !== "presets"} className={tabPanelClass("presets")}>
+        <section id="mcPanelPresets" role="tabpanel" aria-labelledby="mcTabPresets" hidden={shownTab !== "presets"} {...tabPanelMotion("presets")}>
           <ModelPresetsPane client={client} sessionId={sessionId} available={runtimeAvailable} capabilities={capabilities} visible={shownTab === "presets"} />
         </section>
-        <section id="mcPanelAccounts" role="tabpanel" aria-labelledby="mcTabAccounts" hidden={shownTab !== "accounts"} className={tabPanelClass("accounts")}>
+        <section id="mcPanelAccounts" role="tabpanel" aria-labelledby="mcTabAccounts" hidden={shownTab !== "accounts"} {...tabPanelMotion("accounts")}>
           <AccountStatusPane sessionId={sessionId} standalone visible={shownTab === "accounts"} client={client} available={runtimeAvailable} capabilities={capabilities} />
           <SessionOptionsPane client={client} sessionId={sessionId} available={runtimeAvailable} capabilities={capabilities} visible={shownTab === "accounts"} />
           <RuntimeCredentials client={client} preview={preview} />
         </section>
-        <section id="mcPanelProviders" role="tabpanel" aria-labelledby="mcTabProviders" hidden={shownTab !== "providers"} className={tabPanelClass("providers")}>
-          <div className={editorLive ? `mc-view ${pagePhaseClass(editorPhase)}` : "mc-view"}>
+        <section id="mcPanelProviders" role="tabpanel" aria-labelledby="mcTabProviders" hidden={shownTab !== "providers"} {...tabPanelMotion("providers")}>
+          <div className={editorLive ? `mc-view ${pagePhaseClass(editorPhase)}` : "mc-view"} data-page-dir={pageDir(editorDir)}>
           {editor ? (
             <>
             <form className="mp-editor" onSubmit={(event) => void saveProvider(event)}>
@@ -3807,9 +3812,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
           </div>
         </section>
 
-        <section id="mcPanelRoles" role="tabpanel" aria-labelledby="mcTabRoles" hidden={shownTab !== "roles"} className={tabPanelClass("roles")}>
+        <section id="mcPanelRoles" role="tabpanel" aria-labelledby="mcTabRoles" hidden={shownTab !== "roles"} {...tabPanelMotion("roles")}>
           <VisionModelStatus client={client} preview={preview} />
-          <div className={roleLive ? `mc-view ${pagePhaseClass(rolePhase)}` : "mc-view"}>
+          <div className={roleLive ? `mc-view ${pagePhaseClass(rolePhase)}` : "mc-view"} data-page-dir={pageDir(roleDir)}>
           {roleDraft ? (
             <>
               <div className="mr-toolbar">
@@ -4096,7 +4101,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
           </div>
         {shownTab === "roles" && !hasRoleEditor ? <ModelCompactionPane client={client} context={{ sessionId, available: runtimeAvailable, capabilities }} visible={shownTab === "roles"} models={data?.availableModels ?? []} /> : null}
 </section>
-        <section id="mcPanelSubagents" role="tabpanel" aria-labelledby="mcTabSubagents" hidden={shownTab !== "subagents"} className={tabPanelClass("subagents")}>
+        <section id="mcPanelSubagents" role="tabpanel" aria-labelledby="mcTabSubagents" hidden={shownTab !== "subagents"} {...tabPanelMotion("subagents")}>
           <SubagentsPanel
             client={client}
             preview={preview}
@@ -4109,7 +4114,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             {...(agentIntent === undefined ? {} : { initialAgent: agentIntent })}
           />
 </section>
-        <section id="mcPanelWebSearch" role="tabpanel" aria-labelledby="mcTabWebSearch" hidden={shownTab !== "websearch"} className={tabPanelClass("websearch")}>
+        <section id="mcPanelWebSearch" role="tabpanel" aria-labelledby="mcTabWebSearch" hidden={shownTab !== "websearch"} {...tabPanelMotion("websearch")}>
           {data?.webSearch ? (
             <WebSearchPanel
               models={usable}

@@ -248,14 +248,7 @@
 .annotation-footer-actions .btn { height: 36px; font-size: var(--fs-12); padding: 0 var(--sp-14); }
 .annotation-insert { gap: var(--sp-16); }
 
-@media (prefers-reduced-motion: no-preference) {
-  .annotation-note { animation: annotation-note-in var(--dur) var(--ease-out); }
-  @keyframes annotation-note-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-}
-@media (prefers-reduced-motion: reduce) {
-  .annotation-dialog { animation: none; }
-  .annotation-dialog * { transition: none !important; animation: none !important; }
-}
+.annotation-note { animation: var(--motion-reveal); }
 
 /* Short desktop windows prioritize saved feedback over an empty writing area. */
 @container annotations (max-height: 658px) and (min-width: 721px) {

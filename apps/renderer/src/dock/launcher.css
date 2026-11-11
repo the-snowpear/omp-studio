@@ -90,13 +90,8 @@
   border-top: 1px solid var(--border); background: var(--bg-inset);
 }
 /* 面板正文不在这个框里（PanelHosts 直接定位），框淡入会和正文脱节；只有新标签页整页淡入。 */
-.dock-fullscreen:has(> .dock-launcher) { animation: dock-fullscreen-in var(--dur) var(--ease-out); }
+.dock-fullscreen:has(> .dock-launcher) { animation: var(--motion-fade); }
 .dock-fullscreen > :is(.dock-group, .dock-launcher) { flex: 1 1 0; }
 .dock-fullscreen .dock-launcher-inner { max-width: 820px; padding-top: clamp(24px, 10vh, 96px); gap: 22px; }
 .dock-fullscreen .dock-launcher-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
 .dock-group-placeholder { flex: 1 1 0; min-width: 0; min-height: 0; background: var(--bg-inset); }
-@keyframes dock-fullscreen-in { from { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .dock-fullscreen { animation: none; }
-  :is(.dock-launcher-card, .dock-launcher-chip, .dock-launcher-go, .dock-launcher-go .icon) { transition: none; }
-}

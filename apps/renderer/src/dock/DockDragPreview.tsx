@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../icons";
 import { DockMeterRing, DockMeterSummary, usePanelMeter } from "./panelMeters";
-import { transitionMs } from "../motionClock";
+import { transitionMs } from "../motion";
 import { dragPreview, type DragPreview } from "./dragPreview";
 import { locatePanel } from "./model";
 import type { PanelHosts } from "./hosts";

@@ -2,14 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icons";
 import { useSurfaceDocument } from "./dock/SurfaceContext";
+import { MOTION_MS, MOTION_SLACK_MS } from "./motion";
 
 /** 提示停留时长（ms）。 */
 const SHOW_MS = 2800;
-/**
- * 浮出动画时长（ms）。需不小于 styles/tokens.css 的 --dur-toast（320ms），
- * 略留余量，保证动画播完后再清空宿主状态。
- */
-const OUT_MS = 400;
+/** 浮出动画（--motion-toast-out，--dur-slow）播完后再清空宿主状态。 */
+const OUT_MS = MOTION_MS.slow + MOTION_SLACK_MS;
 
 /**
  * 页面浮窗提示：浮入 → 停留 → 浮出，不占用页面布局空间。

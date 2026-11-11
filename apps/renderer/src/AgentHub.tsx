@@ -59,8 +59,8 @@ import {
   type SubagentHubTarget,
 } from "./conversation/toolMeta";
 import { isTickingAgentStatus } from "./conversation/SubagentMetrics";
+import { MOTION_SLACK_MS, motionReduced } from "./motion";
 import {
-  pageMotionReduced,
   TAB_PANE_MS,
   tabPaneRole,
   useOverlappingTabs,
@@ -466,7 +466,7 @@ function useHubChatCloseMotion(
       return;
     }
     if (incoming !== "detail") return;
-    if (pageMotionReduced() || !el) {
+    if (motionReduced() || !el) {
       fromRef.current = 0;
       if (closing) setClosing(false);
       return;
@@ -505,7 +505,7 @@ function useHubChatCloseMotion(
       finish();
     };
     el.addEventListener("transitionend", onEnd);
-    const fallback = window.setTimeout(finish, TAB_PANE_MS + 80);
+    const fallback = window.setTimeout(finish, TAB_PANE_MS + MOTION_SLACK_MS);
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(frame);
