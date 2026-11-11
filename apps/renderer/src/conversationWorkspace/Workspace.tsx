@@ -9,6 +9,7 @@ import { dockedPanelVisible } from "../dock/conversationPanels";
 import { SurfaceProvider, useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
 import { NativeWindowHost } from "../dock/NativeFloat";
 import { WindowFrame } from "../dock/WindowFrame";
+import { conversationWindowTint } from "../dock/windowTint";
 import { MinimizedCapsule } from "../dock/MinimizedCapsule";
 import { WindowPinButton } from "../dock/DockMenus";
 import { WindowFocusContext, WindowOwnerContext, useWindowOrder } from "../dock/windowOrder";
@@ -255,7 +256,7 @@ function ConversationWindow({ view, store, hosts, bounds, order, snapLayer }: { 
   }, [view.id]);
   const content = (area: ConversationView["rect"], nativeKey?: string) => {
     const rect = snapped && snap ? snapCells(snap.template, snap.tree, store.manager.size())[cell!]! : nativeKey || view.maximized ? { x: 0, y: 0, width: area.width, height: area.height } : clampFloat({ ...view.rect, width: Math.max(MIN_VIEW.width, view.rect.width) }, { width: area.width, height: area.height }, MIN_VIEW.height);
-    return <WindowOwnerContext.Provider value={record.id}><WindowFrame title={record.title} icon="message" rect={rect} bounds={area} minWidth={MIN_VIEW.width} minHeight={MIN_VIEW.height}
+    return <WindowOwnerContext.Provider value={record.id}><WindowFrame title={record.title} icon="message" tint={conversationWindowTint(record.id, store)} rect={rect} bounds={area} minWidth={MIN_VIEW.width} minHeight={MIN_VIEW.height}
       maximized={view.maximized} nativeKey={nativeKey} order={order} frameRef={frame} windowId={`conversation:${view.id}`} visible={!view.minimized} locked={locked} resizable={!snapped}
       frameProps={{ className: `dock-conversation-window${snapped ? " is-snapped" : ""}${dragging ? " dock-drag-source" : ""}`, ...{ "data-conversation-view": view.id, "data-conversation-owner": view.documentId, "data-workbench-surface": view.pin === "none" ? "" : undefined, "data-dock-group": conversationPanelId(view.id), "data-dock-region": "float" }, style: snapped ? { position: "absolute" } : undefined }}
       onTitleDrag={event => { if (!nativeKey) dragConversation(event, store, { viewId: view.id }); }}

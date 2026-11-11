@@ -3,7 +3,7 @@ import { beginWindowDrag } from "../dock/windowDrag";
 import type { DragPreview } from "../dock/dragPreview";
 import { workbenchBounds } from "../dock/workbenchGeometry";
 import { WindowSnapTracker, snapCells, type ConversationSnapTarget } from "./snap";
-import { conversationVisible, MIN_VIEW, type ConversationRef } from "./model";
+import { conversationKey, conversationVisible, MIN_VIEW, type ConversationRef } from "./model";
 import type { ConversationWorkspaceStore } from "./store";
 import { previewWindowLayout } from "../dock/windowProjection";
 import { dockHitTest, previewBounds } from "../dock/gestures";
@@ -40,7 +40,8 @@ export function dragConversation(event: PointerEvent<HTMLElement>, store: Conver
   const rect = detached || fromDirectory ? { x: event.clientX - bounds.x - grabX, y: event.clientY - bounds.y - grabY, width, height } : { x: sourceRect.x - bounds.x, y: sourceRect.y - bounds.y, width, height };
   const directory = event.currentTarget.closest("#projectList")?.getBoundingClientRect();
   const checkpoint = store.windows.checkpoint();
-  const content: NonNullable<DragPreview["conversation"]> = { title, documentId: record?.id, sourceElement: frame ?? undefined, attach: record ? slots => store.hosts.preview(record.id, slots) : undefined, loadingLabel: "正在打开对话…" };
+  const documentId = record?.id ?? ("ref" in source ? store.getSnapshot().documents.find(document => conversationKey(document.ref) === conversationKey(source.ref))?.id : undefined);
+  const content: NonNullable<DragPreview["conversation"]> = { title, documentId, sourceElement: frame ?? undefined, attach: record ? slots => store.hosts.preview(record.id, slots) : undefined, loadingLabel: "正在打开对话…" };
   let started = false, target: ConversationSnapTarget | null = null;
   let dockTarget: DockTarget | null = null;
   const panel = conversationPanelId(sourceId);

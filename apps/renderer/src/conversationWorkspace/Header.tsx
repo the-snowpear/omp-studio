@@ -36,7 +36,7 @@ function ConversationWindowTitle({ title, titleRow, source, status, windowed, pr
   const text = (zh: string, en: string) => resolvedLanguage === "zh" ? zh : en;
   const sourceLabel = [source.project, source.connection, source.branch, source.path].filter(Boolean).join(" · ");
   const titleMenu = <DockPopupButton className="cw-window-title-menu" label={title} icon="message" draggable triggerContent={<>
-    {titleRow?.state === "available" && titleRow.card ? <SessionTitleMark row={titleRow} title={title} /> : <Icon name="message" extra="sm" />}
+    {titleRow?.state === "available" && titleRow.card ? <SessionTitleMark row={titleRow} title={title} /> : <i className="dock-window-mark" aria-hidden="true"><Icon name="message" extra="sm" /></i>}
     <span className="cw-window-title-text">{title}</span><Icon name="chevron-d" extra="sm" />
   </>}>{sessionMenu}</DockPopupButton>;
   const statusDot = status ? <span className={`cw-window-status ${status.tone}`} role="status" aria-label={status.label} data-tip={status.label}><span className="dot" /></span> : null;

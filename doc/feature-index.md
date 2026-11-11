@@ -78,6 +78,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 
 | 功能 | 入口 | 说明 |
 |---|---|---|
+| 窗口配色与焦点 | `apps/renderer/src/dock/windowTint.ts`、`WindowFrame.tsx`、`dock.css`；`conversationWorkspace/{Header,Tabs,Workspace}.tsx`、`drag.ts`、`workspace.css`；`dock/DockDragPreview.tsx` | 对话按稳定的打开顺序取色，工具及其实例按类型取色；标题栏保留底色，当前窗口以同色边线与轻微外发光表示焦点；顶部窗口标签、浮窗内工具标签和拖动预览共用色调，深浅主题与真实／预览共用外壳 |
 | 挂载 / 无 Host 空态 | `apps/renderer/src/main.tsx` | `StudioClientImpl` + `createDesktopTransport`；缺桥则 `Unavailable` |
 | 壳布局、侧栏、底栏、路由 | `apps/renderer/src/App.tsx`（启动与连接）、`workbench/{AppShell,WorkbenchCanvas,AppTopbar,BottomPanelChrome}.tsx`、`sidebar/{AppSidebar,WorkspaceTree}.tsx`、`DeferredPanel.tsx`、`pageIntents.ts`、`shellModelLoader.ts` | 非当前重页面与重面板首次可见才加载；会话动作 `workbench/sessionActions.ts`、重命名 `history/useSessionRename.ts`，分支操作 `git/useWorkbenchBranches.ts`、文件动作 `files/useWorkspaceFileActions.ts`；草稿、共享读取与稳定 Dock 宿主继续由现有服务持有 |
 | 动效体系 | `apps/renderer/src/styles/tokens.css`（Motion 段：节奏阶梯 `--dur-*`、曲线 `--ease-*`、位移 `--shift-*`、循环 `--loop-*`）、`styles/motion.css`（配方 `--motion-*`、`omp-enter` / `omp-exit` 页面与标签切换、主题整窗溶解、循环、减弱动效）、`motion.ts`（`MOTION_MS` / `MOTION_EASE` / `motionReduced()` / `transitionMs()`）、`pageTransition.ts`（`useDeferredKey` / `useDeferredPresence` / `useOverlayPresence` / `useOverlappingTabs`）、`themeTransition.ts` | 所有动效从这里取模式和数值，规则见 `motion.css` 头注：纵深走竖向（页面盖在工作台上、编辑器盖在列表上，只有上层位移），同级走横向（按导航 / 标签顺序从右或左进）；离场比入场短一档；减弱动效（系统偏好、应用内开关、低配档位）统一为 `data-perf-tier~="L1"`，动画压到末帧、过渡 0s、循环静止；`perf/tiers.css` 只剩 L2 / L3 的少画规则 |

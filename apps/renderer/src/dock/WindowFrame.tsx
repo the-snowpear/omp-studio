@@ -4,13 +4,15 @@ import { Icon, type IconName } from "../icons";
 import { useI18n } from "../i18n";
 import { beginDockResize } from "./gestures";
 import type { DockRect } from "./types";
+import type { WindowTint } from "./windowTint";
 import "./dock.css";
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
 /** The same window chrome and eight resize handles host tools and conversations. */
-export function WindowFrame({ title, icon, titleContent, titleExtra, controls, maximizeButton, children, tabs, menu, rect, bounds, minWidth = 320, minHeight = 200, maximized = false, nativeKey, locked = false, order = 0, windowId, visible = true, preview = false, resizable = true, frameRef, frameProps, onTitleDrag, onTitleContextMenu, onTitleKeyDown, onRectChange, onMeasure, onControl, onClose, closeLabel }: {
+export function WindowFrame({ title, icon, tint = "violet", titleContent, titleExtra, controls, maximizeButton, children, tabs, menu, rect, bounds, minWidth = 320, minHeight = 200, maximized = false, nativeKey, locked = false, order = 0, windowId, visible = true, preview = false, resizable = true, frameRef, frameProps, onTitleDrag, onTitleContextMenu, onTitleKeyDown, onRectChange, onMeasure, onControl, onClose, closeLabel }: {
   title: string; icon: IconName; titleContent?: ReactNode; titleExtra?: ReactNode; controls?: ReactNode; children: ReactNode; tabs?: ReactNode; menu?: ReactNode;
+  tint?: WindowTint;
   rect: DockRect; bounds: DockRect; minWidth?: number; minHeight?: number; maximized?: boolean; nativeKey?: string | undefined; locked?: boolean; order?: number;
   windowId?: string; visible?: boolean;
   preview?: boolean; resizable?: boolean; maximizeButton?: ReactNode;
@@ -42,13 +44,13 @@ export function WindowFrame({ title, icon, titleContent, titleExtra, controls, m
   };
   return <div {...frameProps} ref={frame} tabIndex={-1} role={frameProps?.role ?? "region"} aria-label={frameProps?.["aria-label"] ?? text(`${title} 浮窗`, `${title} floating window`)}
     className={`dock-float${nativeKey ? " dock-native-float" : ""}${maximized ? " is-maximized" : ""}${stacking.active ? " is-active-window" : ""}${frameProps?.className ? ` ${frameProps.className}` : ""}`}
-    data-dock-order={stacking.index} data-dock-window={stacking.id}
+    data-dock-order={stacking.index} data-dock-window={stacking.id} data-window-tint={tint}
     onPointerDownCapture={event => { frameProps?.onPointerDownCapture?.(event); if (!preview) stacking.raise(); }}
     onFocusCapture={event => { frameProps?.onFocusCapture?.(event); if (!preview) stacking.raise(); }}
     style={{ left: bounds.x + rect.x, top: bounds.y + rect.y, width: rect.width, height: rect.height, zIndex: 31 + stacking.index * 2, ...frameProps?.style }}>
     <header className="dock-float-titlebar" tabIndex={0} onPointerDown={onTitleDrag} onContextMenu={onTitleContextMenu} onKeyDown={onTitleKeyDown}
       onDoubleClick={event => { if (!(event.target as Element).closest("button:not([data-window-drag])")) onControl("maximize"); }}>
-      <span className="dock-float-title">{titleContent ?? <><Icon name={icon} extra="sm" /><span>{title}</span></>}{titleExtra}</span>
+      <span className="dock-float-title">{titleContent ?? <><i className="dock-window-mark" aria-hidden="true"><Icon name={icon} extra="sm" /></i><span>{title}</span></>}{titleExtra}</span>
       {controls}
       <button type="button" className="dock-icon-button" aria-label={text("最小化浮窗", "Minimize window")} data-tip={text("最小化", "Minimize")} onClick={() => onControl("minimize")}><Icon name="minimize" extra="sm" /></button>
       {maximizeButton ?? <button type="button" className="dock-icon-button" aria-label={maximized ? text("还原浮窗", "Restore window") : text("最大化浮窗", "Maximize window")} data-tip={maximized ? text("还原", "Restore") : text("最大化", "Maximize")} onClick={() => onControl("maximize")}><Icon name={maximized ? "restore" : "maximize"} extra="sm" /></button>}

@@ -1,6 +1,7 @@
 import { isFilePanelId } from "./types";
 import { leftCardResize, type LeftCardShares } from "./leftCards";
 import { WindowFrame } from "./WindowFrame";
+import { panelWindowTint } from "./windowTint";
 import { MinimizedCapsule } from "./MinimizedCapsule";
 import { WindowSnapButton } from "./SnapLayout";
 import { snapCells } from "./snap";
@@ -361,6 +362,7 @@ function DockCloseButton({ definition, className = "dock-icon-button dock-card-c
  * (today: the group picker when the right region cannot show both groups). */
 function DockTabs({ group, region, expanded = true, trailing, fullscreen }: { group: DockGroup; region: "right" | "bottom" | "float"; expanded?: boolean; trailing?: ReactNode; fullscreen?: { active: boolean; toggle: () => void } | undefined }) {
   const document = useSurfaceDocument();
+  const workspace = useConversationWorkspace();
   const drag = useDockDrag();
   const { store, definitions, preferences, hosts } = useDock();
   const source = useDragSource(hosts);
@@ -438,7 +440,7 @@ function DockTabs({ group, region, expanded = true, trailing, fullscreen }: { gr
     <div className="dock-tabs" ref={tabs} role="tablist" aria-label={text("工具标签", "Tool tabs")}>
       {group.panels.map(id => {
         const definition = definitionFor(definitions, id);
-        return <div key={id} className={`dock-tab${group.active === id ? " is-active" : ""}${source?.panels.includes(id) ? " dock-drag-source" : ""}`} data-dock-tab={id} role="presentation" onContextMenu={event => menu.onContextMenu(event, [id])}>
+        return <div key={id} className={`dock-tab${group.active === id ? " is-active" : ""}${source?.panels.includes(id) ? " dock-drag-source" : ""}`} data-dock-tab={id} data-window-tint={region === "float" ? panelWindowTint(id, workspace?.store) : undefined} role="presentation" onContextMenu={event => menu.onContextMenu(event, [id])}>
           <button type="button" className="dock-tab-label" role="tab" id={`dock-tab-${id}`} aria-selected={group.active === id} aria-controls={`dock-body-${group.id}`}
             tabIndex={group.active === id ? 0 : -1} data-dock-drag="" data-tip={definition.detail ?? definition.title} title={definition.detail ?? definition.title}
             onPointerDown={event => drag(event, [id])} onClick={() => activate(id)} onKeyDown={event => { menu.onKeyDown(event, [id]); tabKeys(event, id); }}>
@@ -918,9 +920,9 @@ export function FloatWindow({ group: storedGroup, bounds, order, nativeKey }: { 
   const title = activeDefinition.content ? activeDefinition.title : floatTitle(activeDefinition.title, conversationTitle);
   const closesPages = group.panels.some(id => definitionFor(definitions, id).close);
   const containsConversation = group.panels.some(id => definitionFor(definitions, id).content);
-  const content = <WindowFrame title={title} icon={definitionFor(definitions, group.active).icon}
+  const content = <WindowFrame title={title} icon={definitionFor(definitions, group.active).icon} tint={panelWindowTint(group.active, workspace?.store)}
     {...(group.panels.length === 1 && group.active === "annotations" ? { closeLabel: text("关闭标注", "Close annotations") } : {})}
-    titleContent={definitionFor(definitions, group.active).glyph ? <><PanelGlyph definition={definitionFor(definitions, group.active)} /><span>{title}</span></> : undefined}
+    titleContent={definitionFor(definitions, group.active).glyph ? <><i className="dock-window-mark"><PanelGlyph definition={definitionFor(definitions, group.active)} /></i><span>{title}</span></> : undefined}
     {...(closesPages ? { closeLabel: group.panels.every(isFilePanelId) ? text("关闭文件", "Close file") : containsConversation ? text("关闭整个浮窗", "Close window group") : group.panels.length > 1 ? text("关闭网页并隐藏其余工具", "Close pages and hide other tools") : text("关闭网页", "Close page") } : {})} rect={rect} bounds={bounds} minHeight={minHeight} minWidth={manager ? 360 : 320} resizable={!snapped}
     maximizeButton={!nativeKey && managed && manager ? <WindowSnapButton manager={manager} window={managed} locked={preferences.locked} onMaximize={() => control("maximize")} /> : undefined}
     frameRef={frame} nativeKey={nativeKey} maximized={group.maximized} locked={preferences.locked} order={order} windowId={`tool:${store.documentId ?? "standalone"}:${group.id}`} visible={!group.minimized}

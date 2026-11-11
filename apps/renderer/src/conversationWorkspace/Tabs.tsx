@@ -8,6 +8,7 @@ import { useDock } from "../dock/DockContext";
 import { DockToolsButton } from "../dock/DockMenus";
 import { PanelGlyph, closePanels, definitionFor } from "../dock/panelChrome";
 import { floatTitle } from "../dock/workbenchGeometry";
+import { conversationWindowTint, panelWindowTint, type WindowTint } from "../dock/windowTint";
 import { isConversationPanelId, type PanelId } from "../dock/types";
 import type { ToolTabInfo } from "./hosts";
 import type { ConversationWorkspaceStore } from "./store";
@@ -20,7 +21,7 @@ function useText() {
   return (zh: string, en: string) => resolvedLanguage === "zh" ? zh : en;
 }
 
-type WindowTab = { key: string; minimized: boolean; title: string; label: string; mark: ReactNode; extra: ReactNode; closeLabel: string; closeTip: string; focus: () => void; close: () => void };
+type WindowTab = { key: string; tint: WindowTint; minimized: boolean; title: string; label: string; mark: ReactNode; extra: ReactNode; closeLabel: string; closeTip: string; focus: () => void; close: () => void };
 
 /** Window mode: one tab per window, conversations and tools alike (minimized and desktop windows included), in the order they opened.
     A tab focuses its window where it is; × closes it like the window's own ×. The active conversation's dock fills the + slot. */
@@ -38,7 +39,7 @@ export function WindowTabs({ store, addSlot }: { store: ConversationWorkspaceSto
       const title = info?.title || state.documents.find(doc => doc.id === record.content.documentId)?.title || text("新对话", "New conversation");
       const marked = info?.titleRow?.state === "available" && !!info.titleRow.card && info.titleRow.title === title;
       return [{
-        key: `conversation:${record.id}`, minimized: record.minimized, title, label: [title, info?.status?.label, where].filter(Boolean).join(" · "),
+        key: `conversation:${record.id}`, tint: conversationWindowTint(record.content.documentId, store), minimized: record.minimized, title, label: [title, info?.status?.label, where].filter(Boolean).join(" · "),
         mark: <>{native ? <Icon name="external" extra="sm" /> : marked ? null : <Icon name="message" extra="sm" />}{marked ? <SessionTitleMark row={info!.titleRow} title={title} /> : null}</>,
         extra: info?.status ? <span className={`cw-window-status ${info.status.tone}`} aria-hidden="true"><span className="dot" /></span> : null,
         closeLabel: text(`关闭 ${title}`, `Close ${title}`), closeTip: text("关闭对话视图", "Close conversation view"),
@@ -49,7 +50,7 @@ export function WindowTabs({ store, addSlot }: { store: ConversationWorkspaceSto
     if (!info) return [];
     const tools = info.count > 1 ? text(`${info.count} 个工具`, `${info.count} tools`) : undefined;
     return [{
-      key: record.id, minimized: record.minimized, title: info.title, label: [info.title, tools, where].filter(Boolean).join(" · "),
+      key: record.id, tint: panelWindowTint(info.mark.id, store), minimized: record.minimized, title: info.title, label: [info.title, tools, where].filter(Boolean).join(" · "),
       mark: <PanelGlyph definition={info.mark} />, extra: info.count > 1 ? <span className="dock-count" aria-hidden="true">{info.count}</span> : null,
       closeLabel: text(`关闭 ${info.title}`, `Close ${info.title}`), closeTip: info.closeTip,
       // The dock's callbacks change without a visible change; always run the latest ones.
@@ -86,7 +87,7 @@ export function WindowTabs({ store, addSlot }: { store: ConversationWorkspaceSto
     <div className="cw-tabs" ref={list} role="tablist" aria-label={text("窗口标签", "Window tabs")}>
       {tabs.map((tab, index) => {
         const active = tab.key === activeKey, focusable = tab.key === focusableKey ? 0 : -1;
-        return <div key={tab.key} role="presentation" data-window-tab={tab.key} className={`cw-tab${active ? " is-active" : ""}${tab.minimized ? " is-minimized" : ""}`}>
+        return <div key={tab.key} role="presentation" data-window-tab={tab.key} data-window-tint={tab.tint} className={`cw-tab${active ? " is-active" : ""}${tab.minimized ? " is-minimized" : ""}`}>
           <button type="button" role="tab" className="cw-tab-label" aria-selected={active} tabIndex={focusable} aria-label={tab.label} data-tip={tab.label}
             onClick={tab.focus} onKeyDown={event => keys(event, index)}>
             {tab.mark}<span className="cw-tab-title">{tab.title}</span>{tab.extra}

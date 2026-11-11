@@ -8,6 +8,8 @@ import { locatePanel } from "./model";
 import type { PanelHosts } from "./hosts";
 import type { DockGroup, DockRect, PanelDefinition, PanelId, DockTarget, DockLayout } from "./types";
 import { WindowFrame } from "./WindowFrame";
+import { conversationWindowTint, panelWindowTint } from "./windowTint";
+import { useConversationWorkspace } from "../conversationWorkspace/Context";
 import { PanelGlyph, definitionFor } from "./panelChrome";
 import { useI18n } from "../i18n";
 import { floatTitle } from "./workbenchGeometry";
@@ -42,6 +44,7 @@ function PreviewIcon({ panel }: { panel: PanelDefinition }) {
 /** Chrome uses the same styles as its destination. Body geometry is borrowed by
  * the existing Portal host, so canvas, terminal input and scroll state stay live. */
 export function DockDragPreview({ hosts, definitions, conversationTitle }: { hosts: PanelHosts; definitions: readonly PanelDefinition[]; conversationTitle?: string }) {
+  const workspace = useConversationWorkspace();
   const state = useSyncExternalStore(dragPreview.subscribe, dragPreview.snapshot);
   const preview = useRef<HTMLDivElement>(null);
   const motion = useRef<{ state: DragPreview | null; rect: DockRect | null; animation: Animation | null; frame: number; end: number }>({ state: null, rect: null, animation: null, frame: 0, end: 0 });
@@ -151,10 +154,10 @@ export function DockDragPreview({ hosts, definitions, conversationTitle }: { hos
           </section>;
         })}
       </div>
-    </div> : <div className={`dock-preview-group${target.region === "float" ? " dock-float" : " dock-group"}`} data-dock-region={target.region}>
-      {target.region === "float" && <header className="dock-float-titlebar"><span className="dock-float-title"><PanelGlyph definition={title} /><span>{floatTitle(title.title, conversationTitle)}</span></span><span className="dock-icon-button"><Icon name="minimize" extra="sm" /></span><span className="dock-icon-button"><Icon name="maximize" extra="sm" /></span><span className="dock-icon-button"><Icon name="x" extra="sm" /></span></header>}
+    </div> : <div className={`dock-preview-group${target.region === "float" ? " dock-float" : " dock-group"}`} data-dock-region={target.region} data-window-tint={target.region === "float" ? panelWindowTint(group.active, workspace?.store) : undefined}>
+      {target.region === "float" && <header className="dock-float-titlebar"><span className="dock-float-title"><i className="dock-window-mark" aria-hidden="true"><PanelGlyph definition={title} /></i><span>{floatTitle(title.title, conversationTitle)}</span></span><span className="dock-icon-button"><Icon name="minimize" extra="sm" /></span><span className="dock-icon-button"><Icon name="maximize" extra="sm" /></span><span className="dock-icon-button"><Icon name="x" extra="sm" /></span></header>}
       {(target.region !== "float" || group.panels.length > 1) && <div className="dock-tab-strip"><div className="dock-tabs">
-        {group.panels.map(id => <div className={`dock-tab${id === group.active ? " is-active" : ""}`} key={id}><button type="button" className="dock-tab-label" tabIndex={-1}><PanelGlyph definition={definition(id)} /><span>{definition(id).title}</span></button><span className="dock-tab-close"><Icon name="x" extra="sm" /></span></div>)}
+        {group.panels.map(id => <div className={`dock-tab${id === group.active ? " is-active" : ""}`} key={id} data-window-tint={target.region === "float" ? panelWindowTint(id, workspace?.store) : undefined}><button type="button" className="dock-tab-label" tabIndex={-1}><PanelGlyph definition={definition(id)} /><span>{definition(id).title}</span></button><span className="dock-tab-close"><Icon name="x" extra="sm" /></span></div>)}
       </div><span className="dock-icon-button"><Icon name="chevron-d" extra="sm" /></span></div>}
       <div className="dock-group-body"><PreviewSlot id={group.active} hosts={hosts} definition={definition(group.active)} /></div>
       {panels.map(id => <PreviewToolbar id={id} hosts={hosts} key={id} />)}
@@ -164,6 +167,7 @@ export function DockDragPreview({ hosts, definitions, conversationTitle }: { hos
 }
 
 export function ConversationPreview({ content, rect, target, layout, panels, definitions = [] }: { content: NonNullable<DragPreview["conversation"]>; rect: DockRect; target?: DockTarget; layout?: DockLayout; panels?: PanelId[]; definitions?: readonly PanelDefinition[] }) {
+  const workspace = useConversationWorkspace();
   const body = useRef<HTMLDivElement>(null), title = useRef<HTMLSpanElement>(null), actions = useRef<HTMLSpanElement>(null);
   const { resolvedLanguage } = useI18n();
   useLayoutEffect(() => {
@@ -187,9 +191,9 @@ export function ConversationPreview({ content, rect, target, layout, panels, def
       {bodySlot}
     </div>;
   }
-  return <WindowFrame title={content.title} icon="message" preview rect={{ x: 0, y: 0, width: rect.width, height: rect.height }} bounds={{ x: 0, y: 0, width: rect.width, height: rect.height }}
+  return <WindowFrame title={content.title} icon="message" tint={conversationWindowTint(content.documentId, workspace?.store)} preview rect={{ x: 0, y: 0, width: rect.width, height: rect.height }} bounds={{ x: 0, y: 0, width: rect.width, height: rect.height }}
     frameProps={{ className: "dock-preview-group dock-conversation-window", style: { position: "relative", zIndex: "auto" } }}
-    titleContent={<span className="cw-window-title-slot" ref={title}>{!content.attach ? <><Icon name="message" extra="sm" /><span className="cw-window-title-text">{content.title}</span><Icon name="chevron-d" extra="sm" /></> : null}</span>}
+    titleContent={<span className="cw-window-title-slot" ref={title}>{!content.attach ? <><i className="dock-window-mark" aria-hidden="true"><Icon name="message" extra="sm" /></i><span className="cw-window-title-text">{content.title}</span><Icon name="chevron-d" extra="sm" /></> : null}</span>}
     controls={<><span className="cw-window-actions-slot" ref={actions}>{!content.attach ? <><span className="dock-icon-button"><Icon name="tool-list" extra="sm" /></span><span className="dock-icon-button"><Icon name="more" extra="sm" /></span></> : null}</span><span className="dock-icon-button"><Icon name="pin" extra="sm" /></span></>}
     onRectChange={() => {}} onControl={() => {}} onClose={() => {}} closeLabel={resolvedLanguage === "zh" ? "关闭对话视图" : "Close conversation view"}>
     <div className="dock-group-body"><div className="cw-view-content" ref={body}>{!content.attach ? <div className="empty" role="status">{content.loadingLabel}</div> : null}</div></div>
