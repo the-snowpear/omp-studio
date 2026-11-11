@@ -31,6 +31,7 @@ Public documentation for OMP Studio.
 | [migrations/omp-18.4.4-gui.md](migrations/omp-18.4.4-gui.md) | Complete GUI scope and local delivery evidence |
 | [development.md](development.md) | Inner loop, tests, overlay |
 | [performance.md](performance.md) | Streaming budgets, local counters, rollback and repeatable benchmarks |
+| [reviews/security-memory-fixes-2026-11-12.md](reviews/security-memory-fixes-2026-11-12.md) | 安全、Git、Bridge 与资源修复；真实 Chromium/Electron 前后采样和验收边界 |
 | [performance-2026-10-29.md](performance-2026-10-29.md) | 启动、整壳性能与包体优化；开源方案对比、实测及覆盖限制 |
 | [performance-audit-2026-10-29.md](performance-audit-2026-10-29.md) | 启动/运行/GPU/低配独立审查、量化基线与 P0/P1/P2 路线 |
 | [performance-review-2026-10-29-round2.md](performance-review-2026-10-29-round2.md) | 第二轮综合审查：同 HEAD 复测、打包形态/GPU 软合成/6× 低配/动画 A/B、优化方案与门禁 |
