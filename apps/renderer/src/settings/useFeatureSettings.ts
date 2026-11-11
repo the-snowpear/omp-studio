@@ -40,6 +40,12 @@ export function useFeatureSettings({ client, context, visible }: FeatureSettings
     }
     return () => { epoch.current++; };
   }, [preview, enabled, visible, context?.sessionId, invoke]);
+  const refresh = useCallback(async () => {
+    if (preview || !enabled || !context?.sessionId) return;
+    const generation = epoch.current;
+    const result = await invoke("preferences.features.get", { sessionId: context.sessionId });
+    if (generation === epoch.current) setRows(result.settings);
+  }, [preview, enabled, context?.sessionId, invoke]);
   async function save(key: FeatureSettingKey, value: FeatureSettingValue, scope: "session" | "global") {
     if (lock.current || !enabled || !supports("preferences.features.set")) return;
     const generation = epoch.current;
@@ -61,5 +67,5 @@ export function useFeatureSettings({ client, context, visible }: FeatureSettings
     } catch (cause) { if (generation === epoch.current) setError(hostErrorMessage(cause, "Cannot clear override")); }
     finally { if (generation === epoch.current) { lock.current = false; setBusy(false); } }
   }
-  return { rows, enabled, preview, supports, busy, loading, error, notice, save, clear, invoke };
+  return { rows, enabled, preview, supports, busy, loading, error, notice, save, clear, invoke, refresh };
 }

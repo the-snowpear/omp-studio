@@ -14,6 +14,8 @@
    top:0；吸顶时标签栏自身背景盖住滚上来的内容，不再是条缝隙。 */
 .page-body[data-route="model-config"] {
   padding-top: 0;
+  /* The sticky bar expands by this same gutter, including narrow windows. */
+  padding-inline: var(--sp-32);
   /* 供应商 / 角色两个面板高度不同，切换时 .page-body 的纵向滚动条会开/合：
      .page-wide 是 margin:0 auto 居中，滚动条占掉宽度后整块会左右微移，
      标签栏跟着跳。预留在右侧的滚动条槽位，宽度不再随滚动条出现而变化。
@@ -907,31 +909,61 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
 }
 .mp-foot .right { margin-left: auto; display: flex; gap: var(--sp-8); }
 
-/* ---------- 角色总览 ----------
-   导航（图标+名称，按内容宽） | 模型选择 + 思考强度 | 悬停删除 | 进入箭头（钉在右侧）
-   模型选择是独立控件，所以整行不再是一个 button。
-*/
-.role-row {
+/* ---------- 角色路由：所有行共用列宽，标签不参与模型列定位 ---------- */
+#mcPanelRoles { container: mc-roles / inline-size; }
+.mc-role-runtime {
   display: flex;
-  align-items: stretch;
-  gap: 0;
-  padding: 0;
+  align-items: center;
+  gap: var(--sp-6);
+  margin-bottom: var(--sp-16);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+}
+.mc-role-runtime p { margin: 0; }
+.mc-role-toolbar { flex-wrap: wrap; }
+.mc-role-toolbar > b { font-size: var(--fs-14); }
+.mc-role-toolbar > .btn { margin-left: auto; }
+.mc-role-list {
+  --role-columns: minmax(232px, .85fr) minmax(220px, 1.15fr) 144px 28px 28px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-10);
-  margin-bottom: var(--sp-10);
+  overflow: hidden;
+}
+.mc-role-columns,
+.role-row {
+  display: grid;
+  grid-template-columns: var(--role-columns);
+  column-gap: var(--sp-12);
+  padding: var(--sp-12) var(--sp-16);
+}
+.mc-role-columns {
+  align-items: center;
+  padding-block: var(--sp-10);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+}
+.mc-role-columns > :first-child { padding-left: calc(36px + var(--sp-12)); }
+.mc-role-empty { padding: var(--sp-24); color: var(--text-3); font-size: var(--fs-12); }
+.role-row {
+  align-items: center;
+  min-height: 72px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
   color: var(--text);
   width: 100%;
-  overflow: hidden;
   /* 角色主题色：默认紫色，由下方 data-tint 选择器按角色覆盖 */
   --role-c: var(--purple);
   --role-soft: var(--purple-soft);
   --role-border: var(--accent-border);
   transition:
-    border-color var(--dur-fast) var(--ease),
-    box-shadow var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease);
+    background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
+.role-row:last-child { border-bottom: 0; }
 /* 角色 → 主题色映射（与 ModelConfigPage 的 ROLE_TINTS 对应） */
 .role-row[data-tint="green"] { --role-c: var(--tint-green); --role-soft: var(--tint-green-soft); --role-border: var(--tint-green-border); }
 .role-row[data-tint="blue"] { --role-c: var(--tint-blue); --role-soft: var(--tint-blue-soft); --role-border: var(--tint-blue-border); }
@@ -943,27 +975,19 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
 .role-row[data-tint="lime"] { --role-c: var(--tint-lime); --role-soft: var(--tint-lime-soft); --role-border: var(--tint-lime-border); }
 .role-row[data-tint="indigo"] { --role-c: var(--tint-indigo); --role-soft: var(--tint-indigo-soft); --role-border: var(--tint-indigo-border); }
 .role-row[data-tint="rose"] { --role-c: var(--tint-rose); --role-soft: var(--tint-rose-soft); --role-border: var(--tint-rose-border); }
-/* 发光仅由悬停或「键盘聚焦到导航按钮」触发；
-   点击模型选择框等内部控件不会留下外发光（避免 focus-within 残留） */
 .role-row:hover,
 .role-row:has(.role-row-nav:focus-visible),
 .role-row:has(.role-chevron:focus-visible) {
-  border-color: var(--role-border);
-  /* 与供应商卡片同档（参照 .pv-card）：3px 柔环 + 18px 淡投影，不加重光晕 */
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--role-c) 8%, transparent),
-    0 6px 18px color-mix(in srgb, var(--role-c) 8%, transparent);
-  transform: translateY(-1px);
+  background: var(--surface-hover);
+  box-shadow: inset 3px 0 var(--role-c);
 }
-.role-row:has(.role-row-nav:active),
-.role-row:has(.role-chevron:active) { transform: translateY(0); }
-.role-row.has-issue { border-color: var(--amber); }
-.role-row.has-error { border-color: var(--red); }
+.role-row.has-issue { box-shadow: inset 3px 0 var(--amber); }
+.role-row.has-error { box-shadow: inset 3px 0 var(--red); }
 
 .role-row-nav {
   display: flex;
-  align-items: stretch;
-  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--sp-12);
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -973,20 +997,21 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   font: inherit;
   text-align: left;
   cursor: pointer;
-  border-radius: 0;
+  border-radius: var(--r-6);
 }
 .role-row-nav:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--role-soft);
 }
 
-/* 左侧图标区：淡灰 → 角色淡彩，hover 时略加深 */
+/* 色彩只用于扫描角色，控件和表面保持统一。 */
 .role-row .role-icon-area {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  padding: var(--sp-10);
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-6);
   background: color-mix(in srgb, var(--role-c) 10%, var(--bg-inset));
   flex-shrink: 0;
   transition: background var(--dur-fast) var(--ease);
@@ -1008,62 +1033,66 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
 .role-row .role-icon-area .a-ic svg { width: 20px; height: 20px; }
 
 .role-row .role-name-section {
-  flex: 0 1 auto;
-  min-width: 160px;
-  padding: var(--sp-10) var(--sp-16);
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
 .role-row .role-model-section {
-  flex: none;
-  width: auto;
-  display: flex;
+  grid-column: 2 / span 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 144px;
   align-items: center;
-  gap: var(--sp-6);
+  gap: var(--sp-12);
   min-width: 0;
-  padding: var(--sp-10) var(--sp-8) var(--sp-10) 0;
 }
 .role-row .role-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--sp-8);
-  flex-wrap: wrap;
+  min-width: 0;
 }
 .role-row .r-name {
   font-weight: var(--fw-semibold);
-  font-size: var(--fs-13);
-  display: flex;
-  align-items: center;
-  gap: var(--sp-6);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.role-row .r-name .alias {
+.role-row .role-header .alias {
   font-family: var(--font-mono);
   font-size: var(--fs-11);
   font-weight: var(--fw-regular);
   color: var(--text-3);
-  background: var(--surface-2);
-  padding: 2px 6px;
-  border-radius: var(--r-4);
+  max-width: 110px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.role-row .role-meta { display: flex; align-items: center; gap: var(--sp-6); min-width: 0; margin-top: var(--sp-4); }
 .role-row .r-desc {
   font-size: var(--fs-11);
   color: var(--text-3);
   line-height: 1.4;
-  margin-top: 2px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.role-row .role-tag { flex: none; font-size: var(--fs-11); color: var(--accent); }
 
 .role-row .role-model-section .chip.fb { flex-shrink: 0; }
 .role-row .role-model-section .app-select {
-  height: 36px;
+  height: 40px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--r-4);
+  border-radius: var(--r-6);
   box-sizing: border-box;
   padding: 0 var(--sp-8);
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
+  font-family: var(--font-ui);
+  font-size: var(--fs-12);
   color: var(--text);
   cursor: pointer;
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
@@ -1075,7 +1104,7 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   box-shadow: 0 0 0 2px var(--accent-softer);
 }
 .role-row .role-model-section .effort-select {
-  flex: 0 0 92px;
+  width: 100%;
   color: var(--accent);
 }
 .role-row .role-model-section .effort-select:disabled {
@@ -1084,7 +1113,7 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   opacity: 0.7;
 }
 
-/* 最右侧箭头指示器 */
+.role-actions { display: flex; align-items: center; justify-content: center; }
 .role-row .role-delete {
   flex-shrink: 0;
   width: 28px;
@@ -1141,12 +1170,13 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
+  width: 28px;
+  height: 32px;
   flex-shrink: 0;
-  margin-left: auto;
+  margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--r-6);
   background: transparent;
   color: var(--text-faint);
   cursor: pointer;
@@ -1165,20 +1195,28 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
 }
 .role-row .role-chevron svg { width: 16px; height: 16px; }
 
-/* 问题状态 */
-.role-row .role-model {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-}
-.role-row .role-model .model-name {
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  color: var(--text-2);
-}
-.role-row .role-model .model-name.unavailable {
-  text-decoration: line-through;
-  opacity: 0.5;
+.mc-role-settings { margin-top: var(--sp-24); border: 1px solid var(--border); border-radius: var(--r-10); background: var(--surface); overflow: hidden; }
+.mc-role-cycle { padding: var(--sp-20) var(--sp-24); border-bottom: 1px solid var(--border); }
+.mc-role-section-head { display: flex; align-items: center; gap: var(--sp-12); margin-bottom: var(--sp-16); }
+.mc-role-section-head > div { flex: 1; min-width: 0; }
+.mc-role-section-head h3 { font-size: var(--fs-14); font-weight: var(--fw-semibold); color: var(--text); margin: 0; }
+.mc-role-section-head p { font-size: var(--fs-12); color: var(--text-3); margin: var(--sp-4) 0 0; line-height: 1.6; }
+.mc-role-section-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; color: var(--accent); background: var(--accent-softer); border-radius: var(--r-6); }
+.mc-role-cycle .cycle-flow { background: transparent; padding: 0 0 0 calc(36px + var(--sp-12)); margin: 0; }
+.mc-role-cycle .cycle-chip { border-radius: var(--r-6); box-shadow: none; padding: var(--sp-6) var(--sp-10); }
+.mc-role-cycle .cycle-chip > .icon { color: var(--accent); }
+
+@container mc-roles (max-width: 760px) {
+  .mc-role-columns { display: none; }
+  .role-row { grid-template-columns: minmax(0, 1fr) 28px 28px; row-gap: var(--sp-12); }
+  .role-row .role-row-nav { grid-column: 1; grid-row: 1; }
+  .role-row .role-model-section { grid-column: 1 / -1; grid-row: 2; }
+  .role-row .role-actions { grid-column: 2; grid-row: 1; }
+  .role-row .role-chevron { grid-column: 3; grid-row: 1; }
+  .mc-role-cycle { padding: var(--sp-16); }
+  .mc-role-section-head { flex-wrap: wrap; }
+  .mc-role-section-head > .btn { margin-left: calc(36px + var(--sp-12)); }
+  .mc-role-cycle .cycle-flow { padding-left: 0; }
 }
 
 /* 按供应商分组的模型选择器 */

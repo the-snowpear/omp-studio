@@ -196,6 +196,68 @@ function fakeClient(probe: ModelDiscoveryResult | Error = PROBE_OK, modelConfig?
   };
 }
 
+it("keeps an unavailable role model editable and saves its replacement through the native role command", async () => {
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  const config: ModelConfigReadModel = {
+    ...readModel(),
+    roles: [{ id: "default", alias: "@default", name: "Default", desc: "", builtin: true, primary: "stopped/old", scope: "global", issue: { kind: "provider-down", detail: "本地服务未运行" } }],
+    availableModels: [{ provider: "gateway", id: "kept", selector: "gateway/kept", name: "Kept", reasoning: false }],
+  };
+  const client = fakeClient(PROBE_OK, config);
+  render(<PreviewModeProvider switchEnabled><ModelConfigPage client={client} /></PreviewModeProvider>);
+  fireEvent.click(document.getElementById("mcTabRoles")!);
+  const row = (await screen.findByRole("button", { name: "编辑 Default" })).closest(".role-row") as HTMLElement;
+  expect(within(row).getByText("不可用")).toBeTruthy();
+  const picker = within(row).getByRole("button", { name: "主模型" });
+  expect(picker.hasAttribute("disabled")).toBe(false);
+  fireEvent.click(picker);
+  expect(await screen.findByRole("option", { name: /stopped\/old/ })).toBeTruthy();
+  fireEvent.click(screen.getByRole("option", { name: /Kept/ }));
+  await waitFor(() => expect(client.command).toHaveBeenCalledWith("models.roles.set", { roleId: "default", selector: "gateway/kept" }));
+});
+
+it("clears an explicit role assignment to native auto-selection", async () => {
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  const config: ModelConfigReadModel = {
+    ...readModel(),
+    roles: [{ id: "default", alias: "@default", name: "Default", desc: "", builtin: true, primary: "gateway/kept", scope: "global" }],
+    availableModels: [{ provider: "gateway", id: "kept", selector: "gateway/kept", name: "Kept", reasoning: false }],
+  };
+  const client = fakeClient(PROBE_OK, config);
+  render(<PreviewModeProvider switchEnabled><ModelConfigPage client={client} /></PreviewModeProvider>);
+  fireEvent.click(document.getElementById("mcTabRoles")!);
+  const row = (await screen.findByRole("button", { name: "编辑 Default" })).closest(".role-row") as HTMLElement;
+  fireEvent.click(within(row).getByRole("button", { name: "主模型" }));
+  fireEvent.click(await screen.findByRole("option", { name: /自动选择/ }));
+  await waitFor(() => expect(client.command).toHaveBeenCalledWith("models.roles.set", { roleId: "default", selector: "" }));
+});
+
+it("searches and replaces an unavailable preview model with the keyboard without writing to Host", async () => {
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
+  const client = fakeClient();
+  const { container } = render(<PreviewModeProvider switchEnabled><ModelConfigPage client={client} /></PreviewModeProvider>);
+  fireEvent.click(document.getElementById("mcTabRoles")!);
+  const row = (await screen.findByRole("button", { name: "编辑 Designer" })).closest(".role-row") as HTMLElement;
+  fireEvent.click(within(row).getByRole("button", { name: "主模型" }));
+  const defaultRow = screen.getByRole("button", { name: "编辑 Default" }).closest(".role-row") as HTMLElement;
+  const defaultPicker = within(defaultRow).getByRole("button", { name: "主模型" });
+  fireEvent.mouseDown(defaultPicker);
+  fireEvent.click(defaultPicker);
+  expect(screen.getAllByRole("listbox")).toHaveLength(1);
+  const designerPicker = within(row).getByRole("button", { name: "主模型" });
+  fireEvent.mouseDown(designerPicker);
+  fireEvent.click(designerPicker);
+  const search = await screen.findByRole("combobox", { name: "搜索模型或供应商…" });
+  fireEvent.change(search, { target: { value: "openai gpt-5.2" } });
+  expect(screen.getAllByRole("option")).toHaveLength(2);
+  fireEvent.keyDown(search, { key: "Enter" });
+  await waitFor(() => expect(within(row).queryByText("不可用")).toBeNull());
+  expect(within(row).getByRole("button", { name: "主模型" }).textContent).toContain("GPT-5.2");
+  expect(client.command).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "编辑 Designer" }));
+  await waitFor(async () => expect(plainText(await yamlCardText(container, "designer"))).toContain("openai/gpt-5.2"));
+});
+
 it("updates the catalog from the model navigation without a duplicate evaluation tab", async () => {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
   const client = fakeClient(PROBE_OK, {
@@ -475,6 +537,10 @@ describe("ModelConfigPage YAML 卡片随表单实时更新", () => {
     const card = await yamlCard(container, "smol");
     expect(card.querySelector(".st-editor.is-disabled")).toBeTruthy();
     expect(card.textContent).toContain("只读");
+
+    fireEvent.click(screen.getByRole("button", { name: "主模型" }));
+    fireEvent.click(await screen.findByRole("option", { name: /自动选择/ }));
+    await waitFor(async () => expect(plainText(await yamlCardText(container, "smol"))).not.toContain("gateway/fresh"));
   });
 
   it("清空 Base URL 后切片与保存都不再携带 baseUrl", async () => {

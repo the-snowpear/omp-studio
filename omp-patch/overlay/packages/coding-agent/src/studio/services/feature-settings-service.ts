@@ -226,6 +226,7 @@ export class StudioFeatureSettingsService {
 				});
 				if (update.kind === "confirm") return { saved: false, confirmationRequired: true, summary: update.message };
 				await this.session.settings.flush();
+				await registry.reapplyModelPolicies();
 				return { saved: true, confirmationRequired: false, summary: update.summary ?? update.described };
 			}
 			const plan = planModelCompactionPoint(this.session.settings, model, operation.input, tiers);

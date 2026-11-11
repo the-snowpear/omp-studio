@@ -196,6 +196,7 @@ Renderer 读当前查看会话：`apps/renderer/src/telemetry/useViewedSessionTe
 | Token 用量 | Home / `usage/tokenUsage.ts`；顶栏 `usage/TokenUsagePanel.tsx`、`tokenUsagePanel.css`、`TokenCounterPane.tsx`；预览 `preview/tokenUsagePreview.ts` | `omp-usage-adapter.ts`、`usage.get`；顶栏 `session.telemetry.read` | 首页聚合 `omp stats.db`；顶栏真实/预览共用紧凑详情面板，含总量、构成、本轮指标与折叠明细；上下文查看器入口位于 Context 构成弹窗，离线计数入口打开独立可停靠工具 |
 | 动态价格 / 图片能力 | `ModelConfigPage.tsx` | `omp-models-adapter.ts`；`client-contract/src/model-pricing.ts` 解析只读分时价/长上下文价；固定覆盖与价格元数据分开 | 保留上游 catalog policy，历史费用只读已记录 usage |
 | 模型参数自动适配 | `models/ModelParameterEditor.tsx`、`modelParameterDraft.ts`、`fetchedModels.ts`；预览 `preview/modelAdaptationPreview.ts` | `models.adaptation.resolve`、`models.catalog.refresh` → `host-client-api/src/model-adaptation.ts`；完整 thinking / 原始参数与来源旁文件由 `omp-models-adapter.ts` 读写；目录生成 `scripts/model-catalog.mjs` | 只写原生 models.yml 支持字段，保留 Runtime 请求编码；[使用与维护](../docs/model-adaptation.md) |
+| 角色路由与模型压缩 | `ModelConfigPage.tsx`、`models/config/RoleControls.tsx`：统一列布局，失效分配仍可切换，搜索／键盘选择，清除分配恢复自动路由；`models/ModelCompactionPane.tsx`、`models/modelCompaction.css` 同时用于角色总览与详情；预览 `preview/modelCompactionPreview.ts` | `models.roles.set` 保留原生空 selector 清除语义；压缩保存后经 `preferences.features.get` 重读生效值并刷新 Runtime 模型目录 | `services/feature-settings-service.ts` 复用原生 `planModelCompactionPoint` / `setModelCompactionPoint`，保留扩展窗口确认、前缀继承及配置来源优先级；保存回执等待 `reapplyModelPolicies` 完成 |
 
 预览 fixture：`hubPreview.ts`、`skillsPreview.ts`、`capabilitiesPreview.ts`、`preview/modelConfigFixtures.ts`（含 `createPreviewFetchedModels()`）。不要把这些写进 Host。
 

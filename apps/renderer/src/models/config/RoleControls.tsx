@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import type { AvailableModelRecord, ModelRoleRecord } from "@omp-studio/client-contract";
 import { Icon } from "../../icons";
@@ -255,12 +256,16 @@ export function RoleModelPicker({
   groups,
   disabled,
   ariaLabel,
+  unavailableReason,
+  allowClear = false,
   onChange,
 }: {
   value: string;
   groups: ReadonlyArray<ModelPickGroup>;
   disabled?: boolean;
   ariaLabel?: string;
+  unavailableReason?: string | undefined;
+  allowClear?: boolean;
   onChange: (selector: string) => void;
 }) {
   const uid = useId();
@@ -268,21 +273,31 @@ export function RoleModelPicker({
   const { t } = useI18n();
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [anchor, setAnchor] = useState({ top: 0, left: 0, width: 300 });
   const [active, setActive] = useState(value);
-  const activeRef = useRef(active);
-  const onChangeRef = useRef(onChange);
-  activeRef.current = active;
-  onChangeRef.current = onChange;
-  const flat = useMemo(() => flattenModelGroups(groups, value), [groups, value]);
-  const selected = flat.find((item) => item.selector === value);
+  const all = useMemo(() => flattenModelGroups(groups, value), [groups, value]);
+  const selected = all.find((item) => item.selector === value);
   const selectedGroup = groups.find((group) => group.models.some((item) => item.selector === value));
+  const missing = Boolean(value) && (!selectedGroup || Boolean(unavailableReason));
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const filteredGroups = groups.map(group => ({
+    ...group,
+    models: group.models.filter(model => terms.every(term => `${group.providerName} ${group.providerId} ${model.name} ${model.id}`.toLocaleLowerCase().includes(term))),
+  })).filter(group => group.models.length > 0);
+  const showOrphan = Boolean(value) && !selectedGroup && terms.every(term => value.toLocaleLowerCase().includes(term));
+  const showAuto = allowClear && terms.length === 0;
+  const flat = flattenModelGroups(filteredGroups, showOrphan ? value : undefined);
+  if (showAuto) flat.unshift({ provider: "", id: "", selector: "", name: t("modelConfig.autoModel"), reasoning: false, image: false, tools: false });
+  const activeItem = flat.find(item => item.selector === active) ?? flat[0];
+  const optionId = (selector: string) => `${uid}-option-${flat.findIndex(item => item.selector === selector)}`;
 
   const place = () => {
     const rect = btnRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const width = Math.max(rect.width, 380);
+    const width = Math.min(Math.max(rect.width, 440), window.innerWidth - 16);
     const height = popRef.current?.offsetHeight ?? 0;
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
     let top = rect.bottom + 4;
@@ -292,11 +307,45 @@ export function RoleModelPicker({
     setAnchor({ top, left, width });
   };
 
-  const dismiss = () => setOpen(false);
+  const dismiss = (restoreFocus = false) => {
+    setOpen(false);
+    setQuery("");
+    if (restoreFocus) btnRef.current?.focus();
+  };
 
   const pick = (selector: string) => {
-    onChangeRef.current(selector);
-    dismiss();
+    if (selector !== value) onChange(selector);
+    dismiss(true);
+  };
+
+  const expand = () => {
+    setQuery("");
+    setActive(value);
+    setOpen(true);
+  };
+
+  const onKey = (event: ReactKeyboardEvent) => {
+    if (event.nativeEvent.isComposing) return;
+    const typing = event.target === searchRef.current;
+    if (event.key === "Escape" && open) {
+      event.preventDefault();
+      event.stopPropagation();
+      dismiss(true);
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) { expand(); return; }
+      const index = flat.findIndex(item => item.selector === activeItem?.selector);
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      const next = flat[(index + delta + flat.length) % flat.length];
+      if (next) setActive(next.selector);
+    } else if (open && !typing && (event.key === "Home" || event.key === "End")) {
+      event.preventDefault();
+      const next = event.key === "Home" ? flat[0] : flat[flat.length - 1];
+      if (next) setActive(next.selector);
+    } else if (open && (event.key === "Enter" || (!typing && event.key === " "))) {
+      event.preventDefault();
+      if (activeItem) pick(activeItem.selector);
+    }
   };
 
   useLayoutEffect(() => {
@@ -305,69 +354,39 @@ export function RoleModelPicker({
   }, [open, groups.length, flat.length]);
 
   useLayoutEffect(() => {
+    if (open) searchRef.current?.focus();
+  }, [open]);
+
+  useLayoutEffect(() => {
     if (!open) return;
     const node = popRef.current?.querySelector<HTMLElement>("[data-active='true']");
     node?.scrollIntoView({ block: "nearest" });
-  }, [open, active]);
+  }, [open, activeItem?.selector]);
 
   useEffect(() => {
     if (!open) return;
-    setActive(value);
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        dismiss();
-        btnRef.current?.focus();
-        return;
-      }
-      const currentActive = activeRef.current;
-      const index = Math.max(0, flat.findIndex((item) => item.selector === currentActive));
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        event.preventDefault();
-        if (flat.length === 0) return;
-        const delta = event.key === "ArrowDown" ? 1 : -1;
-        const next = flat[(index + delta + flat.length) % flat.length];
-        if (next) setActive(next.selector);
-        return;
-      }
-      if (event.key === "Home") {
-        event.preventDefault();
-        const first = flat[0];
-        if (first) setActive(first.selector);
-        return;
-      }
-      if (event.key === "End") {
-        event.preventDefault();
-        const last = flat[flat.length - 1];
-        if (last) setActive(last.selector);
-        return;
-      }
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        const current = flat.find((item) => item.selector === currentActive) ?? flat[index];
-        if (current) pick(current.selector);
-      }
-    };
     const onDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
       if (btnRef.current?.contains(target) || popRef.current?.contains(target)) return;
       dismiss();
     };
-    const onReposition = () => place();
-    window.addEventListener("keydown", onKey);
+    const onReposition = (event: Event) => {
+      if (event.target instanceof Node && popRef.current?.contains(event.target)) return;
+      place();
+    };
     window.addEventListener("mousedown", onDown);
     window.addEventListener("resize", onReposition);
     window.addEventListener("scroll", onReposition, true);
     return () => {
-      window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("resize", onReposition);
       window.removeEventListener("scroll", onReposition, true);
     };
-  }, [open, flat, value]);
+  }, [open]);
 
-  const label = selected?.name || value || t("modelConfig.selectModel");
-  const missing = Boolean(value) && !selectedGroup;
+  useEffect(() => { if (disabled) dismiss(); }, [disabled]);
+
+  const label = selected?.name || value || t(allowClear ? "modelConfig.autoModel" : "modelConfig.selectModel");
 
   return (
     <>
@@ -380,22 +399,21 @@ export function RoleModelPicker({
         aria-expanded={open}
         aria-controls={listId}
         aria-label={ariaLabel ?? t("modelConfig.primaryModel")}
-        data-tip={value || undefined}
-        onMouseDown={(event) => event.stopPropagation()}
+        data-tip={unavailableReason || value || undefined}
+        onKeyDown={onKey}
         onClick={(event) => {
           event.stopPropagation();
-          if (open && event.detail === 0) return;
           if (open) {
             dismiss();
             return;
           }
-          setActive(value);
-          setOpen(true);
+          expand();
         }}
       >
         <span className="rms-brand" aria-hidden="true">
-          <ProviderGlyph id={selectedGroup?.providerId || selected?.provider || ""} local={selectedGroup?.local ?? false} />
+          {allowClear && !value ? <Icon name="sparkles" extra="sm" /> : <ProviderGlyph id={selectedGroup?.providerId || selected?.provider || value.split("/")[0] || ""} local={selectedGroup?.local ?? false} />}
         </span>
+        {missing ? <span className="rms-unavailable"><Icon name="alert" extra="sm" />{t("common.unavailable")}</span> : null}
         <span className="rms-copy">
           <span className="rms-name">{label}</span>
         </span>
@@ -405,34 +423,40 @@ export function RoleModelPicker({
         ? createPortal(
             <div
               ref={popRef}
-              id={listId}
-              className="menu rms-pop"
-              role="listbox"
-              aria-label={t("modelConfig.pickByProvider")}
+              className="menu rms-pop rms-picker-pop"
               style={{ top: anchor.top, left: anchor.left, width: anchor.width }}
-              onMouseDown={(event) => event.stopPropagation()}
+              onKeyDown={onKey}
             >
+              <div className="rms-search">
+                <Icon name="search" extra="sm" />
+                <input ref={searchRef} value={query} onChange={event => { setQuery(event.target.value); setActive(""); }} placeholder={t("modelConfig.searchModels")} aria-label={t("modelConfig.searchModels")} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={listId} aria-activedescendant={activeItem ? optionId(activeItem.selector) : undefined} />
+              </div>
+              <div id={listId} className="rms-scroll" role="listbox" aria-label={t("modelConfig.pickByProvider")}>
+              {showAuto ? <button type="button" id={optionId("")} role="option" aria-selected={!value} data-active={activeItem?.selector === "" ? "true" : undefined} className={`menu-item rms-option rms-option-auto${!value ? " is-on" : ""}${activeItem?.selector === "" ? " is-active" : ""}`} onFocus={() => setActive("")} onMouseDown={event => event.preventDefault()} onClick={() => pick("")}><Icon name="sparkles" extra="sm" /><span className="rms-option-copy"><b>{t("modelConfig.autoModel")}</b><span>{t("modelConfig.autoModelDesc")}</span></span>{!value ? <Icon name="check" extra="sm" /> : null}</button> : null}
               {flat.length === 0 ? (
-                <div className="rms-empty">{t("modelConfig.noAvailableModels")}</div>
+                <div className="rms-empty">{t(query ? "modelConfig.noModelMatches" : "modelConfig.noAvailableModels")}</div>
               ) : (
                 <>
-                  {missing ? (
+                  {showOrphan ? (
                     <button
                       type="button"
+                      id={optionId(value)}
                       role="option"
-                      aria-selected={value === active}
-                      data-active={active === value ? "true" : undefined}
-                      className={`menu-item rms-option is-missing${active === value ? " is-active" : ""}`}
+                      aria-selected="true"
+                      data-active={activeItem?.selector === value ? "true" : undefined}
+                      className={`menu-item rms-option is-missing${activeItem?.selector === value ? " is-active" : ""}`}
                       onMouseDown={(event) => event.preventDefault()}
+                      onFocus={() => setActive(value)}
                       onClick={() => pick(value)}
                     >
                       <span className="rms-option-copy">
                         <b>{value}</b>
-                        <span>{t("modelConfig.currentNotInList")}</span>
+                        <span>{unavailableReason || t("modelConfig.currentNotInList")}</span>
                       </span>
+                      <span className="rms-unavailable">{t("common.unavailable")}</span>
                     </button>
                   ) : null}
-                  {groups.map((group) => (
+                  {filteredGroups.map((group) => (
                     <div className="rms-group" key={group.providerId} role="group" aria-label={group.providerName}>
                       <div className="rms-group-label">
                         <span className="rms-brand" aria-hidden="true">
@@ -443,21 +467,23 @@ export function RoleModelPicker({
                       </div>
                       {group.models.map((model) => {
                         const on = model.selector === value;
-                        const isActive = model.selector === active;
+                        const isActive = model.selector === activeItem?.selector;
                         return (
                           <button
                             type="button"
                             key={model.selector}
+                            id={optionId(model.selector)}
                             role="option"
                             aria-selected={on}
                             data-active={isActive ? "true" : undefined}
-                            className={`menu-item rms-option${on ? " is-on" : ""}${isActive ? " is-active" : ""}`}
+                            className={`menu-item rms-option${on ? " is-on" : ""}${isActive ? " is-active" : ""}${on && missing ? " is-missing" : ""}`}
                             onMouseDown={(event) => event.preventDefault()}
+                            onFocus={() => setActive(model.selector)}
                             onClick={() => pick(model.selector)}
                           >
                             <span className="rms-option-copy">
                               <b>{model.name}</b>
-                              {model.id !== model.name ? <span>{model.id}</span> : null}
+                              {on && unavailableReason ? <span>{unavailableReason}</span> : model.id !== model.name ? <span>{model.id}</span> : null}
                             </span>
                             <ModelPickCaps model={model} />
                             {on ? <Icon name="check" extra="sm" /> : null}
@@ -468,6 +494,8 @@ export function RoleModelPicker({
                   ))}
                 </>
               )}
+              </div>
+              <div className="rms-foot"><span>{t("modelConfig.modelMatchCount", { count: filteredGroups.reduce((count, group) => count + group.models.length, 0) })}</span><span>↑ ↓ <kbd>Enter</kbd></span></div>
             </div>,
             document.body,
           )

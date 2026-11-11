@@ -350,8 +350,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     [providerFormDirty, editorState, providerYamlId, providerYamlNodeValue, storedAuthType],
   );
   const configYmlFormSlice = useMemo(
-    () => roleFormDirty && roleDraftState?.primary && roleYamlId
-      ? serializeModelsYmlNode({ [roleYamlId]: roleSelector(roleDraftState) })
+    () => roleFormDirty && roleDraftState && roleYamlId
+      ? roleDraftState.primary ? serializeModelsYmlNode({ [roleYamlId]: roleSelector(roleDraftState) }) : ""
       : null,
     [roleFormDirty, roleDraftState, roleYamlId],
   );
@@ -473,8 +473,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     }
     const rolesMap = readModelRoles(parsed.value);
     const draft = roleDraftState;
-    if (overlayForm && draft?.primary) {
-      rolesMap[roleYamlId] = roleSelector(withRoleModel(
+    if (overlayForm && draft) {
+      if (!draft.primary) delete rolesMap[roleYamlId];
+      else rolesMap[roleYamlId] = roleSelector(withRoleModel(
         { ...draft, id: roleYamlId },
         draft.primary,
         (data?.availableModels ?? []).find((item) => item.selector === draft.primary),
@@ -750,9 +751,6 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         toast(t("modelConfig.roleIdTaken"));
         return;
       }
-    } else if (!role.primary) {
-      toast(t("modelConfig.selectPrimaryFirst"));
-      return;
     }
     const renamed = Boolean(persistIdentity && baseline && baseline.id !== id);
     if (preview) {
@@ -760,13 +758,10 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         const saved = { ...next };
         const { issue: _ignored, ...rest } = saved;
         const record = rest;
-        if (renamed && baseline) {
-          return { ...current, roles: [...current.roles.filter((item) => item.id !== baseline.id), record] };
-        }
-        return {
-          ...current,
-          roles: current.roles.map((item) => (item.id === (baseline?.id ?? role.id) ? record : item)),
-        };
+        const nextRoles = renamed && baseline
+          ? [...current.roles.filter((item) => item.id !== baseline.id), record]
+          : current.roles.map((item) => (item.id === (baseline?.id ?? role.id) ? record : item));
+        return withRolePrimaryUpdates({ ...current, roles: nextRoles }, [{ role: record, selector: record.primary }]);
       });
       if (marks) toast((next.thinkingAdjustment ? `${next.thinkingAdjustment} · ` : "") + t("modelConfig.demoRoleUpdated"));
       setRoleId(null);
@@ -785,11 +780,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         if (renamed && baseline) {
           await runWrite(client, "models.roles.delete", { roleId: baseline.id });
         }
-      } else if (selector) {
-        await runWrite(client, "models.roles.set", { roleId: id, selector });
       } else {
-        toast(t("modelConfig.selectPrimaryFirst"));
-        return;
+        await runWrite(client, "models.roles.set", { roleId: id, selector });
       }
       toast((next.thinkingAdjustment ? `${next.thinkingAdjustment} · ` : "") + t("modelConfig.savedToConfigToast"));
       setRoleId(null);
@@ -1194,6 +1186,12 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     for (const model of runtimeModels) map.set(model.selector, { ...model, ...map.get(model.selector) });
     return map;
   }, [data, providers, runtimeModels]);
+
+  const refreshRoleModels = async () => {
+    const current = ++nativeLoad.current;
+    const models = await loadRuntimeModels(client, () => current === nativeLoad.current);
+    if (current === nativeLoad.current) setRuntimeModels(models);
+  };
 
   const catalogStatus = preview && marks ? t("modelAdaptation.demo") : data?.catalog?.version ?? t("modelAdaptation.catalogUnknown");
 
@@ -1926,7 +1924,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         </section>
 
         <section id="mcPanelRoles" role="tabpanel" aria-labelledby="mcTabRoles" hidden={shownTab !== "roles"} {...tabPanelMotion("roles")}>
-          <VisionModelStatus client={client} preview={preview} />
+          <div className="mc-role-runtime"><Icon name="image" extra="sm" /><VisionModelStatus client={client} preview={preview} /></div>
           <div className={roleLive ? `mc-view ${pagePhaseClass(rolePhase)}` : "mc-view"} data-page-dir={pageDir(roleDir)}>
           {roleDraft ? (
             <>
@@ -1984,6 +1982,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                     <span className="v">
                       <RoleModelPicker
                         value={roleDraft.primary}
+                        allowClear
+                        unavailableReason={roleDraft.issue?.detail}
                         groups={groupModelsByProvider(usable.filter(model => modelAcceptsRole(roleDraft.id, model)), orderedProviders)}
                         onChange={(primary) => setRoleDraft(withRoleModel(roleDraft, primary, availableBySelector.get(primary)))}
                       />
@@ -1997,6 +1997,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                   </div>
                 </div>
               </div>
+              <ModelCompactionPane client={client} context={{ sessionId, available: runtimeAvailable, capabilities }} visible={shownTab === "roles"} models={usable} providers={orderedProviders} initialSelector={roleDraft.primary} onSaved={refreshRoleModels} />
               <div className="mp-sec">
                 <h3>{t("modelConfig.fallbackChains")}</h3>
                 <p className="sec-desc">{t("modelConfig.fallbackChainsDesc")}</p>
@@ -2068,7 +2069,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             </>
           ) : (
             <>
-              <div className="mr-toolbar">
+              <div className="mr-toolbar mc-role-toolbar">
                 <span className="seg" role="tablist" aria-label={t("modelConfig.roleScope")}>
                   <button
                     type="button"
@@ -2088,7 +2089,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                     onClick={() => { if (data?.projectScopeAvailable && (data?.modelRoleStorage ?? "global") !== "project") void setRoleStorage("project"); }}
                   >{t("modelConfig.projectScope")}</button>
                 </span>
-                <b style={{ fontSize: "var(--fs-13)" }}>{t("modelConfig.rolesTab")}</b>
+                <b>{t("modelConfig.roleRouting")}</b>
                 <span className="mr-count">{roles.length}</span>
                 <span className="spacer" />
                 <button type="button" className="btn primary" onClick={() => setCreateRoleOpen(true)}><Icon name="plus" extra="sm" />{t("modelConfig.createCustomRole")}</button>
@@ -2102,6 +2103,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                   <button type="button" className="btn small outline" onClick={() => setCreateRoleOpen(false)}>{t("common.cancel")}</button>
                 </div>
               ) : null}
+              <div className="mc-role-list">
+              <div className="mc-role-columns" aria-hidden="true"><span>{t("modelConfig.rolesTab")}</span><span>{t("modelConfig.primaryModel")}</span><span>{t("modelConfig.thinkingEffort")}</span></div>
+              {roles.length === 0 ? <div className="mc-role-empty">{t(data ? "modelConfig.noRoles" : "common.loading")}</div> : null}
               {roles.map((role) => {
                 const thinking = roleThinkingUi(role, availableBySelector.get(role.primary));
                 return (
@@ -2109,19 +2113,20 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                   <button type="button" className="role-row-nav" onClick={() => { setRoleId(role.id); setRoleDraft({ ...role }); }}>
                     <span className="role-icon-area"><span className={`a-ic${role.issue ? " amber" : ""}`}><Icon name={ROLE_ICONS[role.id] ?? "cpu"} extra="sm" /></span></span>
                     <span className="role-name-section">
-                      <div className="role-header"><span className="r-name">{role.name}<span className="alias">{role.alias}</span></span>{role.scope === "project" ? <span className="chip blue xs">Project</span> : null}{role.builtin ? null : <span className="chip purple xs">{t("modelConfig.customRole")}</span>}</div>
-                      <span className="r-desc">{formatRoleDesc(role, t)}</span>
+                      <span className="role-header"><span className="r-name">{role.name}</span><span className="alias">{role.alias}</span></span>
+                      <span className="role-meta"><span className="r-desc" title={formatRoleDesc(role, t)}>{formatRoleDesc(role, t)}</span>{role.scope === "project" ? <span className="role-tag">Project</span> : null}{role.builtin ? null : <span className="role-tag">{t("modelConfig.customRole")}</span>}</span>
                     </span>
                   </button>
                   <span className="role-model-section">
-                    {role.issue ? <span className="role-model"><span className="model-name unavailable">{role.primary || t("modelConfig.unassigned")}</span></span> : (
-                      <>
                         <RoleModelPicker
                           value={role.primary}
+                          allowClear
+                          unavailableReason={role.issue?.detail}
+                          disabled={busy}
                           groups={groupModelsByProvider(usable.filter(model => modelAcceptsRole(role.id, model)), orderedProviders)}
                           onChange={(primary) => { void saveRole(withRoleModel(role, primary, availableBySelector.get(primary))); }}
                         />
-                        <AppSelect className="effort-select" value={thinking.value} disabled={thinking.disabled} aria-label={t("modelConfig.thinkingEffort")} onChange={(event) => {
+                        <AppSelect className="effort-select" value={thinking.value} disabled={busy || thinking.disabled || Boolean(role.issue) || !role.primary} aria-label={t("modelConfig.thinkingEffort")} onChange={(event) => {
                           const { thinkingAdjustment: _mapping, ...next } = role as ModelRoleDraft;
                           if (event.target.value === "") delete next.thinking;
                           else next.thinking = event.target.value;
@@ -2130,8 +2135,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                           <option value="">{t("modelAdaptation.defaultThinking")}</option>
                           {thinking.items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                         </AppSelect>
-                      </>
-                    )}
+                  </span>
+                  <span className="role-actions">
                     {!role.builtin ? (
                       <button
                         type="button"
@@ -2150,9 +2155,10 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                 </div>
                 );
               })}
-              <div className="mp-sec" style={{ marginTop: 20 }}>
-                <h3>{t("modelConfig.cycleOrderTitle")} <span className="chip-code">Cycle Order</span></h3>
-                <p className="sec-desc">{t("modelConfig.cycleOrderDesc")}</p>
+              </div>
+              <div className="mc-role-settings">
+              <section className="mc-role-cycle">
+                <header className="mc-role-section-head"><span className="mc-role-section-icon"><Icon name="steering" /></span><div><h3>{t("modelConfig.cycleOrderTitle")}</h3><p>{t("modelConfig.cycleOrderDesc")}</p></div>{!cycleEdit ? <button type="button" className="btn small outline" onClick={() => { setCycleEdit(true); setCycleDraft([...(data?.cycleOrder ?? [])]); }}><Icon name="pencil" extra="sm" />{t("modelConfig.editCycleOrder")}</button> : null}</header>
                 {cycleEdit ? (
                   <>
                     <div className="cycle-flow">
@@ -2194,9 +2200,10 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                         );
                       })}
                     </div>
-                    <div style={{ marginTop: 12 }}><button type="button" className="btn small outline" onClick={() => { setCycleEdit(true); setCycleDraft([...(data?.cycleOrder ?? [])]); }}><Icon name="pencil" extra="sm" />{t("modelConfig.editCycleOrder")}</button></div>
                   </>
                 )}
+              </section>
+              <ModelCompactionPane client={client} context={{ sessionId, available: runtimeAvailable, capabilities }} visible={shownTab === "roles"} models={usable} providers={orderedProviders} initialSelector={roles.find(role => role.id === "default")?.primary} onSaved={refreshRoleModels} />
               </div>
               {assignSel ? (
                 <div className="preset-banner">
@@ -2212,7 +2219,6 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             </>
           )}
           </div>
-        {shownTab === "roles" && !hasRoleEditor ? <ModelCompactionPane client={client} context={{ sessionId, available: runtimeAvailable, capabilities }} visible={shownTab === "roles"} models={data?.availableModels ?? []} /> : null}
 </section>
         <section id="mcPanelSubagents" role="tabpanel" aria-labelledby="mcTabSubagents" hidden={shownTab !== "subagents"} {...tabPanelMotion("subagents")}>
           <SubagentsPanel
