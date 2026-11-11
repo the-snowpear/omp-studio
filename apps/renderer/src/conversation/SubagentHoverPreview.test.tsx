@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { ClientEvent, ConversationRuntimeEvent, SessionId } from "@omp-studio/client-contract";
 import type { AgentId, Generation, RuntimeEpoch, StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { conversationPages } from "@omp-studio/testkit";
@@ -10,6 +10,7 @@ import { SubagentHoverProvider } from "./SubagentHoverPreview";
 import { activeSubagentConversationEngineCount, type SubagentConversationClient } from "./subagentConversationEngine";
 import { conversationViewLeases } from "./conversationViews";
 import type { ToolView } from "./conversationViewModel";
+import type { SubagentHubTarget } from "./toolMeta";
 
 const parent = "parent" as SessionId;
 const epoch = 7 as RuntimeEpoch;
@@ -53,9 +54,9 @@ function clientFixture(queryResult?: (agentId: string) => Promise<unknown>) {
     } };
 }
 
-function Surface({ client, scope = "parent", runtimeConnected = true, agents = [liveAgent], onInspect = vi.fn(), inputTool = tool }: {
+function Surface({ client, scope = "parent", runtimeConnected = true, agents = [liveAgent], onInspect = vi.fn<(target: SubagentHubTarget) => void>(), inputTool = tool }: {
   client: SubagentConversationClient | null; scope?: string; runtimeConnected?: boolean;
-  agents?: readonly StudioAgentSnapshot[]; onInspect?: ReturnType<typeof vi.fn>; inputTool?: ToolView;
+  agents?: readonly StudioAgentSnapshot[]; onInspect?: Mock<(target: SubagentHubTarget) => void>; inputTool?: ToolView;
 }) {
   return <PreviewModeProvider switchEnabled>
     <SubagentHoverProvider scope={scope} client={client} agents={agents} runtimeConnected={runtimeConnected}
@@ -94,7 +95,7 @@ afterEach(() => {
 describe("subagent hover preview", () => {
   it("waits 300ms before reading, renders Markdown, and clicking opens the original agent", async () => {
     const host = clientFixture();
-    const inspect = vi.fn();
+    const inspect = vi.fn<(target: SubagentHubTarget) => void>();
     const base = activeSubagentConversationEngineCount();
     render(<Surface client={host.client} onInspect={inspect} />);
     const card = rendererCard();

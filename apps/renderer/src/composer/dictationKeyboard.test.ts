@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { DictationKeyboard, DICTATION_HOLD_DELAY_MS, isValidDictationShortcut } from "./dictationKeyboard";
 import type { ComposerDictationBinding } from "./dictationTypes";
 
@@ -7,7 +7,7 @@ let keyboard: DictationKeyboard;
 let binding: ComposerDictationBinding;
 let blocked = false;
 let composing = false;
-let insertSpace: ReturnType<typeof vi.fn>;
+let insertSpace: Mock<(text: string) => void>;
 
 function down(key = " ", options: KeyboardEventInit = {}): KeyboardEvent {
   const event = new KeyboardEvent("keydown", { key, ...(key === " " ? { code: "Space" } : {}), bubbles: true, cancelable: true, ...options });
@@ -27,7 +27,7 @@ beforeEach(() => {
   blocked = false;
   composing = false;
   binding = { enabled: true, active: false, toggleShortcut: "", onStart: vi.fn(), onStop: vi.fn(), onCancel: vi.fn(), onInterrupt: vi.fn() };
-  insertSpace = vi.fn();
+  insertSpace = vi.fn<(text: string) => void>();
   editor = document.createElement("div");
   editor.tabIndex = 0;
   document.body.append(editor);

@@ -103,7 +103,7 @@ describe("floating body corners", () => {
     overlay.className = "dock-rail-overlay"; overlay.dataset.dockCards = "rail";
     overlay.style.border = "1px solid black"; overlay.style.borderBottomLeftRadius = overlay.style.borderBottomRightRadius = "16px";
     overlay.append(slot); document.body.append(overlay);
-    vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 0, 300, 251));
+    overlay.getBoundingClientRect = vi.fn(() => new DOMRect(100, 0, 300, 251));
     hosts.flush();
     expect(host.element.style.clipPath).toContain("polygon(");
     expect(host.element.style.clipPath).toContain("285px 200px, 15px 200px");

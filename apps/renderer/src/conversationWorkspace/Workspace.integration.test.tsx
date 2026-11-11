@@ -125,8 +125,8 @@ describe("conversation windows", () => {
       const editor = main.querySelector<HTMLElement>("[contenteditable=true]")!;
       editor.textContent = "多窗口动画保留草稿"; fireEvent.input(editor);
       const canvas = document.querySelector<HTMLElement>("[data-conversation-canvas]")!;
-      vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(new DOMRect(300, 40, 1100, 800));
-      vi.spyOn(document.querySelector<HTMLElement>("[data-dock-workbench]")!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 40, 1400, 900));
+      canvas.getBoundingClientRect = vi.fn(() => new DOMRect(300, 40, 1100, 800));
+      document.querySelector<HTMLElement>("[data-dock-workbench]")!.getBoundingClientRect = vi.fn(() => new DOMRect(0, 40, 1400, 900));
       Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: vi.fn(() => []) });
       const titles = preview ? ["Audit and fix OSS", "修复 Git Bash"] : ["Second conversation", "Third conversation"];
       for (const [index, title] of titles.entries()) {

@@ -19,6 +19,6 @@
   },
   "dependencies": {
     "@omp-studio/studio-protocol": "0.1.17",
-    "fflate": "0.8.2"
+    "fflate": "0.8.3"
   }
 }

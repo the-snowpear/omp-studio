@@ -649,7 +649,7 @@ describe("dock pointer protocol", () => {
   it("previews hidden shared regions within their actual workbench area", () => {
     geometry();
     render(<div data-dock-workbench><div className="cw-navigation-slot" /><div className="cw-shell-main"><div className="cw-workbench"><div className="cw-right-slot" /></div></div></div>);
-    const box = (selector: string, rect: DOMRect) => vi.spyOn(document.querySelector<HTMLElement>(selector)!, "getBoundingClientRect").mockReturnValue(rect);
+    const box = (selector: string, rect: DOMRect) => { document.querySelector<HTMLElement>(selector)!.getBoundingClientRect = vi.fn(() => rect); };
     box("[data-dock-workbench]", new DOMRect(0, 36, 1600, 964));
     box(".cw-navigation-slot", new DOMRect(0, 36, 56, 964));
     box(".cw-shell-main", new DOMRect(328, 36, 1272, 964));

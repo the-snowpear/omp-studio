@@ -32,6 +32,10 @@ Windows is the supported desktop. Node.js 22+ is required. Building the
 managed Runtime also needs Bun and a working MSVC / Rust toolchain; the
 install script documents those.
 
+The root `mermaid` development dependency mirrors the renderer's version so
+npm 11 applies the root KaTeX override when updating a cached workspace tree.
+Keep the two Mermaid declarations aligned; rendering continues to use Mermaid 11.
+
 ## How to send a change
 
 1. Branch from `main`. Use a short prefix: `fix/`, `feat/`, `docs/`, `patch/`.

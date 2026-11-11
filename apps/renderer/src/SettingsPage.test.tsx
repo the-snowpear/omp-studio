@@ -1,6 +1,6 @@
 import { selectOption } from "./test/selectOption";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi, type Mock } from "vitest";
 import type { RuntimeSettingsReadModel } from "@omp-studio/client-contract";
 import { GUI_SETTING_KEYS } from "@omp-studio/studio-protocol";
 import { I18nProvider } from "./i18n";
@@ -12,6 +12,7 @@ import { BACKGROUND_STORAGE_KEY } from "./background/backgroundSettings";
 import { SETTINGS_GUI_COVERAGE } from "./settings/catalog";
 import { setSettingsIntent, SettingsPage, type RuntimeSettingsApi } from "./SettingsPage";
 import { __resetUpdatesForTests, type UpdatePrefs } from "./settings/updates";
+import type { ApprovalModeId } from "./settings/tabs";
 
 beforeAll(() => {
   class ResizeObserverStub { observe(): void {} unobserve(): void {} disconnect(): void {} }
@@ -37,10 +38,10 @@ const snapshot: RuntimeSettingsReadModel = {
   interruptMode: "immediate", "edit.fuzzyThreshold": 0.95, "compaction.enabled": true,
   "task.maxConcurrency": 32, "retry.enabled": true,
 };
-function renderSettings(options: { preview?: boolean; language?: "zh" | "en"; approvalMode?: "write"; onSetApprovalMode?: ReturnType<typeof vi.fn>; runtimeSettings?: RuntimeSettingsApi } = {}) {
+function renderSettings(options: { preview?: boolean; language?: "zh" | "en"; approvalMode?: "write"; onSetApprovalMode?: Mock<(mode: ApprovalModeId) => void>; runtimeSettings?: RuntimeSettingsApi } = {}) {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview ? "1" : "0");
   return render(<PreviewModeProvider switchEnabled><I18nProvider forcedLanguage={options.language ?? "zh"}><BackgroundProvider preview={!!options.preview} theme="light">
-    <SettingsPage onSetApprovalMode={options.onSetApprovalMode ?? vi.fn()} {...(options.approvalMode ? { approvalMode: options.approvalMode } : {})} {...(options.runtimeSettings ? { runtimeSettings: options.runtimeSettings } : {})} />
+    <SettingsPage onSetApprovalMode={options.onSetApprovalMode ?? vi.fn<(mode: ApprovalModeId) => void>()} {...(options.approvalMode ? { approvalMode: options.approvalMode } : {})} {...(options.runtimeSettings ? { runtimeSettings: options.runtimeSettings } : {})} />
   </BackgroundProvider></I18nProvider></PreviewModeProvider>);
 }
 function openTab(name: string) { fireEvent.click(screen.getByRole("tab", { name })); }

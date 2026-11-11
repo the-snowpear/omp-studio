@@ -41,6 +41,7 @@ describe("ConversationPane session switch", () => {
     cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("uses the current motion tier after the retained conversation changes preference", () => {
@@ -168,7 +169,7 @@ describe("ConversationPane session switch", () => {
 
   it("drops the fade-out under reduced motion but still covers the gap", () => {
     vi.useFakeTimers();
-    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+    vi.stubGlobal("matchMedia", (query: string) => ({
       matches: query.includes("prefers-reduced-motion"),
       media: query,
       onchange: null,

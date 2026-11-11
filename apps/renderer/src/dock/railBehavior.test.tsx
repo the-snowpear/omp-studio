@@ -95,7 +95,7 @@ describe("left sidebar panes", () => {
   it("resizes adjacent panes together, cancels with Escape and undoes as one change", () => {
     const { store } = setup();
     act(() => store.dispatch({ type: "move", panels: ["changes", "problems"], target: { region: "left" } }));
-    const read = HTMLElement.prototype.getBoundingClientRect;
+    const read = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!;
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
       return this.matches('.dock-card-body') ? new DOMRect(0, 0, 240, 100) : read.call(this);
     });
@@ -126,7 +126,7 @@ describe("conversation rail layout", () => {
     vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(function(this: Element) {
       return this.matches('.dock-card-list') ? hasScrollbar() ? 304 : 320 : 0;
     });
-    const read = HTMLElement.prototype.getBoundingClientRect;
+    const read = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!;
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
       const rect = read.call(this);
       if (!this.matches('.dock-rail-expanded [data-dock-card]')) return rect;
@@ -148,7 +148,7 @@ describe("conversation rail layout", () => {
       m42: number;
       constructor(transform: string) { this.m42 = Number(/translateY\(([-.\d]+)px\)/.exec(transform)?.[1] ?? 0); }
     });
-    const read = HTMLElement.prototype.getBoundingClientRect;
+    const read = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!;
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
       const rect = read.call(this);
       const offset = Number(/translateY\(([-.\d]+)px\)/.exec(this.style.transform)?.[1] ?? 0);
