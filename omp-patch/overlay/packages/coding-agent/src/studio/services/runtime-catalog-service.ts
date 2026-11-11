@@ -1,4 +1,5 @@
 import type { MCPManager } from "../../mcp/manager";
+import { normalizeMCPTransportError } from "../../mcp/errors";
 import { cfgMcpStartupTimeoutMs } from "../../mcp/settings";
 import { createHash } from "node:crypto";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
@@ -51,12 +52,16 @@ export class StudioRuntimeCatalogService {
 			// A one-millisecond bounded observation waits for no new discovery and never changes policy.
 			const status = await manager.waitForStartup(1);
 			const pending = new Set(status.pending);
-			const failed = new Set(status.failed.map(server => server.name));
+			const failed = new Map(status.failed.map(server => [server.name, server.error]));
 			const names = [
-				...new Set([...manager.getAllServerNames(), ...status.connected, ...status.pending, ...failed]),
+				...new Set([...manager.getAllServerNames(), ...status.connected, ...status.pending, ...failed.keys()]),
 			].sort();
 			const servers: McpRuntimeStatus["servers"] = names.slice(0, 500).map(name => {
 				const connection = manager.getConnection(name);
+				const config = manager.getServerConfig(name);
+				const source = manager.getSource(name);
+				const transport = config ? (config.type ?? "stdio") : undefined;
+				const failure = failed.get(name);
 				return {
 					name: clean(name),
 					state: pending.has(name)
@@ -69,6 +74,19 @@ export class StudioRuntimeCatalogService {
 									? "pending"
 									: "disconnected",
 					tools: connection?.tools?.length ?? 0,
+					...(transport ? { transport } : {}),
+					...(source ? { source: { providerName: clean(source.providerName), level: source.level } } : {}),
+					...(failure
+						? {
+								error: clean(
+									normalizeMCPTransportError(failure, {
+										transport: transport === "sse" ? "http" : (transport ?? "unknown"),
+										stage: "connect",
+									}).message,
+									1000,
+								),
+							}
+						: {}),
 					toolInfo: this.session
 						.getAllToolInfos()
 						.filter(tool => tool.mcpServerName === name)
@@ -77,6 +95,7 @@ export class StudioRuntimeCatalogService {
 							name: tool.name,
 							mcpServerName: tool.mcpServerName!,
 							mcpToolName: tool.mcpToolName ?? tool.name,
+							...(tool.description ? { description: clean(tool.description, 400) } : {}),
 							...(tool.mcpReadOnlyHint === undefined ? {} : { readOnlyHint: tool.mcpReadOnlyHint }),
 						})),
 				};

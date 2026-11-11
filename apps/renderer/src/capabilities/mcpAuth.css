@@ -1,23 +1,35 @@
-.runtime-mcp-rows > div:has(> .mcp-auth-actions) {
-  flex-wrap: wrap;
+.mcp-auth-actions { display: contents; }
+.mcp-auth-buttons { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: var(--sp-6); width: var(--runtime-mcp-action-width); }
+.mcp-auth-secondary { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-4); min-height: 32px; padding: var(--sp-4) var(--sp-6); border: 0; border-radius: var(--r-4); font-family: var(--font-ui); font-size: var(--fs-11); color: var(--text-3); background: transparent; cursor: pointer; transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
+.mcp-auth-secondary:hover { color: var(--accent); background: var(--accent-softer); }
+.mcp-auth-secondary:disabled { cursor: default; opacity: .5; }
+.mcp-auth-reconnect { min-height: 32px; font-size: var(--fs-11); }
+.mcp-auth-feedback { grid-column: 1 / -1; min-width: 0; padding-left: 48px; animation: var(--motion-unfold); }
+.mcp-auth-confirm { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-12) var(--sp-16); background: var(--red-soft); border-radius: var(--r-6); color: var(--red); }
+.mcp-auth-confirm > .icon { flex: none; }
+.mcp-auth-confirm > div { flex: 1; min-width: 0; }
+.mcp-auth-confirm strong { font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.mcp-auth-confirm p { margin: var(--sp-4) 0 0; font-size: var(--fs-11); line-height: 1.7; overflow-wrap: anywhere; }
+.mcp-auth-confirm > .btn { flex: none; }
+.mcp-auth-wait, .mcp-auth-error { display: flex; align-items: start; gap: var(--sp-8); color: var(--text-3); font-size: var(--fs-11); line-height: 1.8; margin: 0; }
+.mcp-auth-wait > .icon, .mcp-auth-error > .icon { flex: none; margin-top: 4px; }
+.mcp-auth-wait { color: var(--accent); }
+.mcp-auth-error { color: var(--red); }
+.mcp-auth-result { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8) var(--sp-12); margin: 0; color: var(--text-3); font-size: var(--fs-11); line-height: 1.8; overflow-wrap: anywhere; }
+.mcp-auth-status { display: inline-flex; align-items: center; gap: var(--sp-6); font-weight: var(--fw-medium); }
+.mcp-auth-status.success { color: var(--green); }
+.mcp-auth-status.warning { color: var(--amber); }
+.mcp-auth-status.neutral { color: var(--text-3); }
+.mcp-auth-result-scope { color: var(--text-3); }
+.mcp-auth-url { flex-basis: 100%; min-width: 0; }
+.mcp-auth-url code { font-family: var(--font-mono); font-size: inherit; word-break: break-all; user-select: text; }
+@container runtime-catalog (max-width: 640px) {
+  .mcp-auth-confirm { flex-wrap: wrap; }
+  .mcp-auth-confirm > div { flex-basis: calc(100% - 32px); }
+  .mcp-auth-confirm > .btn:first-of-type { margin-left: auto; }
 }
-.mcp-auth-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex-basis: 100%;
-  min-width: 0;
-}
-.mcp-auth-buttons,
-.mcp-auth-confirm,
-.mcp-auth-result {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-}
-.mcp-auth-url code {
-  word-break: break-all;
-  user-select: text;
+@container runtime-catalog (max-width: 480px) {
+  .mcp-auth-feedback { padding-left: 0; }
+  .mcp-auth-buttons { gap: var(--sp-2); }
+  .mcp-auth-secondary { padding-inline: var(--sp-4); }
 }

@@ -53,6 +53,11 @@ it("reports native startup readiness without connecting, probing or exposing cre
 		},
 		getAllServerNames: () => ["ready", "slow", "failed"],
 		getConnection: (name: keyof typeof connections) => connections[name],
+		getServerConfig: (name: string) =>
+			name === "ready"
+				? { command: "node", env: { SECRET: "must-not-leak" } }
+				: { type: "http", url: "https://example.com?token=must-not-leak" },
+		getSource: () => ({ providerName: "OMP", level: "project", path: "/private/config/mcp.json" }),
 		getConnectionStatus: (name: string) =>
 			name === "slow" ? "connecting" : name === "ready" ? "connected" : "disconnected",
 	};
@@ -61,7 +66,15 @@ it("reports native startup readiness without connecting, probing or exposing cre
 		sessionManager: { getCwd: () => "." },
 		settings: Settings.isolated({ "mcp.startupTimeoutMs": 250 }),
 		studioToolSession: { mcpManager: manager },
-		getAllToolInfos: () => [{ name: "tool", mcpServerName: "ready", mcpToolName: "tool", mcpReadOnlyHint: true }],
+		getAllToolInfos: () => [
+			{
+				name: "tool",
+				description: "Read a workspace file",
+				mcpServerName: "ready",
+				mcpToolName: "tool",
+				mcpReadOnlyHint: true,
+			},
+		],
 	};
 	const service = new StudioRuntimeCatalogService(
 		session as unknown as AgentSession,
@@ -75,9 +88,25 @@ it("reports native startup readiness without connecting, probing or exposing cre
 		name: "ready",
 		state: "ready",
 		tools: 1,
-		toolInfo: [{ name: "tool", mcpServerName: "ready", mcpToolName: "tool", readOnlyHint: true }],
+		transport: "stdio",
+		source: { providerName: "OMP", level: "project" },
+		toolInfo: [
+			{
+				name: "tool",
+				description: "Read a workspace file",
+				mcpServerName: "ready",
+				mcpToolName: "tool",
+				readOnlyHint: true,
+			},
+		],
+	});
+	expect(result.servers.find(row => row.name === "failed")).toMatchObject({
+		state: "failed",
+		transport: "http",
+		error: "token=[redacted]",
 	});
 	expect(JSON.stringify(result)).not.toContain("must-not-leak");
+	expect(JSON.stringify(result)).not.toContain("/private/config");
 });
 
 beforeEach(async () => {
