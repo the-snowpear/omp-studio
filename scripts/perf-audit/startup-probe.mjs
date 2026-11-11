@@ -25,8 +25,6 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 
-import { _electron as electron } from "playwright";
-
 import {
   APP_DIR,
   BENCH_ROOT,
@@ -47,6 +45,7 @@ import {
   killStrayElectrons,
   killTree,
   listElectronProcesses,
+  loadPlaywright,
   measureQuietFrames,
   measureReloadCost,
   prepareIsolatedDirs,
@@ -57,6 +56,8 @@ import {
   summarize,
   writeJson,
 } from "./lib/collect.mjs";
+
+const { _electron: electron } = await loadPlaywright();
 
 let ELECTRON = ELECTRON_EXE;
 let NATIVE_TAG = "";

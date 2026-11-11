@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { cpus, totalmem, freemem, arch, platform, release, hostname } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(here, "..", "..", "..");
@@ -19,6 +20,11 @@ export const ELECTRON_EXE = join(REPO_ROOT, "node_modules", "electron", "dist", 
 export const APP_DIR = join(REPO_ROOT, "apps", "desktop");
 export const HOOK_PATH = join(REPO_ROOT, "scripts", "perf-audit", "lib", "main-hook.cjs");
 export const RENDERER_DIST_INDEX = join(REPO_ROOT, "apps", "renderer", "dist", "index.html");
+
+export async function loadPlaywright() {
+  if (process.env.PLAYWRIGHT_MODULE) return createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE);
+  return import("playwright");
+}
 
 export function ensureDirs() {
   for (const dir of [BENCH_ROOT, RAW_ROOT]) mkdirSync(dir, { recursive: true });
@@ -191,13 +197,14 @@ export function collectEnvironment() {
 /* ------------------------------------------------------------------ */
 
 export function listElectronProcesses() {
-  const out = runCapture("tasklist", ["/FI", "IMAGENAME eq electron.exe", "/FO", "CSV", "/NH"]);
-  if (out === "" || /INFO:/i.test(out)) return [];
-  return out
-    .split(/\r?\n/)
-    .map((line) => line.split('","').map((cell) => cell.replace(/^"|"$/g, "")))
-    .filter((cells) => cells.length >= 2 && /electron\.exe/i.test(cells[0]))
-    .map((cells) => ({ image: cells[0], pid: Number(cells[1]), session: cells[2], memory: cells[4] }));
+  const scope = join(BENCH_ROOT, "tmp").replaceAll("\\", "/").toLowerCase().replaceAll("'", "''") + "/";
+  const out = runCapture("powershell.exe", [
+    "-NoProfile", "-NonInteractive", "-Command",
+    `[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter "Name='electron.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Replace('\\','/').ToLowerInvariant().Contains('${scope}') } | Select-Object Name,ProcessId | ConvertTo-Json -Compress`,
+  ]);
+  if (out === "") return [];
+  const processes = JSON.parse(out);
+  return (Array.isArray(processes) ? processes : [processes]).map(proc => ({ image: proc.Name, pid: proc.ProcessId }));
 }
 
 export async function killStrayElectrons({ waitMs = 15000 } = {}) {
@@ -252,6 +259,7 @@ export function isolatedDirs(tag) {
 
 export function prepareIsolatedDirs(tag, { fresh }) {
   const dirs = isolatedDirs(tag);
+  if (!resolve(dirs.root).startsWith(resolve(BENCH_ROOT, "tmp") + sep)) throw new Error("Probe directory is outside the isolated workspace");
   if (fresh) rmSync(dirs.root, { recursive: true, force: true });
   for (const dir of [dirs.userData, dirs.appData, dirs.localAppData, dirs.logs]) mkdirSync(dir, { recursive: true });
   if (fresh) rmSync(dirs.hookLog, { force: true });
@@ -264,6 +272,7 @@ export function hookEnv(dirs, extra = {}) {
     // Unquoted on purpose: Node's NODE_OPTIONS parser does not strip quotes.
     NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require ${HOOK_PATH.replace(/\\/g, "/")}`].filter(Boolean).join(" "),
     OMP_PERF_HOOK_LOG: dirs.hookLog,
+    OMP_RENDERER_DEV_URL: "",
     APPDATA: dirs.appData,
     LOCALAPPDATA: dirs.localAppData,
     ...extra,

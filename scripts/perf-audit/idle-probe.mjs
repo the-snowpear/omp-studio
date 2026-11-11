@@ -19,8 +19,6 @@
 import { join } from "node:path";
 import process from "node:process";
 
-import { _electron as electron } from "playwright";
-
 import {
   APP_DIR,
   ELECTRON_EXE,
@@ -34,6 +32,7 @@ import {
   killStrayElectrons,
   killTree,
   listElectronProcesses,
+  loadPlaywright,
   measureQuietFrames,
   prepareIsolatedDirs,
   round,
@@ -41,6 +40,8 @@ import {
   summarize,
   writeJson,
 } from "./lib/collect.mjs";
+
+const { _electron: electron } = await loadPlaywright();
 
 function parseArgs(argv) {
   const args = { seconds: 60, states: "normal,blurred,minimized", tag: "idle" };

@@ -18,11 +18,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run omp:overlay:apply
       # 性能基线必须固定浏览器版本；latest 漂移会把 Chromium 自身变化误报成产品回归。
       - run: npm i --no-save --package-lock=false playwright@1.62.1
       - run: npx playwright install --with-deps chromium
