@@ -1,6 +1,6 @@
 # 项目安全与内存修复验证
 
-本轮修复 Git 文件误操作、Bridge 中断和恢复阻塞、SSH 网络出口边界，以及历史读取、终端和文件资源的生命周期问题。实现位于独立分支 `codex/security-memory-fixes`，基线为 `fc8e677`：它基于 `8b5c29b`，并单独保存原目录中的后台任务未提交改动。原目录 HEAD 与 12 个未提交文件的 Git blob 均已核对未变，完整编辑前备份在新工作树的 `.codex-backups/security-memory-baseline/`。
+本轮修复 Git 文件误操作、Bridge 中断和恢复阻塞、SSH 网络出口边界，以及历史读取、终端和文件资源的生命周期问题。实现从独立分支 `codex/security-memory-fixes` 于 2026-11-12 本地快进合并到 `D:\Project\omp-studio` 的 `0.2.0`。基线 `fc8e677` 基于 `8b5c29b`，并单独保存原目录中的后台任务未提交改动；合并前再次核对原目录 HEAD 和 12 个文件的 Git blob，全部与采集基线一致。初始编辑前备份在新工作树的 `.codex-backups/security-memory-baseline/`，合并前备份在原目录的 `.codex-backups/merge-to-0.2.0-2026-11-12/`。
 
 ## 修复范围
 
@@ -90,7 +90,7 @@ blurred 前测实际失焦，后测 `blur()` 后仍 focused，两个样本不作
 - `tooling-full.log`：112 个打包、签名、更新和工程脚本测试全部成功。
 - `check-desktop-production-final.log`、`desktop-production-final-tests.log`：最终 Desktop 全量检查与生产构建；816 个测试中 809 个通过，7 个 POSIX socket / login shell 测试按平台跳过，0 失败。Renderer、远端 Host、Windows/macOS sandboxed preload 构建与 2 个 preload 测试均通过。
 - `validation-summary.json`、`artifact-index.json`：最终验证状态和原始数据清单。
-- `source-workspace-preservation.json`：原目录 HEAD 与 12 个未提交文件的内容未变。
+- `source-workspace-preservation.json`：记录合并前原目录 HEAD 与 12 个未提交文件的内容未变；`merge-to-0.2.0.json` 记录合并、stash 保留和最终代码一致性检查。
 
 复现命令使用同一工作树和匹配其 lock 的依赖；Playwright 可安装到临时工具目录，通过 `PLAYWRIGHT_MODULE` 指定，不改产品依赖。
 
@@ -117,4 +117,6 @@ Vitest 4 的升级修正了 3 个 callback mock 类型，以及 5 个文件中�
 
 本机网络出口现在要求桌面 DNS 能解析目标，以便核验真实地址；只在代理侧能解析的域名无法使用本机出口，可改用远端网络。没有加入外部 DNS 服务或放弃私网检查。
 
-本轮未发布、部署或合并到原分支。未重建和签发可分发 Runtime 二进制；真实 Bridge 使用 Bun 1.4.4 源码及经相同 Rust/Cargo/绑定输入核对的本机 native。macOS 真机、真实多用户 SSH、付费模型调用和完整已安装形态仍需对应环境验收。两份 npm 隔离试验目录的清理被自动审批拒绝，保留在 ignored 输出目录中，不影响构建或验证。
+合并代码提交为 `63023b11febec768a1f095616f0a62f43255c0bc`，快进后的树与已验收分支完全一致；后续仅更新本报告的合并记录，代码、依赖和测试输入不变。原 12 个未提交文件已完整包含在 `fc8e677` 中，并额外保留为 stash `fd07355a05cb5c05f2bbb00f79fe6b6c4f0a4b94`（创建时为 `stash@{0}`）；未重复应用。数据包追加合并记录并逐文件核验，合并前的数据包保持原样。
+
+本轮未发布或部署。未重建和签发可分发 Runtime 二进制；真实 Bridge 使用 Bun 1.4.4 源码及经相同 Rust/Cargo/绑定输入核对的本机 native。macOS 真机、真实多用户 SSH、付费模型调用和完整已安装形态仍需对应环境验收。两份 npm 隔离试验目录的清理被自动审批拒绝，保留在 ignored 输出目录中，不影响构建或验证。
