@@ -1,6 +1,6 @@
 {
   "upstreamCommit": "b5a6b2f7e5b6606b6562e678ead83f21738f34a0",
-  "patchsetVersion": "studio.63",
+  "patchsetVersion": "studio.1",
   "patchsetDigest": "sha256:f9948c78011055cf8187d362815b4a7ad29faecf7464f94e436b5dbb2c7b16f2",
   "patches": [
     "0001-studio-cli-entry.patch",

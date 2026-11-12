@@ -3,6 +3,11 @@ node_modules/
 .pnp/
 .pnp.js
 
+# Local environment files; examples can be committed
+.env
+.env.*
+!.env.example
+
 # Build / release output (scoped to our own packages; vendored upstream source
 # under omp-patch/vendor/ must NOT match these — it contains .zip fixtures, an
 # `out/` dir, etc.)
@@ -16,6 +21,7 @@ apps/*/out/
 *.exe
 *.dmg
 *.AppImage
+*.tsbuildinfo
 
 # Logs
 *.log
@@ -36,6 +42,7 @@ Thumbs.db
 # Local Codex / ZCode / agent session data
 .codex-backups/
 .codex-tools/
+/.tools/
 .zcode/
 .omp/
 
@@ -44,6 +51,7 @@ apps/desktop/userdata/
 
 # Local Playwright CLI captures and scratch UI dumps
 .playwright-cli/
+/.cap-tmp/
 **/__scratch__/
 
 # Task backups, scratch work, and generated audit outputs
@@ -51,6 +59,7 @@ backup/
 tmp/
 output/
 outputs/
+*.bak
 
 # Local launch scripts
 /启动生产版.cmd
