@@ -108,6 +108,25 @@ test("viewer resolves links to one identity, preserves text format, and detects 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("Unix viewer preserves backslashes in filenames returned by Explorer", { skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-file-unix-"));
+  try {
+    const path = "说明\\draft.txt";
+    await writeFile(join(root, path), "literal filename");
+    const registry = new WorkspaceRegistry(join(root, "registry.json"));
+    const workspace = await registry.upsertByPath(root), workspaceId = workspace.workspaceId as WorkspaceId;
+    const service = createWorkspaceFileService({ registry });
+    const tree = await service.get({ workspaceId });
+    assert.ok(tree.nodes.some(node => node.path === path));
+    const file = await service.inspect!({ workspaceId, path });
+    assert.equal(file.path, path);
+    const text = await service.readText!({ workspaceId, path });
+    assert.equal(text.text, "literal filename");
+    assert.equal((await service.writeText!({ workspaceId, path, ...text, text: "updated", expectedVersion: file.version })).saved, true);
+    assert.equal(await readFile(join(root, path), "utf8"), "updated");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("viewer saves UTF-16 and bounds media reads without loading the whole file", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-file-bytes-"));
   try {

@@ -57,7 +57,7 @@ import { APP_MENU_COMMAND_CHANNEL, type AppMenuCommand } from "./app-menu-shared
 import { registerMediaAccessIpc } from "./chrome-media-access.js";
 import { buildApplicationMenuTemplate } from "./platform/app-menu.js";
 import { installDevelopmentTools } from "./development-tools.js";
-import { moveToApplicationsMarkerPath, moveToApplicationsStrings, relaunchArguments, shouldOfferMoveToApplications } from "./platform/app-lifecycle.js";
+import { handleMainWindowClose, moveToApplicationsMarkerPath, moveToApplicationsStrings, relaunchArguments, shouldOfferMoveToApplications } from "./platform/app-lifecycle.js";
 import { startAppNapGuard } from "./platform/app-nap.js";
 import { windowChromeOptions } from "./platform/window-chrome.js";
 import { registerChromeImageIpc } from "./chrome-image.js";
@@ -1002,17 +1002,19 @@ export async function main(): Promise<void> {
     // Close hides to the tray (streaming keeps running in background); the
     // real quit path releases this through `isQuitting`.
     // macOS always hides to the Dock; a full-screen window leaves its Space first.
-    window.on("close", (event) => {
-      if (context.isQuitting() || !(closeToTrayEnabled || process.platform === "darwin" || floatingWindows.hasWindows())) return;
-      event.preventDefault();
-      if (process.platform === "darwin" && window.isFullScreen()) {
-        window.once("leave-full-screen", () => window.hide());
-        window.setFullScreen(false);
-      } else {
-        window.hide();
-      }
-      trayRef?.notifyHiddenToTray?.();
-    });
+    window.on("close", (event) => handleMainWindowClose(event, {
+      platform: process.platform, quitting: context.isQuitting(), closeToTray: closeToTrayEnabled,
+      hasFloatingWindows: floatingWindows.hasWindows(), requestQuit: () => application.requestQuit(),
+      hide: () => {
+        if (process.platform === "darwin" && window.isFullScreen()) {
+          window.once("leave-full-screen", () => window.hide());
+          window.setFullScreen(false);
+        } else {
+          window.hide();
+        }
+        trayRef?.notifyHiddenToTray?.();
+      },
+    }));
     window.webContents?.on?.("did-fail-load", (_event: unknown, errorCode: number, errorDescription: string, validatedURL: string) => {
       console.error(`[omp-studio] renderer failed to load (${errorCode}): ${errorDescription} ${validatedURL}`);
     });

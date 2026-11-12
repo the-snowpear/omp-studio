@@ -26,6 +26,21 @@ test("a whole multiline command runs with its own interpreter and preserves lite
   }
 });
 
+test("CRLF scripts run with Unix interpreters locally and over SSH", () => {
+  const command = { shell: "bash" as const, text: 'set -e\r\nif true; then\r\n  printf "%s" "中文 ok"\r\nfi' };
+  const args = commandArguments(command);
+  assert.equal(args[1], command.text.replace(/\r\n/g, "\n"));
+  const shell = resolveCommandShell(command);
+  const result = spawnSync(shell.file, args, { encoding: "utf8", windowsHide: true, timeout: 15_000 });
+  assert.equal(result.status, 0, result.stderr || String(result.error));
+  assert.equal(result.stdout, "中文 ok");
+  for (const platform of ["linux", "darwin", "win32"] as const) {
+    const remote = remoteTerminalCommand(platform, platform === "win32" ? "D:\\work" : "/work", command);
+    const script = platform === "win32" ? Buffer.from(remote.slice(1, -1).split(" ").at(-1)!, "base64").toString("utf16le") : remote;
+    assert.ok(!script.includes("\r"));
+  }
+});
+
 test("terminal manager starts a command in the requested workspace without writing into an interactive shell", () => {
   let spawned!: PtySpawnOptions;
   const writes: string[] = [];

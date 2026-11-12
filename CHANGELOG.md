@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
 ### Added
 
 - 新增工作台使用教程：首次进入 0.2.0 时弹出，用 8 段低保真动画演示工作台布局、拖出对话窗口、吸附分屏、停靠工具、标签／窗口／对话互相拖放吸附、对话工具区、独立窗口及常用快捷键；首次需看完全部步骤才可关闭，之后可从「帮助 → 使用教程」随时重看。
@@ -46,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Windows 托盘不可用时关闭主窗口先走未保存文件确认与 Host 关停，不再被内置浏览器的隐藏窗口阻止退出；macOS 仍隐藏到 Dock，独立窗口继续保留。
+- 文件查看器保留 macOS/Linux 的合法反斜杠文件名；命令块执行将 Unix Shell 脚本的 CRLF 换行转为 LF，本地与 SSH 共用处理。
+- 可选 Office 组件签名任务绑定现有 `release` 环境，沿用 Runtime 的签名密钥与审批流程。
 - Git 单文件操作按字面路径执行，子目录工作区的 Git、Explorer 徽章和文件 Diff 使用一致路径，避免覆盖未选择的文件；工作区身份淘汰时释放文件监视器。
 - Bridge 丢事件后继续结算在途请求并恢复快照；后台作业取消、子 Agent 终止和 BTW 中途操作不再等待主回合结束。
 - 修复主、子对话分页重新同步后卡住，以及子 Agent 历史追加和 `@` 文件索引未失效的问题。
@@ -432,7 +437,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/the-snowpear/omp-studio/compare/v0.1.17...v0.2.0
 [0.1.17]: https://github.com/the-snowpear/omp-studio/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/the-snowpear/omp-studio/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/the-snowpear/omp-studio/compare/v0.1.14...v0.1.15

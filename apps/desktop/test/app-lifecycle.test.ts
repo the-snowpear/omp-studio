@@ -1,8 +1,48 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { moveToApplicationsStrings, relaunchArguments, shouldOfferMoveToApplications } from "../src/platform/app-lifecycle.js";
+import { handleMainWindowClose, moveToApplicationsStrings, relaunchArguments, shouldOfferMoveToApplications } from "../src/platform/app-lifecycle.js";
+import { createDesktopApplication } from "../src/composition.js";
+import type { DesktopHostComposition } from "../src/types.js";
 import { startAppNapGuard } from "../src/platform/app-nap.js";
+
+test("closing without a tray asks to save before destroying the window and stopping Host", async () => {
+  const events: string[] = [];
+  let allow = false;
+  const app = createDesktopApplication({
+    hostFactory: { create: async () => ({ status: "ready", isBusy: () => false, shutdown: async () => { events.push("shutdown"); } }) as DesktopHostComposition },
+    createWindow: async () => ({ show() {}, focus() {}, close() {}, dispose() { events.push("dispose"); } }),
+    requestSingleInstanceLock: () => true, onSecondInstance() {}, onBeforeQuit() {}, onAllWindowsClosed() {},
+    confirmBeforeQuit: async () => { events.push("save-confirmation"); return allow; },
+    quit: () => { events.push("quit"); },
+  });
+  await app.start();
+  const close = () => handleMainWindowClose({ preventDefault() { events.push("prevent-close"); } }, {
+    platform: "win32", quitting: false, closeToTray: false, hasFloatingWindows: false,
+    hide() { events.push("hide"); }, requestQuit: () => app.requestQuit(),
+  });
+  close(); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(events, ["prevent-close", "save-confirmation"]);
+  events.length = 0; allow = true;
+  close(); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(events, ["prevent-close", "save-confirmation", "dispose", "shutdown", "quit"]);
+});
+
+test("macOS Dock, Windows tray and floating windows keep the main window recoverable", () => {
+  for (const input of [
+    { platform: "darwin" as const, closeToTray: false, hasFloatingWindows: false },
+    { platform: "win32" as const, closeToTray: true, hasFloatingWindows: false },
+    { platform: "win32" as const, closeToTray: false, hasFloatingWindows: true },
+  ]) {
+    const events: string[] = [];
+    const options = { ...input, quitting: false, hide() { events.push("hide"); }, requestQuit() { events.push("quit"); } };
+    handleMainWindowClose({ preventDefault() { events.push("prevent-close"); } }, options);
+    assert.deepEqual(events, ["prevent-close", "hide"]);
+    events.length = 0;
+    handleMainWindowClose({ preventDefault() { events.push("prevent-close"); } }, { ...options, quitting: true });
+    assert.deepEqual(events, [], "a confirmed quit must let the native window close");
+  }
+});
 
 test("a relaunch keeps user arguments, drops macOS process serial numbers and marks one restart", () => {
   assert.deepEqual(relaunchArguments(["OMP Studio", "--omp-baseline"]), ["--omp-baseline", "--omp-restarted"]);

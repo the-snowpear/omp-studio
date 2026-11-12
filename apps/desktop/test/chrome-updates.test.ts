@@ -953,7 +953,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
       await new Promise((r) => setTimeout(r, 50));
     }
 
-    assert.ok(progress.some((p) => p.phase === "awaiting-apply"), "Should reach awaiting-apply");
+    assert.ok(progress.some((p) => p.phase === "awaiting-apply"), `Should reach awaiting-apply: ${JSON.stringify(progress)}`);
     assert.equal(progress.find((p) => p.phase === "awaiting-apply")?.runtimeChannel, "stable");
     assert.ok(pending.peek() !== undefined, "pendingArtifact should be set");
 
@@ -1065,7 +1065,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
 
     const failEvent = progress.find((p) => p.phase === "failed");
     assert.ok(failEvent !== undefined, "Should fail on manifest mismatch");
-    assert.ok(failEvent.message?.includes("不一致"));
+    assert.ok(failEvent.message?.includes("不一致"), failEvent.message);
     assert.ok(!fetchedUrls.some((u) => u.endsWith("omp.exe")), "omp.exe must not be fetched");
 
     handle.dispose();

@@ -1,8 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { parse } from "yaml";
 import { signOfficeManifest, OFFICE_PLATFORMS } from "./office-component.mjs";
 import { verifyOfficeComponent } from "../apps/desktop/dist/src/office-component-manifest.js";
+
+test("Office signing uses the same approved release environment as Runtime signing", () => {
+  const workflow = parse(readFileSync(new URL("../.github/workflows/office-component.yml", import.meta.url), "utf8"));
+  assert.equal(workflow.jobs.build.environment, "release");
+});
 
 test("published Office component manifests verify with the desktop installer on each supported platform", () => {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");

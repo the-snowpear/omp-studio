@@ -6,7 +6,7 @@ export function commandArguments(command: TerminalCommand): string[] {
   if (!command || typeof command.text !== "string" || !command.text.trim()) throw new Error("Terminal command is empty");
   switch (command.shell) {
     case "powershell": return ["-NoLogo", "-EncodedCommand", Buffer.from(command.text, "utf16le").toString("base64")];
-    case "bash": case "sh": case "zsh": return ["-lc", command.text];
+    case "bash": case "sh": case "zsh": return ["-lc", command.text.replace(/\r\n/g, "\n")];
     default: throw new Error("Unsupported command shell");
   }
 }

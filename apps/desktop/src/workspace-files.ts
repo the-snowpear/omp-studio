@@ -83,7 +83,7 @@ export function createWorkspaceFileService({ registry }: { readonly registry: Wo
     if (/^file:/i.test(requested)) requested = fileURLToPath(requested);
     // Markdown links may use /C:/... as well as C:\... on Windows.
     if (process.platform === "win32" && /^\/[A-Za-z]:[\\/]/.test(requested)) requested = requested.slice(1);
-    const target = await realpath(isAbsolute(requested) ? requested : resolve(root, requested.replaceAll("\\", "/")));
+    const target = await realpath(isAbsolute(requested) ? requested : resolve(root, requested));
     if (escapedFrom(root, target)) throw new Error("文件不在当前工作区内");
     if (!(await lstat(target)).isFile()) throw new Error("此路径不是文件");
     return { target, path: relative(root, target).split(sep).join("/") };

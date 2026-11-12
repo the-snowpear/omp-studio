@@ -14,6 +14,18 @@ export function relaunchArguments(argv: readonly string[]): string[] {
     .concat("--omp-restarted");
 }
 
+/** A native close must not destroy the renderer before the quit/save gates run.
+ * Hidden browser parking windows mean window-all-closed is not a reliable quit signal. */
+export function handleMainWindowClose(event: { preventDefault(): void }, options: {
+  platform: NodeJS.Platform; quitting: boolean; closeToTray: boolean; hasFloatingWindows: boolean;
+  hide(): void; requestQuit(): void;
+}): void {
+  if (options.quitting) return;
+  event.preventDefault();
+  if (options.platform === "darwin" || options.closeToTray || options.hasFloatingWindows) options.hide();
+  else options.requestQuit();
+}
+
 export const MOVE_TO_APPLICATIONS_DECLINED_FILE = "move-to-applications-declined";
 
 export function moveToApplicationsMarkerPath(stateRoot: string): string {
