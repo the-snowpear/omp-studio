@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复项目里有过会话启动的后台服务时，「后台任务」面板每 4 秒弹出「操作执行失败 / Runtime command failed」：服务行校验补上 0.2.0 起随行返回的 `ownerId`、`pid`、`previewUrl`（Runtime 与 Host 两侧），并校验预览地址只能是 http/https。
+
 ## [0.2.0] - 2026-11-13
 
 如果说 `0.1.x` 的 OMP Studio 还算是一个「长得挺规矩的单栏聊天控制台」，那 `0.2.0` 基本就是把承重墙拆了重装了一遍。

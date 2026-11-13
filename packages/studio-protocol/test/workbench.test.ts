@@ -28,5 +28,18 @@ test("native catalog pagination remains bounded and rejects leaked private field
   const model = { selector: "p/image", provider: "p", name: "Image", kind: "image", image: true, reasoning: false };
   validateWorkbenchResult("runtime.models.list", { models: [model], total: 1 });
   assert.throws(() => validateWorkbenchResult("runtime.models.list", { models: [{ ...model, apiKey: "secret" }], total: 1 }));
-  assert.throws(() => validateWorkbenchResult("services.list", { enabled: true, services: [{ name: "server", instanceId: "id", state: "running", startedAt: 1, restartCount: 0, outputBytes: 0, mode: "session", pid: 123 }] }));
+  assert.throws(() => validateWorkbenchResult("services.list", { enabled: true, services: [{ name: "server", instanceId: "id", state: "running", startedAt: 1, restartCount: 0, outputBytes: 0, mode: "session", command: "npm start" }] }));
+});
+test("service rows carry the 0.2.0 owner, pid and preview fields the Runtime projects", () => {
+  // Regression: these fields were added to StudioServiceRow and projectService
+  // but not to the allow-list, so any owned or running service failed the
+  // whole services.list result every poll ("Runtime command failed").
+  const row = { name: "web", instanceId: "id:1", state: "running", startedAt: 1, readyAt: 2, restartCount: 0, outputBytes: 10, pid: 4242, previewUrl: "http://localhost:4100/?view=main", ownerId: "session-1", ownerAgentId: "session-1", mode: "session" };
+  validateWorkbenchResult("services.list", { enabled: true, services: [row] });
+  validateWorkbenchResult("services.restart", { service: row });
+  const exited = { name: "old", instanceId: "id:2", state: "exited", startedAt: 1, exitedAt: 3, exitCode: 1, restartCount: 0, outputBytes: 0, ownerId: "session-0", ownerAgentId: "session-0", mode: "session" };
+  validateWorkbenchResult("services.list", { enabled: true, services: [row, exited] });
+  assert.throws(() => validateWorkbenchResult("services.list", { enabled: true, services: [{ ...row, previewUrl: "javascript:alert(1)" }] }));
+  assert.throws(() => validateWorkbenchResult("services.list", { enabled: true, services: [{ ...row, pid: -1 }] }));
+  assert.throws(() => validateWorkbenchResult("services.list", { enabled: true, services: [{ ...row, ownerId: "" }] }));
 });

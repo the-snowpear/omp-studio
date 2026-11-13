@@ -13,6 +13,7 @@ import {
 } from "../src/launch/protocol";
 import { listServices, requestService, startService } from "../src/launch/services";
 import { projectService } from "../src/studio/services/workbench-service";
+import { validateWorkbenchResult } from "../src/studio/workbench-protocol";
 import type { ToolSession } from "../src/tools";
 import { BashTool } from "../src/tools/bash";
 
@@ -91,6 +92,11 @@ function expectPreview(daemon: DaemonSnapshot, previewUrl: string): void {
 		ownerId: "main-session-42",
 		ownerAgentId: "main-session-42",
 	});
+	// The projected row must also pass the result contract the dispatcher
+	// enforces; an unlisted field fails every services.list poll.
+	expect(() =>
+		validateWorkbenchResult("services.list", { enabled: true, services: [projectService(daemon)] }),
+	).not.toThrow();
 }
 
 describe("Studio Agent-created service previews", () => {

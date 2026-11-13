@@ -810,6 +810,18 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	if (input.lines !== undefined) integer(input.lines, 1, 1000);
 }
 
+function servicePreviewUrl(value: unknown): void {
+	text(value, 2048);
+	let url: URL;
+	try {
+		url = new URL(value as string);
+	} catch {
+		throw new Error("Invalid service preview URL");
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Invalid service preview URL");
+}
+// Every field `projectService` emits must be listed: an unlisted one fails the
+// whole services.list result, not just the row.
 function serviceRow(value: unknown): void {
 	const row = record(value, [
 		"name",
@@ -821,6 +833,9 @@ function serviceRow(value: unknown): void {
 		"exitCode",
 		"restartCount",
 		"outputBytes",
+		"previewUrl",
+		"pid",
+		"ownerId",
 		"ownerAgentId",
 		"mode",
 	]);
@@ -830,9 +845,10 @@ function serviceRow(value: unknown): void {
 	if (!["starting", "running", "ready", "restarting", "stopping", "exited", "failed"].includes(row.state as string))
 		throw new Error("Invalid service state");
 	for (const key of ["startedAt", "restartCount", "outputBytes"]) integer(row[key]);
-	for (const key of ["readyAt", "exitedAt"]) if (row[key] !== undefined) integer(row[key]);
+	for (const key of ["readyAt", "exitedAt", "pid"]) if (row[key] !== undefined) integer(row[key]);
 	if (row.exitCode !== undefined) integer(row.exitCode, -2147483648, 2147483647);
-	if (row.ownerAgentId !== undefined) text(row.ownerAgentId);
+	if (row.previewUrl !== undefined) servicePreviewUrl(row.previewUrl);
+	for (const key of ["ownerId", "ownerAgentId"]) if (row[key] !== undefined) text(row[key]);
 }
 export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value: unknown): void {
 	if (isSearchCredentialsKind(kind)) return;
