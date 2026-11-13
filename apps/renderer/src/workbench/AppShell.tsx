@@ -835,7 +835,17 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     else beginDockDraft(project);
   };
   const selectProject = (project: SelectedProject) => {
-    if (!previewMode.preview && state.model.workspaces?.activeWorkspaceId === project.id) { setSelectedProject(project); setExplorerOpen(true); return; }
+    if (!previewMode.preview && state.model.workspaces?.activeWorkspaceId === project.id) {
+      // Already active: skip workspace.open, but still expand. The sidebar's
+      // toggle routes a collapsed project here, so returning before
+      // expandProject left the active project impossible to reopen.
+      setSelectedProject(project);
+      setExplorerOpen(true);
+      expandProject(project.id);
+      setProjectListExpanded(true);
+      void loadProjectHistory(project.id as WorkspaceId);
+      return;
+    }
     const generation = navigationGate.next();
     setSelectedProject(project);
     setExplorerOpen(true);

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复侧栏中当前激活的项目收起后再也无法点开：点击已激活项目时不再跳过展开，并同时加载该项目的会话列表。
+
 ## [0.2.0] - 2026-11-13
 
 如果说 `0.1.x` 的 OMP Studio 还算是一个「长得挺规矩的单栏聊天控制台」，那 `0.2.0` 基本就是把承重墙拆了重装了一遍。
