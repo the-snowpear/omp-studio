@@ -32,14 +32,8 @@ export const AGENT_BTW_KINDS = ["agent.btw.read", "agent.btw.ask", "agent.btw.ab
 export function isAgentBtwKind(kind: string): kind is AgentBtwOperation["kind"] {
 	return (AGENT_BTW_KINDS as readonly string[]).includes(kind);
 }
-function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
-	if (
-		!value ||
-		typeof value !== "object" ||
-		Array.isArray(value) ||
-		Object.keys(value).some(key => !keys.includes(key))
-	)
-		throw Error("Invalid child BTW fields");
+function object(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("Invalid child BTW fields");
 	return value as Record<string, unknown>;
 }
 function text(value: unknown, max = 512): void {
@@ -49,29 +43,11 @@ function text(value: unknown, max = 512): void {
 export function validateAgentBtwOperation(value: unknown): asserts value is AgentBtwOperation {
 	const kind = (value as { kind?: unknown })?.kind;
 	if (typeof kind !== "string" || !isAgentBtwKind(kind)) throw Error("Invalid child BTW operation");
-	const row = object(value, [
-		"kind",
-		"sessionId",
-		"agentId",
-		"binding",
-		...(kind === "agent.btw.abort"
-			? ["ephemeralId"]
-			: kind === "agent.btw.ask"
-				? ["question", "topicId", "images"]
-				: ["topicId"]),
-	]);
+	const row = object(value);
 	text(row.sessionId);
 	text(row.agentId);
 	if (kind !== "agent.btw.read" || row.binding !== undefined) text(row.binding, 128);
 	if (row.topicId !== undefined) text(row.topicId, 128);
 	if (kind === "agent.btw.ask") text(row.question, Number.POSITIVE_INFINITY);
 	if (kind === "agent.btw.abort") text(row.ephemeralId, 128);
-}
-/** Check the envelope only; history and images are produced by the Runtime. */
-export function validateAgentBtwState(value: unknown): asserts value is AgentBtwState {
-	const row = object(value, ["binding", "agentId", "targetSessionId", "snapshot", "topics", "turns"]);
-	text(row.binding, 128);
-	text(row.agentId);
-	text(row.targetSessionId);
-	if (!Array.isArray(row.topics) || !Array.isArray(row.turns)) throw Error("Invalid child BTW history");
 }

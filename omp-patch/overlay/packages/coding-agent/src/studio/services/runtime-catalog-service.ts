@@ -10,8 +10,6 @@ import {
 	type McpRuntimeStatus,
 	type PromptTemplateRow,
 	type RuntimeCatalogOperation,
-	validateRuntimeCatalogOperation,
-	validateRuntimeCatalogResult,
 } from "../runtime-catalog-protocol";
 import { SessionControlError } from "./session-control-service";
 
@@ -33,14 +31,12 @@ export class StudioRuntimeCatalogService {
 		readonly manager?: MCPManager,
 	) {}
 	async execute(operation: RuntimeCatalogOperation): Promise<unknown> {
-		validateRuntimeCatalogOperation(operation);
 		const cwd = this.session.sessionManager.getCwd();
 		if (operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "The active session changed; reload the Runtime catalog");
 		const result = await this.#execute(operation);
 		if (operation.sessionId !== this.session.sessionId || cwd !== this.session.sessionManager.getCwd())
 			throw new SessionControlError("COMMAND_BLOCKED", "The active session changed; reload the Runtime catalog");
-		validateRuntimeCatalogResult(operation.kind, result);
 		return result;
 	}
 	async #execute(operation: RuntimeCatalogOperation): Promise<unknown> {

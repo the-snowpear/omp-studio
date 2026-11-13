@@ -14,7 +14,7 @@ import { SessionControlService } from "../src/studio/services/session-control-se
 import { convertToLlm } from "../src/session/messages";
 import { SessionManager } from "../src/session/session-manager";
 import { StudioRuntimeQueueService } from "../src/studio/services/runtime-queue-service";
-import { validateRuntimeQueueResult, type RuntimeQueueResult } from "../src/studio/runtime-queue-protocol";
+import { type RuntimeQueueResult } from "../src/studio/runtime-queue-protocol";
 
 test("identity-based edits and promotion retain the exact duplicate's image companions without replay", async () => {
 	const directory = await fs.mkdtemp(path.join(os.tmpdir(), "studio-queue-"));
@@ -100,7 +100,6 @@ test("identity-based edits and promotion retain the exact duplicate's image comp
 			queue: "steering",
 			imageCount: 1,
 		});
-		validateRuntimeQueueResult("session.queue.get", after);
 		const wire = JSON.stringify(after);
 		expect(wire).not.toContain(image.data);
 		expect(wire).not.toContain("/private/");

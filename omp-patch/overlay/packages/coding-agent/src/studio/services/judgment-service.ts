@@ -7,14 +7,7 @@ import {
 	type JudgmentBatchStatus,
 } from "../../eval/judgment-batch-bridge";
 import type { AgentSession } from "../../session/agent-session";
-import {
-	type JudgmentBatchItem,
-	type JudgmentBatchRow,
-	type JudgmentOperation,
-	validateJudgmentOperation,
-	validateJudgmentResult,
-	validateJudgmentItem,
-} from "../judgments-protocol";
+import { type JudgmentBatchItem, type JudgmentBatchRow, type JudgmentOperation } from "../judgments-protocol";
 import { SessionControlError } from "./session-control-service";
 
 const clean = (text: string, max: number) => sanitizeText(text).replaceAll("\0", "").slice(0, max);
@@ -30,7 +23,6 @@ function row(status: JudgmentBatchStatus): JudgmentBatchRow {
 export class StudioJudgmentService {
 	constructor(readonly session: AgentSession) {}
 	async execute(operation: JudgmentOperation): Promise<unknown> {
-		validateJudgmentOperation(operation);
 		const native = this.session.studioToolSession;
 		if (
 			!native ||
@@ -43,7 +35,6 @@ export class StudioJudgmentService {
 			);
 		}
 		const result = await this.#execute(operation, native);
-		validateJudgmentResult(operation.kind, result);
 		return result;
 	}
 	async #execute(
@@ -93,8 +84,7 @@ export class StudioJudgmentService {
 						...original,
 						...(original.error ? { error: clean(original.error, 4000) || "Judgment failed" } : {}),
 					};
-					validateJudgmentItem(candidate);
-					item = candidate;
+					item = candidate as JudgmentBatchItem;
 					if (Buffer.byteLength(JSON.stringify(item)) > 200000) throw new Error("Oversized item");
 				} catch {
 					// A native agent-created batch may have a shape too large for a GUI control frame.

@@ -5,15 +5,12 @@ import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import {
-  validatePredictionEvent,
-  validatePredictionInput,
-} from "@omp-studio/studio-protocol";
 import type { TerminalSender, TerminalIpcMain } from "./terminal-ipc.js";
 import {
   PREDICTION_CHANNELS,
   type PredictionResult,
 } from "./prediction-shared.js";
+import type { PredictionEvent, PredictionInput } from "@omp-studio/studio-protocol";
 const id = (value: unknown): string => {
   if (typeof value !== "string" || !/^[a-f0-9-]{36}$/.test(value))
     throw new Error("Invalid prediction ID");
@@ -167,8 +164,7 @@ export class DesktopPrediction {
           continue;
         }
         try {
-          const event: unknown = JSON.parse(line);
-          validatePredictionEvent(event);
+          const event = JSON.parse(line) as PredictionEvent;
           if (event.channelId !== entry.id)
             throw new Error("Prediction target changed");
           if (
@@ -214,8 +210,7 @@ export class DesktopPrediction {
   }
   input(sender: TerminalSender, value: unknown): void {
     const raw = object(value, ["channelId", "input"]);
-    validatePredictionInput(raw.input);
-    if (raw.input.kind === "import")
+    if ((raw.input as PredictionInput).kind === "import")
       throw new Error("History imports require the file picker");
     const entry = this.#entry(sender, raw.channelId);
     if (entry.socket.writableLength > 32768)

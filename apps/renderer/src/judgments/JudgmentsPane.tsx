@@ -8,7 +8,6 @@ import type {
   StudioClient,
 } from "@omp-studio/client-contract";
 import {
-  validateJudgmentBatchSpec,
   type JudgmentBatchSpec,
   type JudgmentBatchRow,
   type JudgmentBatchPage,
@@ -98,7 +97,6 @@ function buildSpec(
     retries,
     minOk,
   };
-  validateJudgmentBatchSpec(spec);
   return spec;
 }
 

@@ -63,13 +63,8 @@ export type BrowserObservationInput =
 	| { kind: "text"; sequence: number; text: string };
 export const BROWSER_FRAME_MAX_BASE64 = 2_796_204;
 export const BROWSER_PRIVATE_MAX_BYTES = 4 * 1024 * 1024;
-function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
-	if (
-		!value ||
-		typeof value !== "object" ||
-		Array.isArray(value) ||
-		Object.keys(value).some(key => !keys.includes(key))
-	)
+function object(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value))
 		throw new Error("Invalid browser observation payload");
 	return value as Record<string, unknown>;
 }
@@ -90,61 +85,16 @@ function id(value: unknown): void {
 	if (!/^[a-f0-9-]{36}$/u.test(value)) throw new Error("Invalid observation identity");
 }
 export function validateBrowserObservationOperation(value: unknown): void {
-	const row = object(value, ["kind", "sessionId", "tabId"]);
+	const row = object(value);
 	if (typeof row.kind !== "string" || !isBrowserObservationKind(row.kind))
 		throw new Error("Unknown browser observation operation");
 	text(row.sessionId, 512);
 	if (!row.sessionId) throw new Error("Session identity required");
 	if (row.kind === "browser.observe.prepare") id(row.tabId);
-	else object(row, ["kind", "sessionId"]);
-}
-export function validateBrowserObservationResult(kind: BrowserObservationOperation["kind"], value: unknown): void {
-	if (kind === "browser.managed.prepare") return;
-	if (kind === "browser.observe.prepare") {
-		const row = object(value, ["observationId", "sessionId", "tabId", "expiresAt"]);
-		id(row.observationId);
-		id(row.tabId);
-		text(row.sessionId, 512);
-		number(row.expiresAt, 0, Number.MAX_SAFE_INTEGER);
-		return;
-	}
-	const row = object(value, ["tabs"]);
-	if (!Array.isArray(row.tabs) || row.tabs.length > 128) throw new Error("Invalid browser tab list");
-	for (const item of row.tabs) {
-		const tab = object(item, [
-			"id",
-			"name",
-			"title",
-			"url",
-			"kind",
-			"ownerSessionId",
-			"busy",
-			"frozen",
-			"observable",
-			"reason",
-		]);
-		id(tab.id);
-		for (const key of ["name", "title", "url", "kind", "ownerSessionId"]) text(tab[key]);
-		for (const key of ["busy", "frozen", "observable"])
-			if (typeof tab[key] !== "boolean") throw new Error("Invalid browser tab state");
-		if (tab.reason !== undefined) text(tab.reason);
-	}
+	else object(row);
 }
 export function validateBrowserObservationInput(value: unknown): asserts value is BrowserObservationInput {
-	const row = object(value, [
-		"kind",
-		"sequence",
-		"url",
-		"x",
-		"y",
-		"button",
-		"deltaX",
-		"deltaY",
-		"key",
-		"code",
-		"modifiers",
-		"text",
-	]);
+	const row = object(value);
 	const keys: Record<string, string[]> = {
 		ping: [],
 		take: [],
@@ -157,7 +107,6 @@ export function validateBrowserObservationInput(value: unknown): asserts value i
 		text: ["sequence", "text"],
 	};
 	if (typeof row.kind !== "string" || !Object.hasOwn(keys, row.kind)) throw new Error("Unknown browser action");
-	object(row, ["kind", ...keys[row.kind]!]);
 	if (keys[row.kind]!.includes("sequence")) sequence(row.sequence);
 	if (row.kind === "navigate") {
 		text(row.url);
@@ -181,55 +130,4 @@ export function validateBrowserObservationInput(value: unknown): asserts value i
 		if (!Number.isInteger(row.modifiers)) throw new Error("Invalid keyboard modifiers");
 	}
 	if (row.kind === "text") text(row.text, 16384);
-}
-export function validateBrowserObservationEvent(value: unknown): asserts value is BrowserObservationEvent {
-	const row = object(value, [
-		"kind",
-		"observationId",
-		"tabId",
-		"title",
-		"url",
-		"frozen",
-		"busy",
-		"control",
-		"sequence",
-		"data",
-		"width",
-		"height",
-		"timestamp",
-		"message",
-	]);
-	id(row.observationId);
-	if (row.kind === "closed") {
-		object(row, ["kind", "observationId"]);
-		return;
-	}
-	if (row.kind === "error") {
-		object(row, ["kind", "observationId", "message"]);
-		text(row.message);
-		return;
-	}
-	id(row.tabId);
-	if (row.kind === "state") {
-		object(row, ["kind", "observationId", "tabId", "title", "url", "frozen", "busy", "control"]);
-		text(row.title);
-		text(row.url);
-		if (
-			typeof row.frozen !== "boolean" ||
-			typeof row.busy !== "boolean" ||
-			!["agent", "waiting", "human", "other-window"].includes(row.control as string)
-		)
-			throw new Error("Invalid browser state");
-		return;
-	}
-	if (row.kind !== "frame") throw new Error("Unknown browser observation event");
-	object(row, ["kind", "observationId", "tabId", "sequence", "data", "width", "height", "timestamp"]);
-	sequence(row.sequence);
-	text(row.data, BROWSER_FRAME_MAX_BASE64);
-	if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(row.data as string)) throw new Error("Invalid frame encoding");
-	number(row.width, 1, 4096);
-	number(row.height, 1, 4096);
-	if (Number(row.width) * Number(row.height) > 4_000_000)
-		throw new Error("Browser viewport exceeds the observation budget");
-	number(row.timestamp, 0, Number.MAX_SAFE_INTEGER);
 }

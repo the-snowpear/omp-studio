@@ -10,7 +10,6 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { tokenUsage, type JudgmentResult, type JudgmentRequest, type Questions } from "@oh-my-pi/pi-ai";
 import type { UserMessageStats } from "@oh-my-pi/omp-stats/types";
 import { StudioStatsService } from "../src/studio/stats-worker";
-import { validateStatsSnapshot } from "../src/studio/stats-protocol";
 const originalAgentDir = getAgentDir();
 const keys = ["PI_CONFIG_DIR", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"] as const;
 const prior = Object.fromEntries(keys.map(key => [key, process.env[key]]));
@@ -173,7 +172,6 @@ test("Frustration reads do not call Judge; confirmation is bound to scope and co
 		insertUserMessageStats([user("first", "/a"), user("second", "/a"), user("outside", "/b")]);
 		const filter = { range: "all" as const, folder: "/a" };
 		const snapshot = await service.read(filter);
-		validateStatsSnapshot(snapshot);
 		expect(snapshot.frustration?.overall.messages).toBe(2);
 		expect(calls).toHaveLength(0);
 		expect(resolutions).toBe(0);

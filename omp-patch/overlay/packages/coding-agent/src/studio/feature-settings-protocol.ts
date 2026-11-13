@@ -148,14 +148,8 @@ export const FEATURE_SETTINGS_READ_KINDS = [
 export function isFeatureSettingsKind(kind: string): kind is FeatureSettingsOperation["kind"] {
 	return (FEATURE_SETTINGS_KINDS as readonly string[]).includes(kind);
 }
-function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
-	if (
-		!value ||
-		typeof value !== "object" ||
-		Array.isArray(value) ||
-		Object.keys(value).some(key => !keys.includes(key))
-	)
-		throw Error("Invalid feature settings payload");
+function record(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("Invalid feature settings payload");
 	return value as Record<string, unknown>;
 }
 function text(value: unknown, max = 1024, empty = false): void {
@@ -198,87 +192,29 @@ export function validateFeatureSettingsOperation(value: unknown): void {
 		(value as FeatureSettingsOperation)?.kind === "session.compaction.set"
 	)
 		return;
-	const row = record(value, ["kind", "sessionId", "key", "value", "scope", "selector", "input", "confirmed"]);
+	const row = record(value);
 	if (typeof row.kind !== "string" || !isFeatureSettingsKind(row.kind))
 		throw Error("Unknown feature settings operation");
 	text(row.sessionId, 128);
 	if (row.kind === "models.compaction.set") {
-		record(value, ["kind", "sessionId", "selector", "input", "confirmed"]);
 		text(row.selector);
 		text(row.input, 64, true);
 		if (row.confirmed !== undefined && typeof row.confirmed !== "boolean") throw Error("Invalid confirmation");
 		return;
 	}
 	if (row.kind === "models.compaction.preview") {
-		record(value, ["kind", "sessionId", "selector", "input"]);
 		text(row.selector);
 		text(row.input, 64, true);
 		return;
 	}
 	if (row.kind === "preferences.features.get" || row.kind === "accounts.pool.options") {
-		record(value, ["kind", "sessionId"]);
 		return;
 	}
 	if (!(FEATURE_SETTING_KEYS as readonly unknown[]).includes(row.key)) throw Error("Unknown feature setting");
 	if (row.kind === "preferences.features.clearOverride") {
-		record(value, ["kind", "sessionId", "key"]);
 		return;
 	}
-	record(value, ["kind", "sessionId", "key", "value", "scope"]);
 	if (row.scope !== "session" && row.scope !== "global") throw Error("Invalid settings scope");
 	validateFeatureSettingValue(row.value);
 	if (JSON.stringify(row.value).length > 32768) throw Error("Setting exceeds limit");
-}
-function setting(value: unknown): void {
-	const row = record(value, ["key", "value", "source"]);
-	if (!(FEATURE_SETTING_KEYS as readonly unknown[]).includes(row.key)) throw Error("Unknown feature setting");
-	if (!["env", "runtime", "overlay", "project", "global", "default"].includes(row.source as string))
-		throw Error("Invalid setting source");
-	validateFeatureSettingValue(row.value);
-}
-export function validateFeatureSettingsResult(kind: FeatureSettingsOperation["kind"], value: unknown): void {
-	if (kind === "accounts.pool.get" || kind === "accounts.pool.set") return;
-	if (kind === "session.compaction.get" || kind === "session.compaction.set") return;
-	if (JSON.stringify(value).length > 131072) throw Error("Feature settings result exceeds limit");
-	if (kind === "models.compaction.set") {
-		const row = record(value, ["saved", "confirmationRequired", "summary"]);
-		if (
-			typeof row.saved !== "boolean" ||
-			typeof row.confirmationRequired !== "boolean" ||
-			row.saved === row.confirmationRequired
-		)
-			throw Error("Invalid compaction result");
-		text(row.summary);
-		return;
-	}
-	if (kind === "preferences.features.get") {
-		const row = record(value, ["settings"]);
-		if (!Array.isArray(row.settings) || row.settings.length > FEATURE_SETTING_KEYS.length)
-			throw Error("Invalid settings list");
-		row.settings.forEach(setting);
-		return;
-	}
-	if (kind === "accounts.pool.options") {
-		const row = record(value, ["accounts", "truncated"]);
-		if (!Array.isArray(row.accounts) || row.accounts.length > 256 || typeof row.truncated !== "boolean")
-			throw Error("Invalid account list");
-		for (const item of row.accounts) {
-			const account = record(item, ["provider", "identityKey", "label"]);
-			text(account.provider);
-			text(account.identityKey);
-			text(account.label);
-		}
-		return;
-	}
-	if (kind === "models.compaction.preview") {
-		const row = record(value, ["valid", "summary", "window", "trigger", "extended"]);
-		if (typeof row.valid !== "boolean" || typeof row.extended !== "boolean")
-			throw Error("Invalid compaction preview");
-		if (row.summary !== undefined) text(row.summary);
-		for (const key of ["window", "trigger"])
-			if (row[key] !== undefined && (!Number.isSafeInteger(row[key]) || (row[key] as number) < 0))
-				throw Error("Invalid compaction count");
-		return;
-	}
-	setting(value);
 }

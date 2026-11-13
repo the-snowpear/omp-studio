@@ -43,10 +43,9 @@ export interface AnnotationResultMap {
 }
 export const ANNOTATION_OPERATION_KINDS = ["annotations.capture", "annotations.prepare"] as const;
 const byteLength = (text: string) => new TextEncoder().encode(text).byteLength;
-function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
+function object(value: unknown): Record<string, unknown> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid annotation object");
 	const row = value as Record<string, unknown>;
-	if (Object.keys(row).some(key => !keys.includes(key))) throw new Error("Unknown annotation field");
 	return row;
 }
 function text(value: unknown, max = 512, empty = false): void {
@@ -63,7 +62,7 @@ function relative(value: unknown): void {
 		throw new Error("Annotation paths must be workspace-relative");
 }
 function source(value: unknown): asserts value is AnnotationSource {
-	const row = object(value, ["id", "kind", "label", "text", "version", "path", "sessionId", "messageId"]);
+	const row = object(value);
 	text(row.id);
 	text(row.label);
 	text(row.text, 120000, true);
@@ -87,7 +86,7 @@ function content(sources: unknown, notes: unknown): void {
 	}
 	const noteIds = new Set<string>();
 	for (const item of notes) {
-		const row = object(item, ["id", "sourceId", "note", "selection"]);
+		const row = object(item);
 		text(row.id);
 		text(row.sourceId);
 		text(row.note, 8000);
@@ -96,7 +95,7 @@ function content(sources: unknown, notes: unknown): void {
 		const linked = sourceMap.get(row.sourceId as string);
 		if (!linked) throw new Error("Annotation source is missing");
 		if (row.selection !== undefined) {
-			const range = object(row.selection, ["start", "end"]);
+			const range = object(row.selection);
 			integer(range.start);
 			integer(range.end, 1);
 			if ((range.start as number) >= (range.end as number) || (range.end as number) > linked.text.length)
@@ -107,7 +106,7 @@ function content(sources: unknown, notes: unknown): void {
 		throw new Error("Annotation bundle is too large; split it into smaller groups");
 }
 export function validateAnnotationBundle(value: unknown): asserts value is AnnotationBundle {
-	const row = object(value, ["schemaVersion", "revision", "sources", "notes", "workspaceId", "sessionId"]);
+	const row = object(value);
 	if (row.schemaVersion !== 1) throw new Error("Unsupported annotation format");
 	integer(row.revision, 1);
 	if (row.workspaceId !== undefined) text(row.workspaceId);
@@ -117,13 +116,12 @@ export function validateAnnotationBundle(value: unknown): asserts value is Annot
 export function validateAnnotationOperation(value: unknown): asserts value is AnnotationOperation {
 	if (!value || typeof value !== "object") throw new Error("Invalid annotation operation");
 	if ((value as { kind?: string }).kind === "annotations.capture") {
-		const row = object(value, ["kind", "source"]);
+		const row = object(value);
 		const input = row.source as Record<string, unknown>;
 		if (input?.kind === "file" || input?.kind === "diff") {
-			object(input, ["kind", "path"]);
+			object(input);
 			if (input.kind === "file" || input.path !== undefined) relative(input.path);
 		} else {
-			object(input, ["kind", "text", "label", "sessionId", "messageId"]);
 			if (input.kind !== "message" && input.kind !== "quote") throw new Error("Invalid annotation capture kind");
 			text(input.text, 120000, true);
 			text(input.label);
@@ -131,27 +129,11 @@ export function validateAnnotationOperation(value: unknown): asserts value is An
 			if (input.messageId !== undefined) text(input.messageId);
 		}
 	} else {
-		const row = object(value, ["kind", "sources", "notes", "action", "allowStale"]);
+		const row = object(value);
 		if (row.kind !== "annotations.prepare" || !["feedback", "review"].includes(row.action as string))
 			throw new Error("Invalid annotation action");
 		if (row.allowStale !== undefined && typeof row.allowStale !== "boolean")
 			throw new Error("Invalid stale-source choice");
 		content(row.sources, row.notes);
-	}
-}
-export function validateAnnotationResult(kind: AnnotationOperation["kind"], value: unknown): void {
-	if (byteLength(JSON.stringify(value)) > 800000)
-		throw new Error("Annotation result exceeds the encoded control-frame budget");
-	if (kind === "annotations.capture") {
-		const result = object(value, ["source"]);
-		source(result.source);
-	} else {
-		const result = object(value, ["prompt", "staleSources"]);
-		text(result.prompt, 800000, true);
-		if (byteLength(result.prompt as string) > 800000)
-			throw new Error("Annotation prompt exceeds the control-frame budget");
-		if (!Array.isArray(result.staleSources) || result.staleSources.length > 16)
-			throw new Error("Invalid stale-source list");
-		result.staleSources.forEach(item => text(item));
 	}
 }

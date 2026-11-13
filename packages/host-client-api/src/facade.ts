@@ -1,8 +1,7 @@
 import type { RuntimeViewOperation } from "@omp-studio/studio-protocol";
 import type { EvaluationCoordinator } from "@omp-studio/studio-host";
 import { isComputerWorkspaceCommand, type ComputerWorkspaceQuery, type ContextViewOperation } from "@omp-studio/studio-protocol";
-import { validateArtifactTextInput, validateArtifactIdInput, isWorkbenchOperationKind, isUpgradeOperationKind } from "@omp-studio/studio-protocol";
-import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
+import { isWorkbenchOperationKind, type ArtifactTextInput } from "@omp-studio/studio-protocol";
 /**
  * StudioHostClientFacade — the P1 presentation-neutral product API.
  *
@@ -120,7 +119,6 @@ import {
   parseConversationOpenResult,
   parseConversationRuntimeEvent,
   parseConversationTranscriptPage,
-  parseFoundationStudioRequest,
   parseSessionTelemetryReadResult,
   parseSessionTelemetrySnapshot,
 } from "@omp-studio/studio-protocol";
@@ -422,37 +420,14 @@ function validateEnvelope(request: {
   }
 }
 
-/** Re-validate the three Runtime mirror commands at the in-process Host seam. */
-function validateRuntimeMirrorCommandInput(commandName: CommandName, input: unknown): void {
-  if (
-    !isWorkbenchOperationKind(commandName) &&
-    !isUpgradeOperationKind(commandName) &&
-    !isEvaluationOperationKind(commandName) &&
-    commandName !== "runtime.settings.get" &&
-    commandName !== "runtime.settings.set" &&
-    commandName !== "mode.plan.review.saveAndQuit"
-  ) {
-    return;
-  }
-  try {
-    if (isWorkbenchOperationKind(commandName) && input !== null && typeof input === "object" && ("inputTransfers" in input || "targetCwd" in input || "kind" in input)) throw new Error("Private operation fields are not client inputs");
-    // Same spread order as the dispatch seam (#commandP4): commandName wins,
-    // so validation and dispatch always see the same operation kind.
-    const operation = {
-      ...(input !== null && typeof input === "object" ? input : {}),
-      kind: commandName,
-    };
-    parseFoundationStudioRequest({
-      type: "studio.request",
-      requestId: "host-validation",
-      runtimeEpoch: 1,
-      operation,
-    });
-  } catch (error) {
-    throw clientError(
-      "INVALID_ARGUMENT",
-      `${commandName} input is invalid: ${error instanceof Error ? error.message : "invalid"}`,
-    );
+/**
+ * Runtime validates operation shapes; the Host only keeps fields that the
+ * desktop seam injects (staged transfers, resolved paths) out of client hands.
+ */
+function rejectPrivateOperationFields(commandName: CommandName, input: unknown): void {
+  if (!isWorkbenchOperationKind(commandName) || input === null || typeof input !== "object") return;
+  if ("inputTransfers" in input || "targetCwd" in input || "kind" in input) {
+    throw clientError("INVALID_ARGUMENT", `${commandName} input is invalid: Private operation fields are not client inputs`);
   }
 }
 
@@ -925,7 +900,6 @@ export class StudioHostClientFacade implements ClientTransport {
       }
       case "prediction.query": {
         const input=(request as ClientQueryRequest<"prediction.query">).input;
-        validatePredictionQuery(input);
         const session=this.#runtimeSession();
         if(!session)throw unavailableError("Prediction requires a connected Runtime");
         return {ok:true,queryName:request.queryName,result:await session.predict(input)} as ClientQueryResponse;
@@ -1008,8 +982,7 @@ export class StudioHostClientFacade implements ClientTransport {
       case "artifacts.text.read": {
         const service = this.#options.artifacts;
         if (!service?.readText) throw clientError("CAPABILITY_UNAVAILABLE", "Artifact text is unavailable");
-        validateArtifactIdInput(request.input);
-        return { ok: true, queryName: request.queryName, result: await service.readText(request.input.artifactId) } as ClientQueryResponse;
+        return { ok: true, queryName: request.queryName, result: await service.readText((request.input as { artifactId: string }).artifactId) } as ClientQueryResponse;
       }
       case "artifacts.list":
       case "artifacts.storage.get": {
@@ -1314,8 +1287,7 @@ export class StudioHostClientFacade implements ClientTransport {
       case "artifacts.saveText": {
         const service = this.#options.artifacts;
         if (!service?.saveText) throw clientError("CAPABILITY_UNAVAILABLE", "Artifact text storage is unavailable");
-        validateArtifactTextInput(request.input);
-        const input = request.input;
+        const input = request.input as ArtifactTextInput;
         return this.#commandLocalTask(request, () => service.saveText!(input));
       }
       case "artifacts.delete": {
@@ -1439,7 +1411,7 @@ export class StudioHostClientFacade implements ClientTransport {
 
   async #commandP4(request: ClientCommandRequest): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
-    validateRuntimeMirrorCommandInput(request.commandName, request.input);
+    rejectPrivateOperationFields(request.commandName, request.input);
     const service = this.#options.commands;
     if (service?.invoke === undefined) throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available on this Host`);
     if (!this.#hasSnapshot()) throw unavailableError(`${request.commandName} requires a Runtime snapshot`);
@@ -3722,5 +3694,4 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#bus.emit({ kind: "command.receipt", receipt });
   }
 }
-import { validatePredictionQuery } from "@omp-studio/studio-protocol";
 import type { SharedProjectReads, SharedArchiveTelemetry } from "./shared-reads.js";

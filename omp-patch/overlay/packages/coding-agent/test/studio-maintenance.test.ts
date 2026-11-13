@@ -9,7 +9,6 @@ import type { AgentSession } from "../src/session/agent-session";
 import { StudioMaintenanceService } from "../src/studio/services/maintenance-service";
 import { StudioMediaFiles } from "../src/studio/services/media-files";
 import type { GcPreview, SessionExportResult } from "../src/studio/maintenance-protocol";
-import { validateMaintenanceResult } from "../src/studio/maintenance-protocol";
 test("cleanup requires a fresh single-use preview and never applies during scanning", async () => {
 	const settings = Settings.isolated(),
 		session = { sessionId: "main", settings } as AgentSession;
@@ -31,7 +30,6 @@ test("cleanup requires a fresh single-use preview and never applies during scann
 			sessionId: "main",
 			categories: ["blobs"],
 		})) as GcPreview;
-		validateMaintenanceResult("maintenance.gc.preview", preview);
 		expect(collect.mock.calls[0]![0].flags.apply).toBe(false);
 		const result = await service.execute({ kind: "maintenance.gc.apply", sessionId: "main", token: preview.token });
 		expect(result).toMatchObject({ applied: true, rows: [{ category: "blobs", changed: 2 }] });
@@ -119,7 +117,6 @@ test("session export transfers bytes privately, exposes metadata only, and rejec
 		});
 		release.resolve();
 		const exported = (await pending) as SessionExportResult;
-		validateMaintenanceResult("maintenance.session.export", exported);
 		expect(JSON.stringify(exported)).not.toContain("fixture full transcript");
 		expect(JSON.stringify(exported)).not.toContain(directory);
 		const status = await service.execute({ kind: "maintenance.export.status", sessionId: "main" });

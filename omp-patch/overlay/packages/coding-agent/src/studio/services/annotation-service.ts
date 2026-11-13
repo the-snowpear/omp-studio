@@ -9,13 +9,7 @@ import {
 	readUncommittedReviewTarget,
 } from "../../extensibility/custom-commands/bundled/review/target";
 import type { TextReviewAnnotation } from "@oh-my-pi/pi-tui/overlays/annotation-types";
-import {
-	type AnnotationCapture,
-	type AnnotationSource,
-	type AnnotationOperation,
-	validateAnnotationOperation,
-	validateAnnotationResult,
-} from "../annotations-protocol";
+import { type AnnotationCapture, type AnnotationSource, type AnnotationOperation } from "../annotations-protocol";
 import { SessionControlError } from "./session-control-service";
 
 export const annotationVersion = (text: string) => "sha256:" + createHash("sha256").update(text).digest("hex");
@@ -25,13 +19,11 @@ const normalize = (text: string) => text.replace(/\r\n?/gu, "\n");
 export class StudioAnnotationService {
 	constructor(readonly session: AgentSession) {}
 	async execute(operation: AnnotationOperation): Promise<unknown> {
-		validateAnnotationOperation(operation);
 		try {
 			const result =
 				operation.kind === "annotations.capture"
 					? { source: await this.capture(operation.source) }
 					: await this.prepare(operation);
-			validateAnnotationResult(operation.kind, result);
 			return result;
 		} catch (error) {
 			if (error instanceof SessionControlError) throw error;

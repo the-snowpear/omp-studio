@@ -10,7 +10,6 @@ import { test } from "node:test";
 import {
   FrameDecoder,
   encodeFrame,
-  parseFoundationStudioRequest,
   parseStudioHelloRequest,
   type StudioHelloResponse,
   type StudioComputerQueryRequest,
@@ -176,7 +175,7 @@ async function listenForHello(
             hooks.onTimeTravelResult(frame.body as { requestId: string; error?: string });
             continue;
           }
-          const request = parseFoundationStudioRequest(frame.body);
+          const request = frame.body as StudioRequest;
           if (negotiated === undefined) throw new Error("Not ready");
           if (request.operation.kind !== "runtime.snapshot") {
             if (hooks.onRequest === undefined) throw new Error("Unsupported request");

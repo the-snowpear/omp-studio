@@ -19,7 +19,6 @@ import type {
 	SessionWarmingState,
 	StudioSpeed,
 } from "../session-options-protocol";
-import { validateSessionOptionsOperation } from "../session-options-protocol";
 import { SessionControlError } from "./session-control-service";
 
 /** Thin adapters over native session controls and settings; no provider execution here. */
@@ -86,7 +85,6 @@ export class StudioSessionOptionsService {
 	}
 
 	async execute(operation: SessionOptionsOperation): Promise<unknown> {
-		validateSessionOptionsOperation(operation);
 		const session = this.session;
 		const settings = session.settings;
 		if (operation.sessionId !== session.sessionId)

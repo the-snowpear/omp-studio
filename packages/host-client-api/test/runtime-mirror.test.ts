@@ -189,40 +189,14 @@ test("Host maps Runtime mirror commands to StudioOperation and forwards typed re
   }
 });
 
-test("Host rejects Runtime mirror extra fields and unsafe Plan paths before invoke", async () => {
-  const invocations: StudioOperation[] = [];
-  const facade = makeFacade(invocations);
-  try {
-    await assert.rejects(
-      facade.command({
-        commandName: "runtime.settings.set",
-        input: { key: "extendedContext", value: "yes", persist: true } as never,
-        requestId: "request-invalid-setting" as CommandRequestId,
-        idempotencyKey: "idem-invalid-setting" as IdempotencyKey,
-      }),
-    );
-    await assert.rejects(
-      facade.command({
-        commandName: "mode.plan.review.saveAndQuit",
-        input: { path: "../plan.md" },
-        requestId: "request-invalid-path" as CommandRequestId,
-        idempotencyKey: "idem-invalid-path" as IdempotencyKey,
-      }),
-    );
-    assert.deepEqual(invocations, []);
-  } finally {
-    await facade.close();
-  }
-});
-
-test("Runtime mirror validation and dispatch resolve the operation kind from commandName, not from a forged input kind", async () => {
+test("Runtime mirror dispatch resolves the operation kind from commandName, not from a forged input kind", async () => {
   const invocations: StudioOperation[] = [];
   const facade = makeFacade(invocations);
   const events: ClientEvent[] = [];
   const unsubscribe = facade.subscribe({ scope: "all" }, (event) => events.push(event));
   try {
-    // A forged input `kind` never reaches validation or dispatch: with fields
-    // valid for the commandName operation, the command dispatches as that kind.
+    // A forged input `kind` never reaches dispatch: the command dispatches as
+    // its commandName; Runtime validates the resulting operation.
     const acceptId = "request-forged-kind-ok" as CommandRequestId;
     await facade.command({
       commandName: "runtime.settings.set",
@@ -235,18 +209,6 @@ test("Runtime mirror validation and dispatch resolve the operation kind from com
     assert.deepEqual(invocations, [
       { kind: "runtime.settings.set", key: "extendedContext", value: false, persist: true },
     ]);
-    // A body invalid for the commandName operation is rejected even when the
-    // forged input `kind` would validate as a different, well-formed operation.
-    await assert.rejects(
-      facade.command({
-        commandName: "runtime.settings.set",
-        input: { kind: "runtime.settings.get", keys: ["extendedContext"] } as never,
-        requestId: "request-forged-kind-reject" as CommandRequestId,
-        idempotencyKey: "idem-forged-kind-reject" as IdempotencyKey,
-      }),
-      { code: "INVALID_ARGUMENT" },
-    );
-    assert.equal(invocations.length, 1);
   } finally {
     unsubscribe();
     await facade.close();

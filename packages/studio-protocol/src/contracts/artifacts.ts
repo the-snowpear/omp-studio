@@ -55,11 +55,6 @@ export function validateArtifactTextInput(value: unknown): asserts value is Arti
   for (const key of ["workspaceId", "sessionId", "runId"]) short(input[key], true);
   if (typeof input.text !== "string" || new TextEncoder().encode(input.text).byteLength > ARTIFACT_TEXT_MAX_BYTES || input.text.includes("\0")) throw new Error("Text artifact exceeds its limit or contains binary data");
 }
-export function validateArtifactTextResult(value: unknown): asserts value is ArtifactTextResult {
-  const result = object(value, ["artifact", "text"]);
-  validateArtifactRecord(result.artifact);
-  if (typeof result.text !== "string" || new TextEncoder().encode(result.text).byteLength > ARTIFACT_TEXT_MAX_BYTES) throw new Error("Invalid artifact text");
-}
 
 function object(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected artifact object");

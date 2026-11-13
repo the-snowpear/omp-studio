@@ -1,8 +1,8 @@
-import { validateSessionWorktreeResult, type SessionWorktreeRow } from "@omp-studio/studio-protocol";
-import { validateSessionPortabilityResult, type PortableExport, type SessionPortabilityStatus } from "@omp-studio/studio-protocol";
-import { validateMaintenanceResult, type SessionExportResult, type SessionExportStatus } from "@omp-studio/studio-protocol";
-import { mediaInputArtifacts, validateMediaResult, type MediaDetail, isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, isUpgradeOperationKind, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
-import { validateSessionGuiResult, type QueueTakeback } from "@omp-studio/studio-protocol";
+import { type SessionWorktreeRow } from "@omp-studio/studio-protocol";
+import { type PortableExport, type SessionPortabilityStatus } from "@omp-studio/studio-protocol";
+import { type SessionExportResult, type SessionExportStatus } from "@omp-studio/studio-protocol";
+import { mediaInputArtifacts, type MediaDetail, isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, isUpgradeOperationKind, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
+import { type QueueTakeback } from "@omp-studio/studio-protocol";
 import type { RuntimeMediaFiles } from "./runtime-media-files.js";
 import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
 /**
@@ -433,21 +433,18 @@ export function createDesktopSemanticCommands(options: {
         return { snapshot: latest, result: { targetSessionId: result.targetSessionId, requestedSessionId: result.requestedSessionId, workspaceId } };
       }
       if (operation.kind === "worktrees.session.create" || operation.kind === "worktrees.session.open") {
-        validateSessionWorktreeResult(operation.kind, receipt.result);
         const result = receipt.result as { cwd?: string; worktree?: SessionWorktreeRow };
         if (!result.cwd || !options.registerImportedWorkspace) throw new StudioHostError("INTERNAL_ERROR", "Worktree registration unavailable");
         const workspaceId = await options.registerImportedWorkspace(result.cwd);
         return { snapshot: latest, result: { ...(result.worktree ? { worktree: result.worktree } : {}), workspaceId } };
       }
       if (operation.kind === "session.portability.import") {
-        validateSessionPortabilityResult(operation.kind, receipt.result);
         const imported = receipt.result as { sessionId: string; mode: "created" | "forked"; cwd?: string };
         if (!imported.cwd || !options.registerImportedWorkspace) throw new StudioHostError("INTERNAL_ERROR", "Imported workspace registration is unavailable");
         const workspaceId = await options.registerImportedWorkspace(imported.cwd);
         return { snapshot: latest, result: { sessionId: imported.sessionId, mode: imported.mode, workspaceId } };
       }
       if (operation.kind === "session.portability.pack" || operation.kind === "session.portability.anonymize" || operation.kind === "session.portability.status") {
-        validateSessionPortabilityResult(operation.kind, receipt.result);
         const status = operation.kind === "session.portability.status" ? receipt.result as SessionPortabilityStatus : undefined;
         if (status?.imported?.cwd && options.registerImportedWorkspace) {
           const workspaceId = await options.registerImportedWorkspace(status.imported.cwd);
@@ -462,7 +459,6 @@ export function createDesktopSemanticCommands(options: {
         }
       }
       if (operation.kind === "maintenance.session.export" || operation.kind === "maintenance.export.status") {
-        validateMaintenanceResult(operation.kind,receipt.result);
         const native = operation.kind === "maintenance.session.export" ? receipt.result as SessionExportResult : (receipt.result as SessionExportStatus).result;
         if (native) {
           if (!mediaDirectory || !options.mediaFiles) throw missingRuntime("The private desktop file channel is unavailable");
@@ -473,7 +469,6 @@ export function createDesktopSemanticCommands(options: {
       }
       if (operation.kind === "media.read") {
         if (!mediaDirectory || !options.mediaFiles) throw missingRuntime("The private desktop media channel is unavailable");
-        validateMediaResult("media.read", receipt.result);
         const detail = receipt.result as MediaDetail;
         const outputs = [];
         for (const asset of detail.outputs) {
@@ -483,7 +478,6 @@ export function createDesktopSemanticCommands(options: {
         return { snapshot: latest, result: { ...detail, outputs } };
       }
       if (operation.kind === "session.queue.takeback") {
-        validateSessionGuiResult(operation.kind, receipt.result);
         const detail = receipt.result as QueueTakeback;
         if (!detail.images.length) return { snapshot: latest, result: detail };
         if (!mediaDirectory || !options.mediaFiles) throw missingRuntime("The private desktop media channel is unavailable");

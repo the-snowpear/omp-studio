@@ -2,7 +2,7 @@ import { connect, type Socket } from "node:net";
 import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { BROWSER_PRIVATE_MAX_BYTES, validateBrowserObservationEvent, validateBrowserObservationInput, type BrowserObservationEvent } from "@omp-studio/studio-protocol";
+import { BROWSER_PRIVATE_MAX_BYTES, type BrowserObservationEvent, type BrowserObservationInput } from "@omp-studio/studio-protocol";
 import type { TerminalIpcMain, TerminalSender } from "./terminal-ipc.js";
 import { BROWSER_OBSERVATION_CHANNELS, type BrowserObservationResult } from "./browser-observation-shared.js";
 const identifier = (value: unknown): string => { if (typeof value !== "string" || !/^[a-f0-9-]{36}$/u.test(value)) throw new Error("Invalid browser observation identity"); return value; };
@@ -40,7 +40,7 @@ export class DesktopBrowserObservation {
         const line = pending.subarray(0, index).toString("utf8"); pending.copyWithin(0, index + 1, pendingLength); pendingLength -= index + 1;
         if (!entry.attached) { if (line !== "OK") { socket.destroy(); return; } entry.attached = true; clearTimeout(timer); ready.resolve(); continue; }
         try {
-          const event: unknown = JSON.parse(line); validateBrowserObservationEvent(event);
+          const event = JSON.parse(line) as BrowserObservationEvent;
           if (event.observationId !== id || ("tabId" in event && event.tabId !== tabId)) throw new Error("Browser target identity mismatch");
           if (event.kind === "frame") {
             if (event.sequence <= entry.latest || entry.inFlight) throw new Error("Browser frame backpressure violation"); entry.latest = event.sequence;
@@ -56,9 +56,9 @@ export class DesktopBrowserObservation {
     catch (error) { socket.destroy(); throw error; }
   }
   input(sender: TerminalSender, value: unknown): void {
-    const raw = record(value, ["observationId", "input"]); const id = identifier(raw.observationId); validateBrowserObservationInput(raw.input);
+    const raw = record(value, ["observationId", "input"]); const id = identifier(raw.observationId);
     const entry = this.#connections.get(sender.id); if (!entry?.attached || entry.id !== id || entry.socket.destroyed) throw new Error("Browser observation is not owned by this window");
-    const input = raw.input;
+    const input = raw.input as BrowserObservationInput;
     if (input.kind === "ack") { if (entry.inFlight !== input.sequence) throw new Error("Browser frame acknowledgement is stale"); entry.inFlight = 0; }
     else if (!["ping", "take", "release"].includes(input.kind) && entry.control !== "human") throw new Error("Explicit human control is required");
     if (entry.socket.writableLength > 65536) throw new Error("Browser control buffer is full");

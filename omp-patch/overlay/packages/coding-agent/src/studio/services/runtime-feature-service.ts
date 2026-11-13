@@ -5,11 +5,7 @@ import { probeSessionLeases } from "../../session/session-storage";
 import type { MCPManager } from "../../mcp/manager";
 import type { AgentSession } from "../../session/agent-session";
 import { clearApprovalGrants } from "../../tools/approval-cache";
-import {
-	type RuntimeFeatureOperation,
-	validateRuntimeFeatureOperation,
-	validateRuntimeFeatureResult,
-} from "../runtime-features-protocol";
+import { type RuntimeFeatureOperation } from "../runtime-features-protocol";
 import { inspectStudioJob } from "./job-inspect";
 import { StudioMcpAuthService } from "./mcp-auth-service";
 import { askStudioSeance } from "./seance-service";
@@ -29,12 +25,10 @@ export class StudioRuntimeFeatureService {
 	}
 
 	async execute(operation: RuntimeFeatureOperation): Promise<unknown> {
-		validateRuntimeFeatureOperation(operation);
 		if (operation.sessionId !== this.session.sessionId) {
 			throw new SessionControlError("INVALID_ARGUMENT", "The operation targets another session");
 		}
 		const result = await this.#run(operation);
-		validateRuntimeFeatureResult(operation.kind, result);
 		return result;
 	}
 

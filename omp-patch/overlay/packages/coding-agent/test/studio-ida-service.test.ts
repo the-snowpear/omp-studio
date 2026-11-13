@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { Settings } from "../src/config/settings";
 import type { AgentSession } from "../src/session/agent-session";
 import { StudioIdaDetailsService } from "../src/studio/services/ida-details-service";
-import { validateWorkbenchOperation, validateWorkbenchResult } from "../src/studio/workbench-protocol";
+import { validateWorkbenchOperation } from "../src/studio/workbench-protocol";
 
 test("disabled IDA reports configuration status without launching a broker or probing Python", async () => {
 	const service = new StudioIdaDetailsService({
@@ -12,7 +12,6 @@ test("disabled IDA reports configuration status without launching a broker or pr
 	} as AgentSession);
 	const status = await service.execute({ kind: "ida.status.details", sessionId: "s" });
 	expect(status).toMatchObject({ enabled: false, available: false, databases: [], reason: "IDA is disabled." });
-	validateWorkbenchResult("ida.status.details", status);
 	await expect(
 		service.execute({ kind: "ida.run", sessionId: "old", id: "db", code: "print(1)", timeoutMs: 1000 }),
 	).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });

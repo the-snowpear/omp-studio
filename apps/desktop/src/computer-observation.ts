@@ -1,6 +1,5 @@
 import { lstat, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { validateComputerObservationResult } from "@omp-studio/studio-protocol";
 import type { TerminalIpcMain, TerminalSender } from "./terminal-ipc.js";
 import { COMPUTER_CAPTURE_CHANNEL, type ComputerCaptureResult } from "./computer-observation-shared.js";
 /** One-use, bounded screenshot file delivery on private chrome IPC, never through Host events. */
@@ -17,7 +16,7 @@ export function registerComputerCaptureIpc(options: { ipcMain: TerminalIpcMain; 
     try {
       const metaInfo = await lstat(metadata); const imageInfo = await lstat(payload);
       if (!metaInfo.isFile() || metaInfo.isSymbolicLink() || metaInfo.size > 4096 || !imageInfo.isFile() || imageInfo.isSymbolicLink() || imageInfo.size > 8 * 1024 * 1024) throw new Error("Capture outside resource limits");
-      const descriptor = JSON.parse(await readFile(metadata, "utf8")) as Record<string, unknown>; validateComputerObservationResult("computer.capture", descriptor);
+      const descriptor = JSON.parse(await readFile(metadata, "utf8")) as Record<string, unknown>;
       if (descriptor.captureId !== id || descriptor.sessionId !== request.sessionId || descriptor.targetId !== request.targetId || typeof descriptor.expiresAt !== "number" || descriptor.expiresAt < Date.now() || descriptor.expiresAt > Date.now() + 60000) throw new Error("Capture expired");
       owned = true;
       const bytes = await readFile(payload);

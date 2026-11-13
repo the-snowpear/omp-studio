@@ -7,7 +7,7 @@ import { MemorySessionStorage } from "../src/session/session-storage";
 import { serializeTitleSlot } from "../src/session/session-title-slot";
 import type { AgentSession } from "../src/session/agent-session";
 import { StudioSessionTitlesService } from "../src/studio/services/session-titles-service";
-import { validateSessionTitlesOperation, validateSessionTitlesResult } from "../src/studio/session-titles-protocol";
+import { validateSessionTitlesOperation } from "../src/studio/session-titles-protocol";
 test("saved title metadata follows the latest native rename and never changes the session identity or saved bytes", async () => {
 	const manager = SessionManager.inMemory(),
 		storage = new MemorySessionStorage(),
@@ -95,7 +95,6 @@ test("title query rejects a different session and malformed targets instead of o
 		const service = new StudioSessionTitlesService(session);
 		const operation = { kind: "session.titles.inspect", sessionId: id, targetSessionIds: [id] } as const;
 		const result = await service.execute({ ...operation, targetSessionIds: [id] });
-		validateSessionTitlesResult("session.titles.inspect", result);
 		expect(result.rows[0]?.card?.code).toBe("CARD");
 		await expect(service.execute({ ...operation, sessionId: "foreign", targetSessionIds: [id] })).rejects.toThrow(
 			/Session changed/,

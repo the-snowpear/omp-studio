@@ -38,38 +38,3 @@ export function validateResourceOperation(v: unknown): asserts v is ResourceOper
 		throw Error("Invalid resource version");
 	if ((r.offset as number) > 0 && r.version === undefined) throw Error("Further pages require a resource version");
 }
-export function validateResourcePage(v: unknown): asserts v is ResourcePage {
-	if (!v || typeof v !== "object" || Array.isArray(v)) throw Error("Invalid resource response");
-	const r = v as ResourcePage;
-	validateResourceOperation({
-		kind: "resource.read",
-		sessionId: "result",
-		uri: r.uri,
-		offset: r.offset,
-		version: r.version,
-	});
-	if (
-		Object.keys(v).some(
-			k => !["uri", "version", "offset", "total", "nextOffset", "text", "truncated", "image"].includes(k),
-		) ||
-		!Number.isSafeInteger(r.total) ||
-		r.total < 0 ||
-		typeof r.text !== "string" ||
-		r.text.length > 262144 ||
-		typeof r.truncated !== "boolean"
-	)
-		throw Error("Invalid resource page");
-	if (
-		r.nextOffset !== undefined &&
-		(!Number.isSafeInteger(r.nextOffset) || r.nextOffset <= r.offset || r.nextOffset > r.total)
-	)
-		throw Error("Invalid resource cursor");
-	if (
-		r.image &&
-		(Object.keys(r.image).some(k => !["mimeType", "data"].includes(k)) ||
-			!/^image\/(png|jpeg|webp|gif)$/.test(r.image.mimeType) ||
-			typeof r.image.data !== "string" ||
-			r.image.data.length > 600000)
-	)
-		throw Error("Invalid resource image");
-}

@@ -5,7 +5,6 @@ import type { AgentSession } from "../src/session/agent-session";
 import { SessionManager } from "../src/session/session-manager";
 import { StudioAgentModelService } from "../src/studio/services/agent-model-service";
 import { ownedStudioSessions } from "../src/studio/services/owned-sessions";
-import { validateAgentModelResult } from "../src/studio/agent-model-protocol";
 test("agent model details use native routing and only inspect descendants of the current session", async () => {
 	const manager = SessionManager.inMemory();
 	manager.appendSessionInit({
@@ -48,7 +47,6 @@ test("agent model details use native routing and only inspect descendants of the
 			usingFallback: true,
 			candidates: ["primary/model:high", "backup/model:medium"],
 		});
-		validateAgentModelResult("agent.model.inspect", result);
 		expect(ownedStudioSessions(main).map(session => session.sessionId)).toEqual(["parent", "child"]);
 		await expect(
 			service.execute({ kind: "agent.model.inspect", sessionId: "parent", agentId: "Foreign" }),

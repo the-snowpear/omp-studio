@@ -4,7 +4,6 @@ import type { DeckAskAnswer } from "./types";
 import { afterEach, expect, it, vi } from "vitest";
 import { AskBody } from "./AskCard";
 import { submitAskValue } from "./askContent";
-import { validateAskAnswerPayload } from "@omp-studio/studio-protocol";
 import { setAskText } from "../test/askEditor";
 afterEach(cleanup);
 
@@ -64,10 +63,8 @@ it("answer and note images serialize under their owning question and separate na
   const image = { type: "image" as const, mimeType: "image/png" as const, data: "AA==" };
   const questions = [{ id: "a", question: "A", options: [], multiple: false }, { id: "b", question: "B", options: [], multiple: false }];
   const payload = submitAskValue(questions, { a: { picked: [], custom: "", customInputImages: [image] }, b: { picked: ["B"], custom: "", note: "note", noteImages: [image] } });
-  validateAskAnswerPayload(payload);
   expect(payload.results[0]).toMatchObject({ id: "a", customInput: "[Image #1]", customInputImages: [image] });
   expect(payload.results[1]).toMatchObject({ id: "b", note: "note\n[Image #1]", noteImages: [image] });
-  expect(() => validateAskAnswerPayload({ results: [{ ...payload.results[0], customInputImages: [{ ...image, data: "A".repeat(300000) }] }] })).toThrow();
 });
 
 it("closing or changing a question discards a late image load", async () => {

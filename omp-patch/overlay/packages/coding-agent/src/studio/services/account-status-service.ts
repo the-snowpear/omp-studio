@@ -11,7 +11,6 @@ import type {
 	AccountStatusResult,
 	StudioAccountStatus,
 } from "../accounts-protocol";
-import { validateAccountStatus } from "../accounts-protocol";
 import { SessionControlError } from "./session-control-service";
 
 const clean = (value: string) =>
@@ -225,7 +224,6 @@ export class StudioAccountStatusService {
 			if (result.unassigned.length) result.unassigned.pop();
 			else result.accounts.pop();
 		}
-		validateAccountStatus(result);
 		return result;
 	}
 }

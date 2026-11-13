@@ -433,8 +433,7 @@ export class StudioBridgeClient {
   async predict(input: PredictionQuery): Promise<PredictionResult> {
     if(this.#state !== "ready" || this.#runtimeEpoch === undefined) throw new StudioHostError("OUTCOME_UNKNOWN", "Prediction unavailable");
     const receipt = await this.invoke({type:"studio.request",requestId:(this.options.createRequestId ?? randomUUID)() as RequestId,runtimeEpoch:this.#runtimeEpoch,operation:{kind:"prediction.query",...input}});
-    if(receipt.status !== "completed") throw new StudioHostError("OUTCOME_UNKNOWN", "Prediction unavailable");
-    validatePredictionResult(receipt.result); return receipt.result;
+    if(receipt.status !== "completed") throw new StudioHostError("OUTCOME_UNKNOWN", "Prediction unavailable"); return receipt.result as PredictionResult;
   }
 
   async readTranscript(
@@ -945,4 +944,4 @@ export class StudioBridgeClient {
     }
   }
 }
-import { type PredictionQuery, type PredictionResult, validatePredictionResult } from "@omp-studio/studio-protocol";
+import { type PredictionQuery, type PredictionResult } from "@omp-studio/studio-protocol";

@@ -9,7 +9,6 @@ import type {
 	BenchmarkSnapshot,
 	BenchmarkSpec,
 } from "../benchmarks-protocol";
-import { validateBenchmarkOperation, validateBenchmarkResult } from "../benchmarks-protocol";
 import { SessionControlError } from "./session-control-service";
 
 interface RunState {
@@ -78,11 +77,9 @@ export class StudioBenchmarkService {
 		state.controller.abort();
 	}
 	async execute(operation: BenchmarkOperation): Promise<unknown> {
-		validateBenchmarkOperation(operation);
 		if (this.#disposed || operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "Benchmarks require the current active session");
 		const result = this.#execute(operation);
-		validateBenchmarkResult(operation.kind, result);
 		return structuredClone(result);
 	}
 	#execute(operation: BenchmarkOperation): unknown {
