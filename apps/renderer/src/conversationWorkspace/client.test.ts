@@ -76,6 +76,32 @@ describe("conversation resource lifetime", () => {
     await resyncConversationClient(second);
     expect(shared.bootstrap).toHaveBeenCalledTimes(2);
   });
+  it("re-reads capabilities after a draft context gains its Runtime instead of keeping the empty bootstrap manifest", async () => {
+    // Regression: a new conversation's context opens with no session, so its
+    // bootstrap carries the empty neutral manifest. After session.create the
+    // Host publishes runtime.changed; reads kept returning the empty copy and
+    // the composer stayed disabled ("core.prompt" missing).
+    const empty = { ...structuredClone(contractFixtures.bootstrap.capabilityManifest), capabilities: [] };
+    const live = structuredClone(contractFixtures.bootstrap.capabilityManifest);
+    let emit: (event: import("@omp-studio/client-contract").ClientEvent) => void = () => {};
+    const owned = target();
+    owned.bootstrap.mockResolvedValue({ ...structuredClone(contractFixtures.bootstrap), capabilityManifest: empty });
+    vi.mocked(owned.subscribe).mockImplementation(((_scope: unknown, listener: typeof emit) => { emit = listener; return () => {}; }) as never);
+    Object.assign(owned, { getState: () => ({ connection: { capabilityManifest: empty } }) });
+    vi.mocked(owned.query).mockResolvedValue(live as never);
+    const client = createConversationClient(async () => ({ client: owned, owned: true }));
+    await client.bootstrap();
+    expect((await client.query("capabilities.get", {})).capabilities).toHaveLength(0);
+    expect(owned.query).not.toHaveBeenCalled();
+
+    emit({ kind: "runtime.changed", connection: { status: "connected", classification: "managed" } } as never);
+    expect((await client.query("capabilities.get", {})).capabilities).toEqual(live.capabilities);
+    // A later mount reuses the cached initialization; it must not bring the empty copy back.
+    await client.bootstrap();
+    expect((await client.query("capabilities.get", {})).capabilities).toEqual(live.capabilities);
+    expect(owned.query).toHaveBeenCalledTimes(1);
+    await client.close();
+  });
   it("releases only the owned context and reuses its initialization until explicit resync", async () => {
     const owned = target(), open = vi.fn(async () => ({ client: owned, owned: true }));
     const client = createConversationClient(open);

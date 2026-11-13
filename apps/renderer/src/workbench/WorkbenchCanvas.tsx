@@ -46,7 +46,7 @@ import { RuntimeQueue } from "../composer/RuntimeQueue";
 import { ComposerModePicker } from "../ComposerModePicker";
 import { ChipComposer, type ChipComposerHandle } from "../composer/ChipComposer";
 import { bindSlashTypedCommand, composerSlashExecute, isDestructiveMemoryClear, mergeSlashCatalogWithManifest, planComposerSend, resolveSlashExecute, type SlashNativeUi, type StudioSlashCommand } from "../composer/commands";
-import { composerFollowUpEnabled, composerOwnerSessionId, composerOwnsLiveSnapshot, composerPromptEnabled, composerQueueEnabled, composerRunningForTarget, createComposerDispatchGate, visibleQueuedMessages } from "../composer/dispatch";
+import { composerFollowUpEnabled, composerOwnerSessionId, composerOwnsLiveSnapshot, composerPromptEnabled, composerQueueEnabled, composerRunningForTarget, createComposerDispatchGate, promptTargetChanged, visibleQueuedMessages } from "../composer/dispatch";
 import { beginQueueEdit, cancelQueueEdit, commitQueueEdit, parkQueueEdit, snapshotOfQueued, switchQueueEdit, type QueueEditState } from "../composer/queueEdit";
 import { createWorkspaceFileIndex, followWorkspaceFileIndex, loadMentions, previewMentions, workspaceDirectoryLister } from "../composer/mentions";
 import { snapshotFromDoc, snapshotFromText, snapshotFromTextAndImages, snapshotIsEmpty } from "../composer/serialize";
@@ -1611,11 +1611,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
         ...(targetSessionId === undefined ? {} : { selectedSessionId: targetSessionId }),
         ...(targetThreadId === undefined ? {} : { selectedThreadId: targetThreadId }),
       });
-      const currentTarget = selectedTargetRef.current;
-      if (
-        currentTarget.selectedSessionId !== targetSessionId ||
-        currentTarget.selectedThreadId !== targetThreadId
-      ) {
+      if (promptTargetChanged({
+        sent: { selectedSessionId: targetSessionId, selectedThreadId: targetThreadId },
+        current: selectedTargetRef.current,
+        createdSessionId: readySessionId,
+      })) {
         throw { code: "STATE_VERSION_CONFLICT", message: "发送期间已切换会话，本次发送已取消，草稿已恢复。" };
       }
       if (resumed) {

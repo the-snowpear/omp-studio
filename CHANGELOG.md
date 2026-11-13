@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复新对话的第一条消息被误报「发送期间已切换会话」而取消、草稿退回输入框：新草稿接管自己 `session.create` 刚建出的会话不再算作切换；真正切到其他对话时仍会取消发送。
+- 修复上述失败后发送按钮一直禁用：新草稿打开时拿到的空能力清单在 Runtime 接入后不再沿用，收到 `runtime.changed` 后改为向 Host 重新读取。
+
 ## [0.2.0] - 2026-11-13
 
 如果说 `0.1.x` 的 OMP Studio 还算是一个「长得挺规矩的单栏聊天控制台」，那 `0.2.0` 基本就是把承重墙拆了重装了一遍。
