@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 从历史打开、尚未连接 Runtime 的对话不再显示红色「Runtime 不可用」：没有任何失败记录时改为中性提示「Runtime 未启动 · 发送消息时会自动连接」，并提供「立即连接」；真正的启动失败仍显示红色告警。
+
 ## [0.2.0] - 2026-11-13
 
 如果说 `0.1.x` 的 OMP Studio 还算是一个「长得挺规矩的单栏聊天控制台」，那 `0.2.0` 基本就是把承重墙拆了重装了一遍。
