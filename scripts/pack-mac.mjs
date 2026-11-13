@@ -39,6 +39,7 @@ import {
 import { npmInvocation, repositoryRoot, run } from "./omp-tooling.mjs";
 import { bundlePreload } from "./preload-bundle.mjs";
 import { assertNativeTargetBuild } from "./target-platform.mjs";
+import { assertLockedElectronVersion } from "./release-cache.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -89,6 +90,7 @@ async function main() {
     throw new Error("pack:mac builds the darwin-arm64 app on an Apple Silicon Mac.");
   }
   assertNativeTargetBuild(MAC_TARGET_PLATFORM);
+  assertLockedElectronVersion();
 
   const skipHost = hasFlag("--skip-host") || process.env.OMP_PACK_SKIP_HOST === "1";
   const skipBuild = hasFlag("--skip-build") || process.env.OMP_PACK_SKIP_BUILD === "1";

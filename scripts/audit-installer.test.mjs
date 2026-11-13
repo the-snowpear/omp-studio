@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { auditInstallerOutput, findInstallerExecutable, findPrivateKeyFiles } from "./audit-installer.mjs";
+import { assertWindowsPtyHelper, auditInstallerOutput, findInstallerExecutable, findPrivateKeyFiles } from "./audit-installer.mjs";
+
+test("Windows x64 packaging must retain the WinPTY helper outside asar", async () => {
+  const unpacked = await mkdtemp(join(tmpdir(), "omp-audit-winpty-"));
+  assert.throws(() => assertWindowsPtyHelper(unpacked, "x64"), /winpty-agent\.exe is missing/u);
+  const directory = join(unpacked, "resources", "app.asar.unpacked", "node_modules", "node-pty", "build", "Release");
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "winpty-agent.exe"), "packaged-helper-fixture");
+  assert.doesNotThrow(() => assertWindowsPtyHelper(unpacked, "x64"));
+  const prebuilt = join(unpacked, "resources", "app.asar.unpacked", "node_modules", "node-pty", "prebuilds", "win32-x64");
+  await mkdir(prebuilt, { recursive: true });
+  await rename(join(directory, "winpty-agent.exe"), join(prebuilt, "winpty-agent.exe"));
+  assert.doesNotThrow(() => assertWindowsPtyHelper(unpacked, "x64"));
+  // Windows ARM64 starts at Windows 11 and uses ConPTY, not the x64 WinPTY helper.
+  assert.doesNotThrow(() => assertWindowsPtyHelper(join(unpacked, "arm64"), "arm64"));
+});
 
 test("the installer audit selects the current version and architecture even when older Setup files remain", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-audit-version-"));

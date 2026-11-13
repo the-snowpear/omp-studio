@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { readGitHubApi } from "./release-github.mjs";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { releaseKeys } from "./build-update-assets-v2.mjs";
@@ -13,7 +13,7 @@ await mkdir(dest, { recursive: true });
 const catalogs = join(dest, "catalogs");
 await mkdir(catalogs, { recursive: true });
 const keys = await releaseKeys(root);
-const pages = JSON.parse(execFileSync("gh", ["api", "--paginate", "--slurp", `repos/${repo}/releases?per_page=100`], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }));
+const pages = JSON.parse(await readGitHubApi(["--paginate", "--slurp", `repos/${repo}/releases?per_page=100`], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }));
 const releases = pages.flat().filter(r => !r.draft).sort((a, b) => b.id - a.id);
 // The v1 migration feed only exists for Windows.
 const legacyName = legacyIndexName(platform);
@@ -21,14 +21,14 @@ let legacy;
 for (const release of releases) {
   const catalog = release.assets.find(a => a.name === `updates-${platform}.json`);
   if (catalog) {
-    const bytes = execFileSync("gh", ["api", "-H", "Accept: application/octet-stream", `repos/${repo}/releases/assets/${catalog.id}`], { maxBuffer: 1024 * 1024 });
+    const bytes = await readGitHubApi(["-H", "Accept: application/octet-stream", `repos/${repo}/releases/assets/${catalog.id}`], { maxBuffer: 1024 * 1024 });
     verifyUpdateManifest(JSON.parse(bytes.toString("utf8")), keys, repo, platform);
     await writeFile(join(catalogs, `${release.id}.json`), bytes);
   }
   if (legacyName && !legacy && !release.prerelease && !release.tag_name.startsWith("runtime-v")) {
     const index = release.assets.find(a => a.name === `${legacyName}.json`), sig = release.assets.find(a => a.name === `${legacyName}.sig.json`);
     if (index && sig) {
-      for (const asset of [index, sig]) await writeFile(join(dest, asset.name), execFileSync("gh", ["api", "-H", "Accept: application/octet-stream", `repos/${repo}/releases/assets/${asset.id}`], { maxBuffer: 1024 * 1024 }));
+      for (const asset of [index, sig]) await writeFile(join(dest, asset.name), await readGitHubApi(["-H", "Accept: application/octet-stream", `repos/${repo}/releases/assets/${asset.id}`], { maxBuffer: 1024 * 1024 }));
       legacy = join(dest, `${legacyName}.json`);
     }
   }

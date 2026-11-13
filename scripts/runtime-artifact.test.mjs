@@ -24,7 +24,9 @@ import {
   seriesDigest,
   sha256Hex,
 } from "./runtime-artifact.mjs";
+import { execFileSync } from "node:child_process";
 import { assertOverlayPresent, overlayHash, overlayRoot } from "./omp-overlay.mjs";
+import { findBun, ompSourceDirectory } from "./omp-tooling.mjs";
 import {
   PATCHSET_VERSION_FILE,
   UPSTREAM_COMMIT_FILES,
@@ -37,6 +39,20 @@ import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.j
 
 const REAL_UPSTREAM_COMMIT = "b5a6b2f7e5b6606b6562e678ead83f21738f34a0";
 const FIXTURE_COMMAND_MANIFEST_HASH = `sha256:${"c".repeat(64)}`;
+
+test("packaged capability order and hash match the Runtime protocol", () => {
+  const source = [
+    'import { STUDIO_IMPLEMENTED_CAPABILITIES, stableImplementedManifestHash } from "./packages/coding-agent/src/studio/bridge-protocol.ts";',
+    'console.log(JSON.stringify({ ids: STUDIO_IMPLEMENTED_CAPABILITIES, hash: stableImplementedManifestHash("capabilities") }));',
+  ].join("\n");
+  const runtime = JSON.parse(execFileSync(findBun(), ["-e", source], {
+    cwd: ompSourceDirectory,
+    encoding: "utf8",
+    timeout: 30_000,
+  }));
+  assert.deepEqual(IMPLEMENTED_CAPABILITIES, runtime.ids);
+  assert.equal(implementedManifestHash("capabilities"), runtime.hash);
+});
 
 async function fixtureInputs() {
   const root = await mkdtemp(join(tmpdir(), "omp-artifact-test-"));

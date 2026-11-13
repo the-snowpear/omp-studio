@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { dependencyFingerprint } from "./release-cache.mjs";
+import { assertLockedElectronVersion, dependencyFingerprint } from "./release-cache.mjs";
+
+test("packaging rejects a stale installed Electron instead of shipping the older dependency", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-locked-electron-"));
+  await writeFile(join(root, "package-lock.json"), JSON.stringify({ packages: { "node_modules/electron": { version: "43.8.8" } } }));
+  const installed = join(root, "node_modules", "electron");
+  await mkdir(installed, { recursive: true });
+  await writeFile(join(installed, "package.json"), JSON.stringify({ version: "43.4.0" }));
+  assert.throws(() => assertLockedElectronVersion(root), /Electron dependency is 43\.4\.0; package-lock requires 43\.8\.8/u);
+  await writeFile(join(installed, "package.json"), JSON.stringify({ version: "43.8.8" }));
+  assert.equal(assertLockedElectronVersion(root), "43.8.8");
+});
 
 const fixture = () => ({
   packages: {
