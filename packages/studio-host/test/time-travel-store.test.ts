@@ -7,11 +7,12 @@ import {
   readFile,
   readdir,
   realpath,
+  symlink,
   writeFile,
   rm,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { gzipSync } from "node:zlib";
 import test from "node:test";
 import { TimeTravelStore } from "../src/time-travel-store.js";
@@ -33,6 +34,20 @@ test("snapshots never capture their own storage when the profile is inside the w
   assert.deepEqual(next.entries.map(entry => entry.path), ["file.txt"]);
 });
 
+test("snapshots exclude their own storage reached through a directory alias", async t => {
+  const root = await mkdtemp(join(tmpdir(), "omp-time-travel-alias-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, "workspace");
+  const alias = join(root, "alias");
+  await mkdir(workspace);
+  await symlink(workspace, alias, process.platform === "win32" ? "junction" : "dir");
+  const store = new TimeTravelStore(join(alias, "profile"));
+  await writeFile(join(workspace, "file.txt"), "content");
+  await store.capture({ workspace: alias, sessionId: "session", leafId: null, phase: "before" });
+  const next = await store.capture({ workspace: alias, sessionId: "session", leafId: "one", phase: "after" });
+  assert.deepEqual(next.entries.map(entry => entry.path), ["file.txt"]);
+});
+
 function git(workspace: string, ...args: string[]): string {
   return execFileSync("git", ["-C", workspace, ...args], {
     encoding: "utf8",
@@ -44,7 +59,7 @@ test("legacy checkpoints expose file counts and remain restorable after metadata
   const { workspace, profile, store } = await fixture();
   const temporary = await realpath(dirname(workspace));
   t.after(async () => {
-    const tail = relative(resolve(tmpdir()), temporary);
+    const tail = relative(await realpath(tmpdir()), temporary);
     assert.ok(tail && !isAbsolute(tail) && tail !== ".." && !tail.startsWith(`..${sep}`));
     await rm(temporary, { recursive: true, force: true });
   });

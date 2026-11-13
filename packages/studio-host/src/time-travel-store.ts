@@ -262,9 +262,12 @@ export class TimeTravelStore {
   }
 
   async #names(workspace: string, exclusions: readonly string[]): Promise<string[]> {
-    const privateState = relative(workspace, dirname(this.#root)).split(sep).join("/");
+    const privateDirectory = dirname(this.#root);
+    await mkdir(privateDirectory, { recursive: true });
+    // Both paths must resolve aliases, including cross-drive Windows junctions and macOS /var.
+    const privateState = relative(workspace, await realpath(privateDirectory)).split(sep).join("/");
     if (!privateState) return [];
-    const rules = !privateState.startsWith("../") && !isAbsolute(privateState)
+    const rules = privateState !== ".." && !privateState.startsWith("../") && !isAbsolute(privateState)
       ? [...exclusions, `/${privateState}/`]
       : exclusions;
     return await enumerateWorkspace(workspace, rules);
