@@ -1,4 +1,9 @@
 import { isRuntimeViewKind, type RuntimeViewOperation } from "./runtime-views-protocol";
+import {
+	MODEL_SERVICES_COMMAND_KINDS,
+	isModelServicesKind,
+	type ModelServicesOperation,
+} from "./model-services-protocol";
 import { isContextViewKind, type ContextViewOperation } from "./context-view-protocol";
 import { isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, type WorkbenchOperation } from "./workbench-protocol";
 import { isUpgradeOperationKind, UPGRADE_OPERATION_KINDS, type UpgradeOperation } from "./runtime-upgrade-protocol";
@@ -44,6 +49,7 @@ interface RememberedReceipt {
 }
 
 const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
+	...MODEL_SERVICES_COMMAND_KINDS,
 	"runtime.shutdown",
 	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
@@ -309,6 +315,8 @@ export class StudioBridgeDispatcher {
 
 	dispose(): void {
 		this.#unsubscribeBtw();
+		this.runtime.services.tree.cancelReanswer("Interaction bridge closed");
+		this.runtime.services.workbench.views.cancelClose();
 		this.#interactions.cancel("Interaction bridge closed");
 		this.runtime.services.interaction.unbind(this.#interactions);
 	}
@@ -317,6 +325,7 @@ export class StudioBridgeDispatcher {
 		const operation = request.operation;
 		if (
 			operation.kind !== "runtime.shutdown" &&
+			operation.kind !== "runtime.close.confirm" &&
 			operation.kind !== "tokens.count" &&
 			operation.kind !== "prediction.query" &&
 			operation.kind !== "session.owner.update"
@@ -512,46 +521,50 @@ export class StudioBridgeDispatcher {
 						this.runtime.services.btw.settle(),
 						this.runtime.services.workbench.agentBtw.settle(),
 					]);
-				const result = isWorkbenchOperationKind(operation.kind)
-					? await this.runtime.services.workbench.execute(operation as WorkbenchOperation)
-					: isUpgradeOperationKind(operation.kind)
-						? await this.runtime.services.upgrade.execute(operation as UpgradeOperation)
-						: isEvaluationOperationKind(operation.kind)
-							? await this.runtime.services.evaluation.execute(operation as EvaluationOperation)
-							: isShutdownOperation
-								? await this.#executeShutdownOperation(operation)
-								: isLiveOperation
-									? await this.#executeLiveOperation(operation)
-									: isPauseOperation
-										? await this.#executePauseOperation(operation)
-										: isLoopOperation
-											? await this.#executeLoopOperation(operation)
-											: isModeOperation
-												? await this.#executeModeOperation(operation)
-												: isTreeOperation
-													? await this.#executeTreeOperation(operation, commandId)
-													: operation.kind === "session.fork"
-														? await this.runtime.services.fork.fork()
-														: operation.kind === "session.handoff"
-															? await this.runtime.services.handoff.handoff(operation.customInstructions)
-															: isOperatorOperation
-																? await this.#executeOperatorOperation(operation)
-																: isBtwOperation
-																	? await this.#executeBtwOperation(operation)
-																	: isOmfgOperation
-																		? await this.#executeOmfgOperation(operation, commandId)
-																		: isTanOperation
-																			? await this.#executeTanOperation(operation)
-																			: isAgentOperation
-																				? await this.#executeAgentOperation(operation)
-																				: isJobOperation
-																					? await this.#executeJobOperation(operation)
-																					: isPermissionOperation
-																						? await this.#executePermissionOperation(operation)
-																						: await this.#executeSessionOperation(
-																								operation,
-																								commandId,
-																							);
+				const result = isModelServicesKind(operation.kind)
+					? await this.runtime.services.workbench.executeModelServices(operation as ModelServicesOperation)
+					: isWorkbenchOperationKind(operation.kind)
+						? await this.runtime.services.workbench.execute(operation as WorkbenchOperation)
+						: isUpgradeOperationKind(operation.kind)
+							? await this.runtime.services.upgrade.execute(operation as UpgradeOperation)
+							: isEvaluationOperationKind(operation.kind)
+								? await this.runtime.services.evaluation.execute(operation as EvaluationOperation)
+								: isShutdownOperation
+									? await this.#executeShutdownOperation(operation)
+									: isLiveOperation
+										? await this.#executeLiveOperation(operation)
+										: isPauseOperation
+											? await this.#executePauseOperation(operation)
+											: isLoopOperation
+												? await this.#executeLoopOperation(operation)
+												: isModeOperation
+													? await this.#executeModeOperation(operation)
+													: isTreeOperation
+														? await this.#executeTreeOperation(operation, commandId)
+														: operation.kind === "session.fork"
+															? await this.runtime.services.fork.fork()
+															: operation.kind === "session.handoff"
+																? await this.runtime.services.handoff.handoff(
+																		operation.customInstructions,
+																	)
+																: isOperatorOperation
+																	? await this.#executeOperatorOperation(operation)
+																	: isBtwOperation
+																		? await this.#executeBtwOperation(operation)
+																		: isOmfgOperation
+																			? await this.#executeOmfgOperation(operation, commandId)
+																			: isTanOperation
+																				? await this.#executeTanOperation(operation)
+																				: isAgentOperation
+																					? await this.#executeAgentOperation(operation)
+																					: isJobOperation
+																						? await this.#executeJobOperation(operation)
+																						: isPermissionOperation
+																							? await this.#executePermissionOperation(operation)
+																							: await this.#executeSessionOperation(
+																									operation,
+																									commandId,
+																								);
 				if (
 					!isPauseOperation &&
 					![
@@ -727,6 +740,10 @@ export class StudioBridgeDispatcher {
 		if (operation.kind !== "runtime.shutdown" || operation.drain !== true) {
 			throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Invalid Runtime shutdown request");
 		}
+		// A forced stop takes ownership from any reversible native close dialog.
+		this.runtime.services.tree.cancelReanswer("Runtime is shutting down");
+		this.runtime.services.workbench.modelAuth.dispose();
+		this.runtime.services.workbench.views.cancelClose();
 		// Quiesce before the settle wait (worst case ~10s) so no new command is
 		// accepted into the drain window.
 		this.#quiescing = true;
@@ -827,6 +844,7 @@ export class StudioBridgeDispatcher {
 				return await this.#sessionControl.followUp(operation.text, operation.images, preludes);
 			}
 			case "core.abort":
+				this.runtime.services.tree.cancelReanswer("Tree re-answer aborted");
 				if (this.runtime.services.loop.state() !== undefined) this.runtime.services.loop.pause();
 				return await this.#sessionControl.abort();
 			default:
@@ -1007,6 +1025,7 @@ export class StudioBridgeDispatcher {
 					definition: operation.definition,
 					...(operation.model === undefined ? {} : { model: operation.model }),
 					assignment: operation.assignment,
+					...(operation.steps === undefined ? {} : { steps: operation.steps }),
 					...(operation.solutionSpace !== undefined ? { solutionSpace: operation.solutionSpace } : {}),
 					...(operation.context === undefined ? {} : { context: operation.context }),
 					...(operation.async === undefined ? {} : { async: operation.async }),

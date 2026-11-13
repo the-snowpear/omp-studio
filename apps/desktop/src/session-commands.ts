@@ -4,7 +4,7 @@ import { validateMaintenanceResult, type SessionExportResult, type SessionExport
 import { mediaInputArtifacts, validateMediaResult, type MediaDetail, isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, isUpgradeOperationKind, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
 import { validateSessionGuiResult, type QueueTakeback } from "@omp-studio/studio-protocol";
 import type { RuntimeMediaFiles } from "./runtime-media-files.js";
-import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
+import { isEvaluationOperationKind, isModelServicesKind, MODEL_SERVICES_COMMAND_KINDS, type ModelServicesCommandResultMap } from "@omp-studio/studio-protocol";
 /**
  * Desktop semantic commands: session.create / session.resume / session.drop / interaction.respond
  * and P4 invoke that forwards the client requestId.
@@ -71,6 +71,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   // already express the real preconditions and give better error text.
   ...WORKBENCH_OPERATION_KINDS,
   ...UPGRADE_OPERATION_KINDS,
+  ...MODEL_SERVICES_COMMAND_KINDS,
   "btw.ask",
   "btw.abort",
   "btw.branch",
@@ -494,6 +495,7 @@ export function createDesktopSemanticCommands(options: {
         }
         return { snapshot: latest, result: { ...detail, images } };
       }
+      if (isModelServicesKind(operation.kind)) return receipt.result as ModelServicesCommandResultMap[keyof ModelServicesCommandResultMap];
       if (isWorkbenchOperationKind(operation.kind) || isUpgradeOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
       if (isEvaluationOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
       if (operation.kind === "operator.invoke") {

@@ -59,6 +59,27 @@ it("uses Runtime credential receipts, removes the selected key and keeps an unsa
   expect(screen.getByRole("switch", { name: "web_search 工具开关" }).getAttribute("aria-checked")).toBe("false");
 });
 
+it("keeps Hacker News as a keyless site route, not an account or general-web chain replacement", () => {
+  const { client, command } = runtimeClient();
+  const model = createPreviewModelConfig();
+  render(<I18nProvider forcedLanguage="zh"><WebSearchPanel client={client} preview webSearch={model.webSearch} models={model.availableModels} loginAvailable onSaved={vi.fn()} onPreviewSave={vi.fn()} /></I18nProvider>);
+  const route = providerRow("Hacker News");
+  expect(within(route).getByRole("button", { name: "site:news.ycombinator.com" })).toBeTruthy();
+  expect(within(route).queryByRole("button", { name: "配置凭证" })).toBeNull();
+  expect(within(route).queryByRole("button", { name: "加入链条" })).toBeNull();
+  expect(document.querySelector('.wsx-chain-row[data-id="web/hackernews"]')).toBeNull();
+  expect(command).not.toHaveBeenCalled();
+});
+
+it("adds Sofya through the original provider library and preserves the chosen search-chain order until save", () => {
+  const { client, command } = runtimeClient();
+  const model = createPreviewModelConfig();
+  render(<I18nProvider forcedLanguage="zh"><WebSearchPanel client={client} preview webSearch={model.webSearch} models={model.availableModels} loginAvailable onSaved={vi.fn()} onPreviewSave={vi.fn()} /></I18nProvider>);
+  fireEvent.click(within(providerRow("Sofya")).getByRole("button", { name: "加入链条" }));
+  expect([...document.querySelectorAll<HTMLElement>(".wsx-chain-row")].map(row => row.dataset.id)).toEqual(["web/perplexity", "web/exa", "google/gemini-2.5-flash", "web/sofya"]);
+  expect(command).not.toHaveBeenCalled();
+});
+
 it("does not offer credential writes while Runtime is disconnected", () => {
   const { client, command } = runtimeClient();
   const model = createPreviewModelConfig();

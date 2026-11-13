@@ -2,6 +2,8 @@ import type { WebMcpListOptions, StudioWebMcpCatalog } from "./webmcp.js";
 import type { LiveAudioState } from "./live-audio.js";
 import type { ShellVizPreferences, ShellVizPresentation } from "./shell-view.js";
 import type { RuntimeFeatureResultMap } from "./runtime-features.js";
+import type { InteractionForm } from "./forms.js";
+import { MODEL_SERVICES_QUERY_KINDS, type ModelServicesOperation, type ModelServicesQueryInputMap, type ModelServicesQueryResultMap } from "./model-services.js";
 
 export interface PromptCacheStatus {
   state: "warm" | "cold";
@@ -15,8 +17,11 @@ export interface PromptCacheStatus {
   warming?: { state: "scheduled" | "refreshing" | "inactive"; nextWarmAt?: number; stopsAt?: number; reason?: string };
 }
 
-/** Transient reads and media negotiation: no payload is persisted in the command ledger. */
+/** Transient reads, reversible close checks and media negotiation: no payload is persisted in the command ledger. */
 export type RuntimeViewOperation =
+  | Extract<ModelServicesOperation, { kind: keyof ModelServicesQueryInputMap }>
+  | { kind: "runtime.close.confirm"; sessionId: string }
+  | { kind: "interaction.form.read"; sessionId: string; interactionId: string; leaseGeneration: number }
   | { kind: "agent.spawn.options.read"; sessionId: string; definition: string }
   | { kind: "session.lease.read"; sessionId: string; targetSessionIds: string[] }
   | { kind: "extensions.links.list"; sessionId: string; sourceSessionId?: string; agentId?: string }
@@ -28,7 +33,9 @@ export type RuntimeViewOperation =
   | { kind: "live.webrtc.status"; sessionId: string; audioId?: string }
   | { kind: "live.webrtc.mute"; sessionId: string; audioId: string; muted: boolean }
   | { kind: "live.webrtc.release"; sessionId: string; audioId: string };
-export interface RuntimeViewResultMap {
+export interface RuntimeViewResultMap extends ModelServicesQueryResultMap {
+  "runtime.close.confirm": { allowed: boolean };
+  "interaction.form.read": { form: InteractionForm };
   "agent.spawn.options.read": RuntimeFeatureResultMap["agent.spawn.options"];
   "session.lease.read": RuntimeFeatureResultMap["session.lease.inspect"];
   "extensions.links.list": { schemes: string[] };
@@ -41,7 +48,7 @@ export interface RuntimeViewResultMap {
   "live.webrtc.mute": LiveAudioState;
   "live.webrtc.release": LiveAudioState;
 }
-export const RUNTIME_VIEW_KINDS = ["agent.spawn.options.read", "session.lease.read", "extensions.links.list", "browser.webmcp.list", "session.cache.get", "shell.view.read", "shell.view.release", "live.webrtc.connect", "live.webrtc.status", "live.webrtc.mute", "live.webrtc.release"] as const;
+export const RUNTIME_VIEW_KINDS = [...MODEL_SERVICES_QUERY_KINDS, "runtime.close.confirm", "interaction.form.read", "agent.spawn.options.read", "session.lease.read", "extensions.links.list", "browser.webmcp.list", "session.cache.get", "shell.view.read", "shell.view.release", "live.webrtc.connect", "live.webrtc.status", "live.webrtc.mute", "live.webrtc.release"] as const;
 export function isRuntimeViewKind(kind: string): kind is RuntimeViewOperation["kind"] {
   return (RUNTIME_VIEW_KINDS as readonly string[]).includes(kind);
 }

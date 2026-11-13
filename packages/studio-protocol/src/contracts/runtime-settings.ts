@@ -5,7 +5,9 @@ import type { SessionId } from "./ids.js";
 export const STUDIO_RUNTIME_SETTING_KEYS = [
   ...GUI_SETTING_KEYS,
   "modelRoles.judge",
-  "claudeResets.autoRedeem",
+  "claudeResets.autoRedeem5h",
+  "claudeResets.autoRedeemWeekly",
+  "claudeResets.autoRedeemFable",
   "claudeResets.minBlockedMinutes",
   "claudeResets.keepCredits",
   "claudeResets.salvageHorizonHours",
@@ -62,7 +64,12 @@ export type StudioRuntimeCodeMode = (typeof STUDIO_RUNTIME_CODE_MODES)[number];
 /** Exact schema-backed public values; no arbitrary key/value escapes. */
 export interface StudioRuntimeSettingsSnapshot extends GuiSettingsSnapshot {
   "modelRoles.judge"?: string;
+  /** Legacy Runtime read-only compatibility; new consent is per governing window. */
   "claudeResets.autoRedeem"?: "unset" | "yes" | "no";
+  "codexResets.autoRedeem"?: "unset" | "yes" | "no";
+  "claudeResets.autoRedeem5h"?: "unset" | "yes" | "no";
+  "claudeResets.autoRedeemWeekly"?: "unset" | "yes" | "no";
+  "claudeResets.autoRedeemFable"?: "unset" | "yes" | "no";
   "claudeResets.minBlockedMinutes"?: number;
   "claudeResets.keepCredits"?: number;
   "claudeResets.salvageHorizonHours"?: number;

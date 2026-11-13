@@ -1,0 +1,62 @@
+/* Native form contents use the existing Deck, input, choice and motion vocabulary. */
+.form-card { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.dk-form-cell { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.dk-form-cell[hidden] { display: none !important; }
+.deck.preview-queue .dk-form-cell, .deck.preview-queue .form-card { flex: 0 1 auto; max-height: min(420px, 72vh, var(--deck-max-height, 72vh)); overflow: hidden; }
+.deck.preview-queue.is-ask .ask-card.form-card { overflow: hidden; }
+.deck.is-form-expanded .dk-form-cell, .deck.is-form-expanded .form-card { max-height: min(78vh, var(--deck-max-height, 78vh)); }
+.form-card [hidden] { display: none !important; }
+.form-head { position: sticky; top: 0; z-index: 3; flex: none; background: var(--surface); }
+.form-head .ask-head { flex-wrap: wrap; }
+.form-head-actions { display: inline-flex; align-items: center; gap: var(--sp-4); }
+.form-summary { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); color: var(--text-3); font-size: var(--fs-11); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
+.form-countdown { display: inline-flex; align-items: center; gap: var(--sp-4); }
+.form-summary.is-compact { flex: none; }
+.form-section-nav { display: flex; align-items: center; gap: var(--sp-4); padding: 0 var(--sp-14) var(--sp-8); overflow-x: auto; scrollbar-width: thin; }
+.form-section-nav .dk-head-chip { flex: none; display: inline-flex; gap: var(--sp-6); max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.form-section-nav .dk-head-chip > span { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.form-body { flex: 0 1 auto; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.form-section { min-width: 0; margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: var(--sp-12); }
+.form-section + .form-section { padding-top: var(--sp-12); border-top: 1px solid var(--border); }
+.form-section legend, .form-section h3 { margin: 0 0 var(--sp-8); padding: 0; font-size: var(--fs-14); font-weight: var(--fw-semibold); color: var(--text); }
+.form-section > :last-child { margin-bottom: 0; }
+.form-context, .form-heading { margin: 0; white-space: pre-wrap; color: var(--text-2); line-height: 1.6; font-size: var(--fs-12); overflow-wrap: anywhere; }
+.form-heading { color: var(--text); font-weight: var(--fw-medium); }
+.form-context code, .form-heading code, .form-field-label code, .form-choices code { font-family: var(--font-mono); font-size: 0.95em; }
+.form-field { display: flex; flex-direction: column; gap: var(--sp-6); min-width: 0; }
+.form-field-label { display: flex; align-items: baseline; gap: var(--sp-4); margin: 0; color: var(--text-2); font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.form-required { color: var(--accent); font-size: var(--fs-11); }
+.form-input { width: 100%; min-width: 0; font-size: var(--fs-12); }
+.form-textarea { display: block; width: 100%; min-width: 0; height: auto; padding: var(--sp-8) var(--sp-10); font-family: var(--font-ui); font-size: var(--fs-12); line-height: 1.6; resize: vertical; }
+.form-option { display: flex; flex-direction: column; }
+.form-option-note { padding-left: calc(var(--sp-12) + var(--sp-8) + 14px); margin: var(--sp-4) 0 var(--sp-6); }
+.form-option-note > label { display: flex; flex-direction: column; gap: var(--sp-4); }
+.form-note-label { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-8); font-size: var(--fs-11); color: var(--text-2); }
+.form-note-label > span { color: var(--text-3); }
+.form-note-input, .form-other-input { animation: var(--motion-reveal); }
+.form-other-input { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-6) 0 var(--sp-4) calc(var(--sp-12) + var(--sp-8) + 14px); }
+.form-field-error, .form-media-error { margin: 0; color: var(--red); font-size: var(--fs-11); line-height: 1.5; }
+.form-pre { margin: 0; padding: var(--sp-8) var(--sp-10); border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-2); white-space: pre; overflow: auto; font: var(--fs-12)/1.6 var(--font-mono); }
+.form-list { margin: 0; padding-left: var(--sp-20); font-size: var(--fs-12); line-height: 1.6; color: var(--text-2); }
+.form-table-scroll { overflow-x: auto; }
+.form-table { width: 100%; border-collapse: collapse; font-size: var(--fs-12); line-height: 1.5; }
+.form-table th, .form-table td { padding: var(--sp-6) var(--sp-8); border-bottom: 1px solid var(--border); text-align: left; color: var(--text-2); }
+.form-table th { font-weight: var(--fw-medium); color: var(--text); }
+.form-figure { margin: 0; }
+.form-figure img { display: block; max-width: 100%; max-height: 260px; object-fit: contain; margin: 0 auto; border-radius: var(--r-6); }
+.form-figure figcaption { margin-top: var(--sp-4); color: var(--text-3); text-align: center; font-size: var(--fs-11); }
+.form-card > .dk-actions { position: sticky; bottom: 0; z-index: 3; flex: none; background: var(--surface); }
+.form-card > .ask-error { flex: none; }
+.form-card > .ask-error p { margin: 0; }
+.form-card > .ask-error .btn { margin-top: var(--sp-6); }
+.deck.preview-queue.is-form-expanded, .deck.preview-queue.is-form-expanded .deck-card { max-height: min(78vh, var(--deck-max-height, 78vh)); }
+.convo-wrap[data-reading-column] > .composer-region > .deck.is-form-expanded { --reading-deck-cap: max(0px, min(78vh, var(--deck-max-height, 78vh), calc(var(--reading-height, 100dvh) - var(--sp-16) - var(--sp-8)))); }
+.convo-wrap[data-reading-column] > .composer-region > .deck .dk-form-cell,
+.convo-wrap[data-reading-column] > .composer-region > .deck .form-card { flex: 0 1 auto; max-height: var(--reading-deck-cap); overflow: hidden; }
+.convo-wrap[data-reading-column] > .composer-region > .deck .form-head { flex: none; }
+.convo-wrap[data-reading-column] > .composer-region > .deck .form-card > .form-body { flex: 0 1 auto; }
+@container (max-width: 380px) {
+  .form-summary { gap: var(--sp-4); }
+  .form-compact { flex-wrap: wrap; }
+  .form-option-note, .form-other-input { padding-left: var(--sp-8); }
+}

@@ -1,4 +1,8 @@
-import { cfgClaudeResetsAutoRedeem } from "../src/session/settings";
+import {
+	cfgClaudeResetsAutoRedeem5h,
+	cfgClaudeResetsAutoRedeemWeekly,
+	cfgClaudeResetsAutoRedeemFable,
+} from "../src/session/settings";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { ResetCreditAccountStatus, ResetCreditTarget, UsageReport } from "@oh-my-pi/pi-ai";
@@ -178,11 +182,13 @@ describe("Studio Claude reset consent", () => {
 			"retry.baseDelayMs": 5,
 			"retry.maxDelayMs": 100,
 			"retry.maxRetries": 1,
-			"codexResets.autoRedeem": "no",
-
+			"codexResets.autoRedeem5h": "no",
+			"codexResets.autoRedeemWeekly": "no",
+			"claudeResets.autoRedeem5h": "no",
+			"claudeResets.autoRedeemFable": "unset",
 			"claudeResets.salvageHorizonHours": 12,
 		});
-		cfgClaudeResetsAutoRedeem.set(settings, options.autoRedeem ?? "yes");
+		cfgClaudeResetsAutoRedeemWeekly.set(settings, options.autoRedeem ?? "yes");
 		settings.setModelRole("default", `${model.provider}/${model.id}`);
 		const sessionManager = SessionManager.inMemory();
 		managers.push(sessionManager);
@@ -206,9 +212,9 @@ describe("Studio Claude reset consent", () => {
 				status: claudeStatus(false),
 				autoRedeem: "unset",
 			});
-			const handler = vi.fn(async ({ provider, message }: { provider: string; message: string }) => {
+			const handler = vi.fn(async ({ provider, settingKeys }: { provider: string; settingKeys: string[] }) => {
 				expect(provider).toBe("anthropic");
-				expect(message).toContain("Spend");
+				expect(settingKeys).toEqual(["claudeResets.autoRedeemWeekly"]);
 				return choice;
 			});
 			session.setResetConsentHandler(handler);
@@ -216,9 +222,11 @@ describe("Studio Claude reset consent", () => {
 			await coordinator.sweepPromise;
 			expect(handler).toHaveBeenCalledTimes(1);
 			expect(targets).toHaveLength(choice === "Yes" ? 1 : 0);
-			expect(cfgClaudeResetsAutoRedeem.get(session.settings)).toBe(
+			expect(cfgClaudeResetsAutoRedeemWeekly.get(session.settings)).toBe(
 				choice === "Yes" ? "yes" : choice === "No" ? "no" : "unset",
 			);
+			expect(cfgClaudeResetsAutoRedeem5h.get(session.settings)).toBe("no");
+			expect(cfgClaudeResetsAutoRedeemFable.get(session.settings)).toBe("unset");
 		});
 	}
 	it("does not redeem or remember approval when the Studio interaction fails", async () => {
@@ -235,6 +243,6 @@ describe("Studio Claude reset consent", () => {
 		await coordinator.sweepPromise;
 		expect(handler).toHaveBeenCalledTimes(1);
 		expect(targets).toHaveLength(0);
-		expect(cfgClaudeResetsAutoRedeem.get(session.settings)).toBe("unset");
+		expect(cfgClaudeResetsAutoRedeemWeekly.get(session.settings)).toBe("unset");
 	});
 });

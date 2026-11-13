@@ -3,7 +3,13 @@ import { formatModelStringWithRouting } from "../../config/model-resolver";
 import type { AgentSession } from "../../session/agent-session";
 import { discoverAgents } from "../../task/discovery";
 import { assertPerCallModelApproved, parentModelGrantPattern, PerCallModelError } from "../../task/model-approval";
-import { cfgTaskFile, cfgTaskMaxEffort, perCallModelEnabled } from "../../task/settings";
+import {
+	cfgTaskAutoParallel,
+	cfgTaskEnableEffort,
+	cfgTaskMaxEffort,
+	cfgTaskSteps,
+	perCallModelEnabled,
+} from "../../task/settings";
 import { SessionControlError } from "./session-control-service";
 
 /** The same grants used by task dispatch, including project narrowing and exact selector rules. */
@@ -41,7 +47,9 @@ export async function readStudioTaskOptions(session: AgentSession, definition: s
 				}))
 		: [];
 	return {
-		fileEnabled: cfgTaskFile.get(session.settings),
+		stepsAdvertised: cfgTaskSteps.get(session.settings),
+		autoParallel: cfgTaskAutoParallel.get(session.settings),
+		effortSelection: cfgTaskEnableEffort.get(session.settings),
 		modelSelection: allowed,
 		maxEffort: cfgTaskMaxEffort.get(session.settings),
 		models,

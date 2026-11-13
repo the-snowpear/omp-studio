@@ -15,8 +15,14 @@ export function normalizeModelName(name: string): string {
   return name.normalize("NFKC").toLowerCase().trim().replace(/[\s._]+/g, "-").replace(/-+/g, "-");
 }
 
-const catalogIndexes = new WeakMap<ModelCatalogDocument, ReturnType<typeof buildCatalogIndex>>();
-function buildCatalogIndex(catalog: ModelCatalogDocument) {
+interface ModelCatalogIndex {
+  exact: Map<string, ModelAdaptationCandidate[]>;
+  ids: Map<string, ModelAdaptationCandidate[]>;
+  names: Map<string, ModelAdaptationCandidate[]>;
+  apis: Map<string, Array<{ row: ModelAdaptationCandidate; name: string }>>;
+}
+const catalogIndexes = new WeakMap<ModelCatalogDocument, ModelCatalogIndex>();
+function buildCatalogIndex(catalog: ModelCatalogDocument): ModelCatalogIndex {
   const exact = new Map<string, ModelAdaptationCandidate[]>();
   const ids = new Map<string, ModelAdaptationCandidate[]>();
   const names = new Map<string, ModelAdaptationCandidate[]>();

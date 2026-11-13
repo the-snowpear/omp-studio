@@ -10,6 +10,7 @@ import { WorkspaceEmpty } from "../workspaces/Workspace";
 import { PREVIEW_BROWSER_TAB, PREVIEW_BROWSER_IMAGE } from "../preview/browserPreview";
 import "./browser.css";
 import { useSurfaceDocument, useSurfaceChrome } from "../dock/SurfaceContext";
+import { useBrowserVisible } from "./useNativeBrowserObservation";
 
 interface BrowserPaneProps {
   client: StudioClient;
@@ -20,7 +21,10 @@ interface BrowserPaneProps {
   available: boolean; visible: boolean; capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
 }
 
-/** Desktop pages need the native browser; Web UI, SSH and older Runtimes keep the observation view. */
+/** New runtimes expose descriptors for every backend; Electron availability only authorizes the explicit local adapter. */
+export function supportsNativeBrowser(available: boolean, capabilities: ClientBootstrap["capabilityManifest"] | undefined): boolean {
+  return available && capabilities?.capabilities.some(item => item.id === "browser.native.open" && item.grade !== "unavailable") === true;
+}
 export function useManagedBrowserAvailable(available: boolean, capabilities: ClientBootstrap["capabilityManifest"] | undefined): boolean {
   const { preview } = usePreviewMode();
   const api = useSurfaceChrome()?.managedBrowser;
@@ -32,12 +36,12 @@ export function useManagedBrowserAvailable(available: boolean, capabilities: Cli
     void api.available().then(value => { if (current) setNative(value); }, () => { if (current) setNative(false); });
     return () => { current = false; };
   }, [api, managed, preview]);
-  return preview || native;
+  return preview || supportsNativeBrowser(available, capabilities) || native;
 }
 
 export function BrowserPane(props: BrowserPaneProps) {
-  const native = useManagedBrowserAvailable(props.available, props.capabilities);
-  if (native) return <BrowserStartPanel sessionId={props.chatId} visible={props.visible} />;
+  const workspace = useManagedBrowserAvailable(props.available, props.capabilities);
+  if (workspace) return <BrowserStartPanel nativeClient={supportsNativeBrowser(props.available, props.capabilities) ? props.client : undefined} sessionId={props.chatId ?? props.sessionId} visible={props.visible} />;
   return <LegacyBrowserPane {...props} />;
 }
 function LegacyBrowserPane({ client, sessionId, available, visible, capabilities }: BrowserPaneProps) {
@@ -49,6 +53,9 @@ function LegacyBrowserPane({ client, sessionId, available, visible, capabilities
   const observation = useRef<string | undefined>(undefined); const epoch = useRef(0); const scope = useRef(""); const urlDirty = useRef(false); const picture = useRef<HTMLImageElement>(null);
   const chrome = useSurfaceChrome();
   const document = useSurfaceDocument();
+  const shown = useBrowserVisible(visible);
+  const nativeGeneration = useRef<string | undefined>(undefined);
+  const latestState = useRef(state), latestFrame = useRef(frame); latestState.current = state; latestFrame.current = frame;
   const enabled = preview || (available && !!sessionId && capabilities?.capabilities.some(item => item.id === "browser.tabs.get" && item.grade !== "unavailable") === true);
   const canObserve = preview || (enabled && !!chrome?.attachBrowserObservation && capabilities?.capabilities.some(item => item.id === "browser.observe.prepare" && item.grade !== "unavailable") === true);
   const human = state?.control === "human";
@@ -57,7 +64,11 @@ function LegacyBrowserPane({ client, sessionId, available, visible, capabilities
     if (preview) { if (input.kind === "take" || input.kind === "release") setState(current => ({ kind: "state", observationId: "demo", tabId: PREVIEW_BROWSER_TAB.id, title: PREVIEW_BROWSER_TAB.title, url: PREVIEW_BROWSER_TAB.url, busy: false, frozen: false, ...current, control: input.kind === "take" ? "human" : "agent" })); return; }
     const id = observation.current; if (!id) return;
     try {
-      const value = await chrome?.controlBrowserObservation?.({ observationId: id, input });
+      const generation = nativeGeneration.current, leaseId = latestState.current?.leaseId, documentEpoch = latestFrame.current?.documentEpoch ?? latestState.current?.documentEpoch;
+      const fence = generation ? { generation, ...(leaseId === undefined ? {} : { leaseId }), ...(documentEpoch === undefined ? {} : { documentEpoch }) } : {};
+      const fenced: BrowserObservationInput = input.kind === "take" || input.kind === "ack" ? { ...input, ...(generation ? { generation } : {}) }
+        : input.kind === "navigate" || input.kind === "click" || input.kind === "wheel" || input.kind === "key" || input.kind === "text" ? { ...input, ...fence } : input;
+      const value = await chrome?.controlBrowserObservation?.({ observationId: id, input: fenced });
       if (!value?.ok && observation.current === id) setError(value?.message ?? (zh ? "浏览器控制不可用" : "Browser control unavailable"));
     } catch (cause) { if (observation.current === id) setError(hostErrorMessage(cause, zh ? "浏览器连接中断" : "Browser connection interrupted")); }
   }, [preview, zh, chrome]);
@@ -66,7 +77,7 @@ function LegacyBrowserPane({ client, sessionId, available, visible, capabilities
     const scopeKey = (sessionId ?? "") + ":" + preview;
     if (scope.current !== scopeKey) { scope.current = scopeKey; setTabs(preview ? [PREVIEW_BROWSER_TAB] : []); setSelected(preview ? PREVIEW_BROWSER_TAB.id : ""); urlDirty.current = false; }
     setError(""); setBusy(false);
-    if (!visible || !enabled || document.hidden) return;
+    if (!shown || !enabled || document.hidden) return;
     let active = true; let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
@@ -85,7 +96,7 @@ function LegacyBrowserPane({ client, sessionId, available, visible, capabilities
     const hide = () => { if (document.hidden) { epoch.current++; detach(); } }; document.addEventListener("visibilitychange", hide);
     void poll();
     return () => { active = false; epoch.current++; clearTimeout(timer); clearInterval(heartbeat); unsubscribe?.(); document.removeEventListener("visibilitychange", hide); detach(); };
-  }, [client, sessionId, available, visible, enabled, preview, chrome, detach, send, zh, document]);
+  }, [client, sessionId, available, shown, enabled, preview, chrome, detach, send, zh, document]);
   const observe = async () => {
     const target = tabs.find(tab => tab.id === selected); if (!target?.observable || !canObserve || busy || !visible) return;
     const generation = ++epoch.current; detach(); setBusy(true); setError(""); urlDirty.current = false; setUrl(target.url);
@@ -94,9 +105,13 @@ function LegacyBrowserPane({ client, sessionId, available, visible, capabilities
       const handle = await client.command("browser.observe.prepare", { sessionId: sessionId!, tabId: selected });
       const { result } = await waitReceipt<{ result: BrowserObservationResultMap["browser.observe.prepare"] }>(client, handle.requestId);
       if (generation !== epoch.current || !visible || document.hidden) return; observation.current = result.observationId;
-      const attached = await chrome?.attachBrowserObservation?.({ observationId: result.observationId, sessionId: result.sessionId, tabId: result.tabId });
+      nativeGeneration.current = result.generation;
+      const attachment = { observationId: result.observationId, sessionId: result.sessionId, tabId: result.tabId, ...(result.generation ? { generation: result.generation } : {}) };
+      const attached = await chrome?.attachBrowserObservation?.(attachment);
       if (generation !== epoch.current) { void chrome?.detachBrowserObservation?.({ observationId: result.observationId }); return; }
-      if (!attached?.ok) throw new Error(attached?.message ?? "Desktop observation unavailable"); setObserving(true);
+      if (!attached?.ok) throw new Error(attached?.message ?? "Desktop observation unavailable");
+      if (result.generation) await send({ kind: "visibility", visible: true, capture: true });
+      setObserving(true);
     } catch (cause) { if (generation === epoch.current) { detach(); setError(hostErrorMessage(cause, zh ? "无法观察此标签" : "Cannot observe this tab")); } }
     finally { if (generation === epoch.current) setBusy(false); }
   };

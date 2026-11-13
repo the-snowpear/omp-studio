@@ -898,6 +898,12 @@ export class StudioHostClientFacade implements ClientTransport {
         }
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "models.systemTemplates.list":
+      case "models.systemTemplates.inspect":
+      case "models.systemTemplates.file.read":
+      case "models.auth.providers.read":
+      case "runtime.close.confirm":
+      case "interaction.form.read":
       case "agent.spawn.options.read":
       case "session.lease.read":
       case "session.cache.get":

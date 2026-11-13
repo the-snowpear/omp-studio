@@ -2700,6 +2700,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   color: var(--green);
 }
 .task-dock-mark.abandoned { border-style: dashed; opacity: 0.7; }
+.task-dock-legacy { flex: none; margin-left: auto; font-size: var(--fs-11); color: var(--text-3); }
+.task-dock-note { margin: 0 0 var(--sp-6); color: var(--text-3); font-size: var(--fs-11); line-height: 1.5; overflow-wrap: anywhere; }
+.task-dock-note.is-warning { display: flex; align-items: flex-start; gap: var(--sp-4); color: var(--amber); }
+.task-dock-partial { display: inline-flex; align-items: center; gap: var(--sp-4); font-size: var(--fs-11); color: var(--amber); }
 .task-dock-file {
   gap: var(--sp-6);
   padding: 0 var(--sp-4);
@@ -5782,6 +5786,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 /* 分段控件优先保住命中面积：空间不够时压文字标签，不压这两个按钮。 */
 .ch-toolbar .seg { flex: none; }
 .ch-toolbar .seg button { padding: 0 6px; }
+.ch-partial-notice { flex: none; display: flex; align-items: flex-start; gap: var(--sp-8); padding: var(--sp-10) var(--sp-12); border-bottom: 1px solid var(--border); background: var(--amber-soft); color: var(--text-2); font-size: var(--fs-12); line-height: 1.6; overflow-wrap: anywhere; }
+.ch-partial-notice > .icon { flex: none; color: var(--amber); margin-top: var(--sp-2); }
+.ch-partial-tag { display: inline-flex; align-items: center; gap: var(--sp-4); flex: none; color: var(--amber); font-family: var(--font-ui); font-size: var(--fs-11); white-space: nowrap; }
 .ch-list { flex: 1; min-height: 0; overflow-y: auto; }
 .ch-turn {
   position: relative;

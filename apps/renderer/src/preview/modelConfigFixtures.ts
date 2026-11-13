@@ -176,6 +176,10 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     }),
   ];
 
+  providers.push(provider({ id: "liquid", name: "Liquid AI", source: "builtin", status: "available", statusDetail: "Judge credentials configured", api: "liquid-systemone", local: false, enabled: true, auth: { type: "api-key", hasSecret: true }, models: [
+    { id: "d1.1", selector: "liquid/d1.1", name: "d1.1", kind: "judge", api: "liquid-systemone", contextWindow: 65536, image: true, reasoning: false, tools: false, cost: { input: .02, output: 0 }, status: "available", source: "catalog" },
+    { id: "d1-ultra", selector: "liquid/d1-ultra", name: "d1-ultra", kind: "judge", api: "liquid-systemone", contextWindow: 32768, image: true, reasoning: false, tools: false, cost: { input: .042, output: 0 }, status: "available", source: "catalog" },
+  ] }));
   const roles: ModelRoleRecord[] = [
     { id: "default", alias: "@default", name: "Default", desc: "默认主模型", builtin: true, primary: "anthropic/claude-sonnet-4.5", scope: "global" },
     { id: "smol", alias: "@smol", name: "Fast", desc: "快速、低成本任务", builtin: true, primary: "openai/gpt-5-mini", thinking: "low", scope: "global" },
@@ -192,7 +196,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
 
   for (const role of BUILTIN_MODEL_ROLES) {
     if (!roles.some(existing => existing.id === role.id)) {
-      roles.push({ ...role, alias: `@${role.id}`, builtin: true, primary: "", scope: "global" });
+      roles.push({ ...role, alias: `@${role.id}`, builtin: true, primary: role.id === "judge" ? "liquid/d1.1" : "", scope: "global" });
     }
   }
 
@@ -221,6 +225,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
         name: model.name,
         reasoning: model.reasoning,
         ...(model.kind === undefined ? {} : { kind: model.kind }),
+        ...(model.api === undefined ? {} : { api: model.api }),
         ...(item.id === "anthropic" ? { webSearch: "anthropic" } : model.webSearch === undefined ? {} : { webSearch: model.webSearch }),
         image: model.image,
         tools: model.tools,
@@ -232,7 +237,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     }),
   );
 
-  availableModels.push(...["parallel", "perplexity", "exa", "keenable", "deepseek", "ollama", "zai", "tinyfish", "jina", "kagi", "tavily", "firecrawl", "brave", "kimi", "synthetic", "searxng", "startpage", "duckduckgo", "ecosia", "google", "mojeek", "public"].map(id => ({ provider: "web", id, selector: "web/" + id, name: id, reasoning: false, kind: "search" as const })),
+  availableModels.push(...["parallel", "perplexity", "exa", "keenable", "deepseek", "ollama", "zai", "tinyfish", "sofya", "hackernews", "jina", "kagi", "tavily", "firecrawl", "brave", "kimi", "synthetic", "searxng", "startpage", "duckduckgo", "ecosia", "google", "mojeek", "public"].map(id => ({ provider: "web", id, selector: "web/" + id, name: id, reasoning: false, kind: "search" as const })),
     { provider: "local", id: "title-model", selector: "local/title-model", name: "Local title model", reasoning: false, kind: "tiny" },
     { provider: "local", id: "rule-judge", selector: "local/rule-judge", name: "Local judge", reasoning: false, kind: "judge" });
 
@@ -288,6 +293,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
         { id: "exa", name: "Exa", description: "Exa API with a key, public MCP without one", credentialFree: true, hasCredential: false, envKeys: ["EXA_API_KEY"], loginId: "exa", apiKeyId: "exa" },
         { id: "keenable", name: "Keenable", description: "API key or explicit keyless search", credentialFree: false, hasCredential: false, envKeys: ["KEENABLE_API_KEY"], apiKeyId: "keenable" },
         { id: "tinyfish", name: "TinyFish", description: "Requires TINYFISH_API_KEY", credentialFree: false, hasCredential: false, apiKeyId: "tinyfish" },
+        { id: "sofya", name: "Sofya", description: "Native Sofya search with the stored Sofya key", credentialFree: false, hasCredential: false, envKeys: ["SOFYA_API_KEY"], apiKeyId: "sofya", credentialProviders: ["sofya"] },
         { id: "jina", name: "Jina", description: "Requires JINA_API_KEY", credentialFree: false, hasCredential: false, apiKeyId: "jina" },
         { id: "kagi", name: "Kagi", description: "Requires KAGI_API_KEY and Kagi Search API beta access", credentialFree: false, hasCredential: false, apiKeyId: "kagi" },
         { id: "tavily", name: "Tavily", description: "Requires TAVILY_API_KEY", credentialFree: false, hasCredential: false, envKeys: ["TAVILY_API_KEY"], loginId: "tavily", apiKeyId: "tavily" },
@@ -304,6 +310,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
         { id: "google", name: "Google", description: "Credential-free browser-backed fallback; slower and may be bot-challenged", credentialFree: true, hasCredential: true },
         { id: "mojeek", name: "Mojeek", description: "Credential-free browser-backed scrape of Mojeek's independent index", credentialFree: true, hasCredential: true },
         { id: "public", name: "Public Web", description: "Queries every credential-free engine in parallel and consolidates deduplicated results", credentialFree: true, hasCredential: true },
+        { id: "hackernews", name: "Hacker News", description: "Keyless news.ycombinator.com route only; not a general-web fallback", credentialFree: true, hasCredential: false, siteRoute: "news.ycombinator.com", credentialProviders: [] },
       ],
       advanced: {
         searxng: { endpoint: "https://search.example.com", tokenSet: false, basicUsername: "", passwordSet: false, categories: "general,it", engines: "", language: "zh-CN" },

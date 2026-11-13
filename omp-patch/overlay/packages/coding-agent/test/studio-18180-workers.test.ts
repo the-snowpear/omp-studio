@@ -133,19 +133,15 @@ test("nine concurrent Studio agents reach native workers and retain conversation
 					});
 			} else if (
 				index === 8 &&
-				!body.messages.some(message => message.role === "tool" && text(message.content).includes("Proceed"))
+				!body.messages.some(
+					message => message.role === "tool" && text(message.content).includes('"check": "proceed"'),
+				)
 			) {
 				return response({
 					name: "ask",
 					id: "studio-ask",
 					args: {
-						questions: [
-							{
-								id: "check",
-								question: "Continue the worker check?",
-								options: [{ label: "Proceed" }, { label: "Stop" }],
-							},
-						],
+						html: '<form><fieldset><legend>Continue the worker check?</legend><label><input type="radio" name="check" value="proceed" checked>Proceed</label><label><input type="radio" name="check" value="stop">Stop</label></fieldset></form>',
 					},
 				});
 			}
@@ -293,14 +289,18 @@ test("nine concurrent Studio agents reach native workers and retain conversation
 		expect(
 			interaction.pending()?.request.kind,
 			workerDetail + "\n" + JSON.stringify(worker.messages).slice(-12000),
-		).toBe("ask");
+		).toBe("form");
 		const ask = interaction.pending()!.request;
+		const presented = interaction.readForm(ask.interactionId, interaction.pending()!.leaseGeneration).form;
+		expect(presented.fields.map(field => field.name)).toEqual(["check"]);
+		expect(presented.defaults).toEqual({ check: "proceed" });
 		interaction.respond({
 			kind: "interaction.respond",
 			commandId: ask.commandId,
 			interactionId: ask.interactionId,
+			leaseGeneration: interaction.pending()!.leaseGeneration,
 			decision: "submit",
-			value: { results: [{ id: "check", selectedOptions: ["Proceed"] }] },
+			value: { data: { check: "proceed" } },
 		});
 		const result = await pending[8]!;
 		expect(result.error).toBeUndefined();

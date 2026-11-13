@@ -1,4 +1,5 @@
 import { isRuntimeViewKind } from "./contracts/runtime-views.js";
+import { isModelServicesKind } from "./contracts/model-services.js";
 import { GUI_SETTING_KEYS, isGuiSettingKey, validateGuiSetting } from "./contracts/gui-settings.js";
 import { isContextViewKind } from "./contracts/context-view.js";
 import { isWorkbenchOperationKind, validateWorkbenchOperation } from "./contracts/workbench.js";
@@ -192,7 +193,9 @@ export function validateRuntimeSettingValue(
     case "providers.autoThinkingMaxEffort":
       oneOf(value, ["xhigh", "max"], path);
       return;
-    case "claudeResets.autoRedeem":
+    case "claudeResets.autoRedeem5h":
+    case "claudeResets.autoRedeemWeekly":
+    case "claudeResets.autoRedeemFable":
       oneOf(value, ["unset", "yes", "no"], path);
       return;
     case "ttsr.judge":
@@ -250,7 +253,9 @@ export function validateRuntimeSettingValue(
 const OPTIONAL_RUNTIME_SETTING_KEYS: ReadonlySet<string> = new Set([
   ...GUI_SETTING_KEYS,
   "modelRoles.judge",
-  "claudeResets.autoRedeem",
+  "claudeResets.autoRedeem5h",
+  "claudeResets.autoRedeemWeekly",
+  "claudeResets.autoRedeemFable",
   "claudeResets.minBlockedMinutes",
   "claudeResets.keepCredits",
   "claudeResets.salvageHorizonHours",
@@ -272,7 +277,10 @@ const OPTIONAL_RUNTIME_SETTING_KEYS: ReadonlySet<string> = new Set([
 ]);
 function validateRuntimeSettingsSnapshot(value: unknown, path: string): void {
   const settings = record(value, path);
-  exactKeys(settings, STUDIO_RUNTIME_SETTING_KEYS, path);
+  exactKeys(settings, [...STUDIO_RUNTIME_SETTING_KEYS, "claudeResets.autoRedeem", "codexResets.autoRedeem"], path);
+  for (const legacy of ["claudeResets.autoRedeem", "codexResets.autoRedeem"] as const) {
+    if (settings[legacy] !== undefined) oneOf(settings[legacy], ["unset", "yes", "no"], `${path}.${legacy}`);
+  }
   for (const key of STUDIO_RUNTIME_SETTING_KEYS) {
     if (settings[key] === undefined && OPTIONAL_RUNTIME_SETTING_KEYS.has(key)) continue;
     // Native config may contain values outside the editor's range. The Runtime
@@ -976,6 +984,10 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
         }
       }
       return;
+    case "form":
+      exactKeys(request, [...baseKeys, "summary", "fieldCount", "sectionCount", "timeoutMs"], path);
+      boundedInteractionString(request.summary, `${path}.summary`, INTERACTION_LIMITS.TITLE_MAX_CHARS);
+      return;
     case "ask": {
       exactKeys(request, [...baseKeys, "questions", "acceptImages"], path);
       if(request.acceptImages!==undefined&&typeof request.acceptImages!=="boolean")throw new ContractValidationError("invalid image capability",path);
@@ -1382,7 +1394,7 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "agent.spawn": {
-    keys: ["kind", "definition", "assignment", "taskFile", "context", "async", "isolation", "effort", "model", "solutionSpace"],
+    keys: ["kind", "definition", "assignment", "steps", "context", "async", "isolation", "effort", "model", "solutionSpace"],
     validate: (operation) => {
       if (operation.model !== undefined && (!Array.isArray(operation.model) || operation.model.length === 0 || operation.model.length > 8 || operation.model.some(value => typeof value !== "string" || !value.trim() || value.length > 1024 || /[\u0000-\u001f]/u.test(value)))) throw new ContractValidationError("invalid per-spawn model chain", "$request.operation.model");
       const definition = nonEmptyString(operation.definition, "$request.operation.definition");
@@ -1537,7 +1549,7 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "interaction.respond": {
-    keys: ["kind", "interactionId", "commandId", "decision", "value"],
+    keys: ["kind", "interactionId", "commandId", "leaseGeneration", "decision", "value"],
     validate: (operation) => {
       const interactionId = nonEmptyString(operation.interactionId, "$request.operation.interactionId");
       const commandId = nonEmptyString(operation.commandId, "$request.operation.commandId");
@@ -1590,6 +1602,7 @@ export function parseFoundationStudioRequest(value: unknown): StudioRequest {
   const kind = nonEmptyString(operation.kind, "$request.operation.kind");
   if (kind === "session.owner.update") return input as unknown as StudioRequest;
   if (isRuntimeViewKind(kind)) return input as unknown as StudioRequest;
+  if (isModelServicesKind(kind)) return input as unknown as StudioRequest;
   if (isContextViewKind(kind)) return input as unknown as StudioRequest;
   if (isWorkbenchOperationKind(kind)) {
     try { validateWorkbenchOperation(operation); } catch (error) { throw new ContractValidationError(error instanceof Error ? error.message : "invalid operation", "$request.operation"); }

@@ -1,5 +1,8 @@
+import type { InteractionForm } from "@omp-studio/studio-protocol";
+import { PREVIEW_FORM_LONG, PREVIEW_FORM_SHORT } from "./formPreview";
+
 /**
- * Preview Deck cards. Ask payload follows the OMP ask-tool questions schema.
+ * Preview Deck cards. Native forms use the safe presentation DTO; legacy Ask remains a compatibility surface.
  * Plan payload follows plan-mode review actions. Display only — never sent
  * through Host / Studio Bridge / the command reducer.
  * 每张 ask 卡一个问题（与 ver1「一卡一问 + 队列翻页」一致）：多个提问
@@ -36,6 +39,14 @@ export type PreviewDeckItem =
       readonly id: string;
       readonly meta?: string;
       readonly question: PreviewAskQuestion;
+    }
+  | {
+      readonly kind: "form";
+      readonly id: string;
+      readonly meta?: string;
+      readonly title: string;
+      readonly summary: string;
+      readonly form: InteractionForm;
     };
 
 export const PREVIEW_DECK_ITEMS: readonly PreviewDeckItem[] = [
@@ -73,46 +84,19 @@ export const PREVIEW_DECK_ITEMS: readonly PreviewDeckItem[] = [
     ].join("\n"),
   },
   {
-    kind: "ask",
-    id: "preview:deck:ask:inertia",
+    kind: "form",
+    id: "preview:deck:form:inertia",
     meta: "preview 子 Agent · 14:08",
-    question: {
-      id: "inertia",
-      question: "缩放交互确认：拖拽平移是否需要惯性？",
-      header: "惯性",
-      acceptImages: true,
-      recommended: 0,
-      options: [
-        {
-          label: "需要惯性",
-          description: "松手后继续滑行，大图定位更轻松。",
-          preview: "velocity *= 0.92; pan += velocity",
-        },
-        {
-          label: "不需要",
-          description: "松手即停，像素级对齐更稳。",
-        },
-        {
-          label: "做成设置项",
-          description: "默认关闭，Preview 面板里可打开。",
-        },
-      ],
-    },
+    title: "Agent 提问",
+    summary: "确认 Preview 拖拽与缩放的默认行为",
+    form: PREVIEW_FORM_SHORT,
   },
   {
-    kind: "ask",
-    id: "preview:deck:ask:default",
+    kind: "form",
+    id: "preview:deck:form:parameters",
     meta: "preview 子 Agent · 14:08",
-    question: {
-      id: "default",
-      question: "如果做成设置项，**默认值**怎么定？",
-      header: "默认",
-      acceptImages: true,
-      recommended: 1,
-      options: [
-        { label: "默认开", description: "新会话直接带惯性。" },
-        { label: "默认关", description: "保持现在的精确拖拽。" },
-      ],
-    },
+    title: "Agent 提问",
+    summary: "确认惯性参数、设置入口与验收条件",
+    form: PREVIEW_FORM_LONG,
   },
 ];

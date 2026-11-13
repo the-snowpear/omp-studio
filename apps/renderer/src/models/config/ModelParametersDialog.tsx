@@ -3,7 +3,10 @@ import type { TranslationParams } from "../../i18n";
 import { ModelParameterEditor } from "../ModelParameterEditor";
 import { modelParameterDraftError } from "../modelParameterDraft";
 import { AppSelect } from "../../AppSelect";
-import type { ModelConfigReadModel, StudioClient } from "@omp-studio/client-contract";
+import type { AvailableModelRecord, ModelConfigReadModel, StudioClient } from "@omp-studio/client-contract";
+import type { ModelServiceContext } from "../useModelAuth";
+import { ModelSystemTemplateInspector } from "../ModelSystemTemplates";
+import { useI18n } from "../../i18n";
 import { Icon } from "../../icons";
 import { MODEL_API_TYPES } from "../../preview/modelConfigFixtures";
 import { type Draft, type DraftOverrideForm, type ModelEditState, type ModelsTab } from "./types";
@@ -11,6 +14,8 @@ import { applyOverrideToDraft, entryFromCustomForm, updateModelParameterDraft } 
 import { BedrockMessagesControl, ModelCompatControl, NativeTransportFacts } from "./ProviderControls";
 
 interface ModelParametersDialogProps {
+  context: ModelServiceContext;
+  availableModels: readonly AvailableModelRecord[];
   modelEditLeaving: boolean;
   setModelEdit: Dispatch<SetStateAction<ModelEditState | null>>;
   modelEditView: ModelEditState;
@@ -26,7 +31,11 @@ interface ModelParametersDialogProps {
   setModelsTab: Dispatch<SetStateAction<ModelsTab>>;
 }
 
-export function ModelParametersDialog({ modelEditLeaving, setModelEdit, modelEditView, t, client, preview, modelEditHost, data, editor, persistProviderDraft, setEditor, toast, setModelsTab }: ModelParametersDialogProps) {
+export function ModelParametersDialog({ context, availableModels, modelEditLeaving, setModelEdit, modelEditView, t, client, preview, modelEditHost, data, editor, persistProviderDraft, setEditor, toast, setModelsTab }: ModelParametersDialogProps) {
+  const { resolvedLanguage } = useI18n();
+  const selector = `${modelEditHost.id}/${modelEditView.kind === "override" ? modelEditView.modelId : modelEditView.draft.id}`;
+  const model = availableModels.find(row => row.selector === selector);
+  if (model?.kind === "judge") return <div className="modal-backdrop mc-model-modal" role="presentation" onMouseDown={() => setModelEdit(null)}><div className="modal" role="dialog" aria-modal="true" aria-label={resolvedLanguage === "zh" ? "原生 Judge 模型详情" : "Native Judge model details"} onMouseDown={event => event.stopPropagation()}><div className="modal-head">{model.name} · Judge</div><div className="modal-body"><p className="small muted">{resolvedLanguage === "zh" ? "此模型只用于 Judge 角色与原生评测，不接入聊天参数表，也不使用聊天系统模板。请在 Judge 角色中管理模型与凭据。" : "This model serves the Judge role and native evaluations, not chat parameters or chat system templates. Manage its model and credentials in the Judge role."}</p><dl><dt>Selector</dt><dd><code>{model.selector}</code></dd><dt>Native API</dt><dd><code>{model.api ?? modelEditHost.api}</code></dd><dt>Context</dt><dd>{model.contextWindow?.toLocaleString() ?? "—"} tokens</dd></dl></div><div className="modal-foot"><button className="btn outline" onClick={() => setModelEdit(null)}>{t("common.close")}</button></div></div></div>;
   return (<div className={`modal-backdrop mc-model-modal${modelEditLeaving ? " is-leaving" : ""}`} role="presentation" onMouseDown={() => { if (!modelEditLeaving) setModelEdit(null); }}>
                 <div className="modal" role="dialog" aria-modal="true" aria-label={modelEditView.kind === "override" ? "Model Override" : t("modelConfig.editModel")} style={{ width: 600 }} onMouseDown={(event) => event.stopPropagation()}>
                   {modelEditView.kind === "override" ? (
@@ -103,6 +112,7 @@ export function ModelParametersDialog({ modelEditLeaving, setModelEdit, modelEdi
                             </div>
                           </div>
                         </details>
+                        <ModelSystemTemplateInspector context={context} selector={selector} visible={!modelEditLeaving && !!model} />
                       </div>
                       <div className="modal-foot">
                         <button type="button" className="btn outline" onClick={() => setModelEdit(null)}>{t("common.cancel")}</button>
@@ -205,6 +215,7 @@ export function ModelParametersDialog({ modelEditLeaving, setModelEdit, modelEdi
                             </div>
                           </div>
                         </details>
+                        <ModelSystemTemplateInspector context={context} selector={selector} visible={!modelEditLeaving && !!model} />
                       </div>
                       <div className="modal-foot">
                         <button type="button" className="btn outline" onClick={() => setModelEdit(null)}>{t("common.cancel")}</button>

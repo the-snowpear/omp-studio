@@ -7,7 +7,7 @@ import { LIVE_AUDIO_CHANNELS, type LiveAudioAttach, type LiveAudioChunk, type Li
 import { DICTATION_AUDIO_CHANNELS, type DictationAudioApi, type DictationAudioAttach, type DictationAudioResult, type DictationDesktopEvent } from "./dictation-audio-shared.js";
 import { BROWSER_OBSERVATION_CHANNELS, type BrowserObservationAttach, type BrowserObservationControl, type BrowserObservationEvent, type BrowserObservationResult } from "./browser-observation-shared.js";
 import { validateBrowserObservationEvent } from "@omp-studio/studio-protocol";
-import type { ManagedBrowserApi, ManagedBrowserEvent, ManagedBrowserState } from "@omp-studio/studio-protocol";
+import type { ManagedBrowserApi, ManagedBrowserEvent, ManagedBrowserState, BrowserPageInspection } from "@omp-studio/studio-protocol";
 import { MANAGED_BROWSER_CHANNELS } from "./managed-browser-shared.js";
 import { COMPUTER_CAPTURE_CHANNEL, type ComputerCaptureRequest, type ComputerCaptureResult } from "./computer-observation-shared.js";
 import { COMPUTER_FRAME_CHANNELS, type ComputerFrameRequest, type ComputerFrameReadResult, type ComputerFrameSaveResult } from "./computer-frames-shared.js";
@@ -153,6 +153,7 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
       read: sessionId => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.read, sessionId) as Promise<ManagedBrowserState>,
       execute: command => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.execute, command) as Promise<ManagedBrowserState>,
       present: presentation => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.present, presentation) as Promise<void>,
+      inspect: request => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.inspect, request) as Promise<BrowserPageInspection>,
       subscribe: listener => subscribeChannel<ManagedBrowserEvent>(ipcRenderer, MANAGED_BROWSER_CHANNELS.event, listener),
     }),
     attachBrowserObservation(input: BrowserObservationAttach): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.attach, input) as Promise<BrowserObservationResult>; },

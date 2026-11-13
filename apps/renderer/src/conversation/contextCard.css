@@ -25,7 +25,12 @@
 .context-card-meter-wrap { position: relative; height: 4px; margin: 9px 0 10px; }
 .context-card-meter { display: flex; height: 4px; overflow: hidden; border-radius: var(--r-full); background: var(--context-free); }
 .context-card-threshold-marker { position: absolute; top: -3px; width: 2px; height: 10px; border-radius: 1px; background: var(--text-3); box-shadow: 0 0 0 2px var(--bg); transform: translateX(-1px); }
-.context-card-meter > i { flex: 0 0 auto; height: 100%; }
+.context-card-meter > i { flex: 0 0 auto; height: 100%; box-sizing: border-box; }
+.context-card-meter > i + i { border-left: 2px solid var(--surface); }
+.context-card-meter > i:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+.context-card-dot[data-context-group="messages"] { border-radius: var(--r-full); }
+.context-card-dot[data-context-group="instructions"] { transform: rotate(45deg); border-radius: 1px; }
+.context-card-dot[data-context-group="system"] { width: 10px; height: 3px; border-radius: 1px; }
 .context-card-rows { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: thin; }
 .context-card-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) 48px 45px; align-items: center; gap: 8px; min-height: 25px; font-size: var(--fs-12); }
 .context-card-dot { width: 8px; height: 8px; border-radius: 2px; justify-self: center; }
@@ -80,6 +85,11 @@
 .context-dash-bar > i { display: block; height: 100%; border-radius: inherit; }
 .context-dash-row .context-card-tokens, .context-dash-row .context-card-percent { font-size: var(--fs-12); }
 .context-card.is-wide .context-card-footer { padding: 12px 4px 0; border-top: 1px solid var(--border); }
+@media print, (forced-colors: active) {
+  .context-card-meter i[data-context-group="tools"], .context-card-meter i[data-context-group="system"] { background-image: repeating-linear-gradient(45deg, transparent 0 3px, CanvasText 3px 5px); }
+  .context-card-meter i[data-context-group="instructions"] { background-image: repeating-linear-gradient(135deg, transparent 0 3px, CanvasText 3px 5px); }
+  .context-ring circle:not(.context-ring-track) { stroke: CanvasText; }
+}
 
 .context-threshold { display: flex; align-items: center; gap: 6px; min-width: 0; height: 24px; }
 .context-threshold-title, .context-threshold input { font: inherit; line-height: 1.4; }

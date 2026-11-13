@@ -1,6 +1,6 @@
 .native-maintenance {
   min-width: 0;
-  font-size: var(--fs-13);
+  font-size: var(--fs-12);
 }
 .maintenance-section {
   padding: var(--sp-20) 0;
@@ -107,6 +107,43 @@
 }
 .maintenance-check-error {
   color: var(--red);
+}
+.maintenance-strip {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: var(--sp-4) 0 var(--sp-16);
+  padding: var(--sp-12) 0 0;
+  min-width: 0;
+}
+.maintenance-strip-toggle,
+.maintenance-strip-options,
+.maintenance-strip-options label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+}
+.maintenance-strip-toggle {
+  font-weight: var(--fw-medium);
+  font-size: var(--fs-12);
+}
+.maintenance-strip input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+.maintenance-strip-options {
+  gap: var(--sp-12);
+}
+.maintenance-strip-options .input {
+  width: 10em;
+  font-size: var(--fs-12);
+}
+.maintenance-strip-result {
+  margin-top: var(--sp-16);
+}
+.maintenance-strip-result h4 {
+  margin: 0;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
 }
 @media (max-width: 600px) {
   .maintenance-checks li {

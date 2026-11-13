@@ -1,4 +1,5 @@
 import { createModelCatalogService, createModelOriginStore } from "./model-adaptation.js";
+import { BUILTIN_MODEL_CATALOG } from "./model-catalog.generated.js";
 import { modelParameterValues, parseModelThinkingConfig, providerModelYamlNode, providerOverrideYamlNode } from "@omp-studio/client-contract";
 import type { ModelParameterValues, ModelParameterSources } from "@omp-studio/client-contract";
 import { migrateModelRoleConfig } from "./model-role-migration.js";
@@ -71,6 +72,7 @@ const WEB_SEARCH_PROVIDER_CATALOG: ReadonlyArray<{
   name: string;
   description: string;
   credentialFree: boolean;
+  siteRoute?: string;
 }> = [
   { id: "parallel", name: "Parallel", description: "Keyless search with optional PARALLEL_API_KEY authentication", credentialFree: true },
   { id: "perplexity", name: "Perplexity", description: "Uses auth when configured; explicit selection falls back to anonymous search", credentialFree: false },
@@ -82,6 +84,7 @@ const WEB_SEARCH_PROVIDER_CATALOG: ReadonlyArray<{
   { id: "exa", name: "Exa", description: "API via /login exa or EXA_API_KEY; public MCP without a key", credentialFree: true },
   { id: "keenable", name: "Keenable", description: "KEENABLE_API_KEY or stored key; explicit selection can use the public keyless endpoint", credentialFree: false },
   { id: "tinyfish", name: "TinyFish", description: "Requires TINYFISH_API_KEY", credentialFree: false },
+  { id: "sofya", name: "Sofya", description: "Native Sofya search using SOFYA_API_KEY or the stored Sofya credential", credentialFree: false },
   { id: "jina", name: "Jina", description: "Requires JINA_API_KEY", credentialFree: false },
   { id: "kagi", name: "Kagi", description: "Requires KAGI_API_KEY and Kagi Search API beta access", credentialFree: false },
   { id: "tavily", name: "Tavily", description: "Requires TAVILY_API_KEY", credentialFree: false },
@@ -98,6 +101,7 @@ const WEB_SEARCH_PROVIDER_CATALOG: ReadonlyArray<{
   { id: "google", name: "Google", description: "Credential-free browser-backed fallback; slower and may be bot-challenged", credentialFree: true },
   { id: "mojeek", name: "Mojeek", description: "Credential-free browser-backed scrape of Mojeek's independent index", credentialFree: true },
   { id: "public", name: "Public Web", description: "Queries every credential-free engine in parallel and consolidates deduplicated results", credentialFree: true },
+  { id: "hackernews", name: "Hacker News", description: "Native keyless route for news.ycombinator.com only; not a general-web fallback", credentialFree: true, siteRoute: "news.ycombinator.com" },
 ];
 
 /** Search-specific env vars per provider id (mirrors upstream credential lookup). */
@@ -109,6 +113,7 @@ const WEB_SEARCH_ENV_CREDENTIALS: Readonly<Record<string, readonly string[]>> = 
   zai: ["ZAI_API_KEY"],
   exa: ["EXA_API_KEY"],
   tinyfish: ["TINYFISH_API_KEY"],
+  sofya: ["SOFYA_API_KEY"],
   keenable: ["KEENABLE_API_KEY"],
   jina: ["JINA_API_KEY"],
   kagi: ["KAGI_API_KEY"],
@@ -133,6 +138,7 @@ const WEB_SEARCH_AUTH_IDS: Readonly<Record<string, readonly string[]>> = {
   zai: ["zai"],
   exa: ["exa"],
   tinyfish: ["tinyfish"],
+  sofya: ["sofya"],
   keenable: ["keenable"],
   kimi: ["kimi-code"],
   kagi: ["kagi"],
@@ -160,6 +166,7 @@ const WEB_SEARCH_APIKEY_IDS: Readonly<Record<string, string>> = {
   zai: "zai",
   exa: "exa",
   tinyfish: "tinyfish",
+  sofya: "sofya",
   keenable: "keenable",
   jina: "jina",
   kagi: "kagi",
@@ -173,28 +180,7 @@ const WEB_SEARCH_APIKEY_IDS: Readonly<Record<string, string>> = {
   synthetic: "synthetic",
 };
 
-/**
- * `omp login` ids actually offered in the modal. Restricted to ids that exist
- * in the runtime's OAuth registry (`packages/ai/src/registry/*` with a
- * `login`) AND whose flow emits the browser URL before any terminal prompt —
- * RPC-mode login rejects prompt-first providers (google-gemini-cli) and
- * unknown ids (brave/firecrawl/jina/tinyfish) outright. Keyless or env-only
- * engines keep working through the API-key / env paths.
- */
-const WEB_SEARCH_OAUTH_LOGIN_IDS: ReadonlySet<string> = new Set([
-  "perplexity",
-  "anthropic",
-  "openai-codex",
-  "xai",
-  "zai",
-  "exa",
-  "kagi",
-  "tavily",
-  "kimi-code",
-  "parallel",
-  "synthetic",
-]);
-
+/** Native login availability and API-key-vs-OAuth flow come from AuthStorage's registry, not the old RPC prompt-order whitelist. */
 function hasWebSearchCredential(
   providerId: string,
   authenticated: ReadonlySet<string>,
@@ -581,14 +567,14 @@ interface ProviderYaml {
 }
 
 function webSearchProviderRecord(
-  provider: { id: string; name: string; description: string; credentialFree: boolean },
+  provider: { id: string; name: string; description: string; credentialFree: boolean; siteRoute?: string },
   authenticated: ReadonlySet<string>,
   authKinds: ReadonlyMap<string, ReadonlySet<string>>,
 ) {
   const envKeys = WEB_SEARCH_ENV_CREDENTIALS[provider.id] ?? [];
   const authIds = WEB_SEARCH_AUTH_IDS[provider.id] ?? [];
   const firstAuthId = authIds[0];
-  const loginId = firstAuthId !== undefined && WEB_SEARCH_OAUTH_LOGIN_IDS.has(firstAuthId) ? firstAuthId : undefined;
+  const loginId = firstAuthId;
   const apiKeyId = WEB_SEARCH_APIKEY_IDS[provider.id];
   const hasEnv = envKeys.some((name) => (process.env[name] ?? "").length > 0);
   const hasApiKeyRow = Boolean(apiKeyId && authKinds.get(apiKeyId)?.has("api_key"))
@@ -606,6 +592,7 @@ function webSearchProviderRecord(
     name: provider.name,
     description: provider.description,
     credentialFree: provider.credentialFree,
+    ...(provider.siteRoute ? { siteRoute: provider.siteRoute } : {}),
     hasCredential: hasWebSearchCredential(provider.id, authenticated),
     envKeys,
     credentialProviders: [...new Set([...(apiKeyId ? [apiKeyId] : []), ...authIds])],
@@ -2172,14 +2159,18 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         getAvailable(join(paths.agentDir, "models.db")),
       ]);
       const { authenticated, authKinds } = auth;
+      // Credential-scoped cache namespaces are resolved by the live native registry.
+      // A Host disk snapshot cannot authorize another workspace's ids/prices with this key.
+      const credentialScoped = new Set(BUILTIN_MODEL_CATALOG.nativeProviders?.filter(provider => provider.credentialScoped).map(provider => provider.id));
+      const publicCache = available.filter(model => !credentialScoped.has(model.provider));
       const providersMap = asRecord(file.root.providers) ?? {};
-      const fromFile = Object.keys(providersMap).map((id) => providerFromYaml(id, asRecord(providersMap[id]) ?? {}, available, disabled, authenticated));
+      const fromFile = Object.keys(providersMap).map((id) => providerFromYaml(id, asRecord(providersMap[id]) ?? {}, publicCache, disabled, authenticated));
       const existing = new Set(fromFile.map((provider) => provider.id));
       // models.db also holds bundled static catalogs the operator never opted into
       // (zenmux). Keep yaml providers, plus cache providers with auth/env.
-      const providers = [...fromFile, ...providersFromAvailable(available, existing, disabled, authenticated)];
+      const providers = [...fromFile, ...providersFromAvailable(publicCache, existing, disabled, authenticated)];
       const cacheBySelector = new Map<string, AvailableModelRecord>();
-      for (const model of available) {
+      for (const model of publicCache) {
         if (model.thinking && model.thinking.length > 0 && !cacheBySelector.has(model.selector)) cacheBySelector.set(model.selector, model);
       }
       const yamlAvailable: AvailableModelRecord[] = fromFile.flatMap((provider) =>
@@ -2197,7 +2188,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         providers.filter((provider) => !disabled.has(provider.id)).map((provider) => provider.id),
       );
       const availableBySelector = new Map<string, AvailableModelRecord>();
-      for (const model of [...yamlAvailable, ...available]) {
+      for (const model of [...yamlAvailable, ...publicCache]) {
         if (!selectableProviders.has(model.provider)) continue;
         availableBySelector.set(model.selector, model);
       }

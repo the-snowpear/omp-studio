@@ -32,6 +32,9 @@ import { hubFaceClass, useHubChatCloseMotion } from "./agents/hub/useHubChatMoti
 import { AgentCard, EmptyBlock, KbdHint, TreeGroup } from "./agents/hub/AgentCards";
 import { HubAgentOverview } from "./agents/hub/HubAgentOverview";
 import { HubJobRow } from "./agents/hub/HubJobRow";
+import { TaskAssignmentEditor, createTaskStep, type TaskAssignmentMode, type TaskStepDraft } from "./agents/TaskAssignmentEditor";
+import { TaskStepsView } from "./agents/TaskStepsView";
+import { previewTaskStepsForAgent } from "./preview/taskStepsPreview";
 
 export type { HubView } from "./agents/hub/types";
 
@@ -98,8 +101,8 @@ export function AgentHubPage({
   const [spawnTask, setSpawnTask] = useState("");
   const [spawnEffort, setSpawnEffort] = useState("");
   const [spawnModel, setSpawnModel] = useState("");
-  const [spawnFileMode, setSpawnFileMode] = useState(false);
-  const [spawnFile, setSpawnFile] = useState("");
+  const [spawnMode, setSpawnMode] = useState<TaskAssignmentMode>("single");
+  const [spawnSteps, setSpawnSteps] = useState<TaskStepDraft[]>(() => [createTaskStep()]);
   const [spawnOptions, setSpawnOptions] = useState<RuntimeFeatureResultMap["agent.spawn.options"]>();
   const [spawnOptionsError, setSpawnOptionsError] = useState("");
   const spawnLock = useRef(false);
@@ -159,7 +162,7 @@ export function AgentHubPage({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const { preview } = usePreviewMode();
+  const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [workspaceTab, setWorkspaceTab] = useState<
@@ -175,6 +178,9 @@ export function AgentHubPage({
       connOnline &&
       client !== undefined &&
       !missingCap(capabilities, "agent.spawn"));
+  const spawnTip = preview
+    ? marks ? zh ? "演示创建，不会执行任务" : "Preview creation; no task runs" : undefined
+    : !viewingLive ? CONTRACT.historicalWrite : missingCap(capabilities, "agent.spawn") ? CONTRACT.spawn : undefined;
   useEffect(() => {
     spawnEpoch.current++;
     spawnLock.current = false;
@@ -187,13 +193,25 @@ export function AgentHubPage({
   }, [client, preview, parentSessionId, snapshot?.sessionId]);
   useEffect(() => {
     let alive = true;
-    setSpawnOptions(undefined); setSpawnOptionsError(""); setSpawnModel(""); setSpawnFileMode(false);
+    setSpawnOptions(undefined); setSpawnOptionsError(""); setSpawnModel(""); setSpawnEffort("");
     if (modal?.kind !== "spawn" || !spawnDefinition) return;
     if (preview) { setSpawnOptions(PREVIEW_TASK_SPAWN_OPTIONS); return; }
     if (!client || !snapshot?.sessionId || missingCap(capabilities, "agent.spawn.options")) return;
     void client.query("agent.spawn.options.read", { sessionId: snapshot.sessionId, definition: spawnDefinition }).then(result => { if (alive) setSpawnOptions(result); }).catch(error => { if (alive) setSpawnOptionsError(error instanceof Error ? error.message : String(error)); });
     return () => { alive = false; };
   }, [modal?.kind, spawnDefinition, client, snapshot?.sessionId, capabilities, preview]);
+  const spawnStepsSupported = preview || typeof spawnOptions?.stepsAdvertised === "boolean";
+  const spawnInstructionsReady = spawnMode === "steps"
+    ? spawnStepsSupported && spawnSteps.length > 0 && spawnSteps.every(step => step.text.trim()) && spawnSteps.reduce((size, step) => size + step.text.length, 0) <= 65536
+    : !!spawnTask.trim();
+  const spawnControlsLocked = !spawnAvailable || commandBusy;
+  const chooseSpawnMode = (mode: TaskAssignmentMode) => {
+    if (mode === "steps" && !spawnStepsSupported) return;
+    if (mode === "steps" && spawnSteps.length === 1 && !spawnSteps[0]!.text.trim() && spawnTask.trim()) {
+      setSpawnSteps([{ ...spawnSteps[0]!, text: spawnTask }]);
+    }
+    setSpawnMode(mode);
+  };
   const chatRuntimeConnected = viewingLive && (runtimeConnected ?? connOnline);
   const chatCanSend = (canSend ?? false) && viewingLive && !preview;
   const limited = runtime?.classification === "limited-system";
@@ -784,17 +802,7 @@ export function AgentHubPage({
             className="btn small primary"
             type="button"
             disabled={!spawnAvailable || commandBusy}
-            data-tip={
-              preview
-                ? zh
-                  ? "演示创建，不会执行任务"
-                  : "Preview creation; no task runs"
-                : !viewingLive
-                  ? CONTRACT.historicalWrite
-                  : missingCap(capabilities, "agent.spawn")
-                    ? CONTRACT.spawn
-                    : undefined
-            }
+            data-tip={spawnTip}
             onClick={() => {
               setNotice(null);
               setModal({ kind: "spawn" });
@@ -853,7 +861,10 @@ export function AgentHubPage({
       </>
     );
   };
-  const renderOverview = (agent: HubAgent) => <HubAgentOverview zh={zh} select={select} agent={agent} />;
+  const renderOverview = (agent: HubAgent) => {
+    const taskSteps = preview ? previewTaskStepsForAgent(agent.id) : (agents ?? snapshot?.agents ?? []).find(row => row.agentId === agent.id)?.taskSteps;
+    return <>{taskSteps ? <TaskStepsView key={agent.id} state={taskSteps} zh={zh} /> : null}<HubAgentOverview zh={zh} select={select} agent={agent} /></>;
+  };
   const renderJobRow = (row: JobTreeRow<HubJob>, agent?: HubAgent) => <HubJobRow key={row.job.id} selectedJobId={selectedJobId} setSelectedJobId={setSelectedJobId} zh={zh} preview={preview} viewingLive={viewingLive} commandBusy={commandBusy} connOnline={connOnline} client={client} capabilities={capabilities} cancelJob={cancelJob} parentSessionId={parentSessionId} snapshot={snapshot} resyncRequired={resyncRequired} row={row} agent={agent} />;
 
   const renderJobs = (agent?: HubAgent) => {
@@ -1070,7 +1081,7 @@ export function AgentHubPage({
           { id: "services", label: zh ? "服务" : "Services", icon: "server" },
         ]}
       />
-      {!modal && notice ? (
+      {!modal && notice && (!preview || marks) ? (
         <div
           className={`hub-notice ${notice.kind}`}
           role={notice.kind === "ok" ? "status" : "alert"}
@@ -1233,17 +1244,7 @@ export function AgentHubPage({
               className="btn small primary"
               type="button"
               disabled={!spawnAvailable || commandBusy}
-              data-tip={
-                preview
-                  ? zh
-                    ? "演示创建，不会执行任务"
-                    : "Preview creation; no task runs"
-                  : !viewingLive
-                    ? CONTRACT.historicalWrite
-                    : missingCap(capabilities, "agent.spawn")
-                      ? CONTRACT.spawn
-                      : undefined
-              }
+              data-tip={spawnTip}
               onClick={() => {
                 setNotice(null);
                 setModal({ kind: "spawn" });
@@ -1547,7 +1548,7 @@ export function AgentHubPage({
           onMouseDown={() => setModal(null)}
         >
           <div
-            className="modal hub-modal"
+            className={`modal hub-modal${modal.kind === "spawn" ? " is-spawn" : ""}`}
             role="dialog"
             aria-modal="true"
             aria-label={
@@ -1580,113 +1581,41 @@ export function AgentHubPage({
                     </div>
                   ) : null}
                   <div className="hub-na-grid">
-                    <div className="hub-na-row">
-                      <div className="field">
-                        <label className="tiny muted" htmlFor="naTask">
-                          {zh ? "任务描述" : "Assignment"}
-                        </label>
-                        <label className="tiny muted"><input type="checkbox" checked={spawnFileMode} disabled={!spawnOptions?.fileEnabled || commandBusy} onChange={event => setSpawnFileMode(event.target.checked)} />{zh ? "使用任务文件" : "Use a task file"}</label>
-                        {spawnFileMode ? <input className="input" id="naTask" value={spawnFile} onChange={event => setSpawnFile(event.target.value)} placeholder={zh ? "当前工作环境中的绝对路径或 local:// 文件" : "Absolute path in this environment or local:// file"} disabled={!spawnAvailable || commandBusy} /> :
-                        <textarea
-                          className="input"
-                          id="naTask"
-                          rows={3}
-                          placeholder={
-                            zh
-                              ? "描述代理需要完成的工作…"
-                              : "Describe the work for this agent…"
-                          }
-                          value={spawnTask}
-                          onChange={(event) => setSpawnTask(event.target.value)}
-                          disabled={!spawnAvailable || commandBusy}
-                        />}
-                      </div>
+                    <div className="field">
+                      <label className="tiny muted" htmlFor="naRole">{zh ? "代理定义" : "Agent definition"}</label>
+                      <AppSelect className="select" id="naRole" value={spawnDefinition} onChange={event => setSpawnDefinition(event.target.value)} disabled={spawnControlsLocked || !spawnDefinitions?.length}>
+                        {spawnDefinitions === null ? <option value="">{zh ? "读取定义中…" : "Loading definitions…"}</option> : spawnDefinitions.length === 0 ? <option value="">{zh ? "暂无可用代理定义" : "No agent definitions available"}</option>
+                          : spawnDefinitions.map(definition => <option key={definition.name} value={definition.name}>{definition.name}{definition.description ? ` — ${definition.description.slice(0, 60)}` : ""}</option>)}
+                      </AppSelect>
                     </div>
-                    <div className="hub-na-row">
-                      <div className="field">
-                        <label className="tiny muted" htmlFor="naSolutionSpace">解题范围 / Solution space</label>
-                        <textarea className="input" id="naSolutionSpace" rows={3} maxLength={65536} value={spawnSolutionSpace} onChange={event => setSpawnSolutionSpace(event.target.value)} placeholder="允许探索的方案、限制与边界 / Allowed approaches and constraints" disabled={!preview && (commandBusy || missingCap(capabilities, "session.skills.list"))} />
-                        <label className="tiny muted" htmlFor="naRole">
-                          {zh ? "代理定义" : "Agent definition"}
-                        </label>
-                        <AppSelect
-                          className="select"
-                          id="naRole"
-                          value={spawnDefinition}
-                          onChange={(event) =>
-                            setSpawnDefinition(event.target.value)
-                          }
-                          disabled={
-                            !spawnAvailable ||
-                            commandBusy ||
-                            spawnDefinitions === null ||
-                            spawnDefinitions.length === 0
-                          }
-                        >
-                          {spawnDefinitions === null ? (
-                            <option value="">
-                              {zh ? "读取定义中…" : "Loading definitions…"}
-                            </option>
-                          ) : spawnDefinitions.length === 0 ? (
-                            <option value="">
-                              {zh
-                                ? "暂无可用代理定义"
-                                : "No agent definitions available"}
-                            </option>
-                          ) : (
-                            spawnDefinitions.map((definition) => (
-                              <option
-                                key={definition.name}
-                                value={definition.name}
-                              >
-                                {definition.name}
-                                {definition.description
-                                  ? ` — ${definition.description.slice(0, 60)}`
-                                  : ""}
-                              </option>
-                            ))
-                          )}
-                        </AppSelect>
-                      </div>
-                      <div className="field">
-                        <label className="tiny muted" htmlFor="naEffort">
-                          {zh ? "本次思考强度" : "Thinking effort for this run"}
-                        </label>
-                        <AppSelect
-                          className="select"
-                          id="naEffort"
-                          value={spawnEffort}
-                          onChange={(event) =>
-                            setSpawnEffort(event.target.value)
-                          }
-                          disabled={!spawnAvailable || commandBusy}
-                        >
-                          <option value="">
-                            {zh ? "继承代理定义" : "Inherit agent definition"}
-                          </option>
-                          <option value="lo">{zh ? "轻量" : "Low"}</option>
-                          <option value="med">{zh ? "标准" : "Medium"}</option>
-                          <option value="hi">{zh ? "深入" : "High"}</option>
-                        </AppSelect>
-                      </div>
-                    </div>
+                    <TaskAssignmentEditor mode={spawnMode} onModeChange={chooseSpawnMode} assignment={spawnTask} onAssignmentChange={setSpawnTask} steps={spawnSteps} onStepsChange={setSpawnSteps} disabled={spawnControlsLocked} stepsSupported={spawnStepsSupported} zh={zh}
+                      {...(spawnOptions === undefined ? {} : { stepsAdvertised: spawnOptions.stepsAdvertised })} />
                     {spawnOptionsError ? <p className="small" role="alert">{spawnOptionsError}</p> : null}
-                    <div className="field"><label className="tiny muted" htmlFor="naModel">{zh ? "单次任务模型" : "Model for this task"}</label><AppSelect id="naModel" className="select" value={spawnModel} disabled={!spawnOptions?.modelSelection || commandBusy} onChange={event => setSpawnModel(event.target.value)}><option value="">{zh ? "使用代理配置" : "Use agent configuration"}</option>{spawnOptions?.models.map(model => <option key={model.selector} value={model.selector}>{model.name} · {model.selector}</option>)}</AppSelect><p className="tiny muted">{spawnOptions?.modelSelection ? (zh ? "只显示原生策略授权的精确模型；本次不会切换到其他模型。" : "Only exact models granted by native policy; this task will not switch to another model.") : (zh ? "可在设置 → 任务中开启单次模型选择。" : "Enable per-call models in Settings → Tasks.")}{spawnOptions ? ` · max effort: ${spawnOptions.maxEffort}` : ""}</p></div>
-                    <div className="agent-spawn-config" role="status">
-                      <strong>{zh ? "使用代理配置" : "Agent configuration"}</strong>
-                      <p className="small muted">{zh
-                        ? "模型和备用链由所选代理的配置决定，可在模型工作区的代理页编辑。"
-                        : "Models and fallbacks come from the selected agent. Edit them in Models → Agents."}</p>
-                      <code>{spawnDefinitions?.find(item => item.name === spawnDefinition)?.model?.join(" → ")
-                        || (zh ? "使用原生角色与代理模型配置" : "Use native role and agent model settings")}</code>
-                    </div>
-                    {preview ? (
-                      <p className="tiny muted">
-                        {zh
-                          ? "演示：只预览任务配置，不会创建真实代理或调用模型。"
-                          : "Demo: preview task configuration without creating an agent or calling a model."}
-                      </p>
-                    ) : null}
+                    <details className="task-spawn-options">
+                      <summary><Icon name="settings" extra="sm" />{zh ? "任务级配置" : "Task-level configuration"}<span className="muted">{zh ? "· 模型、思考强度与边界" : "· model, effort and constraints"}</span></summary>
+                      <div className="hub-na-grid">
+                        <div className="hub-na-row">
+                          <div className="field"><label className="tiny muted" htmlFor="naModel">{zh ? "单次任务模型" : "Model for this task"}</label>
+                            <AppSelect id="naModel" className="select" value={spawnModel} disabled={spawnControlsLocked || !spawnOptions?.modelSelection} onChange={event => setSpawnModel(event.target.value)}>
+                              <option value="">{zh ? "使用代理配置" : "Use agent configuration"}</option>{spawnOptions?.models.map(model => <option key={model.selector} value={model.selector}>{model.name} · {model.selector}</option>)}
+                            </AppSelect>
+                          </div>
+                          <div className="field"><label className="tiny muted" htmlFor="naEffort">{zh ? "本次思考强度" : "Thinking effort for this run"}</label>
+                            <AppSelect className="select" id="naEffort" value={spawnEffort} onChange={event => setSpawnEffort(event.target.value)} disabled={spawnControlsLocked || !spawnOptions?.effortSelection}>
+                              <option value="">{zh ? "继承代理定义" : "Inherit agent definition"}</option><option value="lo">{zh ? "轻量" : "Low"}</option><option value="med">{zh ? "标准" : "Medium"}</option><option value="hi">{zh ? "深入" : "High"}</option>
+                            </AppSelect>
+                          </div>
+                        </div>
+                        <p className="tiny muted">{spawnOptions?.modelSelection ? (zh ? "只显示原生策略授权的精确模型；所有步骤沿用本次任务配置。" : "Only exact models granted by native policy; every step shares this task's configuration.") : (zh ? "模型与备用链继承代理配置；单次模型选择需由原生设置授权。" : "Models and fallbacks come from the agent; per-call selection requires native authorization.")}{spawnOptions ? ` · max effort: ${spawnOptions.maxEffort}` : ""}</p>
+                        <div className="field"><label className="tiny muted" htmlFor="naSolutionSpace">{zh ? "解题范围" : "Solution space"}</label>
+                          <textarea className="input" id="naSolutionSpace" rows={3} maxLength={65536} value={spawnSolutionSpace} onChange={event => setSpawnSolutionSpace(event.target.value)} placeholder={zh ? "允许探索的方案、限制与边界" : "Allowed approaches and constraints"} disabled={spawnControlsLocked} />
+                        </div>
+                        <div className="agent-spawn-config"><strong className="tiny muted">{zh ? "代理模型配置" : "Agent model configuration"}</strong><p className="tiny muted">{zh ? "可在模型工作区的代理页编辑配置与备用链。" : "Edit the configuration and fallback chain in Models → Agents."}</p>
+                          <code>{spawnDefinitions?.find(item => item.name === spawnDefinition)?.model?.join(" → ") || (zh ? "使用原生角色与代理模型配置" : "Use native role and agent model settings")}</code>
+                        </div>
+                      </div>
+                    </details>
+                    {preview && marks ? <p className="tiny muted">{zh ? "演示：只预览任务配置，不会创建真实代理或调用模型。" : "Demo: preview task configuration without creating an agent or calling a model."}</p> : null}
                   </div>
                 </div>
                 <div className="modal-foot">
@@ -1703,22 +1632,12 @@ export function AgentHubPage({
                     disabled={
                       !spawnAvailable ||
                       commandBusy ||
-                      !(spawnFileMode ? spawnFile.trim() : spawnTask.trim()) ||
+                      !spawnInstructionsReady ||
                       !spawnDefinition
                     }
-                    data-tip={
-                      preview
-                        ? zh
-                          ? "演示创建，不会执行任务"
-                          : "Preview creation; no task runs"
-                        : !viewingLive
-                          ? CONTRACT.historicalWrite
-                          : missingCap(capabilities, "agent.spawn")
-                            ? CONTRACT.spawn
-                            : undefined
-                    }
+                    data-tip={spawnTip}
                     onClick={() => {
-                      if (spawnLock.current || !spawnAvailable) return;
+                      if (spawnLock.current || !spawnAvailable || !spawnInstructionsReady) return;
                       const definition = spawnDefinition.trim();
                       if (
                         !(spawnDefinitions ?? []).some(
@@ -1734,7 +1653,7 @@ export function AgentHubPage({
                         return;
                       }
                       if (preview) {
-                        setNotice({
+                        if (marks) setNotice({
                           kind: "ok",
                           text: zh
                             ? `演示任务已配置：${definition} · 使用代理配置${spawnEffort ? " · " + spawnEffort : ""}。未执行真实任务。`
@@ -1749,18 +1668,18 @@ export function AgentHubPage({
                         "agent.spawn",
                         {
                           definition,
-                          ...(spawnFileMode ? { taskFile: spawnFile.trim() } : { assignment: spawnTask }),
-                          ...(spawnModel ? { model: [spawnModel] } : {}),
+                          ...(spawnMode === "steps" ? { steps: spawnSteps.map(step => step.text) } : { assignment: spawnTask }),
+                          ...(spawnOptions?.modelSelection && spawnModel ? { model: [spawnModel] } : {}),
                           ...(spawnSolutionSpace.trim() ? { solutionSpace: spawnSolutionSpace.trim() } : {}),
                           async: true,
-                          ...(spawnEffort ? { effort: spawnEffort } : {}),
+                          ...(spawnOptions?.effortSelection && spawnEffort ? { effort: spawnEffort } : {}),
                         },
                         zh ? "代理任务已提交" : "Agent task submitted",
                       )
                         .then((ok) => {
                           if (ok && epoch === spawnEpoch.current) {
                             setModal(null);
-                            setSpawnTask(""); setSpawnFile(""); setSpawnModel("");
+                            setSpawnTask(""); setSpawnSteps([createTaskStep()]); setSpawnMode("single"); setSpawnModel("");
                             setSpawnSolutionSpace("");
                           }
                         })
@@ -1770,7 +1689,7 @@ export function AgentHubPage({
                         });
                     }}
                   >
-                    {preview
+                    {preview && marks
                       ? zh
                         ? "预览创建"
                         : "Preview creation"

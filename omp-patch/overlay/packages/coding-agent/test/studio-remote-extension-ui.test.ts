@@ -1,4 +1,27 @@
 import { describe, expect, test } from "bun:test";
+import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import * as path from "node:path";
+import { Agent } from "@oh-my-pi/pi-agent-core";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
+import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
+import { initializeExtensions } from "@oh-my-pi/pi-coding-agent/modes/runtime-init";
+import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { createDefaultToolUiContext } from "@oh-my-pi/pi-coding-agent/tools/context";
+import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import { logger, TempDir } from "@oh-my-pi/pi-utils";
+import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import type { StudioThreadGlobals } from "@oh-my-pi/pi-coding-agent/studio/services/studio-thread-service";
+import {
+	setStudioThreadInteraction,
+	studioThreadService,
+} from "@oh-my-pi/pi-coding-agent/studio/services/studio-thread-service";
+import type { WorkerPeer } from "@oh-my-pi/pi-coding-agent/thread/services";
+import type { MainThreadLink } from "@oh-my-pi/pi-coding-agent/thread/protocol";
+import type { ThreadId } from "@oh-my-pi/pi-coding-agent/thread/identity";
 import type { ExtensionUIContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import type {
 	StudioInteractionRequiredEvent,
@@ -314,5 +337,262 @@ describe("WP-041 Studio Remote Extension UI", () => {
 				},
 			],
 		});
+	});
+});
+
+async function pendingForm(port: StudioRemoteInteractionPort) {
+	for (let attempt = 0; attempt < 30 && !port.pending(); attempt++) await Promise.resolve();
+	const pending = port.pending();
+	if (pending?.request.kind !== "form") throw new Error("Native form was not published");
+	return pending;
+}
+
+const NATIVE_FORM = `<form><input type="hidden" name="kind" value="deploy"><fieldset><legend>Storage</legend><p>Database?</p><label><input type="radio" name="db" value="sqlite" checked>SQLite</label><label><input type="radio" name="db" value="pg">Postgres</label><label>Replicas<input type="number" name="replicas" value="2" min="1" required></label></fieldset></form>`;
+
+describe("Studio native HTML form UI", () => {
+	test("uses the native parsed form and only exposes summary metadata until the transient read", async () => {
+		const { port, gateway } = fixture();
+		const parsedForm = parseHtmlForm(NATIVE_FORM);
+		const ui = new StudioRemoteExtensionUiContext(gateway, "native-form");
+		const result = ui.formDialog("already parsed by AskTool", { parsedForm });
+		const pending = await pendingForm(port);
+		expect(pending.request).toMatchObject({ kind: "form", fieldCount: 2, sectionCount: 1 });
+		expect(pending.request).not.toHaveProperty("form");
+		expect(pending.request).not.toHaveProperty("html");
+		const body = port.readForm(pending.request.interactionId, pending.leaseGeneration).form;
+		expect(body.fields.map(field => [field.name, field.question])).toEqual([
+			["db", "Database?"],
+			["replicas", "Replicas"],
+		]);
+		expect(body.hidden).toEqual([["kind", "deploy"]]);
+		expect(body.defaults).toEqual({ kind: "deploy", db: "sqlite", replicas: 2 });
+		respond(port, { data: { db: "pg", replicas: 3 }, notes: [{ name: "db", value: "pg", text: " Keep replicas " }] });
+		await expect(result).resolves.toEqual({
+			data: { kind: "deploy", db: "pg", replicas: 3 },
+			notes: [{ name: "db", question: "Database?", option: "Postgres", value: "pg", text: "Keep replicas" }],
+		});
+		expect(() => port.readForm(pending.request.interactionId, pending.leaseGeneration)).toThrow("stale");
+	});
+
+	test("does not add a Runtime clock and accepts the Renderer timeout's current invalid text", async () => {
+		const { port, gateway } = fixture();
+		const ui = new StudioRemoteExtensionUiContext(gateway, "native-timeout");
+		let timedOut = 0;
+		const result = ui.formDialog(NATIVE_FORM, { timeout: 5, onTimeout: () => timedOut++ });
+		const pending = await pendingForm(port);
+		await Bun.sleep(10);
+		expect(port.pending()?.request.interactionId).toBe(pending.request.interactionId);
+		expect(port.pending()?.request).toMatchObject({ timeoutMs: 5 });
+		respond(port, { data: { db: "sqlite", replicas: "-" }, timedOut: true });
+		await expect(result).resolves.toEqual({ data: { kind: "deploy", db: "sqlite", replicas: "-" }, timedOut: true });
+		expect(timedOut).toBe(1);
+	});
+
+	test("aborting after publication closes the form and never accepts its late response", async () => {
+		const { port, gateway, resolved } = fixture();
+		const ui = new StudioRemoteExtensionUiContext(gateway, "native-abort");
+		const controller = new AbortController();
+		const result = ui.formDialog(NATIVE_FORM, { signal: controller.signal });
+		const pending = await pendingForm(port);
+		controller.abort();
+		await expect(result).rejects.toMatchObject({ name: "AbortError" });
+		expect(port.pending()).toBeUndefined();
+		expect(resolved.at(-1)).toMatchObject({ outcome: "aborted", interactionId: pending.request.interactionId });
+		expect(() =>
+			port.respond({
+				kind: "interaction.respond",
+				interactionId: pending.request.interactionId,
+				commandId: pending.request.commandId,
+				decision: "submit",
+				value: { data: { db: "pg", replicas: 3 } },
+			}),
+		).toThrow("stale");
+	});
+
+	test("an external abort wins over a fulfilled form response before the caller resumes", async () => {
+		const { port, gateway, resolved } = fixture();
+		const ui = new StudioRemoteExtensionUiContext(gateway, "native-late-answer");
+		const controller = new AbortController();
+		const result = ui.formDialog(NATIVE_FORM, { signal: controller.signal });
+		await pendingForm(port);
+		respond(port, { data: { db: "pg", replicas: 3 } });
+		controller.abort();
+		await expect(result).rejects.toMatchObject({ name: "AbortError" });
+		expect(resolved).toHaveLength(1);
+		expect(resolved[0]?.outcome).toBe("submitted");
+	});
+
+	test("a rebound gateway rejects old UI contexts rather than opening their form on the new Runtime", async () => {
+		const { port, gateway } = fixture();
+		const old = new StudioRemoteExtensionUiContext(gateway, "old-runtime-form");
+		const result = old.formDialog(NATIVE_FORM);
+		await pendingForm(port);
+		gateway.unbind(port);
+		await expect(result).rejects.toMatchObject({ code: "INTERACTION_STALE" });
+		const next = fixture();
+		next.gateway.unbind(next.port);
+		gateway.bind(next.port);
+		await expect(old.formDialog(NATIVE_FORM)).rejects.toMatchObject({ code: "INTERACTION_STALE" });
+		expect(next.port.pending()).toBeUndefined();
+		const fresh = new StudioRemoteExtensionUiContext(gateway, "fresh-runtime-form").formDialog(NATIVE_FORM);
+		await pendingForm(next.port);
+		respond(next.port, { data: { db: "pg", replicas: 4 } });
+		await expect(fresh).resolves.toMatchObject({ data: { db: "pg", replicas: 4 } });
+		gateway.unbind(next.port);
+	});
+
+	test("worker exit releases its retain, cancels its actual pending form and fences the old home", async () => {
+		const { port, gateway } = fixture();
+		const threadId: ThreadId = "w991";
+		let retains = 0;
+		const peer: WorkerPeer = {
+			threadId,
+			link: {} as MainThreadLink,
+			retain: () => {
+				retains++;
+				return () => retains--;
+			},
+		};
+		setStudioThreadInteraction(gateway);
+		try {
+			const globals = studioThreadService.globals!(peer) as StudioThreadGlobals;
+			const snapshot = globals.watch(() => {});
+			if (!snapshot.interaction) throw new Error("Worker UI was not installed");
+			const ui = new StudioRemoteExtensionUiContext(snapshot.interaction, "studio-tool:worker-session:call");
+			const result = ui.formDialog(NATIVE_FORM);
+			await pendingForm(port);
+			expect(retains).toBe(1);
+			studioThreadService.onWorkerExit!(peer, "test worker exit");
+			await expect(result).rejects.toMatchObject({ code: "INTERACTION_STALE" });
+			expect(port.pending()).toBeUndefined();
+			expect(retains).toBe(0);
+			await expect(ui.formDialog(NATIVE_FORM)).rejects.toMatchObject({ code: "INTERACTION_STALE" });
+			expect(port.pending()).toBeUndefined();
+		} finally {
+			studioThreadService.onWorkerExit!(peer, "test cleanup");
+			setStudioThreadInteraction(undefined);
+			gateway.unbind(port);
+		}
+	});
+});
+
+const CLOSE_FORM = `<form><fieldset><legend>Close this session?</legend><label><input type="radio" name="intent" value="keep" checked>Keep session</label><label><input type="radio" name="intent" value="close">Close session</label></fieldset></form>`;
+
+async function nativeCloseFixture() {
+	const directory = TempDir.createSync("studio-native-form-close-");
+	const auth = createInMemoryAuthStorage();
+	const settings = Settings.isolated({ "compaction.enabled": false });
+	const registry = new ModelRegistry(auth, path.join(directory.path(), "models.yml"), {
+		settings,
+		ignoreLocalModelConfig: true,
+		cacheDbPath: path.join(directory.path(), "models.db"),
+	});
+	const runtime = new ExtensionRuntime();
+	let shutdowns = 0;
+	const extension = await loadExtensionFromFactory(
+		pi => {
+			pi.on("session_before_shutdown", async (event, ctx) => {
+				if (!ctx.hasUI || !ctx.ui.formDialog)
+					throw new Error("Native close hook did not receive the Remote form UI");
+				const answer = await ctx.ui.formDialog(CLOSE_FORM, { signal: event.signal, cwd: ctx.cwd });
+				return { cancel: answer === undefined || answer.data.intent === "keep" };
+			});
+			pi.on("session_shutdown", () => {
+				shutdowns++;
+			});
+		},
+		directory.path(),
+		new EventBus(),
+		runtime,
+		"native-form-close",
+	);
+	const manager = SessionManager.inMemory(directory.path());
+	const runner = new ExtensionRunner([extension], runtime, directory.path(), manager, registry, undefined, settings);
+	const model = getBundledModel("openai", "gpt-4o-mini");
+	if (!model) throw new Error("Bundled test model is unavailable");
+	const session = new AgentSession({
+		agent: new Agent({ initialState: { model, systemPrompt: [], tools: [], messages: [] } }),
+		sessionManager: manager,
+		settings,
+		modelRegistry: registry,
+		extensionRunner: runner,
+	});
+	runner.setUserWaitTracker(dialog => session.waitForUser(dialog));
+	const { port, gateway, resolved } = fixture();
+	setStudioThreadInteraction(gateway);
+	await initializeExtensions(session, {
+		mode: "rpc",
+		uiContext: createDefaultToolUiContext(session.sessionId),
+		reportSendError: (action, error) =>
+			logger.error("Native form close send failed", { action, error: error.message }),
+		reportRuntimeError: error =>
+			logger.error("Native form close extension failed", { path: error.extensionPath, error: error.error }),
+	});
+	return {
+		session,
+		port,
+		resolved,
+		shutdowns: () => shutdowns,
+		async dispose(): Promise<void> {
+			gateway.cancel("Native close test cleanup");
+			setStudioThreadInteraction(undefined);
+			await session.dispose();
+			gateway.unbind(port);
+			auth.close();
+			directory.removeSync();
+		},
+	};
+}
+
+describe("Studio native shutdown hook form", () => {
+	test("a real session_before_shutdown ctx.ui form can veto a close and accept the next attempt without disposing early", async () => {
+		const state = await nativeCloseFixture();
+		try {
+			const first = state.session.confirmClose(new AbortController().signal);
+			await pendingForm(state.port);
+			expect(state.session.isDisposed).toBe(false);
+			expect(state.shutdowns()).toBe(0);
+			respond(state.port, { data: { intent: "keep" } });
+			await expect(first).resolves.toBe(false);
+			expect(state.session.isDisposed).toBe(false);
+			expect(state.shutdowns()).toBe(0);
+
+			const next = state.session.confirmClose(new AbortController().signal);
+			await pendingForm(state.port);
+			respond(state.port, { data: { intent: "close" } });
+			await expect(next).resolves.toBe(true);
+			expect(state.session.isDisposed).toBe(false);
+			expect(state.shutdowns()).toBe(0);
+		} finally {
+			await state.dispose();
+		}
+	});
+
+	test("external abort removes the actual shutdown hook's form and prevents its late veto from blocking teardown", async () => {
+		const state = await nativeCloseFixture();
+		try {
+			const controller = new AbortController();
+			const closing = state.session.confirmClose(controller.signal);
+			const pending = await pendingForm(state.port);
+			controller.abort();
+			await expect(closing).resolves.toBe(true);
+			for (let attempt = 0; attempt < 30 && state.port.pending(); attempt++) await Promise.resolve();
+			expect(state.port.pending()).toBeUndefined();
+			expect(state.resolved.at(-1)?.outcome).toBe("aborted");
+			expect(() =>
+				state.port.respond({
+					kind: "interaction.respond",
+					interactionId: pending.request.interactionId,
+					commandId: pending.request.commandId,
+					leaseGeneration: pending.leaseGeneration,
+					decision: "submit",
+					value: { data: { intent: "keep" } },
+				}),
+			).toThrow("stale");
+			expect(state.session.isDisposed).toBe(false);
+			expect(state.shutdowns()).toBe(0);
+		} finally {
+			await state.dispose();
+		}
 	});
 });

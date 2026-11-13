@@ -9,7 +9,8 @@ import {
 } from "../../modes/settings";
 import { cfgTitleRefreshAfterPrompts } from "../../utils/title-settings";
 import {
-	cfgTaskFile,
+	cfgTaskSteps,
+	cfgTaskAutoParallel,
 	cfgTaskPerCallModel,
 	cfgTaskPerCallModelAllow,
 	cfgTaskWorkerThreads,
@@ -100,7 +101,8 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"display.shellVisualization": cfgDisplayShellVisualization,
 	"title.refreshAfterPrompts": cfgTitleRefreshAfterPrompts,
 	"display.advisorCollapsedLines": cfgDisplayAdvisorCollapsedLines,
-	"task.file": cfgTaskFile,
+	"task.steps": cfgTaskSteps,
+	"task.autoParallel": cfgTaskAutoParallel,
 	"task.perCallModel": cfgTaskPerCallModel,
 	"task.perCallModelAllow": cfgTaskPerCallModelAllow,
 	"task.workerThreads": cfgTaskWorkerThreads,

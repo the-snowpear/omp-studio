@@ -18,6 +18,7 @@ import { isAgentViewSession } from "../../session/agent-session-handle";
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { AgentKind, AgentRef, RegistryEvent } from "../../registry/agent-registry";
+import type { TaskStepState } from "@oh-my-pi/pi-tui/tools/task";
 
 const MAX_MESSAGE_TEXT = 64 * 1024;
 const MAX_ID_LENGTH = 512;
@@ -88,6 +89,8 @@ export interface StudioAgentSnapshot {
 	hasTranscript: boolean;
 	unreadCount: number;
 	activeJobIds: string[];
+	/** Structured native prompt-group execution state, from the task job or session record. */
+	taskSteps?: TaskStepState;
 	/** Current stage of the task job running this agent, from its completion probe. */
 	stage?: string;
 	/** The running task's own completion estimate, 0–100. */
@@ -191,7 +194,7 @@ export interface StudioAgentSpawnRequest {
 	model?: string[];
 	definition: string;
 	assignment?: string;
-	taskFile?: string;
+	steps?: string[];
 	solutionSpace?: string;
 	context?: string;
 	async?: boolean;
@@ -260,8 +263,14 @@ export interface StudioAgentHubServiceOptions {
 	confirmationGate?: StudioConfirmationGate;
 	/** Active job ids for an agent; production wiring reads AsyncJobManager rows. */
 	activeJobIdsFor?: (agentId: string) => string[];
-	/** Stage / completion estimate of the running task job behind an agent. */
-	taskProgressFor?: (agentId: string) => { stage?: string; completionPercent?: number } | undefined;
+	/** Native prompt-group state and completion-probe estimate of an agent's task job. */
+	taskProgressFor?: (agentId: string) =>
+		| {
+				taskSteps?: TaskStepState;
+				stage?: string;
+				completionPercent?: number;
+		  }
+		| undefined;
 	/** Live usage/model/summary source; production wiring reads AgentSession. */
 	telemetry?: StudioAgentTelemetryPort;
 	maxListLimit?: number;
@@ -275,6 +284,7 @@ interface StudioTerminalRecord {
 	kind: AgentKind;
 	parentAgentId?: string;
 	status: "aborted" | "released";
+	taskSteps?: TaskStepState;
 	generation: number;
 	startedAt?: string;
 	updatedAt: string;
@@ -505,7 +515,7 @@ export class StudioAgentHubService {
 		model?: string[];
 		definition: string;
 		assignment?: string;
-		taskFile?: string;
+		steps?: string[];
 		solutionSpace?: string;
 		context?: string;
 		async?: boolean;
@@ -517,8 +527,20 @@ export class StudioAgentHubService {
 			throw new StudioAgentHubError("INVALID_ARGUMENT", "Select one exact per-call model");
 		const definition = args.definition.trim();
 		const assignment = args.assignment;
-		if (!!assignment?.trim() === !!args.taskFile)
-			throw new StudioAgentHubError("INVALID_ARGUMENT", "Provide inline instructions or a task file");
+		if (!!assignment?.trim() === (args.steps !== undefined))
+			throw new StudioAgentHubError("INVALID_ARGUMENT", "Provide inline instructions or ordered steps");
+		if (
+			args.steps !== undefined &&
+			(!Array.isArray(args.steps) ||
+				args.steps.length === 0 ||
+				args.steps.some(step => typeof step !== "string" || !step.trim()) ||
+				args.steps.reduce((size, step) => size + step.length, 0) > MAX_MESSAGE_TEXT)
+		) {
+			throw new StudioAgentHubError(
+				"INVALID_ARGUMENT",
+				"Task steps must contain non-empty instructions within 64 KiB",
+			);
+		}
 		if (
 			args.solutionSpace !== undefined &&
 			(!args.solutionSpace.trim() || args.solutionSpace.length > MAX_MESSAGE_TEXT)
@@ -543,7 +565,7 @@ export class StudioAgentHubService {
 		try {
 			receipt = await this.#spawner.spawn({
 				definition,
-				...(assignment ? { assignment } : { taskFile: args.taskFile }),
+				...(args.steps === undefined ? { assignment } : { steps: args.steps }),
 				...(args.model ? { model: args.model } : {}),
 				...(args.solutionSpace !== undefined ? { solutionSpace: args.solutionSpace } : {}),
 				...(args.context !== undefined ? { context: args.context } : {}),
@@ -891,6 +913,7 @@ export class StudioAgentHubService {
 			kind: terminal.kind,
 			displayName: terminal.displayName,
 			status: terminal.status,
+			...(terminal.taskSteps === undefined ? {} : { taskSteps: terminal.taskSteps }),
 			...(terminal.startedAt !== undefined ? { startedAt: terminal.startedAt } : {}),
 			updatedAt: terminal.updatedAt,
 			hasLiveSession: false,
@@ -910,6 +933,7 @@ export class StudioAgentHubService {
 
 	#terminalRecord(ref: AgentRef, status: "aborted" | "released", generation: number): StudioTerminalRecord {
 		const history = ref.history;
+		const taskSteps = this.#taskProgressFor?.(ref.id)?.taskSteps;
 		return {
 			agentId: ref.id,
 			displayName: ref.displayName,
@@ -917,6 +941,7 @@ export class StudioAgentHubService {
 			...(ref.parentId !== undefined ? { parentAgentId: ref.parentId } : {}),
 			status,
 			generation,
+			...(taskSteps === undefined ? {} : { taskSteps }),
 			startedAt: new Date(ref.createdAt).toISOString(),
 			updatedAt: new Date().toISOString(),
 			hasTranscript: ref.session !== null || ref.sessionFile !== null,

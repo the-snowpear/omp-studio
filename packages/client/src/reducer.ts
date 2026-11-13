@@ -173,6 +173,11 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
 const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
  "timeTravel.settings.set": true, "timeTravel.restore": true, "timeTravel.cleanup": true,
  "extensions.links.activate": true, "browser.webmcp.invoke": true,
+ "browser.native.open": true, "browser.native.close": true,
+ "models.systemTemplates.binding.set": true, "models.systemTemplates.file.write": true,
+ "models.auth.login": true, "models.auth.cancel": false,
+ "models.auth.key.set": true, "models.auth.key.remove": true,
+ "models.provider.roster.refresh": false, "models.accounts.resetPolicy.set": true,
  "session.compaction.enqueue": true, "session.compaction.cancel": false, "session.compaction.status": false,
  "session.history.rename": true, "session.history.pin": true, "session.lease.inspect": false,
  "btw.inject": true, "agent.spawn.options": false,

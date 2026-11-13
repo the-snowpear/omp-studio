@@ -1,6 +1,7 @@
 import type { ConversationContentBlock, JsonValue } from "@omp-studio/studio-protocol";
 import { NATIVE_TOOL_GALLERY } from "./nativeToolGallery";
 import { demoPath } from "./demoPaths";
+import { previewActionsWatch } from "../hubPreview";
 
 type Card = { readonly [key: string]: JsonValue };
 
@@ -36,6 +37,14 @@ export function galleryToolBlocks(cards: readonly Card[], chapter: string): Conv
 
 export const CONTENT_GALLERY_VARIANTS: readonly Card[] = [
   { name: "Read", path: "docs/UPSTREAM-SYNC.md", contentType: "text/markdown", preview: ["## Markdown 读取结果", "", "**类型检查通过**，保留 `MermaidTheme` 返回类型。", "", "- [x] 文档入口", "- [ ] 窄窗口复查"] },
+  { name: "GitHub", kind: "github", op: "run_watch", status: "error", watch: previewActionsWatch(true) as unknown as JsonValue, output: "原生 workflow watch 遇到失败后结束；剩余排队作业保留最后观察状态，不推算进度。" },
+  { name: "Edit", kind: "edit", status: "error", isError: true, output: "历史部分编辑记录：主题类型变更已应用，另一文件被拒绝。只审核 perFileResults 中已应用的结果。", perFileResults: [
+    { path: "components/MermaidBlock.tsx", op: "update", diff: "-147|const theme: string = getCodeTheme();\n+147|const theme: MermaidTheme = getCodeTheme();" },
+    { path: "hooks/useCodeTheme.ts", isError: true, diff: "", errorText: "历史记录中的匹配失败；没有已应用差异。" },
+  ] },
+  { name: "Edit", kind: "edit", status: "error", path: "hooks/useCodeTheme.ts", input: "*** Begin Patch\n*** Update File: hooks/useCodeTheme.ts\n@@\n-missing old line\n+new line\n*** End Patch", diff: "", perFileResults: [], output: "原生阶段校验失败；没有返回任何已应用文件，不能从 input 推断成功。" },
+  { name: "Todo", kind: "todo", op: "view", phases: [{ name: "验证", tasks: [{ content: "验证旧会话的全屏缩放拖拽", status: "blocked" }] }], output: "历史阻塞状态仅供回看，不是当前 Todo 可设置的状态。" },
+  { name: "Todo", kind: "todo", op: "view", phases: [{ name: "验证", tasks: [{ content: "验证旧会话的全屏缩放拖拽", status: "pending" }] }], output: "原生恢复后的同一任务回到待办；旧 transcript 没有被改写。" },
   { name: "Write", path: "docs/check-result.json", created: false, content: { passed: true, checks: ["types", "render"] }, encoding: "UTF-8" },
   { name: "Grep", pattern: "obsoleteTheme", path: "components", matches: [], matchCount: 0, fileCount: 0 },
   { name: "Glob", pattern: "missing/**/*.tsx", files: [] },

@@ -1,6 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { StudioScriptedInteractionPort } from "@oh-my-pi/pi-coding-agent/studio/services/interaction-port";
+import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
+import type { AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+
+const FORM_HTML = `<form><fieldset><legend>Pick</legend><label><input type="radio" name="q1" value="a" checked>A</label><label><input type="radio" name="q1" value="b">B</label></fieldset></form>`;
+const EMPTY_FORM_HTML = `<form><label><input type="checkbox" name="q1" value="a">Pick any</label></form>`;
+const TREE_SETTINGS = Settings.isolated({ "ask.timeout": 0 });
+import {
+	StudioRemoteInteractionPort,
+	StudioScriptedInteractionPort,
+} from "@oh-my-pi/pi-coding-agent/studio/services/interaction-port";
+import { StudioRuntimeCommandArbiter } from "@oh-my-pi/pi-coding-agent/studio/command-arbiter";
+import type { StudioPendingInteraction } from "@oh-my-pi/pi-coding-agent/studio/bridge-protocol";
 import { StudioTreeService } from "@oh-my-pi/pi-coding-agent/studio/services/tree-service";
 
 describe("WP-034 StudioTreeService", () => {
@@ -43,32 +55,44 @@ describe("WP-034 StudioTreeService", () => {
 	});
 
 	test("reopens Ask through the remote InteractionPort and resumes the committed branch", async () => {
+		let committedAnswer: AgentToolResult<AskToolDetails> | undefined;
 		const navigateTree = async (_target: string, options: Record<string, unknown>) => {
 			if (options.reanswerAskResult === undefined) {
 				return {
 					cancelled: false,
 					reopenAsk: {
 						toolCallId: "ask-call",
-						questions: [{ id: "q1", question: "Pick", options: [{ label: "A" }, { label: "B" }] }],
+						html: FORM_HTML,
 					},
 				};
 			}
+			committedAnswer = options.reanswerAskResult as AgentToolResult<AskToolDetails>;
 			return { cancelled: false, askReanswerCommitted: true };
 		};
 		let resumed = 0;
 		const session = {
 			navigateTree,
 			resumeAfterAskReanswer: () => resumed++,
-			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
+			settings: TREE_SETTINGS,
+			sessionManager: {
+				getLeafId: () => "leaf",
+				getTree: () => [],
+				getEntry: () => undefined,
+				getCwd: () => process.cwd(),
+			},
 		} as unknown as AgentSession;
 		const result = await new StudioTreeService(
 			session,
 			new StudioScriptedInteractionPort([
-				{ results: [{ id: "q1", selectedOptions: ["B"], note: "Keep this choice", noteOption: "B" }] },
+				{ data: { q1: "b" }, notes: [{ name: "q1", value: "b", text: "Keep this choice" }] },
 			]),
 		).navigate("cmd-1", { targetId: "ask-result" });
 		expect(result).toMatchObject({ askReanswerCommitted: true, leafId: "leaf" });
 		expect(resumed).toBe(1);
+		expect(committedAnswer?.details).toEqual({
+			answers: [{ name: "q1", question: "Pick", answer: "B" }],
+			notes: [{ name: "q1", question: "Pick", option: "B", value: "b", text: "Keep this choice" }],
+		});
 	});
 
 	test("cancelling the remote Ask leaves the tree untouched", async () => {
@@ -77,10 +101,16 @@ describe("WP-034 StudioTreeService", () => {
 				cancelled: false,
 				reopenAsk: {
 					toolCallId: "ask-call",
-					questions: [{ id: "q1", question: "Pick", options: [{ label: "A" }] }],
+					html: FORM_HTML,
 				},
 			}),
-			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
+			settings: TREE_SETTINGS,
+			sessionManager: {
+				getLeafId: () => "leaf",
+				getTree: () => [],
+				getEntry: () => undefined,
+				getCwd: () => process.cwd(),
+			},
 		} as unknown as AgentSession;
 		const result = await new StudioTreeService(session, new StudioScriptedInteractionPort([undefined])).navigate(
 			"cmd-1",
@@ -99,17 +129,23 @@ describe("WP-034 StudioTreeService", () => {
 					cancelled: false,
 					reopenAsk: {
 						toolCallId: "ask-call",
-						questions: [{ id: "q1", question: "Pick any", multi: true, options: [{ label: "A" }] }],
+						html: EMPTY_FORM_HTML,
 					},
 				};
 			},
 			resumeAfterAskReanswer: () => {},
-			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
+			settings: TREE_SETTINGS,
+			sessionManager: {
+				getLeafId: () => "leaf",
+				getTree: () => [],
+				getEntry: () => undefined,
+				getCwd: () => process.cwd(),
+			},
 		} as unknown as AgentSession;
-		const result = await new StudioTreeService(
-			session,
-			new StudioScriptedInteractionPort([{ results: [{ id: "q1", selectedOptions: [] }] }]),
-		).navigate("cmd-1", { targetId: "ask-result" });
+		const result = await new StudioTreeService(session, new StudioScriptedInteractionPort([{ data: {} }])).navigate(
+			"cmd-1",
+			{ targetId: "ask-result" },
+		);
 		expect(result).toMatchObject({ cancelled: false, askReanswerCommitted: true });
 		expect(navigateCalls).toBe(2);
 	});
@@ -120,10 +156,16 @@ describe("WP-034 StudioTreeService", () => {
 				cancelled: false,
 				reopenAsk: {
 					toolCallId: "ask-call",
-					questions: [{ id: "q1", question: "Pick", options: [{ label: "A" }] }],
+					html: FORM_HTML,
 				},
 			}),
-			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
+			settings: TREE_SETTINGS,
+			sessionManager: {
+				getLeafId: () => "leaf",
+				getTree: () => [],
+				getEntry: () => undefined,
+				getCwd: () => process.cwd(),
+			},
 		} as unknown as AgentSession;
 		await expect(new StudioTreeService(session).navigate("cmd-1", { targetId: "ask-result" })).rejects.toMatchObject({
 			code: "INTERACTION_REQUIRED",
@@ -140,7 +182,13 @@ describe("WP-034 StudioTreeService", () => {
 				navigateCalls += 1;
 				return { cancelled: false };
 			},
-			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
+			settings: TREE_SETTINGS,
+			sessionManager: {
+				getLeafId: () => "leaf",
+				getTree: () => [],
+				getEntry: () => undefined,
+				getCwd: () => process.cwd(),
+			},
 		} as unknown as AgentSession;
 		await expect(new StudioTreeService(session).navigate("cmd-1", { targetId: "entry-1" })).rejects.toMatchObject({
 			code: "BUSY_STREAMING",
@@ -157,7 +205,13 @@ describe("WP-034 StudioTreeService", () => {
 				navigateCalls += 1;
 				return { cancelled: false };
 			},
-			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
+			settings: TREE_SETTINGS,
+			sessionManager: {
+				getLeafId: () => "leaf",
+				getTree: () => [],
+				getEntry: () => undefined,
+				getCwd: () => process.cwd(),
+			},
 		} as unknown as AgentSession;
 		await expect(new StudioTreeService(session).navigate("cmd-1", { targetId: "entry-1" })).rejects.toMatchObject({
 			code: "BUSY_COMPACTING",
@@ -178,7 +232,13 @@ describe("WP-034 StudioTreeService", () => {
 					{ type: "text", text: "nope" },
 				],
 			}),
-			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
+			settings: TREE_SETTINGS,
+			sessionManager: {
+				getLeafId: () => "leaf",
+				getTree: () => [],
+				getEntry: () => undefined,
+				getCwd: () => process.cwd(),
+			},
 		} as unknown as AgentSession;
 		await expect(new StudioTreeService(session).navigate("cmd-1", { targetId: "entry-1" })).resolves.toEqual({
 			cancelled: false,
@@ -251,7 +311,7 @@ test("restoring and branching a tagged prompt returns editable model selectors, 
 	const modelMentions = [{ agent: "m1", selector: "provider/model", name: "Model" }];
 	const session = {
 		modelMentions,
-		sessionManager: { getLeafId: () => "leaf", getSessionId: () => "session" },
+		sessionManager: { getLeafId: () => "leaf", getSessionId: () => "session", getEntry: () => undefined },
 		navigateTree: async () => ({ cancelled: false, editorText: 'ask <model agent="m1" name="Model"/>' }),
 		branch: async () => {
 			session.modelMentions = [];
@@ -263,4 +323,143 @@ test("restoring and branching a tagged prompt returns editable model selectors, 
 		editorText: "ask ^provider/model",
 	});
 	expect(await service.branch("branch", { targetId: "user" })).toMatchObject({ editorText: "ask ^provider/model" });
+});
+
+function deferredReanswer() {
+	const opened = Promise.withResolvers<StudioPendingInteraction>();
+	const port = new StudioRemoteInteractionPort(
+		new StudioRuntimeCommandArbiter(
+			() => ({ runtimeEpoch: 1, stateVersion: 0, isStreaming: false, isCompacting: false }),
+			[],
+		),
+		pending => opened.resolve(pending),
+		() => {},
+	);
+	let leaf = "original-leaf";
+	let committed = 0;
+	let resumed = 0;
+	const session = {
+		sessionId: "tree-session",
+		settings: TREE_SETTINGS,
+		isStreaming: false,
+		isCompacting: false,
+		sessionManager: { getLeafId: () => leaf, getEntry: () => undefined, getCwd: () => process.cwd() },
+		navigateTree: async (_target: string, options: Record<string, unknown>) => {
+			if (options.reanswerAskResult) {
+				committed++;
+				return { cancelled: false, askReanswerCommitted: true };
+			}
+			return { cancelled: false, reopenAsk: { toolCallId: "native-ask", html: FORM_HTML } };
+		},
+		resumeAfterAskReanswer: () => resumed++,
+	};
+	const tree = new StudioTreeService(session as unknown as AgentSession, port);
+	return {
+		tree,
+		port,
+		session,
+		published: opened.promise,
+		committed: () => committed,
+		resumed: () => resumed,
+		moveLeaf: (value: string) => {
+			leaf = value;
+		},
+	};
+}
+
+describe("Studio form history boundaries", () => {
+	test("reports the legacy questions re-answer limit before navigating or manufacturing HTML", async () => {
+		let navigated = 0;
+		const legacy = { questions: [{ id: "old", question: "Old question?", options: [{ label: "A" }] }] };
+		const session = {
+			sessionManager: {
+				getLeafId: () => "current-leaf",
+				getEntry: (id: string) =>
+					id === "old-result"
+						? {
+								type: "message",
+								parentId: "old-call",
+								message: { role: "toolResult", toolName: "ask", toolCallId: "old-ask" },
+							}
+						: id === "old-call"
+							? {
+									type: "message",
+									parentId: null,
+									message: {
+										role: "assistant",
+										content: [{ type: "toolCall", id: "old-ask", arguments: legacy }],
+									},
+								}
+							: undefined,
+			},
+			navigateTree: async () => {
+				navigated++;
+				return { cancelled: false };
+			},
+		};
+		await expect(
+			new StudioTreeService(session as unknown as AgentSession, new StudioScriptedInteractionPort([])).navigate(
+				"legacy",
+				{ targetId: "old-result" },
+			),
+		).rejects.toMatchObject({ code: "INVALID_ARGUMENT", message: expect.stringContaining("旧版 questions") });
+		expect(navigated).toBe(0);
+		expect(legacy).not.toHaveProperty("html");
+	});
+
+	test("does not write a fulfilled answer into a history branch that changed while the form was open", async () => {
+		const state = deferredReanswer();
+		const navigating = state.tree.navigate("tree-late", { targetId: "ask-result" });
+		const pending = await state.published;
+		state.port.respond({
+			kind: "interaction.respond",
+			interactionId: pending.request.interactionId,
+			commandId: pending.request.commandId,
+			leaseGeneration: pending.leaseGeneration,
+			decision: "submit",
+			value: { data: { q1: "b" } },
+		});
+		state.moveLeaf("other-branch");
+		await expect(navigating).rejects.toMatchObject({ code: "INTERACTION_STALE" });
+		expect(state.committed()).toBe(0);
+		expect(state.resumed()).toBe(0);
+		expect(state.session.sessionManager.getLeafId()).toBe("other-branch");
+	});
+
+	test("operator abort closes the actual form and fences its late response without committing history", async () => {
+		const state = deferredReanswer();
+		const navigating = state.tree.navigate("tree-abort", { targetId: "ask-result" });
+		const pending = await state.published;
+		state.tree.cancelReanswer("Operator abort");
+		await expect(navigating).rejects.toMatchObject({ code: "INTERACTION_STALE" });
+		expect(state.port.pending()).toBeUndefined();
+		expect(() =>
+			state.port.respond({
+				kind: "interaction.respond",
+				interactionId: pending.request.interactionId,
+				commandId: pending.request.commandId,
+				decision: "submit",
+				value: { data: { q1: "b" } },
+			}),
+		).toThrow("stale");
+		expect(state.committed()).toBe(0);
+		expect(state.resumed()).toBe(0);
+	});
+
+	test("work starting during the dialog cannot be overwritten by its answer", async () => {
+		const state = deferredReanswer();
+		const navigating = state.tree.navigate("tree-busy", { targetId: "ask-result" });
+		const pending = await state.published;
+		state.session.isStreaming = true;
+		state.port.respond({
+			kind: "interaction.respond",
+			interactionId: pending.request.interactionId,
+			commandId: pending.request.commandId,
+			decision: "submit",
+			value: { data: { q1: "b" } },
+		});
+		await expect(navigating).rejects.toMatchObject({ code: "BUSY_STREAMING" });
+		expect(state.committed()).toBe(0);
+		expect(state.resumed()).toBe(0);
+	});
 });

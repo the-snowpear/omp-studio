@@ -315,7 +315,7 @@ export class StudioBridgeClient {
     });
   }
 
-  async invoke(request: StudioRequest, onReceipt?: (receipt: StudioReceipt) => void): Promise<StudioReceipt> {
+  async invoke(request: StudioRequest, onReceipt?: (receipt: StudioReceipt) => void, timeoutMs: number | null | undefined = this.options.requestTimeoutMs): Promise<StudioReceipt> {
     if (this.#state !== "ready") throw new Error(`Cannot invoke Studio Bridge command from ${this.#state}`);
     if (request.runtimeEpoch !== this.#runtimeEpoch) throw new Error("Studio Bridge request Runtime epoch is stale");
     if (this.#pendingRequests.has(request.requestId)) throw new Error(`Duplicate request id ${request.requestId}`);
@@ -323,9 +323,8 @@ export class StudioBridgeClient {
     if (socket === undefined) throw new Error("Studio Bridge connection is unavailable");
 
     return new Promise<StudioReceipt>((resolve, reject) => {
-      const timeoutMs = this.options.requestTimeoutMs;
       const timer =
-        timeoutMs === undefined
+        timeoutMs == null
           ? undefined
           : setTimeout(() => {
               this.#pendingRequests.delete(request.requestId);
@@ -338,7 +337,13 @@ export class StudioBridgeClient {
         ...(timer === undefined ? {} : { timer }),
       });
       try {
-        socket.write(encodeFrame(`request:${request.requestId}`, request.runtimeEpoch, request));
+        let wireRequest = request;
+        if (request.operation.kind === "interaction.respond" && request.operation.leaseGeneration !== undefined &&
+          !this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === "remoteUi.leaseGeneration" && capability.grade !== "unavailable")) {
+          const { leaseGeneration: _leaseGeneration, ...operation } = request.operation;
+          wireRequest = { ...request, operation };
+        }
+        socket.write(encodeFrame(`request:${request.requestId}`, request.runtimeEpoch, wireRequest));
       } catch {
         if (timer !== undefined) clearTimeout(timer);
         this.#pendingRequests.delete(request.requestId);
@@ -579,6 +584,23 @@ export class StudioBridgeClient {
   onResyncRequired(listener: () => void): () => void {
     this.#resyncListeners.add(listener);
     return () => this.#resyncListeners.delete(listener);
+  }
+
+  /** Reversible operator-close gate. Older Runtimes must never receive an unknown operation. */
+  async confirmClose(): Promise<boolean> {
+    if (!this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === "runtime.close.confirm" && capability.grade !== "unavailable")) return true;
+    const snapshot = this.#projection.snapshot();
+    const runtimeEpoch = this.#runtimeEpoch;
+    if (this.#state !== "ready" || !snapshot || runtimeEpoch === undefined) return true;
+    const receipt = await this.invoke({
+      type: "studio.request",
+      requestId: (this.options.createRequestId ?? randomUUID)() as RequestId,
+      runtimeEpoch,
+      operation: { kind: "runtime.close.confirm", sessionId: snapshot.sessionId },
+    }, undefined, null);
+    if (this.#runtimeEpoch !== runtimeEpoch || this.#projection.snapshot()?.sessionId !== snapshot.sessionId) return true;
+    if (receipt.status !== "completed") throw new StudioBridgeRequestError("OUTCOME_UNKNOWN");
+    return (receipt.result as RuntimeViewResultMap["runtime.close.confirm"] | undefined)?.allowed !== false;
   }
 
   async shutdown(): Promise<StudioReceipt> {

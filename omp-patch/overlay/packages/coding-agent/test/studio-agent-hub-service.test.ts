@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentRef, AgentStatus, RegistryEvent } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import type { TaskStepState } from "@oh-my-pi/pi-tui/tools/task";
 import {
 	StudioAgentHubError,
 	StudioAgentHubService,
@@ -209,6 +210,7 @@ function makeHub(
 		messages?: StudioMessage[];
 		failEnsureLive?: boolean;
 		telemetry?: StudioAgentTelemetryPort;
+		taskProgressFor?: (agentId: string) => { taskSteps?: TaskStepState } | undefined;
 	} = {},
 ) {
 	const registry = makeRegistry();
@@ -225,6 +227,7 @@ function makeHub(
 		{
 			confirmationGate: options.gate,
 			activeJobIdsFor: options.activeJobIdsFor,
+			...(options.taskProgressFor === undefined ? {} : { taskProgressFor: options.taskProgressFor }),
 			...(options.telemetry === undefined ? {} : { telemetry: options.telemetry }),
 		},
 	);
@@ -712,6 +715,36 @@ describe("WP-050/051/053 StudioAgentHubService", () => {
 		expect(service.list().map(s => s.agentId)).toContain("Child-1");
 	});
 
+	test("ordered user steps reach one native spawn and retain one agent/job identity", async () => {
+		const { service, spawner } = makeHub();
+		spawner.setNext({ agentId: "Child-steps", jobId: "job-steps" });
+		const steps = ["inspect", "plan", "implement", "test", "report"];
+		const result = await service.spawn({ definition: "task", steps, async: true, callerAgentId: "Main" });
+		expect(result).toEqual({ agentId: "Child-steps", jobId: "job-steps", status: "starting" });
+		expect(spawner.requests()).toEqual([{ definition: "task", steps, async: true, callerAgentId: "Main" }]);
+		expect(service.list()).toMatchObject([{ agentId: "Child-steps", parentAgentId: "Main" }]);
+	});
+
+	test("retains the native stopped step state when releasing an agent removes its live progress source", async () => {
+		let taskSteps: TaskStepState | undefined = {
+			prompts: ["inspect", "implement", "report"],
+			sent: 2,
+			completed: 1,
+			phase: "budget",
+			reason: "Native request budget reached",
+		};
+		const { service, registry } = makeHub({
+			gate: acceptingGate,
+			taskProgressFor: () => (taskSteps ? { taskSteps } : undefined),
+		});
+		registry.register(makeRef("Child-steps", { status: "parked", parentId: "Main", sessionFile: "child.jsonl" }));
+		expect(service.get("Child-steps").taskSteps).toEqual(taskSteps);
+		await service.release({ agentId: "Child-steps", expectedGeneration: 1, callerAgentId: "Main" });
+		const recorded = taskSteps;
+		taskSteps = undefined;
+		expect(service.get("Child-steps").taskSteps).toEqual(recorded);
+	});
+
 	test("spawn validation and failure stay generic and path-free", async () => {
 		const { service, spawner } = makeHub();
 		await expect(service.spawn({ definition: "", assignment: "x", callerAgentId: "Main" })).rejects.toMatchObject({
@@ -978,7 +1011,7 @@ describe("WP-050/051/053 StudioAgentHubService", () => {
 	});
 });
 
-test("per-call selections and task files reach native policy without losing assignment whitespace", async () => {
+test("per-call selections and ordered steps reach native policy without losing assignment whitespace", async () => {
 	const { service, spawner } = makeHub();
 	try {
 		const assignment = "\nSummarize the docs.  \n\n| file | status |\n";
@@ -989,14 +1022,15 @@ test("per-call selections and task files reach native policy without losing assi
 			callerAgentId: "Main",
 		});
 		expect(spawner.requests()[0]).toMatchObject({ model: ["mock/exact:high"], assignment });
+		const steps = ["\nRead the docs.  \n", "Summarize the findings."];
 		await service.spawn({
 			definition: "researcher",
-			taskFile: "local://assignment.md",
+			steps,
 			effort: "hi",
 			callerAgentId: "Main",
 		});
 		expect(spawner.requests()).toHaveLength(2);
-		expect(spawner.requests()[1]).toMatchObject({ taskFile: "local://assignment.md", effort: "hi" });
+		expect(spawner.requests()[1]).toMatchObject({ steps, effort: "hi" });
 		expect(spawner.requests()[1]!.assignment).toBeUndefined();
 	} finally {
 		service.dispose();

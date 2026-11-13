@@ -1,4 +1,4 @@
-import type { RuntimeViewOperation, RuntimeViewResultMap } from "@omp-studio/studio-protocol";
+import type { RuntimeViewOperation, RuntimeViewResultMap, FormSubmitValue, InteractionForm, ModelServicesCommandInputMap, ModelServicesCommandResultMap } from "@omp-studio/studio-protocol";
 import type { TimeTravelSettings, TimeTravelTimeline, TimeTravelRestorePreview, TimeTravelRestoreInput, TimeTravelRestoreResult } from "./time-travel.js";
 type RuntimeViewQueryMap = { [K in RuntimeViewOperation["kind"]]: Omit<Extract<RuntimeViewOperation, { kind: K }>, "kind"> };
 import type { EvaluationRecord, EvaluationSpec, EvaluationPlan, EvaluationContext, EvaluationListInput, EvaluationResultPage, EvaluationStartInput, EvaluationControlInput, EvaluationExportInput, EvaluationExportResult } from "@omp-studio/studio-protocol";
@@ -436,7 +436,7 @@ export type PromptTextInput = {
 export type EvaluationCommandInputMap = { [K in EvaluationOperation["kind"]]: Omit<Extract<EvaluationOperation, {kind:K}>, "kind"> };
 type UpgradeInputMap = { [K in UpgradeOperation["kind"]]: Omit<Extract<UpgradeOperation, { kind: K }>, "kind" | "fallbackCwd"> };
 type WorkbenchInputMap = { [K in WorkbenchOperation["kind"]]: Omit<Extract<WorkbenchOperation, { kind: K }>, "kind" | "inputTransfers" | "targetCwd"> };
-export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, UpgradeInputMap, WorkbenchInputMap {
+export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, UpgradeInputMap, WorkbenchInputMap, ModelServicesCommandInputMap {
   "core.prompt": PromptTextInput;
   "core.steer": PromptTextInput;
   "core.followUp": PromptTextInput;
@@ -522,7 +522,7 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, Upgra
     readonly model?: string[];
     readonly definition: string;
     readonly assignment?: string;
-    readonly taskFile?: string;
+    readonly steps?: string[];
     readonly solutionSpace?: string;
     readonly context?: string;
     readonly async?: boolean;
@@ -555,7 +555,8 @@ export type InteractionResponseValue =
   | string
   | boolean
   | ReadonlyArray<string>
-  | Readonly<Record<string, unknown>>;
+  | Readonly<Record<string, unknown>>
+  | FormSubmitValue;
 
 interface CoreCommandInputMap {
   "timeTravel.settings.set": Partial<TimeTravelSettings>;
@@ -892,10 +893,11 @@ export interface ContinueTurnOutcome {
   readonly mode: "restored" | "continue" | "none";
 }
 
-export type CommandResultMap = CoreCommandResultMap & {
+export type CommandResultMap = CoreCommandResultMap & ModelServicesCommandResultMap & {
   [K in Exclude<
     keyof RuntimeCommandInputMap,
     | EvaluationOperation["kind"]
+    | keyof ModelServicesCommandInputMap
     | "operator.invoke"
     | "session.tree.navigate"
     | "session.tree.branch"

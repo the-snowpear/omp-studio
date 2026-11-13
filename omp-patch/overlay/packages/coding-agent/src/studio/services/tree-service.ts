@@ -1,14 +1,14 @@
-import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { shiftImageMarkers } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
-import { renderAttachmentSourceNotice } from "../../session/attachment-source-notice";
 import { expandModelMentionTags, type ModelMention } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
+import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { AgentSession } from "../../session/agent-session";
 import type { SessionTreeNode } from "../../session/session-entries";
-import { formatQuestionResult, formatSingleQuestionResponse, type AskToolInput } from "../../tools/ask";
-import { mapAskDialogValue } from "../remote-extension-ui";
-import type { AskToolDetails, QuestionResult } from "@oh-my-pi/pi-tui/tools/ask";
+import { createAskFormResult, recoverAskHtml } from "../../tools/ask";
+import { isRecord } from "@oh-my-pi/pi-utils";
+import type { AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
 import type { StudioInteractionPort } from "./interaction-port";
+import { presentHtmlForm } from "./form-presentation";
+import { askTimeoutMs } from "../../modes/settings";
 
 const EDITOR_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
@@ -49,7 +49,12 @@ export interface StudioTreeNode {
 
 export class StudioTreeError extends Error {
 	constructor(
-		readonly code: "INTERACTION_REQUIRED" | "INVALID_ARGUMENT" | "BUSY_STREAMING" | "BUSY_COMPACTING",
+		readonly code:
+			| "INTERACTION_REQUIRED"
+			| "INTERACTION_STALE"
+			| "INVALID_ARGUMENT"
+			| "BUSY_STREAMING"
+			| "BUSY_COMPACTING",
 		message: string,
 		readonly details?: Record<string, unknown>,
 	) {
@@ -74,10 +79,20 @@ function projectNode(node: SessionTreeNode): StudioTreeNode {
 }
 
 export class StudioTreeService {
+	#navigationGeneration = 0;
+	#reanswerAbort: AbortController | undefined;
+
 	constructor(
 		private readonly session: AgentSession,
 		private readonly interaction?: StudioInteractionPort,
 	) {}
+
+	/** A new navigation, operator abort or Runtime teardown must not commit a late re-answer. */
+	cancelReanswer(reason = "Tree re-answer superseded"): void {
+		this.#navigationGeneration++;
+		this.#reanswerAbort?.abort(new DOMException(reason, "AbortError"));
+		this.#reanswerAbort = undefined;
+	}
 
 	#restoreModelTags(text: string, previous: readonly ModelMention[]): string {
 		const selectors = new Map(
@@ -106,9 +121,15 @@ export class StudioTreeService {
 	): Promise<unknown> {
 		if (this.session.isStreaming) throw new StudioTreeError("BUSY_STREAMING", "Runtime is streaming");
 		if (this.session.isCompacting) throw new StudioTreeError("BUSY_COMPACTING", "Runtime is compacting");
+		this.cancelReanswer();
+		const generation = this.#navigationGeneration;
+		const manager = this.session.sessionManager;
+		const sessionId = this.session.sessionId;
+		const leafId = manager.getLeafId();
 		const mentions = [...(this.session.modelMentions ?? [])];
-		const targetId = input.restoreRoot ? this.session.sessionManager.getLeafId() : input.targetId;
+		const targetId = input.restoreRoot ? leafId : input.targetId;
 		if (targetId === null) return { cancelled: false, leafId: null };
+		if (!input.exactLeaf && !input.restoreRoot) this.#assertAskReanswerAvailable(targetId);
 		let result = await this.session.navigateTree(targetId, {
 			summarize: input.summarize,
 			customInstructions: input.customInstructions,
@@ -121,10 +142,36 @@ export class StudioTreeService {
 			if (this.interaction === undefined) {
 				throw new StudioTreeError("INTERACTION_REQUIRED", "Tree navigation requires an Ask response", {
 					toolCallId: result.reopenAsk.toolCallId,
-					questions: structuredClone(result.reopenAsk.questions),
 				});
 			}
-			const reanswer = await this.#reanswerAsk(commandId, result.reopenAsk.questions);
+			const assertCurrent = () => {
+				if (
+					generation !== this.#navigationGeneration ||
+					this.session.isDisposed ||
+					this.session.sessionManager !== manager ||
+					this.session.sessionId !== sessionId ||
+					manager.getLeafId() !== leafId
+				) {
+					throw new StudioTreeError("INTERACTION_STALE", "这份重答已过期；当前会话或历史分支已改变，未写入答案。");
+				}
+				if (this.session.isStreaming)
+					throw new StudioTreeError("BUSY_STREAMING", "Runtime started streaming before the re-answer committed");
+				if (this.session.isCompacting)
+					throw new StudioTreeError(
+						"BUSY_COMPACTING",
+						"Runtime started compacting before the re-answer committed",
+					);
+			};
+			assertCurrent();
+			const abort = new AbortController();
+			this.#reanswerAbort = abort;
+			let reanswer: AgentToolResult<AskToolDetails> | undefined;
+			try {
+				reanswer = await this.#reanswerAsk(commandId, result.reopenAsk.html, abort.signal, assertCurrent);
+				assertCurrent();
+			} finally {
+				if (this.#reanswerAbort === abort) this.#reanswerAbort = undefined;
+			}
 			if (reanswer === undefined) {
 				return {
 					cancelled: true,
@@ -137,6 +184,7 @@ export class StudioTreeService {
 				summarize: input.summarize,
 				customInstructions: input.customInstructions,
 				allowAskReopen: true,
+				requireIdle: true,
 				reanswerAskResult: reanswer,
 			});
 		}
@@ -164,6 +212,7 @@ export class StudioTreeService {
 	async branch(_commandId: string, input: { targetId: string }): Promise<unknown> {
 		if (this.session.isStreaming) throw new StudioTreeError("BUSY_STREAMING", "Runtime is streaming");
 		if (this.session.isCompacting) throw new StudioTreeError("BUSY_COMPACTING", "Runtime is compacting");
+		this.cancelReanswer();
 		const mentions = [...(this.session.modelMentions ?? [])];
 		const result = await this.session.branch(input.targetId);
 		const editorImages = editorImagesFrom(result.selectedImages);
@@ -175,82 +224,60 @@ export class StudioTreeService {
 		};
 	}
 
+	#assertAskReanswerAvailable(targetId: string): void {
+		const manager = this.session.sessionManager;
+		const target = manager.getEntry(targetId);
+		if (target?.type !== "message" || target.message.role !== "toolResult" || target.message.toolName !== "ask")
+			return;
+		const toolCallId = target.message.toolCallId;
+		let parentId = target.parentId;
+		while (parentId) {
+			const entry = manager.getEntry(parentId);
+			if (!entry) return;
+			if (entry.type === "message") {
+				if (entry.message.role === "user") return;
+				if (entry.message.role === "assistant") {
+					const call = entry.message.content.find(block => block.type === "toolCall" && block.id === toolCallId);
+					if (call?.type === "toolCall") {
+						if (
+							recoverAskHtml(call.arguments) === undefined &&
+							isRecord(call.arguments) &&
+							Array.isArray(call.arguments.questions)
+						) {
+							throw new StudioTreeError(
+								"INVALID_ARGUMENT",
+								"这条旧版 questions 提问仍可回看，但原生 HTML 表单无法重答；请发送一条新消息说明修改。",
+								{ toolCallId },
+							);
+						}
+						return;
+					}
+				}
+			}
+			parentId = entry.parentId;
+		}
+	}
+
 	async #reanswerAsk(
 		commandId: string,
-		questions: AskToolInput["questions"],
+		html: string,
+		signal: AbortSignal,
+		assertCurrent: () => void,
 	): Promise<AgentToolResult<AskToolDetails> | undefined> {
-		const payload = await this.interaction!.ask({
+		assertCurrent();
+		signal.throwIfAborted();
+		const form = parseHtmlForm(html);
+		const timeoutMs = this.session.getPlanModeState?.()?.enabled ? undefined : askTimeoutMs(this.session.settings);
+		const presentation = await presentHtmlForm(form, { cwd: this.session.sessionManager.getCwd(), signal });
+		assertCurrent();
+		signal.throwIfAborted();
+		const answered = await this.interaction!.form({
 			commandId,
 			title: "Re-answer",
-			acceptImages: true,
-			questions: questions.map(question => ({
-				id: question.id,
-				question: question.question,
-				options: question.options.map((option, index) => ({ id: `option:${index}`, ...option })),
-				multiple: question.multi === true,
-			})),
+			form: presentation,
+			signal,
+			...(timeoutMs === undefined ? {} : { timeoutMs }),
 		});
-		if (payload === undefined) return undefined;
-		const mapped = mapAskDialogValue(payload, questions, true);
-		if (mapped.kind !== "submit") return undefined;
-		const images: ImageContent[] = [];
-		const results: QuestionResult[] = mapped.results.map(answer => {
-			const customOffset = images.length;
-			images.push(...(answer.customInputImages ?? []));
-			const noteOffset = images.length;
-			images.push(...(answer.noteImages ?? []));
-			return {
-				id: answer.id,
-				question: answer.question,
-				options: answer.options,
-				multi: answer.multi,
-				selectedOptions: answer.selectedOptions,
-				...(answer.customInput === undefined
-					? {}
-					: {
-							customInput: shiftImageMarkers(
-								answer.customInput,
-								customOffset,
-								answer.customInputImages?.length ?? 0,
-							),
-						}),
-				...(answer.note === undefined
-					? {}
-					: { note: shiftImageMarkers(answer.note, noteOffset, answer.noteImages?.length ?? 0) }),
-				...(answer.noteOption === undefined ? {} : { noteOption: answer.noteOption }),
-			};
-		});
-		if (
-			results.length === 1 &&
-			!results[0]!.multi &&
-			!results[0]!.selectedOptions.length &&
-			results[0]!.customInput === undefined &&
-			!images.length
-		)
-			return undefined;
-		const imageBlocks: AgentToolResult<AskToolDetails>["content"] = images.flatMap((image, index) => {
-			const notice = renderAttachmentSourceNotice(image, index + 1, { askAnswer: true });
-			return notice ? [{ type: "text" as const, text: notice.content }, image] : [image];
-		});
-		if (results.length === 1) {
-			const answer = results[0]!;
-			const details: AskToolDetails = {
-				question: answer.question,
-				options: answer.options,
-				multi: answer.multi,
-				selectedOptions: answer.selectedOptions,
-				...(answer.customInput === undefined ? {} : { customInput: answer.customInput }),
-				...(answer.note ? { note: answer.note } : {}),
-				...(answer.noteOption ? { noteOption: answer.noteOption } : {}),
-			};
-			return { content: [{ type: "text", text: formatSingleQuestionResponse(answer) }, ...imageBlocks], details };
-		}
-		return {
-			content: [
-				{ type: "text", text: `User answers:\n${results.map(formatQuestionResult).join("\n")}` },
-				...imageBlocks,
-			],
-			details: { results },
-		};
+		return answered === undefined ? undefined : createAskFormResult(form, answered);
 	}
 }

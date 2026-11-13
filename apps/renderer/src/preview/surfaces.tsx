@@ -294,6 +294,7 @@ function previewDiffFiles(rows: readonly { file: string; add: number; del: numbe
       file: row.file,
       add: row.add,
       del: row.del,
+      ...(d?.partial ? { partial: true } : {}),
       hunks: d ? [{
         hunkLabel: "变更摘录",
         lines: d.lines.map((line) => (

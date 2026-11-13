@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ClientInteraction, InteractionResponseValue } from "@omp-studio/client-contract";
 import { ApprovalCard } from "./deck/ApprovalCard";
 import { AskActions, AskBody, AskHead } from "./deck/AskCard";
@@ -18,6 +18,8 @@ import {
 import { QueuedDeck, type QueuedAskItem, type QueuedDeckItem } from "./deck/QueuedDeck";
 import { PromptHead, type DeckQueue } from "./deck/PromptHead";
 import type { DeckAskAnswer } from "./deck/types";
+import { closeFormSession, useFormInteractionLifecycle, useFormSession, type FormInteraction, type ReadInteractionForm } from "./deck/FormSession";
+import { FormCard } from "./deck/FormCard";
 
 export type { DeckQueue } from "./deck/PromptHead";
 export { PromptHead, QueueNav } from "./deck/PromptHead";
@@ -28,13 +30,14 @@ export type InteractionCaption = {
   readonly meta?: string;
 };
 
-export function InteractionPrompt({ interaction, onRespond, disabled, caption, demo, queue }: {
+export function InteractionPrompt({ interaction, onRespond, disabled, caption, demo, queue, readForm }: {
   interaction: ClientInteraction;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
   disabled?: boolean;
   caption?: InteractionCaption;
   demo?: boolean;
   queue?: DeckQueue;
+  readForm?: ReadInteractionForm | undefined;
 }) {
   const [text, setText] = useState(interaction.kind === "editor" ? (interaction.content ?? "") : "");
   const [answer, setAnswer] = useState<DeckAskAnswer>(NO_ASK_ANSWER);
@@ -73,6 +76,7 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
       提交失败，卡片已保留。请重试。
     </p>
   ) : null;
+  if (interaction.kind === "form") return <LiveFormPrompt interaction={interaction} readForm={readForm} onRespond={onRespond} disabled={busy} caption={caption} demo={demo} queue={queue} />;
   if (interaction.kind === "confirm") {
     return (
       <div className="approval-card">
@@ -253,12 +257,16 @@ function liveAskValue(
   return submitSelectValue(view, answers[view.question.id] ?? NO_ASK_ANSWER, interaction.multiple);
 }
 
-export function InteractionDeck({ interaction, onRespond, disabled, leaving }: {
+export function InteractionDeck({ interaction, onRespond, disabled, leaving, readForm }: {
   interaction: ClientInteraction | null;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
   disabled: boolean;
   leaving?: boolean;
+  readForm?: ReadInteractionForm | undefined;
 }) {
+  useFormInteractionLifecycle(interaction);
+  useEffect(() => { if (interaction?.kind === "form" && leaving) closeFormSession(interaction); }, [interaction?.interactionId, interaction?.leaseGeneration, leaving]);
+  if (interaction?.kind === "form") return <LiveFormQueue key={`${interaction.interactionId}:${interaction.leaseGeneration}`} interaction={interaction} onRespond={onRespond} readForm={readForm} disabled={disabled} {...(leaving === undefined ? {} : { leaving })} />;
   if (interaction === null) {
     return <div className="deck" role="region" aria-label="待处理的审批与提问" />;
   }
@@ -276,6 +284,31 @@ export function InteractionDeck({ interaction, onRespond, disabled, leaving }: {
   return (
     <PromptDeckShell interaction={interaction} onRespond={onRespond} disabled={disabled} leaving={leaving === true} />
   );
+}
+
+function LiveFormPrompt({ interaction, readForm, onRespond, disabled, caption, demo, queue }: {
+  interaction: FormInteraction;
+  readForm?: ReadInteractionForm | undefined;
+  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
+  disabled?: boolean | undefined;
+  caption?: InteractionCaption | undefined;
+  demo?: boolean | undefined;
+  queue?: DeckQueue | undefined;
+}) {
+  const session = useFormSession(interaction, readForm);
+  return <FormCard session={session} title={caption?.title ?? interaction.title} summary={interaction.summary} meta={caption?.meta} demo={demo} queue={queue} disabled={disabled} onRespond={onRespond} />;
+}
+
+function LiveFormQueue({ interaction, readForm, onRespond, disabled, leaving }: {
+  interaction: FormInteraction;
+  readForm?: ReadInteractionForm | undefined;
+  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
+  disabled: boolean;
+  leaving?: boolean | undefined;
+}) {
+  const session = useFormSession(interaction, readForm);
+  const items = useMemo<readonly QueuedDeckItem[]>(() => [{ kind: "form", id: interaction.interactionId, title: interaction.title, summary: interaction.summary, session }], [session]);
+  return <QueuedDeck items={items} regionLabel="待处理的审批与提问" disabled={disabled} {...(leaving === undefined ? {} : { leaving })} onFormRespond={(_item, decision, value) => onRespond(decision, value)} />;
 }
 
 function PromptDeckShell({

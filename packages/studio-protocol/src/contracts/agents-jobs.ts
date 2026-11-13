@@ -1,5 +1,6 @@
 import type { AgentId, Generation, JobId, OpaqueCursor } from "./ids";
 import type { JobWidgetView } from "./runtime-features";
+import type { JobActionsView } from "./job-actions";
 
 export type AgentStatus =
   | "starting"
@@ -10,6 +11,19 @@ export type AgentStatus =
   | "aborted"
   | "failed"
   | "released";
+
+/** Native prompt groups of one stepped task, not independent per-user-step jobs. */
+export interface StudioTaskStepState {
+  /** Native task-steps prompts; more than four user steps share prompt groups. */
+  prompts: readonly string[];
+  /** Leading groups dispatched to the same agent. Sent does not mean completed. */
+  sent: number;
+  /** Groups that delivered a clean native yield/final result. */
+  completed: number;
+  /** Unknown is reserved for historical task-steps entries without execution metadata. */
+  phase: "running" | "completed" | "interrupted" | "failed" | "budget" | "unknown";
+  reason?: string;
+}
 
 /** Cumulative per-agent usage totals; mirrors the runtime hub projection. */
 export interface StudioAgentUsage {
@@ -39,6 +53,8 @@ export interface StudioAgentSnapshot {
   hasTranscript: boolean;
   unreadCount: number;
   activeJobIds: JobId[];
+  /** Structured native execution state of this agent's single stepped task. */
+  taskSteps?: StudioTaskStepState;
   /** Current stage of the task job running this agent, from its completion probe. */
   stage?: string;
   /** The running task's own completion estimate, 0–100. */
@@ -76,6 +92,10 @@ export interface StudioJobSnapshot {
   command?: string;
   /** A running task's own completion estimate, 0–100. */
   completionPercent?: number;
+  /** Native prompt-group execution state, when this is a stepped task job. */
+  taskSteps?: StudioTaskStepState;
+  /** Latest native GitHub workflow watch associated with this task/eval job. */
+  actions?: JobActionsView;
   /** What the job is doing now: a subagent's stage. */
   stage?: string;
   /** Live widget (the last view seen once the job settled). */
@@ -96,7 +116,8 @@ export type AgentOperation =
       definition: string;
       model?: string[];
       assignment?: string;
-      taskFile?: string;
+      /** Ordered user steps; native grouping and execution stay with the task executor. */
+      steps?: string[];
       solutionSpace?: string;
       context?: string;
       async?: boolean;

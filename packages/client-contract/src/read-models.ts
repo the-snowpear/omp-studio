@@ -646,6 +646,8 @@ export interface ModelLoginProviderRecord {
  * Host-side approximation (env var or stored auth), never a secret value.
  */
 export interface WebSearchProviderRecord {
+  /** A native vertical/site route; never an automatic general-web fallback or account. */
+  readonly siteRoute?: string;
   readonly id: string;
   readonly name: string;
   /** Upstream `SEARCH_PROVIDER_OPTIONS` description: which credential this provider needs. */
@@ -710,7 +712,7 @@ export interface WebSearchConfigReadModel {
   readonly timeoutSeconds: number;
   /** `providers.webSearchGeminiModel` — Gemini grounding model; empty = runtime default. */
   readonly geminiModel: string;
-  /** Static catalog of the 23 built-in search providers, in runtime chain order. */
+  /** Native search engines/groundings and explicit site routes; a site route is not an automatic fallback. */
   readonly providers: ReadonlyArray<WebSearchProviderRecord>;
   readonly advanced: WebSearchAdvancedConfig;
 }

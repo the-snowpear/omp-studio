@@ -43,7 +43,9 @@ export interface SmokeTestRunnerOptions {
 }
 
 const DEFAULT_SMOKE_ARGS = ["--smoke-test"] as const;
-const DEFAULT_SMOKE_TIMEOUT_MS = 60_000;
+// Native 18.19.0 probes all worker graphs sequentially; cold activation on
+// Windows can exceed a minute even when every worker succeeds.
+const DEFAULT_SMOKE_TIMEOUT_MS = 120_000;
 const DEFAULT_KILL_GRACE_MS = 5_000;
 
 const defaultSpawn: SelfCheckSpawn = (command, args, options) =>

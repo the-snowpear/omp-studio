@@ -14,6 +14,8 @@ import type { SubagentViewState } from "../conversation/subagentViewState";
 import { AgentBtwPane } from "../btw/AgentBtwPane";
 import { useWideLayout } from "../layout/useWideLayout";
 import { agentStatusText } from "./agentPresentation";
+import { TaskStepsView } from "./TaskStepsView";
+import { previewTaskStepsForAgent } from "../preview/taskStepsPreview";
 
 /** From this body width the details move out of their tab into a column beside the conversation. */
 const AGENT_DETAIL_WIDE_MIN = 1080;
@@ -67,6 +69,7 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
   const name = agent?.displayName ?? target.displayName ?? target.agentId;
   const model = agent?.resolvedModel ?? target.resolvedModel;
   const task = agent?.assignment ?? target.task;
+  const taskSteps = preview ? previewTaskStepsForAgent(target.agentId) : agent?.taskSteps;
   const status = agent ? demo?.status ?? agentStatusText(agent.status, zh) : undefined;
   const metrics = [
     [zh ? "Agent" : "Agent", target.agentId],
@@ -135,7 +138,7 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
         {...(viewState === undefined ? {} : { viewState })} {...(workspaceId === undefined ? {} : { workspaceId })}
         {...(loadMentions === undefined ? {} : { loadMentions })} {...(pendingInteractionSessionId === undefined ? {} : { pendingInteractionSessionId })} />
     </div>
-    {shown === "details" ? <div className="agent-detail-metadata"><dl>{metrics.filter(([, value]) => value !== undefined && value !== "").map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div> : null}
+    {shown === "details" ? <div className="agent-detail-metadata">{taskSteps ? <TaskStepsView state={taskSteps} zh={zh} /> : null}<dl>{metrics.filter(([, value]) => value !== undefined && value !== "").map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div> : null}
     {btwVisited ? <div className="agent-detail-btw" hidden={shown !== "btw"}><AgentBtwPane client={preview ? undefined : client} sessionId={parentSessionId} agentId={target.agentId} {...(viewState ? { viewState: viewState.btw } : {})}
       available={visible && shown === "btw" && canBtw && runtimeConnected && !historical && agent?.hasLiveSession === true} /></div> : null}
     {wide ? <aside className="agent-detail-aside" aria-label={zh ? "子 Agent 详情" : "Agent details"}>
@@ -143,6 +146,7 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
         {([[zh ? "运行时间" : "Duration", metric(4)], ["Tokens", metric(5)], [zh ? "费用" : "Cost", metric(6)]] as const).map(([label, stat]) =>
           <div key={label} className="agent-detail-stat"><span>{label}</span><strong>{stat || "—"}</strong></div>)}
       </div>
+      {taskSteps ? <TaskStepsView state={taskSteps} zh={zh} /> : null}
       {task ? <section className="agent-detail-section"><h3>{zh ? "任务" : "Task"}</h3><p className="agent-detail-assignment">{task}</p></section> : null}
       {runRows.length ? <section className="agent-detail-section"><h3>{zh ? "运行" : "Run"}</h3>
         <dl className="agent-detail-props">{runRows.map(([label, text]) => <div key={label}><dt>{label}</dt><dd>{text}</dd></div>)}</dl>

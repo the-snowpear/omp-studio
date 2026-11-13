@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as gc from "../src/cli/gc-cli";
-import { cfgGcColdArchiveAfterDays } from "../src/cli/gc-settings";
+import { cfgGcColdArchiveAfterDays, cfgGcStripAfterDays } from "../src/cli/gc-settings";
 import { Settings } from "../src/config/settings";
 import type { AgentSession } from "../src/session/agent-session";
 import { StudioMaintenanceService } from "../src/studio/services/maintenance-service";
@@ -63,6 +63,77 @@ test("cleanup requires a fresh single-use preview and never applies during scann
 		collect.mockRestore();
 	}
 });
+test("replay stripping uses a native idle policy and single-use preview, separate from storage cleanup", async () => {
+	const settings = Settings.isolated({ "gc.stripAfterDays": 30 });
+	const directory = spyOn(settings, "getAgentDir").mockReturnValue("/isolated/studio-strip");
+	const collect = spyOn(gc, "collectGc").mockImplementation(async ({ flags }) => ({
+		agentDir: "/isolated/studio-strip",
+		lockPath: "/isolated/studio-strip/gc.lock",
+		apply: flags.apply === true,
+		strip: {
+			scanned: 8,
+			skippedLive: flags.apply ? 2 : 1,
+			wouldStrip: 3,
+			stripped: flags.apply ? 2 : 0,
+			records: 4,
+			bytes: 512,
+			errors: [],
+		},
+	}));
+	try {
+		const service = new StudioMaintenanceService({ sessionId: "main", settings } as AgentSession);
+		const inherited = (await service.execute({
+			kind: "maintenance.gc.preview",
+			sessionId: "main",
+			categories: [],
+			strip: {},
+		})) as GcPreview;
+		expect(collect.mock.calls[0]![0].flags).toMatchObject({
+			apply: false,
+			strip: true,
+			stripAfterDays: 30,
+			compress: false,
+			blobs: false,
+			archive: false,
+			wal: false,
+			stale: false,
+		});
+		expect(inherited.summary.rows).toEqual([]);
+		expect(inherited.summary.strip).toMatchObject({
+			idleDays: 30,
+			scope: "sessions-and-archives",
+			candidates: 3,
+			changed: 0,
+			records: 4,
+			bytes: 512,
+		});
+		cfgGcStripAfterDays.override(settings, 45);
+		await expect(
+			service.execute({ kind: "maintenance.gc.apply", sessionId: "main", token: inherited.token }),
+		).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+		const explicit = (await service.execute({
+			kind: "maintenance.gc.preview",
+			sessionId: "main",
+			categories: [],
+			strip: { idleDays: 2 },
+		})) as GcPreview;
+		cfgGcStripAfterDays.override(settings, 60);
+		const result = await service.execute({ kind: "maintenance.gc.apply", sessionId: "main", token: explicit.token });
+		expect(result).toMatchObject({
+			applied: true,
+			rows: [],
+			strip: { idleDays: 2, candidates: 3, changed: 2, skippedActive: 2 },
+		});
+		expect(collect.mock.calls.filter(([args]) => args.flags.apply)).toHaveLength(1);
+		await expect(
+			service.execute({ kind: "maintenance.gc.apply", sessionId: "main", token: explicit.token }),
+		).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+	} finally {
+		collect.mockRestore();
+		directory.mockRestore();
+	}
+});
+
 test("collector errors remain visible and prevent applying a partial preview", async () => {
 	const collect = spyOn(gc, "collectGc").mockResolvedValue({
 		agentDir: "/private",

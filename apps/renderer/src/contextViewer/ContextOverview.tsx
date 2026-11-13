@@ -47,7 +47,12 @@ export function ContextOverview({ index, compact = false }: { index: ContextView
               <i
                 key={segment.key}
                 style={{ width: `${segment.share * 100}%`, backgroundColor: segment.color }}
+                data-context-group={segment.key}
                 data-striped={segment.striped ? "" : undefined}
+                tabIndex={0}
+                role="img"
+                aria-label={`${t(`contextViewer.${segment.key === "buffer" || segment.key === "free" ? "categories" : "groups"}.${segment.key}`)} · ${segment.tokens.toLocaleString()} tokens · ${(segment.share * 100).toFixed(1)}%`}
+                data-tip={`${t(`contextViewer.${segment.key === "buffer" || segment.key === "free" ? "categories" : "groups"}.${segment.key}`)} · ${segment.tokens.toLocaleString()} tokens · ${(segment.share * 100).toFixed(1)}%`}
               />
             ))}
           </div>
@@ -59,6 +64,12 @@ export function ContextOverview({ index, compact = false }: { index: ContextView
               aria-hidden="true"
             />
           )}
+        </div>
+        <div className="cv-group-legend" aria-label={t("contextViewer.overview.details")}>
+          {segments.filter(segment => segment.key !== "buffer" && segment.key !== "free").map(segment => <span key={segment.key}>
+            <i className="cv-dot" data-context-group={segment.key} style={{ background: segment.color }} aria-hidden="true" />
+            <span>{t(`contextViewer.groups.${segment.key}`)}</span><b>{compactTokens(segment.tokens)}</b>
+          </span>)}
         </div>
         {!compact && facts}
       </div>
@@ -89,6 +100,9 @@ export function ContextOverview({ index, compact = false }: { index: ContextView
         <p className="cv-note">{t("contextViewer.overview.attribution")}</p>
       </div>
       </details>
+      {index.notices?.length ? <ul className="cv-notices" role="status">
+        {index.notices.map((notice, position) => <li key={position}>{notice}</li>)}
+      </ul> : null}
     </section>
   );
 }

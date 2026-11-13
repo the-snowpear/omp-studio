@@ -79,6 +79,15 @@ export function mapRemoteInteractionToClient(
           ? {}
           : { grants: request.grants.map(({ scope, label, alwaysLabel }) => ({ scope, label, alwaysLabel })) }),
       };
+    case "form":
+      return {
+        ...base,
+        kind: "form",
+        summary: request.summary,
+        fieldCount: request.fieldCount,
+        sectionCount: request.sectionCount,
+        ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
+      };
     case "ask":
       return {
         ...base,

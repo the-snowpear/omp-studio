@@ -6,11 +6,30 @@ export interface GcPolicy {
 	staleDays: number;
 	staleKeep: number;
 }
+/** Explicit native replay stripping, separate from the four storage cleanup categories. */
+export interface GcStripOptions {
+	/** Omit to inherit the native gc.stripAfterDays setting. */
+	idleDays?: number;
+}
+export interface GcStripSummary {
+	idleDays: number;
+	/** Native GC covers main transcripts, their child transcripts and archived transcripts. */
+	scope: "sessions-and-archives";
+	/** Top-level sessions scanned; candidates also include child and archived transcripts. */
+	scannedSessions: number;
+	candidates: number;
+	changed: number;
+	records: number;
+	/** Native scan's planned replay-byte removal in JSONL, uncompressed for archives; not reclaimed disk bytes. */
+	bytes: number;
+	skippedActive: number;
+}
 export interface GcSummary {
 	applied: boolean;
 	checkedAt: number;
 	policy: GcPolicy;
 	rows: Array<{ category: GcCategory; candidates: number; changed: number; bytes: number; skippedActive: number }>;
+	strip?: GcStripSummary;
 	errors: string[];
 }
 export interface GcPreview {
@@ -42,7 +61,7 @@ export interface NativeConnectionCheck {
 export interface AutoCompressionStatus { enabled: boolean; ranAt?: number; log: string; }
 export type MaintenanceOperation =
 	| { kind: "maintenance.compression.auto.status"; sessionId: string }
-	| { kind: "maintenance.gc.preview"; sessionId: string; categories: GcCategory[] }
+	| { kind: "maintenance.gc.preview"; sessionId: string; categories: GcCategory[]; strip?: GcStripOptions }
 	| { kind: "maintenance.gc.apply"; sessionId: string; token: string }
 	| { kind: "maintenance.gc.status"; sessionId: string }
 	| { kind: "maintenance.session.export"; sessionId: string; format?: "archive" | "html" }
@@ -94,7 +113,7 @@ function integer(value: unknown): void {
 	if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error("Invalid maintenance number");
 }
 function summary(value: unknown): void {
-	const row = record(value, ["applied", "checkedAt", "policy", "rows", "errors"]);
+	const row = record(value, ["applied", "checkedAt", "policy", "rows", "strip", "errors"]);
 	if (typeof row.applied !== "boolean") throw new Error("Invalid cleanup state");
 	integer(row.checkedAt);
 	const policy = record(row.policy, ["coldDays", "keepGlobal", "keepPerWorkspace", "staleDays", "staleKeep"]);
@@ -136,14 +155,14 @@ function exported(value: unknown): void {
 		throw new Error("Export exceeds limit");
 }
 export function validateMaintenanceOperation(value: unknown): void {
-	const row = record(value, ["kind", "sessionId", "categories", "token", "format"]);
+	const row = record(value, ["kind", "sessionId", "categories", "strip", "token", "format"]);
  if(row.format!==undefined && (row.kind!=="maintenance.session.export" || !["archive","html"].includes(row.format as string))) throw new Error("Invalid export format");
 	if (typeof row.kind !== "string" || !isMaintenanceKind(row.kind)) throw new Error("Unknown maintenance command");
 	text(row.sessionId, 128);
 	if (row.kind === "maintenance.gc.preview") {
 		if (
 			!Array.isArray(row.categories) ||
-			!row.categories.length ||
+			(!row.categories.length && row.strip === undefined) ||
 			row.categories.length > 4 ||
 			new Set(row.categories).size !== row.categories.length ||
 			row.categories.some(cat => !CATEGORIES.includes(cat as string))

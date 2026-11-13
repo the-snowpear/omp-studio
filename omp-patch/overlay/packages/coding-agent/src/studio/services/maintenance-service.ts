@@ -2,7 +2,7 @@ import { cfgGcAutoCompress } from "../../cli/gc-settings";
 import { GC_AUTO_COMPRESS_LOG } from "../../cli/gc-auto-compress";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { getAgentDir, sanitizeText } from "@oh-my-pi/pi-utils";
+import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { collectGc, collectGcErrors, type GcCommandFlags, type GcResult } from "../../cli/gc-cli";
 import {
 	cfgGcColdArchiveAfterDays,
@@ -10,6 +10,7 @@ import {
 	cfgGcRetainNewestPerCwd,
 	cfgGcStaleRetainDays,
 	cfgGcStaleRetainNewest,
+	cfgGcStripAfterDays,
 } from "../../cli/gc-settings";
 import type { AgentSession } from "../../session/agent-session";
 import type {
@@ -18,6 +19,7 @@ import type {
 	GcPreview,
 	GcStatus,
 	GcSummary,
+	GcStripOptions,
 	MaintenanceOperation,
 	SessionExportResult,
 	SessionExportStatus,
@@ -36,7 +38,7 @@ function clean(error: unknown): string {
 function number(value: number): number {
 	return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }
-function projectGc(result: GcResult, policy: GcPolicy): GcSummary {
+function projectGc(result: GcResult, policy: GcPolicy, stripIdleDays?: number): GcSummary {
 	const rows: GcSummary["rows"] = [];
 	if (result.blobs)
 		rows.push({
@@ -75,6 +77,20 @@ function projectGc(result: GcResult, policy: GcPolicy): GcSummary {
 		checkedAt: Date.now(),
 		policy,
 		rows,
+		...(result.strip && stripIdleDays !== undefined
+			? {
+					strip: {
+						idleDays: stripIdleDays,
+						scope: "sessions-and-archives" as const,
+						scannedSessions: result.strip.scanned,
+						candidates: result.strip.wouldStrip,
+						changed: result.strip.stripped,
+						records: result.strip.records,
+						bytes: result.strip.bytes,
+						skippedActive: result.strip.skippedLive,
+					},
+				}
+			: {}),
 		errors: collectGcErrors(result).slice(0, 20).map(clean),
 	};
 }
@@ -82,6 +98,7 @@ interface PendingGc {
 	preview: GcPreview;
 	flags: GcCommandFlags;
 	categories: GcCategory[];
+	strip?: GcStripOptions;
 	sessionId: string;
 }
 export class StudioMaintenanceService {
@@ -117,14 +134,30 @@ export class StudioMaintenanceService {
 			staleKeep: number(cfgGcStaleRetainNewest.get(this.session.settings)),
 		};
 	}
-	#flags(categories: GcCategory[], policy: GcPolicy): GcCommandFlags {
+	#flags(categories: GcCategory[], policy: GcPolicy, strip?: GcStripOptions): GcCommandFlags {
+		if (
+			!Array.isArray(categories) ||
+			categories.length > 4 ||
+			new Set(categories).size !== categories.length ||
+			categories.some(category => !["blobs", "archive", "wal", "stale"].includes(category)) ||
+			(categories.length === 0 && strip === undefined)
+		) {
+			throw new SessionControlError("INVALID_ARGUMENT", "Choose a cleanup category or provider replay stripping");
+		}
+		if (strip?.idleDays !== undefined && (!Number.isFinite(strip.idleDays) || strip.idleDays < 0)) {
+			throw new SessionControlError("INVALID_ARGUMENT", "Replay stripping requires a non-negative idle day count");
+		}
 		return {
-			agentDir: getAgentDir(),
+			agentDir: this.session.settings.getAgentDir(),
 			compress: false,
 			blobs: categories.includes("blobs"),
 			archive: categories.includes("archive"),
 			wal: categories.includes("wal"),
 			stale: categories.includes("stale"),
+			strip: strip !== undefined,
+			...(strip !== undefined
+				? { stripAfterDays: number(strip.idleDays ?? cfgGcStripAfterDays.get(this.session.settings)) }
+				: {}),
 			coldArchiveAfterDays: policy.coldDays,
 			retainNewestGlobal: policy.keepGlobal,
 			retainNewestPerCwd: policy.keepPerWorkspace,
@@ -206,11 +239,21 @@ export class StudioMaintenanceService {
 			this.#gc = { phase: "previewing" };
 			try {
 				const policy = this.#policy(),
-					flags = this.#flags(operation.categories, policy);
-				const summary = projectGc(await collectGc({ flags: { ...flags, apply: false } }), policy);
+					flags = this.#flags(operation.categories, policy, operation.strip);
+				const summary = projectGc(
+					await collectGc({ flags: { ...flags, apply: false } }),
+					policy,
+					flags.stripAfterDays,
+				);
 				this.#check(operation.sessionId);
 				const preview: GcPreview = { token: crypto.randomUUID(), expiresAt: Date.now() + EXPIRES, summary };
-				this.#plan = { preview, flags, categories: [...operation.categories], sessionId: operation.sessionId };
+				this.#plan = {
+					preview,
+					flags,
+					categories: [...operation.categories],
+					...(operation.strip === undefined ? {} : { strip: { ...operation.strip } }),
+					sessionId: operation.sessionId,
+				};
 				this.#gc = { phase: "complete", preview, summary };
 				return preview;
 			} catch (error) {
@@ -228,7 +271,7 @@ export class StudioMaintenanceService {
 			throw new SessionControlError("COMMAND_BLOCKED", "The cleanup preview expired; scan and confirm again");
 		if (
 			plan.preview.summary.errors.length ||
-			JSON.stringify(this.#flags(plan.categories, this.#policy())) !== JSON.stringify(plan.flags)
+			JSON.stringify(this.#flags(plan.categories, this.#policy(), plan.strip)) !== JSON.stringify(plan.flags)
 		)
 			throw new SessionControlError("COMMAND_BLOCKED", "Cleanup settings or scan errors require a fresh preview");
 		this.#plan = undefined;
@@ -237,6 +280,7 @@ export class StudioMaintenanceService {
 			const result = projectGc(
 				await collectGc({ flags: { ...plan.flags, apply: true } }),
 				plan.preview.summary.policy,
+				plan.flags.stripAfterDays,
 			);
 			this.#gc = { phase: "complete", summary: result };
 			return result;

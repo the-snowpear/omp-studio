@@ -8,7 +8,7 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import type { BrowserLinkIntent } from "./browserLinks";
 import { planBrowserDockSync, type BrowserDockMemory } from "./browserDockSync";
 import { browserHub, type BrowserSession, type BrowserSessionSnapshot } from "./browserSessions";
-import { useManagedBrowserAvailable } from "./BrowserPane";
+import { supportsNativeBrowser, useManagedBrowserAvailable } from "./BrowserPane";
 import { splitAddress } from "./BrowserToolbar";
 import { ManagedBrowserPane, useBrowserCopy } from "./ManagedBrowserPane";
 
@@ -40,7 +40,8 @@ export function BrowserDockInstances({ client, sessionId, available, capabilitie
   const { window: conversationWindow } = useConversationDom();
   const pages = useBrowserPagesLayout();
   const scope = useSyncExternalStore(store.subscribe, () => store.getSnapshot().scope);
-  const hub = native ? browserHub(preview) : null;
+  const nativeClient = supportsNativeBrowser(available, capabilities) ? client : undefined;
+  const hub = native ? browserHub(preview, globalThis.ompStudioChrome?.managedBrowser, nativeClient) : null;
   const session = useMemo(() => hub && sessionId ? hub.session(sessionId) : null, [hub, sessionId]);
   // Only sync once the dock shows this chat's layout; a half-switched chat must not trade pages.
   const bound = !!session && scope.session === sessionId && !scope.draft;
@@ -139,7 +140,7 @@ export function BrowserDockInstances({ client, sessionId, available, capabilitie
       };
       const state = session.getSnapshot().state;
       // Opening directly needs the user in control, unless this is the chat's first page.
-      if (state && (state.control === "human" || !state.pages.length)) {
+      if (state && (session.nativeAvailable || state.control === "human" || !state.pages.length)) {
         if (linkKey) openingLinks.add(linkKey);
         void session.create(detail.url, { linkKey }).then(result => {
           if (!result) later();
@@ -152,6 +153,6 @@ export function BrowserDockInstances({ client, sessionId, available, capabilitie
   }, [conversationWindow, remote, session, bound, store, preview]);
 
   return <>{tabs.map(([id, descriptor]) => <DockPanel key={id} id={id as PanelId}>{visibility =>
-    <ManagedBrowserPane client={available && descriptor.sessionId === sessionId && capabilities?.capabilities.some(item => item.id === "browser.webmcp.list" && item.grade !== "unavailable") ? client : undefined} sessionId={descriptor.sessionId} pageId={descriptor.pageId} visible={visibility.visible} width={visibility.width} foreign={descriptor.sessionId !== sessionId}
+    <ManagedBrowserPane nativeClient={nativeClient} client={available && descriptor.sessionId === sessionId && capabilities?.capabilities.some(item => item.id === "browser.webmcp.list" && item.grade !== "unavailable") ? client : undefined} sessionId={descriptor.sessionId} pageId={descriptor.pageId} visible={visibility.visible} width={visibility.width} foreign={descriptor.sessionId !== sessionId}
       onReferences={onReferences} onActivate={() => { if (store.getSnapshot().layout.lastBrowserPage !== id) store.dispatch({ type: "browser-page-focus", panel: id }); }} />}</DockPanel>)}</>;
 }

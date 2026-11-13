@@ -11,6 +11,7 @@ import { cfgRetryFallbackOn } from "../src/session/settings";
 import { SessionManager } from "../src/session/session-manager";
 import { closeSessionIndex } from "../src/session/session-index";
 import type { AgentSession } from "../src/session/agent-session";
+import type { EphemeralTurnOptions } from "../src/session/agent-session-types";
 import { StudioFeatureSettingsService } from "../src/studio/services/feature-settings-service";
 import { StudioSessionPortabilityService } from "../src/studio/services/session-portability-service";
 import { StudioSessionWorktreesService } from "../src/studio/services/session-worktrees-service";
@@ -272,7 +273,12 @@ test("message suggestions are opt-in, cancel when a draft appears, and still acc
 	const reply = Promise.withResolvers<{ replyText: string; assistantMessage: AssistantMessage }>();
 	const usage = mock(() => {}),
 		publish = mock(() => {}),
-		run = mock(() => reply.promise);
+		run = mock(async (options: EphemeralTurnOptions) => {
+			const result = await reply.promise;
+			// Native side turns report billed messages through onUsage, even after cancellation.
+			options.onUsage?.(result.assistantMessage);
+			return result;
+		});
 	const assistant = {
 		role: "assistant",
 		content: [{ type: "text", text: "Completed" }],
@@ -302,9 +308,9 @@ test("message suggestions are opt-in, cancel when a draft appears, and still acc
 		cfgComposerPredictions.override(settings, true);
 		service.update("channel", 2, true);
 		expect(run).toHaveBeenCalledTimes(1);
-		const request = run.mock.calls[0] as unknown as [{ signal: AbortSignal }];
+		const request = run.mock.calls[0]![0];
 		service.update("channel", 3, false);
-		expect(request[0].signal.aborted).toBe(true);
+		expect(request.signal?.aborted).toBe(true);
 		publish.mockClear();
 		reply.resolve({
 			replyText: "Add regression coverage",
@@ -324,8 +330,7 @@ test("message suggestions are opt-in, cancel when a draft appears, and still acc
 				stopReason: "stop",
 			},
 		});
-		await Promise.resolve();
-		await Promise.resolve();
+		await run.mock.results[0]!.value;
 		expect(publish).not.toHaveBeenCalled();
 		expect(usage).toHaveBeenCalledTimes(1);
 	} finally {

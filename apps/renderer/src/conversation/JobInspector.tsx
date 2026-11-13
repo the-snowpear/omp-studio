@@ -4,6 +4,8 @@ import type { JobInspection } from "@omp-studio/studio-protocol";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { JobWidget } from "./JobWidget";
+import { ActionsSteps } from "./ActionsSteps";
+import { TaskStepsView } from "../agents/TaskStepsView";
 import { bindTailGestures, distanceFromBottom } from "./useConversationScroll";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useSurfaceDocument } from "../dock/SurfaceContext";
@@ -57,18 +59,20 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
     const epoch = ++generation.current;
     let inFlight = false;
     let reload = false;
+    let readingEpoch = 0;
     const load = async () => {
       if (preview || !client || !sessionId || !available || !visible || doc.hidden || epoch !== generation.current) return;
       if (inFlight) { reload = true; return; }
       inFlight = true;
+      const observation = readingEpoch;
       try {
         const handle = await client.command("jobs.inspect", { sessionId, jobId: job.id });
         const result = (await waitReceipt<{ result: JobInspection }>(client, handle.requestId)).result;
-        if (epoch !== generation.current || doc.hidden) return;
+        if (epoch !== generation.current || observation !== readingEpoch || doc.hidden) return;
         setInspection(result);
         setError("");
       } catch (cause) {
-        if (epoch === generation.current && !doc.hidden) setError(hostErrorMessage(cause, zh ? "无法读取任务详情" : "Cannot inspect this job"));
+        if (epoch === generation.current && observation === readingEpoch && !doc.hidden) setError(hostErrorMessage(cause, zh ? "无法读取任务详情" : "Cannot inspect this job"));
       } finally {
         inFlight = false;
         if (reload && epoch === generation.current) { reload = false; void load(); }
@@ -77,13 +81,23 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
     const request = () => { void load(); };
     refresh.current = request;
     request();
+    // Observe the existing parent job, never start another workflow watcher.
     // Status is a dependency: a transition to terminal reads the final tail once.
-    const timer = !preview && visible && available && job.status === "running" ? setInterval(request, POLL_MS) : undefined;
-    doc.addEventListener("visibilitychange", request);
+    let timer: number | undefined;
+    const visibilityChanged = () => {
+      readingEpoch++;
+      if (timer !== undefined) clearInterval(timer);
+      timer = undefined;
+      if (doc.hidden) return;
+      request();
+      if (!preview && visible && available && job.status === "running") timer = window.setInterval(request, POLL_MS);
+    };
+    if (!preview && visible && available && !doc.hidden && job.status === "running") timer = window.setInterval(request, POLL_MS);
+    doc.addEventListener("visibilitychange", visibilityChanged);
     return () => {
       generation.current++;
       if (timer !== undefined) clearInterval(timer);
-      doc.removeEventListener("visibilitychange", request);
+      doc.removeEventListener("visibilitychange", visibilityChanged);
       if (refresh.current === request) refresh.current = () => {};
     };
   }, [preview, client, sessionId, scopeKey, available, visible, doc, job.id, job.generation, job.status, zh]);
@@ -108,6 +122,13 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
   });
 
   const shown = preview ? (previewInspection ?? undefined) : inspection;
+  const steps = shown ? <>
+    {shown.actions ? <ActionsSteps view={shown.actions} zh={zh} parentStatus={job.status} /> : null}
+    {shown.taskSteps ? <details className="ji-task-phases" key={`${job.id}:${job.generation}`}>
+      <summary>{zh ? "原生任务提示组" : "Native task prompt groups"}</summary>
+      <TaskStepsView state={shown.taskSteps} zh={zh} />
+    </details> : null}
+  </> : null;
   const metadata = shown ? <dl className="ji-kv">
     <dt>id</dt><dd>{job.id}</dd>
     {shown.purpose ? <><dt>{zh ? "用途" : "Purpose"}</dt><dd>{shown.purpose}</dd></> : null}
@@ -139,6 +160,7 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
           <span className="ji-title" data-tip={job.label}>{job.label}</span>
           <button className="btn small ghost" type="button" onClick={onClose} aria-label={zh ? "关闭" : "Close"}>×</button>
         </div> : null}
+        {steps}
         {shown?.command ? <div className="ji-process-command">
           <span>{zh ? "命令" : "Command"}</span><code>{shown.command}</code>
         </div> : null}
@@ -198,6 +220,7 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
       {!preview && !available ? <div className="ji-note">{zh ? "Runtime 未连接或是历史会话，无法读取任务详情" : "No live Runtime for this session; job details are unavailable"}</div> : null}
       {error ? <div className="ji-error" role="alert">{error}</div> : null}
       {shown ? <>
+        {steps}
         {metadata}
         {shown.widget ? <JobWidget view={shown.widget} /> : null}
         {shown.output ? <pre className="ji-output" aria-label={zh ? "输出尾部" : "Output tail"}>{shown.output}</pre>

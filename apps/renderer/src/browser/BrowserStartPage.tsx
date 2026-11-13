@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ManagedBrowserPage } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
+import { AppSelect } from "../AppSelect";
 import { useOptionalDock } from "../dock/DockContext";
 import { browserPagePanelId } from "../dock/types";
 import type { BrowserSession, BrowserSessionSnapshot } from "./browserSessions";
@@ -21,13 +22,14 @@ export function BrowserStartPage({ session, snap, copy, pageId, unbound = false,
   const dock = useOptionalDock();
   const input = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
-  const [working, setWorking] = useState(false);
+  const [working, setWorking] = useState(false), [app, setApp] = useState("inherit"), [customApp, setCustomApp] = useState(""), [argv, setArgv] = useState(""), [target, setTarget] = useState(""), [insecure, setInsecure] = useState(false);
   const state = snap.state;
   const human = state?.control === "human";
   const pending = snap.pendingLink;
-  // The first page of a chat may be opened without a takeover; afterwards the user takes control first.
-  const needsTakeover = !!state && !human && (!!pageId || state.pages.length > 0);
-  const full = !!state && !pageId && state.pages.length >= state.settings.maxTabs;
+  const selectedApp = session?.nativeAvailable ? app : "embedded";
+  // A new native tab does not commandeer or recreate any existing tab. Embedded retains its explicit adapter policy.
+  const needsTakeover = !!state && !human && (!!pageId || selectedApp === "embedded" && state.pages.some(page => !page.descriptor || page.descriptor.transport === "embedded"));
+  const full = !!state && !pageId && selectedApp === "embedded" && state.pages.filter(page => !page.descriptor || page.descriptor.transport === "embedded").length >= state.settings.maxTabs;
   useEffect(() => { if (autoFocus) input.current?.focus({ preventScroll: true }); }, [autoFocus]);
   useEffect(() => { if (pending) setValue(pending.url); }, [pending?.id]);
   const open = async (url: string) => {
@@ -35,7 +37,12 @@ export function BrowserStartPage({ session, snap, copy, pageId, unbound = false,
     setWorking(true);
     try {
       if (needsTakeover && !await session.setControl("human")) return;
-      const result = pageId ? await session.execute({ action: "navigate", pageId, url: url.trim() }) : await session.create(url.trim(), { linkKey: pending?.url === url.trim() ? pending.reuseKey : undefined });
+      const result = pageId ? await session.execute({ action: "navigate", pageId, url: url.trim() }) : await session.create(url.trim(), {
+        linkKey: pending?.url === url.trim() ? pending.reuseKey : undefined,
+        ...(selectedApp === "inherit" ? {} : { app: selectedApp === "custom" ? customApp.trim() : selectedApp }),
+        ...(selectedApp === "custom" && argv.trim() ? { argv: argv.split(/\r?\n/u).filter(value => value.length > 0) } : {}),
+        ...(selectedApp !== "embedded" && target.trim() ? { target: target.trim() } : {}), ...(selectedApp !== "embedded" && insecure ? { insecure: true } : {}),
+      });
       if (result) { setValue(""); if (pending) session.setPendingLink(null); }
     } finally { setWorking(false); }
   };
@@ -45,11 +52,23 @@ export function BrowserStartPage({ session, snap, copy, pageId, unbound = false,
     dock?.store.dispatch({ type: "open", panel });
     dock?.store.dispatch({ type: "browser-page-focus", panel });
   };
-  const disabled = unbound || !state || working || full;
+  const disabled = unbound || !state || working || full || selectedApp === "custom" && !customApp.trim();
   return <div className="mb-start">
     <div className="mb-start-column">
       <div className="mb-start-mark" aria-hidden="true"><Icon name="globe" /></div>
       <h2 className="mb-start-title">{copy("新标签页", "New tab")}</h2>
+      {!pageId ? <div className="mb-open-options">
+        <label className="mb-field"><span>{copy("本次打开方式", "Open this page with")}</span><AppSelect aria-label={copy("本次浏览器适配器", "Browser adapter for this open")} value={selectedApp} disabled={working || unbound} onChange={event => { setApp(event.target.value); setInsecure(false); }}>
+          <option value="inherit" disabled={!session?.nativeAvailable}>{copy("继承 CLI（默认）", "Inherit CLI (default)")}</option>
+          <option value="webkit" disabled={!session?.nativeAvailable}>Native WebKit</option><option value="chromium" disabled={!session?.nativeAvailable}>Native Chromium</option><option value="relay" disabled={!session?.nativeAvailable}>Native Chrome relay</option>
+          <option value="custom" disabled={!session?.nativeAvailable}>{copy("CDP 地址 / 可执行文件", "CDP endpoint / executable")}</option><option value="embedded" disabled={!session?.embeddedAvailable}>Studio embedded</option>
+        </AppSelect></label>
+        <p>{selectedApp === "embedded" ? copy("明确选择本机 WebContentsView；它有独立的浏览空间和下载管理，不替换已打开的 CLI 页面。", "Explicit local WebContentsView with its own spaces and downloads. It does not replace any open CLI page.") : copy("保留原生优先级、实际引擎和同一个标签。选择只作用于本次新开，不改变已经登录的页面。", "Preserves native priority and the actual engine/tab. This choice affects only the new open, not signed-in pages.")}</p>
+        {selectedApp === "custom" ? <><label className="mb-field"><span>{copy("app（字符串）", "app (string)")}</span><input className="input" aria-label={copy("CDP 地址或浏览器可执行文件", "CDP endpoint or browser executable")} spellCheck={false} value={customApp} disabled={working} onChange={event => setCustomApp(event.target.value)} /></label>
+          <label className="mb-field"><span>argv</span><textarea className="input mono" aria-label={copy("浏览器 argv，每行一个参数", "Browser argv, one argument per line")} rows={2} value={argv} disabled={working} onChange={event => setArgv(event.target.value)} /></label></> : null}
+        {selectedApp !== "embedded" ? <details><summary>{copy("原生连接选项", "Native connection options")}</summary><label className="mb-field"><span>target</span><input className="input" aria-label={copy("原生 target，可选", "Native target, optional")} value={target} disabled={working} onChange={event => setTarget(event.target.value)} /></label>
+          <label className="mb-open-insecure"><input type="checkbox" checked={insecure} disabled={working || selectedApp === "relay"} onChange={event => setInsecure(event.target.checked)} /><span>{copy("insecure：允许无效 HTTPS 证书（仅本次打开）", "insecure: allow invalid HTTPS certificates for this open")}</span></label></details> : null}
+      </div> : null}
       {pending ? <div className="mb-start-request" role="status">
         <div className="mb-start-request-body"><span>{copy("要在这里打开的链接", "Link to open here")}</span><strong title={pending.url}>{pending.url}</strong></div>
         <div className="mb-start-request-actions">

@@ -50,6 +50,7 @@ function transcriptFixture(
 		session,
 		sessionManager: manager,
 		services: {
+			workbench: { views: { cancelClose: () => {} } },
 			live: new StudioLiveService(),
 			pause: new StudioPauseService(),
 			loop: new StudioLoopService({
@@ -61,10 +62,10 @@ function transcriptFixture(
 				reset: () => {},
 				nowMs: Date.now,
 				setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
-				clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
+				clearTimer: timer => clearTimeout(timer as NodeJS.Timeout),
 			}),
 			modes: { state: () => ({}), onChange: () => () => {} },
-			tree: { getTree: () => ({ leafId: null, roots: [] }), navigate: async () => ({}) },
+			tree: { getTree: () => ({ leafId: null, roots: [] }), navigate: async () => ({}), cancelReanswer: () => {} },
 			fork: { fork: async () => ({ forked: true, sessionId: manager.getSessionId() }) },
 			commands: {
 				manifest: () => ({ hash: "sha256:test-commands", commands: [] }),

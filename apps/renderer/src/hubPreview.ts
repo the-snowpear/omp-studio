@@ -4,7 +4,7 @@
  * page and must not be written through to Host commands.
  */
 
-import type { JobInspection, JobWidgetView } from "@omp-studio/studio-protocol";
+import type { JobActionsView, JobInspection, JobWidgetView } from "@omp-studio/studio-protocol";
 
 export type PreviewTool = { name: string; args?: string };
 export type PreviewRetry = { attempt: number; maxAttempts: number; errorMessage?: string };
@@ -64,6 +64,7 @@ export type PreviewJob = {
   stage?: string;
   completionPercent?: number;
   widget?: JobWidgetView;
+  actions?: JobActionsView;
 };
 
 export type PreviewMain = {
@@ -137,9 +138,53 @@ export function previewTypecheckWidget(now = Date.now()): JobWidgetView {
   };
 }
 
+/** Native run_watch observations carried by the existing task, not a new GitHub job. */
+export function previewActionsWatch(finished = false): JobActionsView {
+  return {
+    mode: "run",
+    state: finished ? "completed" : "watching",
+    repo: "the-snowpear/omp-studio",
+    runs: [{
+      id: 24817,
+      workflowName: "Renderer checks",
+      status: "in_progress",
+      branch: "upgrade/omp-18.19.0",
+      jobs: [{
+        id: 248171,
+        name: "Windows · renderer",
+        status: finished ? "completed" : "in_progress",
+        ...(finished ? { conclusion: "failure", durationSeconds: 75 } : {}),
+        steps: [
+          { number: 1, name: "Check out source", status: "completed", conclusion: "success", durationSeconds: 3 },
+          { number: 2, name: "Restore dependency cache", status: "completed", conclusion: "success", durationSeconds: 0 },
+          { number: 3, name: "Check renderer types and behavior", status: finished ? "completed" : "in_progress", ...(finished ? { conclusion: "failure" } : {}) },
+          { number: 4, name: "Upload screenshots", status: finished ? "completed" : "pending", ...(finished ? { conclusion: "skipped" } : {}) },
+        ],
+      }, {
+        id: 248172,
+        name: "Linux · renderer",
+        status: "queued",
+        steps: [],
+      }],
+    }],
+    ...(finished ? { failedLogs: [{
+      runId: 24817, jobId: 248171, workflowName: "Renderer checks", jobName: "Windows · renderer",
+      conclusion: "failure", available: true,
+      tail: "FAIL conversation/renderer-check\nExpected native result metadata; received legacy input fields.\nProcess exited with code 1.",
+    }] } : {}),
+  };
+}
+
 /** Demo `jobs.inspect` results, keyed by job id. Shown only in preview mode. */
 export function previewJobInspections(now = Date.now()): Record<string, JobInspection> {
   return {
+    "job-82": {
+      jobId: "job-82", pids: [], purpose: "类型检查并观察原生 CI 结果",
+      actions: previewActionsWatch(), output: "Native run_watch is waiting for renderer checks.",
+    },
+    "job-77": {
+      jobId: "job-77", pids: [], actions: previewActionsWatch(), output: "cancelled by owner agent",
+    },
     "job-91": {
       jobId: "job-91",
       purpose: "验证本次 Runtime 升级与 Renderer 适配",
@@ -162,6 +207,7 @@ export function previewJobInspections(now = Date.now()): Record<string, JobInspe
       jobId: "job-87",
       pids: [],
       output: "ESLint exited with code 2 · .eslintrc 合并冲突",
+      actions: previewActionsWatch(true),
     },
   };
 }
@@ -269,7 +315,7 @@ export function buildPreviewHub(now = Date.now()): PreviewHub {
     ],
     jobs: [
       { id: "job-80", type: "task", status: "running", label: "deps 子 Agent · 审计 pi-* 0.82.1", durationMs: 167000, ownerId: "main", agentId: "agent-019fcb01", stage: "对比 pi-mermaid 类型签名", completionPercent: 55 },
-      { id: "job-82", type: "task", status: "running", label: "typecheck 子 Agent · 全量类型检查", durationMs: 96000, ownerId: "agent-019fcb01", agentId: "agent-019fcb20", stage: "归类 renderer 类型错误", completionPercent: 70 },
+      { id: "job-82", type: "task", status: "running", label: "typecheck 子 Agent · 类型与 CI 检查", durationMs: 96000, ownerId: "agent-019fcb01", agentId: "agent-019fcb20", stage: "观察原生 CI 步骤", actions: previewActionsWatch() },
       { id: "job-91", type: "bash", status: "running", label: "bunx tsc --noEmit", durationMs: 24000, ownerId: "agent-019fcb20", widget: previewTypecheckWidget(now) },
       { id: "job-87", type: "task", status: "failed", label: "eslint . 全量扫描", durationMs: 31000, ownerId: "agent-019fcb55", errorText: "ESLint exited with code 2 · .eslintrc 合并冲突" },
       { id: "job-83", type: "bash", status: "completed", label: "grep -rn \"pi-core\" package-lock.json", durationMs: 4200, ownerId: "agent-019fcb01", resultText: "4 matches in 2 files" },

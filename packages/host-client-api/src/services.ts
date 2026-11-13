@@ -1,4 +1,5 @@
 import type { QueryInput, QueryResult } from "@omp-studio/client-contract";
+import type { ModelServicesCommandResultMap } from "@omp-studio/studio-protocol";
 import type { ModelAdaptationInput, ModelAdaptationResult, ModelCatalogRefreshResult } from "@omp-studio/client-contract";
 /**
  * Injected service ports consumed by {@link StudioHostClientFacade}.
@@ -331,7 +332,8 @@ export type HostInvokeOutcome =
   | BtwBranchOutcome
   | StudioRuntimeSettingsGetResult
   | StudioRuntimeSettingsSetResult
-  | StudioPlanSaveAndQuitResult;
+  | StudioPlanSaveAndQuitResult
+  | ModelServicesCommandResultMap[keyof ModelServicesCommandResultMap];
 
 /** One session-history row as supplied by the Host-side catalog provider. */
 export interface HostCatalogEntry {

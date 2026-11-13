@@ -14,6 +14,12 @@ test("catalog generation keeps only YAML-compatible controls and marks native de
   assert.equal(nativeContext.limitation, "native-context");
 });
 
+test("Judge-only and native search APIs stay in the directory rather than disappearing behind the chat API whitelist", () => {
+  const catalog = buildModelCatalog({ liquid: { decision: { id: "decision", name: "Decision", api: "liquid-systemone", kind: "judge", reasoning: false } }, web: { search: { id: "search", api: "web-search", kind: "search" } } }, "pinned");
+  assert.deepEqual(catalog.entries.map(row => [row.api, row.kind]), [["liquid-systemone", "judge"], ["web-search", "search"]]);
+  assert.equal(catalog.entries[0].values.thinkingConfig, undefined);
+});
+
 test("checked-in catalog and bundled module reproduce from the fixed OMP source without networking", async () => {
   const catalog = await generateModelCatalog(true);
   assert.ok(catalog.entries.length > 1000);

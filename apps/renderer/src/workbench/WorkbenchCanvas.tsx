@@ -106,6 +106,7 @@ import { previewTailInterrupted } from "../preview/conversationFixtures";
 import { BtwPanel } from "../btw/BtwPanel";
 import { type BtwSessionApi } from "../btw/useBtwSession";
 import { InteractionDeck } from "../InteractionDeck";
+import { useFormInteractionLifecycle } from "../deck/FormSession";
 import { ASK_GENIE_HOLD_MS, isAskDeckInteraction } from "../deck/askGenie";
 import { motionReduced } from "../motion";
 import { interactionDeckDisabled, planReviewDeckDisabled, usableCapabilityManifest } from "../deck/interactionGate";
@@ -456,6 +457,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const runtime = connection?.runtime ?? state.bootstrap?.runtime;
   const commands = state.clientState?.commands ?? {};
   const pendingInteraction = state.clientState?.interaction.pending ?? null;
+  useFormInteractionLifecycle(pendingInteraction);
+  const readForm = useCallback(async (interaction: Extract<ClientInteraction, { kind: "form" }>) => {
+    const result = await client.query("interaction.form.read", { sessionId: interaction.sessionId, interactionId: interaction.interactionId, leaseGeneration: interaction.leaseGeneration });
+    return result.form;
+  }, [client]);
   const askDeckLive = isAskDeckInteraction(pendingInteraction);
   if (askDeckLive && pendingInteraction) lastAskDeckRef.current = pendingInteraction;
   useEffect(() => {
@@ -2125,6 +2131,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
               <InteractionDeck
                 interaction={deckInteraction}
                 onRespond={respond}
+                readForm={readForm}
                 disabled={interactionDisabled}
                 {...(askDeckLeaving ? { leaving: true } : {})}
               />

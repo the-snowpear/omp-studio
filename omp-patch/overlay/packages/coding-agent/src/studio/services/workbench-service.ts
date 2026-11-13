@@ -1,4 +1,8 @@
 import { StudioSearchCredentialsService } from "./search-credentials-service";
+import { StudioModelSystemTemplatesService } from "./model-system-templates-service";
+import { StudioModelAuthService } from "./model-auth-service";
+import { StudioModelRosterService } from "./model-roster-service";
+import type { ModelServicesOperation } from "../model-services-protocol";
 import { StudioQueuedCompactionService } from "./queued-compaction-service";
 import { StudioRuntimeViews } from "./runtime-view-service";
 import type { MCPManager } from "../../mcp/manager";
@@ -174,6 +178,9 @@ export class StudioWorkbenchService {
 	readonly skillshare: StudioSkillshareService;
 	readonly media: StudioMediaService;
 	readonly benchmarks: StudioBenchmarkService;
+	readonly modelSystemTemplates: StudioModelSystemTemplatesService;
+	readonly modelAuth: StudioModelAuthService;
+	readonly modelRoster: StudioModelRosterService;
 	readonly views: StudioRuntimeViews;
 	readonly catalog: StudioRuntimeCatalogService;
 	readonly judgments: StudioJudgmentService;
@@ -219,7 +226,11 @@ export class StudioWorkbenchService {
 		this.judgments = new StudioJudgmentService(session);
 		this.runtimeFeatures = new StudioRuntimeFeatureService(session, mcpManager);
 		this.catalog = new StudioRuntimeCatalogService(session, mcpManager);
+		this.modelSystemTemplates = new StudioModelSystemTemplatesService(session);
+		this.modelAuth = new StudioModelAuthService(session);
+		this.modelRoster = new StudioModelRosterService(session);
 		this.views = new StudioRuntimeViews(session, liveAudio);
+		this.views.modelServicesReader = operation => this.executeModelServices(operation);
 		this.benchmarks = new StudioBenchmarkService(session);
 		this.media = new StudioMediaService(session);
 		this.annotations = new StudioAnnotationService(session);
@@ -230,6 +241,7 @@ export class StudioWorkbenchService {
 		this.computerObservation = new StudioComputerObservationService(session, undefined, this.computerWorkspace);
 	}
 	dispose(): void {
+		this.modelAuth.dispose();
 		this.views.dispose();
 		this.queuedCompaction.dispose();
 		this.contextView.dispose();
@@ -252,6 +264,19 @@ export class StudioWorkbenchService {
 		this.benchmarks.dispose();
 		this.media.dispose();
 		this.liveAudio.dispose();
+	}
+	async executeModelServices(operation: ModelServicesOperation): Promise<unknown> {
+		if (operation.kind.startsWith("models.systemTemplates."))
+			return this.modelSystemTemplates.execute(
+				operation as Extract<ModelServicesOperation, { kind: `models.systemTemplates.${string}` }>,
+			);
+		if (operation.kind.startsWith("models.auth."))
+			return this.modelAuth.execute(operation as Extract<ModelServicesOperation, { kind: `models.auth.${string}` }>);
+		if (operation.kind === "models.provider.roster.refresh")
+			return this.modelRoster.refresh(operation.sessionId, operation.providerId);
+		if (operation.kind === "models.accounts.resetPolicy.set")
+			return this.accounts.setResetPolicy(operation.sessionId, operation.key, operation.mode);
+		throw new SessionControlError("COMMAND_BLOCKED", "Unknown native model operation");
 	}
 	async execute(operation: WorkbenchOperation): Promise<unknown> {
 		validateWorkbenchOperation(operation);

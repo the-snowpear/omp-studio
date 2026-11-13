@@ -69,7 +69,7 @@ declare global {
         importPredictionHistory?(input:{channelId:string}):Promise<{ok:boolean;cancelled?:boolean;message?:string;count?:number;truncated?:boolean}>;
         onPrediction?(listener:(event:import("@omp-studio/studio-protocol").PredictionEvent)=>void):()=>void;
         managedBrowser?: import("@omp-studio/studio-protocol").ManagedBrowserApi;
-        attachBrowserObservation?(input: { observationId: string; sessionId: string; tabId: string }): Promise<{ ok: boolean; message?: string }>;
+        attachBrowserObservation?(input: { observationId: string; sessionId: string; tabId: string; generation?: string }): Promise<{ ok: boolean; message?: string }>;
         readComputerCapture?(input: { captureId: string; sessionId: string; targetId: string }): Promise<{ ok: true; data: ArrayBuffer; width: number; height: number } | { ok: false; message: string }>;
         readComputerFrame?(input: { scopeSessionId: string; frameId: string; origin: "local" }): Promise<{ ok: true; data: ArrayBuffer; width: number; height: number; mimeType: "image/png"; artifactId?: string } | { ok: false; message: string }>;
         saveComputerFrame?(input: { scopeSessionId: string; frameId: string; origin: "local" }): Promise<{ ok: true; artifactId: string } | { ok: false; message: string }>;

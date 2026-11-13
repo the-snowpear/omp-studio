@@ -19,12 +19,14 @@ import {
   taskJobs,
   toolFields,
   toolKind,
+  toolActionsView,
 } from "./toolMeta";
 import { ToolCardScroll } from "./useToolCardFollowScroll";
 import { CompletionRing, JobTile, type JobTileData } from "./JobWidget";
 import { MarkdownText } from "./markdown";
 import type { JobWidgetView } from "@omp-studio/studio-protocol";
 import { ComputerToolMedia } from "../computer/ComputerToolMedia";
+import { ActionsSteps } from "./ActionsSteps";
 
 const ToolCardLive = createContext(false);
 
@@ -815,9 +817,12 @@ function EvalBody({ tool }: { tool: ToolView }) {
 
 function GithubBody({ tool }: { tool: ToolView }) {
   const fields = toolFields(tool);
+  const actions = toolActionsView(tool);
+  const { resolvedLanguage } = useI18n();
   return (
     <>
       <Kv pairs={[["op", fields.op], ["repo", fields.repo], ["pr", fields.pr]]} />
+      {actions ? <ActionsSteps view={actions} zh={resolvedLanguage === "zh"} /> : null}
       {fields.output !== undefined ? <JsonBlock value={fields.output} /> : <DefaultBody tool={tool} />}
     </>
   );

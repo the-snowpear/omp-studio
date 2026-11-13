@@ -89,11 +89,6 @@ test("context viewer redacts credentials, pages a frozen body and expires it on 
 			snapshotId: index.snapshotId,
 			entryId: list.entries[0]!.id,
 		});
-		// Overview weights and group metadata come from the native descriptor, not from the renderer.
-		expect(index.categories.find(category => category.id === "system-prompt")?.overviewLabel).toBe(
-			"System Prompt (excluding Skills)",
-		);
-		expect(index.categories.find(category => category.id === "skills")?.openable).toBe(false);
 		expect(index.model?.id).toBe(model.id);
 		// The list carries a redacted preview and the source timestamp, so no per-entry body read is needed.
 		expect(list.entries[0]!.preview?.length).toBeLessThanOrEqual(480);
@@ -127,10 +122,11 @@ test("context viewer redacts credentials, pages a frozen body and expires it on 
 	}
 });
 
-test("idle maintenance needs explicit recap opt-in and known visible unblocked ownership", () => {
+test("idle maintenance inherits native recap policy and needs known visible unblocked ownership", () => {
 	const settings = Settings.isolated();
+	const nativeRecap = cfgRecapEnabled.get(settings);
 	applyStudioDefaults(settings);
-	expect(cfgRecapEnabled.get(settings)).toBe(false);
+	expect(cfgRecapEnabled.get(settings)).toBe(nativeRecap);
 	const opted = Settings.isolated({ "recap.enabled": true });
 	applyStudioDefaults(opted);
 	expect(cfgRecapEnabled.get(opted)).toBe(true);

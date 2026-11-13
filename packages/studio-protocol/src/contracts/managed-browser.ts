@@ -1,3 +1,5 @@
+import type { BrowserInspectionView, BrowserPageDescriptor, BrowserPageInspection } from "./browser-observation.js";
+
 export type ManagedBrowserControl = "agent" | "waiting" | "human";
 export type ManagedBrowserConnection = "disconnected" | "connecting" | "connected";
 export type ManagedBrowserPageStatus = "released" | "loading" | "ready" | "error" | "crashed";
@@ -21,6 +23,8 @@ export interface ManagedBrowserPage {
   /** Site icon as a `data:` URL of at most 32 KB. */
   favicon?: string | undefined;
   opener?: ManagedBrowserPageOpener | undefined;
+  /** Native identity for all new pages; absent only in legacy saved/read models. */
+  descriptor?: BrowserPageDescriptor;
 }
 export interface ManagedBrowserDownload {
   id: string;
@@ -70,11 +74,12 @@ export interface ManagedBrowserPresentation {
   clip: { x: number; y: number; width: number; height: number };
 }
 export type ManagedBrowserCommand = { sessionId: string } & (
-  | { action: "create"; url: string; spaceId?: string; openerPageId?: string }
+  | { action: "create"; url: string; spaceId?: string; openerPageId?: string; app?: string; argv?: string[]; target?: string; insecure?: boolean }
   /** `close-handoff` closes a page under any control: it waits for the Agent's current step, closes, then hands control back. */
   | { action: "select" | "close" | "close-handoff" | "close-others" | "reload" | "stop" | "back" | "forward" | "devtools" | "pick"; pageId: string }
   | { action: "navigate"; pageId: string; url: string }
   | { action: "zoom"; pageId: string; factor: number }
+  | { action: "viewer"; pageId: string; visible: boolean }
   | { action: "find"; pageId: string; text: string; forward?: boolean }
   | { action: "take" | "return" | "release" | "stop-picking" }
   | { action: "space-create"; name: string }
@@ -88,10 +93,19 @@ export type ManagedBrowserEvent =
   | { kind: "state"; state: ManagedBrowserState }
   | { kind: "selection"; sessionId: string; reference: BrowserElementReference }
   | { kind: "error"; sessionId: string; message: string };
+export interface ManagedBrowserInspectionRequest {
+  sessionId: string;
+  pageId: string;
+  generation?: string;
+  view: BrowserInspectionView;
+  visible: boolean;
+}
 export interface ManagedBrowserApi {
   available(): Promise<boolean>;
   read(sessionId: string): Promise<ManagedBrowserState>;
   execute(command: ManagedBrowserCommand): Promise<ManagedBrowserState>;
   present(presentation: ManagedBrowserPresentation): Promise<void>;
+  /** Fixed local read channel; bounded rows never enter the shared page state or a transcript. */
+  inspect?(request: ManagedBrowserInspectionRequest): Promise<BrowserPageInspection>;
   subscribe(listener: (event: ManagedBrowserEvent) => void): () => void;
 }

@@ -2991,8 +2991,10 @@ const zhRaw = {
       "snapshotAt": "快照时间",
       "attribution": "类别按估算份额分摊已用量，条目自身权重不缩放。"
     },
+    "groups": { "messages": "对话消息", "tools": "工具定义", "instructions": "指令文件", "system": "提示词与技能" },
     "categories": {
       "system-prompt": "系统提示词",
+      "instruction-files": "指令文件",
       "skills": "技能目录",
       "built-in-tools": "内置工具",
       "custom-tools": "自定义工具",
@@ -3027,6 +3029,8 @@ const zhRaw = {
       "truncated": "正文已截断",
       "sharedGroup": "这条推理的权重计入上方分组，单条不单独计数。",
       "loadMore": "加载更多正文",
+      "openSource": "查看来源条目",
+      "sourceUnavailable": "这份快照未提供可定位的来源条目",
       "progress": "已显示 {shown} / {total} 字符"
     },
     "a11y": {

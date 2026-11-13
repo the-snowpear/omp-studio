@@ -2,8 +2,19 @@ export interface AccountQuotaScope {
   provider: string; accountId?: string; projectId?: string; orgId?: string; modelId?: string;
   tier?: string; windowId?: string; shared?: boolean; sharedGroup?: string;
 }
+export type AccountUsageUnit = "percent" | "tokens" | "requests" | "credits" | "usd" | "minutes" | "bytes" | "unknown";
+export interface AccountUsageAmount { unit: AccountUsageUnit; used?: number; limit?: number; remaining?: number }
+export type AccountResetPolicyKey = "codexResets.autoRedeem5h" | "codexResets.autoRedeemWeekly" | "claudeResets.autoRedeem5h" | "claudeResets.autoRedeemWeekly" | "claudeResets.autoRedeemFable";
+export interface AccountResetPolicy {
+  window: "5h" | "weekly" | "fable";
+  key: AccountResetPolicyKey;
+  mode: "unset" | "yes" | "no";
+  source: "env" | "runtime" | "overlay" | "project" | "global" | "default";
+}
 export interface AccountQuotaWindow {
   id: string; label: string; status: "ok" | "warning" | "exhausted" | "unknown";
+  amount?: AccountUsageAmount;
+  resetWindow?: AccountResetPolicy["window"];
   usedFraction?: number; resetsAt?: number; model?: string;
   scope?: AccountQuotaScope; notes?: string[]; resetLabel?: string;
 }
@@ -18,6 +29,7 @@ export interface AccountResetStatus {
 export interface AccountRoutingPolicy { priority: number; reservePct: number; reserveSource: "global" | "override"; state: "eligible" | "inside-reserve" | "exhausted" | "unknown"; remainingPct?: number; reclaimAbovePct?: number }
 export interface StudioAccountStatus {
   policy?: AccountRoutingPolicy;
+  resetPolicies?: AccountResetPolicy[];
   id: string; provider: string; label: string; organization?: string;
   source: "oauth" | "api-key" | "ambient"; active: boolean;
   limits: AccountQuotaWindow[]; reportedAt?: number; resets: AccountResetStatus;
@@ -40,7 +52,7 @@ function optional(row: Record<string, unknown>, keys: string[], validate: (value
 function boolean(value: unknown): void { if (typeof value !== "boolean") throw new Error("Invalid account status flag"); }
 function list(value: unknown, max: number, validate: (value: unknown) => void): void { if (!Array.isArray(value) || value.length > max) throw new Error("Invalid account status list"); value.forEach(validate); }
 function quota(value: unknown): void {
-  const row = object(value, ["id", "label", "status", "usedFraction", "resetsAt", "model", "scope", "notes", "resetLabel"]);
+  const row = object(value, ["id", "label", "status", "usedFraction", "resetsAt", "model", "scope", "notes", "resetLabel", "amount", "resetWindow"]);
   text(row.id); text(row.label);
   if (!["ok", "warning", "exhausted", "unknown"].includes(row.status as string)) throw new Error("Invalid quota status");
   optional(row, ["usedFraction", "resetsAt"], number); optional(row, ["model", "resetLabel"], text);
@@ -67,7 +79,7 @@ export function validateAccountStatus(value: unknown): asserts value is AccountS
   for (const key of ["refreshing", "usageUnavailable", "truncated"]) boolean(result[key]);
   optional(result, ["refreshedAt"], number);
   list(result.accounts, 200, value => {
-    const row = object(value, ["id", "provider", "label", "organization", "source", "active", "limits", "reportedAt", "resets", "policy"]);
+    const row = object(value, ["id", "provider", "label", "organization", "source", "active", "limits", "reportedAt", "resets", "policy", "resetPolicies"]);
     for (const key of ["id", "provider", "label"]) text(row[key]);
     optional(row, ["organization"], text); optional(row, ["reportedAt"], number); boolean(row.active);
     if (!["oauth", "api-key", "ambient"].includes(row.source as string)) throw new Error("Invalid account source");

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
-import type { ContextCategoryId, ContextEntrySummary, ContextViewIndex } from "@omp-studio/studio-protocol";
+import type { ContextCategoryId, ContextEntrySummary, ContextViewIndex, ContextViewSourceMarker } from "@omp-studio/studio-protocol";
 import { hostErrorMessage } from "../hostError";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useSurfaceDocument } from "../dock/SurfaceContext";
 import { formatCapturedAt } from "./contextViewMath";
-import { PREVIEW_CONTEXT_VIEW, previewContextEntries, previewContextText } from "../preview/contextViewPreview";
+import { PREVIEW_CONTEXT_VIEW, previewContextEntries, previewContextText, previewContextSourceMarkers } from "../preview/contextViewPreview";
 import { ContextCategoryList } from "./ContextCategoryList";
 import { ContextEntryList } from "./ContextEntryList";
 import { ContextEntryPane } from "./ContextEntryPane";
@@ -61,6 +61,8 @@ export function ContextInspector({
   const [nextOffset, setNextOffset] = useState<number | undefined>(undefined);
   const [selected, setSelected] = useState<ContextEntrySummary>();
   const [body, setBody] = useState("");
+  const [sourceMarkers, setSourceMarkers] = useState<ContextViewSourceMarker[]>([]);
+  const [sourceFocus, setSourceFocus] = useState<{ category: ContextCategoryId; entryId: string }>();
   const [totalChars, setTotalChars] = useState(0);
   const [nextBody, setNextBody] = useState<number | undefined>(undefined);
   const [entryTruncated, setEntryTruncated] = useState(false);
@@ -85,6 +87,8 @@ export function ContextInspector({
     setNextOffset(undefined);
     setSelected(undefined);
     setBody("");
+    setSourceMarkers([]);
+    setSourceFocus(undefined);
     setTotalChars(0);
     setNextBody(undefined);
     setEntryTruncated(false);
@@ -144,6 +148,7 @@ export function ContextInspector({
     setSelected(entry);
     if (offset === undefined) {
       setBody("");
+      setSourceMarkers([]);
       setTotalChars(0);
       setNextBody(undefined);
       setEntryTruncated(false);
@@ -155,6 +160,8 @@ export function ContextInspector({
         const text = previewContextText(category, entry);
         if (generation !== bodyGeneration.current) return;
         setBody(previous => (offset === undefined ? text : previous + text));
+        const markers = previewContextSourceMarkers(entry).map(marker => ({ ...marker, start: marker.start + (offset ?? 0), end: marker.end + (offset ?? 0) }));
+        setSourceMarkers(previous => offset === undefined ? markers : [...previous, ...markers]);
         setTotalChars(text.length);
         setNextBody(undefined);
         setEntryTruncated(false);
@@ -169,6 +176,8 @@ export function ContextInspector({
       });
       if (generation !== bodyGeneration.current) return;
       setBody(previous => (offset === undefined ? result.text : previous + result.text));
+      const markers = (result.sourceMarkers ?? []).map(marker => ({ ...marker, start: marker.start + (offset ?? 0), end: marker.end + (offset ?? 0) }));
+      setSourceMarkers(previous => offset === undefined ? markers : [...previous, ...markers]);
       setTotalChars(result.totalChars);
       setNextBody(result.nextOffset);
       setEntryTruncated(result.truncated);
@@ -183,8 +192,11 @@ export function ContextInspector({
   useEffect(() => {
     if (!index || !opened || (!preview && (!sessionId || !available))) return;
     const generation = ++listGeneration.current;
+    bodyGeneration.current++;
+    const focusEntryId = sourceFocus?.category === category ? sourceFocus.entryId : undefined;
     setSelected(undefined);
     setBody("");
+    setSourceMarkers([]);
     setTotalChars(0);
     setNextBody(undefined);
     setEntryTruncated(false);
@@ -207,7 +219,9 @@ export function ContextInspector({
         setTotal(rows.length);
         setNextOffset(undefined);
         setListState("idle");
-        if (rows[0]) void read(rows[0]);
+        const target = focusEntryId ? rows.find(entry => entry.id === focusEntryId) : rows[0];
+        if (target) void read(target);
+        else if (focusEntryId) setError(t("contextViewer.entry.sourceUnavailable"));
         return;
       }
       void client
@@ -218,6 +232,7 @@ export function ContextInspector({
           // A search spans the whole category, so the group key only applies while browsing.
           ...(childKey && !query ? { childKey } : {}),
           search,
+          ...(focusEntryId ? { focusEntryId } : {}),
         })
         .then(page => {
           if (generation !== listGeneration.current) return;
@@ -225,7 +240,9 @@ export function ContextInspector({
           setTotal(page.total);
           setNextOffset(page.nextOffset);
           setListState("idle");
-          if (page.entries[0]) void read(page.entries[0]);
+          const target = focusEntryId ? page.entries.find(entry => entry.id === focusEntryId) : page.entries[0];
+          if (target) void read(target);
+          else if (focusEntryId) setError(t("contextViewer.entry.sourceUnavailable"));
         })
         .catch(cause => {
           if (generation !== listGeneration.current) return;
@@ -237,7 +254,7 @@ export function ContextInspector({
       clearTimeout(timer);
       listGeneration.current++;
     };
-  }, [index, category, childKey, search, opened, preview, client, sessionId, available]);
+  }, [index, category, childKey, search, sourceFocus, opened, preview, client, sessionId, available]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -309,6 +326,7 @@ export function ContextInspector({
                 category={category}
                 childKey={childKey}
                 onSelect={(nextCategory, nextChildKey) => {
+                  setSourceFocus(undefined);
                   setCategory(nextCategory);
                   setChildKey(nextChildKey);
                   setSearch("");
@@ -334,6 +352,16 @@ export function ContextInspector({
               onBack={narrow ? () => setReading(false) : undefined}
               entry={selected}
               body={body}
+              sourceMarkers={sourceMarkers}
+              focusRequested={sourceFocus?.entryId === selected?.id && sourceFocus !== undefined}
+              onOpenSource={marker => {
+                if (!marker.entryId) return;
+                setSourceFocus({ category: marker.category, entryId: marker.entryId });
+                setCategory(marker.category);
+                setChildKey(undefined);
+                setSearch("");
+                setReading(true);
+              }}
               totalChars={totalChars}
               nextBody={nextBody}
               entryTruncated={entryTruncated}
@@ -368,7 +396,7 @@ export function ContextInspector({
           </div>
         )}
         <footer className="cv-foot">
-          <span>{t("contextViewer.footHint")}</span>
+          <span className={index && error ? "cv-read-error" : undefined} role={index && error ? "alert" : undefined}>{index && error ? error : t("contextViewer.footHint")}</span>
           <span>
             {index ? index.snapshotId.slice(0, 8) : "—"} · {t("contextViewer.readonly")}
           </span>

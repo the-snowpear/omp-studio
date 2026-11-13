@@ -1,4 +1,4 @@
-import type { ContextCategoryId, ContextEntrySummary, ContextViewIndex } from "@omp-studio/studio-protocol";
+import type { ContextCategoryId, ContextEntrySummary, ContextViewIndex, ContextViewSourceMarker } from "@omp-studio/studio-protocol";
 import { PREVIEW_CONTEXT_CARD } from "./contextCardPreview";
 
 const context = PREVIEW_CONTEXT_CARD;
@@ -15,10 +15,14 @@ const THINKING_B = { id: "assistant-thinking/6/0", label: "Message 6", tokens: 7
 
 const ENTRIES: Record<ContextCategoryId, ContextEntrySummary[]> = {
   "system-prompt": [
-    ENTRY({ id: "system-prompt/0", label: "System Block 1", tokens: 13_000, preview: "You are a coding agent running inside the OMP runtime…" }),
-    ENTRY({ id: "system-prompt/1", label: "System Block 2", tokens: 42_000, preview: "## Project instructions\n\n- Follow the workspace conventions…" }),
+    ENTRY({ id: "system-prompt/0", label: "System Block 1", tokens: 12_000, preview: "You are a coding agent running inside the OMP runtime…" }),
+    ENTRY({ id: "system-prompt/1", label: "System Block 2", tokens: 1_000, preview: "## Additional effective policy\n\nAn extension updated one source block after the prompt build." }),
   ],
-  skills: [],
+  "instruction-files": [
+    ENTRY({ id: "instruction-files/agents", label: "AGENTS.md", path: "AGENTS.md", tokens: 27_000, preview: "## Workspace conventions\n\nKeep the typed Studio Bridge as the capability boundary." }),
+    ENTRY({ id: "instruction-files/project", label: ".omp/project.md", path: ".omp/project.md", tokens: 15_000, preview: "## Project instructions\n\nUse the existing workbench components and scoped resources." }),
+  ],
+  skills: [ENTRY({ id: "skills/conventions", label: "repo-conventions", path: ".omp/skills/repo-conventions/SKILL.md", tokens: context.skillsTokens, preview: "<skill name=\"repo-conventions\">\nKeep product and Runtime ownership aligned.\n</skill>" })],
   "built-in-tools": [
     ENTRY({ id: "built-in-tools/0", label: "read", tokens: 4_800, info: "native" }),
     ENTRY({ id: "built-in-tools/1", label: "bash", tokens: 4_200, info: "native" }),
@@ -52,6 +56,16 @@ const ENTRIES: Record<ContextCategoryId, ContextEntrySummary[]> = {
   ],
 };
 
+const SOURCE_TEXT = "You are a coding agent running inside the OMP runtime…\n\n[Shown in Instruction Files: .omp/project.md]\n\n[Shown in Skills: repo-conventions]\n\nAdditional effective policy stays in this block.";
+const SOURCE_MARKERS: ContextViewSourceMarker[] = [
+  { label: "[Shown in Instruction Files: .omp/project.md]", category: "instruction-files" as const, entryId: "instruction-files/project" },
+  { label: "[Shown in Skills: repo-conventions]", category: "skills" as const, entryId: "skills/conventions" },
+].map(({ label, ...marker }) => ({ ...marker, start: SOURCE_TEXT.indexOf(label), end: SOURCE_TEXT.indexOf(label) + label.length }));
+
+export function previewContextSourceMarkers(entry: ContextEntrySummary): readonly ContextViewSourceMarker[] {
+  return entry.id === "system-prompt/0" ? SOURCE_MARKERS : [];
+}
+
 export const PREVIEW_CONTEXT_VIEW: ContextViewIndex = {
   sessionId: "demo-context",
   snapshotId: "demo-snapshot",
@@ -63,11 +77,13 @@ export const PREVIEW_CONTEXT_VIEW: ContextViewIndex = {
   thresholdTokens: 800_000,
   savedTokens: 6_400,
   truncated: false,
+  notices: ["1 instruction file stays in System Prompt: the system prompt changed after it was built (e.g. by an extension hook or SDK callback)."],
   model: { id: "preview-model", name: "preview-model" },
   snapcompact: { visionCapable: true, savedTokens: 6_400 },
   categories: [
-    { id: "system-prompt", label: "System Prompt", tokens: context.systemPromptTokens + context.systemContextTokens, entries: 2, overviewLabel: "System Prompt (excluding Skills)" },
-    { id: "skills", label: "Skills", tokens: context.skillsTokens, entries: 0, openable: false },
+    { id: "system-prompt", label: "System Prompt", tokens: context.systemPromptTokens, entries: 2 },
+    { id: "instruction-files", label: "Instruction Files", tokens: context.systemContextTokens, entries: 2 },
+    { id: "skills", label: "Skills", tokens: context.skillsTokens, entries: 1 },
     { id: "built-in-tools", label: "Built-in Tools", tokens: 12_000, entries: 3 },
     { id: "custom-tools", label: "Custom Tools", tokens: 6_000, entries: 1 },
     { id: "user-messages", label: "User / Developer Messages", tokens: 30_000, entries: 3 },
@@ -92,6 +108,7 @@ export function previewContextEntries(category: ContextCategoryId): ContextEntry
 }
 
 export function previewContextText(category: ContextCategoryId, entry: ContextEntrySummary): string {
+  if (entry.id === "system-prompt/0") return SOURCE_TEXT;
   if (category === "assistant-thinking")
     return entry.interrupted
       ? "N/A · Interrupted\n\n这一轮被中断，推理内容没有回流。"

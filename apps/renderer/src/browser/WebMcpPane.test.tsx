@@ -6,6 +6,14 @@ import { WebMcpPane } from "./WebMcpPane";
 
 afterEach(cleanup);
 
+it("does not query or offer tools for a WebKit page even when a WebMCP client exists", async () => {
+  const query = vi.fn(), command = vi.fn();
+  render(<WebMcpPane client={{ query, command } as unknown as StudioClient} sessionId="session" pageId="webkit-page" visible agentControl capability={false} reason="Actual WebKit has no WebMCP" copy={(_zh, en) => en} onBack={() => {}} />);
+  expect(await screen.findByText("Actual WebKit has no WebMCP")).toBeTruthy();
+  expect(query).not.toHaveBeenCalled(); expect(command).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Refresh tools" })).toHaveProperty("disabled", true);
+});
+
 it("keeps all page tools selectable and ignores metadata for an earlier selection", async () => {
   const tools: WebMcpToolRecord[] = ["alpha", "beta"].map(name => ({ name, description: name, frameId: "main", origin: "https://example.com", untrusted: true }));
   const catalog: StudioWebMcpCatalog = { pageId: "page", documentId: "document", status: "ready", tools, truncated: false, untrusted: true, invocationAvailable: true };

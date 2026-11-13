@@ -2991,8 +2991,10 @@ export const en: LocaleDictionary = {
       "snapshotAt": "Captured",
       "attribution": "Categories split reported usage by estimate; entry weights are not scaled."
     },
+    "groups": { "messages": "Messages", "tools": "Tool definitions", "instructions": "Instruction files", "system": "Prompt and skills" },
     "categories": {
       "system-prompt": "System prompt",
+      "instruction-files": "Instruction files",
       "skills": "Skills",
       "built-in-tools": "Built-in tools",
       "custom-tools": "Custom tools",
@@ -3027,6 +3029,8 @@ export const en: LocaleDictionary = {
       "truncated": "Body truncated",
       "sharedGroup": "This thinking entry is weighted through its group, not on its own.",
       "loadMore": "Load more content",
+      "openSource": "View source entry",
+      "sourceUnavailable": "This snapshot has no addressable source entry",
       "progress": "{shown} / {total} characters shown"
     },
     "a11y": {

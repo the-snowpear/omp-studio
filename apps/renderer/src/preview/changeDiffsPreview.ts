@@ -1,10 +1,10 @@
 import { PREVIEW_DIFF, type PreviewDiffLine } from "./fixtures";
 
-type PreviewFileDiff = { add: number; del: number; lines: readonly PreviewDiffLine[] };
+type PreviewFileDiff = { add: number; del: number; lines: readonly PreviewDiffLine[]; partial?: boolean };
 
 /** File-specific excerpts shared by Changes and Git; counts describe the full file change. */
 export const PREVIEW_FILE_DIFFS: Readonly<Record<string, PreviewFileDiff>> = {
-  [PREVIEW_DIFF.file]: PREVIEW_DIFF,
+  [PREVIEW_DIFF.file]: { ...PREVIEW_DIFF, partial: true },
   "docs/UPSTREAM-SYNC.md": { add: 214, del: 0, lines: [
     ["+", "", "1", "# 上游同步记录 · v0.8.1"],
     ["+", "", "2", ""],

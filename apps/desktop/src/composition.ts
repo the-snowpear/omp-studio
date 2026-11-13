@@ -38,7 +38,7 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
   let runtimeStatus: DesktopRuntimeStatus = "read-only";
   let quitting = false;
   let quitConfirmInFlight = false;
-  let fileCloseCheck: Promise<boolean> | undefined;
+  let closeCheck: Promise<boolean> | undefined;
   let started = false;
   let systemShutdown = false;
   let shuttingDown: Promise<void> | null = null;
@@ -107,11 +107,23 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
   }
 
   async function quit(options: { readonly deadlineMs?: number } = {}): Promise<void> {
-    if (!quitting && options.deadlineMs === undefined && deps.confirmBeforeQuit) {
-      const check = fileCloseCheck ??= deps.confirmBeforeQuit();
-      const allowed = await check;
-      if (fileCloseCheck === check) fileCloseCheck = undefined;
-      if (!allowed) return;
+    if (!quitting && options.deadlineMs === undefined && (deps.confirmBeforeQuit || host?.confirmClose)) {
+      const check = closeCheck ??= (async () => {
+        if (deps.confirmBeforeQuit && !(await deps.confirmBeforeQuit())) return false;
+        try { return await (host?.confirmClose?.() ?? true); }
+        catch (error) {
+          // Native close hooks are fail-open on errors and timeouts; file-save
+          // confirmation above keeps its existing refusal/error semantics.
+          log(`native close confirmation failed: ${String(error)}`);
+          return true;
+        }
+      })();
+      let allowed: boolean;
+      try { allowed = await check; }
+      finally { if (closeCheck === check) closeCheck = undefined; }
+      // A forced system shutdown may have taken over while the reversible
+      // check was awaiting a dialog. Its late result no longer owns the exit.
+      if (!allowed || quitting) return;
     }
     if (quitting) {
       // A logout or power-off during an unbounded quit (⌘Q, tray) still

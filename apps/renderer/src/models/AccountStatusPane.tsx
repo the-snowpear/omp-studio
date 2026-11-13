@@ -1,4 +1,6 @@
 import { WorkspaceSection } from "../workspaces/Workspace";
+import { AppSelect } from "../AppSelect";
+import { AccountBudgetTable } from "./AccountBudgetTable";
 import "./accounts.css";
 import { useEffect, useRef, useState } from "react";
 import type {
@@ -7,6 +9,7 @@ import type {
 } from "@omp-studio/client-contract";
 import type {
   AccountQuotaWindow,
+  AccountResetPolicy,
   AccountStatusResult,
 } from "@omp-studio/studio-protocol";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -39,6 +42,8 @@ export function AccountStatusPane({
     label: string;
   }>();
   const logoutLock = useRef(false);
+  const policyLock = useRef(false);
+  const [policyTarget, setPolicyTarget] = useState<AccountResetPolicy>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const generation = useRef(0);
@@ -47,7 +52,9 @@ export function AccountStatusPane({
     setBusy(false);
     setError("");
     setLogoutTarget(undefined);
+    setPolicyTarget(undefined);
     logoutLock.current = false;
+    policyLock.current = false;
   }, [client, preview, sessionId]);
   const load = async (refresh: boolean) => {
     if (
@@ -160,10 +167,35 @@ export function AccountStatusPane({
       }
     }
   };
+  const windowLabel = (window: AccountResetPolicy["window"]) => ({ "5h": zh ? "5 小时" : "5 Hour", weekly: zh ? "每周" : "Weekly", fable: "Fable" }[window]);
+  const canSetPolicy = preview || !!sessionId && available && capabilities?.capabilities.some(row => row.id === "models.accounts.resetPolicy.set" && row.grade !== "unavailable") === true;
+  const savePolicy = async (policy: AccountResetPolicy, mode: AccountResetPolicy["mode"]) => {
+    if (busy || policyLock.current || !canSetPolicy) return;
+    policyLock.current = true;
+    setBusy(true); setError("");
+    const epoch = generation.current;
+    try {
+      let next: AccountResetPolicy;
+      if (preview) next = { ...policy, mode, source: "global" };
+      else {
+        const accepted = await client.command("models.accounts.resetPolicy.set", { sessionId: sessionId!, key: policy.key, mode });
+        next = await waitReceipt<AccountResetPolicy>(client, accepted.requestId);
+      }
+      if (epoch === generation.current) {
+        setStatus(current => current ? { ...current, accounts: current.accounts.map(account => ({ ...account, ...(account.resetPolicies ? { resetPolicies: account.resetPolicies.map(row => row.key === next.key ? next : row) } : {}) })) } : current);
+        setPolicyTarget(undefined);
+      }
+    } catch (cause) {
+      if (epoch === generation.current) setError(hostErrorMessage(cause, zh ? "窗口策略保存失败" : "Window policy could not be saved"));
+    } finally {
+      if (epoch === generation.current) { setBusy(false); policyLock.current = false; }
+    }
+  };
   const quotas = (limits: AccountQuotaWindow[]) => (
     <div className="account-quotas">
-      {limits.length ? (
-        limits.map((limit) => (
+      <AccountBudgetTable limits={limits} />
+      {limits.some(limit => limit.amount?.unit !== "usd") ? (
+        limits.filter(limit => limit.amount?.unit !== "usd").map((limit) => (
           <div key={limit.id} className="account-quota">
             <span>
               {limit.label}
@@ -242,7 +274,7 @@ export function AccountStatusPane({
             ))}
           </div>
         ))
-      ) : (
+      ) : limits.length ? null : (
         <p className="small muted">
           {zh
             ? "尚无可归属到此账户的额度数据"
@@ -268,8 +300,8 @@ export function AccountStatusPane({
           <div className="account-status-toolbar">
             <p className="small muted">
               {zh
-                ? "刷新只读取额度和券状态；此面板不会消费重置券。自动消费策略在设置中调整。"
-                : "Refresh only reads quotas and saved resets. This panel never redeems credits. Change automatic redemption in Settings."}
+                ? "刷新只读取额度和券状态，不消费重置券。自动消费策略按下方原生窗口控制，同一服务商的账户共享该策略。"
+                : "Refresh only reads quotas and resets; it never redeems them. Native window policies below apply across accounts on the same provider."}
             </p>
             <button
               className="btn small outline"
@@ -327,12 +359,25 @@ export function AccountStatusPane({
               </div>
               {account.policy ? <p className="small muted">Priority {account.policy.priority} · Reserve {account.policy.reservePct}% ({account.policy.reserveSource}) · {account.policy.state}{account.policy.remainingPct === undefined ? "" : ` · ${account.policy.remainingPct}% left`}</p> : null}
               {quotas(account.limits)}
+              {account.resetPolicies?.length ? <div className="account-window-policies">
+                {account.resetPolicies.map(policy => <section className="account-reset-window" key={policy.key}>
+                  <div><b>{windowLabel(policy.window)} · {zh ? "重置策略" : "Reset policy"}</b><span className="small muted">{policy.key} · {policy.source}</span></div>
+                  <AppSelect className="select" aria-label={`${account.provider} ${windowLabel(policy.window)} ${zh ? "重置策略" : "reset policy"}`} value={policy.mode} disabled={busy || !canSetPolicy} onChange={event => {
+                    const mode = event.target.value as AccountResetPolicy["mode"];
+                    if (mode === "yes") setPolicyTarget(policy); else void savePolicy(policy, mode);
+                  }}>
+                    <option value="unset">{zh ? "使用前询问" : "Ask before spending"}</option><option value="no">{zh ? "不自动使用" : "Never automatically spend"}</option><option value="yes">{zh ? "允许自动使用" : "Allow automatic spending"}</option>
+                  </AppSelect>
+                </section>)}
+                <p className="small muted">{zh ? "原生按真正阻塞或将到期券的 governing window 判断。未知 Codex 窗口须同时遵循 5 小时和每周授权；Fable 单独授权，旧单项 autoRedeem 不授予 Fable。" : "Native policy follows the governing window of the block or expiring credit. An unknown Codex window needs both 5h and weekly consent. Fable has separate consent; legacy autoRedeem does not grant it."}</p>
+                {!canSetPolicy ? <p className="small muted">{zh ? "此 Runtime 未提供窗口策略写入能力。" : "This Runtime cannot update saved-reset window policies."}</p> : null}
+              </div> : null}
               {account.source === "oauth" ? (
                 <div className="account-resets">
                   <p className="small">
                     {zh ? "重置券" : "Saved resets"} ·{" "}
                     {account.resets.state === "available"
-                      ? `${account.resets.availableCount ?? 0} ${zh ? "张；可用" : "saved; usable"} ${account.resets.redeemableCount ?? "—"}`
+                      ? `${account.resets.availableCount ?? (zh ? "未知" : "Unknown")} ${zh ? "张；可用" : "saved; usable"} ${account.resets.redeemableCount ?? (zh ? "未知" : "Unknown")}`
                       : account.resets.state === "unfetched"
                         ? zh
                           ? "尚未读取"
@@ -384,6 +429,12 @@ export function AccountStatusPane({
               {zh ? "没有账户状态记录" : "No account status records"}
             </p>
           ) : null}
+          {policyTarget ? <div className="session-options-confirm" role="dialog" aria-label={zh ? "确认自动使用重置券" : "Confirm automatic reset spending"}>
+            <strong>{windowLabel(policyTarget.window)} · {policyTarget.key}</strong>
+            <p>{zh ? "允许原生在此窗口符合资格时自动消耗重置券。这是该服务商的全局窗口策略，不代表立即兑换，也不会授权其他窗口。" : "Allow native automatic spending when this window is eligible. This is a provider-wide policy, not an immediate redemption or consent for another window."}</p>
+            <button className="btn danger" disabled={busy} onClick={() => void savePolicy(policyTarget, "yes")}>{zh ? "允许此窗口" : "Allow this window"}</button>
+            <button className="btn outline" disabled={busy} onClick={() => setPolicyTarget(undefined)}>{zh ? "取消" : "Cancel"}</button>
+          </div> : null}
           {logoutTarget ? (
             <div
               className="session-options-confirm"

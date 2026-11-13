@@ -1,5 +1,5 @@
 diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
-index 3ecd1d6955..89e12e86e8 100644
+index 5c05c427d5..feef6842eb 100644
 --- a/packages/coding-agent/package.json
 +++ b/packages/coding-agent/package.json
 @@ -48,6 +48,10 @@
@@ -68,10 +68,10 @@ index cb32c574e3..29ee191cc7 100644
  	sessionDir?: string;
  	providerSessionId?: string;
 diff --git a/packages/coding-agent/src/cli/flag-tables.ts b/packages/coding-agent/src/cli/flag-tables.ts
-index df86b455ee..f72a10a44f 100644
+index 6f6c04a37a..d6e6060ced 100644
 --- a/packages/coding-agent/src/cli/flag-tables.ts
 +++ b/packages/coding-agent/src/cli/flag-tables.ts
-@@ -120,6 +120,14 @@ function parseCostUsd(flag: string, value: string): number {
+@@ -124,6 +124,14 @@ function parseCostUsd(flag: string, value: string): number {
  	);
  }
  
@@ -86,7 +86,7 @@ index df86b455ee..f72a10a44f 100644
  /**
   * Setters for flags with string values. Most built-ins consume the next argv
   * token even when it starts with `-`; flags listed in
-@@ -137,7 +145,14 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
+@@ -141,7 +149,14 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
  		result.addDir = [...(result.addDir ?? []), value];
  	},
  	"--mode": (result, value) => {
@@ -102,7 +102,7 @@ index df86b455ee..f72a10a44f 100644
  			result.mode = value;
  		} else {
  			result.invalidFlagValues.push(
-@@ -145,6 +160,15 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
+@@ -149,6 +164,15 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
  			);
  		}
  	},
@@ -119,7 +119,7 @@ index df86b455ee..f72a10a44f 100644
  		result.fork = value;
  	},
 diff --git a/packages/coding-agent/src/cli/stats-cli.ts b/packages/coding-agent/src/cli/stats-cli.ts
-index c193bc7d68..0b699cf64d 100644
+index 407599a1ef..3b0933f2cf 100644
 --- a/packages/coding-agent/src/cli/stats-cli.ts
 +++ b/packages/coding-agent/src/cli/stats-cli.ts
 @@ -65,6 +65,19 @@ export interface StatsCommandArgs {
@@ -142,7 +142,7 @@ index c193bc7d68..0b699cf64d 100644
  // =============================================================================
  // Command Handler
  // =============================================================================
-@@ -115,13 +128,13 @@ export async function runStatsCommand(cmd: StatsCommandArgs): Promise<void> {
+@@ -127,13 +140,13 @@ export async function runStatsCommand(cmd: StatsCommandArgs): Promise<void> {
  
  	// Close is on before the page first loads, and off again for the system
  	// browser, where closing would leave a dead tab.
@@ -184,7 +184,7 @@ index cb31720d26..01311931e1 100644
  		config: Flags.string({
  			description: "Load an extra config.yml-style overlay for this run (repeatable)",
 diff --git a/packages/coding-agent/src/config/models-config-schema-bundle.ts b/packages/coding-agent/src/config/models-config-schema-bundle.ts
-index 18699bdbb2..2b7fa83679 100644
+index 7325930163..dedfd291cf 100644
 --- a/packages/coding-agent/src/config/models-config-schema-bundle.ts
 +++ b/packages/coding-agent/src/config/models-config-schema-bundle.ts
 @@ -96,6 +96,7 @@ export const getModelsConfigSchemaBundle = once(() => {
@@ -196,10 +196,10 @@ index 18699bdbb2..2b7fa83679 100644
  
  	const OpenAICompatFieldsSchema = type(OpenAICompatFields);
 diff --git a/packages/coding-agent/src/config/registry.ts b/packages/coding-agent/src/config/registry.ts
-index a3d6844121..b606b98162 100644
+index d3cc6db288..14a41a049d 100644
 --- a/packages/coding-agent/src/config/registry.ts
 +++ b/packages/coding-agent/src/config/registry.ts
-@@ -616,7 +616,10 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
+@@ -617,7 +617,10 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
  			case "boolean":
  				return typeof value === "boolean";
  			case "number":
@@ -211,7 +211,7 @@ index a3d6844121..b606b98162 100644
  			case "string":
  				return typeof value === "string";
  			case "enum":
-@@ -647,7 +650,7 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
+@@ -648,7 +651,7 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
  		if (raw === undefined || this.accepts(raw)) {
  			// A fixed value re-arms this instance's warning, so breaking it again is reported again.
  			settings.warnState.invalid.delete(this.id);
@@ -221,10 +221,10 @@ index a3d6844121..b606b98162 100644
  		const warned = settings.warnState.invalid;
  		if (!warned.has(this.id) || !Bun.deepEquals(warned.get(this.id), raw)) {
 diff --git a/packages/coding-agent/src/config/settings.ts b/packages/coding-agent/src/config/settings.ts
-index 8d42713212..53aa9bd30b 100644
+index 38d5f37a9f..cabac0ded4 100644
 --- a/packages/coding-agent/src/config/settings.ts
 +++ b/packages/coding-agent/src/config/settings.ts
-@@ -334,7 +334,7 @@ export type SettingsMirrorWrite =
+@@ -345,7 +345,7 @@ export type SettingsMirrorWrite =
  	| { readonly op: "unsetGlobalValue"; readonly id: string }
  	| { readonly op: "writeEntry"; readonly id: string; readonly key: string; readonly value: unknown }
  	| { readonly op: "writeMember"; readonly id: string; readonly item: string; readonly member: boolean }
@@ -233,7 +233,7 @@ index 8d42713212..53aa9bd30b 100644
  	| { readonly op: "clearOverrideValue"; readonly id: string }
  	| { readonly op: "setModelRole"; readonly role: string; readonly modelId: string | undefined }
  	| { readonly op: "setProjectModelRole"; readonly role: string; readonly modelId: string }
-@@ -1223,9 +1223,8 @@ export class Settings {
+@@ -1234,9 +1234,8 @@ export class Settings {
  	 * disk reload or re-scope that makes a persisted layer configure it, drops it, and an explicit
  	 * override/clear ends it.
  	 */
@@ -246,7 +246,7 @@ index 8d42713212..53aa9bd30b 100644
  		this.writeValue(setting, value, "override");
  		this.#softPins.add(setting);
 diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
-index 2bfe0b7230..a79b98eab2 100644
+index a3adea1626..5ae0cafcc2 100644
 --- a/packages/coding-agent/src/main.ts
 +++ b/packages/coding-agent/src/main.ts
 @@ -1,3 +1,4 @@
@@ -283,7 +283,7 @@ index 2bfe0b7230..a79b98eab2 100644
  import { getChangelogPath, readLastChangelogVersion, resolveStartupChangelogForDisplay } from "./utils/changelog";
  import { EventBus } from "./utils/event-bus";
  import { resolveFirstLaunchPythonEvalWarning } from "./eval/startup-warning";
-@@ -644,7 +653,7 @@ async function runInteractiveMode(
+@@ -651,7 +660,7 @@ async function runInteractiveMode(
  	notifs: (InteractiveModeNotify | null)[],
  	versionCheckPromise: Promise<string | undefined>,
  	initialMessages: string[],
@@ -292,26 +292,26 @@ index 2bfe0b7230..a79b98eab2 100644
  	lspServers: LspStartupServerInfo[] | undefined,
  	mcpManager: MCPManager | undefined,
  	resuming: boolean,
-@@ -660,6 +669,9 @@ async function runInteractiveMode(
+@@ -666,6 +675,9 @@ async function runInteractiveMode(
+ 	startupLease?: ComposerLease,
  	startupGoal?: string,
  	startupRestore?: () => Promise<RestoreOutcome>,
- 	refreshScopedModelsAfterLogin?: () => Promise<void>,
 +	studioLoopService?: StudioLoopService,
 +	studioModeService?: StudioModeControlService,
 +	studioShutdownRequested?: Promise<void>,
  ): Promise<void> {
  	const InteractiveModeConstructor = await loadInteractiveModeConstructor();
  	let mode: InteractiveMode;
-@@ -674,6 +686,8 @@ async function runInteractiveMode(
+@@ -679,6 +691,8 @@ async function runInteractiveMode(
+ 			eventBus,
  			startupLease?.composer,
  			subagentEventBus,
- 			refreshScopedModelsAfterLogin,
 +			studioLoopService,
 +			studioModeService,
  		);
  		startupLease?.adopt();
  	} catch (error) {
-@@ -748,7 +762,7 @@ async function runInteractiveMode(
+@@ -761,7 +775,7 @@ async function runInteractiveMode(
  		const notifyNewVersion = (newVersion: string): void => {
  			if (cfgStartupCheckUpdate.get(settings)) mode.showNewVersionNotification(newVersion);
  		};
@@ -320,8 +320,8 @@ index 2bfe0b7230..a79b98eab2 100644
  			void runAutoUpdate(checkedVersionPromise, {
  				show: update => mode.showVersionUpdate(update),
  				notify: notifyNewVersion,
-@@ -857,8 +871,20 @@ async function runInteractiveMode(
- 	}
+@@ -871,8 +885,20 @@ async function runInteractiveMode(
+ 	mode.settleStartupRun();
  
  	while (true) {
 -		const input = await mode.getUserInput();
@@ -343,7 +343,24 @@ index 2bfe0b7230..a79b98eab2 100644
  	}
  }
  
-@@ -1263,6 +1289,7 @@ export async function createSessionManager(
+@@ -1192,6 +1218,16 @@ export async function rebuildScopedModels(
+ /** Settings the scoped model list follows (see {@link watchScopedModelSettings}). */
+ const cfgScopedModelInputs = combine({ enabledModels: cfgEnabledModels, disabledProviders: cfgDisabledProviders });
+ 
++/** Bind native scope refresh to this instance, including a recreated Studio Worker. */
++export function bindScopedModelRefresh(session: AgentSession, parsed: Args): void {
++	const registry = session.modelRegistry;
++	const activeSettings = session.settings;
++	session.setScopedModelsRefresher(async () => {
++		await rebuildScopedModels(session, parsed, registry, activeSettings);
++	});
++	watchScopedModelSettings(session, parsed, registry, activeSettings);
++}
++
+ /**
+  * Keep the Ctrl+P / scoped `/models` list in step with live settings: an
+  * `enabledModels` edit re-resolves a settings-derived scope (an explicit
+@@ -1277,6 +1313,7 @@ export async function createSessionManager(
  		onSessionContinuation?: (continuation: SessionContinuation) => void;
  	} = {},
  ): Promise<SessionManager | undefined> {
@@ -351,7 +368,7 @@ index 2bfe0b7230..a79b98eab2 100644
  	if (parsed.fork) {
  		if (parsed.noSession) {
  			throw new SessionResolutionError("--fork requires session persistence");
-@@ -1272,6 +1299,7 @@ export async function createSessionManager(
+@@ -1286,6 +1323,7 @@ export async function createSessionManager(
  			try {
  				return await SessionManager.forkFrom(forkSource, cwd, parsed.sessionDir, undefined, {
  					repairInterruptedTail: true,
@@ -359,7 +376,7 @@ index 2bfe0b7230..a79b98eab2 100644
  				});
  			} catch (err) {
  				if (err instanceof ForkSourceNotFoundError) {
-@@ -1287,6 +1315,7 @@ export async function createSessionManager(
+@@ -1301,6 +1339,7 @@ export async function createSessionManager(
  		try {
  			return await SessionManager.forkFrom(match.session.path, cwd, parsed.sessionDir, undefined, {
  				repairInterruptedTail: true,
@@ -367,7 +384,7 @@ index 2bfe0b7230..a79b98eab2 100644
  			});
  		} catch (err) {
  			if (err instanceof ForkSourceNotFoundError) {
-@@ -1354,6 +1383,7 @@ export async function createSessionManager(
+@@ -1368,6 +1407,7 @@ export async function createSessionManager(
  	if (parsed.continue) {
  		return await forkIfMovedAway(
  			await SessionManager.continueRecent(cwd, parsed.sessionDir, undefined, {
@@ -375,7 +392,7 @@ index 2bfe0b7230..a79b98eab2 100644
  				onSessionContinuation: options.onSessionContinuation,
  			}),
  			parsed.sessionDir,
-@@ -1362,16 +1392,18 @@ export async function createSessionManager(
+@@ -1376,16 +1416,18 @@ export async function createSessionManager(
  	// --resume without value is handled separately (needs picker UI)
  	// If --session-dir provided without --continue/--resume, create new session there
  	if (parsed.sessionDir) {
@@ -396,7 +413,7 @@ index 2bfe0b7230..a79b98eab2 100644
  				onSessionContinuation: options.onSessionContinuation,
  			}),
  			parsed.sessionDir,
-@@ -1381,8 +1413,8 @@ export async function createSessionManager(
+@@ -1395,8 +1437,8 @@ export async function createSessionManager(
  		}
  		return manager;
  	}
@@ -407,7 +424,7 @@ index 2bfe0b7230..a79b98eab2 100644
  }
  
  /** Discover APPEND_SYSTEM.md file if no CLI append system prompt was provided */
-@@ -1803,6 +1835,7 @@ interface RunRootCommandDependencies {
+@@ -1818,6 +1860,7 @@ interface RunRootCommandDependencies {
  	discoverAuthStorage?: typeof discoverAuthStorage;
  	selectSession?: SessionPicker;
  	runAcpMode?: RunAcpMode;
@@ -415,7 +432,7 @@ index 2bfe0b7230..a79b98eab2 100644
  	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
  	settings?: Settings;
  	forceSetupWizard?: boolean;
-@@ -1877,6 +1910,10 @@ export async function runRootCommand(
+@@ -1892,6 +1935,10 @@ export async function runRootCommand(
  			rejectNoUiWithoutRpc(parsedArgs);
  		}
  		const mode = parsedArgs.mode || "text";
@@ -426,7 +443,7 @@ index 2bfe0b7230..a79b98eab2 100644
  		// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
  		const rpcInput = mode === "rpc" || mode === "rpc-ui" ? claimRpcInput() : undefined;
  
-@@ -1911,8 +1948,10 @@ export async function runRootCommand(
+@@ -1926,8 +1973,10 @@ export async function runRootCommand(
  		// session-critical database connection picks the right busy timeout.
  		// See getDbBusyTimeoutMs().
  		const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
@@ -438,16 +455,20 @@ index 2bfe0b7230..a79b98eab2 100644
  		// Without a terminal on stdin the TUI cannot run, so such a launch is always
  		// headless: a piped or argv prompt runs like `-p`, and one with no prompt
  		// fails with a usage error instead of booting the interactive stack and
-@@ -1920,7 +1959,7 @@ export async function runRootCommand(
+@@ -1935,10 +1984,10 @@ export async function runRootCommand(
  		const stdinIsTerminal = process.stdin.isTTY === true;
  		const autoPrint =
  			(pipedInput !== undefined || !stdinIsTerminal) && !parsedArgs.print && parsedArgs.mode === undefined;
 -		const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
 +		const isInteractive = !parsedArgs.print && !autoPrint && (parsedArgs.mode === undefined || isStudioHost);
+ 		// The TUI owns the Tern pane or cmux workspace it draws in; an omp its commands start sees the claim and
+ 		// keeps its browser tabs out of this session's pane.
+-		if (isInteractive) claimTerminal();
++		if (isInteractive && !isStudioHost) claimTerminal();
  		// Before session resolution: resume, fork, and import act on these same
  		// startup-parse flags, so rejecting later would leave forked or imported
  		// transcripts (or an opened picker) behind a usage error.
-@@ -1944,7 +1983,7 @@ export async function runRootCommand(
+@@ -1962,7 +2011,7 @@ export async function runRootCommand(
  		// Only the interactive host renders a focusable Agent Hub / subagent session
  		// tree; declare it so headless subagent optimizations (e.g. skipping replan
  		// title refresh) can tell a focusable process from a print/RPC/eval one.
@@ -456,7 +477,7 @@ index 2bfe0b7230..a79b98eab2 100644
  		if (!isInteractive) {
  			stopPendingStartupComposer();
  		}
-@@ -1968,8 +2007,12 @@ export async function runRootCommand(
+@@ -1986,8 +2035,12 @@ export async function runRootCommand(
  			process.stderr.write(`${chalk.red(`Error: ${message}`)}\n`);
  			process.exit(1);
  		}
@@ -470,7 +491,7 @@ index 2bfe0b7230..a79b98eab2 100644
  		// Process-lifetime: broker/account-policy edits reconfigure the shared credential store.
  		createAuthStorageSettingsSync(settingsInstance, authStorage);
  		if (parsedArgs.approvalMode) {
-@@ -2204,6 +2247,9 @@ export async function runRootCommand(
+@@ -2228,6 +2281,9 @@ export async function runRootCommand(
  		}
  		// Only createSessionManager's implicit auto-resume promotes continue here.
  		const autoResumed = !explicitSessionSelection && parsedArgs.continue === true;
@@ -480,7 +501,7 @@ index 2bfe0b7230..a79b98eab2 100644
  
  		if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager && !parsedArgs.noSession) {
  			const previousCwd = cwd;
-@@ -2377,11 +2423,12 @@ export async function runRootCommand(
+@@ -2401,11 +2457,12 @@ export async function runRootCommand(
  			);
  			options.authStorage = authStorage;
  			options.modelRegistry = modelRegistry;
@@ -496,7 +517,7 @@ index 2bfe0b7230..a79b98eab2 100644
  			options.deferSkillDescriptionCompression = isInteractive;
  			options.settings = settingsInstance;
  			options.telemetry = startupTelemetry;
-@@ -2494,8 +2541,11 @@ export async function runRootCommand(
+@@ -2518,8 +2575,11 @@ export async function runRootCommand(
  			// input; the first request waits for them instead. Kept eager when argv may
  			// carry extension flags (they must parse now), `--tools` must validate
  			// extension tools, or a restored transcript needs extension renderers.
@@ -508,7 +529,30 @@ index 2bfe0b7230..a79b98eab2 100644
  				parsedArgs.unrecognizedFlags.length === 0 &&
  				!parsedArgs.tools?.length &&
  				!(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || parsedArgs.restore || foreignSource);
-@@ -2861,33 +2911,94 @@ export async function runRootCommand(
+@@ -2740,8 +2800,8 @@ export async function runRootCommand(
+ 			// runInteractiveMode calls it once init has painted. None feeds the first
+ 			// prompt: fallback-chain validation and the startup changelog only add header
+ 			// rows, and the background refresh already raced the first prompt when it ran earlier.
+-			const startDeferredStartupWork = (interactive: InteractiveMode): void => {
+-				if (showsStartupChangelog) {
++			const startDeferredStartupWork = (interactive?: InteractiveMode): void => {
++				if (showsStartupChangelog && interactive) {
+ 					void resolveStartupChangelogForDisplay({
+ 						mode: cfgStartupChangelogMode.get(settingsInstance),
+ 						currentVersion: VERSION,
+@@ -2768,10 +2828,7 @@ export async function runRootCommand(
+ 					);
+ 				}
+ 			};
+-			session.setScopedModelsRefresher(async () => {
+-				await rebuildScopedModels(session, parsedArgs, modelRegistry, settingsInstance);
+-			});
+-			watchScopedModelSettings(session, parsedArgs, modelRegistry, settingsInstance);
++			bindScopedModelRefresh(session, parsedArgs);
+ 
+ 			if (modelFallbackMessage) {
+ 				notifs.push({ kind: "warn", message: modelFallbackMessage });
+@@ -2885,32 +2942,124 @@ export async function runRootCommand(
  				try {
  					stopStartupWatchdog();
  					logger.endTiming();
@@ -533,19 +577,20 @@ index 2bfe0b7230..a79b98eab2 100644
 -						startupLease,
 -						initialArgs.goal,
 -						parsedArgs.restore ? () => restoreSession(session, { eventBus, subagentEventBus }) : undefined,
--						refreshScopedModelsAfterLogin,
 -					);
-+					const runTui = (runtime?: StudioHostRuntime) => {
-+						// The desktop Host owns the UI. In a non-TTY launch, starting the
-+						// interactive editor makes the Runtime treat stdin as an interrupt
-+						// source and exit with code 129 immediately after the Bridge handshake.
-+						// Keep the Bridge process alive until the desktop sends shutdown.
-+						if (isStudioHost && runtime !== undefined && !(process.stdin.isTTY && process.stdout.isTTY)) {
-+							return runtime.waitForShutdown().then(async () => {
-+								await postmortem.quit(0);
-+							});
++					const runTui = async (runtime?: StudioHostRuntime): Promise<void> => {
++						// The Bridge and Remote UI now own the same native session. No terminal
++						// editor is created for the GUI; explicit restore runs only after this gate.
++						if (isStudioHost && runtime && !(process.stdin.isTTY && process.stdout.isTTY)) {
++							startDeferredStartupWork();
++							if (parsedArgs.restore) {
++								await restoreSession(runtime.session, { eventBus, subagentEventBus });
++							}
++							await runtime.waitForShutdown();
++							await postmortem.quit(0);
++							return;
 +						}
-+						return runInteractiveMode(
++						await runInteractiveMode(
 +							session,
 +							VERSION,
 +							notifs,
@@ -566,7 +611,6 @@ index 2bfe0b7230..a79b98eab2 100644
 +							startupLease,
 +							initialArgs.goal,
 +							parsedArgs.restore ? () => restoreSession(session, { eventBus, subagentEventBus }) : undefined,
-+							refreshScopedModelsAfterLogin,
 +							runtime?.services.loop,
 +							runtime?.services.modes,
 +							runtime?.waitForShutdown(),
@@ -592,6 +636,35 @@ index 2bfe0b7230..a79b98eab2 100644
 +								...(mcpManager === undefined ? {} : { mcpManager }),
 +							});
 +							activeToolUIContextSetter = revived.setToolUIContext;
++							bindScopedModelRefresh(revived.session, parsedArgs);
++							await rebuildScopedModels(
++								revived.session,
++								parsedArgs,
++								revived.session.modelRegistry,
++								revived.session.settings,
++							);
++							AgentLifecycleManager.global().setPersistedSubagentReviverFactory(
++								createPersistedSubagentReviverFactory({
++									session: revived.session,
++									authStorage,
++									modelRegistry: revived.session.modelRegistry,
++									settings: revived.session.settings,
++									enableLsp: sessionOptions.enableLsp ?? true,
++									eventBus: revivedEventBus,
++									subagentEventBus: revivedSubagentEventBus,
++								}),
++								() => Math.trunc(Number(cfgTaskAgentIdleTtlMs.get(revived.session.settings)) || 0),
++							);
++							void revived.session.loadDeferredExtensions();
++							revived.session.modelRegistry.refreshInBackground();
++							void rebuildScopedModelsAfterDiscovery(
++								revived.session,
++								parsedArgs,
++								revived.session.modelRegistry,
++								revived.session.settings,
++							).catch(error =>
++								logger.warn("Recreated Worker scoped discovery failed", { error: String(error) }),
++							);
 +							return revived.session;
 +						};
 +						await (deps.runStudioHostMode ?? defaultRunStudioHostMode)(
@@ -627,7 +700,7 @@ index 2bfe0b7230..a79b98eab2 100644
  				// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.
  				stopStartupWatchdog();
  				// PI_TIMING prints the tree after the run; otherwise stop recording now so a
-@@ -2910,6 +3021,8 @@ export async function runRootCommand(
+@@ -2933,6 +3082,8 @@ export async function runRootCommand(
  				await disposeSessionQuietly(session);
  				stopThemeWatcher();
  				await postmortem.quit(exitCode);

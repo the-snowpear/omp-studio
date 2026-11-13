@@ -51,6 +51,8 @@ export interface DesktopHostComposition {
     workspace: { workspaceId: string; cwd: string },
     options?: { readonly launchIfMissing?: boolean },
   ): Promise<void>;
+  /** Main-only reversible native extension gate; never used by forced teardown. */
+  confirmClose?(): Promise<boolean>;
   /** Graceful close: client-session close, Host shutdown, authority release. */
   shutdown(): Promise<void>;
   /**

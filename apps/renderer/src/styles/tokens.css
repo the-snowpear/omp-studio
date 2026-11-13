@@ -249,6 +249,13 @@
   /* 角色主题色调板 — 给「模型配置 → 角色」列表卡片分配不同颜色。
      主色取高饱和纯色（图标色），-soft 用于 hover 光环，
      图标底色由 CSS color-mix 与 --bg-inset 混合生成，保证通透不灰。 */
+  /* Context identity groups, shared by the card and inspector. Existing hues,
+     independently validated in both themes; not status or text colours. */
+  --context-messages: #3887dc;
+  --context-tools: #e68a39;
+  --context-instructions: #28a580;
+  --context-system: #9380c8;
+
   --tint-green: #16a34a;
   --tint-green-soft: rgba(22, 163, 74, 0.13);
   --tint-green-border: rgba(22, 163, 74, 0.35);
@@ -403,6 +410,11 @@
   --blue-soft: rgba(93, 169, 224, 0.15);
 
   /* 角色主题色调板 — 深色主题亮色档（400 级高饱和） */
+  --context-messages: #3887dc;
+  --context-tools: #b35e14;
+  --context-instructions: #28a580;
+  --context-system: #9380c8;
+
   --tint-green: #4ade80;
   --tint-green-soft: rgba(74, 222, 128, 0.16);
   --tint-green-border: rgba(74, 222, 128, 0.4);

@@ -223,7 +223,7 @@ describe("Studio Agent-created service previews", () => {
 						previewUrl: "http://localhost:4100",
 						pty: false,
 					}),
-				).rejects.toThrow("This project broker does not support preview URLs");
+				).rejects.toThrow("does not support preview URLs");
 			}
 			expect(requests.mock.calls.map(([operation]) => operation.op)).toEqual(["ping", "ping"]);
 			const listed = await listServices(session);

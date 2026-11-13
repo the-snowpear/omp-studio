@@ -18,7 +18,7 @@ import { AgentHubPage, setHubIntent } from "./AgentHub";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { TAB_PANE_MS } from "./pageTransition";
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(null, "", window.location.pathname); });
 
 beforeAll(() => {
   window.matchMedia = (query: string) =>
@@ -599,7 +599,62 @@ it("previews a configured agent spawn without sending Host queries or writes", a
  const dialog = await screen.findByRole("dialog", { name: "创建代理" });
  fireEvent.change(within(dialog).getByRole("textbox", { name: "任务描述" }), { target: { value: "检查模型配置页面的布局" } });
  expect(within(dialog).queryByRole("combobox", { name: "本次主模型" })).toBeNull();
+ fireEvent.click(within(dialog).getByText("任务级配置"));
  selectOption(within(dialog).getByRole("combobox", { name: "本次思考强度" }), "深入");
  fireEvent.click(within(dialog).getByRole("button", { name: "预览创建" }));
  await screen.findByText(/演示任务已配置/); expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
+});
+
+it("submits more than four user steps in one native spawn without changing global delegation", async () => {
+  const query = vi.fn(async (name: string) => {
+    if (name === "agents.definitions.get") return { agents: [{ name: "task", description: "Native task", model: ["@task"] }] };
+    if (name === "agent.spawn.options.read") return { stepsAdvertised: false, autoParallel: "off", effortSelection: false, modelSelection: false, maxEffort: "max", models: [] };
+    throw new Error(name);
+  });
+  const command = vi.fn(async () => ({ requestId: "req-steps", commandName: "agent.spawn", status: "local_pending", idempotencyKey: "steps", issuedAt: "2026-11-12T00:00:00Z" }));
+  const client = { ...mockClient(query), command, getState: () => ({ commands: { "req-steps": { requestId: "req-steps", status: "completed", result: { agentId: "same-child", jobId: "same-job", status: "starting" } } } }) } as unknown as StudioClient;
+  renderHub(snapshotWith([]), { client, runtimeConnected: true, canSend: true, capabilities: hubCapabilities("agent.spawn", "agent.spawn.options") });
+  fireEvent.click(screen.getAllByRole("button", { name: "创建代理" })[0]!);
+  const dialog = await screen.findByRole("dialog", { name: "创建代理" });
+  const stepsMode = within(dialog).getByRole("button", { name: "分步任务" });
+  await waitFor(() => expect((stepsMode as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(stepsMode);
+  const steps = ["Inspect contract", "Check lifecycle", "Preserve identity", "Implement seam", "Test abort", "Test restore", "Report result"];
+  const editor = within(dialog).getByRole("textbox", { name: "第 1 步" }) as HTMLTextAreaElement;
+  for (const [index, text] of steps.entries()) {
+    fireEvent.change(editor, { target: { value: text } });
+    if (index < steps.length - 1) fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true, shiftKey: true });
+  }
+  const start = within(dialog).getByRole("button", { name: "创建并启动" });
+  fireEvent.click(start); fireEvent.click(start);
+  await waitFor(() => expect(command).toHaveBeenCalledTimes(1));
+  expect(command).toHaveBeenCalledWith("agent.spawn", { definition: "task", steps, async: true });
+  expect(query.mock.calls.filter(([name]) => name === "agent.spawn.options.read")).toHaveLength(1);
+});
+
+it("shows real structured native phase counts instead of inventing progress for each user step", () => {
+  renderHub(snapshotWith([snapshotAgent({ status: "idle", taskSteps: { prompts: ["Inspect", "Implement", "Verify", "Report"], sent: 2, completed: 1, phase: "budget", reason: "Native budget reached" } })]));
+  fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+  const phases = screen.getByRole("region", { name: "原生任务阶段" });
+  expect(within(phases).getByText("已发送 2/4 组 · 已完成 1/4 组")).toBeTruthy();
+  expect(within(phases).getByText("Native budget reached")).toBeTruthy();
+  expect(within(phases).queryByRole("progressbar")).toBeNull();
+});
+
+it("uses task preview data with marks off without demo notices or Host writes", async () => {
+  window.history.replaceState(null, "", "?preview=1&marks=off");
+  const query = vi.fn(), command = vi.fn();
+  renderHub(snapshotWith([snapshotAgent({ taskSteps: { prompts: ["Real task must not leak into preview"], sent: 1, completed: 0, phase: "running" } })]), { preview: true, client: { ...mockClient(query), command } });
+  fireEvent.click(screen.getByRole("option", { name: /deps 子 Agent/ }));
+  expect(screen.getByRole("region", { name: "原生任务阶段" })).toBeTruthy();
+  expect(screen.queryByText("Real task must not leak into preview")).toBeNull();
+  fireEvent.click(screen.getAllByRole("button", { name: "创建代理" })[0]!);
+  const dialog = await screen.findByRole("dialog", { name: "创建代理" });
+  expect(dialog.textContent).not.toMatch(/演示|Demo/);
+  fireEvent.click(within(dialog).getByRole("button", { name: "分步任务" }));
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "第 1 步" }), { target: { value: "Inspect the preview layout" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "创建并启动" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "创建代理" })).toBeNull());
+  expect(screen.queryByText(/演示任务已配置/)).toBeNull();
+  expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
 });

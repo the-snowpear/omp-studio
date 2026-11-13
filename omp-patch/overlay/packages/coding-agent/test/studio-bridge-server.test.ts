@@ -40,12 +40,13 @@ function fakeLoopService(): StudioLoopService {
 		reset: () => {},
 		nowMs: Date.now,
 		setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
-		clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
+		clearTimer: timer => clearTimeout(timer as NodeJS.Timeout),
 	});
 }
 
 function fakeExtendedServices(session: Record<string, unknown>) {
 	return {
+		workbench: { views: { cancelClose: () => {} } },
 		modes: {
 			state: () => ({
 				...((session.getPlanModeState as () => unknown)() === undefined
@@ -55,7 +56,7 @@ function fakeExtendedServices(session: Record<string, unknown>) {
 			onChange: () => () => {},
 			dispose: () => {},
 		},
-		tree: { getTree: () => ({ leafId: null, roots: [] }), navigate: async () => ({}) },
+		tree: { getTree: () => ({ leafId: null, roots: [] }), navigate: async () => ({}), cancelReanswer: () => {} },
 		fork: { fork: async () => ({ forked: true, sessionId: "session-test" }) },
 		commands: new StudioCommandManifestService(session as never),
 		agents: {
@@ -314,6 +315,7 @@ describe("WP-011 Studio Bridge runtime server", () => {
 		let listener: ((event: ComputerWorkspaceChange) => void) | undefined;
 		Object.assign(runtime.services, {
 			workbench: {
+				views: { cancelClose: () => {} },
 				computerWorkspace: {
 					subscribe(callback: (event: ComputerWorkspaceChange) => void) {
 						listener = callback;

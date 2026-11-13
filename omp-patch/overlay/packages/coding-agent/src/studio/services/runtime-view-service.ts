@@ -12,6 +12,12 @@ import { loadEntriesFromFile } from "../../session/session-loader";
 import { isAgentViewSession } from "../../session/agent-session-handle";
 import { cfgDisplayShellVisualization } from "../../modes/settings";
 import type { RuntimeViewOperation } from "../runtime-views-protocol";
+import type { InteractionForm } from "../form-protocol";
+import {
+	isModelServicesQueryKind,
+	type ModelServicesOperation,
+	type ModelServicesQueryInputMap,
+} from "../model-services-protocol";
 import type { StudioLiveAudioService } from "./live-audio-service";
 import { ownedStudioAgent } from "./owned-sessions";
 import { SessionControlError } from "./session-control-service";
@@ -26,6 +32,11 @@ function shellKey(operation: Pick<ShellRead, "sessionId" | "sourceSessionId" | "
 
 /** Reads native state and negotiates media without recording transient payloads. */
 export class StudioRuntimeViews {
+	formReader?: (interactionId: string, leaseGeneration: number) => { form: InteractionForm };
+	modelServicesReader?: (
+		operation: Extract<ModelServicesOperation, { kind: keyof ModelServicesQueryInputMap }>,
+	) => Promise<unknown>;
+	#closeAttempt: AbortController | undefined;
 	// One open recorded command shares its journal load and native visualization across replay steps.
 	#recordedShell: { key: string; trace: Promise<ShellTrace | undefined> } | undefined;
 	constructor(
@@ -33,12 +44,44 @@ export class StudioRuntimeViews {
 		readonly audio: StudioLiveAudioService,
 	) {}
 	dispose(): void {
+		this.cancelClose();
 		this.#recordedShell = undefined;
+	}
+	cancelClose(): void {
+		this.#closeAttempt?.abort();
+		this.#closeAttempt = undefined;
+	}
+	async #confirmClose(): Promise<{ allowed: boolean }> {
+		if (this.session.isDisposed) return { allowed: true };
+		this.cancelClose();
+		const attempt = new AbortController();
+		this.#closeAttempt = attempt;
+		try {
+			// Native handler budgets pause while the operator answers a dialog.
+			// Only an actual stop/dispose aborts this reversible close attempt.
+			return { allowed: await this.session.confirmClose(attempt.signal) };
+		} catch {
+			return { allowed: true };
+		} finally {
+			if (this.#closeAttempt === attempt) this.#closeAttempt = undefined;
+		}
 	}
 	async execute(operation: RuntimeViewOperation): Promise<unknown> {
 		if (operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "The Runtime view belongs to another session");
+		if (isModelServicesQueryKind(operation.kind)) {
+			if (!this.modelServicesReader)
+				throw new SessionControlError("CAPABILITY_UNAVAILABLE", "Native model services are unavailable");
+			return this.modelServicesReader(
+				operation as Extract<ModelServicesOperation, { kind: keyof ModelServicesQueryInputMap }>,
+			);
+		}
 		switch (operation.kind) {
+			case "runtime.close.confirm":
+				return this.#confirmClose();
+			case "interaction.form.read":
+				if (!this.formReader) throw new SessionControlError("COMMAND_BLOCKED", "No form is pending");
+				return this.formReader(operation.interactionId, operation.leaseGeneration);
 			case "agent.spawn.options.read":
 				return readStudioTaskOptions(this.session, operation.definition);
 			case "session.lease.read":
@@ -103,8 +146,11 @@ export class StudioRuntimeViews {
 					if (!useLive || file) trace = await this.#readRecordedShell(operation, file);
 				}
 				if (!trace) return { available: false, reason: "This command has no recorded execution trace." };
+				const visualization = shellVisualization(trace);
+				if (!visualization)
+					return { available: false, reason: "The native engine cannot replay this recorded shell trace." };
 				const presentation = readShellPresentation(
-					shellVisualization(trace),
+					visualization,
 					operation.preferences ?? defaultShellVizPreferences(),
 					trace,
 				);

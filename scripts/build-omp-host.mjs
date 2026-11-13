@@ -68,7 +68,7 @@ await assertRuntimeIdentityInSync();
 run(process.execPath, [fileURLToPath(new URL("./verify-omp-source.mjs", import.meta.url))], { env });
 run(process.execPath, [fileURLToPath(new URL("./install-omp-deps.mjs", import.meta.url))], { env });
 
-run(bun, ["--cwd=packages/natives", "run", "build"], { cwd: ompSourceDirectory, env });
+run(process.execPath, [fileURLToPath(new URL("./build-omp-natives.mjs", import.meta.url))], { env });
 run(bun, ["--cwd=packages/coding-agent", "run", "build"], { cwd: ompSourceDirectory, env });
 
 const executable = join(

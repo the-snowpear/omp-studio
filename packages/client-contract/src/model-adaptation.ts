@@ -1,4 +1,5 @@
 import type { ModelThinkingConfig } from "./model-thinking.js";
+import type { ModelKind } from "./model-kinds.js";
 
 export const MODEL_PARAMETER_FIELDS = ["contextWindow", "maxContextWindow", "maxTokens", "reasoning", "thinkingConfig"] as const;
 export type ModelParameterField = (typeof MODEL_PARAMETER_FIELDS)[number];
@@ -20,6 +21,8 @@ export interface ModelParameterOrigin {
 export type ModelParameterSources = Readonly<Partial<Record<ModelParameterField, ModelParameterOrigin>>>;
 
 export interface ModelAdaptationCandidate {
+  readonly kind?: ModelKind;
+  readonly webSearch?: string;
   readonly key: string;
   readonly provider: string;
   readonly id: string;
@@ -54,7 +57,18 @@ export interface ModelCatalogStatus {
   readonly source: "builtin" | "updated";
 }
 
+export interface ModelNativeProviderInfo {
+  readonly id: string;
+  readonly name: string;
+  readonly credentialScoped: boolean;
+  readonly authoritative: boolean;
+  readonly api?: string;
+  readonly endpoint?: string;
+  readonly kinds: readonly ModelKind[];
+}
 export interface ModelCatalogDocument {
+  readonly nativeProviders?: readonly ModelNativeProviderInfo[];
+  readonly roleDefaults?: Readonly<Record<string, readonly string[]>>;
   readonly schemaVersion: 1;
   readonly version: string;
   readonly upstreamCommit: string;

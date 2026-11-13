@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { ContextCategoryId, ContextViewIndex } from "@omp-studio/studio-protocol";
 import { useI18n } from "../i18n";
-import { allocateUsage, CATEGORY_TINT, compactTokens, formatShare } from "./contextViewMath";
+import { allocateUsage, CATEGORY_GROUP, CATEGORY_TINT, compactTokens, formatShare } from "./contextViewMath";
 
 interface Row {
   key: string;
@@ -81,7 +81,7 @@ export function ContextCategoryList({
               disabled={!row.selectable}
               onClick={() => onSelect(row.categoryId, row.childKey)}
             >
-              <i className="cv-dot" style={{ background: row.color }} aria-hidden="true" />
+              <i className="cv-dot" data-context-group={CATEGORY_GROUP[row.categoryId]} style={{ background: row.color }} aria-hidden="true" />
               <span className="cv-cat-label">{row.label}</span>
               <b className="cv-cat-tokens">{compactTokens(row.tokens)}</b>
               <span className="cv-cat-share">{formatShare(row.tokens, index.contextWindow)}</span>

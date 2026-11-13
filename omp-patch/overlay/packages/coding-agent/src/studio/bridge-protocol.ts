@@ -1,4 +1,9 @@
 import { RUNTIME_VIEW_KINDS, isRuntimeViewKind, type RuntimeViewOperation } from "./runtime-views-protocol";
+import {
+	MODEL_SERVICES_COMMAND_KINDS,
+	isModelServicesKind,
+	type ModelServicesOperation,
+} from "./model-services-protocol";
 import type { SessionOwnerOperation } from "./session-owner-protocol";
 import { COMPUTER_WORKSPACE_QUERY_KINDS } from "./computer-workspace-protocol";
 import { CONTEXT_VIEW_KINDS, isContextViewKind, type ContextViewOperation } from "./context-view-protocol";
@@ -86,6 +91,7 @@ export type StudioOperation =
 	| SessionOwnerOperation
 	| ContextViewOperation
 	| RuntimeViewOperation
+	| ModelServicesOperation
 	| PredictionOperation
 	| WorkbenchOperation
 	| UpgradeOperation
@@ -173,7 +179,7 @@ export type StudioOperation =
 			definition: string;
 			model?: string[];
 			assignment?: string;
-			taskFile?: string;
+			steps?: string[];
 			solutionSpace?: string;
 			context?: string;
 			async?: boolean;
@@ -206,6 +212,7 @@ export type StudioOperation =
 			kind: "interaction.respond";
 			interactionId: string;
 			commandId: string;
+			leaseGeneration?: number;
 			decision: "submit" | "cancel";
 			value?: unknown;
 	  };
@@ -263,6 +270,16 @@ export type StudioRemoteInteractionRequest =
 			commandId: string;
 			title: string;
 			questions: StudioAskQuestion[];
+	  }
+	| {
+			kind: "form";
+			interactionId: string;
+			commandId: string;
+			title: string;
+			summary: string;
+			fieldCount: number;
+			sectionCount: number;
+			timeoutMs?: number;
 	  };
 
 export type StudioAskOption = {
@@ -617,6 +634,7 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 	}
 	if (operation.kind === "session.owner.update") return input as unknown as StudioRequest;
 	if (isRuntimeViewKind(operation.kind)) return input as unknown as StudioRequest;
+	if (isModelServicesKind(operation.kind)) return input as unknown as StudioRequest;
 	if (isContextViewKind(operation.kind)) return input as unknown as StudioRequest;
 	if (isEvaluationOperationKind(operation.kind)) {
 		validateEvaluationOperation(operation);
@@ -885,7 +903,7 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 				"kind",
 				"definition",
 				"assignment",
-				"taskFile",
+				"steps",
 				"context",
 				"async",
 				"isolation",
@@ -1082,7 +1100,7 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			if ("arguments" in operation) assertJsonValue(operation.arguments);
 			break;
 		case "interaction.respond":
-			exactKeys(operation, ["kind", "interactionId", "commandId", "decision", "value"]);
+			exactKeys(operation, ["kind", "interactionId", "commandId", "leaseGeneration", "decision", "value"]);
 			if (!nonEmptyString(operation.interactionId) || !nonEmptyString(operation.commandId)) {
 				throw new StudioFrameError("Invalid interaction identity");
 			}
@@ -1173,6 +1191,7 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	...COMPUTER_WORKSPACE_QUERY_KINDS,
 	...CONTEXT_VIEW_KINDS,
 	...RUNTIME_VIEW_KINDS,
+	...MODEL_SERVICES_COMMAND_KINDS,
 	"settings.approval",
 	"prediction.query",
 	"composer.predictions",
@@ -1255,6 +1274,7 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	"interaction.respond",
 	"tui.transfer",
 	"remoteUi.standard",
+	"remoteUi.leaseGeneration",
 	"tui.manualCompatibility",
 ] as const;
 

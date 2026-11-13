@@ -225,6 +225,8 @@ export interface DesktopRuntimeSessionPort {
    * at most once per composition.
    */
   start(context: DesktopRuntimeSessionContext): Promise<DesktopRuntimeSession | undefined>;
+  /** Consult native close hooks without stopping, draining, or closing client sessions. */
+  confirmClose?(): Promise<boolean>;
   /** Gracefully stops the Runtime if this port started one; no-op otherwise. */
   stop(): Promise<void>;
   updateRestartBlocker?(): string | undefined;
@@ -1335,6 +1337,11 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
         context.bindSession.current(undefined);
       }
     }
+  }
+
+  async confirmClose(): Promise<boolean> {
+    if (this.#closed || this.#shutdownStarted) return true;
+    return await (this.#runtimeSession?.confirmClose?.() ?? true);
   }
 
   /**

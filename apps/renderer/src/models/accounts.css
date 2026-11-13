@@ -55,6 +55,18 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+.account-budgets h4 { margin: 0 0 8px; font-size: var(--fs-13); }
+.account-budget-table { overflow-x: auto; }
+.account-budget-table table { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
+.account-budget-table th, .account-budget-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.account-budget-table th:first-child { padding-left: 0; text-align: left; }
+.account-budget-table th { font-weight: 500; }
+.account-budget-table small { display: block; color: var(--text-muted); font-weight: 400; white-space: normal; }
+.account-window-policies { margin-top: 12px; display: grid; gap: 8px; }
+.account-reset-window { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.account-reset-window > div { display: grid; gap: 4px; min-width: 0; }
+.account-reset-window .small { overflow-wrap: anywhere; }
+.account-reset-window > .select { max-width: 100%; }
 @media (max-width: 700px) {
   .account-quota {
     grid-template-columns: minmax(0, 1fr) auto;

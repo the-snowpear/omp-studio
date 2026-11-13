@@ -8,6 +8,31 @@ import type {
 import type { StudioRuntimeCommandArbiter } from "../command-arbiter";
 import type { CfgApproval } from "../../internal-urls/cfg-protocol";
 import type { ExtensionApprovalAnswer, ExtensionApprovalGrant } from "../../extensibility/extensions/types";
+import {
+	fieldError,
+	isArrayChoice,
+	textValue,
+	type HtmlFormValue,
+	type OptionNote,
+} from "@oh-my-pi/pi-tui/html-form/data";
+import { spansText, type ChoiceOption } from "@oh-my-pi/pi-tui/html-form/parse";
+import { isRecord } from "@oh-my-pi/pi-utils";
+import type { FormSubmitValue, InteractionForm, InteractionFormField } from "../form-protocol";
+import { truncateUtf8 } from "./conversation-sanitizer";
+
+const FORM_SUMMARY_MAX_BYTES = 480;
+type InteractionInput<T = StudioRemoteInteractionRequest> = T extends StudioRemoteInteractionRequest
+	? Omit<T, "interactionId">
+	: never;
+
+export interface StudioFormInput {
+	commandId: string;
+	title: string;
+	form: InteractionForm;
+	timeoutMs?: number;
+	/** Local native cancellation only; never projected into the pending request or Bridge DTO. */
+	signal?: AbortSignal;
+}
 
 /** A tool approval request; `session`/`grants` mirror the upstream approval prompt's extra choices. */
 export interface StudioApprovalInput {
@@ -77,10 +102,110 @@ export interface StudioInteractionPort {
 			recommended?: number;
 		}>;
 	}): Promise<unknown>;
+	form(input: StudioFormInput): Promise<FormSubmitValue | undefined>;
+}
+
+/** One executing-service check, before resolving the interaction; a failed submission leaves the card open. */
+export function formResultFromValue(value: unknown, form: InteractionForm): FormSubmitValue {
+	if (!isRecord(value) || !isRecord(value.data)) {
+		throw new StudioInteractionError("INVALID_ARGUMENT", "Form interaction requires submitted data");
+	}
+	const data: Record<string, HtmlFormValue> = Object.fromEntries(form.hidden);
+	const byName = new Map<string, InteractionFormField[]>();
+	for (const field of form.fields) {
+		if (!field.name) continue;
+		const fields = byName.get(field.name) ?? [];
+		fields.push(field);
+		byName.set(field.name, fields);
+	}
+	const timedOut = value.timedOut === true;
+	for (const [name, fields] of byName) {
+		const raw = Object.hasOwn(value.data, name) ? value.data[name] : undefined;
+		if (raw === undefined) {
+			const error = !timedOut && fields.length === 1 ? fieldError(fields[0]!, undefined) : undefined;
+			if (error) throw new StudioInteractionError("INVALID_ARGUMENT", `${fields[0]!.question}: ${error}`);
+			continue; // Unchecked controls contribute nothing: hidden/earlier values are not erased.
+		}
+		if (
+			!(
+				typeof raw === "string" ||
+				(typeof raw === "number" && Number.isFinite(raw)) ||
+				(Array.isArray(raw) && raw.every(entry => typeof entry === "string"))
+			)
+		) {
+			throw new StudioInteractionError("INVALID_ARGUMENT", `Invalid value for ${fields[0]!.question}`);
+		}
+		const submitted = raw as HtmlFormValue;
+		const field = [...fields].reverse().find(candidate => {
+			if (candidate.kind === "text")
+				return (
+					typeof submitted === "string" ||
+					(typeof submitted === "number" && (candidate.type === "number" || candidate.type === "range"))
+				);
+			if (isArrayChoice(candidate) !== Array.isArray(submitted) || typeof submitted === "number") return false;
+			const picked = Array.isArray(submitted) ? submitted : [submitted];
+			return (
+				candidate.other ||
+				picked.every(pick => candidate.options.some(option => !option.disabled && option.value === pick))
+			);
+		});
+		const hidden = Object.hasOwn(data, name) && data[name] === submitted;
+		if (!field && !hidden)
+			throw new StudioInteractionError("INVALID_ARGUMENT", `Invalid choice for ${fields[0]!.question}`);
+		// Duplicate names deliberately collapse in native data. Their overwritten individual drafts cannot
+		// be revalidated from that record; do not reinterpret one field's final value as every field's answer.
+		const normalized = field?.kind === "text" ? textValue(field, String(submitted)) : submitted;
+		const error =
+			!timedOut && fields.length === 1 ? fieldError(fields[0]!, field ? normalized : undefined) : undefined;
+		if (error) throw new StudioInteractionError("INVALID_ARGUMENT", `${fields[0]!.question}: ${error}`);
+		Object.defineProperty(data, name, { value: normalized, enumerable: true, configurable: true, writable: true });
+	}
+	const notes: OptionNote[] = [];
+	if (Array.isArray(value.notes)) {
+		for (const note of value.notes) {
+			if (
+				!isRecord(note) ||
+				typeof note.name !== "string" ||
+				typeof note.value !== "string" ||
+				typeof note.text !== "string"
+			)
+				continue;
+			const fields = byName.get(note.name) ?? [];
+			const matchesOption = (option: ChoiceOption) =>
+				!option.disabled &&
+				option.value === note.value &&
+				(note.option === undefined ||
+					(spansText(option.label).replace(/\s+/g, " ").trim() || option.value) === note.option);
+			const field = fields.find(
+				candidate =>
+					candidate.kind === "choice" &&
+					(note.question === undefined || candidate.question === note.question) &&
+					candidate.options.some(matchesOption),
+			);
+			if (field?.kind !== "choice") continue;
+			const option = field.options.find(matchesOption)!;
+			const picked = data[field.name];
+			if (
+				(fields.length === 1 && !(Array.isArray(picked) ? picked.includes(note.value) : picked === note.value)) ||
+				!note.text.trim()
+			)
+				continue;
+			notes.push({
+				name: field.name,
+				question: field.question,
+				option: spansText(option.label).replace(/\s+/g, " ").trim() || option.value,
+				value: option.value,
+				text: note.text.trim(),
+			});
+		}
+	}
+	return { data, ...(notes.length ? { notes } : {}), ...(timedOut ? { timedOut: true } : {}) };
 }
 
 interface PendingInteraction {
 	request: StudioRemoteInteractionRequest;
+	/** Transient form body. Never in a snapshot, required event or ledger. */
+	form?: InteractionForm;
 	owner: "gui" | "tui";
 	leaseGeneration: number;
 	resolve: (value: unknown) => void;
@@ -88,7 +213,8 @@ interface PendingInteraction {
 }
 
 interface WaitingInteraction {
-	input: Omit<StudioRemoteInteractionRequest, "interactionId">;
+	input: InteractionInput;
+	form?: InteractionForm;
 	deferred: PromiseWithResolvers<unknown>;
 }
 
@@ -105,6 +231,11 @@ export class StudioInteractionError extends Error {
 /** Late-bound bridge between the Runtime-owned TUI and the active bridge dispatcher. */
 export class StudioInteractionGateway implements StudioInteractionPort {
 	#port: StudioRemoteInteractionPort | undefined;
+	#generation = 0;
+
+	get generation(): number {
+		return this.#generation;
+	}
 
 	constructor(readonly onNotice?: (message: string, level: "info" | "warning" | "error") => void) {}
 
@@ -116,11 +247,17 @@ export class StudioInteractionGateway implements StudioInteractionPort {
 		if (this.#port !== undefined && this.#port !== port) {
 			throw new StudioInteractionError("INTERACTION_STALE", "Another interaction bridge is already bound");
 		}
-		this.#port = port;
+		if (this.#port !== port) {
+			this.#port = port;
+			this.#generation++;
+		}
 	}
 
 	unbind(port: StudioRemoteInteractionPort): void {
-		if (this.#port === port) this.#port = undefined;
+		if (this.#port !== port) return;
+		port.cancel("Interaction bridge generation ended");
+		this.#port = undefined;
+		this.#generation++;
 	}
 
 	pending(): StudioPendingInteraction | undefined {
@@ -184,6 +321,14 @@ export class StudioInteractionGateway implements StudioInteractionPort {
 		}>;
 	}): Promise<unknown> {
 		return this.#requirePort().ask(input);
+	}
+
+	form(input: StudioFormInput): Promise<FormSubmitValue | undefined> {
+		return this.#requirePort().form(input);
+	}
+
+	readForm(interactionId: string, leaseGeneration: number): { form: InteractionForm } {
+		return this.#requirePort().readForm(interactionId, leaseGeneration);
 	}
 
 	cancel(reason = "Runtime interaction was cancelled", outcome: "aborted" | "expired" = "aborted"): void {
@@ -314,6 +459,45 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 		return await this.#request({ kind: "ask", ...input });
 	}
 
+	async form(input: StudioFormInput): Promise<FormSubmitValue | undefined> {
+		const { form, signal, ...base } = input;
+		signal?.throwIfAborted();
+		const intro = form.sections.flatMap(section => section.blocks).find(block => block.kind === "text");
+		const caption = intro?.kind === "text" ? spansText(intro.spans) : (form.fields[0]?.question ?? base.title);
+		const short = truncateUtf8(caption.replace(/\s+/g, " ").trim(), FORM_SUMMARY_MAX_BYTES);
+		const summary = short.text + (short.truncated ? "…" : "");
+		const cancel = () => this.cancelCommand(base.commandId, "Form was aborted");
+		signal?.addEventListener("abort", cancel, { once: true });
+		try {
+			const value = (await this.#request(
+				{
+					kind: "form",
+					...base,
+					summary,
+					fieldCount: form.fields.length,
+					sectionCount: form.sections.filter(section => section.blocks.some(block => block.kind === "field"))
+						.length,
+				},
+				form,
+			)) as FormSubmitValue | undefined;
+			signal?.throwIfAborted();
+			return value;
+		} finally {
+			signal?.removeEventListener("abort", cancel);
+		}
+	}
+
+	readForm(interactionId: string, leaseGeneration: number): { form: InteractionForm } {
+		const pending = this.#pending;
+		if (pending?.request.kind !== "form" || pending.request.interactionId !== interactionId || !pending.form) {
+			throw new StudioInteractionError("INTERACTION_STALE", "Form interaction is stale");
+		}
+		if (pending.owner !== "gui") throw new StudioInteractionError("NOT_OWNER", "Caller does not own the form");
+		if (pending.leaseGeneration !== leaseGeneration)
+			throw new StudioInteractionError("INTERACTION_STALE", "Form lease is stale");
+		return { form: pending.form };
+	}
+
 	respond(operation: Extract<StudioOperation, { kind: "interaction.respond" }>, owner: "gui" | "tui" = "gui"): void {
 		const pending = this.#pending;
 		if (pending === undefined || pending.request.interactionId !== operation.interactionId) {
@@ -322,7 +506,17 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 		if (pending.request.commandId !== operation.commandId || pending.owner !== owner) {
 			throw new StudioInteractionError("NOT_OWNER", "Caller does not own the interaction");
 		}
+		if (operation.leaseGeneration !== undefined && operation.leaseGeneration !== pending.leaseGeneration) {
+			throw new StudioInteractionError("INTERACTION_STALE", "Interaction lease is stale");
+		}
+		const value =
+			operation.decision === "cancel"
+				? undefined
+				: pending.request.kind === "form"
+					? formResultFromValue(operation.value, pending.form!)
+					: operation.value;
 		this.arbiter.completeInteraction(operation.interactionId, operation.commandId, owner, pending.leaseGeneration);
+		delete pending.form;
 		this.#pending = undefined;
 		this.onClose({
 			kind: "interaction.resolved",
@@ -331,7 +525,7 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 			leaseGeneration: pending.leaseGeneration,
 			outcome: operation.decision === "cancel" ? "cancelled" : "submitted",
 		});
-		pending.resolve(operation.decision === "cancel" ? undefined : operation.value);
+		pending.resolve(value);
 		this.#drain();
 	}
 
@@ -393,6 +587,7 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 			pending.owner,
 			pending.leaseGeneration,
 		);
+		delete pending.form;
 		this.#pending = undefined;
 		this.onClose({
 			kind: "interaction.resolved",
@@ -421,9 +616,9 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 		throw new StudioInteractionError("INVALID_ARGUMENT", `${input.kind} interaction returned an invalid value`);
 	}
 
-	#request(input: Omit<StudioRemoteInteractionRequest, "interactionId">): Promise<unknown> {
+	#request(input: InteractionInput, form?: InteractionForm): Promise<unknown> {
 		const deferred = Promise.withResolvers<unknown>();
-		this.#waiting.push({ input, deferred });
+		this.#waiting.push({ input, deferred, ...(form === undefined ? {} : { form }) });
 		this.#drain();
 		return deferred.promise;
 	}
@@ -433,19 +628,20 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 		const queued = this.#waiting.shift();
 		if (!queued) return;
 		try {
-			this.#open(queued.input).then(queued.deferred.resolve, queued.deferred.reject);
+			this.#open(queued.input, queued.form).then(queued.deferred.resolve, queued.deferred.reject);
 		} catch (error) {
 			queued.deferred.reject(error);
 			this.#drain();
 		}
 	}
 
-	#open(input: Omit<StudioRemoteInteractionRequest, "interactionId">): Promise<unknown> {
+	#open(input: InteractionInput, form?: InteractionForm): Promise<unknown> {
 		const lease = this.arbiter.openInteraction(input.commandId, "gui");
 		const request = { ...input, interactionId: lease.interactionId } as StudioRemoteInteractionRequest;
 		const deferred = Promise.withResolvers<unknown>();
 		this.#pending = {
 			request,
+			...(form === undefined ? {} : { form }),
 			owner: lease.owner,
 			leaseGeneration: lease.generation,
 			resolve: deferred.resolve,
@@ -517,5 +713,10 @@ export class StudioScriptedInteractionPort implements StudioInteractionPort {
 		}>;
 	}): Promise<unknown> {
 		return Promise.resolve(this.responses.shift());
+	}
+	form(input: StudioFormInput): Promise<FormSubmitValue | undefined> {
+		input.signal?.throwIfAborted();
+		const value = this.responses.shift();
+		return Promise.resolve(value === undefined ? undefined : formResultFromValue(value, input.form));
 	}
 }

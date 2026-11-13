@@ -881,6 +881,16 @@ export function createDesktopRuntimeSessionPort(
         return await launchWorker();
       });
     },
+    async confirmClose(): Promise<boolean> {
+      // Keep the lifecycle queue and all renderer transports open while native
+      // hooks may ask the operator. Only the later stop() quiesces the workers.
+      const current = [...residents.values()].filter(resident => !resident.stopping && resident.session.hello());
+      const allowed = await Promise.all(current.map(async resident => {
+        const answer = await (resident.port.confirmClose?.() ?? true);
+        return residents.get(resident.sessionId) === resident && !resident.stopping ? answer : true;
+      }));
+      return allowed.every(Boolean);
+    },
     stop(): Promise<void> {
       return serialized(stopAll, true);
     },
@@ -1676,6 +1686,18 @@ function createSingleDesktopRuntimeSessionPort(
       });
     },
 
+    async confirmClose(): Promise<boolean> {
+      const current = bridge;
+      const closeGeneration = generation;
+      if (!current || stopping) return true;
+      try {
+        const allowed = await current.confirmClose();
+        return generation === closeGeneration && bridge === current ? allowed : true;
+      } catch (error) {
+        log?.write("warn", "runtime.close.confirm", errorDetail(error));
+        return true;
+      }
+    },
     stop(): Promise<void> {
       stopping = true;
       cancelAutoRespawn();

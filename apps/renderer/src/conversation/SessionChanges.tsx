@@ -8,6 +8,7 @@ import {
   sessionChangeTurnIdForPath,
   SESSION_CHANGE_LAST_ID,
   SESSION_CHANGE_SESSION_ID,
+  type TurnFileChange,
 } from "./toolMeta";
 import { sessionFileDiffs, type SessionFileDiff } from "./sessionDiff";
 
@@ -20,13 +21,14 @@ function toTurnOption(turn: { id: string; label: string; files: readonly { add: 
   return { id: turn.id, label: turn.label, add: delta.add, del: delta.del };
 }
 
-function fileDiff(path: string, add: number, del: number, diff: SessionFileDiff | undefined): ChangesDiffFile {
+function fileDiff(file: TurnFileChange, diff: SessionFileDiff | undefined): ChangesDiffFile {
   return {
-    file: path,
-    add,
-    del,
+    file: file.path,
+    add: file.add,
+    del: file.del,
     hunks: diff?.hunks ?? [],
     ...(diff?.truncated === true ? { truncated: true } : {}),
+    ...(file.partial || diff?.partial ? { partial: true } : {}),
   };
 }
 
@@ -81,7 +83,7 @@ export function SessionChanges({
     setExpanded(hit === undefined ? new Set() : new Set([hit.path]));
   }, [focusPath, focusTurnId, rows]);
 
-  const files: readonly ChangesDiffFile[] = scope.files.map((file) => fileDiff(file.path, file.add, file.del, diffs.get(file.path)));
+  const files: readonly ChangesDiffFile[] = scope.files.map((file) => fileDiff(file, diffs.get(file.path)));
   const sessionHasFiles = turns.some((turn) => turn.id === SESSION_CHANGE_SESSION_ID && (turn.add > 0 || turn.del > 0));
 
   return (

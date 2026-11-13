@@ -1,5 +1,6 @@
 import type { ManagedBrowserCommand, ManagedBrowserEvent, ManagedBrowserPage, ManagedBrowserState } from "@omp-studio/studio-protocol";
-import { PREVIEW_BROWSER_TAB } from "./browserPreview";
+import { PREVIEW_BROWSER_TAB, previewBrowserDescriptor } from "./browserPreview";
+import type { BrowserPageController } from "../browser/browserSessions";
 
 /** Demo-only browser: every command changes local state; nothing reaches the Host or a real page. */
 export interface ManagedBrowserPreviewState extends ManagedBrowserState {
@@ -18,11 +19,11 @@ export const PREVIEW_FAVICONS = {
 const DOCS_URL = "http://localhost:4173/docs/browser";
 const STORY_URL = "http://localhost:6006/?path=/story/button--primary";
 const page = (sessionId: string, id: number, patch: Partial<ManagedBrowserPage> & Pick<ManagedBrowserPage, "title" | "url">): ManagedBrowserPage =>
-  ({ id: `${sessionId}:page-${id}`, sessionId, spaceId: "shared", status: "ready", canGoBack: false, canGoForward: false, zoom: 1, devtools: false, ...patch });
+  ({ id: `${sessionId}:page-${id}`, sessionId, spaceId: "shared", status: "ready", canGoBack: false, canGoForward: false, zoom: 1, devtools: false, descriptor: { ...previewBrowserDescriptor("chromium", true), sessionId, embeddedPageId: `${sessionId}:page-${id}` }, ...patch });
 
 export function createManagedBrowserPreview(sessionId: string): ManagedBrowserPreviewState {
   const studio = page(sessionId, 1, { title: "Studio 组件预览", url: `${PREVIEW_BROWSER_TAB.url}/components`, favicon: PREVIEW_FAVICONS.studio, canGoBack: true });
-  const docs = page(sessionId, 2, { title: "浏览器 · 使用说明", url: DOCS_URL, favicon: PREVIEW_FAVICONS.docs });
+  const docs = page(sessionId, 2, { title: "浏览器 · 使用说明", url: DOCS_URL, favicon: PREVIEW_FAVICONS.docs, descriptor: { ...previewBrowserDescriptor("webkit"), sessionId } });
   const story = page(sessionId, 3, { title: "Button · Storybook", url: STORY_URL, favicon: PREVIEW_FAVICONS.storybook, status: "released" });
   return {
     sessionId, pages: [studio, docs, story], activePageId: studio.id,
@@ -49,7 +50,7 @@ export function applyPreviewBrowserCommand(state: ManagedBrowserPreviewState, co
     case "create": {
       if (state.pages.length >= state.settings.maxTabs) throw new Error("标签数已达上限，关闭一些标签或在浏览器设置中提高上限。");
       const id = `${state.sessionId}:page-${state.previewNextId}`, url = normalize(command.url);
-      const created: ManagedBrowserPage = { id, sessionId: state.sessionId, spaceId: command.spaceId ?? "shared", canGoBack: false, canGoForward: false, zoom: 1, devtools: false, title: "", ...visit(url), status: url === "about:blank" ? "ready" : "loading", opener: { source: "human", ...(command.openerPageId ? { pageId: command.openerPageId } : {}) } } as ManagedBrowserPage;
+      const created: ManagedBrowserPage = { id, sessionId: state.sessionId, spaceId: command.spaceId ?? "shared", descriptor: { ...previewBrowserDescriptor(command.app === "webkit" ? "webkit" : "chromium", command.app === "embedded"), sessionId: state.sessionId, ...(command.app === "embedded" ? { embeddedPageId: id } : {}) }, canGoBack: false, canGoForward: false, zoom: 1, devtools: false, title: "", ...visit(url), status: url === "about:blank" ? "ready" : "loading", opener: { source: "human", ...(command.openerPageId ? { pageId: command.openerPageId } : {}) } } as ManagedBrowserPage;
       return { ...state, control: state.pages.length ? state.control : "human", pages: [...state.pages, created], activePageId: id, previewNextId: state.previewNextId + 1, previewHistory: { ...state.previewHistory, [id]: { urls: [url], cursor: 0 } } };
     }
     case "select": { const target = state.pages.find(page => page.id === command.pageId); return update({ ...state, activePageId: command.pageId }, command.pageId, target?.status === "released" ? { status: "loading" } : {}); }
@@ -80,6 +81,7 @@ export function applyPreviewBrowserCommand(state: ManagedBrowserPreviewState, co
 export function createPreviewBrowserBackend(options: { loadingMs?: number } = {}) {
   const sessions = new Map<string, ManagedBrowserPreviewState>();
   const listeners = new Set<(event: ManagedBrowserEvent) => void>();
+  const controllers = new Map<string, BrowserPageController>();
   const emit = (event: ManagedBrowserEvent) => { for (const listener of listeners) listener(event); };
   const state = (sessionId: string) => { let value = sessions.get(sessionId); if (!value) sessions.set(sessionId, value = createManagedBrowserPreview(sessionId)); return value; };
   const settle = (sessionId: string) => setTimeout(() => {
@@ -90,9 +92,11 @@ export function createPreviewBrowserBackend(options: { loadingMs?: number } = {}
     emit({ kind: "state", state: next });
   }, options.loadingMs ?? 650);
   return {
+    native: true, embedded: true,
     async read(sessionId: string): Promise<ManagedBrowserState> { return state(sessionId); },
     async execute(command: ManagedBrowserCommand): Promise<ManagedBrowserState> {
       const previous = state(command.sessionId);
+      if (command.action === "viewer") { await controllers.get(`${command.sessionId}\n${command.pageId}`)?.execute({ action: "viewer", pageId: command.pageId, visible: command.visible }); return previous; }
       if (command.action === "stop-picking" || command.action === "pick") {
         const pageId = command.action === "pick" ? command.pageId : undefined;
         for (const page of previous.pages) emit({ kind: "picker", sessionId: command.sessionId, pageId: page.id, active: page.id === pageId });
@@ -102,6 +106,7 @@ export function createPreviewBrowserBackend(options: { loadingMs?: number } = {}
       if (next.pages.some(page => page.status === "loading")) settle(command.sessionId);
       return next;
     },
+    bindPage(sessionId: string, pageId: string, controller: BrowserPageController): () => void { const key = `${sessionId}\n${pageId}`; controllers.set(key, controller); return () => { if (controllers.get(key) === controller) controllers.delete(key); }; },
     subscribe(listener: (event: ManagedBrowserEvent) => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; },
     /** Demo of the Agent opening a page by itself: a background tab, with control unchanged. */
     agentOpen(sessionId: string, url: string): void {

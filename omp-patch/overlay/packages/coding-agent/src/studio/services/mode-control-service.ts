@@ -392,7 +392,7 @@ export class StudioModeControlService {
 
 	async exitPlan(
 		discardDraft = false,
-		options?: { deferModelRestore?: boolean; claimedReviewId?: string },
+		options?: { deferModelRestore?: boolean; claimedReviewId?: string; approvedPlanFilePath?: string },
 	): Promise<StudioModeState> {
 		if (this.#review?.claimed && options?.claimedReviewId !== this.#review.request.reviewId)
 			throw new StudioModeError("COMMAND_BLOCKED", "Plan review is being resolved");
@@ -438,7 +438,10 @@ export class StudioModeControlService {
 		if (options?.deferModelRestore !== true) this.#planPreviousModelState = undefined;
 		this.#pendingPlan = undefined;
 		this.#planReviewAbortPending = false;
-		this.session.sessionManager.appendModeChange("none");
+		this.session.sessionManager.appendModeChange(
+			"none",
+			options?.approvedPlanFilePath ? { approvedPlanFilePath: options.approvedPlanFilePath } : undefined,
+		);
 		this.#notify();
 		return this.state();
 	}
@@ -541,11 +544,12 @@ export class StudioModeControlService {
 		let compactOutcome: PlanCompactionOutcome | undefined;
 		if (compactBeforeExecute) this.session.markPlanInternalAbortPending();
 		try {
-			this.session.setPlanReferencePath(pending.planFilePath);
 			await this.exitPlan(true, {
 				deferModelRestore: compactBeforeExecute,
 				claimedReviewId: this.#review?.request.reviewId,
+				approvedPlanFilePath: pending.planFilePath,
 			});
+			this.session.setPlanReferencePath(pending.planFilePath);
 			await this.#ensureReadTool();
 			if (!preserveContext) {
 				const reset = await this.session.resetSessionContext();

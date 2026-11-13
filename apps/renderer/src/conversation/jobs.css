@@ -97,3 +97,40 @@
 .ji-process-details > summary:hover { color: var(--text); }
 .ji-process-details .ji-kv { margin: .75em 0 .25em; }
 .ji-process-widget { padding-top: .75em; border-top: 1px solid var(--border); }
+
+/* Native Actions snapshots: summary, ordered steps, then the original log tails. */
+.ji-actions { min-width: 0; font-size: var(--fs-12); }
+.ji-actions-head, .ji-actions-run-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); }
+.ji-actions-title { font-weight: var(--fw-semibold); }
+.ji-actions-repo { color: var(--text-2); overflow-wrap: anywhere; }
+.ji-actions-head > .ji-note { flex-basis: 100%; }
+.ji-actions-run { margin-top: var(--sp-12); }
+.ji-actions-run-head strong { min-width: 0; overflow-wrap: anywhere; font-weight: var(--fw-semibold); }
+.ji-actions-job { margin-top: var(--sp-8); border-top: 1px solid var(--border); }
+.ji-actions-job > details > summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); min-height: var(--tap-min); padding: var(--sp-8) 0; cursor: pointer; list-style: none; }
+.ji-actions-job > details > summary::-webkit-details-marker { display: none; }
+.ji-actions-chevron { color: var(--text-3); transition: transform var(--dur) var(--ease-out); }
+.ji-actions-job > details[open] > summary .ji-actions-chevron { transform: rotate(90deg); }
+.ji-actions-job-name { flex: 1; min-width: 6em; overflow-wrap: anywhere; font-weight: var(--fw-medium); }
+.ji-current-step { flex-basis: 100%; display: flex; flex-direction: column; gap: var(--sp-2); padding-left: calc(1em + var(--sp-8)); color: var(--text-2); overflow-wrap: anywhere; }
+.ji-current-step > span:first-child { color: var(--text-3); }
+.ji-step-state { display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--text-2); }
+.ji-step-state.is-running { color: var(--accent); }
+.ji-step-state.is-success { color: var(--green); }
+.ji-step-state.is-failed { color: var(--red); }
+.ji-step-state.is-cancelled, .ji-step-state.is-skipped, .ji-step-state.is-unknown { color: var(--text-3); }
+.ji-step-duration { margin-left: auto; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ji-step-duration.is-unknown { color: var(--text-3); }
+.ji-steps { list-style: none; display: flex; flex-direction: column; margin: 0 0 var(--sp-8); padding: 0; }
+.ji-steps > li { display: grid; grid-template-columns: 2em minmax(0, 1fr) auto; align-items: center; gap: var(--sp-4) var(--sp-8); padding: var(--sp-6) var(--sp-8); border-radius: var(--r-4); }
+.ji-steps > li[aria-current="step"] { background: var(--accent-softer); }
+.ji-step-number { grid-column: 1; grid-row: 1 / 3; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.ji-step-name { grid-column: 2 / -1; overflow-wrap: anywhere; }
+.ji-steps .ji-step-state { grid-column: 2; }
+.ji-steps .ji-step-duration { grid-column: 3; }
+.ji-actions-log { margin: var(--sp-8) 0; }
+.ji-actions-log > summary { display: flex; align-items: center; gap: var(--sp-6); cursor: pointer; min-height: var(--tap-min); overflow-wrap: anywhere; }
+.ji-actions-log .ji-output { margin-top: var(--sp-6); }
+.ji-actions summary:focus-visible, .ji-task-phases > summary:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 2px; border-radius: var(--r-4); }
+.ji-task-phases { min-width: 0; border-top: 1px solid var(--border); }
+.ji-task-phases > summary { min-height: var(--tap-min); padding: var(--sp-6) 0; cursor: pointer; color: var(--text-2); font-size: var(--fs-12); }

@@ -3,12 +3,13 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { BrowserWindow, Menu, Notification, View, WebContentsView, dialog, nativeImage, session, shell, type DownloadItem, type Session, type WebContents } from "electron";
-import type { BrowserElementReference, ManagedBrowserCommand, ManagedBrowserDownload, ManagedBrowserEvent, ManagedBrowserPage, ManagedBrowserPageOpener, ManagedBrowserPresentation, ManagedBrowserState } from "@omp-studio/studio-protocol";
+import type { BrowserElementReference, BrowserPageInspection, ManagedBrowserCommand, ManagedBrowserDownload, ManagedBrowserEvent, ManagedBrowserInspectionRequest, ManagedBrowserPage, ManagedBrowserPageOpener, ManagedBrowserPresentation, ManagedBrowserState } from "@omp-studio/studio-protocol";
 import { normalizeBrowserAddress } from "./managed-browser-address.js";
 import { faviconDataUrl, loadFavicon, pickFaviconUrl } from "./managed-browser-favicon.js";
 import { BROWSER_PICKER_POLL, BROWSER_PICKER_START, BROWSER_PICKER_STOP, BROWSER_PICKER_WORLD_ID, type BrowserPickerPoll } from "./managed-browser-picker.js";
 import { ManagedBrowserStore } from "./managed-browser-store.js";
 import { BrowserPageActivity } from "./managed-browser-activity.js";
+import { ManagedBrowserInspection } from "./managed-browser-inspection.js";
 
 interface LivePage {
   page: ManagedBrowserPage;
@@ -22,6 +23,7 @@ interface LivePage {
   closed: boolean;
   agentInputs: number;
   activity: BrowserPageActivity;
+  inspection?: ManagedBrowserInspection;
   focusEmulation: Set<string>;
   favicon?: AbortController;
 }
@@ -29,6 +31,7 @@ export interface ManagedBrowserRuntime {
   control(sessionId: string, control: "human" | "agent"): Promise<void>;
   changed(sessionId: string): void;
   closed(pageId: string): void;
+  ownsDebugger?(pageId: string): boolean;
   dispose(): Promise<void>;
 }
 
@@ -212,6 +215,11 @@ export class DesktopManagedBrowser {
     this.#pages.set(page.id, live);
     this.#watchWindow(parent);
     const contents = view.webContents;
+    live.inspection = new ManagedBrowserInspection(contents, () => this.#runtime?.ownsDebugger?.(page.id) === true);
+    this.store.update(page.id, { descriptor: { targetId: `electron:${contents.id}`, ownerSessionId: page.sessionId, sessionId: page.sessionId, generation: randomUUID(), ownership: "owned",
+      engine: process.versions.chrome ? "chromium" : "unknown", transport: "embedded", embeddedPageId: page.id,
+      capabilities: { observe: true, control: true, nativeViewer: false, history: true, console: true, network: true, downloads: true, webmcp: !!process.versions.chrome, pdf: true, cdp: true, tracing: true, zoom: true, find: true, pick: true, devtools: true, settings: true,
+        reasons: { nativeViewer: "The embedded adapter presents this same WebContentsView inside Studio, not in a separate native viewer.", network: "Request metadata is captured while Network is visible; response bodies are not copied to Studio." } } } });
     contents.setZoomFactor(page.zoom);
     const update = () => {
       if (live.closed || contents.isDestroyed()) return;
@@ -329,6 +337,8 @@ export class DesktopManagedBrowser {
     const live = this.#pages.get(pageId);
     if (!live || (surfaceId && live.presentation?.surfaceId !== surfaceId)) return;
     delete live.presentation;
+    this.#stopPicking(live);
+    void live.inspection?.stop();
     live.clip.setVisible(false);
     this.#updateVisibility(live);
     const parking = this.#parkingWindow();
@@ -345,7 +355,7 @@ export class DesktopManagedBrowser {
   async #destroyPage(pageId: string): Promise<void> {
     const live = this.#pages.get(pageId);
     if (!live) return;
-    live.closed = true; live.activity.dispose(); live.favicon?.abort(); this.#stopPicking(live); this.#pages.delete(pageId);
+    live.closed = true; live.activity.dispose(); live.inspection?.dispose(); live.favicon?.abort(); this.#stopPicking(live); this.#pages.delete(pageId);
     this.#runtime?.closed(pageId);
     if (!live.parent.isDestroyed()) live.parent.contentView.removeChildView(live.clip);
     const children = [live.view, ...(live.shield ? [live.shield] : [])];
@@ -403,6 +413,7 @@ export class DesktopManagedBrowser {
       case "forward": { const contents = await this.ensure(command.pageId); if (contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward(); break; }
       case "zoom": { const factor = Math.max(0.25, Math.min(3, command.factor)); (await this.ensure(command.pageId)).setZoomFactor(factor); this.store.update(command.pageId, { zoom: factor }); break; }
       case "find": { const contents = await this.ensure(command.pageId); if (command.text) contents.findInPage(command.text, { forward: command.forward ?? true }); else contents.stopFindInPage("clearSelection"); break; }
+      case "viewer": throw new Error("The embedded adapter has no separate same-view native viewer.");
       case "take": await this.#control(sessionId, "human"); break;
       case "return": await this.#control(sessionId, "agent"); break;
       case "release": await this.#control(sessionId, "human"); for (const page of this.pages(sessionId)) { this.#releasedPages.add(page.id); this.store.update(page.id, { status: "released" }); await this.#destroyPage(page.id); } this.store.release(sessionId); break;
@@ -507,6 +518,17 @@ export class DesktopManagedBrowser {
       const size = image.getSize(), x = Math.max(0, Math.round(rect.x * factor)), y = Math.max(0, Math.round(rect.y * factor));
       return image.crop({ x, y, width: Math.max(1, Math.min(size.width - x, Math.round(rect.width * factor))), height: Math.max(1, Math.min(size.height - y, Math.round(rect.height * factor))) });
     } finally { release(); if (!attached && !contents.isDestroyed() && contents.debugger.isAttached()) contents.debugger.detach(); }
+  }
+  releaseInspectionWindow(owner: string): void { for (const live of this.#pages.values()) void live.inspection?.releaseOwner(owner); }
+  async inspect(request: ManagedBrowserInspectionRequest, owner = "local"): Promise<BrowserPageInspection> {
+    await this.ready;
+    const page = this.#owner(request.sessionId, request.pageId), live = this.#pages.get(page.id);
+    if (request.generation && request.generation !== page.descriptor?.generation) throw new Error("The embedded page generation changed; refresh the page before inspecting it.");
+    if (request.view !== "console" && request.view !== "network" && request.view !== "downloads") throw new Error("Unknown browser inspection view.");
+    if (!live?.inspection) return { view: request.view, rows: [], reason: "The page is dormant. Show it first; inspecting does not load or reopen it." };
+    if (!request.visible) return live.inspection.read(request.view, false, owner);
+    if (request.view === "downloads") return { view: "downloads", rows: this.store.state(page.sessionId).downloads.filter(row => row.pageId === page.id).slice(-200).map(row => ({ name: row.name, url: row.url, path: row.path, bytes: row.receivedBytes, state: row.state })) };
+    return live.inspection.read(request.view, true, owner);
   }
   async downloadOperation(pageId: string, action: "enable" | "list", directory?: string): Promise<unknown> {
     const page = this.store.page(pageId);

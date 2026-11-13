@@ -131,6 +131,14 @@ export type ClientInteraction =
       readonly kind: "ask";
       readonly acceptImages?: boolean;
       readonly questions: ReadonlyArray<ClientAskQuestion>;
+    })
+  | (ClientInteractionBase & {
+      readonly kind: "form";
+      /** Body is read once into the transient FormSession, not retained in the reducer. */
+      readonly summary: string;
+      readonly fieldCount: number;
+      readonly sectionCount: number;
+      readonly timeoutMs?: number;
     });
 
 export type ClientAskOption = {

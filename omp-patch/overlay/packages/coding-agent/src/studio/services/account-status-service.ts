@@ -1,5 +1,6 @@
 import { computePolicyDiagnostics } from "../../cli/usage-cli";
-import { cfgRetryUsageReservePct } from "../../session/settings";
+import { cfgRetryUsageReservePct, resetWindowSettings } from "../../session/settings";
+import { logoutCredential } from "../../slash-commands/helpers/logout";
 import { createHash } from "node:crypto";
 import type { OAuthAccountSummary, ResetCreditAccountStatus, UsageReport } from "@oh-my-pi/pi-ai";
 import { resolveUsedFraction } from "@oh-my-pi/pi-ai/usage";
@@ -7,6 +8,8 @@ import type { AgentSession } from "../../session/agent-session";
 import type {
 	AccountQuotaWindow,
 	AccountQuotaScope,
+	AccountResetPolicy,
+	AccountResetPolicyKey,
 	AccountResetStatus,
 	AccountStatusResult,
 	StudioAccountStatus,
@@ -45,6 +48,12 @@ export function projectQuota(report: UsageReport, details = false): AccountQuota
 		const notes = limit.notes?.slice(0, 16).map(clean).filter(Boolean);
 		return {
 			id: clean(limit.id) || "quota",
+			amount: {
+				unit: limit.amount.unit,
+				...(finite(limit.amount.used) ? { used: limit.amount.used } : {}),
+				...(finite(limit.amount.limit) ? { limit: limit.amount.limit } : {}),
+				...(finite(limit.amount.remaining) ? { remaining: limit.amount.remaining } : {}),
+			},
 			...(details
 				? {
 						scope,
@@ -91,6 +100,38 @@ export class StudioAccountStatusService {
 	#refreshing: Promise<void> | undefined;
 	#abort: AbortController | undefined;
 	constructor(readonly session: AgentSession) {}
+
+	#resetPolicies(provider: string): AccountResetPolicy[] {
+		const windows = resetWindowSettings[provider as keyof typeof resetWindowSettings];
+		if (!windows) return [];
+		return Object.entries(windows).map(([window, setting]) => ({
+			window: window as AccountResetPolicy["window"],
+			key: setting.id as AccountResetPolicyKey,
+			mode: setting.get(this.session.settings),
+			source: setting.provenance(this.session.settings),
+		}));
+	}
+
+	/** Only writes the native governing-window key. No credit listing, redemption or legacy consent expansion. */
+	async setResetPolicy(
+		sessionId: string,
+		key: AccountResetPolicyKey,
+		mode: AccountResetPolicy["mode"],
+	): Promise<AccountResetPolicy> {
+		if (sessionId !== this.session.sessionId)
+			throw new SessionControlError("COMMAND_BLOCKED", "The account session changed");
+		for (const [provider, windows] of Object.entries(resetWindowSettings)) {
+			const entry = Object.entries(windows).find(([, setting]) => setting.id === key);
+			if (!entry) continue;
+			const [, setting] = entry;
+			setting.assertWritable(mode);
+			setting.set(this.session.settings, mode);
+			await this.session.settings.flush();
+			return this.#resetPolicies(provider).find(policy => policy.key === key)!;
+		}
+		throw new SessionControlError("INVALID_ARGUMENT", "Select a native saved-reset window policy");
+	}
+
 	dispose(): void {
 		this.#generation++;
 		this.#abort?.abort();
@@ -104,7 +145,7 @@ export class StudioAccountStatusService {
 				.accounts(provider, sessionId)
 				.find(row => accountId(provider, String(row.credentialId)) === id);
 			if (!account) continue;
-			if (!(await auth.credentials.removeById(provider, account.credentialId)))
+			if (!(await logoutCredential(this.session, provider, account.credentialId)).removed)
 				throw new SessionControlError(
 					"COMMAND_BLOCKED",
 					"This account has already changed; refresh the account list",
@@ -185,6 +226,7 @@ export class StudioAccountStatusService {
 					...(account.orgName ? { organization: clean(account.orgName) } : {}),
 					source: "oauth",
 					active: account.active,
+					resetPolicies: this.#resetPolicies(provider),
 					limits: report ? projectQuota(report, details) : [],
 					...(report ? { reportedAt: report.fetchedAt } : {}),
 					resets: resetStatus(
@@ -194,16 +236,22 @@ export class StudioAccountStatusService {
 				});
 			}
 			const source = auth.keys.source(provider);
-			if (!native.length && source)
+			if (!native.length && source) {
+				// Key/user budgets are two scopes of the calling key's report, not two fake OAuth accounts.
+				const reports = this.#reports.filter(report => report.provider === provider);
+				const report = reports.sort((left, right) => right.fetchedAt - left.fetchedAt)[0];
+				if (report) reports.forEach(row => assigned.add(row));
 				accounts.push({
 					id: accountId(provider, "key"),
 					provider,
-					label: provider,
+					label: typeof report?.metadata?.email === "string" ? clean(report.metadata.email) : provider,
 					source: source.concrete ? "api-key" : "ambient",
 					active: this.session.model?.provider === provider,
-					limits: [],
+					limits: report ? projectQuota(report, details) : [],
+					...(report ? { reportedAt: report.fetchedAt } : {}),
 					resets: { state: "unfetched", credits: [] },
 				});
+			}
 		}
 		const unassigned = this.#reports
 			.filter(report => !assigned.has(report))

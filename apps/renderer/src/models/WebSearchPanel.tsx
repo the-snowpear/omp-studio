@@ -19,6 +19,8 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { ToastHost } from "../ToastHost";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { credentialProviders, useSearchCredentials } from "./useSearchCredentials";
+import type { ClientBootstrap } from "@omp-studio/client-contract";
+import { modelServiceAvailable, useModelAuth } from "./useModelAuth";
 
 const TIMEOUT_OPTIONS = [30, 60, 120, 180, 300];
 
@@ -93,6 +95,8 @@ interface WebSearchPanelProps {
   readonly client: StudioClient;
   readonly sessionId?: string | undefined;
   readonly visible?: boolean;
+  readonly runtimeAvailable?: boolean;
+  readonly capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
   readonly onReadyCount?: (count: number) => void;
   readonly preview: boolean;
   readonly webSearch: WebSearchConfigReadModel;
@@ -116,7 +120,7 @@ function credStateOf(provider: SearchProvider | undefined): CredState {
   return provider.credentialUnknown ? "unknown" : "missing";
 }
 
-export function WebSearchPanel({ client, preview, sessionId, visible = true, onReadyCount, webSearch, models = [], loginAvailable, onSaved, onPreviewSave }: WebSearchPanelProps) {
+export function WebSearchPanel({ client, preview, sessionId, visible = true, runtimeAvailable = false, capabilities, onReadyCount, webSearch, models = [], loginAvailable, onSaved, onPreviewSave }: WebSearchPanelProps) {
   const { t } = useI18n();
   const { marks } = usePreviewMode();
   const [draft, setDraft] = useState<Draft>(() => draftFromReadModel(webSearch));
@@ -146,6 +150,8 @@ export function WebSearchPanel({ client, preview, sessionId, visible = true, onR
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
   const credentials = useSearchCredentials(client, preview, sessionId, visible, webSearch.providers);
+  const modelContext = { client, sessionId, available: runtimeAvailable, capabilities };
+  const nativeAuth = useModelAuth(modelContext, preview, visible && !!credModalId);
   const providers = useMemo<SearchProvider[]>(() => webSearch.providers.map(provider => {
     const ids = credentialProviders(provider);
     const states = ids.flatMap(id => credentials.statuses.get(id) ?? []);
@@ -206,7 +212,7 @@ export function WebSearchPanel({ client, preview, sessionId, visible = true, onR
     .map((id) => byId.get(id))
     .filter((provider): provider is WebSearchProviderRecord => Boolean(provider));
   const autoChain = providers.filter(
-    (provider) => !inOrder.has(provider.id) && !inExclude.has(provider.id) && (provider.credentialFree || provider.hasCredential),
+    (provider) => !provider.siteRoute && !inOrder.has(provider.id) && !inExclude.has(provider.id) && (provider.credentialFree || provider.hasCredential),
   );
 
   const credCounts = useMemo(() => {
@@ -287,10 +293,11 @@ export function WebSearchPanel({ client, preview, sessionId, visible = true, onR
     if (preview) { if (marks) setFlash(t("modelConfig.toastDemoLogin")); return; }
     setLoginBusy(true);
     try {
-      const handle = await client.command("models.login.start", { providerId: loginId });
-      await waitReceipt(client, handle.requestId);
-      await credentials.reload();
-      setFlash(t("modelConfig.webSearchLoginDone"));
+      if (!modelServiceAvailable(modelContext, "models.auth.login")) return;
+      if (await nativeAuth.login(loginId)) {
+        await credentials.reload();
+        setFlash(t("modelConfig.webSearchLoginDone"));
+      }
     } catch (error) {
       setFlash(hostErrorMessage(error, t("modelConfig.toastLoginFailed", { providerId: loginId })));
     } finally { setLoginBusy(false); }
@@ -425,7 +432,7 @@ export function WebSearchPanel({ client, preview, sessionId, visible = true, onR
               </span>
             </div>
             {!credentials.available && credentialProviders(provider).length > 0 ? <p className="wsx-modal-hint">{t("modelConfig.webSearchRuntimeRequired")}</p> : null}
-            {credentials.error ? <p className="wsx-modal-error" role="alert">{credentials.error}</p> : null}
+            {credentials.error || nativeAuth.error ? <p className="wsx-modal-error" role="alert">{credentials.error || nativeAuth.error}</p> : null}
             {provider.credentialFree ? <p className="wsx-modal-hint">{t(apiKeyId ? "modelConfig.webSearchOptionalKey" : "modelConfig.webSearchFreeNoCred")}</p> : null}
             {apiKeyId ? (
               <div className="wsx-modal-keysec">
@@ -463,10 +470,11 @@ export function WebSearchPanel({ client, preview, sessionId, visible = true, onR
               <div className="wsx-modal-alt">
                 <span className="wsx-modal-alt-label">{t("modelConfig.webSearchOtherWays")}</span>
                 {loginId ? <div className="wsx-modal-actions">
-                  <button type="button" className="btn small outline" disabled={!canEdit || (!preview && !loginAvailable)} onClick={() => void runLogin(loginId)}>
+                  <button type="button" className="btn small outline" disabled={!canEdit || (!preview && (!loginAvailable || !nativeAuth.canLogin))} onClick={() => void runLogin(loginId)}>
                     {t("modelConfig.webSearchLogin")}
                   </button>
-                  {!preview && !loginAvailable ? <span className="wsx-modal-hint">{t("modelConfig.webSearchLoginUnavailable", { id: loginId })}</span> : null}
+                  {nativeAuth.busyProvider ? <button type="button" className="btn small outline" onClick={() => void nativeAuth.cancel()}>{t("common.cancel")}</button> : null}
+                  {!preview && (!loginAvailable || !nativeAuth.canLogin) ? <span className="wsx-modal-hint">{t("modelConfig.webSearchLoginUnavailable", { id: loginId })}</span> : null}
                 </div> : null}
                 {envKeys.length > 0 ? <div className="wsx-modal-env">
                   <span>{t("modelConfig.webSearchEnvHint")}</span><code>{envKeys.join(" · ")}</code>
@@ -595,7 +603,7 @@ export function WebSearchPanel({ client, preview, sessionId, visible = true, onR
                   {credLabel(cred)}
                 </span>
                 <span className="wsx-row-actions">
-                  {webSearch.routing ? choices.length === 1 ? chainButton(choices[0]!.selector) : (
+                  {provider.siteRoute ? <button type="button" className="btn small outline" onClick={() => { void navigator.clipboard.writeText(`site:${provider.siteRoute} `); }}>{`site:${provider.siteRoute}`}</button> : webSearch.routing ? choices.length === 1 ? chainButton(choices[0]!.selector) : (
                     <button type="button" className="btn small outline" disabled={choices.length === 0 || choices.every(model => currentChain.includes(model.selector))}
                       data-tip={choices.length ? undefined : t("modelConfig.webSearchNoModels")}
                       onClick={() => { setChainPickerId(chainPickerId === provider.id ? null : provider.id); setChainPickerSelector(choices.find(model => !currentChain.includes(model.selector))!.selector); }}>
@@ -612,7 +620,7 @@ export function WebSearchPanel({ client, preview, sessionId, visible = true, onR
                       <button type="button" className="icon-btn small" aria-label={t("modelConfig.webSearchExclude", { name: provider.name })} data-tip={t("modelConfig.webSearchExclude", { name: provider.name })} onClick={() => addExclude(provider.id)}><Icon name="x" extra="sm" /></button>
                     </>
                   )}
-                  <button type="button" className="btn small outline" onClick={() => openCredModal(provider.id)}><Icon name="key" extra="sm" />{t("modelConfig.webSearchConfigure")}</button>
+                  {provider.siteRoute ? null : <button type="button" className="btn small outline" onClick={() => openCredModal(provider.id)}><Icon name="key" extra="sm" />{t("modelConfig.webSearchConfigure")}</button>}
                 </span>
                 {chainPickerId === provider.id ? <div className="wsx-pool-choice">
                   <AppSelect aria-label={t("modelConfig.webSearchChooseProviderModel", { name: provider.name })} value={chainPickerSelector} onChange={event => setChainPickerSelector(event.target.value)}>

@@ -9,11 +9,13 @@ import { SettingRow, Switch } from "./SettingRow";
 import { useFeatureSettings, type FeatureSettingsProps } from "./useFeatureSettings";
 import "./featureSettings.css";
 import { ComputerSettings, COMPUTER_SETTING_DEFINITIONS } from "../computer/ComputerSettings";
+import { TaskDelegationSettings, TASK_DELEGATION_SETTINGS_DEFINITIONS } from "./TaskDelegationSettings";
 
 type Group = "interaction" | "context" | "tasks" | "voice" | "dictation" | "maintenance" | "permissions" | "models" | "experimental";
 export type Definition = { key: FeatureSettingKey; group: Group; zh: string; en: string; hint: string; hintEn: string; options?: Array<[string, string, string]>; text?: boolean; list?: boolean; billed?: boolean; min?: number; max?: number; step?: number };
 export const FEATURE_SETTINGS_DEFINITIONS: Definition[] = [
   ...RUNTIME_18180_SETTINGS,
+  ...TASK_DELEGATION_SETTINGS_DEFINITIONS,
   { key: "composer.predictions", group: "interaction", zh: "下一条消息建议", en: "Next-message suggestions", hint: "回答结束后，用当前模型预测下一条消息。会额外调用模型并计入用量；接受建议只填入草稿。", hintEn: "After a reply, predict your next message with the current model. Billed separately; accepting only fills the draft." },
   { key: "contextFiles.extra", group: "context", zh: "额外指令文件", en: "Extra instruction files", hint: "每行一个文件名，与原有项目指令一起加载；下次重新加载上下文时生效。", hintEn: "One filename per line, loaded alongside project instructions when context is reloaded." },
   { key: "retry.fallbackOn", group: "context", zh: "何时切换备用模型", en: "When to use fallbacks", hint: "限制模型候选链的切换条件，不改变当前配置的候选模型。", hintEn: "Limit fallback triggers without changing your model chain.", options: [["any", "所有可回退错误", "Any eligible error"], ["usage-limit", "仅配额不足", "Quota errors only"], ["except-usage-limit", "除配额不足之外", "Except quota errors"]] },
@@ -57,7 +59,8 @@ export function FeatureSettingsPane(props: FeatureSettingsProps & { group: Group
     </header>
     {!state.enabled ? <p className="feature-status">{zh ? "连接支持此功能的 Runtime 后可配置。" : "Connect a compatible Runtime to configure these features."}</p> : state.loading ? <p className="feature-status" role="status">{zh ? "正在读取生效配置…" : "Reading effective settings…"}</p> : null}
     {state.enabled && !state.supports("preferences.features.set") ? <p className="feature-status">{zh ? "当前 Runtime 只提供读取。" : "This Runtime provides read-only settings."}</p> : null}
-    {FEATURE_SETTINGS_DEFINITIONS.filter(item => !item.key.startsWith("computer.") && item.group === props.group && (!props.keys || props.keys.includes(item.key)) && !props.excludeKeys?.includes(item.key)).map(definition => <FeatureRow key={definition.key} definition={definition} row={state.rows.find(row => row.key === definition.key)} disabled={!state.enabled || !state.supports("preferences.features.set") || state.busy || state.loading} zh={zh} save={value => void save(definition.key, value)} clear={() => void clear(definition.key)} />)}
+    {props.group === "tasks" && (!props.keys || props.keys.some(key => key === "task.steps" || key === "task.autoParallel")) && !(props.excludeKeys?.includes("task.steps") && props.excludeKeys.includes("task.autoParallel")) ? <TaskDelegationSettings rows={state.rows} disabled={!state.enabled || !state.supports("preferences.features.set") || state.busy || state.loading} zh={zh} save={(key, value) => void save(key, value)} clear={key => void clear(key)} {...(props.keys ? { keys: props.keys } : {})} {...(props.excludeKeys ? { excludeKeys: props.excludeKeys } : {})} /> : null}
+    {FEATURE_SETTINGS_DEFINITIONS.filter(item => !item.key.startsWith("computer.") && item.key !== "task.steps" && item.key !== "task.autoParallel" && item.group === props.group && (!props.keys || props.keys.includes(item.key)) && !props.excludeKeys?.includes(item.key)).map(definition => <FeatureRow key={definition.key} definition={definition} row={state.rows.find(row => row.key === definition.key)} disabled={!state.enabled || !state.supports("preferences.features.set") || state.busy || state.loading} zh={zh} save={value => void save(definition.key, value)} clear={() => void clear(definition.key)} />)}
     {props.group === "tasks" && (!props.keys || props.keys.some(key => key.startsWith("computer."))) ? <ComputerSettings client={props.client} context={props.context} visible={props.visible} {...(props.onSaved ? { onSaved: props.onSaved } : {})} /> : null}
     {state.error ? <p role="alert" className="feature-error">{state.error}</p> : null}
     {state.notice && (marks || !state.preview) ? <p role="status" className="feature-status">{state.preview ? zh ? "演示设置已更新。" : "Demo settings updated." : zh ? "已保存。界面显示当前生效值；项目或会话覆盖仍优先。" : "Saved. Effective values are shown; project and session overrides still take precedence."}</p> : null}

@@ -7,7 +7,16 @@ import type { AgentSession } from "../../session/agent-session";
 import { startRelayServer, type RelayServer } from "../../tools/browser/relay/server";
 import type { RelayKind } from "../../tools/browser/relay/kind";
 import { acquireBrowser, holdBrowser, releaseBrowser } from "../../tools/browser/registry";
-import { acquireTab, listTabs, runInTab } from "../../tools/browser/tab-supervisor";
+import {
+	acquireTab,
+	createStudioBrowserObservation,
+	getTab,
+	listTabs,
+	runInTab,
+	type TabSession,
+} from "../../tools/browser/tab-supervisor";
+import { studioTabIdentity } from "./browser-tab-control";
+import { remoteNativeBrowserPage } from "./browser-observation-service";
 import type { TabWebMcpRequest } from "../../tools/browser/tab-protocol";
 import type {
 	StudioWebMcpCatalog,
@@ -22,7 +31,7 @@ const services = new Map<string, StudioManagedBrowserService>();
 
 export type StudioManagedBrowserAccess = Pick<
 	StudioManagedBrowserService,
-	"kind" | "begin" | "name" | "contains" | "webMcpList" | "webMcpInvoke"
+	"kind" | "begin" | "name" | "contains" | "pageForTarget" | "webMcpList" | "webMcpInvoke"
 >;
 let remoteAccess: ((sessionId: string) => StudioManagedBrowserAccess | undefined) | undefined;
 export function installManagedBrowserAccess(
@@ -56,13 +65,18 @@ export class StudioManagedBrowserService {
 			directory: process.env.OMP_STUDIO_MEDIA_ROOT,
 		},
 	) {
-		if (options.enabled && options.directory) {
-			services.set(session.sessionId, this);
+		if (options.enabled && options.directory) services.set(session.sessionId, this);
+	}
+	#ensureReady(): Promise<void> {
+		if (!this.options.enabled || !this.options.directory || this.#disposed)
+			return Promise.reject(new ToolError("The embedded browser requires the local Studio desktop."));
+		if (!this.#ready) {
 			this.#ready = this.#start();
 			void this.#ready.catch(error =>
-				logger.error("Managed browser initialization failed", { error: String(error) }),
+				logger.error("Embedded browser initialization failed", { error: String(error) }),
 			);
 		}
+		return this.#ready;
 	}
 	async #start(): Promise<void> {
 		const token = randomBytes(32).toString("hex");
@@ -87,7 +101,7 @@ export class StudioManagedBrowserService {
 		if (this.#disposed) this.dispose();
 	}
 	async begin(signal?: AbortSignal, readOnly = false): Promise<() => void> {
-		await this.#ready;
+		await this.#ensureReady();
 		const deadline = Date.now() + 15000;
 		while (!this.#disposed && (!this.#server?.bridge.ready || !this.#initialized) && Date.now() < deadline) {
 			if (signal?.aborted) throw signal.reason;
@@ -113,7 +127,7 @@ export class StudioManagedBrowserService {
 	}
 	async prepare(sessionId: string): Promise<{ sessionId: string; descriptorId: string }> {
 		if (sessionId !== this.session.sessionId) throw new ToolError("Managed browser belongs to another chat.");
-		await this.#ready;
+		await this.#ensureReady();
 		if (!this.#descriptor || this.#disposed)
 			throw new ToolError("Managed browser requires the local Studio desktop.");
 		return { sessionId, descriptorId: path.basename(this.#descriptor) };
@@ -135,7 +149,69 @@ export class StudioManagedBrowserService {
 		return name.startsWith(`${this.session.sessionId}::`);
 	}
 
+	pageForTarget(targetId: string): { pageId: string; documentId?: string } | undefined {
+		const target = this.#server?.bridge.listTargets().find(row => row.id === targetId);
+		return target?.studioPageId
+			? { pageId: target.studioPageId, ...(target.studioDocumentId ? { documentId: target.studioDocumentId } : {}) }
+			: undefined;
+	}
+	#nativeTab(sessionId: string, pageId: string): TabSession | undefined {
+		if (sessionId !== this.session.sessionId) return;
+		const owners = new Set(
+			ownedStudioSessions(this.session)
+				.map(owner => owner.studioEvalKernelOwnerId)
+				.filter(Boolean),
+		);
+		return listTabs()
+			.map(row => getTab(row.name))
+			.find(tab => tab?.state === "alive" && owners.has(tab.ownerSessionId) && studioTabIdentity(tab) === pageId);
+	}
 	async webMcpList(sessionId: string, pageId: string, options?: WebMcpListOptions): Promise<StudioWebMcpCatalog> {
+		const native = this.#nativeTab(sessionId, pageId);
+		if (native) {
+			if (native.backend !== "worker")
+				return {
+					pageId,
+					status: "unavailable",
+					tools: [],
+					truncated: false,
+					untrusted: true,
+					invocationAvailable: false,
+					reason: "Native WebMCP requires an actual Chromium engine; WebKit does not expose it.",
+				};
+			const result = await this.#nativeWebMcp(native, { action: "list", options });
+			return {
+				...(result.value as WebMcpListResult),
+				pageId,
+				documentId: result.documentId,
+				invocationAvailable: result.chromiumMajor >= 149,
+			};
+		}
+		if (sessionId === this.session.sessionId) {
+			const remote = await remoteNativeBrowserPage(this.session, pageId);
+			if (remote) {
+				if (remote.tab.engine !== "chromium")
+					return {
+						pageId,
+						status: "unavailable",
+						tools: [],
+						truncated: false,
+						untrusted: true,
+						invocationAvailable: false,
+						reason: remote.tab.capabilities.reasons.webmcp ?? "WebMCP requires actual Chromium.",
+					};
+				if (!remote.access.webMcpList)
+					throw new ToolError(
+						"This native home has no WebMCP callback; its page was not recreated in the main thread.",
+					);
+				return await remote.access.webMcpList({
+					kind: "browser.webmcp.list",
+					sessionId: remote.tab.sessionId,
+					pageId,
+					options,
+				});
+			}
+		}
 		if (!this.kind || sessionId !== this.session.sessionId)
 			return {
 				pageId,
@@ -157,12 +233,67 @@ export class StudioManagedBrowserService {
 
 	async webMcpInvoke(operation: WebMcpOperation): Promise<WebMcpInvokeResult> {
 		if (operation.sessionId !== this.session.sessionId) throw new ToolError("WebMCP belongs to another chat.");
+		const native = this.#nativeTab(operation.sessionId, operation.pageId);
+		if (native) {
+			const result = await this.#nativeWebMcp(
+				native,
+				{ action: "invoke", name: operation.name, params: operation.params, options: operation.options },
+				operation.documentId,
+			);
+			return result.value as WebMcpInvokeResult;
+		}
+		const remote = await remoteNativeBrowserPage(this.session, operation.pageId);
+		if (remote) {
+			if (remote.tab.engine !== "chromium" || !remote.access.webMcpInvoke)
+				throw new ToolError(
+					remote.tab.capabilities.reasons.webmcp ??
+						"This native home cannot invoke WebMCP; the page was not recreated.",
+				);
+			return await remote.access.webMcpInvoke({ ...operation, sessionId: remote.tab.sessionId });
+		}
 		const { value } = await this.#webMcp(
 			operation.pageId,
 			{ action: "invoke", name: operation.name, params: operation.params, options: operation.options },
 			operation.documentId,
 		);
 		return value as WebMcpInvokeResult;
+	}
+
+	async #nativeWebMcp(
+		tab: TabSession,
+		operation: TabWebMcpRequest,
+		expectedDocument?: string,
+	): Promise<{ value: unknown; documentId: string; chromiumMajor: number }> {
+		if (tab.backend !== "worker") throw new ToolError("Native WebMCP requires Chromium.");
+		const session = this.session.studioToolSession;
+		if (!session) throw new ToolError("The native browser tool session is unavailable.");
+		const generation = studioTabIdentity(tab);
+		const cdp = await createStudioBrowserObservation(tab);
+		try {
+			const document = async () => {
+				const tree = await cdp.send("Page.getFrameTree");
+				const frame = tree.frameTree.frame;
+				return createHash("sha256").update(`${generation}:${frame.loaderId}:${frame.url}`).digest("hex");
+			};
+			const documentId = await document();
+			if (operation.action === "invoke" && documentId !== expectedDocument)
+				throw new ToolError("The native page navigated. Refresh WebMCP before invoking a tool.");
+			const version = await tab.browser.browser.version();
+			const chromiumMajor = Number(/(?:Chrome|Chromium|HeadlessChrome)\/(\d+)/u.exec(version)?.[1] ?? 0);
+			if (!chromiumMajor) throw new ToolError("This native target is not a verified Chromium engine.");
+			const result = await runInTab(tab.name, {
+				code: "",
+				webmcp: operation,
+				timeoutMs: operation.action === "invoke" ? (operation.options?.timeout ?? 10000) : 10000,
+				session,
+				signal: AbortSignal.timeout(operation.action === "invoke" ? (operation.options?.timeout ?? 10000) : 10000),
+			});
+			if (generation !== studioTabIdentity(tab) || getTab(tab.name) !== tab || documentId !== (await document()))
+				throw new ToolError("The native page changed during WebMCP discovery or invocation.");
+			return { value: result.returnValue, documentId, chromiumMajor };
+		} finally {
+			await cdp.detach().catch(() => undefined);
+		}
 	}
 
 	async #webMcp(

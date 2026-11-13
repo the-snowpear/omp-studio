@@ -8,6 +8,7 @@ import type {
 import type {
   GcCategory,
   GcStatus,
+  GcStripOptions,
   MaintenanceResultMap,
   SessionExportStatus,
   NativeConnectionCheck,
@@ -21,6 +22,7 @@ import {
 } from "../preview/maintenancePreview";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { WorkspaceEmpty, WorkspaceStatus } from "../workspaces/Workspace";
+import { useSurfaceDocument } from "../dock/SurfaceContext";
 import "./maintenance.css";
 const CATEGORIES: GcCategory[] = ["blobs", "archive", "wal", "stale"];
 const LABELS: Record<GcCategory, [string, string]> = {
@@ -52,6 +54,12 @@ export function NativeMaintenancePane({
     ]),
     [gc, setGc] = useState<GcStatus>({ phase: "idle" }),
     [exportState, setExport] = useState<SessionExportStatus>({ phase: "idle" });
+  const [stripEnabled, setStripEnabled] = useState(false);
+  const [stripDays, setStripDays] = useState("");
+  const stripDaysValid = stripDays.trim() === "" || (Number.isSafeInteger(Number(stripDays)) && Number(stripDays) >= 0);
+  const strip: GcStripOptions | undefined = stripEnabled
+    ? (stripDays.trim() === "" ? {} : { idleDays: Number(stripDays) })
+    : undefined;
   const [connection, setConnection] = useState<NativeConnectionCheck>(),
     [latency, setLatency] = useState<number>();
   const [confirm, setConfirm] = useState(false),
@@ -62,6 +70,14 @@ export function NativeMaintenancePane({
   const [exportConfirm,setExportConfirm]=useState(false);
   const epoch = useRef(0),
     lock = useRef(false);
+  const doc = useSurfaceDocument();
+  const statusEpoch = useRef(0);
+  const gcRevision = useRef(0);
+  function invalidateGcPreview() {
+    gcRevision.current++;
+    setGc({ phase: "idle" });
+    setConfirm(false);
+  }
   const supports = (kind: string) =>
     preview ||
     !!(
@@ -84,7 +100,9 @@ export function NativeMaintenancePane({
     ).result;
   }
   async function refreshStatus(current = epoch.current) {
-    if (preview) return;
+    if (preview || !active || doc.hidden) return;
+    const readingEpoch = statusEpoch.current;
+    const revision = gcRevision.current;
     const [gcResult, exportResult] = await Promise.allSettled([
       supports("maintenance.gc.status")
         ? read("maintenance.gc.status", { sessionId: sessionId! })
@@ -93,8 +111,8 @@ export function NativeMaintenancePane({
         ? read("maintenance.export.status", { sessionId: sessionId! })
         : Promise.resolve(undefined),
     ]);
-    if (current !== epoch.current) return;
-    if (gcResult.status === "fulfilled" && gcResult.value)
+    if (current !== epoch.current || readingEpoch !== statusEpoch.current || doc.hidden) return;
+    if (revision === gcRevision.current && gcResult.status === "fulfilled" && gcResult.value)
       setGc(gcResult.value);
     if (exportResult.status === "fulfilled" && exportResult.value)
       setExport(exportResult.value);
@@ -110,7 +128,9 @@ export function NativeMaintenancePane({
       );
   }
   useEffect(() => {
-    const current = ++epoch.current;
+    epoch.current++;
+    statusEpoch.current++;
+    gcRevision.current++;
     lock.current = false;
     setBusy("");
     setConfirm(false);
@@ -126,13 +146,26 @@ export function NativeMaintenancePane({
     };
   }, [client, sessionId, available, preview]);
   useEffect(() => {
+    statusEpoch.current++;
     if (!active) {
       setConfirm(false);
-    setExportConfirm(false);
+      setExportConfirm(false);
       return;
     }
-    if (!preview && available) void refreshStatus();
-  }, [active, capabilities?.hash, client, sessionId, available, preview]);
+    const visibilityChanged = () => {
+      statusEpoch.current++;
+      if (doc.hidden) {
+        setConfirm(false);
+        setExportConfirm(false);
+      } else if (!preview && available) void refreshStatus();
+    };
+    if (!preview && available && !doc.hidden) void refreshStatus();
+    doc.addEventListener("visibilitychange", visibilityChanged);
+    return () => {
+      statusEpoch.current++;
+      doc.removeEventListener("visibilitychange", visibilityChanged);
+    };
+  }, [active, capabilities?.hash, client, sessionId, available, preview, doc]);
   useEffect(() => {
     if (
       !active ||
@@ -143,15 +176,23 @@ export function NativeMaintenancePane({
     )
       return;
     let reading = false;
-    const timer = setInterval(() => {
-      if (reading || document.hidden) return;
+    let timer: number | undefined;
+    const poll = () => {
+      if (reading || doc.hidden) return;
       reading = true;
-      void refreshStatus().finally(() => {
-        reading = false;
-      });
-    }, 1500);
-    return () => clearInterval(timer);
-  }, [active, preview, available, gc.phase, exportState.phase, sessionId]);
+      void refreshStatus().finally(() => { reading = false; });
+    };
+    const visibilityChanged = () => {
+      if (timer !== undefined) clearInterval(timer);
+      timer = doc.hidden ? undefined : window.setInterval(poll, 1500);
+    };
+    visibilityChanged();
+    doc.addEventListener("visibilitychange", visibilityChanged);
+    return () => {
+      if (timer !== undefined) clearInterval(timer);
+      doc.removeEventListener("visibilitychange", visibilityChanged);
+    };
+  }, [active, preview, available, gc.phase, exportState.phase, sessionId, doc]);
   useEffect(() => {
     const plan = gc.preview;
     if (!plan) return;
@@ -183,23 +224,28 @@ export function NativeMaintenancePane({
     const current = epoch.current;
     try {
       if (kind === "preview") {
+        gcRevision.current++;
         setGc({ phase: "previewing" });
         const result = preview
-          ? previewGc(categories)
+          ? previewGc(categories, strip)
           : await read("maintenance.gc.preview", {
               sessionId: sessionId!,
               categories,
+              ...(strip === undefined ? {} : { strip }),
             });
-        if (current === epoch.current)
-          setGc({
-            phase: "complete",
-            preview: result,
-            summary: result.summary,
-          });
+        if (current === epoch.current) {
+          gcRevision.current++;
+          if (stripEnabled && !result.summary.strip) {
+            setGc({ phase: "failed", summary: result.summary, error: zh
+              ? "此 Runtime 未提供供应商回放信息预览，不能确认此操作。未执行清理；请升级 Runtime 后重新扫描。"
+              : "This Runtime did not report a provider replay preview, so the operation cannot be confirmed. Nothing was applied; update the Runtime and scan again." });
+          } else setGc({ phase: "complete", preview: result, summary: result.summary });
+        }
       }
       if (kind === "apply") {
         const plan = gc.preview;
-        if (!plan) return;
+        if (!plan || (stripEnabled && !plan.summary.strip)) return;
+        gcRevision.current++;
         setConfirm(false);
     setExportConfirm(false);
         setGc({ phase: "applying", summary: plan.summary });
@@ -212,12 +258,14 @@ export function NativeMaintenancePane({
                 ...row,
                 changed: row.candidates,
               })),
+              ...(plan.summary.strip ? { strip: { ...plan.summary.strip, changed: plan.summary.strip.candidates } } : {}),
             }
           : await read("maintenance.gc.apply", {
               sessionId: sessionId!,
               token: plan.token,
             });
         if (current === epoch.current) {
+          gcRevision.current++;
           setGc({ phase: "complete", summary: result });
           if (preview && marks)
             setNotice(
@@ -251,6 +299,10 @@ export function NativeMaintenancePane({
         setError(
           hostErrorMessage(cause, zh ? "维护操作失败" : "Maintenance failed"),
         );
+        if (kind === "preview" || kind === "apply") {
+          gcRevision.current++;
+          setGc(state => ({ phase: "failed", ...(state.summary ? { summary: state.summary } : {}) }));
+        }
         if (!preview && available) void refreshStatus(current);
       }
     } finally {
@@ -383,8 +435,8 @@ export function NativeMaintenancePane({
             <h3>{zh ? "清理预览" : "Cleanup preview"}</h3>
             <p>
               {zh
-                ? "范围为本机 OMP 数据目录，与独立 CLI 共用。先查看原生扫描结果，再确认执行。"
-                : "Applies to the local OMP data directory shared with the CLI. Review the native scan before applying."}
+                ? "范围为当前 Runtime 的 OMP 数据目录，与 CLI 共用，不只当前会话或工作区。先查看原生扫描结果，再确认执行。"
+                : "Applies to this Runtime's OMP data directory shared with the CLI, not only the current session or workspace. Review the native scan before applying."}
             </p>
           </div>
           <button
@@ -392,7 +444,8 @@ export function NativeMaintenancePane({
             disabled={
               !supports("maintenance.gc.preview") ||
               working ||
-              !categories.length
+              (!categories.length && !stripEnabled) ||
+              (stripEnabled && !stripDaysValid)
             }
             onClick={() => void run("preview")}
           >
@@ -420,14 +473,43 @@ export function NativeMaintenancePane({
                       ? [...old, category]
                       : old.filter((value) => value !== category),
                   );
-                  setGc({ phase: "idle" });
-                  setConfirm(false);
-    setExportConfirm(false);
+                  invalidateGcPreview();
+                  setExportConfirm(false);
                 }}
               />
               {label(category)}
             </label>
           ))}
+        </fieldset>
+        <fieldset className="maintenance-strip" disabled={working || !supports("maintenance.gc.preview")}>
+          <legend className="sr-only">{zh ? "供应商回放信息" : "Provider replay data"}</legend>
+          <label className="maintenance-strip-toggle">
+            <input type="checkbox" checked={stripEnabled} onChange={event => {
+              setStripEnabled(event.target.checked);
+              invalidateGcPreview();
+            }} />
+            <span>{zh ? "移除供应商回放信息" : "Remove provider replay data"}</span>
+          </label>
+          <p id="maintenance-strip-help">
+            {zh
+              ? "保留会话正文、最新回放轮次及恢复上下文所需的原生状态，只移除过期的供应商回放信息。不是压缩或删除会话。"
+              : "Keep transcript content, the latest replay turn and native state required to restore context. Remove only expired provider replay data, not session content or filesystem compression."}
+          </p>
+          {stripEnabled ? <div className="maintenance-strip-options">
+            <label>
+              <span>{zh ? "空闲天数" : "Idle days"}</span>
+              <input className="input" type="number" min={0} step={1} value={stripDays}
+                placeholder={zh ? "继承原生设置" : "Native setting"}
+                aria-describedby="maintenance-strip-help"
+                aria-invalid={!stripDaysValid || undefined}
+                onChange={event => {
+                  setStripDays(event.target.value);
+                  invalidateGcPreview();
+                }} />
+            </label>
+            <span className="tiny muted">{zh ? "主会话 · 子代理 · 已归档会话；原生写入宽限期与活动租约保护仍生效。" : "Main, child and archived transcripts; native write grace and live-session leases still apply."}</span>
+          </div> : null}
+          {stripEnabled && !stripDaysValid ? <p className="maintenance-error" role="alert">{zh ? "请输入不小于 0 的整数天数，或留空继承原生设置。" : "Enter a non-negative whole number of days, or leave blank to inherit native settings."}</p> : null}
         </fieldset>
         {gc.error ? (
           <p role="alert" className="maintenance-error">
@@ -436,11 +518,12 @@ export function NativeMaintenancePane({
         ) : null}
         {summary ? (
           <>
-            <p className="tiny muted">
-              {zh
-                ? `冷会话：${summary.policy.coldDays} 天；至少保留最近 ${summary.policy.keepGlobal} 个会话，每个工作区 ${summary.policy.keepPerWorkspace} 个。报告保留 ${summary.policy.staleDays} 天及最近 ${summary.policy.staleKeep} 份。`
-                : `Cold after ${summary.policy.coldDays} days; retain ${summary.policy.keepGlobal} sessions globally and ${summary.policy.keepPerWorkspace} per workspace. Reports: ${summary.policy.staleDays} days and newest ${summary.policy.staleKeep}.`}
-            </p>
+            {summary.rows.length > 0 ? <>
+              <p className="tiny muted">
+                {zh
+                  ? `冷会话：${summary.policy.coldDays} 天；至少保留最近 ${summary.policy.keepGlobal} 个会话，每个工作区 ${summary.policy.keepPerWorkspace} 个。报告保留 ${summary.policy.staleDays} 天及最近 ${summary.policy.staleKeep} 份。`
+                  : `Cold after ${summary.policy.coldDays} days; retain ${summary.policy.keepGlobal} sessions globally and ${summary.policy.keepPerWorkspace} per workspace. Reports: ${summary.policy.staleDays} days and newest ${summary.policy.staleKeep}.`}
+              </p>
             <div className="maintenance-table-wrap">
               <table>
                 <thead>
@@ -469,6 +552,35 @@ export function NativeMaintenancePane({
                 </tbody>
               </table>
             </div>
+            </> : null}
+            {summary.strip ? <div className="maintenance-strip-result">
+              <h4>{zh ? "供应商回放信息" : "Provider replay data"}</h4>
+              <p className="tiny muted">
+                {zh
+                  ? `空闲至少 ${summary.strip.idleDays} 天；范围为主会话、子代理与归档。保留正文和最新回放轮次，跳过活动租约。`
+                  : `Idle for at least ${summary.strip.idleDays} days; main, child and archived transcripts. Content and the latest replay turn are kept; live leases are skipped.`}
+              </p>
+              <div className="maintenance-table-wrap">
+                <table aria-label={zh ? "回放信息扫描结果" : "Replay data scan results"}>
+                  <thead><tr>
+                    <th>{zh ? "扫描主会话" : "Main sessions scanned"}</th>
+                    <th>{zh ? "候选记录文件" : "Candidate transcripts"}</th>
+                    <th>{zh ? "已重写文件" : "Transcripts rewritten"}</th>
+                    <th>{zh ? "跳过活动项" : "Live skipped"}</th>
+                    <th>{zh ? "计划移除回放的记录" : "Records with replay to remove"}</th>
+                    <th>{zh ? "可移除回放（JSONL）" : "Removable replay (JSONL)"}</th>
+                  </tr></thead>
+                  <tbody><tr>
+                    <td>{summary.strip.scannedSessions}</td><td>{summary.strip.candidates}</td>
+                    <td>{summary.strip.changed}</td><td>{summary.strip.skippedActive}</td>
+                    <td>{summary.strip.records}</td><td>{(summary.strip.bytes / 1024).toFixed(1)} KiB</td>
+                  </tr></tbody>
+                </table>
+              </div>
+              <p className="tiny muted">{zh
+                ? "记录数和大小来自原生扫描的移除计划；大小按未压缩 JSONL 计，不等于回收的磁盘空间。执行会重查候选，已重写数以实际结果为准。"
+                : "Records and bytes describe the native removal plan, measured as uncompressed JSONL, not reclaimed disk space. Apply rechecks candidates; the rewritten count reports the actual effect."}</p>
+            </div> : null}
             {summary.errors.map((value, index) => (
               <p key={index} role="alert" className="maintenance-error">
                 {value}
@@ -477,7 +589,7 @@ export function NativeMaintenancePane({
             <div className="maintenance-actions">
               <WorkspaceStatus
                 state={
-                  summary.errors.length
+                  gc.phase === "failed" || summary.errors.length
                     ? "failed"
                     : summary.applied
                       ? "completed"
@@ -496,6 +608,7 @@ export function NativeMaintenancePane({
                       !supports("maintenance.gc.apply") ||
                       working ||
                       !!summary.errors.length ||
+                      (stripEnabled && !plan.summary.strip) ||
                       Date.now() > plan.expiresAt
                     }
                     onClick={() => setConfirm(true)}
@@ -578,21 +691,29 @@ export function NativeMaintenancePane({
             className="modal"
             role="dialog"
             aria-modal="true"
-            aria-label={zh ? "确认本地清理" : "Confirm local cleanup"}
+            aria-label={zh ? "确认 OMP 数据清理" : "Confirm OMP data cleanup"}
             onClick={(event) => event.stopPropagation()}
           >
             <header className="modal-head">
               {zh
                 ? "执行所选范围的清理？"
-                : "Apply cleanup to the selected categories?"}
+                : "Apply cleanup to the previewed scope?"}
             </header>
             <div className="modal-body">
               <p>
                 {zh
-                  ? "原生清理器会重新检查文件与存活会话。删除无引用附件或过期文件后无法通过 Studio 撤销。"
-                  : "The native collector rechecks files and live sessions. Deletion of unreferenced attachments or expired files cannot be undone in Studio."}
+                  ? "原生清理器会在当前 Runtime 的 OMP 数据目录内，按预览范围重新检查文件与活动会话。"
+                  : "The native collector rechecks files and live sessions in this Runtime's OMP data directory, within the previewed scope."}
               </p>
-              <p>{categories.map(label).join(" · ")}</p>
+              {plan.summary.rows.length ? <p>{plan.summary.rows.map(row => label(row.category)).join(" · ")}</p> : null}
+              {plan.summary.rows.some(row => row.category === "blobs" || row.category === "stale") ? <p>{zh
+                ? "删除无引用附件或过期文件后，无法通过 Studio 撤销。"
+                : "Deleting unreferenced attachments or expired files cannot be undone in Studio."}</p> : null}
+              {plan.summary.strip ? <p>
+                {zh
+                  ? `移除空闲至少 ${plan.summary.strip.idleDays} 天的供应商回放信息：${plan.summary.strip.candidates} 个记录文件、${plan.summary.strip.records} 条记录。正文和最新回放轮次保留；移除的回放信息无法由 Studio 撤销。`
+                  : `Remove provider replay data after ${plan.summary.strip.idleDays} idle days: ${plan.summary.strip.candidates} transcripts, ${plan.summary.strip.records} records. Content and the latest replay turn are kept; removed replay data cannot be restored by Studio.`}
+              </p> : null}
               {preview && marks ? (
                 <p>
                   {zh

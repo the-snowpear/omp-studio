@@ -638,7 +638,7 @@ export async function main(): Promise<void> {
         dictationAudio.setVisible(child.webContents.id, visible);
         if (!visible) { liveAudio.disposeWindow(child.webContents.id); browserObservation.disposeWindow(child.webContents.id); prediction.disposeWindow(child.webContents.id); }
       },
-      onClosed: contents => desktopConversationViews.remove(contents),
+      onClosed: contents => { browserObservation.disposeWindow(contents.id); desktopConversationViews.remove(contents); },
       onWillClose: child => managedBrowser?.detachWindow(child),
     });
     managedBrowser = new DesktopManagedBrowser({ directory: join(activeProfileDirectory(), "browser"), downloadsDirectory: app.getPath("downloads"), windowFor: floatingWindows.windowFor });
@@ -743,6 +743,7 @@ export async function main(): Promise<void> {
     const retainDictation = () => dictationAudio.retainWindow(window.webContents.id);
     const cancelRemotePreparation = () => { void remoteIpc.cancelPending().catch(() => {}); };
     const cancelRemoteNavigation = (_event: unknown, _url: string, isInPlace: boolean, isMainFrame: boolean) => { if (isMainFrame && !isInPlace) cancelRemotePreparation(); };
+    const releaseBrowserObservation = () => browserObservation.disposeWindow(window.webContents.id);
     const removeConversationVisibility = () => desktopConversationViews.remove(window.webContents);
     window.on("show", refreshConversationVisibility);
     window.on("hide", refreshConversationVisibility);
@@ -752,6 +753,8 @@ export async function main(): Promise<void> {
     window.webContents.on("did-start-navigation", cancelRemoteNavigation);
     window.webContents.on("render-process-gone", cancelRemotePreparation);
     window.webContents.on("render-process-gone", retainDictation);
+    window.webContents.on("render-process-gone", releaseBrowserObservation);
+    window.webContents.on("destroyed", releaseBrowserObservation);
     window.webContents.on("destroyed", cancelRemotePreparation);
     window.webContents.on("destroyed", removeConversationVisibility);
     ipcMain.handle(CONVERSATION_VIEW_CHANNEL, ({ sender }, input: unknown) =>
@@ -1073,6 +1076,8 @@ export async function main(): Promise<void> {
         window.webContents.removeListener("did-start-navigation", cancelRemoteNavigation);
         window.webContents.removeListener("render-process-gone", cancelRemotePreparation);
         window.webContents.removeListener("render-process-gone", retainDictation);
+        window.webContents.removeListener("render-process-gone", releaseBrowserObservation);
+        window.webContents.removeListener("destroyed", releaseBrowserObservation);
         window.webContents.removeListener("destroyed", cancelRemotePreparation);
         window.webContents.removeListener("destroyed", removeConversationVisibility);
         removeConversationVisibility();

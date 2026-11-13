@@ -1,4 +1,5 @@
 import { WORKBENCH_OPERATION_KINDS } from "./workbench-protocol";
+import { MODEL_SERVICES_COMMAND_KINDS } from "./model-services-protocol";
 import { UPGRADE_OPERATION_KINDS } from "./runtime-upgrade-protocol";
 import * as crypto from "node:crypto";
 import type { StudioRequest } from "./bridge-protocol";
@@ -10,6 +11,8 @@ export type StudioCommandSurface = "gui" | "tui" | "system";
 const LIVE_TURN_OPERATION_KINDS = new Set<string>([
 	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
+	...MODEL_SERVICES_COMMAND_KINDS,
+	"runtime.shutdown",
 	"btw.ask",
 	"btw.abort",
 	"core.abort",
@@ -75,6 +78,8 @@ const LIVE_TURN_OPERATION_KINDS = new Set<string>([
 const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
+	...MODEL_SERVICES_COMMAND_KINDS,
+	"runtime.shutdown",
 	"btw.ask",
 	"btw.abort",
 	"core.abort",
@@ -136,6 +141,8 @@ export function isConcurrentStudioOperation(kind: string): boolean {
 const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([
 	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
+	...MODEL_SERVICES_COMMAND_KINDS,
+	"runtime.shutdown",
 	"btw.ask",
 	"btw.abort",
 	"session.model.set",

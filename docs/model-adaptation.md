@@ -20,6 +20,14 @@
 
 角色切换模型时，保留已明确选择的档位；不支持时按 `minimal → low → medium → high → xhigh → max` 的距离映射，同距选择较高档位，并显示映射结果。没有明确档位时采用新模型的 `defaultLevel`。明确关闭保存为 `:off`，与「Runtime 默认」区分；要求必须思考的模型使用最低可用档位。
 
+## 原生系统模板、授权目录与 Judge
+
+模型角色区的“模型系统模板”编辑 `config.yml.systemPromptTemplates` 的 pattern→文件关联。匹配采用原生最长 substring 规则；实际匹配、来源、SYSTEM.md / SYSTEM_TEMPLATE.md 覆盖和 fallback 可在模型详情检查。文件内容沿用既有编辑器，保存采用 native 版本并原生重渲染；预览不会切换模型、调用付费接口或在 client 执行 Handlebars。这不是 slash 模板，也不是 `models.yml` 的模型 override。
+
+“原生供应商目录”和账户登录使用当前 Runtime 的认证与 scoped discovery。Otari 等目录只显示该凭据真实获准的模型；Liquid 接 Judge 角色、凭据与既有评测，不作为聊天参数编辑器。Antigravity 等登录风险须经 GUI 中的原生 challenge 明确接受，Studio 不代答 yes。
+
+账户详情分别显示 LiteLLM Key/User 的 USD 费用预算，以及 Token/百分比额度。未报告的金额保持未知。5h、weekly、Fable reset 策略分别写对应 native key；只读刷新不会自动兑券。
+
 ## 更新和维护目录
 
 目录由项目固定 OMP commit 的 `pi-catalog` 生成，正常应用构建和启动不联网。模型页的「检查并更新目录」手动读取本仓库 `main` 分支的 `catalog/model-catalog-v1.json`。格式兼容的更新缓存在 agent 配置目录，网络失败时保留当前目录，没有缓存时使用内置目录。

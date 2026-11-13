@@ -9,6 +9,7 @@ import { DeferredPanel, lazyPanel } from "../DeferredPanel";
 import { useModelConnection } from "../models/useModelConnection";
 import { useExecutionTarget, useTargetMemory } from "../workspaces/ExecutionTargets";
 import { SecondaryInteractionDeck } from "../deck/SecondaryInteractionDeck";
+import { useFormInteractionLifecycle } from "../deck/FormSession";
 import { AnnotationsProvider } from "../annotations/Annotations";
 import { setCapIntent, setModelConfigIntent, setSettingsIntent, setDiagnosticsIntent } from "../pageIntents";
 import { modelConfigHasUnsavedChanges } from "../models/modelConfigState";
@@ -428,6 +429,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const [mcNonce, setMcNonce] = useState(0);
   const snapshot = snapshotFrom(state);
   const pendingInteraction = state.clientState?.interaction.pending ?? null;
+  useFormInteractionLifecycle(pendingInteraction);
   const residentModel = state.clientState?.entities.residents;
   // `?? []` 每次渲染都是新数组身份，而下面两个通知 effect 都依赖它 ——
   // 流式期间没有 resident 模型时会每帧重建一次 setTimeout。用模块级常量。

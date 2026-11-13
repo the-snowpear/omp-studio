@@ -325,6 +325,8 @@ export const PREVIEW_CHANGES = {
     { file: "docs/UPSTREAM-SYNC.md", status: "added" as const, add: 214, del: 0, agent: "主 Agent" },
   ],
   thread: [
+    { file: "components/MermaidBlock.tsx", status: "modified" as const, add: 6, del: 3, agent: "主 Agent" },
+    { file: "docs/UPSTREAM-SYNC.md", status: "added" as const, add: 214, del: 0, agent: "主 Agent" },
     { file: "README.md", status: "modified" as const, add: 3, del: 1, agent: "主 Agent" },
     { file: "package.json", status: "modified" as const, add: 4, del: 4, agent: "deps 子 Agent" },
     { file: "app/App.tsx", status: "modified" as const, add: 18, del: 9, agent: "主 Agent" },
@@ -346,7 +348,7 @@ export const PREVIEW_TODOS: readonly PreviewTodoItem[] = [
   { id: "t3", phase: "文档", content: "新建 docs/UPSTREAM-SYNC.md 并更新 README 链接", status: "completed" },
   { id: "t4", phase: "验证", content: "修复 MermaidBlock.tsx:147 字面量类型（TS2322）", status: "completed" },
   { id: "t5", phase: "验证", content: "重新运行 typecheck 与 lint 确认通过", status: "in_progress" },
-  { id: "t6", phase: "验证", content: "验证 Mermaid 全屏缩放拖拽（Preview）", status: "in_progress" },
+  { id: "t6", phase: "验证", content: "验证 Mermaid 全屏缩放拖拽（Preview）", status: "pending" },
   { id: "t7", phase: "验证", content: "创建 Checkpoint #13 并汇总本轮变更", status: "pending" },
 ];
 
@@ -354,7 +356,7 @@ export const PREVIEW_TODOS: readonly PreviewTodoItem[] = [
 export const PREVIEW_TODO_FILES = [
   { path: "docs/UPSTREAM-SYNC.md", name: "UPSTREAM-SYNC.md", dir: "docs/", add: 214, del: 0 },
   { path: "README.md", name: "README.md", dir: "", add: 3, del: 1 },
-  { path: "components/MermaidBlock.tsx", name: "MermaidBlock.tsx", dir: "components/", add: 6, del: 3 },
+  { path: "components/MermaidBlock.tsx", name: "MermaidBlock.tsx", dir: "components/", add: 6, del: 3, partial: true },
 ] as const;
 
 /** Git 管理页演示：沿用 ver1 D.projects 里 omp-web / main 的故事（dirty 3）。 */

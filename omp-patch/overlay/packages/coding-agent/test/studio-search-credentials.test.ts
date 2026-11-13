@@ -19,6 +19,7 @@ async function setup() {
 	const refreshes: string[] = [];
 	const session = {
 		sessionId: "chat",
+		refreshScopedModels: async () => {},
 		modelRegistry: {
 			authStorage: auth,
 			refreshProvider: async (provider: string) => {
@@ -99,5 +100,29 @@ describe("search credentials match native CLI auth", () => {
 		});
 		expect(JSON.stringify(result)).not.toContain("oauth-test-secret");
 		expect(JSON.stringify(result)).not.toContain("other-test-key");
+	});
+
+	test("Sofya uses the original credential store and provider-scoped refresh", async () => {
+		const { auth, service, refreshes } = await setup();
+		const saved = (await service.execute({
+			kind: "search.credentials.set",
+			sessionId: "chat",
+			provider: "sofya",
+			apiKey: "sofya-test-key",
+		})) as SearchCredentialStatus;
+		expect(await auth.keys.get("sofya")).toBe("sofya-test-key");
+		expect(saved.credentials).toHaveLength(1);
+		expect(saved.source).toBe("api_key");
+		// Sofya's native search uses AuthStorage, but 18.19.0 advertises no /login provider for it.
+		expect(saved.apiKeyLogin).toBe(false);
+		expect(JSON.stringify(saved)).not.toContain("sofya-test-key");
+		await service.execute({
+			kind: "search.credentials.remove",
+			sessionId: "chat",
+			provider: "sofya",
+			credentialId: saved.credentials[0]!.id,
+		});
+		expect(auth.credentials.list("sofya")).toEqual([]);
+		expect(refreshes).toEqual(["sofya", "sofya"]);
 	});
 });

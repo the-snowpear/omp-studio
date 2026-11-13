@@ -1,10 +1,11 @@
 import type {
   GcCategory,
   GcPreview,
+  GcStripOptions,
   SessionExportResult,
   NativeConnectionCheck,
 } from "@omp-studio/studio-protocol";
-export function previewGc(categories: GcCategory[]): GcPreview {
+export function previewGc(categories: GcCategory[], strip?: GcStripOptions): GcPreview {
   return {
     token: "demo-cleanup",
     expiresAt: Date.now() + 300000,
@@ -32,6 +33,18 @@ export function previewGc(categories: GcCategory[]): GcPreview {
         bytes: category === "archive" ? 0 : 4194304,
         skippedActive: category === "archive" ? 2 : 0,
       })),
+      ...(strip ? {
+        strip: {
+          idleDays: Math.floor(strip.idleDays ?? 30),
+          scope: "sessions-and-archives" as const,
+          scannedSessions: 18,
+          candidates: 7,
+          changed: 0,
+          records: 46,
+          bytes: 734208,
+          skippedActive: 2,
+        },
+      } : {}),
       errors: [],
     },
   };
