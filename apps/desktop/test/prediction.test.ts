@@ -109,7 +109,13 @@ test("prediction transport isolates windows and imports only a selected private 
       () => manager.attach(sender, { channelId, sessionId: "foreign" }),
       /expired or changed/,
     );
-    await manager.attach(sender, { channelId, sessionId: "main" });
+    await assert.rejects(
+      () => manager.attach(sender, { channelId, sessionId: "main", protocolVersion: 3 }),
+      /Invalid prediction protocol/,
+    );
+    // Regression: the renderer passes the whole v2 channel from prediction.prepare;
+    // its protocolVersion field used to fail with "Invalid prediction fields".
+    await manager.attach(sender, { channelId, sessionId: "main", expiresAt: Date.now() + 15000, protocolVersion: 2 });
     assert.throws(
       () =>
         manager.input(

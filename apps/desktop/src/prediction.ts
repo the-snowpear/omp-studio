@@ -55,8 +55,12 @@ export class DesktopPrediction {
     },
   ) {}
   async attach(sender: TerminalSender, value: unknown): Promise<void> {
-    const input = object(value, ["channelId", "sessionId", "expiresAt"]),
+    // The renderer forwards the channel `prediction.prepare` returned. Protocol
+    // v2 only adds ranked choices to the event stream (validatePredictionEvent).
+    const input = object(value, ["channelId", "sessionId", "expiresAt", "protocolVersion"]),
       channelId = id(input.channelId);
+    if (input.protocolVersion !== undefined && input.protocolVersion !== 2)
+      throw new Error("Invalid prediction protocol");
     if (
       typeof input.sessionId !== "string" ||
       !input.sessionId ||

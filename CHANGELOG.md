@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复输入预测无法挂载、输入框下方显示「Invalid prediction fields」：桌面端接受 Runtime 返回的 v2 预测通道（带 `protocolVersion: 2`），拒绝其他协议版本。
+
 ## [0.2.0] - 2026-11-13
 
 如果说 `0.1.x` 的 OMP Studio 还算是一个「长得挺规矩的单栏聊天控制台」，那 `0.2.0` 基本就是把承重墙拆了重装了一遍。
