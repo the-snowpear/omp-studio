@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 修复新对话的第一条消息被误报「发送期间已切换会话」而取消、草稿退回输入框：新草稿接管自己 `session.create` 刚建出的会话不再算作切换；真正切到其他对话时仍会取消发送。
 - 修复上述失败后发送按钮一直禁用：新草稿打开时拿到的空能力清单在 Runtime 接入后不再沿用，收到 `runtime.changed` 后改为向 Host 重新读取。
+- 从历史打开、尚未连接 Runtime 的对话不再显示红色「Runtime 不可用」：没有任何失败记录时改为中性提示「Runtime 未启动 · 发送消息时会自动连接」，并提供「立即连接」；真正的启动失败仍显示红色告警。
 
 ## [0.2.0] - 2026-11-13
 
