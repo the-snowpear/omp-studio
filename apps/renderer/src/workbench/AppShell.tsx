@@ -49,6 +49,9 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { BackgroundProvider } from "../background/BackgroundProvider";
 import { AppBackgroundLayer } from "../background/AppBackgroundLayer";
 import { useAppSettings } from "../settings/appSettings";
+import { applyLightLevel } from "../lux/lightLevel";
+import { LuxAmbient } from "../lux/LuxAmbient";
+import { LuxSpotlight } from "../lux/LuxSpotlight";
 import { applyTheme } from "../themeTransition";
 import { desktopNotice } from "../settings/desktopNotice";
 import { openOnboardingTour } from "../onboarding/onboardingState";
@@ -723,6 +726,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     const root = globalThis.document.documentElement;
     applyTheme(root, appSettings.theme);
     root.setAttribute("data-density", appSettings.density);
+    applyLightLevel(root, appSettings.light);
     /* 文件图标着色：tri 时根元素挂 data-palette，CSS 只覆盖 token。
        注意根元素用 data-palette、树行用 data-ftype，两者不共名。 */
     if (appSettings.fileTypePalette === "tri") {
@@ -730,7 +734,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     } else {
       delete root.dataset.palette;
     }
-  }, [mdi?.active, appSettings.theme, appSettings.density, appSettings.fileTypePalette]);
+  }, [mdi?.active, appSettings.theme, appSettings.density, appSettings.light, appSettings.fileTypePalette]);
 
   /* Resident changes drive task notifications. A disappeared row is a
      neutral stop/disconnect, never a success notification. */
@@ -2598,6 +2602,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         </SharedSurface>
       ) : null}
       <EvaluationActivity client={client} visible={pageRoute !== "evaluation"} onOpen={(id, kind) => { setEvaluationIntent({ id, kind }); go("evaluation"); }} />
+      {!mdi || mdi.active ? <><LuxAmbient /><LuxSpotlight enabled={appSettings.light === "vivid"} /></> : null}
       <div hidden={workbenchHidden} inert={workbenchHidden} ref={layout.rootRef} className={`app-body adaptive-workbench ${mdi ? "" : shellClass}`} data-layout-overlay={layout.overlay ?? undefined}>
         {layout.overlay ? <button type="button" className="layout-overlay-backdrop" aria-label={t("common.close")} onClick={layout.dismissOverlay} /> : null}
         <SharedSurface region="sidebar"><AppSidebar state={state} chrome={chrome} client={client} onRoute={go} onOpenAppUpdateDialog={() => setShowAppUpdateDialog(true)} ompMenuAnchorRef={ompMenuAnchorRef} railCollapsed={railCollapsed} avatarRef={footerAvatarRef} footerBoxRef={footerBoxRef} /></SharedSurface>

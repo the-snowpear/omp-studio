@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useSyncExternalStore } from "react";
+import { LIGHT_LEVELS, type LightLevel } from "../lux/lightLevel";
 
 export type AppLanguage = "system" | "zh" | "en";
 export type AppTheme = "light" | "dark";
@@ -33,6 +34,8 @@ export interface AppSettings {
   readonly agentRosterDensity: AgentRosterDensity;
   /** 文件图标着色；`tri` 走三通道灰阶，写 `data-palette="tri"`。 */
   readonly fileTypePalette: FileTypePalette;
+  /** 光效档位；写 `data-light`（styles/light.css）。性能分级 L2 起仍会去掉光效。 */
+  readonly light: LightLevel;
   readonly conversationWidthMode: ConversationWidthMode;
   /** 自定义阅读列最大宽度；切换预设时保留。 */
   readonly conversationCustomWidth: number;
@@ -72,6 +75,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   density: "standard",
   agentRosterDensity: "standard",
   fileTypePalette: "cat",
+  light: "standard",
   conversationWidthMode: "standard",
   conversationCustomWidth: 1024,
   uiFontFamily: "",
@@ -142,6 +146,7 @@ function parseStoredSettings(raw: string | null): AppSettings {
       density: pick(value.density, DENSITIES) ?? DEFAULT_APP_SETTINGS.density,
       agentRosterDensity: pick(value.agentRosterDensity, ["standard", "minimal"] as const) ?? DEFAULT_APP_SETTINGS.agentRosterDensity,
       fileTypePalette: pick(value.fileTypePalette, FILE_TYPE_PALETTES) ?? DEFAULT_APP_SETTINGS.fileTypePalette,
+      light: pick(value.light, LIGHT_LEVELS) ?? DEFAULT_APP_SETTINGS.light,
       conversationWidthMode: pick(value.conversationWidthMode, CONVERSATION_WIDTH_MODES) ?? DEFAULT_APP_SETTINGS.conversationWidthMode,
       conversationCustomWidth: normalizeConversationCustomWidth(value.conversationCustomWidth),
       uiFontFamily: typeof value.uiFontFamily === "string" ? value.uiFontFamily : "",

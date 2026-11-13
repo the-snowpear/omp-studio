@@ -70,6 +70,13 @@
   outline-offset: 2px !important;
 }
 
+/* Light nodes (styles/light.css) go with the shadows: the ambient field and
+   the spotlight are pure decoration, and the composer's orbit and halo say
+   nothing its blue running border does not already say. */
+:root[data-perf-tier~="L2"] :is(.lux-ambient, .lux-spot, .lux-orbit, .lux-halo) {
+  display: none !important;
+}
+
 /* Decorative sweeps stop entirely: they are the cheapest thing to drop and the
    least noticed. (L1 already collapsed their duration; this removes the layer.) */
 :root[data-perf-tier~="L2"] .ce-heat-cells::after {

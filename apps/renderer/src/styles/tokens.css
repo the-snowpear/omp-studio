@@ -7,6 +7,10 @@
    loads this file gets the shared keyframes, the surface classes and the
    reduced-motion policy with it. */
 @import "./motion.css";
+/* Light is a layer on top of the flat surfaces, chosen by the 光效 setting
+   (`data-light`). It only adds: base colours, borders and backgrounds stay
+   exactly what this file says, so `data-light="off"` is the flat UI. */
+@import "./light.css";
 
 :root {
   /* Typography */
@@ -122,6 +126,11 @@
   --loop-spin: 800ms;
   --loop-pulse: 1400ms;
   --loop-drift: 2400ms;
+  /* Light loops (styles/light.css). The orbit is a light travelling round the
+     edge of a surface that is working; the ambient field drifts so slowly it
+     is only noticed as the window being alive. */
+  --loop-orbit: 3200ms;
+  --loop-ambient: 18000ms;
 
   /* Curves — pick by what the motion means:
        --ease           state    colour, opacity, anything that stays where it is
@@ -300,9 +309,10 @@
   --code-chip-bg: rgba(110, 86, 207, 0.09);
   --code-chip-text: #5a45b8;
 
-  /* Flat: depth comes from borders + surface steps, never shadow stacks.
-     Detached surfaces use --border-float instead, which is strong enough
-     to separate them from the page without faking elevation. */
+  /* Base depth is flat: borders + surface steps. Detached surfaces use
+     --border-float, which separates them from the page on its own. The 光效
+     setting may then add light on top (styles/light.css re-points these two
+     tokens for `data-light~="std"`); `none` here is the "off" picture. */
   --shadow-menu: none;
   --shadow-modal: none;
   --border-float: #9b958c;

@@ -78,6 +78,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 
 | 功能 | 入口 | 说明 |
 |---|---|---|
+| 光效（关／柔和／标准／绚丽） | `apps/renderer/src/styles/light.css`；`lux/{lightLevel,activity}.ts`、`LuxOrbit.tsx`（Composer）、`LuxAmbient.tsx`、`LuxSpotlight.tsx`（AppShell）；设置 `settings/LocalSettings.tsx` 外观；分级 `perf/tiers.css`；定调页 `apps/renderer/light-lab.html` | `data-light` 以层集合写在 `<html>`；只叠加光不改底样式：复用 `--shadow-menu/modal`、零特异性卡片回退、独立光节点；L2 起全部移除，L1 静止循环，高对比/强制色关闭；有壁纸时不画环境光 |
 | 窗口配色与焦点 | `apps/renderer/src/dock/windowTint.ts`、`WindowFrame.tsx`、`dock.css`；`conversationWorkspace/{Header,Tabs,Workspace}.tsx`、`drag.ts`、`workspace.css`；`dock/DockDragPreview.tsx` | 对话按稳定的打开顺序取色，工具及其实例按类型取色；标题栏保留底色，当前窗口以同色边线与轻微外发光表示焦点；顶部窗口标签、浮窗内工具标签和拖动预览共用色调，深浅主题与真实／预览共用外壳 |
 | 挂载 / 无 Host 空态 | `apps/renderer/src/main.tsx` | `StudioClientImpl` + `createDesktopTransport`；缺桥则 `Unavailable` |
 | 壳布局、侧栏、底栏、路由 | `apps/renderer/src/App.tsx`（启动与连接）、`SecondaryPage.tsx`、`workbench/{AppShell,WorkbenchCanvas,AppTopbar,BottomPanelChrome}.tsx`、`sidebar/{AppSidebar,WorkspaceTree}.tsx`、`DeferredPanel.tsx`、`pageIntents.ts`、`shellModelLoader.ts` | 首页、历史、统计及非当前重面板首次可见才加载；二级页头由轻量 `SecondaryPage` 持有；会话动作 `workbench/sessionActions.ts`、重命名 `history/useSessionRename.ts`，分支操作 `git/useWorkbenchBranches.ts`、文件动作 `files/useWorkspaceFileActions.ts`；草稿、共享读取与稳定 Dock 宿主继续由现有服务持有 |

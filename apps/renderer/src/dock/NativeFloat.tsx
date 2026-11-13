@@ -15,7 +15,7 @@ import { floatTitle, workbenchBounds } from "./workbenchGeometry";
 export function mirrorAppearance(target: Document, bodyClass = "dock-native-document"): () => void {
   const nodes = new Map<Element, Element>();
   // Preferences are shared; snapshot/flight flags belong to each document.
-  const attributes = ["data-density", "data-palette", "data-platform", "data-perf-tier", "data-backdrop", "data-backdrop-scope", "data-preview", "data-preview-marks", "style", "lang", "dir"];
+  const attributes = ["data-density", "data-light", "data-palette", "data-platform", "data-perf-tier", "data-backdrop", "data-backdrop-scope", "data-preview", "data-preview-marks", "style", "lang", "dir"];
   let lastTheme: string | null | undefined;
   const sync = () => {
     const sourceRoot = document.documentElement;
