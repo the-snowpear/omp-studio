@@ -10,6 +10,7 @@ import {
   composerQueueEnabled,
   composerRunningForTarget,
   createComposerDispatchGate,
+  promptTargetChanged,
   visibleQueuedMessages,
 } from "./dispatch";
 
@@ -321,6 +322,29 @@ describe("composer ownership across a pending session.create", () => {
         entrySessionId: "sess-a",
       }),
     ).toBe(false);
+  });
+});
+
+/**
+ * Regression: the first message of a new conversation was cancelled with
+ * "发送期间已切换会话" whenever the draft window rebound to its freshly created
+ * session before the send rechecked its target.
+ */
+describe("send target recheck after session.create", () => {
+  const draft = {} as const;
+
+  it("lets a fresh draft adopt the session its own create produced", () => {
+    expect(promptTargetChanged({ sent: draft, current: { selectedSessionId: "sess-new" }, createdSessionId: "sess-new" })).toBe(false);
+    expect(promptTargetChanged({ sent: draft, current: { selectedSessionId: "sess-new", selectedThreadId: "thread-new" }, createdSessionId: "sess-new" })).toBe(false);
+    // Rebind not rendered yet: still the same draft.
+    expect(promptTargetChanged({ sent: draft, current: draft, createdSessionId: "sess-new" })).toBe(false);
+  });
+
+  it("still cancels when the operator moved to another conversation", () => {
+    expect(promptTargetChanged({ sent: draft, current: { selectedSessionId: "sess-other" }, createdSessionId: "sess-new" })).toBe(true);
+    expect(promptTargetChanged({ sent: draft, current: { selectedSessionId: "sess-other" } })).toBe(true);
+    expect(promptTargetChanged({ sent: { selectedSessionId: "sess-a" }, current: { selectedSessionId: "sess-new" }, createdSessionId: "sess-new" })).toBe(true);
+    expect(promptTargetChanged({ sent: { selectedSessionId: "sess-a", selectedThreadId: "t-a" }, current: { selectedSessionId: "sess-a", selectedThreadId: "t-b" } })).toBe(true);
   });
 });
 

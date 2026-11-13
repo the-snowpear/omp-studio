@@ -142,6 +142,28 @@ export function composerRunningForTarget(target: ComposerTarget & { readonly run
   return target.running && composerOwnsLiveSnapshot(target);
 }
 
+type PromptTarget = {
+  readonly selectedSessionId?: string | undefined;
+  readonly selectedThreadId?: string | undefined;
+};
+
+/**
+ * A send in flight is cancelled when the operator moved to another
+ * conversation. A fresh draft that adopted the session its own
+ * `session.create` produced has not moved: it is the same conversation
+ * gaining its id, and the surface may rebind before the send rechecks.
+ */
+export function promptTargetChanged(input: {
+  readonly sent: PromptTarget;
+  readonly current: PromptTarget;
+  readonly createdSessionId?: string | undefined;
+}): boolean {
+  const { sent, current, createdSessionId } = input;
+  if (current.selectedSessionId === sent.selectedSessionId && current.selectedThreadId === sent.selectedThreadId) return false;
+  const freshDraft = sent.selectedSessionId === undefined && sent.selectedThreadId === undefined;
+  return !(freshDraft && createdSessionId !== undefined && current.selectedSessionId === createdSessionId);
+}
+
 /** Synchronous ownership of dispatch, including the gap before React rerenders. */
 export function createComposerDispatchGate() {
   let busy = false;

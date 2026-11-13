@@ -34,6 +34,13 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
   let capabilities: ClientBootstrap["capabilityManifest"] | undefined;
   let selectedSession: import("@omp-studio/client-contract").SessionId | undefined;
   let capabilitiesRead: Promise<ClientBootstrap["capabilityManifest"]> | undefined;
+  // The bootstrap manifest describes the Runtime as it was when this context
+  // opened: a fresh draft gets the empty neutral manifest until its own
+  // session.create attaches a Runtime. After runtime.changed that copy is
+  // stale until the next resync, so reads must go back to the Host.
+  let bootstrapManifestStale = false, capabilitiesGeneration = 0;
+  const invalidateCapabilities = () => { capabilities = undefined; capabilitiesRead = undefined; bootstrapManifestStale = true; capabilitiesGeneration++; };
+  const adoptBootstrapManifest = (manifest: ClientBootstrap["capabilityManifest"]) => { capabilities = manifest; bootstrapManifestStale = false; capabilitiesGeneration++; };
   const selectRootProject = (workspaceId: import("@omp-studio/client-contract").WorkspaceId | undefined) => {
     if (!allowRootProject || owned || closed || !workspaceId || !value?.openContext || project?.workspaceId === workspaceId) return false;
     releaseProject?.();
@@ -52,7 +59,7 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
     if (project) bindProjectReads(client, project);
     if (closed) { releaseProject?.(); if (owned) await value.close(); throw new Error("Conversation client is closed"); }
     offEvents = value.subscribe({ scope: "all" }, event => {
-      if (event.kind === "runtime.changed" || event.kind === "resync.required") { capabilities = undefined; capabilitiesRead = undefined; }
+      if (event.kind === "runtime.changed" || event.kind === "resync.required") invalidateCapabilities();
       project?.observe(event);
       for (const subscription of subscriptions) if (eventMatchesScope(event, subscription.scope)) subscription.listener(event);
     });
@@ -61,7 +68,9 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
   }).catch(error => { opening = undefined; throw error; });
   const client: StatefulClient = {
     bootstrap: () => measureSessionOperation("client.bootstrap", async () => {
-      const result = await initializeConversationClient(await ready()); capabilities = result.capabilityManifest;
+      const result = await initializeConversationClient(await ready());
+      // A cached initialization predates any runtime.changed seen since.
+      if (!bootstrapManifestStale) capabilities = result.capabilityManifest;
       selectedSession = result.selected?.sessionId;
       const projectChanged = selectRootProject(result.selected?.workspaceId);
       if (!result.selected?.sessionId) releaseBody();
@@ -73,9 +82,14 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
       if (isAuxiliaryRead(name)) await measureSessionOperation(`query.${name}.queueWait`, () => body);
       if (closed) throw new Error("Conversation client is closed");
       if (name === "capabilities.get") {
-        const published = (target as StatefulClient).getState?.().connection.capabilityManifest;
-        if (published ?? capabilities) return (published ?? capabilities) as never;
-        capabilitiesRead ??= target.query("capabilities.get", {}).finally(() => { capabilitiesRead = undefined; });
+        const published = bootstrapManifestStale ? undefined : (target as StatefulClient).getState?.().connection.capabilityManifest;
+        const known = capabilities ?? published;
+        if (known) return known as never;
+        const generation = capabilitiesGeneration;
+        capabilitiesRead ??= target.query("capabilities.get", {}).then(manifest => {
+          if (generation === capabilitiesGeneration) capabilities = manifest;
+          return manifest;
+        }).finally(() => { capabilitiesRead = undefined; });
         return await capabilitiesRead as never;
       }
       const epoch = project?.owner.epoch;
@@ -97,7 +111,7 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
     subscribe: (scope, listener) => { const subscription = { scope, listener }; subscriptions.add(subscription); return () => { subscriptions.delete(subscription); }; },
     getState: () => value?.getState?.() ?? initial,
     onState: listener => { stateListeners.add(listener); return () => { stateListeners.delete(listener); }; },
-    resync: async () => { const target = await ready(); const result = await target.bootstrap(); capabilities = result.capabilityManifest; initializations.set(target, Promise.resolve(result)); return result; },
+    resync: async () => { const target = await ready(); const result = await target.bootstrap(); adoptBootstrapManifest(result.capabilityManifest); initializations.set(target, Promise.resolve(result)); return result; },
     transportLost: reason => { capabilities = undefined; project?.owner.invalidate(); if (value) { initializations.delete(value); value.transportLost?.(reason); } },
     close: async () => { if (closed) return; closed = true; releaseBody(); releaseProject?.(); offEvents?.(); offState?.(); subscriptions.clear(); stateListeners.clear(); if (owned) await value?.close(); },
   };
