@@ -1,6 +1,7 @@
 import { WorkspaceSection } from "../workspaces/Workspace";
 import { AppSelect } from "../AppSelect";
 import { AccountBudgetTable } from "./AccountBudgetTable";
+import { Icon } from "../icons";
 import "./accounts.css";
 import { useEffect, useRef, useState } from "react";
 import type {
@@ -191,98 +192,60 @@ export function AccountStatusPane({
       if (epoch === generation.current) { setBusy(false); policyLock.current = false; }
     }
   };
-  const quotas = (limits: AccountQuotaWindow[]) => (
-    <div className="account-quotas">
-      <AccountBudgetTable limits={limits} />
-      {limits.some(limit => limit.amount?.unit !== "usd") ? (
-        limits.filter(limit => limit.amount?.unit !== "usd").map((limit) => (
-          <div key={limit.id} className="account-quota">
-            <span>
-              {limit.label}
-              {limit.model ? ` · ${limit.model}` : ""}
-            </span>
-            <span className="mono">
-              {limit.usedFraction === undefined
-                ? zh
-                  ? "未知"
-                  : "Unknown"
-                : `${(limit.usedFraction * 100).toFixed(1)}%`}
-            </span>
-            {limit.usedFraction === undefined ? null : (
-              <progress
-                aria-label={limit.label}
-                value={Math.min(1, limit.usedFraction)}
-                max={1}
-              />
-            )}
-            <span className="small muted">
-              {
-                {
-                  ok: zh ? "额度正常" : "Available",
-                  warning: zh ? "接近额度上限" : "Near quota limit",
-                  exhausted: zh ? "额度已用尽" : "Quota exhausted",
-                  unknown: zh ? "状态未知" : "Unknown",
-                }[limit.status]
-              }
-              {limit.resetsAt === undefined
-                ? ""
-                : ` · ${limit.resetLabel ?? (zh ? "恢复时间" : "Recovers")} ${new Date(limit.resetsAt).toLocaleString()}`}
-            </span>
-            {limit.scope ? (
-              <details className="small muted">
-                <summary>
-                  {zh ? "额度作用域" : "Quota scope"}
-                  {limit.scope.shared
-                    ? zh
-                      ? " · 共享额度"
-                      : " · Shared quota"
-                    : ""}
-                  {limit.scope.tier ? " · " + limit.scope.tier : ""}
-                </summary>
-                <dl>
-                  {Object.entries(limit.scope)
-                    .filter(([key]) => key !== "shared")
-                    .map(([key, value]) => (
-                      <div key={key}>
-                        <dt>
-                          {{
-                            provider: zh ? "服务商" : "Provider",
-                            accountId: zh ? "账户" : "Account",
-                            projectId: zh ? "项目" : "Project",
-                            orgId: zh ? "组织" : "Organization",
-                            modelId: zh ? "模型" : "Model",
-                            tier: zh ? "档位" : "Tier",
-                            windowId: zh ? "周期" : "Window",
-                            sharedGroup: zh ? "共享组" : "Shared group",
-                            shared: zh ? "共享" : "Shared",
-                          }[
-                            key as keyof NonNullable<
-                              AccountQuotaWindow["scope"]
-                            >
-                          ] ?? key}
-                        </dt>
-                        <dd>{String(value)}</dd>
-                      </div>
-                    ))}
-                </dl>
-              </details>
-            ) : null}
-            {limit.notes?.map((note, index) => (
-              <p key={index} className="small muted">
-                {note}
-              </p>
-            ))}
+  const statusLabel = (status: AccountQuotaWindow["status"]) => ({
+    ok: zh ? "额度正常" : "Available",
+    warning: zh ? "接近额度上限" : "Near quota limit",
+    exhausted: zh ? "额度已用尽" : "Quota exhausted",
+    unknown: zh ? "状态未知" : "Unknown",
+  })[status];
+  const scopeLabel = (key: string) => ({
+    provider: zh ? "服务商" : "Provider",
+    accountId: zh ? "账户" : "Account",
+    projectId: zh ? "项目" : "Project",
+    orgId: zh ? "组织" : "Organization",
+    modelId: zh ? "模型" : "Model",
+    tier: zh ? "档位" : "Tier",
+    windowId: zh ? "周期" : "Window",
+    sharedGroup: zh ? "共享组" : "Shared group",
+    shared: zh ? "共享" : "Shared",
+  } as Record<string, string>)[key] ?? key;
+  const quotas = (limits: AccountQuotaWindow[]) => {
+    const windows = limits.filter(limit => limit.amount?.unit !== "usd");
+    return <div className="account-quotas">
+      {windows.length ? <div className="account-quota-grid">{windows.map(limit => {
+        const used = limit.usedFraction;
+        const tone = limit.status === "exhausted" || (used ?? 0) >= 0.95 ? "danger" : limit.status === "warning" || (used ?? 0) >= 0.8 ? "warn" : "";
+        return <div key={limit.id} className={`account-quota is-${limit.status}`}>
+          <div className="account-quota-head">
+            <span className="account-quota-label">{limit.label}{limit.model ? <span className="muted"> · {limit.model}</span> : null}</span>
+            <span className="account-quota-value mono">{used === undefined ? (zh ? "未知" : "Unknown") : `${(used * 100).toFixed(1)}%`}</span>
           </div>
-        ))
-      ) : limits.length ? null : (
-        <p className="small muted">
-          {zh
-            ? "尚无可归属到此账户的额度数据"
-            : "No quota data attributed to this account"}
-        </p>
-      )}
-    </div>
-  );
+          {used === undefined ? <span className="meter is-unknown" aria-hidden />
+            : <span className={`meter${tone ? ` ${tone}` : ""}`} role="meter" aria-label={limit.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Math.min(1, used) * 100)}><i style={{ width: `${Math.min(1, used) * 100}%` }} /></span>}
+          <span className="account-quota-status">
+            <span className={`account-quota-dot is-${limit.status}`} aria-hidden />
+            {statusLabel(limit.status)}
+            {limit.resetsAt === undefined ? "" : ` · ${limit.resetLabel ?? (zh ? "恢复时间" : "Recovers")} ${new Date(limit.resetsAt).toLocaleString()}`}
+          </span>
+          {limit.scope ? <details className="account-quota-scope">
+            <summary>{zh ? "额度作用域" : "Quota scope"}{limit.scope.shared ? (zh ? " · 共享额度" : " · Shared quota") : ""}{limit.scope.tier ? " · " + limit.scope.tier : ""}</summary>
+            <dl>{Object.entries(limit.scope).filter(([key]) => key !== "shared").map(([key, value]) => <div key={key}><dt>{scopeLabel(key)}</dt><dd>{String(value)}</dd></div>)}</dl>
+          </details> : null}
+          {limit.notes?.map((note, index) => <p key={index} className="small muted">{note}</p>)}
+        </div>;
+      })}</div> : null}
+      <AccountBudgetTable limits={limits} />
+      {!limits.length ? <p className="small muted">{zh ? "尚无可归属到此账户的额度数据" : "No quota data attributed to this account"}</p> : null}
+    </div>;
+  };
+  const policyModes: { value: AccountResetPolicy["mode"]; zh: string; en: string }[] = [
+    { value: "unset", zh: "使用前询问", en: "Ask before spending" },
+    { value: "no", zh: "不自动使用", en: "Never automatically spend" },
+    { value: "yes", zh: "允许自动使用", en: "Allow automatic spending" },
+  ];
+  const resetsSummary = (account: AccountStatusResult["accounts"][number]) => account.resets.state === "available"
+    ? zh ? `${account.resets.availableCount ?? "未知"} 张 · 可用 ${account.resets.redeemableCount ?? "未知"}` : `${account.resets.availableCount ?? "Unknown"} saved · ${account.resets.redeemableCount ?? "Unknown"} usable`
+    : account.resets.state === "unfetched" ? zh ? "尚未读取" : "Not fetched" : zh ? "不可读取或此服务商不支持" : "Unavailable or unsupported";
   return (
     <WorkspaceSection
       className="runtime-credentials account-status"
@@ -297,133 +260,89 @@ export function AccountStatusPane({
     >
       {open ? (
         <>
-          <div className="account-status-toolbar">
+          <div className="account-status-bar">
             <p className="small muted">
               {zh
-                ? "刷新只读取额度和券状态，不消费重置券。自动消费策略按下方原生窗口控制，同一服务商的账户共享该策略。"
-                : "Refresh only reads quotas and resets; it never redeems them. Native window policies below apply across accounts on the same provider."}
+                ? "刷新只读取额度和券状态，不消费重置券。"
+                : "Refresh only reads quotas and resets; it never redeems them."}
+              <span className="account-status-time">
+                {status?.refreshedAt
+                  ? `${zh ? "上次读取" : "Last fetched"} · ${new Date(status.refreshedAt).toLocaleString()}`
+                  : zh ? "点击刷新读取服务商状态" : "Refresh to read provider status"}
+              </span>
             </p>
-            <button
-              className="btn small outline"
-              disabled={busy}
-              onClick={() => void load(true)}
-            >
-              {busy ? "…" : zh ? "刷新额度" : "Refresh quotas"}
+            <button className="btn small outline" disabled={busy} onClick={() => void load(true)}>
+              <Icon name="refresh" extra="sm" />{busy ? "…" : zh ? "刷新额度" : "Refresh quotas"}
             </button>
           </div>
-          {error ? <p role="alert">{error}</p> : null}
+          {error ? <p className="account-status-alert" role="alert">{error}</p> : null}
           {status?.usageUnavailable ? (
-            <p role="status">
+            <p className="account-status-alert is-warn" role="status">
               {zh
                 ? "额度读取失败，以下配置身份不代表账户可用性。"
                 : "Quota lookup failed. Configured identities do not establish account health."}
             </p>
           ) : null}
-          {status?.refreshedAt ? (
-            <p className="small muted">
-              {zh ? "上次读取" : "Last fetched"} ·{" "}
-              {new Date(status.refreshedAt).toLocaleString()}
-            </p>
-          ) : (
-            <p className="small muted">
-              {zh
-                ? "点击刷新读取服务商状态"
-                : "Refresh to read provider status"}
-            </p>
-          )}
+          <div className="account-cards">
           {status?.accounts.map((account) => (
-            <section className="account-status-row" key={account.id}>
-              <div className="account-status-toolbar">
+            <section className={`account-status-row account-card${account.active ? " is-active" : ""}`} key={account.id} aria-label={`${account.provider} · ${account.label}`}>
+              <div className="account-status-toolbar account-card-head">
+                <span className="account-avatar" aria-hidden>{account.provider.slice(0, 1).toUpperCase()}</span>
                 <b>{account.provider}</b>
                 <span>{account.label}</span>
-                {account.organization ? (
-                  <span className="small muted">{account.organization}</span>
-                ) : null}
+                {account.organization ? <span className="small muted">{account.organization}</span> : null}
                 <span className="chip gray xs">{account.source}</span>
+                {account.active ? <span className="chip blue xs">{zh ? "当前会话" : "Current session"}</span> : null}
                 {account.source === "oauth" ? (
-                  <button
-                    className="btn small outline danger"
-                    disabled={busy || !canLogout}
-                    onClick={() =>
-                      setLogoutTarget({ id: account.id, label: account.label })
-                    }
-                  >
+                  <button className="btn small ghost danger account-signout" disabled={busy || !canLogout} onClick={() => setLogoutTarget({ id: account.id, label: account.label })}>
                     {zh ? "退出登录" : "Sign out"}
                   </button>
                 ) : null}
-                {account.active ? (
-                  <span className="chip blue xs">
-                    {zh ? "当前会话" : "Current session"}
-                  </span>
-                ) : null}
               </div>
-              {account.policy ? <p className="small muted">Priority {account.policy.priority} · Reserve {account.policy.reservePct}% ({account.policy.reserveSource}) · {account.policy.state}{account.policy.remainingPct === undefined ? "" : ` · ${account.policy.remainingPct}% left`}</p> : null}
+              {account.policy ? <p className="account-policy-line small muted">Priority {account.policy.priority} · Reserve {account.policy.reservePct}% ({account.policy.reserveSource}) · {account.policy.state}{account.policy.remainingPct === undefined ? "" : ` · ${account.policy.remainingPct}% left`}</p> : null}
               {quotas(account.limits)}
-              {account.resetPolicies?.length ? <div className="account-window-policies">
-                {account.resetPolicies.map(policy => <section className="account-reset-window" key={policy.key}>
-                  <div><b>{windowLabel(policy.window)} · {zh ? "重置策略" : "Reset policy"}</b><span className="small muted">{policy.key} · {policy.source}</span></div>
-                  <AppSelect className="select" aria-label={`${account.provider} ${windowLabel(policy.window)} ${zh ? "重置策略" : "reset policy"}`} value={policy.mode} disabled={busy || !canSetPolicy} onChange={event => {
-                    const mode = event.target.value as AccountResetPolicy["mode"];
-                    if (mode === "yes") setPolicyTarget(policy); else void savePolicy(policy, mode);
-                  }}>
-                    <option value="unset">{zh ? "使用前询问" : "Ask before spending"}</option><option value="no">{zh ? "不自动使用" : "Never automatically spend"}</option><option value="yes">{zh ? "允许自动使用" : "Allow automatic spending"}</option>
-                  </AppSelect>
-                </section>)}
-                <p className="small muted">{zh ? "原生按真正阻塞或将到期券的 governing window 判断。未知 Codex 窗口须同时遵循 5 小时和每周授权；Fable 单独授权，旧单项 autoRedeem 不授予 Fable。" : "Native policy follows the governing window of the block or expiring credit. An unknown Codex window needs both 5h and weekly consent. Fable has separate consent; legacy autoRedeem does not grant it."}</p>
-                {!canSetPolicy ? <p className="small muted">{zh ? "此 Runtime 未提供窗口策略写入能力。" : "This Runtime cannot update saved-reset window policies."}</p> : null}
-              </div> : null}
-              {account.source === "oauth" ? (
-                <div className="account-resets">
-                  <p className="small">
-                    {zh ? "重置券" : "Saved resets"} ·{" "}
-                    {account.resets.state === "available"
-                      ? `${account.resets.availableCount ?? (zh ? "未知" : "Unknown")} ${zh ? "张；可用" : "saved; usable"} ${account.resets.redeemableCount ?? (zh ? "未知" : "Unknown")}`
-                      : account.resets.state === "unfetched"
-                        ? zh
-                          ? "尚未读取"
-                          : "Not fetched"
-                        : zh
-                          ? "不可读取或此服务商不支持"
-                          : "Unavailable or unsupported"}
-                  </p>
-                  {account.resets.credits.map((credit, index) => (
-                    <div className="small muted" key={index}>
-                      {credit.title} · {credit.remainingCount ?? "—"} ·{" "}
-                      {credit.usable === undefined
-                        ? "—"
-                        : credit.usable
-                          ? zh
-                            ? "可用"
-                            : "Usable"
-                          : zh
-                            ? "暂不可用"
-                            : "Not usable"}
-                      {credit.requiresLimit
-                        ? ` · ${zh ? "需额度耗尽" : "Requires an exhausted quota"}`
-                        : ""}
-                      {credit.clears.length
-                        ? ` · ${credit.clears.join(", ")}`
-                        : ""}
-                      {credit.expiresAt
-                        ? ` · ${zh ? "到期" : "expires"} ${Number.isFinite(Date.parse(credit.expiresAt)) ? new Date(credit.expiresAt).toLocaleString() : credit.expiresAt}`
-                        : ""}
-                    </div>
-                  ))}
+              {account.resetPolicies?.length || account.source === "oauth" ? <div className="account-resets-block">
+                <div className="account-resets-head">
+                  <h4>{zh ? "重置券" : "Saved resets"}</h4>
+                  {account.source === "oauth" ? <span className={`chip xs ${account.resets.state === "available" ? "purple" : "gray"}`}>{resetsSummary(account)}</span> : null}
                 </div>
-              ) : null}
+                {account.resetPolicies?.length ? <div className="account-window-policies">
+                  {account.resetPolicies.map(policy => <div className="account-reset-window" key={policy.key}>
+                    <span className="account-reset-label"><b>{windowLabel(policy.window)}</b><span className="tiny muted" data-tip={policy.key}>{zh ? "自动使用" : "Auto-spend"} · {policy.source}</span></span>
+                    <AppSelect className="select" aria-label={`${account.provider} ${windowLabel(policy.window)} ${zh ? "重置策略" : "reset policy"}`} value={policy.mode} disabled={busy || !canSetPolicy} onChange={event => {
+                      const mode = event.target.value as AccountResetPolicy["mode"];
+                      if (mode === "yes") setPolicyTarget(policy); else void savePolicy(policy, mode);
+                    }}>
+                      {policyModes.map(mode => <option key={mode.value} value={mode.value}>{zh ? mode.zh : mode.en}</option>)}
+                    </AppSelect>
+                  </div>)}
+                </div> : null}
+                {account.resets.credits.length ? <ul className="account-credits">{account.resets.credits.map((credit, index) => <li key={index}>
+                  <span className="account-credit-title">{credit.title}<span className="mono"> × {credit.remainingCount ?? "—"}</span></span>
+                  <span className={`chip xs ${credit.usable === undefined ? "gray" : credit.usable ? "green" : "amber"}`}>{credit.usable === undefined ? "—" : credit.usable ? (zh ? "可用" : "Usable") : (zh ? "暂不可用" : "Not usable")}</span>
+                  <span className="tiny muted">
+                    {[credit.requiresLimit ? (zh ? "需额度耗尽" : "Requires an exhausted quota") : "", credit.clears.length ? credit.clears.join(", ") : "", credit.expiresAt ? `${zh ? "到期" : "expires"} ${Number.isFinite(Date.parse(credit.expiresAt)) ? new Date(credit.expiresAt).toLocaleString() : credit.expiresAt}` : ""].filter(Boolean).join(" · ")}
+                  </span>
+                </li>)}</ul> : null}
+                {account.resetPolicies?.length ? <details className="account-policy-help">
+                  <summary><Icon name="info" extra="sm" />{zh ? "自动使用规则" : "How auto-spend is decided"}</summary>
+                  <p>{zh ? "原生按真正阻塞或将到期券的 governing window 判断，同一服务商的账户共享该策略。未知 Codex 窗口须同时遵循 5 小时和每周授权；Fable 单独授权，旧单项 autoRedeem 不授予 Fable。" : "Native policy follows the governing window of the block or expiring credit and applies across accounts on the same provider. An unknown Codex window needs both 5h and weekly consent. Fable has separate consent; legacy autoRedeem does not grant it."}</p>
+                  {!canSetPolicy ? <p>{zh ? "此 Runtime 未提供窗口策略写入能力。" : "This Runtime cannot update saved-reset window policies."}</p> : null}
+                </details> : null}
+              </div> : null}
             </section>
           ))}
           {status?.unassigned.map((report, index) => (
-            <section className="account-status-row" key={index}>
-              <b>
-                {report.provider} ·{" "}
-                {zh
-                  ? "未归属到账户的额度报告"
-                  : "Quota report without an account match"}
-              </b>
+            <section className="account-status-row account-card is-unassigned" key={index}>
+              <div className="account-status-toolbar account-card-head">
+                <span className="account-avatar" aria-hidden>?</span>
+                <b>{report.provider}</b>
+                <span className="small muted">{zh ? "未归属到账户的额度报告" : "Quota report without an account match"}</span>
+              </div>
               {quotas(report.limits)}
             </section>
           ))}
+          </div>
           {status && !status.accounts.length && !status.unassigned.length ? (
             <p className="small muted">
               {zh ? "没有账户状态记录" : "No account status records"}

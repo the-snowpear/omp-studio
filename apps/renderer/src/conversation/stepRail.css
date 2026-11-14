@@ -1,0 +1,42 @@
+/* Ordered native sequences: a node per step and a connector between them.
+   The node owns state colour; rows keep their own typography. */
+.step-node {
+  --step-node: 18px;
+  position: relative; z-index: 1;
+  display: inline-grid; place-items: center; flex: none;
+  width: var(--step-node); height: var(--step-node);
+  border-radius: var(--r-full);
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: var(--fs-11); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; line-height: 1;
+  transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.step-node .icon { width: 11px; height: 11px; stroke-width: 2.2; }
+.step-node.is-done { border-color: transparent; background: var(--green-soft); color: var(--green); }
+.step-node.is-active { border-color: var(--accent); background: var(--accent); color: var(--text-on-accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.step-node.is-failed { border-color: transparent; background: var(--red-soft); color: var(--red); }
+.step-node.is-warn { border-color: transparent; background: var(--amber-soft); color: var(--amber); }
+.step-node.is-muted { border-style: dashed; color: var(--text-faint); }
+.step-node-label { display: block; }
+
+.step-rail { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.step-rail-item {
+  position: relative;
+  display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; column-gap: var(--sp-10);
+  min-width: 0; padding: var(--sp-4) 0;
+}
+.step-rail-item > .step-node { margin-top: 1px; }
+/* The connector runs from below this node to the next row's node. */
+.step-rail-item:not(:last-child)::before {
+  content: ""; position: absolute; left: 8.25px; top: calc(var(--sp-4) + 21px); bottom: calc(-1 * var(--sp-4) + 2px);
+  width: 1.5px; border-radius: var(--r-full); background: var(--border-strong);
+}
+.step-rail-item.is-done:not(:last-child)::before { background: color-mix(in srgb, var(--green) 45%, transparent); }
+.step-rail-body { min-width: 0; }
+
+/* A reported count, not an estimate: done (green) then in-flight (accent). */
+.step-count-bar { display: flex; flex: 1 1 64px; min-width: 48px; max-width: 160px; height: 4px; overflow: hidden; border-radius: var(--r-full); background: var(--surface-3); }
+.step-count-bar > i { display: block; height: 100%; transition: width var(--dur) var(--ease); }
+.step-count-bar > i.is-done { background: var(--green); }
+.step-count-bar > i.is-active { background: var(--accent); opacity: 0.55; }

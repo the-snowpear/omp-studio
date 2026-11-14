@@ -153,3 +153,30 @@
     grid-column: 1/-1;
   }
 }
+
+/* Option pills, the replay-data option card and numeric tables. */
+.maintenance-section > header label:has(.select) { display: inline-flex; align-items: center; gap: var(--sp-8); margin-top: var(--sp-8); }
+.maintenance-section > header label .select { width: auto; min-width: 168px; }
+.maintenance-categories { gap: var(--sp-8); }
+.maintenance-categories label { padding: var(--sp-4) var(--sp-10) var(--sp-4) var(--sp-8); border: 1px solid var(--border-strong); border-radius: var(--r-full); color: var(--text-2); cursor: pointer; transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.maintenance-categories label:hover { background: var(--surface-hover); }
+.maintenance-categories label:has(input:checked) { border-color: var(--accent-border); background: var(--accent-softer); color: var(--text); }
+.maintenance-categories:disabled label { cursor: default; opacity: 0.6; }
+.maintenance-strip { padding: var(--sp-12) var(--sp-14); border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface-2); transition: border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease); }
+.maintenance-strip:has(.maintenance-strip-toggle input:checked) { border-color: var(--accent-border); background: var(--accent-softer); }
+.maintenance-strip-toggle { cursor: pointer; }
+.maintenance-strip > p { margin: var(--sp-4) 0 0; padding-left: calc(13px + var(--sp-8)); }
+.maintenance-strip-options { margin-top: var(--sp-10); padding-left: calc(13px + var(--sp-8)); }
+.maintenance-strip-options label > span { color: var(--text-2); }
+.maintenance-table-wrap { border: 1px solid var(--border); border-radius: var(--r-6); }
+.maintenance-table-wrap thead th { background: var(--surface-2); font-size: var(--fs-11); }
+.maintenance-table-wrap tbody tr:last-child > * { border-bottom: 0; }
+.maintenance-table-wrap :is(th, td):not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.maintenance-strip-result { padding: var(--sp-12) var(--sp-14); border: 1px solid var(--border); border-radius: var(--r-8); }
+.maintenance-strip-result h4 + p { margin: var(--sp-4) 0 var(--sp-10); }
+.maintenance-strip-result .maintenance-table-wrap { border: 0; border-radius: 0; }
+.maintenance-strip-result table { table-layout: fixed; }
+.maintenance-strip-result .maintenance-table-wrap :is(th, td), .maintenance-strip-result .maintenance-table-wrap :is(th, td):not(:first-child) { text-align: left; border-bottom: 0; padding: var(--sp-4) var(--sp-10) var(--sp-4) 0; }
+.maintenance-strip-result thead th { background: transparent; color: var(--text-3); white-space: normal; vertical-align: bottom; line-height: 1.4; }
+.maintenance-strip-result tbody td { color: var(--text); font-size: var(--fs-18); font-weight: var(--fw-semibold); }
+.maintenance-strip-result > p:last-child { margin-bottom: 0; }

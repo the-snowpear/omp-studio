@@ -12,9 +12,18 @@
 .form-summary { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); color: var(--text-3); font-size: var(--fs-11); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
 .form-countdown { display: inline-flex; align-items: center; gap: var(--sp-4); }
 .form-summary.is-compact { flex: none; }
-.form-section-nav { display: flex; align-items: center; gap: var(--sp-4); padding: 0 var(--sp-14) var(--sp-8); overflow-x: auto; scrollbar-width: thin; }
-.form-section-nav .dk-head-chip { flex: none; display: inline-flex; gap: var(--sp-6); max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
-.form-section-nav .dk-head-chip > span { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.form-section-nav { display: flex; align-items: center; gap: 0; padding: var(--sp-2) var(--sp-12) var(--sp-8); overflow-x: auto; scrollbar-width: none; }
+.form-step { position: relative; flex: none; display: inline-flex; align-items: center; gap: var(--sp-6); max-width: 220px; min-height: 28px; padding: 0 var(--sp-8) 0 var(--sp-4); border: 0; border-radius: var(--r-full); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-11); cursor: pointer; transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.form-step + .form-step { margin-left: var(--sp-16); }
+.form-step + .form-step::before { content: ""; position: absolute; right: calc(100% + var(--sp-2)); top: 50%; width: calc(var(--sp-16) - var(--sp-4)); height: 1.5px; border-radius: var(--r-full); background: var(--border-strong); }
+.form-step.is-done + .form-step::before { background: color-mix(in srgb, var(--green) 45%, transparent); }
+.form-step:hover { background: var(--surface-hover); color: var(--text-2); }
+.form-step.active { background: var(--accent-softer); color: var(--text); font-weight: var(--fw-medium); }
+.form-step:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.form-step .step-node { --step-node: 16px; font-size: calc(10px * var(--text-font-scale)); }
+.form-step-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.form-progress { display: block; height: 2px; background: var(--border); overflow: hidden; }
+.form-progress > i { display: block; height: 100%; background: var(--accent); transition: width var(--dur) var(--ease); }
 .form-body { flex: 0 1 auto; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .form-section { min-width: 0; margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: var(--sp-12); }
 .form-section + .form-section { padding-top: var(--sp-12); border-top: 1px solid var(--border); }
@@ -43,7 +52,8 @@
 .form-table th, .form-table td { padding: var(--sp-6) var(--sp-8); border-bottom: 1px solid var(--border); text-align: left; color: var(--text-2); }
 .form-table th { font-weight: var(--fw-medium); color: var(--text); }
 .form-figure { margin: 0; }
-.form-figure img { display: block; max-width: 100%; max-height: 260px; object-fit: contain; margin: 0 auto; border-radius: var(--r-6); }
+.form-figure { padding: var(--sp-8); border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-2); }
+.form-figure img { display: block; max-width: 100%; max-height: 220px; object-fit: contain; margin: 0 auto; border-radius: var(--r-6); }
 .form-figure figcaption { margin-top: var(--sp-4); color: var(--text-3); text-align: center; font-size: var(--fs-11); }
 .form-card > .dk-actions { position: sticky; bottom: 0; z-index: 3; flex: none; background: var(--surface); }
 .form-card > .ask-error { flex: none; }

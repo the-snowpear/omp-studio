@@ -245,10 +245,14 @@ export class FormSession {
     for (const listener of this.#fieldListeners.get(id) ?? []) listener();
   }
   #filled(): number {
-    return [...this.#fields.values()].filter(field => {
-      if (field.kind === "choice") return this.otherChosen(field) || this.getDraft(field.id).checked.some(index => field.options[index]?.disabled === false);
-      return String(this.value(field) ?? "").trim() !== "";
-    }).length;
+    return [...this.#fields.values()].filter(field => this.isFieldFilled(field.id)).length;
+  }
+  /** Whether a field currently holds an answer; drives the filled count and section progress. */
+  isFieldFilled(id: string): boolean {
+    const field = this.#fields.get(id);
+    if (!field) return false;
+    if (field.kind === "choice") return this.otherChosen(field) || this.getDraft(field.id).checked.some(index => field.options[index]?.disabled === false);
+    return String(this.value(field) ?? "").trim() !== "";
   }
   #setView(view: FormViewState): void { this.#view = view; for (const listener of this.#viewListeners) listener(); }
   #setMeta(patch: Partial<FormMetaState>): void {

@@ -1,77 +1,70 @@
-.account-status {
-  margin-bottom: 16px;
-}
-.account-status > summary {
-  cursor: pointer;
-  font-weight: 600;
-  padding: 10px 0;
-}
-.account-status-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-.account-status-toolbar > p {
-  flex: 1;
-}
-.account-status-row {
-  padding: 14px 0;
-  border-top: 1px solid var(--border);
-}
-.account-quotas {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
-}
-.account-quota {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto minmax(80px, 160px);
-  gap: 6px 12px;
-}
-.account-quota > .small {
-  grid-column: 1 / -1;
-}
-.account-quota progress {
-  width: 100%;
-  accent-color: var(--accent);
-  align-self: center;
-  height: 5px;
-}
+/* Accounts: one card per native account — identity, quota meters, USD budgets,
+   then the saved-reset policy grid. Values come only from the native report. */
+.account-status { margin-bottom: var(--sp-16); }
+.account-status > summary { cursor: pointer; font-weight: var(--fw-semibold); padding: var(--sp-10) 0; }
+.account-status-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-8) var(--sp-16); margin-bottom: var(--sp-12); }
+.account-status-bar > p { flex: 1 1 280px; margin: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-10); }
+.account-status-time { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.account-status-bar .btn { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.account-status-alert { margin: 0 0 var(--sp-12); padding: var(--sp-8) var(--sp-12); border-radius: var(--r-6); background: var(--red-soft); color: var(--red); font-size: var(--fs-12); }
+.account-status-alert.is-warn { background: var(--amber-soft); color: var(--amber); }
 
-.account-quota > details,
-.account-quota > p {
-  grid-column: 1 / -1;
-}
-.account-quota dl > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.account-quota dt {
-  min-width: 80px;
-}
-.account-quota dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.account-budgets h4 { margin: 0 0 8px; font-size: var(--fs-13); }
-.account-budget-table { overflow-x: auto; }
-.account-budget-table table { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
-.account-budget-table th, .account-budget-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
-.account-budget-table th:first-child { padding-left: 0; text-align: left; }
-.account-budget-table th { font-weight: 500; }
-.account-budget-table small { display: block; color: var(--text-muted); font-weight: 400; white-space: normal; }
-.account-window-policies { margin-top: 12px; display: grid; gap: 8px; }
-.account-reset-window { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 8px 0; border-bottom: 1px solid var(--border); }
-.account-reset-window > div { display: grid; gap: 4px; min-width: 0; }
-.account-reset-window .small { overflow-wrap: anywhere; }
-.account-reset-window > .select { max-width: 100%; }
-@media (max-width: 700px) {
-  .account-quota {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .account-quota progress {
-    grid-column: 1 / -1;
-  }
-}
+.account-cards { display: grid; gap: var(--sp-12); min-width: 0; }
+.account-card { min-width: 0; padding: var(--sp-14) var(--sp-16); border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface); }
+.account-card.is-active { border-color: var(--accent-border); box-shadow: inset 3px 0 0 var(--accent); }
+.account-card.is-unassigned { border-style: dashed; }
+.account-status-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6) var(--sp-8); min-width: 0; }
+.account-card-head > b { font-size: var(--fs-14); font-weight: var(--fw-semibold); color: var(--text); }
+.account-card-head > span:not(.chip):not(.account-avatar) { min-width: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.account-avatar { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: var(--r-6); background: var(--accent-soft); color: var(--accent); font-size: var(--fs-12); font-weight: var(--fw-bold); }
+.account-card.is-unassigned .account-avatar { background: var(--surface-2); color: var(--text-3); }
+.account-signout { margin-left: auto; }
+.account-policy-line { margin: var(--sp-6) 0 0; font-variant-numeric: tabular-nums; }
+
+.account-quotas { display: grid; gap: var(--sp-12); margin-top: var(--sp-12); min-width: 0; }
+.account-quota-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: var(--sp-10); }
+.account-quota { display: flex; flex-direction: column; gap: var(--sp-6); min-width: 0; padding: var(--sp-10) var(--sp-12); border-radius: var(--r-6); background: var(--surface-2); }
+.account-quota-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-8); min-width: 0; }
+.account-quota-label { min-width: 0; color: var(--text); font-size: var(--fs-12); font-weight: var(--fw-medium); overflow-wrap: anywhere; }
+.account-quota-value { color: var(--text); font-size: var(--fs-14); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.account-quota.is-unknown .account-quota-value { color: var(--text-3); font-size: var(--fs-12); font-weight: var(--fw-regular); }
+.account-quota .meter { height: 6px; }
+.account-quota .meter.is-unknown { background: repeating-linear-gradient(-45deg, var(--surface-3) 0 4px, transparent 4px 8px); }
+.account-quota-status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); color: var(--text-3); font-size: var(--fs-11); }
+.account-quota-dot { width: 6px; height: 6px; flex: none; border-radius: var(--r-full); background: var(--text-faint); }
+.account-quota-dot.is-ok { background: var(--green); }
+.account-quota-dot.is-warning { background: var(--amber); }
+.account-quota-dot.is-exhausted { background: var(--red); }
+.account-quota-scope { color: var(--text-3); font-size: var(--fs-11); }
+.account-quota-scope > summary { cursor: pointer; }
+.account-quota-scope dl { display: grid; gap: var(--sp-2); margin: var(--sp-6) 0 0; }
+.account-quota-scope dl > div { display: flex; flex-wrap: wrap; gap: var(--sp-8); }
+.account-quota-scope dt { min-width: 72px; }
+.account-quota-scope dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+
+.account-budgets h4, .account-resets-head h4 { margin: 0; color: var(--text-2); font-size: var(--fs-12); font-weight: var(--fw-semibold); }
+.account-budgets { display: grid; gap: var(--sp-6); }
+.account-budgets > p { margin: 0; }
+.account-budget-table { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-6); }
+.account-budget-table table { width: 100%; border-collapse: collapse; font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.account-budget-table th, .account-budget-table td { padding: var(--sp-8) var(--sp-12); border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.account-budget-table tbody tr:last-child > * { border-bottom: 0; }
+.account-budget-table thead th { background: var(--surface-2); color: var(--text-3); font-size: var(--fs-11); font-weight: var(--fw-medium); }
+.account-budget-table th:first-child { text-align: left; }
+.account-budget-table tbody th { font-weight: var(--fw-medium); }
+.account-budget-table small { display: block; color: var(--text-muted); font-weight: var(--fw-regular); white-space: normal; }
+
+.account-resets-block { display: grid; gap: var(--sp-8); margin-top: var(--sp-14); padding-top: var(--sp-12); border-top: 1px solid var(--border); }
+.account-resets-head { display: flex; align-items: center; gap: var(--sp-8); }
+.account-window-policies { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: var(--sp-8); }
+.account-reset-window { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); align-items: center; gap: var(--sp-8); min-width: 0; padding: var(--sp-6) var(--sp-6) var(--sp-6) var(--sp-10); border: 1px solid var(--border); border-radius: var(--r-6); }
+.account-reset-label { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.account-reset-label > b { font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.account-reset-window > .select { width: 100%; min-width: 0; }
+.account-credits { list-style: none; display: grid; gap: var(--sp-4); margin: 0; padding: 0; }
+.account-credits li { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-4) var(--sp-8); font-size: var(--fs-12); }
+.account-credit-title { color: var(--text); }
+.account-policy-help { color: var(--text-3); font-size: var(--fs-11); }
+.account-policy-help > summary { display: inline-flex; align-items: center; gap: var(--sp-4); cursor: pointer; }
+.account-policy-help > summary:hover { color: var(--text-2); }
+.account-policy-help p { margin: var(--sp-6) 0 0; line-height: 1.6; }

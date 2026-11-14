@@ -110,13 +110,13 @@ export function ModelSystemTemplates({ context, visible, models = [], onDirty, o
   if (!visible) return null;
   return <section className="model-system-templates mp-sec">
     <header className="model-native-toolbar"><div><h3>{zh ? "模型系统模板" : "Model system templates"}{preview && marks ? zh ? " · 演示" : " · Demo" : ""}</h3><p className="sec-desc">config.yml · systemPromptTemplates</p></div><button className="btn small outline" disabled={!listAvailable || busy || dirty} onClick={() => void reload()}><Icon name="refresh" extra="sm" />{zh ? "重读" : "Reload"}</button><button className="btn small outline" disabled={!canBind || busy} onClick={() => edit()}><Icon name="plus" extra="sm" />{zh ? "添加关联" : "Add association"}</button></header>
-    <p className="small muted">{zh ? "原生最长 substring 匹配（忽略大小写）。文件须为绝对路径或 ~/ 路径；SYSTEM.md / SYSTEM_TEMPLATE.md 和显式提示优先。缺失、空或无效模板回退到内置提示。这里不是 slash 模板，也不是 models.yml 的模型覆盖。" : "Native longest-substring matching is case-insensitive. Files use absolute or ~/ paths. SYSTEM.md / SYSTEM_TEMPLATE.md and explicit prompts take precedence; missing, empty or invalid templates fall back to the bundled prompt. This is not a slash template or models.yml override."}</p>
+    <details className="model-template-rules"><summary><Icon name="info" extra="sm" />{zh ? "匹配与优先级规则" : "Matching and precedence"}</summary><p>{zh ? "原生最长 substring 匹配（忽略大小写）。文件须为绝对路径或 ~/ 路径；SYSTEM.md / SYSTEM_TEMPLATE.md 和显式提示优先。缺失、空或无效模板回退到内置提示。这里不是 slash 模板，也不是 models.yml 的模型覆盖。" : "Native longest-substring matching is case-insensitive. Files use absolute or ~/ paths. SYSTEM.md / SYSTEM_TEMPLATE.md and explicit prompts take precedence; missing, empty or invalid templates fall back to the bundled prompt. This is not a slash template or models.yml override."}</p></details>
     {!listAvailable ? <p className="small muted">{zh ? "当前 Runtime 未提供系统模板读模型。连接新版 Runtime 后可配置。" : "This Runtime has no system-template read model. Connect an updated Runtime to configure it."}</p> : null}
     {error ? <p role="alert">{error}</p> : null}
-    <div className="model-template-layout">
+    <div className={`model-template-layout${draft ? " is-editing" : ""}`}>
       <div className="model-template-list" role="list" aria-label={zh ? "系统模板关联" : "System template associations"}>
         {list?.bindings.map(binding => <button type="button" role="listitem" key={`${binding.source}:${binding.pattern}`} className={`model-template-binding${draft?.baseline === binding ? " active" : ""}`} onClick={() => edit(binding)}>
-          <b className="mono">{binding.pattern}</b><span>{binding.file}</span><small>{binding.source}{binding.effective ? "" : zh ? " · 被覆盖" : " · Overridden"}</small>
+          <b className="mono">{binding.pattern}</b><Icon name="arrow-r" extra="sm" /><span className="mono">{binding.file}</span><small className={`chip xs ${binding.effective ? "gray" : "amber"}`}>{binding.source}{binding.effective ? "" : zh ? " · 被覆盖" : " · Overridden"}</small>
         </button>)}
         {list && !list.bindings.length ? <p className="small muted">{zh ? "尚无关联；使用原生默认系统提示。" : "No associations; native default system prompts apply."}</p> : null}
       </div>

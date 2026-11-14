@@ -8,14 +8,15 @@ const live: StudioTaskStepState = { prompts: ["Inspect contracts", "Implement th
 
 describe("native task phase presentation", () => {
   it("distinguishes dispatch from completion and shows one native prompt group at a time", () => {
-    render(<TaskStepsView state={live} zh />);
+    const view = render(<TaskStepsView state={live} zh />);
+    const prompt = () => view.container.querySelector("pre")?.textContent;
     expect(screen.getByText("已发送 2/4 组 · 已完成 1/4 组")).toBeTruthy();
-    expect(screen.getByText("Implement the native seam")).toBeTruthy();
+    expect(prompt()).toBe("Implement the native seam");
     expect(screen.queryByRole("progressbar")).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /第 3 组/ }));
-    expect(screen.getByText("Verify native execution")).toBeTruthy();
-    expect(screen.queryByText("Implement the native seam")).toBeNull();
+    expect(prompt()).toBe("Verify native execution");
+    expect(view.container.querySelectorAll("pre")).toHaveLength(1);
   });
 
   it("keeps a deliberately selected older group while native progress advances", () => {
@@ -23,7 +24,7 @@ describe("native task phase presentation", () => {
     const first = screen.getByRole("button", { name: /第 1 组/ });
     first.focus(); fireEvent.click(first);
     view.rerender(<TaskStepsView state={{ ...live, sent: 3, completed: 2 }} zh />);
-    expect(screen.getByText("Inspect contracts")).toBeTruthy();
+    expect(view.container.querySelector("pre")?.textContent).toBe("Inspect contracts");
     expect(document.activeElement).toBe(first);
     expect(screen.getByText("已发送 3/4 组 · 已完成 2/4 组")).toBeTruthy();
   });

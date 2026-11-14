@@ -1,41 +1,76 @@
+/* Single/Steps task drafting and the read-only native task phases.
+   Nodes and connectors come from conversation/stepRail.css. */
 .task-assignment { display: flex; flex-direction: column; gap: var(--sp-10); min-width: 0; }
-.task-assignment-head, .task-step-outline-head, .task-step-editor-head, .task-steps-view-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); min-width: 0; }
+.task-assignment-head, .task-step-outline-head, .task-step-editor-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); min-width: 0; }
 .task-assignment-head .seg { flex: none; }
 .task-step-note { margin: 0; color: var(--text-3); font-size: var(--fs-12); line-height: 1.5; overflow-wrap: anywhere; }
-.task-step-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-12); min-width: 0; }
-.task-step-layout.is-wide { grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr); }
-.task-step-outline-wrap { min-width: 0; padding-bottom: var(--sp-10); border-bottom: 1px solid var(--border); }
-.task-step-layout.is-wide .task-step-outline-wrap { padding: 0 var(--sp-12) 0 0; border-bottom: 0; border-right: 1px solid var(--border); }
-.task-step-outline-head, .task-step-editor-head { color: var(--text-2); font-size: var(--fs-12); }
-.task-step-outline-head { margin-bottom: var(--sp-4); }
-.task-step-outline { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; scrollbar-width: thin; }
-.task-step-outline li { margin: 0; padding: 0; }
-.task-step-outline button { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: var(--sp-8); width: 100%; min-height: var(--tap-min); padding: var(--sp-8); border: 0; border-radius: var(--r-4); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
-.task-step-outline button:hover { background: var(--surface-2); }
-.task-step-outline button[aria-current="step"] { background: var(--accent-soft); color: var(--text); }
+.task-step-note.is-pending { color: var(--amber); }
+.task-step-hint { display: flex; align-items: flex-start; gap: var(--sp-6); margin: 0; padding: var(--sp-8) var(--sp-10); border-radius: var(--r-6); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-11); line-height: 1.55; overflow-wrap: anywhere; }
+.task-step-hint > .icon { flex: none; margin-top: 2px; color: var(--text-faint); }
+
+/* Outline + one editor: a card that splits into two columns when wide. */
+.task-step-layout { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface); overflow: hidden; }
+.task-step-layout.is-wide { grid-template-columns: minmax(170px, 0.9fr) minmax(0, 2fr); }
+.task-step-outline-wrap { min-width: 0; padding: var(--sp-8); background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.task-step-layout.is-wide .task-step-outline-wrap { border-bottom: 0; border-right: 1px solid var(--border); }
+.task-step-outline-head { padding: 0 var(--sp-4) var(--sp-6); color: var(--text-2); font-size: var(--fs-12); }
+.task-step-count { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); min-width: 0; font-weight: var(--fw-medium); }
+.task-step-outline { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow: auto; scrollbar-width: thin; }
+.task-step-outline li { position: relative; margin: 0; padding: 0; }
+.task-step-outline li:not(:last-child)::before { content: ""; position: absolute; left: calc(var(--sp-8) + 8.25px); top: calc(50% + 11px); bottom: calc(-50% + 11px); width: 1.5px; border-radius: var(--r-full); background: var(--border-strong); pointer-events: none; }
+.task-step-outline button { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: var(--sp-8); width: 100%; min-height: var(--tap-min); padding: var(--sp-6) var(--sp-8); border: 0; border-radius: var(--r-6); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.task-step-outline button:hover { background: var(--surface-hover); color: var(--text); }
+.task-step-outline button[aria-current="step"] { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
 .task-step-outline button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.task-step-number { color: var(--text-3); font-variant-numeric: tabular-nums; text-align: center; }
-.task-step-outline button[aria-current="step"] .task-step-number { color: var(--accent); font-weight: var(--fw-semibold); }
+.task-step-outline li.is-empty .task-step-caption { color: var(--text-faint); font-style: italic; }
 .task-step-caption { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-step-editor { display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; }
+.task-step-editor { display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; padding: var(--sp-10) var(--sp-12) var(--sp-8); }
+.task-step-editor-head { color: var(--text); font-size: var(--fs-12); font-weight: var(--fw-medium); }
 .task-step-editor textarea { width: 100%; min-height: 160px; resize: vertical; }
-.task-step-actions { display: flex; align-items: center; gap: var(--sp-4); }
+.task-step-actions { display: flex; align-items: center; gap: var(--sp-2); }
+.task-step-keys { display: flex; flex-wrap: wrap; gap: var(--sp-4) var(--sp-12); margin: 0; color: var(--text-3); font-size: var(--fs-11); }
+.task-step-keys > span { display: inline-flex; align-items: center; gap: var(--sp-4); }
 .task-step-error, .task-step-reason { margin: 0; font-size: var(--fs-12); line-height: 1.5; overflow-wrap: anywhere; }
 .task-step-error { color: var(--red); }
+
+/* Spawn modal */
 .task-spawn-options { padding-top: var(--sp-12); border-top: 1px solid var(--border); }
 .task-spawn-options > summary { display: flex; align-items: center; gap: var(--sp-6); color: var(--text-2); font-size: var(--fs-12); cursor: pointer; }
 .task-spawn-options > .hub-na-grid { margin-top: var(--sp-12); }
 .task-spawn-options .agent-spawn-config { padding-bottom: 0; }
-.hub-modal.is-spawn { width: min(740px, calc(100vw - var(--sp-32))); max-height: calc(100dvh - var(--sp-32)); display: flex; flex-direction: column; }
+.hub-modal.is-spawn { width: min(760px, calc(100vw - var(--sp-32))); max-height: calc(100dvh - var(--sp-32)); display: flex; flex-direction: column; }
 .hub-modal.is-spawn .modal-body { overflow: auto; min-height: 0; }
 .hub-modal.is-spawn :is(.modal-head, .modal-foot) { flex: none; }
+
+/* Read-only native phases */
 .task-steps-view { display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; padding: var(--sp-12) 0; border-bottom: 1px solid var(--border); }
-.task-steps-view-head h3 { margin: 0; color: var(--text-2); font-size: var(--fs-12); font-weight: var(--fw-semibold); }
-.task-step-phase, .task-step-group-state { display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--text-3); font-size: var(--fs-11); }
-.task-step-phase.is-running { color: var(--accent); }
-.task-step-phase.is-failed { color: var(--red); }
-.task-step-phase:is(.is-budget, .is-interrupted) { color: var(--amber); }
-.task-step-outline.is-readonly button { grid-template-columns: 22px minmax(0, 1fr) auto; }
-.task-step-prompt { min-width: 0; padding: var(--sp-8) 0 0; border-top: 1px solid var(--border); }
-.task-step-prompt pre { margin: var(--sp-6) 0 0; max-height: 220px; overflow: auto; color: var(--text-2); font: inherit; font-size: var(--fs-12); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-width: thin; }
-.task-step-reason { color: var(--text-2); white-space: pre-wrap; }
+.task-steps-view-head { display: flex; align-items: center; gap: var(--sp-10); min-width: 0; }
+.task-steps-view-head h3 { margin: 0; color: var(--text); font-size: var(--fs-12); font-weight: var(--fw-semibold); }
+.task-steps-view-head .task-step-phase { margin-left: auto; }
+.task-step-phase { display: inline-flex; align-items: center; gap: var(--sp-4); height: 20px; padding: 0 var(--sp-8); border-radius: var(--r-full); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-11); font-weight: var(--fw-medium); white-space: nowrap; }
+.task-step-phase.is-running { background: var(--accent-soft); color: var(--accent); }
+.task-step-phase.is-completed { background: var(--green-soft); color: var(--green); }
+.task-step-phase.is-failed { background: var(--red-soft); color: var(--red); }
+.task-step-phase:is(.is-budget, .is-interrupted) { background: var(--amber-soft); color: var(--amber); }
+.task-phase-rail .step-rail-item { padding: var(--sp-2) 0; }
+.task-phase-rail .step-rail-item > .step-node { margin-top: 7px; }
+.task-phase-rail .step-rail-item:not(:last-child)::before { top: calc(var(--sp-2) + 27px); }
+.task-phase-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-8); width: 100%; min-height: 32px; padding: var(--sp-4) var(--sp-8); border: 0; border-radius: var(--r-6); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.task-phase-row:hover { background: var(--surface-hover); color: var(--text); }
+.task-phase-row[aria-pressed="true"] { background: var(--accent-softer); color: var(--text); }
+.task-phase-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.task-phase-caption { display: flex; align-items: baseline; gap: var(--sp-8); min-width: 0; }
+.task-phase-index { flex: none; color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.task-phase-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-step-group-state { color: var(--text-3); font-size: var(--fs-11); white-space: nowrap; }
+.task-step-group-state.is-done { color: var(--green); }
+.task-step-group-state.is-active { color: var(--accent); }
+.task-step-group-state.is-failed { color: var(--red); }
+.task-step-group-state.is-warn { color: var(--amber); }
+.task-step-group-state.is-pending { color: var(--text-faint); }
+.task-step-prompt { min-width: 0; margin: 0; padding: var(--sp-8) var(--sp-10); border-left: 2px solid var(--accent-border); border-radius: 0 var(--r-6) var(--r-6) 0; background: var(--surface-2); }
+.task-step-prompt > figcaption { color: var(--text-3); font-size: var(--fs-11); }
+.task-step-prompt pre { margin: var(--sp-6) 0 0; max-height: 220px; overflow: auto; color: var(--text); font: inherit; font-size: var(--fs-12); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-width: thin; }
+.task-step-reason { padding: var(--sp-6) var(--sp-10); border-radius: var(--r-6); background: var(--surface-2); color: var(--text-2); white-space: pre-wrap; }
+.task-step-reason.is-failed { background: var(--red-soft); color: var(--red); }
+.task-step-reason.is-warn { background: var(--amber-soft); color: var(--amber); }

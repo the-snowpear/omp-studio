@@ -2,7 +2,11 @@ import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "re
 import { Icon } from "../icons";
 import { formatShortcut, isPrimaryModifier } from "../keyboard/shortcuts";
 import { useWideLayout } from "../layout/useWideLayout";
+import { StepNode } from "../conversation/StepRail";
 import "./taskSteps.css";
+
+/** Native task.steps sends at most this many prompt groups. */
+const NATIVE_GROUPS = 4;
 
 export type TaskAssignmentMode = "single" | "steps";
 export interface TaskStepDraft { id: string; text: string }
@@ -103,6 +107,7 @@ export function TaskAssignmentEditor({ mode, onModeChange, assignment, onAssignm
   }
   const textSize = steps.reduce((size, step) => size + step.text.length, 0);
 
+  const merged = steps.length > NATIVE_GROUPS;
   return <div className="task-assignment" ref={rootRef} onKeyDown={onStepKey}>
     <div className="task-assignment-head">
       <span className="tiny muted">{zh ? "任务形式" : "Assignment"}</span>
@@ -115,14 +120,20 @@ export function TaskAssignmentEditor({ mode, onModeChange, assignment, onAssignm
     {mode === "single" ? <div className="field"><label className="tiny muted" htmlFor={`${id}-assignment`}>{zh ? "任务描述" : "Task instructions"}</label>
       <textarea id={`${id}-assignment`} className="input" rows={4} maxLength={65536} value={assignment} disabled={disabled} placeholder={zh ? "描述代理需要完成的工作…" : "Describe the work for this agent…"} onChange={event => onAssignmentChange(event.target.value)} />
     </div> : <>
-      <p className="task-step-note">{zh ? "一次创建同一个 Agent。原生按顺序发送最多 4 组提示；更多步骤会合并，完成一组才续发。" : "One agent, at most four native prompt groups. More steps share groups; the next group follows a clean result."}</p>
       <div className={`task-step-layout${wide ? " is-wide" : ""}`}>
         <div className="task-step-outline-wrap">
-          <div className="task-step-outline-head"><span>{zh ? `${steps.length} 个有序步骤` : `${steps.length} ordered steps`}</span><button type="button" className="btn small ghost" disabled={editingLocked} aria-label={zh ? "新增步骤" : "Add step"} data-tip={addShortcut} onClick={add}><Icon name="plus" extra="sm" /><span>{zh ? "新增" : "Add"}</span></button></div>
+          <div className="task-step-outline-head">
+            <span className="task-step-count">{zh ? `${steps.length} 个有序步骤` : `${steps.length} ordered steps`}{merged ? <span className="chip amber xs" data-tip={zh ? "原生最多发送 4 组提示，相邻步骤会合并成组" : "Native sends at most four prompt groups; adjacent steps share a group"}>{zh ? `合并为 ${NATIVE_GROUPS} 组` : `${NATIVE_GROUPS} groups`}</span> : null}</span>
+            <button type="button" className="btn small ghost" disabled={editingLocked} aria-label={zh ? "新增步骤" : "Add step"} data-tip={addShortcut} onClick={add}><Icon name="plus" extra="sm" /><span>{zh ? "新增" : "Add"}</span></button>
+          </div>
           <ol className="task-step-outline" ref={outlineRef} aria-label={zh ? "任务步骤顺序" : "Ordered task steps"}>
-            {steps.map((step, index) => <li key={step.id}><button type="button" data-step-id={step.id} aria-current={activeId === step.id ? "step" : undefined} aria-label={`${stepLabel(index)}: ${step.text.trim() || (zh ? "待填写" : "Empty")}`} tabIndex={activeId === step.id ? 0 : -1} onClick={() => choose(index)}>
-              <span className="task-step-number">{index + 1}</span><span className="task-step-caption">{step.text.trim().split(/\r?\n/u)[0] || (zh ? "待填写步骤" : "Empty step")}</span>
-            </button></li>)}
+            {steps.map((step, index) => {
+              const text = step.text.trim();
+              const current = activeId === step.id;
+              return <li key={step.id} className={text ? "is-filled" : "is-empty"}><button type="button" data-step-id={step.id} aria-current={current ? "step" : undefined} aria-label={`${stepLabel(index)}: ${text || (zh ? "待填写" : "Empty")}`} tabIndex={current ? 0 : -1} onClick={() => choose(index)}>
+                <StepNode tone={current ? "active" : text ? "pending" : "muted"} label={index + 1} /><span className="task-step-caption">{text.split(/\r?\n/u)[0] || (zh ? "待填写步骤" : "Empty step")}</span>
+              </button></li>;
+            })}
           </ol>
         </div>
         <div className="task-step-editor">
@@ -132,10 +143,11 @@ export function TaskAssignmentEditor({ mode, onModeChange, assignment, onAssignm
             <button type="button" className="icon-btn small" disabled={editingLocked || steps.length <= 1} aria-label={zh ? "删除步骤" : "Remove step"} data-tip={deleteShortcut} onClick={remove}><Icon name="trash" extra="sm" /></button>
           </div></div>
           <textarea id={`${id}-step`} className="input" ref={editorRef} rows={7} maxLength={65536} disabled={editingLocked || !selected} value={selected?.text ?? ""} placeholder={zh ? "写出这一步的目标、约束和交付…" : "Describe this step's goal, constraints and handoff…"} onChange={event => onStepsChange(steps.map(step => step.id === activeId ? { ...step, text: event.target.value } : step))} />
-          <p className="task-step-note">{zh ? `新增 ${addShortcut} · 删除 ${deleteShortcut} · 排序 Alt+↑/↓` : `Add ${addShortcut} · Remove ${deleteShortcut} · Reorder Alt+↑/↓`}</p>
+          <p className="task-step-keys" aria-hidden><span><kbd className="kbd">{addShortcut}</kbd>{zh ? "新增" : "Add"}</span><span><kbd className="kbd">{deleteShortcut}</kbd>{zh ? "删除" : "Remove"}</span><span><kbd className="kbd">Alt+↑/↓</kbd>{zh ? "排序" : "Reorder"}</span></p>
         </div>
       </div>
-      {steps.some(step => !step.text.trim()) ? <p className="task-step-note">{zh ? "填写每一步后即可创建；模型、思考强度和解题范围对整条任务生效。" : "Fill every step to create the task. Model, effort and solution space apply to the whole task."}</p> : null}
+      <p className="task-step-hint"><Icon name="info" extra="sm" /><span>{zh ? "同一个 Agent 依次执行；原生最多发送 4 组提示，完成一组才续发。模型、思考强度和解题范围对整条任务生效。" : "One agent runs the steps in order; native sends at most four prompt groups, each after a clean result. Model, effort and solution space apply to the whole task."}</span></p>
+      {steps.some(step => !step.text.trim()) ? <p className="task-step-note is-pending">{zh ? "填写每一步后即可创建。" : "Fill every step to create the task."}</p> : null}
       {textSize > 65536 ? <p className="task-step-error" role="alert">{zh ? "步骤正文合计超过 64 KiB，请缩短后再创建。" : "Step instructions exceed 64 KiB in total. Shorten them before creating the task."}</p> : null}
       {stepsAdvertised === false ? <p className="task-step-note">{zh ? "原生步骤广告当前关闭。本次选择只影响这条任务，不会修改全局委派策略。" : "Native step advertising is off. This choice affects only this task, not the global delegation policy."}</p> : null}
     </>}

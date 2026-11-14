@@ -6,6 +6,7 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { demoMark, PromptHead, QueueNav, type DeckQueue } from "./PromptHead";
 import { FormFields, formSectionLabel } from "./FormFields";
 import { FormSession, type FormResponder } from "./FormSession";
+import { StepNode } from "../conversation/StepRail";
 import "./form.css";
 
 /** One Session and the same field DOM survive collapse, section navigation and queue/layout changes. */
@@ -70,13 +71,8 @@ export function FormCard({ session, title, summary, meta, demo, queue, disabled,
         <button className="icon-btn small" type="button" aria-label={view.expanded ? "收回表单" : "放大表单"} data-tip={view.expanded ? "收回表单" : "放大表单"} onClick={() => session.setExpanded(!view.expanded)}><Icon name={view.expanded ? "contract" : "expand"} extra="sm" /></button>
         <button className="icon-btn small" type="button" aria-label="收起表单" data-tip={PLATFORM === "darwin" ? "收起 · ⌥H" : "收起 · Alt+H"} onClick={() => session.setCollapsed(true)}><Icon name="minimize" extra="sm" /></button>
       </span>} />
-      {grouped && form ? <nav className="form-section-nav" aria-label="表单题组" onKeyDown={event => {
-        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-        event.preventDefault();
-        const pos = sections.indexOf(current);
-        const index = event.key === "Home" ? sections[0] : event.key === "End" ? sections.at(-1) : sections[Math.max(0, Math.min(sections.length - 1, pos + (event.key === "ArrowLeft" ? -1 : 1)))];
-        if (index !== undefined) jump(index);
-      }}>{sections.map((index, at) => <button key={index} type="button" className={`dk-head-chip${index === current ? " active" : ""}`} aria-current={index === current ? "step" : undefined} onClick={() => jump(index)}><span>{at + 1}</span>{formSectionLabel(form, index)}</button>)}</nav> : null}
+      {grouped && form ? <FormSectionNav session={session} sections={sections} current={current} jump={jump} /> : null}
+      <FormProgress session={session} />
     </div>
     <div className="ask-body form-body" hidden={view.collapsed}>
       {loading ? <p className="muted small" role="status">正在读取表单…</p> : form ? <FormFields form={form} session={session} section={current} grouped={grouped} disabled={disabled} /> : null}
@@ -84,6 +80,32 @@ export function FormCard({ session, title, summary, meta, demo, queue, disabled,
     <FormError session={session} />
     <FormFooter session={session} disabled={disabled} hidden={view.collapsed} />
   </div>;
+}
+
+/** Section stepper: each group shows whether every field in it holds an answer. Re-renders on the filled count only. */
+function FormSectionNav({ session, sections, current, jump }: { session: FormSession; sections: number[]; current: number; jump: (index: number) => void }) {
+  useSyncExternalStore(session.subscribeMeta, () => session.getMeta().filled, () => 0);
+  const form = session.form!;
+  const complete = (index: number) => form.sections[index]!.blocks.every(block => block.kind !== "field" || session.isFieldFilled(block.fieldId));
+  return <nav className="form-section-nav" aria-label="表单题组" onKeyDown={event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const pos = sections.indexOf(current);
+    const index = event.key === "Home" ? sections[0] : event.key === "End" ? sections.at(-1) : sections[Math.max(0, Math.min(sections.length - 1, pos + (event.key === "ArrowLeft" ? -1 : 1)))];
+    if (index !== undefined) jump(index);
+  }}>{sections.map((index, at) => {
+    const done = complete(index);
+    return <button key={index} type="button" className={`form-step${index === current ? " active" : ""}${done ? " is-done" : ""}`} aria-current={index === current ? "step" : undefined} onClick={() => jump(index)}>
+      <StepNode tone={index === current ? "active" : done ? "done" : "pending"} label={at + 1} /><span className="sr-only">{at + 1}</span><span className="form-step-label">{formSectionLabel(form, index)}</span>
+    </button>;
+  })}</nav>;
+}
+
+/** A thin bar under the head: answered fields over all fields, as the native form reports them. */
+function FormProgress({ session }: { session: FormSession }) {
+  const { filled, total } = useSyncExternalStore(session.subscribeMeta, session.getMeta, session.getMeta);
+  if (!total) return null;
+  return <span className="form-progress" aria-hidden><i style={{ width: `${Math.min(100, (filled / total) * 100)}%` }} /></span>;
 }
 
 /** Countdown and filled count update only this leaf, never the input subtree or conversation. */
