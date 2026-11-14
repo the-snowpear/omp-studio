@@ -7,16 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-14
+
+本次是 0.2.0 的使用阻断修复版，内置 Runtime 更新为 `18.18.0-studio.2`。升级需要完整桌面更新，确保输入预测的桌面端修复与 Runtime 修复一起生效。
+
 ### Fixed
 
 - 修复新对话的第一条消息被误报「发送期间已切换会话」而取消、草稿退回输入框：新草稿接管自己 `session.create` 刚建出的会话不再算作切换；真正切到其他对话时仍会取消发送。
 - 修复上述失败后发送按钮一直禁用：新草稿打开时拿到的空能力清单在 Runtime 接入后不再沿用，收到 `runtime.changed` 后改为向 Host 重新读取。
 - 从历史打开、尚未连接 Runtime 的对话不再显示红色「Runtime 不可用」：没有任何失败记录时改为中性提示「Runtime 未启动 · 发送消息时会自动连接」，并提供「立即连接」；真正的启动失败仍显示红色告警。
 - 冷会话可在首条消息前选择模型：新对话按所选模型启动，历史对话携带所选模型恢复；连接期间保留输入框草稿，当前模型仍以 Runtime 快照为准。
+- 修复鼠标移入再点击「更多模型」会把刚展开的模型列表关闭的问题；点击保持列表展开，仍可通过移出、Esc 或菜单外点击关闭。
 - 独立会话启动失败时保留实际失败原因，重试成功后清除；旧能力读取结束不再打断新 Runtime 的刷新请求。
 - 修复项目包含会话启动的后台服务时，「后台任务」面板反复弹出「操作执行失败 / Runtime command failed」：合法服务记录的 `ownerId`、`pid`、`previewUrl` 不再被过期的结果字段白名单拒绝。沿用单处输入校验，预览地址仍在启动服务时检查。
 - 修复输入预测无法挂载、输入框下方显示「Invalid prediction fields」：桌面端接受 Runtime 返回的 v2 预测通道（带 `protocolVersion: 2`），拒绝其他协议版本。
 - 修复侧栏中当前激活的项目收起后再也无法点开：点击已激活项目时不再跳过展开，并同时加载该项目的会话列表。
+- 修复本地 Runtime 工件生成器忽略 `--signing-key` / `--key-id` 参数的问题：命令行指定的签名文件和身份现在会正确生效；CI 原有的环境变量传参方式保持兼容。
 
 ## [0.2.0] - 2026-11-13
 
@@ -509,7 +515,8 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/the-snowpear/omp-studio/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/the-snowpear/omp-studio/compare/v0.1.17...v0.2.0
 [0.1.17]: https://github.com/the-snowpear/omp-studio/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/the-snowpear/omp-studio/compare/v0.1.15...v0.1.16

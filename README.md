@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> 本页介绍的窗口化工作台属于 **0.2.0**，目前在 [`0.2.0`](https://github.com/the-snowpear/omp-studio/tree/0.2.0) 分支开发，尚未发布正式安装包。[Releases](https://github.com/the-snowpear/omp-studio/releases) 中的最新正式版仍是 0.1.x。各项变化与当前验证范围见 [CHANGELOG](CHANGELOG.md#unreleased)。
+> 窗口化工作台已随 **0.2.0** 发布。**[0.2.1](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.1)** 修复首次发送、冷会话选模型、Runtime 状态提示、输入预测和项目展开，并搭载修复后台服务列表的 Runtime `18.18.0-studio.2`。下载与升级说明见 [发布说明](docs/releases/v0.2.1.md)，验证范围见 [发布审查记录](docs/reviews/v0.2.1-release-review.md)。
 
 <table>
 <tr>
