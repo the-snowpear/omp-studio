@@ -1,6 +1,26 @@
 # tmux 控制模式（`tmux -C`）接入计划
 
-立项：2026-11-14。状态：**实施中，M0 抓包与吞屏修复完成**。实施工作树：`.claude/worktrees/tmux-control-mode`，分支 `codex/tmux-control-mode`，基于任务开始时的 `0.2.0` 提交 `6c2be11`。本文是实施依据，下面的抓包修订优先于原方案示例。
+立项：2026-11-14。状态：**已实现，M0–M5 完成**。实施工作树：`.claude/worktrees/tmux-control-mode`，分支 `codex/tmux-control-mode`，基于任务开始时的 `0.2.0` 提交 `6c2be11`；恢复点为 `codex/tmux-control-mode-base`。下面的实测修订与实施记录优先于原方案示例。
+
+### 实施记录（as-built）
+
+- M0 吞屏修复、M1 协议核心、M2 SSH 管理与 IPC、M3 窗口分屏界面、M4 恢复与生命周期、M5 用户文档分别提交。普通 Shell 和 tmux 窗格复用终端数据、backlog 与 ACK，未改 Host / Studio Bridge / Runtime 契约。
+- 界面拆为 `tmux/TmuxPanel.tsx`、选择器、关闭弹窗、窗口视图和 `tmux.css`，复用已有 `WorkspaceDialog`、`AppSelect` 与浏览器链接菜单。全局终端类型直接引用 Desktop 契约，不再重复定义。
+- 输入只在 Desktop IPC 的 `parseTmux*` 校验一次；不增加结果校验器或拒绝多余字段的白名单。连接层保留真实目标所属关系、并发关闭与资源上限检查。
+- 拓扑额外保留 `fullLayout`。缩放时按 `layout` 呈现可见窗格，隐藏的 xterm 仍使用完整布局的尺寸并消费输出，避免未显示窗格堵住整条连接。
+- `capture-pane -a` 返回全屏程序背后保存的普通屏幕，恢复时先写该屏，再进入备用屏写当前可见屏。鼠标分别恢复 1000 / 1002 / 1003 和 SGR 模式，不能把 `mouse_any_flag` 一律当作 1003。
+- 分离、断线后保留只读屏幕；移除和重新附加会释放旧 Main 连接及 Renderer 图形资源，重新附加沿用分组位置。
+- 预览只保留本地拓扑与布局占位；关闭方式记忆在预览中也只保存在本地演示状态。无假 Shell 输出，无 Host 调用。
+- 使用说明：[docs/tmux.md](../docs/tmux.md)。功能索引、设置搜索入口与 Unreleased 已更新。
+
+### 验证结果与范围（2026-11-14）
+
+- 真实 SSH 抓包：tmux 3.2a、3.4、3.7c；原始 `.bin` 禁止 Git 换行转换。协议核心对整块与随机切块回放、UTF-8 跨输出通知、嵌套 / 缩放布局及命令 FIFO 均通过。
+- `npm run check -- --only desktop --suite tmux --suite terminal-ipc` 通过，覆盖流控、恢复、连接丢失、最低版本、窗口关闭竞态和 IPC 路由。通过 `TMUX_TEST_SSH` / `TMUX_TEST_CONTAINER` 实测 3.2a 与 3.7c 的附加、输入、拆分、隐藏 / 恢复、detach 保留会话、重新附加。
+- `npm run check -- --only renderer --suite terminalSessions --suite TerminalPane --suite TmuxWindowView` 通过，覆盖窗格登记与 ACK、关闭选择与记忆、隐藏 / 恢复、分隔线换算、只读 / 资源释放、重新附加位置、预览和 `marks=off`。
+- `npm run check -- --production` 通过（206 秒）：架构、选择器、动效、全部类型、全量核心测试、Renderer / preload / 远端 Host 生产产物。此命令已包含普通 `npm run check` 的门禁，没有重复跑一遍全量核心。
+- 真实 Chromium + SSH 管道复核使用临时验证页面和独立 tmux socket，通过三窗格拆分、分隔线拖动、18px 字号、主题、缩放、关闭弹窗、隐藏 / 恢复、预览和 `marks=off`。vim 使用 `C.UTF-8`，含中文和 emoji 的未保存内容在 detach / 重新附加后仍可见；截图保留于工作树的 `output/playwright/`，不提交。最终鼠标模式代码也再次通过 tmux 3.2a 的真实 SSH 集成测试。
+- 仍需外部环境复核：macOS 桌面壳、密码 SSH 目标、物理断网、htop 鼠标操作，以及所有 §8 人工项目的双版本完整走查。未将这些标记为已完成。`%pause` 的重同步和 stdout 背压已由连接测试驱动；`too far behind` 文本以 tmux 3.2a `control.c` 确认，未等待原生默认五分钟超时去复现断连。
 
 ### M0 实测修订（2026-11-14）
 
@@ -33,21 +53,21 @@
 
 ## 1. tmux 控制模式速查（实现依据）
 
-来源：tmux wiki「Control Mode」和 `tmux.1` 的 CONTROL MODE、`refresh-client` 两节（链接见 §11）。标了「⚠ 待 M0 抓包确认」的条目，必须先用真实 tmux 3.2a 和最新版抓包核对，再写代码。
+来源：tmux wiki「Control Mode」和 `tmux.1` 的 CONTROL MODE、`refresh-client` 两节（链接见 §11）。原方案待确认项已按 M0 的 3.2a / 3.4 / 3.7c 抓包修订；没有实际诱发的慢客户端超时明确标注来源。
 
 ### 1.1 进入与退出
 
 - `tmux -C new-session …` / `tmux -C attach-session …`：控制模式。客户端从 stdin 按行读命令（以 `\n` 结尾），在 stdout 输出结构化文本。
-- `-CC` 会把 tty 设成 raw 模式，并用 DCS `\033P1000p` … `\033\\` 包住整个会话，需要 tty。**本计划只用单个 `-C`，经管道运行，没有 tty，也就没有回显和 DCS。** ⚠ 待 M0 确认 `ssh -T host tmux -C new -A -s x` 在无 tty 时可以正常工作。
+- `-CC` 会把 tty 设成 raw 模式，并用 DCS `\033P1000p` … `\033\\` 包住整个会话，需要 tty。**产品使用 `-u -C`，经管道运行，没有 tty、回显和 DCS。** 已通过真实 SSH 验证无 tty 的启动与分离。
 - **stdin 收到空行就 detach。** 退出时 tmux 输出 `%exit [reason]`。`refresh-client -f wait-exit` 会让 tmux 在 `%exit` 之后再等一个空行才退出。
-- 客户端落后太多时 tmux 会主动断开，`%exit` 带原因。⚠ 原因文本待抓包确认（预期类似 `too far behind`）。
+- 客户端落后太多时 tmux 会主动断开，`%exit` 带原因。tmux 3.2a 的 `control.c` 明确写出 `too far behind`，默认上限是 300000 ms；本轮未实际等待五分钟诱发该退出。
 
 ### 1.2 命令应答帧
 
 - 每条命令产生**一个**输出块：`%begin <time> <number> <flags>`，若干行输出，然后 `%end <time> <number> <flags>`（成功）或 `%error …`（失败）。三段参数首尾一致。
 - **通知不会出现在输出块内部。** 块里以 `%` 开头的行仍然是命令输出。
 - 关联方式：Studio 每发一行命令，就按 FIFO 等一个块。**一行只发一条命令，不用 `;` 串命令。**
-- ⚠ 待 M0 确认：启动参数里的那条命令（`new-session -A …`）会不会先产生一个块。预期会。实现上要有「启动门」：收到第一个 `%end` / `%error` 之后才发第一条命令，超时 15 秒算附加失败。
+- 实测启动参数中的 `new-session -A …` 会先产生一个块。「启动门」收到首个成功块后才发送排队命令；启动错误立即失败，15 秒没有块也算附加失败。
 
 ### 1.3 通知（3.2+，`tmux.1` 当前版本）
 
@@ -70,7 +90,7 @@
 | `%paste-buffer-changed` / `-deleted`、`%message`、`%config-error` | — | `%config-error` 写日志并在分组头显示一次，其余忽略 |
 | `%exit` | `[reason]` | 连接结束 |
 
-⚠ 待 M0 确认：3.2a 的 `%layout-change` 是否已经带 4 个参数。只有 2 个时用 `layout` 代替 `visible-layout`。
+3.2a、3.4 和 3.7c 抓包均为四参数 `%layout-change`；缩放时 `visible-layout` 只有可见窗格。
 
 ### 1.4 Studio 用到的客户端命令
 
@@ -79,7 +99,7 @@
 | 版本 | `display-message -p '#{version}'`（返回如 `3.2a`、`3.5a`、`next-3.6`） |
 | 客户端选项 | `refresh-client -f pause-after=15` |
 | 默认尺寸 | `refresh-client -C 120x32` |
-| 单窗口尺寸 | `refresh-client -C @3:120x32`（`tmux.1`：「widthxheight 或 window ID:widthxheight」）⚠ 确认 3.2a 支持 |
+| 窗口视口尺寸 | 产品统一使用 `refresh-client -C 120x32`。3.2a 对 `-C @3:120x32` 返回 `bad size argument`，所以不使用新版的逐窗口语法。 |
 | 窗格开关、流控恢复 | `refresh-client -A '%5:on'` / `'%5:off'` / `'%5:continue'` |
 | 订阅（M4） | `refresh-client -B 'studio-pane:%*:#{pane_title}'` |
 | 窗口清单 | `list-windows -F '#{window_id}\t#{window_index}\t#{window_active}\t#{window_flags}\t#{window_visible_layout}\t#{window_name}'` |

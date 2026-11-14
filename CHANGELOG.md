@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- SSH 工作区终端支持附加 tmux ≥ 3.2：会话选择、窗口标签、布局分屏与拖动调整、隐藏 / 结束选择、断线重新附加和全屏程序恢复；退出 Studio 只分离连接，保留远端进程。详见 [tmux 使用说明](docs/tmux.md)。
+
 ### Changed
 
 - 底层引擎升级到 **OMP 18.19.0（`18.19.0-studio.10`）**，涵盖 18.18.1–18.19.0 共十次上游发布；逐版变化与 Studio 落点见 [18.19.0 迁移报告](docs/migrations/omp-18.19.0.md)。
@@ -19,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 可撤销的退出会先询问 Runtime 的原生关闭钩子，再停止 Worker。
 
 ### Fixed
+
+- 普通终端识别到 `tmux -CC` 控制模式时不再无限缓冲 DCS 输出，显示提示并提供退出按钮；其他 DCS 和 Sixel 继续正常处理。
 
 - 修复新对话的第一条消息被误报「发送期间已切换会话」而取消、草稿退回输入框：新草稿接管自己 `session.create` 刚建出的会话不再算作切换；真正切到其他对话时仍会取消发送。
 - 修复上述失败后发送按钮一直禁用：新草稿打开时拿到的空能力清单在 Runtime 接入后不再沿用，收到 `runtime.changed` 后改为向 Host 重新读取。
