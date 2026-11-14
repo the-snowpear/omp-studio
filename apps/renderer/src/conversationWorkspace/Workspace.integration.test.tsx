@@ -17,7 +17,7 @@ import { createDefaultLayout, dockReducer } from "../dock/model";
 vi.setConfig({ testTimeout: 15_000 });
 
 afterEach(() => { cleanup(); localStorage.clear(); window.history.replaceState(null, "", "/"); __resetAppSettingsForTests(null); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-function client(options: { delayContext?: Promise<void>; bootstrap?: () => void; openContext?: (scope: ClientContextScope) => void; openProjectContext?: () => void } = {}) {
+function client(options: { delayContext?: Promise<void>; bootstrap?: () => void; openContext?: (scope: ClientContextScope) => void; openProjectContext?: () => void; reportActiveProject?: boolean } = {}) {
   const workspaceId = contractFixtures.bootstrap.residents!.residents[0]!.workspaceId;
   const transport: ClientTransport = {
     openContext: async scope => { if (scope.sessionId) options.openContext?.(scope); else options.openProjectContext?.(); return { ...transport, bootstrap: async () => {
@@ -30,6 +30,8 @@ function client(options: { delayContext?: Promise<void>; bootstrap?: () => void;
     query: async request => {
       const response = structuredClone((contractFixtures.queryResponses as Record<string, unknown>)[request.queryName]) as any;
       if (request.queryName === "projects.list") response.result.workspaces = [{ workspaceId, name: "First project", active: true, lastOpenedAt: "2026-11-04T00:00:00.000Z" }, { workspaceId: "ws-second", name: "Second project", active: false, lastOpenedAt: "2026-11-04T00:00:00.000Z" }];
+      // The desktop Host also names the active project; the shared fixture omits it.
+      if (request.queryName === "projects.list" && options.reportActiveProject) response.result.activeWorkspaceId = workspaceId;
       if (request.queryName === "history.list") response.result.entries = response.result.entries.slice(0, 1).flatMap((entry: object) => [{ ...entry, sessionId: "second-session", historyId: "second-history", title: "Second conversation" }, { ...entry, sessionId: "third-session", historyId: "third-history", title: "Third conversation" }]);
       return response;
     },
@@ -737,6 +739,21 @@ describe("conversation windows", () => {
     expect(document.querySelector<HTMLElement>(".cw-shared-conversationTitle")?.dataset.conversationOwner).toBe(ownedDocument);
     expect(document.querySelector<HTMLElement>(".cw-shared-right")?.dataset.conversationOwner).toBe(ownedDocument);
   }, 10_000);
+  it("expands, collapses and re-expands the active project from its sidebar row", async () => {
+    // Regression: the toggle routed a collapsed project through selectProject,
+    // which returned early for the already-active workspace before expanding,
+    // so once collapsed the active project could never be opened again.
+    localStorage.setItem("omp.sidebar.expandedProjects", JSON.stringify({ expandedProjects: [] }));
+    await mount(false, client({ reportActiveProject: true }));
+    const head = () => [...document.querySelectorAll<HTMLElement>("#projectList .project-head")].find(node => node.textContent?.includes("First project"));
+    await waitFor(() => expect(head()?.getAttribute("aria-expanded")).toBe("false"));
+    fireEvent.click(head()!);
+    await waitFor(() => expect(head()?.getAttribute("aria-expanded")).toBe("true"));
+    fireEvent.click(head()!);
+    await waitFor(() => expect(head()?.getAttribute("aria-expanded")).toBe("false"));
+    fireEvent.click(head()!);
+    await waitFor(() => expect(head()?.getAttribute("aria-expanded")).toBe("true"));
+  });
   it("keeps the original preview project and conversation rows when opening and focusing floats", async () => {
     const savedRealLayout = JSON.stringify({ savedRealLayout: true });
     localStorage.setItem(WORKSPACE_STORAGE_KEY, savedRealLayout);

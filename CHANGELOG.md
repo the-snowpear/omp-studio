@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 独立会话启动失败时保留实际失败原因，重试成功后清除；旧能力读取结束不再打断新 Runtime 的刷新请求。
 - 修复项目包含会话启动的后台服务时，「后台任务」面板反复弹出「操作执行失败 / Runtime command failed」：合法服务记录的 `ownerId`、`pid`、`previewUrl` 不再被过期的结果字段白名单拒绝。沿用单处输入校验，预览地址仍在启动服务时检查。
 - 修复输入预测无法挂载、输入框下方显示「Invalid prediction fields」：桌面端接受 Runtime 返回的 v2 预测通道（带 `protocolVersion: 2`），拒绝其他协议版本。
+- 修复侧栏中当前激活的项目收起后再也无法点开：点击已激活项目时不再跳过展开，并同时加载该项目的会话列表。
 
 ## [0.2.0] - 2026-11-13
 
