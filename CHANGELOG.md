@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 冷会话可在首条消息前选择模型：新对话按所选模型启动，历史对话携带所选模型恢复；连接期间保留输入框草稿，当前模型仍以 Runtime 快照为准。
 - 独立会话启动失败时保留实际失败原因，重试成功后清除；旧能力读取结束不再打断新 Runtime 的刷新请求。
 - 修复项目包含会话启动的后台服务时，「后台任务」面板反复弹出「操作执行失败 / Runtime command failed」：合法服务记录的 `ownerId`、`pid`、`previewUrl` 不再被过期的结果字段白名单拒绝。沿用单处输入校验，预览地址仍在启动服务时检查。
+- 修复输入预测无法挂载、输入框下方显示「Invalid prediction fields」：桌面端接受 Runtime 返回的 v2 预测通道（带 `protocolVersion: 2`），拒绝其他协议版本。
 
 ## [0.2.0] - 2026-11-13
 
