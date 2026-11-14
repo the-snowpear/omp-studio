@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The Runtime pin is `can1357/oh-my-pi` `v18.18.0` at commit `b5a6b2f7e5b6606b6562e678ead83f21738f34a0`. Studio 0.2.0 starts this upstream release line at `18.18.0-studio.1`; the current Studio revision is recorded in `patches/series.json`. The upgrade began at `18.13.2-studio.44` / Studio 0.1.17; see the [18.18.0 migration report](../docs/migrations/omp-18.18.0.md) for changes, GUI coverage and validation. Earlier reports retain the development revisions used in their original checks, not later release revisions.
+The Runtime pin is `can1357/oh-my-pi` `v18.19.0` at commit `04cd1a7549a02d62ad1d24826198d52507595683`; the current Studio revision is recorded in `patches/series.json`. Studio 0.2.0 shipped on `18.18.0-studio.1`; see the [18.19.0 migration report](../docs/migrations/omp-18.19.0.md) for the ten upstream releases since then, and the [18.18.0 migration report](../docs/migrations/omp-18.18.0.md) for the upgrade from `18.13.2-studio.44` / Studio 0.1.17. Earlier reports retain the development revisions used in their original checks, not later release revisions.
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
@@ -33,7 +33,7 @@ The overlay is ordinary tracked source in this repository. Editing it is an ordi
 
 ## Windows build toolchain
 
-The v18.18.0 Windows bytecode bundle uses the upstream-pinned Bun **1.4.4**, including its certificate/Brotli fixes. Set `BUN_EXE` to a separately installed 1.4.4 executable before building; the global Bun installation need not change. Use the upstream-pinned Rust `nightly-2026-10-06` toolchain. Release signing uses the existing GitHub Environment; the isolated local `canary` test artifact is not a release identity and is not installed automatically.
+The v18.19.0 Windows bytecode bundle uses the upstream-pinned Bun **1.4.4**, including its certificate/Brotli fixes. Set `BUN_EXE` to a separately installed 1.4.4 executable before building; the global Bun installation need not change. Use the upstream-pinned Rust `nightly-2026-11-08` toolchain (`vendor/oh-my-pi/rust-toolchain.toml`). Release signing uses the existing GitHub Environment; the isolated local `canary` test artifact is not a release identity and is not installed automatically.
 
 ## Working loop
 

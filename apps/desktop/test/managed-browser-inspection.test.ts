@@ -46,7 +46,8 @@ test("embedded Network detaches its window session, not the Agent debugger or a 
     assert.equal(rows.view, "network");
     if (rows.view === "network") assert.deepEqual(rows.rows, [{ id: "own", method: "GET", url: "https://same-view.test/", resourceType: "Document", status: 200 }]);
     assert.equal(source.commands.filter(command => command.method === "Target.attachToTarget").length, 1);
-    await inspection.read("network", true, "window-b");
+    const handedOver = await inspection.read("network", true, "window-b");
+    assert.deepEqual(handedOver.rows, [], "a new window must not see the previous window's request log");
     const beforeHide = source.commands.length;
     await inspection.read("network", false, "window-a");
     assert.equal(source.commands.length, beforeHide, "an earlier window must not detach the new window's observation");

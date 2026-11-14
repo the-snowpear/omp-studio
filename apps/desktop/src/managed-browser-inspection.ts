@@ -39,7 +39,8 @@ export class ManagedBrowserInspection {
     if (this.#closed || this.contents.isDestroyed()) throw new Error("The embedded page was replaced or closed.");
     if (view === "console") return { view, rows: this.#console.slice(-200) };
     if (view !== "network") throw new Error("Embedded downloads use the existing DownloadItem read model.");
-    if (this.#owner !== owner) { await this.stop(); await this.#starting?.catch(() => undefined); this.#owner = owner; }
+    // Request rows belong to the window that opened Network; a new owner starts from an empty log.
+    if (this.#owner !== owner) { await this.stop(); await this.#starting?.catch(() => undefined); this.#network.clear(); this.#owner = owner; }
     this.#starting ??= this.#startNetwork().finally(() => { this.#starting = undefined; });
     await this.#starting;
     if (this.#owner !== owner || this.#closed) return { view, rows: [], reason: "The inspection window changed; refresh this view before reading it." };
