@@ -142,7 +142,11 @@ async function mount(client: StudioClientImpl) {
 
 async function chooseModel() {
   fireEvent.click(screen.getByRole("button", { name: "Select Model" }));
-  fireEvent.click(await screen.findByRole("button", { name: "More Models" }));
+  const more = await screen.findByRole("button", { name: "More Models" });
+  // A real pointer enters the hover zone before clicking the same trigger.
+  // Clicking must keep the already-open model list available for selection.
+  fireEvent.mouseEnter(more);
+  fireEvent.click(more);
   const choice = await screen.findByRole("option", { name: /Chosen model/ });
   expect(choice.hasAttribute("disabled")).toBe(false);
   fireEvent.click(choice);

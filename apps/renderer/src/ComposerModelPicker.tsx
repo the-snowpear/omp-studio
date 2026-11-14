@@ -246,7 +246,7 @@ export function ComposerModelMenu({
             className="cmp-more"
             aria-haspopup="listbox"
             aria-expanded={moreOpen}
-            onClick={() => setMoreOpen((open) => !open)}
+            onClick={keepFlyoutOpen}
           >
             <Icon name="more" extra="sm" />
             <span>{t("composer.moreModels")}</span>
