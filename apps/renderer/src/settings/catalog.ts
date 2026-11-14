@@ -85,7 +85,7 @@ const extras: SettingSearchItem[] = [
   { id:"dictation.shortcut", group:"voice", zh:"切换录音快捷键", en:"Toggle recording shortcut", targetZh:"切换录音快捷键", targetEn:"Toggle recording shortcut", keywords:"dictationToggleShortcut hotkey 听写 快捷键" },
   { id:"dictation.microphone", group:"voice", zh:"输入设备", en:"Input device", targetZh:"语音输入", targetEn:"Voice input", keywords:"dictationDeviceId microphone 麦克风 音频设备" },
   { id:"font.interface", group:"appearance", zh:"界面字体与字号", en:"Interface font and size", targetZh:"字体", targetEn:"Fonts", keywords:"uiFontFamily uiFontSize" },
-  { id:"font.terminal", group:"appearance", zh:"终端字体与字号", en:"Terminal font and size", targetZh:"字体", targetEn:"Fonts", keywords:"terminalFontFamily terminalFontSize" },
+  { id:"font.terminal", group:"appearance", zh:"终端字体与字号", en:"Terminal font and size", targetZh:"字体", targetEn:"Fonts", keywords:"terminalFontFamily terminalFontSize terminalTmuxCloseAction tmux 隐藏 关闭窗口" },
   { id:"font.output", group:"appearance", zh:"输出字体与字号", en:"Output font and size", targetZh:"字体", targetEn:"Fonts", keywords:"outputFontFamily outputFontSize" },
   { id:"accounts.reset-policy", group:"models", zh:"账户窗口重置策略", en:"Account window reset policies", targetZh:"配额重置与启动", targetEn:"Quota resets and startup", keywords:"claudeResets.autoRedeem codexResets.autoRedeem5h codexResets.autoRedeemWeekly claudeResets.autoRedeem5h claudeResets.autoRedeemWeekly claudeResets.autoRedeemFable quota 5h weekly Fable 账户 窗口" },
   { id:"claudeResets.minBlockedMinutes", group:"models", zh:"最短配额阻塞（分钟）", en:"Minimum quota block (minutes)", targetZh:"最短配额阻塞（分钟）", targetEn:"Minimum quota block (minutes)", keywords:"claudeResets.minBlockedMinutes" },

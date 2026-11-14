@@ -9,6 +9,7 @@ import {
   utf8Length,
 } from "./terminalSessions";
 import type { Terminal } from "@xterm/xterm";
+import type { TmuxTopology } from "../../desktop/src/tmux/tmux-shared";
 
 interface SentBatch {
   readonly id: string;
@@ -25,7 +26,12 @@ function harness(options: { ack?: boolean } = {}) {
   const acked: Array<{ id: string; bytes: number }> = [];
   let dataListener: (event: SentBatch) => void = () => {};
   let exitListener: (event: { id: string }) => void = () => {};
+  let tmuxListener: (topology: TmuxTopology) => void = () => {};
   const value = {
+    tmuxAttach: vi.fn(async () => ({ connectionId: "tmux-connection" })),
+    tmuxDetach: vi.fn(async () => {}),
+    tmuxCommand: vi.fn(async () => {}),
+    onTmux: (listener: (topology: TmuxTopology) => void) => { tmuxListener = listener; return () => {}; },
     create: vi.fn(async (input?: { targetId?: string; workspaceId?: string }) => ({
       id: input?.targetId ? "ssh-terminal" : "terminal",
       name: input?.targetId ? "SSH · test" : "Shell",
@@ -42,6 +48,7 @@ function harness(options: { ack?: boolean } = {}) {
   };
   return {
     value,
+    topology(value: TmuxTopology) { tmuxListener(value); },
     acked,
     ackedBytes: (id = "terminal") => acked.filter((entry) => entry.id === id).reduce((sum, entry) => sum + entry.bytes, 0),
     emit(id: string, data: string, bytes?: number) {
@@ -280,6 +287,37 @@ describe("unmounted terminal: Main's watermark drives the back-pressure", () => 
 });
 
 // ---- Batches that occupy no backlog ---------------------------------------
+
+function tmuxSnapshot(): TmuxTopology {
+  return { connectionId: "tmux-connection", targetId: "remote", workspaceId: "ws", state: "attached", session: { id: "$0", name: "work" }, activeWindowId: "@0", windows: [{ id: "@0", index: 0, name: "shell", cols: 80, rows: 24, zoomed: false, layout: { type: "pane", paneId: "%0", x: 0, y: 0, cols: 80, rows: 24 } }], panes: { "%0": { terminalId: "tmux-pane", windowId: "@0", active: true, title: "shell", dead: false, off: false, paused: false } } };
+}
+it("tmux topology registers pane backlogs before rendering and releases removed panes without killing them", async () => {
+  const api = harness(), store = new TerminalSessions(api.value);
+  const opening = store.attachTmux("remote", "ws", "work");
+  api.emit("tmux-pane", "early output");
+  api.topology(tmuxSnapshot());
+  await opening;
+  const host = fakeScreen(); store.attachHost("tmux-pane", host.host);
+  expect(host.written()).toBe("early output");
+  host.fireCallbacks(); await settle();
+  expect(api.ackedBytes("tmux-pane")).toBe(12);
+  expect(store.snapshot().sessions[0]?.kind).toBe("tmux-pane");
+  api.topology({ ...tmuxSnapshot(), panes: {}, windows: [] });
+  expect(host.disposed).toBe(1);
+  expect(store.snapshot().sessions).toHaveLength(0);
+  expect(api.value.dispose).not.toHaveBeenCalled();
+  store.close();
+});
+it("hiding tmux windows changes native visibility, and provider shutdown detaches the connection", async () => {
+  const api = harness(), store = new TerminalSessions(api.value);
+  await store.attachTmux("remote", "ws", "work"); api.topology(tmuxSnapshot());
+  await store.hideTmuxWindow("tmux-connection", "@0", true);
+  expect(api.value.tmuxCommand).toHaveBeenCalledWith({ connectionId: "tmux-connection", action: { kind: "setPaneVisible", paneIds: ["%0"], visible: false } });
+  expect(store.snapshot().hiddenWindows["tmux-connection"]).toEqual(["@0"]);
+  store.close();
+  expect(api.value.tmuxDetach).toHaveBeenCalledWith("tmux-connection");
+  expect(api.value.dispose).not.toHaveBeenCalled();
+});
 
 it("streams past tmux -CC without retaining protocol output and resumes after ST", async () => {
   const { store, api, id } = await storeWith(null);

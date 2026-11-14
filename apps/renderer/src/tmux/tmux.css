@@ -1,0 +1,35 @@
+.tmux-group { margin: var(--sp-8) 0; border-top: 1px solid var(--border); padding-top: var(--sp-8); }
+.tmux-group-head { display: flex; align-items: center; gap: var(--sp-4); }
+.tmux-group-name { flex: 1; text-align: left; min-width: 0; font: var(--fs-11) var(--font-mono); }
+.tmux-group-status { display: flex; gap: var(--sp-4); padding: var(--sp-4) 0; }
+.tmux-window-item { padding-left: var(--sp-12); }
+.tmux-window-item .ti-main { border: 0; background: none; text-align: left; padding: 0; }
+.tmux-attach { margin-top: var(--sp-4); }
+.tmux-menu { position: relative; }
+.tmux-menu > summary { list-style: none; cursor: pointer; padding: var(--sp-4); }
+.tmux-menu > div { position: absolute; right: 0; z-index: 5; min-width: 155px; padding: var(--sp-4); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-6); box-shadow: var(--shadow-menu); }
+.tmux-menu button, .tmux-hidden button { display: block; width: 100%; text-align: left; padding: var(--sp-6); font-size: var(--fs-11); }
+.tmux-menu button:hover, .tmux-hidden button:hover { background: var(--surface-hover); }
+.tmux-hidden { color: var(--text-3); font-size: var(--fs-11); padding: var(--sp-4); }
+.tmux-hidden summary { cursor: pointer; }
+.tmux-toolbar { display: flex; gap: var(--sp-4); margin-left: auto; flex: none; }
+.tmux-split-down svg { rotate: 90deg; }
+.tmux-banner { padding: var(--sp-8) var(--sp-12); font-size: var(--fs-11); display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+.tmux-screen-stack { flex: 1; min-height: 0; position: relative; }
+.tmux-screen-stack[hidden], .tmux-window[hidden], .tmux-pane[hidden] { display: none; }
+.tmux-window { position: absolute; inset: 0; overflow: auto; background: var(--surface); }
+.tmux-layout { position: relative; }
+.tmux-measure { position: absolute; inset: 0; visibility: hidden; pointer-events: none; overflow: hidden; }
+.tmux-pane { position: absolute; overflow: hidden; }
+.tmux-pane.is-active { outline: 1px solid var(--accent); outline-offset: -1px; }
+.tmux-xterm, .tmux-xterm > .xterm { height: 100%; width: 100%; }
+.tmux-pane-overlay, .tmux-demo-pane { position: absolute; inset: 0; display: grid; place-content: center; color: var(--text-3); font-size: var(--fs-11); background: color-mix(in srgb, var(--surface) 90%, transparent); }
+.tmux-demo-title { position: absolute; left: var(--sp-8); top: var(--sp-6); font: var(--fs-11) var(--font-mono); color: var(--text-3); }
+.tmux-divider { position: absolute; background: var(--border); touch-action: none; transition: background var(--dur-fast) var(--ease); }
+.tmux-divider:hover, .tmux-divider:focus-visible { background: var(--accent); }
+.tmux-divider.vertical { cursor: col-resize; }
+.tmux-divider.horizontal { cursor: row-resize; }
+.tmux-size-notice { position: sticky; float: right; top: var(--sp-4); right: var(--sp-4); z-index: 2; }
+.tmux-dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-8); padding-top: var(--sp-12); }
+.tmux-name-label { display: flex; flex-direction: column; gap: var(--sp-6); font-size: var(--fs-12); margin-top: var(--sp-12); }
+.tmux-remember { display: flex; align-items: center; gap: var(--sp-8); margin-top: var(--sp-12); }

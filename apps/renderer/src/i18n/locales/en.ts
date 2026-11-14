@@ -2615,7 +2615,17 @@ export const en: LocaleDictionary = {
   "terminal": {
     "tmux": {
       "controlNotice": "This terminal entered tmux -CC control mode. Use Attach tmux… in an SSH workspace.",
-      "exitControl": "Exit control mode"
+      "exitControl": "Exit control mode",
+      "attach": "Attach tmux…", "sessions": "tmux sessions", "newSession": "New session name", "createAttach": "Create / attach", "loading": "Connecting to tmux…", "refresh": "Refresh",
+      "sessionMeta": "{windows} windows · {attached} clients", "noSessions": "No sessions yet. Create one below.", "nameHint": "Use up to 64 letters, digits, underscores or hyphens; start with a letter, digit or underscore.", "existingName": "An existing name attaches to that session.",
+      "sshOnly": "tmux attach is available in SSH workspaces only", "connectFirst": "Connect to SSH and open a workspace first", "unavailable": "This desktop version does not provide tmux integration",
+      "states": { "attaching": "Attaching", "attached": "Attached", "exited": "Ended", "lost": "Disconnected" },
+      "errors": { "remote-windows": "Windows SSH targets do not support tmux.", "not-installed": "tmux is not installed or is missing from PATH on the remote host.", "too-old": "Upgrade the remote tmux to version 3.2 or later.", "ssh-failed": "SSH connection failed.", "attach-timeout": "Attaching to tmux timed out.", "lost": "The SSH connection was lost." },
+      "menu": "tmux session menu", "detach": "Detach tmux connection", "detachedDetail": "Detached. The remote session is preserved.", "reattach": "Reattach", "remove": "Remove", "killSession": "End entire session", "killSessionConfirm": "End all windows and processes in “{name}”? This cannot be undone.",
+      "closeWindow": "Close window {name}", "closeTitle": "Close “{name}”", "closeDetail": "Hide preserves the remote window and its processes. End window terminates all its panes.", "hide": "Hide", "killWindow": "End window", "cancel": "Cancel", "remember": "Remember my choice", "closeSetting": "When closing a tmux window", "ask": "Ask every time",
+      "hidden": "{count} hidden windows", "restore": "Restore {name}", "noVisibleWindows": "No visible windows. Restore hidden windows from the list.",
+      "splitRight": "Split right", "splitDown": "Split down", "newWindow": "New tmux window", "zoom": "Zoom active pane", "rename": "Rename window", "save": "Save", "killPane": "End pane", "resizePane": "Resize pane",
+      "paused": "Output paused; resynchronizing", "off": "Not displayed", "sizeLimited": "Size is limited by other tmux clients", "configErrors": "tmux configuration notice", "demo": "Demo", "demoPane": "Demo pane"
     },
     "title": "Terminal",
     "clear": "Clear",

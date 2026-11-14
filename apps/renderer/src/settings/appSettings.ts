@@ -40,6 +40,7 @@ export interface AppSettings {
   readonly uiFontSize: number;
   readonly terminalFontFamily: string;
   readonly terminalFontSize: number;
+  readonly terminalTmuxCloseAction: "ask" | "hide" | "kill";
   readonly outputFontFamily: string;
   readonly outputFontSize: number;
   /** 关闭后助手消息不带流式光标（显示层行为）。运行状态仍在对话底部。 */
@@ -78,6 +79,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   uiFontSize: 14,
   terminalFontFamily: "",
   terminalFontSize: 12,
+  terminalTmuxCloseAction: "ask",
   outputFontFamily: "",
   outputFontSize: 14,
   streaming: true,
@@ -148,6 +150,7 @@ function parseStoredSettings(raw: string | null): AppSettings {
       uiFontSize: fontSize(value.uiFontSize, 12, 20, 14),
       terminalFontFamily: typeof value.terminalFontFamily === "string" ? value.terminalFontFamily : "",
       terminalFontSize: fontSize(value.terminalFontSize, 8, 32, 12),
+      terminalTmuxCloseAction: pick(value.terminalTmuxCloseAction, ["ask", "hide", "kill"] as const) ?? "ask",
       outputFontFamily: typeof value.outputFontFamily === "string" ? value.outputFontFamily : "",
       outputFontSize: fontSize(value.outputFontSize, 8, 32, 14),
       streaming: pickBoolean(value.streaming) ?? DEFAULT_APP_SETTINGS.streaming,

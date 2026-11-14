@@ -4,9 +4,12 @@ import type { FitAddon } from "@xterm/addon-fit";
 import { utf8ByteLength } from "@omp-studio/client-contract";
 import { TerminalGraphicsDecoder, type TerminalGraphic } from "./terminalGraphics";
 import type { TerminalCommand } from "../../desktop/src/terminal-shared";
+import type { TmuxAction, TmuxTopology } from "../../desktop/src/tmux/tmux-shared";
 
 type Api = NonNullable<typeof globalThis.ompStudioTerminal>;
 export interface TerminalSession {
+  readonly kind?: "shell" | "tmux-pane";
+  readonly tmux?: { connectionId: string; paneId: string; windowId: string };
   readonly conversationId?: string;
   readonly targetId: string | null;
   readonly workspaceId?: string;
@@ -16,7 +19,7 @@ export interface TerminalSession {
   readonly cwd: string;
   readonly status: "running" | "ended";
 }
-export interface TerminalScreenHost { readonly term: Terminal; readonly fit: FitAddon; }
+export interface TerminalScreenHost { readonly term: Terminal; readonly fit?: FitAddon; }
 interface TerminalState {
   sessions: readonly TerminalSession[];
   graphics: Readonly<Record<string, TerminalGraphic[]>>;
@@ -24,6 +27,8 @@ interface TerminalState {
   /** Explicit, user-visible loss notices per terminal — never a silent drop. */
   notices: Readonly<Record<string, string>>;
   controlMode: Readonly<Record<string, boolean>>;
+  tmux: Readonly<Record<string, TmuxTopology>>;
+  hiddenWindows: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
@@ -149,7 +154,7 @@ export class TerminalSessions {
    */
   readonly #removing = new Set<string>();
   #ackScheduled = false;
-  #state: TerminalState = { sessions: [], graphics: {}, graphicsErrors: {}, notices: {}, controlMode: {} };
+  #state: TerminalState = { sessions: [], graphics: {}, graphicsErrors: {}, notices: {}, controlMode: {}, tmux: {}, hiddenWindows: {} };
   #off: (() => void) | undefined;
   #creating = 0;
   #closed = false;
@@ -197,11 +202,58 @@ export class TerminalSessions {
     this.#publish({ ...this.#state, sessions: this.#state.sessions.filter(session => session.id !== id), graphics, graphicsErrors, notices, controlMode });
   }
 
+  listTmuxSessions(targetId: string, workspaceId: string) {
+    if (!this.api?.tmuxSessions) throw new Error("tmux is unavailable");
+    return this.api.tmuxSessions({ targetId, workspaceId });
+  }
+  async attachTmux(targetId: string, workspaceId: string, session?: string, size = { cols: 120, rows: 32 }, replaceId?: string): Promise<string> {
+    if (!this.api?.tmuxAttach || this.#closed) throw new Error("tmux is unavailable");
+    this.#listen(); this.#creating++;
+    try {
+      const result = await this.api.tmuxAttach({ targetId, workspaceId, ...size, ...(session ? { session } : {}), flowControl: !!this.api.ack });
+      if (this.#closed) { await this.api.tmuxDetach?.(result.connectionId); throw new Error("Terminal window has closed"); }
+      if (replaceId && replaceId !== result.connectionId) {
+        const replacement = this.#state.tmux[result.connectionId];
+        if (replacement) {
+          const tmux = Object.fromEntries(Object.entries(this.#state.tmux).flatMap(([id, value]) => id === replaceId ? [[result.connectionId, replacement]] : id === result.connectionId ? [] : [[id, value]]));
+          this.#publish({ ...this.#state, tmux });
+        }
+        this.forgetTmux(replaceId);
+      }
+      return result.connectionId;
+    } finally {
+      this.#creating--;
+      if (!this.#creating) for (const id of this.pending.keys()) if (!this.#sessionIds.has(id)) this.pending.delete(id);
+    }
+  }
+  async tmuxCommand(connectionId: string, action: TmuxAction): Promise<void> {
+    if (!this.api?.tmuxCommand) throw new Error("tmux is unavailable");
+    await this.api.tmuxCommand({ connectionId, action });
+  }
+  async detachTmux(connectionId: string): Promise<void> { await this.api?.tmuxDetach?.(connectionId); }
+  async hideTmuxWindow(connectionId: string, windowId: string, hidden: boolean): Promise<void> {
+    const topology = this.#state.tmux[connectionId]!;
+    const paneIds = Object.entries(topology.panes).filter(([, pane]) => pane.windowId === windowId).map(([id]) => id);
+    await this.tmuxCommand(connectionId, { kind: "setPaneVisible", paneIds, visible: !hidden });
+    const current = this.#state.hiddenWindows[connectionId] ?? [];
+    this.#publish({ ...this.#state, hiddenWindows: { ...this.#state.hiddenWindows, [connectionId]: hidden ? [...new Set([...current, windowId])] : current.filter(id => id !== windowId) } });
+  }
+  forgetTmux(connectionId: string): void {
+    const panes = this.#state.sessions.filter(session => session.tmux?.connectionId === connectionId);
+    for (const pane of panes) this.#releaseScreen(pane.id);
+    const { [connectionId]: _topology, ...tmux } = this.#state.tmux;
+    const { [connectionId]: _hidden, ...hiddenWindows } = this.#state.hiddenWindows;
+    const ids = new Set(panes.map(pane => pane.id));
+    const keep = <T,>(record: Readonly<Record<string, T>>) => Object.fromEntries(Object.entries(record).filter(([id]) => !ids.has(id)));
+    this.#publish({ ...this.#state, tmux, hiddenWindows, sessions: this.#state.sessions.filter(session => !ids.has(session.id)), graphics: keep(this.#state.graphics), graphicsErrors: keep(this.#state.graphicsErrors), notices: keep(this.#state.notices), controlMode: keep(this.#state.controlMode) });
+  }
+
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
     this.#off?.();
-    for (const session of this.#state.sessions) void this.api?.dispose(session.id).catch(() => {});
+    for (const session of this.#state.sessions) if (session.kind !== "tmux-pane") void this.api?.dispose(session.id).catch(() => {});
+    for (const id of Object.keys(this.#state.tmux)) void this.api?.tmuxDetach?.(id).catch(() => {});
     for (const id of this.hosts.keys()) this.#releaseScreen(id);
     this.pending.clear();
     this.#acked.clear();
@@ -223,6 +275,18 @@ export class TerminalSessions {
 
   #listen(): void {
     if (!this.api || this.#off) return;
+    const offTmux = this.api.onTmux?.(topology => {
+      const previous = this.#state.sessions.filter(session => session.tmux?.connectionId === topology.connectionId);
+      const liveIds = new Set(Object.values(topology.panes).map(pane => pane.terminalId));
+      for (const pane of previous) if (!liveIds.has(pane.id)) this.#releaseScreen(pane.id);
+      const panes: TerminalSession[] = Object.entries(topology.panes).map(([paneId, pane]) => ({
+        id: pane.terminalId, kind: "tmux-pane", tmux: { connectionId: topology.connectionId, paneId, windowId: pane.windowId },
+        targetId: topology.targetId, workspaceId: topology.workspaceId, name: pane.title, cwd: pane.cwd ?? "",
+        status: topology.state === "lost" || topology.state === "exited" ? "ended" : "running",
+      }));
+      this.#publish({ ...this.#state, tmux: { ...this.#state.tmux, [topology.connectionId]: topology }, sessions: [...this.#state.sessions.filter(session => session.tmux?.connectionId !== topology.connectionId), ...panes] });
+      for (const pane of panes) this.#drain(pane.id);
+    });
     const offData = this.api.onData(event => {
       if (this.#removing.has(event.id)) return;
       if (!this.#creating && !this.#sessionIds.has(event.id)) return;
@@ -280,7 +344,7 @@ export class TerminalSessions {
       this.#drain(event.id);
       this.#publish({ ...this.#state, sessions: this.#state.sessions.map(session => session.id === event.id ? { ...session, status: "ended" } : session) });
     });
-    this.#off = () => { offData(); offExit(); };
+    this.#off = () => { offData(); offExit(); offTmux?.(); };
   }
 
   #queue(id: string): TerminalPendingOutput {
