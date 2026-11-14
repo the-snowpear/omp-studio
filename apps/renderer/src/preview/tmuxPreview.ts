@@ -39,6 +39,7 @@ export function changePreviewTmux(original: TmuxTopology, action: TmuxAction): T
   const next = structuredClone(original);
   const paneId = "paneId" in action ? action.paneId : undefined;
   const win = next.windows.find(win => win.id === ("windowId" in action ? action.windowId : paneId ? next.panes[paneId]?.windowId : next.activeWindowId));
+  if (win?.zoomed && win.fullLayout && ["splitPane", "killPane", "resizePane"].includes(action.kind)) { win.layout = win.fullLayout; win.zoomed = false; }
   const nextPane = () => `%${Math.max(-1, ...Object.keys(next.panes).map(id => Number(id.slice(1)))) + 1}`;
   const addPane = (id: string, windowId: string) => { next.panes[id] = { terminalId: `preview-${id}`, windowId, title: "shell", active: true, paused: false, dead: false, off: false }; };
   switch (action.kind) {
@@ -72,6 +73,7 @@ export function changePreviewTmux(original: TmuxTopology, action: TmuxAction): T
     case "resizePane": if (win) win.layout = fit(mapPane(win.layout, action.paneId, leaf => ({ ...leaf, [action.axis === "x" ? "cols" : "rows"]: action.cells }))!, win.layout); break;
   }
   for (const [id, item] of Object.entries(next.panes)) if (!next.windows.some(win => win.id === item.windowId)) delete next.panes[id];
+  for (const win of next.windows) if (!win.zoomed) win.fullLayout = win.layout;
   if (!next.windows.some(win => win.id === next.activeWindowId)) next.activeWindowId = next.windows[0]?.id ?? "";
   if (!next.windows.length) next.state = "exited";
   return next;

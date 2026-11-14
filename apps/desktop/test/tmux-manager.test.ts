@@ -12,7 +12,7 @@ const layoutBody = "80x24,0,0,0";
 class ControlProcess extends EventEmitter {
   stdout = new PassThrough(); stderr = new PassThrough();
   exitCode: number | null = null; signalCode = null; pid = undefined;
-  commands: string[] = []; version = "3.2a"; capture = "shell prompt"; sequence = 1;
+  commands: string[] = []; version = "3.2a"; capture = "shell prompt"; alternate = false; sequence = 1;
   stdin = new Writable({ write: (chunk, _encoding, done) => { this.command(chunk.toString()); done(); }, final: done => { this.exitCode = 0; this.emit("close", 0); done(); } });
   constructor() { super(); queueMicrotask(() => this.respond([])); }
   command(text: string) {
@@ -22,8 +22,8 @@ class ControlProcess extends EventEmitter {
     if (text.startsWith("display-message -p '#{version}")) result = [this.version];
     else if (text.startsWith("display-message -p '#{session_id}")) result = ["$0\tcap"];
     else if (text.startsWith("list-windows")) result = [`@0\t0\t1\t*\t${tmuxLayoutChecksum(layoutBody)},${layoutBody}\t${tmuxLayoutChecksum(layoutBody)},${layoutBody}\tshell`];
-    else if (text.startsWith("list-panes") || text.startsWith("display-message -p -t")) result = ["%0\t@0\t1\t0\t0\t3\t2\t1\t0\t0\t0\t1\t0\t0\t23\t1\tshell"];
-    else if (text.startsWith("capture-pane")) result = [this.capture];
+    else if (text.startsWith("list-panes") || text.startsWith("display-message -p -t")) result = [`%0\t@0\t1\t0\t${this.alternate ? 1 : 0}\t3\t2\t1\t0\t1\t1\t1\t0\t0\t23\t1\t0\t0\tshell`];
+    else if (text.startsWith("capture-pane")) result = [this.alternate && !text.includes(" -a ") ? "vim screen" : this.capture];
     queueMicrotask(() => this.respond(result));
   }
   respond(lines: string[]) { const n = this.sequence++; this.stdout.write(`%begin 1 ${n} 1\n${lines.length ? lines.join("\n") + "\n" : ""}%end 1 ${n} 1\n`); }
@@ -61,7 +61,26 @@ test("attach publishes pane identities before restore, routes writes, and isolat
     assert.equal(h.manager.hasTarget("remote"), true);
     await h.manager.detach(1, connectionId);
     assert.equal(h.processes[0]!.commands.at(-1), "\n");
+    assert.equal(h.topology.at(-1)?.reason, "detached");
     assert.equal(h.manager.hasTarget("remote"), false);
+  } finally { await h.manager.disposeAll(); }
+});
+test("restoring a full-screen app preserves its saved normal screen and terminal modes", async () => {
+  const h = harness();
+  try {
+    const { connectionId } = await h.attach(); await until(() => h.output.length > 0);
+    h.processes[0]!.alternate = true;
+    const before = h.output.length;
+    await h.manager.command(1, { connectionId, action: { kind: "setPaneVisible", paneIds: ["%0"], visible: false } });
+    await h.manager.command(1, { connectionId, action: { kind: "setPaneVisible", paneIds: ["%0"], visible: true } });
+    await until(() => h.output.length > before);
+    const restored = h.output.slice(before).join("");
+    assert.ok(restored.indexOf("shell prompt") < restored.indexOf("\x1b[?1049h"));
+    assert.ok(restored.indexOf("\x1b[?1049h") < restored.indexOf("vim screen"));
+    assert.ok(restored.includes("\x1b[?1h"));
+    assert.ok(restored.includes("\x1b[?1000h"));
+    assert.ok(!restored.includes("\x1b[?1003h"));
+    assert.ok(restored.endsWith("\x1b[3;4H"));
   } finally { await h.manager.disposeAll(); }
 });
 test("output pauses SSH at the high watermark, resumes on ACK, and recaptures a paused pane", async () => {

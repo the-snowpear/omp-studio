@@ -18,7 +18,7 @@ export interface TmuxConnectionOptions {
   detachTimeoutMs?: number;
 }
 const windowFormat = "#{window_id}\t#{window_index}\t#{window_active}\t#{window_flags}\t#{window_visible_layout}\t#{window_layout}\t#{window_name}";
-const paneFormat = "#{pane_id}\t#{window_id}\t#{pane_active}\t#{pane_dead}\t#{alternate_on}\t#{cursor_x}\t#{cursor_y}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{mouse_any_flag}\t#{mouse_sgr_flag}\t#{wrap_flag}\t#{origin_flag}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{pane_title}";
+const paneFormat = "#{pane_id}\t#{window_id}\t#{pane_active}\t#{pane_dead}\t#{alternate_on}\t#{cursor_x}\t#{cursor_y}\t#{keypad_cursor_flag}\t#{keypad_flag}\t#{mouse_standard_flag}\t#{mouse_sgr_flag}\t#{wrap_flag}\t#{origin_flag}\t#{scroll_region_upper}\t#{scroll_region_lower}\t#{cursor_flag}\t#{mouse_button_flag}\t#{mouse_all_flag}\t#{pane_title}";
 const id = () => randomBytes(16).toString("base64url");
 const joinLines = (lines: Buffer[]) => Buffer.concat(lines.flatMap((line, index) => index ? [Buffer.from("\r\n"), line] : [line]));
 
@@ -101,6 +101,7 @@ export class TmuxConnection {
     this.options.listeners.onTopology({ ...this.topology, windows: [...this.topology.windows], panes: Object.fromEntries(Object.entries(this.topology.panes).map(([id, pane]) => [id, { ...pane }])) });
   }
   #changed(): void {
+    if (this.#ended) return;
     if (!this.#topologyTimer) this.#topologyTimer = setTimeout(() => this.#publish(), 16);
   }
   #scheduleRefresh(): void {
@@ -128,18 +129,18 @@ export class TmuxConnection {
       const [id, index, active, flags, layout, full, name] = splitTmuxFields(line.toString(), 7);
       const parsed = parseTmuxLayout(layout!);
       const fullLayout = parseTmuxLayout(full!);
-      if (!parsed || !fullLayout) { this.#log("protocol_error", { kind: "layout" }); return; }
+      if (!parsed || !fullLayout) { this.#log("protocol_error", { kind: "layout" }); throw new Error("Invalid tmux layout"); }
       nextWindows.push({ id: id!, index: Number(index), name: name!, zoomed: flags!.includes("Z"), layout: parsed.root, fullLayout: fullLayout.root, cols: parsed.root.cols, rows: parsed.root.rows });
       if (active === "1") this.topology.activeWindowId = id!;
     }
     const nextPanes: TmuxTopology["panes"] = {}, added: string[] = [];
     for (const [index, line] of panes.entries()) {
-      const fields = splitTmuxFields(line.toString(), 17);
+      const fields = splitTmuxFields(line.toString(), 19);
       const [paneId, windowId, active, dead] = fields;
       const previous = this.topology.panes[paneId!];
       const off = index >= TMUX_MAX_PANES_PER_CONNECTION || previous?.off === true;
       const terminalId = previous?.terminalId ?? id();
-      nextPanes[paneId!] = { ...previous, terminalId, windowId: windowId!, active: active === "1", dead: dead === "1", title: fields[16]!, paused: previous?.paused ?? false, off };
+      nextPanes[paneId!] = { ...previous, terminalId, windowId: windowId!, active: active === "1", dead: dead === "1", title: fields[18]!, paused: previous?.paused ?? false, off };
       this.#paneInfo.set(paneId!, fields);
       if (!previous) {
         this.#knownTerminals.add(terminalId);
@@ -181,7 +182,7 @@ export class TmuxConnection {
     if (!pane || pane.off || !this.alive) return;
     this.#restoring.add(paneId);
     try {
-      if (refreshInfo) this.#paneInfo.set(paneId, splitTmuxFields((await this.client.run(`display-message -p -t ${paneId} '${paneFormat}'`))[0]!.toString(), 17));
+      if (refreshInfo) this.#paneInfo.set(paneId, splitTmuxFields((await this.client.run(`display-message -p -t ${paneId} '${paneFormat}'`))[0]!.toString(), 19));
       const info = this.#paneInfo.get(paneId)!;
       const alternate = info[4] === "1";
       // -a is the SAVED normal screen while the application uses its alternate screen.
@@ -191,8 +192,10 @@ export class TmuxConnection {
         const screen = await this.client.run(`capture-pane -p -e -t ${paneId}`);
         parts.push(Buffer.from("\x1b[?1049h\x1b[H\x1b[2J"), joinLines(screen));
       }
-      let modes = "";
-      for (const [index, mode] of [[7, 1], [9, 1003], [10, 1006], [11, 7], [12, 6], [15, 25]]) modes += `\x1b[?${mode}${info[index!] === "1" ? "h" : "l"}`;
+      let modes = "\x1b[?1000l\x1b[?1002l\x1b[?1003l";
+      const mouse = info[17] === "1" ? 1003 : info[16] === "1" ? 1002 : info[9] === "1" ? 1000 : undefined;
+      if (mouse) modes += `\x1b[?${mouse}h`;
+      for (const [index, mode] of [[7, 1], [10, 1006], [11, 7], [12, 6], [15, 25]]) modes += `\x1b[?${mode}${info[index!] === "1" ? "h" : "l"}`;
       modes += info[8] === "1" ? "\x1b=" : "\x1b>";
       const upper = Number(info[13]), lower = Number(info[14]);
       modes += `\x1b[${upper + 1};${lower + 1}r\x1b[${Number(info[6]) + 1 - (info[12] === "1" ? upper : 0)};${Number(info[5]) + 1}H`;
@@ -203,7 +206,7 @@ export class TmuxConnection {
     } finally { this.#buffers.delete(paneId); this.#restoring.delete(paneId); }
   }
   #notification(name: string, args: string): void {
-    if (name === "%exit") { this.#finish("exited", args || "session-ended"); return; }
+    if (name === "%exit") { this.#finish("exited", args || (this.#detaching ? "detached" : "session-ended")); return; }
     if (this.#ended) return;
     if (name === "%pause" || name === "%continue") {
       const pane = this.topology.panes[args];
@@ -250,6 +253,7 @@ export class TmuxConnection {
     const panes = "paneIds" in action ? action.paneIds : "paneId" in action ? [action.paneId] : [];
     const window = "windowId" in action ? action.windowId : "afterWindowId" in action ? action.afterWindowId : undefined;
     if (panes.some(id => !this.topology.panes[id]) || window && !this.topology.windows.some(item => item.id === window)) throw new Error("tmux target is not in this connection");
+    if (action.kind === "setPaneVisible" && action.visible && Object.entries(this.topology.panes).filter(([id, pane]) => !pane.off || action.paneIds.includes(id)).length > TMUX_MAX_PANES_PER_CONNECTION) throw new Error("tmux displays at most 64 panes per connection");
     if (action.kind === "resizeWindow") {
       this.#resize = action;
       if (!this.#resizeTimer) this.#resizeTimer = setTimeout(() => { this.#resizeTimer = undefined; if (this.alive && this.#resize) for (const line of actionLines(this.#resize)) this.client.fire(line); }, 16);
@@ -259,7 +263,11 @@ export class TmuxConnection {
     if (action.kind === "setPaneVisible") {
       for (const id of action.paneIds) {
         const pane = this.topology.panes[id]!; pane.off = !action.visible;
-        if (action.visible) { this.batcher.open(pane.terminalId, { flowControl: this.options.input.flowControl === true }); await this.#restore(id, true, true); }
+        if (action.visible) {
+          this.batcher.open(pane.terminalId, { flowControl: this.options.input.flowControl === true });
+          if (pane.paused) await this.client.run(`refresh-client -A '${id}:continue'`);
+          await this.#restore(id, true, true); pane.paused = false;
+        }
       }
       this.#changed();
     }
@@ -267,8 +275,10 @@ export class TmuxConnection {
   #finish(state: "exited" | "lost", reason: string): void {
     if (this.#ended) return;
     this.#ended = true;
+    if (!this.#initialized) this.#log("attach", { version: this.topology.version, elapsedMs: Date.now() - this.#startedAt, result: reason === "too-old" || reason === "attach-timeout" ? reason : state });
     clearTimeout(this.#refreshTimer); clearTimeout(this.#resizeTimer); clearTimeout(this.#topologyTimer);
     this.topology.state = state; this.topology.reason = reason;
+    this.#buffers.clear(); this.#restoring.clear();
     this.client.close(new Error(reason));
     for (const pane of Object.values(this.topology.panes)) { this.batcher.finish(pane.terminalId); this.options.listeners.onExit({ id: pane.terminalId }); }
     this.#publish();

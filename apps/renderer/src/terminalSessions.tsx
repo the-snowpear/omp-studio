@@ -239,6 +239,7 @@ export class TerminalSessions {
     this.#publish({ ...this.#state, hiddenWindows: { ...this.#state.hiddenWindows, [connectionId]: hidden ? [...new Set([...current, windowId])] : current.filter(id => id !== windowId) } });
   }
   forgetTmux(connectionId: string): void {
+    void this.api?.tmuxDetach?.(connectionId).catch(() => {});
     const panes = this.#state.sessions.filter(session => session.tmux?.connectionId === connectionId);
     for (const pane of panes) this.#releaseScreen(pane.id);
     const { [connectionId]: _topology, ...tmux } = this.#state.tmux;
@@ -278,13 +279,15 @@ export class TerminalSessions {
     const offTmux = this.api.onTmux?.(topology => {
       const previous = this.#state.sessions.filter(session => session.tmux?.connectionId === topology.connectionId);
       const liveIds = new Set(Object.values(topology.panes).map(pane => pane.terminalId));
-      for (const pane of previous) if (!liveIds.has(pane.id)) this.#releaseScreen(pane.id);
+      const removed = new Set(previous.filter(pane => !liveIds.has(pane.id)).map(pane => pane.id));
+      for (const id of removed) this.#releaseScreen(id);
       const panes: TerminalSession[] = Object.entries(topology.panes).map(([paneId, pane]) => ({
         id: pane.terminalId, kind: "tmux-pane", tmux: { connectionId: topology.connectionId, paneId, windowId: pane.windowId },
         targetId: topology.targetId, workspaceId: topology.workspaceId, name: pane.title, cwd: pane.cwd ?? "",
         status: topology.state === "lost" || topology.state === "exited" ? "ended" : "running",
       }));
-      this.#publish({ ...this.#state, tmux: { ...this.#state.tmux, [topology.connectionId]: topology }, sessions: [...this.#state.sessions.filter(session => session.tmux?.connectionId !== topology.connectionId), ...panes] });
+      const keep = <T,>(record: Readonly<Record<string, T>>) => Object.fromEntries(Object.entries(record).filter(([id]) => !removed.has(id)));
+      this.#publish({ ...this.#state, tmux: { ...this.#state.tmux, [topology.connectionId]: topology }, sessions: [...this.#state.sessions.filter(session => session.tmux?.connectionId !== topology.connectionId), ...panes], ...(removed.size ? { graphics: keep(this.#state.graphics), graphicsErrors: keep(this.#state.graphicsErrors), notices: keep(this.#state.notices), controlMode: keep(this.#state.controlMode) } : {}) });
       for (const pane of panes) this.#drain(pane.id);
     });
     const offData = this.api.onData(event => {

@@ -302,10 +302,13 @@ it("tmux topology registers pane backlogs before rendering and releases removed 
   host.fireCallbacks(); await settle();
   expect(api.ackedBytes("tmux-pane")).toBe(12);
   expect(store.snapshot().sessions[0]?.kind).toBe("tmux-pane");
+  api.emit("tmux-pane", "\x1b_Ga=T,f=100;AAAA\x1b\\");
+  expect(store.snapshot().graphicsErrors["tmux-pane"]).toBeDefined();
   api.topology({ ...tmuxSnapshot(), panes: {}, windows: [] });
   expect(host.disposed).toBe(1);
   expect(store.snapshot().sessions).toHaveLength(0);
   expect(api.value.dispose).not.toHaveBeenCalled();
+  expect(store.snapshot().graphicsErrors["tmux-pane"]).toBeUndefined();
   store.close();
 });
 it("hiding tmux windows changes native visibility, and provider shutdown detaches the connection", async () => {
@@ -317,6 +320,22 @@ it("hiding tmux windows changes native visibility, and provider shutdown detache
   store.close();
   expect(api.value.tmuxDetach).toHaveBeenCalledWith("tmux-connection");
   expect(api.value.dispose).not.toHaveBeenCalled();
+});
+it("reattaching replaces the old group in place and releases its ended screen", async () => {
+  const api = harness(), store = new TerminalSessions(api.value);
+  await store.attachTmux("remote", "ws", "work");
+  api.topology({ ...tmuxSnapshot(), state: "lost" });
+  const oldHost = fakeScreen(); store.attachHost("tmux-pane", oldHost.host);
+  api.topology({ ...tmuxSnapshot(), connectionId: "other", panes: {} });
+  api.value.tmuxAttach.mockImplementationOnce(async () => {
+    api.topology({ ...tmuxSnapshot(), connectionId: "replacement", panes: { "%0": { ...tmuxSnapshot().panes["%0"]!, terminalId: "new-pane" } } });
+    return { connectionId: "replacement" };
+  });
+  await store.attachTmux("remote", "ws", "work", undefined, "tmux-connection");
+  expect(Object.keys(store.snapshot().tmux)).toEqual(["replacement", "other"]);
+  expect(oldHost.disposed).toBe(1);
+  expect(api.value.tmuxDetach).toHaveBeenCalledWith("tmux-connection");
+  store.close();
 });
 
 it("streams past tmux -CC without retaining protocol output and resumes after ST", async () => {

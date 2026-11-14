@@ -2616,6 +2616,7 @@ export const en: LocaleDictionary = {
     "tmux": {
       "controlNotice": "This terminal entered tmux -CC control mode. Use Attach tmux… in an SSH workspace.",
       "exitControl": "Exit control mode",
+      "endedDetail": "The remote session has ended.",
       "attach": "Attach tmux…", "sessions": "tmux sessions", "newSession": "New session name", "createAttach": "Create / attach", "loading": "Connecting to tmux…", "refresh": "Refresh",
       "sessionMeta": "{windows} windows · {attached} clients", "noSessions": "No sessions yet. Create one below.", "nameHint": "Use up to 64 letters, digits, underscores or hyphens; start with a letter, digit or underscore.", "existingName": "An existing name attaches to that session.",
       "sshOnly": "tmux attach is available in SSH workspaces only", "connectFirst": "Connect to SSH and open a workspace first", "unavailable": "This desktop version does not provide tmux integration",

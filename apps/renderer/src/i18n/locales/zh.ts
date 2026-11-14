@@ -2616,6 +2616,7 @@ const zhRaw = {
     "tmux": {
       "controlNotice": "此终端进入了 tmux -CC 控制模式。SSH 工作区请使用「附加 tmux…」。",
       "exitControl": "退出控制模式",
+      "endedDetail": "远端会话已结束。",
       "attach": "附加 tmux…", "sessions": "tmux 会话", "newSession": "新建会话名称", "createAttach": "新建 / 附加", "loading": "正在连接 tmux…", "refresh": "刷新",
       "sessionMeta": "{windows} 个窗口 · {attached} 个客户端", "noSessions": "暂无会话，可以在下方新建。", "nameHint": "名称需以字母、数字或下划线开头，仅包含字母、数字、下划线和短横线，最多 64 个字符。", "existingName": "名称已存在时会直接附加该会话。",
       "sshOnly": "仅 SSH 工作区可附加 tmux", "connectFirst": "请先连接 SSH 并打开工作区", "unavailable": "当前桌面版本未提供 tmux 接口",
