@@ -175,7 +175,7 @@ export async function assertOverlayPresent(root = overlayRoot) {
  * the vendor tree before capturing, and blocking that would defeat the loop.
  * It only catches the real failure: building against a tree with no fork.
  */
-export async function assertForkApplied(targetDirectory = ompSourceDirectory, root = overlayRoot) {
+export async function assertForkApplied(targetDirectory = ompSourceDirectory, root = overlayRoot, patchesDirectory = join(repositoryRoot, ...PATCHES_SUBDIRECTORY.split("/"))) {
   const files = await assertOverlayPresent(root);
   const missing = files.filter(file => !existsSync(join(targetDirectory, ...file.split("/"))));
   if (missing.length > 0) {
@@ -184,10 +184,13 @@ export async function assertForkApplied(targetDirectory = ompSourceDirectory, ro
     );
   }
 
-  const modified = new Set(
-    run("git", ["-C", targetDirectory, "diff", "--name-only"], { capture: true }).split(/\r?\n/u).filter(Boolean),
-  );
-  const patchesDirectory = join(repositoryRoot, ...PATCHES_SUBDIRECTORY.split("/"));
+  // `git apply` leaves added seam files untracked in a clean checkout. The
+  // regeneration worktree has intent-to-add entries instead, which used to
+  // hide this build failure locally. Include both new files and staged edits.
+  const modified = new Set([
+    ...run("git", ["-C", targetDirectory, "diff", "HEAD", "--name-only", "-z"], { capture: true }).split("\0"),
+    ...run("git", ["-C", targetDirectory, "ls-files", "--others", "--exclude-standard", "-z"], { capture: true }).split("\0"),
+  ].filter(Boolean));
   const unapplied = [];
   for (const name of seamPatchNames()) {
     const patchFile = join(patchesDirectory, name);
