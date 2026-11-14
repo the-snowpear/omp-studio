@@ -4,6 +4,19 @@ import { AppUpdateDialog } from "./AppUpdateDialog";
 
 afterEach(cleanup);
 
+it("opens the Linux manual installer without preparing or restarting the app", async () => {
+  const download = vi.fn(), apply = vi.fn();
+  const open = vi.spyOn(window, "open").mockImplementation(() => null);
+  const url = "https://github.com/the-snowpear/omp-studio/releases/download/v0.2.2/OMP-Studio-0.2.2-linux-x64.deb";
+  try {
+    render(<AppUpdateDialog update={{ currentVersion: "0.2.1", version: "0.2.2", manualInstallUrl: url }} onClose={vi.fn()} onDownloadAndInstall={download} onApply={apply} />);
+    fireEvent.click(screen.getByRole("button", { name: "下载安装包" }));
+    await waitFor(() => expect(open).toHaveBeenCalledWith(url, "_blank", "noopener,noreferrer"));
+    expect(download).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
+  } finally { open.mockRestore(); }
+});
+
 it("prepares signed updates without an exposed URL and restarts only when ready", async () => {
   const download = vi.fn().mockResolvedValue(false);
   const apply = vi.fn().mockResolvedValue(false);

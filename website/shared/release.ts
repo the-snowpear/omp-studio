@@ -2,7 +2,7 @@
 // falls back to the snapshot below, so the buttons always lead somewhere real.
 // After a release, update SNAPSHOT so the offline fallback stays current.
 
-export type Platform = "win-x64" | "win-arm64" | "mac-arm64";
+export type Platform = "win-x64" | "win-arm64" | "mac-arm64" | "linux-x64" | "linux-x64-deb";
 
 export interface Asset {
   platform: Platform;
@@ -34,6 +34,8 @@ const META: Record<Platform, { label: string; requires: string; match: RegExp }>
   "win-x64": { label: "Windows", requires: "Windows 10 或更新，x64", match: /Setup-.*windows-x64\.exe$/ },
   "win-arm64": { label: "Windows ARM", requires: "Windows 11，ARM64（骁龙等）", match: /Setup-.*windows-arm64\.exe$/ },
   "mac-arm64": { label: "macOS", requires: "macOS 13 或更新，Apple Silicon", match: /macos-arm64\.dmg$/ },
+  "linux-x64": { label: "Linux · AppImage", requires: "x64，glibc 2.39+，FUSE 2", match: /^OMP-Studio-.*-linux-x64\.AppImage$/ },
+  "linux-x64-deb": { label: "Linux · deb", requires: "Ubuntu 24.04+ / Debian 13+，x64", match: /^OMP-Studio-.*-linux-x64\.deb$/ },
 };
 export const PLATFORMS = Object.keys(META) as Platform[];
 
@@ -92,13 +94,20 @@ export function loadRelease(): Promise<Release> {
   return pending;
 }
 
-/** The installer that fits this machine, or null on Linux, phones and Intel Macs we cannot tell apart. */
+/** A matching installer; ARM Linux and mobile visitors choose from the available downloads. */
 export async function detectPlatform(): Promise<Platform | null> {
   const ua = navigator.userAgent;
-  if (/Android|iPhone|iPad|Linux/.test(ua) && !/Windows|Macintosh/.test(ua)) return null;
+  if (/Android|iPhone|iPad/.test(ua)) return null;
   const uaData = (navigator as Navigator & {
     userAgentData?: { getHighEntropyValues(hints: string[]): Promise<{ architecture?: string }> };
   }).userAgentData;
+  if (/Linux/.test(ua)) {
+    let architecture: string | undefined;
+    try { architecture = (await uaData?.getHighEntropyValues(["architecture"]))?.architecture; } catch { /* Use an explicit x64 user agent when hints are unavailable. */ }
+    if (architecture === "arm" || /aarch64|armv\d|arm64/iu.test(ua)) return null;
+    if (architecture !== "x86" && !/x86_64|x64|amd64/iu.test(ua)) return null;
+    return /Ubuntu|Debian/iu.test(ua) ? "linux-x64-deb" : "linux-x64";
+  }
   if (/Windows/.test(ua)) {
     try {
       const { architecture } = (await uaData?.getHighEntropyValues(["architecture"])) ?? {};

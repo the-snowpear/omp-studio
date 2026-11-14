@@ -7,7 +7,7 @@ import {
   type Platform,
 } from "../shared/release";
 
-const PLATFORM_ICON: Record<Platform, IconName> = { "win-x64": "windows", "win-arm64": "windows", "mac-arm64": "apple" };
+const PLATFORM_ICON: Record<Platform, IconName> = { "win-x64": "windows", "win-arm64": "windows", "mac-arm64": "apple", "linux-x64": "terminal", "linux-x64-deb": "terminal" };
 
 const cmd = (text: string) =>
   `<li class="cmd"><code>${text.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</code><button class="copy" type="button" data-copy="${text.replace(/"/g, "&quot;")}">复制</button></li>`;

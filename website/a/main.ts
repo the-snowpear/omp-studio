@@ -170,7 +170,7 @@ codeBlock($("#src-cmd"), SOURCE_COMMANDS);
 codeBlock($("#mac-cmd"), [MAC_QUARANTINE_COMMAND]);
 
 // ---------------- download ----------------
-const osIcon = (asset: Asset) => (asset.platform === "mac-arm64" ? icon.apple : icon.windows);
+const osIcon = (asset: Asset) => (asset.platform === "mac-arm64" ? icon.apple : asset.platform.startsWith("linux-") ? i("terminal") : icon.windows);
 
 Promise.all([loadRelease(), detectPlatform()]).then(([release, platform]) => {
   const mine = release.assets.find((a) => a.platform === platform);

@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Windows/Linux core checks, full platform tests including Runtime, or a Mac test package
+        description: Core checks, full platform tests, or an installed desktop test package
         type: choice
-        options: [core, full, macos-package]
+        options: [core, full, macos-package, linux-package]
         default: core
 
 concurrency:
@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   platform:
-    if: inputs.scope != 'macos-package'
+    if: inputs.scope != 'macos-package' && inputs.scope != 'linux-package'
     name: ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -76,6 +76,96 @@ jobs:
         if: inputs.scope == 'full'
       - run: npm run omp:verify:patches
         if: inputs.scope == 'full'
+
+  linux-package:
+    name: Linux test packages (x64)
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'linux-package'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      BUN_VERSION: "1.4.4"
+      OMP_TARGET_PLATFORM: linux
+      OMP_TARGET_ARCH: x64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - uses: ./.github/actions/cache-release-downloads
+        with:
+          desktop: "true"
+      - uses: ./.github/actions/cache-runtime-build
+      - name: Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils libfuse2t64 libgtk-3-0t64 libasound2t64 libnss3 libgbm1 libsecret-1-0 libnotify4 libxss1 libxtst6 xdg-utils xvfb xauth dbus-x11 weston
+      - run: npm ci --prefer-offline --no-audit --no-fund
+      - uses: ./.github/actions/cache-desktop-native
+      - run: npm run omp:overlay:apply
+      - run: npm run omp:keys
+      - run: npm run omp:build:host
+      - name: Pack and audit AppImage and deb
+        run: |
+          keys="${XDG_CONFIG_HOME:-$HOME/.config}/omp-studio/keys"
+          export OMP_RUNTIME_TRUSTED_PUBLIC_KEY="$keys/trusted-public.pem"
+          export OMP_RUNTIME_SIGNING_KEY_ID="$(tr -d '[:space:]' < "$keys/key-id.txt")"
+          npm run pack:linux -- --skip-host --skip-build
+      - name: Install deb and exercise packaged Electron (X11)
+        timeout-minutes: 10
+        run: |
+          sudo apt-get install -y ./outputs/installer-linux/*.deb
+          npm install --no-save --package-lock=false playwright@1.62.1
+          OMP_E2E_PACKAGED_EXE='/opt/OMP Studio/omp-studio' OMP_E2E_OUTPUT_DIR=outputs/linux-deb-x11 dbus-run-session -- xvfb-run -a node scripts/linux-package-smoke.mjs
+      - name: Exercise AppImage (X11)
+        timeout-minutes: 10
+        run: |
+          image="$(realpath outputs/installer-linux/*.AppImage)"
+          OMP_E2E_PACKAGED_EXE="$image" OMP_E2E_OUTPUT_DIR=outputs/linux-appimage-x11 dbus-run-session -- xvfb-run -a node scripts/linux-package-smoke.mjs
+      - name: Exercise installed deb (Wayland)
+        timeout-minutes: 10
+        run: |
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/omp-wayland"
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          weston --backend=headless-backend.so --socket=wayland-omp --idle-time=0 --log="$RUNNER_TEMP/weston.log" &
+          weston_pid=$!
+          trap 'kill "$weston_pid"' EXIT
+          for attempt in $(seq 1 50); do [ -S "$XDG_RUNTIME_DIR/wayland-omp" ] && break; sleep 0.1; done
+          WAYLAND_DISPLAY=wayland-omp XDG_SESSION_TYPE=wayland OMP_E2E_DISPLAY=wayland OMP_E2E_PACKAGED_EXE='/opt/OMP Studio/omp-studio' OMP_E2E_OUTPUT_DIR=outputs/linux-deb-wayland dbus-run-session -- node scripts/linux-package-smoke.mjs
+      - name: Reinstall and remove without deleting user data
+        run: |
+          state="${XDG_CONFIG_HOME:-$HOME/.config}/omp-studio"
+          mkdir -p "$state"
+          printf '%s' linux-package-retention > "$state/package-retention-probe"
+          sudo apt-get install -y --reinstall ./outputs/installer-linux/*.deb
+          test "$(cat "$state/package-retention-probe")" = linux-package-retention
+          sudo apt-get remove -y omp-studio
+          test "$(cat "$state/package-retention-probe")" = linux-package-retention
+          test ! -e /usr/bin/omp-studio
+          test ! -e /usr/share/applications/omp-studio.desktop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-package-evidence
+          path: |
+            outputs/linux-deb-x11/
+            outputs/linux-appimage-x11/
+            outputs/linux-deb-wayland/
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omp-studio-linux-x64-test-packages
+          path: |
+            outputs/installer-linux/*.AppImage
+            outputs/installer-linux/*.deb
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
 
   macos-package:
     name: macOS test package (arm64)

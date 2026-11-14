@@ -30,6 +30,10 @@ on:
         type: boolean
         description: Also build and publish macOS (darwin-arm64, ad hoc signed)
         default: false
+      include_linux:
+        type: boolean
+        description: Build and publish Linux x64 AppImage and deb
+        default: true
   push:
     tags: ["v*", "runtime-v*"]
 
@@ -48,6 +52,8 @@ jobs:
       matrix: ${{ steps.config.outputs.matrix }}
       kind: ${{ steps.config.outputs.kind }}
       runtime_platforms: ${{ steps.config.outputs.runtime_platforms }}
+      linux_matrix: ${{ steps.config.outputs.linux_matrix }}
+      desktop_platforms: ${{ steps.config.outputs.desktop_platforms }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -58,6 +64,7 @@ jobs:
           TARGET_ARCH: ${{ inputs.target_arch || 'both' }}
           REQUEST_KIND: ${{ inputs.release_kind || (startsWith(github.ref_name, 'runtime-v') && 'runtime') || 'desktop' }}
           INCLUDE_MACOS: ${{ inputs.include_macos }}
+          INCLUDE_LINUX: ${{ github.event_name == 'push' || inputs.include_linux }}
           CHECK_RELEASE_NOTES: "true"
         run: node scripts/release-plan.mjs
 
@@ -235,6 +242,87 @@ jobs:
           path: outputs/release/darwin-arm64/
           if-no-files-found: error
 
+  build-linux:
+    needs: [prepare, runtime]
+    if: ${{ github.event_name == 'push' || inputs.include_linux }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.linux_matrix) }}
+    runs-on: ${{ matrix.os }}
+    environment: release
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OMP_TARGET_PLATFORM: linux
+      OMP_TARGET_ARCH: ${{ matrix.arch }}
+      OMP_RELEASE_KIND: ${{ needs.prepare.outputs.kind }}
+      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
+      OMP_RUNTIME_MIN_APP_VERSION: ${{ inputs.runtime_min_app_version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: ./.github/actions/cache-release-downloads
+        with:
+          desktop: "true"
+      - name: Linux packaging tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends desktop-file-utils libfuse2t64
+      - run: npm ci --prefer-offline --no-audit --no-fund
+      - uses: ./.github/actions/cache-desktop-native
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-${{ matrix.target }}-*
+          merge-multiple: true
+          path: packages/runtime-installer/dist/artifacts/${{ matrix.target }}/
+      - name: Build, package and verify Linux release
+        env:
+          OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          key_path="$RUNNER_TEMP/omp-release-signing.pem"
+          trap 'rm -f "$key_path"' EXIT
+          (umask 077 && printf '%s' "$OMP_SIGNING_SECRET" > "$key_path")
+          export OMP_RUNTIME_SIGNING_KEY="$key_path"
+          export OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
+          npm run omp:overlay:apply
+          npm run build
+          npm run pack:linux:prepare
+          runtime_version="$(node -e '
+            const fs = require("node:fs"), path = require("node:path");
+            const root = "packaging/runtime-payload";
+            const versions = fs.readdirSync(root).filter(name => !name.startsWith("."));
+            const m = versions.length === 1 ? JSON.parse(fs.readFileSync(path.join(root, versions[0], "runtime-manifest.json"), "utf8")) : undefined;
+            if (!m || m.channel !== process.env.OMP_RUNTIME_CHANNEL) throw new Error("Runtime identity/channel mismatch");
+            console.log(m.runtimeVersion);
+          ')"
+          app_version="$(node -p 'require("./package.json").version')"
+          if [ "$OMP_RELEASE_KIND" = runtime ]; then tag="runtime-v$runtime_version"; else tag="v$app_version"; fi
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then echo "Release tag mismatch" >&2; exit 1; fi
+          if [ "$OMP_RELEASE_KIND" = desktop ] && { [ "$OMP_RUNTIME_CHANNEL" != stable ] || [[ "$app_version" == *-* ]]; }; then echo "Desktop releases must be stable" >&2; exit 1; fi
+          export OMP_RELEASE_TAG="$tag"
+          node scripts/collect-update-history.mjs
+          while IFS='=' read -r name value; do
+            case "$name" in OMP_PREVIOUS_CATALOG_DIR|OMP_PREVIOUS_UPDATE_INDEX) export "$name=$value" ;; esac
+          done < "$GITHUB_ENV"
+          if [ "$OMP_RELEASE_KIND" = desktop ]; then npm run pack:linux -- --skip-host --skip-build; fi
+          npm run updates:build
+          npm run updates:verify
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ matrix.target }}
+          compression-level: 0
+          path: outputs/release/${{ matrix.target }}/
+          if-no-files-found: error
+
   build-remote:
     needs: [prepare, runtime]
     if: needs.prepare.outputs.kind == 'desktop'
@@ -247,9 +335,9 @@ jobs:
     secrets: inherit
 
   publish:
-    needs: [prepare, build, build-macos, build-remote]
+    needs: [prepare, build, build-macos, build-linux, build-remote]
     # A skipped macOS job (the default) must not skip the Windows release.
-    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') && (needs.build-remote.result == 'success' || needs.build-remote.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') && (needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped') && (needs.build-remote.result == 'success' || needs.build-remote.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -267,4 +355,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OMP_RELEASE_KIND: ${{ needs.prepare.outputs.kind }}
+          OMP_RELEASE_PLATFORMS: ${{ needs.prepare.outputs.desktop_platforms }}
         run: node scripts/publish-update-release.mjs

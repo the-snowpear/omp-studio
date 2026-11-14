@@ -5,8 +5,7 @@ import { fileURLToPath } from "node:url";
 import { buildBlockMap } from "app-builder-lib/out/targets/blockmap/blockmap.js";
 import { createRuntimeArchive, verifySignedArtifact, RUNTIME_ARTIFACT_LAYOUT, parseRuntimeInstallationManifest, verifyUpdateManifest, updateSigningBytes, createTrustedKeyVerifier, parseRuntimeSignatureManifest } from "@omp-studio/runtime-installer";
 import { STUDIO_PROTOCOL_VERSION } from "@omp-studio/studio-protocol";
-import { resolveTargetArch } from "./windows-architecture.mjs";
-import { MAC_TARGET_PLATFORM, legacyIndexName, packagedAppAssetPath, packagedFirstInstallPath, releaseOutputDirectory, releaseTargetsDarwin, runtimeArchiveAssetName } from "./release-assets.mjs";
+import { legacyIndexName, packagedAppAssetPath, packagedFirstInstallPath, releaseOutputDirectory, resolveReleasePlatform, runtimeArchiveAssetName } from "./release-assets.mjs";
 import { compareRuntimeVersions } from "../apps/desktop/dist/src/runtime-install.js";
 
 export async function releaseKeys(root) {
@@ -22,9 +21,9 @@ export async function describeFile(path, baseUrl) {
 export async function buildUpdateAssetsV2(options = {}) {
   const useEnvironment = options.useEnvironment ?? options.signingKey === undefined;
   const root = options.root ?? resolve(".");
-  // Windows keeps its arch-only interface; macOS is a platform of its own.
-  const platform = options.platform ?? (options.arch === undefined && releaseTargetsDarwin() ? MAC_TARGET_PLATFORM : `win32-${options.arch ?? resolveTargetArch()}`);
-  const arch = platform.slice(platform.indexOf("-") + 1), darwin = platform.startsWith("darwin-");
+  // Keep the historical explicit arch-only Windows API for callers and fixtures.
+  const platform = options.platform ?? (options.arch === undefined ? resolveReleasePlatform() : `win32-${options.arch}`);
+  const arch = platform.slice(platform.indexOf("-") + 1);
   const repo = options.repo ?? process.env.GITHUB_REPOSITORY ?? "the-snowpear/omp-studio";
   const appVersion = options.appVersion ?? JSON.parse(await readFile(join(root, "package.json"), "utf8")).version;
   const runtimeOnly = options.runtimeOnly ?? (useEnvironment && process.env.OMP_RELEASE_KIND === "runtime");
@@ -91,8 +90,7 @@ export async function buildUpdateAssetsV2(options = {}) {
     manifest.app = { version: appVersion, sequence: nextSequence("app", "stable"), channel: "stable",
       file: await describeFile(dest, base), blockmap: await describeFile(`${dest}.blockmap`, base), minAppVersion: "0.0.0",
       studioProtocol: { min: STUDIO_PROTOCOL_VERSION, max: STUDIO_PROTOCOL_VERSION }, bundledRuntimeVersion: rt.runtimeVersion };
-    // The macOS dmg is downloaded by people, never by the updater. It rides in the signed
-    // manifest only so verification and publishing can prove its bytes; clients ignore it.
+    // Manual installers share the catalog signature: macOS dmg and Linux deb.
     const firstInstall = options.firstInstallPath ?? packagedFirstInstallPath(root, appVersion, platform);
     if (firstInstall !== undefined) {
       const dmg = join(out, basename(firstInstall));
@@ -131,8 +129,16 @@ export async function buildMigrationIndex({ previousPath, out, arch, manifest, k
 }
 export function releaseNotes(manifest) {
   if (manifest.platform.startsWith("darwin-")) return macReleaseNotes(manifest);
+  if (manifest.platform.startsWith("linux-")) return linuxReleaseNotes(manifest);
   const app = manifest.app, rt = manifest.runtime;
   return `# ${app ? `OMP Studio ${app.version}` : `OMP Runtime ${rt.version}`}\n\n${app ? `## 安装\n\n[下载 Windows ${manifest.platform.slice(6)} 安装包](${app.file.url})\n\n首次安装或旧版迁移请使用此安装包。已迁移的用户在应用内等待下载完成后点击「重启更新」。\n\n` : "这是 Runtime 独立更新，不是桌面安装包。在 OMP Studio 中检查更新即可。\n\n"}## Runtime\n\n版本：${rt.version} · 通道：${rt.channel} · 最低桌面版本：${rt.minAppVersion}\n\n<details>\n<summary>自动更新附件说明（普通用户无需下载）</summary>\n\n- Runtime ZIP：签名运行时工件，供自动更新或离线导入。\n- blockmap：增量下载索引，不是可执行安装包。\n- updates-*.json：签名版本清单，供更新器使用。\n- update-index*.json：旧客户端迁移入口，请勿删除。\n\n</details>\n`;
+}
+function linuxReleaseNotes(manifest) {
+  const app = manifest.app, rt = manifest.runtime;
+  const install = app
+    ? `## 安装（Linux x64）\n\n[下载 AppImage](${app.file.url}) · [下载 deb](${manifest.firstInstall.url})\n\n支持 Ubuntu 24.04 或更新的 x64 桌面（glibc 2.39+）。内置签名 Runtime，无需 Node、Bun 或 Rust。Ubuntu/Debian 推荐使用 deb：\`sudo apt install ./OMP-Studio-${app.version}-linux-x64.deb\`。AppImage 先执行 \`chmod +x\`；系统需支持 FUSE 2 和非特权用户命名空间。沙箱或安装问题见 [Linux 安装说明](https://github.com/${manifest.repo}/blob/v${app.version}/docs/linux.md)。\n\nLinux 桌面更新通过下载新安装包完成；应用内 Runtime 更新继续验签和校验兼容性。\n\n`
+    : "这是 Runtime 独立更新，不是桌面安装包。在 OMP Studio 中检查更新即可。\n\n";
+  return `# ${app ? `OMP Studio ${app.version}` : `OMP Runtime ${rt.version}`}\n\n${install}## Runtime\n\n版本：${rt.version} · 通道：${rt.channel} · 最低桌面版本：${rt.minAppVersion}\n\nRuntime ZIP 用于在线更新或离线导入；blockmap 和 updates-linux-x64.json 是签名更新附件，不是桌面安装包。\n`;
 }
 function macReleaseNotes(manifest) {
   const app = manifest.app, rt = manifest.runtime;

@@ -44,7 +44,9 @@ export interface UpdateCoordinatorOptions {
   isBusy: () => boolean;
   getRestartBlocker?: () => string | undefined;
   beforeQuit: (onShutdownStarted: () => void) => Promise<void>;
-  installDesktop: (path: string, release: ComponentRelease) => Promise<void>;
+  /** Omitted for Linux's manual installation policy. Runtime updates remain available. */
+  installDesktop?: (path: string, release: ComponentRelease) => Promise<void>;
+  manualDesktopDownload?: "app" | "firstInstall";
   /** Why this installation cannot update itself (e.g. macOS App Translocation); undefined when it can. */
   preflightDesktop?: () => Promise<string | undefined>;
   /**
@@ -93,7 +95,10 @@ export class UpdateCoordinator {
   get state(): UnifiedUpdateSnapshot {
     const runtime = this.journal.pending.runtime?.manifest.runtime ?? this.found.runtime?.manifest.runtime;
     const app = this.journal.pending.app?.manifest.app;
+    const manual = !this.options.installDesktop ? this.found.app?.manifest : undefined;
+    const manualFile = this.options.manualDesktopDownload === "firstInstall" ? manual?.firstInstall : manual?.app?.file;
     return structuredClone({ ...this.snapshot,
+      app: { ...this.snapshot.app, ...(manualFile ? { manualInstallUrl: manualFile.url } : {}) },
       runtime: { ...this.snapshot.runtime, blockedReason: runtime && this.snapshot.runtime.version
         ? this.runtimeCompatibilityBlocker(runtime, app?.version ?? this.options.appVersion, app?.studioProtocol) : undefined },
       rollbackAppVersion: this.journal.rollbackApp?.manifest.app?.version, rollbackAppPending: this.journal.rollbackRequested === true });
@@ -334,6 +339,7 @@ export class UpdateCoordinator {
       this.found = await discoverUpdates({ repo: this.options.repo, platform: this.options.platform, keys: this.options.keys, mirror: prefs.mirrorPrefix, channel: prefs.runtimeChannel, signal: controller.signal, watermarks: this.journal.watermarks, currentVersions: { app: this.options.appVersion, runtime: this.snapshot.runtime.currentVersion }, cacheDirectory: join(this.options.root, "catalog-cache"), ...(this.options.log ? { log: this.options.log } : {}), ...(this.options.fetcher ? { fetcher: this.options.fetcher } : {}) });
       for (const kind of ["app", "runtime"] as const) {
         const baseline = this.found.baselines?.[kind], release = baseline?.manifest[kind];
+        if (kind === "app" && !this.options.installDesktop) continue;
         if (!release || this.journal.previous[kind]?.manifest[kind]?.file.sha256 === release.file.sha256) continue;
         const path = cachedUpdatePath(this.cache, release.file);
         await mkdir(join(this.cache, release.file.sha256), { recursive: true });
@@ -387,6 +393,7 @@ export class UpdateCoordinator {
         if (target !== "all" && target !== kind) continue;
         const envelope = this.found[kind], release = envelope?.manifest[kind];
         if (!release) continue;
+        if (kind === "app" && !this.options.installDesktop) continue;
         if (kind === "app" && this.options.preflightDesktop) {
           const reason = await this.options.preflightDesktop();
           if (reason !== undefined) {
@@ -400,7 +407,10 @@ export class UpdateCoordinator {
           const targetApp = this.journal.pending.app?.manifest.app?.version ?? this.options.appVersion;
           const protocol = this.journal.pending.app?.manifest.app?.studioProtocol ?? { min: STUDIO_PROTOCOL_VERSION, max: STUDIO_PROTOCOL_VERSION };
           const reason = this.runtimeCompatibilityBlocker(release, targetApp, protocol);
-          if (reason) throw new Error(reason);
+          if (reason) {
+            if (target === "all" && !this.options.installDesktop) continue;
+            throw new Error(reason);
+          }
         }
         this.snapshot[kind] = { ...this.snapshot[kind], version: release.version, phase: "downloading", message: undefined, errorStage: undefined };
         this.emit();
@@ -480,6 +490,7 @@ export class UpdateCoordinator {
         // Shutdown takes seconds; re-verify the exact bytes about to be
         // executed so a cache swap in that window cannot launch them.
         if (!await isVerifiedFile(cachedUpdatePath(this.cache, app.file), app.file)) throw new Error("Update checksum mismatch after shutdown");
+        if (!this.options.installDesktop) throw new Error("请从发布页下载 Linux 安装包完成桌面升级");
         await this.options.installDesktop(cachedUpdatePath(this.cache, app.file), app);
         this.options.quit();
       } else this.options.restart();

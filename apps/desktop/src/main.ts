@@ -229,9 +229,10 @@ export async function main(): Promise<void> {
   if (process.platform === "win32") {
     app.setAppUserModelId(resolveAppUserModelId());
   }
+  if (process.platform === "linux") app.setDesktopName("omp-studio.desktop");
   await app.whenReady();
   if (await offerMoveToApplications()) return;
-  // A Finder launch has launchd's bare PATH; the Host waits for the login shell's before spawning.
+  // GUI launchers have a minimal PATH; resolve the user's tools before spawning the Host.
   const loginEnvironment = applyLoginEnvironment({ locale: app.getLocale() });
 
   const runtimeInstallLayout = packagedRuntimeInstallLayout({
@@ -339,7 +340,7 @@ export async function main(): Promise<void> {
   powerMonitor.on("on-ac", () => { void perfProfiles.refresh(true); });
   // Runs once the renderer has booted: a macOS update commits only then.
   let confirmMacDesktop: (() => Promise<void>) | undefined;
-  if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined)) {
+  if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined || process.platform === "linux" && process.arch === "x64")) {
     const { PreparedNsisUpdater, electronDifferentialDownload } = await import("./electron-update-adapter.js");
     const shared = {
       root: desktopPaths().updatesV2Root,
@@ -353,7 +354,9 @@ export async function main(): Promise<void> {
       fetcher: net.fetch.bind(net) as typeof fetch, log: hostFactory.log,
       restart: () => { app.relaunch({ args: relaunchArguments(process.argv) }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
     };
-    if (macBundle === undefined) {
+    if (process.platform === "linux") {
+      updateCoordinator = new UpdateCoordinator({ ...shared, manualDesktopDownload: process.env.APPIMAGE ? "app" : "firstInstall" });
+    } else if (macBundle === undefined) {
       const updater = new PreparedNsisUpdater();
       updateCoordinator = new UpdateCoordinator({
         ...shared,

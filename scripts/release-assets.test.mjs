@@ -13,6 +13,7 @@ import {
   releaseCandidateName,
   releaseOutputDirectory,
   releaseTargetsDarwin,
+  resolveReleasePlatform,
   runtimeArchiveAssetName,
 } from "./release-assets.mjs";
 
@@ -61,7 +62,20 @@ test("macOS release names: update zip, first-install dmg, no v1 index", () => {
   assert.equal(releaseCandidateName(platform), "release-candidate-darwin-arm64");
   assert.equal(platformOfReleaseCandidate("release-candidate-darwin-arm64"), platform);
   assert.equal(platformOfReleaseCandidate("release-candidate-darwin-x64"), undefined);
-  assert.equal(platformOfReleaseCandidate("release-candidate-linux-x64"), undefined);
+  assert.equal(platformOfReleaseCandidate("release-candidate-linux-arm64"), undefined);
+});
+
+test("Linux uses its own signed AppImage/deb candidate and never Windows names", () => {
+  assert.equal(runtimeArchiveAssetName("18.19.0-studio.1", "linux-x64"), "OMP-Studio-Runtime-18.19.0-studio.1-linux-x64.zip");
+  assert.equal(appUpdateAssetName("0.2.2", "linux-x64"), "OMP-Studio-0.2.2-linux-x64.AppImage");
+  assert.equal(firstInstallAssetName("0.2.2", "linux-x64"), "OMP-Studio-0.2.2-linux-x64.deb");
+  assert.equal(packagedAppAssetPath("/r", "0.2.2", "linux-x64"), join("/r", "outputs/installer-linux/OMP-Studio-0.2.2-linux-x64.AppImage"));
+  assert.equal(releaseOutputDirectory("/r", "linux-x64"), join("/r", "outputs/release/linux-x64"));
+  assert.equal(platformOfReleaseCandidate(releaseCandidateName("linux-x64")), "linux-x64");
+  assert.equal(legacyIndexName("linux-x64"), undefined);
+  assert.equal(resolveReleasePlatform({}, { platform: "linux", arch: "x64" }), "linux-x64");
+  assert.equal(resolveReleasePlatform({ OMP_TARGET_PLATFORM: "win32", OMP_TARGET_ARCH: "arm64" }, { platform: "linux", arch: "x64" }), "win32-arm64");
+  assert.throws(() => appUpdateAssetName("0.2.2", "linux-arm64"), /Unsupported desktop/u);
 });
 
 test("a release job targets macOS when asked, or on a Mac by default", () => {

@@ -51,12 +51,13 @@ test("a macOS Runtime archive carries omp and extracts it executable", async () 
   for (const name of runtimeArchiveFiles("omp")) assert.deepEqual(await readFile(join(source, name)), await readFile(join(root, "out", name)));
   if (process.platform !== "win32") assert.equal((await stat(join(root, "out", "omp"))).mode & 0o777, 0o755);
 });
-test("a Linux Runtime archive preserves bytes without becoming a desktop update target", async () => {
+test("a Linux Runtime archive preserves bytes and executable mode", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-runtime-archive-linux-")), source = await archiveSource(root, "linux-x64", "omp");
   await createRuntimeArchive(source, join(root, "a.zip"));
   await extractRuntimeArchive(join(root, "a.zip"), join(root, "out"));
   assert.deepEqual(await readFile(join(source, "omp")), await readFile(join(root, "out", "omp")));
-  assert.equal((UPDATE_PLATFORMS as readonly string[]).includes("linux-x64"), false);
+  assert.equal((UPDATE_PLATFORMS as readonly string[]).includes("linux-x64"), true);
+  assert.equal((UPDATE_PLATFORMS as readonly string[]).includes("linux-arm64"), false);
   if (process.platform !== "win32") assert.equal((await stat(join(root, "out", "omp"))).mode & 0o777, 0o755);
 });
 test("Runtime archive entrypoint must agree with the manifest platform", async () => {
@@ -81,7 +82,7 @@ test("platform table follows the artifact platform", () => {
   assert.equal(runtimeEntrypointFor("darwin-arm64"), "omp");
   assert.equal(runtimeEntrypointFor("linux-x64"), "omp");
   assert.equal(runtimeEntrypointFor("linux-arm64"), "omp");
-  assert.deepEqual([...UPDATE_PLATFORMS], ["win32-x64", "win32-arm64", "darwin-arm64"]);
+  assert.deepEqual([...UPDATE_PLATFORMS], ["win32-x64", "win32-arm64", "darwin-arm64", "linux-x64"]);
 });
 test("a macOS catalog ships the desktop as a zipped app and rejects the Windows installer", () => {
   const m = manifest(); m.platform = "darwin-arm64"; m.app!.file = file("OMP-Studio-1.0.0-macos-arm64.zip"); m.app!.blockmap = file("OMP-Studio-1.0.0-macos-arm64.zip.blockmap");

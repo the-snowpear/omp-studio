@@ -7,6 +7,7 @@
 import { join } from "node:path";
 
 import { MAC_TARGET_PLATFORM, macDmgFileName, macUpdateZipFileName } from "./mac-bundle.mjs";
+import { LINUX_TARGET_PLATFORM, linuxAppImageName, linuxDebName } from "./linux-bundle.mjs";
 import { runtimeOsOf, UPDATE_PLATFORMS } from "./target-platform.mjs";
 
 export { MAC_TARGET_PLATFORM };
@@ -24,9 +25,16 @@ export function releaseTargetsDarwin(env = process.env, hostPlatform = process.p
   return requested === "darwin" || (requested === "" && hostPlatform === "darwin");
 }
 
-/** "windows-x64", "windows-arm64", "macos-arm64". */
+export function resolveReleasePlatform(env = process.env, host = { platform: process.platform, arch: process.arch }) {
+  const platform = `${String(env.OMP_TARGET_PLATFORM ?? host.platform).trim().toLowerCase()}-${env.OMP_TARGET_ARCH ?? host.arch}`;
+  if (!UPDATE_PLATFORMS.includes(platform)) throw new Error(`Unsupported desktop release platform: ${platform}`);
+  return platform;
+}
+
+/** Public labels preserve the historical Windows and macOS names. */
 export function assetPlatformLabel(platform) {
-  return `${runtimeOsOf(platform) === "darwin" ? "macos" : "windows"}-${archOf(platform)}`;
+  const os = runtimeOsOf(platform);
+  return `${os === "darwin" ? "macos" : os === "win32" ? "windows" : "linux"}-${archOf(platform)}`;
 }
 
 export function runtimeArchiveAssetName(runtimeVersion, platform) {
@@ -35,14 +43,19 @@ export function runtimeArchiveAssetName(runtimeVersion, platform) {
 
 /** The desktop artifact the update catalog points at: the NSIS Setup, or the macOS update zip. */
 export function appUpdateAssetName(appVersion, platform) {
+  if (!UPDATE_PLATFORMS.includes(platform)) throw new Error(`Unsupported desktop release platform: ${platform}`);
+  if (platform === LINUX_TARGET_PLATFORM) return linuxAppImageName(appVersion);
   return runtimeOsOf(platform) === "darwin" ? macUpdateZipFileName(appVersion) : `OMP-Studio-Setup-${appVersion}-windows-${archOf(platform)}.exe`;
 }
 
-/** Where pack:win / pack:mac leave that artifact. */
+function installerDirectory(platform) {
+  const os = runtimeOsOf(platform);
+  return os === "darwin" ? "installer-mac" : os === "linux" ? "installer-linux" : "installer";
+}
+
+/** Where the native pack command leaves the artifact. */
 export function packagedAppAssetPath(root, appVersion, platform) {
-  return runtimeOsOf(platform) === "darwin"
-    ? join(root, "outputs", "installer-mac", appUpdateAssetName(appVersion, platform))
-    : join(root, "outputs", "installer", appUpdateAssetName(appVersion, platform));
+  return join(root, "outputs", installerDirectory(platform), appUpdateAssetName(appVersion, platform));
 }
 
 /**
@@ -50,12 +63,13 @@ export function packagedAppAssetPath(root, appVersion, platform) {
  * through it: the macOS dmg. On Windows the catalog's Setup serves both.
  */
 export function firstInstallAssetName(appVersion, platform) {
+  if (platform === LINUX_TARGET_PLATFORM) return linuxDebName(appVersion);
   return runtimeOsOf(platform) === "darwin" ? macDmgFileName(appVersion) : undefined;
 }
 
 export function packagedFirstInstallPath(root, appVersion, platform) {
   const name = firstInstallAssetName(appVersion, platform);
-  return name === undefined ? undefined : join(root, "outputs", "installer-mac", name);
+  return name === undefined ? undefined : join(root, "outputs", installerDirectory(platform), name);
 }
 
 /** The v1 migration feed only ever existed for Windows. */
@@ -67,19 +81,19 @@ export function legacyIndexName(platform) {
 
 /** outputs/release/<arch> for Windows (unchanged), outputs/release/darwin-arm64 for macOS. */
 export function releaseOutputDirectory(root, platform) {
-  return join(root, "outputs", "release", runtimeOsOf(platform) === "darwin" ? platform : archOf(platform));
+  return join(root, "outputs", "release", runtimeOsOf(platform) === "win32" ? archOf(platform) : platform);
 }
 
 /** The workflow artifact carrying one platform's candidate to the publish job. */
 export function releaseCandidateName(platform) {
-  return `release-candidate-${runtimeOsOf(platform) === "darwin" ? platform : archOf(platform)}`;
+  return `release-candidate-${runtimeOsOf(platform) === "win32" ? archOf(platform) : platform}`;
 }
 
 /** Inverse of releaseCandidateName; undefined for anything else. */
 export function platformOfReleaseCandidate(directoryName) {
-  const match = /^release-candidate-(x64|arm64|darwin-arm64)$/u.exec(directoryName);
+  const match = /^release-candidate-(x64|arm64|darwin-arm64|linux-x64)$/u.exec(directoryName);
   if (!match) return undefined;
-  return match[1] === "darwin-arm64" ? MAC_TARGET_PLATFORM : `win32-${match[1]}`;
+  return match[1].includes("-") ? match[1] : `win32-${match[1]}`;
 }
 
 function* releaseNoteAssetNames(notes, repo, tag) {

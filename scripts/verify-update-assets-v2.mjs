@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { extractRuntimeArchive, verifyUpdateManifest, verifySignedArtifact, RUNTIME_ARTIFACT_LAYOUT, parseRuntimeInstallationManifest, createTrustedKeyVerifier, parseRuntimeSignatureManifest } from "@omp-studio/runtime-installer";
 import { releaseKeys } from "./build-update-assets-v2.mjs";
 import { containsPrivateMaterial } from "./private-material.mjs";
-import { MAC_TARGET_PLATFORM, legacyIndexName, releaseOutputDirectory, releaseTargetsDarwin } from "./release-assets.mjs";
+import { firstInstallAssetName, legacyIndexName, releaseOutputDirectory, resolveReleasePlatform } from "./release-assets.mjs";
 
 function sameBytes(bytes, file) {
   return bytes.length === file.size && createHash("sha256").update(bytes).digest("hex") === file.sha256 && createHash("sha512").update(bytes).digest("base64") === file.sha512;
@@ -31,8 +31,8 @@ export async function verifyUpdateAssets(directory, keys, repo, platform) {
   if (firstInstall !== undefined) {
     if (!sameBytes(await readFile(join(directory, firstInstall.asset)), firstInstall)) throw new Error(`Release artifact mismatch: ${firstInstall.asset}`);
     expected.add(firstInstall.asset);
-  } else if (platform.startsWith("darwin-") && envelope.manifest.app) {
-    throw new Error("A macOS desktop release needs its first-install dmg");
+  } else if (envelope.manifest.app && firstInstallAssetName(envelope.manifest.app.version, platform)) {
+    throw new Error(`A ${platform} desktop release needs its manual installer`);
   }
   const runtime = envelope.manifest.runtime;
   if (runtime) {
@@ -58,7 +58,7 @@ export async function verifyUpdateAssets(directory, keys, repo, platform) {
   return envelope.manifest;
 }
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
-  const root = resolve("."), platform = releaseTargetsDarwin() ? MAC_TARGET_PLATFORM : `win32-${process.env.OMP_TARGET_ARCH ?? "x64"}`;
+  const root = resolve("."), platform = resolveReleasePlatform();
   await verifyUpdateAssets(process.argv[2] ?? releaseOutputDirectory(root, platform), await releaseKeys(root), process.env.GITHUB_REPOSITORY ?? "the-snowpear/omp-studio", platform);
   console.log("Signed release assets verified");
 }

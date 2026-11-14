@@ -2636,6 +2636,8 @@ const zhRaw = {
     "visitGithub": "访问 GitHub 仓库"
   },
   "appUpdate": {
+    "downloadInstaller": "下载安装包",
+    "linuxManualInstall": "下载新版本后，关闭 OMP Studio，再安装 deb 或替换 AppImage。你的配置和会话会保留。Runtime 可继续在应用内更新。",
     "dialogTitle": "发现新版本",
     "currentVersion": "当前版本",
     "latestVersion": "最新版本",

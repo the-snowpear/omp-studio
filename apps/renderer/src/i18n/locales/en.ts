@@ -2636,6 +2636,8 @@ export const en: LocaleDictionary = {
     "visitGithub": "Visit GitHub Repository"
   },
   "appUpdate": {
+    "downloadInstaller": "Download installer",
+    "linuxManualInstall": "Download the new version, close OMP Studio, then install the deb or replace the AppImage. Your settings and sessions are retained. Runtime updates remain available in the app.",
     "dialogTitle": "Update Available",
     "currentVersion": "Current Version",
     "latestVersion": "Latest Version",

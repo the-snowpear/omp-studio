@@ -35,7 +35,7 @@ function command(text: string): HTMLElement {
   return row;
 }
 
-const osIcon = (asset: Asset) => i(asset.platform === "mac-arm64" ? "apple" : "windows");
+const osIcon = (asset: Asset) => i(asset.platform === "mac-arm64" ? "apple" : asset.platform.startsWith("linux-") ? "terminal" : "windows");
 
 export async function initDownload(): Promise<void> {
   $("[data-source]").append(...SOURCE_COMMANDS.map(command));

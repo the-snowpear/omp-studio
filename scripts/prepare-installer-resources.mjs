@@ -24,7 +24,7 @@ import {
 } from "./runtime-signing-keys.mjs";
 
 const TARGET_ARCH = resolveTargetArch();
-const TARGET = process.platform === "darwin" ? resolveTargetPlatform() : `win32-${TARGET_ARCH}`;
+const TARGET = resolveTargetPlatform();
 const PLATFORM = process.env.OMP_INSTALLER_ARTIFACT_PLATFORM ?? TARGET;
 if (PLATFORM !== TARGET) throw new Error(`Artifact platform ${PLATFORM} does not match target ${TARGET}`);
 

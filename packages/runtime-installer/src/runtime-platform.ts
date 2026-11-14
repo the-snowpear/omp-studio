@@ -9,11 +9,11 @@ export type RuntimeOs = keyof typeof RUNTIME_ENTRYPOINTS;
 export type RuntimeEntrypoint = (typeof RUNTIME_ENTRYPOINTS)[RuntimeOs];
 
 /** Platforms with signed update catalogs. */
-export const UPDATE_PLATFORMS = Object.freeze(["win32-x64", "win32-arm64", "darwin-arm64"] as const);
+export const UPDATE_PLATFORMS = Object.freeze(["win32-x64", "win32-arm64", "darwin-arm64", "linux-x64"] as const);
 export type UpdatePlatform = (typeof UPDATE_PLATFORMS)[number];
 
 /** Runtime build targets; adding a remote target does not add a desktop updater. */
-export const RUNTIME_PLATFORMS = Object.freeze([...UPDATE_PLATFORMS, "darwin-x64", "linux-x64", "linux-arm64"] as const);
+export const RUNTIME_PLATFORMS = Object.freeze([...UPDATE_PLATFORMS, "darwin-x64", "linux-arm64"] as const);
 
 export function runtimeOsOf(platform: string): RuntimeOs {
   const os = platform.split("-", 1)[0];
@@ -29,7 +29,8 @@ export function isUpdatePlatform(platform: string): platform is UpdatePlatform {
   return (UPDATE_PLATFORMS as readonly string[]).includes(platform);
 }
 
-/** Desktop update payload: the NSIS installer on Windows, the zipped `.app` on macOS. */
-export function appUpdateAssetSuffix(platform: UpdatePlatform): ".exe" | ".zip" {
-  return runtimeOsOf(platform) === "darwin" ? ".zip" : ".exe";
+/** Desktop download: NSIS, zipped `.app`, or a manually installed Linux AppImage. */
+export function appUpdateAssetSuffix(platform: UpdatePlatform): ".exe" | ".zip" | ".AppImage" {
+  const os = runtimeOsOf(platform);
+  return os === "darwin" ? ".zip" : os === "linux" ? ".AppImage" : ".exe";
 }
