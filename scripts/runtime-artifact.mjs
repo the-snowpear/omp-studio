@@ -833,7 +833,8 @@ function parseArgs(argv) {
       flag === "--key-id"
     ) {
       if (value === undefined) throw new Error(`${flag} requires a value`);
-      values[flag.slice(2)] = value;
+      const key = flag === "--signing-key" ? "signingKey" : flag === "--key-id" ? "keyId" : flag.slice(2);
+      values[key] = value;
       index += 1;
     } else {
       throw new Error(`unknown argument ${flag}`);
