@@ -3587,13 +3587,7 @@ export class StudioHostClientFacade implements ClientTransport {
     commandName: "session.create" | "session.resume" | "session.drop" | "interaction.respond",
     input: unknown,
   ): void {
-    if (commandName === "session.create") {
-      if (input === null || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => key !== "noContextFiles" && key !== "model") || ("noContextFiles" in input && typeof input.noContextFiles !== "boolean")) {
-        throw clientError("INVALID_ARGUMENT", "Choose a boolean noContextFiles startup option");
-      }
-      if ("model" in input && input.model !== undefined && (typeof input.model !== "string" || input.model.length > 512 || !/^[^\s\u0000-\u001f-][^\u0000-\u001f]*\/[^\u0000-\u001f]+$/u.test(input.model))) throw clientError("INVALID_ARGUMENT", "Startup requires a provider/model selector");
-      return;
-    }
+    if (commandName === "session.create") return;
     if (commandName === "session.resume" || commandName === "session.drop") {
       if (!isThreadCommandInput(input)) {
         throw clientError("INVALID_ARGUMENT", `${commandName} threadId must not be empty`);

@@ -255,6 +255,12 @@ export function createDesktopSemanticCommands(options: {
       return { applied: true, runtimeEffect: "immediate", message: artifactsWarning ? "Session deleted; managed artifact cleanup failed. Review the artifact library." : deleteManagedArtifacts ? "Session and managed artifacts deleted" : "Session deleted; managed artifacts retained" };
     },
     create: async (input) => {
+      if (input?.noContextFiles !== undefined && typeof input.noContextFiles !== "boolean") {
+        throw new StudioHostError("INVALID_ARGUMENT", "Choose a boolean noContextFiles startup option");
+      }
+      if (input?.model !== undefined && (typeof input.model !== "string" || input.model.length > 512 || !/^[^\s\u0000-\u001f-][^\u0000-\u001f]*\/[^\u0000-\u001f]+$/u.test(input.model))) {
+        throw new StudioHostError("INVALID_ARGUMENT", "Startup requires a provider/model selector");
+      }
       if (options.switchSession === undefined) {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Fresh Runtime sessions are not available");
       }
