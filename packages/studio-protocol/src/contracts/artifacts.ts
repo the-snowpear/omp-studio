@@ -66,36 +66,3 @@ function short(value: unknown, optional = false): void {
   if (value === undefined && optional) return;
   if (typeof value !== "string" || !value.trim() || value.length > 1024 || /[\u0000-\u001f]/u.test(value)) throw new Error("Invalid artifact text");
 }
-function size(value: unknown): void {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error("Invalid artifact size");
-}
-export function validateArtifactIdInput(value: unknown): asserts value is { artifactId: string } {
-  const input = object(value, ["artifactId"]);
-  if (typeof input.artifactId !== "string" || !/^[a-f0-9-]{36}$/u.test(input.artifactId)) throw new Error("Invalid artifact ID");
-}
-export function validateArtifactListInput(value: unknown): asserts value is ArtifactListInput {
-  const input = object(value, ["workspaceId", "sessionId", "kind", "cursor", "limit"]);
-  for (const key of ["workspaceId", "sessionId", "cursor"]) short(input[key], true);
-  if (input.kind !== undefined && !(ARTIFACT_KINDS as readonly unknown[]).includes(input.kind)) throw new Error("Invalid artifact kind");
-  if (input.limit !== undefined && (typeof input.limit !== "number" || !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 200)) throw new Error("Invalid artifact page size");
-}
-export function validateArtifactRecord(value: unknown): asserts value is ArtifactRecord {
-  const row = object(value, ["artifactId", "kind", "name", "mimeType", "bytes", "createdAt", "workspaceId", "sessionId", "runId", "sha256"]);
-  validateArtifactIdInput({ artifactId: row.artifactId });
-  if (!(ARTIFACT_KINDS as readonly unknown[]).includes(row.kind)) throw new Error("Invalid artifact kind");
-  for (const key of ["name", "mimeType", "createdAt", "sha256"]) short(row[key]);
-  for (const key of ["workspaceId", "sessionId", "runId"]) short(row[key], true);
-  size(row.bytes);
-  if (!/^[a-f0-9]{64}$/u.test(row.sha256 as string)) throw new Error("Invalid artifact digest");
-}
-export function validateArtifactPage(value: unknown): asserts value is ArtifactPage {
-  const page = object(value, ["artifacts", "nextCursor", "total", "totalBytes"]);
-  if (!Array.isArray(page.artifacts) || page.artifacts.length > 200) throw new Error("Invalid artifact page");
-  page.artifacts.forEach(validateArtifactRecord);
-  short(page.nextCursor, true); size(page.total); size(page.totalBytes);
-}
-export function validateArtifactStorageState(value: unknown): asserts value is ArtifactStorageState {
-  const state = object(value, ["locationName", "writable", "total", "totalBytes"]);
-  short(state.locationName); size(state.total); size(state.totalBytes);
-  if (typeof state.writable !== "boolean") throw new Error("Invalid artifact storage state");
-}

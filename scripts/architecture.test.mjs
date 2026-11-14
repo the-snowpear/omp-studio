@@ -170,6 +170,36 @@ test("host packages never import the test fixtures", () => {
   assert.deepEqual(violations, [], "demo data belongs in the renderer preview layer");
 });
 
+// Runtime operations are validated once, in the overlay `*-protocol.ts`. The
+// contracts package is types, kind lists and pure helpers; only these files may
+// throw, each being the sole check of a Host-side service (or a pure parser).
+const CONTRACTS_THAT_MAY_THROW = {
+  "annotations.ts": "validateAnnotationBundle — Renderer imports user annotation files",
+  "artifacts.ts": "validateArtifactTextInput — artifact library saveText",
+  "gui-settings.ts": "validateGuiSetting — GUI settings service and snapshot parsing",
+  "session-compaction.ts": "parseSessionCompactionInput — parses user-typed threshold text",
+  "workbench.ts": "validateServiceSpec — desktop stored service definitions",
+};
+
+test("protocol contracts do not grow duplicate validators", () => {
+  const contracts = join(root, "packages", "studio-protocol", "src", "contracts");
+  const throwing = sourceFiles(contracts)
+    .filter(file => /\bthrow\b/.test(readFileSync(file, "utf8")))
+    .map(file => relative(contracts, file).split(sep).join("/"));
+  const stray = throwing.filter(file => !Object.hasOwn(CONTRACTS_THAT_MAY_THROW, file));
+  assert.deepEqual(stray, [], "validate Runtime operations in the overlay *-protocol.ts, not in contracts");
+});
+
+test("no layer re-validates another layer's output", () => {
+  const OUTPUT_VALIDATOR = /\b(?:function\s+|const\s+)((?:validate|assert)\w*(?:Result|Event))\b/g;
+  const dirs = [...units.map(unit => join(unit.dir, "src")), join(root, "omp-patch", "overlay")];
+  const found = [];
+  for (const file of dirs.flatMap(sourceFiles)) {
+    for (const match of readFileSync(file, "utf8").matchAll(OUTPUT_VALIDATOR)) found.push(`${name(file)}: ${match[1]}`);
+  }
+  assert.deepEqual(found, [], "results and events are typed with `as`, not re-validated");
+});
+
 test("the preview switch is defined once", () => {
   const definitions = [];
   const readers = [];

@@ -43,7 +43,3 @@ export interface JudgmentResultMap {
 }
 export const JUDGMENT_OPERATION_KINDS = ["judgments.list", "judgments.create", "judgments.read", "judgments.cancel", "judgments.close", "judgments.retry"] as const;
 export function isJudgmentOperationKind(value: string): value is JudgmentOperation["kind"] { return (JUDGMENT_OPERATION_KINDS as readonly string[]).includes(value); }
-const forbidden = new Set(["__proto__", "constructor", "prototype"]);
-function text(value: unknown, max = 512, empty = false): void { if (typeof value !== "string" || (!empty && !value.trim()) || value.includes("\0") || value.length > max) throw new Error("Invalid judgment text"); }
-function number(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER, integer = false): void { if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max || (integer && !Number.isSafeInteger(value))) throw new Error("Invalid judgment number"); }
-function key(value: unknown): void { if (typeof value === "number") number(value, -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER); else text(value, 256); if (forbidden.has(String(value))) throw new Error("Unsafe judgment key"); }

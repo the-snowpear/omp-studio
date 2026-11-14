@@ -62,7 +62,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 |---|---|---|
 | 一次检查跑什么 | `scripts/check.mjs` | 组 `arch` / `selects` / `motion` / `types` / `packages` / `renderer` / `production`；支持 `--fast`、`--only <组\|包>`、`--all`、`--production` |
 | 核心回归名单 | `scripts/core-suites.mjs` | `check.mjs`、`test-core.mjs`、CI 共用一份，改名单只改这里 |
-| 分层与 Electron 边界 | `scripts/architecture.test.mjs` | 包依赖无环、依赖方向白名单、electron 只在 desktop、react 只在 renderer、renderer 不碰 Node、Host 不 import testkit、预览开关唯一 |
+| 分层与 Electron 边界 | `scripts/architecture.test.mjs` | 包依赖无环、依赖方向白名单、electron 只在 desktop、react 只在 renderer、renderer 不碰 Node、Host 不 import testkit、预览开关唯一、contracts 不长校验器、不写输出校验器 |
 | 选择器规则 | `scripts/check-renderer-selects.mjs` | 普通单选必须用 `AppSelect`，例外在文件内的 `allowed` 表 |
 | 动效规则 | `scripts/check-renderer-motion.mjs` | 组件 CSS 不写字面时长 / 裸曲线 / `transition: all` / 自己的 reduced-motion；`@keyframes` 不重复不闲置；`motion.ts` 数值表与 `tokens.css` 相等；可直接查系统偏好的文件在 `REDUCED_QUERY_OWNERS` |
 | 增量编译 | `tsconfig.base.json` 的 `incremental` | 缓存落各包 `dist/.tsbuildinfo`；`tsc -p` 单包热编译约 2 秒 |
