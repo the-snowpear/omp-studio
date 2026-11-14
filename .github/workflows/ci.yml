@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Core checks, full Windows/macOS tests including Runtime, or a Mac test package
+        description: Windows/Linux core checks, full platform tests including Runtime, or a Mac test package
         type: choice
         options: [core, full, macos-package]
         default: core
@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.scope == 'full' && '[{"name":"Windows","os":"windows-latest","native":"win32-x64"},{"name":"macOS (arm64)","os":"macos-15","native":"darwin-arm64"}]' || '[{"name":"Windows","os":"windows-latest","native":"win32-x64"}]') }}
+        include: ${{ fromJSON(inputs.scope == 'full' && '[{"name":"Windows","os":"windows-latest","native":"win32-x64"},{"name":"macOS (arm64)","os":"macos-15","native":"darwin-arm64"},{"name":"Linux (x64)","os":"ubuntu-24.04","native":"linux-x64"}]' || '[{"name":"Windows","os":"windows-latest","native":"win32-x64"},{"name":"Linux (x64)","os":"ubuntu-24.04","native":"linux-x64"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:

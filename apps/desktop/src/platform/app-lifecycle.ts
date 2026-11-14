@@ -1,5 +1,5 @@
 /**
- * Small lifecycle policies that differ on macOS, kept pure for tests.
+ * Platform lifecycle policies, kept pure for tests.
  */
 import { join } from "node:path";
 
@@ -22,7 +22,9 @@ export function handleMainWindowClose(event: { preventDefault(): void }, options
 }): void {
   if (options.quitting) return;
   event.preventDefault();
-  if (options.platform === "darwin" || options.closeToTray || options.hasFloatingWindows) options.hide();
+  // Linux can create a Tray object even when no desktop host displays it.
+  // Only the Windows tray and macOS Dock guarantee a way back to a hidden window.
+  if (options.platform === "darwin" || (options.platform === "win32" && options.closeToTray) || options.hasFloatingWindows) options.hide();
   else options.requestQuit();
 }
 

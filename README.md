@@ -321,6 +321,8 @@ npm run preview
 
 Windows 也可以直接双击仓库根目录的 `preview.cmd`；macOS 需要先安装 Xcode Command Line Tools。
 
+Linux 已接入源码预览，环境准备与沙箱配置见 [Linux 客户端说明](docs/linux.md)。目前没有 Linux 桌面安装包；Release 中的 Linux remote 压缩包用于 SSH Host。
+
 <details>
 <summary><b>🔌 接上真实的托管 Runtime</b>（首次较慢）</summary>
 

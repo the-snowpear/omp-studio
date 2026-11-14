@@ -418,8 +418,8 @@ export async function main(): Promise<void> {
   const terminalManager = new TerminalSessionManager({
     recording: terminalRecordings,
     spawner: createNodePtySpawner(),
-    // A Finder launch starts in "/"; a new Mac terminal without a project opens in the home folder.
-    resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? (process.platform === "darwin" ? homedir() : process.cwd()),
+    // GUI launches on POSIX may start in "/"; open an unbound terminal in the home folder.
+    resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? (process.platform === "win32" ? process.cwd() : homedir()),
   });
 
   const editorDialogFilters = (platform: NodeJS.Platform): Array<{ name: string; extensions: string[] }> => {
@@ -621,7 +621,7 @@ export async function main(): Promise<void> {
       openExternal: (url) => { void shell.openExternal(url); },
     });
     const windowSurface = window as typeof window & DesktopWindowSurface;
-    installDevelopmentTools((window as BrowserWindow).webContents, process.platform === "win32" && !app.isPackaged);
+    installDevelopmentTools((window as BrowserWindow).webContents, process.platform !== "darwin" && !app.isPackaged);
     if (validAppIcon !== undefined && typeof window.setIcon === "function") {
       window.setIcon(validAppIcon);
     }
@@ -629,6 +629,7 @@ export async function main(): Promise<void> {
     // `dispose` removes handlers before Host shutdown on app quit.
     const floatingWindows = registerFloatingWindows({
       parent: window as BrowserWindow, ipcMain, allowedOrigin, preloadPath,
+      restoreMainOnLastClose: process.platform === "linux",
       areas: () => screen.getAllDisplays().map(display => display.workArea),
       isQuitting: context.isQuitting, openExternal: url => { void shell.openExternal(url); },
       onWindow: child => desktopConversationViews.registerWindow(child.webContents, false),
@@ -1127,8 +1128,8 @@ export async function main(): Promise<void> {
       app.on("window-all-closed", listener);
     },
     createTray: ({ openWindow, requestQuit }) => {
-      // A Linux desktop without a StatusNotifier host throws from `new Tray`;
-      // that must not abort startup, the window simply keeps quit-on-close.
+      // Tray construction can fail on Linux. A successful object still does
+      // not prove visibility; handleMainWindowClose owns the close policy.
       try {
         const tray = createAppTray({
           electron: {
@@ -1161,6 +1162,7 @@ export async function main(): Promise<void> {
         trayRef = tray;
         return tray;
       } catch (error) {
+        if (process.platform !== "linux") throw error;
         console.warn(`[omp-studio] tray unavailable: ${String(error)}`);
         return undefined;
       }

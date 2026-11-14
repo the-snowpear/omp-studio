@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- 桌面壳支持在 Linux 上从源码运行（开发预览，未提供 Linux 安装包）：路径改用 XDG（`$XDG_CONFIG_HOME/omp-studio`，默认 `~/.config`），复用 POSIX 平台端口与 authority lock，外部打开走 `xdg-open`；Runtime 签名密钥目录同步改到 XDG。无 StatusNotifier host 的桌面不再因托盘创建失败而终止启动（[#5](https://github.com/the-snowpear/omp-studio/issues/5)）。
+- 桌面壳支持 Linux 源码预览：XDG 状态与签名密钥目录、POSIX Host / authority lock、`xdg-open`、真实本机终端与开发者工具。保留 Chromium 沙箱；Linux 关窗走退出确认，末个浮窗关闭后恢复隐藏的工作台，不依赖托盘是否可见。更新提示不会误选 Windows 安装器，并增加 Linux x64 源码 CI。当前未提供 Linux 桌面安装包；详见 [Linux 客户端说明](docs/linux.md)（[#5](https://github.com/the-snowpear/omp-studio/issues/5)、[#22](https://github.com/the-snowpear/omp-studio/pull/22)）。
 
 ### Changed
 

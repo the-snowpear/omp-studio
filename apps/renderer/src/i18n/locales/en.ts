@@ -372,6 +372,7 @@ export const en: LocaleDictionary = {
     "fileRevealInExplorer": "Reveal in {fileManager}",
     "fileManagerWindows": "File Explorer",
     "fileManagerMac": "Finder",
+    "fileManagerLinux": "File Manager",
     "copyAbsolutePath": "Copy Absolute Path",
     "copyRelativePath": "Copy Relative Path",
     "fileDesktopOnly": "Desktop with a real project required",

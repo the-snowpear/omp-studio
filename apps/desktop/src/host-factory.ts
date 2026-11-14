@@ -324,7 +324,11 @@ function createProductionAuthorityLockServices(): Win32AuthorityLockServices {
   const liveness = process.platform === "win32"
     ? createWin32AuthorityLiveness()
     : createPosixAuthorityLiveness({
-        socketDirectory: () => ensurePrivateSocketDirectory("authority", { tmpRoot: desktopSocketTmpRoot() }),
+        // macOS has a per-user temp root; Linux shares /tmp and needs a uid scope.
+        socketDirectory: () => ensurePrivateSocketDirectory(
+          process.platform === "linux" ? `authority-${process.getuid!()}` : "authority",
+          { tmpRoot: desktopSocketTmpRoot() },
+        ),
       });
   return {
     async createExclusive(lockFilePath: string, content: string): Promise<boolean> {

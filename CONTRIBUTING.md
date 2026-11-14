@@ -28,9 +28,10 @@ npm run omp:keys          # first machine only
 npm run check
 ```
 
-Windows is the supported desktop. Node.js 22+ is required. Building the
-managed Runtime also needs Bun and a working MSVC / Rust toolchain; the
-install script documents those.
+Windows and Apple Silicon macOS have desktop packages; Linux supports a source
+preview (see [Linux setup](docs/linux.md)). Node.js 22+ is required. Building the
+managed Runtime also needs Bun, Rust and a native C/C++ toolchain for the target
+platform; the Runtime development documentation records the pinned versions.
 
 The root `mermaid` development dependency mirrors the renderer's version so
 npm 11 applies the root KaTeX override when updating a cached workspace tree.

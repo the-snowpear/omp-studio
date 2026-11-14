@@ -372,6 +372,7 @@ const zhRaw = {
     "fileRevealInExplorer": "在{fileManager}中打开",
     "fileManagerWindows": "资源管理器",
     "fileManagerMac": "访达",
+    "fileManagerLinux": "文件管理器",
     "copyAbsolutePath": "复制绝对路径",
     "copyRelativePath": "复制相对路径",
     "fileDesktopOnly": "仅桌面端真实项目可用",

@@ -385,9 +385,7 @@ async function main() {
   }
 
   console.log(`[preview] Opening OMP Studio Desktop (${production ? "production bundle" : previewData ? "dev server, preview data" : "dev server"})...`);
-  // A repo-local Electron build has no setuid chrome-sandbox helper; run
-  // without the sandbox in preview only (never for a packaged install).
-  const desktopArgs = [join(root, "apps", "desktop"), ...(process.platform === "linux" ? ["--no-sandbox"] : [])];
+  const desktopArgs = [join(root, "apps", "desktop")];
   if (production) {
     // 生产预览的实时 UI 更新靠 CDP 触发渲染层重载。
     desktopArgs.push(`--remote-debugging-port=${previewCdpPort}`);

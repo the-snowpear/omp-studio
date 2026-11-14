@@ -113,6 +113,8 @@ npm run preview
 
 On Windows you can also double-click `preview.cmd` at the repo root. macOS needs the Xcode Command Line Tools; the steps are otherwise the same.
 
+Linux supports a source preview; see [Linux setup](docs/linux.md) for dependencies, sandbox configuration and current limits. Linux desktop installers are not available yet; the Linux remote archives in Releases are SSH Host packages.
+
 Attach a real Runtime (slow the first time):
 
 ```powershell

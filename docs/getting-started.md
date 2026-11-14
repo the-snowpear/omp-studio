@@ -71,6 +71,12 @@ source of truth is `omp-patch/overlay/` plus `omp-patch/patches/`.
 Host logs: `%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`; on macOS
 `~/Library/Application Support/omp-studio/logs/host-YYYY-MM-DD.log`.
 
+## Linux source preview
+
+Linux source startup, Runtime preparation, XDG paths and sandbox setup are
+documented in [Linux client setup](linux.md). There is no Linux desktop installer
+or desktop update feed yet; Linux remote-host archives are for SSH environments.
+
 ## Windows installer (unsigned)
 
 Requires a machine that can already `npm run omp:build:host` (Bun, MSVC, Rust,

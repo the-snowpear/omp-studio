@@ -1,6 +1,6 @@
 import type { WebContents } from "electron";
 
-/** Windows' custom menu has no Electron DevTools accelerator. Development only. */
+/** Windows and Linux have no native Electron DevTools menu accelerator. Development only. */
 export function installDevelopmentTools(contents: WebContents, enabled: boolean): void {
   if (!enabled) return;
   contents.on("before-input-event", (event, input) => {

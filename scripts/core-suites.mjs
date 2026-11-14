@@ -31,6 +31,12 @@ export const CORE_NODE_SUITES = [
   "apps/desktop/dist/test/time-travel-service.test.js",
   "apps/desktop/dist/test/time-travel-port.test.js",
   // Local file writes, Electron boundaries, installation and update recovery.
+  "packages/platform-darwin/dist/test/platform-darwin.test.js",
+  "apps/desktop/dist/test/desktop-paths.test.js",
+  "apps/desktop/dist/test/authority-liveness.test.js",
+  "apps/desktop/dist/test/app-lifecycle.test.js",
+  "apps/desktop/dist/test/terminal-darwin.test.js",
+  "apps/desktop/dist/test/chrome-app-update.test.js",
   "apps/desktop/dist/test/workspace-files.test.js",
   "apps/desktop/dist/test/file-resources.test.js",
   "apps/desktop/dist/test/security.test.js",

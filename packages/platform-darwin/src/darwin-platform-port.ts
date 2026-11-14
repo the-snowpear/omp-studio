@@ -1,6 +1,5 @@
 import {
   privateEndpoint,
-  type Platform,
   type PlatformPort,
   type PrivateEndpoint,
   type ResourceHandle,
@@ -13,9 +12,7 @@ import {
 } from "./darwin-services.js";
 
 /**
- * The managed Runtime CLI on macOS (see the runtime-installer artifact
- * layout). Concrete macOS literals are allowed here and nowhere else in
- * the shared tree.
+ * The managed Runtime CLI on POSIX (see the runtime-installer artifact layout).
  */
 const RUNTIME_EXECUTABLE_NAME = "omp";
 
@@ -41,7 +38,7 @@ const ALLOWED_EXTERNAL_SCHEMES: readonly string[] = ["http:", "https:", "mailto:
  * boundary validation and never touches the OS directly.
  */
 export class DarwinPlatformPort implements PlatformPort {
-  readonly platform: Platform;
+  readonly platform: "darwin" | "linux";
 
   readonly #services: DarwinPlatformServices;
 

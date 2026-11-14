@@ -106,7 +106,10 @@ export function findMacInstallerAsset(
 }
 
 export function findInstallerAsset(assets: readonly GitHubReleaseAsset[] = [], platform: NodeJS.Platform = process.platform) {
-  return platform === "darwin" ? findMacInstallerAsset(assets) : findWindowsInstallerAsset(assets);
+  if (platform === "win32") return findWindowsInstallerAsset(assets);
+  if (platform === "darwin") return findMacInstallerAsset(assets);
+  // Linux currently runs from source; Releases have no desktop installer for it.
+  return undefined;
 }
 
 export async function checkGitHubReleaseUpdate(options: {
