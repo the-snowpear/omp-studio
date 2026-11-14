@@ -147,12 +147,12 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 function DriveLabel({ drive, places, copy }: { drive: FsDrive; places: FsPlaces; copy: Copy }) {
   const tone = usageTone(drive);
   const used = drive.total && drive.free !== undefined ? 1 - drive.free / drive.total : undefined;
-  return <span className="fb-drive">
-    <span className="ellipsis">{driveDisplayName(drive, places.separator)}</span>
-    {drive.ready ? used !== undefined ? <>
-      <span className="fb-usage" data-tone={tone} style={{ ["--used" as string]: `${Math.round(used * 100)}%` } as CSSProperties} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(used * 100)} aria-label={copy("已用空间", "Used space")} />
-      <span className="fb-drive-free">{copy(`可用 ${formatSize(drive.free)}，共 ${formatSize(drive.total)}`, `${formatSize(drive.free)} free of ${formatSize(drive.total)}`)}</span>
-    </> : null : <span className="fb-drive-free">{copy("未就绪", "Not ready")}</span>}
+  return <span className="fb-drive" data-tip={drive.ready && used !== undefined ? copy(`可用 ${formatSize(drive.free)}，共 ${formatSize(drive.total)}`, `${formatSize(drive.free)} free of ${formatSize(drive.total)}`) : undefined}>
+    <span className="fb-drive-line">
+      <span className="ellipsis">{driveDisplayName(drive, places.separator)}</span>
+      <span className="fb-drive-free">{drive.ready ? used !== undefined ? copy(`${formatSize(drive.free)} 可用`, `${formatSize(drive.free)} free`) : "" : copy("未就绪", "Not ready")}</span>
+    </span>
+    {drive.ready && used !== undefined ? <span className="fb-usage" data-tone={tone} style={{ ["--used" as string]: `${Math.round(used * 100)}%` } as CSSProperties} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(used * 100)} aria-label={copy("已用空间", "Used space")} /> : null}
   </span>;
 }
 
@@ -182,15 +182,15 @@ export function StatusBar({ state, copy, sourceLabel, demo }: { state: FileBrows
   const picked = state.entries.filter(entry => state.selection.includes(entry.path));
   const bytes = picked.reduce((sum, entry) => sum + (entry.type === "file" ? entry.size ?? 0 : 0), 0);
   return <footer className="fb-status" role="status" aria-live="polite">
-    <span>{dir ? copy(`${state.entries.length} 项`, `${state.entries.length} items`) : "—"}</span>
-    {picked.length ? <span>{copy(`已选 ${picked.length} 项`, `${picked.length} selected`)}{bytes ? ` · ${formatSize(bytes)}` : ""}</span> : null}
-    {dir?.truncated ? <span className="fb-chip" data-tone="warn" data-tip={copy("文件夹太大，只读取了前一部分；用筛选或路径栏缩小范围", "Large folder: only the first part was read")}><Icon name="alert" extra="sm" />{copy("仅显示部分项目", "Partial listing")}</span> : null}
-    {hiddenCount || state.showHidden ? <button type="button" className="fb-chip is-button" aria-pressed={state.showHidden} onClick={state.toggleHidden}>
-      <Icon name={state.showHidden ? "eye" : "eye-off"} extra="sm" />{state.showHidden ? copy("显示隐藏文件", "Showing hidden") : copy(`${hiddenCount} 个隐藏项目`, `${hiddenCount} hidden`)}
+    <span className="fb-stat">{dir ? copy(`${state.entries.length} 项`, `${state.entries.length} items`) : "—"}</span>
+    {picked.length ? <span className="fb-stat is-strong">{copy(`已选 ${picked.length} 项`, `${picked.length} selected`)}{bytes ? <em>{formatSize(bytes)}</em> : null}</span> : null}
+    {hiddenCount || state.showHidden ? <button type="button" className="fb-stat is-button" aria-pressed={state.showHidden} data-tip={state.showHidden ? copy("点击不显示隐藏文件", "Click to hide") : copy("点击显示隐藏文件", "Click to show")} onClick={state.toggleHidden}>
+      <Icon name={state.showHidden ? "eye" : "eye-off"} extra="sm" />{state.showHidden ? copy("含隐藏文件", "Incl. hidden") : copy(`${hiddenCount} 个已隐藏`, `${hiddenCount} hidden`)}
     </button> : null}
+    {dir?.truncated ? <span className="fb-chip" data-tone="warn" data-tip={copy("文件夹太大，只读取了前一部分；用筛选或路径栏缩小范围", "Large folder: only the first part was read")}><Icon name="alert" extra="sm" />{copy("仅显示部分项目", "Partial listing")}</span> : null}
     <span className="fb-status-fill" />
-    {dir?.project ? <span className="fb-chip" data-tone="project"><Icon name="diamond" extra="sm" />{copy(`项目 · ${dir.project.name}`, `Project · ${dir.project.name}`)}</span> : null}
-    {sourceLabel ? <span className="fb-chip"><Icon name={sourceLabel.startsWith("SSH") ? "server" : "monitor"} extra="sm" />{sourceLabel}</span> : null}
+    {dir?.project ? <span className="fb-stat is-project"><Icon name="diamond" extra="sm" />{dir.project.name}</span> : null}
+    {sourceLabel ? <span className="fb-stat"><span className="fb-live" aria-hidden="true" />{sourceLabel}</span> : null}
     {demo ? <span className="chip xs">{copy("演示", "Demo")}</span> : null}
   </footer>;
 }

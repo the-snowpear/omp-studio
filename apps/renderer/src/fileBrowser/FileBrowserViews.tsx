@@ -13,6 +13,18 @@ export interface RowActions {
   activate(entry: FsEntry): void;
   /** 右键；`entry` 为 null 是空白处。 */
   context(entry: FsEntry | null, point: { x: number; y: number }): void;
+  /** 行尾悬停按钮「@」；没有关联对话时不显示。 */
+  addContext?: ((entry: FsEntry) => void) | undefined;
+}
+
+/** 列表行尾的悬停操作：@ 加入对话、⋯ 更多（菜单贴按钮下沿）。 */
+function RowTools({ entry, list, actions, copy }: { entry: FsEntry; list: readonly FsEntry[]; actions: RowActions; copy: Copy }) {
+  return <span className="fb-row-tools" onDoubleClick={event => event.stopPropagation()}>
+    {actions.addContext ? <button type="button" className="icon-btn" aria-label={copy(`把 ${entry.name} 加入对话`, `Add ${entry.name} to chat`)} data-tip={copy("加入对话", "Add to chat")}
+      onClick={event => { event.stopPropagation(); actions.addContext!(entry); }}><Icon name="at" extra="sm" /></button> : null}
+    <button type="button" className="icon-btn" aria-label={copy(`${entry.name} 的更多操作`, `More actions for ${entry.name}`)} data-tip={copy("更多", "More")} aria-haspopup="menu"
+      onClick={event => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); actions.select(entry, { ctrl: false, shift: false }, list); actions.context(entry, { x: rect.right - 220, y: rect.bottom + 4 }); }}><Icon name="more" extra="sm" /></button>
+  </span>;
 }
 interface ViewProps { state: FileBrowserState; places: FsPlaces; actions: RowActions; copy: Copy; language: "zh" | "en" }
 
@@ -176,7 +188,7 @@ export function ListView({ state, places, actions, copy, language }: ViewProps) 
             onClick={event => actions.select(entry, { ctrl: isMod(event), shift: event.shiftKey }, entries)}
             onDoubleClick={() => actions.activate(entry)}
             onContextMenu={(event: MouseEvent) => { event.preventDefault(); if (!selected.has(entry.path)) actions.select(entry, { ctrl: false, shift: false }, entries); actions.context(entry, { x: event.clientX, y: event.clientY }); }}>
-            <span className="fb-cell fb-col-name" role="gridcell"><EntryIcon entry={entry} />{renaming ? <EditInput state={state} places={places} copy={copy} language={language} /> : <NameCell entry={entry} copy={copy} />}</span>
+            <span className="fb-cell fb-col-name" role="gridcell"><EntryIcon entry={entry} />{renaming ? <EditInput state={state} places={places} copy={copy} language={language} /> : <><NameCell entry={entry} copy={copy} />{current === COMPUTER ? null : <RowTools entry={entry} list={entries} actions={actions} copy={copy} />}</>}</span>
             <span className="fb-cell fb-col-modified" role="gridcell">{formatModified(entry.modified, Date.now(), language)}</span>
             <span className="fb-cell fb-col-type" role="gridcell">{current === COMPUTER ? copy("磁盘", "Drive") : typeLabel(entry, copy)}</span>
             <span className="fb-cell fb-col-size" role="gridcell">{entry.type === "file" ? formatSize(entry.size) : ""}</span>
@@ -317,6 +329,7 @@ export function PreviewCard({ entry, peek, copy, language, actions }: { entry: F
   return <article className="fb-peek" aria-label={copy(`预览 ${entry.name}`, `Preview ${entry.name}`)}>
     <div className="fb-peek-visual" data-ftype={ftype ?? undefined} data-kind={kind}>
       {peek !== "loading" && peek?.image ? <img src={peek.image} alt="" /> : <Icon name={iconNameFor(ftype, entry.name)} />}
+      <span className="fb-peek-badge">{fileBadge(entry.name).badge}</span>
     </div>
     <h3 className="fb-peek-name" title={entry.name}>{entry.name}</h3>
     <p className="fb-peek-meta">{typeLabel(entry, copy)}{entry.size !== undefined ? ` · ${formatSize(entry.size)}` : ""}</p>

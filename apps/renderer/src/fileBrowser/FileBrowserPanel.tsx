@@ -100,6 +100,7 @@ export function FileBrowserPanel({ panelId, source, scope, unavailable, onOpenFi
       openFile(entry);
     },
     context(entry, point) { setMenu({ kind: "context", entry, point }); },
+    addContext: onAddContext || preview ? (entry: FsEntry) => addContext(entry) : undefined,
   };
 
   /* ---------- 菜单内容 ---------- */
