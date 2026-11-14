@@ -1,107 +1,130 @@
-/**
- * Release facts and download routing, shared by all three concepts.
- * The snapshot below is v0.1.17 as published on GitHub; `loadRelease()` refreshes it
- * from the API at runtime and silently keeps the snapshot when that fails (rate limit,
- * offline), so download buttons are real links either way.
- */
+// Downloads. The page asks GitHub for the latest release when it loads and
+// falls back to the snapshot below, so the buttons always lead somewhere real.
+// After a release, update SNAPSHOT so the offline fallback stays current.
+
 export type Platform = "win-x64" | "win-arm64" | "mac-arm64";
-export type Asset = { platform: Platform; label: string; detail: string; file: string; url: string; bytes: number };
-export type Release = { version: string; publishedAt: string; assets: Asset[]; notesUrl: string; stars: number | null };
+
+export interface Asset {
+  platform: Platform;
+  /** What the visitor reads on the button. */
+  label: string;
+  /** Hardware and system requirement, shown under the button. */
+  requires: string;
+  file: string;
+  url: string;
+  bytes: number;
+}
+
+export interface Release {
+  version: string;
+  date: string;
+  page: string;
+  assets: Asset[];
+  /** True when the numbers came from GitHub just now rather than the snapshot. */
+  live: boolean;
+}
 
 const REPO = "the-snowpear/omp-studio";
 export const REPO_URL = `https://github.com/${REPO}`;
 export const RELEASES_URL = `${REPO_URL}/releases`;
-export const CHANGELOG_URL = `${REPO_URL}/blob/main/CHANGELOG.md`;
-export const DOCS_URL = `${REPO_URL}/blob/main/docs/README.md`;
-export const SOURCE_URL = `${REPO_URL}/blob/main/docs/getting-started.md`;
-export const UPSTREAM_URL = "https://github.com/can1357/oh-my-pi";
+/** The windowed workbench this site describes ships in this version. */
+export const WORKBENCH_VERSION = "0.2.0";
 
-const META: Record<Platform, { label: string; detail: string; match: RegExp }> = {
-  "win-x64": { label: "Windows x64", detail: "Intel 或 AMD 处理器", match: /^OMP-Studio-Setup-.*-windows-x64\.exe$/ },
-  "win-arm64": { label: "Windows ARM64", detail: "Windows on Arm", match: /^OMP-Studio-Setup-.*-windows-arm64\.exe$/ },
-  "mac-arm64": { label: "macOS Apple Silicon", detail: "M 系列芯片, macOS 13+", match: /^OMP-Studio-.*-macos-arm64\.dmg$/ },
+const META: Record<Platform, { label: string; requires: string; match: RegExp }> = {
+  "win-x64": { label: "Windows", requires: "Windows 10 或更新，x64", match: /Setup-.*windows-x64\.exe$/ },
+  "win-arm64": { label: "Windows ARM", requires: "Windows 11，ARM64（骁龙等）", match: /Setup-.*windows-arm64\.exe$/ },
+  "mac-arm64": { label: "macOS", requires: "macOS 13 或更新，Apple Silicon", match: /macos-arm64\.dmg$/ },
 };
-const ORDER: Platform[] = ["win-x64", "win-arm64", "mac-arm64"];
+export const PLATFORMS = Object.keys(META) as Platform[];
 
-const asset = (platform: Platform, file: string, bytes: number, version = "0.1.17"): Asset => ({
+const snapshotAsset = (platform: Platform, file: string, bytes: number): Asset => ({
   platform,
   label: META[platform].label,
-  detail: META[platform].detail,
+  requires: META[platform].requires,
   file,
+  url: `${RELEASES_URL}/download/v0.1.17/${file}`,
   bytes,
-  url: `${REPO_URL}/releases/download/v${version}/${file}`,
 });
 
-export const SNAPSHOT: Release = {
+const SNAPSHOT: Release = {
   version: "0.1.17",
-  publishedAt: "2026-10-29",
-  notesUrl: `${REPO_URL}/releases/tag/v0.1.17`,
-  stars: null,
+  date: "2026-10-29",
+  page: `${RELEASES_URL}/tag/v0.1.17`,
+  live: false,
   assets: [
-    asset("win-x64", "OMP-Studio-Setup-0.1.17-windows-x64.exe", 221068034),
-    asset("win-arm64", "OMP-Studio-Setup-0.1.17-windows-arm64.exe", 209474548),
-    asset("mac-arm64", "OMP-Studio-0.1.17-macos-arm64.dmg", 252853023),
+    snapshotAsset("win-x64", "OMP-Studio-Setup-0.1.17-windows-x64.exe", 221068034),
+    snapshotAsset("win-arm64", "OMP-Studio-Setup-0.1.17-windows-arm64.exe", 209474548),
+    snapshotAsset("mac-arm64", "OMP-Studio-0.1.17-macos-arm64.dmg", 252853023),
   ],
 };
 
-/** Honest install caveats; show them next to the download, not in fine print elsewhere. */
-export const INSTALL_NOTES: Record<"win" | "mac", string> = {
-  win: "安装包暂无 Authenticode 签名，SmartScreen 可能提示，选择「仍要运行」即可。Runtime 与更新清单用 Ed25519 验签。",
-  mac: "ad hoc 签名，尚未经 Apple 公证。首次打开被拦截时，到「系统设置 › 隐私与安全性」选择「仍要打开」。",
-};
+interface GithubRelease {
+  tag_name: string;
+  published_at: string;
+  html_url: string;
+  assets: { name: string; size: number; browser_download_url: string }[];
+}
 
-export const formatSize = (bytes: number): string => `${Math.round(bytes / 1e6)} MB`;
+let pending: Promise<Release> | undefined;
 
-/** Best guess for this visitor. null: no desktop build for this device (Linux, phones). */
+/** Latest published release. Never rejects: any failure yields the snapshot. */
+export function loadRelease(): Promise<Release> {
+  pending ??= (async () => {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
+        headers: { Accept: "application/vnd.github+json" },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!res.ok) return SNAPSHOT;
+      const data = (await res.json()) as GithubRelease;
+      const assets = PLATFORMS.flatMap((platform): Asset[] => {
+        const hit = data.assets.find((a) => META[platform].match.test(a.name));
+        return hit
+          ? [{ platform, label: META[platform].label, requires: META[platform].requires, file: hit.name, url: hit.browser_download_url, bytes: hit.size }]
+          : [];
+      });
+      if (!assets.length) return SNAPSHOT;
+      return { version: data.tag_name.replace(/^v/, ""), date: data.published_at.slice(0, 10), page: data.html_url, assets, live: true };
+    } catch {
+      return SNAPSHOT;
+    }
+  })();
+  return pending;
+}
+
+/** The installer that fits this machine, or null on Linux, phones and Intel Macs we cannot tell apart. */
 export async function detectPlatform(): Promise<Platform | null> {
-  const nav = navigator as Navigator & {
-    userAgentData?: { platform?: string; mobile?: boolean; getHighEntropyValues?: (hints: string[]) => Promise<{ architecture?: string }> };
-  };
   const ua = navigator.userAgent;
-  if (nav.userAgentData?.mobile || /Android|iPhone|iPad|Mobile/i.test(ua)) return null;
-  const platform = nav.userAgentData?.platform ?? navigator.platform ?? "";
-  if (/Mac/i.test(platform) || /Mac OS X/i.test(ua)) {
-    // There is no Intel Mac build, and every Mac UA says "Intel". Ask the browser, then the GPU.
+  if (/Android|iPhone|iPad|Linux/.test(ua) && !/Windows|Macintosh/.test(ua)) return null;
+  const uaData = (navigator as Navigator & {
+    userAgentData?: { getHighEntropyValues(hints: string[]): Promise<{ architecture?: string }> };
+  }).userAgentData;
+  if (/Windows/.test(ua)) {
     try {
-      const hints = await nav.userAgentData?.getHighEntropyValues?.(["architecture"]);
-      if (hints?.architecture === "x86") return null;
+      const { architecture } = (await uaData?.getHighEntropyValues(["architecture"])) ?? {};
+      return architecture === "arm" ? "win-arm64" : "win-x64";
     } catch {
-      /* fall through to the GPU check */
+      return "win-x64";
     }
-    const gl = document.createElement("canvas").getContext("webgl");
-    const info = gl?.getExtension("WEBGL_debug_renderer_info");
-    if (gl && info && /Intel|AMD|Radeon/i.test(String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)))) return null;
-    return "mac-arm64";
   }
-  if (/Win/i.test(platform) || /Windows/i.test(ua)) {
-    if (/ARM64|aarch64/i.test(ua)) return "win-arm64";
-    try {
-      const hints = await nav.userAgentData?.getHighEntropyValues?.(["architecture"]);
-      if (hints?.architecture === "arm") return "win-arm64";
-    } catch {
-      /* hint refused: x64 is the common case */
-    }
-    return "win-x64";
-  }
-  return null;
+  return /Macintosh/.test(ua) ? "mac-arm64" : null;
 }
 
-export async function loadRelease(): Promise<Release> {
-  try {
-    const [rel, repo] = await Promise.all([
-      fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: "application/vnd.github+json" } }),
-      fetch(`https://api.github.com/repos/${REPO}`, { headers: { Accept: "application/vnd.github+json" } }),
-    ]);
-    if (!rel.ok) return SNAPSHOT;
-    const data = (await rel.json()) as { tag_name: string; published_at: string; html_url: string; assets: { name: string; size: number; browser_download_url: string }[] };
-    const assets = ORDER.flatMap((platform): Asset[] => {
-      const hit = data.assets.find((a) => META[platform].match.test(a.name));
-      return hit ? [{ platform, label: META[platform].label, detail: META[platform].detail, file: hit.name, url: hit.browser_download_url, bytes: hit.size }] : [];
-    });
-    if (assets.length === 0) return SNAPSHOT;
-    const stars = repo.ok ? ((await repo.json()) as { stargazers_count: number }).stargazers_count : null;
-    return { version: data.tag_name.replace(/^v/, ""), publishedAt: data.published_at.slice(0, 10), notesUrl: data.html_url, assets, stars };
-  } catch {
-    return SNAPSHOT;
-  }
+export const formatSize = (bytes: number) => `${Math.round(bytes / 1048576)} MB`;
+
+/** True while the latest published installer predates the windowed workbench. */
+export function predatesWorkbench(release: Release): boolean {
+  const [a = 0, b = 0, c = 0] = release.version.split(".").map(Number);
+  const [x = 0, y = 0, z = 0] = WORKBENCH_VERSION.split(".").map(Number);
+  return a !== x ? a < x : b !== y ? b < y : c < z;
 }
+
+export const SOURCE_COMMANDS = [
+  "git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git",
+  "cd omp-studio",
+  "npm install",
+  "npm run omp:overlay:apply",
+  "npm run preview",
+];
+
+export const MAC_QUARANTINE_COMMAND = 'xattr -dr com.apple.quarantine "/Applications/OMP Studio.app"';

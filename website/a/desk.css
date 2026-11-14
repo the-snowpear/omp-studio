@@ -1,0 +1,320 @@
+/* Concept A: the playable desk, its windows, the layout picker and the tool shelf. */
+.desk {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  isolation: isolate;
+  touch-action: pan-y;
+}
+.desk-wall {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(var(--dot) 1px, transparent 1.4px) 0 0 / 22px 22px,
+    radial-gradient(60% 55% at 22% 18%, var(--wall-a), transparent 70%),
+    radial-gradient(50% 60% at 88% 30%, var(--wall-b), transparent 70%),
+    radial-gradient(70% 60% at 62% 100%, var(--wall-c), transparent 72%),
+    var(--page);
+}
+
+/* ---------- windows ---------- */
+.wm-win {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.wm-win .ow-bar {
+  cursor: grab;
+  touch-action: none;
+}
+.wm-win .ow-bar:focus-visible {
+  outline: 2px solid var(--o-accent);
+  outline-offset: -2px;
+  border-radius: 10px 10px 0 0;
+}
+.wm-win:not([data-focused]) {
+  box-shadow: 0 1px 2px rgba(24, 20, 48, 0.05), 0 6px 18px -10px rgba(24, 20, 48, 0.2);
+}
+.wm-win[data-focused] {
+  border-color: var(--o-accent-border);
+}
+.wm-win[data-dragging] {
+  box-shadow: 0 2px 4px rgba(24, 20, 48, 0.08), 0 34px 70px -18px rgba(40, 24, 110, 0.42);
+  transition: none;
+}
+.wm-win[data-dragging] .ow-bar {
+  cursor: grabbing;
+}
+/* The demo content is a picture of the app; only the chrome is live. */
+.wm-win .ow-body {
+  pointer-events: none;
+  user-select: none;
+}
+html[data-wm-dragging] {
+  user-select: none;
+  cursor: grabbing;
+}
+
+.wm-grip {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+.wm-grip[data-dir="n"], .wm-grip[data-dir="s"] { left: 12px; right: 12px; height: 7px; cursor: ns-resize; }
+.wm-grip[data-dir="e"], .wm-grip[data-dir="w"] { top: 12px; bottom: 12px; width: 7px; cursor: ew-resize; }
+.wm-grip[data-dir="n"] { top: -3px; }
+.wm-grip[data-dir="s"] { bottom: -3px; }
+.wm-grip[data-dir="e"] { right: -3px; }
+.wm-grip[data-dir="w"] { left: -3px; }
+.wm-grip[data-dir="ne"], .wm-grip[data-dir="nw"], .wm-grip[data-dir="se"], .wm-grip[data-dir="sw"] { width: 14px; height: 14px; }
+.wm-grip[data-dir="ne"] { top: -3px; right: -3px; cursor: nesw-resize; }
+.wm-grip[data-dir="sw"] { bottom: -3px; left: -3px; cursor: nesw-resize; }
+.wm-grip[data-dir="nw"] { top: -3px; left: -3px; cursor: nwse-resize; }
+.wm-grip[data-dir="se"] { bottom: -3px; right: -3px; cursor: nwse-resize; }
+
+/* ---------- snap preview ---------- */
+.wm-preview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  border: 1.5px solid var(--accent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.24s var(--ease-out), width 0.24s var(--ease-out), height 0.24s var(--ease-out), opacity 0.16s;
+}
+.wm-preview[data-on] {
+  opacity: 1;
+}
+
+/* ---------- first-run hint ---------- */
+.desk-hint {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 9000;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--page);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+.desk-hint::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  bottom: -4px;
+  width: 9px;
+  height: 9px;
+  background: inherit;
+  rotate: 45deg;
+}
+.desk-hint[data-below]::after {
+  top: -4px;
+  bottom: auto;
+}
+.desk-hint[data-on] {
+  opacity: 1;
+  animation: hint-bob 1.6s ease-in-out infinite;
+}
+@keyframes hint-bob {
+  50% { translate: 0 -5px; }
+}
+
+/* ---------- layout picker ---------- */
+.picker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 9500;
+  width: 318px;
+  padding: 12px 14px 10px;
+  border: 1px solid var(--o-border-strong);
+  border-radius: 14px;
+  background: var(--o-surface);
+  box-shadow: var(--o-shadow);
+  opacity: 0;
+  visibility: hidden;
+  scale: 0.96;
+  transform-origin: 85% 0;
+  transition: opacity 0.14s, scale 0.2s var(--ease-out), visibility 0s 0.14s;
+}
+.picker[data-on] {
+  opacity: 1;
+  visibility: visible;
+  scale: 1;
+  transition: opacity 0.14s, scale 0.2s var(--ease-out);
+}
+.picker p {
+  margin-bottom: 9px;
+  color: var(--o-text-3);
+  font-size: 12px;
+}
+.picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px 9px;
+}
+.picker figure {
+  margin: 0;
+}
+.picker-tile {
+  position: relative;
+  aspect-ratio: 16 / 10;
+}
+.picker-tile button {
+  position: absolute;
+  padding: 0;
+  border: 2px solid var(--o-surface);
+  border-radius: 6px;
+  background: var(--o-surface-3);
+  transition: background 0.12s;
+}
+.picker-tile button:hover,
+.picker-tile button:focus-visible {
+  background: var(--o-accent);
+  outline: none;
+}
+.picker figcaption {
+  margin-top: 3px;
+  color: var(--o-text-2);
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* ---------- tool shelf ---------- */
+.dock {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 9200;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--o-border-strong);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--o-surface) 78%, transparent);
+  box-shadow: var(--o-shadow);
+  backdrop-filter: blur(18px) saturate(1.5);
+  translate: -50% 0;
+}
+.dock-item {
+  --grow: 0;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: calc(38px + var(--grow) * 16px);
+  height: calc(38px + var(--grow) * 16px);
+  margin-top: calc(var(--grow) * -16px);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--o-surface);
+  color: var(--o-text);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--tint) 75%, transparent);
+  transition: width 0.22s var(--ease-out), height 0.22s var(--ease-out), margin 0.22s var(--ease-out), background 0.15s;
+}
+.dock[data-live] .dock-item {
+  transition: background 0.15s;
+}
+.dock-item:hover {
+  background: color-mix(in srgb, var(--tint) 12%, var(--o-surface));
+}
+.dock-ico {
+  display: inline-flex;
+  font-size: calc(17px + var(--grow) * 6px);
+}
+.dock-ico .i {
+  width: 1em;
+  height: 1em;
+}
+.dock-item::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--o-text-2);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.dock-item[data-open]::after {
+  opacity: 1;
+}
+.dock-tip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  padding: 2px 9px;
+  border-radius: 7px;
+  background: var(--ink);
+  color: var(--page);
+  font-size: 11.5px;
+  white-space: nowrap;
+  opacity: 0;
+  translate: 0 4px;
+  pointer-events: none;
+  transition: opacity 0.12s, translate 0.18s var(--ease-out);
+}
+.dock-item:hover .dock-tip,
+.dock-item:focus-visible .dock-tip {
+  opacity: 1;
+  translate: 0;
+}
+
+/* ---------- pinned layer: windows that stay above the page ---------- */
+.pip {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+}
+.pip .wm-win {
+  pointer-events: auto;
+  box-shadow: 0 2px 4px rgba(24, 20, 48, 0.1), 0 30px 70px -20px rgba(30, 16, 90, 0.5), 0 0 0 1px var(--o-accent-border);
+}
+
+/* ---------- toast ---------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 120;
+  padding: 7px 16px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--page);
+  font-size: var(--step--1);
+  font-weight: 600;
+  opacity: 0;
+  translate: -50% 12px;
+  pointer-events: none;
+  transition: opacity 0.2s, translate 0.3s var(--ease-out);
+}
+.toast[data-on] {
+  opacity: 1;
+  translate: -50% 0;
+}
+
+/* ---------- theme change opens from the switch ---------- */
+html[data-theme-swap]::view-transition-old(root),
+html[data-theme-swap]::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+html[data-theme-swap]::view-transition-new(root) {
+  z-index: 2;
+}

@@ -1,0 +1,273 @@
+/* 图 1 总装: hero copy, the two stacked workbench layers, the lens. */
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(340px, 30vw) minmax(0, 1fr);
+  gap: clamp(28px, 3.6vw, 64px);
+  align-items: center;
+  min-height: min(100svh, 1080px);
+  padding-top: calc(var(--top-h) + clamp(28px, 4vw, 56px));
+  padding-bottom: clamp(20px, 3vw, 40px);
+}
+.hero-copy h1 {
+  font-size: var(--fs-5);
+  font-weight: 200;
+  line-height: 1.16;
+  letter-spacing: 0.02em;
+  /* A drawing title is underlined twice: one heavy rule, one fine. */
+  padding-bottom: 0.36em;
+  border-bottom: 3px solid var(--chalk);
+  box-shadow: 0 7px 0 -6px var(--chalk);
+  margin-bottom: 0.2em;
+}
+.hero-copy h1 span { display: block; white-space: nowrap; }
+.lede {
+  max-width: 27em;
+  margin-top: 28px;
+  color: var(--text-2);
+  font-size: clamp(15px, 1.12vw, 17.5px);
+}
+.hero-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 26px;
+  margin-top: 30px;
+}
+.hero-meta {
+  margin-top: 16px;
+  color: var(--line-2);
+  font-size: 13px;
+}
+
+/* ---------------- Assembly drawing ---------------- */
+.assembly {
+  --W: 1040;
+  --H: 640;
+  min-width: 0;
+}
+.assembly-stage {
+  position: relative;
+  aspect-ratio: var(--W) / var(--H);
+  margin: 30px 0 0 34px;
+}
+.drawing {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(var(--W) * 1px);
+  height: calc(var(--H) * 1px);
+  transform: scale(var(--s, 0.8));
+  transform-origin: 0 0;
+  cursor: crosshair;
+}
+.layer {
+  position: absolute;
+  inset: 0;
+}
+.layer-real {
+  clip-path: path("M0 0Z");
+  will-change: clip-path;
+  pointer-events: none;
+}
+.layer-notes,
+.layer-line { pointer-events: none; }
+.layer-frames { pointer-events: none; }
+
+/* Dimension strings along the top and left of the drawing. */
+.dimrow,
+.dimcol {
+  position: absolute;
+  display: flex;
+  color: var(--text-2);
+  font-size: 11.5px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.dimrow { left: 0; right: 0; bottom: 100%; height: 30px; }
+.dimcol { top: 0; bottom: 0; right: 100%; width: 34px; flex-direction: column; }
+.dim {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+}
+/* extension lines */
+.dimrow .dim { border-left: 1px solid var(--line-3); }
+.dimrow .dim:last-child { border-right: 1px solid var(--line-3); }
+.dimcol .dim { border-top: 1px solid var(--line-3); }
+.dimcol .dim:last-child { border-bottom: 1px solid var(--line-3); }
+/* the dimension line itself, with a slash tick where it meets each extension line */
+.dim::before {
+  content: "";
+  position: absolute;
+  background: var(--line-2);
+}
+.dim::after {
+  content: "";
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background: linear-gradient(135deg, transparent 44%, var(--line) 44% 56%, transparent 56%);
+}
+.dimrow .dim::before { inset: 10px 0 auto; height: 1px; }
+.dimrow .dim::after { top: 6px; left: -5px; }
+.dimcol .dim::before { inset: 0 auto 0 10px; width: 1px; }
+.dimcol .dim::after { left: 6px; top: -5px; }
+/* a zero-size closing segment carries the last tick */
+.dim-end { flex: 0 0 0 !important; }
+.dim span {
+  position: relative;
+  z-index: 1;
+  padding: 2px 5px;
+  background: var(--sheet);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dimrow .dim span { translate: 0 -5px; max-width: 100%; }
+.dimcol .dim span { writing-mode: vertical-rl; translate: -6px 0; max-height: 100%; padding: 5px 2px; }
+
+/* ---------------- The workbench shell (drawn in both themes) ---------------- */
+.wb {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template: 34px minmax(0, 1fr) 128px / 44px 196px minmax(0, 1fr);
+  background: var(--o-surface-2);
+  border: 1px solid var(--o-border-strong);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.wb-top {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: var(--o-surface);
+  border-bottom: 1px solid var(--o-border);
+  color: var(--o-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.wb-top .i { color: var(--o-glyph); }
+.wb-menu { margin: 0 8px 0 4px; }
+.wb-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+.wb-tab[data-on] { border-color: var(--o-border-strong); background: var(--o-bg); color: var(--o-text); font-weight: 600; }
+.wb-grow { flex: 1; }
+.wb-tele { font-family: var(--o-mono); font-size: 11px; color: var(--o-text-3); }
+.wb-rail {
+  grid-row: 2 / 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 0;
+  background: var(--o-surface);
+  border-right: 1px solid var(--o-border);
+  color: var(--o-glyph);
+  font-size: 15px;
+}
+.wb-rail span {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+.wb-rail span[data-on] { background: var(--o-accent-soft); color: var(--o-accent); }
+.wb-rail .wb-grow + span {
+  border-radius: 50%;
+  background: var(--o-accent);
+  color: var(--o-on-accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+.wb-side {
+  grid-row: 2 / 4;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--o-inset);
+  border-right: 1px solid var(--o-border);
+  overflow: hidden;
+}
+.wb-side-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 6px;
+  font-weight: 600;
+}
+.wb-side-h .i:last-child { margin-left: auto; color: var(--o-glyph); }
+.wb-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  color: var(--o-text-2);
+}
+.wb-new kbd { margin-left: auto; font: 10.5px var(--o-mono); color: var(--o-faint); }
+.wb-label { padding: 10px 12px 3px; color: var(--o-faint); font-size: 11px; }
+.wb-sess {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 6px;
+  padding: 3px 6px 3px 20px;
+  border-radius: 7px;
+  color: var(--o-text-2);
+  white-space: nowrap;
+}
+.wb-sess span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.wb-sess[data-on] { background: var(--o-accent-soft); color: var(--o-accent); }
+.wb-sess[data-proj] { padding-left: 6px; color: var(--o-text); }
+.wb-side .os-tree { border-top: 1px solid var(--o-border); margin-top: 8px; flex: 1 1 0; }
+.wb-work {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template: 1fr 1fr / 1fr 1fr;
+  gap: 6px;
+  padding: 6px;
+}
+.wb-work > .ow { box-shadow: none; }
+.wb-work > .ow:first-child { grid-row: 1 / 3; }
+.wb-bottom {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--o-surface);
+  border-top: 1px solid var(--o-border);
+}
+.wb-bottom-tabs {
+  display: flex;
+  gap: 14px;
+  flex: none;
+  padding: 5px 12px 0;
+  color: var(--o-text-3);
+}
+.wb-bottom-tabs span { display: inline-flex; align-items: center; gap: 5px; padding-bottom: 4px; border-bottom: 2px solid transparent; }
+.wb-bottom-tabs span[data-on] { color: var(--o-text); border-color: var(--o-accent); font-weight: 600; }
+.wb-bottom .os-term { padding-top: 4px; line-height: 1.55; }
+
+/* Compact drawing for narrow screens: no sidebar, panes stacked. */
+.assembly[data-compact] { --W: 520; --H: 660; }
+.assembly[data-compact] .wb { grid-template-columns: 40px 0 minmax(0, 1fr); grid-template-rows: 34px minmax(0, 1fr) 104px; }
+.assembly[data-compact] .wb-side { display: none; }
+.assembly[data-compact] .wb-work { grid-template: 1.5fr 1fr / 1fr; }
+.assembly[data-compact] .wb-work > .ow:first-child { grid-row: auto; }
+.assembly[data-compact] .wb-work > .ow[data-kind="plan"] { display: none; }
+.assembly[data-compact] .wb-tab:not([data-on]),
+.assembly[data-compact] .wb-tele { display: none; }

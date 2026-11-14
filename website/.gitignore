@@ -1,5 +1,4 @@
 node_modules/
 dist/
-# Regenerated from apps/renderer by `npm run live`
-public/live/
-.cap/
+# Screenshots written by tools/shot.mjs while reviewing
+.shots/

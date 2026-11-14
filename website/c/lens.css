@@ -1,0 +1,242 @@
+/* 图 1, part two: the blueprint theme, balloons, the lens, the caption. */
+
+/* ---------------- Blueprint theme for the product kit ----------------
+   Same boxes, same fonts and same border widths as the light theme, so the
+   two layers register exactly; only paint changes. */
+.omp[data-theme="blueprint"] {
+  color-scheme: dark;
+  --o-bg: transparent;
+  --o-inset: transparent;
+  --o-surface: transparent;
+  --o-surface-2: rgb(241 244 255 / 0.045);
+  --o-surface-3: rgb(241 244 255 / 0.14);
+  --o-hover: transparent;
+  --o-active: transparent;
+  --o-border: rgb(241 244 255 / 0.3);
+  --o-border-strong: rgb(241 244 255 / 0.78);
+  --o-text: rgb(241 244 255 / 0.9);
+  --o-text-2: rgb(241 244 255 / 0.66);
+  --o-text-3: rgb(241 244 255 / 0.54);
+  --o-faint: rgb(241 244 255 / 0.44);
+  --o-glyph: rgb(241 244 255 / 0.56);
+  --o-accent: rgb(241 244 255 / 0.9);
+  --o-accent-soft: rgb(241 244 255 / 0.09);
+  --o-accent-softer: transparent;
+  --o-accent-border: rgb(241 244 255 / 0.6);
+  --o-on-accent: #1535c9;
+  --o-green: rgb(241 244 255 / 0.82);
+  --o-amber: rgb(241 244 255 / 0.82);
+  --o-red: rgb(241 244 255 / 0.82);
+  --o-orange: rgb(241 244 255 / 0.82);
+  --o-blue: rgb(241 244 255 / 0.82);
+  --o-add-bg: rgb(241 244 255 / 0.07);
+  --o-del-bg: transparent;
+  --o-shadow: none;
+}
+.omp[data-theme="blueprint"] .ow { --tint: rgb(241 244 255 / 0.9) !important; }
+.omp[data-theme="blueprint"] .wb { background: rgb(21 53 201 / 0.55); }
+/* Hidden lines: every inner divider is dashed, object outlines stay solid. */
+.omp[data-theme="blueprint"] .ow-bar,
+.omp[data-theme="blueprint"] .wb-top,
+.omp[data-theme="blueprint"] .os-urlbar,
+.omp[data-theme="blueprint"] .os-tool pre,
+.omp[data-theme="blueprint"] .os-plan-f { border-bottom-style: dashed; border-top-style: dashed; }
+.omp[data-theme="blueprint"] .wb-rail,
+.omp[data-theme="blueprint"] .wb-side,
+.omp[data-theme="blueprint"] .os-page nav { border-right-style: dashed; }
+.omp[data-theme="blueprint"] .wb-bottom,
+.omp[data-theme="blueprint"] .wb-side .os-tree { border-top-style: dashed; }
+/* Solid fills become hatching. */
+.omp[data-theme="blueprint"] .os-btn[data-primary] {
+  border-color: rgb(241 244 255 / 0.78);
+  background: var(--hatch);
+  color: rgb(241 244 255 / 0.95);
+}
+.omp[data-theme="blueprint"] .os-send,
+.omp[data-theme="blueprint"] .wb-rail .wb-grow + span {
+  background: var(--hatch);
+  box-shadow: inset 0 0 0 1px rgb(241 244 255 / 0.78);
+  color: rgb(241 244 255 / 0.95);
+}
+.omp[data-theme="blueprint"] .os-user,
+.omp[data-theme="blueprint"] .os-avatar,
+.omp[data-theme="blueprint"] .wb-sess[data-on],
+.omp[data-theme="blueprint"] .wb-rail span[data-on],
+.omp[data-theme="blueprint"] .os-url,
+.omp[data-theme="blueprint"] .os-chip { box-shadow: inset 0 0 0 1px rgb(241 244 255 / 0.3); }
+.omp[data-theme="blueprint"] .os-plan-h { background: var(--hatch); }
+.omp[data-theme="blueprint"] .os-todo li[data-done]::before {
+  border-color: rgb(241 244 255 / 0.78);
+  background: transparent no-repeat center / 9px
+    url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" fill="none" stroke="%23f1f4ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.3 5 8.7 9.5 3.5"/></svg>');
+}
+.omp[data-theme="blueprint"] .os-spin,
+.omp[data-theme="blueprint"] .os-caret,
+.omp[data-theme="blueprint"] .os-composer-input::after { animation: none; }
+
+/* ---------------- Balloons: numbered part markers ---------------- */
+.balloon {
+  position: absolute;
+  left: calc(var(--x) * 1px);
+  top: calc(var(--y) * 1px);
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  border: 1px solid var(--chalk);
+  border-radius: 50%;
+  color: var(--chalk);
+  font: 600 12px/1 var(--latin);
+}
+/* leader line from the balloon to a dot on the part */
+.balloon::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--len, 34) * 1px);
+  height: 1px;
+  background: var(--chalk);
+  transform-origin: 0 50%;
+  rotate: var(--a, 135deg);
+}
+.balloon::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px;
+  border-radius: 50%;
+  background: var(--chalk);
+  transform: rotate(var(--a, 135deg)) translateX(calc(var(--len, 34) * 1px));
+}
+.balloon b {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--sheet);
+  font-weight: 600;
+}
+
+/* ---------------- Lens and pinned windows ---------------- */
+.lens {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(var(--lw) * 1px);
+  height: calc(var(--lh) * 1px);
+  border: 1.5px solid var(--chalk);
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgb(9 22 110 / 0.5), 0 22px 44px -10px rgb(5 12 78 / 0.7);
+  will-change: transform;
+}
+.lens-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 4px 0 9px;
+  border-radius: 8px 8px 0 0;
+  background: var(--chalk);
+  color: var(--sheet-deep);
+  font: 500 11px/1 var(--font);
+  white-space: nowrap;
+}
+.lens-bar .i { font-size: 12px; }
+.lens-bar output { margin-left: auto; padding-right: 5px; font-family: var(--latin); font-size: 10.5px; opacity: 0.7; }
+.lens[data-pinned] { border-color: var(--pencil); }
+.lens[data-pinned] .lens-bar { background: var(--pencil); }
+.lens-close {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  pointer-events: auto;
+}
+.lens-close:hover { background: rgb(15 39 159 / 0.16); }
+.lens[data-pinned] { animation: lens-pin 0.36s var(--ease); }
+@keyframes lens-pin {
+  from { box-shadow: 0 0 0 10px rgb(255 216 74 / 0.5), 0 22px 44px -10px rgb(5 12 78 / 0.7); }
+}
+.lens[data-live][data-touch] { pointer-events: auto; touch-action: none; cursor: grab; }
+.drawing:focus-visible { outline-offset: 6px; }
+
+/* ---------------- Caption strip under the drawing ---------------- */
+.assembly-cap {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px 22px;
+  align-items: start;
+  margin: 16px 0 0 34px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-2);
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.legend li { display: flex; align-items: center; gap: 7px; padding-top: 4px; }
+.legend li b {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--chalk);
+  font: 600 10.5px/1 var(--latin);
+}
+.lens-tools {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 34px;
+}
+.lens-hint {
+  color: var(--pencil);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+/* ---------------- Hero, narrow ---------------- */
+@media (max-width: 980px) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    align-items: start;
+  }
+  .hero-copy h1 { font-size: clamp(34px, 9.6vw, 64px); }
+}
+@media (max-width: 560px) {
+  .assembly-stage { margin-left: 26px; }
+  .assembly-cap { margin-left: 0; grid-template-columns: minmax(0, 1fr); }
+  .dimcol { width: 26px; }
+  .dimcol .dim::before { left: 7px; }
+  .dimcol .dim::after { left: 3px; }
+  .dimcol .dim span { translate: -6px 0; }
+  .lens-tools { flex-wrap: wrap; }
+}

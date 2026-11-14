@@ -1,220 +1,126 @@
 <!doctype html>
-<html lang="zh" data-theme="light" data-layout="stage" data-embed="live">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OMP Studio | 给你的 Coding Agent 一个像样的家</title>
-    <meta name="description" content="OMP Studio 是 oh-my-pi 的桌面工作台。会话、审批、Agent Hub、模型和 Git 收进一扇窗口，支持 Windows 与 macOS，MIT 开源。" />
-    <meta name="theme-color" content="#f3f1f6" />
-    <link rel="icon" href="../favicon.ico" />
-    <link rel="preload" as="image" href="../media/still/workbench-light.webp" />
-    <script>
-      (function () {
-        var d = document.documentElement, t = null;
-        try { t = localStorage.getItem("omp-site-theme"); } catch (e) {}
-        d.dataset.theme = t === "dark" ? "dark" : "light";
-        d.classList.add("js");
-        var wide = matchMedia("(min-width: 900px) and (min-height: 600px) and (hover: hover) and (pointer: fine)").matches;
-        var still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-        d.dataset.embed = wide ? "live" : "still";
-        d.dataset.layout = wide && !still ? "stage" : "flow";
-      })();
-    </script>
-    <script type="module" src="./main.ts"></script>
-  </head>
-  <body>
-    <div class="grain" aria-hidden="true"></div>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMP Studio：对话和工具，各开一扇窗</title>
+<meta name="description" content="OMP Studio 是 oh-my-pi 的桌面工作台。对话、Git、终端和浏览器都是窗口，可以拖动、吸附分屏，或钉成独立的系统窗口。支持 Windows 与 macOS。">
+<meta name="theme-color" content="#120b26">
+<link rel="icon" href="../favicon.ico">
+<script type="module" src="./main.ts"></script>
+</head>
+<body>
+<a class="b-skip" href="#download">跳到下载</a>
 
-    <main>
-      <section class="stage-track" id="top" aria-label="产品介绍与真机导览">
-        <div class="stage">
-          <a class="brand" href="#top" aria-label="OMP Studio 首页">
-            <img src="../media/icon-256.webp" width="32" height="32" alt="" />
-            <span>OMP Studio</span>
-          </a>
+<header class="b-top">
+  <a class="b-brand" href="#workbench" aria-label="OMP Studio，回到顶部"><span data-pi></span>OMP Studio</a>
+  <nav class="b-nav" aria-label="页面">
+    <a href="#workbench">工作台</a>
+    <a href="#features">功能</a>
+    <a href="#download">下载</a>
+    <a href="https://github.com/the-snowpear/omp-studio" rel="noopener">GitHub</a>
+  </nav>
+  <a class="b-btn b-btn-s" href="#download">下载</a>
+</header>
 
-          <div class="hero-copy">
-            <h1 class="hero-title">
-              <span class="line"><span>给你的 Coding Agent</span></span>
-              <span class="line"><span>一个像样的家</span></span>
-            </h1>
-            <p class="hero-sub">OMP Studio 是 oh-my-pi 的桌面工作台。<span class="if-live">这扇窗不是视频，是真实界面。</span><span class="if-still">会话、审批和 Git 都在一扇窗口里。</span></p>
-            <div class="hero-cta">
-              <a class="btn btn-primary" data-download href="https://github.com/the-snowpear/omp-studio/releases">下载 OMP Studio</a>
-              <a class="btn btn-ghost" href="https://github.com/the-snowpear/omp-studio" target="_blank" rel="noopener">查看源码</a>
-            </div>
-          </div>
+<main>
+<section class="b-take" id="workbench" aria-label="工作台，一镜到底">
+  <div class="b-stage">
+    <div class="b-glow b-glow-back" aria-hidden="true"></div>
+    <div class="b-cam" data-cam></div>
+    <div class="b-glow b-glow-front" aria-hidden="true"></div>
+    <img class="b-icon" data-icon alt="" width="256" height="256" decoding="async">
 
-          <nav class="rail" aria-label="真机导览章节">
-            <ol class="chapters" id="chapters"></ol>
-            <div class="rail-foot">
-              <button class="link-btn" type="button" id="tourToggle">暂停导览</button>
-              <p id="railNote"><span class="if-live">窗口里跑的是演示数据。可以进去点，也可以拖右下角。</span><span class="if-still">画面取自真实界面，用的是演示数据。在电脑上打开本页可以直接操作。</span></p>
-            </div>
-          </nav>
+    <div class="b-cap b-cap-1" data-shot="0">
+      <h1>对话和工具，<br>各开一扇窗。</h1>
+      <p class="b-lede">OMP Studio 是 <span lang="en">oh-my-pi</span> 的桌面工作台。对话、Git、终端和浏览器都是窗口，可以拖动、吸附分屏，或钉成独立的系统窗口。</p>
+      <p class="b-cue"><a class="b-btn" href="#download">下载 OMP Studio</a><span>向下滚动，镜头会一直往后退</span></p>
+    </div>
 
-          <div class="win" id="win">
-            <div class="win-body" id="winBody">
-              <div class="win-screen" id="winScreen">
-                <img class="win-poster" id="winPoster" src="../media/still/workbench-light.webp" alt="OMP Studio 工作台界面" width="2000" height="1250" />
-                <div class="win-ring" id="winRing" aria-hidden="true"></div>
-                <button class="win-shield" id="winShield" type="button" aria-label="进入窗口，直接操作真实界面">
-                  <span class="shield-pill">点一下，进去用</span>
-                </button>
-              </div>
-              <div class="win-grip win-grip-r" data-resize="r" aria-hidden="true"></div>
-              <div class="win-grip win-grip-b" data-resize="b" aria-hidden="true"></div>
-              <div class="win-grip win-grip-c" data-resize="rb" aria-hidden="true"><i></i></div>
-              <output class="win-size" id="winSize" aria-live="off"></output>
-            </div>
-          </div>
-        </div>
-      </section>
+    <div class="b-cap b-cap-2" data-shot="1">
+      <h2>这句话，写在<br>一扇对话窗口里。</h2>
+      <p>每场对话都是一个窗口，带着自己的输入框和工具区。拖动顶栏，它就变成浮窗。</p>
+      <p>移动、最小化、收回都不会重建对话，草稿、阅读位置和终端状态全部保留。关闭只是关掉视图，任务不会停。</p>
+    </div>
 
-      <section class="section" id="details">
-        <header class="section-head reveal">
-          <h2>每个面板都贴着对话</h2>
-          <p>用 TUI 要来回切的东西，这里都在同一扇窗。下面的片段录自真实界面。</p>
-        </header>
+    <div class="b-cap b-cap-3" data-shot="2">
+      <h2>几扇窗，吸附成<br>一张工作台。</h2>
+      <p>拖到左右边缘是半屏，拖到四角是四分之一，拖到顶部是最大化。新窗口吸附进来，原来的窗口自动让到剩下最大的空位。</p>
+      <div class="b-layouts" data-layouts aria-hidden="true"></div>
+      <p class="b-note">悬停最大化按钮，从六种模板里选一种。拖动共用的分界线，相邻的窗口一起调整。</p>
+    </div>
 
-        <div class="bento" id="bento">
-          <article class="cell c-plan plaster reveal">
-            <div class="media" style="--z:1;--fx:50%;--fy:50%"><video data-src="../media/clip/plan.mp4" poster="../media/poster/plan.webp" muted loop playsinline preload="none" aria-hidden="true"></video></div>
-            <div class="cell-text">
-              <h3>先看计划，再批准执行</h3>
-              <p>逐段批注计划，批准后才开始动手。Ask 卡片和三档权限都在 Composer 旁边。</p>
-            </div>
-          </article>
-          <article class="cell c-hub plaster reveal">
-            <div class="cell-text">
-              <h3>子 Agent 不再是黑盒</h3>
-              <p>状态、花费、上下文和实时记录一个列表看完，还能恢复或终止。</p>
-            </div>
-            <div class="media" style="--z:1.75;--fx:24%;--fy:42%"><video data-src="../media/clip/hub.mp4" poster="../media/poster/hub.webp" muted loop playsinline preload="none" aria-hidden="true"></video></div>
-          </article>
-          <article class="cell c-tokens plaster reveal">
-            <div class="cell-text">
-              <h3>每一轮花了多少</h3>
-              <p>用量、缓存命中和 TPS 在顶栏展开，首页有曲线和热力图。</p>
-            </div>
-            <div class="media" style="--z:1.6;--fx:92%;--fy:4%"><video data-src="../media/clip/tokens.mp4" poster="../media/poster/tokens.webp" muted loop playsinline preload="none" aria-hidden="true"></video></div>
-          </article>
-          <article class="cell c-models plaster reveal">
-            <div class="media" style="--z:1.1;--fx:50%;--fy:30%"><video data-src="../media/clip/models.mp4" poster="../media/poster/models.webp" muted loop playsinline preload="none" aria-hidden="true"></video></div>
-            <div class="cell-text">
-              <h3>供应商收在一页，模型按角色分工</h3>
-              <p>开关、端点和顺序同页完成，再给 @default、@plan、@task 指定模型和思考强度。</p>
-            </div>
-          </article>
-          <article class="cell c-caps plaster reveal">
-            <div class="cell-text">
-              <h3>能力中心</h3>
-              <p>Skills、Plugins、MCP、Slash Commands 同一页开关、探测、打开目录。</p>
-            </div>
-            <div class="media" style="--z:1.42;--fx:32%;--fy:30%"><video data-src="../media/clip/caps.mp4" poster="../media/poster/caps.webp" muted loop playsinline preload="none" aria-hidden="true"></video></div>
-          </article>
-          <article class="cell c-git plaster reveal">
-            <div class="media" style="--z:1.7;--fx:96%;--fy:30%"><video data-src="../media/clip/git.mp4" poster="../media/poster/git.webp" muted loop playsinline preload="none" aria-hidden="true"></video></div>
-            <div class="cell-text">
-              <h3>不离开对话就能提交</h3>
-              <p>暂存、看 diff、写 commit，Fetch、Pull、Push 和提交图都在右侧面板。</p>
-            </div>
-          </article>
-          <article class="cell c-restore plaster reveal">
-            <div class="cell-text">
-              <h3>走错了就退回去</h3>
-              <p>从历史消息恢复，或者分叉出一条新会话，接着往下走。</p>
-            </div>
-            <div class="media" style="--z:1.34;--fx:50%;--fy:16%"><video data-src="../media/clip/restore.mp4" poster="../media/poster/restore.webp" muted loop playsinline preload="none" aria-hidden="true"></video></div>
-          </article>
-        </div>
-
-        <p class="next-line reveal"><b>下个版本</b>聊天内浏览器、电脑操作工作区、语音输入、自由浮窗。<a href="https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md" target="_blank" rel="noopener">看更新日志</a></p>
-      </section>
-
-      <section class="section section-tight" id="providers">
-        <header class="section-head reveal">
-          <h2>60+ 供应商，一处管理</h2>
-          <p>能力来自 OMP Runtime。仓库不内置任何密钥，沿用你自己的 models.yml 和 omp login。</p>
-        </header>
-        <div class="marquee" id="marquee" aria-label="部分支持的模型供应商"></div>
-      </section>
-
-      <section class="section" id="bridge">
-        <header class="section-head reveal">
-          <h2>控制台，不是套壳终端</h2>
-          <p>界面通过类型化的 Studio Bridge 接到 Runtime，不解析 TUI 文本、ANSI 输出或按键宏。</p>
-        </header>
-        <div class="chain reveal" id="chain">
-          <span class="chain-pulse" id="chainPulse" aria-hidden="true"></span>
-          <div class="node plaster"><code>Renderer</code></div>
-          <div class="node plaster"><code>StudioClient</code></div>
-          <div class="node plaster"><code>Desktop IPC</code></div>
-          <div class="node plaster"><code>Host facade</code></div>
-          <div class="node plaster node-end"><code>omp --mode studio-host</code></div>
-        </div>
-        <div class="vows">
-          <p class="reveal"><b>Renderer 看不到</b>Bridge token、进程句柄和 OMP 会话路径。</p>
-          <p class="reveal"><b>未知操作失败关闭。</b>accepted 只代表已受理，不等于成功。</p>
-          <p class="reveal"><b>Runtime 断了</b>会封住旧 epoch，没完成的操作如实标为结果未知。</p>
-        </div>
-      </section>
-
-      <section class="section" id="download">
-        <header class="section-head reveal">
-          <h2 id="dlTitle">下载 OMP Studio</h2>
-          <p id="dlMeta">版本信息读取中</p>
-        </header>
-        <div class="keys" id="keys"></div>
-        <div class="dl-notes reveal">
-          <p id="noteWin"></p>
-          <p id="noteMac"></p>
-          <p>装好之后，应用内更新走差分下载和 Ed25519 验签，需要时可以恢复上一桌面版本。</p>
-        </div>
-        <div class="source plaster reveal">
-          <div class="source-head">
-            <h3>从源码运行</h3>
-            <p>需要 Node.js 22+。Linux 目前没有桌面安装包。</p>
-            <div class="source-links">
-              <a id="repoLink" href="https://github.com/the-snowpear/omp-studio" target="_blank" rel="noopener">查看源码</a>
-              <a href="https://github.com/the-snowpear/omp-studio/releases" target="_blank" rel="noopener">全部版本</a>
-              <a href="https://github.com/the-snowpear/omp-studio/blob/main/docs/getting-started.md" target="_blank" rel="noopener">完整步骤</a>
-            </div>
-          </div>
-          <div class="code">
-            <pre id="srcCmd"><code>git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git
-cd omp-studio
-npm install
-npm run omp:overlay:apply
-npm run preview</code></pre>
-            <button class="copy" type="button" id="copyCmd">复制</button>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <footer class="foot">
-      <p class="foot-demo">本页内嵌的窗口和片段都运行在演示数据上，不连接真实 Runtime，也不会读取你的任何文件。</p>
-      <div class="foot-row">
-        <p>OMP Studio 以 MIT 开源。Runtime 来自 <a href="https://github.com/can1357/oh-my-pi" target="_blank" rel="noopener">oh-my-pi</a>，Pi by Mario Zechner，omp by Can Bölük。</p>
-        <nav aria-label="页脚链接">
-          <a href="https://github.com/the-snowpear/omp-studio/blob/main/docs/README.md" target="_blank" rel="noopener">文档</a>
-          <a href="https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md" target="_blank" rel="noopener">更新日志</a>
-          <a href="https://github.com/the-snowpear/omp-studio/issues" target="_blank" rel="noopener">反馈问题</a>
-          <a href="https://linux.do/" target="_blank" rel="noopener">LINUX DO</a>
-        </nav>
+    <div class="b-cap b-cap-4" data-shot="3">
+      <h2>工作台放不下的，<br>钉到桌面上。</h2>
+      <div>
+        <p>浮窗的 Pin 菜单有五档。独立窗口在任务栏有自己的图标，可以拖到另一块显示器，重启后回到原来的位置。</p>
+        <ol class="b-pins" data-pins aria-label="Pin 菜单的五档"></ol>
       </div>
-    </footer>
+    </div>
 
-    <nav class="dock" id="dock" aria-label="页面导航">
-      <div class="dock-bg" id="dockBg"></div>
-      <a class="dock-item" href="#top" data-section="top" data-label="开始"><img src="../media/icon-256.webp" alt="" width="52" height="52" /></a>
-      <a class="dock-item" href="#details" data-section="details" data-label="细节"><span class="dock-heat"></span></a>
-      <a class="dock-item" href="#providers" data-section="providers" data-label="供应商"><span class="dock-glyph"><i class="dock-logo"></i></span></a>
-      <a class="dock-item" href="#bridge" data-section="bridge" data-label="架构"><span class="dock-glyph"><code>{ }</code></span></a>
-      <a class="dock-item" href="#download" data-section="download" data-label="下载"><span class="dock-glyph dock-accent">↓</span></a>
-      <span class="dock-sep" aria-hidden="true"></span>
-      <button class="dock-item dock-theme" id="themeBtn" type="button" data-label="切换深色" aria-label="切换深色与浅色"><span class="disc"></span></button>
-    </nav>
-  </body>
+    <div class="b-cap b-cap-5" data-shot="4">
+      <h2>这些都装在 OMP Studio 里。</h2>
+      <p data-facts></p>
+      <p class="b-cue"><a class="b-btn" href="#download">下载</a><a class="b-link" href="#features">先看看里面的页面</a></p>
+    </div>
+
+    <div class="b-slate" data-slate aria-hidden="true">
+      <span class="b-slate-n">镜 <b data-slate-n>1</b> / 5</span>
+      <span class="b-slate-name" data-slate-name>一句话</span>
+      <span class="b-slate-tc" data-slate-tc>00:00:00:00</span>
+      <span class="b-slate-bar"><i data-slate-bar></i></span>
+    </div>
+  </div>
+</section>
+
+<section class="b-pages" id="features" aria-labelledby="features-h">
+  <div class="b-pages-stage">
+    <div class="b-pages-copy">
+      <h2 id="features-h">窗口之外，<br>还有六个整页。</h2>
+      <ol class="b-pages-index" data-pages-index></ol>
+      <div class="b-pages-text" data-pages-text></div>
+    </div>
+    <div class="b-rack" data-rack aria-hidden="true"></div>
+  </div>
+</section>
+
+<section class="b-extras" aria-labelledby="extras-h">
+  <h2 id="extras-h">工作时用得上的，<br>也都在里面。</h2>
+  <dl class="b-extras-list" data-extras></dl>
+</section>
+
+<section class="b-get" id="download" aria-labelledby="download-h">
+  <div class="b-get-head">
+    <img data-icon-static alt="" width="112" height="112" decoding="async" loading="lazy">
+    <h2 id="download-h">下载 OMP Studio</h2>
+    <p class="b-get-ver" data-version>正在读取最新版本</p>
+  </div>
+  <p class="b-get-notice" data-notice hidden></p>
+  <div class="b-get-grid">
+    <div class="b-get-main">
+      <a class="b-btn b-btn-l" data-primary href="https://github.com/the-snowpear/omp-studio/releases" rel="noopener">前往 GitHub Releases</a>
+      <p class="b-get-req" data-primary-req>Windows x64、Windows ARM64、macOS Apple Silicon</p>
+      <ul class="b-get-others" data-others></ul>
+      <details class="b-get-mac">
+        <summary>macOS 首次打开被拦截？</summary>
+        <p>当前安装包是 ad hoc 签名，还没有公证，首次打开会被 Gatekeeper 拦截。打开「系统设置 › 隐私与安全性」，点「仍要打开」；或在终端执行：</p>
+        <div class="b-cmd" data-mac-cmd></div>
+      </details>
+      <p class="b-get-fine">模型和登录沿用 OMP 的 <code>models.yml</code> 与 <code>omp login</code>，安装包不内置任何供应商密钥。Runtime 与更新目录使用 Ed25519 签名；Windows 安装包没有 Authenticode 签名。</p>
+    </div>
+    <div class="b-get-src" id="source">
+      <h3>从源码运行</h3>
+      <p>需要 Node.js 22 或更新、Git 和 Bun。Windows 也可以直接双击仓库根目录的 <code>preview.cmd</code>。</p>
+      <div class="b-cmds" data-source></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="b-foot">
+  <p><span data-pi></span>OMP Studio 以 MIT 许可证开源。Runtime 来自 <a href="https://github.com/can1357/oh-my-pi" rel="noopener">oh-my-pi</a>（Pi by Mario Zechner，omp by Can Bölük）。</p>
+  <p>本页所有界面画面都是预览模式下的演示数据，不是真实项目或真实用量。</p>
+  <p class="b-foot-links"><a href="https://github.com/the-snowpear/omp-studio" rel="noopener">GitHub 仓库</a><a href="https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md" rel="noopener">更新日志</a><a href="https://github.com/the-snowpear/omp-studio/tree/main/docs" rel="noopener">文档</a><a href="https://github.com/the-snowpear/omp-studio/issues" rel="noopener">反馈问题</a></p>
+</footer>
+</body>
 </html>

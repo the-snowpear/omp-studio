@@ -1,0 +1,256 @@
+/* The scene inside the camera: two monitors, the app, its docked windows and
+   the windows pinned out of it. Laid out in app pixels by world.ts. */
+.b-world.omp[data-theme="dark"] {
+  /* The kit's dark theme, pulled toward this page's violet ink. */
+  --o-bg: #151029;
+  --o-inset: #100b20;
+  --o-surface: #1b1534;
+  --o-surface-2: #241d42;
+  --o-surface-3: #2f2753;
+  --o-border: rgb(226 214 255 / 0.08);
+  --o-border-strong: rgb(226 214 255 / 0.14);
+  --o-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 18px 44px -10px rgb(4 2 12 / 0.7);
+}
+
+/* ---------------- Monitors and taskbar ---------------- */
+.b-mon {
+  position: absolute;
+  border: 1px solid rgb(226 214 255 / 0.16);
+  border-radius: 22px;
+  background:
+    radial-gradient(70% 60% at 30% 20%, rgb(139 92 246 / 0.2), transparent 70%),
+    radial-gradient(60% 60% at 80% 90%, rgb(56 182 255 / 0.12), transparent 70%),
+    #130d27;
+  box-shadow: 0 0 0 7px #0a0616, 0 40px 90px -20px rgb(0 0 0 / 0.7);
+  opacity: var(--mon, 0);
+}
+.b-mon-2 {
+  background:
+    radial-gradient(80% 50% at 60% 30%, rgb(255 79 216 / 0.11), transparent 70%),
+    #130d27;
+}
+.b-dock {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 58px;
+  padding: 0 14px;
+  border: 1px solid rgb(226 214 255 / 0.12);
+  border-radius: 18px;
+  background: rgb(30 22 58 / 0.86);
+  translate: -50% 0;
+}
+.b-dock > span {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  color: #8e84ad;
+  font-size: 20px;
+}
+.b-dock > i {
+  width: 1px;
+  height: 26px;
+  background: rgb(226 214 255 / 0.14);
+}
+.b-dock-idle { background: rgb(226 214 255 / 0.06); }
+.b-dock [data-run]::after,
+.b-dock-pin::after {
+  content: "";
+  position: absolute;
+  bottom: -7px;
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--o-accent);
+}
+.b-dock-pin {
+  background: color-mix(in srgb, var(--tint) 22%, #1b1534);
+  color: var(--tint) !important;
+  transition: scale 0.5s var(--ease), opacity 0.3s ease, margin 0.5s var(--ease);
+}
+/* A pinned window's taskbar icon only exists once the window has left the app. */
+.b-world:not([data-pins="1"], [data-pins="2"]) .b-dock-pin[data-pin="git"],
+.b-world:not([data-pins="2"]) .b-dock-pin[data-pin="terminal"] {
+  scale: 0;
+  opacity: 0;
+  margin-left: -48px;
+}
+
+/* ---------------- The app window ---------------- */
+.b-app {
+  position: absolute;
+  overflow: hidden;
+  border: 1px solid var(--o-border-strong);
+  border-radius: 14px;
+  background: var(--o-inset);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.4), 0 50px 110px -24px rgb(4 2 12 / 0.9);
+}
+.b-app-bar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 38px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid var(--o-border);
+  color: var(--o-text-3);
+  white-space: nowrap;
+}
+.b-app-menu { display: flex; align-items: center; gap: 14px; }
+.b-app-menu b { font-weight: 400; }
+.b-app-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+  margin-left: 98px;
+  overflow: hidden;
+}
+.b-app-tabs > span:not(.i) {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 8px;
+}
+.b-app-tabs > span[data-on] {
+  background: var(--o-surface-2);
+  color: var(--o-text);
+}
+.b-app-meter { font-size: 11px; color: var(--o-faint); }
+.b-app-ctl { display: flex; gap: 16px; font-size: 13px; }
+.b-app-rail {
+  position: absolute;
+  inset: 38px auto 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 48px;
+  padding: 10px 0;
+  border-right: 1px solid var(--o-border);
+  color: var(--o-glyph);
+  font-size: 16px;
+}
+.b-app-rail > span {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+.b-app-rail > span[data-on] { background: var(--o-surface-2); color: var(--o-text); }
+.b-app-rail .b-app-me {
+  margin-top: auto;
+  border-radius: 50%;
+  background: var(--o-accent);
+  color: var(--o-on-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+.b-app-side {
+  position: absolute;
+  inset: 38px auto 0 48px;
+  display: flex;
+  flex-direction: column;
+  width: 212px;
+  padding: 10px 0 0;
+  border-right: 1px solid var(--o-border);
+  color: var(--o-text-2);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.b-side-h, .b-side-new, .b-side-proj {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+}
+.b-side-h b { flex: 1; color: var(--o-text); font-size: 13px; }
+.b-side-new kbd { margin-left: auto; color: var(--o-glyph); font-size: 10.5px; }
+.b-side-label {
+  padding: 12px 14px 4px;
+  color: var(--o-faint);
+  font-size: 11.5px;
+}
+.b-side-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 6px;
+  padding: 4px 8px 4px 26px;
+  border-radius: 7px;
+}
+.b-side-list li > span { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.b-side-list li[data-on] { background: var(--o-accent-soft); color: var(--o-accent); }
+.b-side-list em { font-style: normal; }
+.b-app-side .os-tree { flex: 1 1 0; }
+
+.b-ws {
+  position: absolute;
+  background: var(--o-inset);
+}
+.b-docked {
+  position: absolute;
+  border-radius: 10px;
+  box-shadow: none;
+  transition:
+    left 0.62s var(--ease), top 0.62s var(--ease),
+    width 0.62s var(--ease), height 0.62s var(--ease),
+    opacity 0.35s ease, scale 0.5s var(--ease);
+}
+.b-docked[data-away] {
+  opacity: 0;
+  scale: 0.9;
+}
+/* While the camera is close there is only the conversation window; the rest
+   of the app appears around it as the camera pulls back. */
+.b-app { transition: background-color 0.6s ease, border-color 0.6s ease, box-shadow 0.6s ease; }
+:is(.b-app-bar, .b-app-rail, .b-app-side, .b-ws) { transition: opacity 0.6s ease, background-color 0.6s ease; }
+.b-world[data-near] .b-app {
+  border-color: transparent;
+  background-color: transparent;
+  box-shadow: none;
+}
+.b-world[data-near] .b-ws { background-color: transparent; }
+.b-world[data-near] :is(.b-app-bar, .b-app-rail, .b-app-side),
+.b-world[data-near] .b-docked:not([data-kind="chat"]) {
+  opacity: 0;
+}
+
+/* In the opening close-up the frame holds only the sentence. */
+.b-world :is(.os-composer-row, .os-msgs, .b-docked[data-kind="chat"] > .ow-bar) { transition: opacity 0.5s ease; }
+.b-world[data-close] :is(.os-composer-row, .os-msgs, .b-docked[data-kind="chat"] > .ow-bar) { opacity: 0; }
+
+/* The sentence, and the conversation that answers it. */
+.b-typed { white-space: nowrap; }
+.b-world .os-composer-input { white-space: nowrap; }
+.b-arrive { animation: b-arrive 0.5s var(--ease) both; }
+@keyframes b-arrive {
+  from { opacity: 0; translate: 0 10px; }
+}
+
+/* ---------------- Windows pinned out of the app ---------------- */
+.b-pin {
+  position: absolute;
+  opacity: 0;
+  translate: var(--from-x, 0) var(--from-y, 0);
+  scale: 0.55;
+  transition: opacity 0.4s ease, translate 0.8s var(--ease), scale 0.8s var(--ease);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.4), 0 40px 80px -18px rgb(4 2 12 / 0.9);
+}
+.b-pin[data-out] {
+  opacity: 1;
+  translate: 0 0;
+  scale: 1;
+}
+.b-pin .ow-sub { color: var(--o-accent); }

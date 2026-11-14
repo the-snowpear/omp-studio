@@ -1,136 +1,163 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OMP Studio - oh-my-pi 的桌面工作台</title>
-    <meta name="description" content="OMP Studio 是 oh-my-pi 的桌面工作台。界面直连类型化 Studio Bridge，不解析 TUI 文本、ANSI 或按键宏。开源，MIT，支持 Windows 与 macOS。" />
-    <meta name="theme-color" content="#0a0a0c" />
-    <link rel="icon" href="/favicon.ico" />
-    <link rel="preload" as="fetch" crossorigin="anonymous" href="/media/still/shot-chat-00592.webp" fetchpriority="high" />
-    <script type="module" src="./main.ts"></script>
-  </head>
-  <body>
-    <a class="skip" href="#download">跳到下载</a>
-    <header class="nav" id="nav">
-      <a class="brand" href="#top" aria-label="OMP Studio 回到顶部"><span class="brand-pi" data-pi></span><span>OMP Studio</span></a>
-      <nav class="nav-links" aria-label="页面导航">
-        <a href="#resolve-chapters">工作台</a>
-        <a href="#bridge">Bridge</a>
-        <a href="#features">功能</a>
-        <a href="#download">下载</a>
-      </nav>
-      <div class="nav-end">
-        <a class="nav-gh" href="https://github.com/the-snowpear/omp-studio" rel="noopener">GitHub<span id="stars" class="stars"></span></a>
-        <button type="button" class="palette-hint" id="palette-open" aria-haspopup="dialog">命令<kbd id="palette-key">Ctrl K</kbd></button>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMP Studio：对话是窗，工具也是窗</title>
+<meta name="description" content="OMP Studio 是 oh-my-pi 的桌面工作台。对话、Git、终端和浏览器都能拖成窗口，吸附分屏，停到任意一侧，或钉成独立的系统窗口。">
+<meta name="theme-color" content="#1535c9">
+<link rel="icon" href="../favicon.ico">
+</head>
+<body class="c">
+<a class="skip" href="#fig2">跳过总装图</a>
+
+<header class="top">
+  <a class="top-brand" href="#fig1" aria-label="OMP Studio，回到顶部"><span data-pi></span><b>OMP Studio</b></a>
+  <nav class="top-nav" aria-label="图纸目录">
+    <a href="#fig2">图 2 吸附</a>
+    <a href="#fig3">图 3 停靠</a>
+    <a href="#fig4">图 4 钉住</a>
+    <a href="#parts">明细表</a>
+  </nav>
+  <a class="btn btn-solid top-dl" href="#titleblock">下载</a>
+</header>
+
+<main>
+  <!-- 图 1 总装 -->
+  <section class="sheet hero" id="fig1" aria-labelledby="h-hero">
+    <div class="hero-copy">
+      <h1 id="h-hero"><span>对话是窗，</span><span>工具也是窗。</span></h1>
+      <p class="lede">OMP Studio 是 oh-my-pi 的桌面工作台。对话、Git、终端和浏览器都能拖成窗口，吸附分屏，停到任意一侧，或钉成独立的系统窗口。</p>
+      <div class="hero-cta">
+        <a class="btn btn-solid btn-lg" href="#titleblock" data-hero-dl>下载 OMP Studio</a>
+        <a class="link" href="#source">从源码运行</a>
       </div>
+      <p class="hero-meta" data-hero-meta>Windows x64、Windows ARM64 和 macOS Apple Silicon</p>
+    </div>
+
+    <figure class="assembly">
+      <div class="assembly-stage" data-assembly>
+        <div class="dimrow" data-dim-top aria-hidden="true"></div>
+        <div class="dimcol" data-dim-left aria-hidden="true"></div>
+        <div class="drawing" data-drawing>
+          <div class="layer layer-line omp" data-theme="blueprint" data-layer="line" aria-hidden="true"></div>
+          <div class="layer layer-notes" data-notes aria-hidden="true"></div>
+          <div class="layer layer-real omp" data-theme="light" data-layer="real" aria-hidden="true"></div>
+          <div class="layer layer-frames" data-frames></div>
+        </div>
+      </div>
+      <figcaption class="assembly-cap">
+        <div class="figno"><b>图 1</b><span>总装</span></div>
+        <ol class="legend" data-legend></ol>
+        <div class="lens-tools">
+          <p class="lens-hint" data-lens-hint>移动指针，镜头里是真实界面。点一下，把镜头钉成窗口。</p>
+          <button class="btn btn-ghost" type="button" data-unpin hidden>收起全部</button>
+        </div>
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- 图 2 吸附 -->
+  <section class="sheet" id="fig2" aria-labelledby="h-snap">
+    <header class="sheet-head">
+      <div class="figno"><b>图 2</b><span>吸附</span></div>
+      <h2 id="h-snap">拖到边上，它自己对齐。</h2>
+      <p>拖到左右边缘占半屏，拖到四角占四分之一，拖到顶部铺满。新窗口吸附进来时，原来的窗口会移到剩下最大的空位，不会被盖在后面。</p>
     </header>
-
-    <main id="top">
-      <section class="resolve" id="resolve" aria-label="产品总览">
-        <div class="stage" id="stage">
-          <canvas class="stage-gl" id="stage-gl" aria-hidden="true"></canvas>
-          <div class="hero" id="hero">
-            <canvas class="hero-pi" id="pi-gl" aria-hidden="true"></canvas>
-            <h1 class="px hero-title" id="hero-title">别再解析终端了</h1>
-            <p class="hero-sub">OMP Studio 是 oh-my-pi 的桌面工作台。界面直连类型化 Bridge，不读 ANSI，也不模拟按键。</p>
-            <div class="cta">
-              <a class="btn btn-primary" href="#download" data-key="d">下载<kbd>D</kbd></a>
-              <a class="btn" href="https://github.com/the-snowpear/omp-studio" rel="noopener" data-key="g">看源码<kbd>G</kbd></a>
-            </div>
-          </div>
-          <div class="captions" id="resolve-chapters"></div>
-          <div class="rail" id="rail" role="group" aria-label="跳到产品画面"></div>
+    <div class="snap">
+      <div class="snap-stage-wrap">
+        <div class="snap-stage" data-snap-stage>
+          <div class="snap-zone" data-snap-zone hidden><span data-snap-zone-label></span></div>
         </div>
-      </section>
-
-      <section class="section bridge" id="bridge" aria-labelledby="bridge-title">
-        <div class="wrap">
-          <h2 class="px section-title" id="bridge-title">中间隔着一层类型</h2>
-          <p class="lede">OMP Studio 不读屏幕上的字。Renderer 发类型化请求，Runtime 回带状态的回执，谁都不用猜对方的意思。</p>
-          <ul class="nopes" id="nopes" aria-label="OMP Studio 没有采用的做法">
-            <li><s>解析 TUI 文本</s></li>
-            <li><s>解析 ANSI 序列</s></li>
-            <li><s>模拟按键宏</s></li>
-            <li class="yes">Studio Bridge</li>
-          </ul>
-          <div class="inspector" id="inspector">
-            <ol class="layers" id="layers" aria-label="一条消息经过的层"></ol>
-            <div class="payload box" id="payload-box">
-              <span class="box-title" id="payload-title"></span>
-              <pre class="code" id="payload-code" tabindex="0" aria-live="polite"></pre>
-              <p class="payload-note" id="payload-note"></p>
-              <div class="stepper">
-                <button type="button" class="btn btn-sm" id="step-prev">上一步<kbd>←</kbd></button>
-                <button type="button" class="btn btn-sm" id="step-next">下一步<kbd>→</kbd></button>
-                <button type="button" class="btn btn-sm btn-warn" id="step-kill">拔掉 Runtime<kbd>X</kbd></button>
-              </div>
-            </div>
-          </div>
-          <p class="source-note">字段名取自 <code>packages/client-contract</code> 与 <code>packages/studio-protocol</code>，类型和文档冲突时以类型为准。</p>
-        </div>
-      </section>
-
-      <section class="section features" id="features" aria-labelledby="features-title">
-        <div class="wrap">
-          <h2 class="px section-title" id="features-title">剩下的也在这扇窗里</h2>
-          <div class="tabs">
-            <div class="tablist" id="tablist" role="tablist" aria-label="功能" aria-orientation="vertical"></div>
-            <div class="tabpanel" id="tabpanel" role="tabpanel">
-              <div class="clip">
-                <video id="clip" muted playsinline loop preload="metadata"></video>
-                <canvas id="clip-gl" class="clip-gl" aria-hidden="true"></canvas>
-              </div>
-              <p class="clip-note" id="clip-note"></p>
-            </div>
-          </div>
-          <p class="next-up"><span class="tag">下个版本</span>聊天内浏览器、电脑操作工作区、语音输入和自由浮窗。还没发布，进度看<a href="https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md" rel="noopener">更新日志</a>。</p>
-        </div>
-      </section>
-
-      <section class="section download" id="download" aria-labelledby="download-title">
-        <div class="wrap">
-          <h2 class="px section-title" id="download-title">选一个，回车</h2>
-          <p class="lede" id="download-meta">最新版本 0.1.17，发布于 2026-10-29。MIT 开源。</p>
-          <ul class="picker" id="picker" role="listbox" aria-label="选择安装包" aria-orientation="vertical"></ul>
-          <p class="install-note box" id="install-note"></p>
-          <p class="device-note" id="device-note" hidden></p>
-          <div class="source box">
-            <span class="box-title">从源码运行</span>
-            <pre class="code" id="source-code">git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git
-cd omp-studio
-npm install
-npm run omp:overlay:apply
-npm run preview</pre>
-            <button type="button" class="btn btn-sm copy" id="copy-source">复制命令</button>
-          </div>
-          <p class="after">需要 Node.js 22+。模型与登录沿用 OMP 的 <code>models.yml</code> 和 <code>omp login</code>，本仓库不内置任何供应商密钥。</p>
-        </div>
-      </section>
-    </main>
-
-    <footer class="foot">
-      <div class="wrap foot-in">
-        <nav aria-label="外部链接" class="foot-links">
-          <a href="https://github.com/the-snowpear/omp-studio" rel="noopener">GitHub</a>
-          <a href="https://github.com/the-snowpear/omp-studio/blob/main/docs/README.md" rel="noopener">文档</a>
-          <a href="https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md" rel="noopener">更新日志</a>
-          <a href="https://github.com/can1357/oh-my-pi" rel="noopener">oh-my-pi</a>
-          <a href="https://linux.do/" rel="noopener">LINUX DO</a>
-        </nav>
-        <p>产品画面来自预览模式，其中的会话、用量和子 Agent 都是演示数据。</p>
-        <p>MIT 许可。Runtime 来自 oh-my-pi（Pi by Mario Zechner，omp by Can Bölük）。</p>
+        <p class="note" data-snap-note>拖动标题栏试试。键盘：聚焦窗口后按 ← → 占半屏，↑ 铺满，↓ 还原为浮窗。</p>
       </div>
-    </footer>
-
-    <div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="命令面板" hidden>
-      <div class="palette-box box">
-        <label class="sr" for="palette-input">输入命令</label>
-        <input id="palette-input" type="text" autocomplete="off" spellcheck="false" placeholder="跳转、下载、复制..." role="combobox" aria-expanded="true" aria-controls="palette-list" />
-        <ul id="palette-list" role="listbox" aria-label="命令"></ul>
-        <p class="palette-foot">↑↓ 选择，回车执行，Esc 关闭</p>
+      <div class="snap-side">
+        <h3>六种分屏模板</h3>
+        <p>在应用里，把指针停在最大化按钮上 300 毫秒，就会弹出这张选择器。点一种，窗口按它排好。</p>
+        <div class="tpl-grid" data-templates role="group" aria-label="分屏模板"></div>
+        <ul class="facts">
+          <li>拖动相邻窗口的分界线，两边一起调整；双击恢复默认比例。</li>
+          <li>按住 Ctrl（macOS 为 ⌘）临时关闭吸附，Esc 取消这次拖动。</li>
+        </ul>
       </div>
     </div>
-    <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  </body>
+  </section>
+
+  <!-- 图 3 停靠 -->
+  <section class="sheet" id="fig3" aria-labelledby="h-dock">
+    <header class="sheet-head">
+      <div class="figno"><b>图 3</b><span>停靠</span></div>
+      <h2 id="h-dock">五个位置，工具放哪都行。</h2>
+      <p>把工作台按层拆开看：左侧栏、对话工具区、右侧栏、底栏，再加上浮窗。九种工具可以在这五个位置之间随意移动。</p>
+    </header>
+    <div class="dock">
+      <div class="iso-wrap" data-iso-wrap>
+        <div class="iso" data-iso></div>
+      </div>
+      <div class="dock-side">
+        <div class="zone-list" data-zone-list role="group" aria-label="停靠位置"></div>
+        <div class="zone-detail" aria-live="polite">
+          <h3 data-zone-name></h3>
+          <p data-zone-text></p>
+        </div>
+        <h3 class="tool-title">把工具放进选中的位置</h3>
+        <div class="tool-chips" data-tool-chips role="group" aria-label="工具"></div>
+        <p class="note">拖动超过 6 像素就会显示落点预览，松手才生效。不想拖，右键菜单或 Shift F10 也能移动。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 图 4 钉住 -->
+  <section class="sheet" id="fig4" aria-labelledby="h-pin">
+    <header class="sheet-head">
+      <div class="figno"><b>图 4</b><span>钉住</span></div>
+      <h2 id="h-pin">一扇浮窗，可以跟到多远。</h2>
+      <p>每扇浮窗的 Pin 菜单有五档。越往右，窗口跟着你走得越远，直到离开应用，成为一扇独立的系统窗口。</p>
+    </header>
+    <ol class="pins" data-pins></ol>
+    <p class="note pins-note">固定保留的是窗口本身。切换会话不会重启里面的 Shell，也不会改变任务的归属。独立窗口在任务栏有自己的图标，重启后恢复到原来的位置。</p>
+  </section>
+
+  <!-- 明细表 -->
+  <section class="sheet" id="parts" aria-labelledby="h-parts">
+    <header class="sheet-head">
+      <div class="figno"><b>明细表</b><span>功能</span></div>
+      <h2 id="h-parts">窗口里装的东西。</h2>
+      <p>前六项是应用里的整页，选中一行可以看它的真实截图。后八项是随处可用的能力。</p>
+    </header>
+    <div class="parts">
+      <div class="parts-table-wrap">
+        <table class="parts-table">
+          <thead><tr><th scope="col">序号</th><th scope="col">名称</th><th scope="col">说明</th></tr></thead>
+          <tbody data-parts-body></tbody>
+        </table>
+      </div>
+      <figure class="parts-view" data-parts-view>
+        <div class="view-frame">
+          <div class="view-bar"><span class="view-dot"></span><b data-view-title></b><span class="view-no" data-view-no></span></div>
+          <div class="view-img"><img data-view-img alt="" width="1440" height="900" decoding="async"></div>
+        </div>
+        <figcaption>截图在预览模式下录制，使用演示数据。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- 图签：下载 -->
+  <section class="sheet sheet-last" id="titleblock" aria-labelledby="h-dl">
+    <header class="sheet-head">
+      <div class="figno"><b>图签</b><span>下载</span></div>
+      <h2 id="h-dl">把它装到你的电脑上。</h2>
+    </header>
+    <div class="tb" data-tb></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <p><span data-pi-small></span>OMP Studio 以 MIT 许可发布。Runtime 来自 <a href="https://github.com/can1357/oh-my-pi" rel="noopener">oh-my-pi</a>（MIT；Pi by Mario Zechner，omp by Can Bölük）。</p>
+  <p>本页所有界面画面都在预览模式下录制或绘制，使用演示数据。</p>
+  <p><a href="https://github.com/the-snowpear/omp-studio" rel="noopener" data-gh>GitHub 仓库</a></p>
+</footer>
+
+<script type="module" src="./main.ts"></script>
+</body>
 </html>
