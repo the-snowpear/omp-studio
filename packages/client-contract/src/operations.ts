@@ -579,7 +579,7 @@ interface CoreCommandInputMap {
    */
   "runtime.ensure": { readonly force?: boolean };
   /** Start a fresh Runtime session in the active workspace. */
-  "session.create": { readonly noContextFiles?: boolean };
+  "session.create": { readonly noContextFiles?: boolean; readonly model?: string };
   /** Resume a thread from history or the home page. */
   "session.resume": { readonly threadId: ThreadId; readonly model?: string };
   /** Drop a thread. Destructive: the Host issues a one-time confirmation. */

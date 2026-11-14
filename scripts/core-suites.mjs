@@ -51,6 +51,7 @@ export const CORE_RENDERER_SUITES = [
   "src/conversationWorkspace/snap.test.ts",
   "src/conversationWorkspace/Workspace.integration.test.tsx",
   "src/conversationWorkspace/residency.test.tsx",
+  "src/App.modelSelection.test.tsx",
   "src/composer/ChipComposer.test.tsx",
   "src/composer/dispatch.test.ts",
   "src/composer/serialize.test.ts",

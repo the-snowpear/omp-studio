@@ -3538,7 +3538,7 @@ export class StudioHostClientFacade implements ClientTransport {
     const input = request.input;
     switch (commandName) {
       case "session.create":
-        void this.#runSemanticCommand(() => service.create!(input as { noContextFiles?: boolean }), request.requestId, commandName);
+        void this.#runSemanticCommand(() => service.create!(input as CommandInput<"session.create">), request.requestId, commandName);
         break;
       case "session.resume":
       case "session.drop": {
@@ -3588,9 +3588,10 @@ export class StudioHostClientFacade implements ClientTransport {
     input: unknown,
   ): void {
     if (commandName === "session.create") {
-      if (input === null || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => key !== "noContextFiles") || ("noContextFiles" in input && typeof input.noContextFiles !== "boolean")) {
+      if (input === null || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => key !== "noContextFiles" && key !== "model") || ("noContextFiles" in input && typeof input.noContextFiles !== "boolean")) {
         throw clientError("INVALID_ARGUMENT", "Choose a boolean noContextFiles startup option");
       }
+      if ("model" in input && input.model !== undefined && (typeof input.model !== "string" || input.model.length > 512 || !/^[^\s\u0000-\u001f-][^\u0000-\u001f]*\/[^\u0000-\u001f]+$/u.test(input.model))) throw clientError("INVALID_ARGUMENT", "Startup requires a provider/model selector");
       return;
     }
     if (commandName === "session.resume" || commandName === "session.drop") {

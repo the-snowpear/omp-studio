@@ -1515,11 +1515,11 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         if (sessionCreateWaitRef.current === pending) sessionCreateWaitRef.current = null;
       });
     sessionCreateWaitRef.current = pending;
-  }, [dock.store, commitDockSelection, setSelectedProvisionalSessionId]);
-  const ensureNewSession = useCallback(() => {
+  }, [dock.store, commitDockSelection]);
+  const ensureNewSession = useCallback((model?: string) => {
     if (previewMode.preview || sessionCreateWaitRef.current) return;
     runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
-      const handle = await client.command("session.create", {});
+      const handle = await client.command("session.create", model === undefined ? {} : { model });
       const created = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
       refreshSessionTitles();
       return created;

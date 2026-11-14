@@ -258,7 +258,7 @@ export function createDesktopSemanticCommands(options: {
       if (options.switchSession === undefined) {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Fresh Runtime sessions are not available");
       }
-      let next = await options.switchSession({ kind: "fresh", ...(input?.noContextFiles === undefined ? {} : { noContextFiles: input.noContextFiles }) });
+      let next = await options.switchSession({ kind: "fresh", ...(input?.noContextFiles === undefined ? {} : { noContextFiles: input.noContextFiles }), ...(input?.model === undefined ? {} : { model: input.model }) });
       if (next?.controller.publication()?.snapshot === undefined && options.ensureRuntime !== undefined) {
         next = (await options.ensureRuntime()) ?? next;
       }

@@ -86,10 +86,13 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
         const known = capabilities ?? published;
         if (known) return known as never;
         const generation = capabilitiesGeneration;
-        capabilitiesRead ??= target.query("capabilities.get", {}).then(manifest => {
-          if (generation === capabilitiesGeneration) capabilities = manifest;
-          return manifest;
-        }).finally(() => { capabilitiesRead = undefined; });
+        if (!capabilitiesRead) {
+          const read = target.query("capabilities.get", {}).then(manifest => {
+            if (generation === capabilitiesGeneration) capabilities = manifest;
+            return manifest;
+          }).finally(() => { if (capabilitiesRead === read) capabilitiesRead = undefined; });
+          capabilitiesRead = read;
+        }
         return await capabilitiesRead as never;
       }
       const epoch = project?.owner.epoch;
@@ -111,8 +114,14 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
     subscribe: (scope, listener) => { const subscription = { scope, listener }; subscriptions.add(subscription); return () => { subscriptions.delete(subscription); }; },
     getState: () => value?.getState?.() ?? initial,
     onState: listener => { stateListeners.add(listener); return () => { stateListeners.delete(listener); }; },
-    resync: async () => { const target = await ready(); const result = await target.bootstrap(); adoptBootstrapManifest(result.capabilityManifest); initializations.set(target, Promise.resolve(result)); return result; },
-    transportLost: reason => { capabilities = undefined; project?.owner.invalidate(); if (value) { initializations.delete(value); value.transportLost?.(reason); } },
+    resync: async () => {
+      const target = await ready(), generation = capabilitiesGeneration;
+      const result = await target.bootstrap();
+      if (generation === capabilitiesGeneration) adoptBootstrapManifest(result.capabilityManifest);
+      initializations.set(target, Promise.resolve(result));
+      return result;
+    },
+    transportLost: reason => { invalidateCapabilities(); project?.owner.invalidate(); if (value) { initializations.delete(value); value.transportLost?.(reason); } },
     close: async () => { if (closed) return; closed = true; releaseBody(); releaseProject?.(); offEvents?.(); offState?.(); subscriptions.clear(); stateListeners.clear(); if (owned) await value?.close(); },
   };
   bindBodyReady(client, () => {

@@ -213,7 +213,7 @@ export interface DesktopRuntimeSessionContext {
  */
 export interface DesktopRuntimeSessionPort {
   sessionFor?(sessionId: string): DesktopRuntimeSession | undefined;
-  openContextSession?(workspace: { workspaceId: string; cwd: string }, intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean }): Promise<DesktopRuntimeSession | undefined>;
+  openContextSession?(workspace: { workspaceId: string; cwd: string }, intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean; model?: string }): Promise<DesktopRuntimeSession | undefined>;
   /** True when switching the active view keeps sibling Runtime Workers resident. */
   readonly supportsConcurrentSessions?: boolean;
   openEvaluation?(workspace: { workspaceId: string; cwd: string }): Promise<DesktopRuntimeSession | undefined>;
@@ -264,7 +264,7 @@ export interface DesktopRuntimeSessionPort {
    * (`resume`) or a fresh process (`fresh`). Increments the Runtime epoch.
    * On launch failure the port restores the previous session when possible.
    */
-  switchSession?(intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean }): Promise<DesktopRuntimeSession | undefined>;
+  switchSession?(intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean; model?: string }): Promise<DesktopRuntimeSession | undefined>;
   /**
    * Apply the tool approval mode across resident Runtimes (plan §5.3): the
    * active Runtime persists the mode to the OMP global configuration, every
@@ -1087,9 +1087,18 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
   };
   const open = async (intent: Parameters<NonNullable<DesktopRuntimeSessionPort["openContextSession"]>>[1]) => {
     root.runtimeTouched.current = true;
-    const session = await pool.openContextSession!(workspace.current, intent);
-    bind(session);
-    return session;
+    try {
+      const session = await pool.openContextSession!(workspace.current, intent);
+      if (!session) throw new Error(pool.lastUnavailable?.()?.reason ?? "Runtime did not become ready");
+      context.lastUnavailable.current = undefined;
+      clearDisconnect(context.lastDisconnect);
+      bind(session);
+      return session;
+    } catch (error) {
+      context.lastUnavailable.current = pool.lastUnavailable?.() ?? unavailableFromError(error);
+      connectionChanges.publish(undefined);
+      throw error;
+    }
   };
   const list = async () => {
     const model = await root.seams.workspaces!.list();

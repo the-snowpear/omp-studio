@@ -136,7 +136,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 图片预览 | `composer/ImagePreview.tsx`；桌面 `chrome-image.ts` | 缩略图点击预览；复制/保存走 `ompStudioChrome`，不是 Host |
 | slash 命令菜单 | `composer/commands.ts`、`CommandMenu.tsx` | 解析后走语义 command；typed 名必须在 `operations.ts` / IPC `COMMAND_NAMES`。`/clear` → `session.clearContext` → facade `#commandP4` → overlay `clearContext`；`/drop` 补当前 `threadId` 后走 Host `session.drop` |
 | @ 提及 | `composer/mentions.ts` | `workspace.fileTree`、`agents.definitions.get`、查询非空时 `skills.get` |
-| 模型 / 模式选择 | `ComposerModelPicker.tsx`、`ComposerModePicker.tsx` | `session.model.set`、`session.thinking.set`、plan/vibe |
+| 模型 / 模式选择 | `ComposerModelPicker.tsx`、`ComposerModePicker.tsx`；`WorkbenchCanvas.tsx` 准备目标会话 | `session.model.set`、`session.thinking.set`、plan/vibe；冷会话选择模型先通过 `session.create` / `session.resume` 携带启动模型，再执行切换 |
 | 消息队列条 | `MessageQueueBar.tsx`、`composer/queueEdit.ts`、`composer/dispatch.ts`（`composerOwnerSessionId` / `composerRunningForTarget`） | 流式 Enter 本地排队（按 session 隔离），idle 后 `core.prompt`；会话归属由 `composer/dispatch.ts` 判定：新建会话 `session.create` 回执落地前快照仍指向旧会话，此时 Enter 不进排队，而是等新会话创建后发送；第一条等待创建期间再次 Enter 保留输入框草稿，同步 dispatch 锁阻止同帧重复发送。草稿与侧栏当前行也不归到旧会话；「插入纠偏」`core.steer`；`/queue` 为 `queue.enqueue`，带图片时改 `core.followUp`。编辑在 Composer 内进行，条目留队；编辑队首时暂停 flush |
 | Runtime 已提交队列 | `composer/RuntimeQueueBar.tsx`、`preview/runtimeQueuePreview.ts` | `session.queue.get/remove/promote/edit/restore`；原生对象 ID 区分重复正文；编辑保留图片及隐藏上下文；Studio 中止后保留原生组，显式恢复才排队；真实模式不回填演示 |
 | 历史会话模型恢复 | `models/SessionModelRecovery.tsx` | 原生 `session.restore.inspect` 只读检查；显式选择后 Host `session.resume` 携带 model，Desktop 将 `--model` 传给目标 Worker；失败保留已有 Worker |

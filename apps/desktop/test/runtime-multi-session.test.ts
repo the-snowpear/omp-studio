@@ -166,6 +166,23 @@ const context = {
 const WORKSPACE_A = { workspaceId: "workspace-a", cwd: "C:/workspace" };
 const WORKSPACE_B = { workspaceId: "workspace-b", cwd: "C:/other" };
 
+test("new conversation Workers receive the explicitly selected model at launch", async () => {
+  const h = createHarness();
+  const selected: Array<string | undefined> = [];
+  const factory = fakeWorkerFactory(h.state);
+  const port = createDesktopRuntimeSessionPort({
+    ownerId: "model-selection-test", sessionLeaseStore: new InMemorySessionLeaseStore(),
+    workerPortFactory: input => { selected.push(input.model); return factory(input); },
+  });
+  try {
+    await port.start(context);
+    await port.openContextSession!(WORKSPACE_B, { kind: "fresh", model: "test/chosen" });
+    await port.switchSession!({ kind: "fresh", model: "test/other" });
+    assert.deepEqual(selected, [undefined, "test/chosen", "test/other"]);
+    assert.equal(h.state.launchedIn[1]?.workspaceId, WORKSPACE_B.workspaceId);
+  } finally { await port.stop(); }
+});
+
 test("opening background conversation contexts preserves foreground and each worker workspace", async () => {
   const { port, state } = createHarness();
   try {

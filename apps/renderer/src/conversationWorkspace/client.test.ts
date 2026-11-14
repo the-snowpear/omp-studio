@@ -115,4 +115,51 @@ describe("conversation resource lifetime", () => {
     await client.close();
     expect(owned.close).toHaveBeenCalledOnce();
   });
+  it("keeps the current Runtime capability read shared when an older read finishes", async () => {
+    const owned = target();
+    const empty = { ...contractFixtures.bootstrap.capabilityManifest, capabilities: [] };
+    const live = structuredClone(contractFixtures.bootstrap.capabilityManifest);
+    owned.bootstrap.mockResolvedValue({ ...structuredClone(contractFixtures.bootstrap), capabilityManifest: empty });
+    let emit: (event: import("@omp-studio/client-contract").ClientEvent) => void = () => {};
+    vi.mocked(owned.subscribe).mockImplementation(((_scope: unknown, listener: typeof emit) => { emit = listener; return () => {}; }) as never);
+    let finishOld!: (manifest: typeof live) => void, finishCurrent!: (manifest: typeof live) => void;
+    vi.mocked(owned.query)
+      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }) as never)
+      .mockImplementationOnce(() => new Promise(resolve => { finishCurrent = resolve; }) as never);
+    const client = createConversationClient(async () => ({ client: owned, owned: true }));
+    await client.bootstrap();
+    emit({ kind: "runtime.changed" } as never);
+    const oldRead = client.query("capabilities.get", {});
+    await vi.waitFor(() => expect(owned.query).toHaveBeenCalledTimes(1));
+    client.transportLost!("reconnecting");
+    const currentRead = client.query("capabilities.get", {});
+    await vi.waitFor(() => expect(owned.query).toHaveBeenCalledTimes(2));
+    finishOld(empty);
+    await oldRead;
+    const sharedRead = client.query("capabilities.get", {});
+    finishCurrent(live);
+    expect(await currentRead).toEqual(live);
+    expect(await sharedRead).toEqual(live);
+    expect(owned.query).toHaveBeenCalledTimes(2);
+    expect(await client.query("capabilities.get", {})).toEqual(live);
+    await client.close();
+  });
+  it("refreshes model capabilities when Runtime changes during a resync", async () => {
+    const owned = target();
+    const empty = { ...structuredClone(contractFixtures.bootstrap), capabilityManifest: { ...contractFixtures.bootstrap.capabilityManifest, capabilities: [] } };
+    owned.bootstrap.mockResolvedValue(empty);
+    let emit: (event: import("@omp-studio/client-contract").ClientEvent) => void = () => {};
+    vi.mocked(owned.subscribe).mockImplementation(((_scope: unknown, listener: typeof emit) => { emit = listener; return () => {}; }) as never);
+    const client = createConversationClient(async () => ({ client: owned, owned: true }));
+    await client.bootstrap();
+    owned.bootstrap.mockImplementationOnce(async () => {
+      emit({ kind: "runtime.changed", connection: { status: "connected", classification: "managed" } } as never);
+      return empty;
+    });
+    vi.mocked(owned.query).mockResolvedValue(contractFixtures.bootstrap.capabilityManifest as never);
+    await resyncConversationClient(client);
+    expect(await client.query("capabilities.get", {})).toEqual(contractFixtures.bootstrap.capabilityManifest);
+    expect(owned.query).toHaveBeenCalledTimes(1);
+    await client.close();
+  });
 });
