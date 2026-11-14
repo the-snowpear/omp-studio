@@ -1,6 +1,15 @@
 # tmux 控制模式（`tmux -C`）接入计划
 
-立项：2026-11-14。状态：**计划，未开工**。本文写给执行 agent：按 §6 的里程碑顺序逐个实现、逐个提交，每一步都有改动文件、实现要点、验收标准和检查命令。动手前先读一遍 `AGENTS.md` 的「工作方式」「防御性代码与测试的尺度」「预览模式」「验证」几节，本文不重复那些约定。
+立项：2026-11-14。状态：**实施中，M0 抓包与吞屏修复完成**。实施工作树：`.claude/worktrees/tmux-control-mode`，分支 `codex/tmux-control-mode`，基于任务开始时的 `0.2.0` 提交 `6c2be11`。本文是实施依据，下面的抓包修订优先于原方案示例。
+
+### M0 实测修订（2026-11-14）
+
+- 经真实 `ssh -T` 抓取主机 tmux 3.4，以及临时 Ubuntu 22.04 / Debian testing 容器的 tmux 3.2a / 3.7c。原始字节见 `apps/desktop/test/fixtures/tmux/`，可用 `scripts/tmux-transcript.mjs --ssh <alias> [--container <name>]` 重现；使用独立随机 socket。
+- 三个版本均支持无 tty 控制连接、启动应答块、四参数 `%layout-change`、可见缩放布局、`pause-after`、订阅和空行 detach。
+- **3.2a 不支持按窗口的 `refresh-client -C @id:WxH`**（返回 `bad size argument`）。产品统一使用 `refresh-client -C WxH`，同一连接的标签共用 Studio 终端视口，不新增版本降级分支。
+- 远端非登录环境可能是 C locale。统一用 **`tmux -u -C`** 强制 UTF-8；否则 tmux 的命令输出会将分隔用的 tab 改为 `_`。列会话也使用 `tmux -u list-sessions`。
+- 单引号只阻止命令解析阶段的展开。`rename-window` 自身仍会展开格式，所以重命名时另将 `#` 转成 `##`，避免执行 `#(…)` 或展开 `#{…}`。
+- `-CC` 提示由 Renderer 的 `controlMode` 状态翻译呈现，不把翻译后的文字写入存储的通用丢失通知。普通 DCS 原样交给 xterm，Sixel 继续解码。
 
 ---
 

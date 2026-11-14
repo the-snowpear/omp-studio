@@ -54,11 +54,13 @@ export function decodeSixel(body: string): TerminalGraphic {
 
 export class TerminalGraphicsDecoder {
   private pending = "";
+  private controlMode = false;
   private kitty = "";
   private kittyOptions: Record<string, string> = {};
-  push(chunk: string): { text: string; images: TerminalGraphic[]; errors: string[] } {
-    if (!this.pending && !chunk.includes("\x1b")) return { text: chunk, images: [], errors: [] };
+  push(chunk: string): { text: string; images: TerminalGraphic[]; errors: string[]; controlMode?: "enter" | "exit" } {
+    if (!this.controlMode && !this.pending && !chunk.includes("\x1b")) return { text: chunk, images: [], errors: [] };
     const text: string[] = [], images: TerminalGraphic[] = [], errors: string[] = [];
+    let controlMode: "enter" | "exit" | undefined;
     // Main batches ordinary logs up to 2 MiB (and can overshoot by one PTY
     // chunk). Bound graphic parsing, not the size of the text transport batch.
     for (let at = 0; at < chunk.length; at += 64 * 1024) {
@@ -66,19 +68,42 @@ export class TerminalGraphicsDecoder {
       text.push(result.text);
       images.push(...result.images);
       errors.push(...result.errors);
+      if (result.controlMode) controlMode = result.controlMode;
     }
-    return { text: text.join(""), images, errors };
+    return { text: text.join(""), images, errors, ...(controlMode ? { controlMode } : {}) };
   }
-  private decode(chunk: string): { text: string; images: TerminalGraphic[]; errors: string[] } {
-    const result = { text: "", images: [] as TerminalGraphic[], errors: [] as string[] };
+  private decode(chunk: string) {
+    const result: { text: string; images: TerminalGraphic[]; errors: string[]; controlMode?: "enter" | "exit" } = { text: "", images: [], errors: [] };
     if (chunk.length + this.pending.length > GRAPHICS_MAX_BYTES) { this.pending = ""; this.kitty = ""; result.errors.push("Terminal graphics input exceeds limit"); return result; }
     this.pending += chunk;
     while (this.pending.length) {
+      if (this.controlMode) {
+        const end = this.pending.indexOf("\x1b\\");
+        if (end < 0) { this.pending = this.pending.endsWith("\x1b") ? "\x1b" : ""; break; }
+        this.pending = this.pending.slice(end + 2);
+        this.controlMode = false;
+        result.controlMode = "exit";
+        continue;
+      }
       const start = this.pending.indexOf("\x1b");
       if (start < 0) { result.text += this.pending; this.pending = ""; break; }
       result.text += this.pending.slice(0, start); this.pending = this.pending.slice(start);
       if (this.pending.length === 1) break;
       if (this.pending[1] !== "_" && this.pending[1] !== "P") { result.text += "\x1b"; this.pending = this.pending.slice(1); continue; }
+      if (this.pending[1] === "P") {
+        if (this.pending.startsWith("\x1bP1000p")) {
+          this.pending = this.pending.slice(7);
+          this.controlMode = true;
+          result.controlMode = "enter";
+          continue;
+        }
+        if (/^\x1bP[0-9;]*$/.test(this.pending)) break;
+        if (!/^\x1bP[0-9;]*q/.test(this.pending)) {
+          result.text += "\x1bP";
+          this.pending = this.pending.slice(2);
+          continue;
+        }
+      }
       const end = this.pending.indexOf("\x1b\\", 2); if (end < 0) break;
       const frame = this.pending.slice(0, end + 2); this.pending = this.pending.slice(end + 2);
       try {

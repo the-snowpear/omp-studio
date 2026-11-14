@@ -2613,6 +2613,10 @@ const zhRaw = {
     "overwriteAndAsk": "覆盖本轮并提问"
   },
   "terminal": {
+    "tmux": {
+      "controlNotice": "此终端进入了 tmux -CC 控制模式。SSH 工作区请使用「附加 tmux…」。",
+      "exitControl": "退出控制模式"
+    },
     "title": "终端",
     "clear": "清屏",
     "newTerminal": "新建终端",

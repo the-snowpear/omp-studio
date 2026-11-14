@@ -23,6 +23,7 @@ interface TerminalState {
   graphicsErrors: Readonly<Record<string, string>>;
   /** Explicit, user-visible loss notices per terminal — never a silent drop. */
   notices: Readonly<Record<string, string>>;
+  controlMode: Readonly<Record<string, boolean>>;
 }
 
 /**
@@ -148,7 +149,7 @@ export class TerminalSessions {
    */
   readonly #removing = new Set<string>();
   #ackScheduled = false;
-  #state: TerminalState = { sessions: [], graphics: {}, graphicsErrors: {}, notices: {} };
+  #state: TerminalState = { sessions: [], graphics: {}, graphicsErrors: {}, notices: {}, controlMode: {} };
   #off: (() => void) | undefined;
   #creating = 0;
   #closed = false;
@@ -192,7 +193,8 @@ export class TerminalSessions {
     const { [id]: _graphic, ...graphics } = this.#state.graphics;
     const { [id]: _error, ...graphicsErrors } = this.#state.graphicsErrors;
     const { [id]: _notice, ...notices } = this.#state.notices;
-    this.#publish({ ...this.#state, sessions: this.#state.sessions.filter(session => session.id !== id), graphics, graphicsErrors, notices });
+    const { [id]: _control, ...controlMode } = this.#state.controlMode;
+    this.#publish({ ...this.#state, sessions: this.#state.sessions.filter(session => session.id !== id), graphics, graphicsErrors, notices, controlMode });
   }
 
   close(): void {
@@ -231,6 +233,10 @@ export class TerminalSessions {
       let decoder = this.#decoders.get(event.id);
       if (!decoder) { decoder = new TerminalGraphicsDecoder(); this.#decoders.set(event.id, decoder); }
       const decoded = decoder.push(event.data);
+      if (decoded.controlMode) {
+        const { [event.id]: _previous, ...controlMode } = this.#state.controlMode;
+        this.#publish({ ...this.#state, controlMode: decoded.controlMode === "enter" ? { ...controlMode, [event.id]: true } : controlMode });
+      }
       if (decoded.images.length || decoded.errors.length) this.#publish({
         ...this.#state,
         graphics: decoded.images.length ? { ...this.#state.graphics, [event.id]: [...(this.#state.graphics[event.id] ?? []), ...decoded.images].slice(-4) } : this.#state.graphics,

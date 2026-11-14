@@ -38,7 +38,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
   const executionTarget = useExecutionTarget();
   const { preview } = usePreviewMode();
   const targetId = preview ? null : executionTarget.id;
-  const { store, sessions: allSessions, graphics, graphicsErrors, notices } = useTerminalSessions();
+  const { store, sessions: allSessions, graphics, graphicsErrors, notices, controlMode } = useTerminalSessions();
   const ownerKey = JSON.stringify([targetId, workspaceId ?? null, conversationId ?? sessionId ?? null]);
   const sessions = allSessions.filter(session => session.targetId === targetId && (conversationId ? session.conversationId === conversationId : session.workspaceId === workspaceId && session.sessionId === sessionId));
   const [activeId, setActiveId] = useState<string | null>(() => store.activeIds.get(ownerKey) ?? null);
@@ -133,6 +133,10 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
             {executionTarget.id ? <p className="muted small">SSH 终端暂不支持本机录制；关闭标签会结束该终端。</p> : <TerminalRecordingControls key={active.id} api={api} id={active.id} visible={visible} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />}
             {error ? <p role="alert" className="muted small">{error}</p> : null}
             {notices[active.id] ? <p role="status" className="muted small">{notices[active.id]}</p> : null}
+            {controlMode[active.id] ? <div role="status" className="muted small">
+              <p>{t("terminal.tmux.controlNotice")}</p>
+              <button type="button" className="btn" onClick={() => void api.write(active.id, "\n").catch(cause => setError(String(cause)))}>{t("terminal.tmux.exitControl")}</button>
+            </div> : null}
             {(graphics[active.id]?.length || graphicsErrors[active.id]) ? <div style={{ maxHeight: 240, overflow: "auto" }} aria-label="Terminal images / 终端图片">
               {graphics[active.id]?.map((image, index) => <TerminalGraphicView key={index} image={image} />)}
               {graphicsErrors[active.id] ? <p role="status">{graphicsErrors[active.id]}</p> : null}

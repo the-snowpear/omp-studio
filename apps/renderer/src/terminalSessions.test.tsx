@@ -281,6 +281,35 @@ describe("unmounted terminal: Main's watermark drives the back-pressure", () => 
 
 // ---- Batches that occupy no backlog ---------------------------------------
 
+it("streams past tmux -CC without retaining protocol output and resumes after ST", async () => {
+  const { store, api, id } = await storeWith(null);
+  const host = fakeScreen();
+  store.attachHost(id, host.host);
+  api.emit(id, "\x1bP10");
+  api.emit(id, "00p%begin 1 1 0\r\n%end 1 1 0\r\n");
+  expect(store.snapshot().controlMode[id]).toBe(true);
+  api.emit(id, "%output %1 ignored\n".repeat(150_000));
+  expect(host.written()).toBe("");
+  expect(store.snapshot().graphicsErrors[id]).toBeUndefined();
+  api.emit(id, "\x1b");
+  api.emit(id, "\\$ ");
+  expect(store.snapshot().controlMode[id]).toBeUndefined();
+  expect(host.written()).toBe("$ ");
+  host.fireCallbacks();
+  await settle();
+  expect(api.ackedBytes(id)).toBeGreaterThan(2 * 1024 * 1024);
+});
+
+it("still decodes Sixel and passes other DCS through without waiting for ST", async () => {
+  const { store, api, id } = await storeWith(null);
+  const host = fakeScreen();
+  store.attachHost(id, host.host);
+  api.emit(id, "\x1bPq~\x1b\\");
+  expect(store.snapshot().graphics[id]?.[0]?.source).toBe("sixel");
+  api.emit(id, "\x1bP>|tmux");
+  expect(host.written()).toBe("\x1bP>|tmux");
+});
+
 describe("zero-text batches", () => {
   it("acknowledges a graphics-only batch immediately, even without a host", async () => {
     const { store, api, id } = await storeWith(null);

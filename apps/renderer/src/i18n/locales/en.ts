@@ -2613,6 +2613,10 @@ export const en: LocaleDictionary = {
     "overwriteAndAsk": "Overwrite current turn and ask"
   },
   "terminal": {
+    "tmux": {
+      "controlNotice": "This terminal entered tmux -CC control mode. Use Attach tmux… in an SSH workspace.",
+      "exitControl": "Exit control mode"
+    },
     "title": "Terminal",
     "clear": "Clear",
     "newTerminal": "New Terminal",
