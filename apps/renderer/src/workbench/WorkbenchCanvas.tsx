@@ -7,6 +7,7 @@ import type { BrowserElementReference } from "@omp-studio/studio-protocol";
 import { EnvironmentDockCard } from "../environment/EnvironmentCard";
 import { ContextDockPanel } from "../conversation/ContextCard";
 import { PanelRegistration } from "../dock/PanelRegistration";
+import { FileBrowserDock } from "../fileBrowser/FileBrowserDock";
 import { revealMainWindow } from "../dock/SurfaceContext";
 import { DockPanel, useAgentDockLayout, useDockEngine } from "../dock/DockContext";
 import { DockGroupRegion, DockRail, DockCapsules, DockKeyboard } from "../dock/DockRegions";
@@ -2998,6 +2999,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}
           onRevealSource={target => target.toolCallId === undefined ? Promise.resolve(false) : revealConversationTarget(convoScrollerRef.current, { toolCallId: target.toolCallId })} />}</DockPanel>)}
       <FileDockInstances workspaceId={workspaceId ? String(workspaceId) : undefined} targetId={executionTarget.id} onSettings={() => { setSettingsIntent("maintenance", "Office 文档预览"); onRoute("settings"); }} actions={fileViewerActions} />
+      <FileBrowserDock targetId={executionTarget.id} targetName={executionTarget.name} actions={fileViewerActions} />
       <BrowserDockInstances client={client} sessionId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} capabilities={capabilities} remote={!!executionTarget.id} onReferences={insertBrowserReferences} />
       <ToastHost message={statusToast} icon="info" onDismiss={() => setStatusToast(null)} />
       {treeConfirm.dialog}

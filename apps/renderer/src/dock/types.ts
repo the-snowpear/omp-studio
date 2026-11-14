@@ -1,10 +1,10 @@
 import type { ReactNode, PointerEvent } from "react";
 import type { IconName } from "../icons";
 
-export const PANEL_IDS = ["files", "changes", "git", "git-quick", "browser", "computer", "agents", "agent-detail", "environment", "context", "context-viewer", "annotations", "token-counter", "terminal", "jobs", "problems", "tests", "output", "logs", "pvlogs", "btw"] as const;
+export const PANEL_IDS = ["files", "file-browser", "changes", "git", "git-quick", "browser", "computer", "agents", "agent-detail", "environment", "context", "context-viewer", "annotations", "token-counter", "terminal", "jobs", "problems", "tests", "output", "logs", "pvlogs", "btw"] as const;
 export type FixedPanelId = typeof PANEL_IDS[number];
 /** Tools that may be open once per dock region; a second region gets its own instance. */
-export const REPEATABLE_PANEL_IDS = ["files", "changes", "git", "agents", "jobs", "environment", "token-counter", "problems", "tests", "output", "logs", "pvlogs"] as const;
+export const REPEATABLE_PANEL_IDS = ["files", "file-browser", "changes", "git", "agents", "jobs", "environment", "token-counter", "problems", "tests", "output", "logs", "pvlogs"] as const;
 export type RepeatablePanelId = typeof REPEATABLE_PANEL_IDS[number];
 export type ScopedPanelId = `${RepeatablePanelId}@${number}`;
 export const isRepeatablePanelId = (id: string): id is RepeatablePanelId => (REPEATABLE_PANEL_IDS as readonly string[]).includes(id);

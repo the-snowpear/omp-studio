@@ -20,6 +20,7 @@ type ToolCopy = { name: readonly [string, string]; detail: readonly [string, str
 
 const TOOL_COPY: Partial<Record<PanelId, ToolCopy>> = {
   files: { name: ["文件", "Files"], detail: ["浏览工作区目录与文件", "Browse workspace folders and files"], tint: "orange" },
+  "file-browser": { name: ["文件浏览器", "File Browser"], detail: ["浏览整台电脑的文件", "Browse files across the computer"], tint: "indigo" },
   browser: { name: ["浏览器", "Browser"], detail: ["浏览网页、预览本地应用", "Browse the web and preview apps"], tint: "blue" },
   terminal: { name: ["终端", "Terminal"], detail: ["运行命令并查看输出", "Run commands and read the output"], tint: "violet" },
   changes: { name: ["变更", "Changes"], detail: ["审查代码变更与差异", "Review code changes and diffs"], tint: "green" },

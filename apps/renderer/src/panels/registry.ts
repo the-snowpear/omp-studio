@@ -2,6 +2,7 @@ import type { PanelDefinition } from "../dock/types";
 
 export const WORKBENCH_PANELS: readonly PanelDefinition[] = [
   { id: "files", title: "Explorer", icon: "file-tree" },
+  { id: "file-browser", title: "文件浏览器", menuTitle: "文件浏览器 · File Browser", icon: "drive", minHeight: 260, initialHeight: 420 },
   { id: "changes", title: "Changes", icon: "diff", meter: true },
   { id: "git", title: "Git", icon: "branch", meter: true },
   { id: "git-quick", title: "Git", menuTitle: "Git 快捷卡", icon: "branch", initialHeight: 320, meter: true },
