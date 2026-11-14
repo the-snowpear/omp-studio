@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> 本页介绍的窗口化工作台属于 **0.2.0**，目前在 [`0.2.0`](https://github.com/the-snowpear/omp-studio/tree/0.2.0) 分支开发，尚未发布正式安装包。[Releases](https://github.com/the-snowpear/omp-studio/releases) 中的最新正式版仍是 0.1.x。各项变化与当前验证范围见 [CHANGELOG](CHANGELOG.md#unreleased)。
+> 窗口化工作台已随 **0.2.0** 发布。当前 [`0.2.0`](https://github.com/the-snowpear/omp-studio/tree/0.2.0) 开发分支继续准备 OMP 18.19.0 与 Linux 桌面；Linux 安装包将随下一版正式 Release 提供。实际可下载版本以 [Releases](https://github.com/the-snowpear/omp-studio/releases) 为准，开发变更见 [CHANGELOG](CHANGELOG.md#unreleased)。
 
 <table>
 <tr>
@@ -272,6 +272,7 @@ Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管�
 | **Windows x64** | `OMP-Studio-Setup-<版本>-windows-x64.exe` | 安装器，支持应用内更新 |
 | **Windows ARM64** | `OMP-Studio-Setup-<版本>-windows-arm64.exe` | 骁龙等 ARM 设备 |
 | **macOS Apple Silicon** | `OMP-Studio-<版本>-macos-arm64.dmg` | macOS 13+；ad hoc 签名，尚未公证 |
+| **Linux x64（下一版）** | `OMP-Studio-<版本>-linux-x64.deb` / `.AppImage` | Ubuntu 24.04 / glibc 2.39+；[安装与沙箱说明](docs/linux.md) |
 
 👉 前往 **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases)** 下载。具体文件名以 Release 页为准。Runtime 与更新目录使用 Ed25519 签名；Windows 安装包没有 Authenticode 签名。
 
@@ -321,7 +322,7 @@ npm run preview
 
 Windows 也可以直接双击仓库根目录的 `preview.cmd`；macOS 需要先安装 Xcode Command Line Tools。
 
-Linux 已接入源码预览，环境准备与沙箱配置见 [Linux 客户端说明](docs/linux.md)。目前没有 Linux 桌面安装包；Release 中的 Linux remote 压缩包用于 SSH Host。
+Linux 支持源码运行与 `npm run pack:linux` 原生打包；环境、安装、更新与沙箱说明见 [Linux 客户端](docs/linux.md)。正式桌面附件为 AppImage / deb；Release 中的 Linux remote 压缩包用于 SSH Host。
 
 <details>
 <summary><b>🔌 接上真实的托管 Runtime</b>（首次较慢）</summary>

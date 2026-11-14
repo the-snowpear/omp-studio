@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFile, chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { appendFile, chmod, cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
@@ -75,6 +75,7 @@ async function until(read, accept, label) {
 async function launch(env) {
   application = await _electron.launch({
     executablePath: executable,
+    chromiumSandbox: true,
     args: [`--user-data-dir=${join(profile, "user-data")}`, `--ozone-platform=${report.display}`],
     cwd: workspace, env, timeout: 60_000,
   });
@@ -170,6 +171,7 @@ try {
   provider.closeAllConnections();
   await new Promise(done => provider.close(done));
   report.providerCalls = providerCalls;
+  await cp(join(profile, "config/omp-studio/logs"), join(output, "host-logs"), { recursive: true }).catch(() => {});
   await writeFile(join(output, "report.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 }

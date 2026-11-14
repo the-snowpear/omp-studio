@@ -65,6 +65,22 @@ npm run test:tooling
 
 普通检查使用 [项目检查入口](../AGENTS.md#验证)。安装回归包含真实 NSIS 函数、目录保留、宿主完成退出、旧版迁移、实际进程范围，以及图形向导的运行中重试、快捷方式选择和失败反馈。
 
+## Linux（x64，AppImage / deb）
+
+在原生 Ubuntu 24.04 x64 上运行 `npm run pack:linux`。复用已准备的工作区和签名 Runtime 时使用 `npm run pack:linux -- --skip-host --skip-build`；`npm run pack:linux:audit` 单独复验。
+
+`scripts/linux-bundle.mjs` 从通用 `electron-builder.yml` 派生 Linux 配置，Runtime / 公钥改放 `resources/runtime/versions` 与 `resources/runtime-keys`。输出在 `outputs/installer-linux/`：
+
+- `linux-unpacked/`：包含 Electron、Renderer、preload、原生 node-pty 和签名 Runtime；
+- `OMP-Studio-<版本>-linux-x64.AppImage`：便携安装包；
+- `OMP-Studio-<版本>-linux-x64.deb`：Ubuntu / Debian 系统安装包，注册菜单、图标与 `omp-studio` 命令。
+
+AppImage 显式覆盖 builder 的默认启动参数，保持 Chromium 沙箱启用。deb 使用 builder 的安装 / 卸载脚本配置 sandbox、AppArmor 与桌面入口，不删除用户状态。最低 glibc 为 2.39，原生模块按目标 Electron ABI 重建。
+
+`audit-linux.mjs` 分别解包两种实际分发容器，复验平台 / 版本、ELF 架构、glibc 要求、执行权限、桌面入口、Runtime 签名、资源齐备与公钥目录。源码和 GUI 测试由开发 CI 承担；Release 只构建、打包与复验资产。
+
+手动 CI `linux-package` 在 X11 / Wayland 启动安装后的程序，使用本机测试端点完成真实 Runtime 文件工具对话和原生终端检查，并验证重启与重装 / 卸载的数据保留。完整安装和开发签名说明见 [Linux 客户端](../docs/linux.md)。
+
 ## 发布 Runtime 复用
 
 桌面与六个平台远程环境共用 `.github/scripts/find-runtime.sh`，按已提交的 Runtime 输入和目标平台查找签名工件。桌面界面或安装器变化不重建未变化的 Runtime；缓存命中仍核对来源、平台、通道与签名。工件过期或 Runtime 源码变化时才重建，`rebuild_runtime` 可强制冷构建。

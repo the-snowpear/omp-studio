@@ -7,7 +7,7 @@ Public documentation for OMP Studio.
 | [../README.md](../README.md) | 中文总览 |
 | [../README.en.md](../README.en.md) | English overview |
 | [getting-started.md](getting-started.md) | Run from source |
-| [linux.md](linux.md) | Linux 源码客户端、环境、沙箱、路径与正式分发前的边界 |
+| [linux.md](linux.md) | Linux AppImage / deb 安装、更新、沙箱、源码开发与原生包验收 |
 | [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
 | [time-travel.md](time-travel.md) | Time Travel 开启、检查点、代码/对话恢复、存储与限制 |
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |

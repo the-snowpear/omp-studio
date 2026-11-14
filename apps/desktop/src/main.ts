@@ -572,7 +572,7 @@ export async function main(): Promise<void> {
       isPackaged: app.isPackaged,
       bundledVersion: app.getVersion(),
       // A macOS hot payload would live inside the signed bundle; the bundle is the only layout there.
-      forceBaseline: process.argv.includes("--omp-baseline") || process.platform === "darwin",
+      forceBaseline: process.argv.includes("--omp-baseline") || process.platform !== "win32",
       runtime: {
         electron: process.versions.electron,
         modules: process.versions.modules,

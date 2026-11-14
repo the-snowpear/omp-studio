@@ -2,11 +2,11 @@
 
 ## 项目目标
 
-OMP Studio 是 OMP Runtime / AgentSession 的桌面控制台（Windows、macOS Apple Silicon 与 Linux 源码预览）与配套 Web UI。它通过类型化的 Studio Bridge 暴露运行时能力；不要以 slash 文本、ANSI 输出解析或按键宏模拟控制。
+OMP Studio 是 OMP Runtime / AgentSession 的桌面控制台（Windows、macOS Apple Silicon 与 Linux x64）与配套 Web UI。它通过类型化的 Studio Bridge 暴露运行时能力；不要以 slash 文本、ANSI 输出解析或按键宏模拟控制。
 
 主要结构：
 
-- `apps/desktop/`：Electron 主进程与 Windows / macOS 桌面壳；平台差异集中在 `apps/desktop/src/platform/`。
+- `apps/desktop/`：Electron 主进程与 Windows / macOS / Linux 桌面壳；平台差异集中在 `apps/desktop/src/platform/`。
 - `apps/renderer/`：Vite + React 渲染进程 UI。
 - `packages/`：协议、host、客户端、transport、平台和测试工具包。
 - `omp-patch/overlay/`：Studio 自有的 Runtime 源码（`packages/coding-agent/src/studio/**` 与 `studio-*` 测试），上游没有这些路径，按普通源码维护。
@@ -165,7 +165,7 @@ Renderer 的动效只有一套：数值在 `styles/tokens.css` 的 Motion 段，
 - `npm run test:tooling`（打包、签名、更新脚本改动时运行）
 - `npm run preview`（Windows：构建后启动 Electron 预览）
 
-普通 PR / main / 0.2.0 CI 在 Windows 与 Linux x64 跑 `npm run check -- --production`：架构规则、类型、核心测试和生产包各一次；纯文档改动跳过。完整 Windows / macOS / Linux 与 Runtime 检查通过 CI 的 `full` 手动运行，性能 workflow 也只手动触发。Linux 源码 CI 不等同于 GUI 或安装包验收。发布负责打包和产物校验，不重复跑源码测试。
+普通 PR / main / 0.2.0 CI 在 Windows 与 Linux x64 跑 `npm run check -- --production`：架构规则、类型、核心测试和生产包各一次；纯文档改动跳过。完整 Windows / macOS / Linux 与 Runtime 检查通过 CI 的 `full` 手动运行，性能 workflow 也只手动触发。Linux 的 `linux-package` 手动切片负责 AppImage / deb 与 X11 / Wayland 安装验收。发布负责打包和产物校验，不重复跑源码测试或 GUI 验收。
 
 运行时/补丁专项命令见根目录 `package.json`，包括 `runtime:verify-source` 和 `omp:verify:patches`，只在相关改动或升级上游时按需运行。
 

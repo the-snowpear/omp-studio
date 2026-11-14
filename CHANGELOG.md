@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- 桌面壳支持 Linux 源码预览：XDG 状态与签名密钥目录、POSIX Host / authority lock、`xdg-open`、真实本机终端与开发者工具。保留 Chromium 沙箱；Linux 关窗走退出确认，末个浮窗关闭后恢复隐藏的工作台，不依赖托盘是否可见。更新提示不会误选 Windows 安装器，并增加 Linux x64 源码 CI。当前未提供 Linux 桌面安装包；详见 [Linux 客户端说明](docs/linux.md)（[#5](https://github.com/the-snowpear/omp-studio/issues/5)、[#22](https://github.com/the-snowpear/omp-studio/pull/22)）。
+- 新增 Linux x64 桌面客户端及 AppImage / deb 安装包，随下一版正式 Release 发布。以 Ubuntu 24.04 / glibc 2.39 为构建基线，内置签名 Runtime 和原生终端，无需另装 Node、Bun 或 Rust。应用菜单启动可发现用户 Shell 工具；保留 Chromium 沙箱，不依赖托盘隐藏工作台。桌面更新提供对应安装包下载，Runtime 继续签名在线更新。增加原生 Linux 打包、包审计、X11 / Wayland 验收与完整发布资产链路；详见 [Linux 客户端说明](docs/linux.md)（[#5](https://github.com/the-snowpear/omp-studio/issues/5)、[#22](https://github.com/the-snowpear/omp-studio/pull/22)）。
 
 ### Changed
 

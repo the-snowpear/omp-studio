@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Desktop console for OMP Runtime</strong><br>
-  Typed Studio Bridge · Electron workbench · Windows / macOS
+  Typed Studio Bridge · Electron workbench · Windows / macOS / Linux
 </p>
 
 <p align="center">
@@ -113,7 +113,7 @@ npm run preview
 
 On Windows you can also double-click `preview.cmd` at the repo root. macOS needs the Xcode Command Line Tools; the steps are otherwise the same.
 
-Linux supports a source preview; see [Linux setup](docs/linux.md) for dependencies, sandbox configuration and current limits. Linux desktop installers are not available yet; the Linux remote archives in Releases are SSH Host packages.
+Linux x64 supports source startup and native AppImage / deb packaging with `npm run pack:linux`. Installers will join the next release containing this change; 0.2.0 / 0.2.1 have no Linux desktop assets. The build targets Ubuntu 24.04 / glibc 2.39+ and bundles its signed Runtime and native PTY. Desktop upgrades use a manual installer download; Runtime updates remain available in the app. See [Linux setup](docs/linux.md). Linux remote archives in Releases remain separate SSH Host packages.
 
 Attach a real Runtime (slow the first time):
 

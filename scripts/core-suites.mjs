@@ -33,6 +33,7 @@ export const CORE_NODE_SUITES = [
   // Local file writes, Electron boundaries, installation and update recovery.
   "packages/platform-darwin/dist/test/platform-darwin.test.js",
   "apps/desktop/dist/test/desktop-paths.test.js",
+  "apps/desktop/dist/test/login-env.test.js",
   "apps/desktop/dist/test/authority-liveness.test.js",
   "apps/desktop/dist/test/app-lifecycle.test.js",
   "apps/desktop/dist/test/terminal-darwin.test.js",

@@ -28,8 +28,8 @@ npm run omp:keys          # first machine only
 npm run check
 ```
 
-Windows and Apple Silicon macOS have desktop packages; Linux supports a source
-preview (see [Linux setup](docs/linux.md)). Node.js 22+ is required. Building the
+Windows, Apple Silicon macOS and Linux x64 have native desktop packaging
+commands (see [Linux setup](docs/linux.md) for its AppImage / deb build). Node.js 22+ is required for development. Building the
 managed Runtime also needs Bun, Rust and a native C/C++ toolchain for the target
 platform; the Runtime development documentation records the pinned versions.
 

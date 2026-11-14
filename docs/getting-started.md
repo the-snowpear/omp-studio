@@ -71,11 +71,16 @@ source of truth is `omp-patch/overlay/` plus `omp-patch/patches/`.
 Host logs: `%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`; on macOS
 `~/Library/Application Support/omp-studio/logs/host-YYYY-MM-DD.log`.
 
-## Linux source preview
+## Linux desktop
 
-Linux source startup, Runtime preparation, XDG paths and sandbox setup are
-documented in [Linux client setup](linux.md). There is no Linux desktop installer
-or desktop update feed yet; Linux remote-host archives are for SSH environments.
+Linux x64 AppImage / deb packages join the next release containing the Linux
+client. The native build targets Ubuntu 24.04 / glibc 2.39+ and includes its signed
+Runtime, Electron and PTY; end users do not need Node, Bun or Rust. Use deb on
+Ubuntu / Debian, or AppImage where FUSE 2 and user namespaces are available.
+Desktop upgrades use manual installer downloads; Runtime updates remain signed
+and available in the app. See [Linux setup](linux.md) for install / uninstall,
+sandbox, XDG paths, `npm run pack:linux` and package acceptance. Linux SSH Host
+archives are separate from desktop installers.
 
 ## Windows installer (unsigned)
 

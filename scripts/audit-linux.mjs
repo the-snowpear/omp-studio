@@ -29,17 +29,22 @@ function executable(path) {
 }
 
 export function requiredGlibc(text) {
-  const versions = [...text.matchAll(/\bGLIBC_(\d+)\.(\d+)\b/gu)].map(match => [Number(match[1]), Number(match[2])]);
-  versions.sort((a, b) => b[0] - a[0] || b[1] - a[1]);
-  return versions[0]?.join(".");
+  return requiredSymbolVersion(text, "GLIBC");
+}
+
+function requiredSymbolVersion(text, library) {
+  return [...text.matchAll(new RegExp(`\\b${library}_(\\d+(?:\\.\\d+)+)\\b`, "gu"))]
+    .map(match => match[1]).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0];
 }
 
 function checkGlibc(path) {
-  const required = requiredGlibc(exec("readelf", ["--version-info", path]));
-  if (required && required.localeCompare(LINUX_MIN_GLIBC, undefined, { numeric: true }) > 0) {
-    throw new Error(`${path} requires glibc ${required}; Linux installers promise ${LINUX_MIN_GLIBC}`);
+  const symbols = exec("readelf", ["--version-info", path]);
+  for (const [library, baseline] of [["GLIBC", LINUX_MIN_GLIBC], ["GLIBCXX", "3.4.32"]]) {
+    const required = requiredSymbolVersion(symbols, library);
+    if (required && required.localeCompare(baseline, undefined, { numeric: true }) > 0) {
+      throw new Error(`${path} requires ${library} ${required}; Linux installers promise ${baseline}`);
+    }
   }
-  return required;
 }
 
 async function auditAppDirectory(appPath, version, runtimeVersion) {
