@@ -13,12 +13,7 @@ import type {
 	DictationOperation,
 	DictationState,
 } from "../dictation-protocol";
-import {
-	type LiveAudioOperation,
-	type LiveAudioState,
-	validateLiveAudioOperation,
-	validateLiveAudioResult,
-} from "../live-audio-protocol";
+import { type LiveAudioOperation, type LiveAudioState } from "../live-audio-protocol";
 import { StudioLiveError, type StudioLiveService, type StudioLiveSessionFactory } from "./live-service";
 import { StudioDictationCapture } from "./dictation-capture";
 import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
@@ -387,7 +382,6 @@ export class StudioLiveAudioService {
 
 	execute(operation: LiveAudioOperation): Promise<LiveAudioState> {
 		const work = this.#operations.then(async () => {
-			validateLiveAudioOperation(operation);
 			if (this.#disposed || operation.sessionId !== this.session.sessionId)
 				throw new StudioLiveError("COMMAND_BLOCKED", "Live audio requires the active session");
 			if (operation.kind === "live.audio.prepare")
@@ -420,7 +414,6 @@ export class StudioLiveAudioService {
 				}
 			}
 			const state = this.#current()?.sessionId === operation.sessionId ? this.#state : blank(this.#available);
-			validateLiveAudioResult(operation.kind, state);
 			return structuredClone(state);
 		});
 		this.#operations = work.catch(() => {});

@@ -22,7 +22,6 @@ import {
   parseConversationRuntimeEvent,
   parseConversationOpenResult,
   parseConversationTranscriptPage,
-  parseFoundationStudioRequest,
   parseStudioEventEnvelope,
   parseStudioReceipt,
   parseStudioSnapshotResponse,
@@ -73,46 +72,6 @@ test("conversation contract freezes capability, concurrency, cursor, and mapping
   assert.equal(conversationRedactKey("tokens"), false);
   assert.equal(conversationRedactKey("tokensBefore"), false);
   assert.equal(conversationRedactKey("contextTokens"), false);
-});
-
-test("session.transcript.read parses canonical fixture and optional cursor", async () => {
-  const value: unknown = JSON.parse(await readFile(fixture("request.transcript.read.json"), "utf8"));
-  const parsed = parseFoundationStudioRequest(value);
-  assert.equal(parsed.operation.kind, "session.transcript.read");
-  if (parsed.operation.kind === "session.transcript.read") {
-    assert.equal(parsed.operation.limit, 50);
-    assert.equal(parsed.operation.cursor, undefined);
-  }
-  assert.equal(
-    parseFoundationStudioRequest({
-      ...requestBase,
-      operation: { kind: "session.transcript.read", cursor: "opaque-older", limit: 1 },
-    }).operation.kind,
-    "session.transcript.read",
-  );
-  assert.equal(
-    parseFoundationStudioRequest({
-      ...requestBase,
-      operation: { kind: "session.transcript.read" },
-    }).operation.kind,
-    "session.transcript.read",
-  );
-});
-
-test("session.transcript.read rejects illegal cursor, limit, and extra keys", () => {
-  const invalid = [
-    { kind: "session.transcript.read", cursor: "" },
-    { kind: "session.transcript.read", cursor: "x".repeat(CONVERSATION_LIMITS.CURSOR_MAX_CHARS + 1) },
-    { kind: "session.transcript.read", limit: 0 },
-    { kind: "session.transcript.read", limit: -1 },
-    { kind: "session.transcript.read", limit: 1.5 },
-    { kind: "session.transcript.read", limit: 101 },
-    { kind: "session.transcript.read", extra: true },
-    { kind: "session.transcript.read", sessionId: "must-not-appear" },
-  ];
-  for (const operation of invalid) {
-    assert.throws(() => parseFoundationStudioRequest({ ...requestBase, operation }), ContractValidationError);
-  }
 });
 
 test("transcript page fixture accepts every public item and block kind", async () => {

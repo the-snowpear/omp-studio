@@ -8,7 +8,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CommandInput, StudioClient } from "@omp-studio/client-contract";
 import {
   mediaInputArtifacts,
-  validateMediaRequest,
   type ArtifactRecord,
   type MediaDetail,
   type MediaJob,
@@ -387,8 +386,7 @@ export function MediaWorkbench({
           ([, value]) => value !== undefined,
         ),
       );
-      validateMediaRequest(request);
-      setReview(request);
+      setReview(request as MediaRequest);
     } catch (cause) {
       setError(hostErrorMessage(cause, "Invalid media request"));
     }

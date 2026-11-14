@@ -6,7 +6,6 @@ import type {
   StudioClient,
 } from "@omp-studio/client-contract";
 import {
-  validateBenchmarkSpec,
   type BenchmarkRun,
   type BenchmarkSnapshot,
   type BenchmarkSpec,
@@ -202,7 +201,6 @@ export function BenchmarkPane({
         : {}),
     };
     try {
-      validateBenchmarkSpec(spec);
       setReview(structuredClone(spec));
       setError("");
     } catch (cause) {

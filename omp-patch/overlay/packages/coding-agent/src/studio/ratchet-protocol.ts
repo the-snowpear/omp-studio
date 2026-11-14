@@ -73,14 +73,8 @@ export const RATCHET_OPERATION_KINDS = [
 export function isRatchetKind(kind: string): kind is RatchetOperation["kind"] {
 	return (RATCHET_OPERATION_KINDS as readonly string[]).includes(kind);
 }
-function obj(value: unknown, keys: readonly string[]): Record<string, unknown> {
-	if (
-		!value ||
-		typeof value !== "object" ||
-		Array.isArray(value) ||
-		Object.keys(value).some(key => !keys.includes(key))
-	)
-		throw new Error("Invalid Ratchet object");
+function obj(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid Ratchet object");
 	return value as Record<string, unknown>;
 }
 function text(value: unknown, max = 4096): asserts value is string {
@@ -101,44 +95,11 @@ function strings(value: unknown): void {
 	for (const item of value) text(item);
 }
 export function validateRatchetOperation(value: unknown): asserts value is RatchetOperation {
-	const row = obj(value, [
-		"kind",
-		"sessionId",
-		"id",
-		"flow",
-		"cases",
-		"harness",
-		"change",
-		"offLimits",
-		"command",
-		"cohorts",
-		"metric",
-		"direction",
-		"reps",
-		"roundsLimit",
-		"costLimit",
-		"stage",
-	]);
+	const row = obj(value);
 	if (typeof row.kind !== "string" || !isRatchetKind(row.kind)) throw new Error("Unknown Ratchet operation");
 	text(row.sessionId, 512);
 	if (!row.sessionId) throw new Error("Session required");
 	if (row.kind === "ratchet.create") {
-		obj(row, [
-			"kind",
-			"sessionId",
-			"flow",
-			"cases",
-			"harness",
-			"change",
-			"offLimits",
-			"command",
-			"cohorts",
-			"metric",
-			"direction",
-			"reps",
-			"roundsLimit",
-			"costLimit",
-		]);
 		text(row.flow, 64);
 		if (!/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(row.flow)) throw new Error("Invalid flow");
 		for (const key of ["cases", "harness", "change", "offLimits"]) strings(row[key]);
@@ -160,73 +121,10 @@ export function validateRatchetOperation(value: unknown): asserts value is Ratch
 			text(key, 256);
 			text(cohort, 256);
 		}
-	} else if (row.kind === "ratchet.list") obj(row, ["kind", "sessionId"]);
-	else {
-		obj(row, row.kind === "ratchet.approve" ? ["kind", "sessionId", "id", "stage"] : ["kind", "sessionId", "id"]);
+	} else if (row.kind !== "ratchet.list") {
 		text(row.id, 36);
 		if (!/^[a-f0-9-]{36}$/u.test(row.id)) throw new Error("Invalid run identity");
 		if (row.kind === "ratchet.approve" && !["inputs", "grader", "plan"].includes(String(row.stage)))
 			throw new Error("Invalid stage");
-	}
-}
-export function validateRatchetResult(kind: RatchetOperation["kind"], value: unknown): void {
-	if (kind === "ratchet.list") {
-		const row = obj(value, ["runs"]);
-		if (!Array.isArray(row.runs) || row.runs.length > 100) throw new Error("Too many Ratchet runs");
-		for (const run of row.runs) validateRatchetResult("ratchet.read", run);
-		return;
-	}
-	if (kind === "ratchet.approve") {
-		const row = obj(value, ["approved", "run"]);
-		if (typeof row.approved !== "boolean") throw new Error("Invalid approval");
-		validateRatchetResult("ratchet.read", row.run);
-		return;
-	}
-	const row = obj(value, [
-		"id",
-		"flow",
-		"workspace",
-		"state",
-		"createdAt",
-		"roundsLimit",
-		"costLimit",
-		"modelCost",
-		"agentId",
-		"error",
-		"approvals",
-		"rounds",
-		"best",
-		"goal",
-		"command",
-		"cases",
-		"harness",
-		"change",
-		"offLimits",
-		"trainCount",
-		"testCount",
-	]);
-	for (const key of ["id", "flow", "workspace"]) text(row[key]);
-	for (const key of ["agentId", "error", "best", "goal", "command"]) if (row[key] !== undefined) text(row[key], 8192);
-	if (!["ready", "running", "stopped", "completed", "failed", "interrupted"].includes(String(row.state)))
-		throw new Error("Invalid run state");
-	number(row.createdAt, 0, Number.MAX_SAFE_INTEGER);
-	number(row.roundsLimit, 1, 100);
-	number(row.costLimit, 0.01, 10000, false);
-	number(row.modelCost, 0, Number.MAX_SAFE_INTEGER, false);
-	number(row.trainCount, 0, 1000000);
-	number(row.testCount, 0, 1000000);
-	for (const key of ["cases", "harness", "change", "offLimits"]) strings(row[key]);
-	const approvals = obj(row.approvals, ["inputs", "grader", "plan"]);
-	for (const stage of ["inputs", "grader", "plan"]) text(approvals[stage], 64);
-	if (!Array.isArray(row.rounds) || row.rounds.length > 256) throw new Error("Too many rounds");
-	for (const item of row.rounds) {
-		const round = obj(item, ["round", "variant", "change", "decision", "reasons", "train", "test", "at"]);
-		number(round.round, 0, 100000);
-		for (const key of ["variant", "change", "at"]) text(round[key]);
-		if (!["baseline", "keep", "revert", "rerun"].includes(String(round.decision)))
-			throw new Error("Invalid decision");
-		strings(round.reasons);
-		for (const key of ["train", "test"])
-			if (round[key] !== null) number(round[key], -Number.MAX_VALUE, Number.MAX_VALUE, false);
 	}
 }

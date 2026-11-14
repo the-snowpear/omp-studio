@@ -105,14 +105,8 @@ export const SESSION_OPTIONS_KINDS = [
 export function isSessionOptionsKind(kind: string): kind is SessionOptionsOperation["kind"] {
 	return (SESSION_OPTIONS_KINDS as readonly string[]).includes(kind);
 }
-function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
-	if (
-		!value ||
-		typeof value !== "object" ||
-		Array.isArray(value) ||
-		Object.keys(value).some(key => !keys.includes(key))
-	)
-		throw new Error("Invalid session options payload");
+function record(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid session options payload");
 	return value as Record<string, unknown>;
 }
 function text(value: unknown, max = 4096): asserts value is string {
@@ -125,15 +119,11 @@ function choice(value: unknown, values: readonly string[]): void {
 function bool(value: unknown): void {
 	if (typeof value !== "boolean") throw new Error("Invalid session options boolean");
 }
-function number(value: unknown): void {
-	if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("Invalid session options number");
-}
-const scopes = ["default", "env", "global", "project", "overlay", "runtime"];
 const speeds = ["normal", "fast", "ultrafast", "slow"];
 export function validateSessionOptionsOperation(value: unknown): void {
 	if (value && typeof value === "object" && "kind" in value && String(value.kind).startsWith("session.budget."))
 		return;
-	const input = record(value, ["kind", "sessionId", "expectedModel", "speed", "mode", "persist", "name"]);
+	const input = record(value);
 	text(input.kind);
 	if (!isSessionOptionsKind(input.kind)) throw new Error("Unknown session options operation");
 	text(input.sessionId, 512);
@@ -146,7 +136,6 @@ export function validateSessionOptionsOperation(value: unknown): void {
 				: input.kind.startsWith("models.presets.") && input.kind !== "models.presets.list"
 					? ["name"]
 					: [];
-	record(input, ["kind", "sessionId", ...extra]);
 	if (input.kind === "session.speed.set") {
 		text(input.expectedModel);
 		if (!input.expectedModel) throw new Error("Model identity required");
@@ -159,103 +148,5 @@ export function validateSessionOptionsOperation(value: unknown): void {
 	if (extra.includes("name")) {
 		text(input.name, 128);
 		if (!/^[a-zA-Z][\w-]*$/u.test(input.name as string)) throw new Error("Invalid preset name");
-	}
-}
-export function validateSessionOptionsResult(kind: SessionOptionsOperation["kind"], value: unknown): void {
-	if (kind.startsWith("session.budget.")) return;
-	if (kind.startsWith("session.speed.")) {
-		const row = record(value, [
-			"model",
-			"selected",
-			"supported",
-			"effectiveTier",
-			"fastActive",
-			"slowEnabled",
-			"slowScope",
-			"usageLimit",
-		]);
-		if (row.model !== null) text(row.model);
-		choice(row.selected, speeds);
-		if (!Array.isArray(row.supported) || row.supported.length > 4) throw new Error("Invalid supported speeds");
-		row.supported.forEach(item => choice(item, speeds));
-		bool(row.fastActive);
-		bool(row.slowEnabled);
-		if (row.effectiveTier !== undefined) text(row.effectiveTier, 64);
-		if (row.slowScope !== undefined) choice(row.slowScope, ["session", "global"]);
-		if (row.usageLimit !== undefined) {
-			const usage = record(row.usageLimit, ["stage", "resetsAtSec", "allowanceLeftPercent", "extraUsage"]);
-			choice(usage.stage, ["wrap_up", "low_priority"]);
-			for (const key of ["resetsAtSec", "allowanceLeftPercent"]) if (usage[key] !== undefined) number(usage[key]);
-			if (usage.extraUsage !== undefined) bool(usage.extraUsage);
-		}
-		return;
-	}
-	if (kind.startsWith("session.warming.")) {
-		const row = record(value, ["mode", "source", "state", "reason", "nextWarmAt", "decision"]);
-		choice(row.mode, ["off", "streaming", "idle"]);
-		choice(row.source, scopes);
-		choice(row.state, ["unavailable", "inactive", "scheduled", "refreshing"]);
-		if (row.reason !== undefined) text(row.reason);
-		if (row.nextWarmAt !== undefined) number(row.nextWarmAt);
-		if (row.decision !== undefined) {
-			const decision = record(row.decision, [
-				"phase",
-				"warmCost",
-				"missCost",
-				"expectedSavings",
-				"continuationProbability",
-				"economicsAvailable",
-				"action",
-			]);
-			choice(decision.phase, ["streaming", "idle"]);
-			choice(decision.action, ["warm", "stop"]);
-			bool(decision.economicsAvailable);
-			for (const key of ["warmCost", "missCost", "expectedSavings", "continuationProbability"])
-				number(decision[key]);
-		}
-		return;
-	}
-	if (kind === "models.presets.list") {
-		const row = record(value, ["presets"]);
-		if (!Array.isArray(row.presets) || row.presets.length > 200) throw new Error("Too many presets");
-		for (const item of row.presets) {
-			const preset = record(item, ["name", "source", "active", "roles", "thinking", "error"]);
-			text(preset.name, 128);
-			choice(preset.source, scopes);
-			bool(preset.active);
-			if (
-				!preset.roles ||
-				typeof preset.roles !== "object" ||
-				Array.isArray(preset.roles) ||
-				Object.keys(preset.roles).length > 256
-			)
-				throw new Error("Invalid preset roles");
-			for (const [role, selector] of Object.entries(preset.roles)) {
-				text(role, 128);
-				text(selector);
-			}
-			if (preset.thinking !== undefined) text(preset.thinking, 64);
-			if (preset.error !== undefined) text(preset.error);
-		}
-		return;
-	}
-	const row = record(value, ["outcome", "reason", "model", "thinking", "shadowed", "shadowedThinking", "shadowOwner"]);
-	choice(row.outcome, ["saved", "deleted", "missing", "project", "switched", "invalid", "unavailable", "failed"]);
-	for (const key of ["reason", "model", "thinking"]) if (row[key] !== undefined) text(row[key]);
-	if (row.shadowOwner !== undefined) choice(row.shadowOwner, scopes);
-	if (row.shadowed !== undefined) {
-		if (!Array.isArray(row.shadowed) || row.shadowed.length > 256) throw new Error("Invalid preset conflicts");
-		for (const item of row.shadowed) {
-			const conflict = record(item, ["role", "expected", "actual", "source"]);
-			text(conflict.role, 128);
-			choice(conflict.source, scopes);
-			for (const key of ["expected", "actual"]) if (conflict[key] !== undefined) text(conflict[key]);
-		}
-	}
-	if (row.shadowedThinking !== undefined) {
-		const conflict = record(row.shadowedThinking, ["expected", "actual", "source"]);
-		text(conflict.expected);
-		if (conflict.actual !== undefined) text(conflict.actual);
-		choice(conflict.source, scopes);
 	}
 }

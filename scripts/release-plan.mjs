@@ -1,5 +1,7 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertReleaseNotePlatforms } from "./release-assets.mjs";
 
 const runners = [
   { target: "win32-x64", os: "windows-latest" },
@@ -24,6 +26,19 @@ export function releasePlan({ kind = "desktop", arch = "both", includeMacos = fa
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const plan = releasePlan({ kind: process.env.REQUEST_KIND || "desktop", arch: process.env.TARGET_ARCH || "both", includeMacos: process.env.INCLUDE_MACOS === "true", platforms: process.env.RUNTIME_PLATFORMS });
+  const includeMacos = process.env.INCLUDE_MACOS === "true";
+  const plan = releasePlan({ kind: process.env.REQUEST_KIND || "desktop", arch: process.env.TARGET_ARCH || "both", includeMacos, platforms: process.env.RUNTIME_PLATFORMS });
+  // Runtime preparation/cache warming also uses this CLI, without desktop publication.
+  if (process.env.CHECK_RELEASE_NOTES === "true" && plan.kind === "desktop") {
+    const root = join(import.meta.dirname, "..");
+    const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    let notes;
+    try { notes = readFileSync(join(root, "docs", "releases", `v${version}.md`), "utf8"); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    if (notes !== undefined) {
+      const platforms = [...plan.matrix.include.map(row => `win32-${row.arch}`), ...(includeMacos ? ["darwin-arm64"] : [])];
+      assertReleaseNotePlatforms(notes, process.env.GITHUB_REPOSITORY, `v${version}`, version, platforms);
+    }
+  }
   for (const [name, value] of Object.entries(plan)) appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${typeof value === "string" ? value : JSON.stringify(value)}\n`);
 }

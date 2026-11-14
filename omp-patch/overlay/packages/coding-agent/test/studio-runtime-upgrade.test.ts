@@ -8,10 +8,7 @@ import { BtwHistoryStore } from "@oh-my-pi/pi-coding-agent/session/btw-history";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { StudioUpgradeService } from "@oh-my-pi/pi-coding-agent/studio/services/upgrade-service";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import {
-	validateUpgradeOperation,
-	validateUpgradeResult,
-} from "@oh-my-pi/pi-coding-agent/studio/runtime-upgrade-protocol";
+import { validateUpgradeOperation } from "@oh-my-pi/pi-coding-agent/studio/runtime-upgrade-protocol";
 const roots: string[] = [];
 afterEach(async () => {
 	vi.restoreAllMocks();
@@ -241,12 +238,9 @@ describe("Studio 18.2 BTW history contract", () => {
 		expect((await service.historyRead(asked.ephemeralId)).turns[0]?.question).toBe("retain me");
 	});
 });
-test("upgrade wire rejects unknown authentication providers and credential-shaped result fields", () => {
+test("upgrade wire rejects unknown authentication providers and unsafe import paths", () => {
 	expect(() =>
 		validateUpgradeOperation({ kind: "runtime.auth.set", provider: "unknown", apiKey: "secret" }),
-	).toThrow();
-	expect(() =>
-		validateUpgradeResult("runtime.auth.get", { provider: "typesafe", configured: true, apiKey: "secret" }),
 	).toThrow();
 	expect(() =>
 		validateUpgradeOperation({

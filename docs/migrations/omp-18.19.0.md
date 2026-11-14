@@ -89,6 +89,8 @@ Native AgentSession/controllers/settings/catalog/task executor/GC 是唯一执�
 
 本地证明文件位于 `tmp/upgrade-proof/`（UI 截图、Electron report/screenshot）和 `outputs/browser-native-smoke/win32.json`，不进入版本控制。GUI QA 入口为 `form-18190-harness.html`、`features-18190-harness.html` 与既有 workbench/browser harness；关闭 preview 时显示真实未连接空态，不把 fixture 放到 Host。
 
+合入 0.2.0 分支时同时采用其「输入校验只留 Runtime 一处」的约定：浏览器观察、账户与维护的 Host 侧重复校验和结果/事件校验器随之移除，新输入种类只在 overlay `*-protocol.ts` 检查。overlay 因此变化，Runtime 修订由 regen 升为 `18.19.0-studio.10`；上表的 canary 与 Electron 验收针对的是合入前的 `studio.9`，`studio.10` 尚未重新打包签名。
+
 ### 明确未验证的范围
 
 - 真实 macOS / WebKit viewer、其他操作系统及其 Runtime 制品；本机只验证 Windows x64。

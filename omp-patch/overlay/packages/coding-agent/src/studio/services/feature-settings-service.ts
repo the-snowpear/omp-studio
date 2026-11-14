@@ -81,7 +81,6 @@ import {
 import type { AgentSession } from "../../session/agent-session";
 import {
 	FEATURE_SETTING_KEYS,
-	validateFeatureSettingValue,
 	type FeatureSettingKey,
 	type FeatureSettingRow,
 	type FeatureSettingsOperation,
@@ -176,12 +175,11 @@ export class StudioFeatureSettingsService {
 	}
 	#row(key: FeatureSettingKey): FeatureSettingRow {
 		const setting = HANDLES[key],
-			value: unknown =
+			value =
 				key === "out.enabled"
 					? outRepliesActive(this.session.settings, this.session.studioToolSession?.replyTranscript === true)
 					: structuredClone(setting.get(this.session.settings) ?? null);
-		validateFeatureSettingValue(value);
-		return { key, value, source: this.session.settings.getProvenance(setting) };
+		return { key, value: value as FeatureSettingRow["value"], source: this.session.settings.getProvenance(setting) };
 	}
 	async execute(operation: FeatureSettingsOperation): Promise<unknown> {
 		if (operation.sessionId !== this.session.sessionId)

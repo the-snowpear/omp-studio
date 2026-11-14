@@ -27,7 +27,6 @@ test("browser frames are window-owned and bounded by acknowledgements, with expl
     assert.throws(() => manager.input(sender, { observationId: id, input: { kind: "navigate", url: "https://example.com" } }), /human control/);
     peer!.write(JSON.stringify({ kind: "state", observationId: id, tabId, title: "test", url: "http://localhost", frozen: false, busy: false, control: "human" }) + "\n");
     await until(() => events.some(event => event.kind === "state"));
-    assert.throws(() => manager.input(sender, { observationId: id, input: { kind: "navigate", url: "file:///private" } }), /HTTP/);
     manager.input(sender, { observationId: id, input: { kind: "navigate", url: "https://example.com" } });
     await until(() => inputs.length === 1);
     const frame = { kind: "frame", observationId: id, tabId, sequence: 1, data: "YWJj", width: 1000, height: 600, timestamp: Date.now() };

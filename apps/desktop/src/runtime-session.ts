@@ -810,7 +810,7 @@ export function createDesktopRuntimeSessionPort(
           return resident.session;
         }
         if (resident) await stopResident(resident);
-        return launchWorker(id, target, intent.kind === "resume" ? intent.model : undefined,
+        return launchWorker(id, target, intent.model,
           intent.kind === "fresh" ? intent.noContextFiles : undefined, false, true);
       });
     },
@@ -1089,7 +1089,7 @@ export function createDesktopRuntimeSessionPort(
     switchSession(intent): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
         if (intent.kind === "resume") return await selectResident(intent.sessionId, intent.model);
-        return await launchWorker(undefined, undefined, undefined, intent.noContextFiles);
+        return await launchWorker(undefined, undefined, intent.model, intent.noContextFiles);
       });
     },
     async applyApprovalMode(mode: ApprovalMode): Promise<{
@@ -1716,7 +1716,7 @@ function createSingleDesktopRuntimeSessionPort(
       });
     },
 
-    switchSession(intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean }): Promise<DesktopRuntimeSession | undefined> {
+    switchSession(intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean; model?: string }): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
         const previousResume = resumeSessionId;
         const previousModel = resumeModel;
@@ -1725,7 +1725,7 @@ function createSingleDesktopRuntimeSessionPort(
         autoRespawns = 0;
         await stopCurrent("replace");
         resumeSessionId = intent.kind === "resume" ? intent.sessionId : undefined;
-        resumeModel = intent.kind === "resume" ? intent.model : undefined;
+        resumeModel = intent.model;
         noContextFiles = intent.kind === "fresh" ? intent.noContextFiles : noContextFiles;
         try {
           const next = await launch();

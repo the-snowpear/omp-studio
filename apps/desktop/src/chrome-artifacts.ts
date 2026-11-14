@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import { copyFile, lstat } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { Readable } from "node:stream";
-import { ARTIFACT_KINDS, validateArtifactIdInput } from "@omp-studio/studio-protocol";
+import { ARTIFACT_KINDS } from "@omp-studio/studio-protocol";
 import type { ArtifactLibrary } from "@omp-studio/studio-host";
 import type { ChromeImageIpcMain, ChromeImageSender } from "./chrome-image.js";
 import { CHROME_ARTIFACT_CHANNELS, type ArtifactFileResult, type ArtifactImportInput } from "./chrome-artifacts-shared.js";
@@ -44,8 +44,7 @@ export function registerArtifactIpc(options: {
     return { ok: true, cancelled: false, artifact };
   });
   register(CHROME_ARTIFACT_CHANNELS.export, async (sender, raw) => {
-    validateArtifactIdInput(raw);
-    const artifact = await options.library().resolve(raw.artifactId);
+    const artifact = await options.library().resolve((raw as { artifactId: string }).artifactId);
     const destination = await options.chooseExport(sender, artifact.record.name);
     if (!destination) return { ok: true, cancelled: true };
     await copyFile(artifact.path, destination);
@@ -62,7 +61,6 @@ export async function artifactResponse(request: Request, library: ArtifactLibrar
     const url = new URL(request.url);
     if (url.protocol !== "omp-artifact:" || url.hostname !== "library" || url.search || url.hash || url.username || url.password || !["GET", "HEAD"].includes(request.method)) return new Response(null, { status: 400 });
     const artifactId = url.pathname.slice(1);
-    validateArtifactIdInput({ artifactId });
     const artifact = await library.resolve(artifactId);
     const total = artifact.record.bytes;
     let start = 0;

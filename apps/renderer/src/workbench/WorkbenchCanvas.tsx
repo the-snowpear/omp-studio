@@ -46,7 +46,7 @@ import { RuntimeQueue } from "../composer/RuntimeQueue";
 import { ComposerModePicker } from "../ComposerModePicker";
 import { ChipComposer, type ChipComposerHandle } from "../composer/ChipComposer";
 import { bindSlashTypedCommand, composerSlashExecute, isDestructiveMemoryClear, mergeSlashCatalogWithManifest, planComposerSend, resolveSlashExecute, type SlashNativeUi, type StudioSlashCommand } from "../composer/commands";
-import { composerFollowUpEnabled, composerOwnerSessionId, composerOwnsLiveSnapshot, composerPromptEnabled, composerQueueEnabled, composerRunningForTarget, createComposerDispatchGate, visibleQueuedMessages } from "../composer/dispatch";
+import { composerFollowUpEnabled, composerOwnerSessionId, composerOwnsLiveSnapshot, composerPromptEnabled, composerQueueEnabled, composerRunningForTarget, createComposerDispatchGate, promptTargetChanged, visibleQueuedMessages } from "../composer/dispatch";
 import { beginQueueEdit, cancelQueueEdit, commitQueueEdit, parkQueueEdit, snapshotOfQueued, switchQueueEdit, type QueueEditState } from "../composer/queueEdit";
 import { createWorkspaceFileIndex, followWorkspaceFileIndex, loadMentions, previewMentions, workspaceDirectoryLister } from "../composer/mentions";
 import { snapshotFromDoc, snapshotFromText, snapshotFromTextAndImages, snapshotIsEmpty } from "../composer/serialize";
@@ -220,7 +220,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   sessionCreating?: boolean;
   waitForNewSession?: () => Promise<NewSessionWaitResult>;
   /** Start session.create when sending from an empty workbench with no live session. */
-  ensureNewSession?: () => void;
+  ensureNewSession?: (model?: string) => void;
   previewProjectId?: string;
   previewThreadId?: string;
   onPreviewDeckWait?: (kind: ThreadWaitKind | undefined) => void;
@@ -421,6 +421,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     const previous = composerViewRef.current;
     composerViewRef.current = { sessionId: selectedSessionId, threadId: selectedThreadId, viewIdentity };
     if (previous.sessionId === selectedSessionId && previous.threadId === selectedThreadId && previous.viewIdentity === viewIdentity) return;
+    if (previous.sessionId === undefined && selectedSessionId !== undefined
+      && previous.viewIdentity === viewIdentity && snapshotFrom(state)?.sessionId === selectedSessionId) {
+      onComposerDraftChange?.(selectedSessionId, composerRef.current?.getSnapshot() ?? draftLive.current);
+      return;
+    }
     replaceDraft(composerDraftRef.current ?? emptySnapshot());
     setComposerError(undefined);
     setQueueEdit(undefined);
@@ -1221,6 +1226,42 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   // 直接发送与流式期间的本地排队共用同一组闸门。
   const executionStatus = executionTarget.inventory.statuses.find(value => value.id === executionTarget.id);
   const targetOffline = !preview && executionTarget.id !== null && (executionStatus?.state !== "connected" || Boolean(executionStatus.operation));
+  const canPrepareModel = !preview && !targetOffline && !worktreeGated && !connection?.resyncRequired
+    && runtime?.classification !== "limited-system" && workspaceId !== undefined
+    && (!runtimeConnected || !executionMatches);
+  const runModelPreference = async <T extends CommandName>(name: T, input: CommandInput<T>): Promise<boolean> => {
+    const expected = selectedTargetRef.current;
+    let createdSessionId: SessionId | undefined;
+    try {
+      if (!runtimeConnected || !executionMatches) {
+        const model = name === "session.model.set" ? (input as CommandInput<"session.model.set">).selector : undefined;
+        if (expected.selectedSessionId === undefined) {
+          ensureNewSession?.(model);
+          const ready = await waitForNewSession?.();
+          if (ready && !ready.ok) throw new Error(ready.error);
+          createdSessionId = ready?.sessionId;
+        } else {
+          await ensureSelectedSessionActive(client, {
+            ...(snapshot?.sessionId === undefined ? {} : { activeSessionId: snapshot.sessionId }),
+            selectedSessionId: expected.selectedSessionId as SessionId,
+            ...(expected.selectedThreadId === undefined ? {} : { selectedThreadId: expected.selectedThreadId }),
+            ...(model === undefined ? {} : { model }),
+          });
+        }
+        const manifest = await client.query("capabilities.get", {});
+        if (!manifest.capabilities.some(entry => entry.id === name && entry.grade !== "unavailable")) {
+          throw new Error(t("composer.runtimeNotExposedModelSet"));
+        }
+      }
+      if (promptTargetChanged({ sent: expected, current: selectedTargetRef.current, createdSessionId })) {
+        throw new Error("模型选择期间已切换会话，本次选择已取消。");
+      }
+      return await run(name, input);
+    } catch (error) {
+      setComposerError(hostErrorMessage(error, "模型选择失败"));
+      return false;
+    }
+  };
   const promptChannelReady =
     !targetOffline &&
     !busy &&
@@ -1617,11 +1658,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
         ...(targetSessionId === undefined ? {} : { selectedSessionId: targetSessionId }),
         ...(targetThreadId === undefined ? {} : { selectedThreadId: targetThreadId }),
       });
-      const currentTarget = selectedTargetRef.current;
-      if (
-        currentTarget.selectedSessionId !== targetSessionId ||
-        currentTarget.selectedThreadId !== targetThreadId
-      ) {
+      if (promptTargetChanged({
+        sent: { selectedSessionId: targetSessionId, selectedThreadId: targetThreadId },
+        current: selectedTargetRef.current,
+        createdSessionId: readySessionId,
+      })) {
         throw { code: "STATE_VERSION_CONFLICT", message: "发送期间已切换会话，本次发送已取消，草稿已恢复。" };
       }
       if (resumed) {
@@ -2733,10 +2774,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                   preview={preview}
                   client={client}
                   refreshKey={`${selectedSessionId ?? ""}·${(preview ? previewThreadId : selectedThreadId) ?? ""}`}
-                  {...(snapshot === undefined ? {} : { snapshot })}
+                  {...(!executionMatches || snapshot === undefined ? {} : { snapshot })}
                   can={can}
+                  canStartSession={canPrepareModel}
                   busy={busy}
-                  onRun={run}
+                  onRun={runModelPreference}
                   openNonce={modelMenuNonce}
                 />
                 {!can("session.speed.get") ? <ServiceTierPicker client={client} sessionId={composerOwner} available={can("session.tier.get")} modelKey={JSON.stringify(snapshot?.model)} /> : null}

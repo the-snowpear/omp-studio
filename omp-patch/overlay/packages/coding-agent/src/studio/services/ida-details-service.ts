@@ -13,7 +13,6 @@ import { cfgIdaEnabled, cfgIdaInstallDir, cfgIdaPython } from "../../ida/setting
 import type { AgentSession } from "../../session/agent-session";
 import type { ToolSession } from "../../tools";
 import type { StudioIdaDatabase, StudioIdaOperation, StudioIdaStatus } from "../ida-details-protocol";
-import { validateStudioIdaOperation } from "../ida-details-protocol";
 import { SessionControlError } from "./session-control-service";
 
 function projectDatabase(db: IdaDatabase): StudioIdaDatabase {
@@ -94,7 +93,6 @@ export class StudioIdaDetailsService {
 		return result;
 	}
 	async execute(operation: StudioIdaOperation): Promise<unknown> {
-		validateStudioIdaOperation(operation);
 		if (this.#disposed || operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "The session changed; reload IDA state");
 		if (operation.kind === "ida.status.details") return this.status();

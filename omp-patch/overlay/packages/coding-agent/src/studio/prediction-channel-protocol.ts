@@ -79,14 +79,8 @@ export type PredictionEvent =
 			count: number;
 			truncated: boolean;
 	  };
-function object(value: unknown, keys: string[]): Record<string, unknown> {
-	if (
-		!value ||
-		typeof value !== "object" ||
-		Array.isArray(value) ||
-		Object.keys(value).some(key => !keys.includes(key))
-	)
-		throw new Error("Invalid prediction data");
+function object(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid prediction data");
 	return value as Record<string, unknown>;
 }
 function text(value: unknown, max = 1024, empty = false): void {
@@ -101,7 +95,7 @@ function integer(value: unknown, max = Number.MAX_SAFE_INTEGER): void {
 		throw new Error("Invalid prediction number");
 }
 export function validatePredictionChannelOperation(value: unknown): void {
-	const row = object(value, ["kind", "sessionId", "method", "scope", "channelId", "protocolVersion"]);
+	const row = object(value);
 	if (typeof row.kind !== "string" || !isPredictionKind(row.kind)) throw new Error("Unknown prediction command");
 	text(row.sessionId, 128);
 	if (row.kind === "prediction.configure") {
@@ -114,44 +108,8 @@ export function validatePredictionChannelOperation(value: unknown): void {
 	if (row.kind === "prediction.release") id(row.channelId);
 	else if (row.channelId !== undefined) throw new Error("Unexpected prediction channel");
 }
-export function validatePredictionChannelResult(kind: PredictionChannelOperation["kind"], value: unknown): void {
-	if (kind === "prediction.prepare") {
-		const row = object(value, ["channelId", "sessionId", "expiresAt", "protocolVersion"]);
-		id(row.channelId);
-		text(row.sessionId, 128);
-		integer(row.expiresAt);
-		return;
-	}
-	if (kind === "prediction.release") {
-		if (object(value, ["released"]).released !== true) throw new Error("Invalid prediction release");
-		return;
-	}
-	const row = object(value, ["method", "effective", "source", "download"]);
-	if (
-		!["off", "auto", "ngram", "smollm", "apple"].includes(row.method as string) ||
-		!["off", "ngram", "smollm", "apple"].includes(row.effective as string)
-	)
-		throw new Error("Invalid prediction method");
-	text(row.source, 128);
-	const download = object(row.download, ["state", "bytes", "total", "error"]);
-	if (!["idle", "downloading", "ready", "failed", "cancelled"].includes(download.state as string))
-		throw new Error("Invalid model download state");
-	integer(download.bytes);
-	integer(download.total);
-	if (download.error !== undefined) text(download.error);
-}
 export function validatePredictionInput(value: unknown): asserts value is PredictionInput {
-	const row = object(value, [
-		"kind",
-		"revision",
-		"text",
-		"caret",
-		"accepted",
-		"requestId",
-		"transferId",
-		"empty",
-		"rank",
-	]);
+	const row = object(value);
 	switch (row.kind) {
 		case "next":
 			integer(row.revision);
@@ -181,63 +139,5 @@ export function validatePredictionInput(value: unknown): asserts value is Predic
 			break;
 		default:
 			throw new Error("Invalid prediction message");
-	}
-	const allowed =
-		row.kind === "next.shown"
-			? ["kind", "revision"]
-			: row.kind === "next.accepted"
-				? ["kind", "revision", "rank"]
-				: row.kind === "next"
-					? ["kind", "revision", "empty", "text"]
-					: row.kind === "update"
-						? ["kind", "revision", "text", "caret"]
-						: row.kind === "feedback"
-							? ["kind", "revision", "accepted"]
-							: row.kind === "import"
-								? ["kind", "requestId", "transferId"]
-								: ["kind"];
-	object(value, allowed);
-}
-export function validatePredictionEvent(value: unknown): asserts value is PredictionEvent {
-	const row = object(value, [
-		"kind",
-		"channelId",
-		"revision",
-		"suffix",
-		"message",
-		"requestId",
-		"count",
-		"truncated",
-		"choices",
-		"rank",
-	]);
-	id(row.channelId);
-	switch (row.kind) {
-		case "next":
-			object(value, ["kind", "channelId", "revision", "suffix", "choices", "rank"]);
-			integer(row.revision);
-			if (row.suffix !== null) text(row.suffix, 500, true);
-			break;
-		case "suggestion":
-			object(value, ["kind", "channelId", "revision", "suffix", "choices", "rank"]);
-			integer(row.revision);
-			if (row.suffix !== null) text(row.suffix, 256, true);
-			break;
-		case "error":
-			object(value, ["kind", "channelId", "message", "requestId"]);
-			text(row.message);
-			if (row.requestId !== undefined) id(row.requestId);
-			break;
-		case "closed":
-			object(value, ["kind", "channelId"]);
-			break;
-		case "imported":
-			object(value, ["kind", "channelId", "requestId", "count", "truncated"]);
-			id(row.requestId);
-			integer(row.count, 2000);
-			if (typeof row.truncated !== "boolean") throw new Error("Invalid prediction import result");
-			break;
-		default:
-			throw new Error("Invalid prediction event");
 	}
 }

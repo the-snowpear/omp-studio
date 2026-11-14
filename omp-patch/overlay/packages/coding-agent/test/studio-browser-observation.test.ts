@@ -13,10 +13,7 @@ import { acquireBrowser, releaseBrowser, type PuppeteerBrowserKind } from "../sr
 import { acquireTab, getTab, listTabs, releaseTab, runInTab } from "../src/tools/browser/tab-supervisor";
 import { StudioBrowserObservationService } from "../src/studio/services/browser-observation-service";
 import { studioTabIdentity } from "../src/studio/services/browser-tab-control";
-import {
-	validateBrowserObservationEvent,
-	type BrowserObservationEvent,
-} from "../src/studio/browser-observation-protocol";
+import { type BrowserObservationEvent } from "../src/studio/browser-observation-protocol";
 
 test("native Edge keeps Chromium-only actions available without granting them to an unknown engine", async () => {
 	const sessionId = "engine-probe",
@@ -152,8 +149,7 @@ test.skipIf(process.env.OMP_STUDIO_BROWSER_E2E !== "1" || !process.env.OMP_STUDI
 					const line = pending.slice(0, index);
 					pending = pending.slice(index + 1);
 					if (line === "OK") continue;
-					const event: unknown = JSON.parse(line);
-					validateBrowserObservationEvent(event);
+					const event = JSON.parse(line) as BrowserObservationEvent;
 					events.push(event);
 					if (event.kind === "frame")
 						peer.write(JSON.stringify({ kind: "ack", sequence: event.sequence, generation }) + "\n");

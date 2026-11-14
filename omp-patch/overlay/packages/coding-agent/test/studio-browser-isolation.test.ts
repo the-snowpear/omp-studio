@@ -12,11 +12,7 @@ import { acquireBrowser, releaseBrowser } from "../src/tools/browser/registry";
 import { acquireTab, releaseTab, runInTab } from "../src/tools/browser/tab-supervisor";
 import { StudioBrowserObservationService } from "../src/studio/services/browser-observation-service";
 import { studioTabIdentity, studioTabControlState } from "../src/studio/services/browser-tab-control";
-import {
-	validateBrowserObservationEvent,
-	type BrowserObservationEvent,
-	type StudioBrowserTab,
-} from "../src/studio/browser-observation-protocol";
+import { type BrowserObservationEvent, type StudioBrowserTab } from "../src/studio/browser-observation-protocol";
 
 test.skipIf(process.env.OMP_STUDIO_BROWSER_E2E !== "1")(
 	"a parent can observe only its live descendants; slow viewers are bounded and losing ownership returns Agent control",
@@ -101,8 +97,7 @@ test.skipIf(process.env.OMP_STUDIO_BROWSER_E2E !== "1")(
 					const line = pending.slice(0, at);
 					pending = pending.slice(at + 1);
 					if (line === "OK") continue;
-					const event: unknown = JSON.parse(line);
-					validateBrowserObservationEvent(event);
+					const event = JSON.parse(line) as BrowserObservationEvent;
 					events.push(event);
 				}
 			});

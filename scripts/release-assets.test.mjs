@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
   appUpdateAssetName,
   assertReleaseNoteAssets,
+  assertReleaseNotePlatforms,
   firstInstallAssetName,
   legacyIndexName,
   packagedAppAssetPath,
@@ -20,6 +21,18 @@ test("curated release notes cannot advertise an unbuilt platform", () => {
   assert.throws(() => assertReleaseNoteAssets(note, "owner/repo", "v0.1.10", ["windows.exe"]), /unavailable asset/u);
   assert.doesNotThrow(() => assertReleaseNoteAssets(note, "owner/repo", "v0.1.10", ["OMP-Studio-0.1.10-macos-arm64.dmg"]));
   assert.doesNotThrow(() => assertReleaseNoteAssets(note, "owner/repo", "v0.1.11", []));
+});
+
+test("release preparation rejects incomplete platforms advertised by curated notes", () => {
+  const repo = "owner/repo", tag = "v0.2.0", version = "0.2.0";
+  const notes = [
+    "https://github.com/owner/repo/releases/download/v0.2.0/OMP-Studio-Setup-0.2.0-windows-x64.exe",
+    "https://github.com/owner/repo/releases/download/v0.2.0/OMP-Studio-Setup-0.2.0-windows-arm64.exe",
+    "https://github.com/owner/repo/releases/download/v0.2.0/OMP-Studio-0.2.0-macos-arm64.dmg",
+  ].join("\n");
+  assert.throws(() => assertReleaseNotePlatforms(notes, repo, tag, version, ["win32-x64"]), /unselected desktop asset: .*windows-arm64\.exe/u);
+  assert.throws(() => assertReleaseNotePlatforms(notes, repo, tag, version, ["win32-x64", "win32-arm64"]), /unselected desktop asset: .*macos-arm64\.dmg/u);
+  assert.doesNotThrow(() => assertReleaseNotePlatforms(notes, repo, tag, version, ["win32-x64", "win32-arm64", "darwin-arm64"]));
 });
 
 test("Windows release names and layout stay exactly as published before", () => {

@@ -159,6 +159,20 @@ export function findInstallerExecutable(outputDir, version, arch = resolveTarget
   return path;
 }
 
+/** node-pty falls back to WinPTY on supported Windows 10 builds below 18309. */
+export function assertWindowsPtyHelper(unpackedDir, arch = "x64") {
+  if (arch !== "x64") return;
+  // Match node-pty's Release / Debug / prebuild search paths, all outside asar.
+  const candidates = ["app.asar.unpacked", "app"].flatMap(directory =>
+    ["build/Release", "build/Debug", "prebuilds/win32-x64"].map(nativeDirectory =>
+      join(unpackedDir, "resources", directory, "node_modules", "node-pty", nativeDirectory, "winpty-agent.exe"),
+    ),
+  );
+  if (!candidates.some(file => existsSync(file) && statSync(file).isFile())) {
+    throw new Error("Windows x64 PTY helper winpty-agent.exe is missing from the unpacked app; older Windows 10 terminals would fail. Do not exclude dependency EXEs.");
+  }
+}
+
 /**
  * @param {string} outputDir
  * @returns {{ installerExe: string, unpackedDir: string, notes: string[] }}
@@ -283,6 +297,9 @@ export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory
   if (keyHits.length > 0) {
     throw new Error(`Refusing to ship a private signing key in the installer:\n${keyHits.join("\n")}`);
   }
+
+  assertWindowsPtyHelper(unpackedDir, targetArch);
+  if (targetArch !== "arm64") notes.push("Windows 10 WinPTY helper present outside asar");
 
   const product = JSON.parse(readFileSync(join(REPOSITORY_ROOT, "package.json"), "utf8"));
   const installerExe = findInstallerExecutable(outputDir, product.version, targetArch);

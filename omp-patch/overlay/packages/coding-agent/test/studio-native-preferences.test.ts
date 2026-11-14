@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { Settings } from "../src/config/settings";
 import type { AgentSession } from "../src/session/agent-session";
 import { StudioNativePreferencesService } from "../src/studio/services/native-preferences-service";
-import { validateNativePreferenceResult } from "../src/studio/native-preferences-protocol";
 test("native preferences preserve overlay precedence and distinguish next-launch OTLP configuration from effective state", async () => {
 	const settings = Settings.isolated();
 	const service = new StudioNativePreferencesService({ sessionId: "s", settings } as AgentSession);
@@ -15,7 +14,6 @@ test("native preferences preserve overlay precedence and distinguish next-launch
 	await set("title.icons", "emoji", "session");
 	const shadowed = await set("title.icons", "nf+emoji", "global");
 	expect(shadowed).toMatchObject({ value: "emoji", effective: "emoji", source: "runtime" });
-	validateNativePreferenceResult("preferences.native.set", shadowed);
 	expect(
 		await service.execute({ kind: "preferences.native.clearOverride", sessionId: "s", key: "title.icons" }),
 	).toMatchObject({ value: "nf+emoji", source: "global" });
@@ -34,7 +32,6 @@ test("OMP 18.12 native preferences are listed in their groups and round-trip thr
 	const listed = (await service.execute({ kind: "preferences.native.get", sessionId: "s" })) as {
 		preferences: Array<{ key: string; group: string; choices?: unknown[] }>;
 	};
-	validateNativePreferenceResult("preferences.native.get", listed);
 	const byKey = new Map(listed.preferences.map(row => [row.key, row]));
 	expect(byKey.get("advisor.continueSeverity")).toMatchObject({
 		group: "advisor",

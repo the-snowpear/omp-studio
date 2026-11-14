@@ -81,7 +81,6 @@ import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { listServices, requestService, startService } from "../../launch/services";
 import type { AgentSession } from "../../session/agent-session";
 import type { StudioServiceRow, WorkbenchOperation } from "../workbench-protocol";
-import { validateWorkbenchOperation, validateWorkbenchResult } from "../workbench-protocol";
 import { SessionControlError } from "./session-control-service";
 
 function isAdvisorConfigOperation(operation: WorkbenchOperation): operation is AdvisorConfigOperation {
@@ -279,9 +278,7 @@ export class StudioWorkbenchService {
 		throw new SessionControlError("COMMAND_BLOCKED", "Unknown native model operation");
 	}
 	async execute(operation: WorkbenchOperation): Promise<unknown> {
-		validateWorkbenchOperation(operation);
 		const result = await this.#execute(operation);
-		validateWorkbenchResult(operation.kind, result);
 		return result;
 	}
 	async #execute(operation: WorkbenchOperation): Promise<unknown> {

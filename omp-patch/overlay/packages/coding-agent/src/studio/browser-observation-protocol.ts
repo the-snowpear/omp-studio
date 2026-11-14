@@ -197,10 +197,6 @@ export function validateBrowserObservationOperation(value: unknown): void {
 	text(row.sessionId, 512);
 	if (!row.sessionId) throw new Error("Session identity required");
 }
-/** Host results are trusted. Kept for older callers of the domain envelope parser. */
-export function validateBrowserObservationResult(_kind: BrowserObservationOperation["kind"], value: unknown): void {
-	object(value);
-}
 export function validateBrowserObservationInput(value: unknown): asserts value is BrowserObservationInput {
 	const row = object(value);
 	const kinds = [
@@ -254,47 +250,4 @@ export function validateBrowserObservationInput(value: unknown): asserts value i
 		if (!Number.isInteger(row.modifiers)) throw new Error("Invalid keyboard modifiers");
 	}
 	if (row.kind === "text") text(row.text, 16384);
-}
-export function validateBrowserObservationEvent(value: unknown): asserts value is BrowserObservationEvent {
-	const row = object(value);
-	id(row.observationId);
-	if (row.kind === "closed") return;
-	if (row.kind === "error") {
-		text(row.message);
-		return;
-	}
-	id(row.tabId);
-	if (row.generation !== undefined) id(row.generation);
-	if (row.kind === "inspection") {
-		const inspection = object(row.inspection);
-		if (
-			!["console", "network", "downloads"].includes(inspection.view as string) ||
-			!Array.isArray(inspection.rows) ||
-			inspection.rows.length > 200
-		)
-			throw new Error("Browser inspection exceeds its budget");
-		return;
-	}
-	if (row.kind === "state") {
-		text(row.title);
-		text(row.url);
-		if (
-			typeof row.frozen !== "boolean" ||
-			typeof row.busy !== "boolean" ||
-			!["agent", "waiting", "human", "other-window"].includes(row.control as string)
-		)
-			throw new Error("Invalid browser state");
-		return;
-	}
-	if (row.kind !== "frame") throw new Error("Unknown browser observation event");
-	sequence(row.sequence);
-	text(row.data, BROWSER_FRAME_MAX_BASE64);
-	if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(row.data as string)) throw new Error("Invalid frame encoding");
-	number(row.width, 1, 4096);
-	number(row.height, 1, 4096);
-	if (Number(row.width) * Number(row.height) > 4_000_000)
-		throw new Error("Browser viewport exceeds the observation budget");
-	if (row.cssWidth !== undefined) number(row.cssWidth, 1, 4096);
-	if (row.cssHeight !== undefined) number(row.cssHeight, 1, 4096);
-	number(row.timestamp, 0, Number.MAX_SAFE_INTEGER);
 }

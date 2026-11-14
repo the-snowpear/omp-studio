@@ -134,19 +134,8 @@ export class StudioMaintenanceService {
 			staleKeep: number(cfgGcStaleRetainNewest.get(this.session.settings)),
 		};
 	}
+	/** Categories and strip options were checked once by `validateMaintenanceOperation`. */
 	#flags(categories: GcCategory[], policy: GcPolicy, strip?: GcStripOptions): GcCommandFlags {
-		if (
-			!Array.isArray(categories) ||
-			categories.length > 4 ||
-			new Set(categories).size !== categories.length ||
-			categories.some(category => !["blobs", "archive", "wal", "stale"].includes(category)) ||
-			(categories.length === 0 && strip === undefined)
-		) {
-			throw new SessionControlError("INVALID_ARGUMENT", "Choose a cleanup category or provider replay stripping");
-		}
-		if (strip?.idleDays !== undefined && (!Number.isFinite(strip.idleDays) || strip.idleDays < 0)) {
-			throw new SessionControlError("INVALID_ARGUMENT", "Replay stripping requires a non-negative idle day count");
-		}
 		return {
 			agentDir: this.session.settings.getAgentDir(),
 			compress: false,

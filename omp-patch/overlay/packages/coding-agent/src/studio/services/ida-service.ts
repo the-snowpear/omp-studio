@@ -3,14 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentSession } from "../../session/agent-session";
 import { acquireIdaDatabase, listIdaDatabases, resolveIdaRuntime } from "../../ida";
-import {
-	validateIdaOperation,
-	validateIdaResult,
-	type IdaOperation,
-	type IdaEdit,
-	type IdaResultMap,
-	type IdaRow,
-} from "../ida-protocol";
+import { type IdaOperation, type IdaEdit, type IdaRow } from "../ida-protocol";
 import { SessionControlError } from "./session-control-service";
 export interface StudioIdaDb {
 	id: string;
@@ -99,11 +92,9 @@ export class StudioIdaService {
 		return { file, fingerprint: JSON.stringify([stat.dev, stat.ino, stat.size, stat.mtimeMs]) };
 	}
 	async execute(op: IdaOperation): Promise<unknown> {
-		validateIdaOperation(op);
 		this.#assert(op.sessionId);
 		const result = await this.#execute(op);
 		this.#assert(op.sessionId);
-		validateIdaResult(op.kind, result);
 		return result;
 	}
 	async #execute(op: IdaOperation): Promise<unknown> {

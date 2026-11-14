@@ -43,18 +43,3 @@ export function validatePredictionQuery(value: unknown): asserts value is Predic
 		if (typeof v[key] !== "string" || v[key].length > max || v[key].includes("\0"))
 			throw Error("Invalid prediction text");
 }
-export function validatePredictionResult(value: unknown): asserts value is PredictionResult {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("Invalid prediction result");
-	const v = value as Record<string, unknown>;
-	if (
-		Object.keys(v).some(key => !["version", "suffix", "engine", "unavailable"].includes(key)) ||
-		!Number.isSafeInteger(v.version) ||
-		(v.version as number) < 0 ||
-		!["off", "ngram", "smollm"].includes(v.engine as string)
-	)
-		throw Error("Invalid prediction result");
-	if (v.suffix !== null && (typeof v.suffix !== "string" || v.suffix.length > 256 || /[\r\n\0]/.test(v.suffix)))
-		throw Error("Invalid prediction suffix");
-	if (v.unavailable !== undefined && (typeof v.unavailable !== "string" || v.unavailable.length > 512))
-		throw Error("Invalid prediction availability");
-}

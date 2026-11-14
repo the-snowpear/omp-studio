@@ -22,8 +22,6 @@ import {
 	type MediaOperation,
 	type MediaRequest,
 	mediaInputArtifacts,
-	validateMediaOperation,
-	validateMediaResult,
 } from "../media-protocol";
 import { StudioMediaFiles } from "./media-files";
 import { SessionControlError } from "./session-control-service";
@@ -232,13 +230,6 @@ export class StudioMediaService {
 						const stored = value as StoredJob;
 						if (stored.schemaVersion !== 1 || stored.job.sessionId !== sessionId) continue;
 						const { job, request, outputs, text, textTruncated } = stored;
-						validateMediaResult("media.read", {
-							job,
-							request,
-							outputs,
-							...(text ? { text } : {}),
-							...(textTruncated ? { textTruncated } : {}),
-						});
 						if (this.#tasks.has(job.id)) continue;
 						if (active(job)) {
 							job.state = "interrupted";
@@ -271,14 +262,12 @@ export class StudioMediaService {
 		return work;
 	}
 	async #executeFenced(operation: MediaOperation): Promise<unknown> {
-		validateMediaOperation(operation);
 		if (this.#disposed || operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "Media actions require the current session");
 		await this.#load(operation.sessionId);
 		if (operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "Session changed while loading media tasks");
 		const result = await this.#execute(operation);
-		validateMediaResult(operation.kind, result);
 		return structuredClone(result);
 	}
 	async #execute(operation: MediaOperation): Promise<unknown> {

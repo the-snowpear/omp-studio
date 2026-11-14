@@ -58,6 +58,7 @@ jobs:
           TARGET_ARCH: ${{ inputs.target_arch || 'both' }}
           REQUEST_KIND: ${{ inputs.release_kind || (startsWith(github.ref_name, 'runtime-v') && 'runtime') || 'desktop' }}
           INCLUDE_MACOS: ${{ inputs.include_macos }}
+          CHECK_RELEASE_NOTES: "true"
         run: node scripts/release-plan.mjs
 
   runtime:

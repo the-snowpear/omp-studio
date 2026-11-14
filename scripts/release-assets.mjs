@@ -7,7 +7,7 @@
 import { join } from "node:path";
 
 import { MAC_TARGET_PLATFORM, macDmgFileName, macUpdateZipFileName } from "./mac-bundle.mjs";
-import { runtimeOsOf } from "./target-platform.mjs";
+import { runtimeOsOf, UPDATE_PLATFORMS } from "./target-platform.mjs";
 
 export { MAC_TARGET_PLATFORM };
 
@@ -82,11 +82,28 @@ export function platformOfReleaseCandidate(directoryName) {
   return match[1] === "darwin-arm64" ? MAC_TARGET_PLATFORM : `win32-${match[1]}`;
 }
 
+function* releaseNoteAssetNames(notes, repo, tag) {
+  for (const match of notes.matchAll(/https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/releases\/download\/([^/\s]+)\/([^\s)<>]+)/gu)) {
+    if (match[1] === repo && match[2] === tag) yield match[3];
+  }
+}
+
+/** Reject unselected desktop downloads before any expensive native builds. */
+export function assertReleaseNotePlatforms(notes, repo, tag, appVersion, platforms) {
+  const selected = new Set(platforms);
+  const unavailable = new Set(UPDATE_PLATFORMS.filter(platform => !selected.has(platform)).flatMap(platform => {
+    const update = appUpdateAssetName(appVersion, platform);
+    return [update, `${update}.blockmap`, firstInstallAssetName(appVersion, platform)].filter(Boolean);
+  }));
+  for (const name of releaseNoteAssetNames(notes, repo, tag)) {
+    if (unavailable.has(name)) throw new Error(`Release notes advertise an unselected desktop asset: ${name}. Select every documented platform before starting the release.`);
+  }
+}
+
 /** Curated download links may only advertise files present in this release. */
 export function assertReleaseNoteAssets(notes, repo, tag, assets) {
   const names = new Set(assets);
-  for (const match of notes.matchAll(/https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/releases\/download\/([^/\s]+)\/([^\s)<>]+)/gu)) {
-    if (match[1] !== repo || match[2] !== tag) continue;
-    if (!names.has(match[3])) throw new Error(`Release notes advertise an unavailable asset: ${match[3]}`);
+  for (const name of releaseNoteAssetNames(notes, repo, tag)) {
+    if (!names.has(name)) throw new Error(`Release notes advertise an unavailable asset: ${name}`);
   }
 }

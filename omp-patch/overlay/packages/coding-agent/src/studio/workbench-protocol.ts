@@ -4,12 +4,8 @@ import {
 	type SearchCredentialsOperation,
 	type SearchCredentialsResultMap,
 } from "./search-credentials-protocol";
-import {
-	EXTENSION_LINK_KINDS,
-	type ExtensionLinkOperation,
-	type ExtensionLinkResultMap,
-} from "./extension-links-protocol";
-import { WEBMCP_KINDS, type WebMcpOperation, type WebMcpResultMap } from "./webmcp-protocol";
+import { EXTENSION_LINK_KINDS, type ExtensionLinkOperation } from "./extension-links-protocol";
+import { WEBMCP_KINDS, type WebMcpOperation } from "./webmcp-protocol";
 import {
 	EVALUATION_WORKSPACE_KINDS,
 	isEvaluationWorkspaceKind,
@@ -38,7 +34,6 @@ import {
 	NATIVE_PLAN_REVIEW_KINDS,
 	isNativePlanReviewKind,
 	validateNativePlanReviewOperation,
-	validateNativePlanReviewResult,
 	type NativePlanReviewOperation,
 	type NativePlanReviewResultMap,
 } from "./plan-review-protocol";
@@ -46,7 +41,6 @@ import {
 	SESSION_WORKTREE_KINDS,
 	isSessionWorktreeKind,
 	validateSessionWorktreeOperation,
-	validateSessionWorktreeResult,
 	type SessionWorktreeOperation,
 	type SessionWorktreeResultMap,
 } from "./session-worktrees-protocol";
@@ -54,7 +48,6 @@ import {
 	SESSION_COMPRESSION_KINDS,
 	isSessionCompressionKind,
 	validateSessionCompressionOperation,
-	validateSessionCompressionResult,
 	type SessionCompressionOperation,
 	type SessionCompressionResultMap,
 } from "./session-compression-protocol";
@@ -62,7 +55,6 @@ import {
 	SESSION_PORTABILITY_KINDS,
 	isSessionPortabilityKind,
 	validateSessionPortabilityOperation,
-	validateSessionPortabilityResult,
 	type SessionPortabilityOperation,
 	type SessionPortabilityResultMap,
 } from "./session-portability-protocol";
@@ -71,7 +63,6 @@ import {
 	FEATURE_SETTINGS_READ_KINDS,
 	isFeatureSettingsKind,
 	validateFeatureSettingsOperation,
-	validateFeatureSettingsResult,
 	type FeatureSettingsOperation,
 	type FeatureSettingsResultMap,
 } from "./feature-settings-protocol";
@@ -79,7 +70,6 @@ import {
 	SESSION_TITLES_KINDS,
 	isSessionTitlesKind,
 	validateSessionTitlesOperation,
-	validateSessionTitlesResult,
 	type SessionTitlesOperation,
 	type SessionTitlesResultMap,
 } from "./session-titles-protocol";
@@ -87,7 +77,6 @@ import {
 	PREDICTION_KINDS,
 	isPredictionKind,
 	validatePredictionChannelOperation,
-	validatePredictionChannelResult,
 	type PredictionChannelOperation,
 	type PredictionResultMap,
 } from "./prediction-channel-protocol";
@@ -96,7 +85,6 @@ import {
 	MAINTENANCE_READ_KINDS,
 	isMaintenanceKind,
 	validateMaintenanceOperation,
-	validateMaintenanceResult,
 	type MaintenanceOperation,
 	type MaintenanceResultMap,
 } from "./maintenance-protocol";
@@ -104,7 +92,6 @@ import {
 	ARCHIVE_OPERATION_KINDS,
 	isArchiveOperationKind,
 	validateArchiveOperation,
-	validateArchiveResult,
 	type ArchiveOperation,
 	type ArchiveResultMap,
 } from "./archive-protocol";
@@ -112,7 +99,6 @@ import {
 	AGENT_MODEL_KINDS,
 	isAgentModelKind,
 	validateAgentModelOperation,
-	validateAgentModelResult,
 	type AgentModelOperation,
 	type AgentModelResultMap,
 } from "./agent-model-protocol";
@@ -120,7 +106,6 @@ import {
 	SESSION_RESTORE_KINDS,
 	isSessionRestoreKind,
 	validateSessionRestoreOperation,
-	validateSessionRestoreResult,
 	type SessionRestoreOperation,
 	type SessionRestoreResultMap,
 } from "./session-restore-protocol";
@@ -128,7 +113,6 @@ import {
 	RUNTIME_QUEUE_KINDS,
 	isRuntimeQueueKind,
 	validateRuntimeQueueOperation,
-	validateRuntimeQueueResult,
 	type RuntimeQueueOperation,
 	type RuntimeQueueResultMap,
 } from "./runtime-queue-protocol";
@@ -136,7 +120,6 @@ import {
 	NATIVE_PREFERENCE_KINDS,
 	isNativePreferenceKind,
 	validateNativePreferenceOperation,
-	validateNativePreferenceResult,
 	type NativePreferenceOperation,
 	type NativePreferenceResultMap,
 } from "./native-preferences-protocol";
@@ -144,7 +127,6 @@ import {
 	RATCHET_OPERATION_KINDS,
 	isRatchetKind,
 	validateRatchetOperation,
-	validateRatchetResult,
 	type RatchetOperation,
 	type RatchetResultMap,
 } from "./ratchet-protocol";
@@ -158,7 +140,6 @@ import {
 	COMPUTER_OBSERVATION_KINDS,
 	isComputerObservationKind,
 	validateComputerObservationOperation,
-	validateComputerObservationResult,
 	type ComputerObservationOperation,
 	type ComputerObservationResultMap,
 } from "./computer-observation-protocol";
@@ -166,7 +147,6 @@ import {
 	BROWSER_OBSERVATION_KINDS,
 	isBrowserObservationKind,
 	validateBrowserObservationOperation,
-	validateBrowserObservationResult,
 	type BrowserObservationOperation,
 	type BrowserObservationResultMap,
 } from "./browser-observation-protocol";
@@ -174,7 +154,6 @@ import {
 	IDA_OPERATION_KINDS,
 	isIdaOperationKind,
 	validateStudioIdaOperation,
-	validateStudioIdaResult,
 	type StudioIdaOperation,
 	type StudioIdaResultMap,
 } from "./ida-details-protocol";
@@ -182,7 +161,6 @@ import {
 	SESSION_OPTIONS_KINDS,
 	isSessionOptionsKind,
 	validateSessionOptionsOperation,
-	validateSessionOptionsResult,
 	type SessionOptionsOperation,
 	type SessionOptionsResultMap,
 } from "./session-options-protocol";
@@ -191,7 +169,6 @@ import {
 	SESSION_GUI_READ_KINDS,
 	isSessionGuiKind,
 	validateSessionGuiOperation,
-	validateSessionGuiResult,
 	type SessionGuiOperation,
 	type SessionGuiResultMap,
 } from "./session-gui-protocol";
@@ -199,7 +176,6 @@ import {
 	SKILLSHARE_OPERATION_KINDS,
 	isSkillshareOperationKind,
 	validateSkillshareOperation,
-	validateSkillshareResult,
 	type SkillshareOperation,
 	type SkillshareResultMap,
 } from "./skillshare-protocol";
@@ -207,7 +183,6 @@ import {
 	LIVE_AUDIO_OPERATION_KINDS,
 	isLiveAudioOperationKind,
 	validateLiveAudioOperation,
-	validateLiveAudioResult,
 	type LiveAudioOperation,
 	type LiveAudioResultMap,
 } from "./live-audio-protocol";
@@ -215,7 +190,6 @@ import {
 	MEDIA_OPERATION_KINDS,
 	isMediaOperationKind,
 	validateMediaOperation,
-	validateMediaResult,
 	type MediaOperation,
 	type MediaResultMap,
 } from "./media-protocol";
@@ -223,7 +197,6 @@ import {
 	BENCHMARK_OPERATION_KINDS,
 	isBenchmarkOperationKind,
 	validateBenchmarkOperation,
-	validateBenchmarkResult,
 	type BenchmarkOperation,
 	type BenchmarkResultMap,
 } from "./benchmarks-protocol";
@@ -231,7 +204,6 @@ import {
 	RUNTIME_CATALOG_OPERATION_KINDS,
 	isRuntimeCatalogOperationKind,
 	validateRuntimeCatalogOperation,
-	validateRuntimeCatalogResult,
 	type RuntimeCatalogOperation,
 	type RuntimeCatalogResultMap,
 } from "./runtime-catalog-protocol";
@@ -239,7 +211,6 @@ import {
 	JUDGMENT_OPERATION_KINDS,
 	isJudgmentOperationKind,
 	validateJudgmentOperation,
-	validateJudgmentResult,
 	type JudgmentOperation,
 	type JudgmentResultMap,
 } from "./judgments-protocol";
@@ -248,18 +219,16 @@ import {
 	RUNTIME_FEATURE_READ_KINDS,
 	isRuntimeFeatureKind,
 	validateRuntimeFeatureOperation,
-	validateRuntimeFeatureResult,
 	type RuntimeFeatureOperation,
 	type RuntimeFeatureResultMap,
 } from "./runtime-features-protocol";
 import {
 	ANNOTATION_OPERATION_KINDS,
 	validateAnnotationOperation,
-	validateAnnotationResult,
 	type AnnotationOperation,
 	type AnnotationResultMap,
 } from "./annotations-protocol";
-import { validateAccountStatus, type AccountStatusResult } from "./accounts-protocol";
+import { type AccountStatusResult } from "./accounts-protocol";
 /** Shared, presentation-neutral tools added with OMP 18.3.0. */
 export interface StudioServiceSpec {
 	name: string;
@@ -808,243 +777,4 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	}
 	if (input.limit !== undefined) integer(input.limit, 1, 200);
 	if (input.lines !== undefined) integer(input.lines, 1, 1000);
-}
-
-function serviceRow(value: unknown): void {
-	const row = record(value, [
-		"name",
-		"instanceId",
-		"state",
-		"startedAt",
-		"readyAt",
-		"exitedAt",
-		"exitCode",
-		"restartCount",
-		"outputBytes",
-		"ownerAgentId",
-		"mode",
-	]);
-	text(row.name, 48);
-	text(row.instanceId);
-	mode(row.mode);
-	if (!["starting", "running", "ready", "restarting", "stopping", "exited", "failed"].includes(row.state as string))
-		throw new Error("Invalid service state");
-	for (const key of ["startedAt", "restartCount", "outputBytes"]) integer(row[key]);
-	for (const key of ["readyAt", "exitedAt"]) if (row[key] !== undefined) integer(row[key]);
-	if (row.exitCode !== undefined) integer(row.exitCode, -2147483648, 2147483647);
-	if (row.ownerAgentId !== undefined) text(row.ownerAgentId);
-}
-export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value: unknown): void {
-	if (isSearchCredentialsKind(kind)) return;
-	if (kind === "extensions.links.activate" || kind === "browser.webmcp.invoke") return;
-	if (isComputerWorkspaceCommand(kind)) return;
-	if (isEvaluationWorkspaceKind(kind)) return;
-	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
-	if (isSessionTitlesKind(kind)) {
-		validateSessionTitlesResult(kind, value);
-		return;
-	}
-	if (isPredictionKind(kind)) {
-		validatePredictionChannelResult(kind, value);
-		return;
-	}
-	if (isMaintenanceKind(kind)) {
-		validateMaintenanceResult(kind, value);
-		return;
-	}
-	if (isArchiveOperationKind(kind)) {
-		validateArchiveResult(kind, value);
-		return;
-	}
-	if (isAgentModelKind(kind)) {
-		validateAgentModelResult(kind, value);
-		return;
-	}
-
-	if (isSessionRestoreKind(kind)) {
-		validateSessionRestoreResult(kind, value);
-		return;
-	}
-
-	if (isRuntimeQueueKind(kind)) {
-		validateRuntimeQueueResult(kind, value);
-		return;
-	}
-
-	if (isNativePlanReviewKind(kind)) {
-		validateNativePlanReviewResult(kind, value);
-		return;
-	}
-	if (isSessionWorktreeKind(kind)) {
-		validateSessionWorktreeResult(kind, value);
-		return;
-	}
-	if (isSessionCompressionKind(kind)) {
-		validateSessionCompressionResult(kind, value);
-		return;
-	}
-	if (isSessionPortabilityKind(kind)) {
-		validateSessionPortabilityResult(kind, value);
-		return;
-	}
-	if (isFeatureSettingsKind(kind)) {
-		validateFeatureSettingsResult(kind, value);
-		return;
-	}
-	if (isNativePreferenceKind(kind)) {
-		validateNativePreferenceResult(kind, value);
-		return;
-	}
-	if (kind === "accounts.logout") {
-		if (record(value, ["loggedOut"]).loggedOut !== true) throw new Error("Logout did not complete");
-		return;
-	}
-	if (isRatchetKind(kind)) {
-		validateRatchetResult(kind, value);
-		return;
-	}
-	if (isComputerObservationKind(kind)) {
-		validateComputerObservationResult(kind, value);
-		return;
-	}
-	if (isBrowserObservationKind(kind)) {
-		validateBrowserObservationResult(kind, value);
-		return;
-	}
-	if (isIdaOperationKind(kind)) {
-		validateStudioIdaResult(kind, value);
-		return;
-	}
-	if (isSessionOptionsKind(kind)) {
-		validateSessionOptionsResult(kind, value);
-		return;
-	}
-	if (isSessionGuiKind(kind)) {
-		validateSessionGuiResult(kind, value);
-		return;
-	}
-	if (isSkillshareOperationKind(kind)) {
-		validateSkillshareResult(kind, value);
-		return;
-	}
-	if (isLiveAudioOperationKind(kind)) {
-		validateLiveAudioResult(kind, value);
-		return;
-	}
-	if (isMediaOperationKind(kind)) {
-		validateMediaResult(kind, value);
-		return;
-	}
-	if (isBenchmarkOperationKind(kind)) {
-		validateBenchmarkResult(kind, value);
-		return;
-	}
-	if (isRuntimeCatalogOperationKind(kind)) {
-		validateRuntimeCatalogResult(kind, value);
-		return;
-	}
-	if (isJudgmentOperationKind(kind)) {
-		validateJudgmentResult(kind, value);
-		return;
-	}
-	if (isRuntimeFeatureKind(kind)) {
-		validateRuntimeFeatureResult(kind, value);
-		return;
-	}
-	if (kind === "annotations.capture" || kind === "annotations.prepare") {
-		validateAnnotationResult(kind, value);
-		return;
-	}
-	if (kind === "accounts.status" || kind === "accounts.status.details") {
-		validateAccountStatus(value);
-		return;
-	}
-	if (kind === "runtime.models.describe") {
-		const described = record(value, ["model"]);
-		validateWorkbenchResult("runtime.models.list", { models: [described.model], total: 1 });
-		return;
-	}
-	if (kind === "services.list") {
-		const result = record(value, ["enabled", "services"]);
-		if (typeof result.enabled !== "boolean" || !Array.isArray(result.services) || result.services.length > 500)
-			throw new Error("Invalid service list");
-		result.services.forEach(serviceRow);
-	} else if (kind === "services.logs") {
-		const result = record(value, ["instanceId", "text", "cursor", "state"]);
-		text(result.instanceId);
-		text(result.text, 65536, true);
-		integer(result.cursor);
-		text(result.state, 32);
-	} else if (kind.startsWith("services.")) {
-		const result = record(value, kind === "services.start" ? ["service", "readyTimedOut"] : ["service"]);
-		serviceRow(result.service);
-		if (kind === "services.start" && typeof result.readyTimedOut !== "boolean")
-			throw new Error("Invalid readiness result");
-	} else if (kind === "tokens.count") {
-		const result = record(value, ["bytes", "chars", "lines", "encodings"]);
-		for (const key of ["bytes", "chars", "lines"]) integer(result[key]);
-		if (!Array.isArray(result.encodings) || result.encodings.length > 64) throw new Error("Invalid encoding list");
-		for (const item of result.encodings) {
-			const row = record(item, ["encoding", "tokens"]);
-			text(row.encoding);
-			integer(row.tokens);
-		}
-	} else {
-		const result = record(value, ["models", "total", "nextCursor"]);
-		integer(result.total);
-		if (result.nextCursor !== undefined) text(result.nextCursor);
-		if (!Array.isArray(result.models) || result.models.length > 200) throw new Error("Invalid model list");
-		for (const item of result.models) {
-			const row = record(item, [
-				"selector",
-				"name",
-				"provider",
-				"kind",
-				"image",
-				"reasoning",
-				"contextWindow",
-				"maxTokens",
-				"webSearch",
-				"serviceTiers",
-				"promptCache",
-				"promptCacheConfig",
-				"compatibility",
-			]);
-			for (const key of ["selector", "name", "provider", "kind"]) text(row[key]);
-			if (typeof row.reasoning !== "boolean") throw new Error("Invalid model reasoning capability");
-			for (const key of ["contextWindow", "maxTokens"]) if (row[key] !== undefined) integer(row[key]);
-			if (typeof row.image !== "boolean") throw new Error("Invalid model image capability");
-			if (row.webSearch !== undefined) text(row.webSearch);
-			if (row.serviceTiers !== undefined) {
-				if (!Array.isArray(row.serviceTiers) || row.serviceTiers.length > 32)
-					throw new Error("Invalid service tiers");
-				row.serviceTiers.forEach(value => text(value, 128));
-			}
-			for (const field of ["promptCache", "promptCacheConfig"])
-				if (row[field] !== undefined) {
-					const cache = record(row[field], ["short", "long"]);
-					for (const key of ["short", "long"])
-						if (
-							cache[key] !== undefined &&
-							(typeof cache[key] !== "number" || !Number.isFinite(cache[key]) || (cache[key] as number) < 0)
-						)
-							throw new Error("Invalid prompt cache lifetime");
-				}
-			if (row.compatibility !== undefined) {
-				const compat = record(row.compatibility, [
-					"preferWebsockets",
-					"useResponsesLite",
-					"toolMode",
-					"supportsMessageThreads",
-					"toolNamePrefix",
-					"statefulResponses",
-				]);
-				for (const field of ["preferWebsockets", "useResponsesLite"])
-					if (compat[field] !== undefined && typeof compat[field] !== "boolean")
-						throw new Error("Invalid model compatibility flag");
-				if (compat.toolMode !== undefined && compat.toolMode !== "code_mode_only")
-					throw new Error("Invalid model tool mode");
-			}
-		}
-	}
 }

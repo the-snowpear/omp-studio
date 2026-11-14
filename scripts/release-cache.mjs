@@ -15,6 +15,14 @@ export function dependencyFingerprint(lockfile) {
   return createHash("sha256").update(JSON.stringify(external)).digest("hex");
 }
 
+/** A stale local install must not silently select an older Electron for a release package. */
+export function assertLockedElectronVersion(root = repositoryRoot) {
+  const expected = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")).packages["node_modules/electron"].version;
+  const installed = JSON.parse(readFileSync(join(root, "node_modules", "electron", "package.json"), "utf8")).version;
+  if (installed !== expected) throw new Error(`Electron dependency is ${installed}; package-lock requires ${expected}. Run npm ci before packaging.`);
+  return expected;
+}
+
 export function writeReleaseCacheOutputs() {
   const lockfile = JSON.parse(readFileSync(join(repositoryRoot, "package-lock.json"), "utf8"));
   const npm = npmInvocation();

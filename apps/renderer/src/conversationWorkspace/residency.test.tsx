@@ -116,7 +116,8 @@ it.each([false, true])("opens a conversation from History instead of restoring i
   navigateTo("History");
   await waitFor(() => expect(document.querySelector("#pageBody")?.getAttribute("data-route")).toBe("history"));
   const target = released ? 1 : 0;
-  fireEvent.click(await screen.findByRole("link", { name: new RegExp(`^Residency session ${target}`) }));
+  // The lazy History content loads after its route shell appears.
+  fireEvent.click(await screen.findByRole("link", { name: new RegExp(`^Residency session ${target}`) }, { timeout: 5_000 }));
   if (released) {
     await expectConversation(1);
     await waitFor(() => expect(input.counts.closed).toBe(1));

@@ -319,6 +319,7 @@ export function ComposerModelPicker({
   refreshKey = "",
   snapshot,
   can,
+  canStartSession = false,
   onRun,
   openNonce = 0,
 }: {
@@ -329,6 +330,8 @@ export function ComposerModelPicker({
   /** Runtime 真值；`snapshot.model` 是 pill 当前值的唯一来源。 */
   snapshot?: OperatorStateSnapshot;
   can: (id: string) => boolean;
+  /** Explicit selection may start or resume the viewed session. */
+  canStartSession?: boolean;
   busy: boolean;
   onRun: <T extends CommandName>(name: T, input: CommandInput<T>) => Promise<boolean>;
   /** Increment to open the model menu from `/model`. */
@@ -342,6 +345,7 @@ export function ComposerModelPicker({
   // Task 子代理模式：菜单内切换，激活后列表选择的是会话级 Task 模型而非会话模型。
   const [taskPicking, setTaskPicking] = useState(false);
   const [previewTaskPick, setPreviewTaskPick] = useState<ComposerPick | null>(null);
+  const [selecting, setSelecting] = useState(false);
 
   useEffect(() => {
     if (openNonce > 0) setMenu("model");
@@ -415,7 +419,7 @@ export function ComposerModelPicker({
     () => (preview ? previewPick : snapshotPick(snapshot, data?.roles ?? [])),
     [preview, previewPick, snapshot, data],
   );
-  const modelReady = preview || can("session.model.set");
+  const modelReady = preview || can("session.model.set") || canStartSession;
   const thinkingReady = preview || can("session.thinking.set");
   const taskReady = preview || can("session.taskModel.set");
   const nextTurnOnly = !preview && (snapshot?.isStreaming === true || snapshot?.isCompacting === true);
@@ -460,7 +464,8 @@ export function ComposerModelPicker({
 
   /** 失败由父级 onRun 报错；pill 始终跟 snapshot，不做乐观回填。 */
   const apply = <T extends CommandName>(name: T, input: CommandInput<T>) => {
-    void onRun(name, input);
+    setSelecting(true);
+    void onRun(name, input).finally(() => setSelecting(false));
   };
 
   const chooseRole = (role: ModelRoleRecord) => {
@@ -534,6 +539,8 @@ export function ComposerModelPicker({
           aria-expanded={menu === "model"}
           aria-label={t("composer.selectModel")}
           aria-description={modelLabel}
+          disabled={selecting}
+          aria-busy={selecting || undefined}
           data-tip={!modelReady ? t("common.notImplemented") : `${t("composer.model")}: ${modelLabel}`}
           onClick={() => {
             if (menu === "model") {
@@ -560,7 +567,7 @@ export function ComposerModelPicker({
             loading={loading}
             loadError={loadError}
             preview={preview}
-            disabled={taskPicking ? !taskReady : !modelReady}
+            disabled={selecting || (taskPicking ? !taskReady : !modelReady)}
             header={
               <button
                 type="button"
@@ -610,7 +617,7 @@ export function ComposerModelPicker({
         <button
           type="button"
           className="pill-btn cmp-responsive-pill"
-          disabled={!pick || thinking.disabled || !thinkingReady}
+          disabled={selecting || !pick || thinking.disabled || !thinkingReady}
           aria-haspopup="menu"
           aria-expanded={menu === "thinking"}
           aria-label={t("composer.reasoningEffort")}

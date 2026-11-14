@@ -10,7 +10,7 @@ import { AgentSession } from "../src/session/agent-session";
 import { SessionManager } from "../src/session/session-manager";
 import { StudioMaintenanceService } from "../src/studio/services/maintenance-service";
 import { StudioMediaFiles } from "../src/studio/services/media-files";
-import { validateMaintenanceResult, type SessionExportResult } from "../src/studio/maintenance-protocol";
+import { type SessionExportResult } from "../src/studio/maintenance-protocol";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 test("native dump-all ZIP reaches the private output with main, child and request payload intact", async () => {
 	const temp = TempDir.createSync("@studio-native-export-");
@@ -53,7 +53,6 @@ test("native dump-all ZIP reaches the private output with main, child and reques
 			kind: "maintenance.session.export",
 			sessionId: session.sessionId,
 		})) as SessionExportResult;
-		validateMaintenanceResult("maintenance.session.export", exported);
 		expect(exported.format).toBe("archive");
 		expect(exported.warnings).toEqual([]);
 		const key = new Bun.CryptoHasher("sha256").update(session.sessionId).digest("hex");

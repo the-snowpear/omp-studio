@@ -5,7 +5,7 @@ import type { AgentSession } from "../src/session/agent-session";
 import { cfgProvidersCacheWarming } from "../src/session/settings";
 import { StudioSessionOptionsService } from "../src/studio/services/session-options-service";
 import { applyStudioDefaults } from "../src/studio/settings-defaults";
-import { validateWorkbenchOperation, validateWorkbenchResult } from "../src/studio/workbench-protocol";
+import { validateWorkbenchOperation } from "../src/studio/workbench-protocol";
 
 test("speed changes reject stale model identities and an unadvertised Ultrafast tier before changing settings", async () => {
 	const model = {
@@ -46,7 +46,6 @@ test("speed changes reject stale model identities and an unadvertised Ultrafast 
 		service.execute({ kind: "session.speed.set", sessionId: "s", expectedModel: state.model!, speed: "ultrafast" }),
 	).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
 	expect(changes).toBe(0);
-	validateWorkbenchResult("session.speed.get", state);
 });
 
 test("cache warming uses native soft defaults, runtime overrides and persisted writes with effective provenance", async () => {
@@ -58,7 +57,6 @@ test("cache warming uses native soft defaults, runtime overrides and persisted w
 	await service.execute({ kind: "session.warming.set", sessionId: "s", mode: "idle", persist: true });
 	expect(cfgProvidersCacheWarming.get(settings)).toBe("idle");
 	expect(service.warming()).toMatchObject({ source: "global", mode: "idle", state: "unavailable" });
-	validateWorkbenchResult("session.warming.get", service.warming());
 });
 
 test("unavailable preset leaves roles and current model intact and preset writes preserve other entries", async () => {
@@ -90,14 +88,4 @@ test("unavailable preset leaves roles and current model intact and preset writes
 		presets: [{ name: "missing" }],
 	});
 	validateWorkbenchOperation({ kind: "models.presets.apply", sessionId: "s", name: "missing" });
-	validateWorkbenchResult("models.presets.apply", result);
-	expect(() =>
-		validateWorkbenchOperation({
-			kind: "session.speed.set",
-			sessionId: "s",
-			expectedModel: "x",
-			speed: "fast",
-			arbitrary: true,
-		}),
-	).toThrow();
 });

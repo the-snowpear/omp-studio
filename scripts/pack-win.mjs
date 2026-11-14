@@ -23,6 +23,7 @@ import process from "node:process";
 
 import { npmInvocation, repositoryRoot, run } from "./omp-tooling.mjs";
 import { auditInstallerOutput, defaultInstallerOutputDirectory } from "./audit-installer.mjs";
+import { assertLockedElectronVersion } from "./release-cache.mjs";
 import { buildInstallerHost } from "./build-installer-host.mjs";
 import { bundlePreload } from "./preload-bundle.mjs";
 import { resolveTargetArch, assertNativeRuntimeBuild } from "./windows-architecture.mjs";
@@ -33,7 +34,7 @@ function hasFlag(name) {
   return process.argv.slice(2).includes(name);
 }
 
-function disableNodePtySpectreMitigation() {
+function prepareWindowsNodePtyBuild() {
   const ptyRoot = join(repositoryRoot, "node_modules", "node-pty");
   if (!existsSync(ptyRoot)) {
     throw new Error("node-pty is missing. Run npm install.");
@@ -54,7 +55,11 @@ function disableNodePtySpectreMitigation() {
     const path = join(ptyRoot, rel);
     if (!existsSync(path)) continue;
     const text = readFileSync(path, "utf8");
-    const next = text.replaceAll("'SpectreMitigation': 'Spectre'", "'SpectreMitigation': 'false'");
+    // CMD may disable implicit current-directory lookup; keep that setting and name the scripts explicitly.
+    const next = text
+      .replaceAll("'SpectreMitigation': 'Spectre'", "'SpectreMitigation': 'false'")
+      .replaceAll("&& GetCommitHash.bat", String.raw`&& .\\GetCommitHash.bat`)
+      .replaceAll("&& UpdateGenVersion.bat", String.raw`&& .\\UpdateGenVersion.bat`);
     if (next !== text) writeFileSync(path, next);
   }
 }
@@ -67,6 +72,7 @@ async function main() {
     throw new Error("electron-builder is missing. Run npm install.");
   }
 
+  const electronVersion = assertLockedElectronVersion();
   const skipHost = hasFlag("--skip-host") || process.env.OMP_PACK_SKIP_HOST === "1";
   const skipBuild = hasFlag("--skip-build") || process.env.OMP_PACK_SKIP_BUILD === "1";
   const npm = npmInvocation();
@@ -83,8 +89,7 @@ async function main() {
   };
 
   if (hasFlag("--native-only")) {
-    disableNodePtySpectreMitigation();
-    const electronVersion = JSON.parse(readFileSync(join(repositoryRoot, "node_modules", "electron", "package.json"), "utf8")).version;
+    prepareWindowsNodePtyBuild();
     const { rebuild } = await import("@electron/rebuild");
     const task = rebuild({
       buildPath: join(repositoryRoot, "apps", "desktop"),
@@ -130,8 +135,8 @@ async function main() {
   console.log("[pack:win] Building HTML installer UI host...");
   await buildInstallerHost();
 
-  console.log("[pack:win] Disabling node-pty Spectre mitigation for Electron rebuild...");
-  disableNodePtySpectreMitigation();
+  console.log("[pack:win] Preparing node-pty Windows build compatibility...");
+  prepareWindowsNodePtyBuild();
 
   console.log("[pack:win] electron-builder NSIS...");
   run(

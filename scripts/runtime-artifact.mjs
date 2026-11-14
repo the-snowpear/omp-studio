@@ -51,6 +51,7 @@ export const MANAGED_ENTRYPOINT = RUNTIME_ENTRYPOINTS.win32;
 // packages/studio-protocol/src/contracts/protocol.ts.
 export const STUDIO_PROTOCOL_RANGE = Object.freeze({ min: 1, max: 1 });
 
+// Keep this literal usable before workspace builds; tooling checks its exact Runtime order.
 export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "timeTravel.capture",
   "computer.workspace.get",
@@ -586,7 +587,7 @@ function assertRuntimeIdentity(identity, expected) {
   }
   const expectedCapabilityHash = implementedManifestHash("capabilities");
   if (identity.capabilityHash !== expectedCapabilityHash) {
-    throw new Error("Runtime identity capability hash does not match the packaged capability definition");
+    throw new Error(`Runtime identity capability hash does not match the packaged capability definition: expected ${expectedCapabilityHash}, found ${identity.capabilityHash ?? "missing"}`);
   }
   for (const field of ["capabilityHash", "commandManifestHash"]) {
     if (!/^sha256:[a-f0-9]{64}$/u.test(identity[field] ?? "")) {

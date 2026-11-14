@@ -1,14 +1,12 @@
-import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
 import { downloadWebView2Sdk } from "./build-installer-host.mjs";
-import { repositoryRoot } from "./omp-tooling.mjs";
+import { assertLockedElectronVersion } from "./release-cache.mjs";
 import { resolveTargetArch } from "./windows-architecture.mjs";
 
 const require = createRequire(import.meta.url);
 const windows = require("app-builder-lib/out/toolsets/windows.js");
 const { downloadElectronArtifactZip } = require("app-builder-lib/out/util/electronGet.js");
-const version = JSON.parse(readFileSync(join(repositoryRoot, "node_modules", "electron", "package.json"), "utf8")).version;
+const version = assertLockedElectronVersion();
 await Promise.all([
   windows.getMakeNsisPath(),
   windows.getNsisPluginsPath(),

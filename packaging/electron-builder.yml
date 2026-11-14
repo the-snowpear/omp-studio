@@ -35,7 +35,7 @@ files:
   - "!**/@omp-studio/*/src/**"
   - "!**/@omp-studio/*/test/**"
   - "!**/@omp-studio/*/tsconfig*.json"
-  - "!**/*.exe"
+  # Dependency EXEs include node-pty's WinPTY helper; exclude only our separately staged askpass.
   - "!dist/ssh-askpass/**"
 
 # Native PTY bits must not stay inside asar. Icons are also unpacked so a

@@ -67,34 +67,3 @@ export function validateAnnotationBundle(value: unknown): asserts value is Annot
   if (row.workspaceId !== undefined) text(row.workspaceId); if (row.sessionId !== undefined) text(row.sessionId);
   content(row.sources, row.notes);
 }
-export function validateAnnotationOperation(value: unknown): asserts value is AnnotationOperation {
-  if (!value || typeof value !== "object") throw new Error("Invalid annotation operation");
-  if ((value as { kind?: string }).kind === "annotations.capture") {
-    const row = object(value, ["kind", "source"]);
-    const input = row.source as Record<string, unknown>;
-    if (input?.kind === "file" || input?.kind === "diff") {
-      object(input, ["kind", "path"]);
-      if (input.kind === "file" || input.path !== undefined) relative(input.path);
-    } else {
-      object(input, ["kind", "text", "label", "sessionId", "messageId"]);
-      if (input.kind !== "message" && input.kind !== "quote") throw new Error("Invalid annotation capture kind");
-      text(input.text, 120000, true); text(input.label);
-      if (input.sessionId !== undefined) text(input.sessionId); if (input.messageId !== undefined) text(input.messageId);
-    }
-  } else {
-    const row = object(value, ["kind", "sources", "notes", "action", "allowStale"]);
-    if (row.kind !== "annotations.prepare" || !["feedback", "review"].includes(row.action as string)) throw new Error("Invalid annotation action");
-    if (row.allowStale !== undefined && typeof row.allowStale !== "boolean") throw new Error("Invalid stale-source choice");
-    content(row.sources, row.notes);
-  }
-}
-export function validateAnnotationResult(kind: AnnotationOperation["kind"], value: unknown): void {
-  if (byteLength(JSON.stringify(value)) > 800000) throw new Error("Annotation result exceeds the encoded control-frame budget");
-  if (kind === "annotations.capture") { const result = object(value, ["source"]); source(result.source); }
-  else {
-    const result = object(value, ["prompt", "staleSources"]); text(result.prompt, 800000, true);
-    if (byteLength(result.prompt as string) > 800000) throw new Error("Annotation prompt exceeds the control-frame budget");
-    if (!Array.isArray(result.staleSources) || result.staleSources.length > 16) throw new Error("Invalid stale-source list");
-    result.staleSources.forEach(item => text(item));
-  }
-}

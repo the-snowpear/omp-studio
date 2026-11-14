@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { WorkspaceDialog } from "../workspaces/Workspace";
 import type { CommandInput, StudioClient } from "@omp-studio/client-contract";
 import {
-  validateSkillshareAction,
   type SkillshareAction,
   type SkillshareActionState,
   type SkillshareResultMap,
@@ -327,7 +326,6 @@ export function SkillsharePane({
   }, [action?.id, action?.state, preview, sessionId, invoke, load, visible]);
   const prepare = (request: SkillshareAction) =>
     void run(async (generation) => {
-      validateSkillshareAction(request);
       setSecret(undefined);
       if (preview) {
         const id = crypto.randomUUID();

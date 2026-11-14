@@ -535,6 +535,57 @@ test("separate conversation contexts keep their selected sessions and closing on
   }));
 });
 
+for (const failure of ["throw", "empty"] as const) test(`a conversation context records a ${failure} startup failure and clears it after model selection`, async () => {
+  await withTempProfile(async profileDirectory => withTempExecutable(async executablePath => {
+    const root = fakeSessionPort({ ready: true });
+    const ready = (await root.port.start({ profileDirectory } as DesktopRuntimeSessionContext))!;
+    let failed = true;
+    const models: Array<string | undefined> = [];
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port, authorityLock: fakeAuthorityLock().port,
+      privateEndpoint: fakePrivateEndpoint().port,
+      resolver: { probe: fullParityProbe() }, preference: { kind: "system", executable: executablePath, allowLimited: false },
+      runtimeSession: { ...root.port, sessionFor: () => undefined, openContextSession: async (_workspace, intent) => {
+        models.push(intent.model);
+        if (failed) {
+          if (failure === "throw") throw new Error("conversation handshake failed");
+          return undefined;
+        }
+        return ready;
+      } },
+      facade: { resolveImportWorkspace: async () => profileDirectory },
+    });
+    try {
+      const context = await composition.transport.openContext!({ workspaceId: "workspace-a" as WorkspaceId });
+      const completed = (requestId: string) => new Promise<void>(resolve => {
+        const off = context.subscribe({ scope: "command", requestId: requestId as CommandRequestId }, event => {
+          if (event.kind === "command.receipt") { off(); resolve(); }
+        });
+      });
+      assert.equal((await context.bootstrap()).runtime.unavailableCode, undefined);
+      const statuses: string[] = [];
+      context.subscribe({ scope: "all" }, event => { if (event.kind === "runtime.changed") statuses.push(event.connection.status); });
+      const failedReceipt = completed("context-fail");
+      await context.command({ commandName: "runtime.ensure", input: {}, requestId: "context-fail" as CommandRequestId, idempotencyKey: "context-fail" as IdempotencyKey });
+      await failedReceipt;
+      const unavailable = (await context.bootstrap()).runtime;
+      assert.equal(unavailable.status, "unavailable");
+      assert.equal(unavailable.unavailableCode, "launch-failed");
+      if (failure === "throw") assert.match(unavailable.unavailableReason ?? "", /conversation handshake failed/);
+      assert.ok(statuses.includes("unavailable"));
+      failed = false;
+      const readyReceipt = completed("context-retry");
+      await context.command({ commandName: "session.create", input: { model: "test/chosen" }, requestId: "context-retry" as CommandRequestId, idempotencyKey: "context-retry" as IdempotencyKey });
+      await readyReceipt;
+      const connected = (await context.bootstrap()).runtime;
+      assert.equal(connected.status, "connected");
+      assert.equal(connected.unavailableCode, undefined);
+      assert.equal(models.at(-1), "test/chosen");
+      await context.close();
+    } finally { await composition.shutdown(); }
+  }));
+});
+
 test("composition follows the P1 initialization order and bootstraps read-only without a runtime", async () => {
   await withTempProfile(async (profileDirectory) => {
     const platform = fakePlatform(profileDirectory);

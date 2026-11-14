@@ -49,10 +49,16 @@ Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`；macOS：`~
 
 目标是快速、可靠地交付，不是层层设防。
 
-- 参数校验只做一处：Host facade 或真正执行操作的服务（文件越界、git 参数注入这类安全检查放在服务里）。IPC / transport 只检查信封形状，不逐字段校验，不校验 Host 自己的输出，不深拷贝。
-- 新增 query / command 只需改契约类型、facade 分发和实现，不要为它另写边界校验器。
+- 输入校验只做一处，就在真正执行操作的那一层：
+  - 转发给 Runtime 的操作（workbench、settings、plan、upgrade 等）只在 overlay 的 `*-protocol.ts` / `bridge-protocol.ts` 校验。facade、桌面端、Renderer 不做预检，表单错误等 Runtime 返回后再显示。facade 只拦客户端伪造的私有字段（`rejectPrivateOperationFields`）。
+  - Host 自己执行的服务（artifact、annotation 导入、services 定义、GUI 设置、git、workspace-files）由该服务自己检查。
+  - 文件越界、路径穿越、NUL、git 参数注入这类安全检查放在执行服务里，不能省。
+- 不写结果 / 事件校验器：哪一层都不复查另一层的输出（Runtime 不自查返回值，Host、桌面端、preload 不复查 Runtime 发来的结果和事件），类型用 `as` 断言即可。IPC / transport 只检查信封形状，不深拷贝。
+- 不写"拒绝多余字段"的白名单，除非操作会被原样展开交给原生接口或付费接口（judgments、media、benchmarks、`services.start`），或者是 bridge / conversation 的信封。
+- `packages/studio-protocol/src/contracts/` 只放类型、kind 列表和纯函数，不放与 overlay 重复的校验器；留下的几个是 Host 侧执行服务唯一的那一处检查，列在 `architecture.test.mjs` 里。
+- 新增 query / command 只需改契约类型、facade 分发和实现（Runtime 操作再加一处 overlay 输入校验），不要为它另写边界校验器。
 - 测试只测用户能感知的行为和真实出过的 bug；不要为校验器、内部结构、"拒绝畸形输入"写成套测试，也不要为了测试改夹具绕圈。
-- 唯一的例外是 `scripts/architecture.test.mjs`：它只锚定已经写进本文的分层决策（依赖方向、electron / react 边界、预览开关唯一），不限制内部重构。改决策就同一次提交里改表和代码，diff 就是记录。
+- 唯一的例外是 `scripts/architecture.test.mjs`：它只锚定已经写进本文的分层决策（依赖方向、electron / react 边界、预览开关唯一、校验只留一处），不限制内部重构。改决策就同一次提交里改表和代码，diff 就是记录。
 - 发布前的检查只拦真正会发坏包的问题（签名、架构、产物缺失）。不在发布流程里重跑源码测试或 GUI 验收。
 
 ## 预览模式与 Mock 数据
@@ -136,6 +142,8 @@ node scripts/check.mjs --list          # 看有哪些组和包
 - `apps/renderer` 源码不能直接 import Node 内置模块或 `electron`，必须走 preload
 - `packages/*/src` 不能 import `@omp-studio/testkit`（演示数据留在渲染层 preview）
 - `PREVIEW_MODE_SWITCH_ENABLED` 只有 `preview/mode.ts` 一处定义，只有 `preview/` 读它
+- `studio-protocol/src/contracts/` 里只有白名单列出的文件可以 `throw`（防止重复校验器长回来）
+- 源码里不定义 `validate*Result` / `validate*Event` 这类输出校验器（包括 overlay）
 
 改分层是决策不是失误：同一次提交里改表和代码，diff 就是记录。
 

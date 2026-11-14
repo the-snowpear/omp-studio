@@ -62,20 +62,27 @@ export function RuntimeLossBanner({
     return null;
   }
 
-  const copy = status === "disconnected"
-    ? formatRuntimeDisconnectCopy(runtime?.disconnectCode, runtime?.disconnectReason)
-    : formatRuntimeUnavailableCopy(runtime?.unavailableCode, runtime?.unavailableReason);
+  // Every real failure records an unavailableCode. Unavailable with no facts is
+  // a conversation that has not attached a Runtime yet (an opened history or
+  // dormant project): it starts on the first send, so it is not a loss.
+  const dormant = status === "unavailable" && runtime?.unavailableCode === undefined && runtime?.unavailableReason === undefined;
+  const copy = dormant
+    ? { title: "Runtime 未启动", detail: "发送消息时会自动连接，也可以现在连接。" }
+    : status === "disconnected"
+      ? formatRuntimeDisconnectCopy(runtime?.disconnectCode, runtime?.disconnectReason)
+      : formatRuntimeUnavailableCopy(runtime?.unavailableCode, runtime?.unavailableReason);
   const actionMessage = message !== null && !copy.detail.includes(message) ? message : null;
   const auto = runtime?.autoRespawn === undefined ? undefined : formatRuntimeAutoRespawnCopy(runtime.autoRespawn);
   const canReconnect = runtimeCanReconnect(runtime);
-  const className = `${variant === "hub" ? "hub-conn red" : "banner red"}${busy ? " is-busy" : ""}${floatClass}`;
+  const tone = dormant ? "blue" : "red";
+  const className = `${variant === "hub" ? `hub-conn ${tone}` : `banner ${tone}`}${busy ? " is-busy" : ""}${floatClass}`;
   const detailClass = variant === "hub" ? "hc-detail" : "banner-detail";
   const actionsClass = variant === "hub" ? "hc-actions" : "banner-actions";
   const copyClass = variant === "hub" ? "hc-copy" : undefined;
 
   return (
-    <div className={className} role="alert" aria-busy={busy || undefined}>
-      <Icon name="alert" extra="sm" />
+    <div className={className} role={dormant ? "status" : "alert"} aria-busy={busy || undefined}>
+      <Icon name={dormant ? "info" : "alert"} extra="sm" />
       <span className={copyClass}>
         <b>{copy.title}</b>
         {" · "}
@@ -88,7 +95,7 @@ export function RuntimeLossBanner({
       <span className={actionsClass}>
         {canReconnect ? (
           <button type="button" className="btn small outline" disabled={busy} onClick={() => void reconnect()}>
-            {busy ? "正在连接…" : "重新连接"}
+            {busy ? "正在连接…" : dormant ? "立即连接" : "重新连接"}
           </button>
         ) : null}
         {onOpenDiagnostics ? (

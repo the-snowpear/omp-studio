@@ -40,8 +40,6 @@ import {
 	type SkillshareOperation,
 	type SkillshareReview,
 	type SkillshareVersion,
-	validateSkillshareOperation,
-	validateSkillshareResult,
 } from "../skillshare-protocol";
 import { SessionControlError } from "./session-control-service";
 
@@ -174,13 +172,11 @@ export class StudioSkillshareService {
 		}
 	}
 	async execute(operation: SkillshareOperation): Promise<unknown> {
-		validateSkillshareOperation(operation);
 		const cwd = this.session.sessionManager.getCwd();
 		this.#assert(operation.sessionId, cwd);
 		try {
 			const result = await this.#execute(operation, cwd);
 			this.#assert(operation.sessionId, cwd);
-			validateSkillshareResult(operation.kind, result);
 			return structuredClone(result);
 		} catch (cause) {
 			if (cause instanceof SessionControlError) throw cause;
@@ -293,7 +289,6 @@ export class StudioSkillshareService {
 				throw new SessionControlError("COMMAND_BLOCKED", "Discard old Skillshare reviews before creating another");
 			const plan = await this.#prepare(operation.action, operation.sessionId, cwd);
 			this.#assert(operation.sessionId, cwd);
-			validateSkillshareResult("skillshare.prepare", { review: plan.review });
 			this.#plans.set(plan.review.id, plan);
 			return { review: plan.review };
 		}
@@ -728,7 +723,6 @@ export class StudioSkillshareService {
 					: ["install", "update", "uninstall"].includes(action.type)
 						? "Local package manifests updated. Refresh skills explicitly to load the changed inventory."
 						: "The reviewed action completed.";
-			validateSkillshareResult("skillshare.action", { action: plan.state });
 		} catch (cause) {
 			plan.state.state =
 				submitted &&
