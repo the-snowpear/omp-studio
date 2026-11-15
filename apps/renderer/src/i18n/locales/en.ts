@@ -1,6 +1,7 @@
 import type { LocaleDictionary } from "./zh";
 
 export const en: LocaleDictionary = {
+  fileBrowser: { open: "Open file browser", showInBrowser: "Show in file browser", outsideProject: "Outside project" },
   onboarding: {
     kicker: "New in 0.2.0 · Workbench",
     stepOf: "Step {current} of {total}",

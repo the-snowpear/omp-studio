@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Icon, type IconName } from "../icons";
 import { MenuItem, useRowMenuAnchor } from "../menus";
 import { surfaceWindow, useSurfaceDocument } from "../dock/SurfaceContext";
+import { useI18n } from "../i18n";
 import { PLATFORM } from "../platform";
 import type { FileViewMode } from "../dock/types";
 
@@ -16,19 +17,21 @@ export interface FileTool { id: string; icon: IconName; tip: string; run: () => 
 export interface FileModeOption { id: FileViewMode; label: string; icon: IconName }
 
 /** Breadcrumb, state badges, view switch, tool icons, Save and the ⋯ menu. */
-export function FileHeader({ path, badge, dirty, readOnly, demo, git, modes, mode, onMode, tools, save, menu, onCopyPath }: {
-  path: string; badge: { badge: string; tone: string; label: string }; dirty: boolean; readOnly: boolean; demo: boolean;
+export function FileHeader({ outsideProject = false, path, badge, dirty, readOnly, demo, git, modes, mode, onMode, tools, save, menu, onCopyPath }: {
+  outsideProject?: boolean; path: string; badge: { badge: string; tone: string; label: string }; dirty: boolean; readOnly: boolean; demo: boolean;
   git: { additions: number; deletions: number } | null;
   modes: FileModeOption[] | null; mode: FileViewMode; onMode: (mode: FileViewMode) => void;
   tools: FileTool[]; save: { saving: boolean; disabled: boolean; run: () => void } | null;
   menu: FileMenuEntry[]; onCopyPath: () => void;
 }) {
+  const { t } = useI18n();
   const parts = path.replaceAll("\\", "/").split("/").filter(Boolean), name = parts.pop() ?? path;
   return <header className="file-header">
     <div className="file-crumbs" data-tip={path}>
       <span className={`file-badge tone-${badge.tone}`} aria-label={badge.label}>{badge.badge}</span>
       {parts.length ? <span className="file-crumb-dirs"><span dir="ltr">{parts.map((part, index) => <span key={index}>{part}<i aria-hidden="true">/</i></span>)}</span></span> : null}
       <button type="button" className="file-crumb-name" aria-label={`复制路径 ${path}`} onClick={onCopyPath}>{name}</button>
+      {outsideProject ? <span className="file-tag">{t("fileBrowser.outsideProject")}</span> : null}
       {dirty ? <span className="file-dirty-dot" role="status" aria-label="未保存" data-tip="有未保存的修改" /> : null}
       {readOnly ? <span className="file-tag" data-tip="此文件不可写"><Icon name="lock" extra="sm" />只读</span> : null}
       {git ? <span className="file-tag tone-git" data-tip="相对暂存区的工作区改动">已修改{git.additions ? <b className="add">+{git.additions}</b> : null}{git.deletions ? <b className="del">−{git.deletions}</b> : null}</span> : null}

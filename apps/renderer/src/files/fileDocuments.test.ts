@@ -6,7 +6,7 @@ const file: WorkspaceFileInfo = { workspaceId: "workspace" as WorkspaceFileInfo[
 const read = (text = "base", version = "v1"): WorkspaceFileText => ({ file: { ...file, version }, text, encoding: "utf8", bom: false, lineEnding: "lf" });
 function backend() {
   let disk = read(), receipt: unknown;
-  const query = vi.fn(async (name: string) => name === "workspace.file.inspect" ? disk.file : disk);
+  const query = vi.fn(async (name: string) => name.endsWith(".inspect") ? disk.file : disk);
   const command = vi.fn(async (_name: string, input: { text: string; expectedVersion: string }) => {
     const result = input.expectedVersion === disk.file.version ? { saved: true, file: { ...disk.file, version: "saved" } } : { saved: false, conflict: true, file: disk.file };
     if (result.saved) disk = read(input.text, "saved");
@@ -17,6 +17,22 @@ function backend() {
   return { client, query, command, disk: (value: WorkspaceFileText) => { disk = value; } };
 }
 describe("file editing", () => {
+  it("uses the system backend throughout load, conflict detection and save", async () => {
+    const source = backend(), system = { ...file, workspaceId: "" as WorkspaceFileInfo["workspaceId"], path: "/tmp/README.md", source: "system" as const };
+    const document = new FileDocument(system, async () => source.client);
+    source.disk({ ...read(), file: { ...file, path: system.path } });
+    await document.load(); document.edit("outside draft"); source.disk({ ...read("external edit", "external"), file: { ...file, path: system.path, version: "external" } });
+    await document.refresh();
+    expect(document.getSnapshot().file.source).toBe("system");
+    expect(document.getSnapshot().text).toBe("outside draft");
+    expect(await document.save()).toBe(false);
+    expect(await document.save(true)).toBe(true);
+    expect(document.getSnapshot().file.source).toBe("system");
+    expect(source.query.mock.calls.every(([name]) => name.startsWith("fs.file."))).toBe(true);
+    expect(source.command).toHaveBeenLastCalledWith("fs.file.writeText", expect.objectContaining({ text: "outside draft", expectedVersion: "external" }));
+    expect(source.command.mock.calls[0]![1]).not.toHaveProperty("workspaceId");
+    document.dispose();
+  });
   it("retains a draft when the Agent edits the file and only overwrites after an explicit choice", async () => {
     const source = backend(), document = new FileDocument(file, async () => source.client);
     await document.load(); document.edit("my draft"); source.disk(read("agent edit", "agent"));
@@ -84,5 +100,12 @@ describe("file editing", () => {
     expect(same).toBe(first); expect(remote).not.toBe(first);
     first.edit("shared"); expect(same.getSnapshot().text).toBe("shared"); expect(remote.getSnapshot().text).toBe("");
     first.discard(); releaseFileDocument(first); releaseFileDocument(remote);
+  });
+  it("keeps system and workspace identities separate when restoring file windows", () => {
+    const source = backend();
+    const workspace = getFileDocument(null, file, async () => source.client, false);
+    const system = getFileDocument(null, { ...file, source: "system" }, async () => source.client, false);
+    expect(system).not.toBe(workspace);
+    releaseFileDocument(system); releaseFileDocument(workspace);
   });
 });

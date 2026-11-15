@@ -23,7 +23,7 @@ export const conversationPanelId = (viewId: string): ConversationPanelId => `con
 export const isConversationPanelId = (id: string): id is ConversationPanelId => id.startsWith("conversation:");
 export type FilePanelId = `file-view:${string}`;
 export const isFilePanelId = (id: string): id is FilePanelId => id.startsWith("file-view:");
-export type FilePanelDescriptor = { targetId: string | null; workspaceId: string; path: string; fileId: string; title: string; scope: "conversation" | "workspace"; line?: number; column?: number; jump?: number; page?: number; scroll?: number; mode?: FileViewMode; time?: number };
+export type FilePanelDescriptor = { source?: "system"; targetId: string | null; workspaceId: string; path: string; fileId: string; title: string; scope: "conversation" | "workspace"; line?: number; column?: number; jump?: number; page?: number; scroll?: number; mode?: FileViewMode; time?: number };
 /** `preview` renders Markdown or the CSV grid; `split` is Markdown source beside its preview; `diff` is the working-tree patch. */
 export type FileViewMode = "preview" | "source" | "split" | "diff";
 export type PanelId = FixedPanelId | ScopedPanelId | AgentPanelId | BrowserPagePanelId | ConversationPanelId | FilePanelId;

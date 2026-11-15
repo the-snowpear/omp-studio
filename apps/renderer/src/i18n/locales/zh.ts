@@ -1,6 +1,7 @@
 type DeepString<T> = { readonly [K in keyof T]: T[K] extends string ? string : DeepString<T[K]> };
 
 const zhRaw = {
+  fileBrowser: { open: "打开文件浏览器", showInBrowser: "在文件浏览器中显示", outsideProject: "项目外" },
   onboarding: {
     kicker: "0.2.0 新工作台",
     stepOf: "第 {current} 步，共 {total} 步",

@@ -6,6 +6,11 @@ import type { FilePanelDescriptor, FilePanelId } from "./types";
 const panel: FilePanelId = "file-view:readme";
 const descriptor: FilePanelDescriptor = { targetId: null, workspaceId: "project", path: "README.md", fileId: "file-a", title: "README.md", scope: "conversation" };
 describe("file windows", () => {
+  it("restores a system file with its absolute path and source", () => {
+    const system: FilePanelDescriptor = { ...descriptor, source: "system", workspaceId: "", path: "C:\\Users\\demo\\notes.txt" };
+    const layout = dockReducer(createDefaultLayout(), { type: "file-open", panel, descriptor: system });
+    expect(normalizeLayout(JSON.parse(JSON.stringify(layout))).fileViews[panel]).toEqual(system);
+  });
   it("opens once as a float, can dock, and removes a closed file instead of hiding it", () => {
     let layout = dockReducer(createDefaultLayout(), { type: "file-open", panel, descriptor });
     layout = dockReducer(layout, { type: "file-open", panel, descriptor });
