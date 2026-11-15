@@ -31,6 +31,8 @@ chmod +x ./OMP-Studio-*-linux-x64.AppImage
 
 中文界面需要 CJK 字体。deb 默认推荐安装 `fonts-noto-cjk`；使用 AppImage 或精简桌面时，请安装发行版提供的 Noto CJK 字体，避免中文显示成方框（Ubuntu / Debian：`sudo apt install fonts-noto-cjk`）。
 
+文件浏览器的独占重命名使用系统 `/usr/bin/perl`。deb 已声明 `perl-base` 依赖；使用 AppImage 的精简系统需要提供 Perl。
+
 ### AppImage 与沙箱
 
 Ubuntu 24.04 安装 FUSE 2 使用 `sudo apt install libfuse2t64`，Debian 13 使用 `sudo apt install libfuse2t64`。其他发行版按其包管理器安装 libfuse2。缺少 FUSE 时也可用 `--appimage-extract` 解包，然后运行解出的 `squashfs-root/omp-studio`，但仍须满足系统的 Chromium 沙箱要求。

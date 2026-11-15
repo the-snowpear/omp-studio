@@ -13,7 +13,7 @@ export function PanelRegistration({ panels }: { panels: Partial<Record<PanelId, 
   })}</>;
 }
 /** One body per instance of a repeatable tool; each instance owns its own host and state. */
-export function PanelInstances({ base, children }: { base: FixedPanelId; children: (id: PanelId) => ReactNode }) {
+export function PanelInstances({ base, children }: { base: FixedPanelId; children: (id: PanelId, visibility: PanelVisibility) => ReactNode }) {
   const instances = usePanelInstances(base);
-  return <>{instances.map(id => <DockPanel key={id} id={id}>{children(id)}</DockPanel>)}</>;
+  return <>{instances.map(id => <DockPanel key={id} id={id}>{visibility => children(id, visibility)}</DockPanel>)}</>;
 }

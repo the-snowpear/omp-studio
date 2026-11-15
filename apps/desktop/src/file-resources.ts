@@ -3,19 +3,22 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { ClientTransport, WorkspaceFileInfo, WorkspaceId } from "@omp-studio/client-contract";
+import type { ClientTransport, SystemFileInfo, WorkspaceId } from "@omp-studio/client-contract";
 import type { FileResource, FileResourceTarget } from "./file-viewer-shared.js";
 import { desktopText } from "./desktop-language-shared.js";
 
 const CHUNK = 512 * 1024;
-interface Lease { target: FileResourceTarget; file: WorkspaceFileInfo; controller: AbortController; owner: number; pdf?: string }
+interface Lease { target: FileResourceTarget; file: SystemFileInfo; controller: AbortController; owner: number; pdf?: string }
 export class FileResources {
   private leases = new Map<string, Lease>();
   constructor(private transport: (targetId: string | null) => Pick<ClientTransport, "query">) {}
   async open(target: FileResourceTarget, owner: number): Promise<FileResource> {
-    const response = await this.transport(target.targetId).query({ queryName: "workspace.file.inspect", input: { workspaceId: target.workspaceId as WorkspaceId, path: target.path } });
+    const transport = this.transport(target.targetId);
+    const response = target.source === "system"
+      ? await transport.query({ queryName: "fs.file.inspect", input: { path: target.path } })
+      : await transport.query({ queryName: "workspace.file.inspect", input: { workspaceId: target.workspaceId as WorkspaceId, path: target.path } });
     if (!response.ok) throw new Error(response.error.message);
-    const file = response.result as WorkspaceFileInfo, id = randomUUID();
+    const file = response.result as SystemFileInfo, id = randomUUID();
     this.leases.set(id, { target: { ...target, path: file.path }, file, controller: new AbortController(), owner });
     return { id, file, url: `omp-file://viewer/${id}` };
   }
@@ -34,9 +37,11 @@ export class FileResources {
     const lease = this.get(id), limit = Math.min(end ?? lease.file.size - 1, lease.file.size - 1);
     for (let offset = start; offset <= limit;) {
       lease.controller.signal.throwIfAborted(); signal?.throwIfAborted();
-      const response = await this.transport(lease.target.targetId).query({ queryName: "workspace.file.readChunk", input: {
-        workspaceId: lease.target.workspaceId as WorkspaceId, path: lease.target.path, version: lease.file.version, offset, length: Math.min(CHUNK, limit - offset + 1),
-      } });
+      const transport = this.transport(lease.target.targetId);
+      const input = { path: lease.target.path, version: lease.file.version, offset, length: Math.min(CHUNK, limit - offset + 1) };
+      const response = lease.target.source === "system"
+        ? await transport.query({ queryName: "fs.file.readChunk", input })
+        : await transport.query({ queryName: "workspace.file.readChunk", input: { ...input, workspaceId: lease.target.workspaceId as WorkspaceId } });
       if (!response.ok) throw new Error(response.error.message);
       lease.controller.signal.throwIfAborted(); signal?.throwIfAborted();
       const chunk = response.result as { data: string; bytes: number };

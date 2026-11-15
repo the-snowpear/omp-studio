@@ -67,7 +67,7 @@ export function deriveLinuxBuilderConfig(base, { outputDirectory }) {
         `libc6 (>= ${LINUX_MIN_GLIBC})`, "libstdc++6 (>= 13.2)", "libgcc-s1",
         "libgtk-3-0t64 | libgtk-3-0", "libasound2t64 | libasound2",
         "libnss3", "libnotify4", "libxss1", "libxtst6", "libgbm1",
-        "libatspi2.0-0t64 | libatspi2.0-0", "libuuid1", "libsecret-1-0", "xdg-utils",
+        "libatspi2.0-0t64 | libatspi2.0-0", "libuuid1", "libsecret-1-0", "xdg-utils", "perl-base",
       ],
       recommends: ["libayatana-appindicator3-1", "gnome-keyring | kwalletmanager", "fonts-noto-cjk"],
       // Use the builder's package-owned sandbox/AppArmor and desktop integration scripts.

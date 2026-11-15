@@ -566,6 +566,7 @@ export interface HostAgentDefinitionsService {
 export interface HostWorkspaceService {
   list(): WorkspaceListReadModel | Promise<WorkspaceListReadModel>;
   open(input: { readonly workspaceId: WorkspaceId }): Promise<WorkspaceListReadModel>;
+  openPath?(input: { readonly path: string }): Promise<WorkspaceListReadModel>;
   pick(input?: { readonly name?: string }): Promise<WorkspaceListReadModel>;
 }
 
@@ -578,6 +579,19 @@ export interface HostWorkspaceFileService {
   get(input: { readonly workspaceId: WorkspaceId; readonly path?: string }): WorkspaceFileTreeReadModel | Promise<WorkspaceFileTreeReadModel>;
   createFile(input: { readonly workspaceId: WorkspaceId; readonly path: string }): WorkspaceFileMutationResult | Promise<WorkspaceFileMutationResult>;
   createDirectory(input: { readonly workspaceId: WorkspaceId; readonly path: string }): WorkspaceFileMutationResult | Promise<WorkspaceFileMutationResult>;
+}
+
+/** Host-owned absolute-path file service, shared by Desktop and SSH Hosts. */
+export interface HostSystemFileService {
+  places(): Promise<import("@omp-studio/client-contract").SystemPlaces>;
+  list(input: import("@omp-studio/client-contract").SystemListInput): Promise<import("@omp-studio/client-contract").SystemDirectory>;
+  inspect(input: import("@omp-studio/client-contract").SystemFileTarget): Promise<import("@omp-studio/client-contract").SystemFileInfo>;
+  readText(input: import("@omp-studio/client-contract").SystemFileTarget): Promise<import("@omp-studio/client-contract").SystemFileText>;
+  readChunk(input: import("@omp-studio/client-contract").SystemFileChunkInput): Promise<import("@omp-studio/client-contract").WorkspaceFileChunk>;
+  writeText(input: import("@omp-studio/client-contract").SystemFileWrite): Promise<import("@omp-studio/client-contract").SystemFileSaveResult>;
+  createDirectory(input: { readonly parent: string; readonly name: string }): Promise<import("@omp-studio/client-contract").SystemFileMutationResult>;
+  rename(input: { readonly path: string; readonly name: string }): Promise<import("@omp-studio/client-contract").SystemFileMutationResult>;
+  trash?(input: { readonly paths: readonly string[] }): Promise<{ readonly paths: readonly string[] }>;
 }
 
 /** Host-owned system Git adapter. Repository paths and process details never cross this port. */

@@ -1,3 +1,4 @@
+import { revealWorkspaceFile } from "../fileBrowser/fileBrowserLinks";
 import { useWorkspaceFileActions } from "../files/useWorkspaceFileActions";
 import { ConversationTitleSurface, SharedSurface, useConversationView, useConversationDom } from "../conversationWorkspace/Context";
 import { EvaluationActivity } from "../evaluation/EvaluationActivity";
@@ -7,7 +8,7 @@ import { locatePanel } from "../dock/model";
 import { type DockScope, type PanelId } from "../dock/types";
 import { DeferredPanel, lazyPanel } from "../DeferredPanel";
 import { useModelConnection } from "../models/useModelConnection";
-import { useExecutionTarget, useTargetMemory } from "../workspaces/ExecutionTargets";
+import { useExecutionTarget, useExecutionTargets, useTargetMemory } from "../workspaces/ExecutionTargets";
 import { SecondaryInteractionDeck } from "../deck/SecondaryInteractionDeck";
 import { useFormInteractionLifecycle } from "../deck/FormSession";
 import { AnnotationsProvider } from "../annotations/Annotations";
@@ -138,6 +139,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const zhRef = useRef(zh);
   zhRef.current = zh;
   const executionTarget = useExecutionTarget();
+  const fileTargets = useExecutionTargets();
   const previewMode = usePreviewMode();
   const modelClient = (executionTarget.localClient ?? client) as ClientStateSource;
   const modelConnection = useModelConnection(modelClient);
@@ -1890,6 +1892,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         else if (action.operation === "snap") dock.store.updatePreferences({ snap: !current.preferences.snap });
         else if (action.operation === "rail") dock.store.dispatch({ type: "region", region: "rail", visible: current.layout.rail.mode === "hidden" });
         else if (action.operation === "files") dock.store.dispatch({ type: "open", panel: "files" });
+        else if (action.operation === "file-browser") dock.store.dispatch({ type: "open", panel: "file-browser" });
         else if (action.operation === "reset") dock.store.resetFactory();
         else dock.store.applyPreset(action.operation);
         go("workbench");
@@ -2137,8 +2140,28 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const { fileOpeners, fileShellUnavailable, runFileShellAction } = useWorkspaceFileActions({ workspace: realActiveWorkspace, remote: !!executionTarget.id, onNotice: setShellNotice, onOpenIda: absolute => { setCapIntent("ida", absolute); setCapNonce(value => value + 1); go("capabilities"); } });
   // File windows reuse the Explorer shell actions and the Composer capsule chain; a line range follows the capsule as plain text.
   const fileViewerActions: FileViewerActions = {
+    contextWorkspaceId: realActiveWorkspace?.workspaceId,
     openers: fileOpeners,
     runShell: runFileShellAction,
+    openProjectPath: async (path, targetId) => {
+      if (previewMode.preview) return;
+      const host = await fileTargets.readyClient(targetId);
+      const handle = await host.command("workspace.openPath", { path });
+      const model = await waitReceipt<WorkspaceListReadModel>(host, handle.requestId);
+      onWorkspacesChange(model);
+      const project = model.workspaces.find(row => row.workspaceId === model.activeWorkspaceId)!;
+      if (mdi) { mdi.store.openFromDirectory({ targetId, workspaceId: project.workspaceId, draftId: crypto.randomUUID() }); return; }
+      startNewChatInProject({ id: project.workspaceId, name: project.name });
+      const outcome = await waitForNewSession();
+      if (!outcome.ok) throw new Error(outcome.error);
+    },
+    revealInExplorer: (workspaceId, path) => {
+      const project = state.model.workspaces?.workspaces.find(row => row.workspaceId === workspaceId);
+      if (project) selectProject({ id: project.workspaceId, name: project.name });
+      setExplorerOpen(true); expandProject(workspaceId);
+      dock.store.dispatch({ type: "open", panel: "files" });
+      revealWorkspaceFile(mdi?.document.id ?? "standalone", executionTarget.id, workspaceId, path);
+    },
     addContext: ({ path, label, lines }) => {
       const composer = composerRef.current;
       if (!composer) return;

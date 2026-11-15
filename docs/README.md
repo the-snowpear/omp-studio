@@ -14,6 +14,7 @@ Public documentation for OMP Studio.
 | [../doc/ssh-workspace-test-prompt.md](../doc/ssh-workspace-test-prompt.md) | SSH 与账密功能的独立测试交接提示词 |
 | [model-adaptation.md](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |
 | [workbench-docking.md](workbench-docking.md) | 工具停靠、浮窗、会话布局和预设 |
+| [file-browser.md](file-browser.md) | 全机文件浏览、本机／SSH、文件管理与项目外编辑 |
 | [browser.md](browser.md) | 聊天浏览器、人工接管、元素引用、登录空间和恢复 |
 | [computer-use.md](computer-use.md) | 电脑操作工作区、画面与步骤、安全停止、界面结构和隐私 |
 | [dock-delivery-2026-10-29.md](dock-delivery-2026-10-29.md) | 停靠工作台实现与验收记录、未验证边界 |

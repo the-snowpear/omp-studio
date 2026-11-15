@@ -19,6 +19,8 @@ import {
   type WorkspaceFileActionResult,
   type WorkspaceFileTargetInput,
   type WorkspaceShellEditorResult,
+  type SystemFileTargetInput,
+  type SystemFileOpenWithInput,
 } from "./workspace-shell-shared.js";
 
 export interface WorkspaceShellSender {
@@ -52,6 +54,9 @@ export interface WorkspaceShellActions {
   resolveFileAbsolutePath(cwd: string, target: WorkspaceFileTargetInput): Promise<string>;
   /** Machine-level probe of installed editors for the Open-With submenu. */
   listFileOpeners(): Promise<ReadonlyArray<FileOpener>>;
+  systemFileOpen?(input: SystemFileTargetInput): Promise<WorkspaceFileActionResult>;
+  systemFileOpenWith?(input: SystemFileOpenWithInput): Promise<WorkspaceFileActionResult>;
+  systemFileReveal?(input: SystemFileTargetInput): Promise<WorkspaceFileActionResult>;
 }
 
 export interface WorkspaceShellIpcOptions {
@@ -148,8 +153,19 @@ export function registerWorkspaceShellIpc(options: WorkspaceShellIpcOptions): Wo
     return await options.actions.listFileOpeners();
   });
 
+  for (const action of ["systemFileOpen", "systemFileOpenWith", "systemFileReveal"] as const) {
+    ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS[action]);
+    ipc.handle(WORKSPACE_SHELL_IPC_CHANNELS[action], async (event, payload) => {
+      assertTrusted(event.sender);
+      const run = options.actions[action];
+      if (!run) throw new Error("System file actions unavailable");
+      return run(payload as SystemFileOpenWithInput);
+    });
+  }
+
   return Object.freeze({
     dispose(): void {
+      for (const action of ["systemFileOpen", "systemFileOpenWith", "systemFileReveal"] as const) ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS[action]);
       ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.openInEditor);
       ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.revealInFileManager);
       ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.resolveDroppedPaths);

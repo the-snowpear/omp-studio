@@ -1,3 +1,4 @@
+import { useOpenFileBrowser } from "../fileBrowser/fileBrowserLinks";
 import { useOpenFile } from "../files/fileLinks";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type { GitCommitChangesReadModel, GitCommitDiffReadModel, GitLogListReadModel, WorkspaceId } from "@omp-studio/client-contract";
@@ -149,6 +150,7 @@ export function PreviewFileTree({ label, search, onContext, onFileAction, worksp
     return next;
   });
   const openInViewer = useOpenFile();
+  const openBrowser = useOpenFileBrowser();
   // 行「⋯ 更多」菜单：与真实树同一 FileRowMenu；演示路径不执行桌面动作
   // （打开/打开方式/资源管理器/绝对路径禁用），仅保留复制相对路径与添加上下文。
   const [fileMenuOpenId, setFileMenuOpenId] = useState<string | null>(null);
@@ -189,6 +191,7 @@ export function PreviewFileTree({ label, search, onContext, onFileAction, worksp
       setFileMenuOpenId(path);
     },
     onAction: (action, target) => {
+      if (action.type === "browse") { openBrowser({ workspaceId, path: target.path }); return; }
       if (action.type === "addContext") {
         onContext?.(target.path, target.kind);
         return;
