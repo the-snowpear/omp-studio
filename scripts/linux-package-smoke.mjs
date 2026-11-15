@@ -26,13 +26,14 @@ const provider = createServer(async (request, response) => {
     const body = JSON.parse(raw);
     providerCalls += 1;
     const toolReply = body.messages.find(message => message.role === "tool" && JSON.stringify(message.content).includes(proof));
-    const conversation = Boolean(toolReply || body.tools?.some(tool => tool.function?.name === "read"));
+    const lastUser = JSON.stringify(body.messages.findLast(message => message.role === "user")?.content ?? "");
+    const conversation = !lastUser.includes("<title-request>") && Boolean(toolReply || body.tools?.some(tool => tool.function?.name === "read"));
     // Titles and cache warming also contact the provider; the assertion below
     // follows the actual tool result and persisted reply, not a request count.
     if (conversation) toolRequests += 1;
     if (toolReply) readResultReplies += 1;
     report.providerRequests ??= [];
-    if (report.providerRequests.length < 8) report.providerRequests.push({ tools: Boolean(body.tools?.length), toolChoice: body.tool_choice, toolReply: Boolean(toolReply), lastUser: JSON.stringify(body.messages.findLast(message => message.role === "user")?.content ?? "").slice(0, 200) });
+    if (report.providerRequests.length < 8) report.providerRequests.push({ tools: Boolean(body.tools?.length), toolChoice: body.tool_choice, toolReply: Boolean(toolReply), lastUser: lastUser.slice(0, 200) });
     const delta = !conversation ? { content: "Linux package acceptance" } : toolReply ? { content: `OMP_LINUX_OK ${proof}` } : {
       tool_calls: [{ index: 0, id: "linux-smoke-read", type: "function", function: { name: "read", arguments: JSON.stringify({ path: "fixture.txt" }) } }],
     };
@@ -174,10 +175,14 @@ try {
   await application.close(); application = undefined;
 
   await launch(env);
-  await until(() => query("session.state"), result => result.sessionId === session.sessionId, "session restore after restart");
-  await until(() => query("session.transcript.read"), result => result.items.some(item => item.role === "assistant" && item.content?.some(block => block.type === "text" && block.text.includes(proof))), "persisted conversation");
+  await page.getByText(`OMP_LINUX_OK ${proof}`, { exact: true }).waitFor({ state: "visible" });
+  await until(() => query("session.transcript.readPage", { sessionId: session.sessionId }), result => result.items.some(item => item.role === "assistant" && item.content?.some(block => block.type === "text" && block.text.includes(proof))), "persisted conversation");
+  // Restored conversation views are deliberately dormant until the user sends
+  // again or chooses Connect now; the authority's startup session is separate.
+  await page.getByRole("button", { name: "立即连接", exact: true }).click();
+  await until(() => query("residents.list"), result => result.residents.some(row => row.sessionId === session.sessionId), "restored conversation reconnects");
   await page.screenshot({ path: join(output, "restarted.png") });
-  report.checks.push("same signed Runtime, workspace, session and transcript restored after a full application restart");
+  report.checks.push("workspace and persisted conversation restore after restart; the dormant session reconnects through its visible control");
   report.status = "passed";
 } catch (error) {
   report.status = "failed"; report.error = error instanceof Error ? error.stack : String(error); process.exitCode = 1;
