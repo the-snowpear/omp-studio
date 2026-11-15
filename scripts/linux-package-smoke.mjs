@@ -161,7 +161,7 @@ try {
   report.checks.push("same signed Runtime, workspace, session and transcript restored after a full application restart");
   report.status = "passed";
 } catch (error) {
-  report.status = "failed"; report.error = String(error); process.exitCode = 1;
+  report.status = "failed"; report.error = error instanceof Error ? error.stack : String(error); process.exitCode = 1;
   if (page && !page.isClosed()) {
     await page.screenshot({ path: join(output, "failure.png") }).catch(() => {});
     report.runtimeAtFailure = await query("environment.get").catch(() => undefined);

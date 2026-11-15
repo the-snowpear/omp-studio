@@ -7,6 +7,7 @@ export const LINUX_DESKTOP_FILE = "omp-studio.desktop";
 export const LINUX_UNPACKED_DIRECTORY = "linux-unpacked";
 export const LINUX_INSTALL_DIRECTORY = "/opt/OMP Studio";
 export const LINUX_MIN_GLIBC = "2.39";
+export const LINUX_APPIMAGE_LAUNCHER = "packaging/linux/AppRun";
 
 export function linuxAppImageName(version) {
   return `OMP-Studio-${version}-linux-${LINUX_ARCH}.AppImage`;
@@ -43,6 +44,9 @@ export function deriveLinuxBuilderConfig(base, { outputDirectory }) {
       // POSIX desktop paths resolve the signed seed under process.resourcesPath.
       ...base.extraFiles,
     ],
+    // AppImage copies the app directory over its generated launcher. Own AppRun
+    // so the builder cannot silently disable sandboxing when unshare fails.
+    extraFiles: [{ from: LINUX_APPIMAGE_LAUNCHER, to: "AppRun" }],
     linux: {
       target: [{ target: "AppImage", arch: [LINUX_ARCH] }, { target: "deb", arch: [LINUX_ARCH] }],
       icon: "apps/desktop/resources/icon.png",

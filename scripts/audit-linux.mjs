@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertPublicRuntimeKeys, findPrivateKeyFiles } from "./audit-installer.mjs";
-import { LINUX_DESKTOP_FILE, LINUX_EXECUTABLE, LINUX_INSTALL_DIRECTORY, LINUX_MIN_GLIBC, LINUX_PACKAGE_NAME, LINUX_TARGET_PLATFORM, LINUX_UNPACKED_DIRECTORY, linuxAppImageName, linuxDebName } from "./linux-bundle.mjs";
+import { LINUX_APPIMAGE_LAUNCHER, LINUX_DESKTOP_FILE, LINUX_EXECUTABLE, LINUX_INSTALL_DIRECTORY, LINUX_MIN_GLIBC, LINUX_PACKAGE_NAME, LINUX_TARGET_PLATFORM, LINUX_UNPACKED_DIRECTORY, linuxAppImageName, linuxDebName } from "./linux-bundle.mjs";
 import { REPOSITORY_ROOT, SERIES_JSON_PATH, VENDOR_CODING_AGENT_PACKAGE_JSON, deriveRuntimeVersion } from "./runtime-artifact.mjs";
 import { assertExecutableTarget, assertRuntimeManifestPlatform } from "./target-platform.mjs";
 
@@ -111,6 +111,8 @@ export async function auditLinuxOutput(outputDirectory = defaultLinuxOutputDirec
     exec(appImagePath, ["--appimage-extract"], { cwd: temporary });
     const imageRoot = join(temporary, "squashfs-root");
     await auditAppDirectory(imageRoot, version, runtimeVersion);
+    const launcher = requireFile(join(imageRoot, "AppRun"));
+    if ((statSync(launcher).mode & 0o111) !== 0o111 || !readFileSync(launcher).equals(readFileSync(join(REPOSITORY_ROOT, LINUX_APPIMAGE_LAUNCHER)))) throw new Error("AppImage must use Studio's executable sandbox-preserving launcher");
     auditDesktopFile(join(imageRoot, LINUX_DESKTOP_FILE));
     const debRoot = join(temporary, "deb");
     exec("dpkg-deb", ["--extract", debPath, debRoot]);

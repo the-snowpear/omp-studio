@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { requiredGlibc } from "./audit-linux.mjs";
-import { deriveLinuxBuilderConfig, linuxAppImageName, linuxDebName } from "./linux-bundle.mjs";
+import { deriveLinuxBuilderConfig, LINUX_APPIMAGE_LAUNCHER, linuxAppImageName, linuxDebName } from "./linux-bundle.mjs";
 import { parseBuilderYaml } from "./mac-bundle.mjs";
 
 const require = createRequire(import.meta.url);
@@ -17,7 +19,7 @@ test("Linux packages carry POSIX Runtime resources and retain Chromium sandboxin
   assert.deepEqual(base, before);
   assert.equal(config.win, undefined);
   assert.equal(config.nsis, undefined);
-  assert.equal(config.extraFiles, undefined);
+  assert.deepEqual(config.extraFiles, [{ from: LINUX_APPIMAGE_LAUNCHER, to: "AppRun" }]);
   for (const entry of base.extraFiles) assert.ok(config.extraResources.some(resource => resource.to === entry.to));
   assert.deepEqual(config.appImage.executableArgs, [], "the builder's default would disable the sandbox");
   assert.equal(config.extraMetadata.desktopName, "omp-studio.desktop");
@@ -48,6 +50,20 @@ test("packaging errors remain failures after electron-builder temporary-file cle
   const result = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(bootstrap)}`, fileURLToPath(entry), "--skip-host", "--skip-build"], { encoding: "utf8", timeout: 30_000 });
   assert.match(result.stderr, /Build the linux-x64 Runtime on a native linux-x64 runner/u);
   assert.equal(result.status, 1, "async-exit-hook must not turn a failed build/audit into a successful release step");
+});
+
+test("AppImage preserves quoted arguments and does not disable sandboxing when unshare fails", { skip: process.platform !== "linux" }, () => {
+  const directory = mkdtempSync(join(tmpdir(), "omp AppImage launcher-"));
+  try {
+    writeFileSync(join(directory, "AppRun"), readFileSync(new URL(`../${LINUX_APPIMAGE_LAUNCHER}`, import.meta.url)), { mode: 0o755 });
+    writeFileSync(join(directory, "unshare"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    writeFileSync(join(directory, "omp-studio"), "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o755 });
+    for (const appDir of [directory, ""]) {
+      const result = spawnSync(join(directory, "AppRun"), ["a path with spaces", "--ozone-platform=wayland"], { env: { ...process.env, APPDIR: appDir, PATH: `${directory}:/usr/bin:/bin` }, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout, "a path with spaces\n--ozone-platform=wayland\n");
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("the ELF audit reports the newest required glibc version numerically", () => {

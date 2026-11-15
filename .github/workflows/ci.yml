@@ -115,12 +115,22 @@ jobs:
           export OMP_RUNTIME_TRUSTED_PUBLIC_KEY="$keys/trusted-public.pem"
           export OMP_RUNTIME_SIGNING_KEY_ID="$(tr -d '[:space:]' < "$keys/key-id.txt")"
           npm run pack:linux -- --skip-host --skip-build
+      - name: Build and verify Linux test catalog
+        run: |
+          node --input-type=module <<'NODE'
+          import { buildUpdateAssetsV2 } from './scripts/build-update-assets-v2.mjs';
+          import { verifyUpdateAssets } from './scripts/verify-update-assets-v2.mjs';
+          import { readRuntimeSigningKeys } from './scripts/runtime-signing-keys.mjs';
+          const { keyId, privateKey, publicKey } = await readRuntimeSigningKeys();
+          const keys = { [keyId]: publicKey };
+          const { out, manifest } = await buildUpdateAssetsV2({ platform: 'linux-x64', signingKey: privateKey, keyId, keys });
+          await verifyUpdateAssets(out, keys, manifest.repo, 'linux-x64');
+          console.log('Verified test-signed AppImage, deb, Runtime ZIP and Linux catalog');
+          NODE
       - uses: actions/upload-artifact@v4
         with:
           name: omp-studio-linux-x64-test-packages
-          path: |
-            outputs/installer-linux/*.AppImage
-            outputs/installer-linux/*.deb
+          path: outputs/release/linux-x64/
           compression-level: 0
           retention-days: 14
           if-no-files-found: error

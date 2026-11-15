@@ -11,7 +11,7 @@
   <a href="https://github.com/the-snowpear/omp-studio/releases"><img src="https://img.shields.io/github/v/release/the-snowpear/omp-studio?include_prereleases&style=flat-square&label=release&color=7c4dff" alt="Release"></a>
   <a href="https://github.com/the-snowpear/omp-studio/releases"><img src="https://img.shields.io/github/downloads/the-snowpear/omp-studio/total?style=flat-square&color=d946ef" alt="Downloads"></a>
   <a href="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/the-snowpear/omp-studio/ci.yml?style=flat-square&label=CI" alt="CI"></a>
-  <a href="#下载安装"><img src="https://img.shields.io/badge/Windows%20%7C%20macOS-x64%20%C2%B7%20ARM64-0ea5e9?style=flat-square" alt="Windows | macOS"></a>
+  <a href="#下载安装"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0ea5e9?style=flat-square" alt="Windows | macOS | Linux"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%E2%89%A522-339933?style=flat-square" alt="Node 22+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-64748b?style=flat-square" alt="MIT"></a>
   <a href="https://linux.do/"><img src="https://img.shields.io/badge/LINUX%20DO-社区-FFB003?style=flat-square" alt="LINUX DO"></a>
@@ -147,7 +147,7 @@ Files、Changes、Git、Browser、Computer、Agents、Terminal、Logs、BTW 等�
 
 <br>
 
-| 操作 | Windows | macOS |
+| 操作 | Windows / Linux | macOS |
 |---|---|---|
 | 新建对话 | <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>O</kbd> | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>O</kbd> |
 | 收起 / 展开左栏 | <kbd>Ctrl</kbd> <kbd>B</kbd> | <kbd>⌘</kbd> <kbd>B</kbd> |
@@ -391,7 +391,7 @@ packages/             协议、Host、客户端、传输、平台、测试工具
 omp-patch/overlay     Studio 自有的 Runtime 源码（上游不存在的路径）
 omp-patch/patches     对上游文件的接缝补丁，按子系统分四组（不要手改）
 omp-patch/vendor      oh-my-pi 子模块（只提交 gitlink）
-packaging/            Windows NSIS 安装器；macOS 签名配置
+packaging/            Windows NSIS、macOS 与 Linux 安装包资源
 docs/                 使用与开发文档
 ```
 

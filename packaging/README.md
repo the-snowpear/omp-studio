@@ -75,7 +75,7 @@ npm run test:tooling
 - `OMP-Studio-<版本>-linux-x64.AppImage`：便携安装包；
 - `OMP-Studio-<版本>-linux-x64.deb`：Ubuntu / Debian 系统安装包，注册菜单、图标与 `omp-studio` 命令。
 
-AppImage 显式覆盖 builder 的默认启动参数，保持 Chromium 沙箱启用。deb 使用 builder 的安装 / 卸载脚本配置 sandbox、AppArmor 与桌面入口，不删除用户状态。最低 glibc 为 2.39，原生模块按目标 Electron ABI 重建。
+AppImage 使用 `packaging/linux/AppRun`，保持 Chromium 沙箱启用；它不会像 builder 的默认脚本那样在 `unshare` 失败时追加 `--no-sandbox`。解包审计会核对实际启动脚本。deb 使用 builder 的安装 / 卸载脚本配置 sandbox、AppArmor 与桌面入口，不删除用户状态。最低 glibc 为 2.39，原生模块按目标 Electron ABI 重建。
 
 `audit-linux.mjs` 分别解包两种实际分发容器，复验平台 / 版本、ELF 架构、glibc 要求、执行权限、桌面入口、Runtime 签名、资源齐备与公钥目录。源码和 GUI 测试由开发 CI 承担；Release 只构建、打包与复验资产。
 

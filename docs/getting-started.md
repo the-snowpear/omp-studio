@@ -6,6 +6,10 @@ macOS 13 or later on Apple Silicon also runs from source, or as an ad hoc signed
 app built with `npm run pack:mac` (not notarized yet; see
 [macOS app](#macos-app-ad-hoc-signed)).
 
+Linux x64 AppImage and deb packages are prepared for the next release, with
+Ubuntu 24.04 / glibc 2.39 as the build baseline. See [Linux installation and
+development](linux.md) for package requirements, sandbox setup and source builds.
+
 ## Requirements
 
 - Node.js 22 or newer, with npm
@@ -138,4 +142,4 @@ when those areas change. They are not required just to run the app.
 
 - [development.md](development.md) — inner loop and patch regen
 - [architecture.md](architecture.md) — what talks to what
-- [releasing.md](releasing.md) — tagging, the Windows installer and the macOS build
+- [releasing.md](releasing.md) — tagging and Windows / macOS / Linux packages
