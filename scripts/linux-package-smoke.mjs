@@ -15,7 +15,7 @@ const output = resolve(process.env.OMP_E2E_OUTPUT_DIR ?? "outputs/linux-package-
 const profile = await mkdtemp("/tmp/omp-linux-smoke-");
 const home = join(profile, "home"), workspace = join(profile, "workspace"), agentDir = join(home, ".omp/agent");
 const proof = `linux-package-${randomUUID()}`;
-const report = { status: "running", executable, packageRun: process.env.OMP_E2E_PACKAGE_RUN, display: process.env.OMP_E2E_DISPLAY ?? "x11", model: "local deterministic OpenAI-compatible endpoint", checks: [], profile };
+const report = { status: "running", executable, packageRun: process.env.OMP_E2E_PACKAGE_RUN, sandboxSetup: process.env.OMP_E2E_SANDBOX_SETUP, display: process.env.OMP_E2E_DISPLAY ?? "x11", model: "local deterministic OpenAI-compatible endpoint", checks: [], profile };
 let application, page, providerCalls = 0, toolRequests = 0, readResultReplies = 0;
 
 const provider = createServer(async (request, response) => {
@@ -162,6 +162,14 @@ try {
   assert.ok(readResultReplies > 0, "The Runtime must return the unique file contents to the model endpoint");
   report.checks.push("real Runtime conversation through local model endpoint, native file read, streamed reply and persisted transcript");
   const session = await query("session.state");
+  const prediction = (await command("prediction.prepare", { sessionId: session.sessionId, protocolVersion: 2 })).result;
+  const attached = await page.evaluate(channel => window.ompStudioChrome.attachPrediction(channel), prediction);
+  assert.ok(attached.ok, attached.message);
+  const pinged = await page.evaluate(channelId => window.ompStudioChrome.predictionInput({ channelId, input: { kind: "ping" } }), prediction.channelId);
+  assert.ok(pinged.ok, pinged.message);
+  await page.evaluate(channelId => window.ompStudioChrome.detachPrediction({ channelId }), prediction.channelId);
+  await command("prediction.release", { sessionId: session.sessionId, channelId: prediction.channelId });
+  report.checks.push("v2 prediction channel metadata, authenticated private socket and input transport");
   await editor.fill("unsent ");
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Input.imeSetComposition", { text: "中文输入", selectionStart: 4, selectionEnd: 4 });

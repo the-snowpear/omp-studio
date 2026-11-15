@@ -167,7 +167,7 @@ jobs:
       - name: Prepare desktop acceptance
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libfuse2t64 fonts-noto-cjk xvfb xauth dbus-x11 weston
+          sudo apt-get install -y --no-install-recommends apparmor libfuse2t64 fonts-noto-cjk xvfb xauth dbus-x11 weston
           npm install --prefix "$RUNNER_TEMP/omp-playwright" --no-audit --no-fund playwright@1.62.1
           echo "PLAYWRIGHT_MODULE=$RUNNER_TEMP/omp-playwright/node_modules/playwright" >> "$GITHUB_ENV"
           chmod +x outputs/installer-linux/*.AppImage
@@ -180,6 +180,22 @@ jobs:
         timeout-minutes: 10
         run: |
           image="$(realpath outputs/installer-linux/*.AppImage)"
+          # Ubuntu 24.04 restricts user namespaces for arbitrary downloads.
+          # Test the documented AppImage prerequisite with a rule for this file
+          # only; keep Chromium sandboxing and the system-wide policy enabled.
+          if ! unshare -Ur true 2>/dev/null; then
+            mkdir -p outputs/linux-appimage-x11
+            cat > outputs/linux-appimage-x11/apparmor-profile <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile omp-studio-appimage-ci "$image" flags=(unconfined) {
+            userns,
+          }
+          EOF
+            sudo apparmor_parser --replace outputs/linux-appimage-x11/apparmor-profile
+            trap 'sudo apparmor_parser --remove outputs/linux-appimage-x11/apparmor-profile' EXIT
+            export OMP_E2E_SANDBOX_SETUP='AppArmor userns grant for this fixed AppImage path'
+          fi
           OMP_E2E_PACKAGED_EXE="$image" OMP_E2E_OUTPUT_DIR=outputs/linux-appimage-x11 dbus-run-session -- xvfb-run -a node scripts/linux-package-smoke.mjs
       - name: Exercise installed deb (Wayland)
         timeout-minutes: 10

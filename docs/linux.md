@@ -147,6 +147,8 @@ npm run pack:linux
 
 构建与安装验收是独立任务。只调整验收脚本时，可以给 `linux_package_run` 填入已有测试包的 CI run ID，复测该包而不用重编 Runtime；报告会记录安装包的来源 run。修改产品或打包代码后，应留空此项生成新包。
 
+Ubuntu CI 对 AppImage 使用仅匹配该测试包固定路径的 AppArmor `userns` 规则，验证其命名空间前提已满足时的运行；规则写入验收附件。deb 使用安装器注册的规则。两者都保持 Chromium 沙箱与系统全局策略开启，这不代表任意下载位置的 AppImage 在 Ubuntu 默认策略下无需配置即可启动。
+
 自动化中的中文输入检查覆盖 Chromium composition 事件；实体 IBus / Fcitx、GNOME / KDE 的窗口策略、屏幕共享 portal / PipeWire、麦克风与系统密钥环仍按目标桌面实机验证。能力是否可用由真实 Runtime 探测报告，不因安装包生成成功而伪造能力。
 
 Release 默认包含 Linux x64，任一选中平台的构建 / 包审计失败会阻止整次发布。版本号须晚于已发布版本，不能重用 0.2.0 / 0.2.1 的 tag。详细流程见 [发布指南](releasing.md)。
