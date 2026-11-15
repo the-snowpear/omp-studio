@@ -10,6 +10,7 @@ import { createDesktopGitService } from "../git-service.js";
 import { createDesktopGithubService } from "../github-service.js";
 import { GitWriteQueue, HostProcessRunner } from "../git-process.js";
 import { createWorkspaceFileService } from "../workspace-files.js";
+import { createSystemFileService } from "../system-files.js";
 import { createWorkspaceSessionCatalog } from "../session-commands.js";
 import { createHostFileLog } from "../host-log.js";
 import { loadInstallerTrustedKeys } from "../runtime-install.js";
@@ -95,6 +96,7 @@ export async function createRemoteHost(options: RemoteHostOptions): Promise<Remo
         hostLog: log,
         workspaces,
         workspaceFiles: createWorkspaceFileService({ registry }),
+        systemFiles: createSystemFileService({ registry }),
         git, github,
         catalog: createWorkspaceSessionCatalog(() => cwd, async workspaceId => registry.get(workspaceId)?.canonicalPath),
         getWorkspaceCwd: () => cwd,

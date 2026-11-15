@@ -32,6 +32,7 @@ export const CORE_NODE_SUITES = [
   "apps/desktop/dist/test/time-travel-port.test.js",
   // Local file writes, Electron boundaries, installation and update recovery.
   "apps/desktop/dist/test/workspace-files.test.js",
+  "apps/desktop/dist/test/system-files.test.js",
   "apps/desktop/dist/test/file-resources.test.js",
   "apps/desktop/dist/test/security.test.js",
   "apps/desktop/dist/test/floating-windows.test.js",

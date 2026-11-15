@@ -51,7 +51,8 @@ Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`；macOS：`~
 
 - 输入校验只做一处，就在真正执行操作的那一层：
   - 转发给 Runtime 的操作（workbench、settings、plan、upgrade 等）只在 overlay 的 `*-protocol.ts` / `bridge-protocol.ts` 校验。facade、桌面端、Renderer 不做预检，表单错误等 Runtime 返回后再显示。facade 只拦客户端伪造的私有字段（`rejectPrivateOperationFields`）。
-  - Host 自己执行的服务（artifact、annotation 导入、services 定义、GUI 设置、git、workspace-files）由该服务自己检查。
+  - Host 自己执行的服务（artifact、annotation 导入、services 定义、GUI 设置、git、workspace-files、system-files）由该服务自己检查。
+  - 全机文件浏览器的 `fs.*` 是用户所选绝对文件路径跨 Host 边界的显式入口；`system-files.ts` 校验路径，工作区文件操作仍保留包含性限制。`workspace.openPath` 由工作区服务登记并打开真实目录；本机 `systemFile*` Shell 动作在 Main 端复用系统文件路径解析。
   - 文件越界、路径穿越、NUL、git 参数注入这类安全检查放在执行服务里，不能省。
 - 不写结果 / 事件校验器：哪一层都不复查另一层的输出（Runtime 不自查返回值，Host、桌面端、preload 不复查 Runtime 发来的结果和事件），类型用 `as` 断言即可。IPC / transport 只检查信封形状，不深拷贝。
 - 不写"拒绝多余字段"的白名单，除非操作会被原样展开交给原生接口或付费接口（judgments、media、benchmarks、`services.start`），或者是 bridge / conversation 的信封。

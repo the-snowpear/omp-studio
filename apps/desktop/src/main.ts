@@ -1,3 +1,4 @@
+import { resolveSystemShellTarget } from "./system-files.js";
 import { FileResources } from "./file-resources.js";
 import { OfficeComponent } from "./office-component.js";
 import { registerFileViewerIpc } from "./file-viewer-ipc.js";
@@ -504,20 +505,18 @@ export async function main(): Promise<void> {
     return absolute;
   };
 
-  const openFile = async (cwd: string, target: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> => {
-    const absolute = await resolveWorkspaceFileTarget(cwd, target);
+  const openAbsoluteFile = async (absolute: string): Promise<WorkspaceFileActionResult> => {
     const error = await shell.openPath(absolute);
     return error.length > 0 ? { status: "failed", message: error } : { status: "opened" };
   };
 
-  const openFileWith = async (
-    cwd: string,
-    target: WorkspaceFileTargetInput,
+  const openAbsoluteFileWith = async (
+    absolute: string,
+    kind: "file" | "dir",
     openerId: string,
   ): Promise<WorkspaceFileActionResult> => {
-    const absolute = await resolveWorkspaceFileTarget(cwd, target);
     if (openerId === "choose") {
-      if (process.platform === "win32" && target.kind === "file") {
+      if (process.platform === "win32" && kind === "file") {
         // Native Windows "How do you want to open this file?" dialog.
         const child = spawn("rundll32.exe", ["shell32.dll,OpenAs_RunDLL", absolute], {
           detached: true,
@@ -541,7 +540,7 @@ export async function main(): Promise<void> {
         return { status: "opened" };
       }
       const picked = await showOpenWithPicker(
-        target.kind === "dir"
+        kind === "dir"
           ? desktopText("选择用于打开目录的程序", "Select an Application to Open Directory")
           : desktopText("选择用于打开文件的程序", "Select an Application to Open File"),
       );
@@ -557,9 +556,8 @@ export async function main(): Promise<void> {
     return { status: "opened" };
   };
 
-  const revealFileInFileManager = async (cwd: string, target: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> => {
-    const absolute = await resolveWorkspaceFileTarget(cwd, target);
-    if (target.kind === "dir") {
+  const revealAbsoluteFile = async (absolute: string, kind: "file" | "dir"): Promise<WorkspaceFileActionResult> => {
+    if (kind === "dir") {
       const error = await shell.openPath(absolute);
       return error.length > 0 ? { status: "failed", message: error } : { status: "opened" };
     }
@@ -938,9 +936,12 @@ export async function main(): Promise<void> {
           if (error.length > 0) throw new Error(error);
         },
         resolveDroppedPaths: (cwd, paths) => resolveDroppedPaths(cwd, paths),
-        openFile,
-        openFileWith,
-        revealFileInFileManager,
+        openFile: async (cwd, target) => openAbsoluteFile(await resolveWorkspaceFileTarget(cwd, target)),
+        openFileWith: async (cwd, target, openerId) => openAbsoluteFileWith(await resolveWorkspaceFileTarget(cwd, target), target.kind, openerId),
+        revealFileInFileManager: async (cwd, target) => revealAbsoluteFile(await resolveWorkspaceFileTarget(cwd, target), target.kind),
+        systemFileOpen: async input => openAbsoluteFile((await resolveSystemShellTarget(input.path)).path),
+        systemFileOpenWith: async input => { const target = await resolveSystemShellTarget(input.path); return openAbsoluteFileWith(target.path, target.kind, input.openerId); },
+        systemFileReveal: async input => { const target = await resolveSystemShellTarget(input.path); return revealAbsoluteFile(target.path, target.kind); },
         resolveFileAbsolutePath: (cwd, target) => resolveWorkspaceFileTarget(cwd, target),
         listFileOpeners,
         async pickPlanSavePath(cwd) {

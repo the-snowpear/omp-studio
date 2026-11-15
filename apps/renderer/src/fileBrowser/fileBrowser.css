@@ -1,0 +1,607 @@
+/* ============================================================
+   文件浏览器（全机文件）
+   ------------------------------------------------------------
+   窗口色调与 Explorer / 文件窗口同为 indigo（dock/windowTint.ts），正文只用
+   tokens.css 的语义色。三档由 [data-tier] 决定：0 窄（单树）、1 中（位置栏 +
+   列表）、2 宽（默认分栏）；[data-view] 是实际生效的视图。
+
+   视觉规则
+   - 少线多面：分区靠底色层级（侧栏 bg-subtle、正文 surface、输入 bg-inset），
+     只在区域交界留一条 border-subtle；控件默认无边框，悬停 / 聚焦才显形。
+   - 选中只有一种语言：indigo 软底 + indigo 图标，不加描边；键盘焦点另用焦点环。
+   - 文字两级：名称 text（13px），元信息 text-3（11px、等宽数字）。
+   - 动效按 styles/motion.css：视图切换 --motion-swap，弹层 --motion-pop，
+     状态色变 state 模式（--dur-fast · --ease）。
+   ============================================================ */
+
+.fb {
+  --fb-row: 28px;
+  --fb-select: var(--tint-indigo-soft);
+  --fb-ink: var(--tint-indigo);
+  --fb-line: var(--border-subtle, var(--border));
+  --fb-focus: color-mix(in srgb, var(--accent) 62%, transparent);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  outline: none;
+}
+
+/* ---------- 工具栏 ---------- */
+.fb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  height: 44px;
+  flex: none;
+  padding: 0 var(--sp-10);
+  border-bottom: 1px solid var(--fb-line);
+  min-width: 0;
+}
+.fb-nav { display: flex; align-items: center; gap: 1px; flex: none; }
+.fb-toolbar .icon-btn { width: 28px; height: 28px; border-radius: var(--r-6); color: var(--text-3); }
+.fb-toolbar .icon-btn:hover:not(:disabled) { color: var(--text); }
+.fb-toolbar .icon-btn:disabled { opacity: 0.35; }
+
+.fb-places-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: 28px;
+  padding: 0 var(--sp-8);
+  border: 0;
+  border-radius: var(--r-6);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+  flex: none;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.fb-places-trigger:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.fb-places-trigger .icon:last-child { width: 10px; height: 10px; color: var(--text-3); }
+
+/* 地址胶囊：面包屑与路径输入共用一个底，无描边；聚焦时只亮一圈。 */
+.fb-crumbs, .fb-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-8);
+  background: var(--bg-inset);
+  box-shadow: inset 0 0 0 1px var(--fb-line);
+  padding: 0 var(--sp-4);
+  overflow: hidden;
+  cursor: text;
+  transition: box-shadow var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+.fb-crumbs:hover { box-shadow: inset 0 0 0 1px var(--border); }
+.fb-crumbs.is-empty { cursor: default; }
+.fb-crumb-item { display: inline-flex; align-items: center; min-width: 0; flex: 0 1 auto; color: var(--text-faint); }
+.fb-crumb-item:last-child { flex-shrink: 0; max-width: 62%; }
+.fb-crumb-item > .icon { width: 10px; height: 10px; flex: none; margin: 0 -1px; }
+.fb-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--sp-6);
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.fb-crumb:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.fb-crumb.is-current { color: var(--text); font-weight: var(--fw-semibold); }
+.fb-crumb.is-project { color: var(--fb-ink); }
+.fb-crumb.is-project .icon { color: var(--fb-ink); }
+.fb-crumb .icon { width: 12px; height: 12px; flex: none; }
+
+.fb-path { gap: var(--sp-6); padding: 0 var(--sp-6) 0 var(--sp-10); background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent-border), 0 0 0 3px var(--accent-softer); animation: var(--motion-swap); }
+.fb-path > .icon { width: 13px; height: 13px; color: var(--fb-ink); flex: none; }
+.fb-path .input { flex: 1; min-width: 0; height: 26px; border: 0; background: transparent; padding: 0; font-family: var(--font-mono); font-size: var(--fs-12); box-shadow: none; }
+.fb-path kbd { font: inherit; font-size: var(--fs-10); color: var(--text-3); background: var(--surface-2); border-radius: var(--r-4); padding: 1px var(--sp-6); flex: none; }
+
+.fb-filter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 1 188px;
+  min-width: 112px;
+  height: 30px;
+}
+.fb-filter > .icon { position: absolute; left: 9px; width: 12px; height: 12px; color: var(--text-3); pointer-events: none; transition: color var(--dur-fast) var(--ease); }
+.fb-filter .input {
+  width: 100%;
+  height: 30px;
+  padding-left: 28px;
+  padding-right: 26px;
+  border: 0;
+  border-radius: var(--r-8);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px transparent;
+  font-size: var(--fs-12);
+  transition: background-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.fb-filter .input:hover { background: var(--surface-2); }
+.fb-filter .input:focus, .fb-filter.has-value .input { background: var(--bg-inset); box-shadow: inset 0 0 0 1px var(--accent-border), 0 0 0 3px var(--accent-softer); }
+.fb-filter:focus-within > .icon, .fb-filter.has-value > .icon { color: var(--fb-ink); }
+.fb-filter .icon-btn { position: absolute; right: 3px; width: 22px; height: 22px; }
+.fb[data-tier="0"] .fb-filter { position: absolute; inset: 7px var(--sp-10) auto auto; width: min(240px, calc(100% - 20px)); z-index: 2; animation: var(--motion-pop); }
+.fb[data-tier="0"] .fb-filter .input { background: var(--surface); box-shadow: var(--shadow-menu), inset 0 0 0 1px var(--accent-border); }
+
+/* 视图切换：轨道 + 浮起的当前段；因宽度临时降级时，原选择留一个小圆点。 */
+.fb-view-switch {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  gap: 1px;
+  border-radius: var(--r-8);
+  background: var(--surface-2);
+}
+.fb-view-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 var(--sp-8);
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.fb-view-btn .icon { width: 13px; height: 13px; }
+.fb-view-btn:hover:not(:disabled):not(.is-active) { color: var(--text); }
+.fb-view-btn.is-active {
+  background: var(--surface);
+  color: var(--fb-ink);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 10%, transparent), 0 0 0 1px color-mix(in srgb, var(--text) 5%, transparent);
+}
+.fb-view-btn:disabled { opacity: 0.32; cursor: not-allowed; }
+.fb-view-btn.is-deferred::after { content: ""; position: absolute; top: 4px; right: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--fb-ink); }
+
+/* ---------- 主体 ---------- */
+.fb-body { flex: 1 1 auto; display: flex; min-height: 0; min-width: 0; }
+.fb-main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; animation: var(--motion-swap); }
+
+/* 位置栏：比正文低一层的底色，靠留白分组，不画分组线。 */
+.fb-places { flex: none; min-width: 0; overflow: auto; padding: var(--sp-10) var(--sp-8) var(--sp-16); background: var(--bg-subtle, var(--surface-2)); }
+.fb-splitter { flex: none; width: 1px; background: var(--fb-line); position: relative; z-index: 1; cursor: col-resize; outline: none; }
+.fb-splitter::after { content: ""; position: absolute; inset: 0 -3px; background: transparent; transition: background-color var(--dur-fast) var(--ease); }
+.fb-splitter:hover::after, .fb-splitter:focus-visible::after { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.fb-places-list { display: flex; flex-direction: column; gap: var(--sp-14); }
+.fb-places-section { display: flex; flex-direction: column; gap: 1px; }
+.fb-places-section h4 { margin: 0 0 var(--sp-4); padding: 0 var(--sp-8); font-size: var(--fs-10); font-weight: var(--fw-semibold); color: var(--text-faint); letter-spacing: 0.06em; text-transform: uppercase; }
+.fb-place {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  min-height: 28px;
+  padding: var(--sp-4) var(--sp-8);
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.fb-place > .icon { flex: none; width: 15px; height: 15px; color: var(--text-3); transition: color var(--dur-fast) var(--ease); }
+.fb-place:hover { background: var(--surface-hover); color: var(--text); }
+.fb-place:focus-visible { outline: 1px solid var(--fb-focus); outline-offset: -1px; }
+.fb-place.is-active { background: var(--fb-select); color: var(--text); font-weight: var(--fw-medium); }
+.fb-place.is-active > .icon { color: var(--fb-ink); }
+.fb-place[data-unready] { color: var(--text-3); }
+.fb-place[data-unready] > .icon { opacity: 0.6; }
+.fb-place-label { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-6); }
+.fb-place-x { display: inline-flex; flex: none; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: var(--r-4); color: var(--text-3); opacity: 0; transition: opacity var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease); }
+.fb-place-x:hover { background: var(--surface-active); color: var(--text); }
+.fb-place:hover .fb-place-x, .fb-place:focus-visible .fb-place-x { opacity: 1; }
+.fb-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--fb-ink); box-shadow: 0 0 0 3px var(--fb-select); }
+.fb-places-hint { margin: 0; padding: var(--sp-2) var(--sp-8); font-size: var(--fs-11); color: var(--text-faint); line-height: 1.5; }
+.fb-drive { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 2px 0; }
+.fb-drive-line { display: flex; align-items: baseline; gap: var(--sp-6); min-width: 0; }
+.fb-drive-line > .ellipsis { flex: 1; min-width: 0; }
+.fb-drive-free { flex: none; font-size: var(--fs-10); color: var(--text-3); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
+.fb-usage { display: block; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--text) 9%, transparent); overflow: hidden; position: relative; }
+.fb-usage::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--used); border-radius: inherit; background: color-mix(in srgb, var(--fb-ink) 80%, var(--surface)); }
+.fb-usage[data-tone="warn"]::after { background: var(--amber); }
+.fb-usage[data-tone="full"]::after { background: var(--red); }
+.fb-places-popover { width: 264px; max-height: min(480px, 70vh); overflow: auto; padding: var(--sp-8); }
+.fb-places-list.is-compact { gap: var(--sp-10); }
+
+/* ---------- 共用行元素 ---------- */
+.fb-ico { display: inline-flex; flex: none; color: var(--text-3); }
+.fb-ico .icon { width: 16px; height: 16px; }
+.fb-ico[data-kind="dir"], .fb-ico[data-kind="drive"] { color: color-mix(in srgb, var(--accent) 88%, var(--text-2)); }
+.fb-ico[data-ftype="code"] { color: var(--ftype-code); }
+.fb-ico[data-ftype="markup"] { color: var(--ftype-markup); }
+.fb-ico[data-ftype="style"] { color: var(--ftype-style); }
+.fb-ico[data-ftype="data"] { color: var(--ftype-data); }
+.fb-ico[data-ftype="doc"] { color: var(--ftype-doc); }
+.fb-ico[data-ftype="config"] { color: var(--ftype-config); }
+.fb-ico[data-ftype="script"] { color: var(--ftype-script); }
+.fb-ico[data-ftype="test"] { color: var(--ftype-test); }
+.fb-ico[data-ftype="package"] { color: var(--ftype-package); }
+.fb-ico[data-ftype="lock"] { color: var(--ftype-lock); }
+.fb-ico[data-ftype="image"] { color: var(--ftype-image); }
+.fb-ico[data-ftype="secret"], .fb-ico[data-secret] { color: var(--ftype-secret); }
+.fb-name { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1; color: var(--text); font-size: var(--fs-13); }
+.fb-badge { flex: none; display: inline-flex; align-items: center; font-size: var(--fs-11); color: var(--text-faint); }
+.fb-badge .icon { width: 11px; height: 11px; }
+.fb-muted { color: var(--text-faint); }
+[data-hidden] .fb-name, [data-hidden] .fname, [data-hidden] > .fb-ico, [data-hidden] .fb-col-name > .fb-ico { opacity: 0.55; }
+[data-denied] .fb-name, [data-denied] .fname { color: var(--text-3); }
+[data-noise] .fb-name { color: var(--text-2); }
+
+.fb-edit { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-4); }
+.fb-edit .input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-4);
+  font-size: var(--fs-13);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--accent-border), 0 0 0 3px var(--accent-softer);
+  border: 0;
+}
+.fb-edit .input[aria-invalid] { box-shadow: inset 0 0 0 1px var(--red), 0 0 0 3px var(--red-soft); }
+.fb-edit-error {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 5px);
+  z-index: 3;
+  max-width: 320px;
+  padding: var(--sp-4) var(--sp-8);
+  border-radius: var(--r-6);
+  background: var(--red);
+  color: var(--text-on-accent);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+  white-space: normal;
+  box-shadow: var(--shadow-menu);
+  animation: var(--motion-pop);
+}
+
+/* ---------- 详细列表 ---------- */
+.fb-list { flex: 1; display: flex; flex-direction: column; min-height: 0; container-type: inline-size; }
+.fb-list-head, .fb-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 128px 108px 72px;
+  align-items: center;
+  column-gap: var(--sp-12);
+  padding: 0 var(--sp-12) 0 var(--sp-10);
+}
+.fb-list-head { height: 30px; flex: none; margin: 0 var(--sp-6); border-bottom: 1px solid var(--fb-line); }
+.fb-col {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+.fb-col:hover { color: var(--text-2); }
+.fb-col[aria-sort="ascending"], .fb-col[aria-sort="descending"] { color: var(--text); }
+.fb-col .icon { width: 10px; height: 10px; color: var(--fb-ink); }
+.fb-list-head .fb-col-size, .fb-row .fb-col-size { justify-content: flex-end; text-align: right; }
+.fb-list-body { flex: 1; overflow: auto; padding: var(--sp-4) var(--sp-6) var(--sp-16); outline: none; }
+.fb-rows { display: flex; flex-direction: column; flex: none; }
+.fb-column .fb-rows { gap: 1px; }
+.fb-row {
+  height: var(--fb-row);
+  border-radius: var(--r-6);
+  cursor: default;
+  color: var(--text-2);
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--fb-row);
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.fb-row:hover { background: var(--surface-hover); }
+.fb-row.is-selected { background: var(--fb-select); }
+.fb-row.is-selected + .fb-row.is-selected { border-top-left-radius: 0; border-top-right-radius: 0; }
+.fb-row.is-selected:has(+ .fb-row.is-selected) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.fb-row:focus-visible { outline: 1px solid var(--fb-focus); outline-offset: -1px; }
+.fb-row.is-editing { background: var(--fb-select); }
+.fb-cell { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fb-cell.fb-col-name { display: flex; align-items: center; gap: 9px; overflow: visible; }
+.fb-cell.fb-col-modified, .fb-cell.fb-col-type, .fb-cell.fb-col-size { color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.fb-row.is-selected .fb-cell:not(.fb-col-name) { color: var(--text-2); }
+.fb-row.is-selected .fb-ico[data-kind="dir"] { color: var(--fb-ink); }
+
+/* 行尾悬停操作：平时不占视觉，悬停 / 选中 / 键盘聚焦才浮出。 */
+.fb-row-tools { display: inline-flex; align-items: center; gap: 1px; flex: none; margin-left: auto; opacity: 0; transition: opacity var(--dur-fast) var(--ease); }
+.fb-row-tools .icon-btn { width: 22px; height: 22px; border-radius: var(--r-4); color: var(--text-3); }
+.fb-row-tools .icon-btn:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.fb-row:hover .fb-row-tools, .fb-row:focus-within .fb-row-tools, .fb-row.is-selected .fb-row-tools { opacity: 1; }
+
+@container (max-width: 620px) {
+  .fb-list-head, .fb-row { grid-template-columns: minmax(0, 1fr) 104px 64px; }
+  .fb-col-type { display: none; }
+}
+@container (max-width: 420px) {
+  .fb-list-head, .fb-row { grid-template-columns: minmax(0, 1fr) 64px; }
+  .fb-col-modified { display: none; }
+}
+
+/* ---------- 单树（沿用 Explorer 的 .tree-row 尺寸与配色） ---------- */
+.fb-tree { flex: 1; overflow: auto; padding: var(--sp-6) var(--sp-6) var(--sp-16); outline: none; }
+.fb-tree .tree-row { height: 26px; }
+.fb-tree .tree-row .fname { flex: 1; min-width: 0; color: var(--text); }
+.fb-tree .tree-row[data-dir] .fi { color: color-mix(in srgb, var(--accent) 88%, var(--text-2)); }
+.fb-tree .tree-row[aria-selected="true"] { background: var(--fb-select); }
+.fb-tree .tree-row[aria-selected="true"][data-dir] .fi { color: var(--fb-ink); }
+.fb-tree .tree-row .fb-badge { margin-left: auto; }
+.fb-tree-error .fi { color: var(--red); }
+.fb-tree .fb-tree-error .fname { color: var(--text-3); }
+.fb-tree .tree-row.muted .fname { color: var(--text-faint); font-size: var(--fs-11); }
+.fb-tree .tree-row.is-editing { background: var(--fb-select); cursor: default; }
+
+/* ---------- 分栏 ---------- */
+.fb-columns { flex: 1; display: flex; min-height: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scroll-padding-inline: var(--sp-8); }
+.fb-column {
+  flex: none;
+  width: 228px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--sp-6);
+  overflow-y: auto;
+  border-right: 1px solid var(--fb-line);
+  scroll-snap-align: start;
+  outline: none;
+  animation: var(--motion-swap);
+}
+.fb-crow {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: var(--fb-row);
+  padding: 0 var(--sp-6) 0 var(--sp-8);
+  border-radius: var(--r-6);
+  color: var(--text-2);
+  cursor: default;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.fb-crow > .icon:last-child { flex: none; width: 10px; height: 10px; color: var(--text-faint); }
+.fb-crow:hover { background: var(--surface-hover); }
+/* 路径上的祖先：中性浅底；当前列的选中才用 indigo。 */
+.fb-crow.is-trail { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.fb-crow.is-trail .fb-ico[data-kind="dir"] { color: var(--text-2); }
+.fb-crow.is-selected { background: var(--fb-select); }
+.fb-crow.is-selected .fb-ico[data-kind="dir"], .fb-crow.is-selected > .icon:last-child { color: var(--fb-ink); }
+.fb-crow:focus-visible { outline: 1px solid var(--fb-focus); outline-offset: -1px; }
+.fb-preview-column { width: auto; min-width: 288px; max-width: 420px; flex: 1 0 288px; padding: var(--sp-16) var(--sp-16) var(--sp-24); border-right: 0; }
+.fb-columns-tail { flex: 1 0 0; min-width: 0; }
+
+/* 预览卡 */
+.fb-peek { display: flex; flex-direction: column; gap: var(--sp-6); min-width: 0; }
+.fb-peek-visual {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 10;
+  max-height: 180px;
+  border-radius: var(--r-10);
+  background:
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, currentColor 14%, transparent), transparent 70%),
+    var(--surface-2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text-3);
+  overflow: hidden;
+  margin-bottom: var(--sp-6);
+}
+.fb-peek-visual > .icon { width: 48px; height: 48px; stroke-width: 1; }
+.fb-peek-visual[data-ftype="code"] { color: var(--ftype-code); }
+.fb-peek-visual[data-ftype="markup"] { color: var(--ftype-markup); }
+.fb-peek-visual[data-ftype="doc"] { color: var(--ftype-doc); }
+.fb-peek-visual[data-ftype="data"] { color: var(--ftype-data); }
+.fb-peek-visual[data-ftype="config"] { color: var(--ftype-config); }
+.fb-peek-visual[data-ftype="image"] { color: var(--ftype-image); }
+.fb-peek-visual[data-ftype="secret"] { color: var(--ftype-secret); }
+.fb-peek-visual img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.fb-peek-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 1px var(--sp-6);
+  border-radius: var(--r-4);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  backdrop-filter: blur(6px);
+  color: currentColor;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
+}
+.fb-peek-name { margin: 0; font-size: var(--fs-14); font-weight: var(--fw-semibold); color: var(--text); line-height: 1.35; overflow-wrap: anywhere; }
+.fb-peek-meta { margin: 0; color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.fb-peek-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-6) var(--sp-12);
+  margin: var(--sp-8) 0 0;
+  padding-top: var(--sp-10);
+  border-top: 1px solid var(--fb-line);
+  font-size: var(--fs-11);
+}
+.fb-peek-facts dt { color: var(--text-3); }
+.fb-peek-facts dd { margin: 0; color: var(--text-2); min-width: 0; font-variant-numeric: tabular-nums; }
+.fb-peek-facts .fb-peek-path { font-family: var(--font-mono); font-size: var(--fs-10); line-height: 1.5; overflow-wrap: anywhere; color: var(--text-3); }
+.fb-peek-text {
+  margin: var(--sp-6) 0 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-8);
+  background: var(--bg-inset);
+  box-shadow: inset 0 0 0 1px var(--fb-line);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--text-2);
+  white-space: pre;
+  -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
+  mask-image: linear-gradient(to bottom, #000 82%, transparent);
+}
+.fb-peek-actions { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin-top: var(--sp-10); }
+.fb-peek-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 28px; border-radius: var(--r-6); }
+.fb-peek-actions .btn.primary { flex: 1 0 100%; }
+.fb-peek-actions .btn.outline { flex: 1 1 0; }
+
+/* ---------- 空态 / 骨架 ---------- */
+.fb-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-6);
+  padding: var(--sp-32) var(--sp-20);
+  text-align: center;
+  color: var(--text-3);
+  animation: var(--motion-reveal);
+}
+.fb-state > .icon {
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  padding: 12px;
+  margin-bottom: var(--sp-6);
+  border-radius: var(--r-12);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+.fb-state strong { color: var(--text); font-size: var(--fs-13); font-weight: var(--fw-medium); max-width: 360px; line-height: 1.45; }
+.fb-state > span:not(.fb-state-actions):not(.fb-unavailable-ico) { max-width: 360px; font-size: var(--fs-12); line-height: 1.6; color: var(--text-3); }
+.fb-state-actions { display: flex; gap: var(--sp-6); margin-top: var(--sp-8); }
+.fb-unavailable-ico {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: var(--sp-8);
+  border-radius: 16px;
+  background: linear-gradient(160deg, var(--fb-select), color-mix(in srgb, var(--fb-select) 30%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fb-ink) 18%, transparent);
+  color: var(--fb-ink);
+}
+.fb-unavailable-ico .icon { width: 26px; height: 26px; }
+.fb-skeleton { display: flex; flex-direction: column; gap: 14px; padding: var(--sp-14) var(--sp-16); }
+.fb-skeleton > span { display: block; height: 8px; width: var(--w, 70%); border-radius: 4px; background: color-mix(in srgb, var(--text) 7%, transparent); }
+.fb-skeleton-page { flex: 1; padding: var(--sp-20); }
+
+/* ---------- 状态栏 ---------- */
+.fb-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: 28px;
+  flex: none;
+  padding: 0 var(--sp-10);
+  border-top: 1px solid var(--fb-line);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.fb-stat { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 var(--sp-4); border: 0; background: transparent; color: inherit; font: inherit; border-radius: var(--r-4); min-width: 0; }
+.fb-stat + .fb-stat::before { content: ""; width: 3px; height: 3px; margin-right: var(--sp-6); border-radius: 50%; background: var(--text-faint); }
+.fb-status-fill + .fb-stat::before { display: none; }
+.fb-stat .icon { width: 11px; height: 11px; }
+.fb-stat em { font-style: normal; color: var(--text-3); margin-left: var(--sp-4); }
+.fb-stat.is-strong { color: var(--text-2); }
+.fb-stat.is-button { cursor: pointer; transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.fb-stat.is-button:hover { background: var(--surface-hover); color: var(--text); }
+.fb-stat.is-project { color: var(--fb-ink); }
+.fb-live { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--green-soft); }
+.fb-status-fill { flex: 1; }
+.fb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: 18px;
+  margin-left: var(--sp-4);
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-full);
+  font: inherit;
+  border: 0;
+  min-width: 0;
+}
+.fb-chip .icon { width: 11px; height: 11px; }
+.fb-chip[data-tone="warn"] { background: var(--amber-soft); color: var(--amber); }
+.fb[data-tier="0"] .fb-stat.is-project { display: none; }
+
+/* ---------- 提示条 ---------- */
+.fb-notice {
+  position: absolute;
+  /* 用 margin 居中而不是 translate：入场关键帧也写 translate，两者会互相覆盖。 */
+  left: 0;
+  right: 0;
+  width: fit-content;
+  margin-inline: auto;
+  bottom: 40px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  max-width: calc(100% - 32px);
+  padding: 7px var(--sp-14) 7px var(--sp-12);
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text) 92%, var(--surface));
+  color: var(--surface);
+  font-size: var(--fs-12);
+  box-shadow: var(--shadow-menu);
+  pointer-events: none;
+  --toast-from: 1;
+  animation: var(--motion-toast);
+}
+.fb-notice[data-tone="error"] { background: var(--red); color: var(--text-on-accent); }
+.fb-notice .icon { width: 13px; height: 13px; flex: none; color: var(--green); }
+.fb-notice[data-tone="error"] .icon { color: inherit; }
+
+/* ---------- 菜单 / 对话框 ---------- */
+.fb-menu { min-width: 224px; animation: var(--motion-pop); }
+.fb-menu-danger .menu-item:not(:disabled) { color: var(--red); }
+.fb-menu-danger .menu-item:not(:disabled):hover { background: var(--red-soft); }
+.fb-trash-list { list-style: none; margin: 0; padding: var(--sp-10) var(--sp-12); display: flex; flex-direction: column; gap: var(--sp-6); border-radius: var(--r-8); background: var(--bg-inset); box-shadow: inset 0 0 0 1px var(--fb-line); font-family: var(--font-mono); font-size: var(--fs-11); }
+.fb-trash-list li { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; color: var(--text-2); }
+.fb-trash-list .icon { flex: none; color: var(--text-3); }
+.fb-trash-warn { display: flex; gap: var(--sp-8); align-items: flex-start; margin: var(--sp-12) 0 0; padding: var(--sp-8) var(--sp-10); border-radius: var(--r-8); background: var(--amber-soft); color: var(--amber); font-size: var(--fs-12); line-height: 1.5; }
+.fb-trash-warn .icon { flex: none; margin-top: 2px; }
+.btn.primary.fb-danger { background: var(--red); border-color: var(--red); display: inline-flex; align-items: center; gap: var(--sp-6); }
+.btn.primary.fb-danger:hover { background: color-mix(in srgb, var(--red) 86%, var(--text)); }
+
+/* 窄档：工具栏更紧，状态栏只留数量与来源。 */
+.fb[data-tier="0"] .fb-toolbar { gap: var(--sp-4); padding: 0 var(--sp-6); height: 40px; }
+.fb[data-tier="0"] .fb-status { padding: 0 var(--sp-6); }

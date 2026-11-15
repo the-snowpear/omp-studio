@@ -17,14 +17,14 @@ export interface FileTool { id: string; icon: IconName; tip: string; run: () => 
 export interface FileModeOption { id: FileViewMode; label: string; icon: IconName }
 
 /** Breadcrumb, state badges, view switch, tool icons, Save and the ⋯ menu. */
-export function FileHeader({ path, badge, dirty, readOnly, demo, git, modes, mode, onMode, tools, save, menu, onCopyPath }: {
-  path: string; badge: { badge: string; tone: string; label: string }; dirty: boolean; readOnly: boolean; demo: boolean;
+export function FileHeader({ outsideProject = false, path, badge, dirty, readOnly, demo, git, modes, mode, onMode, tools, save, menu, onCopyPath }: {
+  outsideProject?: boolean; path: string; badge: { badge: string; tone: string; label: string }; dirty: boolean; readOnly: boolean; demo: boolean;
   git: { additions: number; deletions: number } | null;
   modes: FileModeOption[] | null; mode: FileViewMode; onMode: (mode: FileViewMode) => void;
   tools: FileTool[]; save: { saving: boolean; disabled: boolean; run: () => void } | null;
   menu: FileMenuEntry[]; onCopyPath: () => void;
 }) {
-  const { resolvedLanguage } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const parts = path.replaceAll("\\", "/").split("/").filter(Boolean), name = parts.pop() ?? path;
   return <header className="file-header">
@@ -32,6 +32,7 @@ export function FileHeader({ path, badge, dirty, readOnly, demo, git, modes, mod
       <span className={`file-badge tone-${badge.tone}`} aria-label={badge.label}>{badge.badge}</span>
       {parts.length ? <span className="file-crumb-dirs"><span dir="ltr">{parts.map((part, index) => <span key={index}>{part}<i aria-hidden="true">/</i></span>)}</span></span> : null}
       <button type="button" className="file-crumb-name" aria-label={zh ? `复制路径 ${path}` : `Copy path ${path}`} onClick={onCopyPath}>{name}</button>
+      {outsideProject ? <span className="file-tag">{t("fileBrowser.outsideProject")}</span> : null}
       {dirty ? <span className="file-dirty-dot" role="status" aria-label={zh ? "未保存" : "Unsaved"} data-tip={zh ? "有未保存的修改" : "Unsaved changes"} /> : null}
       {readOnly ? <span className="file-tag" data-tip={zh ? "此文件不可写" : "This file is read-only"}><Icon name="lock" extra="sm" />{zh ? "只读" : "Read-only"}</span> : null}
       {git ? <span className="file-tag tone-git" data-tip={zh ? "相对暂存区的工作区改动" : "Working-tree changes relative to index"}>{zh ? "已修改" : "Modified"}{git.additions ? <b className="add">+{git.additions}</b> : null}{git.deletions ? <b className="del">−{git.deletions}</b> : null}</span> : null}

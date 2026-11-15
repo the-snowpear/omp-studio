@@ -45,6 +45,7 @@ export type {
   HostUsageService,
   HostWorkspaceService,
   HostWorkspaceFileService,
+  HostSystemFileService,
   HostGitService,
   HostGitHubService,
 } from "./services.js";

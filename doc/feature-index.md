@@ -237,6 +237,9 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | Git 提交 / Issue / PR 输入框引用 | `composer/gitCommitReference.ts`、`githubReference.ts`、`GitHubReferencePreview.tsx`、`ChipComposer.tsx` | Git 快捷卡历史行可引用提交信息与变更文件清单；Issue / PR 收录正文、讨论及可选文件 Diff；发送 / 恢复 / 剪贴板保留胶囊；浏览器验收：`github-harness.html?preview=1&marks=off` |
 | 工作区注册 | 首页 / 设置 | `studio-host/src/workspace-registry.ts`、`workspace.open` / `pick` |
 | 文件树 query | `sidebar/WorkspaceTree.tsx` `RealFileTree` | facade `workspace.fileTree`；磁盘 `apps/desktop/src/workspace-files.ts` |
+| 全机文件浏览器 | `fileBrowser/{FileBrowserDock,FileBrowserPanel,FileBrowserChrome,FileBrowserViews,VirtualFileRows}.tsx`、`useFileBrowser.ts`、`fileBrowserSource.ts`；预览 `preview/fileBrowserPreview.ts`；验收 `file-browser-harness.html` | `fs.places/list/file.*`、`fs.directory.create/rename/trash` → facade → Desktop／SSH 共用 `system-files.ts`，文件编码、分块、保存冲突共用 `file-io.ts`；本机 `systemFile*` Shell 通道；说明 `docs/file-browser.md` |
+| 文件浏览器与项目联动 | `fileBrowser/fileBrowserLinks.ts`、`sidebar/WorkspaceTree.tsx`、`sidebar/treeKeyboard.ts`、`workbench/AppShell.tsx`；命令面板 `commandPaletteCatalog.ts` | `workspace.openPath` → `omp-workspace-adapter.ts`；Explorer 双向定位、绝对路径 Composer 胶囊；系统文件窗口使用 `files/fileBackend.ts` 和 `source: "system"`，项目内仍共用工作区缓冲区 |
+| 文件无覆盖重命名 | `apps/desktop/src/platform/file-rename.ts` | Windows `Rename-Item`；macOS `renameatx_np(RENAME_EXCL)`、Linux `renameat2(RENAME_NOREPLACE)` 通过系统 Perl 调用，不替换并发创建的目标 |
 | 通用文件窗口 / 编辑与预览 | `files/{FileDockInstances,FilePane,FileTextEditor,PdfPane,SpreadsheetPane,OfficePane}.tsx`、`fileDocuments.ts`、`fileLinks.tsx`；Dock `file-view:` 实例 | `workspace.file.inspect/readText/readChunk/writeText` → `workspace-files.ts`；桌面 `file-resources.ts` 的 `omp-file:` Range 通道覆盖本地 / SSH；保存版本冲突、共享缓冲、布局恢复与关闭确认；预览 `preview/filesPreview.ts`，说明 `docs/file-viewer.md` |
 | 文件窗口头部 / 状态栏 / Git 标记 / 添加到对话 | `files/{FileHeader,FileStatusBar}.tsx`、`gitMarks.ts`（hunk → 行号旁标记）、`fileActions.ts`（`workbench/AppShell.tsx` 的 `fileViewerActions` 复用 Explorer 文件菜单动作与 Composer 胶囊）、`filePreferences.ts`（换行 / 字号） | Git 改动走 `git.diff.get`（`target: "working"`），Diff 视图复用 `git/GitPatch.tsx`；预览补丁 `previewFilePatch` |
 | 可选 Office 预览组件 | `files/FileViewerSettings.tsx`；更新与维护的「可选组件」 | Desktop `office-component.ts` / `office-process.ts` / `office-component-manifest.ts` / `file-viewer-ipc.ts`；仅主动安装，独立签名工件；打包 `scripts/office-component.mjs`，独立验收 `office-component-smoke.mjs`，手动 workflow `office-component.yml` |
@@ -391,6 +394,8 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 | `skills.*` / `mcp.*` / `plugins.setEnabled` | 抽屉 / Capabilities：`skills.reveal` / `skills.revealRoot` 开系统目录；`mcp.refresh` / `mcp.test` / `mcp.logs.get` 为 Host 探测；Slash 执行走 Composer `runSlashCommand` |
 | `git.*` / `github.*` | Git 面板 → `git-service.ts` / `github-service.ts` |
 | `workspace.fileTree` | `sidebar/WorkspaceTree.tsx` `RealFileTree` → `workspace-files.ts` |
+| `fs.*` | `fileBrowser/fileBrowserSource.ts`、`files/fileBackend.ts` → facade → `apps/desktop/src/system-files.ts`；本机／SSH 同一服务，`file-resources.ts` 承载媒体 Range 读取 |
+| `workspace.openPath` | 文件浏览器“设为项目” → `AppShell.tsx` → `omp-workspace-adapter.ts` → registry，然后新建该项目的对话 |
 | `session.transcript.readPage` | 历史 / 对话回放 → `session-archive-reader.ts` |
 | `session.telemetry.read` | `useViewedSessionTelemetry.ts` → Host store / archive probe |
 | `btw.ask` / `abort` / `branch` | Composer `/btw` → `useBtwSession` → facade → overlay `btw-service.ts` |

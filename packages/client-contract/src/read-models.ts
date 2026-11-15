@@ -5,8 +5,9 @@ import type { ModelParameterValues, ModelParameterSources, ModelCatalogStatus } 
  * session history and home pages (FRONTEND_INTEGRATION.md §12.1).
  *
  * Every model exposes only safe display facts: opaque identities, epochs,
- * versions and pre-redacted text. No absolute paths, PIDs, process handles,
- * private endpoints, tokens or secrets may ever appear in these shapes.
+ * versions and pre-redacted text. Workspace roots are explicit display metadata;
+ * system browsing has its own fs.* contracts. Private Runtime paths, process
+ * handles, private endpoints, tokens and secrets are never exposed implicitly.
  */
 
 import type {
@@ -269,9 +270,9 @@ export interface RecentThread {
  * canonical root for display.
  *
  * `root` is the folder the operator picked in the system dialog, shown back
- * to them as an address. It is display metadata only: every file, tree and
- * mutation path stays workspace-relative and is resolved inside the Host
- * registry, so nothing here is ever joined or used for access checks.
+ * to them as an address. Workspace file/tree operations still resolve against
+ * the Host registry and enforce containment. The separate fs.* service accepts
+ * user-selected absolute paths and owns its own access checks.
  */
 export interface WorkspaceRecord {
   readonly workspaceId: WorkspaceId;
@@ -289,7 +290,7 @@ export interface WorkspaceListReadModel {
   readonly activeWorkspaceId?: WorkspaceId;
 }
 
-/** A workspace-relative Explorer node. Absolute paths never cross the Host boundary. */
+/** A workspace-relative Explorer node. Absolute browsing belongs to the separate fs.* contracts. */
 export interface WorkspaceFileNode {
   readonly type: "file" | "dir";
   readonly name: string;

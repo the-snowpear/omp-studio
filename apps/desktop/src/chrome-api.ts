@@ -50,6 +50,8 @@ import {
   type WorkspaceFileActionResult,
   type WorkspaceFileTargetInput,
   type WorkspaceShellEditorResult,
+  type SystemFileTargetInput,
+  type SystemFileOpenWithInput,
 } from "./workspace-shell-shared.js";
 import {
   CHROME_UPDATES_CHANNELS,
@@ -247,6 +249,15 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     },
     openFile(input: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> {
       return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpen, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileOpen(input: SystemFileTargetInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileOpen, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileOpenWith(input: SystemFileOpenWithInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileOpenWith, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileReveal(input: SystemFileTargetInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileReveal, input) as Promise<WorkspaceFileActionResult>;
     },
     openFileWith(input: FileOpenWithInput): Promise<WorkspaceFileActionResult> {
       return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpenWith, input) as Promise<WorkspaceFileActionResult>;
