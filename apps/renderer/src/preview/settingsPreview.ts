@@ -35,6 +35,7 @@ export const PREVIEW_APP_SETTINGS: AppSettings = {
   uiFontSize: 14,
   terminalFontFamily: "Cascadia Code",
   terminalFontSize: 13,
+  terminalTmuxCloseAction: "ask",
   outputFontFamily: "",
   outputFontSize: 15,
   streaming: true,

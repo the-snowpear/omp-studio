@@ -11,6 +11,7 @@ Public documentation for OMP Studio.
 | [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
 | [time-travel.md](time-travel.md) | Time Travel 开启、检查点、代码/对话恢复、存储与限制 |
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |
+| [tmux.md](tmux.md) | SSH tmux 会话附加、窗口与分屏、隐藏与分离、恢复及限制 |
 | [../doc/ssh-workspace-test-prompt.md](../doc/ssh-workspace-test-prompt.md) | SSH 与账密功能的独立测试交接提示词 |
 | [model-adaptation.md](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |
 | [workbench-docking.md](workbench-docking.md) | 工具停靠、浮窗、会话布局和预设 |

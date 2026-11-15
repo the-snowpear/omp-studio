@@ -254,6 +254,7 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 功能 | Renderer | Desktop |
 |---|---|---|
 | 底栏终端 | `apps/renderer/src/TerminalPane.tsx`、`terminalSessions.tsx` | `terminal-ipc.ts`、`terminal-pty.ts`、`terminal-batch.ts`、`remote/terminal.ts`；本地/SSH 共用有界输出合批与退出尾部排空 |
+| tmux 控制模式 | `TerminalPane.tsx`、`tmux/*.tsx`、`terminalSessions.tsx`、`preview/tmuxPreview.ts`；设置 `settings/appSettings.ts`、`FontSettings.tsx` | `apps/desktop/src/tmux/*.ts`、`terminal-ipc.ts`、`preload.ts`；SSH 管道 `tmux -u -C`，窗口标签、原生布局分屏、背压、屏幕恢复和 detach；类型化动作只在 Desktop 生成命令，不进入 Host / Runtime。说明 `docs/tmux.md` |
 | 正文命令块执行 | `conversation/CommandBlock.tsx`、`commandBlock.css`、`markdown.tsx`；共用高亮语法 `highlight/commandLanguages.ts`；预览 `preview/conversationFixtures.ts` | `terminal-shared.ts` 的 `create.command` → `terminal-command.ts` / `terminal-pty.ts` / `remote/terminal.ts`；识别 bash/sh/zsh 与 pwsh/powershell/ps1，显式点击后在当前对话工作区创建独立终端，整块脚本作为 Shell 参数执行并显示底栏输出；流式未完成时禁用，预览仅本地演示；Worker 与开发高亮共用命令名/选项着色，PowerShell 两条路径均注册别名 |
 | GPU / 低配档位 | `apps/renderer/src/perf/{tierControl,tiers}.ts`、`tiers.css` | `perf-profile.ts` 判定、`perf-profile-cache.ts` 解析磁盘缓存、`perf-profile-shared.ts` 固定只读 preload；最新快照与用户减少动效偏好叠加，重复档位不写 DOM |
 | Shell 录制 / 回放 | `recordings/TerminalRecordingControls.tsx`、`RecordingPlayer.tsx`、`format.ts`、`recording.worker.ts`；产物库录制项 | `terminal-recording.ts` + 固定 terminal recording IPC；真实 PTY 输出流写入产物库；支持 `.studiocast` 和上游 `.ompcast` 只读回放，无额外 AgentSession/TUI |

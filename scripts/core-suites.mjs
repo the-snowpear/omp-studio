@@ -48,6 +48,7 @@ export const CORE_NODE_SUITES = [
   "apps/desktop/dist/test/perf-profile.test.js",
   "apps/desktop/dist/test/terminal-batch.test.js",
   "apps/desktop/dist/test/terminal-flow-control.test.js",
+  "apps/desktop/dist/test/tmux-control.test.js",
   "apps/desktop/dist/test/update-v2.test.js",
   "packages/runtime-installer/dist/test/installer.test.js",
   "packages/runtime-installer/dist/test/installer-verification-cache.test.js",

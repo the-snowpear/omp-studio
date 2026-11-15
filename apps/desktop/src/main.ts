@@ -121,6 +121,7 @@ import {
 import type { DesktopTray, DesktopWindowFactory, DesktopWindowSurface } from "./types.js";
 import { createProductionHostFactory } from "./host-factory.js";
 import { defaultHostLogsDirectory } from "./host-log.js";
+import { TmuxControlManager } from "./tmux/manager.js";
 import { desktopPaths } from "./platform/desktop-paths.js";
 import { applyLoginEnvironment } from "./platform/login-env.js";
 import {
@@ -412,6 +413,7 @@ export async function main(): Promise<void> {
     connected: (id, remote, signal, report) => connectRemoteServices(remoteConnections, id, remote, signal, report, remoteVault, url => session.defaultSession.resolveProxy(url), memoryCredentials, timeTravelService(activeProfileDirectory())),
   });
   const remoteTerminals = new RemoteTerminalManager(remoteConnections);
+  const tmux = new TmuxControlManager({ connections: remoteConnections, log: (level, event, detail) => hostFactory.log?.write(level, event, JSON.stringify(detail)) });
   const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);
   const mediaUploads = new MediaUploadManager(activeArtifactLibrary);
   const dictationAudio = new DesktopDictationAudio({
@@ -708,7 +710,7 @@ export async function main(): Promise<void> {
     const remoteIpc = registerRemoteIpc({ ipc: ipcMain, manager: remoteConnections, isTrusted: isTrustedSender, installRuntime: async id => {
       const picked = await dialog.showOpenDialog(window, { title: desktopText("选择匹配远端系统的签名 Runtime ZIP", "Select Signed Runtime ZIP Matching the Remote OS"), properties: ["openFile"], filters: [{ name: "OMP Studio Runtime", extensions: ["zip"] }] });
       if (picked.canceled || !picked.filePaths[0]) return { installed: false };
-      if (remoteTerminals.hasTarget(id)) throw new Error(desktopText("请先关闭这个 SSH 目标的终端，再安装 Runtime", "Close terminals for this SSH target before installing the Runtime"));
+      if (remoteTerminals.hasTarget(id) || tmux.hasTarget(id)) throw new Error(desktopText("请先关闭这个 SSH 目标的终端，再安装 Runtime", "Close terminals for this SSH target before installing the Runtime"));
       await installRemoteRuntime(remoteConnections, id, picked.filePaths[0], trustedKeys);
       return { installed: true };
     } });
@@ -912,6 +914,7 @@ export async function main(): Promise<void> {
       isTrustedSender,
       manager: terminalManager,
       remote: remoteTerminals,
+      tmux,
       activeRemote: () => remoteConnections.activeId,
       resolveWorkspaceCwd: workspaceId => hostFactory.resolveWorkspaceCwd(workspaceId),
       recordings: terminalRecordings,
@@ -1121,7 +1124,7 @@ export async function main(): Promise<void> {
 
   const application = createDesktopApplication({
     confirmBeforeQuit: () => fileViewerIpc?.requestClose() ?? Promise.resolve(true),
-    beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await remoteConnections.close(); remoteVault.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await tmux.disposeAll(); await remoteConnections.close(); remoteVault.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
     platform: process.platform,

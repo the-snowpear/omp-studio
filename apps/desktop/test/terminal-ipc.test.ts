@@ -28,6 +28,8 @@ import {
   type TerminalSender,
 } from "../src/terminal-ipc.js";
 import type { TerminalBatchTimers } from "../src/terminal-batch.js";
+import { TMUX_IPC_CHANNELS } from "../src/tmux/tmux-shared.js";
+import type { TmuxControlManager } from "../src/tmux/manager.js";
 
 /** Manual clock: the manager batches output, so tests decide when a window ends. */
 class ManualTimers implements TerminalBatchTimers {
@@ -160,7 +162,7 @@ function makeIpc(): FakeIpc {
   };
 }
 
-function register(trusted: (sender: TerminalSender) => boolean = () => true, resolveWorkspaceCwd?: (workspaceId: string) => Promise<string>) {
+function register(trusted: (sender: TerminalSender) => boolean = () => true, resolveWorkspaceCwd?: (workspaceId: string) => Promise<string>, tmux?: TmuxControlManager) {
   const ipc = makeIpc();
   const ptys: FakePty[] = [];
   const timers = new ManualTimers();
@@ -171,7 +173,7 @@ function register(trusted: (sender: TerminalSender) => boolean = () => true, res
     newId: () => `term-${ptys.length + 1}xxxx`,
     output: { timers },
   });
-  const handle = registerTerminalIpc({ ipcMain: ipc, isTrustedSender: trusted, manager, ...(resolveWorkspaceCwd ? { resolveWorkspaceCwd } : {}) });
+  const handle = registerTerminalIpc({ ipcMain: ipc, isTrustedSender: trusted, manager, ...(resolveWorkspaceCwd ? { resolveWorkspaceCwd } : {}), ...(tmux ? { tmux } : {}) });
   return {
     ipc,
     ptys,
@@ -237,7 +239,7 @@ describe("resolveDefaultShell", () => {
 });
 
 describe("registerTerminalIpc", () => {
-  test("registers exactly the shell and recording inbound channels", () => {
+  test("registers the shell, recording and tmux inbound channels", () => {
     const { ipc, handle } = register();
     assert.deepEqual(
       [...ipc.handlers.keys()].sort(),
@@ -250,10 +252,29 @@ describe("registerTerminalIpc", () => {
         TERMINAL_IPC_CHANNELS.recordingStop,
         TERMINAL_IPC_CHANNELS.recordingStatus,
         TERMINAL_IPC_CHANNELS.ack,
+        TMUX_IPC_CHANNELS.sessions,
+        TMUX_IPC_CHANNELS.attach,
+        TMUX_IPC_CHANNELS.command,
+        TMUX_IPC_CHANNELS.detach,
       ].sort(),
     );
     assert.equal(ipc.handlers.has(TERMINAL_IPC_CHANNELS.data), false);
     handle.dispose();
+  });
+
+  test("tmux pane input and credits route to tmux; local resize, dispose and recording cannot affect a pane", async () => {
+    const calls: unknown[][] = [];
+    const tmux = { owns: (windowId: number, id: string) => windowId === 1 && id === "term-1xxxx", write: (...args: unknown[]) => calls.push(["write", ...args]), acknowledge: (...args: unknown[]) => calls.push(["ack", ...args]), disposeWindow: async () => {} } as unknown as TmuxControlManager;
+    const f = register(undefined, undefined, tmux), sender = makeSender(1);
+    f.invoke(TERMINAL_IPC_CHANNELS.create, sender);
+    await f.invoke(TERMINAL_IPC_CHANNELS.write, sender, { id: "term-1xxxx", data: "ls" });
+    await f.invoke(TERMINAL_IPC_CHANNELS.ack, sender, { id: "term-1xxxx", bytes: 2 });
+    await f.invoke(TERMINAL_IPC_CHANNELS.resize, sender, { id: "term-1xxxx", cols: 80, rows: 24 });
+    await f.invoke(TERMINAL_IPC_CHANNELS.dispose, sender, { id: "term-1xxxx" });
+    assert.deepEqual(calls, [["write", 1, "term-1xxxx", "ls"], ["ack", 1, "term-1xxxx", 2]]);
+    assert.deepEqual(f.ptys[0]!.writes, []); assert.deepEqual(f.ptys[0]!.resizes, []); assert.equal(f.ptys[0]!.killed, false);
+    assert.throws(() => f.invoke(TERMINAL_IPC_CHANNELS.recordingStart, sender, { id: "term-1xxxx" }), /tmux pane recording/);
+    f.handle.dispose();
   });
 
   test("rejects untrusted senders before spawning", () => {

@@ -304,19 +304,8 @@ declare global {
    * when the Electron preload exposed `ompStudioTerminal`.
    */
   var ompStudioTerminal:
-    | {
-        create(size?: { cols?: number; rows?: number; targetId?: string; workspaceId?: string; flowControl?: boolean; command?: import("../../desktop/src/terminal-shared").TerminalCommand }): Promise<{ id: string; name: string; cwd: string }>;
-        write(id: string, data: string): Promise<void>;
-        resize(id: string, cols: number, rows: number): Promise<void>;
-        dispose(id: string): Promise<void>;
-        recordingStart?(input: { id: string; workspaceId?: string; sessionId?: string }): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
-        recordingStop?(id: string): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
-        recordingStatus?(id: string): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
-        onData(listener: (event: { id: string; data: string; bytes?: number }) => void): () => void;
-        onExit(listener: (event: { id: string }) => void): () => void;
-        /** Flow control: bytes written to xterm. Absent on an older preload. */
-        ack?(id: string, bytes: number): void;
-      }
+    | (Omit<import("../../desktop/src/terminal-shared").OmpStudioTerminalApi, "recordingStart" | "recordingStop" | "recordingStatus">
+      & Partial<Pick<import("../../desktop/src/terminal-shared").OmpStudioTerminalApi, "recordingStart" | "recordingStop" | "recordingStatus">>)
     | undefined;
 }
 
