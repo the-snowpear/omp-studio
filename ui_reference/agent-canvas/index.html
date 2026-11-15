@@ -1,0 +1,1313 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent 画布 · 交互原型</title>
+<style>
+:root{
+  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-mono:"JetBrains Mono","Cascadia Code",ui-monospace,Menlo,Consolas,monospace;
+  --bg:#fbfbfc;--surface:#fff;--surface-2:#f2f2f5;--surface-3:#e8e8ec;--hover:rgba(20,20,30,.045);--active:rgba(20,20,30,.08);
+  --border:rgba(15,18,25,.09);--border-strong:rgba(15,18,25,.16);--border-float:#9b958c;
+  --text:#1d2129;--text-2:#4e5560;--text-3:#5c636e;--text-faint:#6d7480;--on-accent:#fff;
+  --accent:#6e56cf;--accent-soft:rgba(110,86,207,.1);--accent-softer:rgba(110,86,207,.06);--accent-border:rgba(110,86,207,.35);
+  --green:#137a52;--green-soft:rgba(19,122,82,.12);--amber:#8f5a05;--amber-soft:rgba(143,90,5,.12);--red:#c0272c;--red-soft:rgba(192,39,44,.1);
+  --grid:rgba(15,18,25,.08);
+}
+:root[data-theme=dark]{
+  --bg:#121519;--surface:#1a1b1f;--surface-2:#222329;--surface-3:#2b2c33;--hover:rgba(235,235,245,.05);--active:rgba(235,235,245,.09);
+  --border:rgba(255,255,255,.07);--border-strong:rgba(255,255,255,.12);--border-float:#46505f;
+  --text:#e7e8eb;--text-2:#a7abb4;--text-3:#8b909a;--text-faint:#7c828c;--on-accent:#121316;
+  --accent:#9e8cfc;--accent-soft:rgba(158,140,252,.14);--accent-softer:rgba(158,140,252,.08);--accent-border:rgba(158,140,252,.4);
+  --green:#46b983;--green-soft:rgba(70,185,131,.15);--amber:#e0a23c;--amber-soft:rgba(224,162,60,.15);--red:#f06568;--red-soft:rgba(240,101,104,.14);
+  --grid:rgba(255,255,255,.07);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font:13px/1.45 var(--font-ui);color:var(--text);background:var(--bg);overflow:hidden;user-select:none;-webkit-user-select:none}
+button,input,select{font:inherit;color:inherit}
+button{background:none;border:0;padding:0;cursor:pointer}
+.ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+#app{display:flex;height:100vh}
+#rail{width:56px;flex:none;border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0;background:var(--surface-2)}
+.rb{width:38px;height:38px;border-radius:9px;display:grid;place-items:center;color:var(--text-3);position:relative}
+.rb:hover{background:var(--hover);color:var(--text)}
+.rb.on{background:var(--accent-soft);color:var(--accent)}
+.rb .ic{width:19px;height:19px}
+.rsub{display:flex;flex-direction:column;gap:2px;padding:2px 0 6px;border-bottom:1px solid var(--border);margin-bottom:4px}
+.rb.sm{width:32px;height:30px}
+.rb.sm .ic{width:16px;height:16px}
+.badge{position:absolute;top:-2px;right:-4px;min-width:15px;height:15px;border-radius:8px;background:var(--amber);color:#fff;font-size:10px;line-height:15px;text-align:center;padding:0 3px;font-style:normal}
+.badge:empty{display:none}
+#side{width:236px;flex:none;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--surface)}
+#side h4{margin:0;padding:10px 12px 6px;font-size:12px;color:var(--text-3);font-weight:600}
+#sideList{flex:1;overflow:auto;padding:0 6px 10px}
+.sp{display:flex;align-items:center;margin-top:6px}
+.spn{flex:1;min-width:0;display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:6px;font-weight:600;text-align:left}
+.spn span,.sr span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.spn:hover,.sr:hover,.eye:hover{background:var(--hover)}
+.eye{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;color:var(--text-3)}
+.sr{width:100%;display:flex;align-items:center;gap:7px;padding:4px 6px 4px 22px;border-radius:6px;text-align:left}
+.sr span{flex:1;min-width:0}
+.sr em{font-style:normal;font-size:11px;color:var(--text-faint);flex:none}
+.sr.dim{color:var(--text-faint)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--text-faint);flex:none;display:inline-block}
+.dot.st-running,.dot.st-done{background:var(--green)}.dot.st-waiting{background:var(--amber)}.dot.st-draft{background:var(--accent)}
+#main{flex:1;min-width:0;display:flex;flex-direction:column}
+#top{height:40px;flex:none;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;padding:0 12px;background:var(--surface)}
+#top b{font-weight:600}
+#top .grow{flex:1}
+.tb{height:28px;padding:0 9px;border-radius:7px;display:inline-flex;align-items:center;gap:5px;color:var(--text-2);border:1px solid transparent;white-space:nowrap}
+.tb:hover{background:var(--hover)}
+.tb.on{background:var(--accent-soft);color:var(--accent)}
+#stage{flex:1;min-height:0;display:flex}
+#wrap{flex:1;min-width:0;position:relative;overflow:hidden}
+#canvas{position:absolute;top:0;bottom:0;left:0;right:0;overflow:hidden;background-color:var(--bg);background-image:radial-gradient(var(--grid) 1.2px,transparent 1.2px);cursor:default}
+#canvas.grabbing,#canvas.space{cursor:grabbing}
+#world{position:absolute;left:0;top:0;transform-origin:0 0}
+#edges{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none}
+#edges path{fill:none}
+.se{stroke:var(--border-strong);stroke-width:1.5}
+.te{stroke:var(--text-faint);stroke-width:1.2;stroke-dasharray:2 4}
+.le{stroke:var(--text-faint);stroke-width:1.4;stroke-dasharray:8 4}
+.we{stroke:var(--accent);stroke-width:1.8;stroke-dasharray:6 4}
+.we.st-sent{stroke:var(--text-faint);opacity:.6}
+.we.st-updated{stroke:var(--green)}
+.we.st-always{stroke-dasharray:none}
+.we.on{stroke-width:3}
+.we.tmp{opacity:.7}
+.hit{stroke:transparent;stroke-width:14;pointer-events:stroke;cursor:pointer}
+.node{position:absolute;background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;display:flex;flex-direction:column}
+.node.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.node.target{box-shadow:0 0 0 3px var(--accent-border)}
+.node.ref{cursor:grab}
+.k-project{background:var(--surface-2);border-color:var(--accent-border)}
+.k-agent,.k-sub{border-left:3px solid var(--st,var(--text-faint))}
+.st-running{--st:var(--green)}.st-waiting{--st:var(--amber)}.st-draft{--st:var(--accent)}.st-done{--st:var(--green)}
+.node.st-archived,.node.gone{opacity:.55;border-style:dashed}
+.node.popped{border-style:dashed;background:var(--surface-2)}
+.nh{display:flex;align-items:center;gap:6px;padding:7px 6px 3px 9px;flex:none;cursor:grab;min-width:0}
+.nt{font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nb{width:22px;height:22px;border-radius:5px;display:inline-grid;place-items:center;color:var(--text-3);flex:none}
+.nb:hover{background:var(--hover);color:var(--text)}
+.nb .ic{width:14px;height:14px}
+.node.ref .nb{display:none}
+.node.ref:hover .nb,.node.ref.sel .nb{display:inline-grid}
+.meta{padding:0 9px 3px;color:var(--text-3);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:5px;min-height:19px}
+.meta.last{color:var(--text-faint)}
+.lk{color:var(--accent);font-size:12px;margin-left:auto;white-space:nowrap}
+.lk:hover{text-decoration:underline}
+.bar{height:3px;margin:0 9px 3px;border-radius:2px;background:var(--surface-3);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--green)}
+.chip-s{font-size:11px;padding:0 6px;border-radius:999px;background:var(--surface-2);color:var(--text-3);white-space:nowrap;flex:none}
+.chip-s.st-running,.chip-s.st-done{background:var(--green-soft);color:var(--green)}
+.chip-s.st-waiting{background:var(--amber-soft);color:var(--amber)}
+.chip-s.st-draft{background:var(--accent-soft);color:var(--accent)}
+.port{position:absolute;width:13px;height:13px;border-radius:50%;background:var(--surface);border:2px solid var(--accent);top:min(50%,19px);margin-top:-6px;z-index:2}
+.port.out{right:-7px;cursor:crosshair}
+.port.out:hover{background:var(--accent)}
+.port.in{left:-8px;border-color:var(--text-faint);pointer-events:none}
+.port b{position:absolute;left:13px;top:-9px;font-size:10px;line-height:14px;background:var(--accent);color:var(--on-accent);border-radius:8px;padding:0 5px;font-weight:600}
+.fn-body{flex:1;min-height:0;display:flex;flex-direction:column;border-top:1px solid var(--border);margin-top:3px}
+.lod-sum{display:none}
+.rs{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;border-right:2px solid var(--border-strong);border-bottom:2px solid var(--border-strong);border-radius:0 0 9px 0}
+.cols{flex:1;min-height:0;display:flex}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.detail{display:none;width:170px;flex:none;border-left:1px solid var(--border);padding:8px 10px;flex-direction:column;gap:4px;color:var(--text-3);font-size:12px}
+.wide .detail{display:flex}
+.scroll{flex:1;min-height:0;overflow:auto;padding:8px 10px;user-select:text;-webkit-user-select:text}
+.msg{padding:6px 8px;border-radius:8px;margin-bottom:6px;border:1px solid transparent;cursor:pointer;word-break:break-word}
+.msg.user{background:var(--accent-softer);margin-left:28px}
+.msg.ai{background:var(--surface-2);margin-right:16px}
+.msg.sel,.item.sel,.bcard.sel{border-color:var(--accent);background:var(--accent-soft)}
+.msg .auto{margin-top:4px;font-size:11px;color:var(--text-faint)}
+.empty,.tip{color:var(--text-faint);font-size:12px}
+.appr{border:1px solid var(--amber);background:var(--amber-soft);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px}
+.appr code{font-family:var(--font-mono);font-size:12px;background:var(--surface);border-radius:5px;padding:4px 6px;user-select:text}
+.row{display:flex;align-items:center;gap:6px}
+.btn{height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--border-strong);display:inline-flex;align-items:center;gap:4px;white-space:nowrap;background:var(--surface)}
+.btn:hover{background:var(--hover)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn .ic{width:13px;height:13px}
+.composer{flex:none;padding:8px 10px 9px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:5px}
+.opts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--text-3)}
+.opts select{height:24px;border:1px solid var(--border-strong);border-radius:6px;background:var(--surface);padding:0 4px}
+.input{min-height:50px;max-height:110px;overflow:auto;border:1px solid var(--border-strong);border-radius:8px;padding:6px 8px;outline:none;user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;cursor:text}
+.input:focus{border-color:var(--accent)}
+.input:empty::before{content:attr(data-ph);color:var(--text-faint)}
+.tray{display:flex;flex-wrap:wrap;gap:4px;min-height:22px;align-items:center}
+.cap,.chip{display:inline-flex;align-items:center;gap:4px;padding:0 8px;height:21px;border:1px solid var(--accent-border);background:var(--accent-softer);border-radius:999px;font-size:12px;white-space:nowrap;max-width:100%;overflow:hidden;vertical-align:middle}
+.cap{cursor:grab}
+.cap .ic,.chip .ic{width:12px;height:12px}
+.cap.st-sent{border-color:var(--border-strong);background:transparent;color:var(--text-faint)}
+.cap.st-updated{border-color:var(--green);background:var(--green-soft);color:var(--green)}
+.cap.st-always{border-style:solid;border-width:2px}
+.cap.ghost{position:fixed;z-index:99;pointer-events:none;background:var(--surface)}
+.chip{margin:0 2px;user-select:none}
+.ro{padding:8px 10px;border-top:1px solid var(--border);color:var(--text-faint);font-size:12px}
+.pick{padding:5px 10px;font-size:11px;color:var(--text-faint);border-bottom:1px solid var(--border);flex:none}
+.sum{padding:5px 10px 0;font-size:12px;color:var(--text-3);flex:none}
+.list{padding:6px}
+.wide .list{display:grid;grid-template-columns:1fr 1fr;gap:0 6px;align-content:start}
+.item{display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:6px;border:1px solid transparent;cursor:pointer;font-family:var(--font-mono);font-size:12px;min-width:0}
+.item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item:hover,.bcard:hover{background:var(--hover)}
+.ck{width:12px;height:12px;border-radius:3px;border:1.5px solid var(--text-faint);flex:none}
+.sel>.ck{background:var(--accent);border-color:var(--accent)}
+.note-text{flex:1;min-height:0;overflow:auto;padding:8px 10px;outline:none;user-select:text;-webkit-user-select:text;white-space:pre-wrap;cursor:text}
+.k-note{background:var(--amber-soft)}
+.board{flex:1;min-height:0;display:flex;gap:6px;padding:8px}
+.bcol{flex:1;min-width:0;background:var(--surface-2);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px;overflow:auto}
+.bcol>b{font-size:12px;color:var(--text-3)}
+.bcard{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 4px 4px 7px;display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px}
+.bcard span{flex:1;min-width:0}
+.badd{display:flex;gap:3px}
+.badd input{flex:1;min-width:0;height:22px;border:1px solid var(--border-strong);border-radius:5px;background:var(--surface);padding:0 5px;font-size:12px}
+.lod .node.fn .fn-body,.lod .node.fn .rs,.lod .nb,.lod .meta.last,.lod .bar{display:none!important}
+.lod .node.fn .lod-sum{display:block}
+.lod .nt{font-size:calc(13px*var(--k,1))}
+.lod .nh{padding-top:9px}
+.group{position:absolute;border:1.5px dashed var(--gc,var(--accent-border));border-radius:14px;background:color-mix(in srgb,var(--gc,var(--accent)) 5%,transparent)}
+.group.collapsed{border-style:solid;background:var(--surface)}
+.gh{display:flex;align-items:center;gap:6px;height:30px;padding:0 6px 0 10px;cursor:grab;color:var(--text-2)}
+.gt{font-weight:600;outline:none;min-width:20px;cursor:text;white-space:nowrap}
+.gm{font-size:11px;color:var(--text-faint);flex:1;white-space:nowrap}
+.gh button{font-size:11px;padding:1px 6px;border-radius:5px;color:var(--text-3)}
+.gh button:hover{background:var(--hover)}
+#marquee{position:absolute;border:1px solid var(--accent);background:var(--accent-softer);display:none;pointer-events:none}
+#toolbar{position:absolute;left:10px;top:10px;right:10px;display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;pointer-events:none}
+.tg{display:flex;align-items:center;gap:2px;background:var(--surface);border:1px solid var(--border-strong);border-radius:9px;padding:2px;pointer-events:auto}
+.tg .tb{height:26px;padding:0 8px}
+#searchBox{position:relative;pointer-events:auto}
+#search{height:32px;width:170px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface);padding:0 9px;outline:none;user-select:text}
+#search:focus{border-color:var(--accent)}
+#results{position:absolute;top:35px;left:0;width:240px;background:var(--surface);border:1px solid var(--border-float);border-radius:9px;padding:4px;display:none;z-index:5}
+#results button{display:flex;gap:6px;align-items:center;width:100%;text-align:left;padding:5px 7px;border-radius:6px}
+#results button:hover{background:var(--hover)}
+#results em{font-style:normal;color:var(--text-faint);font-size:11px;margin-left:auto}
+#indicators{position:absolute;inset:0;pointer-events:none}
+.ind{position:absolute;pointer-events:auto;display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:999px;background:var(--amber);color:#fff;font-size:12px;white-space:nowrap}
+.ind i{display:inline-grid}
+#minimap{position:absolute;right:10px;bottom:10px;width:192px;height:122px;background:var(--surface);border:1px solid var(--border-strong);border-radius:9px;overflow:hidden;cursor:pointer}
+#minimap rect{fill:var(--text-faint);opacity:.55}
+#minimap .mk-project{fill:var(--accent);opacity:.8}
+#minimap .ms-running{fill:var(--green);opacity:.9}
+#minimap .ms-waiting{fill:var(--amber);opacity:1}
+#minimap .mvp{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1;opacity:1}
+#hint{position:absolute;left:10px;bottom:10px;width:292px;background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;padding:8px 10px;font-size:12px;color:var(--text-2)}
+#hint b{display:flex;align-items:center;justify-content:space-between;color:var(--text)}
+#hint ol{margin:6px 0 0;padding-left:18px;line-height:1.7}
+#hint.min ol{display:none}
+#hint kbd{font-family:var(--font-mono);font-size:11px;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:0 4px}
+#snapPrev{position:absolute;top:0;bottom:0;width:50%;background:var(--accent-soft);border:2px solid var(--accent-border);display:none;pointer-events:none;z-index:3}
+#snapPrev.on{display:block}#snapPrev.left{left:0}#snapPrev.right{right:0}#snapPrev.max{left:0;width:100%}
+#windows{position:absolute;inset:0;pointer-events:none;z-index:4}
+.win{position:absolute;background:var(--surface);border:1px solid var(--border-float);border-radius:10px;display:flex;flex-direction:column;pointer-events:auto;overflow:hidden}
+.win.snapped{border-radius:0}
+.wh{height:32px;flex:none;display:flex;align-items:center;gap:6px;padding:0 6px 0 10px;background:var(--surface-2);cursor:grab;border-bottom:1px solid var(--border)}
+.wh .nt{font-weight:600}
+.wb{flex:1;min-height:0;display:flex;flex-direction:column}
+#rightbar{width:0;flex:none;border-left:1px solid var(--border);background:var(--surface);overflow:hidden}
+#rightbar.open{width:250px;padding:10px 12px}
+#bottombar{height:0;flex:none;border-top:1px solid var(--border);background:var(--surface);overflow:hidden;font-family:var(--font-mono);font-size:12px;color:var(--text-3)}
+#bottombar.open{height:130px;padding:8px 12px}
+#convo{position:absolute;inset:0;background:var(--bg);display:none;place-items:center;text-align:center;color:var(--text-2);z-index:8;padding:30px}
+#convo.on{display:grid}
+#menu{position:fixed;z-index:50;min-width:176px;background:var(--surface);border:1px solid var(--border-float);border-radius:9px;padding:4px;display:none}
+#menu button{display:flex;align-items:center;gap:7px;width:100%;text-align:left;padding:5px 9px;border-radius:6px;white-space:nowrap}
+#menu button:hover{background:var(--hover)}
+#menu hr{border:0;border-top:1px solid var(--border);margin:4px 2px}
+#menu small{display:block;padding:4px 9px;color:var(--text-faint)}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:7px 14px;border-radius:9px;font-size:12px;display:none;z-index:60;max-width:70vw;text-align:center}
+</style>
+</head>
+<body>
+<div id="app">
+  <nav id="rail" aria-label="主导航"></nav>
+  <aside id="side"><h4>项目与会话</h4><div id="sideList"></div></aside>
+  <main id="main">
+    <header id="top"></header>
+    <div id="stage">
+      <div id="wrap">
+        <div id="canvas">
+          <div id="world"><div id="groups"></div><svg id="edges"></svg><div id="nodes"></div></div>
+          <div id="marquee"></div>
+          <div id="indicators"></div>
+          <div id="toolbar"></div>
+          <div id="minimap" title="小地图：点击或拖动移动视口"></div>
+          <div id="hint"></div>
+        </div>
+        <div id="snapPrev"></div>
+        <div id="windows"></div>
+        <div id="convo"><div><p><b>对话模式</b>（现有界面，原型未包含）</p><p>在对话模式里，「引用」动作直接进入当前输入框；<br>回到画布，同样的动作变成「选中为引用」，再用连线决定交给哪个 Agent。</p><button class="btn pri" data-cmd="mode-canvas">返回画布</button></div></div>
+      </div>
+      <aside id="rightbar"></aside>
+    </div>
+    <div id="bottombar"></div>
+  </main>
+</div>
+<div id="menu"></div>
+<div id="toast" role="status"></div>
+<script>
+(() => {
+'use strict';
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+let seq = 0;
+const uid = p => p + (++seq).toString(36) + Math.random().toString(36).slice(2, 5);
+const short = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+
+const ICONS = {
+  bench: 'M2 3h12v10H2z M6 3v10 M6 8h8', chat: 'M2.5 3.5h11v7H8l-3 2.5v-2.5H2.5z', canvas: 'M2 3h4v3H2z M10 10h4v3h-4z M6 4.5h1.5c2 0 .5 7 2.5 7',
+  home: 'M2.5 8L8 3l5.5 5 M4 7v6h8V7', clock: 'M8 2a6 6 0 1 0 0 12a6 6 0 1 0 0-12 M8 5v3l2 2', box: 'M2.5 5L8 2l5.5 3v6L8 14l-5.5-3z M2.5 5L8 8l5.5-3 M8 8v6',
+  server: 'M3 3h10v4H3z M3 9h10v4H3z M5.5 5h.01 M5.5 11h.01', gear: 'M8 5.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5 M8 1.5v2 M8 12.5v2 M1.5 8h2 M12.5 8h2',
+  agent: 'M3 6h10v7H3z M8 6V3 M6 9.5h.01 M10 9.5h.01', project: 'M2 4h4l1.5 2H14v7H2z', branch: 'M5 3v10 M11 3v2.5c0 3-6 2-6 5',
+  worktree: 'M8 2v12 M8 6l4-2 M8 9L4 7 M8 12l4-2', file: 'M4 2h5l3 3v9H4z M9 2v3h3', git: 'M8 2l6 6-6 6-6-6z M8 5.5v5',
+  diff: 'M4 5h8 M8 2.5v5 M4 12h8', web: 'M8 2a6 6 0 1 0 0 12a6 6 0 1 0 0-12 M2 8h12 M8 2c2.5 2 2.5 10 0 12 M8 2c-2.5 2-2.5 10 0 12',
+  term: 'M2 3h12v10H2z M4.5 6l2.5 2-2.5 2 M8.5 10.5h3', note: 'M3 3h10v7l-3 3H3z M10 13v-3h3', board: 'M2 3h12v10H2z M6 3v10 M10 3v10',
+  pin: 'M8 10v4 M5 10h6 M6 10V4h4v6', pop: 'M9 3h4v4 M13 3L8 8 M11 9v4H3V5h4', chev: 'M6 4l4 4-4 4', card: 'M2 4h12v8H2z M2 7h12',
+  eye: 'M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z M8 6.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3',
+  eyeoff: 'M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z M3 3l10 10',
+  search: 'M7 3a4 4 0 1 0 0 8a4 4 0 1 0 0-8 M10 10l3.5 3.5', plus: 'M8 3v10 M3 8h10', fit: 'M3 6V3h3 M10 3h3v3 M13 10v3h-3 M6 13H3v-3',
+  tidy: 'M3 4h10 M3 8h6 M3 12h8', group: 'M3 3h4 M9 3h4 M3 13h4 M9 13h4 M3 3v4 M3 9v4 M13 3v4 M13 9v4', x: 'M4 4l8 8 M12 4l-8 8',
+  moon: 'M8 2.5a5.5 5.5 0 1 0 5.5 5.5A4.5 4.5 0 0 1 8 2.5z', send: 'M8 13V3 M4 7l4-4 4 4', undo: 'M4 6h6a3 3 0 0 1 0 6H6 M6 3.5L3.5 6 6 8.5',
+  redo: 'M12 6H6a3 3 0 0 0 0 6h4 M10 3.5L12.5 6 10 8.5', more: 'M4 8h.01 M8 8h.01 M12 8h.01', side: 'M2 3h12v10H2z M10 3v10', bottom: 'M2 3h12v10H2z M2 10h12',
+};
+const ic = n => `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="${ICONS[n] || ''}"/></svg>`;
+
+const LOD = 0.55, GAPX = 64, GAPY = 16, KEY = 'omp-agent-canvas-proto-v1';
+const STRUCT = new Set(['project', 'branch', 'worktree', 'agent', 'sub']);
+const SIZE = { project: [220, 56], branch: [196, 54], worktree: [196, 54], agent: [236, 82], sub: [186, 54], tool: [196, 54], note: [196, 54], board: [210, 54] };
+const FN = { agent: [400, 440], sub: [340, 320], tool: [330, 270], branch: [330, 270], worktree: [330, 270], note: [240, 170], board: [470, 250] };
+const TOOLS = { file: ['文件', 'file'], git: ['Git', 'git'], changes: ['Changes', 'diff'], web: ['网页', 'web'], term: ['终端', 'term'] };
+const KIND_ICON = { project: 'project', branch: 'branch', worktree: 'worktree', agent: 'agent', sub: 'agent', note: 'note', board: 'board' };
+const ST = { running: '运行中', waiting: '等待审批', idle: '空闲', draft: '草稿', archived: '已归档', done: '完成', parked: '已停放' };
+const ITEMS = {
+  file: ['doc/agent-canvas-design.md', 'apps/renderer/src/NavRail.tsx', 'apps/renderer/src/dock/hosts.ts', 'apps/renderer/src/composer/serialize.ts', 'packages/client-contract/src/operations.ts', 'README.md'],
+  git: ['4720f1e docs(release): record verified 0.2.1', 'ae87bde fix(renderer): keep the hovered model list open', '0044cc1 chore(release): prepare 0.2.1', '0272db6 fix(release): honor explicit signing arguments'],
+  changes: ['NavRail.tsx  +24 −3', 'canvas/Viewport.tsx  +180', 'styles/canvas.css  +96', 'dock/types.ts  +6 −1'],
+  web: ['button.app-rail-btn', 'nav.app-rail-nav', 'div.canvas-toolbar'],
+  term: ['$ npm run check -- --fast  →  通过', 'error TS2345: Argument of type string is not assignable', '$ git status  →  3 个文件有改动'],
+};
+const TOOL_HEAD = { file: '工作区文件', git: '未提交：M 3 · A 1 · 下面是最近提交', changes: '最近一轮 · 4 个文件 +306 −4', web: 'http://127.0.0.1:5173/ · 可选元素', term: '最近输出' };
+const TOOL_WHOLE = { git: 'Git 未提交状态', changes: 'Changes · 全部改动', web: '网页 · 当前页面', term: '终端 · 最近输出' };
+const CAP_TIP = { pending: '待发：发送时自动带上，也可以拖进输入框', sent: '已发：不再自动带，可以手动拖入', updated: '来源已更新：发送时自动带上', always: '始终带上' };
+
+const S = { view: { x: 40, y: 60, z: 0.9 }, filter: 'auto', wires: [], groups: [], sel: new Set(), selWire: null, theme: 'light', wheel: 'zoom', cap: 4, space: false, right: false, bottom: false, chrome: true };
+const N = new Map();
+const els = new Map(), winEls = new Map();
+const hist = [], fut = [];
+let tmpWire = null;
+
+const canvas = $('#canvas'), world = $('#world'), nodesEl = $('#nodes'), edgesEl = $('#edges'), groupsEl = $('#groups'), wrap = $('#wrap');
+const winsEl = $('#windows'), snapEl = $('#snapPrev'), mini = $('#minimap'), indEl = $('#indicators'), menuEl = $('#menu'), toastEl = $('#toast');
+const reduced = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)').matches : true;
+
+/* ---------- model ---------- */
+const u = t => ({ role: 'user', html: esc(t) });
+const a = t => ({ role: 'ai', html: esc(t) });
+function add(n) {
+  n.id = n.id || uid('n');
+  n.form = n.form || 'ref';
+  if (n.kind === 'branch' || n.kind === 'worktree') n.items = ITEMS.git.map(t => ({ t, sel: false }));
+  if ((n.kind === 'agent' || n.kind === 'sub') && !n.msgs) n.msgs = [];
+  n.dirty = true;
+  N.set(n.id, n);
+  return n;
+}
+function makeTool(tool, parent, x, y) {
+  return add({ kind: 'tool', tool, parent, title: TOOLS[tool][0], x, y, pinned: true, items: ITEMS[tool].map(t => ({ t, sel: false })) });
+}
+function seed() {
+  N.clear(); S.wires = []; S.groups = [];
+  add({ id: 'p1', kind: 'project', title: 'omp-studio', git: true, where: '本机' });
+  add({ id: 'b1', kind: 'branch', parent: 'p1', title: 'main', ahead: 0, behind: 0, dirty: true, primary: true });
+  add({ id: 'a1', kind: 'agent', parent: 'b1', title: '重构登录流程', status: 'running', progress: 62, age: 0, last: '正在给第二步补测试…', model: 'fable-5.2',
+    msgs: [u('把登录流程拆成三步，并给每一步补测试。'), a('计划：1. 抽出校验；2. 拆分会话建立；3. 补回归测试。已派出 explore 和 reviewer。')] });
+  add({ id: 's1', kind: 'sub', parent: 'a1', title: 'explore', status: 'done', model: 'haiku-5.5', msgs: [a('定位到 3 个相关文件。')] });
+  add({ id: 's2', kind: 'sub', parent: 'a1', title: 'reviewer', status: 'running', progress: 40, model: 'sonnet-5.5', msgs: [a('正在审阅第一步的改动…')] });
+  add({ id: 's3', kind: 'sub', parent: 'a1', title: 'tester', status: 'parked', model: 'sonnet-5.5' });
+  add({ id: 'a2', kind: 'agent', parent: 'b1', title: '修复 CI 失败', status: 'waiting', age: 0, last: '等待你批准运行检查命令', model: 'fable-5.2', approval: 'npm run check -- --only renderer',
+    msgs: [u('CI 的 renderer 组失败了，查一下。'), a('失败来自动效规则检查。我想在本地复现。')] });
+  add({ id: 'a5', kind: 'agent', parent: 'b1', title: '迁移报告（旧）', status: 'idle', age: 20, last: '已完成', model: 'opus-5.5', msgs: [a('迁移报告已写入 docs/migrations。')] });
+  add({ id: 'b2', kind: 'branch', parent: 'p1', title: 'feat/canvas', ahead: 4, behind: 0, dirty: false });
+  add({ id: 'w2', kind: 'worktree', parent: 'b2', title: 'worktree · canvas', path: '../omp-studio-canvas' });
+  add({ id: 'a3', kind: 'agent', parent: 'w2', title: '画布缩放探针页', status: 'idle', age: 1, onCanvas: true, last: '探针页已能加载终端和编辑器', model: 'fable-5.2',
+    msgs: [u('做一个缩放探针页。'), a('已放入终端、编辑器、对话列表三个样本。')] });
+  add({ id: 'b3', kind: 'branch', parent: 'p1', title: 'fix/login', ahead: 2, behind: 5, dirty: true });
+  add({ id: 'w3', kind: 'worktree', parent: 'b3', title: 'worktree · login', path: '../omp-studio-login' });
+  add({ id: 'a4', kind: 'agent', parent: 'w3', title: '登录回归排查', status: 'idle', age: 5, last: '复现步骤已记录', model: 'sonnet-5.5', msgs: [a('复现步骤已记录到便签。')] });
+  add({ id: 'p2', kind: 'project', title: 'docs-site', git: false, where: '本机' });
+  add({ id: 'c1', kind: 'agent', parent: 'p2', title: '整理发布说明', status: 'idle', age: 0, onCanvas: true, last: '草稿已生成', model: 'sonnet-5.5', msgs: [a('0.2.1 的发布说明草稿已生成。')] });
+  add({ id: 'c2', kind: 'agent', parent: 'p2', title: '翻译 README', status: 'idle', age: 9, last: '已完成', model: 'haiku-5.5', msgs: [a('README 已翻译。')] });
+  layout();
+  const bottom = Math.max(...[...N.values()].filter(shown).map(n => n.y + box(n).h)) + 50, x0 = N.get('a1').x;
+  const t1 = makeTool('file', 'a1', x0, bottom); t1.id && (t1.items[0].sel = false);
+  add({ id: 'm1', kind: 'note', title: '便签', text: '验收标准：\n缩放到 50% 仍能看清谁在等我。', x: x0 + 240, y: bottom, pinned: true });
+  add({ id: 'k1', kind: 'board', title: '看板', x: x0 + 480, y: bottom, pinned: true,
+    cols: [{ name: '待办', cards: [{ t: '缩放探针页' }, { t: '画布文档读写' }] }, { name: '进行中', cards: [{ t: '地图与对话' }] }, { name: '完成', cards: [{ t: '设计文档' }] }] });
+  S.wires.push({ id: uid('w'), from: t1.id, to: 'a1', state: 'sent', always: false, caps: [{ id: uid('c'), label: 'agent-canvas-design.md', icon: 'file' }] });
+}
+
+const hasFn = n => n.kind !== 'project';
+const form = n => (n.popped ? 'ref' : n.form);
+function box(n) {
+  const fn = form(n) === 'fn';
+  const [w, h] = fn ? [n.fw || FN[n.kind][0], n.fh || FN[n.kind][1]] : SIZE[n.kind];
+  return { x: n.x || 0, y: n.y || 0, w, h };
+}
+const isWide = n => form(n) === 'fn' && box(n).w >= (n.kind === 'agent' || n.kind === 'sub' ? 560 : 480);
+function projectOf(n) { while (n && n.kind !== 'project') n = N.get(n.parent); return n; }
+function rootAgent(n) { while (n && n.kind === 'sub') n = N.get(n.parent); return n; }
+const subsOf = n => [...N.values()].filter(c => c.kind === 'sub' && c.parent === n.id);
+function agentShown(n) {
+  if (n.status === 'draft' || n.popped) return true;
+  const f = S.filter;
+  if (f === 'all') return true;
+  if (f === 'running') return n.status === 'running' || n.status === 'waiting';
+  if (f === '3d') return n.age <= 3;
+  if (f === '7d') return n.age <= 7;
+  return n.status === 'running' || n.status === 'waiting' || !!n.onCanvas;
+}
+function shown(n) {
+  if (!n) return false;
+  if (n.kind === 'project') return !n.off;
+  if (n.kind === 'agent' && !agentShown(n)) return false;
+  if (n.kind === 'sub' && !N.get(n.parent).subsOpen) return false;
+  return n.parent ? shown(N.get(n.parent)) : true;
+}
+function groupOf(n) {
+  for (let c = n; c; c = N.get(c.parent)) { const g = S.groups.find(g => g.collapsed && g.members.includes(c.id)); if (g) return g; }
+  return null;
+}
+function collect(ids) {
+  const out = new Set(ids); let grew = true;
+  while (grew) { grew = false; for (const n of N.values()) if (n.parent && out.has(n.parent) && !out.has(n.id)) { out.add(n.id); grew = true; } }
+  return out;
+}
+function selCount(n) {
+  if (n.items) return n.items.filter(i => i.sel).length;
+  if (n.cols) return n.cols.reduce((s, c) => s + c.cards.filter(k => k.sel).length, 0);
+  if (n.msgs) return n.msgs.filter(m => m.sel).length;
+  return 0;
+}
+const capsFor = id => S.wires.filter(w => w.to === id && N.has(w.from)).flatMap(w => w.caps.map(c => ({ w, c })));
+
+/* ---------- layout ---------- */
+const kids = n => [...N.values()].filter(c => c.parent === n.id && STRUCT.has(c.kind) && shown(c));
+function place(n, x, y) {
+  if (!n.pinned) { n.x = x; n.y = y; }
+  const b = box(n), cx = n.x + b.w + GAPX; let cy = n.y, total = 0;
+  const ks = kids(n);
+  for (const k of ks) { const h = place(k, cx, cy); cy += h + GAPY; total += h + GAPY; }
+  return Math.max(b.h, total - (ks.length ? GAPY : 0));
+}
+function layout() {
+  let y = 70;
+  for (const p of N.values()) if (p.kind === 'project' && !p.off) y += place(p, 40, y) + 56;
+}
+
+/* ---------- node html ---------- */
+function statusChip(n) {
+  if (n.removed) return '<span class="chip-s">已移除</span>';
+  if (!n.status) return '';
+  return `<span class="chip-s st-${n.status}">${ST[n.status]}${n.status === 'running' ? ' ' + Math.round(n.progress || 0) + '%' : ''}</span>`;
+}
+function headHtml(n, inWin) {
+  const icon = n.kind === 'tool' ? TOOLS[n.tool][1] : KIND_ICON[n.kind];
+  let b = '';
+  if (inWin) b = `<button class="nb" data-act="unpop" title="收回画布（或按住 Alt 把窗口拖回画布）">${ic('x')}</button>`;
+  else {
+    if (n.pinned && STRUCT.has(n.kind)) b += `<button class="nb" data-act="unpin" title="已手动摆放，点击恢复自动布局">${ic('pin')}</button>`;
+    if (hasFn(n) && !n.popped) b += `<button class="nb" data-act="form" title="切换引用卡 / 功能卡（双击标题）">${ic('card')}</button>`;
+    if (hasFn(n) && !n.popped) b += `<button class="nb" data-act="pop" title="弹出为窗口（也可以按住 Alt 拖动）">${ic('pop')}</button>`;
+    b += `<button class="nb" data-act="more" title="更多">${ic('more')}</button>`;
+  }
+  return `<div class="${inWin ? 'wh' : 'nh'}">${ic(icon)}<span class="nt">${esc(n.title)}</span>${inWin || form(n) === 'fn' ? statusChip(n) : ''}${b}</div>`;
+}
+function refBody(n) {
+  if (n.popped) return '<div class="meta">已弹出为窗口<button class="lk" data-act="unpop">收回</button></div>';
+  switch (n.kind) {
+    case 'project': {
+      const ag = [...N.values()].filter(x => x.kind === 'agent' && projectOf(x) === n);
+      return `<div class="meta">${esc(n.where)} · ${n.git ? 'Git 画布' : '非 Git 画布'} · 运行 ${ag.filter(x => x.status === 'running').length} · 等待 ${ag.filter(x => x.status === 'waiting').length}</div>`;
+    }
+    case 'branch': return `<div class="meta">${n.primary ? '主分支 · ' : ''}↑${n.ahead} ↓${n.behind}${n.dirty ? ' · 有未提交改动' : ''}</div>`;
+    case 'worktree': return `<div class="meta">${n.removed ? '目录已移除' : esc(n.path)}</div>`;
+    case 'agent': {
+      const subs = subsOf(n);
+      return `<div class="meta"><i class="dot st-${n.status}"></i>${ST[n.status]}${n.status === 'running' ? ' ' + Math.round(n.progress || 0) + '%' : ''}${n.status === 'waiting' ? ' · 点开处理' : ''}`
+        + (subs.length ? `<button class="lk" data-act="subs">${subs.length} 个子代理 ${n.subsOpen ? '▾' : '▸'}</button>` : '') + '</div>'
+        + (n.status === 'running' ? `<div class="bar"><i style="width:${n.progress || 0}%"></i></div>` : '')
+        + `<div class="meta last">${esc(n.last || '')}</div>`;
+    }
+    case 'sub': return `<div class="meta"><i class="dot st-${n.status}"></i>${ST[n.status] || ''} · ${esc(n.model || '')}</div>`;
+    case 'tool': { const c = selCount(n); return `<div class="meta">${c ? `已选 ${c} 项，可从右侧圆点拉线` : esc(TOOL_HEAD[n.tool])}</div>`; }
+    case 'note': return `<div class="meta">${esc((n.text || '').split('\n')[0] || '空便签')}</div>`;
+    case 'board': return `<div class="meta">${n.cols.map(c => `${c.name} ${c.cards.length}`).join(' · ')}</div>`;
+  }
+  return '';
+}
+function trayHtml(n) {
+  const cs = capsFor(n.id).filter(({ c }) => !c.placed);
+  if (!cs.length) return '<span class="tip">从其他节点右侧的圆点拉线到这里，胶囊会浮在这一行</span>';
+  return cs.map(({ w, c }) => { const st = w.always ? 'always' : w.state; return `<span class="cap st-${st}" data-cap="${c.id}" title="${CAP_TIP[st]}">${ic(c.icon)}${esc(c.label)}</span>`; }).join('');
+}
+function agentBody(n) {
+  const msgs = n.msgs.map((m, i) => `<div class="msg ${m.role}${m.sel ? ' sel' : ''}" data-msg="${i}" title="点击选中为对话片段，再从右侧圆点拉线">${m.html}${m.auto && m.auto.length ? `<div class="auto">自动带上：${m.auto.map(esc).join('、')}</div>` : ''}</div>`).join('');
+  const appr = n.status === 'waiting' ? `<div class="appr"><b>需要你的批准</b><code>${esc(n.approval || '')}</code><div class="row"><button class="btn pri" data-act="approve">允许</button><button class="btn" data-act="deny">拒绝</button></div></div>` : '';
+  const host = N.get(n.parent);
+  const opts = n.status === 'draft' ? `<div class="opts"><select title="模型"><option>fable-5.2</option><option>sonnet-5.5</option><option>haiku-5.5</option></select><select title="模式"><option>Agent</option><option>Plan</option></select>${host && host.kind === 'branch' ? '<label><input type="checkbox"> 新开 worktree</label>' : ''}</div>` : '';
+  const detail = `<div class="detail"><b>详情</b><span>模型 ${esc(n.model || '默认')}</span><span>状态 ${ST[n.status] || ''}</span><span>上下文线 ${S.wires.filter(w => w.to === n.id).length}</span><span>消息 ${n.msgs.length}</span></div>`;
+  const foot = n.status === 'archived' ? '<div class="ro">已归档，只读</div>'
+    : `<div class="composer">${opts}<div class="input" contenteditable="true" spellcheck="false" data-input="${n.id}" data-ph="输入提示词，Enter 发送">${n.draftHtml || ''}</div><div class="tray" data-tray="${n.id}">${trayHtml(n)}</div><div class="row"><span class="tip" style="flex:1">没拖进输入框的胶囊，发送时自动带上</span><button class="btn pri" data-act="send">${ic('send')}发送</button></div></div>`;
+  return `<div class="cols"><div class="col"><div class="scroll">${msgs || '<div class="empty">还没有消息。连几根线，写下提示词。</div>'}${appr}</div>${foot}</div>${detail}</div>`;
+}
+function toolBody(n, tool) {
+  return `<div class="pick">画布里点条目 = 选中为引用；对话模式下才直接进输入框</div><div class="sum">${esc(TOOL_HEAD[tool])}</div>`
+    + `<div class="scroll list">${n.items.map((it, i) => `<div class="item${it.sel ? ' sel' : ''}" data-item="${i}"><i class="ck"></i><span>${esc(it.t)}</span></div>`).join('')}</div>`;
+}
+function boardBody(n) {
+  return '<div class="pick">点卡片 = 选中为引用；箭头 = 移到下一列</div><div class="board">' + n.cols.map((c, ci) => `<div class="bcol"><b>${c.name} ${c.cards.length}</b>`
+    + c.cards.map((k, ki) => `<div class="bcard${k.sel ? ' sel' : ''}" data-ci="${ci}" data-ki="${ki}"><i class="ck"></i><span>${esc(k.t)}</span>${ci < n.cols.length - 1 ? `<button class="nb" data-act="bmove" title="移到下一列">${ic('chev')}</button>` : ''}</div>`).join('')
+    + (ci === 0 ? `<div class="badd"><input placeholder="新卡片…"><button class="nb" data-act="badd" title="添加">${ic('plus')}</button></div>` : '') + '</div>').join('') + '</div>';
+}
+function fnBody(n) {
+  if (n.kind === 'agent' || n.kind === 'sub') return agentBody(n);
+  if (n.kind === 'tool') return toolBody(n, n.tool);
+  if (n.kind === 'branch' || n.kind === 'worktree') return toolBody(n, 'git');
+  if (n.kind === 'note') return `<div class="note-text" contenteditable="true" spellcheck="false">${esc(n.text || '')}</div>`;
+  if (n.kind === 'board') return boardBody(n);
+  return '';
+}
+function nodeHtml(n) {
+  const c = selCount(n);
+  const ports = (n.kind === 'agent' || n.kind === 'sub' ? '<span class="port in"></span>' : '')
+    + (n.kind !== 'project' && !n.removed ? `<span class="port out" data-port="${n.id}" title="拉线：把它作为上下文交给某个 Agent">${c ? `<b>${c}</b>` : ''}</span>` : '');
+  if (form(n) === 'ref') return headHtml(n) + refBody(n) + ports;
+  return headHtml(n) + `<div class="fn-body">${fnBody(n)}</div><div class="lod-sum">${refBody(n)}</div><span class="rs" data-rs="${n.id}" title="拖动改尺寸"></span>` + ports;
+}
+const cls = n => `node k-${n.kind} ${form(n)}${n.status ? ' st-' + n.status : ''}${n.popped ? ' popped' : ''}${n.removed ? ' gone' : ''}`;
+function paint(el, n, html, parts) {
+  const act = document.activeElement;
+  if (act && el.contains(act) && act.closest('.composer,.note-text,.badd')) {
+    const tmp = document.createElement('div'); tmp.innerHTML = html;
+    for (const p of parts) { const x = $(p, el), y = $(p, tmp); if (x && y) x.replaceWith(y); }
+  } else el.innerHTML = html;
+  const sc = $('.col>.scroll', el); if (sc) sc.scrollTop = sc.scrollHeight;
+}
+
+/* ---------- draw ---------- */
+function gbox(g) {
+  const ms = [...collect(g.members)].map(id => N.get(id)).filter(n => n && shown(n));
+  if (!ms.length) return null;
+  let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+  for (const m of ms) { const b = box(m); x1 = Math.min(x1, b.x); y1 = Math.min(y1, b.y); x2 = Math.max(x2, b.x + b.w); y2 = Math.max(y2, b.y + b.h); }
+  return g.collapsed ? { x: x1 - 14, y: y1 - 40, w: 230, h: 56, n: ms.length } : { x: x1 - 14, y: y1 - 40, w: x2 - x1 + 28, h: y2 - y1 + 54, n: ms.length };
+}
+function vis(n) { const g = groupOf(n); return g && g._b ? Object.assign({ g: g.id }, g._b) : box(n); }
+const outPt = b => [b.x + b.w, b.y + Math.min(b.h / 2, 19)];
+const inPt = b => [b.x, b.y + Math.min(b.h / 2, 19)];
+function curve(x1, y1, x2, y2) { const dx = Math.max(36, Math.abs(x2 - x1) * 0.5); return `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`; }
+function link(f, t) { const A = vis(f), B = vis(t); if (A.g && A.g === B.g) return null; const p = outPt(A), q = inPt(B); return curve(p[0], p[1], q[0], q[1]); }
+function drawGroups() {
+  let h = '';
+  for (const g of S.groups) {
+    const b = g._b = gbox(g); if (!b) continue;
+    h += `<div class="group${g.collapsed ? ' collapsed' : ''}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px;--gc:${g.color}"><div class="gh" data-g="${g.id}"><span class="gt" contenteditable="true" spellcheck="false" data-gt="${g.id}">${esc(g.title)}</span><span class="gm">${b.n} 个节点</span><button data-act="g-collapse" data-g="${g.id}">${g.collapsed ? '展开' : '折叠'}</button><button data-act="g-ungroup" data-g="${g.id}">解散</button></div></div>`;
+  }
+  if (!groupsEl.contains(document.activeElement)) groupsEl.innerHTML = h;
+}
+function drawEdges() {
+  let h = '';
+  for (const n of N.values()) {
+    if (!shown(n)) continue;
+    const p = n.parent && N.get(n.parent);
+    if (p && shown(p)) { const d = link(p, n); if (d) h += `<path class="${n.kind === 'tool' ? 'te' : 'se'}" d="${d}"/>`; }
+    const o = n.from && N.get(n.from);
+    if (o && shown(o)) { const d = link(o, n); if (d) h += `<path class="le" d="${d}"/>`; }
+  }
+  for (const w of S.wires) {
+    const f = N.get(w.from), t = N.get(w.to);
+    if (!f || !t || !shown(f) || !shown(t)) continue;
+    const d = link(f, t); if (!d) continue;
+    h += `<path class="we st-${w.always ? 'always' : w.state}${S.selWire === w.id ? ' on' : ''}" d="${d}"/><path class="hit" data-wire="${w.id}" d="${d}"><title>点击设置这根线</title></path>`;
+  }
+  if (tmpWire) h += `<path class="we tmp" d="${tmpWire}"/>`;
+  edgesEl.innerHTML = h;
+}
+function bbox(bs) {
+  let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+  for (const b of bs) { x1 = Math.min(x1, b.x); y1 = Math.min(y1, b.y); x2 = Math.max(x2, b.x + b.w); y2 = Math.max(y2, b.y + b.h); }
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+}
+const liveNodes = () => [...N.values()].filter(n => shown(n) && !groupOf(n));
+function drawMini() {
+  const ns = liveNodes(); if (!ns.length) { mini.innerHTML = ''; return; }
+  const r = canvas.getBoundingClientRect(), z = S.view.z;
+  const vp = { x: -S.view.x / z, y: -S.view.y / z, w: r.width / z, h: r.height / z };
+  const all = bbox(ns.map(box).concat(r.width ? [vp] : [])); all.x -= 40; all.y -= 40; all.w += 80; all.h += 80;
+  const W = 190, H = 120, k = Math.min(W / all.w, H / all.h); mini._m = { all, k };
+  let h = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+  for (const n of ns) { const b = box(n); h += `<rect class="mk-${n.kind} ms-${n.status || ''}" x="${((b.x - all.x) * k).toFixed(1)}" y="${((b.y - all.y) * k).toFixed(1)}" width="${Math.max(2, b.w * k).toFixed(1)}" height="${Math.max(2, b.h * k).toFixed(1)}" rx="1"/>`; }
+  mini.innerHTML = h + `<rect class="mvp" x="${((vp.x - all.x) * k).toFixed(1)}" y="${((vp.y - all.y) * k).toFixed(1)}" width="${(vp.w * k).toFixed(1)}" height="${(vp.h * k).toFixed(1)}"/></svg>`;
+}
+function drawIndicators() {
+  const r = canvas.getBoundingClientRect(); let h = '', count = 0;
+  for (const n of N.values()) {
+    if (n.kind !== 'agent' || n.status !== 'waiting') continue;
+    count++;
+    if (!shown(n) || !r.width) continue;
+    const b = vis(n), cx = (b.x + b.w / 2) * S.view.z + S.view.x, cy = (b.y + b.h / 2) * S.view.z + S.view.y;
+    if (cx >= 0 && cx <= r.width && cy >= 0 && cy <= r.height) continue;
+    const x = clamp(cx, 14, r.width - 14), y = clamp(cy, 60, r.height - 20), ang = Math.atan2(cy - y, cx - x) * 180 / Math.PI;
+    h += `<button class="ind" data-fly="${n.id}" style="left:${x}px;top:${y}px;transform:translate(${x > r.width / 2 ? '-100%' : '0'},-50%)"><i style="transform:rotate(${ang.toFixed(0)}deg)">${ic('chev')}</i>${esc(n.title)} 在等你</button>`;
+  }
+  indEl.innerHTML = h;
+  const bd = $('#railBadge'); if (bd) bd.textContent = count || '';
+}
+function drawWindows() {
+  for (const [id, el] of winEls) if (!N.has(id) || !N.get(id).popped) { el.remove(); winEls.delete(id); }
+  let left = false, right = false;
+  for (const n of N.values()) {
+    const p = n.popped; if (!p) continue;
+    let el = winEls.get(n.id);
+    if (!el) { el = document.createElement('div'); el.className = 'win'; el.dataset.id = n.id; winsEl.append(el); winEls.set(n.id, el); n.dirty = true; }
+    el.classList.toggle('snapped', !!p.snap); el.classList.toggle('wide', p.snap ? true : p.w >= 560);
+    if (p.snap === 'left') { left = true; el.style.cssText = 'left:0;top:0;width:50%;height:100%'; }
+    else if (p.snap === 'right') { right = true; el.style.cssText = 'right:0;top:0;width:50%;height:100%'; }
+    else if (p.snap === 'max') el.style.cssText = 'left:0;top:0;width:100%;height:100%';
+    else el.style.cssText = `left:${p.x}px;top:${p.y}px;width:${p.w}px;height:${p.h}px`;
+    if (n.dirty) paint(el, n, headHtml(n, true) + `<div class="wb">${fnBody(n)}</div>`, ['.wh', '.col>.scroll', '.tray']);
+  }
+  canvas.style.left = left ? '50%' : '0'; canvas.style.right = right ? '50%' : '0';
+}
+function draw() {
+  const z = S.view.z;
+  world.style.transform = `translate(${S.view.x}px,${S.view.y}px) scale(${z})`;
+  world.classList.toggle('lod', z < LOD);
+  world.style.setProperty('--k', clamp(0.8 / z, 1, 2.6).toFixed(2));
+  canvas.style.backgroundSize = `${24 * z}px ${24 * z}px`;
+  canvas.style.backgroundPosition = `${S.view.x}px ${S.view.y}px`;
+  drawWindows();
+  drawGroups();
+  for (const n of N.values()) {
+    let el = els.get(n.id);
+    if (!shown(n) || groupOf(n)) { if (el) { el.remove(); els.delete(n.id); } n.dirty = false; continue; }
+    if (!el) { el = document.createElement('div'); el.dataset.id = n.id; nodesEl.append(el); els.set(n.id, el); n.dirty = true; }
+    const b = box(n);
+    el.style.left = b.x + 'px'; el.style.top = b.y + 'px'; el.style.width = b.w + 'px'; el.style.height = b.h + 'px';
+    if (n.dirty) { el.className = cls(n); paint(el, n, nodeHtml(n), ['.nh', '.col>.scroll', '.tray', '.port.out']); n.dirty = false; }
+    el.classList.toggle('sel', S.sel.has(n.id)); el.classList.toggle('wide', isWide(n));
+  }
+  for (const [id, el] of els) if (!N.has(id)) { el.remove(); els.delete(id); }
+  drawEdges(); drawMini(); drawIndicators();
+  const zl = $('#zoomLbl'); if (zl) zl.textContent = Math.round(z * 100) + '%';
+  if (S.chrome) { S.chrome = false; drawChrome(); }
+  save();
+}
+function commit() { S.chrome = true; draw(); }
+/* ---------- helpers ---------- */
+function toWorld(cx, cy) { const r = canvas.getBoundingClientRect(); return [(cx - r.left - S.view.x) / S.view.z, (cy - r.top - S.view.y) / S.view.z]; }
+function track(onMove, onEnd) {
+  const mv = e => onMove(e);
+  const done = (e, cancel) => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); window.removeEventListener('keydown', key, true); if (onEnd) onEnd(e, cancel); };
+  const up = e => done(e, false);
+  const key = e => { if (e.key === 'Escape') { e.stopPropagation(); done(e, true); } };
+  window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up); window.addEventListener('keydown', key, true);
+}
+function nodeAt(cx, cy) { const el = document.elementFromPoint ? document.elementFromPoint(cx, cy) : null; const ne = el && el.closest('.node'); return ne ? N.get(ne.dataset.id) : null; }
+let toastTimer = 0;
+function toast(t) { toastEl.textContent = t; toastEl.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.style.display = 'none'; }, 3000); }
+function menu(pt, items) {
+  menuEl.innerHTML = '';
+  for (const it of items) {
+    if (it === '-') { menuEl.append(document.createElement('hr')); continue; }
+    if (typeof it === 'string') { const s = document.createElement('small'); s.textContent = it; menuEl.append(s); continue; }
+    const b = document.createElement('button'); b.innerHTML = (it[2] ? ic(it[2]) : '') + esc(it[0]); b.onclick = () => { closeMenu(); it[1](); }; menuEl.append(b);
+  }
+  menuEl.style.display = 'block';
+  const w = menuEl.offsetWidth || 190, h = menuEl.offsetHeight || 220;
+  menuEl.style.left = clamp(pt.x, 4, Math.max(4, window.innerWidth - w - 4)) + 'px';
+  menuEl.style.top = clamp(pt.y, 4, Math.max(4, window.innerHeight - h - 4)) + 'px';
+}
+function closeMenu() { menuEl.style.display = 'none'; }
+const markAll = () => { for (const n of N.values()) n.dirty = true; };
+const strip = html => html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ');
+const follow = n => { for (let c = n; c; c = N.get(c.parent)) if (c.kind === 'agent') return c; return null; };
+
+/* ---------- undo ---------- */
+const snapState = () => JSON.stringify({ nodes: [...N.values()], wires: S.wires, groups: S.groups });
+function snapshot() { hist.push(snapState()); if (hist.length > 60) hist.shift(); fut.length = 0; }
+function restore(s) {
+  const d = JSON.parse(s);
+  N.clear(); for (const n of d.nodes) { n.dirty = true; N.set(n.id, n); }
+  S.wires = d.wires; S.groups = d.groups; S.sel.clear(); S.selWire = null;
+  for (const el of els.values()) el.remove(); els.clear();
+  for (const el of winEls.values()) el.remove(); winEls.clear();
+  commit();
+}
+function undo() { if (!hist.length) return toast('没有可撤销的操作'); fut.push(snapState()); restore(hist.pop()); toast('已撤销'); }
+function redo() { if (!fut.length) return toast('没有可重做的操作'); hist.push(snapState()); restore(fut.pop()); toast('已重做'); }
+
+/* ---------- view ---------- */
+function animateView(to) {
+  if (reduced || !window.requestAnimationFrame) { Object.assign(S.view, to); draw(); return; }
+  const from = Object.assign({}, S.view), t0 = performance.now();
+  const step = t => { const k = clamp((t - t0) / 240, 0, 1), e = 1 - Math.pow(1 - k, 3); for (const p of ['x', 'y', 'z']) S.view[p] = from[p] + (to[p] - from[p]) * e; draw(); if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+function fitBoxes(bs, instant) {
+  if (!bs.length) return;
+  const r = canvas.getBoundingClientRect(), W = r.width || 1000, H = r.height || 640, b = bbox(bs);
+  const z = clamp(Math.min((W - 120) / b.w, (H - 180) / b.h), 0.2, 1.1);
+  const to = { z, x: (W - b.w * z) / 2 - b.x * z, y: (H - b.h * z) / 2 - b.y * z + 24 };
+  if (instant) { Object.assign(S.view, to); draw(); } else animateView(to);
+}
+const fitAll = instant => fitBoxes(liveNodes().map(box), instant);
+function fitSel() { const bs = [...collect([...S.sel])].map(i => N.get(i)).filter(n => n && shown(n)).map(vis); if (bs.length) fitBoxes(bs); else fitAll(); }
+function flyTo(n) { const r = canvas.getBoundingClientRect(), b = vis(n), z = Math.max(S.view.z, 0.75); S.chrome = true; animateView({ z, x: (r.width || 1000) / 2 - (b.x + b.w / 2) * z, y: (r.height || 640) / 2 - (b.y + b.h / 2) * z }); }
+function zoomAt(cx, cy, f) {
+  const r = canvas.getBoundingClientRect(), px = cx - r.left, py = cy - r.top, z0 = S.view.z, z1 = clamp(z0 * f, 0.15, 2.5);
+  S.view.x = px - (px - S.view.x) * z1 / z0; S.view.y = py - (py - S.view.y) * z1 / z0; S.view.z = z1; draw();
+}
+function ensureVisible(n) {
+  const r = canvas.getBoundingClientRect(), b = vis(n), z = S.view.z, x1 = b.x * z + S.view.x, y1 = b.y * z + S.view.y;
+  if (r.width && (x1 < 20 || y1 < 60 || x1 + b.w * z > r.width - 20 || y1 + b.h * z > r.height - 20)) flyTo(n); else draw();
+}
+function syncTools(apply) {
+  for (const n of N.values()) {
+    if (n.kind !== 'tool') continue; const p = N.get(n.parent); if (!p) continue;
+    if (apply && n.dx != null) { n.x = p.x + n.dx; n.y = p.y + n.dy; } else { n.dx = n.x - p.x; n.dy = n.y - p.y; }
+  }
+}
+function relayout(keepTools) { if (!keepTools) syncTools(false); layout(); syncTools(true); }
+
+/* ---------- pointer: pan, move, resize, marquee ---------- */
+function pick(n, e) {
+  if (e.shiftKey || (S.sel.size === 1 && S.sel.has(n.id))) return;
+  S.sel.clear(); S.sel.add(n.id); S.selWire = null; n.touched = Date.now(); S.chrome = true; draw();
+}
+function startPan(e) {
+  const sx = e.clientX, sy = e.clientY, vx = S.view.x, vy = S.view.y; let moved = false;
+  canvas.classList.add('grabbing');
+  track(ev => { if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 3) return; moved = true; S.view.x = vx + ev.clientX - sx; S.view.y = vy + ev.clientY - sy; draw(); },
+    () => { canvas.classList.remove('grabbing'); if (!moved) { S.sel.clear(); S.selWire = null; S.chrome = true; draw(); } });
+}
+function dragNodes(e, heads, done) {
+  const sx = e.clientX, sy = e.clientY; let ids = null, base = null;
+  track(ev => {
+    if (!ids) {
+      if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
+      snapshot(); ids = collect(heads); base = new Map([...ids].map(i => [i, { x: N.get(i).x, y: N.get(i).y }]));
+      for (const h of heads) if (N.has(h)) { N.get(h).pinned = true; N.get(h).dirty = true; }
+    }
+    const dx = (ev.clientX - sx) / S.view.z, dy = (ev.clientY - sy) / S.view.z;
+    for (const i of ids) { const m = N.get(i), b = base.get(i); m.x = b.x + dx; m.y = b.y + dy; }
+    draw();
+  }, (ev, cancel) => { if (!ids) return; if (cancel) return restore(hist.pop()); relayout(); commit(); if (done) done(); });
+}
+function startMove(e, n) {
+  if (e.shiftKey) { if (S.sel.has(n.id)) S.sel.delete(n.id); else S.sel.add(n.id); } else if (!S.sel.has(n.id)) { S.sel.clear(); S.sel.add(n.id); }
+  S.selWire = null; n.touched = Date.now(); S.chrome = true; draw();
+  if (e.altKey && hasFn(n) && !n.popped) return startPop(e, n);
+  dragNodes(e, S.sel.has(n.id) ? [...S.sel] : [n.id]);
+}
+function startResize(e, n) {
+  const b = box(n), sx = e.clientX, sy = e.clientY; snapshot();
+  track(ev => { n.fw = Math.max(240, b.w + (ev.clientX - sx) / S.view.z); n.fh = Math.max(150, b.h + (ev.clientY - sy) / S.view.z); draw(); }, () => { relayout(); commit(); });
+}
+function startMarquee(e) {
+  const r = canvas.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top, mq = $('#marquee');
+  track(ev => {
+    const x = ev.clientX - r.left, y = ev.clientY - r.top;
+    Object.assign(mq.style, { display: 'block', left: Math.min(sx, x) + 'px', top: Math.min(sy, y) + 'px', width: Math.abs(x - sx) + 'px', height: Math.abs(y - sy) + 'px' });
+  }, (ev, cancel) => {
+    mq.style.display = 'none'; if (cancel) return;
+    const p = toWorld(Math.min(e.clientX, ev.clientX), Math.min(e.clientY, ev.clientY)), q = toWorld(Math.max(e.clientX, ev.clientX), Math.max(e.clientY, ev.clientY));
+    S.sel.clear();
+    for (const n of liveNodes()) { const b = box(n); if (b.x < q[0] && b.x + b.w > p[0] && b.y < q[1] && b.y + b.h > p[1]) S.sel.add(n.id); }
+    S.chrome = true; draw();
+    if (S.sel.size > 1) toast(`已选 ${S.sel.size} 个节点，按 G 圈成一组`);
+  });
+}
+
+/* ---------- wires and capsules ---------- */
+const mkCap = (label, icon) => ({ id: uid('c'), label, icon });
+function buildCaps(n) {
+  if (n.kind === 'note') return [mkCap('便签：' + short((n.text || '空便签').split('\n')[0], 14), 'note')];
+  if (n.kind === 'board') { const ks = n.cols.flatMap(c => c.cards.filter(k => k.sel)); return ks.length ? ks.map(k => mkCap('卡片：' + short(k.t, 14), 'board')) : [mkCap('看板 · 全部卡片', 'board')]; }
+  const tool = n.kind === 'tool' ? n.tool : 'git', sel = n.items.filter(i => i.sel);
+  if (sel.length) return sel.map(i => mkCap(tool === 'file' ? i.t.split('/').pop() : short(i.t, 22), TOOLS[tool][1]));
+  if (tool === 'file') { toast('先在文件节点里点选要引用的文件，再拉线'); return null; }
+  return [mkCap(TOOL_WHOLE[tool] + (n.kind === 'tool' ? '' : ' · ' + n.title), TOOLS[tool][1])];
+}
+function clearSel(n) {
+  for (const i of n.items || []) i.sel = false;
+  for (const c of n.cols || []) for (const k of c.cards) k.sel = false;
+  for (const m of n.msgs || []) m.sel = false;
+  n.dirty = true;
+}
+function addWire(from, to, caps, quiet) {
+  if (!quiet) snapshot();
+  S.wires.push({ id: uid('w'), from: from.id, to: to.id, state: 'pending', always: false, caps });
+  clearSel(from); to.dirty = true; commit();
+  toast(`已连线：${caps.length} 个胶囊浮在「${to.title}」的输入框下方${form(to) === 'ref' ? '，展开它就能看到' : ''}`);
+}
+function connect(from, to, pt) {
+  if (to.status === 'archived') return toast('已归档的 Agent 不能接收上下文');
+  if (from.kind === 'agent' || from.kind === 'sub') {
+    const picked = from.msgs.filter(m => m.sel);
+    if (picked.length) return addWire(from, to, picked.map(m => mkCap('片段：' + short(strip(m.html), 12), 'chat')));
+    if (rootAgent(from) !== rootAgent(to)) return toast('跨会话不能直接引用。可以先点选对话片段再拉线，或拉线到空白处做交接');
+    const r = mkCap.bind(null, from.title + ' 的结论', 'agent'), h = mkCap.bind(null, from.title + ' 的过程', 'clock');
+    return menu(pt, ['带过去什么？', ['结论', () => addWire(from, to, [r()]), 'agent'], ['过程', () => addWire(from, to, [h()]), 'clock'], ['两者都带', () => addWire(from, to, [r(), h()]), 'plus']]);
+  }
+  const caps = buildCaps(from); if (caps) addWire(from, to, caps);
+}
+function hostFor(wx, wy) {
+  let best = null, bd = 1e15;
+  for (const n of N.values()) {
+    if (!shown(n) || n.removed) continue;
+    const ok = n.kind === 'worktree' || (n.kind === 'branch' && !kids(n).some(k => k.kind === 'worktree')) || (n.kind === 'project' && !n.git);
+    if (!ok) continue;
+    const b = box(n), d = (b.x + b.w / 2 - wx) ** 2 + (b.y + b.h / 2 - wy) ** 2;
+    if (d < bd) { bd = d; best = n; }
+  }
+  return best;
+}
+function createAgent(wx, wy, quiet, parent) {
+  const host = parent || hostFor(wx, wy);
+  if (!host) { toast('没有可以挂 Agent 的项目或分支'); return null; }
+  if (!quiet) snapshot();
+  const n = add({ kind: 'agent', parent: host.id, title: '新 Agent', status: 'draft', form: 'fn', x: wx, y: wy, pinned: true, age: 0, onCanvas: true, model: 'fable-5.2', last: '' });
+  S.sel.clear(); S.sel.add(n.id); n.touched = Date.now(); commit();
+  if (!quiet) toast(`已在「${host.title}」下新建 Agent 草稿`);
+  return n;
+}
+function spawnSub(from) {
+  snapshot();
+  add({ kind: 'sub', parent: from.id, title: 'worker-' + (subsOf(from).length + 1), status: 'running', progress: 8, model: 'sonnet-5.5', msgs: [a('已接到任务，开始执行。')] });
+  from.subsOpen = true; from.dirty = true; relayout(); commit(); toast('已派生子 Agent');
+}
+function handoff(from, wx, wy) {
+  snapshot(); const n = createAgent(wx, wy, true, N.get(from.parent)); if (!n) return;
+  n.title = short(from.title, 10) + '（交接）'; n.from = from.id; n.draftHtml = `<span class="chip" contenteditable="false">${ic('file')}交接文档 · ${esc(from.title)}</span>&nbsp;`; n.dirty = true;
+  commit(); toast('已生成交接文档，并用它新建了一个 Agent');
+}
+function fork(from, wx, wy) {
+  snapshot(); const n = createAgent(wx, wy, true, N.get(from.parent)); if (!n) return;
+  Object.assign(n, { title: short(from.title, 10) + '（分叉）', status: 'idle', form: 'ref', from: from.id, msgs: JSON.parse(JSON.stringify(from.msgs)), last: '从原会话分叉', dirty: true });
+  relayout(); commit(); toast('已分叉为新会话');
+}
+function wireToBlank(from, pt) {
+  const [wx, wy] = toWorld(pt.x, pt.y);
+  if (from.kind === 'agent') return menu(pt, ['从这个 Agent…', ['派生子 Agent', () => spawnSub(from), 'agent'], ['交接成新 Agent', () => handoff(from, wx, wy), 'file'], ['分叉', () => fork(from, wx, wy), 'branch']]);
+  if (from.kind === 'sub') return toast('子 Agent 只能连到同一棵树里的 Agent');
+  menu(pt, [['新建 Agent 并连上', () => { const caps = buildCaps(from); if (!caps) return; snapshot(); const n = createAgent(wx, wy, true); if (n) addWire(from, n, caps, true); }, 'agent']]);
+}
+function startWire(e, from) {
+  const p = outPt(vis(from)); let target = null;
+  const setTarget = el => { if (target === el) return; if (target) target.classList.remove('target'); target = el; if (el) el.classList.add('target'); };
+  track(ev => {
+    const [wx, wy] = toWorld(ev.clientX, ev.clientY); tmpWire = curve(p[0], p[1], wx, wy);
+    const t = nodeAt(ev.clientX, ev.clientY);
+    setTarget(t && t.id !== from.id && (t.kind === 'agent' || t.kind === 'sub') ? els.get(t.id) : null);
+    drawEdges();
+  }, (ev, cancel) => {
+    tmpWire = null; setTarget(null); drawEdges(); if (cancel) return;
+    const pt = { x: ev.clientX, y: ev.clientY }, t = nodeAt(pt.x, pt.y), el = ev.target;
+    if (t && t.id !== from.id && (t.kind === 'agent' || t.kind === 'sub')) connect(from, t, pt);
+    else if (!t && el && el.closest && el.closest('#canvas') && !el.closest('#toolbar,#minimap,#hint')) wireToBlank(from, pt);
+  });
+}
+function wireMenu(id, pt) {
+  const w = S.wires.find(x => x.id === id); if (!w) return;
+  const f = N.get(w.from), t = N.get(w.to);
+  menu(pt, [`${f.title} → ${t.title}（${CAP_TIP[w.always ? 'always' : w.state].split('：')[0]}）`,
+    [w.always ? '取消「始终带上」' : '始终带上', () => { snapshot(); w.always = !w.always; t.dirty = true; commit(); }, 'pin'],
+    ['重新点亮（当作来源已更新）', () => { snapshot(); w.state = 'updated'; t.dirty = true; commit(); }, 'undo'],
+    '-', ['删除连线', () => { S.selWire = id; deleteSel(); }, 'x']]);
+}
+const findCap = (agentId, capId) => capsFor(agentId).find(x => x.c.id === capId);
+function refreshTrays(id) { const n = N.get(id); for (const t of $$(`[data-tray="${id}"]`)) t.innerHTML = trayHtml(n); }
+function placeCap(agentId, capId, input, cx, cy) {
+  const hit = findCap(agentId, capId); if (!hit) return;
+  const chip = document.createElement('span'); chip.className = 'chip'; chip.contentEditable = 'false'; chip.dataset.cap = capId; chip.innerHTML = ic(hit.c.icon) + esc(hit.c.label);
+  let range = null;
+  if (cx != null && document.caretRangeFromPoint) range = document.caretRangeFromPoint(cx, cy);
+  if (range && input.contains(range.startContainer) && !(range.startContainer.parentElement && range.startContainer.parentElement.closest('.chip'))) range.insertNode(chip); else input.append(chip);
+  chip.after(document.createTextNode(' '));
+  hit.c.placed = true; N.get(agentId).draftHtml = input.innerHTML; refreshTrays(agentId); save();
+}
+function startCapDrag(e, capEl) {
+  e.preventDefault();
+  const host = capEl.closest('[data-id]'), id = host.dataset.id, capId = capEl.dataset.cap, sx = e.clientX, sy = e.clientY; let ghost = null;
+  track(ev => {
+    if (!ghost) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return; ghost = capEl.cloneNode(true); ghost.classList.add('ghost'); document.body.append(ghost); }
+    ghost.style.left = ev.clientX + 8 + 'px'; ghost.style.top = ev.clientY + 6 + 'px';
+  }, (ev, cancel) => {
+    const input = $('.input', host), dragged = !!ghost; if (ghost) ghost.remove();
+    if (cancel || !input) return;
+    if (!dragged) return placeCap(id, capId, input);
+    const el = document.elementFromPoint ? document.elementFromPoint(ev.clientX, ev.clientY) : null;
+    if (el && el.closest('.input') === input) placeCap(id, capId, input, ev.clientX, ev.clientY);
+  });
+}
+function send(n, comp) {
+  const input = comp && $('.input', comp); if (!input) return;
+  const clone = input.cloneNode(true); for (const c of $$('.chip', clone)) c.remove();
+  const text = clone.textContent.replace(/ /g, ' ').trim(), placed = $$('.chip', input).length;
+  const auto = capsFor(n.id).filter(({ w, c }) => !c.placed && (w.always || w.state !== 'sent'));
+  if (!text && !placed && !auto.length) return toast('先写提示词，或者连一根线');
+  snapshot();
+  n.msgs.push({ role: 'user', html: input.innerHTML, auto: auto.map(x => x.c.label) });
+  for (const w of S.wires) {
+    if (w.to !== n.id) continue; let used = false;
+    for (const c of w.caps) { if (c.placed || auto.some(x => x.c === c)) used = true; c.placed = false; }
+    if (used && !w.always) w.state = 'sent';
+  }
+  if (n.status === 'draft') n.title = short(text || '新 Agent', 14);
+  Object.assign(n, { draftHtml: '', status: 'running', progress: 6, last: '正在读取上下文…', onCanvas: true, dirty: true });
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  commit();
+}
+function decide(n, ok) {
+  snapshot();
+  Object.assign(n, { status: ok ? 'running' : 'idle', progress: ok ? 10 : 0, last: ok ? '已批准，继续执行' : '已拒绝，等待新的指示', dirty: true });
+  n.msgs.push(a(ok ? '收到批准，正在运行检查。' : '已取消这条命令。'));
+  commit();
+}
+function tick() {
+  let changed = false;
+  for (const n of N.values()) {
+    if (n.status !== 'running') continue;
+    n.progress = Math.min(100, (n.progress || 0) + 4 + Math.random() * 8); changed = true;
+    if (n.progress >= 100) {
+      n.status = n.kind === 'sub' ? 'done' : 'idle'; n.last = '已完成，结论可以被引用'; n.dirty = true;
+      const lastMsg = n.msgs[n.msgs.length - 1];
+      if (lastMsg && lastMsg.role === 'user') { const tmp = document.createElement('div'); tmp.innerHTML = lastMsg.html; n.msgs.push(a(`已完成。这次读取了 ${$$('.chip', tmp).length + (lastMsg.auto || []).length} 项上下文。`)); }
+      else n.msgs.push(a('这一步已完成。'));
+      for (const w of S.wires) if (w.from === n.id && w.state === 'sent') { w.state = 'updated'; const t = N.get(w.to); if (t) t.dirty = true; }
+    } else if (form(n) === 'ref') n.dirty = true;
+    else for (const el of [els.get(n.id), winEls.get(n.id)]) { const chip = el && $('.chip-s', el); if (chip) chip.textContent = `${ST.running} ${Math.round(n.progress)}%`; }
+  }
+  if (changed) commit();
+}
+/* ---------- forms, windows, groups ---------- */
+function toggleForm(n) {
+  if (!n || !hasFn(n) || n.popped) return;
+  snapshot(); n.form = n.form === 'fn' ? 'ref' : 'fn'; n.touched = Date.now(); n.dirty = true;
+  if (n.form === 'fn' && (n.kind === 'agent' || n.kind === 'sub')) {
+    const live = [...N.values()].filter(m => (m.kind === 'agent' || m.kind === 'sub') && m.form === 'fn' && !m.popped && m.status !== 'draft' && shown(m));
+    if (live.length > S.cap) {
+      const old = live.filter(m => m !== n).sort((p, q) => (p.touched || 0) - (q.touched || 0))[0];
+      if (old) { old.form = 'ref'; old.dirty = true; toast(`活的对话卡上限 ${S.cap}：「${old.title}」已退回引用卡`); }
+    }
+  }
+  relayout(); commit();
+}
+function popOut(n) {
+  if (!hasFn(n) || n.popped) return;
+  snapshot(); n.form = 'fn'; const b = box(n), k = winEls.size;
+  n.popped = { x: 90 + k * 26, y: 70 + k * 26, w: b.w, h: b.h, snap: null }; n.dirty = true;
+  relayout(); commit(); toast('已弹出为窗口：画布上留下占位卡，连线还在');
+}
+function unpop(n, quiet) { if (!n.popped) return; if (!quiet) snapshot(); delete n.popped; n.dirty = true; relayout(); commit(); }
+function startPop(e, n) {
+  snapshot(); n.form = 'fn';
+  const r = wrap.getBoundingClientRect(), b = box(n);
+  n.popped = { x: e.clientX - r.left - 70, y: e.clientY - r.top - 16, w: b.w, h: b.h, snap: null }; n.dirty = true;
+  relayout(); commit(); startWinDrag(e, n, true);
+}
+function startWinDrag(e, n, fresh) {
+  const p = n.popped, r = wrap.getBoundingClientRect(); let ox = e.clientX - r.left - p.x, oy = e.clientY - r.top - p.y, zone = null, moved = fresh;
+  if (!fresh) snapshot();
+  track(ev => {
+    if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return;
+    moved = true;
+    if (p.snap) { p.snap = null; ox = p.w / 2; oy = 16; }
+    p.x = ev.clientX - r.left - ox; p.y = ev.clientY - r.top - oy;
+    const px = ev.clientX - r.left, py = ev.clientY - r.top;
+    zone = ev.ctrlKey ? null : px < 70 ? 'left' : px > r.width - 70 ? 'right' : py < 28 ? 'max' : null;
+    snapEl.className = zone ? 'on ' + zone : '';
+    drawWindows();
+  }, (ev, cancel) => {
+    snapEl.className = '';
+    if (cancel) return restore(hist.pop());
+    if (!moved) { hist.pop(); return; }
+    if (!fresh && ev.altKey && !zone) {
+      const [wx, wy] = toWorld(ev.clientX, ev.clientY);
+      n.x = wx - 60; n.y = wy - 16; n.pinned = true; delete n.popped; n.dirty = true; relayout(); commit();
+      return toast('已收回画布，放在松手的位置');
+    }
+    p.snap = zone; commit();
+    if (fresh) toast('已弹出为窗口：拖到左右边缘吸附成半屏，画布让出另一半');
+  });
+}
+const GCOL = ['#6e56cf', '#137a52', '#b5780d', '#1f6ba3'];
+function groupSel() {
+  const ids = [...S.sel].filter(id => N.has(id) && N.get(id).kind !== 'project');
+  if (ids.length < 2) return toast('先选中至少两个节点：Shift 点选，或 Shift 拖框');
+  snapshot();
+  S.groups.push({ id: uid('g'), title: '分组 ' + (S.groups.length + 1), color: GCOL[S.groups.length % GCOL.length], members: ids, collapsed: false });
+  commit(); toast('已分组：拖标题栏整体移动，可以折叠或解散');
+}
+function removeNode(n) {
+  const ids = collect([n.id]);
+  for (const id of ids) { N.delete(id); S.sel.delete(id); }
+  S.wires = S.wires.filter(w => !ids.has(w.from) && !ids.has(w.to));
+  for (const g of S.groups) g.members = g.members.filter(m => !ids.has(m));
+  S.groups = S.groups.filter(g => g.members.length);
+}
+function deleteSel() {
+  if (S.selWire) { snapshot(); S.wires = S.wires.filter(w => w.id !== S.selWire); S.selWire = null; markAll(); return commit(); }
+  const ns = [...S.sel].map(id => N.get(id)).filter(n => n && (['tool', 'note', 'board'].includes(n.kind) || n.status === 'draft'));
+  if (!ns.length) { if (S.sel.size) toast('只有工具、便签、看板和草稿可以直接删除；会话请用右键菜单归档或永久删除'); return; }
+  snapshot(); ns.forEach(removeNode); markAll(); commit();
+}
+
+/* ---------- menus ---------- */
+function nearest(wx, wy, kinds) {
+  let best = null, bd = 1e15;
+  for (const n of liveNodes()) {
+    if (!kinds.includes(n.kind) || n.removed) continue;
+    const b = box(n), d = (b.x + b.w / 2 - wx) ** 2 + (b.y + b.h / 2 - wy) ** 2;
+    if (d < bd) { bd = d; best = n; }
+  }
+  return best;
+}
+function nodeMenu(n, pt) {
+  const it = [];
+  if (hasFn(n) && !n.popped) it.push([n.form === 'fn' ? '收成引用卡' : '展开成功能卡', () => toggleForm(n), 'card'], ['弹出为窗口', () => popOut(n), 'pop']);
+  if (n.popped) it.push(['收回画布', () => unpop(n), 'x']);
+  if (n.kind === 'agent' && subsOf(n).length) it.push([n.subsOpen ? '收起子代理' : '展开子代理', () => { n.subsOpen = !n.subsOpen; n.dirty = true; relayout(); commit(); }, 'agent']);
+  if (n.pinned && STRUCT.has(n.kind)) it.push(['恢复自动布局', () => { snapshot(); n.pinned = false; n.dirty = true; relayout(); commit(); }, 'pin']);
+  if (['branch', 'worktree', 'agent'].includes(n.kind) && !n.removed) {
+    it.push('-', '在这里挂一个工具');
+    for (const k of Object.keys(TOOLS)) it.push([TOOLS[k][0], () => { snapshot(); const b = box(n), t = makeTool(k, n.id, b.x + 30, b.y + b.h + 34); S.sel.clear(); S.sel.add(t.id); commit(); toast(`已挂到「${n.title}」下，它看的是这里的数据`); }, TOOLS[k][1]]);
+  }
+  const sim = [];
+  if (n.kind !== 'project') sim.push(['来源有更新', () => {
+    let c = 0;
+    for (const w of S.wires) if (w.from === n.id && w.state === 'sent') { w.state = 'updated'; c++; const t = N.get(w.to); if (t) t.dirty = true; }
+    commit(); toast(c ? `${c} 根线的胶囊重新点亮，下次发送会自动带上` : '这个节点还没有发送过的连线');
+  }, 'undo']);
+  if (n.kind === 'agent' && n.status !== 'draft' && n.status !== 'archived') sim.push(['进入等待审批', () => { Object.assign(n, { status: 'waiting', approval: 'git push origin HEAD', last: '等待你批准', dirty: true }); commit(); }, 'clock']);
+  if (sim.length) it.push('-', '模拟', ...sim);
+  if (n.kind === 'agent' && n.status !== 'draft') it.push('-',
+    [n.status === 'archived' ? '取消归档' : '归档（变灰保留）', () => { snapshot(); n.status = n.status === 'archived' ? 'idle' : 'archived'; n.dirty = true; commit(); }, 'box'],
+    ['永久删除（节点和连线一起消失）', () => { snapshot(); removeNode(n); markAll(); relayout(); commit(); }, 'x']);
+  if (n.kind === 'worktree') it.push('-', [n.removed ? '恢复 worktree' : '移除 worktree（变灰保留）', () => { snapshot(); n.removed = !n.removed; n.dirty = true; commit(); }, 'x']);
+  if (['tool', 'note', 'board'].includes(n.kind) || n.status === 'draft') it.push('-', ['删除', () => { snapshot(); removeNode(n); markAll(); commit(); }, 'x']);
+  if (it[0] === '-') it.shift();
+  if (it.length) menu(pt, it);
+}
+function blankMenu(pt, at) {
+  const [wx, wy] = at || toWorld(pt.x, pt.y);
+  const it = [['新建 Agent', () => createAgent(wx, wy), 'agent'], '-', '工具节点（挂到最近的分支或 Agent）'];
+  for (const k of Object.keys(TOOLS)) it.push([TOOLS[k][0], () => {
+    const h = nearest(wx, wy, ['branch', 'worktree', 'agent']); if (!h) return toast('没有可以挂的节点');
+    snapshot(); const t = makeTool(k, h.id, wx, wy); S.sel.clear(); S.sel.add(t.id); commit(); toast(`已挂到「${h.title}」下，它看的是这里的数据`);
+  }, TOOLS[k][1]]);
+  it.push('-',
+    ['便签', () => { snapshot(); const n = add({ kind: 'note', title: '便签', text: '', form: 'fn', x: wx, y: wy, pinned: true }); S.sel.clear(); S.sel.add(n.id); commit(); }, 'note'],
+    ['看板', () => { snapshot(); const n = add({ kind: 'board', title: '看板', form: 'fn', x: wx, y: wy, pinned: true, cols: [{ name: '待办', cards: [] }, { name: '进行中', cards: [] }, { name: '完成', cards: [] }] }); S.sel.clear(); S.sel.add(n.id); commit(); }, 'board']);
+  menu(pt, it);
+}
+function simWait() {
+  const r = canvas.getBoundingClientRect(), idle = [...N.values()].filter(n => n.kind === 'agent' && n.status === 'idle');
+  const off = idle.find(n => { if (!shown(n)) return false; const b = box(n), cx = (b.x + b.w / 2) * S.view.z + S.view.x, cy = (b.y + b.h / 2) * S.view.z + S.view.y; return cx < 0 || cy < 0 || cx > r.width || cy > r.height; }) || idle[0];
+  if (!off) return toast('没有空闲的 Agent 可以模拟');
+  Object.assign(off, { status: 'waiting', approval: 'git push origin HEAD', last: '等待你批准' });
+  markAll(); relayout(); commit(); toast(`「${off.title}」进入等待：看视口边缘的标记和导航栏上的数字`);
+}
+function settingsMenu(pt) {
+  menu(pt, ['原型设置',
+    [S.wheel === 'zoom' ? '滚轮：缩放（点击改为平移）' : '滚轮：平移（点击改为缩放）', () => { S.wheel = S.wheel === 'zoom' ? 'pan' : 'zoom'; save(); toast(S.wheel === 'zoom' ? '滚轮缩放，拖空白平移' : '滚轮或双指平移，Ctrl + 滚轮或捏合缩放'); }, 'gear'],
+    [`活的对话卡上限：${S.cap}（点击切换 2 / 4 / 8）`, () => { S.cap = S.cap === 2 ? 4 : S.cap === 4 ? 8 : 2; save(); toast(`同时展开的对话卡最多 ${S.cap} 个，超出时最久没碰的退回引用卡`); }, 'card'],
+    '-', '模拟', ['让一个屏幕外的 Agent 等你', simWait, 'clock'],
+    '-', ['重置演示数据', resetDemo, 'undo']]);
+}
+function resetDemo() {
+  try { localStorage.removeItem(KEY); } catch (err) { /* storage unavailable */ }
+  for (const el of els.values()) el.remove(); els.clear();
+  for (const el of winEls.values()) el.remove(); winEls.clear();
+  hist.length = 0; fut.length = 0; S.filter = 'auto'; S.sel.clear(); S.selWire = null;
+  seed(); commit(); fitAll(true);
+}
+
+/* ---------- search and tree navigation ---------- */
+function reveal(n) {
+  if (!n) return;
+  for (let c = n; c; c = N.get(c.parent)) {
+    if (c.kind === 'project') c.off = false;
+    if (c.kind === 'agent' && !agentShown(c)) c.onCanvas = true;
+    if (c.kind === 'sub') N.get(c.parent).subsOpen = true;
+    const g = S.groups.find(x => x.collapsed && x.members.includes(c.id)); if (g) g.collapsed = false;
+  }
+  if (!shown(n)) { S.filter = 'auto'; toast('它不在当前筛选里，已切回「自动」并加入画布'); }
+  markAll(); relayout(); S.sel.clear(); S.sel.add(n.id); S.chrome = true; flyTo(n);
+}
+function doSearch(q) {
+  const res = $('#results'); q = q.trim().toLowerCase();
+  if (!q) { res.style.display = 'none'; return; }
+  const hits = [...N.values()].filter(n => n.title.toLowerCase().includes(q)).slice(0, 7);
+  res.innerHTML = hits.length ? hits.map(n => `<button data-reveal="${n.id}">${ic(n.kind === 'tool' ? TOOLS[n.tool][1] : KIND_ICON[n.kind])}<span>${esc(n.title)}</span><em>${shown(n) ? '' : '未在画布'}</em></button>`).join('')
+    : '<small style="display:block;padding:6px;color:var(--text-faint)">没有匹配的节点</small>';
+  res.style.display = 'block';
+}
+function navTree(key) {
+  if (S.sel.size !== 1) return;
+  const n = N.get([...S.sel][0]); if (!n) return;
+  const p = n.parent && N.get(n.parent); let to = null;
+  if (key === 'ArrowLeft') to = p;
+  else if (key === 'ArrowRight') {
+    if (n.kind === 'agent' && !n.subsOpen && subsOf(n).length) { n.subsOpen = true; n.dirty = true; relayout(); }
+    to = kids(n)[0];
+  } else {
+    const sib = !p ? [...N.values()].filter(x => x.kind === 'project' && !x.off) : STRUCT.has(n.kind) ? kids(p) : [];
+    to = sib[sib.indexOf(n) + (key === 'ArrowDown' ? 1 : -1)];
+  }
+  if (!to || !shown(to)) return;
+  S.sel.clear(); S.sel.add(to.id); S.chrome = true; ensureVisible(to);
+}
+
+/* ---------- chrome ---------- */
+function buildChrome() {
+  $('#rail').innerHTML = `<button class="rb on" title="工作台">${ic('bench')}</button><div class="rsub"><button class="rb sm" data-cmd="mode-chat" id="mChat" title="工作台 · 对话">${ic('chat')}</button><button class="rb sm on" data-cmd="mode-canvas" id="mCanvas" title="工作台 · 画布">${ic('canvas')}<i class="badge" id="railBadge"></i></button></div>`
+    + [['home', '首页'], ['clock', '会话历史'], ['box', '能力中心'], ['server', '模型配置'], ['gear', '设置']].map(([i, t]) => `<button class="rb" title="${t}（原型未包含）">${ic(i)}</button>`).join('');
+  $('#top').innerHTML = `<b>工作台</b><span style="color:var(--text-faint)">/</span><span id="crumb">画布</span><span class="grow"></span><button class="tb" data-cmd="right" id="bRight" title="右侧栏：进画布默认收起，内容跟随选中的 Agent">${ic('side')}右侧栏</button><button class="tb" data-cmd="bottom" id="bBottom" title="底栏：进画布默认收起">${ic('bottom')}底栏</button><button class="tb" data-cmd="theme" title="切换深浅主题">${ic('moon')}</button>`;
+  $('#toolbar').innerHTML = `<div class="tg" id="filters">${[['auto', '自动'], ['running', '仅运行'], ['3d', '3 天内'], ['7d', '7 天内'], ['all', '全部']].map(([f, t]) => `<button class="tb" data-cmd="filter" data-f="${f}">${t}</button>`).join('')}</div>`
+    + `<div class="tg"><button class="tb" data-cmd="add" title="添加节点（也可以右键空白处）">${ic('plus')}添加</button><button class="tb" data-cmd="tidy" title="整理：只重排没拖过的节点。按住 Shift 点击 = 全部解除固定后重排">${ic('tidy')}整理</button><button class="tb" data-cmd="group" title="把选中的节点圈成一组（G）">${ic('group')}分组</button></div>`
+    + `<div class="tg"><button class="tb" data-cmd="fit" title="适应视图（F）；Shift+F 只看选中的那棵树">${ic('fit')}</button><button class="tb" data-cmd="zoom100" id="zoomLbl" title="点击回到 100%（0）">100%</button><button class="tb" data-cmd="undo" title="撤销（Ctrl+Z）">${ic('undo')}</button><button class="tb" data-cmd="redo" title="重做（Ctrl+Shift+Z）">${ic('redo')}</button></div>`
+    + '<div id="searchBox"><input id="search" placeholder="搜索节点（Ctrl+F）" autocomplete="off"><div id="results"></div></div>'
+    + `<div class="tg"><button class="tb" data-cmd="settings" title="原型设置与模拟">${ic('gear')}设置</button></div>`;
+  $('#hint').innerHTML = '<b>可以试试<button class="lk" data-cmd="hint">收起 / 展开</button></b><ol>'
+    + '<li>滚轮缩放，拖空白平移；缩到 55% 以下节点自动降级</li>'
+    + '<li>双击节点标题：引用卡 ↔ 功能卡；右下角拖动改尺寸</li>'
+    + '<li>双击空白：新建 Agent 草稿</li>'
+    + '<li>从节点右侧圆点拉线到 Agent；拉到空白处是另一组菜单</li>'
+    + '<li>展开 Agent：把胶囊拖进输入框，或直接发送让它自动带上</li>'
+    + '<li>展开「文件」节点点选条目，圆点出现数字后再拉线</li>'
+    + '<li>按住 <kbd>Alt</kbd> 拖节点：弹出为窗口，拖到左右边缘吸附</li>'
+    + '<li><kbd>Shift</kbd> 拖框选，<kbd>G</kbd> 分组，再折叠这个组</li>'
+    + '<li>方向键沿树移动，<kbd>F</kbd> 适应视图，<kbd>Ctrl</kbd>+<kbd>F</kbd> 搜索，<kbd>Ctrl</kbd>+<kbd>Z</kbd> 撤销</li>'
+    + '<li>右键节点或空白处看更多；「设置」里可以模拟屏外等待</li></ol>';
+}
+function drawChrome() {
+  for (const b of $$('#filters .tb')) b.classList.toggle('on', b.dataset.f === S.filter);
+  $('#bRight').classList.toggle('on', S.right); $('#bBottom').classList.toggle('on', S.bottom);
+  $('#rightbar').classList.toggle('open', S.right); $('#bottombar').classList.toggle('open', S.bottom);
+  let h = '';
+  for (const p of N.values()) {
+    if (p.kind !== 'project') continue;
+    h += `<div class="sp"><button class="spn" data-reveal="${p.id}">${ic('project')}<span>${esc(p.title)}</span></button><button class="eye" data-eye="${p.id}" title="${p.off ? '在画布上显示这个项目' : '从画布上隐藏这个项目'}">${ic(p.off ? 'eyeoff' : 'eye')}</button></div>`;
+    for (const s of N.values()) {
+      if (s.kind !== 'agent' || s.status === 'draft' || projectOf(s) !== p) continue;
+      h += `<button class="sr${shown(s) ? '' : ' dim'}" data-reveal="${s.id}" title="${shown(s) ? '飞到这个节点' : '不在当前筛选里，点击加入画布'}"><i class="dot st-${s.status}"></i><span>${esc(s.title)}</span><em>${s.age ? s.age + ' 天前' : '今天'}</em></button>`;
+    }
+  }
+  $('#sideList').innerHTML = h;
+  const sel = S.sel.size === 1 ? N.get([...S.sel][0]) : null, f = sel ? follow(sel) : null;
+  $('#rightbar').innerHTML = '<b>右侧栏</b><p class="tip">进画布时默认收起，内容跟随选中的 Agent。</p>'
+    + (f ? `<p>${esc(f.title)}</p><p class="tip">Context · Changes · Git 快捷卡<br>状态：${ST[f.status] || ''}<br>模型：${esc(f.model || '')}</p>` : '<p class="tip">没有选中 Agent。</p>');
+  $('#bottombar').innerHTML = `Terminal · ${f ? esc(projectOf(f).title) : '未选中项目'}<br>PS&gt; _`;
+}
+function applyTheme() { document.documentElement.dataset.theme = S.theme; }
+function doCmd(c, el, e) {
+  switch (c) {
+    case 'filter': S.filter = el.dataset.f; markAll(); relayout(); commit(); break;
+    case 'tidy':
+      snapshot();
+      if (e.shiftKey) for (const n of N.values()) if (STRUCT.has(n.kind)) n.pinned = false;
+      markAll(); relayout(); commit(); toast(e.shiftKey ? '已全部解除固定并重排' : '已整理：拖过的节点保持不动（Shift + 点击可全部重排）');
+      break;
+    case 'group': groupSel(); break;
+    case 'fit': if (e.shiftKey) fitSel(); else fitAll(); break;
+    case 'zoom100': { const r = canvas.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / S.view.z); break; }
+    case 'undo': undo(); break;
+    case 'redo': redo(); break;
+    case 'theme': S.theme = S.theme === 'dark' ? 'light' : 'dark'; applyTheme(); save(); break;
+    case 'right': S.right = !S.right; commit(); break;
+    case 'bottom': S.bottom = !S.bottom; commit(); break;
+    case 'hint': $('#hint').classList.toggle('min'); break;
+    case 'mode-chat': case 'mode-canvas': {
+      const chat = c === 'mode-chat';
+      $('#convo').classList.toggle('on', chat); $('#mChat').classList.toggle('on', chat); $('#mCanvas').classList.toggle('on', !chat); $('#crumb').textContent = chat ? '对话' : '画布';
+      break;
+    }
+    case 'add': { const r = el.getBoundingClientRect(), q = canvas.getBoundingClientRect(); blankMenu({ x: r.left, y: r.bottom + 4 }, toWorld(q.left + q.width / 2 - 100, q.top + q.height / 2 - 60)); break; }
+    case 'settings': { const r = el.getBoundingClientRect(); settingsMenu({ x: r.left, y: r.bottom + 4 }); break; }
+  }
+}
+function doAct(act, n, el, e) {
+  const blur = () => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); };
+  if (act === 'g-collapse' || act === 'g-ungroup') {
+    const g = S.groups.find(x => x.id === el.dataset.g); if (!g) return;
+    snapshot(); if (act === 'g-collapse') g.collapsed = !g.collapsed; else S.groups = S.groups.filter(x => x !== g);
+    blur(); markAll(); return commit();
+  }
+  if (!n) return;
+  switch (act) {
+    case 'form': return toggleForm(n);
+    case 'pop': return popOut(n);
+    case 'unpop': return unpop(n);
+    case 'more': return nodeMenu(n, { x: e.clientX, y: e.clientY });
+    case 'subs': n.subsOpen = !n.subsOpen; n.dirty = true; relayout(); return commit();
+    case 'unpin': snapshot(); n.pinned = false; n.dirty = true; relayout(); return commit();
+    case 'send': return send(n, el.closest('.composer'));
+    case 'approve': return decide(n, true);
+    case 'deny': return decide(n, false);
+    case 'bmove': { const c = el.closest('.bcard'), ci = +c.dataset.ci, ki = +c.dataset.ki; snapshot(); n.cols[ci + 1].cards.push(n.cols[ci].cards.splice(ki, 1)[0]); n.dirty = true; return commit(); }
+    case 'badd': { const inp = $('input', el.closest('.badd')), v = inp.value.trim(); if (!v) return; snapshot(); n.cols[0].cards.push({ t: v }); blur(); n.dirty = true; return commit(); }
+  }
+}
+
+/* ---------- events ---------- */
+document.addEventListener('pointerdown', e => {
+  if (!e.target.closest) return;
+  if (!e.target.closest('#menu')) closeMenu();
+  if (!e.target.closest('#searchBox')) $('#results').style.display = 'none';
+}, true);
+canvas.addEventListener('pointerdown', e => {
+  if (e.button === 2) return;
+  const t = e.target;
+  if (t.closest('#toolbar,#minimap,#hint,.ind')) return;
+  if (e.button === 1 || S.space) { e.preventDefault(); return startPan(e); }
+  const hit = t.closest('.hit');
+  if (hit) { S.selWire = hit.dataset.wire; S.sel.clear(); draw(); return wireMenu(hit.dataset.wire, { x: e.clientX, y: e.clientY }); }
+  const port = t.closest('.port.out'); if (port) { e.preventDefault(); return startWire(e, N.get(port.dataset.port)); }
+  const rs = t.closest('.rs'); if (rs) { e.preventDefault(); return startResize(e, N.get(rs.dataset.rs)); }
+  const cap = t.closest('.tray .cap'); if (cap) return startCapDrag(e, cap);
+  const gh = t.closest('.gh');
+  if (gh) { const g = S.groups.find(x => x.id === gh.dataset.g); if (g && !t.closest('button,.gt')) dragNodes(e, g.members.filter(m => N.has(m))); return; }
+  const ne = t.closest('.node');
+  if (ne) {
+    const n = N.get(ne.dataset.id);
+    if (t.closest('button,input,select,label,.input,.note-text,.scroll,.tray,.board')) return pick(n, e);
+    return startMove(e, n);
+  }
+  if (e.shiftKey) return startMarquee(e);
+  startPan(e);
+});
+winsEl.addEventListener('pointerdown', e => {
+  const t = e.target, we = t.closest('.win'); if (!we) return;
+  const n = N.get(we.dataset.id); if (!n) return;
+  if (we !== winsEl.lastElementChild && !t.closest('button,.input,.cap')) winsEl.append(we);
+  const cap = t.closest('.tray .cap'); if (cap) return startCapDrag(e, cap);
+  if (t.closest('.wh') && !t.closest('button')) { e.preventDefault(); startWinDrag(e, n, false); }
+});
+canvas.addEventListener('dblclick', e => {
+  const t = e.target;
+  if (t.closest('#toolbar,#minimap,#hint,.ind,.group')) return;
+  const ne = t.closest('.node');
+  if (ne) { if (!t.closest('button,.fn-body,.port,.rs')) toggleForm(N.get(ne.dataset.id)); return; }
+  const [wx, wy] = toWorld(e.clientX, e.clientY); createAgent(wx - 60, wy - 20);
+});
+canvas.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const t = e.target; if (t.closest('#toolbar,#minimap,#hint')) return;
+  const ne = t.closest('.node'), pt = { x: e.clientX, y: e.clientY };
+  if (ne) { const n = N.get(ne.dataset.id); pick(n, e); nodeMenu(n, pt); } else blankMenu(pt);
+});
+canvas.addEventListener('wheel', e => {
+  if (e.target.closest('#toolbar,#hint')) return;
+  if (!e.ctrlKey && !world.classList.contains('lod') && e.target.closest('.node.fn')) return;
+  e.preventDefault();
+  if (S.wheel === 'pan' && !e.ctrlKey) { S.view.x -= e.deltaX; S.view.y -= e.deltaY; return draw(); }
+  zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0016)));
+}, { passive: false });
+mini.addEventListener('pointerdown', e => {
+  e.preventDefault(); const m = mini._m; if (!m) return;
+  const go = ev => { const r = mini.getBoundingClientRect(), q = canvas.getBoundingClientRect(); S.view.x = q.width / 2 - (m.all.x + (ev.clientX - r.left) / m.k) * S.view.z; S.view.y = q.height / 2 - (m.all.y + (ev.clientY - r.top) / m.k) * S.view.z; draw(); };
+  go(e); track(go);
+});
+document.addEventListener('click', e => {
+  const t = e.target; if (!t.closest) return;
+  const act = t.closest('[data-act]');
+  if (act) { const host = act.closest('[data-id]'); return doAct(act.dataset.act, host ? N.get(host.dataset.id) : null, act, e); }
+  const fly = t.closest('[data-fly]');
+  if (fly) { const n = N.get(fly.dataset.fly); if (n) { S.sel.clear(); S.sel.add(n.id); flyTo(n); } return; }
+  const rv = t.closest('[data-reveal]'); if (rv) { $('#results').style.display = 'none'; return reveal(N.get(rv.dataset.reveal)); }
+  const eye = t.closest('[data-eye]'); if (eye) { const p = N.get(eye.dataset.eye); p.off = !p.off; markAll(); relayout(); return commit(); }
+  const cmd = t.closest('[data-cmd]'); if (cmd) return doCmd(cmd.dataset.cmd, cmd, e);
+  const host = t.closest('[data-id]'), n = host && N.get(host.dataset.id); if (!n) return;
+  const item = t.closest('.item'); if (item && n.items) { const it = n.items[+item.dataset.item]; it.sel = !it.sel; n.dirty = true; return commit(); }
+  const bc = t.closest('.bcard'); if (bc && n.cols) { const k = n.cols[+bc.dataset.ci].cards[+bc.dataset.ki]; k.sel = !k.sel; n.dirty = true; return commit(); }
+  const msg = t.closest('.msg'); if (msg && n.msgs) { const m = n.msgs[+msg.dataset.msg]; m.sel = !m.sel; n.dirty = true; return commit(); }
+});
+document.addEventListener('input', e => {
+  const t = e.target; if (!t.matches) return;
+  if (t.matches('.input')) {
+    const n = N.get(t.dataset.input); if (!n) return;
+    n.draftHtml = t.innerHTML;
+    const ids = new Set($$('.chip', t).map(c => c.dataset.cap));
+    for (const { c } of capsFor(n.id)) c.placed = ids.has(c.id);
+    refreshTrays(n.id); save();
+  } else if (t.matches('.note-text')) { const h = t.closest('[data-id]'), n = h && N.get(h.dataset.id); if (n) { n.text = t.textContent; save(); } }
+  else if (t.matches('.gt')) { const g = S.groups.find(x => x.id === t.dataset.gt); if (g) { g.title = t.textContent; save(); } }
+  else if (t.id === 'search') doSearch(t.value);
+});
+document.addEventListener('focusout', e => { if (e.target.matches && e.target.matches('.gt,.note-text')) setTimeout(() => { markAll(); draw(); }, 0); });
+window.addEventListener('keydown', e => {
+  const t = e.target, typing = t && t.closest && t.closest('input,select,[contenteditable]'), mod = e.ctrlKey || e.metaKey, k = e.key;
+  if (k === 'Escape') {
+    closeMenu(); $('#results').style.display = 'none';
+    if (typing) t.blur(); else { S.sel.clear(); S.selWire = null; S.chrome = true; draw(); }
+    return;
+  }
+  if (mod && k.toLowerCase() === 'f') { e.preventDefault(); $('#search').focus(); $('#search').select(); return; }
+  if (typing) {
+    if (k !== 'Enter') return;
+    if (!e.shiftKey && t.matches('.input')) { e.preventDefault(); const h = t.closest('[data-id]'); send(N.get(h.dataset.id), t.closest('.composer')); }
+    else if (t.id === 'search') { const b = $('#results button'); if (b) b.click(); }
+    else if (t.closest('.badd')) $('[data-act="badd"]', t.closest('.badd')).click();
+    else if (t.matches('.gt')) { e.preventDefault(); t.blur(); }
+    return;
+  }
+  if (e.code === 'Space') { e.preventDefault(); S.space = true; canvas.classList.add('space'); return; }
+  if (mod && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+  if (mod) return;
+  if (k === 'f' || k === 'F') { if (e.shiftKey) fitSel(); else fitAll(); return; }
+  if (k === 'g' || k === 'G') return groupSel();
+  if (k === '0') return doCmd('zoom100', null, e);
+  if (k === 'Delete' || k === 'Backspace') return deleteSel();
+  if (k === 'Enter' && S.sel.size === 1) return toggleForm(N.get([...S.sel][0]));
+  if (k.startsWith('Arrow')) { e.preventDefault(); navTree(k); }
+});
+window.addEventListener('keyup', e => { if (e.code === 'Space') { S.space = false; canvas.classList.remove('space'); } });
+window.addEventListener('resize', () => draw());
+
+/* ---------- persistence and init ---------- */
+let saveTimer = 0;
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(KEY, JSON.stringify({ d: snapState(), view: S.view, filter: S.filter, theme: S.theme, wheel: S.wheel, cap: S.cap })); } catch (err) { /* storage unavailable */ }
+  }, 400);
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY); if (!raw) return false;
+    const o = JSON.parse(raw), d = JSON.parse(o.d);
+    for (const n of d.nodes) { n.dirty = true; N.set(n.id, n); }
+    S.wires = d.wires; S.groups = d.groups; Object.assign(S.view, o.view);
+    S.filter = o.filter || 'auto'; S.theme = o.theme || 'light'; S.wheel = o.wheel || 'zoom'; S.cap = o.cap || 4;
+    return N.size > 0;
+  } catch (err) { return false; }
+}
+buildChrome();
+const fresh = !load();
+if (fresh) seed();
+applyTheme(); commit();
+if (fresh) fitAll(true);
+setInterval(tick, 1500);
+window.__canvas = { S, N, hist, api: { seed, layout: relayout, commit, draw, connect, addWire, buildCaps, send, tick, toggleForm, createAgent, spawnSub, handoff, fork, popOut, unpop, groupSel, deleteSel, removeNode, undo, redo, fitAll, reveal, doSearch, navTree, doCmd, doAct, simWait, resetDemo, shown, box, capsFor } };
+})();
+</script>
+</body>
+</html>
