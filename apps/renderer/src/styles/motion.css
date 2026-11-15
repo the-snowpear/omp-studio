@@ -262,6 +262,11 @@
   from { translate: -100% 0; }
   to { translate: 100% 0; }
 }
+/* The ambient light field (styles/light.css): a slow wander, run `alternate`
+   so it is at rest at both ends. Each spot sets its own `--drift-x/-y`. */
+@keyframes omp-field-drift {
+  to { translate: var(--drift-x, 0px) var(--drift-y, 0px); scale: 1.12; }
+}
 
 /* ==========================================================================
    Reduced motion

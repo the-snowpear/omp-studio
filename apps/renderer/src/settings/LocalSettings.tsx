@@ -24,12 +24,15 @@ export function LocalSettings({ ctl, section }: { ctl: SettingsCtl; section: "ge
   if (section === "maintenance") return <UpdateAutomationSettings key={String(ctl.preview)} preview={ctl.preview} />;
   if (section === "appearance") return <>
     <SettingSection title={zh ? "外观" : "Appearance"}>
-      {reset(["theme", "density", "fileTypePalette"], zh ? "恢复外观默认值" : "Reset appearance")}
+      {reset(["theme", "density", "light", "fileTypePalette"], zh ? "恢复外观默认值" : "Reset appearance")}
       <SettingRow label={t("settings.general.theme")} desc={t("settings.general.themeDesc")} source={source("theme")}>
         <Select label={t("settings.general.theme")} value={app.theme} options={[["light", t("settings.general.themeLight")], ["dark", t("settings.general.themeDark")]]} onChange={theme => updateApp({ theme })} />
       </SettingRow>
       <SettingRow label={t("settings.general.density")} desc={t("settings.general.densityDesc")} source={source("density")}>
         <Select label={t("settings.general.density")} value={app.density} options={[["compact", t("settings.general.densityCompact")], ["standard", t("settings.general.densityStandard")], ["cozy", t("settings.general.densityCozy")]]} onChange={density => updateApp({ density })} />
+      </SettingRow>
+      <SettingRow label={t("settings.general.light")} desc={t("settings.general.lightDesc")} source={source("light")}>
+        <Select label={t("settings.general.light")} value={app.light} options={[["off", t("settings.general.lightOff")], ["soft", t("settings.general.lightSoft")], ["standard", t("settings.general.lightStandard")], ["vivid", t("settings.general.lightVivid")]]} onChange={light => updateApp({ light })} />
       </SettingRow>
       <SettingRow label={t("settings.general.fileTypePalette")} desc={t("settings.general.fileTypePaletteDesc")} source={source("fileTypePalette")}>
         <Switch label={t("settings.general.fileTypePalette")} checked={app.fileTypePalette === "cat"} onChange={on => updateApp({ fileTypePalette: on ? "cat" : "tri" })} />

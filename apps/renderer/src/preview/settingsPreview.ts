@@ -29,6 +29,7 @@ export const PREVIEW_APP_SETTINGS: AppSettings = {
   density: "compact",
   agentRosterDensity: "standard",
   fileTypePalette: "cat",
+  light: "standard",
   conversationWidthMode: "standard",
   conversationCustomWidth: 1024,
   uiFontFamily: "",
