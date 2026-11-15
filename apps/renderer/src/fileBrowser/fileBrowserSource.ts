@@ -58,7 +58,7 @@ export function createHostFileBrowserSource(options: {
           ...(project?.root ? { project: { name: project.name, root: project.root } } : {}),
           entries: directory.entries.map(entry => {
             const owner = projectRows.filter(row => row.root && within(entry.path, row.root, separator)).sort((a, b) => b.root!.length - a.root!.length)[0];
-            const identity = owner?.root ? { workspaceId: owner.workspaceId, relativePath: samePath(entry.path, owner.root, separator) ? "" : entry.path.slice(owner.root.length + (owner.root.endsWith(separator) ? 0 : 1)).split(separator).join("/") }
+            const identity = entry.link ? undefined : owner?.root ? { workspaceId: owner.workspaceId, relativePath: samePath(entry.path, owner.root, separator) ? "" : entry.path.slice(owner.root.length + (owner.root.endsWith(separator) ? 0 : 1)).split(separator).join("/") }
               : workspace ? { workspaceId: workspace.workspaceId, relativePath: [workspace.relativePath, entry.name].filter(Boolean).join("/") } : undefined;
             return { ...entry, ...(entry.mtimeMs === undefined ? {} : { modified: entry.mtimeMs }), ...(identity ? { workspace: identity } : {}) };
           }),

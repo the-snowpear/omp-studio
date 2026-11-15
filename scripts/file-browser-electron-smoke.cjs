@@ -56,8 +56,9 @@ async function run() {
   const home = join(temp, "home"), workspace = join(temp, "workspace"), roaming = join(temp, "roaming");
   const outside = join(home, ".omp", "external.txt"), image = join(home, ".omp", "preview.svg");
   report.profile = temp;
-  const projectFolder = join(home, "adopt-me");
-  for (const path of [workspace, projectFolder, join(workspace, "src"), roaming, join(temp, "user-data"), join(temp, "local"), join(home, ".omp"), ...["Desktop", "Downloads", "Documents", "Pictures"].map(name => join(home, name))]) await fs.mkdir(path, { recursive: true });
+  const projectFolder = join(home, "adopt-me"), otherProject = join(home, "other-project");
+  for (const path of [workspace, projectFolder, otherProject, join(workspace, "src"), roaming, join(temp, "user-data"), join(temp, "local"), join(home, ".omp"), ...["Desktop", "Downloads", "Documents", "Pictures"].map(name => join(home, name))]) await fs.mkdir(path, { recursive: true });
+  await fs.writeFile(join(otherProject, "foreign.txt"), "File from another project\n");
   await fs.writeFile(join(workspace, "inside.txt"), "Project file\n");
   await fs.writeFile(join(workspace, "src", "linked.txt"), "Shared buffer\n");
   const git = args => execute("git", args, { cwd: workspace, windowsHide: true });
@@ -79,7 +80,7 @@ async function run() {
     `dialog.showOpenDialog=async()=>({canceled:false,filePaths:[${JSON.stringify(workspace)}]});`,
     `import(${JSON.stringify(pathToFileURL(join(desktop, "dist", "src", "main.js")).href)});`,
   ].join("\n"));
-  const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: roaming, LOCALAPPDATA: join(temp, "local"), PI_CONFIG_DIR: join(temp, "native-config"), OMP_RENDERER_DEV_URL: url, DO_NOT_TRACK: "1" };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: roaming, LOCALAPPDATA: join(temp, "local"), PI_CONFIG_DIR: join(temp, "native-config"), OMP_RENDERER_DEV_URL: url, OMP_STUDIO_LOCALE: "zh", DO_NOT_TRACK: "1" };
   delete env.ELECTRON_RUN_AS_NODE;
   if (!url) delete env.OMP_RENDERER_DEV_URL;
   application = await _electron.launch({ executablePath: require("electron"), args: [bootstrap], cwd: workspace, env, timeout: 60000 });
@@ -88,6 +89,7 @@ async function run() {
   page.on("pageerror", error => report.errors.push(error.message));
   page.on("console", message => { if (message.type() === "error") report.errors.push(message.text()); });
   await page.waitForFunction(() => !!window.ompStudio && !!window.ompStudioChrome?.files);
+  await command("workspace.openPath", { path: otherProject });
   const model = await command("workspace.openPath", { path: workspace });
   assert.ok(model.activeWorkspaceId);
   report.checks.push("workspace.openPath registers and activates a real folder");
@@ -202,6 +204,16 @@ async function run() {
   assert.equal(await browser.locator(".fb-crumb.is-current").innerText(), "src");
   report.checks.push("Explorer and file browser reveal each other's selected folder/file");
 
+  await navigateBrowser(browser, otherProject);
+  await browserRow(browser, "foreign.txt").dblclick();
+  const foreignPane = page.getByRole("region", { name: "foreign.txt", exact: true });
+  await foreignPane.locator(".cm-content").waitFor();
+  await foreignPane.getByRole("button", { name: "更多操作", exact: true }).click();
+  await page.getByRole("menuitem", { name: "添加到对话", exact: true }).click();
+  await page.waitForFunction(path => [...document.querySelectorAll(".chip-composer .cm-chip")].some(chip => chip.title.replaceAll("\\", "/") === path.replaceAll("\\", "/")), join(otherProject, "foreign.txt"));
+  report.checks.push("file windows reference files from another project by absolute path");
+
+  browser = await openBrowser();
   await navigateBrowser(browser, projectFolder);
   await browser.getByRole("button", { name: "更多操作", exact: true }).click();
   await page.getByRole("menuitem", { name: "设为项目并新建对话", exact: true }).click();
@@ -234,6 +246,21 @@ async function run() {
   assert.equal(await browser.getAttribute("data-view"), "tree");
   assert.equal(await browser.locator(".fb-main").evaluate(element => getComputedStyle(element).transitionDuration), "0s");
   report.checks.push("reduced motion keeps navigation working with zero-duration transitions");
+
+  await page.evaluate(() => localStorage.setItem("omp.appSettings", JSON.stringify({ ...JSON.parse(localStorage.getItem("omp.appSettings") || "{}"), language: "en" })));
+  await page.reload();
+  await page.locator(".app-shell").waitFor();
+  await page.keyboard.press(`${modifier}+k`);
+  await page.locator(".cmdk-input input").fill("Open file browser");
+  await page.locator(".cmdk-list").getByText("Open file browser", { exact: true }).click();
+  browser = page.locator(".fb:visible").last();
+  await browser.getByRole("radio", { name: "List view" }).click();
+  await browser.locator(".fb-place-label").getByText("System (C:)", { exact: true }).waitFor();
+  assert.equal(await browser.getByText("本机", { exact: true }).count(), 0);
+  await browserRow(browser, "Desktop").getByText("Desktop", { exact: true }).dblclick();
+  await browserRow(browser, "待办.txt").getByText("待办.txt", { exact: true }).dblclick();
+  await page.getByRole("region", { name: "待办.txt", exact: true }).getByText("Outside project", { exact: true }).waitFor();
+  report.checks.push("English mode localizes browser places and the outside-project file window");
   assert.deepEqual(report.errors, []);
 }
 

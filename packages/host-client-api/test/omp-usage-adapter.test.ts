@@ -145,7 +145,7 @@ describe("createOmpUsageService", () => {
     });
     const result = await service.openDashboard();
     assert.equal(result.applied, true);
-    assert.match(result.message ?? "", /已在浏览器打开/);
+    assert.match(result.message ?? "", /Opened the OMP Stats dashboard in your browser/);
     assert.deepEqual(spawned, []);
     assert.deepEqual(opened, ["http://127.0.0.1:3847/"]);
     assert.equal(JSON.stringify(result).includes("C:\\\\tools"), false);
@@ -209,7 +209,7 @@ describe("createOmpUsageService", () => {
     const result = await service.dashboard?.();
     assert.equal(result?.available, false);
     assert.equal(result?.url, undefined);
-    assert.match(result?.reason ?? "", /未找到 OMP Runtime/);
+    assert.match(result?.reason ?? "", /OMP Runtime not found/);
   });
 
   test("dashboard gives up after the startup deadline instead of hanging the page", async () => {
@@ -226,7 +226,7 @@ describe("createOmpUsageService", () => {
     });
     const result = await service.dashboard?.();
     assert.equal(result?.available, false);
-    assert.match(result?.reason ?? "", /未在预期时间内就绪/);
+    assert.match(result?.reason ?? "", /did not become ready in time/);
   });
 
   test("dashboard stops claiming a running panel once the process is gone", async () => {
@@ -250,7 +250,7 @@ describe("createOmpUsageService", () => {
     live = false;
     const second = await service.dashboard?.();
     assert.equal(second?.available, false, "a cached URL must not report a dead panel as running");
-    assert.match(second?.reason ?? "", /未在预期时间内就绪/);
+    assert.match(second?.reason ?? "", /did not become ready in time/);
     assert.equal(spawned.length, 1, "the first call reused a live panel; only the retry spawns");
   });
 
@@ -287,7 +287,7 @@ describe("createOmpUsageService", () => {
       now: () => NOW,
     });
     const model = await service.get();
-    assert.match(model.unavailableReason ?? "", /安装 OMP 或将其加入 PATH/);
+    assert.match(model.unavailableReason ?? "", /Install OMP or add it to PATH/);
   });
 
   test("concurrent get() calls stay single-flight and share one locator", async () => {

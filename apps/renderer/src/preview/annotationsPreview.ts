@@ -1,5 +1,8 @@
 import type { AnnotationBundle } from "@omp-studio/studio-protocol";
-export const PREVIEW_ANNOTATION_FILE = `import type { Workspace } from './workspace';
+import { isZh } from "../i18n";
+
+export function getPreviewAnnotationFile(zh = isZh()): string {
+  return `import type { Workspace } from './workspace';
 
 interface GreetingOptions {
   workspace?: Workspace;
@@ -13,7 +16,7 @@ export function greeting(options: GreetingOptions) {
 
   if (!workspace) {
     return locale === 'zh'
-      ? '选择一个工作区，开始新的对话。'
+      ? '${zh ? "选择一个工作区，开始新的对话。" : "Choose a workspace to start a conversation."}'
       : 'Choose a workspace to start a conversation.';
   }
 
@@ -21,13 +24,16 @@ export function greeting(options: GreetingOptions) {
     title,
     subtitle: workspace.description,
     actions: [
-      { id: 'new-chat', label: '新建对话' },
-      { id: 'recent', label: '最近会话' },
+      { id: 'new-chat', label: '${zh ? "新建对话" : "New chat"}' },
+      { id: 'recent', label: '${zh ? "最近会话" : "Recent sessions"}' },
     ],
   };
 }
 `;
-export const PREVIEW_ANNOTATION_DIFF = `diff --git a/src/app.ts b/src/app.ts
+}
+
+export function getPreviewAnnotationDiff(zh = isZh()): string {
+  return `diff --git a/src/app.ts b/src/app.ts
 --- a/src/app.ts
 +++ b/src/app.ts
 @@ -7,11 +7,13 @@ interface GreetingOptions {
@@ -39,7 +45,7 @@ export const PREVIEW_ANNOTATION_DIFF = `diff --git a/src/app.ts b/src/app.ts
 
    if (!workspace) {
      return locale === 'zh'
-       ? '选择一个工作区，开始新的对话。'
+       ? '${zh ? "选择一个工作区，开始新的对话。" : "Choose a workspace to start a conversation."}'
        : 'Choose a workspace to start a conversation.';
    }
 +
@@ -51,8 +57,18 @@ export const PREVIEW_ANNOTATION_DIFF = `diff --git a/src/app.ts b/src/app.ts
 +    subtitle,
      actions: [
 `;
-export const PREVIEW_ANNOTATION_BUNDLE: AnnotationBundle = {
-  schemaVersion: 1, revision: 2,
-  sources: [{ id: "demo-source", kind: "file", label: "src/app.ts", path: "src/app.ts", text: PREVIEW_ANNOTATION_FILE, version: "sha256:" + "0".repeat(64) }],
-  notes: [{ id: "demo-note", sourceId: "demo-source", note: "这里应显示当前工作区名称。", selection: { start: PREVIEW_ANNOTATION_FILE.indexOf("Hello Studio"), end: PREVIEW_ANNOTATION_FILE.indexOf("Hello Studio") + 12 } }],
-};
+}
+
+export function getPreviewAnnotationBundle(zh = isZh()): AnnotationBundle {
+  const file = getPreviewAnnotationFile(zh);
+  return {
+    schemaVersion: 1,
+    revision: 2,
+    sources: [{ id: "demo-source", kind: "file", label: "src/app.ts", path: "src/app.ts", text: file, version: "sha256:" + "0".repeat(64) }],
+    notes: [{ id: "demo-note", sourceId: "demo-source", note: zh ? "这里应显示当前工作区名称。" : "Should display the current workspace name here.", selection: { start: file.indexOf("Hello Studio"), end: file.indexOf("Hello Studio") + 12 } }],
+  };
+}
+
+export const PREVIEW_ANNOTATION_FILE = getPreviewAnnotationFile();
+export const PREVIEW_ANNOTATION_DIFF = getPreviewAnnotationDiff();
+export const PREVIEW_ANNOTATION_BUNDLE: AnnotationBundle = getPreviewAnnotationBundle();

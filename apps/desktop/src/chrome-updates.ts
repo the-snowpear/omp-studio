@@ -44,6 +44,7 @@ import {
   type UpdateIndex,
 } from "./update-index.js";
 import type { UpdatePrefs } from "./update-prefs-store.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 export interface ChromeUpdatesSender {
   isDestroyed(): boolean;
@@ -173,7 +174,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
   // The v1 index (update-index*.json) only ever described Windows builds; other platforms use the v2 catalogs.
   const legacyIndexPlatform = options.platform.startsWith("win32-");
   const loadIndex = async (prefs: UpdatePrefs, signal?: AbortSignal, channel: "stable" | "canary" = "stable"): Promise<UpdateIndex> => {
-    if (!legacyIndexPlatform) throw new Error("旧版更新索引只适用于 Windows");
+    if (!legacyIndexPlatform) throw new Error(desktopText("旧版更新索引只适用于 Windows", "Legacy update index only applies to Windows"));
     const index = await fetchUpdateIndex({
       repo: options.repo ?? DEFAULT_GITHUB_REPO,
       mirrorPrefix: prefs.mirrorPrefix,
@@ -313,7 +314,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
     }
 
     if (activeJob !== null || applying) {
-      return { ok: false, message: "已有正在进行的更新任务" };
+      return { ok: false, message: desktopText("已有正在进行的更新任务", "An update task is already in progress") };
     }
 
     // Claim the job slot immediately to prevent concurrent startApp calls
@@ -354,7 +355,9 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
       activeJob = null;
       return {
         ok: false,
-        message: plan.kind === "none" ? "当前无可用的应用更新" : "应用更新安装器不可用",
+        message: plan.kind === "none"
+          ? desktopText("当前无可用的应用更新", "No app update is currently available")
+          : desktopText("应用更新安装器不可用", "App update installer is unavailable"),
       };
     }
 
@@ -383,7 +386,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
             steps: 3,
             receivedBytes,
             totalBytes,
-            message: "正在下载应用更新...",
+            message: desktopText("正在下载应用更新...", "Downloading app update..."),
           });
         });
 
@@ -406,7 +409,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
           phase: "verifying",
           step: 2,
           steps: 3,
-          message: "正在解压并校验负载签名...",
+          message: desktopText("正在解压并校验负载签名...", "Extracting and verifying payload signature..."),
         });
 
         if (plan.kind === "hot") {
@@ -433,7 +436,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
           phase: "awaiting-apply",
           step: 3,
           steps: 3,
-          message: "应用负载已就绪，等待重启应用",
+          message: desktopText("应用负载已就绪，等待重启应用", "App payload ready; awaiting restart to apply"),
         });
       } catch (error) {
         const sanitized = sanitizeErrorMessage(error);
@@ -460,7 +463,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
     }
 
     if (activeJob !== null || applying) {
-      return { ok: false, message: "已有正在进行的更新任务" };
+      return { ok: false, message: desktopText("已有正在进行的更新任务", "An update task is already in progress") };
     }
 
     const jobId = randomUUID();
@@ -494,7 +497,9 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
 
         if (runtimePlan.kind !== "available") {
           const reason =
-            runtimePlan.kind === "blocked" ? `更新被阻止: ${runtimePlan.reason}` : "当前已是最新版本";
+            runtimePlan.kind === "blocked"
+              ? desktopText(`更新被阻止: ${runtimePlan.reason}`, `Update blocked: ${runtimePlan.reason}`)
+              : desktopText("当前已是最新版本", "Already up to date");
           options.send(CHROME_UPDATES_CHANNELS.progress, {
             jobId,
             kind: "runtime",
@@ -528,7 +533,10 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
             steps: 3,
             receivedBytes: received,
             totalBytes: total,
-            message: `正在下载 OMP Runtime (${Math.round((received / total) * 100)}%)...`,
+            message: desktopText(
+              `正在下载 OMP Runtime (${Math.round((received / total) * 100)}%)...`,
+              `Downloading OMP Runtime (${Math.round((received / total) * 100)}%)...`,
+            ),
           });
         });
 
@@ -564,7 +572,10 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
             const manifestJson = JSON.parse(manifestRaw) as { runtimeVersion?: string };
             if (manifestJson.runtimeVersion !== index.runtime.runtimeVersion) {
               throw new Error(
-                `工件清单版本 (${manifestJson.runtimeVersion}) 与索引声明版本 (${index.runtime.runtimeVersion}) 不一致`,
+                desktopText(
+                  `工件清单版本 (${manifestJson.runtimeVersion}) 与索引声明版本 (${index.runtime.runtimeVersion}) 不一致`,
+                  `Artifact manifest version (${manifestJson.runtimeVersion}) does not match index version (${index.runtime.runtimeVersion})`,
+                ),
               );
             }
           }
@@ -578,7 +589,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
           phase: "verifying",
           step: 2,
           steps: 3,
-          message: "正在验签工件...",
+          message: desktopText("正在验签工件...", "Verifying artifact signature..."),
         });
 
         const verified = await verifySignedArtifact({
@@ -591,13 +602,13 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
         abortController.signal.throwIfAborted();
 
         if (verified.manifest.runtimeVersion !== index.runtime.runtimeVersion) {
-          throw new Error("工件清单版本与索引不一致");
+          throw new Error(desktopText("工件清单版本与索引不一致", "Artifact manifest version does not match index"));
         }
         if (verified.manifest.platform !== options.platform) {
-          throw new Error(`平台不匹配: 期望 ${options.platform}, 实际 ${verified.manifest.platform}`);
+          throw new Error(desktopText(`平台不匹配: 期望 ${options.platform}, 实际 ${verified.manifest.platform}`, `Platform mismatch: expected ${options.platform}, got ${verified.manifest.platform}`));
         }
         if (verified.manifest.channel !== prefs.runtimeChannel) {
-          throw new Error(`通道不匹配: 期望 ${prefs.runtimeChannel}, 实际 ${verified.manifest.channel}`);
+          throw new Error(desktopText(`通道不匹配: 期望 ${prefs.runtimeChannel}, 实际 ${verified.manifest.channel}`, `Channel mismatch: expected ${prefs.runtimeChannel}, got ${verified.manifest.channel}`));
         }
 
         options.pendingArtifact.set(targetDir);
@@ -608,7 +619,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
           phase: "awaiting-apply",
           step: 3,
           steps: 3,
-          message: "工件已验签，准备安装",
+          message: desktopText("工件已验签，准备安装", "Artifact verified; ready to install"),
           runtimeChannel: verified.manifest.channel,
         });
       } catch (err) {
@@ -619,7 +630,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
             phase: "cancelled",
             step: 0,
             steps: 3,
-            message: "已取消更新",
+            message: desktopText("已取消更新", "Update cancelled"),
           });
         } else {
           const sanitized = sanitizeErrorMessage(err);
@@ -650,14 +661,14 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
 
     const input = parseChromeUpdatesImportInput(payload);
     if (input === undefined) {
-      return { ok: false, message: "无效的导入参数" };
+      return { ok: false, message: desktopText("无效的导入参数", "Invalid import parameters") };
     }
 
     if (input.kind !== "runtime") {
-      return { ok: false, message: "当前仅支持导入 Runtime 工件" };
+      return { ok: false, message: desktopText("当前仅支持导入 Runtime 工件", "Only Runtime artifacts are currently supported for import") };
     }
 
-    if (activeJob !== null || applying) return { ok: false, message: "已有正在进行的更新任务" };
+    if (activeJob !== null || applying) return { ok: false, message: desktopText("已有正在进行的更新任务", "An update task is already in progress") };
     const jobId = randomUUID();
     const abortController = new AbortController();
     activeJob = { jobId, kind: "runtime", abortController };
@@ -667,14 +678,14 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
     let dialogOpts: OpenDialogOptionsLike;
     if (input.source === "directory") {
       dialogOpts = {
-        title: "选择 OMP Runtime 目录",
+        title: desktopText("选择 OMP Runtime 目录", "Select OMP Runtime Directory"),
         properties: ["openDirectory"],
       };
     } else {
       dialogOpts = {
-        title: "选择 OMP Runtime 清单",
+        title: desktopText("选择 OMP Runtime 清单", "Select OMP Runtime Manifest"),
         properties: ["openFile"],
-        filters: [{ name: "OMP Runtime 工件", extensions: ["zip", "json"] }],
+        filters: [{ name: desktopText("OMP Runtime 工件", "OMP Runtime Artifact"), extensions: ["zip", "json"] }],
       };
     }
 
@@ -699,7 +710,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
       phase: "verifying",
       step: 1,
       steps: 3,
-      message: "正在验签工件...",
+      message: desktopText("正在验签工件...", "Verifying artifact signature..."),
     });
 
     let verified: { manifest: RuntimeInstallationManifest };
@@ -727,7 +738,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
     const currentPrefs = await options.prefs.read();
     abortController.signal.throwIfAborted();
     if (verified.manifest.platform !== options.platform) {
-      const msg = `平台不匹配: 期望 ${options.platform}, 实际 ${verified.manifest.platform}`;
+      const msg = desktopText(`平台不匹配: 期望 ${options.platform}, 实际 ${verified.manifest.platform}`, `Platform mismatch: expected ${options.platform}, got ${verified.manifest.platform}`);
       options.send(CHROME_UPDATES_CHANNELS.progress, {
         jobId,
         kind: "runtime",
@@ -740,7 +751,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
     }
 
     if (verified.manifest.channel !== currentPrefs.runtimeChannel) {
-      const msg = `通道不匹配: 期望 ${currentPrefs.runtimeChannel}, 实际 ${verified.manifest.channel}`;
+      const msg = desktopText(`通道不匹配: 期望 ${currentPrefs.runtimeChannel}, 实际 ${verified.manifest.channel}`, `Channel mismatch: expected ${currentPrefs.runtimeChannel}, got ${verified.manifest.channel}`);
       options.send(CHROME_UPDATES_CHANNELS.progress, {
         jobId,
         kind: "runtime",
@@ -760,7 +771,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
       phase: "awaiting-apply",
       step: 2,
       steps: 3,
-      message: "工件已验签，准备安装",
+      message: desktopText("工件已验签，准备安装", "Artifact verified; ready to install"),
       runtimeChannel: verified.manifest.channel,
     });
 
@@ -814,7 +825,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
       phase: "cancelled",
       step: 0,
       steps: 1,
-      message: "已取消更新",
+      message: desktopText("已取消更新", "Update cancelled"),
     });
   });
 
@@ -822,16 +833,16 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
     if (event.sender.isDestroyed() || !options.isTrustedSender(event.sender)) {
       return { ok: false, message: "Untrusted sender" };
     }
-    if (activeJob !== null || applying) return { ok: false, message: "已有正在进行的更新任务" };
+    if (activeJob !== null || applying) return { ok: false, message: desktopText("已有正在进行的更新任务", "An update task is already in progress") };
     if (pendingAppPayloadVersion === undefined && pendingInstaller === undefined) {
-      return { ok: false, message: "没有待应用的更新" };
+      return { ok: false, message: desktopText("没有待应用的更新", "No pending update to apply") };
     }
 
     applying = true;
     try {
       if (options.isBusy?.()) return { ok: true, deferred: true };
       if (pendingInstaller !== undefined) {
-        if (!options.openPath) return { ok: false, message: "应用更新安装器不可用" };
+        if (!options.openPath) return { ok: false, message: desktopText("应用更新安装器不可用", "App update installer is unavailable") };
         if ((await stat(pendingInstaller.path)).size !== pendingInstaller.size || await sha256File(pendingInstaller.path) !== pendingInstaller.sha256) {
           throw new Error("Installer checksum mismatch");
         }
@@ -843,7 +854,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
         options.quit?.();
         return { ok: true };
       }
-      if (!options.appPayloadInstaller) return { ok: false, message: "应用负载安装器不可用" };
+      if (!options.appPayloadInstaller) return { ok: false, message: desktopText("应用负载安装器不可用", "App payload installer is unavailable") };
       await options.appPayloadInstaller.activate(pendingAppPayloadVersion!);
       pendingAppPayloadVersion = undefined;
       pendingAppJobId = undefined;
@@ -864,9 +875,9 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
       return { ok: false, message: "Untrusted sender" };
     }
     if (!options.appPayloadInstaller) {
-      return { ok: false, message: "应用负载安装器不可用" };
+      return { ok: false, message: desktopText("应用负载安装器不可用", "App payload installer is unavailable") };
     }
-    if (activeJob !== null || applying) return { ok: false, message: "已有正在进行的更新任务" };
+    if (activeJob !== null || applying) return { ok: false, message: desktopText("已有正在进行的更新任务", "An update task is already in progress") };
 
     applying = true;
     try {

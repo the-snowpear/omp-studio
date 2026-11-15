@@ -35,7 +35,8 @@ export function SidebarFooter({
   /** 底栏盒子：壳用它的底边换算落点，这里用它盯实时高度。 */
   readonly footerRef: RefObject<HTMLElement | null> | undefined;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const localFooterRef = useRef<HTMLElement>(null);
   const footer = footerRef ?? localFooterRef;
   const [mounted, setMounted] = useState(railCollapsed);
@@ -65,7 +66,7 @@ export function SidebarFooter({
           <button
             type="button"
             className={`sb-user${hasUpdate ? " has-update" : ""}`}
-            aria-label={`${profile.displayName} · ${hasUpdate ? `${updateLabel} · ` : ""}OMP 状态与环境菜单`}
+            aria-label={`${profile.displayName} · ${hasUpdate ? `${updateLabel} · ` : ""}${zh ? "OMP 状态与环境菜单" : "OMP status and environment menu"}`}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={(event) => onToggleMenu(event.currentTarget)}

@@ -25,6 +25,7 @@ import {
   placeholder,
   rectangularSelection,
 } from "@codemirror/view";
+import { isZh } from "../i18n";
 import type { StructuredLanguage } from "./parse";
 import { yamlDiagnostics } from "./parse";
 import { studioEditorTheme } from "./theme";
@@ -83,7 +84,8 @@ export function languageExtensions(
           try {
             return yamlDiagnostics(view.state.doc.toString(), options.allowEmpty);
           } catch (error) {
-            const message = error instanceof Error ? error.message : "YAML 无法解析";
+            const fallback = isZh() ? "YAML 无法解析" : "Unable to parse YAML";
+            const message = error instanceof Error ? error.message : fallback;
             return [{ from: 0, to: 0, severity: "error" as const, message, source: "yaml" }];
           }
         };

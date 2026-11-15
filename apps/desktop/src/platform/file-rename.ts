@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
+import { desktopText } from "../desktop-language-shared.js";
 
 const execute = promisify(execFile);
 const windowsRename = `try {
@@ -27,7 +28,7 @@ export async function renameWithoutOverwrite(source: string, target: string): Pr
         env: { ...process.env, OMP_RENAME_SOURCE: source, OMP_RENAME_NAME: basename(target) },
       });
     } else {
-      if (!["darwin", "linux"].includes(process.platform) || !["x64", "arm64"].includes(process.arch)) throw new Error(`不支持此平台的独占重命名：${process.platform}-${process.arch}`);
+      if (!["darwin", "linux"].includes(process.platform) || !["x64", "arm64"].includes(process.arch)) throw new Error(desktopText(`不支持此平台的独占重命名：${process.platform}-${process.arch}`, `Exclusive rename is unsupported on ${process.platform}-${process.arch}`));
       const syscall = process.platform === "darwin" ? 488 : process.arch === "arm64" ? 276 : 316;
       const cwd = process.platform === "darwin" ? -2 : -100;
       const flags = process.platform === "darwin" ? 4 : 1;
@@ -35,8 +36,8 @@ export async function renameWithoutOverwrite(source: string, target: string): Pr
     }
   } catch (error) {
     const failure = error as Error & { code?: number | string; stderr?: string };
-    if ([17, 80, 183].includes(Number(failure.code))) throw new Error("目标名称已存在，未覆盖原文件");
-    if (failure.code === "ENOENT" && process.platform !== "win32") throw new Error("重命名需要 /usr/bin/perl；请在此主机安装 Perl 后重试");
+    if ([17, 80, 183].includes(Number(failure.code))) throw new Error(desktopText("目标名称已存在，未覆盖原文件", "Destination already exists; no file was overwritten"));
+    if (failure.code === "ENOENT" && process.platform !== "win32") throw new Error(desktopText("重命名需要 /usr/bin/perl；请在此主机安装 Perl 后重试", "Renaming requires /usr/bin/perl; install Perl on this host and try again"));
     throw new Error(failure.stderr?.trim() || failure.message);
   }
 }

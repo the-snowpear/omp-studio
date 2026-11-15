@@ -10,6 +10,7 @@ import { BROWSER_PICKER_POLL, BROWSER_PICKER_START, BROWSER_PICKER_STOP, BROWSER
 import { ManagedBrowserStore } from "./managed-browser-store.js";
 import { BrowserPageActivity } from "./managed-browser-activity.js";
 import { ManagedBrowserInspection } from "./managed-browser-inspection.js";
+import { desktopText, isDesktopZh } from "./desktop-language-shared.js";
 
 interface LivePage {
   page: ManagedBrowserPage;
@@ -129,7 +130,7 @@ export class DesktopManagedBrowser {
       if (existing.some(entry => entry?.allowed === false)) { callback(false); return; }
       if (existing.every(entry => entry?.allowed === true)) { callback(true); return; }
       if (!["media", "notifications", "clipboard-read", "clipboard-readwrite", "geolocation", "fullscreen"].includes(permission)) { callback(false); return; }
-      const zh = this.options.language?.() !== "en";
+      const zh = (this.options.language?.() ?? (isDesktopZh() ? "zh" : "en")) === "zh";
       const labels: Record<string, string> = { "media:audio": "麦克风", "media:video": "摄像头", notifications: "通知", "clipboard-read": "读取剪贴板", "clipboard-readwrite": "读取剪贴板", geolocation: "位置信息", fullscreen: "全屏" };
       const prompt = { type: "question" as const, title: zh ? "网站权限" : "Website permission", message: `${origin}\n${zh ? "请求使用：" + names.map(name => labels[name] ?? name).join("、") : `requests ${names.join(", ")}`}`, buttons: zh ? ["拒绝", "允许"] : ["Deny", "Allow"], defaultId: 0, cancelId: 0, checkboxLabel: zh ? "在此浏览空间记住选择" : "Remember in this browser space", checkboxChecked: false };
       void dialog.showMessageBox(live.parent === this.#parking ? this.options.windowFor() ?? live.parent : live.parent, prompt).then(result => {
@@ -284,9 +285,10 @@ export class DesktopManagedBrowser {
     });
     contents.on("context-menu", (_event, details) => {
       if (this.store.state(page.sessionId).control !== "human") return;
+      const zh = (this.options.language?.() ?? (isDesktopZh() ? "zh" : "en")) === "zh";
       const items: Electron.MenuItemConstructorOptions[] = [{ role: "copy", enabled: !!details.selectionText }, { role: "paste", enabled: details.isEditable }, { role: "selectAll" }];
-      if (details.linkURL) items.push({ type: "separator" }, { label: "在新标签打开 / Open in new tab", click: () => { void this.create(page.sessionId, details.linkURL, "human", page.spaceId, { pageId: page.id }).catch(error => this.#error(page.sessionId, error)); } }, { label: "系统浏览器 / System browser", click: () => { if (/^https?:/iu.test(details.linkURL)) void shell.openExternal(details.linkURL); } });
-      items.push({ type: "separator" }, { label: "检查元素 / Inspect", click: () => { void this.execute({ sessionId: page.sessionId, action: "devtools", pageId: page.id }).then(() => contents.inspectElement(details.x, details.y)).catch(error => this.#error(page.sessionId, error)); } });
+      if (details.linkURL) items.push({ type: "separator" }, { label: zh ? "在新标签打开" : "Open in new tab", click: () => { void this.create(page.sessionId, details.linkURL, "human", page.spaceId, { pageId: page.id }).catch(error => this.#error(page.sessionId, error)); } }, { label: zh ? "系统浏览器" : "System browser", click: () => { if (/^https?:/iu.test(details.linkURL)) void shell.openExternal(details.linkURL); } });
+      items.push({ type: "separator" }, { label: zh ? "检查元素" : "Inspect", click: () => { void this.execute({ sessionId: page.sessionId, action: "devtools", pageId: page.id }).then(() => contents.inspectElement(details.x, details.y)).catch(error => this.#error(page.sessionId, error)); } });
       Menu.buildFromTemplate(items).popup({ window: live.parent });
     });
     this.#inputState(live);
@@ -569,7 +571,8 @@ export class DesktopManagedBrowser {
       release();
       download.state = state; publish(); this.#downloads.delete(download.id);
       if (state === "completed" && Notification.isSupported()) {
-        const notification = new Notification({ title: "下载完成 / Download complete", body: download.name });
+        const zh = (this.options.language?.() ?? (isDesktopZh() ? "zh" : "en")) === "zh";
+        const notification = new Notification({ title: zh ? "下载完成" : desktopText("下载完成", "Download complete"), body: download.name });
         this.#notifications.set(download.id, notification); notification.once("close", () => this.#notifications.delete(download.id)); notification.show();
       }
     });

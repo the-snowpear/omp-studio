@@ -113,7 +113,7 @@ function emptyHint(state: FileBrowserState, copy: Copy): ReactNode {
 function useListKeys(entries: readonly FsEntry[], state: FileBrowserState, actions: RowActions, extra?: (event: KeyboardEvent<HTMLElement>, focused: FsEntry | undefined) => boolean) {
   const typed = useRef({ text: "", at: 0 });
   return (event: KeyboardEvent<HTMLElement>) => {
-    if (state.edit) return;
+    if (state.edit || event.altKey || isMod(event)) return;
     const selected = state.selection[state.selection.length - 1];
     const index = entries.findIndex(entry => selected !== undefined && entry.path === selected);
     const focused = entries[index];
@@ -203,7 +203,7 @@ export function TreeView({ state, places, actions, copy, language }: ViewProps) 
   useEffect(() => { state.load(COMPUTER); }, [state.load]);
   const selected = new Set(state.selection);
   // 扁平化当前可见的树行，给键盘导航用。
-  const flat = flattenTree(state.dirState(COMPUTER)?.dir?.entries ?? [], entry => state.childrenOf(entry.path), state.isExpanded)
+  const flat = flattenTree(state.childrenOf(COMPUTER), entry => state.childrenOf(entry.path), state.isExpanded)
     .map(item => ({ entry: item.node, depth: item.depth, parent: item.parentPath ?? COMPUTER }));
   const list = flat.map(item => item.entry);
   const onKeyDown = useListKeys(list, state, actions, (event, focused) => {
@@ -219,7 +219,7 @@ export function TreeView({ state, places, actions, copy, language }: ViewProps) 
     const dir = state.dirState(path);
     if (path !== COMPUTER && (!dir || dir.status === "loading" && !dir.dir)) { rows.push(<div key={`${path}:loading`} className="tree-row muted" role="status" style={{ ["--depth-pad" as string]: `${depth * 14 + 6}px` } as CSSProperties}><span className="tw" /><span className="fi"><span className="spinner" aria-hidden="true" /></span><span className="fname">{copy("正在读取…", "Loading…")}</span></div>); return; }
     if (dir?.status === "error") { rows.push(<div key={`${path}:error`} className="tree-row muted fb-tree-error" role="status" style={{ ["--depth-pad" as string]: `${depth * 14 + 6}px` } as CSSProperties}><span className="tw" /><span className="fi"><Icon name="alert-c" /></span><span className="fname ellipsis">{dir.error}</span></div>); return; }
-    const children = path === COMPUTER ? dir?.dir?.entries ?? [] : state.childrenOf(path);
+    const children = state.childrenOf(path);
     if (path !== COMPUTER && children.length === 0 && !(state.edit?.kind === "new" && samePath(state.edit.parent, path, places.separator))) rows.push(<div key={`${path}:empty`} className="tree-row muted" style={{ ["--depth-pad" as string]: `${depth * 14 + 6}px` } as CSSProperties}><span className="tw" /><span className="fname">{copy("（空）", "(empty)")}</span></div>);
     if (state.edit?.kind === "new" && samePath(state.edit.parent, path, places.separator)) rows.push(<div key={`${path}:new`} className="tree-row is-editing" style={{ ["--depth-pad" as string]: `${depth * 14 + 6}px` } as CSSProperties}><span className="tw" /><span className="fi"><Icon name="folder" /></span><EditInput state={state} places={places} copy={copy} language={language} /></div>);
     for (const entry of children) {

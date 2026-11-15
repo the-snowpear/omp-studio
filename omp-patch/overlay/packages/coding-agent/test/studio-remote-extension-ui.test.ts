@@ -289,7 +289,7 @@ describe("WP-041 Studio Remote Extension UI", () => {
 		expect(opened[0]!.request).toMatchObject({
 			kind: "ask",
 			commandId: "studio-tool:call-ask",
-			title: "Agent 提问",
+			title: "Agent Question",
 			questions: [
 				{
 					id: "inertia",

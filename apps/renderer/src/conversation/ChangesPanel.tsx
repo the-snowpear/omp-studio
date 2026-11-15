@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { GIT_STATUS_META, type TreeGitStatus } from "../git/treeStatus";
+import { GIT_STATUS_META, gitStatusLabel, type TreeGitStatus } from "../git/treeStatus";
 import { Icon } from "../icons";
 import { fileTypeOf, iconNameFor, isSensitive } from "../explorer-types";
 import { splitDisplayPath } from "./toolMeta";
@@ -42,12 +42,13 @@ function PartialEditBadge() {
 }
 
 export function FileStat({ status }: { status: TreeGitStatus | undefined }) {
+  const { resolvedLanguage } = useI18n();
   if (!status) return null;
   const meta = GIT_STATUS_META[status];
   return (
     <span className={`fstat ${meta.className}`}>
       <span aria-hidden="true">{meta.letter}</span>
-      <span className="sr-only"> {meta.label}</span>
+      <span className="sr-only"> {gitStatusLabel(status, resolvedLanguage === "zh")}</span>
     </span>
   );
 }

@@ -2,6 +2,7 @@ import type { CommandReceipt, CommandRequestId, RuntimeConnection } from "@omp-s
 import { waitForCommandReceipt, type CommandWaitClient } from "./sessionLifecycle";
 import { runtimeCanReconnect } from "./diagnosticsModel";
 import type { ActionProgress } from "./ActionProgressBar";
+import { pickLocale } from "./i18n";
 
 type EnsureEvent = {
   readonly kind: string;
@@ -52,33 +53,33 @@ export async function ensureRuntimeConnection(
   const force = input.force === true;
   const steps = force ? 3 : 2;
   if (force) {
-    onProgress?.(progress("stopping", "正在停止当前托管进程", 1, steps));
+    onProgress?.(progress("stopping", pickLocale("正在停止当前托管进程", "Stopping current managed process"), 1, steps));
   } else {
-    onProgress?.(progress("connecting", "正在请求连接", 1, steps));
+    onProgress?.(progress("connecting", pickLocale("正在请求连接", "Requesting connection"), 1, steps));
   }
   try {
     if (force) {
-      onProgress?.(progress("starting", "正在启动 Runtime", 2, steps));
+      onProgress?.(progress("starting", pickLocale("正在启动 Runtime", "Starting Runtime"), 2, steps));
     }
     const first = await runEnsure(client, force);
     if (first.ok) return first;
     if (first.connection?.status === "connecting") {
-      onProgress?.(progress("waiting", "正在等待 Runtime 就绪", steps, steps));
+      onProgress?.(progress("waiting", pickLocale("正在等待 Runtime 就绪", "Waiting for Runtime readiness"), steps, steps));
       return waitUntilConnected(client, first.connection);
     }
     if (force && canFollowUpReconnect(first.connection)) {
-      onProgress?.(progress("connecting", "正在重新连接 Runtime", 3, steps));
+      onProgress?.(progress("connecting", pickLocale("正在重新连接 Runtime", "Reconnecting Runtime"), 3, steps));
       const second = await runEnsure(client, false);
       if (second.ok) return second;
       if (second.connection?.status === "connecting") {
-        onProgress?.(progress("waiting", "正在等待 Runtime 就绪", 3, steps));
+        onProgress?.(progress("waiting", pickLocale("正在等待 Runtime 就绪", "Waiting for Runtime readiness"), 3, steps));
         return waitUntilConnected(client, second.connection);
       }
       return toResult(second);
     }
     return toResult(first);
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : "重新连接 Runtime 失败" };
+    return { ok: false, message: error instanceof Error ? error.message : pickLocale("重新连接 Runtime 失败", "Failed to reconnect Runtime") };
   }
 }
 
@@ -121,12 +122,12 @@ function resultFromReceipt(receipt: CommandReceipt): EnsureAttempt {
   if (receipt.status === "failed") {
     return { ok: false, message: receipt.error.message };
   }
-  return { ok: false, message: "重新连接未完成" };
+  return { ok: false, message: pickLocale("重新连接未完成", "Reconnect did not complete") };
 }
 
 function connectionMessage(connection: RuntimeConnection | undefined): string {
-  if (connection?.status === "connecting") return "Runtime 正在连接";
-  return connection?.disconnectReason ?? connection?.unavailableReason ?? "Runtime 未能连接";
+  if (connection?.status === "connecting") return pickLocale("Runtime 正在连接", "Runtime is connecting");
+  return connection?.disconnectReason ?? connection?.unavailableReason ?? pickLocale("Runtime 未能连接", "Runtime could not connect");
 }
 
 function currentRuntime(client: EnsureRuntimeClient): RuntimeConnection | undefined {
@@ -172,7 +173,7 @@ function waitUntilConnected(
       return;
     }
     timer = setTimeout(() => {
-      finish({ ok: false, message: "等待 Runtime 连接超时" });
+      finish({ ok: false, message: pickLocale("等待 Runtime 连接超时", "Timed out waiting for Runtime connection") });
     }, RUNTIME_ENSURE_WAIT_MS);
   });
 }

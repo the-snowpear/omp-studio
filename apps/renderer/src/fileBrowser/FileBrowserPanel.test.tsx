@@ -32,6 +32,16 @@ function mount(extra: Partial<FileBrowserPanelProps> = {}, preview = true) {
 const row = (name: string) => screen.getByText(name, { selector: ".fb-name .ellipsis" }).closest<HTMLElement>("[data-path]")!;
 
 describe("file browser", () => {
+  it("uses English labels for the browser and preview places", async () => {
+    const source = createPreviewFileBrowserSource("win32", Date.now(), "en");
+    render(<I18nProvider forcedLanguage="en"><PreviewSurface preview><FileBrowserPanel panelId="english" scope="preview" source={source} /></PreviewSurface></I18nProvider>);
+    await screen.findByText("System (C:)", { selector: ".fb-place-label .ellipsis" });
+    expect(screen.getByRole("region", { name: "File browser" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "This computer" })).toBeTruthy();
+    expect(screen.queryByText("本机")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: /New folder/ })).toBeTruthy();
+  });
   it.each([[380, "tree"], [720, "list"], [1120, "columns"]] as const)("chooses the default view at %i px", async (size, expected) => {
     width = size; mount();
     await waitFor(() => expect(screen.getByRole("region", { name: "文件浏览器" }).querySelector(".fb-skeleton-page")).toBeNull());
@@ -76,6 +86,34 @@ describe("file browser", () => {
     fireEvent.keyDown(row("Desktop"), { key: "ArrowRight" });
     await screen.findByText("待办.txt", { selector: ".fb-name .ellipsis" });
   });
+  it("uses Alt+Left for history without also navigating to the parent folder", async () => {
+    width = 1120; mount();
+    await screen.findByText("Desktop", { selector: ".fb-name .ellipsis" });
+    fireEvent.click(screen.getByRole("button", { name: "桌面" }));
+    await screen.findByText("待办.txt", { selector: ".fb-name .ellipsis" });
+    fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    await screen.findByText("spec-v3.pdf", { selector: ".fb-name .ellipsis" });
+    fireEvent.keyDown(row("spec-v3.pdf"), { key: "ArrowLeft", altKey: true });
+    await waitFor(() => expect(document.querySelector(".fb-crumb.is-current")?.textContent).toBe("Desktop"));
+    fireEvent.click(screen.getByRole("button", { name: "后退" }));
+    await waitFor(() => expect(document.querySelector(".fb-crumb.is-current")?.textContent).toBe("demo"));
+    fireEvent.click(screen.getByRole("button", { name: "前进" }));
+    await screen.findByText("待办.txt", { selector: ".fb-name .ellipsis" });
+    fireEvent.keyDown(row("待办.txt"), { key: "ArrowRight", altKey: true });
+    await waitFor(() => expect(document.querySelector(".fb-crumb.is-current")?.textContent).toBe("Downloads"));
+  });
+  it("filters the current folder in narrow tree view", async () => {
+    width = 380; mount();
+    const desktop = await screen.findByText("Desktop", { selector: ".fname" });
+    fireEvent.click(desktop);
+    await screen.findByText("待办.txt", { selector: ".fname" });
+    fireEvent.click(screen.getByRole("button", { name: "筛选" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "筛选当前文件夹" }), { target: { value: "待办" } });
+    expect(screen.getByText("待办.txt", { selector: ".fname" })).toBeTruthy();
+    expect(screen.queryByText("会议纪要 1112.docx", { selector: ".fname" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "筛选当前文件夹" }), { key: "Escape" });
+    await screen.findByText("会议纪要 1112.docx", { selector: ".fname" });
+  });
   it.each([{ preview: true, marks: true, size: 720 }, { preview: true, marks: false, size: 720 }, { preview: false, marks: false, size: 720 }, { preview: true, marks: false, size: 1120 }])("creates, renames and confirms recycling at $size px with preview=$preview and marks=$marks", async ({ preview, marks, size }) => {
     width = size;
     window.history.replaceState(null, "", marks ? "/" : "/?marks=off");
@@ -106,7 +144,7 @@ describe("file browser", () => {
       if (name === "fs.places") return { platform: "linux", separator: "/", home: "/home/demo", quick: [], volumes: [{ path: "/", label: "/", ready: true }], trash: false };
       if (name === "projects.list") return { workspaces: [{ workspaceId: "project", name: "Project", root: "/work" }] };
       const path = input.path ?? "/home/demo";
-      return { path, parent: "/", segments: [], truncated: false, entries: [{ name: "notes.txt", path: `${path}/notes.txt`, type: "file", size: 5, hidden: false }], ...(path === "/work" ? { workspace: { workspaceId: "project", relativePath: "" } } : {}) };
+      return { path, parent: "/", segments: [], truncated: false, entries: [{ name: "notes.txt", path: `${path}/notes.txt`, type: "file", size: 5, hidden: false }, { name: "link.txt", path: `${path}/link.txt`, type: "file", size: 5, hidden: false, link: true }], ...(path === "/work" ? { workspace: { workspaceId: "project", relativePath: "" } } : {}) };
     });
     const source = createHostFileBrowserSource({ client: async () => ({ query }) as unknown as StudioClient, targetId: null, label: "Local", language: "en" });
     const open = vi.fn();
@@ -116,6 +154,8 @@ describe("file browser", () => {
     fireEvent.click(screen.getByText("Project", { selector: ".fb-place-label .ellipsis" }));
     await waitFor(() => expect(row("notes.txt").dataset.path).toBe("/work/notes.txt")); fireEvent.doubleClick(row("notes.txt"));
     expect(open).toHaveBeenLastCalledWith({ workspaceId: "project", path: "notes.txt" });
+    fireEvent.doubleClick(row("link.txt"));
+    expect(open).toHaveBeenLastCalledWith({ source: "system", path: "/work/link.txt" });
   });
   it("disables local shell and recycling for remote files", async () => {
     const source = { ...createPreviewFileBrowserSource("win32"), local: false, trash: false, label: "SSH · dev" };

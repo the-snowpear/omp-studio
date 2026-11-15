@@ -10,6 +10,7 @@ import type { FileResources } from "./file-resources.js";
 import type { OfficeComponentState } from "./file-viewer-shared.js";
 import { verifyOfficeComponent, type SignedOfficeComponent } from "./office-component-manifest.js";
 import { runOfficeProcess } from "./office-process.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 const execute = promisify(execFile);
 export class OfficeComponent {
@@ -48,10 +49,10 @@ export class OfficeComponent {
     try {
       const url = this.options.manifestUrl ?? `https://github.com/the-snowpear/omp-studio/releases/download/office-preview/office-preview-${this.platform}.json`;
       const response = await (this.options.fetcher ?? fetch)(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) });
-      if (!response.ok) throw new Error(response.status === 404 ? "该平台的 Office 组件尚未发布，请稍后检查" : `组件清单下载失败 (${response.status})`);
+      if (!response.ok) throw new Error(response.status === 404 ? desktopText("该平台的 Office 组件尚未发布，请稍后检查", "Office component has not been published for this platform yet; check back later") : desktopText(`组件清单下载失败 (${response.status})`, `Failed to download component manifest (${response.status})`));
       this.available = verifyOfficeComponent(await response.json(), this.keys, this.platform);
       return this.publish({ status: this.installed ? "ready" : "not-installed", availableVersion: this.available.manifest.version, downloadBytes: this.available.manifest.archive.bytes });
-    } catch (error) { return this.publish({ status: this.installed ? "ready" : signal.aborted ? "not-installed" : "error", message: signal.aborted ? "已取消操作" : error instanceof Error ? error.message : String(error) }); }
+    } catch (error) { return this.publish({ status: this.installed ? "ready" : signal.aborted ? "not-installed" : "error", message: signal.aborted ? desktopText("已取消操作", "Operation cancelled") : error instanceof Error ? error.message : String(error) }); }
   }
   async install(): Promise<OfficeComponentState> {
     if (this.installing) return this.installing;
@@ -65,8 +66,8 @@ export class OfficeComponent {
     const envelope = this.available;
     if (!envelope) return this.state;
     if (this.installed?.manifest.version === envelope.manifest.version) {
-      if (this.installed.manifest.archive.sha256 !== envelope.manifest.archive.sha256) return this.publish({ message: "同版本组件内容不一致，需要新的组件版本" });
-      return this.publish({ status: "ready", message: "已安装最新版本" });
+      if (this.installed.manifest.archive.sha256 !== envelope.manifest.archive.sha256) return this.publish({ message: desktopText("同版本组件内容不一致，需要新的组件版本", "Component contents differ for the same version; a new version is required") });
+      return this.publish({ status: "ready", message: desktopText("已安装最新版本", "Latest version is already installed") });
     }
     const staging = join(this.root, `.staging-${randomUUID()}`), archive = join(this.root, `${envelope.manifest.version}.zip`);
     try {
@@ -86,7 +87,7 @@ export class OfficeComponent {
       this.installed = envelope;
       await this.removeOwned(archive);
       return this.publish({ status: "ready", installedVersion: envelope.manifest.version, message: "", receivedBytes: envelope.manifest.archive.bytes });
-    } catch (error) { return this.publish({ status: this.installed ? "ready" : "error", message: controller.signal.aborted ? "已取消安装" : error instanceof Error ? error.message : String(error) }); }
+    } catch (error) { return this.publish({ status: this.installed ? "ready" : "error", message: controller.signal.aborted ? desktopText("已取消安装", "Installation cancelled") : error instanceof Error ? error.message : String(error) }); }
     finally { await this.removeOwned(staging); }
   }
   cancel() { this.controller?.abort(); }
@@ -106,9 +107,9 @@ export class OfficeComponent {
   }
   async convert(resources: FileResources, id: string, owner: number): Promise<string> {
     await this.init();
-    if (!this.installed) throw new Error("请先安装 Office 文档预览组件");
+    if (!this.installed) throw new Error(desktopText("请先安装 Office 文档预览组件", "Install the Office document preview component first"));
     const lease = resources.get(id, owner), installed = this.installed;
-    if (!/\.(docx?|pptx?|odt|odp|rtf)$/i.test(lease.file.name)) throw new Error("此文件不需要 Office 转换");
+    if (!/\.(docx?|pptx?|odt|odp|rtf)$/i.test(lease.file.name)) throw new Error(desktopText("此文件不需要 Office 转换", "This file does not require Office conversion"));
     const key = createHash("sha256").update(JSON.stringify([lease.target.targetId, lease.file.id, lease.file.version, installed.manifest.version])).digest("hex");
     const directory = join(this.root, "cache", key), pdf = join(directory, "preview.pdf");
     if (await access(pdf).then(() => true, () => false)) return pdf;
@@ -127,7 +128,7 @@ export class OfficeComponent {
         await resources.copy(id, input, controller.signal);
         await runOfficeProcess(join(this.root, "versions", installed.manifest.version, installed.manifest.entrypoint), [`-env:UserInstallation=${pathToFileURL(profile).href}`, "--headless", "--nologo", "--nodefault", "--nofirststartwizard", "--norestore", "--convert-to", "pdf", "--outdir", directory, input], controller.signal);
         const generated = join(directory, "input.pdf");
-        await access(generated).catch(() => { throw new Error("Office 转换未生成预览。文件可能已加密或格式不受支持。"); });
+        await access(generated).catch(() => { throw new Error(desktopText("Office 转换未生成预览。文件可能已加密或格式不受支持。", "Office conversion did not produce a preview. The file may be encrypted or in an unsupported format.")); });
         await this.removeOwned(input);
         await rename(generated, pdf);
         return pdf;

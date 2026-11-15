@@ -3,6 +3,7 @@ import type { StudioClient } from "@omp-studio/client-contract";
 import type { BrowserObservationEvent, BrowserObservationInput, BrowserObservationResultMap, BrowserPageInspection, BrowserInspectionView, ManagedBrowserPage } from "@omp-studio/studio-protocol";
 import { useSurfaceChrome, useSurfaceDocument } from "../dock/SurfaceContext";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { previewBrowserFrame, previewBrowserInspection } from "../preview/browserPreview";
 import { browserAddress } from "./browserNativeBackend";
@@ -45,6 +46,8 @@ export function useBrowserWatch(session: BrowserSession | null, visible: boolean
 export function useNativeBrowserObservation(options: { client?: StudioClient | undefined; session: BrowserSession | null; page?: ManagedBrowserPage | undefined; visible: boolean; capture: boolean; inspection?: BrowserInspectionView | undefined }) {
   const chrome = useSurfaceChrome(), document = useSurfaceDocument();
   const { preview } = usePreviewMode();
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const shown = useBrowserVisible(options.visible);
   const [state, setState] = useState<NativeBrowserState>();
   const [frames] = useState(() => new NativeBrowserFrames());
@@ -145,7 +148,7 @@ export function useNativeBrowserObservation(options: { client?: StudioClient | u
           title: options.page!.title, url: options.page!.url, frozen: false, busy: false, control: "agent" };
         handle.state = next; setState(next);
         if (options.capture) { handle.frame = previewBrowserFrame(options.page!.id, descriptor.generation); frames.publish(handle.frame); }
-        if (options.inspection) setInspection(previewBrowserInspection(options.inspection));
+        if (options.inspection) setInspection(previewBrowserInspection(options.inspection, zh));
       } else {
         const receipt = await options.client!.command("browser.observe.prepare", { sessionId: options.session!.id, tabId: options.page!.id });
         const result = (await waitReceipt<{ result: BrowserObservationResultMap["browser.observe.prepare"] }>(options.client!, receipt.requestId)).result;
@@ -163,7 +166,7 @@ export function useNativeBrowserObservation(options: { client?: StudioClient | u
       if (!disposed) unbind = options.session!.bindPage(options.page!.id, controller);
     })().catch(cause => { if (!disposed && epoch.current === run) { report(cause); void stop(); } }).finally(() => { if (!disposed && epoch.current === run) setConnecting(false); });
     return () => { disposed = true; epoch.current++; unbind?.(); off?.(); if (controls.current === controller) controls.current = undefined; void stop(); };
-  }, [options.client, options.session, options.page?.id, descriptor?.generation, active, options.capture, options.inspection, preview, chrome, document, revision]);
+  }, [options.client, options.session, options.page?.id, descriptor?.generation, active, options.capture, options.inspection, preview, chrome, document, revision, zh]);
 
   const execute = useCallback(async (action: BrowserAction) => {
     try { await controls.current?.execute(action); } catch (cause) { report(cause); }
@@ -183,5 +186,5 @@ export function useNativeBrowserObservation(options: { client?: StudioClient | u
   }, [send, preview, report]);
   return { state, frames, inspection, error, connecting, paused, viewer, preview, shown, available: preview || !!chrome?.attachBrowserObservation,
     acknowledge, input, execute, resume: () => { setPaused(false); refresh(value => value + 1); },
-    refreshInspection: () => { if (preview && options.inspection) setInspection(previewBrowserInspection(options.inspection)); else if (options.inspection) void send({ kind: "inspect", view: options.inspection }).catch(report); } };
+    refreshInspection: () => { if (preview && options.inspection) setInspection(previewBrowserInspection(options.inspection, zh)); else if (options.inspection) void send({ kind: "inspect", view: options.inspection }).catch(report); } };
 }

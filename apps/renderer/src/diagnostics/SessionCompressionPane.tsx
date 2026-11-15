@@ -58,7 +58,7 @@ export function SessionCompressionPane(props: FeatureSettingsProps) {
     </>}{summary.errors.map((message, index) => <p className="feature-error" role="alert" key={index}>{message}</p>)}</div> : null}
     {error || state.error ? <p className="feature-error" role="alert">{error || state.error}</p> : null}
     <details><summary>{zh ? "最近自动压缩日志" : "Latest automatic compression log"}</summary><button className="btn small outline" onClick={() => {
-      if (preview) { setAutomatic({ enabled: false, log: marks ? "演示：compress skipped: unsupported on this filesystem" : "compress skipped: unsupported on this filesystem" }); return; }
+      if (preview) { setAutomatic({ enabled: false, log: marks ? (zh ? "演示：compress skipped: unsupported on this filesystem" : "Demo: compress skipped: unsupported on this filesystem") : "compress skipped: unsupported on this filesystem" }); return; }
       if (props.client && props.context?.sessionId) void props.client.command("maintenance.compression.auto.status", { sessionId: props.context.sessionId }).then(handle => waitReceipt<{ result: AutoCompressionStatus }>(props.client!, handle.requestId)).then(result => setAutomatic(result.result)).catch(cause => setError(hostErrorMessage(cause, "Compression log unavailable")));
     }}>{zh ? "读取日志" : "Read log"}</button>{automatic ? <><p>{automatic.enabled ? "Enabled" : "Disabled"} · {automatic.ranAt ? new Date(automatic.ranAt).toLocaleString() : "—"}</p><pre>{automatic.log}</pre></> : null}</details>
     <FeatureSettingsPane {...props} group="maintenance" />

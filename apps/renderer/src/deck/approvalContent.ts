@@ -1,4 +1,5 @@
 import type { ClientInteraction } from "@omp-studio/client-contract";
+import { isZh } from "../i18n";
 
 export type ApprovalRisk = "high" | "medium" | "low";
 
@@ -38,16 +39,16 @@ const TOOL_LABELS: Record<string, string> = {
   github: "GitHub",
 };
 
-const TOOL_TITLES: Record<string, string> = {
-  bash: "OMP 想要执行 Bash 命令",
-  write: "OMP 想要写入文件",
-  edit: "OMP 想要编辑文件",
-  ast_edit: "OMP 想要做 AST 编辑",
-  eval: "OMP 想要执行代码",
-  computer: "OMP 想要操作桌面",
-  browser: "OMP 想要操作浏览器",
-  debug: "OMP 想要使用调试器",
-  github: "OMP 想要调用 GitHub",
+const TOOL_TITLE_PAIRS: Record<string, readonly [string, string]> = {
+  bash: ["OMP 想要执行 Bash 命令", "OMP wants to run a Bash command"],
+  write: ["OMP 想要写入文件", "OMP wants to write a file"],
+  edit: ["OMP 想要编辑文件", "OMP wants to edit a file"],
+  ast_edit: ["OMP 想要做 AST 编辑", "OMP wants to run an AST edit"],
+  eval: ["OMP 想要执行代码", "OMP wants to evaluate code"],
+  computer: ["OMP 想要操作桌面", "OMP wants to control the desktop"],
+  browser: ["OMP 想要操作浏览器", "OMP wants to control the browser"],
+  debug: ["OMP 想要使用调试器", "OMP wants to use the debugger"],
+  github: ["OMP 想要调用 GitHub", "OMP wants to call GitHub"],
 };
 
 function toolKey(value: string | undefined): string {
@@ -91,20 +92,21 @@ function parseLabeledLines(summary: string): Record<string, string> {
   return out;
 }
 
-function defaultScope(tool: string, explicit?: string): string | undefined {
-  if (explicit === "mcp") return "MCP 工具";
+function defaultScope(tool: string, explicit: string | undefined, zh: boolean): string | undefined {
+  if (explicit === "mcp") return zh ? "MCP 工具" : "MCP tool";
   if (explicit) return explicit;
-  if (tool === "bash") return "工作区内 · Shell";
-  if (tool === "write" || tool === "edit" || tool === "ast_edit") return "工作区内 · 文件";
-  if (tool === "eval") return "工作区内 · 代码执行";
-  if (tool === "browser") return "受控浏览器";
-  if (tool === "computer") return "本机桌面";
+  if (tool === "bash") return zh ? "工作区内 · Shell" : "Inside workspace · Shell";
+  if (tool === "write" || tool === "edit" || tool === "ast_edit") return zh ? "工作区内 · 文件" : "Inside workspace · Files";
+  if (tool === "eval") return zh ? "工作区内 · 代码执行" : "Inside workspace · Code execution";
+  if (tool === "browser") return zh ? "受控浏览器" : "Controlled browser";
+  if (tool === "computer") return zh ? "本机桌面" : "Local desktop";
   return undefined;
 }
 
 /** Shape Host `approval` details (OMP formatApprovalPrompt + wrapper fields) into the ver1 card. */
 export function approvalFromInteraction(
   interaction: Extract<ClientInteraction, { kind: "approval" }>,
+  zh = isZh(),
 ): ApprovalView {
   const detail = interaction.detail;
   if (interaction.approvalType === "configuration") {
@@ -138,8 +140,9 @@ export function approvalFromInteraction(
     .filter((value): value is string => Boolean(value));
   const unlabeledExtra = labeledEmpty && tool !== "bash" && summary && !command && !path ? summary : undefined;
   const extra = extraBits.length > 0 ? extraBits.join("\n") : unlabeledExtra;
-  const title = TOOL_TITLES[tool] ?? (interaction.title || `Allow ${interaction.approvalType}?`);
-  const scope = defaultScope(tool, stringDetail(detail, "scope"));
+  const titlePair = TOOL_TITLE_PAIRS[tool];
+  const title = titlePair ? (zh ? titlePair[0] : titlePair[1]) : (interaction.title || `Allow ${interaction.approvalType}?`);
+  const scope = defaultScope(tool, stringDetail(detail, "scope"), zh);
   return {
     restriction,
     title,

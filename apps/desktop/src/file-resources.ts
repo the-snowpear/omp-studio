@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ClientTransport, SystemFileInfo, WorkspaceId } from "@omp-studio/client-contract";
 import type { FileResource, FileResourceTarget } from "./file-viewer-shared.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 const CHUNK = 512 * 1024;
 interface Lease { target: FileResourceTarget; file: SystemFileInfo; controller: AbortController; owner: number; pdf?: string }
@@ -23,7 +24,7 @@ export class FileResources {
   }
   get(id: string, owner?: number): Lease {
     const lease = this.leases.get(id);
-    if (!lease || owner !== undefined && lease.owner !== owner) throw new Error("文件视图已关闭");
+    if (!lease || owner !== undefined && lease.owner !== owner) throw new Error(desktopText("文件视图已关闭", "File viewer is closed"));
     return lease;
   }
   release(id: string, owner?: number): void {
@@ -44,7 +45,7 @@ export class FileResources {
       if (!response.ok) throw new Error(response.error.message);
       lease.controller.signal.throwIfAborted(); signal?.throwIfAborted();
       const chunk = response.result as { data: string; bytes: number };
-      if (!chunk.bytes) throw new Error("文件读取未完成，请重新加载");
+      if (!chunk.bytes) throw new Error(desktopText("文件读取未完成，请重新加载", "File read did not complete; reload and try again"));
       offset += chunk.bytes;
       yield Buffer.from(chunk.data, "base64");
     }

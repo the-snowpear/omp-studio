@@ -221,7 +221,7 @@ args = []
       );
       const model = await createOmpMcpService({ home, getCwd: () => cwd, now: () => NOW }).get();
       assert.equal(model.servers[0]?.name, "extra");
-      assert.equal(model.servers[0]?.sourceLabel, "用户");
+      assert.equal(model.servers[0]?.sourceLabel, "User");
     });
   });
 
@@ -292,7 +292,7 @@ args = []
       await fs.writeFile(path.join(cwd, ".omp", "settings.json"), JSON.stringify({ extensions: [ext] }), "utf8");
       const model = await createOmpMcpService({ home, getCwd: () => cwd, now: () => NOW }).get();
       assert.equal(model.servers[0]?.name, "pack_tool");
-      assert.equal(model.servers[0]?.sourceLabel, "插件");
+      assert.equal(model.servers[0]?.sourceLabel, "Plugin");
     });
   });
 
@@ -344,7 +344,7 @@ args = []
       );
       const model = await createOmpMcpService({ home, getCwd: () => cwd, now: () => NOW }).get();
       assert.equal(model.servers[0]?.name, "demo-mcp:gh");
-      assert.equal(model.servers[0]?.sourceLabel, "Claude 插件");
+      assert.equal(model.servers[0]?.sourceLabel, "Claude Plugin");
     });
   });
 
@@ -365,7 +365,7 @@ args = []
       assert.equal(rows.length, 2);
       const winner = rows.find((s) => s.status !== "shadowed");
       const shadowed = rows.find((s) => s.status === "shadowed");
-      assert.equal(winner?.sourceLabel, "项目");
+      assert.equal(winner?.sourceLabel, "Project");
       assert.ok(shadowed);
     });
   });
@@ -423,7 +423,7 @@ describe("mcp probe / refresh / logs", () => {
       const result = await service.test({ name: "filesystem" });
       assert.equal(result.ok, true);
       assert.equal(result.toolCount, 2);
-      assert.match(result.detail, /2 个工具/);
+      assert.match(result.detail, /2 tools/);
       const json = JSON.stringify(result);
       assert.equal(json.includes("sekrit-token"), false);
       assert.equal("url" in result, false);
@@ -480,11 +480,11 @@ describe("mcp probe / refresh / logs", () => {
         async () => service.test({ name: "shared", scope: "user" }),
         (error: unknown) =>
           (error as { code?: string }).code === "INVALID_ARGUMENT" &&
-          (error as { message?: string }).message?.includes("覆盖"),
+          (error as { message?: string }).message?.includes("shadowed"),
       );
 
       const empty = await service.logs({ name: "shared" });
-      assert.equal(empty.emptyReason, "尚无日志，请先测试连接");
+      assert.equal(empty.emptyReason, "No logs yet; test the connection first");
 
       const refreshed = await service.refresh({});
       assert.equal(refreshed.applied, true);

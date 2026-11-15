@@ -7,6 +7,7 @@ import type { FilePanelDescriptor, FilePanelId, PanelDefinition } from "../dock/
 import { useConversationView } from "../conversationWorkspace/Context";
 import { useExecutionTargets } from "../workspaces/ExecutionTargets";
 import { usePreviewMode } from "../preview/PreviewContext";
+import { useI18n } from "../i18n";
 import { previewFile } from "../preview/filesPreview";
 import { getFileDocument, releaseFileDocument, type FileDocument, type FileDocumentIdentity } from "./fileDocuments";
 import { inspectFileBackend } from "./fileBackend";
@@ -22,7 +23,7 @@ const catalogs = new Set<Catalog>();
 const closingFiles = new Set<FilePanelId>();
 
 export function FileDockInstances({ workspaceId, targetId, onSettings, actions }: { workspaceId?: string | undefined; targetId: string | null; onSettings: () => void; actions?: FileViewerActions | undefined }) {
-  const { preview } = usePreviewMode(), view = useConversationView(), targets = useExecutionTargets();
+  const { preview } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh", view = useConversationView(), targets = useExecutionTargets();
   const { store, setFileViewDefinitions } = useDockEngine();
   const fileViewCache = useRef<{ key: string; value: Record<string, FilePanelDescriptor> } | undefined>(undefined);
   const fileViews = useSyncExternalStore(store.subscribe, useCallback(() => {
@@ -107,7 +108,7 @@ export function FileDockInstances({ workspaceId, targetId, onSettings, actions }
     const session = sessionFor(descriptor), state = session.getSnapshot();
     return { id, title: `${descriptor.title}${state.dirty ? " •" : ""}`, icon: "file", detail: descriptor.path, minHeight: 260, initialHeight: 500,
       glyph: { state: state.loading || state.saving ? "busy" : state.error ? "error" : undefined },
-      close: { label: `关闭 ${descriptor.title}`, tip: "关闭文件", pending: closingFiles.has(id), run: () => {
+      close: { label: zh ? `关闭 ${descriptor.title}` : `Close ${descriptor.title}`, tip: zh ? "关闭文件" : "Close file", pending: closingFiles.has(id), run: () => {
         if (closingFiles.has(id)) return;
         closingFiles.add(id);
         const bufferKey = (item: FilePanelDescriptor) => JSON.stringify([item.targetId, item.workspaceId, item.fileId, item.source]);
@@ -125,5 +126,5 @@ export function FileDockInstances({ workspaceId, targetId, onSettings, actions }
   });
   useLayoutEffect(() => { setFileViewDefinitions(definitions); });
   useLayoutEffect(() => () => setFileViewDefinitions([]), [setFileViewDefinitions]);
-  return <>{descriptors.map(([id, descriptor]) => <DockPanel key={id} id={id}>{visibility => <Suspense fallback={<div className="file-empty">正在打开文件…</div>}><FilePane id={id} descriptor={descriptor} session={sessionFor(descriptor)} visible={visibility.visible} onSettings={onSettings} onOpen={reference => { void open({ ...reference, workspaceId: descriptor.workspaceId, targetId: descriptor.targetId, ...(descriptor.source ? { source: descriptor.source } : {}) }); }} onViewState={patch => store.dispatch({ type: "file-state", panel: id, patch })} actions={actions ? { openers: actions.openers, addContext: input => contextActions(descriptor)?.addContext(input), runShell: (...args) => contextActions(descriptor)?.runShell(...args) } : undefined} /></Suspense>}</DockPanel>)}</>;
+  return <>{descriptors.map(([id, descriptor]) => <DockPanel key={id} id={id}>{visibility => <Suspense fallback={<div className="file-empty">{zh ? "正在打开文件…" : "Opening file…"}</div>}><FilePane id={id} descriptor={descriptor} session={sessionFor(descriptor)} visible={visibility.visible} onSettings={onSettings} onOpen={reference => { void open({ ...reference, workspaceId: descriptor.workspaceId, targetId: descriptor.targetId, ...(descriptor.source ? { source: descriptor.source } : {}) }); }} onViewState={patch => store.dispatch({ type: "file-state", panel: id, patch })} actions={actions ? { contextWorkspaceId: contextActions(descriptor)?.contextWorkspaceId, openers: actions.openers, addContext: input => contextActions(descriptor)?.addContext(input), runShell: (...args) => contextActions(descriptor)?.runShell(...args) } : undefined} /></Suspense>}</DockPanel>)}</>;
 }

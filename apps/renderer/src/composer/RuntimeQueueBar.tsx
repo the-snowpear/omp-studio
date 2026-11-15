@@ -90,13 +90,13 @@ export function RuntimeQueueBar({
     setEditing(undefined);
     setResult(
       preview && showDemo
-        ? runtimeQueuePreview()
+        ? runtimeQueuePreview(zh)
         : { entries: [], total: 0, truncated: false },
     );
     return () => {
       epoch.current++;
     };
-  }, [client, sessionId, preview, showDemo]);
+  }, [client, sessionId, preview, showDemo, zh]);
   useEffect(() => {
     if (preview || !supported) return;
     let active = true;

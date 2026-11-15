@@ -173,7 +173,12 @@ export class DictationSession {
     const recovery = retry ? this.#view.recovery : undefined;
     if (!retry && this.#view.recovery) { this.#publish({ phase: "retained" }); return; }
     if (!api || !this.options.client || this.options.remote || !this.options.available || !this.options.visible) {
-      this.#publish({ phase: "review", message: this.#text(this.options.remote ? "远程工作区暂不转发本机麦克风。" : "需要已连接的本机 Runtime 和新版桌面音频通道。", "A local Runtime and the updated desktop audio channel are required.") });
+      this.#publish({
+        phase: "review",
+        message: this.options.remote
+          ? this.#text("远程工作区暂不转发本机麦克风。", "Local microphone is not forwarded to remote workspaces.")
+          : this.#text("需要已连接的本机 Runtime 和新版桌面音频通道。", "A local Runtime and the updated desktop audio channel are required."),
+      });
       return;
     }
     if (retry && (!recovery || !this.ownsRecovery())) return;

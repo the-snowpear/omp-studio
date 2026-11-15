@@ -112,7 +112,8 @@ export function GitCommitGraph({
 }) {
   const rows = useMemo(() => (model ? buildGitGraphRows(model) : []), [model]);
   const [menuOid, setMenuOid] = useState<string>();
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [branchOid, setBranchOid] = useState<string>();
   const [branchName, setBranchName] = useState("");
   const [rootRef, wide] = useWideLayout<HTMLDivElement>(GIT_GRAPH_WIDE_MIN);
@@ -247,7 +248,7 @@ export function GitCommitGraph({
         );
       })}
       {model.truncated && onLoadMore ? (
-        <button type="button" className="btn small outline git-graph-more" disabled={loading || preview} onClick={onLoadMore}>加载更多</button>
+        <button type="button" className="btn small outline git-graph-more" disabled={loading || preview} onClick={onLoadMore}>{zh ? "加载更多" : "Load more"}</button>
       ) : null}
     </div>
     {wide ? <CommitDetail row={rows.find((row) => row.id === selectedOid && row.commit !== undefined)} changes={changes} changesLoading={changesLoading}

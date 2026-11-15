@@ -1275,6 +1275,7 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	"tui.transfer",
 	"remoteUi.standard",
 	"remoteUi.leaseGeneration",
+	"studio.locale",
 	"tui.manualCompatibility",
 ] as const;
 

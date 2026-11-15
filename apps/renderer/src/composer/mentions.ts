@@ -11,6 +11,7 @@ import type {
 } from "@omp-studio/client-contract";
 
 import { SKIPPED_DIRS } from "../explorer-types";
+import { isZh, pickLocale } from "../i18n";
 import type { MentionCandidate } from "./types";
 
 /** `@` shows agents, skills (when the query is non-empty), and workspace paths. `/` is the command menu, not a mention. */
@@ -241,11 +242,13 @@ export function workspaceDirectoryLister(client: StudioClient, workspaceId: Work
 
 // ---- 预览模式演示数据 ----
 
-const PREVIEW_AGENTS: ReadonlyArray<MentionCandidate> = [
-  { kind: "agent", id: "agent:explore", label: "explore", name: "explore", detail: "快速扫仓库、定位相关文件" },
-  { kind: "agent", id: "agent:code-reviewer", label: "code-reviewer", name: "code-reviewer", detail: "审阅 diff 与回归风险" },
-  { kind: "agent", id: "agent:generalPurpose", label: "generalPurpose", name: "generalPurpose", detail: "通用子代理" },
-];
+function previewAgentCandidates(zh = isZh()): MentionCandidate[] {
+  return [
+    { kind: "agent", id: "agent:explore", label: "explore", name: "explore", detail: zh ? "快速扫仓库、定位相关文件" : "Quickly scan the repo and locate relevant files" },
+    { kind: "agent", id: "agent:code-reviewer", label: "code-reviewer", name: "code-reviewer", detail: zh ? "审阅 diff 与回归风险" : "Review diff and regression risks" },
+    { kind: "agent", id: "agent:generalPurpose", label: "generalPurpose", name: "generalPurpose", detail: zh ? "通用子代理" : "General-purpose subagent" },
+  ];
+}
 
 const PREVIEW_SKILLS: ReadonlyArray<MentionCandidate> = [
   { kind: "skill", id: "skill:commit-msg", label: "commit-msg", name: "commit-msg", detail: "Conventional Commits" },
@@ -261,10 +264,10 @@ const PREVIEW_ENTRIES: ReadonlyArray<WorkspaceEntry> = [
   { type: "file", name: "AGENTS.md", path: "AGENTS.md" },
 ];
 
-export function previewMentions(trigger: "@" | "/" | "^", query: string): MentionCandidate[] {
-  if (trigger === "^") { const models = createPreviewModelConfig().availableModels; return modelMentionCandidates(models.map(model => ({ selector: model.selector, name: model.name, image: model.image === true, efforts: (model.thinking ?? []).filter(level => !models.some(other => other.selector === `${model.selector}:${level}`)).map(level => ({ selector: `${model.selector}:${level}`, name: `${model.name} · ${level}` })) })), query); }
+export function previewMentions(trigger: "@" | "/" | "^", query: string, zh = isZh()): MentionCandidate[] {
+  if (trigger === "^") { const models = createPreviewModelConfig(zh).availableModels; return modelMentionCandidates(models.map(model => ({ selector: model.selector, name: model.name, image: model.image === true, efforts: (model.thinking ?? []).filter(level => !models.some(other => other.selector === `${model.selector}:${level}`)).map(level => ({ selector: `${model.selector}:${level}`, name: `${model.name} · ${level}` })) })), query); }
   if (trigger === "/") return [];
-  const agents = filterMentions(PREVIEW_AGENTS, query);
+  const agents = filterMentions(previewAgentCandidates(zh), query);
   const skills = query.trim().length === 0 ? [] : filterMentions(PREVIEW_SKILLS, query);
   const entries = rankEntries(PREVIEW_ENTRIES, query.trim().replaceAll("\\", "/").toLowerCase());
   return dedupeById([...agents, ...skills, ...entries]).slice(0, MENTION_LIMIT);
@@ -321,7 +324,7 @@ export async function loadMentions(
       .catch(() => [] as MentionCandidate[]),
     needle.length === 0
       ? Promise.resolve([] as MentionCandidate[])
-      : runtimeSessionId !== undefined ? (runtimeSessionId ? loadRuntimeSkills(client,runtimeSessionId).then(skills=>filterMentions(skills.map(skill=>skillCandidate({name:skill.name,desc:[skill.namespace,skill.source,skill.description,skill.conflict?"名称冲突 / Name conflict":""].filter(Boolean).join(" · ")})),query)).catch(()=>[] as MentionCandidate[]) : Promise.resolve([] as MentionCandidate[]))
+      : runtimeSessionId !== undefined ? (runtimeSessionId ? loadRuntimeSkills(client,runtimeSessionId).then(skills=>filterMentions(skills.map(skill=>skillCandidate({name:skill.name,desc:[skill.namespace,skill.source,skill.description,skill.conflict?pickLocale("名称冲突","Name conflict"):""].filter(Boolean).join(" · ")})),query)).catch(()=>[] as MentionCandidate[]) : Promise.resolve([] as MentionCandidate[]))
       : client
           .query("skills.get", {})
           .then((model) =>

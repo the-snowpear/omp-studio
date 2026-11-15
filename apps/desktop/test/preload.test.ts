@@ -548,6 +548,7 @@ describe("createOmpStudioChromeApi: fixed named surface, frozen object", () => {
       "saveImage",
       "setTheme",
       "setConversationViewState",
+      "setLanguage",
       "setUpdatePrefs",
       "startApp",
       "startRuntime",

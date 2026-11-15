@@ -1,4 +1,5 @@
 import { isMap, parseDocument, stringify as stringifyYaml, type Document } from "yaml";
+import { isZh } from "../i18n";
 
 export type StructuredLanguage = "json" | "yaml";
 
@@ -25,7 +26,7 @@ export function parseStructured(
 ): ParseResult {
   if (!text.trim()) {
     if (allowEmpty) return { ok: true, value: undefined };
-    return { ok: false, message: language === "json" ? "JSON 为空" : "YAML 为空" };
+    return { ok: false, message: isZh() ? (language === "json" ? "JSON 为空" : "YAML 为空") : (language === "json" ? "JSON is empty" : "YAML is empty") };
   }
   if (language === "json") {
     try {
@@ -144,7 +145,7 @@ export function mergeYamlMapEntry(
   path: ReadonlyArray<string>,
   sliceText: string,
 ): { ok: true; text: string } | { ok: false; message: string } {
-  if (path.length === 0) return { ok: false, message: "YAML 路径为空" };
+  if (path.length === 0) return { ok: false, message: isZh() ? "YAML 路径为空" : "YAML path is empty" };
   const slice = parseStructured("yaml", sliceText, false);
   if (!slice.ok) return slice;
   const expectedKey = path[path.length - 1]!;
@@ -250,19 +251,19 @@ function formatValue(language: StructuredLanguage, value: unknown): FormatResult
     }
     return { ok: true, text: stringifyYaml(value, { indent: 2, lineWidth: 0 }) };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : "格式化失败" };
+    return { ok: false, message: error instanceof Error ? error.message : isZh() ? "格式化失败" : "Formatting failed" };
   }
 }
 
 function jsonErrorMessage(error: unknown): string {
   if (error instanceof SyntaxError && error.message) return error.message.replace(/^JSON\.parse:\s*/i, "");
   if (error instanceof Error && error.message) return error.message;
-  return "JSON 无法解析";
+  return isZh() ? "JSON 无法解析" : "Unable to parse JSON";
 }
 
 function yamlErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return stripYamlPrefix(error.message);
-  return "YAML 无法解析";
+  return isZh() ? "YAML 无法解析" : "Unable to parse YAML";
 }
 
 function stripYamlPrefix(message: string): string {

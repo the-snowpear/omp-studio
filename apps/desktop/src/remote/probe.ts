@@ -4,6 +4,7 @@ import type { RemoteEnvironment } from "./deploy.js";
 import type { SshConnection } from "./platform.js";
 import type { SshAuthentication } from "./authentication.js";
 import { RemoteConnectionError } from "./errors.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 export function powershellCommand(script: string): string {
   return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
@@ -28,21 +29,21 @@ export async function detectRemoteEnvironment(connection: SshConnection & { inst
     const home = fields[2]!;
     const root = platform === "darwin" ? posix.join(home, "Library", "Application Support", "omp-studio", "remote") : posix.join(fields[3] || posix.join(home, ".local", "share"), "omp-studio", "remote");
     const arch = fields[1] === "x86_64" ? "x64" : ["aarch64", "arm64"].includes(fields[1] ?? "") ? "arm64" : fields[1]!;
-    if (!fields[4]) throw new RemoteConnectionError("environment", "远端缺少 tar，无法解压私有运行环境");
+    if (!fields[4]) throw new RemoteConnectionError("environment", desktopText("远端缺少 tar，无法解压私有运行环境", "Remote machine is missing tar, cannot extract the private runtime environment"));
     const libc = /glibc (\d+)\.(\d+)/u.exec(fields[5] ?? "");
-    if (platform === "linux" && libc && (Number(libc[1]) < 2 || Number(libc[1]) === 2 && Number(libc[2]) < 28)) throw new RemoteConnectionError("environment", "远端 glibc 低于 2.28，无法运行随包 Node；请升级远端系统");
+    if (platform === "linux" && libc && (Number(libc[1]) < 2 || Number(libc[1]) === 2 && Number(libc[2]) < 28)) throw new RemoteConnectionError("environment", desktopText("远端 glibc 低于 2.28，无法运行随包 Node；请升级远端系统", "Remote glibc is older than 2.28 and cannot run bundled Node; please upgrade the remote OS"));
     environment = { platform, arch, home, root, node: "node", version: "", shell: "posix" };
   } else {
     output = await runSsh(connection, powershellCommand(WINDOWS_PROBE), undefined, 30_000, signal, authentication);
     const marker = output.indexOf("__OMP_WINDOWS__");
-    if (marker < 0) throw new RemoteConnectionError("environment", "无法自动识别远端系统；需要 POSIX Shell 或 Windows PowerShell");
+    if (marker < 0) throw new RemoteConnectionError("environment", desktopText("无法自动识别远端系统；需要 POSIX Shell 或 Windows PowerShell", "Unable to detect the remote OS automatically; requires a POSIX shell or Windows PowerShell"));
     const value = JSON.parse(output.slice(marker + "__OMP_WINDOWS__".length).trim()) as { arch: string; home: string; root: string };
     environment = { platform: "win32", arch: value.arch === "amd64" ? "x64" : value.arch, home: value.home, root: value.root, node: "node", version: "", shell: "powershell" };
   }
-  if (!["x64", "arm64"].includes(environment.arch)) throw new RemoteConnectionError("environment", `不支持远端 CPU 架构：${environment.arch}`);
+  if (!["x64", "arm64"].includes(environment.arch)) throw new RemoteConnectionError("environment", desktopText(`不支持远端 CPU 架构：${environment.arch}`, `Unsupported remote CPU architecture: ${environment.arch}`));
   if (connection.installRoot) {
     const paths = environment.platform === "win32" ? win32 : posix;
-    if (!paths.isAbsolute(connection.installRoot)) throw new RemoteConnectionError("configuration", "安装目录必须是远端绝对路径");
+    if (!paths.isAbsolute(connection.installRoot)) throw new RemoteConnectionError("configuration", desktopText("安装目录必须是远端绝对路径", "Install directory must be an absolute path on the remote machine"));
     environment.root = connection.installRoot;
   }
   return environment;

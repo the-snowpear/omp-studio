@@ -7,7 +7,12 @@
  */
 
 import { useCallback, useSyncExternalStore } from "react";
+import { isZh } from "../i18n";
 import { cropSourceRect, initialCropView } from "./avatarCrop";
+
+function profileMsg(zh: string, en: string): string {
+  return isZh() ? zh : en;
+}
 
 export type AvatarMime = "image/jpeg" | "image/webp" | "image/png";
 
@@ -217,7 +222,7 @@ export async function persistOperatorAvatar(avatar: ProcessedAvatar | null): Pro
     return;
   }
   if (avatar.bytes.byteLength === 0 || avatar.bytes.byteLength > AVATAR_FILE_MAX_BYTES) {
-    throw new Error("处理后的头像仍然过大，请换一张更小的图片。");
+    throw new Error(profileMsg("处理后的头像仍然过大，请换一张更小的图片。", "Processed avatar is still too large; please choose a smaller image."));
   }
   if (disk !== undefined) {
     const result = await disk.saveAvatar(avatar);
@@ -265,9 +270,9 @@ export function useOperatorProfile(): {
 export function assertAvatarImageFile(file: File): void {
   const named = AVATAR_NAME_RE.test(file.name);
   if (!file.type.startsWith("image/") && !(file.type === "" && named)) {
-    throw new Error("请选择图片文件。");
+    throw new Error(profileMsg("请选择图片文件。", "Please choose an image file."));
   }
-  if (file.size > AVATAR_INPUT_MAX_BYTES) throw new Error("图片太大，请选择 8MB 以内的文件。");
+  if (file.size > AVATAR_INPUT_MAX_BYTES) throw new Error(profileMsg("图片太大，请选择 8MB 以内的文件。", "Image is too large; choose a file under 8 MB."));
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -275,9 +280,9 @@ function readFileAsDataUrl(file: File): Promise<string> {
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") resolve(reader.result);
-      else reject(new Error("无法读取这张图片。"));
+      else reject(new Error(profileMsg("无法读取这张图片。", "Unable to read this image.")));
     };
-    reader.onerror = () => reject(new Error("无法读取这张图片。"));
+    reader.onerror = () => reject(new Error(profileMsg("无法读取这张图片。", "Unable to read this image.")));
     reader.readAsDataURL(file);
   });
 }
@@ -286,7 +291,7 @@ function loadImageFromSrc(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("无法读取这张图片。"));
+    image.onerror = () => reject(new Error(profileMsg("无法读取这张图片。", "Unable to read this image.")));
     image.src = src;
   });
 }
@@ -295,7 +300,7 @@ async function loadViaBitmap(file: File): Promise<LoadedAvatarImage> {
   const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
   if (!bitmap.width || !bitmap.height) {
     bitmap.close();
-    throw new Error("无法读取这张图片。");
+    throw new Error(profileMsg("无法读取这张图片。", "Unable to read this image."));
   }
   return {
     source: bitmap,
@@ -314,7 +319,7 @@ async function loadViaBitmap(file: File): Promise<LoadedAvatarImage> {
 async function loadViaDataUrl(file: File): Promise<LoadedAvatarImage> {
   const src = await readFileAsDataUrl(file);
   const image = await loadImageFromSrc(src);
-  if (!image.naturalWidth || !image.naturalHeight) throw new Error("无法读取这张图片。");
+  if (!image.naturalWidth || !image.naturalHeight) throw new Error(profileMsg("无法读取这张图片。", "Unable to read this image."));
   return {
     source: image,
     width: image.naturalWidth,
@@ -339,7 +344,7 @@ export async function loadAvatarImageFile(file: File): Promise<LoadedAvatarImage
   try {
     return await loadViaDataUrl(file);
   } catch {
-    throw new Error("无法读取这张图片。");
+    throw new Error(profileMsg("无法读取这张图片。", "Unable to read this image."));
   }
 }
 
@@ -348,8 +353,8 @@ function blobToAvatar(blob: Blob): Promise<ProcessedAvatar> {
     const mime = blob.type === "image/webp" || blob.type === "image/png" || blob.type === "image/jpeg"
       ? blob.type
       : undefined;
-    if (mime === undefined) throw new Error("无法处理图片。");
-    if (blob.size > AVATAR_FILE_MAX_BYTES) throw new Error("处理后的头像仍然过大，请换一张更小的图片。");
+    if (mime === undefined) throw new Error(profileMsg("无法处理图片。", "Unable to process image."));
+    if (blob.size > AVATAR_FILE_MAX_BYTES) throw new Error(profileMsg("处理后的头像仍然过大，请换一张更小的图片。", "Processed avatar is still too large; please choose a smaller image."));
     return { mime, bytes: new Uint8Array(buffer) };
   });
 }
@@ -368,7 +373,7 @@ export async function encodeAvatarCrop(
   canvas.width = AVATAR_PIXEL_SIZE;
   canvas.height = AVATAR_PIXEL_SIZE;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("无法处理图片。");
+  if (!ctx) throw new Error(profileMsg("无法处理图片。", "Unable to process image."));
   ctx.fillStyle = "#111318";
   ctx.fillRect(0, 0, AVATAR_PIXEL_SIZE, AVATAR_PIXEL_SIZE);
   ctx.drawImage(source, crop.sx, crop.sy, crop.size, crop.size, 0, 0, AVATAR_PIXEL_SIZE, AVATAR_PIXEL_SIZE);
@@ -376,7 +381,7 @@ export async function encodeAvatarCrop(
   if (webp && webp.type === "image/webp" && webp.size <= AVATAR_FILE_MAX_BYTES) return blobToAvatar(webp);
   const jpeg = await encodeCanvas(canvas, "image/jpeg", 0.86);
   if (jpeg && jpeg.type === "image/jpeg" && jpeg.size <= AVATAR_FILE_MAX_BYTES) return blobToAvatar(jpeg);
-  throw new Error("处理后的头像仍然过大，请换一张更小的图片。");
+  throw new Error(profileMsg("处理后的头像仍然过大，请换一张更小的图片。", "Processed avatar is still too large; please choose a smaller image."));
 }
 
 /** 把用户选择的图片按居中覆盖裁成方形并压缩（无交互裁切时的路径）。 */

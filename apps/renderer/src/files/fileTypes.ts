@@ -1,3 +1,5 @@
+import { isZh } from "../i18n";
+
 export type FileKind = "text" | "markdown" | "pdf" | "image" | "audio" | "video" | "spreadsheet" | "office";
 export const extension = (name: string) => name.split(".").pop()?.toLowerCase() ?? "";
 export function fileKind(name: string): FileKind {
@@ -22,15 +24,26 @@ const LANGUAGES: Record<string, [label: string, badge: string, tone: string]> = 
   sh: ["Shell", "SH", "green"], bash: ["Shell", "SH", "green"], zsh: ["Shell", "SH", "green"], ps1: ["PowerShell", "PS", "blue"], bat: ["Batch", "BAT", "gray"], cmd: ["Batch", "CMD", "gray"],
   sql: ["SQL", "SQL", "amber"], html: ["HTML", "HTML", "red"], htm: ["HTML", "HTML", "red"], css: ["CSS", "CSS", "blue"], scss: ["SCSS", "SCSS", "accent"], less: ["Less", "LESS", "blue"], xml: ["XML", "XML", "amber"], svg: ["SVG", "SVG", "amber"], vue: ["Vue", "VUE", "green"], svelte: ["Svelte", "SV", "red"],
   csv: ["CSV", "CSV", "green"], tsv: ["TSV", "TSV", "green"], xls: ["Excel", "XLS", "green"], xlsx: ["Excel", "XLSX", "green"], pdf: ["PDF", "PDF", "red"],
-  doc: ["Word", "DOC", "blue"], docx: ["Word", "DOCX", "blue"], odt: ["文档", "ODT", "blue"], rtf: ["RTF", "RTF", "blue"], ppt: ["PowerPoint", "PPT", "amber"], pptx: ["PowerPoint", "PPTX", "amber"], odp: ["演示文稿", "ODP", "amber"],
-  txt: ["纯文本", "TXT", "gray"], log: ["日志", "LOG", "gray"], lock: ["Lock", "LOCK", "gray"], env: ["Env", "ENV", "gray"],
+  doc: ["Word", "DOC", "blue"], docx: ["Word", "DOCX", "blue"], odt: ["Document", "ODT", "blue"], rtf: ["RTF", "RTF", "blue"], ppt: ["PowerPoint", "PPT", "amber"], pptx: ["PowerPoint", "PPTX", "amber"], odp: ["Presentation", "ODP", "amber"],
+  txt: ["Plain text", "TXT", "gray"], log: ["Log", "LOG", "gray"], lock: ["Lock", "LOCK", "gray"], env: ["Env", "ENV", "gray"],
 };
-const KIND_BADGE: Record<FileKind, [string, string, string]> = { text: ["纯文本", "TXT", "gray"], markdown: ["Markdown", "MD", "blue"], pdf: ["PDF", "PDF", "red"], image: ["图片", "IMG", "green"], audio: ["音频", "AUD", "accent"], video: ["视频", "VID", "accent"], spreadsheet: ["表格", "XLS", "green"], office: ["文档", "DOC", "blue"] };
+const KIND_BADGE: Record<FileKind, [string, string, string]> = { text: ["Plain text", "TXT", "gray"], markdown: ["Markdown", "MD", "blue"], pdf: ["PDF", "PDF", "red"], image: ["Image", "IMG", "green"], audio: ["Audio", "AUD", "accent"], video: ["Video", "VID", "accent"], spreadsheet: ["Spreadsheet", "XLS", "green"], office: ["Document", "DOC", "blue"] };
+const BADGE_LABEL_ZH: Record<string, string> = {
+  Document: "文档",
+  Presentation: "演示文稿",
+  "Plain text": "纯文本",
+  Log: "日志",
+  Image: "图片",
+  Audio: "音频",
+  Video: "视频",
+  Spreadsheet: "表格",
+};
 /** Short colored badge and human language name for headers and status bars. */
 export function fileBadge(name: string): { label: string; badge: string; tone: string } {
   const base = name.split(/[\\/]/).pop() ?? name;
   const named = /^(Dockerfile|Makefile)$/i.test(base) ? [base, base === "Makefile" ? "MK" : "DKR", "blue"] as const : /^\.git(ignore|attributes)$/.test(base) ? ["Git", "GIT", "red"] as const : undefined;
-  const [label, badge, tone] = named ?? LANGUAGES[extension(base)] ?? KIND_BADGE[fileKind(base)];
+  const [rawLabel, badge, tone] = named ?? LANGUAGES[extension(base)] ?? KIND_BADGE[fileKind(base)];
+  const label = isZh() ? (BADGE_LABEL_ZH[rawLabel] ?? rawLabel) : rawLabel;
   return { label, badge, tone };
 }
 export function formatBytes(size: number | undefined): string {

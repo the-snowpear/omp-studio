@@ -11,6 +11,7 @@ import { createPasswordAuthentication, type SshAuthentication } from "./authenti
 import { connectionCancelled, connectionFailure, RemoteConnectionError } from "./errors.js";
 import { RemoteRequestTimeout, type RemoteAttachment } from "./wire.js";
 import type { PreparationProgress } from "./environment-installer.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 interface PreparedRemote extends RemoteInstallation { environment: RemoteEnvironment; attachment: RemoteAttachment; instanceId?: string; }
 export interface LiveRemote extends RemoteInstallation { transport: SshRemoteTransport; environment: RemoteEnvironment; generation: number; connectedAt: number; healthVersion: number; hostRestarted: boolean; }
@@ -61,10 +62,10 @@ export class RemoteConnectionManager {
     sshArguments(input);
     if (!input.name?.trim() || input.name.length > 80) throw new Error("Connection name is required");
     if (input.networkMode && !["remote-first", "remote-only", "local-only"].includes(input.networkMode)) throw new Error("Unsupported network mode");
-    if (input.localProxyUrl && !["http:", "https:", "socks5:", "socks5h:"].includes(new URL(input.localProxyUrl).protocol)) throw new Error("不支持的本机代理类型");
+    if (input.localProxyUrl && !["http:", "https:", "socks5:", "socks5h:"].includes(new URL(input.localProxyUrl).protocol)) throw new Error(desktopText("不支持的本机代理类型", "Unsupported local proxy type"));
     if (input.authMode !== undefined && input.authMode !== "agent" && input.authMode !== "password") throw new Error("Unsupported SSH authentication method");
-    if (input.authMode === "password" && !input.user?.trim()) throw new Error("账密连接需要填写用户名");
-    if (input.user?.trim() && input.host.includes("@")) throw new Error("使用独立用户名字段时，主机中请勿重复填写 user@");
+    if (input.authMode === "password" && !input.user?.trim()) throw new Error(desktopText("账密连接需要填写用户名", "Username is required for password authentication"));
+    if (input.user?.trim() && input.host.includes("@")) throw new Error(desktopText("使用独立用户名字段时，主机中请勿重复填写 user@", "Do not include user@ in Host when using the separate Username field"));
     const id = input.id ?? randomUUID();
     this.assertWritable(id);
     if (input.id && !this.#profiles.has(input.id)) throw new Error("Unknown SSH connection");
@@ -123,7 +124,7 @@ export class RemoteConnectionManager {
         controller.signal.throwIfAborted();
         let authentication = this.#authentication.get(id);
         if (profile.authMode === "password" && !authentication) {
-          if (automatic || !credentials || typeof credentials.password !== "string") throw new RemoteConnectionError("authentication", "请在应用内重新输入 SSH 密码");
+          if (automatic || !credentials || typeof credentials.password !== "string") throw new RemoteConnectionError("authentication", desktopText("请在应用内重新输入 SSH 密码", "Please re-enter your SSH password in the app"));
           const preparing = this.services.createPasswordAuthentication(profile, credentials.password, this.helperDirectory, controller.signal);
           credentials.password = "";
           authentication = await preparing;
@@ -136,16 +137,16 @@ export class RemoteConnectionManager {
             const base = this.recovery.delaysMs[Math.min(budget.attempts, this.recovery.delaysMs.length - 1)] ?? 1_000;
             const wait = Math.round(base * (0.8 + this.recovery.random() * 0.4));
             budget.attempts++;
-            this.#setStatus({ id, state: "recovering", arch: prepared.environment.arch, attempt: budget.attempts, maxAttempts: this.recovery.maxAttempts, retryAt: Date.now() + wait, message: "网络连接中断，正在等待重新附加原 Host；命令不会自动重发" });
+            this.#setStatus({ id, state: "recovering", arch: prepared.environment.arch, attempt: budget.attempts, maxAttempts: this.recovery.maxAttempts, retryAt: Date.now() + wait, message: desktopText("网络连接中断，正在等待重新附加原 Host；命令不会自动重发", "Network connection interrupted; waiting to reattach to the original Host (commands will not be resent)") });
             await delay(wait, undefined, { signal: controller.signal });
-            this.#setStatus({ id, state: "recovering", arch: prepared.environment.arch, attempt: budget.attempts, maxAttempts: this.recovery.maxAttempts, message: "正在重新附加原 Host，不重新部署或启动任务" });
+            this.#setStatus({ id, state: "recovering", arch: prepared.environment.arch, attempt: budget.attempts, maxAttempts: this.recovery.maxAttempts, message: desktopText("正在重新附加原 Host，不重新部署或启动任务", "Reattaching to the original Host without redeploying or restarting tasks") });
             try { await this.#attach(id, profile, prepared, controller.signal, authentication); return; }
             catch (error) { controller.signal.throwIfAborted(); if (connectionFailure(error).connectionCode !== "network") throw error; }
           }
           exhausted = true;
-          throw new RemoteConnectionError("network", "自动恢复已达到次数或时间上限");
+          throw new RemoteConnectionError("network", desktopText("自动恢复已达到次数或时间上限", "Automatic recovery reached the attempt or time limit"));
         }
-        this.#setStatus({ id, state: "connecting", message: "正在连接 SSH" });
+        this.#setStatus({ id, state: "connecting", message: desktopText("正在连接 SSH", "Connecting via SSH") });
         const prepared = this.#prepared.get(id);
         if (prepared && !redeploy) {
           try { await this.#attach(id, profile, prepared, controller.signal, authentication); return; }
@@ -154,12 +155,12 @@ export class RemoteConnectionManager {
             if (!["host-unavailable", "protocol"].includes(connectionFailure(error).connectionCode)) throw error;
           }
         }
-        this.#setStatus({ id, state: "connecting", stage: "probe", message: "正在自动识别远端系统和运行环境" });
+        this.#setStatus({ id, state: "connecting", stage: "probe", message: desktopText("正在自动识别远端系统和运行环境", "Detecting remote OS and runtime environment") });
         const environment = await this.services.probeRemote(profile, controller.signal, authentication);
         controller.signal.throwIfAborted();
         profile.platform = environment.platform; profile.arch = environment.arch;
         if (this.options.requireApproval && !profile.installationApproved) {
-          this.#setStatus({ id, state: "awaiting-approval", stage: "confirmation", platform: environment.platform, arch: environment.arch, installRoot: environment.root, message: "体检完成，请确认准备远端运行环境" });
+          this.#setStatus({ id, state: "awaiting-approval", stage: "confirmation", platform: environment.platform, arch: environment.arch, installRoot: environment.root, message: desktopText("体检完成，请确认准备远端运行环境", "Preflight check complete; please confirm preparing the remote runtime environment") });
           await new Promise<void>((resolve, reject) => {
             const abort = () => { this.#approvals.delete(id); reject(connectionCancelled()); };
             this.#approvals.set(id, () => { controller.signal.removeEventListener("abort", abort); this.#approvals.delete(id); resolve(); });
@@ -170,7 +171,7 @@ export class RemoteConnectionManager {
         }
         await this.#flush();
         const progress: PreparationProgress = (stage, message, receivedBytes, totalBytes) => this.#setStatus({ id, state: "connecting", platform: environment.platform, arch: environment.arch, installRoot: environment.root, stage, message, ...(receivedBytes !== undefined ? { receivedBytes } : {}), ...(totalBytes !== undefined ? { totalBytes } : {}) });
-        progress("install", "正在准备远端 Host");
+        progress("install", desktopText("正在准备远端 Host", "Preparing remote Host"));
         const installation = this.options.prepare
           ? await this.options.prepare(profile, environment, authentication, controller.signal, progress)
           : await this.services.deployRemote(profile, environment, this.bundleDirectory, controller.signal, authentication);
@@ -182,7 +183,7 @@ export class RemoteConnectionManager {
       } catch (error) {
         this.#wanted.delete(id);
         await this.#clearAuthentication(id);
-        const failure = exhausted ? new RemoteConnectionError("network", `自动恢复已停止（最多 ${this.recovery.maxAttempts} 次 / ${Math.round(this.recovery.budgetMs / 1_000)} 秒）；请手动重连核对任务，未重发命令`) : controller.signal.aborted ? connectionCancelled() : connectionFailure(error);
+        const failure = exhausted ? new RemoteConnectionError("network", desktopText(`自动恢复已停止（最多 ${this.recovery.maxAttempts} 次 / ${Math.round(this.recovery.budgetMs / 1_000)} 秒）；请手动重连核对任务，未重发命令`, `Auto-recovery stopped (max ${this.recovery.maxAttempts} attempts / ${Math.round(this.recovery.budgetMs / 1_000)}s); please reconnect manually to verify tasks (commands were not resent)`)) : controller.signal.aborted ? connectionCancelled() : connectionFailure(error);
         this.#setStatus({ id, state: failure.connectionCode === "cancelled" ? "disconnected" : "failed", message: failure.message });
         throw failure;
       }
@@ -204,9 +205,9 @@ export class RemoteConnectionManager {
       transport = await this.services.attachRemote(profile, prepared.environment, prepared, signal, authentication, attachment);
       signal.throwIfAborted();
       if (transport.hello && (transport.hello.platform !== prepared.environment.platform || transport.hello.arch !== prepared.environment.arch)) {
-        throw new RemoteConnectionError("environment", `目标系统是 ${transport.hello.platform}/${transport.hello.arch}，与体检结果 ${prepared.environment.platform}/${prepared.environment.arch} 不符`);
+        throw new RemoteConnectionError("environment", desktopText(`目标系统是 ${transport.hello.platform}/${transport.hello.arch}，与体检结果 ${prepared.environment.platform}/${prepared.environment.arch} 不符`, `Target OS is ${transport.hello.platform}/${transport.hello.arch}, which does not match preflight result ${prepared.environment.platform}/${prepared.environment.arch}`));
       }
-      this.#setStatus({ id, state: "synchronizing", arch: prepared.environment.arch, message: "SSH 已连通，正在核对远端快照" });
+      this.#setStatus({ id, state: "synchronizing", arch: prepared.environment.arch, message: desktopText("SSH 已连通，正在核对远端快照", "SSH connected; verifying remote snapshot") });
       await transport.bootstrap();
       signal.throwIfAborted();
       if (this.#closed || !this.#wanted.has(id)) throw connectionCancelled();
@@ -224,27 +225,27 @@ export class RemoteConnectionManager {
       });
       transport.onHealth(healthy => { void this.#healthChanged(id, live, healthy); });
       transport.onDisconnect(error => this.#transportLost(id, live, error));
-      if (this.#live.get(id) !== live) throw new RemoteConnectionError("network", "SSH 在同步期间断开");
+      if (this.#live.get(id) !== live) throw new RemoteConnectionError("network", desktopText("SSH 在同步期间断开", "SSH disconnected during synchronization"));
       if (transport.hello) prepared.instanceId = transport.hello.instanceId;
       this.#connected(id, live);
       transport.startHealthChecks();
     } catch (error) {
       if (this.#live.get(id)?.transport === transport) this.#live.delete(id);
       await transport?.close();
-      if (error instanceof RemoteRequestTimeout) throw new RemoteConnectionError("network", "远端快照同步超时，尚未恢复写操作");
+      if (error instanceof RemoteRequestTimeout) throw new RemoteConnectionError("network", desktopText("远端快照同步超时，尚未恢复写操作", "Remote snapshot sync timed out; write operations have not resumed"));
       throw error;
     }
   }
 
   #connected(id: string, live: LiveRemote): void {
     const previous = this.#status.get(id);
-    this.#setStatus({ id, state: "connected", generation: live.generation, platform: live.environment.platform, arch: live.environment.arch, installRoot: live.environment.root, ...(previous?.networkRoute ? { networkRoute: previous.networkRoute } : {}), ...(previous?.networkMessage ? { networkMessage: previous.networkMessage } : {}), hostRestarted: live.hostRestarted, ...(live.hostRestarted ? { message: "远端 Host 已更换实例；已重新读取状态，不能保证原任务仍在运行" } : {}) });
+    this.#setStatus({ id, state: "connected", generation: live.generation, platform: live.environment.platform, arch: live.environment.arch, installRoot: live.environment.root, ...(previous?.networkRoute ? { networkRoute: previous.networkRoute } : {}), ...(previous?.networkMessage ? { networkMessage: previous.networkMessage } : {}), hostRestarted: live.hostRestarted, ...(live.hostRestarted ? { message: desktopText("远端 Host 已更换实例；已重新读取状态，不能保证原任务仍在运行", "Remote Host restarted with a new instance; state was reloaded, and prior tasks cannot be guaranteed to still be running") } : {}) });
   }
   async #healthChanged(id: string, live: LiveRemote, healthy: boolean): Promise<void> {
     if (this.#live.get(id) !== live || this.#closed) return;
     const version = ++live.healthVersion;
-    if (!healthy) { this.#setStatus({ id, state: "degraded", generation: live.generation, arch: live.environment.arch, message: "远端响应迟缓，暂停新的写操作并检查通道；不重启 Host" }); return; }
-    this.#setStatus({ id, state: "synchronizing", generation: live.generation, arch: live.environment.arch, message: "通道已恢复响应，正在同步远端状态" });
+    if (!healthy) { this.#setStatus({ id, state: "degraded", generation: live.generation, arch: live.environment.arch, message: desktopText("远端响应迟缓，暂停新的写操作并检查通道；不重启 Host", "Remote host is responding slowly; pausing new write operations and checking channel without restarting the Host") }); return; }
+    this.#setStatus({ id, state: "synchronizing", generation: live.generation, arch: live.environment.arch, message: desktopText("通道已恢复响应，正在同步远端状态", "Channel recovered; synchronizing remote state") });
     try {
       await live.transport.bootstrap();
       if (this.#live.get(id) !== live || version !== live.healthVersion || this.#closed) return;
@@ -252,7 +253,7 @@ export class RemoteConnectionManager {
       live.connectedAt = Date.now();
       this.#connected(id, live);
     } catch (error) {
-      if (this.#live.get(id) === live && version === live.healthVersion) live.transport.peer.close(error instanceof RemoteRequestTimeout ? new RemoteConnectionError("network", "远端快照同步超时") : connectionFailure(error));
+      if (this.#live.get(id) === live && version === live.healthVersion) live.transport.peer.close(error instanceof RemoteRequestTimeout ? new RemoteConnectionError("network", desktopText("远端快照同步超时", "Remote snapshot synchronization timed out")) : connectionFailure(error));
     }
   }
   #transportLost(id: string, live: LiveRemote, error: Error): void {
@@ -260,7 +261,7 @@ export class RemoteConnectionManager {
     this.#live.delete(id);
     this.#resources.get(id)?.(); this.#resources.delete(id);
     if (this.#closed || !this.#wanted.has(id) || this.#maintenance.has(id)) {
-      this.#setStatus({ id, state: "disconnected", message: "SSH 已断开；未停止远端任务" });
+      this.#setStatus({ id, state: "disconnected", message: desktopText("SSH 已断开；未停止远端任务", "SSH disconnected; remote tasks were not stopped") });
       return;
     }
     const failure = connectionFailure(error);
@@ -271,7 +272,7 @@ export class RemoteConnectionManager {
       return;
     }
     if (!this.#budgets.has(id) || Date.now() - live.connectedAt >= this.recovery.stableMs) this.#budgets.set(id, { startedAt: Date.now(), attempts: 0 });
-    this.#setStatus({ id, state: "recovering", generation: live.generation, arch: live.environment.arch, message: "连接中断，正在恢复；已发送命令结果未知，未自动重发" });
+    this.#setStatus({ id, state: "recovering", generation: live.generation, arch: live.environment.arch, message: desktopText("连接中断，正在恢复；已发送命令结果未知，未自动重发", "Connection lost; recovering (outcome of sent commands is unknown and they were not resent)") });
     void (async () => {
       await this.#connecting.get(id)?.promise.catch(() => {});
       if (!this.#closed && this.#wanted.has(id) && !this.#live.has(id) && !this.#maintenance.has(id)) await this.#connect(id, undefined, undefined, true);
@@ -289,7 +290,7 @@ export class RemoteConnectionManager {
     const live = this.#live.get(id);
     this.#live.delete(id);
     this.#resources.get(id)?.(); this.#resources.delete(id);
-    this.#setStatus({ id, state: "disconnected", message: "连接已取消或断开；未停止远端任务" });
+    this.#setStatus({ id, state: "disconnected", message: desktopText("连接已取消或断开；未停止远端任务", "Connection cancelled or disconnected; remote tasks were not stopped") });
     const run = Promise.resolve().then(async () => {
       await live?.transport.close();
       await pending?.promise.catch(() => {});
@@ -304,7 +305,7 @@ export class RemoteConnectionManager {
     await Promise.all([...ids].filter(id => !this.#maintenance.has(id)).map(id => this.disconnect(id)));
   }
   authentication(id: string): SshAuthentication | undefined { return this.#authentication.get(id); }
-  approveDeployment(id: string): void { const approve = this.#approvals.get(id); if (!approve) throw new Error("没有等待确认的远端安装"); approve(); }
+  approveDeployment(id: string): void { const approve = this.#approvals.get(id); if (!approve) throw new Error(desktopText("没有等待确认的远端安装", "No remote installation awaiting confirmation")); approve(); }
   async rememberDirectory(id: string, path: string): Promise<void> { this.profile(id).lastDirectory = path; await this.#flush(); }
   async #clearAuthentication(id: string): Promise<void> {
     const authentication = this.#authentication.get(id);
@@ -317,12 +318,12 @@ export class RemoteConnectionManager {
     if (this.#connecting.has(id)) throw new Error("Wait for SSH preparation to finish");
     this.get(id);
     const run = Promise.resolve().then(() => action({
-      disconnect: async () => { const live = this.#live.get(id); this.#live.delete(id); await live?.transport.close(); this.#setStatus({ id, state: "disconnected", message: "正在维护远端 Runtime" }); },
+      disconnect: async () => { const live = this.#live.get(id); this.#live.delete(id); await live?.transport.close(); this.#setStatus({ id, state: "disconnected", message: desktopText("正在维护远端 Runtime", "Maintaining remote Runtime") }); },
       reconnect: async () => { if (!this.#closed) await this.#connect(id, undefined, undefined, false, true); },
       progress: message => this.#setStatus({ ...this.#status.get(id)!, id, message }),
     }));
     this.#maintenance.set(id, run);
-    this.#setStatus({ ...this.#status.get(id)!, id, message: "正在验证 Runtime 制品" });
+    this.#setStatus({ ...this.#status.get(id)!, id, message: desktopText("正在验证 Runtime 制品", "Verifying Runtime artifact") });
     try { return await run; }
     finally {
       this.#maintenance.delete(id);
@@ -335,12 +336,12 @@ export class RemoteConnectionManager {
 
   assertWritable(id: string): void {
     if (this.#closed) throw new Error("Application is shutting down");
-    if (this.#maintenance.has(id)) throw new Error("远端正在安装 Runtime，暂时不能修改工作区");
+    if (this.#maintenance.has(id)) throw new Error(desktopText("远端正在安装 Runtime，暂时不能修改工作区", "Remote Runtime installation is in progress; workspace cannot be modified yet"));
   }
   select(id: string | null): void { if (id !== null) { this.assertWritable(id); this.get(id); } this.activeId = id; this.#changed(); }
   get(id: string): LiveRemote {
     const remote = this.#live.get(id);
-    if (!remote || this.#status.get(id)?.state !== "connected") throw new Error("SSH 已断开或正在恢复，请等待同步完成；不会回落到本机");
+    if (!remote || this.#status.get(id)?.state !== "connected") throw new Error(desktopText("SSH 已断开或正在恢复，请等待同步完成；不会回落到本机", "SSH is disconnected or recovering; wait for sync to finish (will not fall back to local)"));
     return remote;
   }
   profile(id: string): RemoteConnectionProfile { const profile = this.#profiles.get(id); if (!profile) throw new Error("Unknown SSH connection"); return profile; }

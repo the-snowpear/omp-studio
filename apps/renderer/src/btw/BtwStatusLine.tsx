@@ -2,24 +2,24 @@ import { useEffect, useState } from "react";
 import type { BtwSnapshot, BtwStatus } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
 import { formatElapsed } from "../conversation/activityStatus";
-import { useI18n } from "../i18n";
+import { useI18n, isZh } from "../i18n";
 
-const LABELS: Readonly<Record<BtwStatus, string>> = {
-  running: "正在回答",
-  completed: "已完成",
-  failed: "失败",
-  aborted: "已中止",
+const LABELS: Readonly<Record<BtwStatus, [string, string]>> = {
+  running: ["正在回答", "Answering"],
+  completed: ["已完成", "Completed"],
+  failed: ["失败", "Failed"],
+  aborted: ["已中止", "Aborted"],
 };
 
 /** The Runtime's own wording is an English contract string; label it in place. */
-function failureLabel(snapshot: BtwSnapshot): string {
-  return snapshot.error?.code === "OUTPUT_LIMIT" ? "超出输出上限" : LABELS.failed;
+function failureLabel(snapshot: BtwSnapshot, zh: boolean): string {
+  return snapshot.error?.code === "OUTPUT_LIMIT" ? (zh ? "超出输出上限" : "Output limit reached") : LABELS.failed[zh ? 0 : 1];
 }
 
-export function btwStatusLabel(snapshot: BtwSnapshot | null): string {
-  if (snapshot === null) return "待提问";
-  if (snapshot.status === "failed") return failureLabel(snapshot);
-  return LABELS[snapshot.status];
+export function btwStatusLabel(snapshot: BtwSnapshot | null, zh = isZh()): string {
+  if (snapshot === null) return zh ? "待提问" : "Ready";
+  if (snapshot.status === "failed") return failureLabel(snapshot, zh);
+  return LABELS[snapshot.status][zh ? 0 : 1];
 }
 
 /**

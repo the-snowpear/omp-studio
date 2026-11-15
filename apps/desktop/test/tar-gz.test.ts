@@ -170,7 +170,7 @@ describe("extractTarGz", () => {
       const dest = join(tmpDir, "out");
       await assert.rejects(
         () => extractTarGz(archivePath, dest),
-        /非法路径段（含 \.\.）/,
+        /contains '\.\.'/,
       );
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
@@ -189,7 +189,7 @@ describe("extractTarGz", () => {
       const dest = join(tmpDir, "out");
       await assert.rejects(
         () => extractTarGz(archivePath, dest),
-        /非法路径格式（含反斜杠）/,
+        /contains backslash/,
       );
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
@@ -209,7 +209,7 @@ describe("extractTarGz", () => {
       const dest = join(tmpDir, "out");
       await assert.rejects(
         () => extractTarGz(archivePath, dest),
-        /路径名称过长/,
+        /exceeds 255 bytes/,
       );
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
@@ -228,7 +228,7 @@ describe("extractTarGz", () => {
       const dest = join(tmpDir, "out");
       await assert.rejects(
         () => extractTarGz(archivePath, dest),
-        /不支持的条目类型/,
+        /Unsupported tar entry type/,
       );
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
@@ -249,7 +249,7 @@ describe("extractTarGz", () => {
       const dest = join(tmpDir, "out");
       await assert.rejects(
         () => extractTarGz(archivePath, dest, { maxEntries: 2 }),
-        /条目数超过上限/,
+        /Archive entry limit exceeded/,
       );
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
@@ -269,7 +269,7 @@ describe("extractTarGz", () => {
       const dest = join(tmpDir, "out");
       await assert.rejects(
         () => extractTarGz(archivePath, dest, { maxTotalBytes: 15 }),
-        /解压总量超过上限/,
+        /Extracted size limit exceeded/,
       );
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
@@ -281,10 +281,10 @@ test("tar rejects oversized header before its data arrives, truncated data, and 
   const dir = await mkdtemp(join(tmpdir(), "tar-limits-"));
   try {
     const cases = [
-      { archive: gzipSync(buildTarHeader({ name: "huge", size: 2 ** 30 })), limits: { maxTotalBytes: 100 }, error: /解压总量超过上限/ },
+      { archive: gzipSync(buildTarHeader({ name: "huge", size: 2 ** 30 })), limits: { maxTotalBytes: 100 }, error: /Extracted size limit exceeded/ },
       { archive: gzipSync(buildTarHeader({ name: "short", size: 10 })), limits: {}, error: /Truncated/ },
-      { archive: createTarGz([{ name: "a/" }, { name: "b/" }]), limits: { maxEntries: 1 }, error: /条目数超过上限/ },
-      { archive: createTarGz([{ name: "zeros", content: Buffer.alloc(20000) }]), limits: { maxRatio: 10 }, error: /解压压缩比异常/ },
+      { archive: createTarGz([{ name: "a/" }, { name: "b/" }]), limits: { maxEntries: 1 }, error: /Archive entry limit exceeded/ },
+      { archive: createTarGz([{ name: "zeros", content: Buffer.alloc(20000) }]), limits: { maxRatio: 10 }, error: /Abnormal archive compression ratio/ },
     ];
     for (const [i, sample] of cases.entries()) {
       const archivePath = join(dir, `${i}.gz`);

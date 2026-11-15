@@ -39,6 +39,8 @@ import "./workspace.css";
 
 export function ConversationWorkspace({ client, renderDocument }: { client: StudioClient; renderDocument: (client: StudioClient) => ReactNode }) {
   const { preview } = usePreviewMode();
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const visited = useRef({ real: !preview, demo: preview });
   if (preview) visited.current.demo = true; else visited.current.real = true;
   const [real] = useState(() => new ConversationWorkspaceStore(localStorage, false, !preview));
@@ -113,7 +115,7 @@ export function ConversationWorkspace({ client, renderDocument }: { client: Stud
     </div>
     {createPortal(<div className="dock-floating-layer">{state.views.filter(view => view.placement === "float" || view.placement === "native").map((view, order) => <ConversationWindow key={view.id} view={view} store={store} hosts={hosts} bounds={bounds} order={order} snapLayer={snapLayer} />)}</div>, document.body)}
     <ConversationLayoutPreview store={store} />
-    {!windowed && state.views.some(view => view.minimized && view.placement !== "native") ? <div className="dock-pinned-capsules" role="group" aria-label="最小化的对话">{state.views.filter(view => view.minimized && view.placement !== "native").map(view => <MinimizedCapsule key={view.id} owner={store} capsuleId={view.id} locked={layoutLocked} onClick={() => store.focus(view.id)}><Icon name="message" extra="sm" /><span className="dock-capsule-title">{store.documentFor(view.id)?.title}</span><Icon name="restore" extra="sm" /></MinimizedCapsule>)}</div> : null}
+    {!windowed && state.views.some(view => view.minimized && view.placement !== "native") ? <div className="dock-pinned-capsules" role="group" aria-label={zh ? "最小化的对话" : "Minimized conversations"}>{state.views.filter(view => view.minimized && view.placement !== "native").map(view => <MinimizedCapsule key={view.id} owner={store} capsuleId={view.id} locked={layoutLocked} onClick={() => store.focus(view.id)}><Icon name="message" extra="sm" /><span className="dock-capsule-title">{store.documentFor(view.id)?.title}</span><Icon name="restore" extra="sm" /></MinimizedCapsule>)}</div> : null}
     {visited.current.real && real.mountedDocuments().map(record => <PreviewSurface key={`real:${record.id}`} preview={false}><ConversationDocumentHost enabled={!preview} record={record} client={client} store={real} hosts={real.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
     {visited.current.demo && demo.mountedDocuments().map(record => <PreviewSurface key={`demo:${record.id}`} preview><ConversationDocumentHost enabled={preview} record={record} client={client} store={demo} hosts={demo.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
   </WorkspaceContext.Provider></WindowFocusContext.Provider>;
@@ -122,13 +124,15 @@ export function ConversationWorkspace({ client, renderDocument }: { client: Stud
 function ConversationDocumentHost({ enabled, record, client: initialClient, store, hosts, dock, tabAdd, renderDocument }: { enabled: boolean; record: ConversationDocument; client: StudioClient; store: ConversationWorkspaceStore; hosts: DocumentHosts; dock: DockStore; tabAdd: HTMLElement | null; renderDocument: (client: StudioClient) => ReactNode }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const { resolvedLanguage } = useI18n();
+  const zhRef = useRef(resolvedLanguage === "zh");
+  zhRef.current = resolvedLanguage === "zh";
   const registry = useExecutionTargets();
   const registryRef = useRef(registry); registryRef.current = registry;
   const [client] = useState(() => createConversationClient(async () => {
     const target = store.demo || record.ref.targetId === null ? initialClient : await registryRef.current.readyClient(record.ref.targetId);
     const workspaceId = record.ref.workspaceId ?? (!store.demo && record.ref.draftId !== "initial" ? (await initializeConversationClient(target)).selected?.workspaceId : undefined);
     if (!workspaceId || store.demo) return { client: target, owned: false };
-    if (!target.openContext) throw new Error("此 Host 需要升级后才能打开多个对话窗口。");
+    if (!target.openContext) throw new Error(zhRef.current ? "此 Host 需要升级后才能打开多个对话窗口。" : "Upgrade this Host to open multiple conversation windows.");
     const opened = await target.openContext({ workspaceId: workspaceId as WorkspaceId, ...(record.ref.sessionId ? { sessionId: record.ref.sessionId as SessionId } : {}) });
     const shared = acquireProjectReads(target, workspaceId as WorkspaceId);
     return { client: opened, owned: true, project: shared.reads, releaseProject: shared.release };
@@ -241,6 +245,8 @@ function HeaderSlot({ hosts, id, kind, fallback }: { hosts: DocumentHosts; id: s
 }
 
 function ConversationWindow({ view, store, hosts, bounds, order, snapLayer }: { view: ConversationView; store: ConversationWorkspaceStore; hosts: DocumentHosts; bounds: ConversationView["rect"]; order: number; snapLayer: HTMLElement | null }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const record = store.documentFor(view.id)!;
   const dragging = useSyncExternalStore(dragPreview.subscribe, () => dragPreview.snapshot()?.conversation?.documentId === view.documentId);
   const frame = useRef<HTMLDivElement>(null);
@@ -262,7 +268,7 @@ function ConversationWindow({ view, store, hosts, bounds, order, snapLayer }: { 
       onTitleDrag={event => { if (!nativeKey) dragConversation(event, store, { viewId: view.id }); }}
       onRectChange={rect => store.setWindow(view.id, { rect })}
       onControl={action => { if (nativeKey) void globalThis.ompStudioChrome!.controlFloatWindow!({ key: nativeKey, action }); else control(action); }}
-      onClose={() => store.close(view.id)} closeLabel="关闭对话视图"
+      onClose={() => store.close(view.id)} closeLabel={zh ? "关闭对话视图" : "Close conversation view"}
       titleContent={<HeaderSlot hosts={hosts} id={view.documentId} kind="title" fallback={record.title} />}
       titleExtra={view.pin !== "none" ? <span className="dock-pin-status"><Icon name={native ? "external" : "pin"} extra="sm" /></span> : null}
       maximizeButton={!nativeKey ? <WindowSnapButton manager={store.manager} window={store.manager.get(view.id)!} locked={locked} onMaximize={() => control("maximize")} /> : undefined}

@@ -127,8 +127,10 @@ function TodoPhaseBlock({
   currentRef: Ref<HTMLLIElement>;
   onToggle: () => void;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const tasksId = `${panelId}-p${index + 1}`;
-  const label = group.phase ?? "任务";
+  const label = group.phase ?? (zh ? "任务" : "Tasks");
   const complete = isTodoPhaseComplete(group);
   const total = group.tasks.filter((task) => task.status !== "abandoned").length;
   const done = group.tasks.filter((task) => task.status === "completed").length;
@@ -143,7 +145,9 @@ function TodoPhaseBlock({
         className="task-dock-phase-toggle"
         aria-expanded={open}
         aria-controls={tasksId}
-        aria-label={`P${index + 1} ${label}，${done}/${total}，${open ? "收起" : "展开"}`}
+        aria-label={zh
+          ? `P${index + 1} ${label}，${done}/${total}，${open ? "收起" : "展开"}`
+          : `P${index + 1} ${label}, ${done}/${total}, ${open ? "collapse" : "expand"}`}
         onClick={onToggle}
       >
         <span className="task-dock-phase-index" aria-hidden="true">P{index + 1}</span>
@@ -253,10 +257,16 @@ export function TaskProgressDock({
   const legacyTodo = todos.some(todo => todo.status === "blocked");
   const add = files.reduce((sum, file) => sum + file.add, 0);
   const del = files.reduce((sum, file) => sum + file.del, 0);
-  const stepText = steps.total > 0 ? `第 ${steps.current} / ${steps.total} 步` : "";
-  const fileText = files.length > 0 ? `${files.length} 个文件已更改` : "";
+  const stepText = steps.total > 0
+    ? (zh ? `第 ${steps.current} / ${steps.total} 步` : `Step ${steps.current} / ${steps.total}`)
+    : "";
+  const fileText = files.length > 0
+    ? (zh ? `${files.length} 个文件已更改` : `${files.length} ${files.length === 1 ? "file" : "files"} changed`)
+    : "";
   const summary = [stepText, fileText, partialEdit ? (zh ? "部分编辑" : "Partial edit") : ""].filter(Boolean).join(" · ");
-  const toggleLabel = `${summary || "任务进度"}，${open ? "收起" : "展开"}任务与文件修改`;
+  const toggleLabel = zh
+    ? `${summary || "任务进度"}，${open ? "收起" : "展开"}任务与文件修改`
+    : `${summary || "Task progress"}, ${open ? "collapse" : "expand"} tasks and file changes`;
   const both = todos.length > 0 && files.length > 0;
   const groups = groupTodosByPhase(todos);
   const showPhases = todoPhaseHeadersVisible(groups);
@@ -274,7 +284,7 @@ export function TaskProgressDock({
         <div className="task-dock-collapse-inner">
           <div className="task-dock-panel">
             {todos.length > 0 ? (
-              <section className="task-dock-col" aria-label="任务列表">
+              <section className="task-dock-col" aria-label={zh ? "任务列表" : "Task list"}>
                 {legacyTodo ? <p className="task-dock-note">{zh
                   ? "旧记录的阻塞状态仅供回看；原生恢复会将其转为待办。"
                   : "Blocked is a read-only legacy status; native restore returns it to pending."}</p> : null}
@@ -315,7 +325,7 @@ export function TaskProgressDock({
               </section>
             ) : null}
             {files.length > 0 ? (
-              <section className="task-dock-col" aria-label="文件修改">
+              <section className="task-dock-col" aria-label={zh ? "文件修改" : "File changes"}>
                 {partialEdit ? <p className="task-dock-note is-warning" role="note"><Icon name="alert-c" extra="sm" />{zh
                   ? "部分编辑未应用；仅显示已确认落盘的文件。"
                   : "Partial edit; only confirmed-applied files are shown."}</p> : null}
@@ -335,8 +345,12 @@ export function TaskProgressDock({
                       <button
                         type="button"
                         className="task-dock-file-open"
-                        aria-label={demo === true && marks ? `打开 ${file.path}（演示）` : `打开 ${file.path}`}
-                        data-tip={demo === true && marks ? "打开（演示）" : "打开"}
+                        aria-label={demo === true && marks
+                          ? (zh ? `打开 ${file.path}（演示）` : `Open ${file.path} (Demo)`)
+                          : (zh ? `打开 ${file.path}` : `Open ${file.path}`)}
+                        data-tip={demo === true && marks
+                          ? (zh ? "打开（演示）" : "Open (Demo)")
+                          : (zh ? "打开" : "Open")}
                         onClick={() => onOpen?.(file.path)}
                       >
                         <span className="task-dock-file-name">{file.name}</span>
@@ -377,17 +391,17 @@ export function TaskProgressDock({
                 <span className="del">-{del}</span>
               </span>
             ) : null}
-            {demo === true && marks ? <span className="chip gray xs">演示</span> : null}
+            {demo === true && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
           </button>
           {open && files.length > 0 ? (
             <button
               type="button"
               className="btn small task-dock-review"
               onClick={onReview}
-              data-tip={demo === true && marks ? "Changes（演示）" : "Changes"}
+              data-tip={demo === true && marks ? (zh ? "Changes（演示）" : "Changes (Demo)") : "Changes"}
             >
               <Icon name="diff" extra="sm" />
-              审核
+              {zh ? "审核" : "Review"}
             </button>
           ) : null}
         </div>

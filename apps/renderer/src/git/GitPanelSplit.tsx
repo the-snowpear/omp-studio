@@ -27,7 +27,8 @@ export function GitPanelSplit({
   readonly children: ReactNode;
 }) {
   const document = useSurfaceDocument(), window = surfaceWindow(document);
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const { marks } = usePreviewMode();
   const rootRef = useRef<HTMLDivElement>(null);
   const topShare = graphOpen ? `${(splitRatio * 100).toFixed(3)}%` : "100%";
@@ -109,7 +110,7 @@ export function GitPanelSplit({
       <section className={`git-graph-pane${graphOpen ? "" : " collapse"}`} style={{ ["--git-graph-basis" as string]: graphShare }} aria-labelledby="gitGraphTitle">
         <div className="git-graph-head">
           <h2 id="gitGraphTitle">{t("git.commitHistoryTitle")}</h2>
-          {preview && marks ? <span className="chip gray xs">演示</span> : null}
+          {preview && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
           {meta}
           <span className="spacer" />
           <button

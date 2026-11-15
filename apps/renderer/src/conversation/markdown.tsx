@@ -17,6 +17,7 @@ import { HighlightedCode } from "../highlight/HighlightedCode";
 import { ExtensionAwareLink } from "./ExtensionLinks";
 import { CommandBlock, commandShell } from "./CommandBlock";
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 
 const REMARK: Options["remarkPlugins"] = [remarkGfm];
 const HIGHLIGHT: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"], languages: commandLanguages, aliases: { powershell: ["pwsh", "ps1"] } }]];
@@ -42,6 +43,8 @@ function cacheMermaid(key: string, svg: string): void {
   mermaidCache.set(key, svg);
 }
 function LegacyMermaid({ code }: { code: string }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const host = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string | null>(() => mermaidCache.get(code) ?? null);
   useEffect(() => {
@@ -60,10 +63,12 @@ function LegacyMermaid({ code }: { code: string }) {
     }
     return () => { active = false; };
   }, [code, svg]);
-  return <div ref={host} className="mermaid-box" {...(svg ? { dangerouslySetInnerHTML: { __html: svg } } : {})}>{svg === null ? <span className="mermaid-pending">图表等待渲染…</span> : svg === "" ? <pre className="codeblock md-code-pre"><code>{code}</code></pre> : null}</div>;
+  return <div ref={host} className="mermaid-box" {...(svg ? { dangerouslySetInnerHTML: { __html: svg } } : {})}>{svg === null ? <span className="mermaid-pending">{zh ? "图表等待渲染…" : "Diagram pending…"}</span> : svg === "" ? <pre className="codeblock md-code-pre"><code>{code}</code></pre> : null}</div>;
 }
 
 function CodeFrame({ language, text, children, streaming }: { language: string; text: string; children: ReactNode; streaming: boolean }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current); }, []);
@@ -71,7 +76,7 @@ function CodeFrame({ language, text, children, streaming }: { language: string; 
   return <div className="md-code">
     <div className="md-code-head">
       <span className="md-code-lang">{language || "text"}</span>
-      {streaming ? <span className="md-code-hint">流式输出中</span> : <button type="button" className="md-code-copy" aria-label={copied ? "已复制" : "复制代码"} data-tip={copied ? "已复制" : "复制代码"} onClick={() => {
+      {streaming ? <span className="md-code-hint">{zh ? "流式输出中" : "Streaming"}</span> : <button type="button" className="md-code-copy" aria-label={copied ? (zh ? "已复制" : "Copied") : (zh ? "复制代码" : "Copy code")} data-tip={copied ? (zh ? "已复制" : "Copied") : (zh ? "复制代码" : "Copy code")} onClick={() => {
         void navigator.clipboard?.writeText(text).then(() => {
           setCopied(true);
           if (timer.current !== null) clearTimeout(timer.current);

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { BrowserCapability, BrowserPageInspection, ManagedBrowserDownload, ManagedBrowserPage } from "@omp-studio/studio-protocol";
 import { useSurfaceChrome } from "../dock/SurfaceContext";
+import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { previewBrowserInspection } from "../preview/browserPreview";
 import { useBrowserVisible } from "./useNativeBrowserObservation";
@@ -23,21 +24,21 @@ export function BrowserViews({ view, session, snap, page, inspection, inspection
   view: BrowserView; session: BrowserSession; snap: BrowserSessionSnapshot; page?: ManagedBrowserPage | undefined; inspection?: BrowserPageInspection | undefined;
   inspectionBusy?: boolean; inspectionError?: string; onRefresh?: (() => void) | undefined; visible?: boolean; copy: Copy; onBack: () => void;
 }) {
-  const api = useSurfaceChrome()?.managedBrowser, { preview } = usePreviewMode(), shown = useBrowserVisible(visible);
+  const api = useSurfaceChrome()?.managedBrowser, { preview } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh", shown = useBrowserVisible(visible);
   const [embedded, setEmbedded] = useState<BrowserPageInspection>(), [error, setError] = useState(""), [busy, setBusy] = useState(false), [revision, refresh] = useState(0);
   const native = !!page?.descriptor && page.descriptor.transport !== "embedded";
   const inspect = view === "console" || view === "network" || native && view === "downloads";
   useEffect(() => {
     setEmbedded(undefined); setError(""); setBusy(false);
     if (!shown || native || !page || (view !== "console" && view !== "network")) return;
-    if (preview) { setEmbedded(previewBrowserInspection(view)); return; }
+    if (preview) { setEmbedded(previewBrowserInspection(view, zh)); return; }
     if (!api?.inspect) { setError(copy("当前 Desktop 没有接入此页面的私有检查通道。", "This Desktop has no private inspection channel for this page.")); return; }
     let current = true;
     const request = { sessionId: session.id, pageId: page.id, ...(page.descriptor ? { generation: page.descriptor.generation } : {}), view, visible: true };
     setBusy(true);
     void api.inspect(request).then(value => { if (current) setEmbedded(value); }, cause => { if (current) setError(cause instanceof Error ? cause.message : String(cause)); }).finally(() => { if (current) setBusy(false); });
     return () => { current = false; void api.inspect?.({ ...request, visible: false }).catch(() => undefined); };
-  }, [api, page?.id, page?.descriptor?.generation, native, view, session, shown, preview, revision, copy]);
+  }, [api, page?.id, page?.descriptor?.generation, native, view, session, shown, preview, revision, copy, zh]);
   const title = view === "downloads" ? copy("下载", "Downloads") : view === "settings" ? copy("Embedded 浏览器设置", "Embedded browser settings") : view === "capabilities" ? copy("页面与能力", "Page and capabilities") : view === "console" ? "Console" : "Network";
   return <div className="mb-view">
     <header className="mb-view-header">

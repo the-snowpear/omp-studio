@@ -13,6 +13,7 @@ import { homedir as osHomedir } from "node:os";
 import { basename, dirname, join, posix } from "node:path";
 
 import { resolveCommandOnPath } from "./platform/developer-tools.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 export type ExternalEditorId = "vscode" | "cursor" | "windsurf";
 
@@ -141,7 +142,7 @@ export function launchExternalEditor(
       settled = true;
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
-        reject(new Error(`未找到外部编辑器 ${command.label}，请确认其已安装并可从 PATH 启动`));
+        reject(new Error(desktopText(`未找到外部编辑器 ${command.label}，请确认其已安装并可从 PATH 启动`, `External editor ${command.label} was not found. Make sure it is installed and available on PATH.`)));
         return;
       }
       reject(error);
@@ -183,7 +184,7 @@ export function createExternalEditorOpener(options: CreateExternalEditorOpenerOp
   return async (cwd: string): Promise<void> => {
     const command = resolveExternalEditorCommand(options);
     if (command === undefined) {
-      throw new Error("未找到外部编辑器，请安装 Visual Studio Code / Cursor / Windsurf");
+      throw new Error(desktopText("未找到外部编辑器，请安装 Visual Studio Code / Cursor / Windsurf", "No external editor found. Install Visual Studio Code, Cursor, or Windsurf."));
     }
     await launchExternalEditor(command, cwd, options);
   };

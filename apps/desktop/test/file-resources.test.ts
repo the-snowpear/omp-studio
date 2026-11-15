@@ -22,7 +22,7 @@ test("desktop and SSH file URLs stream ranges and retain the originating target"
   const tail = await resources.response(new Request(lease.url, { headers: { Range: "bytes=-3" } }), "null");
   assert.equal(await tail.text(), "xyz"); assert.ok(targets.every(target => target === "ssh-server"));
   const iterator = resources.bytes(lease.id); resources.release(lease.id, 12);
-  await assert.rejects(iterator.next(), /关闭/);
+  await assert.rejects(iterator.next(), /closed/);
   assert.equal((await resources.response(new Request(lease.url), "null")).status, 404);
 });
 

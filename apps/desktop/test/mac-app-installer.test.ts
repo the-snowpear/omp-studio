@@ -70,9 +70,9 @@ test("preflight refuses App Translocation, an unwritable folder and a full disk"
   const translocated = new MacAppInstaller({ bundlePath: "/private/var/folders/x/T/AppTranslocation/ABC/d/OMP Studio.app", swapDirectory: root, appId: "a", execPath: "e", pid: 1 });
   assert.match(await translocated.preflight() ?? "", /App Translocation/u);
   const missingParent = new MacAppInstaller({ bundlePath: join(root, "missing", "OMP Studio.app"), swapDirectory: root, appId: "a", execPath: "e", pid: 1 });
-  assert.match(await missingParent.preflight() ?? "", /权限/u);
+  assert.match(await missingParent.preflight() ?? "", /permission/iu);
   const full = new MacAppInstaller({ bundlePath, swapDirectory: root, appId: "a", execPath: "e", pid: 1, freeBytes: async () => 10 });
-  assert.match(await full.preflight(1_000) ?? "", /空间不足/u);
+  assert.match(await full.preflight(1_000) ?? "", /disk space/iu);
 });
 
 test("install verifies the staged bundle, writes the plan and starts the helper as Node", async () => {
@@ -100,8 +100,8 @@ test("install verifies the staged bundle, writes the plan and starts the helper 
 });
 
 for (const [name, info, options, message] of [
-  ["another app", { CFBundleIdentifier: "com.example.other" }, {}, /应用标识/u],
-  ["another version", { CFBundleShortVersionString: "1.9.9" }, {}, /版本/u],
+  ["another app", { CFBundleIdentifier: "com.example.other" }, {}, /bundle identifier/iu],
+  ["another version", { CFBundleShortVersionString: "1.9.9" }, {}, /version/iu],
   ["an Intel executable", {}, { cpuType: 0x01000007 }, /arm64/u],
   ["a broken signature", {}, { codesign: false }, /codesign/u],
 ] as const) {

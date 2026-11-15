@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
+import { pickLocale, useI18n } from "../i18n";
 import { Icon } from "../icons";
 import type { ImageMimeType } from "./types";
 
@@ -40,7 +41,7 @@ async function readBytes(image: ImagePreviewSubject, window: Window & typeof glo
   }
   // URL-only subjects may be local Blob/artifact URLs. Do not fetch just to display.
   const response = await window.fetch(image.url);
-  if (!response.ok) throw new Error("无法读取图片，请重新打开后重试。");
+  if (!response.ok) throw new Error(pickLocale("无法读取图片，请重新打开后重试。", "Unable to read image. Close and reopen to try again."));
   return new Uint8Array(await response.arrayBuffer());
 }
 
@@ -54,17 +55,17 @@ async function pngBytes(bytes: Uint8Array, mime: ImageMimeType, document: Docume
   try {
     await new Promise<void>((resolve, reject) => {
       img.onload = () => resolve();
-      img.onerror = () => reject(new Error("无法处理这张图片。"));
+      img.onerror = () => reject(new Error(pickLocale("无法处理这张图片。", "Unable to process this image.")));
       img.src = url;
     });
     const canvas = document.createElement("canvas");
     canvas.width = img.naturalWidth || 1024;
     canvas.height = img.naturalHeight || 1024;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("无法处理这张图片。");
+    if (!context) throw new Error(pickLocale("无法处理这张图片。", "Unable to process this image."));
     context.drawImage(img, 0, 0);
     const png = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((next) => next ? resolve(next) : reject(new Error("无法编码图片。")), "image/png");
+      canvas.toBlob((next) => next ? resolve(next) : reject(new Error(pickLocale("无法编码图片。", "Unable to encode image."))), "image/png");
     });
     return new Uint8Array(await png.arrayBuffer());
   } finally {
@@ -76,6 +77,8 @@ async function pngBytes(bytes: Uint8Array, mime: ImageMimeType, document: Docume
 }
 
 export function ImagePreview({ image, onClose, onError, actionsEnabled = true }: ImagePreviewProps) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const document = useSurfaceDocument();
   const window = surfaceWindow(document);
   const chrome = window.ompStudioChrome;
@@ -250,15 +253,18 @@ export function ImagePreview({ image, onClose, onError, actionsEnabled = true }:
         ? await chrome!.copyImage({ mime, bytes })
         : await chrome!.saveImage({ mime, bytes, suggestedName: image.label });
       if (!current()) return;
-      if (result.ok) setStatus(action === "copy" ? "已复制图片" : "已保存图片");
-      else if ("cancelled" in result && result.cancelled) setStatus("已取消保存");
+      if (result.ok) setStatus(action === "copy" ? (zh ? "已复制图片" : "Image copied") : (zh ? "已保存图片" : "Image saved"));
+      else if ("cancelled" in result && result.cancelled) setStatus(zh ? "已取消保存" : "Save cancelled");
       else if ("message" in result) {
         setError(result.message);
         onError?.(result.message);
       }
     } catch (cause) {
       if (!current()) return;
-      const message = `${action === "copy" ? "复制" : "保存"}图片失败${(cause instanceof Error || cause instanceof window.Error) ? `：${cause.message}` : "，请重试。"}`;
+      const reason = (cause instanceof Error || cause instanceof window.Error) ? cause.message : "";
+      const message = zh
+        ? `${action === "copy" ? "复制" : "保存"}图片失败${reason ? `：${reason}` : "，请重试。"}`
+        : `Failed to ${action === "copy" ? "copy" : "save"} image${reason ? `: ${reason}` : ". Try again."}`;
       setError(message);
       onError?.(message);
     } finally {
@@ -300,33 +306,33 @@ export function ImagePreview({ image, onClose, onError, actionsEnabled = true }:
       }}
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div ref={dialogRef} className="img-preview-dialog" role="dialog" aria-modal="true" aria-label={`预览${image.label}`} aria-describedby={hintId}>
+      <div ref={dialogRef} className="img-preview-dialog" role="dialog" aria-modal="true" aria-label={zh ? `预览${image.label}` : `Preview ${image.label}`} aria-describedby={hintId}>
         <header className="img-preview-header">
           <span className="img-preview-title" data-tip={image.label}>{image.label}</span>
-          <div className="img-preview-actions" role="group" aria-label="图片操作">
+          <div className="img-preview-actions" role="group" aria-label={zh ? "图片操作" : "Image actions"}>
             <button type="button" className="btn" disabled={!actionsEnabled || busy !== null || copyUnavailable} onClick={() => void runAction("copy")}>
-              <Icon name="copy" extra="sm" />{busy === "copy" ? "复制中…" : "复制"}
+              <Icon name="copy" extra="sm" />{busy === "copy" ? (zh ? "复制中…" : "Copying…") : (zh ? "复制" : "Copy")}
             </button>
             <button type="button" className="btn" disabled={!actionsEnabled || busy !== null || saveUnavailable} onClick={() => void runAction("save")}>
-              <Icon name="save" extra="sm" />{busy === "save" ? "保存中…" : "另存为"}
+              <Icon name="save" extra="sm" />{busy === "save" ? (zh ? "保存中…" : "Saving…") : (zh ? "另存为" : "Save as")}
             </button>
-            <button ref={closeRef} type="button" className="btn img-preview-close" aria-label="关闭预览" onClick={onClose}>
-              <Icon name="x" extra="sm" />关闭
+            <button ref={closeRef} type="button" className="btn img-preview-close" aria-label={zh ? "关闭预览" : "Close preview"} onClick={onClose}>
+              <Icon name="x" extra="sm" />{zh ? "关闭" : "Close"}
             </button>
           </div>
         </header>
-        <div className="img-preview-zoom" role="group" aria-label="图片缩放">
-          <button type="button" className="btn" disabled={!size} aria-pressed={zoom === "fit"} onClick={() => changeZoom("fit")}>适应窗口</button>
+        <div className="img-preview-zoom" role="group" aria-label={zh ? "图片缩放" : "Image zoom"}>
+          <button type="button" className="btn" disabled={!size} aria-pressed={zoom === "fit"} onClick={() => changeZoom("fit")}>{zh ? "适应窗口" : "Fit"}</button>
           <button type="button" className="btn" disabled={!size} aria-pressed={zoom === 1} onClick={() => changeZoom(1)}>100%</button>
-          <button type="button" className="btn" disabled={!size || scale <= MIN_ZOOM} onClick={() => changeZoom(Math.max(MIN_ZOOM, scale / 1.25))}>缩小</button>
-          <output className="img-preview-scale" aria-label="缩放比例">{size ? `${Number((scale * 100).toFixed(1))}%` : "—"}</output>
-          <button type="button" className="btn" disabled={!size || scale >= MAX_ZOOM} onClick={() => changeZoom(Math.min(MAX_ZOOM, scale * 1.25))}>放大</button>
+          <button type="button" className="btn" disabled={!size || scale <= MIN_ZOOM} onClick={() => changeZoom(Math.max(MIN_ZOOM, scale / 1.25))}>{zh ? "缩小" : "Zoom out"}</button>
+          <output className="img-preview-scale" aria-label={zh ? "缩放比例" : "Zoom level"}>{size ? `${Number((scale * 100).toFixed(1))}%` : "—"}</output>
+          <button type="button" className="btn" disabled={!size || scale >= MAX_ZOOM} onClick={() => changeZoom(Math.min(MAX_ZOOM, scale * 1.25))}>{zh ? "放大" : "Zoom in"}</button>
         </div>
         <div
           ref={viewportRef}
           className={`img-preview-viewport${canPan ? " is-pannable" : ""}${dragging ? " is-dragging" : ""}`}
           role="region"
-          aria-label="图片查看区域"
+          aria-label={zh ? "图片查看区域" : "Image viewport"}
           tabIndex={0}
           onContextMenu={openMenu}
           onKeyDown={(event) => {
@@ -373,18 +379,34 @@ export function ImagePreview({ image, onClose, onError, actionsEnabled = true }:
           </div>
         </div>
         <footer className="img-preview-footer">
-          <p id={hintId}>100% 表示收到的图片原始尺寸{size ? `（${size.width} × ${size.height}）` : ""}，不代表显示器分辨率。滚动或拖动画面可平移。</p>
-          {actionsEnabled && (copyUnavailable || saveUnavailable) ? <p>{copyUnavailable && saveUnavailable ? "当前环境不支持复制和另存为图片，请在桌面应用中使用。" : copyUnavailable ? "当前环境不支持复制图片。" : "当前环境不支持另存为图片。"}</p> : null}
-          {imageFailed ? <p role="alert" className="img-preview-error">无法显示这张图片，请关闭后重新打开。</p> : null}
+          <p id={hintId}>
+            {zh
+              ? `100% 表示收到的图片原始尺寸${size ? `（${size.width} × ${size.height}）` : ""}，不代表显示器分辨率。滚动或拖动画面可平移。`
+              : `100% shows the received image dimensions${size ? ` (${size.width} × ${size.height})` : ""}, not display resolution. Scroll or drag to pan.`}
+          </p>
+          {actionsEnabled && (copyUnavailable || saveUnavailable) ? (
+            <p>
+              {copyUnavailable && saveUnavailable
+                ? (zh ? "当前环境不支持复制和另存为图片，请在桌面应用中使用。" : "Copying and saving images are unavailable here; use the desktop app.")
+                : copyUnavailable
+                  ? (zh ? "当前环境不支持复制图片。" : "Copying images is unavailable here.")
+                  : (zh ? "当前环境不支持另存为图片。" : "Saving images is unavailable here.")}
+            </p>
+          ) : null}
+          {imageFailed ? <p role="alert" className="img-preview-error">{zh ? "无法显示这张图片，请关闭后重新打开。" : "Unable to display this image. Close and reopen to try again."}</p> : null}
           {error ? <p role="alert" className="img-preview-error">{error}</p> : null}
-          <p role="status">{busy ? (busy === "copy" ? "正在复制图片…" : "正在保存图片…") : status || (!size && !imageFailed ? "正在载入图片…" : "")}</p>
+          <p role="status">
+            {busy
+              ? (busy === "copy" ? (zh ? "正在复制图片…" : "Copying image…") : (zh ? "正在保存图片…" : "Saving image…"))
+              : status || (!size && !imageFailed ? (zh ? "正在载入图片…" : "Loading image…") : "")}
+          </p>
         </footer>
         {menu !== null ? (
           <div
             ref={menuRef}
             className="menu img-preview-menu"
             role="menu"
-            aria-label="图片操作"
+            aria-label={zh ? "图片操作" : "Image actions"}
             tabIndex={-1}
             style={{ top: menu.y, left: menu.x }}
             onKeyDown={(event) => {
@@ -397,10 +419,10 @@ export function ImagePreview({ image, onClose, onError, actionsEnabled = true }:
             }}
           >
             <button type="button" className="menu-item" role="menuitem" disabled={!actionsEnabled || busy !== null || copyUnavailable} onClick={() => void runAction("copy")}>
-              <Icon name="copy" extra="sm" />复制
+              <Icon name="copy" extra="sm" />{zh ? "复制" : "Copy"}
             </button>
             <button type="button" className="menu-item" role="menuitem" disabled={!actionsEnabled || busy !== null || saveUnavailable} onClick={() => void runAction("save")}>
-              <Icon name="save" extra="sm" />保存
+              <Icon name="save" extra="sm" />{zh ? "保存" : "Save"}
             </button>
           </div>
         ) : null}

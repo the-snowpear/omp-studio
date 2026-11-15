@@ -123,7 +123,7 @@ it("keeps both preview flows local and hides demo markings when marks are off", 
   const onOpen = vi.fn(), onImported = vi.fn(), onPreviewOpen = vi.fn();
   mount(<><ResumeScopePane client={client} context={context} onOpen={onOpen} onPreviewOpen={onPreviewOpen} /><SessionImportPanel client={client} onOpen={onOpen} onImported={onImported} onPreviewOpen={onPreviewOpen} /></>, true);
   fireEvent.click(screen.getByRole("button", { name: "Resume OMP session" }));
-  await screen.findByRole("heading", { name: "会话恢复与附件检查" });
+  await screen.findByRole("heading", { name: "Session resume & attachment check" });
   expect(screen.queryByText("Demo")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Resume session" }));
   fireEvent.click(screen.getByRole("button", { name: "Import Claude / Codex sessions" }));

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StudioClient, WorkspaceId, GitBranchRecord, GitOperationResult } from "@omp-studio/client-contract";
 import { useI18n } from "../i18n";
 import { useConversationDom } from "../conversationWorkspace/Context";
@@ -7,7 +7,10 @@ import type { useGitRepository } from "./useGitRepository";
 import { switchBlockedFilesOf, type SwitchBlockedFile } from "./branchSwitchErrors";
 
 export function useWorkbenchBranches({ client, gitWorkspaceId, realGit, preview, running, interactionPending }: { client: StudioClient; gitWorkspaceId: WorkspaceId | undefined; realGit: ReturnType<typeof useGitRepository>; preview: boolean; running: boolean; interactionPending: boolean }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const { window } = useConversationDom();
   const [contextBranchMenuOpen, setContextBranchMenuOpen] = useState(false);
   const [branchListState, setBranchListState] = useState<{ status: "idle" | "loading" | "ready" | "error"; branches: ReadonlyArray<GitBranchRecord>; error?: string }>({ status: "idle", branches: [] });
@@ -31,7 +34,7 @@ export function useWorkbenchBranches({ client, gitWorkspaceId, realGit, preview,
       const value = await client.query("git.branches.list", { workspaceId: gitWorkspaceId });
       setBranchListState({ status: "ready", branches: value.branches });
     } catch (cause) {
-      setBranchListState({ status: "error", branches: [], error: hostErrorMessage(cause, "无法读取分支列表") });
+      setBranchListState({ status: "error", branches: [], error: hostErrorMessage(cause, zhRef.current ? "无法读取分支列表" : "Cannot load branch list") });
     }
   }, [client, gitWorkspaceId]);
   const openCreateBranch = () => {
@@ -127,7 +130,7 @@ export function useWorkbenchBranches({ client, gitWorkspaceId, realGit, preview,
       });
       await waitReceipt<GitOperationResult>(client, handle.requestId, 60_000);
       setCreateBranchOpen(false);
-      setBranchNotice({ tone: "ok", text: `已创建并切换到 ${name}` });
+      setBranchNotice({ tone: "ok", text: zhRef.current ? `已创建并切换到 ${name}` : `Created and switched to ${name}` });
       void loadBranches();
     } catch (cause) {
       setCreateBranchError(hostErrorMessage(cause, t("git.createBranchFailed")));

@@ -19,6 +19,19 @@ export const STARTUP_NOTICE_COPY = {
   thanks: "感谢使用 OMP Studio。",
 } as const;
 
+export const STARTUP_NOTICE_COPY_EN = {
+  kicker: "Development preview",
+  title: "Work in progress",
+  body: "OMP Studio is still under active development and some features are incomplete. You may encounter rough edges, missing capabilities, or behavior that differs from the final release. Bug reports, issues, and feature ideas are welcome.",
+  hint: "Track progress on the GitHub repository or open an issue to join the discussion.",
+  repoLabel: "Repository",
+  thanks: "Thank you for trying OMP Studio.",
+} as const;
+
+export function getStartupNoticeCopy(zh: boolean) {
+  return zh ? STARTUP_NOTICE_COPY : STARTUP_NOTICE_COPY_EN;
+}
+
 function readStorage(key: string): string | null {
   try {
     return globalThis.localStorage?.getItem(key) ?? null;

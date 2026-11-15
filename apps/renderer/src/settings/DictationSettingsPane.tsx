@@ -10,7 +10,7 @@ import { MicrophoneSetup } from "../media/MicrophoneSetup";
 import { DictationDetails } from "../composer/DictationDetails";
 import { dictationCommand } from "../composer/dictationClient";
 import { isValidDictationShortcut } from "../composer/dictationKeyboard";
-import { PREVIEW_DICTATION_CONFIGURATION } from "../preview/dictationPreview";
+import { getPreviewDictationConfiguration } from "../preview/dictationPreview";
 import { DictationDemo } from "../preview/DictationDemo";
 import { hostErrorMessage } from "../hostError";
 import "../composer/dictation.css";
@@ -29,12 +29,12 @@ export function DictationSettingsPane(props: FeatureSettingsProps & { onModels?(
   useEffect(() => {
     let current = true;
     setError("");
-    if (preview) setConfiguration(PREVIEW_DICTATION_CONFIGURATION);
+    if (preview) setConfiguration(getPreviewDictationConfiguration(zh));
     else if (props.visible && props.client && props.context?.sessionId && supports) {
       void dictationCommand(props.client, "dictation.inspect", { sessionId: props.context.sessionId }).then(value => { if (current) setConfiguration(value); }).catch(cause => { if (current) setError(hostErrorMessage(cause, t("无法读取有效听写配置", "Could not inspect dictation settings"))); });
     } else setConfiguration(undefined);
     return () => { current = false; };
-  }, [preview, props.visible, props.client, props.context?.sessionId, supports, revision]);
+  }, [preview, props.visible, props.client, props.context?.sessionId, supports, revision, zh]);
   return <section aria-label={t("语音输入设置", "Voice input settings")}>
     <FeatureSettingsPane {...props} group="dictation" onSaved={saved} />
     <div className="dictation-settings-extras">

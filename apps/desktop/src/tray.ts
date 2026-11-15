@@ -179,14 +179,19 @@ export function createAppTray(options: {
   const icon = options.electron.createImageFromPath(options.iconPath);
   if (icon.isEmpty()) return undefined;
   const platform = options.platform ?? process.platform;
-  const strings = trayStrings(options.locale, platform);
-
+  let activeLocale = options.locale;
   const tray = options.electron.createTrayFromImage(icon);
-  tray.setToolTip(strings.tooltip);
-  tray.setContextMenu(options.electron.buildMenu(trayMenuTemplate(strings, {
-    open: options.onOpen,
-    quit: options.onQuit,
-  })));
+  const applyLocale = (nextLocale: string): void => {
+    activeLocale = nextLocale;
+    if (tray.isDestroyed()) return;
+    const strings = trayStrings(activeLocale, platform);
+    tray.setToolTip(strings.tooltip);
+    tray.setContextMenu(options.electron.buildMenu(trayMenuTemplate(strings, {
+      open: options.onOpen,
+      quit: options.onQuit,
+    })));
+  };
+  applyLocale(activeLocale);
   tray.on("click", () => options.onOpen());
 
   // In-process latch: the marker write is async, so without it a second
@@ -195,12 +200,15 @@ export function createAppTray(options: {
   let hintPending = !trayHintShown(options.persistRoot);
 
   return {
+    setLocale(nextLocale: string) {
+      applyLocale(nextLocale);
+    },
     // displayBalloon 仅 Windows 提供；其他平台静默跳过。
     notifyHiddenToTray() {
       if (platform !== "win32") return;
       if (!hintPending || tray.isDestroyed()) return;
       hintPending = false;
-      const balloon = firstHideBalloonStrings(options.locale);
+      const balloon = firstHideBalloonStrings(activeLocale);
       tray.displayBalloon({ icon, title: balloon.title, content: balloon.content });
       void markTrayHintShown(options.persistRoot).catch(() => undefined);
     },

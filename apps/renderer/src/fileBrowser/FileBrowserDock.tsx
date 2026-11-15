@@ -21,7 +21,7 @@ export function FileBrowserDock({ targetId, targetName, workspaceId, actions }: 
   const targets = useExecutionTargets(), view = useConversationView(), { store } = useDockEngine();
   const open = useOpenFile(), language = resolvedLanguage === "zh" ? "zh" : "en";
   const [location, setLocation] = useState<{ revision: number; path?: string; error?: string }>();
-  const source = useMemo(() => preview ? createPreviewFileBrowserSource() : createHostFileBrowserSource({
+  const source = useMemo(() => preview ? createPreviewFileBrowserSource(undefined, undefined, language) : createHostFileBrowserSource({
     client: () => targets.readyClient(targetId), targetId, workspaceId, language,
     label: targetId ? `SSH · ${targetName ?? targetId}` : language === "zh" ? "本机" : "Local",
   }), [preview, targets, targetId, targetName, workspaceId, language]);
@@ -38,8 +38,8 @@ export function FileBrowserDock({ targetId, targetName, workspaceId, actions }: 
         const directory = await client.query("fs.list", intent.workspaceId ? { workspaceId: intent.workspaceId as WorkspaceId, path: intent.path } : { path: intent.path });
         setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, path: directory.path }));
       }
-    })().catch(error => setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, error: hostErrorMessage(error, "无法打开文件夹") })));
-  }), [view?.document.id, store, source, targets, targetId, preview]);
+    })().catch(error => setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, error: hostErrorMessage(error, language === "zh" ? "无法打开文件夹" : "Cannot open the folder") })));
+  }), [view?.document.id, store, source, targets, targetId, preview, language]);
 
   const openFile = (entry: FsEntry) => {
     const intent = preview ? previewProjectFile(entry.path) ?? { source: "system" as const, path: entry.path } : systemFileReference(entry);

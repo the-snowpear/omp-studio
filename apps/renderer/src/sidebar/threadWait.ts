@@ -1,15 +1,26 @@
 import type { ClientInteraction, ResidentSessionRow } from "@omp-studio/client-contract";
+import { isZh } from "../i18n";
 import type { PlanState } from "@omp-studio/studio-protocol";
 import { residentForSession, type ResidentRows } from "./threadRunning";
 
 /** Sidebar capsule when a thread is blocked on the operator. */
 export type ThreadWaitKind = "approval" | "plan" | "ask";
 
-export const THREAD_WAIT_LABEL: Record<ThreadWaitKind, string> = {
+const THREAD_WAIT_LABEL_ZH: Record<ThreadWaitKind, string> = {
   approval: "待确认",
   plan: "待审核",
   ask: "待回答",
 };
+
+const THREAD_WAIT_LABEL_EN: Record<ThreadWaitKind, string> = {
+  approval: "Needs confirmation",
+  plan: "Needs review",
+  ask: "Needs answer",
+};
+
+export function threadWaitLabel(kind: ThreadWaitKind, zh = isZh()): string {
+  return (zh ? THREAD_WAIT_LABEL_ZH : THREAD_WAIT_LABEL_EN)[kind];
+}
 
 export const THREAD_WAIT_TONE: Record<ThreadWaitKind, "amber" | "purple" | "blue"> = {
   approval: "amber",

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { BtwSnapshot, PromptImageInput, StudioClient } from "@omp-studio/client-contract";
 import type { AgentBtwOperation, AgentBtwState } from "@omp-studio/studio-protocol";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { agentBtwPreview, PREVIEW_CHILD_BTW_TURNS } from "../preview/agentBtwPreview";
+import { agentBtwPreview, getPreviewChildBtwTurns } from "../preview/agentBtwPreview";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { emptySnapshot, type ComposerSnapshot } from "../composer/types";
@@ -27,7 +27,7 @@ export function AgentBtwPane({ client, sessionId, agentId, available, viewState 
   const [notice, setNotice] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
-  const demoHistory = useRef<Record<string, AgentBtwState["turns"]>>({ "demo-child-topic": [...PREVIEW_CHILD_BTW_TURNS] });
+  const demoHistory = useRef<Record<string, AgentBtwState["turns"]>>({ "demo-child-topic": [...getPreviewChildBtwTurns(zh)] });
   const epoch = useRef(0);
   const binding = useRef<string | undefined>(undefined);
   const stopped = useRef(false);
@@ -47,9 +47,9 @@ export function AgentBtwPane({ client, sessionId, agentId, available, viewState 
     const generation = ++epoch.current;
     binding.current = undefined; stopped.current = false; action.current = false;
     historyTopic.current = ""; historyVersion.current = "";
-    setState(preview ? viewState?.previewState ?? agentBtwPreview(agentId) : undefined);
+    setState(preview ? viewState?.previewState ?? agentBtwPreview(agentId, zh) : undefined);
     setTopic(viewState?.topic ?? ""); setDraft(viewState?.draft ?? emptySnapshot()); setError(undefined); setNotice(undefined); setBusy(false);
-    demoHistory.current = viewState?.previewHistory ?? { "demo-child-topic": [...PREVIEW_CHILD_BTW_TURNS] };
+    demoHistory.current = viewState?.previewHistory ?? { "demo-child-topic": [...getPreviewChildBtwTurns(zh)] };
     if (preview && viewState) viewState.previewHistory = demoHistory.current;
     let timer: ReturnType<typeof setTimeout>;
     const read = async () => {
@@ -75,7 +75,7 @@ export function AgentBtwPane({ client, sessionId, agentId, available, viewState 
     };
     if (!preview) void read();
     return () => { epoch.current++; clearTimeout(timer); };
-  }, [client, sessionId, agentId, preview]);
+  }, [client, sessionId, agentId, preview, zh]);
   useEffect(() => { if (preview && viewState && state) viewState.previewState = state; }, [preview, viewState, state]);
 
   const choose = (next: string) => {
@@ -96,7 +96,7 @@ export function AgentBtwPane({ client, sessionId, agentId, available, viewState 
     if (action.current || running || !question.trim()) return false;
     if (preview) {
       const now = Date.now(), topicId = topic || "demo-topic-" + now;
-      const answer = marks ? (zh ? "演示：本话题只使用所选子代理的上下文，不会发往 Host。" : "Demo: using only this child's context; no Host call.") : PREVIEW_CHILD_BTW_TURNS[0]!.answer;
+      const answer = marks ? (zh ? "演示：本话题只使用所选子代理的上下文，不会发往 Host。" : "Demo: using only this child's context; no Host call.") : getPreviewChildBtwTurns(zh)[0]!.answer;
       const turns = [...(demoHistory.current[topicId] ?? []), { question, ...(images?.length ? { images } : {}), answer, status: "complete" as const, createdAt: now, updatedAt: now }];
       demoHistory.current[topicId] = turns;
       setState(current => ({ ...current!, snapshot: { ephemeralId: "demo-child-" + now, topicId, question, text: answer, status: "completed", turnIndex: turns.length - 1 }, topics: [{ topicId, question: turns[0]!.question, status: "complete", updatedAt: now, turnCount: turns.length }, ...current!.topics.filter(item => item.topicId !== topicId)], turns }));

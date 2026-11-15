@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { open, readFile, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { desktopText } from "./desktop-language-shared.js";
 import { applyMirror } from "./update-index.js";
 import { UpdateTransportError, withUpdateRequest, type UpdateRequestLog, type UpdateRequestPolicy } from "./update-request.js";
 
@@ -90,7 +91,7 @@ export async function assertFreeSpace(path: string, requiredBytes: number): Prom
   if (freeBytes < requiredBytes) {
     const freeMb = Math.round(freeBytes / (1024 * 1024));
     const reqMb = Math.round(requiredBytes / (1024 * 1024));
-    throw new Error(`磁盘空间不足: 可用 ${freeMb} MB, 至少需要 ${reqMb} MB`);
+    throw new Error(desktopText(`磁盘空间不足: 可用 ${freeMb} MB, 至少需要 ${reqMb} MB`, `Insufficient disk space: ${freeMb} MB available, at least ${reqMb} MB required`));
   }
 }
 
@@ -160,8 +161,8 @@ export async function downloadOne(input: DownloadOneInput): Promise<void> {
       const contentRange = response.headers.get("content-range");
       if (!contentRange) throw new Error("Missing Content-Range for partial response");
       const match = /^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(contentRange);
-      if (!match) throw new Error(`无法解析 Content-Range: ${contentRange}`);
-      if (Number(match[1]) !== startByte) throw new Error(`Content-Range 起点不符: 期望 ${startByte}, 实际 ${match[1]}`);
+      if (!match) throw new Error(desktopText(`无法解析 Content-Range: ${contentRange}`, `Unable to parse Content-Range: ${contentRange}`));
+      if (Number(match[1]) !== startByte) throw new Error(desktopText(`Content-Range 起点不符: 期望 ${startByte}, 实际 ${match[1]}`, `Content-Range offset mismatch: expected ${startByte}, got ${match[1]}`));
       if (Number(match[3]) !== input.expectedSize || Number(match[2]) !== input.expectedSize - 1) throw new Error("Content-Range size mismatch");
       resuming = true;
     } else {
@@ -214,7 +215,7 @@ export async function downloadOne(input: DownloadOneInput): Promise<void> {
     if (receivedBytes !== input.expectedSize) throw new UpdateTransportError("Download size mismatch: response ended before the signed size");
     attempt.signal.throwIfAborted();
     const actualSha256 = hash.digest("hex");
-    if (actualSha256 !== input.expectedSha256.toLowerCase()) throw new Error(`SHA-256 校验失败: 期望 ${input.expectedSha256}, 实际 ${actualSha256}`);
+    if (actualSha256 !== input.expectedSha256.toLowerCase()) throw new Error(desktopText(`SHA-256 校验失败: 期望 ${input.expectedSha256}, 实际 ${actualSha256}`, `SHA-256 checksum mismatch: expected ${input.expectedSha256}, got ${actualSha256}`));
     await rename(partFile, input.destination);
     await rm(metaFile, { force: true }).catch(() => {});
     input.onProgress(receivedBytes, totalBytes);

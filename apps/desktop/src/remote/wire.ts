@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import { encodeFrame, FrameDecoder, type RuntimeEpoch } from "@omp-studio/studio-protocol";
 import { RemoteConnectionError, sshFailure, type RemoteConnectionErrorCode } from "./errors.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 export const REMOTE_PROTOCOL_VERSION = 3;
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 const MAX_BUFFERED_BYTES = 32 * 1024 * 1024;
 const WIRE_EPOCH = 1 as RuntimeEpoch;
-export type RemoteMethod = "context.open" | "context.close" | "hello" | "ping" | "bootstrap" | "query" | "command" | "subscribe" | "workspace.register" | "workspace.path" | "directories" | "shutdown" | "network.open" | "network.configure" | "network.reset" | "provisioning.apply" | "memory.credentials.replace" | "timeTravel.settings.sync";
-const METHODS = new Set<RemoteMethod>(["context.open", "context.close", "hello", "ping", "bootstrap", "query", "command", "subscribe", "workspace.register", "workspace.path", "directories", "shutdown", "network.open", "network.configure", "network.reset", "provisioning.apply", "memory.credentials.replace", "timeTravel.settings.sync"]);
+export type RemoteMethod = "context.open" | "context.close" | "hello" | "ping" | "bootstrap" | "query" | "command" | "subscribe" | "workspace.register" | "workspace.path" | "directories" | "shutdown" | "network.open" | "network.configure" | "network.reset" | "provisioning.apply" | "memory.credentials.replace" | "timeTravel.settings.sync" | "desktop.language.set";
+const METHODS = new Set<RemoteMethod>(["context.open", "context.close", "hello", "ping", "bootstrap", "query", "command", "subscribe", "workspace.register", "workspace.path", "directories", "shutdown", "network.open", "network.configure", "network.reset", "provisioning.apply", "memory.credentials.replace", "timeTravel.settings.sync", "desktop.language.set"]);
 export interface RemoteAttachment { key: string; sequence: number; }
 export class RemoteOperationError extends Error {}
 export class RemoteRequestTimeout extends Error {
@@ -89,7 +90,7 @@ export class RemotePeer {
   readonly #onData = (chunk: Buffer): void => {
     try {
       for (const frame of this.#decoder.push(chunk)) this.#receive(frame.body);
-    } catch { this.close(new RemoteConnectionError("protocol", "远端控制协议异常，已停止连接；不会重发命令")); }
+    } catch { this.close(new RemoteConnectionError("protocol", desktopText("远端控制协议异常，已停止连接；不会重发命令", "Remote control protocol error; connection stopped and commands will not be resent"))); }
   };
 
   #send(message: Message): void {

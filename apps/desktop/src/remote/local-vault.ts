@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse, stringify } from "yaml";
 import { MIRRORED_MODEL_SETTINGS, type RemoteProvisioning } from "./provisioning.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 export interface LocalVaultOptions {
   agentDirectory: () => string;
@@ -37,7 +38,7 @@ export class LocalCredentialVault {
     let failure: Error | undefined; child.once("error", error => { failure = error; });
     for (let attempt = 0; attempt < 100; attempt++) {
       if (failure) throw failure;
-      if (child.exitCode !== null) throw new Error("本机凭证服务启动失败，请检查 Runtime 的 Auth Broker 支持");
+      if (child.exitCode !== null) throw new Error(desktopText("本机凭证服务启动失败，请检查 Runtime 的 Auth Broker 支持", "Failed to start local credential service; please check Runtime Auth Broker support"));
       try {
         if ((await fetch(`${url}/v1/healthz`, { signal: AbortSignal.timeout(500) })).ok) {
           const token = (await readFile(join(dirname(directory), "auth-broker.token"), "utf8")).trim();
@@ -46,7 +47,7 @@ export class LocalCredentialVault {
       } catch { /* The native service is still opening its credential store. */ }
       await delay(100);
     }
-    child.kill(); throw new Error("本机凭证服务启动超时");
+    child.kill(); throw new Error(desktopText("本机凭证服务启动超时", "Local credential service startup timed out"));
   }
   async snapshot(): Promise<RemoteProvisioning> {
     const directory = this.options.agentDirectory();
@@ -58,7 +59,7 @@ export class LocalCredentialVault {
     }
     const native = await this.endpoint();
     const authSnapshot = await fetch(`${native.url}/v1/snapshot`, { headers: { Authorization: `Bearer ${native.token}` } }).then(response => {
-      if (!response.ok) throw new Error("无法读取本机模型凭证");
+      if (!response.ok) throw new Error(desktopText("无法读取本机模型凭证", "Unable to read local model credentials"));
       return response.json() as Promise<{ credentials?: { provider: string; credential: { type?: string; key?: string } }[] }>;
     });
     const providers = models.providers ??= {};

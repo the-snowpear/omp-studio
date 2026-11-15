@@ -11,6 +11,7 @@ import type {
 } from "@omp-studio/client-contract";
 import type { HostWorkspaceFileService } from "@omp-studio/host-client-api";
 import type { WorkspaceRegistry } from "@omp-studio/studio-host";
+import { desktopText } from "./desktop-language-shared.js";
 
 const MAX_DIRECTORY_ENTRIES = 5_000;
 const IGNORED = new Set([".git", "node_modules"]);
@@ -72,10 +73,10 @@ export function createWorkspaceFileService({ registry }: { readonly registry: Wo
     // Markdown links may use /C:/... as well as C:\... on Windows.
     if (process.platform === "win32" && /^\/[A-Za-z]:[\\/]/.test(requested)) requested = requested.slice(1);
     const candidate = isAbsolute(requested) ? requested : resolve(root, requested);
-    if (writing && (await lstat(candidate)).isSymbolicLink()) throw new Error("不能写入符号链接文件");
+    if (writing && (await lstat(candidate)).isSymbolicLink()) throw new Error(desktopText("不能写入符号链接文件", "Cannot write through a symbolic link"));
     const target = await realpath(candidate);
-    if (escapedFrom(root, target)) throw new Error("文件不在当前工作区内");
-    if (!(await lstat(target)).isFile()) throw new Error("此路径不是文件");
+    if (escapedFrom(root, target)) throw new Error(desktopText("文件不在当前工作区内", "File is outside the current workspace"));
+    if (!(await lstat(target)).isFile()) throw new Error(desktopText("此路径不是文件", "Path is not a file"));
     return { target, path: relative(root, target).split(sep).join("/") };
   }
   async function inspect(input: WorkspaceFileTarget): Promise<WorkspaceFileInfo> {

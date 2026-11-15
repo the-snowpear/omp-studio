@@ -10,9 +10,17 @@ import type {
 } from "@omp-studio/client-contract";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 import { waitReceipt } from "./hostError";
+import { pickLocale } from "./i18n";
+
+export function newConversationUnavailableReason(): string {
+  return pickLocale(
+    "Host 未提供 session.create，无法创建新的 Runtime 会话。",
+    "Host does not provide session.create, so a new Runtime session cannot be created.",
+  );
+}
 
 export const NEW_CONVERSATION_UNAVAILABLE_REASON =
-  "Host 未提供 session.create，无法创建新的 Runtime 会话。";
+  "Host does not provide session.create, so a new Runtime session cannot be created.";
 
 export type NewSessionWaitResult =
   | { readonly ok: true; readonly sessionId?: SessionId }
@@ -116,14 +124,20 @@ export async function ensureSelectedSessionActive(
 ): Promise<void> {
   if (target.selectedSessionId === undefined || target.activeSessionId === target.selectedSessionId) return;
   if (target.selectedThreadId === undefined) {
-    throw { code: "INVALID_ARGUMENT", message: "当前历史会话缺少 threadId，无法自动恢复后发送。" };
+    throw {
+      code: "INVALID_ARGUMENT",
+      message: pickLocale("当前历史会话缺少 threadId，无法自动恢复后发送。", "This history session has no threadId, so it cannot resume automatically before sending."),
+    };
   }
   const handle = await client.command("session.resume", { threadId: target.selectedThreadId, ...(target.model === undefined ? {} : { model: target.model }) });
   const snapshot = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId, 30_000);
   if (snapshot.sessionId !== target.selectedSessionId) {
     throw {
       code: "STATE_VERSION_CONFLICT",
-      message: `恢复后的会话与发送目标不一致：期望 ${target.selectedSessionId}，实际 ${snapshot.sessionId}。`,
+      message: pickLocale(
+        `恢复后的会话与发送目标不一致：期望 ${target.selectedSessionId}，实际 ${snapshot.sessionId}。`,
+        `Resumed session does not match send target: expected ${target.selectedSessionId}, got ${snapshot.sessionId}.`,
+      ),
     };
   }
 }

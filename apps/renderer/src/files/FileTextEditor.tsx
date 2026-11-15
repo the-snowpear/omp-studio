@@ -7,6 +7,7 @@ import { coreEditorExtensions } from "../structured-editor/extensions";
 import type { FileDocument } from "./fileDocuments";
 import type { FilePanelDescriptor } from "../dock/types";
 import { useSurfaceDocument } from "../dock/SurfaceContext";
+import { isZh } from "../i18n";
 import { gitChangeGutter, setGitMarks, type PatchMarks } from "./gitMarks";
 
 /** Caret and selection summary for the status bar. */
@@ -63,8 +64,9 @@ export default function FileTextEditor({ session, descriptor, onViewState, readO
         return { pos: range.head, above, strictSide: false, arrow: false, create: editor => {
           const owner = editor.dom.ownerDocument, dom = owner.createElement("div"); dom.className = "file-selection-bar";
           const button = (label: string, tip: string, run: () => void) => { const element = owner.createElement("button"); element.type = "button"; element.textContent = label; element.dataset.tip = tip; element.onmousedown = event => event.preventDefault(); element.onclick = run; dom.append(element); };
-          if (latest.current.commands?.onAddSelection) button("＠ 添加到对话", "把选中的行作为上下文加入对话（Ctrl Shift L）", () => { const selection = lineRange(editor.state); if (selection) latest.current.commands?.onAddSelection?.(selection); });
-          button("复制", "复制选区", () => latest.current.commands?.onCopy?.(editor.state.sliceDoc(editor.state.selection.main.from, editor.state.selection.main.to)));
+          const zh = isZh();
+          if (latest.current.commands?.onAddSelection) button(zh ? "＠ 添加到对话" : "@ Add to conversation", zh ? "把选中的行作为上下文加入对话（Ctrl Shift L）" : "Add selected lines to conversation context (Ctrl Shift L)", () => { const selection = lineRange(editor.state); if (selection) latest.current.commands?.onAddSelection?.(selection); });
+          button(zh ? "复制" : "Copy", zh ? "复制选区" : "Copy selection", () => latest.current.commands?.onCopy?.(editor.state.sliceDoc(editor.state.selection.main.from, editor.state.selection.main.to)));
           return { dom, offset: { x: 0, y: 6 } };
         } };
       },

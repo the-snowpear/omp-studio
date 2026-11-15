@@ -125,9 +125,11 @@ const TEXT_SAMPLE: Record<string, string> = {
 const CODE_SAMPLE = "import { useState } from \"react\";\n\nexport function Counter() {\n  const [count, setCount] = useState(0);\n  return <button onClick={() => setCount(count + 1)}>{count}</button>;\n}\n";
 const IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#172c43"/><stop offset="1" stop-color="#3b3f8f"/></linearGradient></defs><rect width="480" height="300" fill="url(#g)"/><circle cx="240" cy="130" r="70" fill="#72cbb4"/><text x="240" y="250" text-anchor="middle" fill="white" font-size="26" font-family="sans-serif">OMP Studio</text></svg>')}`;
 
-export function createPreviewFileBrowserSource(platform: "win32" | "darwin" = PLATFORM === "darwin" ? "darwin" : "win32", now = Date.now()): FileBrowserSource {
+export function createPreviewFileBrowserSource(platform: "win32" | "darwin" = PLATFORM === "darwin" ? "darwin" : "win32", now = Date.now(), language: "zh" | "en" = "zh"): FileBrowserSource {
+  const copy = (zh: string, en: string) => language === "zh" ? zh : en;
   const sep = platform === "win32" ? "\\" : "/";
-  const vols = volumes(platform);
+  const driveLabels: Record<string, string> = { 系统: "System", 数据: "Data", "U 盘": "USB drive" };
+  const vols = volumes(platform).map(volume => ({ ...volume, drive: { ...volume.drive, label: copy(volume.drive.label, driveLabels[volume.drive.label] ?? volume.drive.label) } }));
   /** 键是比较用的路径（Windows 不分大小写），值保留原始写法。 */
   const folders = new Map<string, { path: string; entries: FsEntry[] }>();
   const keyOf = (path: string) => platform === "win32" ? path.toLowerCase() : path;
@@ -150,13 +152,13 @@ export function createPreviewFileBrowserSource(platform: "win32" | "darwin" = PL
   const home = platform === "win32" ? "C:\\Users\\demo" : "/Users/demo";
   const projects = PREVIEW_PROJECTS.map((project, position) => ({ name: project.name, root: project.path, ...(position === 0 ? { current: true } : {}) }));
   const places: FsPlaces = {
-    platform, separator: sep, computerLabel: platform === "win32" ? "此电脑" : "此 Mac", home,
+    platform, separator: sep, computerLabel: platform === "win32" ? copy("此电脑", "This computer") : copy("此 Mac", "This Mac"), home,
     quick: [
       { kind: "home", label: "demo", path: home },
-      { kind: "desktop", label: "桌面", path: joinPath(home, "Desktop", sep) },
-      { kind: "downloads", label: "下载", path: joinPath(home, "Downloads", sep) },
-      { kind: "documents", label: "文档", path: joinPath(home, "Documents", sep) },
-      { kind: "pictures", label: "图片", path: joinPath(home, "Pictures", sep) },
+      { kind: "desktop", label: copy("桌面", "Desktop"), path: joinPath(home, "Desktop", sep) },
+      { kind: "downloads", label: copy("下载", "Downloads"), path: joinPath(home, "Downloads", sep) },
+      { kind: "documents", label: copy("文档", "Documents"), path: joinPath(home, "Documents", sep) },
+      { kind: "pictures", label: copy("图片", "Pictures"), path: joinPath(home, "Pictures", sep) },
     ],
     drives: vols.map(volume => volume.drive),
     projects,
@@ -173,16 +175,16 @@ export function createPreviewFileBrowserSource(platform: "win32" | "darwin" = PL
   };
 
   return {
-    kind: "preview", label: "本机", local: true, trash: true,
+    kind: "preview", label: copy("本机", "Local"), local: true, trash: true,
     places: () => wait(places, 40),
     list(path) {
       if (path === COMPUTER) return wait<FsDirectory>({ path, entries: vols.map(volume => ({ name: driveDisplayName(volume.drive, sep), path: volume.drive.path, type: "dir" as const, ...(volume.drive.ready ? {} : { denied: true }) })) }, 40);
       const drive = vols.find(volume => within(path, volume.drive.path, sep));
-      if (drive && !drive.drive.ready) return fail(`${drive.drive.label}（${baseName(drive.drive.path, sep)}）未就绪：请插入设备后重试`);
+      if (drive && !drive.drive.ready) return fail(copy(`${drive.drive.label}（${baseName(drive.drive.path, sep)}）未就绪：请插入设备后重试`, `${drive.drive.label} (${baseName(drive.drive.path, sep)}) is not ready; connect the device and try again`));
       const entry = findEntry(path);
-      if (entry?.denied) return fail("没有权限读取此文件夹");
+      if (entry?.denied) return fail(copy("没有权限读取此文件夹", "Permission denied for this folder"));
       const entries = tree.get(path);
-      if (!entries) return fail("路径不存在或不是文件夹");
+      if (!entries) return fail(copy("路径不存在或不是文件夹", "The path does not exist or is not a folder"));
       const project = projects.find(item => within(path, item.root, sep));
       return wait<FsDirectory>({ path: drive && samePath(drive.drive.path, path, sep) ? drive.drive.path : (entry?.path ?? path), entries: entries.slice(0, 5000), ...(entries.length > 5000 ? { truncated: true } : {}), ...(project ? { project: { name: project.name, root: project.root } } : {}) }, entries.length > 100 ? 220 : 90);
     },
@@ -190,13 +192,15 @@ export function createPreviewFileBrowserSource(platform: "win32" | "darwin" = PL
       const ext = entry.name.includes(".") ? entry.name.slice(entry.name.lastIndexOf(".") + 1).toLowerCase() : "";
       if (/^(png|jpe?g|gif|webp|svg|bmp|heic)$/.test(ext)) return wait<FsPeek>({ image: IMAGE }, 60);
       if (/^(tsx?|jsx?|mjs|cjs)$/.test(ext)) return wait<FsPeek>({ text: CODE_SAMPLE }, 60);
-      const text = TEXT_SAMPLE[ext === "yaml" ? "yml" : ext] ?? (["config", "known_hosts", ".gitconfig", ".gitignore"].includes(entry.name) ? "# demo\nHost dev-server\n  HostName 192.168.1.10\n  User demo\n" : undefined);
+      const text = language === "en" && ext === "txt" ? "1. Reply to the upstream pi-web issue\n2. Prepare the 0.2.1 release notes\n3. Read spec-v3.pdf before Friday\n"
+        : language === "en" && ext === "md" ? "# Notes\n\n- Browse files across this computer\n- Open a folder and press Backspace to go up\n"
+        : TEXT_SAMPLE[ext === "yaml" ? "yml" : ext] ?? (["config", "known_hosts", ".gitconfig", ".gitignore"].includes(entry.name) ? "# demo\nHost dev-server\n  HostName 192.168.1.10\n  User demo\n" : undefined);
       return wait<FsPeek>(text === undefined ? {} : { text }, 60);
     },
     createFolder(parent, name) {
       const entries = tree.get(parent);
-      if (!entries) return fail("父文件夹不存在");
-      if (entries.some(entry => entry.name.toLowerCase() === name.toLowerCase())) return fail(`已存在同名项目：${name}`);
+      if (!entries) return fail(copy("父文件夹不存在", "Parent folder does not exist"));
+      if (entries.some(entry => entry.name.toLowerCase() === name.toLowerCase())) return fail(copy(`已存在同名项目：${name}`, `An item named ${name} already exists`));
       const path = joinPath(parent, name, sep);
       entries.push({ name, path, type: "dir", modified: Date.now() });
       tree.set(path, []);
@@ -205,8 +209,8 @@ export function createPreviewFileBrowserSource(platform: "win32" | "darwin" = PL
     rename(path, name) {
       const parent = parentPath(path, sep), entries = tree.get(parent);
       const entry = entries?.find(item => samePath(item.path, path, sep));
-      if (!entries || !entry) return fail("找不到要重命名的项目");
-      if (entries.some(item => item !== entry && item.name.toLowerCase() === name.toLowerCase())) return fail(`已存在同名项目：${name}`);
+      if (!entries || !entry) return fail(copy("找不到要重命名的项目", "Cannot find the item to rename"));
+      if (entries.some(item => item !== entry && item.name.toLowerCase() === name.toLowerCase())) return fail(copy(`已存在同名项目：${name}`, `An item named ${name} already exists`));
       const next = joinPath(parent, name, sep);
       entries.splice(entries.indexOf(entry), 1, { ...entry, name, path: next, modified: Date.now() });
       if (entry.type === "dir") remap(entry.path, next);

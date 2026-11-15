@@ -6,6 +6,7 @@ import type { HostSystemFileService } from "@omp-studio/host-client-api";
 import type { WorkspaceRegistry } from "@omp-studio/studio-host";
 import { inspectFile, readFileChunk, readFileText, writeFileText } from "./file-io.js";
 import { renameWithoutOverwrite } from "./platform/file-rename.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 const DIRECTORY_LIMIT = 5_000;
 const WINDOWS_HIDDEN = new Set(["$recycle.bin", "system volume information", "pagefile.sys", "swapfile.sys", "hiberfil.sys", "dumpstack.log.tmp", "desktop.ini"]);
@@ -15,22 +16,22 @@ const inside = (root: string, path: string) => { const suffix = relative(root, p
 
 /** Shared by the executing file service and the local shell actions, never by forwarding layers. */
 export function normalizeSystemPath(value: string): string {
-  if (typeof value !== "string" || value.includes("\0")) throw new Error("文件路径无效：不能包含 NUL");
+  if (typeof value !== "string" || value.includes("\0")) throw new Error(desktopText("文件路径无效：不能包含 NUL", "Invalid file path: NUL is not allowed"));
   const expanded = value === "~" ? homedir() : /^~[\\/]/.test(value) ? join(homedir(), value.slice(2)) : value;
-  if (!isAbsolute(expanded)) throw new Error("文件路径必须是绝对路径");
+  if (!isAbsolute(expanded)) throw new Error(desktopText("文件路径必须是绝对路径", "File path must be absolute"));
   if (process.platform === "win32") {
     const windows = expanded.replaceAll("/", "\\");
-    if (/^\\\\[?.]\\|^\\\?\?\\/.test(windows)) throw new Error("不能访问 Windows 设备路径");
-    if (!/^[a-z]:\\|^\\\\[^\\]+\\[^\\]+/i.test(windows)) throw new Error("文件路径必须包含盘符或 UNC 共享名");
+    if (/^\\\\[?.]\\|^\\\?\?\\/.test(windows)) throw new Error(desktopText("不能访问 Windows 设备路径", "Windows device paths are not supported"));
+    if (!/^[a-z]:\\|^\\\\[^\\]+\\[^\\]+/i.test(windows)) throw new Error(desktopText("文件路径必须包含盘符或 UNC 共享名", "File path must include a drive letter or UNC share"));
     const parts = windows.slice(parse(windows).root.length).split("\\");
-    if (parts.some(part => DEVICE_NAME.test(part.replace(/[ .]+$/, "")) || part.includes(":"))) throw new Error("不能访问 Windows 保留设备名或数据流");
+    if (parts.some(part => DEVICE_NAME.test(part.replace(/[ .]+$/, "")) || part.includes(":"))) throw new Error(desktopText("不能访问 Windows 保留设备名或数据流", "Windows device names and alternate data streams are not supported"));
   }
   return resolve(expanded);
 }
 
 function entryName(name: string): string {
-  if (typeof name !== "string" || !name || name === "." || name === ".." || /[\\/\0]/.test(name)) throw new Error("名称不能为空或包含路径分隔符");
-  if (process.platform === "win32" && (DEVICE_NAME.test(name) || /[<>:"|?*\x01-\x1f]/.test(name) || /[ .]$/.test(name))) throw new Error("名称不能使用 Windows 保留名、特殊字符或以点和空格结尾");
+  if (typeof name !== "string" || !name || name === "." || name === ".." || /[\\/\0]/.test(name)) throw new Error(desktopText("名称不能为空或包含路径分隔符", "Name cannot be empty or contain path separators"));
+  if (process.platform === "win32" && (DEVICE_NAME.test(name) || /[<>:"|?*\x01-\x1f]/.test(name) || /[ .]$/.test(name))) throw new Error(desktopText("名称不能使用 Windows 保留名、特殊字符或以点和空格结尾", "Name cannot use Windows reserved names, special characters, or end with a dot or space"));
   return name;
 }
 
@@ -43,7 +44,7 @@ export interface SystemFileServiceOptions {
 export async function resolveSystemShellTarget(value: string) {
   const path = await realpath(normalizeSystemPath(value));
   const info = await lstat(path);
-  if (!info.isDirectory() && !info.isFile()) throw new Error("此路径不是文件或目录");
+  if (!info.isDirectory() && !info.isFile()) throw new Error(desktopText("此路径不是文件或目录", "Path is not a file or directory"));
   return { path, kind: info.isDirectory() ? "dir" as const : "file" as const };
 }
 
@@ -53,9 +54,9 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
 
   async function fileTarget(input: SystemFileTarget, writing = false) {
     const requested = normalizeSystemPath(input.path);
-    if (writing && (await lstat(requested)).isSymbolicLink()) throw new Error("不能写入符号链接文件");
+    if (writing && (await lstat(requested)).isSymbolicLink()) throw new Error(desktopText("不能写入符号链接文件", "Cannot write through a symbolic link"));
     const target = await realpath(requested);
-    if (!(await lstat(target)).isFile()) throw new Error("此路径不是文件");
+    if (!(await lstat(target)).isFile()) throw new Error(desktopText("此路径不是文件", "Path is not a file"));
     return target;
   }
   const inspect = async (input: SystemFileTarget) => {
@@ -153,11 +154,11 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
 
   async function mutableEntry(value: string): Promise<string> {
     const target = normalizeSystemPath(value);
-    if (dirname(target) === target) throw new Error("不能修改磁盘或卷的根目录");
+    if (dirname(target) === target) throw new Error(desktopText("不能修改磁盘或卷的根目录", "Cannot modify a disk or volume root"));
     // Resolve the parent, leaving the entry itself intact: rename/trash act on a link, never its target.
     const path = join(await realpath(dirname(target)), basename(target));
     const info = await lstat(path);
-    if (info.isDirectory() && info.dev !== (await stat(dirname(path))).dev) throw new Error("不能修改磁盘或卷的根目录");
+    if (info.isDirectory() && info.dev !== (await stat(dirname(path))).dev) throw new Error(desktopText("不能修改磁盘或卷的根目录", "Cannot modify a disk or volume root"));
     return path;
   }
   return {

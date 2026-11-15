@@ -11,8 +11,10 @@ import { dockReducer } from "../dock/model";
 import { conversationPanelId, type DockTarget } from "../dock/types";
 import { measureCardPlacement, cardPlacementRect } from "../dock/cardDrag";
 import { conversationDocument } from "./dom";
+import { isZh } from "../i18n";
 
 export function dragConversation(event: PointerEvent<HTMLElement>, store: ConversationWorkspaceStore, source: { viewId: string } | { ref: ConversationRef; title: string }) {
+  const zh = isZh();
   const surface = event.currentTarget.ownerDocument;
   const canvas = surface.querySelector<HTMLElement>("[data-conversation-canvas]");
   if (!canvas) return;
@@ -25,7 +27,7 @@ export function dragConversation(event: PointerEvent<HTMLElement>, store: Conver
   const host = record ? store.hosts.get(record.id) : undefined;
   const tools = host?.tools ?? (store.getSnapshot().activeDocumentId ? store.hosts.get(store.getSnapshot().activeDocumentId!).tools : undefined);
   if (!tools || tools.store.getSnapshot().preferences.locked) return;
-  const title = record?.title ?? ("title" in source ? source.title : "新对话");
+  const title = record?.title ?? ("title" in source ? source.title : (zh ? "新对话" : "New conversation"));
   const sourceId = view?.id ?? "pending-conversation";
   const bodyFrame = view ? surface.querySelector<HTMLElement>(`[data-conversation-view="${view.id}"]`) : null;
   const frame = bodyFrame?.closest<HTMLElement>("[data-dock-card]") ?? bodyFrame;
@@ -41,7 +43,7 @@ export function dragConversation(event: PointerEvent<HTMLElement>, store: Conver
   const directory = event.currentTarget.closest("#projectList")?.getBoundingClientRect();
   const checkpoint = store.windows.checkpoint();
   const documentId = record?.id ?? ("ref" in source ? store.getSnapshot().documents.find(document => conversationKey(document.ref) === conversationKey(source.ref))?.id : undefined);
-  const content: NonNullable<DragPreview["conversation"]> = { title, documentId, sourceElement: frame ?? undefined, attach: record ? slots => store.hosts.preview(record.id, slots) : undefined, loadingLabel: "正在打开对话…" };
+  const content: NonNullable<DragPreview["conversation"]> = { title, documentId, sourceElement: frame ?? undefined, attach: record ? slots => store.hosts.preview(record.id, slots) : undefined, loadingLabel: zh ? "正在打开对话…" : "Opening conversation…" };
   let started = false, target: ConversationSnapTarget | null = null;
   let dockTarget: DockTarget | null = null;
   const panel = conversationPanelId(sourceId);
@@ -76,14 +78,14 @@ export function dragConversation(event: PointerEvent<HTMLElement>, store: Conver
       if (suspended || !tools.store.getSnapshot().preferences.snap) snapTracker.reset();
       target = !suspended && tools.store.getSnapshot().preferences.snap ? snapTracker.hit(point.x, point.y, area, store.getSnapshot().snap, !!store.manager.mainConversation(sourceId)) : null;
       if (!target) return null;
-      if ("maximize" in target) return { rect: area, label: "最大化对话", key: "conversation-maximize" };
+      if ("maximize" in target) return { rect: area, label: zh ? "最大化对话" : "Maximize conversation", key: "conversation-maximize" };
       const projected = store.manager.project(sourceId, target);
       restorePreview = previewWindowLayout(store.manager, projected, sourceId, surface);
       const candidate = projected.snap!;
       const size = store.manager.size(candidate);
       const cell = snapCells(target.template, candidate.tree, size)[target.cell]!;
       const viewport = canvas.querySelector<HTMLElement>(".cw-snap-viewport");
-      return { rect: { ...cell, x: area.x + cell.x - (viewport?.scrollLeft ?? 0), y: area.y + cell.y - (viewport?.scrollTop ?? 0) }, label: "吸附对话", key: `${target.template}:${target.cell}`, workspace: { manager: store.manager, layout: projected, sourceId } };
+      return { rect: { ...cell, x: area.x + cell.x - (viewport?.scrollLeft ?? 0), y: area.y + cell.y - (viewport?.scrollTop ?? 0) }, label: zh ? "吸附对话" : "Snap conversation", key: `${target.template}:${target.cell}`, workspace: { manager: store.manager, layout: projected, sourceId } };
     },
     onDrop: (rect, point) => {
       restorePreview();

@@ -20,6 +20,7 @@ import { isAbsolute } from "node:path";
 import type { StoredWorkspace, WorkspaceRegistry } from "@omp-studio/studio-host";
 
 import { sanitizeDisplayText } from "./read-models.js";
+import { hostText } from "./locale.js";
 import type { HostWorkspaceService } from "./services.js";
 
 /** Thrown when the user cancels the directory picker. */
@@ -99,7 +100,7 @@ export function createOmpWorkspaceService(options: OmpWorkspaceAdapterOptions): 
     },
 
     async openPath(input): Promise<WorkspaceListReadModel> {
-      if (typeof input.path !== "string" || input.path.includes("\0") || !isAbsolute(input.path)) throw new Error("项目路径必须是绝对目录路径");
+      if (typeof input.path !== "string" || input.path.includes("\0") || !isAbsolute(input.path)) throw new Error(hostText("项目路径必须是绝对目录路径", "Project path must be an absolute directory path"));
       const stored = await options.registry.upsertByPath(input.path, now());
       await activate(stored);
       return toModel(options.registry);

@@ -168,7 +168,7 @@ export function useFileBrowser(source: FileBrowserSource | null, memoryId: strin
 
   const currentState = current === undefined ? undefined : dirState(current);
   const entries = useMemo(() => sortEntries(visibleEntries(currentState?.dir?.entries ?? [], showHidden, filter), sort), [currentState, showHidden, filter, sort]);
-  const childrenOf = useCallback((target: string) => sortEntries(visibleEntries(dirState(target)?.dir?.entries ?? [], showHidden, ""), sort), [dirState, showHidden, sort]);
+  const childrenOf = useCallback((target: string) => sortEntries(visibleEntries(dirState(target)?.dir?.entries ?? [], showHidden, current !== undefined && samePath(target, current, sep) ? filter : ""), sort), [dirState, showHidden, sort, current, sep, filter]);
 
   /* ---------- 写操作（新建 / 重命名 / 回收站） ---------- */
   const reloadAround = useCallback((target: string) => { requested.current.delete(keyOf(target)); load(target, true); }, [keyOf, load]);

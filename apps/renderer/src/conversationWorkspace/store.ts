@@ -6,6 +6,7 @@ import { WorkbenchWindows, type WindowLayout, type WorkbenchWindow } from "../do
 import { clampFloat } from "../dock/model";
 import { DocumentHosts } from "./hosts";
 import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
+import { isZh } from "../i18n";
 import { snapTree, WINDOW_MINIMUM, type SnapRatios, type SnapNode, type SnapTemplate, type WindowSnapLayout } from "../dock/snap";
 
 export type ConversationAction = { id: string; kind: "rename" | "fork" | "handoff" | "compact" | "export" | "archive" | "delete"; entry: SessionHistoryEntry; workspaceId: string };
@@ -50,7 +51,7 @@ export class ConversationWorkspaceStore {
               const embedded = view.placement === "main" || (view.placement as string) === "tile";
               const placement = embedded && !main ? "main" : view.placement === "native" ? "native" : "float";
               if (placement === "main") main = true;
-              return { ...view, placement, content: { kind: "conversation", documentId: view.documentId }, minimum: WINDOW_MINIMUM, title: saved.documents.find(doc => doc.id === view.documentId)?.title ?? "新对话", pin: view.pin ?? (placement === "native" ? "window" : "none") };
+              return { ...view, placement, content: { kind: "conversation", documentId: view.documentId }, minimum: WINDOW_MINIMUM, title: saved.documents.find(doc => doc.id === view.documentId)?.title ?? (isZh() ? "新对话" : "New conversation"), pin: view.pin ?? (placement === "native" ? "window" : "none") };
             });
             const legacySnap = snap as (WindowSnapLayout & { ratios?: SnapRatios }) | null;
             this.manager.restore({ records, assist: null, snap: legacySnap ? { template: legacySnap.template, members: legacySnap.members, tree: legacySnap.tree ?? snapTree(legacySnap.template, legacySnap.ratios) } : null });
@@ -115,7 +116,7 @@ export class ConversationWorkspaceStore {
     if (this.demo || !this.persistenceEnabled) return;
     const windowLayout = this.manager.getSnapshot();
     const open = new Set(windowLayout.records.map(record => record.content.documentId));
-    const documents = this.metadata.documents.filter(doc => open.has(doc.id)).map(({ page, pagePhase, route, ...doc }) => doc.ref.sessionId || doc.ref.historyId ? doc : { ...doc, title: "新对话" });
+    const documents = this.metadata.documents.filter(doc => open.has(doc.id)).map(({ page, pagePhase, route, ...doc }) => doc.ref.sessionId || doc.ref.historyId ? doc : { ...doc, title: isZh() ? "新对话" : "New conversation" });
     const records = windowLayout.records.map(record => record.content.kind === "conversation" ? { ...record, title: documents.find(doc => doc.id === record.content.documentId)!.title } : record);
     const state = { ...this.metadata, documents, windowLayout: { ...windowLayout, records, assist: null }, focus: this.windows.checkpoint() };
     try { this.storage?.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(state)); } catch {}
@@ -200,7 +201,7 @@ export class ConversationWorkspaceStore {
     if (this.demo && ref.draftId && ref.draftId !== "initial") ref = { ...ref, previewThreadId: "t0", previewProjectId: ref.workspaceId ?? this.documentFor(this.state.activeViewId)?.ref.previewProjectId };
     const key = conversationKey(ref);
     // Only the startup document defers to startupPage; an explicit open reveals the conversation, including cached documents.
-    const document: ConversationDocument = this.state.documents.find(doc => conversationKey(doc.ref) === key) ?? { id: crypto.randomUUID(), ref, title: "新对话", route: ref.draftId === "initial" ? undefined : "workbench" };
+    const document: ConversationDocument = this.state.documents.find(doc => conversationKey(doc.ref) === key) ?? { id: crypto.randomUUID(), ref, title: isZh() ? "新对话" : "New conversation", route: ref.draftId === "initial" ? undefined : "workbench" };
     if (!this.metadata.documents.includes(document)) this.metadata = { ...this.metadata, documents: [...this.metadata.documents, document] };
     else this.updateDocument(document.id, { route: "workbench" });
     const existing = this.state.views.find(view => view.documentId === document.id);

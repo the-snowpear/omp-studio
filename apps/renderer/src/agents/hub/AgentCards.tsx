@@ -26,18 +26,19 @@ function StatusDot({ status }: { status: HubStatus }) {
 }
 
 function FlagChips({ agent, kids }: { agent: HubAgent; kids?: number }) {
+  const zh = useI18n().resolvedLanguage === "zh";
   return (
     <>
       {agent.unread > 0 ? (
-        <span className="hub-unread" data-tip={`${agent.unread} 未读`}>
+        <span className="hub-unread" data-tip={zh ? `${agent.unread} 未读` : `${agent.unread} unread`}>
           <Icon name="message" extra="sm" />
           {agent.unread}
         </span>
       ) : null}
       {agent.readOnly ? <span className="hub-ro-tag">read-only</span> : null}
       {kids ? (
-        <span className="hub-ro-tag" data-tip="子 Agent">
-          ↳ {kids} 子
+        <span className="hub-ro-tag" data-tip={zh ? "子 Agent" : "Subagents"}>
+          ↳ {kids}{zh ? " 子" : " sub"}
         </span>
       ) : null}
     </>
@@ -153,7 +154,7 @@ export function AgentCard({
         {agent.startedAt ? (
           <span
             className="hc-start"
-            data-tip={`已运行 ${durationMs === undefined ? "—" : fmtDur(durationMs)}`}
+            data-tip={zh ? `已运行 ${durationMs === undefined ? "—" : fmtDur(durationMs)}` : `Running ${durationMs === undefined ? "—" : fmtDur(durationMs)}`}
           >
             <Icon name="clock" extra="sm" />
             {fmtHM(agent.startedAt)}

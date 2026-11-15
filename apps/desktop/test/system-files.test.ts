@@ -3,12 +3,15 @@ import { once } from "node:events";
 import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
-import test, { type TestContext } from "node:test";
+import test, { beforeEach, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import type { WorkspaceId } from "@omp-studio/client-contract";
 import { WorkspaceRegistry } from "@omp-studio/studio-host";
 import { createOmpWorkspaceService } from "@omp-studio/host-client-api/workspaces";
 import { createSystemFileService, normalizeSystemPath } from "../src/system-files.js";
+import { setDesktopLanguage } from "../src/desktop-language-shared.js";
+
+beforeEach(() => { setDesktopLanguage("zh"); });
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), "omp-system-files-"));
@@ -104,6 +107,18 @@ test("file rename preserves content and treats shell punctuation as a literal na
     const recased = await service.rename({ path: renamed.path, name: name.replace("notes", "NOTES") });
     assert.equal(await readFile(recased.path, "utf8"), "keep content");
   }
+});
+
+test("system file errors follow live desktop language changes", async t => {
+  const { root, registry } = await fixture(t);
+  const service = createSystemFileService({ registry });
+  await writeFile(join(root, "source.txt"), "source");
+  await writeFile(join(root, "existing.txt"), "keep");
+  setDesktopLanguage("en");
+  await assert.rejects(service.rename({ path: join(root, "source.txt"), name: "existing.txt" }), /Destination already exists/);
+  setDesktopLanguage("zh");
+  await assert.rejects(service.rename({ path: join(root, "source.txt"), name: "existing.txt" }), /目标名称已存在/);
+  assert.equal(await readFile(join(root, "existing.txt"), "utf8"), "keep");
 });
 
 test("a separate process creating the rename destination cannot be overwritten", async t => {

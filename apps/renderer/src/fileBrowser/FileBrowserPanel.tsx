@@ -80,7 +80,7 @@ export function FileBrowserPanel({ panelId, source, scope, unavailable, visible 
     if (onSystemAction) { void Promise.resolve().then(() => onSystemAction(action, entry, openerId)).catch(error => state.notify("error", hostErrorMessage(error, copy("操作失败", "Operation failed")))); return; }
     if (demo) say((action === "openSystem" || action === "openWith") ? copy(`演示：用系统程序打开「${entry.name}」`, `Demo: open "${entry.name}" with the system app`) : action === "reveal" ? copy(`演示：在${fileManager}中显示「${entry.name}」`, `Demo: reveal "${entry.name}" in ${fileManager}`) : copy(`演示：把「${entry.name}」设为项目`, `Demo: open "${entry.name}" as a project`));
   };
-  const copyPath = (path: string) => { void navigator.clipboard?.writeText(path).then(() => say(copy("已复制路径", "Path copied")), () => state.notify("error", copy("无法写入剪贴板", "Couldn't copy"))); };
+  const copyPath = (path: string) => { void (surface.defaultView?.navigator.clipboard ?? navigator.clipboard)?.writeText(path).then(() => say(copy("已复制路径", "Path copied")), () => state.notify("error", copy("无法写入剪贴板", "Couldn't copy"))); };
   const addContext = (entry: FsEntry) => {
     if (onAddContext) { onAddContext(entry); say(copy(`已把「${entry.name}」加入对话`, `Added "${entry.name}" to the chat`)); }
     else if (demo) say(copy(`演示：把「${entry.name}」加入对话`, `Demo: add "${entry.name}" to the chat`));

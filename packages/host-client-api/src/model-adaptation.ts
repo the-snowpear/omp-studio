@@ -8,6 +8,7 @@ import {
   type ModelParameterSources, type ModelParameterOrigin,
 } from "@omp-studio/client-contract";
 import { BUILTIN_MODEL_CATALOG } from "./model-catalog.generated.js";
+import { hostText } from "./locale.js";
 
 export const MODEL_CATALOG_URL = "https://raw.githubusercontent.com/the-snowpear/omp-studio/main/catalog/model-catalog-v1.json";
 
@@ -104,12 +105,12 @@ export function createModelCatalogService(options: { cachePath: string; fetch: t
       const response = await options.fetch(MODEL_CATALOG_URL, { signal: AbortSignal.timeout(10_000) });
       if (!response.ok) throw new Error(`Model catalog update failed: HTTP ${response.status}`);
       const next = decodeModelCatalog(await response.json());
-      if (next.version === current.version) return { updated: false, catalog: status(), message: "模型目录已是最新版本" };
+      if (next.version === current.version) return { updated: false, catalog: status(), message: hostText("模型目录已是最新版本", "Model catalog is already up to date") };
       await mkdir(dirname(options.cachePath), { recursive: true });
       await writeFile(`${options.cachePath}.tmp`, JSON.stringify(next), "utf8");
       await rename(`${options.cachePath}.tmp`, options.cachePath);
       current = next; source = "updated"; revisions.set(next.version, next);
-      return { updated: true, catalog: status(), message: "模型目录已更新；已保存配置和当前草稿保持不变，可主动重新应用推荐" };
+      return { updated: true, catalog: status(), message: hostText("模型目录已更新；已保存配置和当前草稿保持不变，可主动重新应用推荐", "Model catalog updated; saved settings and current draft remain unchanged — you can re-apply recommendations anytime") };
     },
   };
 }

@@ -233,11 +233,12 @@ export function MenuEntries({ entries, onClose }: { entries: readonly BrowserMen
 /* ---------- 移到回收站确认 ---------- */
 
 export function TrashDialog({ items, places, copy, demo, onCancel, onConfirm }: { items: readonly FsEntry[]; places: FsPlaces; copy: Copy; demo: boolean; onCancel(): void; onConfirm(): void }) {
+  const document = useSurfaceDocument(), window = surfaceWindow(document);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); onCancel(); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  }, [onCancel, window]);
   const projectRoot = items.find(item => places.projects.some(project => samePath(project.root, item.path, places.separator)));
   const bin = places.platform === "darwin" ? copy("废纸篓", "Trash") : copy("回收站", "Recycle Bin");
   const one = items.length === 1 ? items[0]! : undefined;
