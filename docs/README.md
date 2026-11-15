@@ -33,6 +33,7 @@ Public documentation for OMP Studio.
 | [migrations/omp-18.4.4.md](migrations/omp-18.4.4.md) | Upstream changes and Runtime migration |
 | [migrations/omp-18.4.4-gui.md](migrations/omp-18.4.4-gui.md) | Complete GUI scope and local delivery evidence |
 | [development.md](development.md) | Inner loop, tests, overlay |
+| [localization.md](localization.md) | 中英文完整性、实时语言切换、缓存与 Runtime / SSH 兼容、审查与验收 |
 | [performance.md](performance.md) | Streaming budgets, local counters, rollback and repeatable benchmarks |
 | [reviews/security-memory-fixes-2026-11-12.md](reviews/security-memory-fixes-2026-11-12.md) | 安全、Git、Bridge 与资源修复；真实 Chromium/Electron 前后采样和验收边界 |
 | [performance-2026-10-29.md](performance-2026-10-29.md) | 启动、整壳性能与包体优化；开源方案对比、实测及覆盖限制 |
