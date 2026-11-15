@@ -115,11 +115,43 @@ jobs:
           export OMP_RUNTIME_TRUSTED_PUBLIC_KEY="$keys/trusted-public.pem"
           export OMP_RUNTIME_SIGNING_KEY_ID="$(tr -d '[:space:]' < "$keys/key-id.txt")"
           npm run pack:linux -- --skip-host --skip-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omp-studio-linux-x64-test-packages
+          path: |
+            outputs/installer-linux/*.AppImage
+            outputs/installer-linux/*.deb
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
+  linux-package-smoke:
+    name: Linux installed acceptance (x64)
+    needs: linux-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: omp-studio-linux-x64-test-packages
+          path: outputs/installer-linux
+      - name: Prepare desktop acceptance
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfuse2t64 xvfb xauth dbus-x11 weston
+          npm install --prefix "$RUNNER_TEMP/omp-playwright" --no-audit --no-fund playwright@1.62.1
+          echo "PLAYWRIGHT_MODULE=$RUNNER_TEMP/omp-playwright/node_modules/playwright" >> "$GITHUB_ENV"
+          chmod +x outputs/installer-linux/*.AppImage
       - name: Install deb and exercise packaged Electron (X11)
         timeout-minutes: 10
         run: |
           sudo apt-get install -y ./outputs/installer-linux/*.deb
-          npm install --no-save --package-lock=false playwright@1.62.1
           OMP_E2E_PACKAGED_EXE='/opt/OMP Studio/omp-studio' OMP_E2E_OUTPUT_DIR=outputs/linux-deb-x11 dbus-run-session -- xvfb-run -a node scripts/linux-package-smoke.mjs
       - name: Exercise AppImage (X11)
         timeout-minutes: 10
@@ -157,16 +189,6 @@ jobs:
             outputs/linux-appimage-x11/
             outputs/linux-deb-wayland/
           retention-days: 14
-      - uses: actions/upload-artifact@v4
-        with:
-          name: omp-studio-linux-x64-test-packages
-          path: |
-            outputs/installer-linux/*.AppImage
-            outputs/installer-linux/*.deb
-          compression-level: 0
-          retention-days: 14
-          if-no-files-found: error
-
   macos-package:
     name: macOS test package (arm64)
     if: github.event_name == 'workflow_dispatch' && inputs.scope == 'macos-package'

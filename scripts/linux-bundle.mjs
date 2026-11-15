@@ -19,7 +19,9 @@ export function linuxDebName(version) {
 export function deriveLinuxBuilderConfig(base, { outputDirectory }) {
   const shared = Object.fromEntries(Object.entries(base).filter(([key]) =>
     !["win", "nsis", "extraFiles", "artifactName", "publish", "forceCodeSigning"].includes(key)));
-  const artifactName = "OMP-Studio-${version}-linux-${arch}.${ext}";
+  // The builder expands ${arch} to x86_64 for AppImage and amd64 for deb.
+  // Both public downloads use the same linux-x64 identity as the signed feed.
+  const artifactName = "OMP-Studio-${version}-linux-x64.${ext}";
   return {
     ...shared,
     executableName: LINUX_EXECUTABLE,

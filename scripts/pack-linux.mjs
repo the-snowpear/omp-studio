@@ -35,4 +35,10 @@ async function main() {
   for (const note of report.notes) console.log(`[pack:linux] ${note}`);
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+main().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+  // electron-builder's temp-file cleanup calls process.exit(0) on beforeExit.
+  // Preserve the failure after cleanup, as electron-builder's CLI does.
+  process.on("exit", () => { process.exitCode = 1; });
+});
