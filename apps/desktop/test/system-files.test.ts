@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import test, { beforeEach, type TestContext } from "node:test";
@@ -100,7 +100,8 @@ test("file rename preserves content and treats shell punctuation as a literal na
   await writeFile(source, "keep content");
   const service = createSystemFileService({ registry });
   const renamed = await service.rename({ path: source, name });
-  assert.equal(renamed.path, join(root, name));
+  // Windows CI can expose TEMP through an 8.3 alias; the service resolves its parent.
+  assert.equal(renamed.path, join(await realpath(root), name));
   assert.equal(await readFile(renamed.path, "utf8"), "keep content");
   await assert.rejects(lstat(source), { code: "ENOENT" });
   if (process.platform === "win32") {
