@@ -348,6 +348,14 @@ async function main() {
     );
   }
 
+  const commandExtension = process.platform === "win32" ? ".cmd" : "";
+  if (["tsc", "vite"].some((command) => !existsSync(join(root, "node_modules", ".bin", `${command}${commandExtension}`)))) {
+    console.log("[preview] Repairing workspace dependencies / 正在修复工作区依赖...");
+    // 补齐中断安装遗留的缺包，再恢复命令链接；保留锁文件与已准备好的原生模块。
+    await run(process.execPath, [npmCli, "install", "--include=dev", "--ignore-scripts", "--bin-links=true", "--no-save", "--no-audit", "--no-fund"]);
+    await run(process.execPath, [npmCli, "rebuild", "--ignore-scripts", "--bin-links=true"]);
+  }
+
   console.log("[preview] Building workspace...");
   await run(process.execPath, [npmCli, "run", "build"]);
 
