@@ -84,6 +84,7 @@ import {
   type HostUsageService,
   type HostWorkspaceService,
   type HostWorkspaceFileService,
+  type HostSystemFileService,
   type StudioHostClientFacadeOptions,
 } from "@omp-studio/host-client-api";
 import { createOmpAgentDefinitionsService } from "@omp-studio/host-client-api/agent-definitions";
@@ -349,6 +350,7 @@ export interface DesktopFacadeSeams {
   readonly registerImportedWorkspace?: (cwd: string) => Promise<string>;
 
   readonly workspaceFiles?: HostWorkspaceFileService;
+  readonly systemFiles?: HostSystemFileService;
   readonly git?: HostGitService;
   readonly github?: HostGitHubService;
   readonly usage?: HostUsageService;
@@ -981,6 +983,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       context.projectReads.scoped("agents", () => context.workspaceCwd.current, projectAdapters.agents),
     ...(seams.workspaces === undefined ? {} : { workspaces: seams.workspaces }),
     ...(seams.workspaceFiles === undefined ? {} : { workspaceFiles: seams.workspaceFiles }),
+    ...(seams.systemFiles === undefined ? {} : { systemFiles: seams.systemFiles }),
     ...(seams.git === undefined ? {} : { git: seams.git }),
     ...(seams.github === undefined ? {} : { github: seams.github }),
     usage: seams.usage ?? (context.usage ??= createOmpUsageService({
@@ -1146,6 +1149,15 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
           }
           return list();
         },
+        ...(root.seams.workspaces.openPath ? { openPath: async (input: { readonly path: string }) => {
+          const model = await root.seams.workspaces!.openPath!(input);
+          if (model.activeWorkspaceId) {
+            workspace.current = await resolveWorkspace(model.activeWorkspaceId);
+            context.workspaceCwd.current = workspace.current.cwd;
+            wanted = undefined; bind(undefined);
+          }
+          return list();
+        } } : {}),
       } } : {}),
     },
   };

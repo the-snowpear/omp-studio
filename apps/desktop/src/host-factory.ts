@@ -38,7 +38,7 @@ import { chmod, lstat, mkdir, open, readFile, rm, unlink, writeFile, type FileHa
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { app, dialog } from "electron";
+import { app, dialog, shell } from "electron";
 
 import type { ArchId, WorkspaceId } from "@omp-studio/client-contract";
 import type { RuntimePreference } from "@omp-studio/studio-protocol";
@@ -64,6 +64,7 @@ import { GitWriteQueue, HostProcessRunner } from "./git-process.js";
 import { createDesktopRuntimeSessionPort } from "./runtime-session.js";
 import type { MemoryCredentialProvider } from "./memory-credentials.js";
 import { createWorkspaceFileService } from "./workspace-files.js";
+import { createSystemFileService } from "./system-files.js";
 import { createWorkspaceSessionCatalog } from "./session-commands.js";
 import {
   createPendingArtifactRegistry,
@@ -611,6 +612,7 @@ export function createProductionHostFactory(options?: {
   const workspaces = {
     list: () => innerWorkspaces.list(),
     pick: (input?: { readonly name?: string }) => innerWorkspaces.pick(input),
+    openPath: (input: { readonly path: string }) => innerWorkspaces.openPath!(input),
     async open(input: { readonly workspaceId: WorkspaceId }) {
       const alreadyActive = registry.activeWorkspaceId === input.workspaceId;
       const runtimeBound = activeComposition?.status === "ready";
@@ -643,6 +645,9 @@ export function createProductionHostFactory(options?: {
     ...(options?.revealDirectory === undefined ? {} : { revealDirectory: options.revealDirectory }),
     workspaces,
     workspaceFiles: createWorkspaceFileService({ registry }),
+    systemFiles: createSystemFileService({ registry, knownFolders: {
+      home: app.getPath("home"), desktop: app.getPath("desktop"), downloads: app.getPath("downloads"), documents: app.getPath("documents"), pictures: app.getPath("pictures"),
+    }, trash: path => shell.trashItem(path) }),
     git,
     github,
     disposeHostOperations: () => {

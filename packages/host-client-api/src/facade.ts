@@ -168,6 +168,7 @@ import {
   type HostUsageService,
   type HostWorkspaceService,
   type HostWorkspaceFileService,
+  type HostSystemFileService,
   type HostGitService,
   type HostGitHubService,
 } from "./services.js";
@@ -287,6 +288,7 @@ export interface StudioHostClientFacadeOptions {
   readonly workspaces?: HostWorkspaceService;
   /** Optional Host-owned workspace-relative file tree adapter. */
   readonly workspaceFiles?: HostWorkspaceFileService;
+  readonly systemFiles?: HostSystemFileService;
   /** Optional Host-owned system Git adapter. Independent of Runtime availability. */
   readonly git?: HostGitService;
   /** Optional Host-owned GitHub CLI adapter. Independent of Runtime availability. */
@@ -1019,6 +1021,20 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = await this.#queryProjects();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "fs.places":
+      case "fs.list":
+      case "fs.file.inspect":
+      case "fs.file.readText":
+      case "fs.file.readChunk": {
+        const service = this.#options.systemFiles;
+        if (!service) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持文件浏览器，请更新 Host");
+        const input = request.input as import("@omp-studio/client-contract").SystemFileChunkInput;
+        const result = request.queryName === "fs.places" ? await service.places()
+          : request.queryName === "fs.list" ? await service.list(request.input as import("@omp-studio/client-contract").SystemListInput)
+          : request.queryName === "fs.file.inspect" ? await service.inspect(input)
+          : request.queryName === "fs.file.readText" ? await service.readText(input) : await service.readChunk(input);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "workspace.file.inspect":
       case "workspace.file.readText":
       case "workspace.file.readChunk": {
@@ -1260,13 +1276,18 @@ export class StudioHostClientFacade implements ClientTransport {
         return this.#commandModels(request as ClientCommandRequest<ModelsCommandName>);
       }
       case "workspace.open":
+      case "workspace.openPath":
       case "workspace.pick": {
-        return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick">);
+        return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath">);
       }
       case "workspace.file.writeText":
+      case "fs.file.writeText":
+      case "fs.directory.create":
+      case "fs.rename":
+      case "fs.trash":
       case "workspace.file.create":
       case "workspace.directory.create": {
-        return this.#commandWorkspaceFile(request as ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">);
+        return this.#commandWorkspaceFile(request as ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText" | "fs.file.writeText" | "fs.directory.create" | "fs.rename" | "fs.trash">);
       }
       case "usage.openDashboard": {
         return this.#commandUsage(request as ClientCommandRequest<"usage.openDashboard">);
@@ -3350,7 +3371,7 @@ export class StudioHostClientFacade implements ClientTransport {
    * never as a fabricated success.
    */
   async #commandWorkspace(
-    request: ClientCommandRequest<"workspace.open" | "workspace.pick">,
+    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath">,
   ): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
     const service = this.#options.workspaces;
@@ -3378,10 +3399,10 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #commandWorkspaceFile(
-    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">,
+    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText" | "fs.file.writeText" | "fs.directory.create" | "fs.rename" | "fs.trash">,
   ): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
-    const service = this.#options.workspaceFiles;
+    const service = request.commandName.startsWith("fs.") ? this.#options.systemFiles : this.#options.workspaceFiles;
     if (service === undefined) {
       throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available: no workspace file adapter is wired`);
     }
@@ -3398,15 +3419,29 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #runWorkspaceFileCommand(
-    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">,
-    service: HostWorkspaceFileService,
+    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText" | "fs.file.writeText" | "fs.directory.create" | "fs.rename" | "fs.trash">,
+    service: HostWorkspaceFileService | HostSystemFileService,
   ): Promise<void> {
     try {
-      const input = request.input as { readonly workspaceId: WorkspaceId; readonly path: string };
-      if (request.commandName === "workspace.file.writeText" && !service.writeText) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持文件保存，请更新 Host");
-      const result = request.commandName === "workspace.file.writeText"
-        ? await service.writeText!(request.input as import("@omp-studio/client-contract").WorkspaceFileWrite)
-        : request.commandName === "workspace.file.create" ? await service.createFile(input) : await service.createDirectory(input);
+      let result: unknown;
+      if (request.commandName.startsWith("fs.")) {
+        const files = service as HostSystemFileService;
+        switch (request.commandName) {
+          case "fs.file.writeText": result = await files.writeText(request.input as import("@omp-studio/client-contract").SystemFileWrite); break;
+          case "fs.directory.create": result = await files.createDirectory(request.input as { parent: string; name: string }); break;
+          case "fs.rename": result = await files.rename(request.input as { path: string; name: string }); break;
+          case "fs.trash":
+            if (!files.trash) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持回收站");
+            result = await files.trash(request.input as { paths: readonly string[] }); break;
+        }
+      } else {
+        const files = service as HostWorkspaceFileService;
+        const input = request.input as { readonly workspaceId: WorkspaceId; readonly path: string };
+        if (request.commandName === "workspace.file.writeText" && !files.writeText) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持文件保存，请更新 Host");
+        result = request.commandName === "workspace.file.writeText"
+          ? await files.writeText!(request.input as import("@omp-studio/client-contract").WorkspaceFileWrite)
+          : request.commandName === "workspace.file.create" ? await files.createFile(input) : await files.createDirectory(input);
+      }
       this.#emitTerminal(request.requestId, {
         requestId: request.requestId,
         commandName: request.commandName,
@@ -3426,12 +3461,14 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #runWorkspaceCommand(
-    request: ClientCommandRequest<"workspace.open" | "workspace.pick">,
+    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath">,
     service: HostWorkspaceService,
   ): Promise<void> {
     try {
-      const result =
-        request.commandName === "workspace.open"
+      if (request.commandName === "workspace.openPath" && !service.openPath) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持从路径打开项目，请更新 Host");
+      const result = request.commandName === "workspace.openPath"
+        ? await service.openPath!(request.input as { readonly path: string })
+        : request.commandName === "workspace.open"
           ? await service.open(request.input as { readonly workspaceId: WorkspaceId })
           : await service.pick(request.input as { readonly name?: string });
       this.#lastWorkspaceModel = result;

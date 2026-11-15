@@ -6,8 +6,8 @@
  * maps stored records to `WorkspaceListReadModel`: `workspaceId / name /
  * lastOpenedAt / active` plus `root` — the canonical folder the operator
  * picked, published for display only (the workbench shows it as the project
- * address). Nothing in the Host ever reads that field back: every file, tree
- * and mutation path stays workspace-relative and is resolved here.
+ * address). Workspace file/tree operations resolve against the registry;
+ * the explicit openPath command registers a user-selected absolute directory.
  *
  * `pickDirectory` is injected (the Desktop composition root supplies the
  * Electron dialog); returning `undefined` means the user cancelled and the
@@ -16,6 +16,7 @@
  */
 
 import type { WorkspaceId, WorkspaceListReadModel, WorkspaceRecord } from "@omp-studio/client-contract";
+import { isAbsolute } from "node:path";
 import type { StoredWorkspace, WorkspaceRegistry } from "@omp-studio/studio-host";
 
 import { sanitizeDisplayText } from "./read-models.js";
@@ -93,6 +94,13 @@ export function createOmpWorkspaceService(options: OmpWorkspaceAdapterOptions): 
       }
       const displayName = input?.name === undefined ? undefined : sanitizeDisplayText(input.name, NAME_MAX);
       const stored = await options.registry.upsertByPath(dir, now(), displayName);
+      await activate(stored);
+      return toModel(options.registry);
+    },
+
+    async openPath(input): Promise<WorkspaceListReadModel> {
+      if (typeof input.path !== "string" || input.path.includes("\0") || !isAbsolute(input.path)) throw new Error("项目路径必须是绝对目录路径");
+      const stored = await options.registry.upsertByPath(input.path, now());
       await activate(stored);
       return toModel(options.registry);
     },

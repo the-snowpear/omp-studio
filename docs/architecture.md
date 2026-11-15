@@ -11,7 +11,7 @@ Renderer (apps/renderer)
   → apps/desktop                ipc.ts
   → @omp-studio/host-client-api product facade
         ├─ Host-owned: session catalog, archive, models.yml,
-        │              skills scan, git, workspace registry
+        │              skills scan, git, workspace registry, system files
         └─ Runtime Bridge: studio-host
               → overlay packages/coding-agent/src/studio/**
 ```
@@ -48,6 +48,20 @@ Authoritative lists:
 - Runtime loss fences the old epoch and maps unresolved accepted work to
   `outcome_unknown`.
 - PTY bytes are not a control protocol.
+- Workspace file operations resolve workspace-relative paths inside the Host
+  and enforce containment. The file browser's `fs.*` operations explicitly
+  accept user-selected absolute paths on the selected Host. `system-files.ts`
+  is their execution and validation boundary; forwarding layers do not repeat
+  validation. `workspace.openPath` registers an existing directory through
+  the workspace service. Private Runtime paths are never exposed implicitly.
+- Local and SSH Hosts share the same system-file service and file I/O. Only
+  the local Electron composition injects a recycle-bin operation. Explicit
+  `systemFile*` shell IPC actions are local-only, and Main resolves their
+  paths before opening an application or the file manager.
+- File documents and `omp-file:` resource leases carry their source and Host
+  target. Files inside registered projects use workspace identities and
+  share Explorer buffers; other files use the system backend with the same
+  version conflicts, text formats, resource streaming and close confirmation.
 
 ## Runtime pin
 
