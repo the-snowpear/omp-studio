@@ -189,8 +189,14 @@ try {
   // again or chooses Connect now; the authority's startup session is separate.
   await page.getByRole("button", { name: "立即连接", exact: true }).click();
   await until(() => query("residents.list"), result => result.residents.some(row => row.sessionId === session.sessionId), "restored conversation reconnects");
+  const restoredEditor = page.locator('.composer-region [contenteditable="true"]').first();
+  await restoredEditor.fill("Confirm this conversation survived a restart.");
+  await restoredEditor.press("Enter");
+  await until(() => query("session.transcript.readPage", { sessionId: session.sessionId }), result => result.items.filter(item => item.role === "assistant" && item.content?.some(block => block.type === "text" && block.text.includes(`OMP_LINUX_OK ${proof}`))).length >= 2, "resumed conversation completes a second reply");
+  await page.getByText("正在同步", { exact: true }).waitFor({ state: "hidden" });
+  assert.equal(await page.locator(".cm-prediction-error").count(), 0, "The restored conversation must attach its prediction channel too");
   await page.screenshot({ path: join(output, "restarted.png") });
-  report.checks.push("workspace and persisted conversation restore after restart; the dormant session reconnects through its visible control");
+  report.checks.push("workspace and conversation restore after restart; the dormant session reconnects and completes a second reply with prediction available");
   report.status = "passed";
 } catch (error) {
   report.status = "failed"; report.error = error instanceof Error ? error.stack : String(error); process.exitCode = 1;
