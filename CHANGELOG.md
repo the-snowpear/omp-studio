@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- 底层引擎升级到 **OMP 18.19.0（`18.19.0-studio.10`）**，涵盖 18.18.1–18.19.0 共十次上游发布；逐版变化与 Studio 落点见 [18.19.0 迁移报告](docs/migrations/omp-18.19.0.md)。
+- 底层引擎升级到 **OMP 18.19.0（`18.19.0-studio.12`）**，涵盖 18.18.1–18.19.0 共十次上游发布；逐版变化与 Studio 落点见 [18.19.0 迁移报告](docs/migrations/omp-18.19.0.md)。
 - Agent 提问改为原生 HTML 表单：命名字段、题组、图示、「其他」与选项附注；折叠、放大和翻页不丢草稿，闲置超时提交当前值。
 - Agent Hub 新增「分步任务」：一次创建有序步骤，超过四步时由原生合并为四组，并在任务详情里按组查看进度与提示词。
 - GitHub Actions 结果按运行 → 作业 → 有序步骤展示，带真实状态、耗时与失败日志；任务步骤、Actions 与表单题组共用同一套步骤样式。
@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - 修复新版 Runtime 的输入预测通道无法连接、输入框显示 `Invalid prediction fields`：桌面私有传输接受 Runtime 的协议版本元数据，继续校验实际通道所有权与本地文件授权。
+- 补齐英文模式下的工作台、对话、模型、浏览器、文件、SSH 与预览文案；切换语言时同步已连接的 Runtime 和远端 Host，并刷新命令目录与 Host 显示缓存。图片胶囊标签随界面语言更新，附件编号、字节和历史引用格式保持兼容。
 - 修复新对话的第一条消息被误报「发送期间已切换会话」而取消、草稿退回输入框：新草稿接管自己 `session.create` 刚建出的会话不再算作切换；真正切到其他对话时仍会取消发送。
 - 修复上述失败后发送按钮一直禁用：新草稿打开时拿到的空能力清单在 Runtime 接入后不再沿用，收到 `runtime.changed` 后改为向 Host 重新读取。
 - 从历史打开、尚未连接 Runtime 的对话不再显示红色「Runtime 不可用」：没有任何失败记录时改为中性提示「Runtime 未启动 · 发送消息时会自动连接」，并提供「立即连接」；真正的启动失败仍显示红色告警。

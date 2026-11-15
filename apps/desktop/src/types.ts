@@ -107,6 +107,8 @@ export type DesktopWindowFactory = (context: DesktopWindowContext) => Promise<De
 
 /** Tray handle the application owns alongside the main window. */
 export interface DesktopTray {
+  /** Update tray menu and tooltip copy when the active UI language changes. */
+  setLocale?(locale: string): void;
   /**
    * Best-effort one-time notification for the first close-to-tray hide.
    * Optional because non-Windows trays cannot show a balloon.

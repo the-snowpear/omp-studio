@@ -25,6 +25,7 @@ import { join } from "node:path";
 
 export interface MacSwapPlan {
   readonly schema: 1;
+  readonly locale?: "zh" | "en";
   /** The quitting app. */
   readonly pid: number;
   /** The installed bundle, e.g. /Applications/OMP Studio.app. */
@@ -82,12 +83,14 @@ export async function runMacAppSwap(plan: MacSwapPlan, deps: MacSwapDeps): Promi
   const discardStaging = (): void => {
     try { deps.remove(plan.stagingRoot); } catch { /* A leftover folder is cleaned up at the next confirmed start. */ }
   };
+  const zh = plan.locale === "zh";
+  const text = (z: string, e: string): string => (zh ? z : e);
   const parentOf = (path: string): string => path.slice(0, path.lastIndexOf("/"));
-  const manualInstall = "请从发布页下载 dmg 手动安装。";
+  const manualInstall = text("请从发布页下载 dmg 手动安装。", "Download the .dmg from the releases page and install manually.");
 
   const parent = parentOf(plan.target);
   if (!plan.target.endsWith(".app") || parentOf(plan.backup) !== parent || parentOf(plan.stagingRoot) !== parent || parentOf(plan.staged) !== plan.stagingRoot) {
-    return finish({ status: "failed", version: plan.version, message: "更新计划无效，已取消" });
+    return finish({ status: "failed", version: plan.version, message: text("更新计划无效，已取消", "Invalid update plan; cancelled") });
   }
 
   // The bundle may only move once the app that runs from it is gone.
@@ -95,7 +98,7 @@ export async function runMacAppSwap(plan: MacSwapPlan, deps: MacSwapDeps): Promi
   while (deps.isAlive(plan.pid)) {
     if (deps.now() >= exitDeadline) {
       discardStaging();
-      return finish({ status: "failed", version: plan.version, message: "OMP Studio 没有退出，更新已取消" });
+      return finish({ status: "failed", version: plan.version, message: text("OMP Studio 没有退出，更新已取消", "OMP Studio did not quit; update cancelled") });
     }
     await deps.sleep(plan.pollMs);
   }
@@ -111,8 +114,8 @@ export async function runMacAppSwap(plan: MacSwapPlan, deps: MacSwapDeps): Promi
       status: "failed",
       version: plan.version,
       message: denied(error)
-        ? `macOS 不允许替换应用（系统设置 › 隐私与安全性 › App 管理）。${manualInstall}`
-        : `无法替换应用：${describe(error)}。${manualInstall}`,
+        ? text(`macOS 不允许替换应用（系统设置 › 隐私与安全性 › App 管理）。${manualInstall}`, `macOS did not allow replacing the app (System Settings › Privacy & Security › App Management). ${manualInstall}`)
+        : text(`无法替换应用：${describe(error)}。${manualInstall}`, `Could not replace the app: ${describe(error)}. ${manualInstall}`),
     });
     deps.open(plan.target);
     return outcome;
@@ -123,10 +126,10 @@ export async function runMacAppSwap(plan: MacSwapPlan, deps: MacSwapDeps): Promi
     try {
       deps.rename(plan.backup, plan.target);
     } catch (restoreError) {
-      return finish({ status: "failed", version: plan.version, message: `更新失败，且无法恢复原应用：${describe(restoreError)}。原应用保留在 ${plan.backup}` });
+      return finish({ status: "failed", version: plan.version, message: text(`更新失败，且无法恢复原应用：${describe(restoreError)}。原应用保留在 ${plan.backup}`, `Update failed and the previous app could not be restored: ${describe(restoreError)}. The previous app remains at ${plan.backup}`) });
     }
     discardStaging();
-    const outcome = finish({ status: "failed", version: plan.version, message: `无法安装新版本：${describe(error)}。${manualInstall}` });
+    const outcome = finish({ status: "failed", version: plan.version, message: text(`无法安装新版本：${describe(error)}。${manualInstall}`, `Could not install the new version: ${describe(error)}. ${manualInstall}`) });
     deps.open(plan.target);
     return outcome;
   }
@@ -137,16 +140,16 @@ export async function runMacAppSwap(plan: MacSwapPlan, deps: MacSwapDeps): Promi
     try {
       deps.rename(plan.target, failed);
     } catch (error) {
-      return finish({ status: "failed", version: plan.version, message: `${reason}，但无法恢复上一版本：${describe(error)}` });
+      return finish({ status: "failed", version: plan.version, message: text(`${reason}，但无法恢复上一版本：${describe(error)}`, `${reason}, and the previous version could not be restored: ${describe(error)}`) });
     }
     try {
       deps.rename(plan.backup, plan.target);
     } catch (error) {
       try { deps.rename(failed, plan.target); } catch { /* Both copies stay next to the target for manual recovery. */ }
-      return finish({ status: "failed", version: plan.version, message: `${reason}，但无法恢复上一版本：${describe(error)}` });
+      return finish({ status: "failed", version: plan.version, message: text(`${reason}，但无法恢复上一版本：${describe(error)}`, `${reason}, and the previous version could not be restored: ${describe(error)}`) });
     }
     try { deps.remove(failed); } catch { /* Cleaned up at the next confirmed start. */ }
-    const outcome = finish({ status: "rolled-back", version: plan.version, message: `${reason}，已恢复上一版本` });
+    const outcome = finish({ status: "rolled-back", version: plan.version, message: text(`${reason}，已恢复上一版本`, `${reason}; restored the previous version`) });
     deps.open(plan.target);
     return outcome;
   };
@@ -167,17 +170,17 @@ export async function runMacAppSwap(plan: MacSwapPlan, deps: MacSwapDeps): Promi
         const pid = Number.parseInt(started.trim(), 10);
         startedPid = Number.isSafeInteger(pid) && pid > 0 ? pid : 0;
       } else if (deps.now() >= startDeadline) {
-        return rollBack("新版本没有启动");
+        return rollBack(text("新版本没有启动", "The new version failed to start"));
       }
     } else if (startedPid > 0 && !deps.isAlive(startedPid)) {
       if (deps.exists(plan.markers.healthy)) continue;
       if (deps.exists(plan.markers.cleanExit)) {
-        return finish({ status: "unconfirmed", version: plan.version, message: "新版本在确认前退出，下次启动时完成确认" });
+        return finish({ status: "unconfirmed", version: plan.version, message: text("新版本在确认前退出，下次启动时完成确认", "The new version exited before confirming startup and will be confirmed on the next launch") });
       }
-      return rollBack("新版本启动后异常退出");
+      return rollBack(text("新版本启动后异常退出", "The new version exited unexpectedly after starting"));
     }
     if (deps.now() >= watchDeadline) {
-      return finish({ status: "unconfirmed", version: plan.version, message: "新版本长时间未完成启动确认" });
+      return finish({ status: "unconfirmed", version: plan.version, message: text("新版本长时间未完成启动确认", "The new version did not complete startup confirmation in time") });
     }
     await deps.sleep(plan.pollMs);
   }

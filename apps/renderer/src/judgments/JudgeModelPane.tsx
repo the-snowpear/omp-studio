@@ -20,7 +20,7 @@ export function JudgeModelPane(props: FeatureSettingsProps) {
   useEffect(() => {
     const current = ++epoch.current; setModels([]); setConfigured(""); setSelected(""); setError(""); setNotice(""); lock.current = false; setBusy(false);
     if (!props.visible || !enabled) return;
-    if (preview) { const choices = createPreviewModelConfig().availableModels.filter(row => row.kind === "judge" || row.kind === "chat" || !row.kind); setModels([...choices]); setConfigured(choices.find(row => row.kind === "judge")?.selector ?? ""); return; }
+    if (preview) { const choices = createPreviewModelConfig(zh).availableModels.filter(row => row.kind === "judge" || row.kind === "chat" || !row.kind); setModels([...choices]); setConfigured(choices.find(row => row.kind === "judge")?.selector ?? ""); return; }
     void (async () => {
       const [choices, handle] = await Promise.all([loadRuntimeModels(props.client!, () => current === epoch.current), props.client!.command("runtime.settings.get", { keys: ["modelRoles.judge"] })]);
       const settings = await waitReceipt<StudioRuntimeSettingsGetResult>(props.client!, handle.requestId);
@@ -28,7 +28,7 @@ export function JudgeModelPane(props: FeatureSettingsProps) {
       setModels(choices.filter(row => row.kind === "judge" || row.kind === "chat" || !row.kind)); setConfigured(String(settings.values["modelRoles.judge"] ?? ""));
     })().catch(cause => { if (current === epoch.current) setError(hostErrorMessage(cause, "Cannot read judge models")); });
     return () => { epoch.current++; };
-  }, [props.client, props.context?.sessionId, props.visible, enabled, preview]);
+  }, [props.client, props.context?.sessionId, props.visible, enabled, preview, zh]);
   async function save() {
     if (lock.current || !enabled || !selected) return;
     const current = epoch.current; lock.current = true; setBusy(true); setError(""); setNotice("");

@@ -29,7 +29,7 @@ test("renderer navigation cancels a pending deployment confirmation and preserve
   f.setConfirm(() => new Promise(resolve => { release = resolve; }));
   const credentials = { password: "test-only" };
   const pending = f.invoke(REMOTE_CHANNELS.connect, "target", credentials);
-  const rejected = assert.rejects(pending, /取消/);
+  const rejected = assert.rejects(pending, /cancelled/i);
   await new Promise(resolve => setImmediate(resolve));
   await f.ipc.cancelPending();
   await rejected;
@@ -60,11 +60,11 @@ test("renderer navigation aborts a running connect and a later request is indepe
   let signal!: AbortSignal;
   f.setConnect(async (_id, _credentials, value) => {
     signal = value;
-    await new Promise<void>((_resolve, reject) => value.addEventListener("abort", () => reject(new Error("连接已取消")), { once: true }));
+    await new Promise<void>((_resolve, reject) => value.addEventListener("abort", () => reject(new Error("Connection cancelled")), { once: true }));
   });
   const credentials = { password: "test-only" };
   const pending = f.invoke(REMOTE_CHANNELS.connect, "target", credentials);
-  const rejected = assert.rejects(pending, /取消/);
+  const rejected = assert.rejects(pending, /cancelled/i);
   await new Promise(resolve => setImmediate(resolve));
   await f.ipc.cancelPending(); await rejected;
   assert.equal(signal.aborted, true); assert.equal(credentials.password, "");

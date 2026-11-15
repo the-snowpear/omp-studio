@@ -6,6 +6,7 @@ import type {
 } from "@omp-studio/studio-protocol";
 import { choiceValue, fieldError, textValue } from "@oh-my-pi/pi-tui/html-form/data";
 import { spansText } from "@oh-my-pi/pi-tui/html-form/model";
+import { isZh, pickLocale, useI18n } from "../i18n";
 
 export type FormInteraction = Extract<ClientInteraction, { kind: "form" }>;
 export type ReadInteractionForm = (interaction: FormInteraction, signal: AbortSignal) => Promise<InteractionForm>;
@@ -106,7 +107,7 @@ export class FormSession {
     }).catch(error => {
       if (this.#meta.phase !== "closed") {
         this.#loading = undefined;
-        this.#setMeta({ error: error instanceof Error ? error.message : "表单读取失败，请重试。" });
+        this.#setMeta({ error: error instanceof Error ? error.message : pickLocale("表单读取失败，请重试。", "Failed to load form. Please try again.") });
       }
     });
     return this.#loading;
@@ -268,10 +269,10 @@ export class FormSession {
     this.#stopCountdown(); this.#setMeta({ phase: "submitting", error: undefined, remaining: undefined });
     try {
       const ok = await surface.respond(decision, value);
-      if (ok === false) throw new Error("提交失败，表单与已填写内容已保留。请重试。");
+      if (ok === false) throw new Error(pickLocale("提交失败，表单与已填写内容已保留。请重试。", "Submission failed; the form and your entries were preserved. Please try again."));
       this.close(); return true;
     } catch (error) {
-      if (this.#meta.phase !== "closed") this.#setMeta({ phase: "open", error: error instanceof Error ? error.message : "提交失败，请重试。" });
+      if (this.#meta.phase !== "closed") this.#setMeta({ phase: "open", error: error instanceof Error ? error.message : pickLocale("提交失败，请重试。", "Submission failed. Please try again.") });
       return false;
     }
   }
@@ -321,6 +322,9 @@ export function useFormInteractionLifecycle(interaction: ClientInteraction | nul
 }
 
 export function useFormSession(interaction: FormInteraction, readForm: ReadInteractionForm | undefined): FormSession {
+  const { resolvedLanguage } = useI18n();
+  const zhRef = useRef(resolvedLanguage === "zh");
+  zhRef.current = resolvedLanguage === "zh";
   const key = interactionKey(interaction);
   const session = useMemo(() => {
     const existing = liveSessions.get(key);
@@ -338,7 +342,7 @@ export function useFormSession(interaction: FormInteraction, readForm: ReadInter
     return created;
   }, [key]);
   useEffect(() => {
-    void session.load(readForm ?? (() => Promise.reject(new Error("当前连接没有表单正文读取能力；请恢复连接或取消提问。"))));
+    void session.load(readForm ?? (() => Promise.reject(new Error(zhRef.current ? "当前连接没有表单正文读取能力；请恢复连接或取消提问。" : "Current connection cannot read form contents; reconnect or cancel."))));
   }, [session, readForm]);
   return session;
 }

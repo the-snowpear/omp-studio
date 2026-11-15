@@ -14,6 +14,7 @@ import { cachedUpdatePath, downloadDifferentialArtifact, isVerifiedFile, type Di
 import type { UpdatePrefs } from "./update-prefs-store.js";
 import type { HostLog } from "./host-log.js";
 import { UpdateRestartBlockedError } from "./update-restart.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 interface Journal {
   schema: 2; authorized: boolean;
@@ -154,7 +155,7 @@ export class UpdateCoordinator {
   }
 
   private restartBlocker(): string | undefined {
-    return this.options.getRestartBlocker?.() ?? (this.options.isBusy() ? "任务仍在运行，请完成后重启更新" : undefined);
+    return this.options.getRestartBlocker?.() ?? (this.options.isBusy() ? desktopText("任务仍在运行，请完成后重启更新", "Tasks are still running; wait until they finish before restarting to update") : undefined);
   }
   private async pruneCache(): Promise<void> {
     const retained = new Set<string>();
@@ -190,7 +191,7 @@ export class UpdateCoordinator {
       for (const sequence of Object.values(raw.watermarks)) if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error("Invalid update watermark");
       this.journal = raw;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") { this.journalInvalid = true; this.snapshot.error = "更新状态损坏；请从诊断恢复或重新安装，已停止自动更新"; this.snapshot.errorStage = "recovery"; this.emit(); return; }
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") { this.journalInvalid = true; this.snapshot.error = desktopText("更新状态损坏；请从诊断恢复或重新安装，已停止自动更新", "Update state is corrupted; recover from Diagnostics or reinstall. Automatic updates have stopped."); this.snapshot.errorStage = "recovery"; this.emit(); return; }
     }
     await this.applyDesktopInstallOutcome();
     const app = this.journal.pending.app?.manifest.app;
@@ -200,7 +201,7 @@ export class UpdateCoordinator {
     // A pending desktop matching this executable is started, awaiting confirmation.
     const otherDesktopPending = this.journal.pending.app !== undefined && this.journal.pending.app.manifest.app?.version !== this.options.appVersion;
     if (this.journal.authorized && otherDesktopPending && this.journal.pending.runtime?.manifest.runtime) {
-      this.snapshot.error = "桌面更新事务不完整，请使用历史 Setup 恢复";
+      this.snapshot.error = desktopText("桌面更新事务不完整，请使用历史 Setup 恢复", "Desktop update transaction is incomplete; recover using a previous Setup installer");
       this.snapshot.errorStage = "recovery";
       this.journal.authorized = false;
     }
@@ -253,7 +254,7 @@ export class UpdateCoordinator {
       const release = this.journal.pending[kind]?.manifest[kind];
       if (!release || this.snapshot[kind].phase === "failed") continue;
       this.snapshot[kind] = kind === "app" && release.version === this.options.appVersion
-        ? { ...this.snapshot[kind], version: release.version, phase: "verifying", message: "正在确认新版本" }
+        ? { ...this.snapshot[kind], version: release.version, phase: "verifying", message: desktopText("正在确认新版本", "Confirming new version") }
         : { ...this.snapshot[kind], version: release.version, phase: "ready" };
     }
     await this.save(); await this.pruneCache().catch(() => {}); this.emit();
@@ -272,7 +273,7 @@ export class UpdateCoordinator {
     const pending = this.journal.pending.app?.manifest.app;
     if (!outcome || !pending || outcome.version !== pending.version || pending.version === this.options.appVersion) return;
     if (outcome.status !== "rolled-back" && outcome.status !== "failed") return;
-    const message = outcome.message ?? "桌面更新未能完成";
+    const message = outcome.message ?? desktopText("桌面更新未能完成", "Desktop update could not complete");
     if (outcome.status === "rolled-back") {
       this.journal.failedApp = { version: pending.version, sha256: pending.file.sha256 };
       delete this.journal.pending.app;
@@ -316,8 +317,8 @@ export class UpdateCoordinator {
   }
 
   private runtimeCompatibilityBlocker(release: ComponentRelease, appVersion: string, protocol: ComponentRelease["studioProtocol"] = { min: STUDIO_PROTOCOL_VERSION, max: STUDIO_PROTOCOL_VERSION }): string | undefined {
-    if (compareSemver(appVersion, release.minAppVersion) < 0) return `Runtime 至少需要桌面 ${release.minAppVersion}，请先更新桌面`;
-    if (release.studioProtocol.min > protocol.max || release.studioProtocol.max < protocol.min) return "Runtime 需要兼容的桌面协议，请先更新桌面";
+    if (compareSemver(appVersion, release.minAppVersion) < 0) return desktopText(`Runtime 至少需要桌面 ${release.minAppVersion}，请先更新桌面`, `Runtime requires Desktop ${release.minAppVersion} or newer; update the desktop app first`);
+    if (release.studioProtocol.min > protocol.max || release.studioProtocol.max < protocol.min) return desktopText("Runtime 需要兼容的桌面协议，请先更新桌面", "Runtime requires a compatible desktop protocol version; update the desktop app first");
     return undefined;
   }
   private assertRuntimeCompatible(release: ComponentRelease, appVersion: string, protocol?: ComponentRelease["studioProtocol"]): void {
@@ -380,12 +381,12 @@ export class UpdateCoordinator {
 
   async prepare(target: UpdateComponent | "all" = "all"): Promise<void> {
     if (this.journalInvalid) throw new Error(this.snapshot.error);
-    if (this.journal.rollbackRequested) throw new Error("桌面回滚已准备，请重启应用完成恢复");
-    if (this.controller || this.applying) throw new Error("已有正在进行的更新任务");
+    if (this.journal.rollbackRequested) throw new Error(desktopText("桌面回滚已准备，请重启应用完成恢复", "Desktop rollback is staged; restart the app to finish recovery"));
+    if (this.controller || this.applying) throw new Error(desktopText("已有正在进行的更新任务", "An update task is already in progress"));
     await this.reconcileRuntimePending();
     if (!this.found.app && !this.found.runtime) await this.check();
     if (this.snapshot.error) throw new Error(this.snapshot.error);
-    if (this.controller || this.applying) throw new Error("已有正在进行的更新任务");
+    if (this.controller || this.applying) throw new Error(desktopText("已有正在进行的更新任务", "An update task is already in progress"));
     const controller = this.controller = new AbortController();
     try {
       const prefs = await this.options.prefs.read();
@@ -402,7 +403,7 @@ export class UpdateCoordinator {
             continue;
           }
         }
-        if (kind === "runtime" && release.channel !== prefs.runtimeChannel) throw new Error("Runtime 通道已更改，请重新检查更新");
+        if (kind === "runtime" && release.channel !== prefs.runtimeChannel) throw new Error(desktopText("Runtime 通道已更改，请重新检查更新", "Runtime channel changed; check for updates again"));
         if (kind === "runtime") {
           const targetApp = this.journal.pending.app?.manifest.app?.version ?? this.options.appVersion;
           const protocol = this.journal.pending.app?.manifest.app?.studioProtocol ?? { min: STUDIO_PROTOCOL_VERSION, max: STUDIO_PROTOCOL_VERSION };
@@ -438,7 +439,7 @@ export class UpdateCoordinator {
   cancel(): void { this.controller?.abort(new Error("Update cancelled")); }
   async apply(): Promise<{ ok: boolean; deferred?: boolean; message?: string }> {
     if (this.journalInvalid) return { ok: false, message: this.snapshot.error ?? "Invalid update journal" };
-    if (this.controller || this.applying) return { ok: false, message: "更新尚未准备完成" };
+    if (this.controller || this.applying) return { ok: false, message: desktopText("更新尚未准备完成", "Update is not ready to apply yet") };
     this.applying = true;
     let stopped = false;
     try {
@@ -446,11 +447,11 @@ export class UpdateCoordinator {
       await this.reconcileRuntimePending();
       // A pending desktop matching this executable already runs and awaits confirmation.
       const pendingApp = this.journal.pending.app?.manifest.app?.version === this.options.appVersion ? undefined : this.journal.pending.app;
-      if (!pendingApp && !this.journal.pending.runtime) return hadRuntimePending ? { ok: true } : { ok: false, message: "没有待应用的更新" };
+      if (!pendingApp && !this.journal.pending.runtime) return hadRuntimePending ? { ok: true } : { ok: false, message: desktopText("没有待应用的更新", "No pending update to apply") };
       const blocker = this.restartBlocker();
       if (blocker) throw new UpdateRestartBlockedError(blocker);
       const prefs = await this.options.prefs.read();
-      if (this.journal.pending.runtime?.manifest.runtime?.channel && this.journal.pending.runtime.manifest.runtime.channel !== prefs.runtimeChannel) throw new Error("Runtime 通道已更改，请重新检查更新");
+      if (this.journal.pending.runtime?.manifest.runtime?.channel && this.journal.pending.runtime.manifest.runtime.channel !== prefs.runtimeChannel) throw new Error(desktopText("Runtime 通道已更改，请重新检查更新", "Runtime channel changed; check for updates again"));
       for (const kind of ["app", "runtime"] as const) {
         const envelope = kind === "app" ? pendingApp : this.journal.pending.runtime;
         if (!envelope) continue;
@@ -467,7 +468,7 @@ export class UpdateCoordinator {
           targetApp?.studioProtocol);
       } else if (targetApp) {
         const current = await this.installer.currentManifest();
-        if (current && (current.manifest.studioProtocol.max < targetApp.studioProtocol.min || current.manifest.studioProtocol.min > targetApp.studioProtocol.max)) throw new Error("请同时准备兼容的 Runtime 更新");
+        if (current && (current.manifest.studioProtocol.max < targetApp.studioProtocol.min || current.manifest.studioProtocol.min > targetApp.studioProtocol.max)) throw new Error(desktopText("请同时准备兼容的 Runtime 更新", "Prepare a compatible Runtime update together"));
       }
       const finalBlocker = this.restartBlocker();
       if (finalBlocker) throw new UpdateRestartBlockedError(finalBlocker);
@@ -490,7 +491,7 @@ export class UpdateCoordinator {
         // Shutdown takes seconds; re-verify the exact bytes about to be
         // executed so a cache swap in that window cannot launch them.
         if (!await isVerifiedFile(cachedUpdatePath(this.cache, app.file), app.file)) throw new Error("Update checksum mismatch after shutdown");
-        if (!this.options.installDesktop) throw new Error("请从发布页下载 Linux 安装包完成桌面升级");
+        if (!this.options.installDesktop) throw new Error(desktopText("请从发布页下载 Linux 安装包完成桌面升级", "Download the Linux installer from the release page to upgrade the desktop app"));
         await this.options.installDesktop(cachedUpdatePath(this.cache, app.file), app);
         this.options.quit();
       } else this.options.restart();
@@ -523,12 +524,12 @@ export class UpdateCoordinator {
     } finally { this.applying = false; }
   }
   async rollbackDesktop(): Promise<{ ok: boolean; message?: string }> {
-    if (this.controller || this.applying || this.options.isBusy()) return { ok: false, message: "请先完成任务和下载" };
+    if (this.controller || this.applying || this.options.isBusy()) return { ok: false, message: desktopText("请先完成任务和下载", "Finish running tasks and downloads first") };
     const envelope = this.journal.rollbackApp;
-    if (!envelope?.manifest.app) return { ok: false, message: "没有可验证的上一桌面版本，请下载历史安装包恢复" };
+    if (!envelope?.manifest.app) return { ok: false, message: desktopText("没有可验证的上一桌面版本，请下载历史安装包恢复", "No verifiable previous desktop version is available; download a previous installer to recover") };
     const app = this.verify(envelope).manifest.app!;
     const runtime = await this.installer.currentManifest();
-    if (runtime && (runtime.manifest.studioProtocol.min > app.studioProtocol.max || runtime.manifest.studioProtocol.max < app.studioProtocol.min)) return { ok: false, message: "当前 Runtime 与上一桌面不兼容，请先回滚 Runtime" };
+    if (runtime && (runtime.manifest.studioProtocol.min > app.studioProtocol.max || runtime.manifest.studioProtocol.max < app.studioProtocol.min)) return { ok: false, message: desktopText("当前 Runtime 与上一桌面不兼容，请先回滚 Runtime", "Current Runtime is incompatible with the previous desktop version; roll back the Runtime first") };
     const controller = this.controller = new AbortController();
     try {
       const prefs = await this.options.prefs.read();
@@ -537,7 +538,7 @@ export class UpdateCoordinator {
       this.journal.rollbackRequested = true;
       await this.save();
       this.snapshot.runtime = { component: "runtime", currentVersion: this.snapshot.runtime.currentVersion, phase: "idle" };
-      this.snapshot.app = { ...this.snapshot.app, version: app.version, phase: "ready", message: "上一版本已准备，点击重启恢复" }; this.emit();
+      this.snapshot.app = { ...this.snapshot.app, version: app.version, phase: "ready", message: desktopText("上一版本已准备，点击重启恢复", "Previous version is staged; click Restart to recover") }; this.emit();
       return { ok: true };
     } catch (error) { return { ok: false, message: String(error) }; }
     finally { this.controller = undefined; }
@@ -548,15 +549,15 @@ export class UpdateCoordinator {
     if (!trial || !workspaceSelected) return false;
     if (ready) { delete this.journal.runtimeTrial; await this.save(); return false; }
     try {
-      if (!trial.previousVersion) throw new Error("没有可回退的 Runtime");
+      if (!trial.previousVersion) throw new Error(desktopText("没有可回退的 Runtime", "No previous Runtime to roll back to"));
       const directory = join(this.options.runtimeRoot, "versions", trial.previousVersion);
       const old = await verifySignedArtifact({ directory, layout: RUNTIME_ARTIFACT_LAYOUT, parseManifest: parseRuntimeInstallationManifest, requireCovered: m => ["runtime-manifest.json", m.entrypoint], trustedKeys: this.options.keys });
-      if (old.manifest.studioProtocol.min > STUDIO_PROTOCOL_VERSION || old.manifest.studioProtocol.max < STUDIO_PROTOCOL_VERSION) throw new Error("上一 Runtime 与当前桌面不兼容");
+      if (old.manifest.studioProtocol.min > STUDIO_PROTOCOL_VERSION || old.manifest.studioProtocol.max < STUDIO_PROTOCOL_VERSION) throw new Error(desktopText("上一 Runtime 与当前桌面不兼容", "Previous Runtime is incompatible with the current desktop version"));
       await this.installer.activate(trial.previousVersion, this.options.activateOptions);
-      this.snapshot.runtime = { component: "runtime", currentVersion: trial.previousVersion, phase: "failed", message: "新 Runtime 启动失败，已恢复上一版本", errorStage: "recovery" };
+      this.snapshot.runtime = { component: "runtime", currentVersion: trial.previousVersion, phase: "failed", message: desktopText("新 Runtime 启动失败，已恢复上一版本", "New Runtime failed to start; restored the previous version"), errorStage: "recovery" };
       delete this.journal.runtimeTrial; await this.save(); this.emit(); return true;
     } catch (error) {
-      this.snapshot.runtime = { ...this.snapshot.runtime, phase: "failed", message: `Runtime 恢复失败：${String(error)}`, errorStage: "recovery" };
+      this.snapshot.runtime = { ...this.snapshot.runtime, phase: "failed", message: desktopText(`Runtime 恢复失败：${String(error)}`, `Runtime recovery failed: ${String(error)}`), errorStage: "recovery" };
       delete this.journal.runtimeTrial; await this.save(); this.emit(); return false;
     }
   }

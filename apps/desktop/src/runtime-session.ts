@@ -88,6 +88,7 @@ import type {
 import type { HostLog } from "./host-log.js";
 import { startMemoryCredentialBroker, type MemoryCredentialProvider } from "./memory-credentials.js";
 import { UpdateRestartBlockedError, updateRestartBlockerForSnapshot } from "./update-restart.js";
+import { getDesktopLanguage, onDesktopLanguageChange } from "./desktop-language-shared.js";
 
 export interface DesktopRuntimeSessionPortOptions {
   readonly managedBrowser?: boolean;
@@ -1209,6 +1210,7 @@ function createSingleDesktopRuntimeSessionPort(
   let sessionController: StudioRuntimeSessionController | undefined;
   let unregisterPerformance: (() => void) | undefined;
   let unsubscribeProjection: (() => void) | undefined;
+  let unsubscribeLanguage: (() => void) | undefined;
   let alive = false;
   let resumeSessionId: string | undefined = initialResumeSessionId;
   let resumeModel = initialModel;
@@ -1360,6 +1362,7 @@ function createSingleDesktopRuntimeSessionPort(
       `generation=${generation} hadSession=${bundle !== undefined} alive=${alive} reason=${reason}`,
     );
     alive = false;
+    unsubscribeLanguage?.(); unsubscribeLanguage = undefined;
     unsubscribeProjection?.();
     unsubscribeProjection = undefined;
     const current = bundle;
@@ -1467,6 +1470,7 @@ function createSingleDesktopRuntimeSessionPort(
     const client = new StudioBridgeClient({
       endpoint: bridgeBootstrap.endpoint,
       token: bridgeBootstrap.token,
+      locale: getDesktopLanguage,
       onTimeTravelCapture: async (request) => {
         const active = controller?.publication()?.snapshot;
         if (!active || active.sessionId !== request.sessionId) throw new Error("Session changed before the snapshot was saved");
@@ -1516,6 +1520,7 @@ function createSingleDesktopRuntimeSessionPort(
       },
     });
     bridge = client;
+    unsubscribeLanguage = onDesktopLanguageChange(locale => client.setLocale(locale));
 
     try {
       if (options.memoryCredentials) memoryBroker = await startMemoryCredentialBroker(options.memoryCredentials, bridgeBootstrap.token);

@@ -6,6 +6,7 @@ import { RemotePeer, RemoteRequestTimeout, REMOTE_PROTOCOL_VERSION, type RemoteA
 import type { RemoteHello } from "./server.js";
 import { sshAuthenticationRequest, type SshAuthentication } from "./authentication.js";
 import { RemoteConnectionError, connectionCancelled, sshFailure } from "./errors.js";
+import { desktopText, getDesktopLanguage, onDesktopLanguageChange, type DesktopLocale } from "../desktop-language-shared.js";
 
 export interface SshRemoteOptions {
   readonly networkChannel?: boolean;
@@ -40,7 +41,10 @@ export class SshRemoteTransport implements ClientTransport {
   #healthy = true;
   hello: RemoteHello | undefined;
 
-  constructor(readonly peer: RemotePeer, readonly terminate: () => void | Promise<void> = () => {}) {
+  constructor(readonly peer: RemotePeer, readonly terminate: () => void | Promise<void> = () => {}, private readonly languageSync = true) {
+    const offLanguage = onDesktopLanguageChange(locale => {
+      void this.setLanguage(locale).catch(error => console.warn("Remote language sync failed", error));
+    });
     const offEvent = peer.onEvent(event => { if (event && typeof event === "object" && "contextId" in event) return; for (const listener of this.#listeners) listener(event as ClientEvent); });
     peer.onTimeout(method => {
       if (!this.#healthPolicy || method === "ping") return;
@@ -48,6 +52,7 @@ export class SshRemoteTransport implements ClientTransport {
       void this.#checkHealth();
     });
     peer.onClose(error => {
+      offLanguage();
       this.#closed = error;
       clearTimeout(this.#healthTimer);
       offEvent();
@@ -69,7 +74,7 @@ export class SshRemoteTransport implements ClientTransport {
     let diagnostics = "";
     let exited = false;
     const exit = new Promise<void>(resolve => child.once("close", () => { exited = true; resolve(); }));
-    const peer = new RemotePeer(child.stdout, child.stdin, 30_000, () => sshFailure(diagnostics, new RemoteConnectionError("network", "SSH 通道已中断；已发送命令结果未知，未自动重发")));
+    const peer = new RemotePeer(child.stdout, child.stdin, 30_000, () => sshFailure(diagnostics, new RemoteConnectionError("network", desktopText("SSH 通道已中断；已发送命令结果未知，未自动重发", "SSH channel interrupted; outcome of sent commands is unknown and they were not resent"))));
     child.stderr.on("data", (chunk: Buffer) => { diagnostics = (diagnostics + chunk.toString("utf8")).slice(-4096); });
     child.once("error", error => peer.close(sshFailure(diagnostics, error)));
     child.once("close", code => peer.close(sshFailure(diagnostics, undefined, code)));
@@ -80,23 +85,29 @@ export class SshRemoteTransport implements ClientTransport {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try { await Promise.race([exit, new Promise<void>(resolve => { timeout = setTimeout(resolve, 2_000); })]); }
       finally { clearTimeout(force); clearTimeout(timeout); }
-    });
+    }, options.networkChannel !== true);
     const cancel = (): void => peer.close(connectionCancelled());
     options.signal?.addEventListener("abort", cancel, { once: true });
     peer.onClose(() => { options.signal?.removeEventListener("abort", cancel); authenticationRequest?.dispose(); });
     if (options.signal?.aborted) cancel();
     try {
       const hello = await peer.request<RemoteHello>("hello", { ...(options.attachment ? { attachment: options.attachment } : {}), ...(options.networkChannel ? { networkChannel: true } : {}) });
-      if (hello.protocolVersion !== REMOTE_PROTOCOL_VERSION) throw new RemoteConnectionError("protocol", "远端 Host 协议版本与客户端不一致，请手动重新连接以更新 Host");
-      if (hello.platform !== options.expectedPlatform) throw new RemoteConnectionError("environment", `远端系统是 ${hello.platform}，与配置的 ${options.expectedPlatform} 不符`);
-      if (options.expectedBundleVersion !== undefined && hello.bundleVersion !== options.expectedBundleVersion) throw new RemoteConnectionError("protocol", "远端 Host 版本已改变，请手动重新连接；未覆盖现有 Host");
+      if (hello.protocolVersion !== REMOTE_PROTOCOL_VERSION) throw new RemoteConnectionError("protocol", desktopText("远端 Host 协议版本与客户端不一致，请手动重新连接以更新 Host", "Remote Host protocol version does not match the client; please reconnect manually to update the Host"));
+      if (hello.platform !== options.expectedPlatform) throw new RemoteConnectionError("environment", desktopText(`远端系统是 ${hello.platform}，与配置的 ${options.expectedPlatform} 不符`, `Remote OS is ${hello.platform}, which does not match configured ${options.expectedPlatform}`));
+      if (options.expectedBundleVersion !== undefined && hello.bundleVersion !== options.expectedBundleVersion) throw new RemoteConnectionError("protocol", desktopText("远端 Host 版本已改变，请手动重新连接；未覆盖现有 Host", "Remote Host version has changed; please reconnect manually without overwriting the existing Host"));
       transport.hello = hello;
+      if (!options.networkChannel) await transport.setLanguage(getDesktopLanguage());
       return transport;
     } catch (error) {
       await transport.close();
       if (options.signal?.aborted) throw connectionCancelled();
-      throw sshFailure(diagnostics, error instanceof RemoteRequestTimeout ? new RemoteConnectionError("network", "远端 Host 握手超时") : error, child.exitCode);
+      throw sshFailure(diagnostics, error instanceof RemoteRequestTimeout ? new RemoteConnectionError("network", desktopText("远端 Host 握手超时", "Remote Host handshake timed out")) : error, child.exitCode);
     }
+  }
+
+  async setLanguage(locale: DesktopLocale): Promise<void> {
+    if (!this.languageSync || !this.hello?.capabilities?.includes("desktop.language")) return;
+    await this.peer.request("desktop.language.set", { locale });
   }
 
   onDisconnect(listener: (error: Error) => void): Unsubscribe {
@@ -133,7 +144,7 @@ export class SshRemoteTransport implements ClientTransport {
       if (this.#closed) return;
       this.#setHealth(false);
       if (!(error instanceof RemoteRequestTimeout)) { this.peer.close(sshFailure("", error)); return; }
-      if (++this.#missed >= policy.missedChecks) this.peer.close(new RemoteConnectionError("network", "远端 Host 连续未响应健康检查，正在恢复通道；未停止远端任务"));
+      if (++this.#missed >= policy.missedChecks) this.peer.close(new RemoteConnectionError("network", desktopText("远端 Host 连续未响应健康检查，正在恢复通道；未停止远端任务", "Remote Host missed consecutive health checks; recovering channel without stopping remote tasks")));
     } finally {
       this.#checking = false;
       if (!this.#closed) this.#scheduleHealth(this.#missed ? 0 : policy.intervalMs);

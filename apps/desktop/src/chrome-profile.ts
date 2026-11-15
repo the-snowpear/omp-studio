@@ -21,6 +21,7 @@ import {
   writeProfileAvatar,
 } from "./chrome-profile-store.js";
 import { desktopPaths } from "./platform/desktop-paths.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 function persistRoot(): string {
   return resolveProfilePersistRoot(desktopPaths().appDataRoot);
@@ -48,16 +49,16 @@ export function registerChromeProfileIpc(options: {
 
   ipcMain.handle(CHROME_PROFILE_CHANNELS.saveAvatar, async (event, payload: unknown) => {
     if (event.sender.isDestroyed() || !options.isTrustedSender(event.sender)) {
-      return { ok: false, message: "不受信任的调用方。" };
+      return { ok: false, message: desktopText("不受信任的调用方。", "Untrusted caller.") };
     }
     const input = parseAvatarSaveInput(payload);
-    if (input === undefined) return { ok: false, message: "头像数据无效。" };
+    if (input === undefined) return { ok: false, message: desktopText("头像数据无效。", "Invalid avatar data.") };
     try {
       await writeProfileAvatar(await readyRoot(), input);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "EACCES" || code === "EPERM") {
-        return { ok: false, message: "无法写入头像文件（没有权限）。" };
+        return { ok: false, message: desktopText("无法写入头像文件（没有权限）。", "Cannot write avatar file (permission denied).") };
       }
       throw error;
     }

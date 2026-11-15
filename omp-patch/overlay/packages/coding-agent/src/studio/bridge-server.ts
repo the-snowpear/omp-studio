@@ -2,6 +2,7 @@ import { RUNTIME_VIEW_KINDS } from "./runtime-views-protocol";
 import { CONTEXT_VIEW_KINDS } from "./context-view-protocol";
 import { isComputerWorkspaceQuery, type ComputerWorkspaceQuery } from "./computer-workspace-protocol";
 import { SessionControlError } from "./services/session-control-service";
+import { setRuntimeLocale } from "./locale";
 import { isConcurrentStudioOperation } from "./command-arbiter";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
@@ -30,7 +31,7 @@ const UPSTREAM_COMMIT = "04cd1a7549a02d62ad1d24826198d52507595683";
  * refuses to sign an artifact whose probed identity disagrees with the series,
  * so a stale value here fails the build (see `scripts/build-omp-host.mjs`).
  */
-const PATCHSET_VERSION = "studio.10";
+const PATCHSET_VERSION = "studio.12";
 
 /** Reads and interrupts must not wait for `core.prompt` to finish. Prompt holds
  *  `#dispatchQueue` for the whole turn, including 503 auto-retry backoff. */
@@ -294,6 +295,12 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 							frame.header.runtimeEpoch !== runtime.runtimeEpoch
 						)
 							throw new Error("Stale Runtime epoch");
+						const locale = frame.body as { type?: string; locale?: unknown };
+						if (locale.type === "studio.locale") {
+							if (locale.locale !== "zh" && locale.locale !== "en") throw new Error("Invalid Studio locale");
+							setRuntimeLocale(locale.locale);
+							continue;
+						}
 						if (
 							frame.body &&
 							typeof frame.body === "object" &&

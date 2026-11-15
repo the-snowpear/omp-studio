@@ -1,4 +1,5 @@
 import { GitHubReferencePreview } from "../composer/GitHubReferencePreview";
+import { useI18n } from "../i18n";
 import {
   useLayoutEffect,
   useMemo,
@@ -186,11 +187,12 @@ export function UserMessageBody({
   copyText?: string;
   actions?: ReactNode;
 }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [preview, setPreview] = useState<ImagePreviewSubject | null>(null);
   const display = useMemo(
-    () => attachUserThumbs(displayDocForUserMessage(text, doc), thumbs ?? []),
-    [text, doc, thumbs],
+    () => attachUserThumbs(displayDocForUserMessage(text, doc, undefined, zh), thumbs ?? []),
+    [text, doc, thumbs, zh],
   );
     const chips = docHasDisplayChips(display);
     // 每个 subject 都带一份等长的 data URL（`imagePreviewUrl` 是字符串拼接），
@@ -232,13 +234,13 @@ export function UserMessageBody({
   );
 
   const thumbsRow = subjects.length === 0 ? null : (
-    <div className="ev-thumbs cm-thumbs" aria-label="已附加的图片">
+    <div className="ev-thumbs cm-thumbs" aria-label={zh ? "已附加的图片" : "Attached images"}>
       {subjects.map((thumb) => (
         <figure key={`${thumb.label}-${thumb.data?.slice(0, 12) ?? thumb.url}`} className="cm-thumb">
           <button
             type="button"
             className="cm-thumb-open"
-            aria-label={`预览${thumb.label}`}
+            aria-label={zh ? `预览${thumb.label}` : `Preview ${thumb.label}`}
             onClick={() => setPreview(thumb)}
           >
             <img src={thumb.url} alt="" loading="lazy" decoding="async" />

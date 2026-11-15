@@ -105,8 +105,8 @@ export function NativeArchivePane({
       try {
         const args = { sessionId: context?.sessionId ?? "", scope };
         if (preview) {
-          setSessions(previewArchiveSessions());
-          setTexts(previewArchiveTexts(view, search));
+          setSessions(previewArchiveSessions(zh));
+          setTexts(previewArchiveTexts(view, search, zh));
           setTruncated(false);
           return;
         }
@@ -164,7 +164,7 @@ export function NativeArchivePane({
     setDetailBusy(true);
     try {
       const result = preview
-        ? previewArchiveDetail(id)
+        ? previewArchiveDetail(id, zh)
         : await read("archive.session.inspect", {
             sessionId: context!.sessionId!,
             targetSessionId: id,

@@ -1,5 +1,6 @@
 import { useState, type MouseEvent, type ReactNode } from "react";
 import type { ManagedBrowserPage } from "@omp-studio/studio-protocol";
+import { useI18n } from "../i18n";
 import "./managedBrowserDemo.css";
 
 export type DemoPick = { selector: string; tagName: string; text: string; rect: { x: number; y: number; width: number; height: number } };
@@ -12,6 +13,7 @@ export function ManagedBrowserDemoPage({ page, picking, interactive, hint, onPic
   page: ManagedBrowserPage; picking: boolean; interactive: boolean; hint: string | null; onPick: (pick: DemoPick) => void;
 }) {
   const [count, setCount] = useState(0);
+  const zh = useI18n().resolvedLanguage === "zh";
   const target = (selector: string, tagName: string, text: string) => ({
     "data-demo-pick": selector,
     onClickCapture: (event: MouseEvent<HTMLElement>) => {
@@ -25,10 +27,10 @@ export function ManagedBrowserDemoPage({ page, picking, interactive, hint, onPic
   const url = page.url;
   let body: ReactNode;
   if (url.includes("/docs/")) body = <article className="mbd-doc">
-    <nav className="mbd-doc-crumbs" {...target("nav.crumbs", "nav", "文档 / 工作台 / 浏览器")}>文档 / 工作台 / 浏览器</nav>
-    <h1 {...target("article > h1", "h1", "在对话里使用浏览器")}>在对话里使用浏览器</h1>
-    <p {...target("article > p:nth-of-type(1)", "p", "每个对话都有自己的网页。")}>每个对话都有自己的网页，你和 Agent 看到的是同一张页面。需要亲自操作时先接管，用完再交还。</p>
-    <div className="mbd-callout" {...target("aside.callout", "aside", "选择元素后可以写备注")}><strong>提示</strong> 选择元素后可以写备注，一起放进输入框发给 Agent。</div>
+    <nav className="mbd-doc-crumbs" {...target("nav.crumbs", "nav", zh ? "文档 / 工作台 / 浏览器" : "Docs / Workbench / Browser")}>{zh ? "文档 / 工作台 / 浏览器" : "Docs / Workbench / Browser"}</nav>
+    <h1 {...target("article > h1", "h1", zh ? "在对话里使用浏览器" : "Using the browser in chat")}>{zh ? "在对话里使用浏览器" : "Using the browser in chat"}</h1>
+    <p {...target("article > p:nth-of-type(1)", "p", zh ? "每个对话都有自己的网页。" : "Each conversation has its own browser page.")}>{zh ? "每个对话都有自己的网页，你和 Agent 看到的是同一张页面。需要亲自操作时先接管，用完再交还。" : "Each conversation has its own browser page — you and the agent see the same view. Take over whenever you need direct control, then hand it back."}</p>
+    <div className="mbd-callout" {...target("aside.callout", "aside", zh ? "选择元素后可以写备注" : "Add notes after picking an element")}><strong>{zh ? "提示" : "Tip"}</strong> {zh ? "选择元素后可以写备注，一起放进输入框发给 Agent。" : "You can add a note after picking an element and send both to the agent from the composer."}</div>
     <pre {...target("pre.code", "pre", "browser open localhost:5173")}><code>browser open http://localhost:5173 --target main</code></pre>
   </article>;
   else if (url.includes("localhost:6006")) body = <div className="mbd-story">

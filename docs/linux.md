@@ -4,7 +4,7 @@ Linux x64 的 AppImage 与 deb 已接入打包和发布流程，将随包含本�
 
 ## 首发范围
 
-- x64（Intel / AMD 64 位）。原生构建与安装验收使用 Ubuntu 24.04；最低 glibc 2.39、libstdc++ 13.2。Debian 13 等更新的系统还需具备包内列明的桌面依赖。Ubuntu 22.04、Alpine / musl 不在此构建目标内。
+- x64（x86-64-v3 / AVX2，Intel Haswell、AMD Zen 或更新的同等 CPU）。当前 Runtime 的本机构建内置 modern 原生模块，因此首发不覆盖缺少 AVX2 的老 CPU。原生构建与安装验收使用 Ubuntu 24.04；最低 glibc 2.39、libstdc++ 13.2。Debian 13 等更新的系统还需具备包内列明的桌面依赖。Ubuntu 22.04、Alpine / musl 不在此构建目标内。
 - 两种安装格式：Ubuntu / Debian 推荐 deb；AppImage 用作便携包，需要系统提供 FUSE 2 和可用的非特权用户命名空间。
 - 内置签名 OMP Runtime、Electron 和原生 PTY。使用安装包不需要安装 Node、npm、Bun 或 Rust；开发项目本身用到的 Git、编译器和语言工具仍由用户安装。
 - Linux 桌面先采用手动升级，Runtime 保留应用内签名更新、兼容性检查和回滚。ARM64 桌面、RPM、Flatpak 与软件源不包含在此次首发中。

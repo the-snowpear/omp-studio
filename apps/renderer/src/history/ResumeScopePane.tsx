@@ -5,7 +5,7 @@ import { AppSelect } from "../AppSelect";
 import { Icon } from "../icons";
 import { MarkdownText } from "../conversation/markdown";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { PREVIEW_RESUME_SESSIONS } from "../preview/resumeScopePreview";
+import { getPreviewResumeSessions } from "../preview/resumeScopePreview";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { WorkspaceDialog, WorkspaceEmpty, WorkspaceStatus } from "../workspaces/Workspace";
@@ -47,7 +47,7 @@ export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
     setRows([]); setError(""); setLoading(false); setResuming(false); setTruncated(false);
     if (!opened || !enabled) return;
     if (preview) {
-      setRows(PREVIEW_RESUME_SESSIONS.filter(row => scope !== "directory" || row.currentDirectory));
+      setRows(getPreviewResumeSessions(zh).filter(row => scope !== "directory" || row.currentDirectory));
       setResolvedScope(scope ?? "repo");
       return;
     }

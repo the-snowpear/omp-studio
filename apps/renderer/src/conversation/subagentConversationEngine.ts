@@ -8,6 +8,7 @@ import { ConversationStore } from "./conversationStore";
 import type { ConversationState, TimelineRow } from "./conversationViewModel";
 import type { SubagentHubTarget } from "./toolMeta";
 import { registerRendererResource } from "../rendererResources";
+import { isZh } from "../i18n";
 
 export type SubagentConversationClient = Pick<StudioClient, "query" | "subscribe">;
 export type SubagentConversationEngineInput = { readonly preview: boolean; readonly previewStream?: boolean; readonly previewItems: readonly ConversationItem[]; readonly client: SubagentConversationClient | null; readonly target: SubagentHubTarget | null; readonly runtimeConnected: boolean; readonly parentSessionId?: SessionId; readonly liveSessionId?: SessionId };
@@ -41,7 +42,7 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
   function applyLiveEvent(event: Extract<ClientEvent, { kind: "conversation.changed" }>): void {
     if (event.streamSeq <= watermark) return;
     if (event.streamSeq !== watermark + 1) {
-      store.requireResync("子 Agent 对话流序号不连续，正在重新同步。");
+      store.requireResync(isZh() ? "子 Agent 对话流序号不连续，正在重新同步。" : "Subagent conversation stream sequence gap detected; resyncing.");
       void hydrate(true);
       return;
     }
@@ -65,7 +66,7 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
   async function hydrate(resyncing = false): Promise<void> {
     if (disposed || !active) return;
     const current = ++token; loadingOlder = false; buffered = []; bufferedBytes = 0; bufferOverflowed = false; conversationSessionId = undefined; watermark = 0;
-    if (input.target === null) { store.setUnavailable("没有可读取的子 Agent 对话。"); return; }
+    if (input.target === null) { store.setUnavailable(isZh() ? "没有可读取的子 Agent 对话。" : "No subagent conversation available."); return; }
     store.setLoading(resyncing);
     if (input.preview) {
       stopPreviewStream();
@@ -76,8 +77,8 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
         setTimeout(() => store.applyEvent(event, index + 1), afterMs));
       return;
     }
-    if (parentSessionId === undefined) { store.setUnavailable("没有可读取的子 Agent 对话。"); return; }
-    if (input.client === null) { store.setUnavailable("当前环境无法读取子 Agent 对话。"); return; }
+    if (parentSessionId === undefined) { store.setUnavailable(isZh() ? "没有可读取的子 Agent 对话。" : "No subagent conversation available."); return; }
+    if (input.client === null) { store.setUnavailable(isZh() ? "当前环境无法读取子 Agent 对话。" : "Cannot read subagent conversations in this environment."); return; }
     const source = createConversationSource(input.client);
     const target: ConversationTarget = { kind: "agent", parentSessionId, agentId: input.target.agentId as AgentId };
     liveTarget = undefined;
@@ -94,7 +95,7 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
           store.hydrate(opened.page, opened.live.events.map((event) => ({ streamSeq: event.streamSeq, update: event.update })), watermark);
         }
         const queued = buffered; const overflowed = bufferOverflowed; buffered = []; bufferedBytes = 0; bufferOverflowed = false;
-        if (overflowed) { store.requireResync("打开子 Agent 对话期间的事件缓冲已满，正在重新同步。"); void hydrate(true); return; }
+        if (overflowed) { store.requireResync(isZh() ? "打开子 Agent 对话期间的事件缓冲已满，正在重新同步。" : "Event buffer filled while opening subagent conversation; resyncing."); void hydrate(true); return; }
         for (const event of queued) if (event.sessionId === conversationSessionId) applyLiveEvent(event);
       } else {
         const page = await source.readArchive(parentSessionId, input.target.agentId, undefined, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);

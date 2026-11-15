@@ -4,7 +4,7 @@ import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { hostErrorMessage } from "../hostError";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { PREVIEW_TEMPLATES, getPreviewTemplateContent, preparePreviewTemplate } from "../preview/runtimeCatalogPreview";
+import { getPreviewTemplates, getPreviewTemplateContent, preparePreviewTemplate } from "../preview/runtimeCatalogPreview";
 import { CatalogEmpty, CatalogHeading, useRuntimeCatalog, type RuntimeCatalogProps } from "./RuntimeCatalogShared";
 import "./promptTemplates.css";
 
@@ -62,24 +62,24 @@ export function PromptTemplatesPane({ client, sessionId, available, visible = tr
     setPrepared(undefined);
     setSourceOpen(true);
     setArgs("");
-    const value = preview ? { template: row, content: getPreviewTemplateContent(row.id) } : await invoke("templates.get", { sessionId: sessionId!, id: row.id, version: row.version });
+    const value = preview ? { template: row, content: getPreviewTemplateContent(row.id, zh) } : await invoke("templates.get", { sessionId: sessionId!, id: row.id, version: row.version });
     if (epoch === generation.current) { selectedRef.current = value.template; setSelected(value.template); setContent(value.content); }
-  }, [invoke, preview, sessionId]);
+  }, [invoke, preview, sessionId, zh]);
 
   const load = useCallback(async (epoch: number, after?: string) => {
-    const result = preview ? { templates: PREVIEW_TEMPLATES, nextCursor: undefined } : await invoke("templates.list", { sessionId: sessionId!, ...(after ? { cursor: after } : {}), limit: 50 });
+    const result = preview ? { templates: getPreviewTemplates(zh), nextCursor: undefined } : await invoke("templates.list", { sessionId: sessionId!, ...(after ? { cursor: after } : {}), limit: 50 });
     if (epoch !== generation.current) return;
     setRows((current) => after ? [...current, ...result.templates] : result.templates);
     setCursor(result.nextCursor);
     if (!after && visibleRef.current) {
       const first = result.templates.find((row) => row.id === selectedRef.current?.id) ?? [...result.templates].sort((a, b) => a.name.localeCompare(b.name))[0];
       if (first) {
-        if (first.id !== selectedRef.current?.id || first.version !== selectedRef.current?.version) await select(first, epoch);
+        if (preview || first.id !== selectedRef.current?.id || first.version !== selectedRef.current?.version) await select(first, epoch);
         else setSelected(first);
       }
       else { selectedRef.current = undefined; setSelected(undefined); setContent(""); setPrepared(undefined); }
     }
-  }, [invoke, preview, sessionId, select]);
+  }, [invoke, preview, sessionId, select, zh]);
 
   const run = useCallback(async (operation: Busy, action: (epoch: number) => Promise<void>) => {
     if (busyRef.current) return;
@@ -116,7 +116,7 @@ export function PromptTemplatesPane({ client, sessionId, available, visible = tr
   const expand = () => {
     if (!selected || busy || !canRead) return;
     void run("prepare", async (epoch) => {
-      const text = preview ? preparePreviewTemplate(selected.id, args) : (await invoke("templates.prepare", { sessionId: sessionId!, id: selected.id, version: selected.version, arguments: args })).text;
+      const text = preview ? preparePreviewTemplate(selected.id, args, zh) : (await invoke("templates.prepare", { sessionId: sessionId!, id: selected.id, version: selected.version, arguments: args })).text;
       if (epoch === generation.current) { setPrepared(text); setSourceOpen(false); }
     });
   };

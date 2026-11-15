@@ -2,6 +2,7 @@ import type { RuntimeViewOperation } from "@omp-studio/studio-protocol";
 import type { EvaluationCoordinator } from "@omp-studio/studio-host";
 import { isComputerWorkspaceCommand, type ComputerWorkspaceQuery, type ContextViewOperation } from "@omp-studio/studio-protocol";
 import { isWorkbenchOperationKind, type ArtifactTextInput } from "@omp-studio/studio-protocol";
+import { hostText, isHostLocaleZh } from "./locale.js";
 /**
  * StudioHostClientFacade — the P1 presentation-neutral product API.
  *
@@ -1024,7 +1025,7 @@ export class StudioHostClientFacade implements ClientTransport {
       case "workspace.file.readChunk": {
         const service = this.#options.workspaceFiles;
         const input = request.input as import("@omp-studio/client-contract").WorkspaceFileChunkInput;
-        if (!service?.inspect || !service.readText || !service.readChunk) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持文件查看，请更新 Host");
+        if (!service?.inspect || !service.readText || !service.readChunk) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持文件查看，请更新 Host", "This Host does not support file viewing; please update the Host"));
         const result = request.queryName === "workspace.file.inspect" ? await service.inspect(input)
           : request.queryName === "workspace.file.readText" ? await service.readText(input) : await service.readChunk(input);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
@@ -1045,7 +1046,7 @@ export class StudioHostClientFacade implements ClientTransport {
           return {
             ok: true,
             queryName: request.queryName,
-            result: { available: false, reason: "本机统计面板未接入。" },
+            result: { available: false, reason: hostText("本机统计面板未接入。", "Local stats dashboard is not wired up.") },
           } as ClientQueryResponse;
         }
         return { ok: true, queryName: request.queryName, result: await usage.dashboard() } as ClientQueryResponse;
@@ -2368,7 +2369,7 @@ export class StudioHostClientFacade implements ClientTransport {
         models: [],
         byModel: [],
         hours: [],
-        unavailableReason: "Host 未接入用量适配器。",
+        unavailableReason: hostText("Host 未接入用量适配器。", "Host usage adapter is not wired up."),
       };
     }
     return service.get();
@@ -2624,7 +2625,7 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   #sharedProjectRead<T>(name: string, run: () => T | Promise<T>): Promise<T> {
-    return this.#options.projectReads?.read(`${this.#options.workspaceCwd?.()}\0${name}`, run) ?? Promise.resolve(run());
+    return this.#options.projectReads?.read(`${this.#options.workspaceCwd?.()}\0${name}\0${isHostLocaleZh() ? "zh" : "en"}`, run) ?? Promise.resolve(run());
   }
 
   async #querySkills(): Promise<ExtensibilityReadModel> {
@@ -2635,7 +2636,7 @@ export class StudioHostClientFacade implements ClientTransport {
         plugins: [],
         warnings: [],
         generatedAt: this.#options.diagnostics.now(),
-        unavailableReason: "Host 未接入技能 / 插件适配器。",
+        unavailableReason: hostText("Host 未接入技能 / 插件适配器。", "Host skills/plugins adapter is not wired up."),
       };
     }
     return this.#sharedProjectRead("skills", service.get.bind(service));
@@ -2648,7 +2649,7 @@ export class StudioHostClientFacade implements ClientTransport {
         servers: [],
         warnings: [],
         generatedAt: this.#options.diagnostics.now(),
-        unavailableReason: "Host 未接入 MCP 适配器。",
+        unavailableReason: hostText("Host 未接入 MCP 适配器。", "Host MCP adapter is not wired up."),
       };
     }
     return service.get();
@@ -2672,7 +2673,7 @@ export class StudioHostClientFacade implements ClientTransport {
         roleAliases: [],
         projectScopeAvailable: false,
         generatedAt: this.#options.diagnostics.now(),
-        unavailableReason: "Host 未接入子代理定义适配器。",
+        unavailableReason: hostText("Host 未接入子代理定义适配器。", "Host subagent definitions adapter is not wired up."),
       };
     }
     return service.get();
@@ -2690,10 +2691,10 @@ export class StudioHostClientFacade implements ClientTransport {
         loginProviders: [],
         generatedModelsYml: "providers: {}\n",
         generatedConfigYml: "modelRoles: {}\n",
-        runtimeEffectHint: "Host 未接入模型配置适配器。",
+        runtimeEffectHint: hostText("Host 未接入模型配置适配器。", "Host model configuration adapter is not wired up."),
         loginAvailable: false,
         ompAvailable: false,
-        unavailableReason: "Host 未接入模型配置适配器。",
+        unavailableReason: hostText("Host 未接入模型配置适配器。", "Host model configuration adapter is not wired up."),
         modelRoleStorage: "global",
         projectScopeAvailable: false,
         modelProviderOrder: [],
@@ -3403,7 +3404,7 @@ export class StudioHostClientFacade implements ClientTransport {
   ): Promise<void> {
     try {
       const input = request.input as { readonly workspaceId: WorkspaceId; readonly path: string };
-      if (request.commandName === "workspace.file.writeText" && !service.writeText) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持文件保存，请更新 Host");
+      if (request.commandName === "workspace.file.writeText" && !service.writeText) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持文件保存，请更新 Host", "This Host does not support saving files; please update the Host"));
       const result = request.commandName === "workspace.file.writeText"
         ? await service.writeText!(request.input as import("@omp-studio/client-contract").WorkspaceFileWrite)
         : request.commandName === "workspace.file.create" ? await service.createFile(input) : await service.createDirectory(input);

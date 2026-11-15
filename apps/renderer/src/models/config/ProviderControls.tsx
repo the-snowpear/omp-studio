@@ -7,7 +7,7 @@ import { resolveModelPrice } from "@omp-studio/client-contract";
 import { Brand, hasBrand } from "../../brands";
 import { Icon } from "../../icons";
 import { useI18n } from "../../i18n";
-import { MODEL_AUTH_TYPES } from "../../preview/modelConfigFixtures";
+import { getModelAuthTypes } from "../../preview/modelConfigFixtures";
 import { fmtK } from "../modelPresentation";
 import { type I18nT, type TestResultView } from "./types";
 import { thinkingMenuAnchor } from "./RoleControls";
@@ -76,8 +76,9 @@ export function AuthTypeSelect({
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState({ top: 0, left: 0, width: 280 });
-  const { t } = useI18n();
-  const selected = MODEL_AUTH_TYPES.find((item) => item.id === value) ?? MODEL_AUTH_TYPES[1];
+  const { t, resolvedLanguage } = useI18n();
+  const authTypes = getModelAuthTypes(resolvedLanguage === "zh");
+  const selected = authTypes.find((item) => item.id === value) ?? authTypes[1];
 
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
@@ -147,7 +148,7 @@ export function AuthTypeSelect({
               style={{ top: anchor.top, left: anchor.left, width: anchor.width }}
               onMouseDown={(event) => event.stopPropagation()}
             >
-              {MODEL_AUTH_TYPES.map((item) => {
+              {authTypes.map((item) => {
                 const on = item.id === value;
                 return (
                   <button
@@ -206,6 +207,23 @@ export function ModelCaps({ model }: { model: ModelCatalogEntry }) {
 }
 
 export function NativeTransportFacts({ facts }: { facts: ModelExecutionMetadata["compatibility"] }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   if (facts?.supportsMessageThreads === undefined && facts?.toolNamePrefix === undefined) return null;
-  return <div className="small muted" role="note">{facts.supportsMessageThreads !== undefined ? <p>Message threads · {facts.supportsMessageThreads ? "原生模型声明支持 / Supported by native policy" : "未声明支持 / Not advertised"}</p> : null}{facts.toolNamePrefix !== undefined ? <p>原生工具名前缀 / Native tool prefix · <code>{facts.toolNamePrefix}</code></p> : null}</div>;
+  return (
+    <div className="small muted" role="note">
+      {facts.supportsMessageThreads !== undefined ? (
+        <p>
+          Message threads · {facts.supportsMessageThreads
+            ? (zh ? "原生模型声明支持" : "Supported by native policy")
+            : (zh ? "未声明支持" : "Not advertised")}
+        </p>
+      ) : null}
+      {facts.toolNamePrefix !== undefined ? (
+        <p>
+          {zh ? "原生工具名前缀" : "Native tool prefix"} · <code>{facts.toolNamePrefix}</code>
+        </p>
+      ) : null}
+    </div>
+  );
 }

@@ -84,6 +84,7 @@ export class StudioBridgeRequestError extends Error {
 export interface StudioBridgeClientOptions {
   endpoint: string;
   token: string;
+  locale?: () => "zh" | "en";
   handshakeTimeoutMs?: number;
   supportedProtocolVersions?: readonly number[];
   connectSocket?: (endpoint: string) => Socket;
@@ -148,6 +149,14 @@ export class StudioBridgeClient {
 
   get state(): StudioBridgeClientState {
     return this.#state;
+  }
+
+  /** Private display preference; older Runtimes receive no new frame. */
+  setLocale(locale: "zh" | "en"): void {
+    if (!["negotiated", "snapshotting", "snapshot-required", "ready"].includes(this.#state) ||
+      !this.#socket || this.#runtimeEpoch === undefined ||
+      !this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === "studio.locale" && capability.grade !== "unavailable")) return;
+    this.#socket.write(encodeFrame("locale", this.#runtimeEpoch, { type: "studio.locale", locale }));
   }
 
   async connect(): Promise<StudioHelloResponse> {
@@ -727,6 +736,7 @@ export class StudioBridgeClient {
         this.#readyDecoder = decoder;
         this.#projection.beginConnection(response);
         this.#state = "negotiated";
+        if (this.options.locale) this.setLocale(this.options.locale());
         socket.once("error", () => socket.destroy());
         socket.once("close", () => this.#handleSocketClosed(socket));
         resolve(response);

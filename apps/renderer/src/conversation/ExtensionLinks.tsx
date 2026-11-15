@@ -4,6 +4,7 @@ import { BrowserLink } from "../browser/browserLinks";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { PREVIEW_EXTENSION_SCHEMES } from "../preview/runtimeViewsPreview";
 import { waitReceipt } from "../hostError";
+import { useI18n } from "../i18n";
 
 interface LinkOwner { schemes: readonly string[]; activate?: ((url: string) => Promise<void>) | undefined }
 const Context = createContext<LinkOwner>({ schemes: [] });
@@ -35,11 +36,13 @@ export function ExtensionLinksProvider({ client, actions, sessionId, sourceSessi
 }
 
 export function ExtensionAwareLink({ href, safe, children }: { href: string; safe: boolean; children: ReactNode }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const owner = useContext(Context), { preview, marks } = usePreviewMode();
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const colon = href.indexOf(":"), registered = colon > 0 && owner.schemes.includes(href.slice(0, colon).toLowerCase());
   if (!registered) return safe ? <BrowserLink href={href}>{children}</BrowserLink> : <span>{children}</span>;
-  return <><button type="button" className="md-extension-link" disabled={busy || !owner.activate} title={preview && marks ? "演示扩展链接" : undefined} onClick={() => {
+  return <><button type="button" className="md-extension-link" disabled={busy || !owner.activate} title={preview && marks ? (zh ? "演示扩展链接" : "Demo extension link") : undefined} onClick={() => {
     setBusy(true); setError("");
     void owner.activate?.(href).catch(cause => setError(cause instanceof Error ? cause.message : String(cause))).finally(() => setBusy(false));
   }}>{children}</button>{error ? <span role="alert" className="tc-note">{error}</span> : null}</>;

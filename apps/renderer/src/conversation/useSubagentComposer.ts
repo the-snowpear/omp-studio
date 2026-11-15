@@ -20,6 +20,7 @@ import { emptySnapshot, type ComposerSnapshot, type PromptImage } from "../compo
 import type { ChipComposerHandle } from "../composer/ChipComposer";
 import type { QueuedMessage } from "../MessageQueueBar";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { useI18n } from "../i18n";
 import { subagentComposerText, type SubagentComposerAgent } from "./subagentComposerGate";
 import { createSubagentViewState, useSubagentViewField, type SubagentViewState } from "./subagentViewState";
 
@@ -45,6 +46,9 @@ export function useSubagentComposer(input: {
   readonly sessionId: string | undefined;
   readonly viewState?: SubagentViewState;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zhRef = useRef(resolvedLanguage === "zh");
+  zhRef.current = resolvedLanguage === "zh";
   const composerRef = useRef<ChipComposerHandle | null>(null);
   const [localState] = useState(createSubagentViewState);
   const viewState = input.viewState ?? localState;
@@ -105,7 +109,7 @@ export function useSubagentComposer(input: {
       await waitReceipt(client as StudioClient, handle.requestId);
       return true;
     } catch (cause) {
-      setError(hostErrorMessage(cause, "发送给子 Agent 失败"));
+      setError(hostErrorMessage(cause, zhRef.current ? "发送给子 Agent 失败" : "Failed to send to subagent"));
       return false;
     } finally {
       setSending(false);
@@ -264,7 +268,7 @@ export function useSubagentComposer(input: {
   }, [channelReady, input.running, input.agent?.generation, pendingInteraction, queueEdit, queueKey, queued, sendSnapshot, sending, flushTick, setQueued]);
 
   const rejectSlash = useCallback(() => {
-    setError("子 Agent 不支持斜杠指令");
+    setError(zhRef.current ? "子 Agent 不支持斜杠指令" : "Subagents do not support slash commands");
   }, []);
 
   return {

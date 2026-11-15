@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRe
 import { createPortal } from "react-dom";
 import { DeferredPanel } from "../DeferredPanel";
 import { useI18n } from "../i18n";
+import { localizePanelDefinition } from "../panels/registry";
 import { DockStore } from "./store";
 import { PanelHosts } from "./hosts";
 import { DockDragPreview } from "./DockDragPreview";
@@ -56,7 +57,8 @@ export function DockProvider({ children, definitions, store, ownerId, conversati
   const scopedKey = scopedIds.join(",");
   const dynamicKey = JSON.stringify([snapshot.layout.agentPanels, agentCatalog?.scope, agentCatalog?.entries, snapshot.layout.browserPages, snapshot.layout.fileViews, scopedKey]);
   const allDefinitions = useMemo(() => {
-    const bases = definitions.map(definition => definition.id === "git-quick" && resolvedLanguage === "en" ? { ...definition, menuTitle: "Git Quick" } : definition.id === "context-viewer" && resolvedLanguage === "en" ? { ...definition, title: "Context viewer" } : definition.id === "annotations" && resolvedLanguage === "en" ? { ...definition, title: "Annotations" } : definition);
+    const zh = resolvedLanguage === "zh";
+    const bases = definitions.map(definition => localizePanelDefinition(definition, zh));
     return [...bases, ...scopedIds.flatMap((id): PanelDefinition[] => {
       const base = bases.find(definition => definition.id === panelBaseId(id));
       return base ? [scopedDefinition(id, base)] : [];

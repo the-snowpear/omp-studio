@@ -4,6 +4,7 @@ import type { AgentSession } from "../../session/agent-session";
 import { continuesConversation, conversationPosition } from "../../modes/utils/conversation-position";
 import { waitForCompactionYield, type CompactionSubmissionPort } from "./compaction-yield";
 import { SessionControlError } from "./session-control-service";
+import { runtimeText } from "../locale";
 
 interface QueuedCompaction {
 	id: string;
@@ -53,7 +54,9 @@ export class StudioQueuedCompactionService {
 					kind: "compaction" as const,
 					queue: "followUp" as const,
 					state: request.state === "running" ? ("inFlight" as const) : ("queued" as const),
-					text: request.instructions ? `压缩上下文 · ${request.instructions}` : "压缩上下文 / Compact context",
+					text: request.instructions
+						? `${runtimeText("压缩上下文", "Compact context")} · ${request.instructions}`
+						: runtimeText("压缩上下文", "Compact context"),
 					imageCount: 0,
 					editable: false,
 				}

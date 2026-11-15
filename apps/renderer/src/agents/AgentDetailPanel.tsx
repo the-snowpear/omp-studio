@@ -63,13 +63,13 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
   const shown = wide && tab === "details" ? "chat" : tab;
   const agent = agents.find(row => row.agentId === target.agentId);
   const parent = agents.find(row => row.agentId === agent?.parentAgentId);
-  const demo = preview ? previewAgentDisplay(target.agentId) : undefined;
+  const demo = preview ? previewAgentDisplay(target.agentId, zh) : undefined;
   const historical = !preview && parentSessionId !== liveSessionId;
   const duration = agent ? subagentDurationMs(agent) : undefined;
   const name = agent?.displayName ?? target.displayName ?? target.agentId;
   const model = agent?.resolvedModel ?? target.resolvedModel;
   const task = agent?.assignment ?? target.task;
-  const taskSteps = preview ? previewTaskStepsForAgent(target.agentId) : agent?.taskSteps;
+  const taskSteps = preview ? previewTaskStepsForAgent(target.agentId, zh) : agent?.taskSteps;
   const status = agent ? demo?.status ?? agentStatusText(agent.status, zh) : undefined;
   const metrics = [
     [zh ? "Agent" : "Agent", target.agentId],

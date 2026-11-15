@@ -24,7 +24,7 @@ describe("createOmpAgentDefinitionsService", () => {
       assert.ok(result.agents.length >= 7);
       assert.ok(result.agents.every((agent) => agent.source === "bundled"));
       const scout = result.agents.find((agent) => agent.name === "scout");
-      assert.equal(scout?.sourceLabel, "内置");
+      assert.equal(scout?.sourceLabel, "Bundled");
       assert.equal(scout?.editable, false);
       assert.equal(scout?.canFork, true);
       assert.equal(scout?.promptPacked, true);

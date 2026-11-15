@@ -2,10 +2,12 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { isPrimaryModifier } from "../keyboard/shortcuts";
 import { MarkdownText } from "../conversation/markdown";
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 import { mergePlanDraft, type PlanNotesBySection } from "./planFeedback";
 import { parsePlanSections, sectionBodyMarkdown } from "./planSections";
 
-const PREAMBLE_LABEL = "计划前言";
+const PREAMBLE_LABEL_ZH = "计划前言";
+const PREAMBLE_LABEL_EN = "Plan preamble";
 
 function headingTag(level: number): "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" {
   if (level <= 0) return "p";
@@ -32,6 +34,8 @@ export const PlanAnnotatedBody = forwardRef<PlanAnnotatedBodyHandle, {
   disabled,
   onNotesChange,
 }, ref) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const sections = parsePlanSections(body);
   const [draftIndex, setDraftIndex] = useState<number | undefined>(undefined);
   const [draft, setDraft] = useState("");
@@ -99,7 +103,7 @@ export const PlanAnnotatedBody = forwardRef<PlanAnnotatedBodyHandle, {
   return (
     <div className="plan-annotate">
       {sections.map((section, index) => {
-        const title = section.title || PREAMBLE_LABEL;
+        const title = section.title || (zh ? PREAMBLE_LABEL_ZH : PREAMBLE_LABEL_EN);
         const Heading = headingTag(section.level);
         const markdown = sectionBodyMarkdown(section).trim();
         const saved = notes[index] ?? [];
@@ -112,10 +116,10 @@ export const PlanAnnotatedBody = forwardRef<PlanAnnotatedBodyHandle, {
                 type="button"
                 className="btn small outline"
                 disabled={disabled === true || drafting}
-                aria-label={`批注 ${title}`}
+                aria-label={zh ? `批注 ${title}` : `Annotate ${title}`}
                 onClick={() => startDraft(index)}
               >
-                批注
+                {zh ? "批注" : "Annotate"}
               </button>
             </div>
             {markdown.length > 0 ? (
@@ -130,7 +134,7 @@ export const PlanAnnotatedBody = forwardRef<PlanAnnotatedBodyHandle, {
                   type="button"
                   className="icon-btn small"
                   disabled={disabled === true}
-                  aria-label={`删除批注 ${title} ${noteIndex + 1}`}
+                  aria-label={zh ? `删除批注 ${title} ${noteIndex + 1}` : `Delete annotation ${title} ${noteIndex + 1}`}
                   onClick={() => setSectionNotes(index, saved.filter((_, i) => i !== noteIndex))}
                 >
                   <Icon name="x" extra="sm" />
@@ -145,8 +149,8 @@ export const PlanAnnotatedBody = forwardRef<PlanAnnotatedBodyHandle, {
                   rows={3}
                   value={draft}
                   disabled={disabled === true}
-                  aria-label={`批注内容 ${title}`}
-                  placeholder="写下对这一段的修改意见…"
+                  aria-label={zh ? `批注内容 ${title}` : `Annotation text ${title}`}
+                  placeholder={zh ? "写下对这一段的修改意见…" : "Write suggested edits for this section…"}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && isPrimaryModifier(event)) {
@@ -157,7 +161,7 @@ export const PlanAnnotatedBody = forwardRef<PlanAnnotatedBodyHandle, {
                 />
                 <div className="plan-note-draft-actions">
                   <button type="button" className="btn small outline" disabled={disabled === true} onClick={cancelDraft}>
-                    取消
+                    {zh ? "取消" : "Cancel"}
                   </button>
                   <button
                     type="button"
@@ -165,7 +169,7 @@ export const PlanAnnotatedBody = forwardRef<PlanAnnotatedBodyHandle, {
                     disabled={disabled === true || draft.trim().length === 0}
                     onClick={saveDraft}
                   >
-                    保存
+                    {zh ? "保存" : "Save"}
                   </button>
                 </div>
               </div>

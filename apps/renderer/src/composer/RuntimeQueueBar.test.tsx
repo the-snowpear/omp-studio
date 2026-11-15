@@ -33,7 +33,7 @@ it("edits submitted preview entries locally and prevents changing in-flight inpu
   );
   fireEvent.click(await screen.findByRole("button", { name: /已提交\s*4/ }));
   const row = within(screen.getByText("检查截图中的布局问题").closest(".runtime-queue-row") as HTMLElement);
-  const compaction = within(screen.getByText("压缩上下文 / Compact context").closest(".runtime-queue-row") as HTMLElement);
+  const compaction = within(screen.getByText("压缩上下文").closest(".runtime-queue-row") as HTMLElement);
   const inFlight = within(screen.getByText("先保留当前改动，补充验收说明").closest(".runtime-queue-row") as HTMLElement);
   expect((compaction.getByRole("button", { name: "提升为纠偏" }) as HTMLButtonElement).disabled).toBe(true);
   expect((inFlight.getByRole("button", { name: "编辑已提交消息" }) as HTMLButtonElement).disabled).toBe(true);

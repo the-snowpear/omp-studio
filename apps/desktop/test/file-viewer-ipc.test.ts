@@ -44,7 +44,7 @@ test("closing the renderer during an SSH file inspection cancels the late open",
   try {
     const opening = source.invoke(channels.open, { targetId: "ssh", workspaceId: "workspace", path: file.path }) as Promise<unknown>;
     source.sender.destroy(); finish(file);
-    await assert.rejects(opening, /窗口已关闭/);
+    await assert.rejects(opening, /window is closed/);
   } finally { source.controller.dispose(); }
 });
 
@@ -71,7 +71,7 @@ for (const event of ["did-navigate", "render-process-gone"] as const) {
     const source = setup(() => ++reads === 1 ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(file));
     try {
       const opening = source.invoke(channels.open, { targetId: "ssh", workspaceId: "workspace", path: file.path }) as Promise<unknown>;
-      const rejected = assert.rejects(opening, /窗口已关闭/);
+      const rejected = assert.rejects(opening, /window is closed/);
       source.sender.emit(event);
       const fresh = await source.invoke(channels.open, { targetId: null, workspaceId: "workspace", path: file.path }) as { url: string };
       finish(file);

@@ -1,11 +1,47 @@
 import type { SkillshareResultMap } from "@omp-studio/studio-protocol";
-const hit = { package: "@studio/service-review", description: "检查服务配置与运行日志，保存配置后由使用者明确启动。", version: "1.2.0", downloads: 184, updatedAt: 1789948800000 };
-export const PREVIEW_SKILLSHARE_STATUS: SkillshareResultMap["skillshare.status"] = { registry: "https://skills.omp.sh", accountAuthenticated: true, publishAuthenticated: true, privateTokenChannel: true, actions: [] };
-export const PREVIEW_SKILLSHARE_SEARCH: SkillshareResultMap["skillshare.search"] = { hits: [hit], total: 1, page: 0, perPage: 20 };
-export const PREVIEW_SKILLSHARE_PACKAGE: SkillshareResultMap["skillshare.package"] = {
-  package: hit.package, description: hit.description, keywords: ["services", "review"], owners: ["studio"], tags: { latest: "1.2.0", stable: "1.1.0" }, totalVersions: 2,
-  versions: [{ version: "1.2.0", integrity: "sha512-3f9c2a17", bytes: 4120, fileCount: 2, hasScripts: true, yanked: false, publishedAt: hit.updatedAt }, { version: "1.1.0", integrity: "sha512-9b71ce42", bytes: 3000, fileCount: 1, hasScripts: false, yanked: false, publishedAt: hit.updatedAt - 86400000 }],
-  selected: { version: { version: "1.2.0", integrity: "sha512-3f9c2a17", bytes: 4120, fileCount: 2, hasScripts: true, yanked: false, publishedAt: hit.updatedAt }, files: [{ path: "SKILL.md", size: 3800, executable: false }, { path: "scripts/check.sh", size: 320, executable: true }], publisher: "studio", provenance: "演示：来自已验证的发布工作流" },
-};
-export const PREVIEW_SKILLSHARE_INSTALLED: SkillshareResultMap["skillshare.installed"] = { total: 1, skills: [{ package: hit.package, scope: "project", range: "^1.0.0", version: "1.1.0", stored: true }] };
-export const PREVIEW_SKILLSHARE_TOKENS: SkillshareResultMap["skillshare.tokens"] = { tokens: [{ id: "demo-ci", name: "Release CI", packages: [hit.package], createdAt: hit.updatedAt - 86400000, expiresAt: hit.updatedAt + 2592000000 }] };
+import { isZh } from "../i18n";
+
+function buildHit(zh: boolean) {
+  return {
+    package: "@studio/service-review",
+    description: zh
+      ? "检查服务配置与运行日志，保存配置后由使用者明确启动。"
+      : "Inspect service config and runtime logs; start services explicitly after saving config.",
+    version: "1.2.0",
+    downloads: 184,
+    updatedAt: 1789948800000,
+  };
+}
+
+export function getPreviewSkillshareStatus(): SkillshareResultMap["skillshare.status"] {
+  return { registry: "https://skills.omp.sh", accountAuthenticated: true, publishAuthenticated: true, privateTokenChannel: true, actions: [] };
+}
+
+export function getPreviewSkillshareSearch(zh = isZh()): SkillshareResultMap["skillshare.search"] {
+  return { hits: [buildHit(zh)], total: 1, page: 0, perPage: 20 };
+}
+
+export function getPreviewSkillsharePackage(zh = isZh()): SkillshareResultMap["skillshare.package"] {
+  const hit = buildHit(zh);
+  return {
+    package: hit.package, description: hit.description, keywords: ["services", "review"], owners: ["studio"], tags: { latest: "1.2.0", stable: "1.1.0" }, totalVersions: 2,
+    versions: [{ version: "1.2.0", integrity: "sha512-3f9c2a17", bytes: 4120, fileCount: 2, hasScripts: true, yanked: false, publishedAt: hit.updatedAt }, { version: "1.1.0", integrity: "sha512-9b71ce42", bytes: 3000, fileCount: 1, hasScripts: false, yanked: false, publishedAt: hit.updatedAt - 86400000 }],
+    selected: { version: { version: "1.2.0", integrity: "sha512-3f9c2a17", bytes: 4120, fileCount: 2, hasScripts: true, yanked: false, publishedAt: hit.updatedAt }, files: [{ path: "SKILL.md", size: 3800, executable: false }, { path: "scripts/check.sh", size: 320, executable: true }], publisher: "studio", provenance: zh ? "演示：来自已验证的发布工作流" : "Demo: from verified release workflow" },
+  };
+}
+
+export function getPreviewSkillshareInstalled(): SkillshareResultMap["skillshare.installed"] {
+  const hit = buildHit(true);
+  return { total: 1, skills: [{ package: hit.package, scope: "project", range: "^1.0.0", version: "1.1.0", stored: true }] };
+}
+
+export function getPreviewSkillshareTokens(): SkillshareResultMap["skillshare.tokens"] {
+  const hit = buildHit(true);
+  return { tokens: [{ id: "demo-ci", name: "Release CI", packages: [hit.package], createdAt: hit.updatedAt - 86400000, expiresAt: hit.updatedAt + 2592000000 }] };
+}
+
+export const PREVIEW_SKILLSHARE_STATUS = getPreviewSkillshareStatus();
+export const PREVIEW_SKILLSHARE_SEARCH = getPreviewSkillshareSearch();
+export const PREVIEW_SKILLSHARE_PACKAGE = getPreviewSkillsharePackage();
+export const PREVIEW_SKILLSHARE_INSTALLED = getPreviewSkillshareInstalled();
+export const PREVIEW_SKILLSHARE_TOKENS = getPreviewSkillshareTokens();

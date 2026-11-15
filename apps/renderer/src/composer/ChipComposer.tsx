@@ -22,10 +22,11 @@ import {
   type PointerEvent,
 } from "react";
 
+import { isZh, pickLocale, useI18n } from "../i18n";
 import type { ComposerChip, ComposerSnapshot, MentionCandidate, PromptImage } from "./types";
 import type { PredictionResult } from "@omp-studio/studio-protocol";
 import { emptySnapshot, newChipId } from "./types";
-import { snapshotFromDoc, snapshotIsEmpty, displayDocFromSerializedText } from "./serialize";
+import { defaultImageChipLabel, localizeImageChipLabel, snapshotFromDoc, snapshotIsEmpty, displayDocFromSerializedText } from "./serialize";
 import { fileToPromptImage, imagePreviewUrl, isImageFile } from "./ingest";
 import {
   chipRemoveTarget,
@@ -204,6 +205,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   },
   ref,
 ) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const document = useSurfaceDocument(), window = surfaceWindow(document);
   const executionTarget = useExecutionTarget();
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -313,7 +316,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     // reads on this path, and only a capsule can invalidate them: plain typing
     // next to a `/plan` chip must not re-measure every capsule twice.
     if (chipSignature(editor) !== chipSignatureRef.current) {
-      renumberImageChips(editor);
+      renumberImageChips(editor, zh);
       chipSignatureRef.current = chipSignature(editor);
       syncChipTruncation(editor);
       // Wrapping/scrollbars settle one frame later; coalesce capsule and resize work.
@@ -429,7 +432,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           const svg = image.mimeType === "image/svg+xml";
           insertChip({
             kind: "image",
-            label: "图",
+            label: defaultImageChipLabel(),
             ...(meta && !svg ? { path: meta.path } : {}),
             image,
           });
@@ -438,7 +441,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         if (meta) {
           insertChip({
             kind: "image",
-            label: "图",
+            label: defaultImageChipLabel(),
             path: meta.path,
           });
           continue;
@@ -459,10 +462,19 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     }
     if (skipped > 0) {
       onError?.(executionTarget.id !== null
-        ? "SSH 工作区可以直接附加图片；普通文件请通过 @ 选择远端文件，本机文件尚不支持上传。"
+        ? pickLocale(
+            "SSH 工作区可以直接附加图片；普通文件请通过 @ 选择远端文件，本机文件尚不支持上传。",
+            "SSH workspaces can attach images directly; use @ to select remote files, as uploading local files is not supported yet.",
+          )
         : workspaceId
-          ? "有些文件读不到，未添加为胶囊：可能已被移动或是快捷方式。"
-          : "当前环境无法解析磁盘路径，只有图片可以附件。");
+          ? pickLocale(
+              "有些文件读不到，未添加为胶囊：可能已被移动或是快捷方式。",
+              "Some files could not be read and were not attached: they may have been moved or are shortcuts.",
+            )
+          : pickLocale(
+              "当前环境无法解析磁盘路径，只有图片可以附件。",
+              "Disk paths cannot be resolved here; only images can be attached.",
+            ));
     }
     return skipped === 0;
   };
@@ -478,6 +490,12 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       return live ?? null;
     });
   }, [thumbs]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (editor) renumberImageChips(editor, zh);
+    setThumbs(current => current.map(thumb => ({ ...thumb, label: localizeImageChipLabel(thumb.label, zh) })));
+  }, [zh]);
 
   /* Capsule truncation depends on the editor's content width; typing only moves
      the height. A width-only ResizeObserver re-measures when the box actually
@@ -758,7 +776,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         try { images = await resolveImagePaste(text); }
         catch (cause) { if (current()) { insertPlainText(editor, text); emit(); } throw cause; }
         if (!current()) return false;
-        if (images?.length) for (const image of images) insertChip({ kind: "image", label: "图", image });
+        if (images?.length) for (const image of images) insertChip({ kind: "image", label: defaultImageChipLabel(), image });
         else { insertPlainText(editor, text); emit(); }
         return true;
       });
@@ -902,13 +920,13 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   return (
     <div className={`chip-composer${compact ? " is-compact" : ""}`} style={{position:"relative"}}>
       {thumbs.length > 0 ? (
-        <div className="cm-thumbs" aria-label="已附加的图片">
+        <div className="cm-thumbs" aria-label={zh ? "已附加的图片" : "Attached images"}>
           {thumbs.map((thumb) => (
             <figure key={thumb.id} className="cm-thumb">
               <button
                 type="button"
                 className="cm-thumb-open"
-                aria-label={`预览${thumb.label}`}
+                aria-label={zh ? `预览${thumb.label}` : `Preview ${thumb.label}`}
                 onClick={() => setPreview(thumb)}
               >
                 <img src={thumb.url} alt="" />
@@ -916,8 +934,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
               <button
                 type="button"
                 className="cm-thumb-remove"
-                aria-label={`移除${thumb.label}`}
-                data-tip="移除"
+                aria-label={zh ? `移除${thumb.label}` : `Remove ${thumb.label}`}
+                data-tip={zh ? "移除" : "Remove"}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();

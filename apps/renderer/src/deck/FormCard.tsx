@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 import { PLATFORM } from "../platform";
 import { useSurfaceDocument } from "../dock/SurfaceContext";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -16,6 +17,8 @@ export function FormCard({ session, title, summary, meta, demo, queue, disabled,
   onRespond: FormResponder;
 }) {
   const document = useSurfaceDocument();
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const { marks } = usePreviewMode();
   const view = useSyncExternalStore(session.subscribeView, session.getView, session.getView);
   const loading = useSyncExternalStore(session.subscribeMeta, () => session.getMeta().phase === "loading" && !session.getMeta().error, () => true);
@@ -64,18 +67,18 @@ export function FormCard({ session, title, summary, meta, demo, queue, disabled,
       <FormSummary session={session} compact />
       <strong>{summary || title}</strong>
       <QueueNav {...(queue ? { queue } : {})} />
-      <button type="button" className="btn small outline" onClick={() => { session.setCollapsed(false); if (form?.fields[0]) session.focusField(form.fields[0].id); }}>展开 / Show</button>
+      <button type="button" className="btn small outline" onClick={() => { session.setCollapsed(false); if (form?.fields[0]) session.focusField(form.fields[0].id); }}>{zh ? "展开 / Show" : "Show"}</button>
     </div>
     <div className="form-head" hidden={view.collapsed}>
-      <PromptHead icon="message" title={title || "Agent 提问"} {...(demo === true ? { demo: true } : {})} {...(meta ? { meta } : {})} {...(queue ? { queue } : {})} chips={<FormSummary session={session} />} end={<span className="form-head-actions">
-        <button className="icon-btn small" type="button" aria-label={view.expanded ? "收回表单" : "放大表单"} data-tip={view.expanded ? "收回表单" : "放大表单"} onClick={() => session.setExpanded(!view.expanded)}><Icon name={view.expanded ? "contract" : "expand"} extra="sm" /></button>
-        <button className="icon-btn small" type="button" aria-label="收起表单" data-tip={PLATFORM === "darwin" ? "收起 · ⌥H" : "收起 · Alt+H"} onClick={() => session.setCollapsed(true)}><Icon name="minimize" extra="sm" /></button>
+      <PromptHead icon="message" title={title || (zh ? "Agent 提问" : "Agent question")} {...(demo === true ? { demo: true } : {})} {...(meta ? { meta } : {})} {...(queue ? { queue } : {})} chips={<FormSummary session={session} />} end={<span className="form-head-actions">
+        <button className="icon-btn small" type="button" aria-label={view.expanded ? (zh ? "收回表单" : "Restore form size") : (zh ? "放大表单" : "Expand form")} data-tip={view.expanded ? (zh ? "收回表单" : "Restore form size") : (zh ? "放大表单" : "Expand form")} onClick={() => session.setExpanded(!view.expanded)}><Icon name={view.expanded ? "contract" : "expand"} extra="sm" /></button>
+        <button className="icon-btn small" type="button" aria-label={zh ? "收起表单" : "Collapse form"} data-tip={PLATFORM === "darwin" ? (zh ? "收起 · ⌥H" : "Hide · ⌥H") : (zh ? "收起 · Alt+H" : "Hide · Alt+H")} onClick={() => session.setCollapsed(true)}><Icon name="minimize" extra="sm" /></button>
       </span>} />
       {grouped && form ? <FormSectionNav session={session} sections={sections} current={current} jump={jump} /> : null}
       <FormProgress session={session} />
     </div>
     <div className="ask-body form-body" hidden={view.collapsed}>
-      {loading ? <p className="muted small" role="status">正在读取表单…</p> : form ? <FormFields form={form} session={session} section={current} grouped={grouped} disabled={disabled} /> : null}
+      {loading ? <p className="muted small" role="status">{zh ? "正在读取表单…" : "Loading form…"}</p> : form ? <FormFields form={form} session={session} section={current} grouped={grouped} disabled={disabled} /> : null}
     </div>
     <FormError session={session} />
     <FormFooter session={session} disabled={disabled} hidden={view.collapsed} />
@@ -84,10 +87,12 @@ export function FormCard({ session, title, summary, meta, demo, queue, disabled,
 
 /** Section stepper: each group shows whether every field in it holds an answer. Re-renders on the filled count only. */
 function FormSectionNav({ session, sections, current, jump }: { session: FormSession; sections: number[]; current: number; jump: (index: number) => void }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   useSyncExternalStore(session.subscribeMeta, () => session.getMeta().filled, () => 0);
   const form = session.form!;
   const complete = (index: number) => form.sections[index]!.blocks.every(block => block.kind !== "field" || session.isFieldFilled(block.fieldId));
-  return <nav className="form-section-nav" aria-label="表单题组" onKeyDown={event => {
+  return <nav className="form-section-nav" aria-label={zh ? "表单题组" : "Form sections"} onKeyDown={event => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     const pos = sections.indexOf(current);
@@ -96,7 +101,7 @@ function FormSectionNav({ session, sections, current, jump }: { session: FormSes
   }}>{sections.map((index, at) => {
     const done = complete(index);
     return <button key={index} type="button" className={`form-step${index === current ? " active" : ""}${done ? " is-done" : ""}`} aria-current={index === current ? "step" : undefined} onClick={() => jump(index)}>
-      <StepNode tone={index === current ? "active" : done ? "done" : "pending"} label={at + 1} /><span className="sr-only">{at + 1}</span><span className="form-step-label">{formSectionLabel(form, index)}</span>
+      <StepNode tone={index === current ? "active" : done ? "done" : "pending"} label={at + 1} /><span className="sr-only">{at + 1}</span><span className="form-step-label">{formSectionLabel(form, index, zh)}</span>
     </button>;
   })}</nav>;
 }
@@ -110,22 +115,28 @@ function FormProgress({ session }: { session: FormSession }) {
 
 /** Countdown and filled count update only this leaf, never the input subtree or conversation. */
 function FormSummary({ session, compact }: { session: FormSession; compact?: boolean | undefined }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const state = useSyncExternalStore(session.subscribeMeta, session.getMeta, session.getMeta);
   return <span className={`form-summary${compact ? " is-compact" : ""}`}>
-    <span>{state.filled}/{state.total} 已填</span>
-    {state.remaining === undefined ? null : <span className="form-countdown" data-tip="输入会重置闲置倒计时；超时提交当前值"><Icon name="clock" extra="sm" />{state.remaining}s</span>}
-    {state.phase === "submitting" ? <span role="status">{state.timedOut ? "超时提交当前值…" : "提交中…"}</span> : state.timedOut && !state.error && state.phase === "open" ? <span role="status">闲置超时，等待连接后提交当前值</span> : null}
+    <span>{state.filled}/{state.total} {zh ? "已填" : "filled"}</span>
+    {state.remaining === undefined ? null : <span className="form-countdown" data-tip={zh ? "输入会重置闲置倒计时；超时提交当前值" : "Typing resets the idle timer; submitting current values on timeout"}><Icon name="clock" extra="sm" />{state.remaining}s</span>}
+    {state.phase === "submitting" ? <span role="status">{state.timedOut ? (zh ? "超时提交当前值…" : "Timed out; submitting current values…") : (zh ? "提交中…" : "Submitting…")}</span> : state.timedOut && !state.error && state.phase === "open" ? <span role="status">{zh ? "闲置超时，等待连接后提交当前值" : "Idle timeout; waiting to submit current values once connected"}</span> : null}
   </span>;
 }
 function FormError({ session }: { session: FormSession }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const state = useSyncExternalStore(session.subscribeMeta, session.getMeta, session.getMeta);
-  return state.error ? <div className="ask-error"><p role="alert">{state.error}</p>{state.phase === "loading" ? <button type="button" className="btn small outline" onClick={() => session.retryRead()}>重试读取</button> : null}</div> : null;
+  return state.error ? <div className="ask-error"><p role="alert">{state.error}</p>{state.phase === "loading" ? <button type="button" className="btn small outline" onClick={() => session.retryRead()}>{zh ? "重试读取" : "Retry loading"}</button> : null}</div> : null;
 }
 function FormFooter({ session, disabled, hidden }: { session: FormSession; disabled?: boolean | undefined; hidden: boolean }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const phase = useSyncExternalStore(session.subscribeMeta, () => session.getMeta().phase, () => "loading" as const);
   const locked = disabled || phase === "submitting" || phase === "closed";
   return <div className="dk-actions" hidden={hidden}>
-    <button type="button" className="btn lg outline" disabled={locked} onClick={() => { void session.cancel(); }}>取消</button>
-    <button type="button" className="btn lg primary" disabled={locked || phase === "loading"} onClick={() => { void session.submit(); }}>提交</button>
+    <button type="button" className="btn lg outline" disabled={locked} onClick={() => { void session.cancel(); }}>{zh ? "取消" : "Cancel"}</button>
+    <button type="button" className="btn lg primary" disabled={locked || phase === "loading"} onClick={() => { void session.submit(); }}>{zh ? "提交" : "Submit"}</button>
   </div>;
 }

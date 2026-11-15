@@ -1,6 +1,7 @@
 import { cfgAsyncEnabled } from "../tools/settings";
 import { cfgTaskIsolationMerge, cfgTaskBatch, cfgTaskSteps } from "../task/settings";
 import { cfgBtwInject } from "../modes/settings";
+import { runtimeText } from "./locale";
 import { sendStudioBtwInjection } from "./services/btw-injection";
 import {
 	isAgentViewSession,
@@ -602,13 +603,22 @@ export function createStudioHostRuntime(
 			options: [
 				{
 					id: "Yes",
-					label: "本次兑换并记住此窗口",
-					description: `只将本次适用的 ${settingKeys.join(", ")} 设为允许，不批准其他窗口。`,
+					label: runtimeText("本次兑换并记住此窗口", "Redeem this time and remember for this window"),
+					description: runtimeText(
+						`只将本次适用的 ${settingKeys.join(", ")} 设为允许，不批准其他窗口。`,
+						`Allow ${settingKeys.join(", ")} for this window only without approving other windows.`,
+					),
 				},
 				{
 					id: "No",
-					label: "保留重置并关闭此窗口自动兑换",
-					description: `只将 ${settingKeys.join(", ")} 设为不允许；其他窗口保持原策略。`,
+					label: runtimeText(
+						"保留重置并关闭此窗口自动兑换",
+						"Keep resets and disable auto-redeem for this window",
+					),
+					description: runtimeText(
+						`只将 ${settingKeys.join(", ")} 设为不允许；其他窗口保持原策略。`,
+						`Disallow ${settingKeys.join(", ")} for this window only; keep the existing policy for other windows.`,
+					),
 				},
 			],
 		});

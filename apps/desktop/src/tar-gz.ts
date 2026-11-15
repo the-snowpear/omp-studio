@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, open, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { createGunzip } from "node:zlib";
+import { desktopText } from "./desktop-language-shared.js";
 
 export interface ExtractLimits {
   readonly maxEntries?: number;
@@ -72,8 +73,8 @@ export async function extractTarGz(
         if (next.done) break;
         buffered = next.value as Buffer;
         inflated += buffered.length;
-        if (inflated > maxTotalBytes + maxEntries * 1024 + 1024) throw new Error("解压总量超过上限");
-        if (inflated > compressedSize * maxRatio) throw new Error("解压压缩比异常");
+        if (inflated > maxTotalBytes + maxEntries * 1024 + 1024) throw new Error(desktopText("解压总量超过上限", "Extracted size limit exceeded"));
+        if (inflated > compressedSize * maxRatio) throw new Error(desktopText("解压压缩比异常", "Abnormal archive compression ratio"));
       }
       const take = Math.min(remaining, buffered.length);
       pieces.push(buffered.subarray(0, take));
@@ -95,7 +96,7 @@ export async function extractTarGz(
       if (header.length !== 512) throw new Error("Truncated tar header");
       if (header.every((byte) => byte === 0)) { ended = true; continue; }
       if (ended) throw new Error("Unexpected tar data after end marker");
-      if (++entryCount > maxEntries) throw new Error(`条目数超过上限 (${maxEntries})`);
+      if (++entryCount > maxEntries) throw new Error(desktopText(`条目数超过上限 (${maxEntries})`, `Archive entry limit exceeded (${maxEntries})`));
       const checksum = parseOctal(header, 148, 8);
       const calculated = header.reduce((sum, byte, i) => sum + (i >= 148 && i < 156 ? 32 : byte), 0);
       if (checksum !== calculated) throw new Error("Invalid tar header checksum");
@@ -106,12 +107,12 @@ export async function extractTarGz(
       const prefix = readNullTerminatedString(header, 345, 155);
 
       totalExtractedBytes += size;
-      if (totalExtractedBytes > maxTotalBytes) throw new Error(`解压总量超过上限 (${maxTotalBytes} 字节)`);
+      if (totalExtractedBytes > maxTotalBytes) throw new Error(desktopText(`解压总量超过上限 (${maxTotalBytes} 字节)`, `Extracted size limit exceeded (${maxTotalBytes} bytes)`));
       const padding = (512 - size % 512) % 512;
 
       // GNU long name extension
       if (typeflag === "L") {
-        if (size > 256) throw new Error("路径名称过长（超过 255 字节）");
+        if (size > 256) throw new Error(desktopText("路径名称过长（超过 255 字节）", "Entry path exceeds 255 bytes"));
         const entryData = await readRequired(size);
         nextLongName = readNullTerminatedString(entryData, 0, entryData.length);
         await readRequired(padding);
@@ -123,20 +124,20 @@ export async function extractTarGz(
 
       // Security validations
       if (entryName.includes("\\")) {
-        throw new Error(`非法路径格式（含反斜杠）: ${entryName}`);
+        throw new Error(desktopText(`非法路径格式（含反斜杠）: ${entryName}`, `Invalid archive path (contains backslash): ${entryName}`));
       }
       if (Buffer.byteLength(entryName, "utf8") > 255) {
-        throw new Error(`路径名称过长（超过 255 字节）: ${entryName}`);
+        throw new Error(desktopText(`路径名称过长（超过 255 字节）: ${entryName}`, `Entry path exceeds 255 bytes: ${entryName}`));
       }
       if (entryName.split("/").some((seg) => seg === "..")) {
-        throw new Error(`非法路径段（含 ..）: ${entryName}`);
+        throw new Error(desktopText(`非法路径段（含 ..）: ${entryName}`, `Invalid archive path segment (contains '..'): ${entryName}`));
       }
       if (!entryName || entryName.startsWith("/") || /[:\x00-\x1f<>"|?*]/.test(entryName) || entryName.split("/").some((part) => /[. ]$/.test(part) && part !== "." || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) {
-        throw new Error("非法路径格式");
+        throw new Error(desktopText("非法路径格式", "Invalid archive path format"));
       }
       const resolved = resolve(destination, entryName);
       if (!isInside(destination, resolved)) {
-        throw new Error(`目标路径越界: ${entryName}`);
+        throw new Error(desktopText(`目标路径越界: ${entryName}`, `Archive path escapes target directory: ${entryName}`));
       }
 
       // Check typeflag: only '0', '\0' (file) and '5' (dir) are allowed
@@ -147,7 +148,7 @@ export async function extractTarGz(
       }
 
       if (typeflag !== "0" && typeflagByte !== 0) {
-        throw new Error(`不支持的条目类型: '${typeflag}' (${typeflagByte})`);
+        throw new Error(desktopText(`不支持的条目类型: '${typeflag}' (${typeflagByte})`, `Unsupported tar entry type: '${typeflag}' (${typeflagByte})`));
       }
 
       const parentDir = resolve(resolved, "..");

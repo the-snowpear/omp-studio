@@ -1168,10 +1168,10 @@ test("update restart rechecks commands accepted while the restore intent is bein
       };
       try {
         await assert.rejects(() => composition.prepareUpdateRestart!(() => { began = true; }),
-          error => error instanceof UpdateRestartBlockedError && /命令/.test(error.message));
+          error => error instanceof UpdateRestartBlockedError && /Commands/.test(error.message));
         assert.equal(began, false);
         assert.equal(composition.isBusy(), false);
-        assert.match(composition.updateRestartBlocker!()!, /命令/);
+        assert.match(composition.updateRestartBlocker!()!, /Commands/);
         assert.deepEqual(session.calls, ["session.start"]);
         assert.equal((await composition.facade.bootstrap()).runtime.status, "connected");
 

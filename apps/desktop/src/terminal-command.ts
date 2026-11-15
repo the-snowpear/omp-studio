@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { posix, win32 } from "node:path";
 import type { TerminalCommand } from "./terminal-shared.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 export function commandArguments(command: TerminalCommand): string[] {
   if (!command || typeof command.text !== "string" || !command.text.trim()) throw new Error("Terminal command is empty");
@@ -34,6 +35,9 @@ export function resolveCommandShell(command: TerminalCommand, options: {
   if (!windows) for (const name of names) candidates.push(`/bin/${name}`, `/usr/bin/${name}`, `/usr/local/bin/${name}`, `/opt/homebrew/bin/${name}`);
   const wsl = win32.join(env.SystemRoot ?? "C:\\Windows", "System32", "bash.exe").toLowerCase();
   const file = candidates.find(candidate => (!windows || candidate.toLowerCase() !== wsl) && exists(candidate));
-  if (!file) throw new Error(`未找到 ${command.shell === "powershell" ? "PowerShell" : command.shell}，请先安装对应 Shell`);
+  if (!file) {
+    const shellName = command.shell === "powershell" ? "PowerShell" : command.shell;
+    throw new Error(desktopText(`未找到 ${shellName}，请先安装对应 Shell`, `${shellName} was not found. Install that shell first.`));
+  }
   return { file, name: path.basename(file).replace(/\.exe$/i, "") };
 }

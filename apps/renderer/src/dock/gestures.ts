@@ -1,4 +1,5 @@
 import { conversationDocument } from "../conversationWorkspace/dom";
+import { isZh } from "../i18n";
 import { measureWorkbenchLayout } from "../layout/useWorkbenchLayout";
 import { flushSync } from "react-dom";
 import type { PointerEvent as ReactPointerEvent } from "react";
@@ -14,7 +15,12 @@ import { cardLayoutRect, cardList, cardPlacementRect, measureCardPlacement, type
 import { snapCells, WindowSnapTracker, type WindowSnapTarget } from "./snap";
 import { previewWindowLayout } from "./windowProjection";
 
-const NAMES = { left: "左侧栏", rail: "对话工具区", right: "右侧栏", bottom: "底栏", float: "浮窗" };
+const REGION_NAMES = {
+  zh: { left: "左侧栏", rail: "对话工具区", right: "右侧栏", bottom: "底栏", float: "浮窗" },
+  en: { left: "Left sidebar", rail: "Conversation tools", right: "Right sidebar", bottom: "Bottom panel", float: "Floating window" },
+} as const;
+const regionLabel = (region: DockTarget["region"]) => REGION_NAMES[isZh() ? "zh" : "en"][region];
+const moveRegionLabel = (region: DockTarget["region"]) => isZh() ? `移入${regionLabel(region)}` : `Move to ${regionLabel(region)}`;
 const WINDOW_EDGE_WIDTH = 24;
 const WINDOW_EDGE_DWELL = 160;
 function railDropBounds(document: Document) {
@@ -32,12 +38,12 @@ function cardHit(list: HTMLElement, region: "left" | "rail", y: number, layout?:
     const rect = cardLayoutRect(card);
     return card.classList.contains("dock-drag-source") && rect.height > 0 && y >= rect.top && y <= rect.bottom;
   });
-  if (gap && state?.cards?.region === region) return { target: state.target, rect: cardLayoutRect(gap), label: `移入${NAMES[region]}` };
+  if (gap && state?.cards?.region === region) return { target: state.target, rect: cardLayoutRect(gap), label: moveRegionLabel(region) };
   const next = cards.filter(card => !card.classList.contains("dock-drag-source")).find(card => { const rect = cardLayoutRect(card); return y < rect.top + rect.height / 2; });
   const original = layout?.[region].panels ?? cards.map(card => card.dataset.dockCard as PanelId);
   const index = next ? original.indexOf(next.dataset.dockCard as PanelId) : original.length;
   const rect = next ? cardLayoutRect(next) : list.getBoundingClientRect();
-  return { target: { region, index }, rect: new DOMRect(rect.left, next ? rect.top : rect.bottom - 3, rect.width, 3), label: next ? `插入 ${next.dataset.dockCard} 上方` : `移至${NAMES[region]}底部` };
+  return { target: { region, index }, rect: new DOMRect(rect.left, next ? rect.top : rect.bottom - 3, rect.width, 3), label: next ? (isZh() ? `插入 ${next.dataset.dockCard} 上方` : `Insert above ${next.dataset.dockCard}`) : (isZh() ? `移至${regionLabel(region)}底部` : `Move to bottom of ${regionLabel(region)}`) };
 }
 export function dockHitTest(x: number, y: number, snap: boolean, ignoredFloat?: string, layout?: DockLayout, document: Document = globalThis.document, ownerId?: string, surface: Document = globalThis.document): { target: DockTarget; rect: DOMRect; label: string } | null {
   const hit = readDockTarget(x, y, snap, ignoredFloat, layout, document, ownerId, surface);
@@ -74,7 +80,7 @@ function readDockTarget(x: number, y: number, snap: boolean, ignoredFloat: strin
         const region = entry.dataset.dockEntry as DockTarget["region"];
         const list = region === "left" || region === "rail" ? cardList(region, document) : null;
         if (list) return cardHit(list, region as "left" | "rail", y, layout);
-        return { target: { region }, rect: entry.getBoundingClientRect(), label: `移入${NAMES[region]}` };
+        return { target: { region }, rect: entry.getBoundingClientRect(), label: moveRegionLabel(region) };
       }
       const group = element.closest<HTMLElement>('[data-dock-group]');
       if (group) {
@@ -88,7 +94,7 @@ function readDockTarget(x: number, y: number, snap: boolean, ignoredFloat: strin
           const index = tabs.findIndex(tab => x < tab.getBoundingClientRect().left + tab.getBoundingClientRect().width / 2);
           const at = index < 0 ? tabs.length : index;
           const edge = at < tabs.length ? tabs[at]!.getBoundingClientRect().left : tabs.at(-1)?.getBoundingClientRect().right ?? bar.left;
-          return { target: { region, groupId, index: at }, rect: new DOMRect(edge - 2, bar.top, 4, bar.height), label: `插入${NAMES[region]}标签` };
+          return { target: { region, groupId, index: at }, rect: new DOMRect(edge - 2, bar.top, 4, bar.height), label: isZh() ? `插入${regionLabel(region)}标签` : `Insert tab in ${regionLabel(region)}` };
         }
         if (region === "right" || region === "bottom") {
           const container = group.closest<HTMLElement>('[data-dock-groups]')!;
@@ -102,10 +108,10 @@ function readDockTarget(x: number, y: number, snap: boolean, ignoredFloat: strin
             const existing = groups.length >= 2 ? groups[before ? 0 : 1] : undefined;
             const target: DockTarget = existing ? { region, groupId: existing.dataset.dockGroup! } : { region, split: before ? "before" : "after" };
             const highlight = region === "right" ? new DOMRect(regionRect.x, before ? regionRect.y : regionRect.y + regionRect.height / 2, regionRect.width, regionRect.height / 2) : new DOMRect(before ? regionRect.x : regionRect.x + regionRect.width / 2, regionRect.y, regionRect.width / 2, regionRect.height);
-            return { target, rect: highlight, label: `加入${NAMES[region]}${region === "right" ? (before ? "上方" : "下方") : (before ? "左侧" : "右侧")}标签组` };
+            return { target, rect: highlight, label: isZh() ? `加入${regionLabel(region)}${region === "right" ? (before ? "上方" : "下方") : (before ? "左侧" : "右侧")}标签组` : `Add to ${region === "right" ? (before ? "upper" : "lower") : (before ? "left" : "right")} tab group in ${regionLabel(region)}` };
           }
         }
-        return { target: { region, groupId }, rect, label: `加入${NAMES[region]}标签组` };
+        return { target: { region, groupId }, rect, label: isZh() ? `加入${regionLabel(region)}标签组` : `Add to tab group in ${regionLabel(region)}` };
       }
       const cards = element.closest<HTMLElement>('[data-dock-cards]');
       if (cards) {
@@ -113,7 +119,7 @@ function readDockTarget(x: number, y: number, snap: boolean, ignoredFloat: strin
         return cardHit(cardList(region, document) ?? cards, region, y, layout);
       }
       const empty = element.closest<HTMLElement>('[data-dock-empty]');
-      if (empty) { const region = empty.dataset.dockEmpty as DockTarget["region"]; return { target: { region }, rect: empty.getBoundingClientRect(), label: `移入${NAMES[region]}` }; }
+      if (empty) { const region = empty.dataset.dockEmpty as DockTarget["region"]; return { target: { region }, rect: empty.getBoundingClientRect(), label: moveRegionLabel(region) }; }
       if (element.closest(".dock-float, [data-conversation-view]")) {
         blocked = !ownerId || targetOwner !== ownerId || !!element.closest("[data-dock-float]");
         break;
@@ -129,11 +135,11 @@ function readDockTarget(x: number, y: number, snap: boolean, ignoredFloat: strin
       const rect = sidebar.getBoundingClientRect();
       const css = getComputedStyle(sidebar);
       if (css.display !== "none" && css.visibility !== "hidden" && rect.width > 0 && rect.height > 0 && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-        return { target: { region: "left" }, rect, label: "吸附到左侧栏底部" };
+        return { target: { region: "left" }, rect, label: isZh() ? "吸附到左侧栏底部" : "Snap to bottom of left sidebar" };
       }
     }
   }
-  return { target: { region: "float", rect: { x: x - bounds.left - 160, y: y - bounds.top - 18, width: 480, height: 360 } }, rect: new DOMRect(Math.max(bounds.left, Math.min(x - 160, bounds.right - Math.min(480, bounds.width))), Math.max(bounds.top, Math.min(y - 18, bounds.bottom - Math.min(360, bounds.height))), Math.min(480, bounds.width), Math.min(360, bounds.height)), label: "作为浮窗" };
+  return { target: { region: "float", rect: { x: x - bounds.left - 160, y: y - bounds.top - 18, width: 480, height: 360 } }, rect: new DOMRect(Math.max(bounds.left, Math.min(x - 160, bounds.right - Math.min(480, bounds.width))), Math.max(bounds.top, Math.min(y - 18, bounds.bottom - Math.min(360, bounds.height))), Math.min(480, bounds.width), Math.min(360, bounds.height)), label: isZh() ? "作为浮窗" : "Open as floating window" };
 }
 
 export function previewBounds(hit: NonNullable<ReturnType<typeof dockHitTest>>, layout: DockLayout, panels: PanelId[], document: Document = globalThis.document, surface: Document = globalThis.document): DockRect {
@@ -279,7 +285,7 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
         }
         if (performance.now() - edgeSince < WINDOW_EDGE_DWELL) {
           windowTarget = null;
-          if (hit) hit.label = "停留以吸附到右侧分栏";
+          if (hit) hit.label = isZh() ? "停留以吸附到右侧分栏" : "Pause to snap to right split";
         } else edgeArmed = true;
       } else resetEdge();
       if (windowTarget) {
@@ -298,7 +304,7 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
         const rect = candidate && size && !("maximize" in windowTarget) ? snapCells(candidate.template, candidate.tree, size)[windowTarget.cell]! : { ...manager.geometry.canvas, x: 0, y: 0 };
         const viewport = canvas.querySelector<HTMLElement>(".cw-snap-viewport");
         const visibleRect = candidate ? { ...rect, x: box.x + rect.x - (viewport?.scrollLeft ?? 0), y: box.y + rect.y - (viewport?.scrollTop ?? 0) } : { x: box.x, y: box.y, width: box.width, height: box.height };
-        hit = { target: { region: "float", rect: { ...visibleRect, x: visibleRect.x - area.x, y: visibleRect.y - area.y } }, rect: new DOMRect(visibleRect.x, visibleRect.y, visibleRect.width, visibleRect.height), label: candidate ? "吸附窗口" : "最大化窗口" };
+        hit = { target: { region: "float", rect: { ...visibleRect, x: visibleRect.x - area.x, y: visibleRect.y - area.y } }, rect: new DOMRect(visibleRect.x, visibleRect.y, visibleRect.width, visibleRect.height), label: candidate ? (isZh() ? "吸附窗口" : "Snap window") : (isZh() ? "最大化窗口" : "Maximize window") };
       }
     } else { snapTracker.reset(); resetEdge(); }
     if (hit) {
@@ -328,7 +334,7 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
       // Borrow only destination geometry. The saved layout is unchanged until pointerup.
       const fallback = previewBounds(hit, projected!, destinationPanels, document, surface);
       const rect = cardPlacement ? cardPlacementRect(cardPlacement, projected!, destinationPanels, fallback, document) : fallback;
-      flushSync(() => dragPreview.show({ source: dragSource, hosts, layout: projected!, panels: destinationPanels, target: hit!.target, rect, ...(cardPlacement ? { cards: cardPlacement } : {}), label: destinationPanels.length > 1 && cardPlacement ? `${hit!.label} · 拆为 ${destinationPanels.length} 张卡片` : hit!.label, snapped: !!windowTarget || hit!.target.region !== "float" || !!hit!.target.groupId, ...(windowTarget ? { snapKey: JSON.stringify(windowTarget) } : {}), ...(workspace ? { workspace } : {}) }));
+      flushSync(() => dragPreview.show({ source: dragSource, hosts, layout: projected!, panels: destinationPanels, target: hit!.target, rect, ...(cardPlacement ? { cards: cardPlacement } : {}), label: destinationPanels.length > 1 && cardPlacement ? (isZh() ? `${hit!.label} · 拆为 ${destinationPanels.length} 张卡片` : `${hit!.label} · Split into ${destinationPanels.length} cards`) : hit!.label, snapped: !!windowTarget || hit!.target.region !== "float" || !!hit!.target.groupId, ...(windowTarget ? { snapKey: JSON.stringify(windowTarget) } : {}), ...(workspace ? { workspace } : {}) }));
       if (cardPlacement) {
         const list = cardList(cardPlacement.region, document);
         const gaps = destinationPanels.map(id => {

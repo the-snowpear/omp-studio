@@ -7,8 +7,10 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import "./seance.css";
 
-const DEMO_ANSWER =
-  "演示回答 / Demo answer: the session settled on keeping the bridge typed, deferred the macOS signing work, and left one open question about retry budgets.";
+const DEMO_ANSWER_ZH =
+  "演示回答：会话最终确定保持桥接层强类型，暂缓 macOS 签名工作，并保留了一个关于重试预算的待定问题。";
+const DEMO_ANSWER_EN =
+  "Demo answer: the session settled on keeping the bridge typed, deferred the macOS signing work, and left one open question about retry budgets.";
 const DEMO_ANSWER_PLAIN =
   "The session settled on keeping the bridge typed, deferred the macOS signing work, and left one open question about retry budgets.";
 
@@ -53,7 +55,7 @@ export function SeanceDialog({
       let result: SeanceResult;
       if (preview) {
         const chosenModel = model.trim() || (marks ? "demo/model" : "");
-        result = { text: marks ? DEMO_ANSWER : DEMO_ANSWER_PLAIN, sourceSessionId: source, state: "completed", ...(chosenModel ? { model: chosenModel } : {}) };
+        result = { text: marks ? (zh ? DEMO_ANSWER_ZH : DEMO_ANSWER_EN) : DEMO_ANSWER_PLAIN, sourceSessionId: source, state: "completed", ...(chosenModel ? { model: chosenModel } : {}) };
       } else {
         const handle = await client!.command("seance.ask", {
           sessionId: sessionId!,

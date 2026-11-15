@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Duplex, type TransformCallback } from "node:stream";
 import type { RemotePeer } from "./wire.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 export interface NetworkDestination { host: string; port: number; service?: "broker"; }
 interface Packet { channel: "network"; id: string; kind: "data" | "credit" | "end" | "close"; data?: string; bytes?: number; }
@@ -42,7 +43,7 @@ class ByteStream extends Duplex {
   override _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
     this.owner.streams.delete(this.id);
     if (!this.remoteClosed && (!this.ended || error)) this.owner.send({ channel: "network", id: this.id, kind: "close" });
-    if (this.pending) { const pending = this.pending; this.pending = undefined; pending.callback(error ?? new Error("网络通道已关闭")); }
+    if (this.pending) { const pending = this.pending; this.pending = undefined; pending.callback(error ?? new Error(desktopText("网络通道已关闭", "Network channel closed"))); }
     callback(error);
   }
 }
@@ -61,7 +62,7 @@ export class NetworkStreams {
       const request = input as NetworkDestination & { id: string };
       if (!request.id || !request.host || !Number.isInteger(request.port) || request.port < 1 || request.port > 65535) throw new Error("Invalid network destination");
       const socket = await dial(request);
-      if (this.closed) { socket.destroy(); throw new Error("网络通道已断开"); }
+      if (this.closed) { socket.destroy(); throw new Error(desktopText("网络通道已断开", "Network channel disconnected")); }
       const stream = new ByteStream(this, request.id); this.streams.set(request.id, stream);
       socket.on("error", error => stream.destroy(error)); stream.on("error", () => socket.destroy());
       stream.on("close", () => socket.destroy()); socket.on("close", (failed: boolean) => { if (failed) stream.destroy(); else stream.push(null); });
@@ -72,10 +73,10 @@ export class NetworkStreams {
   }
   send(packet: Packet): void { if (!this.closed) { try { this.peer.publish(packet); } catch { this.close(); } } }
   async open(destination: NetworkDestination): Promise<Duplex> {
-    if (this.closed) throw new Error("本机联网通道尚未连接");
+    if (this.closed) throw new Error(desktopText("本机联网通道尚未连接", "Local network channel is not connected"));
     const id = randomUUID(), stream = new ByteStream(this, id); this.streams.set(id, stream);
     try { await this.peer.request("network.open", { ...destination, id }, 20_000); return stream; }
     catch (error) { stream.destroy(); throw error; }
   }
-  close(): void { if (this.closed) return; this.closed = true; for (const stream of this.streams.values()) { stream.remoteClosed = true; stream.destroy(new Error("本机联网通道已断开；请求未重放")); } this.streams.clear(); }
+  close(): void { if (this.closed) return; this.closed = true; for (const stream of this.streams.values()) { stream.remoteClosed = true; stream.destroy(new Error(desktopText("本机联网通道已断开；请求未重放", "Local network channel disconnected; request was not replayed"))); } this.streams.clear(); }
 }

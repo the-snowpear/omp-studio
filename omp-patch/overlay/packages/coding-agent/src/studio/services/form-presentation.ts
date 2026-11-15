@@ -4,6 +4,7 @@ import type { FormBlock, HtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import { resizeImage } from "../../utils/image-resize";
 import type { InteractionForm, InteractionFormBlock } from "../form-protocol";
 import { utf8ByteLength } from "./conversation-sanitizer";
+import { runtimeText } from "../locale";
 
 /** Leave envelope space inside the existing 1 MiB control-frame limit; do not enlarge that limit. */
 export const FORM_DTO_MAX_BYTES = 768 * 1024;
@@ -28,7 +29,11 @@ export async function presentHtmlForm(form: HtmlForm, options: FormMediaOptions)
 					};
 				if (block.kind !== "image" && block.kind !== "svg") return block;
 				mediaBlocks.push({ block, section: sectionIndex, index });
-				return { kind: "media-unavailable", alt: block.alt, reason: "图示不可用" };
+				return {
+					kind: "media-unavailable",
+					alt: block.alt,
+					reason: runtimeText("图示不可用", "Diagram unavailable"),
+				};
 			}),
 		})),
 		fields: form.fields.map(field => ({
@@ -41,7 +46,12 @@ export async function presentHtmlForm(form: HtmlForm, options: FormMediaOptions)
 	};
 	let bytes = utf8ByteLength(JSON.stringify(presentation));
 	if (bytes > FORM_DTO_MAX_BYTES)
-		throw new Error("表单文字与字段超过当前展示预算；请拆分表单。字段与默认值未被截断。");
+		throw new Error(
+			runtimeText(
+				"表单文字与字段超过当前展示预算；请拆分表单。字段与默认值未被截断。",
+				"Form text and fields exceed the display budget; split the form. Fields and defaults were not truncated.",
+			),
+		);
 	for (const slot of mediaBlocks) {
 		options.signal?.throwIfAborted();
 		const previous = presentation.sections[slot.section]!.blocks[slot.index]!;
@@ -58,19 +68,26 @@ export async function presentHtmlForm(form: HtmlForm, options: FormMediaOptions)
 				};
 			} else {
 				const maxBytes = Math.min(FORM_RASTER_MAX_BYTES, Math.floor((FORM_DTO_MAX_BYTES - bytes) * 0.7));
-				if (maxBytes < 1024) throw new Error("图示超过当前表单展示预算");
+				if (maxBytes < 1024)
+					throw new Error(runtimeText("图示超过当前表单展示预算", "Diagram exceeds the form display budget"));
 				const image = await resizeImage(
 					{ bytes: media.bytes, mimeType: media.mime },
 					{ maxBytes, maxWidth: 1280, maxHeight: 1280, minDimension: 0 },
 				);
-				if (image.buffer.byteLength > maxBytes) throw new Error("图示无法压缩到当前展示预算");
+				if (image.buffer.byteLength > maxBytes)
+					throw new Error(
+						runtimeText(
+							"图示无法压缩到当前展示预算",
+							"Diagram could not be compressed within the form display budget",
+						),
+					);
 				next = { kind: "image", src: `data:${image.mimeType};base64,${image.data}`, alt: slot.block.alt };
 			}
 			if (
 				bytes - utf8ByteLength(JSON.stringify(previous)) + utf8ByteLength(JSON.stringify(next)) >
 				FORM_DTO_MAX_BYTES
 			) {
-				throw new Error("图示超过当前表单展示预算");
+				throw new Error(runtimeText("图示超过当前表单展示预算", "Diagram exceeds the form display budget"));
 			}
 		} catch (error) {
 			options.signal?.throwIfAborted();
@@ -83,6 +100,13 @@ export async function presentHtmlForm(form: HtmlForm, options: FormMediaOptions)
 		bytes += utf8ByteLength(JSON.stringify(next)) - utf8ByteLength(JSON.stringify(previous));
 		presentation.sections[slot.section]!.blocks[slot.index] = next;
 	}
-	if (bytes > FORM_DTO_MAX_BYTES) throw new Error("表单图示与文字超过当前展示预算；请拆分表单。");
+	if (bytes > FORM_DTO_MAX_BYTES) {
+		throw new Error(
+			runtimeText(
+				"表单图示与文字超过当前展示预算；请拆分表单。",
+				"Form diagrams and text exceed the display budget; split the form.",
+			),
+		);
+	}
 	return presentation;
 }

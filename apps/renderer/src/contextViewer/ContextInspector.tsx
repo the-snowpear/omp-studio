@@ -44,6 +44,8 @@ export function ContextInspector({
 }) {
   const { preview, marks } = usePreviewMode();
   const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const previewLocale = preview ? resolvedLanguage : "";
   const surface = useSurfaceDocument();
   const narrow = width < 900;
   const compact = height < 520;
@@ -51,7 +53,7 @@ export function ContextInspector({
   const [snapshot, setSnapshot] = useState<{ key: string; index: ContextViewIndex }>();
   const [phase, setPhase] = useState<Phase>("idle");
   const [attempt, setAttempt] = useState(0);
-  const snapshotKey = JSON.stringify([opened, preview, sessionId, sourceKey, attempt, available]);
+  const snapshotKey = JSON.stringify([opened, preview, sessionId, sourceKey, attempt, available, previewLocale]);
   const index = snapshot?.key === snapshotKey ? snapshot.index : undefined;
   const [category, setCategory] = useState<ContextCategoryId>("system-prompt");
   const [childKey, setChildKey] = useState<string | undefined>(undefined);
@@ -140,7 +142,7 @@ export function ContextInspector({
           .catch(() => {});
     };
     // `t` is read once per open on purpose: a language switch must not re-sample the history.
-  }, [opened, preview, sessionId, sourceKey, client, attempt, available, unavailableReason]);
+  }, [opened, preview, sessionId, sourceKey, client, attempt, available, unavailableReason, previewLocale]);
 
   const read = async (entry: ContextEntrySummary, offset?: number) => {
     if (!index) return;
@@ -157,7 +159,7 @@ export function ContextInspector({
     setError("");
     try {
       if (preview) {
-        const text = previewContextText(category, entry);
+        const text = previewContextText(category, entry, zh);
         if (generation !== bodyGeneration.current) return;
         setBody(previous => (offset === undefined ? text : previous + text));
         const markers = previewContextSourceMarkers(entry).map(marker => ({ ...marker, start: marker.start + (offset ?? 0), end: marker.end + (offset ?? 0) }));
@@ -211,7 +213,7 @@ export function ContextInspector({
       const matches = (entry: ContextEntrySummary) =>
         !query || `${entry.label} ${entry.info ?? ""} ${entry.path ?? ""} ${entry.preview ?? ""}`.toLowerCase().includes(query);
       if (preview) {
-        const all = previewContextEntries(category);
+        const all = previewContextEntries(category, zh);
         // A search spans the whole category, matching the service.
         const rows = (query ? all : childKey ? all.filter(entry => entry.childKey === childKey) : all).filter(matches);
         if (generation !== listGeneration.current) return;
@@ -254,7 +256,7 @@ export function ContextInspector({
       clearTimeout(timer);
       listGeneration.current++;
     };
-  }, [index, category, childKey, search, sourceFocus, opened, preview, client, sessionId, available]);
+  }, [index, category, childKey, search, sourceFocus, opened, preview, client, sessionId, available, previewLocale]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

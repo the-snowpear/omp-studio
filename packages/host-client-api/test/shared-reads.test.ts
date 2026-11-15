@@ -3,6 +3,37 @@ import test from "node:test";
 import { SharedArchiveTelemetry, SharedProjectReads } from "../src/shared-reads.js";
 import { createDefaultHostDiagnosticsFactory, StudioHostClientFacade, type HostExtensibilityService } from "../src/index.js";
 import type { HostBackend } from "@omp-studio/studio-host";
+import { hostText } from "../src/locale.js";
+
+test("switching language refreshes localized Skills reads without a configuration write", async () => {
+  const previous = process.env.OMP_STUDIO_LOCALE;
+  let reads = 0;
+  const facade = new StudioHostClientFacade({
+    authority: { authorityId: "authority" as never, authorityEpoch: 1 as never }, platform: "win32", arch: "x64", backend: {} as HostBackend,
+    capabilityManifest: () => undefined, commandManifest: () => undefined, catalog: { list: () => [] },
+    diagnostics: createDefaultHostDiagnosticsFactory(), install: async () => ({ status: "installed", signature: "unknown" }),
+    workspaceCwd: () => "project", projectReads: new SharedProjectReads(),
+    extensibility: { get: async () => {
+      reads++;
+      return { skills: [], plugins: [], warnings: [], generatedAt: "2026-11-15T00:00:00Z", unavailableReason: hostText("技能不可用", "Skills unavailable") };
+    } } as unknown as HostExtensibilityService,
+  });
+  try {
+    process.env.OMP_STUDIO_LOCALE = "zh";
+    const zh = await facade.query({ queryName: "skills.get", input: {} });
+    process.env.OMP_STUDIO_LOCALE = "en";
+    const en = await facade.query({ queryName: "skills.get", input: {} });
+    const cached = await facade.query({ queryName: "skills.get", input: {} });
+    assert.ok(zh.ok && en.ok && cached.ok);
+    assert.equal(zh.result.unavailableReason, "技能不可用");
+    assert.equal(en.result.unavailableReason, "Skills unavailable");
+    assert.equal(cached.result.unavailableReason, "Skills unavailable");
+    assert.equal(reads, 2);
+  } finally {
+    await facade.close();
+    if (previous === undefined) delete process.env.OMP_STUDIO_LOCALE; else process.env.OMP_STUDIO_LOCALE = previous;
+  }
+});
 
 test("switching projects before a queued read starts cannot cache the next project's settings under the previous project", async () => {
   let workspace = "project-a", reads = 0;

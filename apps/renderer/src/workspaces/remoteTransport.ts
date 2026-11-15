@@ -1,5 +1,6 @@
 import type { ClientTransport } from "@omp-studio/client-contract";
 import { eventMatchesScope } from "@omp-studio/client";
+import { pickLocale } from "../i18n";
 import type { RemoteApi } from "../../../desktop/src/remote/shared";
 
 export interface RemoteTransportState {
@@ -11,7 +12,10 @@ export interface RemoteTransportState {
   error?: string;
 }
 
-const unavailable = () => ({ code: "RESYNC_REQUIRED" as const, message: "SSH 已断开或正在同步；操作未发送，也不会回落到本机" });
+const unavailable = () => ({
+  code: "RESYNC_REQUIRED" as const,
+  message: pickLocale("SSH 已断开或正在同步；操作未发送，也不会回落到本机", "SSH is disconnected or synchronizing; actions were not sent and will not fall back to local execution"),
+});
 
 export function createRemoteTransport(api: RemoteApi, id: string, state: RemoteTransportState, scope?: import("@omp-studio/client-contract").ClientContextScope): ClientTransport {
   let contextId: string | undefined;

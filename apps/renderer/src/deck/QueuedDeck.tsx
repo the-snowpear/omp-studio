@@ -11,6 +11,7 @@ import type { SlideDir } from "../pageTransition";
 import type { FormSubmitValue } from "@omp-studio/studio-protocol";
 import { FormCard } from "./FormCard";
 import type { FormSession } from "./FormSession";
+import { useI18n } from "../i18n/I18nContext";
 
 export type QueuedDeckItem =
   | {
@@ -125,6 +126,8 @@ export function QueuedDeck({
   readonly onPlanAction?: (item: Extract<QueuedDeckItem, { kind: "plan" }>) => void;
   readonly onPlanSaveAndQuit?: (item: Extract<QueuedDeckItem, { kind: "plan" }>) => void;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [remaining, setRemaining] = useState<readonly QueuedDeckItem[]>(() => items);
   const remainingRef = useRef(remaining);
   const presentedForms = useRef(new Set<string>());
@@ -372,7 +375,7 @@ export function QueuedDeck({
       aria-label={regionLabel}
       aria-live="polite"
     >
-      {collapsed && current.kind === "ask" ? <div className="ask-collapsed-bar"><span>待回答 / Pending</span><strong>{current.question.question}</strong><button className="btn small outline" type="button" autoFocus onClick={() => setCollapsed(false)}>展开 / Show</button></div> : null}
+      {collapsed && current.kind === "ask" ? <div className="ask-collapsed-bar"><span>{zh ? "待回答 / Pending" : "Pending"}</span><strong>{current.question.question}</strong><button className="btn small outline" type="button" autoFocus onClick={() => setCollapsed(false)}>{zh ? "展开 / Show" : "Show"}</button></div> : null}
       <div className="deck-card" hidden={collapsed && current.kind === "ask"}>
         <div ref={stageRef} className={`dk-stage${lockSmooth("stage")}`} style={lockStyle("stage")}>
           {current.kind === "plan" ? (
@@ -413,7 +416,7 @@ export function QueuedDeck({
               </div>
               {submitError === true ? (
                 <p className="ask-error" role="alert">
-                  提交失败，卡片已保留。请重试。
+                  {zh ? "提交失败，卡片已保留。请重试。" : "Submission failed; the card was kept. Please try again."}
                 </p>
               ) : null}
               <AskActions

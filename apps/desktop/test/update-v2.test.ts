@@ -60,7 +60,7 @@ test("Linux waits for a required manual desktop upgrade before downloading an in
     prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, restart: () => {}, quit: () => {},
     fetcher: fetcher([signed({ platform: "linux-x64", app: component("new.AppImage"), runtime: { ...component("runtime.zip", "18.0.0-studio.2"), minAppVersion: "2.0.0" } })], requests) });
   await coordinator.initialize(); await coordinator.check(); await coordinator.prepare("all");
-  assert.match(coordinator.state.runtime.blockedReason!, /请先更新桌面/u);
+  assert.match(coordinator.state.runtime.blockedReason!, /update the desktop app first/u);
   assert.equal(coordinator.state.error, undefined);
   assert.equal(requests.some(url => url.endsWith("runtime.zip")), false);
 });
@@ -140,9 +140,9 @@ for (const [name, minimum, protocol, appProtocol] of [
       const check = () => handlers.get(CHROME_UPDATES_CHANNELS.check)!({ sender: { isDestroyed: () => false, getURL: () => "file:///qa/index.html" } });
       const first = await check() as { runtime: { plan: string; reason?: string } };
       assert.equal(first.runtime.plan, "blocked");
-      assert.match(first.runtime.reason!, /请先更新桌面/);
+      assert.match(first.runtime.reason!, /update the desktop app first/);
       assert.equal(coordinator.state.runtime.phase, "idle");
-      await assert.rejects(coordinator.prepare("runtime"), /请先更新桌面/);
+      await assert.rejects(coordinator.prepare("runtime"), /update the desktop app first/);
       assert.equal(requests.some(url => url.endsWith("runtime.zip") || url.endsWith("runtime.zip.blockmap")), false);
       await coordinator.prepare("app");
       const paired = await check() as { runtime: { plan: string; reason?: string } };
@@ -218,7 +218,7 @@ test("a failed desktop installation surfaces the incomplete transaction and keep
   const options = { root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([]) };
   const coordinator = new UpdateCoordinator(options);
   await coordinator.initialize();
-  assert.match(coordinator.state.error ?? "", /事务不完整/);
+  assert.match(coordinator.state.error ?? "", /transaction is incomplete/);
   const saved = JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8"));
   assert.equal(saved.authorized, false);
   assert.equal(saved.pending.runtime.manifest.runtime.version, "18.0.0-studio.2");
@@ -335,7 +335,7 @@ for (const target of ["app", "all"] as const) {
     const coordinator = new UpdateCoordinator(options); await coordinator.initialize(); await coordinator.prepare("runtime");
     catalogs.unshift(signed({ app: { ...component(), studioProtocol: { min: 2, max: 2 } } }));
     await coordinator.check();
-    if (target === "all") await assert.rejects(() => coordinator.prepare(target), /兼容/);
+    if (target === "all") await assert.rejects(() => coordinator.prepare(target), /compatible/i);
     else await coordinator.prepare(target);
     const resumed = new UpdateCoordinator(options); await resumed.initialize();
     assert.equal((await resumed.apply()).ok, false);
@@ -359,7 +359,7 @@ test("a prepared desktop rollback survives restart and cannot be overwritten by 
   assert.equal(resumed.state.rollbackAppPending, true);
   assert.equal(resumed.state.app.version, "1.0.0");
   await resumed.check();
-  await assert.rejects(() => resumed.prepare("all"), /回滚已准备/);
+  await assert.rejects(() => resumed.prepare("all"), /rollback is staged/);
   assert.equal((await resumed.apply()).ok, true); assert.equal(installs, 2);
   const restored = new UpdateCoordinator(options); await restored.initialize();
   assert.equal(restored.state.rollbackAppPending, false);

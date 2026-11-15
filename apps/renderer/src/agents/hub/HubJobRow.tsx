@@ -9,7 +9,7 @@ import { type JobTreeRow } from "../../conversation/jobTree";
 import { Icon } from "../../icons";
 import { previewJobInspections } from "../../hubPreview";
 import { type HubAgent, type HubJob } from "./types";
-import { CONTRACT, missingCap } from "./capabilities";
+import { contractFor, missingCap } from "./capabilities";
 import { fmtDur } from "./projection";
 
 interface HubJobRowProps {
@@ -32,6 +32,7 @@ interface HubJobRowProps {
 
 export function HubJobRow({ selectedJobId, setSelectedJobId, zh, preview, viewingLive, commandBusy, connOnline, client, capabilities, cancelJob, parentSessionId, snapshot, resyncRequired, row, agent }: HubJobRowProps) {
 
+    const contract = contractFor(zh);
     const job = row.job;
     const open = selectedJobId === job.id;
     const toggle = () => setSelectedJobId(open ? null : job.id);
@@ -114,9 +115,9 @@ export function HubJobRow({ selectedJobId, setSelectedJobId, zh, preview, viewin
               }
               data-tip={
                 !viewingLive
-                  ? CONTRACT.historicalWrite
+                  ? contract.historicalWrite
                   : missingCap(capabilities, "job.cancel")
-                    ? CONTRACT.cancel
+                    ? contract.cancel
                     : undefined
               }
               onClick={(event) => {
@@ -124,7 +125,7 @@ export function HubJobRow({ selectedJobId, setSelectedJobId, zh, preview, viewin
                 cancelJob(job);
               }}
             >
-              取消
+              {zh ? "取消" : "Cancel"}
             </button>
           ) : null}
         </div>
@@ -134,7 +135,7 @@ export function HubJobRow({ selectedJobId, setSelectedJobId, zh, preview, viewin
             client={client}
             sessionId={parentSessionId ?? snapshot?.sessionId}
             available={!preview && viewingLive && connOnline && !resyncRequired}
-            {...(preview ? { previewInspection: previewJobInspections()[job.id] ?? null } : {})}
+            {...(preview ? { previewInspection: previewJobInspections(undefined, zh)[job.id] ?? null } : {})}
             onClose={() => setSelectedJobId(null)}
           />
         ) : null}

@@ -532,7 +532,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
     })) as { ok: boolean; message?: string };
 
     assert.equal(res.ok, false);
-    assert.match(res.message ?? "", /平台不匹配/);
+    assert.match(res.message ?? "", /Platform mismatch/);
     assert.equal(pending.peek(), undefined);
 
     handle.dispose();
@@ -575,7 +575,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
     })) as { ok: boolean; message?: string };
 
     assert.equal(res.ok, false);
-    assert.match(res.message ?? "", /通道不匹配/);
+    assert.match(res.message ?? "", /Channel mismatch/);
     assert.equal(pending.peek(), undefined);
 
     handle.dispose();
@@ -1065,7 +1065,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
 
     const failEvent = progress.find((p) => p.phase === "failed");
     assert.ok(failEvent !== undefined, "Should fail on manifest mismatch");
-    assert.ok(failEvent.message?.includes("不一致"), failEvent.message);
+    assert.ok(failEvent.message?.includes("does not match"), failEvent.message);
     assert.ok(!fetchedUrls.some((u) => u.endsWith("omp.exe")), "omp.exe must not be fetched");
 
     handle.dispose();

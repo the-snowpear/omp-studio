@@ -6,6 +6,7 @@
  */
 import { execFile } from "node:child_process";
 import type { SelfCheckRunner } from "@omp-studio/runtime-installer";
+import { desktopText } from "../desktop-language-shared.js";
 
 export type RunFile = (file: string, args: readonly string[]) => Promise<void>;
 
@@ -28,7 +29,7 @@ export function withCodeSignatureCheck(
       try {
         await run("/usr/bin/codesign", ["--verify", "--strict", entrypointPath]);
       } catch (error) {
-        throw new Error(`Runtime 的代码签名无效，macOS 会拒绝运行它：${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(desktopText(`Runtime 的代码签名无效，macOS 会拒绝运行它：${error instanceof Error ? error.message : String(error)}`, `Runtime code signature is invalid and macOS will refuse to run it: ${error instanceof Error ? error.message : String(error)}`));
       }
       await runner.run(entrypointPath);
     },

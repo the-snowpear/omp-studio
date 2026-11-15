@@ -9,10 +9,26 @@ import type { ComposerDictationBinding } from "./dictationTypes";
 import type { GitHubReferenceSnapshot } from "./githubReference";
 import type { GitCommitReferenceSnapshot } from "./gitCommitReference";
 import { splitChipLabel, type PromptImage } from "./types";
+import { I18nProvider } from "../i18n";
 
 afterEach(() => {
   cleanup();
   Reflect.deleteProperty(globalThis, "ompStudioChrome");
+});
+
+it("switches draft image labels without changing text, image bytes, or sending", () => {
+  const ref = createRef<ChipComposerHandle>();
+  const submit = vi.fn();
+  const view = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><ChipComposer ref={ref} onSubmit={submit} /></I18nProvider>;
+  const { container, rerender } = render(view("zh"));
+  const image: PromptImage = { type: "image", mimeType: "image/png", data: "aW1hZ2U=" };
+  act(() => ref.current!.setSnapshot({ text: "[图1]", images: [image], doc: { nodes: [{ type: "chip", chip: { id: "image-1", kind: "image", label: "图1", image } }] } }));
+  const before = ref.current!.getSnapshot();
+  rerender(view("en"));
+  expect(container.textContent).toContain("Img1");
+  expect(ref.current!.getSnapshot().text).toBe(before.text);
+  expect(ref.current!.getSnapshot().images).toEqual(before.images);
+  expect(submit).not.toHaveBeenCalled();
 });
 
 it("restores a background draft without moving focus or the current selection", () => {

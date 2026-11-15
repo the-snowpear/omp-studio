@@ -71,7 +71,7 @@ function ResourceReader({ client, sessionId, available }: ResourceProps) {
     lock.current = true; setBusy(true); setError("");
     try {
       let result: ResourcePage;
-      if (preview) result = readPreviewResource(targetUri.trim(), cursor?.offset, cursor?.version);
+      if (preview) result = readPreviewResource(targetUri.trim(), cursor?.offset, cursor?.version, zh);
       else {
         if (!available || !sessionId) throw new Error(zh ? "请先连接活动会话" : "Connect an active session first");
         const handle = await client.command("resource.read", { sessionId, uri: targetUri.trim(), ...(cursor ? { offset: cursor.offset, version: cursor.version } : {}) });

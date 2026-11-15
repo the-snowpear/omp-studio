@@ -24,9 +24,13 @@ export function useBrowserCopy(): Copy {
 
 export function useChatBrowser(sessionId: string | undefined, nativeClient?: StudioClient): { session: BrowserSession | null; snap: BrowserSessionSnapshot } {
   const { preview } = usePreviewMode();
+  const { resolvedLanguage } = useI18n();
   const api = useSurfaceChrome()?.managedBrowser;
   const hub = browserHub(preview, api, nativeClient);
   const session = useMemo(() => hub && sessionId ? hub.session(sessionId) : null, [hub, sessionId]);
+  useEffect(() => {
+    if (preview && session) void session.read();
+  }, [preview, session, resolvedLanguage]);
   return { session, snap: useBrowserSession(session) };
 }
 

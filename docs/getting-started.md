@@ -6,7 +6,7 @@ macOS 13 or later on Apple Silicon also runs from source, or as an ad hoc signed
 app built with `npm run pack:mac` (not notarized yet; see
 [macOS app](#macos-app-ad-hoc-signed)).
 
-Linux x64 AppImage and deb packages are prepared for the next release, with
+Linux x64 (AVX2 / x86-64-v3) AppImage and deb packages are prepared for the next release, with
 Ubuntu 24.04 / glibc 2.39 as the build baseline. See [Linux installation and
 development](linux.md) for package requirements, sandbox setup and source builds.
 

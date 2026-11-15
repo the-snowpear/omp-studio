@@ -52,7 +52,7 @@ export function deriveLinuxBuilderConfig(base, { outputDirectory }) {
       icon: "apps/desktop/resources/icon.png",
       category: "Development",
       synopsis: "Desktop workspace for OMP agents",
-      description: "OMP Studio desktop workspace with a bundled, signed OMP Runtime.",
+      description: "OMP Studio desktop workspace with a bundled, signed OMP Runtime. Requires an x86-64-v3 (AVX2) CPU.",
       syncDesktopName: true,
       desktop: { entry: { StartupWMClass: LINUX_EXECUTABLE, Terminal: "false" } },
       artifactName,

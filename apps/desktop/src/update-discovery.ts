@@ -3,6 +3,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { verifyUpdateManifest, writeJsonAtomic, type SignedUpdateManifest, type UpdateComponent, type UpdateChannel } from "@omp-studio/runtime-installer";
 import { withUpdateRequest, type UpdateRequestAttempt, type UpdateRequestLog, type UpdateRequestPolicy } from "./update-request.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 export interface DiscoveredUpdates { app?: SignedUpdateManifest; runtime?: SignedUpdateManifest; baselines?: Partial<Record<UpdateComponent, SignedUpdateManifest>> }
 interface ReleaseAsset { id?: number; updated_at?: string; name: string; browser_download_url: string }
@@ -117,7 +118,7 @@ export async function discoverUpdates(input: {
       if (rows.length < 100) break;
       if (page === 10) throw new Error("Release discovery limit reached; refusing incomplete catalog");
     }
-    if (manifestsSeen > 0 && manifestsVerified === 0) throw new Error("未取得可验证的更新清单，请稍后重试");
+    if (manifestsSeen > 0 && manifestsVerified === 0) throw new Error(desktopText("未取得可验证的更新清单，请稍后重试", "Could not retrieve a verifiable update manifest; try again later"));
     for (const kind of ["app", "runtime"] as UpdateComponent[]) {
       const candidate = result[kind]?.manifest[kind];
       if (candidate && candidate.sequence < (input.watermarks[`${kind}:${candidate.channel}:${input.platform}`] ?? 0)) throw new Error("Update catalog rollback rejected");

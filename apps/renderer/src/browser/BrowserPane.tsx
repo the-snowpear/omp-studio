@@ -7,7 +7,7 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { WorkspaceEmpty } from "../workspaces/Workspace";
-import { PREVIEW_BROWSER_TAB, PREVIEW_BROWSER_IMAGE } from "../preview/browserPreview";
+import { getPreviewBrowserTab, PREVIEW_BROWSER_IMAGE } from "../preview/browserPreview";
 import "./browser.css";
 import { useSurfaceDocument, useSurfaceChrome } from "../dock/SurfaceContext";
 import { useBrowserVisible } from "./useNativeBrowserObservation";
@@ -61,7 +61,11 @@ function LegacyBrowserPane({ client, sessionId, available, visible, capabilities
   const human = state?.control === "human";
   const detach = useCallback(() => { const id = observation.current; observation.current = undefined; if (id) void chrome?.detachBrowserObservation?.({ observationId: id }); setObserving(false); setFrame(undefined); setState(undefined); }, [chrome]);
   const send = useCallback(async (input: BrowserObservationInput) => {
-    if (preview) { if (input.kind === "take" || input.kind === "release") setState(current => ({ kind: "state", observationId: "demo", tabId: PREVIEW_BROWSER_TAB.id, title: PREVIEW_BROWSER_TAB.title, url: PREVIEW_BROWSER_TAB.url, busy: false, frozen: false, ...current, control: input.kind === "take" ? "human" : "agent" })); return; }
+    if (preview) {
+      const demoTab = getPreviewBrowserTab(zh);
+      if (input.kind === "take" || input.kind === "release") setState(current => ({ kind: "state", observationId: "demo", tabId: demoTab.id, title: demoTab.title, url: demoTab.url, busy: false, frozen: false, ...current, control: input.kind === "take" ? "human" : "agent" }));
+      return;
+    }
     const id = observation.current; if (!id) return;
     try {
       const generation = nativeGeneration.current, leaseId = latestState.current?.leaseId, documentEpoch = latestFrame.current?.documentEpoch ?? latestState.current?.documentEpoch;
@@ -75,7 +79,9 @@ function LegacyBrowserPane({ client, sessionId, available, visible, capabilities
   useEffect(() => {
     epoch.current++; detach();
     const scopeKey = (sessionId ?? "") + ":" + preview;
-    if (scope.current !== scopeKey) { scope.current = scopeKey; setTabs(preview ? [PREVIEW_BROWSER_TAB] : []); setSelected(preview ? PREVIEW_BROWSER_TAB.id : ""); urlDirty.current = false; }
+    const demoTab = preview ? getPreviewBrowserTab(zh) : undefined;
+    if (scope.current !== scopeKey) { scope.current = scopeKey; setTabs(demoTab ? [demoTab] : []); setSelected(demoTab ? demoTab.id : ""); urlDirty.current = false; }
+    else if (demoTab) { setTabs([demoTab]); }
     setError(""); setBusy(false);
     if (!shown || !enabled || document.hidden) return;
     let active = true; let timer: ReturnType<typeof setTimeout>;

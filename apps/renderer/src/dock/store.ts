@@ -1,4 +1,5 @@
 import type { LayoutMemory } from "../settings/appSettings";
+import { isZh, pickLocale } from "../i18n";
 import { preserveFileViews, applyBrowserPagePreset, applyInstancePreset, builtInPresets, clampFloat, createDefaultLayout, dockReducer, instancePresetLayout, locatePanel, moveConflicts, normalizeLayout, removePanels, resolveOpenIn } from "./model";
 import { projectConversationPanel } from "./conversationPanels";
 import { workbenchBounds } from "./workbenchGeometry";
@@ -6,7 +7,7 @@ import { pinWorkspace, pinsForScope, putPin, readPins, subtractPinPanels, withPi
 import type { DockFloat, DockPinMode, DockRect } from "./types";
 import { WorkbenchWindows, toolWindowId, type WorkbenchWindow } from "./windows";
 import { WINDOW_MINIMUM } from "./snap";
-import { WORKBENCH_PANELS } from "../panels/registry";
+import { WORKBENCH_PANELS, localizePanelDefinition } from "../panels/registry";
 import { isFilePanelId, PANEL_IDS, conversationPanelId, isConversationPanelId, isAgentPanelId, isBrowserPagePanelId, panelBaseId, type DockAction, type DockLayout, type DockPreferences, type DockPreset, type DockScope, type DockSnapshot, type DockTarget, type PanelId } from "./types";
 
 const STORAGE_KEY = "omp.dock.v1";
@@ -138,7 +139,7 @@ function legacyPreset(value: unknown, source: string, id: string): DockPreset | 
   // Migration preserves the old region switches, even when its selected tool was hidden.
   if (typeof memory.sideOpen === "boolean") layout.right.visible = memory.sideOpen;
   layout.presetId = id;
-  return { id, name: `旧布局 · ${source}`, layout: normalizeLayout(layout) };
+  return { id, name: `${pickLocale("旧布局 · ", "Legacy layout · ")}${source}`, layout: normalizeLayout(layout) };
 }
 
 export class DockStore {
@@ -313,7 +314,8 @@ export class DockStore {
       for (const record of manager.getSnapshot().records) if (record.content.kind === "tools" && record.content.documentId === this.documentId && !ids.has(record.id)) manager.remove(record.id);
       for (const group of groups) {
         const id = this.windowId(group.id), pin = group.pin?.mode ?? "none";
-        const definition = WORKBENCH_PANELS.find(value => value.id === panelBaseId(group.active));
+        const rawDefinition = WORKBENCH_PANELS.find(value => value.id === panelBaseId(group.active));
+        const definition = rawDefinition ? localizePanelDefinition(rawDefinition, isZh()) : undefined;
         const conversationActive = isConversationPanelId(group.active);
         const minimum = toolWindowMinimum(group.active, group.panels.length);
         const title = conversationActive ? this.conversationTitle : `${definition?.title ?? this.snapshot?.layout.agentPanels[group.active]?.target.displayName ?? (isFilePanelId(group.active) ? this.snapshot?.layout.fileViews[group.active]?.title || "File" : isBrowserPagePanelId(group.active) ? this.snapshot?.layout.browserPages[group.active]?.title || "Browser" : group.active)}${this.conversationTitle ? ` · ${this.conversationTitle}` : ""}`;
@@ -845,7 +847,7 @@ export class DockStore {
         const source = key.slice(LEGACY_PREFIX.length);
         const id = `legacy-${encodeURIComponent(source)}`;
         if (this.real.presets.some(preset => preset.id === id)) continue;
-        const preset = legacyPreset(read(this.storage, key), source === "global" ? "全局" : source, id);
+        const preset = legacyPreset(read(this.storage, key), source === "global" ? pickLocale("全局", "Global") : source, id);
         if (preset) this.real.presets.push(preset);
       }
     } catch { /* Storage enumeration can be unavailable even when getItem works. */ }

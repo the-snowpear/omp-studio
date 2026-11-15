@@ -8,6 +8,7 @@ import { SshRemoteTransport } from "./transport.js";
 import { sshAuthenticationRequest, type SshAuthentication } from "./authentication.js";
 import { RemoteConnectionError, connectionCancelled, sshFailure } from "./errors.js";
 import type { RemoteAttachment } from "./wire.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 export interface RemoteEnvironment {
   platform: RemotePlatform; arch: string; home: string; node: string; version: string; root: string;
@@ -32,7 +33,7 @@ export async function runSsh(connection: SshConnection, command: string, input?:
       if (input instanceof Readable) { input.unpipe(child.stdin); input.destroy(); }
       if (error) { child.kill(); reject(error); } else resolve(stdout.trim());
     };
-    const timer = setTimeout(() => finish(new RemoteConnectionError("network", "SSH 操作超时；已发送操作的结果未知，未自动重发")), timeoutMs);
+    const timer = setTimeout(() => finish(new RemoteConnectionError("network", desktopText("SSH 操作超时；已发送操作的结果未知，未自动重发", "SSH operation timed out; outcome of sent operation is unknown and was not resent"))), timeoutMs);
     signal?.addEventListener("abort", cancel, { once: true });
     child.stdout.on("data", chunk => { stdout += String(chunk); if (stdout.length > 1024 * 1024) finish(new Error("SSH response exceeded its limit")); });
     child.stderr.on("data", chunk => { stderr = (stderr + String(chunk)).slice(-4096); });

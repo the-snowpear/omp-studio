@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
+import { useI18n } from "../i18n";
 
 /**
  * 切换会话空窗期的骨架屏。
@@ -59,6 +60,7 @@ export function ConversationSkeleton({ leaving = false }: { leaving?: boolean })
    * 都压在这一次 transition 上：`@starting-style` 若被构建链或旧内核丢掉，骨架会
    * 直接满亮出现，快加载就闪了。翻类退化最坏也只是没有淡入。
    */
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const [shown, setShown] = useState(false);
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -79,7 +81,7 @@ export function ConversationSkeleton({ leaving = false }: { leaving?: boolean })
           <SkeletonGroupView key={index} group={group} index={index} />
         ))}
       </div>
-      <p className="cv-note" {...(slow ? { "data-on": "true" } : {})}>正在读取会话记录…</p>
+      <p className="cv-note" {...(slow ? { "data-on": "true" } : {})}>{zh ? "正在读取会话记录…" : "Loading conversation history…"}</p>
     </div>
   );
 }

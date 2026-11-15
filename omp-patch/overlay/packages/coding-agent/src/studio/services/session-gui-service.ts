@@ -11,6 +11,7 @@ import type {
 } from "../session-gui-protocol";
 import { StudioMediaFiles } from "./media-files";
 import { SessionControlError } from "./session-control-service";
+import { runtimeText } from "../locale";
 
 /** Live reads and identity-fenced mutations of the current Runtime session. */
 export class StudioSessionGuiService {
@@ -47,7 +48,7 @@ export class StudioSessionGuiService {
 			choices: (["standard", "slow", "priority", "ultrafast"] as const).map(id => ({
 				id,
 				available: available[id],
-				...(!available[id] ? { reason: "Not supported by the current model / 当前模型不支持" } : {}),
+				...(!available[id] ? { reason: runtimeText("当前模型不支持", "Not supported by the current model") } : {}),
 			})),
 			...(this.session.getAnthropicSlowModeLabel() ? { usageStatus: this.session.getAnthropicSlowModeLabel() } : {}),
 		};

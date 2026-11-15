@@ -4,6 +4,7 @@ import { spansText } from "@oh-my-pi/pi-tui/html-form/model";
 import { OTHER_LABEL } from "@oh-my-pi/pi-tui/html-form/data";
 import { AppSelect } from "../AppSelect";
 import { SvgFigureImage } from "../graphics/SvgFigureImage";
+import { isZh, useI18n } from "../i18n";
 import { FormSession } from "./FormSession";
 
 /** Render native inline spans as text and fixed semantic tags, never Host HTML. */
@@ -13,15 +14,17 @@ export function FormSpans({ spans }: { spans: readonly FormSpan[] }) {
     : span.style === "em" ? <em key={index}>{span.text}</em> : <span key={index}>{span.text}</span>)}</>;
 }
 
-export function formSectionLabel(form: InteractionForm, index: number): string {
+export function formSectionLabel(form: InteractionForm, index: number, zh = isZh()): string {
   const section = form.sections[index];
   const first = section?.blocks.find(block => block.kind === "field");
-  return spansText(section?.title ?? []) || (first?.kind === "field" ? form.fields.find(field => field.id === first.fieldId)?.question : undefined) || `题组 ${index + 1}`;
+  return spansText(section?.title ?? []) || (first?.kind === "field" ? form.fields.find(field => field.id === first.fieldId)?.question : undefined) || (zh ? `题组 ${index + 1}` : `Section ${index + 1}`);
 }
 
 export function FormFields({ form, session, section, grouped, disabled }: {
   form: InteractionForm; session: FormSession; section: number; grouped: boolean; disabled?: boolean | undefined;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const fields = useMemo(() => new Map(form.fields.map(field => [field.id, field])), [form]);
   const locked = useSyncExternalStore(session.subscribeMeta, () => session.getMeta().phase !== "open", () => true);
   const groups = form.sections.flatMap((group, index) => group.blocks.some(block => block.kind === "field") ? [index] : []);
@@ -34,7 +37,7 @@ export function FormFields({ form, session, section, grouped, disabled }: {
     ) : <FormContextBlock key={at} block={block} />);
     const hidden = grouped && (index < start || index >= end);
     // Native loose context rides with its next fieldset; trailing context stays with the last.
-    if (group.fieldset) return <fieldset key={index} className="form-section" hidden={hidden} aria-label={formSectionLabel(form, index)}>
+    if (group.fieldset) return <fieldset key={index} className="form-section" hidden={hidden} aria-label={formSectionLabel(form, index, zh)}>
       {group.title.length ? <legend><FormSpans spans={group.title} /></legend> : null}{content}
     </fieldset>;
     return <section key={index} className="form-section form-loose" hidden={hidden}>
@@ -44,6 +47,8 @@ export function FormFields({ form, session, section, grouped, disabled }: {
 }
 
 const FormContextBlock = memo(function FormContextBlock({ block }: { block: Exclude<InteractionFormBlock, { kind: "field" }> }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   switch (block.kind) {
     case "text": return <p className={block.heading ? "form-heading" : "form-context"}><FormSpans spans={block.spans} /></p>;
     case "pre": return <pre className="form-pre"><code>{block.text}</code></pre>;
@@ -54,14 +59,16 @@ const FormContextBlock = memo(function FormContextBlock({ block }: { block: Excl
     case "table": return <div className="form-table-scroll"><table className="form-table"><tbody>{block.rows.map((row, index) => <tr key={index}>{row.map((cell, at) => index < block.headerRows ? <th key={at}><FormSpans spans={cell} /></th> : <td key={at}><FormSpans spans={cell} /></td>)}</tr>)}</tbody></table></div>;
     case "image": return <FormRasterImage src={block.src} alt={block.alt} />;
     case "graphic": return <figure className="form-figure"><SvgFigureImage source={block.source} alt={block.alt} />{block.alt ? <figcaption>{block.alt}</figcaption> : null}</figure>;
-    case "media-unavailable": return <p className="form-media-error" role="status">{block.alt || "图示"}：{block.reason}</p>;
+    case "media-unavailable": return <p className="form-media-error" role="status">{block.alt || (zh ? "图示" : "Figure")}{zh ? "：" : ": "}{block.reason}</p>;
   }
 });
 
 function FormRasterImage({ src, alt }: { src: string; alt: string }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [src]);
-  return <figure className="form-figure">{failed ? <p className="form-media-error" role="status">{alt || "图示"}：图片无法显示</p> : <img src={src} alt={alt} decoding="async" loading="lazy" onError={() => setFailed(true)} />}{alt ? <figcaption>{alt}</figcaption> : null}</figure>;
+  return <figure className="form-figure">{failed ? <p className="form-media-error" role="status">{zh ? `${alt || "图示"}：图片无法显示` : `${alt || "Figure"}: image failed to load`}</p> : <img src={src} alt={alt} decoding="async" loading="lazy" onError={() => setFailed(true)} />}{alt ? <figcaption>{alt}</figcaption> : null}</figure>;
 }
 
 function useFieldDraft(session: FormSession, id: string) {
@@ -88,6 +95,8 @@ const FormFieldView = memo(function FormFieldView({ field, session, disabled }: 
 function TextFormField({ field, session, disabled, inputId, errorId }: {
   field: FormTextField; session: FormSession; disabled?: boolean | undefined; inputId: string; errorId?: string | undefined;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const draft = useFieldDraft(session, field.id);
   const common = {
     id: inputId, "aria-label": field.question, "aria-describedby": errorId, "aria-invalid": Boolean(errorId), "aria-required": field.required,
@@ -95,7 +104,7 @@ function TextFormField({ field, session, disabled, inputId, errorId }: {
     onChange: (event: { target: { value: string } }) => session.setText(field.id, event.target.value),
   };
   return <>
-    <label className="form-field-label" htmlFor={inputId}><FormSpans spans={field.label.length ? field.label : [{ text: field.question }]} />{field.required ? <span className="form-required" aria-label="必填">*</span> : null}</label>
+    <label className="form-field-label" htmlFor={inputId}><FormSpans spans={field.label.length ? field.label : [{ text: field.question }]} />{field.required ? <span className="form-required" aria-label={zh ? "必填" : "Required"}>*</span> : null}</label>
     {field.multiline ? <textarea {...common} className="input form-textarea" rows={Math.min(10, Math.max(2, field.rows, draft.text.split("\n").length))} />
       : <input {...common} className="input form-input" type={["password", "email", "url", "tel", "search"].includes(field.type) ? field.type : "text"} inputMode={field.type === "number" || field.type === "range" ? "decimal" : field.type === "email" ? "email" : field.type === "url" ? "url" : field.type === "tel" ? "tel" : "text"} />}
   </>;
@@ -104,6 +113,8 @@ function TextFormField({ field, session, disabled, inputId, errorId }: {
 function ChoiceFormField({ field, session, disabled, inputId, errorId }: {
   field: FormChoiceField; session: FormSession; disabled?: boolean | undefined; inputId: string; errorId?: string | undefined;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const draft = useFieldDraft(session, field.id);
   const host = useRef<HTMLDivElement>(null);
   const otherInput = useRef<HTMLInputElement>(null);
@@ -130,19 +141,19 @@ function ChoiceFormField({ field, session, disabled, inputId, errorId }: {
     const label = spansText(option.label) || option.value;
     return <div className="form-option-note">
       {draft.noteOpen[index] || draft.notes[index] ? <label>
-        <span className="form-note-label">附注 · {label}<span>可选，不替代选项</span></span>
-        <textarea className="input form-textarea form-note-input" rows={2} value={draft.notes[index] ?? ""} data-form-note={index} aria-label={`附注：${label}`} disabled={disabled} placeholder="补充这个选项的细节…" onChange={event => session.setNote(field.id, index, event.target.value)} />
-      </label> : <button type="button" className="btn small ghost" aria-label={`添加附注：${label}`} disabled={disabled} onClick={() => {
+        <span className="form-note-label">{zh ? `附注 · ${label}` : `Note · ${label}`}<span>{zh ? "可选，不替代选项" : "optional, does not replace selection"}</span></span>
+        <textarea className="input form-textarea form-note-input" rows={2} value={draft.notes[index] ?? ""} data-form-note={index} aria-label={zh ? `附注：${label}` : `Note: ${label}`} disabled={disabled} placeholder={zh ? "补充这个选项的细节…" : "Add details for this option…"} onChange={event => session.setNote(field.id, index, event.target.value)} />
+      </label> : <button type="button" className="btn small ghost" aria-label={zh ? `添加附注：${label}` : `Add note: ${label}`} disabled={disabled} onClick={() => {
         session.openNote(field.id, index);
         queueMicrotask(() => host.current?.querySelector<HTMLTextAreaElement>(`[data-form-note="${index}"]`)?.focus());
-      }}>添加附注</button>}
+      }}>{zh ? "添加附注" : "Add note"}</button>}
     </div>;
   };
   return <>
-    <label className="form-field-label" id={`${inputId}-label`} {...(field.select && !field.multi ? { htmlFor: inputId } : {})}><FormSpans spans={field.label.length ? field.label : [{ text: field.question }]} />{field.required ? <span className="form-required" aria-label="必选">*</span> : null}</label>
+    <label className="form-field-label" id={`${inputId}-label`} {...(field.select && !field.multi ? { htmlFor: inputId } : {})}><FormSpans spans={field.label.length ? field.label : [{ text: field.question }]} />{field.required ? <span className="form-required" aria-label={zh ? "必选" : "Required"}>*</span> : null}</label>
     {field.select && !field.multi ? <div ref={host} className="form-select-field">
       <AppSelect id={inputId} className="select form-input" aria-label={field.question} aria-describedby={errorId} aria-invalid={Boolean(errorId)} aria-required={field.required} data-form-control value={picked[0] === undefined ? "" : String(picked[0])} disabled={disabled || !enabled.length} onChange={event => session.choose(field.id, Number(event.target.value))}>
-        {picked.length === 0 ? <option value="" disabled>选择一项…</option> : null}
+        {picked.length === 0 ? <option value="" disabled>{zh ? "选择一项…" : "Select an option…"}</option> : null}
         {field.options.map((option, index) => <option key={index} value={String(index)} disabled={option.disabled}>{spansText(option.label) || option.value}</option>)}
       </AppSelect>
       {picked[0] === undefined ? null : noteFor(picked[0])}
@@ -156,12 +167,12 @@ function ChoiceFormField({ field, session, disabled, inputId, errorId }: {
         </div>;
       })}
       {field.other ? <div className="form-other">
-        <button type="button" className={`dk-opt${chosen ? " sel" : ""}`} role={field.multi ? "checkbox" : "radio"} aria-checked={chosen} aria-label={`${OTHER_LABEL}：${field.question}`} disabled={disabled} data-form-control data-form-option="other" tabIndex={field.multi || chosen || first === undefined ? 0 : -1} onKeyDown={event => moveChoice(event, -1)} onClick={openOther}>
-          <span className="dk-opt-row"><span className={field.multi ? "o-check" : "o-radio"} aria-hidden /><span className="o-label">{OTHER_LABEL} <span className="muted">· 填写其他答案</span></span></span>
+        <button type="button" className={`dk-opt${chosen ? " sel" : ""}`} role={field.multi ? "checkbox" : "radio"} aria-checked={chosen} aria-label={zh ? `${OTHER_LABEL}：${field.question}` : `${OTHER_LABEL}: ${field.question}`} disabled={disabled} data-form-control data-form-option="other" tabIndex={field.multi || chosen || first === undefined ? 0 : -1} onKeyDown={event => moveChoice(event, -1)} onClick={openOther}>
+          <span className="dk-opt-row"><span className={field.multi ? "o-check" : "o-radio"} aria-hidden /><span className="o-label">{OTHER_LABEL} <span className="muted">· {zh ? "填写其他答案" : "enter another answer"}</span></span></span>
         </button>
         <div hidden={!draft.otherEditing && !draft.other} className="form-other-input">
-          <input ref={otherInput} className="input form-input" data-form-control aria-label={`${OTHER_LABEL}：${field.question}`} type="text" value={draft.other} disabled={disabled} placeholder="填写其他答案…" onChange={event => session.setOther(field.id, event.target.value)} />
-          {!field.multi && draft.other && !chosen ? <span className="muted small">当前使用已选项；编辑这里会改用 Other。</span> : null}
+          <input ref={otherInput} className="input form-input" data-form-control aria-label={zh ? `${OTHER_LABEL}：${field.question}` : `${OTHER_LABEL}: ${field.question}`} type="text" value={draft.other} disabled={disabled} placeholder={zh ? "填写其他答案…" : "Enter another answer…"} onChange={event => session.setOther(field.id, event.target.value)} />
+          {!field.multi && draft.other && !chosen ? <span className="muted small">{zh ? "当前使用已选项；编辑这里会改用 Other。" : "Currently using selected option; editing here switches to Other."}</span> : null}
         </div>
       </div> : null}
     </div>}

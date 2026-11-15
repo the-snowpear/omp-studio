@@ -34,8 +34,8 @@ const META: Record<Platform, { label: string; requires: string; match: RegExp }>
   "win-x64": { label: "Windows", requires: "Windows 10 或更新，x64", match: /Setup-.*windows-x64\.exe$/ },
   "win-arm64": { label: "Windows ARM", requires: "Windows 11，ARM64（骁龙等）", match: /Setup-.*windows-arm64\.exe$/ },
   "mac-arm64": { label: "macOS", requires: "macOS 13 或更新，Apple Silicon", match: /macos-arm64\.dmg$/ },
-  "linux-x64": { label: "Linux · AppImage", requires: "x64，glibc 2.39+，FUSE 2", match: /^OMP-Studio-.*-linux-x64\.AppImage$/ },
-  "linux-x64-deb": { label: "Linux · deb", requires: "Ubuntu 24.04+ / Debian 13+，x64", match: /^OMP-Studio-.*-linux-x64\.deb$/ },
+  "linux-x64": { label: "Linux · AppImage", requires: "x64（AVX2），glibc 2.39+，FUSE 2", match: /^OMP-Studio-.*-linux-x64\.AppImage$/ },
+  "linux-x64-deb": { label: "Linux · deb", requires: "Ubuntu 24.04+ / Debian 13+，x64（AVX2）", match: /^OMP-Studio-.*-linux-x64\.deb$/ },
 };
 export const PLATFORMS = Object.keys(META) as Platform[];
 

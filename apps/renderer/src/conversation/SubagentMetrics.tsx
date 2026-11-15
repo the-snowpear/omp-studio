@@ -1,4 +1,5 @@
 import type { StudioAgentSnapshot, StudioAgentUsage } from "@omp-studio/studio-protocol";
+import { useI18n } from "../i18n";
 import { isRealSubagentId, type SubagentHubTarget, type SubagentView } from "./toolMeta";
 
 const REDACTED_METRIC = "[redacted]";
@@ -164,6 +165,7 @@ export function applyLiveSubagentRoster(
 }
 
 export function SubagentMetrics({ tokens, tools, requests, files, cost, generationTps, showTooltips = true }: SubagentMetricValues & { showTooltips?: boolean }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   if (tokens === undefined && tools === undefined && requests === undefined && files === undefined && !cost) {
     return null;
   }
@@ -174,7 +176,7 @@ export function SubagentMetrics({ tokens, tools, requests, files, cost, generati
     files !== undefined ? `${files} files` : "",
     cost ?? "",
     generationTps === undefined ? "" : generationTps.toFixed(1) + " tok/s",
-  ].filter(Boolean).join("，");
+  ].filter(Boolean).join(zh ? "，" : ", ");
   return (
     <div className="sa-metrics" aria-label={aria}>
       {tokens !== undefined ? <span className="sa-tok"><b>{tokens}</b><i>tok</i></span> : null}
@@ -182,7 +184,7 @@ export function SubagentMetrics({ tokens, tools, requests, files, cost, generati
       {requests !== undefined ? <span className="hub-num"><i>req</i><b>{requests}</b></span> : null}
       {files !== undefined ? <span className="hub-num"><i>files</i><b>{files}</b></span> : null}
       {generationTps === undefined ? null : <span className="sa-tok">{generationTps.toFixed(1)} tok/s</span>}
-      {cost ? <span className="sa-cost" title={showTooltips ? "API-equivalent estimate; billed cost unavailable / API 等价估算，实际扣费未知" : undefined}>{cost}</span> : null}
+      {cost ? <span className="sa-cost" title={showTooltips ? (zh ? "API 等价估算，实际扣费未知" : "API-equivalent estimate; billed cost unavailable") : undefined}>{cost}</span> : null}
     </div>
   );
 }
