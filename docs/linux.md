@@ -29,6 +29,8 @@ chmod +x ./OMP-Studio-*-linux-x64.AppImage
 
 以上命令假定目录中只有本次下载的一份同格式安装包。AppImage 可移到个人应用目录，再从文件管理器启动。
 
+中文界面需要 CJK 字体。deb 默认推荐安装 `fonts-noto-cjk`；使用 AppImage 或精简桌面时，请安装发行版提供的 Noto CJK 字体，避免中文显示成方框（Ubuntu / Debian：`sudo apt install fonts-noto-cjk`）。
+
 ### AppImage 与沙箱
 
 Ubuntu 24.04 安装 FUSE 2 使用 `sudo apt install libfuse2t64`，Debian 13 使用 `sudo apt install libfuse2t64`。其他发行版按其包管理器安装 libfuse2。缺少 FUSE 时也可用 `--appimage-extract` 解包，然后运行解出的 `squashfs-root/omp-studio`，但仍须满足系统的 Chromium 沙箱要求。

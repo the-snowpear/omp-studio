@@ -108,6 +108,13 @@ try {
   report.app = await launch(env);
   await page.evaluate(() => { localStorage.setItem("omp.previewMode", "0"); localStorage.setItem("omp.appSettings", JSON.stringify({ language: "zh" })); localStorage.setItem("omp.startupNotice.dismissed", "incomplete-v1"); });
   await page.reload();
+  const tour = page.locator(".ob-dialog");
+  await tour.waitFor({ state: "visible" });
+  const steps = await tour.getByRole("tab").count();
+  for (let step = 1; step < steps; step += 1) await tour.getByRole("button", { name: /^(下一步|Next)$/ }).click();
+  await tour.getByRole("button", { name: /^(开始使用|Get started)$/ }).click();
+  await tour.waitFor({ state: "hidden" });
+  report.checks.push("first-run tutorial completes and releases the workspace controls");
   await page.getByRole("button", { name: /打开本地文件夹|Open local folder/ }).first().click();
   await until(() => query("projects.list"), result => result.workspaces.some(row => row.active), "workspace selection");
   await command("session.create", { model: "linux-smoke/smoke-model", noContextFiles: true });

@@ -21,7 +21,7 @@ on:
         default: ""
 
 concurrency:
-  group: ci-${{ github.ref }}-${{ inputs.scope || 'core' }}
+  group: ci-${{ github.ref }}-${{ inputs.scope || 'core' }}-${{ inputs.linux_package_run || 'fresh' }}
   cancel-in-progress: true
 
 permissions:
@@ -167,7 +167,7 @@ jobs:
       - name: Prepare desktop acceptance
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libfuse2t64 xvfb xauth dbus-x11 weston
+          sudo apt-get install -y --no-install-recommends libfuse2t64 fonts-noto-cjk xvfb xauth dbus-x11 weston
           npm install --prefix "$RUNNER_TEMP/omp-playwright" --no-audit --no-fund playwright@1.62.1
           echo "PLAYWRIGHT_MODULE=$RUNNER_TEMP/omp-playwright/node_modules/playwright" >> "$GITHUB_ENV"
           chmod +x outputs/installer-linux/*.AppImage

@@ -69,7 +69,7 @@ export function deriveLinuxBuilderConfig(base, { outputDirectory }) {
         "libnss3", "libnotify4", "libxss1", "libxtst6", "libgbm1",
         "libatspi2.0-0t64 | libatspi2.0-0", "libuuid1", "libsecret-1-0", "xdg-utils",
       ],
-      recommends: ["libayatana-appindicator3-1", "gnome-keyring | kwalletmanager"],
+      recommends: ["libayatana-appindicator3-1", "gnome-keyring | kwalletmanager", "fonts-noto-cjk"],
       // Use the builder's package-owned sandbox/AppArmor and desktop integration scripts.
     },
     // Discovery uses Studio's signed catalogs. No electron-updater feed is installed.
