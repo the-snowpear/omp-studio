@@ -4,6 +4,7 @@ import type { BrowserElementReference } from "@omp-studio/studio-protocol";
 import { useConversationDom } from "../conversationWorkspace/Context";
 import { DockPanel, useBrowserPagesLayout, useDockEngine } from "../dock/DockContext";
 import { browserPagePanelId, type BrowserPagePanelId, type PanelDefinition, type PanelId } from "../dock/types";
+import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import type { BrowserLinkIntent } from "./browserLinks";
 import { planBrowserDockSync, type BrowserDockMemory } from "./browserDockSync";
@@ -34,6 +35,7 @@ export function BrowserDockInstances({ client, sessionId, available, capabilitie
   onReferences: (references: BrowserElementReference[]) => void;
 }) {
   const { preview } = usePreviewMode();
+  const { resolvedLanguage } = useI18n();
   const copy = useBrowserCopy();
   const native = useManagedBrowserAvailable(available, capabilities);
   const { store, setBrowserPageDefinitions } = useDockEngine();
@@ -48,6 +50,10 @@ export function BrowserDockInstances({ client, sessionId, available, capabilitie
   const tabs = (Object.entries(pages.browserPages) as [BrowserPagePanelId, (typeof pages.browserPages)[string]][]).filter(([id]) => pages.placed.has(id));
   const sessionIds = [...new Set(tabs.map(([, descriptor]) => descriptor.sessionId))];
   const sessions = useMemo(() => hub ? sessionIds.map(id => hub.session(id)) : [], [hub, sessionIds.join("\n")]);
+  useEffect(() => {
+    if (!preview) return;
+    for (const item of sessions) void item.read();
+  }, [preview, sessions, resolvedLanguage]);
   const snapshots = useSessionSnapshots(sessions);
 
   const definitions = useMemo((): PanelDefinition[] => tabs.map(([id, descriptor]) => {

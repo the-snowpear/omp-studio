@@ -25,7 +25,7 @@ import { hostErrorMessage, waitReceipt } from "./hostError";
 import { pageDir, pagePhaseClass, useDeferredKey, useDeferredPresence, useOverlayPresence } from "./pageTransition";
 import { extractYamlMapEntry, mergeYamlMapEntry, parseStructured, readYamlMapEntryNode, StructuredEditor } from "./structured-editor";
 import { usePreviewMode } from "./preview/PreviewContext";
-import { MODEL_API_TYPES, MODEL_AUTH_TYPES, createPreviewModelConfig } from "./preview/modelConfigFixtures";
+import { MODEL_API_TYPES, getModelAuthTypes, createPreviewModelConfig } from "./preview/modelConfigFixtures";
 import { chooseFetchedModelCandidate, pickedCount, setAllPicked, togglePicked } from "./models/fetchedModels";
 import { draftProviderYamlNode, nestedProviderYamlNode, serializeModelsYmlNode } from "./models/providerYaml";
 import { SubagentsPanel } from "./SubagentsPanel";
@@ -37,7 +37,7 @@ import { ROLE_ICONS, ROLE_TINTS, groupModelsByProvider, fmtK } from "./models/mo
 import { type Draft, type ModelEditState, type ModelRoleDraft, type ModelsTab, type TestResultView } from "./models/config/types";
 import { mergeProviderOrder, permuteVisible, readProviderOrder, sameOrder, sortProviders, writeProviderOrder } from "./models/config/providerOrder";
 import { applyRoleSelector, assignedRoleIds, blankCustomForm, blankDraft, blankOverrideForm, draftFromPreset, draftFromProvider, draftsEqual, editorTestSecret, previewProviderFromDraft, providerUpsertFromDraft, readModelRoles, roleAssignDiff, roleAssignModCount, rolePrimaryUpdates, roleSelector, roleThinkingUi, rolesEqual, sameStringList, withPreviewLogin, withRoleModel, withRolePrimaryUpdates } from "./models/config/drafts";
-import { SOURCE_GROUP, STATUS_META, formatProviderStatusDetail, formatRoleDesc } from "./models/config/presentation";
+import { SOURCE_GROUP, STATUS_META, formatPresetDesc, formatPresetGroup, formatPresetName, formatProviderStatusDetail, formatRoleDesc } from "./models/config/presentation";
 import { runProbe, runTest, runWrite } from "./models/config/commands";
 import { AuthTypeSelect, BrandMark, DiscoveryResultBlock, ModelCaps, ProviderTestRow, confirmDiscardDirty } from "./models/config/ProviderControls";
 import { RoleAssignControl, RoleModelPicker, RoleThinkingSeg } from "./models/config/RoleControls";
@@ -62,6 +62,7 @@ const mcTabRank = (tab: McTab): number => Object.keys(TAB_BUTTON_ID).indexOf(tab
 
 export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailable = false, capabilities }: { capabilities?: ClientBootstrap["capabilityManifest"] | undefined; client: StudioClient; sessionId?: string | undefined; workspaceId?: string | undefined; runtimeAvailable?: boolean }) {
   const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [, updatePricingClock] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(() => updatePricingClock(tick => tick + 1), 60_000);
@@ -86,7 +87,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const nativeAuth = useModelAuth(modelContext, preview, shownTab === "providers" || shownTab === "accounts" || shownTab === "roles");
   const [runtimeModels, setRuntimeModels] = useState<AvailableModelRecord[]>([]);
   const nativeLoad = useRef(0);
-  const [data, setData] = useState<ModelConfigReadModel | null>(preview ? createPreviewModelConfig() : null);
+  const [data, setData] = useState<ModelConfigReadModel | null>(preview ? createPreviewModelConfig(zh) : null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
@@ -114,7 +115,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [agentIntent, setAgentIntent] = useState<string | undefined>(undefined);
   const [accountPoolsDirty, setAccountPoolsDirty] = useState(false);
   const [systemTemplatesDirty, setSystemTemplatesDirty] = useState(false);
-  const [agentCount, setAgentCount] = useState(preview ? createPreviewAgentDefinitions().agents.length : 0);
+  const [agentCount, setAgentCount] = useState(preview ? createPreviewAgentDefinitions(undefined, zh).agents.length : 0);
   const [testResult, setTestResult] = useState<TestResultView | null>(null);
   const [testing, setTesting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -154,8 +155,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
 
   const refresh = useCallback(async () => {
     if (preview) {
-      setData(createPreviewModelConfig());
-      setAgentCount(createPreviewAgentDefinitions().agents.length);
+      setData(createPreviewModelConfig(zh));
+      setAgentCount(createPreviewAgentDefinitions(undefined, zh).agents.length);
       setLoadError(null);
       return;
     }
@@ -171,7 +172,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       setLoadError(hostErrorMessage(error, "models.get failed"));
       setData(null);
     }
-  }, [client, preview]);
+  }, [client, preview, zh]);
 
   useEffect(() => {
     void refresh();
@@ -401,7 +402,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   }, [ymlCardsDirty, accountPoolsDirty, systemTemplatesDirty]);
 
   const mutateLocal = (recipe: (current: ModelConfigReadModel) => ModelConfigReadModel) => {
-    setData((current) => recipe(current ?? createPreviewModelConfig()));
+    setData((current) => recipe(current ?? createPreviewModelConfig(zh)));
   };
 
   const mergeContentHash = (hash: string | undefined) => {
@@ -1265,13 +1266,13 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                         if (!items.length) return null;
                         return (
                           <div key={group.group}>
-                            <div className="preset-group-label">{group.group} · {items.length}</div>
+                            <div className="preset-group-label">{formatPresetGroup(group.group, resolvedLanguage === "zh")} · {items.length}</div>
                             <div className="preset-grid">
                               {items.map((item) => (
                                 <button type="button" key={item.id} className={`preset-item${presetSel === item.id ? " sel" : ""}`} onClick={() => { setProviderBaseline(null); setEditor(draftFromPreset(item)); setPresetSel(item.id); }}>
-                                  <span className="pi-name">{hasBrand(item.id) ? <Brand id={item.id} extra="sm" /> : null}{item.name}{item.popular ? <span className="chip purple xs">{t("modelConfig.popularBadge")}</span> : null}{item.local ? <span className="chip blue xs">{t("modelConfig.localBadge")}</span> : null}</span>
-                                  <span className="pi-desc">{item.desc}</span>
-                                  <span className="pi-desc">{item.auth.map((auth) => MODEL_AUTH_TYPES.find((entry) => entry.id === auth)?.label ?? auth).join(" · ")}</span>
+                                  <span className="pi-name">{hasBrand(item.id) ? <Brand id={item.id} extra="sm" /> : null}{formatPresetName(item.id, item.name, resolvedLanguage === "zh")}{item.popular ? <span className="chip purple xs">{t("modelConfig.popularBadge")}</span> : null}{item.local ? <span className="chip blue xs">{t("modelConfig.localBadge")}</span> : null}</span>
+                                  <span className="pi-desc">{formatPresetDesc(item.id, item.desc, resolvedLanguage === "zh")}</span>
+                                  <span className="pi-desc">{item.auth.map((auth) => getModelAuthTypes(zh).find((entry) => entry.id === auth)?.label ?? auth).join(" · ")}</span>
                                 </button>
                               ))}
                             </div>
@@ -1335,7 +1336,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                           <span className={`chip ${authed ? "green" : "gray"} xs`}>{authed ? t("modelConfig.credentialValid") : t("modelConfig.notLoggedIn")}</span>
                         </div>
                         <div className="auth-actions">
-                          {preview && data?.loginProviders.find(item => item.id === editor.id)?.flows?.length ? <AppSelect aria-label="登录方式 / Login method" className="select" value={loginFlowByProvider[editor.id] ?? ""} disabled={busy} onChange={event => setLoginFlowByProvider(current => ({ ...current, [editor.id]: event.target.value }))}>{data.loginProviders.find(item => item.id === editor.id)?.flows?.map(flow => <option key={flow.id} value={flow.id}>{flow.name}</option>)}</AppSelect> : null}
+                          {preview && data?.loginProviders.find(item => item.id === editor.id)?.flows?.length ? <AppSelect aria-label={resolvedLanguage === "zh" ? "登录方式" : "Login method"} className="select" value={loginFlowByProvider[editor.id] ?? ""} disabled={busy} onChange={event => setLoginFlowByProvider(current => ({ ...current, [editor.id]: event.target.value }))}>{data.loginProviders.find(item => item.id === editor.id)?.flows?.map(flow => <option key={flow.id} value={flow.id}>{flow.name}</option>)}</AppSelect> : null}
                           <button type="button" className={`btn small ${authed ? "outline" : "primary"}`} disabled={busy || !nativeAuth.canLogin || (!preview && !login?.available)} onClick={() => void startLogin(editor.id, loginFlowByProvider[editor.id])}>
                             <Icon name="key" extra="sm" />
                             {authed ? t("modelConfig.relogin") : t("modelConfig.login")}
@@ -1577,8 +1578,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                 {modelsTab === "discovery" ? (
                   <div className="kv-list">
                     <div className="kv-row"><span className="k">Discovery Type</span><span className="v"><span className="chip-code">{editor.discoveryType}</span></span></div>
-                    <div className="kv-row"><span className="k">采用服务端 reasoning 配置</span><span className="v"><input type="checkbox" checked={editor.advertisedReasoning !== false} onChange={event => setEditor({ ...editor, advertisedReasoning: event.target.checked })} /><span className="tiny muted">读取 /v1/models 的 ladder、none 和 reasoning:false；关闭则沿用目录推断。</span></span></div>
-                    <div className="kv-row"><span className="k">Timeout（ms）</span><span className="v">
+                    <div className="kv-row"><span className="k">{resolvedLanguage === "zh" ? "采用服务端 reasoning 配置" : "Use server reasoning config"}</span><span className="v"><input type="checkbox" checked={editor.advertisedReasoning !== false} onChange={event => setEditor({ ...editor, advertisedReasoning: event.target.checked })} /><span className="tiny muted">{resolvedLanguage === "zh" ? "读取 /v1/models 的 ladder、none 和 reasoning:false；关闭则沿用目录推断。" : "Read ladder, none, and reasoning:false from /v1/models; when off, infer from the catalog."}</span></span></div>
+                    <div className="kv-row"><span className="k">{resolvedLanguage === "zh" ? "Timeout（ms）" : "Timeout (ms)"}</span><span className="v">
                       <input className="input mono" type="number" style={{ width: 120 }} value={editor.discoveryTimeoutMs ?? ""} onChange={(event) => {
                         const next = { ...editor };
                         if (event.target.value === "") delete next.discoveryTimeoutMs;

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { usePreviewMode } from "../preview/PreviewContext";
 import {
@@ -159,6 +160,7 @@ export function ActivityLine({
   /** Preview mode: data comes from fixtures. */
   demo?: boolean;
 }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const { marks } = usePreviewMode();
   const elapsed = useElapsed(startedAt, status.retry?.nextRetryAt !== undefined);
   const live = isLiveActivityPhase(status.phase) && status.retry?.nextRetryAt === undefined;
@@ -191,7 +193,7 @@ export function ActivityLine({
           </>
         ) : null}
       </span>
-      {demo === true && marks ? <span className="chip gray xs">演示</span> : null}
+      {demo === true && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
     </div>
   );
 }

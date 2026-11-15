@@ -24,6 +24,7 @@ import type {
   ConfigWriteResult,
 } from "@omp-studio/client-contract";
 
+import { hostText, isHostLocaleZh } from "./locale.js";
 import { parseFrontmatter } from "./omp-discovery/frontmatter.js";
 import { listClaudePluginRoots } from "./omp-discovery/helpers.js";
 import { getAgentDir, getProjectConfigDir } from "./omp-discovery/paths.js";
@@ -165,11 +166,18 @@ const BUNDLED_AGENTS: ReadonlyArray<BundledAgent> = [
   },
 ];
 
-const SOURCE_LABEL: Record<AgentDefinitionSource, string> = {
+const SOURCE_LABEL_ZH: Record<AgentDefinitionSource, string> = {
   project: "项目",
   user: "用户",
   bundled: "内置",
   plugin: "插件",
+};
+
+const SOURCE_LABEL_EN: Record<AgentDefinitionSource, string> = {
+  project: "Project",
+  user: "User",
+  bundled: "Bundled",
+  plugin: "Plugin",
 };
 
 interface ParsedAgentFile {
@@ -362,7 +370,7 @@ async function readDirMarkdown(dir: string): Promise<Array<{ file: string; conte
 }
 
 function sourceLabelOf(source: AgentDefinitionSource): string {
-  return SOURCE_LABEL[source];
+  return isHostLocaleZh() ? SOURCE_LABEL_ZH[source] : SOURCE_LABEL_EN[source];
 }
 
 function toRecord(
@@ -408,7 +416,7 @@ function toRecord(
     ...(prewalkOverride === undefined ? {} : { prewalkOverride }),
     ...(advisorOverride === undefined ? {} : { advisorOverride }),
     contentHash: parsed.contentHash,
-    ...(description.length === 0 ? { error: "缺少 description" } : {}),
+    ...(description.length === 0 ? { error: hostText("缺少 description", "Missing description") } : {}),
     ...(packed ? { promptPacked: true } : {}),
   };
 }
@@ -666,11 +674,12 @@ export function createOmpAgentDefinitionsService(
       for (const file of files) {
         const parsed = parseAgentMarkdown(file.content);
         if (!parsed) {
-          warnings.push(redactText(sanitizeDisplayText(`无法解析 ${file.file}（缺少 name 或 description）`, WARNING_MAX) ?? "无法解析代理文件"));
+          const msg = hostText(`无法解析 ${file.file}（缺少 name 或 description）`, `Failed to parse ${file.file} (missing name or description)`);
+          warnings.push(redactText(sanitizeDisplayText(msg, WARNING_MAX) ?? hostText("无法解析代理文件", "Failed to parse agent file")));
           continue;
         }
         if (seen.has(parsed.name)) {
-          warnings.push(sanitizeDisplayText(`${parsed.name} 被更高优先级来源覆盖`, WARNING_MAX) ?? parsed.name);
+          warnings.push(sanitizeDisplayText(hostText(`${parsed.name} 被更高优先级来源覆盖`, `${parsed.name} is overridden by a higher-priority source`), WARNING_MAX) ?? parsed.name);
           continue;
         }
         seen.add(parsed.name);
@@ -723,7 +732,7 @@ export function createOmpAgentDefinitionsService(
     const home = homeOf();
     if (scope === "user") return path.join(getAgentDir(home), "agents");
     const cwd = resolveCwd(options);
-    if (!cwd) fail("UNAVAILABLE", "未打开工作区，无法写入项目级子代理。");
+    if (!cwd) fail("UNAVAILABLE", hostText("未打开工作区，无法写入项目级子代理。", "No workspace is open; cannot write project subagents."));
     return path.join(getProjectConfigDir(cwd), "agents");
   }
 
@@ -766,7 +775,7 @@ export function createOmpAgentDefinitionsService(
       const content = serializeAgentMarkdown({ ...input, name, description });
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(filePath, content, "utf8");
-      return { ...WRITE_OK("已写入子代理定义。新会话后生效。"), contentHash: hashText(content) };
+      return { ...WRITE_OK(hostText("已写入子代理定义。新会话后生效。", "Saved subagent definition. Takes effect in a new session.")), contentHash: hashText(content) };
     },
 
     async delete(input: AgentDefinitionDeleteInput): Promise<ConfigWriteResult> {
@@ -786,7 +795,7 @@ export function createOmpAgentDefinitionsService(
         fail("STATE_VERSION_CONFLICT", "agent file changed since it was last read");
       }
       await fs.unlink(filePath);
-      return WRITE_OK("已删除子代理定义。");
+      return WRITE_OK(hostText("已删除子代理定义。", "Deleted subagent definition."));
     },
 
     async configure(input: AgentDefinitionConfigureInput): Promise<ConfigWriteResult> {
@@ -824,7 +833,7 @@ export function createOmpAgentDefinitionsService(
           setYamlStringMap(task, "agentAdvisor", map);
         }
       });
-      return WRITE_OK("已更新子代理会话覆盖。新会话后生效。");
+      return WRITE_OK(hostText("已更新子代理会话覆盖。新会话后生效。", "Updated subagent session overrides. Takes effect in a new session."));
     },
   };
 }

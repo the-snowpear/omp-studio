@@ -19,7 +19,7 @@ import type { SessionHistoryEntry, SessionHistoryReadModel, StudioClient, Worksp
 import { type ClientState } from "@omp-studio/client";
 import { clientShellChanged, shouldRecordShellEvent } from "./shellMemory";
 import { Icon } from "./icons";
-import { I18nProvider, useI18n } from "./i18n";
+import { I18nProvider, pickLocale, useI18n } from "./i18n";
 import { createShellModelLoader } from "./shellModelLoader";
 import { TerminalSessionsProvider } from "./terminalSessions";
 import { TipHost } from "./TipHost";
@@ -73,7 +73,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
     previousConnectionStatus.current = connectionStatus;
     if (connectionStatus !== "connected") {
       if (connectionStatus === "synchronizing" || connectionStatus === previousStatus) return;
-      (client as StudioClient & { transportLost?(reason: string): void }).transportLost?.("SSH 连接已中断；保留对话与草稿，等待重新同步。");
+      (client as StudioClient & { transportLost?(reason: string): void }).transportLost?.(pickLocale("SSH 连接已中断；保留对话与草稿，等待重新同步。", "SSH connection lost; keeping conversation and drafts while waiting to resync."));
       return;
     }
     if (connectionRevision.current !== executionTarget.syncRevision) {
@@ -99,7 +99,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
   const routeRef = useRef(route);
   routeRef.current = route;
   const navigate = useCallback((next: Route) => {
-    if (next !== routeRef.current && modelConfigHasUnsavedChanges() && !window.confirm("有未保存的模型配置更改，确定离开吗？")) return false;
+    if (next !== routeRef.current && modelConfigHasUnsavedChanges() && !window.confirm(pickLocale("有未保存的模型配置更改，确定离开吗？", "You have unsaved model configuration changes. Leave anyway?"))) return false;
     routeRef.current = next;
     setRoute(next);
     return true;

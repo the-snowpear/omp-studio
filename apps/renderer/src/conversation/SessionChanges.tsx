@@ -53,14 +53,15 @@ export function SessionChanges({
   /** 同一轮再次审核时递增，避免被轮次菜单改过之后无法跳回。 */
   focusKey?: number;
 }) {
-  const { t } = useI18n();
-  const turns = useMemo(() => listSessionChangeTurns(rows).map(toTurnOption), [rows]);
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const turns = useMemo(() => listSessionChangeTurns(rows, zh).map(toTurnOption), [rows, zh]);
   const [turnId, setTurnId] = useState(SESSION_CHANGE_LAST_ID);
   const [split, setSplit] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const known = turns.some((turn) => turn.id === turnId);
   const activeId = known ? turnId : SESSION_CHANGE_LAST_ID;
-  const scope = useMemo(() => sessionChangeScope(rows, activeId), [rows, activeId]);
+  const scope = useMemo(() => sessionChangeScope(rows, activeId, zh), [rows, activeId, zh]);
   const diffs = useMemo(() => sessionFileDiffs(scope.segments), [scope.segments]);
 
   useEffect(() => {
@@ -78,10 +79,10 @@ export function SessionChanges({
     if (focusTurnId !== undefined) return;
     if (focusPath === undefined) return;
     const nextTurn = sessionChangeTurnIdForPath(rows, focusPath) ?? SESSION_CHANGE_LAST_ID;
-    const hit = sessionChangeScope(rows, nextTurn).files.find((file) => pathMatches(file.path, focusPath));
+    const hit = sessionChangeScope(rows, nextTurn, zh).files.find((file) => pathMatches(file.path, focusPath));
     setTurnId(nextTurn);
     setExpanded(hit === undefined ? new Set() : new Set([hit.path]));
-  }, [focusPath, focusTurnId, rows]);
+  }, [focusPath, focusTurnId, rows, zh]);
 
   const files: readonly ChangesDiffFile[] = scope.files.map((file) => fileDiff(file, diffs.get(file.path)));
   const sessionHasFiles = turns.some((turn) => turn.id === SESSION_CHANGE_SESSION_ID && (turn.add > 0 || turn.del > 0));

@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import type { OperatorInvokeOutcome, SessionHistoryEntry, SessionHistoryReadModel, SessionId, ThreadId, WorkspaceId } from "@omp-studio/client-contract";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 import { type IconName } from "../icons";
+import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { resolveProvisionalHistoryTitle, type ProvisionalProjectThread } from "../sidebar/provisionalThread";
 import { renameNeedsSessionResume } from "../sidebar/sessionTitle";
@@ -24,6 +25,9 @@ interface useSessionRenameInput {
 }
 
 export function useSessionRename({ renameTargetSessionId, selected, renameTargetWorkspaceId, threadTitle, workspaceActionQueue, snapshot, can, client, refreshHistoryAfterTitle, setProvisionalThreadsBySession, setShellNotice, ensureWorkspaceActive }: useSessionRenameInput) {
+  const { resolvedLanguage } = useI18n();
+  const zhRef = useRef(resolvedLanguage === "zh");
+  zhRef.current = resolvedLanguage === "zh";
   /** 顶栏「重命名对话」模态：builtin.rename 持久化到会话标题槽。 */
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -47,6 +51,7 @@ export function useSessionRename({ renameTargetSessionId, selected, renameTarget
     setRenameError(undefined);
     setRenameBusy(true);
     void workspaceActionQueue.enqueue(async () => {
+      const zh = zhRef.current;
       try {
         const context = renameContextRef.current;
         const targetSessionId = context?.sessionId ?? renameTargetSessionId;
@@ -57,7 +62,10 @@ export function useSessionRename({ renameTargetSessionId, selected, renameTarget
           const outcome = await waitReceipt<{ result: { targetSessionId: string; title: string } }>(client, handle.requestId);
           await refreshHistoryAfterTitle(targetWorkspaceId);
           setProvisionalThreadsBySession(current => current[targetSessionId] ? { ...current, [targetSessionId]: resolveProvisionalHistoryTitle(current[targetSessionId]!, outcome.result.title) } : current);
-          setShellNotice({ text: `已重命名为「${outcome.result.title}」`, icon: "check" });
+          setShellNotice({
+            text: zh ? `已重命名为「${outcome.result.title}」` : `Renamed to "${outcome.result.title}"`,
+            icon: "check",
+          });
           setRenameOpen(false);
           return;
         }
@@ -67,19 +75,21 @@ export function useSessionRename({ renameTargetSessionId, selected, renameTarget
           ...(targetSessionId === undefined ? {} : { viewedSessionId: targetSessionId }),
           ...(snapshot?.sessionId === undefined ? {} : { liveSessionId: snapshot.sessionId }),
         })) {
-          if (targetThreadId === undefined) throw new Error("当前查看会话缺少 threadId，无法重命名");
+          if (targetThreadId === undefined) {
+            throw new Error(zh ? "当前查看会话缺少 threadId，无法重命名" : "Current session is missing threadId and cannot be renamed");
+          }
           await ensureWorkspaceActive(targetWorkspaceId);
           const resume = await client.command("session.resume", { threadId: targetThreadId });
           const resumed = await waitReceipt<OperatorStateSnapshot>(client, resume.requestId);
           if (selected?.sessionId !== undefined && resumed.sessionId !== selected.sessionId) {
-            throw new Error("恢复的会话与当前查看会话不一致");
+            throw new Error(zh ? "恢复的会话与当前查看会话不一致" : "Resumed session does not match the currently viewed session");
           }
           renamedSessionId = resumed.sessionId;
         }
         const handle = await client.command("operator.invoke", { commandId: "builtin.rename", arguments: next });
         const outcome = await waitReceipt<OperatorInvokeOutcome>(client, handle.requestId);
         if (renamedSessionId !== undefined && outcome.snapshot.sessionId !== renamedSessionId) {
-          throw new Error("重命名回执与目标会话不一致");
+          throw new Error(zh ? "重命名回执与目标会话不一致" : "Rename receipt does not match the target session");
         }
         renamedSessionId ??= outcome.snapshot.sessionId;
         const receiptTitle = outcome.snapshot.sessionTitle?.trim();
@@ -93,7 +103,7 @@ export function useSessionRename({ renameTargetSessionId, selected, renameTarget
             ? historyTitle
             : undefined;
         if (confirmedTitle === undefined) {
-          throw new Error("重命名回执或历史记录未确认目标标题");
+          throw new Error(zh ? "重命名回执或历史记录未确认目标标题" : "Rename receipt or history did not confirm the target title");
         }
         if (renamedSessionId !== undefined) {
           const key = String(renamedSessionId);
@@ -103,10 +113,13 @@ export function useSessionRename({ renameTargetSessionId, selected, renameTarget
             return { ...current, [key]: resolveProvisionalHistoryTitle(thread, confirmedTitle) };
           });
         }
-        setShellNotice({ text: `已重命名为「${confirmedTitle}」`, icon: "check" });
+        setShellNotice({
+          text: zh ? `已重命名为「${confirmedTitle}」` : `Renamed to "${confirmedTitle}"`,
+          icon: "check",
+        });
         setRenameOpen(false);
       } catch (error) {
-        setRenameError(hostErrorMessage(error, "重命名失败"));
+        setRenameError(hostErrorMessage(error, zh ? "重命名失败" : "Rename failed"));
       } finally {
         setRenameBusy(false);
       }

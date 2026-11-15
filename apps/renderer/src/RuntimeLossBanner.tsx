@@ -9,6 +9,7 @@ import {
   runtimeCanReconnect,
 } from "./diagnosticsModel";
 import { ensureRuntimeConnection } from "./runtimeEnsure";
+import { useI18n } from "./i18n";
 import { usePreviewMode } from "./preview/PreviewContext";
 
 export function RuntimeLossBanner({
@@ -28,34 +29,40 @@ export function RuntimeLossBanner({
   onOpenDiagnostics?: () => void;
 }) {
   const { marks } = usePreviewMode();
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<ActionProgress | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const reconnect = useCallback(async () => {
     if (preview) {
-      setMessage(marks ? "已重新连接 Runtime（演示）" : "Runtime 已重新连接");
+      setMessage(
+        marks
+          ? (zh ? "已重新连接 Runtime（演示）" : "Reconnected to Runtime (Demo)")
+          : (zh ? "Runtime 已重新连接" : "Runtime reconnected"),
+      );
       return;
     }
     if (client === undefined) {
-      setMessage("当前环境无法重新连接 Runtime");
+      setMessage(zh ? "当前环境无法重新连接 Runtime" : "Cannot reconnect Runtime in this environment");
       return;
     }
     setBusy(true);
     setMessage(null);
-    setProgress({ label: "正在请求连接", step: 1, steps: 2 });
+    setProgress({ label: zh ? "正在请求连接" : "Requesting connection", step: 1, steps: 2 });
     const result = await ensureRuntimeConnection(client, {}, setProgress);
-    setMessage(result.ok ? "Runtime 已重新连接" : result.message);
+    setMessage(result.ok ? (zh ? "Runtime 已重新连接" : "Runtime reconnected") : result.message);
     setBusy(false);
     setProgress(null);
-  }, [client, marks, preview]);
+  }, [client, marks, preview, zh]);
 
   const floatClass = floating && variant === "workbench" ? " is-floating" : "";
   const status = runtime?.status ?? "unavailable";
   if (status === "connecting") {
     return <div className={`${variant === "hub" ? "hub-conn" : "banner"}${floatClass}`} role="status" aria-busy="true">
       <span className="spinner" aria-hidden="true" />
-      <span>Runtime 正在准备，工作台已可用；连接完成后即可发送消息。</span>
+      <span>{zh ? "Runtime 正在准备，工作台已可用；连接完成后即可发送消息。" : "Runtime is preparing. The workbench is ready; you can send messages once connected."}</span>
     </div>;
   }
   if (status !== "disconnected" && status !== "unavailable") {
@@ -67,7 +74,10 @@ export function RuntimeLossBanner({
   // dormant project): it starts on the first send, so it is not a loss.
   const dormant = status === "unavailable" && runtime?.unavailableCode === undefined && runtime?.unavailableReason === undefined;
   const copy = dormant
-    ? { title: "Runtime 未启动", detail: "发送消息时会自动连接，也可以现在连接。" }
+    ? {
+        title: zh ? "Runtime 未启动" : "Runtime not started",
+        detail: zh ? "发送消息时会自动连接，也可以现在连接。" : "It connects automatically when sending a message, or you can connect now.",
+      }
     : status === "disconnected"
       ? formatRuntimeDisconnectCopy(runtime?.disconnectCode, runtime?.disconnectReason)
       : formatRuntimeUnavailableCopy(runtime?.unavailableCode, runtime?.unavailableReason);
@@ -88,19 +98,19 @@ export function RuntimeLossBanner({
         {" · "}
         <span className={detailClass}>
           {copy.detail}
-          {auto === undefined ? "" : ` ${auto}。`}
+          {auto === undefined ? "" : ` ${auto}${zh ? "。" : "."}`}
           {actionMessage === null ? "" : ` ${actionMessage}`}
         </span>
       </span>
       <span className={actionsClass}>
         {canReconnect ? (
           <button type="button" className="btn small outline" disabled={busy} onClick={() => void reconnect()}>
-            {busy ? "正在连接…" : dormant ? "立即连接" : "重新连接"}
+            {busy ? (zh ? "正在连接…" : "Connecting…") : dormant ? (zh ? "立即连接" : "Connect now") : (zh ? "重新连接" : "Reconnect")}
           </button>
         ) : null}
         {onOpenDiagnostics ? (
           <button type="button" className="btn small outline" onClick={onOpenDiagnostics}>
-            诊断中心
+            {zh ? "诊断中心" : "Diagnostics"}
           </button>
         ) : null}
       </span>

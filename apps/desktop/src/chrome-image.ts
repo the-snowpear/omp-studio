@@ -11,6 +11,7 @@ import {
   type ChromeImageMime,
   type ChromeImageResult,
 } from "./chrome-image-shared.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 export interface ChromeImageSender {
   isDestroyed(): boolean;
@@ -50,11 +51,11 @@ export interface ChromeImageIpcHandle {
 }
 
 function saveFilters(mime: ChromeImageMime): ChromeImageSaveDialogOptions["filters"] {
-  if (mime === "image/jpeg") return [{ name: "JPEG 图片", extensions: ["jpg", "jpeg"] }];
-  if (mime === "image/gif") return [{ name: "GIF 图片", extensions: ["gif"] }];
-  if (mime === "image/webp") return [{ name: "WebP 图片", extensions: ["webp"] }];
-  if (mime === "image/svg+xml") return [{ name: "SVG 图片", extensions: ["svg"] }];
-  return [{ name: "PNG 图片", extensions: ["png"] }];
+  if (mime === "image/jpeg") return [{ name: desktopText("JPEG 图片", "JPEG Image"), extensions: ["jpg", "jpeg"] }];
+  if (mime === "image/gif") return [{ name: desktopText("GIF 图片", "GIF Image"), extensions: ["gif"] }];
+  if (mime === "image/webp") return [{ name: desktopText("WebP 图片", "WebP Image"), extensions: ["webp"] }];
+  if (mime === "image/svg+xml") return [{ name: desktopText("SVG 图片", "SVG Image"), extensions: ["svg"] }];
+  return [{ name: desktopText("PNG 图片", "PNG Image"), extensions: ["png"] }];
 }
 
 function fail(message: string): ChromeImageResult {
@@ -66,7 +67,7 @@ export function registerChromeImageIpc(options: ChromeImageIpcOptions): ChromeIm
 
   function deny(sender: ChromeImageSender): ChromeImageResult | undefined {
     if (sender.isDestroyed() || !options.isTrustedSender(sender)) {
-      return fail("不受信任的调用方。");
+      return fail(desktopText("不受信任的调用方。", "Untrusted caller."));
     }
     return undefined;
   }
@@ -78,9 +79,9 @@ export function registerChromeImageIpc(options: ChromeImageIpcOptions): ChromeIm
     const denied = deny(event.sender);
     if (denied) return denied;
     const input = parseChromeImageInput(payload);
-    if (input === undefined) return fail("图片数据无效。");
+    if (input === undefined) return fail(desktopText("图片数据无效。", "Invalid image data."));
     const copied = await options.actions.copyImageToClipboard(input.bytes);
-    if (!copied) return fail("无法把这张图片写入剪贴板。");
+    if (!copied) return fail(desktopText("无法把这张图片写入剪贴板。", "Could not copy this image to the clipboard."));
     return { ok: true };
   });
 
@@ -88,7 +89,7 @@ export function registerChromeImageIpc(options: ChromeImageIpcOptions): ChromeIm
     const denied = deny(event.sender);
     if (denied) return denied;
     const input = parseChromeImageInput(payload);
-    if (input === undefined) return fail("图片数据无效。");
+    if (input === undefined) return fail(desktopText("图片数据无效。", "Invalid image data."));
     const picked = await options.actions.showSaveDialog(event.sender, {
       defaultPath: input.suggestedName,
       filters: saveFilters(input.mime),
@@ -99,8 +100,8 @@ export function registerChromeImageIpc(options: ChromeImageIpcOptions): ChromeIm
       await options.actions.writeFile(filePath, input.bytes);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (code === "EACCES" || code === "EPERM") return fail("没有权限写入所选位置。");
-      return fail("保存图片失败。");
+      if (code === "EACCES" || code === "EPERM") return fail(desktopText("没有权限写入所选位置。", "Permission denied writing to the selected location."));
+      return fail(desktopText("保存图片失败。", "Failed to save image."));
     }
     return { ok: true };
   });

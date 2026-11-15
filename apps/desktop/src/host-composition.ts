@@ -6,6 +6,7 @@ import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 import { timeTravelService } from "./time-travel-service.js";
 import { randomUUID } from "node:crypto";
 import type { WorkspaceId, SessionId } from "@omp-studio/client-contract";
+import { desktopText } from "./desktop-language-shared.js";
 
 /**
  * Desktop Host composition (FRONTEND_INTEGRATION.md §9.2).
@@ -1385,15 +1386,15 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     });
   }
   updateRestartBlocker(): string | undefined {
-    if (this.#closed || this.#shutdownStarted) return "应用正在关闭，请稍后重试";
-    if (this.#facadeContext.startup.pending) return "Runtime 正在准备，请完成后重启更新";
-    if (this.#facade.runtimeInstallInProgress) return "Runtime 更新尚未完成，请完成后重启更新";
-    if (this.#facade.hasPendingCommands) return "仍有命令未完成，请完成后重启更新";
+    if (this.#closed || this.#shutdownStarted) return desktopText("应用正在关闭，请稍后重试", "Application is closing; try again shortly");
+    if (this.#facadeContext.startup.pending) return desktopText("Runtime 正在准备，请完成后重启更新", "Runtime is starting up; wait until it finishes before restarting to update");
+    if (this.#facade.runtimeInstallInProgress) return desktopText("Runtime 更新尚未完成，请完成后重启更新", "Runtime update is still in progress; wait until it finishes before restarting to update");
+    if (this.#facade.hasPendingCommands) return desktopText("仍有命令未完成，请完成后重启更新", "Commands are still running; wait until they finish before restarting to update");
     if (this.#runtimeSession?.updateRestartBlocker) return this.#runtimeSession.updateRestartBlocker();
     const residents = this.#runtimeSession?.listResidents?.().residents;
-    if (residents?.some(row => row.phase === "running" || row.phase === "compacting")) return "任务仍在运行，请完成后重启更新";
-    if (residents?.some(row => row.phase === "waiting")) return "请先处理待完成的交互，再重启更新";
-    if (residents?.some(row => row.pendingMessages > 0)) return "仍有排队消息，请处理后重启更新";
+    if (residents?.some(row => row.phase === "running" || row.phase === "compacting")) return desktopText("任务仍在运行，请完成后重启更新", "Tasks are still running; wait until they finish before restarting to update");
+    if (residents?.some(row => row.phase === "waiting")) return desktopText("请先处理待完成的交互，再重启更新", "Respond to pending interactions before restarting to update");
+    if (residents?.some(row => row.pendingMessages > 0)) return desktopText("仍有排队消息，请处理后重启更新", "Queued messages are still pending; handle them before restarting to update");
     const session = this.#sessionRef.current;
     return session?.hello() ? updateRestartBlockerForSnapshot(session.controller.publication()?.snapshot) : undefined;
   }

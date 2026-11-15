@@ -1,7 +1,8 @@
 import type { TokenUsageData } from "../usage/TokenUsagePanel";
-import { PREVIEW_TELEMETRY as usage } from "./fixtures";
+import { getPreviewTelemetry } from "./fixtures";
 
 export function previewTokenUsage(zh: boolean): TokenUsageData {
+  const usage = getPreviewTelemetry(zh);
   return {
     total: usage.totalBurn,
     turn: usage.turnBurn,

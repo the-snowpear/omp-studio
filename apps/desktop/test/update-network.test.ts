@@ -116,7 +116,7 @@ test("a request with no first response times out and cancellation prevents retry
   let requests = 0;
   const fetcher: typeof fetch = async () => { requests++; return new Promise(() => {}); };
   await assert.rejects(withUpdateRequest({ url: manifestUrl, signal: new AbortController().signal, stage: "manifest", fetcher,
-    requestPolicy: { ...requestPolicy, responseTimeoutMs: 5 } }, attempt => attempt.request()), /首响应超时/);
+    requestPolicy: { ...requestPolicy, responseTimeoutMs: 5 } }, attempt => attempt.request()), /response timed out/);
   assert.equal(requests, 3);
   const controller = new AbortController();
   requests = 0;

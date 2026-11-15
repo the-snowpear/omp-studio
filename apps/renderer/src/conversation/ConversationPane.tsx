@@ -27,15 +27,19 @@ import { useConversationView } from "../conversationWorkspace/Context";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { useConversationReading, type ConversationReadingMemory } from "./useConversationReading";
 import { motionReduced } from "../motion";
+import { useI18n } from "../i18n";
 
-const FALLBACK_SNAPSHOT: ConversationSnapshot = {
-  state: resetConversation(0, null, "unavailable", "当前没有活动会话。"),
-  rows: [],
-  demo: false,
-  loadingOlder: false,
-  identityKey: "",
-};
-const EMPTY_SNAPSHOT = (): ConversationSnapshot => FALLBACK_SNAPSHOT;
+function makeFallbackSnapshot(zh: boolean): ConversationSnapshot {
+  return {
+    state: resetConversation(0, null, "unavailable", zh ? "当前没有活动会话。" : "No active conversation."),
+    rows: [],
+    demo: false,
+    loadingOlder: false,
+    identityKey: "",
+  };
+}
+const EMPTY_SNAPSHOT_ZH = makeFallbackSnapshot(true);
+const EMPTY_SNAPSHOT = (): ConversationSnapshot => EMPTY_SNAPSHOT_ZH;
 const NOOP_SUBSCRIBE = (): (() => void) => () => undefined;
 
 /** 上一屏已经画出来的正文，连同它当时的滚动编排输入。
@@ -123,6 +127,8 @@ export function ConversationPane({
   /** Display-only content following the transcript, captured with its switch transition. */
   supplement?: ReactNode;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const localScrollerRef = useRef<HTMLElement | null>(null);
   const scrollerRef = externalScrollerRef ?? localScrollerRef;
   const conversation = useConversationView();
@@ -153,13 +159,7 @@ export function ConversationPane({
       : retainConversationWhileRemounting(liveSnapshot, snapshot, liveSnapshot.state.identity?.sessionId);
   const { state, rows, demo, loadingOlder, identityKey } = effectiveSnapshot?.state
     ? effectiveSnapshot
-    : {
-        state: resetConversation(0, null, "unavailable", "当前没有活动会话。"),
-        rows: [] as ConversationSnapshot["rows"],
-        demo: false,
-        loadingOlder: false,
-        identityKey: "",
-      };
+    : makeFallbackSnapshot(zh);
   const showWelcome = Boolean(welcome && (forceWelcome || rows.length === 0) && compacting !== true);
   /**
    * `withCompactingRow` 追加行时返回**新数组**，令牌却只挂在 store 发布的那一个
@@ -258,7 +258,7 @@ export function ConversationPane({
   useConversationReading({ memory: readingMemory,
     // Wait for the existing two-frame initial layout before restoring the anchor offset.
     visible: (conversation?.visible ?? true) && (switchState.phase === "idle" || switchState.phase === "revealing"),
-    snapshot: effectiveSnapshot ?? FALLBACK_SNAPSHOT, scrollerRef, follow: scroll.follow,
+    snapshot: effectiveSnapshot ?? makeFallbackSnapshot(zh), scrollerRef, follow: scroll.follow,
     detachFromLatest: scroll.detachFromLatest, loadOlder: onLoadOlder, beforeDetach });
   const prevLoading = useRef(loadingOlder);
   const paintableRef = useRef(paintable);
@@ -325,7 +325,7 @@ export function ConversationPane({
     </>
   ) : (
     <>
-      {demo ? null : <StatusBanner state={state} />}
+      {demo ? null : <StatusBanner state={state} zh={zh} />}
       {state.hasMoreBefore && (state.hydrateStatus === "ready" || state.hydrateStatus === "resyncing" && displayRows.length > 0) ? (
         <div className="convo-load-earlier">
           <button
@@ -334,7 +334,9 @@ export function ConversationPane({
             disabled={loadingOlder || state.hydrateStatus !== "ready"}
             onClick={loadOlder}
           >
-            {loadingOlder ? "正在加载更早消息…" : "加载更早消息"}
+            {loadingOlder
+              ? (zh ? "正在加载更早消息…" : "Loading earlier messages…")
+              : (zh ? "加载更早消息" : "Load earlier messages")}
           </button>
         </div>
       ) : null}
@@ -343,7 +345,7 @@ export function ConversationPane({
         if (isRetryTranscriptNotice(notice.message, notice.source)) return null;
         const xdevGroups = parseXdevMountNotice(notice.message);
         if (xdevGroups !== null) {
-          return <XdevMountNotice key={notice.id} level={notice.level} groups={xdevGroups} />;
+          return <XdevMountNotice key={notice.id} level={notice.level} groups={xdevGroups} zh={zh} />;
         }
         return (
           <div key={notice.id} className={`convo-notice ${notice.level}`} role={notice.level === "error" ? "alert" : "status"}>
@@ -353,7 +355,7 @@ export function ConversationPane({
       })}
       {displayRows.length === 0 ? (
         <>
-          {welcome ?? <EmptyConversation state={state} demo={demo} />}
+          {welcome ?? <EmptyConversation state={state} demo={demo} zh={zh} />}
           {planLink === undefined || planLink.attachEvenWithoutPropose !== true ? null : (
             <PlanCreatedCard
               title={planLink.title ?? "Plan"}
@@ -382,7 +384,7 @@ export function ConversationPane({
       )}
       {displayRows.length > 0 ? supplement : null}
       {state.hydrateStatus === "resyncing" ? (
-        <div className="convo-notice info" role="status">正在同步</div>
+        <div className="convo-notice info" role="status">{zh ? "正在同步" : "Syncing"}</div>
       ) : null}
       {activity === undefined ? null : <ActivityLine {...activity} />}
     </>
@@ -420,7 +422,7 @@ export function ConversationPane({
         id="convoScroll"
         ref={scrollerRef}
         tabIndex={-1}
-        aria-label="对话内容"
+        aria-label={zh ? "对话内容" : "Conversation"}
         {...(visualStreaming ? { "data-live-stream": "1" } : {})}
         onScroll={scroll.onScroll}
       >
@@ -436,7 +438,7 @@ export function ConversationPane({
           <div className="convo-body" data-phase={switchState.phase}>{body}</div>
         </div>
         <div className="sr-only" aria-live="polite">
-          {latestAnnouncement(state, displayRows.length, switchState.phase)}
+          {latestAnnouncement(state, displayRows.length, switchState.phase, zh)}
         </div>
       </main>
       <ConversationMinimap
@@ -474,12 +476,18 @@ export function parseXdevMountNotice(message: string): XdevMountGroups | null {
   return matched ? groups : null;
 }
 
-function xdevMountTitle(groups: XdevMountGroups): string {
+function xdevMountTitle(groups: XdevMountGroups, zh: boolean): string {
   const mounted = groups.mounted?.length ?? 0;
   const unmounted = groups.unmounted?.length ?? 0;
-  if (mounted > 0 && unmounted > 0) return `xd:// 设备变更 · 挂载 ${mounted} · 卸载 ${unmounted}`;
-  if (mounted > 0) return `xd:// 设备已挂载 · ${mounted} 个工具`;
-  return `xd:// 设备已卸载 · ${unmounted} 个工具`;
+  if (mounted > 0 && unmounted > 0) {
+    return zh
+      ? `xd:// 设备变更 · 挂载 ${mounted} · 卸载 ${unmounted}`
+      : `xd:// device changes · mounted ${mounted} · unmounted ${unmounted}`;
+  }
+  if (mounted > 0) {
+    return zh ? `xd:// 设备已挂载 · ${mounted} 个工具` : `xd:// device mounted · ${mounted} ${mounted === 1 ? "tool" : "tools"}`;
+  }
+  return zh ? `xd:// 设备已卸载 · ${unmounted} 个工具` : `xd:// device unmounted · ${unmounted} ${unmounted === 1 ? "tool" : "tools"}`;
 }
 
 function XdevMountGroup({ label, names }: { label: string; names: readonly string[] }) {
@@ -493,16 +501,16 @@ function XdevMountGroup({ label, names }: { label: string; names: readonly strin
   );
 }
 
-function XdevMountNotice({ level, groups }: { level: string; groups: XdevMountGroups }) {
+function XdevMountNotice({ level, groups, zh }: { level: string; groups: XdevMountGroups; zh: boolean }) {
   const [open, setOpen] = useState(false);
-  const title = xdevMountTitle(groups);
+  const title = xdevMountTitle(groups, zh);
   return (
     <div className={`convo-notice ${level} xdev-mount${open ? " open" : ""}`}>
       <button
         type="button"
         className="xdev-mount-toggle"
         aria-expanded={open}
-        aria-label={`${title}，${open ? "收起" : "展开"}名单`}
+        aria-label={zh ? `${title}，${open ? "收起" : "展开"}名单` : `${title}, ${open ? "collapse" : "expand"} list`}
         onClick={() => setOpen((value) => !value)}
       >
         <Icon name="plug" extra="sm" />
@@ -512,8 +520,8 @@ function XdevMountNotice({ level, groups }: { level: string; groups: XdevMountGr
       <div className="xdev-mount-body">
         <div className="xdev-mount-motion">
           <div className="xdev-mount-scroll">
-            {groups.mounted === undefined ? null : <XdevMountGroup label="已挂载" names={groups.mounted} />}
-            {groups.unmounted === undefined ? null : <XdevMountGroup label="已卸载" names={groups.unmounted} />}
+            {groups.mounted === undefined ? null : <XdevMountGroup label={zh ? "已挂载" : "Mounted"} names={groups.mounted} />}
+            {groups.unmounted === undefined ? null : <XdevMountGroup label={zh ? "已卸载" : "Unmounted"} names={groups.unmounted} />}
           </div>
         </div>
       </div>
@@ -521,27 +529,27 @@ function XdevMountNotice({ level, groups }: { level: string; groups: XdevMountGr
   );
 }
 
-function StatusBanner({ state }: { state: ConversationState }) {
+function StatusBanner({ state, zh }: { state: ConversationState; zh: boolean }) {
   // 加载态不在这里出声：切换会话的空窗由骨架屏（.convo-veil）兜住，
   // 再加一条"正在加载对话"横幅等于把同一件事说两遍，且横幅会撑高文档。
   if (state.hydrateStatus === "error" && state.error) {
     return (
       <div className="convo-notice error" role="alert">
-        加载失败：{state.error.message}
+        {zh ? `加载失败：${state.error.message}` : `Failed to load: ${state.error.message}`}
       </div>
     );
   }
   return null;
 }
 
-function EmptyConversation({ state, demo }: { state: ConversationState; demo: boolean }) {
+function EmptyConversation({ state, demo, zh }: { state: ConversationState; demo: boolean; zh: boolean }) {
   if (demo) return null;
   if (state.hydrateStatus === "unavailable") {
     return (
       <div className="empty" style={{ paddingTop: 72 }}>
         <Icon name="message" extra="lg" />
-        <p>对话不可用</p>
-        <p className="muted small">{state.unavailableReason ?? "当前 Runtime 无法提供 transcript。"}</p>
+        <p>{zh ? "对话不可用" : "Conversation unavailable"}</p>
+        <p className="muted small">{state.unavailableReason ?? (zh ? "当前 Runtime 无法提供 transcript。" : "The current runtime cannot provide a transcript.")}</p>
       </div>
     );
   }
@@ -549,8 +557,8 @@ function EmptyConversation({ state, demo }: { state: ConversationState; demo: bo
     return (
       <div className="empty" style={{ paddingTop: 72 }}>
         <Icon name="alert" extra="lg" />
-        <p>无法加载对话</p>
-        <p className="muted small">{state.error?.message ?? "读取 transcript 失败。"}</p>
+        <p>{zh ? "无法加载对话" : "Unable to load conversation"}</p>
+        <p className="muted small">{state.error?.message ?? (zh ? "读取 transcript 失败。" : "Failed to load transcript.")}</p>
       </div>
     );
   }
@@ -561,18 +569,18 @@ function EmptyConversation({ state, demo }: { state: ConversationState; demo: bo
   return (
     <div className="empty" style={{ paddingTop: 72 }}>
       <Icon name="message" extra="lg" />
-      <p>开始一段对话</p>
-      <p className="muted small">向当前会话发送消息后，真实 transcript 会显示在这里。</p>
+      <p>{zh ? "开始一段对话" : "Start a conversation"}</p>
+      <p className="muted small">{zh ? "向当前会话发送消息后，真实 transcript 会显示在这里。" : "Send a message to this session to see the transcript here."}</p>
     </div>
   );
 }
 
-function latestAnnouncement(state: ConversationState, rowCount: number, phase: ConversationSwitchPhase): string {
-  if (phase === "waiting" || phase === "settling") return "正在加载对话";
+function latestAnnouncement(state: ConversationState, rowCount: number, phase: ConversationSwitchPhase, zh: boolean): string {
+  if (phase === "waiting" || phase === "settling") return zh ? "正在加载对话" : "Loading conversation";
   if (state.hydrateStatus === "unavailable") return state.unavailableReason ?? "";
   if (state.hydrateStatus === "error") return state.error?.message ?? "";
   const last = Object.values(state.liveMessages).at(-1);
-  if (last?.aborted) return "回复已中止";
+  if (last?.aborted) return zh ? "回复已中止" : "Response aborted";
   if (rowCount > 0 && state.hydrateStatus === "ready" && Object.keys(state.liveMessages).length === 0) {
     return "";
   }

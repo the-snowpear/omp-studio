@@ -57,6 +57,7 @@ import {
   type DesktopRuntimeSessionPort,
 } from "./host-composition.js";
 import { createHostFileLog, defaultHostLogsDirectory, type HostLog } from "./host-log.js";
+import { desktopText } from "./desktop-language-shared.js";
 import { startHostPerformance } from "./desktop-performance.js";
 import { createDesktopGitService } from "./git-service.js";
 import { createDesktopGithubService } from "./github-service.js";
@@ -199,7 +200,7 @@ function createProductionPickDirectory(): () => Promise<string | undefined> {
   return async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openDirectory", "createDirectory"],
-      title: "打开本地文件夹",
+      title: desktopText("打开本地文件夹", "Open Local Folder"),
     });
     if (result.canceled || result.filePaths[0] === undefined) {
       return undefined;

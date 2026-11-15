@@ -4,9 +4,12 @@ import { EventBus, PDFViewer, PDFLinkService, PDFFindController } from "pdfjs-di
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "pdfjs-dist/web/pdf_viewer.css";
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 
 type Bookmark = { title: string; dest: string | unknown[] | null; items: Bookmark[] };
 export default function PdfPane({ url, initialPage = 1, onPage, onPages }: { url: string; initialPage?: number | undefined; onPage: (page: number) => void; onPages?: ((pages: number) => void) | undefined }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const container = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null);
   const api = useRef<{ viewer: PDFViewer; bus: EventBus; links: PDFLinkService } | null>(null);
   const callback = useRef(onPage); callback.current = onPage;
@@ -44,21 +47,21 @@ export default function PdfPane({ url, initialPage = 1, onPage, onPages }: { url
   const entries = (items: Bookmark[]) => <ol>{items.map((item, index) => <li key={index}><button onClick={() => { if (item.dest) void api.current?.links.goToDestination(item.dest); }}>{item.title}</button>{item.items.length ? entries(item.items) : null}</li>)}</ol>;
   return <div className="file-pdf">
     <div className="file-subbar">
-      <button type="button" className={`icon-btn${outline ? " is-active" : ""}`} aria-pressed={outline} aria-label="目录" data-tip={bookmarks.length ? "目录" : "此文档没有目录"} disabled={!bookmarks.length} onClick={() => setOutline(value => !value)}><Icon name="tool-list" extra="sm" /></button>
+      <button type="button" className={`icon-btn${outline ? " is-active" : ""}`} aria-pressed={outline} aria-label={zh ? "目录" : "Outline"} data-tip={bookmarks.length ? (zh ? "目录" : "Outline") : (zh ? "此文档没有目录" : "This document has no outline")} disabled={!bookmarks.length} onClick={() => setOutline(value => !value)}><Icon name="tool-list" extra="sm" /></button>
       <span className="file-subbar-sep" />
       <span className="file-pager">
-        <button type="button" aria-label="上一页" data-tip="上一页" disabled={page <= 1} onClick={() => navigate(page - 1)}><Icon name="chevron-u" extra="sm" /></button>
-        <input aria-label="PDF 页码" inputMode="numeric" value={pageInput ?? String(page)} onFocus={event => { setPageInput(String(page)); event.currentTarget.select(); }} onChange={event => setPageInput(event.target.value.replace(/\D/g, ""))} onBlur={() => setPageInput(null)} onKeyDown={event => { if (event.key === "Enter") { navigate(Number(pageInput) || page); event.currentTarget.blur(); } }} />
+        <button type="button" aria-label={zh ? "上一页" : "Previous page"} data-tip={zh ? "上一页" : "Previous page"} disabled={page <= 1} onClick={() => navigate(page - 1)}><Icon name="chevron-u" extra="sm" /></button>
+        <input aria-label={zh ? "PDF 页码" : "PDF page number"} inputMode="numeric" value={pageInput ?? String(page)} onFocus={event => { setPageInput(String(page)); event.currentTarget.select(); }} onChange={event => setPageInput(event.target.value.replace(/\D/g, ""))} onBlur={() => setPageInput(null)} onKeyDown={event => { if (event.key === "Enter") { navigate(Number(pageInput) || page); event.currentTarget.blur(); } }} />
         <span>/ {pages || "…"}</span>
-        <button type="button" aria-label="下一页" data-tip="下一页" disabled={page >= pages} onClick={() => navigate(page + 1)}><Icon name="chevron-d" extra="sm" /></button>
+        <button type="button" aria-label={zh ? "下一页" : "Next page"} data-tip={zh ? "下一页" : "Next page"} disabled={page >= pages} onClick={() => navigate(page + 1)}><Icon name="chevron-d" extra="sm" /></button>
       </span>
-      <span className="file-zoom"><button type="button" aria-label="缩小" onClick={() => api.current?.viewer.decreaseScale()}>−</button><span>{Math.round(scale * 100)}%</span><button type="button" aria-label="放大" onClick={() => api.current?.viewer.increaseScale()}>+</button></span>
-      <button type="button" className="icon-btn" aria-label="适合宽度" data-tip="适合宽度" onClick={() => { if (api.current) api.current.viewer.currentScaleValue = "page-width"; }}><Icon name="expand" extra="sm" /></button>
+      <span className="file-zoom"><button type="button" aria-label={zh ? "缩小" : "Zoom out"} onClick={() => api.current?.viewer.decreaseScale()}>−</button><span>{Math.round(scale * 100)}%</span><button type="button" aria-label={zh ? "放大" : "Zoom in"} onClick={() => api.current?.viewer.increaseScale()}>+</button></span>
+      <button type="button" className="icon-btn" aria-label={zh ? "适合宽度" : "Fit width"} data-tip={zh ? "适合宽度" : "Fit width"} onClick={() => { if (api.current) api.current.viewer.currentScaleValue = "page-width"; }}><Icon name="expand" extra="sm" /></button>
       <span className="file-subbar-spacer" />
-      <label className="file-find"><Icon name="search" extra="sm" /><input aria-label="搜索 PDF" placeholder="在文档中查找" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === "Enter") search(event.shiftKey); if (event.key === "Escape") setQuery(""); }} />{matches && query ? <span className="file-find-count">{matches}</span> : null}<button type="button" aria-label="上一个" data-tip="上一个（Shift Enter）" disabled={!query} onClick={() => search(true)}><Icon name="chevron-u" extra="sm" /></button><button type="button" aria-label="下一个" data-tip="下一个（Enter）" disabled={!query} onClick={() => search()}><Icon name="chevron-d" extra="sm" /></button></label>
+      <label className="file-find"><Icon name="search" extra="sm" /><input aria-label={zh ? "搜索 PDF" : "Search PDF"} placeholder={zh ? "在文档中查找" : "Find in document"} value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === "Enter") search(event.shiftKey); if (event.key === "Escape") setQuery(""); }} />{matches && query ? <span className="file-find-count">{matches}</span> : null}<button type="button" aria-label={zh ? "上一个" : "Previous match"} data-tip={zh ? "上一个（Shift Enter）" : "Previous match (Shift Enter)"} disabled={!query} onClick={() => search(true)}><Icon name="chevron-u" extra="sm" /></button><button type="button" aria-label={zh ? "下一个" : "Next match"} data-tip={zh ? "下一个（Enter）" : "Next match (Enter)"} disabled={!query} onClick={() => search()}><Icon name="chevron-d" extra="sm" /></button></label>
     </div>
     {error ? <div className="file-banner is-error" role="alert"><Icon name="alert-c" extra="sm" /><span>{error}</span></div> : null}
-    {needsPassword ? <form className="file-empty file-password" onSubmit={event => { event.preventDefault(); passwordCallback.current?.(password); setPassword(""); }}><span className="file-badge is-large tone-red" aria-hidden="true"><Icon name="lock" /></span><h3>此 PDF 受密码保护</h3><span className="file-password-row"><input type="password" aria-label="PDF 密码" placeholder="输入密码" autoFocus value={password} onChange={event => setPassword(event.target.value)} /><button className="btn small primary" type="submit">打开</button></span></form> : null}
-    <div className="file-pdf-main">{outline ? <nav className="file-pdf-outline" aria-label="文档目录">{entries(bookmarks)}</nav> : null}<div className="file-pdf-area"><div ref={container} className="file-pdf-container"><div ref={body} className="pdfViewer" /></div></div></div>
+    {needsPassword ? <form className="file-empty file-password" onSubmit={event => { event.preventDefault(); passwordCallback.current?.(password); setPassword(""); }}><span className="file-badge is-large tone-red" aria-hidden="true"><Icon name="lock" /></span><h3>{zh ? "此 PDF 受密码保护" : "This PDF is password protected"}</h3><span className="file-password-row"><input type="password" aria-label={zh ? "PDF 密码" : "PDF password"} placeholder={zh ? "输入密码" : "Enter password"} autoFocus value={password} onChange={event => setPassword(event.target.value)} /><button className="btn small primary" type="submit">{zh ? "打开" : "Open"}</button></span></form> : null}
+    <div className="file-pdf-main">{outline ? <nav className="file-pdf-outline" aria-label={zh ? "文档目录" : "Document outline"}>{entries(bookmarks)}</nav> : null}<div className="file-pdf-area"><div ref={container} className="file-pdf-container"><div ref={body} className="pdfViewer" /></div></div></div>
   </div>;
 }

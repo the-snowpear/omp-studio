@@ -2,7 +2,26 @@ import { nextGithubReference, serializeGithubReference } from "./githubReference
 import { nextBrowserReference, serializeBrowserReference } from "./browserReference";
 import { gitCommitReferenceLabel, nextGitCommitReference, serializeGitCommitReference } from "./gitCommitReference";
 import type { ComposerChip, ComposerDoc, ComposerSnapshot, PromptImage } from "./types";
+import { isZh } from "../i18n";
 import { emptyDoc, emptySnapshot, fileLabel, newChipId } from "./types";
+
+export function defaultImageChipLabel(index?: number, zh = isZh()): string {
+  if (index === undefined) return zh ? "图" : "Img";
+  return zh ? `图${index}` : `Img${index}`;
+}
+
+export function localizeImageChipLabel(label: string, zh: boolean): string {
+  const match = /^(?:图|Img)(\d*)$/u.exec(label);
+  return match ? defaultImageChipLabel(match[1] ? Number(match[1]) : undefined, zh) : label;
+}
+
+function localizeImageChips(doc: ComposerDoc, zh: boolean): ComposerDoc {
+  return { nodes: doc.nodes.map(node => {
+    if (node.type !== "chip" || node.chip.kind !== "image") return node;
+    const label = localizeImageChipLabel(node.chip.label, zh);
+    return label === node.chip.label ? node : { ...node, chip: { ...node.chip, label } };
+  }) };
+}
 
 const NEEDS_QUOTES = /[\s@'"\\]/u;
 
@@ -85,7 +104,7 @@ export function snapshotFromTextAndImages(
   for (const image of images) {
     nodes.push({
       type: "chip",
-      chip: { id: newChipId(), kind: "image", label: "图", image },
+      chip: { id: newChipId(), kind: "image", label: defaultImageChipLabel(), image },
     });
   }
   return snapshotFromDoc({ nodes });
@@ -103,7 +122,7 @@ export function snapshotIsEmpty(snapshot: ComposerSnapshot): boolean {
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/iu;
 const MENTION_BOUNDARY = /[\s([{<"'`]/u;
-const IMAGE_TOKEN_RE = /\[图(\d+)\]/gu;
+const IMAGE_TOKEN_RE = /\[(?:图|Img)(\d+)\]/gu;
 const SKILL_TOKEN_RE = /\/skill:([^\s/]+(?:\/[^\s/]+)?)(?=\s|$)/gu;
 const MENTION_TOKEN_RE = /@(?:"([^"]+)"|'([^']+)'|([^\s@]+))/gu;
 
@@ -152,6 +171,7 @@ function mentionChipFromPath(raw: string): ComposerChip {
 function nextSerializedToken(
   text: string,
   from: number,
+  zh: boolean,
 ): { readonly start: number; readonly end: number; readonly chip: ComposerChip } | null {
   let best: { start: number; end: number; chip: ComposerChip } | null = null;
   const consider = (start: number, end: number, chip: ComposerChip): void => {
@@ -171,7 +191,7 @@ function nextSerializedToken(
     consider(image.index, image.index + image[0].length, {
       id: newChipId(),
       kind: "image",
-      label: `图${image[1]}`,
+      label: defaultImageChipLabel(Number(image[1]), zh),
     });
   }
   const skill = firstMatch(SKILL_TOKEN_RE.source, "gu", text, from, (match) => isSkillBoundary(text, match.index));
@@ -196,7 +216,7 @@ function attachClipboardImages(doc: ComposerDoc, images?: ReadonlyArray<PromptIm
   return {
     nodes: doc.nodes.map((node) => {
       if (node.type !== "chip" || node.chip.kind !== "image" || node.chip.image !== undefined) return node;
-      const numbered = /^图(\d+)$/u.exec(node.chip.label);
+      const numbered = /^(?:图|Img)(\d+)$/u.exec(node.chip.label);
       if (numbered?.[1] === undefined) return node;
       const image = images[Number(numbered[1]) - 1];
       if (image === undefined) return node;
@@ -219,11 +239,12 @@ export function docHasDisplayChips(doc: ComposerDoc): boolean {
 export function displayDocFromSerializedText(
   text: string,
   images?: ReadonlyArray<PromptImage>,
+  zh = isZh(),
 ): ComposerDoc {
   const nodes: ComposerDoc["nodes"][number][] = [];
   let cursor = 0;
   while (cursor < text.length) {
-    const token = nextSerializedToken(text, cursor);
+    const token = nextSerializedToken(text, cursor, zh);
     if (token === null) {
       nodes.push({ type: "text", value: text.slice(cursor) });
       break;
@@ -243,18 +264,19 @@ export function displayDocForUserMessage(
   text: string,
   doc?: ComposerDoc,
   images?: ReadonlyArray<PromptImage>,
+  zh = isZh(),
 ): ComposerDoc {
   if (doc !== undefined) {
     const stripped = attachClipboardImages(stripModeChips(doc), images);
-    if (docHasDisplayChips(stripped)) return stripped;
+    if (docHasDisplayChips(stripped)) return localizeImageChips(stripped, zh);
   }
-  return displayDocFromSerializedText(text, images);
+  return displayDocFromSerializedText(text, images, zh);
 }
 
 /** Clipboard-style copy token for one capsule. */
 export function chipCopyToken(chip: ComposerChip): string {
   if (chip.kind === "image" && chip.path === undefined) {
-    const numbered = /^图(\d+)$/u.exec(chip.label);
+    const numbered = /^(?:图|Img)(\d+)$/u.exec(chip.label);
     return `[图${numbered?.[1] ?? "1"}]`;
   }
   return serializeChip(chip);

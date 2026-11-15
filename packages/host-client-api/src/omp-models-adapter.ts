@@ -1,5 +1,6 @@
 import { createModelCatalogService, createModelOriginStore } from "./model-adaptation.js";
 import { BUILTIN_MODEL_CATALOG } from "./model-catalog.generated.js";
+import { hostText } from "./locale.js";
 import { modelParameterValues, parseModelThinkingConfig, providerModelYamlNode, providerOverrideYamlNode } from "@omp-studio/client-contract";
 import type { ModelParameterValues, ModelParameterSources } from "@omp-studio/client-contract";
 import { migrateModelRoleConfig } from "./model-role-migration.js";
@@ -58,7 +59,32 @@ import { toClientError } from "./services.js";
 
 const execFileAsync = promisify(execFile);
 
-const BUILTIN_ROLES = BUILTIN_MODEL_ROLES.map(role => ({ ...role, alias: `@${role.id}` }));
+const ROLE_DESC_EN: Readonly<Record<string, string>> = {
+  default: "Default primary model",
+  smol: "Fast, low-cost tasks",
+  slow: "Complex reasoning tasks",
+  vision: "Vision and image tasks",
+  plan: "Planning and architecture tasks",
+  designer: "Design-related tasks",
+  commit: "Commit-related tasks",
+  tiny: "Title, memory, and ultra-light background tasks",
+  memory: "Long-term memory extraction and curation",
+  task: "General subtasks",
+  advisor: "Second model review",
+  image: "Image generation and editing",
+  web: "Web fetching and search summarization",
+  speech: "Text-to-speech synthesis",
+  dictation: "Speech-to-text dictation",
+  judge: "Auto-thinking and quality judgment",
+  widget: "Live background-job widgets (falls back to Fast)",
+};
+
+const builtinRoles = () =>
+  BUILTIN_MODEL_ROLES.map((role) => ({
+    ...role,
+    desc: hostText(role.desc, ROLE_DESC_EN[role.id] ?? role.desc),
+    alias: `@${role.id}`,
+  }));
 
 /**
  * Web-search providers in the runtime's built-in chain order
@@ -191,58 +217,58 @@ function hasWebSearchCredential(
   return authIds.some((id) => authenticated.has(id));
 }
 
-const PRESET_GROUPS: ReadonlyArray<ModelPresetGroup> = [
+const presetGroups = (): ReadonlyArray<ModelPresetGroup> => [
   {
-    group: "官方 / 主流",
+    group: hostText("官方 / 主流", "Official / Popular"),
     items: [
-      { id: "mistral", name: "Mistral", desc: "Mistral Vibe 浏览器登录或 API Key", api: "openai-completions", auth: ["oauth", "api-key"], oauth: true, endpoint: "https://api.mistral.ai/v1" },
-      { id: "devin", name: "Devin", desc: "导入 Devin CLI 凭据或使用 Windsurf 企业账号", api: "devin", auth: ["oauth", "api-key"], oauth: true },
-      { id: "muse-code", name: "Muse Code", desc: "Muse Spark 订阅、账号模型发现与额度", api: "openai-responses", auth: ["oauth"], oauth: true },
-      { id: "anthropic", name: "Anthropic", desc: "Claude 系列模型官方 API", api: "anthropic-messages", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://api.anthropic.com/v1" },
-      { id: "openai", name: "OpenAI", desc: "GPT 系列模型官方 API", api: "openai-responses", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://api.openai.com/v1" },
-      { id: "openai-codex", name: "OpenAI Codex", desc: "Codex 订阅额度（ChatGPT 账号）", api: "openai-codex-responses", auth: ["oauth"], oauth: true, endpoint: "https://api.openai.com/v1" },
-      { id: "google-gemini", name: "Google Gemini", desc: "Gemini 系列模型官方 API", api: "google-generative-ai", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://generativelanguage.googleapis.com/v1beta" },
-      { id: "gemini-cli", name: "Google Gemini CLI", desc: "Gemini Code Assist 订阅", api: "google-gemini-cli", auth: ["oauth"], oauth: true },
-      { id: "xai", name: "xAI", desc: "Grok 系列模型", api: "openai-responses", auth: ["api-key"], endpoint: "https://api.x.ai/v1" },
-      { id: "groq", name: "Groq", desc: "高速推理（Llama / Mixtral）", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.groq.com/openai/v1" },
-      { id: "deepseek", name: "DeepSeek", desc: "DeepSeek V / R 系列", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.deepseek.com/v1" },
-      { id: "moonshot", name: "Moonshot / Kimi", desc: "Kimi K 系列模型", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.moonshot.cn/v1" },
+      { id: "mistral", name: "Mistral", desc: hostText("Mistral Vibe 浏览器登录或 API Key", "Mistral Vibe browser login or API key"), api: "openai-completions", auth: ["oauth", "api-key"], oauth: true, endpoint: "https://api.mistral.ai/v1" },
+      { id: "devin", name: "Devin", desc: hostText("导入 Devin CLI 凭据或使用 Windsurf 企业账号", "Import Devin CLI credentials or use Windsurf enterprise account"), api: "devin", auth: ["oauth", "api-key"], oauth: true },
+      { id: "muse-code", name: "Muse Code", desc: hostText("Muse Spark 订阅、账号模型发现与额度", "Muse Spark subscription, account model discovery, and quota"), api: "openai-responses", auth: ["oauth"], oauth: true },
+      { id: "anthropic", name: "Anthropic", desc: hostText("Claude 系列模型官方 API", "Official Claude model API"), api: "anthropic-messages", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://api.anthropic.com/v1" },
+      { id: "openai", name: "OpenAI", desc: hostText("GPT 系列模型官方 API", "Official GPT model API"), api: "openai-responses", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://api.openai.com/v1" },
+      { id: "openai-codex", name: "OpenAI Codex", desc: hostText("Codex 订阅额度（ChatGPT 账号）", "Codex subscription quota (ChatGPT account)"), api: "openai-codex-responses", auth: ["oauth"], oauth: true, endpoint: "https://api.openai.com/v1" },
+      { id: "google-gemini", name: "Google Gemini", desc: hostText("Gemini 系列模型官方 API", "Official Gemini model API"), api: "google-generative-ai", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://generativelanguage.googleapis.com/v1beta" },
+      { id: "gemini-cli", name: "Google Gemini CLI", desc: hostText("Gemini Code Assist 订阅", "Gemini Code Assist subscription"), api: "google-gemini-cli", auth: ["oauth"], oauth: true },
+      { id: "xai", name: "xAI", desc: hostText("Grok 系列模型", "Grok model family"), api: "openai-responses", auth: ["api-key"], endpoint: "https://api.x.ai/v1" },
+      { id: "groq", name: "Groq", desc: hostText("高速推理（Llama / Mixtral）", "High-speed inference (Llama / Mixtral)"), api: "openai-completions", auth: ["api-key"], endpoint: "https://api.groq.com/openai/v1" },
+      { id: "deepseek", name: "DeepSeek", desc: hostText("DeepSeek V / R 系列", "DeepSeek V / R series"), api: "openai-completions", auth: ["api-key"], endpoint: "https://api.deepseek.com/v1" },
+      { id: "moonshot", name: "Moonshot / Kimi", desc: hostText("Kimi K 系列模型", "Kimi K series models"), api: "openai-completions", auth: ["api-key"], endpoint: "https://api.moonshot.cn/v1" },
     ],
   },
   {
-    group: "Gateway / 聚合",
+    group: hostText("Gateway / 聚合", "Gateway / Aggregators"),
     items: [
-      { id: "modular", name: "Modular Cloud", desc: "Modular Cloud 模型与原生推理参数", api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.modular.com/v1" },
-      { id: "commandcode", name: "Command Code", desc: "原生 OpenAI / Anthropic 路由、模型发现与价格", api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
-      { id: "openrouter", name: "OpenRouter", desc: "一个 Key 访问多家模型", api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
-      { id: "github-copilot", name: "GitHub Copilot", desc: "Copilot 订阅额度", api: "openai-responses", auth: ["oauth"], oauth: true },
-      { id: "litellm", name: "LiteLLM", desc: "自托管统一模型代理", api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },
+      { id: "modular", name: "Modular Cloud", desc: hostText("Modular Cloud 模型与原生推理参数", "Modular Cloud models and native reasoning parameters"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.modular.com/v1" },
+      { id: "commandcode", name: "Command Code", desc: hostText("原生 OpenAI / Anthropic 路由、模型发现与价格", "Native OpenAI / Anthropic routing, discovery, and pricing"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
+      { id: "openrouter", name: "OpenRouter", desc: hostText("一个 Key 访问多家模型", "Access multiple providers with one key"), api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
+      { id: "github-copilot", name: "GitHub Copilot", desc: hostText("Copilot 订阅额度", "Copilot subscription quota"), api: "openai-responses", auth: ["oauth"], oauth: true },
+      { id: "litellm", name: "LiteLLM", desc: hostText("自托管统一模型代理", "Self-hosted unified model proxy"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },
     ],
   },
   {
-    group: "本地",
+    group: hostText("本地", "Local"),
     items: [
-      { id: "ollama", name: "Ollama", desc: "本地模型服务，自动发现已拉取模型", api: "openai-completions", auth: ["none"], local: true, popular: true, endpoint: "http://localhost:11434/v1", discovery: "ollama" },
-      { id: "lm-studio", name: "LM Studio", desc: "本地 OpenAI 兼容服务", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:1234/v1", discovery: "lm-studio" },
-      { id: "llama.cpp", name: "llama.cpp", desc: "llama-server OpenAI 兼容接口", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:8080/v1", discovery: "llama.cpp" },
+      { id: "ollama", name: "Ollama", desc: hostText("本地模型服务，自动发现已拉取模型", "Local model server; auto-discovers pulled models"), api: "openai-completions", auth: ["none"], local: true, popular: true, endpoint: "http://localhost:11434/v1", discovery: "ollama" },
+      { id: "lm-studio", name: "LM Studio", desc: hostText("本地 OpenAI 兼容服务", "Local OpenAI-compatible server"), api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:1234/v1", discovery: "lm-studio" },
+      { id: "llama.cpp", name: "llama.cpp", desc: hostText("llama-server OpenAI 兼容接口", "llama-server OpenAI-compatible endpoint"), api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:8080/v1", discovery: "llama.cpp" },
     ],
   },
   {
-    group: "更多 Provider",
+    group: hostText("更多 Provider", "More Providers"),
     items: [
-      { id: "qwen", name: "Qwen", desc: "通义千问官方 API", api: "openai-completions", auth: ["api-key"], endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
-      { id: "zhipu", name: "Zhipu / 智谱", desc: "GLM 系列模型", api: "openai-completions", auth: ["api-key"], endpoint: "https://open.bigmodel.cn/api/paas/v4" },
-      { id: "fireworks", name: "Fireworks", desc: "Fireworks AI 托管推理", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.fireworks.ai/inference/v1" },
-      { id: "siliconflow", name: "SiliconFlow", desc: "硅基流动模型云", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.siliconflow.cn/v1" },
+      { id: "qwen", name: "Qwen", desc: hostText("通义千问官方 API", "Official Qwen (Tongyi Qianwen) API"), api: "openai-completions", auth: ["api-key"], endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
+      { id: "zhipu", name: hostText("Zhipu / 智谱", "Zhipu"), desc: hostText("GLM 系列模型", "GLM series models"), api: "openai-completions", auth: ["api-key"], endpoint: "https://open.bigmodel.cn/api/paas/v4" },
+      { id: "fireworks", name: "Fireworks", desc: hostText("Fireworks AI 托管推理", "Fireworks AI hosted inference"), api: "openai-completions", auth: ["api-key"], endpoint: "https://api.fireworks.ai/inference/v1" },
+      { id: "siliconflow", name: "SiliconFlow", desc: hostText("硅基流动模型云", "SiliconFlow model cloud"), api: "openai-completions", auth: ["api-key"], endpoint: "https://api.siliconflow.cn/v1" },
     ],
   },
 ];
 
-const WRITE_OK: ConfigWriteResult = {
+const writeOk = (): ConfigWriteResult => ({
   applied: true,
   runtimeEffect: "new-session",
-  message: "已保存",
-};
+  message: hostText("已保存", "Saved"),
+});
 
 export interface OmpModelsAdapterOptions {
   readonly locateOmp?: () => Promise<string | undefined>;
@@ -286,14 +312,14 @@ export function authProbeUrl(base: string, api: string): string | undefined {
 
 /** Classify a probe network error into a user-facing Chinese detail. */
 export function networkErrorDetail(error: unknown): string {
-  if (error instanceof Error && error.name === "AbortError") return "连接失败：请求超时";
+  if (error instanceof Error && error.name === "AbortError") return hostText("连接失败：请求超时", "Connection failed: request timed out");
   const cause = (error as { cause?: NodeJS.ErrnoException }).cause;
   const code = cause?.code;
-  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "连接失败：域名无法解析";
-  if (code === "ECONNREFUSED") return "连接失败：连接被拒绝";
-  if (code === "ECONNRESET" || code === "EPIPE") return "连接失败：连接被重置";
-  if (typeof code === "string" && code.includes("CERT")) return "连接失败：TLS 证书错误";
-  return "连接失败：网络不可达";
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return hostText("连接失败：域名无法解析", "Connection failed: failed to resolve hostname");
+  if (code === "ECONNREFUSED") return hostText("连接失败：连接被拒绝", "Connection failed: connection refused");
+  if (code === "ECONNRESET" || code === "EPIPE") return hostText("连接失败：连接被重置", "Connection failed: connection reset");
+  if (typeof code === "string" && code.includes("CERT")) return hostText("连接失败：TLS 证书错误", "Connection failed: TLS certificate error");
+  return hostText("连接失败：网络不可达", "Connection failed: network unreachable");
 }
 
 /** Only timeout / transient network jitter deserves a retry. */
@@ -621,8 +647,8 @@ function emptyWebSearch(): WebSearchConfigReadModel {
 function emptyModel(reason: string, ompAvailable: boolean): ModelConfigReadModel {
   return {
     providers: [],
-    presets: PRESET_GROUPS,
-    roles: BUILTIN_ROLES.map((role) => ({
+    presets: presetGroups(),
+    roles: builtinRoles().map((role) => ({
       ...role,
       builtin: true,
       primary: "",
@@ -1103,20 +1129,20 @@ function providerFromYaml(
   const models = [...catalogModels, ...customModels];
   const hasAvailable = available.some((model) => model.selector.startsWith(`${id}/`));
   let status: ModelProviderStatus = "available";
-  let statusDetail = "已从 models.yml 读取";
+  let statusDetail = hostText("已从 models.yml 读取", "Read from models.yml");
   if (disabled.has(id)) {
     status = "disabled";
-    statusDetail = "已在 disabledProviders 中禁用";
+    statusDetail = hostText("已在 disabledProviders 中禁用", "Disabled in disabledProviders");
   } else if (auth.type === "oauth" && !hasOAuth && !hasAvailable) {
     status = "not-authenticated";
-    statusDetail = "尚未登录";
+    statusDetail = hostText("尚未登录", "Not logged in");
   } else if (auth.type !== "none" && auth.type !== "oauth" && !auth.hasSecret && !hasAvailable) {
     status = "not-authenticated";
-    statusDetail = "尚未配置凭据";
+    statusDetail = hostText("尚未配置凭据", "Credentials not configured");
   } else if (hasAvailable) {
-    statusDetail = "OMP 已解析到可用模型";
+    statusDetail = hostText("OMP 已解析到可用模型", "Available models resolved by OMP");
   }
-  const preset = PRESET_GROUPS.flatMap((group) => group.items).find((item) => item.id === id);
+  const preset = presetGroups().flatMap((group) => group.items).find((item) => item.id === id);
   const yamlName = stringOf(raw.name);
   const yamlWebsite = stringOf(raw.website);
   const yamlNote = typeof raw.note === "string" ? raw.note : undefined;
@@ -1179,7 +1205,7 @@ function providersFromAvailable(
     byProvider.set(model.provider, list);
   }
   return [...byProvider.entries()].map(([id, models]) => {
-    const preset = PRESET_GROUPS.flatMap((group) => group.items).find((item) => item.id === id);
+    const preset = presetGroups().flatMap((group) => group.items).find((item) => item.id === id);
     const authType = preset?.auth[0] ?? (authenticated.has(id) ? "oauth" : "api-key");
     const oauthOk = authType === "oauth" && authenticated.has(id);
     return {
@@ -1187,7 +1213,7 @@ function providersFromAvailable(
       name: preset?.name ?? id,
       source: (preset ? "builtin" : "runtime") as ModelProviderRecord["source"],
       status: disabled.has(id) ? "disabled" : "available",
-      statusDetail: disabled.has(id) ? "已禁用" : "OMP 已解析到可用模型",
+      statusDetail: disabled.has(id) ? hostText("已禁用", "Disabled") : hostText("OMP 已解析到可用模型", "Available models resolved by OMP"),
       api: mapApi(preset?.api),
       ...(preset?.endpoint === undefined ? {} : { endpointUrl: preset.endpoint }),
       local: Boolean(preset?.local),
@@ -2063,14 +2089,14 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
 
   async function logoutAuth(agentDir: string, providerId: string): Promise<number> {
     const db = await openAuthDb(agentDir, false);
-    if (!db) throw { code: "UNAVAILABLE", message: "未找到本机 auth 存储（agent.db）。请在终端运行 /logout。" };
+    if (!db) throw { code: "UNAVAILABLE", message: hostText("未找到本机 auth 存储（agent.db）。请在终端运行 /logout。", "Local auth store (agent.db) not found. Run /logout in a terminal.") };
     try {
       const result = db
         .prepare("UPDATE auth_credentials SET disabled_cause = ?, updated_at = strftime('%s','now') WHERE provider = ? AND disabled_cause IS NULL")
         .run("logged out by user", providerId) as { changes?: number };
       return typeof result.changes === "number" ? result.changes : 0;
     } catch {
-      throw { code: "UNAVAILABLE", message: "无法更新 auth 存储。请在终端运行 /logout。" };
+      throw { code: "UNAVAILABLE", message: hostText("无法更新 auth 存储。请在终端运行 /logout。", "Unable to update the auth store. Run /logout in a terminal.") };
     } finally {
       try {
         db.close();
@@ -2084,13 +2110,13 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     const storage = ((await readScalar(paths.configPath, "modelRoleStorage")) === "project" ? "project" : "global") as ModelRoleStorage;
     if (storage !== "project") return { path: paths.configPath, storage };
     const cwd = cwdOf();
-    if (!cwd) throw { code: "UNAVAILABLE", message: "未打开工作区，无法写入项目级角色。" };
+    if (!cwd) throw { code: "UNAVAILABLE", message: hostText("未打开工作区，无法写入项目级角色。", "No workspace is open; cannot write project-scoped roles.") };
     return { path: join(getProjectConfigDir(cwd), "config.yml"), storage };
   }
 
   async function knownRoleIds(configPath: string): Promise<Set<string>> {
     const tags = await readModelTags(configPath);
-    return new Set([...BUILTIN_ROLES.map((role) => role.id), ...Object.keys(tags)]);
+    return new Set([...builtinRoles().map((role) => role.id), ...Object.keys(tags)]);
   }
 
   async function saveProviderOrigins(input: ModelProviderUpsertInput, written: Record<string, YamlValue>): Promise<boolean> {
@@ -2116,14 +2142,14 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     async get(): Promise<ModelConfigReadModel> {
       const paths = await resolvePaths();
       if (!paths) {
-        return emptyModel(`未找到配置目录 ${defaultAgentDir()}。`, false);
+        return emptyModel(hostText(`未找到配置目录 ${defaultAgentDir()}。`, `Config directory not found: ${defaultAgentDir()}.`), false);
       }
       let file;
       try {
         file = await readModelsFile(paths.modelsPath);
       } catch (error) {
-        const reason = error instanceof Error ? error.message : "models.yml 无法解析";
-        const fallback = emptyModel(`models.yml 校验失败：${reason}`, false);
+        const reason = error instanceof Error ? error.message : hostText("models.yml 无法解析", "Failed to parse models.yml");
+        const fallback = emptyModel(hostText(`models.yml 校验失败：${reason}`, `models.yml validation failed: ${reason}`), false);
         return { ...fallback, generatedModelsYml: "# models.yml could not be parsed\n" };
       }
       let configRoot: ParsedConfig = {};
@@ -2195,14 +2221,14 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       const mergedAvailable = [...availableBySelector.values()];
       const availableSet = new Set(mergedAvailable.map((model) => model.selector));
       const roleDefs = [
-        ...BUILTIN_ROLES.map((role) => ({ ...role, builtin: true })),
-        ...Object.entries({ ...Object.fromEntries(Object.keys(modelRoles).map(id => [id, { name: id, desc: "自定义角色" }])), ...tags })
-          .filter(([id]) => !BUILTIN_ROLES.some((role) => role.id === id))
+        ...builtinRoles().map((role) => ({ ...role, builtin: true })),
+        ...Object.entries({ ...Object.fromEntries(Object.keys(modelRoles).map(id => [id, { name: id, desc: hostText("自定义角色", "Custom role") }])), ...tags })
+          .filter(([id]) => !builtinRoles().some((role) => role.id === id))
           .map(([id, tag]) => ({
             id,
             alias: `@${id}`,
             name: tag.name,
-            desc: tag.desc ?? "自定义角色",
+            desc: tag.desc ?? hostText("自定义角色", "Custom role"),
             builtin: false,
           })),
       ];
@@ -2210,7 +2236,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         const raw = modelRoles[role.id] ?? "";
         const parsed = raw ? parseThinking(raw) : { primary: "" };
         const issue = parsed.primary && !availableSet.has(parsed.primary) && parsed.primary.length > 0
-          ? { kind: "model-missing" as const, detail: `${parsed.primary} 当前不在可用模型列表中` }
+          ? { kind: "model-missing" as const, detail: hostText(`${parsed.primary} 当前不在可用模型列表中`, `${parsed.primary} is not currently in the available models list`) }
           : undefined;
         return {
           ...role,
@@ -2240,13 +2266,13 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       const webSearch: WebSearchConfigReadModel = { ...globalWebSearch, routing: { ...globalWebSearch.routing!, primary: modelRoles.web ?? "", fallbacks: fallback.chains.web ?? null } };
       return {
         providers,
-        presets: PRESET_GROUPS,
+        presets: presetGroups(),
         catalog: await catalog.status(),
         roles,
         cycleOrder: cycleOrder.length > 0 ? cycleOrder : ["smol", "default", "slow"],
         availableModels: mergedAvailable,
         loginProviders: (() => {
-          const fromPresets = PRESET_GROUPS.flatMap((group) => group.items)
+          const fromPresets = presetGroups().flatMap((group) => group.items)
             .filter((item) => item.oauth)
             .map((item) => ({
               id: item.id,
@@ -2296,15 +2322,15 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         await applyProviderEnabled(paths.configPath, input.id, input.enabled);
       }
       const sourcesSaved = await saveProviderOrigins(input, asRecord(providers[input.id])!);
-      if (!sourcesSaved) return { ...WRITE_OK, contentHash, message: "配置已保存，但来源记录未保存；重新打开时将显示为手工配置" };
-      return { ...WRITE_OK, contentHash };
+      if (!sourcesSaved) return { ...writeOk(), contentHash, message: hostText("配置已保存，但来源记录未保存；重新打开时将显示为手工配置", "Configuration saved, but origin metadata was not saved; it will appear as manual on reopen") };
+      return { ...writeOk(), contentHash };
     },
 
     async setProviderEnabled(input): Promise<ConfigWriteResult> {
       const paths = await resolvePaths();
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
       await applyProviderEnabled(paths.configPath, input.id, input.enabled);
-      return { ...WRITE_OK, message: input.enabled ? `已启用 ${input.id}` : `已禁用 ${input.id}` };
+      return { ...writeOk(), message: input.enabled ? hostText(`已启用 ${input.id}`, `Enabled ${input.id}`) : hostText(`已禁用 ${input.id}`, `Disabled ${input.id}`) };
     },
 
     async writeModelsYml(input): Promise<ConfigWriteResult> {
@@ -2315,12 +2341,12 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       try {
         root = parseModelsYml(input.text);
       } catch (error) {
-        const reason = error instanceof Error ? error.message : "YAML 无法解析";
+        const reason = error instanceof Error ? error.message : hostText("YAML 无法解析", "Failed to parse YAML");
         throw { code: "INVALID_ARGUMENT", message: reason };
       }
       if (!("providers" in root) || root.providers === undefined) root.providers = {};
       if (!asRecord(root.providers)) {
-        throw { code: "INVALID_ARGUMENT", message: "models.yml 的 providers 必须是映射" };
+        throw { code: "INVALID_ARGUMENT", message: hostText("models.yml 的 providers 必须是映射", "providers in models.yml must be a mapping") };
       }
       restoreRedactedApiKeys(root, file.root);
       if (input.overlay) {
@@ -2330,7 +2356,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       }
       const contentHash = await writeModelsFile(paths.modelsPath, root, input.expectedHash);
       const sourcesSaved = !input.overlay || await saveProviderOrigins(input.overlay, asRecord(asRecord(root.providers)?.[input.overlay.id])!);
-      return { ...WRITE_OK, contentHash, message: sourcesSaved ? "已写入 models.yml" : "配置已保存，但来源记录未保存；重新打开时将显示为手工配置" };
+      return { ...writeOk(), contentHash, message: sourcesSaved ? hostText("已写入 models.yml", "Saved models.yml") : hostText("配置已保存，但来源记录未保存；重新打开时将显示为手工配置", "Configuration saved, but origin metadata was not saved; it will appear as manual on reopen") };
     },
 
     async deleteProvider(input): Promise<ConfigWriteResult> {
@@ -2342,7 +2368,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       delete providers[input.id];
       file.root.providers = providers;
       const contentHash = await writeModelsFile(paths.modelsPath, file.root, input.expectedHash);
-      return { ...WRITE_OK, contentHash };
+      return { ...writeOk(), contentHash };
     },
 
     async setRole(input): Promise<ConfigWriteResult> {
@@ -2358,14 +2384,14 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         ? deleteYamlRecordEntry(text, "modelRoles", input.roleId)
         : upsertYamlRecordEntry(text, "modelRoles", input.roleId, input.selector);
       await writeConfigText(target.path, next);
-      return WRITE_OK;
+      return writeOk();
     },
 
     async startLogin(input): Promise<ConfigWriteResult> {
       if (!openUrl) {
         throw {
           code: "CAPABILITY_UNAVAILABLE",
-          message: `应用内登录不可用。请在终端运行 omp login ${input.providerId}`,
+          message: hostText(`应用内登录不可用。请在终端运行 omp login ${input.providerId}`, `In-app login is unavailable. Run omp login ${input.providerId} in a terminal.`),
         };
       }
       const exe = await locateOmp();
@@ -2380,7 +2406,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           settled = true;
           child.kill();
           if (error) reject(toClientError(error, "CAPABILITY_UNAVAILABLE"));
-          else resolve(result ?? WRITE_OK);
+          else resolve(result ?? writeOk());
         };
         const timer = setTimeout(() => finish({ code: "UNAVAILABLE", message: "login timed out; use omp login in a terminal" }), 120_000);
         child.stdout?.setEncoding("utf8");
@@ -2409,13 +2435,13 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
             if (frame.type === "extension_ui_request" && frame.method === "input") {
               finish({
                 code: "CAPABILITY_UNAVAILABLE",
-                message: `该供应商需要交互式输入。请在终端运行 omp login ${input.providerId}`,
+                message: hostText(`该供应商需要交互式输入。请在终端运行 omp login ${input.providerId}`, `This provider requires interactive input. Run omp login ${input.providerId} in a terminal.`),
               });
               continue;
             }
             if (frame.type === "response" && frame.command === "login") {
               clearTimeout(timer);
-              if (frame.success === true) finish(undefined, { ...WRITE_OK, message: `已登录 ${input.providerId}。新会话后生效。` });
+              if (frame.success === true) finish(undefined, { ...writeOk(), message: hostText(`已登录 ${input.providerId}。新会话后生效。`, `Logged in to ${input.providerId}. Takes effect in a new session.`) });
               else finish({ code: "INTERNAL_ERROR", message: typeof frame.error === "string" ? frame.error : "login failed" });
             }
           }
@@ -2440,10 +2466,10 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       if (apiKey !== undefined) {
         const resolved = resolveRequestApiKey(apiKey);
         if ("command" in resolved) {
-          return { ok: false, latencyMs: Date.now() - started, detail: "该供应商使用外部命令取凭据，无法在此自动测试，请在终端验证。" };
+          return { ok: false, latencyMs: Date.now() - started, detail: hostText("该供应商使用外部命令取凭据，无法在此自动测试，请在终端验证。", "This provider uses an external command for credentials and cannot be tested automatically here; verify in a terminal.") };
         }
         if ("missingEnv" in resolved) {
-          return { ok: false, latencyMs: Date.now() - started, detail: `未在环境中检测到 ${resolved.missingEnv}` };
+          return { ok: false, latencyMs: Date.now() - started, detail: hostText(`未在环境中检测到 ${resolved.missingEnv}`, `${resolved.missingEnv} was not found in the environment`) };
         }
         apiKey = resolved.value;
       }
@@ -2463,10 +2489,10 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
               if (yamlAuth !== "none" && yamlAuth !== "oauth") {
                 const resolved = resolveRequestApiKey(stringOf(raw.apiKey), input.providerId);
                 if ("command" in resolved) {
-                  return { ok: false, latencyMs: Date.now() - started, detail: "该供应商使用外部命令取凭据，无法在此自动测试，请在终端验证。" };
+                  return { ok: false, latencyMs: Date.now() - started, detail: hostText("该供应商使用外部命令取凭据，无法在此自动测试，请在终端验证。", "This provider uses an external command for credentials and cannot be tested automatically here; verify in a terminal.") };
                 }
                 if ("missingEnv" in resolved) {
-                  return { ok: false, latencyMs: Date.now() - started, detail: `未在环境中检测到 ${resolved.missingEnv}` };
+                  return { ok: false, latencyMs: Date.now() - started, detail: hostText(`未在环境中检测到 ${resolved.missingEnv}`, `${resolved.missingEnv} was not found in the environment`) };
                 }
                 apiKey = resolved.value;
               }
@@ -2476,12 +2502,12 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           }
         }
         if (!endpointUrl) {
-          endpointUrl = PRESET_GROUPS.flatMap((group) => group.items).find((item) => item.id === input.providerId)?.endpoint;
+          endpointUrl = presetGroups().flatMap((group) => group.items).find((item) => item.id === input.providerId)?.endpoint;
         }
       }
 
       if (!endpointUrl) {
-        return { ok: false, latencyMs: Date.now() - started, detail: "未配置 Base URL。" };
+        return { ok: false, latencyMs: Date.now() - started, detail: hostText("未配置 Base URL。", "Base URL is not configured.") };
       }
 
       const base = endpointUrl.replace(/\/+$/, "");
@@ -2523,7 +2549,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         return {
           ok: true,
           latencyMs: Date.now() - started,
-          detail: `连接成功 · HTTP ${result.status}`,
+          detail: hostText(`连接成功 · HTTP ${result.status}`, `Connected · HTTP ${result.status}`),
           httpStatus: result.status,
           retryCount: result.retries,
         };
@@ -2545,7 +2571,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           return {
             ok: true,
             latencyMs: Date.now() - started,
-            detail: `连接成功 · HTTP ${authResult.status} · 凭据有效`,
+            detail: hostText(`连接成功 · HTTP ${authResult.status} · 凭据有效`, `Connected · HTTP ${authResult.status} · Valid credentials`),
             httpStatus: authResult.status,
             retryCount: authResult.retries,
           };
@@ -2554,7 +2580,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           return {
             ok: false,
             latencyMs: Date.now() - started,
-            detail: `连接失败：端点可达 · HTTP ${authResult.status} · 凭据无效`,
+            detail: hostText(`连接失败：端点可达 · HTTP ${authResult.status} · 凭据无效`, `Connection failed: endpoint reachable · HTTP ${authResult.status} · Invalid credentials`),
             httpStatus: authResult.status,
             retryCount: authResult.retries,
           };
@@ -2568,7 +2594,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         return {
           ok: true,
           latencyMs: Date.now() - started,
-          detail: `连接成功 · 端点可达（HTTP ${fallback.status}）· 模型列表接口不可用（HTTP ${authResult.status}）· 凭据未验证`,
+          detail: hostText(`连接成功 · 端点可达（HTTP ${fallback.status}）· 模型列表接口不可用（HTTP ${authResult.status}）· 凭据未验证`, `Connected · endpoint reachable (HTTP ${fallback.status}) · model list unavailable (HTTP ${authResult.status}) · credentials unverified`),
           httpStatus: fallback.status,
           retryCount: authResult.retries + fallback.retries,
         };
@@ -2582,7 +2608,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       return {
         ok: true,
         latencyMs: Date.now() - started,
-        detail: `连接成功 · HTTP ${reach.status} · 凭据未验证（该 API 类型无模型列表接口）`,
+        detail: hostText(`连接成功 · HTTP ${reach.status} · 凭据未验证（该 API 类型无模型列表接口）`, `Connected · HTTP ${reach.status} · credentials unverified (this API type has no model-list endpoint)`),
         httpStatus: reach.status,
         retryCount: reach.retries,
       };
@@ -2608,9 +2634,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       if (apiKey) {
         const resolved = resolveRequestApiKey(apiKey);
         if ("command" in resolved) {
-          return fail("该供应商使用外部命令取凭据，无法在此自动获取模型，请在终端验证。");
+          return fail(hostText("该供应商使用外部命令取凭据，无法在此自动获取模型，请在终端验证。", "This provider uses an external command for credentials and cannot fetch models automatically here; verify in a terminal."));
         }
-        if ("missingEnv" in resolved) return fail(`未在环境中检测到 ${resolved.missingEnv}`);
+        if ("missingEnv" in resolved) return fail(hostText(`未在环境中检测到 ${resolved.missingEnv}`, `${resolved.missingEnv} was not found in the environment`));
         apiKey = resolved.value;
       }
       const paths = await resolvePaths();
@@ -2625,9 +2651,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
             if (yamlAuth !== "none" && yamlAuth !== "oauth") {
               const resolved = resolveRequestApiKey(stringOf(raw.apiKey), input.providerId);
               if ("command" in resolved) {
-                return fail("该供应商使用外部命令取凭据，无法在此自动获取模型，请在终端验证。");
+                return fail(hostText("该供应商使用外部命令取凭据，无法在此自动获取模型，请在终端验证。", "This provider uses an external command for credentials and cannot fetch models automatically here; verify in a terminal."));
               }
-              if ("missingEnv" in resolved) return fail(`未在环境中检测到 ${resolved.missingEnv}`);
+              if ("missingEnv" in resolved) return fail(hostText(`未在环境中检测到 ${resolved.missingEnv}`, `${resolved.missingEnv} was not found in the environment`));
               apiKey = resolved.value;
             }
           }
@@ -2642,11 +2668,11 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           /* use request fields */
         }
       }
-      const preset = PRESET_GROUPS.flatMap((group) => group.items).find((item) => item.id === input.providerId);
+      const preset = presetGroups().flatMap((group) => group.items).find((item) => item.id === input.providerId);
       if (!endpointUrl) endpointUrl = preset?.endpoint;
       if (!api) api = preset?.api;
       if (!discoveryType) discoveryType = preset?.discovery;
-      if (!endpointUrl) return fail("未配置 Base URL。");
+      if (!endpointUrl) return fail(hostText("未配置 Base URL。", "Base URL is not configured."));
 
       // With a discovery type the runtime protocol dictates the endpoint
       // (Ollama tags, LiteLLM model info); without one the wire API does, which
@@ -2658,7 +2684,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           ? litellmInfoUrls(endpointUrl)
           : listRequest.urls;
       if (urls.length === 0) {
-        return fail("该 API 类型没有模型列表接口，无法自动获取模型。");
+        return fail(hostText("该 API 类型没有模型列表接口，无法自动获取模型。", "This API type has no model-list endpoint and cannot fetch models automatically."));
       }
       // Draft custom headers never overwrite the auth headers above.
       const headers: Record<string, string> = { ...(input.headers ?? {}), ...listRequest.headers };
@@ -2704,7 +2730,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
             usable: models.length,
             models,
             latencyMs: Date.now() - started,
-            detail: `探测成功 · 发现 ${models.length} 个模型 · HTTP ${response.status}`,
+            detail: hostText(`探测成功 · 发现 ${models.length} 个模型 · HTTP ${response.status}`, `Probe succeeded · found ${models.length} ${models.length === 1 ? "model" : "models"} · HTTP ${response.status}`),
             httpStatus: response.status,
           };
         } catch (error) {
@@ -2715,9 +2741,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       }
       if (lastError) return fail(networkErrorDetail(lastError));
       if (lastStatus === 401 || lastStatus === 403) {
-        return fail(`探测失败：端点可达 · HTTP ${lastStatus} · 凭据无效`, lastStatus);
+        return fail(hostText(`探测失败：端点可达 · HTTP ${lastStatus} · 凭据无效`, `Probe failed: endpoint reachable · HTTP ${lastStatus} · Invalid credentials`), lastStatus);
       }
-      return fail(`探测失败${lastStatus ? ` · HTTP ${lastStatus}` : ""}`, lastStatus || undefined);
+      return fail(hostText(`探测失败${lastStatus ? ` · HTTP ${lastStatus}` : ""}`, `Probe failed${lastStatus ? ` · HTTP ${lastStatus}` : ""}`), lastStatus || undefined);
     },
 
     async refreshDiscovery(): Promise<ConfigWriteResult> {
@@ -2732,7 +2758,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         if (result.code !== 0) {
           throw { code: "INTERNAL_ERROR", message: result.stderr.trim() || "omp models refresh failed" };
         }
-        return { ...WRITE_OK, message: "已重新扫描 Discovery 缓存（新会话后生效）" };
+        return { ...writeOk(), message: hostText("已重新扫描 Discovery 缓存（新会话后生效）", "Rescanned Discovery cache (takes effect in a new session)") };
       } catch (error) {
         if (error && typeof error === "object" && "code" in error) throw error;
         throw toClientError(error, "UNAVAILABLE");
@@ -2743,7 +2769,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       const paths = await resolvePaths();
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
       const changes = await logoutAuth(paths.agentDir, input.providerId);
-      return { ...WRITE_OK, message: changes > 0 ? `已登出 ${input.providerId}` : `${input.providerId} 没有已保存凭据` };
+      return { ...writeOk(), message: changes > 0 ? hostText(`已登出 ${input.providerId}`, `Logged out of ${input.providerId}`) : hostText(`${input.providerId} 没有已保存凭据`, `No saved credentials for ${input.providerId}`) };
     },
 
     async writeRoles(input: ModelRolesWriteInput): Promise<ConfigWriteResult> {
@@ -2752,17 +2778,17 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       const target = await roleTargetPath(paths);
       const text = await readConfigText(target.path);
       await writeConfigText(target.path, replaceYamlRecordStrings(text, "modelRoles", input.roles));
-      return { ...WRITE_OK, message: "已写入 modelRoles" };
+      return { ...writeOk(), message: hostText("已写入 modelRoles", "Saved modelRoles") };
     },
 
     async createRole(input: ModelRoleCreateInput): Promise<ConfigWriteResult> {
       const paths = await resolvePaths();
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
-      if (BUILTIN_ROLES.some((role) => role.id === input.id)) {
-        throw { code: "INVALID_ARGUMENT", message: `${input.id} 是内置角色，不能重复创建` };
+      if (builtinRoles().some((role) => role.id === input.id)) {
+        throw { code: "INVALID_ARGUMENT", message: hostText(`${input.id} 是内置角色，不能重复创建`, `${input.id} is a built-in role and cannot be created again`) };
       }
       if (!/^[a-z][a-z0-9_-]*$/.test(input.id)) {
-        throw { code: "INVALID_ARGUMENT", message: "角色 id 只能使用小写字母、数字、连字符和下划线" };
+        throw { code: "INVALID_ARGUMENT", message: hostText("角色 id 只能使用小写字母、数字、连字符和下划线", "Role IDs may only contain lowercase letters, digits, hyphens, and underscores") };
       }
       const text = await readConfigText(paths.configPath);
       const next = patchYamlRoot(text, (root) => {
@@ -2782,14 +2808,14 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         const roleText = await readConfigText(target.path);
         await writeConfigText(target.path, upsertYamlRecordEntry(roleText, "modelRoles", input.id, input.selector));
       }
-      return { ...WRITE_OK, message: `已创建角色 ${input.id}` };
+      return { ...writeOk(), message: hostText(`已创建角色 ${input.id}`, `Created role ${input.id}`) };
     },
 
     async deleteRole(input): Promise<ConfigWriteResult> {
       const paths = await resolvePaths();
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
-      if (BUILTIN_ROLES.some((role) => role.id === input.roleId)) {
-        throw { code: "INVALID_ARGUMENT", message: "不能删除内置角色" };
+      if (builtinRoles().some((role) => role.id === input.roleId)) {
+        throw { code: "INVALID_ARGUMENT", message: hostText("不能删除内置角色", "Built-in roles cannot be deleted") };
       }
       const text = await readConfigText(paths.configPath);
       const next = patchYamlRoot(text, (root) => {
@@ -2813,18 +2839,18 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           await writeConfigText(projectPath, deleteYamlRecordEntry(projectText, "modelRoles", input.roleId));
         }
       }
-      return { ...WRITE_OK, message: `已删除角色 ${input.roleId}` };
+      return { ...writeOk(), message: hostText(`已删除角色 ${input.roleId}`, `Deleted role ${input.roleId}`) };
     },
 
     async setRoleStorage(input): Promise<ConfigWriteResult> {
       const paths = await resolvePaths();
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
       if (input.storage === "project" && !cwdOf()) {
-        throw { code: "UNAVAILABLE", message: "未打开工作区，无法切换到 Project 作用域。" };
+        throw { code: "UNAVAILABLE", message: hostText("未打开工作区，无法切换到 Project 作用域。", "No workspace is open; cannot switch to Project scope.") };
       }
       const text = await readConfigText(paths.configPath);
       await writeConfigText(paths.configPath, upsertYamlScalar(text, "modelRoleStorage", input.storage));
-      return { ...WRITE_OK, message: input.storage === "project" ? "角色写入项目 .omp/config.yml" : "已恢复全局角色配置" };
+      return { ...writeOk(), message: input.storage === "project" ? hostText("角色写入项目 .omp/config.yml", "Roles now write to project .omp/config.yml") : hostText("已恢复全局角色配置", "Restored global role configuration") };
     },
 
     async setFallback(input): Promise<ConfigWriteResult> {
@@ -2841,21 +2867,21 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         root.retry = retry;
       });
       await writeConfigText(target.path, next);
-      return { ...WRITE_OK, message: "已保存 Fallback 链" };
+      return { ...writeOk(), message: hostText("已保存 Fallback 链", "Saved fallback chains") };
     },
 
     async setProviderOrder(input): Promise<ConfigWriteResult> {
       const paths = await resolvePaths();
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
       await writeConfigStringList(paths.configPath, "modelProviderOrder", input.order);
-      return { ...WRITE_OK, message: "已保存 modelProviderOrder" };
+      return { ...writeOk(), message: hostText("已保存 modelProviderOrder", "Saved modelProviderOrder") };
     },
 
     async setCycleOrder(input): Promise<ConfigWriteResult> {
       const paths = await resolvePaths();
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
       await writeConfigStringList(paths.configPath, "cycleOrder", input.order);
-      return WRITE_OK;
+      return writeOk();
     },
 
     async setWebSearch(input: ModelWebSearchSetInput): Promise<ConfigWriteResult> {
@@ -2868,7 +2894,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           if (Object.keys(input).some(key => key !== "routing")) throw { code: "INVALID_ARGUMENT", message: "Save project search routing separately from global transport settings" };
           const text = await readConfigText(target.path);
           await writeConfigText(target.path, patchYamlRoot(text, root => writeWebRouting(root, input.routing!)));
-          return { ...WRITE_OK, message: "已保存项目 Web 模型链" };
+          return { ...writeOk(), message: hostText("已保存项目 Web 模型链", "Saved project Web model chain") };
         }
       }
       const known = new Set(WEB_SEARCH_PROVIDER_CATALOG.map((provider) => provider.id));
@@ -2949,7 +2975,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         }
       }
       await writeConfigText(paths.configPath, next);
-      return { ...WRITE_OK, message: "已保存网络搜索配置" };
+      return { ...writeOk(), message: hostText("已保存网络搜索配置", "Saved web search configuration") };
     },
 
     async setWebSearchApiKey(_input: ModelWebSearchCredentialSetInput): Promise<ConfigWriteResult> {

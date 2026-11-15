@@ -19,7 +19,7 @@ import { Icon, type IconName } from "./icons";
 import { ToastHost } from "./ToastHost";
 import { tabPaneClass, tabPaneRole, useOverlappingTabs } from "./pageTransition";
 import { SlidingTabs } from "./SlidingTabs";
-import { useI18n, type TranslationParams } from "./i18n";
+import { pickLocale, useI18n, type TranslationParams } from "./i18n";
 import { fileManagerName } from "./platformCopy";
 import {
   createPreviewMcp,
@@ -87,12 +87,12 @@ function slashBareName(name: string): string {
   return name.startsWith("/") ? name.slice(1) : name;
 }
 
-function previewSkills(): SkillPreview[] {
-  return createPreviewDrawerItems().filter((item): item is SkillPreview => item.kind === "skill");
+function previewSkills(zh: boolean): SkillPreview[] {
+  return createPreviewDrawerItems(zh).filter((item): item is SkillPreview => item.kind === "skill");
 }
 
-function previewPlugins(): PluginPreview[] {
-  return createPreviewDrawerItems().filter((item): item is PluginPreview => item.kind === "plugin");
+function previewPlugins(zh: boolean): PluginPreview[] {
+  return createPreviewDrawerItems(zh).filter((item): item is PluginPreview => item.kind === "plugin");
 }
 
 function scopeOf(t: TFunc, skill: SkillPreview): { cls: "global" | "builtin" | "project"; label: string } {
@@ -218,9 +218,9 @@ export function CapabilitiesPage({
   const [commandsView,setCommandsView] = useState<"commands"|"templates">("commands");
   const supports = (id:string) => capabilities?.capabilities.some(row=>row.id===id&&row.grade!=="unavailable") === true;
   const [tab, setTab] = useState<CapTab>("skills");
-  const [skills, setSkills] = useState<SkillPreview[]>(() => preview ? previewSkills() : []);
-  const [plugins, setPlugins] = useState<PluginPreview[]>(() => preview ? previewPlugins() : []);
-  const [mcp, setMcp] = useState<PreviewMcp[]>(() => preview ? createPreviewMcp() : []);
+  const [skills, setSkills] = useState<SkillPreview[]>(() => preview ? previewSkills(zh) : []);
+  const [plugins, setPlugins] = useState<PluginPreview[]>(() => preview ? previewPlugins(zh) : []);
+  const [mcp, setMcp] = useState<PreviewMcp[]>(() => preview ? createPreviewMcp(zh) : []);
   const [mcpServers, setMcpServers] = useState<McpServerRecord[]>([]);
   const [commandManifest, setCommandManifest] = useState<OperatorCommandManifest | undefined>();
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -247,19 +247,19 @@ export function CapabilitiesPage({
   };
 
   const slashCatalog = useMemo(
-    () => (preview ? [] : mergeSlashCatalogWithManifest(commandManifest)),
-    [commandManifest, preview],
+    () => (preview ? [] : mergeSlashCatalogWithManifest(commandManifest, zh)),
+    [commandManifest, preview, zh],
   );
   const slash = useMemo(
-    () => (preview ? createPreviewSlashCommands() : slashCatalog.map((command) => slashToPreview(t, command))),
-    [preview, slashCatalog, t],
+    () => (preview ? createPreviewSlashCommands(zh) : slashCatalog.map((command) => slashToPreview(t, command))),
+    [preview, slashCatalog, t, zh],
   );
 
   const refresh = useCallback(async () => {
     if (preview) {
-      setSkills(previewSkills());
-      setPlugins(previewPlugins());
-      setMcp(createPreviewMcp());
+      setSkills(previewSkills(zh));
+      setPlugins(previewPlugins(zh));
+      setMcp(createPreviewMcp(zh));
       setMcpServers([]);
       setCommandManifest(undefined);
       setLoadError(null);
@@ -276,10 +276,10 @@ export function CapabilitiesPage({
         try {
           const identities = await loadRuntimeSkills(client, sessionId);
           setSkills(identities.map(skill => ({kind: "skill", name: skill.name,
-            desc: skill.description + (skill.conflict ? " · 名称冲突 / Name conflict" : ""),
+            desc: skill.description + (skill.conflict ? pickLocale(" · 名称冲突", " · Name conflict") : ""),
             src: [skill.namespace, skill.source].filter(Boolean).join(" · "),
             scope: skill.scope ?? "runtime", path: "", enabled: true, loaded: true, session: true})));
-        } catch (error) { setSkills([]); identityError = hostErrorMessage(error, "Runtime 技能身份不可用 / Runtime skill identities unavailable"); }
+        } catch (error) { setSkills([]); identityError = hostErrorMessage(error, pickLocale("Runtime 技能身份不可用", "Runtime skill identities unavailable")); }
       } else setSkills(skillsResult.value.skills.map(skillToPreview));
       setPlugins(skillsResult.value.plugins.map(pluginToPreview));
     } else {
@@ -300,7 +300,7 @@ export function CapabilitiesPage({
         ? (mcpResult.reason instanceof Error ? mcpResult.reason.message : "mcp.get failed")
         : skillsResult.value.unavailableReason ?? mcpResult.value.unavailableReason ?? null;
     setLoadError(identityError ?? loadError);
-  }, [client, preview, sessionId]);
+  }, [client, preview, sessionId, zh]);
 
   useEffect(() => {
     void refresh();
@@ -599,7 +599,7 @@ export function CapabilitiesPage({
                       onToggle={() => void toggleSkill(skill)}
                     />
                   ) : skill.scope === "builtin" || (sessionId && !skill.path) ? (
-                    <Disabled className="switch" tip={sessionId && !skill.path ? "Runtime 身份不支持按名称修改 / Runtime identities cannot be changed by name" : t("capabilities.scopeBuiltin")}>
+                    <Disabled className="switch" tip={sessionId && !skill.path ? pickLocale("Runtime 身份不支持按名称修改", "Runtime identities cannot be changed by name") : t("capabilities.scopeBuiltin")}>
                       <span className="sr-only">{t("capabilities.toggleSkillAria", { name: skill.name })}</span>
                     </Disabled>
                   ) : (

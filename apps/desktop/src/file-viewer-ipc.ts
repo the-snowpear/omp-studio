@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { FILE_VIEWER_CHANNELS as channels, type FileResourceTarget } from "./file-viewer-shared.js";
 import type { FileResources } from "./file-resources.js";
 import type { OfficeComponent } from "./office-component.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 type DocumentExit = "destroyed" | "did-navigate" | "render-process-gone";
 interface Sender { id: number; getURL(): string; send(channel: string, ...args: unknown[]): void; isDestroyed(): boolean; once(event: DocumentExit, listener: () => void): unknown; off(event: DocumentExit, listener: () => void): unknown }
@@ -37,7 +38,7 @@ export function registerFileViewerIpc(options: {
   const openResource = async (sender: Sender, input: FileResourceTarget) => {
     const document = senders.get(sender.id);
     const resource = await options.resources.open(input, sender.id);
-    if (sender.isDestroyed() || senders.get(sender.id) !== document) { options.resources.release(resource.id, sender.id); throw new Error("文件窗口已关闭"); }
+    if (sender.isDestroyed() || senders.get(sender.id) !== document) { options.resources.release(resource.id, sender.id); throw new Error(desktopText("文件窗口已关闭", "File viewer window is closed")); }
     return resource;
   };
   register(channels.open, openResource);

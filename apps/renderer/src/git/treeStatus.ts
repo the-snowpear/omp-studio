@@ -10,6 +10,7 @@
  */
 
 import type { GitFileChange } from "@omp-studio/client-contract";
+import { isZh } from "../i18n";
 import { workspacePathForRepositoryFile } from "./workspacePaths";
 
 export type TreeGitStatus = "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
@@ -60,12 +61,26 @@ export interface GitStatusMeta {
   readonly label: string;
 }
 
-/** 行尾字母徽标 + 文件名着色双通道，不单靠颜色（WCAG color-not-only）。 */
+const STATUS_LABELS: Readonly<Record<TreeGitStatus, readonly [string, string]>> = {
+  modified: ["已修改", "Modified"],
+  added: ["已暂存新增", "Staged addition"],
+  deleted: ["已删除", "Deleted"],
+  renamed: ["已重命名", "Renamed"],
+  untracked: ["未跟踪", "Untracked"],
+  conflicted: ["存在冲突", "Conflicted"],
+};
+
+export function gitStatusLabel(status: TreeGitStatus, zh = isZh()): string {
+  const pair = STATUS_LABELS[status];
+  return zh ? pair[0] : pair[1];
+}
+
+/** Trailing status letter + filename color dual channel (WCAG color-not-only). */
 export const GIT_STATUS_META: Readonly<Record<TreeGitStatus, GitStatusMeta>> = {
-  modified: { letter: "M", className: "m", label: "已修改" },
-  added: { letter: "A", className: "a", label: "已暂存新增" },
-  deleted: { letter: "D", className: "d", label: "已删除" },
-  renamed: { letter: "R", className: "r", label: "已重命名" },
-  untracked: { letter: "U", className: "u", label: "未跟踪" },
-  conflicted: { letter: "!", className: "x", label: "存在冲突" },
+  modified: { letter: "M", className: "m", get label() { return gitStatusLabel("modified"); } },
+  added: { letter: "A", className: "a", get label() { return gitStatusLabel("added"); } },
+  deleted: { letter: "D", className: "d", get label() { return gitStatusLabel("deleted"); } },
+  renamed: { letter: "R", className: "r", get label() { return gitStatusLabel("renamed"); } },
+  untracked: { letter: "U", className: "u", get label() { return gitStatusLabel("untracked"); } },
+  conflicted: { letter: "!", className: "x", get label() { return gitStatusLabel("conflicted"); } },
 };

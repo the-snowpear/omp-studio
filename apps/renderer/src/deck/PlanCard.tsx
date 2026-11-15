@@ -1,5 +1,5 @@
 import { PlanExecutionPicker } from "./PlanExecutionPicker";
-import { PREVIEW_PLAN_EXECUTION } from "../preview/planExecutionPreview";
+import { getPreviewPlanExecution } from "../preview/planExecutionPreview";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { MarkdownText } from "../conversation/markdown";
@@ -27,6 +27,8 @@ function PlanHeadActions({
   onToggle: () => void;
   onDismiss: () => void;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   if (expanded) {
     return (
       <span className="plan-head-actions">
@@ -38,7 +40,7 @@ function PlanHeadActions({
           {...(collapseRef ? { ref: collapseRef } : {})}
           type="button"
           className="icon-btn small"
-          aria-label="收起计划"
+          aria-label={zh ? "收起计划" : "Collapse plan"}
           disabled={disabled === true}
           onClick={onToggle}
         >
@@ -56,7 +58,7 @@ function PlanHeadActions({
       <button
         type="button"
         className="icon-btn small"
-        aria-label="放大计划"
+        aria-label={zh ? "放大计划" : "Expand plan"}
         disabled={disabled === true}
         onClick={onToggle}
       >
@@ -65,7 +67,7 @@ function PlanHeadActions({
       <button
         type="button"
         className="icon-btn small"
-        aria-label="关闭计划"
+        aria-label={zh ? "关闭计划" : "Dismiss plan"}
         disabled={disabled === true}
         onClick={onDismiss}
       >
@@ -197,6 +199,8 @@ function PlanReviewDialog({
   onNotesChange: (notes: Record<number, string[]>) => void;
   onOverallNoteChange: (note: string) => void;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const closeRef = useRef<HTMLButtonElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -298,7 +302,7 @@ function PlanReviewDialog({
                 <MarkdownText text={body} />
               </div>
             ) : (
-              <p className="dk-sub">当前会话里没有找到计划正文。</p>
+              <p className="dk-sub">{zh ? "当前会话里没有找到计划正文。" : "No plan content found in the current session."}</p>
             )
           ) : (
             <PlanAnnotatedBody
@@ -312,15 +316,15 @@ function PlanReviewDialog({
         </div>
         {viewOnly === true ? null : (
         <div className="plan-review-overall">
-          <label className="plan-review-overall-label" htmlFor="planOverallNote">全文批注</label>
+          <label className="plan-review-overall-label" htmlFor="planOverallNote">{zh ? "全文批注" : "Overall annotations"}</label>
           <textarea
             id="planOverallNote"
             className="input"
             rows={3}
             value={overallNote}
             disabled={disabled === true}
-            aria-label="全文批注"
-            placeholder="对整份计划的修改意见…"
+            aria-label={zh ? "全文批注" : "Overall annotations"}
+            placeholder={zh ? "对整份计划的修改意见…" : "Suggested edits for the entire plan…"}
             onChange={(event) => onOverallNoteChange(event.target.value)}
           />
         </div>
@@ -369,8 +373,10 @@ export function PlanCard({
   onSaveAndQuit?: () => void;
   executionControl?: ReactNode;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [demoRole, setDemoRole] = useState("default");
-  const tierControl = executionControl ?? (demo ? <PlanExecutionPicker details={PREVIEW_PLAN_EXECUTION} role={demoRole} onChange={setDemoRole} disabled={disabled} /> : null);
+  const tierControl = executionControl ?? (demo ? <PlanExecutionPicker details={getPreviewPlanExecution(zh)} role={demoRole} onChange={setDemoRole} disabled={disabled} /> : null);
   const cardRef = useRef<HTMLDivElement>(null);
   const controlled = expandedProp !== undefined;
   const [internalExpanded, setInternalExpanded] = useState(false);
@@ -431,7 +437,7 @@ export function PlanCard({
         className="approval-body plan-preview-hit"
         role="button"
         tabIndex={disabled === true ? -1 : 0}
-        aria-label="展开完整计划"
+        aria-label={zh ? "展开完整计划" : "Expand full plan"}
         aria-disabled={disabled === true}
         onClick={(event) => {
           if (disabled === true) return;
@@ -531,8 +537,10 @@ export function PlanReviewDeck({
   onSaveAndQuit?: () => void;
   executionControl?: ReactNode;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   return (
-    <div className="deck active preview-queue" role="region" aria-label="待审核的计划" aria-live="polite">
+    <div className="deck active preview-queue" role="region" aria-label={zh ? "待审核的计划" : "Plan pending review"} aria-live="polite">
       <div className="deck-card">
         <PlanCard
           executionControl={executionControl}

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, type RefObject } from "react";
 import type { InteractionId, SessionId } from "@omp-studio/client-contract";
 import { FormSession } from "../deck/FormSession";
 import { QueuedDeck, type QueuedDeckItem } from "../deck/QueuedDeck";
-import { PREVIEW_DECK_ITEMS } from "./deckFixtures";
+import { useI18n } from "../i18n";
+import { getPreviewDeckItems } from "./deckFixtures";
 import { usePreviewMode } from "./PreviewContext";
 
 /**
@@ -22,17 +23,19 @@ export function PreviewDeck({
   planOriginRef?: RefObject<HTMLElement | null>;
 } = {}) {
   const { marks } = usePreviewMode();
-  const items = useMemo<readonly QueuedDeckItem[]>(() => PREVIEW_DECK_ITEMS.map(item => {
+  const zh = useI18n().resolvedLanguage === "zh";
+  const deckFixtures = useMemo(() => getPreviewDeckItems(zh), [zh]);
+  const items = useMemo<readonly QueuedDeckItem[]>(() => deckFixtures.map(item => {
     if (item.kind !== "form") return item;
     const session = new FormSession({ kind: "form", interactionId: item.id as InteractionId, sessionId: "preview:deck" as SessionId, leaseGeneration: 1, title: item.title, summary: item.summary, fieldCount: item.form.fields.length, sectionCount: item.form.sections.length });
     return { kind: "form", id: item.id, title: item.title, summary: item.summary, session, ...(item.meta ? { meta: item.meta } : {}) };
-  }), []);
+  }), [deckFixtures]);
   const mounting = useRef(0);
   useEffect(() => {
     const generation = ++mounting.current;
     for (const item of items) {
       if (item.kind !== "form") continue;
-      const fixture = PREVIEW_DECK_ITEMS.find(candidate => candidate.id === item.id);
+      const fixture = deckFixtures.find(candidate => candidate.id === item.id);
       if (fixture?.kind === "form") void item.session.load(() => Promise.resolve(fixture.form));
     }
     return () => { queueMicrotask(() => {
@@ -40,13 +43,13 @@ export function PreviewDeck({
       if (mounting.current !== generation) return;
       for (const item of items) if (item.kind === "form") item.session.close();
     }); };
-  }, [items]);
+  }, [items, deckFixtures]);
   return (
     <QueuedDeck
       items={items}
       demo={marks}
       previewMark={marks}
-      regionLabel={marks ? "待处理的审批与提问（演示）" : "待处理的审批与提问"}
+      regionLabel={zh ? (marks ? "待处理的审批与提问（演示）" : "待处理的审批与提问") : (marks ? "Pending approvals and questions (Demo)" : "Pending approvals and questions")}
       {...(onCurrentKind === undefined ? {} : { onCurrentKind })}
       {...(planExpanded === undefined ? {} : { planExpanded })}
       {...(onPlanExpandedChange === undefined ? {} : { onPlanExpandedChange })}

@@ -11,7 +11,7 @@ import type { StudioClient } from "@omp-studio/client-contract";
 import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
-import { PREVIEW_NEXT_MESSAGES } from "../preview/nextMessagePreview";
+import { getPreviewNextMessages, PREVIEW_NEXT_MESSAGES } from "../preview/nextMessagePreview";
 import { ChipComposer } from "./ChipComposer";
 import { predictionDraft } from "./useWordPrediction";
 afterEach(() => {
@@ -96,20 +96,21 @@ it("inserts word and alternative message predictions into the draft without subm
     fireEvent.keyDown(editor, { key: "Tab" });
     expect(editor.textContent).toBe("please review ");
     editor.textContent = ""; caret(editor); fireEvent.input(editor);
-    await waitFor(() => expect(mounted.container.querySelector(".cm-prediction")?.textContent).toContain(PREVIEW_NEXT_MESSAGES[0]));
+    const enNextMessages = getPreviewNextMessages(false);
+    await waitFor(() => expect(mounted.container.querySelector(".cm-prediction")?.textContent).toContain(enNextMessages[0]));
     expect(editor.getAttribute("data-prediction-visible")).toBe("true");
     fireEvent.keyDown(editor, { key: "Escape" });
     expect(editor.hasAttribute("data-prediction-visible")).toBe(false);
     fireEvent.input(editor);
-    await waitFor(() => expect(mounted.container.querySelector(".cm-prediction")?.textContent).toContain(PREVIEW_NEXT_MESSAGES[0]));
+    await waitFor(() => expect(mounted.container.querySelector(".cm-prediction")?.textContent).toContain(enNextMessages[0]));
     fireEvent.keyDown(editor, { key: "ArrowRight" });
-    expect(editor.textContent).toBe(PREVIEW_NEXT_MESSAGES[0]);
+    expect(editor.textContent).toBe(enNextMessages[0]);
     expect(editor.hasAttribute("data-prediction-visible")).toBe(false);
     fireEvent.keyDown(editor, { key: "Tab" });
     expect(screen.getAllByRole("option")).toHaveLength(4);
     fireEvent.keyDown(editor, { key: "ArrowDown" });
     fireEvent.keyDown(editor, { key: "Enter" });
-    expect(editor.textContent).toBe(PREVIEW_NEXT_MESSAGES[1]);
+    expect(editor.textContent).toBe(enNextMessages[1]);
     expect(submit).not.toHaveBeenCalled();
     expect(client.command).not.toHaveBeenCalled();
   } finally {

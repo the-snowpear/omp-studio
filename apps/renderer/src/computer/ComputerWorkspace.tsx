@@ -34,7 +34,10 @@ export function ComputerWorkspace(props: ComputerPaneProps) {
   const live = isVisible && available && !!props.sessionId && !preview;
   const state = useSyncExternalStore(live ? source.subscribe : noSubscribe, preview ? emptySnapshot : source.getSnapshot);
   const mediaRevision = source.mediaRevision;
-  const [demo, setDemo] = useState(() => buildComputerPreview(sessionId, props.previewScenario));
+  const [demo, setDemo] = useState(() => buildComputerPreview(sessionId, props.previewScenario, zh));
+  useEffect(() => {
+    if (preview) setDemo(buildComputerPreview(sessionId, props.previewScenario, zh));
+  }, [preview, sessionId, props.previewScenario, zh]);
   const snapshot = preview ? demo.snapshot : state.snapshot;
   const actions = preview ? demo.actions : state.actions;
   const frames = preview ? demo.snapshot.frames : state.frames;

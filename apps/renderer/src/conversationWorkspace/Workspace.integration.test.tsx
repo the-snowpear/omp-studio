@@ -128,7 +128,7 @@ describe("conversation windows", () => {
       canvas.getBoundingClientRect = vi.fn(() => new DOMRect(300, 40, 1100, 800));
       document.querySelector<HTMLElement>("[data-dock-workbench]")!.getBoundingClientRect = vi.fn(() => new DOMRect(0, 40, 1400, 900));
       Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: vi.fn(() => []) });
-      const titles = preview ? ["Audit and fix OSS", "修复 Git Bash"] : ["Second conversation", "Third conversation"];
+      const titles = preview ? ["Audit and fix OSS", "Fix Git Bash"] : ["Second conversation", "Third conversation"];
       for (const [index, title] of titles.entries()) {
         const row = await waitFor(() => {
           const found = [...document.querySelectorAll("#projectList .thread")].find(element => element.textContent?.includes(title));
@@ -559,7 +559,7 @@ describe("conversation windows", () => {
     for (const cancel of [true, false]) {
       fireEvent.pointerDown(git, { button: 0, clientX: 1880, clientY: 96 });
       fireEvent.pointerMove(window, { clientX: 1700, clientY: 400 });
-      await waitFor(() => expect(dragPreview.snapshot()?.label).toBe("停留以吸附到右侧分栏"));
+      await waitFor(() => expect(dragPreview.snapshot()?.label).toBe("Pause to snap to right split"));
       fireEvent.pointerMove(window, { clientX: 1690, clientY: 400 });
       await waitFor(() => expect(dragPreview.snapshot()?.target.region).toBe("rail"));
       expect(dragPreview.snapshot()?.snapKey).toBeUndefined();
@@ -730,7 +730,7 @@ describe("conversation windows", () => {
     expect(document.querySelector<HTMLElement>(".cw-shared-bottom")?.dataset.conversationOwner).toBe(ownedDocument);
     const tool = document.querySelector<HTMLElement>("[data-dock-float]")!;
     expect(Number(tool.style.zIndex)).toBeGreaterThan(Math.max(...[...document.querySelectorAll<HTMLElement>(".dock-conversation-window")].map(frame => Number(frame.style.zIndex))));
-    fireEvent.click(within(floating).getByRole("button", { name: "关闭对话视图" }));
+    fireEvent.click(within(floating).getByRole("button", { name: "Close conversation view" }));
     await waitFor(() => expect(floating.isConnected).toBe(false));
     await waitFor(() => expect(tool.isConnected).toBe(true));
     fireEvent.pointerDown(tool);
@@ -888,7 +888,7 @@ describe("conversation windows", () => {
     drag(document.querySelector("#projectList .thread:not(.active)")!);
     await waitFor(() => expect(document.querySelector(".cw-window-title-menu")).not.toBeNull());
     const floating = document.querySelector<HTMLElement>(".dock-conversation-window")!;
-    const title = within(floating).getByRole("button", { name: /新建对话/ });
+    const title = within(floating).getByRole("button", { name: /New chat/ });
     await new Promise(resolve => setTimeout(resolve, 0));
     fireEvent.keyDown(title, { key: "ArrowDown" });
     expect(screen.getByRole("menuitem", { name: /Fork/ }).hasAttribute("disabled")).toBe(true);
@@ -913,14 +913,14 @@ describe("conversation windows", () => {
     await waitFor(() => expect(document.querySelectorAll(".dock-conversation-window")).toHaveLength(1));
     const first = document.querySelector<HTMLElement>(".dock-conversation-window")!;
     const owner = first.querySelector<HTMLElement>(".cw-document")!.dataset.conversationDocument;
-    drag([...document.querySelectorAll<HTMLElement>("#projectList .thread")].find(row => !row.classList.contains("active") && !row.textContent?.includes("pi-web 更新"))!);
+    drag([...document.querySelectorAll<HTMLElement>("#projectList .thread")].find(row => !row.classList.contains("active") && !row.textContent?.includes("pi-web updates"))!);
     await waitFor(() => expect(document.querySelectorAll(".dock-conversation-window")).toHaveLength(2));
     const second = [...document.querySelectorAll<HTMLElement>(".dock-conversation-window")].find(frame => frame !== first)!;
     fireEvent.pointerDown(first);
     fireEvent.pointerDown(second);
     fireEvent.pointerEnter(main);
     expect(document.querySelector<HTMLElement>(".cw-shared-right")?.dataset.conversationOwner).toBe(second.querySelector<HTMLElement>(".cw-document")!.dataset.conversationDocument);
-    fireEvent.click(within(second).getByRole("button", { name: "关闭对话视图" }));
+    fireEvent.click(within(second).getByRole("button", { name: "Close conversation view" }));
     await waitFor(() => expect(document.querySelector<HTMLElement>(".cw-shared-right")?.dataset.conversationOwner).toBe(owner));
     fireEvent.click(within(first).getByRole("button", { name: "Minimize window" }));
     await waitFor(() => expect(document.querySelector<HTMLElement>(".cw-shared-right")?.dataset.conversationOwner).toBe(mainOwner));

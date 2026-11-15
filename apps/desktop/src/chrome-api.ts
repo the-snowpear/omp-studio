@@ -13,6 +13,7 @@ import { CHROME_SERVICE_CHANNELS, type ServiceDefinitionResult, type ServiceDefi
 import { PAYLOAD_HEALTH_CHANNEL, type PayloadHealthStatus } from "./payload-health-shared.js";
 import { CHROME_ARTIFACT_CHANNELS, type ArtifactFileResult, type ArtifactImportInput } from "./chrome-artifacts-shared.js";
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
+import { DESKTOP_LANGUAGE_CHANNEL, type DesktopLocale } from "./desktop-language-shared.js";
 import { CHROME_PERFORMANCE_CHANNEL } from "./chrome-performance-shared.js";
 import type { MemorySample } from "@omp-studio/studio-protocol";
 import { CONVERSATION_VIEW_CHANNEL, type ConversationViewState } from "./conversation-views.js";
@@ -191,6 +192,9 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     setTheme(theme: "light" | "dark", tint?: { color: string; symbolColor: string }): Promise<void> {
       if (theme !== "light" && theme !== "dark") return Promise.resolve();
       return ipcRenderer.invoke(TITLEBAR_OVERLAY_CHANNEL, tint === undefined ? { theme } : { theme, tint }) as Promise<void>;
+    },
+    setLanguage(locale: DesktopLocale): Promise<void> {
+      return ipcRenderer.invoke(DESKTOP_LANGUAGE_CHANNEL, { locale }) as Promise<void>;
     },
     notify(payload: { title: string; body?: string }): Promise<void> {
       return ipcRenderer.invoke(CHROME_NOTIFY_CHANNEL, payload) as Promise<void>;

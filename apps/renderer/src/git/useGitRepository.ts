@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { GitRepositoryReadModel, StudioClient, WorkspaceId } from "@omp-studio/client-contract";
 import { hostErrorMessage } from "../hostError";
+import { pickLocale } from "../i18n";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { projectReadsFor } from "../conversationWorkspace/projectReads";
 
@@ -48,7 +49,7 @@ function createRepositoryStore(client: StudioClient, workspaceId: WorkspaceId, r
             const repository = await client.query("git.repository.get", { workspaceId });
             if (requestGeneration === generation) publish({ repository, loading: false });
           } catch (cause) {
-            if (requestGeneration === generation) publish({ loading: false, error: hostErrorMessage(cause, "无法读取 Git 仓库状态") });
+            if (requestGeneration === generation) publish({ loading: false, error: hostErrorMessage(cause, pickLocale("无法读取 Git 仓库状态", "Cannot read Git repository status")) });
           } finally {
             reading = false;
           }

@@ -6,7 +6,7 @@ import { LIVE_AUDIO_VOICES, type LiveAudioResultMap, type LiveAudioState, type L
 import { WorkspaceStatus } from "../workspaces/Workspace";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { PREVIEW_LIVE_AUDIO } from "../preview/liveAudioPreview";
+import { getPreviewLiveAudio } from "../preview/liveAudioPreview";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { openLiveCapture } from "./liveCapture";
 import { MicrophoneDeniedError, MicrophoneSettingsButton, ensureMicrophoneAccess } from "./microphoneAccess";
@@ -36,7 +36,7 @@ export function LiveAudioPane({ client, sessionId, available, visible = true, re
     if (id && sessionId && !useWebRtc) void invoke("live.audio.release", { sessionId, audioId: id }).catch(() => {});
   }, [invoke, sessionId, useWebRtc]);
   useEffect(() => {
-    const epoch = ++generation.current; lock.current = false; setBusy(false); setError(""); setReview(false); setState(preview ? PREVIEW_LIVE_AUDIO : undefined);
+    const epoch = ++generation.current; lock.current = false; setBusy(false); setError(""); setReview(false); setState(preview ? getPreviewLiveAudio(zh) : undefined);
     let alive = true; let timer: ReturnType<typeof setTimeout>;
     const hide = () => { if (document.hidden) { generation.current++; lock.current = false; setBusy(false); release(); setReview(false); setState(previous => previous ? { ...previous, phase: "off", attached: false, inputLevel: 0, outputLevel: 0 } : previous); } };
     document.addEventListener("visibilitychange", hide);
@@ -51,11 +51,11 @@ export function LiveAudioPane({ client, sessionId, available, visible = true, re
     };
     if (!preview && enabled) void poll();
     return () => { alive = false; generation.current++; clearTimeout(timer); document.removeEventListener("visibilitychange", hide); release(); };
-  }, [preview, enabled, sessionId, invoke, release, visible]);
+  }, [preview, enabled, sessionId, invoke, release, visible, zh]);
   useEffect(() => { if (review) confirm.current?.focus(); }, [review]);
   const start = async () => {
     if (lock.current || !enabled) return; const epoch = generation.current; lock.current = true; setBusy(true); setError("");
-    if (preview) { setState({ ...PREVIEW_LIVE_AUDIO, voice, phase: "listening", attached: true, inputLevel: 0.2 }); setReview(false); setBusy(false); lock.current = false; return; }
+    if (preview) { setState({ ...getPreviewLiveAudio(zh), voice, phase: "listening", attached: true, inputLevel: 0.2 }); setReview(false); setBusy(false); lock.current = false; return; }
     const access = ensureMicrophoneAccess(zh);
     if (access) {
       try { await access; setMicDenied(false); }

@@ -175,7 +175,7 @@ describe("createOmpExtensibilityService", () => {
       const plugin = result.plugins.find((entry) => entry.name === "plain-pkg");
       assert.ok(plugin);
       assert.equal(plugin?.status, "error");
-      assert.equal(plugin?.err, "package.json 缺少 omp/pi");
+      assert.equal(plugin?.err, "package.json is missing omp/pi");
       assert.ok(!plugin?.err?.includes(home), "err must not leak paths");
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -582,7 +582,7 @@ describe("skills.setEnabled (whole-skill toggle)", () => {
         async () => service.setSkillEnabled({ name: "oss-audit", enabled: false }),
         (error: unknown) =>
           (error as { code?: string }).code === "INVALID_ARGUMENT" &&
-          (error as { message?: string }).message?.includes("内置"),
+          (error as { message?: string }).message?.includes("built in"),
       );
       await assert.rejects(
         async () => service.setSkillEnabled({ name: "ghost", enabled: false }),
@@ -651,7 +651,7 @@ describe("skills.reveal / skills.revealRoot", () => {
         async () => blocked.revealSkill({ name: "anything" }),
         (error: unknown) =>
           (error as { code?: string }).code === "UNAVAILABLE" &&
-          (error as { message?: string }).message?.includes("文件资源管理器"),
+          (error as { message?: string }).message?.includes("file manager"),
       );
 
       const service = createOmpExtensibilityService({

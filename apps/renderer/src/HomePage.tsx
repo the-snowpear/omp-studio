@@ -4,7 +4,7 @@ import type { ClientBootstrap, HomeReadModel, SessionHistoryReadModel, StudioCli
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "./icons";
 import { usePreviewMode } from "./preview/PreviewContext";
-import { PREVIEW_ACTIVITY, PREVIEW_PROJECTS } from "./preview/fixtures";
+import { getPreviewActivity, getPreviewProjects } from "./preview/fixtures";
 import { waitForCommandReceipt } from "./sessionLifecycle";
 import { ActionProgressBar } from "./ActionProgressBar";
 import { formatRuntimeDisconnectCopy, formatRuntimeUnavailableCopy } from "./diagnosticsModel";
@@ -972,7 +972,7 @@ export function HomePage({
 
       <h3 className="home-h">{t("home.recentProjects")}</h3>
       <div className="proj-grid" id="projGrid">
-        {preview ? PREVIEW_PROJECTS.map((project) => (
+        {preview ? getPreviewProjects(resolvedLanguage === "zh").map((project) => (
           <button key={project.id} className="proj-card" type="button" onClick={() => onRoute("workbench")}>
             <span className="pc-name"><Icon name="folder-open" /><span className="ellipsis">{project.name}</span></span>
             <span className="pc-path ellipsis">{project.path}</span>
@@ -1017,7 +1017,7 @@ export function HomePage({
 
       <h3 className="home-h home-h-tight">{t("home.recentActivity")}</h3>
       <div className="card" style={{ padding: 6 }} id="activityList">
-        {preview ? PREVIEW_ACTIVITY.map((entry) => (
+        {preview ? getPreviewActivity(resolvedLanguage === "zh").map((entry) => (
           <button key={entry.text} className="activity-row" type="button" onClick={() => onRoute("workbench")}>
             <span className={`a-ic ${entry.color}`} aria-hidden="true"><Icon name={entry.icon} extra="sm" /></span>
             <span className="ellipsis">{entry.text}</span>

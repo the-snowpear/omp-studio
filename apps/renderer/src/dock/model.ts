@@ -1,3 +1,4 @@
+import { pickLocale } from "../i18n";
 import { isFilePanelId, isRepeatablePanelId, isScopedPanelId, panelBaseId, scopedPanelId, type FilePanelId, type FilePanelDescriptor, PANEL_IDS, agentPanelId, browserPagePanelId, isAgentPanelId, isBrowserPagePanelId, isConversationPanelId, type AgentPanelId, type AgentPanelTarget, type BrowserPagePanelId, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId, type ScopedPanelId } from "./types";
 
 const FLOAT_RECT: DockRect = { x: 80, y: 60, width: 560, height: 400 };
@@ -663,7 +664,7 @@ export function builtInPresets(): DockPreset[] {
   debug.bottom.expanded = true;
   debug.bottom.groups = [{ id: "bottom-terminal", panels: ["terminal", "problems", "tests", "output"], active: "terminal" }, { id: "bottom-logs", panels: ["logs", "pvlogs"], active: "logs" }];
   debug.rail.mode = debug.rail.lastMode = "compact";
-  return [{ id: "default", name: "默认", layout: standard, builtin: true }, { id: "focus", name: "专注", layout: focus, builtin: true }, { id: "debug", name: "调试", layout: debug, builtin: true }];
+  return [{ id: "default", name: pickLocale("默认", "Default"), layout: standard, builtin: true }, { id: "focus", name: pickLocale("专注", "Focus"), layout: focus, builtin: true }, { id: "debug", name: pickLocale("调试", "Debug"), layout: debug, builtin: true }];
 }
 
 function readRect(value: unknown): DockRect {

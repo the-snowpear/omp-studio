@@ -26,7 +26,7 @@ import { AgentAccountRules, AgentPoolSummary } from "./models/AgentAccountRules"
 import { useAgentAccountPools } from "./models/useAgentAccountPools";
 import type { NativePreferencesContext } from "./settings/NativePreferencesPane";
 import {
-  AGENT_THINKING,
+  getAgentThinking,
   createPreviewAgentDefinitions,
 } from "./preview/subagentsPreview";
 
@@ -250,7 +250,7 @@ export function SubagentsPanel({
   const zh = resolvedLanguage === "zh";
   const accountPools = useAgentAccountPools({ client, context, preview, visible });
   useEffect(() => { onAccountDirtyChange?.(accountPools.hasChanges); }, [accountPools.hasChanges, onAccountDirtyChange]);
-  const [data, setData] = useState<AgentDefinitionsReadModel | null>(preview ? createPreviewAgentDefinitions() : null);
+  const [data, setData] = useState<AgentDefinitionsReadModel | null>(preview ? createPreviewAgentDefinitions(undefined, zh) : null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
@@ -275,7 +275,7 @@ export function SubagentsPanel({
 
   const refresh = useCallback(async () => {
     if (preview) {
-      setData(createPreviewAgentDefinitions());
+      setData(createPreviewAgentDefinitions(undefined, zh));
       setLoadError(null);
       return;
     }
@@ -287,7 +287,7 @@ export function SubagentsPanel({
       setLoadError(hostErrorMessage(error, "agents.definitions.get failed"));
       setData(null);
     }
-  }, [client, preview]);
+  }, [client, preview, zh]);
 
   useEffect(() => {
     void refresh();
@@ -317,7 +317,7 @@ export function SubagentsPanel({
   }, [pendingDelete, busy]);
 
   const mutateLocal = (updater: (current: AgentDefinitionsReadModel) => AgentDefinitionsReadModel) => {
-    setData((current) => updater(current ?? createPreviewAgentDefinitions()));
+    setData((current) => updater(current ?? createPreviewAgentDefinitions(undefined, zh)));
   };
 
   const agents = data?.agents ?? [];
@@ -599,7 +599,7 @@ export function SubagentsPanel({
     toast(t("subagents.forkDraftToast"));
   };
 
-  const catalog = models ?? (preview ? createPreviewModelConfig() : null);
+  const catalog = models ?? (preview ? createPreviewModelConfig(zh) : null);
 
   const addModelValue = (value: string) => {
     if (!draftState || !value || draftState.models.includes(value)) {
@@ -753,7 +753,7 @@ export function SubagentsPanel({
           <div className="field" style={{ marginTop: 12 }}>
             <label>{t("subagents.thinkingLevel")}</label>
             <div className="seg sa-seg-wrap">
-              {AGENT_THINKING.map((item) => (
+              {getAgentThinking(zh).map((item) => (
                 <button type="button" key={item.id || "inherit"} className={draft.thinkingLevel === item.id ? "active" : undefined} disabled={definitionLocked} onClick={() => setDraft({ ...draft, thinkingLevel: item.id as AgentDraft["thinkingLevel"] })}>{item.label}</button>
               ))}
             </div>

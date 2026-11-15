@@ -7,6 +7,7 @@ import type { LookupAddress } from "node:dns";
 import { SocksClient } from "socks";
 import { connectTcp, remotePrivateHost } from "./network-proxy.js";
 import type { NetworkDestination } from "./network-stream.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 export type NetworkLookup = (hostname: string, options: { all: true; order: "ipv4first" }) => Promise<readonly LookupAddress[]>;
 
@@ -15,7 +16,7 @@ export async function localNetworkConnect(destination: NetworkDestination, proxy
   // only these public addresses, including tunnels through a configured proxy.
   const addresses = (await resolveHost(destination.host, { all: true, order: "ipv4first" }))
     .filter(address => !remotePrivateHost(address.address));
-  if (!addresses.length) throw Object.assign(new Error("本机联网出口不连接远端请求的私有地址"), { code: "PRIVATE_NETWORK_DESTINATION" });
+  if (!addresses.length) throw Object.assign(new Error(desktopText("本机联网出口不连接远端请求的私有地址", "Local network egress does not connect to private addresses requested remotely")), { code: "PRIVATE_NETWORK_DESTINATION" });
   let proxy = proxyUrl;
   if (!proxy && resolveProxy) {
     const rule = (await resolveProxy(`https://${destination.host}:${destination.port}`)).split(";")[0]?.trim() ?? "DIRECT";
@@ -40,11 +41,11 @@ export async function localNetworkConnect(destination: NetworkDestination, proxy
       const authorization = url.username ? `Basic ${Buffer.from(`${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`).toString("base64")}` : undefined;
       const authority = `${target.includes(":") ? `[${target}]` : target}:${destination.port}`;
       const req = send({ hostname: proxyHost, port: Number(url.port || (url.protocol === "https:" ? 443 : 80)), method: "CONNECT", path: authority, headers: { Host: authority, ...(authorization ? { "Proxy-Authorization": authorization } : {}) }, agent: false });
-      req.setTimeout(10_000, () => req.destroy(new Error("本机上游代理连接超时")));
+      req.setTimeout(10_000, () => req.destroy(new Error(desktopText("本机上游代理连接超时", "Local upstream proxy connection timed out"))));
       req.once("error", reject);
       req.once("connect", (response, socket, head) => {
         req.setTimeout(0);
-        if (response.statusCode !== 200) { socket.destroy(); reject(new Error(`本机上游代理拒绝连接：HTTP ${response.statusCode}`)); return; }
+        if (response.statusCode !== 200) { socket.destroy(); reject(new Error(desktopText(`本机上游代理拒绝连接：HTTP ${response.statusCode}`, `Local upstream proxy rejected connection: HTTP ${response.statusCode}`))); return; }
         if (head.length) socket.unshift(head); resolve(socket);
       });
       req.end();

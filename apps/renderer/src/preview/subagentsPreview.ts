@@ -4,6 +4,7 @@
  */
 
 import type { AgentDefinitionRecord, AgentDefinitionsReadModel } from "@omp-studio/client-contract";
+import { isZh } from "../i18n";
 
 export const AGENT_BUILTIN_TOOLS = [
   "read",
@@ -50,23 +51,27 @@ export const AGENT_ROLE_ALIASES = [
   "@advisor",
 ] as const;
 
-export const AGENT_THINKING = [
-  { id: "", label: "继承" },
-  { id: "auto", label: "Auto" },
-  { id: "off", label: "Off" },
-  { id: "minimal", label: "Minimal" },
-  { id: "low", label: "Low" },
-  { id: "medium", label: "Medium" },
-  { id: "high", label: "High" },
-  { id: "xhigh", label: "XHigh" },
-  { id: "max", label: "Max" },
-] as const;
+export function getAgentThinking(zh = isZh()) {
+  return [
+    { id: "", label: zh ? "继承" : "Inherit" },
+    { id: "auto", label: "Auto" },
+    { id: "off", label: "Off" },
+    { id: "minimal", label: "Minimal" },
+    { id: "low", label: "Low" },
+    { id: "medium", label: "Medium" },
+    { id: "high", label: "High" },
+    { id: "xhigh", label: "XHigh" },
+    { id: "max", label: "Max" },
+  ] as const;
+}
+
+export const AGENT_THINKING = getAgentThinking();
 
 function agent(partial: AgentDefinitionRecord): AgentDefinitionRecord {
   return partial;
 }
 
-export function createPreviewAgentDefinitions(now = "2026-08-14T08:00:00.000Z"): AgentDefinitionsReadModel {
+export function createPreviewAgentDefinitions(now = "2026-08-14T08:00:00.000Z", zh = isZh()): AgentDefinitionsReadModel {
   return {
     agents: [
       agent({
@@ -77,7 +82,7 @@ export function createPreviewAgentDefinitions(now = "2026-08-14T08:00:00.000Z"):
         model: ["@smol"],
         thinkingLevel: "low",
         source: "user",
-        sourceLabel: "用户",
+        sourceLabel: zh ? "用户" : "User",
         editable: true,
         canDelete: true,
         canFork: false,
@@ -92,7 +97,7 @@ export function createPreviewAgentDefinitions(now = "2026-08-14T08:00:00.000Z"):
         thinkingLevel: "medium",
         readSummarize: false,
         source: "bundled",
-        sourceLabel: "内置",
+        sourceLabel: zh ? "内置" : "Bundled",
         editable: false,
         canDelete: false,
         canFork: true,
@@ -107,7 +112,7 @@ export function createPreviewAgentDefinitions(now = "2026-08-14T08:00:00.000Z"):
         spawns: ["scout"],
         model: ["@slow"],
         source: "bundled",
-        sourceLabel: "内置",
+        sourceLabel: zh ? "内置" : "Bundled",
         editable: false,
         canDelete: false,
         canFork: true,
@@ -122,7 +127,7 @@ export function createPreviewAgentDefinitions(now = "2026-08-14T08:00:00.000Z"):
         model: ["@task"],
         thinkingLevel: "auto",
         source: "bundled",
-        sourceLabel: "内置",
+        sourceLabel: zh ? "内置" : "Bundled",
         editable: false,
         canDelete: false,
         canFork: true,

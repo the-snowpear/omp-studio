@@ -7,6 +7,7 @@ import { extractRuntimeArchive, verifySignedArtifact, parseRuntimeInstallationMa
 import { runSsh, nodeRemoteCommand } from "./deploy.js";
 import { hasActiveRemoteWork } from "./server.js";
 import type { RemoteConnectionManager, RemoteMaintenance } from "./manager.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 export async function installRemoteRuntime(manager: RemoteConnectionManager, id: string, archive: string, trustedKeys: Readonly<Record<string, string | Buffer>>): Promise<void> {
   return manager.maintenance(id, controls => install(manager, id, archive, trustedKeys, controls));
@@ -23,10 +24,10 @@ async function install(manager: RemoteConnectionManager, id: string, archive: st
   try {
     await extractRuntimeArchive(archive, join(temp, "artifact"));
     const { manifest } = await verifySignedArtifact({ directory: join(temp, "artifact"), layout: RUNTIME_ARTIFACT_LAYOUT, parseManifest: parseRuntimeInstallationManifest, requireCovered: value => ["runtime-manifest.json", value.entrypoint], trustedKeys });
-    if (manifest.platform !== `${remote.environment.platform}-${remote.environment.arch}`) throw new Error(`制品目标 ${manifest.platform} 与远端不匹配`);
-    if (hasActiveRemoteWork(await remote.transport.bootstrap())) throw new Error("请先完成远端任务和待处理审批，再安装 Runtime");
+    if (manifest.platform !== `${remote.environment.platform}-${remote.environment.arch}`) throw new Error(desktopText(`制品目标 ${manifest.platform} 与远端不匹配`, `Artifact target ${manifest.platform} does not match the remote machine`));
+    if (hasActiveRemoteWork(await remote.transport.bootstrap())) throw new Error(desktopText("请先完成远端任务和待处理审批，再安装 Runtime", "Please finish remote tasks and pending approvals before installing Runtime"));
     for (const name of ["runtime-manifest.json", "checksums.json", "runtime-signature.json", manifest.entrypoint]) {
-      controls.progress(`正在上传 ${name}`);
+      controls.progress(desktopText(`正在上传 ${name}`, `Uploading ${name}`));
       const file = join(temp, "artifact", name);
       const digest = createHash("sha256");
       for await (const chunk of createReadStream(file)) digest.update(chunk);
@@ -44,7 +45,7 @@ async function install(manager: RemoteConnectionManager, id: string, archive: st
         });
       `), createReadStream(file), 600_000, undefined, authentication);
     }
-    controls.progress("正在停止空闲 Host 并安装 Runtime");
+    controls.progress(desktopText("正在停止空闲 Host 并安装 Runtime", "Stopping idle Host and installing Runtime"));
     shutdownRequested = true;
     await remote.transport.peer.request("shutdown");
     await controls.disconnect();
@@ -69,7 +70,7 @@ async function install(manager: RemoteConnectionManager, id: string, archive: st
       await runSsh(profile, nodeRemoteCommand(`require('node:fs').rmSync(require('node:path').join(${JSON.stringify(remote.state)},${JSON.stringify(stageName)}),{recursive:true,force:true});`), undefined, 30_000, undefined, authentication).catch(() => {});
     }
     if (shutdownRequested) {
-      controls.progress("正在重新连接远端 Host");
+      controls.progress(desktopText("正在重新连接远端 Host", "Reconnecting to remote Host"));
       await controls.reconnect();
     }
   }

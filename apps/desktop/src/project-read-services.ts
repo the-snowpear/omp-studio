@@ -3,12 +3,14 @@ import { SessionArchiveWorkerPool, SessionTelemetryStore, type SessionArchiveRea
 import { SharedArchiveTelemetry, SharedProjectReads } from "@omp-studio/host-client-api";
 import type { QueryResult } from "@omp-studio/client-contract";
 import { registerHostReadDiagnostics } from "./desktop-performance.js";
+import { onDesktopLanguageChange } from "./desktop-language-shared.js";
 
 /** Authority lifetime; workspace paths are captured, never read from a mutable selection. */
 export class ProjectReadServices {
   readonly archiveBudget = new SessionArchiveWorkerPool();
   readonly metadata = new SharedProjectReads();
   readonly telemetry = new SharedArchiveTelemetry<QueryResult<"session.telemetry.read"> | undefined>();
+  readonly #stopLanguage = onDesktopLanguageChange(() => this.metadata.invalidate());
   readonly #stores = new Map<string, SessionTelemetryStore>();
   readonly #services = new Map<string, object>();
   readonly #unregister = registerHostReadDiagnostics(() => {
@@ -47,6 +49,7 @@ export class ProjectReadServices {
     return store;
   }
   async dispose(): Promise<void> {
+    this.#stopLanguage();
     this.#unregister();
     await this.telemetry.dispose(); this.metadata.invalidate();
     this.#services.clear();

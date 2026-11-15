@@ -6,6 +6,7 @@ import type { ComputerFrame } from "@omp-studio/studio-protocol";
 import { runtimeMediaFilesForLibrary, type RuntimeMediaAsset } from "./runtime-media-files.js";
 import { COMPUTER_FRAME_CHANNELS, type ComputerFrameRequest, type ComputerFrameReadResult, type ComputerFrameSaveResult } from "./computer-frames-shared.js";
 import type { TerminalIpcMain, TerminalSender } from "./terminal-ipc.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
@@ -13,7 +14,7 @@ const FRAME_BYTES = 32 * 1024 * 1024;
 const READ_BUDGET = 64 * 1024 * 1024;
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const RETENTION_BYTES = 1024 * 1024 * 1024;
-const unavailable = "电脑画面不可用或已过期，请刷新观察画面。 / Computer frame is unavailable or expired.";
+const unavailable = () => desktopText("电脑画面不可用或已过期，请刷新观察画面。", "Computer frame is unavailable or expired. Refresh the view.");
 
 /** Written only by the owning Runtime into its managed media root. Never returned to Renderer. */
 interface FrameDescriptor {
@@ -47,21 +48,21 @@ interface ManagedFrame {
 
 function sessionKey(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function request(value: unknown): ComputerFrameRequest {
-  if (!value || typeof value !== "object") throw new Error(unavailable);
+  if (!value || typeof value !== "object") throw new Error(unavailable());
   const input = value as ComputerFrameRequest;
-  if (input.origin !== "local" || typeof input.scopeSessionId !== "string" || !input.scopeSessionId.trim() || input.scopeSessionId.length > 512 || typeof input.frameId !== "string" || !UUID.test(input.frameId)) throw new Error(unavailable);
+  if (input.origin !== "local" || typeof input.scopeSessionId !== "string" || !input.scopeSessionId.trim() || input.scopeSessionId.length > 512 || typeof input.frameId !== "string" || !UUID.test(input.frameId)) throw new Error(unavailable());
   return input;
 }
 async function assertInside(root: string, target: string): Promise<void> {
   const [base, path] = await Promise.all([realpath(root), realpath(target)]);
   const normalize = (value: string) => process.platform === "win32" ? value.toLowerCase() : value;
-  if (!normalize(path).startsWith(normalize(base + sep))) throw new Error(unavailable);
+  if (!normalize(path).startsWith(normalize(base + sep))) throw new Error(unavailable());
 }
 async function readSmallJson<T>(file: string): Promise<T> {
   const info = await lstat(file);
-  if (!info.isFile() || info.isSymbolicLink() || info.size > 32 * 1024) throw new Error(unavailable);
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 32 * 1024) throw new Error(unavailable());
   const text = await readFile(file, "utf8");
-  if (Buffer.byteLength(text) > 32 * 1024) throw new Error(unavailable);
+  if (Buffer.byteLength(text) > 32 * 1024) throw new Error(unavailable());
   return JSON.parse(text) as T;
 }
 async function optionalRetention(file: string): Promise<FrameRetention | undefined> {
@@ -111,11 +112,11 @@ export class ComputerFrameStore {
   }
 
   async #load(input: ComputerFrameRequest): Promise<ManagedFrame> {
-    if (this.#disposed) throw new Error(unavailable);
+    if (this.#disposed) throw new Error(unavailable());
     const directory = this.options.directory();
     const scopeDirectory = join(directory, "computer-workspace", sessionKey(input.scopeSessionId));
     const parent = await lstat(scopeDirectory);
-    if (!parent.isDirectory() || parent.isSymbolicLink()) throw new Error(unavailable);
+    if (!parent.isDirectory() || parent.isSymbolicLink()) throw new Error(unavailable());
     await assertInside(directory, scopeDirectory);
     const descriptorFile = join(scopeDirectory, input.frameId + ".json");
     const descriptor = await readSmallJson<FrameDescriptor>(descriptorFile);
@@ -126,10 +127,10 @@ export class ComputerFrameStore {
       || !Number.isSafeInteger(descriptor.bytes) || descriptor.bytes < 33 || descriptor.bytes > FRAME_BYTES
       || !HASH.test(descriptor.sha256) || !Number.isSafeInteger(frame.width) || !Number.isSafeInteger(frame.height)
       || frame.width < 1 || frame.height < 1 || frame.width * frame.height > 32_000_000
-      || !Number.isFinite(frame.capturedAt)) throw new Error(unavailable);
+      || !Number.isFinite(frame.capturedAt)) throw new Error(unavailable());
     const retentionFile = join(scopeDirectory, input.frameId + ".artifact.json");
     const retention = await optionalRetention(retentionFile);
-    if (retention && (retention.scopeSessionId !== input.scopeSessionId || retention.frameId !== input.frameId || (retention.artifactId !== undefined && !UUID.test(retention.artifactId)))) throw new Error(unavailable);
+    if (retention && (retention.scopeSessionId !== input.scopeSessionId || retention.frameId !== input.frameId || (retention.artifactId !== undefined && !UUID.test(retention.artifactId)))) throw new Error(unavailable());
     return { library: this.options.library(), descriptor, files: { directory, descriptor: descriptorFile, retention: retentionFile, payload: join(directory, "outputs", sessionKey(frame.sessionId), frame.frameId + ".bin") }, ...(retention ? { retention } : {}) };
   }
 
@@ -177,7 +178,7 @@ export class ComputerFrameStore {
     return this.#serial(input.frameId, async () => {
       const row = await this.#load(input);
       let artifactId = await this.#lookupArtifact(row);
-      if (this.#expired(row)) throw new Error(unavailable);
+      if (this.#expired(row)) throw new Error(unavailable());
       if (!artifactId && row.descriptor.frame.source === "execution" && row.descriptor.runFinished) artifactId = await this.#promote(row);
       const bytes = await this.#bytes(row, artifactId);
       return { ok: true, data: Uint8Array.from(bytes).buffer, width: row.descriptor.frame.width, height: row.descriptor.frame.height, mimeType: "image/png", ...(artifactId ? { artifactId } : {}) };
@@ -185,16 +186,16 @@ export class ComputerFrameStore {
   }
 
   async #bytes(row: ManagedFrame, artifactId?: string): Promise<Buffer> {
-    if (this.#readingBytes + row.descriptor.bytes > READ_BUDGET) throw new Error(unavailable);
+    if (this.#readingBytes + row.descriptor.bytes > READ_BUDGET) throw new Error(unavailable());
     this.#readingBytes += row.descriptor.bytes;
     try {
       const path = artifactId ? (await row.library.resolve(artifactId)).path : row.files.payload;
       if (!artifactId) await assertInside(row.files.directory, path);
       const info = await lstat(path);
-      if (!info.isFile() || info.isSymbolicLink() || info.size !== row.descriptor.bytes) throw new Error(unavailable);
+      if (!info.isFile() || info.isSymbolicLink() || info.size !== row.descriptor.bytes) throw new Error(unavailable());
       const bytes = await readFile(path);
-      if (bytes.length !== row.descriptor.bytes || !validPng(bytes, row.descriptor.frame) || createHash("sha256").update(bytes).digest("hex") !== row.descriptor.sha256) throw new Error(unavailable);
-      if (this.#disposed) throw new Error(unavailable);
+      if (bytes.length !== row.descriptor.bytes || !validPng(bytes, row.descriptor.frame) || createHash("sha256").update(bytes).digest("hex") !== row.descriptor.sha256) throw new Error(unavailable());
+      if (this.#disposed) throw new Error(unavailable());
       return bytes;
     } finally { this.#readingBytes -= row.descriptor.bytes; }
   }
@@ -204,7 +205,7 @@ export class ComputerFrameStore {
     return this.#serial(input.frameId, async () => {
       const row = await this.#load(input);
       const previous = await this.#lookupArtifact(row);
-      if (this.#expired(row)) throw new Error(unavailable);
+      if (this.#expired(row)) throw new Error(unavailable());
       await this.#bytes(row, previous);
       const artifactId = await this.#promote(row);
       await row.library.retain(artifactId);
@@ -284,14 +285,14 @@ export function registerComputerFrameIpc(options: {
   let disposed = false;
   const allowed = (sender: TerminalSender) => !disposed && !sender.isDestroyed() && options.isTrustedSender(sender) && options.isVisible(sender);
   options.ipcMain.handle(COMPUTER_FRAME_CHANNELS.read, async ({ sender }, raw): Promise<ComputerFrameReadResult> => {
-    if (!allowed(sender)) return { ok: false, message: unavailable };
-    try { const result = await options.store.read(raw); return allowed(sender) ? result : { ok: false, message: unavailable }; }
-    catch { return { ok: false, message: unavailable }; }
+    if (!allowed(sender)) return { ok: false, message: unavailable() };
+    try { const result = await options.store.read(raw); return allowed(sender) ? result : { ok: false, message: unavailable() }; }
+    catch { return { ok: false, message: unavailable() }; }
   });
   options.ipcMain.handle(COMPUTER_FRAME_CHANNELS.save, async ({ sender }, raw): Promise<ComputerFrameSaveResult> => {
-    if (!allowed(sender)) return { ok: false, message: unavailable };
+    if (!allowed(sender)) return { ok: false, message: unavailable() };
     try { return await options.store.save(raw); }
-    catch { return { ok: false, message: unavailable }; }
+    catch { return { ok: false, message: unavailable() }; }
   });
   options.store.start();
   return { dispose() { disposed = true; options.store.dispose(); options.ipcMain.removeHandler(COMPUTER_FRAME_CHANNELS.read); options.ipcMain.removeHandler(COMPUTER_FRAME_CHANNELS.save); } };

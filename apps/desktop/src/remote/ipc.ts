@@ -4,6 +4,7 @@ import { parseClientCommandRequest, parseClientQueryRequest } from "@omp-studio/
 import { REMOTE_CHANNELS, type RemoteConnectionProfile, type RemoteCredentials } from "./shared.js";
 import type { RemoteConnectionManager } from "./manager.js";
 import { RemoteOperationError } from "./wire.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 interface Sender { getURL(): string; isDestroyed(): boolean; send(channel: string, payload: unknown): void; }
 interface Ipc { handle(channel: string, listener: (event: { sender: Sender }, ...args: unknown[]) => unknown): void; removeHandler(channel: string): void; }
@@ -33,7 +34,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
     const remote = manager.get(target);
     const generation = remote.generation;
     const result = await action(remote);
-    if (manager.get(target) !== remote || remote.generation !== generation) throw new Error("SSH 通道已改变，请重新同步；已丢弃旧连接的读取结果");
+    if (manager.get(target) !== remote || remote.generation !== generation) throw new Error(desktopText("SSH 通道已改变，请重新同步；已丢弃旧连接的读取结果", "SSH channel changed; please resynchronize (read result from previous connection was discarded)"));
     return result;
   };
   const cancelPending = async (): Promise<void> => {
@@ -50,7 +51,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
   handle(REMOTE_CHANNELS.connect, async (id, input) => {
     const credentials = input as RemoteCredentials | undefined;
     const target = idOf(id);
-    if (connecting.has(target)) { if (credentials) credentials.password = ""; throw new Error("此 SSH 连接正在准备中"); }
+    if (connecting.has(target)) { if (credentials) credentials.password = ""; throw new Error(desktopText("此 SSH 连接正在准备中", "This SSH connection is still being prepared")); }
     const attempt = { controller: new AbortController(), clearCredentials: () => { if (credentials) credentials.password = ""; } };
     connecting.set(target, attempt);
     let stopWaiting: (() => void) | undefined;
@@ -63,7 +64,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
         stopWaiting = () => attempt.controller.signal.removeEventListener("abort", onAbort);
       });
       const confirmed = options.confirmDeployment ? await Promise.race([options.confirmDeployment(manager.profile(target)), cancelled]) : true;
-      if (!confirmed || attempt.controller.signal.aborted || disposed) throw new Error("连接已取消");
+      if (!confirmed || attempt.controller.signal.aborted || disposed) throw new Error(desktopText("连接已取消", "Connection cancelled"));
       await manager.connect(target, credentials, attempt.controller.signal);
     } finally {
       stopWaiting?.();
@@ -101,11 +102,11 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
     const transport = target(name, contextId);
     const command = parseClientCommandRequest(request);
     try { return { ok: true, accepted: await transport.command(command) }; }
-    catch (error) { return { ok: false, error: { code: error instanceof RemoteOperationError ? "UNAVAILABLE" : "OUTCOME_UNKNOWN", message: error instanceof Error ? error.message : "命令结果未知；未自动重发，请重新连接核对" } }; }
+    catch (error) { return { ok: false, error: { code: error instanceof RemoteOperationError ? "UNAVAILABLE" : "OUTCOME_UNKNOWN", message: error instanceof Error ? error.message : desktopText("命令结果未知；未自动重发，请重新连接核对", "Command outcome is unknown; it was not resent — reconnect to verify") } }; }
   });
   handle(REMOTE_CHANNELS.directories, (id, path) => read(id, remote => remote.transport.peer.request("directories", typeof path === "string" ? { path } : {})));
   handle(REMOTE_CHANNELS.register, (id, path) => {
-    if (typeof path !== "string" || !path) throw new Error("远端目录不能为空");
+    if (typeof path !== "string" || !path) throw new Error(desktopText("远端目录不能为空", "Remote directory cannot be empty"));
     manager.assertWritable(idOf(id));
     return manager.get(idOf(id)).transport.registerWorkspace(path).then(async result => { await manager.rememberDirectory(idOf(id), path); return result; });
   });

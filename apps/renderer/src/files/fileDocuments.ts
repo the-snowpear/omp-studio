@@ -1,5 +1,6 @@
 import type { StudioClient, WorkspaceFileInfo, WorkspaceFileText, WorkspaceFileSaveResult } from "@omp-studio/client-contract";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { pickLocale } from "../i18n";
 import { previewFile, previewFileText } from "../preview/filesPreview";
 
 /** Persisted identity is enough to reopen a view; size, version and permissions stay unknown until read. */
@@ -104,7 +105,7 @@ export class FileDocument {
   isViewClosed(id: string) { return this.closedViews.has(id); }
   dispose() { clearInterval(this.timer); this.listeners.clear(); }
 }
-const message = (error: unknown) => hostErrorMessage(error, "无法读取或保存文件");
+const message = (error: unknown) => hostErrorMessage(error, pickLocale("无法读取或保存文件", "Unable to read or save file"));
 const documents = new Map<string, FileDocument>();
 const dirtyListeners = new Set<() => void>();
 export function subscribeDirtyFiles(listener: () => void) { dirtyListeners.add(listener); return () => { dirtyListeners.delete(listener); }; }

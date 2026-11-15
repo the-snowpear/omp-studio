@@ -175,7 +175,7 @@ describe("artifact-download: downloadOne", () => {
             onProgress: () => {},
             fetcher: mockFetcher,
           }),
-        /Content-Range 起点不符/,
+        /Content-Range offset mismatch/,
       );
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -291,7 +291,7 @@ describe("artifact-download: downloadOne", () => {
             onProgress: () => {},
             fetcher: mockFetcher,
           }),
-        /SHA-256 校验失败/,
+        /SHA-256 checksum mismatch/,
       );
 
       await assert.rejects(() => stat(destination), { code: "ENOENT" });
@@ -307,7 +307,7 @@ describe("artifact-download: assertFreeSpace", () => {
     try {
       await assert.doesNotReject(() => assertFreeSpace(dir, 1024)); // 1 KB
       // 100 PB will definitely exceed any disk space
-      await assert.rejects(() => assertFreeSpace(dir, 100 * 1024 * 1024 * 1024 * 1024 * 1024), /磁盘空间不足/);
+      await assert.rejects(() => assertFreeSpace(dir, 100 * 1024 * 1024 * 1024 * 1024 * 1024), /Insufficient disk space/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

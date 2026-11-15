@@ -18,6 +18,7 @@ import type {
   HostSessionCatalogProvider,
 } from "@omp-studio/host-client-api";
 import { threadIdFor, formatRuntimeMissingMessage, type HostRuntimeDisconnect, type HostRuntimeUnavailable } from "@omp-studio/host-client-api";
+import { desktopText } from "./desktop-language-shared.js";
 import { scanSessionCatalog, StudioHostError, removeSessionPin, type StudioSessionArchiveService, type StudioSessionDeleteService } from "@omp-studio/studio-host";
 import type { ApprovalMode, RequestId, StudioOperation, ThreadId } from "@omp-studio/studio-protocol";
 import type {
@@ -613,7 +614,7 @@ async function releaseResidentSession(
   options.bindSession(next);
   const nextId = next?.controller.publication()?.snapshot?.sessionId;
   if (nextId === sessionId) {
-    throw new StudioHostError("COMMAND_BLOCKED", "无法离开当前会话，归档已取消");
+    throw new StudioHostError("COMMAND_BLOCKED", desktopText("无法离开当前会话，归档已取消", "Cannot leave the current session; archive cancelled"));
   }
   return true;
 }

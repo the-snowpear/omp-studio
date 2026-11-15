@@ -26,6 +26,7 @@ import { classifyAgentPluginRoot } from "./omp-discovery/agent-plugin.js";
 import { listClaudePluginRoots, type ClaudePluginRoot } from "./omp-discovery/helpers.js";
 import { getAgentDir, getProjectConfigDir } from "./omp-discovery/paths.js";
 import { listOmpPluginRoots, listSettingsExtensionRoots } from "./omp-discovery/plugin-roots.js";
+import { hostText } from "./locale.js";
 import { sanitizeDisplayText } from "./read-models.js";
 import { probeMcpServer, type McpConnectSpec } from "./omp-mcp-probe.js";
 import type { HostMcpService } from "./services.js";
@@ -229,17 +230,17 @@ function listFromMap(
   for (const [rawName, rawEntry] of Object.entries(map)) {
     const base = safeName(rawName);
     if (base === undefined) {
-      warnings.push(sanitizeDisplayText(`跳过无效 MCP 名称`, WARNING_MAX) ?? "跳过无效 MCP 名称");
+      warnings.push(sanitizeDisplayText(hostText(`跳过无效 MCP 名称`, `Skipped invalid MCP server name`), WARNING_MAX) ?? hostText("跳过无效 MCP 名称", "Skipped invalid MCP server name"));
       continue;
     }
     const name = options?.namePrefix ? safeName(`${options.namePrefix}:${base}`) : base;
     if (name === undefined) {
-      warnings.push(sanitizeDisplayText(`跳过无效 MCP 名称`, WARNING_MAX) ?? "跳过无效 MCP 名称");
+      warnings.push(sanitizeDisplayText(hostText(`跳过无效 MCP 名称`, `Skipped invalid MCP server name`), WARNING_MAX) ?? hostText("跳过无效 MCP 名称", "Skipped invalid MCP server name"));
       continue;
     }
     const entry = asRecord(rawEntry);
     if (!entry) {
-      warnings.push(sanitizeDisplayText(`MCP "${name}" 配置无效`, WARNING_MAX) ?? `MCP "${name}" 配置无效`);
+      warnings.push(sanitizeDisplayText(hostText(`MCP "${name}" 配置无效`, `Invalid MCP configuration for "${name}"`), WARNING_MAX) ?? hostText(`MCP "${name}" 配置无效`, `Invalid MCP configuration for "${name}"`));
       continue;
     }
     if (options?.requireEndpoint && typeof entry.command !== "string" && typeof entry.url !== "string") {
@@ -292,8 +293,8 @@ async function loadJsonSource(
     return listFromMap(filePath, config.mcpServers, scope, sourceLabel, rank, writableNative, warnings, seq);
   } catch (error) {
     warnings.push(
-      sanitizeDisplayText(`读取 ${sourceLabel} MCP 配置失败: ${String(error)}`, WARNING_MAX) ??
-        `读取 ${sourceLabel} MCP 配置失败`,
+      sanitizeDisplayText(hostText(`读取 ${sourceLabel} MCP 配置失败: ${String(error)}`, `Failed to read ${sourceLabel} MCP config: ${String(error)}`), WARNING_MAX) ??
+        hostText(`读取 ${sourceLabel} MCP 配置失败`, `Failed to read ${sourceLabel} MCP config`),
     );
     return [];
   }
@@ -406,7 +407,7 @@ async function loadCodexSource(
     return listFromCodexToml(filePath, text, scope, rank, warnings, seq);
   } catch (error) {
     warnings.push(
-      sanitizeDisplayText(`读取 Codex MCP 配置失败: ${String(error)}`, WARNING_MAX) ?? "读取 Codex MCP 配置失败",
+      sanitizeDisplayText(hostText(`读取 Codex MCP 配置失败: ${String(error)}`, `Failed to read Codex MCP config: ${String(error)}`), WARNING_MAX) ?? hostText("读取 Codex MCP 配置失败", "Failed to read Codex MCP config"),
     );
     return [];
   }
@@ -426,7 +427,7 @@ async function loadOpenCodeSource(
     return listFromMap(filePath, mcp, scope, "OpenCode", rank, false, warnings, seq);
   } catch (error) {
     warnings.push(
-      sanitizeDisplayText(`读取 OpenCode MCP 配置失败: ${String(error)}`, WARNING_MAX) ?? "读取 OpenCode MCP 配置失败",
+      sanitizeDisplayText(hostText(`读取 OpenCode MCP 配置失败: ${String(error)}`, `Failed to read OpenCode MCP config: ${String(error)}`), WARNING_MAX) ?? hostText("读取 OpenCode MCP 配置失败", "Failed to read OpenCode MCP config"),
     );
     return [];
   }
@@ -445,7 +446,7 @@ async function loadVsCodeSource(
     return listFromMap(filePath, servers, "project", "VS Code", RANK.vscode, false, warnings, seq);
   } catch (error) {
     warnings.push(
-      sanitizeDisplayText(`读取 VS Code MCP 配置失败: ${String(error)}`, WARNING_MAX) ?? "读取 VS Code MCP 配置失败",
+      sanitizeDisplayText(hostText(`读取 VS Code MCP 配置失败: ${String(error)}`, `Failed to read VS Code MCP config: ${String(error)}`), WARNING_MAX) ?? hostText("读取 VS Code MCP 配置失败", "Failed to read VS Code MCP config"),
     );
     return [];
   }
@@ -480,13 +481,13 @@ async function loadOmpPluginMcp(
       const config = await readJsonFile(filePath);
       if (!config?.mcpServers || typeof config.mcpServers !== "object" || Array.isArray(config.mcpServers)) continue;
       items.push(
-        ...listFromMap(filePath, config.mcpServers, scope, "插件", RANK.ompPlugins, false, warnings, seq, {
+        ...listFromMap(filePath, config.mcpServers, scope, hostText("插件", "Plugin"), RANK.ompPlugins, false, warnings, seq, {
           requireEndpoint: true,
         }),
       );
     } catch (error) {
       warnings.push(
-        sanitizeDisplayText(`读取插件 MCP 配置失败: ${String(error)}`, WARNING_MAX) ?? "读取插件 MCP 配置失败",
+        sanitizeDisplayText(hostText(`读取插件 MCP 配置失败: ${String(error)}`, `Failed to read plugin MCP config: ${String(error)}`), WARNING_MAX) ?? hostText("读取插件 MCP 配置失败", "Failed to read plugin MCP config"),
       );
     }
   }
@@ -523,8 +524,8 @@ async function loadAgentPluginMcp(
     });
   } catch (error) {
     warnings.push(
-      sanitizeDisplayText(`读取 Agent Plugin MCP 配置失败: ${String(error)}`, WARNING_MAX) ??
-        "读取 Agent Plugin MCP 配置失败",
+      sanitizeDisplayText(hostText(`读取 Agent Plugin MCP 配置失败: ${String(error)}`, `Failed to read Agent Plugin MCP config: ${String(error)}`), WARNING_MAX) ??
+        hostText("读取 Agent Plugin MCP 配置失败", "Failed to read Agent Plugin MCP config"),
     );
     return [];
   }
@@ -573,7 +574,7 @@ async function loadClaudePluginMcp(
     resolved.sourcePath,
     resolved.map,
     root.scope,
-    "Claude 插件",
+    hostText("Claude 插件", "Claude Plugin"),
     RANK.claudePlugins,
     false,
     warnings,
@@ -645,7 +646,7 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
   ): InternalServer => {
     const matches = servers.filter((server) => server.name === name);
     if (matches.length === 0) {
-      throw { code: "INVALID_ARGUMENT", message: `未找到 MCP 服务器 ${name}` };
+      throw { code: "INVALID_ARGUMENT", message: hostText(`未找到 MCP 服务器 ${name}`, `MCP server "${name}" not found`) };
     }
     const preferred =
       (scope === "user" || scope === "project"
@@ -654,7 +655,7 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
       matches.find((server) => !server.shadowed) ??
       matches[0];
     if (preferred === undefined) {
-      throw { code: "INVALID_ARGUMENT", message: `未找到 MCP 服务器 ${name}` };
+      throw { code: "INVALID_ARGUMENT", message: hostText(`未找到 MCP 服务器 ${name}`, `MCP server "${name}" not found`) };
     }
     return preferred;
   };
@@ -679,20 +680,20 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
 
     const userConfig = await readJsonFile(userFile).catch((error) => {
       warnings.push(
-        sanitizeDisplayText(`读取用户 MCP 配置失败: ${String(error)}`, WARNING_MAX) ?? "读取用户 MCP 配置失败",
+        sanitizeDisplayText(hostText(`读取用户 MCP 配置失败: ${String(error)}`, `Failed to read user MCP config: ${String(error)}`), WARNING_MAX) ?? hostText("读取用户 MCP 配置失败", "Failed to read user MCP config"),
       );
       return null;
     });
     if (userConfig?.mcpServers && typeof userConfig.mcpServers === "object" && !Array.isArray(userConfig.mcpServers)) {
       servers.push(
-        ...listFromMap(userFile, userConfig.mcpServers, "user", "用户", RANK.nativeUser, true, warnings, seq),
+        ...listFromMap(userFile, userConfig.mcpServers, "user", hostText("用户", "User"), RANK.nativeUser, true, warnings, seq),
       );
     }
     servers.push(
       ...(await loadJsonSource(
         path.join(getAgentDir(home), ".mcp.json"),
         "user",
-        "用户",
+        hostText("用户", "User"),
         RANK.nativeUserDot,
         true,
         warnings,
@@ -702,13 +703,13 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
 
     if (cwd && projectFile) {
       servers.push(
-        ...(await loadJsonSource(projectFile, "project", "项目", RANK.nativeProject, true, warnings, seq)),
+        ...(await loadJsonSource(projectFile, "project", hostText("项目", "Project"), RANK.nativeProject, true, warnings, seq)),
       );
       servers.push(
         ...(await loadJsonSource(
           path.join(getProjectConfigDir(cwd), ".mcp.json"),
           "project",
-          "项目",
+          hostText("项目", "Project"),
           RANK.nativeProjectDot,
           true,
           warnings,
@@ -718,9 +719,9 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
       const projectMcp = path.join(cwd, "mcp.json");
       const projectDotMcp = path.join(cwd, ".mcp.json");
       if (path.resolve(projectMcp) !== path.resolve(projectFile)) {
-        servers.push(...(await loadJsonSource(projectMcp, "project", "项目", RANK.mcpJson, true, warnings, seq)));
+        servers.push(...(await loadJsonSource(projectMcp, "project", hostText("项目", "Project"), RANK.mcpJson, true, warnings, seq)));
       }
-      servers.push(...(await loadJsonSource(projectDotMcp, "project", "项目", RANK.mcpDotJson, true, warnings, seq)));
+      servers.push(...(await loadJsonSource(projectDotMcp, "project", hostText("项目", "Project"), RANK.mcpDotJson, true, warnings, seq)));
 
       servers.push(
         ...(await loadFirstHit(
@@ -921,13 +922,13 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
     async setEnabled(input) {
       const name = safeName(input.name);
       if (name === undefined) {
-        throw { code: "INVALID_ARGUMENT", message: "无效的 MCP 服务器名称" };
+        throw { code: "INVALID_ARGUMENT", message: hostText("无效的 MCP 服务器名称", "Invalid MCP server name") };
       }
 
       const { servers, disabled, forced, userFile, projectFile } = await collect();
       const matches = servers.filter((server) => server.name === name);
       if (matches.length === 0) {
-        throw { code: "INVALID_ARGUMENT", message: `未找到 MCP 服务器 ${name}` };
+        throw { code: "INVALID_ARGUMENT", message: hostText(`未找到 MCP 服务器 ${name}`, `MCP server "${name}" not found`) };
       }
 
       const preferred =
@@ -938,7 +939,7 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
         matches[0];
 
       if (preferred === undefined) {
-        throw { code: "INVALID_ARGUMENT", message: `未找到 MCP 服务器 ${name}` };
+        throw { code: "INVALID_ARGUMENT", message: hostText(`未找到 MCP 服务器 ${name}`, `MCP server "${name}" not found`) };
       }
 
       const candidatePaths = [
@@ -984,7 +985,7 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
       else delete nextUser.enabledServers;
       await writeJsonFile(userFile, nextUser);
 
-      return WRITE_OK(input.enabled ? `已启用 ${name}` : `已禁用 ${name}`);
+      return WRITE_OK(input.enabled ? hostText(`已启用 ${name}`, `Enabled ${name}`) : hostText(`已禁用 ${name}`, `Disabled ${name}`));
     },
 
     async refresh(input) {
@@ -992,25 +993,26 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
       if (input?.name !== undefined) {
         const name = safeName(input.name);
         if (name === undefined) {
-          throw { code: "INVALID_ARGUMENT", message: "无效的 MCP 服务器名称" };
+          throw { code: "INVALID_ARGUMENT", message: hostText("无效的 MCP 服务器名称", "Invalid MCP server name") };
         }
         pickServer(servers, name);
-        const line = sanitizeDisplayText(`已重新扫描 ${name}`, WARNING_MAX) ?? `已重新扫描 ${name}`;
+        const rescanText = hostText(`已重新扫描 ${name}`, `Rescanned ${name}`);
+        const line = sanitizeDisplayText(rescanText, WARNING_MAX) ?? rescanText;
         appendLog(name, [line]);
-        return WRITE_OK(`已重新扫描 ${name}。当前会话需新开会话后才会重载连接。`);
+        return WRITE_OK(hostText(`已重新扫描 ${name}。当前会话需新开会话后才会重载连接。`, `Rescanned ${name}. Start a new session to reload the connection.`));
       }
-      return WRITE_OK(`已重新扫描 ${servers.length} 个 MCP 配置。当前会话需新开会话后才会重载连接。`);
+      return WRITE_OK(hostText(`已重新扫描 ${servers.length} 个 MCP 配置。当前会话需新开会话后才会重载连接。`, `Rescanned ${servers.length} MCP ${servers.length === 1 ? "config" : "configs"}. Start a new session to reload connections.`));
     },
 
     async test(input): Promise<McpTestResult> {
       const name = safeName(input.name);
       if (name === undefined) {
-        throw { code: "INVALID_ARGUMENT", message: "无效的 MCP 服务器名称" };
+        throw { code: "INVALID_ARGUMENT", message: hostText("无效的 MCP 服务器名称", "Invalid MCP server name") };
       }
       const { servers } = await collect();
       const server = pickServer(servers, name, input.scope);
       if (server.shadowed) {
-        throw { code: "INVALID_ARGUMENT", message: `${name} 被更高优先级配置覆盖` };
+        throw { code: "INVALID_ARGUMENT", message: hostText(`${name} 被更高优先级配置覆盖`, `${name} is shadowed by a higher-priority config`) };
       }
       const cwd = getCwd()?.trim();
       const outcome = await probeMcpServer(server.connect, cwd ? { cwd } : {});
@@ -1033,7 +1035,7 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
     async logs(input): Promise<McpLogsReadModel> {
       const name = safeName(input.name);
       if (name === undefined) {
-        throw { code: "INVALID_ARGUMENT", message: "无效的 MCP 服务器名称" };
+        throw { code: "INVALID_ARGUMENT", message: hostText("无效的 MCP 服务器名称", "Invalid MCP server name") };
       }
       const { servers } = await collect();
       pickServer(servers, name);
@@ -1042,7 +1044,7 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
         name,
         lines,
         generatedAt: now(),
-        ...(lines.length === 0 ? { emptyReason: "尚无日志，请先测试连接" } : {}),
+        ...(lines.length === 0 ? { emptyReason: hostText("尚无日志，请先测试连接", "No logs yet; test the connection first") } : {}),
       };
     },
   };

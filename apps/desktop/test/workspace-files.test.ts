@@ -104,7 +104,7 @@ test("viewer resolves links to one identity, preserves text format, and detects 
     const conflict = await service.writeText!({ ...relative, ...read, text: "stale draft", expectedVersion: read.file.version });
     assert.equal(conflict.saved, false); assert.equal(await readFile(path, "utf8"), "Agent changed this file");
     await writeFile(join(root, "outside.txt"), "outside");
-    await assert.rejects(service.inspect!({ workspaceId, path: join(root, "outside.txt") }), /工作区/);
+    await assert.rejects(service.inspect!({ workspaceId, path: join(root, "outside.txt") }), /outside the current workspace/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

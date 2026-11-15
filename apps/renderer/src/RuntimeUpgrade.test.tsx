@@ -24,13 +24,13 @@ it("preview import creates only a local result and does not open a real session"
  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY,"1");const open=vi.fn();
  render(<PreviewModeProvider switchEnabled><I18nProvider forcedLanguage="en"><SessionImportPanel client={null} onOpen={open}/></I18nProvider></PreviewModeProvider>);
  fireEvent.click(screen.getByRole("button",{name:"Import Claude / Codex sessions"}));
- fireEvent.click(await screen.findByRole("button",{name:/检查 SessionChanges/}));
+ fireEvent.click(await screen.findByRole("button",{name:/Review SessionChanges/}));
  fireEvent.click(await screen.findByRole("button",{name:"Import"}));
  expect(await screen.findByText("Imported. The source file is unchanged.")).toBeTruthy();
  fireEvent.click(screen.getByRole("button",{name:"Open"}));expect(open).not.toHaveBeenCalled();
 });
 it("credential preview uses masked input and clears entered keys after local save",()=>{
  render(<I18nProvider forcedLanguage="en"><RuntimeCredentials client={null} preview/></I18nProvider>);
- const input=screen.getByLabelText("typesafe API key") as HTMLInputElement;expect(input.type).toBe("password");
- fireEvent.change(input,{target:{value:"demo-key"}});fireEvent.click(screen.getByRole("button",{name:"Save"}));expect(input.value).toBe("");
+ const input=screen.getByLabelText("TypeSafe API key") as HTMLInputElement;expect(input.type).toBe("password");
+ fireEvent.change(input,{target:{value:"demo-key"}});fireEvent.click(screen.getAllByRole("button",{name:"Save"})[0]!);expect(input.value).toBe("");
 });

@@ -159,7 +159,7 @@ export function FileMenuContent({ target, openers, onRun, desktopActionsReason }
   /** 非 undefined 时（预览演示树 / 非桌面端）桌面依赖项禁用并以 tip 说明原因。 */
   desktopActionsReason?: string | undefined;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const desktopOnly = desktopActionsReason === undefined
     ? {}
     : { disabled: true, title: desktopActionsReason };
@@ -172,7 +172,7 @@ export function FileMenuContent({ target, openers, onRun, desktopActionsReason }
       >
         {t("shell.fileOpen")}
       </MenuItem>
-      {target.kind === "file" ? <MenuItem icon="external" {...desktopOnly} onClick={() => onRun({ type: "openSystem" })}>使用系统应用打开</MenuItem> : null}
+      {target.kind === "file" ? <MenuItem icon="external" {...desktopOnly} onClick={() => onRun({ type: "openSystem" })}>{resolvedLanguage === "zh" ? "使用系统应用打开" : "Open with system app"}</MenuItem> : null}
       <OpenWithZone
         // The native resource resolver validates the selected workspace path before IDA sees it.
         openers={openers}

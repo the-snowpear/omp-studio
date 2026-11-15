@@ -7,7 +7,18 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import type { NativePreferencesContext } from "./NativePreferencesPane";
 
-const DEMO: AdvisorConfigView = { scope: "project", version: "demo", warnings: [], active: 0, document: { instructions: "检查任务与验收是否一致。", advisors: [{ name: "Reviewer", model: "demo/reason", enabled: false, scope: "all", includeReasoning: false, tools: ["read", "grep", "glob"], reviewMode: "turn", reviewInterval: 1 }] } };
+function demoAdvisorConfig(zh: boolean): AdvisorConfigView {
+  return {
+    scope: "project",
+    version: "demo",
+    warnings: [],
+    active: 0,
+    document: {
+      instructions: zh ? "检查任务与验收是否一致。" : "Verify task execution matches acceptance criteria.",
+      advisors: [{ name: "Reviewer", model: "demo/reason", enabled: false, scope: "all", includeReasoning: false, tools: ["read", "grep", "glob"], reviewMode: "turn", reviewInterval: 1 }],
+    },
+  };
+}
 export function AdvisorConfigPane({ client, context, visible }: { client?: StudioClient | undefined; context?: NativePreferencesContext | undefined; visible: boolean }) {
   const { preview, marks } = usePreviewMode(); const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
   const [scope, setScope] = useState<"user" | "project">("project"); const [view, setView] = useState<AdvisorConfigView>(); const [selected, setSelected] = useState(0);
@@ -16,12 +27,12 @@ export function AdvisorConfigPane({ client, context, visible }: { client?: Studi
   useEffect(() => {
     const generation = ++epoch.current; setView(undefined); setSelected(0); setError(""); setReview(false);
     if (!visible) return;
-    if (preview) { setView({ ...DEMO, scope, document: structuredClone(DEMO.document) }); return; }
+    if (preview) { const demo = demoAdvisorConfig(zh); setView({ ...demo, scope }); return; }
     if (!available || !client || !context?.sessionId) return;
     setBusy(true);
     void client.command("advisors.config.get", { sessionId: context.sessionId, scope }).then(handle => waitReceipt<{ result: AdvisorConfigView }>(client, handle.requestId)).then(result => { if (generation === epoch.current) setView(result.result); }).catch(cause => { if (generation === epoch.current) setError(hostErrorMessage(cause, "Advisor configuration unavailable")); }).finally(() => { if (generation === epoch.current) setBusy(false); });
     return () => { epoch.current++; };
-  }, [visible, preview, available, client, context?.sessionId, scope]);
+  }, [visible, preview, available, client, context?.sessionId, scope, zh]);
   const row = view?.document.advisors[selected];
   const patch = (change: Partial<AdvisorConfigRow>) => setView(current => current ? { ...current, document: { ...current.document, advisors: current.document.advisors.map((row, index) => index === selected ? { ...row, ...change } : row) } } : current);
   const save = async () => {

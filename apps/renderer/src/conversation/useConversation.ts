@@ -4,6 +4,7 @@ import { createConversationEngine, defaultConversationEngineInput, type Conversa
 import type { PendingUser } from "./conversationViewModel";
 import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
 import { conversationBodyReady } from "../conversationWorkspace/projectReads";
+import { useI18n } from "../i18n";
 
 export type UseConversationInput = { readonly preview: boolean; readonly client: ConversationClient | null; readonly identity: ConversationIdentity | null; readonly canRead: boolean; readonly runtimeConnected: boolean; readonly syncRevision?: number; readonly deferHydrate?: boolean; readonly previewThreadId?: string };
 export type UseConversationResult = ConversationSnapshot & { readonly engine: ConversationEngine; loadOlder: () => void; reload: () => Promise<void>; restoreFromUser: (itemId: string) => boolean; trackPending: (pending: PendingUser) => void; failPending: (requestId: string, error: string) => void; dropPending: (requestId: string) => void; settleOpenTurns: () => boolean };
@@ -15,7 +16,9 @@ export function retainConversationWhileRemounting(current: ConversationSnapshot,
 }
 
 export function useConversation(input: UseConversationInput): UseConversationResult {
-  const engine = useMemo(() => createConversationEngine(defaultConversationEngineInput(input)), [input.preview, input.client, input.identity?.sessionId, input.identity?.runtimeEpoch, input.identity?.transcriptRevision, input.canRead, input.runtimeConnected, input.deferHydrate, input.previewThreadId]);
+  const { resolvedLanguage } = useI18n();
+  const previewLocale = input.preview ? resolvedLanguage : "";
+  const engine = useMemo(() => createConversationEngine(defaultConversationEngineInput({ ...input, zh: input.preview ? resolvedLanguage === "zh" : undefined })), [input.preview, input.client, input.identity?.sessionId, input.identity?.runtimeEpoch, input.identity?.transcriptRevision, input.canRead, input.runtimeConnected, input.deferHydrate, input.previewThreadId, previewLocale]);
   useEffect(() => { engine.start(); return () => engine.dispose(); }, [engine]);
   useEffect(() => {
     if (input.preview) return;

@@ -13,7 +13,7 @@ import {
   type RefObject,
 } from "react";
 import { Icon } from "../icons";
-import { useI18n } from "../i18n";
+import { useI18n, isZh } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { compactMinimapPreview } from "./compactSummary";
 import { MOTION_MS } from "../motion";
@@ -126,7 +126,7 @@ function assistantMarkType(rows: readonly Extract<TimelineRow, { type: "assistan
   return "assistant";
 }
 
-function assistantPreview(segments: readonly AssistantSegment[]): string {
+function assistantPreview(segments: readonly AssistantSegment[], zh: boolean): string {
   const firstText = segments.find(
     (segment): segment is Extract<AssistantSegment, { type: "text" }> => segment.type === "text" && segment.text.trim().length > 0,
   );
@@ -144,7 +144,7 @@ function assistantPreview(segments: readonly AssistantSegment[]): string {
       tools.push(...segment.tools);
     }
   }
-  if (thinking.length > 0 || tools.length > 0) return batchSummary(thinking, tools).text;
+  if (thinking.length > 0 || tools.length > 0) return batchSummary(thinking, tools, zh).text;
   return "";
 }
 
@@ -153,9 +153,12 @@ function assistantPreview(segments: readonly AssistantSegment[]): string {
  * 计算一次 preview（`trim()` / `batchSummary` 都会复制整段正文）。流式期间只有
  * 尾行是新对象，其余行直接命中缓存，派生代价从 O(全文字符) 降到 O(行数) 次查找。
  */
-const markCache = new WeakMap<TimelineRow, MinimapMark>();
+const markCacheByLang = {
+  zh: new WeakMap<TimelineRow, MinimapMark>(),
+  en: new WeakMap<TimelineRow, MinimapMark>(),
+} as const;
 
-function buildMark(row: TimelineRow, turn: number): MinimapMark {
+function buildMark(row: TimelineRow, turn: number, zh: boolean): MinimapMark {
   if (row.type === "extension") return { itemId: row.itemId, type: "extension", labelKey: MARK_LABEL_KEY.extension, preview: row.text, turn };
   if (row.type === "user") {
     const failed = row.pending === "failed" || row.error !== undefined;
@@ -171,14 +174,14 @@ function buildMark(row: TimelineRow, turn: number): MinimapMark {
   }
   if (row.type === "assistant") {
     const type = assistantMarkType([row]);
-    return { itemId: row.itemId, type, labelKey: MARK_LABEL_KEY[type], preview: assistantPreview(row.segments), turn };
+    return { itemId: row.itemId, type, labelKey: MARK_LABEL_KEY[type], preview: assistantPreview(row.segments, zh), turn };
   }
   if (row.type === "compaction") {
     return {
       itemId: row.item.itemId,
       type: "compact",
       labelKey: MARK_LABEL_KEY.compact,
-      preview: compactMinimapPreview(row.item),
+      preview: compactMinimapPreview(row.item, zh),
       turn,
     };
   }
@@ -202,18 +205,25 @@ function buildMark(row: TimelineRow, turn: number): MinimapMark {
   };
 }
 
-const assistantRunCache = new WeakMap<
-  Extract<TimelineRow, { type: "assistant" }>,
-  { readonly members: readonly Extract<TimelineRow, { type: "assistant" }>[]; readonly mark: MinimapMark }
->();
+type AssistantRunCacheEntry = {
+  readonly members: readonly Extract<TimelineRow, { type: "assistant" }>[];
+  readonly mark: MinimapMark;
+};
+
+const assistantRunCacheByLang = {
+  zh: new WeakMap<Extract<TimelineRow, { type: "assistant" }>, AssistantRunCacheEntry>(),
+  en: new WeakMap<Extract<TimelineRow, { type: "assistant" }>, AssistantRunCacheEntry>(),
+} as const;
 
 function markForAssistantRun(
   members: readonly Extract<TimelineRow, { type: "assistant" }>[],
   turn: number,
+  zh: boolean,
 ): MinimapMark {
-  if (members.length === 1) return markForRow(members[0]!, turn);
+  if (members.length === 1) return markForRow(members[0]!, turn, zh);
   const first = members[0]!;
-  const cached = assistantRunCache.get(first);
+  const runCache = zh ? assistantRunCacheByLang.zh : assistantRunCacheByLang.en;
+  const cached = runCache.get(first);
   if (
     cached !== undefined
     && cached.mark.turn === turn
@@ -228,36 +238,37 @@ function markForAssistantRun(
     itemId: first.itemId,
     type,
     labelKey: MARK_LABEL_KEY[type],
-    preview: assistantPreview(segments),
+    preview: assistantPreview(segments, zh),
     turn,
   };
-  assistantRunCache.set(first, { members, mark });
+  runCache.set(first, { members, mark });
   return mark;
 }
 
-function markForRow(row: TimelineRow, turn: number): MinimapMark {
-  const cached = markCache.get(row);
+function markForRow(row: TimelineRow, turn: number, zh: boolean): MinimapMark {
+  const cache = zh ? markCacheByLang.zh : markCacheByLang.en;
+  const cached = cache.get(row);
   if (cached !== undefined) {
     if (cached.turn === turn) return cached;
     /* 前插一页后所有 turn 都会平移；改写缓存，避免此后每帧都复制一次。 */
     const shifted = { ...cached, turn };
-    markCache.set(row, shifted);
+    cache.set(row, shifted);
     return shifted;
   }
-  const mark = buildMark(row, turn);
-  markCache.set(row, mark);
+  const mark = buildMark(row, turn, zh);
+  cache.set(row, mark);
   return mark;
 }
 
 /** 与 transcript DOM 对齐：连续 assistant 行由 AssistantRunView 合成一个导航点。 */
-export function deriveMinimapMarks(rows: readonly TimelineRow[]): MinimapMark[] {
+export function deriveMinimapMarks(rows: readonly TimelineRow[], zh = isZh()): MinimapMark[] {
   const marks: MinimapMark[] = [];
   let index = 0;
   while (index < rows.length) {
     const row = rows[index]!;
     const turn = marks.length + 1;
     if (row.type !== "assistant") {
-      marks.push(markForRow(row, turn));
+      marks.push(markForRow(row, turn, zh));
       index += 1;
       continue;
     }
@@ -266,7 +277,7 @@ export function deriveMinimapMarks(rows: readonly TimelineRow[]): MinimapMark[] 
       members.push(rows[index] as Extract<TimelineRow, { type: "assistant" }>);
       index += 1;
     }
-    marks.push(markForAssistantRun(members, turn));
+    marks.push(markForAssistantRun(members, turn, zh));
   }
   return marks;
 }
@@ -474,7 +485,8 @@ export function ConversationMinimap({
   /** 拖动进行中：滚动事件里的强制重测被降级（见 onScroll），拖动结束补一次。 */
   const draggingRef = useRef(false);
 
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const { marks: previewMarks } = usePreviewMode();
   const [fractions, setFractions] = useState<MarkFractions>({});
   const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
@@ -503,7 +515,7 @@ export function ConversationMinimap({
    */
   const structureToken = timelineStructureToken(rows);
   const derived = useMemo(() => {
-    const next = reuseMarks(prevMarksRef.current, deriveMinimapMarks(rows));
+    const next = reuseMarks(prevMarksRef.current, deriveMinimapMarks(rows, zh));
     let hasError = false;
     let hasUser = false;
     for (const mark of next) {
@@ -513,7 +525,7 @@ export function ConversationMinimap({
     }
     return { marks: next, hasError, hasUser };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 结构令牌代表 rows 的内容版本
-  }, [structureToken]);
+  }, [structureToken, zh]);
   const marks = derived.marks;
   prevMarksRef.current = marks;
   /* Refs mirror committed state, never a render that may be thrown away: React

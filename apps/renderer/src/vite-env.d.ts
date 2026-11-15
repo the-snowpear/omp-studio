@@ -96,6 +96,7 @@ declare global {
         reportPerformanceSample?(sample: import("@omp-studio/studio-protocol").MemorySample): Promise<boolean>;
         setConversationViewState?(state: { runtimeEpoch: number; visibleSessionIds: readonly string[]; blockedSessionIds?: readonly string[] }): Promise<boolean>;
         setTheme(theme: "light" | "dark", tint?: { color: string; symbolColor: string }): Promise<void>;
+        setLanguage?(locale: "zh" | "en"): Promise<void>;
         /** Fixed by the preload; read it through `src/platform.ts`. Absent on older installs. */
         readonly platform?: "win32" | "darwin" | "linux";
         /** macOS menu bar commands (allowlisted ids from Main). */

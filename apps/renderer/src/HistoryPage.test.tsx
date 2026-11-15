@@ -46,10 +46,10 @@ it("keeps lease status while filtering the catalog without repeated lease reads 
   render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><HistoryPage
     history={{ entries: [ACTIVE_ENTRY], total: 1 }} nativeContext={nativeContext} client={{ query, command, subscribe: () => () => {} } as unknown as StudioClient}
     onRoute={() => undefined} onSelectThread={() => undefined} /></PreviewModeProvider></I18nProvider>);
-  await screen.findByText("使用中 / In use");
+  await screen.findByText("使用中");
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "No match" } });
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Deletable" } });
-  expect(screen.getByText("使用中 / In use")).toBeTruthy();
+  expect(screen.getByText("使用中")).toBeTruthy();
   expect(query.mock.calls.filter(([kind]) => kind === "session.lease.read")).toHaveLength(1);
   expect(query).toHaveBeenCalledWith("session.lease.read", { sessionId: "live", targetSessionIds: ["session-a"] });
   expect(command).not.toHaveBeenCalledWith("session.lease.inspect", expect.anything());

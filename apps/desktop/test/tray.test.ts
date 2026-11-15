@@ -302,6 +302,30 @@ describe("createAppTray", () => {
       assert.equal(tray.destroyed, true);
     });
   });
+
+  test("setLocale rebuilds menu/tooltip and updates future balloon copy", async () => {
+    await withTempPersistRoot(async (persistRoot) => {
+      const { surface, tray } = fakeElectron();
+      const handle = createAppTray({
+        electron: surface,
+        iconPath: "icon.ico",
+        persistRoot,
+        locale: "zh-CN",
+        platform: "win32",
+        onOpen: () => {},
+        onQuit: () => {},
+      });
+      assert.ok(handle !== undefined);
+      assert.equal(tray.menu?.template[0]?.label, trayStrings("zh-CN", "win32").open);
+      handle.setLocale?.("en");
+      const enStrings = trayStrings("en", "win32");
+      assert.equal(tray.toolTip, enStrings.tooltip);
+      assert.equal(tray.menu?.template[0]?.label, enStrings.open);
+      assert.equal(tray.menu?.template[2]?.label, enStrings.quit);
+      handle.notifyHiddenToTray?.();
+      assert.equal(tray.balloonCalls[0]?.title, firstHideBalloonStrings("en").title);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

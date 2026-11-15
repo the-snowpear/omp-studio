@@ -1,8 +1,8 @@
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useLayoutEffect, useMemo, type ReactNode } from "react";
 import { zh } from "./locales/zh";
 import { en } from "./locales/en";
 import type { AppLanguage, I18nContextValue, Locale, TranslationParams } from "./types";
-import { useAppSettings } from "../settings/appSettings";
+import { getAppSettings, useAppSettings } from "../settings/appSettings";
 
 const dictionaries: Record<Locale, typeof zh> = {
   zh,
@@ -30,6 +30,18 @@ export function resolveLanguage(preference?: AppLanguage): Locale {
     return preference;
   }
   return detectSystemLanguage();
+}
+
+export function activeLanguage(): Locale {
+  return resolveLanguage(getAppSettings().language);
+}
+
+export function isZh(): boolean {
+  return activeLanguage() === "zh";
+}
+
+export function pickLocale<T>(zhValue: T, enValue: T): T {
+  return activeLanguage() === "zh" ? zhValue : enValue;
 }
 
 function lookupKey(dict: Record<string, unknown>, path: string): string | undefined {
@@ -74,6 +86,16 @@ export function I18nProvider({ children, forcedLanguage }: { children: ReactNode
   const { settings, update } = useAppSettings();
   const language = forcedLanguage ?? settings.language;
   const resolvedLanguage = resolveLanguage(language);
+
+  useLayoutEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = resolvedLanguage === "zh" ? "zh-CN" : "en";
+      document.title = resolvedLanguage === "zh" ? "OMP Studio — 工作台" : "OMP Studio — Workbench";
+    }
+    if (forcedLanguage === undefined) {
+      void globalThis.ompStudioChrome?.setLanguage?.(resolvedLanguage);
+    }
+  }, [resolvedLanguage, forcedLanguage]);
 
   const value = useMemo<I18nContextValue>(() => {
     return {

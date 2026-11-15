@@ -13,15 +13,15 @@ import { GitTip } from "../git/GitTip";
 import { readGitGraphLayout, writeGitGraphLayout } from "../git/gitGraphMemory";
 import { useGitWorkspace } from "../git/GitWorkspaceContext";
 import {
-  PREVIEW_CHANGES,
-  PREVIEW_CTX_PARTS,
-  PREVIEW_DIFF,
-  PREVIEW_FILE_TREE,
+  getPreviewChanges,
+  getPreviewCtxParts,
+  getPreviewDiff,
+  getPreviewFileTree,
+  getPreviewProblems,
+  getPreviewPvLogs,
+  getPreviewTelemetry,
+  getPreviewTests,
   PREVIEW_GIT_LOG,
-  PREVIEW_PROBLEMS,
-  PREVIEW_PV_LOGS,
-  PREVIEW_TELEMETRY,
-  PREVIEW_TESTS,
   type PreviewFileNode,
 } from "./fixtures";
 import { ChangesPanel, DiffDisplayMode, DiffLine, FileStat, type ChangesDiffFile } from "../conversation/ChangesPanel";
@@ -29,7 +29,7 @@ import { splitDisplayPath } from "../conversation/toolMeta";
 import { ConvoTranscript } from "../conversation/ConvoTranscript";
 import { GIT_STATUS_META } from "../git/treeStatus";
 import { previewConversationRows } from "./conversationFixtures";
-import { PREVIEW_FILE_DIFFS } from "./changeDiffsPreview";
+import { getPreviewFileDiffs } from "./changeDiffsPreview";
 import { usePreviewMode } from "./PreviewContext";
 
 function collectOpen(nodes: PreviewFileNode[], prefix: string, into: Set<string>): void {
@@ -51,7 +51,8 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction,
   onAction: (path: string, action: "context" | "context-dir") => void;
   fileMenu: FileMenuController;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   return (
     <>
       {nodes.map((node) => {
@@ -69,7 +70,7 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction,
                 role="treeitem"
                 tabIndex={0}
                 aria-expanded={open}
-                aria-label={`${node.name} 文件夹`}
+                aria-label={zh ? `${node.name} 文件夹` : `${node.name} folder`}
                 style={pad}
                 onClick={() => onToggle(path)}
                 onContextMenu={(event) => fileMenu.onContext(event, path)}
@@ -112,11 +113,11 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction,
             <span className="fname ellipsis">{node.name}</span>
             {node.writing || node.reading ? (
               <span className="live">
-                {node.reading ? <span className="dot red pulse" role="img" aria-label="读取中" data-tip="读取中" /> : null}
-                {node.writing ? <span className="dot green pulse" role="img" aria-label="写入中" data-tip="写入中" /> : null}
+                {node.reading ? <span className="dot red pulse" role="img" aria-label={zh ? "读取中" : "Reading"} data-tip={zh ? "读取中" : "Reading"} /> : null}
+                {node.writing ? <span className="dot green pulse" role="img" aria-label={zh ? "写入中" : "Writing"} data-tip={zh ? "写入中" : "Writing"} /> : null}
               </span>
             ) : null}
-            {node.diagnostic ? <span className={`diag ${node.diagnostic === "error" ? "err" : "warn"}`} role="img" aria-label={node.diagnostic === "error" ? "存在诊断错误" : "存在诊断警告"} /> : null}
+            {node.diagnostic ? <span className={`diag ${node.diagnostic === "error" ? "err" : "warn"}`} role="img" aria-label={node.diagnostic === "error" ? (zh ? "存在诊断错误" : "Diagnostic errors") : (zh ? "存在诊断警告" : "Diagnostic warnings")} /> : null}
             <FileStat status={node.status} />
             <span className="fop">
               <button type="button" className="icon-btn" data-tip={t("shell.addContext")} aria-label={`${t("shell.addContext")} ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context"); }}><Icon name="at" /></button>
@@ -139,10 +140,12 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction,
 }
 
 export function PreviewFileTree({ label, search, onContext, onFileAction, workspaceId = "preview-workspace" }: { workspaceId?: string; label: string; search?: string; onContext?: (path: string, kind: "file" | "dir") => void; onFileAction?: (action: FileMenuAction, target: FileMenuTarget) => void }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const tree = useMemo(() => getPreviewFileTree(zh), [zh]);
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     const next = new Set<string>();
-    collectOpen(PREVIEW_FILE_TREE, "", next);
+    collectOpen(getPreviewFileTree(zh), "", next);
     return next;
   });
   const openInViewer = useOpenFile();
@@ -199,10 +202,10 @@ export function PreviewFileTree({ label, search, onContext, onFileAction, worksp
     },
   };
   const visible = search?.trim()
-    ? filterPreviewNodes(PREVIEW_FILE_TREE, search)
-    : PREVIEW_FILE_TREE;
+    ? filterPreviewNodes(tree, search)
+    : tree;
   return (
-    <div className="tree" role="tree" aria-label={`${label} 文件树`}>
+    <div className="tree" role="tree" aria-label={zh ? `${label} 文件树` : `${label} file tree`}>
       <TreeNodes nodes={visible} depth={0} prefix="" expanded={expanded} onToggle={onToggle} onFile={path => { openInViewer({ workspaceId, path }); }} onAction={(path, action) => {
         if (action === "context" || action === "context-dir") {
           onContext?.(path, action === "context-dir" ? "dir" : "file");
@@ -227,7 +230,7 @@ export function PreviewTranscript() {
 }
 
 export function PreviewTokenTrigger() {
-  const t = PREVIEW_TELEMETRY;
+  const t = getPreviewTelemetry(useI18n().resolvedLanguage === "zh");
   return (
     <>
       <span className="t-tok-icon" data-tip={`Token ↑${t.inputTokens} ↓${t.outputTokens} · ${t.cacheTokens} cache`}><Icon name="chart" /></span>
@@ -240,7 +243,7 @@ export function PreviewTokenTrigger() {
 }
 
 export function PreviewContextTrigger() {
-  const t = PREVIEW_TELEMETRY;
+  const t = getPreviewTelemetry(useI18n().resolvedLanguage === "zh");
   return (
     <>
       <span className="ctx-ring" style={{ ["--p" as string]: t.ctxPct }} aria-hidden="true" data-tip={`Context ${t.ctxPct}%`} />
@@ -250,24 +253,26 @@ export function PreviewContextTrigger() {
 }
 
 export function PreviewContextPanel() {
-  const t = PREVIEW_TELEMETRY;
   const { marks } = usePreviewMode();
+  const zh = useI18n().resolvedLanguage === "zh";
+  const t = getPreviewTelemetry(zh);
+  const ctxParts = getPreviewCtxParts(zh);
   const tone = t.ctxPct > 80 ? "red" : t.ctxPct > 60 ? "amber" : "green";
   return (
     <>
-      <div className="tp-head"><Icon name="layers" extra="sm" />CONTEXT 构成<span className="spacer" /><span className={`chip ${tone} xs`}>{t.ctxPct}%</span></div>
+      <div className="tp-head"><Icon name="layers" extra="sm" />{zh ? "CONTEXT 构成" : "CONTEXT BREAKDOWN"}<span className="spacer" /><span className={`chip ${tone} xs`}>{t.ctxPct}%</span></div>
       <div className="tp-ctx" style={{ paddingTop: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <span>已使用</span>
-          <b className="mono" style={{ fontSize: 13 }}>{t.usedExact} / {t.totalExact}（{t.ctxPct}.0%）</b>
+          <span>{zh ? "已使用" : "Used"}</span>
+          <b className="mono" style={{ fontSize: 13 }}>{t.usedExact} / {t.totalExact}{zh ? `（${t.ctxPct}.0%）` : ` (${t.ctxPct}.0%)`}</b>
         </div>
         <div className="ctxbar">
-          {PREVIEW_CTX_PARTS.map((part) => (
+          {ctxParts.map((part) => (
             <i key={part.name} style={{ width: `${part.pct}%`, background: part.color }} data-tip={part.name} />
           ))}
         </div>
         <div className="ctx-legend">
-          {PREVIEW_CTX_PARTS.map((part) => (
+          {ctxParts.map((part) => (
             <div key={part.name} className="cl-row">
               <span className="cl-dot" style={{ background: part.color }} />
               <span>{part.name}</span>
@@ -276,7 +281,7 @@ export function PreviewContextPanel() {
           ))}
         </div>
         <div className="tiny muted" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
-          Compact：{t.compact} · 上次 Compact：3 天前 · 阈值 80%{marks ? " · 演示数据" : ""}
+          {zh ? `Compact：${t.compact} · 上次 Compact：3 天前 · 阈值 80%${marks ? " · 演示数据" : ""}` : `Compact: ${t.compact} · Last Compact: 3 days ago · Threshold 80%${marks ? " · Demo data" : ""}`}
         </div>
       </div>
     </>
@@ -287,16 +292,17 @@ function previewDelta(rows: readonly { add: number; del: number }[]): { add: num
   return rows.reduce((sum, row) => ({ add: sum.add + row.add, del: sum.del + row.del }), { add: 0, del: 0 });
 }
 
-function previewDiffFiles(rows: readonly { file: string; add: number; del: number }[]): ChangesDiffFile[] {
+function previewDiffFiles(rows: readonly { file: string; add: number; del: number }[], zh = true): ChangesDiffFile[] {
+  const fileDiffs = getPreviewFileDiffs(zh);
   return rows.map((row) => {
-    const d = PREVIEW_FILE_DIFFS[row.file];
+    const d = fileDiffs[row.file];
     return {
       file: row.file,
       add: row.add,
       del: row.del,
       ...(d?.partial ? { partial: true } : {}),
       hunks: d ? [{
-        hunkLabel: "变更摘录",
+        hunkLabel: zh ? "变更摘录" : "Change excerpt",
         lines: d.lines.map((line) => (
           line[0] === "collapse"
             ? { kind: "collapse" as const, label: line[1] }
@@ -325,13 +331,15 @@ export function PreviewChanges({
   focusTurnId?: string;
   focusKey?: number;
 }) {
-  const last = previewDelta(PREVIEW_CHANGES.turn);
-  const session = previewDelta(PREVIEW_CHANGES.thread);
   const { marks } = usePreviewMode();
+  const zh = useI18n().resolvedLanguage === "zh";
+  const changes = useMemo(() => getPreviewChanges(zh), [zh]);
+  const last = previewDelta(changes.turn);
+  const session = previewDelta(changes.thread);
   const [turnId, setTurnId] = useState(PREVIEW_TURN_LAST);
   const [split, setSplit] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
-  const files = previewDiffFiles(turnId === PREVIEW_TURN_SESSION ? PREVIEW_CHANGES.thread : PREVIEW_CHANGES.turn);
+  const files = previewDiffFiles(turnId === PREVIEW_TURN_SESSION ? changes.thread : changes.turn, zh);
   useEffect(() => {
     if (focusTurnId === undefined) return;
     if (focusTurnId === PREVIEW_TURN_SESSION || focusTurnId === PREVIEW_TURN_LAST) {
@@ -342,18 +350,18 @@ export function PreviewChanges({
   useEffect(() => {
     if (focusTurnId !== undefined) return;
     if (focusPath === undefined) return;
-    const inLast = PREVIEW_CHANGES.turn.some((row) => row.file === focusPath);
-    const inSession = PREVIEW_CHANGES.thread.some((row) => row.file === focusPath);
+    const inLast = changes.turn.some((row) => row.file === focusPath);
+    const inSession = changes.thread.some((row) => row.file === focusPath);
     if (!inLast && !inSession) return;
     setTurnId(inLast ? PREVIEW_TURN_LAST : PREVIEW_TURN_SESSION);
     setExpanded(new Set([focusPath]));
-  }, [focusPath, focusTurnId]);
+  }, [changes, focusPath, focusTurnId]);
   return (
     <ChangesPanel
       demo
       turns={[
-        { id: PREVIEW_TURN_LAST, label: "最近一轮", add: last.add, del: last.del },
-        { id: PREVIEW_TURN_SESSION, label: "本会话", add: session.add, del: session.del },
+        { id: PREVIEW_TURN_LAST, label: zh ? "最近一轮" : "Last turn", add: last.add, del: last.del },
+        { id: PREVIEW_TURN_SESSION, label: zh ? "本会话" : "This session", add: session.add, del: session.del },
       ]}
       turnId={turnId}
       onTurnChange={(id) => {
@@ -374,7 +382,7 @@ export function PreviewChanges({
       onSplit={setSplit}
       empty={(
         <div className="empty" style={{ padding: 18 }}>
-          <p>{marks ? "演示会话还没有文件改动。" : "这个会话还没有文件改动。"}</p>
+          <p>{zh ? (marks ? "演示会话还没有文件改动。" : "这个会话还没有文件改动。") : (marks ? "No file changes in this demo session yet." : "No file changes in this session yet.")}</p>
         </div>
       )}
     />
@@ -385,8 +393,9 @@ export function PreviewChanges({
 export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes" | "history"; focusPath?: string; focusKey?: number } = {}) {
   const { marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const shared = useGitWorkspace();
-  const [selected, setSelected] = useState<string | null>(PREVIEW_DIFF.file);
+  const [selected, setSelected] = useState<string | null>(() => getPreviewDiff(zh).file);
   const [graphLayout, setGraphLayout] = useState(readGitGraphLayout);
   const [diffHeight, setDiffHeight] = useGitDiffHeight();
   const [splitDiff, setSplitDiff] = useState(false);
@@ -397,7 +406,7 @@ export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes
   const known = shared.repository?.changes.some((row) => row.path === selected);
   const active = known ? selected : null;
   useEffect(() => { if (focusPath) setSelected(focusPath); }, [focusPath, focusKey]);
-  const d = PREVIEW_FILE_DIFFS[active ?? ""];
+  const d = getPreviewFileDiffs(zh)[active ?? ""];
   const previewLog = useMemo<GitLogListReadModel>(() => ({
     workspaceId: "preview-git" as WorkspaceId,
     commits: PREVIEW_GIT_LOG.commits.map(({ files: _files, patch: _patch, ...commit }) => commit),
@@ -442,10 +451,10 @@ export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes
           data-ftype={ftype ?? undefined}
           data-secret={isSensitive(name) || undefined}
         >
-          <button type="button" className="ch-row" aria-label={marks ? `演示：查看 ${row.path}` : `查看 ${row.path}`} onClick={() => setSelected(row.path)}>
+          <button type="button" className="ch-row" aria-label={marks ? (zh ? `演示：查看 ${row.path}` : `Demo: view ${row.path}`) : (zh ? `查看 ${row.path}` : `View ${row.path}`)} onClick={() => setSelected(row.path)}>
             <span className="ch-row-icon" aria-hidden="true"><Icon name={iconNameFor(ftype, name)} extra="sm" /></span>
             <span className="ch-file ellipsis">{row.path}</span>
-            <span className="ch-note">{row[target === "staged" ? "index" : "worktree"] === "untracked" ? resolvedLanguage === "zh" ? "未跟踪" : "Untracked" : row[target === "staged" ? "index" : "worktree"] === "added" ? resolvedLanguage === "zh" ? "新增" : "Added" : resolvedLanguage === "zh" ? "修改" : "Modified"}</span>
+            <span className="ch-note">{row[target === "staged" ? "index" : "worktree"] === "untracked" ? (zh ? "未跟踪" : "Untracked") : row[target === "staged" ? "index" : "worktree"] === "added" ? (zh ? "新增" : "Added") : (zh ? "修改" : "Modified")}</span>
           </button>
           <button type="button" className="icon-btn small" aria-label={target === "working" ? `Stage ${row.path}` : `Unstage ${row.path}`} disabled={shared.busy} onClick={() => void shared.execute({ kind: target === "working" ? "stage" : "unstage", paths: [row.path] })}><Icon name={target === "working" ? "plus" : "minimize"} extra="sm" /></button>
         </div>
@@ -459,7 +468,7 @@ export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes
       top={(
         <>
       <div className="ch-toolbar git-toolbar">
-        {marks ? <span className="chip gray xs">演示</span> : null}
+        {marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
         <span className="git-branch-label ellipsis"><Icon name="branch" extra="sm" />{shared.repository?.branch}</span>
         <span className="chip gray xs">↑{shared.repository?.ahead} ↓{shared.repository?.behind}</span>
         <span className="spacer" />
@@ -467,29 +476,29 @@ export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes
         <button type="button" className="btn small outline" disabled={shared.busy} onClick={() => void shared.execute({ kind: "pull", strategy: "ff-only" })}>Pull</button>
         <button type="button" className="btn small outline" disabled={shared.busy} onClick={() => void shared.execute({ kind: "push" })}>Push</button>
       </div>
-      {marks ? <div className="git-notice" role="status">演示仓库状态（omp-web / main）。预览模式下不执行任何 Git 操作。</div> : null}
+      {marks ? <div className="git-notice" role="status">{zh ? "演示仓库状态（omp-web / main）。预览模式下不执行任何 Git 操作。" : "Demo repository status (omp-web / main). No Git operations run in preview mode."}</div> : null}
       <div className="git-actions">
         <GitMoreActionsMenu />
-        {marks ? <span className="tiny muted">演示</span> : null}
+        {marks ? <span className="tiny muted">{zh ? "演示" : "Demo"}</span> : null}
       </div>
       <div className="ch-list">
-        {group("已暂存", staged, "staged", (
-          <GitTip text={resolvedLanguage === "zh" ? "取消暂存全部" : "Unstage all"}>
-            <button type="button" className="icon-btn small" aria-label="取消暂存全部" disabled={shared.busy || !staged.length} onClick={() => void shared.execute({ kind: "unstage", paths: staged.map(row => row.path) })}>
+        {group(zh ? "已暂存" : "Staged", staged, "staged", (
+          <GitTip text={zh ? "取消暂存全部" : "Unstage all"}>
+            <button type="button" className="icon-btn small" aria-label={zh ? "取消暂存全部" : "Unstage all"} disabled={shared.busy || !staged.length} onClick={() => void shared.execute({ kind: "unstage", paths: staged.map(row => row.path) })}>
               <Icon name="minimize" extra="sm" />
             </button>
           </GitTip>
         ))}
-        {group("工作区", working, "working", (
-          <GitTip text={resolvedLanguage === "zh" ? "暂存全部" : "Stage all"}>
-            <button type="button" className="icon-btn small" aria-label="暂存全部" disabled={shared.busy || !working.length} onClick={() => void shared.execute({ kind: "stage", paths: working.map(row => row.path) })}>
+        {group(zh ? "工作区" : "Changes", working, "working", (
+          <GitTip text={zh ? "暂存全部" : "Stage all"}>
+            <button type="button" className="icon-btn small" aria-label={zh ? "暂存全部" : "Stage all"} disabled={shared.busy || !working.length} onClick={() => void shared.execute({ kind: "stage", paths: working.map(row => row.path) })}>
               <Icon name="plus" extra="sm" />
             </button>
           </GitTip>
         ))}
       </div>
       <div className="git-commit-box">
-        <textarea placeholder={marks ? "Commit message（演示）" : "Commit message"} rows={1} value={shared.draft} onChange={event => shared.setDraft(event.target.value)} />
+        <textarea placeholder={marks ? (zh ? "Commit message（演示）" : "Commit message (Demo)") : "Commit message"} rows={1} value={shared.draft} onChange={event => shared.setDraft(event.target.value)} />
         <button type="button" className="btn small primary" disabled={shared.busy || !staged.length || !shared.draft.trim()} onClick={() => { const submitted = shared.draft; const message = submitted.trim(); if (message) void shared.execute({ kind: "commit", message }).then(ok => { if (ok) shared.setDraft(current => current === submitted ? "" : current); }); }}>Commit</button>
       </div>
       {active !== null && d ? (
@@ -499,7 +508,7 @@ export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes
           <div className="diff-toolbar">
             <Icon name="file-code" extra="sm" />
             <span className="mono small ellipsis">{active}</span>
-            {marks ? <span className="chip gray xs">演示 diff</span> : null}
+            {marks ? <span className="chip gray xs">{zh ? "演示 diff" : "Demo diff"}</span> : null}
             <span className="ch-add">+{d.add}</span>
             <span className="ch-del">-{d.del}</span>
             <span className="spacer" />
@@ -541,21 +550,23 @@ export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes
 }
 
 const SEV = {
-  error: { icon: "alert-c", tone: "red", label: "错误" },
-  warn: { icon: "alert", tone: "amber", label: "警告" },
-  info: { icon: "info", tone: "blue", label: "信息" },
+  error: { icon: "alert-c", tone: "red", zh: "错误", en: "Error" },
+  warn: { icon: "alert", tone: "amber", zh: "警告", en: "Warning" },
+  info: { icon: "info", tone: "blue", zh: "信息", en: "Info" },
 } as const;
 
 export function PreviewProblems() {
   const { marks } = usePreviewMode();
+  const zh = useI18n().resolvedLanguage === "zh";
+  const problems = getPreviewProblems(zh);
   return (
     <>
-      {PREVIEW_PROBLEMS.map((problem) => {
+      {problems.map((problem) => {
         const sev = SEV[problem.sev];
         return (
           <div className="prob-row" key={`${problem.src}-${problem.msg}`}>
-            <button type="button" className="prob-open" disabled data-tip={marks ? "打开（演示）" : "打开"}>
-              <span className={`prob-sev sev-${sev.tone}`} role="img" aria-label={sev.label}><Icon name={sev.icon} extra="sm" /></span>
+            <button type="button" className="prob-open" disabled data-tip={zh ? (marks ? "打开（演示）" : "打开") : (marks ? "Open (Demo)" : "Open")}>
+              <span className={`prob-sev sev-${sev.tone}`} role="img" aria-label={zh ? sev.zh : sev.en}><Icon name={sev.icon} extra="sm" /></span>
               <span className="chip gray xs">{problem.src}</span>
               <span className="ellipsis">{problem.msg}</span>
               <span className="pfile">{problem.file ? `${problem.file}${problem.line ? `:${problem.line}` : ""}` : ""}</span>
@@ -569,21 +580,23 @@ export function PreviewProblems() {
 
 export function PreviewTests() {
   const { marks } = usePreviewMode();
+  const zh = useI18n().resolvedLanguage === "zh";
+  const tests = getPreviewTests(zh);
   return (
     <>
-      {PREVIEW_TESTS.map((test) => {
+      {tests.map((test) => {
         const pass = test.status === "pass";
         return (
           <div key={test.suite}>
             <div className="test-row">
-              <span className={`prob-sev sev-${pass ? "green" : "red"}`} role="img" aria-label={pass ? "通过" : "失败"}>
+              <span className={`prob-sev sev-${pass ? "green" : "red"}`} role="img" aria-label={pass ? (zh ? "通过" : "Pass") : (zh ? "失败" : "Fail")}>
                 <Icon name={pass ? "check" : "x"} extra="sm" />
               </span>
               <b className="mono test-suite">{test.suite}</b>
-              <span className={`chip ${pass ? "green" : "red"} sm`}>{test.pass}/{test.total} 通过</span>
+              <span className={`chip ${pass ? "green" : "red"} sm`}>{test.pass}/{test.total} {zh ? "通过" : "passed"}</span>
               <span className="tiny muted mono">{test.time}</span>
               <span className="spacer" />
-              <button type="button" className="btn small outline" disabled data-tip={marks ? "重跑（演示）" : "重跑"}>重新运行</button>
+              <button type="button" className="btn small outline" disabled data-tip={zh ? (marks ? "重跑（演示）" : "重跑") : (marks ? "Re-run (Demo)" : "Re-run")}>{zh ? "重新运行" : "Re-run"}</button>
             </div>
             {test.failDetail ? <pre className="test-fail">{test.failDetail}</pre> : null}
           </div>
@@ -594,9 +607,10 @@ export function PreviewTests() {
 }
 
 export function PreviewLogs() {
+  const zh = useI18n().resolvedLanguage === "zh";
   return (
     <div className="term">
-      {PREVIEW_PV_LOGS.map((line) => (
+      {getPreviewPvLogs(zh).map((line) => (
         <div key={line.text} className={line.tone || undefined}>{line.text}</div>
       ))}
     </div>
@@ -608,17 +622,18 @@ export function PreviewSwitch({ enabled, preview, onToggle }: {
   preview: boolean;
   onToggle: () => void;
 }): ReactNode {
+  const zh = useI18n().resolvedLanguage === "zh";
   if (!enabled) return null;
   return (
     <button
       type="button"
       className={`preview-switch${preview ? " on" : ""}`}
       aria-pressed={preview}
-      data-tip={preview ? "退出预览" : "预览"}
-      aria-label={preview ? "退出预览模式" : "进入预览模式"}
+      data-tip={preview ? (zh ? "退出预览" : "Exit preview") : (zh ? "预览" : "Preview")}
+      aria-label={preview ? (zh ? "退出预览模式" : "Exit preview mode") : (zh ? "进入预览模式" : "Enter preview mode")}
       onClick={onToggle}
     >
-      预览
+      {zh ? "预览" : "Preview"}
     </button>
   );
 }

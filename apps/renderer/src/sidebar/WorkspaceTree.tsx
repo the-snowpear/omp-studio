@@ -10,7 +10,7 @@ import { useI18n } from "../i18n";
 import { hostErrorMessage } from "../hostError";
 import { explorerRowActivity, EMPTY_EXPLORER_FILE_ACTIVITY, type ExplorerFileActivity } from "../conversation/explorerFileActivity";
 import { readExplorerExpansion, writeExplorerExpansion } from "./expandMemory";
-import { GIT_STATUS_META, type TreeGitStatus } from "../git/treeStatus";
+import { GIT_STATUS_META, gitStatusLabel, type TreeGitStatus } from "../git/treeStatus";
 
 export type WorkspaceCreationKind = "file" | "directory";
 
@@ -78,12 +78,13 @@ function expandedWorkspacePathsForSearch(nodes: ReadonlyArray<WorkspaceFileNode>
 
 /** Explorer 行内 git 状态徽章：行尾彩色字母 + 文件名着色双通道，目录显示聚合后的后代状态。 */
 function GitTreeBadge({ status }: { status?: TreeGitStatus | undefined }) {
+  const { resolvedLanguage } = useI18n();
   if (status === undefined) return null;
   const meta = GIT_STATUS_META[status];
   return (
     <span className={`fstat ${meta.className}`}>
       <span aria-hidden="true">{meta.letter}</span>
-      <span className="sr-only"> {meta.label}</span>
+      <span className="sr-only"> {gitStatusLabel(status, resolvedLanguage === "zh")}</span>
     </span>
   );
 }
@@ -324,6 +325,10 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
 }) {
   const openInViewer = useOpenFile();
   const executionTarget = useExecutionTarget();
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const [model, setModel] = useState<WorkspaceFileTreeReadModel | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
@@ -356,7 +361,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
     } catch (error) {
       if (generation !== generationRef.current) return;
       setModel(null);
-      setMessage(hostErrorMessage(error, "文件树加载失败"));
+      setMessage(hostErrorMessage(error, zhRef.current ? "文件树加载失败" : "Failed to load file tree"));
     } finally {
       if (generation === generationRef.current) setLoading(false);
     }
@@ -388,7 +393,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
         next.delete(path);
         expandedRef.current = next;
         setExpanded(next);
-        setMessage(hostErrorMessage(error, `无法展开 ${path}`));
+        setMessage(hostErrorMessage(error, zhRef.current ? `无法展开 ${path}` : `Failed to expand ${path}`));
       }
     } finally {
       loadingPathsRef.current.delete(path);

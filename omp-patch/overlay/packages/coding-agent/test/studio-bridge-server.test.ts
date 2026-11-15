@@ -26,6 +26,7 @@ import { StudioLoopService } from "@oh-my-pi/pi-coding-agent/studio/services/loo
 import { StudioPauseService } from "@oh-my-pi/pi-coding-agent/studio/services/pause-service";
 import type { StudioHostRuntime } from "@oh-my-pi/pi-coding-agent/studio/studio-host-mode";
 import { VERSION } from "@oh-my-pi/pi-utils";
+import { runtimeText, setRuntimeLocale } from "../src/studio/locale";
 
 const servers: StudioBridgeServer[] = [];
 const sockets: net.Socket[] = [];
@@ -309,6 +310,33 @@ function sendHello(socket: net.Socket, challenge: string, versions = [1]): void 
 }
 
 describe("WP-011 Studio Bridge runtime server", () => {
+	test("authenticated language changes affect Runtime copy without receipts or event sequence changes", async () => {
+		const previous = process.env.OMP_STUDIO_LOCALE;
+		const fixture = await bridgeFixture();
+		const server = new StudioBridgeServer(fixture.endpoint, fixture.tokenFile);
+		servers.push(server);
+		setRuntimeLocale("zh");
+		try {
+			const started = server.start(fakeRuntime());
+			await waitForTokenConsumption(fixture.tokenFile);
+			const socket = await connect(fixture.endpoint);
+			const helloFrame = receiveFrame(socket);
+			sendHello(socket, "locale");
+			const hello = (await helloFrame).body as StudioHelloResponse;
+			expect(hello.capabilityManifest.capabilities.some(capability => capability.id === "studio.locale")).toBe(true);
+			socket.write(encodeStudioFrame("locale-en", hello.runtimeEpoch, { type: "studio.locale", locale: "en" }));
+			const english = await exchangeSnapshot(socket, "snapshot-en");
+			await started;
+			expect(runtimeText("Agent 提问", "Agent Question")).toBe("Agent Question");
+			socket.write(encodeStudioFrame("locale-zh", hello.runtimeEpoch, { type: "studio.locale", locale: "zh" }));
+			const chinese = await exchangeSnapshot(socket, "snapshot-zh");
+			expect(runtimeText("Agent 提问", "Agent Question")).toBe("Agent 提问");
+			expect(chinese.lastEventSeq).toBe(english.lastEventSeq);
+		} finally {
+			if (previous === undefined) delete process.env.OMP_STUDIO_LOCALE;
+			else process.env.OMP_STUDIO_LOCALE = previous;
+		}
+	});
 	test("Computer query and increment use private envelopes without command receipts or Studio event sequence", async () => {
 		const fixture = await bridgeFixture();
 		const runtime = fakeRuntime();

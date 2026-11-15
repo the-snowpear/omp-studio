@@ -18,7 +18,7 @@ import { ToastHost } from "./ToastHost";
 import type { PageRoute } from "./HomePage";
 import { usePreviewMode } from "./preview/PreviewContext";
 import {
-  PREVIEW_HISTORY,
+  getPreviewHistory,
   type PreviewHistoryRow,
   type PreviewHistoryStatus,
 } from "./preview/fixtures";
@@ -103,7 +103,8 @@ function HistMoreMenu({
   onPin?: (() => void) | undefined;
   pinned?: boolean | undefined;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const popRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 200 });
 
@@ -150,7 +151,7 @@ function HistMoreMenu({
       style={{ top: anchor.top, left: anchor.left, minWidth: anchor.width }}
     >
       {onRename ? <button type="button" role="menuitem" className="menu-item" onClick={onRename}><Icon name="pencil" extra="sm" /><span>{t("conversation.renameThread")}</span></button> : null}
-      {onPin ? <button type="button" role="menuitem" className="menu-item" onClick={onPin}><Icon name="pin" extra="sm" /><span>{pinned ? "取消置顶 / Unpin" : "置顶 / Pin"}</span></button> : null}
+      {onPin ? <button type="button" role="menuitem" className="menu-item" onClick={onPin}><Icon name="pin" extra="sm" /><span>{pinned ? (zh ? "取消置顶" : "Unpin") : (zh ? "置顶" : "Pin")}</span></button> : null}
       <button type="button" role="menuitem" className="menu-item danger" onClick={onDelete}>
         <Icon name="trash" extra="sm" />
         <span>{t("history.deleteSession")}</span>
@@ -176,7 +177,8 @@ function DeleteSessionDialog({
   onConfirm: (deleteManagedArtifacts: boolean) => void;
   onCancel: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const { marks } = usePreviewMode();
   const [deleteManagedArtifacts, setDeleteManagedArtifacts] = useState(false);
   useEffect(() => {
@@ -242,7 +244,8 @@ function PreviewHistRow({
   onConsult: () => void;
 }) {
   const status = PREVIEW_STATUS[row.status];
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const consultLabel = useConsultLabel();
   return (
     <div className="hist-row">
@@ -309,7 +312,8 @@ function HostHistRow({
 }) {
   const status = HOST_STATUS[entry.status];
   const archived = entry.status === "archived";
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const consultLabel = useConsultLabel();
   const title = hostHistoryTitle(entry, t("conversation.untitledSession"));
   return (
@@ -317,7 +321,7 @@ function HostHistRow({
       <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
       <a className="h-main" href="#!workbench" onClick={(event) => { event.preventDefault(); onOpen(); }}>
         <span className="h-title ellipsis">
-          {lease === true ? <span className="chip blue xs">使用中 / In use</span> : lease === null ? <span className="chip gray xs">占用未知 / Unknown lease</span> : null}
+          {lease === true ? <span className="chip blue xs">{zh ? "使用中" : "In use"}</span> : lease === null ? <span className="chip gray xs">{zh ? "占用未知" : "Unknown lease"}</span> : null}
           {entry.pinned === true ? <span className="t-pin" role="img" aria-label={t("history.pinned")}><Icon name="pin" extra="sm" /></span> : null}
           <SessionTitleMark row={titleRow} title={title} />{title}
         </span>
@@ -439,10 +443,10 @@ export function HistoryPage({
   }, [deleteFor, deleting, marks, preview, onDeleteSession, show, t]);
 
   const previewRows = useMemo(
-    () => PREVIEW_HISTORY.map(row => ({ ...row, ...previewMetadata[row.id] })).sort((a,b) => Number(!!b.pinned)-Number(!!a.pinned))
+    () => getPreviewHistory(zh).map(row => ({ ...row, ...previewMetadata[row.id] })).sort((a,b) => Number(!!b.pinned)-Number(!!a.pinned))
       .filter((row) => `${row.title} ${row.project} ${row.branch}`.toLowerCase().includes(q))
       .filter((row) => matchesStatusTab(row.status, statusTab)),
-    [q, statusTab, previewMetadata],
+    [q, statusTab, previewMetadata, zh],
   );
   const hostRows = useMemo(
     () => (history?.entries ?? [])
