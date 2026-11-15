@@ -11,7 +11,7 @@ import {
 } from "@omp-studio/studio-protocol";
 import type { TerminalSender } from "../src/terminal-ipc.js";
 import { DesktopPrediction } from "../src/prediction.js";
-test("prediction transport isolates windows and imports only a selected private file", async () => {
+test("v2 prediction transport attaches Runtime metadata, isolates windows and imports only a selected file", async () => {
   const root = await mkdtemp(join(tmpdir(), "studio-prediction-ipc-")),
     channelId = randomUUID(),
     token = randomBytes(32).toString("hex");
@@ -108,7 +108,7 @@ test("prediction transport isolates windows and imports only a selected private 
       () => manager.attach(sender, { channelId, sessionId: "foreign" }),
       /expired or changed/,
     );
-    await manager.attach(sender, { channelId, sessionId: "main" });
+    await manager.attach(sender, { channelId, sessionId: "main", expiresAt: Date.now() + 15000, protocolVersion: 2 });
     assert.throws(
       () =>
         manager.input(

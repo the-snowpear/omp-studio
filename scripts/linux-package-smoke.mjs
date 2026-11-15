@@ -16,7 +16,7 @@ const profile = await mkdtemp("/tmp/omp-linux-smoke-");
 const home = join(profile, "home"), workspace = join(profile, "workspace"), agentDir = join(home, ".omp/agent");
 const proof = `linux-package-${randomUUID()}`;
 const report = { status: "running", executable, packageRun: process.env.OMP_E2E_PACKAGE_RUN, display: process.env.OMP_E2E_DISPLAY ?? "x11", model: "local deterministic OpenAI-compatible endpoint", checks: [], profile };
-let application, page, providerCalls = 0;
+let application, page, providerCalls = 0, conversationCalls = 0;
 
 const provider = createServer(async (request, response) => {
   try {
@@ -26,15 +26,22 @@ const provider = createServer(async (request, response) => {
     const body = JSON.parse(raw);
     providerCalls += 1;
     const toolReply = body.messages.find(message => message.role === "tool" && JSON.stringify(message.content).includes(proof));
-    const delta = toolReply ? { content: `OMP_LINUX_OK ${proof}` } : {
+    const conversation = Boolean(toolReply || body.tools?.some(tool => tool.function?.name === "read"));
+    // The real Runtime also asks this provider for a background session title.
+    if (conversation) conversationCalls += 1;
+    const delta = !conversation ? { content: "Linux package acceptance" } : toolReply ? { content: `OMP_LINUX_OK ${proof}` } : {
       tool_calls: [{ index: 0, id: "linux-smoke-read", type: "function", function: { name: "read", arguments: JSON.stringify({ path: "fixture.txt" }) } }],
     };
-    if (!toolReply && !body.tools?.some(tool => tool.function?.name === "read")) throw new Error("Runtime did not expose its native read tool");
-    if (providerCalls > 4) throw new Error("Runtime did not return the read result");
+    if (conversationCalls > 2) throw new Error("Runtime did not return the read result");
+    const finish = delta.tool_calls ? "tool_calls" : "stop";
+    if (body.stream === false) {
+      response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ id: "linux-package-smoke", object: "chat.completion", created: 1, model: "smoke-model", choices: [{ index: 0, message: { role: "assistant", ...delta }, finish_reason: finish }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }));
+      return;
+    }
     response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
     const chunk = (change, finish_reason) => `data: ${JSON.stringify({ id: "linux-package-smoke", object: "chat.completion.chunk", created: 1, model: "smoke-model", choices: [{ index: 0, delta: change, finish_reason }] })}\n\n`;
     response.write(chunk({ role: "assistant", ...delta }, null));
-    response.write(chunk({}, toolReply ? "stop" : "tool_calls"));
+    response.write(chunk({}, finish));
     response.end("data: [DONE]\n\n");
   } catch (error) {
     report.providerError = String(error);
@@ -86,6 +93,8 @@ async function launch(env) {
   const identity = await application.evaluate(({ app }) => ({ packaged: app.isPackaged, sandboxDisabled: app.commandLine.hasSwitch("no-sandbox"), version: app.getVersion() }));
   assert.equal(identity.packaged, true);
   assert.equal(identity.sandboxDisabled, false);
+  const locations = await application.evaluate(() => ({ home: process.env.HOME, configHome: process.env.XDG_CONFIG_HOME }));
+  report.logDirectory = join(locations.configHome || join(locations.home, ".config"), "omp-studio/logs");
   await application.evaluate(({ dialog }, selected) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] }); }, workspace);
   return identity;
 }
@@ -146,7 +155,7 @@ try {
   await editor.press("Enter");
   await until(() => query("session.transcript.read"), result => result.items.some(item => item.role === "assistant" && item.content?.some(block => block.type === "text" && block.text.includes(`OMP_LINUX_OK ${proof}`))), "conversation and native tool roundtrip");
   await until(() => query("session.state"), result => !result.isStreaming, "conversation completion");
-  assert.equal(providerCalls, 2);
+  assert.equal(conversationCalls, 2);
   report.checks.push("real Runtime conversation through local model endpoint, native file read, streamed reply and persisted transcript");
   const session = await query("session.state");
   await editor.fill("unsent ");
@@ -178,7 +187,8 @@ try {
   provider.closeAllConnections();
   await new Promise(done => provider.close(done));
   report.providerCalls = providerCalls;
-  await cp(join(profile, "config/omp-studio/logs"), join(output, "host-logs"), { recursive: true }).catch(() => {});
+  report.conversationCalls = conversationCalls;
+  if (report.logDirectory) await cp(report.logDirectory, join(output, "host-logs"), { recursive: true }).catch(error => { report.logCopyError = String(error); });
   await writeFile(join(output, "report.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 }

@@ -43,6 +43,7 @@ export const CORE_NODE_SUITES = [
   "apps/desktop/dist/test/security.test.js",
   "apps/desktop/dist/test/floating-windows.test.js",
   "apps/desktop/dist/test/desktop-ipc-subscriptions.test.js",
+  "apps/desktop/dist/test/prediction.test.js",
   "apps/desktop/dist/test/perf-profile.test.js",
   "apps/desktop/dist/test/terminal-batch.test.js",
   "apps/desktop/dist/test/terminal-flow-control.test.js",
