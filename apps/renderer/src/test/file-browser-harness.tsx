@@ -1,3 +1,4 @@
+import { useOpenFile } from "../files/fileLinks";
 /** 文件浏览器验收：可拖宽度的舞台看三档视图，另可在真实 Dock 浮窗里打开。只用预览 fixture，不接 Host。 */
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -14,7 +15,7 @@ import { FileCloseDialog } from "../files/FileCloseDialog";
 import type { FileViewerActions } from "../files/fileActions";
 import { FileBrowserDock } from "../fileBrowser/FileBrowserDock";
 import { FileBrowserPanel } from "../fileBrowser/FileBrowserPanel";
-import { createPreviewFileBrowserSource } from "../preview/fileBrowserPreview";
+import { createPreviewFileBrowserSource, previewProjectFile } from "../preview/fileBrowserPreview";
 import "../styles/tokens.css";
 import "../styles/base.css";
 import "../styles/components.css";
@@ -33,8 +34,8 @@ const store = new DockStore(null); store.switchScope({ target: "local", project:
 const WIDTHS = [{ label: "窄 · 380", width: 380 }, { label: "中 · 720", width: 720 }, { label: "宽 · 1120", width: 1120 }] as const;
 
 function Harness() {
-  const dock = useDock();
-  const [width, setWidth] = useState(1120);
+  const dock = useDock(), openFile = useOpenFile();
+  const [width, setWidth] = useState(() => Number(query.get("w")) || 1120);
   const [real, setReal] = useState(false);
   const [context, setContext] = useState<string[]>([]);
   const source = useMemo(() => createPreviewFileBrowserSource(), []);
@@ -44,14 +45,15 @@ function Harness() {
       <strong style={{ marginRight: 8 }}>文件浏览器验收</strong>
       {WIDTHS.map(item => <button key={item.width} className={`btn small ${width === item.width ? "primary" : "outline"}`} onClick={() => setWidth(item.width)}>{item.label}</button>)}
       <button className="btn small outline" onClick={() => { document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark"; }}>切换主题</button>
-      <button className={`btn small ${real ? "primary" : "outline"}`} onClick={() => setReal(value => !value)}>{real ? "真实模式（未接入）" : "预览数据"}</button>
+      <button className={`btn small ${real ? "primary" : "outline"}`} onClick={() => setReal(value => !value)}>{real ? "无 Host 连接" : "预览数据"}</button>
       <button className="btn small outline" onClick={() => dock.store.dispatch({ type: "open", panel: "file-browser" })}>在 Dock 浮窗中打开</button>
       <span data-testid="composer-context" className="muted small">Composer：{context.length ? context.join("、") : "（空）"}</span>
     </header>
     <div data-testid="stage" style={{ width, maxWidth: "100%", height: 560, resize: "both", overflow: "hidden", border: "1px solid var(--border)", borderRadius: 10, boxShadow: "var(--shadow-sm)" }}>
       <PreviewSurface preview={!real}>
         <FileBrowserPanel panelId="harness" scope={real ? "harness-real" : "harness-preview"} source={real ? null : source}
-          unavailable={{ title: "文件浏览器尚未接入", detail: "浏览整台电脑需要新版 Host 提供全机文件读取；目前可以用左下角 Explorer 查看当前项目。" }}
+          unavailable={{ title: "尚未连接 Host", detail: "此样式验收页只提供演示数据。在桌面应用中打开文件浏览器可浏览本机或 SSH 文件。" }}
+          onOpenFile={entry => { openFile(previewProjectFile(entry.path) ?? { source: "system", path: entry.path }); }}
           onAddContext={entry => actions.addContext({ path: entry.path, label: entry.name })} />
       </PreviewSurface>
     </div>
@@ -62,5 +64,13 @@ function Harness() {
     <DockFloatingLayer /><FileCloseDialog />
   </div>;
 }
-document.documentElement.dataset.theme = new URLSearchParams(location.search).get("theme") === "dark" ? "dark" : "light";
+// 截图用：?w= 舞台宽度，?path= 初始位置，?select= 打开后点选的项目，?theme=dark。
+const query = new URLSearchParams(location.search);
+document.documentElement.dataset.theme = query.get("theme") === "dark" ? "dark" : "light";
+try {
+  const path = query.get("path");
+  localStorage.setItem("omp.fileBrowser.v1", JSON.stringify(path ? { "harness-preview:harness": { path } } : {}));
+} catch { /* storage unavailable */ }
+const select = query.get("select");
+if (select) setTimeout(() => document.querySelector<HTMLElement>(`[data-testid="stage"] [data-path="${CSS.escape(select)}"]`)?.click(), 900);
 createRoot(document.getElementById("root")!).render(<PreviewModeProvider switchEnabled><I18nProvider forcedLanguage="zh"><ExecutionTargets client={client}>{() => <DockProvider definitions={WORKBENCH_PANELS} store={store}><Harness /></DockProvider>}</ExecutionTargets></I18nProvider></PreviewModeProvider>);

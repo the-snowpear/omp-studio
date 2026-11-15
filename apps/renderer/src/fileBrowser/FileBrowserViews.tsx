@@ -1,8 +1,10 @@
+import { flattenTree, treeNavigationIndex, treeTypeahead } from "../sidebar/treeKeyboard";
+import { VirtualFileRows } from "./VirtualFileRows";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Icon, type IconName } from "../icons";
 import { fileTypeOf, iconNameFor, isNoiseDir, isSensitive } from "../explorer-types";
 import { fileBadge, fileKind } from "../files/fileTypes";
-import { baseName, COMPUTER, driveDisplayName, formatModified, formatSize, nameProblem, pathSegments, samePath, type FsEntry, type FsPeek, type FsPlaces, type SortKey } from "./model";
+import { baseName, columnRoot, COMPUTER, driveDisplayName, within, formatModified, formatSize, parentPath, pathSegments, samePath, type FsEntry, type FsPeek, type FsPlaces, type SortKey } from "./model";
 import type { FileBrowserState } from "./useFileBrowser";
 
 export type Copy = (zh: string, en: string) => string;
@@ -63,7 +65,6 @@ export function EditInput({ state, places, copy, language }: { state: FileBrowse
     element.setSelectionRange(0, dot > 0 ? dot : element.value.length);
   }, [edit?.kind, edit?.kind === "rename" ? edit.path : edit?.parent]);
   if (!edit) return null;
-  const problem = nameProblem(edit.draft, places.platform, language);
   return <span className="fb-edit" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
     <input ref={input} className="input" value={edit.draft} disabled={edit.busy} spellCheck={false}
       aria-label={edit.kind === "new" ? copy("新文件夹名称", "New folder name") : copy("新名称", "New name")}
@@ -71,14 +72,14 @@ export function EditInput({ state, places, copy, language }: { state: FileBrowse
       onChange={event => { const { error: _cleared, ...rest } = edit; state.setEdit({ ...rest, draft: event.target.value }); }}
       onKeyDown={event => {
         event.stopPropagation();
-        if (event.key === "Enter") { event.preventDefault(); void state.submitEdit(problem); }
+        if (event.key === "Enter") { event.preventDefault(); void state.submitEdit(); }
         if (event.key === "Escape") { event.preventDefault(); state.setEdit(undefined); }
       }}
       onBlur={() => {
         if (edit.busy) return;
         // 点走即确认；名称没变、为空或已经报错时点走等于取消。
         const unchanged = edit.kind === "rename" && edit.draft.trim() === baseName(edit.path, places.separator);
-        if (edit.error || unchanged || !edit.draft.trim() || problem) state.setEdit(undefined);
+        if (edit.error || unchanged || !edit.draft.trim()) state.setEdit(undefined);
         else void state.submitEdit();
       }} />
     {edit.busy ? <span className="spinner" aria-hidden="true" /> : null}
@@ -118,20 +119,16 @@ function useListKeys(entries: readonly FsEntry[], state: FileBrowserState, actio
     const focused = entries[index];
     if (extra?.(event, focused)) { event.preventDefault(); return; }
     const pick = (next: number) => { const entry = entries[Math.max(0, Math.min(entries.length - 1, next))]; if (entry) actions.select(entry, { ctrl: false, shift: event.shiftKey }, entries); };
+    const destination = treeNavigationIndex(event.key, index, entries.length);
+    if (destination !== undefined) { pick(destination); event.preventDefault(); return; }
     switch (event.key) {
-      case "ArrowDown": pick(index + 1); break;
-      case "ArrowUp": pick(index < 0 ? entries.length - 1 : index - 1); break;
-      case "Home": pick(0); break;
-      case "End": pick(entries.length - 1); break;
-      case "PageDown": pick(index + 10); break;
-      case "PageUp": pick(index - 10); break;
       case "Enter": if (focused) actions.activate(focused); break;
       case "Backspace": state.goUp(); break;
       default:
         if (event.key.length === 1 && !isMod(event) && !event.altKey && /\S/.test(event.key)) {
           const now = Date.now();
           typed.current = { text: now - typed.current.at > 700 ? event.key.toLowerCase() : typed.current.text + event.key.toLowerCase(), at: now };
-          const hit = entries.find(entry => entry.name.toLowerCase().startsWith(typed.current.text));
+          const hit = treeTypeahead(entries, index, typed.current.text, entry => entry.name) ?? treeTypeahead(entries, index, event.key, entry => entry.name);
           if (hit) actions.select(hit, { ctrl: false, shift: false }, entries);
           break;
         }
@@ -179,7 +176,7 @@ export function ListView({ state, places, actions, copy, language }: ViewProps) 
       onMouseDown={event => { if (event.target === event.currentTarget) state.setSelection([]); }}>
       {!loaded ? status : <>
         {newRow ? <div className="fb-row is-editing" role="row"><span className="fb-cell fb-col-name"><span className="fb-ico" data-kind="dir"><Icon name="folder" /></span><EditInput state={state} places={places} copy={copy} language={language} /></span></div> : null}
-        {state.currentState?.status === "error" ? status : entries.length === 0 && !newRow ? emptyHint(state, copy) : entries.map(entry => {
+        {state.currentState?.status === "error" ? status : entries.length === 0 && !newRow ? emptyHint(state, copy) : <VirtualFileRows entries={entries} selected={state.selection.at(-1)}>{entry => {
           const renaming = state.edit?.kind === "rename" && state.edit.path === entry.path;
           return <div key={entry.path} role="row" tabIndex={selected.has(entry.path) ? 0 : -1} data-path={entry.path}
             className={`fb-row${selected.has(entry.path) ? " is-selected" : ""}${renaming ? " is-editing" : ""}`}
@@ -193,7 +190,7 @@ export function ListView({ state, places, actions, copy, language }: ViewProps) 
             <span className="fb-cell fb-col-type" role="gridcell">{current === COMPUTER ? copy("磁盘", "Drive") : typeLabel(entry, copy)}</span>
             <span className="fb-cell fb-col-size" role="gridcell">{entry.type === "file" ? formatSize(entry.size) : ""}</span>
           </div>;
-        })}
+        }}</VirtualFileRows>}
       </>}
     </div>
   </div>;
@@ -206,15 +203,8 @@ export function TreeView({ state, places, actions, copy, language }: ViewProps) 
   useEffect(() => { state.load(COMPUTER); }, [state.load]);
   const selected = new Set(state.selection);
   // 扁平化当前可见的树行，给键盘导航用。
-  const flat: { entry: FsEntry; depth: number; parent: string }[] = [];
-  const walk = (path: string, depth: number) => {
-    const children = path === COMPUTER ? state.dirState(COMPUTER)?.dir?.entries ?? [] : state.childrenOf(path);
-    for (const entry of children) {
-      flat.push({ entry, depth, parent: path });
-      if (entry.type === "dir" && state.isExpanded(entry.path)) walk(entry.path, depth + 1);
-    }
-  };
-  walk(COMPUTER, 0);
+  const flat = flattenTree(state.dirState(COMPUTER)?.dir?.entries ?? [], entry => state.childrenOf(entry.path), state.isExpanded)
+    .map(item => ({ entry: item.node, depth: item.depth, parent: item.parentPath ?? COMPUTER }));
   const list = flat.map(item => item.entry);
   const onKeyDown = useListKeys(list, state, actions, (event, focused) => {
     if (!focused) return false;
@@ -265,14 +255,20 @@ export function TreeView({ state, places, actions, copy, language }: ViewProps) 
 
 export function ColumnsView({ state, places, actions, copy, language, preview }: ViewProps & { preview: PreviewSlot }) {
   const scroller = useRef<HTMLDivElement>(null);
+  useScrollSelected(scroller.current, state.selection.at(-1));
   const current = state.current ?? COMPUTER;
-  const chain = pathSegments(current, places).map(segment => segment.path);
+  const selectedCurrent = state.selection.some(path => samePath(path, current, places.separator));
+  const root = columnRoot(selectedCurrent ? parentPath(current, places.separator) : current, places, state.pins);
+  const chain = pathSegments(current, places).map(segment => segment.path).filter(path => root === COMPUTER || within(path, root, places.separator));
   const selected = state.selection.length === 1 ? state.entries.find(entry => entry.path === state.selection[0]) : undefined;
   const file = selected?.type === "file" ? selected : undefined;
+  const chainKey = chain.join("\u0000");
+  useEffect(() => { for (const path of chain) state.load(path); }, [chainKey, state.load]);
+  const loadedKey = chain.map(path => state.dirState(path)?.status ?? "").join();
   useLayoutEffect(() => {
     const element = scroller.current;
-    if (element) element.scrollTo?.({ left: element.scrollWidth, behavior: "smooth" });
-  }, [current, file?.path]);
+    if (element) element.scrollLeft = element.scrollWidth;
+  }, [chainKey, loadedKey, file?.path]);
   const entries = state.entries;
   const onKeyDown = useListKeys(entries, state, actions, (event, focused) => {
     if (event.key === "ArrowLeft") { state.goUp(); return true; }
@@ -287,22 +283,22 @@ export function ColumnsView({ state, places, actions, copy, language, preview }:
       const loaded = state.dirState(dirPath)?.dir !== undefined;
       const newRow = last && state.edit?.kind === "new" && samePath(state.edit.parent, dirPath, places.separator);
       return <div key={dirPath || "computer"} className={`fb-column${last ? " is-current" : ""}`} role="listbox" aria-label={dirPath || places.computerLabel}
-        tabIndex={last && !list.length ? 0 : -1} onKeyDown={last ? onKeyDown : undefined}
+        tabIndex={last && !list.length ? 0 : -1} onKeyDown={onKeyDown}
         onContextMenu={event => { if (event.target === event.currentTarget) { event.preventDefault(); if (!last) state.go(dirPath, { select: nextPath }); actions.context(null, { x: event.clientX, y: event.clientY }); } }}
         onMouseDown={event => { if (event.target === event.currentTarget && last) state.setSelection([]); }}>
         {!loaded || state.dirState(dirPath)?.status === "error" ? <FolderStatus state={state} path={dirPath} copy={copy} onUp={last && dirPath !== COMPUTER ? state.goUp : undefined} /> : <>
           {newRow ? <div className="fb-crow is-editing"><span className="fb-ico" data-kind="dir"><Icon name="folder" /></span><EditInput state={state} places={places} copy={copy} language={language} /></div> : null}
-          {list.length === 0 && !newRow ? last ? emptyHint(state, copy) : null : list.map(entry => {
+          {list.length === 0 && !newRow ? last ? emptyHint(state, copy) : null : <VirtualFileRows entries={list} selected={state.selection.at(-1)}>{entry => {
             const onPath = nextPath !== undefined && samePath(entry.path, nextPath, places.separator);
-            const picked = last && state.selection.includes(entry.path);
+            const picked = state.selection.includes(entry.path);
             const renaming = state.edit?.kind === "rename" && state.edit.path === entry.path;
             const drive = dirPath === COMPUTER ? places.drives.find(value => samePath(value.path, entry.path, places.separator)) : undefined;
             return <div key={entry.path} role="option" data-path={entry.path} aria-selected={picked || onPath}
               tabIndex={picked ? 0 : -1} className={`fb-crow${onPath ? " is-trail" : ""}${picked ? " is-selected" : ""}${renaming ? " is-editing" : ""}`}
               data-hidden={entry.hidden || undefined} data-denied={entry.denied || undefined}
               onClick={event => {
-                if (!last) { if (entry.type === "dir") state.go(entry.path); else { state.go(dirPath, { select: entry.path }); } return; }
-                if (entry.type === "dir" && !isMod(event) && !event.shiftKey && !entry.denied) state.go(entry.path);
+                if (!last) { if (entry.type === "dir") state.go(entry.path, { select: entry.path }); else { state.go(dirPath, { select: entry.path }); } return; }
+                if (entry.type === "dir" && !isMod(event) && !event.shiftKey && !entry.denied) state.go(entry.path, { select: entry.path });
                 else actions.select(entry, { ctrl: isMod(event), shift: event.shiftKey }, list);
               }}
               onDoubleClick={() => { if (entry.type === "file") actions.activate(entry); }}
@@ -311,7 +307,7 @@ export function ColumnsView({ state, places, actions, copy, language, preview }:
               {renaming ? <EditInput state={state} places={places} copy={copy} language={language} /> : drive ? <span className="fb-name"><span className="ellipsis">{driveDisplayName(drive, places.separator)}</span></span> : <NameCell entry={entry} copy={copy} />}
               {entry.type === "dir" ? <Icon name="chevron-r" extra="sm" /> : null}
             </div>;
-          })}
+          }}</VirtualFileRows>}
         </>}
       </div>;
     })}

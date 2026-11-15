@@ -3,13 +3,13 @@
  *
  * 这里只有 Renderer 自己的形状与纯函数：路径拆分、排序、格式化、视图分档。
  * 数据从 `FileBrowserSource` 来——预览模式是 `preview/fileBrowserPreview.ts`
- * 的演示文件系统；真实模式等 Host 提供全机文件读模型后接在同一接口上，
- * 在此之前面板显示禁用壳和原因，不伪造任何目录。
+ * 的演示文件系统；真实模式使用 fileBrowserSource 的 Host 服务，不伪造目录。
  */
 
 export type FsPlatform = "win32" | "darwin" | "linux";
 
 export interface FsEntry {
+  readonly workspace?: { readonly workspaceId: string; readonly relativePath: string };
   readonly name: string;
   /** 绝对路径，按来源平台的写法（`C:\Users\demo` / `/Users/demo`）。 */
   readonly path: string;
@@ -25,6 +25,7 @@ export interface FsEntry {
 }
 
 export interface FsDirectory {
+  readonly workspace?: { readonly workspaceId: string; readonly relativePath: string };
   readonly path: string;
   readonly entries: readonly FsEntry[];
   /** 条目超过上限，只返回了前一部分。 */
@@ -50,6 +51,8 @@ export interface FsPlaces {
 }
 
 export interface FsPeek {
+  /** Release an image lease when the preview card closes or changes selection. */
+  readonly release?: () => void;
   /** 文本文件的开头若干行。 */
   readonly text?: string;
   /** 可直接放进 `<img>` 的地址（预览为 data URL，真实为文件租约 URL）。 */
@@ -70,7 +73,7 @@ export interface FileBrowserSource {
   readonly trash: boolean;
   places(): Promise<FsPlaces>;
   /** `""` 是根层：「此电脑」下的盘符与卷。 */
-  list(path: string): Promise<FsDirectory>;
+  list(path: string, showHidden?: boolean): Promise<FsDirectory>;
   peek(entry: FsEntry): Promise<FsPeek>;
   createFolder(parent: string, name: string): Promise<string>;
   rename(path: string, name: string): Promise<string>;
@@ -139,6 +142,16 @@ export function pathSegments(path: string, places: Pick<FsPlaces, "separator" | 
   return out;
 }
 
+/**
+ * 分栏的起点：包含当前位置的最深的「位置」（快速访问 / 项目 / 已固定 / 盘符），
+ * 与 Finder 一样从侧栏所在处展开，而不是每次从「此电脑」排起。
+ */
+export function columnRoot(current: string, places: FsPlaces, pins: readonly string[]): string {
+  if (current === COMPUTER) return COMPUTER;
+  const all = [...places.quick.map(item => item.path), ...places.projects.map(item => item.root), ...pins, ...places.drives.map(item => item.path)];
+  return all.filter(path => within(current, path, places.separator)).sort((a, b) => b.length - a.length)[0] ?? COMPUTER;
+}
+
 export function samePath(a: string, b: string, sep: string): boolean {
   const left = trimEnd(a, sep), right = trimEnd(b, sep);
   return sep === "\\" ? left.toLowerCase() === right.toLowerCase() : left === right;
@@ -158,7 +171,7 @@ export function driveShortLabel(drive: FsDrive, sep: string): string {
 
 /** 位置栏与根层列表里的卷名：Windows「系统 (C:)」，其余直接用卷名。 */
 export function driveDisplayName(drive: FsDrive, sep: string): string {
-  return sep === "\\" ? `${drive.label} (${drive.path.slice(0, 2)})` : drive.label;
+  return sep === "\\" && drive.label !== drive.path.slice(0, 2) ? `${drive.label} (${drive.path.slice(0, 2)})` : drive.label;
 }
 
 /** 路径栏输入：`~` 展开为主目录，去掉两端引号与空白。 */

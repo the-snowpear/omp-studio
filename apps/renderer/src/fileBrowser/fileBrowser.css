@@ -313,6 +313,8 @@
 .fb-col .icon { width: 10px; height: 10px; color: var(--fb-ink); }
 .fb-list-head .fb-col-size, .fb-row .fb-col-size { justify-content: flex-end; text-align: right; }
 .fb-list-body { flex: 1; overflow: auto; padding: var(--sp-4) var(--sp-6) var(--sp-16); outline: none; }
+.fb-rows { display: flex; flex-direction: column; flex: none; }
+.fb-column .fb-rows { gap: 1px; }
 .fb-row {
   height: var(--fb-row);
   border-radius: var(--r-6);

@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "../icons";
@@ -184,10 +185,10 @@ export function StatusBar({ state, copy, sourceLabel, demo }: { state: FileBrows
   return <footer className="fb-status" role="status" aria-live="polite">
     <span className="fb-stat">{dir ? copy(`${state.entries.length} 项`, `${state.entries.length} items`) : "—"}</span>
     {picked.length ? <span className="fb-stat is-strong">{copy(`已选 ${picked.length} 项`, `${picked.length} selected`)}{bytes ? <em>{formatSize(bytes)}</em> : null}</span> : null}
-    {hiddenCount || state.showHidden ? <button type="button" className="fb-stat is-button" aria-pressed={state.showHidden} data-tip={state.showHidden ? copy("点击不显示隐藏文件", "Click to hide") : copy("点击显示隐藏文件", "Click to show")} onClick={state.toggleHidden}>
-      <Icon name={state.showHidden ? "eye" : "eye-off"} extra="sm" />{state.showHidden ? copy("含隐藏文件", "Incl. hidden") : copy(`${hiddenCount} 个已隐藏`, `${hiddenCount} hidden`)}
+    {dir ? <button type="button" className="fb-stat is-button" aria-pressed={state.showHidden} data-tip={state.showHidden ? copy("点击不显示隐藏文件", "Click to hide") : copy("点击显示隐藏文件", "Click to show")} onClick={state.toggleHidden}>
+      <Icon name={state.showHidden ? "eye" : "eye-off"} extra="sm" />{state.showHidden ? copy("含隐藏文件", "Incl. hidden") : hiddenCount ? copy(`${hiddenCount} 个已隐藏`, `${hiddenCount} hidden`) : copy("隐藏文件：关", "Hidden files: off")}
     </button> : null}
-    {dir?.truncated ? <span className="fb-chip" data-tone="warn" data-tip={copy("文件夹太大，只读取了前一部分；用筛选或路径栏缩小范围", "Large folder: only the first part was read")}><Icon name="alert" extra="sm" />{copy("仅显示部分项目", "Partial listing")}</span> : null}
+    {dir?.truncated ? <span className="fb-chip" data-tone="warn" data-tip={copy("文件夹太大，只读取了前一部分；用筛选或路径栏缩小范围", "Large folder: only the first part was read")}><Icon name="alert" extra="sm" />{copy("仅显示前 5000 项", "First 5000 items")}</span> : null}
     <span className="fb-status-fill" />
     {dir?.project ? <span className="fb-stat is-project"><Icon name="diamond" extra="sm" />{dir.project.name}</span> : null}
     {sourceLabel ? <span className="fb-stat"><span className="fb-live" aria-hidden="true" />{sourceLabel}</span> : null}
@@ -222,8 +223,9 @@ export function Popover({ anchor, point, onClose, label, children, className = "
 }
 
 export interface MenuEntry { icon?: IconName; label: string; kbd?: string; disabled?: string | undefined; danger?: boolean; run(): void }
-export function MenuEntries({ entries, onClose }: { entries: readonly (MenuEntry | "sep")[]; onClose(): void }) {
-  return <>{entries.map((entry, index) => entry === "sep" ? <div key={`sep-${index}`} className="menu-sep" /> : <span key={entry.label} className={entry.danger ? "fb-menu-danger" : undefined}>
+export type BrowserMenuEntry = MenuEntry | "sep" | { id: string; content: ReactNode };
+export function MenuEntries({ entries, onClose }: { entries: readonly BrowserMenuEntry[]; onClose(): void }) {
+  return <>{entries.map((entry, index) => entry === "sep" ? <div key={`sep-${index}`} className="menu-sep" /> : "content" in entry ? <Fragment key={entry.id}>{entry.content}</Fragment> : <span key={entry.label} className={entry.danger ? "fb-menu-danger" : undefined}>
     <MenuItem {...(entry.icon ? { icon: entry.icon } : {})} {...(entry.kbd ? { kbd: entry.kbd } : {})} disabled={Boolean(entry.disabled)} title={entry.disabled} onClick={() => { onClose(); entry.run(); }}>{entry.label}</MenuItem>
   </span>)}</>;
 }

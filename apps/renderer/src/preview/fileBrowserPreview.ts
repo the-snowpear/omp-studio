@@ -25,7 +25,7 @@ function fromPreviewTree(nodes: readonly PreviewFileNode[], depth = 0): Node[] {
 }
 
 const winSystem = (): Node[] => [
-  dir("System32", Array.from({ length: 420 }, (_, index) => file(index % 7 === 0 ? `drivers-${index}.sys` : `api-ms-win-core-${index}.dll`, 24 * KB + index * 311, 90 * DAY + index * HOUR))),
+  dir("System32", Array.from({ length: 5001 }, (_, index) => file(index % 7 === 0 ? `drivers-${index}.sys` : `api-ms-win-core-${index}.dll`, 24 * KB + index * 311, 90 * DAY + index * HOUR))),
   dir("Fonts", [file("msyh.ttc", 19 * MB, 400 * DAY), file("consola.ttf", 450 * KB, 400 * DAY)]),
   dir("Temp", [], { denied: true }),
   file("explorer.exe", 5 * MB, 30 * DAY),
@@ -184,7 +184,7 @@ export function createPreviewFileBrowserSource(platform: "win32" | "darwin" = PL
       const entries = tree.get(path);
       if (!entries) return fail("路径不存在或不是文件夹");
       const project = projects.find(item => within(path, item.root, sep));
-      return wait<FsDirectory>({ path: drive && samePath(drive.drive.path, path, sep) ? drive.drive.path : (entry?.path ?? path), entries, ...(entries.length >= 400 ? { truncated: true } : {}), ...(project ? { project: { name: project.name, root: project.root } } : {}) }, entries.length > 100 ? 220 : 90);
+      return wait<FsDirectory>({ path: drive && samePath(drive.drive.path, path, sep) ? drive.drive.path : (entry?.path ?? path), entries: entries.slice(0, 5000), ...(entries.length > 5000 ? { truncated: true } : {}), ...(project ? { project: { name: project.name, root: project.root } } : {}) }, entries.length > 100 ? 220 : 90);
     },
     peek(entry) {
       const ext = entry.name.includes(".") ? entry.name.slice(entry.name.lastIndexOf(".") + 1).toLowerCase() : "";
