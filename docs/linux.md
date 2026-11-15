@@ -143,6 +143,8 @@ npm run pack:linux
 
 普通 CI 执行 Windows / Linux 源码检查。手动 CI 的 `linux-package` 额外构建、审计两种安装包，并运行 X11 AppImage / deb、Wayland deb、真实 Runtime 握手、原生终端、会话重启与安装 / 卸载数据保留验收。对话使用本机 OpenAI 兼容测试端点驱动真实 Runtime 和文件读取工具，不使用外部模型账户或假 Host。产物使用测试密钥，不能作为正式 Release 附件。
 
+构建与安装验收是独立任务。只调整验收脚本时，可以给 `linux_package_run` 填入已有测试包的 CI run ID，复测该包而不用重编 Runtime；报告会记录安装包的来源 run。修改产品或打包代码后，应留空此项生成新包。
+
 自动化中的中文输入检查覆盖 Chromium composition 事件；实体 IBus / Fcitx、GNOME / KDE 的窗口策略、屏幕共享 portal / PipeWire、麦克风与系统密钥环仍按目标桌面实机验证。能力是否可用由真实 Runtime 探测报告，不因安装包生成成功而伪造能力。
 
 Release 默认包含 Linux x64，任一选中平台的构建 / 包审计失败会阻止整次发布。版本号须晚于已发布版本，不能重用 0.2.0 / 0.2.1 的 tag。详细流程见 [发布指南](releasing.md)。

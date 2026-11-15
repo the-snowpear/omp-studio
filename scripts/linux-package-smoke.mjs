@@ -15,7 +15,7 @@ const output = resolve(process.env.OMP_E2E_OUTPUT_DIR ?? "outputs/linux-package-
 const profile = await mkdtemp("/tmp/omp-linux-smoke-");
 const home = join(profile, "home"), workspace = join(profile, "workspace"), agentDir = join(home, ".omp/agent");
 const proof = `linux-package-${randomUUID()}`;
-const report = { status: "running", executable, display: process.env.OMP_E2E_DISPLAY ?? "x11", model: "local deterministic OpenAI-compatible endpoint", checks: [], profile };
+const report = { status: "running", executable, packageRun: process.env.OMP_E2E_PACKAGE_RUN, display: process.env.OMP_E2E_DISPLAY ?? "x11", model: "local deterministic OpenAI-compatible endpoint", checks: [], profile };
 let application, page, providerCalls = 0;
 
 const provider = createServer(async (request, response) => {

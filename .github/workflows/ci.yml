@@ -15,6 +15,10 @@ on:
         type: choice
         options: [core, full, macos-package, linux-package]
         default: core
+      linux_package_run:
+        description: Retest Linux packages from this CI run without rebuilding (blank builds fresh packages)
+        type: string
+        default: ""
 
 concurrency:
   group: ci-${{ github.ref }}-${{ inputs.scope || 'core' }}
@@ -79,7 +83,7 @@ jobs:
 
   linux-package:
     name: Linux test packages (x64)
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'linux-package'
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'linux-package' && inputs.linux_package_run == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
@@ -114,6 +118,7 @@ jobs:
           keys="${XDG_CONFIG_HOME:-$HOME/.config}/omp-studio/keys"
           export OMP_RUNTIME_TRUSTED_PUBLIC_KEY="$keys/trusted-public.pem"
           export OMP_RUNTIME_SIGNING_KEY_ID="$(tr -d '[:space:]' < "$keys/key-id.txt")"
+          node --test scripts/linux-bundle.test.mjs
           npm run pack:linux -- --skip-host --skip-build
       - name: Build and verify Linux test catalog
         run: |
@@ -138,8 +143,14 @@ jobs:
   linux-package-smoke:
     name: Linux installed acceptance (x64)
     needs: linux-package
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.scope == 'linux-package' && (needs.linux-package.result == 'success' || inputs.linux_package_run != '') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+    env:
+      OMP_E2E_PACKAGE_RUN: ${{ inputs.linux_package_run || github.run_id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -151,6 +162,8 @@ jobs:
         with:
           name: omp-studio-linux-x64-test-packages
           path: outputs/installer-linux
+          run-id: ${{ inputs.linux_package_run || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Prepare desktop acceptance
         run: |
           sudo apt-get update
