@@ -411,6 +411,11 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "agents.definition.delete": true,
   "agents.definition.configure": true,
   "workspace.open": true,
+  "workspace.openPath": true,
+  "fs.file.writeText": true,
+  "fs.directory.create": true,
+  "fs.rename": true,
+  "fs.trash": true,
   "workspace.pick": true,
   "workspace.file.create": true,
   "workspace.file.writeText": true,
@@ -644,6 +649,8 @@ function preserveHostOwnedCommand(command: CommandState): boolean {
     || command.commandName === "timeTravel.cleanup"
     || command.commandName === "runtime.ensure"
     || command.commandName === "workspace.open"
+    || command.commandName === "workspace.openPath"
+    || command.commandName.startsWith("fs.")
     || command.commandName === "workspace.pick"
     || command.commandName === "session.archive"
     || command.commandName === "session.unarchive"
