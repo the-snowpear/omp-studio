@@ -1,10 +1,14 @@
-import { act, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LuxAmbient } from "./LuxAmbient";
 import { LuxOrbit } from "./LuxOrbit";
+import { LuxSpotlight } from "./LuxSpotlight";
 import { applyLightLevel } from "./lightLevel";
 
 afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   document.documentElement.removeAttribute("data-light");
 });
 
@@ -43,5 +47,39 @@ describe("light layer", () => {
     view.unmount();
     const fresh = render(<LuxAmbient />);
     expect(fresh.container.querySelector(".lux-ambient")?.getAttribute("data-activity")).toBe("idle");
+  });
+
+  it("keeps the spotlight on the same card after its layout changes", () => {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const view = render(<><div className="card" /><LuxSpotlight enabled /></>);
+    const card = view.container.querySelector<HTMLElement>(".card")!;
+    const spot = view.container.querySelector<HTMLElement>(".lux-spot")!;
+    let rect = new DOMRect(28, 266, 230, 76);
+    vi.spyOn(card, "getBoundingClientRect").mockImplementation(() => rect);
+    const move = (x: number, y: number) => {
+      fireEvent.pointerMove(card, { clientX: x, clientY: y });
+      act(() => { frames.shift()!(0); });
+    };
+
+    move(100, 300);
+    expect(spot.style.translate).toBe("28px 266px");
+
+    rect = new DOMRect(90, 300, 280, 90);
+    move(100, 330);
+    expect(spot.style.translate).toBe("90px 300px");
+    expect(spot.style.width).toBe("280px");
+    expect(spot.style.height).toBe("90px");
+    expect(spot.style.getPropertyValue("--mx")).toBe("10px");
+    expect(spot.style.getPropertyValue("--my")).toBe("30px");
+
+    fireEvent.resize(window);
+    expect(spot.hasAttribute("data-on")).toBe(false);
+    rect = new DOMRect(90, 340, 280, 90);
+    move(100, 350);
+    expect(spot.style.translate).toBe("90px 340px");
+    expect(spot.hasAttribute("data-on")).toBe(true);
   });
 });

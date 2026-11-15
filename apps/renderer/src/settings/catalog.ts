@@ -56,6 +56,7 @@ const localKeys: Array<[string, ActiveSettingsGroup, string, string?]> = [
   ["startup.session", "general", "settings.general.restoreLastSession"], ["startup.page", "general", "settings.general.startupPage"],
   ...(["notifyTaskDone", "notifyErrors", "notifyConfirmations", "notifyLongTasks"] as const).map(key => [key, "general", "settings.general." + key] as [string, ActiveSettingsGroup, string]),
   ["theme", "appearance", "settings.general.theme"], ["density", "appearance", "settings.general.density"], ["palette", "appearance", "settings.general.fileTypePalette"],
+  ["light", "appearance", "settings.general.light"],
   ["conversation.width", "appearance", "settings.conversationWidth.title", "conversation reading width 阅读宽度"],
   ["background", "appearance", "settings.background.title", "wallpaper 背景 图片 video"], ["font", "appearance", "settings.fonts.title", "fonts 字体 字号"],
   ["streaming", "interaction", "settings.general.streaming"], ["streaming.rate", "interaction", "settings.general.streamingCadence"],
