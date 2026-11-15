@@ -1,8 +1,26 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AppUpdateDialog } from "./AppUpdateDialog";
+import { I18nProvider } from "./i18n";
 
 afterEach(cleanup);
+
+for (const preview of [false, true]) it(`keeps the Linux installer dialog and its notice localized while switching languages (${preview ? "preview" : "real"})`, () => {
+  const update = { currentVersion: "0.2.1", version: "0.2.2", manualInstallUrl: "https://github.com/the-snowpear/omp-studio/releases/download/v0.2.2/OMP-Studio-0.2.2-linux-x64.deb" };
+  const view = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><AppUpdateDialog preview={preview} update={update} onClose={vi.fn()} /></I18nProvider>;
+  const { rerender } = render(view("zh"));
+  expect(screen.getByRole("button", { name: "下载安装包" })).toBeTruthy();
+  if (preview) fireEvent.click(screen.getByRole("button", { name: "下载安装包" }));
+  rerender(view("en"));
+  expect(screen.getByRole("button", { name: "Download installer" })).toBeTruthy();
+  expect(screen.getByText(/Download the new version, close OMP Studio/)).toBeTruthy();
+  if (preview) expect(screen.getByText("(Demo)")).toBeTruthy();
+  expect(screen.getByRole("dialog").textContent).toContain("0.2.2");
+  rerender(view("zh"));
+  expect(screen.getByRole("button", { name: "下载安装包" })).toBeTruthy();
+  expect(screen.getByText(/下载新版本后，关闭 OMP Studio/)).toBeTruthy();
+  if (preview) expect(screen.getByText("（演示）")).toBeTruthy();
+});
 
 it("opens the Linux manual installer without preparing or restarting the app", async () => {
   const download = vi.fn(), apply = vi.fn();

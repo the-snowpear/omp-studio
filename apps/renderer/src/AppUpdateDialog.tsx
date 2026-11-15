@@ -92,7 +92,8 @@ export function AppUpdateDialog({
   const applying = isApplying || operation === "apply";
   const busy = downloading || applying;
   const [simulatedProgress, setSimulatedProgress] = useState(0);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ key: "appUpdate.demoUpdate" | "appUpdate.demoApplied" | "appUpdate.restarting" | "updates.readyToApply"; demo?: boolean } | null>(null);
+  const statusMessage = notice ? t(notice.key) + (notice.demo && marks ? ` ${t("appUpdate.demoUpdate")}` : "") : null;
   const [previewReady, setPreviewReady] = useState(false);
   const ready = preview ? previewReady : readyToApply;
   const manualInstallUrl = update.manualInstallUrl ?? (preview && PLATFORM === "linux" && update.component !== "runtime" ? update.htmlUrl : undefined);
@@ -124,9 +125,9 @@ export function AppUpdateDialog({
 
   const handleDownload = useCallback(async () => {
     if (busy || update.blockedReason) return;
-    setStatusMessage(null);
+    setNotice(null);
     if (manualInstallUrl && !ready) {
-      if (preview) { if (marks) setStatusMessage(t("appUpdate.demoUpdate")); return; }
+      if (preview) { if (marks) setNotice({ key: "appUpdate.demoUpdate" }); return; }
       const openUrl = globalThis.ompStudioChrome?.openUrl;
       if (openUrl) await openUrl({ url: manualInstallUrl });
       else window.open(manualInstallUrl, "_blank", "noopener,noreferrer");
@@ -138,7 +139,7 @@ export function AppUpdateDialog({
         previewTimersRef.current.push(setTimeout(() => {
           setOperation(null);
           setPreviewReady(false);
-          if (marks) setStatusMessage(t("appUpdate.demoApplied"));
+          if (marks) setNotice({ key: "appUpdate.demoApplied" });
         }, 600));
         return;
       }
@@ -151,7 +152,7 @@ export function AppUpdateDialog({
       timers.push(setTimeout(() => {
         setOperation(null);
         setPreviewReady(true);
-        setStatusMessage(t("updates.readyToApply") + (marks ? " " + t("appUpdate.demoUpdate") : ""));
+        setNotice({ key: "updates.readyToApply", demo: true });
       }, 1600));
       return;
     }
@@ -161,13 +162,13 @@ export function AppUpdateDialog({
       try {
         const ok = await action();
         if (ok) {
-          setStatusMessage(t(ready ? "appUpdate.restarting" : "updates.readyToApply"));
+          setNotice({ key: ready ? "appUpdate.restarting" : "updates.readyToApply" });
         }
       } finally {
         setOperation(null);
       }
     }
-  }, [busy, marks, preview, previewReady, ready, onApply, onDownloadAndInstall, t, update.blockedReason, manualInstallUrl]);
+  }, [busy, marks, preview, previewReady, ready, onApply, onDownloadAndInstall, update.blockedReason, manualInstallUrl]);
 
   const openGithub = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
