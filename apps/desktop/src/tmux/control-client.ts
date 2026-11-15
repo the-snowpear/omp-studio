@@ -1,5 +1,6 @@
 import type { Writable } from "node:stream";
 import { TmuxControlParser, type TmuxParserEvents, type TmuxBlock } from "./control-parser.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 interface Command { line: string; resolve(lines: Buffer[]): void; reject(error: Error): void }
 export class TmuxControlClient {
@@ -23,7 +24,7 @@ export class TmuxControlClient {
     stdin.on("error", error => this.close(error));
   }
   run(line: string): Promise<Buffer[]> {
-    if (this.#closed) return Promise.reject(new Error("tmux connection closed"));
+    if (this.#closed) return Promise.reject(new Error(desktopText("tmux 连接已关闭", "tmux connection closed")));
     return new Promise((resolve, reject) => {
       const command = { line, resolve, reject };
       if (this.#started) this.#send(command); else this.#queue.push(command);
@@ -38,7 +39,7 @@ export class TmuxControlClient {
   #send(command: Command): void { this.#waiting.push(command); this.stdin.write(command.line + "\n"); }
   #block(block: TmuxBlock): void {
     if (this.#closed) return;
-    const error = () => new Error(block.lines.map(line => line.toString()).join("\n") || "tmux command failed");
+    const error = () => new Error(block.lines.map(line => line.toString()).join("\n") || desktopText("tmux 命令执行失败", "tmux command failed"));
     if (!this.#started) {
       clearTimeout(this.#timer);
       if (!block.ok) { this.close(error()); return; }
@@ -46,14 +47,16 @@ export class TmuxControlClient {
       for (const command of this.#queue.splice(0)) this.#send(command);
       return;
     }
+    // Hooks also produce blocks, but only flag 1 identifies a command from stdin.
+    if (!(block.flags & 1)) return;
     const command = this.#waiting.shift();
     if (block.ok) command?.resolve(block.lines); else command?.reject(error());
   }
   detach(): void {
     if (!this.stdin.destroyed && !this.stdin.writableEnded) this.stdin.end("\n");
-    this.close(new Error("tmux detached"));
+    this.close(new Error(desktopText("tmux 连接已分离", "tmux detached")));
   }
-  close(error = new Error("tmux connection closed")): void {
+  close(error = new Error(desktopText("tmux 连接已关闭", "tmux connection closed"))): void {
     if (this.#closed) return;
     this.#closed = true; clearTimeout(this.#timer); this.#rejectReady(error);
     for (const command of [...this.#waiting.splice(0), ...this.#queue.splice(0)]) command.reject(error);

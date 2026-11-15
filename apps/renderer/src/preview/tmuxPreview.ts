@@ -46,7 +46,7 @@ export function changePreviewTmux(original: TmuxTopology, action: TmuxAction): T
     case "killSession": next.state = "exited"; break;
     case "selectWindow": next.activeWindowId = action.windowId; break;
     case "renameWindow": if (win) win.name = action.name; break;
-    case "setPaneVisible": for (const id of action.paneIds) next.panes[id]!.off = !action.visible; break;
+    case "setWindowVisible": for (const pane of Object.values(next.panes)) if (pane.windowId === action.windowId) pane.off = !action.visible; break;
     case "newWindow": {
       const index = Math.max(-1, ...next.windows.map(win => win.index)) + 1, id = `@${index}`, p = nextPane();
       next.windows.push({ id, index, name: "shell", zoomed: false, cols: 100, rows: 28, layout: pane(p, 100, 28) }); addPane(p, id); next.activeWindowId = id; break;

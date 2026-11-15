@@ -56,6 +56,12 @@ test("noise and exit reasons stay outside command blocks", () => {
   assert.equal(events.blocks[0]?.lines[0]?.toString(), "%output is a command result");
   assert.deepEqual(events.notifications, [["%exit", "too far behind"]]);
 });
+test("captured screen text resembling a different command's end marker stays in the screen", () => {
+  const events = replay(Buffer.from("%begin 10 20 1\n%end 9 20 1\n%end 10 19 1\n%error 10 20 0\nshell prompt\n%end 10 20 1\n"), true);
+  assert.equal(events.blocks.length, 1);
+  assert.deepEqual(events.blocks[0]!.lines.map(line => line.toString()), ["%end 9 20 1", "%end 10 19 1", "%error 10 20 0", "shell prompt"]);
+  assert.equal(events.blocks[0]!.ok, true);
+});
 test("layout checksum and nested pane rectangles reflect tmux's border cells", () => {
   const body = "100x30,0,0{40x30,0,0,0,59x30,41,0[59x15,41,0,1,59x14,41,16,2]}";
   const layout = parseTmuxLayout(`${tmuxLayoutChecksum(body)},${body}`)!;
@@ -89,4 +95,14 @@ test("startup gate prevents pairing our first command with the launch block; FIF
   await rejected;
   client.detach();
   assert.equal(written.at(-1), "\n");
+});
+test("hook output cannot consume the pending response to a Studio command", async () => {
+  const stdin = new Writable({ write(_chunk, _encoding, done) { done(); } });
+  const client = new TmuxControlClient(stdin, { onNotification() {}, onPaneOutput() {} });
+  client.parser.push(Buffer.from("%begin 1 1 0\n%end 1 1 0\n"));
+  const windows = client.run("list-windows"), panes = client.run("list-panes");
+  client.parser.push(Buffer.from("%begin 1 2 0\nhook output\n%end 1 2 0\n%begin 1 3 1\nwindows\n%end 1 3 1\n%begin 1 4 1\npanes\n%end 1 4 1\n"));
+  assert.equal((await windows)[0]!.toString(), "windows");
+  assert.equal((await panes)[0]!.toString(), "panes");
+  client.detach();
 });

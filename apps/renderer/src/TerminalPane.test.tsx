@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useCallback, useLayoutEffect } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { __resetAppSettingsForTests, updateAppSettings, useAppSettings } from "./settings/appSettings";
@@ -59,10 +59,10 @@ it("asks before closing a tmux window, hides without killing, and can restore it
   fireEvent.click(screen.getByRole("button", { name: "Close window shell" }));
   expect(screen.getByRole("dialog", { name: "Close “shell”" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Hide" }));
-  await waitFor(() => expect(api.tmuxCommand).toHaveBeenCalledWith({ connectionId: "connection-1", action: { kind: "setPaneVisible", paneIds: ["%0"], visible: false } }));
+  await waitFor(() => expect(api.tmuxCommand).toHaveBeenCalledWith({ connectionId: "connection-1", action: { kind: "setWindowVisible", windowId: "@0", visible: false } }));
   fireEvent.click(screen.getByText("1 hidden windows"));
   fireEvent.click(screen.getByRole("button", { name: "Restore shell" }));
-  await waitFor(() => expect(api.tmuxCommand).toHaveBeenCalledWith({ connectionId: "connection-1", action: { kind: "setPaneVisible", paneIds: ["%0"], visible: true } }));
+  await waitFor(() => expect(api.tmuxCommand).toHaveBeenCalledWith({ connectionId: "connection-1", action: { kind: "setWindowVisible", windowId: "@0", visible: true } }));
   expect(api.dispose).not.toHaveBeenCalled();
 });
 it("remembered End window choice skips the next close dialog", async () => {
@@ -81,6 +81,45 @@ it("explains why local workspaces cannot attach tmux", () => {
   const entry = screen.getByRole("button", { name: "Attach tmux…" }) as HTMLButtonElement;
   expect(entry.disabled).toBe(true);
   expect(entry.title).toContain("SSH workspaces only");
+});
+it("one tmux screen belongs to the conversation that attached it, including when reusing a connection", async () => {
+  const api = tmuxApi(); mocks.targetId = "remote";
+  let nextShell = 0;
+  api.create.mockImplementation(async () => ({ id: `shell-${nextShell++}`, name: "Shell", cwd: "/work" }));
+  render(<I18nProvider forcedLanguage="en"><TerminalSessionsProvider>
+    <section aria-label="First conversation"><TerminalPane visible workspaceId="ws" conversationId="first" /></section>
+    <section aria-label="Second conversation"><TerminalPane visible workspaceId="other-ws" conversationId="second" /></section>
+  </TerminalSessionsProvider></I18nProvider>);
+  const first = screen.getByRole("region", { name: "First conversation" }), second = screen.getByRole("region", { name: "Second conversation" });
+  fireEvent.click(within(first).getByRole("button", { name: "Attach tmux…" }));
+  fireEvent.click(await screen.findByRole("button", { name: /work.*1 windows/ }));
+  await within(first).findByRole("button", { name: "Close window shell" });
+  expect(second.querySelector('[data-pane-id="%0"]')).toBeNull();
+  const paneTerm = mocks.terminals.find(term => term.options.convertEol === false)!;
+  fireEvent.click(within(second).getByRole("button", { name: "Attach tmux…" }));
+  fireEvent.click(await screen.findByRole("button", { name: /work.*1 windows/ }));
+  await within(second).findByRole("button", { name: "Close window shell" });
+  expect(first.querySelector('[data-pane-id="%0"]')).toBeNull();
+  expect(second.querySelector('[data-pane-id="%0"]')).not.toBeNull();
+  expect(mocks.terminals.filter(term => term.options.convertEol === false)).toEqual([paneTerm]);
+  expect(paneTerm.dispose).not.toHaveBeenCalled();
+  expect(api.tmuxDetach).not.toHaveBeenCalled();
+});
+for (const preview of [false, true]) it(`keeps the tmux picker draft while switching zh → en → zh (preview=${preview})`, async () => {
+  const api = tmuxApi(); mocks.targetId = "remote";
+  window.history.replaceState(null, "", preview ? "/?preview=1&marks=off" : "/");
+  const surface = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><PreviewModeProvider><TerminalSessionsProvider><TerminalPane visible workspaceId="ws" /></TerminalSessionsProvider></PreviewModeProvider></I18nProvider>;
+  const view = render(surface("zh"));
+  fireEvent.click(screen.getByRole("button", { name: "附加 tmux…" }));
+  const input = await screen.findByRole("textbox");
+  fireEvent.change(input, { target: { value: "my-session-draft" } });
+  view.rerender(surface("en"));
+  expect(screen.getByRole("dialog", { name: "Attach tmux…" })).toBeTruthy();
+  expect(screen.getByRole<HTMLInputElement>("textbox", { name: "New session name" }).value).toBe("my-session-draft");
+  view.rerender(surface("zh"));
+  expect(screen.getByRole("dialog", { name: "附加 tmux…" })).toBeTruthy();
+  expect(screen.getByRole<HTMLInputElement>("textbox").value).toBe("my-session-draft");
+  expect(api.tmuxSessions).toHaveBeenCalledTimes(preview ? 0 : 1);
 });
 for (const marks of [true, false]) it(`preview tmux draws panes without terminal IPC (marks=${marks})`, async () => {
   const api = tmuxApi();

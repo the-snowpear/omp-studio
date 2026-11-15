@@ -35,6 +35,7 @@ export function TmuxWindowView({ topology, window: info, store, active, demo, co
   useEffect(() => {
     const node = container.current, measurement = measure.current;
     if (!node || !measurement || !active || demo) return;
+    lastSize.current = "";
     const terminal = new Terminal({ ...readTerminalTypography(), lineHeight: 1.3, scrollback: 0, theme: readXtermTheme() });
     const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(measurement);
     let frame = 0, disposed = false;

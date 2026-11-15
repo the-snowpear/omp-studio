@@ -19,6 +19,7 @@ import type { TerminalSessionManager, TerminalSessionListeners } from "./termina
 import type { RemoteTerminalManager } from "./remote/terminal.js";
 import type { TerminalRecordingManager } from "./terminal-recording.js";
 import type { TmuxControlManager } from "./tmux/manager.js";
+import { desktopText } from "./desktop-language-shared.js";
 import { TMUX_IPC_CHANNELS, parseTmuxSessionsInput, parseTmuxAttachInput, parseTmuxCommandInput, parseTmuxDetachInput } from "./tmux/tmux-shared.js";
 
 const tmuxHandlers = [TMUX_IPC_CHANNELS.sessions, TMUX_IPC_CHANNELS.attach, TMUX_IPC_CHANNELS.command, TMUX_IPC_CHANNELS.detach];
@@ -98,13 +99,13 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
   for (const channel of tmuxHandlers) ipc.removeHandler(channel);
   ipc.handle(TMUX_IPC_CHANNELS.sessions, (event, payload) => {
     assertTrusted(event.sender); track(event.sender);
-    if (!options.tmux) throw new Error("tmux is unavailable");
+    if (!options.tmux) throw new Error(desktopText("tmux 暂不可用", "tmux is unavailable"));
     return options.tmux.sessions(event.sender.id, parseTmuxSessionsInput(payload));
   });
   ipc.handle(TMUX_IPC_CHANNELS.attach, (event, payload) => {
     assertTrusted(event.sender);
     const document = track(event.sender);
-    if (!options.tmux) throw new Error("tmux is unavailable");
+    if (!options.tmux) throw new Error(desktopText("tmux 暂不可用", "tmux is unavailable"));
     const active = () => tracked.get(event.sender.id) === document && !event.sender.isDestroyed();
     return options.tmux.attach(event.sender.id, parseTmuxAttachInput(payload), {
       ...listenersFor(event.sender, active),
@@ -113,7 +114,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
   });
   ipc.handle(TMUX_IPC_CHANNELS.command, (event, payload) => {
     assertTrusted(event.sender); track(event.sender);
-    if (!options.tmux) throw new Error("tmux is unavailable");
+    if (!options.tmux) throw new Error(desktopText("tmux 暂不可用", "tmux is unavailable"));
     return options.tmux.command(event.sender.id, parseTmuxCommandInput(payload));
   });
   ipc.handle(TMUX_IPC_CHANNELS.detach, (event, payload) => {
@@ -129,7 +130,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
   ipc.handle(TERMINAL_IPC_CHANNELS.recordingStart, (event, payload) => {
     assertTrusted(event.sender); track(event.sender);
     const input = parseRecordingInput(payload);
-    if (options.tmux?.owns(event.sender.id, input.id)) throw new Error("tmux pane recording is not supported");
+    if (options.tmux?.owns(event.sender.id, input.id)) throw new Error(desktopText("tmux 窗格暂不支持录制", "tmux pane recording is not supported"));
     if (!options.recordings) throw new Error("Terminal recording is unavailable");
     if (options.remote?.owns(event.sender.id, input.id)) throw new Error("SSH terminal recording is not supported");
     options.manager.flushOutput(event.sender.id, input.id);

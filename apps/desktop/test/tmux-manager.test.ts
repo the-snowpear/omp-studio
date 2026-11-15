@@ -13,6 +13,7 @@ class ControlProcess extends EventEmitter {
   stdout = new PassThrough(); stderr = new PassThrough();
   exitCode: number | null = null; signalCode = null; pid = undefined;
   commands: string[] = []; version = "3.2a"; capture = "shell prompt"; alternate = false; sequence = 1;
+  paneIds = ["%0"];
   stdin = new Writable({ write: (chunk, _encoding, done) => { this.command(chunk.toString()); done(); }, final: done => { this.exitCode = 0; this.emit("close", 0); done(); } });
   constructor() { super(); queueMicrotask(() => this.respond([])); }
   command(text: string) {
@@ -22,7 +23,7 @@ class ControlProcess extends EventEmitter {
     if (text.startsWith("display-message -p '#{version}")) result = [this.version];
     else if (text.startsWith("display-message -p '#{session_id}")) result = ["$0\tcap"];
     else if (text.startsWith("list-windows")) result = [`@0\t0\t1\t*\t${tmuxLayoutChecksum(layoutBody)},${layoutBody}\t${tmuxLayoutChecksum(layoutBody)},${layoutBody}\tshell`];
-    else if (text.startsWith("list-panes") || text.startsWith("display-message -p -t")) result = [`%0\t@0\t1\t0\t${this.alternate ? 1 : 0}\t3\t2\t1\t0\t1\t1\t1\t0\t0\t23\t1\t0\t0\tshell`];
+    else if (text.startsWith("list-panes") || text.startsWith("display-message -p -t")) result = this.paneIds.map(id => `${id}\t@0\t1\t0\t${this.alternate ? 1 : 0}\t3\t2\t1\t0\t1\t1\t1\t0\t0\t23\t1\t0\t0\tshell`);
     else if (text.startsWith("capture-pane")) result = [this.alternate && !text.includes(" -a ") ? "vim screen" : this.capture];
     queueMicrotask(() => this.respond(result));
   }
@@ -71,8 +72,8 @@ test("restoring a full-screen app preserves its saved normal screen and terminal
     const { connectionId } = await h.attach(); await until(() => h.output.length > 0);
     h.processes[0]!.alternate = true;
     const before = h.output.length;
-    await h.manager.command(1, { connectionId, action: { kind: "setPaneVisible", paneIds: ["%0"], visible: false } });
-    await h.manager.command(1, { connectionId, action: { kind: "setPaneVisible", paneIds: ["%0"], visible: true } });
+    await h.manager.command(1, { connectionId, action: { kind: "setWindowVisible", windowId: "@0", visible: false } });
+    await h.manager.command(1, { connectionId, action: { kind: "setWindowVisible", windowId: "@0", visible: true } });
     await until(() => h.output.length > before);
     const restored = h.output.slice(before).join("");
     assert.ok(restored.indexOf("shell prompt") < restored.indexOf("\x1b[?1049h"));
@@ -81,6 +82,23 @@ test("restoring a full-screen app preserves its saved normal screen and terminal
     assert.ok(restored.includes("\x1b[?1000h"));
     assert.ok(!restored.includes("\x1b[?1003h"));
     assert.ok(restored.endsWith("\x1b[3;4H"));
+  } finally { await h.manager.disposeAll(); }
+});
+test("new panes in a hidden window stay off until that window is restored", async () => {
+  const h = harness();
+  try {
+    const { connectionId } = await h.attach(); await until(() => h.output.length > 0);
+    await h.manager.command(1, { connectionId, action: { kind: "setWindowVisible", windowId: "@0", visible: false } });
+    const process = h.processes[0]!;
+    process.paneIds.push("%1");
+    process.stdout.write("%window-pane-changed @0 %1\n");
+    await until(() => h.topology.at(-1)?.panes["%1"]?.off === true);
+    assert.ok(process.commands.includes("refresh-client -A '%1:off'\n"));
+    process.stdout.write("%output %1 hidden pane output\n");
+    await h.manager.command(1, { connectionId, action: { kind: "setWindowVisible", windowId: "@0", visible: true } });
+    await until(() => h.topology.at(-1)?.panes["%1"]?.off === false);
+    assert.ok(process.commands.includes("refresh-client -A '%0:on' -A '%1:on'\n"));
+    assert.ok(!h.output.join("").includes("hidden pane output"));
   } finally { await h.manager.disposeAll(); }
 });
 test("output pauses SSH at the high watermark, resumes on ACK, and recaptures a paused pane", async () => {

@@ -51,7 +51,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
   const targetStatus = executionTarget.inventory.statuses.find(status => status.id === executionTarget.id);
   const canCreate = !targetId || (targetStatus?.state === "connected" && !targetStatus.operation);
   const selectSession = (id: string): void => { store.activeIds.set(ownerKey, id); setActiveId(id); };
-  const tmuxPanel = useTmuxPanel({ targetId, workspaceId, connected: canCreate, cwd: sessions[0]?.cwd ?? executionTarget.inventory.profiles.find(profile => profile.id === targetId)?.lastDirectory ?? "", activeId, select: selectSession, visible, onError: setError });
+  const tmuxPanel = useTmuxPanel({ targetId, workspaceId, ownerKey, connected: canCreate, cwd: sessions[0]?.cwd ?? executionTarget.inventory.profiles.find(profile => profile.id === targetId)?.lastDirectory ?? "", activeId, select: selectSession, visible, onError: setError });
   useEffect(() => { setActiveId(store.activeIds.get(ownerKey) ?? null); bootstrapped.current = sessions.length > 0; }, [ownerKey, allSessions, store]);
 
   const createSession = useCallback(async () => {
@@ -88,7 +88,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
     <div className="term-layout">
       <div className="term-list" role="listbox" aria-label={t("terminal.listAria")}>
         {sessions.map((session) => {
-          const selected = session.id === active?.id;
+          const selected = !tmuxPanel.selected && session.id === active?.id;
           return (
             <div
               key={session.id}

@@ -1,4 +1,5 @@
 import { TerminalIpcError, parseSessionId, TERMINAL_MIN_COLS, TERMINAL_MAX_COLS, TERMINAL_MIN_ROWS, TERMINAL_MAX_ROWS } from "../terminal-shared.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 export const TMUX_IPC_CHANNELS = {
   sessions: "omp-studio:desktop:terminal-tmux-sessions",
@@ -30,7 +31,7 @@ export type TmuxAction =
   | { kind: "renameWindow"; windowId: string; name: string }
   | { kind: "resizeWindow"; windowId: string; cols: number; rows: number }
   | { kind: "resizePane"; paneId: string; axis: "x" | "y"; cells: number }
-  | { kind: "setPaneVisible"; paneIds: string[]; visible: boolean };
+  | { kind: "setWindowVisible"; windowId: string; visible: boolean };
 export interface TmuxCommandInput { connectionId: string; action: TmuxAction }
 export type TmuxLayoutNode =
   | { type: "pane"; paneId: string; x: number; y: number; cols: number; rows: number }
@@ -47,19 +48,19 @@ export interface TmuxTopology {
 }
 
 function object(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TerminalIpcError("tmux: expected an object");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TerminalIpcError(desktopText("tmux 请求必须是对象", "tmux: expected an object"));
   return value as Record<string, unknown>;
 }
 function text(value: unknown, field: string, pattern?: RegExp): string {
-  if (typeof value !== "string" || !value.length || value.length > 512 || /[\x00-\x1f\x7f]/.test(value) || (pattern && !pattern.test(value))) throw new TerminalIpcError(`Invalid tmux ${field}`);
+  if (typeof value !== "string" || !value.length || value.length > 512 || /[\x00-\x1f\x7f]/.test(value) || (pattern && !pattern.test(value))) throw new TerminalIpcError(desktopText(`tmux 字段无效：${field}`, `Invalid tmux ${field}`));
   return value;
 }
 function integer(value: unknown, field: string, min: number, max: number): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max) throw new TerminalIpcError(`Invalid tmux ${field}`);
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max) throw new TerminalIpcError(desktopText(`tmux 字段无效：${field}`, `Invalid tmux ${field}`));
   return value;
 }
 function boolean(value: unknown, field: string): boolean {
-  if (typeof value !== "boolean") throw new TerminalIpcError(`Invalid tmux ${field}`);
+  if (typeof value !== "boolean") throw new TerminalIpcError(desktopText(`tmux 字段无效：${field}`, `Invalid tmux ${field}`));
   return value;
 }
 function size(value: Record<string, unknown>) {
@@ -86,21 +87,19 @@ export function parseTmuxCommandInput(value: unknown): TmuxCommandInput {
     case "killPane": case "selectPane": case "zoomPane": action = { kind: raw.kind, paneId: pane() }; break;
     case "killWindow": case "selectWindow": action = { kind: raw.kind, windowId: window() }; break;
     case "splitPane":
-      if (raw.direction !== "right" && raw.direction !== "down") throw new TerminalIpcError("Invalid tmux split direction");
+      if (raw.direction !== "right" && raw.direction !== "down") throw new TerminalIpcError(desktopText("tmux 拆分方向无效", "Invalid tmux split direction"));
       action = { kind: raw.kind, paneId: pane(), direction: raw.direction }; break;
     case "renameWindow": {
       const name = text(raw.name, "window name");
-      if (name.length > 128) throw new TerminalIpcError("tmux window name exceeds 128 characters");
+      if (name.length > 128) throw new TerminalIpcError(desktopText("tmux 窗口名称不能超过 128 个字符", "tmux window name exceeds 128 characters"));
       action = { kind: raw.kind, windowId: window(), name }; break;
     }
     case "resizeWindow": action = { kind: raw.kind, windowId: window(), ...size(raw) }; break;
     case "resizePane":
-      if (raw.axis !== "x" && raw.axis !== "y") throw new TerminalIpcError("Invalid tmux resize axis");
+      if (raw.axis !== "x" && raw.axis !== "y") throw new TerminalIpcError(desktopText("tmux 窗格调整方向无效", "Invalid tmux resize axis"));
       action = { kind: raw.kind, paneId: pane(), axis: raw.axis, cells: integer(raw.cells, "cells", 1, raw.axis === "x" ? TERMINAL_MAX_COLS : TERMINAL_MAX_ROWS) }; break;
-    case "setPaneVisible":
-      if (!Array.isArray(raw.paneIds) || raw.paneIds.length > TMUX_MAX_PANES_PER_CONNECTION) throw new TerminalIpcError("Invalid tmux pane list");
-      action = { kind: raw.kind, paneIds: raw.paneIds.map(id => text(id, "paneId", TMUX_PANE_ID_PATTERN)), visible: boolean(raw.visible, "visible") }; break;
-    default: throw new TerminalIpcError("Unknown tmux action");
+    case "setWindowVisible": action = { kind: raw.kind, windowId: window(), visible: boolean(raw.visible, "visible") }; break;
+    default: throw new TerminalIpcError(desktopText("未知的 tmux 操作", "Unknown tmux action"));
   }
   return { connectionId, action };
 }

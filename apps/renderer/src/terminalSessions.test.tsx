@@ -315,7 +315,7 @@ it("hiding tmux windows changes native visibility, and provider shutdown detache
   const api = harness(), store = new TerminalSessions(api.value);
   await store.attachTmux("remote", "ws", "work"); api.topology(tmuxSnapshot());
   await store.hideTmuxWindow("tmux-connection", "@0", true);
-  expect(api.value.tmuxCommand).toHaveBeenCalledWith({ connectionId: "tmux-connection", action: { kind: "setPaneVisible", paneIds: ["%0"], visible: false } });
+  expect(api.value.tmuxCommand).toHaveBeenCalledWith({ connectionId: "tmux-connection", action: { kind: "setWindowVisible", windowId: "@0", visible: false } });
   expect(store.snapshot().hiddenWindows["tmux-connection"]).toEqual(["@0"]);
   store.close();
   expect(api.value.tmuxDetach).toHaveBeenCalledWith("tmux-connection");
@@ -331,10 +331,25 @@ it("reattaching replaces the old group in place and releases its ended screen", 
     api.topology({ ...tmuxSnapshot(), connectionId: "replacement", panes: { "%0": { ...tmuxSnapshot().panes["%0"]!, terminalId: "new-pane" } } });
     return { connectionId: "replacement" };
   });
-  await store.attachTmux("remote", "ws", "work", undefined, "tmux-connection");
+  await store.attachTmux("remote", "ws", "work", { replaceId: "tmux-connection" });
   expect(Object.keys(store.snapshot().tmux)).toEqual(["replacement", "other"]);
   expect(oldHost.disposed).toBe(1);
   expect(api.value.tmuxDetach).toHaveBeenCalledWith("tmux-connection");
+  store.close();
+});
+
+it("a forgotten tmux group stays removed when detach sends its final topology", async () => {
+  const api = harness(), store = new TerminalSessions(api.value);
+  await store.attachTmux("remote", "ws", "work"); api.topology(tmuxSnapshot());
+  let finish!: () => void;
+  api.value.tmuxDetach.mockImplementationOnce(async () => {
+    await new Promise<void>(resolve => { finish = resolve; });
+    api.topology({ ...tmuxSnapshot(), state: "exited" });
+  });
+  store.forgetTmux("tmux-connection");
+  finish(); await settle();
+  expect(store.snapshot().tmux).toEqual({});
+  expect(store.snapshot().sessions).toEqual([]);
   store.close();
 });
 

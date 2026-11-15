@@ -6,7 +6,7 @@ export function sendKeysLines(paneId: string, data: string): string[] {
   for (let at = 0; at < bytes.length; at += 512) lines.push(`send-keys -t ${paneId} -H ${[...bytes.subarray(at, at + 512)].map(byte => byte.toString(16).padStart(2, "0")).join(" ")}`);
   return lines;
 }
-export function actionLines(action: TmuxAction): string[] {
+export function actionLines(action: Exclude<TmuxAction, { kind: "setWindowVisible" }>): string[] {
   switch (action.kind) {
     case "newWindow": return [`new-window${action.afterWindowId ? ` -t ${action.afterWindowId} -a` : ""}`];
     case "splitPane": return [`split-window -${action.direction === "right" ? "h" : "v"} -t ${action.paneId}`];
@@ -21,7 +21,6 @@ export function actionLines(action: TmuxAction): string[] {
     case "resizeWindow": return [`refresh-client -C ${action.cols}x${action.rows}`];
     case "resizePane": return [`resize-pane -t ${action.paneId} -${action.axis} ${action.cells}`];
     case "zoomPane": return [`resize-pane -t ${action.paneId} -Z`];
-    case "setPaneVisible": return action.paneIds.length ? [`refresh-client ${action.paneIds.map(id => `-A '${id}:${action.visible ? "on" : "off"}'`).join(" ")}`] : [];
   }
 }
 const pathPrefix = 'PATH="$PATH:/usr/local/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:$HOME/.local/bin:$HOME/bin"; export PATH; command -v tmux >/dev/null 2>&1 || { echo "studio-tmux: not-installed" >&2; exit 127; }; ';

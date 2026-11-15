@@ -1,4 +1,4 @@
-export interface TmuxBlock { number: number; ok: boolean; lines: Buffer[] }
+export interface TmuxBlock { time: number; number: number; flags: number; ok: boolean; lines: Buffer[] }
 export interface TmuxParserEvents {
   onBlock(block: TmuxBlock): void;
   onNotification(name: string, args: Buffer): void;
@@ -25,7 +25,7 @@ export class TmuxControlParser {
   #length = 0;
   #discard = false;
   #started = false;
-  #block: { number: number; lines: Buffer[] } | undefined;
+  #block: Omit<TmuxBlock, "ok"> | undefined;
   constructor(readonly events: TmuxParserEvents) {}
   push(chunk: Buffer): void {
     let start = 0;
@@ -51,14 +51,13 @@ export class TmuxControlParser {
   #line(line: Buffer): void {
     const marker = /^%(begin|end|error) (\d+) (\d+) (\d+)$/.exec(line.subarray(0, 100).toString("ascii"));
     if (this.#block) {
-      if (marker && marker[1] !== "begin") {
+      if (marker && marker[1] !== "begin" && Number(marker[2]) === this.#block.time && Number(marker[3]) === this.#block.number && Number(marker[4]) === this.#block.flags) {
         const block = this.#block; this.#block = undefined;
-        if (Number(marker[3]) !== block.number) this.events.onProtocolError?.("block-number");
         this.events.onBlock({ ...block, ok: marker[1] === "end" });
       } else this.#block.lines.push(line);
       return;
     }
-    if (marker?.[1] === "begin") { this.#started = true; this.#block = { number: Number(marker[3]), lines: [] }; return; }
+    if (marker?.[1] === "begin") { this.#started = true; this.#block = { time: Number(marker[2]), number: Number(marker[3]), flags: Number(marker[4]), lines: [] }; return; }
     if (!this.#started) { this.events.onNoise?.(line); return; }
     const space = line.indexOf(32);
     const name = line.subarray(0, space < 0 ? line.length : space).toString("ascii");

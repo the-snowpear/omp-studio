@@ -13,12 +13,13 @@ import { TmuxWindowView } from "./TmuxWindowView";
 import "./tmux.css";
 
 const selection = (connection: string, window = "") => `tmux:${connection}:${window}`;
-export function useTmuxPanel({ targetId, workspaceId, connected, cwd, activeId, select, visible, onError }: {
+export function useTmuxPanel({ targetId, workspaceId, ownerKey, connected, cwd, activeId, select, visible, onError }: {
   targetId: string | null; workspaceId?: string | undefined; connected: boolean; cwd: string;
+  ownerKey: string;
   activeId: string | null; select(id: string): void; visible: boolean; onError(error: string): void;
 }) {
   const { t } = useI18n(), { preview, marks } = usePreviewMode(), { settings, update } = useAppSettings();
-  const { store, tmux, hiddenWindows } = useTerminalSessions();
+  const { store, tmux, tmuxOwners, hiddenWindows } = useTerminalSessions();
   const [demos, setDemos] = useState<TmuxTopology[]>([]);
   const [demoHidden, setDemoHidden] = useState<Record<string, string[]>>({});
   const [demoClose, setDemoClose] = useState<"ask" | "hide" | "kill">("ask");
@@ -26,7 +27,7 @@ export function useTmuxPanel({ targetId, workspaceId, connected, cwd, activeId, 
   const [closing, setClosing] = useState<{ group: TmuxTopology; windowId: string; name: string }>();
   const [killing, setKilling] = useState<TmuxTopology>();
   const [renaming, setRenaming] = useState<{ group: TmuxTopology; windowId: string; name: string }>();
-  const groups = preview ? demos : Object.values(tmux).filter(group => group.targetId === targetId && group.workspaceId === workspaceId);
+  const groups = preview ? demos : Object.values(tmux).filter(group => tmuxOwners[group.connectionId] === ownerKey);
   const hidden = preview ? demoHidden : hiddenWindows;
   const group = groups.find(group => activeId?.startsWith(`tmux:${group.connectionId}:`));
   const shownWindows = group?.windows.filter(window => !hidden[group.connectionId]?.includes(window.id)) ?? [];
@@ -65,7 +66,7 @@ export function useTmuxPanel({ targetId, workspaceId, connected, cwd, activeId, 
       setDemos(current => old ? current.map(item => item.connectionId === old.connectionId ? next : item) : [...current, next]);
     } else {
       const screen = activeId ? store.hosts.get(activeId)?.term : undefined;
-      connectionId = await store.attachTmux(targetId!, workspaceId!, name, screen ? { cols: screen.cols, rows: screen.rows } : undefined, old?.connectionId);
+      connectionId = await store.attachTmux(targetId!, workspaceId!, name, { ownerKey, ...(screen ? { size: { cols: screen.cols, rows: screen.rows } } : {}), ...(old ? { replaceId: old.connectionId } : {}) });
     }
     select(selection(connectionId));
   };

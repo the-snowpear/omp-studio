@@ -3,6 +3,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { TerminalOutputBatcher, TERMINAL_FLOW_LOW_BYTES, type TerminalOutputBatcherOptions } from "../terminal-batch.js";
 import type { TerminalSessionListeners } from "../terminal-pty.js";
 import { terminateProcessTree } from "../platform/process-tree.js";
+import { desktopText } from "../desktop-language-shared.js";
 import { TmuxControlClient } from "./control-client.js";
 import { actionLines, sendKeysLines, splitTmuxFields, supportedTmuxVersion } from "./commands.js";
 import { parseTmuxLayout } from "./layout.js";
@@ -41,10 +42,11 @@ export class TmuxConnection {
   #refreshTimer: ReturnType<typeof setTimeout> | undefined;
   #topologyTimer: ReturnType<typeof setTimeout> | undefined;
   #resizeTimer: ReturnType<typeof setTimeout> | undefined;
-  #resize: TmuxAction | undefined;
+  #resize: Extract<TmuxAction, { kind: "resizeWindow" }> | undefined;
   #refreshing: Promise<void> | undefined;
   #again = false;
   #knownTerminals = new Set<string>();
+  #hiddenWindows = new Set<string>();
 
   constructor(readonly options: TmuxConnectionOptions) {
     this.topology = { connectionId: options.id, targetId: options.input.targetId, workspaceId: options.input.workspaceId, state: "attaching", session: { id: "", name: options.session }, windows: [], panes: {} };
@@ -129,16 +131,18 @@ export class TmuxConnection {
       const [id, index, active, flags, layout, full, name] = splitTmuxFields(line.toString(), 7);
       const parsed = parseTmuxLayout(layout!);
       const fullLayout = parseTmuxLayout(full!);
-      if (!parsed || !fullLayout) { this.#log("protocol_error", { kind: "layout" }); throw new Error("Invalid tmux layout"); }
+      if (!parsed || !fullLayout) { this.#log("protocol_error", { kind: "layout" }); throw new Error(desktopText("无法读取 tmux 布局", "Invalid tmux layout")); }
       nextWindows.push({ id: id!, index: Number(index), name: name!, zoomed: flags!.includes("Z"), layout: parsed.root, fullLayout: fullLayout.root, cols: parsed.root.cols, rows: parsed.root.rows });
       if (active === "1") this.topology.activeWindowId = id!;
     }
     const nextPanes: TmuxTopology["panes"] = {}, added: string[] = [];
-    for (const [index, line] of panes.entries()) {
+    let displayed = 0;
+    for (const line of panes) {
       const fields = splitTmuxFields(line.toString(), 19);
       const [paneId, windowId, active, dead] = fields;
       const previous = this.topology.panes[paneId!];
-      const off = index >= TMUX_MAX_PANES_PER_CONNECTION || previous?.off === true;
+      const off = this.#hiddenWindows.has(windowId!) || previous?.off === true || displayed >= TMUX_MAX_PANES_PER_CONNECTION;
+      if (!off) displayed++;
       const terminalId = previous?.terminalId ?? id();
       nextPanes[paneId!] = { ...previous, terminalId, windowId: windowId!, active: active === "1", dead: dead === "1", title: fields[18]!, paused: previous?.paused ?? false, off };
       this.#paneInfo.set(paneId!, fields);
@@ -154,6 +158,7 @@ export class TmuxConnection {
       this.#buffers.delete(paneId); this.#restoring.delete(paneId); this.#paneInfo.delete(paneId);
     }
     this.topology.windows = nextWindows; this.topology.panes = nextPanes;
+    for (const windowId of this.#hiddenWindows) if (!nextWindows.some(window => window.id === windowId)) this.#hiddenWindows.delete(windowId);
     this.topology.state = "attached";
     // Renderer learns every terminalId before any restore or live output is sent.
     this.#publish();
@@ -248,29 +253,34 @@ export class TmuxConnection {
   }
   acknowledge(terminalId: string, bytes: number): void { this.batcher.acknowledge(terminalId, bytes); this.#resumePaused(); }
   async command(action: TmuxAction): Promise<void> {
-    if (!this.alive) throw new Error("tmux connection closed");
+    if (!this.alive) throw new Error(desktopText("tmux 连接已关闭", "tmux connection closed"));
     // Authorize native tmux targets against this connection's topology.
-    const panes = "paneIds" in action ? action.paneIds : "paneId" in action ? [action.paneId] : [];
+    const panes = "paneId" in action ? [action.paneId] : [];
     const window = "windowId" in action ? action.windowId : "afterWindowId" in action ? action.afterWindowId : undefined;
-    if (panes.some(id => !this.topology.panes[id]) || window && !this.topology.windows.some(item => item.id === window)) throw new Error("tmux target is not in this connection");
-    if (action.kind === "setPaneVisible" && action.visible && Object.entries(this.topology.panes).filter(([id, pane]) => !pane.off || action.paneIds.includes(id)).length > TMUX_MAX_PANES_PER_CONNECTION) throw new Error("tmux displays at most 64 panes per connection");
+    if (panes.some(id => !this.topology.panes[id]) || window && !this.topology.windows.some(item => item.id === window)) throw new Error(desktopText("目标窗口或窗格不属于此 tmux 连接", "tmux target is not in this connection"));
+    if (action.kind === "setWindowVisible") {
+      if (action.visible) this.#hiddenWindows.delete(action.windowId); else this.#hiddenWindows.add(action.windowId);
+      let available = TMUX_MAX_PANES_PER_CONNECTION - Object.values(this.topology.panes).filter(pane => pane.windowId !== action.windowId && !pane.off).length;
+      const entries = Object.entries(this.topology.panes).filter(([, pane]) => pane.windowId === action.windowId);
+      for (const [, pane] of entries) {
+        pane.off = !action.visible || available <= 0;
+        if (!pane.off) available--;
+      }
+      await this.client.run(`refresh-client ${entries.map(([id, pane]) => `-A '${id}:${pane.off ? "off" : "on"}'`).join(" ")}`);
+      for (const [id, pane] of entries) if (!pane.off) {
+        this.batcher.open(pane.terminalId, { flowControl: this.options.input.flowControl === true });
+        if (pane.paused) await this.client.run(`refresh-client -A '${id}:continue'`);
+        await this.#restore(id, true, true); pane.paused = false;
+      }
+      this.#changed();
+      return;
+    }
     if (action.kind === "resizeWindow") {
       this.#resize = action;
       if (!this.#resizeTimer) this.#resizeTimer = setTimeout(() => { this.#resizeTimer = undefined; if (this.alive && this.#resize) for (const line of actionLines(this.#resize)) this.client.fire(line); }, 16);
       return;
     }
     for (const line of actionLines(action)) await this.client.run(line);
-    if (action.kind === "setPaneVisible") {
-      for (const id of action.paneIds) {
-        const pane = this.topology.panes[id]!; pane.off = !action.visible;
-        if (action.visible) {
-          this.batcher.open(pane.terminalId, { flowControl: this.options.input.flowControl === true });
-          if (pane.paused) await this.client.run(`refresh-client -A '${id}:continue'`);
-          await this.#restore(id, true, true); pane.paused = false;
-        }
-      }
-      this.#changed();
-    }
   }
   #finish(state: "exited" | "lost", reason: string): void {
     if (this.#ended) return;
