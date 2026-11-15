@@ -1,7 +1,8 @@
 # Development
 
-Windows is the main inner-loop platform; an Apple Silicon Mac runs the same
-commands. Automatic CI builds and runs core tests on Windows. Node 22+ and
+Windows is the main inner-loop platform; an Apple Silicon Mac or Linux desktop
+runs the same source commands (see [Linux setup](linux.md)). Automatic CI builds
+and runs core tests on Windows and Linux x64. Node 22+ and
 npm workspaces drive this repository; Bun is needed only for Runtime work.
 
 ## Layout
@@ -41,7 +42,7 @@ Choose other commands as needed; these are alternatives, not a checklist:
 | `npm run build` | Production build, no tests |
 | `npm test` | Build and run all workspace tests |
 | `npm run test:tooling` | Build script dependencies and test packaging, signatures and updates |
-| `npm run pack:win` / `npm run pack:mac` | Build and audit a desktop package on its native platform |
+| `npm run pack:win` / `npm run pack:mac` / `npm run pack:linux` | Build and audit a desktop package on its native platform |
 
 `scripts/check.mjs` is the only check entry point. Compilation is incremental
 (`tsconfig.base.json` → `dist/.tsbuildinfo`) and runs in dependency order, so a
@@ -137,16 +138,23 @@ current builder still preserves the signed migration feed for old clients.
 
 ## CI
 
-PRs and pushes to `main` run `npm run check -- --production` on Windows: the
+PRs and pushes to `main` / `0.2.0` run `npm run check -- --production` on Windows
+and Ubuntu 24.04 x64: the
 architecture rules, the compile, the core suite and the release bundles.
 Documentation and UI-reference-only changes skip CI. The manual CI workflow has
-three scopes:
+four scopes:
 
-- `core` (default): the same Windows checks.
-- `full`: all workspace and tooling tests on Windows and macOS, plus native
+- `core` (default): the same Windows and Linux checks.
+- `full`: all workspace and tooling tests on Windows, macOS and Linux, plus native
   Runtime builds and patch verification.
 - `macos-package`: an ad hoc signed test package and packaged Electron smoke
   checks, with evidence and installers retained for seven days; nothing is published.
+- `linux-package`: native x64 AppImage / deb builds, package audits, installed
+  X11 / Wayland acceptance, real Runtime / file-tool / PTY checks and data retention
+  across reinstall / uninstall. Test packages and evidence are retained for 14 days.
+
+The Linux core job checks source, tests and build output. Package acceptance is
+the separate `linux-package` scope and is not repeated in the release workflow.
 
 The Streaming perf workflow is manual only. Run it when investigating or
 changing streaming performance. No paid model calls are needed for packaged

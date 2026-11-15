@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useI18n } from "../i18n";
 import type { SessionId, StudioClient, ThreadId } from "@omp-studio/client-contract";
 import { parseSessionCompactionInput, type SessionCompactionRead, type SessionCompactionState } from "@omp-studio/studio-protocol";
 import { hostErrorMessage, waitReceipt } from "../hostError";
@@ -11,6 +12,9 @@ export function useSessionCompaction({ client, sessionId, threadId, liveSessionI
   client: StudioClient; sessionId: string | undefined; threadId: ThreadId | undefined; liveSessionId: string | undefined;
   enabled: boolean; visible: boolean; preview: boolean; contextWindow: number | undefined; refreshKey?: string | undefined;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zhRef = useRef(resolvedLanguage === "zh");
+  zhRef.current = resolvedLanguage === "zh";
   const [state, setState] = useState<CompactionControlState>();
   const [loading, setLoading] = useState(false), [saving, setSaving] = useState(false), [error, setError] = useState("");
   const identity = useRef({ client, sessionId, preview });
@@ -31,7 +35,7 @@ export function useSessionCompaction({ client, sessionId, threadId, liveSessionI
     const read = sessionId === liveSessionId ? invoke("session.compaction.get", sessionId)
       : client.query("session.compaction.read", { sessionId: sessionId as SessionId });
     void read.then(value => { if (!cancelled) setState(value); })
-      .catch(cause => { if (!cancelled) setError(hostErrorMessage(cause, "无法读取会话阈值 / Could not read session threshold")); })
+      .catch(cause => { if (!cancelled) setError(hostErrorMessage(cause, zhRef.current ? "无法读取会话阈值" : "Could not read session threshold")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [client, sessionId, liveSessionId, preview, enabled, visible, contextWindow, refreshKey, saving, invoke]);
@@ -56,7 +60,7 @@ export function useSessionCompaction({ client, sessionId, threadId, liveSessionI
       setState(value);
       return true;
     } catch (cause) {
-      if (matches(owner)) setError(hostErrorMessage(cause, "保存失败，请重试 / Could not save threshold"));
+      if (matches(owner)) setError(hostErrorMessage(cause, zhRef.current ? "保存失败，请重试" : "Could not save threshold"));
       return false;
     } finally { if (matches(owner)) setSaving(false); }
   };

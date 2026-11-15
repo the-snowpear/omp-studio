@@ -10,7 +10,12 @@ test("macOS opens the account's login shell, then $SHELL, then zsh", () => {
   });
   assert.deepEqual(resolveDefaultShell({ platform: "darwin", env: { SHELL: "/bin/bash" }, accountShell: () => undefined }), { name: "bash", file: "/bin/bash" });
   assert.deepEqual(resolveDefaultShell({ platform: "darwin", env: {}, accountShell: () => undefined }), { name: "zsh", file: "/bin/zsh" });
-  assert.deepEqual(resolveDefaultShell({ platform: "linux", env: {}, accountShell: () => "/bin/zsh" }), { name: "bash", file: "/bin/bash" });
+});
+
+test("Linux uses the launching shell, then the account shell, then bash", () => {
+  assert.deepEqual(resolveDefaultShell({ platform: "linux", env: { SHELL: "/usr/bin/fish" }, accountShell: () => "/bin/zsh" }), { name: "fish", file: "/usr/bin/fish" });
+  assert.deepEqual(resolveDefaultShell({ platform: "linux", env: {}, accountShell: () => "/bin/zsh" }), { name: "zsh", file: "/bin/zsh" });
+  assert.deepEqual(resolveDefaultShell({ platform: "linux", env: {}, accountShell: () => undefined }), { name: "bash", file: "/bin/bash" });
 });
 
 test("macOS shells start as login shells, and interactive when there is no PTY", () => {
@@ -22,9 +27,15 @@ test("macOS shells start as login shells, and interactive when there is no PTY",
   assert.deepEqual(shellArgs("C:\\Program Files\\PowerShell\\7\\pwsh.exe", { platform: "win32", backend: "pty" }), ["-NoLogo"]);
 });
 
-test("the macOS shell gets a terminal name and none of Electron's switches; Windows keeps its environment", () => {
+test("Linux pipe fallback remains interactive without forcing a login shell", () => {
+  assert.deepEqual(shellArgs("/bin/bash", { platform: "linux", backend: "pty" }), []);
+  assert.deepEqual(shellArgs("/bin/bash", { platform: "linux", backend: "pipes" }), ["-i"]);
+  assert.deepEqual(shellArgs("/usr/bin/pwsh", { platform: "linux", backend: "pipes" }), ["-NoLogo"]);
+});
+
+for (const platform of ["darwin", "linux"] as const) test(`${platform} shells get a terminal name and none of Electron's switches; Windows keeps its environment`, () => {
   const source = { PATH: "/opt/homebrew/bin:/usr/bin", LANG: "zh_CN.UTF-8", ELECTRON_RUN_AS_NODE: "1", ELECTRON_NO_ATTACH_CONSOLE: "1" };
-  const mac = terminalEnvironment(source, "darwin");
+  const mac = terminalEnvironment(source, platform);
   assert.equal(mac.ELECTRON_RUN_AS_NODE, undefined);
   assert.equal(mac.ELECTRON_NO_ATTACH_CONSOLE, undefined);
   assert.equal(mac.TERM_PROGRAM, "OMP-Studio");

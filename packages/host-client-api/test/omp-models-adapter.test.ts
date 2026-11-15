@@ -480,7 +480,7 @@ describe("testProvider", () => {
     });
     const result = await service.testProvider({ endpointUrl: "https://example.com" });
     assert.equal(result.ok, false);
-    assert.match(result.detail, /连接被拒绝/);
+    assert.match(result.detail, /connection refused/);
     assert.equal(calls.length, 1); // definitive errors are not retried
   });
 
@@ -490,7 +490,7 @@ describe("testProvider", () => {
     });
     const result = await service.testProvider({ endpointUrl: "https://nope.invalid" });
     assert.equal(result.ok, false);
-    assert.match(result.detail, /域名无法解析/);
+    assert.match(result.detail, /failed to resolve hostname/);
   });
 
   test("no credentials: timeout-class failure retries once", async () => {
@@ -499,7 +499,7 @@ describe("testProvider", () => {
     });
     const result = await service.testProvider({ endpointUrl: "https://example.com" });
     assert.equal(result.ok, false);
-    assert.match(result.detail, /超时/);
+    assert.match(result.detail, /timed out/);
     assert.equal(result.retryCount, 1);
     assert.equal(calls.length, 2);
   });
@@ -512,7 +512,7 @@ describe("testProvider", () => {
       apiKey: "sk-123",
     });
     assert.equal(result.ok, true);
-    assert.match(result.detail, /凭据有效/);
+    assert.match(result.detail, /Valid credentials/);
     assert.equal(result.httpStatus, 200);
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.url, "https://api.deepseek.com/v1/models");
@@ -527,7 +527,7 @@ describe("testProvider", () => {
       apiKey: "bad",
     });
     assert.equal(result.ok, false);
-    assert.match(result.detail, /凭据无效/);
+    assert.match(result.detail, /Invalid credentials/);
     assert.equal(result.httpStatus, 401);
   });
 
@@ -543,7 +543,7 @@ describe("testProvider", () => {
       apiKey: "sk",
     });
     assert.equal(result.ok, true);
-    assert.match(result.detail, /模型列表接口不可用/);
+    assert.match(result.detail, /model list unavailable/);
     assert.equal(calls.length, 2);
     assert.equal(calls[1]?.url, "https://example.com");
   });
@@ -603,7 +603,7 @@ describe("testProvider", () => {
     const { service, calls } = await serviceWith(async () => new Response(null, { status: 200 }));
     const result = await service.testProvider({ providerId: "p2" });
     assert.equal(result.ok, false);
-    assert.match(result.detail, /外部命令/);
+    assert.match(result.detail, /external command/);
     assert.equal(calls.length, 0);
   });
 
@@ -630,13 +630,13 @@ describe("authProbeUrl", () => {
 
 describe("networkErrorDetail", () => {
   test("classifies each failure class", () => {
-    assert.equal(networkErrorDetail(abortError()), "连接失败：请求超时");
-    assert.equal(networkErrorDetail(networkError("ENOTFOUND")), "连接失败：域名无法解析");
-    assert.equal(networkErrorDetail(networkError("EAI_AGAIN")), "连接失败：域名无法解析");
-    assert.equal(networkErrorDetail(networkError("ECONNREFUSED")), "连接失败：连接被拒绝");
-    assert.equal(networkErrorDetail(networkError("ECONNRESET")), "连接失败：连接被重置");
-    assert.equal(networkErrorDetail(networkError("CERT_HAS_EXPIRED")), "连接失败：TLS 证书错误");
-    assert.equal(networkErrorDetail(networkError(undefined)), "连接失败：网络不可达");
+    assert.equal(networkErrorDetail(abortError()), "Connection failed: request timed out");
+    assert.equal(networkErrorDetail(networkError("ENOTFOUND")), "Connection failed: failed to resolve hostname");
+    assert.equal(networkErrorDetail(networkError("EAI_AGAIN")), "Connection failed: failed to resolve hostname");
+    assert.equal(networkErrorDetail(networkError("ECONNREFUSED")), "Connection failed: connection refused");
+    assert.equal(networkErrorDetail(networkError("ECONNRESET")), "Connection failed: connection reset");
+    assert.equal(networkErrorDetail(networkError("CERT_HAS_EXPIRED")), "Connection failed: TLS certificate error");
+    assert.equal(networkErrorDetail(networkError(undefined)), "Connection failed: network unreachable");
   });
 });
 
@@ -1192,7 +1192,7 @@ describe("P1/P2 model-config adapter surfaces", () => {
     }
   });
 
-  test("keeps OAuth-authenticated cache providers that are absent from models.yml", async () => {
+  test("credential-scoped OAuth caches stay in the live Runtime catalog", async () => {
     const dir = await mkdtemp(join(tmpdir(), "omp-models-authed-cache-"));
     try {
       await writeFile(join(dir, "models.yml"), "providers:\n  gateway:\n    api: openai-completions\n", "utf8");
@@ -1216,9 +1216,9 @@ describe("P1/P2 model-config adapter surfaces", () => {
       const snapshot = await createOmpModelsService({ agentDir: dir }).get();
       assert.deepEqual(
         snapshot.providers.map((item) => item.id).sort(),
-        ["gateway", "opencode-go"],
+        ["gateway"],
       );
-      assert.equal(snapshot.availableModels.some((item) => item.selector === "opencode-go/glm-5"), true);
+      assert.equal(snapshot.availableModels.some((item) => item.selector === "opencode-go/glm-5"), false);
       assert.equal(
         snapshot.availableModels.some((item) => item.provider === "zenmux" || item.selector.startsWith("zenmux/")),
         false,
@@ -1349,14 +1349,14 @@ describe("P1/P2 model-config adapter surfaces", () => {
       });
       const command = await service.probeProvider({ providerId: "vault" });
       assert.equal(command.ok, false);
-      assert.match(command.detail, /外部命令取凭据/);
+      assert.match(command.detail, /external command/);
       const noList = await service.probeProvider({
         providerId: "bedrock",
         api: "bedrock-converse-stream",
         endpointUrl: "https://bedrock.test",
       });
       assert.equal(noList.ok, false);
-      assert.match(noList.detail, /没有模型列表接口/);
+      assert.match(noList.detail, /no model-list endpoint/);
       assert.equal(calls, 0);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -1380,7 +1380,7 @@ describe("P1/P2 model-config adapter surfaces", () => {
       });
       assert.equal(result.ok, false);
       assert.equal(result.httpStatus, 401);
-      assert.match(result.detail, /凭据无效/);
+      assert.match(result.detail, /Invalid credentials/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1707,16 +1707,13 @@ describe("web search config", () => {
       assert.deepEqual(byId.get("ollama")?.credentialProviders, ["ollama-cloud"]);
       assert.match(byId.get("brave")?.description ?? "", /BRAVE_API_KEY/);
       assert.ok(ws.providers.every((p) => p.description.length > 0));
-      // Credential hints for the modal: env keys + omp login id where OAuth exists.
+      // IDs identify native credential storage; the live credentials catalog distinguishes OAuth and API keys.
       assert.deepEqual(byId.get("brave")?.envKeys, ["BRAVE_API_KEY"]);
-      assert.equal(byId.get("brave")?.loginId, undefined);
+      assert.equal(byId.get("brave")?.loginId, "brave");
       assert.equal(byId.get("brave")?.apiKeyId, "brave");
       assert.equal(byId.get("codex")?.loginId, "openai-codex");
-      assert.equal(byId.get("gemini")?.loginId, undefined);
-      // Login is only offered for ids in the runtime's OAuth registry and
-      // headless-capable flows: prompt-first (google-gemini-cli) and unknown
-      // ids (firecrawl) are excluded so RPC login can never hard-fail.
-      assert.equal(byId.get("firecrawl")?.loginId, undefined);
+      assert.equal(byId.get("gemini")?.loginId, "google-gemini-cli");
+      assert.equal(byId.get("firecrawl")?.loginId, "firecrawl");
       assert.equal(byId.get("firecrawl")?.apiKeyId, "firecrawl");
       assert.equal(byId.get("tavily")?.loginId, "tavily");
       assert.equal(byId.get("gemini")?.apiKeyId, "google");

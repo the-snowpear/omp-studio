@@ -18,7 +18,7 @@ for (const action of ["install", "check"] as const) test(`cancels Office ${actio
     const operation = action === "install" ? component.install() : component.getState(true);
     await checking; component.cancel();
     const state = await operation;
-    assert.equal(state.status, "not-installed"); assert.match(state.message!, /取消/); assert.equal(calls, 1);
+    assert.equal(state.status, "not-installed"); assert.match(state.message!, /cancelled/i); assert.equal(calls, 1);
     assert.equal((await component.getState()).installedVersion, undefined);
   } finally { component.dispose(); await rm(directory, { recursive: true, force: true }); }
 });

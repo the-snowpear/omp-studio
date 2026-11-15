@@ -9,6 +9,7 @@
  */
 
 import type { GitLogCommitRecord, GitLogListReadModel, GitLogRef } from "@omp-studio/client-contract";
+import { pickLocale } from "../i18n";
 
 export const SWIMLANE_HEIGHT = 22;
 export const SWIMLANE_WIDTH = 11;
@@ -150,7 +151,7 @@ function insertIncomingOutgoing(rows: GraphRow[], model: GitLogListReadModel): G
       next.splice(headIndex, 0, toRow({
         id: OUTGOING_HISTORY_ID,
         kind: "outgoing-changes",
-        subject: "传出的更改",
+        subject: pickLocale("传出的更改", "Outgoing changes"),
         refs: [],
         parentIds: [headOid],
         inputSwimlanes,
@@ -189,7 +190,7 @@ function insertIncomingOutgoing(rows: GraphRow[], model: GitLogListReadModel): G
         next.splice(afterIndex, 0, toRow({
           id: INCOMING_HISTORY_ID,
           kind: "incoming-changes",
-          subject: "传入的更改",
+          subject: pickLocale("传入的更改", "Incoming changes"),
           refs: [],
           parentIds: [mergeBase],
           inputSwimlanes: rewritten.outputSwimlanes.map(cloneLane),

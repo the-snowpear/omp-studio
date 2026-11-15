@@ -17,6 +17,9 @@ export const WORKSPACE_SHELL_IPC_CHANNELS = {
   fileReveal: "omp-studio:desktop:file-reveal",
   fileAbsolutePath: "omp-studio:desktop:file-absolute-path",
   fileOpeners: "omp-studio:desktop:file-openers",
+  systemFileOpen: "omp-studio:desktop:system-file-open",
+  systemFileOpenWith: "omp-studio:desktop:system-file-open-with",
+  systemFileReveal: "omp-studio:desktop:system-file-reveal",
 } as const;
 
 /** Opaque workspace ids are Host-generated base64url tokens (or test ids). */
@@ -157,6 +160,10 @@ export type FileOpenerChoice = "vscode" | "cursor" | "windsurf" | "choose";
 export interface FileOpenWithInput extends WorkspaceFileTargetInput {
   readonly openerId: FileOpenerChoice;
 }
+
+/** Absolute paths are accepted only by these explicit local system-file actions. */
+export interface SystemFileTargetInput { readonly path: string }
+export interface SystemFileOpenWithInput extends SystemFileTargetInput { readonly openerId: FileOpenerChoice }
 
 /**
  * Result of a file-level shell action. `cancelled` means the user closed the

@@ -35,7 +35,7 @@ function command(text: string): HTMLElement {
   return row;
 }
 
-const osIcon = (asset: Asset) => i(asset.platform === "mac-arm64" ? "apple" : "windows");
+const osIcon = (asset: Asset) => i(asset.platform === "mac-arm64" ? "apple" : asset.platform.startsWith("linux-") ? "terminal" : "windows");
 
 export async function initDownload(): Promise<void> {
   $("[data-source]").append(...SOURCE_COMMANDS.map(command));
@@ -60,7 +60,7 @@ export async function initDownload(): Promise<void> {
   } else {
     primary.href = release.page;
     primary.innerHTML = `${i("github")}在 GitHub Releases 查看 ${release.version}`;
-    $("[data-primary-req]").textContent = "没有认出你的系统。安装包有 Windows x64、Windows ARM64 和 macOS Apple Silicon 三种。";
+    $("[data-primary-req]").textContent = `没有找到适合本机的安装包。此版本提供：${release.assets.map(a => a.label).join("、")}。`;
   }
 
   $("[data-others]").innerHTML = release.assets

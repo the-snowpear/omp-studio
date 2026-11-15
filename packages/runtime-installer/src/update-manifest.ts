@@ -19,7 +19,7 @@ export interface UpdateManifest {
   schema: 2; repo: string; platform: UpdatePlatform;
   generatedAt: string; releaseNotesUrl: string;
   app?: ComponentRelease; runtime?: ComponentRelease;
-  /** macOS only: the dmg a new user downloads; never installed by the updater. */
+  /** An alternative manual installer: macOS dmg or Linux deb. */
   firstInstall?: UpdateFile;
 }
 export interface SignedUpdateManifest {
@@ -84,10 +84,11 @@ export function verifyUpdateManifest(value: unknown, keys: Readonly<Record<strin
   if (raw.runtime !== undefined) manifest.runtime = component(raw.runtime, repo, "runtime", platform);
   if (!manifest.app && !manifest.runtime) throw new Error("Empty update manifest");
   if (raw.firstInstall !== undefined) {
-    const dmg = file(raw.firstInstall, repo);
+    const installer = file(raw.firstInstall, repo);
     const release = manifest.app?.file.url.slice(0, manifest.app.file.url.lastIndexOf("/") + 1);
-    if (!platform.startsWith("darwin-") || release === undefined || !dmg.asset.endsWith(".dmg") || dmg.url !== `${release}${dmg.asset}`) throw new Error("Invalid first-install asset");
-    manifest.firstInstall = dmg;
+    const suffix = platform.startsWith("darwin-") ? ".dmg" : platform.startsWith("linux-") ? ".deb" : undefined;
+    if (suffix === undefined || release === undefined || !installer.asset.endsWith(suffix) || installer.url !== `${release}${installer.asset}`) throw new Error("Invalid first-install asset");
+    manifest.firstInstall = installer;
   }
   // The coordinator journals this manifest and verifies it again on every
   // start, so it must be byte-identical to what was signed: a dropped field
@@ -104,6 +105,8 @@ export interface ComponentUpdateState {
   receivedBytes?: number | undefined; totalBytes?: number | undefined; message?: string | undefined;
   errorStage?: UpdateErrorStage | undefined;
   blockedReason?: string | undefined;
+  /** Verified catalog URL for installations upgraded by the user/package manager. */
+  manualInstallUrl?: string | undefined;
 }
 export interface UnifiedUpdateSnapshot {
   schema: 2; checking: boolean; app: ComponentUpdateState; runtime: ComponentUpdateState;

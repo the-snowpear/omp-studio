@@ -13,6 +13,7 @@ import { CHROME_SERVICE_CHANNELS, type ServiceDefinitionResult, type ServiceDefi
 import { PAYLOAD_HEALTH_CHANNEL, type PayloadHealthStatus } from "./payload-health-shared.js";
 import { CHROME_ARTIFACT_CHANNELS, type ArtifactFileResult, type ArtifactImportInput } from "./chrome-artifacts-shared.js";
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
+import { DESKTOP_LANGUAGE_CHANNEL, type DesktopLocale } from "./desktop-language-shared.js";
 import { CHROME_PERFORMANCE_CHANNEL } from "./chrome-performance-shared.js";
 import type { MemorySample } from "@omp-studio/studio-protocol";
 import { CONVERSATION_VIEW_CHANNEL, type ConversationViewState } from "./conversation-views.js";
@@ -49,6 +50,8 @@ import {
   type WorkspaceFileActionResult,
   type WorkspaceFileTargetInput,
   type WorkspaceShellEditorResult,
+  type SystemFileTargetInput,
+  type SystemFileOpenWithInput,
 } from "./workspace-shell-shared.js";
 import {
   CHROME_UPDATES_CHANNELS,
@@ -192,6 +195,9 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
       if (theme !== "light" && theme !== "dark") return Promise.resolve();
       return ipcRenderer.invoke(TITLEBAR_OVERLAY_CHANNEL, tint === undefined ? { theme } : { theme, tint }) as Promise<void>;
     },
+    setLanguage(locale: DesktopLocale): Promise<void> {
+      return ipcRenderer.invoke(DESKTOP_LANGUAGE_CHANNEL, { locale }) as Promise<void>;
+    },
     notify(payload: { title: string; body?: string }): Promise<void> {
       return ipcRenderer.invoke(CHROME_NOTIFY_CHANNEL, payload) as Promise<void>;
     },
@@ -243,6 +249,15 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     },
     openFile(input: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> {
       return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpen, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileOpen(input: SystemFileTargetInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileOpen, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileOpenWith(input: SystemFileOpenWithInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileOpenWith, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileReveal(input: SystemFileTargetInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileReveal, input) as Promise<WorkspaceFileActionResult>;
     },
     openFileWith(input: FileOpenWithInput): Promise<WorkspaceFileActionResult> {
       return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpenWith, input) as Promise<WorkspaceFileActionResult>;

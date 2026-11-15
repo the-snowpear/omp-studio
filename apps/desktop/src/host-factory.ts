@@ -35,10 +35,10 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rm, unlink, writeFile, type FileHandle } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import { app, dialog } from "electron";
+import { app, dialog, shell } from "electron";
 
 import type { ArchId, WorkspaceId } from "@omp-studio/client-contract";
 import type { RuntimePreference } from "@omp-studio/studio-protocol";
@@ -57,6 +57,7 @@ import {
   type DesktopRuntimeSessionPort,
 } from "./host-composition.js";
 import { createHostFileLog, defaultHostLogsDirectory, type HostLog } from "./host-log.js";
+import { desktopText } from "./desktop-language-shared.js";
 import { startHostPerformance } from "./desktop-performance.js";
 import { createDesktopGitService } from "./git-service.js";
 import { createDesktopGithubService } from "./github-service.js";
@@ -64,6 +65,7 @@ import { GitWriteQueue, HostProcessRunner } from "./git-process.js";
 import { createDesktopRuntimeSessionPort } from "./runtime-session.js";
 import type { MemoryCredentialProvider } from "./memory-credentials.js";
 import { createWorkspaceFileService } from "./workspace-files.js";
+import { createSystemFileService } from "./system-files.js";
 import { createWorkspaceSessionCatalog } from "./session-commands.js";
 import {
   createPendingArtifactRegistry,
@@ -108,9 +110,9 @@ export interface DesktopHostFactoryOptionsWin32 {
   readonly facade?: DesktopFacadeSeams;
 }
 
-/** Injectable inputs for {@link createDesktopHostFactory} (macOS). */
+/** Injectable inputs for {@link createDesktopHostFactory} (macOS and Linux). */
 export interface DesktopHostFactoryOptionsDarwin {
-  readonly platform: "darwin";
+  readonly platform: "darwin" | "linux";
   /** Native platform operations backing DarwinPlatformPort. */
   readonly services: DarwinPlatformServices;
   /** Native filesystem/liveness/clock/random operations backing the authority lock. */
@@ -161,7 +163,7 @@ export function createDesktopHostFactory(options: DesktopHostFactoryOptions): De
         });
         privateEndpoint = new Win32PrivateEndpoint(options.endpointProviders);
       } else {
-        platform = new DarwinPlatformPort(options.services);
+        platform = new DarwinPlatformPort(options.services, options.platform);
         const profileDirectory = await platform.appDataDirectory();
         await mkdir(profileDirectory, { recursive: true });
         authorityLock = new Win32AuthorityLock({
@@ -199,7 +201,7 @@ function createProductionPickDirectory(): () => Promise<string | undefined> {
   return async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openDirectory", "createDirectory"],
-      title: "打开本地文件夹",
+      title: desktopText("打开本地文件夹", "Open Local Folder"),
     });
     if (result.canceled || result.filePaths[0] === undefined) {
       return undefined;
@@ -256,8 +258,8 @@ function createProductionWin32PlatformServices(): Win32PlatformServices {
   };
 }
 
-/** Production pure-Node realizations of the native platform operations (macOS). */
-function createProductionDarwinPlatformServices(): DarwinPlatformServices {
+/** Production pure-Node realizations of the native platform operations (POSIX). */
+function createProductionDarwinPlatformServices(platform: "darwin" | "linux" = "darwin"): DarwinPlatformServices {
   return {
     async appDataDirectory(): Promise<string> {
       return desktopPaths().stateRoot;
@@ -280,9 +282,17 @@ function createProductionDarwinPlatformServices(): DarwinPlatformServices {
       return authority;
     },
     async revealInFinder(path: string): Promise<void> {
+      if (platform === "linux") {
+        await execFileAsync("xdg-open", [dirname(path)]);
+        return;
+      }
       await execFileAsync("open", ["-R", path]);
     },
     async openExternal(url: string): Promise<void> {
+      if (platform === "linux") {
+        await execFileAsync("xdg-open", [url]);
+        return;
+      }
       await execFileAsync("open", [url]);
     },
     // Runtime containment is a native milestone; nothing in P1
@@ -316,7 +326,11 @@ function createProductionAuthorityLockServices(): Win32AuthorityLockServices {
   const liveness = process.platform === "win32"
     ? createWin32AuthorityLiveness()
     : createPosixAuthorityLiveness({
-        socketDirectory: () => ensurePrivateSocketDirectory("authority", { tmpRoot: desktopSocketTmpRoot() }),
+        // macOS has a per-user temp root; Linux shares /tmp and needs a uid scope.
+        socketDirectory: () => ensurePrivateSocketDirectory(
+          process.platform === "linux" ? `authority-${process.getuid!()}` : "authority",
+          { tmpRoot: desktopSocketTmpRoot() },
+        ),
       });
   return {
     async createExclusive(lockFilePath: string, content: string): Promise<boolean> {
@@ -611,6 +625,7 @@ export function createProductionHostFactory(options?: {
   const workspaces = {
     list: () => innerWorkspaces.list(),
     pick: (input?: { readonly name?: string }) => innerWorkspaces.pick(input),
+    openPath: (input: { readonly path: string }) => innerWorkspaces.openPath!(input),
     async open(input: { readonly workspaceId: WorkspaceId }) {
       const alreadyActive = registry.activeWorkspaceId === input.workspaceId;
       const runtimeBound = activeComposition?.status === "ready";
@@ -643,6 +658,9 @@ export function createProductionHostFactory(options?: {
     ...(options?.revealDirectory === undefined ? {} : { revealDirectory: options.revealDirectory }),
     workspaces,
     workspaceFiles: createWorkspaceFileService({ registry }),
+    systemFiles: createSystemFileService({ registry, knownFolders: {
+      home: app.getPath("home"), desktop: app.getPath("desktop"), downloads: app.getPath("downloads"), documents: app.getPath("documents"), pictures: app.getPath("pictures"),
+    }, trash: path => shell.trashItem(path) }),
     git,
     github,
     disposeHostOperations: () => {
@@ -680,20 +698,20 @@ export function createProductionHostFactory(options?: {
     managedInstall: productionManagedInstall(hostLog),
     facade,
   };
-  if (process.platform !== "win32" && process.platform !== "darwin") {
+  if (process.platform !== "win32" && process.platform !== "darwin" && process.platform !== "linux") {
     throw new Error(`OMP Studio does not support ${process.platform}`);
   }
   const factory = createDesktopHostFactory({
-    ...(process.platform === "darwin"
+    ...(process.platform === "win32"
       ? {
-          platform: "darwin" as const,
-          services: createProductionDarwinPlatformServices(),
-          endpointProviders: createProductionDarwinEndpointProviders(),
-        }
-      : {
           platform: "win32" as const,
           services: createProductionWin32PlatformServices(),
           endpointProviders: createProductionWin32EndpointProviders(),
+        }
+      : {
+          platform: process.platform,
+          services: createProductionDarwinPlatformServices(process.platform),
+          endpointProviders: createProductionDarwinEndpointProviders(),
         }),
     ...baseOptions,
   });

@@ -8,6 +8,7 @@ import { isRecord } from "@oh-my-pi/pi-utils";
 import type { AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
 import type { StudioInteractionPort } from "./interaction-port";
 import { presentHtmlForm } from "./form-presentation";
+import { runtimeText } from "../locale";
 import { askTimeoutMs } from "../../modes/settings";
 
 const EDITOR_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -152,7 +153,13 @@ export class StudioTreeService {
 					this.session.sessionId !== sessionId ||
 					manager.getLeafId() !== leafId
 				) {
-					throw new StudioTreeError("INTERACTION_STALE", "这份重答已过期；当前会话或历史分支已改变，未写入答案。");
+					throw new StudioTreeError(
+						"INTERACTION_STALE",
+						runtimeText(
+							"这份重答已过期；当前会话或历史分支已改变，未写入答案。",
+							"This re-answer prompt has expired; the session or branch history changed and no answer was written.",
+						),
+					);
 				}
 				if (this.session.isStreaming)
 					throw new StudioTreeError("BUSY_STREAMING", "Runtime started streaming before the re-answer committed");
@@ -246,7 +253,10 @@ export class StudioTreeService {
 						) {
 							throw new StudioTreeError(
 								"INVALID_ARGUMENT",
-								"这条旧版 questions 提问仍可回看，但原生 HTML 表单无法重答；请发送一条新消息说明修改。",
+								runtimeText(
+									"这条旧版 questions 提问仍可回看，但原生 HTML 表单无法重答；请发送一条新消息说明修改。",
+									"This legacy questions prompt is still viewable, but native HTML forms cannot be re-answered; send a new message describing your changes.",
+								),
 								{ toolCallId },
 							);
 						}

@@ -3,7 +3,7 @@ import { PREVIEW_TASK_SPAWN_OPTIONS } from "./preview/taskSpawnPreview";
 import { SlidingTabs } from "./SlidingTabs";
 import { AppSelect } from "./AppSelect";
 import { AgentModelDetails } from "./models/AgentModelDetails";
-import { PREVIEW_AGENT_DEFINITIONS } from "./preview/agentSpawnPreview";
+import { getPreviewAgentDefinitions } from "./preview/agentSpawnPreview";
 import { ModelDelegationList } from "./ModelDelegationList";
 import { AgentBtwPane } from "./btw/AgentBtwPane";
 import { ServicesPane } from "./services/ServicesPane";
@@ -26,7 +26,7 @@ import { tabPaneRole, useOverlappingTabs } from "./pageTransition";
 import { type HubTab } from "./pageIntents";
 import { clearHubIntent, loadPersisted, persist, readHubIntent } from "./agents/hub/navigation";
 import { type HubAgent, type HubJob, type HubStatus, type HubView, type Modal, type Notice } from "./agents/hub/types";
-import { CONTRACT, capsFor, missingCap } from "./agents/hub/capabilities";
+import { contractFor, capsFor, missingCap } from "./agents/hub/capabilities";
 import { STATUS_DOT, STATUS_LABEL, TABS, activityPill, fmtAge, fmtClock, fmtCost, fmtDur, fmtNum, fromPreviewAgent, fromPreviewJob, hubChatTarget, hubComposerAgents, hubDurationMs, hubSelectorId, hubWord, linearSeq, sortByCreation, toHubAgent, toHubJob, treeGroups } from "./agents/hub/projection";
 import { hubFaceClass, useHubChatCloseMotion } from "./agents/hub/useHubChatMotion";
 import { AgentCard, EmptyBlock, KbdHint, TreeGroup } from "./agents/hub/AgentCards";
@@ -165,6 +165,9 @@ export function AgentHubPage({
   const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
+  const contract = contractFor(zh);
   const [workspaceTab, setWorkspaceTab] = useState<
     "agents" | "jobs" | "services"
   >("agents");
@@ -180,17 +183,18 @@ export function AgentHubPage({
       !missingCap(capabilities, "agent.spawn"));
   const spawnTip = preview
     ? marks ? zh ? "演示创建，不会执行任务" : "Preview creation; no task runs" : undefined
-    : !viewingLive ? CONTRACT.historicalWrite : missingCap(capabilities, "agent.spawn") ? CONTRACT.spawn : undefined;
+    : !viewingLive ? contract.historicalWrite : missingCap(capabilities, "agent.spawn") ? contract.spawn : undefined;
   useEffect(() => {
     spawnEpoch.current++;
     spawnLock.current = false;
-    setSpawnDefinitions(preview ? PREVIEW_AGENT_DEFINITIONS : null);
-    setSpawnDefinition(preview ? PREVIEW_AGENT_DEFINITIONS[0]!.name : "");
+    const previewDefs = getPreviewAgentDefinitions(zh);
+    setSpawnDefinitions(preview ? previewDefs : null);
+    setSpawnDefinition(preview ? previewDefs[0]!.name : "");
     setSpawnEffort("");
     return () => {
       spawnEpoch.current++;
     };
-  }, [client, preview, parentSessionId, snapshot?.sessionId]);
+  }, [client, preview, parentSessionId, snapshot?.sessionId, zh]);
   useEffect(() => {
     let alive = true;
     setSpawnOptions(undefined); setSpawnOptionsError(""); setSpawnModel(""); setSpawnEffort("");
@@ -226,7 +230,7 @@ export function AgentHubPage({
 
   const mapped = useMemo(() => {
     if (preview) {
-      const fixture = buildPreviewHub();
+      const fixture = buildPreviewHub(undefined, zh);
       return {
         preview: true,
         roster: fixture.agents.map(fromPreviewAgent),
@@ -246,7 +250,7 @@ export function AgentHubPage({
         roster: [],
         jobs: viewingLive ? (snapshot?.jobs ?? []).map(toHubJob) : [],
         jobAgents: (viewingLive ? (snapshot?.jobAgents ?? []) : []) as ReadonlyArray<{ id: string; parentId?: string }>,
-        mainName: "主对话",
+        mainName: zh ? "主对话" : "Main conversation",
         mainStatus:
           viewingLive && snapshot?.isStreaming
             ? "Streaming"
@@ -258,7 +262,7 @@ export function AgentHubPage({
             ? `session ${snapshot.sessionId}`
             : parentSessionId
               ? `session ${parentSessionId}`
-              : "等待 Runtime snapshot",
+              : (zh ? "等待 Runtime snapshot" : "Waiting for Runtime snapshot"),
         mainMeta:
           viewingLive && snapshot
             ? `${snapshot.activeMode} · pending ${snapshot.pendingMessages}`
@@ -295,7 +299,7 @@ export function AgentHubPage({
       roster,
       jobs: viewingLive ? (snapshot?.jobs ?? []).map(toHubJob) : [],
       jobAgents: (viewingLive ? (snapshot?.jobAgents ?? []) : []) as ReadonlyArray<{ id: string; parentId?: string }>,
-      mainName: main?.name ?? "主对话",
+      mainName: main?.name ?? (zh ? "主对话" : "Main conversation"),
       mainStatus:
         liveHeader && snapshot.isStreaming
           ? "Streaming"
@@ -308,11 +312,11 @@ export function AgentHubPage({
           ? `session ${parentSessionId}`
           : liveHeader
             ? `session ${snapshot.sessionId}`
-            : "等待 Runtime snapshot"),
+            : (zh ? "等待 Runtime snapshot" : "Waiting for Runtime snapshot")),
       mainMeta,
       runtimeLabel: undefined as string | undefined,
     };
-  }, [preview, snapshot, agents, viewingLive, parentSessionId]);
+  }, [preview, snapshot, agents, viewingLive, parentSessionId, zh]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -332,6 +336,7 @@ export function AgentHubPage({
     client !== undefined,
     preview,
     viewingLive,
+    zh,
   );
   const killTarget =
     modal?.kind === "kill"
@@ -344,6 +349,7 @@ export function AgentHubPage({
     client !== undefined,
     preview,
     viewingLive,
+    zh,
   );
 
   const runCommand = useCallback(
@@ -352,16 +358,17 @@ export function AgentHubPage({
       input: CommandInput<TName>,
       okText: string,
     ): Promise<boolean> => {
+      const c = contractFor(zhRef.current);
       if (preview) {
-        setNotice({ kind: "warn", text: CONTRACT.previewWrite });
+        setNotice({ kind: "warn", text: c.previewWrite });
         return false;
       }
       if (!viewingLive) {
-        setNotice({ kind: "warn", text: CONTRACT.historicalWrite });
+        setNotice({ kind: "warn", text: c.historicalWrite });
         return false;
       }
       if (!client) {
-        setNotice({ kind: "warn", text: "无 Studio client（桌面桥未注入）" });
+        setNotice({ kind: "warn", text: zhRef.current ? "无 Studio client（桌面桥未注入）" : "No Studio client (desktop bridge not injected)" });
         return false;
       }
       setCommandBusy(true);
@@ -371,7 +378,7 @@ export function AgentHubPage({
         setNotice({ kind: "ok", text: okText });
         return true;
       } catch (error) {
-        setNotice({ kind: "err", text: hostErrorMessage(error, "操作失败") });
+        setNotice({ kind: "err", text: hostErrorMessage(error, zhRef.current ? "操作失败" : "Action failed") });
         return false;
       } finally {
         setCommandBusy(false);
@@ -385,7 +392,7 @@ export function AgentHubPage({
       void runCommand(
         "job.cancel",
         { jobId: job.id, expectedGeneration: job.generation },
-        `job ${job.id} 取消已提交`,
+        zhRef.current ? `job ${job.id} 取消已提交` : `Submitted cancellation for job ${job.id}`,
       );
     },
     [runCommand],
@@ -396,7 +403,7 @@ export function AgentHubPage({
       void runCommand(
         "agent.revive",
         { agentId: agent.id, expectedGeneration: agent.generation },
-        `${agent.name} revive 已提交`,
+        zhRef.current ? `${agent.name} revive 已提交` : `Submitted revive for ${agent.name}`,
       );
     },
     [runCommand],
@@ -407,7 +414,7 @@ export function AgentHubPage({
       void runCommand(
         "agent.release",
         { agentId: agent.id, expectedGeneration: agent.generation },
-        `${agent.name} release 已提交`,
+        zhRef.current ? `${agent.name} release 已提交` : `Submitted release for ${agent.name}`,
       );
     },
     [runCommand],
@@ -418,7 +425,7 @@ export function AgentHubPage({
       void runCommand(
         "agent.kill",
         { agentId: agent.id, expectedGeneration: agent.generation },
-        `${agent.name} 已结束`,
+        zhRef.current ? `${agent.name} 已结束` : `Stopped ${agent.name}`,
       );
     },
     [runCommand],
@@ -436,7 +443,7 @@ export function AgentHubPage({
           text,
           mode: "prompt",
         },
-        `消息已发送给 ${agent.name}`,
+        zhRef.current ? `消息已发送给 ${agent.name}` : `Message sent to ${agent.name}`,
       ).then((ok) => {
         if (ok) setDraft("");
       });
@@ -547,7 +554,7 @@ export function AgentHubPage({
       })
       .catch((error) => {
         if (!cancelled && req === transcriptReq.current)
-          setTranscriptError(hostErrorMessage(error, "读取 transcript 失败"));
+          setTranscriptError(hostErrorMessage(error, zhRef.current ? "读取 transcript 失败" : "Failed to load transcript"));
       })
       .finally(() => {
         if (!cancelled && req === transcriptReq.current)
@@ -599,7 +606,7 @@ export function AgentHubPage({
       })
       .catch((error) => {
         if (req === transcriptReq.current)
-          setTranscriptError(hostErrorMessage(error, "读取 transcript 失败"));
+          setTranscriptError(hostErrorMessage(error, zhRef.current ? "读取 transcript 失败" : "Failed to load transcript"));
       })
       .finally(() => {
         if (req === transcriptReq.current) setTranscriptBusy(false);
@@ -681,7 +688,7 @@ export function AgentHubPage({
           if (selectedAgent) {
             event.preventDefault();
             if (caps.open) openChat(selectedAgent.id);
-            else warn(caps.openWhy ?? "已结束");
+            else warn(caps.openWhy ?? (zhRef.current ? "已结束" : "Ended"));
           }
           break;
         case "t":
@@ -692,7 +699,7 @@ export function AgentHubPage({
           if (selectedAgent) {
             event.preventDefault();
             if (caps.revive) reviveAgent(selectedAgent);
-            else warn(caps.reviveWhy ?? CONTRACT.revive);
+            else warn(caps.reviveWhy ?? contractFor(zhRef.current).revive);
           }
           break;
         case "x":
@@ -700,7 +707,7 @@ export function AgentHubPage({
             event.preventDefault();
             if (caps.kill)
               setModal({ kind: "kill", agentId: selectedAgent.id });
-            else warn(caps.killWhy ?? CONTRACT.kill);
+            else warn(caps.killWhy ?? contractFor(zhRef.current).kill);
           }
           break;
         case "Escape":
@@ -781,8 +788,8 @@ export function AgentHubPage({
         return (
           <div className="hub-empty-list">
             <Icon name="search" />
-            <b>没有匹配的 Agent</b>
-            <span>试试其他 id、名称、任务或模型关键字。</span>
+            <b>{zh ? "没有匹配的 Agent" : "No matching agents"}</b>
+            <span>{zh ? "试试其他 id、名称、任务或模型关键字。" : "Try another id, name, task, or model keyword."}</span>
           </div>
         );
       }
@@ -862,7 +869,7 @@ export function AgentHubPage({
     );
   };
   const renderOverview = (agent: HubAgent) => {
-    const taskSteps = preview ? previewTaskStepsForAgent(agent.id) : (agents ?? snapshot?.agents ?? []).find(row => row.agentId === agent.id)?.taskSteps;
+    const taskSteps = preview ? previewTaskStepsForAgent(agent.id, zh) : (agents ?? snapshot?.agents ?? []).find(row => row.agentId === agent.id)?.taskSteps;
     return <>{taskSteps ? <TaskStepsView key={agent.id} state={taskSteps} zh={zh} /> : null}<HubAgentOverview zh={zh} select={select} agent={agent} /></>;
   };
   const renderJobRow = (row: JobTreeRow<HubJob>, agent?: HubAgent) => <HubJobRow key={row.job.id} selectedJobId={selectedJobId} setSelectedJobId={setSelectedJobId} zh={zh} preview={preview} viewingLive={viewingLive} commandBusy={commandBusy} connOnline={connOnline} client={client} capabilities={capabilities} cancelJob={cancelJob} parentSessionId={parentSessionId} snapshot={snapshot} resyncRequired={resyncRequired} row={row} agent={agent} />;
@@ -878,8 +885,10 @@ export function AgentHubPage({
         <div className="hub-cap-note" style={{ marginBottom: "var(--sp-8)" }}>
           <Icon name="lock" extra="sm" />
           {missingCap(capabilities, "job.cancel")
-            ? CONTRACT.cancel
-            : "取消走 runtime 确认门；运行中的 job 才可取消（owner-scoped）"}
+            ? contract.cancel
+            : zh
+              ? "取消走 runtime 确认门；运行中的 job 才可取消（owner-scoped）"
+              : "Cancellation goes through the runtime confirmation gate; only running jobs can be cancelled (owner-scoped)"}
         </div>
         {rows.length ? (
           <div className="hub-job-tree">
@@ -906,14 +915,14 @@ export function AgentHubPage({
                 icon="message"
                 detail={
                   agent.hasTranscript
-                    ? "预览模式不读取真实 transcript"
+                    ? (zh ? "预览模式不读取真实 transcript" : "Preview mode does not read real transcripts")
                     : "No messages yet."
                 }
               />
             </div>
             <div className="hub-ro-banner">
               <Icon name="lock" extra="sm" />
-              <span>预览模式不调用 Host 写操作</span>
+              <span>{zh ? "预览模式不调用 Host 写操作" : "Preview mode does not invoke Host write operations"}</span>
             </div>
           </>
         );
@@ -924,12 +933,12 @@ export function AgentHubPage({
             <div className="hub-transcript" id="hubTranscript">
               <EmptyBlock
                 icon="message"
-                detail="历史会话请用「打开」查看归档对话，不读取 live transcript。"
+                detail={zh ? "历史会话请用「打开」查看归档对话，不读取 live transcript。" : "For historical sessions, click Open to view archived conversations; live transcripts are unavailable."}
               />
             </div>
             <div className="hub-ro-banner">
               <Icon name="lock" extra="sm" />
-              <span>{CONTRACT.historicalWrite}</span>
+              <span>{contract.historicalWrite}</span>
             </div>
           </>
         );
@@ -939,7 +948,7 @@ export function AgentHubPage({
         <>
           <div className="hub-transcript" id="hubTranscript">
             {transcriptBusy && !page ? (
-              <EmptyBlock icon="message" detail="读取 transcript…" />
+              <EmptyBlock icon="message" detail={zh ? "读取 transcript…" : "Loading transcript…"} />
             ) : null}
             {transcriptError ? (
               <EmptyBlock icon="alert" detail={transcriptError} />
@@ -948,7 +957,7 @@ export function AgentHubPage({
               <EmptyBlock
                 icon="message"
                 detail={
-                  agent.hasTranscript ? CONTRACT.transcript : "No messages yet."
+                  agent.hasTranscript ? contract.transcript : "No messages yet."
                 }
               />
             ) : null}
@@ -976,7 +985,7 @@ export function AgentHubPage({
                 style={{ margin: "var(--sp-8) auto" }}
                 onClick={loadMoreTranscript}
               >
-                加载更早消息
+                {zh ? "加载更早消息" : "Load older messages"}
               </button>
             ) : null}
           </div>
@@ -986,10 +995,10 @@ export function AgentHubPage({
               type="text"
               placeholder={
                 caps.chat
-                  ? `发消息给 ${agent.name}（prompt）…`
-                  : (caps.chatWhy ?? CONTRACT.chat)
+                  ? (zh ? `发消息给 ${agent.name}（prompt）…` : `Message ${agent.name} (prompt)…`)
+                  : (caps.chatWhy ?? contract.chat)
               }
-              aria-label="发送消息"
+              aria-label={zh ? "发送消息" : "Send message"}
               value={draft}
               disabled={!caps.chat || commandBusy}
               onChange={(event) => setDraft(event.target.value)}
@@ -1013,15 +1022,15 @@ export function AgentHubPage({
               onClick={() => sendDraft(agent)}
             >
               <Icon name="message" extra="sm" />
-              发送
+              {zh ? "发送" : "Send"}
             </button>
           </div>
           {agent.status === "parked" ? (
             <div className="hub-cap-note">
               <Icon name="clock" extra="sm" />
               {agent.isolated || agent.canRevive === false
-                ? "仅保留记录和产物，不可自动 revive"
-                : "parked agent：发送将自动 revive（outcome=revived）"}
+                ? (zh ? "仅保留记录和产物，不可自动 revive" : "Records and artifacts only; automatic revive is unavailable")
+                : (zh ? "parked agent：发送将自动 revive（outcome=revived）" : "Parked agent: sending automatically revives it (outcome=revived)")}
             </div>
           ) : null}
         </>
@@ -1033,15 +1042,15 @@ export function AgentHubPage({
         <>
           <div className="hub-ro-banner" style={{ margin: "0 0 var(--sp-12)" }}>
             <Icon name="lock" extra="sm" />
-            <span>{CONTRACT.irc}</span>
+            <span>{contract.irc}</span>
           </div>
           <div className="hub-irc-list">
             <EmptyBlock
               icon="message"
               detail={
                 agent.unread > 0
-                  ? `${agent.unread} 条未读（内容读取本轮未接入）`
-                  : "没有与该 Agent 的 IRC 往来"
+                  ? (zh ? `${agent.unread} 条未读（内容读取本轮未接入）` : `${agent.unread} unread (content reading not yet wired)`)
+                  : (zh ? "没有与该 Agent 的 IRC 往来" : "No IRC messages with this agent")
               }
             />
           </div>
@@ -1136,18 +1145,22 @@ export function AgentHubPage({
         {connKind === "reconnecting" ? (
           <div className="hub-conn amber">
             <span className="spinner" />
-            <b>正在重连</b>
+            <b>{zh ? "正在重连" : "Reconnecting"}</b>
             <span className="hc-detail">
-              与 runtime 的连接中断，正在重试… roster 为最后一次同步的快照。
+              {zh
+                ? "与 runtime 的连接中断，正在重试… roster 为最后一次同步的快照。"
+                : "Connection to runtime lost, retrying… Roster shows the last synced snapshot."}
             </span>
           </div>
         ) : null}
         {connKind === "resync" ? (
           <div className="hub-conn blue">
             <span className="spinner" />
-            <b>状态回源中</b>
+            <b>{zh ? "状态回源中" : "Resyncing state"}</b>
             <span className="hc-detail">
-              正在恢复最新 Runtime 状态，敏感操作已暂停。
+              {zh
+                ? "正在恢复最新 Runtime 状态，敏感操作已暂停。"
+                : "Restoring latest runtime state; sensitive actions are paused."}
             </span>
           </div>
         ) : null}
@@ -1195,7 +1208,7 @@ export function AgentHubPage({
         </div>
 
         <div className="hub-roster-head">
-          <div className="seg" role="group" aria-label="Roster 视图">
+          <div className="seg" role="group" aria-label={zh ? "Roster 视图" : "Roster view"}>
             <button
               type="button"
               className={view === "flat" ? "active" : undefined}
@@ -1229,7 +1242,7 @@ export function AgentHubPage({
             placeholder={
               zh ? "搜索名称 / 任务 / 模型…" : "Search name / task / model…"
             }
-            aria-label="搜索 Agent"
+            aria-label={zh ? "搜索 Agent" : "Search agents"}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onSearchKeyDown}
@@ -1265,7 +1278,7 @@ export function AgentHubPage({
             id="hubList"
             ref={listRef}
             role="listbox"
-            aria-label="子 Agent 列表"
+            aria-label={zh ? "子 Agent 列表" : "Subagent list"}
           >
             {renderList()}
           </div>
@@ -1296,7 +1309,7 @@ export function AgentHubPage({
                               onClick={() => setChatOpen(false)}
                             >
                               <Icon name="arrow-l" extra="sm" />
-                              返回
+                              {zh ? "返回" : "Back"}
                             </button>
                           </div>
                           <SubagentConversationPane
@@ -1334,7 +1347,8 @@ export function AgentHubPage({
                               <button
                                 className="icon-btn small hub-drawer-back"
                                 type="button"
-                                data-tip="返回"
+                                data-tip={zh ? "返回" : "Back"}
+                                aria-label={zh ? "返回" : "Back"}
                                 onClick={() => setDrawerOpen(false)}
                               >
                                 <Icon name="arrow-l" extra="sm" />
@@ -1485,7 +1499,7 @@ export function AgentHubPage({
                               data-tip={caps.killWhy ?? undefined}
                               onClick={() => {
                                 if (!caps.kill)
-                                  warn(caps.killWhy ?? CONTRACT.kill);
+                                  warn(caps.killWhy ?? contract.kill);
                                 else
                                   setModal({
                                     kind: "kill",
@@ -1528,8 +1542,8 @@ export function AgentHubPage({
             <div className="hub-detail hub-detail-placeholder">
               <div className="hub-empty-list" style={{ border: "none" }}>
                 <Icon name="cursor" />
-                <b>未选择 Agent</b>
-                <span>从左侧列表选择一个子 Agent 查看详情。</span>
+                <b>{zh ? "未选择 Agent" : "No agent selected"}</b>
+                <span>{zh ? "从左侧列表选择一个子 Agent 查看详情。" : "Select a subagent from the list to view details."}</span>
               </div>
             </div>
           )}
@@ -1556,7 +1570,9 @@ export function AgentHubPage({
                 ? zh
                   ? "创建代理"
                   : "New Agent"
-                : "结束任务"
+                : zh
+                  ? "结束任务"
+                  : "End task"
             }
             onMouseDown={(event) => event.stopPropagation()}
           >
@@ -1702,7 +1718,7 @@ export function AgentHubPage({
             ) : (
               <>
                 <div className="modal-head">
-                  <b>结束任务？</b>
+                  <b>{zh ? "结束任务？" : "End task?"}</b>
                   <button
                     className="icon-btn small"
                     type="button"
@@ -1718,9 +1734,19 @@ export function AgentHubPage({
                     className="small"
                     style={{ color: "var(--text-2)", lineHeight: 1.6 }}
                   >
-                    确定结束
-                    {killTarget?.name ? `「${killTarget.name}」` : "这个任务"}
-                    吗？结束后无法恢复。
+                    {zh ? (
+                      <>
+                        确定结束
+                        {killTarget?.name ? `「${killTarget.name}」` : "这个任务"}
+                        吗？结束后无法恢复。
+                      </>
+                    ) : (
+                      <>
+                        Are you sure you want to end{" "}
+                        {killTarget?.name ? `"${killTarget.name}"` : "this task"}?
+                        This cannot be undone.
+                      </>
+                    )}
                     {killCaps.killWhy ? (
                       <div style={{ marginTop: 8 }}>{killCaps.killWhy}</div>
                     ) : null}

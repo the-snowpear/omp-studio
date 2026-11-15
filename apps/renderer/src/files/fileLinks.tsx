@@ -4,12 +4,12 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { previewFile, previewFileBlob } from "../preview/filesPreview";
 import { parseFileReference, relativeFileReference, type FileReference } from "./fileTypes";
 
-export interface FileOpenIntent extends FileReference { workspaceId?: string; ownerId?: string; targetId?: string | null }
+export interface FileOpenIntent extends FileReference { source?: "system"; workspaceId?: string; ownerId?: string; targetId?: string | null }
 type Opener = (intent: FileOpenIntent) => void;
 const openers = new Map<string, Opener>();
 export function registerFileOpener(owner: string, open: Opener) { openers.set(owner, open); return () => { if (openers.get(owner) === open) openers.delete(owner); }; }
 export const FileReferenceContext = createContext<((reference: FileReference) => void) | null>(null);
-export const FileImageContext = createContext<{ targetId: string | null; workspaceId: string; basePath: string; preview: boolean } | null>(null);
+export const FileImageContext = createContext<{ targetId: string | null; workspaceId: string; basePath: string; preview: boolean; source?: "system" } | null>(null);
 export function useOpenFile() {
   const view = useConversationView();
   return (intent: FileOpenIntent) => {
@@ -41,9 +41,9 @@ export function LocalFileImage({ src, alt }: { src: string; alt: string }) {
       return () => { active = false; if (blob) URL.revokeObjectURL(blob); };
     }
     const api = globalThis.ompStudioChrome?.files;
-    if (!api || !workspaceId) return;
-    void api.open({ targetId, workspaceId, path }).then(resource => { id = resource.id; if (active) setUrl(resource.url); else void api.release(id); }).catch(() => { if (active) setUrl(undefined); });
+    if (!api || !workspaceId && context?.source !== "system") return;
+    void api.open({ targetId, workspaceId: workspaceId ?? "", path, ...(context?.source ? { source: context.source } : {}) }).then(resource => { id = resource.id; if (active) setUrl(resource.url); else void api.release(id); }).catch(() => { if (active) setUrl(undefined); });
     return () => { active = false; if (id) void api.release(id); };
-  }, [src, context?.basePath, preview, targetId, workspaceId]);
+  }, [src, context?.basePath, context?.source, preview, targetId, workspaceId]);
   return url ? <img src={url} alt={alt} decoding="async" /> : <span className="file-muted">{alt || src}</span>;
 }

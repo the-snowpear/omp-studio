@@ -12,4 +12,4 @@ runs:
         # .forge-meta lets electron-rebuild check the architecture and ABI.
         # No fallback: a changed dependency or build policy requires a rebuild.
         path: node_modules/node-pty/build/Release
-        key: electron-native-v1-${{ runner.os }}-${{ runner.arch }}-node${{ steps.identity.outputs.node }}-${{ steps.identity.outputs.dependencies }}-${{ hashFiles('scripts/pack-win.mjs', 'scripts/pack-mac.mjs', 'scripts/mac-bundle.mjs', 'packaging/electron-builder.yml') }}
+        key: electron-native-v1-${{ runner.os }}-${{ runner.arch }}-node${{ steps.identity.outputs.node }}-${{ steps.identity.outputs.dependencies }}-${{ hashFiles('scripts/pack-win.mjs', 'scripts/pack-mac.mjs', 'scripts/mac-bundle.mjs', 'scripts/pack-linux.mjs', 'scripts/linux-bundle.mjs', 'packaging/electron-builder.yml') }}

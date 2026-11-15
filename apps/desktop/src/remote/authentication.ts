@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { ensurePrivateSocketDirectory, privateSocketPath } from "@omp-studio/studio-host";
 import { sshArguments, systemSshExecutable, type SshConnection } from "./platform.js";
 import { RemoteConnectionError, connectionCancelled, sshFailure } from "./errors.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 export interface SshAuthenticationRequest {
   readonly env: NodeJS.ProcessEnv;
@@ -24,8 +25,8 @@ const REQUEST_TTL_MS = 90_000;
 
 /** Passwords stay in Main; each SSH child receives only a one-use askpass ticket. */
 export async function createPasswordAuthentication(connection: SshConnection, password: string, helperDirectory: string, signal: AbortSignal): Promise<SshAuthentication> {
-  if (typeof password !== "string" || password.length === 0 || /[\r\n\0]/u.test(password)) throw new RemoteConnectionError("authentication", "请输入有效的 SSH 密码（不支持换行或 NUL）");
-  if (Buffer.byteLength(password) > MAX_PASSWORD_BYTES) throw new RemoteConnectionError("authentication", "SSH 密码不能超过 4096 个 UTF-8 字节");
+  if (typeof password !== "string" || password.length === 0 || /[\r\n\0]/u.test(password)) throw new RemoteConnectionError("authentication", desktopText("请输入有效的 SSH 密码（不支持换行或 NUL）", "Please enter a valid SSH password (newlines and NUL characters are not allowed)"));
+  if (Buffer.byteLength(password) > MAX_PASSWORD_BYTES) throw new RemoteConnectionError("authentication", desktopText("SSH 密码不能超过 4096 个 UTF-8 字节", "SSH password cannot exceed 4096 UTF-8 bytes"));
   const secret = Buffer.from(password, "utf8");
   password = "";
   let directory: string | undefined;
@@ -39,8 +40,8 @@ export async function createPasswordAuthentication(connection: SshConnection, pa
     const user = config.get("user");
     const hostname = config.get("hostname");
     const hasProxy = [config.get("proxyjump"), config.get("proxycommand")].some(value => value !== undefined && value !== "none");
-    if (hasProxy) throw new RemoteConnectionError("configuration", "账密模式暂不支持跳板机；请使用系统密钥或 agent 模式");
-    if (!user || !hostname) throw new RemoteConnectionError("configuration", "系统 SSH 未能解析目标用户名和主机");
+    if (hasProxy) throw new RemoteConnectionError("configuration", desktopText("账密模式暂不支持跳板机；请使用系统密钥或 agent 模式", "Jump hosts are not supported in password mode; please use system key or SSH agent mode"));
+    if (!user || !hostname) throw new RemoteConnectionError("configuration", desktopText("系统 SSH 未能解析目标用户名和主机", "System SSH could not resolve the target username and host"));
     const prompt = `${user}@${hostname}'s password:`;
     const endpoint = process.platform === "win32"
       ? `\\\\.\\pipe\\omp-ssh-askpass-${randomUUID()}`
@@ -92,7 +93,7 @@ export async function createPasswordAuthentication(connection: SshConnection, pa
     listener.on("error", () => { void close(); });
     return {
       request() {
-        if (closed) throw new RemoteConnectionError("authentication", "SSH 密码已清除，请重新连接并输入密码");
+        if (closed) throw new RemoteConnectionError("authentication", desktopText("SSH 密码已清除，请重新连接并输入密码", "SSH password cleared; please reconnect and enter the password"));
         if (tickets.size >= 16) throw new Error("Too many SSH authentication requests");
         const token = randomBytes(32).toString("base64url");
         const timer = setTimeout(() => forget(token), REQUEST_TTL_MS);
@@ -120,15 +121,15 @@ export async function createPasswordAuthentication(connection: SshConnection, pa
     if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {});
     if (signal.aborted) throw connectionCancelled();
     if (error instanceof RemoteConnectionError) throw error;
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new RemoteConnectionError("configuration", "SSH 账密认证组件未安装，请重新构建或更新桌面客户端");
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new RemoteConnectionError("configuration", desktopText("SSH 账密认证组件未安装，请重新构建或更新桌面客户端", "SSH password authentication helper is not installed; rebuild or update the desktop app"));
     const failure = sshFailure(typeof (error as { stderr?: unknown }).stderr === "string" ? (error as { stderr: string }).stderr : "", error);
     if (failure.connectionCode !== "unknown") throw failure;
-    throw new RemoteConnectionError("configuration", "无法准备 SSH 账密认证，请检查系统 SSH 配置及认证组件");
+    throw new RemoteConnectionError("configuration", desktopText("无法准备 SSH 账密认证，请检查系统 SSH 配置及认证组件", "Unable to prepare SSH password authentication; please check system SSH configuration and authentication helper"));
   }
 }
 
 export function sshAuthenticationRequest(connection: SshConnection, authentication?: SshAuthentication): SshAuthenticationRequest | undefined {
   if (connection.authMode !== "password") return undefined;
-  if (!authentication) throw new RemoteConnectionError("authentication", "此连接需要密码，请重新连接并在应用内输入");
+  if (!authentication) throw new RemoteConnectionError("authentication", desktopText("此连接需要密码，请重新连接并在应用内输入", "This connection requires a password; please reconnect and enter it in the app"));
   return authentication.request();
 }

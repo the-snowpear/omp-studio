@@ -15,11 +15,14 @@ export function visibleWindowBounds(rect: Rectangle, areas: readonly Rectangle[]
 export function registerFloatingWindows(options: {
   parent: BrowserWindow; ipcMain: Pick<IpcMain, "handle" | "removeHandler">; allowedOrigin: string; preloadPath: string;
   areas: () => Rectangle[]; isQuitting: () => boolean; openExternal: (url: string) => void;
+  /** Desktops without a reliable tray must retain a visible way back to the workbench. */
+  restoreMainOnLastClose?: boolean;
   onWindow?: (window: BrowserWindow) => void; onVisibility?: (window: BrowserWindow) => void; onClosed?: (contents: WebContents) => void;
   onWillClose?: (window: BrowserWindow) => void;
 }) {
   const { parent, ipcMain } = options;
   const entries = new Map<string, Entry>();
+  const hasWindows = () => [...entries.values()].some(entry => !!entry.window);
   const destroy = (window: BrowserWindow) => { options.onWillClose?.(window); window.destroy(); };
   const send = (event: FloatWindowEvent) => { if (!parent.webContents.isDestroyed()) parent.webContents.send(CHANNELS.changed, event); };
   const owns = (sender: { getURL(): string }) => [...entries.values()].some(entry => entry.window?.webContents === sender);
@@ -66,7 +69,10 @@ export function registerFloatingWindows(options: {
       if (options.isQuitting() || entry.closing) { options.onWillClose?.(child); return; }
       event.preventDefault(); send({ key: entry.key, id: entry.input.id, kind: "close-request" });
     });
-    child.on("closed", () => { entries.delete(entry.key); options.onClosed?.(contents); refreshThrottle(); send({ key: entry.key, id: entry.input.id, kind: "closed" }); });
+    child.on("closed", () => {
+      entries.delete(entry.key); options.onClosed?.(contents); refreshThrottle(); send({ key: entry.key, id: entry.input.id, kind: "closed" });
+      if (options.restoreMainOnLastClose && !options.isQuitting() && !hasWindows() && !parent.isDestroyed() && !parent.isVisible()) showMain();
+    });
     options.onWindow?.(child);
   };
   parent.webContents.on("did-create-window", didCreate);
@@ -93,7 +99,7 @@ export function registerFloatingWindows(options: {
   });
   return {
     windowFor: (key?: string) => key ? entries.get(key)?.window : parent,
-    owns, hasWindows: () => [...entries.values()].some(entry => !!entry.window),
+    owns, hasWindows,
     dispose() {
       parent.webContents.removeListener("did-create-window", didCreate);
       parent.webContents.removeListener("destroyed", closeWindows);

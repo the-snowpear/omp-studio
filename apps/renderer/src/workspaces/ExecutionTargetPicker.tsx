@@ -3,6 +3,7 @@ import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { PREVIEW_SSH_TARGETS } from "../preview/fixtures";
 import { useExecutionTarget, useTargetMemory } from "./ExecutionTargets";
@@ -12,6 +13,8 @@ import { remoteConnectionPending, remoteStatusLabel } from "./remoteStatus";
 import type { RemoteConnectionProfile, RemoteDirectoryList, RemoteNetworkMode } from "../../../desktop/src/remote/shared";
 
 export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpen?(): void; otherMenuOpen?: boolean }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const target = useExecutionTarget();
   const { preview, marks } = usePreviewMode();
   const [open, setOpen] = useState(false);
@@ -41,7 +44,8 @@ export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpe
   const navigation = useRef(0);
   const modalOpen = form || directoryTarget !== undefined;
   const status = target.inventory.statuses.find(value => value.id === target.id);
-  const label = preview ? demo ? `SSH · ${demo}` : "此计算机" : target.id ? `SSH · ${target.name}` : "此计算机";
+  const localLabel = zh ? "此计算机" : "This computer";
+  const label = preview ? demo ? `SSH · ${demo}` : localLabel : target.id ? `SSH · ${target.name}` : localLabel;
   const unavailable = !preview && !target.api;
   const installing = status?.operation === "installing-runtime";
 
@@ -127,17 +131,17 @@ export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpe
   const displayError = error || target.inventoryError;
 
   return <span className="execution-picker">
-    <button ref={button} type="button" className="ctx-item ctx-project-switch" aria-label={`工作位置：${label}${preview && marks ? "（演示）" : ""}`} aria-haspopup="menu" aria-expanded={open} disabled={busy} onClick={() => { onOpen?.(); setOpen(value => !value); setError(""); }}>
+    <button ref={button} type="button" className="ctx-item ctx-project-switch" aria-label={`${zh ? "工作位置：" : "Execution target: "}${label}${preview && marks ? (zh ? "（演示）" : " (Preview)") : ""}`} aria-haspopup="menu" aria-expanded={open} disabled={busy} onClick={() => { onOpen?.(); setOpen(value => !value); setError(""); }}>
       {busy ? <span className="spinner" /> : <Icon name="terminal" extra="sm" />}
       <span>{label}</span>
-      {!preview && target.id && status?.state !== "connected" ? <span className={remoteConnectionPending(status) ? "remote-pending" : "remote-offline"}>{remoteStatusLabel(status)}</span> : null}
-      {preview && marks ? <span className="chip xs">演示</span> : null}
+      {!preview && target.id && status?.state !== "connected" ? <span className={remoteConnectionPending(status) ? "remote-pending" : "remote-offline"}>{remoteStatusLabel(status, zh)}</span> : null}
+      {preview && marks ? <span className="chip xs">{zh ? "演示" : "Preview"}</span> : null}
       <Icon name="chevron-d" extra="sm" />
     </button>
-    {connectingId ? <button className="btn small" onClick={() => { cancelled.current = true; void target.cancelConnection(connectingId).catch(showError); }}>取消连接</button> : null}
+    {connectingId ? <button className="btn small" onClick={() => { cancelled.current = true; void target.cancelConnection(connectingId).catch(showError); }}>{zh ? "取消连接" : "Cancel connection"}</button> : null}
     {open ? <>
-      <button className="ctx-project-backdrop" aria-label="关闭执行位置菜单" onClick={closeMenu} />
-      <div ref={menu} className="menu ctx-project-menu execution-menu" role="menu" aria-label="工作位置" onKeyDown={event => {
+      <button className="ctx-project-backdrop" aria-label={zh ? "关闭执行位置菜单" : "Close execution target menu"} onClick={closeMenu} />
+      <div ref={menu} className="menu ctx-project-menu execution-menu" role="menu" aria-label={zh ? "工作位置" : "Execution target"} onKeyDown={event => {
         if (event.key === "Escape") { event.preventDefault(); closeMenu(); }
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault();
@@ -146,60 +150,60 @@ export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpe
           items[(current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
         }
       }}>
-        <div className="menu-label">工作位置</div>
-        <button className="execution-menu-row" role="menuitem" onClick={() => choose(null)}><Icon name="folder-open" extra="sm" /><span>此计算机</span>{(!preview && !target.id) || (preview && !demo) ? <Icon name="check" extra="sm" /> : null}</button>
+        <div className="menu-label">{zh ? "工作位置" : "Execution target"}</div>
+        <button className="execution-menu-row" role="menuitem" onClick={() => choose(null)}><Icon name="folder-open" extra="sm" /><span>{zh ? "此计算机" : "This computer"}</span>{(!preview && !target.id) || (preview && !demo) ? <Icon name="check" extra="sm" /> : null}</button>
         {profiles.map(profile => {
           const state = target.inventory.statuses.find(value => value.id === profile.id);
           const locked = !preview && (remoteConnectionPending(state) || Boolean(state?.operation));
           const realProfile = !preview ? target.inventory.profiles.find(value => value.id === profile.id) : undefined;
           return <div className="execution-profile" key={profile.id}>
             <button className="execution-menu-row" role="menuitem" disabled={locked} onClick={() => choose(preview ? profile.name : profile.id)}>
-              <Icon name="terminal" extra="sm" /><span>{profile.name}<small>{profile.platform === "win32" ? "Windows" : profile.platform === "darwin" ? "macOS" : profile.platform === "linux" ? "Linux" : "系统自动识别"}{!preview ? ` · ${remoteStatusLabel(state)}` : ""}</small></span>
+              <Icon name="terminal" extra="sm" /><span>{profile.name}<small>{profile.platform === "win32" ? "Windows" : profile.platform === "darwin" ? "macOS" : profile.platform === "linux" ? "Linux" : (zh ? "系统自动识别" : "Auto-detected")}{!preview ? ` · ${remoteStatusLabel(state, zh)}` : ""}</small></span>
               {!preview && target.id === profile.id ? <Icon name="check" extra="sm" /> : null}
             </button>
-            {realProfile && target.id !== profile.id && !locked && state?.state !== "connected" ? <button className="icon-btn" aria-label={`编辑 ${profile.name}`} onClick={() => edit(realProfile)}><Icon name="settings" extra="sm" /></button> : null}
-            {realProfile && target.id !== profile.id && !locked ? <button className="icon-btn" aria-label={`移除 ${profile.name}`} onClick={() => void run(async () => { await target.api!.disconnect(profile.id); await target.api!.remove(profile.id); await target.refresh(); })}><Icon name="x" extra="sm" /></button> : null}
+            {realProfile && target.id !== profile.id && !locked && state?.state !== "connected" ? <button className="icon-btn" aria-label={zh ? `编辑 ${profile.name}` : `Edit ${profile.name}`} onClick={() => edit(realProfile)}><Icon name="settings" extra="sm" /></button> : null}
+            {realProfile && target.id !== profile.id && !locked ? <button className="icon-btn" aria-label={zh ? `移除 ${profile.name}` : `Remove ${profile.name}`} onClick={() => void run(async () => { await target.api!.disconnect(profile.id); await target.api!.remove(profile.id); await target.refresh(); })}><Icon name="x" extra="sm" /></button> : null}
           </div>;
         })}
         <div className="menu-sep" />
-        <button className="execution-menu-row" role="menuitem" disabled={unavailable} onClick={() => edit()}><Icon name="plus" extra="sm" /><span>添加 SSH 连接</span></button>
+        <button className="execution-menu-row" role="menuitem" disabled={unavailable} onClick={() => edit()}><Icon name="plus" extra="sm" /><span>{zh ? "添加 SSH 连接" : "Add SSH connection"}</span></button>
         {!preview && target.id ? <>
-          <button className="execution-menu-row" role="menuitem" disabled={status?.state !== "connected" || installing} onClick={() => openDirectory(target.id!)}><Icon name="folder-open" extra="sm" /><span>选择远端目录</span></button>
-          <button className="execution-menu-row" role="menuitem" disabled={installing} onClick={() => { closeMenu(); void run(async () => { await target.api!.disconnect(target.id!); await target.refresh(); }); }}><Icon name="x" extra="sm" /><span>断开 SSH（不停止任务）</span></button>
-          <button className="execution-menu-row" role="menuitem" disabled={status?.state !== "connected" || installing} onClick={() => { closeMenu(); void run(async () => { const result = await target.api!.installRuntime(target.id!); if (result.installed) { await target.refresh(); await target.select(target.id); } }); }}><Icon name="arrow-d" extra="sm" /><span>导入签名 Runtime</span></button>
-          <button className="execution-menu-row" role="menuitem" disabled={status?.state !== "connected"} onClick={() => { closeMenu(); void run(() => target.api!.retryNetwork(target.id!)); }}><Icon name="refresh" extra="sm" /><span>重新检查远端网络</span></button>
-          <p className="execution-menu-help">{status?.networkMessage || "远端优先联网，连接失败时降级本机。"} 用户级模型配置自动从本机同步；文件、Git 和终端在远端执行。</p>
+          <button className="execution-menu-row" role="menuitem" disabled={status?.state !== "connected" || installing} onClick={() => openDirectory(target.id!)}><Icon name="folder-open" extra="sm" /><span>{zh ? "选择远端目录" : "Select remote directory"}</span></button>
+          <button className="execution-menu-row" role="menuitem" disabled={installing} onClick={() => { closeMenu(); void run(async () => { await target.api!.disconnect(target.id!); await target.refresh(); }); }}><Icon name="x" extra="sm" /><span>{zh ? "断开 SSH（不停止任务）" : "Disconnect SSH (keep tasks running)"}</span></button>
+          <button className="execution-menu-row" role="menuitem" disabled={status?.state !== "connected" || installing} onClick={() => { closeMenu(); void run(async () => { const result = await target.api!.installRuntime(target.id!); if (result.installed) { await target.refresh(); await target.select(target.id); } }); }}><Icon name="arrow-d" extra="sm" /><span>{zh ? "导入签名 Runtime" : "Import signed Runtime"}</span></button>
+          <button className="execution-menu-row" role="menuitem" disabled={status?.state !== "connected"} onClick={() => { closeMenu(); void run(() => target.api!.retryNetwork(target.id!)); }}><Icon name="refresh" extra="sm" /><span>{zh ? "重新检查远端网络" : "Recheck remote network"}</span></button>
+          <p className="execution-menu-help">{status?.networkMessage || (zh ? "远端优先联网，连接失败时降级本机。" : "Uses remote network first and falls back through this computer.")} {zh ? "用户级模型配置自动从本机同步；文件、Git 和终端在远端执行。" : "User-level model config syncs from this computer; files, Git, and terminals run remotely."}</p>
         </> : null}
-        {unavailable ? <p className="execution-menu-help">SSH 连接需要桌面客户端。</p> : null}
+        {unavailable ? <p className="execution-menu-help">{zh ? "SSH 连接需要桌面客户端。" : "SSH connections require the desktop app."}</p> : null}
       </div>
     </> : null}
     {displayError && !modalOpen ? <span className="execution-error" role="alert">{displayError}</span> : null}
     {modalOpen ? createPortal(<dialog role="dialog" ref={dialog} className="ssh-dialog" aria-labelledby="ssh-dialog-title" onCancel={event => { event.preventDefault(); closeModal(); }}>
-      <div className="ssh-dialog-head"><h2 id="ssh-dialog-title">{form ? editing ? "编辑 SSH 连接" : "添加 SSH 连接" : "选择远端项目目录"}</h2><button type="button" className="icon-btn" aria-label="关闭" disabled={busy} onClick={closeModal}><Icon name="x" /></button></div>
+      <div className="ssh-dialog-head"><h2 id="ssh-dialog-title">{form ? editing ? (zh ? "编辑 SSH 连接" : "Edit SSH connection") : (zh ? "添加 SSH 连接" : "Add SSH connection") : (zh ? "选择远端项目目录" : "Choose remote project directory")}</h2><button type="button" className="icon-btn" aria-label={zh ? "关闭" : "Close"} disabled={busy} onClick={closeModal}><Icon name="x" /></button></div>
       {form ? <form onSubmit={event => { event.preventDefault(); save(); }}>
-        <label>连接名称<input autoFocus value={name} onChange={event => setName(event.target.value)} placeholder="开发服务器" maxLength={80} disabled={busy} /></label>
-        <label>主机地址或 SSH 配置别名<input required value={host} onChange={event => setHost(event.target.value)} placeholder="dev-server 或 192.168.1.10" autoCapitalize="off" spellCheck={false} disabled={busy} /></label>
-        <label>用户名{authMode === "agent" ? "（可留空使用 SSH 配置）" : ""}<input value={user} onChange={event => setUser(event.target.value)} required={authMode === "password"} placeholder="用户名" autoComplete="username" autoCapitalize="off" spellCheck={false} disabled={busy} /></label>
-        <label>认证方式<AppSelect value={authMode} onChange={event => setAuthMode(event.target.value as "agent" | "password")} disabled={busy}><option value="agent">系统 SSH 配置 / 密钥 / agent</option><option value="password">用户名和密码</option></AppSelect></label>
-        <label>端口（留空使用 SSH 配置）<input type="number" min="1" max="65535" value={port} onChange={event => setPort(event.target.value)} placeholder="22" disabled={busy} /></label>
-        <p className="muted small">连接后自动识别 Windows、Linux 或 macOS，并准备私有 Node 和 Runtime。</p>
-        <details><summary>高级设置</summary>
-          <label>联网方式<AppSelect value={networkMode} onChange={event => setNetworkMode(event.target.value as RemoteNetworkMode)} disabled={busy}><option value="remote-first">远端优先，失败时通过本机</option><option value="remote-only">仅远端联网</option><option value="local-only">仅通过本机联网</option></AppSelect></label>
-          <label>远端安装目录（留空自动选择）<input value={installRoot} onChange={event => setInstallRoot(event.target.value)} placeholder="远端绝对路径" spellCheck={false} disabled={busy} /></label>
-          <label>本机上游代理（留空使用系统代理）<input value={localProxyUrl} onChange={event => setLocalProxyUrl(event.target.value)} placeholder="http://127.0.0.1:7890 或 socks5://…" spellCheck={false} disabled={busy} /></label>
+        <label>{zh ? "连接名称" : "Connection name"}<input autoFocus value={name} onChange={event => setName(event.target.value)} placeholder={zh ? "开发服务器" : "Dev server"} maxLength={80} disabled={busy} /></label>
+        <label>{zh ? "主机地址或 SSH 配置别名" : "Host address or SSH config alias"}<input required value={host} onChange={event => setHost(event.target.value)} placeholder={zh ? "dev-server 或 192.168.1.10" : "dev-server or 192.168.1.10"} autoCapitalize="off" spellCheck={false} disabled={busy} /></label>
+        <label>{zh ? "用户名" : "Username"}{authMode === "agent" ? (zh ? "（可留空使用 SSH 配置）" : " (optional, uses SSH config)") : ""}<input value={user} onChange={event => setUser(event.target.value)} required={authMode === "password"} placeholder={zh ? "用户名" : "Username"} autoComplete="username" autoCapitalize="off" spellCheck={false} disabled={busy} /></label>
+        <label>{zh ? "认证方式" : "Authentication"}<AppSelect value={authMode} onChange={event => setAuthMode(event.target.value as "agent" | "password")} disabled={busy}><option value="agent">{zh ? "系统 SSH 配置 / 密钥 / agent" : "System SSH config / keys / agent"}</option><option value="password">{zh ? "用户名和密码" : "Username and password"}</option></AppSelect></label>
+        <label>{zh ? "端口（留空使用 SSH 配置）" : "Port (leave empty for SSH config)"}<input type="number" min="1" max="65535" value={port} onChange={event => setPort(event.target.value)} placeholder="22" disabled={busy} /></label>
+        <p className="muted small">{zh ? "连接后自动识别 Windows、Linux 或 macOS，并准备私有 Node 和 Runtime。" : "Detects Windows, Linux, or macOS automatically after connecting and prepares private Node and Runtime."}</p>
+        <details><summary>{zh ? "高级设置" : "Advanced settings"}</summary>
+          <label>{zh ? "联网方式" : "Network mode"}<AppSelect value={networkMode} onChange={event => setNetworkMode(event.target.value as RemoteNetworkMode)} disabled={busy}><option value="remote-first">{zh ? "远端优先，失败时通过本机" : "Remote first, fall back to this computer"}</option><option value="remote-only">{zh ? "仅远端联网" : "Remote network only"}</option><option value="local-only">{zh ? "仅通过本机联网" : "Through this computer only"}</option></AppSelect></label>
+          <label>{zh ? "远端安装目录（留空自动选择）" : "Remote install directory (auto if empty)"}<input value={installRoot} onChange={event => setInstallRoot(event.target.value)} placeholder={zh ? "远端绝对路径" : "Remote absolute path"} spellCheck={false} disabled={busy} /></label>
+          <label>{zh ? "本机上游代理（留空使用系统代理）" : "Local upstream proxy (uses system proxy if empty)"}<input value={localProxyUrl} onChange={event => setLocalProxyUrl(event.target.value)} placeholder={zh ? "http://127.0.0.1:7890 或 socks5://…" : "http://127.0.0.1:7890 or socks5://..."} spellCheck={false} disabled={busy} /></label>
         </details>
-        <p className="muted small">{authMode === "password" ? "连接时会单独询问密码，只在本次连接期间保留，不保存到配置。账密模式仅支持直接密码认证，暂不支持跳板机、验证码或密码变更。" : "复用系统 SSH config、密钥和 ssh-agent。可直接填写 user@host，或单独填写用户名。"}</p>
-        <p className="muted small">首次主机信任仍需在系统 SSH 完成；安装位置与模型配置同步会在体检后由应用内弹窗确认。</p>
-        {preview && marks ? <p className="muted small">演示模式只修改界面，不连接服务器。</p> : null}
+        <p className="muted small">{authMode === "password" ? (zh ? "连接时会单独询问密码，只在本次连接期间保留，不保存到配置。账密模式仅支持直接密码认证，暂不支持跳板机、验证码或密码变更。" : "Asks for the password on connect and keeps it only for that connection without saving to disk. Password mode supports direct password auth only (no jump hosts, OTP, or password changes).") : (zh ? "复用系统 SSH config、密钥和 ssh-agent。可直接填写 user@host，或单独填写用户名。" : "Reuses your system SSH config, keys, and ssh-agent. You can enter user@host or specify username separately.")}</p>
+        <p className="muted small">{zh ? "首次主机信任仍需在系统 SSH 完成；安装位置与模型配置同步会在体检后由应用内弹窗确认。" : "First-time host trust must still be completed via system SSH; install path and model config sync are confirmed in-app after probing."}</p>
+        {preview && marks ? <p className="muted small">{zh ? "演示模式只修改界面，不连接服务器。" : "Preview mode updates UI state only and does not connect to any server."}</p> : null}
         {error ? <p role="alert" className="ssh-error">{error}</p> : null}
-        <div className="ssh-dialog-actions"><button type="button" className="btn outline" onClick={closeModal} disabled={busy}>取消</button><button className="btn primary" disabled={busy}>{busy ? "准备中…" : `连接并检查${preview && marks ? "（演示）" : ""}`}</button></div>
+        <div className="ssh-dialog-actions"><button type="button" className="btn outline" onClick={closeModal} disabled={busy}>{zh ? "取消" : "Cancel"}</button><button className="btn primary" disabled={busy}>{busy ? (zh ? "准备中…" : "Preparing…") : `${zh ? "连接并检查" : "Connect & inspect"}${preview && marks ? (zh ? "（演示）" : " (Preview)") : ""}`}</button></div>
       </form> : <form onSubmit={event => { event.preventDefault(); if (!directoryTarget) return; void run(async () => { await target.api!.register(directoryTarget, path); await target.select(directoryTarget); setDirectoryTarget(undefined); }); }}>
-        <p className="muted small">{target.inventory.profiles.find(value => value.id === directoryTarget)?.name} 上的目录，不会创建本机副本。</p>
-        <label>远端绝对路径<input autoFocus required value={path} onChange={event => setPath(event.target.value)} spellCheck={false} disabled={busy} /></label>
-        <div className="ssh-directory-actions"><button type="button" className="btn outline small" disabled={busy || !directories || directories.parent === directories.path} onClick={() => void run(() => browse(directoryTarget!, directories?.parent))}>上一级</button><button type="button" className="btn outline small" disabled={busy || !path} onClick={() => void run(() => browse(directoryTarget!, path))}>浏览路径</button></div>
-        <div className="ssh-directory-list" aria-label="远端子目录">{directories?.directories.map(directory => <button type="button" key={directory.path} disabled={busy} onClick={() => void run(() => browse(directoryTarget!, directory.path))}><Icon name="folder-open" extra="sm" />{directory.name}</button>)}{busy ? <p role="status">正在读取远端目录…</p> : directories?.directories.length === 0 ? <p className="muted small">没有子目录，可以直接选择当前目录。</p> : null}</div>
+        <p className="muted small">{zh ? `${target.inventory.profiles.find(value => value.id === directoryTarget)?.name} 上的目录，不会创建本机副本。` : `Directory on ${target.inventory.profiles.find(value => value.id === directoryTarget)?.name}; no local copy is created.`}</p>
+        <label>{zh ? "远端绝对路径" : "Remote absolute path"}<input autoFocus required value={path} onChange={event => setPath(event.target.value)} spellCheck={false} disabled={busy} /></label>
+        <div className="ssh-directory-actions"><button type="button" className="btn outline small" disabled={busy || !directories || directories.parent === directories.path} onClick={() => void run(() => browse(directoryTarget!, directories?.parent))}>{zh ? "上一级" : "Up"}</button><button type="button" className="btn outline small" disabled={busy || !path} onClick={() => void run(() => browse(directoryTarget!, path))}>{zh ? "浏览路径" : "Browse path"}</button></div>
+        <div className="ssh-directory-list" aria-label={zh ? "远端子目录" : "Remote subdirectories"}>{directories?.directories.map(directory => <button type="button" key={directory.path} disabled={busy} onClick={() => void run(() => browse(directoryTarget!, directory.path))}><Icon name="folder-open" extra="sm" />{directory.name}</button>)}{busy ? <p role="status">{zh ? "正在读取远端目录…" : "Loading remote directory…"}</p> : directories?.directories.length === 0 ? <p className="muted small">{zh ? "没有子目录，可以直接选择当前目录。" : "No subdirectories; you can select the current directory directly."}</p> : null}</div>
         {error ? <p role="alert" className="ssh-error">{error}</p> : null}
-        <div className="ssh-dialog-actions"><button type="button" className="btn outline" disabled={busy} onClick={closeModal}>取消</button><button className="btn primary" disabled={busy || !path}>{busy ? "准备中…" : "在此目录工作"}</button></div>
+        <div className="ssh-dialog-actions"><button type="button" className="btn outline" disabled={busy} onClick={closeModal}>{zh ? "取消" : "Cancel"}</button><button className="btn primary" disabled={busy || !path}>{busy ? (zh ? "准备中…" : "Preparing…") : (zh ? "在此目录工作" : "Work in this directory")}</button></div>
       </form>}
     </dialog>, document.body) : null}
     {preview && demoPasswordProfile ? <SshPasswordDialog demo profile={demoPasswordProfile} onCancel={() => setDemoPasswordProfile(undefined)} onSubmit={() => { setDemoPreparation(demoPasswordProfile); setDemoPasswordProfile(undefined); }} /> : null}

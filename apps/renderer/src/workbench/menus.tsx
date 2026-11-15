@@ -275,7 +275,8 @@ export function ThreadActionMenuItems({ live, busy, compacting, compactPending, 
   onExport: () => void;
   onHistory: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   return (
     <>
       <MenuItem
@@ -284,7 +285,7 @@ export function ThreadActionMenuItems({ live, busy, compacting, compactPending, 
         {...(live ? {} : { title: reason })}
         onClick={onRename}
       >{t("conversation.renameThread")}</MenuItem>
-      {onPin ? <MenuItem icon="pin" disabled={!live} onClick={onPin}>{pinned ? "取消置顶 / Unpin" : "置顶 / Pin"}</MenuItem> : null}
+      {onPin ? <MenuItem icon="pin" disabled={!live} onClick={onPin}>{pinned ? (zh ? "取消置顶 / Unpin" : "Unpin") : (zh ? "置顶 / Pin" : "Pin")}</MenuItem> : null}
       <MenuItem
         icon="fork"
         disabled={!live || busy}

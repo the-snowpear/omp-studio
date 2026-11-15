@@ -16,6 +16,7 @@ import { NetworkStreams } from "./network-stream.js";
 import type { RemoteNetworkMode } from "./shared.js";
 import type { RemoteProvisioning } from "./provisioning.js";
 import type { MemoryCredentialEntry } from "../memory-credentials.js";
+import { desktopText, parseDesktopLanguagePayload, setDesktopLanguage } from "../desktop-language-shared.js";
 
 export interface RemoteHello {
   readonly protocolVersion: number;
@@ -61,7 +62,7 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
     }).catch(() => { idleSince = Date.now(); }).finally(() => { checkingIdle = false; });
   }, 60_000);
   idleTimer.unref();
-  const hello: RemoteHello = { protocolVersion: REMOTE_PROTOCOL_VERSION, platform: remotePlatform(process.platform), arch: process.arch, bundleVersion, instanceId: name, capabilities: [...(host.replaceMemoryCredentials ? ["memory.credentials"] : []), ...(host.composition.transport.openContext ? ["session.contexts"] : []), ...(host.updateTimeTravelSettings ? ["timeTravel.settings"] : [])] };
+  const hello: RemoteHello = { protocolVersion: REMOTE_PROTOCOL_VERSION, platform: remotePlatform(process.platform), arch: process.arch, bundleVersion, instanceId: name, capabilities: ["desktop.language", ...(host.replaceMemoryCredentials ? ["memory.credentials"] : []), ...(host.composition.transport.openContext ? ["session.contexts"] : []), ...(host.updateTimeTravelSettings ? ["timeTravel.settings"] : [])] };
   const server = createServer(socket => {
     const peer = new RemotePeer(socket, socket);
     peers.add(peer);
@@ -93,16 +94,16 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
         networkChannel = Boolean(input && typeof input === "object" && "networkChannel" in input && input.networkChannel);
         if (attachment && (typeof attachment.key !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(attachment.key) || !Number.isSafeInteger(attachment.sequence) || attachment.sequence < 1)) throw new RemoteConnectionError("protocol", "Invalid remote attachment identity");
         if (networkChannel) {
-          if (!host.network || !attached || !attachment || attachment.key !== lastAttachment?.key || attachment.sequence !== lastAttachment.sequence) throw new RemoteConnectionError("replaced", "联网通道必须属于当前 SSH 连接");
+          if (!host.network || !attached || !attachment || attachment.key !== lastAttachment?.key || attachment.sequence !== lastAttachment.sequence) throw new RemoteConnectionError("replaced", desktopText("联网通道必须属于当前 SSH 连接", "Network channel must belong to the current SSH connection"));
           const streams = new NetworkStreams(peer);
           host.network.attach(streams);
           host.network.report = route => peer.publish({ channel: "network-route", route });
         } else if (!observer) {
           const sameOwner = attachment && lastAttachment && attachment.key === lastAttachment.key;
-          if (sameOwner && attachment && lastAttachment && attachment.sequence <= lastAttachment.sequence) throw new RemoteConnectionError("replaced", "这条 SSH 通道已被更新的连接取代");
+          if (sameOwner && attachment && lastAttachment && attachment.sequence <= lastAttachment.sequence) throw new RemoteConnectionError("replaced", desktopText("这条 SSH 通道已被更新的连接取代", "This SSH channel was replaced by a newer connection"));
           // Only a newer channel holding this desktop's attachment key may replace its orphaned attach.
-          if (attached && !sameOwner) throw new RemoteConnectionError("host-busy", "远端 Host 已被其他桌面连接占用；不会强制断开对方");
-          attached?.close(new RemoteConnectionError("replaced", "这条 SSH 通道已被更新的连接取代"));
+          if (attached && !sameOwner) throw new RemoteConnectionError("host-busy", desktopText("远端 Host 已被其他桌面连接占用；不会强制断开对方", "Remote Host is already in use by another desktop connection and will not be forcibly disconnected"));
+          attached?.close(new RemoteConnectionError("replaced", desktopText("这条 SSH 通道已被更新的连接取代", "This SSH channel was replaced by a newer connection")));
           attached = peer;
           lastAttachment = attachment;
         }
@@ -118,6 +119,13 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
       const transport = bound?.transport ?? host.composition.transport;
       const payload = contextId && input && typeof input === "object" && "input" in input ? input.input : input;
       switch (method) {
+        case "desktop.language.set": {
+          if (peer !== attached) throw new Error("Only the attached desktop can change language");
+          const locale = parseDesktopLanguagePayload(input);
+          if (locale === undefined) throw new Error("Invalid desktop language");
+          setDesktopLanguage(locale);
+          return { applied: true };
+        }
         case "context.open": {
           if (!host.composition.transport.openContext) throw new Error("Concurrent conversations are unavailable");
           const transport = await host.composition.transport.openContext(input as ClientContextScope);
@@ -221,7 +229,7 @@ export async function serveRemoteHost(host: RemoteHost, stateDirectory: string, 
 export async function connectRemoteEndpoint(stateDirectory: string, observe = false, attachment?: RemoteAttachment, networkChannel = false): Promise<RemotePeer> {
   let data: EndpointFile;
   try { data = JSON.parse(await readFile(join(stateDirectory, ENDPOINT_FILE), "utf8")) as EndpointFile; }
-  catch (error) { if (!observe && (error as NodeJS.ErrnoException).code === "ENOENT") throw new RemoteConnectionError("host-unavailable", "远端 Host 已停止或端点不存在；请手动重新连接，自动恢复不会重启任务"); throw error; }
+  catch (error) { if (!observe && (error as NodeJS.ErrnoException).code === "ENOENT") throw new RemoteConnectionError("host-unavailable", desktopText("远端 Host 已停止或端点不存在；请手动重新连接，自动恢复不会重启任务", "Remote Host has stopped or its endpoint is missing; please reconnect manually (auto-recovery will not restart tasks)")); throw error; }
   if (typeof data.endpoint !== "string" || typeof data.token !== "string") throw new Error("Invalid remote Host endpoint file");
   const socket = await new Promise<Socket>((resolve, reject) => {
     const connection = connect(data.endpoint);
@@ -229,7 +237,7 @@ export async function connectRemoteEndpoint(stateDirectory: string, observe = fa
     connection.once("connect", () => { clearTimeout(timer); resolve(connection); });
     connection.once("error", error => {
       clearTimeout(timer);
-      reject(!observe && ["ENOENT", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException).code ?? "") ? new RemoteConnectionError("host-unavailable", "远端 Host 已停止；请手动重新连接，自动恢复不会重启任务") : error);
+      reject(!observe && ["ENOENT", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException).code ?? "") ? new RemoteConnectionError("host-unavailable", desktopText("远端 Host 已停止；请手动重新连接，自动恢复不会重启任务", "Remote Host has stopped; please reconnect manually (auto-recovery will not restart tasks)")) : error);
     });
   });
   const peer = new RemotePeer(socket, socket);

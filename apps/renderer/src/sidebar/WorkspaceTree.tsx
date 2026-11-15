@@ -1,4 +1,6 @@
+import { flattenTree, treeNavigationIndex, treeTypeahead } from "./treeKeyboard";
 import { useOpenFile } from "../files/fileLinks";
+import { useOpenFileBrowser, useExplorerReveal } from "../fileBrowser/fileBrowserLinks";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
@@ -10,7 +12,7 @@ import { useI18n } from "../i18n";
 import { hostErrorMessage } from "../hostError";
 import { explorerRowActivity, EMPTY_EXPLORER_FILE_ACTIVITY, type ExplorerFileActivity } from "../conversation/explorerFileActivity";
 import { readExplorerExpansion, writeExplorerExpansion } from "./expandMemory";
-import { GIT_STATUS_META, type TreeGitStatus } from "../git/treeStatus";
+import { GIT_STATUS_META, gitStatusLabel, type TreeGitStatus } from "../git/treeStatus";
 
 export type WorkspaceCreationKind = "file" | "directory";
 
@@ -51,14 +53,7 @@ function flattenVisibleWorkspaceNodes(
   expanded: ReadonlySet<string>,
   parentPath?: string,
 ): ReadonlyArray<VisibleWorkspaceNode> {
-  const visible: VisibleWorkspaceNode[] = [];
-  for (const node of nodes) {
-    visible.push({ node, ...(parentPath ? { parentPath } : {}) });
-    if (node.type === "dir" && expanded.has(node.path) && node.children) {
-      visible.push(...flattenVisibleWorkspaceNodes(node.children, expanded, node.path));
-    }
-  }
-  return visible;
+  return flattenTree(nodes, node => node.children, path => expanded.has(path), parentPath);
 }
 
 function expandedWorkspacePathsForSearch(nodes: ReadonlyArray<WorkspaceFileNode>, expanded: ReadonlySet<string>, search: string): Set<string> {
@@ -78,12 +73,13 @@ function expandedWorkspacePathsForSearch(nodes: ReadonlyArray<WorkspaceFileNode>
 
 /** Explorer 行内 git 状态徽章：行尾彩色字母 + 文件名着色双通道，目录显示聚合后的后代状态。 */
 function GitTreeBadge({ status }: { status?: TreeGitStatus | undefined }) {
+  const { resolvedLanguage } = useI18n();
   if (status === undefined) return null;
   const meta = GIT_STATUS_META[status];
   return (
     <span className={`fstat ${meta.className}`}>
       <span aria-hidden="true">{meta.letter}</span>
-      <span className="sr-only"> {meta.label}</span>
+      <span className="sr-only"> {gitStatusLabel(status, resolvedLanguage === "zh")}</span>
     </span>
   );
 }
@@ -324,6 +320,12 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
 }) {
   const openInViewer = useOpenFile();
   const executionTarget = useExecutionTarget();
+  const openBrowser = useOpenFileBrowser();
+  const reveal = useExplorerReveal(executionTarget.id, String(workspaceId));
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const [model, setModel] = useState<WorkspaceFileTreeReadModel | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
@@ -356,7 +358,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
     } catch (error) {
       if (generation !== generationRef.current) return;
       setModel(null);
-      setMessage(hostErrorMessage(error, "文件树加载失败"));
+      setMessage(hostErrorMessage(error, zhRef.current ? "文件树加载失败" : "Failed to load file tree"));
     } finally {
       if (generation === generationRef.current) setLoading(false);
     }
@@ -388,7 +390,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
         next.delete(path);
         expandedRef.current = next;
         setExpanded(next);
-        setMessage(hostErrorMessage(error, `无法展开 ${path}`));
+        setMessage(hostErrorMessage(error, zhRef.current ? `无法展开 ${path}` : `Failed to expand ${path}`));
       }
     } finally {
       loadingPathsRef.current.delete(path);
@@ -454,6 +456,22 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
     setActivePath(path);
     nodeRefs.current.get(path)?.focus();
   }, []);
+  const revealed = useRef<typeof reveal>(undefined);
+  useEffect(() => {
+    if (!reveal || !model || revealed.current === reveal) return;
+    if (!reveal.path) { revealed.current = reveal; setActivePath(null); onSelectionChange?.(undefined); return; }
+    const parts = reveal.path.split("/"), parents = parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join("/"));
+    const node = findWorkspaceNode(model.nodes, reveal.path);
+    const next = new Set(expandedRef.current);
+    for (const path of parents) next.add(path);
+    if (next.size !== expandedRef.current.size) { expandedRef.current = next; setExpanded(next); }
+    const missing = parents.find(path => findWorkspaceNode(model.nodes, path)?.children === undefined);
+    if (missing) { void loadDirectory(missing); return; }
+    if (!node || !nodeRefs.current.has(reveal.path)) return;
+    revealed.current = reveal;
+    focusNode(reveal.path); onSelectionChange?.(node);
+    nodeRefs.current.get(reveal.path)?.scrollIntoView?.({ block: "nearest" });
+  }, [reveal, model, visibleItems, loadDirectory, focusNode, onSelectionChange]);
   const openFile = useCallback((path: string) => {
     setActivePath(path);
     openInViewer({ workspaceId: String(workspaceId), path });
@@ -476,26 +494,8 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
       const item = visibleItems[nextIndex];
       if (item) focusNode(item.node.path);
     };
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      focusAt(Math.min(visibleItems.length - 1, index + 1));
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      focusAt(Math.max(0, index - 1));
-      return;
-    }
-    if (event.key === "Home") {
-      event.preventDefault();
-      focusAt(0);
-      return;
-    }
-    if (event.key === "End") {
-      event.preventDefault();
-      focusAt(visibleItems.length - 1);
-      return;
-    }
+    const destination = treeNavigationIndex(event.key, index, visibleItems.length);
+    if (destination !== undefined) { event.preventDefault(); focusAt(destination); return; }
     if (event.key === "ArrowRight" && node.type === "dir") {
       event.preventDefault();
       if (!displayExpanded.has(node.path)) toggle(node.path);
@@ -517,13 +517,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
     if (event.key.length !== 1 || event.ctrlKey || event.altKey || event.metaKey) return;
     const typed = event.key.toLocaleLowerCase();
     const previous = typeaheadRef.current.value;
-    const findMatch = (needle: string): VisibleWorkspaceNode | undefined => {
-      for (let offset = 1; offset <= visibleItems.length; offset += 1) {
-        const candidate = visibleItems[(index + offset) % visibleItems.length];
-        if (candidate?.node.name.toLocaleLowerCase().startsWith(needle)) return candidate;
-      }
-      return undefined;
-    };
+    const findMatch = (needle: string) => treeTypeahead(visibleItems, index, needle, item => item.node.name);
     let value = `${previous}${typed}`;
     let match = findMatch(value);
     if (!match && previous) {
@@ -566,6 +560,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
     setFileMenuOpenId(path);
   }, []);
   const handleMenuAction = useCallback((action: FileMenuAction, target: FileMenuTarget) => {
+    if (action.type === "browse") { openBrowser({ workspaceId: String(workspaceId), path: target.path, targetId: executionTarget.id }); return; }
     if (action.type === "addContext") {
       onAddContext?.(target.path, target.kind);
       return;
@@ -577,7 +572,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
     }
     if (action.type === "open") { openFile(target.path); return; }
     onFileAction?.(action, target);
-  }, [onAddContext, onFileAction, toggle, openFile]);
+  }, [onAddContext, onFileAction, toggle, openFile, openBrowser, workspaceId, executionTarget.id]);
   const fileMenu = useMemo<TreeFileMenu>(() => ({
     openId: fileMenuOpenId,
     point: fileMenuPoint,

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { parse, stringify } from "yaml";
+import { desktopText } from "../desktop-language-shared.js";
 
 export interface RemoteProvisioning {
   modelsYml: string;
@@ -12,7 +13,7 @@ export const MIRRORED_MODEL_SETTINGS = ["model", "modelRoles", "disabledProvider
 export async function applyRemoteProvisioning(state: string, brokerUrl: string, input: RemoteProvisioning): Promise<void> {
   const directory = join(state, "agent"); await mkdir(directory, { recursive: true, mode: 0o700 });
   const models = parse(input.modelsYml || "providers: {}\n");
-  if (!models || typeof models !== "object" || Array.isArray(models)) throw new Error("模型配置必须为 YAML 对象");
+  if (!models || typeof models !== "object" || Array.isArray(models)) throw new Error(desktopText("模型配置必须为 YAML 对象", "Model configuration must be a YAML object"));
   const path = join(directory, "config.yml");
   const config = parse(await readFile(path, "utf8").catch(error => { if (error.code === "ENOENT") return "{}"; throw error; })) as Record<string, unknown> ?? {};
   for (const key of MIRRORED_MODEL_SETTINGS) {

@@ -34,7 +34,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
   { visible, workspaceId, sessionId, conversationId },
   ref,
 ) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const api = globalThis.ompStudioTerminal;
   const executionTarget = useExecutionTarget();
   const { preview } = usePreviewMode();
@@ -107,7 +108,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
               <span className="ti-badge gray">
                 YOU<span className="sr-only"> {t("terminal.userCreated")}</span>
               </span>
-              <button className="icon-btn small" type="button" aria-label={`关闭终端 ${session.name}`} onClick={event => { event.stopPropagation(); void store.remove(session.id).catch(cause => setError(String(cause))); }}><Icon name="x" extra="sm" /></button>
+              <button className="icon-btn small" type="button" aria-label={zh ? `关闭终端 ${session.name}` : `Close terminal ${session.name}`} onClick={event => { event.stopPropagation(); void store.remove(session.id).catch(cause => setError(String(cause))); }}><Icon name="x" extra="sm" /></button>
             </div>
           );
         })}
@@ -134,14 +135,14 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
                 </span>
               )}
             </div>
-            {executionTarget.id ? <p className="muted small">SSH 终端暂不支持本机录制；关闭标签会结束该终端。</p> : <TerminalRecordingControls key={active.id} api={api!} id={active.id} visible={visible} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />}
+            {executionTarget.id ? <p className="muted small">{zh ? "SSH 终端暂不支持本机录制；关闭标签会结束该终端。" : "Local recording is not supported on SSH terminals; closing this tab ends the session."}</p> : <TerminalRecordingControls key={active.id} api={api!} id={active.id} visible={visible} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />}
             {error ? <p role="alert" className="muted small">{error}</p> : null}
             {notices[active.id] ? <p role="status" className="muted small">{notices[active.id]}</p> : null}
             {controlMode[active.id] ? <div role="status" className="muted small">
               <p>{t("terminal.tmux.controlNotice")}</p>
               <button type="button" className="btn" onClick={() => void api!.write(active.id, "\n").catch(cause => setError(String(cause)))}>{t("terminal.tmux.exitControl")}</button>
             </div> : null}
-            {(graphics[active.id]?.length || graphicsErrors[active.id]) ? <div style={{ maxHeight: 240, overflow: "auto" }} aria-label="Terminal images / 终端图片">
+            {(graphics[active.id]?.length || graphicsErrors[active.id]) ? <div style={{ maxHeight: 240, overflow: "auto" }} aria-label={zh ? "终端图片" : "Terminal images"}>
               {graphics[active.id]?.map((image, index) => <TerminalGraphicView key={index} image={image} />)}
               {graphicsErrors[active.id] ? <p role="status">{graphicsErrors[active.id]}</p> : null}
             </div> : null}

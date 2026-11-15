@@ -90,14 +90,14 @@ test("the password never appears in the SSH child environment or argv", { skip }
 test("a closed authentication refuses further tickets instead of replaying the password", { skip }, async () => {
   const auth = await createPasswordAuthentication(passwordProfile, "test-password", helperDirectory, controller.signal);
   await auth.close();
-  assert.throws(() => auth.request(), /SSH 密码已清除/);
+  assert.throws(() => auth.request(), /SSH password cleared/);
 });
 
 test("empty, multiline and oversized passwords are rejected before any helper runs", { skip }, async () => {
   for (const password of ["", "line\nbreak", "nul\0byte"]) {
-    await assert.rejects(createPasswordAuthentication(passwordProfile, password, helperDirectory, controller.signal), /请输入有效的 SSH 密码/);
+    await assert.rejects(createPasswordAuthentication(passwordProfile, password, helperDirectory, controller.signal), /valid SSH password/);
   }
-  await assert.rejects(createPasswordAuthentication(passwordProfile, "x".repeat(4097), helperDirectory, controller.signal), /4096 个 UTF-8 字节/);
+  await assert.rejects(createPasswordAuthentication(passwordProfile, "x".repeat(4097), helperDirectory, controller.signal), /4096 UTF-8 bytes/);
 });
 
 test("password mode refuses jump-host connections instead of forwarding the password", { skip }, async () => {
@@ -107,19 +107,19 @@ test("password mode refuses jump-host connections instead of forwarding the pass
 test("the jump-host refusal names the unsupported feature", { skip }, async () => {
   await assert.rejects(
     createPasswordAuthentication({ ...passwordProfile, proxyJump: "jump.invalid" }, "test-password", helperDirectory, controller.signal),
-    /账密模式暂不支持跳板机/,
+    /Jump hosts are not supported in password mode/,
   );
 });
 
 test("a missing helper reports an actionable error rather than failing at authentication time", { skip }, async () => {
   const empty = await mkdtemp(join(tmpdir(), "omp-askpass-missing-"));
   try {
-    await assert.rejects(createPasswordAuthentication(passwordProfile, "test-password", empty, controller.signal), /账密认证组件未安装/);
+    await assert.rejects(createPasswordAuthentication(passwordProfile, "test-password", empty, controller.signal), /password authentication helper is not installed/);
   } finally { await rm(empty, { recursive: true, force: true }); }
 });
 
 test("agent connections request no askpass environment, password connections require credentials", () => {
   assert.equal(sshAuthenticationRequest({ host: "build", authMode: "agent" }), undefined);
   assert.equal(sshAuthenticationRequest({ host: "build" }), undefined);
-  assert.throws(() => sshAuthenticationRequest({ host: "build", authMode: "password" }), /此连接需要密码/);
+  assert.throws(() => sshAuthenticationRequest({ host: "build", authMode: "password" }), /requires a password/);
 });

@@ -1,7 +1,7 @@
-import type { WorkspaceFileInfo } from "@omp-studio/client-contract";
+import type { SystemFileInfo } from "@omp-studio/client-contract";
 
-export interface FileResourceTarget { targetId: string | null; workspaceId: string; path: string }
-export interface FileResource { id: string; url: string; file: WorkspaceFileInfo }
+export interface FileResourceTarget { targetId: string | null; workspaceId: string; path: string; source?: "system" }
+export interface FileResource { id: string; url: string; file: SystemFileInfo }
 export interface OfficeComponentState {
   id: "office-preview";
   status: "not-installed" | "ready" | "checking" | "downloading" | "installing" | "error";

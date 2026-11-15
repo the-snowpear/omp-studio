@@ -1,5 +1,7 @@
 /** Align Studio user-bubble Restore with OMP `/tree` on a user node. */
 
+import { isZh } from "../i18n";
+
 export type UserMessageTreeConfirmKind = "restore" | "branch";
 
 export type UserMessageTreeConfirmCopy = {
@@ -20,6 +22,15 @@ export const USER_MESSAGE_RESTORE_CONFIRM_COPY: UserMessageTreeConfirmCopy = {
   action: "恢复",
 };
 
+export const USER_MESSAGE_RESTORE_CONFIRM_COPY_EN: UserMessageTreeConfirmCopy = {
+  kicker: "CONVERSATION",
+  title: "Confirm restore",
+  body: "Rollback the conversation to before this message; its contents will be placed back in the composer.",
+  hint: "Later turns will leave the current branch, though you can still recover them from the session tree.",
+  hintPreview: "Demo: updates only the conversation in this view without calling Host.",
+  action: "Restore",
+};
+
 export const USER_MESSAGE_BRANCH_CONFIRM_COPY: UserMessageTreeConfirmCopy = {
   kicker: "CONVERSATION",
   title: "确认新建会话",
@@ -29,8 +40,18 @@ export const USER_MESSAGE_BRANCH_CONFIRM_COPY: UserMessageTreeConfirmCopy = {
   action: "新建会话",
 };
 
-export function userMessageTreeConfirmCopy(kind: UserMessageTreeConfirmKind): UserMessageTreeConfirmCopy {
-  return kind === "restore" ? USER_MESSAGE_RESTORE_CONFIRM_COPY : USER_MESSAGE_BRANCH_CONFIRM_COPY;
+export const USER_MESSAGE_BRANCH_CONFIRM_COPY_EN: UserMessageTreeConfirmCopy = {
+  kicker: "CONVERSATION",
+  title: "Confirm new branched session",
+  body: "Create and switch to a new session from this message; its text (and images) will be placed back in the composer.",
+  hint: "The original session file is preserved and will not be overwritten or deleted.",
+  hintPreview: "Demo: updates only the conversation in this view without calling Host.",
+  action: "New session",
+};
+
+export function userMessageTreeConfirmCopy(kind: UserMessageTreeConfirmKind, zh = isZh()): UserMessageTreeConfirmCopy {
+  if (kind === "restore") return zh ? USER_MESSAGE_RESTORE_CONFIRM_COPY : USER_MESSAGE_RESTORE_CONFIRM_COPY_EN;
+  return zh ? USER_MESSAGE_BRANCH_CONFIRM_COPY : USER_MESSAGE_BRANCH_CONFIRM_COPY_EN;
 }
 
 export type UserMessageRestoreDisableInput = {
@@ -52,14 +73,14 @@ export type UserMessageEditorFill = {
   }>;
 };
 
-export function userMessageRestoreDisabledReason(input: UserMessageRestoreDisableInput): string | undefined {
-  if (input.sessionCreating) return "创建中";
-  if (input.resyncRequired) return "同步中";
-  if (input.running) return "进行中";
-  if (input.compacting) return "压缩中";
+export function userMessageRestoreDisabledReason(input: UserMessageRestoreDisableInput, zh = isZh()): string | undefined {
+  if (input.sessionCreating) return zh ? "创建中" : "Creating";
+  if (input.resyncRequired) return zh ? "同步中" : "Syncing";
+  if (input.running) return zh ? "进行中" : "In progress";
+  if (input.compacting) return zh ? "压缩中" : "Compacting";
   if (input.preview) return undefined;
-  if (input.gated) return "无法操作";
-  if (!input.canNavigateTree) return "当前 Runtime 不支持会话树操作";
+  if (input.gated) return zh ? "无法操作" : "Unavailable";
+  if (!input.canNavigateTree) return zh ? "当前 Runtime 不支持会话树操作" : "Current Runtime does not support session tree actions";
   return undefined;
 }
 

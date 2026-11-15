@@ -2,6 +2,7 @@ import type { AskImage } from "@omp-studio/studio-protocol";
 import type { ComposerDoc } from "../composer/types";
 import { serializeChip } from "../composer/serialize";
 import type { ClientInteraction } from "@omp-studio/client-contract";
+import { isZh } from "../i18n";
 import { NO_ASK_ANSWER, type DeckAskAnswer, type DeckAskOption, type DeckAskQuestion } from "./types";
 
 const RECOMMENDED_SUFFIX = " (Recommended)";
@@ -80,7 +81,7 @@ export type SelectAskView = {
 };
 
 /** Map a Host `select` interaction onto the preview Ask card model. */
-export function selectToAskView(interaction: Extract<ClientInteraction, { kind: "select" }>): SelectAskView {
+export function selectToAskView(interaction: Extract<ClientInteraction, { kind: "select" }>, zh = isZh()): SelectAskView {
   const idByLabel: Record<string, string> = {};
   const options: DeckAskOption[] = [];
   let recommended: number | undefined;
@@ -98,7 +99,7 @@ export function selectToAskView(interaction: Extract<ClientInteraction, { kind: 
   return {
     question: {
       id: interaction.interactionId,
-      question: interaction.title || "选择",
+      question: interaction.title || (zh ? "选择" : "Select"),
       customExclusive: true,
       options,
       ...(interaction.multiple ? { multi: true } : {}),

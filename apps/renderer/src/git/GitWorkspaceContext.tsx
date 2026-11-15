@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import type { CommandRequestId, GitFileChange, GitFileState, GitHubOperation, GitOperation, GitOperationResult, GitRepositoryReadModel, StudioClient, WorkspaceId } from "@omp-studio/client-contract";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { PREVIEW_GIT } from "../preview/fixtures";
 import { useTargetMemory } from "../workspaces/ExecutionTargets";
@@ -37,7 +38,7 @@ export function useGitWorkspace() {
 
 function previewRepository(): GitRepositoryReadModel {
   const change = (row: { path: string; status: string }, staged: boolean): GitFileChange => {
-    const state: GitFileState = row.status === "新增" ? "added" : row.status === "未跟踪" ? "untracked" : "modified";
+    const state: GitFileState = row.status === "新增" || row.status === "added" || row.status === "Added" ? "added" : row.status === "未跟踪" || row.status === "untracked" || row.status === "Untracked" ? "untracked" : "modified";
     return { path: row.path, index: staged ? state : "unmodified", worktree: staged ? "unmodified" : state, conflicted: false };
   };
   return { workspaceId: "preview-git" as WorkspaceId, isRepository: true, branch: PREVIEW_GIT.branch, detached: false, unborn: false, ahead: PREVIEW_GIT.ahead, behind: PREVIEW_GIT.behind, stashCount: 0, insertions: 6, deletions: 3,
@@ -62,6 +63,10 @@ function previewOperation(repository: GitRepositoryReadModel, operation: GitOper
 
 /** Shared by the quick card and full Git view for one execution target/workspace. */
 export function GitWorkspaceProvider({ client, workspaceId, children }: { client: StudioClient; workspaceId?: WorkspaceId | undefined; children: ReactNode }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const { preview, marks } = usePreviewMode();
   const repositoryHook = useGitRepository(client, preview ? undefined : workspaceId);
   const [demoRepository, setDemoRepository] = useState(previewRepository);
@@ -86,7 +91,7 @@ export function GitWorkspaceProvider({ client, workspaceId, children }: { client
     try {
       if (preview) {
         setDemoRepository(current => previewOperation(current, operation));
-        if (marks) setNotice("演示操作已完成");
+        if (marks) setNotice(zhRef.current ? "演示操作已完成" : "Demo action completed");
       } else {
         const handle = await client.command("git.execute", { ...(workspaceId ? { workspaceId } : {}), operation });
         if (!alive.current) return false;
@@ -97,7 +102,7 @@ export function GitWorkspaceProvider({ client, workspaceId, children }: { client
       }
       await update(operation.kind === "fetch" || operation.kind === "pull" || operation.kind === "push");
       return true;
-    } catch (cause) { if (alive.current) setNotice(hostErrorMessage(cause, "Git operation failed")); return false; }
+    } catch (cause) { if (alive.current) setNotice(hostErrorMessage(cause, zhRef.current ? "Git 操作失败" : "Git operation failed")); return false; }
     finally { if (alive.current) { setActiveRequest(undefined); setBusy(false); } lock.current = false; }
   }, [client, workspaceId, preview, marks, update]);
 
@@ -111,10 +116,10 @@ export function GitWorkspaceProvider({ client, workspaceId, children }: { client
         setActiveRequest({ domain: "github", requestId: handle.requestId });
         await waitReceipt(client, handle.requestId, 16 * 60_000);
         if (!alive.current) return;
-        setNotice(`${operation.kind} completed`);
-      } else if (marks) setNotice("演示操作已完成");
+        setNotice(zhRef.current ? `${operation.kind} 已完成` : `${operation.kind} completed`);
+      } else if (marks) setNotice(zhRef.current ? "演示操作已完成" : "Demo action completed");
       await refresh();
-    } catch (cause) { if (alive.current) setNotice(hostErrorMessage(cause, "GitHub operation failed")); }
+    } catch (cause) { if (alive.current) setNotice(hostErrorMessage(cause, zhRef.current ? "GitHub 操作失败" : "GitHub operation failed")); }
     finally { if (alive.current) { setActiveRequest(undefined); setBusy(false); } lock.current = false; }
   }, [client, workspaceId, preview, marks, refresh]);
   const cancel = useCallback(async () => {
@@ -122,7 +127,7 @@ export function GitWorkspaceProvider({ client, workspaceId, children }: { client
     try {
       const handle = await client.command(activeRequest.domain === "git" ? "git.execute" : "github.execute", { operation: { kind: "cancel", requestId: activeRequest.requestId } });
       await waitReceipt(client, handle.requestId, 30_000);
-      if (alive.current) setNotice("Cancellation requested");
+      if (alive.current) setNotice(zhRef.current ? "已请求取消" : "Cancellation requested");
     } catch (cause) { if (alive.current) setNotice(hostErrorMessage(cause, "Cancellation failed")); }
   }, [client, activeRequest]);
   return <Context.Provider value={{ repository: preview ? demoRepository : repositoryHook.repository, loading: preview ? false : repositoryHook.loading, error: preview ? undefined : repositoryHook.error,

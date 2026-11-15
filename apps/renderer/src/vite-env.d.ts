@@ -96,6 +96,7 @@ declare global {
         reportPerformanceSample?(sample: import("@omp-studio/studio-protocol").MemorySample): Promise<boolean>;
         setConversationViewState?(state: { runtimeEpoch: number; visibleSessionIds: readonly string[]; blockedSessionIds?: readonly string[] }): Promise<boolean>;
         setTheme(theme: "light" | "dark", tint?: { color: string; symbolColor: string }): Promise<void>;
+        setLanguage?(locale: "zh" | "en"): Promise<void>;
         /** Fixed by the preload; read it through `src/platform.ts`. Absent on older installs. */
         readonly platform?: "win32" | "darwin" | "linux";
         /** macOS menu bar commands (allowlisted ids from Main). */
@@ -156,6 +157,9 @@ declare global {
         >;
         /** 用系统默认关联程序打开工作区文件（Main 解析绝对路径并校验）。 */
         openFile(input: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult>;
+        systemFileOpen(input: { readonly path: string }): Promise<WorkspaceFileActionResult>;
+        systemFileOpenWith(input: { readonly path: string; readonly openerId: "vscode" | "cursor" | "windsurf" | "choose" }): Promise<WorkspaceFileActionResult>;
+        systemFileReveal(input: { readonly path: string }): Promise<WorkspaceFileActionResult>;
         /** 用所选编辑器 / 系统「打开方式」打开文件或目录。 */
         openFileWith(
           input: WorkspaceFileTargetInput & { readonly openerId: "vscode" | "cursor" | "windsurf" | "choose" },

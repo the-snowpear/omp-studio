@@ -7,8 +7,10 @@ import type { FilePanelDescriptor, FilePanelId, PanelDefinition } from "../dock/
 import { useConversationView } from "../conversationWorkspace/Context";
 import { useExecutionTargets } from "../workspaces/ExecutionTargets";
 import { usePreviewMode } from "../preview/PreviewContext";
+import { useI18n } from "../i18n";
 import { previewFile } from "../preview/filesPreview";
 import { getFileDocument, releaseFileDocument, type FileDocument, type FileDocumentIdentity } from "./fileDocuments";
+import { inspectFileBackend } from "./fileBackend";
 import { readFileScope } from "./filePreferences";
 import { registerFileOpener, type FileOpenIntent } from "./fileLinks";
 import { requestFileClose } from "./FileCloseDialog";
@@ -21,7 +23,7 @@ const catalogs = new Set<Catalog>();
 const closingFiles = new Set<FilePanelId>();
 
 export function FileDockInstances({ workspaceId, targetId, onSettings, actions }: { workspaceId?: string | undefined; targetId: string | null; onSettings: () => void; actions?: FileViewerActions | undefined }) {
-  const { preview } = usePreviewMode(), view = useConversationView(), targets = useExecutionTargets();
+  const { preview } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh", view = useConversationView(), targets = useExecutionTargets();
   const { store, setFileViewDefinitions } = useDockEngine();
   const fileViewCache = useRef<{ key: string; value: Record<string, FilePanelDescriptor> } | undefined>(undefined);
   const fileViews = useSyncExternalStore(store.subscribe, useCallback(() => {
@@ -38,10 +40,11 @@ export function FileDockInstances({ workspaceId, targetId, onSettings, actions }
   const descriptors = Object.entries(fileViews) as [FilePanelId, FilePanelDescriptor][];
 
   const sessionFor = (descriptor: FilePanelDescriptor) => {
-    const key = JSON.stringify([descriptor.targetId, descriptor.workspaceId, descriptor.fileId]);
+    const key = JSON.stringify([descriptor.targetId, descriptor.workspaceId, descriptor.fileId, descriptor.source]);
     let session = catalog.documents.get(key);
     if (!session) {
-      const info: FileDocumentIdentity = preview ? previewFile(descriptor.path, descriptor.workspaceId) : { id: descriptor.fileId, path: descriptor.path, name: descriptor.title, workspaceId: descriptor.workspaceId as WorkspaceId };
+      const identity = preview ? previewFile(descriptor.path, descriptor.workspaceId) : { id: descriptor.fileId, path: descriptor.path, name: descriptor.title, workspaceId: descriptor.workspaceId as WorkspaceId };
+      const info: FileDocumentIdentity = { ...identity, ...(descriptor.source ? { source: descriptor.source } : {}) };
       session = getFileDocument(descriptor.targetId, info, () => latest.current.resolveClient(descriptor.targetId), preview);
       catalog.documents.set(key, session);
     }
@@ -54,7 +57,7 @@ export function FileDockInstances({ workspaceId, targetId, onSettings, actions }
     return () => { catalogs.delete(catalog); for (const session of catalog.documents.values()) if (![...catalogs].some(value => [...value.documents.values()].includes(session))) releaseFileDocument(session); };
   }, [catalog]);
   useEffect(() => {
-    const keys = new Set(descriptors.map(([, item]) => JSON.stringify([item.targetId, item.workspaceId, item.fileId])));
+    const keys = new Set(descriptors.map(([, item]) => JSON.stringify([item.targetId, item.workspaceId, item.fileId, item.source])));
     for (const [key, session] of catalog.documents) if (!keys.has(key)) {
       catalog.documents.delete(key);
       if (![...catalogs].some(value => [...value.documents.values()].includes(session))) releaseFileDocument(session);
@@ -65,16 +68,17 @@ export function FileDockInstances({ workspaceId, targetId, onSettings, actions }
   }, [catalog, descriptors.map(([id]) => id).join("|")]);
 
   const open = useCallback(async (intent: FileOpenIntent) => {
-    const current = latest.current, workspace = intent.workspaceId ?? current.workspaceId;
+    const current = latest.current, workspace = intent.source === "system" ? "" : intent.workspaceId ?? current.workspaceId;
     const target = intent.targetId === undefined ? current.targetId : intent.targetId;
-    if (!workspace) return;
+    if (workspace === undefined) return;
     let file: FileDocumentIdentity;
-    try { file = preview ? previewFile(intent.path, workspace) : await (await current.resolveClient(target)).query("workspace.file.inspect", { workspaceId: workspace as WorkspaceId, path: intent.path }); }
+    try { file = preview ? previewFile(intent.path, workspace) : await inspectFileBackend(await current.resolveClient(target), { workspaceId: workspace as WorkspaceId, path: intent.path, ...(intent.source ? { source: intent.source } : {}) }); }
     catch { file = { workspaceId: workspace as WorkspaceId, path: intent.path, id: `unresolved:${intent.path}`, name: intent.path.split(/[\\/]/).pop() ?? intent.path }; }
+    if (intent.source) file = { ...file, source: intent.source };
     const scope = readFileScope(preview);
     for (const other of catalogs) {
       if (other.preview !== preview) continue;
-      const found = Object.entries(other.store.getSnapshot().layout.fileViews ?? {}).find(([, item]) => (item.fileId === file.id || other.documents.get(JSON.stringify([item.targetId, item.workspaceId, item.fileId]))?.getSnapshot().file.id === file.id) && item.workspaceId === workspace && item.targetId === target && (other.store === store || item.scope === "workspace" && scope === "workspace"));
+      const found = Object.entries(other.store.getSnapshot().layout.fileViews ?? {}).find(([, item]) => (item.fileId === file.id || other.documents.get(JSON.stringify([item.targetId, item.workspaceId, item.fileId, item.source]))?.getSnapshot().file.id === file.id) && item.workspaceId === workspace && item.targetId === target && item.source === intent.source && (other.store === store || item.scope === "workspace" && scope === "workspace"));
       if (found) {
         const panel = found[0] as FilePanelId;
         if (intent.line) other.store.dispatch({ type: "file-state", panel, patch: { line: intent.line, column: intent.column ?? 1, jump: Date.now() } });
@@ -82,9 +86,9 @@ export function FileDockInstances({ workspaceId, targetId, onSettings, actions }
       }
     }
     const panel: FilePanelId = `file-view:${crypto.randomUUID()}`;
-    const descriptor: FilePanelDescriptor = { targetId: target, workspaceId: workspace, path: file.path, fileId: file.id, title: file.name, scope, ...(intent.line ? { line: intent.line } : {}), ...(intent.column ? { column: intent.column } : {}) };
+    const descriptor: FilePanelDescriptor = { ...(intent.source ? { source: intent.source } : {}), targetId: target, workspaceId: workspace, path: file.path, fileId: file.id, title: file.name, scope, ...(intent.line ? { line: intent.line } : {}), ...(intent.column ? { column: intent.column } : {}) };
     const session = getFileDocument(target, file, () => latest.current.resolveClient(target), preview);
-    catalog.documents.set(JSON.stringify([target, workspace, file.id]), session);
+    catalog.documents.set(JSON.stringify([target, workspace, file.id, intent.source]), session);
     const rect = current.view?.store.nextWindowRect({ width: 900, height: 680 });
     store.dispatch({ type: "file-open", panel, descriptor, ...(rect ? { rect } : {}) });
     if (scope === "workspace") { const location = locatePanel(store.getSnapshot().layout, panel); if (location?.groupId) store.setPin(location.groupId, "workspace"); }
@@ -104,10 +108,10 @@ export function FileDockInstances({ workspaceId, targetId, onSettings, actions }
     const session = sessionFor(descriptor), state = session.getSnapshot();
     return { id, title: `${descriptor.title}${state.dirty ? " •" : ""}`, icon: "file", detail: descriptor.path, minHeight: 260, initialHeight: 500,
       glyph: { state: state.loading || state.saving ? "busy" : state.error ? "error" : undefined },
-      close: { label: `关闭 ${descriptor.title}`, tip: "关闭文件", pending: closingFiles.has(id), run: () => {
+      close: { label: zh ? `关闭 ${descriptor.title}` : `Close ${descriptor.title}`, tip: zh ? "关闭文件" : "Close file", pending: closingFiles.has(id), run: () => {
         if (closingFiles.has(id)) return;
         closingFiles.add(id);
-        const bufferKey = (item: FilePanelDescriptor) => JSON.stringify([item.targetId, item.workspaceId, item.fileId]);
+        const bufferKey = (item: FilePanelDescriptor) => JSON.stringify([item.targetId, item.workspaceId, item.fileId, item.source]);
         const views = () => [...catalogs].filter(value => value.preview === preview).flatMap(value => Object.entries(value.store.getSnapshot().layout.fileViews ?? {}).filter(([, item]) => value.documents.get(bufferKey(item)) === session));
         const remaining = views().filter(([panel]) => !closingFiles.has(panel as FilePanelId));
         void requestFileClose(remaining.length ? [] : [session]).then(allow => {
@@ -122,5 +126,5 @@ export function FileDockInstances({ workspaceId, targetId, onSettings, actions }
   });
   useLayoutEffect(() => { setFileViewDefinitions(definitions); });
   useLayoutEffect(() => () => setFileViewDefinitions([]), [setFileViewDefinitions]);
-  return <>{descriptors.map(([id, descriptor]) => <DockPanel key={id} id={id}>{visibility => <Suspense fallback={<div className="file-empty">正在打开文件…</div>}><FilePane id={id} descriptor={descriptor} session={sessionFor(descriptor)} visible={visibility.visible} onSettings={onSettings} onOpen={reference => { void open({ ...reference, workspaceId: descriptor.workspaceId, targetId: descriptor.targetId }); }} onViewState={patch => store.dispatch({ type: "file-state", panel: id, patch })} actions={actions ? { openers: actions.openers, addContext: input => contextActions(descriptor)?.addContext(input), runShell: (...args) => contextActions(descriptor)?.runShell(...args) } : undefined} /></Suspense>}</DockPanel>)}</>;
+  return <>{descriptors.map(([id, descriptor]) => <DockPanel key={id} id={id}>{visibility => <Suspense fallback={<div className="file-empty">{zh ? "正在打开文件…" : "Opening file…"}</div>}><FilePane id={id} descriptor={descriptor} session={sessionFor(descriptor)} visible={visibility.visible} onSettings={onSettings} onOpen={reference => { void open({ ...reference, workspaceId: descriptor.workspaceId, targetId: descriptor.targetId, ...(descriptor.source ? { source: descriptor.source } : {}) }); }} onViewState={patch => store.dispatch({ type: "file-state", panel: id, patch })} actions={actions ? { contextWorkspaceId: contextActions(descriptor)?.contextWorkspaceId, openers: actions.openers, addContext: input => contextActions(descriptor)?.addContext(input), runShell: (...args) => contextActions(descriptor)?.runShell(...args) } : undefined} /></Suspense>}</DockPanel>)}</>;
 }

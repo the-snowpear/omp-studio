@@ -1,4 +1,5 @@
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
+import { useI18n } from "../i18n";
 import { AssistantRunView, ConversationItemView, type AssistantRunEntry } from "./ConversationItemView";
 import type { AssistantSegment, TimelineRow } from "./conversationViewModel";
 import { timelineRowKey, timelineShapeToken, timelineStructureToken } from "./conversationViewModel";
@@ -169,6 +170,7 @@ export function ConvoTranscript({
   onRetryTurn?: () => void;
   retryTurnDisabledReason?: string;
 }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const { marks } = usePreviewMode();
   const structureToken = timelineStructureToken(rows);
   // `renderItems` 只按行 type 把行分成 row / assistantRun，与工具集无关，所以挂在
@@ -357,7 +359,7 @@ export function ConvoTranscript({
     <>
       {demo === true && marks ? (
         <div className="convo-demo-banner">
-          <span className="chip gray xs">演示</span>
+          <span className="chip gray xs">{zh ? "演示" : "Demo"}</span>
         </div>
       ) : null}
       <ConversationVirtualList

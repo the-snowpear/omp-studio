@@ -1,10 +1,12 @@
+import { pickLocale } from "./i18n";
+
 export const UPDATE_CHECK_TIMEOUT_MS = 8_000;
 
 export class UpdateCheckTimeoutError extends Error {
   readonly name = "UpdateCheckTimeoutError";
 
   constructor() {
-    super("检查更新超时");
+    super(pickLocale("检查更新超时", "Update check timed out"));
   }
 }
 

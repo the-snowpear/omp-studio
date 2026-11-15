@@ -13,6 +13,30 @@ import { remoteLaunchCommand, remoteStateRoot, sshArguments } from "../src/remot
 import { RemotePeer } from "../src/remote/wire.js";
 import { SshRemoteTransport } from "../src/remote/transport.js";
 import { connectRemoteEndpoint, serveRemoteHost } from "../src/remote/server.js";
+import { desktopText, getDesktopLanguage, setDesktopLanguage } from "../src/desktop-language-shared.js";
+
+test("the attached desktop controls remote language before subsequent reads", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-remote-locale-"));
+  const previous = getDesktopLanguage();
+  const host = { close: async () => {}, composition: {
+    facade: { hasPendingCommands: false }, isBusy: () => false,
+    transport: { query: async () => ({}), bootstrap: async () => ({ message: desktopText("远端已连接", "Remote connected") }) },
+  } } as unknown as RemoteHost;
+  const endpoint = await serveRemoteHost(host, root);
+  let peer: RemotePeer | undefined, observer: RemotePeer | undefined;
+  try {
+    peer = await connectRemoteEndpoint(root);
+    const hello = await peer.request<{ capabilities: string[] }>("hello");
+    assert.ok(hello.capabilities.includes("desktop.language"));
+    await peer.request("desktop.language.set", { locale: "en" });
+    assert.deepEqual(await peer.request("bootstrap"), { message: "Remote connected" });
+    await peer.request("desktop.language.set", { locale: "zh" });
+    assert.deepEqual(await peer.request("bootstrap"), { message: "远端已连接" });
+    observer = await connectRemoteEndpoint(root, true);
+    await assert.rejects(observer.request("desktop.language.set", { locale: "en" }), /status connection/);
+    assert.equal(getDesktopLanguage(), "zh");
+  } finally { peer?.close(); observer?.close(); await endpoint.close(); setDesktopLanguage(previous); await rm(root, { recursive: true, force: true }); }
+});
 
 function peers() {
   const toServer = new PassThrough();
@@ -174,8 +198,8 @@ test("only a newer channel from the same desktop can replace its orphaned attach
     second = await connectRemoteEndpoint(root, false, { key, sequence: 2 });
     await oldClosed;
     await second.request("ping");
-    await assert.rejects(connectRemoteEndpoint(root, false, { key, sequence: 1 }), /取代/);
-    await assert.rejects(connectRemoteEndpoint(root, false, { key: "b".repeat(43), sequence: 3 }), /其他桌面/);
+    await assert.rejects(connectRemoteEndpoint(root, false, { key, sequence: 1 }), /replaced/);
+    await assert.rejects(connectRemoteEndpoint(root, false, { key: "b".repeat(43), sequence: 3 }), /another desktop/);
     await second.request("bootstrap");
     assert.equal(closed, false);
   } finally { first?.close(); second?.close(); await endpoint.close(); await rm(root, { recursive: true, force: true }); }

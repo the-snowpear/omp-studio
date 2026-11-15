@@ -402,7 +402,7 @@ describe("Studio form history boundaries", () => {
 				"legacy",
 				{ targetId: "old-result" },
 			),
-		).rejects.toMatchObject({ code: "INVALID_ARGUMENT", message: expect.stringContaining("旧版 questions") });
+		).rejects.toMatchObject({ code: "INVALID_ARGUMENT", message: expect.stringContaining("legacy questions") });
 		expect(navigated).toBe(0);
 		expect(legacy).not.toHaveProperty("html");
 	});

@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isZh, useI18n } from "./i18n";
 
 export interface ProcessMemoryRow {
   readonly kind: string;
@@ -38,8 +39,14 @@ export function formatWorkingSet(kb: number): string {
  * runtime 是我们自己 spawn 的 Node 子进程，不在 `getAppMetrics()` 里 —— 面板上
  * 要说清楚这一点，否则会以为 runtime 不占内存。
  */
-export function processLabel(kind: string, ordinal: number, total: number): string {
-  const base = kind === "Browser" ? "主进程" : kind === "Tab" ? "渲染进程" : kind === "GPU" ? "GPU" : kind;
+export function processLabel(kind: string, ordinal: number, total: number, zh = isZh()): string {
+  const base = kind === "Browser"
+    ? (zh ? "主进程" : "Main process")
+    : kind === "Tab"
+      ? (zh ? "渲染进程" : "Renderer")
+      : kind === "GPU"
+        ? "GPU"
+        : kind;
   return total > 1 ? `${base} #${ordinal}` : base;
 }
 
@@ -97,28 +104,32 @@ export function useProcessMemory(enabled: boolean): {
 
 export function ProcessMemoryPanel({ enabled }: { enabled: boolean }) {
   const { sample, unsupported } = useProcessMemory(enabled);
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   if (unsupported || sample === null) return null;
   const counts = new Map<string, number>();
   for (const row of sample.rows) counts.set(row.kind, (counts.get(row.kind) ?? 0) + 1);
   return (
     <section className="diag-card" aria-labelledby="diagMemoryTitle">
       <div className="diag-card-head">
-        <b id="diagMemoryTitle">进程内存</b>
-        <span className="muted small">{formatWorkingSet(sample.totalWorkingSetKb)} 合计</span>
+        <b id="diagMemoryTitle">{zh ? "进程内存" : "Process memory"}</b>
+        <span className="muted small">{zh ? `${formatWorkingSet(sample.totalWorkingSetKb)} 合计` : `${formatWorkingSet(sample.totalWorkingSetKb)} total`}</span>
       </div>
       <div className="diag-mem-rows">
         {sample.rows.map((row) => (
           <div key={`${row.kind}-${row.ordinal}`} className="diag-mem-row">
-            <span className="diag-mem-label">{processLabel(row.kind, row.ordinal, counts.get(row.kind) ?? 1)}</span>
+            <span className="diag-mem-label">{processLabel(row.kind, row.ordinal, counts.get(row.kind) ?? 1, zh)}</span>
             <span className="diag-mem-value">{formatWorkingSet(row.workingSetKb)}</span>
             {row.peakWorkingSetKb === undefined ? null : (
-              <span className="diag-mem-peak muted small">峰值 {formatWorkingSet(row.peakWorkingSetKb)}</span>
+              <span className="diag-mem-peak muted small">{zh ? `峰值 ${formatWorkingSet(row.peakWorkingSetKb)}` : `Peak ${formatWorkingSet(row.peakWorkingSetKb)}`}</span>
             )}
           </div>
         ))}
       </div>
       <p className="muted small">
-        每 5 秒刷新。Runtime Worker 是独立 Node 子进程，不在这张表里 —— 长对话下三方都要看。
+        {zh
+          ? "每 5 秒刷新。Runtime Worker 是独立 Node 子进程，不在这张表里 —— 长对话下三方都要看。"
+          : "Refreshes every 5s. The Runtime Worker is a separate Node child process not listed here — watch all three during long sessions."}
       </p>
     </section>
   );

@@ -10,7 +10,7 @@ import { SlidingTabs } from "./SlidingTabs";
 import { MarkdownText } from "./conversation/markdown";
 import { WorkspaceDialog, WorkspaceEmpty } from "./workspaces/Workspace";
 import { SessionPickerKeys, SessionPickerList, SessionPickerSearch, sessionPickerTime } from "./history/SessionPicker";
-import { PREVIEW_FOREIGN_SESSIONS, PREVIEW_IMPORT_PREVIEWS, PREVIEW_IMPORT_WORKSPACES } from "./preview/runtimeUpgradeFixtures";
+import { getPreviewForeignSessions, getPreviewImportPreviews, PREVIEW_IMPORT_WORKSPACES } from "./preview/runtimeUpgradeFixtures";
 
 export function SessionImportPanel({ client, onOpen, onImported, onPreviewOpen }: {
   client: StudioClient | null;
@@ -54,7 +54,7 @@ export function SessionImportPanel({ client, onOpen, onImported, onPreviewOpen }
     setSelectedId(""); setSessions([]); setListError(""); setLoading(false);
     if (!opened || !available) return;
     if (preview) {
-      setSessions(PREVIEW_FOREIGN_SESSIONS.filter(item => item.source === source));
+      setSessions(getPreviewForeignSessions(zh).filter(item => item.source === source));
       setWorkspaces(PREVIEW_IMPORT_WORKSPACES);
       return;
     }
@@ -82,7 +82,7 @@ export function SessionImportPanel({ client, onOpen, onImported, onPreviewOpen }
     if (!opened || !selected) return;
     setPreviewLoading(true);
     const read = preview
-      ? Promise.resolve({ session: selected, preview: PREVIEW_IMPORT_PREVIEWS[selected.sourceId]! })
+      ? Promise.resolve({ session: selected, preview: getPreviewImportPreviews(zh)[selected.sourceId]! })
       : invokeUpgrade(client!, "session.import.preview", { source, sourceId: selected.sourceId });
     void read.then(value => { if (current === detailEpoch.current) setDetail(value); })
       .catch(cause => { if (current === detailEpoch.current) setPreviewError(hostErrorMessage(cause, zh ? "读取会话预览失败" : "Could not preview the session")); })

@@ -3,6 +3,7 @@ import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import { utf8ByteLength } from "@omp-studio/client-contract";
 import { TerminalGraphicsDecoder, type TerminalGraphic } from "./terminalGraphics";
+import { isZh } from "./i18n";
 import type { TerminalCommand } from "../../desktop/src/terminal-shared";
 import type { TmuxAction, TmuxTopology } from "../../desktop/src/tmux/tmux-shared";
 
@@ -395,7 +396,12 @@ export class TerminalSessions {
     const limit = Math.round(PENDING_MAX_BYTES / (1024 * 1024));
     this.#publish({
       ...this.#state,
-      notices: { ...this.#state.notices, [id]: `后台输出超过 ${limit} MiB 上限，较早的输出已被丢弃。` },
+      notices: {
+        ...this.#state.notices,
+        [id]: isZh()
+          ? `后台输出超过 ${limit} MiB 上限，较早的输出已被丢弃。`
+          : `Background output exceeded the ${limit} MiB limit; earlier output was discarded.`,
+      },
     });
   }
 

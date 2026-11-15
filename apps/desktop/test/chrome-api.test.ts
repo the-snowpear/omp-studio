@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createOmpStudioChromeApi, type IpcRendererLike } from "../src/chrome-api.js";
+import { DESKTOP_LANGUAGE_CHANNEL, getDesktopLanguage, initDesktopLanguage, onDesktopLanguageChange, setDesktopLanguage } from "../src/desktop-language-shared.js";
 import { DICTATION_AUDIO_CHANNELS, type DictationDesktopEvent, type DictationAudioAttach } from "../src/dictation-audio-shared.js";
 
 test("dictation preload methods preserve Main faults, use fixed private channels, and unsubscribe exactly", async () => {
@@ -43,4 +44,30 @@ test("dictation preload methods preserve Main faults, use fixed private channels
   off();
   for (const listener of listeners.get(DICTATION_AUDIO_CHANNELS.event)!) listener({}, event);
   assert.deepEqual(a, [event]); assert.deepEqual(b, [event, event]);
+});
+
+test("setLanguage preload forwards valid locales and desktop language state notifies listeners", async () => {
+  const calls: Array<{ channel: string; args: unknown[] }> = [];
+  const ipc: IpcRendererLike = {
+    async invoke(channel, ...args) { calls.push({ channel, args }); return undefined; },
+    on() {},
+    removeListener() {},
+  };
+  const api = createOmpStudioChromeApi(ipc);
+  await api.setLanguage?.("en");
+  await api.setLanguage?.("zh");
+  assert.deepEqual(calls, [
+    { channel: DESKTOP_LANGUAGE_CHANNEL, args: [{ locale: "en" }] },
+    { channel: DESKTOP_LANGUAGE_CHANNEL, args: [{ locale: "zh" }] },
+  ]);
+
+  initDesktopLanguage("zh-CN");
+  assert.equal(getDesktopLanguage(), "zh");
+  const seen: string[] = [];
+  const off = onDesktopLanguageChange(next => seen.push(next));
+  assert.equal(setDesktopLanguage("en"), true);
+  assert.equal(setDesktopLanguage("en"), false);
+  off();
+  assert.equal(setDesktopLanguage("zh"), true);
+  assert.deepEqual(seen, ["en"]);
 });

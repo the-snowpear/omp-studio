@@ -1,7 +1,7 @@
 import type { ClientEvent, ConversationItem, ConversationRuntimeEvent, ConversationTranscriptReadPage } from "@omp-studio/client-contract";
 import { CONVERSATION_LIMITS, utf8ByteLength } from "@omp-studio/client-contract";
 import type { ConversationTarget } from "@omp-studio/studio-protocol";
-import { PREVIEW_CONVO_IDENTITY, PREVIEW_CONVO_LIVE, previewConversationItems } from "../preview/conversationFixtures";
+import { getPreviewConvoLive, PREVIEW_CONVO_IDENTITY, previewConversationItems } from "../preview/conversationFixtures";
 import { asClientError, identityKey, isStaleCursorError, type ConversationClient, type ConversationIdentity } from "./conversationHost";
 import { createConversationSource } from "./conversationSource";
 import { ConversationStore } from "./conversationStore";
@@ -10,6 +10,7 @@ import { getDefaultThumbStore, type UserThumbStore } from "./userMessageThumbs";
 import { registerRendererResource } from "../rendererResources";
 import { projectReadsFor } from "../conversationWorkspace/projectReads";
 import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
+import { isZh } from "../i18n";
 
 export type ConversationEngineInput = {
   readonly preview: boolean; readonly client: ConversationClient | null; readonly identity: ConversationIdentity | null;
@@ -76,7 +77,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
   function applyLiveEvent(event: BufferedConversationEvent): void {
     if (event.streamSeq <= watermark) return;
     if (event.streamSeq !== watermark + 1) {
-      store.requireResync("对话流序号不连续，正在重新同步。");
+      store.requireResync(isZh() ? "对话流序号不连续，正在重新同步。" : "Conversation stream sequence gap detected; resyncing.");
       void hydrate(true);
       return;
     }
@@ -107,12 +108,12 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
   async function hydrate(resyncing = false): Promise<void> {
     if (disposed) return;
     const token = ++run; loadingOlder = false; buffer = []; bufferBytes = 0; bufferOverflowed = false; conversationSessionId = undefined; watermark = 0;
-    if (identity === null) { store.setUnavailable("当前没有活动会话。"); return; }
+    if (identity === null) { store.setUnavailable(isZh() ? "当前没有活动会话。" : "No active conversation."); return; }
     if (input.deferHydrate) { store.setLoading(false); return; }
     if (input.preview) {
       store.setLoading(resyncing); store.hydrate({ items: input.previewItems, headCursor: "preview" as never, hasMoreBefore: false }, (input.previewLive ?? []).map((update, index) => ({ streamSeq: index + 1, update })), input.previewLive?.length ?? 0); return;
     }
-    if (!input.canRead || input.client === null) { store.setUnavailable("当前环境无法读取对话。"); return; }
+    if (!input.canRead || input.client === null) { store.setUnavailable(isZh() ? "当前环境无法读取对话。" : "Cannot read conversations in this environment."); return; }
     store.setLoading(resyncing || initialCachedPage !== undefined);
     const source = createConversationSource(input.client);
     liveTarget = { kind: "session", sessionId: identity.sessionId };
@@ -129,7 +130,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
           store.hydrate(opened.page, opened.live.events.map((event) => ({ streamSeq: event.streamSeq, update: event.update })), watermark);
         }
         const buffered = buffer; const overflowed = bufferOverflowed; buffer = []; bufferBytes = 0; bufferOverflowed = false;
-        if (overflowed) { store.requireResync("打开对话期间的事件缓冲已满，正在重新同步。"); void hydrate(true); return; }
+        if (overflowed) { store.requireResync(isZh() ? "打开对话期间的事件缓冲已满，正在重新同步。" : "Event buffer filled while opening conversation; resyncing."); void hydrate(true); return; }
         for (const event of buffered) if (event.sessionId === conversationSessionId) applyLiveEvent(event);
       } else {
         const page = await source.readArchive(identity.sessionId, undefined, undefined, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);
@@ -203,9 +204,10 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
   };
 }
 
-export function defaultConversationEngineInput(input: Omit<ConversationEngineInput, "previewItems" | "previewLive"> & { readonly previewThreadId?: string }): ConversationEngineInput {
+export function defaultConversationEngineInput(input: Omit<ConversationEngineInput, "previewItems" | "previewLive"> & { readonly previewThreadId?: string; readonly zh?: boolean | undefined }): ConversationEngineInput {
+  const previewZh = input.zh ?? isZh();
   // Only `t1` is the streaming demo. Handing the live fixture to every preview
   // thread pins `running` true everywhere, which turns the send button into the
   // stop button and hides the paused-continue state entirely.
-  return { ...input, previewItems: input.preview ? previewConversationItems(input.previewThreadId) : [], ...(input.preview && input.previewThreadId === "t1" ? { previewLive: PREVIEW_CONVO_LIVE } : {}) };
+  return { ...input, previewItems: input.preview ? previewConversationItems(input.previewThreadId, previewZh) : [], ...(input.preview && input.previewThreadId === "t1" ? { previewLive: getPreviewConvoLive(previewZh) } : {}) };
 }

@@ -9,7 +9,7 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { Icon } from "../icons";
-import { PREVIEW_ANNOTATION_FILE, PREVIEW_ANNOTATION_DIFF, PREVIEW_ANNOTATION_BUNDLE } from "../preview/annotationsPreview";
+import { getPreviewAnnotationBundle, getPreviewAnnotationDiff, getPreviewAnnotationFile } from "../preview/annotationsPreview";
 import { lazyPanel } from "../DeferredPanel";
 import { DockPanel, useDockEngine } from "../dock/DockContext";
 import { locatePanel } from "../dock/model";
@@ -143,7 +143,7 @@ export function AnnotationsProvider({ children, client, workspaceId, sessionId, 
       if ((input.kind === "message" || input.kind === "quote") && !input.sessionId && sessionId) input = { ...input, sessionId };
       let source: AnnotationSource;
       if (preview) {
-        const text = "text" in input ? input.text : input.kind === "diff" ? PREVIEW_ANNOTATION_DIFF : PREVIEW_ANNOTATION_FILE;
+        const text = "text" in input ? input.text : input.kind === "diff" ? getPreviewAnnotationDiff(zh) : getPreviewAnnotationFile(zh);
         source = {
           id: "demo-" + id(), kind: input.kind,
           label: "label" in input ? input.label : input.path ?? (zh ? "当前改动" : "Current changes"),
@@ -176,7 +176,7 @@ export function AnnotationsProvider({ children, client, workspaceId, sessionId, 
       openWindow();
       void run(async epoch => {
         if (preview) {
-          commit(structuredClone(PREVIEW_ANNOTATION_BUNDLE)); setSelected("demo-source"); setEditorEpoch(value => value + 1);
+          commit(structuredClone(getPreviewAnnotationBundle(zh))); setSelected("demo-source"); setEditorEpoch(value => value + 1);
           if (marks) setNotice(zh ? "演示快照" : "Demo snapshot");
           return;
         }
@@ -203,7 +203,7 @@ export function AnnotationsProvider({ children, client, workspaceId, sessionId, 
         const quote = note.selection ? source.text.slice(note.selection.start, note.selection.end) : "";
         return `### ${source.label}\n${quote ? "> " + quote.split("\n").join("\n> ") + "\n\n" : ""}${note.note}`;
       }).join("\n\n");
-      prompt = (marks ? "[演示标注 / Demo annotations]\n" : "")
+      prompt = (marks ? (zh ? "[演示标注]\n" : "[Demo annotations]\n") : "")
         + (action === "review" ? zh ? "请独立审查以下改动，并验证标注中的关注点。\n\n" : "Review the changes independently and verify the annotated concerns.\n\n" : "") + feedback;
     } else {
       const handle = await client.command("annotations.prepare", { sources: bundle.sources, notes: bundle.notes, action, allowStale });

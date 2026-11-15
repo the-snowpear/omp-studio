@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Icon } from "../icons";
+import { isZh, useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 
 export type DeckQueue = {
@@ -10,24 +11,26 @@ export type DeckQueue = {
 };
 
 export function QueueNav({ queue }: { queue?: DeckQueue }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   if (!queue || queue.total <= 1) return null;
   /* data-dk-focus：换卡时新旧卡是两个 DOM 节点，Deck 靠这个标记把焦点搬到
      新卡里位置相同的按钮上，键盘 / 连续点击翻页不会掉焦点。 */
   return (
     <span className="dk-queue">
-      <button type="button" className="icon-btn small" aria-label="上一个请求" data-dk-focus="queue-prev" disabled={queue.index === 0} onClick={queue.onPrev}>
+      <button type="button" className="icon-btn small" aria-label={zh ? "上一个请求" : "Previous request"} data-dk-focus="queue-prev" disabled={queue.index === 0} onClick={queue.onPrev}>
         <Icon name="chevron-l" extra="sm" />
       </button>
       <span className="q-pos">{queue.index + 1}/{queue.total}</span>
-      <button type="button" className="icon-btn small" aria-label="下一个请求" data-dk-focus="queue-next" disabled={queue.index === queue.total - 1} onClick={queue.onNext}>
+      <button type="button" className="icon-btn small" aria-label={zh ? "下一个请求" : "Next request"} data-dk-focus="queue-next" disabled={queue.index === queue.total - 1} onClick={queue.onNext}>
         <Icon name="chevron-r" extra="sm" />
       </button>
     </span>
   );
 }
 
-export function demoMark(demo?: boolean, marks = true) {
-  return demo && marks ? <span className="chip gray xs">演示</span> : null;
+export function demoMark(demo?: boolean, marks = true, zh = isZh()) {
+  return demo && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null;
 }
 
 export function PromptHead({
@@ -49,6 +52,8 @@ export function PromptHead({
   /** 队列导航之前的操作（如计划放大）。 */
   end?: ReactNode;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const { marks } = usePreviewMode();
   return (
     <div className={icon === "message" || icon === "pencil" ? "ask-head" : "approval-head"}>
@@ -56,7 +61,7 @@ export function PromptHead({
       {title}
       {chips}
       <span className="dk-head-end">
-        {demoMark(demo, marks)}
+        {demoMark(demo, marks, zh)}
         {meta ? <span className="dk-agent">{meta}</span> : null}
         <QueueNav {...(queue ? { queue } : {})} />
         {end}

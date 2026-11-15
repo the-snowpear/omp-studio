@@ -385,6 +385,7 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "tui.transfer",
   "remoteUi.standard",
   "remoteUi.leaseGeneration",
+  "studio.locale",
   "tui.manualCompatibility",
 ]);
 

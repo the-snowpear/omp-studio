@@ -1,14 +1,15 @@
 import { RenderCache, renderBytes } from "./renderCache";
+import { isZh } from "../i18n";
 
 export const MERMAID_CONFIG = Object.freeze({ startOnLoad: false, securityLevel: "strict" as const, theme: "default" as const });
 export type MermaidConfig = typeof MERMAID_CONFIG;
 export function mermaidBudget(code: string): { allowed: boolean; score: number; reason?: string } {
-  if (code.length > 20_000) return { allowed: false, score: 0, reason: "图表过大，已保留源码" };
+  if (code.length > 20_000) return { allowed: false, score: 0, reason: isZh() ? "图表过大，已保留源码" : "Diagram is too large; source preserved" };
   const lines = code.split("\n").length;
   // A cheap heuristic (lines + edge features + node features), not a parser
   // or an estimate of the graph algorithm's exact complexity.
   const score = lines + (code.match(/-->|==>|-.->|->>|--|->/g)?.length ?? 0) + (code.match(/[\[({]/g)?.length ?? 0);
-  if (lines > 600 || score > 1500) return { allowed: false, score, reason: "图表较复杂，已保留源码" };
+  if (lines > 600 || score > 1500) return { allowed: false, score, reason: isZh() ? "图表较复杂，已保留源码" : "Diagram is too complex; source preserved" };
   return { allowed: true, score };
 }
 type Subscriber = { active: () => boolean; result: (svg: string | null) => void };

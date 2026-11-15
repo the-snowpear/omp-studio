@@ -10,6 +10,34 @@ import {
   snapshotFromDoc,
   snapshotFromTextAndImages,
 } from "./serialize";
+import { attachUserThumbs } from "../conversation/userMessageThumbs";
+
+it("localizes stored image labels while preserving IDs, image order, and legacy serialization", () => {
+  const first = { type: "image" as const, mimeType: "image/png" as const, data: "first" };
+  const second = { type: "image" as const, mimeType: "image/png" as const, data: "second" };
+  const stored = displayDocFromSerializedText("[图2] [图1]", [first, second], true);
+  const labels = (doc: typeof stored) => doc.nodes.flatMap(node => node.type === "chip" ? [node.chip.label] : []);
+  const ids = (doc: typeof stored) => doc.nodes.flatMap(node => node.type === "chip" ? [node.chip.id] : []);
+  const english = displayDocForUserMessage("[图2] [图1]", stored, undefined, false);
+  expect(labels(english)).toEqual(["Img2", "Img1"]);
+  expect(ids(english)).toEqual(ids(stored));
+  expect(labels(stored)).toEqual(["图2", "图1"]);
+  expect(serializeDoc(english)).toEqual(serializeDoc(stored));
+  expect(labels(displayDocForUserMessage("", english, undefined, true))).toEqual(["图2", "图1"]);
+
+  const reloaded = attachUserThumbs(displayDocFromSerializedText("[图2] [Img1]", undefined, false), [
+    { label: "图1", image: first }, { label: "图2", image: second },
+  ]);
+  expect(reloaded.nodes.flatMap(node => node.type === "chip" ? [node.chip.image] : [])).toEqual([second, first]);
+
+  const mixed = displayDocFromSerializedText("@shots/pic.png [图1]", undefined, false);
+  const restored = attachUserThumbs(mixed, [{ label: "图1", path: "shots\\pic.png", image: first }, { label: "图2", image: second }]);
+  expect(restored.nodes.flatMap(node => node.type === "chip" ? [node.chip.image] : [])).toEqual([first, second]);
+  const clipboardOnly = attachUserThumbs(mixed, [{ label: "图1", image: second }]);
+  expect(clipboardOnly.nodes.flatMap(node => node.type === "chip" ? [node.chip.image] : [])).toEqual([undefined, second]);
+  const repeated = attachUserThumbs(displayDocFromSerializedText("[图2] [图1] [Img2]", undefined, false), [{ label: "图1", image: first }, { label: "图2", image: second }]);
+  expect(repeated.nodes.flatMap(node => node.type === "chip" ? [node.chip.image] : [])).toEqual([second, first, second]);
+});
 import type { ComposerChip, ComposerDoc } from "./types";
 import type { GitHubReferenceSnapshot } from "./githubReference";
 import type { GitCommitReferenceSnapshot } from "./gitCommitReference";

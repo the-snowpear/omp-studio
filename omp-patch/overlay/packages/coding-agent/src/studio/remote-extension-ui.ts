@@ -4,6 +4,7 @@ import type { ToolCallContext } from "@oh-my-pi/pi-agent-core";
 import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import { presentHtmlForm } from "./services/form-presentation";
 import { validateAskAnswerPayload } from "./ask-attachments-protocol";
+import { runtimeText } from "./locale";
 import type {
 	AutocompleteProviderFactory,
 	ExtensionAskDialogQuestion,
@@ -216,7 +217,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 			() =>
 				this.gateway.ask({
 					commandId: this.commandId,
-					title: "Agent 提问",
+					title: runtimeText("Agent 提问", "Agent Question"),
 					questions: remoteQuestions,
 					acceptImages: dialogOptions?.acceptImages === true,
 				}),
@@ -243,7 +244,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 			() =>
 				this.gateway.form({
 					commandId: this.commandId,
-					title: "Agent 提问",
+					title: runtimeText("Agent 提问", "Agent Question"),
 					form: presentation,
 					...(dialogOptions?.timeout === undefined ? {} : { timeoutMs: dialogOptions.timeout }),
 				}),

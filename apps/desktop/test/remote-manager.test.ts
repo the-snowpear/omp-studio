@@ -16,7 +16,7 @@ test("saved SSH profiles survive restart without storing credentials or a live s
     assert.equal(inventory.profiles[0]?.host, "build");
     assert.equal(inventory.profiles[0]?.port, 2222);
     assert.equal(next.activeId, null);
-    assert.throws(() => next.get(profile.id), /SSH 已断开/);
+    assert.throws(() => next.get(profile.id), /SSH is disconnected/);
     assert.equal((await readFile(path, "utf8")).includes("password"), false);
     await next.remove(profile.id);
     assert.equal((await new RemoteConnectionManager(path, root).list()).profiles.length, 0);

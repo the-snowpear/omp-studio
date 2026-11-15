@@ -4,8 +4,9 @@ import type { StudioWebMcpCatalog, WebMcpInvokeResult, WebMcpToolRecord } from "
 import { JsonTree } from "../conversation/JsonTree";
 import { Icon } from "../icons";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { PREVIEW_WEBMCP, PREVIEW_WEBMCP_RESULT } from "../preview/webmcpPreview";
+import { getPreviewWebMcp, getPreviewWebMcpResult } from "../preview/webmcpPreview";
 import type { Copy } from "./BrowserToolbar";
 import { useBrowserVisible } from "./useNativeBrowserObservation";
 
@@ -14,6 +15,8 @@ export function WebMcpPane({ client, sessionId, pageId, documentId, agentControl
   agentControl: boolean; visible: boolean; capability?: boolean | undefined; reason?: string | undefined; copy: Copy; onBack(): void;
 }) {
   const { preview, marks } = usePreviewMode();
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const shown = useBrowserVisible(visible);
   const [catalog, setCatalog] = useState<StudioWebMcpCatalog>(), [selected, setSelected] = useState<WebMcpToolRecord>();
   const [input, setInput] = useState("{}"), [result, setResult] = useState<WebMcpInvokeResult>(), [error, setError] = useState(""), [busy, setBusy] = useState(false), [revision, refresh] = useState(0);
@@ -23,12 +26,12 @@ export function WebMcpPane({ client, sessionId, pageId, documentId, agentControl
     setCatalog(undefined); setSelected(undefined); setResult(undefined); setError(""); setBusy(false);
     if (!shown) return;
     if (capability === false) { setCatalog({ pageId, status: "unavailable", tools: [], truncated: false, untrusted: true, invocationAvailable: false, reason: reason ?? copy("WebMCP 需要实际 Chromium；此原生页面不提供。", "WebMCP requires actual Chromium; this native page does not provide it.") }); return; }
-    if (preview) { setCatalog({ ...PREVIEW_WEBMCP, pageId }); return; }
+    if (preview) { setCatalog({ ...getPreviewWebMcp(zh), pageId }); return; }
     if (!client) return;
     setBusy(true);
     void client.query("browser.webmcp.list", { sessionId, pageId }).then(value => { if (current === epoch.current) setCatalog(value); }).catch(cause => { if (current === epoch.current) setError(hostErrorMessage(cause, "WebMCP unavailable")); }).finally(() => { if (current === epoch.current) setBusy(false); });
     return () => { epoch.current++; };
-  }, [client, sessionId, pageId, documentId, shown, preview, revision, capability, reason, copy]);
+  }, [client, sessionId, pageId, documentId, shown, preview, revision, capability, reason, copy, zh]);
   const choose = async (tool: WebMcpToolRecord) => {
     const current = ++epoch.current; setSelected(tool); setInput("{}"); setResult(undefined); setError("");
     if (preview || !client) return;
@@ -43,7 +46,7 @@ export function WebMcpPane({ client, sessionId, pageId, documentId, agentControl
     try {
       const params: unknown = JSON.parse(input);
       if (!params || typeof params !== "object" || Array.isArray(params)) throw new Error(copy("参数需要是 JSON 对象", "Parameters must be a JSON object"));
-      if (preview) { setResult(PREVIEW_WEBMCP_RESULT); return; }
+      if (preview) { setResult(getPreviewWebMcpResult(zh)); return; }
       if (!client) return;
       const handle = await client.command("browser.webmcp.invoke", { sessionId, pageId, documentId: catalog.documentId, name: selected.name, params: params as Record<string, unknown>, options: { frame: selected.frameId } });
       const receipt = await waitReceipt<{ result: WebMcpInvokeResult }>(client, handle.requestId, 30000);

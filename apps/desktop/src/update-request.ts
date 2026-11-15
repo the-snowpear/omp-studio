@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { HostLog } from "./host-log.js";
 import { applyMirror } from "./update-index.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 export type UpdateRequestLog = Pick<HostLog, "write">;
 export interface UpdateRequestPolicy {
@@ -39,8 +40,13 @@ class UpdateHttpError extends Error {
     const retryAt = retryAfter === null ? (reset === null ? undefined : Number(reset) * 1000)
       : /^\d+$/u.test(retryAfter) ? Date.now() + Number(retryAfter) * 1000 : Date.parse(retryAfter);
     const limited = status === 429 || (status === 403 && (reset !== null || retryAfter !== null));
-    const next = limited && retryAt !== undefined && Number.isFinite(retryAt) ? `；可在 ${new Date(retryAt).toISOString()} 后重试` : "";
-    super(`更新请求 HTTP ${status}（${host}）${limited ? "，请求受限" : ""}${next}`);
+    const next = limited && retryAt !== undefined && Number.isFinite(retryAt)
+      ? desktopText(`；可在 ${new Date(retryAt).toISOString()} 后重试`, `; retry after ${new Date(retryAt).toISOString()}`)
+      : "";
+    super(desktopText(
+      `更新请求 HTTP ${status}（${host}）${limited ? "，请求受限" : ""}${next}`,
+      `Update request HTTP ${status} (${host})${limited ? ", rate limited" : ""}${next}`,
+    ));
     this.retryable = status === 408 || status >= 500 || limited;
     this.retryAfterMs = limited && retryAt !== undefined && Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : 0;
   }
@@ -77,12 +83,12 @@ export async function withUpdateRequest<T>(input: UpdateRequestOptions, operatio
       return await operation({
         url, signal,
         async request(headers) {
-          const timer = setTimeout(() => controller.abort(new UpdateTransportError("更新请求首响应超时")), policy.responseTimeoutMs);
+          const timer = setTimeout(() => controller.abort(new UpdateTransportError(desktopText("更新请求首响应超时", "Update request response timed out"))), policy.responseTimeoutMs);
           try {
             try { response = await withUpdateSignal((input.fetcher ?? fetch)(url, { ...(headers === undefined ? {} : { headers }), signal }), signal); }
             catch (error) {
               signal.throwIfAborted();
-              throw new UpdateTransportError("更新请求连接中断", { cause: error });
+              throw new UpdateTransportError(desktopText("更新请求连接中断", "Update request connection interrupted"), { cause: error });
             }
             input.log?.write("info", "update.request", `stage=${input.stage} host=${host} attempt=${index + 1} status=${response.status}`);
             if (!response.ok && !(input.acceptNotModified && response.status === 304)) throw new UpdateHttpError(response.status, host, response.headers);
@@ -90,12 +96,12 @@ export async function withUpdateRequest<T>(input: UpdateRequestOptions, operatio
           } finally { clearTimeout(timer); }
         },
         async read(reader) {
-          const timer = setTimeout(() => controller.abort(new UpdateTransportError("更新下载长时间没有进展")), policy.idleTimeoutMs);
+          const timer = setTimeout(() => controller.abort(new UpdateTransportError(desktopText("更新下载长时间没有进展", "Update download stalled with no progress"))), policy.idleTimeoutMs);
           try {
             try { return await withUpdateSignal(reader.read(), signal); }
             catch (error) {
               signal.throwIfAborted();
-              throw new UpdateTransportError("更新响应传输中断", { cause: error });
+              throw new UpdateTransportError(desktopText("更新响应传输中断", "Update response stream interrupted"), { cause: error });
             }
           } finally { clearTimeout(timer); }
         },

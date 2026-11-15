@@ -4,6 +4,7 @@
  */
 
 import { jsonString, type TimelineRow, type ToolView } from "./conversationViewModel";
+import { isZh } from "../i18n";
 import { jsonNumber, toolFields, toolKind } from "./toolMeta";
 
 export type AgentTestRunStatus = "running" | "pass" | "fail" | "aborted";
@@ -34,7 +35,7 @@ const LANGUAGE_RUNNERS = new Set(["cargo", "go", "dotnet"]);
 const PYTHON_BINS = new Set(["python", "python3", "py"]);
 
 export function rerunTestPrompt(command: string): string {
-  return `请重新运行这条测试命令，不要改命令本身：\n${command}`;
+  return `${isZh() ? "请重新运行这条测试命令，不要改命令本身：" : "Please rerun this test command without modifying the command itself:"}\n${command}`;
 }
 
 export function formatTestDuration(durationMs: number): string {

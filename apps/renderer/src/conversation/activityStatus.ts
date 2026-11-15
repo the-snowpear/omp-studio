@@ -1,5 +1,6 @@
 import { fileBase, isPathKind, toolKind, toolLabel, toolTarget } from "./toolMeta";
 import type { ConversationState, LiveTool } from "./conversationViewModel";
+import { isZh } from "../i18n";
 
 export type ActivityPhase = "waiting" | "thinking" | "responding" | "tool" | "queued";
 
@@ -28,30 +29,30 @@ export function isLiveActivityPhase(phase: ActivityPhase): boolean {
 }
 
 /** Verb per tool kind so the line reads as a sentence; unknown kinds fall back to the tool label. */
-const KIND_VERB: Record<string, string> = {
-  read: "正在读取",
-  write: "正在写入",
-  edit: "正在修改",
-  ast_edit: "正在修改",
-  bash: "正在运行",
-  eval: "正在执行代码",
-  grep: "正在搜索",
-  ast_grep: "正在搜索",
-  glob: "正在查找文件",
-  lsp: "正在分析代码",
-  web_search: "正在联网检索",
-  web: "正在联网检索",
-  browser: "正在操作浏览器",
-  task: "正在派发子 Agent",
-  hub: "正在协调子 Agent",
-  todo: "正在整理任务",
-  think: "正在思考",
-  reflect: "正在思考",
-  debug: "正在调试",
-  security_scan: "正在做安全扫描",
-  inspect_image: "正在查看图片",
-  generate_image: "正在生成图片",
-  mcp: "正在调用 MCP",
+const KIND_VERB: Record<string, [string, string]> = {
+  read: ["正在读取", "Reading"],
+  write: ["正在写入", "Writing"],
+  edit: ["正在修改", "Editing"],
+  ast_edit: ["正在修改", "Editing"],
+  bash: ["正在运行", "Running"],
+  eval: ["正在执行代码", "Evaluating"],
+  grep: ["正在搜索", "Searching"],
+  ast_grep: ["正在搜索", "Searching"],
+  glob: ["正在查找文件", "Finding files"],
+  lsp: ["正在分析代码", "Analyzing code"],
+  web_search: ["正在联网检索", "Searching web"],
+  web: ["正在联网检索", "Fetching web"],
+  browser: ["正在操作浏览器", "Using browser"],
+  task: ["正在派发子 Agent", "Delegating agent"],
+  hub: ["正在协调子 Agent", "Coordinating agents"],
+  todo: ["正在整理任务", "Updating tasks"],
+  think: ["正在思考", "Thinking"],
+  reflect: ["正在思考", "Reflecting"],
+  debug: ["正在调试", "Debugging"],
+  security_scan: ["正在做安全扫描", "Scanning security"],
+  inspect_image: ["正在查看图片", "Inspecting image"],
+  generate_image: ["正在生成图片", "Generating image"],
+  mcp: ["正在调用 MCP", "Calling MCP"],
 };
 
 const DETAIL_MAX_CHARS = 56;
@@ -411,8 +412,9 @@ export function deriveActivityStatus(input: {
   readonly pendingMessages: number;
   readonly awaiting?: boolean;
   readonly retry?: ActivityRetry;
+  readonly zh?: boolean;
 }): ActivityStatus | null {
-  const { state, streaming, pendingMessages, awaiting = false, retry } = input;
+  const { state, streaming, pendingMessages, awaiting = false, retry, zh = isZh() } = input;
   const withRetry = (status: ActivityStatus): ActivityStatus => (
     retry === undefined ? status : { ...status, retry }
   );
@@ -420,16 +422,17 @@ export function deriveActivityStatus(input: {
     const tool = activeTool(state);
     if (tool !== undefined) {
       const kind = toolKind(tool);
-      const label = KIND_VERB[kind] ?? `正在执行 ${toolLabel(tool)}`;
+      const pair = KIND_VERB[kind];
+      const label = pair ? (zh ? pair[0] : pair[1]) : (zh ? `正在执行 ${toolLabel(tool)}` : `Running ${toolLabel(tool)}`);
       const detail = toolDetail(tool);
       return { phase: "tool", label, ...(detail === "" ? {} : { detail }) };
     }
     const blockType = lastLiveBlockType(state);
-    if (blockType === "thinking") return { phase: "thinking", label: "正在思考" };
-    if (blockType === "text") return { phase: "responding", label: "正在回复" };
+    if (blockType === "thinking") return { phase: "thinking", label: zh ? "正在思考" : "Thinking" };
+    if (blockType === "text") return { phase: "responding", label: zh ? "正在回复" : "Responding" };
   }
   if (streaming || awaiting || retry !== undefined) return withRetry({ phase: "waiting", label: WORKING_LABEL });
-  if (pendingMessages > 0) return { phase: "queued", label: `已排队 ${pendingMessages} 条消息` };
+  if (pendingMessages > 0) return { phase: "queued", label: zh ? `已排队 ${pendingMessages} 条消息` : `${pendingMessages} queued ${pendingMessages === 1 ? "message" : "messages"}` };
   return null;
 }
 

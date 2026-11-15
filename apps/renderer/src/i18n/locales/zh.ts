@@ -1,6 +1,7 @@
 type DeepString<T> = { readonly [K in keyof T]: T[K] extends string ? string : DeepString<T[K]> };
 
 const zhRaw = {
+  fileBrowser: { open: "打开文件浏览器", showInBrowser: "在文件浏览器中显示", outsideProject: "项目外" },
   onboarding: {
     kicker: "0.2.0 新工作台",
     stepOf: "第 {current} 步，共 {total} 步",
@@ -278,7 +279,15 @@ const zhRaw = {
     "update": "更新",
     "view": "查看",
     "notSet": "未设",
-    "current": "当前"
+    "current": "当前",
+    "edit": "编辑",
+    "test": "测试",
+    "show": "显示",
+    "hide": "隐藏",
+    "inherit": "继承",
+    "truncated": "已截断",
+    "notInstalled": "未安装",
+    "connecting": "连接中…"
   },
   "menu": {
     "file": "文件",
@@ -372,6 +381,7 @@ const zhRaw = {
     "fileRevealInExplorer": "在{fileManager}中打开",
     "fileManagerWindows": "资源管理器",
     "fileManagerMac": "访达",
+    "fileManagerLinux": "文件管理器",
     "copyAbsolutePath": "复制绝对路径",
     "copyRelativePath": "复制相对路径",
     "fileDesktopOnly": "仅桌面端真实项目可用",
@@ -383,7 +393,7 @@ const zhRaw = {
     "folderName": "文件夹名",
     "refreshTree": "刷新文件树",
     "openInEditor": "在外部编辑器中打开项目",
-    "openInExplorer": "打开系统文件管理器",
+    "openInExplorer": "在{fileManager}中打开",
     "enterName": "请输入名称",
     "singleFileError": "这里只能输入单个文件名或文件夹名",
     "nameRequired": "名称不能为空",
@@ -860,6 +870,7 @@ const zhRaw = {
       "switch": "打开模型选择（临时）",
       "fast": "切换优先服务档位",
       "prewalk": "下一步编辑改用便宜模型",
+      "prewalk-restart": "返回默认模型并重新准备 Prewalk",
       "plan": "切换 Plan 模式",
       "plan-review": "重新打开计划评审",
       "vibe": "切换 Vibe 模式",
@@ -875,6 +886,7 @@ const zhRaw = {
       "shake": "丢掉沉重的工具结果",
       "fresh": "重置供应商流，保留本地记录",
       "clear": "清空上下文，保留会话",
+      "delete": "删除当前会话并开新会话",
       "drop": "删除当前会话并开新会话",
       "new": "开始新会话",
       "rename": "重命名当前会话",
@@ -902,6 +914,7 @@ const zhRaw = {
       "jobs": "后台任务",
       "usage": "供应商用量",
       "stats": "打开用量看板",
+      "local": "编辑原生会话文件",
       "context": "上下文占用",
       "changelog": "更新说明",
       "hotkeys": "打开命令面板",
@@ -1409,6 +1422,12 @@ const zhRaw = {
     "roleDescSubtask": "通用子任务",
     "roleDescAdvisor": "第二模型审查",
     "roleDescWidget": "后台任务实时小组件（未设置时使用 Fast）",
+    "roleDescMemory": "长期记忆提取与整理",
+    "roleDescImage": "图像生成与编辑",
+    "roleDescWeb": "网页抓取与检索总结",
+    "roleDescSpeech": "语音合成（TTS）",
+    "roleDescDictation": "语音转写（听写）",
+    "roleDescJudge": "自动思考与质量评判",
     "newProvider": "新建供应商",
     "editProviderNamed": "编辑 · {name}",
     "presetTemplateNamed": "预设模板：{name}",
@@ -1540,6 +1559,7 @@ const zhRaw = {
     "toastOrderSaved": "已保存顺序",
     "cannotSaveRoleNoPrimary": "无法保存：角色 {labels} 取消后没有主模型，请先设置另一个模型",
     "localOauthCredential": "本机 OAuth 凭据",
+    "noWorkspaceTip": "无工作区",
     "statusDemoNoHost": "演示 · 未写入 Host"
   },
   "settings": {
@@ -2650,6 +2670,8 @@ const zhRaw = {
     "visitGithub": "访问 GitHub 仓库"
   },
   "appUpdate": {
+    "downloadInstaller": "下载安装包",
+    "linuxManualInstall": "下载新版本后，关闭 OMP Studio，再安装 deb 或替换 AppImage。你的配置和会话会保留。Runtime 可继续在应用内更新。",
     "dialogTitle": "发现新版本",
     "currentVersion": "当前版本",
     "latestVersion": "最新版本",
@@ -2823,7 +2845,18 @@ const zhRaw = {
     "capSkills": "能力中心 · Skills",
     "capPlugins": "能力中心 · Plugins",
     "capMcp": "能力中心 · MCP",
-    "capSlash": "能力中心 · Slash 命令"
+    "capSlash": "能力中心 · Slash 命令",
+    "dockRail": "对话工具区",
+    "dockFiles": "打开 Files",
+    "dockUndo": "撤销布局修改",
+    "dockRedo": "重做布局修改",
+    "dockLock": "锁定布局",
+    "dockSnap": "停靠吸附",
+    "dockReset": "恢复出厂布局",
+    "dockDefault": "默认布局",
+    "dockFocus": "专注布局",
+    "dockDebug": "调试布局",
+    "computerSettings": "电脑操作设置"
   },
   "subagents": {
     "title": "子代理",

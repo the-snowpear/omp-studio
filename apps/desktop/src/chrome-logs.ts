@@ -11,6 +11,7 @@ import {
   parseChromeLogsPayload,
   type ChromeLogsResult,
 } from "./chrome-logs-shared.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 export interface ChromeLogsSender {
   isDestroyed(): boolean;
@@ -54,7 +55,7 @@ function fail(message: string): ChromeLogsResult {
 
 function deny(options: ChromeLogsIpcOptions, sender: ChromeLogsSender): ChromeLogsResult | undefined {
   if (sender.isDestroyed() || !options.isTrustedSender(sender)) {
-    return fail("不受信任的调用方。");
+    return fail(desktopText("不受信任的调用方。", "Untrusted caller."));
   }
   return undefined;
 }
@@ -68,21 +69,21 @@ export function registerChromeLogsIpc(options: ChromeLogsIpcOptions): ChromeLogs
   ipc.handle(CHROME_LOGS_CHANNELS.openDir, async (event, payload): Promise<ChromeLogsResult> => {
     const denied = deny(options, event.sender);
     if (denied) return denied;
-    if (!parseChromeLogsPayload(payload)) return fail("请求无效。");
+    if (!parseChromeLogsPayload(payload)) return fail(desktopText("请求无效。", "Invalid request."));
     try {
       await options.actions.mkdirLogs();
       const error = await options.actions.openDirectory();
-      if (error.length > 0) return fail("无法打开日志目录。");
+      if (error.length > 0) return fail(desktopText("无法打开日志目录。", "Could not open the logs directory."));
       return { ok: true };
     } catch {
-      return fail("无法打开日志目录。");
+      return fail(desktopText("无法打开日志目录。", "Could not open the logs directory."));
     }
   });
 
   ipc.handle(CHROME_LOGS_CHANNELS.exportLogs, async (event, payload): Promise<ChromeLogsResult> => {
     const denied = deny(options, event.sender);
     if (denied) return denied;
-    if (!parseChromeLogsPayload(payload)) return fail("请求无效。");
+    if (!parseChromeLogsPayload(payload)) return fail(desktopText("请求无效。", "Invalid request."));
     try {
       await options.actions.mkdirLogs();
       const names = (await options.actions.listBasenames()).filter(isHostLogBasename).sort();
@@ -96,7 +97,7 @@ export function registerChromeLogsIpc(options: ChromeLogsIpcOptions): ChromeLogs
         }
       }
       const text = composeHostLogExport(files);
-      if (text.trim().length === 0) return fail("没有可导出的日志。");
+      if (text.trim().length === 0) return fail(desktopText("没有可导出的日志。", "No logs available to export."));
       const day = new Date().toISOString().slice(0, 10);
       const picked = await options.actions.showSaveDialog(event.sender, {
         defaultPath: `omp-studio-host-logs-${day}.txt`,
@@ -107,7 +108,7 @@ export function registerChromeLogsIpc(options: ChromeLogsIpcOptions): ChromeLogs
       await options.actions.writeFile(picked.filePath, text);
       return { ok: true };
     } catch {
-      return fail("导出失败。");
+      return fail(desktopText("导出失败。", "Export failed."));
     }
   });
 

@@ -6,6 +6,10 @@ macOS 13 or later on Apple Silicon also runs from source, or as an ad hoc signed
 app built with `npm run pack:mac` (not notarized yet; see
 [macOS app](#macos-app-ad-hoc-signed)).
 
+Linux x64 (AVX2 / x86-64-v3) AppImage and deb packages are prepared for the next release, with
+Ubuntu 24.04 / glibc 2.39 as the build baseline. See [Linux installation and
+development](linux.md) for package requirements, sandbox setup and source builds.
+
 ## Requirements
 
 - Node.js 22 or newer, with npm
@@ -71,6 +75,17 @@ source of truth is `omp-patch/overlay/` plus `omp-patch/patches/`.
 Host logs: `%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`; on macOS
 `~/Library/Application Support/omp-studio/logs/host-YYYY-MM-DD.log`.
 
+## Linux desktop
+
+Linux x64 AppImage / deb packages join the next release containing the Linux
+client. The native build targets Ubuntu 24.04 / glibc 2.39+ and includes its signed
+Runtime, Electron and PTY; end users do not need Node, Bun or Rust. Use deb on
+Ubuntu / Debian, or AppImage where FUSE 2 and user namespaces are available.
+Desktop upgrades use manual installer downloads; Runtime updates remain signed
+and available in the app. See [Linux setup](linux.md) for install / uninstall,
+sandbox, XDG paths, `npm run pack:linux` and package acceptance. Linux SSH Host
+archives are separate from desktop installers.
+
 ## Windows installer (unsigned)
 
 Requires a machine that can already `npm run omp:build:host` (Bun, MSVC, Rust,
@@ -127,4 +142,4 @@ when those areas change. They are not required just to run the app.
 
 - [development.md](development.md) — inner loop and patch regen
 - [architecture.md](architecture.md) — what talks to what
-- [releasing.md](releasing.md) — tagging, the Windows installer and the macOS build
+- [releasing.md](releasing.md) — tagging and Windows / macOS / Linux packages

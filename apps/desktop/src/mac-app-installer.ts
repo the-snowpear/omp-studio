@@ -17,6 +17,7 @@ import { basename, dirname, join } from "node:path";
 import { writeJsonAtomic, type ComponentRelease } from "@omp-studio/runtime-installer";
 
 import { macSwapHelperSource, macSwapPaths, type MacSwapOutcome, type MacSwapPlan, type MacSwapStatus } from "./mac-app-swap.js";
+import { desktopText, getDesktopLanguage } from "./desktop-language-shared.js";
 
 export type RunFile = (file: string, args: readonly string[]) => Promise<string>;
 export type SpawnHelper = (execPath: string, args: readonly string[], env: NodeJS.ProcessEnv) => Promise<void>;
@@ -41,7 +42,7 @@ export const MAC_APP_ID = "com.ompstudio.desktop";
 
 const STAGING_PREFIX = ".OMP Studio.update-";
 const BACKUP_PREFIX = ".OMP Studio.previous-";
-const MANUAL_INSTALL = "请从发布页下载 dmg 手动安装。";
+const manualInstall = () => desktopText("请从发布页下载 dmg 手动安装。", "Download the .dmg from the releases page and install manually.");
 
 /** `.../OMP Studio.app/Contents/MacOS/OMP Studio` → `.../OMP Studio.app`. */
 export function macBundlePath(execPath: string): string | undefined {
@@ -100,18 +101,24 @@ export class MacAppInstaller {
   async preflight(requiredBytes?: number): Promise<string | undefined> {
     const bundle = this.#options.bundlePath;
     if (bundle.includes("/AppTranslocation/")) {
-      return "OMP Studio 正从 macOS 的隔离位置运行（App Translocation），无法自行更新。请把它移到“应用程序”文件夹后重新打开。";
+      return desktopText(
+        "OMP Studio 正从 macOS 的隔离位置运行（App Translocation），无法自行更新。请把它移到“应用程序”文件夹后重新打开。",
+        "OMP Studio is running from a macOS quarantined path (App Translocation) and cannot self-update. Move it to the Applications folder and reopen it.",
+      );
     }
     const parent = dirname(bundle);
     try {
       await access(parent, constants.W_OK);
       await rm(await mkdtemp(join(parent, ".OMP Studio.write-")), { recursive: true, force: true });
     } catch {
-      return `没有写入“${parent}”的权限，无法自动更新。${MANUAL_INSTALL}`;
+      return desktopText(
+        `没有写入“${parent}”的权限，无法自动更新。${manualInstall()}`,
+        `No write permission to "${parent}"; cannot auto-update. ${manualInstall()}`,
+      );
     }
     if (requiredBytes !== undefined) {
       const free = await (this.#options.freeBytes ?? availableBytes)(parent).catch(() => Number.POSITIVE_INFINITY);
-      if (free < requiredBytes) return `“${parent}”所在磁盘空间不足，无法自动更新。`;
+      if (free < requiredBytes) return desktopText(`“${parent}”所在磁盘空间不足，无法自动更新。`, `Insufficient disk space on "${parent}"; cannot auto-update.`);
     }
     return undefined;
   }
@@ -126,14 +133,14 @@ export class MacAppInstaller {
     try {
       await this.#run("/usr/bin/ditto", ["-x", "-k", "--noqtn", zipPath, stagingRoot]);
       const staged = join(stagingRoot, basename(target));
-      if (!(await stat(staged).then((entry) => entry.isDirectory(), () => false))) throw new Error(`更新包里没有 ${basename(target)}`);
+      if (!(await stat(staged).then((entry) => entry.isDirectory(), () => false))) throw new Error(desktopText(`更新包里没有 ${basename(target)}`, `Update package does not contain ${basename(target)}`));
       await this.#run("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged]);
       const info = JSON.parse(await this.#run("/usr/bin/plutil", ["-convert", "json", "-o", "-", join(staged, "Contents", "Info.plist")])) as Record<string, unknown>;
-      if (info.CFBundleIdentifier !== this.#options.appId) throw new Error(`更新包的应用标识是 ${String(info.CFBundleIdentifier)}，不是 ${this.#options.appId}`);
+      if (info.CFBundleIdentifier !== this.#options.appId) throw new Error(desktopText(`更新包的应用标识是 ${String(info.CFBundleIdentifier)}，不是 ${this.#options.appId}`, `Update package bundle identifier is ${String(info.CFBundleIdentifier)}, expected ${this.#options.appId}`));
       // Equality, not "newer": restoring the previous version installs an older one.
-      if (info.CFBundleShortVersionString !== release.version) throw new Error(`更新包版本是 ${String(info.CFBundleShortVersionString)}，清单要求 ${release.version}`);
+      if (info.CFBundleShortVersionString !== release.version) throw new Error(desktopText(`更新包版本是 ${String(info.CFBundleShortVersionString)}，清单要求 ${release.version}`, `Update package version is ${String(info.CFBundleShortVersionString)}, manifest requires ${release.version}`));
       if (typeof info.CFBundleExecutable !== "string" || !(await isArm64MachO(join(staged, "Contents", "MacOS", info.CFBundleExecutable)))) {
-        throw new Error("更新包的主程序不是 Apple Silicon (arm64) 可执行文件");
+        throw new Error(desktopText("更新包的主程序不是 Apple Silicon (arm64) 可执行文件", "Update package executable is not an Apple Silicon (arm64) binary"));
       }
 
       const paths = macSwapPaths(this.#options.swapDirectory);
@@ -141,6 +148,7 @@ export class MacAppInstaller {
       for (const stale of [paths.started, paths.healthy, paths.cleanExit, paths.outcome]) await rm(stale, { force: true });
       const plan: MacSwapPlan = {
         schema: 1,
+        locale: getDesktopLanguage(),
         pid: this.#options.pid,
         target,
         staged,

@@ -1,5 +1,6 @@
 import type { CommandName, StudioPlanSaveAndQuitResult } from "@omp-studio/client-contract";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
+import { isZh } from "../i18n";
 import type { RuntimeSettingsApi } from "../SettingsPage";
 import { type ArchivePending } from "./types";
 
@@ -45,7 +46,15 @@ export function runtimeSettingsPropsOf(
 }
 
 /** Keep the save/exit receipt honest when Runtime could not select the new session. */
-export function planSaveAndQuitNotice(result: StudioPlanSaveAndQuitResult, selected: boolean): string {
+export function planSaveAndQuitNotice(result: StudioPlanSaveAndQuitResult, selected: boolean, zh = isZh()): string {
+  if (!zh) {
+    const prefix = `Saved ${result.path} and exited Plan`;
+    if (result.newSession === "cancelled") return `${prefix}; new session creation was cancelled.`;
+    if (result.newSession === "failed") return `${prefix}; failed to create a new session—open it from History.`;
+    return selected
+      ? `${prefix}; created and switched to the new session.`
+      : `${prefix}; created the new session but could not switch automatically—open it from History.`;
+  }
   const prefix = `已保存 ${result.path}，Plan 已退出`;
   if (result.newSession === "cancelled") return `${prefix}；新会话创建已取消。`;
   if (result.newSession === "failed") return `${prefix}；新会话创建失败，请从历史记录打开。`;

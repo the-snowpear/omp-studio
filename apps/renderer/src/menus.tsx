@@ -56,6 +56,7 @@ export type FileMenuAction =
   | { readonly type: "openSystem" }
   | { readonly type: "openWith"; readonly openerId: string }
   | { readonly type: "reveal" }
+  | { readonly type: "browse" }
   | { readonly type: "copyAbsolute" }
   | { readonly type: "copyRelative" }
   | { readonly type: "addContext" };
@@ -79,7 +80,7 @@ export interface FileMenuController {
 }
 
 /** 悬停展开的「打开方式」子菜单（cmp-flyout 模式：宽限关闭 + 左右翻叠）。 */
-function OpenWithZone({ openers, disabled, reason, onPick }: {
+export function OpenWithZone({ openers, disabled, reason, onPick }: {
   openers: ReadonlyArray<FileOpenerOption>;
   disabled: boolean;
   reason?: string | undefined;
@@ -159,7 +160,7 @@ export function FileMenuContent({ target, openers, onRun, desktopActionsReason }
   /** 非 undefined 时（预览演示树 / 非桌面端）桌面依赖项禁用并以 tip 说明原因。 */
   desktopActionsReason?: string | undefined;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const desktopOnly = desktopActionsReason === undefined
     ? {}
     : { disabled: true, title: desktopActionsReason };
@@ -172,7 +173,7 @@ export function FileMenuContent({ target, openers, onRun, desktopActionsReason }
       >
         {t("shell.fileOpen")}
       </MenuItem>
-      {target.kind === "file" ? <MenuItem icon="external" {...desktopOnly} onClick={() => onRun({ type: "openSystem" })}>使用系统应用打开</MenuItem> : null}
+      {target.kind === "file" ? <MenuItem icon="external" {...desktopOnly} onClick={() => onRun({ type: "openSystem" })}>{resolvedLanguage === "zh" ? "使用系统应用打开" : "Open with system app"}</MenuItem> : null}
       <OpenWithZone
         // The native resource resolver validates the selected workspace path before IDA sees it.
         openers={openers}
@@ -185,6 +186,7 @@ export function FileMenuContent({ target, openers, onRun, desktopActionsReason }
       <MenuItem icon="folder-open" onClick={() => onRun({ type: "reveal" })} {...desktopOnly}>
         {t("shell.fileRevealInExplorer", { fileManager: fileManagerName(t) })}
       </MenuItem>
+      {target.kind === "dir" ? <MenuItem icon="drive" onClick={() => onRun({ type: "browse" })}>{t("fileBrowser.showInBrowser")}</MenuItem> : null}
       <MenuItem icon="copy" onClick={() => onRun({ type: "copyAbsolute" })} {...desktopOnly}>
         {t("shell.copyAbsolutePath")}
       </MenuItem>

@@ -7,7 +7,7 @@ export function agentStatusText(status: string, zh: boolean): string {
 }
 
 export function agentPresentation(agent: StudioAgentSnapshot, preview: boolean, zh: boolean) {
-  const demo = preview ? previewAgentDisplay(agent.agentId) : undefined;
+  const demo = preview ? previewAgentDisplay(agent.agentId, zh) : undefined;
   const tone = demo?.tone ?? agent.status;
   const status = demo?.status ?? agentStatusText(agent.status, zh);
   // Waiting comes from the explicit demo adapter only. Runtime lifecycle alone

@@ -21,19 +21,49 @@ function file(asset: string, bytes: Buffer): UpdateFile { return { asset, url: `
 const map = gzipSync(JSON.stringify({ version: "2", files: [{ name: "file", offset: 0, checksums: ["checksum"], sizes: [3] }] }));
 const binary = Buffer.from("new");
 function component(name = "setup.exe", version = "2.0.0"): ComponentRelease { return { version, sequence: 2, channel: "stable", file: file(name, binary), blockmap: file(`${name}.blockmap`, map), minAppVersion: "1.0.0", studioProtocol: { min: 1, max: 1 } }; }
-function signed(parts: Partial<Pick<UpdateManifest, "app" | "runtime">>): SignedUpdateManifest {
+function signed(parts: Partial<Pick<UpdateManifest, "app" | "runtime" | "platform" | "firstInstall">>): SignedUpdateManifest {
   const manifest: UpdateManifest = { schema: 2, repo: "owner/repo", platform: "win32-x64", generatedAt: "2026-09-17T00:00:00Z", releaseNotesUrl: "https://github.com/owner/repo/releases/tag/v2", ...parts };
   return { manifest, signature: { algorithm: "ed25519", keyId: "test", value: sign(null, updateSigningBytes(manifest), pair.privateKey).toString("base64url") } };
 }
 function fetcher(envelopes: SignedUpdateManifest[], counter: string[] = []): typeof fetch {
   return (async (url: string | URL | Request) => {
     const u = String(url); counter.push(u);
-    if (u.includes("api.github.com")) return new Response(JSON.stringify(envelopes.map((e, i) => ({ assets: [{ name: "updates-win32-x64.json", browser_download_url: `https://github.com/owner/repo/releases/download/v${i}/updates-win32-x64.json` }] }))));
-    if (u.endsWith("updates-win32-x64.json")) { const index = Number(/\/v(\d+)\//.exec(u)![1]); return new Response(JSON.stringify(envelopes[index])); }
+    if (u.includes("api.github.com")) return new Response(JSON.stringify(envelopes.map((e, i) => ({ assets: [{ name: `updates-${e.manifest.platform}.json`, browser_download_url: `https://github.com/owner/repo/releases/download/v${i}/updates-${e.manifest.platform}.json` }] }))));
+    if (/\/updates-[\w-]+\.json$/u.test(u)) { const index = Number(/\/v(\d+)\//.exec(u)![1]); return new Response(JSON.stringify(envelopes[index])); }
     const bytes = u.endsWith("blockmap") ? map : binary;
     return new Response(new Uint8Array(bytes), { headers: { "content-length": String(bytes.length) } });
   }) as typeof fetch;
 }
+
+for (const format of ["app", "firstInstall"] as const) test(`Linux ${format} installs expose a signed download while compatible Runtime updates prepare normally`, async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-linux-"));
+  const app = component("OMP-Studio-2.0.0-linux-x64.AppImage");
+  const runtime = component("runtime.zip", "18.0.0-studio.2");
+  const deb = file("OMP-Studio-2.0.0-linux-x64.deb", binary);
+  const requests: string[] = [];
+  const coordinator = new UpdateCoordinator({ root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "linux-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, restart: () => {}, quit: () => {},
+    manualDesktopDownload: format, fetcher: fetcher([signed({ platform: "linux-x64", app, runtime, firstInstall: deb })], requests) });
+  await coordinator.initialize();
+  assert.equal((await coordinator.check()).app.manualInstallUrl, format === "app" ? app.file.url : deb.url);
+  await coordinator.prepare("all");
+  assert.equal(coordinator.state.app.phase, "idle");
+  assert.equal(coordinator.state.runtime.phase, "ready");
+  assert.equal(coordinator.state.error, undefined);
+  assert.equal(requests.some(url => /\.(AppImage|deb)(\.blockmap)?$/u.test(url)), false);
+});
+
+test("Linux waits for a required manual desktop upgrade before downloading an incompatible Runtime", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-linux-minimum-"));
+  const requests: string[] = [];
+  const coordinator = new UpdateCoordinator({ root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "linux-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, restart: () => {}, quit: () => {},
+    fetcher: fetcher([signed({ platform: "linux-x64", app: component("new.AppImage"), runtime: { ...component("runtime.zip", "18.0.0-studio.2"), minAppVersion: "2.0.0" } })], requests) });
+  await coordinator.initialize(); await coordinator.check(); await coordinator.prepare("all");
+  assert.match(coordinator.state.runtime.blockedReason!, /update the desktop app first/u);
+  assert.equal(coordinator.state.error, undefined);
+  assert.equal(requests.some(url => url.endsWith("runtime.zip")), false);
+});
 
 for (const scenario of [
   { name: "downloads by default", initial: {}, duringCheck: {}, checks: 1, downloads: 1 },
@@ -110,9 +140,9 @@ for (const [name, minimum, protocol, appProtocol] of [
       const check = () => handlers.get(CHROME_UPDATES_CHANNELS.check)!({ sender: { isDestroyed: () => false, getURL: () => "file:///qa/index.html" } });
       const first = await check() as { runtime: { plan: string; reason?: string } };
       assert.equal(first.runtime.plan, "blocked");
-      assert.match(first.runtime.reason!, /请先更新桌面/);
+      assert.match(first.runtime.reason!, /update the desktop app first/);
       assert.equal(coordinator.state.runtime.phase, "idle");
-      await assert.rejects(coordinator.prepare("runtime"), /请先更新桌面/);
+      await assert.rejects(coordinator.prepare("runtime"), /update the desktop app first/);
       assert.equal(requests.some(url => url.endsWith("runtime.zip") || url.endsWith("runtime.zip.blockmap")), false);
       await coordinator.prepare("app");
       const paired = await check() as { runtime: { plan: string; reason?: string } };
@@ -188,7 +218,7 @@ test("a failed desktop installation surfaces the incomplete transaction and keep
   const options = { root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([]) };
   const coordinator = new UpdateCoordinator(options);
   await coordinator.initialize();
-  assert.match(coordinator.state.error ?? "", /事务不完整/);
+  assert.match(coordinator.state.error ?? "", /transaction is incomplete/);
   const saved = JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8"));
   assert.equal(saved.authorized, false);
   assert.equal(saved.pending.runtime.manifest.runtime.version, "18.0.0-studio.2");
@@ -305,7 +335,7 @@ for (const target of ["app", "all"] as const) {
     const coordinator = new UpdateCoordinator(options); await coordinator.initialize(); await coordinator.prepare("runtime");
     catalogs.unshift(signed({ app: { ...component(), studioProtocol: { min: 2, max: 2 } } }));
     await coordinator.check();
-    if (target === "all") await assert.rejects(() => coordinator.prepare(target), /兼容/);
+    if (target === "all") await assert.rejects(() => coordinator.prepare(target), /compatible/i);
     else await coordinator.prepare(target);
     const resumed = new UpdateCoordinator(options); await resumed.initialize();
     assert.equal((await resumed.apply()).ok, false);
@@ -329,7 +359,7 @@ test("a prepared desktop rollback survives restart and cannot be overwritten by 
   assert.equal(resumed.state.rollbackAppPending, true);
   assert.equal(resumed.state.app.version, "1.0.0");
   await resumed.check();
-  await assert.rejects(() => resumed.prepare("all"), /回滚已准备/);
+  await assert.rejects(() => resumed.prepare("all"), /rollback is staged/);
   assert.equal((await resumed.apply()).ok, true); assert.equal(installs, 2);
   const restored = new UpdateCoordinator(options); await restored.initialize();
   assert.equal(restored.state.rollbackAppPending, false);

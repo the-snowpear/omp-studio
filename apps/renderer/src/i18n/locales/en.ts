@@ -1,6 +1,7 @@
 import type { LocaleDictionary } from "./zh";
 
 export const en: LocaleDictionary = {
+  fileBrowser: { open: "Open file browser", showInBrowser: "Show in file browser", outsideProject: "Outside project" },
   onboarding: {
     kicker: "New in 0.2.0 · Workbench",
     stepOf: "Step {current} of {total}",
@@ -278,7 +279,15 @@ export const en: LocaleDictionary = {
     "update": "Update",
     "view": "View",
     "notSet": "Not set",
-    "current": "Current"
+    "current": "Current",
+    "edit": "Edit",
+    "test": "Test",
+    "show": "Show",
+    "hide": "Hide",
+    "inherit": "Inherit",
+    "truncated": "Truncated",
+    "notInstalled": "Not installed",
+    "connecting": "Connecting…"
   },
   "menu": {
     "file": "File",
@@ -372,6 +381,7 @@ export const en: LocaleDictionary = {
     "fileRevealInExplorer": "Reveal in {fileManager}",
     "fileManagerWindows": "File Explorer",
     "fileManagerMac": "Finder",
+    "fileManagerLinux": "File Manager",
     "copyAbsolutePath": "Copy Absolute Path",
     "copyRelativePath": "Copy Relative Path",
     "fileDesktopOnly": "Desktop with a real project required",
@@ -860,6 +870,7 @@ export const en: LocaleDictionary = {
       "switch": "Open model picker (temporary)",
       "fast": "Toggle service priority tier",
       "prewalk": "Use cheaper model for next edit step",
+      "prewalk-restart": "Return to default model and re-arm Prewalk",
       "plan": "Toggle Plan mode",
       "plan-review": "Reopen plan review",
       "vibe": "Toggle Vibe mode",
@@ -875,6 +886,7 @@ export const en: LocaleDictionary = {
       "shake": "Drop heavy tool results from context",
       "fresh": "Reset provider stream, keep local record",
       "clear": "Clear context, keep session",
+      "delete": "Delete current session and start new",
       "drop": "Delete current session and start new",
       "new": "Start a new session",
       "rename": "Rename current session",
@@ -902,6 +914,7 @@ export const en: LocaleDictionary = {
       "jobs": "Background jobs",
       "usage": "Provider usage",
       "stats": "Open usage dashboard",
+      "local": "Edit native session files",
       "context": "Context usage",
       "changelog": "Changelog",
       "hotkeys": "Open command palette",
@@ -1409,6 +1422,12 @@ export const en: LocaleDictionary = {
     "roleDescSubtask": "General subtasks",
     "roleDescAdvisor": "Second model review",
     "roleDescWidget": "Live background-job widgets (falls back to Fast)",
+    "roleDescMemory": "Long-term memory extraction and curation",
+    "roleDescImage": "Image generation and editing",
+    "roleDescWeb": "Web fetching and search summarization",
+    "roleDescSpeech": "Text-to-speech synthesis",
+    "roleDescDictation": "Speech-to-text dictation",
+    "roleDescJudge": "Auto-thinking and quality judgment",
     "newProvider": "New Provider",
     "editProviderNamed": "Edit · {name}",
     "presetTemplateNamed": "Preset: {name}",
@@ -1540,6 +1559,7 @@ export const en: LocaleDictionary = {
     "toastOrderSaved": "Saved order",
     "cannotSaveRoleNoPrimary": "Cannot save: role {labels} has no primary model after cancellation, please set another model first",
     "localOauthCredential": "Local OAuth credential",
+    "noWorkspaceTip": "No workspace",
     "statusDemoNoHost": "Demo · Not written to Host"
   },
   "settings": {
@@ -2429,7 +2449,7 @@ export const en: LocaleDictionary = {
     "restartRuntimeDesc": "Stop and restart current managed process; will reconnect automatically. In-progress sessions may be interrupted.",
     "exportLogsLabel": "Export Logs",
     "openLogsLabel": "Open Logs Directory",
-    "openLogsDesc": "Open Host logs directory in file manager.",
+    "openLogsDesc": "Open Host logs directory in {fileManager}.",
     "restartConfirmDesc": "Stops and restarts current managed process, automatically reconnecting afterwards. In-progress sessions may be interrupted.",
     "confirmRestart": "Confirm Restart",
     "reinstallConfirmDesc": "Overwrites current installation with locally signed artifact and reactivates. In-progress sessions may be interrupted.",
@@ -2650,6 +2670,8 @@ export const en: LocaleDictionary = {
     "visitGithub": "Visit GitHub Repository"
   },
   "appUpdate": {
+    "downloadInstaller": "Download installer",
+    "linuxManualInstall": "Download the new version, close OMP Studio, then install the deb or replace the AppImage. Your settings and sessions are retained. Runtime updates remain available in the app.",
     "dialogTitle": "Update Available",
     "currentVersion": "Current Version",
     "latestVersion": "Latest Version",
@@ -2823,7 +2845,18 @@ export const en: LocaleDictionary = {
     "capSkills": "Capabilities · Skills",
     "capPlugins": "Capabilities · Plugins",
     "capMcp": "Capabilities · MCP",
-    "capSlash": "Capabilities · Slash Commands"
+    "capSlash": "Capabilities · Slash Commands",
+    "dockRail": "Conversation tools",
+    "dockFiles": "Open Files",
+    "dockUndo": "Undo layout",
+    "dockRedo": "Redo layout",
+    "dockLock": "Lock layout",
+    "dockSnap": "Dock snapping",
+    "dockReset": "Reset layout",
+    "dockDefault": "Default layout",
+    "dockFocus": "Focus layout",
+    "dockDebug": "Debug layout",
+    "computerSettings": "Computer settings"
   },
   "subagents": {
     "title": "Subagents",

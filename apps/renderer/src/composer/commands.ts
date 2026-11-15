@@ -7,6 +7,7 @@
 import type { CommandName, ThreadId } from "@omp-studio/client-contract";
 import type { CommandSource, OperatorCommandManifest, OperatorCommandManifestEntry } from "@omp-studio/studio-protocol";
 
+import { isZh, pickLocale } from "../i18n";
 import { snapshotFromDoc, snapshotIsEmpty } from "./serialize";
 import type { ComposerDoc, ComposerSnapshot } from "./types";
 
@@ -89,14 +90,14 @@ export const SLASH_GROUP_KEY: Record<SlashGroup, string> = {
 };
 
 export const SLASH_GROUP_LABEL: Record<SlashGroup, string> = {
-  session: "会话",
-  mode: "模式",
-  model: "模型",
-  context: "上下文",
-  capability: "能力",
-  workspace: "工作区",
-  collab: "协作",
-  help: "帮助",
+  session: "Session",
+  mode: "Mode",
+  model: "Model",
+  context: "Context",
+  capability: "Capability",
+  workspace: "Workspace",
+  collab: "Collaboration",
+  help: "Help",
 };
 
 const GROUP_ORDER: readonly SlashGroup[] = ["mode", "model", "session", "context", "capability", "workspace", "collab", "help"];
@@ -163,10 +164,14 @@ function manifestAvailability(entry: OperatorCommandManifestEntry, metadata: Stu
   return entry.availability === "available" ? "available" : "disabled";
 }
 
-function manifestDisabledReason(entry: OperatorCommandManifestEntry, metadata: StudioSlashCommand | undefined): string | undefined {
-  if (entry.presentation === "terminal" && !hasLocalSlashMapping(metadata)) return "此指令需要终端交互，暂不能在 Studio 中执行";
+function manifestDisabledReason(entry: OperatorCommandManifestEntry, metadata: StudioSlashCommand | undefined, zh: boolean): string | undefined {
+  if (entry.presentation === "terminal" && !hasLocalSlashMapping(metadata)) {
+    return zh ? "此指令需要终端交互，暂不能在 Studio 中执行" : "This command requires an interactive terminal and cannot run in Studio yet";
+  }
   if (entry.availability === "available") return undefined;
-  return entry.availability === "blocked" ? "Runtime 已阻止此指令" : "Runtime 已禁用此指令";
+  return entry.availability === "blocked"
+    ? (zh ? "Runtime 已阻止此指令" : "Blocked by Runtime")
+    : (zh ? "Runtime 已禁用此指令" : "Disabled by Runtime");
 }
 
 /**
@@ -177,11 +182,12 @@ function manifestDisabledReason(entry: OperatorCommandManifestEntry, metadata: S
  * the complete Runtime set: static entries may only enrich a matching row
  * (native UI, typed mapping, group, and argument hints), never add a command.
  */
-export function mergeSlashCatalogWithManifest(manifest?: OperatorCommandManifest): StudioSlashCommand[] {
-  if (manifest === undefined) return visibleSlashCatalog();
+export function mergeSlashCatalogWithManifest(manifest?: OperatorCommandManifest, zh = isZh()): StudioSlashCommand[] {
+  if (manifest === undefined) return visibleSlashCatalog(zh);
 
   return manifest.commands.map((entry) => {
-    const metadata = BUILTIN_SLASH_CATALOG.find((command) => manifestMatchesStatic(entry, command));
+    const rawMetadata = BUILTIN_SLASH_CATALOG.find((command) => manifestMatchesStatic(entry, command));
+    const metadata = rawMetadata ? localizeSlashCommand(rawMetadata, zh) : undefined;
     const schemaAllowsArgs = manifestAllowsArgs(entry);
     const allowArgs = metadata?.allowArgs === true || schemaAllowsArgs;
     const localSelect = metadata?.select === "native-ui" || metadata?.typed !== undefined
@@ -190,7 +196,7 @@ export function mergeSlashCatalogWithManifest(manifest?: OperatorCommandManifest
     const select = localSelect ?? (allowArgs ? "complete-args" : "run-now");
     const aliases = [...new Set(entry.aliases.map(bareSlashName).filter((alias) => alias.length > 0))];
     const name = bareSlashName(entry.name);
-    const disabledReason = manifestDisabledReason(entry, metadata);
+    const disabledReason = manifestDisabledReason(entry, metadata, zh);
     return {
       name,
       aliases,
@@ -222,15 +228,15 @@ function onOffStatus(extra: string): readonly SlashSubcommand[] {
 
 /** Full OMP builtin catalog for the composer `/` menu. Hidden entries stay resolvable by alias. */
 export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
-  cmd("help", "列出可用指令", "help", { select: "native-ui", ui: "command-palette" }),
-  cmd("model", "切换本会话模型", "model", {
+  cmd("help", "List available slash commands", "help", { select: "native-ui", ui: "command-palette" }),
+  cmd("model", "Switch model for this session", "model", {
     aliases: ["models"],
     select: "native-ui",
     ui: "model-picker",
     invokeId: "builtin.model",
   }),
-  cmd("switch", "打开模型选择（临时）", "model", { select: "native-ui", ui: "model-picker" }),
-  cmd("fast", "切换优先服务档位", "mode", {
+  cmd("switch", "Open model picker (temporary)", "model", { select: "native-ui", ui: "model-picker" }),
+  cmd("fast", "Toggle service priority tier", "mode", {
     allowArgs: true,
     hint: "[on|off|status]",
     subcommands: onOffStatus("fast mode"),
@@ -241,217 +247,378 @@ export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
     },
     invokeId: "builtin.fast",
   }),
-  cmd("prewalk", "下一步编辑改用便宜模型", "mode", {
+  cmd("prewalk", "Use cheaper model for next edit step", "mode", {
     select: "chip",
     typed: { name: "session.prewalk.arm" },
     invokeId: "builtin.prewalk",
   }),
-  cmd("prewalk-restart", "返回默认模型并重新准备 Prewalk", "mode", {
+  cmd("prewalk-restart", "Return to default model and re-arm Prewalk", "mode", {
     select: "run-now",
     typed: { name: "session.prewalk.restart" },
   }),
-  cmd("plan", "切换 Plan 模式", "mode", {
+  cmd("plan", "Toggle Plan mode", "mode", {
     allowArgs: true,
     hint: "[prompt]",
     select: "chip",
     typed: { name: "mode.plan.enter", fromArgs: (args) => (args ? { initialPrompt: args } : {}) },
   }),
-  cmd("plan-review", "重新打开计划评审", "mode", {
+  cmd("plan-review", "Reopen plan review", "mode", {
     select: "native-ui",
     ui: "plan-review",
     typed: { name: "mode.plan.review.open" },
   }),
-  cmd("vibe", "切换 Vibe 模式", "mode", {
+  cmd("vibe", "Toggle Vibe mode", "mode", {
     allowArgs: true,
     hint: "[prompt]",
     select: "chip",
     typed: { name: "mode.vibe.enter", fromArgs: (args) => (args ? { initialPrompt: args } : {}) },
   }),
-  cmd("goal", "目标模式", "mode", {
+  cmd("goal", "Goal mode", "mode", {
     allowArgs: true,
     hint: "[objective]",
     subcommands: [
-      { name: "set", description: "设置目标", usage: "<objective>" },
-      { name: "show", description: "查看当前目标" },
-      { name: "pause", description: "暂停目标" },
-      { name: "resume", description: "恢复目标" },
-      { name: "drop", description: "丢弃目标" },
-      { name: "budget", description: "调整 token 预算", usage: "<N|off>" },
+      { name: "set", description: "Set objective", usage: "<objective>" },
+      { name: "show", description: "Show current objective" },
+      { name: "pause", description: "Pause objective" },
+      { name: "resume", description: "Resume objective" },
+      { name: "drop", description: "Drop objective" },
+      { name: "budget", description: "Adjust token budget", usage: "<N|off>" },
     ],
     select: "chip",
     typed: { name: "goal.create", fromArgs: (args) => ({ objective: args || "Continue current work" }) },
   }),
-  cmd("guided-goal", "访谈后进入目标模式", "mode", {
+  cmd("guided-goal", "Interview before entering goal mode", "mode", {
     select: "run-now",
     typed: { name: "goal.guided.start" },
   }),
-  cmd("loop", "循环重提下一条消息", "mode", {
+  cmd("loop", "Loop and re-prompt next message", "mode", {
     allowArgs: true,
     hint: "[count|duration] [prompt]",
     select: "chip",
     typed: { name: "loop.enable", fromArgs: (args) => (args ? { prompt: args } : {}) },
   }),
-  cmd("queue", "排队到本轮结束后发送", "session", {
+  cmd("queue", "Queue to send after current turn", "session", {
     allowArgs: true,
     hint: "<message>",
     select: "complete-args",
     typed: { name: "queue.enqueue", fromArgs: (args) => ({ text: args }) },
   }),
-  cmd("settings", "打开设置", "help", { select: "native-ui", ui: "settings" }),
-  cmd("setup", "打开供应商配置", "capability", { aliases: ["providers"], select: "native-ui", ui: "model-config" }),
-  cmd("login", "登录供应商", "capability", { select: "native-ui", ui: "model-config" }),
-  cmd("logout", "登出供应商", "capability", { select: "native-ui", ui: "model-config" }),
-  cmd("compact", "压缩当前会话上下文", "context", {
+  cmd("settings", "Open settings", "help", { select: "native-ui", ui: "settings" }),
+  cmd("setup", "Open provider configuration", "capability", { aliases: ["providers"], select: "native-ui", ui: "model-config" }),
+  cmd("login", "Log in to provider", "capability", { select: "native-ui", ui: "model-config" }),
+  cmd("logout", "Log out from provider", "capability", { select: "native-ui", ui: "model-config" }),
+  cmd("compact", "Compact current conversation context", "context", {
     allowArgs: true,
     hint: "[soft|remote|snapcompact] [focus]",
     subcommands: [
-      { name: "soft", description: "软压缩", usage: "[focus]" },
-      { name: "remote", description: "远程压缩", usage: "[focus]" },
-      { name: "snapcompact", description: "快照压缩" },
+      { name: "soft", description: "Soft compact", usage: "[focus]" },
+      { name: "remote", description: "Remote compact", usage: "[focus]" },
+      { name: "snapcompact", description: "Snapshot compact" },
     ],
     select: "complete-args",
     invokeId: "builtin.compact",
   }),
-  cmd("shake", "丢掉沉重的工具结果", "context", {
+  cmd("shake", "Drop heavy tool results from context", "context", {
     allowArgs: true,
     hint: "[elide|images]",
     subcommands: [
-      { name: "elide", description: "去掉工具结果和大块" },
-      { name: "images", description: "去掉图片块" },
+      { name: "elide", description: "Drop tool results and large blocks" },
+      { name: "images", description: "Drop image blocks" },
     ],
     select: "complete-args",
     invokeId: "builtin.shake",
   }),
-  cmd("fresh", "重置供应商流，保留本地记录", "context", { select: "run-now", invokeId: "builtin.fresh" }),
-  cmd("clear", "清空上下文，保留会话", "context", {
+  cmd("fresh", "Reset provider stream, keep local record", "context", { select: "run-now", invokeId: "builtin.fresh" }),
+  cmd("clear", "Clear context, keep session", "context", {
     select: "run-now",
     risk: "destructive",
     typed: { name: "session.clearContext" },
   }),
-  cmd("delete", "删除当前会话并开新会话", "session", {
+  cmd("delete", "Delete current session and start new", "session", {
     aliases: ["drop"],
     select: "run-now",
     risk: "destructive",
     typed: { name: "session.drop" },
   }),
-  cmd("new", "开始新会话", "session", { select: "native-ui", ui: "new-chat" }),
-  cmd("rename", "重命名当前会话", "session", { allowArgs: true, hint: "<title>", select: "complete-args", invokeId: "builtin.rename" }),
-  cmd("handoff", "交接上下文到新会话", "session", {
+  cmd("new", "Start a new session", "session", { select: "native-ui", ui: "new-chat" }),
+  cmd("rename", "Rename current session", "session", { allowArgs: true, hint: "<title>", select: "complete-args", invokeId: "builtin.rename" }),
+  cmd("handoff", "Hand off context to new session", "session", {
     select: "run-now",
     typed: { name: "session.handoff" },
   }),
-  cmd("resume", "切换到另一会话", "session", { select: "native-ui", ui: "history" }),
-  cmd("retry", "重试上一轮失败", "session", { select: "run-now", typed: { name: "turn.retry" } }),
-  cmd("fork", "从先前消息分叉", "session", { select: "run-now", typed: { name: "session.fork" } }),
-  cmd("branch", "从先前消息建分支", "session", { select: "native-ui", ui: "user-message-branch" }),
-  cmd("tree", "打开会话树", "session", { select: "native-ui", ui: "session-tree" }),
-  cmd("session", "会话信息 / 删除 / 固定账号", "session", {
+  cmd("resume", "Switch to another session", "session", { select: "native-ui", ui: "history" }),
+  cmd("retry", "Retry last failed turn", "session", { select: "run-now", typed: { name: "turn.retry" } }),
+  cmd("fork", "Fork from previous message", "session", { select: "run-now", typed: { name: "session.fork" } }),
+  cmd("branch", "Create branch from previous message", "session", { select: "native-ui", ui: "user-message-branch" }),
+  cmd("tree", "Open session tree", "session", { select: "native-ui", ui: "session-tree" }),
+  cmd("session", "Session info / delete / pin account", "session", {
     allowArgs: true,
     hint: "[info|delete|pin]",
     subcommands: [
-      { name: "info", description: "会话信息" },
-      { name: "delete", description: "删除当前会话" },
-      { name: "pin", description: "固定 OAuth 账号", usage: "[account]" },
+      { name: "info", description: "Session info" },
+      { name: "delete", description: "Delete current session" },
+      { name: "pin", description: "Pin OAuth account", usage: "[account]" },
     ],
     select: "complete-args",
     invokeId: "builtin.session",
     risk: "sensitive",
   }),
-  cmd("pause", "暂停 Runtime", "session", { select: "run-now", typed: { name: "runtime.pause" } }),
-  cmd("btw", "旁路问答与历史", "session", { allowArgs: true, hint: "[question]", select: "run-now", typed: { name: "btw.ask", fromArgs: (args) => ({ question: args }) } }),
-  cmd("tan", "后台旁路代理", "session", { allowArgs: true, hint: "<work>", select: "complete-args", typed: { name: "tan.start", fromArgs: (args) => ({ work: args }) } }),
-  cmd("omfg", "生成 TTSR 规则", "session", { allowArgs: true, hint: "<complaint>", select: "complete-args", typed: { name: "omfg.generate", fromArgs: (args) => ({ complaint: args }) } }),
-  cmd("computer", "本会话 computer-use", "mode", {
+  cmd("pause", "Pause Runtime", "session", { select: "run-now", typed: { name: "runtime.pause" } }),
+  cmd("btw", "Side-channel Q&A and history", "session", { allowArgs: true, hint: "[question]", select: "run-now", typed: { name: "btw.ask", fromArgs: (args) => ({ question: args }) } }),
+  cmd("tan", "Background side-channel agent", "session", { allowArgs: true, hint: "<work>", select: "complete-args", typed: { name: "tan.start", fromArgs: (args) => ({ work: args }) } }),
+  cmd("omfg", "Generate TTSR rules", "session", { allowArgs: true, hint: "<complaint>", select: "complete-args", typed: { name: "omfg.generate", fromArgs: (args) => ({ complaint: args }) } }),
+  cmd("computer", "Session computer-use", "mode", {
     allowArgs: true,
     hint: "[on|off|status]",
     subcommands: onOffStatus("computer use"),
     select: "complete-args",
     invokeId: "builtin.computer",
   }),
-  cmd("vision", "本会话 inspect_image", "mode", {
+  cmd("vision", "Session inspect_image", "mode", {
     allowArgs: true,
     hint: "[on|off|auto|status]",
     subcommands: [
-      { name: "on", description: "始终暴露 inspect_image" },
-      { name: "off", description: "隐藏 inspect_image" },
-      { name: "auto", description: "跟随设置" },
-      { name: "status", description: "查看状态" },
+      { name: "on", description: "Always expose inspect_image" },
+      { name: "off", description: "Hide inspect_image" },
+      { name: "auto", description: "Follow settings" },
+      { name: "status", description: "Show status" },
     ],
     select: "complete-args",
     invokeId: "builtin.vision",
   }),
-  cmd("advisor", "第二模型顾问", "mode", {
+  cmd("advisor", "Second-model advisor", "mode", {
     allowArgs: true,
     hint: "[on|off|status|dump|configure]",
     subcommands: [
-      { name: "on", description: "启用顾问" },
-      { name: "off", description: "关闭顾问" },
-      { name: "status", description: "顾问状态" },
-      { name: "dump", description: "复制顾问记录", usage: "[raw]" },
-      { name: "configure", description: "配置顾问" },
+      { name: "on", description: "Enable advisor" },
+      { name: "off", description: "Disable advisor" },
+      { name: "status", description: "Advisor status" },
+      { name: "dump", description: "Copy advisor transcript", usage: "[raw]" },
+      { name: "configure", description: "Configure advisor" },
     ],
     select: "complete-args",
     invokeId: "builtin.advisor",
   }),
-  cmd("mcp", "管理 MCP 服务器", "capability", {
+  cmd("mcp", "Manage MCP servers", "capability", {
     select: "native-ui",
     ui: "capabilities-mcp",
     invokeId: "builtin.mcp",
   }),
-  cmd("plugins", "列出或开关插件", "capability", {
+  cmd("plugins", "List or toggle plugins", "capability", {
     select: "native-ui",
     ui: "capabilities-plugins",
     invokeId: "builtin.plugins",
   }),
-  cmd("marketplace", "插件市场", "capability", { select: "native-ui", ui: "capabilities-plugins", invokeId: "builtin.marketplace" }),
-  cmd("reload-plugins", "重载技能 / 指令 / MCP", "capability", { select: "run-now", invokeId: "builtin.reload-plugins" }),
-  cmd("extensions", "扩展控制台", "capability", { aliases: ["status"], select: "native-ui", ui: "capabilities-slash" }),
-  cmd("agents", "打开 Agent Hub", "capability", { select: "native-ui", ui: "agent-hub" }),
-  cmd("tools", "列出活动工具", "capability", { select: "run-now", invokeId: "builtin.tools" }),
-  cmd("jobs", "后台任务", "capability", { select: "run-now", invokeId: "builtin.jobs" }),
-  cmd("usage", "供应商用量", "help", { select: "run-now", invokeId: "builtin.usage" }),
-  cmd("stats", "打开用量看板", "help", { select: "run-now", invokeId: "builtin.stats" }),
-  cmd("local", "编辑原生会话文件", "context", { ui: "local-files", allowArgs: true }),
-  cmd("context", "检查上下文正文与 token 估算", "context", { ui: "context-viewer" }),
-  cmd("changelog", "更新说明", "help", { select: "run-now", invokeId: "builtin.changelog" }),
-  cmd("hotkeys", "打开命令面板", "help", { select: "native-ui", ui: "command-palette" }),
-  cmd("todo", "待办列表", "session", { allowArgs: true, hint: "<subcommand>", select: "complete-args", invokeId: "builtin.todo" }),
-  cmd("memory", "记忆后端", "context", {
+  cmd("marketplace", "Plugin marketplace", "capability", { select: "native-ui", ui: "capabilities-plugins", invokeId: "builtin.marketplace" }),
+  cmd("reload-plugins", "Reload skills / commands / MCP", "capability", { select: "run-now", invokeId: "builtin.reload-plugins" }),
+  cmd("extensions", "Extensions console", "capability", { aliases: ["status"], select: "native-ui", ui: "capabilities-slash" }),
+  cmd("agents", "Open Agent Hub", "capability", { select: "native-ui", ui: "agent-hub" }),
+  cmd("tools", "List active tools", "capability", { select: "run-now", invokeId: "builtin.tools" }),
+  cmd("jobs", "Background jobs", "capability", { select: "run-now", invokeId: "builtin.jobs" }),
+  cmd("usage", "Provider usage", "help", { select: "run-now", invokeId: "builtin.usage" }),
+  cmd("stats", "Open usage dashboard", "help", { select: "run-now", invokeId: "builtin.stats" }),
+  cmd("local", "Edit native session files", "context", { ui: "local-files", allowArgs: true }),
+  cmd("context", "Inspect context body and token estimate", "context", { ui: "context-viewer" }),
+  cmd("changelog", "Changelog", "help", { select: "run-now", invokeId: "builtin.changelog" }),
+  cmd("hotkeys", "Open command palette", "help", { select: "native-ui", ui: "command-palette" }),
+  cmd("todo", "Todo list", "session", { allowArgs: true, hint: "<subcommand>", select: "complete-args", invokeId: "builtin.todo" }),
+  cmd("memory", "Memory backend", "context", {
     allowArgs: true,
     hint: "<subcommand>",
     subcommands: [
-      { name: "view", description: "查看注入内容" },
-      { name: "stats", description: "后端统计" },
-      { name: "diagnose", description: "诊断" },
-      { name: "clear", description: "清空记忆" },
-      { name: "reset", description: "clear 的别名" },
-      { name: "enqueue", description: "排队整理" },
-      { name: "rebuild", description: "enqueue 的别名" },
+      { name: "view", description: "View injected entries" },
+      { name: "stats", description: "Backend stats" },
+      { name: "diagnose", description: "Diagnose" },
+      { name: "clear", description: "Clear memory" },
+      { name: "reset", description: "Alias for clear" },
+      { name: "enqueue", description: "Queue consolidation" },
+      { name: "rebuild", description: "Alias for enqueue" },
     ],
     select: "complete-args",
     invokeId: "builtin.memory",
     risk: "sensitive",
   }),
-  cmd("export", "导出会话 HTML", "session", { select: "run-now", invokeId: "builtin.export" }),
-  cmd("dump", "导出完整记录", "session", { select: "run-now", invokeId: "builtin.dump" }),
-  cmd("copy", "从对话复制", "session", { allowArgs: true, hint: "[code|cmd]", availability: "disabled", disabledReason: "复制（暂未实现）", select: "run-now" }),
-  cmd("debug", "调试工具", "help", { availability: "disabled", disabledReason: "调试（暂未实现）", select: "run-now" }),
-  cmd("security", "安全扫描", "capability", { allowArgs: true, hint: "<subcommand>", select: "complete-args", invokeId: "builtin.security" }),
-  cmd("ssh", "SSH 主机", "workspace", { allowArgs: true, hint: "<subcommand>", select: "complete-args", invokeId: "builtin.ssh" }),
-  cmd("move", "移动会话工作目录", "workspace", { allowArgs: true, hint: "[<path>]", select: "complete-args", invokeId: "builtin.move" }),
-  cmd("add-dir", "加入工作区根目录", "workspace", { allowArgs: true, hint: "<path>", select: "complete-args", invokeId: "builtin.add-dir" }),
-  cmd("remove-dir", "移除工作区根目录", "workspace", { allowArgs: true, hint: "<path>", select: "complete-args", invokeId: "builtin.remove-dir" }),
-  cmd("dirs", "列出工作区目录", "workspace", { select: "run-now", invokeId: "builtin.dirs" }),
-  cmd("force", "下一轮强制使用指定工具", "mode", { aliases: ["force:"], allowArgs: true, hint: "<tool-name> [prompt]", select: "complete-args", invokeId: "builtin.force" }),
-  cmd("share", "生成分享链接", "collab", { select: "run-now", invokeId: "builtin.share" }),
-  cmd("collab", "实时协作", "collab", { allowArgs: true, hint: "[start|view|stop|status]", availability: "disabled", disabledReason: "协作（暂未实现）", select: "complete-args" }),
-  cmd("join", "加入协作", "collab", { allowArgs: true, hint: "<link>", availability: "disabled", disabledReason: "协作（暂未实现）", select: "complete-args" }),
-  cmd("leave", "离开协作", "collab", { availability: "disabled", disabledReason: "协作（暂未实现）", select: "run-now" }),
-  cmd("browser", "浏览器可见性", "capability", { allowArgs: true, hint: "[headless|visible]", select: "complete-args", invokeId: "builtin.browser" }),
-  cmd("live", "实时语音", "collab", { availability: "hidden", select: "run-now" }),
-  cmd("quit", "退出应用", "help", { aliases: ["q"], availability: "hidden", select: "run-now" }),
-  cmd("exit", "退出应用", "help", { availability: "hidden", select: "run-now" }),
+  cmd("export", "Export session HTML", "session", { select: "run-now", invokeId: "builtin.export" }),
+  cmd("dump", "Export full session transcript", "session", { select: "run-now", invokeId: "builtin.dump" }),
+  cmd("copy", "Copy from conversation", "session", { allowArgs: true, hint: "[code|cmd]", availability: "disabled", disabledReason: "Copy (not implemented yet)", select: "run-now" }),
+  cmd("debug", "Debugging tools", "help", { availability: "disabled", disabledReason: "Debug (not implemented yet)", select: "run-now" }),
+  cmd("security", "Security scan", "capability", { allowArgs: true, hint: "<subcommand>", select: "complete-args", invokeId: "builtin.security" }),
+  cmd("ssh", "SSH hosts", "workspace", { allowArgs: true, hint: "<subcommand>", select: "complete-args", invokeId: "builtin.ssh" }),
+  cmd("move", "Move session working directory", "workspace", { allowArgs: true, hint: "[<path>]", select: "complete-args", invokeId: "builtin.move" }),
+  cmd("add-dir", "Add workspace root directory", "workspace", { allowArgs: true, hint: "<path>", select: "complete-args", invokeId: "builtin.add-dir" }),
+  cmd("remove-dir", "Remove workspace root directory", "workspace", { allowArgs: true, hint: "<path>", select: "complete-args", invokeId: "builtin.remove-dir" }),
+  cmd("dirs", "List workspace directories", "workspace", { select: "run-now", invokeId: "builtin.dirs" }),
+  cmd("force", "Force specific tool in next turn", "mode", { aliases: ["force:"], allowArgs: true, hint: "<tool-name> [prompt]", select: "complete-args", invokeId: "builtin.force" }),
+  cmd("share", "Generate share link", "collab", { select: "run-now", invokeId: "builtin.share" }),
+  cmd("collab", "Realtime collaboration", "collab", { allowArgs: true, hint: "[start|view|stop|status]", availability: "disabled", disabledReason: "Collaboration (not implemented yet)", select: "complete-args" }),
+  cmd("join", "Join collaboration", "collab", { allowArgs: true, hint: "<link>", availability: "disabled", disabledReason: "Collaboration (not implemented yet)", select: "complete-args" }),
+  cmd("leave", "Leave collaboration", "collab", { availability: "disabled", disabledReason: "Collaboration (not implemented yet)", select: "run-now" }),
+  cmd("browser", "Browser visibility", "capability", { allowArgs: true, hint: "[headless|visible]", select: "complete-args", invokeId: "builtin.browser" }),
+  cmd("live", "Realtime voice", "collab", { availability: "hidden", select: "run-now" }),
+  cmd("quit", "Quit application", "help", { aliases: ["q"], availability: "hidden", select: "run-now" }),
+  cmd("exit", "Exit application", "help", { availability: "hidden", select: "run-now" }),
 ];
+
+type SlashZhOverride = {
+  readonly description?: string;
+  readonly disabledReason?: string;
+  readonly subcommands?: Record<string, string>;
+};
+
+const SLASH_ZH_OVERRIDES: Record<string, SlashZhOverride> = {
+  help: { description: "列出可用指令" },
+  model: { description: "切换本会话模型" },
+  switch: { description: "打开模型选择（临时）" },
+  fast: { description: "切换优先服务档位" },
+  prewalk: { description: "下一步编辑改用便宜模型" },
+  "prewalk-restart": { description: "返回默认模型并重新准备 Prewalk" },
+  plan: { description: "切换 Plan 模式" },
+  "plan-review": { description: "重新打开计划评审" },
+  vibe: { description: "切换 Vibe 模式" },
+  goal: {
+    description: "目标模式",
+    subcommands: {
+      set: "设置目标",
+      show: "查看当前目标",
+      pause: "暂停目标",
+      resume: "恢复目标",
+      drop: "丢弃目标",
+      budget: "调整 token 预算",
+    },
+  },
+  "guided-goal": { description: "访谈后进入目标模式" },
+  loop: { description: "循环重提下一条消息" },
+  queue: { description: "排队到本轮结束后发送" },
+  settings: { description: "打开设置" },
+  setup: { description: "打开供应商配置" },
+  login: { description: "登录供应商" },
+  logout: { description: "登出供应商" },
+  compact: {
+    description: "压缩当前会话上下文",
+    subcommands: {
+      soft: "软压缩",
+      remote: "远程压缩",
+      snapcompact: "快照压缩",
+    },
+  },
+  shake: {
+    description: "丢掉沉重的工具结果",
+    subcommands: {
+      elide: "去掉工具结果和大块",
+      images: "去掉图片块",
+    },
+  },
+  fresh: { description: "重置供应商流，保留本地记录" },
+  clear: { description: "清空上下文，保留会话" },
+  delete: { description: "删除当前会话并开新会话" },
+  new: { description: "开始新会话" },
+  rename: { description: "重命名当前会话" },
+  handoff: { description: "交接上下文到新会话" },
+  resume: { description: "切换到另一会话" },
+  retry: { description: "重试上一轮失败" },
+  fork: { description: "从先前消息分叉" },
+  branch: { description: "从先前消息建分支" },
+  tree: { description: "打开会话树" },
+  session: {
+    description: "会话信息 / 删除 / 固定账号",
+    subcommands: {
+      info: "会话信息",
+      delete: "删除当前会话",
+      pin: "固定 OAuth 账号",
+    },
+  },
+  pause: { description: "暂停 Runtime" },
+  btw: { description: "旁路问答与历史" },
+  tan: { description: "后台旁路代理" },
+  omfg: { description: "生成 TTSR 规则" },
+  computer: { description: "本会话 computer-use" },
+  vision: {
+    description: "本会话 inspect_image",
+    subcommands: {
+      on: "始终暴露 inspect_image",
+      off: "隐藏 inspect_image",
+      auto: "跟随设置",
+      status: "查看状态",
+    },
+  },
+  advisor: {
+    description: "第二模型顾问",
+    subcommands: {
+      on: "启用顾问",
+      off: "关闭顾问",
+      status: "顾问状态",
+      dump: "复制顾问记录",
+      configure: "配置顾问",
+    },
+  },
+  mcp: { description: "管理 MCP 服务器" },
+  plugins: { description: "列出或开关插件" },
+  marketplace: { description: "插件市场" },
+  "reload-plugins": { description: "重载技能 / 指令 / MCP" },
+  extensions: { description: "扩展控制台" },
+  agents: { description: "打开 Agent Hub" },
+  tools: { description: "列出活动工具" },
+  jobs: { description: "后台任务" },
+  usage: { description: "供应商用量" },
+  stats: { description: "打开用量看板" },
+  local: { description: "编辑原生会话文件" },
+  context: { description: "检查上下文正文与 token 估算" },
+  changelog: { description: "更新说明" },
+  hotkeys: { description: "打开命令面板" },
+  todo: { description: "待办列表" },
+  memory: {
+    description: "记忆后端",
+    subcommands: {
+      view: "查看注入内容",
+      stats: "后端统计",
+      diagnose: "诊断",
+      clear: "清空记忆",
+      reset: "clear 的别名",
+      enqueue: "排队整理",
+      rebuild: "enqueue 的别名",
+    },
+  },
+  export: { description: "导出会话 HTML" },
+  dump: { description: "导出完整记录" },
+  copy: { description: "从对话复制", disabledReason: "复制（暂未实现）" },
+  debug: { description: "调试工具", disabledReason: "调试（暂未实现）" },
+  security: { description: "安全扫描" },
+  ssh: { description: "SSH 主机" },
+  move: { description: "移动会话工作目录" },
+  "add-dir": { description: "加入工作区根目录" },
+  "remove-dir": { description: "移除工作区根目录" },
+  dirs: { description: "列出工作区目录" },
+  force: { description: "下一轮强制使用指定工具" },
+  share: { description: "生成分享链接" },
+  collab: { description: "实时协作", disabledReason: "协作（暂未实现）" },
+  join: { description: "加入协作", disabledReason: "协作（暂未实现）" },
+  leave: { description: "离开协作", disabledReason: "协作（暂未实现）" },
+  browser: { description: "浏览器可见性" },
+  live: { description: "实时语音" },
+  quit: { description: "退出应用" },
+  exit: { description: "退出应用" },
+};
+
+function localizeSlashCommand(command: StudioSlashCommand, zh: boolean): StudioSlashCommand {
+  if (!zh) return command;
+  const override = SLASH_ZH_OVERRIDES[command.name];
+  if (!override) return command;
+  return {
+    ...command,
+    ...(override.description === undefined ? {} : { description: override.description }),
+    ...(override.disabledReason === undefined || command.disabledReason === undefined
+      ? {}
+      : { disabledReason: override.disabledReason }),
+    ...(command.subcommands && override.subcommands
+      ? {
+          subcommands: command.subcommands.map((sub) => {
+            const subDesc = override.subcommands?.[sub.name];
+            return subDesc === undefined ? sub : { ...sub, description: subDesc };
+          }),
+        }
+      : {}),
+  };
+}
 
 const CATALOG_BY_NAME = new Map<string, StudioSlashCommand>();
 for (const command of BUILTIN_SLASH_CATALOG) {
@@ -495,12 +662,17 @@ export function parseSlashDraft(text: string): SlashDraft | null {
 
 export function lookupSlashCommand(name: string, catalog?: readonly StudioSlashCommand[]): StudioSlashCommand | undefined {
   const key = normalizedSlashName(name);
-  if (catalog === undefined) return CATALOG_BY_NAME.get(key);
-  return catalog.find((command) => [command.name, ...command.aliases].some((candidate) => normalizedSlashName(candidate) === key));
+  const zh = isZh();
+  if (catalog === undefined) {
+    const found = CATALOG_BY_NAME.get(key);
+    return found ? localizeSlashCommand(found, zh) : undefined;
+  }
+  const found = catalog.find((command) => [command.name, ...command.aliases].some((candidate) => normalizedSlashName(candidate) === key));
+  return found ? localizeSlashCommand(found, zh) : undefined;
 }
 
-export function visibleSlashCatalog(): StudioSlashCommand[] {
-  return BUILTIN_SLASH_CATALOG.filter((command) => command.availability !== "hidden");
+export function visibleSlashCatalog(zh = isZh()): StudioSlashCommand[] {
+  return BUILTIN_SLASH_CATALOG.filter((command) => command.availability !== "hidden").map((command) => localizeSlashCommand(command, zh));
 }
 
 function scoreCommand(command: StudioSlashCommand, needle: string): number {
@@ -608,7 +780,10 @@ export function bindSlashTypedCommand(
   if (execute.name === "session.drop") {
     const threadId = context.threadId;
     if (threadId === undefined || threadId.length === 0) {
-      return { ok: false, error: "没有当前会话，无法执行 /delete" };
+      return {
+        ok: false,
+        error: pickLocale("没有当前会话，无法执行 /delete", "No active session; cannot run /delete"),
+      };
     }
     return { ok: true, name: "session.drop", input: { threadId } };
   }

@@ -23,7 +23,7 @@ import { MenuItem } from "../menus";
 import { useI18n } from "../i18n";
 import { useViewedSessionTelemetry, type ViewedSessionTelemetryState } from "../telemetry/useViewedSessionTelemetry";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { PREVIEW_PROJECTS, findPreviewProject, findPreviewThread } from "../preview/fixtures";
+import { getPreviewProjects, findPreviewProject, findPreviewThread } from "../preview/fixtures";
 import { PreviewContextPanel, PreviewContextTrigger, PreviewTokenTrigger } from "../preview/surfaces";
 import { usableCapabilityManifest } from "../deck/interactionGate";
 import { sidebarProjectOrder } from "../sidebar/projectOrder";
@@ -122,8 +122,9 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
   const sessionLive = liveSnapshot !== undefined;
   const sessionBusy = liveSnapshot?.isStreaming === true || liveSnapshot?.isCompacting === true;
   const sessionActionReason = !sessionLive ? t("common.unavailable") : t("common.loading");
-  const previewProject = findPreviewProject(chrome.previewProjectId);
-  const previewHit = findPreviewThread(chrome.previewThreadId);
+  const zh = resolvedLanguage === "zh";
+  const previewProject = findPreviewProject(chrome.previewProjectId, zh);
+  const previewHit = findPreviewThread(chrome.previewThreadId, zh);
   const realActiveWorkspace = state.model.workspaces?.workspaces.find(workspace => workspace.workspaceId === conversation?.document.ref.workspaceId)
     ?? state.model.workspaces?.workspaces.find(workspace => workspace.active);
   // 与侧栏项目树同一顺序，避免「切换项目」菜单在每次切换后重排。
@@ -190,7 +191,7 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
   /** Project and branch menus, shared by the top bar breadcrumb and (in window mode) each window's title row. */
   const projectMenu = (finish: (action: () => void) => void, fromWindow = false) => <>
     <div className="menu-label">{t("shell.switchProject")}</div>
-    {preview ? PREVIEW_PROJECTS.map((project) => (
+    {preview ? getPreviewProjects(zh).map((project) => (
       <MenuItem
         key={project.id}
         icon="folder-open"

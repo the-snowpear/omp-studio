@@ -3,13 +3,14 @@ import { execFileSync } from "node:child_process";
 import { createHash, createPublicKey, verify } from "node:crypto";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assertReleaseNoteAssets, legacyIndexName, platformOfReleaseCandidate } from "./release-assets.mjs";
+import { assertReleaseNoteAssets, firstInstallAssetName, legacyIndexName, platformOfReleaseCandidate } from "./release-assets.mjs";
 const repo = process.env.GITHUB_REPOSITORY;
 if (!repo) throw new Error("GITHUB_REPOSITORY is required");
 const gh = (...args) => execFileSync("gh", args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
 const canonical = v => Array.isArray(v) ? `[${v.map(canonical).join(",")}]` : v !== null && typeof v === "object" ? `{${Object.entries(v).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(",")}}` : JSON.stringify(v);
 const table = JSON.parse(await readFile("packaging/keys/trusted-keys.json", "utf8"));
 const artifacts = [], notes = [], identities = [];
+const publishedPlatforms = new Set();
 for (const dir of await readdir("outputs/publish")) {
   if (dir.startsWith("release-candidate-remote-")) {
     const platform = dir.slice("release-candidate-remote-".length);
@@ -29,6 +30,7 @@ for (const dir of await readdir("outputs/publish")) {
   }
   const platform = platformOfReleaseCandidate(dir);
   if (platform === undefined) throw new Error("Unexpected release candidate");
+  publishedPlatforms.add(platform);
   const root = join("outputs/publish", dir);
   const name = `updates-${platform}.json`;
   const envelope = JSON.parse(await readFile(join(root, name), "utf8"));
@@ -46,12 +48,14 @@ for (const dir of await readdir("outputs/publish")) {
     if (bytes.length !== file.size || createHash("sha256").update(bytes).digest("hex") !== file.sha256 || file.url !== `https://github.com/${repo}/releases/download/${tag}/${file.asset}`) throw new Error("Candidate asset verification failed");
     allowed.add(file.asset);
   }
-  // The macOS dmg: a first-install download whose digest is signed with the catalog.
+  // Manual installers (macOS dmg, Linux deb) have signed digests too.
   if (m.firstInstall !== undefined) {
     const file = m.firstInstall;
     const bytes = await readFile(join(root, file.asset));
-    if (!m.app || typeof file.asset !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,220}\.dmg$/.test(file.asset) || bytes.length !== file.size || createHash("sha256").update(bytes).digest("hex") !== file.sha256 || file.url !== `https://github.com/${repo}/releases/download/${tag}/${file.asset}`) throw new Error("Candidate asset verification failed");
+    if (!m.app || file.asset !== firstInstallAssetName(m.app.version, platform) || bytes.length !== file.size || createHash("sha256").update(bytes).digest("hex") !== file.sha256 || file.url !== `https://github.com/${repo}/releases/download/${tag}/${file.asset}`) throw new Error("Candidate asset verification failed");
     allowed.add(file.asset);
+  } else if (m.app && firstInstallAssetName(m.app.version, platform)) {
+    throw new Error(`Missing manual installer for ${platform}`);
   }
   const legacy = legacyIndexName(platform);
   if (legacy !== undefined) { allowed.add(`${legacy}.json`); allowed.add(`${legacy}.sig.json`); }
@@ -62,6 +66,9 @@ for (const dir of await readdir("outputs/publish")) {
   notes.push(await readFile(join(root, "release-notes.md"), "utf8"));
 }
 const identity = identities[0];
+for (const platform of (process.env.OMP_RELEASE_PLATFORMS ?? "").split(",").filter(Boolean)) {
+  if (!publishedPlatforms.has(platform)) throw new Error(`Missing release candidate for ${platform}`);
+}
 if (!identity || identities.some(i => JSON.stringify(i) !== JSON.stringify(identity))) throw new Error("Architecture releases disagree");
 const releases = JSON.parse(gh("api", "--paginate", "--slurp", `repos/${repo}/releases?per_page=100`)).flat();
 if (releases.some(r => r.tag_name === identity.tag && !r.draft)) throw new Error("Refusing to overwrite a published release");

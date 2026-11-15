@@ -4,6 +4,7 @@ import type { JobActionsView } from "@omp-studio/studio-protocol";
 import { actionsViewFromData } from "./jobActionsModel";
 import type { IconName } from "../icons";
 import { jsonRecord, jsonString, type AssistantSegment, type TimelineRow, type ToolStatus, type ToolView } from "./conversationViewModel";
+import { isZh } from "../i18n";
 
 export type ToolKind = string;
 
@@ -173,13 +174,13 @@ export const NAME_TO_KIND: Record<string, string> = {
 
 const PATH_KINDS = new Set(["read", "write", "edit", "inspect_image", "glob", "generate_image", "tts"]);
 
-export const STATUS_LABEL: Record<ToolStatus, string> = {
-  queued: "等待",
-  running: "运行中",
-  succeeded: "完成",
-  failed: "失败",
-  aborted: "已中止",
-  missing: "结果缺失",
+const STATUS_LABEL_PAIRS: Record<ToolStatus, readonly [string, string]> = {
+  queued: ["等待", "Queued"],
+  running: ["运行中", "Running"],
+  succeeded: ["完成", "Done"],
+  failed: ["失败", "Failed"],
+  aborted: ["已中止", "Aborted"],
+  missing: ["结果缺失", "Missing result"],
 };
 
 const MCP_NAME_PREFIX = "mcp__";
@@ -423,8 +424,8 @@ export function isPathKind(kind: ToolKind): boolean {
   return PATH_KINDS.has(kind);
 }
 
-export function statusLabel(status: ToolStatus): string {
-  return STATUS_LABEL[status];
+export function statusLabel(status: ToolStatus, zh = isZh()): string {
+  return STATUS_LABEL_PAIRS[status][zh ? 0 : 1];
 }
 
 export function fileBase(path: string): string {
@@ -543,12 +544,13 @@ export function toolTarget(tool: ToolView): string {
   );
 }
 
-export function chainItemDetail(tool: ToolView): string {
+export function chainItemDetail(tool: ToolView, zh = isZh()): string {
   const kind = toolKind(tool);
   const fields = toolFields(tool);
   const target = jsonString(fields.target);
   if (kind === "think") {
-    return jsonString(fields.preview) ?? (jsonString(fields.dur) ? `思考了 ${jsonString(fields.dur)}` : "");
+    const dur = jsonString(fields.dur);
+    return jsonString(fields.preview) ?? (dur ? (zh ? `思考了 ${dur}` : `Thought for ${dur}`) : "");
   }
   if (kind === "bash") return jsonString(fields.cmd) ?? jsonString(fields.command) ?? target ?? "";
   if (kind === "grep" || kind === "ast_grep" || kind === "glob") {
@@ -943,13 +945,13 @@ function changePathMatches(path: string, focus: string): boolean {
 }
 
 /** 轮次菜单：最近一轮（跟随最新段）+ 有改动的历史轮 + 本会话。 */
-export function listSessionChangeTurns(rows: readonly TimelineRow[]): SessionChangeTurn[] {
+export function listSessionChangeTurns(rows: readonly TimelineRow[], zh = isZh()): SessionChangeTurn[] {
   const ranges = assistantRunRanges(rows);
   const last = ranges[ranges.length - 1];
   const items: SessionChangeTurn[] = [{
     id: SESSION_CHANGE_LAST_ID,
     kind: "last",
-    label: "最近一轮",
+    label: zh ? "最近一轮" : "Latest turn",
     files: last === undefined ? [] : filesInRange(rows, last),
   }];
   let historyIndex = 0;
@@ -961,27 +963,27 @@ export function listSessionChangeTurns(rows: readonly TimelineRow[]): SessionCha
     items.push({
       id: rangeTurnId(rows, range),
       kind: "turn",
-      label: `第 ${historyIndex} 轮`,
+      label: zh ? `第 ${historyIndex} 轮` : `Turn ${historyIndex}`,
       files,
     });
   }
   items.push({
     id: SESSION_CHANGE_SESSION_ID,
     kind: "session",
-    label: "本会话",
+    label: zh ? "本会话" : "This session",
     files: collectTurnFileChanges(allAssistantSegments(rows)),
   });
   return items;
 }
 
 /** 选中轮次的文件清单与 patch 段。未知 id 回退到最近一轮。 */
-export function sessionChangeScope(rows: readonly TimelineRow[], turnId: string): SessionChangeScope {
+export function sessionChangeScope(rows: readonly TimelineRow[], turnId: string, zh = isZh()): SessionChangeScope {
   if (turnId === SESSION_CHANGE_SESSION_ID) {
     const segments = allAssistantSegments(rows);
     return {
       id: SESSION_CHANGE_SESSION_ID,
       kind: "session",
-      label: "本会话",
+      label: zh ? "本会话" : "This session",
       files: collectTurnFileChanges(segments),
       segments,
     };
@@ -998,7 +1000,7 @@ export function sessionChangeScope(rows: readonly TimelineRow[], turnId: string)
       return {
         id: turnId,
         kind: "turn",
-        label: `第 ${historyIndex} 轮`,
+        label: zh ? `第 ${historyIndex} 轮` : `Turn ${historyIndex}`,
         files,
         segments: segmentsInRange(rows, range),
       };
@@ -1008,7 +1010,7 @@ export function sessionChangeScope(rows: readonly TimelineRow[], turnId: string)
   return {
     id: SESSION_CHANGE_LAST_ID,
     kind: "last",
-    label: "最近一轮",
+    label: zh ? "最近一轮" : "Latest turn",
     files: last === undefined ? [] : filesInRange(rows, last),
     segments: last === undefined ? [] : segmentsInRange(rows, last),
   };
@@ -1027,7 +1029,7 @@ export function sessionChangeTurnIdForPath(rows: readonly TimelineRow[], path: s
 
 // --- Deleted: WeakMap segment caches, session patch tree builder, todo state machine, progress aggregation ---
 
-export function batchSummary(thinking: readonly ThinkView[], tools: readonly ToolView[]): BatchSummary {
+export function batchSummary(thinking: readonly ThinkView[], tools: readonly ToolView[], zh = isZh()): BatchSummary {
   const files = new Set<string>();
   let searches = 0;
   let commands = 0;
@@ -1072,20 +1074,43 @@ export function batchSummary(thinking: readonly ThinkView[], tools: readonly Too
     del += diff.del;
   }
   const parts: string[] = [];
-  if (editing) parts.push(`${editingRun ? "正在编辑 " : "编辑 "}${fileBase(editing)}`);
-  if (files.size) parts.push(`阅读 ${files.size} 个文件`);
-  if (searches) parts.push(`搜索 ${searches} 次`);
-  if (commands) parts.push(`运行 ${commands} 条命令`);
-  if (fetches) parts.push(`请求 ${fetches} 次`);
-  if (agents) parts.push(`${agents} 个子 Agent`);
+  if (editing) {
+    const verb = editingRun
+      ? (zh ? "正在编辑 " : "Editing ")
+      : (zh ? "编辑 " : "Edited ");
+    parts.push(`${verb}${fileBase(editing)}`);
+  }
+  if (files.size) {
+    parts.push(zh ? `阅读 ${files.size} 个文件` : `Read ${files.size} ${files.size === 1 ? "file" : "files"}`);
+  }
+  if (searches) {
+    parts.push(zh ? `搜索 ${searches} 次` : `${searches} ${searches === 1 ? "search" : "searches"}`);
+  }
+  if (commands) {
+    parts.push(zh ? `运行 ${commands} 条命令` : `Ran ${commands} ${commands === 1 ? "command" : "commands"}`);
+  }
+  if (fetches) {
+    parts.push(zh ? `请求 ${fetches} 次` : `${fetches} ${fetches === 1 ? "request" : "requests"}`);
+  }
+  if (agents) {
+    parts.push(zh ? `${agents} 个子 Agent` : `${agents} ${agents === 1 ? "subagent" : "subagents"}`);
+  }
   if (asks === 1 && askFirst && parts.length === 0) parts.push(`Ask · ${askFirst}`);
-  else if (asks) parts.push(`回答 ${asks} 次`);
-  if (parts.length === 0 && thinkDur) parts.push(`思考了 ${thinkDur}`);
+  else if (asks) {
+    parts.push(zh ? `回答 ${asks} 次` : `${asks} ${asks === 1 ? "answer" : "answers"}`);
+  }
+  if (parts.length === 0 && thinkDur) {
+    parts.push(zh ? `思考了 ${thinkDur}` : `Thought for ${thinkDur}`);
+  }
   if (parts.length === 0 && thinking.length > 0) {
     const preview = thinking[0]?.text.trim().replace(/\s+/g, " ") ?? "";
-    parts.push(preview ? `思考 · ${preview.slice(0, 36)}${preview.length > 36 ? "…" : ""}` : "思考");
+    parts.push(
+      preview
+        ? (zh ? `思考 · ${preview.slice(0, 36)}${preview.length > 36 ? "…" : ""}` : `Thinking · ${preview.slice(0, 36)}${preview.length > 36 ? "…" : ""}`)
+        : (zh ? "思考" : "Thinking"),
+    );
   }
-  if (parts.length === 0) parts.push("工具调用");
+  if (parts.length === 0) parts.push(zh ? "工具调用" : "Tool calls");
   return { text: parts.join(" · "), add, del };
 }
 

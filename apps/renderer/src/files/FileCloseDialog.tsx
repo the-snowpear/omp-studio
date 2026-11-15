@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useI18n } from "../i18n";
 import { dirtyFileDocuments, subscribeDirtyFiles, type FileDocument } from "./fileDocuments";
 
 type Request = { documents: FileDocument[]; resolve: (allow: boolean) => void };
@@ -11,6 +12,8 @@ export function requestFileClose(documents: FileDocument[]): Promise<boolean> {
   return new Promise(resolve => { queue.push({ documents: dirty, resolve }); for (const listener of listeners) listener(); });
 }
 export function FileCloseDialog() {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [, update] = useState(0), [saving, setSaving] = useState(false), [error, setError] = useState("");
   useEffect(() => { const changed = () => update(value => value + 1); listeners.add(changed); return () => { listeners.delete(changed); }; }, []);
   useEffect(() => {
@@ -43,9 +46,9 @@ export function FileCloseDialog() {
   }, []);
   if (!active) return null;
   const documents = [...new Set(queue.flatMap(item => item.documents))];
-  return createPortal(<div className="file-dialog-backdrop"><section className="file-dialog" role="dialog" aria-modal="true" aria-label="保存文件修改">
-    <h3>保存文件修改？</h3><p>以下文件有未保存的内容：</p><ul>{documents.map((item, index) => <li key={index}>{item.getSnapshot().file.path}</li>)}</ul>
+  return createPortal(<div className="file-dialog-backdrop"><section className="file-dialog" role="dialog" aria-modal="true" aria-label={zh ? "保存文件修改" : "Save file changes"}>
+    <h3>{zh ? "保存文件修改？" : "Save changes to files?"}</h3><p>{zh ? "以下文件有未保存的内容：" : "The following files have unsaved changes:"}</p><ul>{documents.map((item, index) => <li key={index}>{item.getSnapshot().file.path}</li>)}</ul>
     {error ? <p role="alert">{error}</p> : null}
-    <footer><button className="btn outline" disabled={saving} onClick={() => settle(false)}>取消</button><button className="btn outline" disabled={saving} onClick={() => { for (const item of documents) item.discard(); settle(true); }}>不保存</button><button className="btn primary" disabled={saving} onClick={() => { setSaving(true); void Promise.all(documents.map(item => item.save())).then(results => { if (results.every(Boolean)) settle(true); else setError("部分文件未保存，请返回文件窗口处理冲突或连接问题。"); }).finally(() => setSaving(false)); }}>{saving ? "正在保存…" : "保存"}</button></footer>
+    <footer><button className="btn outline" disabled={saving} onClick={() => settle(false)}>{zh ? "取消" : "Cancel"}</button><button className="btn outline" disabled={saving} onClick={() => { for (const item of documents) item.discard(); settle(true); }}>{zh ? "不保存" : "Don't Save"}</button><button className="btn primary" disabled={saving} onClick={() => { setSaving(true); void Promise.all(documents.map(item => item.save())).then(results => { if (results.every(Boolean)) settle(true); else setError(zh ? "部分文件未保存，请返回文件窗口处理冲突或连接问题。" : "Some files could not be saved. Return to the file window to resolve conflicts or connection issues."); }).finally(() => setSaving(false)); }}>{saving ? (zh ? "正在保存…" : "Saving…") : (zh ? "保存" : "Save")}</button></footer>
   </section></div>, document.body);
 }

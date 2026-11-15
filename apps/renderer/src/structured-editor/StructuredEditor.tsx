@@ -66,7 +66,8 @@ export function StructuredEditor({
   dirty = false,
   saveHint,
 }: StructuredEditorProps) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const langConf = useRef(new Compartment());
@@ -101,8 +102,8 @@ export function StructuredEditor({
   }, [language]);
 
   useEffect(() => {
-    reportIssue(mode, value, allowEmpty, lint, setIssue, validityRef.current);
-  }, [mode, value, allowEmpty, lint]);
+    reportIssue(mode, value, allowEmpty, lint, zh, setIssue, validityRef.current);
+  }, [mode, value, allowEmpty, lint, zh]);
 
   useLayoutEffect(() => {
     const parent = hostRef.current;
@@ -381,6 +382,7 @@ function reportIssue(
   text: string,
   allowEmpty: boolean,
   lint: boolean,
+  zh: boolean,
   setIssue: (message: string | null) => void,
   onValidityChange: ((ok: boolean, message: string | null) => void) | undefined,
 ): void {
@@ -395,7 +397,8 @@ function reportIssue(
     setIssue(message);
     onValidityChange?.(parsed.ok, message);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "无法解析";
+    const fallback = zh ? "无法解析" : "Unable to parse";
+    const message = error instanceof Error ? error.message : fallback;
     setIssue(message);
     onValidityChange?.(false, message);
   }

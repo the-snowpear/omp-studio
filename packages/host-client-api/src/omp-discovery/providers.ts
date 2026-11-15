@@ -14,6 +14,7 @@ import {
 import { getAgentDir } from "./paths.js";
 import { listOmpPluginRoots, listSettingsExtensionRoots, resolvePluginSkillDirs } from "./plugin-roots.js";
 import { classifyAgentPluginRoot, legacyProviderAllowed } from "./agent-plugin.js";
+import { hostText } from "../locale.js";
 import type { LoadContext, DiscoveredSkill, DiscoveryWarning } from "./types.js";
 
 export interface ProviderResult {
@@ -24,15 +25,15 @@ export interface ProviderResult {
 /** Provider chip text on the Skills inventory (same role as MCP `sourceLabel`). */
 function providerLabel(providerId: string): string {
   if (providerId === "native") return "OMP";
-  if (providerId === "omp-plugins") return "插件";
+  if (providerId === "omp-plugins") return hostText("插件", "Plugin");
   if (providerId === "claude") return "Claude";
   if (providerId === "agent-plugins") return "Agent Plugin";
-  if (providerId === "claude-plugins") return "Claude 插件";
+  if (providerId === "claude-plugins") return hostText("Claude 插件", "Claude Plugin");
   if (providerId === "codex") return "Codex";
   if (providerId === "opencode") return "OpenCode";
   if (providerId === "github") return "GitHub";
   if (providerId === "agents") return "Agents";
-  if (providerId === "omp-managed") return "托管";
+  if (providerId === "omp-managed") return hostText("托管", "Managed");
   return "OMP";
 }
 

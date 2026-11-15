@@ -4,7 +4,7 @@ import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { hostErrorMessage } from "../hostError";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { PREVIEW_MCP_RUNTIME, applyPreviewMcpAction } from "../preview/runtimeCatalogPreview";
+import { getPreviewMcpRuntime, applyPreviewMcpAction } from "../preview/runtimeCatalogPreview";
 import { CatalogEmpty, CatalogHeading, useRuntimeCatalog, type RuntimeCatalogProps } from "./RuntimeCatalogShared";
 import { McpAuthActions } from "./McpAuthActions";
 import "./mcpRuntime.css";
@@ -96,12 +96,16 @@ export function McpRuntimePane(props: RuntimeCatalogProps & { authAvailable?: bo
   const invoke = useRuntimeCatalog(client, sessionId);
 
   useEffect(() => {
-    setStatus(preview ? PREVIEW_MCP_RUNTIME : undefined);
+    setStatus(preview ? getPreviewMcpRuntime(zh) : undefined);
     setError("");
     setRefreshing(false);
     setFilter("all");
     setSearch("");
   }, [preview, sessionId, available, client]);
+
+  useEffect(() => {
+    if (preview) setStatus(getPreviewMcpRuntime(zh));
+  }, [preview, zh]);
 
   useEffect(() => {
     if (preview || !available || !sessionId || !visible) return;
@@ -125,7 +129,7 @@ export function McpRuntimePane(props: RuntimeCatalogProps & { authAvailable?: bo
   }, [invoke, preview, sessionId, available, visible, refreshRevision, zh]);
 
   const onComplete = (result: McpAuthResult) => {
-    if (preview) setStatus((current) => current ? applyPreviewMcpAction(current, result) : current);
+    if (preview) setStatus((current) => current ? applyPreviewMcpAction(current, result, zh) : current);
     else setRefreshRevision((value) => value + 1);
   };
   const canRead = preview || (available && !!sessionId);
@@ -146,7 +150,7 @@ export function McpRuntimePane(props: RuntimeCatalogProps & { authAvailable?: bo
       <CatalogHeading title={zh ? "会话连接" : "Session connections"} scope={zh ? "MCP · 当前 Runtime" : "MCP · Current Runtime"}
         demo={preview && marks ? (zh ? "演示" : "Demo") : undefined}
         description={zh ? "查看当前会话的实际连接、工具就绪状态与授权。" : "Live connections, tool readiness, and authorization in this session."}
-        actions={<button type="button" className="btn small outline" disabled={!canRead || refreshing} onClick={() => preview ? setStatus((current) => current ?? PREVIEW_MCP_RUNTIME) : setRefreshRevision((value) => value + 1)}><Icon name="refresh" extra="xs" />{refreshing ? (zh ? "刷新中…" : "Refreshing…") : (zh ? "刷新连接状态" : "Refresh connections")}</button>} />
+        actions={<button type="button" className="btn small outline" disabled={!canRead || refreshing} onClick={() => preview ? setStatus((current) => current ?? getPreviewMcpRuntime(zh)) : setRefreshRevision((value) => value + 1)}><Icon name="refresh" extra="xs" />{refreshing ? (zh ? "刷新中…" : "Refreshing…") : (zh ? "刷新连接状态" : "Refresh connections")}</button>} />
       {error ? <p className="runtime-catalog-notice error" role="alert"><Icon name="alert-c" extra="xs" /><span>{error}{status ? (zh ? " · 下方保留上次读取的状态。" : " · The last observed status is shown below.") : ""}</span></p> : null}
       {status?.available ? <>
         <div className="runtime-mcp-overview">

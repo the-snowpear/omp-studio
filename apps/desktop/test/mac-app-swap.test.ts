@@ -115,7 +115,7 @@ test("a version that never starts is swapped back and the previous one reopened"
   const { w, deps } = world({ onTick: launches(() => undefined) });
   const outcome = await swapFromSource(PLAN, deps);
   assert.equal(outcome.status, "rolled-back");
-  assert.match(outcome.message ?? "", /没有启动/u);
+  assert.match(outcome.message ?? "", /failed to start/u);
   assert.equal(w.nodes.get(PLAN.target), "old");
   assert.equal(w.nodes.has(PLAN.backup), false);
   assert.equal(w.nodes.has(`${PLAN.backup}.failed`), false);
@@ -131,7 +131,7 @@ test("a started version whose process ends without healthy or clean-exit is swap
   });
   const outcome = await swapFromSource(PLAN, deps);
   assert.equal(outcome.status, "rolled-back");
-  assert.match(outcome.message ?? "", /异常退出/u);
+  assert.match(outcome.message ?? "", /exited unexpectedly/u);
   assert.equal(w.nodes.get(PLAN.target), "old");
 });
 
@@ -164,7 +164,7 @@ test("an app that never quits cancels the swap without touching the bundle", asy
   const { w, deps } = world();
   const outcome = await swapFromSource(PLAN, deps);
   assert.equal(outcome.status, "failed");
-  assert.match(outcome.message ?? "", /没有退出/u);
+  assert.match(outcome.message ?? "", /did not quit/u);
   assert.equal(w.nodes.get(PLAN.target), "old");
   assert.equal(w.nodes.has(PLAN.stagingRoot), false);
   assert.deepEqual(w.renames, []);
@@ -178,7 +178,7 @@ test("App Management refusing the first rename leaves the old app in place and r
   });
   const outcome = await swapFromSource(PLAN, deps);
   assert.equal(outcome.status, "failed");
-  assert.match(outcome.message ?? "", /App 管理/u);
+  assert.match(outcome.message ?? "", /App Management/u);
   assert.match(outcome.message ?? "", /dmg/u);
   assert.equal(w.nodes.get(PLAN.target), "old");
   assert.equal(w.nodes.has(PLAN.stagingRoot), false);
