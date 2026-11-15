@@ -42,14 +42,16 @@ test("builder container-specific architecture names match the signed Linux downl
 });
 
 test("packaging errors remain failures after electron-builder temporary-file cleanup", () => {
-  const entry = new URL("./pack-linux.mjs", import.meta.url);
-  const bootstrap = `import { createRequire } from "node:module";
-    const require = createRequire(${JSON.stringify(entry.href)});
-    await new (require("temp-file").TmpDir)().getTempFile();
-    Object.defineProperty(process, "arch", { value: "ia32" });`;
-  const result = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(bootstrap)}`, fileURLToPath(entry), "--skip-host", "--skip-build"], { encoding: "utf8", timeout: 30_000 });
-  assert.match(result.stderr, /Build the linux-x64 Runtime on a native linux-x64 runner/u);
-  assert.equal(result.status, 1, "async-exit-hook must not turn a failed build/audit into a successful release step");
+  for (const [script, error] of [["pack-linux.mjs", /Build the linux-x64 Runtime on a native linux-x64 runner/u], ["pack-mac.mjs", /pack:mac builds the darwin-arm64 app/u]]) {
+    const entry = new URL(`./${script}`, import.meta.url);
+    const bootstrap = `import { createRequire } from "node:module";
+      const require = createRequire(${JSON.stringify(entry.href)});
+      await new (require("temp-file").TmpDir)().getTempFile();
+      Object.defineProperty(process, "arch", { value: "ia32" });`;
+    const result = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(bootstrap)}`, fileURLToPath(entry), "--skip-host", "--skip-build"], { encoding: "utf8", timeout: 30_000 });
+    assert.match(result.stderr, error);
+    assert.equal(result.status, 1, `${script}: async-exit-hook must not turn a failed build/audit into a successful release step`);
+  }
 });
 
 test("AppImage preserves quoted arguments and does not disable sandboxing when unshare fails", { skip: process.platform !== "linux" }, () => {

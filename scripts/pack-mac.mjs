@@ -165,4 +165,6 @@ async function main() {
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
+  // electron-builder's temporary-file cleanup otherwise exits with zero.
+  process.on("exit", () => { process.exitCode = 1; });
 });
