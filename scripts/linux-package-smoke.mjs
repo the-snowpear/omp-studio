@@ -16,7 +16,7 @@ const profile = await mkdtemp("/tmp/omp-linux-smoke-");
 const home = join(profile, "home"), workspace = join(profile, "workspace"), agentDir = join(home, ".omp/agent");
 const proof = `linux-package-${randomUUID()}`;
 const report = { status: "running", executable, packageRun: process.env.OMP_E2E_PACKAGE_RUN, display: process.env.OMP_E2E_DISPLAY ?? "x11", model: "local deterministic OpenAI-compatible endpoint", checks: [], profile };
-let application, page, providerCalls = 0, conversationCalls = 0;
+let application, page, providerCalls = 0, toolRequests = 0, readResultReplies = 0;
 
 const provider = createServer(async (request, response) => {
   try {
@@ -27,12 +27,15 @@ const provider = createServer(async (request, response) => {
     providerCalls += 1;
     const toolReply = body.messages.find(message => message.role === "tool" && JSON.stringify(message.content).includes(proof));
     const conversation = Boolean(toolReply || body.tools?.some(tool => tool.function?.name === "read"));
-    // The real Runtime also asks this provider for a background session title.
-    if (conversation) conversationCalls += 1;
+    // Titles and cache warming also contact the provider; the assertion below
+    // follows the actual tool result and persisted reply, not a request count.
+    if (conversation) toolRequests += 1;
+    if (toolReply) readResultReplies += 1;
+    report.providerRequests ??= [];
+    if (report.providerRequests.length < 8) report.providerRequests.push({ tools: Boolean(body.tools?.length), toolChoice: body.tool_choice, toolReply: Boolean(toolReply), lastUser: JSON.stringify(body.messages.findLast(message => message.role === "user")?.content ?? "").slice(0, 200) });
     const delta = !conversation ? { content: "Linux package acceptance" } : toolReply ? { content: `OMP_LINUX_OK ${proof}` } : {
       tool_calls: [{ index: 0, id: "linux-smoke-read", type: "function", function: { name: "read", arguments: JSON.stringify({ path: "fixture.txt" }) } }],
     };
-    if (conversationCalls > 2) throw new Error("Runtime did not return the read result");
     const finish = delta.tool_calls ? "tool_calls" : "stop";
     if (body.stream === false) {
       response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ id: "linux-package-smoke", object: "chat.completion", created: 1, model: "smoke-model", choices: [{ index: 0, message: { role: "assistant", ...delta }, finish_reason: finish }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }));
@@ -155,7 +158,7 @@ try {
   await editor.press("Enter");
   await until(() => query("session.transcript.read"), result => result.items.some(item => item.role === "assistant" && item.content?.some(block => block.type === "text" && block.text.includes(`OMP_LINUX_OK ${proof}`))), "conversation and native tool roundtrip");
   await until(() => query("session.state"), result => !result.isStreaming, "conversation completion");
-  assert.equal(conversationCalls, 2);
+  assert.ok(readResultReplies > 0, "The Runtime must return the unique file contents to the model endpoint");
   report.checks.push("real Runtime conversation through local model endpoint, native file read, streamed reply and persisted transcript");
   const session = await query("session.state");
   await editor.fill("unsent ");
@@ -187,7 +190,8 @@ try {
   provider.closeAllConnections();
   await new Promise(done => provider.close(done));
   report.providerCalls = providerCalls;
-  report.conversationCalls = conversationCalls;
+  report.toolRequests = toolRequests;
+  report.readResultReplies = readResultReplies;
   if (report.logDirectory) await cp(report.logDirectory, join(output, "host-logs"), { recursive: true }).catch(error => { report.logCopyError = String(error); });
   await writeFile(join(output, "report.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
