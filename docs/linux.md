@@ -153,6 +153,8 @@ Ubuntu CI 对 AppImage 使用仅匹配该测试包固定路径的 AppArmor `user
 
 自动化中的中文输入检查覆盖 Chromium composition 事件；实体 IBus / Fcitx、GNOME / KDE 的窗口策略、屏幕共享 portal / PipeWire、麦克风与系统密钥环仍按目标桌面实机验证。能力是否可用由真实 Runtime 探测报告，不因安装包生成成功而伪造能力。
 
+2026-11-15 的 [原生打包与签名检查](https://github.com/the-snowpear/omp-studio/actions/runs/43677778069) 和 [安装／重启续聊验收](https://github.com/the-snowpear/omp-studio/actions/runs/43679774005) 均已通过；使用 Runtime `18.19.0-studio.12`。测试包保留在 Actions 附件，正式安装包仍以 Release 发布为准。
+
 Release 默认包含 Linux x64，任一选中平台的构建 / 包审计失败会阻止整次发布。版本号须晚于已发布版本，不能重用 0.2.0 / 0.2.1 的 tag。详细流程见 [发布指南](releasing.md)。
 
 开发检查沿用 [唯一检查入口](development.md#everyday-commands)：`npm run check -- --production`。PR #22 的审查与分发缺口见 [审查记录](reviews/pr22-linux-client-2026-11-14.md)。
