@@ -2747,6 +2747,8 @@ const zhRaw = {
   "appUpdate": {
     "downloadInstaller": "下载安装包",
     "linuxManualInstall": "下载新版本后，关闭 OMP Studio，再安装 deb 或替换 AppImage。你的配置和会话会保留。Runtime 可继续在应用内更新。",
+    "systemAuthorization": "重启安装时，系统会请求管理员授权。",
+    "waitingAuthorization": "请在系统弹窗中完成管理员授权…",
     "dialogTitle": "发现新版本",
     "currentVersion": "当前版本",
     "latestVersion": "最新版本",

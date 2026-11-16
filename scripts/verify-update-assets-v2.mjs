@@ -34,6 +34,15 @@ export async function verifyUpdateAssets(directory, keys, repo, platform) {
   } else if (envelope.manifest.app && firstInstallAssetName(envelope.manifest.app.version, platform)) {
     throw new Error(`A ${platform} desktop release needs its manual installer`);
   }
+  if (platform === "linux-x64" && envelope.manifest.app) {
+    const name = "updates-linux-deb-x64.json";
+    const deb = verifyUpdateManifest(JSON.parse(await readFile(join(directory, name), "utf8")), keys, repo, platform, "deb").manifest;
+    const { file: _appFile, blockmap: _appMap, ...identity } = envelope.manifest.app;
+    const { file: debFile, blockmap, ...debIdentity } = deb.app ?? {};
+    if (deb.runtime || deb.firstInstall || JSON.stringify(identity) !== JSON.stringify(debIdentity) || JSON.stringify(debFile) !== JSON.stringify(firstInstall)) throw new Error("Linux deb update catalog does not match desktop release");
+    if (!sameBytes(await readFile(join(directory, blockmap.asset)), blockmap)) throw new Error(`Release artifact mismatch: ${blockmap.asset}`);
+    expected.add(name); expected.add(blockmap.asset);
+  }
   const runtime = envelope.manifest.runtime;
   if (runtime) {
     const temp = await mkdtemp(join(tmpdir(), "omp-release-audit-"));

@@ -60,6 +60,8 @@ async function auditAppDirectory(appPath, version, runtimeVersion) {
   if (!renderer.includes("Content-Security-Policy")) throw new Error("Packaged renderer has no CSP");
   requireFile(join(resources, "icon.png"));
   requireFile(join(resources, "ssh-askpass/askpass.cjs"));
+  const debHelper = requireFile(join(resources, "omp-deb-update"));
+  if ((statSync(debHelper).mode & 0o111) !== 0o111 || !readFileSync(debHelper).equals(readFileSync(join(REPOSITORY_ROOT, "packaging/linux/omp-deb-update")))) throw new Error("Missing or altered executable deb update helper");
   const versionsRoot = join(resources, "runtime/versions");
   const versions = readdirSync(versionsRoot).filter(name => !name.startsWith("."));
   if (versions.length !== 1 || versions[0] !== runtimeVersion) throw new Error(`Expected exactly Runtime ${runtimeVersion}; found ${versions}`);

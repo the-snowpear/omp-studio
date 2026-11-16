@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { verifyUpdateManifest, writeJsonAtomic, type SignedUpdateManifest, type UpdateComponent, type UpdateChannel } from "@omp-studio/runtime-installer";
+import { canonicalUpdateJson, verifyUpdateManifest, writeJsonAtomic, type SignedUpdateManifest, type UpdateComponent, type UpdateChannel } from "@omp-studio/runtime-installer";
 import { withUpdateRequest, type UpdateRequestAttempt, type UpdateRequestLog, type UpdateRequestPolicy } from "./update-request.js";
 import { desktopText } from "./desktop-language-shared.js";
+import { compareSemver } from "./chrome-app-update.js";
 
 export interface DiscoveredUpdates { app?: SignedUpdateManifest; runtime?: SignedUpdateManifest; baselines?: Partial<Record<UpdateComponent, SignedUpdateManifest>> }
 interface ReleaseAsset { id?: number; updated_at?: string; name: string; browser_download_url: string }
@@ -39,12 +40,14 @@ export async function discoverUpdates(input: {
   keys: Readonly<Record<string, string | Buffer>>; signal: AbortSignal;
   fetcher?: typeof fetch; watermarks: Record<string, number>;
   currentVersions?: Partial<Record<UpdateComponent, string | undefined>>;
+  linuxDesktopFormat?: "appimage" | "deb";
   cacheDirectory?: string | undefined;
   log?: UpdateRequestLog | undefined;
   requestPolicy?: Partial<UpdateRequestPolicy> | undefined;
 }): Promise<DiscoveredUpdates> {
   const result: DiscoveredUpdates = {};
   const assetName = `updates-${input.platform}.json`;
+  const debName = "updates-linux-deb-x64.json";
   const cachePath = input.cacheDirectory ? join(input.cacheDirectory, `${createHash("sha256").update(`${input.repo}:${input.platform}`).digest("hex")}.json`) : undefined;
   let cache: DiscoveryCache = { schema: 1, catalog: {}, manifests: {} };
   if (cachePath) {
@@ -53,7 +56,8 @@ export async function discoverUpdates(input: {
       if (saved.schema === 1 && saved.catalog && saved.manifests) cache = saved;
     } catch { /* The cache is optional; discovery still verifies fresh manifests. */ }
   }
-  let manifestsSeen = 0, manifestsVerified = 0;
+  let manifestsSeen = 0, manifestsVerified = 0, manifestsInvalid = 0;
+  let latestStandard: SignedUpdateManifest | undefined;
   try {
     for (let page = 1; page <= 10; page++) {
       const url = `https://api.github.com/repos/${input.repo}/releases?per_page=100&page=${page}`;
@@ -74,51 +78,70 @@ export async function discoverUpdates(input: {
         if (row.draft) continue;
         // Stable desktops always use stable releases; Canary is opt-in for Runtime.
         if (row.prerelease && input.channel !== "canary") continue;
-        const asset = row.assets?.find(a => a.name === assetName);
-        if (!asset) continue;
-        manifestsSeen++;
-        if (!asset.browser_download_url.startsWith(`https://github.com/${input.repo}/releases/download/`)) continue;
-        let envelope: SignedUpdateManifest | undefined;
-        const saved = cache.manifests[asset.browser_download_url];
-        if (saved && saved.assetId === asset.id && saved.updatedAt === asset.updated_at) {
-          try { envelope = verifyUpdateManifest(saved.envelope, input.keys, input.repo, input.platform); }
-          catch { delete cache.manifests[asset.browser_download_url]; }
-        }
-        if (!envelope) {
-          try {
-            envelope = await withUpdateRequest({ ...input, url: asset.browser_download_url, stage: "manifest" }, async attempt => {
-              const body = await boundedText(await attempt.request(), 1024 * 1024, attempt);
-              // A mirror can return an HTML error page with HTTP 200. Verify
-              // content before considering that transport attempt successful.
-              try { return verifyUpdateManifest(JSON.parse(body), input.keys, input.repo, input.platform); }
-              catch (error) { throw new InvalidUpdateManifestError("Invalid signed update manifest", { cause: error }); }
-            });
-          } catch (error) {
-            input.signal.throwIfAborted();
-            // A corrupt release may be skipped; an unreachable release must
-            // fail the check rather than masquerade as "no update".
-            if (!(error instanceof InvalidUpdateManifestError)) throw error;
-            input.log?.write("warn", "update.manifest.invalid", `stage=manifest host=${new URL(asset.browser_download_url).hostname}`);
-            continue;
+        const assets = (row.assets ?? []).filter(a => a.name === assetName || (input.linuxDesktopFormat === "deb" && a.name === debName));
+        for (const asset of assets) {
+          const deb = asset.name === debName;
+          manifestsSeen++;
+          if (!asset.browser_download_url.startsWith(`https://github.com/${input.repo}/releases/download/`)) { manifestsInvalid++; continue; }
+          let envelope: SignedUpdateManifest | undefined;
+          const saved = cache.manifests[asset.browser_download_url];
+          if (saved && saved.assetId === asset.id && saved.updatedAt === asset.updated_at) {
+            try { envelope = verifyUpdateManifest(saved.envelope, input.keys, input.repo, input.platform, deb ? "deb" : undefined); }
+            catch { delete cache.manifests[asset.browser_download_url]; }
           }
-          if (asset.id !== undefined && asset.updated_at !== undefined) cache.manifests[asset.browser_download_url] = { assetId: asset.id, updatedAt: asset.updated_at, envelope };
-        }
-        manifestsVerified++;
-        for (const kind of ["app", "runtime"] as UpdateComponent[]) {
-          const candidate = envelope.manifest[kind];
-          const wanted = kind === "app" ? "stable" : input.channel;
-          if (!candidate || candidate.channel !== wanted || (kind === "app" && row.prerelease)) continue;
-          if (candidate.version === input.currentVersions?.[kind]) (result.baselines ??= {})[kind] = envelope;
-          const sequence = result[kind]?.manifest[kind]?.sequence ?? 0;
-          const selected = result[kind]?.manifest[kind];
-          if (selected && candidate.sequence === sequence && (candidate.version !== selected.version || candidate.file.sha256 !== selected.file.sha256 || candidate.blockmap.sha256 !== selected.blockmap.sha256)) throw new Error("Conflicting signed update sequence");
-          if (candidate.sequence > sequence) result[kind] = envelope;
+          if (!envelope) {
+            try {
+              envelope = await withUpdateRequest({ ...input, url: asset.browser_download_url, stage: "manifest" }, async attempt => {
+                const body = await boundedText(await attempt.request(), 1024 * 1024, attempt);
+                // A mirror can return an HTML error page with HTTP 200. Verify
+                // content before considering that transport attempt successful.
+                try { return verifyUpdateManifest(JSON.parse(body), input.keys, input.repo, input.platform, deb ? "deb" : undefined); }
+                catch (error) { throw new InvalidUpdateManifestError("Invalid signed update manifest", { cause: error }); }
+              });
+            } catch (error) {
+              input.signal.throwIfAborted();
+              if (!(error instanceof InvalidUpdateManifestError)) throw error;
+              input.log?.write("warn", "update.manifest.invalid", `stage=manifest host=${new URL(asset.browser_download_url).hostname}`);
+              manifestsInvalid++;
+              continue;
+            }
+            if (asset.id !== undefined && asset.updated_at !== undefined) cache.manifests[asset.browser_download_url] = { assetId: asset.id, updatedAt: asset.updated_at, envelope };
+          }
+          manifestsVerified++;
+          if (!deb && input.linuxDesktopFormat === "deb" && envelope.manifest.app && !row.prerelease &&
+            envelope.manifest.app.sequence > (latestStandard?.manifest.app?.sequence ?? 0)) {
+            latestStandard = envelope;
+          }
+          for (const kind of ["app", "runtime"] as UpdateComponent[]) {
+            if (input.linuxDesktopFormat === "deb" && (kind === "app" ? !deb : deb)) continue;
+            const candidate = envelope.manifest[kind];
+            const wanted = kind === "app" ? "stable" : input.channel;
+            if (!candidate || candidate.channel !== wanted || (kind === "app" && row.prerelease)) continue;
+            if (candidate.version === input.currentVersions?.[kind]) (result.baselines ??= {})[kind] = envelope;
+            const sequence = result[kind]?.manifest[kind]?.sequence ?? 0;
+            const selected = result[kind]?.manifest[kind];
+            if (selected && candidate.sequence === sequence && (candidate.version !== selected.version || candidate.file.sha256 !== selected.file.sha256 || candidate.blockmap.sha256 !== selected.blockmap.sha256)) throw new Error("Conflicting signed update sequence");
+            if (candidate.sequence > sequence) result[kind] = envelope;
+          }
         }
       }
       if (rows.length < 100) break;
       if (page === 10) throw new Error("Release discovery limit reached; refusing incomplete catalog");
     }
     if (manifestsSeen > 0 && manifestsVerified === 0) throw new Error(desktopText("未取得可验证的更新清单，请稍后重试", "Could not retrieve a verifiable update manifest; try again later"));
+    if (manifestsInvalid > 0) throw new Error(desktopText("部分更新清单无法验证，无法确定最新版本；请稍后重试", "Some update manifests could not be verified, so the latest version cannot be determined; try again later"));
+    const standardApp = latestStandard?.manifest.app, debApp = result.app?.manifest.app;
+    if (standardApp && standardApp.sequence > (debApp?.sequence ?? 0) && compareSemver(standardApp.version, input.currentVersions?.app ?? "0.0.0") > 0) {
+      throw new Error(desktopText("新版缺少 deb 更新清单，请从发布页手动安装", "The new version has no deb update catalog; install it from the release page"));
+    }
+    if (input.linuxDesktopFormat === "deb" && debApp) {
+      if (!standardApp || debApp.sequence > standardApp.sequence) throw new Error("Linux deb and desktop catalogs do not match");
+      if (debApp.sequence === standardApp.sequence) {
+        const { file: _appFile, blockmap: _appMap, ...identity } = standardApp;
+        const { file: debFile, blockmap: _debMap, ...debIdentity } = debApp;
+        if (canonicalUpdateJson(identity) !== canonicalUpdateJson(debIdentity) || canonicalUpdateJson(debFile) !== canonicalUpdateJson(latestStandard?.manifest.firstInstall)) throw new Error("Linux deb and desktop catalogs do not match");
+      }
+    }
     for (const kind of ["app", "runtime"] as UpdateComponent[]) {
       const candidate = result[kind]?.manifest[kind];
       if (candidate && candidate.sequence < (input.watermarks[`${kind}:${candidate.channel}:${input.platform}`] ?? 0)) throw new Error("Update catalog rollback rejected");

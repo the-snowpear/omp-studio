@@ -169,6 +169,20 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/omp-playwright" --no-audit --no-fund playwright@1.62.1
           echo "PLAYWRIGHT_MODULE=$RUNNER_TEMP/omp-playwright/node_modules/playwright" >> "$GITHUB_ENV"
           chmod +x outputs/installer-linux/*.AppImage
+      - name: Verify signed deb updates in an isolated package database
+        timeout-minutes: 10
+        run: |
+          docker run -i --rm -v "$GITHUB_WORKSPACE:/repo:ro" -e OMP_DEB_TEST_CONTAINER=1 ubuntu:24.04 sh -s <<'SCRIPT'
+          set -e
+          apt-get -o Acquire::Retries=4 update -qq
+          apt-get -o Acquire::Retries=4 install -y -qq --no-install-recommends python3 openssl ca-certificates nodejs pkexec polkitd dbus > /tmp/setup.log
+          mkdir -p /run/dbus /etc/polkit-1/rules.d
+          printf '%s\n' 'polkit.addRule(function(action, subject) { if (action.id === "org.freedesktop.policykit.exec" && subject.user === "nobody") return polkit.Result.YES; });' > /etc/polkit-1/rules.d/10-omp-test.rules
+          dbus-daemon --system --fork
+          /usr/lib/polkit-1/polkitd > /tmp/polkit.log 2>&1 &
+          sleep 3
+          OMP_DEB_TEST_PKEXEC=1 python3 -u /repo/scripts/linux-deb-update-integration.py
+          SCRIPT
       - name: Install deb and exercise packaged Electron (X11)
         timeout-minutes: 10
         run: |

@@ -230,11 +230,15 @@ export async function main(): Promise<void> {
     app.exit(0);
     return;
   }
-  // A pending macOS update swap watches for this version's main process; say so first thing.
+  // A pending desktop update watches for this version's main process.
   const macBundle = process.platform === "darwin" && app.isPackaged ? macBundlePath(process.execPath) : undefined;
   const macSwapDirectory = join(desktopPaths().updatesV2Root, "mac-swap");
-  const macSwap = macBundle === undefined ? undefined : macSwapMarkers(macSwapDirectory, { version: app.getVersion(), bundlePath: macBundle });
-  macSwap?.started(process.pid);
+  const appImage = process.platform === "linux" && app.isPackaged && process.env.APPIMAGE && isAbsolute(process.env.APPIMAGE) ? process.env.APPIMAGE : undefined;
+  const debInstalled = process.platform === "linux" && app.isPackaged && appImage === undefined && await (await import("./linux-deb-installer.js")).isLinuxDebInstallation(process.execPath, app.getVersion());
+  const linuxSwapDirectory = debInstalled ? join(desktopPaths().updatesV2Root, "deb", "swap") : join(desktopPaths().updatesV2Root, "linux-appimage-swap");
+  const desktopSwap = macBundle !== undefined ? macSwapMarkers(macSwapDirectory, { version: app.getVersion(), bundlePath: macBundle })
+    : appImage !== undefined || debInstalled ? macSwapMarkers(linuxSwapDirectory, { version: app.getVersion(), bundlePath: appImage ?? process.execPath }) : undefined;
+  desktopSwap?.started(process.pid);
   if (process.platform === "win32") {
     app.setAppUserModelId(resolveAppUserModelId());
   }
@@ -348,8 +352,8 @@ export async function main(): Promise<void> {
   setTimeout(() => { if (!gpuStatusSettled) settleGpuStatus(); }, 2_000).unref?.();
   powerMonitor.on("on-battery", () => { void perfProfiles.refresh(true); });
   powerMonitor.on("on-ac", () => { void perfProfiles.refresh(true); });
-  // Runs once the renderer has booted: a macOS update commits only then.
-  let confirmMacDesktop: (() => Promise<void>) | undefined;
+  // App bundle and AppImage updates commit once the renderer is ready.
+  let confirmDesktop: (() => Promise<void>) | undefined;
   if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined || process.platform === "linux" && process.arch === "x64")) {
     const { PreparedNsisUpdater, electronDifferentialDownload } = await import("./electron-update-adapter.js");
     const shared = {
@@ -362,10 +366,39 @@ export async function main(): Promise<void> {
       isBusy: () => hostFactory.isBusy(), getRestartBlocker: () => fileViewerIpc?.hasDirty() ? desktopText("请先保存或关闭有未保存修改的文件，再重启更新。", "Save or close files with unsaved changes before restarting to update.") : hostFactory.updateRestartBlocker(),
       beforeQuit: (onShutdownStarted: () => void) => hostFactory.shutdownForUpdate(onShutdownStarted),
       fetcher: net.fetch.bind(net) as typeof fetch, log: hostFactory.log,
-      restart: () => { app.relaunch({ args: relaunchArguments(process.argv) }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
+      restart: () => { app.relaunch({ args: relaunchArguments(process.argv), ...(appImage ? { execPath: appImage } : {}) }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
     };
     if (process.platform === "linux") {
-      updateCoordinator = new UpdateCoordinator({ ...shared, manualDesktopDownload: process.env.APPIMAGE ? "app" : "firstInstall" });
+      if (debInstalled) {
+        const { LinuxDebInstaller } = await import("./linux-deb-installer.js");
+        const installer = new LinuxDebInstaller({ target: process.execPath, resourcesPath: process.resourcesPath, swapDirectory: linuxSwapDirectory, pid: process.pid, launchArguments: relaunchArguments(process.argv) });
+        const coordinator = updateCoordinator = new UpdateCoordinator({
+          ...shared, root: join(desktopPaths().updatesV2Root, "deb"), linuxDesktopFormat: "deb",
+          installDesktop: (path, release, rollback, envelope, previous) => installer.install(path, release, rollback, envelope, previous),
+          preflightDesktop: () => installer.preflight(), desktopCommit: "confirmed",
+          desktopInstallOutcome: () => installer.consumeOutcome(), trackAppBaselineWithoutBase: true, desktopRequiresRollbackBase: true,
+        });
+        let confirmed: Promise<void> | undefined;
+        confirmDesktop = () => confirmed ??= (async () => { desktopSwap?.healthy(); await coordinator.confirmDesktopStartup(); })()
+          .catch((error) => console.error("[omp-studio] confirming the Linux deb update failed", error));
+      } else if (appImage === undefined) updateCoordinator = new UpdateCoordinator({ ...shared, manualDesktopDownload: "firstInstall" });
+      else {
+        const { LinuxAppImageInstaller } = await import("./linux-appimage-installer.js");
+        const installer = new LinuxAppImageInstaller({ target: appImage, swapDirectory: linuxSwapDirectory, pid: process.pid, launchArguments: relaunchArguments(process.argv) });
+        const coordinator = updateCoordinator = new UpdateCoordinator({
+          ...shared, initialInstallerPath: appImage,
+          installDesktop: (path, release, rollback) => installer.install(path, release, rollback),
+          preflightDesktop: () => installer.preflight(),
+          desktopCommit: "confirmed", desktopInstallOutcome: () => installer.consumeOutcome(),
+          trackAppBaselineWithoutBase: true,
+        });
+        let confirmed: Promise<void> | undefined;
+        confirmDesktop = () => confirmed ??= (async () => {
+          desktopSwap?.healthy();
+          await coordinator.confirmDesktopStartup();
+          await installer.cleanup(app.getVersion());
+        })().catch((error) => console.error("[omp-studio] confirming the Linux update failed", error));
+      }
     } else if (macBundle === undefined) {
       const updater = new PreparedNsisUpdater();
       updateCoordinator = new UpdateCoordinator({
@@ -386,8 +419,8 @@ export async function main(): Promise<void> {
         activateOptions: { selfCheck: withCodeSignatureCheck(createSmokeTestRunner()) },
       });
       let confirmed: Promise<void> | undefined;
-      confirmMacDesktop = () => confirmed ??= (async () => {
-        macSwap?.healthy();
+      confirmDesktop = () => confirmed ??= (async () => {
+        desktopSwap?.healthy();
         await coordinator.confirmDesktopStartup();
         await macInstaller.cleanup();
       })().catch((error) => console.error("[omp-studio] confirming the macOS update failed", error));
@@ -680,7 +713,7 @@ export async function main(): Promise<void> {
       isTrustedSender,
       noteBootSuccess: async () => {
         if (layout.payloadVersion !== undefined) await appPayloadInstaller.noteBootSuccess(layout.payloadVersion);
-        await confirmMacDesktop?.();
+        await confirmDesktop?.();
       },
     });
     window.webContents.once("did-finish-load", () => {
@@ -995,7 +1028,7 @@ export async function main(): Promise<void> {
       openPath: (path) => shell.openPath(path),
       rollbackRuntime: async () => {
         await hostFactory.rollbackRuntime();
-        app.relaunch({ args: relaunchArguments(process.argv) });
+        app.relaunch({ args: relaunchArguments(process.argv), ...(appImage ? { execPath: appImage } : {}) });
         app.quit();
       },
       pruneRuntimes: () => hostFactory.pruneRuntimes(),
@@ -1124,7 +1157,7 @@ export async function main(): Promise<void> {
 
   const application = createDesktopApplication({
     confirmBeforeQuit: () => fileViewerIpc?.requestClose() ?? Promise.resolve(true),
-    beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await tmux.disposeAll(); await remoteConnections.close(); remoteVault.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await tmux.disposeAll(); await remoteConnections.close(); remoteVault.close(); desktopSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
     platform: process.platform,

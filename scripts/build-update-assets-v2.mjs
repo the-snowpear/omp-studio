@@ -101,6 +101,15 @@ export async function buildUpdateAssetsV2(options = {}) {
   const envelope = { manifest, signature: { algorithm: "ed25519", keyId, value: sign(null, updateSigningBytes(manifest), signingKey).toString("base64url") } };
   verifyUpdateManifest(envelope, keys, repo, platform);
   await writeFile(join(out, `updates-${platform}.json`), JSON.stringify(envelope, null, 2) + "\n");
+  if (platform === "linux-x64" && manifest.app) {
+    const deb = manifest.firstInstall;
+    await buildBlockMap(join(out, deb.asset), "gzip", join(out, `${deb.asset}.blockmap`));
+    const debManifest = { schema: 2, repo, platform, generatedAt: manifest.generatedAt, releaseNotesUrl: manifest.releaseNotesUrl,
+      app: { ...manifest.app, file: deb, blockmap: await describeFile(join(out, `${deb.asset}.blockmap`), base) } };
+    const debEnvelope = { manifest: debManifest, signature: { algorithm: "ed25519", keyId, value: sign(null, updateSigningBytes(debManifest), signingKey).toString("base64url") } };
+    verifyUpdateManifest(debEnvelope, keys, repo, platform, "deb");
+    await writeFile(join(out, "updates-linux-deb-x64.json"), JSON.stringify(debEnvelope, null, 2) + "\n");
+  }
   const previousPath = options.previousIndex ?? (useEnvironment ? process.env.OMP_PREVIOUS_UPDATE_INDEX : undefined);
   if (!runtimeOnly && previousPath && legacyIndexName(platform) !== undefined) await buildMigrationIndex({ previousPath, out, arch, manifest, keys, signingKey, keyId });
   const notes = releaseNotes(manifest);
@@ -136,7 +145,7 @@ export function releaseNotes(manifest) {
 function linuxReleaseNotes(manifest) {
   const app = manifest.app, rt = manifest.runtime;
   const install = app
-    ? `## 安装（Linux x64）\n\n[下载 AppImage](${app.file.url}) · [下载 deb](${manifest.firstInstall.url})\n\n支持 Ubuntu 24.04 或更新的 x64 桌面（glibc 2.39+）。内置签名 Runtime，无需 Node、Bun 或 Rust。Ubuntu/Debian 推荐使用 deb：\`sudo apt install ./OMP-Studio-${app.version}-linux-x64.deb\`。AppImage 先执行 \`chmod +x\`；系统需支持 FUSE 2 和非特权用户命名空间。沙箱或安装问题见 [Linux 安装说明](https://github.com/${manifest.repo}/blob/v${app.version}/docs/linux.md)。\n\nLinux 桌面更新通过下载新安装包完成；应用内 Runtime 更新继续验签和校验兼容性。\n\n`
+    ? `## 安装（Linux x64）\n\n[下载 AppImage](${app.file.url}) · [下载 deb](${manifest.firstInstall.url})\n\n支持 Ubuntu 24.04 或更新的 x64 桌面（glibc 2.39+）。内置签名 Runtime，无需 Node、Bun 或 Rust。Ubuntu/Debian 推荐使用 deb：\`sudo apt install ./OMP-Studio-${app.version}-linux-x64.deb\`。AppImage 先执行 \`chmod +x\`；系统需支持 FUSE 2 和非特权用户命名空间。沙箱或安装问题见 [Linux 安装说明](https://github.com/${manifest.repo}/blob/v${app.version}/docs/linux.md)。\n\n支持应用内更新的 AppImage 和 deb 可后台差分下载并重启升级；deb 在安装前请求系统管理员授权。Runtime 更新继续验签和校验兼容性。\n\n`
     : "这是 Runtime 独立更新，不是桌面安装包。在 OMP Studio 中检查更新即可。\n\n";
   return `# ${app ? `OMP Studio ${app.version}` : `OMP Runtime ${rt.version}`}\n\n${install}## Runtime\n\n版本：${rt.version} · 通道：${rt.channel} · 最低桌面版本：${rt.minAppVersion}\n\nRuntime ZIP 用于在线更新或离线导入；blockmap 和 updates-linux-x64.json 是签名更新附件，不是桌面安装包。\n`;
 }

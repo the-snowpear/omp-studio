@@ -45,9 +45,11 @@ export interface UpdateCoordinatorOptions {
   isBusy: () => boolean;
   getRestartBlocker?: () => string | undefined;
   beforeQuit: (onShutdownStarted: () => void) => Promise<void>;
-  /** Omitted for Linux's manual installation policy. Runtime updates remain available. */
-  installDesktop?: (path: string, release: ComponentRelease) => Promise<void>;
+  /** Omitted for system-managed Linux installations. Runtime updates remain available. */
+  installDesktop?: (path: string, release: ComponentRelease, rollback: boolean, envelope: SignedUpdateManifest, previous?: { path: string; envelope: SignedUpdateManifest }) => Promise<void>;
   manualDesktopDownload?: "app" | "firstInstall";
+  linuxDesktopFormat?: "deb";
+  desktopRequiresRollbackBase?: boolean;
   /** Why this installation cannot update itself (e.g. macOS App Translocation); undefined when it can. */
   preflightDesktop?: () => Promise<string | undefined>;
   /**
@@ -99,7 +101,7 @@ export class UpdateCoordinator {
     const manual = !this.options.installDesktop ? this.found.app?.manifest : undefined;
     const manualFile = this.options.manualDesktopDownload === "firstInstall" ? manual?.firstInstall : manual?.app?.file;
     return structuredClone({ ...this.snapshot,
-      app: { ...this.snapshot.app, ...(manualFile ? { manualInstallUrl: manualFile.url } : {}) },
+      app: { ...this.snapshot.app, ...(manualFile ? { manualInstallUrl: manualFile.url } : {}), ...(this.options.linuxDesktopFormat === "deb" ? { requiresSystemAuthorization: true } : {}) },
       runtime: { ...this.snapshot.runtime, blockedReason: runtime && this.snapshot.runtime.version
         ? this.runtimeCompatibilityBlocker(runtime, app?.version ?? this.options.appVersion, app?.studioProtocol) : undefined },
       rollbackAppVersion: this.journal.rollbackApp?.manifest.app?.version, rollbackAppPending: this.journal.rollbackRequested === true });
@@ -107,7 +109,24 @@ export class UpdateCoordinator {
   get hasRuntimeTrial(): boolean { return this.journal.runtimeTrial !== undefined; }
   private emit(): void { this.options.snapshotChanged(this.state); }
   private save(): Promise<void> { return writeJsonAtomic(join(this.options.root, "transaction-v2.json"), this.journal); }
-  private verify(value: unknown): SignedUpdateManifest { return verifyUpdateManifest(value, this.options.keys, this.options.repo, this.options.platform); }
+  private verify(value: unknown, kind?: UpdateComponent): SignedUpdateManifest { return verifyUpdateManifest(value, this.options.keys, this.options.repo, this.options.platform, kind === "app" ? this.options.linuxDesktopFormat : undefined); }
+  /** A manual installation can supersede an ordinary prepared desktop update. */
+  private async reconcileDesktopPending(): Promise<void> {
+    const app = this.journal.pending.app?.manifest.app;
+    if (!app || this.journal.rollbackRequested || compareSemver(app.version, this.options.appVersion) >= 0) return;
+    const runtime = this.journal.pending.runtime?.manifest.runtime;
+    if (runtime?.channel === "stable" && app.bundledRuntimeVersion === runtime.version &&
+      !await isVerifiedFile(cachedUpdatePath(this.cache, runtime.file), runtime.file)) {
+      delete this.journal.pending.runtime;
+      this.snapshot.runtime = { component: "runtime", currentVersion: this.snapshot.runtime.currentVersion, phase: "idle" };
+    }
+    delete this.journal.pending.app;
+    this.journal.authorized = false;
+    this.snapshot.app = { component: "app", currentVersion: this.options.appVersion, phase: "idle" };
+    await this.save();
+    this.options.log?.write("info", "update.pending.superseded", `component=app version=${app.version}`);
+    this.emit();
+  }
   /** An external installation may have completed or superseded a prepared Runtime. */
   private async reconcileRuntimePending(): Promise<Awaited<ReturnType<RuntimeInstaller["currentManifest"]>>> {
     const current = await this.installer.currentManifest().catch(() => undefined);
@@ -178,8 +197,8 @@ export class UpdateCoordinator {
     try {
       const raw = JSON.parse(await readFile(join(this.options.root, "transaction-v2.json"), "utf8")) as Journal;
       if (raw.schema !== 2 || typeof raw.authorized !== "boolean" || !raw.pending || !raw.previous || !raw.watermarks) throw new Error("Invalid update journal");
-      for (const collection of [raw.pending, raw.previous]) for (const kind of ["app", "runtime"] as const) if (collection[kind]) collection[kind] = this.verify(collection[kind]);
-      if (raw.rollbackApp) raw.rollbackApp = this.verify(raw.rollbackApp);
+      for (const collection of [raw.pending, raw.previous]) for (const kind of ["app", "runtime"] as const) if (collection[kind]) collection[kind] = this.verify(collection[kind], kind);
+      if (raw.rollbackApp) raw.rollbackApp = this.verify(raw.rollbackApp, "app");
       if (raw.rollbackRequested !== undefined && typeof raw.rollbackRequested !== "boolean") throw new Error("Invalid rollback intent");
       if (raw.runtimeTrial) {
         assertSafeVersion(raw.runtimeTrial.version);
@@ -194,6 +213,7 @@ export class UpdateCoordinator {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") { this.journalInvalid = true; this.snapshot.error = desktopText("更新状态损坏；请从诊断恢复或重新安装，已停止自动更新", "Update state is corrupted; recover from Diagnostics or reinstall. Automatic updates have stopped."); this.snapshot.errorStage = "recovery"; this.emit(); return; }
     }
     await this.applyDesktopInstallOutcome();
+    await this.reconcileDesktopPending();
     const app = this.journal.pending.app?.manifest.app;
     if (app && app.version === this.options.appVersion && this.options.desktopCommit !== "confirmed") this.promoteApp();
     // A failed desktop installation leaves authorization pending; never activate
@@ -332,12 +352,13 @@ export class UpdateCoordinator {
     this.snapshot.checking = true; this.snapshot.error = undefined; this.snapshot.errorStage = undefined; this.emit();
     try {
       const prefs = await this.options.prefs.read();
+      await this.reconcileDesktopPending();
       const installedRuntime = await this.reconcileRuntimePending();
       if (this.journal.pending.runtime?.manifest.runtime?.channel !== undefined && this.journal.pending.runtime.manifest.runtime.channel !== prefs.runtimeChannel) {
         delete this.journal.pending.runtime;
         this.snapshot.runtime = { component: "runtime", currentVersion: this.snapshot.runtime.currentVersion, phase: "idle" };
       }
-      this.found = await discoverUpdates({ repo: this.options.repo, platform: this.options.platform, keys: this.options.keys, mirror: prefs.mirrorPrefix, channel: prefs.runtimeChannel, signal: controller.signal, watermarks: this.journal.watermarks, currentVersions: { app: this.options.appVersion, runtime: this.snapshot.runtime.currentVersion }, cacheDirectory: join(this.options.root, "catalog-cache"), ...(this.options.log ? { log: this.options.log } : {}), ...(this.options.fetcher ? { fetcher: this.options.fetcher } : {}) });
+      this.found = await discoverUpdates({ repo: this.options.repo, platform: this.options.platform, keys: this.options.keys, mirror: prefs.mirrorPrefix, channel: prefs.runtimeChannel, signal: controller.signal, watermarks: this.journal.watermarks, currentVersions: { app: this.options.appVersion, runtime: this.snapshot.runtime.currentVersion }, cacheDirectory: join(this.options.root, "catalog-cache"), ...(this.options.linuxDesktopFormat ? { linuxDesktopFormat: this.options.linuxDesktopFormat } : {}), ...(this.options.log ? { log: this.options.log } : {}), ...(this.options.fetcher ? { fetcher: this.options.fetcher } : {}) });
       for (const kind of ["app", "runtime"] as const) {
         const baseline = this.found.baselines?.[kind], release = baseline?.manifest[kind];
         if (kind === "app" && !this.options.installDesktop) continue;
@@ -383,6 +404,7 @@ export class UpdateCoordinator {
     if (this.journalInvalid) throw new Error(this.snapshot.error);
     if (this.journal.rollbackRequested) throw new Error(desktopText("桌面回滚已准备，请重启应用完成恢复", "Desktop rollback is staged; restart the app to finish recovery"));
     if (this.controller || this.applying) throw new Error(desktopText("已有正在进行的更新任务", "An update task is already in progress"));
+    await this.reconcileDesktopPending();
     await this.reconcileRuntimePending();
     if (!this.found.app && !this.found.runtime) await this.check();
     if (this.snapshot.error) throw new Error(this.snapshot.error);
@@ -416,6 +438,14 @@ export class UpdateCoordinator {
         this.snapshot[kind] = { ...this.snapshot[kind], version: release.version, phase: "downloading", message: undefined, errorStage: undefined };
         this.emit();
         try {
+          if (kind === "app" && this.options.desktopRequiresRollbackBase) {
+            const previous = this.journal.previous.app?.manifest.app;
+            if (!previous || previous.version !== this.options.appVersion) throw new Error(desktopText("找不到当前版本的签名 deb 清单，无法准备恢复包；请手动安装新版", "The signed deb catalog for the installed version is unavailable; install the new version manually"));
+            if (!await isVerifiedFile(cachedUpdatePath(this.cache, previous.file), previous.file)) {
+              await downloadDifferentialArtifact({ release: previous, root: this.cache, mirror: prefs.mirrorPrefix, signal: controller.signal, fetcher: this.options.fetcher, ...(this.options.log ? { log: this.options.log } : {}),
+                progress: (_method, receivedBytes, totalBytes) => { this.snapshot.app = { ...this.snapshot.app, receivedBytes, totalBytes, message: desktopText("正在准备当前版本的恢复包", "Preparing the current version for recovery") }; this.emit(); } });
+            }
+          }
           if (kind === "runtime" && release.channel === "stable" && this.journal.pending.app?.manifest.app?.bundledRuntimeVersion === release.version) {
             this.snapshot.runtime = { ...this.snapshot.runtime, method: "reuse", receivedBytes: 0, totalBytes: 0 };
           } else await downloadDifferentialArtifact({ release, previous: this.journal.previous[kind]?.manifest[kind], root: this.cache, mirror: prefs.mirrorPrefix, signal: controller.signal, fetcher: this.options.fetcher, differential: this.options.differential, ...(this.options.log ? { log: this.options.log } : {}),
@@ -443,6 +473,7 @@ export class UpdateCoordinator {
     this.applying = true;
     let stopped = false;
     try {
+      await this.reconcileDesktopPending();
       const hadRuntimePending = this.journal.pending.runtime !== undefined;
       await this.reconcileRuntimePending();
       // A pending desktop matching this executable already runs and awaits confirmation.
@@ -455,7 +486,7 @@ export class UpdateCoordinator {
       for (const kind of ["app", "runtime"] as const) {
         const envelope = kind === "app" ? pendingApp : this.journal.pending.runtime;
         if (!envelope) continue;
-        const release = this.verify(envelope).manifest[kind]!;
+        const release = this.verify(envelope, kind).manifest[kind]!;
         const bundled = kind === "runtime" && release.channel === "stable" && this.journal.pending.app?.manifest.app?.bundledRuntimeVersion === release.version;
         if (!bundled && !await isVerifiedFile(cachedUpdatePath(this.cache, release.file), release.file)) throw new Error("Update checksum mismatch before apply");
       }
@@ -492,7 +523,11 @@ export class UpdateCoordinator {
         // executed so a cache swap in that window cannot launch them.
         if (!await isVerifiedFile(cachedUpdatePath(this.cache, app.file), app.file)) throw new Error("Update checksum mismatch after shutdown");
         if (!this.options.installDesktop) throw new Error(desktopText("请从发布页下载 Linux 安装包完成桌面升级", "Download the Linux installer from the release page to upgrade the desktop app"));
-        await this.options.installDesktop(cachedUpdatePath(this.cache, app.file), app);
+        const previous = this.journal.previous.app;
+        const previousRelease = previous ? this.verify(previous, "app").manifest.app : undefined;
+        const previousPath = previousRelease ? cachedUpdatePath(this.cache, previousRelease.file) : undefined;
+        const backup = previous && previousRelease && previousPath && await isVerifiedFile(previousPath, previousRelease.file) ? { path: previousPath, envelope: previous } : undefined;
+        await this.options.installDesktop(cachedUpdatePath(this.cache, app.file), app, this.journal.rollbackRequested === true, this.verify(pendingApp, "app"), backup);
         this.options.quit();
       } else this.options.restart();
       return { ok: true };
@@ -527,7 +562,7 @@ export class UpdateCoordinator {
     if (this.controller || this.applying || this.options.isBusy()) return { ok: false, message: desktopText("请先完成任务和下载", "Finish running tasks and downloads first") };
     const envelope = this.journal.rollbackApp;
     if (!envelope?.manifest.app) return { ok: false, message: desktopText("没有可验证的上一桌面版本，请下载历史安装包恢复", "No verifiable previous desktop version is available; download a previous installer to recover") };
-    const app = this.verify(envelope).manifest.app!;
+    const app = this.verify(envelope, "app").manifest.app!;
     const runtime = await this.installer.currentManifest();
     if (runtime && (runtime.manifest.studioProtocol.min > app.studioProtocol.max || runtime.manifest.studioProtocol.max < app.studioProtocol.min)) return { ok: false, message: desktopText("当前 Runtime 与上一桌面不兼容，请先回滚 Runtime", "Current Runtime is incompatible with the previous desktop version; roll back the Runtime first") };
     const controller = this.controller = new AbortController();

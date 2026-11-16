@@ -57,6 +57,20 @@ for (const dir of await readdir("outputs/publish")) {
   } else if (m.app && firstInstallAssetName(m.app.version, platform)) {
     throw new Error(`Missing manual installer for ${platform}`);
   }
+  if (platform === "linux-x64" && m.app) {
+    const debName = "updates-linux-deb-x64.json";
+    const { manifest: dm, signature: ds } = JSON.parse(await readFile(join(root, debName), "utf8"));
+    const debKey = table.keys[ds.keyId];
+    if (!debKey || ds.algorithm !== "ed25519" || !verify(null, Buffer.from(`omp-studio-update-v2\n${canonical(dm)}`), createPublicKey(await readFile(join("packaging/keys", debKey))), Buffer.from(ds.value, "base64url"))) throw new Error("Invalid deb candidate signature");
+    const expectedDeb = { schema: 2, repo, platform, generatedAt: m.generatedAt, releaseNotesUrl: m.releaseNotesUrl,
+      app: { ...m.app, file: m.firstInstall, blockmap: dm.app?.blockmap } };
+    if (canonical(dm) !== canonical(expectedDeb)) throw new Error("Linux deb candidate does not match desktop release");
+    const map = dm.app.blockmap;
+    if (map.asset !== `${m.firstInstall.asset}.blockmap` || map.url !== `https://github.com/${repo}/releases/download/${tag}/${map.asset}`) throw new Error("Invalid deb blockmap identity");
+    const bytes = await readFile(join(root, map.asset));
+    if (bytes.length !== map.size || createHash("sha256").update(bytes).digest("hex") !== map.sha256) throw new Error("Candidate deb blockmap verification failed");
+    allowed.add(debName); allowed.add(map.asset);
+  }
   const legacy = legacyIndexName(platform);
   if (legacy !== undefined) { allowed.add(`${legacy}.json`); allowed.add(`${legacy}.sig.json`); }
   for (const file of await readdir(root)) {

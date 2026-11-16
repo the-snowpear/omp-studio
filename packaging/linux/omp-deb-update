@@ -1,0 +1,137 @@
+#!/usr/bin/python3 -I
+"""Install a signed Studio deb through the system package manager.
+
+This helper is installed under /opt by dpkg and runs via pkexec. It copies the
+user's downloads into a root-owned directory before checking their signatures
+and digests, so the bytes apt installs cannot be replaced after verification.
+"""
+import base64
+import hashlib
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+
+RESOURCE_DIR = os.path.dirname(os.path.realpath(__file__))
+KEY_DIR = os.path.join(RESOURCE_DIR, "runtime-keys")
+REPO = "the-snowpear/omp-studio"
+ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "DEBIAN_FRONTEND": "noninteractive"}
+
+
+def open_user_file(path):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != int(os.environ["PKEXEC_UID"]):
+        os.close(fd)
+        raise ValueError("Update file is not owned by the requesting user")
+    return os.fdopen(fd, "rb")
+
+
+def read_source(path, limit=None, user_file=False):
+    source = open_user_file(path) if user_file else open(path, "rb")
+    with source:
+        data = source.read() if limit is None else source.read(limit + 1)
+    if limit is not None and len(data) > limit:
+        raise ValueError("Update catalog is too large")
+    return data
+
+
+def canonical(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def require_root_owned(path):
+    info = os.lstat(path)
+    if info.st_uid != 0 or stat.S_ISLNK(info.st_mode) or info.st_mode & 0o022:
+        raise ValueError("Untrusted installed update helper or signing key")
+
+
+def verified_package(package_path, catalog_path, root, name):
+    envelope = json.loads(read_source(catalog_path, 1024 * 1024, user_file=True))
+    manifest, signature = envelope["manifest"], envelope["signature"]
+    table = json.loads(read_source(os.path.join(KEY_DIR, "trusted-keys.json"), 1024 * 1024))
+    key_name = table["keys"][signature["keyId"]]
+    if signature["algorithm"] != "ed25519" or os.path.basename(key_name) != key_name:
+        raise ValueError("Invalid signing key")
+    require_root_owned(os.path.join(KEY_DIR, key_name))
+    raw_signature = base64.urlsafe_b64decode(signature["value"] + "==")
+    signed_path, signature_path = os.path.join(root, name + ".signed"), os.path.join(root, name + ".sig")
+    with open(signed_path, "wb") as output:
+        output.write(b"omp-studio-update-v2\n" + canonical(manifest))
+    with open(signature_path, "wb") as output:
+        output.write(raw_signature)
+    subprocess.run(["/usr/bin/openssl", "pkeyutl", "-verify", "-pubin", "-inkey", os.path.join(KEY_DIR, key_name),
+                    "-rawin", "-in", signed_path, "-sigfile", signature_path], check=True, env=ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    app = manifest["app"]
+    file = app["file"]
+    version = app["version"]
+    if (manifest["schema"] != 2 or manifest["repo"] != REPO or manifest["platform"] != "linux-x64"
+            or app["channel"] != "stable" or not re.fullmatch(r"\d+\.\d+\.\d+(?:-[\w.-]+)?", version)
+            or file["asset"] != "OMP-Studio-" + version + "-linux-x64.deb"
+            or not re.fullmatch(r"[a-f0-9]{64}", file["sha256"])):
+        raise ValueError("Invalid deb catalog identity")
+    destination = os.path.join(root, name + ".deb")
+    digest = hashlib.sha256()
+    with open_user_file(package_path) as source, open(destination, "xb") as output:
+        while True:
+            data = source.read(1024 * 1024)
+            if not data:
+                break
+            digest.update(data)
+            output.write(data)
+            if output.tell() > file["size"]:
+                raise ValueError("Downloaded deb exceeds signed size")
+    if os.path.getsize(destination) != file["size"] or digest.hexdigest() != file["sha256"]:
+        raise ValueError("Downloaded deb checksum mismatch")
+    os.chmod(destination, 0o644)
+    for field, expected in (("Package", "omp-studio"), ("Version", version), ("Architecture", "amd64")):
+        actual = subprocess.check_output(["/usr/bin/dpkg-deb", "--field", destination, field], env=ENV, text=True).strip()
+        if actual != expected:
+            raise ValueError("Downloaded deb %s mismatch" % field)
+    return destination
+
+
+def install(package_path, catalog_path, previous=None):
+    with tempfile.TemporaryDirectory(prefix="omp-studio-update-", dir="/var/tmp") as root:
+        os.chmod(root, 0o755)  # apt's _apt user may read, but cannot change, staged packages.
+        target = verified_package(package_path, catalog_path, root, "target")
+        backup = verified_package(previous[0], previous[1], root, "previous") if previous else None
+        print("AUTHORIZED", flush=True)
+        if sys.stdin.readline().strip() != "install":
+            return
+        command = ["/usr/bin/apt-get", "install", "-y", "--allow-downgrades", "--no-install-recommends"]
+        result = subprocess.run([*command, target], env=ENV, stdin=subprocess.DEVNULL, stdout=sys.stderr)
+        if result.returncode != 0:
+            if backup:
+                restored = subprocess.run([*command, backup], env=ENV, stdin=subprocess.DEVNULL, stdout=sys.stderr)
+                if restored.returncode != 0:
+                    raise RuntimeError("Package installation failed and restoring the previous package also failed")
+                print("ROLLED_BACK", flush=True)
+                return
+            raise RuntimeError("Package installation failed; reinstall the previous package if needed")
+        print("INSTALLED", flush=True)
+        if sys.stdin.readline().strip() != "commit":
+            if not backup or subprocess.run([*command, backup], env=ENV, stdin=subprocess.DEVNULL, stdout=sys.stderr).returncode != 0:
+                raise RuntimeError("Could not restore the previous package")
+            print("ROLLED_BACK", flush=True)
+        else:
+            print("COMMITTED", flush=True)
+
+
+def main():
+    if os.geteuid() != 0 or len(sys.argv) not in (3, 5):
+        raise ValueError("Expected a privileged install with a signed catalog")
+    for path in (RESOURCE_DIR, __file__, KEY_DIR, os.path.join(KEY_DIR, "trusted-keys.json")):
+        require_root_owned(path)
+    install(sys.argv[1], sys.argv[2], tuple(sys.argv[3:]) if len(sys.argv) == 5 else None)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)

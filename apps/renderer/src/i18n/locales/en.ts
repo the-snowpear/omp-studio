@@ -2747,6 +2747,8 @@ export const en: LocaleDictionary = {
   "appUpdate": {
     "downloadInstaller": "Download installer",
     "linuxManualInstall": "Download the new version, close OMP Studio, then install the deb or replace the AppImage. Your settings and sessions are retained. Runtime updates remain available in the app.",
+    "systemAuthorization": "The system will request administrator authorization when you restart to install.",
+    "waitingAuthorization": "Complete administrator authorization in the system prompt…",
     "dialogTitle": "Update Available",
     "currentVersion": "Current Version",
     "latestVersion": "Latest Version",

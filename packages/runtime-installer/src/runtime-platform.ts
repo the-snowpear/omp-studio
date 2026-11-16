@@ -29,7 +29,7 @@ export function isUpdatePlatform(platform: string): platform is UpdatePlatform {
   return (UPDATE_PLATFORMS as readonly string[]).includes(platform);
 }
 
-/** Desktop download: NSIS, zipped `.app`, or a manually installed Linux AppImage. */
+/** Desktop download: NSIS, zipped `.app`, or a Linux AppImage. */
 export function appUpdateAssetSuffix(platform: UpdatePlatform): ".exe" | ".zip" | ".AppImage" {
   const os = runtimeOsOf(platform);
   return os === "darwin" ? ".zip" : os === "linux" ? ".AppImage" : ".exe";

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useI18n } from "../i18n";
+import { PLATFORM } from "../platform";
 import { PREVIEW_DESKTOP_RECOVERY } from "../preview/fixtures";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useAppUpdate } from "./appUpdate";
@@ -44,6 +45,7 @@ export function DesktopUpdateRecovery({ preview }: { preview: boolean }) {
       </button>
     </SettingRow>
     {ready && !applying ? <p className="small muted" role="status">{t("updates.readyToApply")}</p> : null}
+    {ready && (preview ? PLATFORM === "linux" : updates.state.requiresSystemAuthorization) ? <p className="small muted">{t(applying ? "appUpdate.waitingAuthorization" : "appUpdate.systemAuthorization")}</p> : null}
     {preview && marks && demoDone ? <p className="small muted" role="status">{t("updates.rollbackAppDemoDone")}</p> : null}
     {!preview && updates.state.applyNotice ? <p className="small muted" role="status">{updates.state.applyNotice}</p> : null}
     {!preview ? ([

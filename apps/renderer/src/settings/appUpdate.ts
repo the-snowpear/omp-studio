@@ -22,6 +22,7 @@ export interface AppUpdateState {
   readonly readyToApply?: boolean;
   readonly rollbackVersion?: string | undefined;
   readonly rollbackReady?: boolean;
+  readonly requiresSystemAuthorization?: boolean;
   readonly receivedBytes?: number | undefined;
   readonly totalBytes?: number | undefined;
   readonly updateInfo: {
@@ -32,6 +33,7 @@ export interface AppUpdateState {
     readonly reason?: string | undefined;
     readonly blockedReason?: string | undefined;
     readonly manualInstallUrl?: string | undefined;
+    readonly requiresSystemAuthorization?: boolean | undefined;
     readonly version?: string | undefined;
     readonly name?: string | undefined;
     readonly releaseNotes?: string | undefined;
@@ -116,6 +118,7 @@ function receiveUnifiedUpdate(snapshot: import("@omp-studio/runtime-installer").
     checking: snapshot.checking, downloading, applying, readyToApply: ready,
     rollbackVersion: snapshot.rollbackAppVersion,
     rollbackReady: snapshot.rollbackAppPending === true && snapshot.app.phase === "ready",
+    requiresSystemAuthorization: snapshot.app.requiresSystemAuthorization === true,
     ...messages,
     receivedBytes: parts.reduce((n, p) => n + (p.receivedBytes ?? 0), 0),
     totalBytes: parts.reduce((n, p) => n + (p.totalBytes ?? 0), 0),
@@ -124,6 +127,7 @@ function receiveUnifiedUpdate(snapshot: import("@omp-studio/runtime-installer").
       available: Boolean(current.version), currentVersion: current.currentVersion ?? "",
       version: current.version, name: current.component === "runtime" ? `OMP Runtime ${current.version ?? ""}` : `OMP Studio ${current.version ?? ""}`,
       reason: "restart-update", blockedReason: current.blockedReason, htmlUrl: snapshot.releaseNotesUrl, manualInstallUrl: current.manualInstallUrl,
+      requiresSystemAuthorization: snapshot.app.requiresSystemAuthorization === true && (snapshot.app.phase === "ready" || snapshot.app.phase === "applying"),
       releaseNotes: parts.filter(p => p.version).map(p => `${p.component === "app" ? "OMP Studio" : "Runtime"}: ${p.currentVersion ?? "—"} → ${p.version}${p.method === "differential" ? ` · ${updateCopy("appUpdate.downloadDifferential")}` : p.method === "reuse" ? ` · ${updateCopy("appUpdate.downloadReuse")}` : p.method === "full" ? ` · ${updateCopy("appUpdate.downloadFull")}` : ""}${p.message ? `\n${p.message}` : ""}`).join("\n\n"),
     },
   });

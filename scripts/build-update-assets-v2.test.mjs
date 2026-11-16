@@ -35,14 +35,25 @@ test("Linux publishes signed AppImage, deb and executable Runtime assets without
   assert.equal(manifest.app.file.asset, "OMP-Studio-1.0.0-linux-x64.AppImage");
   assert.equal(manifest.firstInstall.asset, "OMP-Studio-1.0.0-linux-x64.deb");
   assert.equal(manifest.runtime.file.asset, "OMP-Studio-Runtime-18.0.0-studio.1-linux-x64.zip");
-  assert.equal((await readdir(out)).length, 7);
+  assert.equal((await readdir(out)).length, 9);
   assert.equal((await verifyUpdateAssets(out, keys, "owner/repo", "linux-x64")).app.version, "1.0.0");
   const envelope = verifyUpdateManifest(JSON.parse(await readFile(join(out, "updates-linux-x64.json"), "utf8")), keys, "owner/repo", "linux-x64");
   assert.deepEqual(verifyUpdateManifest(JSON.parse(JSON.stringify(envelope)), keys, "owner/repo", "linux-x64"), envelope);
+  const deb = verifyUpdateManifest(JSON.parse(await readFile(join(out, "updates-linux-deb-x64.json"), "utf8")), keys, "owner/repo", "linux-x64", "deb");
+  assert.deepEqual(deb.manifest.app.file, manifest.firstInstall);
+  assert.equal(deb.manifest.app.blockmap.asset, `${manifest.firstInstall.asset}.blockmap`);
+  assert.throws(() => verifyUpdateManifest(deb, keys, "owner/repo", "linux-x64"), /metadata/u, "older clients still reject a deb catalog if presented as the AppImage feed");
   assert.match(notes, /Linux x64/u);
   assert.doesNotMatch(notes, /Windows|update-index/u);
   await writeFile(join(out, manifest.firstInstall.asset), "changed-deb");
   await assert.rejects(() => verifyUpdateAssets(out, keys, "owner/repo", "linux-x64"), /mismatch/u);
+});
+test("Linux Runtime-only releases do not create a deb desktop catalog", async () => {
+  const options = await fixture("stable", "18.0.0-studio.1", "signed-linux-runtime", "linux-x64");
+  const { out, manifest } = await buildUpdateAssetsV2({ ...options, runtimeOnly: true });
+  assert.equal(manifest.app, undefined);
+  assert.equal((await readdir(out)).includes("updates-linux-deb-x64.json"), false);
+  await verifyUpdateAssets(out, keys, "owner/repo", "linux-x64");
 });
 test("v2 desktop publishes only documented artifacts and verifies every byte", async () => {
   const options = await fixture(); const { out, manifest } = await buildUpdateAssetsV2(options);

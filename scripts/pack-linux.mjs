@@ -19,6 +19,7 @@ async function main() {
   const skipBuild = process.argv.includes("--skip-build") || process.env.OMP_PACK_SKIP_BUILD === "1";
   const npm = npmInvocation();
   const env = { ...process.env, OMP_TARGET_PLATFORM: "linux", OMP_TARGET_ARCH: "x64", OMP_INSTALLER_ARTIFACT_PLATFORM: LINUX_TARGET_PLATFORM };
+  chmodSync(join(repositoryRoot, "packaging/linux/omp-deb-update"), 0o755);
   if (!skipHost) run(npm.command, [...npm.prefix, "run", "omp:build:host"], { env });
   else if (!skipBuild) run(npm.command, [...npm.prefix, "run", "build"], { env });
   bundlePreload();

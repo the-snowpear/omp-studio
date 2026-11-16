@@ -21,11 +21,13 @@ test("Linux packages carry POSIX Runtime resources and retain Chromium sandboxin
   assert.equal(config.nsis, undefined);
   assert.deepEqual(config.extraFiles, [{ from: LINUX_APPIMAGE_LAUNCHER, to: "AppRun" }]);
   for (const entry of base.extraFiles) assert.ok(config.extraResources.some(resource => resource.to === entry.to));
+  assert.ok(config.extraResources.some(resource => resource.from === "packaging/linux/omp-deb-update" && resource.to === "omp-deb-update"));
   assert.deepEqual(config.appImage.executableArgs, [], "the builder's default would disable the sandbox");
   assert.equal(config.extraMetadata.desktopName, "omp-studio.desktop");
   assert.equal(config.linux.desktop.entry.StartupWMClass, "omp-studio");
   assert.equal(config.deb.packageName, "omp-studio");
   assert.ok(config.deb.depends.includes("libc6 (>= 2.39)"));
+  for (const dependency of ["python3", "openssl", "pkexec", "apt"]) assert.ok(config.deb.depends.includes(dependency));
   assert.equal(linuxAppImageName("0.2.2"), "OMP-Studio-0.2.2-linux-x64.AppImage");
   assert.equal(linuxDebName("0.2.2"), "OMP-Studio-0.2.2-linux-x64.deb");
 });

@@ -22,6 +22,27 @@ for (const preview of [false, true]) it(`keeps the Linux installer dialog and it
   if (preview) expect(screen.getByText("（演示）")).toBeTruthy();
 });
 
+for (const preview of [false, true]) it(`preserves the prepared deb update and authorization hint while switching languages (${preview ? "preview" : "real"})`, async () => {
+  vi.useFakeTimers();
+  try {
+    const update = { component: "app" as const, currentVersion: "0.2.2", version: "0.2.3", requiresSystemAuthorization: true };
+    const view = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><AppUpdateDialog preview={preview} update={update} readyToApply={!preview} onClose={vi.fn()} onApply={vi.fn()} /></I18nProvider>;
+    const { rerender } = render(view("zh"));
+    if (preview) {
+      fireEvent.click(screen.getByRole("button", { name: "下载更新" }));
+      await act(async () => vi.advanceTimersByTime(1600));
+    }
+    expect(screen.getByRole("button", { name: "重启更新" })).toBeTruthy();
+    expect(screen.getByText("重启安装时，系统会请求管理员授权。")).toBeTruthy();
+    rerender(view("en"));
+    expect(screen.getByRole("button", { name: "Restart to update" })).toBeTruthy();
+    expect(screen.getByText("The system will request administrator authorization when you restart to install.")).toBeTruthy();
+    rerender(view("zh"));
+    expect(screen.getByRole("button", { name: "重启更新" })).toBeTruthy();
+    expect(screen.getByText("重启安装时，系统会请求管理员授权。")).toBeTruthy();
+  } finally { vi.useRealTimers(); }
+});
+
 it("opens the Linux manual installer without preparing or restarting the app", async () => {
   const download = vi.fn(), apply = vi.fn();
   const open = vi.spyOn(window, "open").mockImplementation(() => null);

@@ -718,14 +718,17 @@ export type PreviewAppUpdate = {
   downloadUrl: string;
   assetName: string;
   assetSize: number;
+  requiresSystemAuthorization?: boolean;
 };
 
 export function getPreviewAppUpdate(zh = isZh()): PreviewAppUpdate {
+  const version = PLATFORM === "linux" ? "0.2.2" : "0.2.0";
+  const assetName = PLATFORM === "darwin" ? `OMP-Studio-${version}-macos-arm64.dmg` : PLATFORM === "linux" ? `OMP-Studio-${version}-linux-x64.deb` : `OMP-Studio-Setup-${version}-windows-x64.exe`;
   return {
     available: true,
     currentVersion: "0.1.0",
-    version: "0.2.0",
-    name: "OMP Studio 0.2.0",
+    version,
+    name: `OMP Studio ${version}`,
     releaseNotes: zh
       ? `### 新增功能与改进
 
@@ -742,10 +745,11 @@ export function getPreviewAppUpdate(zh = isZh()): PreviewAppUpdate {
 - **Full bilingual UI support**: Complete Chinese and English update guidance across dialogs and badges.
 - **Performance & reliability**: Improved Runtime Bridge handshake and IPC responsiveness.`,
     publishedAt: "2026-08-20T00:00:00Z",
-    htmlUrl: "https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.0",
-    downloadUrl: `https://github.com/the-snowpear/omp-studio/releases/download/v0.2.0/${PLATFORM === "darwin" ? "OMP-Studio-0.2.0-macos-arm64.dmg" : "OMP-Studio-Setup-0.2.0-windows-x64.exe"}`,
-    assetName: PLATFORM === "darwin" ? "OMP-Studio-0.2.0-macos-arm64.dmg" : "OMP-Studio-Setup-0.2.0-windows-x64.exe",
+    htmlUrl: `https://github.com/the-snowpear/omp-studio/releases/tag/v${version}`,
+    downloadUrl: `https://github.com/the-snowpear/omp-studio/releases/download/v${version}/${assetName}`,
+    assetName,
     assetSize: 89452000,
+    ...(PLATFORM === "linux" ? { requiresSystemAuthorization: true } : {}),
   };
 }
 

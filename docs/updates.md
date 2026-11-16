@@ -2,7 +2,7 @@
 
 ## 用户体验
 
-Linux x64 桌面采用手动升级：检查到新版本后，「下载安装包」打开签名清单中对应的 AppImage 或 deb 下载。用户关闭应用后安装新版；应用不会自动替换系统包或请求 root。以下自动下载、差分与重启事务在 Linux 上用于 Runtime；桌面与 Runtime 都能自动安装的流程适用于 Windows / macOS。
+Linux x64 AppImage 和 deb 支持后台准备、差分下载和用户主动重启安装。AppImage 文件及其所在目录须可由当前用户写入；新版启动失败时尝试换回原文件。deb 在用户点击重启后请求系统管理员授权，应用退出后使用 apt 安装；失败时尝试恢复已验签的上一版本。Runtime 在两种 Linux 安装方式下都可在线更新。
 
 新更新器在后台检查并准备更新，完成后点击「重启更新」。下载不会中断任务；运行中任务、压缩、待处理交互、计划审阅、排队消息和后台代理工作会延后重启。界面说明等待原因并保留已验证工件，处理完成后手动重试，不会重新下载。普通退出不会自动安装。
 
@@ -23,7 +23,8 @@ Linux x64 桌面采用手动升级：检查到新版本后，「下载安装包�
 | Windows v0.1.6 及后续 v2 客户端 | 从各 Release 的已验签清单按组件选择最高序号，直接准备当前版本，不要求逐版安装。差分直接比较本地基线和目标工件；没有可用基线则全量下载。 |
 | Windows v0.1.4 / v0.1.5 的 v1 客户端 | 通过保留的签名 `update-index.json` 先运行迁移安装包 v0.1.6，再由 v2 更新器升级到当前版本。迁移索引固定指向首次 v2 安装包，历史附件须保留。 |
 | macOS v2 客户端 | 同样支持跳版本；首次从 dmg 安装没有 ZIP 基线时，全量下载目标 ZIP，之后可直接跨版差分。 |
-| Linux x64 客户端 | 从签名清单获取匹配安装格式的下载地址，手动安装最新桌面；兼容的 Runtime 可直接跨版本在线更新。 |
+| Linux x64 AppImage 客户端 | 当前 AppImage 与签名清单匹配时可作为差分基线，缺失基线则全量下载。0.2.2 及之前的 Linux 客户端需要先手动安装一次支持应用内更新的版本。 |
+| Linux x64 deb 客户端 | 新版客户端读取独立签名的 deb 清单。首次更新先下载可恢复的当前版本并用它作为差分基线，后续复用缓存；0.2.2 及之前须先手动安装一次支持此功能的新版 deb。 |
 
 桌面和 Runtime 的版本不必同步增长，但 Runtime 的最低桌面版本与协议范围必须满足。准备「全部更新」时先准备桌面，再用目标桌面的版本和协议检查 Runtime；重启应用前还会再次检查最终组合。例如 v0.1.11 发布的 Runtime `18.12.6-studio.1` 要求桌面至少为 v0.1.11，旧桌面应同时更新桌面，不能单独激活该 Runtime。
 
@@ -86,9 +87,11 @@ v2 清单采用 Ed25519 签名，包含组件、版本、通道、架构、序�
 ## Linux
 
 - 状态在 `$XDG_CONFIG_HOME/omp-studio`（未设、为空或相对路径时用 `~/.config/omp-studio`）；活跃 Runtime 与更新暂存分别在其 `runtimes` 和 `updates-v2` 子目录。
-- `updates-linux-x64.json` 的应用附件是 AppImage，`firstInstall` 是 deb；两个文件的摘要都纳入同一 Ed25519 签名。AppImage 进程提供 `APPIMAGE` 路径，据此选择 AppImage 下载；deb 安装提供 deb 下载。解包运行的用户也可从 Release 选择 AppImage。
-- 手动桌面更新不进入下载 / 替换事务，也不提供应用内桌面回滚按钮。需要回退时安装历史完整包；配置、会话和项目不在程序包内。
-- 「全部准备」只下载可在线安装的兼容 Runtime。如果其最低桌面版本或协议不满足，提示先安装新桌面，不下载该 Runtime，也不把正常等待状态报成更新失败。
+- `updates-linux-x64.json` 的应用附件是 AppImage，`firstInstall` 是 deb；两个文件的摘要都纳入同一 Ed25519 签名。新增的 `updates-linux-deb-x64.json` 对 deb 和对应 blockmap 单独签名，旧清单不增加字段。deb 客户端仍从原清单发现独立 Runtime，并核对两个桌面清单；缺少新版 deb 清单时明确报错。
+- AppImage 在同目录暂存并校验目标文件，旧进程退出后替换；新版本启动失败时换回原文件。恢复到没有启动确认功能的旧版时，以进程持续运行 10 秒作为完成条件。
+- deb 在用户确认重启时通过 polkit 获取授权。由包管理器安装的受保护 helper 将目标和上一版本复制到 root 所有目录，再独立验证签名、摘要、包名、版本和架构，旧进程退出后才调用 apt。新进程健康确认前异常退出或 apt 安装失败时，helper 尝试恢复上一 deb；正常退出但尚未确认时下次启动继续确认。授权取消时应用重新启动并保留待更新状态。
+- 首次 deb 更新需要下载已安装版本的完整 deb，作为恢复包与差分基线；之后复用已验证缓存。找不到已安装版本的签名 deb 清单时需要手动安装新版，避免无法恢复的自动替换。
+- 解包运行的非 AppImage 安装仍手动升级；其「全部准备」只下载兼容的 Runtime，不会下载不兼容组合。
 - deb 升级、重装与卸载均保留用户状态。沙箱、最低系统版本与安装说明见 [Linux 客户端](linux.md)。
 
 ## 工程边界
@@ -96,7 +99,8 @@ v2 清单采用 Ed25519 签名，包含组件、版本、通道、架构、序�
 - `update-coordinator.ts` 管理 Main 中的后台任务、事务、准备与重启。
 - `update-request.ts` 负责镜像回退、请求重试、首响应与流停滞超时；更新阶段、来源主机、HTTP 状态、重试和差分回退原因写入现有 Host 日志。界面分别展示检查、下载、应用与恢复错误，任务延期作为等待状态显示。
 - `differential-artifact.ts` 负责工件缓存、摘要验证、差分和全量回退。
-- `electron-update-adapter.ts` 集中封装固定版本 electron-updater 的差分实现，以及 NSIS `--updated /S --force-run` 启动；等待进程启动结果，失败不回退到交互打开安装包。
+- `electron-update-adapter.ts` 使用固定版本 electron-updater 的分块计划，并通过 Electron 网络栈检查每个 Range 响应和响应取消；不支持 Range 时立即回退全量下载。NSIS 使用 `--updated /S --force-run` 启动，等待进程启动结果，失败不回退到交互打开安装包。
+- Linux：`linux-appimage-installer.ts` 暂存校验后的文件并启动同目录替换 helper；`linux-deb-installer.ts` / `linux-deb-swap.ts` 管理授权、启动确认与恢复，`packaging/linux/omp-deb-update` 在管理员权限下重新验签并调用 apt。
 - macOS：
   - `mac-app-installer.ts` 负责 preflight、解包与校验，并启动 helper；
   - `mac-app-swap.ts` 负责交换、启动标记与换回；

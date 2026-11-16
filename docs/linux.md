@@ -7,7 +7,7 @@ Linux x64 桌面客户端支持 AppImage 与 deb 安装包。0.2.0 / 0.2.1 没�
 - x64（x86-64-v3 / AVX2，Intel Haswell、AMD Zen 或更新的同等 CPU）。当前 Runtime 的本机构建内置 modern 原生模块，因此首发不覆盖缺少 AVX2 的老 CPU。原生构建与安装验收使用 Ubuntu 24.04；最低 glibc 2.39、libstdc++ 13.2。Debian 13 等更新的系统还需具备包内列明的桌面依赖。Ubuntu 22.04、Alpine / musl 不在此构建目标内。
 - 两种安装格式：Ubuntu / Debian 推荐 deb；AppImage 用作便携包，需要系统提供 FUSE 2 和可用的非特权用户命名空间。
 - 内置签名 OMP Runtime、Electron 和原生 PTY。使用安装包不需要安装 Node、npm、Bun 或 Rust；开发项目本身用到的 Git、编译器和语言工具仍由用户安装。
-- Linux 桌面先采用手动升级，Runtime 保留应用内签名更新、兼容性检查和回滚。ARM64 桌面、RPM、Flatpak 与软件源不包含在此次首发中。
+- AppImage 和 deb 支持应用内自动检查、后台差分下载和重启更新；deb 安装时由系统请求管理员授权。Runtime 保留应用内签名更新、兼容性检查和回滚。ARM64 桌面、RPM、Flatpak 与软件源不包含在此次首发中。
 
 ## 安装与启动
 
@@ -41,7 +41,9 @@ Ubuntu 的 AppArmor 可能限制从任意下载位置启动的 AppImage 创建�
 
 ## 更新与卸载
 
-「设置 → 更新与维护」从 `updates-linux-x64.json` 验签获取可用版本。AppImage 用户看到 AppImage 下载按钮，deb 用户看到 deb 下载按钮；下载完成后先退出 Studio，再替换 AppImage 或用上述 apt 命令安装新版 deb。桌面自动下载开关在 Linux 上只影响可在线安装的 Runtime，不会在后台下载或替换系统安装包。
+「设置 → 更新与维护」会验证签名并准备更新，完成后点击「重启更新」。AppImage 所在目录须可由当前用户写入；无法写入时请移到可写目录。新版启动失败时会尝试恢复旧文件。0.2.2 及之前的 Linux 安装尚不具备桌面自动更新，须先手动安装一次支持该功能的新版 AppImage 或 deb。
+
+deb 在后台准备目标包和可恢复的当前版本；首次准备可能需要先完整下载当前版本，之后使用缓存进行差分。点击「重启更新」时系统会显示管理员授权，授权成功且应用退出后才通过 apt 安装。取消授权不会安装；安装或新版本启动失败时尝试通过 apt 恢复上一版本。需要图形化 polkit 授权代理和可用的 apt。解包运行的非 AppImage 安装仍从发布页手动安装。
 
 Runtime 更新仍按平台、通道、最低桌面版本和 Bridge 协议匹配。如果 Runtime 需要新版桌面，会先提示升级桌面，不下载不兼容组合。全新安装和桌面升级都可从包内验签、复制并激活 Runtime，安装过程不需要联网下载运行时。
 
@@ -51,7 +53,7 @@ Runtime 更新仍按平台、通道、最低桌面版本和 Bridge 协议匹配�
 sudo apt remove omp-studio
 ```
 
-AppImage 退出后删除该文件即可。两种方式都保留用户配置、会话、日志和活跃 Runtime；不删除用户项目。需要恢复旧桌面时，从历史 Release 下载对应的完整安装包。
+AppImage 退出后删除该文件即可。两种方式都保留用户配置、会话、日志和活跃 Runtime；不删除用户项目。完成一次应用内更新后，可在设置中准备并重启恢复上一桌面版本；deb 恢复也需系统授权。
 
 ## 开发环境
 
@@ -123,7 +125,7 @@ npm run preview
 | 托盘 | 提供菜单，但不把 Tray 对象创建成功当作图标可见；Linux 不自动关闭到托盘 |
 | 开发者工具 | 源码预览支持 F12 / Ctrl+Shift+I |
 | 凭证与服务配置 | 使用系统密钥环；不接受 Electron 的 `basic_text` 固定密码回退，也不清空已有加密文件 |
-| 更新提示 | 签名 Linux 清单；AppImage / deb 手动升级，Runtime 可在线更新；不选 Windows Setup 或 SSH Host 包 |
+| 更新提示 | AppImage 与 deb 使用签名 Linux 清单后台差分下载并重启安装；deb 更新时请求系统授权，Runtime 可在线更新；不选 Windows Setup 或 SSH Host 包 |
 
 ## 构建安装包
 
@@ -146,6 +148,8 @@ npm run pack:linux
 ## 验证与发布
 
 普通 CI 执行 Windows / Linux 源码检查。手动 CI 的 `linux-package` 额外构建、审计两种安装包，并运行 X11 AppImage / deb、Wayland deb、真实 Runtime 握手、原生终端、会话重启与安装 / 卸载数据保留验收。对话使用本机 OpenAI 兼容测试端点驱动真实 Runtime 和文件读取工具，不使用外部模型账户或假 Host。产物使用测试密钥，不能作为正式 Release 附件。
+
+该验收还在隔离的 Ubuntu 容器中使用真实 polkit、apt 和 dpkg 测试签名 deb 更新、授权拒绝、安装失败与恢复，以及篡改文件的拒绝。容器中的授权规则仅供测试，真实桌面的授权弹窗仍须在目标系统上检查。
 
 构建与安装验收是独立任务。只调整验收脚本时，可以给 `linux_package_run` 填入已有测试包的 CI run ID，复测该包而不用重编 Runtime；报告会记录安装包的来源 run。修改产品或打包代码后，应留空此项生成新包。
 

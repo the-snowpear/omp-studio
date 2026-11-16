@@ -1,9 +1,10 @@
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { sha256File, type ComponentRelease, type DownloadMethod, type UpdateFile } from "@omp-studio/runtime-installer";
 import type { BlockMap } from "builder-util-runtime";
-import { assertFreeSpace, downloadOne } from "./artifact-download.js";
+import { assertFreeSpace, createProgressThrottle, downloadOne } from "./artifact-download.js";
 import { applyMirror } from "./update-index.js";
 import { desktopText } from "./desktop-language-shared.js";
 import { withUpdateSignal, type UpdateRequestLog } from "./update-request.js";
@@ -49,16 +50,28 @@ export async function downloadDifferentialArtifact(input: DifferentialInput): Pr
       input.progress("differential", 0, input.release.file.size);
       const controller = new AbortController();
       const signal = AbortSignal.any([input.signal, controller.signal]);
+      const temporary = `${target}.${randomUUID()}.diff`;
+      const progress = createProgressThrottle((received, total) => input.progress("differential", received, total));
       let idle = setTimeout(() => controller.abort(new Error(desktopText("增量下载长时间没有进展", "Differential download stalled with no progress"))), 30_000);
+      const task = input.differential(cachedUpdatePath(input.root, previous.file), temporary, applyMirror(input.mirror, input.release.file.url), oldMap, newMap, input.release.file, signal, (r, t) => {
+        if (signal.aborted) return;
+        clearTimeout(idle);
+        idle = setTimeout(() => controller.abort(new Error(desktopText("增量下载长时间没有进展", "Differential download stalled with no progress"))), 30_000);
+        progress.report(r, t);
+      });
       try {
-        await withUpdateSignal(input.differential(cachedUpdatePath(input.root, previous.file), target, applyMirror(input.mirror, input.release.file.url), oldMap, newMap, input.release.file, signal, (r, t) => {
-          clearTimeout(idle);
-          idle = setTimeout(() => controller.abort(new Error(desktopText("增量下载长时间没有进展", "Differential download stalled with no progress"))), 30_000);
-          input.progress("differential", r, t);
-        }), signal);
-      } finally { clearTimeout(idle); controller.abort(); }
-      if (!await isVerifiedFile(target, input.release.file)) throw new Error("Reconstructed artifact checksum mismatch");
-      return target;
+        await withUpdateSignal(task, signal);
+        signal.throwIfAborted();
+        if (!await isVerifiedFile(temporary, input.release.file)) throw new Error("Reconstructed artifact checksum mismatch");
+        signal.throwIfAborted();
+        await rename(temporary, target);
+        return target;
+      } finally {
+        clearTimeout(idle);
+        if (!signal.aborted) progress.flush();
+        progress.dispose(); controller.abort();
+        void task.catch(() => {}).then(() => rm(temporary, { force: true }).catch(() => {}));
+      }
     } catch (error) {
       input.signal.throwIfAborted();
       const message = error instanceof Error ? error.message : "";

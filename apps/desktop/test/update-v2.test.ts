@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { test } from "node:test";
 import { createRuntimeArchive, RuntimeInstaller, updateSigningBytes, type ComponentRelease, type UpdateFile, type UpdateManifest, type SignedUpdateManifest } from "@omp-studio/runtime-installer";
 import { downloadDifferentialArtifact, cachedUpdatePath } from "../src/differential-artifact.js";
+import { createDifferentialDownloader } from "../src/electron-update-adapter.js";
 import { discoverUpdates } from "../src/update-discovery.js";
 import { UpdateCoordinator } from "../src/update-coordinator.js";
 import { DEFAULT_UPDATE_PREFS, type UpdatePrefs } from "../src/update-prefs-store.js";
@@ -65,6 +67,87 @@ test("Linux waits for a required manual desktop upgrade before downloading an in
   assert.equal(requests.some(url => url.endsWith("runtime.zip")), false);
 });
 
+test("Linux AppImage uses the installed image as a differential baseline and confirms the new version", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-linux-appimage-"));
+  const image = join(root, "installed.AppImage");
+  await writeFile(image, binary);
+  const previous = { ...component("old.AppImage", "1.0.0"), sequence: 1 };
+  const next = component("next.AppImage", "2.0.0");
+  let differences = 0;
+  const installs: boolean[] = [];
+  const options = { root, initialInstallerPath: image, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "linux-x64", appVersion: "1.0.0", keys,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {},
+    installDesktop: async (_path: string, _release: ComponentRelease, rollback: boolean) => { installs.push(rollback); }, restart: () => {}, quit: () => {}, desktopCommit: "confirmed" as const, trackAppBaselineWithoutBase: true,
+    differential: async (_old: string, target: string) => { differences++; await writeFile(target, binary); },
+    fetcher: fetcher([signed({ platform: "linux-x64", app: next }), signed({ platform: "linux-x64", app: previous })]) };
+  const first = new UpdateCoordinator(options);
+  await first.initialize(); await first.check(); await first.prepare("app");
+  assert.equal(differences, 1);
+  assert.equal(first.state.app.method, "differential");
+  assert.equal((await first.apply()).ok, true);
+  assert.deepEqual(installs, [false]);
+  const upgraded = new UpdateCoordinator({ ...options, appVersion: "2.0.0" });
+  await upgraded.initialize();
+  assert.equal(upgraded.state.app.phase, "verifying");
+  await upgraded.confirmDesktopStartup();
+  assert.equal(upgraded.state.rollbackAppVersion, "1.0.0");
+  assert.equal(upgraded.state.app.phase, "idle");
+  assert.equal((await upgraded.rollbackDesktop()).ok, true);
+  assert.equal((await upgraded.apply()).ok, true);
+  assert.deepEqual(installs, [false, true]);
+});
+
+test("deb discovers its signed catalog beside independent Runtime releases and reuses the recovery package for differential updates", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-linux-deb-"));
+  const oldBytes = Buffer.from("old");
+  const deb = (version: string, sequence: number, bytes: Buffer) => {
+    const name = `OMP-Studio-${version}-linux-x64.deb`;
+    return { ...component(name, version), sequence, file: file(name, bytes) };
+  };
+  const previous = deb("1.0.0", 1, oldBytes), next = deb("2.0.0", 2, binary);
+  const primary = (app: ComponentRelease) => signed({ platform: "linux-x64", app: { ...app, file: file(`${app.version}.AppImage`, binary), blockmap: file(`${app.version}.AppImage.blockmap`, map) }, firstInstall: app.file });
+  const debEnvelope = (app: ComponentRelease) => signed({ platform: "linux-x64", app });
+  const runtime = signed({ platform: "linux-x64", runtime: component("runtime.zip", "18.0.0-studio.2") });
+  const rows = [[runtime], [primary(next), debEnvelope(next)], [primary(previous), debEnvelope(previous)]];
+  const requests: string[] = [];
+  const source: typeof fetch = (async (url: string | URL | Request) => {
+    const u = String(url); requests.push(u);
+    if (u.includes("api.github.com")) return new Response(JSON.stringify(rows.map((envelopes, index) => ({ assets: envelopes.map(envelope => {
+      const name = envelope.manifest.app?.file.asset.endsWith(".deb") ? "updates-linux-deb-x64.json" : "updates-linux-x64.json";
+      return { name, browser_download_url: `https://github.com/owner/repo/releases/download/v${index}/${name}` };
+    }) }))));
+    if (u.includes("updates-linux-")) {
+      const index = Number(/\/v(\d+)\//u.exec(u)![1]);
+      const isDeb = u.endsWith("updates-linux-deb-x64.json");
+      return new Response(JSON.stringify(rows[index]!.find(value => Boolean(value.manifest.app?.file.asset.endsWith(".deb")) === isDeb)));
+    }
+    const bytes = u.endsWith(".blockmap") ? map : u.endsWith(previous.file.asset) ? oldBytes : binary;
+    return new Response(new Uint8Array(bytes), { headers: { "content-length": String(bytes.length) } });
+  }) as typeof fetch;
+  let differences = 0, backups = 0;
+  const options = { root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "linux-x64", appVersion: "1.0.0", keys,
+    linuxDesktopFormat: "deb" as const, desktopRequiresRollbackBase: true, trackAppBaselineWithoutBase: true, desktopCommit: "confirmed" as const,
+    prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {},
+    installDesktop: async (_path: string, _release: ComponentRelease, _rollback: boolean, _envelope: SignedUpdateManifest, backup?: { path: string }) => { if (backup) { assert.deepEqual(await readFile(backup.path), oldBytes); backups++; } },
+    restart: () => {}, quit: () => {}, fetcher: source,
+    differential: async (_old: string, target: string) => { differences++; await writeFile(target, binary); } };
+  const coordinator = new UpdateCoordinator(options);
+  await coordinator.initialize(); await coordinator.check(); await coordinator.prepare("app");
+  assert.equal(coordinator.state.app.method, "differential");
+  assert.equal(differences, 1);
+  assert.equal(requests.filter(url => url.endsWith(previous.file.asset)).length, 1);
+  assert.equal((await coordinator.apply()).ok, true);
+  assert.equal(backups, 1);
+  const upgraded = new UpdateCoordinator({ ...options, appVersion: "2.0.0" });
+  await upgraded.initialize(); await upgraded.confirmDesktopStartup();
+  assert.equal(upgraded.state.rollbackAppVersion, "1.0.0");
+  const discovery = { repo: "owner/repo", platform: "linux-x64", keys, mirror: "", channel: "stable" as const, signal: new AbortController().signal, watermarks: {}, currentVersions: { app: "1.0.0" }, linuxDesktopFormat: "deb" as const, fetcher: source };
+  rows[1] = [primary(next)];
+  await assert.rejects(discoverUpdates(discovery), /no deb update catalog/u);
+  rows[1] = [primary(next), debEnvelope({ ...next, minAppVersion: "9.0.0" })];
+  await assert.rejects(discoverUpdates(discovery), /catalogs do not match/u);
+});
+
 for (const scenario of [
   { name: "downloads by default", initial: {}, duringCheck: {}, checks: 1, downloads: 1 },
   { name: "only checks when automatic downloads are disabled", initial: { autoDownload: false }, duringCheck: {}, checks: 1, downloads: 0 },
@@ -115,6 +198,59 @@ test("cancelled differential download never triggers full fallback", async () =>
   await assert.rejects(() => downloadDifferentialArtifact({ root, previous, release: component(), mirror: "", signal: controller.signal, fetcher: fetcher([], requests), progress: () => {}, differential: async () => { controller.abort(new Error("cancelled")); throw new Error("cancelled"); } }), /cancelled/);
   assert.equal(requests.filter(u => u.endsWith("setup.exe")).length, 0);
 });
+
+test("differential requests reconstruct changed ranges and stop immediately when Range is ignored", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-range-http-"));
+  const old = Buffer.from("aabbccdd"), next = Buffer.from("xxbbyydd");
+  const oldFile = join(root, "old"), newFile = join(root, "new");
+  await writeFile(oldFile, old);
+  const blockmap = (checksums: string[]) => ({ version: "2" as const, files: [{ name: "file", offset: 0, sizes: [2, 2, 2, 2], checksums }] });
+  const oldMap = blockmap(["a", "b", "c", "d"]), newMap = blockmap(["x", "b", "y", "d"]);
+  let ignoreRange = false, requests = 0;
+  const server = createServer((request, response) => {
+    requests++;
+    const range = /^bytes=(\d+)-(\d+)$/u.exec(request.headers.range ?? "")!;
+    const start = Number(range[1]), end = Number(range[2]);
+    if (ignoreRange) { response.writeHead(200); response.end(next); return; }
+    response.writeHead(206, { "content-range": `bytes ${start}-${end}/${next.length}` });
+    response.end(next.subarray(start, end + 1));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server address");
+    const download = createDifferentialDownloader(fetch);
+    const url = `http://127.0.0.1:${address.port}/artifact`;
+    await download(oldFile, newFile, url, oldMap, newMap, file("next.exe", next), new AbortController().signal, () => {});
+    assert.deepEqual(await readFile(newFile), next);
+    assert.equal(requests, 2);
+    ignoreRange = true; requests = 0;
+    await assert.rejects(download(oldFile, newFile, url, oldMap, newMap, file("next.exe", next), new AbortController().signal, () => {}), /invalid Range response/u);
+    assert.equal(requests, 1);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+test("cancelling a stalled differential request closes its HTTP connection", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-range-cancel-"));
+  const old = Buffer.from("aabb"), next = Buffer.from("xxbb"), oldFile = join(root, "old");
+  await writeFile(oldFile, old);
+  let arrived!: () => void, closed!: () => void;
+  const requestArrived = new Promise<void>(resolve => { arrived = resolve; });
+  const responseClosed = new Promise<void>(resolve => { closed = resolve; });
+  const server = createServer((_request, response) => { response.once("close", closed); arrived(); });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server address");
+    const map = (checksums: string[]) => ({ version: "2" as const, files: [{ name: "file", offset: 0, sizes: [2, 2], checksums }] });
+    const controller = new AbortController();
+    const task = createDifferentialDownloader(fetch)(oldFile, join(root, "new"), `http://127.0.0.1:${address.port}/artifact`, map(["a", "b"]), map(["x", "b"]), file("next.exe", next), controller.signal, () => {});
+    await requestArrived;
+    controller.abort(new Error("user cancelled"));
+    await assert.rejects(task, /user cancelled/u);
+    await Promise.race([responseClosed, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("HTTP connection stayed open")), 2_000).unref())]);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
 test("discovery combines desktop and independent Runtime, rejecting sequence rollback", async () => {
   const app = signed({ app: component() }), runtime = signed({ runtime: component("runtime.zip", "18.0.0-studio.2") });
   const input = { repo: "owner/repo", platform: "win32-x64", channel: "stable" as const, mirror: "", keys, signal: new AbortController().signal, fetcher: fetcher([runtime, app]), watermarks: {} };
@@ -163,13 +299,11 @@ test("discovery routes both the release catalog and manifests through the mirror
   assert.ok(requests.length > 0);
   assert.ok(requests.every(u => u.startsWith(mirror)), `unmirrored request: ${requests.find(u => !u.startsWith(mirror))}`);
 });
-test("discovery skips a release whose manifest fails verification and still finds a later valid one", async () => {
+test("discovery reports an incomplete catalog when one signed manifest is invalid", async () => {
   const broken = signed({ app: { ...component("old.exe", "1.5.0"), sequence: 1 } });
   broken.manifest.app!.version = "9.9.9"; // Mutating after signing breaks the signature.
   const valid = signed({ app: { ...component(), sequence: 3 } });
-  const found = await discoverUpdates({ repo: "owner/repo", platform: "win32-x64", channel: "stable", mirror: "", keys, signal: new AbortController().signal, fetcher: fetcher([broken, valid]), watermarks: {} });
-  assert.equal(found.app?.manifest.app?.version, "2.0.0");
-  assert.equal(found.app?.manifest.app?.sequence, 3);
+  await assert.rejects(discoverUpdates({ repo: "owner/repo", platform: "win32-x64", channel: "stable", mirror: "", keys, signal: new AbortController().signal, fetcher: fetcher([broken, valid]), watermarks: {} }), /latest version cannot be determined/u);
 });
 test("discovery still rejects conflicting signed sequences for one component", async () => {
   const first = signed({ app: { ...component(), sequence: 2 } });
@@ -208,6 +342,25 @@ test("downloading and ordinary startup never authorize applying an update", asyn
   const first = new UpdateCoordinator(options); await first.initialize(); await first.prepare("all");
   const second = new UpdateCoordinator(options); await second.initialize(); assert.equal(installs, 0);
   assert.equal((await second.apply()).ok, true); assert.equal(installs, 1);
+});
+
+test("a newer manually installed desktop supersedes an older prepared update", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-desktop-superseded-"));
+  let installs = 0;
+  const runtime = component("runtime.zip", "18.0.0-studio.2");
+  const app = { ...component(), bundledRuntimeVersion: runtime.version };
+  const options = { root, runtimeRoot: join(root, "runtime"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => { installs++; }, restart: () => {}, quit: () => {}, fetcher: fetcher([signed({ app, runtime })]) };
+  const first = new UpdateCoordinator(options);
+  await first.initialize(); await first.prepare("all");
+  const newer = new UpdateCoordinator({ ...options, appVersion: "3.0.0" });
+  await newer.initialize(); await newer.check();
+  assert.equal(newer.state.app.version, undefined);
+  assert.equal(newer.state.app.phase, "idle");
+  assert.equal((await newer.apply()).ok, false);
+  assert.equal(installs, 0);
+  const pending = JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8")).pending;
+  assert.equal(pending.app, undefined);
+  assert.equal(pending.runtime, undefined, "a Runtime borrowed from the superseded desktop must be prepared again");
 });
 test("a failed desktop installation surfaces the incomplete transaction and keeps the pending Runtime prepared", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-incomplete-transaction-"));

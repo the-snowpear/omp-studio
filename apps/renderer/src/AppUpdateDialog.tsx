@@ -27,6 +27,7 @@ export interface AppUpdateDialogProps {
     readonly reason?: string | undefined;
     readonly blockedReason?: string | undefined;
     readonly manualInstallUrl?: string | undefined;
+    readonly requiresSystemAuthorization?: boolean | undefined;
   };
   readonly preview?: boolean;
   readonly isDownloading?: boolean;
@@ -96,7 +97,7 @@ export function AppUpdateDialog({
   const statusMessage = notice ? t(notice.key) + (notice.demo && marks ? ` ${t("appUpdate.demoUpdate")}` : "") : null;
   const [previewReady, setPreviewReady] = useState(false);
   const ready = preview ? previewReady : readyToApply;
-  const manualInstallUrl = update.manualInstallUrl ?? (preview && PLATFORM === "linux" && update.component !== "runtime" ? update.htmlUrl : undefined);
+  const manualInstallUrl = update.manualInstallUrl;
 
   const progressPct = preview
     ? simulatedProgress
@@ -219,6 +220,7 @@ export function AppUpdateDialog({
           {manualInstallUrl && !ready ? <p>{t("appUpdate.linuxManualInstall")}</p> : null}
           {update.plan === "full" && update.reason !== "restart-update" ? <p>{t("updates.fullInstallerRequired")}{update.reason ? ` · ${update.reason}` : ""}</p> : null}
           {ready && !applying ? <p>{t("updates.readyToApply")}</p> : null}
+          {ready && update.requiresSystemAuthorization ? <p>{t("appUpdate.systemAuthorization")}</p> : null}
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", opacity: 0.8 }}>
             <span>{t("appUpdate.releaseDate")}: {formatDate(update.publishedAt)}</span>
             {update.assetSize ? <span>{t(UPDATE_COPY.packageSize)}: {formatBytes(update.assetSize)}</span> : null}
@@ -259,7 +261,7 @@ export function AppUpdateDialog({
 
           {update.blockedReason ? <p role="status">{update.blockedReason}</p> : null}
           {applyNotice && applyNotice !== update.blockedReason ? <p className="small muted" role="status">{applyNotice}</p> : null}
-          {applying ? <p role="status">{t("appUpdate.restarting")}</p> : null}
+          {applying ? <p role="status">{t(update.requiresSystemAuthorization ? "appUpdate.waitingAuthorization" : "appUpdate.restarting")}</p> : null}
 
           {statusMessage ? (
             <div className="alert-box success" style={{ color: "var(--green)", fontSize: "0.85rem", display: "flex", gap: 6, alignItems: "center" }}>
@@ -316,7 +318,7 @@ export function AppUpdateDialog({
               autoFocus
               onClick={handleDownload}
             >
-              {applying ? t("appUpdate.restarting") : downloading ? t("updates.downloading") : ready ? t("updates.applyAndRestart") : manualInstallUrl ? t("appUpdate.downloadInstaller") : t("appUpdate.downloadAndInstall")}
+              {applying ? t(update.requiresSystemAuthorization ? "appUpdate.waitingAuthorization" : "appUpdate.restarting") : downloading ? t("updates.downloading") : ready ? t("updates.applyAndRestart") : manualInstallUrl ? t("appUpdate.downloadInstaller") : t("appUpdate.downloadAndInstall")}
             </button>
           </div>
         </div>
