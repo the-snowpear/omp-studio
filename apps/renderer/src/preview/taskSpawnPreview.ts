@@ -1,7 +1,9 @@
 import type { RuntimeFeatureResultMap } from "@omp-studio/studio-protocol";
 
 export const PREVIEW_TASK_SPAWN_OPTIONS: RuntimeFeatureResultMap["agent.spawn.options"] = {
-  fileEnabled: true,
+  stepsAdvertised: true,
+  autoParallel: "off",
+  effortSelection: true,
   modelSelection: true,
   maxEffort: "max",
   models: [

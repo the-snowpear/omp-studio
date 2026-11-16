@@ -1,6 +1,6 @@
 import type { CommandId, InteractionId } from "./ids";
 
-export type InteractionKind = "confirm" | "select" | "input" | "editor" | "approval" | "ask";
+export type InteractionKind = "confirm" | "select" | "input" | "editor" | "approval" | "ask" | "form";
 
 interface InteractionBase {
   interactionId: InteractionId;
@@ -18,6 +18,10 @@ export type RemoteInteractionRequest =
       kind: "select";
       options: Array<{ id: string; label: string; description?: string }>;
       multiple?: boolean;
+      initialIndex?: number;
+      selectionMarker?: "radio" | "checkbox";
+      checkedIndices?: readonly number[];
+      markableCount?: number;
     })
   | (InteractionBase & {
       kind: "input";
@@ -43,6 +47,14 @@ export type RemoteInteractionRequest =
       kind: "ask";
       acceptImages?: boolean;
       questions: RemoteAskQuestion[];
+    })
+  | (InteractionBase & {
+      kind: "form";
+      summary: string;
+      fieldCount: number;
+      sectionCount: number;
+      /** Native form inactivity duration. The Renderer owns its one resettable countdown. */
+      timeoutMs?: number;
     });
 
 /**
@@ -81,6 +93,8 @@ export interface RemoteInteractionResponse {
   kind: "interaction.respond";
   interactionId: InteractionId;
   commandId: CommandId;
+  /** Captured GUI lease; omitted only by legacy Runtime/TUI callers. */
+  leaseGeneration?: number;
   decision: "submit" | "cancel";
   value?: unknown;
 }

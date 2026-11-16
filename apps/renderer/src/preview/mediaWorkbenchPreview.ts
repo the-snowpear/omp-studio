@@ -64,6 +64,7 @@ export const PREVIEW_MEDIA_MODELS: MediaModelChoice[] = [
     ],
   },
 ];
+
 export const PREVIEW_MEDIA_INPUTS: ArtifactRecord[] = [
   {
     artifactId: "11111111-1111-4111-8111-111111111111",
@@ -84,30 +85,44 @@ export const PREVIEW_MEDIA_INPUTS: ArtifactRecord[] = [
     sha256: "0".repeat(64),
   },
 ];
-export const PREVIEW_MEDIA_DETAIL: MediaDetail = {
-  job: {
-    id: "33333333-3333-4333-8333-333333333333",
-    sessionId: "preview",
-    type: "transcription",
-    state: "completed",
-    createdAt: Date.parse("2026-10-07T06:02:00Z"),
-    updatedAt: Date.parse("2026-10-07T06:02:18Z"),
-    model: "openai/whisper-1",
-    cost: 0.001,
-    canResume: false,
-    outputCount: 0,
-  },
-  request: {
-    type: "transcription",
-    model: "openai/whisper-1",
-    audioArtifact: PREVIEW_MEDIA_INPUTS[0]!.artifactId,
-  },
-  outputs: [],
-  text: "请检查服务配置保存后不会自动启动，并验证录音结束后麦克风已经释放。",
-};
+import { isZh } from "../i18n";
 
-export const PREVIEW_MEDIA_DETAILS: MediaDetail[] = [
-  PREVIEW_MEDIA_DETAIL,
+export function getPreviewMediaDetail(zh = isZh()): MediaDetail {
+  return {
+    job: {
+      id: "33333333-3333-4333-8333-333333333333",
+      sessionId: "preview",
+      type: "transcription",
+      state: "completed",
+      createdAt: Date.parse("2026-10-07T06:02:00Z"),
+      updatedAt: Date.parse("2026-10-07T06:02:18Z"),
+      model: "openai/whisper-1",
+      cost: 0.001,
+      canResume: false,
+      outputCount: 0,
+    },
+    request: {
+      type: "transcription",
+      model: "openai/whisper-1",
+      audioArtifact: PREVIEW_MEDIA_INPUTS[0]!.artifactId,
+    },
+    outputs: [],
+    text: zh
+      ? "请检查服务配置保存后不会自动启动，并验证录音结束后麦克风已经释放。"
+      : "Check that saved service config does not auto-start, and verify the microphone is released after recording.",
+  };
+}
+
+export const PREVIEW_MEDIA_DETAIL: MediaDetail = getPreviewMediaDetail();
+
+export function getPreviewMediaDetails(zh = isZh()): MediaDetail[] {
+  return [
+    getPreviewMediaDetail(zh),
+    ...PREVIEW_MEDIA_DETAILS_REST,
+  ];
+}
+
+const PREVIEW_MEDIA_DETAILS_REST: MediaDetail[] = [
   {
     job: {
       id: "44444444-4444-4444-8444-444444444444",
@@ -208,3 +223,5 @@ export const PREVIEW_MEDIA_DETAILS: MediaDetail[] = [
     ],
   },
 ];
+
+export const PREVIEW_MEDIA_DETAILS: MediaDetail[] = getPreviewMediaDetails();

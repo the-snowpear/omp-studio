@@ -1,11 +1,7 @@
 import type { Settings } from "../config/settings";
-import { cfgProvidersCacheWarming } from "../session/settings";
-import { cfgRecapEnabled } from "../modes/settings";
-import { cfgTaskAgentIdleTtlMs } from "../task/settings";
 
-/** Studio defaults are soft pins: explicit config and later saves always win. */
-export function applyStudioDefaults(settings: Settings): void {
-	settings.pinDefaultValue(cfgProvidersCacheWarming, "off");
-	settings.pinDefaultValue(cfgRecapEnabled, false);
-	settings.pinDefaultValue(cfgTaskAgentIdleTtlMs, 300_000);
+/** Kept for the Studio bootstrap API; native defaults now own all agent policy. */
+export function applyStudioDefaults(_settings: Settings): void {
+	// GUI rendering and managed-runtime lifecycle are handled at their actual
+	// adapters. Cache warming, recap and worker idle TTL inherit the CLI settings.
 }

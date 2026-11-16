@@ -110,7 +110,14 @@ contextBridge.exposeInMainWorld(
   }),
 );
 
+import { TMUX_IPC_CHANNELS, type TmuxTopology } from "./tmux/tmux-shared.js";
+
 const terminalApi: OmpStudioTerminalApi = {
+  tmuxSessions(input) { return ipcRenderer.invoke(TMUX_IPC_CHANNELS.sessions, input); },
+  tmuxAttach(input) { return ipcRenderer.invoke(TMUX_IPC_CHANNELS.attach, input); },
+  tmuxCommand(input) { return ipcRenderer.invoke(TMUX_IPC_CHANNELS.command, input); },
+  tmuxDetach(connectionId) { return ipcRenderer.invoke(TMUX_IPC_CHANNELS.detach, { connectionId }); },
+  onTmux(listener) { return subscribeChannel<TmuxTopology>(ipcRenderer, TMUX_IPC_CHANNELS.topology, listener); },
   recordingStart(input) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStart, input); },
   recordingStop(id) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStop, { id }); },
   recordingStatus(id) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStatus, { id }); },

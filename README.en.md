@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Desktop console for OMP Runtime</strong><br>
-  Typed Studio Bridge · Electron workbench · Windows / macOS
+  Typed Studio Bridge · Electron workbench · Windows / macOS / Linux
 </p>
 
 <p align="center">
@@ -22,8 +22,8 @@
 <p align="center">
   <a href="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml"><img src="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.6-informational.svg" alt="0.1.6"></a>
-  <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0078D4.svg" alt="Windows | macOS"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.2.1-informational.svg" alt="0.2.1"></a>
+  <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D4.svg" alt="Windows | macOS | Linux"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-339933.svg" alt="Node 22+"></a>
   <a href="https://linux.do/"><img src="https://img.shields.io/badge/LINUX%20DO-Community-FFB003.svg" alt="LINUX DO"></a>
 </p>
@@ -34,7 +34,7 @@ OMP Studio is a desktop shell for [oh-my-pi](https://github.com/can1357/oh-my-pi
   <img src="docs/images/workbench.png" alt="OMP Studio workbench: new conversation welcome, activity heatmap, and composer" width="920">
 </p>
 
-Version 0.1.10 targets OMP 18.10.4, adding session transfer, worktrees, storage compression and model controls. See the [release notes](docs/releases/v0.1.10.md) and [migration report](docs/migrations/omp-18.10.4.md). Windows x64 / ARM64 and macOS Apple Silicon downloads are available from [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases). The Mac application is ad hoc signed and not notarized.
+Version [0.2.1](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.1) fixes session startup, model selection, input prediction, project expansion, and service listing; it includes Runtime `18.18.0-studio.2`. See the [release notes](docs/releases/v0.2.1.md) and [release review](docs/reviews/v0.2.1-release-review.md). Current source also includes OMP 18.20.2 and Linux desktop support; Linux installers are planned for a later release. See the [changelog](CHANGELOG.md#unreleased) for development changes and [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases) for available downloads. The Mac application is ad hoc signed and not notarized.
 
 ## Why this workbench
 
@@ -87,7 +87,7 @@ The right-hand Git panel stages, diffs, and commits next to the conversation. Fe
 </p>
 
 > [!TIP]
-> **Installation & Getting Started:** Windows users can download the latest installer (`OMP-Studio-Setup-0.1.6-windows-x64.exe`) directly from [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases), or run from source following the instructions below. Please file any bugs or suggestions as [Issues](https://github.com/the-snowpear/omp-studio/issues).
+> **Installation & Getting Started:** Windows users can download the latest installer (`OMP-Studio-Setup-0.2.1-windows-x64.exe`) directly from [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases), or run from source following the instructions below. Please file any bugs or suggestions as [Issues](https://github.com/the-snowpear/omp-studio/issues).
 >
 > **macOS (Apple Silicon, macOS 13+):** when a release ships `OMP-Studio-<version>-macos-arm64.dmg`, open it and drag OMP Studio into Applications. It is an ad hoc signed, not yet notarized preview: macOS blocks the first launch, so choose "Open Anyway" in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine "/Applications/OMP Studio.app"`. You can also run from source or build it with `npm run pack:mac`, see [docs/getting-started.md](docs/getting-started.md).
 
@@ -113,6 +113,8 @@ npm run preview
 
 On Windows you can also double-click `preview.cmd` at the repo root. macOS needs the Xcode Command Line Tools; the steps are otherwise the same.
 
+Linux x64 supports source startup and native AppImage / deb packaging with `npm run pack:linux`. Installers will join the next release containing this change; 0.2.0 / 0.2.1 have no Linux desktop assets. The build targets Ubuntu 24.04 / glibc 2.39+ and bundles its signed Runtime and native PTY. Desktop upgrades use a manual installer download; Runtime updates remain available in the app. See [Linux setup](docs/linux.md). Linux remote archives in Releases remain separate SSH Host packages.
+
 Attach a real Runtime (slow the first time):
 
 ```powershell
@@ -134,7 +136,7 @@ packages/             protocol, Host, client, transports, platform
 omp-patch/overlay     Studio-owned Runtime sources
 omp-patch/patches     seam patches on upstream files (do not hand-edit)
 omp-patch/vendor      oh-my-pi submodule (commit the gitlink only)
-packaging/            Windows NSIS installer skeleton; macOS signing setup (packaging/mac)
+packaging/            Windows NSIS, macOS and Linux packaging resources
 ui_reference/ver1     visual reference, not product code
 docs/                 user and contributor docs
 ```
@@ -163,7 +165,7 @@ Invariants (see [docs/architecture.md](docs/architecture.md)):
 | [docs/getting-started.md](docs/getting-started.md) | Run from source |
 | [docs/development.md](docs/development.md) | Inner loop, preview mode, patch regen |
 | [docs/architecture.md](docs/architecture.md) | Packages and invariants |
-| [docs/releasing.md](docs/releasing.md) | Version, tag, Windows installer, macOS build |
+| [docs/releasing.md](docs/releasing.md) | Versions, tags and Windows / macOS / Linux packages |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to open a PR |
 | [SECURITY.md](SECURITY.md) | Vulnerability disclosure |
 | [CHANGELOG.md](CHANGELOG.md) | User-facing history |

@@ -32,7 +32,16 @@ export interface ComputerFrame {
   expiresAt?: number;
 }
 
+/** Native takeover focus report, not inferred from requested input mode. */
+export interface ComputerFocusReturn {
+  handedBack: boolean;
+  previousPid?: number;
+  frontPid?: number;
+}
+
 export interface ComputerAction {
+  unconfirmed?: string;
+  focusReturn?: ComputerFocusReturn;
   id: string;
   sessionId: string;
   runId: string;
@@ -66,10 +75,14 @@ export interface ComputerWorkspaceSnapshot {
   enabled: boolean;
   preludeAvailable: boolean;
   backend: string;
-  capabilities: { capture: boolean; input: boolean; accessibility: boolean; globalEscape: boolean; observationOnly: boolean };
+  capabilities: {
+    capture: boolean; input: boolean; accessibility: boolean;
+    /** Effective native Escape availability (false while Secure Event Input hides keys). */
+    globalEscape: boolean; secureInput?: boolean; secureInputApp?: string; observationOnly: boolean;
+  };
   permissions: { capture: string; input: string; accessibility: string };
-  /** Only true when the native backend can distinguish unlocked/awake from unknown. */
-  screen: { locked: boolean; asleep: boolean; known?: boolean };
+  /** Missing knowledge is unknown, not an unlocked or awake screen. `known` is the legacy conjunction. */
+  screen: { locked: boolean; asleep: boolean; lockKnown?: boolean; sleepKnown?: boolean; known?: boolean };
   control: ComputerControlState;
   targets: ComputerTarget[];
   active: ComputerAction[];

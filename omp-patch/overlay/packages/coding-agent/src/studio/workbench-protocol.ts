@@ -1,4 +1,18 @@
 import {
+	SELECTIVE_COMMIT_COMMAND_KINDS,
+	isSelectiveCommitKind,
+	validateSelectiveCommitOperation,
+	type SelectiveCommitOperation,
+	type SelectiveCommitCommandInputMap,
+	type SelectiveCommitCommandResultMap,
+} from "./commit-protocol";
+import {
+	PROMPT_HISTORY_COMMAND_KINDS,
+	isPromptHistoryKind,
+	type PromptHistoryCommandOperation,
+	type PromptHistoryCommandResultMap,
+} from "./prompt-history-protocol";
+import {
 	SEARCH_CREDENTIAL_KINDS,
 	isSearchCredentialsKind,
 	type SearchCredentialsOperation,
@@ -291,6 +305,8 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
+	| Extract<SelectiveCommitOperation, { kind: keyof SelectiveCommitCommandInputMap }>
+	| PromptHistoryCommandOperation
 	| SearchCredentialsOperation
 	| ExtensionLinkOperation
 	| WebMcpOperation
@@ -342,6 +358,8 @@ export type WorkbenchOperation =
 
 export interface WorkbenchResultMap
 	extends
+		SelectiveCommitCommandResultMap,
+		PromptHistoryCommandResultMap,
 		SearchCredentialsResultMap,
 		EvaluationWorkspaceResultMap,
 		SessionTitlesResultMap,
@@ -390,6 +408,8 @@ export interface WorkbenchResultMap
 	"runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
 export const WORKBENCH_OPERATION_KINDS = [
+	...SELECTIVE_COMMIT_COMMAND_KINDS,
+	...PROMPT_HISTORY_COMMAND_KINDS,
 	...SEARCH_CREDENTIAL_KINDS,
 	...EXTENSION_LINK_KINDS,
 	...WEBMCP_KINDS,
@@ -500,6 +520,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 	"media.models",
 	"media.list",
 	"media.read",
+	"benchmarks.accounts.read",
 	"benchmarks.list",
 	"benchmarks.read",
 	...RUNTIME_CATALOG_OPERATION_KINDS,
@@ -575,6 +596,8 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	if (!value || typeof value !== "object") throw new Error("Invalid workbench operation");
 	const kind = (value as Record<string, unknown>).kind;
 	if (typeof kind !== "string" || !isWorkbenchOperationKind(kind)) throw new Error("Unknown workbench operation");
+	if (isSelectiveCommitKind(kind)) return validateSelectiveCommitOperation(value);
+	if (isPromptHistoryKind(kind)) return;
 	if (isSearchCredentialsKind(kind)) return;
 	if (kind === "extensions.links.activate" || kind === "browser.webmcp.invoke") return;
 	if (isComputerWorkspaceCommand(kind)) return;
@@ -702,6 +725,8 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	const fields: Record<
 		Exclude<
 			WorkbenchOperation["kind"],
+			| keyof SelectiveCommitCommandInputMap
+			| PromptHistoryCommandOperation["kind"]
 			| SearchCredentialsOperation["kind"]
 			| ExtensionLinkOperation["kind"]
 			| WebMcpOperation["kind"]

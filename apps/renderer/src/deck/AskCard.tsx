@@ -1,5 +1,6 @@
 import { AppSelect } from "../AppSelect";
 import { MarkdownInline } from "../conversation/markdown";
+import { useI18n } from "../i18n";
 import { PLATFORM } from "../platform";
 import {useState,useEffect,useRef,useId} from "react";
 import type { ChipComposerHandle } from "../composer/ChipComposer";
@@ -25,17 +26,19 @@ export function AskHead({
   onJump: (index: number) => void;
   onCollapse?: () => void;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   return (
     <PromptHead
       icon="message"
-      title="Agent 提问"
-      {...(onCollapse ? { end: <button type="button" className="btn small ghost" onClick={onCollapse} data-tip={PLATFORM === "darwin" ? "⌥H" : "Alt+H"}>收起 / Hide</button> } : {})}
+      title={zh ? "Agent 提问" : "Agent question"}
+      {...(onCollapse ? { end: <button type="button" className="btn small ghost" onClick={onCollapse} data-tip={PLATFORM === "darwin" ? "⌥H" : "Alt+H"}>{zh ? "收起 / Hide" : "Hide"}</button> } : {})}
       {...(demo === true ? { demo: true } : {})}
       {...(meta ? { meta } : {})}
       {...(queue ? { queue } : {})}
       {...(headers.length > 1 ? {
         chips: (
-          <span className="dk-head-chips" role="tablist" aria-label="问题">
+          <span className="dk-head-chips" role="tablist" aria-label={zh ? "问题" : "Questions"}>
             {headers.map((entry) => (
               <button
                 key={`${entry.index}:${entry.header}`}
@@ -58,17 +61,21 @@ export function AskHead({
 
 /** 换页时唯一会动的那一段：问题正文 + 选项 + 自定义回答。 */
 export function AskBody({
-  question, answer, disabled, onPick, onCustom, onPatch, onSubmit, onBusy,
+  question, answer, disabled, onPick, onChoose, onCustom, onPatch, onSubmit, onBusy,
 }: {
   onBusy?: (busy: boolean) => void;
   question: DeckAskQuestion;
   answer: DeckAskAnswer;
   disabled?: boolean;
   onPick: (label: string) => void;
+  /** Toggle lists answer a click immediately instead of staging it. */
+  onChoose?: (label: string) => void;
   onCustom: (value: string) => void;
   onPatch?: (patch: Partial<DeckAskAnswer>) => void;
   onSubmit: () => void;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [customBusy, setCustomBusy] = useState(false);
   const [noteBusy, setNoteBusy] = useState(false);
   const [customEditing, setCustomEditing] = useState(false);
@@ -101,15 +108,26 @@ export function AskBody({
     <div className="ask-body">
       <div className="dk-sub"><MarkdownInline text={question.question} k={`q-${question.id}`} /></div>
       <p className="ask-selection-hint">
-        {question.multi ? exclusive ? "多选 · 自定义回答会替代已选项" : "多选 · 可同时选择选项和自定义回答" : "单选 · 选择一项，或填写自定义回答"}
+        {question.toggleList && onChoose
+          ? (zh ? "点击切换勾选，每次点击都会立即发送；选完后点结束项" : "Click to toggle a mark; each click is sent right away. Pick the finishing row when done")
+          : question.multi
+          ? exclusive
+            ? (zh ? "多选 · 自定义回答会替代已选项" : "Multi-select · Custom answer replaces selected options")
+            : (zh ? "多选 · 可同时选择选项和自定义回答" : "Multi-select · Options and custom answer can be combined")
+          : (zh ? "单选 · 选择一项，或填写自定义回答" : "Single-select · Pick an option or enter a custom answer")}
       </p>
-      <div className="dk-opts" role={question.multi ? "group" : "radiogroup"} aria-label={question.question}>
+      <div className="dk-opts" role={question.multi || (question.toggleList && onChoose) ? "group" : "radiogroup"} aria-label={question.question}>
         {question.options.map((option, index) => {
-          const on = picked.includes(option.label);
+          const toggle = question.toggleList === true && onChoose !== undefined;
+          const on = toggle ? option.mark === "checked" : picked.includes(option.label);
           return (
-            <button key={option.label} type="button" className={`dk-opt${on ? " sel" : ""}`} role={question.multi ? "checkbox" : "radio"} aria-checked={on} disabled={choicesDisabled} onClick={() => { setCustomEditing(false); onPick(option.label); }}>
+            <button key={option.label} type="button" className={`dk-opt${on ? " sel" : ""}${toggle && option.mark === undefined ? " is-action" : ""}`}
+              {...(toggle ? option.mark === undefined ? {} : { role: "checkbox", "aria-checked": on } : { role: question.multi ? "checkbox" : "radio", "aria-checked": on })}
+              autoFocus={index === question.initial && toggle}
+              disabled={choicesDisabled}
+              onClick={() => { setCustomEditing(false); if (toggle) onChoose(option.label); else onPick(option.label); }}>
               <span className="dk-opt-row">
-                <span className={question.multi ? "o-check" : "o-radio"} aria-hidden="true" />
+                <span className={toggle ? option.mark === undefined ? "o-action" : "o-check" : question.multi ? "o-check" : "o-radio"} aria-hidden="true" />
                 <span className="o-label">{option.label}</span>
                 {index === question.recommended ? <span className="chip purple xs">Recommended</span> : null}
               </span>
@@ -120,10 +138,10 @@ export function AskBody({
         })}
         <div className={`ask-custom-choice${customActive ? " is-active" : ""}`}>
           <AskImages
-            heading={<button type="button" className="ask-custom-toggle" role={exclusive ? "radio" : "checkbox"} aria-label="自定义回答选项" aria-checked={customActive} disabled={choicesDisabled} onClick={chooseCustom}><span className={exclusive ? "o-radio" : "o-check"} aria-hidden="true" /><span>自定义回答</span></button>}
-            allowImages={imagesAllowed} onBusy={setCustomBusy} label="回答 / Answer" ariaLabel="自定义回答"
+            heading={<button type="button" className="ask-custom-toggle" role={exclusive ? "radio" : "checkbox"} aria-label={zh ? "自定义回答选项" : "Custom answer option"} aria-checked={customActive} disabled={choicesDisabled} onClick={chooseCustom}><span className={exclusive ? "o-radio" : "o-check"} aria-hidden="true" /><span>{zh ? "自定义回答" : "Custom answer"}</span></button>}
+            allowImages={imagesAllowed} onBusy={setCustomBusy} label={zh ? "回答 / Answer" : "Answer"} ariaLabel={zh ? "自定义回答" : "Custom answer"}
             text={answer.custom} images={answer.customInputImages ?? []} doc={answer.customDoc} editorRef={inputRef} disabled={disabled}
-            placeholder={imagesAllowed ? "填写其他答案，也可粘贴图片…" : "填写其他答案…"}
+            placeholder={imagesAllowed ? (zh ? "填写其他答案，也可粘贴图片…" : "Type another answer, or paste an image…") : (zh ? "填写其他答案…" : "Type another answer…")}
             onChange={value => {
               setCustomEditing(true);
               if (onPatch) onPatch({ custom: value.text, customInputImages: value.images, customDoc: value.doc });
@@ -135,20 +153,20 @@ export function AskBody({
       </div>
       {question.acceptImages !== undefined && onPatch ? (
         <AskImages
-          multiline allowImages={imagesAllowed} heading={<span className="ask-note-title">补充说明 <span>可选</span></span>}
-          hint={<div id={noteId} className="ask-note-target" data-tip="补充说明附加在当前回答后，不会替代回答">
+          multiline allowImages={imagesAllowed} heading={<span className="ask-note-title">{zh ? "补充说明" : "Additional note"} <span>{zh ? "可选" : "Optional"}</span></span>}
+          hint={<div id={noteId} className="ask-note-target" data-tip={zh ? "补充说明附加在当前回答后，不会替代回答" : "Additional note is appended to your current answer without replacing it"}>
             {noteTargetCount ? <>
-              <span>附加到</span>
-              {noteTargetCount > 1 ? <AppSelect className="select" aria-label="备注对象 / Note on" value={noteOption === undefined ? "custom" : `option:${picked.indexOf(noteOption)}`} disabled={choicesDisabled} data-tip="选择这条补充说明的归属" onChange={event => onPatch({ noteOption: event.target.value === "custom" ? undefined : picked[Number(event.target.value.slice(7))] })}>
+              <span>{zh ? "附加到" : "Attach to"}</span>
+              {noteTargetCount > 1 ? <AppSelect className="select" aria-label={zh ? "备注对象 / Note on" : "Note on"} value={noteOption === undefined ? "custom" : `option:${picked.indexOf(noteOption)}`} disabled={choicesDisabled} data-tip={zh ? "选择这条补充说明的归属" : "Choose which answer this note applies to"} onChange={event => onPatch({ noteOption: event.target.value === "custom" ? undefined : picked[Number(event.target.value.slice(7))] })}>
                 {picked.map((label, index) => <option key={label} value={`option:${index}`}>{label}</option>)}
-                {hasCustom ? <option value="custom">自定义回答</option> : null}
-              </AppSelect> : <strong data-tip={noteOption ?? "自定义回答"}>{noteOption ?? "自定义回答"}</strong>}
-              <span>· 不替代回答</span>
-            </> : <span>先选择或填写回答</span>}
+                {hasCustom ? <option value="custom">{zh ? "自定义回答" : "Custom answer"}</option> : null}
+              </AppSelect> : <strong data-tip={noteOption ?? (zh ? "自定义回答" : "Custom answer")}>{noteOption ?? (zh ? "自定义回答" : "Custom answer")}</strong>}
+              <span>{zh ? "· 不替代回答" : "· Does not replace answer"}</span>
+            </> : <span>{zh ? "先选择或填写回答" : "Select or enter an answer first"}</span>}
           </div>}
-          onBusy={setNoteBusy} label="备注 / Note" ariaLabel="备注 / Note" describedBy={noteId}
+          onBusy={setNoteBusy} label={zh ? "备注 / Note" : "Note"} ariaLabel={zh ? "备注 / Note" : "Note"} describedBy={noteId}
           text={answer.note ?? ""} images={answer.noteImages ?? []} doc={answer.noteDoc} disabled={noteDisabled}
-          placeholder={imagesAllowed ? "补充细节，也可粘贴图片…" : "补充细节…"}
+          placeholder={imagesAllowed ? (zh ? "补充细节，也可粘贴图片…" : "Add extra details, or paste an image…") : (zh ? "补充细节…" : "Add extra details…")}
           onChange={value => onPatch({ note: value.text, noteImages: value.images, noteDoc: value.doc })}
         />
       ) : null}
@@ -167,10 +185,12 @@ export function AskActions({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   return (
     <div className="dk-actions">
-      <button type="button" className="btn lg outline" disabled={disabled} onClick={onCancel}>取消</button>
-      <button type="button" className="btn lg primary" disabled={disabled || !canSubmit} onClick={onSubmit}>提交</button>
+      <button type="button" className="btn lg outline" disabled={disabled} onClick={onCancel}>{zh ? "取消" : "Cancel"}</button>
+      <button type="button" className="btn lg primary" disabled={disabled || !canSubmit} onClick={onSubmit}>{zh ? "提交" : "Submit"}</button>
     </div>
   );
 }

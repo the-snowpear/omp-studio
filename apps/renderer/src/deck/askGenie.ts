@@ -12,6 +12,7 @@ export function isAskDeckInteraction(
 ): boolean {
   if (interaction == null) return false;
   return interaction.kind === "ask"
+    || interaction.kind === "form"
     || interaction.kind === "select"
     || interaction.kind === "input"
     || interaction.kind === "editor";

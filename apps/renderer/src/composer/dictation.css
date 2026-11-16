@@ -16,6 +16,9 @@
 .dictation-model { color: var(--text); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
 .dictation-details > p { color: var(--text-2); font-size: 12px; }
 .dictation-details > .dictation-warning { color: var(--danger-orange); }
+.dictation-details > .dictation-policy { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.dictation-details > .dictation-policy code { font-size: 11px; padding: 0 4px; border-radius: 4px; background: var(--surface-hover); overflow-wrap: anywhere; }
+.dictation-details > .dictation-policy[data-blocked] .chip { color: var(--danger-orange); background: var(--danger-orange-soft); }
 .dictation-meter-row, .dictation-device-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .dictation-level { display: block; width: 96px; height: 7px; flex: 1; max-width: 150px; border: 0; border-radius: 4px; background: var(--surface-3); }
 .dictation-level::-webkit-meter-bar { border: 0; border-radius: 4px; background: var(--surface-3); }

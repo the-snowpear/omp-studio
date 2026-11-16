@@ -8,7 +8,8 @@ import type {
 import { usePreviewMode } from "../preview/PreviewContext";
 import { waitReceipt } from "../hostError";
 import { insertPlainText } from "./editorDom";
-import { PREVIEW_NEXT_MESSAGES } from "../preview/nextMessagePreview";
+import { isZh, useI18n } from "../i18n";
+import { getPreviewNextMessages } from "../preview/nextMessagePreview";
 import "./prediction.css";
 export interface ComposerPrediction {
   client: StudioClient;
@@ -72,11 +73,13 @@ function currentDraft(editor: HTMLElement, allowEmpty: boolean): { text: string;
   if (remaining.textContent || remaining.querySelector("br,.cm-chip,[contenteditable=false]")) return;
   return draft;
 }
-function previewSuffix(text: string, caret: number): string | null {
+function previewSuffix(text: string, caret: number, zh = isZh()): string | null {
   const before = text.slice(0, caret),
     word = before.match(/[\p{L}]+$/u)?.[0];
   if (!word || /[/\\@]/.test(before)) return null;
-  const choices = ["review", "implementation", "testing", "测试", "验证"];
+  const choices = zh
+    ? ["review", "implementation", "testing", "测试", "验证"]
+    : ["review", "implementation", "testing", "verify", "tests"];
   const full = choices.find(
     (value) =>
       value.toLowerCase().startsWith(word.toLowerCase()) &&
@@ -102,6 +105,10 @@ export function useWordPrediction(
 ) {
   const document = useSurfaceDocument(), window = surfaceWindow(document);
   const { preview } = usePreviewMode();
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const [ghost, setGhost] = useState<Ghost>(),
     [error, setError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false), [choiceIndex, setChoiceIndex] = useState(0);
@@ -356,14 +363,15 @@ export function useWordPrediction(
             const version = ++revision.current;
             lastDraft = { ...draft, revision: version };
             if (preview) {
-              const rank = options.nextMessageAvailable ? PREVIEW_NEXT_MESSAGES.findIndex(value => value.startsWith(draft.text.trimEnd())) : -1;
+              const previewMessages = getPreviewNextMessages(zhRef.current);
+              const rank = options.nextMessageAvailable ? previewMessages.findIndex(value => value.startsWith(draft.text.trimEnd())) : -1;
               if (rank >= 0) {
-                const next = { values: PREVIEW_NEXT_MESSAGES, revision: version };
+                const next = { values: previewMessages, revision: version };
                 offers.current = next; setAlternatives(next);
-                show(PREVIEW_NEXT_MESSAGES[rank]!.slice(draft.text.trimEnd().length), version, true, rank);
+                show(previewMessages[rank]!.slice(draft.text.trimEnd().length), version, true, rank);
               } else {
                 if (!options.nextMessageAvailable) { offers.current = undefined; setAlternatives(undefined); }
-                show(previewSuffix(draft.text, draft.caret), version);
+                show(previewSuffix(draft.text, draft.caret, zhRef.current), version);
               }
               return;
             }
@@ -472,6 +480,7 @@ export function useWordPrediction(
     options?.nextMessageAvailable,
     blocked,
     preview,
+    zh,
     document,
     window,
   ]);

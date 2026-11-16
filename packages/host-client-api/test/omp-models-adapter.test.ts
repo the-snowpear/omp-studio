@@ -26,8 +26,62 @@ import {
   upsertNestedRecordList,
   upsertYamlRecordEntry,
   upsertYamlStringList,
+  withRuntimeModels,
 } from "../src/omp-models-adapter.js";
 import { restoreRedactedApiKeys } from "../src/models-yml.js";
+
+test("Google Decisions uses the Google key header and unsupported model lists make no guessed HTTP requests", async () => {
+  const request = modelListRequest("https://generativelanguage.googleapis.com/v1beta", "google-decisions", "test-key");
+  assert.equal(request.headers["x-goog-api-key"], "test-key");
+  assert.equal(request.headers.Authorization, undefined);
+  assert.deepEqual(request.urls, []);
+  const directory = await mkdtemp(join(tmpdir(), "omp-model-probe-unsupported-"));
+  let calls = 0;
+  const service = createOmpModelsService({ agentDir: directory, fetch: async () => { calls++; throw new Error("No network request is authorized"); } });
+  try {
+    for (const api of ["google-decisions", "nace-systemone", "antigravity-acp", "unknown-api"]) {
+      const result = await service.probeProvider({ providerId: "test-provider", api, endpointUrl: "https://provider.invalid", apiKey: "test-key" });
+      assert.equal(result.ok, false);
+      assert.deepEqual(result.models, []);
+    }
+    assert.equal(calls, 0);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("managed Antigravity cannot be saved or tested as an HTTP provider, while Judge HTTP configuration remains editable", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-managed-models-"));
+  let calls = 0;
+  const service = createOmpModelsService({ agentDir: directory, fetch: async () => { calls++; throw new Error("No network request is authorized"); } });
+  try {
+    await assert.rejects(async () => service.upsertProvider({ id: "antigravity-cli", name: "Antigravity", api: "openai-completions", auth: { type: "none" } }), { code: "INVALID_ARGUMENT" });
+    await assert.rejects(async () => service.upsertProvider({ id: "alias", name: "Alias", api: "antigravity-acp", auth: { type: "none" } }), { code: "INVALID_ARGUMENT" });
+    await assert.rejects(async () => service.writeModelsYml({ text: "providers:\n  alias:\n    api: antigravity-acp\n" }), { code: "INVALID_ARGUMENT" });
+    assert.equal((await service.testProvider({ providerId: "antigravity-cli", endpointUrl: "https://provider.invalid" })).ok, false);
+    assert.equal(calls, 0);
+    await service.upsertProvider({ id: "nace", name: "Nace", api: "nace-systemone", auth: { type: "api-key", apiKey: "sk-test-only" }, models: [{ id: "drex-test", kind: "judge" }] });
+    const read = await service.get();
+    assert.equal(read.providers[0]?.models[0]?.kind, "judge");
+    assert.equal(read.presets.flatMap(group => group.items).find(provider => provider.id === "antigravity-cli")?.configurationMode, "managed");
+    assert.deepEqual(read.availableModels, []);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("only the Runtime snapshot authorizes configured models and invalid saved roles are not reassigned", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-model-runtime-truth-"));
+  try {
+    await writeFile(join(directory, "models.yml"), "providers:\n  gateway:\n    api: openai-completions\n    apiKey: sk-test-only\n    models:\n    - id: obsolete\n");
+    const roles = "modelRoles:\n  default: gateway/obsolete:high\n";
+    await writeFile(join(directory, "config.yml"), roles);
+    const saved = await createOmpModelsService({ agentDir: directory }).get();
+    const projected = withRuntimeModels(saved, { sessionId: "session", version: "native-generation", total: 1, truncated: false, models: [{ id: "judge", selector: "gateway/judge", name: "Judge", provider: "gateway", api: "google-decisions", kind: "judge", source: "registry", reasoning: false, image: true, tools: false }] });
+    assert.deepEqual(projected.availableModels.map(model => model.selector), ["gateway/judge"]);
+    assert.equal(projected.providers[0]?.models.find(model => model.id === "obsolete")?.status, "unavailable");
+    assert.equal(projected.roles.find(role => role.id === "default")?.primary, "gateway/obsolete");
+    assert.equal(projected.roles.find(role => role.id === "default")?.thinking, "high");
+    assert.equal(projected.roles.find(role => role.id === "default")?.issue?.kind, "model-missing");
+    assert.equal(await readFile(join(directory, "config.yml"), "utf8"), roles);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 
 describe("upsertYamlRecordEntry", () => {
   test("updates an existing entry in block form", () => {
@@ -480,7 +534,7 @@ describe("testProvider", () => {
     });
     const result = await service.testProvider({ endpointUrl: "https://example.com" });
     assert.equal(result.ok, false);
-    assert.match(result.detail, /连接被拒绝/);
+    assert.match(result.detail, /connection refused/);
     assert.equal(calls.length, 1); // definitive errors are not retried
   });
 
@@ -490,7 +544,7 @@ describe("testProvider", () => {
     });
     const result = await service.testProvider({ endpointUrl: "https://nope.invalid" });
     assert.equal(result.ok, false);
-    assert.match(result.detail, /域名无法解析/);
+    assert.match(result.detail, /failed to resolve hostname/);
   });
 
   test("no credentials: timeout-class failure retries once", async () => {
@@ -499,7 +553,7 @@ describe("testProvider", () => {
     });
     const result = await service.testProvider({ endpointUrl: "https://example.com" });
     assert.equal(result.ok, false);
-    assert.match(result.detail, /超时/);
+    assert.match(result.detail, /timed out/);
     assert.equal(result.retryCount, 1);
     assert.equal(calls.length, 2);
   });
@@ -512,7 +566,7 @@ describe("testProvider", () => {
       apiKey: "sk-123",
     });
     assert.equal(result.ok, true);
-    assert.match(result.detail, /凭据有效/);
+    assert.match(result.detail, /Valid credentials/);
     assert.equal(result.httpStatus, 200);
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.url, "https://api.deepseek.com/v1/models");
@@ -527,7 +581,7 @@ describe("testProvider", () => {
       apiKey: "bad",
     });
     assert.equal(result.ok, false);
-    assert.match(result.detail, /凭据无效/);
+    assert.match(result.detail, /Invalid credentials/);
     assert.equal(result.httpStatus, 401);
   });
 
@@ -543,7 +597,7 @@ describe("testProvider", () => {
       apiKey: "sk",
     });
     assert.equal(result.ok, true);
-    assert.match(result.detail, /模型列表接口不可用/);
+    assert.match(result.detail, /model list unavailable/);
     assert.equal(calls.length, 2);
     assert.equal(calls[1]?.url, "https://example.com");
   });
@@ -603,7 +657,7 @@ describe("testProvider", () => {
     const { service, calls } = await serviceWith(async () => new Response(null, { status: 200 }));
     const result = await service.testProvider({ providerId: "p2" });
     assert.equal(result.ok, false);
-    assert.match(result.detail, /外部命令/);
+    assert.match(result.detail, /external command/);
     assert.equal(calls.length, 0);
   });
 
@@ -630,13 +684,13 @@ describe("authProbeUrl", () => {
 
 describe("networkErrorDetail", () => {
   test("classifies each failure class", () => {
-    assert.equal(networkErrorDetail(abortError()), "连接失败：请求超时");
-    assert.equal(networkErrorDetail(networkError("ENOTFOUND")), "连接失败：域名无法解析");
-    assert.equal(networkErrorDetail(networkError("EAI_AGAIN")), "连接失败：域名无法解析");
-    assert.equal(networkErrorDetail(networkError("ECONNREFUSED")), "连接失败：连接被拒绝");
-    assert.equal(networkErrorDetail(networkError("ECONNRESET")), "连接失败：连接被重置");
-    assert.equal(networkErrorDetail(networkError("CERT_HAS_EXPIRED")), "连接失败：TLS 证书错误");
-    assert.equal(networkErrorDetail(networkError(undefined)), "连接失败：网络不可达");
+    assert.equal(networkErrorDetail(abortError()), "Connection failed: request timed out");
+    assert.equal(networkErrorDetail(networkError("ENOTFOUND")), "Connection failed: failed to resolve hostname");
+    assert.equal(networkErrorDetail(networkError("EAI_AGAIN")), "Connection failed: failed to resolve hostname");
+    assert.equal(networkErrorDetail(networkError("ECONNREFUSED")), "Connection failed: connection refused");
+    assert.equal(networkErrorDetail(networkError("ECONNRESET")), "Connection failed: connection reset");
+    assert.equal(networkErrorDetail(networkError("CERT_HAS_EXPIRED")), "Connection failed: TLS certificate error");
+    assert.equal(networkErrorDetail(networkError(undefined)), "Connection failed: network unreachable");
   });
 });
 
@@ -813,7 +867,7 @@ describe("upsertProvider enabled / disabledProviders", () => {
     }
   });
 
-  test("disabled provider's models are dropped from availableModels", async () => {
+  test("provider disabling remains editable without treating a disk cache as available", async () => {
     const dir = await mkdtemp(join(tmpdir(), "omp-models-disabled-available-"));
     try {
       await writeFile(join(dir, "models.yml"), "providers:\n  acme:\n    api: openai-completions\n    apiKey: sk-test\n", "utf8");
@@ -828,7 +882,8 @@ describe("upsertProvider enabled / disabledProviders", () => {
       db.close();
       const service = createOmpModelsService({ agentDir: dir });
       const before = await service.get();
-      assert.equal(before.availableModels.some((item) => item.provider === "acme"), true);
+      assert.deepEqual(before.availableModels, []);
+      assert.equal(before.availability?.status, "unverified");
       await service.upsertProvider({
         id: "acme",
         name: "Acme",
@@ -846,7 +901,7 @@ describe("upsertProvider enabled / disabledProviders", () => {
   });
 });
 
-describe("models.get availableModels thinking", () => {
+describe("model configuration thinking without Runtime", () => {
   test("keeps models.yml thinking.efforts on the selector used by role rows", async () => {
     const dir = await mkdtemp(join(tmpdir(), "omp-models-role-thinking-"));
     try {
@@ -870,9 +925,11 @@ describe("models.get availableModels thinking", () => {
       );
       await writeFile(join(dir, "config.yml"), "modelRoles:\n  default: gateway/flash:high\n", "utf8");
       const snapshot = await createOmpModelsService({ agentDir: dir }).get();
-      const available = snapshot.availableModels.find((model) => model.selector === "gateway/flash");
-      assert.equal(available?.reasoning, true);
-      assert.deepEqual(available?.thinking, ["high", "max"]);
+      assert.deepEqual(snapshot.availableModels, []);
+      assert.equal(snapshot.availability?.status, "unverified");
+      assert.equal(snapshot.roles.find(role => role.id === "default")?.primary, "gateway/flash");
+      assert.equal(snapshot.roles.find(role => role.id === "default")?.thinking, "high");
+      assert.equal(snapshot.roles.find(role => role.id === "default")?.issue, undefined);
       const catalog = snapshot.providers[0]?.models.find((model) => model.id === "flash");
       assert.deepEqual(catalog?.thinking, ["high", "max"]);
       const roundTrip = availableFromCatalogEntry("gateway", catalog!);
@@ -1136,8 +1193,10 @@ describe("P1/P2 model-config adapter surfaces", () => {
       );
       db.close();
       const snapshot = await createOmpModelsService({ agentDir: dir }).get();
-      assert.deepEqual(snapshot.availableModels.find((item) => item.selector === "openai/shared")?.thinking, ["low"]);
-      assert.deepEqual(snapshot.availableModels.find((item) => item.selector === "anthropic/shared")?.thinking, ["max"]);
+      assert.deepEqual(snapshot.availableModels, []);
+      assert.equal(snapshot.availability?.status, "unverified");
+      assert.equal(snapshot.providers.find(provider => provider.id === "openai")?.models[0]?.thinking, undefined);
+      assert.equal(snapshot.providers.find(provider => provider.id === "anthropic")?.models[0]?.thinking, undefined);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1184,15 +1243,15 @@ describe("P1/P2 model-config adapter surfaces", () => {
         snapshot.availableModels.some((item) => item.provider === "zenmux" || item.selector.startsWith("zenmux/")),
         false,
       );
-      assert.equal(snapshot.availableModels.some((item) => item.selector === "gateway/flash"), true);
-      assert.equal(snapshot.availableModels.some((item) => item.selector === "gateway/pro"), true);
-      assert.deepEqual(snapshot.availableModels.find((item) => item.selector === "gateway/flash")?.thinking, ["high"]);
+      assert.deepEqual(snapshot.availableModels, []);
+      assert.deepEqual(snapshot.providers[0]?.models.map(model => model.id), ["flash"]);
+      assert.equal(snapshot.providers[0]?.models[0]?.thinking, undefined);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  test("keeps OAuth-authenticated cache providers that are absent from models.yml", async () => {
+  test("credential-scoped OAuth caches stay in the live Runtime catalog", async () => {
     const dir = await mkdtemp(join(tmpdir(), "omp-models-authed-cache-"));
     try {
       await writeFile(join(dir, "models.yml"), "providers:\n  gateway:\n    api: openai-completions\n", "utf8");
@@ -1216,9 +1275,9 @@ describe("P1/P2 model-config adapter surfaces", () => {
       const snapshot = await createOmpModelsService({ agentDir: dir }).get();
       assert.deepEqual(
         snapshot.providers.map((item) => item.id).sort(),
-        ["gateway", "opencode-go"],
+        ["gateway"],
       );
-      assert.equal(snapshot.availableModels.some((item) => item.selector === "opencode-go/glm-5"), true);
+      assert.equal(snapshot.availableModels.some((item) => item.selector === "opencode-go/glm-5"), false);
       assert.equal(
         snapshot.availableModels.some((item) => item.provider === "zenmux" || item.selector.startsWith("zenmux/")),
         false,
@@ -1349,14 +1408,14 @@ describe("P1/P2 model-config adapter surfaces", () => {
       });
       const command = await service.probeProvider({ providerId: "vault" });
       assert.equal(command.ok, false);
-      assert.match(command.detail, /外部命令取凭据/);
+      assert.match(command.detail, /external command/);
       const noList = await service.probeProvider({
         providerId: "bedrock",
         api: "bedrock-converse-stream",
         endpointUrl: "https://bedrock.test",
       });
       assert.equal(noList.ok, false);
-      assert.match(noList.detail, /没有模型列表接口/);
+      assert.match(noList.detail, /no model-list endpoint/);
       assert.equal(calls, 0);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -1380,7 +1439,7 @@ describe("P1/P2 model-config adapter surfaces", () => {
       });
       assert.equal(result.ok, false);
       assert.equal(result.httpStatus, 401);
-      assert.match(result.detail, /凭据无效/);
+      assert.match(result.detail, /Invalid credentials/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1707,16 +1766,13 @@ describe("web search config", () => {
       assert.deepEqual(byId.get("ollama")?.credentialProviders, ["ollama-cloud"]);
       assert.match(byId.get("brave")?.description ?? "", /BRAVE_API_KEY/);
       assert.ok(ws.providers.every((p) => p.description.length > 0));
-      // Credential hints for the modal: env keys + omp login id where OAuth exists.
+      // IDs identify native credential storage; the live credentials catalog distinguishes OAuth and API keys.
       assert.deepEqual(byId.get("brave")?.envKeys, ["BRAVE_API_KEY"]);
-      assert.equal(byId.get("brave")?.loginId, undefined);
+      assert.equal(byId.get("brave")?.loginId, "brave");
       assert.equal(byId.get("brave")?.apiKeyId, "brave");
       assert.equal(byId.get("codex")?.loginId, "openai-codex");
-      assert.equal(byId.get("gemini")?.loginId, undefined);
-      // Login is only offered for ids in the runtime's OAuth registry and
-      // headless-capable flows: prompt-first (google-gemini-cli) and unknown
-      // ids (firecrawl) are excluded so RPC login can never hard-fail.
-      assert.equal(byId.get("firecrawl")?.loginId, undefined);
+      assert.equal(byId.get("gemini")?.loginId, "google-gemini-cli");
+      assert.equal(byId.get("firecrawl")?.loginId, "firecrawl");
       assert.equal(byId.get("firecrawl")?.apiKeyId, "firecrawl");
       assert.equal(byId.get("tavily")?.loginId, "tavily");
       assert.equal(byId.get("gemini")?.apiKeyId, "google");

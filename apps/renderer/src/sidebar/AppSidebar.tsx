@@ -16,7 +16,7 @@ import type { FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, 
 import type { ClientBootstrap, SessionId, StudioClient, WorkspaceId, WorkspaceFileNode } from "@omp-studio/client-contract";
 import { AppIcon, Icon } from "../icons";
 import { MenuItem } from "../menus";
-import { useI18n } from "../i18n";
+import { pickLocale, useI18n } from "../i18n";
 import { SHORTCUTS, formatShortcut } from "../keyboard/shortcuts";
 import { fileLabel } from "../composer/types";
 import { formatRuntimeClassification, formatRuntimeStatusLabel, runtimeCanReconnect, runtimeCanRestart } from "../diagnosticsModel";
@@ -28,12 +28,12 @@ import { SidebarFooter } from "../SidebarFooter";
 import { MOTION_MS, transitionDelayMs, transitionMs } from "../motion";
 import { useAppUpdate } from "../settings/appUpdate";
 import { avatarInitial, useOperatorProfile } from "../settings/operatorProfile";
-import { PREVIEW_APP_UPDATE, PREVIEW_PROJECTS, findPreviewProject } from "../preview/fixtures";
+import { getPreviewAppUpdate, getPreviewProjects, findPreviewProject } from "../preview/fixtures";
 import { PreviewFileTree } from "../preview/surfaces";
 import { usableCapabilityManifest } from "../deck/interactionGate";
 import { ThreadSpin } from "./ThreadSpin";
 import { ThreadWaitChip } from "./ThreadWaitChip";
-import { residentRowsOf, threadRunningFromLive } from "./threadRunning";
+import { residentForSession, residentRowsOf, threadRunningFromLive } from "./threadRunning";
 import { sidebarProjectOrder } from "./projectOrder";
 import { projectHasSession, provisionalThreadForHistoryEntry, sidebarThreadTitle } from "./provisionalThread";
 import { waitKindFromLive } from "./threadWait";
@@ -49,7 +49,7 @@ function relativeTime(iso: string): string {
   const then = Date.parse(iso);
   if (!Number.isFinite(then)) return "";
   const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (seconds < 60) return "刚刚";
+  if (seconds < 60) return pickLocale("刚刚", "just now");
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   if (seconds < 86400 * 7) return `${Math.floor(seconds / 86400)}d`;
@@ -68,10 +68,11 @@ function runtimeStatusLabel(runtime: ClientBootstrap["runtime"] | undefined, t: 
 export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDialog, ompMenuAnchorRef, railCollapsed = false, avatarRef, footerBoxRef }: { state: ViewState; chrome: ShellChrome; client: StudioClient; onRoute: (route: Route) => void; onOpenAppUpdateDialog: () => void; ompMenuAnchorRef?: RefObject<HTMLButtonElement | null>; /** 左栏（rail）收起时，用户/环境入口回到侧栏底部。 */ railCollapsed?: boolean; /** 底栏里的头像圆本身：壳要量它，才能在收起/展开时把头像交接到位。 */ avatarRef?: RefObject<HTMLElement | null>; /** 底栏盒子本身：壳要用它的底边换算头像落点，这里用它盯实时高度。 */ footerBoxRef?: RefObject<HTMLElement | null> }) {
   const { document, window } = useConversationDom();
   const mdi = useConversationView();
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const { preview, marks } = usePreviewMode();
   const appUpdate = useAppUpdate();
-  const effectiveUpdate = preview ? PREVIEW_APP_UPDATE : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
+  const effectiveUpdate = preview ? getPreviewAppUpdate(zh) : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
   const hasUpdate = effectiveUpdate?.available === true;
   const dock = useOptionalDock();
   const hasDockCards = !dock || dock.layout.left.panels.length > 0;
@@ -246,6 +247,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
       行菜单的目标是所在行会话：非当前会话由 runThreadRowAction 先打开（resume）再执行。 */
   const sessionLive = liveSnapshot !== undefined;
   const sessionBusy = liveSnapshot?.isStreaming === true || liveSnapshot?.isCompacting === true;
+  const forkBusy = liveSnapshot?.isCompacting === true;
   const rowActionReason = !sessionLive ? t("common.unavailable") : t("common.loading");
   const pendingInteraction = state.clientState?.interaction.pending ?? null;
   const residentModel = state.clientState?.entities.residents;
@@ -508,7 +510,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
           </div>
         </div>
         <div className="sb-scroll" id="projectList">
-          {preview ? PREVIEW_PROJECTS.map((project) => {
+          {preview ? getPreviewProjects(zh).map((project) => {
             const open = chrome.previewProjectId === project.id && chrome.projectListExpanded;
             return (
               <div className="project" key={project.id}>
@@ -641,8 +643,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                       </span>
                       <span className="p-name ellipsis">{workspace.name}</span>
                       <span className="project-flags">
-                        {runningCount > 0 ? <span className="chip green xs" aria-label={`运行 ${runningCount}`}>{runningCount}</span> : null}
-                        {waitingCount > 0 ? <span className="chip amber xs" aria-label={`等待 ${waitingCount}`}>{waitingCount}</span> : null}
+                        {runningCount > 0 ? <span className="chip green xs" aria-label={zh ? `运行 ${runningCount}` : `${runningCount} running`}>{runningCount}</span> : null}
+                        {waitingCount > 0 ? <span className="chip amber xs" aria-label={zh ? `等待 ${waitingCount}` : `${waitingCount} waiting`}>{waitingCount}</span> : null}
                       </span>
                     </button>
                     {/* 悬停浮现的操作区：最右 + 在此项目下新建会话，其左 ⋯ 更多（功能未接入） */}
@@ -696,6 +698,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                     <ThreadActionMenuItems
                                       live={sessionLive && chrome.activeProvisionalSessionId === thread.sessionId}
                                       busy={sessionBusy}
+                                      forkBusy={forkBusy}
                                       compacting={liveSnapshot?.isCompacting === true}
                                       compactPending={chrome.compactPending}
                                       reason={t("common.unavailable")}
@@ -773,7 +776,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                   <ThreadActionMenuItems
                                     live={sessionLive}
                                     busy={running}
-                                    compacting={liveSnapshot?.sessionId === entry.sessionId && liveSnapshot?.isCompacting === true}
+                                    compacting={hasResidentModel
+                                      ? residentForSession(residentRows, entry.sessionId)?.phase === "compacting"
+                                      : liveSnapshot?.sessionId === entry.sessionId && liveSnapshot?.isCompacting === true}
                                     compactPending={chrome.compactPending}
                                     reason={rowActionReason}
                                     pinned={entry.pinned}
@@ -879,15 +884,15 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
           {preview ? (
             <PreviewFileTree
               workspaceId={chrome.previewProjectId ?? "preview-workspace"}
-              label={findPreviewProject(chrome.previewProjectId)?.name ?? t("shell.project")}
+              label={findPreviewProject(chrome.previewProjectId, zh)?.name ?? t("shell.project")}
               search={fileSearch.trim()}
               onContext={(path, kind) => chrome.onAddComposerContext({ kind, path, label: fileLabel(path) })}
               onFileAction={(action, target) => {
                 if (action.type !== "copyRelative") return;
                 void navigator.clipboard
                   .writeText(target.path)
-                  .then(() => setPreviewFileMessage("已复制相对路径"))
-                  .catch(() => setPreviewFileMessage("复制相对路径失败"));
+                  .then(() => setPreviewFileMessage(pickLocale("已复制相对路径", "Copied relative path")))
+                  .catch(() => setPreviewFileMessage(pickLocale("复制相对路径失败", "Failed to copy relative path")));
               }}
             />
           ) : chrome.selectedProject ? (
@@ -963,7 +968,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
               ref={ompMenuRef}
               className="menu title-menu-popover omp-menu"
               role="menu"
-              aria-label="OMP 状态与环境"
+              aria-label={zh ? "OMP 状态与环境" : "OMP status & environment"}
               style={{
                 position: "fixed",
                 left: ompMenuPos.left,
@@ -1041,7 +1046,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
               {!ompConnected ? (
                 <div className="omp-menu-err">
                   <Icon name="alert" extra="sm" />
-                  <span>{state.hostError?.message ?? "Runtime 未连接。"}</span>
+                  <span>{state.hostError?.message ?? (zh ? "Runtime 未连接。" : "Runtime disconnected.")}</span>
                 </div>
               ) : null}
               <div className="menu-sep" />
@@ -1063,7 +1068,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                     onRoute("diagnostics");
                   }
                 }}
-                {...(hasUpdate ? { hint: `v${effectiveUpdate?.version} ${t("shell.updateAvailable")}` } : preview ? { hint: "v0.82.2 可用" } : {})}
+                {...(hasUpdate ? { hint: `v${effectiveUpdate?.version} ${t("shell.updateAvailable")}` } : preview ? { hint: `v0.82.2 ${t("shell.updateAvailable")}` } : {})}
               >
                 {t("shell.checkUpdate")}
               </MenuItem>

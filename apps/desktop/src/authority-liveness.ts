@@ -90,7 +90,7 @@ export interface PosixAuthorityLivenessOptions {
   readonly uid?: number;
 }
 
-/** macOS: connect-probed unix socket with safe reclamation of crash leftovers. */
+/** POSIX: connect-probed unix socket with safe reclamation of crash leftovers. */
 export function createPosixAuthorityLiveness(options: PosixAuthorityLivenessOptions): AuthorityLiveness {
   const proofs = new Map<string, Server>();
   const address = async (environmentKey: string): Promise<string> =>

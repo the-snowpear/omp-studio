@@ -5,6 +5,7 @@ import {
 	metricStats,
 	readBoundedUtf8File,
 	resolveBenchPlan,
+	resolveBenchAccountIds,
 	runBenchCommand,
 	type BenchDependencies,
 	type BenchCommandArgs,
@@ -30,6 +31,7 @@ import type {
 	EvaluationResultRow,
 } from "../evaluation-workspace-protocol";
 import { EvaluationRatchetRunner } from "./evaluation-ratchet-runner";
+import { validateBenchmarkAccountSelection } from "../benchmarks-protocol";
 import { cfgModelRoles } from "../../config/model-settings";
 import { cfgTierOpenai, cfgTierAnthropic, cfgTierGoogle } from "../../session/settings";
 
@@ -73,11 +75,13 @@ export function benchmarkCommand(spec: PerformanceEvaluationSpec): BenchCommandA
 			maxTokens: spec.maxTokens,
 			prompt: spec.prompt,
 			serviceTier: spec.serviceTier,
+			...(spec.account ? { account: spec.account.account } : {}),
 		},
 	};
 }
 export function evaluationPlan(spec: EvaluationSpec): EvaluationPlan {
 	if (spec.kind === "benchmark") {
+		if (spec.account !== undefined) validateBenchmarkAccountSelection(spec.account);
 		if (!spec.models.length) throw new Error("Select at least one model");
 		const plan = resolveBenchPlan(benchmarkCommand(spec));
 		return {
@@ -180,7 +184,11 @@ export class StudioEvaluationWorkspaceService {
 		for (const listener of this.#listeners) listener(id, task.view.revision);
 	}
 	#runtime(): BenchRuntime {
-		return { settings: this.session.settings, modelRegistry: this.session.modelRegistry };
+		return {
+			settings: this.session.settings,
+			modelRegistry: this.session.modelRegistry,
+			oauth: this.session.modelRegistry.authStorage.oauth,
+		};
 	}
 	async execute(op: EvaluationWorkspaceOperation): Promise<unknown> {
 		if (op.kind === "evaluation.runtime.plan") {
@@ -210,6 +218,13 @@ export class StudioEvaluationWorkspaceService {
 					this.session.settings,
 					() => {},
 				);
+				if (op.spec.kind === "benchmark" && op.spec.account)
+					resolveBenchAccountIds(
+						this.#runtime(),
+						targets.map(target => target.model.provider),
+						op.spec.account.account,
+						op.spec.account.credentialIds,
+					);
 				plan.resolvedModels = targets.map(
 					t => `${t.model.provider}/${t.model.id}${t.thinking ? `:${t.thinking}` : ""}`,
 				);
@@ -622,6 +637,7 @@ export class StudioEvaluationWorkspaceService {
 		};
 		task.report = await runBenchCommand(benchmarkCommand(spec), {
 			...this.dependencies,
+			expectedAccountCredentialIds: spec.account?.credentialIds,
 			...(spec.cachePrefixContent === undefined ? {} : { readTextFile: async () => spec.cachePrefixContent! }),
 			createRuntime: async () => this.#runtime(),
 			signal: task.abort.signal,

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 接入 OMP 18.20.2 的原生选择性提交、输入历史、模型授权目录、Antigravity 就绪状态、Provider 政策与 Benchmark 账户选择，提供现有页面内的真实／预览入口；接口约定见[适配交接](docs/migrations/omp-18.20.2-frontend-handoff.md)。
+- SSH 工作区终端支持附加 tmux ≥ 3.2：会话选择、窗口标签、布局分屏与拖动调整、隐藏 / 结束选择、断线重新附加和全屏程序恢复；退出 Studio 只分离连接，保留远端进程。详见 [tmux 使用说明](docs/tmux.md)。
+- 新增 Linux x64（AVX2）桌面客户端及 AppImage / deb 安装包，随下一版正式 Release 发布。以 Ubuntu 24.04 / glibc 2.39 为构建基线，内置签名 Runtime 和原生终端，无需另装 Node、Bun 或 Rust。应用菜单启动可发现用户 Shell 工具；保留 Chromium 沙箱，不依赖托盘隐藏工作台。桌面更新提供对应安装包下载，Runtime 继续签名在线更新。增加原生 Linux 打包、包审计、X11 / Wayland 验收与完整发布资产链路；详见 [Linux 客户端说明](docs/linux.md)（[#5](https://github.com/the-snowpear/omp-studio/issues/5)、[#22](https://github.com/the-snowpear/omp-studio/pull/22)）。
+- 新增全机文件浏览器：按窗口宽度切换树、详细列表与分栏，提供磁盘容量、快速访问、固定文件夹、筛选、隐藏文件和键盘导航；本机与 SSH 分别使用所属 Host 的真实文件服务。
+- 项目外文件可在内置文件窗口查看、编辑和保存，沿用版本冲突与关闭确认；项目内文件与 Explorer 共用缓冲区。支持新建文件夹、重命名、确认后移到本机回收站、打开方式、加入对话、设为项目和 Explorer 双向定位，详见[文件浏览器说明](docs/file-browser.md)。
+- Agents 放进左右侧栏、底栏或浮窗时成为「Agent 指挥台」：每个 Agent 有固定的像素徽记；顶部实时显示状态色带、Tokens、费用、工具调用和生成速率曲线；提供编队（派生树）、时间线（泳道与回放）、星图（径向关系图）和通讯四个视图，宽窗口三栏并排并显示选中 Agent 的检视栏。检视栏可打开对话、定位委派、BTW 提问、进入 Agent Hub，并在确认后停止或恢复。Agent 间通讯等待 Runtime 提供消息记录，目前显示未接入说明；对话工具区里的 Agents 卡片保持原样。
+
+### Changed
+
+- 后端固定到 **OMP 18.20.2**，Windows Antigravity CLI 使用同源 Runtime MCP relay，无需手工安装 nc；模型可用性以当前 Runtime 为准，不再从 Host 缓存猜测。迁移与验证范围见 [18.20.2 迁移报告](docs/migrations/omp-18.20.2.md)。
+- 底层引擎升级到 **OMP 18.19.0（`18.19.0-studio.12`）**，涵盖 18.18.1–18.19.0 共十次上游发布；逐版变化与 Studio 落点见 [18.19.0 迁移报告](docs/migrations/omp-18.19.0.md)。
+- Agent 提问改为原生 HTML 表单：命名字段、题组、图示、「其他」与选项附注；折叠、放大和翻页不丢草稿，闲置超时提交当前值。
+- Agent Hub 新增「分步任务」：一次创建有序步骤，超过四步时由原生合并为四组，并在任务详情里按组查看进度与提示词。
+- GitHub Actions 结果按运行 → 作业 → 有序步骤展示，带真实状态、耗时与失败日志；任务步骤、Actions 与表单题组共用同一套步骤样式。
+- 模型角色内可管理系统模板关联并编辑模板文件；账户页改为卡片，显示 5h / 每周 / Fable 窗口用量与对应的兑券策略，未报告的用量显示为未知而不是 0。
+- 内置浏览器可新开原生页面（继承 CLI、WebKit、Chromium、relay 等），嵌入页提供 Console / Network / 下载检查；会话维护新增「移除供应商回放信息」。
+- Changes 只展示真正已应用的文件和 hunk，部分编辑被拒时给出提示；Sofya 搜索凭据与 Hacker News 站内搜索可在搜索设置中使用。
+- 可撤销的退出会先询问 Runtime 的原生关闭钩子，再停止 Worker。
+
+### Fixed
+
+- 富文本粘贴在图片读取期间保留原插入位置与段落顺序；输入历史删除被 Runtime 拒绝时，列表刷新后仍显示失败原因。
+- Bash 审批规则编辑保留项目和路径作用域，避免将局部允许规则写成全局授权；选择性提交隔离迟到的冻结补丁，释放被取消的草稿准备，并保留原生标题长度与 Agent 范围语义。
+- 原目录缺失时可在选定工作区完成真实恢复；输入历史与删除警告随语言更新，独立窗口弹层保持归属；聊天角色列表排除 Judge 模型，已保存会话可在流式期间 Fork，富文本粘贴保留 SVG 并避免嵌套表格重复。
+- 历史会话恢复区分记录目录与实际执行目录，启动失败保留原 Worker；删除会话通过私有原生维护清理 history/stats，并如实报告部分清理。流式 fork/branch 与异步命令输入保持原会话归属。
+- 普通终端识别到 `tmux -CC` 控制模式时不再无限缓冲 DCS 输出，显示提示并提供退出按钮；其他 DCS 和 Sixel 继续正常处理。
+- 修复新版 Runtime 的输入预测通道无法连接、输入框显示 `Invalid prediction fields`：桌面私有传输接受 Runtime 的协议版本元数据，继续校验实际通道所有权与本地文件授权。
+- 补齐英文模式下的工作台、对话、模型、浏览器、文件、SSH 与预览文案；切换语言时同步已连接的 Runtime 和远端 Host，并刷新命令目录与 Host 显示缓存。图片胶囊标签随界面语言更新，附件编号、字节和历史引用格式保持兼容。
+
 ## [0.2.1] - 2026-11-14
 
 本次是 0.2.0 的使用阻断修复版，内置 Runtime 更新为 `18.18.0-studio.2`。升级需要完整桌面更新，确保输入预测的桌面端修复与 Runtime 修复一起生效。
@@ -515,8 +546,7 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.1...HEAD
-[0.2.1]: https://github.com/the-snowpear/omp-studio/compare/v0.2.0...v0.2.1
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/the-snowpear/omp-studio/compare/v0.1.17...v0.2.0
 [0.1.17]: https://github.com/the-snowpear/omp-studio/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/the-snowpear/omp-studio/compare/v0.1.15...v0.1.16

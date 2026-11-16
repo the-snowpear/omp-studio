@@ -27,7 +27,7 @@ test("native dump-all ZIP reaches the private output with main, child and reques
 		sessionManager: SessionManager.create(temp.path(), temp.path()),
 		settings: Settings.isolated({ "compaction.enabled": false }),
 		modelRegistry: new ModelRegistry(createInMemoryAuthStorage()),
-		advisorTools: [],
+		advisorTools: { names: () => [], create: () => ({ tools: [] }) },
 	});
 	try {
 		const sessionFile = session.sessionManager.getSessionFile()!;

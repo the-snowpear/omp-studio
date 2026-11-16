@@ -1,3 +1,4 @@
+import { resolveSystemShellTarget } from "./system-files.js";
 import { FileResources } from "./file-resources.js";
 import { OfficeComponent } from "./office-component.js";
 import { registerFileViewerIpc } from "./file-viewer-ipc.js";
@@ -52,6 +53,13 @@ import {
   applyTitleBarOverlay,
   registerTitleBarOverlayIpc,
 } from "./titlebar-overlay.js";
+import {
+  getDesktopLanguage,
+  initDesktopLanguage,
+  onDesktopLanguageChange,
+  registerDesktopLanguageIpc,
+} from "./desktop-language.js";
+import { desktopText } from "./desktop-language-shared.js";
 import { resolveAppIconPath, resolveAppUserModelId, resolveTrayIconPath } from "./app-icon.js";
 import { APP_MENU_COMMAND_CHANNEL, type AppMenuCommand } from "./app-menu-shared.js";
 import { registerMediaAccessIpc } from "./chrome-media-access.js";
@@ -113,6 +121,7 @@ import {
 import type { DesktopTray, DesktopWindowFactory, DesktopWindowSurface } from "./types.js";
 import { createProductionHostFactory } from "./host-factory.js";
 import { defaultHostLogsDirectory } from "./host-log.js";
+import { TmuxControlManager } from "./tmux/manager.js";
 import { desktopPaths } from "./platform/desktop-paths.js";
 import { applyLoginEnvironment } from "./platform/login-env.js";
 import {
@@ -229,9 +238,11 @@ export async function main(): Promise<void> {
   if (process.platform === "win32") {
     app.setAppUserModelId(resolveAppUserModelId());
   }
+  if (process.platform === "linux") app.setDesktopName("omp-studio.desktop");
   await app.whenReady();
+  initDesktopLanguage(app.getLocale());
   if (await offerMoveToApplications()) return;
-  // A Finder launch has launchd's bare PATH; the Host waits for the login shell's before spawning.
+  // GUI launchers have a minimal PATH; resolve the user's tools before spawning the Host.
   const loginEnvironment = applyLoginEnvironment({ locale: app.getLocale() });
 
   const runtimeInstallLayout = packagedRuntimeInstallLayout({
@@ -339,7 +350,7 @@ export async function main(): Promise<void> {
   powerMonitor.on("on-ac", () => { void perfProfiles.refresh(true); });
   // Runs once the renderer has booted: a macOS update commits only then.
   let confirmMacDesktop: (() => Promise<void>) | undefined;
-  if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined)) {
+  if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined || process.platform === "linux" && process.arch === "x64")) {
     const { PreparedNsisUpdater, electronDifferentialDownload } = await import("./electron-update-adapter.js");
     const shared = {
       root: desktopPaths().updatesV2Root,
@@ -348,12 +359,14 @@ export async function main(): Promise<void> {
       repo: "the-snowpear/omp-studio", platform: `${process.platform}-${process.arch}`, appVersion: app.getVersion(), keys: trustedKeys,
       prefs: createUpdatePrefsStore({ appDataDirectory: join(app.getPath("appData"), "omp-studio") }),
       snapshotChanged: (snapshot: UnifiedUpdateSnapshot) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send(CHROME_UPDATES_CHANNELS.changed, snapshot); },
-      isBusy: () => hostFactory.isBusy(), getRestartBlocker: () => fileViewerIpc?.hasDirty() ? "请先保存或关闭有未保存修改的文件，再重启更新。" : hostFactory.updateRestartBlocker(),
+      isBusy: () => hostFactory.isBusy(), getRestartBlocker: () => fileViewerIpc?.hasDirty() ? desktopText("请先保存或关闭有未保存修改的文件，再重启更新。", "Save or close files with unsaved changes before restarting to update.") : hostFactory.updateRestartBlocker(),
       beforeQuit: (onShutdownStarted: () => void) => hostFactory.shutdownForUpdate(onShutdownStarted),
       fetcher: net.fetch.bind(net) as typeof fetch, log: hostFactory.log,
       restart: () => { app.relaunch({ args: relaunchArguments(process.argv) }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
     };
-    if (macBundle === undefined) {
+    if (process.platform === "linux") {
+      updateCoordinator = new UpdateCoordinator({ ...shared, manualDesktopDownload: process.env.APPIMAGE ? "app" : "firstInstall" });
+    } else if (macBundle === undefined) {
       const updater = new PreparedNsisUpdater();
       updateCoordinator = new UpdateCoordinator({
         ...shared,
@@ -390,7 +403,7 @@ export async function main(): Promise<void> {
     runtimeExecutable: async () => {
       const installer = new RuntimeInstaller(runtimeInstallLayout?.installDirectory ?? join(app.getPath("appData"), "omp-studio", "runtimes"), { trustedKeys });
       const current = await installer.currentManifest();
-      if (!current) throw new Error("请先安装本机 Runtime，以同步模型登录和凭证");
+      if (!current) throw new Error(desktopText("请先安装本机 Runtime，以同步模型登录和凭证", "Install the local Runtime first to sync model logins and credentials"));
       return current.entrypointPath;
     },
   });
@@ -400,6 +413,7 @@ export async function main(): Promise<void> {
     connected: (id, remote, signal, report) => connectRemoteServices(remoteConnections, id, remote, signal, report, remoteVault, url => session.defaultSession.resolveProxy(url), memoryCredentials, timeTravelService(activeProfileDirectory())),
   });
   const remoteTerminals = new RemoteTerminalManager(remoteConnections);
+  const tmux = new TmuxControlManager({ connections: remoteConnections, log: (level, event, detail) => hostFactory.log?.write(level, event, JSON.stringify(detail)) });
   const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);
   const mediaUploads = new MediaUploadManager(activeArtifactLibrary);
   const dictationAudio = new DesktopDictationAudio({
@@ -412,30 +426,30 @@ export async function main(): Promise<void> {
     files: () => runtimeMediaFilesForLibrary(activeArtifactLibrary()),
     socketDirectory: () => runtimeSocketDirectory(activeProfileDirectory()),
   });
-  const prediction = new DesktopPrediction({directory:activeMediaDirectory,socketDirectory:()=>runtimeSocketDirectory(activeProfileDirectory()),chooseHistory:async sender=>{const owner=BrowserWindow.fromWebContents(sender as WebContents);const options={title:"导入提示词历史 / Import prompt history",filters:[{name:"JSONL history",extensions:["jsonl"]}],properties:["openFile"] as const};const result=owner?await dialog.showOpenDialog(owner,{...options,properties:[...options.properties]}):await dialog.showOpenDialog({...options,properties:[...options.properties]});return result.canceled?undefined:result.filePaths[0];}});
+  const prediction = new DesktopPrediction({directory:activeMediaDirectory,socketDirectory:()=>runtimeSocketDirectory(activeProfileDirectory()),chooseHistory:async sender=>{const owner=BrowserWindow.fromWebContents(sender as WebContents);const options={title:desktopText("导入提示词历史", "Import prompt history"),filters:[{name:"JSONL history",extensions:["jsonl"]}],properties:["openFile"] as const};const result=owner?await dialog.showOpenDialog(owner,{...options,properties:[...options.properties]}):await dialog.showOpenDialog({...options,properties:[...options.properties]});return result.canceled?undefined:result.filePaths[0];}});
   const browserObservation = new DesktopBrowserObservation({ directory: activeMediaDirectory, socketDirectory: () => runtimeSocketDirectory(activeProfileDirectory()) });
   let managedBrowser: DesktopManagedBrowser | undefined;
   const terminalManager = new TerminalSessionManager({
     recording: terminalRecordings,
     spawner: createNodePtySpawner(),
-    // A Finder launch starts in "/"; a new Mac terminal without a project opens in the home folder.
-    resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? (process.platform === "darwin" ? homedir() : process.cwd()),
+    // GUI launches on POSIX may start in "/"; open an unbound terminal in the home folder.
+    resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? (process.platform === "win32" ? process.cwd() : homedir()),
   });
 
   const editorDialogFilters = (platform: NodeJS.Platform): Array<{ name: string; extensions: string[] }> => {
     if (platform === "darwin") {
       return [
-        { name: "应用程序 (*.app)", extensions: ["app"] },
-        { name: "所有文件", extensions: ["*"] },
+        { name: desktopText("应用程序 (*.app)", "Applications (*.app)"), extensions: ["app"] },
+        { name: desktopText("所有文件", "All Files"), extensions: ["*"] },
       ];
     }
     if (platform === "win32") {
       return [
-        { name: "应用程序 (*.exe)", extensions: ["exe"] },
-        { name: "所有文件", extensions: ["*"] },
+        { name: desktopText("应用程序 (*.exe)", "Applications (*.exe)"), extensions: ["exe"] },
+        { name: desktopText("所有文件", "All Files"), extensions: ["*"] },
       ];
     }
-    return [{ name: "所有文件", extensions: ["*"] }];
+    return [{ name: desktopText("所有文件", "All Files"), extensions: ["*"] }];
   };
 
   const showOpenWithPicker = async (title: string): Promise<string | undefined> => {
@@ -446,7 +460,7 @@ export async function main(): Promise<void> {
       : detected !== undefined && isAbsolute(detected.file) ? detected.file : undefined;
     const pickerOptions: Electron.OpenDialogOptions = {
       title,
-      buttonLabel: "用所选程序打开",
+      buttonLabel: desktopText("用所选程序打开", "Open with Selected"),
       properties: ["openFile"],
       ...(defaultPath === undefined ? {} : { defaultPath }),
       filters: editorDialogFilters(process.platform),
@@ -459,7 +473,7 @@ export async function main(): Promise<void> {
   };
 
   const openInExternalEditor = async (cwd: string): Promise<WorkspaceShellEditorResult> => {
-    const file = await showOpenWithPicker("选择用于打开项目的编辑器");
+    const file = await showOpenWithPicker(desktopText("选择用于打开项目的编辑器", "Select an Editor to Open the Project"));
     if (file === undefined) {
       return { status: "cancelled" };
     }
@@ -476,34 +490,38 @@ export async function main(): Promise<void> {
     const root = resolve(cwd);
     const absolute = resolve(root, target.path);
     if (absolute !== root && !absolute.startsWith(root + sep)) {
-      throw new Error("目标路径超出工作区范围");
+      throw new Error(desktopText("目标路径超出工作区范围", "Target path is outside the workspace"));
     }
     let info: Awaited<ReturnType<typeof stat>>;
     try {
       info = await stat(absolute);
     } catch {
-      throw new Error(`未找到${target.kind === "dir" ? "目录" : "文件"} ${target.path}`);
+      throw new Error(desktopText(
+        `未找到${target.kind === "dir" ? "目录" : "文件"} ${target.path}`,
+        `${target.kind === "dir" ? "Directory" : "File"} not found: ${target.path}`,
+      ));
     }
     if ((target.kind === "dir") !== info.isDirectory()) {
-      throw new Error(`${target.path} 不是${target.kind === "dir" ? "目录" : "文件"}`);
+      throw new Error(desktopText(
+        `${target.path} 不是${target.kind === "dir" ? "目录" : "文件"}`,
+        `${target.path} is not a ${target.kind === "dir" ? "directory" : "file"}`,
+      ));
     }
     return absolute;
   };
 
-  const openFile = async (cwd: string, target: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> => {
-    const absolute = await resolveWorkspaceFileTarget(cwd, target);
+  const openAbsoluteFile = async (absolute: string): Promise<WorkspaceFileActionResult> => {
     const error = await shell.openPath(absolute);
     return error.length > 0 ? { status: "failed", message: error } : { status: "opened" };
   };
 
-  const openFileWith = async (
-    cwd: string,
-    target: WorkspaceFileTargetInput,
+  const openAbsoluteFileWith = async (
+    absolute: string,
+    kind: "file" | "dir",
     openerId: string,
   ): Promise<WorkspaceFileActionResult> => {
-    const absolute = await resolveWorkspaceFileTarget(cwd, target);
     if (openerId === "choose") {
-      if (process.platform === "win32" && target.kind === "file") {
+      if (process.platform === "win32" && kind === "file") {
         // Native Windows "How do you want to open this file?" dialog.
         const child = spawn("rundll32.exe", ["shell32.dll,OpenAs_RunDLL", absolute], {
           detached: true,
@@ -527,7 +545,9 @@ export async function main(): Promise<void> {
         return { status: "opened" };
       }
       const picked = await showOpenWithPicker(
-        target.kind === "dir" ? "选择用于打开目录的程序" : "选择用于打开文件的程序",
+        kind === "dir"
+          ? desktopText("选择用于打开目录的程序", "Select an Application to Open Directory")
+          : desktopText("选择用于打开文件的程序", "Select an Application to Open File"),
       );
       if (picked === undefined) return { status: "cancelled" };
       await launchExternalEditor(externalEditorCommandForPath(picked), absolute);
@@ -535,15 +555,14 @@ export async function main(): Promise<void> {
     }
     const command = listExternalEditorCommands().find((candidate) => candidate.id === openerId);
     if (command === undefined) {
-      return { status: "failed", message: "未找到所选编辑器，请确认其已安装" };
+      return { status: "failed", message: desktopText("未找到所选编辑器，请确认其已安装", "Selected editor was not found. Make sure it is installed.") };
     }
     await launchExternalEditor(command, absolute);
     return { status: "opened" };
   };
 
-  const revealFileInFileManager = async (cwd: string, target: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> => {
-    const absolute = await resolveWorkspaceFileTarget(cwd, target);
-    if (target.kind === "dir") {
+  const revealAbsoluteFile = async (absolute: string, kind: "file" | "dir"): Promise<WorkspaceFileActionResult> => {
+    if (kind === "dir") {
       const error = await shell.openPath(absolute);
       return error.length > 0 ? { status: "failed", message: error } : { status: "opened" };
     }
@@ -569,7 +588,7 @@ export async function main(): Promise<void> {
       isPackaged: app.isPackaged,
       bundledVersion: app.getVersion(),
       // A macOS hot payload would live inside the signed bundle; the bundle is the only layout there.
-      forceBaseline: process.argv.includes("--omp-baseline") || process.platform === "darwin",
+      forceBaseline: process.argv.includes("--omp-baseline") || process.platform !== "win32",
       runtime: {
         electron: process.versions.electron,
         modules: process.versions.modules,
@@ -585,7 +604,7 @@ export async function main(): Promise<void> {
     if (!(await protocol.isProtocolHandled("omp-graphics"))) {
       protocol.handle("omp-graphics", request => graphicRendererDist === undefined ? new Response(null, { status: 503 }) : graphicAssetResponse(request, graphicRendererDist));
     }
-    fileResources = new FileResources(id => { const transport = id ? remoteConnections.get(id).transport : context.transport; if (!transport) throw new Error("文件服务尚未连接"); return transport; });
+    fileResources = new FileResources(id => { const transport = id ? remoteConnections.get(id).transport : context.transport; if (!transport) throw new Error(desktopText("文件服务尚未连接", "File service is not connected")); return transport; });
     if (!(await protocol.isProtocolHandled("omp-file"))) protocol.handle("omp-file", request => fileResources ? fileResources.response(request, target.kind === "url" ? new URL(target.url).origin : "null") : new Response(null, { status: 503 }));
     if (!(await protocol.isProtocolHandled("omp-artifact"))) {
       const origin = target.kind === "url" ? new URL(target.url).origin : "null";
@@ -621,7 +640,7 @@ export async function main(): Promise<void> {
       openExternal: (url) => { void shell.openExternal(url); },
     });
     const windowSurface = window as typeof window & DesktopWindowSurface;
-    installDevelopmentTools((window as BrowserWindow).webContents, process.platform === "win32" && !app.isPackaged);
+    installDevelopmentTools((window as BrowserWindow).webContents, process.platform !== "darwin" && !app.isPackaged);
     if (validAppIcon !== undefined && typeof window.setIcon === "function") {
       window.setIcon(validAppIcon);
     }
@@ -629,6 +648,7 @@ export async function main(): Promise<void> {
     // `dispose` removes handlers before Host shutdown on app quit.
     const floatingWindows = registerFloatingWindows({
       parent: window as BrowserWindow, ipcMain, allowedOrigin, preloadPath,
+      restoreMainOnLastClose: process.platform === "linux",
       areas: () => screen.getAllDisplays().map(display => display.workArea),
       isQuitting: context.isQuitting, openExternal: url => { void shell.openExternal(url); },
       onWindow: child => desktopConversationViews.registerWindow(child.webContents, false),
@@ -638,10 +658,10 @@ export async function main(): Promise<void> {
         dictationAudio.setVisible(child.webContents.id, visible);
         if (!visible) { liveAudio.disposeWindow(child.webContents.id); browserObservation.disposeWindow(child.webContents.id); prediction.disposeWindow(child.webContents.id); }
       },
-      onClosed: contents => desktopConversationViews.remove(contents),
+      onClosed: contents => { browserObservation.disposeWindow(contents.id); desktopConversationViews.remove(contents); },
       onWillClose: child => managedBrowser?.detachWindow(child),
     });
-    managedBrowser = new DesktopManagedBrowser({ directory: join(activeProfileDirectory(), "browser"), downloadsDirectory: app.getPath("downloads"), windowFor: floatingWindows.windowFor });
+    managedBrowser = new DesktopManagedBrowser({ directory: join(activeProfileDirectory(), "browser"), downloadsDirectory: app.getPath("downloads"), windowFor: floatingWindows.windowFor, language: () => getDesktopLanguage() });
     new ManagedBrowserRelay({ manager: managedBrowser, directory: activeMediaDirectory });
     window.on("close", () => { if (context.isQuitting()) managedBrowser?.detachWindow(window as BrowserWindow); });
     const isTrustedSender = (sender: { getURL(): string }) => (sender === window.webContents || floatingWindows.owns(sender)) && isTrustedRendererUrl(sender.getURL(), allowedOrigin);
@@ -688,13 +708,14 @@ export async function main(): Promise<void> {
       service: perfProfiles,
     });
     const remoteIpc = registerRemoteIpc({ ipc: ipcMain, manager: remoteConnections, isTrusted: isTrustedSender, installRuntime: async id => {
-      const picked = await dialog.showOpenDialog(window, { title: "选择匹配远端系统的签名 Runtime ZIP", properties: ["openFile"], filters: [{ name: "OMP Studio Runtime", extensions: ["zip"] }] });
+      const picked = await dialog.showOpenDialog(window, { title: desktopText("选择匹配远端系统的签名 Runtime ZIP", "Select Signed Runtime ZIP Matching the Remote OS"), properties: ["openFile"], filters: [{ name: "OMP Studio Runtime", extensions: ["zip"] }] });
       if (picked.canceled || !picked.filePaths[0]) return { installed: false };
-      if (remoteTerminals.hasTarget(id)) throw new Error("请先关闭这个 SSH 目标的终端，再安装 Runtime");
+      if (remoteTerminals.hasTarget(id) || tmux.hasTarget(id)) throw new Error(desktopText("请先关闭这个 SSH 目标的终端，再安装 Runtime", "Close terminals for this SSH target before installing the Runtime"));
       await installRemoteRuntime(remoteConnections, id, picked.filePaths[0], trustedKeys);
       return { installed: true };
     } });
     const disposeChrome = registerTitleBarOverlayIpc({ isTrustedSender });
+    const disposeLanguage = registerDesktopLanguageIpc({ isTrustedSender });
     const disposeNotify = registerChromeNotifyIpc({
       isTrustedSender,
     });
@@ -743,6 +764,7 @@ export async function main(): Promise<void> {
     const retainDictation = () => dictationAudio.retainWindow(window.webContents.id);
     const cancelRemotePreparation = () => { void remoteIpc.cancelPending().catch(() => {}); };
     const cancelRemoteNavigation = (_event: unknown, _url: string, isInPlace: boolean, isMainFrame: boolean) => { if (isMainFrame && !isInPlace) cancelRemotePreparation(); };
+    const releaseBrowserObservation = () => browserObservation.disposeWindow(window.webContents.id);
     const removeConversationVisibility = () => desktopConversationViews.remove(window.webContents);
     window.on("show", refreshConversationVisibility);
     window.on("hide", refreshConversationVisibility);
@@ -752,6 +774,8 @@ export async function main(): Promise<void> {
     window.webContents.on("did-start-navigation", cancelRemoteNavigation);
     window.webContents.on("render-process-gone", cancelRemotePreparation);
     window.webContents.on("render-process-gone", retainDictation);
+    window.webContents.on("render-process-gone", releaseBrowserObservation);
+    window.webContents.on("destroyed", releaseBrowserObservation);
     window.webContents.on("destroyed", cancelRemotePreparation);
     window.webContents.on("destroyed", removeConversationVisibility);
     ipcMain.handle(CONVERSATION_VIEW_CHANNEL, ({ sender }, input: unknown) =>
@@ -779,9 +803,9 @@ export async function main(): Promise<void> {
         async showSaveDialog(sender, options) {
           const owner = BrowserWindow.fromWebContents(sender as WebContents);
           const dialogOptions = {
-            title: "导出 Host 日志",
+            title: desktopText("导出 Host 日志", "Export Host Logs"),
             defaultPath: options.defaultPath,
-            filters: [{ name: "文本文件", extensions: ["txt"] }],
+            filters: [{ name: desktopText("文本文件", "Text Files"), extensions: ["txt"] }],
           };
           const picked = owner
             ? await dialog.showSaveDialog(owner, dialogOptions)
@@ -806,20 +830,20 @@ export async function main(): Promise<void> {
       library: activeArtifactLibrary,
       async chooseDirectory(sender) {
         const owner = BrowserWindow.fromWebContents(sender as WebContents);
-        const options = { title: "产物保存位置", properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory"> };
+        const options = { title: desktopText("产物保存位置", "Artifact Save Location"), properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory"> };
         const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
         return result.canceled ? undefined : result.filePaths[0];
       },
       async chooseFile(sender, kind) {
         const owner = BrowserWindow.fromWebContents(sender as WebContents);
         const extensions = kind === "graphic" ? ["svg", "mermaid", "mmd", "chart", "obj", "ply", "wrl", "x3dv", "stl", "gltf", "glb", "usda", "zip"] : kind === "image" ? ["png", "jpg", "jpeg", "webp", "gif", "svg"] : kind === "audio" ? ["wav", "mp3", "ogg", "opus", "flac"] : kind === "video" ? ["mp4", "webm"] : kind === "recording" ? ["ompcast", "studiocast"] : ["*"];
-        const options = { title: "导入文件", properties: ["openFile"] as Array<"openFile">, filters: [{ name: kind, extensions }] };
+        const options = { title: desktopText("导入文件", "Import File"), properties: ["openFile"] as Array<"openFile">, filters: [{ name: kind, extensions }] };
         const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
         return result.canceled ? undefined : result.filePaths[0];
       },
       async chooseExport(sender, name) {
         const owner = BrowserWindow.fromWebContents(sender as WebContents);
-        const options = { title: "另存为", defaultPath: name };
+        const options = { title: desktopText("另存为", "Save As"), defaultPath: name };
         const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
         return result.canceled ? undefined : result.filePath;
       },
@@ -858,7 +882,7 @@ export async function main(): Promise<void> {
         async showSaveDialog(sender, options) {
           const owner = BrowserWindow.fromWebContents(sender as WebContents);
           const dialogOptions = {
-            title: "保存图片",
+            title: desktopText("保存图片", "Save Image"),
             defaultPath: options.defaultPath,
             filters: options.filters.map((filter) => ({
               name: filter.name,
@@ -890,6 +914,7 @@ export async function main(): Promise<void> {
       isTrustedSender,
       manager: terminalManager,
       remote: remoteTerminals,
+      tmux,
       activeRemote: () => remoteConnections.activeId,
       resolveWorkspaceCwd: workspaceId => hostFactory.resolveWorkspaceCwd(workspaceId),
       recordings: terminalRecordings,
@@ -918,14 +943,17 @@ export async function main(): Promise<void> {
           if (error.length > 0) throw new Error(error);
         },
         resolveDroppedPaths: (cwd, paths) => resolveDroppedPaths(cwd, paths),
-        openFile,
-        openFileWith,
-        revealFileInFileManager,
+        openFile: async (cwd, target) => openAbsoluteFile(await resolveWorkspaceFileTarget(cwd, target)),
+        openFileWith: async (cwd, target, openerId) => openAbsoluteFileWith(await resolveWorkspaceFileTarget(cwd, target), target.kind, openerId),
+        revealFileInFileManager: async (cwd, target) => revealAbsoluteFile(await resolveWorkspaceFileTarget(cwd, target), target.kind),
+        systemFileOpen: async input => openAbsoluteFile((await resolveSystemShellTarget(input.path)).path),
+        systemFileOpenWith: async input => { const target = await resolveSystemShellTarget(input.path); return openAbsoluteFileWith(target.path, target.kind, input.openerId); },
+        systemFileReveal: async input => { const target = await resolveSystemShellTarget(input.path); return revealAbsoluteFile(target.path, target.kind); },
         resolveFileAbsolutePath: (cwd, target) => resolveWorkspaceFileTarget(cwd, target),
         listFileOpeners,
         async pickPlanSavePath(cwd) {
           const picked = await dialog.showSaveDialog({
-            title: "保存计划",
+            title: desktopText("保存计划", "Save Plan"),
             defaultPath: join(cwd, "PLAN.md"),
             filters: [{ name: "Markdown", extensions: ["md"] }],
           });
@@ -1073,12 +1101,15 @@ export async function main(): Promise<void> {
         window.webContents.removeListener("did-start-navigation", cancelRemoteNavigation);
         window.webContents.removeListener("render-process-gone", cancelRemotePreparation);
         window.webContents.removeListener("render-process-gone", retainDictation);
+        window.webContents.removeListener("render-process-gone", releaseBrowserObservation);
+        window.webContents.removeListener("destroyed", releaseBrowserObservation);
         window.webContents.removeListener("destroyed", cancelRemotePreparation);
         window.webContents.removeListener("destroyed", removeConversationVisibility);
         removeConversationVisibility();
         disposeProfile();
         disposeOpenUrl.dispose();
         disposeNotify();
+        disposeLanguage();
         disposeChrome();
         remoteIpc.dispose();
         ipc.dispose();
@@ -1093,7 +1124,7 @@ export async function main(): Promise<void> {
 
   const application = createDesktopApplication({
     confirmBeforeQuit: () => fileViewerIpc?.requestClose() ?? Promise.resolve(true),
-    beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await remoteConnections.close(); remoteVault.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await tmux.disposeAll(); await remoteConnections.close(); remoteVault.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
     platform: process.platform,
@@ -1122,39 +1153,47 @@ export async function main(): Promise<void> {
       app.on("window-all-closed", listener);
     },
     createTray: ({ openWindow, requestQuit }) => {
-      const tray = createAppTray({
-        electron: {
-          createImageFromPath: (iconPath) => nativeImage.createFromPath(iconPath),
-          buildMenu: (template) => Menu.buildFromTemplate([...template]),
-          createTrayFromImage: (image) => {
-            const electronTray = new Tray(image as NativeImage);
-            return {
-              setToolTip: (toolTip: string) => electronTray.setToolTip(toolTip),
-              setContextMenu: (menu: object) => electronTray.setContextMenu(menu as Menu),
-              on: (event: "click", listener: () => void) => electronTray.on(event, listener),
-              displayBalloon: (options: { icon?: object; title: string; content: string }) =>
-                electronTray.displayBalloon({ ...options, icon: image as NativeImage }),
-              isDestroyed: () => electronTray.isDestroyed(),
-              destroy: () => electronTray.destroy(),
-            };
+      // Tray construction can fail on Linux. A successful object still does
+      // not prove visibility; handleMainWindowClose owns the close policy.
+      try {
+        const tray = createAppTray({
+          electron: {
+            createImageFromPath: (iconPath) => nativeImage.createFromPath(iconPath),
+            buildMenu: (template) => Menu.buildFromTemplate([...template]),
+            createTrayFromImage: (image) => {
+              const electronTray = new Tray(image as NativeImage);
+              return {
+                setToolTip: (toolTip: string) => electronTray.setToolTip(toolTip),
+                setContextMenu: (menu: object) => electronTray.setContextMenu(menu as Menu),
+                on: (event: "click", listener: () => void) => electronTray.on(event, listener),
+                displayBalloon: (options: { icon?: object; title: string; content: string }) =>
+                  electronTray.displayBalloon({ ...options, icon: image as NativeImage }),
+                isDestroyed: () => electronTray.isDestroyed(),
+                destroy: () => electronTray.destroy(),
+              };
+            },
           },
-        },
-        iconPath: resolveTrayIconPath({ appPath: app.getAppPath(), platform: process.platform }),
-        persistRoot: resolveProfilePersistRoot(app.getPath("appData")),
-        locale: app.getLocale(),
-        onOpen: openWindow,
-        onQuit: requestQuit,
-      });
-      if (tray === undefined) {
-        console.log("[omp-studio] tray unavailable; window close keeps quit behavior");
+          iconPath: resolveTrayIconPath({ appPath: app.getAppPath(), platform: process.platform }),
+          persistRoot: resolveProfilePersistRoot(app.getPath("appData")),
+          locale: getDesktopLanguage(),
+          onOpen: openWindow,
+          onQuit: requestQuit,
+        });
+        if (tray === undefined) {
+          console.log("[omp-studio] tray unavailable; window close keeps quit behavior");
+          return undefined;
+        }
+        closeToTrayEnabled = true;
+        trayRef = tray;
+        return tray;
+      } catch (error) {
+        if (process.platform !== "linux") throw error;
+        console.warn(`[omp-studio] tray unavailable: ${String(error)}`);
         return undefined;
       }
-      closeToTrayEnabled = true;
-      trayRef = tray;
-      return tray;
     },
     confirmQuitWhileBusy: async () => {
-      const options = quitBusyMessageBoxOptions(quitBusyDialogStrings(app.getLocale()));
+      const options = quitBusyMessageBoxOptions(quitBusyDialogStrings(getDesktopLanguage()));
       const owner = rendererWindow !== null && !rendererWindow.isDestroyed() ? rendererWindow : undefined;
       const picked = owner !== undefined
         ? await dialog.showMessageBox(owner, options)
@@ -1169,22 +1208,32 @@ export async function main(): Promise<void> {
     },
   });
 
-  if (process.platform === "darwin") {
+  const applyAppMenu = (locale: string): void => {
+    if (process.platform !== "darwin") return;
     const sendMenuCommand = (command: AppMenuCommand): void => {
       const target = rendererWindow;
       if (target === null || target.isDestroyed()) return;
       if (!target.isVisible()) target.show();
       target.webContents.send(APP_MENU_COMMAND_CHANNEL, command);
     };
-    app.setAboutPanelOptions({ applicationName: "OMP Studio", applicationVersion: app.getVersion(), copyright: "Copyright © 2026 OMP Studio" });
     Menu.setApplicationMenu(Menu.buildFromTemplate(buildApplicationMenuTemplate({
       isPackaged: app.isPackaged,
-      locale: app.getLocale(),
+      locale,
       dispatch: sendMenuCommand,
       openRepository: () => { void shell.openExternal(PROJECT_REPOSITORY_URL); },
       requestQuit: () => application.requestQuit(),
     })));
+  };
+
+  if (process.platform === "darwin") {
+    app.setAboutPanelOptions({ applicationName: "OMP Studio", applicationVersion: app.getVersion(), copyright: "Copyright © 2026 OMP Studio" });
+    applyAppMenu(getDesktopLanguage());
   }
+
+  onDesktopLanguageChange((locale) => {
+    trayRef?.setLocale?.(locale);
+    applyAppMenu(locale);
+  });
 
   await application.start();
   updateCoordinator?.startBackground();

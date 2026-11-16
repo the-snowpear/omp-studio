@@ -34,7 +34,6 @@ export async function askStudioSeance(
 		source = await resolveSeanceSource(operation.source, {
 			cwd,
 			sessionDirHint: session.sessionManager.getSessionDir(),
-			includeGlobal: true,
 		});
 	} catch (error) {
 		throw new SessionControlError("INVALID_ARGUMENT", errorText(error));

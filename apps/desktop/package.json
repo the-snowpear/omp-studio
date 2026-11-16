@@ -6,7 +6,7 @@
   "type": "module",
   "main": "./dist/src/main.js",
   "author": "snowpear",
-  "description": "OMP Studio desktop shell (Electron Main) for Windows and macOS",
+  "description": "OMP Studio desktop shell (Electron Main) for Windows, macOS and Linux",
   "scripts": {
     "dev": "electron .",
     "build": "tsc -p tsconfig.json",

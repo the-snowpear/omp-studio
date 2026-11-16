@@ -77,8 +77,10 @@ function MessageBody({
 }
 
 function AssistantStatus({ status }: { status: Extract<TimelineRow, { type: "assistant" }>["status"] }) {
-  if (status === "aborted") return <span className="chip gray xs">已中止</span>;
-  if (status === "error") return <span className="chip red xs">出错</span>;
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  if (status === "aborted") return <span className="chip gray xs">{zh ? "已中止" : "Aborted"}</span>;
+  if (status === "error") return <span className="chip red xs">{zh ? "出错" : "Error"}</span>;
   return null;
 }
 
@@ -111,6 +113,8 @@ function concludingReplyText(segments: readonly AssistantSegment[]): Extract<Ass
 }
 
 export function MessageCopyButton({ text }: { text: string }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -124,8 +128,8 @@ export function MessageCopyButton({ text }: { text: string }) {
     <button
       type="button"
       className="ev-msg-copy"
-      aria-label={copied ? "已复制" : "复制消息"}
-      data-tip={copied ? "已复制" : "复制"}
+      aria-label={copied ? (zh ? "已复制" : "Copied") : (zh ? "复制消息" : "Copy message")}
+      data-tip={copied ? (zh ? "已复制" : "Copied") : (zh ? "复制" : "Copy")}
       onClick={() => {
         const clipboard = typeof navigator === "object" ? navigator.clipboard : undefined;
         if (!clipboard) return;
@@ -476,10 +480,12 @@ function isCommittedUserRow(row: Extract<TimelineRow, { type: "user" }>): boolea
 }
 
 function CompactionRule({ item }: { item: Extract<TimelineRow, { type: "compaction" }>["item"] }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [open, setOpen] = useState(false);
-  const label = compactRuleLabel(item);
+  const label = compactRuleLabel(item, zh);
   const summary = (item.summary.trim() || item.shortSummary?.trim() || "");
-  const foldable = compactSummaryFoldable(item);
+  const foldable = compactSummaryFoldable(item, zh);
   const showBody = summary.length > 0 && (foldable ? open : summary !== label);
   return (
     <div className="ev" data-item-id={item.itemId}>
@@ -488,7 +494,7 @@ function CompactionRule({ item }: { item: Extract<TimelineRow, { type: "compacti
           type="button"
           className={`compact-rule${open ? " is-open" : ""}`}
           aria-expanded={open}
-          aria-label={`Compact · ${label}，${open ? "收起" : "展开"}详情`}
+          aria-label={zh ? `Compact · ${label}，${open ? "收起" : "展开"}详情` : `Compact · ${label}, ${open ? "collapse" : "expand"} details`}
           onClick={() => setOpen((current) => !current)}
         >
           <Icon name="minimize" extra="sm compact-rule-icon" />
@@ -558,7 +564,8 @@ export const ConversationItemView = memo(function ConversationItemView({
             onRestore: () => onRestoreUserMessage(row.itemId, row.text),
           }
         : undefined;
-    const branchReason = userBranchDisabledReason ?? userRestoreDisabledReason;
+    // Branch has its own gate: unlike restore it stays available while a turn streams.
+    const branchReason = userBranchDisabledReason;
     const branch =
       onBranchUserMessage !== undefined && committed
         ? {
@@ -571,10 +578,10 @@ export const ConversationItemView = memo(function ConversationItemView({
     return (
       <div className="ev ev-user" data-item-id={row.itemId}>
         <div className="ev-head">
-          <span className="who"><span className="role-badge u">S</span>你</span>
+          <span className="who"><span className="role-badge u">S</span>{resolvedLanguage === "zh" ? "你" : "You"}</span>
           <span>{formatTime(row.createdAt)}</span>
-          {row.pending === "pending" ? <span className="chip gray xs">发送中</span> : null}
-          {row.pending === "failed" ? <span className="chip red xs">发送失败</span> : null}
+          {row.pending === "pending" ? <span className="chip gray xs">{resolvedLanguage === "zh" ? "发送中" : "Sending"}</span> : null}
+          {row.pending === "failed" ? <span className="chip red xs">{resolvedLanguage === "zh" ? "发送失败" : "Failed"}</span> : null}
         </div>
         <UserMessageBody
           text={row.text}
@@ -598,7 +605,7 @@ export const ConversationItemView = memo(function ConversationItemView({
           <div className="err-actions">
             {row.error ? <span className="muted small">{row.error}</span> : null}
             <button type="button" className="btn small outline" onClick={() => onRestore(row.requestId as string)}>
-              恢复到输入框
+              {resolvedLanguage === "zh" ? "恢复到输入框" : "Restore to composer"}
             </button>
           </div>
         ) : null}
@@ -676,7 +683,7 @@ export const ConversationItemView = memo(function ConversationItemView({
       <div className="ev" data-item-id="compacting">
         <div className="compact-rule is-pending" role="status" aria-live="polite">
           <span className="spinner" aria-hidden="true" />
-          <span>压缩中</span>
+          <span>{resolvedLanguage === "zh" ? "压缩中" : "Compacting"}</span>
         </div>
       </div>
     );
@@ -685,7 +692,7 @@ export const ConversationItemView = memo(function ConversationItemView({
     <div className="ev" data-item-id={row.item.itemId}>
       <div className="reset-boundary-bar">
         <Icon name="commit" extra="sm" />
-        <span>上下文边界</span>
+        <span>{resolvedLanguage === "zh" ? "上下文边界" : "Context boundary"}</span>
         <span className="muted small">{formatTime(row.item.createdAt)}</span>
       </div>
     </div>

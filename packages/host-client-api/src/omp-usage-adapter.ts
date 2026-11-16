@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 
 import type { ConfigWriteResult, StatsDashboardReadModel, TokenUsageReadModel } from "@omp-studio/client-contract";
 
+import { hostText } from "./locale.js";
 import { getStatsDbPath } from "./omp-discovery/paths.js";
 import { sanitizeDisplayText } from "./read-models.js";
 import type { HostUsageService } from "./services.js";
@@ -41,17 +42,17 @@ const DASHBOARD_EMBED_URL = `${DASHBOARD_URL}#/overview?range=all`;
 const DASHBOARD_START_TIMEOUT_MS = 20_000;
 const DASHBOARD_POLL_MS = 250;
 
-const OPEN_OK: ConfigWriteResult = {
+const openOk = (): ConfigWriteResult => ({
   applied: true,
   runtimeEffect: "immediate",
-  message: "正在打开 OMP Stats 仪表盘。",
-};
+  message: hostText("正在打开 OMP Stats 仪表盘。", "Opening the OMP Stats dashboard."),
+});
 
-const OPENED_OK: ConfigWriteResult = {
+const openedOk = (): ConfigWriteResult => ({
   applied: true,
   runtimeEffect: "immediate",
-  message: "已在浏览器打开 OMP Stats 仪表盘。",
-};
+  message: hostText("已在浏览器打开 OMP Stats 仪表盘。", "Opened the OMP Stats dashboard in your browser."),
+});
 
 export interface OmpUsageAdapterOptions {
   readonly home?: string;
@@ -346,7 +347,7 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
       try {
         const exe = await locateOmp();
         if (exe === undefined) {
-          return { reason: "未找到 OMP Runtime，无法启动本机统计面板。" };
+          return { reason: hostText("未找到 OMP Runtime，无法启动本机统计面板。", "OMP Runtime not found; cannot launch the local stats dashboard.") };
         }
         spawnDashboard(exe);
         const deadline = now() + startTimeoutMs;
@@ -357,10 +358,10 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
           await delay(DASHBOARD_POLL_MS);
           if (await probeDashboard()) return { url: DASHBOARD_EMBED_URL };
         }
-        return { reason: "本机统计面板未在预期时间内就绪，可稍后重试或在浏览器打开。" };
+        return { reason: hostText("本机统计面板未在预期时间内就绪，可稍后重试或在浏览器打开。", "The local stats dashboard did not become ready in time; retry shortly or open it in your browser.") };
       } catch {
         // A rejected locator or spawn must not leave the shared promise stuck.
-        return { reason: "启动本机统计面板失败。" };
+        return { reason: hostText("启动本机统计面板失败。", "Failed to start the local stats dashboard.") };
       }
     })();
     const result = await dashboardStarting;
@@ -389,7 +390,7 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
     if (exe === undefined) {
       // Same `exe`-classified message as before the reorder: not finding the
       // Runtime still surfaces as a sync error, never as a generic read failure.
-      return { syncError: "未找到 omp。安装 OMP 或将其加入 PATH 后即可同步用量。" };
+      return { syncError: hostText("未找到 omp。安装 OMP 或将其加入 PATH 后即可同步用量。", "omp was not found. Install OMP or add it to PATH to sync usage.") };
     }
     // Re-check after the await: a concurrent caller may have started or finished
     // the sync while the locator was resolving. Keeping this check after the
@@ -430,9 +431,9 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
         return emptyModel(generatedAt, sync.syncError);
       }
       if (await fileExists(statsDbPath)) {
-        return emptyModel(generatedAt, "无法读取用量库。");
+        return emptyModel(generatedAt, hostText("无法读取用量库。", "Unable to read the usage database."));
       }
-      return emptyModel(generatedAt, "尚未同步到用量数据。可点击「打开 OMP Stats」生成统计库。");
+      return emptyModel(generatedAt, hostText("尚未同步到用量数据。可点击「打开 OMP Stats」生成统计库。", "No usage data synced yet. Click Open OMP Stats to build the stats database."));
     },
 
     async dashboard(): Promise<StatsDashboardReadModel> {
@@ -443,22 +444,22 @@ export function createOmpUsageService(options: OmpUsageAdapterOptions = {}): Hos
     async openDashboard(): Promise<ConfigWriteResult> {
       const exe = await locateOmp();
       if (exe === undefined) {
-        throw { code: "UNAVAILABLE", message: "未找到 omp。安装 OMP 或将其加入 PATH 后再打开 Stats。" };
+        throw { code: "UNAVAILABLE", message: hostText("未找到 omp。安装 OMP 或将其加入 PATH 后再打开 Stats。", "omp was not found. Install OMP or add it to PATH before opening Stats.") };
       }
       try {
         const live = await probeDashboard();
         if (live && openUrl !== undefined) {
           await openUrl(DASHBOARD_URL);
-          return OPENED_OK;
+          return openedOk();
         }
         // An explicit request to see the panel in a browser keeps `omp stats`
         // opening one; only the embedded start suppresses it.
         spawnDashboard(exe, { open: true });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "打开 OMP Stats 失败";
+        const message = error instanceof Error ? error.message : hostText("打开 OMP Stats 失败", "Failed to open OMP Stats");
         throw { code: "UNAVAILABLE", message };
       }
-      return OPEN_OK;
+      return openOk();
     },
   };
 }

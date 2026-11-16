@@ -1,3 +1,4 @@
+import { pickLocale } from "../i18n";
 import { isFilePanelId, isRepeatablePanelId, isScopedPanelId, panelBaseId, scopedPanelId, type FilePanelId, type FilePanelDescriptor, PANEL_IDS, agentPanelId, browserPagePanelId, isAgentPanelId, isBrowserPagePanelId, isConversationPanelId, type AgentPanelId, type AgentPanelTarget, type BrowserPagePanelId, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId, type ScopedPanelId } from "./types";
 
 const FLOAT_RECT: DockRect = { x: 80, y: 60, width: 560, height: 400 };
@@ -17,7 +18,7 @@ export function createDefaultLayout(): DockLayout {
     right: { visible: false, size: 480, ratio: 0.5, groups: [] },
     bottom: { visible: false, expanded: false, size: 240, ratio: 0.5, groups: [{ id: "bottom-main", panels: ["terminal", "problems", "tests", "output", "logs", "pvlogs"], active: "logs" }] },
     floats: [],
-    hidden: { changes: { region: "right", groupId: "right-main", index: 0 }, git: { region: "right", groupId: "right-main", index: 1 }, browser: { region: "right", groupId: "right-main", index: 2 }, computer: { region: "right", groupId: "right-main", index: 3 }, btw: { region: "float", rect: { ...FLOAT_RECT } }, "agent-detail": { region: "right" }, "context-viewer": { region: "float" }, annotations: { region: "float" }, "token-counter": { region: "float", rect: { x: 120, y: 90, width: 420, height: 460 } } },
+    hidden: { changes: { region: "right", groupId: "right-main", index: 0 }, git: { region: "right", groupId: "right-main", index: 1 }, browser: { region: "right", groupId: "right-main", index: 2 }, computer: { region: "right", groupId: "right-main", index: 3 }, commit: { region: "right", groupId: "right-main", index: 4 }, btw: { region: "float", rect: { ...FLOAT_RECT } }, "agent-detail": { region: "right" }, "context-viewer": { region: "float" }, annotations: { region: "float" }, "token-counter": { region: "float", rect: { x: 120, y: 90, width: 420, height: 460 } }, "file-browser": { region: "float", rect: { x: 96, y: 64, width: 960, height: 600 } } },
     cards: Object.fromEntries(PANEL_IDS.map(id => [id, { collapsed: id === "context" || id === "git-quick" || id === "agents", height: id === "browser" || id === "computer" ? 320 : id === "terminal" ? 240 : null }])) as DockLayout["cards"],
     agentPanels: {},
     browserPages: {},
@@ -663,7 +664,7 @@ export function builtInPresets(): DockPreset[] {
   debug.bottom.expanded = true;
   debug.bottom.groups = [{ id: "bottom-terminal", panels: ["terminal", "problems", "tests", "output"], active: "terminal" }, { id: "bottom-logs", panels: ["logs", "pvlogs"], active: "logs" }];
   debug.rail.mode = debug.rail.lastMode = "compact";
-  return [{ id: "default", name: "默认", layout: standard, builtin: true }, { id: "focus", name: "专注", layout: focus, builtin: true }, { id: "debug", name: "调试", layout: debug, builtin: true }];
+  return [{ id: "default", name: pickLocale("默认", "Default"), layout: standard, builtin: true }, { id: "focus", name: pickLocale("专注", "Focus"), layout: focus, builtin: true }, { id: "debug", name: pickLocale("调试", "Debug"), layout: debug, builtin: true }];
 }
 
 function readRect(value: unknown): DockRect {

@@ -5,7 +5,7 @@ export type WindowTint = "violet" | "blue" | "pink" | "amber" | "teal" | "green"
 
 const CONVERSATION_TINTS: readonly WindowTint[] = ["violet", "blue", "pink", "amber", "teal", "green", "indigo", "orange"];
 const PANEL_TINTS: Record<FixedPanelId, WindowTint> = {
-  files: "indigo", changes: "teal", git: "orange", "git-quick": "orange",
+  files: "indigo", "file-browser": "indigo", changes: "teal", git: "orange", "git-quick": "orange", commit: "teal",
   browser: "blue", computer: "cyan", agents: "pink", "agent-detail": "pink",
   environment: "teal", context: "blue", "context-viewer": "blue", annotations: "amber",
   "token-counter": "blue", terminal: "green", jobs: "violet", problems: "rose",

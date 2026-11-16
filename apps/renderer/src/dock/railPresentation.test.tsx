@@ -74,10 +74,10 @@ describe("rail title menus and context presentation", () => {
     expect(document.querySelector('.has-meter-summary .dock-meter-value')?.textContent).toBe("25%");
     expect(document.querySelector(".context-card")).toBeNull();
     act(() => store.dispatch({ type: "railMode", mode: "compact" })); flush();
-    expect(document.querySelector('.dock-meter-ring-value[data-category="messagesTokens"]')?.getAttribute("stroke-dasharray")).toBe("23 100");
+    expect(document.querySelector('.dock-meter-ring-value[data-category="messages"]')?.getAttribute("stroke-dasharray")).toBe("23 100");
     update(telemetry(95));
     expect(document.querySelector('.dock-meter-ring')?.getAttribute("data-tone")).toBe("danger");
-    expect(document.querySelector('.dock-meter-ring-value[data-category="messagesTokens"]')?.getAttribute("stroke-dasharray")).toBe("93 100");
+    expect(document.querySelector('.dock-meter-ring-value[data-category="messages"]')?.getAttribute("stroke-dasharray")).toBe("93 100");
     fireEvent.click(document.querySelector('[data-dock-rail-icon="context"]')!); flush(); flush();
     expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("95");
     expect(query).toHaveBeenCalledWith("session.cache.get", { sessionId: liveId });
@@ -95,20 +95,21 @@ describe("rail title menus and context presentation", () => {
     await waitFor(() => expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("25"));
     expect(query).toHaveBeenCalledWith("session.telemetry.read", { sessionId: archivedId });
     fireEvent.click(document.querySelector('[data-dock-rail-icon="context"]')!); flush(); flush();
-    expect(document.querySelector('.dock-meter-ring-value[data-category="messagesTokens"]')?.getAttribute("stroke-dasharray")).toBe("23 100");
+    expect(document.querySelector('.dock-meter-ring-value[data-category="messages"]')?.getAttribute("stroke-dasharray")).toBe("23 100");
     expect(query).toHaveBeenCalledOnce();
     fireEvent.click(document.querySelector('[data-dock-rail-icon="context"]')!); flush(); flush();
     await waitFor(() => expect(screen.getByRole("meter").getAttribute("aria-valuenow")).toBe("25"));
     expect(query).toHaveBeenCalledOnce();
   });
 
-  it("draws each native category as a different color and fraction of the full window", () => {
+  it("draws native usage groups with shared prompt-and-skills color and correct window fractions", () => {
     const data = telemetry(25);
     setup("compact", { ...data, context: { ...data.context!, messagesTokens: 10000, systemToolsTokens: 5000, systemContextTokens: 4000, systemPromptTokens: 3000, skillsTokens: 3000 } });
     const arcs = [...document.querySelectorAll<SVGCircleElement>(".dock-meter-ring-value")];
-    expect(arcs.map(arc => arc.getAttribute("stroke-dasharray"))).toEqual(["10 100", "5 100", "4 100", "3 100", "3 100"]);
-    expect(arcs.map(arc => arc.getAttribute("stroke-dashoffset"))).toEqual(["0", "-10", "-15", "-19", "-22"]);
-    expect(new Set(arcs.map(arc => arc.style.stroke)).size).toBe(5);
+    expect(arcs.map(arc => arc.getAttribute("data-category"))).toEqual(["messages", "tools", "instructions", "system"]);
+    expect(arcs.map(arc => arc.getAttribute("stroke-dasharray"))).toEqual(["10 100", "5 100", "4 100", "6 100"]);
+    expect(arcs.map(arc => arc.getAttribute("stroke-dashoffset"))).toEqual(["0", "-10", "-15", "-19"]);
+    expect(new Set(arcs.map(arc => arc.style.stroke)).size).toBe(4);
     const icon = document.querySelector('[data-dock-rail-icon="context"]')!;
     expect(icon.getAttribute("data-tip")).toContain("10k");
     fireEvent.click(icon); flush(); flush();

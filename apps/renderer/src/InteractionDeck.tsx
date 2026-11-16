@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ClientInteraction, InteractionResponseValue } from "@omp-studio/client-contract";
 import { ApprovalCard } from "./deck/ApprovalCard";
 import { AskActions, AskBody, AskHead } from "./deck/AskCard";
@@ -10,6 +10,7 @@ import {
   askToDeckView,
   NO_ASK_ANSWER,
   nextPicked,
+  initialAskAnswer,
   patchAskAnswer,
   selectToAskView,
   submitAskValue,
@@ -18,6 +19,9 @@ import {
 import { QueuedDeck, type QueuedAskItem, type QueuedDeckItem } from "./deck/QueuedDeck";
 import { PromptHead, type DeckQueue } from "./deck/PromptHead";
 import type { DeckAskAnswer } from "./deck/types";
+import { closeFormSession, useFormInteractionLifecycle, useFormSession, type FormInteraction, type ReadInteractionForm } from "./deck/FormSession";
+import { FormCard } from "./deck/FormCard";
+import { isZh, useI18n } from "./i18n/I18nContext";
 
 export type { DeckQueue } from "./deck/PromptHead";
 export { PromptHead, QueueNav } from "./deck/PromptHead";
@@ -28,14 +32,17 @@ export type InteractionCaption = {
   readonly meta?: string;
 };
 
-export function InteractionPrompt({ interaction, onRespond, disabled, caption, demo, queue }: {
+export function InteractionPrompt({ interaction, onRespond, disabled, caption, demo, queue, readForm }: {
   interaction: ClientInteraction;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
   disabled?: boolean;
   caption?: InteractionCaption;
   demo?: boolean;
   queue?: DeckQueue;
+  readForm?: ReadInteractionForm | undefined;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [text, setText] = useState(interaction.kind === "editor" ? (interaction.content ?? "") : "");
   const [answer, setAnswer] = useState<DeckAskAnswer>(NO_ASK_ANSWER);
   const [submitting, setSubmitting] = useState(false);
@@ -43,8 +50,8 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
   useEffect(() => {
     if (interaction.kind === "editor") setText(interaction.content ?? "");
     else setText("");
-    setAnswer(NO_ASK_ANSWER);
-  }, [interaction.interactionId, interaction.leaseGeneration]);
+    setAnswer(interaction.kind === "select" ? initialAskAnswer(selectToAskView(interaction).question) : NO_ASK_ANSWER);
+  }, [interaction.interactionId, interaction.leaseGeneration]); // eslint-disable-line react-hooks/exhaustive-deps
   const busy = disabled || submitting;
   const submit = (value?: InteractionResponseValue) => {
     if (busy) return;
@@ -70,24 +77,25 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
   };
   const retryNote = submitError ? (
     <p className="ask-error" role="alert">
-      提交失败，卡片已保留。请重试。
+      {zh ? "提交失败，卡片已保留。请重试。" : "Submission failed; the card was kept. Please try again."}
     </p>
   ) : null;
+  if (interaction.kind === "form") return <LiveFormPrompt interaction={interaction} readForm={readForm} onRespond={onRespond} disabled={busy} caption={caption} demo={demo} queue={queue} />;
   if (interaction.kind === "confirm") {
     return (
       <div className="approval-card">
-        <PromptHead icon="alert" title={interaction.title || "确认"} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
+        <PromptHead icon="alert" title={interaction.title || (zh ? "确认" : "Confirm")} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
         <div className="approval-body">{interaction.message}</div>
         {retryNote}
         <div className="dk-actions">
-          <button className="btn lg outline" disabled={busy} onClick={cancel}>取消</button>
-          <button className="btn lg primary" disabled={busy} onClick={() => submit(true)}>确认</button>
+          <button className="btn lg outline" disabled={busy} onClick={cancel}>{zh ? "取消" : "Cancel"}</button>
+          <button className="btn lg primary" disabled={busy} onClick={() => submit(true)}>{zh ? "确认" : "Confirm"}</button>
         </div>
       </div>
     );
   }
   if (interaction.kind === "select") {
-    const view = selectToAskView(interaction);
+    const view = selectToAskView(interaction, zh);
     const pick = (label: string) => {
       if (busy) return;
       setAnswer(previous => patchAskAnswer(view.question, previous, { picked: nextPicked(view.question, previous.picked, label) }));
@@ -111,6 +119,7 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
           answer={answer}
           {...(busy ? { disabled: true } : {})}
           onPick={pick}
+          {...(view.question.toggleList ? { onChoose: (label: string) => { const id = view.idByLabel[label]; if (id !== undefined) submit(id); } } : {})}
           onCustom={custom => setAnswer(previous => patchAskAnswer(view.question, previous, { custom }))}
           onSubmit={send}
         />
@@ -127,7 +136,7 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
   if (interaction.kind === "input") {
     return (
       <div className="ask-card">
-        <PromptHead icon="pencil" title={interaction.title || "输入"} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
+        <PromptHead icon="pencil" title={interaction.title || (zh ? "输入" : "Input")} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
         <div className="ask-body">
           <input className="input dk-input" value={text} onChange={(event) => setText(event.target.value)} disabled={busy} placeholder={interaction.placeholder ?? "Response"} type={interaction.secret ? "password" : "text"} />
         </div>
@@ -139,7 +148,7 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
   if (interaction.kind === "editor") {
     return (
       <div className="ask-card">
-        <PromptHead icon="pencil" title={interaction.title || "编辑"} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
+        <PromptHead icon="pencil" title={interaction.title || (zh ? "编辑" : "Edit")} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
         <div className="ask-body">
           {interaction.language ? <p className="muted small">{interaction.language}</p> : null}
           <textarea
@@ -148,7 +157,7 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
             value={text}
             onChange={(event) => setText(event.target.value)}
             disabled={busy}
-            aria-label={interaction.title || "编辑内容"}
+            aria-label={interaction.title || (zh ? "编辑内容" : "Edit content")}
           />
         </div>
         {retryNote}
@@ -166,7 +175,7 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
     );
   }
   if (interaction.kind !== "approval") return null;
-  const view = approvalFromInteraction(interaction);
+  const view = approvalFromInteraction(interaction, zh);
   return (
     <ApprovalCard
       view={view}
@@ -182,9 +191,9 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
   );
 }
 
-function askItemsFrom(interaction: Extract<ClientInteraction, { kind: "ask" | "select" }>): readonly QueuedDeckItem[] {
+function askItemsFrom(interaction: Extract<ClientInteraction, { kind: "ask" | "select" }>, zh = isZh()): readonly QueuedDeckItem[] {
   if (interaction.kind === "ask") return askToDeckView(interaction).items;
-  const view = selectToAskView(interaction);
+  const view = selectToAskView(interaction, zh);
   return [{ kind: "ask", id: view.question.id, question: view.question }];
 }
 
@@ -199,7 +208,9 @@ function LiveAskQueue({
   disabled: boolean;
   leaving?: boolean;
 }) {
-  const items = askItemsFrom(interaction);
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const items = askItemsFrom(interaction, zh);
   const answersRef = useRef<Record<string, DeckAskAnswer>>({});
   const outcomesRef = useRef<Record<string, "submit" | "cancel">>({});
   const [submitError, setSubmitError] = useState(false);
@@ -211,7 +222,7 @@ function LiveAskQueue({
       const result = await Promise.resolve(onRespond("cancel"));
       return result !== false;
     }
-    const value = liveAskValue(interaction, answersRef.current);
+    const value = liveAskValue(interaction, answersRef.current, zh);
     if (value === undefined) return false;
     const result = await Promise.resolve(onRespond("submit", value));
     return result !== false;
@@ -234,7 +245,7 @@ function LiveAskQueue({
   return (
     <QueuedDeck
       items={items}
-      regionLabel="待处理的审批与提问"
+      regionLabel={zh ? "待处理的审批与提问" : "Pending approvals & questions"}
       {...(disabled ? { disabled: true } : {})}
       {...(submitError ? { submitError: true } : {})}
       {...(leaving === true ? { leaving: true } : {})}
@@ -247,20 +258,27 @@ function LiveAskQueue({
 function liveAskValue(
   interaction: Extract<ClientInteraction, { kind: "ask" | "select" }>,
   answers: Readonly<Record<string, DeckAskAnswer>>,
+  zh = isZh(),
 ): InteractionResponseValue | undefined {
   if (interaction.kind === "ask") return submitAskValue(interaction.questions, answers);
-  const view = selectToAskView(interaction);
+  const view = selectToAskView(interaction, zh);
   return submitSelectValue(view, answers[view.question.id] ?? NO_ASK_ANSWER, interaction.multiple);
 }
 
-export function InteractionDeck({ interaction, onRespond, disabled, leaving }: {
+export function InteractionDeck({ interaction, onRespond, disabled, leaving, readForm }: {
   interaction: ClientInteraction | null;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
   disabled: boolean;
   leaving?: boolean;
+  readForm?: ReadInteractionForm | undefined;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  useFormInteractionLifecycle(interaction);
+  useEffect(() => { if (interaction?.kind === "form" && leaving) closeFormSession(interaction); }, [interaction?.interactionId, interaction?.leaseGeneration, leaving]);
+  if (interaction?.kind === "form") return <LiveFormQueue key={`${interaction.interactionId}:${interaction.leaseGeneration}`} interaction={interaction} onRespond={onRespond} readForm={readForm} disabled={disabled} {...(leaving === undefined ? {} : { leaving })} />;
   if (interaction === null) {
-    return <div className="deck" role="region" aria-label="待处理的审批与提问" />;
+    return <div className="deck" role="region" aria-label={zh ? "待处理的审批与提问" : "Pending approvals & questions"} />;
   }
   if (interaction.kind === "ask" || interaction.kind === "select") {
     return (
@@ -278,6 +296,33 @@ export function InteractionDeck({ interaction, onRespond, disabled, leaving }: {
   );
 }
 
+function LiveFormPrompt({ interaction, readForm, onRespond, disabled, caption, demo, queue }: {
+  interaction: FormInteraction;
+  readForm?: ReadInteractionForm | undefined;
+  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
+  disabled?: boolean | undefined;
+  caption?: InteractionCaption | undefined;
+  demo?: boolean | undefined;
+  queue?: DeckQueue | undefined;
+}) {
+  const session = useFormSession(interaction, readForm);
+  return <FormCard session={session} title={caption?.title ?? interaction.title} summary={interaction.summary} meta={caption?.meta} demo={demo} queue={queue} disabled={disabled} onRespond={onRespond} />;
+}
+
+function LiveFormQueue({ interaction, readForm, onRespond, disabled, leaving }: {
+  interaction: FormInteraction;
+  readForm?: ReadInteractionForm | undefined;
+  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
+  disabled: boolean;
+  leaving?: boolean | undefined;
+}) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const session = useFormSession(interaction, readForm);
+  const items = useMemo<readonly QueuedDeckItem[]>(() => [{ kind: "form", id: interaction.interactionId, title: interaction.title, summary: interaction.summary, session }], [session]);
+  return <QueuedDeck items={items} regionLabel={zh ? "待处理的审批与提问" : "Pending approvals & questions"} disabled={disabled} {...(leaving === undefined ? {} : { leaving })} onFormRespond={(_item, decision, value) => onRespond(decision, value)} />;
+}
+
 function PromptDeckShell({
   interaction,
   onRespond,
@@ -289,6 +334,8 @@ function PromptDeckShell({
   disabled: boolean;
   leaving: boolean;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [enter, setEnter] = useState(() => !motionReduced());
   useEffect(() => {
     if (motionReduced()) {
@@ -306,7 +353,7 @@ function PromptDeckShell({
     <div
       className={`deck active preview-queue${askLike ? " is-ask" : ""}${askEnter ? " is-ask-enter" : ""}${askLeave ? " is-ask-leave" : ""}`}
       role="region"
-      aria-label="待处理的审批与提问"
+      aria-label={zh ? "待处理的审批与提问" : "Pending approvals & questions"}
       aria-live="polite"
     >
       <div className="deck-card">

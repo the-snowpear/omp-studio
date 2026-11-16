@@ -1,12 +1,14 @@
 import type { ModelThinkingConfig } from "./model-thinking.js";
+import type { RuntimeModelDiscovery, RuntimeModelThinking } from "@omp-studio/studio-protocol";
 import type { ModelParameterValues, ModelParameterSources, ModelCatalogStatus } from "./model-adaptation.js";
 /**
  * Public read models for the P0 surface: environment, capability, diagnostic,
  * session history and home pages (FRONTEND_INTEGRATION.md §12.1).
  *
  * Every model exposes only safe display facts: opaque identities, epochs,
- * versions and pre-redacted text. No absolute paths, PIDs, process handles,
- * private endpoints, tokens or secrets may ever appear in these shapes.
+ * versions and pre-redacted text. Workspace roots are explicit display metadata;
+ * system browsing has its own fs.* contracts. Private Runtime paths, process
+ * handles, private endpoints, tokens and secrets are never exposed implicitly.
  */
 
 import type {
@@ -269,9 +271,9 @@ export interface RecentThread {
  * canonical root for display.
  *
  * `root` is the folder the operator picked in the system dialog, shown back
- * to them as an address. It is display metadata only: every file, tree and
- * mutation path stays workspace-relative and is resolved inside the Host
- * registry, so nothing here is ever joined or used for access checks.
+ * to them as an address. Workspace file/tree operations still resolve against
+ * the Host registry and enforce containment. The separate fs.* service accepts
+ * user-selected absolute paths and owns its own access checks.
  */
 export interface WorkspaceRecord {
   readonly workspaceId: WorkspaceId;
@@ -289,7 +291,7 @@ export interface WorkspaceListReadModel {
   readonly activeWorkspaceId?: WorkspaceId;
 }
 
-/** A workspace-relative Explorer node. Absolute paths never cross the Host boundary. */
+/** A workspace-relative Explorer node. Absolute browsing belongs to the separate fs.* contracts. */
 export interface WorkspaceFileNode {
   readonly type: "file" | "dir";
   readonly name: string;
@@ -385,7 +387,10 @@ export type ModelApiKind =
   | "bedrock-converse-stream"
   | "google-generative-ai"
   | "google-gemini-cli"
-  | "google-vertex";
+  | "google-vertex"
+  | "google-decisions"
+  | "nace-systemone"
+  | "antigravity-acp";
 
 export type ModelAuthType = "oauth" | "api-key" | "env" | "command" | "none";
 
@@ -547,6 +552,8 @@ export interface ModelProviderRecord {
   readonly status: ModelProviderStatus;
   readonly statusDetail: string;
   readonly api: ModelApiKind | string;
+  /** Managed native transports cannot be saved as ordinary HTTP providers. */
+  readonly configurationMode?: "http" | "managed";
   readonly endpointUrl?: string;
   readonly local: boolean;
   readonly enabled: boolean;
@@ -566,6 +573,7 @@ export interface ModelProviderRecord {
 export type ModelPresetAuth = ModelAuthType;
 
 export interface ModelPresetItem {
+  readonly configurationMode?: "http" | "managed";
   readonly id: string;
   readonly name: string;
   readonly desc: string;
@@ -613,7 +621,21 @@ export interface ModelRoleRecord {
 }
 
 export interface AvailableModelRecord extends ModelExecutionMetadata {
-  readonly thinkingConfig?: ModelThinkingConfig | null;
+  readonly thinkingConfig?: RuntimeModelThinking | null;
+  readonly source?: "registry";
+  readonly providerType?: string;
+  readonly input?: readonly ("text" | "image")[];
+  readonly supportsComputerUse?: boolean;
+  readonly hostedImage?: boolean;
+  readonly imageCountBudget?: number;
+  readonly pricingStatus?: "fixed" | "free" | "included" | "variable" | "unknown";
+  readonly serviceTierCost?: Readonly<Partial<Record<"flex" | "priority" | "ultrafast", number>>>;
+  readonly discovery?: RuntimeModelDiscovery;
+  readonly description?: string;
+  readonly isNew?: boolean;
+  readonly isBeta?: boolean;
+  readonly isProviderDefault?: boolean;
+  readonly isRecommended?: boolean;
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly provider: string;
@@ -646,6 +668,8 @@ export interface ModelLoginProviderRecord {
  * Host-side approximation (env var or stored auth), never a secret value.
  */
 export interface WebSearchProviderRecord {
+  /** A native vertical/site route; never an automatic general-web fallback or account. */
+  readonly siteRoute?: string;
   readonly id: string;
   readonly name: string;
   /** Upstream `SEARCH_PROVIDER_OPTIONS` description: which credential this provider needs. */
@@ -710,7 +734,7 @@ export interface WebSearchConfigReadModel {
   readonly timeoutSeconds: number;
   /** `providers.webSearchGeminiModel` — Gemini grounding model; empty = runtime default. */
   readonly geminiModel: string;
-  /** Static catalog of the 23 built-in search providers, in runtime chain order. */
+  /** Native search engines/groundings and explicit site routes; a site route is not an automatic fallback. */
   readonly providers: ReadonlyArray<WebSearchProviderRecord>;
   readonly advanced: WebSearchAdvancedConfig;
 }
@@ -765,7 +789,18 @@ export interface ModelWebSearchCredentialRemoveInput {
  * Model-config page read model. Paths, API keys and auth-store secrets
  * never appear. `generated*Yml` is Host-built and already redacted.
  */
+export interface ModelAvailability {
+  readonly status: "verified" | "unverified";
+  readonly source: "runtime" | "none";
+  readonly sessionId?: string;
+  readonly version?: string;
+  readonly total?: number;
+  readonly truncated?: boolean;
+  readonly reason?: string;
+}
 export interface ModelConfigReadModel {
+  /** Static recommendations and configured credentials never establish model availability. */
+  readonly availability?: ModelAvailability;
   readonly catalog?: ModelCatalogStatus;
   readonly providers: ReadonlyArray<ModelProviderRecord>;
   readonly presets: ReadonlyArray<ModelPresetGroup>;

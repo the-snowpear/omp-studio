@@ -1,10 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StudioClientImpl } from "@omp-studio/client";
 import { contractFixtures } from "@omp-studio/testkit";
 import type { ClientBootstrap, ClientContextScope, ClientEvent, ClientTransport, ConversationMessageItem, ModelConfigReadModel, QueryInput } from "@omp-studio/client-contract";
 import { App } from "./App";
-import { __resetAppSettingsForTests } from "./settings/appSettings";
+import { __resetAppSettingsForTests, updateAppSettings } from "./settings/appSettings";
 import { STARTUP_NOTICE_ID, STARTUP_NOTICE_STORAGE_KEY } from "./settings/startupNotice";
 import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
 import { ConversationWorkspaceStore } from "./conversationWorkspace/store";
@@ -140,6 +140,19 @@ async function mount(client: StudioClientImpl) {
   await waitFor(() => expect(document.querySelector('.cw-document [aria-busy="true"]#appRoot')).toBeNull());
 }
 
+it("updates disabled slash-command copy when the workbench language changes and preserves the draft", async () => {
+  const h = host();
+  window.history.replaceState(null, "", "/?preview=1");
+  await mount(h.client);
+  const editor = document.querySelector<HTMLElement>('.chip-composer-editor[contenteditable="true"]')!;
+  editor.textContent = "/copy";
+  fireEvent.input(editor);
+  await screen.findByText("Copy (not implemented yet)");
+  act(() => updateAppSettings({ language: "zh" }));
+  await screen.findByText("复制（暂未实现）");
+  expect(editor.textContent).toBe("/copy");
+});
+
 async function chooseModel() {
   fireEvent.click(screen.getByRole("button", { name: "Select Model" }));
   const more = await screen.findByRole("button", { name: "More Models" });
@@ -160,7 +173,7 @@ describe("model selection in a cold conversation", () => {
     const h = host(new Promise<void>(resolve => { releaseCreate = resolve; }));
     await mount(h.client);
     fireEvent.click(document.querySelector(".new-convo-btn")!);
-    await screen.findByText("Runtime 未启动");
+    await screen.findByText("Runtime not started");
     const editor = document.querySelector<HTMLElement>('.cw-main-conversation [contenteditable="true"]')!;
     editor.textContent = "first prompt stays in the draft";
     fireEvent.input(editor);
@@ -192,7 +205,7 @@ describe("model selection in a cold conversation", () => {
     workspace.open({ targetId: null, workspaceId: h.workspaceId, sessionId: "saved-session" as never, threadId: "thread:saved-session" as never });
     workspace.flush();
     await mount(h.client);
-    await screen.findByText("Runtime 未启动");
+    await screen.findByText("Runtime not started");
     await chooseModel();
     expect(h.calls.filter(call => call.name === "session.resume").map(call => ({ input: call.input, sessionId: call.sessionId })))
       .toEqual([{ input: { threadId: "thread:saved-session", model: selector }, sessionId: "saved-session" }]);

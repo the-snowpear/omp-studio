@@ -9,10 +9,27 @@ import type { ComposerDictationBinding } from "./dictationTypes";
 import type { GitHubReferenceSnapshot } from "./githubReference";
 import type { GitCommitReferenceSnapshot } from "./gitCommitReference";
 import { splitChipLabel, type PromptImage } from "./types";
+import { I18nProvider } from "../i18n";
+import * as ingest from "./ingest";
 
 afterEach(() => {
   cleanup();
   Reflect.deleteProperty(globalThis, "ompStudioChrome");
+});
+
+it("switches draft image labels without changing text, image bytes, or sending", () => {
+  const ref = createRef<ChipComposerHandle>();
+  const submit = vi.fn();
+  const view = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><ChipComposer ref={ref} onSubmit={submit} /></I18nProvider>;
+  const { container, rerender } = render(view("zh"));
+  const image: PromptImage = { type: "image", mimeType: "image/png", data: "aW1hZ2U=" };
+  act(() => ref.current!.setSnapshot({ text: "[图1]", images: [image], doc: { nodes: [{ type: "chip", chip: { id: "image-1", kind: "image", label: "图1", image } }] } }));
+  const before = ref.current!.getSnapshot();
+  rerender(view("en"));
+  expect(container.textContent).toContain("Img1");
+  expect(ref.current!.getSnapshot().text).toBe(before.text);
+  expect(ref.current!.getSnapshot().images).toEqual(before.images);
+  expect(submit).not.toHaveBeenCalled();
 });
 
 it("restores a background draft without moving focus or the current selection", () => {
@@ -79,6 +96,42 @@ it("adds and updates a commit reference without losing existing text or sending"
   expect(send).not.toHaveBeenCalled();
   act(() => ref.current!.setSnapshot(snapshot));
   expect(ref.current!.getSnapshot().text).toBe(snapshot.text);
+});
+
+it("keeps rich paste at its original caret when clipboard image decoding finishes after the caret moves", async () => {
+  const ref = createRef<ChipComposerHandle>();
+  const send = vi.fn();
+  const pending = Promise.withResolvers<PromptImage>();
+  const image = png("aW1hZ2U=");
+  const readImage = vi.spyOn(ingest, "fileToPromptImage").mockReturnValue(pending.promise);
+  try {
+    render(<ChipComposer ref={ref} onSubmit={send} />);
+    const editor = editorOf();
+    editor.focus();
+    pasteText(editor, "left right");
+    selectText(editor.firstChild!, 5);
+    const html = '<p><strong>PASTE</strong></p><img src="file:///clipboard.png" alt="picture"><p>TAIL</p>';
+    fireEvent.paste(editor, { clipboardData: {
+      files: [new File(["bytes"], "clipboard.png", { type: "image/png" })],
+      getData: (type: string) => type === "text/html" ? html : "PASTE TAIL",
+    } });
+    await waitFor(() => expect(readImage).toHaveBeenCalledOnce());
+    selectText(editor.firstChild!, 10);
+    await act(async () => { pending.resolve(image); });
+    const snapshot = ref.current!.getSnapshot();
+    const imageIndex = snapshot.doc.nodes.findIndex(node => node.type === "chip" && node.chip.kind === "image");
+    const textOf = (nodes: typeof snapshot.doc.nodes) => nodes.map(node => node.type === "text" ? node.value : "").join("");
+    const before = textOf(snapshot.doc.nodes.slice(0, imageIndex));
+    const after = textOf(snapshot.doc.nodes.slice(imageIndex + 1));
+    expect(before, JSON.stringify(snapshot.doc.nodes)).toContain("left **PASTE**");
+    expect(before).not.toContain("right");
+    expect(after).toContain("TAILright");
+    expect(snapshot.images).toEqual([image]);
+    expect(send).not.toHaveBeenCalled();
+  } finally {
+    pending.resolve(image);
+    readImage.mockRestore();
+  }
 });
 
 function png(data: string): PromptImage {

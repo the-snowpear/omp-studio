@@ -20,11 +20,13 @@ type ToolCopy = { name: readonly [string, string]; detail: readonly [string, str
 
 const TOOL_COPY: Partial<Record<PanelId, ToolCopy>> = {
   files: { name: ["文件", "Files"], detail: ["浏览工作区目录与文件", "Browse workspace folders and files"], tint: "orange" },
+  "file-browser": { name: ["文件浏览器", "File Browser"], detail: ["浏览整台电脑的文件", "Browse files across the computer"], tint: "indigo" },
   browser: { name: ["浏览器", "Browser"], detail: ["浏览网页、预览本地应用", "Browse the web and preview apps"], tint: "blue" },
   terminal: { name: ["终端", "Terminal"], detail: ["运行命令并查看输出", "Run commands and read the output"], tint: "violet" },
   changes: { name: ["变更", "Changes"], detail: ["审查代码变更与差异", "Review code changes and diffs"], tint: "green" },
   git: { name: ["Git", "Git"], detail: ["分支、提交与暂存", "Branches, commits and staging"], tint: "rose" },
   "git-quick": { name: ["Git 快捷卡", "Git quick card"], detail: ["常用 Git 操作一卡集中", "Common Git actions in one card"], tint: "rose" },
+  commit: { name: ["选择性提交", "Selective commit"], detail: ["按改动归属挑选后再提交", "Pick changes by ownership, then commit"], tint: "teal" },
   agents: { name: ["Agents", "Agents"], detail: ["跟踪子 Agent 的运行状态", "Follow subagent runs"], tint: "teal" },
   btw: { name: ["BTW", "BTW"], detail: ["旁路提问，不打断主对话", "Ask aside without interrupting"], tint: "pink" },
   computer: { name: ["电脑", "Computer"], detail: ["查看并操控桌面", "View and control the desktop"], tint: "indigo" },

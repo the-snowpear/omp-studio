@@ -6,15 +6,14 @@ import { execFileSync } from "node:child_process";
 import { findBun, toolingEnvironment } from "./omp-tooling.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const apis = new Set(["devin", "openai-completions", "openai-responses", "openai-codex-responses", "azure-openai-responses", "anthropic-messages", "bedrock-converse-stream", "google-generative-ai", "google-gemini-cli", "google-vertex"]);
 const thinkingFields = ["mode", "efforts", "defaultLevel", "effortMap", "supportsDisplay", "requiresEffort"];
 const runtimeThinkingFields = ["effortRouting", "effortBudgets", "suppressWhenOff", "prefixBinding", "unverified"];
 
-export function buildModelCatalog(models, upstreamCommit, aliases = {}) {
+export function buildModelCatalog(models, upstreamCommit, aliases = {}, nativeProviders = [], roleDefaults = {}) {
   const entries = [];
   for (const [provider, providerModels] of Object.entries(models)) {
     for (const model of Object.values(providerModels)) {
-      if (!apis.has(model.api)) continue;
+      if (typeof model.api !== "string") continue;
       const values = {};
       for (const field of ["contextWindow", "maxContextWindow", "maxTokens"]) {
         if (Number.isSafeInteger(model[field]) && model[field] > 0) values[field] = model[field];
@@ -31,30 +30,49 @@ export function buildModelCatalog(models, upstreamCommit, aliases = {}) {
       const key = `${provider}/${model.api}/${model.id}`;
       entries.push({
         key, provider, id: model.id, name: model.name || model.id, api: model.api,
+        ...(model.kind ? { kind: model.kind } : {}),
+        ...(model.webSearch ? { webSearch: model.webSearch } : {}),
         ...(aliases[key] ? { aliases: aliases[key] } : {}), values,
         ...(nativeOnly || nativeContext ? { limitation: [nativeOnly ? "native-thinking" : "", nativeContext ? "native-context" : ""].filter(Boolean).join(",") } : {}),
       });
     }
   }
   entries.sort((a, b) => a.key.localeCompare(b.key, "en"));
-  const version = createHash("sha256").update(JSON.stringify({ upstreamCommit, entries })).digest("hex").slice(0, 16);
-  return { schemaVersion: 1, version, upstreamCommit, entries };
+  const version = createHash("sha256").update(JSON.stringify({ upstreamCommit, entries, nativeProviders, roleDefaults })).digest("hex").slice(0, 16);
+  return { schemaVersion: 1, version, upstreamCommit, entries, ...(nativeProviders.length ? { nativeProviders } : {}), ...(Object.keys(roleDefaults).length ? { roleDefaults } : {}) };
 }
 
 export async function generateModelCatalog(check = false) {
   const pin = JSON.parse(await readFile(resolve(root, "omp-patch/upstream.json"), "utf8"));
   // Upstream stores a compact, interned catalog. Its registry materializes the
   // provider records and owns the format; Studio only consumes those records.
-  const models = JSON.parse(execFileSync(findBun(), ["--eval", `
+  const env = toolingEnvironment();
+  // A release catalog must not capture a developer's private gateway endpoint.
+  for (const key of Object.keys(env)) if (key.endsWith("_BASE_URL")) delete env[key];
+  const native = JSON.parse(execFileSync(findBun(), ["--eval", `
     import { getBundledProviders, getBundledModels } from "./packages/catalog/src/models";
-    console.log(JSON.stringify(Object.fromEntries(getBundledProviders().map(provider =>
-      [provider, Object.fromEntries(getBundledModels(provider).map(model => [model.id, model]))]))));
+    import { providerEntries } from "./packages/catalog/src/compat/providers";
+    import { modelKind } from "./packages/catalog/src/types";
+    import { authPolicyFor } from "./packages/catalog/src/compat/auth";
+    import { apiRouteFor, roleDefaultModels } from "./packages/catalog/src/compat/behavior";
+    import { getDefaultModelDiscoveryBaseUrl, isCredentialScopedModelCacheProvider } from "./packages/catalog/src/provider-models/cache-provider-id";
+    const models = Object.fromEntries(getBundledProviders().map(provider =>
+      [provider, Object.fromEntries(getBundledModels(provider).map(model => [model.id, model]))]));
+    const providers = Object.values(providerEntries()).map(provider => {
+      const rows = Object.values(models[provider.id] || {});
+      const api = apiRouteFor(provider.id, provider.defaultModel)?.api || rows[0]?.api || provider.seed?.models[0]?.api;
+      const endpoint = getDefaultModelDiscoveryBaseUrl(provider.id) || rows[0]?.baseUrl || provider.seed?.models[0]?.baseUrl;
+      return { id: provider.id, name: authPolicyFor(provider.id)?.name || provider.discovery?.label || provider.id,
+        credentialScoped: isCredentialScopedModelCacheProvider(provider.id), authoritative: provider.dynamicModelsAuthoritative === true,
+        ...(api ? { api } : {}), ...(endpoint ? { endpoint } : {}), kinds: [...new Set(rows.map(model => modelKind(model)))] };
+    });
+    console.log(JSON.stringify({ models, providers, roleDefaults: roleDefaultModels() }));
   `], {
     cwd: resolve(root, "omp-patch/vendor/oh-my-pi"),
-    env: toolingEnvironment(), encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024,
+    env, encoding: "utf8", windowsHide: true, maxBuffer: 64 * 1024 * 1024,
   }));
   const aliases = JSON.parse(await readFile(resolve(root, "catalog/model-aliases.json"), "utf8"));
-  const catalog = buildModelCatalog(models, pin.commit, aliases);
+  const catalog = buildModelCatalog(native.models, pin.commit, aliases, native.providers, native.roleDefaults);
   const outputs = [
     ["catalog/model-catalog-v1.json", `${JSON.stringify(catalog, null, 2)}\n`],
     ["packages/host-client-api/src/model-catalog.generated.ts", `// Generated by npm run models:catalog:generate. Do not edit.\nimport type { ModelCatalogDocument } from "@omp-studio/client-contract";\nexport const BUILTIN_MODEL_CATALOG = JSON.parse(${JSON.stringify(JSON.stringify(catalog))}) as ModelCatalogDocument;\n`],

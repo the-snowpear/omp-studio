@@ -136,6 +136,7 @@ async function listenForHello(
     onRequest?: (request: StudioRequest, socket: Socket, hello: StudioHelloResponse) => void;
     onComputerQuery?: (request: StudioComputerQueryRequest, socket: Socket, hello: StudioHelloResponse) => void;
     onTimeTravelResult?: (result: { requestId: string; error?: string }) => void;
+    onLocale?: (locale: "zh" | "en") => void;
   } = {},
 ): Promise<{
   endpoint: string;
@@ -169,6 +170,10 @@ async function listenForHello(
           }
           if ((frame.body as { type?: unknown }).type === "computer.query" && negotiated && hooks.onComputerQuery) {
             hooks.onComputerQuery(frame.body as StudioComputerQueryRequest, socket, negotiated);
+            continue;
+          }
+          if ((frame.body as { type?: unknown }).type === "studio.locale" && negotiated && hooks.onLocale) {
+            hooks.onLocale((frame.body as { locale: "zh" | "en" }).locale);
             continue;
           }
           if ((frame.body as { type?: unknown }).type === "timeTravel.capture.result" && negotiated && hooks.onTimeTravelResult) {
@@ -494,6 +499,37 @@ test("PR-010 Bridge shutdown waits for the terminal receipt and shutdownComplete
   }
 });
 
+for (const supported of [false, true]) {
+  test(`language sync preserves the Bridge with ${supported ? "current" : "legacy"} Runtime`, async () => {
+    const token = "bridge-token-locale";
+    const locales: string[] = [];
+    let locale: "zh" | "en" = "en";
+    const bridge = await listenForHello(hello => {
+      const response = helloResponse(hello, token);
+      if (supported) response.capabilityManifest.capabilities.push({ id: "studio.locale", grade: "stable", version: 1, evidence: "locale-fixture" });
+      return response;
+    }, { onLocale: locale => locales.push(locale) });
+    const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token, locale: () => locale });
+    try {
+      await client.connect();
+      await client.requestSnapshot();
+      assert.deepEqual(locales, supported ? ["en"] : []);
+      client.setLocale("zh");
+      await client.requestSnapshot();
+      assert.deepEqual(locales, supported ? ["en", "zh"] : []);
+      assert.equal(client.state, "ready");
+      client.disconnect();
+      const reconnect = client.reconnect();
+      locale = "zh";
+      client.setLocale(locale);
+      await reconnect;
+      await client.requestSnapshot();
+      assert.deepEqual(locales, supported ? ["en", "zh", "zh"] : []);
+      assert.equal(client.state, "ready");
+    } finally { client.close(); await bridge.close(); }
+  });
+}
+
 for (const supportsOwner of [false, true]) {
   test(`startup owner notifications preserve the Bridge with ${supportsOwner ? "supporting" : "legacy"} Runtime`, async () => {
     const token = "bridge-token-owner-notifications";
@@ -542,6 +578,31 @@ for (const supportsOwner of [false, true]) {
     }
   });
 }
+
+test("expired Runtime model cursors retain the native retryable error across the Bridge", async () => {
+  const token = "bridge-token-model-cursor";
+  const bridge = await listenForHello(hello => helloResponse(hello, token), {
+    onRequest(request, socket, hello) {
+      socket.write(encodeFrame("receipt:stale-models", hello.runtimeEpoch, {
+        type: "studio.receipt", requestId: request.requestId, commandId: "runtime-stale-models",
+        runtimeEpoch: hello.runtimeEpoch, stateVersion: 0, status: "failed",
+        error: { code: "COMMAND_BLOCKED", message: "The native model snapshot changed", retryable: true },
+      }));
+    },
+  });
+  const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
+  try {
+    await client.connect();
+    const { snapshot } = await client.requestSnapshot();
+    await assert.rejects(
+      () => client.readRuntimeView({ kind: "models.available.read", sessionId: snapshot.sessionId, cursor: "expired-page" }),
+      { code: "COMMAND_BLOCKED", retryable: true },
+    );
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
 
 test("RT-002 Bridge command-manifest probe parses and returns the advertised manifest", async () => {
   const token = "bridge-token-command-manifest";

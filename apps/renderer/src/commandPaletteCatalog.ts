@@ -4,7 +4,7 @@ import { SHORTCUTS, formatShortcut, shortcutSearchText } from "./keyboard/shortc
 import type { CapTab } from "./CapabilitiesPage";
 import type { PageRoute } from "./HomePage";
 import type { McTab } from "./ModelConfigPage";
-import { PREVIEW_HISTORY, PREVIEW_PROJECTS } from "./preview/fixtures";
+import { getPreviewHistory, getPreviewProjects } from "./preview/fixtures";
 import type { SettingsGroupId } from "./SettingsPage";
 import type { DrawerItem } from "./skillsPreview";
 
@@ -12,7 +12,7 @@ export type SideTab = "changes" | "git" | "preview" | "computer" | "agents" | "b
 export type BottomTab = "terminal" | "problems" | "tests" | "output" | "logs" | "pvlogs";
 
 export type PaletteAction =
-  | { kind: "dock"; operation: "rail" | "undo" | "redo" | "lock" | "snap" | "reset" | "default" | "focus" | "debug" | "files" }
+  | { kind: "dock"; operation: "rail" | "undo" | "redo" | "lock" | "snap" | "reset" | "default" | "focus" | "debug" | "files" | "file-browser" }
   | { kind: "openContext" }
   | { kind: "route"; route: PageRoute }
   | { kind: "diagnostics"; intent?: "check-update" | "reconnect" | "restart" }
@@ -54,6 +54,7 @@ export type PaletteGroup = {
 
 export type PaletteCatalogInput = {
   preview: boolean;
+  zh?: boolean;
   untitledTitle: string;
   historyEntries: ReadonlyArray<SessionHistoryEntry>;
   workspaces: ReadonlyArray<{ workspaceId: string; name: string }>;
@@ -62,8 +63,8 @@ export type PaletteCatalogInput = {
   query: string;
 };
 
-function findPreviewThreadByTitle(title: string): { projectId: string; threadId: string; projectName: string } | undefined {
-  for (const project of PREVIEW_PROJECTS) {
+function findPreviewThreadByTitle(title: string, zh?: boolean): { projectId: string; threadId: string; projectName: string } | undefined {
+  for (const project of getPreviewProjects(zh)) {
     const thread = project.threads.find((entry) => entry.title === title);
     if (thread) return { projectId: project.id, threadId: thread.id, projectName: project.name };
   }
@@ -78,8 +79,8 @@ function matches(item: PaletteItem, query: string): boolean {
 
 function recents(input: PaletteCatalogInput): PaletteItem[] {
   if (input.preview) {
-    return PREVIEW_HISTORY.slice(0, 9).map((row, index) => {
-      const hit = findPreviewThreadByTitle(row.title);
+    return getPreviewHistory(input.zh).slice(0, 9).map((row, index) => {
+      const hit = findPreviewThreadByTitle(row.title, input.zh);
       const recentIndex = index + 1;
       return {
         id: `recent-${row.id}`,
@@ -148,7 +149,19 @@ function staticGroups(preview: boolean): PaletteGroup[] {
       id: "panels",
       label: "palette.groupPanels",
       items: [
-        ...([['rail', '对话工具区 / Conversation tools'], ['files', '打开 Files'], ['undo', '撤销布局修改 / Undo layout'], ['redo', '重做布局修改 / Redo layout'], ['lock', '锁定布局 / Lock layout'], ['snap', '停靠吸附 / Dock snapping'], ['reset', '恢复出厂布局 / Reset layout'], ['default', '默认布局 / Default'], ['focus', '专注布局 / Focus'], ['debug', '调试布局 / Debug']] as const).map(([operation, label]): PaletteItem => ({ id: `dock-${operation}`, icon: 'layout', label, keywords: 'dock layout 停靠 布局', action: { kind: 'dock' as const, operation } })),
+        ...([
+          ["rail", "palette.dockRail"],
+          ["files", "palette.dockFiles"],
+          ["undo", "palette.dockUndo"],
+          ["redo", "palette.dockRedo"],
+          ["lock", "palette.dockLock"],
+          ["snap", "palette.dockSnap"],
+          ["reset", "palette.dockReset"],
+          ["default", "palette.dockDefault"],
+          ["focus", "palette.dockFocus"],
+          ["debug", "palette.dockDebug"],
+        ] as const).map(([operation, label]): PaletteItem => ({ id: `dock-${operation}`, icon: "layout", label, keywords: "dock layout 停靠 布局", action: { kind: "dock" as const, operation } })),
+        { id: "open-file-browser", icon: "drive", label: "fileBrowser.open", keywords: "open file browser 打开文件浏览器 磁盘 全机 文件夹", action: { kind: "dock", operation: "file-browser" } },
         { id: "toggle-sidebar", icon: "layout", label: "palette.toggleSidebar", hint: formatShortcut(SHORTCUTS.toggleSidebar, "hint"), keywords: `sidebar 侧栏 切换侧栏 ${shortcutSearchText(SHORTCUTS.toggleSidebar)}`, action: { kind: "toggleSidebar" } },
         { id: "toggle-bottom", icon: "rows", label: "palette.toggleBottom", hint: formatShortcut(SHORTCUTS.toggleBottomPanel, "hint"), keywords: `bottom panel 底部面板 切换底部面板 ${shortcutSearchText(SHORTCUTS.toggleBottomPanel)}`, action: { kind: "toggleBottom" } },
         { id: "toggle-side", icon: "panel", label: "palette.toggleSide", keywords: "right panel 右侧面板 切换右侧面板", action: { kind: "toggleSide" } },
@@ -162,7 +175,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
         { id: "open-git", icon: "branch", label: "palette.openGit", keywords: "git branch commit push pull stage 打开 Git", action: { kind: "openSide", tab: "git" } },
         { id: "open-preview", icon: "globe", label: "browser.title", keywords: "browser 浏览器 观察 接管 preview", action: { kind: "openSide", tab: "preview" } },
         { id: "open-computer", icon: "monitor", label: "computer.title", keywords: "computer 电脑 屏幕 窗口 观察 代理截图 停止 接手 历史画面", action: { kind: "openSide", tab: "computer" } },
-        { id: "computer-settings", icon: "settings", label: "电脑操作设置 / Computer settings", keywords: "computer enabled display maxWidth maxHeight backgroundFallback 电脑 会话 全局 默认", action: { kind: "openSettings", group: "tasks", setting: "computer.enabled" } },
+        { id: "computer-settings", icon: "settings", label: "palette.computerSettings", keywords: "computer enabled display maxWidth maxHeight backgroundFallback 电脑 会话 全局 默认", action: { kind: "openSettings", group: "tasks", setting: "computer.enabled" } },
         { id: "open-agents", icon: "bot", label: "palette.openAgents", keywords: "agents 打开 Agents", action: { kind: "openSide", tab: "agents" } },
         { id: "open-context", icon: "layers", label: "palette.openContext", keywords: "context inspector 上下文 查看器 提示词 tokens 工具输出", action: { kind: "openContext" } },
         { id: "open-btw", icon: "sparkles", label: "palette.openBtw", keywords: "btw 旁路 side channel 提问 打开 BTW 面板", action: { kind: "openSide", tab: "btw" } },
@@ -201,7 +214,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
 
 function projectItems(input: PaletteCatalogInput): PaletteItem[] {
   if (input.preview) {
-    return PREVIEW_PROJECTS.map((project) => ({
+    return getPreviewProjects(input.zh).map((project) => ({
       id: `proj-${project.id}`,
       icon: "folder",
       label: project.name,

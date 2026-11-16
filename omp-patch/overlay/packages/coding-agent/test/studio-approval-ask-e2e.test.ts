@@ -184,47 +184,44 @@ describe("studio real tool approval and ask E2E", () => {
 		expect(port.pending()).toBeUndefined();
 	});
 
-	test("Live Ask sends every question in one ask card and returns the chosen labels", async () => {
+	test("Live native Ask reads one safe form and returns named data with option notes", async () => {
 		const askTool = new AskTool(session as never);
 		const { port, ui, toolCall } = remoteUi();
 		const result = askTool.execute(
 			"e2e-ask-1",
 			{
-				questions: [
-					{
-						id: "backend",
-						question: "Which backend?",
-						options: [{ label: "SQLite" }, { label: "PostgreSQL" }],
-					},
-					{
-						id: "cache",
-						question: "Cache layer?",
-						header: "缓存",
-						options: [{ label: "Redis" }, { label: "Memory" }],
-					},
-				],
+				html: `<form><input type="hidden" name="kind" value="deploy"><fieldset><legend>Storage</legend><p>Which backend?</p><label><input type="radio" name="backend" value="sqlite" checked>SQLite</label><label><input type="radio" name="backend" value="pg">PostgreSQL</label></fieldset><fieldset><legend>Cache layer?</legend><select name="cache"><option value="redis">Redis</option><option value="memory">Memory</option></select></fieldset></form>`,
 			},
 			undefined,
 			undefined,
 			{ hasUI: true, ui, toolCall } as AgentToolContext,
 		);
+		await waitForInteraction(port);
 		const pending = port.pending();
 		expect(pending?.request).toMatchObject({
-			kind: "ask",
+			kind: "form",
 			commandId: "studio-tool:e2e-call-1",
-			title: "Agent 提问",
+			fieldCount: 2,
+			sectionCount: 2,
 		});
-		if (pending?.request.kind !== "ask") throw new Error("expected ask");
-		expect(pending.request.questions.map(question => question.id)).toEqual(["backend", "cache"]);
+		if (pending?.request.kind !== "form") throw new Error("expected native form");
+		const dto = port.readForm(pending.request.interactionId, pending.leaseGeneration).form;
+		expect(dto.fields.map(field => field.name)).toEqual(["backend", "cache"]);
+		expect(dto.defaults).toEqual({ kind: "deploy", backend: "sqlite", cache: "redis" });
 		await respond(port, "submit", {
-			results: [
-				{ id: "backend", selectedOptions: ["PostgreSQL"] },
-				{ id: "cache", selectedOptions: ["Redis"] },
-			],
+			data: { kind: "not-editable", backend: "pg", cache: "redis" },
+			notes: [{ name: "backend", value: "pg", text: "Use replicas" }],
 		});
 		const outcome = await result;
-		expect(textOf(outcome)).toContain("PostgreSQL");
-		expect(textOf(outcome)).toContain("Redis");
+		expect(textOf(outcome)).toContain('"backend": "pg"');
+		expect(textOf(outcome)).toContain('"kind": "deploy"');
+		expect(outcome.details?.answers).toEqual([
+			{ name: "backend", question: "Which backend?", answer: "PostgreSQL" },
+			{ name: "cache", question: "Cache layer?", answer: "Redis" },
+		]);
+		expect(outcome.details?.notes).toEqual([
+			{ name: "backend", question: "Which backend?", option: "PostgreSQL", value: "pg", text: "Use replicas" },
+		]);
 		expect(port.pending()).toBeUndefined();
 	});
 });

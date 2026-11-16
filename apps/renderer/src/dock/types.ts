@@ -1,10 +1,10 @@
 import type { ReactNode, PointerEvent } from "react";
 import type { IconName } from "../icons";
 
-export const PANEL_IDS = ["files", "changes", "git", "git-quick", "browser", "computer", "agents", "agent-detail", "environment", "context", "context-viewer", "annotations", "token-counter", "terminal", "jobs", "problems", "tests", "output", "logs", "pvlogs", "btw"] as const;
+export const PANEL_IDS = ["files", "file-browser", "changes", "git", "git-quick", "commit", "browser", "computer", "agents", "agent-detail", "environment", "context", "context-viewer", "annotations", "token-counter", "terminal", "jobs", "problems", "tests", "output", "logs", "pvlogs", "btw"] as const;
 export type FixedPanelId = typeof PANEL_IDS[number];
 /** Tools that may be open once per dock region; a second region gets its own instance. */
-export const REPEATABLE_PANEL_IDS = ["files", "changes", "git", "agents", "jobs", "environment", "token-counter", "problems", "tests", "output", "logs", "pvlogs"] as const;
+export const REPEATABLE_PANEL_IDS = ["files", "file-browser", "changes", "git", "agents", "jobs", "environment", "token-counter", "problems", "tests", "output", "logs", "pvlogs"] as const;
 export type RepeatablePanelId = typeof REPEATABLE_PANEL_IDS[number];
 export type ScopedPanelId = `${RepeatablePanelId}@${number}`;
 export const isRepeatablePanelId = (id: string): id is RepeatablePanelId => (REPEATABLE_PANEL_IDS as readonly string[]).includes(id);
@@ -23,7 +23,7 @@ export const conversationPanelId = (viewId: string): ConversationPanelId => `con
 export const isConversationPanelId = (id: string): id is ConversationPanelId => id.startsWith("conversation:");
 export type FilePanelId = `file-view:${string}`;
 export const isFilePanelId = (id: string): id is FilePanelId => id.startsWith("file-view:");
-export type FilePanelDescriptor = { targetId: string | null; workspaceId: string; path: string; fileId: string; title: string; scope: "conversation" | "workspace"; line?: number; column?: number; jump?: number; page?: number; scroll?: number; mode?: FileViewMode; time?: number };
+export type FilePanelDescriptor = { source?: "system"; targetId: string | null; workspaceId: string; path: string; fileId: string; title: string; scope: "conversation" | "workspace"; line?: number; column?: number; jump?: number; page?: number; scroll?: number; mode?: FileViewMode; time?: number };
 /** `preview` renders Markdown or the CSV grid; `split` is Markdown source beside its preview; `diff` is the working-tree patch. */
 export type FileViewMode = "preview" | "source" | "split" | "diff";
 export type PanelId = FixedPanelId | ScopedPanelId | AgentPanelId | BrowserPagePanelId | ConversationPanelId | FilePanelId;

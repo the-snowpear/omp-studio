@@ -38,17 +38,20 @@ export function SettingRow({
   desc,
   source = "user",
   reason,
+  wide,
   children,
 }: {
   label: string;
   desc?: string;
   source?: SettingSource | null;
   reason?: string;
+  /** Control takes its own full-width line under the label (editors, tables). */
+  wide?: boolean;
   children: ReactNode;
 }) {
   const { t } = useI18n();
   return (
-    <div className={`set-row${source === "unavailable" ? " is-unavailable" : ""}`} data-setting-label={label} data-tip={source === "unavailable" ? (reason ?? `（${t("common.notImplemented")}）`) : undefined}>
+    <div className={`set-row${wide ? " is-wide" : ""}${source === "unavailable" ? " is-unavailable" : ""}`} data-setting-label={label} data-tip={source === "unavailable" ? (reason ?? `（${t("common.notImplemented")}）`) : undefined}>
       <div>
         <div className="sr-label">
           {label} {source ? <SourceBadge source={source} reason={reason} /> : null}

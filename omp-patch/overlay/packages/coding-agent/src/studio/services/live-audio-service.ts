@@ -469,6 +469,7 @@ export class StudioLiveAudioService {
 					settings: this.session.settings,
 					registry: this.session.modelRegistry,
 					getSessionId: () => sessionId,
+					getSessionProvider: () => this.session.model?.provider,
 					configuration: { model, language: configuration.language, submitTrigger: configuration.submitTrigger },
 				},
 				{

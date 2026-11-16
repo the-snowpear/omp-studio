@@ -4,6 +4,7 @@
  */
 
 import type { IconName } from "./icons";
+import { isZh } from "./i18n";
 
 export type SkillScope = "workspace" | "global" | "builtin" | "runtime";
 export type DrawerKind = "skill" | "plugin";
@@ -203,12 +204,12 @@ export function itemTone(item: DrawerItem): SkillTone {
   return COLOR_BY_NAME[item.name] ?? COLOR_BY_NAME[item.name.trim().toLowerCase()] ?? hashTone(item.name);
 }
 
-export function createPreviewDrawerItems(): DrawerItem[] {
+export function createPreviewDrawerItems(zh = isZh()): DrawerItem[] {
   return [
     {
       kind: "skill",
       name: "upstream-sync",
-      desc: "跟踪上游仓库同步的标准流程（graft、合并、验证）",
+      desc: zh ? "跟踪上游仓库同步的标准流程（graft、合并、验证）" : "Standard workflow for syncing upstream repo changes (graft, merge, verify)",
       src: "OMP",
       scope: "workspace",
       path: ".omp/skills/upstream-sync/SKILL.md",
@@ -220,7 +221,7 @@ export function createPreviewDrawerItems(): DrawerItem[] {
     {
       kind: "skill",
       name: "code-review-graph",
-      desc: "生成代码审查依赖图",
+      desc: zh ? "生成代码审查依赖图" : "Generate a code review dependency graph",
       src: "OMP",
       scope: "global",
       path: "~/.omp/skills/code-review-graph/SKILL.md",
@@ -232,7 +233,7 @@ export function createPreviewDrawerItems(): DrawerItem[] {
     {
       kind: "skill",
       name: "mermaid-verify",
-      desc: "Mermaid 图表渲染回归验证",
+      desc: zh ? "Mermaid 图表渲染回归验证" : "Mermaid diagram rendering regression checks",
       src: "OMP",
       scope: "workspace",
       path: ".omp/skills/mermaid-verify/SKILL.md",
@@ -243,7 +244,7 @@ export function createPreviewDrawerItems(): DrawerItem[] {
     {
       kind: "skill",
       name: "commit-msg",
-      desc: "生成符合 Conventional Commits 的提交信息",
+      desc: zh ? "生成符合 Conventional Commits 的提交信息" : "Generate Conventional Commits messages",
       src: "OMP",
       scope: "global",
       path: "~/.omp/skills/commit-msg/SKILL.md",
@@ -254,20 +255,20 @@ export function createPreviewDrawerItems(): DrawerItem[] {
     {
       kind: "skill",
       name: "oss-audit",
-      desc: "开源仓库发布前合规检查",
-      src: "托管",
+      desc: zh ? "开源仓库发布前合规检查" : "Pre-release compliance audit for open-source repositories",
+      src: zh ? "托管" : "Managed",
       scope: "builtin",
       path: "omp:builtin/oss-audit",
       enabled: true,
       loaded: true,
       session: true,
       used: true,
-      error: "SKILL.md 第 42 行 frontmatter 缺 summary",
+      error: zh ? "SKILL.md 第 42 行 frontmatter 缺 summary" : "SKILL.md line 42 frontmatter missing summary",
     },
     {
       kind: "plugin",
       name: "omp-preview-tools",
-      src: "内置",
+      src: zh ? "内置" : "Built-in",
       status: "loaded",
       tools: 4,
       commands: 1,
@@ -277,7 +278,7 @@ export function createPreviewDrawerItems(): DrawerItem[] {
       toolItems: ["preview_snapshot", "preview_diff", "preview_open", "preview_dom"],
       commandItems: ["/preview"],
       hookItems: ["PreToolUse:Preview", "PostToolUse:Preview"],
-      uiItems: ["Preview 侧栏扩展"],
+      uiItems: [zh ? "Preview 侧栏扩展" : "Preview sidebar extension"],
     },
     {
       kind: "plugin",
@@ -292,18 +293,18 @@ export function createPreviewDrawerItems(): DrawerItem[] {
       toolItems: ["git_blame_range", "git_file_history", "git_stash_diff"],
       commandItems: ["/blame", "/file-history"],
       hookItems: ["PreToolUse:Bash"],
-      uiItems: ["Diff 侧栏扩展"],
+      uiItems: [zh ? "Diff 侧栏扩展" : "Diff sidebar extension"],
     },
     {
       kind: "plugin",
       name: "browser-lab",
-      src: "本地目录 · ~/omp-plugins/browser-lab",
+      src: zh ? "本地目录 · ~/omp-plugins/browser-lab" : "Local dir · ~/omp-plugins/browser-lab",
       status: "error",
       tools: 0,
       commands: 0,
       hooks: 0,
       ui: false,
-      err: "加载失败：manifest.json 缺少 \"omp\" 字段",
+      err: zh ? "加载失败：manifest.json 缺少 \"omp\" 字段" : "Load failed: manifest.json is missing \"omp\" field",
     },
   ];
 }

@@ -19,12 +19,14 @@ import {
   taskJobs,
   toolFields,
   toolKind,
+  toolActionsView,
 } from "./toolMeta";
 import { ToolCardScroll } from "./useToolCardFollowScroll";
 import { CompletionRing, JobTile, type JobTileData } from "./JobWidget";
 import { MarkdownText } from "./markdown";
 import type { JobWidgetView } from "@omp-studio/studio-protocol";
 import { ComputerToolMedia } from "../computer/ComputerToolMedia";
+import { ActionsSteps } from "./ActionsSteps";
 
 const ToolCardLive = createContext(false);
 
@@ -33,9 +35,10 @@ function ScrollPane(props: Omit<ComponentProps<typeof ToolCardScroll>, "follow">
 }
 
 export function TruncationMark() {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   return (
-    <span className="chip gray xs" role="note" aria-label="已截断">
-      已截断
+    <span className="chip gray xs" role="note" aria-label={zh ? "已截断" : "Truncated"}>
+      {zh ? "已截断" : "Truncated"}
     </span>
   );
 }
@@ -62,12 +65,15 @@ function Kv({ pairs }: { pairs: ReadonlyArray<readonly [string, JsonValue | stri
   );
 }
 
-function MediaList({ value, alt = "Image / 图片" }: { value: unknown; alt?: string }) {
+function MediaList({ value, alt }: { value: unknown; alt?: string }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const items = Array.isArray(value) ? value : value === undefined ? [] : [value];
-  return items.length === 0 ? null : <div className="tool-media-list">{items.slice(0, 8).map((item, i) => <RasterPreview key={i} value={item} alt={alt} />)}</div>;
+  const resolvedAlt = alt ?? (zh ? "图片" : "Image");
+  return items.length === 0 ? null : <div className="tool-media-list">{items.slice(0, 8).map((item, i) => <RasterPreview key={i} value={item} alt={resolvedAlt} />)}</div>;
 }
 
 function ToolMedia({ tool }: { tool: ToolView }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const data = jsonRecord(tool.result?.data);
   const computer = hasComputerMedia(tool);
   const items = useMemo(() => computer ? computerToolMedia(tool) : [], [computer, tool]);
@@ -76,7 +82,7 @@ function ToolMedia({ tool }: { tool: ToolView }) {
     {computer ? <ComputerToolMedia items={items} /> : toolKind(tool) !== "eval" ? <MediaList value={data?.media} /> : null}
     {graphics.images.map((image, index) => <TerminalGraphicView key={index} image={image} />)}
     {graphics.errors.map((error, index) => <p role="status" key={index}>{error}</p>)}
-    {typeof data?.mediaOmitted === "number" ? <p role="status">{data.mediaOmitted} image(s) omitted: unsupported format or size limit / 图片超限或格式不受支持</p> : null}
+    {typeof data?.mediaOmitted === "number" ? <p role="status">{zh ? `${data.mediaOmitted} 张图片因超出大小限制或格式不受支持已省略` : `${data.mediaOmitted} image(s) omitted: unsupported format or size limit`}</p> : null}
   </>;
 }
 
@@ -305,6 +311,7 @@ function RichText({ text }: { text: string }) {
 }
 
 function ReadBody({ tool }: { tool: ToolView }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const fields = toolFields(tool);
   const offset = jsonNumber(fields.offset) ?? jsonNumber(fields.startLine);
   const displayContent = jsonRecord(fields.displayContent);
@@ -314,27 +321,28 @@ function ReadBody({ tool }: { tool: ToolView }) {
   const markdown = markdownLines?.slice(0, TOOL_ROWS_MAX).join("\n");
   return (
     <>
-      <Kv pairs={[["行", fields.lines ?? fields.totalLines], ["编码", fields.encoding], ["大小", fields.size ?? fields.fileSize], ["问题", fields.q ?? fields.question]]} />
+      <Kv pairs={[[zh ? "行" : "Lines", fields.lines ?? fields.totalLines], [zh ? "编码" : "Encoding", fields.encoding], [zh ? "大小" : "Size", fields.size ?? fields.fileSize], [zh ? "问题" : "Query", fields.q ?? fields.question]]} />
       {markdown !== undefined ? <ScrollPane className="tc-markdown tool-card-scroll" data-tool-scroll="both"><MarkdownText text={markdown} />{markdownLines && markdownLines.length > TOOL_ROWS_MAX ? <OmittedRows count={markdownLines.length - TOOL_ROWS_MAX} /> : null}</ScrollPane> : preview ? <CodeLines lines={preview} start={offset ?? 1} /> : summary ? <div className="tc-summary">{summary}</div> : tool.output ? <CodeLines lines={tool.output.split("\n")} start={offset ?? 1} /> : null}
-      <MediaList value={fields.media ?? fields.image ?? fields.images} alt="读取结果" />
+      <MediaList value={fields.media ?? fields.image ?? fields.images} alt={zh ? "读取结果" : "Read output"} />
     </>
   );
 }
 
 function WriteBody({ tool }: { tool: ToolView }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const fields = toolFields(tool);
   const preview = stringLines(fields.preview) ?? contentLines(fields.content);
   const created = fields.created === true ? true : fields.created === false ? false : undefined;
   const lines = jsonNumber(fields.lines) ?? preview?.length;
-  const operation = created === true ? "新建" : created === false ? "覆盖" : "写入";
+  const operation = created === true ? (zh ? "新建" : "Created") : created === false ? (zh ? "覆盖" : "Overwrote") : (zh ? "写入" : "Wrote");
   return (
     <>
       <Kv pairs={[
-        [operation, lines !== undefined ? `${lines} 行` : ""],
-        ["编码", fields.encoding],
+        [operation, lines !== undefined ? (zh ? `${lines} 行` : `${lines} lines`) : ""],
+        [zh ? "编码" : "Encoding", fields.encoding],
       ]} />
       {preview ? <CodeLines lines={preview} /> : null}
-      {fields.executable === true ? <div className="tc-note">已设为可执行</div> : null}
+      {fields.executable === true ? <div className="tc-note">{zh ? "已设为可执行" : "Marked executable"}</div> : null}
     </>
   );
 }
@@ -410,6 +418,7 @@ function EditBody({ tool }: { tool: ToolView }) {
 }
 
 function BashBody({ tool }: { tool: ToolView }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const fields = toolFields(tool);
   const meta = jsonRecord(fields.meta), minimized = jsonRecord(meta?.minimized), truncation = jsonRecord(meta?.truncation), columns = jsonRecord(jsonRecord(meta?.limits)?.columnTruncated);
   const cmd = jsonString(fields.cmd) ?? jsonString(fields.command) ?? jsonString(fields.target) ?? "";
@@ -436,7 +445,7 @@ function BashBody({ tool }: { tool: ToolView }) {
       <ShellView toolCallId={tool.toolCallId} running={running} maxRows={TOOL_ROWS_MAX} />
       <div className="tc-foot">
         {running ? (
-          <span className="chip blue xs">运行中</span>
+          <span className="chip blue xs">{zh ? "运行中" : "Running"}</span>
         ) : (
           <span className={`chip ${failed ? "red" : "green"} xs`}>
             {exit !== undefined ? `exit ${exit}` : failed ? "failed" : "exit 0"}
@@ -451,6 +460,7 @@ function BashBody({ tool }: { tool: ToolView }) {
 }
 
 function AskBody({ tool }: { tool: ToolView }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const fields = toolFields(tool);
   const question = jsonString(fields.question) ?? jsonString(fields.prompt) ?? jsonString(fields.target) ?? "";
   const picked = askAnswer(tool);
@@ -475,7 +485,7 @@ function AskBody({ tool }: { tool: ToolView }) {
   if (picked && !options.some((option) => option.label === picked)) {
     options.push({ label: picked, selected: true, rec: false });
   }
-  if (!options.length && !question) return <div className="tc-note">无回答</div>;
+  if (!options.length && !question) return <div className="tc-note">{zh ? "无回答" : "No answer"}</div>;
   return (
     <div className="tc-ask">
       {question ? <div className="ask-q">{question}</div> : null}
@@ -487,8 +497,8 @@ function AskBody({ tool }: { tool: ToolView }) {
                 {option.selected ? <Icon name="check" extra="sm" /> : null}
               </span>
               <span className="ask-label">{option.label}</span>
-              {option.rec ? <span className="chip purple xs">推荐</span> : null}
-              {option.selected ? <span className="ask-chosen">已选</span> : null}
+              {option.rec ? <span className="chip purple xs">{zh ? "推荐" : "Recommended"}</span> : null}
+              {option.selected ? <span className="ask-chosen">{zh ? "已选" : "Selected"}</span> : null}
             </div>
           ))}
         </div>
@@ -778,7 +788,7 @@ function EvalBody({ tool }: { tool: ToolView }) {
   return (
     <div className="tc-eval">
       <Kv pairs={[["status", fields.status], ["id", fields.id], ["duration", fields.durationMs]]} />
-      {!hasComputerMedia(tool) ? <MediaList value={fields.media ?? fields.image ?? fields.images ?? fields.screenshot ?? (fields.screenshotData !== undefined ? { data: fields.screenshotData, mimeType: fields.mimeType } : undefined)} alt="评估结果" /> : null}
+      {!hasComputerMedia(tool) ? <MediaList value={fields.media ?? fields.image ?? fields.images ?? fields.screenshot ?? (fields.screenshotData !== undefined ? { data: fields.screenshotData, mimeType: fields.mimeType } : undefined)} alt={resolvedLanguage === "zh" ? "评估结果" : "Evaluation result"} /> : null}
       {cells.map((entry, index) => {
         const cell = jsonRecord(entry) ?? {};
         const code = jsonString(cell.code) ?? "";
@@ -815,9 +825,12 @@ function EvalBody({ tool }: { tool: ToolView }) {
 
 function GithubBody({ tool }: { tool: ToolView }) {
   const fields = toolFields(tool);
+  const actions = toolActionsView(tool);
+  const { resolvedLanguage } = useI18n();
   return (
     <>
       <Kv pairs={[["op", fields.op], ["repo", fields.repo], ["pr", fields.pr]]} />
+      {actions ? <ActionsSteps view={actions} zh={resolvedLanguage === "zh"} /> : null}
       {fields.output !== undefined ? <JsonBlock value={fields.output} /> : <DefaultBody tool={tool} />}
     </>
   );
@@ -854,6 +867,7 @@ function LspBody({ tool }: { tool: ToolView }) {
 }
 
 function InspectBody({ tool }: { tool: ToolView }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const fields = toolFields(tool);
   const answer = jsonString(fields.answer) ?? jsonString(fields.output);
   return (
@@ -861,7 +875,7 @@ function InspectBody({ tool }: { tool: ToolView }) {
       <Kv pairs={[["mime", fields.mime], ["model", fields.model]]} />
       {jsonString(fields.question) ? <div className="tc-summary">{jsonString(fields.question)}</div> : null}
       {answer ? <div className="tc-answer">{answer}</div> : null}
-      <MediaList value={fields.media ?? fields.image ?? fields.images} alt="图片问题结果" />
+      <MediaList value={fields.media ?? fields.image ?? fields.images} alt={zh ? "图片问题结果" : "Image inspection result"} />
     </>
   );
 }
@@ -1045,6 +1059,7 @@ function TodoBody({ tool }: { tool: ToolView }) {
 }
 
 function WebSearchBody({ tool }: { tool: ToolView }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const fields = toolFields(tool);
   const data = jsonRecord(tool.result?.data);
   const response = jsonRecord(data?.response) ?? jsonRecord(fields.response) ?? {};
@@ -1065,7 +1080,7 @@ function WebSearchBody({ tool }: { tool: ToolView }) {
   return (
     <>
       <Kv pairs={[["provider", provider], ["sources", cites.length]]} />
-      {failures.length ? <details className="tc-note"><summary>搜索回退 / Search fallbacks · {failures.length}</summary>{failures.map((item, index) => { const failure = jsonRecord(item); return <p key={index}><strong>{jsonString(failure?.label) ?? jsonString(failure?.provider)}</strong> · {jsonNumber(failure?.status)} {jsonString(failure?.reason)}</p>; })}</details> : null}
+      {failures.length ? <details className="tc-note"><summary>{zh ? "搜索回退" : "Search fallbacks"} · {failures.length}</summary>{failures.map((item, index) => { const failure = jsonRecord(item); return <p key={index}><strong>{jsonString(failure?.label) ?? jsonString(failure?.provider)}</strong> · {jsonNumber(failure?.status)} {jsonString(failure?.reason)}</p>; })}</details> : null}
       {answer ? <div className="tc-answer">{answer}</div> : null}
       {cites.length > 0 ? <div className="tc-cites">
         {cites.map((entry, index) => {

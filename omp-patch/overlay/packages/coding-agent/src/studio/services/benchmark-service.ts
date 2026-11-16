@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
-import type { BenchDependencies, BenchTableRow } from "../../cli/bench-cli";
+import { streamSimple } from "@oh-my-pi/pi-ai";
+import type { Api, Model } from "@oh-my-pi/pi-catalog/types";
+import { runBenchCommand, type BenchDependencies, type BenchTableRow } from "../../cli/bench-cli";
 import type { AgentSession } from "../../session/agent-session";
 import type {
+	BenchmarkAccounts,
 	BenchmarkModelResult,
 	BenchmarkOperation,
 	BenchmarkRun,
@@ -79,10 +82,28 @@ export class StudioBenchmarkService {
 	async execute(operation: BenchmarkOperation): Promise<unknown> {
 		if (this.#disposed || operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "Benchmarks require the current active session");
+		if (operation.kind === "benchmarks.accounts.read") {
+			const auth = this.session.modelRegistry.authStorage;
+			await auth.credentials.revalidate();
+			if (this.#disposed || operation.sessionId !== this.session.sessionId)
+				throw new SessionControlError("COMMAND_BLOCKED", "The benchmark session changed");
+			return {
+				providerId: operation.providerId,
+				accounts: auth.oauth.accounts(operation.providerId).map((account, index) => ({
+					account: index + 1,
+					credentialId: account.credentialId,
+					label: sanitizeText(
+						[account.email ?? account.accountId ?? `Account ${index + 1}`, account.orgName]
+							.filter(Boolean)
+							.join(" · "),
+					),
+				})),
+			} satisfies BenchmarkAccounts;
+		}
 		const result = this.#execute(operation);
 		return structuredClone(result);
 	}
-	#execute(operation: BenchmarkOperation): unknown {
+	#execute(operation: Exclude<BenchmarkOperation, { kind: "benchmarks.accounts.read" }>): unknown {
 		if (operation.kind === "benchmarks.list")
 			return {
 				runs: [...this.#runs.values()]
@@ -145,13 +166,11 @@ export class StudioBenchmarkService {
 		this.#runs.delete(state.run.id);
 		return { closed: true };
 	}
-	async #run(state: RunState, catalog: ReturnType<AgentSession["modelRegistry"]["getAll"]>): Promise<void> {
+	async #run(state: RunState, catalog: Model<Api>[]): Promise<void> {
 		const registry = this.session.modelRegistry;
 		const cwd = this.session.sessionManager.getCwd();
 		const settings = this.session.settings;
 		try {
-			const { runBenchCommand } = await import("../../cli/bench-cli");
-			const { streamSimple } = await import("@oh-my-pi/pi-ai");
 			const stream = this.dependencies.streamSimple ?? streamSimple;
 			const spec: BenchmarkSpec = state.run.spec;
 			await runBenchCommand(
@@ -174,13 +193,17 @@ export class StudioBenchmarkService {
 								}),
 						...(spec.maxTokens === undefined ? {} : { maxTokens: spec.maxTokens }),
 						...(spec.prompt ? { prompt: spec.prompt } : {}),
+						...(spec.serviceTier ? { serviceTier: spec.serviceTier } : {}),
+						...(spec.account ? { account: spec.account.account } : {}),
 					},
 				},
 				{
 					...this.dependencies,
 					signal: state.controller.signal,
+					expectedAccountCredentialIds: spec.account?.credentialIds,
 					createRuntime: async () => ({
 						settings,
+						oauth: registry.authStorage.oauth,
 						modelRegistry: {
 							getAll: () => catalog,
 							getAvailable: () => catalog,

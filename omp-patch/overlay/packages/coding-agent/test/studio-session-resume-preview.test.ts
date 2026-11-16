@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { TempDir, getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils";
 import { Settings } from "../src/config/settings";
 import type { AgentSession } from "../src/session/agent-session";
@@ -59,3 +60,82 @@ test("resume preview uses the saved native conversation and configured scope wit
 		await temp.remove();
 	}
 });
+
+for (const stranded of [false, true]) {
+	test(`resume preparation keeps missing recorded cwd separate from ${stranded ? "a native-proven current workspace" : "an explicitly chosen execution workspace"}`, async () => {
+		const temp = TempDir.createSync("@studio-resume-cwd-");
+		const originalAgentDir = getAgentDir();
+		const originalEnv = process.env.PI_CODING_AGENT_DIR;
+		let manager: SessionManager | undefined;
+		let service: StudioSessionWorktreesService | undefined;
+		try {
+			setAgentDir(temp.join("agent"));
+			const recordedCwd = temp.join("removed-worktree");
+			const executionCwd = temp.join("chosen-workspace");
+			await fs.mkdir(recordedCwd);
+			await fs.mkdir(executionCwd);
+			// A native /wt session can retain the originating checkout's bucket.
+			const currentCwd = stranded ? executionCwd : recordedCwd;
+			manager = SessionManager.create(recordedCwd, SessionManager.getDefaultSessionDir(currentCwd));
+			manager.appendMessage({ role: "user", content: "Keep my saved conversation", timestamp: 1 });
+			manager.appendMessage(makeAssistantMessage());
+			await manager.flush();
+			const sessionFile = manager.getSessionFile()!;
+			const targetSessionId = manager.getSessionId();
+			await manager.close();
+			manager = undefined;
+			const original = await Bun.file(sessionFile).text();
+			const session = {
+				sessionId: "reader",
+				sessionManager: { getCwd: () => currentCwd },
+				settings: Settings.isolated(),
+			} as unknown as AgentSession;
+			service = new StudioSessionWorktreesService(session);
+			const operation = {
+				kind: "worktrees.session.resume.prepare" as const,
+				sessionId: session.sessionId,
+				targetSessionId,
+				scope: "directory" as const,
+			};
+			// A still-existing saved directory cannot be silently re-rooted elsewhere.
+			await expect(service.execute({ ...operation, executionCwd })).rejects.toMatchObject({
+				code: "INVALID_ARGUMENT",
+			});
+			await fs.rm(recordedCwd, { recursive: true });
+			const missing = (await service.execute(
+				operation,
+			)) as SessionWorktreeResultMap["worktrees.session.resume.prepare"];
+			expect(missing.recordedCwd).toBe(recordedCwd);
+			expect(missing.cwd).toBe(recordedCwd);
+			expect(missing.requiresWorkspaceSelection).toBe(!stranded);
+			expect(missing.executionCwd).toBe(stranded ? await fs.realpath(executionCwd) : undefined);
+			await expect(
+				service.execute({ ...operation, executionCwd: path.join(executionCwd, "missing") }),
+			).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+			const chosen = (await service.execute({
+				...operation,
+				executionWorkspaceId: "chosen",
+				executionCwd,
+			})) as SessionWorktreeResultMap["worktrees.session.resume.prepare"];
+			expect(chosen).toMatchObject({
+				targetSessionId,
+				requestedSessionId: targetSessionId,
+				recordedCwd,
+				cwd: recordedCwd,
+				executionCwd: await fs.realpath(executionCwd),
+				requiresWorkspaceSelection: false,
+			});
+			expect(await fs.lstat(recordedCwd).catch(() => undefined)).toBeUndefined();
+			expect(await Bun.file(sessionFile).text()).toBe(original);
+			expect(session.sessionId).toBe("reader");
+		} finally {
+			service?.dispose();
+			await manager?.close();
+			closeSessionIndex();
+			setAgentDir(originalAgentDir);
+			if (originalEnv === undefined) delete process.env.PI_CODING_AGENT_DIR;
+			else process.env.PI_CODING_AGENT_DIR = originalEnv;
+			await temp.remove();
+		}
+	});
+}

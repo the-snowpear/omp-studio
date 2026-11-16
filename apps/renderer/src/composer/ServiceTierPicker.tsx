@@ -4,16 +4,16 @@ import type { SessionTier, SessionTierState } from "@omp-studio/studio-protocol"
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
-import { PREVIEW_SERVICE_TIER } from "../preview/sessionGuiPreview";
+import { getPreviewServiceTier } from "../preview/sessionGuiPreview";
 import { Icon } from "../icons";
 
 export function ServiceTierPicker({ client, sessionId, available, modelKey }: { client: StudioClient; sessionId: string | undefined; available: boolean; modelKey: string }) {
  const {preview,marks}=usePreviewMode();const {resolvedLanguage}=useI18n();const zh=resolvedLanguage==="zh";
  const [state,setState]=useState<SessionTierState>();const [open,setOpen]=useState(false);const [busy,setBusy]=useState(false);const [error,setError]=useState("");const epoch=useRef(0);
- useEffect(()=>{const generation=++epoch.current;setState(preview?PREVIEW_SERVICE_TIER:undefined);setError("");setBusy(false);
+ useEffect(()=>{const generation=++epoch.current;setState(preview?getPreviewServiceTier(zh):undefined);setError("");setBusy(false);
   if(!preview&&available&&sessionId){setBusy(true);void (async()=>{try{const handle=await client.command("session.tier.get",{sessionId});const value=await waitReceipt<{result:SessionTierState}>(client,handle.requestId);if(epoch.current===generation)setState(value.result);}catch(cause){if(epoch.current===generation)setError(hostErrorMessage(cause,zh?"档位不可用":"Service tiers unavailable"));}finally{if(epoch.current===generation)setBusy(false);}})();}
   return ()=>{epoch.current++;};
- },[client,sessionId,modelKey,available,preview]);
+ },[client,sessionId,modelKey,available,preview,zh]);
  const labels={standard:zh?"标准":"Standard",slow:"Slow",priority:"Priority",ultrafast:"Ultrafast"};
  const change=async(tier:SessionTier)=>{if(!state||busy)return;if(preview){setState({...state,configured:tier,effective:tier});return;}if(!sessionId||!available)return;const generation=epoch.current;setBusy(true);setError("");try{const handle=await client.command("session.tier.set",{sessionId:sessionId as SessionId,selector:state.selector,tier});const value=await waitReceipt<{result:SessionTierState}>(client,handle.requestId);if(epoch.current===generation)setState(value.result);}catch(cause){if(epoch.current===generation)setError(hostErrorMessage(cause,zh?"档位切换失败":"Could not change service tier"));}finally{if(epoch.current===generation)setBusy(false);}};
  return <div className="composer-tier" style={{position:"relative"}}>

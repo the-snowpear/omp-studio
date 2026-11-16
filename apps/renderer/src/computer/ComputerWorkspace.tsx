@@ -34,7 +34,10 @@ export function ComputerWorkspace(props: ComputerPaneProps) {
   const live = isVisible && available && !!props.sessionId && !preview;
   const state = useSyncExternalStore(live ? source.subscribe : noSubscribe, preview ? emptySnapshot : source.getSnapshot);
   const mediaRevision = source.mediaRevision;
-  const [demo, setDemo] = useState(() => buildComputerPreview(sessionId, props.previewScenario));
+  const [demo, setDemo] = useState(() => buildComputerPreview(sessionId, props.previewScenario, zh));
+  useEffect(() => {
+    if (preview) setDemo(buildComputerPreview(sessionId, props.previewScenario, zh));
+  }, [preview, sessionId, props.previewScenario, zh]);
   const snapshot = preview ? demo.snapshot : state.snapshot;
   const actions = preview ? demo.actions : state.actions;
   const frames = preview ? demo.snapshot.frames : state.frames;
@@ -191,6 +194,9 @@ export function ComputerWorkspace(props: ComputerPaneProps) {
         {snapshot?.control.foreground === "requested" ? <div className="cw-warning"><span>{foregroundLabel(snapshot.control, zh)}</span><button className="cw-button" disabled={!onRevealApproval} onClick={onRevealApproval}>{zh ? "前往原生审批" : "Go to native approval"}</button></div> : null}
         {!preview && (!available || state.loading) ? <p className="cw-subtle" role="status">{!available ? zh ? "当前连接不可用；保留的画面仅供历史参考。" : "Connection unavailable; retained frames are historical only." : zh ? "正在同步电脑状态…" : "Syncing Computer state…"}</p> : null}
         {snapshot?.screen.locked || snapshot?.screen.asleep ? <p className="cw-warning">{zh ? "屏幕已锁定或休眠，额外观察已暂停。已有图像不是当前画面。" : "Screen locked or asleep; extra observation paused. Existing images are not current."}</p> : null}
+        {snapshot?.capabilities.secureInput ? <p className="cw-warning cw-secure" role="status"><Icon name="lock" extra="sm" /><span>{zh
+          ? `${snapshot.capabilities.secureInputApp ? `「${snapshot.capabilities.secureInputApp}」` : "某个应用"}正在使用安全输入，系统隐藏了按键：全局 Esc 暂时无法停止电脑操作，请用上方「停止电脑操作」。`
+          : `${snapshot.capabilities.secureInputApp ?? "An app"} has Secure Input on, so the system hides keystrokes: the global Escape stop is unavailable. Use "Stop computer actions" above.`}</span></p> : null}
         {error || state.error ? <p className="cw-error" role="alert">{error || state.error}<button className="cw-button" disabled={!live} onClick={() => void source.refresh()}>{zh ? "读取最新状态" : "Read latest state"}</button></p> : null}
         {notice ? <p className="cw-notice" role="status">{notice}</p> : null}
         {selection ? <div className="cw-history-state"><span>{zh ? "正在查看历史" : "Viewing history"}</span><button className="cw-button" onClick={() => { selectionGeneration.current++; setSelection(undefined); setStructure(undefined); setNode(undefined); }}>{zh ? "回到当前" : "Back to current"}</button>{frame?.toolCallId ? <button className="cw-button" onClick={() => void reveal(frame)}>{zh ? "在对话中查看" : "View in conversation"}</button> : null}</div> : null}
@@ -200,8 +206,9 @@ export function ComputerWorkspace(props: ComputerPaneProps) {
         {details ? <div className="cw-details"><h3>{zh ? "诊断与观察详情" : "Diagnostics and observation"}</h3><dl>{[
           [zh ? "执行脚本入口" : "Computer prelude", snapshot ? snapshot.preludeAvailable ? zh ? "可用" : "Available" : zh ? "不可用" : "Unavailable" : undefined],
           [zh ? "后端" : "Backend", snapshot?.backend], [zh ? "截图权限" : "Capture permission", snapshot?.permissions.capture], [zh ? "输入权限" : "Input permission", snapshot?.permissions.input], [zh ? "辅助功能权限" : "Accessibility permission", snapshot?.permissions.accessibility],
-          [zh ? "全局 Esc 停止" : "Global Escape", snapshot ? snapshot.capabilities.globalEscape ? zh ? "可用" : "Available" : zh ? "不可用，请使用此面板停止" : "Unavailable; stop from this panel" : undefined],
-          [zh ? "锁屏与休眠检测" : "Lock and sleep detection", snapshot?.screen.known === true ? zh ? "支持" : "Supported" : zh ? "当前后端不提供可靠检测" : "Not reliably reported by this backend"],
+          [zh ? "全局 Esc 停止" : "Global Escape", snapshot ? snapshot.capabilities.globalEscape ? zh ? "可用" : "Available" : snapshot.capabilities.secureInput ? zh ? `安全输入期间不可用${snapshot.capabilities.secureInputApp ? `（${snapshot.capabilities.secureInputApp}）` : ""}` : `Unavailable during Secure Input${snapshot.capabilities.secureInputApp ? ` (${snapshot.capabilities.secureInputApp})` : ""}` : zh ? "不可用，请使用此面板停止" : "Unavailable; stop from this panel" : undefined],
+          [zh ? "锁屏状态" : "Lock state", snapshot ? (snapshot.screen.lockKnown ?? snapshot.screen.known) === true ? snapshot.screen.locked ? zh ? "已锁定" : "Locked" : zh ? "未锁定" : "Unlocked" : zh ? "未知：后端无法可靠检测，不代表未锁定" : "Unknown: not reliably reported, which does not mean unlocked" : undefined],
+          [zh ? "休眠状态" : "Sleep state", snapshot ? (snapshot.screen.sleepKnown ?? snapshot.screen.known) === true ? snapshot.screen.asleep ? zh ? "休眠中" : "Asleep" : zh ? "未休眠" : "Awake" : zh ? "未知：后端无法可靠检测，不代表已唤醒" : "Unknown: not reliably reported, which does not mean awake" : undefined],
           [zh ? "前台控制" : "Foreground control", foregroundLabel(snapshot?.control, zh)],
           [zh ? "会话停止状态" : "Session stop state", controlLabel(snapshot?.control, zh)],
         ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? (zh ? "未知" : "Unknown")}</dd></div>)}</dl>{snapshot?.reason ? <p>{snapshot.reason}</p> : null}<p className="cw-subtle">{zh ? "默认不额外抓图。自动观察：活动时最多每 2 秒一帧，空闲每 5 秒，连续空闲 30 秒暂停。离开最后一个可见面板后释放观察。" : "No extra capture by default. Opt-in observation: at most every 2 seconds active, 5 seconds idle, paused after 30 seconds idle. The last visible panel releases observation."}</p><button className="cw-button" disabled={!structureAllowed || structureLoading} onClick={() => void readStructure()}>{structureLoading ? zh ? "正在读取结构…" : "Reading structure…" : structure ? zh ? "刷新界面结构" : "Refresh structure" : zh ? "读取界面结构" : "Read interface structure"}</button>{!snapshot?.capabilities.accessibility ? <p className="cw-subtle">{zh ? "此 Runtime 或目标未提供辅助功能结构；截图能力独立保留。" : "This Runtime or target does not provide accessibility structure. Capture remains independent."}</p> : null}{structure ? <ComputerStructure structure={structure} selected={node?.id} onSelect={setNode} zh={zh} /> : null}

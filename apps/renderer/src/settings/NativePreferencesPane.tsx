@@ -361,7 +361,20 @@ export function NativePreferencesPane({
           concern: "关注（concern）",
           blocker: "阻断（blocker）",
         }[String(value)] ?? String(value))
-      : String(value);
+      : ({
+          turn: "Every update",
+          "agent-end": "Final result",
+          off: "Off",
+          strict: "Wait for all",
+          "nf+emoji": "Nerd Font & Emoji",
+          emoji: "Emoji",
+          boring: "Title only",
+          fork: "Side call on current model",
+          tiny: "Title model role",
+          nit: "Nit",
+          concern: "Concern",
+          blocker: "Blocker",
+        }[String(value)] ?? String(value));
   if (!can("preferences.native.get"))
     return (
       <WorkspaceEmpty

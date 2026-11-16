@@ -9,7 +9,28 @@ export interface AccountQuotaScope {
 	shared?: boolean;
 	sharedGroup?: string;
 }
+export type AccountUsageUnit = "percent" | "tokens" | "requests" | "credits" | "usd" | "minutes" | "bytes" | "unknown";
+export interface AccountUsageAmount {
+	unit: AccountUsageUnit;
+	used?: number;
+	limit?: number;
+	remaining?: number;
+}
+export type AccountResetPolicyKey =
+	| "codexResets.autoRedeem5h"
+	| "codexResets.autoRedeemWeekly"
+	| "claudeResets.autoRedeem5h"
+	| "claudeResets.autoRedeemWeekly"
+	| "claudeResets.autoRedeemFable";
+export interface AccountResetPolicy {
+	window: "5h" | "weekly" | "fable";
+	key: AccountResetPolicyKey;
+	mode: "unset" | "yes" | "no";
+	source: "env" | "runtime" | "overlay" | "project" | "global" | "default";
+}
 export interface AccountQuotaWindow {
+	amount?: AccountUsageAmount;
+	resetWindow?: AccountResetPolicy["window"];
 	id: string;
 	label: string;
 	status: "ok" | "warning" | "exhausted" | "unknown";
@@ -46,6 +67,7 @@ export interface AccountRoutingPolicy {
 }
 export interface StudioAccountStatus {
 	policy?: AccountRoutingPolicy;
+	resetPolicies?: AccountResetPolicy[];
 	id: string;
 	provider: string;
 	label: string;

@@ -15,6 +15,9 @@
  */
 
 import type { AsyncJob, AsyncJobFilter, AsyncJobType } from "../../async/job-manager";
+import type { TaskStepState } from "@oh-my-pi/pi-tui/tools/task";
+import type { JobActionsView } from "../job-actions-protocol";
+import { nativeJobTaskRecord, projectJobActions } from "./job-actions";
 import type { JobWidgetView } from "../runtime-features-protocol";
 
 const MAX_ID_LENGTH = 512;
@@ -54,6 +57,10 @@ export interface StudioJobSnapshot {
 	command?: string;
 	/** A running task's own completion estimate, 0–100. */
 	completionPercent?: number;
+	/** Native prompt-group state; sent groups are not assumed complete. */
+	taskSteps?: TaskStepState;
+	/** Native Actions watch associated with this existing job; list snapshots omit log bodies. */
+	actions?: JobActionsView;
 	/** What the job is doing now: a subagent's stage. */
 	stage?: string;
 	/** Live widget of the job (last seen view once it settled). */
@@ -67,27 +74,22 @@ export interface StudioJobAgentLink {
 }
 
 /** Stage and completion estimate a running task job reports for its subagent (upstream `snapshotJobs`). */
-export function taskJobProgress(job: AsyncJob): { stage?: string; completionPercent?: number } {
+export function taskJobProgress(job: AsyncJob): {
+	stage?: string;
+	completionPercent?: number;
+	taskSteps?: TaskStepState;
+} {
 	if (job.type !== "task") return {};
-	const progress = job.latestDetails?.progress;
-	if (!Array.isArray(progress)) return {};
-	let record: Record<string, unknown> | undefined;
-	for (const item of progress) {
-		if (!item || typeof item !== "object") continue;
-		const candidate = item as Record<string, unknown>;
-		record ??= candidate;
-		if (candidate.id === job.id) {
-			record = candidate;
-			break;
-		}
-	}
+	const record = nativeJobTaskRecord(job);
 	const stage = typeof record?.stage === "string" ? record.stage.trim().slice(0, 240) : "";
 	const percent = record?.completionPercent;
+	const taskSteps = record?.taskSteps;
 	return {
 		...(stage ? { stage } : {}),
 		...(job.status === "running" && typeof percent === "number" && Number.isFinite(percent)
 			? { completionPercent: Math.min(100, Math.max(0, percent)) }
 			: {}),
+		...(taskSteps && typeof taskSteps === "object" ? { taskSteps: taskSteps as TaskStepState } : {}),
 	};
 }
 
@@ -301,6 +303,7 @@ export class StudioJobService {
 		const summary = (job.resultText ?? job.errorText ?? "").trim();
 		const command = job.process?.command;
 		const widget = this.#widget(job);
+		const actions = projectJobActions(job);
 		return {
 			jobId: job.id,
 			generation,
@@ -319,6 +322,7 @@ export class StudioJobService {
 				: {}),
 			...(command ? { command: command.length > 4096 ? `${command.slice(0, 4096)}…` : command } : {}),
 			...taskJobProgress(job),
+			...(actions ? { actions } : {}),
 			...(widget ? { widget } : {}),
 		};
 	}

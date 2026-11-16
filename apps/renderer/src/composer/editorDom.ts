@@ -1,6 +1,7 @@
 import { iconSvg } from "../icons";
 import { chipPayload, chipIconName, parseChipPayload } from "./ingest";
-import { normalizeDoc } from "./serialize";
+import { isZh } from "../i18n";
+import { defaultImageChipLabel, normalizeDoc } from "./serialize";
 import { splitChipLabel, type ComposerChip, type ComposerDoc, type ComposerNode, type PromptImage } from "./types";
 import { modeChipConflictsWith } from "./commands";
 
@@ -15,7 +16,7 @@ function escapeHtml(value: string): string {
 }
 
 function removeChipLabel(label: string): string {
-  return `移除胶囊 ${label}`;
+  return isZh() ? `移除胶囊 ${label}` : `Remove chip ${label}`;
 }
 
 /**
@@ -165,14 +166,14 @@ export function writeDoc(editor: HTMLElement, doc: ComposerDoc, images: Map<stri
  * would otherwise leave a label that disagrees with the `[图N]` marker that
  * `serializeDoc` emits from the attachment order.
  */
-export function renumberImageChips(editor: HTMLElement): void {
+export function renumberImageChips(editor: HTMLElement, zh = isZh()): void {
   const chips = editor.querySelectorAll<HTMLElement>(".cm-chip-image");
   let index = 0;
   for (const chip of chips) {
     const parsed = parseChipPayload(chip.dataset.chip ?? "");
     if (!parsed) continue;
     index += 1;
-    const label = `图${index}`;
+    const label = defaultImageChipLabel(index, zh);
     if (parsed.label === label) continue;
     chip.dataset.chip = chipPayload({ ...parsed, label });
     writeChipLabel(chip, label);
@@ -299,9 +300,11 @@ export function insertNodesAtCaret(editor: HTMLElement, nodes: Node[]): void {
     return;
   }
   const range = selection.getRangeAt(0);
+  const fragment = document.createDocumentFragment();
+  for (const node of nodes) fragment.append(node);
+  const last = fragment.lastChild;
   range.deleteContents();
-  for (const node of [...nodes].reverse()) range.insertNode(node);
-  const last = nodes[nodes.length - 1];
+  range.insertNode(fragment);
   if (last) placeCaretAfter(last);
 }
 

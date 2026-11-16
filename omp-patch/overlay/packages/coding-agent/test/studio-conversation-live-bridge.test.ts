@@ -606,6 +606,7 @@ describe("conversation events enter Studio Bridge", () => {
 			sessionManager: manager,
 			session,
 			services: {
+				workbench: { views: { cancelClose: () => {} } },
 				conversation,
 				transcript,
 				pause: new StudioPauseService(new AgentPauseGate()),
@@ -616,7 +617,11 @@ describe("conversation events enter Studio Bridge", () => {
 					onChange: () => () => {},
 					dispose: () => {},
 				},
-				tree: { getTree: () => ({ leafId: null, roots: [] }), navigate: async () => ({}) },
+				tree: {
+					getTree: () => ({ leafId: null, roots: [] }),
+					navigate: async () => ({}),
+					cancelReanswer: () => {},
+				},
 				fork: { fork: async () => ({ forked: true, sessionId: manager.getSessionId() }) },
 				commands: new StudioCommandManifestService(session as never),
 				agents: { list: () => [], onChange: () => () => {} },

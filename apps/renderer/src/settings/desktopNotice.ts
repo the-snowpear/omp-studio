@@ -11,6 +11,7 @@
  */
 
 import { getAppSettings } from "./appSettings";
+import { isZh } from "../i18n";
 
 export type DesktopNoticeKind = "task" | "error" | "ask" | "longTask";
 
@@ -42,7 +43,7 @@ export function notifyAskConfirmation(interactionId: string, leaseGeneration: nu
   const key = askNoticeKey(interactionId, leaseGeneration);
   if (lastAskNoticeKey === key) return;
   lastAskNoticeKey = key;
-  desktopNotice("ask", "等待确认", title);
+  desktopNotice("ask", isZh() ? "等待确认" : "Confirmation required", title);
 }
 
 export function clearAskConfirmationNotice(interactionId: string, leaseGeneration: number): void {

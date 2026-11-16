@@ -9,6 +9,70 @@ import {
 
 import { JobWidgets } from "../src/job-widgets/registry";
 import { TextTap } from "../src/job-widgets/text-tap";
+import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
+import { type } from "@oh-my-pi/omptype";
+import type { GhRunWatchViewDetails } from "@oh-my-pi/pi-tui/tools/github";
+import { buildRunWatchRunDetails } from "../src/tools/gh-run-watch";
+import { callSessionTool, type JsStatusEvent } from "../src/eval/js/tool-bridge";
+import { Settings } from "../src/config/settings";
+import type { ToolSession } from "../src/tools";
+import type { AgentSession } from "../src/session/agent-session";
+import { inspectStudioJob } from "../src/studio/services/job-inspect";
+import { projectActionsWatch } from "../src/studio/services/job-actions";
+
+function nativeWatch(): GhRunWatchViewDetails {
+	return {
+		mode: "run",
+		state: "completed",
+		repo: "owner/project",
+		run: buildRunWatchRunDetails(
+			{
+				id: 41,
+				workflowName: "Checks",
+				status: "in_progress",
+				jobs: [
+					{
+						id: 42,
+						name: "renderer",
+						status: "completed",
+						conclusion: "failure",
+						startedAt: "2026-11-12T11:59:00.000Z",
+						completedAt: "2026-11-12T12:00:05.000Z",
+						steps: [
+							{ number: 3, name: "Upload", status: "pending" },
+							{
+								number: 2,
+								name: "Check types",
+								status: "completed",
+								conclusion: "failure",
+								startedAt: "2026-11-12T12:00:01.000Z",
+								completedAt: "2026-11-12T12:00:04.000Z",
+							},
+							{
+								number: 1,
+								name: "Cache",
+								status: "completed",
+								conclusion: "success",
+								startedAt: "2026-11-12T12:00:00.000Z",
+								completedAt: "2026-11-12T12:00:00.000Z",
+							},
+						],
+					},
+					{ id: 43, name: "queued job", status: "queued", steps: [] },
+				],
+			},
+			Date.parse("2026-11-12T12:00:05.000Z"),
+		),
+		failedLogs: [
+			{
+				runId: 41,
+				jobName: "renderer",
+				available: true,
+				tail: "old output\n".repeat(2000) + "\u001b[31mNative step failed\u001b[0m",
+			},
+		],
+	};
+}
 
 const SECRET = "D:/secret/jobs/private.jsonl";
 
@@ -177,6 +241,161 @@ describe("StudioJobService job tree and widgets", () => {
 		expect(row.completionPercent).toBe(100);
 		h.jobs.get("task-1")!.status = "completed";
 		expect(h.service.get("task-1").completionPercent).toBeUndefined();
+	});
+});
+
+describe("native Actions on existing jobs", () => {
+	test("inspects only the task's own watch, preserving native times and bounded failed logs", async () => {
+		const h = fixture();
+		const watch = nativeWatch();
+		const candidate = job("parent-task", {
+			latestDetails: {
+				progress: [
+					{ id: "Sibling", actions: { ...watch, repo: "other/project" }, stage: "other task" },
+					{ id: "Worker", actions: watch, stage: "native watch" },
+				],
+			},
+		});
+		h.jobs.set(candidate.id, candidate);
+		const row = h.service.get(candidate.id);
+		expect(row.actions?.repo).toBe("owner/project");
+		expect(row.stage).toBe("native watch");
+		expect(row.type).toBe("task");
+		expect(row.actions?.failedLogs).toBeUndefined();
+		const steps = row.actions!.runs[0]!.jobs[0]!.steps;
+		expect(steps.map(step => step.number)).toEqual([1, 2, 3]);
+		expect(steps.map(step => step.durationSeconds)).toEqual([0, 3, undefined]);
+		expect(row.actions!.runs[0]!.jobs[0]!.durationSeconds).toBe(65);
+		expect(row.actions!.runs[0]!.jobs[1]!.durationSeconds).toBeUndefined();
+		expect(row.completionPercent).toBeUndefined();
+
+		const session = {
+			inspectAsyncJob: () => ({ pids: [], output: "original process output" }),
+			asyncJobManager: { getJob: (id: string) => h.jobs.get(id) },
+		} as unknown as AgentSession;
+		const inspected = await inspectStudioJob(session, candidate.id);
+		expect(inspected.output).toBe("original process output");
+		const log = inspected.actions?.failedLogs?.[0];
+		expect(log?.jobId).toBe(42);
+		expect(log?.tail?.endsWith("Native step failed")).toBe(true);
+		expect(log?.tail).not.toContain("\u001b");
+		expect(Buffer.byteLength(log?.tail ?? "")).toBeLessThanOrEqual(16 * 1024);
+		expect(inspected.actions?.truncated).toBe(true);
+		candidate.status = "completed";
+		candidate.latestDetails = {
+			progress: [{ id: "Worker", actions: { ...watch, state: "watching" }, stage: "native watch" }],
+			results: [{ id: "Worker", actions: watch }],
+		};
+		const settled = h.service.get(candidate.id);
+		expect(settled.stage).toBe("native watch");
+		expect(settled.actions?.state).toBe("completed");
+	});
+
+	test("does not borrow an unmatched batch member or turn a bash result into a GitHub job", () => {
+		const h = fixture();
+		const watch = nativeWatch();
+		h.jobs.set(
+			"unmatched",
+			job("unmatched", {
+				latestDetails: {
+					progress: [
+						{ id: "Other", actions: watch, stage: "other task" },
+						{ id: "Sibling", actions: watch },
+					],
+				},
+			}),
+		);
+		expect(h.service.get("unmatched").actions).toBeUndefined();
+		expect(h.service.get("unmatched").stage).toBeUndefined();
+		h.jobs.set(
+			"eval-parent",
+			job("eval-parent", { type: "eval", agentId: undefined, latestDetails: { actions: watch } }),
+		);
+		expect(h.service.get("eval-parent").type).toBe("eval");
+		expect(h.service.get("eval-parent").actions?.state).toBe("completed");
+		h.jobs.set(
+			"bash-parent",
+			job("bash-parent", { type: "bash", agentId: undefined, latestDetails: { actions: watch } }),
+		);
+		expect(h.service.get("bash-parent").actions).toBeUndefined();
+	});
+
+	test("keeps failure-log identities even when the workflow/step display budget omits their run", () => {
+		const base = nativeWatch();
+		const { run, ...rest } = base;
+		if (!run) throw new Error("Native fixture has no run");
+		const runs = Array.from({ length: 9 }, (_, index) => ({
+			...run,
+			id: index + 1,
+			jobs: Array.from({ length: 20 }, (_, jobIndex) => ({
+				...run.jobs[0]!,
+				id: index * 100 + jobIndex,
+				name: `job-${jobIndex}`,
+				steps: Array.from({ length: 100 }, (_, number) => ({
+					number: number + 1,
+					name: `step-${number + 1}`,
+					status: "pending",
+				})),
+			})),
+		}));
+		const shown = projectActionsWatch(
+			{
+				...rest,
+				runs,
+				failedLogs: [{ runId: 9, jobName: "job-0", available: true, tail: "last omitted run failed" }],
+			},
+			true,
+		)!;
+		expect(shown.runs).toHaveLength(8);
+		expect(shown.runs.flatMap(value => value.jobs).length).toBeLessThanOrEqual(24);
+		expect(shown.runs.flatMap(value => value.jobs.flatMap(value => value.steps)).length).toBeLessThanOrEqual(96);
+		expect(shown.truncated).toBe(true);
+		expect(shown.failedLogs?.[0]).toMatchObject({ runId: 9, jobId: 800, tail: "last omitted run failed" });
+	});
+
+	test("the eval bridge publishes original watch frames and ignores updates after its foreground call settled", async () => {
+		const started = Promise.withResolvers<void>();
+		const finished = Promise.withResolvers<AgentToolResult>();
+		let update: AgentToolUpdateCallback | undefined;
+		const initial = { ...nativeWatch(), state: "watching" as const };
+		const execute: AgentTool["execute"] = async (_id, _args, _signal, onUpdate) => {
+			update = onUpdate;
+			onUpdate?.({ content: [], details: { watch: initial } });
+			started.resolve();
+			return finished.promise;
+		};
+		const tool = {
+			name: "github",
+			label: "GitHub",
+			description: "Native watch fixture",
+			concurrency: "parallel",
+			parameters: type({ op: "string" }),
+			execute,
+		} as unknown as AgentTool;
+		const session: ToolSession = {
+			cwd: "/isolated",
+			hasUI: false,
+			getSessionFile: () => null,
+			getSessionSpawns: () => null,
+			settings: Settings.isolated(),
+			getToolByName: name => (name === "github" ? tool : undefined),
+		};
+		const events: JsStatusEvent[] = [];
+		const call = callSessionTool("github", { op: "run_watch" }, { session, emitStatus: event => events.push(event) });
+		await started.promise;
+		expect(events.filter(event => event.op === "github_watch")).toHaveLength(1);
+		finished.resolve({
+			content: [{ type: "text", text: "native failure" }],
+			details: { watch: nativeWatch() },
+			isError: true,
+		});
+		await call;
+		const frames = events.filter(event => event.op === "github_watch");
+		const h = fixture();
+		h.jobs.set("eval-job", job("eval-job", { type: "eval", latestDetails: { actions: frames.at(-1)?.watch } }));
+		expect(h.service.get("eval-job").actions?.state).toBe("completed");
+		update?.({ content: [], details: { watch: initial } });
+		expect(events.filter(event => event.op === "github_watch")).toHaveLength(2);
 	});
 });
 

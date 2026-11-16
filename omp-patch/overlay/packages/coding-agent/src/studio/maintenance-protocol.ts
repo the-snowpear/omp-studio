@@ -6,11 +6,30 @@ export interface GcPolicy {
 	staleDays: number;
 	staleKeep: number;
 }
+/** Explicit native replay stripping, separate from the four storage cleanup categories. */
+export interface GcStripOptions {
+	/** Omit to inherit the native gc.stripAfterDays setting. */
+	idleDays?: number;
+}
+export interface GcStripSummary {
+	idleDays: number;
+	/** Native GC covers main transcripts, their child transcripts and archived transcripts. */
+	scope: "sessions-and-archives";
+	/** Top-level sessions scanned; candidates also include child and archived transcripts. */
+	scannedSessions: number;
+	candidates: number;
+	changed: number;
+	records: number;
+	/** Native scan's planned replay-byte removal in JSONL, uncompressed for archives; not reclaimed disk bytes. */
+	bytes: number;
+	skippedActive: number;
+}
 export interface GcSummary {
 	applied: boolean;
 	checkedAt: number;
 	policy: GcPolicy;
 	rows: Array<{ category: GcCategory; candidates: number; changed: number; bytes: number; skippedActive: number }>;
+	strip?: GcStripSummary;
 	errors: string[];
 }
 export interface GcPreview {
@@ -48,7 +67,7 @@ export interface AutoCompressionStatus {
 }
 export type MaintenanceOperation =
 	| { kind: "maintenance.compression.auto.status"; sessionId: string }
-	| { kind: "maintenance.gc.preview"; sessionId: string; categories: GcCategory[] }
+	| { kind: "maintenance.gc.preview"; sessionId: string; categories: GcCategory[]; strip?: GcStripOptions }
 	| { kind: "maintenance.gc.apply"; sessionId: string; token: string }
 	| { kind: "maintenance.gc.status"; sessionId: string }
 	| { kind: "maintenance.session.export"; sessionId: string; format?: "archive" | "html" }
@@ -102,13 +121,18 @@ export function validateMaintenanceOperation(value: unknown): void {
 	if (row.kind === "maintenance.gc.preview") {
 		if (
 			!Array.isArray(row.categories) ||
-			!row.categories.length ||
+			(!row.categories.length && row.strip === undefined) ||
 			row.categories.length > 4 ||
 			new Set(row.categories).size !== row.categories.length ||
 			row.categories.some(cat => !CATEGORIES.includes(cat as string))
 		)
 			throw new Error("Choose cleanup categories");
-	} else if (row.categories !== undefined) throw new Error("Unexpected categories");
+		if (row.strip !== undefined) {
+			const strip = record(row.strip);
+			if (strip.idleDays !== undefined && (!Number.isFinite(strip.idleDays) || (strip.idleDays as number) < 0))
+				throw new Error("Replay stripping requires a non-negative idle day count");
+		}
+	} else if (row.categories !== undefined || row.strip !== undefined) throw new Error("Unexpected categories");
 	if (row.kind === "maintenance.gc.apply") text(row.token, 128);
 	else if (row.token !== undefined) throw new Error("Unexpected cleanup token");
 }

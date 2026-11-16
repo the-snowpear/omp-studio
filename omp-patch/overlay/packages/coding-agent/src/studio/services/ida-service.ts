@@ -5,6 +5,7 @@ import type { AgentSession } from "../../session/agent-session";
 import { acquireIdaDatabase, listIdaDatabases, resolveIdaRuntime } from "../../ida";
 import { type IdaOperation, type IdaEdit, type IdaRow } from "../ida-protocol";
 import { SessionControlError } from "./session-control-service";
+import { runtimeText } from "../locale";
 export interface StudioIdaDb {
 	id: string;
 	label: string;
@@ -193,7 +194,7 @@ export class StudioIdaService {
 					throw Error("IDA input changed since review");
 				this.#assert(op.sessionId);
 				await this.port.open(file.file, controller.signal);
-				return { text: "Opened / 已打开" };
+				return { text: runtimeText("已打开", "Opened") };
 			}
 			const db = await this.#db(edit.dbId);
 			const { action, dbId, ...params } = edit;

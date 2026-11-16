@@ -22,11 +22,13 @@ import {
   type PointerEvent,
 } from "react";
 
+import { isZh, pickLocale, useI18n } from "../i18n";
 import type { ComposerChip, ComposerSnapshot, MentionCandidate, PromptImage } from "./types";
 import type { PredictionResult } from "@omp-studio/studio-protocol";
 import { emptySnapshot, newChipId } from "./types";
-import { snapshotFromDoc, snapshotIsEmpty, displayDocFromSerializedText } from "./serialize";
+import { defaultImageChipLabel, localizeImageChipLabel, snapshotFromDoc, snapshotIsEmpty, displayDocFromSerializedText } from "./serialize";
 import { fileToPromptImage, imagePreviewUrl, isImageFile } from "./ingest";
+import { richPasteFromHtml, richPasteHasText, type RichPaste } from "./richPaste";
 import {
   chipRemoveTarget,
   createChipElement,
@@ -69,6 +71,8 @@ export type ChipComposerHandle = ComposerDictationHandle & {
   getSnapshot(): ComposerSnapshot;
   setSnapshot(snapshot: ComposerSnapshot, options?: { preserveFocus?: boolean }): void;
   insertChip(chip: Omit<ComposerChip, "id"> & { id?: string }): void;
+  /** Inserts text at the last caret (or the end), keeping serialized references as capsules. Never sends. */
+  insertText(text: string): void;
   removeSkillChip(name: string): void;
   openFilePicker(): void;
   waitForAttachments?(): Promise<boolean>;
@@ -204,6 +208,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   },
   ref,
 ) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const document = useSurfaceDocument(), window = surfaceWindow(document);
   const executionTarget = useExecutionTarget();
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -218,6 +224,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     return () => document.removeEventListener("selectionchange", remember);
   }, [document, window]);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  /** Set by Ctrl/Cmd+Shift+V so the next paste skips HTML conversion. */
+  const plainPasteRef = useRef(false);
   const imagesRef = useRef(new Map<string, PromptImage>());
   const attachmentEpoch = useRef(0);
   const pendingAttachments = useRef<Promise<boolean> | null>(null);
@@ -313,7 +321,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     // reads on this path, and only a capsule can invalidate them: plain typing
     // next to a `/plan` chip must not re-measure every capsule twice.
     if (chipSignature(editor) !== chipSignatureRef.current) {
-      renumberImageChips(editor);
+      renumberImageChips(editor, zh);
       chipSignatureRef.current = chipSignature(editor);
       syncChipTruncation(editor);
       // Wrapping/scrollbars settle one frame later; coalesce capsule and resize work.
@@ -429,7 +437,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           const svg = image.mimeType === "image/svg+xml";
           insertChip({
             kind: "image",
-            label: "图",
+            label: defaultImageChipLabel(),
             ...(meta && !svg ? { path: meta.path } : {}),
             image,
           });
@@ -438,7 +446,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         if (meta) {
           insertChip({
             kind: "image",
-            label: "图",
+            label: defaultImageChipLabel(),
             path: meta.path,
           });
           continue;
@@ -459,10 +467,19 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     }
     if (skipped > 0) {
       onError?.(executionTarget.id !== null
-        ? "SSH 工作区可以直接附加图片；普通文件请通过 @ 选择远端文件，本机文件尚不支持上传。"
+        ? pickLocale(
+            "SSH 工作区可以直接附加图片；普通文件请通过 @ 选择远端文件，本机文件尚不支持上传。",
+            "SSH workspaces can attach images directly; use @ to select remote files, as uploading local files is not supported yet.",
+          )
         : workspaceId
-          ? "有些文件读不到，未添加为胶囊：可能已被移动或是快捷方式。"
-          : "当前环境无法解析磁盘路径，只有图片可以附件。");
+          ? pickLocale(
+              "有些文件读不到，未添加为胶囊：可能已被移动或是快捷方式。",
+              "Some files could not be read and were not attached: they may have been moved or are shortcuts.",
+            )
+          : pickLocale(
+              "当前环境无法解析磁盘路径，只有图片可以附件。",
+              "Disk paths cannot be resolved here; only images can be attached.",
+            ));
     }
     return skipped === 0;
   };
@@ -478,6 +495,12 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       return live ?? null;
     });
   }, [thumbs]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (editor) renumberImageChips(editor, zh);
+    setThumbs(current => current.map(thumb => ({ ...thumb, label: localizeImageChipLabel(thumb.label, zh) })));
+  }, [zh]);
 
   /* Capsule truncation depends on the editor's content width; typing only moves
      the height. A width-only ResizeObserver re-measures when the box actually
@@ -551,6 +574,20 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       if (!options?.preserveFocus || editor.ownerDocument.activeElement === editor) placeCaretAtEnd(editor);
     },
     insertChip,
+    insertText(text) {
+      const editor = editorRef.current;
+      if (!editor || disabled || text.length === 0) return;
+      editor.focus();
+      const caret = savedCaret.current;
+      const selection = window.getSelection();
+      if (caret && editor.contains(caret.commonAncestorContainer)) { selection?.removeAllRanges(); selection?.addRange(caret); }
+      else if (!selection || selection.rangeCount === 0 || !editor.contains(selection.anchorNode)) placeCaretAtEnd(editor);
+      invalidatePrediction();
+      dictationEditorRef.current?.beforeEdit();
+      insertSerializedText(editor, text);
+      emit();
+      refreshMention();
+    },
     removeSkillChip(name) {
       const editor = editorRef.current;
       if (!editor || !removeSkillChipsByName(editor, name)) return;
@@ -739,18 +776,73 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     refreshMention();
   };
 
-  // Files on the clipboard (Explorer Ctrl+C, screenshot) become capsules; anything
-  // else pastes as plain text, so a pasted path stays a path.
+  /** Serialized `<github-reference>`-style text keeps its capsules; everything else is plain text. */
+  const insertSerializedText = (editor: HTMLDivElement, text: string): void => {
+    if (text.includes("<github-reference ") || text.includes("<git-commit-reference ") || text.includes("<browser-reference ")) {
+      const doc = displayDocFromSerializedText(text);
+      insertNodesAtCaret(editor, doc.nodes.map(node => node.type === "text" ? document.createTextNode(node.value) : createChipElement(node.chip, document)));
+    } else insertPlainText(editor, text);
+  };
+
+  /* Rich paste keeps the source order: text runs as Markdown, images as capsules.
+     Bytes stay in this editor's image map, never in the client reducer. */
+  const insertRich = (editor: HTMLDivElement, rich: RichPaste, fills: ReadonlyArray<PromptImage | null>): void => {
+    dictationEditorRef.current?.beforeEdit();
+    for (const part of rich.parts) {
+      if (part.kind === "text") { insertPlainText(editor, part.text); continue; }
+      const image = part.image ?? (part.slot === undefined ? null : fills[part.slot] ?? null);
+      if (image) insertChip({ kind: "image", label: defaultImageChipLabel(), image });
+      else if (part.alt) insertPlainText(editor, `[${part.alt}]`);
+    }
+    emit();
+    refreshMention();
+  };
+  const pasteRich = (editor: HTMLDivElement, rich: RichPaste, files: readonly File[]): void => {
+    // Nothing to read from clipboard files: insert at the caret now, like a plain paste.
+    if (rich.slots === 0) { insertRich(editor, rich, []); return; }
+    const selection = window.getSelection();
+    const pasteRange = selection?.rangeCount && editor.contains(selection.getRangeAt(0).commonAncestorContainer)
+      ? selection.getRangeAt(0).cloneRange() : null;
+    void enqueueAttachment(async current => {
+      const fills: Array<PromptImage | null> = [];
+      for (let slot = 0; slot < rich.slots; slot += 1) {
+        const file = files[slot];
+        fills.push(file ? await fileToPromptImage(file).catch(() => null) : null);
+        if (!current()) return false;
+      }
+      const target = editorRef.current;
+      if (target !== editor) return false;
+      if (pasteRange && editor.contains(pasteRange.commonAncestorContainer)) {
+        const liveSelection = window.getSelection();
+        liveSelection?.removeAllRanges(); liveSelection?.addRange(pasteRange);
+      }
+      insertRich(target, rich, fills);
+      return true;
+    });
+  };
+
+  // Files on the clipboard (Explorer Ctrl+C, screenshot) become capsules. Rich
+  // HTML (documents, web pages) becomes Markdown with ordered images; code-editor
+  // copies and Ctrl+Shift+V stay plain text, so a pasted path stays a path.
   const onPaste = (event: ClipboardEvent<HTMLDivElement>): void => {
     const data = event.clipboardData;
     if (!data) return;
     event.preventDefault();
-    if (data.files.length > 0) {
-      void ingestFiles(data.files);
-      return;
-    }
+    const plainOnly = plainPasteRef.current;
+    plainPasteRef.current = false;
     const editor = editorRef.current;
     const text = data.getData("text/plain");
+    const html = plainOnly ? "" : data.getData("text/html");
+    const files = Array.from(data.files);
+    const rich = editor && html ? richPasteFromHtml(html, text) : null;
+    if (files.length > 0 && !(rich && richPasteHasText(rich) && files.every(isImageFile))) {
+      void ingestFiles(files);
+      return;
+    }
+    if (editor && rich) {
+      pasteRich(editor, rich, files);
+      return;
+    }
     if (!editor || text.length === 0) return;
     if (resolveImagePaste && /\.(?:png|jpe?g|gif|webp|svg|svgz|bmp|tiff?|avif|heic|heif)["']?\s*$/iu.test(text)) {
       void enqueueAttachment(async current => {
@@ -758,17 +850,14 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         try { images = await resolveImagePaste(text); }
         catch (cause) { if (current()) { insertPlainText(editor, text); emit(); } throw cause; }
         if (!current()) return false;
-        if (images?.length) for (const image of images) insertChip({ kind: "image", label: "图", image });
+        if (images?.length) for (const image of images) insertChip({ kind: "image", label: defaultImageChipLabel(), image });
         else { insertPlainText(editor, text); emit(); }
         return true;
       });
       return;
     }
     dictationEditorRef.current?.beforeEdit();
-    if (text.includes("<github-reference ") || text.includes("<git-commit-reference ") || text.includes("<browser-reference ")) {
-      const doc = displayDocFromSerializedText(text);
-      insertNodesAtCaret(editor, doc.nodes.map(node => node.type === "text" ? document.createTextNode(node.value) : createChipElement(node.chip, document)));
-    } else insertPlainText(editor, text);
+    insertSerializedText(editor, text);
     emit();
     refreshMention();
   };
@@ -787,6 +876,10 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       const capsule = event.target.closest<HTMLElement>(".cm-chip-github, .cm-chip-git-commit, .cm-chip-browser");
       const reference = capsule && parseChipPayload(capsule.dataset.chip ?? "")?.reference;
       if (reference) { event.preventDefault(); setGithubPreview(reference); return; }
+    }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "v") {
+      plainPasteRef.current = true;
+      window.setTimeout(() => { plainPasteRef.current = false; }, 0);
     }
     if (dictationKeyboardRef.current?.keydown(event.nativeEvent)) { event.preventDefault(); return; }
     if(composingRef.current||event.nativeEvent.isComposing||event.keyCode===229)return;
@@ -902,13 +995,13 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   return (
     <div className={`chip-composer${compact ? " is-compact" : ""}`} style={{position:"relative"}}>
       {thumbs.length > 0 ? (
-        <div className="cm-thumbs" aria-label="已附加的图片">
+        <div className="cm-thumbs" aria-label={zh ? "已附加的图片" : "Attached images"}>
           {thumbs.map((thumb) => (
             <figure key={thumb.id} className="cm-thumb">
               <button
                 type="button"
                 className="cm-thumb-open"
-                aria-label={`预览${thumb.label}`}
+                aria-label={zh ? `预览${thumb.label}` : `Preview ${thumb.label}`}
                 onClick={() => setPreview(thumb)}
               >
                 <img src={thumb.url} alt="" />
@@ -916,8 +1009,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
               <button
                 type="button"
                 className="cm-thumb-remove"
-                aria-label={`移除${thumb.label}`}
-                data-tip="移除"
+                aria-label={zh ? `移除${thumb.label}` : `Remove ${thumb.label}`}
+                data-tip={zh ? "移除" : "Remove"}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();

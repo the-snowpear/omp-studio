@@ -69,7 +69,7 @@ declare global {
         importPredictionHistory?(input:{channelId:string}):Promise<{ok:boolean;cancelled?:boolean;message?:string;count?:number;truncated?:boolean}>;
         onPrediction?(listener:(event:import("@omp-studio/studio-protocol").PredictionEvent)=>void):()=>void;
         managedBrowser?: import("@omp-studio/studio-protocol").ManagedBrowserApi;
-        attachBrowserObservation?(input: { observationId: string; sessionId: string; tabId: string }): Promise<{ ok: boolean; message?: string }>;
+        attachBrowserObservation?(input: { observationId: string; sessionId: string; tabId: string; generation?: string }): Promise<{ ok: boolean; message?: string }>;
         readComputerCapture?(input: { captureId: string; sessionId: string; targetId: string }): Promise<{ ok: true; data: ArrayBuffer; width: number; height: number } | { ok: false; message: string }>;
         readComputerFrame?(input: { scopeSessionId: string; frameId: string; origin: "local" }): Promise<{ ok: true; data: ArrayBuffer; width: number; height: number; mimeType: "image/png"; artifactId?: string } | { ok: false; message: string }>;
         saveComputerFrame?(input: { scopeSessionId: string; frameId: string; origin: "local" }): Promise<{ ok: true; artifactId: string } | { ok: false; message: string }>;
@@ -96,6 +96,7 @@ declare global {
         reportPerformanceSample?(sample: import("@omp-studio/studio-protocol").MemorySample): Promise<boolean>;
         setConversationViewState?(state: { runtimeEpoch: number; visibleSessionIds: readonly string[]; blockedSessionIds?: readonly string[] }): Promise<boolean>;
         setTheme(theme: "light" | "dark", tint?: { color: string; symbolColor: string }): Promise<void>;
+        setLanguage?(locale: "zh" | "en"): Promise<void>;
         /** Fixed by the preload; read it through `src/platform.ts`. Absent on older installs. */
         readonly platform?: "win32" | "darwin" | "linux";
         /** macOS menu bar commands (allowlisted ids from Main). */
@@ -156,6 +157,9 @@ declare global {
         >;
         /** 用系统默认关联程序打开工作区文件（Main 解析绝对路径并校验）。 */
         openFile(input: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult>;
+        systemFileOpen(input: { readonly path: string }): Promise<WorkspaceFileActionResult>;
+        systemFileOpenWith(input: { readonly path: string; readonly openerId: "vscode" | "cursor" | "windsurf" | "choose" }): Promise<WorkspaceFileActionResult>;
+        systemFileReveal(input: { readonly path: string }): Promise<WorkspaceFileActionResult>;
         /** 用所选编辑器 / 系统「打开方式」打开文件或目录。 */
         openFileWith(
           input: WorkspaceFileTargetInput & { readonly openerId: "vscode" | "cursor" | "windsurf" | "choose" },
@@ -300,19 +304,8 @@ declare global {
    * when the Electron preload exposed `ompStudioTerminal`.
    */
   var ompStudioTerminal:
-    | {
-        create(size?: { cols?: number; rows?: number; targetId?: string; workspaceId?: string; flowControl?: boolean; command?: import("../../desktop/src/terminal-shared").TerminalCommand }): Promise<{ id: string; name: string; cwd: string }>;
-        write(id: string, data: string): Promise<void>;
-        resize(id: string, cols: number, rows: number): Promise<void>;
-        dispose(id: string): Promise<void>;
-        recordingStart?(input: { id: string; workspaceId?: string; sessionId?: string }): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
-        recordingStop?(id: string): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
-        recordingStatus?(id: string): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
-        onData(listener: (event: { id: string; data: string; bytes?: number }) => void): () => void;
-        onExit(listener: (event: { id: string }) => void): () => void;
-        /** Flow control: bytes written to xterm. Absent on an older preload. */
-        ack?(id: string, bytes: number): void;
-      }
+    | (Omit<import("../../desktop/src/terminal-shared").OmpStudioTerminalApi, "recordingStart" | "recordingStop" | "recordingStatus">
+      & Partial<Pick<import("../../desktop/src/terminal-shared").OmpStudioTerminalApi, "recordingStart" | "recordingStop" | "recordingStatus">>)
     | undefined;
 }
 

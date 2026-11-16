@@ -102,6 +102,10 @@ export type ClientInteraction =
         readonly description?: string;
       }>;
       readonly multiple: boolean;
+      readonly initialIndex?: number;
+      readonly selectionMarker?: "radio" | "checkbox";
+      readonly checkedIndices?: readonly number[];
+      readonly markableCount?: number;
     })
   | (ClientInteractionBase & {
       readonly kind: "input";
@@ -131,6 +135,14 @@ export type ClientInteraction =
       readonly kind: "ask";
       readonly acceptImages?: boolean;
       readonly questions: ReadonlyArray<ClientAskQuestion>;
+    })
+  | (ClientInteractionBase & {
+      readonly kind: "form";
+      /** Body is read once into the transient FormSession, not retained in the reducer. */
+      readonly summary: string;
+      readonly fieldCount: number;
+      readonly sectionCount: number;
+      readonly timeoutMs?: number;
     });
 
 export type ClientAskOption = {

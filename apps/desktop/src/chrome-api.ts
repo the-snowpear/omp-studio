@@ -5,7 +5,7 @@ import { SKILLSHARE_TOKEN_CHANNEL, type SkillshareTokenReveal } from "./chrome-s
 import { LIVE_AUDIO_CHANNELS, type LiveAudioAttach, type LiveAudioChunk, type LiveAudioResult } from "./live-audio-shared.js";
 import { DICTATION_AUDIO_CHANNELS, type DictationAudioApi, type DictationAudioAttach, type DictationAudioResult, type DictationDesktopEvent } from "./dictation-audio-shared.js";
 import { BROWSER_OBSERVATION_CHANNELS, type BrowserObservationAttach, type BrowserObservationControl, type BrowserObservationEvent, type BrowserObservationResult } from "./browser-observation-shared.js";
-import type { ManagedBrowserApi, ManagedBrowserEvent, ManagedBrowserState } from "@omp-studio/studio-protocol";
+import type { ManagedBrowserApi, ManagedBrowserEvent, ManagedBrowserState, BrowserPageInspection } from "@omp-studio/studio-protocol";
 import { MANAGED_BROWSER_CHANNELS } from "./managed-browser-shared.js";
 import { COMPUTER_CAPTURE_CHANNEL, type ComputerCaptureRequest, type ComputerCaptureResult } from "./computer-observation-shared.js";
 import { COMPUTER_FRAME_CHANNELS, type ComputerFrameRequest, type ComputerFrameReadResult, type ComputerFrameSaveResult } from "./computer-frames-shared.js";
@@ -13,6 +13,7 @@ import { CHROME_SERVICE_CHANNELS, type ServiceDefinitionResult, type ServiceDefi
 import { PAYLOAD_HEALTH_CHANNEL, type PayloadHealthStatus } from "./payload-health-shared.js";
 import { CHROME_ARTIFACT_CHANNELS, type ArtifactFileResult, type ArtifactImportInput } from "./chrome-artifacts-shared.js";
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
+import { DESKTOP_LANGUAGE_CHANNEL, type DesktopLocale } from "./desktop-language-shared.js";
 import { CHROME_PERFORMANCE_CHANNEL } from "./chrome-performance-shared.js";
 import type { MemorySample } from "@omp-studio/studio-protocol";
 import { CONVERSATION_VIEW_CHANNEL, type ConversationViewState } from "./conversation-views.js";
@@ -49,6 +50,8 @@ import {
   type WorkspaceFileActionResult,
   type WorkspaceFileTargetInput,
   type WorkspaceShellEditorResult,
+  type SystemFileTargetInput,
+  type SystemFileOpenWithInput,
 } from "./workspace-shell-shared.js";
 import {
   CHROME_UPDATES_CHANNELS,
@@ -151,6 +154,7 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
       read: sessionId => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.read, sessionId) as Promise<ManagedBrowserState>,
       execute: command => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.execute, command) as Promise<ManagedBrowserState>,
       present: presentation => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.present, presentation) as Promise<void>,
+      inspect: request => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.inspect, request) as Promise<BrowserPageInspection>,
       subscribe: listener => subscribeChannel<ManagedBrowserEvent>(ipcRenderer, MANAGED_BROWSER_CHANNELS.event, listener),
     }),
     attachBrowserObservation(input: BrowserObservationAttach): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.attach, input) as Promise<BrowserObservationResult>; },
@@ -190,6 +194,9 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     setTheme(theme: "light" | "dark", tint?: { color: string; symbolColor: string }): Promise<void> {
       if (theme !== "light" && theme !== "dark") return Promise.resolve();
       return ipcRenderer.invoke(TITLEBAR_OVERLAY_CHANNEL, tint === undefined ? { theme } : { theme, tint }) as Promise<void>;
+    },
+    setLanguage(locale: DesktopLocale): Promise<void> {
+      return ipcRenderer.invoke(DESKTOP_LANGUAGE_CHANNEL, { locale }) as Promise<void>;
     },
     notify(payload: { title: string; body?: string }): Promise<void> {
       return ipcRenderer.invoke(CHROME_NOTIFY_CHANNEL, payload) as Promise<void>;
@@ -242,6 +249,15 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     },
     openFile(input: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> {
       return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpen, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileOpen(input: SystemFileTargetInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileOpen, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileOpenWith(input: SystemFileOpenWithInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileOpenWith, input) as Promise<WorkspaceFileActionResult>;
+    },
+    systemFileReveal(input: SystemFileTargetInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.systemFileReveal, input) as Promise<WorkspaceFileActionResult>;
     },
     openFileWith(input: FileOpenWithInput): Promise<WorkspaceFileActionResult> {
       return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpenWith, input) as Promise<WorkspaceFileActionResult>;

@@ -9,6 +9,7 @@ import {
   utf8Length,
 } from "./terminalSessions";
 import type { Terminal } from "@xterm/xterm";
+import type { TmuxTopology } from "../../desktop/src/tmux/tmux-shared";
 
 interface SentBatch {
   readonly id: string;
@@ -25,7 +26,12 @@ function harness(options: { ack?: boolean } = {}) {
   const acked: Array<{ id: string; bytes: number }> = [];
   let dataListener: (event: SentBatch) => void = () => {};
   let exitListener: (event: { id: string }) => void = () => {};
+  let tmuxListener: (topology: TmuxTopology) => void = () => {};
   const value = {
+    tmuxAttach: vi.fn(async () => ({ connectionId: "tmux-connection" })),
+    tmuxDetach: vi.fn(async () => {}),
+    tmuxCommand: vi.fn(async () => {}),
+    onTmux: (listener: (topology: TmuxTopology) => void) => { tmuxListener = listener; return () => {}; },
     create: vi.fn(async (input?: { targetId?: string; workspaceId?: string }) => ({
       id: input?.targetId ? "ssh-terminal" : "terminal",
       name: input?.targetId ? "SSH · test" : "Shell",
@@ -42,6 +48,7 @@ function harness(options: { ack?: boolean } = {}) {
   };
   return {
     value,
+    topology(value: TmuxTopology) { tmuxListener(value); },
     acked,
     ackedBytes: (id = "terminal") => acked.filter((entry) => entry.id === id).reduce((sum, entry) => sum + entry.bytes, 0),
     emit(id: string, data: string, bytes?: number) {
@@ -280,6 +287,100 @@ describe("unmounted terminal: Main's watermark drives the back-pressure", () => 
 });
 
 // ---- Batches that occupy no backlog ---------------------------------------
+
+function tmuxSnapshot(): TmuxTopology {
+  return { connectionId: "tmux-connection", targetId: "remote", workspaceId: "ws", state: "attached", session: { id: "$0", name: "work" }, activeWindowId: "@0", windows: [{ id: "@0", index: 0, name: "shell", cols: 80, rows: 24, zoomed: false, layout: { type: "pane", paneId: "%0", x: 0, y: 0, cols: 80, rows: 24 } }], panes: { "%0": { terminalId: "tmux-pane", windowId: "@0", active: true, title: "shell", dead: false, off: false, paused: false } } };
+}
+it("tmux topology registers pane backlogs before rendering and releases removed panes without killing them", async () => {
+  const api = harness(), store = new TerminalSessions(api.value);
+  const opening = store.attachTmux("remote", "ws", "work");
+  api.emit("tmux-pane", "early output");
+  api.topology(tmuxSnapshot());
+  await opening;
+  const host = fakeScreen(); store.attachHost("tmux-pane", host.host);
+  expect(host.written()).toBe("early output");
+  host.fireCallbacks(); await settle();
+  expect(api.ackedBytes("tmux-pane")).toBe(12);
+  expect(store.snapshot().sessions[0]?.kind).toBe("tmux-pane");
+  api.emit("tmux-pane", "\x1b_Ga=T,f=100;AAAA\x1b\\");
+  expect(store.snapshot().graphicsErrors["tmux-pane"]).toBeDefined();
+  api.topology({ ...tmuxSnapshot(), panes: {}, windows: [] });
+  expect(host.disposed).toBe(1);
+  expect(store.snapshot().sessions).toHaveLength(0);
+  expect(api.value.dispose).not.toHaveBeenCalled();
+  expect(store.snapshot().graphicsErrors["tmux-pane"]).toBeUndefined();
+  store.close();
+});
+it("hiding tmux windows changes native visibility, and provider shutdown detaches the connection", async () => {
+  const api = harness(), store = new TerminalSessions(api.value);
+  await store.attachTmux("remote", "ws", "work"); api.topology(tmuxSnapshot());
+  await store.hideTmuxWindow("tmux-connection", "@0", true);
+  expect(api.value.tmuxCommand).toHaveBeenCalledWith({ connectionId: "tmux-connection", action: { kind: "setWindowVisible", windowId: "@0", visible: false } });
+  expect(store.snapshot().hiddenWindows["tmux-connection"]).toEqual(["@0"]);
+  store.close();
+  expect(api.value.tmuxDetach).toHaveBeenCalledWith("tmux-connection");
+  expect(api.value.dispose).not.toHaveBeenCalled();
+});
+it("reattaching replaces the old group in place and releases its ended screen", async () => {
+  const api = harness(), store = new TerminalSessions(api.value);
+  await store.attachTmux("remote", "ws", "work");
+  api.topology({ ...tmuxSnapshot(), state: "lost" });
+  const oldHost = fakeScreen(); store.attachHost("tmux-pane", oldHost.host);
+  api.topology({ ...tmuxSnapshot(), connectionId: "other", panes: {} });
+  api.value.tmuxAttach.mockImplementationOnce(async () => {
+    api.topology({ ...tmuxSnapshot(), connectionId: "replacement", panes: { "%0": { ...tmuxSnapshot().panes["%0"]!, terminalId: "new-pane" } } });
+    return { connectionId: "replacement" };
+  });
+  await store.attachTmux("remote", "ws", "work", { replaceId: "tmux-connection" });
+  expect(Object.keys(store.snapshot().tmux)).toEqual(["replacement", "other"]);
+  expect(oldHost.disposed).toBe(1);
+  expect(api.value.tmuxDetach).toHaveBeenCalledWith("tmux-connection");
+  store.close();
+});
+
+it("a forgotten tmux group stays removed when detach sends its final topology", async () => {
+  const api = harness(), store = new TerminalSessions(api.value);
+  await store.attachTmux("remote", "ws", "work"); api.topology(tmuxSnapshot());
+  let finish!: () => void;
+  api.value.tmuxDetach.mockImplementationOnce(async () => {
+    await new Promise<void>(resolve => { finish = resolve; });
+    api.topology({ ...tmuxSnapshot(), state: "exited" });
+  });
+  store.forgetTmux("tmux-connection");
+  finish(); await settle();
+  expect(store.snapshot().tmux).toEqual({});
+  expect(store.snapshot().sessions).toEqual([]);
+  store.close();
+});
+
+it("streams past tmux -CC without retaining protocol output and resumes after ST", async () => {
+  const { store, api, id } = await storeWith(null);
+  const host = fakeScreen();
+  store.attachHost(id, host.host);
+  api.emit(id, "\x1bP10");
+  api.emit(id, "00p%begin 1 1 0\r\n%end 1 1 0\r\n");
+  expect(store.snapshot().controlMode[id]).toBe(true);
+  api.emit(id, "%output %1 ignored\n".repeat(150_000));
+  expect(host.written()).toBe("");
+  expect(store.snapshot().graphicsErrors[id]).toBeUndefined();
+  api.emit(id, "\x1b");
+  api.emit(id, "\\$ ");
+  expect(store.snapshot().controlMode[id]).toBeUndefined();
+  expect(host.written()).toBe("$ ");
+  host.fireCallbacks();
+  await settle();
+  expect(api.ackedBytes(id)).toBeGreaterThan(2 * 1024 * 1024);
+});
+
+it("still decodes Sixel and passes other DCS through without waiting for ST", async () => {
+  const { store, api, id } = await storeWith(null);
+  const host = fakeScreen();
+  store.attachHost(id, host.host);
+  api.emit(id, "\x1bPq~\x1b\\");
+  expect(store.snapshot().graphics[id]?.[0]?.source).toBe("sixel");
+  api.emit(id, "\x1bP>|tmux");
+  expect(host.written()).toBe("\x1bP>|tmux");
+});
 
 describe("zero-text batches", () => {
   it("acknowledges a graphics-only batch immediately, even without a host", async () => {

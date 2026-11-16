@@ -16,12 +16,11 @@ const id = (value: unknown): string => {
     throw new Error("Invalid prediction ID");
   return value;
 };
-function object(value: unknown, keys: string[]): Record<string, unknown> {
+function object(value: unknown): Record<string, unknown> {
   if (
     !value ||
     typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.keys(value).some((key) => !keys.includes(key))
+    Array.isArray(value)
   )
     throw new Error("Invalid prediction fields");
   return value as Record<string, unknown>;
@@ -54,7 +53,7 @@ export class DesktopPrediction {
   async attach(sender: TerminalSender, value: unknown): Promise<void> {
     // The renderer forwards the channel `prediction.prepare` returned. Protocol
     // v2 adds ranked choices to the same private event stream.
-    const input = object(value, ["channelId", "sessionId", "expiresAt", "protocolVersion"]),
+    const input = object(value),
       channelId = id(input.channelId);
     if (input.protocolVersion !== undefined && input.protocolVersion !== 2)
       throw new Error("Invalid prediction protocol");
@@ -74,14 +73,7 @@ export class DesktopPrediction {
       stat = await lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4096)
       throw new Error("Prediction descriptor unavailable");
-    const descriptor = object(JSON.parse(await readFile(file, "utf8")), [
-      "version",
-      "channelId",
-      "sessionId",
-      "endpoint",
-      "token",
-      "expiresAt",
-    ]);
+    const descriptor = object(JSON.parse(await readFile(file, "utf8")));
     const endpoint =
       process.platform === "win32"
         ? "\\\\.\\pipe\\omp-studio-predict-" + channelId
@@ -213,7 +205,7 @@ export class DesktopPrediction {
     }
   }
   input(sender: TerminalSender, value: unknown): void {
-    const raw = object(value, ["channelId", "input"]);
+    const raw = object(value);
     if ((raw.input as PredictionInput).kind === "import")
       throw new Error("History imports require the file picker");
     const entry = this.#entry(sender, raw.channelId);
@@ -232,7 +224,7 @@ export class DesktopPrediction {
     return entry;
   }
   detach(sender: TerminalSender, value: unknown): void {
-    const input = object(value, ["channelId"]);
+    const input = object(value);
     if (this.#connections.get(sender.id)?.id === id(input.channelId))
       this.disposeWindow(sender.id);
   }
@@ -253,7 +245,7 @@ export class DesktopPrediction {
     sender: TerminalSender,
     value: unknown,
   ): Promise<PredictionResult> {
-    const raw = object(value, ["channelId"]),
+    const raw = object(value),
       entry = this.#entry(sender, raw.channelId);
     if (entry.importing) throw new Error("A history import is already running");
     const selected = await this.options.chooseHistory(sender);

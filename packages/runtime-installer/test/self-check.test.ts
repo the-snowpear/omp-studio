@@ -69,6 +69,16 @@ test("smoke-test runner rejects when spawn throws synchronously", async () => {
   await assert.rejects(runner.run("entrypoint"), /Failed to start.*spawn blocked/u);
 });
 
+test("a healthy multi-worker self-check may finish after one minute", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const child = fakeChild();
+  const runner = createSmokeTestRunner({ spawn: recordingSpawn([], child) });
+  const completed = runner.run("entrypoint");
+  t.mock.timers.tick(60_001);
+  child.emitter.emit("close", 0);
+  await completed;
+});
+
 test("smoke-test runner rejects when the self-check times out", async () => {
   const child = fakeChild((emitter) => queueMicrotask(() => emitter.emit("close", null)));
   const runner = createSmokeTestRunner({

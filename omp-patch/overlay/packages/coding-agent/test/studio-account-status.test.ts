@@ -96,24 +96,130 @@ it("signs out the exact native credential when account labels are duplicated, re
 		accounts = accounts.filter(account => account.credentialId !== id);
 		return found;
 	});
+	const refreshProvider = mock(async () => {}),
+		refreshScopedModels = mock(async () => {});
 	const auth = {
-		credentials: { list: () => [{ provider: "anthropic" }], removeById },
+		credentials: { list: () => [{ provider: "anthropic" }], reload: async () => {}, removeById },
 		oauth: { accounts: () => accounts, policy: () => undefined },
-		keys: { source: () => undefined },
+		keys: { source: () => undefined, describe: () => undefined },
 	};
 	const service = new StudioAccountStatusService({
 		sessionId: "owner",
 		settings: Settings.isolated(),
-		modelRegistry: { authStorage: auth, getAvailable: () => [] },
+		refreshScopedModels,
+		modelRegistry: { authStorage: auth, getAvailable: () => [], refreshProvider },
 	} as unknown as AgentSession);
 	const rows = (await service.get()).accounts;
 	await expect(service.logout("other", rows[1]!.id)).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
 	expect(removeById).not.toHaveBeenCalled();
 	expect(await service.logout("owner", rows[1]!.id)).toEqual({ loggedOut: true });
 	expect(removeById).toHaveBeenCalledWith("anthropic", 47);
+	expect(refreshProvider).toHaveBeenCalledWith("anthropic", "online");
+	expect(refreshScopedModels).toHaveBeenCalledTimes(1);
 	expect((await service.get()).accounts.map(account => account.id)).toEqual([rows[0]!.id]);
 	await expect(service.logout("owner", rows[1]!.id)).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
 	expect(removeById).toHaveBeenCalledTimes(1);
+	service.dispose();
+});
+
+it("LiteLLM key and user USD budgets belong to one calling account and absent budgets remain unknown", async () => {
+	const reports = mock(async () => [
+		{
+			provider: "litellm",
+			fetchedAt: 100,
+			metadata: { accountId: "user" },
+			limits: [
+				{
+					id: "litellm:key:budget",
+					label: "Key budget",
+					scope: { provider: "litellm" },
+					amount: { unit: "usd", used: 4, limit: 25, remaining: 21 },
+				},
+				{
+					id: "litellm:user:budget",
+					label: "User budget",
+					scope: { provider: "litellm" },
+					amount: { unit: "usd", used: 9 },
+				},
+			],
+		},
+	]);
+	const redeem = mock(async () => {
+		throw new Error("must not redeem");
+	});
+	const auth = {
+		credentials: { list: () => [{ provider: "litellm" }] },
+		keys: { source: (provider: string) => (provider === "litellm" ? { concrete: true } : undefined) },
+		oauth: { accounts: () => [], policy: () => undefined },
+		usage: { invalidate: async () => {}, reports },
+		resets: { list: async () => [], redeem },
+	};
+	const service = new StudioAccountStatusService({
+		sessionId: "owner",
+		settings: Settings.isolated(),
+		modelRegistry: { authStorage: auth, getAvailable: () => [] },
+	} as unknown as AgentSession);
+	const result = await service.get(true, true);
+	expect(result.accounts).toHaveLength(1);
+	expect(result.unassigned).toEqual([]);
+	expect(result.accounts[0]?.limits[0]?.amount).toEqual({ unit: "usd", used: 4, limit: 25, remaining: 21 });
+	expect(result.accounts[0]?.limits[1]?.amount).toEqual({ unit: "usd", used: 9 });
+	expect(result.accounts[0]?.limits[1]?.usedFraction).toBeUndefined();
+	expect(redeem).not.toHaveBeenCalled();
+	service.dispose();
+});
+
+it("legacy reset consent is read through native migration without extending it to Fable", async () => {
+	const settings = Settings.isolated({ "claudeResets.autoRedeem": "yes", "codexResets.autoRedeem": "no" });
+	const reports = mock(async () => []),
+		resets = mock(async () => []);
+	const auth = {
+		credentials: { list: () => [{ provider: "anthropic" }, { provider: "openai-codex" }] },
+		keys: { source: () => undefined },
+		oauth: {
+			policy: () => undefined,
+			accounts: (provider: string) => [
+				{ credentialId: 1, position: 0, email: provider + "@example.test", active: false },
+			],
+		},
+		usage: { reports },
+		resets: { list: resets },
+	};
+	const service = new StudioAccountStatusService({
+		sessionId: "owner",
+		settings,
+		modelRegistry: { authStorage: auth, getAvailable: () => [] },
+	} as unknown as AgentSession);
+	const result = await service.get(false);
+	const claude = result.accounts.find(row => row.provider === "anthropic")!.resetPolicies!;
+	expect(claude.map(row => [row.key, row.mode])).toEqual([
+		["claudeResets.autoRedeem5h", "yes"],
+		["claudeResets.autoRedeemWeekly", "yes"],
+		["claudeResets.autoRedeemFable", "unset"],
+	]);
+	expect(result.accounts.find(row => row.provider === "openai-codex")?.resetPolicies?.map(row => row.mode)).toEqual([
+		"no",
+		"no",
+	]);
+	expect(reports).not.toHaveBeenCalled();
+	expect(resets).not.toHaveBeenCalled();
+	service.dispose();
+});
+
+it("saving a governing-window policy changes only its live native key and performs no quota or credit read", async () => {
+	const settings = Settings.isolated();
+	const reports = mock(async () => []),
+		resets = mock(async () => []);
+	const service = new StudioAccountStatusService({
+		sessionId: "owner",
+		settings,
+		modelRegistry: { authStorage: { usage: { reports }, resets: { list: resets } } },
+	} as unknown as AgentSession);
+	const policy = await service.setResetPolicy("owner", "claudeResets.autoRedeem5h", "no");
+	expect(policy).toMatchObject({ window: "5h", key: "claudeResets.autoRedeem5h", mode: "no", source: "global" });
+	expect(settings.mirrorState().global.claudeResets).toEqual({ autoRedeem5h: "no" });
+	expect(reports).not.toHaveBeenCalled();
+	expect(resets).not.toHaveBeenCalled();
 	service.dispose();
 });
 

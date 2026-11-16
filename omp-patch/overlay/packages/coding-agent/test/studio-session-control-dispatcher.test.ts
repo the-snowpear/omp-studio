@@ -157,6 +157,8 @@ function fixture() {
 		},
 		services: {
 			workbench: {
+				modelAuth: { dispose: () => {} },
+				views: { cancelClose: () => {} },
 				agentBtw: { settle: async () => {} },
 				worktrees: {
 					cleanupOnShutdown: async () => {
@@ -171,6 +173,7 @@ function fixture() {
 			models,
 			permissions,
 			tree: {
+				cancelReanswer: () => {},
 				getTree: () => {
 					serviceCalls.push("session.tree.get");
 					return { leafId: null, roots: [] };

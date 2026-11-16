@@ -70,6 +70,20 @@ describe("settings navigation and real preferences", () => {
     expect(screen.getByRole("button", { name: /Steering 消息处理/ })).toBeTruthy();
   });
 
+  it.each([
+    { preview: false, language: "zh", label: "光效", group: "外观与布局" },
+    { preview: true, language: "zh", label: "光效", group: "外观与布局" },
+    { preview: false, language: "en", label: "Lighting", group: "Appearance and layout" },
+    { preview: true, language: "en", label: "Lighting", group: "Appearance and layout" },
+  ] as const)("finds and opens lighting from search (language=$language, preview=$preview)", async ({ preview, language, label, group }) => {
+    renderSettings({ preview, language });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: label } });
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(label) }));
+    expect(screen.getByRole("tab", { name: group }).getAttribute("aria-selected")).toBe("true");
+    const control = await screen.findByRole("combobox", { name: label });
+    await waitFor(() => expect(control.closest(".set-row")?.classList.contains("settings-search-highlight")).toBe(true));
+  });
+
   it("allows changing categories with the keyboard", () => {
     renderSettings();
     const first = screen.getByRole("tab", { name: "常规与通知" });

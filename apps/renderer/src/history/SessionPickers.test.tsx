@@ -49,7 +49,7 @@ function mount(children: ReactNode, preview = false) {
 it("uses the native default once, previews the selection and resumes the resolved continuing copy", async () => {
   const { client, command } = receiptClient((kind, input) => kind === "worktrees.session.resume.list"
     ? { scope: input.scope ?? "directory", sessions: input.scope === "repo" ? [current, moved] : [current], truncated: false }
-    : { requestedSessionId: "moved", targetSessionId: "latest-copy", workspaceId: "worktree-destination" });
+    : { requestedSessionId: "moved", targetSessionId: "latest-copy", workspaceId: "worktree-destination", threadId: "prepared-latest-copy" });
   const onOpen = vi.fn();
   mount(<ResumeScopePane client={client} context={context} onOpen={onOpen} />);
   expect(command).not.toHaveBeenCalled();
@@ -69,9 +69,69 @@ it("uses the native default once, previews the selection and resumes the resolve
   await within(preview).findByRole("heading", { name: "Migration copy" });
   expect(within(preview).getByText("Continuing copy")).toBeTruthy();
   fireEvent.keyDown(document.activeElement!, { key: "Enter" });
-  await waitFor(() => expect(onOpen).toHaveBeenCalledWith("latest-copy", "worktree-destination"));
+  await waitFor(() => expect(onOpen).toHaveBeenCalledWith("prepared-latest-copy", "worktree-destination"));
   expect(command).toHaveBeenCalledWith("worktrees.session.resume.prepare", { sessionId: "live", targetSessionId: "moved", scope: "repo" });
   expect(command.mock.calls.filter(([kind]) => kind === "worktrees.session.resume.list")).toHaveLength(2);
+});
+
+it("asks where to continue when the recorded directory is gone, then prepares again with that workspace", async () => {
+  const stranded = { requestedSessionId: "current", targetSessionId: "current", recordedCwd: "C:/removed", cwd: "C:/removed" };
+  const { client, command } = receiptClient((kind, input) => kind === "worktrees.session.resume.list"
+    ? { scope: "directory", sessions: [current], truncated: false }
+    : input.executionWorkspaceId
+      ? { ...stranded, executionCwd: "C:/chosen", requiresWorkspaceSelection: false, workspaceId: "destination", threadId: "prepared-current" }
+      : { ...stranded, requiresWorkspaceSelection: true });
+  const onOpen = vi.fn();
+  mount(<ResumeScopePane client={client} context={context} onOpen={onOpen} />);
+  fireEvent.click(screen.getByRole("button", { name: "Resume OMP session" }));
+  await screen.findByRole("heading", { name: "Attachment recovery" });
+  fireEvent.click(screen.getByRole("button", { name: "Resume session" }));
+  await screen.findByText("C:/removed");
+  expect(onOpen).not.toHaveBeenCalled();
+  const proceed = screen.getByRole("button", { name: "Continue there" }) as HTMLButtonElement;
+  expect(proceed.disabled).toBe(true);
+  selectOption(screen.getByRole("combobox", { name: "Execution workspace" }), "Destination");
+  fireEvent.click(proceed);
+  await waitFor(() => expect(onOpen).toHaveBeenCalledWith("prepared-current", "destination"));
+  expect(command).toHaveBeenLastCalledWith("worktrees.session.resume.prepare", { sessionId: "live", targetSessionId: "current", scope: "directory", executionWorkspaceId: "destination" });
+});
+
+it("preserves the execution-workspace choice through live language changes", async () => {
+  const { client, command } = receiptClient((kind, input) => kind === "worktrees.session.resume.list"
+    ? { scope: "directory", sessions: [current], truncated: false }
+    : input.executionWorkspaceId ? { targetSessionId: "current", requestedSessionId: "current", workspaceId: "destination", threadId: "issued-handle", requiresWorkspaceSelection: false }
+      : { targetSessionId: "current", requestedSessionId: "current", recordedCwd: "C:/missing", requiresWorkspaceSelection: true });
+  const onOpen = vi.fn();
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  const tree = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><PreviewModeProvider switchEnabled><ResumeScopePane client={client} context={context} onOpen={onOpen} /></PreviewModeProvider></I18nProvider>;
+  const ui = render(tree("en"));
+  fireEvent.click(screen.getByRole("button", { name: "Resume OMP session" }));
+  await screen.findByRole("heading", { name: "Attachment recovery" });
+  fireEvent.click(screen.getByRole("button", { name: "Resume session" }));
+  await screen.findByText("C:/missing");
+  selectOption(screen.getByRole("combobox", { name: "Execution workspace" }), "Destination");
+  ui.rerender(tree("zh"));
+  expect(screen.getByRole("combobox", { name: "继续执行的工作区" }).textContent).toBe("Destination");
+  expect((screen.getByRole("button", { name: "在所选工作区继续" }) as HTMLButtonElement).disabled).toBe(false);
+  ui.rerender(tree("en"));
+  expect(screen.getByRole("combobox", { name: "Execution workspace" }).textContent).toBe("Destination");
+  expect(command.mock.calls.filter(([kind]) => kind === "worktrees.session.resume.list")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Continue there" }));
+  await waitFor(() => expect(onOpen).toHaveBeenCalledWith("issued-handle", "destination"));
+  expect(command).toHaveBeenLastCalledWith("worktrees.session.resume.prepare", { sessionId: "live", targetSessionId: "current", scope: "directory", executionWorkspaceId: "destination" });
+});
+
+it("keeps the restore dialog and native failure visible when consuming the prepared handle fails", async () => {
+  const { client } = receiptClient(kind => kind === "worktrees.session.resume.list"
+    ? { scope: "directory", sessions: [current], truncated: false }
+    : { targetSessionId: "current", requestedSessionId: "current", workspaceId: "destination", threadId: "issued-handle", requiresWorkspaceSelection: false });
+  const onOpen = vi.fn().mockRejectedValue(new Error("Original worker retained"));
+  mount(<ResumeScopePane client={client} context={context} onOpen={onOpen} />);
+  fireEvent.click(screen.getByRole("button", { name: "Resume OMP session" }));
+  await screen.findByRole("heading", { name: "Attachment recovery" });
+  fireEvent.click(screen.getByRole("button", { name: "Resume session" }));
+  await screen.findByText("Original worker retained");
+  expect(screen.getByRole("dialog", { name: "Resume OMP session" })).toBeTruthy();
 });
 
 it("requires a destination for a missing import directory, then waits for an explicit open", async () => {
@@ -123,7 +183,7 @@ it("keeps both preview flows local and hides demo markings when marks are off", 
   const onOpen = vi.fn(), onImported = vi.fn(), onPreviewOpen = vi.fn();
   mount(<><ResumeScopePane client={client} context={context} onOpen={onOpen} onPreviewOpen={onPreviewOpen} /><SessionImportPanel client={client} onOpen={onOpen} onImported={onImported} onPreviewOpen={onPreviewOpen} /></>, true);
   fireEvent.click(screen.getByRole("button", { name: "Resume OMP session" }));
-  await screen.findByRole("heading", { name: "会话恢复与附件检查" });
+  await screen.findByRole("heading", { name: "Session resume & attachment check" });
   expect(screen.queryByText("Demo")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Resume session" }));
   fireEvent.click(screen.getByRole("button", { name: "Import Claude / Codex sessions" }));

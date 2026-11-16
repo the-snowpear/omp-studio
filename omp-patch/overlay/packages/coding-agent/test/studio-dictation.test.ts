@@ -8,6 +8,8 @@ import type { Api, Model } from "@oh-my-pi/pi-catalog/types";
 import type { AgentSession } from "../src/session/agent-session";
 import { Settings } from "../src/config/settings";
 import { cfgSttLanguage, cfgSttSubmitTrigger } from "../src/stt/settings";
+import { cfgOffline } from "../src/config/auxiliary-model-policy";
+import * as transcription from "@oh-my-pi/pi-ai/transcription";
 import * as downloader from "../src/stt/downloader";
 import { sttClient, type SttStreamOptions } from "../src/stt/asr-client";
 import type {
@@ -191,6 +193,53 @@ async function setup(
 		},
 	};
 }
+
+test("inspection exposes the restricted provider and changes consent identity instead of presenting a local fallback", async () => {
+	const f = await setup();
+	const model = getBundledModel("openai", "whisper-1");
+	f.cloud(model, true);
+	const unrestricted = configuration(await f.audio.dictation({ kind: "dictation.inspect", sessionId: "one" }));
+	cfgOffline.override(f.settings, true);
+	const blocked = configuration(await f.audio.dictation({ kind: "dictation.inspect", sessionId: "one" }));
+	expect(blocked).toMatchObject({
+		model: "openai/whisper-1",
+		cloud: true,
+		blockedReason: "provider-restricted",
+		providerPolicy: { mode: "active-provider" },
+	});
+	expect(blocked.configurationId).not.toBe(unrestricted.configurationId);
+	await expect(
+		f.audio.dictation({ kind: "dictation.open", sessionId: "one", configurationId: unrestricted.configurationId }),
+	).rejects.toThrow("configuration changed");
+	await expect(
+		f.audio.dictation({ kind: "dictation.open", sessionId: "one", configurationId: blocked.configurationId }),
+	).rejects.toThrow("provider-restricted");
+	expect(f.warm).not.toHaveBeenCalled();
+});
+
+test("Studio frozen dictation passes the active provider to native start and refuses upload after it changes", async () => {
+	const f = await setup();
+	const model = getBundledModel("openai", "whisper-1");
+	f.cloud(model, true);
+	let active = "openai";
+	Object.defineProperty(f.session, "model", { get: () => ({ provider: active }) });
+	cfgOffline.override(f.settings, true);
+	const transcribe = vi
+		.spyOn(transcription, "transcribeAudio")
+		.mockRejectedValue(new Error("Provider requests are not authorized in this test"));
+	const channel = await f.open();
+	channel.start();
+	await channel.waitPhase("ready");
+	channel.socket.write(control({ kind: "recording" }));
+	channel.socket.write(pcm([0.25, 0.5]));
+	channel.socket.write(control({ kind: "drain", requestId: "provider-change" }));
+	await waitFor(() => channel.events.some(event => event.kind === "drained" && event.requestId === "provider-change"));
+	active = "foreign";
+	channel.socket.write(control({ kind: "stop" }));
+	await channel.waitPhase("error");
+	expect(transcribe).not.toHaveBeenCalled();
+	expect(JSON.stringify(channel.events)).toContain("provider changed");
+});
 
 test("receiver warms before ready, authenticated preparation survives descriptor expiry, and early cancel cannot revive capture", async () => {
 	const warmup = Promise.withResolvers<void>();

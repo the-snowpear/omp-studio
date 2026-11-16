@@ -407,6 +407,14 @@ test("dormant workspace unbinding keeps connected state without emitting false d
   }
 });
 
+test("resume preparation cannot forge the Desktop-resolved execution directory", async () => {
+  const calls: StudioOperation[] = []; const facade = makeFacade(calls);
+  try {
+    await assert.rejects(facade.command({ commandName: "worktrees.session.resume.prepare", requestId: "resume-private-cwd" as CommandRequestId, idempotencyKey: "resume-private-cwd" as IdempotencyKey, input: { sessionId: "session-1", executionWorkspaceId: "workspace", executionCwd: "C:/untrusted" } as never }), { code: "INVALID_ARGUMENT" });
+    assert.deepEqual(calls, []);
+  } finally { await facade.close(); }
+});
+
 test("in-process and Web facade reject private media grants before dispatch", async () => {
   const calls: StudioOperation[] = []; const facade = makeFacade(calls);
   try {

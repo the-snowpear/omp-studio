@@ -22,4 +22,29 @@
 .feature-actions { display:flex; align-items:center; flex-wrap:wrap; gap:var(--sp-8); margin-top:var(--sp-16); }
 .feature-meter { height:8px; border-radius:4px; background:var(--surface-hover); overflow:hidden; margin:var(--sp-16) 0; }
 .feature-meter span { display:block; height:100%; background:var(--accent); transition:width var(--dur) var(--ease); }
+.set-row.is-wide { flex-wrap:wrap; align-items:flex-start; }
+.set-row.is-wide > .sr-control { flex:1 1 100%; margin-left:0; }
+.feature-control.is-wide { max-width:none; width:100%; }
+.bash-rules { display:grid; gap:var(--sp-8); }
+.bash-rules-empty { margin:0; padding:var(--sp-12); border:1px dashed var(--border); border-radius:var(--r-8); color:var(--text-3); font-size:var(--fs-12); text-align:center; }
+.bash-rules-list { list-style:none; margin:0; padding:0; display:grid; gap:var(--sp-6); }
+.bash-rule { --rule-tone:var(--green); display:grid; grid-template-columns:22px minmax(140px,1.4fr) auto minmax(120px,1fr) auto; align-items:center; gap:var(--sp-8); padding:var(--sp-6) var(--sp-8); border:1px solid var(--border); border-left:3px solid var(--rule-tone); border-radius:var(--r-8); background:var(--surface-2,var(--surface)); animation:var(--motion-reveal); transition:border-color var(--dur-fast) var(--ease); }
+.bash-rule.is-preserved { --rule-tone:var(--text-3); grid-template-columns:22px minmax(0,1fr) auto; }
+.bash-rule-preserved, .bash-rule-metadata { min-width:0; font-size:var(--fs-12); color:var(--text-2); }
+.bash-rule-metadata { grid-column:2 / -1; }
+.bash-rule-preserved pre, .bash-rule-metadata pre { max-height:220px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+.bash-rule[data-approval=prompt] { --rule-tone:var(--amber); }
+.bash-rule[data-approval=deny] { --rule-tone:var(--red); }
+.set-row .bash-rule .input { width:100%; min-width:0; }
+.bash-rule-index { font-size:var(--fs-11); color:var(--text-3); font-variant-numeric:tabular-nums; text-align:center; }
+.bash-rule-approval { display:inline-flex; padding:2px; border-radius:var(--r-6,6px); background:var(--surface-hover); }
+.bash-rule-approval button { border:0; background:transparent; color:var(--text-2,var(--text)); font-size:var(--fs-11); padding:3px var(--sp-8); border-radius:var(--r-4,4px); cursor:pointer; transition:background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.bash-rule-approval button[aria-checked=true][data-tone=allow] { background:var(--green-soft); color:var(--green); }
+.bash-rule-approval button[aria-checked=true][data-tone=prompt] { background:var(--amber-soft); color:var(--amber); }
+.bash-rule-approval button[aria-checked=true][data-tone=deny] { background:var(--red-soft); color:var(--red); }
+.bash-rule-approval button:disabled { cursor:default; opacity:.6; }
+.bash-rule-tools { display:inline-flex; gap:2px; }
+.bash-rules-foot { display:flex; align-items:center; flex-wrap:wrap; gap:var(--sp-8); }
+.bash-rules-note { flex:1 1 220px; color:var(--text-3); font-size:var(--fs-11); line-height:1.5; }
+@media(max-width:900px) { .bash-rule { grid-template-columns:22px minmax(0,1fr) auto; } .bash-rule-match { grid-column:2 / -1; } .bash-rule-env { grid-column:2 / -1; } }
 @media(max-width:900px) { .feature-split { grid-template-columns:1fr; } .feature-list { max-height:180px; overflow:auto; } .feature-settings-head { align-items:flex-start; flex-direction:column; } .feature-control { min-width:0; } }

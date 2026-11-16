@@ -1,7 +1,23 @@
-import type { CommandName, StudioPlanSaveAndQuitResult } from "@omp-studio/client-contract";
+import type { CommandName, SessionHistoryEntry, StudioClient, StudioPlanSaveAndQuitResult, ThreadId, WorkspaceId } from "@omp-studio/client-contract";
+import { waitReceipt } from "../hostError";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
+import { isZh } from "../i18n";
 import type { RuntimeSettingsApi } from "../SettingsPage";
 import { type ArchivePending } from "./types";
+
+/** A prepared native session may still be catalogued under its old, missing cwd. */
+export async function resumePreparedHistoryEntry(client: StudioClient, threadId: ThreadId, workspaceId: WorkspaceId, limit: number, missingMessage: string): Promise<SessionHistoryEntry> {
+  const handle = await client.command("session.resume", { threadId });
+  const resumed = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
+  const history = await client.query("history.list", { workspaceId, limit });
+  const entry = history.entries.find(item => item.sessionId === resumed.sessionId);
+  if (!entry) throw new Error(missingMessage);
+  return entry;
+}
+
+export function partialSessionDeletionNotice(title: string, details: string, zh: boolean): string {
+  return `${zh ? `已删除会话「${title}」，但清理未全部完成。` : `Deleted "${title}", but cleanup is incomplete.`} ${details}`.trim();
+}
 
 /** Session preferences apply on the next user turn; they must not wait for abort/prompt receipts. */
 const LIVE_SESSION_PREFERENCE_COMMANDS = new Set<CommandName>([
@@ -45,7 +61,15 @@ export function runtimeSettingsPropsOf(
 }
 
 /** Keep the save/exit receipt honest when Runtime could not select the new session. */
-export function planSaveAndQuitNotice(result: StudioPlanSaveAndQuitResult, selected: boolean): string {
+export function planSaveAndQuitNotice(result: StudioPlanSaveAndQuitResult, selected: boolean, zh = isZh()): string {
+  if (!zh) {
+    const prefix = `Saved ${result.path} and exited Plan`;
+    if (result.newSession === "cancelled") return `${prefix}; new session creation was cancelled.`;
+    if (result.newSession === "failed") return `${prefix}; failed to create a new session—open it from History.`;
+    return selected
+      ? `${prefix}; created and switched to the new session.`
+      : `${prefix}; created the new session but could not switch automatically—open it from History.`;
+  }
   const prefix = `已保存 ${result.path}，Plan 已退出`;
   if (result.newSession === "cancelled") return `${prefix}；新会话创建已取消。`;
   if (result.newSession === "failed") return `${prefix}；新会话创建失败，请从历史记录打开。`;

@@ -53,6 +53,10 @@ export function mapRemoteInteractionToClient(
           ...(option.description === undefined ? {} : { description: option.description }),
         })),
         multiple: request.multiple ?? false,
+        ...(request.initialIndex === undefined ? {} : { initialIndex: request.initialIndex }),
+        ...(request.selectionMarker === undefined ? {} : { selectionMarker: request.selectionMarker }),
+        ...(request.checkedIndices === undefined ? {} : { checkedIndices: request.checkedIndices }),
+        ...(request.markableCount === undefined ? {} : { markableCount: request.markableCount }),
       };
     case "input":
       return {
@@ -78,6 +82,15 @@ export function mapRemoteInteractionToClient(
         ...(request.grants === undefined
           ? {}
           : { grants: request.grants.map(({ scope, label, alwaysLabel }) => ({ scope, label, alwaysLabel })) }),
+      };
+    case "form":
+      return {
+        ...base,
+        kind: "form",
+        summary: request.summary,
+        fieldCount: request.fieldCount,
+        sectionCount: request.sectionCount,
+        ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
       };
     case "ask":
       return {

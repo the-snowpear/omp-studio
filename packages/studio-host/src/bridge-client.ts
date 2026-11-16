@@ -84,6 +84,7 @@ export class StudioBridgeRequestError extends Error {
 export interface StudioBridgeClientOptions {
   endpoint: string;
   token: string;
+  locale?: () => "zh" | "en";
   handshakeTimeoutMs?: number;
   supportedProtocolVersions?: readonly number[];
   connectSocket?: (endpoint: string) => Socket;
@@ -148,6 +149,14 @@ export class StudioBridgeClient {
 
   get state(): StudioBridgeClientState {
     return this.#state;
+  }
+
+  /** Private display preference; older Runtimes receive no new frame. */
+  setLocale(locale: "zh" | "en"): void {
+    if (!["negotiated", "snapshotting", "snapshot-required", "ready"].includes(this.#state) ||
+      !this.#socket || this.#runtimeEpoch === undefined ||
+      !this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === "studio.locale" && capability.grade !== "unavailable")) return;
+    this.#socket.write(encodeFrame("locale", this.#runtimeEpoch, { type: "studio.locale", locale }));
   }
 
   async connect(): Promise<StudioHelloResponse> {
@@ -315,7 +324,7 @@ export class StudioBridgeClient {
     });
   }
 
-  async invoke(request: StudioRequest, onReceipt?: (receipt: StudioReceipt) => void): Promise<StudioReceipt> {
+  async invoke(request: StudioRequest, onReceipt?: (receipt: StudioReceipt) => void, timeoutMs: number | null | undefined = this.options.requestTimeoutMs): Promise<StudioReceipt> {
     if (this.#state !== "ready") throw new Error(`Cannot invoke Studio Bridge command from ${this.#state}`);
     if (request.runtimeEpoch !== this.#runtimeEpoch) throw new Error("Studio Bridge request Runtime epoch is stale");
     if (this.#pendingRequests.has(request.requestId)) throw new Error(`Duplicate request id ${request.requestId}`);
@@ -323,9 +332,8 @@ export class StudioBridgeClient {
     if (socket === undefined) throw new Error("Studio Bridge connection is unavailable");
 
     return new Promise<StudioReceipt>((resolve, reject) => {
-      const timeoutMs = this.options.requestTimeoutMs;
       const timer =
-        timeoutMs === undefined
+        timeoutMs == null
           ? undefined
           : setTimeout(() => {
               this.#pendingRequests.delete(request.requestId);
@@ -338,7 +346,13 @@ export class StudioBridgeClient {
         ...(timer === undefined ? {} : { timer }),
       });
       try {
-        socket.write(encodeFrame(`request:${request.requestId}`, request.runtimeEpoch, request));
+        let wireRequest = request;
+        if (request.operation.kind === "interaction.respond" && request.operation.leaseGeneration !== undefined &&
+          !this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === "remoteUi.leaseGeneration" && capability.grade !== "unavailable")) {
+          const { leaseGeneration: _leaseGeneration, ...operation } = request.operation;
+          wireRequest = { ...request, operation };
+        }
+        socket.write(encodeFrame(`request:${request.requestId}`, request.runtimeEpoch, wireRequest));
       } catch {
         if (timer !== undefined) clearTimeout(timer);
         this.#pendingRequests.delete(request.requestId);
@@ -369,7 +383,13 @@ export class StudioBridgeClient {
   async readRuntimeView<K extends RuntimeViewOperation["kind"]>(operation: Extract<RuntimeViewOperation, { kind: K }>): Promise<RuntimeViewResultMap[K]> {
     if (this.#state !== "ready" || this.#runtimeEpoch === undefined) throw new StudioHostError("OUTCOME_UNKNOWN", "Runtime view unavailable");
     const receipt = await this.invoke({ type: "studio.request", requestId: (this.options.createRequestId ?? randomUUID)() as RequestId, runtimeEpoch: this.#runtimeEpoch, operation });
-    if (receipt.status !== "completed") throw new StudioHostError(receipt.error?.code ?? "OUTCOME_UNKNOWN", receipt.error?.message ?? "Runtime view failed");
+    if (receipt.status !== "completed") {
+      // Native cursor invalidation explicitly permits one bounded fresh read.
+      // Keep that signal across the Bridge instead of losing it during error mapping.
+      throw Object.assign(new StudioHostError(receipt.error?.code ?? "OUTCOME_UNKNOWN", receipt.error?.message ?? "Runtime view failed"), {
+        retryable: receipt.error?.retryable,
+      });
+    }
     return receipt.result as RuntimeViewResultMap[K];
   }
 
@@ -580,6 +600,23 @@ export class StudioBridgeClient {
     return () => this.#resyncListeners.delete(listener);
   }
 
+  /** Reversible operator-close gate. Older Runtimes must never receive an unknown operation. */
+  async confirmClose(): Promise<boolean> {
+    if (!this.#hello?.capabilityManifest.capabilities.some(capability => capability.id === "runtime.close.confirm" && capability.grade !== "unavailable")) return true;
+    const snapshot = this.#projection.snapshot();
+    const runtimeEpoch = this.#runtimeEpoch;
+    if (this.#state !== "ready" || !snapshot || runtimeEpoch === undefined) return true;
+    const receipt = await this.invoke({
+      type: "studio.request",
+      requestId: (this.options.createRequestId ?? randomUUID)() as RequestId,
+      runtimeEpoch,
+      operation: { kind: "runtime.close.confirm", sessionId: snapshot.sessionId },
+    }, undefined, null);
+    if (this.#runtimeEpoch !== runtimeEpoch || this.#projection.snapshot()?.sessionId !== snapshot.sessionId) return true;
+    if (receipt.status !== "completed") throw new StudioBridgeRequestError("OUTCOME_UNKNOWN");
+    return (receipt.result as RuntimeViewResultMap["runtime.close.confirm"] | undefined)?.allowed !== false;
+  }
+
   async shutdown(): Promise<StudioReceipt> {
     const runtimeEpoch = this.#runtimeEpoch;
     if (runtimeEpoch === undefined) throw new Error("Studio Bridge negotiation is incomplete");
@@ -705,6 +742,7 @@ export class StudioBridgeClient {
         this.#readyDecoder = decoder;
         this.#projection.beginConnection(response);
         this.#state = "negotiated";
+        if (this.options.locale) this.setLocale(this.options.locale());
         socket.once("error", () => socket.destroy());
         socket.once("close", () => this.#handleSocketClosed(socket));
         resolve(response);

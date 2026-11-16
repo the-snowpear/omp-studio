@@ -58,14 +58,6 @@ export const RUNTIME_18180_SETTINGS: Definition[] = [
     "step": 1
   },
   {
-    "key": "task.file",
-    "group": "tasks",
-    "zh": "从文件读取任务",
-    "en": "Task instructions from files",
-    "hint": "允许绝对 UTF-8 文件或 local:// 任务文件，沿用原生文件审批。",
-    "hintEn": "Allow UTF-8 files and local:// task files under native file approvals."
-  },
-  {
     "key": "task.perCallModel",
     "group": "tasks",
     "zh": "单次任务模型选择",

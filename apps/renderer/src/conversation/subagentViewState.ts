@@ -15,12 +15,21 @@ export type SubagentViewState = {
   nextQueueId: number;
   contentTab?: "chat" | "details" | "btw";
   btwVisited?: boolean;
+  /** Deck requests retain their sequence with the target across workbench remounts. */
+  btwIntentSerial?: number;
+  /** The last "open on BTW" request this tab has applied, so a remount does not apply it again. */
+  btwIntentSeen?: number;
   btw: SubagentBtwViewState;
   reading?: { anchor: ScrollAnchor | null; following: boolean; rows: number; conversationSessionId?: string };
 };
 
 export function createSubagentViewState(): SubagentViewState {
   return { draft: emptySnapshot(), queued: [], queueEdit: undefined, error: undefined, nextQueueId: 0, btw: { draft: emptySnapshot(), topic: "" } };
+}
+
+export function nextSubagentBtwIntent(record: SubagentViewState): number {
+  record.btwIntentSerial = (record.btwIntentSerial ?? 0) + 1;
+  return record.btwIntentSerial;
 }
 
 /** Scope includes execution target, workspace, parent session and preview mode. */

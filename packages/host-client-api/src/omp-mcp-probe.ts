@@ -10,6 +10,7 @@ import { performance } from "node:perf_hooks";
 
 import type { McpTransport } from "@omp-studio/client-contract";
 
+import { hostText } from "./locale.js";
 import { redactText, sanitizeDisplayText } from "./read-models.js";
 
 const PROTOCOL_VERSION = "2025-11-25";
@@ -44,7 +45,7 @@ interface JsonRpcResponse {
 }
 
 function safeDetail(value: string): string {
-  return sanitizeDisplayText(redactText(value), DETAIL_MAX) ?? "MCP 探测失败";
+  return sanitizeDisplayText(redactText(value), DETAIL_MAX) ?? hostText("MCP 探测失败", "MCP probe failed");
 }
 
 function safeLine(value: string): string | undefined {
@@ -67,7 +68,7 @@ export async function probeMcpServer(
     return {
       ok: true,
       latencyMs,
-      detail: safeDetail(`已连接（${toolCount} 个工具）`),
+      detail: safeDetail(hostText(`已连接（${toolCount} 个工具）`, `Connected (${toolCount} ${toolCount === 1 ? "tool" : "tools"})`)),
       toolCount,
       logLines: [
         `connected tools=${toolCount}`,
@@ -79,7 +80,7 @@ export async function probeMcpServer(
     };
   } catch (error) {
     const latencyMs = Math.max(0, Math.round(performance.now() - started));
-    const message = error instanceof Error ? error.message : "MCP 探测失败";
+    const message = error instanceof Error ? error.message : hostText("MCP 探测失败", "MCP probe failed");
     const detail = safeDetail(message);
     return {
       ok: false,
@@ -96,7 +97,7 @@ export async function probeMcpServer(
 async function probeStdio(spec: McpConnectSpec, timeoutMs: number, cwd?: string): Promise<string[]> {
   const command = spec.command?.trim();
   if (command === undefined || command.length === 0) {
-    throw new Error("stdio 服务器未配置启动命令");
+    throw new Error(hostText("stdio 服务器未配置启动命令", "stdio server has no command configured"));
   }
   const args = [...(spec.args ?? [])];
   const child = spawn(command, args, {
@@ -117,11 +118,11 @@ async function probeStdio(spec: McpConnectSpec, timeoutMs: number, cwd?: string)
   });
   child.stdout?.setEncoding("utf8");
   child.stdout?.on("data", (chunk: string) => session.push(chunk));
-  child.on("error", () => session.fail(new Error("无法启动 MCP 进程")));
+  child.on("error", () => session.fail(new Error(hostText("无法启动 MCP 进程", "Failed to start MCP process"))));
   child.on("close", (code) => {
     if (!session.done) {
       const stderr = redactText(stderrChunks.join("").slice(0, STDERR_CAP)).trim();
-      session.fail(new Error(stderr.length > 0 ? stderr : `stdio 进程退出（${code ?? "unknown"}）`));
+      session.fail(new Error(stderr.length > 0 ? stderr : hostText(`stdio 进程退出（${code ?? "unknown"}）`, `stdio process exited (${code ?? "unknown"})`)));
     }
   });
 
@@ -174,10 +175,10 @@ async function terminateChild(child: ReturnType<typeof spawn>): Promise<void> {
 async function probeHttp(spec: McpConnectSpec, timeoutMs: number): Promise<string[]> {
   const url = spec.url?.trim();
   if (url === undefined || url.length === 0) {
-    throw new Error("远程服务器未配置地址");
+    throw new Error(hostText("远程服务器未配置地址", "Remote server has no URL configured"));
   }
   if (looksLikeOAuthOnly(spec)) {
-    throw new Error("该服务器需要认证，请在 OMP 中完成 /mcp reauth。");
+    throw new Error(hostText("该服务器需要认证，请在 OMP 中完成 /mcp reauth。", "This server requires authentication; run /mcp reauth in OMP."));
   }
   const init = await httpRpc(url, spec.headers, 1, "initialize", {
     protocolVersion: PROTOCOL_VERSION,
@@ -226,7 +227,7 @@ async function httpRpc(
   }
   const text = await response.text();
   const parsed = parseHttpPayload(text);
-  if (parsed === undefined) throw new Error("远程服务器返回无法解析的响应");
+  if (parsed === undefined) throw new Error(hostText("远程服务器返回无法解析的响应", "Remote server returned an unparseable response"));
   return parsed;
 }
 
@@ -268,7 +269,7 @@ function listToolsFromResult(value: unknown): string[] {
 function rpcError(response: JsonRpcResponse): Error {
   const message = asRecord(response.error)?.message;
   if (typeof message === "string" && message.trim().length > 0) return new Error(message);
-  return new Error("MCP JSON-RPC 错误");
+  return new Error(hostText("MCP JSON-RPC 错误", "MCP JSON-RPC error"));
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -284,7 +285,7 @@ async function withTimeout<T>(timeoutMs: number, run: () => Promise<T>): Promise
     return await Promise.race([
       run(),
       new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("连接超时")), timeoutMs);
+        timer = setTimeout(() => reject(new Error(hostText("连接超时", "Connection timed out"))), timeoutMs);
       }),
     ]);
   } finally {
@@ -335,7 +336,7 @@ class NdjsonSession {
 
   close(): void {
     this.#closed = true;
-    this.fail(new Error("连接已关闭"));
+    this.fail(new Error(hostText("连接已关闭", "Connection closed")));
   }
 
   #onLine(line: string): void {

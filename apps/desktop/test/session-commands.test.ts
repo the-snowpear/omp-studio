@@ -3,7 +3,8 @@ import { test } from "node:test";
 
 import type { HostCatalogEntry, HostSessionCatalogProvider } from "@omp-studio/host-client-api";
 import { threadIdFor } from "@omp-studio/host-client-api";
-import type { StudioSessionArchiveService } from "@omp-studio/studio-host";
+import type { StudioSessionArchiveService, StudioSessionDeleteService } from "@omp-studio/studio-host";
+import type { DesktopRuntimeSession, DesktopSessionSwitchIntent } from "../src/host-composition.js";
 import type { ThreadId } from "@omp-studio/studio-protocol";
 
 import type { DesktopInteractionHost } from "../src/interaction-host.js";
@@ -93,6 +94,83 @@ test("session.archive skips the grace for a dormant Studio-origin session", asyn
   assert.deepEqual(calls, [{ sessionId: "session-a", skipWriteGrace: true }]);
 });
 
+
+test("resume preparation registers execution cwd only, and failed restore retains the original Worker binding", async () => {
+  const snapshot = { sessionId: "active", runtimeEpoch: 1, stateVersion: 1, isStreaming: false };
+  const prepared = { targetSessionId: "saved", requestedSessionId: "source", recordedCwd: "C:/removed", cwd: "C:/removed", executionCwd: "C:/chosen", requiresWorkspaceSelection: false };
+  const previous = { hello: () => ({}), controller: { publication: () => ({ snapshot }), invoke: async () => ({ status: "completed", result: prepared }) } } as unknown as DesktopRuntimeSession;
+  const restored = { hello: () => ({}), controller: { publication: () => ({ snapshot: { ...snapshot, sessionId: "saved" } }) } } as unknown as DesktopRuntimeSession;
+  const sessionRef = { current: previous as DesktopRuntimeSession | undefined };
+  const registrations: string[] = [];
+  const switches: DesktopSessionSwitchIntent[] = [];
+  let fail = true;
+  const commands = createDesktopSemanticCommands({
+    ...baseOptions, sessionRef,
+    registerImportedWorkspace: async cwd => { registrations.push(cwd); return "chosen"; },
+    bindSession: session => { sessionRef.current = session; },
+    switchSession: async intent => { switches.push(intent); if (fail) throw new Error("Native restore failed"); return restored; },
+  });
+  const result = await commands.invoke!({ kind: "worktrees.session.resume.prepare", sessionId: "active", targetSessionId: "source", scope: "repo" }, "prepare" as never);
+  assert.deepEqual(registrations, ["C:/chosen"]);
+  const preparedResult = (result as { result: { workspaceId: string; threadId: string } }).result;
+  assert.equal(preparedResult.workspaceId, "chosen");
+  assert.equal(preparedResult.threadId, threadIdFor("saved"));
+  await assert.rejects(async () => commands.resume!({ threadId: preparedResult.threadId as ThreadId }), /Native restore failed/);
+  assert.equal(sessionRef.current, previous);
+  fail = false;
+  await commands.resume!({ threadId: threadIdFor("source") as ThreadId });
+  assert.equal(sessionRef.current, restored);
+  assert.deepEqual(switches[0], { kind: "resume", sessionId: "saved", resumeWorkspace: { workspaceId: "chosen", cwd: "C:/chosen" }, allowRelocation: true });
+});
+
+test("missing execution cwd is an explicit selection requirement, never registered or used as a launch path", async () => {
+  let registrations = 0;
+  let switched = 0;
+  const prepared = { targetSessionId: "missing", requestedSessionId: "missing", recordedCwd: "C:/removed", cwd: "C:/removed", requiresWorkspaceSelection: true };
+  const session = { hello: () => ({}), controller: { publication: () => ({ snapshot: { sessionId: "active", runtimeEpoch: 1, stateVersion: 1 } }), invoke: async () => ({ status: "completed", result: prepared }) } } as unknown as DesktopRuntimeSession;
+  const commands = createDesktopSemanticCommands({ ...baseOptions, sessionRef: { current: session },
+    registerImportedWorkspace: async () => { registrations++; return "wrong"; }, switchSession: async () => { switched++; return undefined; } });
+  const result = await commands.invoke!({ kind: "worktrees.session.resume.prepare", sessionId: "active", targetSessionId: "missing", scope: "repo" }, "prepare" as never);
+  assert.equal((result as { result: { requiresWorkspaceSelection: boolean } }).result.requiresWorkspaceSelection, true);
+  await assert.rejects(async () => commands.resume!({ threadId: threadIdFor("missing") as ThreadId }), { code: "INVALID_ARGUMENT" });
+  assert.equal(registrations, 0);
+  assert.equal(switched, 0);
+});
+
+test("a new resume preparation that needs a workspace invalidates both aliases of the previous selection", async () => {
+  const ready = { targetSessionId: "saved", requestedSessionId: "source", recordedCwd: "C:/removed", cwd: "C:/removed", executionCwd: "C:/chosen", requiresWorkspaceSelection: false };
+  let prepared: Omit<typeof ready, "executionCwd"> & { executionCwd?: string } = ready;
+  const session = { hello: () => ({}), controller: { publication: () => ({ snapshot: { sessionId: "active", runtimeEpoch: 1, stateVersion: 1 } }), invoke: async () => ({ status: "completed", result: prepared }) } } as unknown as DesktopRuntimeSession;
+  let switches = 0;
+  const commands = createDesktopSemanticCommands({ ...baseOptions, sessionRef: { current: session },
+    catalog: { list: async () => [{ sessionId: "saved", modifiedAt: T0, messageCount: 2, status: "active" }] },
+    registerImportedWorkspace: async () => "chosen", switchSession: async () => { switches++; return undefined; } });
+  const operation = { kind: "worktrees.session.resume.prepare" as const, sessionId: "active", targetSessionId: "source", scope: "repo" as const };
+  await commands.invoke!(operation, "prepare-ready" as never);
+  const { executionCwd: _gone, ...missing } = ready;
+  prepared = { ...missing, requiresWorkspaceSelection: true };
+  await commands.invoke!(operation, "prepare-missing" as never);
+  for (const id of ["source", "saved"]) {
+    await assert.rejects(async () => commands.resume!({ threadId: threadIdFor(id) as ThreadId }), { code: "INVALID_ARGUMENT" });
+  }
+  assert.equal(switches, 0);
+});
+
+test("delete reports native partial cleanup while still removing telemetry, bindings and leases", async () => {
+  const cleaned: string[] = [];
+  const commands = createDesktopSemanticCommands({ ...baseOptions,
+    deleteService: () => ({ delete: async () => ({ sessionId: "session-a", deleted: true, nativeCleanup: { status: "partial", reason: "native-purge-partial" } }) }) as unknown as StudioSessionDeleteService,
+    finishManagedArtifacts: async () => { cleaned.push("artifacts"); throw new Error("Artifact library unavailable"); },
+    telemetryStore: () => ({ remove: () => { cleaned.push("telemetry"); } }),
+    bindings: { unbind: () => { cleaned.push("binding"); } },
+    leaseStore: { removeForSession: () => { cleaned.push("lease"); } },
+  });
+  const result = await commands.delete!({ threadId: threadIdFor("session-a") as ThreadId });
+  assert.equal(result.applied, true);
+  assert.match(result.message ?? "", /partial.*native-purge-partial/);
+  assert.match(result.message ?? "", /Managed artifact cleanup failed/);
+  assert.deepEqual(cleaned, ["artifacts", "telemetry", "binding", "lease"]);
+});
 
 test("queue takeback retries a failed attachment promotion before acknowledging recovery", async () => {
   const asset = {artifactId:"11111111-1111-1111-1111-111111111111",kind:"image",name:"a.png",mimeType:"image/png",bytes:1,sha256:"a".repeat(64)};

@@ -6,18 +6,27 @@ import type {
   ContextViewIndex,
 } from "@omp-studio/studio-protocol";
 
-/** Category tint for dots and meter segments; never used for text. */
-export const CATEGORY_TINT: Record<ContextCategoryId, string> = {
-  "system-prompt": "var(--tint-indigo)",
-  skills: "var(--tint-teal)",
-  "built-in-tools": "var(--tint-orange)",
-  "custom-tools": "var(--tint-violet)",
-  "user-messages": "var(--tint-blue)",
-  "assistant-messages": "var(--tint-cyan)",
-  "assistant-thinking": "var(--tint-pink)",
-  "tool-calls": "var(--tint-rose)",
-  "tool-output": "var(--tint-lime)",
+export type ContextUsageGroup = "messages" | "tools" | "instructions" | "system";
+/** Four fixed identity groups shared with ContextCard; never status or text colours. */
+export const CONTEXT_GROUP_TINT: Record<ContextUsageGroup, string> = {
+  messages: "var(--context-messages)",
+  tools: "var(--context-tools)",
+  instructions: "var(--context-instructions)",
+  system: "var(--context-system)",
 };
+export const CATEGORY_GROUP: Record<ContextCategoryId, ContextUsageGroup> = {
+  "system-prompt": "system",
+  "instruction-files": "instructions",
+  skills: "system",
+  "built-in-tools": "tools",
+  "custom-tools": "tools",
+  "user-messages": "messages",
+  "assistant-messages": "messages",
+  "assistant-thinking": "messages",
+  "tool-calls": "messages",
+  "tool-output": "messages",
+};
+export const CATEGORY_TINT = Object.fromEntries(Object.entries(CATEGORY_GROUP).map(([category, group]) => [category, CONTEXT_GROUP_TINT[group]])) as Record<ContextCategoryId, string>;
 export const FREE_TINT = "var(--surface-active)";
 export const BUFFER_TINT = "var(--border-strong)";
 
@@ -94,9 +103,11 @@ export function meterSegments(
   const window = index.contextWindow;
   if (!(window > 0)) return [];
   const segments: MeterSegment[] = [];
-  for (const category of index.categories) {
-    const tokens = allocation?.get(category.key ?? category.id) ?? category.tokens;
-    if (tokens > 0) segments.push({ key: category.id, tokens, share: tokens / window, color: CATEGORY_TINT[category.id] });
+  const grouped: Record<ContextUsageGroup, number> = { messages: 0, tools: 0, instructions: 0, system: 0 };
+  for (const category of index.categories) grouped[CATEGORY_GROUP[category.id]] += allocation?.get(category.key ?? category.id) ?? category.tokens;
+  for (const group of Object.keys(CONTEXT_GROUP_TINT) as ContextUsageGroup[]) {
+    const tokens = grouped[group];
+    if (tokens > 0) segments.push({ key: group, tokens, share: tokens / window, color: CONTEXT_GROUP_TINT[group] });
   }
   if (index.bufferTokens > 0)
     segments.push({

@@ -3,11 +3,15 @@ import { AskActions, AskBody, AskHead } from "./AskCard";
 import { ASK_GENIE_HOLD_MS, ASK_GENIE_MS } from "./askGenie";
 import { MOTION_SLACK_MS, motionReduced } from "../motion";
 import { TAB_PANE_MS } from "../pageTransition";
-import { askAnswered, nextPicked, patchAskAnswer } from "./askContent";
+import { askAnswered, initialAskAnswer, nextPicked, patchAskAnswer } from "./askContent";
 import { PlanCard } from "./PlanCard";
 import { type DeckQueue } from "./PromptHead";
 import { NO_ASK_ANSWER, type AskHeader, type DeckAskAnswer, type DeckAskQuestion } from "./types";
 import type { SlideDir } from "../pageTransition";
+import type { FormSubmitValue } from "@omp-studio/studio-protocol";
+import { FormCard } from "./FormCard";
+import type { FormSession } from "./FormSession";
+import { useI18n } from "../i18n/I18nContext";
 
 export type QueuedDeckItem =
   | {
@@ -22,9 +26,19 @@ export type QueuedDeckItem =
       readonly id: string;
       readonly meta?: string;
       readonly question: DeckAskQuestion;
+    }
+  | {
+      readonly kind: "form";
+      readonly id: string;
+      readonly meta?: string;
+      readonly title: string;
+      readonly summary: string;
+      readonly session: FormSession;
     };
 
 export type QueuedAskItem = Extract<QueuedDeckItem, { kind: "ask" }>;
+export type QueuedFormItem = Extract<QueuedDeckItem, { kind: "form" }>;
+const askLike = (item: QueuedDeckItem | undefined) => item?.kind === "ask" || item?.kind === "form";
 
 /* ask 卡之间切换（队列 1/N 翻页 / 标题行 header 胶囊跳转）：
    · 卡片外壳常驻 —— 标题行（Agent 提问 / 胶囊 / 1-N）与底部操作行（取消 / 提交）
@@ -54,8 +68,8 @@ type LockLayer = "stage" | "swap";
 
 /** 舞台里当前那张卡（整卡换掉时用它量新卡的自然高度）。 */
 function stageCard(stage: HTMLElement | null): HTMLElement | null {
-  const node = stage?.firstElementChild;
-  return node instanceof HTMLElement ? node : null;
+  const node = stage?.querySelector<HTMLElement>(":scope > :not([hidden])");
+  return node ?? null;
 }
 
 /** 焦点落回 data-dk-focus 相同的控件；队列按钮翻到边界被禁用时退到另一侧。 */
@@ -65,7 +79,7 @@ function restoreFocus(scope: HTMLElement | null, slot: string) {
     ? [slot, "queue-prev"]
     : slot === "queue-prev" ? [slot, "queue-next"] : [slot];
   for (const name of order) {
-    const node = scope.querySelector<HTMLElement>(`[data-dk-focus="${name}"]:not([disabled])`);
+    const node = [...scope.querySelectorAll<HTMLElement>(`[data-dk-focus="${name}"]:not([disabled])`)].find(candidate => !candidate.closest("[hidden]"));
     if (node) {
       node.focus();
       return;
@@ -90,6 +104,7 @@ export function QueuedDeck({
   onCurrentKind,
   onAskSubmit,
   onAskCancel,
+  onFormRespond,
   onPlanAction,
   onPlanSaveAndQuit,
   leaving,
@@ -107,11 +122,17 @@ export function QueuedDeck({
   readonly onCurrentKind?: (kind: "plan" | "ask" | null) => void;
   readonly onAskSubmit?: (item: QueuedAskItem, answer: DeckAskAnswer) => boolean | Promise<boolean>;
   readonly onAskCancel?: (item: QueuedAskItem) => boolean | Promise<boolean>;
+  readonly onFormRespond?: (item: QueuedFormItem, decision: "submit" | "cancel", value?: FormSubmitValue) => void | Promise<boolean>;
   readonly onPlanAction?: (item: Extract<QueuedDeckItem, { kind: "plan" }>) => void;
   readonly onPlanSaveAndQuit?: (item: Extract<QueuedDeckItem, { kind: "plan" }>) => void;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [remaining, setRemaining] = useState<readonly QueuedDeckItem[]>(() => items);
+  const remainingRef = useRef(remaining);
+  const presentedForms = useRef(new Set<string>());
   const [pos, setPos] = useState(0);
+  const posRef = useRef(pos);
   const [answers, setAnswers] = useState<Readonly<Record<string, DeckAskAnswer>>>({});
   const [swap, setSwap] = useState<DeckSwap | null>(null);
   const [busy, setBusy] = useState(false);
@@ -126,13 +147,14 @@ export function QueuedDeck({
   const focusSlot = useRef<string | null>(null);
   const leaveTimerRef = useRef<number | undefined>(undefined);
   const [askPhase, setAskPhase] = useState<"enter" | "open" | "leave" | "idle">(
-    () => items[0]?.kind === "ask" && !motionReduced() ? "enter" : items[0]?.kind === "ask" ? "open" : "idle",
+    () => askLike(items[0]) && !motionReduced() ? "enter" : askLike(items[0]) ? "open" : "idle",
   );
   const prevKindRef = useRef(items[0]?.kind);
 
   const total = remaining.length;
   const index = total === 0 ? 0 : Math.min(pos, total - 1);
   const current = remaining[index];
+  if (current?.kind === "form") presentedForms.current.add(current.id);
   useEffect(() => { setCollapsed(false); }, [items[0]?.id]);
   useEffect(() => {
     if (current?.kind !== "ask" || leaving) return;
@@ -169,7 +191,7 @@ export function QueuedDeck({
   const kind = current?.kind;
   useLayoutEffect(() => {
     const prev = prevKindRef.current;
-    if (kind === "ask" && prev !== "ask") {
+    if ((kind === "ask" || kind === "form") && prev !== "ask" && prev !== "form") {
       setAskPhase(motionReduced() ? "open" : "enter");
     } else if (kind === "plan") {
       setAskPhase("idle");
@@ -238,7 +260,7 @@ export function QueuedDeck({
   const navigate = useCallback((next: number) => {
     const at = total === 0 ? 0 : Math.min(pos, total - 1);
     const target = Math.max(0, Math.min(total - 1, next));
-    if (target === at || attachmentBusy) return;
+    if (target === at || attachmentBusy || actionsLocked) return;
     const from = remaining[at];
     const to = remaining[target];
     const active = document.activeElement;
@@ -246,13 +268,20 @@ export function QueuedDeck({
     /* 只有 ask ⇄ ask 共用外壳，能只换正文；跨类型（计划卡）整卡过渡高度 */
     const keep = from?.kind === "ask" && to?.kind === "ask" ? from : null;
     beginSwap(keep, target > at ? "fwd" : "back");
+    posRef.current = target;
     setPos(target);
-  }, [beginSwap, pos, remaining, total, attachmentBusy]);
+  }, [beginSwap, pos, remaining, total, attachmentBusy, actionsLocked]);
 
   const drop = useCallback((id: string) => {
-    const gone = remaining.find((item) => item.id === id);
-    const next = remaining.filter((item) => item.id !== id);
-    const lastAsk = gone?.kind === "ask" && next.length === 0;
+    const gone = remainingRef.current.find((item) => item.id === id);
+    if (!gone) return;
+    const selected = remainingRef.current[Math.min(posRef.current, remainingRef.current.length - 1)]?.id;
+    const next = remainingRef.current.filter((item) => item.id !== id);
+    remainingRef.current = next;
+    const retained = next.findIndex(item => item.id === selected);
+    posRef.current = retained >= 0 ? retained : Math.max(0, Math.min(posRef.current, next.length - 1));
+    setPos(posRef.current);
+    const lastAsk = askLike(gone) && next.length === 0;
     if (lastAsk && !motionReduced()) {
       if (askPhase === "leave") return;
       setAskPhase("leave");
@@ -265,14 +294,14 @@ export function QueuedDeck({
     }
     beginSwap(null, "fwd");
     setRemaining(next);
-  }, [askPhase, beginSwap, remaining]);
+  }, [askPhase, beginSwap]);
 
-  const dismissAsk = useCallback(async (item: QueuedAskItem, reason: "submit" | "cancel") => {
+  const dismissAsk = useCallback(async (item: QueuedAskItem, reason: "submit" | "cancel", chosen?: DeckAskAnswer) => {
     if (actionsLocked || (reason === "submit" && attachmentBusy)) return;
     if (reason === "submit" && onAskSubmit) {
       setBusy(true);
       try {
-        const ok = await onAskSubmit(item, answers[item.id] ?? NO_ASK_ANSWER);
+        const ok = await onAskSubmit(item, chosen ?? answers[item.id] ?? initialAskAnswer(item.question));
         if (ok === false) return;
       } finally {
         setBusy(false);
@@ -293,7 +322,7 @@ export function QueuedDeck({
   const pick = useCallback((item: QueuedAskItem, label: string) => {
     if (editsLocked) return;
     setAnswers((prev) => {
-      const at = prev[item.id] ?? NO_ASK_ANSWER;
+      const at = prev[item.id] ?? initialAskAnswer(item.question);
       const picked = nextPicked(item.question, at.picked, label);
       return { ...prev, [item.id]: patchAskAnswer(item.question, at, { picked }) };
     });
@@ -301,7 +330,7 @@ export function QueuedDeck({
 
   const patchAnswer = useCallback((item: QueuedAskItem, patch: Partial<DeckAskAnswer>) => {
     if (editsLocked) return;
-    setAnswers(prev => ({ ...prev, [item.id]: patchAskAnswer(item.question, prev[item.id] ?? NO_ASK_ANSWER, patch) }));
+    setAnswers(prev => ({ ...prev, [item.id]: patchAskAnswer(item.question, prev[item.id] ?? initialAskAnswer(item.question), patch) }));
   }, [editsLocked]);
 
   if (!current) {
@@ -325,16 +354,17 @@ export function QueuedDeck({
       key={item.id}
       onBusy={setAttachmentBusy}
       question={item.question}
-      answer={answers[item.id] ?? NO_ASK_ANSWER}
+      answer={answers[item.id] ?? initialAskAnswer(item.question)}
       {...(editsLocked ? { disabled: true } : {})}
       onPick={(label) => pick(item, label)}
+      {...(item.question.toggleList ? { onChoose: (label: string) => { void dismissAsk(item, "submit", { ...NO_ASK_ANSWER, picked: [label] }); } } : {})}
       onCustom={custom => patchAnswer(item, { custom })}
       onPatch={patch => patchAnswer(item, patch)}
       onSubmit={() => { void dismissAsk(item, "submit"); }}
     />
   );
 
-  const askShell = current?.kind === "ask" || askPhase === "leave" || leaving === true;
+  const askShell = askLike(current) || askPhase === "leave" || leaving === true;
   const askEnter = askPhase === "enter" && leaving !== true;
   const askLeave = askPhase === "leave" || leaving === true;
   return (
@@ -346,7 +376,7 @@ export function QueuedDeck({
       aria-label={regionLabel}
       aria-live="polite"
     >
-      {collapsed && current.kind === "ask" ? <div className="ask-collapsed-bar"><span>待回答 / Pending</span><strong>{current.question.question}</strong><button className="btn small outline" type="button" autoFocus onClick={() => setCollapsed(false)}>展开 / Show</button></div> : null}
+      {collapsed && current.kind === "ask" ? <div className="ask-collapsed-bar"><span>{zh ? "待回答 / Pending" : "Pending"}</span><strong>{current.question.question}</strong><button className="btn small outline" type="button" autoFocus onClick={() => setCollapsed(false)}>{zh ? "展开 / Show" : "Show"}</button></div> : null}
       <div className="deck-card" hidden={collapsed && current.kind === "ask"}>
         <div ref={stageRef} className={`dk-stage${lockSmooth("stage")}`} style={lockStyle("stage")}>
           {current.kind === "plan" ? (
@@ -364,7 +394,7 @@ export function QueuedDeck({
               }}
               {...(onPlanSaveAndQuit === undefined ? {} : { onSaveAndQuit: () => onPlanSaveAndQuit(current) })}
             />
-          ) : (
+          ) : current.kind === "form" ? null : (
             <div className="ask-card">
               {/* 标题行：队列位置与胶囊高亮始终是当前卡的，不随离场正文回退 */}
               <AskHead
@@ -387,17 +417,38 @@ export function QueuedDeck({
               </div>
               {submitError === true ? (
                 <p className="ask-error" role="alert">
-                  提交失败，卡片已保留。请重试。
+                  {zh ? "提交失败，卡片已保留。请重试。" : "Submission failed; the card was kept. Please try again."}
                 </p>
               ) : null}
               <AskActions
                 {...(actionsLocked ? { disabled: true } : {})}
-                canSubmit={!attachmentBusy && askAnswered(answers[current.id] ?? NO_ASK_ANSWER)}
+                canSubmit={!attachmentBusy && askAnswered(answers[current.id] ?? (current.kind === "ask" ? initialAskAnswer(current.question) : NO_ASK_ANSWER))}
                 onCancel={() => { void dismissAsk(current, "cancel"); }}
                 onSubmit={() => { void dismissAsk(current, "submit"); }}
               />
             </div>
           )}
+          {remaining.filter((item): item is QueuedFormItem => item.kind === "form" && presentedForms.current.has(item.id)).map(item => <div key={item.id} className="dk-form-cell" hidden={current.id !== item.id}>
+            <FormCard
+              session={item.session}
+              title={item.title}
+              summary={item.summary}
+              demo={demo}
+              meta={item.meta}
+              queue={queue}
+              active={current.id === item.id}
+              disabled={actionsLocked}
+              onRespond={async (decision, value) => {
+                setBusy(true);
+                try {
+                  const ok = onFormRespond ? await onFormRespond(item, decision, value) : true;
+                  if (ok === false) return false;
+                  drop(item.id);
+                  return true;
+                } finally { setBusy(false); }
+              }}
+            />
+          </div>)}
         </div>
       </div>
     </div>

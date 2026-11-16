@@ -1,6 +1,7 @@
 import { CHROME_UPDATES_CHANNELS as C, type UpdateCheckResult } from "./chrome-updates-shared.js";
 import type { ChromeUpdatesIpcOptions } from "./chrome-updates.js";
 import type { UpdateCoordinator } from "./update-coordinator.js";
+import { desktopText } from "./desktop-language-shared.js";
 
 export function registerUnifiedUpdatesIpc(options: Pick<ChromeUpdatesIpcOptions, "ipcMain" | "isTrustedSender">, coordinator: UpdateCoordinator): () => void {
   const channels = [C.snapshot, C.prepare, C.check, C.apply, C.cancel, C.rollback, C.startApp, C.startRuntime];
@@ -26,8 +27,8 @@ export function registerUnifiedUpdatesIpc(options: Pick<ChromeUpdatesIpcOptions,
   bind(C.apply, () => coordinator.apply());
   bind(C.rollback, () => coordinator.rollbackDesktop());
   // Retired online endpoints must not run a second independent updater.
-  bind(C.startApp, () => ({ ok: false, message: "请使用统一更新入口" }));
-  bind(C.startRuntime, () => ({ ok: false, message: "请使用统一更新入口" }));
+  bind(C.startApp, () => ({ ok: false, message: desktopText("请使用统一更新入口", "Use the unified update entrypoint") }));
+  bind(C.startRuntime, () => ({ ok: false, message: desktopText("请使用统一更新入口", "Use the unified update entrypoint") }));
   bind(C.cancel, () => coordinator.cancel());
   return () => { for (const channel of channels) options.ipcMain.removeHandler(channel); };
 }

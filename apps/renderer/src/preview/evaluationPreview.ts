@@ -5,8 +5,9 @@ import type {
   EvaluationResultRow,
   EvaluationContext,
 } from "@omp-studio/studio-protocol";
+import { isZh } from "../i18n";
 import { PREVIEW_RATCHET } from "./ratchetPreview";
-import { PREVIEW_JUDGMENT_SPEC } from "./judgmentsPreview";
+import { getPreviewJudgmentSpec, PREVIEW_JUDGMENT_SPEC } from "./judgmentsPreview";
 import { PREVIEW_BENCHMARK } from "./benchmarksPreview";
 
 export function previewEvaluationPlan(spec: EvaluationSpec): EvaluationPlan {
@@ -211,30 +212,30 @@ export function previewEvaluation(
     },
   };
 }
-export function previewEvaluationRecords(): EvaluationRecord[] {
+export function previewEvaluationRecords(zh = isZh()): EvaluationRecord[] {
   const models = EVALUATION_PREVIEW_CONTEXT.models.map((m) => m.selector);
   const ratchet = PREVIEW_RATCHET;
   const records = [
     previewEvaluation(
       { kind: "benchmark", profile: "detailed", models, runs: 4, concurrency: 4 },
-      "模型性能对比",
+      zh ? "模型性能对比" : "Model benchmark comparison",
       "10f1e6e2-bcef-4acf-8756-48ed87f2a001",
     ),
     previewEvaluation(
       { kind: "instruction", models },
-      "连续指令测试",
+      zh ? "连续指令测试" : "Sequential instruction adherence",
       "10f1e6e2-bcef-4acf-8756-48ed87f2a002",
     ),
     previewEvaluation(
-      { kind: "judgment", ...PREVIEW_JUDGMENT_SPEC },
-      "支持工单分类",
+      { kind: "judgment", ...(zh ? getPreviewJudgmentSpec(true) : getPreviewJudgmentSpec(false)) },
+      zh ? "支持工单分类" : "Support ticket classification",
       "10f1e6e2-bcef-4acf-8756-48ed87f2a003",
     ),
     previewEvaluation(
       {
         kind: "ratchet",
         flow: ratchet.flow,
-        objective: "提高支持工单路由准确率",
+        objective: zh ? "提高支持工单路由准确率" : "Improve support ticket routing accuracy",
         cases: ratchet.cases,
         harness: ratchet.harness,
         change: ratchet.change,
@@ -246,7 +247,7 @@ export function previewEvaluationRecords(): EvaluationRecord[] {
         costLimit: 5,
         roundsLimit: 8,
       },
-      "支持工单路由优化",
+      zh ? "支持工单路由优化" : "Support ticket routing optimization",
       "10f1e6e2-bcef-4acf-8756-48ed87f2a004",
     ),
   ];

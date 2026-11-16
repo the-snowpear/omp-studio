@@ -174,7 +174,9 @@ export function validateRuntimeSettingValue(
     case "providers.autoThinkingMaxEffort":
       oneOf(value, ["xhigh", "max"], path);
       return;
-    case "claudeResets.autoRedeem":
+    case "claudeResets.autoRedeem5h":
+    case "claudeResets.autoRedeemWeekly":
+    case "claudeResets.autoRedeemFable":
       oneOf(value, ["unset", "yes", "no"], path);
       return;
     case "ttsr.judge":
@@ -232,7 +234,9 @@ export function validateRuntimeSettingValue(
 const OPTIONAL_RUNTIME_SETTING_KEYS: ReadonlySet<string> = new Set([
   ...GUI_SETTING_KEYS,
   "modelRoles.judge",
-  "claudeResets.autoRedeem",
+  "claudeResets.autoRedeem5h",
+  "claudeResets.autoRedeemWeekly",
+  "claudeResets.autoRedeemFable",
   "claudeResets.minBlockedMinutes",
   "claudeResets.keepCredits",
   "claudeResets.salvageHorizonHours",
@@ -254,7 +258,10 @@ const OPTIONAL_RUNTIME_SETTING_KEYS: ReadonlySet<string> = new Set([
 ]);
 function validateRuntimeSettingsSnapshot(value: unknown, path: string): void {
   const settings = record(value, path);
-  exactKeys(settings, STUDIO_RUNTIME_SETTING_KEYS, path);
+  exactKeys(settings, [...STUDIO_RUNTIME_SETTING_KEYS, "claudeResets.autoRedeem", "codexResets.autoRedeem"], path);
+  for (const legacy of ["claudeResets.autoRedeem", "codexResets.autoRedeem"] as const) {
+    if (settings[legacy] !== undefined) oneOf(settings[legacy], ["unset", "yes", "no"], `${path}.${legacy}`);
+  }
   for (const key of STUDIO_RUNTIME_SETTING_KEYS) {
     if (settings[key] === undefined && OPTIONAL_RUNTIME_SETTING_KEYS.has(key)) continue;
     // Native config may contain values outside the editor's range. The Runtime
@@ -865,7 +872,7 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
       }
       return;
     case "select": {
-      exactKeys(request, [...baseKeys, "options", "multiple"], path);
+      exactKeys(request, [...baseKeys, "options", "multiple", "initialIndex", "selectionMarker", "checkedIndices", "markableCount"], path);
       if (!Array.isArray(request.options) || request.options.length === 0 || request.options.length > INTERACTION_LIMITS.OPTION_COUNT_MAX) {
         throw new ContractValidationError("expected non-empty options", `${path}.options`);
       }
@@ -917,6 +924,10 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
           boundedInteractionString(grant.alwaysLabel, `${path}.grants[${index}].alwaysLabel`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
         }
       }
+      return;
+    case "form":
+      exactKeys(request, [...baseKeys, "summary", "fieldCount", "sectionCount", "timeoutMs"], path);
+      boundedInteractionString(request.summary, `${path}.summary`, INTERACTION_LIMITS.TITLE_MAX_CHARS);
       return;
     case "ask": {
       exactKeys(request, [...baseKeys, "questions", "acceptImages"], path);

@@ -1,60 +1,53 @@
 import { useEffect, useState } from "react";
-import type { StudioClient, RuntimeAuthProvider } from "@omp-studio/client-contract";
+import type { ClientBootstrap, StudioClient } from "@omp-studio/client-contract";
 import { invokeUpgrade, useUpgradeAvailable } from "../runtimeUpgrade";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { hostErrorMessage } from "../hostError";
-export function RuntimeCredentials({ client, preview, providers = ["typesafe"] }: {
- client: StudioClient | null; preview: boolean; providers?: readonly RuntimeAuthProvider[];
+import { useModelAuth, type ModelAuthController } from "./useModelAuth";
+
+/** Credentials for native Judge runners. Liquid never becomes a chat-parameter form. */
+export function RuntimeCredentials({ client, preview, providers = ["typesafe", "liquid"], visible = true, sessionId, available = false, capabilities, controller, onChanged }: {
+  client: StudioClient | null; preview: boolean; providers?: readonly string[]; visible?: boolean;
+  sessionId?: string | undefined; available?: boolean; capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
+  controller?: ModelAuthController;
+  onChanged?: () => void;
 }) {
- const { t } = useI18n();
- return <section className="runtime-credentials"><h3>{t("runtimeUpgrade.authTitle")}</h3><p className="sec-desc">{t("runtimeUpgrade.authHint")}</p>
- {providers.map(provider => <CredentialRow key={provider} provider={provider} client={client} preview={preview} />)}
- </section>;
+  const { t, resolvedLanguage } = useI18n(), { marks } = usePreviewMode();
+  const own = useModelAuth({ client, sessionId, available, capabilities }, preview, visible && !controller);
+  const auth = controller ?? own;
+  const zh = resolvedLanguage === "zh";
+  if (!visible) return null;
+  return <section className="runtime-credentials">
+    <h3>{zh ? "Judge 供应商凭据" : "Judge provider credentials"}{preview && marks ? ` · ${t("common.demo")}` : ""}</h3>
+    <p className="sec-desc">{zh ? "凭据存入原生 AuthStorage。模型用于 Judge 角色及既有评测；Liquid SystemOne 接收 state/questions，不是聊天接口。" : "Credentials use native AuthStorage for the Judge role and existing evaluations. Liquid SystemOne accepts state/questions, not chat requests."}</p>
+    {providers.map(provider => <CredentialRow key={provider} id={provider} auth={auth} onChanged={onChanged} />)}
+    {auth.error ? <p role="alert">{auth.error}</p> : null}
+  </section>;
 }
-function CredentialRow({ client, preview, provider }: { client: StudioClient | null; preview: boolean; provider: RuntimeAuthProvider }) {
- const { t } = useI18n();
- const { marks } = usePreviewMode();
- const available = useUpgradeAvailable(client, preview, "runtime.auth.set");
- const [configured, setConfigured] = useState<boolean | null>(null);
- const [key, setKey] = useState("");
- const [lastJudgment, setLastJudgment] = useState<string | null>(null);
- const [busy, setBusy] = useState(false);
- const [error, setError] = useState("");
- useEffect(() => {
-  let disposed = false;
-  setKey(""); setConfigured(null); setError("");
-  if (preview) { setConfigured(provider === "typesafe"); return; }
-  if (client && available) void invokeUpgrade(client, "runtime.auth.get", {provider}).then(result => { if (!disposed) { setConfigured(result.configured); setLastJudgment(result.lastJudgment ? result.lastJudgment.provider + "/" + result.lastJudgment.model : null); } }).catch(cause => { if (!disposed) setError(hostErrorMessage(cause,"Credential status unavailable")); });
-  return () => { disposed = true; };
- }, [client, available, preview, provider]);
- const save = async (remove: boolean) => {
-  if (!available || busy) return;
-  setBusy(true); setError("");
-  const secret = key; setKey("");
-  try {
-   if (preview) setConfigured(!remove);
-   else if (client) { const result = remove ? await invokeUpgrade(client,"runtime.auth.remove",{provider}) : await invokeUpgrade(client,"runtime.auth.set",{provider,apiKey:secret}); setConfigured(result.configured); }
-  } catch(cause) { setError(hostErrorMessage(cause,"Credential update failed")); }
-  finally { setBusy(false); }
- };
- return <div className="runtime-credential-row">
-  <strong>{provider === "typesafe" ? "TypeSafe" : provider === "exa" ? "Exa" : "Ollama Cloud"}</strong>
-  <span className="small muted">{!available ? t("runtimeUpgrade.unavailable") : configured === null ? t("common.loading") : configured ? t("runtimeUpgrade.authConfigured") : t("runtimeUpgrade.authMissing")}</span>
-  {lastJudgment ? <span className="small muted">{t("runtimeUpgrade.lastJudgment")} {lastJudgment}</span> : null}
-  {preview && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}
-  <input className="input" type="password" autoComplete="new-password" aria-label={provider + " " + t("runtimeUpgrade.authKey")} value={key} disabled={!available || busy} onChange={event => setKey(event.target.value)} />
-  <button className="btn small" disabled={!available || busy || !key.trim()} onClick={() => void save(false)}>{t("common.save")}</button>
-  <button className="btn small" disabled={!available || busy || !configured} onClick={() => void save(true)}>{t("common.delete")}</button>
-  {provider === "exa" ? <button className="btn small" onClick={() => { if (!preview) void window.ompStudioChrome?.openUrl({ url: "https://dashboard.exa.ai/api-keys" }); }}>{t("runtimeUpgrade.authWebsite")}</button> : null}
-  {error ? <p role="alert">{error}</p> : null}
- </div>;
+function CredentialRow({ id, auth, onChanged }: { id: string; auth: ModelAuthController; onChanged?: (() => void) | undefined }) {
+  const { t } = useI18n();
+  const [key, setKey] = useState("");
+  const provider = auth.providers?.find(row => row.id === id);
+  const disabled = !auth.canEdit || !!auth.busyProvider || !provider?.available;
+  useEffect(() => setKey(""), [id, auth.supported]);
+  return <div className="runtime-credential-row">
+    <strong>{provider?.name ?? id}</strong>
+    <span className="small muted">{!auth.supported ? t("runtimeUpgrade.unavailable") : !provider ? t("common.loading") : provider.authenticated ? t("runtimeUpgrade.authConfigured") : t("runtimeUpgrade.authMissing")}</span>
+    <input className="input" type="password" autoComplete="new-password" aria-label={`${provider?.name ?? id} ${t("runtimeUpgrade.authKey")}`} value={key} disabled={disabled} onChange={event => setKey(event.target.value)} />
+    <button className="btn small" disabled={disabled || !key.trim()} onClick={() => { const secret = key; setKey(""); void auth.key(id, secret).then(saved => { if (saved) onChanged?.(); }); }}>{t("common.save")}</button>
+    {provider?.credentials.filter(row => row.type === "api_key").map(row => <button className="btn small outline" key={row.id} disabled={disabled} aria-label={`${t("common.delete")} ${provider.name} ${row.label}`} onClick={() => void auth.key(id, undefined, row.id)}>{t("common.delete")} · {row.label}</button>)}
+  </div>;
 }
-export function VisionModelStatus({client,preview}:{client:StudioClient|null;preview:boolean}) {
- const {t}=useI18n();
- const {marks}=usePreviewMode();
- const available=useUpgradeAvailable(client,preview,"session.models.mentions");
- const [image,setImage]=useState<boolean|null>(null);
- useEffect(()=>{let closed=false;setImage(null);if(preview){setImage(true);return;}if(client&&available)void invokeUpgrade(client,"session.models.mentions",{}).then(result=>{if(!closed)setImage(result.activeModelImage);}).catch(()=>{});return()=>{closed=true;};},[client,preview,available]);
- return <p className="small muted">{image===null?t("runtimeUpgrade.unavailable"):image?t("runtimeUpgrade.visionNative"):t("runtimeUpgrade.visionText")}{preview&&marks?" · "+t("common.demo"):""}</p>;
+export function VisionModelStatus({ client, preview, visible = true }: { client: StudioClient | null; preview: boolean; visible?: boolean }) {
+  const { t } = useI18n(), { marks } = usePreviewMode();
+  const available = useUpgradeAvailable(visible ? client : null, preview, "session.models.mentions");
+  const [image, setImage] = useState<boolean | null>(null);
+  useEffect(() => {
+    let closed = false; setImage(null);
+    if (!visible) return;
+    if (preview) { setImage(true); return; }
+    if (client && available) void invokeUpgrade(client, "session.models.mentions", {}).then(result => { if (!closed) setImage(result.activeModelImage); }).catch(() => {});
+    return () => { closed = true; };
+  }, [client, preview, available, visible]);
+  return <p className="small muted">{image === null ? t("runtimeUpgrade.unavailable") : image ? t("runtimeUpgrade.visionNative") : t("runtimeUpgrade.visionText")}{preview && marks ? " · " + t("common.demo") : ""}</p>;
 }

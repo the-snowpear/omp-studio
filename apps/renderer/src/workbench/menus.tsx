@@ -259,9 +259,11 @@ export function CrumbMenu({ id, openId, onToggle, tip, current, children, menu }
 
 /** 顶栏「对话选项」与侧栏会话行 ⋯ 菜单共用的会话动作项（归档项作用目标不同，由调用方各自追加）。
     live/busy/compacting 语义与顶栏一致，只是取值来源不同：顶栏看当前会话，行菜单看所在行。 */
-export function ThreadActionMenuItems({ live, busy, compacting, compactPending, reason, onRename, onFork, onHandoff, onCompact, onExport, onHistory, onPin, pinned }: {
+export function ThreadActionMenuItems({ live, busy, compacting, forkBusy = compacting, compactPending, reason, onRename, onFork, onHandoff, onCompact, onExport, onHistory, onPin, pinned }: {
   live: boolean;
   busy: boolean;
+  /** Fork only blocks compaction, not an active streaming turn. */
+  forkBusy?: boolean;
   compacting: boolean;
   compactPending: boolean;
   /** 禁用时的悬停原因（无 Runtime / 加载中 / 预览不可用）。 */
@@ -275,7 +277,8 @@ export function ThreadActionMenuItems({ live, busy, compacting, compactPending, 
   onExport: () => void;
   onHistory: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   return (
     <>
       <MenuItem
@@ -284,11 +287,11 @@ export function ThreadActionMenuItems({ live, busy, compacting, compactPending, 
         {...(live ? {} : { title: reason })}
         onClick={onRename}
       >{t("conversation.renameThread")}</MenuItem>
-      {onPin ? <MenuItem icon="pin" disabled={!live} onClick={onPin}>{pinned ? "取消置顶 / Unpin" : "置顶 / Pin"}</MenuItem> : null}
+      {onPin ? <MenuItem icon="pin" disabled={!live} onClick={onPin}>{pinned ? (zh ? "取消置顶 / Unpin" : "Unpin") : (zh ? "置顶 / Pin" : "Pin")}</MenuItem> : null}
       <MenuItem
         icon="fork"
-        disabled={!live || busy}
-        {...(live && !busy ? {} : { title: reason })}
+        disabled={!live || forkBusy}
+        {...(live && !forkBusy ? {} : { title: reason })}
         onClick={onFork}
       >{t("shell.forkThread")}</MenuItem>
       <MenuItem

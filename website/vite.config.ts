@@ -8,7 +8,6 @@ export default defineConfig({
   server: { port: 5190, strictPort: true },
   build: {
     target: "es2022",
-    chunkSizeWarningLimit: 900,
     rollupOptions: {
       input: {
         index: page("index.html"),

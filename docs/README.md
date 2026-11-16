@@ -7,12 +7,15 @@ Public documentation for OMP Studio.
 | [../README.md](../README.md) | 中文总览 |
 | [../README.en.md](../README.en.md) | English overview |
 | [getting-started.md](getting-started.md) | Run from source |
+| [linux.md](linux.md) | Linux AppImage / deb 安装、更新、沙箱、源码开发与原生包验收 |
 | [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
 | [time-travel.md](time-travel.md) | Time Travel 开启、检查点、代码/对话恢复、存储与限制 |
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |
+| [tmux.md](tmux.md) | SSH tmux 会话附加、窗口与分屏、隐藏与分离、恢复及限制 |
 | [../doc/ssh-workspace-test-prompt.md](../doc/ssh-workspace-test-prompt.md) | SSH 与账密功能的独立测试交接提示词 |
 | [model-adaptation.md](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |
 | [workbench-docking.md](workbench-docking.md) | 工具停靠、浮窗、会话布局和预设 |
+| [file-browser.md](file-browser.md) | 全机文件浏览、本机／SSH、文件管理与项目外编辑 |
 | [browser.md](browser.md) | 聊天浏览器、人工接管、元素引用、登录空间和恢复 |
 | [computer-use.md](computer-use.md) | 电脑操作工作区、画面与步骤、安全停止、界面结构和隐私 |
 | [dock-delivery-2026-10-29.md](dock-delivery-2026-10-29.md) | 停靠工作台实现与验收记录、未验证边界 |
@@ -24,6 +27,10 @@ Public documentation for OMP Studio.
 | [releases/v0.1.11.md](releases/v0.1.11.md) | 0.1.11 发布页文案、三平台下载与升级说明 |
 | [releases/v0.1.10.md](releases/v0.1.10.md) | 0.1.10 发布页文案、三平台下载与升级说明 |
 | [migrations/omp-18.13.2.md](migrations/omp-18.13.2.md) | 18.12.6 → 18.13.2 正式版本变化、完整 Runtime / GUI 迁移与无付费验收 |
+| [migrations/omp-18.20.2.md](migrations/omp-18.20.2.md) | 18.19.0 → 18.20.2 分阶段迁移、同源 Runtime 与隔离验证范围 |
+| [migrations/omp-18.20.2-frontend-handoff.md](migrations/omp-18.20.2-frontend-handoff.md) | 前端接续阶段记录、typed API 与修复后的调用约定 |
+| [reviews/omp-18.20.2-frontend-fixes-2026-11-16.md](reviews/omp-18.20.2-frontend-fixes-2026-11-16.md) | 15 项前端复核修复、studio.5 canary、最终门禁与未验证边界 |
+| [migrations/omp-18.19.0.md](migrations/omp-18.19.0.md) | CLI-first GUI：原生表单、任务步骤、同页浏览器、系统模板、账户、Actions、GC 与兼容验收 |
 | [migrations/omp-18.18.0.md](migrations/omp-18.18.0.md) | 从 18.13.2-studio.44 升级至 18.18.0：逐版变化、worker / 队列 / Shell / WebRTC / WebMCP 适配与验证 |
 | [migrations/omp-18.12.6.md](migrations/omp-18.12.6.md) | 18.10.4 → 18.12.6 版本概览、Runtime 适配与新功能 GUI 入口 |
 | [migrations/omp-18.10.4.md](migrations/omp-18.10.4.md) | 18.8.0 → 18.10.4 完整版本概览、GUI 入口与验收 |
@@ -32,6 +39,7 @@ Public documentation for OMP Studio.
 | [migrations/omp-18.4.4.md](migrations/omp-18.4.4.md) | Upstream changes and Runtime migration |
 | [migrations/omp-18.4.4-gui.md](migrations/omp-18.4.4-gui.md) | Complete GUI scope and local delivery evidence |
 | [development.md](development.md) | Inner loop, tests, overlay |
+| [localization.md](localization.md) | 中英文完整性、实时语言切换、缓存与 Runtime / SSH 兼容、审查与验收 |
 | [performance.md](performance.md) | Streaming budgets, local counters, rollback and repeatable benchmarks |
 | [reviews/security-memory-fixes-2026-11-12.md](reviews/security-memory-fixes-2026-11-12.md) | 安全、Git、Bridge 与资源修复；真实 Chromium/Electron 前后采样和验收边界 |
 | [performance-2026-10-29.md](performance-2026-10-29.md) | 启动、整壳性能与包体优化；开源方案对比、实测及覆盖限制 |

@@ -1,13 +1,18 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { StudioClient } from "@omp-studio/client-contract";
+import type { JsonValue, StudioClient } from "@omp-studio/client-contract";
+import type { JobInspection } from "@omp-studio/studio-protocol";
 import { I18nProvider } from "../i18n";
 import { JobInspector } from "./JobInspector";
+import { ToolBody } from "./ToolBody";
+import { previewActionsWatch } from "../hubPreview";
+import { PreviewModeProvider } from "../preview/PreviewContext";
 
 const receipt = vi.hoisted(() => vi.fn());
 vi.mock("../hostError", () => ({ waitReceipt: receipt, hostErrorMessage: () => "Cannot inspect" }));
 beforeEach(() => { vi.spyOn(document, "hidden", "get").mockReturnValue(false); receipt.mockReset(); });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
+const initialUrl = window.location.href;
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); window.history.replaceState({}, "", initialUrl); localStorage.clear(); });
 const job = { id: "job-a", generation: 1, label: "Compile", status: "running" };
 const inspection = { jobId: "job-a", pids: [], output: "finished output" };
 function client() {
@@ -209,4 +214,88 @@ it("follows output until the reader scrolls up and resumes only at the tail or o
   height = 900; update("tail after truncation"); expect(top).toBe(700);
   expect(screen.queryByRole("button", { name: "回到最新" })).toBeNull();
   expect(value.command).not.toHaveBeenCalled();
+});
+
+it.each(["details", "process"] as const)("puts the native failed-step summary and ordered steps before original output, without estimating unknown time (%s)", presentation => {
+  const value = client();
+  const full: JobInspection = { ...inspection, actions: previewActionsWatch(true) };
+  render(view(value, { presentation, previewInspection: full, job: { ...job, status: "failed" } }));
+  const actions = screen.getByRole("region", { name: "GitHub Actions 步骤" });
+  const steps = within(actions).getByText("Windows · renderer").closest("details")!;
+  expect(steps.open).toBe(false);
+  expect(steps.querySelector("summary")?.textContent).toContain("失败步骤 · #3");
+  fireEvent.click(steps.querySelector("summary")!);
+  expect(steps.open).toBe(true);
+  const ordered = within(steps).getByRole("list", { name: "Windows · renderer 有序步骤" });
+  expect(Array.from(ordered.children).map(row => (row as HTMLLIElement).value)).toEqual([1, 2, 3, 4]);
+  expect(within(ordered.children[1] as HTMLElement).getByText("0s").getAttribute("datetime")).toBe("PT0S");
+  expect(within(ordered.children[2] as HTMLElement).getByText("耗时未知")).toBeTruthy();
+  expect(within(ordered.children[2] as HTMLElement).getByText("失败")).toBeTruthy();
+  expect(within(actions).queryByRole("progressbar")).toBeNull();
+  const output = presentation === "process" ? screen.getByRole("region", { name: "最近输出（只读）" }) : screen.getByLabelText("输出尾部");
+  expect(actions.compareDocumentPosition(output) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  const log = within(actions).getByText(/日志.*Windows.*24817/).closest("details")!;
+  fireEvent.click(log.querySelector("summary")!);
+  expect(within(log).getByText(/Expected native result metadata/)).toBeTruthy();
+  expect(value.command).not.toHaveBeenCalled();
+});
+
+it("the foreground GitHub tool uses the same native steps and ignores a submitted watch object", () => {
+  const native = previewActionsWatch(true) as unknown as JsonValue;
+  render(<I18nProvider forcedLanguage="zh"><ToolBody tool={{
+    toolCallId: "foreground-watch", toolName: "github", status: "failed",
+    arguments: { op: "run_watch", watch: { mode: "run", repo: "forged/repo", state: "completed", run: { id: 99, jobs: [{ id: 99, name: "FORGED STEP", steps: [] }] } } },
+    result: { type: "toolResult", toolCallId: "foreground-watch", isError: true, data: { watch: native, output: "original native watch output" } },
+  }} /></I18nProvider>);
+  const actions = screen.getByRole("region", { name: "GitHub Actions 步骤" });
+  expect(within(actions).getByText("the-snowpear/omp-studio")).toBeTruthy();
+  expect(within(actions).queryByText("FORGED STEP")).toBeNull();
+  expect(screen.getByText(/original native watch output/)).toBeTruthy();
+});
+
+it("keeps the last native observation clear after cancellation, including failure logs from a display-budget omitted run", () => {
+  const full: JobInspection = { ...inspection, actions: {
+    mode: "run", repo: "owner/project", state: "watching", runs: [], truncated: true,
+    failedLogs: [{ runId: 999, jobId: 9991, jobName: "omitted job", available: true, tail: "original omitted-run failure" }],
+  } };
+  render(view(client(), { previewInspection: full, job: { ...job, status: "cancelled" } }));
+  expect(screen.getByText(/父 Job 已结束/)).toBeTruthy();
+  const log = screen.getByText(/日志.*omitted job.*999/).closest("details")!;
+  fireEvent.click(log.querySelector("summary")!);
+  expect(within(log).getByText("original omitted-run failure")).toBeTruthy();
+  expect(screen.getByText(/当前仅显示原生快照的一部分/)).toBeTruthy();
+});
+
+it("marks=off hides only demo chrome, not native Actions state or unknown durations", () => {
+  window.history.replaceState({}, "", "/?preview=1&marks=off");
+  const value = client();
+  render(<PreviewModeProvider switchEnabled>{view(value, { previewInspection: { ...inspection, actions: previewActionsWatch() } })}</PreviewModeProvider>);
+  expect(screen.queryByText("演示")).toBeNull();
+  expect(screen.getByRole("region", { name: "GitHub Actions 步骤" })).toBeTruthy();
+  expect(screen.getAllByText("耗时未知").length).toBeGreaterThan(0);
+  expect(value.command).not.toHaveBeenCalled();
+});
+
+it("pauses reads in a hidden document and discards an observation spanning hide/show before requesting the fresh tail", async () => {
+  vi.useFakeTimers();
+  let hidden = true;
+  vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
+  let resolveFirst!: (value: { result: typeof inspection }) => void;
+  const first = new Promise<{ result: typeof inspection }>(resolve => { resolveFirst = resolve; });
+  receipt.mockReturnValueOnce(first).mockResolvedValue({ result: { ...inspection, output: "fresh observation" } });
+  const value = client();
+  render(view(value, { presentation: "process" }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+  expect(value.command).not.toHaveBeenCalled();
+  hidden = false;
+  await act(async () => { fireEvent(document, new Event("visibilitychange")); });
+  expect(value.command).toHaveBeenCalledTimes(1);
+  hidden = true; fireEvent(document, new Event("visibilitychange"));
+  hidden = false; fireEvent(document, new Event("visibilitychange"));
+  await act(async () => { resolveFirst({ result: { ...inspection, output: "stale observation" } }); });
+  expect(screen.queryByText("stale observation")).toBeNull();
+  expect(screen.getByText("fresh observation")).toBeTruthy();
+  hidden = true; fireEvent(document, new Event("visibilitychange"));
+  await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+  expect(value.command).toHaveBeenCalledTimes(2);
 });

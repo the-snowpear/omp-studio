@@ -5,6 +5,7 @@ import { sha256File, type ComponentRelease, type DownloadMethod, type UpdateFile
 import type { BlockMap } from "builder-util-runtime";
 import { assertFreeSpace, downloadOne } from "./artifact-download.js";
 import { applyMirror } from "./update-index.js";
+import { desktopText } from "./desktop-language-shared.js";
 import { withUpdateSignal, type UpdateRequestLog } from "./update-request.js";
 
 export interface DifferentialInput {
@@ -48,11 +49,11 @@ export async function downloadDifferentialArtifact(input: DifferentialInput): Pr
       input.progress("differential", 0, input.release.file.size);
       const controller = new AbortController();
       const signal = AbortSignal.any([input.signal, controller.signal]);
-      let idle = setTimeout(() => controller.abort(new Error("增量下载长时间没有进展")), 30_000);
+      let idle = setTimeout(() => controller.abort(new Error(desktopText("增量下载长时间没有进展", "Differential download stalled with no progress"))), 30_000);
       try {
         await withUpdateSignal(input.differential(cachedUpdatePath(input.root, previous.file), target, applyMirror(input.mirror, input.release.file.url), oldMap, newMap, input.release.file, signal, (r, t) => {
           clearTimeout(idle);
-          idle = setTimeout(() => controller.abort(new Error("增量下载长时间没有进展")), 30_000);
+          idle = setTimeout(() => controller.abort(new Error(desktopText("增量下载长时间没有进展", "Differential download stalled with no progress"))), 30_000);
           input.progress("differential", r, t);
         }), signal);
       } finally { clearTimeout(idle); controller.abort(); }
@@ -61,9 +62,9 @@ export async function downloadDifferentialArtifact(input: DifferentialInput): Pr
     } catch (error) {
       input.signal.throwIfAborted();
       const message = error instanceof Error ? error.message : "";
-      const reason = /没有进展/u.test(message) ? "timeout" : /checksum/iu.test(message) ? "checksum" : /range/iu.test(message) ? "range" : "request";
+      const reason = /没有进展|no progress/iu.test(message) ? "timeout" : /checksum/iu.test(message) ? "checksum" : /range/iu.test(message) ? "range" : "request";
       input.log?.write("warn", "update.differential.fallback", `stage=artifact reason=${reason}`);
-      fallbackReason = "增量下载不可用，正在下载完整更新包";
+      fallbackReason = desktopText("增量下载不可用，正在下载完整更新包", "Differential download is unavailable; downloading the full update package");
     }
   }
   input.progress("full", 0, input.release.file.size, fallbackReason);

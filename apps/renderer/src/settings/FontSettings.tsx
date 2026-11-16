@@ -24,7 +24,8 @@ function FontGroupSettings({ group, app, families, update, reset }: {
   update: SettingsCtl["updateApp"];
   reset: SettingsCtl["resetApp"];
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const family = app[group.family];
   const size = app[group.size];
   const [custom, setCustom] = useState(false);
@@ -66,15 +67,19 @@ function FontGroupSettings({ group, app, families, update, reset }: {
         if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); commitFamily(); }
       }} /> : null}
       <div className={`font-sample font-sample-${group.id}`} aria-label={t("settings.fonts.sampleAria", { group: label })}>
-        <p>你好，OMP Studio · The quick brown fox 0123456789</p>
-        {group.id !== "ui" ? <pre><code>{'const message = "字体预览 / Font preview";\n$ echo "Hello, 世界"'}</code></pre> : <span>{t("settings.fonts.uiSample")}</span>}
+        <p>{zh ? "你好，OMP Studio · The quick brown fox 0123456789" : "Hello, OMP Studio · The quick brown fox jumps 0123456789"}</p>
+        {group.id !== "ui" ? <pre><code>{zh ? 'const message = "字体预览 / Font preview";\n$ echo "Hello, 世界"' : 'const message = "Font preview";\n$ echo "Hello, world"'}</code></pre> : <span>{t("settings.fonts.uiSample")}</span>}
       </div>
+      {group.id === "terminal" ? <label className="tmux-name-label">{t("terminal.tmux.closeSetting")}<AppSelect className="select" value={app.terminalTmuxCloseAction} onChange={event => update({ terminalTmuxCloseAction: event.target.value as AppSettings["terminalTmuxCloseAction"] })}>
+        <option value="ask">{t("terminal.tmux.ask")}</option><option value="hide">{t("terminal.tmux.hide")}</option><option value="kill">{t("terminal.tmux.killWindow")}</option>
+      </AppSelect></label> : null}
     </div>
   );
 }
 
 export function FontSettings({ ctl }: { ctl: SettingsCtl }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const { marks } = usePreviewMode();
   const [families, setFamilies] = useState<readonly string[]>(() => ctl.preview ? PREVIEW_FONT_FAMILIES : cachedFontFamilies() ?? []);
   const [loading, setLoading] = useState(false);

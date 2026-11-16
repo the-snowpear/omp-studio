@@ -7,6 +7,10 @@
    loads this file gets the shared keyframes, the surface classes and the
    reduced-motion policy with it. */
 @import "./motion.css";
+/* Light is a layer on top of the flat surfaces, chosen by the 光效 setting
+   (`data-light`). It only adds: base colours, borders and backgrounds stay
+   exactly what this file says, so `data-light="off"` is the flat UI. */
+@import "./light.css";
 
 :root {
   /* Typography */
@@ -122,6 +126,11 @@
   --loop-spin: 800ms;
   --loop-pulse: 1400ms;
   --loop-drift: 2400ms;
+  /* Light loops (styles/light.css). The orbit is a light travelling round the
+     edge of a surface that is working; the ambient field drifts so slowly it
+     is only noticed as the window being alive. */
+  --loop-orbit: 3200ms;
+  --loop-ambient: 18000ms;
 
   /* Curves — pick by what the motion means:
        --ease           state    colour, opacity, anything that stays where it is
@@ -249,6 +258,13 @@
   /* 角色主题色调板 — 给「模型配置 → 角色」列表卡片分配不同颜色。
      主色取高饱和纯色（图标色），-soft 用于 hover 光环，
      图标底色由 CSS color-mix 与 --bg-inset 混合生成，保证通透不灰。 */
+  /* Context identity groups, shared by the card and inspector. Existing hues,
+     independently validated in both themes; not status or text colours. */
+  --context-messages: #3887dc;
+  --context-tools: #e68a39;
+  --context-instructions: #28a580;
+  --context-system: #9380c8;
+
   --tint-green: #16a34a;
   --tint-green-soft: rgba(22, 163, 74, 0.13);
   --tint-green-border: rgba(22, 163, 74, 0.35);
@@ -300,9 +316,10 @@
   --code-chip-bg: rgba(110, 86, 207, 0.09);
   --code-chip-text: #5a45b8;
 
-  /* Flat: depth comes from borders + surface steps, never shadow stacks.
-     Detached surfaces use --border-float instead, which is strong enough
-     to separate them from the page without faking elevation. */
+  /* Base depth is flat: borders + surface steps. Detached surfaces use
+     --border-float, which separates them from the page on its own. The 光效
+     setting may then add light on top (styles/light.css re-points these two
+     tokens for `data-light~="std"`); `none` here is the "off" picture. */
   --shadow-menu: none;
   --shadow-modal: none;
   --border-float: #9b958c;
@@ -403,6 +420,11 @@
   --blue-soft: rgba(93, 169, 224, 0.15);
 
   /* 角色主题色调板 — 深色主题亮色档（400 级高饱和） */
+  --context-messages: #3887dc;
+  --context-tools: #b35e14;
+  --context-instructions: #28a580;
+  --context-system: #9380c8;
+
   --tint-green: #4ade80;
   --tint-green-soft: rgba(74, 222, 128, 0.16);
   --tint-green-border: rgba(74, 222, 128, 0.4);

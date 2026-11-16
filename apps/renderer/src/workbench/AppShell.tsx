@@ -1,3 +1,4 @@
+import { revealWorkspaceFile } from "../fileBrowser/fileBrowserLinks";
 import { useWorkspaceFileActions } from "../files/useWorkspaceFileActions";
 import { ConversationTitleSurface, SharedSurface, useConversationView, useConversationDom } from "../conversationWorkspace/Context";
 import { EvaluationActivity } from "../evaluation/EvaluationActivity";
@@ -7,8 +8,9 @@ import { locatePanel } from "../dock/model";
 import { type DockScope, type PanelId } from "../dock/types";
 import { DeferredPanel, lazyPanel } from "../DeferredPanel";
 import { useModelConnection } from "../models/useModelConnection";
-import { useExecutionTarget, useTargetMemory } from "../workspaces/ExecutionTargets";
+import { useExecutionTarget, useExecutionTargets, useTargetMemory } from "../workspaces/ExecutionTargets";
 import { SecondaryInteractionDeck } from "../deck/SecondaryInteractionDeck";
+import { useFormInteractionLifecycle } from "../deck/FormSession";
 import { AnnotationsProvider } from "../annotations/Annotations";
 import { setCapIntent, setModelConfigIntent, setSettingsIntent, setDiagnosticsIntent } from "../pageIntents";
 import { modelConfigHasUnsavedChanges } from "../models/modelConfigState";
@@ -49,6 +51,9 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { BackgroundProvider } from "../background/BackgroundProvider";
 import { AppBackgroundLayer } from "../background/AppBackgroundLayer";
 import { useAppSettings } from "../settings/appSettings";
+import { applyLightLevel } from "../lux/lightLevel";
+import { LuxAmbient } from "../lux/LuxAmbient";
+import { LuxSpotlight } from "../lux/LuxSpotlight";
 import { applyTheme } from "../themeTransition";
 import { desktopNotice } from "../settings/desktopNotice";
 import { openOnboardingTour } from "../onboarding/onboardingState";
@@ -57,8 +62,8 @@ import { AppNavRail, type NavRailRoute } from "../NavRail";
 import { useIdentityFlight } from "../useIdentityFlight";
 import { useAppUpdate } from "../settings/appUpdate";
 import { useOperatorProfile } from "../settings/operatorProfile";
-import { PREVIEW_APP_UPDATE, defaultPreviewSelection, findPreviewProject, findPreviewThread } from "../preview/fixtures";
-import { PREVIEW_BTW_QUESTION, PREVIEW_BTW_SNAPSHOTS, previewBtwSnapshot } from "../preview/btwPreview";
+import { getPreviewAppUpdate, defaultPreviewSelection, findPreviewProject, findPreviewThread } from "../preview/fixtures";
+import { getPreviewBtwQuestion, PREVIEW_BTW_SNAPSHOTS, previewBtwSnapshot } from "../preview/btwPreview";
 import { useBtwSession } from "../btw/useBtwSession";
 import { usableCapabilityManifest } from "../deck/interactionGate";
 import { residentForSession } from "../sidebar/threadRunning";
@@ -73,7 +78,7 @@ import { createSerialTaskQueue } from "../workspaceActionQueue";
 import { type ArchivePending, type ClientStateSource, type ProjectShellActionResult, type Route, type SecondaryRoute, type ShellChrome, type ShellDialog, type ThreadRowActionKind, type ViewState } from "./types";
 import { CURRENT_PROJECT, PROJECT_THREADS_INITIAL, PROJECT_THREADS_PAGE, PROJECT_THREADS_QUERY_MAX, type SelectedProject } from "./sessionSelection";
 import { SECONDARY_META, isSecondary, snapshotFrom } from "./shellState";
-import { archiveConfirmIsStreaming, runtimeSettingsPropsOf, shouldOpenLiveProvisional } from "./sessionActions";
+import { archiveConfirmIsStreaming, partialSessionDeletionNotice, resumePreparedHistoryEntry, runtimeSettingsPropsOf, shouldOpenLiveProvisional } from "./sessionActions";
 import { TitleMenu, execEditCommand, type EditCommand } from "./menus";
 import { setSlashUiIntent } from "./slashUiIntent";
 import { Titlebar } from "./Titlebar";
@@ -109,6 +114,13 @@ const NO_RESIDENT_ROWS: readonly never[] = [];
 /** 导航面包屑保留的最大深度：只增不减的数组，路由对象虽小也不该无界。 */
 const TRAIL_MAX = 100;
 
+class SessionSwitchCancelledError extends Error {
+  constructor() {
+    super("Session switch cancelled");
+    this.name = "SessionSwitchCancelledError";
+  }
+}
+
 export function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSelectThread, onNewThread, projectsLoading, onWorkspacesChange, onHistoryChange }: {
   state: ViewState;
   healthReady: boolean;
@@ -125,14 +137,18 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const { document, window } = useConversationDom();
   const mdi = useConversationView();
   const [evaluationIntent, setEvaluationIntent] = useState<{id: string; kind: import("@omp-studio/studio-protocol").EvaluationKind}>();
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const executionTarget = useExecutionTarget();
+  const fileTargets = useExecutionTargets();
   const previewMode = usePreviewMode();
   const modelClient = (executionTarget.localClient ?? client) as ClientStateSource;
   const modelConnection = useModelConnection(modelClient);
   const appUpdate = useAppUpdate();
   const { profile } = useOperatorProfile();
-  const effectiveUpdate = previewMode.preview ? PREVIEW_APP_UPDATE : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
+  const effectiveUpdate = previewMode.preview ? getPreviewAppUpdate(zh) : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
   const [showAppUpdateDialog, setShowAppUpdateDialog] = useState(false);
   const [localAppVersion, setLocalAppVersion] = useState<string | null>(null);
   useEffect(() => {
@@ -293,7 +309,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   /** 左上菜单「新建项目」：递增后 WorkbenchCanvas 打开已有创建项目对话框。 */
   const [createProjectNonce, setCreateProjectNonce] = useState(0);
   const sessionCreateWaitRef = useRef<Promise<NewSessionWaitResult> | null>(null);
-  const [shellNotice, setShellNotice] = useState<{ text: string; icon: IconName } | null>(null);
+  const [shellNotice, setShellNotice] = useState<{ text: string; icon: IconName; sticky?: boolean; partialDeletion?: { title: string; details: string } } | null>(null);
   const [compactPending, setCompactPending] = useState(false);
   /** 用户在压缩回执落地前点了「取消」：压缩命令回执完成后按取消提示，不再误报成功。 */
   const compactCancelRequestedRef = useRef(false);
@@ -428,6 +444,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const [mcNonce, setMcNonce] = useState(0);
   const snapshot = snapshotFrom(state);
   const pendingInteraction = state.clientState?.interaction.pending ?? null;
+  useFormInteractionLifecycle(pendingInteraction);
   const residentModel = state.clientState?.entities.residents;
   // `?? []` 每次渲染都是新数组身份，而下面两个通知 effect 都依赖它 ——
   // 流式期间没有 resident 模型时会每帧重建一次 setTimeout。用模块级常量。
@@ -452,13 +469,13 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   }, [client, hubWorkspaceId, hubFileIndex]);
   const fetchHubMentions = useCallback(async (trigger: "@" | "/" | "^", query: string) => {
     if (trigger === "/") return [];
-    if (previewMode.preview) return previewMentions(trigger, query);
+    if (previewMode.preview) return previewMentions(trigger, query, zh);
     try {
       return await loadMentions(client, trigger, query, hubFileIndex);
     } catch {
       return [];
     }
-  }, [previewMode.preview, client, hubFileIndex]);
+  }, [previewMode.preview, client, hubFileIndex, zh]);
   const selected = state.model.history?.entries.find((entry) => entry.historyId === selectedHistoryId)
     ?? historyAll?.entries.find((entry) => entry.historyId === selectedHistoryId)
     ?? Object.values(projectHistoryCache).flatMap((historyState) => historyState.model?.entries ?? [])
@@ -474,7 +491,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       ...(target.sessionId ? { selectedSessionId: target.sessionId as SessionId } : {}),
       ...(target.threadId ? { selectedThreadId: target.threadId } : {}),
     });
-    if (target.sessionId !== btwTargetRef.current.sessionId) throw new Error("已切换会话，请在当前会话重新提问");
+    if (target.sessionId !== btwTargetRef.current.sessionId) throw new Error(zhRef.current ? "已切换会话，请在当前会话重新提问" : "Session switched; ask again in the current session");
   }, [client]);
   /* BTW 旁路问答：状态挂在 AppShell 而不是 WorkbenchCanvas —— 回首页会卸载
      WorkbenchCanvas，浮窗不该跟着消失。演示轮次只改本地 UI，不碰 Host。 */
@@ -485,11 +502,11 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     targetActive: !btwTargetId || btwTargetId === snapshot?.sessionId,
     prepareTarget: prepareBtwTarget,
     snapshot: previewMode.preview
-      ? previewBtwSnapshot(btwDemoRound)
+      ? previewBtwSnapshot(btwDemoRound, zh)
       : (state.clientState?.entities.btw ?? null),
     client,
     preview: previewMode.preview,
-    previewQuestion: PREVIEW_BTW_QUESTION,
+    previewQuestion: getPreviewBtwQuestion(zh),
     mainStreaming: !previewMode.preview && snapshot?.isStreaming === true,
     canCommand: snapshot !== undefined && runtime?.status === "connected",
     onBranched: async (sessionId) => {
@@ -519,12 +536,12 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
             readonly failedSessions?: number;
           }>(client, handle.requestId);
           if (result.syncStatus === "partial") {
-            setSessionActionError(`权限模式仅同步到部分 Runtime（${result.failedSessions ?? 0} 个失败），请稍后重试。`);
+            setSessionActionError(zhRef.current ? `权限模式仅同步到部分 Runtime（${result.failedSessions ?? 0} 个失败），请稍后重试。` : `Permission mode synced to only some Runtimes (${result.failedSessions ?? 0} failed); please try again later.`);
             return;
           }
           setSessionActionError(undefined);
         } catch (error) {
-          setSessionActionError(hostErrorMessage(error, "切换权限模式失败"));
+          setSessionActionError(hostErrorMessage(error, zhRef.current ? "切换权限模式失败" : "Failed to switch permission mode"));
         }
       })();
     },
@@ -607,7 +624,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       cancelled = true;
     };
   }, [wantHistoryAll, client]);
-  const previewThread = findPreviewThread(previewThreadId);
+  const previewThread = findPreviewThread(previewThreadId, zh);
   /** 顶栏「归档」目标：当前选中的历史会话，或驻留 Runtime 上的会话。
       进行中的会话也可以归档：Host 会先停止再移走文件。 */
   const residentSessionId = snapshot?.sessionId;
@@ -651,7 +668,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     ? t("conversation.newChat")
     : t("conversation.untitledSession");
   const threadTitle = state.loading && mdi ? mdi.document.title : previewMode.preview
-    ? (previewThread?.thread.title ?? "跟踪上游 pi-web 更新到 omp-web")
+    ? (previewThread?.thread.title ?? (zh ? "跟踪上游 pi-web 更新到 omp-web" : "Track upstream pi-web updates to omp-web"))
     : currentThreadTitle ?? (state.route === "history" ? t("menu.history") : state.route === "home" ? t("menu.home") : state.route === "agent-hub" ? "Agent Hub" : state.route === "capabilities" ? t("menu.capabilities") : state.route === "model-config" ? t("menu.modelConfig") : untitledThreadTitle);
   const onProvisionalSessionChange = useCallback((change: {
     readonly sessionId?: SessionId;
@@ -691,7 +708,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     if (previewMode.preview) {
       setExplorerOpen(true);
       setProjectListExpanded(true);
-      const project = findPreviewProject(previewProjectId);
+      const project = findPreviewProject(previewProjectId, zh);
       if (project) setSelectedProject({ id: project.id, name: project.name });
       return;
     }
@@ -723,6 +740,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     const root = globalThis.document.documentElement;
     applyTheme(root, appSettings.theme);
     root.setAttribute("data-density", appSettings.density);
+    applyLightLevel(root, appSettings.light);
     /* 文件图标着色：tri 时根元素挂 data-palette，CSS 只覆盖 token。
        注意根元素用 data-palette、树行用 data-ftype，两者不共名。 */
     if (appSettings.fileTypePalette === "tri") {
@@ -730,7 +748,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     } else {
       delete root.dataset.palette;
     }
-  }, [mdi?.active, appSettings.theme, appSettings.density, appSettings.fileTypePalette]);
+  }, [mdi?.active, appSettings.theme, appSettings.density, appSettings.light, appSettings.fileTypePalette]);
 
   /* Resident changes drive task notifications. A disappeared row is a
      neutral stop/disconnect, never a success notification. */
@@ -746,7 +764,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       if (now && !previous.on) streamingSinceRef.current = { on: true, since: Date.now() };
       if (!now && previous.on) {
         streamingSinceRef.current = { on: false, since: 0 };
-        desktopNotice("task", "任务结束", "会话任务已结束或停止");
+        desktopNotice("task", zhRef.current ? "任务结束" : "Task finished", zhRef.current ? "会话任务已结束或停止" : "Session task finished or stopped");
       }
       return;
     }
@@ -765,7 +783,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         residentLongNotifiedRef.current.delete(id);
       }
       if (wasActive && resident.phase === "idle") {
-        desktopNotice("task", "任务结束", "会话任务已结束");
+        desktopNotice("task", zhRef.current ? "任务结束" : "Task finished", zhRef.current ? "会话任务已结束" : "Session task finished");
       }
     }
     for (const [id, phase] of previous) {
@@ -773,7 +791,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       if (!current.has(id)) {
         residentStartedAtRef.current.delete(id);
         residentLongNotifiedRef.current.delete(id);
-        desktopNotice("task", "任务停止", "会话已停止或断开");
+        desktopNotice("task", zhRef.current ? "任务停止" : "Task stopped", zhRef.current ? "会话已停止或断开" : "Session stopped or disconnected");
       }
     }
     previousResidentsRef.current = current;
@@ -785,7 +803,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       const startedAt = streamingSinceRef.current.since || Date.now();
       const remaining = Math.max(0, 5 * 60_000 - (Date.now() - startedAt));
       const timer = window.setTimeout(() => {
-        desktopNotice("longTask", "任务仍在运行", "当前任务已连续运行超过 5 分钟");
+        desktopNotice("longTask", zhRef.current ? "任务仍在运行" : "Task still running", zhRef.current ? "当前任务已连续运行超过 5 分钟" : "The current task has been running for over 5 minutes");
       }, remaining);
       return () => window.clearTimeout(timer);
     }
@@ -801,7 +819,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       .filter(({ resident, startedAt }) => !residentLongNotifiedRef.current.has(String(resident.sessionId)) && now - startedAt >= 5 * 60_000);
     if (due.length > 0) {
       for (const { resident } of due) residentLongNotifiedRef.current.add(String(resident.sessionId));
-      desktopNotice("longTask", "任务仍在运行", "当前任务已连续运行超过 5 分钟");
+      desktopNotice("longTask", zhRef.current ? "任务仍在运行" : "Task still running", zhRef.current ? "当前任务已连续运行超过 5 分钟" : "The current task has been running for over 5 minutes");
       return;
     }
     const remaining = Math.min(...active.map((resident) => Math.max(0, 5 * 60_000 - (now - (residentStartedAtRef.current.get(String(resident.sessionId)) ?? now)))));
@@ -813,7 +831,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         const startedAt = residentStartedAtRef.current.get(id);
         if (startedAt !== undefined && Date.now() - startedAt >= 5 * 60_000) residentLongNotifiedRef.current.add(id);
       }
-      desktopNotice("longTask", "任务仍在运行", "当前任务已连续运行超过 5 分钟");
+      desktopNotice("longTask", zhRef.current ? "任务仍在运行" : "Task still running", zhRef.current ? "当前任务已连续运行超过 5 分钟" : "The current task has been running for over 5 minutes");
     }, remaining);
     return () => window.clearTimeout(timer);
   }, [appSettings.notifyLongTasks, residentModel, residentRows, runtime?.status, snapshot?.isStreaming]);
@@ -861,7 +879,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       await commitActivatedWorkspace(project.id, generation);
     }).catch((error) => {
       if (!navigationGate.isCurrent(generation)) return;
-      setShellNotice({ text: hostErrorMessage(error, "切换项目失败"), icon: "alert" });
+      setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "切换项目失败" : "Failed to switch project"), icon: "alert" });
       const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
       setSelectedProject(active === undefined ? null : { id: active.workspaceId, name: active.name });
     });
@@ -890,7 +908,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         go("workbench");
       }
     } catch (error) {
-      setShellNotice({ text: hostErrorMessage(error, "选择项目失败"), icon: "alert" });
+      setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "选择项目失败" : "Failed to select project"), icon: "alert" });
     }
   };
 
@@ -1022,7 +1040,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
 
   /** 归档进行中时再次点击归档入口：给出提示而不是静默吞掉。 */
   const notifyArchiveBusy = () => {
-    setShellNotice({ text: "正在归档中，请稍候", icon: "archive" });
+    setShellNotice({ text: zh ? "正在归档中，请稍候" : "Archiving in progress, please wait", icon: "archive" });
   };
 
   const requestArchivePreview = (threadId: string) => {
@@ -1030,12 +1048,12 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       notifyArchiveBusy();
       return;
     }
-    const hit = findPreviewThread(threadId);
+    const hit = findPreviewThread(threadId, zh);
     setArchiveError(undefined);
     setArchivePending({
       kind: "preview",
       threadId,
-      title: hit?.thread.title ?? "该会话",
+      title: hit?.thread.title ?? (zh ? "该会话" : "This session"),
       streaming: hit?.thread.status === "running",
     });
   };
@@ -1229,10 +1247,10 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       }
       if (selectedHistoryId === entry.historyId) onNewThread();
       await refreshHistoryModels(workspaceId);
-      setShellNotice({ text: `已归档「${entry.title}」，可在会话历史页查看`, icon: "archive" });
+      setShellNotice({ text: zhRef.current ? `已归档「${entry.title}」，可在会话历史页查看` : `Archived "${entry.title}"; view it in History`, icon: "archive" });
       return true;
       } catch (error) {
-        setArchiveError(hostErrorMessage(error, "归档失败"));
+        setArchiveError(hostErrorMessage(error, zhRef.current ? "归档失败" : "Failed to archive"));
         return false;
       }
     });
@@ -1287,9 +1305,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           archivedProvisionalSessionIdsRef.current = nextExcluded;
         }
         await refreshHistoryModels(targetWorkspaceId);
-        setShellNotice({ text: `已恢复「${entry.title}」`, icon: "check" });
+        setShellNotice({ text: zhRef.current ? `已恢复「${entry.title}」` : `Restored "${entry.title}"`, icon: "check" });
       } catch (error) {
-        setShellNotice({ text: hostErrorMessage(error, "取消归档失败"), icon: "alert" });
+        setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "取消归档失败" : "Failed to unarchive"), icon: "alert" });
       } finally {
         const done = new Set(unarchiveBusyThreadIdsRef.current);
         done.delete(entry.threadId);
@@ -1309,7 +1327,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           ?? residentForSession(residentModel, entry.sessionId)?.workspaceId;
         await ensureWorkspaceActive(targetWorkspaceId);
         const handle = await client.command("session.delete", { threadId: entry.threadId, deleteManagedArtifacts });
-        await waitReceipt(client, handle.requestId);
+        const removal = await waitReceipt<{ message?: string; cleanup?: "complete" | "partial" }>(client, handle.requestId);
         if (entry.sessionId) dock.store.deleteSession({ target: executionTarget.id ?? "local", project: targetWorkspaceId ?? null, session: entry.sessionId });
         if (entry.sessionId !== undefined) {
           archivedProvisionalSessionIdsRef.current = new Set([
@@ -1328,10 +1346,13 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         }
         if (selectedHistoryId === entry.historyId) onNewThread();
         await refreshHistoryModels(targetWorkspaceId);
-        setShellNotice({ text: `已删除会话「${entry.title}」`, icon: "trash" });
+        // A partial cleanup keeps the Host's full explanation on screen until dismissed.
+        setShellNotice(removal?.cleanup === "partial"
+          ? { text: "", partialDeletion: { title: entry.title ?? "", details: removal.message ?? "" }, icon: "alert", sticky: true }
+          : { text: zhRef.current ? `已删除会话「${entry.title}」` : `Deleted conversation "${entry.title}"`, icon: "trash" });
         return true;
       } catch (error) {
-        setShellNotice({ text: hostErrorMessage(error, "删除会话失败"), icon: "alert" });
+        setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "删除会话失败" : "Failed to delete conversation"), icon: "alert" });
         return false;
       }
     });
@@ -1347,7 +1368,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         await selectBranchedSession(receipt.sessionId);
         setShellNotice({ text: t("shell.forkedToNewSession", { id: receipt.sessionId }), icon: "check" });
       } catch (error) {
-        setShellNotice({ text: hostErrorMessage(error, "Fork 失败"), icon: "alert" });
+        setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "Fork 失败" : "Fork failed"), icon: "alert" });
       }
     });
   };
@@ -1361,7 +1382,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         await selectBranchedSession(receipt.sessionId);
         setShellNotice({ text: t("shell.handoffToNewSession", { id: receipt.sessionId }), icon: "check" });
       } catch (error) {
-        setShellNotice({ text: hostErrorMessage(error, "Handoff 失败"), icon: "alert" });
+        setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "Handoff 失败" : "Handoff failed"), icon: "alert" });
       }
     });
   };
@@ -1378,8 +1399,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     const current = snapshotFrom(state), targetId = target?.sessionId ?? selected?.sessionId;
     if (current?.sessionId && current.isStreaming && (!targetId || targetId === current.sessionId) && can("session.compaction.enqueue")) {
       void workspaceActionQueue.enqueue(async () => {
-        try { const handle = await client.command("session.compaction.enqueue", { sessionId: current.sessionId! }); await waitReceipt(client, handle.requestId); setShellNotice({ text: "已排队压缩；后续消息将在压缩后发送", icon: "queue" }); }
-        catch (error) { setShellNotice({ text: hostErrorMessage(error, "排队压缩失败"), icon: "alert" }); }
+        try { const handle = await client.command("session.compaction.enqueue", { sessionId: current.sessionId! }); await waitReceipt(client, handle.requestId); setShellNotice({ text: zhRef.current ? "已排队压缩；后续消息将在压缩后发送" : "Compaction queued; subsequent messages will be sent after compaction", icon: "queue" }); }
+        catch (error) { setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "排队压缩失败" : "Failed to queue compaction"), icon: "alert" }); }
       });
       return;
     }
@@ -1396,16 +1417,16 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           ...(targetThreadId === undefined ? {} : { selectedThreadId: targetThreadId }),
         });
         if (compactCancelRequestedRef.current) {
-          setShellNotice({ text: "已取消压缩", icon: "info" });
+          setShellNotice({ text: zhRef.current ? "已取消压缩" : "Compaction cancelled", icon: "info" });
           return;
         }
         const handle = await client.command("operator.invoke", { commandId: "builtin.compact" });
         const outcome = await waitReceipt<OperatorInvokeOutcome>(client, handle.requestId);
         if (compactCancelRequestedRef.current) {
-          setShellNotice({ text: "已取消压缩", icon: "info" });
+          setShellNotice({ text: zhRef.current ? "已取消压缩" : "Compaction cancelled", icon: "info" });
           return;
         }
-        const notice = compactNoticeFromOutput(outcome.output, { successText: "已压缩上下文" });
+        const notice = compactNoticeFromOutput(outcome.output, { successText: zhRef.current ? "已压缩上下文" : "Context compacted" });
         setShellNotice({
           text: notice.text,
           icon: notice.ok ? "check" : "alert",
@@ -1413,9 +1434,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         if (notice.ok) refreshViewedTelemetry();
       } catch (error) {
         if (compactCancelRequestedRef.current) {
-          setShellNotice({ text: "已取消压缩", icon: "info" });
+          setShellNotice({ text: zhRef.current ? "已取消压缩" : "Compaction cancelled", icon: "info" });
         } else {
-          setShellNotice({ text: hostErrorMessage(error, "压缩失败"), icon: "alert" });
+          setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "压缩失败" : "Compaction failed"), icon: "alert" });
         }
       } finally {
         setCompactPending(false);
@@ -1434,7 +1455,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         await waitReceipt(client, handle.requestId);
       } catch (error) {
         compactCancelRequestedRef.current = false;
-        setShellNotice({ text: hostErrorMessage(error, "取消压缩失败"), icon: "alert" });
+        setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "取消压缩失败" : "Failed to cancel compaction"), icon: "alert" });
       }
     })();
   };
@@ -1447,9 +1468,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         const handle = await client.command("operator.invoke", { commandId: "builtin.export" });
         const outcome = await waitReceipt<OperatorInvokeOutcome>(client, handle.requestId);
         const exportedLine = outcome.output.find((line) => /export/i.test(line));
-        setShellNotice({ text: exportedLine ?? "已导出对话（HTML）", icon: "check" });
+        setShellNotice({ text: exportedLine ?? (zhRef.current ? "已导出对话（HTML）" : "Conversation exported (HTML)"), icon: "check" });
       } catch (error) {
-        setShellNotice({ text: hostErrorMessage(error, "导出失败"), icon: "alert" });
+        setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "导出失败" : "Export failed"), icon: "alert" });
       }
     });
   };
@@ -1465,7 +1486,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           return;
         }
         if (action === "pin") {
-          if (!snapshot?.sessionId || !entry.sessionId) throw new Error("请先连接 Runtime / Connect a Runtime first");
+          if (!snapshot?.sessionId || !entry.sessionId) throw new Error(zhRef.current ? "请先连接 Runtime / Connect a Runtime first" : "Connect a Runtime first");
           const handle = await client.command("session.history.pin", { sessionId: snapshot.sessionId, targetSessionId: entry.sessionId, pinned: !entry.pinned });
           await waitReceipt(client, handle.requestId);
           await refreshHistoryModels();
@@ -1490,8 +1511,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
             break;
         }
       } catch (error) {
-        if (error instanceof Error && error.message === "会话切换已取消") return;
-        setSessionActionError(hostErrorMessage(error, "会话操作失败"));
+        if (error instanceof SessionSwitchCancelledError) return;
+        setSessionActionError(hostErrorMessage(error, zhRef.current ? "会话操作失败" : "Conversation action failed"));
       }
     });
   };
@@ -1516,7 +1537,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         return { ok: true, ...(created?.sessionId === undefined ? {} : { sessionId: created.sessionId as SessionId }) };
       })
       .catch((error): NewSessionWaitResult => {
-        const message = hostErrorMessage(error, "新建对话失败");
+        const message = hostErrorMessage(error, zhRef.current ? "新建对话失败" : "Failed to create conversation");
         setShellNotice({ text: message, icon: "alert" });
         return { ok: false, error: message };
       })
@@ -1573,11 +1594,11 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
 
   const runSlashFromShell = async (command: StudioSlashCommand, args: string): Promise<boolean> => {
     if (command.availability === "disabled") {
-      setShellNotice({ text: command.disabledReason ?? `/${command.name} 暂不可用`, icon: "alert" });
+      setShellNotice({ text: command.disabledReason ?? (zhRef.current ? `/${command.name} 暂不可用` : `/${command.name} is unavailable`), icon: "alert" });
       return false;
     }
     const destructive = command.risk === "destructive" || isDestructiveMemoryClear(command, args);
-    if (destructive && !previewMode.preview && !window.confirm(`确定执行 /${command.name}${args ? ` ${args}` : ""}？此操作会改会话状态。`)) {
+    if (destructive && !previewMode.preview && !window.confirm(zhRef.current ? `确定执行 /${command.name}${args ? ` ${args}` : ""}？此操作会改会话状态。` : `Run /${command.name}${args ? ` ${args}` : ""}? This modifies session state.`)) {
       return false;
     }
     const execute = resolveSlashExecute(command, args);
@@ -1604,7 +1625,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       return await btwSession.ask(question, true);
     }
     if (previewMode.preview) {
-      if (previewMode.marks) setShellNotice({ text: `演示：/${command.name}${args ? ` ${args}` : ""}`, icon: "info" });
+      if (previewMode.marks) setShellNotice({ text: zhRef.current ? `演示：/${command.name}${args ? ` ${args}` : ""}` : `Demo: /${command.name}${args ? ` ${args}` : ""}`, icon: "info" });
       return true;
     }
     if (execute.kind === "typed") {
@@ -1617,10 +1638,10 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       try {
         const handle = await client.command(bound.name, bound.input as CommandInput<CommandName>);
         await waitReceipt(client, handle.requestId);
-        setShellNotice({ text: `已执行 /${command.name}`, icon: "check" });
+        setShellNotice({ text: zhRef.current ? `已执行 /${command.name}` : `Executed /${command.name}`, icon: "check" });
         return true;
       } catch (error) {
-        setShellNotice({ text: hostErrorMessage(error, `/${command.name} 失败`), icon: "alert" });
+        setShellNotice({ text: hostErrorMessage(error, zhRef.current ? `/${command.name} 失败` : `/${command.name} failed`), icon: "alert" });
         return false;
       }
     }
@@ -1635,25 +1656,25 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         const outcome = await waitReceipt<OperatorInvokeOutcome>(client, handle.requestId);
         if (compacting) {
           if (compactCancelRequestedRef.current) {
-            setShellNotice({ text: "已取消压缩", icon: "info" });
+            setShellNotice({ text: zhRef.current ? "已取消压缩" : "Compaction cancelled", icon: "info" });
           } else {
-            const notice = compactNoticeFromOutput(outcome.output, { successText: "已压缩上下文" });
+            const notice = compactNoticeFromOutput(outcome.output, { successText: zhRef.current ? "已压缩上下文" : "Context compacted" });
             setShellNotice({ text: notice.text, icon: notice.ok ? "check" : "alert" });
             if (notice.ok) refreshViewedTelemetry();
           }
         } else {
           const line = outcome.output.find((item) => item.trim().length > 0);
           setShellNotice({
-            text: line ?? `已执行 /${command.name}`,
+            text: line ?? (zhRef.current ? `已执行 /${command.name}` : `Executed /${command.name}`),
             icon: "check",
           });
         }
         return true;
       } catch (error) {
         if (compacting && compactCancelRequestedRef.current) {
-          setShellNotice({ text: "已取消压缩", icon: "info" });
+          setShellNotice({ text: zhRef.current ? "已取消压缩" : "Compaction cancelled", icon: "info" });
         } else {
-          setShellNotice({ text: hostErrorMessage(error, `/${command.name} 失败`), icon: "alert" });
+          setShellNotice({ text: hostErrorMessage(error, zhRef.current ? `/${command.name} 失败` : `/${command.name} failed`), icon: "alert" });
         }
         return false;
       } finally {
@@ -1723,7 +1744,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       globalThis.window.dispatchEvent(new CustomEvent("omp:conversation-focus", { detail: viewId }));
       return Promise.resolve();
     }
-    if (!onRoute("workbench")) return opts?.resumeForAction ? Promise.reject(new Error("会话切换已取消")) : Promise.resolve();
+    if (!onRoute("workbench")) return opts?.resumeForAction ? Promise.reject(new SessionSwitchCancelledError()) : Promise.resolve();
     const generation = navigationGate.next();
     setSelectedProvisionalSessionId(undefined);
     if (previewMode.preview) {
@@ -1745,7 +1766,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     const run = async () => {
       try {
         if (!navigationGate.isCurrent(generation)) {
-          if (opts?.resumeForAction === true) throw new Error("会话切换已取消");
+          if (opts?.resumeForAction === true) throw new SessionSwitchCancelledError();
           return;
         }
         let workspaces: WorkspaceListReadModel | undefined;
@@ -1753,7 +1774,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           const open = await client.command("workspace.open", { workspaceId: targetWorkspaceId });
           workspaces = await waitReceipt<WorkspaceListReadModel>(client, open.requestId);
           if (!navigationGate.isCurrent(generation)) {
-            if (opts?.resumeForAction === true) throw new Error("会话切换已取消");
+            if (opts?.resumeForAction === true) throw new SessionSwitchCancelledError();
             return;
           }
           onWorkspacesChange(workspaces);
@@ -1771,19 +1792,19 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         // 都作用于 Runtime 活动会话，目标必须先成为活动会话。
         if (opts?.resumeForAction === true || resident !== undefined) {
           if (!navigationGate.isCurrent(generation)) {
-            if (opts?.resumeForAction === true) throw new Error("会话切换已取消");
+            if (opts?.resumeForAction === true) throw new SessionSwitchCancelledError();
             return;
           }
           const handle = await client.command("session.resume", { threadId: entry.threadId });
           const resumed = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
           if (opts?.resumeForAction === true && entry.sessionId !== undefined && resumed.sessionId !== entry.sessionId) {
-            throw new Error("恢复的会话与目标会话不一致");
+            throw new Error(zhRef.current ? "恢复的会话与目标会话不一致" : "Resumed session does not match the target session");
           }
         }
         if (navigationGate.isCurrent(generation)) setSessionActionError(undefined);
       } catch (error) {
         if (opts?.resumeForAction === true) throw error;
-        if (navigationGate.isCurrent(generation)) setSessionActionError(hostErrorMessage(error, "打开会话失败"));
+        if (navigationGate.isCurrent(generation)) setSessionActionError(hostErrorMessage(error, zhRef.current ? "打开会话失败" : "Failed to open conversation"));
       }
     };
     return opts?.skipQueue === true ? run() : workspaceActionQueue.enqueue(run);
@@ -1832,7 +1853,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     void (async () => {
       const entry = await resolveProvisionalHistoryEntry(thread);
       if (entry === undefined) {
-        setSessionActionError("会话记录仍在写入，请稍后重试");
+        setSessionActionError(zhRef.current ? "会话记录仍在写入，请稍后重试" : "Conversation history is still being written; please try again shortly");
         return;
       }
       openHistoryEntry(entry, thread.workspaceId);
@@ -1847,7 +1868,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     void (async () => {
       const entry = await resolveProvisionalHistoryEntry(thread);
       if (entry === undefined) {
-        setSessionActionError("会话记录仍在写入，请稍后重试");
+        setSessionActionError(zhRef.current ? "会话记录仍在写入，请稍后重试" : "Conversation history is still being written; please try again shortly");
         return;
       }
       requestArchiveThread(entry, thread.workspaceId);
@@ -1888,6 +1909,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         else if (action.operation === "snap") dock.store.updatePreferences({ snap: !current.preferences.snap });
         else if (action.operation === "rail") dock.store.dispatch({ type: "region", region: "rail", visible: current.layout.rail.mode === "hidden" });
         else if (action.operation === "files") dock.store.dispatch({ type: "open", panel: "files" });
+        else if (action.operation === "file-browser") dock.store.dispatch({ type: "open", panel: "file-browser" });
         else if (action.operation === "reset") dock.store.resetFactory();
         else dock.store.applyPreset(action.operation);
         go("workbench");
@@ -1912,7 +1934,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       case "previewThread":
         setPreviewThreadId(action.threadId);
         {
-          const hit = findPreviewThread(action.threadId);
+          const hit = findPreviewThread(action.threadId, zh);
           if (hit) {
             setPreviewProjectId(hit.project.id);
             setSelectedProject({ id: hit.project.id, name: hit.project.name });
@@ -1929,7 +1951,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       case "previewProject":
         setPreviewProjectId(action.id);
         {
-          const project = findPreviewProject(action.id);
+          const project = findPreviewProject(action.id, zh);
           if (project) {
             setSelectedProject({ id: project.id, name: project.name });
             setExplorerOpen(true);
@@ -1975,7 +1997,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         go("settings");
         return;
       case "openModelConfig":
-        if (modelConfigHasUnsavedChanges() && !window.confirm("有未保存的模型配置更改，重新打开会丢弃草稿。确定继续？")) return;
+        if (modelConfigHasUnsavedChanges() && !window.confirm(zh ? "有未保存的模型配置更改，重新打开会丢弃草稿。确定继续？" : "You have unsaved model configuration changes. Reopening will discard the draft. Continue?")) return;
         setModelConfigIntent({ tab: action.tab });
         setMcNonce((value) => value + 1);
         go("model-config");
@@ -1992,7 +2014,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   useEffect(() => {
     if (!paletteOpen) return;
     if (previewMode.preview) {
-      setPaletteInventory(createPreviewDrawerItems());
+      setPaletteInventory(createPreviewDrawerItems(zh));
       return;
     }
     let cancelled = false;
@@ -2002,17 +2024,18 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       if (!cancelled) setPaletteInventory([]);
     });
     return () => { cancelled = true; };
-  }, [paletteOpen, previewMode.preview, client]);
+  }, [paletteOpen, previewMode.preview, previewMode.preview ? zh : false, client]);
 
   const paletteGroups = useMemo(() => buildPaletteGroups({
     preview: previewMode.preview,
+    zh,
     untitledTitle: t("conversation.untitledSession"),
     historyEntries: state.model.history?.entries ?? [],
     workspaces: sidebarProjectOrder(state.model.workspaces),
     ...(selectedProject ? { activeProjectName: selectedProject.name } : {}),
     inventory: paletteInventory,
     query: paletteQuery,
-  }), [previewMode.preview, state.model.history, state.model.workspaces, selectedProject, paletteInventory, paletteQuery, t]);
+  }), [previewMode.preview, previewMode.preview ? zh : false, state.model.history, state.model.workspaces, selectedProject, paletteInventory, paletteQuery, t]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -2088,9 +2111,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   // workspace，就允许在预览态下对当前真实项目执行；没有真实 workspace
   // 时保持禁用并给出原因，绝不使用 preview fixture 里的演示路径。
   const projectShellUnavailable = realActiveWorkspace === undefined
-    ? "请先打开本地项目"
+    ? (zh ? "请先打开本地项目" : "Open a local project first")
     : (globalThis.ompStudioChrome?.openProjectInEditor === undefined || globalThis.ompStudioChrome?.openProjectDirectory === undefined)
-      ? "仅桌面端可用"
+      ? (zh ? "仅桌面端可用" : "Desktop only")
       : undefined;
 
   const runProjectShellAction = async (kind: "editor" | "directory", action: () => Promise<ProjectShellActionResult>) => {
@@ -2099,15 +2122,15 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     try {
       const result = await action();
       if (result.status === "cancelled") {
-        setShellNotice({ text: "已取消选择打开器", icon: "info" });
+        setShellNotice({ text: zh ? "已取消选择打开器" : "Cancelled launcher selection", icon: "info" });
         return;
       }
       setShellNotice(kind === "editor"
-        ? { text: result.editorName ? `已用 ${result.editorName} 打开项目` : "已在外部编辑器中打开项目", icon: "check" }
-        : { text: "已打开项目目录", icon: "check" });
+        ? { text: result.editorName ? (zh ? `已用 ${result.editorName} 打开项目` : `Opened project in ${result.editorName}`) : (zh ? "已在外部编辑器中打开项目" : "Opened project in external editor"), icon: "check" }
+        : { text: zh ? "已打开项目目录" : "Opened project directory", icon: "check" });
     } catch (cause) {
       const message = cause instanceof Error && cause.message ? cause.message : String(cause);
-      setShellNotice({ text: `操作失败：${message}`, icon: "alert" });
+      setShellNotice({ text: zh ? `操作失败：${message}` : `Operation failed: ${message}`, icon: "alert" });
     } finally {
       setShellAction(null);
     }
@@ -2134,8 +2157,28 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const { fileOpeners, fileShellUnavailable, runFileShellAction } = useWorkspaceFileActions({ workspace: realActiveWorkspace, remote: !!executionTarget.id, onNotice: setShellNotice, onOpenIda: absolute => { setCapIntent("ida", absolute); setCapNonce(value => value + 1); go("capabilities"); } });
   // File windows reuse the Explorer shell actions and the Composer capsule chain; a line range follows the capsule as plain text.
   const fileViewerActions: FileViewerActions = {
+    contextWorkspaceId: realActiveWorkspace?.workspaceId,
     openers: fileOpeners,
     runShell: runFileShellAction,
+    openProjectPath: async (path, targetId) => {
+      if (previewMode.preview) return;
+      const host = await fileTargets.readyClient(targetId);
+      const handle = await host.command("workspace.openPath", { path });
+      const model = await waitReceipt<WorkspaceListReadModel>(host, handle.requestId);
+      onWorkspacesChange(model);
+      const project = model.workspaces.find(row => row.workspaceId === model.activeWorkspaceId)!;
+      if (mdi) { mdi.store.openFromDirectory({ targetId, workspaceId: project.workspaceId, draftId: crypto.randomUUID() }); return; }
+      startNewChatInProject({ id: project.workspaceId, name: project.name });
+      const outcome = await waitForNewSession();
+      if (!outcome.ok) throw new Error(outcome.error);
+    },
+    revealInExplorer: (workspaceId, path) => {
+      const project = state.model.workspaces?.workspaces.find(row => row.workspaceId === workspaceId);
+      if (project) selectProject({ id: project.workspaceId, name: project.name });
+      setExplorerOpen(true); expandProject(workspaceId);
+      dock.store.dispatch({ type: "open", panel: "files" });
+      revealWorkspaceFile(mdi?.document.id ?? "standalone", executionTarget.id, workspaceId, path);
+    },
     addContext: ({ path, label, lines }) => {
       const composer = composerRef.current;
       if (!composer) return;
@@ -2201,7 +2244,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       if (previewMode.preview) {
         setProjectListExpanded(true);
         setPreviewProjectId(project.id);
-        const hit = findPreviewProject(project.id);
+        const hit = findPreviewProject(project.id, zh);
         if (hit) {
           setSelectedProject({ id: hit.id, name: hit.name });
           setExplorerOpen(true);
@@ -2252,7 +2295,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     hiddenPreviewThreads,
     onSelectPreviewProject: (id) => {
       setPreviewProjectId(id);
-      const project = findPreviewProject(id);
+      const project = findPreviewProject(id, zh);
       if (project) {
         setSelectedProject({ id: project.id, name: project.name });
         setExplorerOpen(true);
@@ -2265,13 +2308,13 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     },
     onSelectPreviewThread: (id) => {
       if (mdi) {
-        const hit = findPreviewThread(id);
+        const hit = findPreviewThread(id, zh);
         if (hit) mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: hit.project.id, previewProjectId: hit.project.id, previewThreadId: id });
         go("workbench");
         return;
       }
       setPreviewThreadId(id);
-      const hit = findPreviewThread(id);
+      const hit = findPreviewThread(id, zh);
       if (hit) {
         setPreviewProjectId(hit.project.id);
         setSelectedProject({ id: hit.project.id, name: hit.project.name });
@@ -2347,14 +2390,14 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         ...(viewedSessionId ? { sessionId: viewedSessionId, draftId: undefined } : {}),
         ...(selected?.threadId ? { threadId: selected.threadId, historyId: selected.historyId } : {}),
       }) };
-    mdi.store.updateDocument(mdi.document.id, { ref, title: threadTitle, projectName: previewMode.preview ? findPreviewProject(previewProjectId)?.name : selectedProject?.name });
-  }, [mdi?.document.id, threadTitle, viewedSessionId, dockSelection.project, selected?.threadId, selected?.historyId, previewProjectId, previewThreadId, previewMode.preview, executionTarget.id, selectedProject?.name, state.loading]);
+    mdi.store.updateDocument(mdi.document.id, { ref, title: threadTitle, projectName: previewMode.preview ? findPreviewProject(previewProjectId, zh)?.name : selectedProject?.name });
+  }, [mdi?.document.id, threadTitle, viewedSessionId, dockSelection.project, selected?.threadId, selected?.historyId, previewProjectId, previewThreadId, previewMode.preview, previewMode.preview ? zh : false, executionTarget.id, selectedProject?.name, state.loading]);
   return (
     <AnnotationsProvider client={client} workspaceId={hubWorkspaceId} sessionId={viewedSessionId} runtimeSessionId={snapshot?.sessionId} onInsert={insertPreparedPrompt}>
     <BackgroundProvider key={previewMode.preview ? "background-preview" : "background-real"} preview={previewMode.preview} theme={theme}>
     <div className="app" id="appRoot" aria-busy={state.loading}>
       <SharedSurface region="background"><AppBackgroundLayer route={state.route} theme={theme} /></SharedSurface>
-      <a className="skip-link" href="#convoScroll">跳到对话内容</a>
+      <a className="skip-link" href="#convoScroll">{zh ? "跳到对话内容" : "Skip to conversation"}</a>
       <SharedSurface region="title">
       <Titlebar
         canBack={trailAt > 0}
@@ -2492,13 +2535,13 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           {state.hostError && (
             <div className="banner amber" role="alert">
               <Icon name="alert" />
-              <span><b>Host 不可用</b> · <span className="banner-detail">{state.hostError.message}</span></span>
+              <span><b>{zh ? "Host 不可用" : "Host unavailable"}</b> · <span className="banner-detail">{state.hostError.message}</span></span>
             </div>
           )}
           {state.clientState?.connection.resyncRequired && (
             <div className="banner amber" role="alert">
               <Icon name="alert" />
-              <span><b>需要重新同步</b> · <span className="banner-detail">正在恢复最新 Runtime 状态，敏感操作已暂停。</span></span>
+              <span><b>{zh ? "需要重新同步" : "Resync required"}</b> · <span className="banner-detail">{zh ? "正在恢复最新 Runtime 状态，敏感操作已暂停。" : "Restoring latest Runtime state; sensitive actions are paused."}</span></span>
             </div>
           )}
           {pageRoute !== "diagnostics" ? (
@@ -2534,6 +2577,16 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
                   workspaceId={hubWorkspaceId}
                   client={client}
                   onImported={() => void refreshHistoryModels()}
+                  onNativeResume={async (threadId, workspaceId) => {
+                    try {
+                      const entry = await resumePreparedHistoryEntry(client, threadId, workspaceId, PROJECT_THREADS_QUERY_MAX,
+                        zhRef.current ? "会话已恢复，但目录尚未更新；请刷新会话历史。" : "The session resumed, but its history entry is not available yet. Refresh history.");
+                      await openHistoryEntry(entry, workspaceId);
+                    } catch (error) {
+                      setSessionActionError(hostErrorMessage(error, zhRef.current ? "恢复会话失败" : "Could not resume the session"));
+                      throw error;
+                    }
+                  }}
                   onImportedOpen={(sessionId, workspaceId) => { void client.query("history.list", { workspaceId, limit: PROJECT_THREADS_QUERY_MAX }).then(history => { const entry = history.entries.find(item => item.sessionId === sessionId); if (entry) void openHistoryEntry(entry, workspaceId); else setSessionActionError("Imported session is not yet available; refresh history"); }); }}
                   {...(historyModel ? { history: historyModel } : {})}
                   onRoute={go}
@@ -2608,6 +2661,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         </SharedSurface>
       ) : null}
       <EvaluationActivity client={client} visible={pageRoute !== "evaluation"} onOpen={(id, kind) => { setEvaluationIntent({ id, kind }); go("evaluation"); }} />
+      {!mdi || mdi.active ? <><LuxAmbient /><LuxSpotlight enabled={appSettings.light === "vivid"} /></> : null}
       <div hidden={workbenchHidden} inert={workbenchHidden} ref={layout.rootRef} className={`app-body adaptive-workbench ${mdi ? "" : shellClass}`} data-layout-overlay={layout.overlay ?? undefined}>
         {layout.overlay ? <button type="button" className="layout-overlay-backdrop" aria-label={t("common.close")} onClick={layout.dismissOverlay} /> : null}
         <SharedSurface region="sidebar"><AppSidebar state={state} chrome={chrome} client={client} onRoute={go} onOpenAppUpdateDialog={() => setShowAppUpdateDialog(true)} ompMenuAnchorRef={ompMenuAnchorRef} railCollapsed={railCollapsed} avatarRef={footerAvatarRef} footerBoxRef={footerBoxRef} /></SharedSurface>
@@ -2800,7 +2854,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
                 <div className="modal-body">
                   <dl className="about-list">
                     <div className="about-row"><dt>{t("common.product")}</dt><dd>OMP Studio</dd></div>
-                    <div className="about-row"><dt>{t("appUpdate.currentVersion")}</dt><dd>{(previewMode.preview ? PREVIEW_APP_UPDATE.currentVersion : localAppVersion ?? appUpdate.state.updateInfo?.currentVersion) || "—"}</dd></div>
+                    <div className="about-row"><dt>{t("appUpdate.currentVersion")}</dt><dd>{(previewMode.preview ? getPreviewAppUpdate(zh).currentVersion : localAppVersion ?? appUpdate.state.updateInfo?.currentVersion) || "—"}</dd></div>
                     <div className="about-row"><dt>Client contract</dt><dd>v{CLIENT_CONTRACT_VERSION}</dd></div>
                     <div className="about-row"><dt>Runtime</dt><dd>{runtime?.status ?? t("common.unavailable")}{runtime?.classification ? ` · ${runtime.classification}` : ""}</dd></div>
                     {runtime?.runtimeVersion ? <div className="about-row"><dt>{t("common.runtimeVersion")}</dt><dd>{runtime.runtimeVersion}</dd></div> : null}
@@ -2830,7 +2884,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           </div>
         </div>
       ) : null}
-      <ToastHost message={shellNotice?.text ?? null} icon={shellNotice?.icon ?? "info"} onDismiss={() => setShellNotice(null)} />
+      <ToastHost message={shellNotice?.partialDeletion ? partialSessionDeletionNotice(shellNotice.partialDeletion.title, shellNotice.partialDeletion.details, resolvedLanguage === "zh") : shellNotice?.text ?? null} icon={shellNotice?.icon ?? "info"} sticky={shellNotice?.sticky === true} onDismiss={() => setShellNotice(null)} />
       <CommandPalette
         ref={paletteRef}
         open={paletteOpen}
@@ -2857,7 +2911,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           onApply={() => appUpdate.apply()}
           {...(!previewMode.preview ? { onCancel: () => appUpdate.cancel() } : {})}
           {...(!previewMode.preview ? { onSkip: async () => { await appUpdate.skip(); setShowAppUpdateDialog(false); } } : {})}
-          onOpenComponents={() => { setShowAppUpdateDialog(false); setSettingsIntent("maintenance", "Office 文档预览"); onRoute("settings"); }}
+          onOpenComponents={() => { setShowAppUpdateDialog(false); setSettingsIntent("maintenance", "office-preview"); onRoute("settings"); }}
           onClose={() => setShowAppUpdateDialog(false)}
           onDownloadAndInstall={() => appUpdate.downloadAndInstall()}
         />

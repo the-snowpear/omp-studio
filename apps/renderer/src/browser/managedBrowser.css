@@ -180,6 +180,32 @@ button.mb-omnibox-chip:hover:not(:disabled) { border-color: var(--border-strong)
 
 .browser-link-menu { padding: 5px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px #0003; }
 
+/* ---- Native same-page view and adapter choices ---------------------------- */
+.mb-native-frame { position: absolute; inset: 0; background: var(--bg-inset); }
+.mb-native-frame > img { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; }
+.mb-native-frame.is-controlled > img { cursor: crosshair; }
+.mb-native-frame:focus-within { box-shadow: inset 0 0 0 2px var(--accent-border); }
+.mb-native-input { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; overflow: hidden; resize: none; }
+.mb-native-input-hint { position: absolute; bottom: 8px; left: 8px; max-width: calc(100% - 32px); padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--r-4); color: var(--text-2); background: var(--surface); font-size: var(--fs-11); pointer-events: none; }
+.mb-open-options { display: flex; flex-direction: column; align-self: stretch; gap: 10px; margin: 0 0 16px; }
+.mb-open-options > p { margin: 0; color: var(--text-3); line-height: 1.6; }
+.mb-open-options details { color: var(--text-2); }
+.mb-open-options summary { cursor: pointer; }
+.mb-open-options details[open] > .mb-field { margin-top: 10px; }
+.mb-open-options .input { min-width: 0; font-size: var(--fs-12); }
+.mb-open-insecure { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; line-height: 1.5; }
+.mb-open-insecure input { flex: none; margin-top: 3px; }
+.mb-page-identity { display: grid; grid-template-columns: minmax(88px, 26%) minmax(0, 1fr); gap: 8px 12px; margin: 16px 0 0; }
+.mb-page-identity dt { color: var(--text-3); }
+.mb-page-identity dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); }
+.mb-capabilities li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.mb-capabilities li > .icon { color: var(--text-3); }
+.mb-capabilities strong { color: var(--text-2); font-weight: var(--fw-medium); }
+.mb-capabilities p { grid-column: 2 / -1; margin: 0; color: var(--text-3); line-height: 1.6; }
+.mb-inspection li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.mb-inspection li > pre, .mb-inspection li > code { flex: 1 1 240px; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--fs-12); }
+.mb-inspection li > p { flex-basis: 100%; margin: 0; color: var(--text-3); }
+
 /* ---- Narrow docks --------------------------------------------------------- */
 @container managed-browser (max-width: 420px) {
   .mb-toolbar { gap: 4px; padding-right: 4px; }

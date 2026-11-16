@@ -11,7 +11,7 @@ import {
 } from "@omp-studio/studio-protocol";
 import type { TerminalSender } from "../src/terminal-ipc.js";
 import { DesktopPrediction } from "../src/prediction.js";
-test("prediction transport isolates windows and imports only a selected private file", async () => {
+test("v2 prediction transport attaches Runtime metadata, isolates windows and imports only a selected file", async () => {
   const root = await mkdtemp(join(tmpdir(), "studio-prediction-ipc-")),
     channelId = randomUUID(),
     token = randomBytes(32).toString("hex");

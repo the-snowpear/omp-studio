@@ -16,6 +16,6 @@ test("macOS verifies the Runtime's signature before running its smoke test", asy
   assert.deepEqual(calls, ["/usr/bin/codesign --verify --strict /rt/omp", "smoke /rt/omp"]);
 
   const broken = withCodeSignatureCheck(runner, { platform: "darwin", run: async () => { throw new Error("code object is not signed at all"); } });
-  await assert.rejects(() => broken.run("/rt/omp"), /代码签名无效.*not signed/u);
+  await assert.rejects(() => broken.run("/rt/omp"), /code signature is invalid.*not signed/u);
   assert.equal(calls.length, 2, "an unsigned Runtime is never executed");
 });

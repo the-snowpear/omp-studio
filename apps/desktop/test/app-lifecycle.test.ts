@@ -6,7 +6,7 @@ import { createDesktopApplication } from "../src/composition.js";
 import type { DesktopHostComposition } from "../src/types.js";
 import { startAppNapGuard } from "../src/platform/app-nap.js";
 
-test("closing without a tray asks to save before destroying the window and stopping Host", async () => {
+for (const platform of ["win32", "linux"] as const) test(`${platform}: closing asks to save before destroying the window and stopping Host`, async () => {
   const events: string[] = [];
   let allow = false;
   const app = createDesktopApplication({
@@ -18,7 +18,8 @@ test("closing without a tray asks to save before destroying the window and stopp
   });
   await app.start();
   const close = () => handleMainWindowClose({ preventDefault() { events.push("prevent-close"); } }, {
-    platform: "win32", quitting: false, closeToTray: false, hasFloatingWindows: false,
+    // On Linux even a constructed Tray can be invisible to the desktop shell.
+    platform, quitting: false, closeToTray: platform === "linux", hasFloatingWindows: false,
     hide() { events.push("hide"); }, requestQuit: () => app.requestQuit(),
   });
   close(); await new Promise(resolve => setImmediate(resolve));
@@ -28,11 +29,63 @@ test("closing without a tray asks to save before destroying the window and stopp
   assert.deepEqual(events, ["prevent-close", "save-confirmation", "dispose", "shutdown", "quit"]);
 });
 
+test("a native close veto leaves the window usable and a later operator quit can proceed", async () => {
+  const events: string[] = [];
+  let allow = false;
+  let activate: (() => void) | undefined;
+  const app = createDesktopApplication({
+    hostFactory: { create: async () => ({ status: "ready", isBusy: () => false,
+      confirmClose: async () => { events.push("native-confirmation"); return allow; },
+      shutdown: async () => { events.push("shutdown"); } }) as DesktopHostComposition },
+    createWindow: async () => ({ show() { events.push("show"); }, focus() {}, close() {}, dispose() { events.push("dispose"); } }),
+    requestSingleInstanceLock: () => true, onSecondInstance() {}, onBeforeQuit() {}, onAllWindowsClosed() {},
+    onActivate: (listener) => { activate = listener; },
+    confirmBeforeQuit: async () => { events.push("save-confirmation"); return true; },
+    beforeShutdown: async () => { events.push("flush"); },
+    quit: () => { events.push("quit"); },
+  });
+  await app.start();
+  await app.quit();
+  activate?.();
+  assert.deepEqual(events, ["save-confirmation", "native-confirmation", "show"]);
+  events.length = 0;
+  allow = true;
+  await app.quit();
+  assert.deepEqual(events, ["save-confirmation", "native-confirmation", "dispose", "flush", "shutdown", "quit"]);
+});
+
+test("system shutdown does not wait for a native close dialog or honor its late veto", async () => {
+  const events: string[] = [];
+  let resolveConfirmation!: (allowed: boolean) => void;
+  const confirmation = new Promise<boolean>(resolve => { resolveConfirmation = resolve; });
+  let systemShutdown: ((event: { preventDefault(): void }) => void) | undefined;
+  const app = createDesktopApplication({
+    hostFactory: { create: async () => ({ status: "ready", isBusy: () => false,
+      confirmClose: async () => { events.push("native-confirmation"); return confirmation; },
+      shutdown: async () => { events.push("shutdown"); } }) as DesktopHostComposition },
+    createWindow: async () => ({ show() {}, focus() {}, close() {}, dispose() { events.push("dispose"); } }),
+    requestSingleInstanceLock: () => true, onSecondInstance() {}, onBeforeQuit() {}, onAllWindowsClosed() {},
+    onSystemShutdown: (listener) => { systemShutdown = listener; },
+    quit: () => { events.push("quit"); },
+  });
+  await app.start();
+  const closing = app.quit();
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.deepEqual(events, ["native-confirmation"]);
+  systemShutdown?.({ preventDefault() {} });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.deepEqual(events, ["native-confirmation", "dispose", "shutdown", "quit"]);
+  resolveConfirmation(false);
+  await closing;
+  assert.deepEqual(events, ["native-confirmation", "dispose", "shutdown", "quit"]);
+});
+
 test("macOS Dock, Windows tray and floating windows keep the main window recoverable", () => {
   for (const input of [
     { platform: "darwin" as const, closeToTray: false, hasFloatingWindows: false },
     { platform: "win32" as const, closeToTray: true, hasFloatingWindows: false },
     { platform: "win32" as const, closeToTray: false, hasFloatingWindows: true },
+    { platform: "linux" as const, closeToTray: true, hasFloatingWindows: true },
   ]) {
     const events: string[] = [];
     const options = { ...input, quitting: false, hide() { events.push("hide"); }, requestQuit() { events.push("quit"); } };

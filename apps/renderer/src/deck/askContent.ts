@@ -2,6 +2,7 @@ import type { AskImage } from "@omp-studio/studio-protocol";
 import type { ComposerDoc } from "../composer/types";
 import { serializeChip } from "../composer/serialize";
 import type { ClientInteraction } from "@omp-studio/client-contract";
+import { isZh } from "../i18n";
 import { NO_ASK_ANSWER, type DeckAskAnswer, type DeckAskOption, type DeckAskQuestion } from "./types";
 
 const RECOMMENDED_SUFFIX = " (Recommended)";
@@ -80,32 +81,50 @@ export type SelectAskView = {
 };
 
 /** Map a Host `select` interaction onto the preview Ask card model. */
-export function selectToAskView(interaction: Extract<ClientInteraction, { kind: "select" }>): SelectAskView {
+export function selectToAskView(interaction: Extract<ClientInteraction, { kind: "select" }>, zh = isZh()): SelectAskView {
   const idByLabel: Record<string, string> = {};
   const options: DeckAskOption[] = [];
   let recommended: number | undefined;
-  for (const option of interaction.options) {
-    if (isReservedOption(option.id, option.label)) continue;
+  let initial: number | undefined;
+  // A checkbox-marked list is still one choice per answer; marks are native state.
+  const toggleList = interaction.selectionMarker === "checkbox" && !interaction.multiple;
+  const markable = toggleList ? interaction.markableCount ?? interaction.options.length : 0;
+  const checked = new Set(interaction.checkedIndices ?? []);
+  interaction.options.forEach((option, index) => {
+    // Toggle lists keep their finishing rows ("Done", "Next"); only free text maps onto the custom answer.
+    const reserved = toggleList ? option.id === "custom-input" || option.label === OTHER_LABEL || option.label === CHAT_LABEL : isReservedOption(option.id, option.label);
+    if (reserved) return;
     const stripped = stripRecommended(option.label);
     const rec = stripped.recommended || option.description === "推荐";
     if (rec && recommended === undefined) recommended = options.length;
+    if (index === interaction.initialIndex) initial = options.length;
     idByLabel[stripped.label] = option.id;
     options.push({
       label: stripped.label,
       ...(option.description && option.description !== "推荐" ? { description: option.description } : {}),
+      ...(index < markable ? { mark: checked.has(index) ? "checked" as const : "unchecked" as const } : {}),
     });
-  }
+  });
   return {
     question: {
       id: interaction.interactionId,
-      question: interaction.title || "选择",
+      question: interaction.title || (zh ? "选择" : "Select"),
       customExclusive: true,
       options,
       ...(interaction.multiple ? { multi: true } : {}),
       ...(recommended === undefined ? {} : { recommended }),
+      ...(toggleList ? { toggleList: true } : {}),
+      ...(initial === undefined ? {} : { initial }),
     },
     idByLabel,
   };
+}
+
+/** A plain single select starts on the native cursor; toggle lists only focus it. */
+export function initialAskAnswer(question: DeckAskQuestion): DeckAskAnswer {
+  const { initial, multi, toggleList, options } = question;
+  const label = initial === undefined || multi || toggleList ? undefined : options[initial]?.label;
+  return label === undefined ? NO_ASK_ANSWER : { ...NO_ASK_ANSWER, picked: [label] };
 }
 
 export function submitSelectValue(

@@ -4,6 +4,11 @@ import type {
   ComputerWorkspaceCommand, ComputerWorkspaceResultMap, ComputerWorkspaceSnapshot,
 } from "@omp-studio/studio-protocol";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { isZh } from "../i18n";
+
+function computerText(zh: string, en: string): string {
+  return isZh() ? zh : en;
+}
 
 export async function computerCommand<K extends ComputerWorkspaceCommand["kind"]>(client: StudioClient, kind: K, input: CommandInput<K>): Promise<ComputerWorkspaceResultMap[K]> {
   const handle = await client.command(kind, input);
@@ -103,7 +108,7 @@ export class ComputerWorkspaceSource {
       const bufferedActions = this.pending.flatMap(change => change.kind === "action" && change.revision > page.revision && change.revision <= snapshot.revision ? [change.action] : []);
       this.publish({ snapshot: this.withConfirmedControl(snapshot), actions: merge(merge(page.items, bufferedActions, action => action.id), snapshot.active, action => action.id), frames: merge(page.frames, snapshot.frames, frame => frame.frameId), nextCursor: page.nextCursor, loading: false });
     }).catch(cause => {
-      if (generation === this.generation) this.publish({ loading: false, error: hostErrorMessage(cause, "无法读取电脑工作区 / Cannot read Computer workspace") });
+      if (generation === this.generation) this.publish({ loading: false, error: hostErrorMessage(cause, computerText("无法读取电脑工作区", "Cannot read Computer workspace")) });
     }).finally(() => {
       if (generation !== this.generation) return;
       this.refreshing = undefined;
@@ -150,14 +155,14 @@ export class ComputerWorkspaceSource {
       if (generation !== this.generation) return;
       this.publish({ actions: merge(this.state.actions, page.items, action => action.id), frames: merge(this.state.frames, page.frames, frame => frame.frameId), nextCursor: page.nextCursor });
     } catch (cause) {
-      if (generation === this.generation) this.publish({ error: hostErrorMessage(cause, "无法读取更早动作 / Cannot load earlier actions") });
+      if (generation === this.generation) this.publish({ error: hostErrorMessage(cause, computerText("无法读取更早动作", "Cannot load earlier actions")) });
     } finally { if (generation === this.generation) this.publish({ loadingMore: false }); }
   };
   async getFrame(frameId: string) {
     return this.state.frames.find(frame => frame.frameId === frameId) ?? await this.client.query("computer.frame.get", { sessionId: this.sessionId, frameId });
   }
   private async ensureLease() {
-    if (!this.listeners.size) throw new Error("观察面板已隐藏 / Computer panel is hidden");
+    if (!this.listeners.size) throw new Error(computerText("观察面板已隐藏", "Computer panel is hidden"));
     if (this.lease && this.lease.expiresAt > Date.now()) return this.lease;
     if (this.leasePromise) return this.leasePromise;
     if (this.lease) this.closeLease();
@@ -165,7 +170,7 @@ export class ComputerWorkspaceSource {
     const task = computerCommand(this.client, "computer.observe.open", { sessionId: this.sessionId, consumerId: `renderer:${crypto.randomUUID()}` }).then(lease => {
       if (generation !== this.leaseGeneration || !this.listeners.size) {
         void computerCommand(this.client, "computer.observe.close", { sessionId: this.sessionId, leaseId: lease.leaseId }).catch(() => {});
-        throw new Error("观察范围已改变 / Observation scope changed");
+        throw new Error(computerText("观察范围已改变", "Observation scope changed"));
       }
       this.lease = lease; return lease;
     }).finally(() => { if (generation === this.leaseGeneration) this.leasePromise = undefined; });
@@ -190,10 +195,10 @@ export class ComputerWorkspaceSource {
     const task = this.ensureLease().then(lease => {
       leaseGeneration = this.leaseGeneration;
       const screen = this.state.snapshot?.screen;
-      if (!this.listeners.size || screen?.locked || screen?.asleep || lease.expiresAt <= Date.now()) throw new Error("屏幕锁定、休眠或观察已结束 / Screen locked, asleep, or observation ended");
+      if (!this.listeners.size || screen?.locked || screen?.asleep || lease.expiresAt <= Date.now()) throw new Error(computerText("屏幕锁定、休眠或观察已结束", "Screen locked, asleep, or observation ended"));
       return computerCommand(this.client, "computer.frame.capture", { sessionId: this.sessionId, leaseId: lease.leaseId, targetId });
     }).then(frame => {
-      if (generation !== this.generation || leaseGeneration !== this.leaseGeneration) throw new Error("观察范围已改变 / Observation scope changed");
+      if (generation !== this.generation || leaseGeneration !== this.leaseGeneration) throw new Error(computerText("观察范围已改变", "Observation scope changed"));
       this.recordFrame(frame); return frame;
     }).finally(() => { if (this.captures.get(targetId) === task) this.captures.delete(targetId); });
     this.captures.set(targetId, task);
@@ -226,7 +231,7 @@ export class ComputerWorkspaceSource {
           const frame = await this.capture(targetId);
           if (!value.stopped) for (const notify of value.listeners) notify({ frame });
         } catch (cause) {
-          if (!value.stopped) for (const notify of value.listeners) notify({ error: hostErrorMessage(cause, "自动观察已暂停 / Automatic observation paused"), paused: true });
+          if (!value.stopped) for (const notify of value.listeners) notify({ error: hostErrorMessage(cause, computerText("自动观察已暂停", "Automatic observation paused")), paused: true });
           return;
         }
         if (!value.stopped) value.timer = setTimeout(() => void tick(), active ? 2000 : 5000);

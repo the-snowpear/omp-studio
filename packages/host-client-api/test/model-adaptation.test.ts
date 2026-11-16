@@ -72,8 +72,9 @@ test("complete thinking modes survive save/read, source records survive reopenin
     assert.deepEqual(row.thinkingConfig, models[i]!.thinkingConfig);
     assert.equal(row.maxContextWindow, 1000000);
     assert.equal(row.parameterSources?.thinkingConfig?.source, "catalog");
-    assert.equal(snapshot.availableModels.find(model => model.selector === row.selector)?.thinkingConfig?.defaultLevel, "high");
   }
+  assert.deepEqual(snapshot.availableModels, []);
+  assert.equal(snapshot.availability?.status, "unverified");
   const file = join(directory, "models.yml");
   await writeFile(file, (await readFile(file, "utf8")).replace("contextWindow: 200000", "contextWindow: 100000"));
   snapshot = await createOmpModelsService({ agentDir: directory, locateOmp: async () => undefined }).get();

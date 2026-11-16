@@ -1,7 +1,10 @@
 import type { JsonValue } from "@omp-studio/client-contract";
 import type { TreeGitStatus } from "../git/treeStatus";
+import type { JobActionsView } from "@omp-studio/studio-protocol";
+import { actionsViewFromData } from "./jobActionsModel";
 import type { IconName } from "../icons";
 import { jsonRecord, jsonString, type AssistantSegment, type TimelineRow, type ToolStatus, type ToolView } from "./conversationViewModel";
+import { isZh } from "../i18n";
 
 export type ToolKind = string;
 
@@ -171,13 +174,13 @@ export const NAME_TO_KIND: Record<string, string> = {
 
 const PATH_KINDS = new Set(["read", "write", "edit", "inspect_image", "glob", "generate_image", "tts"]);
 
-export const STATUS_LABEL: Record<ToolStatus, string> = {
-  queued: "等待",
-  running: "运行中",
-  succeeded: "完成",
-  failed: "失败",
-  aborted: "已中止",
-  missing: "结果缺失",
+const STATUS_LABEL_PAIRS: Record<ToolStatus, readonly [string, string]> = {
+  queued: ["等待", "Queued"],
+  running: ["运行中", "Running"],
+  succeeded: ["完成", "Done"],
+  failed: ["失败", "Failed"],
+  aborted: ["已中止", "Aborted"],
+  missing: ["结果缺失", "Missing result"],
 };
 
 const MCP_NAME_PREFIX = "mcp__";
@@ -216,6 +219,18 @@ function xdevOutput(inner: { readonly [key: string]: JsonValue }): string | unde
     .filter((entry): entry is string => entry !== undefined)
     .join("\n");
   return text || undefined;
+}
+
+/** Native result fields only. Submitted arguments must not shadow applied-file or watch evidence. */
+export function toolResultFields(tool: ToolView): { readonly [key: string]: JsonValue } {
+  const data = jsonRecord(tool.result?.data) ?? {};
+  const inner = jsonRecord(jsonRecord(data.xdev)?.inner);
+  return inner === undefined ? data : { ...data, ...inner };
+}
+
+export function toolActionsView(tool: ToolView): JobActionsView | undefined {
+  const data = toolResultFields(tool);
+  return actionsViewFromData(data.watch ?? data.actions);
 }
 
 export function toolFields(tool: ToolView): { readonly [key: string]: JsonValue } {
@@ -409,8 +424,8 @@ export function isPathKind(kind: ToolKind): boolean {
   return PATH_KINDS.has(kind);
 }
 
-export function statusLabel(status: ToolStatus): string {
-  return STATUS_LABEL[status];
+export function statusLabel(status: ToolStatus, zh = isZh()): string {
+  return STATUS_LABEL_PAIRS[status][zh ? 0 : 1];
 }
 
 export function fileBase(path: string): string {
@@ -529,12 +544,13 @@ export function toolTarget(tool: ToolView): string {
   );
 }
 
-export function chainItemDetail(tool: ToolView): string {
+export function chainItemDetail(tool: ToolView, zh = isZh()): string {
   const kind = toolKind(tool);
   const fields = toolFields(tool);
   const target = jsonString(fields.target);
   if (kind === "think") {
-    return jsonString(fields.preview) ?? (jsonString(fields.dur) ? `思考了 ${jsonString(fields.dur)}` : "");
+    const dur = jsonString(fields.dur);
+    return jsonString(fields.preview) ?? (dur ? (zh ? `思考了 ${dur}` : `Thought for ${dur}`) : "");
   }
   if (kind === "bash") return jsonString(fields.cmd) ?? jsonString(fields.command) ?? target ?? "";
   if (kind === "grep" || kind === "ast_grep" || kind === "glob") {
@@ -577,8 +593,105 @@ export function chainItemDetail(tool: ToolView): string {
 
 export type BatchSummary = { readonly text: string; readonly add: number; readonly del: number };
 
+export type EditDiffRow = {
+  readonly mark: "+" | "-" | " ";
+  readonly oldLn: string;
+  readonly newLn: string;
+  readonly text: string;
+};
+
+/** Native numbered diff rows and legacy unified diffs; no submitted edit input is interpreted. */
+export function editDiffRows(diff: JsonValue | undefined): EditDiffRow[] {
+  const rows: EditDiffRow[] = [];
+  const push = (mark: "+" | "-" | " ", oldLn: string, newLn: string, text: string) => {
+    rows.push({ mark, oldLn: mark === "+" ? "" : oldLn, newLn: mark === "-" ? "" : newLn, text });
+  };
+  if (Array.isArray(diff)) {
+    for (const row of diff) {
+      if (!Array.isArray(row)) continue;
+      const mark = row[0] === "+" || row[0] === "-" ? row[0] : " ";
+      push(mark, String(row[1] ?? ""), String(row[2] ?? ""), String(row[3] ?? ""));
+    }
+    return rows;
+  }
+  if (typeof diff !== "string" || !diff.length) return rows;
+  let oldLine: number | undefined;
+  let newLine: number | undefined;
+  for (const line of diff.split("\n")) {
+    const hunk = /^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/u.exec(line);
+    if (hunk) { oldLine = Number(hunk[1]); newLine = Number(hunk[2]); continue; }
+    if (/^(?:diff --git |index |--- |\+\+\+ |\\ No newline)/u.test(line)) continue;
+    const numbered = /^([ +\-])\s*(\d*)[|│](.*)$/u.exec(line);
+    if (numbered) {
+      const mark = numbered[1] === "+" || numbered[1] === "-" ? numbered[1] : " ";
+      push(mark, numbered[2] ?? "", numbered[2] ?? "", numbered[3] ?? "");
+    } else if (/^[ +\-]/u.test(line)) {
+      const mark = line[0] === "+" || line[0] === "-" ? line[0] : " ";
+      push(mark, oldLine === undefined ? "" : String(oldLine), newLine === undefined ? "" : String(newLine), line.slice(1));
+      if (mark !== "+" && oldLine !== undefined) oldLine++;
+      if (mark !== "-" && newLine !== undefined) newLine++;
+    } else if (line.length) push(" ", "", "", line);
+  }
+  return rows;
+}
+
+export function editDiffStats(diff: JsonValue | undefined): { readonly add: number; readonly del: number } {
+  let add = 0;
+  let del = 0;
+  // The composer only needs counts; do not allocate display rows for every historical edit.
+  if (Array.isArray(diff)) {
+    for (const row of diff) {
+      if (!Array.isArray(row)) continue;
+      if (row[0] === "+") add++;
+      if (row[0] === "-") del++;
+    }
+  } else if (typeof diff === "string") {
+    for (const line of diff.split("\n")) {
+      if (line.startsWith("+++ ") || line.startsWith("--- ")) continue;
+      if (line.startsWith("+")) add++;
+      if (line.startsWith("-")) del++;
+    }
+  }
+  return { add, del };
+}
+
+export type AppliedEditFileResult = {
+  readonly path: string;
+  readonly fields: { readonly [key: string]: JsonValue };
+};
+export type AppliedEditResults = {
+  readonly files: readonly AppliedEditFileResult[];
+  readonly partial: boolean;
+};
+
+/** Presence (including an empty array) suppresses every legacy path/diff fallback. */
+export function appliedEditResults(tool: ToolView): AppliedEditResults | undefined {
+  const data = toolResultFields(tool);
+  if (!Object.hasOwn(data, "perFileResults")) return undefined;
+  const files: AppliedEditFileResult[] = [];
+  let rejected = false;
+  if (tool.status === "succeeded" || tool.status === "failed") {
+    for (const entry of Array.isArray(data.perFileResults) ? data.perFileResults : []) {
+      const fields = jsonRecord(entry);
+      if (fields === undefined) continue;
+      if (fields.isError === true || jsonString(fields.errorText) || jsonString(fields.displayErrorText)) { rejected = true; continue; }
+      const path = jsonString(fields.move) ?? jsonString(fields.path);
+      if (path !== undefined) files.push({ path, fields });
+    }
+  }
+  return { files, partial: files.length > 0 && (rejected || tool.status === "failed" || tool.result?.isError === true || data.isError === true) };
+}
+
 export function toolDiffStats(tool: ToolView): { readonly add: number; readonly del: number } {
   const kind = toolKind(tool);
+  const applied = appliedEditResults(tool);
+  if (applied !== undefined) {
+    return applied.files.reduce((total, file) => {
+      const diff = editDiffStats(file.fields.diff);
+      return { add: total.add + diff.add, del: total.del + diff.del };
+    }, { add: 0, del: 0 });
+  }
+  if (tool.status !== "succeeded" || tool.result?.isError === true) return { add: 0, del: 0 };
   const fields = toolFields(tool);
   if (kind === "write") {
     const explicit = jsonNumber(fields.lines);
@@ -588,24 +701,8 @@ export function toolDiffStats(tool: ToolView): { readonly add: number; readonly 
       return { add: content.length === 0 ? 0 : content.split("\n").length, del: 0 };
     }
     if (Array.isArray(content)) return { add: content.length, del: 0 };
-    return { add: 0, del: 0 };
   }
-  if (kind !== "edit") return { add: 0, del: 0 };
-  let add = 0;
-  let del = 0;
-  if (Array.isArray(fields.diff)) {
-    for (const row of fields.diff) {
-      if (!Array.isArray(row)) continue;
-      if (row[0] === "+") add += 1;
-      if (row[0] === "-") del += 1;
-    }
-  } else if (typeof fields.diff === "string") {
-    for (const line of fields.diff.split("\n")) {
-      if (/^\+\d*\|/.test(line)) add += 1;
-      if (/^-\d*\|/.test(line)) del += 1;
-    }
-  }
-  return { add, del };
+  return kind === "edit" ? editDiffStats(toolResultFields(tool).diff ?? fields.diff) : { add: 0, del: 0 };
 }
 
 export type FileEditKind = "write" | "edit" | "ast_edit";
@@ -618,6 +715,8 @@ export type TurnFileChange = {
   readonly del: number;
   readonly status?: TreeGitStatus;
   readonly note?: string;
+  /** This file is confirmed applied, but another part of its tool call was rejected. */
+  readonly partial?: boolean;
 };
 
 export const CHANGE_NOTE: Readonly<Record<FileEditKind, string>> = {
@@ -642,12 +741,14 @@ function changeNote(kinds: readonly FileEditKind[]): string | undefined {
   return last === undefined ? undefined : CHANGE_NOTE[last];
 }
 
-function toolFilePath(tool: ToolView): string | undefined {
+export function toolFilePath(tool: ToolView): string | undefined {
+  const result = toolResultFields(tool);
   const fields = toolFields(tool);
-  return jsonString(fields.path) ?? jsonString(fields.resolvedPath) ?? jsonString(fields.target);
+  return jsonString(result.move) ?? jsonString(result.path) ?? jsonString(result.resolvedPath)
+    ?? jsonString(fields.path) ?? jsonString(fields.resolvedPath) ?? jsonString(fields.target);
 }
 
-type FileChangeAcc = { add: number; del: number; kinds: FileEditKind[] };
+type FileChangeAcc = { add: number; del: number; kinds: FileEditKind[]; partial?: boolean; status?: TreeGitStatus };
 
 function addTurnFile(
   files: Map<string, FileChangeAcc>,
@@ -655,6 +756,8 @@ function addTurnFile(
   add: number,
   del: number,
   kind: FileEditKind,
+  partial = false,
+  status?: TreeGitStatus,
 ): void {
   if (path === undefined) return;
   const normalized = path.replaceAll("\\", "/").trim();
@@ -662,15 +765,30 @@ function addTurnFile(
   if(/^(?:cfg|proc|local|omp|attachment|conflict):/iu.test(normalized)||/\.(?:sqlite3?|db)\//iu.test(normalized))return;
   if (!normalized || normalized.includes(" → ") || /^[a-z][a-z0-9+.-]*:\/\//iu.test(normalized)) return;
   const previous = files.get(normalized);
-  files.set(normalized, previous === undefined
-    ? { add, del, kinds: [kind] }
-    : { add: previous.add + add, del: previous.del + del, kinds: [...previous.kinds, kind] });
+  const resultStatus = status ?? previous?.status;
+  files.set(normalized, {
+    add: (previous?.add ?? 0) + add,
+    del: (previous?.del ?? 0) + del,
+    kinds: [...(previous?.kinds ?? []), kind],
+    ...(partial || previous?.partial ? { partial: true } : {}),
+    ...(resultStatus === undefined ? {} : { status: resultStatus }),
+  });
 }
 
 function collectToolFileChanges(tool: ToolView, files: Map<string, FileChangeAcc>): void {
-  if (tool.status !== "succeeded") return;
   const kind = asFileEditKind(toolKind(tool));
   if (kind === undefined) return;
+  const applied = appliedEditResults(tool);
+  if (applied !== undefined) {
+    for (const file of applied.files) {
+      const stats = editDiffStats(file.fields.diff);
+      const op = jsonString(file.fields.op);
+      const status = op === "create" ? "added" : op === "delete" ? "deleted" : "modified";
+      addTurnFile(files, file.path, stats.add, stats.del, kind, applied.partial, status);
+    }
+    return;
+  }
+  if (tool.status !== "succeeded" || tool.result?.isError === true) return;
   const fields = toolFields(tool);
   if (kind === "ast_edit") {
     if (Array.isArray(fields.changes)) {
@@ -717,8 +835,9 @@ export function collectTurnFileChanges(segments: readonly AssistantSegment[]): T
       dir: display.dir,
       add: stats.add,
       del: stats.del,
-      status: changeStatus(stats.add, stats.del, stats.kinds),
+      status: stats.status ?? changeStatus(stats.add, stats.del, stats.kinds),
       ...(note === undefined ? {} : { note }),
+      ...(stats.partial ? { partial: true } : {}),
     });
   }
   return changes;
@@ -826,13 +945,13 @@ function changePathMatches(path: string, focus: string): boolean {
 }
 
 /** 轮次菜单：最近一轮（跟随最新段）+ 有改动的历史轮 + 本会话。 */
-export function listSessionChangeTurns(rows: readonly TimelineRow[]): SessionChangeTurn[] {
+export function listSessionChangeTurns(rows: readonly TimelineRow[], zh = isZh()): SessionChangeTurn[] {
   const ranges = assistantRunRanges(rows);
   const last = ranges[ranges.length - 1];
   const items: SessionChangeTurn[] = [{
     id: SESSION_CHANGE_LAST_ID,
     kind: "last",
-    label: "最近一轮",
+    label: zh ? "最近一轮" : "Latest turn",
     files: last === undefined ? [] : filesInRange(rows, last),
   }];
   let historyIndex = 0;
@@ -844,27 +963,27 @@ export function listSessionChangeTurns(rows: readonly TimelineRow[]): SessionCha
     items.push({
       id: rangeTurnId(rows, range),
       kind: "turn",
-      label: `第 ${historyIndex} 轮`,
+      label: zh ? `第 ${historyIndex} 轮` : `Turn ${historyIndex}`,
       files,
     });
   }
   items.push({
     id: SESSION_CHANGE_SESSION_ID,
     kind: "session",
-    label: "本会话",
+    label: zh ? "本会话" : "This session",
     files: collectTurnFileChanges(allAssistantSegments(rows)),
   });
   return items;
 }
 
 /** 选中轮次的文件清单与 patch 段。未知 id 回退到最近一轮。 */
-export function sessionChangeScope(rows: readonly TimelineRow[], turnId: string): SessionChangeScope {
+export function sessionChangeScope(rows: readonly TimelineRow[], turnId: string, zh = isZh()): SessionChangeScope {
   if (turnId === SESSION_CHANGE_SESSION_ID) {
     const segments = allAssistantSegments(rows);
     return {
       id: SESSION_CHANGE_SESSION_ID,
       kind: "session",
-      label: "本会话",
+      label: zh ? "本会话" : "This session",
       files: collectTurnFileChanges(segments),
       segments,
     };
@@ -881,7 +1000,7 @@ export function sessionChangeScope(rows: readonly TimelineRow[], turnId: string)
       return {
         id: turnId,
         kind: "turn",
-        label: `第 ${historyIndex} 轮`,
+        label: zh ? `第 ${historyIndex} 轮` : `Turn ${historyIndex}`,
         files,
         segments: segmentsInRange(rows, range),
       };
@@ -891,7 +1010,7 @@ export function sessionChangeScope(rows: readonly TimelineRow[], turnId: string)
   return {
     id: SESSION_CHANGE_LAST_ID,
     kind: "last",
-    label: "最近一轮",
+    label: zh ? "最近一轮" : "Latest turn",
     files: last === undefined ? [] : filesInRange(rows, last),
     segments: last === undefined ? [] : segmentsInRange(rows, last),
   };
@@ -910,7 +1029,7 @@ export function sessionChangeTurnIdForPath(rows: readonly TimelineRow[], path: s
 
 // --- Deleted: WeakMap segment caches, session patch tree builder, todo state machine, progress aggregation ---
 
-export function batchSummary(thinking: readonly ThinkView[], tools: readonly ToolView[]): BatchSummary {
+export function batchSummary(thinking: readonly ThinkView[], tools: readonly ToolView[], zh = isZh()): BatchSummary {
   const files = new Set<string>();
   let searches = 0;
   let commands = 0;
@@ -955,20 +1074,43 @@ export function batchSummary(thinking: readonly ThinkView[], tools: readonly Too
     del += diff.del;
   }
   const parts: string[] = [];
-  if (editing) parts.push(`${editingRun ? "正在编辑 " : "编辑 "}${fileBase(editing)}`);
-  if (files.size) parts.push(`阅读 ${files.size} 个文件`);
-  if (searches) parts.push(`搜索 ${searches} 次`);
-  if (commands) parts.push(`运行 ${commands} 条命令`);
-  if (fetches) parts.push(`请求 ${fetches} 次`);
-  if (agents) parts.push(`${agents} 个子 Agent`);
+  if (editing) {
+    const verb = editingRun
+      ? (zh ? "正在编辑 " : "Editing ")
+      : (zh ? "编辑 " : "Edited ");
+    parts.push(`${verb}${fileBase(editing)}`);
+  }
+  if (files.size) {
+    parts.push(zh ? `阅读 ${files.size} 个文件` : `Read ${files.size} ${files.size === 1 ? "file" : "files"}`);
+  }
+  if (searches) {
+    parts.push(zh ? `搜索 ${searches} 次` : `${searches} ${searches === 1 ? "search" : "searches"}`);
+  }
+  if (commands) {
+    parts.push(zh ? `运行 ${commands} 条命令` : `Ran ${commands} ${commands === 1 ? "command" : "commands"}`);
+  }
+  if (fetches) {
+    parts.push(zh ? `请求 ${fetches} 次` : `${fetches} ${fetches === 1 ? "request" : "requests"}`);
+  }
+  if (agents) {
+    parts.push(zh ? `${agents} 个子 Agent` : `${agents} ${agents === 1 ? "subagent" : "subagents"}`);
+  }
   if (asks === 1 && askFirst && parts.length === 0) parts.push(`Ask · ${askFirst}`);
-  else if (asks) parts.push(`回答 ${asks} 次`);
-  if (parts.length === 0 && thinkDur) parts.push(`思考了 ${thinkDur}`);
+  else if (asks) {
+    parts.push(zh ? `回答 ${asks} 次` : `${asks} ${asks === 1 ? "answer" : "answers"}`);
+  }
+  if (parts.length === 0 && thinkDur) {
+    parts.push(zh ? `思考了 ${thinkDur}` : `Thought for ${thinkDur}`);
+  }
   if (parts.length === 0 && thinking.length > 0) {
     const preview = thinking[0]?.text.trim().replace(/\s+/g, " ") ?? "";
-    parts.push(preview ? `思考 · ${preview.slice(0, 36)}${preview.length > 36 ? "…" : ""}` : "思考");
+    parts.push(
+      preview
+        ? (zh ? `思考 · ${preview.slice(0, 36)}${preview.length > 36 ? "…" : ""}` : `Thinking · ${preview.slice(0, 36)}${preview.length > 36 ? "…" : ""}`)
+        : (zh ? "思考" : "Thinking"),
+    );
   }
-  if (parts.length === 0) parts.push("工具调用");
+  if (parts.length === 0) parts.push(zh ? "工具调用" : "Tool calls");
   return { text: parts.join(" · "), add, del };
 }
 
@@ -1171,6 +1313,7 @@ function lastAssistantRunRange(rows: readonly TimelineRow[]): AssistantRunRange 
   return ranges[ranges.length - 1];
 }
 
+/** `blocked` is read-only legacy transcript compatibility, not a status offered by native Todo. */
 export type TodoStatus = "pending" | "in_progress" | "completed" | "abandoned" | "blocked";
 
 export type TodoTask = {
@@ -1275,7 +1418,11 @@ function tasksFromTodoFields(fields: { readonly [key: string]: JsonValue }): Tod
 }
 
 function extractTodoSnapshot(tool: ToolView): TodoTask[] | undefined {
-  if (toolKind(tool) !== "todo") return undefined;
+  if (toolKind(tool) !== "todo" || tool.status !== "succeeded" || tool.result?.isError === true) return undefined;
+  const result = toolResultFields(tool);
+  // A native view after restore supersedes the historical blocked snapshot,
+  // including an empty list. History itself remains untouched and read-only.
+  if (Object.hasOwn(result, "phases")) return tasksFromTodoFields(result);
   const fields = toolFields(tool);
   const tasks = tasksFromTodoFields(fields);
   if (tasks.length > 0) return tasks;

@@ -9,7 +9,8 @@ import {
 } from "../../modes/settings";
 import { cfgTitleRefreshAfterPrompts } from "../../utils/title-settings";
 import {
-	cfgTaskFile,
+	cfgTaskSteps,
+	cfgTaskAutoParallel,
 	cfgTaskPerCallModel,
 	cfgTaskPerCallModelAllow,
 	cfgTaskWorkerThreads,
@@ -68,7 +69,11 @@ import {
 import type { StudioComputerWorkspaceService } from "./computer-workspace-service";
 import { cfgExtensionHandlersModeControl } from "../../extensibility/settings";
 import { cfgSttEnabled, cfgSttLanguage, cfgSttSubmitTrigger } from "../../stt/settings";
-import { cfgBashGitGuard } from "../../exec/settings";
+import { cfgBashAllowedEnvVars, cfgBashGitGuard, cfgBashPatterns, cfgShellPath } from "../../exec/settings";
+import { cfgNoJudge, cfgNoSpotlight, cfgOffline } from "../../config/auxiliary-model-policy";
+import { cfgEncourageEdits } from "../../session/settings";
+import { cfgCommitEnabled, cfgFindHitThreshold, cfgFindVerifyModel, cfgTodoMidRunNudges } from "../../tools/settings";
+import { cfgTtsrRepeatMode } from "../../export/ttsr-settings";
 import { cfgComposerPredictions, cfgRecapEnabled, cfgRecapIdleSeconds } from "../../modes/settings";
 import { cfgSpeechSpeed, cfgTtsLocalSpeed } from "../../tts/settings";
 import { cfgGcCompress, cfgGcCompressAfterDays, cfgGcAutoCompress } from "../../cli/gc-settings";
@@ -91,6 +96,18 @@ import { SessionControlError } from "./session-control-service";
 import { StudioSessionCompactionService } from "./session-compaction-service";
 
 const HANDLES: Record<FeatureSettingKey, AnySetting> = {
+	"models.noJudge": cfgNoJudge,
+	"models.noSpotlight": cfgNoSpotlight,
+	"models.offline": cfgOffline,
+	"find.verifyModel": cfgFindVerifyModel,
+	"find.hitThreshold": cfgFindHitThreshold,
+	encourageEdits: cfgEncourageEdits,
+	"commit.enabled": cfgCommitEnabled,
+	"todo.midRunNudges": cfgTodoMidRunNudges,
+	shellPath: cfgShellPath,
+	"bash.allowedEnvVars": cfgBashAllowedEnvVars,
+	"bash.patterns": cfgBashPatterns,
+	"ttsr.repeatMode": cfgTtsrRepeatMode,
 	"magicKeywords.enabled": cfgMagicKeywordsEnabled,
 	"magicKeywords.chillax": cfgMagicKeyword.chillax,
 	"out.enabled": cfgOutEnabled,
@@ -99,7 +116,8 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"display.shellVisualization": cfgDisplayShellVisualization,
 	"title.refreshAfterPrompts": cfgTitleRefreshAfterPrompts,
 	"display.advisorCollapsedLines": cfgDisplayAdvisorCollapsedLines,
-	"task.file": cfgTaskFile,
+	"task.steps": cfgTaskSteps,
+	"task.autoParallel": cfgTaskAutoParallel,
 	"task.perCallModel": cfgTaskPerCallModel,
 	"task.perCallModelAllow": cfgTaskPerCallModelAllow,
 	"task.workerThreads": cfgTaskWorkerThreads,
@@ -177,7 +195,26 @@ export class StudioFeatureSettingsService {
 				key === "out.enabled"
 					? outRepliesActive(this.session.settings, this.session.studioToolSession?.replyTranscript === true)
 					: structuredClone(setting.get(this.session.settings) ?? null);
-		return { key, value: value as FeatureSettingRow["value"], source: this.session.settings.getProvenance(setting) };
+		// A merged/path-resolved rule list is not an editable global configuration:
+		// copying it back would promote project grants and erase path restrictions.
+		const globalBash =
+			key === "bash.patterns"
+				? (this.session.settings.getGlobalSettings().bash as { patterns?: FeatureSettingRow["value"] } | undefined)
+				: undefined;
+		const sessionBash =
+			key === "bash.patterns"
+				? (this.session.settings.overlayLayers().overrides.bash as
+						| { patterns?: FeatureSettingRow["value"] }
+						| undefined)
+				: undefined;
+		return {
+			key,
+			value: value as FeatureSettingRow["value"],
+			source: this.session.settings.getProvenance(setting),
+			...(key === "bash.patterns"
+				? { editableValues: { global: globalBash?.patterns ?? [], session: sessionBash?.patterns ?? null } }
+				: {}),
+		};
 	}
 	async execute(operation: FeatureSettingsOperation): Promise<unknown> {
 		if (operation.sessionId !== this.session.sessionId)

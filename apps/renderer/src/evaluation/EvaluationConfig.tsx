@@ -9,6 +9,8 @@ import { AppSelect } from "../AppSelect";
 import { WorkspaceDialog } from "../workspaces/Workspace";
 import { hostErrorMessage } from "../hostError";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
+import { useI18n } from "../i18n";
+import { BenchmarkAccountPicker, NATIVE_SERVICE_TIERS, selectorProvider } from "../models/BenchmarkAccountPicker";
 
 type T = (cn: string, en: string) => string;
 export const lines = (text: string) =>
@@ -191,6 +193,7 @@ export function EvaluationConfig({
   t: T;
 }) {
   const executionTarget = useExecutionTarget();
+  const { resolvedLanguage } = useI18n();
   const [imagePicker, setImagePicker] = useState<number>();
   const [search, setSearch] = useState(""),
     [step, setStep] = useState(0),
@@ -383,13 +386,25 @@ export function EvaluationConfig({
                 onChange={(e) => set("serviceTier", e.target.value)}
               >
                 <option value="">{t("继承原生配置", "Native configuration")}</option>
-                {["none", "auto", "default", "flex", "scale", "priority", "ultrafast"].map(
+                {NATIVE_SERVICE_TIERS.map(
                   (tier) => (
                     <option key={tier}>{tier}</option>
                   ),
                 )}
               </AppSelect>
             </Field>
+            <BenchmarkAccountPicker
+              client={client}
+              sessionId={currentSessionId}
+              preview={preview}
+              zh={resolvedLanguage === "zh"}
+              providers={spec.models.flatMap((selector) => {
+                const provider = context?.models.find((m) => m.selector === selector)?.provider ?? selectorProvider(selector);
+                return provider ? [provider] : [];
+              })}
+              value={spec.account}
+              onChange={(account) => set("account", account)}
+            />
           </div>
           {["chat", "generation"].includes(spec.profile) ? (
             <Field

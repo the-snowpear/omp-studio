@@ -143,6 +143,31 @@ describe("ContextInspector", () => {
     expect(screen.queryByText("0 tokens")).toBeNull();
   });
 
+  it("opens the source identity rather than the first entry and keeps native caveats visible", async () => {
+    const text = "prefix [Shown in Instruction Files: target.md] suffix";
+    const start = text.indexOf("[");
+    query.mockImplementation(async (kind: string, input: { category?: string; entryId?: string }) => {
+      if (kind === "context.view.open") return index({ notices: ["A changed source remains in System Prompt."], categories: [
+        { id: "system-prompt", label: "System Prompt", tokens: 100, entries: 1 },
+        { id: "instruction-files", label: "Instruction Files", tokens: 200, entries: 2 },
+      ] });
+      if (kind === "context.view.list") return { entries: input.category === "instruction-files" ? [entry("first-file"), entry("target-file")] : [entry("system-prompt/0")], total: 2 };
+      if (kind === "context.view.entry") return input.entryId === "system-prompt/0"
+        ? { entryId: input.entryId, text, totalChars: text.length, truncated: false, sourceMarkers: [{ start, end: text.indexOf("]") + 1, category: "instruction-files", entryId: "target-file" }] }
+        : { entryId: input.entryId, text: `body:${input.entryId}`, totalChars: 16, truncated: false };
+      return { released: true };
+    });
+    render(<PreviewModeProvider switchEnabled={false}><ContextInspector client={client} sessionId="s" opened width={500} /></PreviewModeProvider>);
+    expect(await screen.findByText("A changed source remains in System Prompt.")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /system-prompt\/0/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /查看来源条目.*target\.md/ }));
+    const body = await screen.findByText("body:target-file");
+    expect(screen.queryByText("body:first-file")).toBeNull();
+    expect(body.closest("section")?.hidden).toBe(false);
+    await waitFor(() => expect(document.activeElement).toBe(body.closest("pre")));
+    expect(query).toHaveBeenCalledWith("context.view.list", { sessionId: "s", snapshotId: "snap", category: "instruction-files", search: "", focusEntryId: "target-file" });
+  });
+
   it("never reads the Host in preview mode and hides the demo chip when marks are off", async () => {
     localStorage.setItem("omp.previewMode", "1");
     const first = render(

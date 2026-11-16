@@ -1,4 +1,7 @@
-export type ContextCategoryId = "system-prompt" | "skills" | "built-in-tools" | "custom-tools" | "user-messages" | "assistant-messages" | "assistant-thinking" | "tool-calls" | "tool-output";
+export type ContextCategoryId = "system-prompt" | "instruction-files" | "skills" | "built-in-tools" | "custom-tools" | "user-messages" | "assistant-messages" | "assistant-thinking" | "tool-calls" | "tool-output";
+
+/** UTF-16 offsets in a returned page of redacted text; links carry a native entry identity. */
+export interface ContextViewSourceMarker { start: number; end: number; category: ContextCategoryId; entryId?: string }
 
 /** Shared reasoning weight of one assistant message with several thinking blocks; member entries carry zero. */
 export interface ContextThinkingGroupSummary { id: string; label: string; tokens: number; interrupted?: boolean }
@@ -45,16 +48,18 @@ export interface ContextViewIndex {
   savedTokens: number; truncated: boolean; categories: ContextCategorySummary[];
   model?: ContextModelSummary;
   snapcompact?: ContextSnapcompactSummary;
+  /** Native snapshot caveats, not another estimate of the prompt. */
+  notices?: string[];
 }
 export type ContextViewOperation =
   | { kind: "context.view.open"; sessionId: string }
-  | { kind: "context.view.list"; sessionId: string; snapshotId: string; category: ContextCategoryId; childKey?: string; offset?: number; search?: string }
+  | { kind: "context.view.list"; sessionId: string; snapshotId: string; category: ContextCategoryId; childKey?: string; offset?: number; search?: string; focusEntryId?: string }
   | { kind: "context.view.entry"; sessionId: string; snapshotId: string; entryId: string; offset?: number }
   | { kind: "context.view.release"; sessionId: string; snapshotId: string };
 export interface ContextViewResultMap {
   "context.view.open": ContextViewIndex;
   "context.view.list": { entries: ContextEntrySummary[]; total: number; nextOffset?: number };
-  "context.view.entry": { entryId: string; text: string; totalChars: number; nextOffset?: number; truncated: boolean };
+  "context.view.entry": { entryId: string; text: string; totalChars: number; nextOffset?: number; truncated: boolean; sourceMarkers?: ContextViewSourceMarker[] };
   "context.view.release": { released: boolean };
 }
 export const CONTEXT_VIEW_KINDS = ["context.view.open", "context.view.list", "context.view.entry", "context.view.release"] as const;

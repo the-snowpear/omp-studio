@@ -2,7 +2,7 @@ import { cfgSkills } from "../extensibility/settings";
 import { cfgExtensions } from "../extensibility/settings";
 import { cfgMcpEnableProjectConfig } from "../mcp/settings";
 import { cfgIncludeModelInPrompt, cfgPersonality } from "../session/settings";
-import { cfgTaskBatch, cfgTaskMaxConcurrency } from "../task/settings";
+import { cfgTaskBatch } from "../task/settings";
 import { cfgSecurityEnabled } from "../tools/settings";
 import { cfgTuiRenderMermaid } from "../modes/settings";
 /**
@@ -316,7 +316,7 @@ export async function deriveProbeSessionInputs(options: {
 		includeModelInPrompt: cfgIncludeModelInPrompt.get(options.settings),
 		personality: cfgPersonality.get(options.settings),
 		taskBatch: cfgTaskBatch.get(options.settings),
-		taskMaxConcurrency: cfgTaskMaxConcurrency.get(options.settings),
+		readOnly: true,
 		securityEnabled: cfgSecurityEnabled.get(options.settings),
 		renderMermaid: cfgTuiRenderMermaid.get(options.settings),
 	});

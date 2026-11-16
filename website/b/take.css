@@ -1,0 +1,280 @@
+/* The take: a tall section whose sticky stage is the film frame. The camera
+   (take.ts) writes one transform on .b-world and opacity/translate on the
+   captions; nothing else moves per scroll frame. */
+.b-take {
+  position: relative;
+  height: 860vh;
+}
+.b-stage {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100svh;
+  overflow: hidden;
+  background: var(--ink);
+  isolation: isolate;
+}
+.b-cam {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+.b-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+/* Brand light: only ever a glow behind the subject. */
+.b-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.b-glow-back {
+  z-index: 0;
+  opacity: 0;
+  background:
+    radial-gradient(34% 40% at 38% 46%, rgb(255 79 216 / 0.34), transparent 70%),
+    radial-gradient(36% 44% at 62% 52%, rgb(56 182 255 / 0.3), transparent 72%),
+    radial-gradient(30% 36% at 50% 46%, rgb(139 92 246 / 0.5), transparent 70%);
+}
+/* A soft vignette keeps the eye in the frame and gives captions a ground. */
+.b-glow-front {
+  z-index: 2;
+  background:
+    linear-gradient(to bottom, rgb(18 11 38 / 0.72), transparent 22%),
+    radial-gradient(120% 90% at 50% 50%, transparent 55%, rgb(8 5 18 / 0.55));
+}
+.b-icon {
+  position: absolute;
+  z-index: 3;
+  top: 36%;
+  left: 50%;
+  width: clamp(120px, 15vh, 176px);
+  height: auto;
+  margin: 0;
+  translate: -50% -50%;
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 30px 50px rgb(0 0 0 / 0.5));
+}
+
+/* ---------------- Captions ---------------- */
+.b-cap {
+  position: absolute;
+  z-index: 4;
+  opacity: 0;
+  visibility: hidden;
+}
+.b-cap[data-on] { visibility: visible; }
+.b-cap p {
+  max-width: 34em;
+  color: var(--muted);
+  font-size: var(--t-lede);
+}
+.b-cap h2 + p, .b-cap h2 + div { margin-top: 1.1em; }
+.b-cap p + p { margin-top: 0.8em; }
+.b-cap .b-note { font-size: 14.5px; }
+
+/* Shot 1: the title over the sentence. */
+.b-cap-1 {
+  top: clamp(84px, 13vh, 150px);
+  left: var(--pad);
+  right: var(--pad);
+}
+.b-cap-1 .b-lede {
+  max-width: 31em;
+  margin-top: 1.3em;
+  color: #cfc6e4;
+}
+.b-cue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 22px;
+  margin-top: 1.7em;
+}
+.b-cap .b-cue { max-width: none; font-size: 14.5px; }
+.b-cue > span::before {
+  content: "";
+  display: inline-block;
+  width: 1px;
+  height: 26px;
+  margin-right: 12px;
+  vertical-align: middle;
+  background: linear-gradient(var(--muted), transparent);
+  animation: b-drip 2.2s ease-in-out infinite;
+  transform-origin: top;
+}
+@keyframes b-drip {
+  0%, 100% { transform: scaleY(0.35); opacity: 0.5; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+
+/* Shots 2 and 3: caption in a left column, subject on the right. */
+.b-cap-2, .b-cap-3 {
+  top: 50%;
+  left: var(--pad);
+  width: min(30vw, 440px);
+  translate: 0 -50%;
+}
+.b-cap-3 { width: min(27vw, 400px); }
+.b-cap-2 h2, .b-cap-3 h2 { font-size: clamp(30px, 2.5vw + 6px, 52px); }
+
+/* Shot 4: caption across the top, the desktop below. */
+.b-cap-4 {
+  top: clamp(84px, 12vh, 132px);
+  left: var(--pad);
+  right: var(--pad);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: clamp(24px, 5vw, 80px);
+  align-items: start;
+}
+.b-cap-4 h2 { font-size: clamp(30px, 2.7vw + 6px, 56px); }
+.b-cap-4 h2 + div { margin-top: 0.5em; }
+
+/* Shot 5: under the icon, centred. */
+.b-cap-5 {
+  top: calc(36% + clamp(80px, 10.5vh, 124px));
+  left: var(--pad);
+  right: var(--pad);
+  text-align: center;
+}
+.b-cap-5 h2 { font-size: clamp(30px, 3vw + 6px, 58px); }
+.b-cap-5 p { margin-inline: auto; }
+.b-cap-5 .b-cue { justify-content: center; }
+
+/* The six snap templates; the one in use is lit. */
+.b-layouts {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  max-width: 340px;
+  margin: 1.4em 0 1em;
+}
+.b-layouts span {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  background: rgb(243 236 220 / 0.06);
+  transition: background-color 0.3s ease;
+}
+.b-layouts i {
+  position: absolute;
+  border-radius: 2.5px;
+  background: rgb(243 236 220 / 0.26);
+  transition: background-color 0.3s ease;
+}
+.b-layouts span[data-on] { background: rgb(158 140 252 / 0.2); }
+.b-layouts span[data-on] i { background: var(--accent); }
+
+/* The five pin modes; lit as windows leave the app. */
+.b-pins {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin-top: 1em;
+  font-size: 13.5px;
+}
+.b-pins li {
+  padding: 3px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  transition: color 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
+}
+.b-pins li[data-on] {
+  border-color: var(--accent);
+  background: rgb(158 140 252 / 0.14);
+  color: var(--paper);
+}
+
+/* ---------------- Slate: shot, name, timecode. It is the progress bar. ---------------- */
+.b-slate {
+  position: absolute;
+  z-index: 5;
+  left: var(--pad);
+  bottom: clamp(16px, 3.4vh, 30px);
+  display: grid;
+  grid-template-columns: auto auto auto;
+  gap: 0 16px;
+  align-items: baseline;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.b-slate-n b { color: var(--paper); font-weight: 500; }
+.b-slate-name { color: var(--paper); }
+.b-slate-tc {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.b-slate-bar {
+  grid-column: 1 / -1;
+  height: 2px;
+  margin-top: 8px;
+  background: var(--line);
+  overflow: hidden;
+}
+.b-slate-bar i {
+  display: block;
+  height: 100%;
+  background: var(--paper);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+}
+
+/* ---------------- Narrow screens: caption above, subject below ---------------- */
+@media (max-width: 860px) {
+  .b-take { height: 760vh; }
+  .b-cap-1 { top: 76px; }
+  .b-cap-1 .b-lede { margin-top: 1em; }
+  .b-cue > span { display: none; }
+  .b-cap-2, .b-cap-3, .b-cap-4 {
+    top: 72px;
+    left: var(--pad);
+    right: var(--pad);
+    width: auto;
+    translate: none;
+    display: block;
+  }
+  .b-cap-2 p + p, .b-cap-3 .b-note { display: none; }
+  .b-cap-4 h2 + div { margin-top: 1em; }
+  .b-layouts { max-width: 280px; margin-bottom: 0; }
+  .b-cap p { font-size: 15px; line-height: 1.65; }
+  .b-slate { bottom: 14px; gap: 0 12px; font-size: 12px; }
+}
+
+/* ---------------- Reduced motion: the take becomes five still frames ---------------- */
+.b-take[data-static] { height: auto; padding: 96px var(--pad) 40px; }
+.b-take[data-static] .b-stage {
+  position: static;
+  height: auto;
+  overflow: visible;
+  display: grid;
+  gap: clamp(56px, 9vh, 110px);
+}
+.b-take[data-static] :is(.b-cam, .b-glow, .b-slate, .b-icon) { display: none; }
+.b-take[data-static] .b-cap {
+  position: static;
+  inset: auto;
+  width: auto;
+  translate: none;
+  opacity: 1;
+  visibility: visible;
+  display: block;
+  text-align: left;
+}
+.b-take[data-static] .b-cap-5 { text-align: center; }
+.b-still {
+  position: relative;
+  margin-top: 28px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--ink-2);
+  overflow: hidden;
+}

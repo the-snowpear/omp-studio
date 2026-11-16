@@ -3,15 +3,16 @@ import type { JsonValue } from "@omp-studio/client-contract";
 import type { ChangesDiffHunk, ChangesDiffLine } from "./ChangesPanel";
 import type { AssistantSegment, ToolView } from "./conversationViewModel";
 import { jsonRecord, jsonString } from "./conversationViewModel";
-import { toolFields, toolKind } from "./toolMeta";
+import { appliedEditResults, editDiffRows, toolFields, toolFilePath, toolKind, toolResultFields } from "./toolMeta";
 
 type FileEditKind = "write" | "edit" | "ast_edit";
 type DiffMark = "+" | "-" | " ";
-type DiffBlock = { readonly kind: FileEditKind; readonly lines: readonly ChangesDiffLine[]; readonly truncated?: boolean };
+type DiffBlock = { readonly kind: FileEditKind; readonly lines: readonly ChangesDiffLine[]; readonly truncated?: boolean; readonly partial?: boolean };
 
 export type SessionFileDiff = {
   readonly hunks: readonly ChangesDiffHunk[];
   readonly truncated?: boolean;
+  readonly partial?: boolean;
 };
 
 const PATCH_LINE_CAP = 500;
@@ -34,8 +35,7 @@ function normalizedPath(path: string | undefined): string | undefined {
 }
 
 function toolPath(tool: ToolView): string | undefined {
-  const fields = toolFields(tool);
-  return normalizedPath(jsonString(fields.path) ?? jsonString(fields.resolvedPath) ?? jsonString(fields.target));
+  return normalizedPath(toolFilePath(tool));
 }
 
 function markOf(value: unknown): DiffMark {
@@ -47,21 +47,7 @@ function diffLine(mark: DiffMark, oldLn: string, newLn: string, text: string): C
 }
 
 function editLines(diff: JsonValue | undefined): ChangesDiffLine[] {
-  const lines: ChangesDiffLine[] = [];
-  if (Array.isArray(diff)) {
-    for (const row of diff) {
-      if (!Array.isArray(row)) continue;
-      lines.push(diffLine(markOf(row[0]), String(row[1] ?? ""), String(row[2] ?? ""), String(row[3] ?? "")));
-    }
-    return lines;
-  }
-  if (typeof diff !== "string" || diff.length === 0) return lines;
-  for (const line of diff.split("\n")) {
-    const match = /^([ +\-])(\d*)\|(.*)$/u.exec(line);
-    if (match === null) lines.push(diffLine(" ", "", "", line));
-    else lines.push(diffLine(markOf(match[1]), match[2] ?? "", match[2] ?? "", match[3] ?? ""));
-  }
-  return lines;
+  return editDiffRows(diff).map(row => ({ kind: "row", ...row }));
 }
 
 const GROUPED_HEADER_RE = /^(#+)\s+(.*)$/u;
@@ -109,7 +95,7 @@ function contentLines(content: JsonValue | undefined): string[] | undefined {
 
 function addBlock(files: Map<string, DiffBlock[]>, path: string | undefined, block: DiffBlock): void {
   const normalized = normalizedPath(path);
-  if (normalized === undefined || block.lines.length === 0) return;
+  if (normalized === undefined) return;
   const blocks = files.get(normalized);
   if (blocks === undefined) files.set(normalized, [block]);
   else blocks.push(block);
@@ -145,9 +131,22 @@ export function sessionFileDiffs(segments: readonly AssistantSegment[]): Readonl
   for (const segment of segments) {
     if (segment.type !== "batch") continue;
     for (const tool of segment.tools) {
-      if (tool.status !== "succeeded") continue;
       const kind = editKind(tool);
       if (kind === undefined) continue;
+      const applied = appliedEditResults(tool);
+      if (applied !== undefined) {
+        for (const file of applied.files) {
+          const lines = editLines(file.fields.diff);
+          addBlock(files, file.path, {
+            kind,
+            lines: lines.slice(0, PATCH_LINE_CAP),
+            ...(tool.truncated || lines.length > PATCH_LINE_CAP ? { truncated: true } : {}),
+            ...(applied.partial ? { partial: true } : {}),
+          });
+        }
+        continue;
+      }
+      if (tool.status !== "succeeded" || tool.result?.isError === true) continue;
       if (kind === "ast_edit") {
         addAstEdit(files, tool);
         continue;
@@ -155,7 +154,7 @@ export function sessionFileDiffs(segments: readonly AssistantSegment[]): Readonl
       const fields = toolFields(tool);
       const path = toolPath(tool);
       if (kind === "edit") {
-        addBlock(files, path, { kind, lines: editLines(fields.diff), ...(tool.truncated ? { truncated: true } : {}) });
+        addBlock(files, path, { kind, lines: editLines(toolResultFields(tool).diff ?? fields.diff), ...(tool.truncated ? { truncated: true } : {}) });
         continue;
       }
       const raw = contentLines(fields.content);
@@ -171,12 +170,14 @@ export function sessionFileDiffs(segments: readonly AssistantSegment[]): Readonl
 
   const result = new Map<string, SessionFileDiff>();
   for (const [path, blocks] of files) {
+    const visibleBlocks = blocks.filter(block => block.lines.length > 0);
     result.set(path, {
-      hunks: blocks.map((block, index) => ({
-        hunkLabel: `@@ ${BLOCK_LABEL[block.kind]} · ${index + 1}/${blocks.length} @@`,
+      hunks: visibleBlocks.map((block, index) => ({
+        hunkLabel: `@@ ${BLOCK_LABEL[block.kind]} · ${index + 1}/${visibleBlocks.length} @@`,
         lines: block.lines,
       })),
       ...(blocks.some((block) => block.truncated === true) ? { truncated: true } : {}),
+      ...(blocks.some((block) => block.partial === true) ? { partial: true } : {}),
     });
   }
   return result;

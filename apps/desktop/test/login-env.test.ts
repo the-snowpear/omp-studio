@@ -144,6 +144,16 @@ test("the process environment is resolved once, however many callers ask", async
 
 const posixOnly = { skip: process.platform === "win32" ? "POSIX login shells" : false } as const;
 
+test("Linux application-menu launches discover user tools without assuming Homebrew or generated locales", async () => {
+  const result = await resolveLoginEnvironment({
+    platform: "linux", env: { PATH: "/usr/bin:/bin", SHELL: "/bin/bash" }, homedir: "/home/dev",
+    run: async () => ({ stdout: `${MARK}{"PATH":"/home/dev/.nvm/bin:/usr/bin:/bin"}${MARK}`, timedOut: false }),
+  });
+  assert.equal(result.status, "resolved");
+  assert.equal(result.env.LANG, "C.UTF-8");
+  assert.equal(result.env.PATH, "/home/dev/.nvm/bin:/usr/bin:/bin:/usr/local/bin:/home/dev/.bun/bin:/home/dev/.local/bin:/home/dev/.cargo/bin");
+});
+
 async function fakeHome(profile: string): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), "omp-login-env-"));
   await writeFile(join(home, ".profile"), profile);

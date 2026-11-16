@@ -22,7 +22,7 @@ test("desktop and SSH file URLs stream ranges and retain the originating target"
   const tail = await resources.response(new Request(lease.url, { headers: { Range: "bytes=-3" } }), "null");
   assert.equal(await tail.text(), "xyz"); assert.ok(targets.every(target => target === "ssh-server"));
   const iterator = resources.bytes(lease.id); resources.release(lease.id, 12);
-  await assert.rejects(iterator.next(), /关闭/);
+  await assert.rejects(iterator.next(), /closed/);
   assert.equal((await resources.response(new Request(lease.url), "null")).status, 404);
 });
 
@@ -39,4 +39,24 @@ test("closing an Office view also aborts its converted PDF stream", async () => 
     resources.release(lease.id, 12);
     await assert.rejects(async () => { while (!(await reader.read()).done) {} }, /abort/i);
   } finally { resources.dispose(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("system file resources use absolute paths on the originating SSH Host", async () => {
+  const requests: { queryName: string; input: Record<string, unknown> }[] = [], targets: (string | null)[] = [];
+  const resources = new FileResources(target => {
+    targets.push(target);
+    return { query: async (request: { queryName: string; input: Record<string, unknown> }) => {
+      requests.push(request);
+      return { ok: true, queryName: request.queryName, result: request.queryName === "fs.file.inspect"
+        ? { id: "outside", path: "/home/demo/file.png", name: "file.png", size: 5, version: "v1", writable: true, mime: "image/png" }
+        : { data: Buffer.from("image").toString("base64"), bytes: 5 } };
+    } } as Pick<ClientTransport, "query">;
+  });
+  const lease = await resources.open({ targetId: "ssh", workspaceId: "", path: "/home/demo/file.png", source: "system" }, 1);
+  assert.equal(await (await resources.response(new Request(lease.url), "null")).text(), "image");
+  assert.deepEqual(requests.map(request => request.queryName), ["fs.file.inspect", "fs.file.readChunk"]);
+  assert.ok(requests.every(request => request.input.path === "/home/demo/file.png" && !("workspaceId" in request.input)));
+  assert.ok(targets.every(target => target === "ssh"));
+  resources.releaseOwner(1);
+  assert.equal((await resources.response(new Request(lease.url), "null")).status, 404);
 });

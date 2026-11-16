@@ -7,6 +7,11 @@ import { ModelCompactionPane } from "./models/ModelCompactionPane";
 import { ModelPresetsPane } from "./models/ModelPresetsPane";
 import { SessionOptionsPane } from "./models/SessionOptionsPane";
 import { AccountStatusPane } from "./models/AccountStatusPane";
+import { NativeModelAccessPane } from "./models/NativeModelAccessPane";
+import { ModelSystemTemplates, ModelSystemTemplateInspector } from "./models/ModelSystemTemplates";
+import { modelServiceAvailable, useModelAuth } from "./models/useModelAuth";
+import { ModelAvailabilityStrip } from "./models/ModelAvailabilityStrip";
+import { previewModelAvailability } from "./preview/modelServicesPreview";
 import { loadRuntimeModels } from "./models/runtimeModels";
 import { RuntimeCredentials, VisionModelStatus } from "./models/RuntimeCredentials";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +27,7 @@ import { hostErrorMessage, waitReceipt } from "./hostError";
 import { pageDir, pagePhaseClass, useDeferredKey, useDeferredPresence, useOverlayPresence } from "./pageTransition";
 import { extractYamlMapEntry, mergeYamlMapEntry, parseStructured, readYamlMapEntryNode, StructuredEditor } from "./structured-editor";
 import { usePreviewMode } from "./preview/PreviewContext";
-import { MODEL_API_TYPES, MODEL_AUTH_TYPES, createPreviewModelConfig } from "./preview/modelConfigFixtures";
+import { MODEL_API_TYPES, getModelAuthTypes, createPreviewModelConfig } from "./preview/modelConfigFixtures";
 import { chooseFetchedModelCandidate, pickedCount, setAllPicked, togglePicked } from "./models/fetchedModels";
 import { draftProviderYamlNode, nestedProviderYamlNode, serializeModelsYmlNode } from "./models/providerYaml";
 import { SubagentsPanel } from "./SubagentsPanel";
@@ -34,7 +39,7 @@ import { ROLE_ICONS, ROLE_TINTS, groupModelsByProvider, fmtK } from "./models/mo
 import { type Draft, type ModelEditState, type ModelRoleDraft, type ModelsTab, type TestResultView } from "./models/config/types";
 import { mergeProviderOrder, permuteVisible, readProviderOrder, sameOrder, sortProviders, writeProviderOrder } from "./models/config/providerOrder";
 import { applyRoleSelector, assignedRoleIds, blankCustomForm, blankDraft, blankOverrideForm, draftFromPreset, draftFromProvider, draftsEqual, editorTestSecret, previewProviderFromDraft, providerUpsertFromDraft, readModelRoles, roleAssignDiff, roleAssignModCount, rolePrimaryUpdates, roleSelector, roleThinkingUi, rolesEqual, sameStringList, withPreviewLogin, withRoleModel, withRolePrimaryUpdates } from "./models/config/drafts";
-import { SOURCE_GROUP, STATUS_META, formatProviderStatusDetail, formatRoleDesc } from "./models/config/presentation";
+import { SOURCE_GROUP, STATUS_META, formatPresetDesc, formatPresetGroup, formatPresetName, formatProviderStatusDetail, formatRoleDesc } from "./models/config/presentation";
 import { runProbe, runTest, runWrite } from "./models/config/commands";
 import { AuthTypeSelect, BrandMark, DiscoveryResultBlock, ModelCaps, ProviderTestRow, confirmDiscardDirty } from "./models/config/ProviderControls";
 import { RoleAssignControl, RoleModelPicker, RoleThinkingSeg } from "./models/config/RoleControls";
@@ -59,6 +64,7 @@ const mcTabRank = (tab: McTab): number => Object.keys(TAB_BUTTON_ID).indexOf(tab
 
 export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailable = false, capabilities }: { capabilities?: ClientBootstrap["capabilityManifest"] | undefined; client: StudioClient; sessionId?: string | undefined; workspaceId?: string | undefined; runtimeAvailable?: boolean }) {
   const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [, updatePricingClock] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(() => updatePricingClock(tick => tick + 1), 60_000);
@@ -79,9 +85,11 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const tabPanelMotion = (id: McTab) => (shownTab === id && tabMotionLive.current
     ? { className: pagePhaseClass(tabPhase), "data-page-axis": "x", "data-page-dir": pageDir(tabDir) }
     : {});
+  const modelContext = useMemo(() => ({ client, sessionId, available: runtimeAvailable, capabilities }), [client, sessionId, runtimeAvailable, capabilities]);
+  const nativeAuth = useModelAuth(modelContext, preview, shownTab === "providers" || shownTab === "accounts" || shownTab === "roles");
   const [runtimeModels, setRuntimeModels] = useState<AvailableModelRecord[]>([]);
   const nativeLoad = useRef(0);
-  const [data, setData] = useState<ModelConfigReadModel | null>(preview ? createPreviewModelConfig() : null);
+  const [data, setData] = useState<ModelConfigReadModel | null>(preview ? createPreviewModelConfig(zh) : null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
@@ -108,7 +116,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [roleAssignDraft, setRoleAssignDraft] = useState<Record<string, string[]>>({});
   const [agentIntent, setAgentIntent] = useState<string | undefined>(undefined);
   const [accountPoolsDirty, setAccountPoolsDirty] = useState(false);
-  const [agentCount, setAgentCount] = useState(preview ? createPreviewAgentDefinitions().agents.length : 0);
+  const [systemTemplatesDirty, setSystemTemplatesDirty] = useState(false);
+  const [agentCount, setAgentCount] = useState(preview ? createPreviewAgentDefinitions(undefined, zh).agents.length : 0);
   const [testResult, setTestResult] = useState<TestResultView | null>(null);
   const [testing, setTesting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -119,6 +128,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [probeResult, setProbeResult] = useState<ModelDiscoveryResult | null>(null);
   const [probing, setProbing] = useState(false);
   const [catalogUpdating, setCatalogUpdating] = useState(false);
+  const [availabilityRefreshing, setAvailabilityRefreshing] = useState(false);
   const [createRoleOpen, setCreateRoleOpen] = useState(false);
   const [newRole, setNewRole] = useState({ id: "", name: "", desc: "" });
   const [fallbackDraft, setFallbackDraft] = useState<string[] | null>(null);
@@ -148,8 +158,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
 
   const refresh = useCallback(async () => {
     if (preview) {
-      setData(createPreviewModelConfig());
-      setAgentCount(createPreviewAgentDefinitions().agents.length);
+      setData(createPreviewModelConfig(zh));
+      setAgentCount(createPreviewAgentDefinitions(undefined, zh).agents.length);
       setLoadError(null);
       return;
     }
@@ -165,7 +175,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       setLoadError(hostErrorMessage(error, "models.get failed"));
       setData(null);
     }
-  }, [client, preview]);
+  }, [client, preview, zh]);
 
   useEffect(() => {
     void refresh();
@@ -173,12 +183,12 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   useEffect(() => {
     const generation = ++nativeLoad.current;
     setRuntimeModels([]);
-    if (preview || (tab !== "roles" && tab !== "websearch")) return;
+    if (preview || (tab !== "roles" && tab !== "websearch" && tab !== "providers") || !runtimeAvailable) return;
     void loadRuntimeModels(client, () => generation === nativeLoad.current)
       .then(rows => { if (generation === nativeLoad.current) setRuntimeModels(rows); })
       .catch(() => { /* Disk configuration remains usable when Runtime is unavailable. */ });
     return () => { nativeLoad.current++; };
-  }, [client, preview, tab, data]);
+  }, [client, preview, tab, data, runtimeAvailable, sessionId]);
 
 
   const previewRef = useRef(preview);
@@ -278,7 +288,13 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   }, [data, roleId, roleDraft]);
 
   const providers = data?.providers ?? [];
-  const roles = data?.roles ?? [];
+  const roles = useMemo<ModelRoleRecord[]>(() => (data?.roles ?? []).map(role => {
+    if (role.issue?.kind === "model-missing" && runtimeModels.some(model => model.selector === role.primary)) {
+      const { issue: _cacheIssue, ...nativeAvailableRole } = role;
+      return nativeAvailableRole;
+    }
+    return role;
+  }), [data, runtimeModels]);
   const [webSearchReadyCount, setWebSearchReadyCount] = useState(0);
   const presets = data?.presets ?? [];
   const modelEditListProvider = modelEditView?.providerId
@@ -382,14 +398,14 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const ymlCardsDirty = providerFormDirty || roleFormDirty || modelsYmlEdited || configYmlEdited || fallbackDirty;
 
   useEffect(() => {
-    setModelConfigDirty(ymlCardsDirty || accountPoolsDirty);
+    setModelConfigDirty(ymlCardsDirty || accountPoolsDirty || systemTemplatesDirty);
     return () => {
       setModelConfigDirty(false);
     };
-  }, [ymlCardsDirty, accountPoolsDirty]);
+  }, [ymlCardsDirty, accountPoolsDirty, systemTemplatesDirty]);
 
   const mutateLocal = (recipe: (current: ModelConfigReadModel) => ModelConfigReadModel) => {
-    setData((current) => recipe(current ?? createPreviewModelConfig()));
+    setData((current) => recipe(current ?? createPreviewModelConfig(zh)));
   };
 
   const mergeContentHash = (hash: string | undefined) => {
@@ -827,43 +843,18 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       if (marks) toast(t("modelConfig.toastDemoLogin"));
       return;
     }
-    if (!data?.loginAvailable) {
-      toast(t("modelConfig.toastTerminalLogin", { providerId }));
+    if (!nativeAuth.canLogin) {
+      toast(resolvedLanguage === "zh" ? "此 Runtime 未提供原生 GUI 登录与风险确认能力。现有凭据保持不变。" : "This Runtime does not provide native GUI login and risk challenges. Existing credentials are unchanged.");
       return;
     }
     setBusy(true);
     try {
-      const result = await runWrite(client, "models.login.start", { providerId, ...(loginId ? { loginId } : {}) });
-      toast(result.message ?? t("modelConfig.toastLoginCompleted"));
-      await refresh();
+      if (await nativeAuth.login(loginId ?? providerId)) {
+        toast(t("modelConfig.toastLoginCompleted"));
+        await refresh();
+      }
     } catch (error) {
       toast(hostErrorMessage(error, t("modelConfig.toastLoginFailed", { providerId })));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const logoutProvider = async (providerId: string) => {
-    if (preview) {
-      mutateLocal((current) => ({
-        ...current,
-        loginProviders: current.loginProviders.map((item) => item.id === providerId ? { ...item, authenticated: false } : item),
-        providers: current.providers.map((item) => {
-          if (item.id !== providerId) return item;
-          const { account: _dropped, ...auth } = item.auth;
-          return { ...item, statusDetail: t("modelConfig.statusNotLoggedIn"), auth: { ...auth, hasSecret: false } };
-        }),
-      }));
-      if (marks) toast(t("modelConfig.toastDemoLogout"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const result = await runWrite(client, "models.login.logout", { providerId });
-      toast(result.message ?? t("modelConfig.toastLogoutNamed", { providerId }));
-      await refresh();
-    } catch (error) {
-      toast(hostErrorMessage(error, t("modelConfig.toastLogoutFailed")));
     } finally {
       setBusy(false);
     }
@@ -968,6 +959,27 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       toast(hostErrorMessage(error, t("modelConfig.toastRefreshFailed")));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /* Current Runtime registry first; without a Runtime only the CLI cache for later sessions moves. */
+  const refreshAvailability = async () => {
+    if (preview) { if (marks) toast(t("modelConfig.toastDemoNoRefresh")); return; }
+    setAvailabilityRefreshing(true);
+    try {
+      if (runtimeAvailable && sessionId && modelServiceAvailable(modelContext, "models.available.refresh")) {
+        const handle = await client.command("models.available.refresh", { sessionId });
+        await waitReceipt(client, handle.requestId, 120_000);
+        toast(zh ? "已让当前 Runtime 重新读取授权目录" : "The current Runtime re-read its authorized models");
+      } else {
+        const result = await runWrite(client, "models.discovery.refresh", {});
+        toast(result.message ?? (runtimeAvailable ? t("modelConfig.toastRescannedDiscovery") : zh ? "已更新本地 CLI 缓存；之后的会话会读取它" : "Updated the CLI cache for later sessions"));
+      }
+      await refresh();
+    } catch (error) {
+      toast(hostErrorMessage(error, t("modelConfig.toastRefreshFailed")));
+    } finally {
+      setAvailabilityRefreshing(false);
     }
   };
 
@@ -1138,7 +1150,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const usable = useMemo(() => {
     const models = data?.availableModels ?? [];
     const merged = new Map(models.filter(model => (preview && !providers.some(provider => provider.id === model.provider)) || providers.some(provider => provider.id === model.provider && provider.enabled && provider.status !== "disabled")).map(model => [model.selector, model]));
-    for (const model of runtimeModels) if (!providers.some(provider => provider.id === model.provider && !provider.enabled)) merged.set(model.selector, { ...model, ...merged.get(model.selector) });
+    for (const model of runtimeModels) if (!providers.some(provider => provider.id === model.provider && !provider.enabled)) merged.set(model.selector, { ...merged.get(model.selector), ...model });
     return [...merged.values()];
   }, [data, providers, runtimeModels, preview]);
   const availableBySelector = useMemo(() => {
@@ -1183,7 +1195,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         }
       }
     }
-    for (const model of runtimeModels) map.set(model.selector, { ...model, ...map.get(model.selector) });
+    for (const model of runtimeModels) map.set(model.selector, { ...map.get(model.selector), ...model });
     return map;
   }, [data, providers, runtimeModels]);
 
@@ -1245,9 +1257,14 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         <section id="mcPanelAccounts" role="tabpanel" aria-labelledby="mcTabAccounts" hidden={shownTab !== "accounts"} {...tabPanelMotion("accounts")}>
           <AccountStatusPane sessionId={sessionId} standalone visible={shownTab === "accounts"} client={client} available={runtimeAvailable} capabilities={capabilities} />
           <SessionOptionsPane client={client} sessionId={sessionId} available={runtimeAvailable} capabilities={capabilities} visible={shownTab === "accounts"} />
-          <RuntimeCredentials client={client} preview={preview} />
+          <NativeModelAccessPane context={modelContext} auth={nativeAuth} visible={shownTab === "accounts"} accounts onChanged={() => { void refresh(); }} />
         </section>
         <section id="mcPanelProviders" role="tabpanel" aria-labelledby="mcTabProviders" hidden={shownTab !== "providers"} {...tabPanelMotion("providers")}>
+          {!editor ? <ModelAvailabilityStrip
+            availability={preview ? previewModelAvailability(data?.availableModels.length ?? 0) : data?.availability}
+            refreshing={availabilityRefreshing} canRefresh={preview || !!data} runtimeRefresh={preview || runtimeAvailable}
+            demo={preview && marks} onRefresh={() => void refreshAvailability()} /> : null}
+          {!editor ? <NativeModelAccessPane context={modelContext} auth={nativeAuth} visible={shownTab === "providers"} onChanged={() => { void refresh(); }} /> : null}
           <div className={editorLive ? `mc-view ${pagePhaseClass(editorPhase)}` : "mc-view"} data-page-dir={pageDir(editorDir)}>
           {editor ? (
             <>
@@ -1277,13 +1294,13 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                         if (!items.length) return null;
                         return (
                           <div key={group.group}>
-                            <div className="preset-group-label">{group.group} · {items.length}</div>
+                            <div className="preset-group-label">{formatPresetGroup(group.group, resolvedLanguage === "zh")} · {items.length}</div>
                             <div className="preset-grid">
                               {items.map((item) => (
                                 <button type="button" key={item.id} className={`preset-item${presetSel === item.id ? " sel" : ""}`} onClick={() => { setProviderBaseline(null); setEditor(draftFromPreset(item)); setPresetSel(item.id); }}>
-                                  <span className="pi-name">{hasBrand(item.id) ? <Brand id={item.id} extra="sm" /> : null}{item.name}{item.popular ? <span className="chip purple xs">{t("modelConfig.popularBadge")}</span> : null}{item.local ? <span className="chip blue xs">{t("modelConfig.localBadge")}</span> : null}</span>
-                                  <span className="pi-desc">{item.desc}</span>
-                                  <span className="pi-desc">{item.auth.map((auth) => MODEL_AUTH_TYPES.find((entry) => entry.id === auth)?.label ?? auth).join(" · ")}</span>
+                                  <span className="pi-name">{hasBrand(item.id) ? <Brand id={item.id} extra="sm" /> : null}{formatPresetName(item.id, item.name, resolvedLanguage === "zh")}{item.popular ? <span className="chip purple xs">{t("modelConfig.popularBadge")}</span> : null}{item.local ? <span className="chip blue xs">{t("modelConfig.localBadge")}</span> : null}</span>
+                                  <span className="pi-desc">{formatPresetDesc(item.id, item.desc, resolvedLanguage === "zh")}</span>
+                                  <span className="pi-desc">{item.auth.map((auth) => getModelAuthTypes(zh).find((entry) => entry.id === auth)?.label ?? auth).join(" · ")}</span>
                                 </button>
                               ))}
                             </div>
@@ -1330,32 +1347,33 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                 />
                 <div className="auth-box">
                   {editor.authType === "oauth" ? (() => {
-                    const login = data?.loginProviders.find((item) => item.id === editor.id);
+                    const login = preview ? data?.loginProviders.find(item => item.id === editor.id) : nativeAuth.providers?.find(item => item.id === editor.id);
                     const authed = Boolean(login?.authenticated);
                     const account = marks ? data?.providers.find((item) => item.id === editor.id)?.auth.account : undefined;
                     return (
                       <>
                         <div className="auth-status">
-                          <Icon name={authed ? "check" : data?.loginAvailable ? "key" : "info"} extra="sm" />
+                          <Icon name={authed ? "check" : nativeAuth.canLogin ? "key" : "info"} extra="sm" />
                           <span>
                             {authed
                               ? <>{t("modelConfig.loginCompleted", { account: account ? ` ${account}` : ` ${t("modelConfig.localOauthCredential")}` })}</>
-                              : data?.loginAvailable
+                              : nativeAuth.canLogin
                                 ? t("modelConfig.loginPrompt")
-                                : <>{t("modelConfig.loginCliPrompt", { provider: editor.id || "provider" })}</>}
+                                : <>{resolvedLanguage === "zh" ? "原生 GUI 登录不可用；现有凭据保持不变。" : "Native GUI login unavailable; existing credentials are unchanged."}</>}
                           </span>
                           <span className={`chip ${authed ? "green" : "gray"} xs`}>{authed ? t("modelConfig.credentialValid") : t("modelConfig.notLoggedIn")}</span>
                         </div>
                         <div className="auth-actions">
-                          {login?.flows?.length ? <AppSelect aria-label="登录方式 / Login method" className="select" value={loginFlowByProvider[editor.id] ?? login.flows[0]!.id} disabled={busy} onChange={event => setLoginFlowByProvider(current => ({ ...current, [editor.id]: event.target.value }))}>{login.flows.map(flow => <option key={flow.id} value={flow.id}>{flow.name}</option>)}</AppSelect> : null}
-                          <button type="button" className={`btn small ${authed ? "outline" : "primary"}`} disabled={busy} onClick={() => void startLogin(editor.id, loginFlowByProvider[editor.id] ?? login?.flows?.[0]?.id)}>
+                          {preview && data?.loginProviders.find(item => item.id === editor.id)?.flows?.length ? <AppSelect aria-label={resolvedLanguage === "zh" ? "登录方式" : "Login method"} className="select" value={loginFlowByProvider[editor.id] ?? ""} disabled={busy} onChange={event => setLoginFlowByProvider(current => ({ ...current, [editor.id]: event.target.value }))}>{data.loginProviders.find(item => item.id === editor.id)?.flows?.map(flow => <option key={flow.id} value={flow.id}>{flow.name}</option>)}</AppSelect> : null}
+                          <button type="button" className={`btn small ${authed ? "outline" : "primary"}`} disabled={busy || !nativeAuth.canLogin || (!preview && !login?.available)} onClick={() => void startLogin(editor.id, loginFlowByProvider[editor.id])}>
                             <Icon name="key" extra="sm" />
                             {authed ? t("modelConfig.relogin") : t("modelConfig.login")}
                           </button>
                           {authed ? (
-                            <button type="button" className="btn small outline" disabled={busy} onClick={() => void logoutProvider(editor.id)}>{t("modelConfig.logout")}</button>
+                            <button type="button" className="btn small outline" disabled={busy} onClick={() => { if (!providerFormDirty || confirmDiscardDirty(t)) { setEditor(null); setTab("accounts"); } }}>{resolvedLanguage === "zh" ? "管理账户" : "Manage accounts"}</button>
                           ) : null}
                         </div>
+                        {nativeAuth.error ? <p role="alert" className="small">{nativeAuth.error}</p> : null}
                       </>
                     );
                   })() : null}
@@ -1588,8 +1606,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                 {modelsTab === "discovery" ? (
                   <div className="kv-list">
                     <div className="kv-row"><span className="k">Discovery Type</span><span className="v"><span className="chip-code">{editor.discoveryType}</span></span></div>
-                    <div className="kv-row"><span className="k">采用服务端 reasoning 配置</span><span className="v"><input type="checkbox" checked={editor.advertisedReasoning !== false} onChange={event => setEditor({ ...editor, advertisedReasoning: event.target.checked })} /><span className="tiny muted">读取 /v1/models 的 ladder、none 和 reasoning:false；关闭则沿用目录推断。</span></span></div>
-                    <div className="kv-row"><span className="k">Timeout（ms）</span><span className="v">
+                    <div className="kv-row"><span className="k">{resolvedLanguage === "zh" ? "采用服务端 reasoning 配置" : "Use server reasoning config"}</span><span className="v"><input type="checkbox" checked={editor.advertisedReasoning !== false} onChange={event => setEditor({ ...editor, advertisedReasoning: event.target.checked })} /><span className="tiny muted">{resolvedLanguage === "zh" ? "读取 /v1/models 的 ladder、none 和 reasoning:false；关闭则沿用目录推断。" : "Read ladder, none, and reasoning:false from /v1/models; when off, infer from the catalog."}</span></span></div>
+                    <div className="kv-row"><span className="k">{resolvedLanguage === "zh" ? "Timeout（ms）" : "Timeout (ms)"}</span><span className="v">
                       <input className="input mono" type="number" style={{ width: 120 }} value={editor.discoveryTimeoutMs ?? ""} onChange={(event) => {
                         const next = { ...editor };
                         if (event.target.value === "") delete next.discoveryTimeoutMs;
@@ -1918,13 +1936,13 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             </>
           )}
             {modelEditView && modelEditHost ? createPortal(
-              <ModelParametersDialog modelEditLeaving={modelEditLeaving} setModelEdit={setModelEdit} modelEditView={modelEditView} t={t} client={client} preview={preview} modelEditHost={modelEditHost} data={data} editor={editor} persistProviderDraft={persistProviderDraft} setEditor={setEditor} toast={toast} setModelsTab={setModelsTab} />
+              <ModelParametersDialog context={modelContext} availableModels={usable} modelEditLeaving={modelEditLeaving} setModelEdit={setModelEdit} modelEditView={modelEditView} t={t} client={client} preview={preview} modelEditHost={modelEditHost} data={data} editor={editor} persistProviderDraft={persistProviderDraft} setEditor={setEditor} toast={toast} setModelsTab={setModelsTab} />
             , document.body) : null}
           </div>
         </section>
 
         <section id="mcPanelRoles" role="tabpanel" aria-labelledby="mcTabRoles" hidden={shownTab !== "roles"} {...tabPanelMotion("roles")}>
-          <div className="mc-role-runtime"><Icon name="image" extra="sm" /><VisionModelStatus client={client} preview={preview} /></div>
+          <div className="mc-role-runtime"><Icon name="image" extra="sm" /><VisionModelStatus client={client} preview={preview} visible={shownTab === "roles"} /></div>
           <div className={roleLive ? `mc-view ${pagePhaseClass(rolePhase)}` : "mc-view"} data-page-dir={pageDir(roleDir)}>
           {roleDraft ? (
             <>
@@ -1997,7 +2015,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                   </div>
                 </div>
               </div>
-              <ModelCompactionPane client={client} context={{ sessionId, available: runtimeAvailable, capabilities }} visible={shownTab === "roles"} models={usable} providers={orderedProviders} initialSelector={roleDraft.primary} onSaved={refreshRoleModels} />
+              {roleDraft.id === "judge" ? <RuntimeCredentials client={client} preview={preview} controller={nativeAuth} visible={shownTab === "roles"} onChanged={refreshRoleModels} /> : <><ModelSystemTemplateInspector context={modelContext} selector={roleDraft.primary} visible={shownTab === "roles" && !!roleDraft.primary} /><ModelCompactionPane client={client} context={{ sessionId, available: runtimeAvailable, capabilities }} visible={shownTab === "roles"} models={usable} providers={orderedProviders} initialSelector={roleDraft.primary} onSaved={refreshRoleModels} /></>}
               <div className="mp-sec">
                 <h3>{t("modelConfig.fallbackChains")}</h3>
                 <p className="sec-desc">{t("modelConfig.fallbackChainsDesc")}</p>
@@ -2219,6 +2237,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             </>
           )}
           </div>
+          <ModelSystemTemplates context={modelContext} visible={shownTab === "roles" && !roleDraft} models={usable} onDirty={setSystemTemplatesDirty} onSaved={() => { void refresh(); }} />
 </section>
         <section id="mcPanelSubagents" role="tabpanel" aria-labelledby="mcTabSubagents" hidden={shownTab !== "subagents"} {...tabPanelMotion("subagents")}>
           <SubagentsPanel
@@ -2243,7 +2262,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
               client={client}
               preview={preview}
               webSearch={data.webSearch}
-              loginAvailable={data.loginAvailable}
+              runtimeAvailable={runtimeAvailable}
+              capabilities={capabilities}
+              loginAvailable={nativeAuth.canLogin}
               onSaved={() => void refresh()}
               onPreviewSave={(next) => mutateLocal((current) => ({ ...current, webSearch: next }))}
             />

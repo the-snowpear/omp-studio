@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useI18n } from "../i18n";
 import { createPortal } from "react-dom";
 import { Icon } from "../icons";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -18,7 +19,9 @@ export function UserMessageTreeConfirmDialog({
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
 }): ReactNode {
-  const copy = userMessageTreeConfirmCopy(kind);
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const copy = userMessageTreeConfirmCopy(kind, zh);
   const { marks } = usePreviewMode();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -44,13 +47,13 @@ export function UserMessageTreeConfirmDialog({
             <h2 id="userMessageTreeConfirmTitle">{copy.title}</h2>
             <p className="create-branch-sub">{copy.body}</p>
           </div>
-          <button type="button" className="icon-btn" aria-label="关闭" onClick={onCancel}><Icon name="x" /></button>
+          <button type="button" className="icon-btn" aria-label={zh ? "关闭" : "Close"} onClick={onCancel}><Icon name="x" /></button>
         </div>
         <div className="create-project-body">
           <p className="create-branch-hint">{preview && marks ? copy.hintPreview : copy.hint}</p>
         </div>
         <div className="create-project-foot">
-          <button type="button" className="btn outline" onClick={onCancel}>取消</button>
+          <button type="button" className="btn outline" onClick={onCancel}>{zh ? "取消" : "Cancel"}</button>
           <button type="button" className="btn primary" autoFocus onClick={onConfirm}>{copy.action}</button>
         </div>
       </section>

@@ -1,35 +1,12 @@
 /** Native kind-role migration with the pinned Runtime's defaults; Host reads without writing user configuration. */
 function isRecord(value: unknown): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value); }
+import { BUILTIN_MODEL_CATALOG } from "./model-catalog.generated.js";
 export const MODEL_ROLE_PRIORITIES = {
-  "web": [
-    "web/parallel",
-    "web/hosted",
-    "web/exa",
-    "web/firecrawl",
-    "web/searxng",
-    "web/startpage",
-    "web/duckduckgo",
-    "web/ecosia",
-    "web/google",
-    "web/mojeek",
-    "web/public"
-  ],
-  "image": [
-    "openai/gpt-image-2",
-    "openai-codex/gpt-image-2",
-    "google-antigravity/gemini-3-pro-image",
-    "xai/grok-imagine-image",
-    "xai-oauth/grok-imagine-image",
-    "openrouter/google/gemini-3-pro-image",
-    "google/gemini-3-pro-image",
-    "deepinfra/black-forest-labs/FLUX-2-pro",
-    "factory-droid/gpt-image-2.5-sunburst",
-    "factory-droid/gpt-image-2.5-flare",
-    "factory-droid/gemini-3-pro-image-preview"
-  ]
+  web: [...(BUILTIN_MODEL_CATALOG.roleDefaults?.web ?? [])],
+  image: [...(BUILTIN_MODEL_CATALOG.roleDefaults?.image ?? [])],
 };
 /** Pure search engines, including paid engines available for explicit legacy selections. */
-export const REGISTERED_SEARCH_ENGINES = ["perplexity","zai","exa","tinyfish","keenable","jina","kagi","tavily","firecrawl","brave","deepseek","kimi","parallel","synthetic","ollama","searxng","duckduckgo","google","ecosia","startpage","mojeek","public"];
+export const REGISTERED_SEARCH_ENGINES = BUILTIN_MODEL_CATALOG.entries.filter(model => model.provider === "web" && model.kind === "search").map(model => model.id);
 function isRegisteredSearchEngine(id: string): boolean { return REGISTERED_SEARCH_ENGINES.includes(id); }
 const MODEL_PRIO = MODEL_ROLE_PRIORITIES;
 export function migrateModelRoleConfig(source: unknown): Record<string, unknown> {

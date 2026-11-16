@@ -7,7 +7,7 @@ const now = Date.now();
 const hub = buildPreviewHub(now);
 export const PREVIEW_BACKGROUND_MAIN_AGENT_ID = "main";
 export const PREVIEW_BACKGROUND_JOB_AGENTS: StudioJobAgentLink[] = [];
-const commands = ["job-91", "job-87", "job-83", "job-77"].map(id => hub.jobs.find(job => job.id === id)!);
+const commands = ["job-82", "job-91", "job-87", "job-83", "job-77"].map(id => hub.jobs.find(job => job.id === id)!);
 export const PREVIEW_BACKGROUND_JOBS: StudioJobSnapshot[] = commands.map((job, index) => {
   const terminal = job.status !== "running" && job.status !== "queued";
   const end = now - (index + 1) * 30000;
@@ -15,13 +15,14 @@ export const PREVIEW_BACKGROUND_JOBS: StudioJobSnapshot[] = commands.map((job, i
     jobId: job.id as StudioJobSnapshot["jobId"],
     generation: 1 as StudioJobSnapshot["generation"],
     ownerAgentId: PREVIEW_BACKGROUND_MAIN_AGENT_ID as StudioJobSnapshot["ownerAgentId"],
-    type: "bash",
+    type: job.type,
     label: job.label,
     status: job.status,
     startedAt: new Date((terminal ? end : now) - job.durationMs).toISOString(),
     ...(terminal ? { completedAt: new Date(end).toISOString() } : {}),
     ...(job.resultText || job.errorText ? { summary: job.resultText || job.errorText! } : {}),
     ...(job.widget === undefined ? {} : { widget: job.widget }),
+    ...(job.actions === undefined ? {} : { actions: job.actions }),
   };
 });
 PREVIEW_BACKGROUND_JOBS.push({

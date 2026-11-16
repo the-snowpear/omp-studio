@@ -138,7 +138,7 @@ function GitHubCollection({ source, client, workspaceId, repository, kind, previ
       if (alive.current && version === listVersion.current) setListBusy(false);
     });
     return () => { listVersion.current++; };
-  }, [source, workspaceId, repository.remote, kind, filter, revision]);
+  }, [source, workspaceId, repository.remote, kind, filter, revision, preview ? resolvedLanguage : ""]);
 
   useEffect(() => {
     const version = ++detailVersion.current;
@@ -153,7 +153,7 @@ function GitHubCollection({ source, client, workspaceId, repository, kind, previ
       if (alive.current && version === detailVersion.current) setDetailBusy(false);
     });
     return () => { detailVersion.current++; };
-  }, [source, workspaceId, repository.remote, kind, selected, revision]);
+  }, [source, workspaceId, repository.remote, kind, selected, revision, preview ? resolvedLanguage : ""]);
 
   const add = async (row: GitHubItem) => {
     const version = detailVersion.current;

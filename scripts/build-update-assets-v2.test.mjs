@@ -8,20 +8,42 @@ import { buildUpdateAssetsV2, buildMigrationIndex } from "./build-update-assets-
 import { verifyUpdateAssets } from "./verify-update-assets-v2.mjs";
 import { verifyUpdateManifest } from "@omp-studio/runtime-installer";
 import { parseUpdateIndex } from "../apps/desktop/dist/src/update-index.js";
+import { appUpdateAssetName, firstInstallAssetName } from "./release-assets.mjs";
 
 const { privateKey: signingKey, publicKey } = generateKeyPairSync("ed25519");
 const keyId = "test", keys = { test: publicKey.export({ type: "spki", format: "pem" }) };
 const hash = b => createHash("sha256").update(b).digest("hex");
-async function fixture(channel = "stable", runtimeVersion = "18.0.0-studio.1", exeBytes = "signed-runtime") {
+async function fixture(channel = "stable", runtimeVersion = "18.0.0-studio.1", exeBytes = "signed-runtime", platform = "win32-x64") {
   const root = await mkdtemp(join(tmpdir(), "omp-v2-release-")), runtimeDir = join(root, "runtime");
   await mkdir(runtimeDir);
-  const exe = Buffer.from(exeBytes), manifest = Buffer.from(JSON.stringify({ runtimeVersion, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "studio.1", studioProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: "win32-x64", entrypoint: "omp.exe", channel }));
-  const sums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { "omp.exe": hash(exe), "runtime-manifest.json": hash(manifest) } }));
+  const entrypoint = platform.startsWith("win32-") ? "omp.exe" : "omp";
+  const exe = Buffer.from(exeBytes), manifest = Buffer.from(JSON.stringify({ runtimeVersion, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "studio.1", studioProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform, entrypoint, channel }));
+  const sums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { [entrypoint]: hash(exe), "runtime-manifest.json": hash(manifest) } }));
   const payload = Buffer.concat([manifest, Buffer.from("\0"), sums]);
-  for (const [name, bytes] of [["omp.exe", exe], ["runtime-manifest.json", manifest], ["checksums.json", sums], ["runtime-signature.json", JSON.stringify({ algorithm: "ed25519", keyId, payloadSha256: hash(payload), signature: sign(null, payload, signingKey).toString("base64url") })]]) await writeFile(join(runtimeDir, name), bytes);
-  const setupPath = join(root, "OMP-Studio-Setup-1.0.0-windows-x64.exe"); await writeFile(setupPath, "setup-fixture");
-  return { root, runtimeDir, setupPath, arch: "x64", appVersion: "1.0.0", repo: "owner/repo", keys, signingKey, keyId };
+  for (const [name, bytes] of [[entrypoint, exe], ["runtime-manifest.json", manifest], ["checksums.json", sums], ["runtime-signature.json", JSON.stringify({ algorithm: "ed25519", keyId, payloadSha256: hash(payload), signature: sign(null, payload, signingKey).toString("base64url") })]]) await writeFile(join(runtimeDir, name), bytes);
+  const setupPath = join(root, appUpdateAssetName("1.0.0", platform)); await writeFile(setupPath, "setup-fixture");
+  const firstInstallName = firstInstallAssetName("1.0.0", platform);
+  const firstInstallPath = firstInstallName ? join(root, firstInstallName) : undefined;
+  if (firstInstallPath) await writeFile(firstInstallPath, "manual-installer-fixture");
+  return { root, runtimeDir, setupPath, firstInstallPath, platform, arch: "x64", appVersion: "1.0.0", repo: "owner/repo", keys, signingKey, keyId };
 }
+
+test("Linux publishes signed AppImage, deb and executable Runtime assets without Windows migration files", async () => {
+  const options = await fixture("stable", "18.0.0-studio.1", "signed-linux-runtime", "linux-x64");
+  const { out, manifest, notes } = await buildUpdateAssetsV2({ ...options, previousIndex: join(options.root, "not-a-windows-index.json") });
+  assert.equal(out, join(options.root, "outputs/release/linux-x64"));
+  assert.equal(manifest.app.file.asset, "OMP-Studio-1.0.0-linux-x64.AppImage");
+  assert.equal(manifest.firstInstall.asset, "OMP-Studio-1.0.0-linux-x64.deb");
+  assert.equal(manifest.runtime.file.asset, "OMP-Studio-Runtime-18.0.0-studio.1-linux-x64.zip");
+  assert.equal((await readdir(out)).length, 7);
+  assert.equal((await verifyUpdateAssets(out, keys, "owner/repo", "linux-x64")).app.version, "1.0.0");
+  const envelope = verifyUpdateManifest(JSON.parse(await readFile(join(out, "updates-linux-x64.json"), "utf8")), keys, "owner/repo", "linux-x64");
+  assert.deepEqual(verifyUpdateManifest(JSON.parse(JSON.stringify(envelope)), keys, "owner/repo", "linux-x64"), envelope);
+  assert.match(notes, /Linux x64/u);
+  assert.doesNotMatch(notes, /Windows|update-index/u);
+  await writeFile(join(out, manifest.firstInstall.asset), "changed-deb");
+  await assert.rejects(() => verifyUpdateAssets(out, keys, "owner/repo", "linux-x64"), /mismatch/u);
+});
 test("v2 desktop publishes only documented artifacts and verifies every byte", async () => {
   const options = await fixture(); const { out, manifest } = await buildUpdateAssetsV2(options);
   assert.equal((await readdir(out)).length, 6);

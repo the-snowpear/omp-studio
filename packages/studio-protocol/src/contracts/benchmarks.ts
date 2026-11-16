@@ -1,4 +1,21 @@
+/** The native one-based --account choice, bound to stable credential rows for each provider. */
+export interface BenchmarkAccountSelection {
+  account: number;
+  credentialIds: Record<string, number>;
+}
+export interface BenchmarkAccountOption {
+  account: number;
+  credentialId: number;
+  label: string;
+}
+export interface BenchmarkAccounts {
+  providerId: string;
+  accounts: BenchmarkAccountOption[];
+}
+
 export interface BenchmarkSpec {
+  account?: BenchmarkAccountSelection;
+  serviceTier?: string;
   models: string[]; profile: "chat" | "prefill" | "generation" | "mix" | "cache" | "detailed";
   runs: number; concurrency: number; maxTokens?: number; prompt?: string;
   prefillBytes?: number; cachePrefixBytes?: number;
@@ -31,17 +48,19 @@ export interface BenchmarkRun {
 }
 export interface BenchmarkSnapshot { run: BenchmarkRun; models: BenchmarkModelResult[] }
 export type BenchmarkOperation =
+  | { kind: "benchmarks.accounts.read"; sessionId: string; providerId: string }
   | { kind: "benchmarks.list"; sessionId: string }
   | { kind: "benchmarks.start"; sessionId: string; spec: BenchmarkSpec }
   | { kind: "benchmarks.read"; sessionId: string; id: string }
   | { kind: "benchmarks.cancel"; sessionId: string; id: string }
   | { kind: "benchmarks.close"; sessionId: string; id: string };
 export interface BenchmarkResultMap {
+  "benchmarks.accounts.read": BenchmarkAccounts;
   "benchmarks.list": { runs: BenchmarkRun[] };
   "benchmarks.start": { run: BenchmarkRun };
   "benchmarks.read": BenchmarkSnapshot;
   "benchmarks.cancel": { run: BenchmarkRun };
   "benchmarks.close": { closed: boolean };
 }
-export const BENCHMARK_OPERATION_KINDS = ["benchmarks.list", "benchmarks.start", "benchmarks.read", "benchmarks.cancel", "benchmarks.close"] as const;
+export const BENCHMARK_OPERATION_KINDS = ["benchmarks.accounts.read", "benchmarks.list", "benchmarks.start", "benchmarks.read", "benchmarks.cancel", "benchmarks.close"] as const;
 export function isBenchmarkOperationKind(kind: string): kind is BenchmarkOperation["kind"] { return (BENCHMARK_OPERATION_KINDS as readonly string[]).includes(kind); }

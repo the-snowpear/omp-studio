@@ -1,7 +1,7 @@
 import { cfgAsyncEnabled } from "../tools/settings";
-import { cfgTaskIsolationMerge } from "../task/settings";
-import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
+import { cfgTaskIsolationMerge, cfgTaskBatch, cfgTaskSteps } from "../task/settings";
 import { cfgBtwInject } from "../modes/settings";
+import { runtimeText } from "./locale";
 import { sendStudioBtwInjection } from "./services/btw-injection";
 import {
 	isAgentViewSession,
@@ -52,10 +52,10 @@ import { loadEntriesFromFile } from "../session/session-loader";
 import type { SessionManager } from "../session/session-manager";
 import { SessionManager as NativeSessionManager } from "../session/session-manager";
 import { TaskTool } from "../task";
-import { runStructuredSubagent } from "../task/structured-subagent";
 import type { TaskEffort } from "@oh-my-pi/pi-tui/thinking";
 import type { ToolSession } from "../tools";
-import type { ToolUiFactory } from "../tools/context";
+import { createDefaultToolUiContext, type ToolUiFactory } from "../tools/context";
+import { initializeExtensions } from "../modes/runtime-init";
 import { StudioBridgeServer } from "./bridge-server";
 import { StudioRuntimeCommandError } from "./command-arbiter";
 import { createStudioRemoteUiFactory } from "./remote-extension-ui";
@@ -566,7 +566,12 @@ export function createStudioHostRuntime(
 	const modes = new StudioModeControlService(session);
 	const extensionModes = new StudioExtensionModes(session, modes, loop);
 	const models = new StudioModelControlService(session);
-	const workbench = new StudioWorkbenchService(session, liveAudio, mcpManager);
+	const workbench = new StudioWorkbenchService(
+		session,
+		liveAudio,
+		mcpManager,
+		() => bridgeConfig.runtimeEpoch as number,
+	);
 	workbench.planControl = modes;
 	const permissions = new StudioPermissionControlService(session);
 	const settings = new StudioRuntimeSettingsService(session);
@@ -590,24 +595,35 @@ export function createStudioHostRuntime(
 		interaction,
 		() => workerLifecycle.residency() === "active",
 	);
+	workbench.views.formReader = (id, generation) => interaction.readForm(id, generation);
+	workbench.modelAuth.interaction = interaction;
 	workbench.worktrees.interaction = interaction;
 	workbench.runtimeFeatures.mcpAuth.interaction = interaction;
 	modes.interaction = interaction;
 	const cfg = new StudioCfgService(session, interaction);
-	session.setResetConsentHandler?.(async ({ provider, message }) => {
+	session.setResetConsentHandler?.(async ({ provider, message, settingKeys }) => {
 		const choice = await interaction.select({
 			commandId: `reset-consent:${provider}:${crypto.randomUUID()}`,
 			title: message,
 			options: [
 				{
 					id: "Yes",
-					label: "Use now and allow future automatic use",
-					description: "Spend eligible resets now and remember this choice. You can change it in Settings.",
+					label: runtimeText("本次兑换并记住此窗口", "Redeem this time and remember for this window"),
+					description: runtimeText(
+						`只将本次适用的 ${settingKeys.join(", ")} 设为允许，不批准其他窗口。`,
+						`Allow ${settingKeys.join(", ")} for this window only without approving other windows.`,
+					),
 				},
 				{
 					id: "No",
-					label: "Disable automatic use",
-					description: "Keep the saved resets and remember that automatic redemption is disabled.",
+					label: runtimeText(
+						"保留重置并关闭此窗口自动兑换",
+						"Keep resets and disable auto-redeem for this window",
+					),
+					description: runtimeText(
+						`只将 ${settingKeys.join(", ")} 设为不允许；其他窗口保持原策略。`,
+						`Disallow ${settingKeys.join(", ")} for this window only; keep the existing policy for other windows.`,
+					),
 				},
 			],
 		});
@@ -617,7 +633,9 @@ export function createStudioHostRuntime(
 	const fork = new StudioForkService(session);
 	const handoff = new StudioHandoffService(session);
 	const fastPrewalk = new StudioFastPrewalkService(session);
-	const commands = new StudioCommandManifestService(session);
+	const commands = new StudioCommandManifestService(session, (args, signal) =>
+		workbench.commit.prepareFromArgs(args, signal),
+	);
 	const btw = new StudioBtwService(session, {
 		injectEnabled: () => cfgBtwInject.get(session.settings),
 		sendInjection: (text, sessionId) => sendStudioBtwInjection(session, text, sessionId),
@@ -852,6 +870,10 @@ export function createStudioHostRuntime(
 		{
 			spawn: async request => {
 				const settings = session.settings.overlay();
+				// This GUI action is one native task; the schema override is local to
+				// this invocation, never a change to the model's advertised task policy.
+				cfgTaskBatch.override(settings, false);
+				cfgTaskSteps.override(settings, request.steps !== undefined);
 				if (request.async !== undefined) cfgAsyncEnabled.override(settings, request.async);
 				if (request.isolation !== undefined)
 					cfgTaskIsolationMerge.override(settings, request.isolation as "patch" | "branch");
@@ -863,34 +885,15 @@ export function createStudioHostRuntime(
 				const task = await TaskTool.create(spawningSession);
 				const parameters = {
 					agent: request.definition,
-					...(request.taskFile ? { taskFile: request.taskFile } : { task: request.assignment }),
-					solutionSpace: request.solutionSpace ?? request.assignment ?? request.taskFile,
+					...(request.steps ? { steps: request.steps } : { task: request.assignment }),
+					solutionSpace: request.solutionSpace ?? request.assignment ?? request.steps?.join("\n"),
 					...(request.model ? { model: request.model[0] } : {}),
 					...(request.context === undefined ? {} : { context: request.context }),
 					...(request.effort === undefined ? {} : { effort: request.effort as TaskEffort }),
 					...(request.isolation === undefined ? {} : { isolated: true }),
 				};
-				if (request.taskFile && !session.extensionRunner)
-					throw new Error("Task files require the native approval host");
 				const toolCallId = crypto.randomUUID();
-				const context = spawningSession.getToolContext?.();
-				const result =
-					request.taskFile && session.extensionRunner
-						? await new ExtensionToolWrapper(
-								{
-									name: task.name,
-									label: task.label,
-									description: task.description,
-									parameters: task.parameters,
-									approval: task.approval,
-									bindApprovalTargets: task.bindApprovalTargets,
-									approvalRestrictionPaths: task.approvalRestrictionPaths,
-									formatApprovalDetails: task.formatApprovalDetails,
-									execute: task.execute.bind(task),
-								},
-								session.extensionRunner,
-							).execute(toolCallId, parameters, undefined, undefined, context)
-						: await task.execute(toolCallId, parameters);
+				const result = await task.execute(toolCallId, parameters);
 				const first = result.details?.progress?.[0] ?? result.details?.results?.[0];
 				if (!first?.id)
 					throw new Error(
@@ -934,8 +937,9 @@ export function createStudioHostRuntime(
 					.map(job => job.id),
 			taskProgressFor: agentId => {
 				const job = jobsPort
-					.getRunningJobs()
-					.find(candidate => candidate.type === "task" && candidate.agentId === agentId);
+					.getAllJobs()
+					.filter(candidate => candidate.type === "task" && candidate.agentId === agentId)
+					.sort((a, b) => b.startTime - a.startTime)[0];
 				return job === undefined ? undefined : taskJobProgress(job);
 			},
 			telemetry: createStudioAgentTelemetry(registry),
@@ -1179,6 +1183,17 @@ interface StudioMainWorkerSupervisor {
 	dispose(): Promise<void>;
 }
 
+async function initializeStudioExtensions(session: AgentSession, runtime: StudioHostRuntime): Promise<void> {
+	const uiContext = createDefaultToolUiContext(session.sessionId);
+	await initializeExtensions(session, {
+		mode: "rpc",
+		...(uiContext ? { uiContext } : {}),
+		onShutdown: () => runtime.requestShutdown(),
+		reportSendError: (action, error) => logger.warn("Studio extension send failed", { action, error: error.message }),
+		reportRuntimeError: error => logger.warn("Studio extension runtime failed", { error }),
+	});
+}
+
 function createStudioMainWorkerSupervisor(
 	slot: StudioSessionSlot,
 	runtime: StudioHostRuntime,
@@ -1220,7 +1235,7 @@ function createStudioMainWorkerSupervisor(
 		)
 			return true;
 		if (runtime.services.idleMaintenance.keepWorkerLive()) return true;
-		if (runtime.services.workbench.skillshare.running) return true;
+		if (runtime.services.workbench.skillshare.running || runtime.services.workbench.modelAuth.isBusy()) return true;
 		if (
 			runtime.services.workbench.ida.running ||
 			runtime.services.workbench.agentBtw.running ||
@@ -1344,6 +1359,7 @@ function createStudioMainWorkerSupervisor(
 			try {
 				const next = await recreateSession(sessionFile);
 				slot.replace(next);
+				if (!(process.stdin.isTTY && process.stdout.isTTY)) await initializeStudioExtensions(next, runtime);
 				runtime.services.modes.rebindSettings();
 				runtime.services.extensionModes.rebind();
 				runtime.services.idleMaintenance.rebind();
@@ -1458,6 +1474,7 @@ export async function runStudioHostMode(
 		// branch (TTY) replaces it with its own UIContext when it starts.
 		dependencies.setToolUIContext?.(createStudioRemoteUiFactory(runtime.services.interaction), true);
 		setStudioThreadInteraction(runtime.services.interaction);
+		if (!(process.stdin.isTTY && process.stdout.isTTY)) await initializeStudioExtensions(session, runtime);
 		await runTui(runtime);
 	} finally {
 		stopParentWatch();

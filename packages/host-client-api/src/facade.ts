@@ -2,6 +2,9 @@ import type { RuntimeViewOperation } from "@omp-studio/studio-protocol";
 import type { EvaluationCoordinator } from "@omp-studio/studio-host";
 import { isComputerWorkspaceCommand, type ComputerWorkspaceQuery, type ContextViewOperation } from "@omp-studio/studio-protocol";
 import { isWorkbenchOperationKind, type ArtifactTextInput } from "@omp-studio/studio-protocol";
+import { hostText, isHostLocaleZh } from "./locale.js";
+import { RuntimeModelSnapshotReads } from "./runtime-model-snapshot.js";
+import { withRuntimeModels } from "./omp-models-adapter.js";
 /**
  * StudioHostClientFacade — the P1 presentation-neutral product API.
  *
@@ -168,6 +171,7 @@ import {
   type HostUsageService,
   type HostWorkspaceService,
   type HostWorkspaceFileService,
+  type HostSystemFileService,
   type HostGitService,
   type HostGitHubService,
 } from "./services.js";
@@ -287,6 +291,7 @@ export interface StudioHostClientFacadeOptions {
   readonly workspaces?: HostWorkspaceService;
   /** Optional Host-owned workspace-relative file tree adapter. */
   readonly workspaceFiles?: HostWorkspaceFileService;
+  readonly systemFiles?: HostSystemFileService;
   /** Optional Host-owned system Git adapter. Independent of Runtime availability. */
   readonly git?: HostGitService;
   /** Optional Host-owned GitHub CLI adapter. Independent of Runtime availability. */
@@ -426,7 +431,8 @@ function validateEnvelope(request: {
  */
 function rejectPrivateOperationFields(commandName: CommandName, input: unknown): void {
   if (!isWorkbenchOperationKind(commandName) || input === null || typeof input !== "object") return;
-  if ("inputTransfers" in input || "targetCwd" in input || "kind" in input) {
+  if ("inputTransfers" in input || "targetCwd" in input || "kind" in input ||
+      (commandName === "worktrees.session.resume.prepare" && "executionCwd" in input)) {
     throw clientError("INVALID_ARGUMENT", `${commandName} input is invalid: Private operation fields are not client inputs`);
   }
 }
@@ -689,6 +695,8 @@ export class StudioHostClientFacade implements ClientTransport {
   #unsubscribeGithubProgress: Unsubscribe | undefined;
   #closed = false;
   readonly #readLifetime = new AbortController();
+  readonly #modelReads = new RuntimeModelSnapshotReads();
+  #modelReadEpoch = 0;
   #lastHello: HostRuntimeHelloView | undefined;
   #lastEmittedConnection: RuntimeConnection | undefined;
   #lastPublishedVersion: StateVersion | undefined;
@@ -873,6 +881,21 @@ export class StudioHostClientFacade implements ClientTransport {
         }
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "commit.draft.prepare":
+      case "commit.draft.read":
+      case "commit.draft.preview":
+      case "commit.draft.release":
+      case "history.prompts.list":
+      case "history.prompts.read":
+      case "models.available.read":
+      case "models.available.release":
+      case "models.antigravity.readiness":
+      case "models.systemTemplates.list":
+      case "models.systemTemplates.inspect":
+      case "models.systemTemplates.file.read":
+      case "models.auth.providers.read":
+      case "runtime.close.confirm":
+      case "interaction.form.read":
       case "agent.spawn.options.read":
       case "session.lease.read":
       case "session.cache.get":
@@ -886,7 +909,7 @@ export class StudioHostClientFacade implements ClientTransport {
       case "live.webrtc.release": {
         const session = this.#runtimeSession();
         if (!session) throw unavailableError("Runtime view requires a connected Runtime");
-        const result = await session.readRuntimeView({ kind: request.queryName, ...request.input } as RuntimeViewOperation);
+        const result = await session.readRuntimeView({ ...request.input, kind: request.queryName } as RuntimeViewOperation);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "context.view.open":
@@ -1013,12 +1036,26 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = await this.#queryProjects();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "fs.places":
+      case "fs.list":
+      case "fs.file.inspect":
+      case "fs.file.readText":
+      case "fs.file.readChunk": {
+        const service = this.#options.systemFiles;
+        if (!service) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持文件浏览器，请更新 Host", "This Host does not support the file browser; please update the Host"));
+        const input = request.input as import("@omp-studio/client-contract").SystemFileChunkInput;
+        const result = request.queryName === "fs.places" ? await service.places()
+          : request.queryName === "fs.list" ? await service.list(request.input as import("@omp-studio/client-contract").SystemListInput)
+          : request.queryName === "fs.file.inspect" ? await service.inspect(input)
+          : request.queryName === "fs.file.readText" ? await service.readText(input) : await service.readChunk(input);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "workspace.file.inspect":
       case "workspace.file.readText":
       case "workspace.file.readChunk": {
         const service = this.#options.workspaceFiles;
         const input = request.input as import("@omp-studio/client-contract").WorkspaceFileChunkInput;
-        if (!service?.inspect || !service.readText || !service.readChunk) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持文件查看，请更新 Host");
+        if (!service?.inspect || !service.readText || !service.readChunk) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持文件查看，请更新 Host", "This Host does not support file viewing; please update the Host"));
         const result = request.queryName === "workspace.file.inspect" ? await service.inspect(input)
           : request.queryName === "workspace.file.readText" ? await service.readText(input) : await service.readChunk(input);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
@@ -1039,7 +1076,7 @@ export class StudioHostClientFacade implements ClientTransport {
           return {
             ok: true,
             queryName: request.queryName,
-            result: { available: false, reason: "本机统计面板未接入。" },
+            result: { available: false, reason: hostText("本机统计面板未接入。", "Local stats dashboard is not wired up.") },
           } as ClientQueryResponse;
         }
         return { ok: true, queryName: request.queryName, result: await usage.dashboard() } as ClientQueryResponse;
@@ -1254,13 +1291,18 @@ export class StudioHostClientFacade implements ClientTransport {
         return this.#commandModels(request as ClientCommandRequest<ModelsCommandName>);
       }
       case "workspace.open":
+      case "workspace.openPath":
       case "workspace.pick": {
-        return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick">);
+        return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath">);
       }
       case "workspace.file.writeText":
+      case "fs.file.writeText":
+      case "fs.directory.create":
+      case "fs.rename":
+      case "fs.trash":
       case "workspace.file.create":
       case "workspace.directory.create": {
-        return this.#commandWorkspaceFile(request as ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">);
+        return this.#commandWorkspaceFile(request as ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText" | "fs.file.writeText" | "fs.directory.create" | "fs.rename" | "fs.trash">);
       }
       case "usage.openDashboard": {
         return this.#commandUsage(request as ClientCommandRequest<"usage.openDashboard">);
@@ -2362,7 +2404,7 @@ export class StudioHostClientFacade implements ClientTransport {
         models: [],
         byModel: [],
         hours: [],
-        unavailableReason: "Host 未接入用量适配器。",
+        unavailableReason: hostText("Host 未接入用量适配器。", "Host usage adapter is not wired up."),
       };
     }
     return service.get();
@@ -2618,7 +2660,7 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   #sharedProjectRead<T>(name: string, run: () => T | Promise<T>): Promise<T> {
-    return this.#options.projectReads?.read(`${this.#options.workspaceCwd?.()}\0${name}`, run) ?? Promise.resolve(run());
+    return this.#options.projectReads?.read(`${this.#options.workspaceCwd?.()}\0${name}\0${isHostLocaleZh() ? "zh" : "en"}`, run) ?? Promise.resolve(run());
   }
 
   async #querySkills(): Promise<ExtensibilityReadModel> {
@@ -2629,7 +2671,7 @@ export class StudioHostClientFacade implements ClientTransport {
         plugins: [],
         warnings: [],
         generatedAt: this.#options.diagnostics.now(),
-        unavailableReason: "Host 未接入技能 / 插件适配器。",
+        unavailableReason: hostText("Host 未接入技能 / 插件适配器。", "Host skills/plugins adapter is not wired up."),
       };
     }
     return this.#sharedProjectRead("skills", service.get.bind(service));
@@ -2642,7 +2684,7 @@ export class StudioHostClientFacade implements ClientTransport {
         servers: [],
         warnings: [],
         generatedAt: this.#options.diagnostics.now(),
-        unavailableReason: "Host 未接入 MCP 适配器。",
+        unavailableReason: hostText("Host 未接入 MCP 适配器。", "Host MCP adapter is not wired up."),
       };
     }
     return service.get();
@@ -2666,13 +2708,13 @@ export class StudioHostClientFacade implements ClientTransport {
         roleAliases: [],
         projectScopeAvailable: false,
         generatedAt: this.#options.diagnostics.now(),
-        unavailableReason: "Host 未接入子代理定义适配器。",
+        unavailableReason: hostText("Host 未接入子代理定义适配器。", "Host subagent definitions adapter is not wired up."),
       };
     }
     return service.get();
   }
 
-  async #queryModels(): Promise<ModelConfigReadModel> {
+  async #queryModels(attempt = 0): Promise<ModelConfigReadModel> {
     const service = this.#options.models;
     if (service === undefined) {
       return {
@@ -2684,10 +2726,11 @@ export class StudioHostClientFacade implements ClientTransport {
         loginProviders: [],
         generatedModelsYml: "providers: {}\n",
         generatedConfigYml: "modelRoles: {}\n",
-        runtimeEffectHint: "Host 未接入模型配置适配器。",
+        availability: { status: "unverified", source: "none", reason: hostText("Host 未接入模型配置适配器。", "Host model configuration adapter is not wired up.") },
+        runtimeEffectHint: hostText("Host 未接入模型配置适配器。", "Host model configuration adapter is not wired up."),
         loginAvailable: false,
         ompAvailable: false,
-        unavailableReason: "Host 未接入模型配置适配器。",
+        unavailableReason: hostText("Host 未接入模型配置适配器。", "Host model configuration adapter is not wired up."),
         modelRoleStorage: "global",
         projectScopeAvailable: false,
         modelProviderOrder: [],
@@ -2704,7 +2747,36 @@ export class StudioHostClientFacade implements ClientTransport {
         },
       };
     }
-    return this.#sharedProjectRead("models", service.get.bind(service));
+    const session = this.#runtimeSession();
+    const snapshot = this.#currentSnapshotRef();
+    if (!session || !snapshot) return withRuntimeModels(await service.get());
+    const cwd = this.#options.workspaceCwd?.();
+    const locale = isHostLocaleZh();
+    const epoch = this.#modelReadEpoch;
+    const isCurrent = () => {
+      const current = this.#currentSnapshotRef();
+      return !this.#closed && this.#runtimeSession() === session && current?.runtimeId === snapshot.runtimeId &&
+        current.runtimeEpoch === snapshot.runtimeEpoch && current.sessionId === snapshot.sessionId &&
+        this.#options.workspaceCwd?.() === cwd && isHostLocaleZh() === locale && this.#modelReadEpoch === epoch;
+    };
+    try {
+      return await this.#modelReads.read({
+        owner: session,
+        key: JSON.stringify([snapshot.runtimeId, snapshot.runtimeEpoch, snapshot.sessionId, cwd, locale, epoch]),
+        sessionId: snapshot.sessionId,
+        isCurrent,
+        read: operation => session.readRuntimeView(operation),
+      }, service.get.bind(service), this.#readLifetime.signal);
+    } catch {
+      this.#readLifetime.signal.throwIfAborted();
+      if (!isCurrent() && attempt === 0) return this.#queryModels(1);
+      // Missing/old/disconnected Runtime is not a reason to hide the configuration editor
+      // or to consult a model_cache row belonging to a different credential namespace.
+      return withRuntimeModels(await service.get(), undefined, hostText(
+        "当前 Runtime 无法验证模型可用性；配置与推荐目录仍可使用",
+        "The current Runtime could not verify model availability; configuration and recommendations remain available",
+      ));
+    }
   }
 
   async #currentInstalledManifest(): Promise<{ readonly manifest: RuntimeInstallationManifest } | undefined> {
@@ -3038,6 +3110,7 @@ export class StudioHostClientFacade implements ClientTransport {
       acceptedAt,
     };
     this.#bus.emit({ kind: "command.accepted", accepted });
+    this.#modelReadEpoch++;
     void this.#runModelsCommand(request, service);
     return accepted;
   }
@@ -3098,9 +3171,23 @@ export class StudioHostClientFacade implements ClientTransport {
           if (!service.refreshCatalog) throw clientError("CAPABILITY_UNAVAILABLE", "Model catalog updates are unavailable");
           result = await service.refreshCatalog();
           break;
-        case "models.discovery.refresh":
-          result = await service.refreshDiscovery();
+        case "models.discovery.refresh": {
+          const runtime = this.#runtimeSession();
+          const snapshot = this.#currentSnapshotRef();
+          if (runtime || snapshot) {
+            const commands = this.#options.commands;
+            if (!snapshot || !commands?.invoke) throw clientError("CAPABILITY_UNAVAILABLE", hostText(
+              "当前 Runtime 无法刷新模型目录。", "The current Runtime cannot refresh the model catalog.",
+            ));
+            // Refresh the same registry that serves models.get, never a detached CLI/cache namespace.
+            // A stale or older Runtime must surface its failure rather than silently falling back.
+            await commands.invoke({ kind: "models.available.refresh", sessionId: snapshot.sessionId }, request.requestId);
+            result = { applied: true, runtimeEffect: "immediate", message: hostText("已刷新当前 Runtime 模型目录", "Refreshed the current Runtime model catalog") };
+          } else {
+            result = await service.refreshDiscovery();
+          }
           break;
+        }
         case "models.cycleOrder.set":
           result = await service.setCycleOrder(request.input as { readonly order: ReadonlyArray<string> });
           break;
@@ -3344,7 +3431,7 @@ export class StudioHostClientFacade implements ClientTransport {
    * never as a fabricated success.
    */
   async #commandWorkspace(
-    request: ClientCommandRequest<"workspace.open" | "workspace.pick">,
+    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath">,
   ): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
     const service = this.#options.workspaces;
@@ -3372,10 +3459,10 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #commandWorkspaceFile(
-    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">,
+    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText" | "fs.file.writeText" | "fs.directory.create" | "fs.rename" | "fs.trash">,
   ): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
-    const service = this.#options.workspaceFiles;
+    const service = request.commandName.startsWith("fs.") ? this.#options.systemFiles : this.#options.workspaceFiles;
     if (service === undefined) {
       throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available: no workspace file adapter is wired`);
     }
@@ -3392,15 +3479,29 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #runWorkspaceFileCommand(
-    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText">,
-    service: HostWorkspaceFileService,
+    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create" | "workspace.file.writeText" | "fs.file.writeText" | "fs.directory.create" | "fs.rename" | "fs.trash">,
+    service: HostWorkspaceFileService | HostSystemFileService,
   ): Promise<void> {
     try {
-      const input = request.input as { readonly workspaceId: WorkspaceId; readonly path: string };
-      if (request.commandName === "workspace.file.writeText" && !service.writeText) throw clientError("CAPABILITY_UNAVAILABLE", "此 Host 不支持文件保存，请更新 Host");
-      const result = request.commandName === "workspace.file.writeText"
-        ? await service.writeText!(request.input as import("@omp-studio/client-contract").WorkspaceFileWrite)
-        : request.commandName === "workspace.file.create" ? await service.createFile(input) : await service.createDirectory(input);
+      let result: unknown;
+      if (request.commandName.startsWith("fs.")) {
+        const files = service as HostSystemFileService;
+        switch (request.commandName) {
+          case "fs.file.writeText": result = await files.writeText(request.input as import("@omp-studio/client-contract").SystemFileWrite); break;
+          case "fs.directory.create": result = await files.createDirectory(request.input as { parent: string; name: string }); break;
+          case "fs.rename": result = await files.rename(request.input as { path: string; name: string }); break;
+          case "fs.trash":
+            if (!files.trash) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持回收站", "This Host does not support the recycle bin"));
+            result = await files.trash(request.input as { paths: readonly string[] }); break;
+        }
+      } else {
+        const files = service as HostWorkspaceFileService;
+        const input = request.input as { readonly workspaceId: WorkspaceId; readonly path: string };
+        if (request.commandName === "workspace.file.writeText" && !files.writeText) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持文件保存，请更新 Host", "This Host does not support saving files; please update the Host"));
+        result = request.commandName === "workspace.file.writeText"
+          ? await files.writeText!(request.input as import("@omp-studio/client-contract").WorkspaceFileWrite)
+          : request.commandName === "workspace.file.create" ? await files.createFile(input) : await files.createDirectory(input);
+      }
       this.#emitTerminal(request.requestId, {
         requestId: request.requestId,
         commandName: request.commandName,
@@ -3420,12 +3521,14 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #runWorkspaceCommand(
-    request: ClientCommandRequest<"workspace.open" | "workspace.pick">,
+    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath">,
     service: HostWorkspaceService,
   ): Promise<void> {
     try {
-      const result =
-        request.commandName === "workspace.open"
+      if (request.commandName === "workspace.openPath" && !service.openPath) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持从路径打开项目，请更新 Host", "This Host does not support opening projects by path; please update the Host"));
+      const result = request.commandName === "workspace.openPath"
+        ? await service.openPath!(request.input as { readonly path: string })
+        : request.commandName === "workspace.open"
           ? await service.open(request.input as { readonly workspaceId: WorkspaceId })
           : await service.pick(request.input as { readonly name?: string });
       this.#lastWorkspaceModel = result;
@@ -3669,6 +3772,7 @@ export class StudioHostClientFacade implements ClientTransport {
     if (this.#terminalEmitted.has(requestId)) {
       return;
     }
+    if (receipt.status === "completed" && /^(models\.|config\.)/.test(receipt.commandName)) this.#modelReadEpoch++;
     if (receipt.status === "completed" && /^(models\.|skills\.|plugins\.|runtime\.install|config\.)/.test(receipt.commandName)) {
       this.#options.projectReads?.invalidate();
       this.#options.archiveTelemetry?.invalidate();

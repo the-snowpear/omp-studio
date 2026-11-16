@@ -152,6 +152,10 @@ export class ManagedBrowserRelay implements ManagedBrowserRuntime {
     }
     for (const tabId of [...link.signatures.keys()]) if (!liveIds.has(tabId)) { this.#send(link, { t: "tabRemoved", tabId }); link.signatures.delete(tabId); }
   }
+  ownsDebugger(pageId: string): boolean {
+    const tabId = this.#pageNumbers.get(pageId);
+    return tabId !== undefined && [...this.#links.values()].some(link => link.attached.has(tabId));
+  }
   closed(pageId: string): void {
     const tabId = this.#pageNumbers.get(pageId);
     if (tabId === undefined) return;

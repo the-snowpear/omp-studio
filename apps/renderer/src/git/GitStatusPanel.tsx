@@ -28,6 +28,7 @@ import { GitPatch } from "./GitPatch";
 import { GitMoreActionsMenu } from "./GitMoreActionsMenu";
 import { GitPanelSplit } from "./GitPanelSplit";
 import { GitTip } from "./GitTip";
+import { SelectiveCommitButton } from "../commit/SelectiveCommitLauncher";
 import { readGitGraphLayout, writeGitGraphLayout } from "./gitGraphMemory";
 import { useGitWorkspace } from "./GitWorkspaceContext";
 
@@ -42,34 +43,39 @@ function ask(label: string, initial = ""): string | undefined {
     这些靠 prompt 收集文本输入的操作在桌面端拿不到任何输入，点击后只会静默无反应。
     Host 侧操作本身都已实现，等应用内输入对话框接入后从此清单移除即可恢复。
     选中时先给出明确提示，而不是假装可用。 */
-const PENDING_INPUT_LABELS: Record<string, string> = {
-  "branch.create": "新建并切换分支",
-  "branch.switch": "切换分支",
-  "branch.rename": "重命名当前分支",
-  "branch.delete": "删除分支",
-  "worktree.create": "新建 Worktree",
-  "worktree.lock": "锁定 Worktree",
-  "worktree.unlock": "解锁 Worktree",
-  "worktree.remove": "移除 Worktree",
-  merge: "Merge",
-  rebase: "Rebase",
-  "cherry-pick": "Cherry-pick",
-  revert: "Revert",
-  reset: "Hard reset",
-  "tag.create": "创建 Tag",
-  "tag.delete": "删除 Tag",
-  "push.force": "Force-with-lease Push",
-  "remote.add": "添加 Remote",
-  "remote.set": "修改 Remote URL",
-  "remote.remove": "移除 Remote",
-  "pr.create": "创建 PR",
-  "pr.edit": "编辑 PR",
-  "pr.comment": "评论 PR",
-  "pr.review": "Review PR",
-  "pr.merge": "合并 PR",
-  "pr.update": "更新 PR 分支",
-  "pr.close": "关闭 PR",
-  "pr.reopen": "重新打开 PR",
+const PENDING_INPUT_PAIRS: Record<string, readonly [string, string]> = {
+  "branch.create": ["新建并切换分支", "Create & switch branch"],
+  "branch.switch": ["切换分支", "Switch branch"],
+  "branch.rename": ["重命名当前分支", "Rename current branch"],
+  "branch.delete": ["删除分支", "Delete branch"],
+  "worktree.create": ["新建 Worktree", "Create worktree"],
+  "worktree.lock": ["锁定 Worktree", "Lock worktree"],
+  "worktree.unlock": ["解锁 Worktree", "Unlock worktree"],
+  "worktree.remove": ["移除 Worktree", "Remove worktree"],
+  merge: ["Merge", "Merge"],
+  rebase: ["Rebase", "Rebase"],
+  "cherry-pick": ["Cherry-pick", "Cherry-pick"],
+  revert: ["Revert", "Revert"],
+  reset: ["Hard reset", "Hard reset"],
+  "tag.create": ["创建 Tag", "Create tag"],
+  "tag.delete": ["删除 Tag", "Delete tag"],
+  "push.force": ["Force-with-lease Push", "Force-with-lease Push"],
+  "remote.add": ["添加 Remote", "Add remote"],
+  "remote.set": ["修改 Remote URL", "Edit remote URL"],
+  "remote.remove": ["移除 Remote", "Remove remote"],
+  "pr.create": ["创建 PR", "Create PR"],
+  "pr.edit": ["编辑 PR", "Edit PR"],
+  "pr.comment": ["评论 PR", "Comment on PR"],
+  "pr.review": ["Review PR", "Review PR"],
+  "pr.merge": ["合并 PR", "Merge PR"],
+  "pr.update": ["更新 PR 分支", "Update PR branch"],
+  "pr.close": ["关闭 PR", "Close PR"],
+  "pr.reopen": ["重新打开 PR", "Reopen PR"],
+};
+
+function pendingInputLabel(value: string, zh: boolean): string | undefined {
+  const pair = PENDING_INPUT_PAIRS[value];
+  return pair ? (zh ? pair[0] : pair[1]) : undefined;
 };
 
 function statusLabel(index: string, worktree: string, t: (k: string) => string): string {
@@ -80,7 +86,10 @@ function statusLabel(index: string, worktree: string, t: (k: string) => string):
 }
 
 export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, focusKey, view }: { readonly client: StudioClient; readonly workspaceId?: WorkspaceId; readonly focusPath?: string; readonly focusTarget?: GitDiffTarget; readonly focusKey?: number; readonly view?: "changes" | "history" }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const { syncRevision } = useExecutionTarget();
   const repositoryHook = useGitWorkspace();
   const repository = repositoryHook.repository;
@@ -157,7 +166,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
     } catch (cause) {
       if (requestGeneration !== logGeneration.current) return;
       setLog(undefined);
-      setLogError(hostErrorMessage(cause, "无法读取提交历史"));
+      setLogError(hostErrorMessage(cause, zhRef.current ? "无法读取提交历史" : "Cannot read commit history"));
     } finally {
       if (requestGeneration === logGeneration.current) setLogLoading(false);
     }
@@ -191,7 +200,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
     setChangesLoading(true);
     void client.query("git.commit.changes", { workspaceId, oid: selectedCommit }).then(
       (value) => { if (!cancelled) { setCommitChanges(value); setChangesLoading(false); } },
-      (cause) => { if (!cancelled) { setCommitChanges(undefined); setChangesLoading(false); setNotice(hostErrorMessage(cause, "无法读取提交文件")); } },
+      (cause) => { if (!cancelled) { setCommitChanges(undefined); setChangesLoading(false); setNotice(hostErrorMessage(cause, zhRef.current ? "无法读取提交文件" : "Cannot read commit files")); } },
     );
     return () => { cancelled = true; };
   }, [client, selectedCommit, workspaceId]);
@@ -205,7 +214,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
     setCommitDiff(undefined);
     void client.query("git.commit.diff", { workspaceId, oid: selectedCommit, path: selectedCommitPath }).then(
       (value) => { if (!cancelled) setCommitDiff(value); },
-      (cause) => { if (!cancelled) { setCommitDiff(undefined); setNotice(hostErrorMessage(cause, "无法读取提交 Diff")); } },
+      (cause) => { if (!cancelled) { setCommitDiff(undefined); setNotice(hostErrorMessage(cause, zhRef.current ? "无法读取提交 Diff" : "Cannot read commit diff")); } },
     );
     return () => { cancelled = true; };
   }, [client, selectedCommit, selectedCommitPath, workspaceId]);
@@ -219,54 +228,54 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
     setDiff(undefined);
     void client.query("git.diff.get", { workspaceId, path: selected.path, target: selected.target }).then(
       (value) => { if (!cancelled) setDiff(value); },
-      (cause) => { if (!cancelled) { setDiff(undefined); setNotice(hostErrorMessage(cause, "无法读取 Diff")); } },
+      (cause) => { if (!cancelled) { setDiff(undefined); setNotice(hostErrorMessage(cause, zhRef.current ? "无法读取 Diff" : "Cannot read diff")); } },
     );
     return () => { cancelled = true; };
   }, [client, selected, workspaceId, syncRevision]);
 
   const runAdvanced = (value: string) => {
     if (!repository) return;
-    const pending = PENDING_INPUT_LABELS[value];
+    const pending = pendingInputLabel(value, zh);
     if (pending !== undefined) {
-      setNotice(`${pending}：该功能待后续实现`);
+      setNotice(zh ? `${pending}：该功能待后续实现` : `${pending}: coming soon`);
       return;
     }
     switch (value) {
-      case "branch.create": { const name = ask("新分支名称"); if (name) void execute({ kind: "branch.create", name, checkout: true }); break; }
-      case "branch.switch": { const name = ask("切换到分支", branches?.branches.find((item) => !item.remote && !item.current)?.name); if (name) void execute({ kind: "branch.switch", name }); break; }
-      case "branch.rename": { const newName = ask("新的分支名称", repository.branch); if (newName) void execute({ kind: "branch.rename", newName }); break; }
-      case "branch.delete": { const name = ask("删除本地分支"); if (name && window.confirm(`确认删除分支 ${name}？`)) void execute({ kind: "branch.delete", name, ...(repository.revision === undefined ? {} : { expectedRevision: repository.revision }) }); break; }
+      case "branch.create": { const name = ask(zh ? "新分支名称" : "New branch name"); if (name) void execute({ kind: "branch.create", name, checkout: true }); break; }
+      case "branch.switch": { const name = ask(zh ? "切换到分支" : "Switch to branch", branches?.branches.find((item) => !item.remote && !item.current)?.name); if (name) void execute({ kind: "branch.switch", name }); break; }
+      case "branch.rename": { const newName = ask(zh ? "新的分支名称" : "New branch name", repository.branch); if (newName) void execute({ kind: "branch.rename", newName }); break; }
+      case "branch.delete": { const name = ask(zh ? "删除本地分支" : "Delete local branch"); if (name && window.confirm(zh ? `确认删除分支 ${name}？` : `Delete branch ${name}?`)) void execute({ kind: "branch.delete", name, ...(repository.revision === undefined ? {} : { expectedRevision: repository.revision }) }); break; }
       case "worktree.root": void execute({ kind: "worktree.pickRoot" }); break;
-      case "worktree.create": { const branch = ask("Worktree 分支名"); if (branch) void execute({ kind: "worktree.create", branch, createBranch: true }); break; }
-      case "worktree.lock": { const name = ask("锁定哪个 Worktree？", worktrees?.worktrees.find((item) => !item.current)?.name); const target = worktrees?.worktrees.find((item) => item.name === name); if (target) void execute({ kind: "worktree.lock", worktreeId: target.worktreeId }); else if (name) setNotice("找不到该 Worktree"); break; }
-      case "worktree.unlock": { const name = ask("解锁哪个 Worktree？", worktrees?.worktrees.find((item) => item.locked)?.name); const target = worktrees?.worktrees.find((item) => item.name === name); if (target) void execute({ kind: "worktree.unlock", worktreeId: target.worktreeId }); else if (name) setNotice("找不到该 Worktree"); break; }
-      case "worktree.remove": { const name = ask("移除哪个 Worktree？", worktrees?.worktrees.find((item) => !item.current)?.name); const target = worktrees?.worktrees.find((item) => item.name === name); if (target && window.confirm(`确认移除 Worktree ${target.name}？`)) void execute({ kind: "worktree.remove", worktreeId: target.worktreeId }); else if (name && !target) setNotice("找不到该 Worktree"); break; }
+      case "worktree.create": { const branch = ask(zh ? "Worktree 分支名" : "Worktree branch name"); if (branch) void execute({ kind: "worktree.create", branch, createBranch: true }); break; }
+      case "worktree.lock": { const name = ask(zh ? "锁定哪个 Worktree？" : "Lock which worktree?", worktrees?.worktrees.find((item) => !item.current)?.name); const target = worktrees?.worktrees.find((item) => item.name === name); if (target) void execute({ kind: "worktree.lock", worktreeId: target.worktreeId }); else if (name) setNotice(zh ? "找不到该 Worktree" : "Worktree not found"); break; }
+      case "worktree.unlock": { const name = ask(zh ? "解锁哪个 Worktree？" : "Unlock which worktree?", worktrees?.worktrees.find((item) => item.locked)?.name); const target = worktrees?.worktrees.find((item) => item.name === name); if (target) void execute({ kind: "worktree.unlock", worktreeId: target.worktreeId }); else if (name) setNotice(zh ? "找不到该 Worktree" : "Worktree not found"); break; }
+      case "worktree.remove": { const name = ask(zh ? "移除哪个 Worktree？" : "Remove which worktree?", worktrees?.worktrees.find((item) => !item.current)?.name); const target = worktrees?.worktrees.find((item) => item.name === name); if (target && window.confirm(zh ? `确认移除 Worktree ${target.name}？` : `Remove worktree ${target.name}?`)) void execute({ kind: "worktree.remove", worktreeId: target.worktreeId }); else if (name && !target) setNotice(zh ? "找不到该 Worktree" : "Worktree not found"); break; }
       case "worktree.prune": void execute({ kind: "worktree.prune" }); break;
       case "stash": void execute({ kind: "stash.push", includeUntracked: true }); break;
-      case "stash.pop": if (window.confirm("确认 Pop 最近一次 Stash？可能产生冲突。")) void execute({ kind: "stash.apply", pop: true }); break;
-      case "merge": { const ref = ask("合并哪个分支或提交？"); if (ref) void execute({ kind: "merge", ref }); break; }
-      case "rebase": { const ref = ask("Rebase 到哪个分支或提交？"); if (ref) void execute({ kind: "rebase", ref }); break; }
-      case "cherry-pick": { const ref = ask("Cherry-pick 提交"); if (ref) void execute({ kind: "cherry-pick", ref }); break; }
-      case "revert": { const ref = ask("Revert 提交"); if (ref) void execute({ kind: "revert", ref }); break; }
-      case "reset": { const ref = ask("Hard reset 到（会丢弃改动）"); if (ref && repository.revision && window.confirm(`确认 hard reset 到 ${ref}？此操作不可撤销。`)) void execute({ kind: "reset", mode: "hard", ref, expectedRevision: repository.revision }); break; }
-      case "remote.add": { const name = ask("Remote 名称", "upstream"); const url = name ? ask("Remote URL") : undefined; if (name && url) void execute({ kind: "remote.add", name, url }); break; }
-      case "remote.set": { const name = ask("Remote 名称", remotes?.remotes[0]?.name ?? "origin"); const url = name ? ask("新的 Remote URL") : undefined; if (name && url) void execute({ kind: "remote.setUrl", name, url }); break; }
-      case "remote.remove": { const name = ask("移除 Remote", remotes?.remotes[0]?.name); if (name && window.confirm(`确认移除 Remote ${name}？`)) void execute({ kind: "remote.remove", name }); break; }
+      case "stash.pop": if (window.confirm(zh ? "确认 Pop 最近一次 Stash？可能产生冲突。" : "Pop the latest stash? Conflicts may occur.")) void execute({ kind: "stash.apply", pop: true }); break;
+      case "merge": { const ref = ask(zh ? "合并哪个分支或提交？" : "Merge branch or commit"); if (ref) void execute({ kind: "merge", ref }); break; }
+      case "rebase": { const ref = ask(zh ? "Rebase 到哪个分支或提交？" : "Rebase onto branch or commit"); if (ref) void execute({ kind: "rebase", ref }); break; }
+      case "cherry-pick": { const ref = ask(zh ? "Cherry-pick 提交" : "Cherry-pick commit"); if (ref) void execute({ kind: "cherry-pick", ref }); break; }
+      case "revert": { const ref = ask(zh ? "Revert 提交" : "Revert commit"); if (ref) void execute({ kind: "revert", ref }); break; }
+      case "reset": { const ref = ask(zh ? "Hard reset 到（会丢弃改动）" : "Hard reset to (discards changes)"); if (ref && repository.revision && window.confirm(zh ? `确认 hard reset 到 ${ref}？此操作不可撤销。` : `Hard reset to ${ref}? This cannot be undone.`)) void execute({ kind: "reset", mode: "hard", ref, expectedRevision: repository.revision }); break; }
+      case "remote.add": { const name = ask(zh ? "Remote 名称" : "Remote name", "upstream"); const url = name ? ask("Remote URL") : undefined; if (name && url) void execute({ kind: "remote.add", name, url }); break; }
+      case "remote.set": { const name = ask(zh ? "Remote 名称" : "Remote name", remotes?.remotes[0]?.name ?? "origin"); const url = name ? ask(zh ? "新的 Remote URL" : "New Remote URL") : undefined; if (name && url) void execute({ kind: "remote.setUrl", name, url }); break; }
+      case "remote.remove": { const name = ask(zh ? "移除 Remote" : "Remove remote", remotes?.remotes[0]?.name); if (name && window.confirm(zh ? `确认移除 Remote ${name}？` : `Remove remote ${name}?`)) void execute({ kind: "remote.remove", name }); break; }
       case "pull.rebase": void execute({ kind: "pull", strategy: "rebase" }); break;
       case "pull.merge": void execute({ kind: "pull", strategy: "merge" }); break;
-      case "push.force": { const remote = ask("Remote", "origin"); const branch = remote ? ask("分支", repository.branch) : undefined; const expected = remote && branch ? branches?.branches.find((item) => item.remote && item.name === `${remote}/${branch}`)?.headOid : undefined; if (!expected) { setNotice("无法取得远端分支 OID，已拒绝 force push"); break; } if (remote && branch && window.confirm(`确认使用 force-with-lease 推送 ${remote}/${branch}？`)) void execute({ kind: "push", remote, branch, forceWithLease: true, expectedRemoteOid: expected }); break; }
-      case "tag.create": { const name = ask("Tag 名称"); const message = name ? window.prompt("注释（留空创建轻量 Tag）", "") : null; if (name && message !== null) void execute({ kind: "tag.create", name, ...(message.trim() ? { message: message.trim() } : {}) }); break; }
-      case "tag.delete": { const name = ask("删除 Tag"); if (name && window.confirm(`确认删除本地 Tag ${name}？`)) void execute({ kind: "tag.delete", name }); break; }
-      case "pr.create": { const title = ask("PR 标题"); const base = title ? ask("目标分支", "main") : undefined; const body = base ? window.prompt("PR 描述", "") : null; if (title && base && body !== null) void executeGithub({ kind: "pr.create", title, base, body }); break; }
+      case "push.force": { const remote = ask("Remote", "origin"); const branch = remote ? ask(zh ? "分支" : "Branch", repository.branch) : undefined; const expected = remote && branch ? branches?.branches.find((item) => item.remote && item.name === `${remote}/${branch}`)?.headOid : undefined; if (!expected) { setNotice(zh ? "无法取得远端分支 OID，已拒绝 force push" : "Cannot resolve remote branch OID; force push aborted"); break; } if (remote && branch && window.confirm(zh ? `确认使用 force-with-lease 推送 ${remote}/${branch}？` : `Push ${remote}/${branch} with --force-with-lease?`)) void execute({ kind: "push", remote, branch, forceWithLease: true, expectedRemoteOid: expected }); break; }
+      case "tag.create": { const name = ask(zh ? "Tag 名称" : "Tag name"); const message = name ? window.prompt(zh ? "注释（留空创建轻量 Tag）" : "Annotation (leave empty for lightweight tag)", "") : null; if (name && message !== null) void execute({ kind: "tag.create", name, ...(message.trim() ? { message: message.trim() } : {}) }); break; }
+      case "tag.delete": { const name = ask(zh ? "删除 Tag" : "Delete tag"); if (name && window.confirm(zh ? `确认删除本地 Tag ${name}？` : `Delete local tag ${name}?`)) void execute({ kind: "tag.delete", name }); break; }
+      case "pr.create": { const title = ask(zh ? "PR 标题" : "PR title"); const base = title ? ask(zh ? "目标分支" : "Target branch", "main") : undefined; const body = base ? window.prompt(zh ? "PR 描述" : "PR description", "") : null; if (title && base && body !== null) void executeGithub({ kind: "pr.create", title, base, body }); break; }
       case "auth": void executeGithub({ kind: "auth.login" }); break;
-      case "auth.logout": if (window.confirm("确认退出 GitHub CLI 当前账户？")) void executeGithub({ kind: "auth.logout", ...(githubAuth?.host === undefined ? {} : { host: githubAuth.host }) }); break;
-      case "pr.edit": { const number = Number(ask("PR 编号")); const title = Number.isSafeInteger(number) && number > 0 ? ask("新标题") : undefined; if (title) void executeGithub({ kind: "pr.edit", number, title }); break; }
-      case "pr.comment": { const number = Number(ask("PR 编号")); const body = Number.isSafeInteger(number) && number > 0 ? ask("评论内容") : undefined; if (body) void executeGithub({ kind: "pr.comment", number, body }); break; }
-      case "pr.review": { const number = Number(ask("PR 编号")); const decision = Number.isSafeInteger(number) && number > 0 ? ask("Review 决定：approve / comment / request-changes", "comment") : undefined; const body = decision ? window.prompt("Review 意见（可留空）", "") : null; if ((decision === "approve" || decision === "comment" || decision === "request-changes") && body !== null) void executeGithub({ kind: "pr.review", number, decision, ...(body.trim() ? { body: body.trim() } : {}) }); break; }
-      case "pr.merge": { const number = Number(ask("PR 编号")); const pr = pullRequests?.pullRequests.find((item) => item.number === number); const method = pr ? ask("合并方式：merge / squash / rebase", "squash") : undefined; if (!pr?.headOid) { if (Number.isSafeInteger(number)) setNotice("找不到该 Open PR 或缺少 head OID"); break; } if ((method === "merge" || method === "squash" || method === "rebase") && window.confirm(`确认 ${method} merge PR #${number}？`)) void executeGithub({ kind: "pr.merge", number, method, expectedHeadOid: pr.headOid }); break; }
-      case "pr.update": { const number = Number(ask("PR 编号")); if (Number.isSafeInteger(number) && number > 0) void executeGithub({ kind: "pr.updateBranch", number }); break; }
-      case "pr.close": { const number = Number(ask("PR 编号")); if (Number.isSafeInteger(number) && number > 0 && window.confirm(`确认关闭 PR #${number}？`)) void executeGithub({ kind: "pr.close", number }); break; }
-      case "pr.reopen": { const number = Number(ask("PR 编号")); if (Number.isSafeInteger(number) && number > 0) void executeGithub({ kind: "pr.reopen", number }); break; }
+      case "auth.logout": if (window.confirm(zh ? "确认退出 GitHub CLI 当前账户？" : "Sign out of the current GitHub CLI account?")) void executeGithub({ kind: "auth.logout", ...(githubAuth?.host === undefined ? {} : { host: githubAuth.host }) }); break;
+      case "pr.edit": { const number = Number(ask(zh ? "PR 编号" : "PR number")); const title = Number.isSafeInteger(number) && number > 0 ? ask(zh ? "新标题" : "New title") : undefined; if (title) void executeGithub({ kind: "pr.edit", number, title }); break; }
+      case "pr.comment": { const number = Number(ask(zh ? "PR 编号" : "PR number")); const body = Number.isSafeInteger(number) && number > 0 ? ask(zh ? "评论内容" : "Comment") : undefined; if (body) void executeGithub({ kind: "pr.comment", number, body }); break; }
+      case "pr.review": { const number = Number(ask(zh ? "PR 编号" : "PR number")); const decision = Number.isSafeInteger(number) && number > 0 ? ask(zh ? "Review 决定：approve / comment / request-changes" : "Review decision: approve / comment / request-changes", "comment") : undefined; const body = decision ? window.prompt(zh ? "Review 意见（可留空）" : "Review comment (optional)", "") : null; if ((decision === "approve" || decision === "comment" || decision === "request-changes") && body !== null) void executeGithub({ kind: "pr.review", number, decision, ...(body.trim() ? { body: body.trim() } : {}) }); break; }
+      case "pr.merge": { const number = Number(ask(zh ? "PR 编号" : "PR number")); const pr = pullRequests?.pullRequests.find((item) => item.number === number); const method = pr ? ask(zh ? "合并方式：merge / squash / rebase" : "Merge method: merge / squash / rebase", "squash") : undefined; if (!pr?.headOid) { if (Number.isSafeInteger(number)) setNotice(zh ? "找不到该 Open PR 或缺少 head OID" : "Open PR not found or missing head OID"); break; } if ((method === "merge" || method === "squash" || method === "rebase") && window.confirm(zh ? `确认 ${method} merge PR #${number}？` : `Merge PR #${number} with ${method}?`)) void executeGithub({ kind: "pr.merge", number, method, expectedHeadOid: pr.headOid }); break; }
+      case "pr.update": { const number = Number(ask(zh ? "PR 编号" : "PR number")); if (Number.isSafeInteger(number) && number > 0) void executeGithub({ kind: "pr.updateBranch", number }); break; }
+      case "pr.close": { const number = Number(ask(zh ? "PR 编号" : "PR number")); if (Number.isSafeInteger(number) && number > 0 && window.confirm(zh ? `确认关闭 PR #${number}？` : `Close PR #${number}?`)) void executeGithub({ kind: "pr.close", number }); break; }
+      case "pr.reopen": { const number = Number(ask(zh ? "PR 编号" : "PR number")); if (Number.isSafeInteger(number) && number > 0) void executeGithub({ kind: "pr.reopen", number }); break; }
     }
   };
 
@@ -322,10 +331,10 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
     </GitPanelSplit>
   );
 
-  if (workspaceId === undefined) return wrap(<div className="empty" style={{ padding: 18 }}>请先选择项目</div>);
-  if (repositoryHook.loading && repository === undefined) return wrap(<div className="empty" style={{ padding: 18 }}>正在读取 Git 状态…</div>);
-  if (repositoryHook.error) return wrap(<div className="empty" style={{ padding: 18 }}><p>{repositoryHook.error}</p><button className="btn small outline" onClick={() => void repositoryHook.refresh()}>重试</button></div>);
-  if (!repository?.isRepository) return wrap(<div className="empty" style={{ padding: 18 }}><p>{repository?.unavailableReason ?? "当前项目还不是 Git 仓库"}</p><button className="btn small primary" disabled={busy} onClick={() => void execute({ kind: "init" })}>初始化仓库</button></div>);
+  if (workspaceId === undefined) return wrap(<div className="empty" style={{ padding: 18 }}>{zh ? "请先选择项目" : "Select a project first"}</div>);
+  if (repositoryHook.loading && repository === undefined) return wrap(<div className="empty" style={{ padding: 18 }}>{zh ? "正在读取 Git 状态…" : "Reading Git status…"}</div>);
+  if (repositoryHook.error) return wrap(<div className="empty" style={{ padding: 18 }}><p>{repositoryHook.error}</p><button className="btn small outline" onClick={() => void repositoryHook.refresh()}>{zh ? "重试" : "Retry"}</button></div>);
+  if (!repository?.isRepository) return wrap(<div className="empty" style={{ padding: 18 }}><p>{repository?.unavailableReason ?? (zh ? "当前项目还不是 Git 仓库" : "This project is not a Git repository")}</p><button className="btn small primary" disabled={busy} onClick={() => void execute({ kind: "init" })}>{zh ? "初始化仓库" : "Initialize repository"}</button></div>);
 
   const rows = (title: string, changes: typeof staged, target: GitDiffTarget) => (
     <div className="ch-group">
@@ -357,7 +366,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
           data-ftype={ftype ?? undefined}
           data-secret={isSensitive(name) || undefined}
         >
-          <button className="ch-row" aria-label={`查看 ${change.path} 的 ${target === "staged" ? "暂存" : "工作区"} Diff`} onClick={() => setSelected({ path: change.path, target })}>
+          <button className="ch-row" aria-label={zh ? `查看 ${change.path} 的 ${target === "staged" ? "暂存" : "工作区"} Diff` : `View ${target === "staged" ? "staged" : "working tree"} diff for ${change.path}`} onClick={() => setSelected({ path: change.path, target })}>
             <span className="ch-row-icon" aria-hidden="true"><Icon name={iconNameFor(ftype, name)} extra="sm" /></span>
             <span className="ch-file ellipsis">{change.path}</span><span className="ch-note">{statusLabel(change.index, change.worktree, t)}</span>
           </button>
@@ -392,7 +401,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
     {repository.operation ? <div className="git-operation"><b>{repository.operation}</b> {t("git.inProgress")} <span className="spacer" /><button className="btn small outline" disabled={busy} onClick={() => void execute({ kind: "continue", operation: repository.operation! })}>{t("git.continue")}</button><button className="btn small danger" disabled={busy} onClick={() => void execute({ kind: "abort", operation: repository.operation! })}>{t("git.abort")}</button></div> : null}
     <div className="git-actions">
       <GitMoreActionsMenu disabled={busy} githubDisabled={githubAuth?.available === false} onPick={runAdvanced} />
-      <span className="tiny muted">{branches ? branches.branches.length : "—"} branches · {worktrees ? worktrees.worktrees.length : "—"} worktrees · {repository.stashCount} stash{githubAuth?.available === false ? ` · ${githubAuth.unavailableReason ?? "GitHub CLI 不可用"}` : ""}</span>
+      <span className="tiny muted">{branches ? branches.branches.length : "—"} branches · {worktrees ? worktrees.worktrees.length : "—"} worktrees · {repository.stashCount} stash{githubAuth?.available === false ? ` · ${githubAuth.unavailableReason ?? (zh ? "GitHub CLI 不可用" : "GitHub CLI unavailable")}` : ""}</span>
     </div>
     <div className="ch-list">
       {rows(t("git.staged"), staged, "staged")}
@@ -403,6 +412,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
     <div className="git-commit-box">
       <textarea value={commitMessage} placeholder="Commit message" rows={1} onChange={(event) => setCommitMessage(event.target.value)} />
       <button className="btn small primary" disabled={busy || staged.length === 0 || !commitMessage.trim()} onClick={() => { const submitted = commitMessage; const message = submitted.trim(); if (!message) return; void execute({ kind: "commit", message }).then((completed) => { if (completed) setCommitMessage(current => current === submitted ? "" : current); }); }}>Commit</button>
+      {repository.changes.length > 0 ? <SelectiveCommitButton variant="icon" /> : null}
     </div>
     {selected ? (
       <>

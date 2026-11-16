@@ -1,8 +1,10 @@
 import { migrateModelRoleConfig, MODEL_ROLE_PRIORITIES } from "./model-role-migration.js";
 import type { WebSearchRouting } from "@omp-studio/client-contract";
 
-/** Released v18.8.0 priority.json; kept separate from credential display order. */
-export const WEB_PRIORITY_1880 = MODEL_ROLE_PRIORITIES.web;
+/** Generated from the pinned native KDL role defaults; credential display order is independent. */
+export const WEB_PRIORITY_NATIVE = MODEL_ROLE_PRIORITIES.web;
+/** Compatibility export for existing consumers, no separately authored policy. */
+export const WEB_PRIORITY_1880 = WEB_PRIORITY_NATIVE;
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
 const list = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item.trim()) : [];

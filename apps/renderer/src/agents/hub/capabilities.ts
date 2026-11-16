@@ -1,8 +1,22 @@
 import type { ClientBootstrap } from "@omp-studio/client-contract";
+import { isZh } from "../../i18n";
 import { type Caps, type HubAgent } from "./types";
 import { isAdvisor } from "./projection";
 
-export const CONTRACT = {
+export type HubContract = {
+  readonly chat: string;
+  readonly revive: string;
+  readonly kill: string;
+  readonly release: string;
+  readonly spawn: string;
+  readonly cancel: string;
+  readonly transcript: string;
+  readonly irc: string;
+  readonly previewWrite: string;
+  readonly historicalWrite: string;
+};
+
+const CONTRACT_ZH: HubContract = {
   chat: "发送（暂未实现）",
   revive: "Revive（暂未实现）",
   kill: "停止（暂未实现）",
@@ -13,7 +27,24 @@ export const CONTRACT = {
   irc: "IRC（暂未实现）",
   previewWrite: "预览模式",
   historicalWrite: "历史会话只读",
-} as const;
+};
+
+const CONTRACT_EN: HubContract = {
+  chat: "Send (not available)",
+  revive: "Revive (not available)",
+  kill: "Stop (not available)",
+  release: "Release (not available)",
+  spawn: "Spawn (not available)",
+  cancel: "Cancel (not available)",
+  transcript: "No transcript",
+  irc: "IRC (not available)",
+  previewWrite: "Preview mode",
+  historicalWrite: "Historical session is read-only",
+};
+
+export function contractFor(zh = isZh()): HubContract {
+  return zh ? CONTRACT_ZH : CONTRACT_EN;
+}
 
 export function missingCap(
   capabilities: ClientBootstrap["capabilityManifest"] | undefined,
@@ -23,17 +54,21 @@ export function missingCap(
   return !entry || entry.grade === "unavailable";
 }
 
-function lockedWhy(agent: HubAgent): string {
-  return isAdvisor(agent) ? "只读" : "read-only";
+/** What the gate reads from an agent: Hub rows and the Agents deck both satisfy it. */
+export type CapsSubject = Pick<HubAgent, "kind" | "status" | "readOnly" | "isolated" | "canRevive">;
+
+function lockedWhy(agent: CapsSubject, zh: boolean): string {
+  return isAdvisor(agent) ? (zh ? "只读" : "Read-only") : "read-only";
 }
 
 export function capsFor(
-  agent: HubAgent | undefined,
+  agent: CapsSubject | undefined,
   connOnline: boolean,
   capabilities: ClientBootstrap["capabilityManifest"] | undefined,
   hasClient: boolean,
   preview: boolean,
   viewingLive: boolean,
+  zh = isZh(),
 ): Caps {
   if (!agent) {
     return {
@@ -49,6 +84,7 @@ export function capsFor(
       releaseWhy: null,
     };
   }
+  const contract = contractFor(zh);
   const dead = agent.status === "aborted";
   const cannotRevive =
     agent.status === "parked" &&
@@ -59,9 +95,13 @@ export function capsFor(
   const killMissing = missingCap(capabilities, "agent.kill");
   const releaseMissing = missingCap(capabilities, "agent.release");
   const hostReady = connOnline && hasClient && viewingLive;
+  const endedWhy = zh ? "已结束" : "Ended";
+  const isolatedWhy = zh ? "隔离或不可恢复的 agent 仅能查看记录" : "Isolated or non-revivable agents are read-only";
+  const noClientWhy = zh ? "无 Studio client" : "No Studio client";
+  const offlineWhy = zh ? "未连接" : "Disconnected";
   return {
     open: !dead,
-    openWhy: dead ? "已结束" : null,
+    openWhy: dead ? endedWhy : null,
     chat:
       !locked &&
       !dead &&
@@ -70,21 +110,21 @@ export function capsFor(
       hostReady &&
       !chatMissing,
     chatWhy: locked
-      ? lockedWhy(agent)
+      ? lockedWhy(agent, zh)
       : cannotRevive
-        ? "隔离或不可恢复的 agent 仅能查看记录"
+        ? isolatedWhy
         : dead
-          ? "已结束"
+          ? endedWhy
           : preview
-            ? CONTRACT.previewWrite
+            ? contract.previewWrite
             : !viewingLive
-              ? CONTRACT.historicalWrite
+              ? contract.historicalWrite
               : !hasClient
-                ? "无 Studio client"
+                ? noClientWhy
                 : !connOnline
-                  ? "未连接"
+                  ? offlineWhy
                   : chatMissing
-                    ? CONTRACT.chat
+                    ? contract.chat
                     : null,
     revive:
       !preview &&
@@ -94,53 +134,53 @@ export function capsFor(
       hostReady &&
       !reviveMissing,
     reviveWhy: preview
-      ? CONTRACT.previewWrite
+      ? contract.previewWrite
       : !viewingLive
-        ? CONTRACT.historicalWrite
+        ? contract.historicalWrite
         : locked
-          ? lockedWhy(agent)
+          ? lockedWhy(agent, zh)
           : cannotRevive
-            ? "隔离或不可恢复的 agent 仅能查看记录"
+            ? isolatedWhy
             : agent.status !== "parked"
-              ? "仅 parked"
+              ? (zh ? "仅 parked" : "Parked only")
               : !hasClient
-                ? "无 Studio client"
+                ? noClientWhy
                 : !connOnline
-                  ? "未连接"
+                  ? offlineWhy
                   : reviveMissing
-                    ? CONTRACT.revive
+                    ? contract.revive
                     : null,
     kill: !preview && !locked && !dead && hostReady && !killMissing,
     killWhy: preview
-      ? CONTRACT.previewWrite
+      ? contract.previewWrite
       : !viewingLive
-        ? CONTRACT.historicalWrite
+        ? contract.historicalWrite
         : locked
-          ? lockedWhy(agent)
+          ? lockedWhy(agent, zh)
           : dead
-            ? "已结束"
+            ? endedWhy
             : !hasClient
-              ? "无 Studio client"
+              ? noClientWhy
               : !connOnline
-                ? "未连接"
+                ? offlineWhy
                 : killMissing
-                  ? CONTRACT.kill
+                  ? contract.kill
                   : null,
     release: !preview && !locked && dead && hostReady && !releaseMissing,
     releaseWhy: preview
-      ? CONTRACT.previewWrite
+      ? contract.previewWrite
       : !viewingLive
-        ? CONTRACT.historicalWrite
+        ? contract.historicalWrite
         : locked
-          ? lockedWhy(agent)
+          ? lockedWhy(agent, zh)
           : !dead
-            ? "仅终态"
+            ? (zh ? "仅终态" : "Terminal states only")
             : !hasClient
-              ? "无 Studio client"
+              ? noClientWhy
               : !connOnline
-                ? "未连接"
+                ? offlineWhy
                 : releaseMissing
-                  ? CONTRACT.release
+                  ? contract.release
                   : null,
   };
 }

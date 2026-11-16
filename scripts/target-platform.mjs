@@ -6,8 +6,8 @@ import { peArchitecture } from "./windows-architecture.mjs";
 // keeps the two tables identical. The entrypoint follows the artifact platform,
 // never the machine running the script.
 export const RUNTIME_ENTRYPOINTS = Object.freeze({ win32: "omp.exe", darwin: "omp", linux: "omp" });
-export const UPDATE_PLATFORMS = Object.freeze(["win32-x64", "win32-arm64", "darwin-arm64"]);
-export const RUNTIME_PLATFORMS = Object.freeze([...UPDATE_PLATFORMS, "darwin-x64", "linux-x64", "linux-arm64"]);
+export const UPDATE_PLATFORMS = Object.freeze(["win32-x64", "win32-arm64", "darwin-arm64", "linux-x64"]);
+export const RUNTIME_PLATFORMS = Object.freeze([...UPDATE_PLATFORMS, "darwin-x64", "linux-arm64"]);
 
 export function runtimeOsOf(platform) {
   const os = String(platform).split("-", 1)[0];

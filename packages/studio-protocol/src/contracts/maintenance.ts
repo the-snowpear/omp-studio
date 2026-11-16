@@ -6,11 +6,30 @@ export interface GcPolicy {
 	staleDays: number;
 	staleKeep: number;
 }
+/** Explicit native replay stripping, separate from the four storage cleanup categories. */
+export interface GcStripOptions {
+	/** Omit to inherit the native gc.stripAfterDays setting. */
+	idleDays?: number;
+}
+export interface GcStripSummary {
+	idleDays: number;
+	/** Native GC covers main transcripts, their child transcripts and archived transcripts. */
+	scope: "sessions-and-archives";
+	/** Top-level sessions scanned; candidates also include child and archived transcripts. */
+	scannedSessions: number;
+	candidates: number;
+	changed: number;
+	records: number;
+	/** Native scan's planned replay-byte removal in JSONL, uncompressed for archives; not reclaimed disk bytes. */
+	bytes: number;
+	skippedActive: number;
+}
 export interface GcSummary {
 	applied: boolean;
 	checkedAt: number;
 	policy: GcPolicy;
 	rows: Array<{ category: GcCategory; candidates: number; changed: number; bytes: number; skippedActive: number }>;
+	strip?: GcStripSummary;
 	errors: string[];
 }
 export interface GcPreview {
@@ -42,7 +61,7 @@ export interface NativeConnectionCheck {
 export interface AutoCompressionStatus { enabled: boolean; ranAt?: number; log: string; }
 export type MaintenanceOperation =
 	| { kind: "maintenance.compression.auto.status"; sessionId: string }
-	| { kind: "maintenance.gc.preview"; sessionId: string; categories: GcCategory[] }
+	| { kind: "maintenance.gc.preview"; sessionId: string; categories: GcCategory[]; strip?: GcStripOptions }
 	| { kind: "maintenance.gc.apply"; sessionId: string; token: string }
 	| { kind: "maintenance.gc.status"; sessionId: string }
 	| { kind: "maintenance.session.export"; sessionId: string; format?: "archive" | "html" }

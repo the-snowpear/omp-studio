@@ -2,15 +2,16 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import type { AskImage } from "@omp-studio/studio-protocol";
 import { ChipComposer, type ChipComposerHandle } from "../composer/ChipComposer";
 import { fileToPromptImage } from "../composer/ingest";
-import { snapshotFromDoc } from "../composer/serialize";
+import { defaultImageChipLabel, snapshotFromDoc } from "../composer/serialize";
 import { newChipId, type ComposerDoc, type ComposerNode, type ComposerSnapshot, type PromptImage } from "../composer/types";
+import { useI18n, pickLocale } from "../i18n";
 import { Icon } from "../icons";
 import "./askImages.css";
 
 export async function askImage(file:File):Promise<AskImage>{
- if(!["image/png","image/jpeg","image/gif","image/webp"].includes(file.type)||file.size>20*1024*1024)throw Error("Choose PNG, JPEG, GIF or WebP under 20 MB / 请选择 20 MB 以内的图片");
+ if(!["image/png","image/jpeg","image/gif","image/webp"].includes(file.type)||file.size>20*1024*1024)throw Error(pickLocale("请选择 20 MB 以内的 PNG、JPEG、GIF 或 WebP 图片", "Choose PNG, JPEG, GIF, or WebP under 20 MB"));
  if(file.size<=96*1024)return (await fileToPromptImage(file)) as AskImage;
- const bitmap=await createImageBitmap(file);try{const canvas=document.createElement("canvas");for(const edge of [1280,800,480]){const scale=Math.min(1,edge/Math.max(bitmap.width,bitmap.height));canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));const context=canvas.getContext("2d")!;context.fillStyle="#fff";context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(bitmap,0,0,canvas.width,canvas.height);const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve,"image/jpeg",0.7));if(blob&&blob.size<=96*1024)return (await fileToPromptImage(new File([blob],"attachment.jpg",{type:"image/jpeg"}))) as AskImage;}throw Error("Image exceeds response budget / 图片超出回答容量");}finally{bitmap.close();}
+ const bitmap=await createImageBitmap(file);try{const canvas=document.createElement("canvas");for(const edge of [1280,800,480]){const scale=Math.min(1,edge/Math.max(bitmap.width,bitmap.height));canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));const context=canvas.getContext("2d")!;context.fillStyle="#fff";context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(bitmap,0,0,canvas.width,canvas.height);const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve,"image/jpeg",0.7));if(blob&&blob.size<=96*1024)return (await fileToPromptImage(new File([blob],"attachment.jpg",{type:"image/jpeg"}))) as AskImage;}throw Error(pickLocale("图片超出回答容量", "Image exceeds response budget"));}finally{bitmap.close();}
 }
 
 export type AskEditorValue = Omit<ComposerSnapshot, "images"> & { readonly images: readonly AskImage[] };
@@ -43,6 +44,10 @@ export function AskImages({
   multiline?: boolean;
   allowImages?: boolean;
 }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const ownEditor = useRef<ChipComposerHandle>(null);
   const composer = editorRef ?? ownEditor;
   const field = useRef<HTMLDivElement>(null);
@@ -62,7 +67,7 @@ export function AskImages({
     const previous = last.current;
     if (previous && (doc ? doc === previous.doc : text === previous.text && sameImages(images, previous.images))) return;
     const nodes: ComposerNode[] = text ? [{ type: "text", value: text }] : [];
-    if (!doc) for (const image of images) nodes.push({ type: "chip", chip: { id: newChipId(), kind: "image", label: "图", image } });
+    if (!doc) for (const image of images) nodes.push({ type: "chip", chip: { id: newChipId(), kind: "image", label: defaultImageChipLabel(undefined, zh), image } });
     epoch.current++;
     processing.current = false;
     setBusy(false);
@@ -71,7 +76,7 @@ export function AskImages({
       composer.current?.setSnapshot(snapshotFromDoc(doc ?? { nodes }), { preserveFocus: true });
       last.current = { text, images, doc };
     } finally { syncing.current = false; }
-  }, [text, images, doc, composer]);
+  }, [text, images, doc, composer, zh]);
   useLayoutEffect(() => {
     if (!busy && focusAfterUpload.current) {
       focusAfterUpload.current = false;
@@ -94,13 +99,13 @@ export function AskImages({
   };
   const add = async (files: readonly File[]) => {
     if (disabled || processing.current || !files.length) return;
-    if (!allowImages) { setError("当前问题不接受图片附件"); return; }
+    if (!allowImages) { setError(zhRef.current ? "当前问题不接受图片附件" : "This question does not accept image attachments"); return; }
     const generation = epoch.current;
     const range = caret.current?.cloneRange();
     processing.current = true;
     setBusy(true);
     try {
-      if ((composer.current?.getSnapshot().images.length ?? 0) + files.length > 4) throw Error("每个回答区最多 4 张图片");
+      if ((composer.current?.getSnapshot().images.length ?? 0) + files.length > 4) throw Error(zhRef.current ? "每个回答区最多 4 张图片" : "Up to 4 images per field");
       const added: AskImage[] = [];
       for (const file of files) added.push(await askImage(file));
       if (epoch.current !== generation) return;
@@ -110,7 +115,7 @@ export function AskImages({
         selection?.removeAllRanges();
         selection?.addRange(range);
       }
-      for (const image of added) composer.current?.insertChip({ kind: "image", label: "图", image });
+      for (const image of added) composer.current?.insertChip({ kind: "image", label: defaultImageChipLabel(undefined, zhRef.current), image });
       setError("");
       focusAfterUpload.current = true;
     } catch (cause) {
@@ -171,8 +176,8 @@ export function AskImages({
           onChange={changed} onBlur={rememberCaret} onError={setError}
         />
         {allowImages ? <div className="ask-field-tools">
-          <button type="button" className="ask-image-add" aria-label={`${label} + 图片 / Image`} aria-busy={busy}
-            data-tip={busy ? "正在处理图片…" : `${label} · 添加图片，也可直接粘贴，最多 4 张`}
+          <button type="button" className="ask-image-add" aria-label={`${label} + ${zh ? "图片 / Image" : "Image"}`} aria-busy={busy}
+            data-tip={busy ? (zh ? "正在处理图片…" : "Processing image…") : zh ? `${label} · 添加图片，也可直接粘贴，最多 4 张` : `${label} · Add images or paste (max 4)`}
             disabled={!!locked} onMouseDown={event => { event.preventDefault(); rememberCaret(); }}
             onClick={() => { rememberCaret(); composer.current?.openFilePicker(); }}><Icon name="image" /></button>
         </div> : null}

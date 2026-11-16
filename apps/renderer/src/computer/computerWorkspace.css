@@ -66,6 +66,11 @@
 .cw-action time { font-size: var(--fs-11); color: var(--text-3); max-width: 80px; font-variant-numeric: tabular-nums; }
 .cw-action-detail { padding: 0 var(--sp-8) var(--sp-10) 30px; }
 .cw-action-detail p { margin: 0 0 var(--sp-8); color: var(--text-2); }
+.cw-action-detail p.cw-action-warn { color: var(--amber); overflow-wrap: anywhere; }
+.cw-action-flag { margin-left: var(--sp-6); padding: 0 var(--sp-4); border-radius: var(--r-4); font-style: normal; color: var(--amber); background: var(--amber-soft); }
+.cw-secure { align-items: flex-start; }
+.cw-secure > .icon { flex: none; margin-top: 2px; }
+.cw-secure > span { flex: 1; min-width: 0; line-height: 1.55; }
 .cw-more { width: 100%; margin-top: var(--sp-10); }
 .cw-details { border-top: 1px solid var(--border); padding-top: var(--sp-12); }
 .cw-details dl { margin: var(--sp-10) 0; }

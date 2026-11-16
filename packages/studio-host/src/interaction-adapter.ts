@@ -159,7 +159,9 @@ export class RemoteInteractionAdapter {
         }
         this.confirmations.consume(input.confirmationToken, operation, input.owner, input.binding);
       }
-      await this.#acknowledged(operation);
+      // Generation is already bound by the confirmation token. Keep it out of
+      // that payload hash, but carry it to the Runtime for late-response fencing.
+      await this.#acknowledged({ ...operation, ...(input.generation === undefined ? {} : { leaseGeneration: input.generation }) });
       // Runtime interaction.resolved may have already completed the arbiter
       // between the acknowledgement and this continuation. Completion is
       // therefore deliberately idempotent from the adapter's perspective.

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import { presentHtmlForm } from "@oh-my-pi/pi-coding-agent/studio/services/form-presentation";
 import type {
 	StudioInteractionRequiredEvent,
 	StudioInteractionResolvedEvent,
@@ -218,5 +220,180 @@ describe("WP-040 Runtime InteractionPort", () => {
 			value: "yes",
 		});
 		await expect(nonTrue).resolves.toBe("deny");
+	});
+});
+
+describe("Studio native form interaction port", () => {
+	test("keeps full text and media only in a leased transient body, not the pending snapshot", async () => {
+		const { port, opened } = fixture();
+		const caption = "界".repeat(3000);
+		const form = await presentHtmlForm(
+			parseHtmlForm(
+				`<form><p>${caption}</p><fieldset><legend>Details</legend><label>Password<input type="password" name="password" value="private-prefill"></label><img src="data:text/plain,not-an-image" alt="Unavailable diagram"><svg viewBox="0 0 20 20" aria-label="Flow"><rect width="20" height="20"/></svg></fieldset></form>`,
+			),
+			{ cwd: process.cwd() },
+		);
+		const result = port.form({ commandId: "native-body", title: "Details", form });
+		const pending = port.pending();
+		if (pending?.request.kind !== "form") throw new Error("Expected form");
+		expect(new TextEncoder().encode(pending.request.summary).length).toBeLessThanOrEqual(483);
+		expect(JSON.stringify(pending)).not.toContain("private-prefill");
+		expect(JSON.stringify(opened)).not.toContain(caption);
+		const body = port.readForm(pending.request.interactionId, pending.leaseGeneration).form;
+		const blocks = body.sections.flatMap(section => section.blocks);
+		expect(blocks.find(block => block.kind === "text")).toMatchObject({ spans: [{ text: caption }] });
+		expect(blocks.find(block => block.kind === "media-unavailable")).toMatchObject({ alt: "Unavailable diagram" });
+		expect(blocks.find(block => block.kind === "graphic")).toMatchObject({ format: "svg", alt: "Flow" });
+		port.respond({
+			kind: "interaction.respond",
+			interactionId: pending.request.interactionId,
+			commandId: pending.request.commandId,
+			leaseGeneration: pending.leaseGeneration,
+			decision: "cancel",
+		});
+		await expect(result).resolves.toBeUndefined();
+		expect(() => port.readForm(pending.request.interactionId, pending.leaseGeneration)).toThrow("stale");
+	});
+
+	test("preserves hidden and duplicate named data and native scalar/array checkbox semantics", async () => {
+		const { port } = fixture();
+		const form = await presentHtmlForm(
+			parseHtmlForm(
+				`<form><input type="hidden" name="kind" value="deploy"><input type="hidden" name="mode" value="fallback"><input name="shared" value="earlier"><input type="number" name="qty" value="2"><label><input type="checkbox" name="shared" value="on">Override</label><label><input type="checkbox" name="mode" value="on">Enable</label><label><input type="checkbox" name="features" value="a">Alpha</label><label><input type="checkbox" name="features" value="b">Beta</label><label><input type="checkbox" name="lone" value="yes">Accept</label><input value="unnamed"></form>`,
+			),
+			{ cwd: process.cwd() },
+		);
+		const question = form.fields.find(field => field.name === "features")!.question;
+		const result = port.form({ commandId: "native-data", title: "Data", form });
+		const pending = port.pending()!;
+		port.respond({
+			kind: "interaction.respond",
+			interactionId: pending.request.interactionId,
+			commandId: pending.request.commandId,
+			decision: "submit",
+			value: {
+				data: {
+					kind: "not-editable",
+					shared: "earlier",
+					mode: "fallback",
+					qty: "3.50",
+					features: ["b"],
+					lone: "yes",
+					unnamed: "not-submitted",
+				},
+				notes: [{ name: "features", value: "b", text: " Keep this ", question }],
+			},
+		});
+		const answer = await result;
+		expect(answer?.data).toEqual({
+			kind: "deploy",
+			shared: "earlier",
+			mode: "fallback",
+			qty: 3.5,
+			features: ["b"],
+			lone: "yes",
+		});
+		expect(answer?.notes).toEqual([{ name: "features", question, option: "Beta", value: "b", text: "Keep this" }]);
+	});
+
+	test("keeps a note on the chosen row when two option labels share the same submitted value", async () => {
+		const { port } = fixture();
+		const form = await presentHtmlForm(
+			parseHtmlForm(
+				`<form><fieldset><legend>Pick</legend><label><input type="radio" name="pick" value="same">First label</label><label><input type="radio" name="pick" value="same">Second label</label></fieldset></form>`,
+			),
+			{ cwd: process.cwd() },
+		);
+		const result = port.form({ commandId: "duplicate-option-values", title: "Pick", form });
+		const pending = port.pending()!;
+		port.respond({
+			kind: "interaction.respond",
+			interactionId: pending.request.interactionId,
+			commandId: pending.request.commandId,
+			decision: "submit",
+			value: {
+				data: { pick: "same" },
+				notes: [
+					{
+						name: "pick",
+						question: "Pick",
+						option: "Second label",
+						value: "same",
+						text: " Details for the second row ",
+					},
+				],
+			},
+		});
+		await expect(result).resolves.toEqual({
+			data: { pick: "same" },
+			notes: [
+				{
+					name: "pick",
+					question: "Pick",
+					option: "Second label",
+					value: "same",
+					text: "Details for the second row",
+				},
+			],
+		});
+	});
+
+	test("rejects an old GUI lease after transfer to TUI and back without closing the current form", async () => {
+		const { port, resolved } = fixture();
+		const form = await presentHtmlForm(
+			parseHtmlForm(`<form><label>Name<input name="name" value="initial"></label></form>`),
+			{ cwd: process.cwd() },
+		);
+		const result = port.form({ commandId: "native-lease", title: "Name", form });
+		const original = port.pending()!;
+		port.transfer(original.request.interactionId, original.request.commandId, "gui", "tui");
+		expect(() => port.readForm(original.request.interactionId, original.leaseGeneration)).toThrow("does not own");
+		const current = port.transfer(original.request.interactionId, original.request.commandId, "tui", "gui");
+		expect(() =>
+			port.respond({
+				kind: "interaction.respond",
+				interactionId: original.request.interactionId,
+				commandId: original.request.commandId,
+				leaseGeneration: original.leaseGeneration,
+				decision: "submit",
+				value: { data: { name: "old owner" } },
+			}),
+		).toThrow("lease is stale");
+		expect(port.pending()?.leaseGeneration).toBe(current.leaseGeneration);
+		port.respond({
+			kind: "interaction.respond",
+			interactionId: current.request.interactionId,
+			commandId: current.request.commandId,
+			leaseGeneration: current.leaseGeneration,
+			decision: "submit",
+			value: { data: { name: "current owner" } },
+		});
+		await expect(result).resolves.toEqual({ data: { name: "current owner" } });
+		expect(resolved).toHaveLength(1);
+		expect(resolved[0]?.leaseGeneration).toBe(current.leaseGeneration);
+	});
+
+	test("aborts a queued native form without cancelling the other dialog that owns the surface", async () => {
+		const { port, opened } = fixture();
+		const first = port.confirm({ commandId: "first-dialog", title: "First", message: "Proceed?" });
+		const current = port.pending()!;
+		const controller = new AbortController();
+		const form = await presentHtmlForm(parseHtmlForm(`<form><input name="name" value="queued draft"></form>`), {
+			cwd: process.cwd(),
+		});
+		const queued = port.form({ commandId: "queued-form", title: "Queued", form, signal: controller.signal });
+		controller.abort();
+		await expect(queued).rejects.toMatchObject({ code: "INTERACTION_STALE" });
+		expect(port.pending()?.request.interactionId).toBe(current.request.interactionId);
+		port.respond({
+			kind: "interaction.respond",
+			interactionId: current.request.interactionId,
+			commandId: current.request.commandId,
+			decision: "submit",
+			value: true,
+		});
+		await expect(first).resolves.toBe(true);
+		expect(opened.some(event => event.request.kind === "form")).toBe(false);
+		expect(port.pending()).toBeUndefined();
 	});
 });

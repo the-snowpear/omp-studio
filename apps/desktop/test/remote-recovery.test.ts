@@ -74,7 +74,7 @@ test("a dropped mutation is never replayed and recovery only attaches the origin
     const next = channel(); f.channels.push(next); return next.transport;
   });
   first.transport.peer.close(network());
-  assert.throws(() => f.manager.get(f.profile.id), /正在恢复/);
+  assert.throws(() => f.manager.get(f.profile.id), /recovering/);
   await rejected;
   await status(f.manager, f.profile.id, row => row.state === "connected" && row.generation! > generation);
   assert.equal(f.manager.activeId, f.profile.id);
@@ -94,7 +94,7 @@ test("brief successful reconnects do not reset a flapping connection's attempt b
   }
   f.manager.get(f.profile.id).transport.peer.close(network());
   const failed = await status(f.manager, f.profile.id, row => row.state === "failed");
-  assert.match(failed.message!, /自动恢复已停止/);
+  assert.match(failed.message!, /Auto-recovery stopped/);
   assert.equal(f.calls.attach, 3); assert.equal(f.calls.deploy, 1);
 });
 
@@ -139,13 +139,13 @@ test("a late attach result cannot make a cancelled connection live again", async
   let release!: (value: SshRemoteTransport) => void;
   f.setAttach(() => new Promise(resolve => { release = resolve; }));
   const connecting = f.connect();
-  const rejected = assert.rejects(connecting, /取消/);
+  const rejected = assert.rejects(connecting, /cancelled/);
   while (!release) await delay(1);
   const stopping = f.manager.disconnect(f.profile.id);
   const late = channel(); f.channels.push(late); release(late.transport);
   await stopping; await rejected;
-  assert.throws(() => f.manager.get(f.profile.id), /SSH 已断开/);
-  await assert.rejects(late.transport.peer.request("ping"), /取消/);
+  assert.throws(() => f.manager.get(f.profile.id), /SSH is disconnected/);
+  await assert.rejects(late.transport.peer.request("ping"), /cancelled/);
 });
 
 test("the overall recovery deadline aborts a hung attachment and releases its password", async t => {
@@ -154,7 +154,7 @@ test("the overall recovery deadline aborts a hung attachment and releases its pa
   f.setAttach(signal => new Promise((_resolve, reject) => { signal!.addEventListener("abort", () => reject(connectionCancelled()), { once: true }); }));
   f.manager.get(f.profile.id).transport.peer.close(network());
   const failed = await status(f.manager, f.profile.id, row => row.state === "failed");
-  assert.match(failed.message!, /自动恢复已停止/);
+  assert.match(failed.message!, /Auto-recovery stopped/);
   assert.equal(f.calls.attach, 2); assert.equal(f.calls.clearAuthentication, 1);
 });
 
@@ -162,7 +162,7 @@ test("auto-detected system overrides legacy profile metadata and handshake misma
   const f = await fixture(t, {}, true);
   f.setProbe(async () => ({ platform: "win32", arch: "x64", home: "C:\\Users\\test", node: "node", version: "24", root: "C:\\remote" }));
   const credentials = { password: "test-only" };
-  await assert.rejects(f.manager.connect(f.profile.id, credentials), /体检结果 win32\/x64/);
+  await assert.rejects(f.manager.connect(f.profile.id, credentials), /preflight result win32\/x64/);
   assert.equal(credentials.password, ""); assert.equal(f.calls.probe, 1); assert.equal(f.calls.attach, 1);
   assert.equal(f.calls.clearAuthentication, 1);
 });
@@ -200,10 +200,10 @@ test("safe SSH errors identify the failure without returning arbitrary stderr", 
 test("unresolved Windows SSH aliases and remote directory conflicts show actionable errors", () => {
   const unresolved = sshFailure("ssh: Could not resolve hostname testserver: 不知道这样的主机。", undefined, 255);
   assert.equal(unresolved.connectionCode, "configuration");
-  assert.match(unresolved.message, /主机地址.*Host 别名/);
+  assert.match(unresolved.message, /host address.*Host aliases/);
   const temporary = sshFailure("ssh: Could not resolve hostname example: Temporary failure in name resolution", undefined, 255);
   assert.equal(temporary.connectionCode, "network");
   const conflict = sshFailure("Error: ENOTDIR: not a directory, mkdir '/home/ubuntu/.local/share/omp-studio/remote/versions/hash'", undefined, 1);
   assert.equal(conflict.connectionCode, "environment");
-  assert.match(conflict.message, /同名文件占用/);
+  assert.match(conflict.message, /blocked by an existing file/);
 });

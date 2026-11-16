@@ -1,11 +1,12 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { GIT_STATUS_META, type TreeGitStatus } from "../git/treeStatus";
+import { GIT_STATUS_META, gitStatusLabel, type TreeGitStatus } from "../git/treeStatus";
 import { Icon } from "../icons";
 import { fileTypeOf, iconNameFor, isSensitive } from "../explorer-types";
 import { splitDisplayPath } from "./toolMeta";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useWideLayout } from "../layout/useWideLayout";
+import { SelectiveCommitButton } from "../commit/SelectiveCommitLauncher";
 
 /** From this body width the panel reads like a review page: file list beside one file's diff. */
 const CHANGES_WIDE_MIN = 820;
@@ -24,6 +25,8 @@ export type ChangesDiffFile = {
   readonly add: number;
   readonly del: number;
   readonly truncated?: boolean;
+  /** Only this confirmed-applied file is listed; its tool call also had unapplied work. */
+  readonly partial?: boolean;
   readonly hunks: readonly ChangesDiffHunk[];
 };
 
@@ -34,13 +37,19 @@ export type ChangesTurnOption = {
   readonly del: number;
 };
 
+function PartialEditBadge() {
+  const { resolvedLanguage } = useI18n();
+  return <span className="ch-partial-tag"><Icon name="alert-c" extra="sm" />{resolvedLanguage === "zh" ? "部分编辑" : "Partial edit"}</span>;
+}
+
 export function FileStat({ status }: { status: TreeGitStatus | undefined }) {
+  const { resolvedLanguage } = useI18n();
   if (!status) return null;
   const meta = GIT_STATUS_META[status];
   return (
     <span className={`fstat ${meta.className}`}>
       <span aria-hidden="true">{meta.letter}</span>
-      <span className="sr-only"> {meta.label}</span>
+      <span className="sr-only"> {gitStatusLabel(status, resolvedLanguage === "zh")}</span>
     </span>
   );
 }
@@ -208,7 +217,7 @@ export function ChangesPanel({
   onSplit: (next: boolean) => void;
   empty?: ReactNode;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const { marks } = usePreviewMode();
   const [rootRef, wide] = useWideLayout<HTMLDivElement>(CHANGES_WIDE_MIN);
   return (
@@ -218,8 +227,15 @@ export function ChangesPanel({
         {demo === true && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}
         <span className="spacer" />
         {wide && files.length > 0 ? <span className="ch-toolbar-summary">{t("changes.fileCount", { count: files.length })}</span> : null}
+        {files.length > 0 ? <SelectiveCommitButton variant="icon" /> : null}
         <DiffDisplayMode split={split} onSplit={onSplit} />
       </div>
+      {files.some(file => file.partial) ? <div className="ch-partial-notice" role="alert">
+        <Icon name="alert-c" extra="sm" />
+        <span>{resolvedLanguage === "zh"
+          ? "部分编辑未完整应用。这里只审核原生结果确认已落盘的文件与差异，未应用的部分不计入统计。"
+          : "An edit did not apply completely. Only files and diffs confirmed applied by the native result are reviewed here; unapplied work is excluded from the totals."}</span>
+      </div> : null}
       {wide && files.length > 0 ? <ChangesBrowser files={files} expanded={expanded} split={split} /> : <div className="ch-list">
         {files.length === 0 ? empty : files.map((file) => {
           const open = expanded.has(file.file);
@@ -248,6 +264,7 @@ export function ChangesPanel({
                 </span>
                 <span className="ch-file-meta">
                   <span className="ch-file-name">{display.name}</span>
+                  {file.partial ? <PartialEditBadge /> : null}
                   {display.dir ? <span className="ch-file-dir">{display.dir}</span> : null}
                 </span>
                 <ChangeDelta add={file.add} del={file.del} />
@@ -316,6 +333,7 @@ function ChangesBrowser({ files, expanded, split }: { files: readonly ChangesDif
               <span className="ch-row-icon" aria-hidden="true"><Icon name={iconNameFor(rowType, row.name)} extra="sm" /></span>
               <span className="ch-browser-copy">
                 <span className="ch-browser-name">{row.name}</span>
+                {file.partial ? <PartialEditBadge /> : null}
                 {row.dir ? <span className="ch-browser-dir">{row.dir}</span> : null}
               </span>
               <ChangeDelta add={file.add} del={file.del} />
@@ -331,6 +349,7 @@ function ChangesBrowser({ files, expanded, split }: { files: readonly ChangesDif
             {display.dir ? <span className="ch-detail-dir">{display.dir}</span> : null}
           </span>
           <ChangeDelta add={selected.add} del={selected.del} />
+          {selected.partial ? <PartialEditBadge /> : null}
           {selected.truncated ? <span className="chip gray xs">{t("changes.truncated")}</span> : null}
           <span className="spacer" />
           {files.length > 1 ? <span className="ch-detail-nav">

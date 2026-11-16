@@ -114,18 +114,16 @@ async function assertNoLinkParents(root: string, name: string): Promise<void> {
 }
 
 async function repositoryRoot(workspace: string): Promise<string | undefined> {
-  let path = workspace;
-  for (;;) {
-    if (
-      await lstat(join(path, ".git")).then(
-        () => true,
-        () => false,
-      )
-    )
-      return path;
-    const parent = dirname(path);
-    if (parent === path) return undefined;
-    path = parent;
+  try {
+    // Git owns discovery (including ceiling directories and linked worktrees), not a separate .git walk.
+    const { stdout } = await execFileAsync("git", ["-C", workspace, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8", windowsHide: true, env: { ...process.env, LC_ALL: "C" },
+    });
+    return stdout.trim() || undefined;
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { stderr?: string };
+    if (failure.code === "ENOENT" || failure.stderr?.includes("not a git repository")) return undefined;
+    throw error;
   }
 }
 

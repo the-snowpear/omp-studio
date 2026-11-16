@@ -17,7 +17,7 @@ import { Icon, type IconName } from "./icons";
 import { ProcessMemoryPanel } from "./ProcessMemoryPanel";
 import { ToastHost } from "./ToastHost";
 import { usePreviewMode } from "./preview/PreviewContext";
-import { PREVIEW_DIAGNOSTICS, type PreviewDiagScenario } from "./preview/fixtures";
+import { getPreviewDiagnostics, type PreviewDiagScenario } from "./preview/fixtures";
 import { waitForCommandReceipt } from "./sessionLifecycle";
 import {
   deriveDiagnosticsView,
@@ -31,7 +31,7 @@ import {
   type DiagnosticsHero,
 } from "./diagnosticsModel";
 import { ActionProgressBar } from "./ActionProgressBar";
-import { useI18n } from "./i18n";
+import { pickLocale, useI18n } from "./i18n";
 import { fileManagerName } from "./platformCopy";
 import { PLATFORM } from "./platform";
 import { ensureRuntimeConnection } from "./runtimeEnsure";
@@ -51,7 +51,7 @@ import { takeDiagnosticsIntent } from "./pageIntents";
 export { DIAGNOSTICS_INTENT_KEY, setDiagnosticsIntent, type DiagnosticsIntent } from "./pageIntents";
 
 async function applyRuntimeArtifact(client: StudioClient, channel: RuntimeChannel | undefined, incompleteMessage: string): Promise<void> {
-  if (channel === undefined) throw new Error("无法确认 Runtime 工件通道，请重新检查更新");
+  if (channel === undefined) throw new Error(pickLocale("无法确认 Runtime 工件通道，请重新检查更新", "Unable to determine the Runtime artifact channel. Please check for updates again."));
   const handle = await client.command("runtime.install", { channel });
   const receipt = await waitForCommandReceipt(client, handle.requestId);
   if (receipt.status === "failed") throw new Error(receipt.error.message);
@@ -104,18 +104,18 @@ function previewGeneratedAt(): string {
   return PREVIEW_GENERATED_AT;
 }
 
-function previewEnvironment(scenario: PreviewDiagScenario, installer: RuntimeInstallState): EnvironmentReadModel {
+function previewEnvironment(scenario: PreviewDiagScenario, installer: RuntimeInstallState, zh: boolean): EnvironmentReadModel {
   return {
     platform: PLATFORM === "darwin" ? "darwin" : "win32",
     arch: PLATFORM === "darwin" ? "arm64" : "x64",
     authority: previewAuthority(),
-    runtime: previewRuntime(scenario),
+    runtime: previewRuntime(scenario, zh),
     installer,
   };
 }
 
-function previewRuntime(scenario: PreviewDiagScenario): RuntimeConnection {
-  const mock = PREVIEW_DIAGNOSTICS;
+function previewRuntime(scenario: PreviewDiagScenario, zh: boolean): RuntimeConnection {
+  const mock = getPreviewDiagnostics(zh);
   if (scenario === "fail") {
     return {
       status: "unavailable",
@@ -134,8 +134,8 @@ function previewRuntime(scenario: PreviewDiagScenario): RuntimeConnection {
   };
 }
 
-function previewInstaller(scenario: PreviewDiagScenario, t: (key: string) => string): RuntimeInstallState {
-  const mock = PREVIEW_DIAGNOSTICS;
+function previewInstaller(scenario: PreviewDiagScenario, t: (key: string) => string, zh: boolean): RuntimeInstallState {
+  const mock = getPreviewDiagnostics(zh);
   if (scenario === "fail") {
     return { status: "failed", version: mock.version, signature: "unknown", message: t("diagnostics.previewActivationFailed") };
   }
@@ -150,8 +150,8 @@ function previewInstaller(scenario: PreviewDiagScenario, t: (key: string) => str
   };
 }
 
-function previewDiagnostics(scenario: PreviewDiagScenario): DiagnosticReadModel {
-  const mock = PREVIEW_DIAGNOSTICS;
+function previewDiagnostics(scenario: PreviewDiagScenario, zh: boolean): DiagnosticReadModel {
+  const mock = getPreviewDiagnostics(zh);
   const now = previewGeneratedAt();
   if (scenario === "ok") {
     return {
@@ -179,12 +179,12 @@ function previewDiagnostics(scenario: PreviewDiagScenario): DiagnosticReadModel 
   return { generatedAt: now, authority: previewAuthority(), redacted: true, entries: scenario === "fail" ? [handshake, ...extras] : extras };
 }
 
-function previewCapabilities(): CapManifest {
+function previewCapabilities(zh: boolean): CapManifest {
   return {
     profile: "full-parity-v1",
     generatedAt: previewGeneratedAt(),
     hash: "preview-capabilities",
-    capabilities: PREVIEW_DIAGNOSTICS.capabilities.map((id) => ({
+    capabilities: getPreviewDiagnostics(zh).capabilities.map((id) => ({
       id,
       grade: "stable",
       version: 1,
@@ -284,7 +284,8 @@ export function DiagnosticsPage({
  const [workspaceTab,setWorkspaceTab]=useState<"runtime"|"maintenance">("runtime");
   const updates = useUpdates();
   const { t, resolvedLanguage } = useI18n();
-  const mock = PREVIEW_DIAGNOSTICS;
+  const zh = resolvedLanguage === "zh";
+  const mock = getPreviewDiagnostics(zh);
   const [scenario, setScenario] = useState<PreviewDiagScenario>("update");
   const [diag, setDiag] = useState<DiagnosticReadModel | undefined>(diagnostics);
   const [caps, setCaps] = useState<CapManifest | undefined>(capabilities);
@@ -298,12 +299,12 @@ export function DiagnosticsPage({
   useEffect(() => setCaps(capabilities), [capabilities]);
   useEffect(() => setEnv(environment), [environment]);
 
-  const previewInstallerState = previewInstaller(scenario, t);
+  const previewInstallerState = previewInstaller(scenario, t, zh);
   const currentPreviewScenario = PREVIEW_CYCLE.find((item) => item.id === scenario);
-  const viewRuntime = preview ? previewRuntime(scenario) : runtime ?? env?.runtime;
-  const viewEnv = preview ? previewEnvironment(scenario, previewInstallerState) : env;
-  const viewDiag = preview ? previewDiagnostics(scenario) : diag;
-  const viewCaps = preview ? previewCapabilities() : caps;
+  const viewRuntime = preview ? previewRuntime(scenario, zh) : runtime ?? env?.runtime;
+  const viewEnv = preview ? previewEnvironment(scenario, previewInstallerState, zh) : env;
+  const viewDiag = preview ? previewDiagnostics(scenario, zh) : diag;
+  const viewCaps = preview ? previewCapabilities(zh) : caps;
   const runtimeUpdate = preview ? undefined : updates.state.check?.runtime;
   const runtimeUpdateBlocker = preview
     ? scenario === "blocked" ? t(marks ? "diagnostics.runtimeUpdateBlockerDemo" : "diagnostics.runtimeUpdateBlocker", { version: mock.requiredAppVersion }) : undefined

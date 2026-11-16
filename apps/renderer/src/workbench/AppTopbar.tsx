@@ -23,7 +23,7 @@ import { MenuItem } from "../menus";
 import { useI18n } from "../i18n";
 import { useViewedSessionTelemetry, type ViewedSessionTelemetryState } from "../telemetry/useViewedSessionTelemetry";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { PREVIEW_PROJECTS, findPreviewProject, findPreviewThread } from "../preview/fixtures";
+import { getPreviewProjects, findPreviewProject, findPreviewThread } from "../preview/fixtures";
 import { PreviewContextPanel, PreviewContextTrigger, PreviewTokenTrigger } from "../preview/surfaces";
 import { usableCapabilityManifest } from "../deck/interactionGate";
 import { sidebarProjectOrder } from "../sidebar/projectOrder";
@@ -121,9 +121,13 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
   const liveSnapshot = snapshotFrom(state);
   const sessionLive = liveSnapshot !== undefined;
   const sessionBusy = liveSnapshot?.isStreaming === true || liveSnapshot?.isCompacting === true;
+  // Runtime 18.20.2 forks a streaming session (the running turn stays in the original);
+  // compaction still rewrites history, so it keeps blocking Fork.
+  const forkBusy = liveSnapshot?.isCompacting === true;
   const sessionActionReason = !sessionLive ? t("common.unavailable") : t("common.loading");
-  const previewProject = findPreviewProject(chrome.previewProjectId);
-  const previewHit = findPreviewThread(chrome.previewThreadId);
+  const zh = resolvedLanguage === "zh";
+  const previewProject = findPreviewProject(chrome.previewProjectId, zh);
+  const previewHit = findPreviewThread(chrome.previewThreadId, zh);
   const realActiveWorkspace = state.model.workspaces?.workspaces.find(workspace => workspace.workspaceId === conversation?.document.ref.workspaceId)
     ?? state.model.workspaces?.workspaces.find(workspace => workspace.active);
   // 与侧栏项目树同一顺序，避免「切换项目」菜单在每次切换后重排。
@@ -190,7 +194,7 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
   /** Project and branch menus, shared by the top bar breadcrumb and (in window mode) each window's title row. */
   const projectMenu = (finish: (action: () => void) => void, fromWindow = false) => <>
     <div className="menu-label">{t("shell.switchProject")}</div>
-    {preview ? PREVIEW_PROJECTS.map((project) => (
+    {preview ? getPreviewProjects(zh).map((project) => (
       <MenuItem
         key={project.id}
         icon="folder-open"
@@ -302,6 +306,7 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
                 <ThreadActionMenuItems
                   live={sessionLive}
                   busy={sessionBusy}
+                  forkBusy={forkBusy}
                   compacting={liveSnapshot?.isCompacting === true}
                   compactPending={chrome.compactPending}
                   reason={sessionActionReason}
@@ -342,9 +347,9 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
         </nav>
         <button
           className="icon-btn"
-          data-tip={sessionLive && !sessionBusy ? t("shell.tipForkThread") : sessionActionReason}
+          data-tip={sessionLive && !forkBusy ? t("shell.tipForkThread") : sessionActionReason}
           aria-label={t("shell.forkThread")}
-          disabled={!sessionLive || sessionBusy}
+          disabled={!sessionLive || forkBusy}
           onClick={() => run(chrome.onForkThread)}
         ><Icon name="fork" /></button>
         <button
@@ -445,10 +450,10 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
       source={{ project: crumbProject, branch: crumbBranch, path: preview ? previewProject?.path : realActiveWorkspace?.root, connection: executionTarget.id === null ? undefined : executionTarget.name }}
       status={floatingStatus} onDetailsChange={setFloatingDetails}
       windowed={windowed} projectMenu={close => projectMenu(action => { close(); run(action); }, true)} branchMenu={close => branchMenu(action => { close(); run(action); }, true)}
-      threadActions={{ disabled: preview || !sessionLive || sessionBusy, reason: preview ? t("common.unavailableInPreview") : sessionActionReason, onFork: () => run(chrome.onForkThread), onHandoff: () => run(chrome.onHandoffThread) }}
+      threadActions={{ disabled: preview || !sessionLive || sessionBusy, forkDisabled: preview || !sessionLive || forkBusy, reason: preview ? t("common.unavailableInPreview") : sessionActionReason, onFork: () => run(chrome.onForkThread), onHandoff: () => run(chrome.onHandoffThread) }}
       sessionMenu={close => {
         const finish = (action: () => void) => { close(); run(action); };
-        return <><ThreadActionMenuItems live={!preview && sessionLive} busy={sessionBusy} compacting={liveSnapshot?.isCompacting === true} compactPending={chrome.compactPending} reason={preview ? t("common.unavailableInPreview") : sessionActionReason}
+        return <><ThreadActionMenuItems live={!preview && sessionLive} busy={sessionBusy} forkBusy={forkBusy} compacting={liveSnapshot?.isCompacting === true} compactPending={chrome.compactPending} reason={preview ? t("common.unavailableInPreview") : sessionActionReason}
           onRename={() => finish(chrome.onRenameThread)} onFork={() => finish(chrome.onForkThread)} onHandoff={() => finish(chrome.onHandoffThread)} onCompact={() => finish(chrome.onCompactThread)} onExport={() => finish(chrome.onExportThread)} onHistory={() => finish(() => { revealMainWindow(); onRoute("history"); })} />
           {chrome.compactPending || liveSnapshot?.isCompacting ? <MenuItem icon="x" disabled={preview || !sessionLive} onClick={() => finish(chrome.onCancelCompact)}>{t("common.cancel")}</MenuItem> : null}
           <MenuItem icon="archive" disabled={preview ? chrome.hiddenPreviewThreads.has(chrome.previewThreadId) : chrome.archiveTarget === undefined} onClick={() => { if (preview) finish(() => chrome.onArchivePreviewThread(chrome.previewThreadId)); else if (chrome.archiveTarget) finish(() => chrome.onArchiveThread(chrome.archiveTarget!)); }}>{t("history.archiveSession")}</MenuItem>

@@ -57,6 +57,7 @@ async function run() {
     windows.push(main);
     // Initialize the native host document just as the first-process fixture does.
     await main.loadURL("about:blank");
+    main.showInactive();
     const manager = new DesktopManagedBrowser({ directory: recovery.directory, downloadsDirectory: path.join(temporary, "recovery-downloads"), windowFor: () => main });
     try {
       await manager.ready;
@@ -335,7 +336,7 @@ async function run() {
     requests.set(id, { resolve, reject, timer }); child.stdin.write(JSON.stringify({ id, action, parameters, owner }) + "\n");
   });
   try {
-    const opened = await request("invoke", { action: "open", url, timeout: 30 });
+    const opened = await request("invoke", { action: "open", app: "embedded", url, timeout: 30 });
     assert.equal(opened.details.browser, "relay");
     const runtimePage = relayManager.pages("runtime-chat")[0]; assert.ok(runtimePage);
     const inputEvents = [];
@@ -364,7 +365,7 @@ async function run() {
     await wait(2200);
     assert.equal(transitions.includes("disconnected"), false);
     await request("retire");
-    await request("invoke", { action: "open", app: { target: url }, timeout: 20 });
+    await request("invoke", { action: "open", app: "embedded", target: url, timeout: 20 });
     const rebound = await request("invoke", { action: "run", code: 'return await page.$eval("#text", element => element.value);', timeout: 20 }, "isolated");
     assert.equal(rebound.details.value, "Agent 同页");
     assert.equal(relayManager.contents(runtimePage.id).id, identity);
@@ -372,9 +373,9 @@ async function run() {
     record("Runtime generation and child ownership", "registered normal and isolated descendants share the parent page and takeover gate; overlapping Runtime generations select the newest live connection without recreating the page");
     await request("release");
     assert.ok(relayManager.contents(runtimePage.id));
-    const targets = await request("invoke", { action: "targets", timeout: 20 });
+    const targets = await request("invoke", { action: "targets", app: "embedded", timeout: 20 });
     assert.ok(targets.details.value.length);
-    await request("invoke", { action: "open", name: "existing", app: { target: url }, timeout: 20 });
+    await request("invoke", { action: "open", name: "existing", app: "embedded", target: url, timeout: 20 });
     const kept = await request("invoke", { action: "run", name: "existing", code: 'return await page.$eval("#text", element => element.value);', timeout: 20 });
     assert.equal(kept.details.value, "Agent 同页");
     await request("invoke", { action: "close", name: "existing", timeout: 20 });

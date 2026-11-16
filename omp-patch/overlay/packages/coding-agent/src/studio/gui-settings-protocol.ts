@@ -86,12 +86,19 @@ export const GUI_SETTING_DEFINITIONS = {
 		zh: "Advisor 默认服务档位",
 		en: "Advisor default tier",
 	},
-	"codexResets.autoRedeem": {
+	"codexResets.autoRedeem5h": {
 		type: "enum",
 		values: ["unset", "yes", "no"],
 		default: "unset",
-		zh: "Codex 重置券策略",
-		en: "Codex reset policy",
+		zh: "Codex 5 小时窗口重置",
+		en: "Codex 5-hour reset policy",
+	},
+	"codexResets.autoRedeemWeekly": {
+		type: "enum",
+		values: ["unset", "yes", "no"],
+		default: "unset",
+		zh: "Codex 周窗口重置",
+		en: "Codex weekly reset policy",
 	},
 	"codexResets.minBlockedMinutes": {
 		type: "number",

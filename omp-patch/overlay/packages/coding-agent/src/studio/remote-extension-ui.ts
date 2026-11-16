@@ -1,5 +1,10 @@
 import * as crypto from "node:crypto";
+import type { ImageContent } from "@oh-my-pi/pi-ai";
 import type { ToolCallContext } from "@oh-my-pi/pi-agent-core";
+import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import { presentHtmlForm } from "./services/form-presentation";
+import { validateAskAnswerPayload } from "./ask-attachments-protocol";
+import { runtimeText } from "./locale";
 import type {
 	AutocompleteProviderFactory,
 	ExtensionAskDialogQuestion,
@@ -8,6 +13,8 @@ import type {
 	ExtensionApprovalAnswer,
 	ExtensionApprovalGrant,
 	ExtensionApprovalPrompt,
+	ExtensionFormDialogOptions,
+	ExtensionFormDialogResult,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionUISelectItem,
@@ -40,8 +47,8 @@ function toolCallCommandId(toolCall: ToolCallContext | undefined, sessionId?: st
 
 export type StudioUiGateway = Pick<
 	StudioInteractionGateway,
-	"select" | "ask" | "confirm" | "input" | "approve" | "editor" | "cancelCommand" | "notify"
->;
+	"select" | "ask" | "form" | "confirm" | "input" | "approve" | "editor" | "cancelCommand" | "notify"
+> & { readonly generation?: number };
 
 function isOtherOption(option: ExtensionUISelectItem): boolean {
 	return typeof option === "string" ? option === "Other (type your own)" : option.label === "Other (type your own)";
@@ -129,10 +136,8 @@ export function mapAskDialogValue(
 			...(typeof customInput === "string" ? { customInput } : {}),
 			...(typeof raw.note === "string" ? { note: raw.note } : {}),
 			...(typeof raw.noteOption === "string" ? { noteOption: raw.noteOption } : {}),
-			...(raw.customInputImages
-				? { customInputImages: raw.customInputImages as import("@oh-my-pi/pi-ai").ImageContent[] }
-				: {}),
-			...(raw.noteImages ? { noteImages: raw.noteImages as import("@oh-my-pi/pi-ai").ImageContent[] } : {}),
+			...(raw.customInputImages ? { customInputImages: raw.customInputImages as ImageContent[] } : {}),
+			...(raw.noteImages ? { noteImages: raw.noteImages as ImageContent[] } : {}),
 		});
 	}
 	return { kind: "submit", results: mapped };
@@ -154,11 +159,20 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		return true;
 	}
 	#fallbackTheme: Theme | undefined;
+	readonly #gatewayGeneration: number | undefined;
 
 	constructor(
 		private readonly gateway: StudioUiGateway,
 		private readonly commandId: string,
-	) {}
+	) {
+		this.#gatewayGeneration = gateway.generation;
+	}
+
+	#assertCurrent(): void {
+		if (this.#gatewayGeneration !== undefined && this.gateway.generation !== this.#gatewayGeneration) {
+			throw new StudioInteractionError("INTERACTION_STALE", "The dialog's Runtime generation changed");
+		}
+	}
 
 	async select(
 		title: string,
@@ -176,6 +190,12 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 					commandId: this.commandId,
 					title,
 					options: remoteOptions,
+					...(dialogOptions?.initialIndex === undefined ? {} : { initialIndex: dialogOptions.initialIndex }),
+					...(dialogOptions?.selectionMarker === undefined
+						? {}
+						: { selectionMarker: dialogOptions.selectionMarker }),
+					...(dialogOptions?.checkedIndices === undefined ? {} : { checkedIndices: dialogOptions.checkedIndices }),
+					...(dialogOptions?.markableCount === undefined ? {} : { markableCount: dialogOptions.markableCount }),
 				}),
 			dialogOptions,
 		);
@@ -203,7 +223,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 			() =>
 				this.gateway.ask({
 					commandId: this.commandId,
-					title: "Agent 提问",
+					title: runtimeText("Agent 提问", "Agent Question"),
 					questions: remoteQuestions,
 					acceptImages: dialogOptions?.acceptImages === true,
 				}),
@@ -211,6 +231,33 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		);
 		if (value === undefined) return undefined;
 		return mapAskDialogValue(value, questions, dialogOptions?.acceptImages === true);
+	};
+
+	formDialog = async (
+		html: string,
+		dialogOptions?: ExtensionFormDialogOptions,
+	): Promise<ExtensionFormDialogResult | undefined> => {
+		this.#assertCurrent();
+		dialogOptions?.signal?.throwIfAborted();
+		const form = dialogOptions?.parsedForm ?? parseHtmlForm(html);
+		const presentation = await presentHtmlForm(form, {
+			cwd: dialogOptions?.cwd ?? process.cwd(),
+			...(dialogOptions?.signal === undefined ? {} : { signal: dialogOptions.signal }),
+		});
+		dialogOptions?.signal?.throwIfAborted();
+		// No Runtime deadline: the stable Renderer form session resets the native inactivity timer on input.
+		const answered = await this.#runWithCancel(
+			() =>
+				this.gateway.form({
+					commandId: this.commandId,
+					title: runtimeText("Agent 提问", "Agent Question"),
+					form: presentation,
+					...(dialogOptions?.timeout === undefined ? {} : { timeoutMs: dialogOptions.timeout }),
+				}),
+			dialogOptions,
+		);
+		if (answered?.timedOut) dialogOptions?.onTimeout?.();
+		return answered;
 	};
 
 	async confirm(title: string, message: string, dialogOptions?: ExtensionUIDialogOptions): Promise<boolean> {
@@ -399,8 +446,13 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 	 * AbortError so the Ask fallback converges and no card is left behind.
 	 */
 	async #runWithCancel<T>(run: () => Promise<T>, dialogOptions?: ExtensionUIDialogOptions): Promise<T> {
+		this.#assertCurrent();
 		const signal = dialogOptions?.signal;
-		if (signal === undefined) return await run();
+		if (signal === undefined) {
+			const value = await run();
+			this.#assertCurrent();
+			return value;
+		}
 		const abortOutcome = (): "aborted" | "expired" => {
 			const reason = signal.reason;
 			return reason instanceof DOMException && reason.name === "TimeoutError" ? "expired" : "aborted";
@@ -418,7 +470,10 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		};
 		signal.addEventListener("abort", onAbort, { once: true });
 		try {
-			return await run();
+			const value = await run();
+			if (cancelled || signal.aborted) throw new DOMException("Aborted", "AbortError");
+			this.#assertCurrent();
+			return value;
 		} catch (error) {
 			if (cancelled) throw new DOMException("Aborted", "AbortError");
 			throw error;
@@ -429,6 +484,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 
 	#cancel(reason: string, outcome: "aborted" | "expired" = "aborted"): void {
 		try {
+			this.#assertCurrent();
 			this.gateway.cancelCommand(this.commandId, reason, outcome);
 		} catch {
 			// Interaction already resolved or closed; nothing to cancel.
@@ -444,4 +500,3 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 export function createStudioRemoteUiFactory(gateway: StudioUiGateway): ToolUiFactory {
 	return (toolCall, sessionId) => new StudioRemoteExtensionUiContext(gateway, toolCallCommandId(toolCall, sessionId));
 }
-import { validateAskAnswerPayload } from "./ask-attachments-protocol";

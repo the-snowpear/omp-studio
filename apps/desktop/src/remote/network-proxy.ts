@@ -4,11 +4,12 @@ import { randomBytes } from "node:crypto";
 import type { Duplex } from "node:stream";
 import type { NetworkStreams, NetworkDestination } from "./network-stream.js";
 import type { RemoteNetworkMode } from "./shared.js";
+import { desktopText } from "../desktop-language-shared.js";
 
 export function connectTcp(host: string, port: number, timeoutMs = 10_000, lookup?: TcpNetConnectOpts["lookup"]): Promise<Socket> {
   return new Promise((resolve, reject) => {
     const socket = connect({ host, port, ...(lookup ? { lookup } : {}) });
-    const timeout = setTimeout(() => { socket.destroy(); reject(Object.assign(new Error("连接目标超时"), { code: "ETIMEDOUT" })); }, timeoutMs);
+    const timeout = setTimeout(() => { socket.destroy(); reject(Object.assign(new Error(desktopText("连接目标超时", "Connection to target timed out")), { code: "ETIMEDOUT" })); }, timeoutMs);
     socket.once("connect", () => { clearTimeout(timeout); socket.off("error", reject); resolve(socket); });
     socket.once("error", error => { clearTimeout(timeout); reject(error); });
   });
@@ -76,7 +77,7 @@ export class RemoteNetworkProxy {
     }
   }
   private async local(destination: NetworkDestination): Promise<Duplex> {
-    if (!this.channel) throw new Error("远端无法联网，本机联网通道尚未连接");
+    if (!this.channel) throw new Error(desktopText("远端无法联网，本机联网通道尚未连接", "Remote host has no network access and the local network channel is not connected"));
     const stream = await this.channel.open(destination); if (!destination.service) this.report("local"); return stream;
   }
   private pipe(a: Duplex, b: Duplex): void {
@@ -107,9 +108,9 @@ export class RemoteNetworkProxy {
         res.writeHead(response.statusCode ?? 502, response.headers); response.pipe(res);
       });
       upstream.once("close", () => agent.destroy());
-      upstream.on("error", () => { if (!res.headersSent) res.writeHead(502); res.end("联网请求失败；未自动重放"); });
+      upstream.on("error", () => { if (!res.headersSent) res.writeHead(502); res.end(desktopText("联网请求失败；未自动重放", "Network request failed; it was not automatically replayed")); });
       res.on("close", () => { upstream.destroy(); stream?.destroy(); }); req.pipe(upstream);
-    } catch { stream?.destroy(); res.writeHead(502); res.end("远端及本机网络出口均不可用"); }
+    } catch { stream?.destroy(); res.writeHead(502); res.end(desktopText("远端及本机网络出口均不可用", "Neither remote nor local network egress is available")); }
   }
   async close(): Promise<void> {
     this.channel?.close(); for (const socket of this.sockets) socket.destroy();

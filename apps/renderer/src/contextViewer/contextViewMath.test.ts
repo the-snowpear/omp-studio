@@ -62,9 +62,10 @@ describe("contextViewMath", () => {
     expect(compactTokens(987)).toBe("987");
   });
 
-  it("orders meter segments categories → buffer → free and keeps the window whole", () => {
+  it("groups native prompt weights without counting source placeholders twice and keeps the window whole", () => {
     const segments = meterSegments(index(), undefined);
-    expect(segments.map(segment => segment.key)).toEqual(["system-prompt", "skills", "buffer", "free"]);
+    expect(segments.map(segment => segment.key)).toEqual(["system", "buffer", "free"]);
+    expect(segments[0]?.tokens).toBe(60);
     expect(segments.reduce((sum, segment) => sum + segment.tokens, 0)).toBe(100);
     expect(segments.at(-2)?.striped).toBe(true);
   });

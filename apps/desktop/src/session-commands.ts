@@ -1,10 +1,10 @@
-import { type SessionWorktreeRow } from "@omp-studio/studio-protocol";
+import { type SessionWorktreeRow, type SessionResumePreparation } from "@omp-studio/studio-protocol";
 import { type PortableExport, type SessionPortabilityStatus } from "@omp-studio/studio-protocol";
 import { type SessionExportResult, type SessionExportStatus } from "@omp-studio/studio-protocol";
 import { mediaInputArtifacts, type MediaDetail, isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, isUpgradeOperationKind, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
 import { type QueueTakeback } from "@omp-studio/studio-protocol";
 import type { RuntimeMediaFiles } from "./runtime-media-files.js";
-import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
+import { isEvaluationOperationKind, isModelServicesKind, MODEL_SERVICES_COMMAND_KINDS, type ModelServicesCommandResultMap } from "@omp-studio/studio-protocol";
 /**
  * Desktop semantic commands: session.create / session.resume / session.drop / interaction.respond
  * and P4 invoke that forwards the client requestId.
@@ -18,6 +18,7 @@ import type {
   HostSessionCatalogProvider,
 } from "@omp-studio/host-client-api";
 import { threadIdFor, formatRuntimeMissingMessage, type HostRuntimeDisconnect, type HostRuntimeUnavailable } from "@omp-studio/host-client-api";
+import { desktopText } from "./desktop-language-shared.js";
 import { scanSessionCatalog, StudioHostError, removeSessionPin, type StudioSessionArchiveService, type StudioSessionDeleteService } from "@omp-studio/studio-host";
 import type { ApprovalMode, RequestId, StudioOperation, ThreadId } from "@omp-studio/studio-protocol";
 import type {
@@ -47,6 +48,8 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   "core.steer",
   "core.followUp",
   "queue.enqueue",
+  "session.fork",
+  "session.tree.branch",
   "runtime.pause",
   "runtime.resume",
   "session.model.set",
@@ -71,6 +74,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   // already express the real preconditions and give better error text.
   ...WORKBENCH_OPERATION_KINDS,
   ...UPGRADE_OPERATION_KINDS,
+  ...MODEL_SERVICES_COMMAND_KINDS,
   "btw.ask",
   "btw.abort",
   "btw.branch",
@@ -182,6 +186,7 @@ export function createDesktopSemanticCommands(options: {
   /** Resolves the OMP agent dir holding the global pin file. */
   readonly agentDir?: () => string;
   readonly switchSession?: DesktopRuntimeSessionPort["switchSession"];
+  readonly synchronizeSessionIdentity?: DesktopRuntimeSessionPort["synchronizeSessionIdentity"];
   readonly applyApprovalMode?: DesktopRuntimeSessionPort["applyApprovalMode"];
   readonly evacuateResident?: DesktopRuntimeSessionPort["evacuateResident"];
   readonly supportsConcurrentSessions?: boolean;
@@ -200,6 +205,11 @@ export function createDesktopSemanticCommands(options: {
   };
 }): HostSemanticCommandService {
   const archiveFactory = options.archive;
+  const resumePreparations = new Map<string, {
+    result: SessionResumePreparation;
+    workspace?: { workspaceId: string; cwd: string };
+    expiresAt: number;
+  }>();
   const missingRuntime = (fallback: string): StudioHostError => {
     const facts = options.runtimeMissing?.();
     const message = formatRuntimeMissingMessage(facts ?? {});
@@ -233,7 +243,7 @@ export function createDesktopSemanticCommands(options: {
             return { applied: true, runtimeEffect: "immediate", message: "Session restored from the archive" };
           },
         }),
-    delete: async ({ threadId, deleteManagedArtifacts = false }: { readonly threadId: ThreadId; readonly deleteManagedArtifacts?: boolean }): Promise<ConfigWriteResult> => {
+    delete: async ({ threadId, deleteManagedArtifacts = false }: { readonly threadId: ThreadId; readonly deleteManagedArtifacts?: boolean }): Promise<ConfigWriteResult & { readonly cleanup: "complete" | "partial" }> => {
       if (options.deleteService === undefined) {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Session deletion is not available on this Host");
       }
@@ -241,7 +251,7 @@ export function createDesktopSemanticCommands(options: {
       // Abort a streaming turn and switch the Runtime off this file so the
       // transcript can be removed while no Worker holds it.
       await releaseResidentSession(options, sessionId);
-      await options.deleteService().delete(sessionId);
+      const removed = await options.deleteService().delete(sessionId);
       let artifactsWarning = false;
       await options.finishManagedArtifacts?.(sessionId, deleteManagedArtifacts).catch(() => { artifactsWarning = true; });
       // Best-effort residue cleanup: the transcript/artifacts are the primary
@@ -252,7 +262,18 @@ export function createDesktopSemanticCommands(options: {
       if (options.agentDir !== undefined) {
         await Promise.resolve(removeSessionPin(sessionId, options.agentDir())).catch(() => undefined);
       }
-      return { applied: true, runtimeEffect: "immediate", message: artifactsWarning ? "Session deleted; managed artifact cleanup failed. Review the artifact library." : deleteManagedArtifacts ? "Session and managed artifacts deleted" : "Session deleted; managed artifacts retained" };
+      const messages = [deleteManagedArtifacts
+        ? desktopText("会话及托管产物已删除。", "Session and managed artifacts deleted.")
+        : desktopText("会话已删除；托管产物已保留。", "Session deleted; managed artifacts retained.")];
+      if (removed.nativeCleanup.status === "partial") {
+        messages.push(desktopText(
+          `原生历史/统计清理未全部完成（${removed.nativeCleanup.reason}）；部分原生记录可能仍保留。`,
+          `Native history/stats cleanup is partial (${removed.nativeCleanup.reason}); some native records may remain.`,
+        ));
+      }
+      if (artifactsWarning) messages.push(desktopText("托管产物清理失败，请检查产物库。", "Managed artifact cleanup failed. Review the artifact library."));
+      const cleanup = removed.nativeCleanup.status === "partial" || artifactsWarning ? "partial" : "complete";
+      return { applied: true, runtimeEffect: "immediate", message: messages.join(" "), cleanup };
     },
     create: async (input) => {
       if (input?.noContextFiles !== undefined && typeof input.noContextFiles !== "boolean") {
@@ -276,8 +297,17 @@ export function createDesktopSemanticCommands(options: {
       return created;
     },
     resume: async ({ threadId, model }) => {
-      const target = await resolveCatalogSessionId(options, threadId);
-      const snapshot = options.sessionRef.current?.controller.publication()?.snapshot;
+      const candidate = resumePreparations.get(threadId);
+      const prepared = candidate && candidate.expiresAt > Date.now() ? candidate : undefined;
+      if (prepared && !prepared.workspace) {
+        throw new StudioHostError("INVALID_ARGUMENT", desktopText(
+          "请选择有效的工作区并重新准备恢复会话。",
+          "Choose an available workspace and prepare the session resume again.",
+        ));
+      }
+      const target = prepared?.result.targetSessionId ?? await resolveCatalogSessionId(options, threadId);
+      const previous = options.sessionRef.current;
+      const snapshot = previous?.controller.publication()?.snapshot;
       if (snapshot !== undefined) {
         if (snapshot.isStreaming && options.supportsConcurrentSessions !== true) {
           throw new StudioHostError("BUSY_STREAMING", "Cannot resume while the Runtime is streaming");
@@ -290,19 +320,29 @@ export function createDesktopSemanticCommands(options: {
       if (options.switchSession === undefined) {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime session switching is not available");
       }
-      const next = await options.switchSession({ kind: "resume", sessionId: target, ...(model === undefined ? {} : { model }) });
-      let restoredSession = next;
-      if (next?.controller.publication()?.snapshot === undefined && options.ensureRuntime !== undefined) {
+      const intent = {
+        kind: "resume" as const, sessionId: target,
+        ...(model === undefined ? {} : { model }),
+        ...(prepared?.workspace ? {
+          resumeWorkspace: prepared.workspace,
+          allowRelocation: prepared.result.recordedCwd !== prepared.workspace.cwd,
+        } : {}),
+      };
+      let restoredSession = await options.switchSession(intent);
+      // Recovery is for a cold Host, not a failed replacement of a healthy Worker.
+      if (restoredSession?.controller.publication()?.snapshot === undefined && previous?.hello() === undefined && options.ensureRuntime !== undefined) {
         await options.ensureRuntime();
-        restoredSession = (await options.switchSession({ kind: "resume", sessionId: target })) ?? next;
+        restoredSession = await options.switchSession(intent);
+      }
+      const restored = restoredSession?.controller.publication()?.snapshot;
+      if (restored === undefined) throw missingRuntime(desktopText("恢复会话失败；原会话保持不变。", "Session resume failed; the previous session is unchanged"));
+      if (restored.sessionId !== target && restored.resumedFromSessionId !== target && restored.continuationOf !== target) {
+        throw new StudioHostError("INTERNAL_ERROR", desktopText("恢复会话失败；原会话保持不变。", "Session resume failed; the previous session is unchanged"));
       }
       options.bindSession(restoredSession);
-      const restored = restoredSession?.controller.publication()?.snapshot;
-      if (restored === undefined) {
-        throw missingRuntime("Runtime is not available");
-      }
-      if (restored.sessionId !== target && restored.resumedFromSessionId !== target && restored.continuationOf !== target) {
-        throw new StudioHostError("INTERNAL_ERROR", "Session resume failed; the previous session was kept when possible");
+      if (prepared) {
+        resumePreparations.delete(threadIdFor(prepared.result.targetSessionId));
+        resumePreparations.delete(threadIdFor(prepared.result.requestedSessionId));
       }
       return restored;
     },
@@ -378,6 +418,16 @@ export function createDesktopSemanticCommands(options: {
       if (snapshot === undefined || hello === undefined) {
         throw missingRuntime("Runtime snapshot is unavailable");
       }
+      if (operation.kind === "worktrees.session.resume.prepare") {
+        // A new selection supersedes both aliases of an earlier preparation,
+        // including when this attempt fails or now needs an explicit workspace.
+        const previous = resumePreparations.get(threadIdFor(operation.targetSessionId));
+        for (const [key, prepared] of resumePreparations) if (prepared === previous) resumePreparations.delete(key);
+        const { executionWorkspaceId, executionCwd: _privatePath, ...rest } = operation;
+        const cwd = executionWorkspaceId ? await options.resolveImportWorkspace?.(executionWorkspaceId) : undefined;
+        if (executionWorkspaceId && !cwd) throw new StudioHostError("INVALID_ARGUMENT", desktopText("未知的执行工作区", "Unknown execution workspace"));
+        operation = { ...rest, ...(executionWorkspaceId ? { executionWorkspaceId } : {}), ...(cwd ? { executionCwd: cwd } : {}) };
+      }
       if (operation.kind === "session.import.execute") {
         if (!options.registerImportedWorkspace) throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Workspace import registration is unavailable");
         const { fallbackWorkspaceId, fallbackCwd: _privatePath, ...rest } = operation;
@@ -424,6 +474,7 @@ export function createDesktopSemanticCommands(options: {
       });
       if (receipt.status !== "completed" && mediaDirectory && grants.length) await options.mediaFiles?.releaseInputs(mediaDirectory, grants);
       throwIfNotCompleted(receipt);
+      if (session.controller.publication()?.snapshot.sessionId !== snapshot.sessionId) await options.synchronizeSessionIdentity?.(session);
       const latest = session.controller.publication()?.snapshot ?? snapshot;
       if (operation.kind === "session.import.execute") {
         const imported = receipt.result as { imported?: unknown; sessionId?: unknown; cwd?: unknown };
@@ -433,10 +484,19 @@ export function createDesktopSemanticCommands(options: {
         return { snapshot: latest, result: { imported: true, sessionId: imported.sessionId, workspaceId } };
       }
       if (operation.kind === "worktrees.session.resume.prepare") {
-        const result = receipt.result as { targetSessionId: string; requestedSessionId: string; cwd: string };
-        if (!result.cwd || !options.registerImportedWorkspace) throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Resume workspace registration is unavailable");
-        const workspaceId = await options.registerImportedWorkspace(result.cwd);
-        return { snapshot: latest, result: { targetSessionId: result.targetSessionId, requestedSessionId: result.requestedSessionId, workspaceId } };
+        const result = receipt.result as SessionResumePreparation;
+        let workspace: { workspaceId: string; cwd: string } | undefined;
+        if (result.executionCwd !== undefined && !result.requiresWorkspaceSelection) {
+          if (!options.registerImportedWorkspace) throw new StudioHostError("CAPABILITY_UNAVAILABLE", desktopText("恢复工作区注册不可用", "Resume workspace registration is unavailable"));
+          workspace = { workspaceId: await options.registerImportedWorkspace(result.executionCwd), cwd: result.executionCwd };
+        }
+        const now = Date.now();
+        for (const [key, prepared] of resumePreparations) if (prepared.expiresAt <= now) resumePreparations.delete(key);
+        while (resumePreparations.size > 30) resumePreparations.delete(resumePreparations.keys().next().value!);
+        const prepared = { result, ...(workspace ? { workspace } : {}), expiresAt: now + 300_000 };
+        resumePreparations.set(threadIdFor(result.targetSessionId), prepared);
+        resumePreparations.set(threadIdFor(result.requestedSessionId), prepared);
+        return { snapshot: latest, result: { ...result, ...(workspace ? { workspaceId: workspace.workspaceId, threadId: threadIdFor(result.targetSessionId) } : { requiresWorkspaceSelection: true }) } };
       }
       if (operation.kind === "worktrees.session.create" || operation.kind === "worktrees.session.open") {
         const result = receipt.result as { cwd?: string; worktree?: SessionWorktreeRow };
@@ -494,6 +554,7 @@ export function createDesktopSemanticCommands(options: {
         }
         return { snapshot: latest, result: { ...detail, images } };
       }
+      if (isModelServicesKind(operation.kind)) return receipt.result as ModelServicesCommandResultMap[keyof ModelServicesCommandResultMap];
       if (isWorkbenchOperationKind(operation.kind) || isUpgradeOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
       if (isEvaluationOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
       if (operation.kind === "operator.invoke") {
@@ -611,7 +672,7 @@ async function releaseResidentSession(
   options.bindSession(next);
   const nextId = next?.controller.publication()?.snapshot?.sessionId;
   if (nextId === sessionId) {
-    throw new StudioHostError("COMMAND_BLOCKED", "无法离开当前会话，归档已取消");
+    throw new StudioHostError("COMMAND_BLOCKED", desktopText("无法离开当前会话，归档已取消", "Cannot leave the current session; archive cancelled"));
   }
   return true;
 }

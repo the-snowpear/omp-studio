@@ -1,4 +1,11 @@
 import { StudioSearchCredentialsService } from "./search-credentials-service";
+import { inspectStudioAntigravity } from "./antigravity-readiness";
+import { StudioCommitService } from "./commit-service";
+import { StudioPromptHistoryService } from "./prompt-history-service";
+import { StudioModelSystemTemplatesService } from "./model-system-templates-service";
+import { StudioModelAuthService } from "./model-auth-service";
+import { StudioModelRosterService } from "./model-roster-service";
+import type { ModelServicesOperation } from "../model-services-protocol";
 import { StudioQueuedCompactionService } from "./queued-compaction-service";
 import { StudioRuntimeViews } from "./runtime-view-service";
 import type { MCPManager } from "../../mcp/manager";
@@ -173,6 +180,11 @@ export class StudioWorkbenchService {
 	readonly skillshare: StudioSkillshareService;
 	readonly media: StudioMediaService;
 	readonly benchmarks: StudioBenchmarkService;
+	readonly modelSystemTemplates: StudioModelSystemTemplatesService;
+	readonly modelAuth: StudioModelAuthService;
+	readonly modelRoster: StudioModelRosterService;
+	readonly promptHistory: StudioPromptHistoryService;
+	#commit: StudioCommitService | undefined;
 	readonly views: StudioRuntimeViews;
 	readonly catalog: StudioRuntimeCatalogService;
 	readonly judgments: StudioJudgmentService;
@@ -189,6 +201,7 @@ export class StudioWorkbenchService {
 		readonly session: AgentSession,
 		readonly liveAudio = new StudioLiveAudioService(session),
 		mcpManager?: MCPManager,
+		readonly runtimeEpoch: () => number = () => 0,
 	) {
 		this.advisorConfig = new StudioAdvisorConfigService(session);
 		this.contextView = new StudioContextViewService(session);
@@ -218,7 +231,14 @@ export class StudioWorkbenchService {
 		this.judgments = new StudioJudgmentService(session);
 		this.runtimeFeatures = new StudioRuntimeFeatureService(session, mcpManager);
 		this.catalog = new StudioRuntimeCatalogService(session, mcpManager);
+		this.modelSystemTemplates = new StudioModelSystemTemplatesService(session);
+		this.modelAuth = new StudioModelAuthService(session);
+		this.modelRoster = new StudioModelRosterService(session);
+		this.promptHistory = new StudioPromptHistoryService(session);
 		this.views = new StudioRuntimeViews(session, liveAudio);
+		this.views.modelServicesReader = operation => this.executeModelServices(operation);
+		this.views.commitReader = operation => this.commit.execute(operation);
+		this.views.promptHistoryReader = operation => this.promptHistory.execute(operation);
 		this.benchmarks = new StudioBenchmarkService(session);
 		this.media = new StudioMediaService(session);
 		this.annotations = new StudioAnnotationService(session);
@@ -228,7 +248,13 @@ export class StudioWorkbenchService {
 		this.managedBrowser = new StudioManagedBrowserService(session);
 		this.computerObservation = new StudioComputerObservationService(session, undefined, this.computerWorkspace);
 	}
+	get commit(): StudioCommitService {
+		return (this.#commit ??= new StudioCommitService(this.session, this.runtimeEpoch));
+	}
 	dispose(): void {
+		this.#commit?.dispose();
+		this.modelAuth.dispose();
+		this.modelRoster.dispose();
 		this.views.dispose();
 		this.queuedCompaction.dispose();
 		this.contextView.dispose();
@@ -252,11 +278,32 @@ export class StudioWorkbenchService {
 		this.media.dispose();
 		this.liveAudio.dispose();
 	}
+	async executeModelServices(operation: ModelServicesOperation): Promise<unknown> {
+		if (operation.kind === "models.available.refresh") return this.modelRoster.refreshAll(operation.sessionId);
+		if (operation.kind === "models.available.read" || operation.kind === "models.available.release")
+			return this.modelRoster.available(operation);
+		if (operation.kind === "models.antigravity.readiness")
+			return inspectStudioAntigravity(this.session, operation.sessionId);
+		if (operation.kind.startsWith("models.systemTemplates."))
+			return this.modelSystemTemplates.execute(
+				operation as Extract<ModelServicesOperation, { kind: `models.systemTemplates.${string}` }>,
+			);
+		if (operation.kind.startsWith("models.auth."))
+			return this.modelAuth.execute(operation as Extract<ModelServicesOperation, { kind: `models.auth.${string}` }>);
+		if (operation.kind === "models.provider.roster.refresh")
+			return this.modelRoster.refresh(operation.sessionId, operation.providerId);
+		if (operation.kind === "models.accounts.resetPolicy.set")
+			return this.accounts.setResetPolicy(operation.sessionId, operation.key, operation.mode);
+		throw new SessionControlError("COMMAND_BLOCKED", "Unknown native model operation");
+	}
 	async execute(operation: WorkbenchOperation): Promise<unknown> {
 		const result = await this.#execute(operation);
 		return result;
 	}
 	async #execute(operation: WorkbenchOperation): Promise<unknown> {
+		if (operation.kind === "commit.draft.select" || operation.kind === "commit.draft.execute")
+			return this.commit.execute(operation);
+		if (operation.kind === "history.prompts.delete") return this.promptHistory.execute(operation);
 		if (
 			operation.kind === "search.credentials.list" ||
 			operation.kind === "search.credentials.set" ||
@@ -356,6 +403,7 @@ export class StudioWorkbenchService {
 		)
 			return this.media.execute(operation);
 		if (
+			operation.kind === "benchmarks.accounts.read" ||
 			operation.kind === "benchmarks.list" ||
 			operation.kind === "benchmarks.start" ||
 			operation.kind === "benchmarks.read" ||

@@ -3,14 +3,13 @@ import { Settings } from "../src/config/settings";
 import { cfgProvidersCacheWarming } from "../src/session/settings";
 import { applyStudioDefaults } from "../src/studio/settings-defaults";
 
-test("Studio disables unconfigured warming without changing CLI or blocking later explicit choices", () => {
+test("Studio startup preserves native warming policy and later explicit choices", () => {
 	const cli = Settings.isolated();
 	const studio = Settings.isolated();
+	const nativePolicy = cfgProvidersCacheWarming.get(cli);
 	applyStudioDefaults(studio);
-	expect(cfgProvidersCacheWarming.get(studio)).toBe("off");
-	expect(cfgProvidersCacheWarming.get(cli)).toBe("idle");
+	expect(cfgProvidersCacheWarming.get(studio)).toBe(nativePolicy);
 	cfgProvidersCacheWarming.set(studio, "streaming");
-	expect(cfgProvidersCacheWarming.get(studio)).toBe("streaming");
 	applyStudioDefaults(studio);
 	expect(cfgProvidersCacheWarming.get(studio)).toBe("streaming");
 });

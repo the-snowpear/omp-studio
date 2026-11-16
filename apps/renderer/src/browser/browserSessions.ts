@@ -1,14 +1,26 @@
 import { useSyncExternalStore } from "react";
-import type { BrowserElementReference, ManagedBrowserCommand, ManagedBrowserEvent, ManagedBrowserState } from "@omp-studio/studio-protocol";
+import type { StudioClient } from "@omp-studio/client-contract";
+import type { BrowserElementReference, ManagedBrowserApi, ManagedBrowserCommand, ManagedBrowserEvent, ManagedBrowserState } from "@omp-studio/studio-protocol";
 import { createPreviewBrowserBackend } from "../preview/managedBrowserPreview";
+import { createNativeBrowserBackend } from "./browserNativeBackend";
 
 type WithoutSession<Command> = Command extends { sessionId: string } ? Omit<Command, "sessionId"> : never;
 export type BrowserAction = WithoutSession<ManagedBrowserCommand>;
-/** The desktop API or the preview twin; `present` stays with each pane's own window. */
+/** A pane's private controller. Frames and input remain local, outside the shared read model. */
+export interface BrowserPageController {
+  execute(action: BrowserAction): Promise<void>;
+  release(): Promise<void>;
+}
+/** Native inventory plus the explicit embedded adapter; presentation stays with the owning window. */
 export interface BrowserBackend {
+  readonly native?: boolean;
+  readonly embedded?: boolean;
   read(sessionId: string): Promise<ManagedBrowserState>;
   execute(command: ManagedBrowserCommand): Promise<ManagedBrowserState>;
   subscribe(listener: (event: ManagedBrowserEvent) => void): () => void;
+  watch?(sessionId: string): () => void;
+  bindPage?(sessionId: string, pageId: string, controller: BrowserPageController): () => void;
+  updatePage?(sessionId: string, pageId: string, patch: Partial<ManagedBrowserState["pages"][number]>): void;
 }
 
 export interface BrowserSessionSnapshot {
@@ -43,6 +55,11 @@ export class BrowserSession {
   #version = 0;
   #reading = false;
   constructor(readonly id: string, private readonly backend: BrowserBackend) {}
+  get nativeAvailable(): boolean { return this.backend.native === true; }
+  get embeddedAvailable(): boolean { return this.backend.embedded !== false; }
+  watch(): () => void { return this.backend.watch?.(this.id) ?? (() => {}); }
+  bindPage(pageId: string, controller: BrowserPageController): () => void { return this.backend.bindPage?.(this.id, pageId, controller) ?? (() => {}); }
+  updatePage(pageId: string, patch: Partial<ManagedBrowserState["pages"][number]>): void { this.backend.updatePage?.(this.id, pageId, patch); }
 
   subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
@@ -100,7 +117,9 @@ export class BrowserSession {
     if (this.#snapshot.closing.includes(pageId)) return false;
     this.#set({ closing: [...this.#snapshot.closing, pageId], error: "" });
     try {
-      await this.backend.execute({ action: "close-handoff", pageId, sessionId: this.id });
+      const version = this.#version;
+      const state = await this.backend.execute({ action: "close-handoff", pageId, sessionId: this.id });
+      if (version === this.#version) this.#set({ state });
       return true;
     } catch (cause) { this.#set({ error: message(cause) }); return false; }
     finally { this.#set({ closing: this.#snapshot.closing.filter(item => item !== pageId) }); }
@@ -136,8 +155,12 @@ export class BrowserSession {
     this.#linkedPages.set(key, { pageId, url });
     if (this.#linkedPages.size > 100) this.#linkedPages.delete(this.#linkedPages.keys().next().value!);
   }
-  create(url: string, options: { openerPageId?: string | undefined; spaceId?: string | undefined; linkKey?: string | undefined } = {}): Promise<ManagedBrowserState | null> {
-    return this.execute({ action: "create", url, spaceId: options.spaceId ?? this.#snapshot.newTabSpaceId, ...(options.openerPageId ? { openerPageId: options.openerPageId } : {}) }).then(state => {
+  create(url: string, options: { openerPageId?: string | undefined; spaceId?: string | undefined; linkKey?: string | undefined; app?: string | undefined; argv?: string[] | undefined; target?: string | undefined; insecure?: boolean | undefined } = {}): Promise<ManagedBrowserState | null> {
+    return this.execute({ action: "create", url, spaceId: options.spaceId ?? this.#snapshot.newTabSpaceId,
+      ...(options.openerPageId ? { openerPageId: options.openerPageId } : {}),
+      ...(options.app === undefined ? {} : { app: options.app }), ...(options.argv === undefined ? {} : { argv: options.argv }),
+      ...(options.target === undefined ? {} : { target: options.target }), ...(options.insecure === undefined ? {} : { insecure: options.insecure }),
+    }).then(state => {
       if (options.linkKey && state?.activePageId) this.#rememberLink(options.linkKey, url, state.activePageId);
       return state;
     });
@@ -181,9 +204,19 @@ export class BrowserHub {
 }
 
 const hubs = new WeakMap<object, BrowserHub>();
+const nativeHubs = new WeakMap<StudioClient, WeakMap<object, BrowserHub>>();
+const noEmbedded = {};
 let previewBackend: BrowserBackend | undefined;
-/** Real panes share the desktop API's hub; preview panes share one in-memory demo browser. */
-export function browserHub(preview: boolean, api = globalThis.ompStudioChrome?.managedBrowser): BrowserHub | null {
+/** The client selects the native registry, never an Electron-presence test. Old runtimes keep their explicit legacy adapter. */
+export function browserHub(preview: boolean, api: ManagedBrowserApi | undefined = globalThis.ompStudioChrome?.managedBrowser, client?: StudioClient): BrowserHub | null {
+  if (!preview && client) {
+    let byAdapter = nativeHubs.get(client);
+    if (!byAdapter) nativeHubs.set(client, byAdapter = new WeakMap());
+    const key = api ?? noEmbedded;
+    let hub = byAdapter.get(key);
+    if (!hub) byAdapter.set(key, hub = new BrowserHub(createNativeBrowserBackend(client, api)));
+    return hub;
+  }
   const backend = preview ? previewBackend ??= createPreviewBrowserBackend() : api;
   if (!backend) return null;
   let hub = hubs.get(backend);

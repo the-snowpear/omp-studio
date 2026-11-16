@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product kit sheet (dev only)</title>
+<meta name="robots" content="noindex">
+<style>
+  body { margin: 0; font-family: system-ui; }
+  section { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; padding: 20px; }
+  section[data-theme="light"] { background: #ebe9f5; }
+  section[data-theme="dark"] { background: #07080c; }
+  .ow { height: 300px; }
+  p { grid-column: 1 / -1; margin: 0; display: flex; gap: 12px; align-items: center; color: #888; }
+  p span { font-size: 28px; color: #888; }
+</style>
+</head>
+<body>
+<script type="module">
+import "@fontsource-variable/jetbrains-mono/wght.css";
+import "./shared/base.css";
+import "./shared/ui.css";
+import { KINDS, ompWindow } from "./shared/ui";
+import { icon, piMark } from "./shared/icons";
+for (const theme of ["light", "dark"]) {
+  const s = document.createElement("section");
+  s.className = "omp";
+  s.dataset.theme = theme;
+  Object.keys(KINDS).forEach((kind, n) => s.append(ompWindow({ kind, focused: n === 0 })));
+  const marks = document.createElement("p");
+  marks.innerHTML = piMark(40) + ["windows", "apple", "github"].map((k) => `<span class="i">${icon[k]}</span>`).join("");
+  s.append(marks);
+  document.body.append(s);
+}
+</script>
+</body>
+</html>

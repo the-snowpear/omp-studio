@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { DockPanelMeter, type PanelStatusCount, type PanelStatusMeter } from "../dock/panelMeters";
 import { useI18n } from "../i18n";
-import { PREVIEW_CHANGES } from "../preview/fixtures";
+import { getPreviewChanges } from "../preview/fixtures";
 import { usePreviewMode } from "../preview/PreviewContext";
 import type { TimelineRow } from "./conversationViewModel";
 import { listSessionChangeTurns, SESSION_CHANGE_LAST_ID, type TurnFileChange } from "./toolMeta";
@@ -54,9 +54,9 @@ export function ChangesDockMeter({ rows }: { rows: readonly TimelineRow[] }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const files = useMemo<readonly ChangeRow[]>(() => preview
-    ? PREVIEW_CHANGES.turn.map(row => ({ path: row.file, add: row.add, del: row.del }))
-    : listSessionChangeTurns(rows).find(turn => turn.id === SESSION_CHANGE_LAST_ID)?.files ?? [],
-  [preview, rows]);
+    ? getPreviewChanges(zh).turn.map(row => ({ path: row.file, add: row.add, del: row.del }))
+    : listSessionChangeTurns(rows, zh).find(turn => turn.id === SESSION_CHANGE_LAST_ID)?.files ?? [],
+  [preview, rows, zh]);
   const meter = useMemo(() => buildChangesDockMeter({ files, preview, marks, zh }), [files, preview, marks, zh]);
   return <DockPanelMeter id="changes" value={meter} />;
 }

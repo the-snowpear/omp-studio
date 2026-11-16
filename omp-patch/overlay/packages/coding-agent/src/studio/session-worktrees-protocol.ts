@@ -1,3 +1,6 @@
+import * as path from "node:path";
+import type { SessionResumePreparation } from "./session-lifecycle-protocol";
+
 export interface SessionResumeRow {
 	sessionId: string;
 	title: string;
@@ -40,6 +43,9 @@ export type SessionWorktreeOperation =
 			sessionId: string;
 			targetSessionId: string;
 			scope: "directory" | "repo";
+			executionWorkspaceId?: string;
+			/** Host-resolved private path, never accepted from a client. */
+			executionCwd?: string;
 	  }
 	| { kind: "worktrees.session.list"; sessionId: string }
 	| { kind: "worktrees.session.startPolicy"; sessionId: string }
@@ -56,12 +62,7 @@ export type SessionWorktreeOperation =
 	| { kind: "worktrees.session.remove.apply"; sessionId: string; token: string };
 export interface SessionWorktreeResultMap {
 	"worktrees.session.resume.list": { scope: "directory" | "repo"; sessions: SessionResumeRow[]; truncated: boolean };
-	"worktrees.session.resume.prepare": {
-		targetSessionId: string;
-		requestedSessionId: string;
-		workspaceId?: string;
-		cwd?: string;
-	};
+	"worktrees.session.resume.prepare": SessionResumePreparation;
 	"worktrees.session.list": { worktrees: SessionWorktreeRow[]; truncated: boolean };
 	"worktrees.session.startPolicy": WorktreeStartPolicy;
 	"worktrees.session.continueHere": { continued: true };
@@ -100,10 +101,24 @@ function flag(value: unknown): void {
 	if (typeof value !== "boolean") throw Error("Invalid worktree flag");
 }
 export function validateSessionWorktreeOperation(value: unknown): void {
-	const resume = value as { kind?: string; sessionId?: unknown; targetSessionId?: unknown; scope?: unknown };
+	const resume = value as {
+		kind?: string;
+		sessionId?: unknown;
+		targetSessionId?: unknown;
+		scope?: unknown;
+		executionWorkspaceId?: unknown;
+		executionCwd?: unknown;
+	};
 	if (resume.kind === "worktrees.session.resume.list" || resume.kind === "worktrees.session.resume.prepare") {
 		text(resume.sessionId, 128);
-		if (resume.kind.endsWith("prepare")) text(resume.targetSessionId, 128);
+		if (resume.kind.endsWith("prepare")) {
+			text(resume.targetSessionId, 128);
+			if (resume.executionWorkspaceId !== undefined) text(resume.executionWorkspaceId, 128);
+			if (resume.executionCwd !== undefined) {
+				text(resume.executionCwd, 32768);
+				if (!path.isAbsolute(resume.executionCwd as string)) throw Error("Execution workspace must be absolute");
+			}
+		}
 		if (resume.scope !== undefined && resume.scope !== "directory" && resume.scope !== "repo")
 			throw Error("Invalid resume scope");
 		return;

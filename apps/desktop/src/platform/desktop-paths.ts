@@ -8,6 +8,8 @@
  * (never inside the signed `.app`) and reads bundled seeds from the bundle's
  * `Contents/Resources` (`process.resourcesPath`), because `dirname(execPath)`
  * there is `Contents/MacOS`.
+ * Linux keeps the same single-root layout under `$XDG_CONFIG_HOME/omp-studio`
+ * (default `~/.config/omp-studio`) and uses `process.resourcesPath` for seeds.
  */
 import { execFileSync } from "node:child_process";
 import { homedir as osHomedir, tmpdir } from "node:os";
@@ -17,7 +19,7 @@ export const STATE_DIRECTORY_NAME = "omp-studio";
 export const ENDPOINT_REGISTRY_DIRECTORY_NAME = "omp-studio-endpoints";
 
 export interface DesktopPaths {
-  /** `%APPDATA%` / `~/Library/Application Support`. */
+  /** `%APPDATA%` / `~/Library/Application Support` / `$XDG_CONFIG_HOME`. */
   readonly appDataRoot: string;
   /** Profile state: workspace registry, keys, logs, git preferences. */
   readonly stateRoot: string;
@@ -70,6 +72,22 @@ export function resolveDesktopPaths(input: DesktopPathInputs): DesktopPaths {
       endpointRegistryRoot: posix.join(appDataRoot, ENDPOINT_REGISTRY_DIRECTORY_NAME),
     };
   }
+  if (input.platform === "linux") {
+    // XDG ignores empty and relative values; never write profile data into cwd.
+    const xdgConfigHome = env.XDG_CONFIG_HOME ?? "";
+    const appDataRoot = posix.isAbsolute(xdgConfigHome) ? xdgConfigHome : posix.join(home, ".config");
+    const stateRoot = posix.join(appDataRoot, STATE_DIRECTORY_NAME);
+    return {
+      appDataRoot,
+      stateRoot,
+      logsRoot: posix.join(stateRoot, "logs"),
+      keysRoot: posix.join(stateRoot, "keys"),
+      runtimesRoot: posix.join(stateRoot, "runtimes"),
+      updatesV2Root: posix.join(stateRoot, "updates-v2"),
+      legacyStagingRoot: posix.join(stateRoot, "updates"),
+      endpointRegistryRoot: posix.join(appDataRoot, ENDPOINT_REGISTRY_DIRECTORY_NAME),
+    };
+  }
   throw new Error(`Unsupported desktop platform: ${input.platform}`);
 }
 
@@ -83,7 +101,7 @@ export interface PackagedResourcePaths {
 export function packagedResourcePaths(input: {
   readonly platform: NodeJS.Platform;
   readonly execPath: string;
-  /** `process.resourcesPath`; required on macOS. */
+  /** `process.resourcesPath`; required on macOS and Linux. */
   readonly resourcesPath?: string;
 }): PackagedResourcePaths {
   if (input.platform === "win32") {
@@ -96,6 +114,13 @@ export function packagedResourcePaths(input: {
   }
   if (input.platform === "darwin") {
     if (input.resourcesPath === undefined) throw new Error("macOS bundle resources path is required");
+    return {
+      bundledRuntimeRoot: posix.join(input.resourcesPath, "runtime", "versions"),
+      bundledKeysRoot: posix.join(input.resourcesPath, "runtime-keys"),
+    };
+  }
+  if (input.platform === "linux") {
+    if (input.resourcesPath === undefined) throw new Error("Linux package resources path is required");
     return {
       bundledRuntimeRoot: posix.join(input.resourcesPath, "runtime", "versions"),
       bundledKeysRoot: posix.join(input.resourcesPath, "runtime-keys"),
@@ -125,6 +150,9 @@ let socketTmpRoot: string | undefined;
 
 /** Temp root for Desktop's private unix-socket directories. */
 export function desktopSocketTmpRoot(): string {
+  // Linux launchers must agree even when a terminal exports a custom TMPDIR.
+  // Scope/uid isolation and 0700 ownership checks live in the socket service.
+  if (process.platform === "linux") return "/tmp";
   socketTmpRoot ??= process.platform === "darwin" ? darwinUserTempDir() : tmpdir();
   return socketTmpRoot;
 }

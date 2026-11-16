@@ -26,6 +26,7 @@ import type {
   SkillRecord,
 } from "@omp-studio/client-contract";
 
+import { hostText } from "./locale.js";
 import { redactText, sanitizeDisplayText } from "./read-models.js";
 import type { HostExtensibilityService } from "./services.js";
 import { discoverAll, discoverSkills } from "./omp-discovery/index.js";
@@ -74,8 +75,8 @@ function safeDesc(value: string | undefined): string {
 }
 
 function sourceLabelOf(kind: PluginSourceKind): string {
-  if (kind === "marketplace") return "市场";
-  if (kind === "link") return "链接";
+  if (kind === "marketplace") return hostText("市场", "Marketplace");
+  if (kind === "link") return hostText("链接", "Link");
   if (kind === "git") return "git";
   return "npm";
 }
@@ -93,7 +94,7 @@ function toSkillRecord(skill: DiscoveredSkill): SkillRecord {
     sourceLabel: skill.sourceLabel,
     enabled: skill.enabled,
     hide: skill.hide || skill.disableModelInvocation,
-    ...(desc.length === 0 ? { error: "SKILL.md 缺少 description" } : {}),
+    ...(desc.length === 0 ? { error: hostText("SKILL.md 缺少 description", "SKILL.md is missing description") } : {}),
   };
 }
 
@@ -105,7 +106,7 @@ function toPluginRecord(plugin: DiscoveredPlugin): PluginRecord {
   const displayName = sanitizeDisplayText(plugin.name, NAME_MAX) ?? "plugin";
   const version = sanitizeDisplayText(plugin.version, 32) ?? "0.0.0";
   const items = collectDeclaredItems(plugin.manifest);
-  const err = plugin.hasOmpManifest ? undefined : sanitizeDisplayText("package.json 缺少 omp/pi", 80);
+  const err = plugin.hasOmpManifest ? undefined : sanitizeDisplayText(hostText("package.json 缺少 omp/pi", "package.json is missing omp/pi"), 80);
 
   return {
     name: displayName,
@@ -197,7 +198,7 @@ async function atomicWriteText(filePath: string, content: string): Promise<void>
 function editFrontmatterEnabled(content: string, enabled: boolean): string {
   const match = /^---(\r?\n)([\s\S]*?)\r?\n---(\r?\n?)/.exec(content);
   if (match === null) {
-    throw { code: "INVALID_ARGUMENT", message: "SKILL.md 缺少 frontmatter，无法切换" };
+    throw { code: "INVALID_ARGUMENT", message: hostText("SKILL.md 缺少 frontmatter，无法切换", "SKILL.md is missing frontmatter and cannot be toggled") };
   }
   const eol = match[1] as string;
   const block = match[2] as string;
@@ -440,8 +441,12 @@ export function createOmpExtensibilityService(
         await updateProjectOverrides(cwd, name, enabled);
       }
 
-      const where = target.scope === "project" ? "（项目级）" : "（用户级）";
-      return WRITE_OK(`已${enabled ? "启用" : "禁用"}插件 ${name}${where}，新会话生效。`);
+      const where = target.scope === "project" ? hostText("（项目级）", " (project)") : hostText("（用户级）", " (user)");
+      return WRITE_OK(
+        enabled
+          ? hostText(`已启用插件 ${name}${where}，新会话生效。`, `Enabled plugin ${name}${where}; takes effect in a new session.`)
+          : hostText(`已禁用插件 ${name}${where}，新会话生效。`, `Disabled plugin ${name}${where}; takes effect in a new session.`),
+      );
     },
 
     async setSkillEnabled(input: {
@@ -479,19 +484,23 @@ export function createOmpExtensibilityService(
         throw { code: "INVALID_ARGUMENT", message: `Skill "${name}" is not installed${detail}` };
       }
       if (target.scope === "builtin") {
-        throw { code: "INVALID_ARGUMENT", message: `Skill "${name}" 是内置技能，不可切换` };
+        throw { code: "INVALID_ARGUMENT", message: hostText(`Skill "${name}" 是内置技能，不可切换`, `Skill "${name}" is built in and cannot be toggled`) };
       }
 
       let content: string;
       try {
         content = await fs.readFile(target.path, "utf8");
       } catch {
-        throw { code: "UNAVAILABLE", message: `Skill "${name}" 的 SKILL.md 不可读` };
+        throw { code: "UNAVAILABLE", message: hostText(`Skill "${name}" 的 SKILL.md 不可读`, `Cannot read SKILL.md for skill "${name}"`) };
       }
       await atomicWriteText(target.path, editFrontmatterEnabled(content, enabled));
 
-      const where = target.scope === "workspace" ? "（项目级）" : "（用户级）";
-      return WRITE_OK(`已${enabled ? "启用" : "禁用"}技能 ${name}${where}。`);
+      const where = target.scope === "workspace" ? hostText("（项目级）", " (project)") : hostText("（用户级）", " (user)");
+      return WRITE_OK(
+        enabled
+          ? hostText(`已启用技能 ${name}${where}。`, `Enabled skill ${name}${where}.`)
+          : hostText(`已禁用技能 ${name}${where}。`, `Disabled skill ${name}${where}.`),
+      );
     },
 
     async revealSkill(input: {
@@ -500,17 +509,17 @@ export function createOmpExtensibilityService(
     }): Promise<ConfigWriteResult> {
       const reveal = options.revealDirectory;
       if (reveal === undefined) {
-        throw { code: "UNAVAILABLE", message: "无法打开系统文件资源管理器。" };
+        throw { code: "UNAVAILABLE", message: hostText("无法打开系统文件资源管理器。", "Unable to open the system file manager.") };
       }
       const target = await findSkill(input);
       const directory = path.dirname(target.path);
       try {
         await fs.access(directory);
       } catch {
-        throw { code: "UNAVAILABLE", message: `Skill "${target.name}" 没有本地目录` };
+        throw { code: "UNAVAILABLE", message: hostText(`Skill "${target.name}" 没有本地目录`, `Skill "${target.name}" has no local directory`) };
       }
       await reveal(directory);
-      return WRITE_OK(`已打开 ${target.name} 所在目录`);
+      return WRITE_OK(hostText(`已打开 ${target.name} 所在目录`, `Opened folder for ${target.name}`));
     },
 
     async revealSkillRoot(input?: {
@@ -518,7 +527,7 @@ export function createOmpExtensibilityService(
     }): Promise<ConfigWriteResult> {
       const reveal = options.revealDirectory;
       if (reveal === undefined) {
-        throw { code: "UNAVAILABLE", message: "无法打开系统文件资源管理器。" };
+        throw { code: "UNAVAILABLE", message: hostText("无法打开系统文件资源管理器。", "Unable to open the system file manager.") };
       }
       if (input?.scope !== undefined && input.scope !== "user" && input.scope !== "project") {
         throw { code: "INVALID_ARGUMENT", message: "skills.revealRoot scope must be 'user' or 'project'" };
@@ -532,7 +541,7 @@ export function createOmpExtensibilityService(
           : path.join(getAgentDir(home), "skills");
       await fs.mkdir(directory, { recursive: true });
       await reveal(directory);
-      return WRITE_OK(scope === "project" ? "已打开项目技能目录" : "已打开用户技能目录");
+      return WRITE_OK(scope === "project" ? hostText("已打开项目技能目录", "Opened project skills folder") : hostText("已打开用户技能目录", "Opened user skills folder"));
     },
   };
 }

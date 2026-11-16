@@ -89,7 +89,6 @@ export function appSource<K extends keyof AppSettings>(app: AppSettings, key: K)
 
 type RuntimeBooleanKey = "task.enableEffort" | "images.describeForTextModels" | "tools.speculativeExecution.enabled" | "edit.autoRepair.enabled" | "extendedContext" | "compaction.asyncEnabled" | "plan.autosave" | "retry.waitForUsageReset" | "compaction.experimentalContextManagement";
 type RuntimeScalarKey =
-  | "claudeResets.autoRedeem"
   | "ttsr.judge"
   | "task.maxEffort"
   | "providers.autoThinkingMaxEffort"

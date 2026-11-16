@@ -6,7 +6,7 @@ import { AgentDetailPanel } from "./AgentDetailPanel";
 import { AgentRosterPanel } from "./AgentRosterPanel";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_DOCK_AGENTS } from "../preview/agentDockPreview";
-import { createSubagentViewBook, createSubagentViewState, subagentViewKey } from "../conversation/subagentViewState";
+import { createSubagentViewBook, createSubagentViewState, nextSubagentBtwIntent, subagentViewKey } from "../conversation/subagentViewState";
 import type { SubagentHubTarget } from "../conversation/toolMeta";
 import { DockProvider, DockPanel, DockSlot, useDock, useDockEngine } from "../dock/DockContext";
 import { WORKBENCH_PANELS } from "../panels/registry";
@@ -25,6 +25,40 @@ beforeEach(() => {
 afterEach(() => { cleanup(); window.dispatchEvent(new Event("pagehide")); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("Agent dock entry points", () => {
+  it("opens BTW again after the workbench remounts and keeps the previous draft", async () => {
+    const viewState = createSubagentViewState();
+    const command = vi.fn(), query = vi.fn();
+    const client = { command, query, subscribe: () => () => {} } as unknown as StudioClient;
+    function Workbench() {
+      const [intent, setIntent] = useState<number | undefined>(undefined);
+      return <>
+        <button onClick={() => setIntent(nextSubagentBtwIntent(viewState))}>Deck BTW</button>
+        <AgentDetailPanel target={{ agentId: "agent-019fcb01" }} scope="reopened-parent" agents={PREVIEW_DOCK_AGENTS} viewState={viewState}
+          visible client={client} conversationClient={null} runtimeConnected={false} canSend={false} canBtw={false}
+          {...(intent === undefined ? {} : { btwIntent: intent })} onMain={vi.fn()} onOpenHub={vi.fn()} onRevealSource={async () => false} />
+      </>;
+    }
+    function Views() {
+      const [open, setOpen] = useState(true);
+      return <><button onClick={() => setOpen(value => !value)}>Toggle workbench</button>{open ? <Workbench /> : null}</>;
+    }
+    render(<PreviewModeProvider switchEnabled><Views /></PreviewModeProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Deck BTW" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "BTW" }).getAttribute("aria-selected")).toBe("true"));
+    const editor = screen.getByRole("textbox");
+    editor.textContent = "Keep this BTW draft";
+    fireEvent.input(editor);
+    fireEvent.click(screen.getByRole("tab", { name: "对话" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle workbench" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle workbench" }));
+    expect(screen.getByRole("tab", { name: "对话" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Deck BTW" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "BTW" }).getAttribute("aria-selected")).toBe("true"));
+    await waitFor(() => expect(screen.getByRole("textbox").textContent).toBe("Keep this BTW draft"));
+    expect(command).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it("does not locate a pinned agent's delegation in a different parent conversation", () => {
     const client = { query: vi.fn(), command: vi.fn(), subscribe: () => () => {} } as unknown as StudioClient;
     render(<PreviewModeProvider switchEnabled><AgentDetailPanel target={{ agentId: "agent-019fcb01", toolCallId: "delegate" }} scope="old-parent"

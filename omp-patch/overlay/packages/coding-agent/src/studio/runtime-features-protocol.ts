@@ -52,7 +52,12 @@ export interface JobWidgetView {
 }
 
 /** Upstream `AsyncJobInspection` for one job. */
+import type { TaskStepState } from "@oh-my-pi/pi-tui/tools/task";
+import type { JobActionsView } from "./job-actions-protocol";
+
 export interface JobInspection {
+	actions?: JobActionsView;
+	taskSteps?: TaskStepState;
 	purpose?: string;
 	caption?: string;
 	jobId: string;
@@ -102,7 +107,9 @@ export type RuntimeFeatureOperation =
 	| { kind: "seance.ask"; sessionId: string; source: string; task: string; model?: string };
 export interface RuntimeFeatureResultMap {
 	"agent.spawn.options": {
-		fileEnabled: boolean;
+		stepsAdvertised: boolean;
+		autoParallel: "off" | "suggest" | "on";
+		effortSelection: boolean;
 		modelSelection: boolean;
 		maxEffort: string;
 		models: Array<{ selector: string; name: string; thinkingLevels: readonly string[] }>;

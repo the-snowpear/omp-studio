@@ -1,0 +1,166 @@
+/* Below the take: the focus rack of full pages, the quiet list, download, footer. */
+
+/* ---------------- 功能: focus rack ---------------- */
+.b-pages {
+  position: relative;
+  height: 520vh;
+}
+.b-pages-stage {
+  position: sticky;
+  top: 0;
+  display: grid;
+  grid-template-columns: minmax(270px, 0.5fr) minmax(0, 1.6fr);
+  gap: clamp(28px, 5vw, 80px);
+  align-items: center;
+  height: 100vh;
+  height: 100svh;
+  padding: 76px var(--pad) 40px;
+  overflow: hidden;
+}
+.b-pages-copy h2 { font-size: clamp(30px, 2.7vw + 6px, 56px); }
+.b-pages-index {
+  display: grid;
+  gap: 2px;
+  margin: clamp(22px, 4vh, 44px) 0 0 -12px;
+}
+.b-pages-index button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--muted);
+  font-family: var(--serif);
+  font-size: var(--t-h3);
+  font-variation-settings: "SOFT" 100, "WONK" 0;
+  text-align: left;
+  transition: color 0.25s ease, background-color 0.25s ease;
+}
+.b-pages-index button .i { font-size: 0.8em; opacity: 0.7; }
+.b-pages-index button:hover { color: var(--paper); }
+.b-pages-index button[aria-current] {
+  background: rgb(158 140 252 / 0.13);
+  color: var(--paper);
+}
+.b-pages-index button[aria-current] .i { color: var(--accent); opacity: 1; }
+.b-pages-text {
+  display: grid;
+  margin-top: clamp(16px, 3vh, 30px);
+  max-width: 27em;
+}
+.b-pages-text p {
+  grid-area: 1 / 1;
+  color: var(--muted);
+  opacity: 0;
+  translate: 0 8px;
+  transition: opacity 0.3s ease, translate 0.4s var(--ease);
+}
+.b-pages-text p[data-on] {
+  color: #cfc6e4;
+  opacity: 1;
+  translate: 0 0;
+  transition-delay: 0.12s;
+}
+
+.b-rack {
+  position: relative;
+  aspect-ratio: 1440 / 900;
+  width: 100%;
+  max-width: calc((100svh - 210px) * 1.6);
+  margin-top: 40px;
+  justify-self: center;
+}
+/* Brand light behind the page in focus. */
+.b-rack::before {
+  content: "";
+  position: absolute;
+  inset: -16% -10%;
+  background:
+    radial-gradient(42% 46% at 32% 42%, rgb(255 79 216 / 0.2), transparent 70%),
+    radial-gradient(44% 50% at 68% 58%, rgb(56 182 255 / 0.18), transparent 72%),
+    radial-gradient(38% 42% at 50% 50%, rgb(139 92 246 / 0.34), transparent 70%);
+}
+.b-rack figure {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 0;
+  border: 1px solid rgb(226 214 255 / 0.16);
+  border-radius: 12px;
+  background: #121519;
+  box-shadow: 0 30px 70px -20px rgb(4 2 12 / 0.85);
+  overflow: hidden;
+  will-change: transform, opacity;
+}
+.b-rack img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 0 0;
+  transition: filter 0.45s ease;
+}
+.b-rack figure[data-soft] img { filter: blur(5px); }
+.b-rack figure > i {
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  opacity: 0;
+}
+
+@media (max-width: 860px) {
+  .b-pages { height: 460vh; }
+  .b-pages-stage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    gap: 0;
+    align-items: start;
+    padding-top: 72px;
+  }
+  .b-pages-index {
+    grid-template-columns: repeat(6, auto);
+    justify-content: start;
+    gap: 4px;
+    margin: 16px 0 0 -6px;
+  }
+  .b-pages-index button { padding: 8px 10px; font-size: 17px; }
+  .b-pages-index button span:not(.i) { display: none; }
+  .b-pages-index button[aria-current] span:not(.i) { display: inline; }
+  .b-pages-index button .i { font-size: 1em; }
+  .b-pages-text { margin-top: 12px; font-size: 15px; line-height: 1.65; }
+  .b-rack { margin-top: 0; align-self: center; }
+}
+
+/* Reduced motion: an ordinary list of pages. */
+.b-pages[data-static] { height: auto; }
+.b-pages[data-static] .b-pages-stage {
+  position: static;
+  display: block;
+  height: auto;
+  overflow: visible;
+  padding-block: clamp(64px, 10vh, 120px);
+}
+.b-pages[data-static] :is(.b-pages-index, .b-pages-text, .b-rack::before) { display: none; }
+.b-pages[data-static] .b-rack {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 40px 32px;
+  aspect-ratio: auto;
+  max-height: none;
+  margin-top: 40px;
+}
+.b-pages[data-static] .b-rack figure {
+  position: static;
+  overflow: visible;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.b-pages[data-static] .b-rack img {
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.b-pages[data-static] figcaption { margin-top: 14px; }
+.b-pages[data-static] figcaption p { margin-top: 4px; color: var(--muted); font-size: 15px; }

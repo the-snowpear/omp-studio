@@ -133,7 +133,7 @@
 
 .cv-meter {
   display: flex;
-  height: 14px;
+  height: 8px;
   overflow: hidden;
   background: var(--surface-active);
   border-radius: var(--r-full);
@@ -141,8 +141,20 @@
 
 .cv-meter i {
   display: block;
-  min-width: 2px;
+  min-width: 0;
+  flex: 0 0 auto;
+  box-sizing: border-box;
 }
+.cv-meter i + i { border-left: 2px solid var(--surface-2); }
+.cv-meter i:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+.cv-group-legend { display: flex; flex-wrap: wrap; gap: var(--sp-6) var(--sp-12); color: var(--text-3); font-size: var(--fs-11); }
+.cv-group-legend > span { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.cv-group-legend b { color: var(--text-2); font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
+.cv-dot[data-context-group="instructions"] { transform: rotate(45deg); border-radius: 1px; }
+.cv-dot[data-context-group="tools"] { border-radius: 2px; }
+.cv-dot[data-context-group="system"] { width: 10px; height: 3px; border-radius: 1px; }
+.cv-notices { grid-column: 1 / -1; margin: 0; padding: var(--sp-8) 0 0; border-top: 1px solid var(--border); color: var(--text-3); font-size: var(--fs-11); line-height: 1.5; list-style: none; }
+.cv-notices li + li { margin-top: var(--sp-4); }
 
 .cv-meter i[data-striped] {
   background-image: repeating-linear-gradient(
@@ -601,6 +613,15 @@ li[data-child] .cv-cat-label {
 .cv-body-scroll:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+.cv-source-mark { margin: 0; padding: 0; border: 0; border-bottom: 1px dashed; background: none; color: var(--text); font: inherit; line-height: inherit; white-space: inherit; text-align: left; }
+button.cv-source-mark { cursor: pointer; }
+button.cv-source-mark:hover { background: var(--surface-hover); }
+button.cv-source-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cv-read-error { color: var(--red); }
+@media print, (forced-colors: active) {
+  .cv-meter i[data-context-group="tools"], .cv-meter i[data-context-group="system"] { background-image: repeating-linear-gradient(45deg, transparent 0 3px, CanvasText 3px 5px); }
+  .cv-meter i[data-context-group="instructions"] { background-image: repeating-linear-gradient(135deg, transparent 0 3px, CanvasText 3px 5px); }
 }
 
 .cv-entry-foot {

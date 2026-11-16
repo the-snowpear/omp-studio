@@ -76,6 +76,7 @@ export function EvaluationPage({
   const { preview, marks } = usePreviewMode(),
     { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh",
+    previewLocale = preview ? resolvedLanguage : "",
     t = (cn: string, en: string) => (zh ? cn : en);
   const names = evaluationNames(zh),
     descriptions = evaluationDescriptions(zh);
@@ -132,7 +133,7 @@ export function EvaluationPage({
     setOffset(0);
     setCompare(undefined);
     if (preview) {
-      previewRecords.current = previewEvaluationRecords();
+      previewRecords.current = previewEvaluationRecords(zh);
       setRecords(previewRecords.current);
       setContext(EVALUATION_PREVIEW_CONTEXT);
     } else if (workspaceId)
@@ -148,7 +149,7 @@ export function EvaluationPage({
     return () => {
       epoch.current++;
     };
-  }, [client, workspaceId, preview]);
+  }, [client, workspaceId, preview, previewLocale]);
   useEffect(() => {
     if (intent) {
       setTab(intent.kind);
@@ -210,7 +211,7 @@ export function EvaluationPage({
       active = false;
       stop?.();
     };
-  }, [client, workspaceId, preview, tab, selected, offset, refresh]);
+  }, [client, workspaceId, preview, tab, selected, offset, refresh, previewLocale]);
   useEffect(() => {
     if (!history) return;
     let active = true;
