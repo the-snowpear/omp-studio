@@ -5,7 +5,7 @@
 // If a rule becomes intentionally wrong, change the table or the allowance in the
 // same commit as the code — that diff is the decision record.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { test } from "node:test";
@@ -57,31 +57,48 @@ function readUnits() {
 
 const units = readUnits();
 const byKey = new Map(units.map(unit => [unit.key, unit]));
+const sourceFileCache = new Map();
+const sourceTextCache = new Map();
+const importCache = new Map();
 
 // Only implementation sources: tests and fixtures may use whatever they need.
 function sourceFiles(dir) {
+  const cached = sourceFileCache.get(dir);
+  if (cached) return cached;
   const files = [];
-  const walk = current => {
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const path = join(current, entry.name);
+  if (existsSync(dir)) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
       if (entry.isDirectory()) {
         if (entry.name === "node_modules" || entry.name === "dist") continue;
-        walk(path);
+        files.push(...sourceFiles(path));
       } else if (/\.[cm]?[jt]sx?$/.test(entry.name) && !/\.test\.[cm]?[jt]sx?$/.test(entry.name)) {
         files.push(path);
       }
     }
-  };
-  if (existsSync(dir)) walk(dir);
+  }
+  sourceFileCache.set(dir, files);
   return files;
+}
+
+// All rules inspect the same source snapshot for this process.
+function sourceText(file) {
+  let text = sourceTextCache.get(file);
+  if (text === undefined) {
+    text = readFileSync(file, "utf8");
+    sourceTextCache.set(file, text);
+  }
+  return text;
 }
 
 const IMPORT = /(?:^\s*import\s+(?:type\s+)?[^"']*?from\s*|^\s*export\s+(?:type\s+)?[^"']*?from\s*|^\s*import\s*|require\s*\(\s*|import\s*\(\s*)["']([^"']+)["']/gm;
 
 function importsOf(file) {
-  const text = readFileSync(file, "utf8");
+  const cached = importCache.get(file);
+  if (cached) return cached;
   const found = [];
-  for (const match of text.matchAll(IMPORT)) found.push(match[1]);
+  for (const match of sourceText(file).matchAll(IMPORT)) found.push(match[1]);
+  importCache.set(file, found);
   return found;
 }
 
@@ -184,7 +201,7 @@ const CONTRACTS_THAT_MAY_THROW = {
 test("protocol contracts do not grow duplicate validators", () => {
   const contracts = join(root, "packages", "studio-protocol", "src", "contracts");
   const throwing = sourceFiles(contracts)
-    .filter(file => /\bthrow\b/.test(readFileSync(file, "utf8")))
+    .filter(file => /\bthrow\b/.test(sourceText(file)))
     .map(file => relative(contracts, file).split(sep).join("/"));
   const stray = throwing.filter(file => !Object.hasOwn(CONTRACTS_THAT_MAY_THROW, file));
   assert.deepEqual(stray, [], "validate Runtime operations in the overlay *-protocol.ts, not in contracts");
@@ -195,7 +212,7 @@ test("no layer re-validates another layer's output", () => {
   const dirs = [...units.map(unit => join(unit.dir, "src")), join(root, "omp-patch", "overlay")];
   const found = [];
   for (const file of dirs.flatMap(sourceFiles)) {
-    for (const match of readFileSync(file, "utf8").matchAll(OUTPUT_VALIDATOR)) found.push(`${name(file)}: ${match[1]}`);
+    for (const match of sourceText(file).matchAll(OUTPUT_VALIDATOR)) found.push(`${name(file)}: ${match[1]}`);
   }
   assert.deepEqual(found, [], "results and events are typed with `as`, not re-validated");
 });
@@ -204,7 +221,7 @@ test("the preview switch is defined once", () => {
   const definitions = [];
   const readers = [];
   for (const file of sourceFiles(join(root, "apps"))) {
-    const text = readFileSync(file, "utf8");
+    const text = sourceText(file);
     if (!text.includes("PREVIEW_MODE_SWITCH_ENABLED")) continue;
     if (/export\s+const\s+PREVIEW_MODE_SWITCH_ENABLED\s*=/.test(text)) definitions.push(name(file));
     else readers.push(name(file));

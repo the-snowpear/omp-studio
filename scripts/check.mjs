@@ -273,32 +273,33 @@ if (flags.has("--all") && !only) plan.test = new Set(allUnits());
 const failures = [];
 const started = Date.now();
 
+// Static rules are independent reads. Finish all three before compiling.
+const staticChecks = [];
 if (plan.arch) {
-  const result = await runStep({
+  staticChecks.push({
     name: "arch",
     command: process.execPath,
     args: ["--test", join(root, "scripts", "architecture.test.mjs")],
   });
-  report(result);
-  if (!result.ok) failures.push(result.name);
 }
 
 if (plan.selects) {
-  const result = await runStep({
+  staticChecks.push({
     name: "selects",
     command: process.execPath,
     args: [join(root, "scripts", "check-renderer-selects.mjs")],
   });
-  report(result);
-  if (!result.ok) failures.push(result.name);
 }
 
 if (plan.motion) {
-  const result = await runStep({
+  staticChecks.push({
     name: "motion",
     command: process.execPath,
     args: [join(root, "scripts", "check-renderer-motion.mjs")],
   });
+}
+
+for (const result of await Promise.all(staticChecks.map(runStep))) {
   report(result);
   if (!result.ok) failures.push(result.name);
 }

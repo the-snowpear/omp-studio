@@ -93,7 +93,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 
 | 事 | 文件 | 说明 |
 |---|---|---|
-| 一次检查跑什么 | `scripts/check.mjs` | 组 `arch` / `selects` / `motion` / `types` / `packages` / `renderer` / `production`；支持 `--fast`、`--only <组\|包>`、`--all`、`--production` |
+| 一次检查跑什么 | `scripts/check.mjs` | 静态规则并行完成后编译；组 `arch` / `selects` / `motion` / `types` / `packages` / `renderer` / `production`；支持 `--fast`、`--only <组\|包>`、`--all`、`--production` |
 | 核心回归名单 | `scripts/core-suites.mjs` | `check.mjs`、`test-core.mjs`、CI 共用一份，改名单只改这里 |
 | 分层与 Electron 边界 | `scripts/architecture.test.mjs` | 包依赖无环、依赖方向白名单、electron 只在 desktop、react 只在 renderer、renderer 不碰 Node、Host 不 import testkit、预览开关唯一、contracts 不长校验器、不写输出校验器 |
 | 选择器规则 | `scripts/check-renderer-selects.mjs` | 普通单选必须用 `AppSelect`，例外在文件内的 `allowed` 表 |

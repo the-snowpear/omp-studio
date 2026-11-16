@@ -13,6 +13,13 @@ import { WORKSPACE_STORAGE_KEY } from "./store";
 import { dragPreview } from "../dock/dragPreview";
 import { createDefaultLayout, dockReducer } from "../dock/model";
 
+// Keep the real shell, dock hosts and Composer; page bodies and PTY contents
+// are outside these window flows and have their own suites.
+vi.mock("../ModelConfigPage", () => ({ ModelConfigPage: () => null }));
+vi.mock("../SettingsPage", () => ({ SettingsPage: () => null }));
+vi.mock("../HistoryPage", () => ({ HistoryPage: () => null }));
+vi.mock("../TerminalPane", () => ({ TerminalPane: () => null }));
+
 // These full workbench flows include animated moves and mounted preview panels.
 vi.setConfig({ testTimeout: 15_000 });
 
@@ -56,6 +63,8 @@ async function mount(preview = false, input = client()) {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("PointerEvent", MouseEvent);
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  // JSDOM has no hit testing; each flow can supply its own elements under the pointer.
+  Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [] });
   vi.stubGlobal("URL", class extends URL {
     static createObjectURL = () => "blob:content-gallery";
     static revokeObjectURL = () => {};
@@ -295,16 +304,23 @@ describe("conversation windows", () => {
     for (const route of ["model-config", "settings", "history"]) {
       fireEvent.click(document.querySelector(`.app-rail-btn[data-route="${route}"]`)!);
       await waitFor(() => expect(document.querySelector("#pageBody")?.getAttribute("data-route")).toBe(route));
-      await waitFor(() => expect(panels.every(panel => !panel.isConnected || isInaccessible(panel))).toBe(true));
-      expect(isInaccessible(document.querySelector(".cw-sidebar-slot")!)).toBe(true);
-      expect(isInaccessible(document.querySelector(".cw-conversation-title-row")!)).toBe(true);
+      // Wait for attachment and visibility state without recomputing styles on every mutation.
+      await waitFor(() => expect(panels.every(panel => !panel.isConnected || panel.closest("[hidden]"))).toBe(true));
+      for (const panel of panels) if (panel.isConnected) expect(isInaccessible(panel)).toBe(true);
+      for (const selector of [".cw-sidebar-slot", ".cw-conversation-title-row", ".cw-right-slot", ".cw-bottom-slot"]) {
+        const slot = document.querySelector(selector)!;
+        expect(slot.hasAttribute("hidden")).toBe(true);
+        expect(slot.hasAttribute("inert")).toBe(true);
+        expect(isInaccessible(slot)).toBe(true);
+      }
       expect(isInaccessible(document.querySelector("#pageBody")!)).toBe(false);
       expect(screen.getByRole("navigation", { name: "Primary" })).toBeDefined();
       expect(document.querySelector(".dock-conversation-window")).toBeNull();
     }
     fireEvent.click(document.querySelector('.app-rail-btn[data-route="workbench"]')!);
     await waitFor(() => expect(document.querySelector("#pageBody")).toBeNull());
-    await waitFor(() => expect(panels.every(panel => panel.isConnected && !isInaccessible(panel))).toBe(true));
+    await waitFor(() => expect(panels.every(panel => panel.isConnected && !panel.closest("[hidden], [inert]"))).toBe(true));
+    for (const panel of panels) expect(isInaccessible(panel)).toBe(false);
     expect(document.querySelectorAll("#sidebar, #sidePanel, #bottomPanel, .bp-reveal, .topbar")).toHaveLength(5);
     expect(document.querySelector("[contenteditable=true]")).toBe(editor);
     expect(editor.textContent).toBe("切换独立页面保留草稿");
