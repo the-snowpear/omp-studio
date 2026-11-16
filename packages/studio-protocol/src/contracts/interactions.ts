@@ -18,6 +18,10 @@ export type RemoteInteractionRequest =
       kind: "select";
       options: Array<{ id: string; label: string; description?: string }>;
       multiple?: boolean;
+      initialIndex?: number;
+      selectionMarker?: "radio" | "checkbox";
+      checkedIndices?: readonly number[];
+      markableCount?: number;
     })
   | (InteractionBase & {
       kind: "input";

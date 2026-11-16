@@ -23,6 +23,9 @@ Public documentation for OMP Studio.
 | [releases/v0.1.11.md](releases/v0.1.11.md) | 0.1.11 发布页文案、三平台下载与升级说明 |
 | [releases/v0.1.10.md](releases/v0.1.10.md) | 0.1.10 发布页文案、三平台下载与升级说明 |
 | [migrations/omp-18.13.2.md](migrations/omp-18.13.2.md) | 18.12.6 → 18.13.2 正式版本变化、完整 Runtime / GUI 迁移与无付费验收 |
+| [migrations/omp-18.20.2.md](migrations/omp-18.20.2.md) | 18.19.0 → 18.20.2 分阶段迁移、同源 Runtime 与隔离验证范围 |
+| [migrations/omp-18.20.2-frontend-handoff.md](migrations/omp-18.20.2-frontend-handoff.md) | 前端接续阶段记录、typed API 与修复后的调用约定 |
+| [reviews/omp-18.20.2-frontend-fixes-2026-11-16.md](reviews/omp-18.20.2-frontend-fixes-2026-11-16.md) | 15 项前端复核修复、studio.5 canary、最终门禁与未验证边界 |
 | [migrations/omp-18.19.0.md](migrations/omp-18.19.0.md) | CLI-first GUI：原生表单、任务步骤、同页浏览器、系统模板、账户、Actions、GC 与兼容验收 |
 | [migrations/omp-18.18.0.md](migrations/omp-18.18.0.md) | 从 18.13.2-studio.44 升级至 18.18.0：逐版变化、worker / 队列 / Shell / WebRTC / WebMCP 适配与验证 |
 | [migrations/omp-18.12.6.md](migrations/omp-18.12.6.md) | 18.10.4 → 18.12.6 版本概览、Runtime 适配与新功能 GUI 入口 |

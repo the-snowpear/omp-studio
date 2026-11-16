@@ -3,7 +3,7 @@ import { AskActions, AskBody, AskHead } from "./AskCard";
 import { ASK_GENIE_HOLD_MS, ASK_GENIE_MS } from "./askGenie";
 import { MOTION_SLACK_MS, motionReduced } from "../motion";
 import { TAB_PANE_MS } from "../pageTransition";
-import { askAnswered, nextPicked, patchAskAnswer } from "./askContent";
+import { askAnswered, initialAskAnswer, nextPicked, patchAskAnswer } from "./askContent";
 import { PlanCard } from "./PlanCard";
 import { type DeckQueue } from "./PromptHead";
 import { NO_ASK_ANSWER, type AskHeader, type DeckAskAnswer, type DeckAskQuestion } from "./types";
@@ -296,12 +296,12 @@ export function QueuedDeck({
     setRemaining(next);
   }, [askPhase, beginSwap]);
 
-  const dismissAsk = useCallback(async (item: QueuedAskItem, reason: "submit" | "cancel") => {
+  const dismissAsk = useCallback(async (item: QueuedAskItem, reason: "submit" | "cancel", chosen?: DeckAskAnswer) => {
     if (actionsLocked || (reason === "submit" && attachmentBusy)) return;
     if (reason === "submit" && onAskSubmit) {
       setBusy(true);
       try {
-        const ok = await onAskSubmit(item, answers[item.id] ?? NO_ASK_ANSWER);
+        const ok = await onAskSubmit(item, chosen ?? answers[item.id] ?? initialAskAnswer(item.question));
         if (ok === false) return;
       } finally {
         setBusy(false);
@@ -322,7 +322,7 @@ export function QueuedDeck({
   const pick = useCallback((item: QueuedAskItem, label: string) => {
     if (editsLocked) return;
     setAnswers((prev) => {
-      const at = prev[item.id] ?? NO_ASK_ANSWER;
+      const at = prev[item.id] ?? initialAskAnswer(item.question);
       const picked = nextPicked(item.question, at.picked, label);
       return { ...prev, [item.id]: patchAskAnswer(item.question, at, { picked }) };
     });
@@ -330,7 +330,7 @@ export function QueuedDeck({
 
   const patchAnswer = useCallback((item: QueuedAskItem, patch: Partial<DeckAskAnswer>) => {
     if (editsLocked) return;
-    setAnswers(prev => ({ ...prev, [item.id]: patchAskAnswer(item.question, prev[item.id] ?? NO_ASK_ANSWER, patch) }));
+    setAnswers(prev => ({ ...prev, [item.id]: patchAskAnswer(item.question, prev[item.id] ?? initialAskAnswer(item.question), patch) }));
   }, [editsLocked]);
 
   if (!current) {
@@ -354,9 +354,10 @@ export function QueuedDeck({
       key={item.id}
       onBusy={setAttachmentBusy}
       question={item.question}
-      answer={answers[item.id] ?? NO_ASK_ANSWER}
+      answer={answers[item.id] ?? initialAskAnswer(item.question)}
       {...(editsLocked ? { disabled: true } : {})}
       onPick={(label) => pick(item, label)}
+      {...(item.question.toggleList ? { onChoose: (label: string) => { void dismissAsk(item, "submit", { ...NO_ASK_ANSWER, picked: [label] }); } } : {})}
       onCustom={custom => patchAnswer(item, { custom })}
       onPatch={patch => patchAnswer(item, patch)}
       onSubmit={() => { void dismissAsk(item, "submit"); }}
@@ -421,7 +422,7 @@ export function QueuedDeck({
               ) : null}
               <AskActions
                 {...(actionsLocked ? { disabled: true } : {})}
-                canSubmit={!attachmentBusy && askAnswered(answers[current.id] ?? NO_ASK_ANSWER)}
+                canSubmit={!attachmentBusy && askAnswered(answers[current.id] ?? (current.kind === "ask" ? initialAskAnswer(current.question) : NO_ASK_ANSWER))}
                 onCancel={() => { void dismissAsk(current, "cancel"); }}
                 onSubmit={() => { void dismissAsk(current, "submit"); }}
               />

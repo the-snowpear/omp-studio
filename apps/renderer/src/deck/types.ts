@@ -2,6 +2,8 @@ export type DeckAskOption = {
   readonly label: string;
   readonly description?: string;
   readonly preview?: string;
+  /** Native checkbox mark (display only); absent on options that cannot be marked. */
+  readonly mark?: "checked" | "unchecked";
 };
 
 export type DeckAskQuestion = {
@@ -14,6 +16,13 @@ export type DeckAskQuestion = {
   /** Legacy select returns either option IDs or custom text, never both. */
   readonly customExclusive?: boolean;
   readonly recommended?: number;
+  /**
+   * Native toggle list (`selectionMarker: "checkbox"`): still a single choice, but each
+   * click is answered right away so the Runtime can re-ask with updated marks.
+   */
+  readonly toggleList?: boolean;
+  /** Option index that receives focus first (native `initialIndex`). */
+  readonly initial?: number;
 };
 
 export type DeckAskAnswer = {

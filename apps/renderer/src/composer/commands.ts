@@ -349,6 +349,8 @@ export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
   cmd("resume", "Switch to another session", "session", { select: "native-ui", ui: "history" }),
   cmd("retry", "Retry last failed turn", "session", { select: "run-now", typed: { name: "turn.retry" } }),
   cmd("fork", "Fork from previous message", "session", { select: "run-now", typed: { name: "session.fork" } }),
+  /* Opens the selective-commit panel on a native draft; it never commits or calls a model by itself. */
+  cmd("commit", "Pick changes by ownership and commit", "workspace", { allowArgs: true, hint: "[notes]", select: "complete-args", invokeId: "builtin.commit" }),
   cmd("branch", "Create branch from previous message", "session", { select: "native-ui", ui: "user-message-branch" }),
   cmd("tree", "Open session tree", "session", { select: "native-ui", ui: "session-tree" }),
   cmd("session", "Session info / delete / pin account", "session", {

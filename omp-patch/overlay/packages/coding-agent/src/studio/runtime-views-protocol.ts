@@ -1,4 +1,15 @@
 import type { WebMcpListOptions, StudioWebMcpCatalog } from "./webmcp-protocol";
+import {
+	SELECTIVE_COMMIT_QUERY_KINDS,
+	type SelectiveCommitOperation,
+	type SelectiveCommitQueryInputMap,
+	type SelectiveCommitQueryResultMap,
+} from "./commit-protocol";
+import {
+	PROMPT_HISTORY_QUERY_KINDS,
+	type PromptHistoryQueryOperation,
+	type PromptHistoryQueryResultMap,
+} from "./prompt-history-protocol";
 import type { LiveAudioState } from "./live-audio-protocol";
 import type { ShellVizPreferences, ShellVizPresentation } from "./shell-view-protocol";
 import type { RuntimeFeatureResultMap } from "./runtime-features-protocol";
@@ -27,6 +38,8 @@ export interface PromptCacheStatus {
 
 /** Transient reads, reversible close checks and media negotiation: no payload is persisted in the command ledger. */
 export type RuntimeViewOperation =
+	| Extract<SelectiveCommitOperation, { kind: keyof SelectiveCommitQueryInputMap }>
+	| PromptHistoryQueryOperation
 	| Extract<ModelServicesOperation, { kind: keyof ModelServicesQueryInputMap }>
 	| { kind: "runtime.close.confirm"; sessionId: string }
 	| { kind: "interaction.form.read"; sessionId: string; interactionId: string; leaseGeneration: number }
@@ -48,7 +61,8 @@ export type RuntimeViewOperation =
 	| { kind: "live.webrtc.status"; sessionId: string; audioId?: string }
 	| { kind: "live.webrtc.mute"; sessionId: string; audioId: string; muted: boolean }
 	| { kind: "live.webrtc.release"; sessionId: string; audioId: string };
-export interface RuntimeViewResultMap extends ModelServicesQueryResultMap {
+export interface RuntimeViewResultMap
+	extends ModelServicesQueryResultMap, SelectiveCommitQueryResultMap, PromptHistoryQueryResultMap {
 	"runtime.close.confirm": { allowed: boolean };
 	"interaction.form.read": { form: InteractionForm };
 	"agent.spawn.options.read": RuntimeFeatureResultMap["agent.spawn.options"];
@@ -64,6 +78,8 @@ export interface RuntimeViewResultMap extends ModelServicesQueryResultMap {
 	"live.webrtc.release": LiveAudioState;
 }
 export const RUNTIME_VIEW_KINDS = [
+	...SELECTIVE_COMMIT_QUERY_KINDS,
+	...PROMPT_HISTORY_QUERY_KINDS,
 	...MODEL_SERVICES_QUERY_KINDS,
 	"runtime.close.confirm",
 	"interaction.form.read",

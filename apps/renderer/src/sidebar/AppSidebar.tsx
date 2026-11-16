@@ -33,7 +33,7 @@ import { PreviewFileTree } from "../preview/surfaces";
 import { usableCapabilityManifest } from "../deck/interactionGate";
 import { ThreadSpin } from "./ThreadSpin";
 import { ThreadWaitChip } from "./ThreadWaitChip";
-import { residentRowsOf, threadRunningFromLive } from "./threadRunning";
+import { residentForSession, residentRowsOf, threadRunningFromLive } from "./threadRunning";
 import { sidebarProjectOrder } from "./projectOrder";
 import { projectHasSession, provisionalThreadForHistoryEntry, sidebarThreadTitle } from "./provisionalThread";
 import { waitKindFromLive } from "./threadWait";
@@ -247,6 +247,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
       行菜单的目标是所在行会话：非当前会话由 runThreadRowAction 先打开（resume）再执行。 */
   const sessionLive = liveSnapshot !== undefined;
   const sessionBusy = liveSnapshot?.isStreaming === true || liveSnapshot?.isCompacting === true;
+  const forkBusy = liveSnapshot?.isCompacting === true;
   const rowActionReason = !sessionLive ? t("common.unavailable") : t("common.loading");
   const pendingInteraction = state.clientState?.interaction.pending ?? null;
   const residentModel = state.clientState?.entities.residents;
@@ -697,6 +698,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                     <ThreadActionMenuItems
                                       live={sessionLive && chrome.activeProvisionalSessionId === thread.sessionId}
                                       busy={sessionBusy}
+                                      forkBusy={forkBusy}
                                       compacting={liveSnapshot?.isCompacting === true}
                                       compactPending={chrome.compactPending}
                                       reason={t("common.unavailable")}
@@ -774,7 +776,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                   <ThreadActionMenuItems
                                     live={sessionLive}
                                     busy={running}
-                                    compacting={liveSnapshot?.sessionId === entry.sessionId && liveSnapshot?.isCompacting === true}
+                                    compacting={hasResidentModel
+                                      ? residentForSession(residentRows, entry.sessionId)?.phase === "compacting"
+                                      : liveSnapshot?.sessionId === entry.sessionId && liveSnapshot?.isCompacting === true}
                                     compactPending={chrome.compactPending}
                                     reason={rowActionReason}
                                     pinned={entry.pinned}

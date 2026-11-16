@@ -6,6 +6,7 @@ import { splitDisplayPath } from "./toolMeta";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useWideLayout } from "../layout/useWideLayout";
+import { SelectiveCommitButton } from "../commit/SelectiveCommitLauncher";
 
 /** From this body width the panel reads like a review page: file list beside one file's diff. */
 const CHANGES_WIDE_MIN = 820;
@@ -226,6 +227,7 @@ export function ChangesPanel({
         {demo === true && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}
         <span className="spacer" />
         {wide && files.length > 0 ? <span className="ch-toolbar-summary">{t("changes.fileCount", { count: files.length })}</span> : null}
+        {files.length > 0 ? <SelectiveCommitButton variant="icon" /> : null}
         <DiffDisplayMode split={split} onSplit={onSplit} />
       </div>
       {files.some(file => file.partial) ? <div className="ch-partial-notice" role="alert">

@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/can1357/oh-my-pi.git",
-  "commit": "04cd1a7549a02d62ad1d24826198d52507595683",
+  "commit": "7c49c11aa5bbaf3f418406583096168ad5b8c6dc",
   "firstPlatform": "win32-x64",
   "entrypoint": "omp.exe",
   "platforms": [

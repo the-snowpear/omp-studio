@@ -12,6 +12,12 @@ import { loadEntriesFromFile } from "../../session/session-loader";
 import { isAgentViewSession } from "../../session/agent-session-handle";
 import { cfgDisplayShellVisualization } from "../../modes/settings";
 import type { RuntimeViewOperation } from "../runtime-views-protocol";
+import {
+	isSelectiveCommitKind,
+	type SelectiveCommitOperation,
+	type SelectiveCommitQueryInputMap,
+} from "../commit-protocol";
+import { isPromptHistoryKind, type PromptHistoryQueryOperation } from "../prompt-history-protocol";
 import type { InteractionForm } from "../form-protocol";
 import {
 	isModelServicesQueryKind,
@@ -32,6 +38,10 @@ function shellKey(operation: Pick<ShellRead, "sessionId" | "sourceSessionId" | "
 
 /** Reads native state and negotiates media without recording transient payloads. */
 export class StudioRuntimeViews {
+	commitReader?: (
+		operation: Extract<SelectiveCommitOperation, { kind: keyof SelectiveCommitQueryInputMap }>,
+	) => Promise<unknown>;
+	promptHistoryReader?: (operation: PromptHistoryQueryOperation) => unknown;
 	formReader?: (interactionId: string, leaseGeneration: number) => { form: InteractionForm };
 	modelServicesReader?: (
 		operation: Extract<ModelServicesOperation, { kind: keyof ModelServicesQueryInputMap }>,
@@ -69,6 +79,18 @@ export class StudioRuntimeViews {
 	async execute(operation: RuntimeViewOperation): Promise<unknown> {
 		if (operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "The Runtime view belongs to another session");
+		if (isSelectiveCommitKind(operation.kind)) {
+			if (!this.commitReader)
+				throw new SessionControlError("CAPABILITY_UNAVAILABLE", "Selective commit is unavailable");
+			return this.commitReader(
+				operation as Extract<SelectiveCommitOperation, { kind: keyof SelectiveCommitQueryInputMap }>,
+			);
+		}
+		if (isPromptHistoryKind(operation.kind)) {
+			if (!this.promptHistoryReader)
+				throw new SessionControlError("CAPABILITY_UNAVAILABLE", "Prompt history is unavailable");
+			return this.promptHistoryReader(operation as PromptHistoryQueryOperation);
+		}
 		if (isModelServicesQueryKind(operation.kind)) {
 			if (!this.modelServicesReader)
 				throw new SessionControlError("CAPABILITY_UNAVAILABLE", "Native model services are unavailable");

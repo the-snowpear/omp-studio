@@ -872,7 +872,7 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
       }
       return;
     case "select": {
-      exactKeys(request, [...baseKeys, "options", "multiple"], path);
+      exactKeys(request, [...baseKeys, "options", "multiple", "initialIndex", "selectionMarker", "checkedIndices", "markableCount"], path);
       if (!Array.isArray(request.options) || request.options.length === 0 || request.options.length > INTERACTION_LIMITS.OPTION_COUNT_MAX) {
         throw new ContractValidationError("expected non-empty options", `${path}.options`);
       }

@@ -1,4 +1,5 @@
 import type { ComputerScreenshot } from "../tools/computer/protocol";
+import type { ComputerFocusReturn } from "./computer-workspace-protocol";
 
 /** Host-owned policy and telemetry. Absent outside Studio; never parses tool source or input. */
 export interface ComputerRunIdentity {
@@ -17,6 +18,8 @@ export type ComputerLifecycleEvent =
 			target?: string;
 			mode: "read" | "background" | "takeover" | "unknown";
 			phase: "running" | "completed" | "failed" | "cancelled";
+			unconfirmed?: string;
+			focusReturn?: ComputerFocusReturn;
 			at: number;
 	  }
 	| { kind: "frame"; identity: ComputerRunIdentity; screenshot: ComputerScreenshot; actionId?: string; at: number }

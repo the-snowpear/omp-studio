@@ -250,21 +250,35 @@ describe("WP-034 StudioTreeService", () => {
 		});
 	});
 
-	test("refuses to branch while streaming without calling branch", async () => {
-		let branchCalls = 0;
+	test("streaming branch waits for abort settlement before changing the transcript", async () => {
+		const settled = Promise.withResolvers<void>();
+		const events: string[] = [];
 		const session = {
+			sessionId: "session-1",
 			isStreaming: true,
 			isCompacting: false,
+			abort: async () => {
+				events.push("abort");
+			},
+			waitForIdle: async () => {
+				events.push("wait");
+				await settled.promise;
+			},
+			beginStudioQueueBarrier() {},
+			releaseStudioQueueBarrier() {},
+			clearQueue() {},
 			branch: async () => {
-				branchCalls += 1;
+				events.push("branch");
 				return { selectedText: "x", selectedImages: [], cancelled: false };
 			},
-			sessionManager: { getLeafId: () => "leaf", getSessionId: () => "session-1", getTree: () => [] },
+			sessionManager: { getLeafId: () => "leaf", getSessionId: () => "branched", getTree: () => [] },
 		} as unknown as AgentSession;
-		await expect(new StudioTreeService(session).branch("cmd-1", { targetId: "entry-1" })).rejects.toMatchObject({
-			code: "BUSY_STREAMING",
-		});
-		expect(branchCalls).toBe(0);
+		const result = new StudioTreeService(session).branch("cmd-1", { targetId: "entry-1" });
+		await Promise.resolve();
+		expect(events).toEqual(["abort", "wait"]);
+		settled.resolve();
+		expect(await result).toMatchObject({ cancelled: false, sessionId: "branched" });
+		expect(events).toEqual(["abort", "wait", "branch"]);
 	});
 
 	test("refuses to branch while compacting without calling branch", async () => {
@@ -286,6 +300,11 @@ describe("WP-034 StudioTreeService", () => {
 
 	test("branch receipts include sessionId, editorText, and filtered editorImages", async () => {
 		const session = {
+			abort: async () => {},
+			waitForIdle: async () => {},
+			beginStudioQueueBarrier() {},
+			releaseStudioQueueBarrier() {},
+			clearQueue() {},
 			isStreaming: false,
 			isCompacting: false,
 			branch: async () => ({
@@ -310,6 +329,11 @@ describe("WP-034 StudioTreeService", () => {
 test("restoring and branching a tagged prompt returns editable model selectors, even after registry rewind", async () => {
 	const modelMentions = [{ agent: "m1", selector: "provider/model", name: "Model" }];
 	const session = {
+		abort: async () => {},
+		waitForIdle: async () => {},
+		beginStudioQueueBarrier() {},
+		releaseStudioQueueBarrier() {},
+		clearQueue() {},
 		modelMentions,
 		sessionManager: { getLeafId: () => "leaf", getSessionId: () => "session", getEntry: () => undefined },
 		navigateTree: async () => ({ cancelled: false, editorText: 'ask <model agent="m1" name="Model"/>' }),

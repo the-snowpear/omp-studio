@@ -190,6 +190,12 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 					commandId: this.commandId,
 					title,
 					options: remoteOptions,
+					...(dialogOptions?.initialIndex === undefined ? {} : { initialIndex: dialogOptions.initialIndex }),
+					...(dialogOptions?.selectionMarker === undefined
+						? {}
+						: { selectionMarker: dialogOptions.selectionMarker }),
+					...(dialogOptions?.checkedIndices === undefined ? {} : { checkedIndices: dialogOptions.checkedIndices }),
+					...(dialogOptions?.markableCount === undefined ? {} : { markableCount: dialogOptions.markableCount }),
 				}),
 			dialogOptions,
 		);

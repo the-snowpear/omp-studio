@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "version": "322bad6953beb512",
-  "upstreamCommit": "04cd1a7549a02d62ad1d24826198d52507595683",
+  "version": "a6df552d314c84dd",
+  "upstreamCommit": "7c49c11aa5bbaf3f418406583096168ad5b8c6dc",
   "entries": [
     {
       "key": "abliteration/openai-responses/abliterated-model",
@@ -9567,6 +9567,133 @@
       "limitation": "native-thinking"
     },
     {
+      "key": "antigravity-cli/antigravity-acp/claude-opus-5-5",
+      "provider": "antigravity-cli",
+      "id": "claude-opus-5-5",
+      "name": "Claude Opus 5.5",
+      "api": "antigravity-acp",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 128000,
+        "reasoning": true
+      },
+      "limitation": "native-thinking"
+    },
+    {
+      "key": "antigravity-cli/antigravity-acp/claude-sonnet-5-5",
+      "provider": "antigravity-cli",
+      "id": "claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "api": "antigravity-acp",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 128000,
+        "reasoning": true
+      },
+      "limitation": "native-thinking"
+    },
+    {
+      "key": "antigravity-cli/antigravity-acp/gemini-3.8-flash",
+      "provider": "antigravity-cli",
+      "id": "gemini-3.8-flash",
+      "name": "Gemini 3.8 Flash",
+      "api": "antigravity-acp",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "defaultLevel": "medium",
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "antigravity-cli/antigravity-acp/gemini-4-argon",
+      "provider": "antigravity-cli",
+      "id": "gemini-4-argon",
+      "name": "Gemini 4 Argon",
+      "api": "antigravity-acp",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "defaultLevel": "medium",
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "antigravity-cli/antigravity-acp/gemini-4-carbon",
+      "provider": "antigravity-cli",
+      "id": "gemini-4-carbon",
+      "name": "Gemini 4 Carbon",
+      "api": "antigravity-acp",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 262144,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "defaultLevel": "medium",
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "antigravity-cli/antigravity-acp/gemini-4-hydrogen",
+      "provider": "antigravity-cli",
+      "id": "gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
+      "api": "antigravity-acp",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 262144,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "defaultLevel": "medium",
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "antigravity-cli/antigravity-acp/gpt-oss-120b-medium",
+      "provider": "antigravity-cli",
+      "id": "gpt-oss-120b-medium",
+      "name": "GPT-OSS 120B (Medium)",
+      "api": "antigravity-acp",
+      "values": {
+        "contextWindow": 131072,
+        "maxTokens": 32768,
+        "reasoning": false
+      }
+    },
+    {
       "key": "azure/azure-openai-responses/codex-mini",
       "provider": "azure",
       "id": "codex-mini",
@@ -10903,6 +11030,412 @@
       }
     },
     {
+      "key": "chutes/openai-completions/deepseek-ai/DeepSeek-V3.2-TEE",
+      "provider": "chutes",
+      "id": "deepseek-ai/DeepSeek-V3.2-TEE",
+      "name": "deepseek-ai/DeepSeek-V3.2-TEE",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 131072,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/deepseek-ai/DeepSeek-V4-Flash-0731-TEE",
+      "provider": "chutes",
+      "id": "deepseek-ai/DeepSeek-V4-Flash-0731-TEE",
+      "name": "deepseek-ai/DeepSeek-V4-Flash-0731-TEE",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/deepseek-ai/DeepSeek-V4-Pro-0813",
+      "provider": "chutes",
+      "id": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "name": "deepseek-ai/DeepSeek-V4-Pro-0813",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 393216,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "provider": "chutes",
+      "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "name": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 393216,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/google/gemma-4-31B-turbo-TEE",
+      "provider": "chutes",
+      "id": "google/gemma-4-31B-turbo-TEE",
+      "name": "google/gemma-4-31B-turbo-TEE",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 131072,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/moonshotai/Kimi-K2.6-TEE",
+      "provider": "chutes",
+      "id": "moonshotai/Kimi-K2.6-TEE",
+      "name": "moonshotai/Kimi-K2.6-TEE",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 65535,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/moonshotai/Kimi-K2.7-Code",
+      "provider": "chutes",
+      "id": "moonshotai/Kimi-K2.7-Code",
+      "name": "moonshotai/Kimi-K2.7-Code",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 16384,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/moonshotai/Kimi-K3-TEE",
+      "provider": "chutes",
+      "id": "moonshotai/Kimi-K3-TEE",
+      "name": "moonshotai/Kimi-K3-TEE",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65535,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
+          "defaultLevel": "max",
+          "effortMap": {
+            "max": "max"
+          },
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/Qwen/Qwen3.5-27B-TEE",
+      "provider": "chutes",
+      "id": "Qwen/Qwen3.5-27B-TEE",
+      "name": "Qwen/Qwen3.5-27B-TEE",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 262144,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/Qwen/Qwen3.5-397B-A17B-TEE",
+      "provider": "chutes",
+      "id": "Qwen/Qwen3.5-397B-A17B-TEE",
+      "name": "Qwen/Qwen3.5-397B-A17B-TEE",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/Qwen/Qwen3.6-27B-TEE",
+      "provider": "chutes",
+      "id": "Qwen/Qwen3.6-27B-TEE",
+      "name": "Qwen/Qwen3.6-27B-TEE",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/Qwen/Qwen3.8-2.4T-A95B",
+      "provider": "chutes",
+      "id": "Qwen/Qwen3.8-2.4T-A95B",
+      "name": "Qwen/Qwen3.8-2.4T-A95B",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/Qwen/Qwen3.8-27B-TEE",
+      "provider": "chutes",
+      "id": "Qwen/Qwen3.8-27B-TEE",
+      "name": "Qwen/Qwen3.8-27B-TEE",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/Qwen/Qwen3.8-Max-0902",
+      "provider": "chutes",
+      "id": "Qwen/Qwen3.8-Max-0902",
+      "name": "Qwen/Qwen3.8-Max-0902",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/tencent/Hy4",
+      "provider": "chutes",
+      "id": "tencent/Hy4",
+      "name": "tencent/Hy4",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/zai-org/GLM-5.1-TEE",
+      "provider": "chutes",
+      "id": "zai-org/GLM-5.1-TEE",
+      "name": "zai-org/GLM-5.1-TEE",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 202752,
+        "maxTokens": 65535,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/zai-org/GLM-5.2-Fast",
+      "provider": "chutes",
+      "id": "zai-org/GLM-5.2-Fast",
+      "name": "zai-org/GLM-5.2-Fast",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/zai-org/GLM-5.2-TEE",
+      "provider": "chutes",
+      "id": "zai-org/GLM-5.2-TEE",
+      "name": "zai-org/GLM-5.2-TEE",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65535,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "chutes/openai-completions/zai-org/GLM-5.3",
+      "provider": "chutes",
+      "id": "zai-org/GLM-5.3",
+      "name": "zai-org/GLM-5.3",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
+          "defaultLevel": "max",
+          "requiresEffort": true
+        }
+      }
+    },
+    {
       "key": "cline-pass/openai-completions/cline-free/nemotron-3.5-super-vl",
       "provider": "cline-pass",
       "id": "cline-free/nemotron-3.5-super-vl",
@@ -12111,6 +12644,29 @@
       "provider": "cloudflare-ai-gateway",
       "id": "google/gemini-4-argon",
       "name": "Gemini 4 Argon",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "cloudflare-ai-gateway/anthropic-messages/google/gemini-4-carbon",
+      "provider": "cloudflare-ai-gateway",
+      "id": "google/gemini-4-carbon",
+      "name": "Gemini 4 Carbon",
       "api": "anthropic-messages",
       "values": {
         "contextWindow": 1048576,
@@ -14540,6 +15096,18 @@
             "high"
           ]
         }
+      }
+    },
+    {
+      "key": "commandcode/openai-completions/thinkingmachines/inkling-2-small:free",
+      "provider": "commandcode",
+      "id": "thinkingmachines/inkling-2-small:free",
+      "name": "Inkling 2 Small",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": false
       }
     },
     {
@@ -23119,18 +23687,6 @@
       }
     },
     {
-      "key": "google-vertex/google-vertex/codestral-2",
-      "provider": "google-vertex",
-      "id": "codestral-2",
-      "name": "Codestral 2",
-      "api": "google-vertex",
-      "values": {
-        "contextWindow": 128000,
-        "maxTokens": 8192,
-        "reasoning": false
-      }
-    },
-    {
       "key": "google-vertex/google-vertex/gemini-3-flash-preview",
       "provider": "google-vertex",
       "id": "gemini-3-flash-preview",
@@ -23330,7 +23886,7 @@
       "api": "google-vertex",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 65536,
+        "maxTokens": 262144,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "google-level",
@@ -23351,7 +23907,7 @@
       "api": "google-vertex",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 65536,
+        "maxTokens": 262144,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "google-level",
@@ -23365,26 +23921,36 @@
       }
     },
     {
-      "key": "google-vertex/google-vertex/mistral-medium-3",
+      "key": "google-vertex/google-vertex/gemini-4-hydrogen",
       "provider": "google-vertex",
-      "id": "mistral-medium-3",
-      "name": "Mistral Medium 3",
+      "id": "gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
       "api": "google-vertex",
       "values": {
-        "contextWindow": 131072,
-        "maxTokens": 131072,
-        "reasoning": false
+        "contextWindow": 1048576,
+        "maxTokens": 262144,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "google-level",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "requiresEffort": true
+        }
       }
     },
     {
-      "key": "google-vertex/google-vertex/mistral-small-2503",
+      "key": "google-vertex/openai-completions/codestral-2",
       "provider": "google-vertex",
-      "id": "mistral-small-2503",
-      "name": "Mistral Small 3.1 24B",
-      "api": "google-vertex",
+      "id": "codestral-2",
+      "name": "Codestral 2",
+      "api": "openai-completions",
       "values": {
         "contextWindow": 128000,
-        "maxTokens": 16384,
+        "maxTokens": 8192,
         "reasoning": false
       }
     },
@@ -23431,6 +23997,30 @@
       "values": {
         "contextWindow": 1310720,
         "maxTokens": 8192,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "google-vertex/openai-completions/mistral-medium-3",
+      "provider": "google-vertex",
+      "id": "mistral-medium-3",
+      "name": "Mistral Medium 3",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 131072,
+        "maxTokens": 131072,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "google-vertex/openai-completions/mistral-small-2503",
+      "provider": "google-vertex",
+      "id": "mistral-small-2503",
+      "name": "Mistral Small 3.1 24B",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 128000,
+        "maxTokens": 16384,
         "reasoning": false
       }
     },
@@ -23575,6 +24165,20 @@
             "max"
           ]
         }
+      }
+    },
+    {
+      "key": "google/google-decisions/gemini-decision-1",
+      "provider": "google",
+      "id": "gemini-decision-1",
+      "name": "Gemini Decision 1",
+      "api": "google-decisions",
+      "kind": "judge",
+      "webSearch": "gemini",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 235929,
+        "reasoning": false
       }
     },
     {
@@ -24209,7 +24813,7 @@
       "webSearch": "gemini",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 32768,
+        "maxTokens": 262144,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "google-level",
@@ -24231,7 +24835,7 @@
       "webSearch": "gemini",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 32768,
+        "maxTokens": 262144,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "google-level",
@@ -24239,6 +24843,29 @@
             "low",
             "medium",
             "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "google/google-generative-ai/gemini-4-hydrogen",
+      "provider": "google",
+      "id": "gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
+      "api": "google-generative-ai",
+      "webSearch": "gemini",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 262144,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "google-level",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
           ],
           "requiresEffort": true
         }
@@ -27206,6 +27833,16 @@
       }
     },
     {
+      "key": "kilo/openai-completions/amazon/nova-2-lite",
+      "provider": "kilo",
+      "id": "amazon/nova-2-lite",
+      "name": "Nova 2 Lite",
+      "api": "openai-completions",
+      "values": {
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/amazon/nova-2-lite-v1",
       "provider": "kilo",
       "id": "amazon/nova-2-lite-v1",
@@ -27228,6 +27865,16 @@
       }
     },
     {
+      "key": "kilo/openai-completions/amazon/nova-lite",
+      "provider": "kilo",
+      "id": "amazon/nova-lite",
+      "name": "Nova Lite",
+      "api": "openai-completions",
+      "values": {
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/amazon/nova-lite-v1",
       "provider": "kilo",
       "id": "amazon/nova-lite-v1",
@@ -27236,6 +27883,16 @@
       "values": {
         "contextWindow": 300000,
         "maxTokens": 5120,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/amazon/nova-micro",
+      "provider": "kilo",
+      "id": "amazon/nova-micro",
+      "name": "Nova Micro",
+      "api": "openai-completions",
+      "values": {
         "reasoning": false
       }
     },
@@ -27260,6 +27917,16 @@
       "values": {
         "contextWindow": 1000000,
         "maxTokens": 32000,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/amazon/nova-pro",
+      "provider": "kilo",
+      "id": "amazon/nova-pro",
+      "name": "Nova Pro",
+      "api": "openai-completions",
+      "values": {
         "reasoning": false
       }
     },
@@ -28058,7 +28725,17 @@
       "values": {
         "contextWindow": 1024000,
         "maxTokens": 921600,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
       }
     },
     {
@@ -28183,7 +28860,7 @@
       "key": "kilo/openai-completions/bytedance-seed/seed-2.0-code",
       "provider": "kilo",
       "id": "bytedance-seed/seed-2.0-code",
-      "name": "Seed 2.0 Code",
+      "name": "ByteDance Seed 2.0 Code",
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
@@ -28263,6 +28940,18 @@
             "xhigh"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/callstack/apex",
+      "provider": "kilo",
+      "id": "callstack/apex",
+      "name": "Apex",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 131072,
+        "reasoning": false
       }
     },
     {
@@ -28501,6 +29190,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/deepseek/deepseek-v3.1",
+      "provider": "kilo",
+      "id": "deepseek/deepseek-v3.1",
+      "name": "DeepSeek V3.1",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 163840,
+        "maxTokens": 161000,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/deepseek/deepseek-v3.1-terminus",
       "provider": "kilo",
       "id": "deepseek/deepseek-v3.1-terminus",
@@ -28576,6 +29277,18 @@
       "name": "DeepSeek V3.2 Speciale",
       "api": "openai-completions",
       "values": {
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/deepseek/deepseek-v3.2-thinking",
+      "provider": "kilo",
+      "id": "deepseek/deepseek-v3.2-thinking",
+      "name": "DeepSeek V3.2 Thinking",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 163840,
+        "maxTokens": 65536,
         "reasoning": false
       }
     },
@@ -28779,7 +29492,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 943718,
+        "maxTokens": 393216,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -28789,6 +29502,42 @@
             "max"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/deepseek/deepseek-v4.1-flash-1017-fast",
+      "provider": "kilo",
+      "id": "deepseek/deepseek-v4.1-flash-1017-fast",
+      "name": "DeepSeek V4.1 Flash 1017 Fast",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 262144,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/deepseek/deepseek-v4.1-flash-1017-ultrafast",
+      "provider": "kilo",
+      "id": "deepseek/deepseek-v4.1-flash-1017-ultrafast",
+      "name": "DeepSeek V4.1 Flash 1017 Ultrafast",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 131072,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/deepseek/deepseek-v4.1-flash-fast",
+      "provider": "kilo",
+      "id": "deepseek/deepseek-v4.1-flash-fast",
+      "name": "DeepSeek V4.1 Flash Fast",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "reasoning": false
       }
     },
     {
@@ -29042,6 +29791,28 @@
       "values": {
         "contextWindow": 1048576,
         "maxTokens": 65535,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/google/gemini-3-flash",
+      "provider": "kilo",
+      "id": "google/gemini-3-flash",
+      "name": "Gemini 3 Flash Preview",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65536,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -29414,6 +30185,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/google/gemini-4-hydrogen",
+      "provider": "kilo",
+      "id": "google/gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/google/gemini-nano-banana-2.1",
       "provider": "kilo",
       "id": "google/gemini-nano-banana-2.1",
@@ -29450,6 +30233,16 @@
       "provider": "kilo",
       "id": "google/gemini-omni-1.2-flash",
       "name": "Gemini Omni 1.2 Flash",
+      "api": "openai-completions",
+      "values": {
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/google/gemini-omni-flash-preview",
+      "provider": "kilo",
+      "id": "google/gemini-omni-flash-preview",
+      "name": "Gemini Omni Flash Preview",
       "api": "openai-completions",
       "values": {
         "reasoning": false
@@ -29630,6 +30423,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/humansand/ampersand-v0.1",
+      "provider": "kilo",
+      "id": "humansand/ampersand-v0.1",
+      "name": "Ampersand v0.1",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 32768,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/ibm-granite/granite-4.0-h-micro",
       "provider": "kilo",
       "id": "ibm-granite/granite-4.0-h-micro",
@@ -29792,6 +30597,18 @@
       "values": {
         "contextWindow": 128000,
         "maxTokens": 32000,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/inception/mercury-coder-small",
+      "provider": "kilo",
+      "id": "inception/mercury-coder-small",
+      "name": "Mercury Coder Small Beta",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 32768,
+        "maxTokens": 16384,
         "reasoning": false
       }
     },
@@ -30076,6 +30893,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/inclusionai/ling-3.1-flash-1019",
+      "provider": "kilo",
+      "id": "inclusionai/ling-3.1-flash-1019",
+      "name": "Ling 3.1 Flash 1019",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 262144,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/inclusionai/ring-2.6-1t",
       "provider": "kilo",
       "id": "inclusionai/ring-2.6-1t",
@@ -30170,6 +30999,18 @@
       "name": "Inflection 3 Productivity",
       "api": "openai-completions",
       "values": {
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/interfaze/interfaze-beta",
+      "provider": "kilo",
+      "id": "interfaze/interfaze-beta",
+      "name": "Interfaze Beta",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 32000,
         "reasoning": false
       }
     },
@@ -30524,6 +31365,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/liquid/lfm2.5-24b-a2b",
+      "provider": "kilo",
+      "id": "liquid/lfm2.5-24b-a2b",
+      "name": "LFM2.5-24B-A2B",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 128000,
+        "maxTokens": 8200,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/mancer/weaver",
       "provider": "kilo",
       "id": "mancer/weaver",
@@ -30585,6 +31438,18 @@
             "xhigh"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/meituan/longcat-2.5",
+      "provider": "kilo",
+      "id": "meituan/longcat-2.5",
+      "name": "LongCat 2.5",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "reasoning": false
       }
     },
     {
@@ -30980,6 +31845,28 @@
       }
     },
     {
+      "key": "kilo/openai-completions/meta/muse-wonder-1.0",
+      "provider": "kilo",
+      "id": "meta/muse-wonder-1.0",
+      "name": "Muse Wonder",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "kilo/openai-completions/microsoft/phi-4",
       "provider": "kilo",
       "id": "microsoft/phi-4",
@@ -31123,14 +32010,26 @@
       }
     },
     {
+      "key": "kilo/openai-completions/minimax/minimax-m2.1-lightning",
+      "provider": "kilo",
+      "id": "minimax/minimax-m2.1-lightning",
+      "name": "MiniMax M2.1 Lightning",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 32000,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/minimax/minimax-m2.5",
       "provider": "kilo",
       "id": "minimax/minimax-m2.5",
       "name": "MiniMax-M2.5",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 65536,
-        "maxTokens": 58982,
+        "contextWindow": 200000,
+        "maxTokens": 128000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -31141,6 +32040,18 @@
           ],
           "requiresEffort": true
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/minimax/minimax-m2.5-highspeed",
+      "provider": "kilo",
+      "id": "minimax/minimax-m2.5-highspeed",
+      "name": "MiniMax M2.5 High Speed",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 204800,
+        "maxTokens": 131072,
+        "reasoning": false
       }
     },
     {
@@ -31164,6 +32075,27 @@
       "values": {
         "contextWindow": 196608,
         "maxTokens": 176947,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/minimax/minimax-m2.7-highspeed",
+      "provider": "kilo",
+      "id": "minimax/minimax-m2.7-highspeed",
+      "name": "MiniMax M2.7 highspeed",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 204800,
+        "maxTokens": 131070,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -31298,6 +32230,16 @@
       }
     },
     {
+      "key": "kilo/openai-completions/mistralai/codestral",
+      "provider": "kilo",
+      "id": "mistralai/codestral",
+      "name": "Mistral Codestral",
+      "api": "openai-completions",
+      "values": {
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/mistralai/codestral-2508",
       "provider": "kilo",
       "id": "mistralai/codestral-2508",
@@ -31346,6 +32288,16 @@
       }
     },
     {
+      "key": "kilo/openai-completions/mistralai/ministral-14b",
+      "provider": "kilo",
+      "id": "mistralai/ministral-14b",
+      "name": "Ministral 14B",
+      "api": "openai-completions",
+      "values": {
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/mistralai/ministral-14b-2512",
       "provider": "kilo",
       "id": "mistralai/ministral-14b-2512",
@@ -31354,6 +32306,16 @@
       "values": {
         "contextWindow": 262144,
         "maxTokens": 209715,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/mistralai/ministral-3b",
+      "provider": "kilo",
+      "id": "mistralai/ministral-3b",
+      "name": "Ministral 3B",
+      "api": "openai-completions",
+      "values": {
         "reasoning": false
       }
     },
@@ -31564,6 +32526,16 @@
       }
     },
     {
+      "key": "kilo/openai-completions/mistralai/mistral-small",
+      "provider": "kilo",
+      "id": "mistralai/mistral-small",
+      "name": "Mistral Small",
+      "api": "openai-completions",
+      "values": {
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/mistralai/mistral-small-24b-instruct-2501",
       "provider": "kilo",
       "id": "mistralai/mistral-small-24b-instruct-2501",
@@ -31676,6 +32648,18 @@
       "values": {
         "contextWindow": 32768,
         "maxTokens": 26214,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/mixedbread/toast-1",
+      "provider": "kilo",
+      "id": "mixedbread/toast-1",
+      "name": "Toast 1",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 131000,
+        "maxTokens": 4000,
         "reasoning": false
       }
     },
@@ -31853,6 +32837,28 @@
       }
     },
     {
+      "key": "kilo/openai-completions/moonshotai/kimi-k2.7-code-highspeed",
+      "provider": "kilo",
+      "id": "moonshotai/kimi-k2.7-code-highspeed",
+      "name": "Kimi K2.7 Code HighSpeed",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 262144,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "kilo/openai-completions/moonshotai/kimi-k3",
       "provider": "kilo",
       "id": "moonshotai/kimi-k3",
@@ -31878,6 +32884,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/moonshotai/kimi-k3-fast",
+      "provider": "kilo",
+      "id": "moonshotai/kimi-k3-fast",
+      "name": "Kimi K3 Fast",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 1048576,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/moonshotai/kimi-k3.1-pro",
       "provider": "kilo",
       "id": "moonshotai/kimi-k3.1-pro",
@@ -31886,6 +32904,31 @@
       "values": {
         "contextWindow": 1048576,
         "maxTokens": 943718,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
+          "defaultLevel": "max",
+          "effortMap": {
+            "max": "max"
+          },
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/moonshotai/kimi-k3.1-pro-highspeed",
+      "provider": "kilo",
+      "id": "moonshotai/kimi-k3.1-pro-highspeed",
+      "name": "Kimi K3.1 Pro Highspeed",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 1048576,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -32567,7 +33610,7 @@
       "key": "kilo/openai-completions/nvidia/nemotron-nano-12b-v2-vl",
       "provider": "kilo",
       "id": "nvidia/nemotron-nano-12b-v2-vl",
-      "name": "Nemotron Nano 12B v2 VL",
+      "name": "Nvidia Nemotron Nano 12B V2 VL",
       "api": "openai-completions",
       "values": {
         "contextWindow": 128000,
@@ -32589,7 +33632,7 @@
       "key": "kilo/openai-completions/nvidia/nemotron-nano-9b-v2",
       "provider": "kilo",
       "id": "nvidia/nemotron-nano-9b-v2",
-      "name": "Nemotron Nano 9B V2",
+      "name": "Nvidia Nemotron Nano 9B V2",
       "api": "openai-completions",
       "values": {
         "contextWindow": 131072,
@@ -32746,10 +33789,34 @@
       }
     },
     {
+      "key": "kilo/openai-completions/openai/gpt-4.1-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-4.1-fast",
+      "name": "GPT-4.1 (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1047576,
+        "maxTokens": 32768,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/openai/gpt-4.1-mini",
       "provider": "kilo",
       "id": "openai/gpt-4.1-mini",
       "name": "GPT-4.1 mini",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1047576,
+        "maxTokens": 32768,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/openai/gpt-4.1-mini-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-4.1-mini-fast",
+      "name": "GPT-4.1 mini (Fast)",
       "api": "openai-completions",
       "values": {
         "contextWindow": 1047576,
@@ -32830,6 +33897,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/openai/gpt-4o-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-4o-fast",
+      "name": "GPT-4o (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 128000,
+        "maxTokens": 16384,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/openai/gpt-4o-mini",
       "provider": "kilo",
       "id": "openai/gpt-4o-mini",
@@ -32846,6 +33925,18 @@
       "provider": "kilo",
       "id": "openai/gpt-4o-mini-2024-07-18",
       "name": "GPT-4o-mini (2024-07-18)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 128000,
+        "maxTokens": 16384,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/openai/gpt-4o-mini-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-4o-mini-fast",
+      "name": "GPT-4o mini (Fast)",
       "api": "openai-completions",
       "values": {
         "contextWindow": 128000,
@@ -32940,6 +34031,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/openai/gpt-5-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-5-fast",
+      "name": "GPT-5 (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 400000,
+        "maxTokens": 128000,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/openai/gpt-5-image",
       "provider": "kilo",
       "id": "openai/gpt-5-image",
@@ -33000,6 +34103,18 @@
             "high"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/openai/gpt-5-mini-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-5-mini-fast",
+      "name": "GPT-5 mini (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 400000,
+        "maxTokens": 128000,
+        "reasoning": false
       }
     },
     {
@@ -33139,6 +34254,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/openai/gpt-5.1-thinking-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-5.1-thinking-fast",
+      "name": "GPT 5.1 Thinking (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 400000,
+        "maxTokens": 128000,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/openai/gpt-5.2",
       "provider": "kilo",
       "id": "openai/gpt-5.2",
@@ -33190,6 +34317,18 @@
             "xhigh"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/openai/gpt-5.2-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-5.2-fast",
+      "name": "GPT 5.2 (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 200000,
+        "maxTokens": 64000,
+        "reasoning": false
       }
     },
     {
@@ -33247,6 +34386,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/openai/gpt-5.3-codex-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-5.3-codex-fast",
+      "name": "GPT 5.3 Codex (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 272000,
+        "maxTokens": 64000,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/openai/gpt-5.4",
       "provider": "kilo",
       "id": "openai/gpt-5.4",
@@ -33265,6 +34416,18 @@
             "xhigh"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/openai/gpt-5.4-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-5.4-fast",
+      "name": "GPT 5.4 (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 200000,
+        "maxTokens": 64000,
+        "reasoning": false
       }
     },
     {
@@ -33296,6 +34459,18 @@
             "xhigh"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/openai/gpt-5.4-mini-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-5.4-mini-fast",
+      "name": "GPT 5.4 Mini (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 400000,
+        "maxTokens": 128000,
+        "reasoning": false
       }
     },
     {
@@ -33362,6 +34537,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/openai/gpt-5.5-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-5.5-fast",
+      "name": "GPT 5.5 (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 200000,
+        "maxTokens": 64000,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/openai/gpt-5.5-pro",
       "provider": "kilo",
       "id": "openai/gpt-5.5-pro",
@@ -33402,6 +34589,18 @@
             "max"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/openai/gpt-5.6-luna-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-5.6-luna-fast",
+      "name": "GPT 5.6 Luna (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 272000,
+        "maxTokens": 64000,
+        "reasoning": false
       }
     },
     {
@@ -33471,6 +34670,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/openai/gpt-5.6-sol-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-5.6-sol-fast",
+      "name": "GPT 5.6 Sol (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 272000,
+        "maxTokens": 64000,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/openai/gpt-5.6-sol-pro",
       "provider": "kilo",
       "id": "openai/gpt-5.6-sol-pro",
@@ -33512,6 +34723,18 @@
             "max"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/openai/gpt-5.6-terra-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-5.6-terra-fast",
+      "name": "GPT 5.6 Terra (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 272000,
+        "maxTokens": 64000,
+        "reasoning": false
       }
     },
     {
@@ -33559,6 +34782,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/openai/gpt-6-astra-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-6-astra-fast",
+      "name": "GPT-6 Astra (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1050000,
+        "maxTokens": 128000,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/openai/gpt-6-astra-pro",
       "provider": "kilo",
       "id": "openai/gpt-6-astra-pro",
@@ -33600,6 +34835,18 @@
             "max"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/openai/gpt-6-luna-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-6-luna-fast",
+      "name": "GPT-6 Luna (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1050000,
+        "maxTokens": 128000,
+        "reasoning": false
       }
     },
     {
@@ -33647,6 +34894,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/openai/gpt-6-sol-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-6-sol-fast",
+      "name": "GPT-6 Sol (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1050000,
+        "maxTokens": 128000,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/openai/gpt-6-sol-pro",
       "provider": "kilo",
       "id": "openai/gpt-6-sol-pro",
@@ -33691,6 +34950,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/openai/gpt-6.1-sol-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-6.1-sol-fast",
+      "name": "GPT-6.1 Sol (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1050000,
+        "maxTokens": 128000,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/openai/gpt-6.1-sol-pro",
       "provider": "kilo",
       "id": "openai/gpt-6.1-sol-pro",
@@ -33732,6 +35003,18 @@
             "max"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/openai/gpt-6.1-terra-fast",
+      "provider": "kilo",
+      "id": "openai/gpt-6.1-terra-fast",
+      "name": "GPT-6.1 Terra (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1050000,
+        "maxTokens": 128000,
+        "reasoning": false
       }
     },
     {
@@ -33845,6 +35128,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/openai/gpt-oss-safeguard-120b",
+      "provider": "kilo",
+      "id": "openai/gpt-oss-safeguard-120b",
+      "name": "GPT OSS Safeguard 120B",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 128000,
+        "maxTokens": 16000,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/openai/gpt-oss-safeguard-20b",
       "provider": "kilo",
       "id": "openai/gpt-oss-safeguard-20b",
@@ -33954,6 +35249,18 @@
           ],
           "requiresEffort": true
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/openai/o3-fast",
+      "provider": "kilo",
+      "id": "openai/o3-fast",
+      "name": "o3 (Fast)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 200000,
+        "maxTokens": 100000,
+        "reasoning": false
       }
     },
     {
@@ -34321,6 +35628,18 @@
             "xhigh"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/particle/particle-1",
+      "provider": "kilo",
+      "id": "particle/particle-1",
+      "name": "Particle-1",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "reasoning": false
       }
     },
     {
@@ -34699,6 +36018,30 @@
       }
     },
     {
+      "key": "kilo/openai-completions/quiverai/arrow-2",
+      "provider": "kilo",
+      "id": "quiverai/arrow-2",
+      "name": "Arrow 2",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 131072,
+        "maxTokens": 131072,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/quiverai/arrow-2-telos",
+      "provider": "kilo",
+      "id": "quiverai/arrow-2-telos",
+      "name": "Arrow 2 Telos",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 131072,
+        "maxTokens": 131072,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/qwen/qwen-2.5-72b-instruct",
       "provider": "kilo",
       "id": "qwen/qwen-2.5-72b-instruct",
@@ -34739,6 +36082,18 @@
       "name": "Qwen2.5-VL 7B Instruct",
       "api": "openai-completions",
       "values": {
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/qwen/qwen-3-14b",
+      "provider": "kilo",
+      "id": "qwen/qwen-3-14b",
+      "name": "Qwen3-14B",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 40960,
+        "maxTokens": 16384,
         "reasoning": false
       }
     },
@@ -34869,7 +36224,7 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 40960,
-        "maxTokens": 36864,
+        "maxTokens": 16384,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -35113,7 +36468,7 @@
       "key": "kilo/openai-completions/qwen/qwen3-max-thinking",
       "provider": "kilo",
       "id": "qwen/qwen3-max-thinking",
-      "name": "Qwen3 Max Thinking",
+      "name": "Qwen 3 Max Thinking",
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
@@ -35147,7 +36502,7 @@
       "key": "kilo/openai-completions/qwen/qwen3-next-80b-a3b-thinking",
       "provider": "kilo",
       "id": "qwen/qwen3-next-80b-a3b-thinking",
-      "name": "Qwen3-Next 80B-A3B (Thinking)",
+      "name": "Qwen3 Next 80B A3B Thinking",
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
@@ -35280,6 +36635,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/qwen/qwen3-vl-instruct",
+      "provider": "kilo",
+      "id": "qwen/qwen3-vl-instruct",
+      "name": "Qwen3 VL 235B A22B Instruct",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 262144,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/qwen/qwen3.5-122b-a10b",
       "provider": "kilo",
       "id": "qwen/qwen3.5-122b-a10b",
@@ -35371,7 +36738,28 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 235929,
+        "maxTokens": 40960,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/qwen/qwen3.5-flash",
+      "provider": "kilo",
+      "id": "qwen/qwen3.5-flash",
+      "name": "Qwen3.5 Flash",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1020000,
+        "maxTokens": 1020000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -35393,6 +36781,27 @@
       "values": {
         "contextWindow": 1000000,
         "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/qwen/qwen3.5-plus",
+      "provider": "kilo",
+      "id": "qwen/qwen3.5-plus",
+      "name": "Qwen3.5 Plus",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 64000,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -35887,7 +37296,7 @@
       "key": "kilo/openai-completions/reflection/beam-free",
       "provider": "kilo",
       "id": "reflection/beam-free",
-      "name": "Beam 1.0 (free)",
+      "name": "Beam 1.0 (Free)",
       "api": "openai-completions",
       "values": {
         "contextWindow": 1048576,
@@ -36181,6 +37590,26 @@
       "provider": "kilo",
       "id": "scaledown/extract",
       "name": "Extract",
+      "api": "openai-completions",
+      "values": {
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/scaledown/scaledown-extract-1",
+      "provider": "kilo",
+      "id": "scaledown/scaledown-extract-1",
+      "name": "Extract-1",
+      "api": "openai-completions",
+      "values": {
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/scaledown/scaledown-summarize-1",
+      "provider": "kilo",
+      "id": "scaledown/scaledown-summarize-1",
+      "name": "Summarize-1",
       "api": "openai-completions",
       "values": {
         "reasoning": false
@@ -36603,6 +38032,36 @@
             "xhigh"
           ]
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/tencent/hy-mt2-lite",
+      "provider": "kilo",
+      "id": "tencent/hy-mt2-lite",
+      "name": "Tencent Hy-MT2-Lite",
+      "api": "openai-completions",
+      "values": {
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/tencent/hy-mt2-plus",
+      "provider": "kilo",
+      "id": "tencent/hy-mt2-plus",
+      "name": "Tencent Hy-MT2-Plus",
+      "api": "openai-completions",
+      "values": {
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/tencent/hy-mt2-pro",
+      "provider": "kilo",
+      "id": "tencent/hy-mt2-pro",
+      "name": "Tencent Hy-MT2-Pro",
+      "api": "openai-completions",
+      "values": {
+        "reasoning": false
       }
     },
     {
@@ -37245,8 +38704,9 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 2000000,
-        "reasoning": false
-      }
+        "reasoning": true
+      },
+      "limitation": "native-thinking"
     },
     {
       "key": "kilo/openai-completions/x-ai/grok-4.20-multi-agent",
@@ -37274,7 +38734,31 @@
       "key": "kilo/openai-completions/x-ai/grok-4.20-multi-agent-beta",
       "provider": "kilo",
       "id": "x-ai/grok-4.20-multi-agent-beta",
-      "name": "Grok 4.20 Multi-Agent Beta",
+      "name": "Grok 4.20 Multi Agent Beta",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 2000000,
+        "maxTokens": 2000000,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/x-ai/grok-4.20-non-reasoning",
+      "provider": "kilo",
+      "id": "x-ai/grok-4.20-non-reasoning",
+      "name": "Grok 4.20 Non-Reasoning",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 2000000,
+        "maxTokens": 2000000,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "kilo/openai-completions/x-ai/grok-4.20-non-reasoning-beta",
+      "provider": "kilo",
+      "id": "x-ai/grok-4.20-non-reasoning-beta",
+      "name": "Grok 4.20 Beta Non-Reasoning",
       "api": "openai-completions",
       "values": {
         "contextWindow": 2000000,
@@ -37811,6 +39295,28 @@
       }
     },
     {
+      "key": "kilo/openai-completions/z-ai/glm-4.7-flashx",
+      "provider": "kilo",
+      "id": "z-ai/glm-4.7-flashx",
+      "name": "GLM 4.7 FlashX",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 200000,
+        "maxTokens": 128000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "kilo/openai-completions/z-ai/glm-5",
       "provider": "kilo",
       "id": "z-ai/glm-5",
@@ -37861,7 +39367,7 @@
       "name": "GLM-5.1",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 202745,
+        "contextWindow": 202752,
         "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
@@ -37899,6 +39405,18 @@
       }
     },
     {
+      "key": "kilo/openai-completions/z-ai/glm-5.2-fast",
+      "provider": "kilo",
+      "id": "z-ai/glm-5.2-fast",
+      "name": "GLM 5.2 Fast",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "reasoning": false
+      }
+    },
+    {
       "key": "kilo/openai-completions/z-ai/glm-5.2:free",
       "provider": "kilo",
       "id": "z-ai/glm-5.2:free",
@@ -37930,6 +39448,18 @@
           "defaultLevel": "max",
           "requiresEffort": true
         }
+      }
+    },
+    {
+      "key": "kilo/openai-completions/z-ai/glm-5.3-fast",
+      "provider": "kilo",
+      "id": "z-ai/glm-5.3-fast",
+      "name": "GLM 5.3 Fast",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 131072,
+        "reasoning": false
       }
     },
     {
@@ -40887,6 +42417,42 @@
       }
     },
     {
+      "key": "nace/nace-systemone/drex-max-finance",
+      "provider": "nace",
+      "id": "drex-max-finance",
+      "name": "Drex Max Finance",
+      "api": "nace-systemone",
+      "kind": "judge",
+      "values": {
+        "contextWindow": 262144,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "nace/nace-systemone/drex-max-v1.1",
+      "provider": "nace",
+      "id": "drex-max-v1.1",
+      "name": "Drex Max v1.1",
+      "api": "nace-systemone",
+      "kind": "judge",
+      "values": {
+        "contextWindow": 262144,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "nace/nace-systemone/drex-v2.0",
+      "provider": "nace",
+      "id": "drex-v2.0",
+      "name": "Drex 2.0",
+      "api": "nace-systemone",
+      "kind": "judge",
+      "values": {
+        "contextWindow": 262144,
+        "reasoning": false
+      }
+    },
+    {
       "key": "nanogpt/openai-completions/~typesafe/jev-latest",
       "provider": "nanogpt",
       "id": "~typesafe/jev-latest",
@@ -41015,7 +42581,7 @@
       "name": "Abliterated Model Large V2",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 1048576,
+        "contextWindow": 1000000,
         "maxTokens": 999990,
         "reasoning": true,
         "thinkingConfig": {
@@ -42682,6 +44248,28 @@
       }
     },
     {
+      "key": "nanogpt/openai-completions/baidu/ernie-light-dt-1.0-intl",
+      "provider": "nanogpt",
+      "id": "baidu/ernie-light-dt-1.0-intl",
+      "name": "ERNIE Light DT 1.0 (Intl)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1024000,
+        "maxTokens": 131072,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "nanogpt/openai-completions/baseten/Kimi-K2-Instruct-FP4",
       "provider": "nanogpt",
       "id": "baseten/Kimi-K2-Instruct-FP4",
@@ -44183,6 +45771,46 @@
       }
     },
     {
+      "key": "nanogpt/openai-completions/deepseek/deepseek-v4-pro-20260423",
+      "provider": "nanogpt",
+      "id": "deepseek/deepseek-v4-pro-20260423",
+      "name": "DeepSeek V4 Pro (April preview)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 384000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "nanogpt/openai-completions/deepseek/deepseek-v4-pro-20260423:thinking",
+      "provider": "nanogpt",
+      "id": "deepseek/deepseek-v4-pro-20260423:thinking",
+      "name": "DeepSeek V4 Pro (April preview, Thinking)",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 384000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
       "key": "nanogpt/openai-completions/deepseek/deepseek-v4-pro-cheaper",
       "provider": "nanogpt",
       "id": "deepseek/deepseek-v4-pro-cheaper",
@@ -44263,6 +45891,46 @@
       }
     },
     {
+      "key": "nanogpt/openai-completions/deepseek/deepseek-v4.1-flash-0910-uncensored",
+      "provider": "nanogpt",
+      "id": "deepseek/deepseek-v4.1-flash-0910-uncensored",
+      "name": "DeepSeek V4.1 Flash 0910 Uncensored",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 524288,
+        "maxTokens": 32768,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "nanogpt/openai-completions/deepseek/deepseek-v4.1-flash-0910-uncensored:thinking",
+      "provider": "nanogpt",
+      "id": "deepseek/deepseek-v4.1-flash-0910-uncensored:thinking",
+      "name": "DeepSeek V4.1 Flash 0910 Uncensored Thinking",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 524288,
+        "maxTokens": 32768,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
       "key": "nanogpt/openai-completions/deepseek/deepseek-v4.1-flash-1017",
       "provider": "nanogpt",
       "id": "deepseek/deepseek-v4.1-flash-1017",
@@ -44331,6 +45999,46 @@
       "values": {
         "contextWindow": 1048576,
         "maxTokens": 393216,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "nanogpt/openai-completions/deepseek/deepseek-v4.1-flash-uncensored",
+      "provider": "nanogpt",
+      "id": "deepseek/deepseek-v4.1-flash-uncensored",
+      "name": "DeepSeek V4.1 Flash Uncensored",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "nanogpt/openai-completions/deepseek/deepseek-v4.1-flash-uncensored:thinking",
+      "provider": "nanogpt",
+      "id": "deepseek/deepseek-v4.1-flash-uncensored:thinking",
+      "name": "DeepSeek V4.1 Flash Uncensored Thinking",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -47633,7 +49341,7 @@
       "name": "Gemma 4 31B Split-Untied",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 262144,
+        "contextWindow": 32768,
         "maxTokens": 32768,
         "reasoning": false
       }
@@ -47730,7 +49438,7 @@
       "name": "Qwen 3.8 27B Uncensored Fast by Heabsy",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 524288,
+        "contextWindow": 1048576,
         "maxTokens": 235929,
         "reasoning": true,
         "thinkingConfig": {
@@ -49494,6 +51202,28 @@
         "contextWindow": 328000,
         "maxTokens": 65536,
         "reasoning": false
+      }
+    },
+    {
+      "key": "nanogpt/openai-completions/meta/muse-ember",
+      "provider": "nanogpt",
+      "id": "meta/muse-ember",
+      "name": "Muse Ember",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 1048576,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
       }
     },
     {
@@ -55062,7 +56792,7 @@
       "name": "Qwen 3.8 27B Fable",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 524288,
+        "contextWindow": 1048576,
         "maxTokens": 32768,
         "reasoning": true,
         "thinkingConfig": {
@@ -55230,7 +56960,7 @@
       "name": "Qwen 3.8 27B Queen",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 524288,
+        "contextWindow": 1048576,
         "maxTokens": 32768,
         "reasoning": true,
         "thinkingConfig": {
@@ -70160,6 +71890,29 @@
       }
     },
     {
+      "key": "opencode-zen/google-generative-ai/gemini-4-hydrogen",
+      "provider": "opencode-zen",
+      "id": "gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
+      "api": "google-generative-ai",
+      "webSearch": "gemini",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "google-level",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
       "key": "opencode-zen/openai-completions/beam-free",
       "provider": "opencode-zen",
       "id": "beam-free",
@@ -73279,6 +75032,20 @@
       }
     },
     {
+      "key": "openrouter/openrouter-decisions/google/gemini-decision-1",
+      "provider": "openrouter",
+      "id": "google/gemini-decision-1",
+      "name": "Gemini Decision 1",
+      "api": "openrouter-decisions",
+      "kind": "judge",
+      "webSearch": "openrouter",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 235929,
+        "reasoning": false
+      }
+    },
+    {
       "key": "openrouter/openrouter-decisions/inception/mercury-decide",
       "provider": "openrouter",
       "id": "inception/mercury-decide",
@@ -73552,6 +75319,20 @@
       }
     },
     {
+      "key": "openrouter/openrouter-decisions/perplexity/pplx-decider-flash-v1.3:free",
+      "provider": "openrouter",
+      "id": "perplexity/pplx-decider-flash-v1.3:free",
+      "name": "Decider Flash V1.3 (free)",
+      "api": "openrouter-decisions",
+      "kind": "judge",
+      "webSearch": "openrouter",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 235929,
+        "reasoning": false
+      }
+    },
+    {
       "key": "openrouter/openrouter-decisions/perplexity/pplx-decider-v1-27b",
       "provider": "openrouter",
       "id": "perplexity/pplx-decider-v1-27b",
@@ -73593,6 +75374,20 @@
       "provider": "openrouter",
       "id": "perplexity/pplx-decider-v1.2",
       "name": "Decider V1.2",
+      "api": "openrouter-decisions",
+      "kind": "judge",
+      "webSearch": "openrouter",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 235929,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "openrouter/openrouter-decisions/perplexity/pplx-decider-v1.3:free",
+      "provider": "openrouter",
+      "id": "perplexity/pplx-decider-v1.3:free",
+      "name": "Decider V1.3 (free)",
       "api": "openrouter-decisions",
       "kind": "judge",
       "webSearch": "openrouter",
@@ -76105,14 +77900,15 @@
       "webSearch": "openrouter",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 65536,
+        "maxTokens": 943718,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
             "low",
             "medium",
-            "high"
+            "high",
+            "xhigh"
           ],
           "defaultLevel": "medium",
           "requiresEffort": true
@@ -77818,7 +79614,7 @@
       "key": "openrouter/openrouter/bytedance-seed/seed-2.0-code",
       "provider": "openrouter",
       "id": "bytedance-seed/seed-2.0-code",
-      "name": "Seed 2.0 Code",
+      "name": "ByteDance Seed 2.0 Code",
       "api": "openrouter",
       "webSearch": "openrouter",
       "values": {
@@ -78373,7 +80169,7 @@
       "webSearch": "openrouter",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 943718,
+        "maxTokens": 393216,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -79288,6 +81084,54 @@
             "low",
             "medium",
             "high"
+          ],
+          "defaultLevel": "medium",
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "openrouter/openrouter/google/gemini-4-hydrogen",
+      "provider": "openrouter",
+      "id": "google/gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
+      "api": "openrouter",
+      "webSearch": "openrouter",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 943718,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "defaultLevel": "medium",
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "openrouter/openrouter/google/gemini-4-hydrogen:batch",
+      "provider": "openrouter",
+      "id": "google/gemini-4-hydrogen:batch",
+      "name": "Gemini 4 Hydrogen (batch)",
+      "api": "openrouter",
+      "webSearch": "openrouter",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 943718,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
           ],
           "defaultLevel": "medium",
           "requiresEffort": true
@@ -81335,7 +83179,7 @@
       "webSearch": "openrouter",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 65536,
+        "maxTokens": 235929,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -85172,7 +87016,7 @@
       "webSearch": "openrouter",
       "values": {
         "contextWindow": 40960,
-        "maxTokens": 36864,
+        "maxTokens": 16384,
         "reasoning": false
       }
     },
@@ -85746,7 +87590,7 @@
       "webSearch": "openrouter",
       "values": {
         "contextWindow": 262144,
-        "maxTokens": 235929,
+        "maxTokens": 40960,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -88202,7 +90046,7 @@
       "webSearch": "openrouter",
       "values": {
         "contextWindow": 1048576,
-        "maxTokens": 943718,
+        "maxTokens": 131072,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
@@ -91783,6 +93627,29 @@
       "provider": "venice",
       "id": "gemini-4-argon",
       "name": "Gemini 4 Argon",
+      "api": "openai-completions",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "venice/openai-completions/gemini-4-carbon",
+      "provider": "venice",
+      "id": "gemini-4-carbon",
+      "name": "Gemini 4 Carbon",
       "api": "openai-completions",
       "values": {
         "contextWindow": 1000000,
@@ -96684,6 +98551,29 @@
       "provider": "vercel-ai-gateway",
       "id": "google/gemini-4-carbon",
       "name": "Gemini 4 Carbon",
+      "api": "anthropic-messages",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 1000000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "budget",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "vercel-ai-gateway/anthropic-messages/google/gemini-4-hydrogen",
+      "provider": "vercel-ai-gateway",
+      "id": "google/gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
       "api": "anthropic-messages",
       "values": {
         "contextWindow": 1000000,
@@ -105415,11 +107305,21 @@
       "key": "zenmux/openai-completions/atria-asi/atria-dawn",
       "provider": "zenmux",
       "id": "atria-asi/atria-dawn",
-      "name": "Atria Dawn (Free)",
+      "name": "Atria Dawn",
       "api": "openai-completions",
       "values": {
         "contextWindow": 524288,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
       }
     },
     {
@@ -111247,6 +113147,17 @@
       ]
     },
     {
+      "id": "antigravity-cli",
+      "name": "Antigravity CLI (Gemini, Claude, GPT-OSS)",
+      "credentialScoped": false,
+      "authoritative": false,
+      "api": "antigravity-acp",
+      "endpoint": "https://antigravity.google",
+      "kinds": [
+        "chat"
+      ]
+    },
+    {
       "id": "apple",
       "name": "Apple Foundation Models (on-device)",
       "credentialScoped": false,
@@ -111303,6 +113214,17 @@
       "authoritative": true,
       "endpoint": "https://hyper.charm.land/v1",
       "kinds": []
+    },
+    {
+      "id": "chutes",
+      "name": "Chutes",
+      "credentialScoped": false,
+      "authoritative": true,
+      "api": "openai-completions",
+      "endpoint": "https://llm.chutes.ai/v1",
+      "kinds": [
+        "chat"
+      ]
     },
     {
       "id": "cline-pass",
@@ -111501,7 +113423,8 @@
       "endpoint": "https://generativelanguage.googleapis.com/v1beta",
       "kinds": [
         "chat",
-        "image"
+        "image",
+        "judge"
       ]
     },
     {
@@ -111732,6 +113655,17 @@
       ]
     },
     {
+      "id": "nace",
+      "name": "Nace",
+      "credentialScoped": false,
+      "authoritative": false,
+      "api": "nace-systemone",
+      "endpoint": "https://console.nace.ai",
+      "kinds": [
+        "judge"
+      ]
+    },
+    {
       "id": "nanogpt",
       "name": "NanoGPT",
       "credentialScoped": false,
@@ -111836,8 +113770,8 @@
     {
       "id": "openrouter",
       "name": "OpenRouter",
-      "credentialScoped": false,
-      "authoritative": false,
+      "credentialScoped": true,
+      "authoritative": true,
       "api": "openrouter",
       "endpoint": "https://openrouter.ai/api/v1",
       "kinds": [

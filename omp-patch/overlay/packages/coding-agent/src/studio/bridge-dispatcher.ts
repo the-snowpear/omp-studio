@@ -30,7 +30,11 @@ import { StudioOmfgError } from "./services/omfg-service";
 import { StudioPauseError } from "./services/pause-service";
 import { StudioPermissionControlError, StudioPermissionControlService } from "./services/permission-control-service";
 import { StudioRuntimeSettingsError } from "./services/runtime-settings-service";
-import { SessionControlError, SessionControlService } from "./services/session-control-service";
+import {
+	captureStudioSessionInput,
+	SessionControlError,
+	SessionControlService,
+} from "./services/session-control-service";
 import { StudioSessionTranscriptError, StudioSessionTranscriptService } from "./services/session-transcript-service";
 import { expandSkillPrompts } from "./services/skill-prompt-expansion";
 import { StudioTanError } from "./services/tan-service";
@@ -508,15 +512,7 @@ export class StudioBridgeDispatcher {
 					stateVersion: this.projector.stateVersion,
 					status: "accepted",
 				});
-				if (
-					[
-						"session.clearContext",
-						"session.fork",
-						"session.handoff",
-						"session.tree.navigate",
-						"session.tree.branch",
-					].includes(operation.kind)
-				)
+				if (["session.clearContext", "session.handoff", "session.tree.navigate"].includes(operation.kind))
 					await Promise.all([
 						this.runtime.services.btw.settle(),
 						this.runtime.services.workbench.agentBtw.settle(),
@@ -542,7 +538,7 @@ export class StudioBridgeDispatcher {
 													: isTreeOperation
 														? await this.#executeTreeOperation(operation, commandId)
 														: operation.kind === "session.fork"
-															? await this.runtime.services.fork.fork()
+															? await this.runtime.services.fork.fork(() => this.#settleBtw())
 															: operation.kind === "session.handoff"
 																? await this.runtime.services.handoff.handoff(
 																		operation.customInstructions,
@@ -823,11 +819,13 @@ export class StudioBridgeDispatcher {
 			case "session.prewalk.restart":
 				return await this.runtime.services.fastPrewalk.restart();
 			case "core.prompt": {
+				const checkInput = captureStudioSessionInput(this.runtime.session);
 				const loop = this.runtime.services.loop;
 				const held =
 					!this.runtime.session.isStreaming && loop.state() !== undefined ? loop.holdPrompt() : undefined;
 				try {
 					const { preludes } = await expandSkillPrompts(this.runtime.session, operation.text);
+					checkInput();
 					const result = await this.#sessionControl.prompt(operation.text, operation.images, preludes);
 					if (result.started) held?.capture(operation.text);
 					return result;
@@ -836,11 +834,15 @@ export class StudioBridgeDispatcher {
 				}
 			}
 			case "core.steer": {
+				const checkInput = captureStudioSessionInput(this.runtime.session);
 				const { preludes } = await expandSkillPrompts(this.runtime.session, operation.text);
+				checkInput();
 				return await this.#sessionControl.steer(operation.text, operation.images, preludes);
 			}
 			case "core.followUp": {
+				const checkInput = captureStudioSessionInput(this.runtime.session);
 				const { preludes } = await expandSkillPrompts(this.runtime.session, operation.text);
+				checkInput();
 				return await this.#sessionControl.followUp(operation.text, operation.images, preludes);
 			}
 			case "core.abort":
@@ -934,6 +936,10 @@ export class StudioBridgeDispatcher {
 		}
 	}
 
+	async #settleBtw(): Promise<void> {
+		await Promise.all([this.runtime.services.btw.settle(), this.runtime.services.workbench.agentBtw.settle()]);
+	}
+
 	async #executeTreeOperation(operation: StudioRequest["operation"], commandId: string): Promise<unknown> {
 		switch (operation.kind) {
 			case "session.tree.get":
@@ -941,7 +947,7 @@ export class StudioBridgeDispatcher {
 			case "session.tree.navigate":
 				return await this.runtime.services.tree.navigate(commandId, operation);
 			case "session.tree.branch":
-				return await this.runtime.services.tree.branch(commandId, operation);
+				return await this.runtime.services.tree.branch(commandId, operation, () => this.#settleBtw());
 			default:
 				throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Tree operation is not registered");
 		}

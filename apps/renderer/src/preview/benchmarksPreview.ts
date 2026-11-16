@@ -1,4 +1,9 @@
-import type { BenchmarkSnapshot, BenchmarkStats, BenchmarkSpec } from "@omp-studio/studio-protocol";
+import type { BenchmarkAccounts, BenchmarkSnapshot, BenchmarkStats, BenchmarkSpec } from "@omp-studio/studio-protocol";
+/** Demo OAuth accounts; never sent to a real Runtime. */
+export function previewBenchmarkAccounts(providerId: string): BenchmarkAccounts {
+  const labels = providerId === "anthropic" ? ["demo-personal@example.com", "demo-team@example.com"] : providerId === "openai-codex" ? ["demo-plus@example.com"] : [];
+  return { providerId, accounts: labels.map((label, index) => ({ account: index + 1, credentialId: 900 + index, label })) };
+}
 const metric = (value: number) => ({ mean: value, min: value * 0.8, p50: value, p95: value * 1.2, max: value * 1.2 });
 const stats = (ttft: number, tps: number): BenchmarkStats => ({ ttftMs: metric(ttft), durationMs: metric(1800), tokensPerSecond: metric(tps), generationTps: metric(tps * 1.2), prefillTps: metric(4000), inputTokens: 600, outputTokens: 180, cost: 0.002 });
 export function previewBenchmark(spec: BenchmarkSpec): BenchmarkSnapshot {

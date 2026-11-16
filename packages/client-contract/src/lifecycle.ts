@@ -102,6 +102,10 @@ export type ClientInteraction =
         readonly description?: string;
       }>;
       readonly multiple: boolean;
+      readonly initialIndex?: number;
+      readonly selectionMarker?: "radio" | "checkbox";
+      readonly checkedIndices?: readonly number[];
+      readonly markableCount?: number;
     })
   | (ClientInteractionBase & {
       readonly kind: "input";

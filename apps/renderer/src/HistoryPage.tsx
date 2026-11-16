@@ -1,5 +1,5 @@
 import { timeTravelPreview } from "./preview/timeTravelPreview";
-import { ResumeScopePane } from "./history/ResumeScopePane";
+import { ResumeScopePane, type OpenPreparedSession } from "./history/ResumeScopePane";
 import { SessionPortabilityPane } from "./history/SessionPortabilityPane";
 import { SeanceDialog } from "./history/SeanceDialog";
 import type { SessionTitleRow } from "@omp-studio/studio-protocol";
@@ -355,7 +355,7 @@ function HostHistRow({
 
 export function HistoryPage({
  nativeContext,
-  client, onImportedOpen, onImported,
+  client, onImportedOpen, onNativeResume, onImported,
   workspaceId,
   history,
   onRoute,
@@ -370,6 +370,7 @@ export function HistoryPage({
   onRenameSession?: (entry: SessionHistoryEntry) => void;
   onPinSession?: (entry: SessionHistoryEntry) => void;
   onImportedOpen?: (sessionId: string, workspaceId: WorkspaceId) => void;
+  onNativeResume?: OpenPreparedSession;
   onImported?: () => void;
   history?: SessionHistoryReadModel;
   onRoute: (route: PageRoute) => void;
@@ -489,7 +490,7 @@ export function HistoryPage({
         <header className="history-catalog-heading">
           <div className="history-catalog-title"><h2 id="histHeading">{zh ? "项目会话" : "Project sessions"}</h2><span className="history-catalog-count">{t("history.conversationsCount", { count: rows.length })}</span></div>
           <div className="history-catalog-actions">
-            <ResumeScopePane key={nativeContext?.sessionId ?? "no-live-session"} client={client} context={nativeContext} onOpen={onImportedOpen} onPreviewOpen={() => onRoute("workbench")} />
+            <ResumeScopePane key={nativeContext?.sessionId ?? "no-live-session"} client={client} context={nativeContext} onOpen={onNativeResume} onPreviewOpen={() => onRoute("workbench")} />
             <SessionImportPanel client={client ?? null} onOpen={onImportedOpen ?? (() => {})} {...(onImported ? { onImported } : {})} onPreviewOpen={() => onRoute("workbench")} />
           </div>
         </header>

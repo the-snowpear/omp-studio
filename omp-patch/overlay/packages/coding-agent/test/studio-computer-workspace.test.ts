@@ -18,6 +18,7 @@ import {
 	computerToolResultDelivered,
 } from "../src/studio/computer-runtime-lifecycle";
 import type {
+	ComputerActivityPage,
 	ComputerFrame,
 	ComputerObservationLease,
 	ComputerWorkspaceSnapshot,
@@ -117,6 +118,77 @@ async function harness(capture?: () => Promise<DesktopCapture>) {
 		},
 	};
 }
+
+test.each([
+	{ backend: "win32", locked: true, lockKnown: true, sleepKnown: false },
+	{ backend: "quartz", locked: false, lockKnown: true, sleepKnown: true },
+	{ backend: "wayland", locked: false, lockKnown: false, sleepKnown: false },
+])(
+	"$backend reports independent lock/sleep knowledge and the effective native Escape state",
+	async ({ backend, locked, lockKnown, sleepKnown }) => {
+		const h = await harness();
+		const native = observer();
+		native.capabilities.backend = backend;
+		native.capabilities.secureInput = backend === "quartz";
+		native.capabilities.secureInputApp = backend === "quartz" ? "Password Manager" : undefined;
+		native.capabilities.globalEscape = backend !== "quartz";
+		native.screenState.screenLocked = locked;
+		const service = new StudioComputerWorkspaceService(h.root, { directory: h.directory, observer: () => native });
+		try {
+			const result = (await service.query({
+				kind: "computer.workspace.get",
+				sessionId: h.root.sessionId,
+			})) as ComputerWorkspaceSnapshot;
+			expect(result.screen).toEqual({
+				locked,
+				asleep: false,
+				lockKnown,
+				sleepKnown,
+				known: lockKnown && sleepKnown,
+			});
+			if (backend === "quartz")
+				expect(result.capabilities).toMatchObject({
+					secureInput: true,
+					secureInputApp: "Password Manager",
+					globalEscape: false,
+				});
+			if (backend === "win32") expect(result.reason).toContain("sleep state is unknown");
+		} finally {
+			await service.dispose();
+		}
+	},
+);
+
+test("native action delivery uncertainty and focus return survive workspace activity history", async () => {
+	const h = await harness();
+	const identity = { sessionId: h.root.sessionId, runId: "native-focus-run" };
+	emitComputerLifecycle({ kind: "run", identity, phase: "running", at: 1 });
+	emitComputerLifecycle({
+		kind: "action",
+		identity,
+		actionId: "typing",
+		method: "typeText",
+		mode: "takeover",
+		phase: "completed",
+		at: 2,
+		unconfirmed: "target did not consume input",
+		focusReturn: { handedBack: false, previousPid: 42, frontPid: 84 },
+	});
+	emitComputerLifecycle({ kind: "run", identity, phase: "completed", at: 3 });
+	const activity = (await h.service.query({
+		kind: "computer.activity.list",
+		sessionId: h.root.sessionId,
+	})) as ComputerActivityPage;
+	expect(activity.items.find(item => item.id === "typing")).toMatchObject({
+		status: "completed",
+		mode: "takeover",
+		unconfirmed: "target did not consume input",
+		focusReturn: { handedBack: false, previousPid: 42, frontPid: 84 },
+	});
+	const stop = await h.service.stop();
+	expect(stop.status).toBe("stopped");
+	expect(stop.revision).toBeGreaterThan(0);
+});
 
 test("global defaults preserve session enable overrides and clearing a false inherited override stops", async () => {
 	const h = await harness();

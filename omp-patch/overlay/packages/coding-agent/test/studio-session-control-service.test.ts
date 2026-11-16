@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { AgentBusyError } from "@oh-my-pi/pi-agent-core";
+import type { AgentSession } from "../src/session/agent-session";
+import { StudioForkService } from "../src/studio/services/fork-service";
 import type { SessionControlSession } from "@oh-my-pi/pi-coding-agent/studio/services/session-control-service";
 import {
 	SessionControlError,
@@ -93,6 +95,33 @@ class FakeSessionControlSession implements SessionControlSession {
 		return Promise.resolve(this.newSessionResult);
 	}
 }
+
+test("an input still preparing when fork starts cannot be admitted to the forked session", async () => {
+	const preferences = Promise.withResolvers<void>();
+	let id = "source";
+	const session = Object.assign(new FakeSessionControlSession(), {
+		getVibeModeState: () => undefined,
+		waitForIdle: async () => {},
+		beginStudioQueueBarrier() {},
+		releaseStudioQueueBarrier() {},
+		clearQueue() {},
+		fork: async () => {
+			id = "forked";
+			return true;
+		},
+		sessionManager: { getSessionId: () => id },
+	});
+	Object.defineProperty(session, "sessionId", { get: () => id });
+	const control = new SessionControlService(session, { beforeQueuedUserTurn: () => preferences.promise });
+	const submission = control.steer("belongs to source");
+	await new StudioForkService(session as unknown as AgentSession).fork();
+	preferences.resolve();
+	await expect(submission).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+	expect(session.steerCalls).toEqual([]);
+	expect(session.followUpCalls).toEqual([]);
+	await control.steer("belongs to fork");
+	expect(session.steerCalls).toEqual(["belongs to fork"]);
+});
 
 describe("WP-021/022/023/024/025 SessionControlService", () => {
 	test("queue.enqueue reuses followUp and reports the pending queue length", async () => {

@@ -28,6 +28,7 @@ import { GitPatch } from "./GitPatch";
 import { GitMoreActionsMenu } from "./GitMoreActionsMenu";
 import { GitPanelSplit } from "./GitPanelSplit";
 import { GitTip } from "./GitTip";
+import { SelectiveCommitButton } from "../commit/SelectiveCommitLauncher";
 import { readGitGraphLayout, writeGitGraphLayout } from "./gitGraphMemory";
 import { useGitWorkspace } from "./GitWorkspaceContext";
 
@@ -411,6 +412,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
     <div className="git-commit-box">
       <textarea value={commitMessage} placeholder="Commit message" rows={1} onChange={(event) => setCommitMessage(event.target.value)} />
       <button className="btn small primary" disabled={busy || staged.length === 0 || !commitMessage.trim()} onClick={() => { const submitted = commitMessage; const message = submitted.trim(); if (!message) return; void execute({ kind: "commit", message }).then((completed) => { if (completed) setCommitMessage(current => current === submitted ? "" : current); }); }}>Commit</button>
+      {repository.changes.length > 0 ? <SelectiveCommitButton variant="icon" /> : null}
     </div>
     {selected ? (
       <>

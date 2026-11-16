@@ -84,11 +84,12 @@ import type {
   DesktopRuntimeSession,
   DesktopRuntimeSessionContext,
   DesktopRuntimeSessionPort,
+  DesktopSessionSwitchIntent,
 } from "./host-composition.js";
 import type { HostLog } from "./host-log.js";
 import { startMemoryCredentialBroker, type MemoryCredentialProvider } from "./memory-credentials.js";
 import { UpdateRestartBlockedError, updateRestartBlockerForSnapshot } from "./update-restart.js";
-import { getDesktopLanguage, onDesktopLanguageChange } from "./desktop-language-shared.js";
+import { desktopText, getDesktopLanguage, onDesktopLanguageChange } from "./desktop-language-shared.js";
 
 export interface DesktopRuntimeSessionPortOptions {
   readonly managedBrowser?: boolean;
@@ -134,6 +135,7 @@ export interface DesktopRuntimeSessionPortOptions {
   readonly workerPortFactory?: (input: {
     readonly resumeSessionId?: string;
     readonly model?: string;
+    readonly allowRelocation?: boolean;
     readonly nextRuntimeEpoch: () => number;
   }) => DesktopRuntimeSessionPort;
 }
@@ -188,7 +190,7 @@ export function selectVerifiedCommandManifest(
 }
 
 interface ResidentRuntime {
-  readonly sessionId: string;
+  sessionId: string;
   /**
    * The workspace this Worker was spawned under. A Runtime process binds its
    * cwd at spawn time (`--cwd`), so this never changes for a resident: opening
@@ -198,7 +200,7 @@ interface ResidentRuntime {
   port: DesktopRuntimeSessionPort;
   session: DesktopRuntimeSession;
   stopping: boolean;
-  readonly lease: SessionLease;
+  lease: SessionLease;
   lastSelected: number;
   idleSince: number | undefined;
   lastActivityAt: string;
@@ -363,6 +365,28 @@ export function createDesktopRuntimeSessionPort(
     };
   };
 
+  async function rebindResidentIdentity(resident: ResidentRuntime): Promise<void> {
+    const sessionId = resident.session.controller.publication()?.snapshot.sessionId;
+    if (!sessionId || sessionId === resident.sessionId || resident.stopping) return;
+    if (residents.has(sessionId)) throw new Error(desktopText("新会话已由另一个常驻 Worker 占用", "The new session identity already has a resident Worker"));
+    const lease = await getLeaseStore().acquire({ sessionId, ownerId });
+    if (resident.stopping || resident.session.controller.publication()?.snapshot.sessionId !== sessionId) {
+      await lease.release();
+      return;
+    }
+    const previousId = resident.sessionId;
+    const previousLease = resident.lease;
+    residents.delete(previousId);
+    resident.sessionId = sessionId;
+    resident.lease = lease;
+    residents.set(sessionId, resident);
+    if (activeSessionId === previousId) activeSessionId = sessionId;
+    if (evaluationSessions.delete(previousId)) evaluationSessions.add(sessionId);
+    try { await previousLease.release(); }
+    catch (error) { options.log?.write("warn", "runtime.worker.lease-release-failed", errorDetail(error)); }
+    emitResidents();
+  }
+
   const trackResidentPublication = (resident: ResidentRuntime, session: DesktopRuntimeSession): void => {
     resident.unsubscribePublication?.();
     resident.unsubscribePublication = undefined;
@@ -374,7 +398,18 @@ export function createDesktopRuntimeSessionPort(
       if (publication.commitSeq <= resident.lastCommitSeq) return;
       resident.lastCommitSeq = publication.commitSeq;
       resident.lastActivityAt = publication.publishedAt;
-      emitResidents(publication.terminalOutcomes);
+      if (publication.snapshot.sessionId !== resident.sessionId) {
+        void serialized(async () => {
+          try {
+            await rebindResidentIdentity(resident);
+            emitResidents(publication.terminalOutcomes);
+          } catch (error) {
+            if (activeSessionId === resident.sessionId) sessionSink?.(undefined);
+            await stopResident(resident);
+            throw error;
+          }
+        }).catch(error => options.log?.write("error", "runtime.worker.rebind-failed", errorDetail(error)));
+      } else emitResidents(publication.terminalOutcomes);
       // A publication is Runtime activity even when its resulting snapshot is
       // idle (for example a completed setting command). Start the idle window
       // from this publication rather than an older selection timestamp.
@@ -445,13 +480,14 @@ export function createDesktopRuntimeSessionPort(
     return leaseStore;
   };
 
-  const workerPort = (resumeSessionId?: string, model?: string, noContextFiles?: boolean): DesktopRuntimeSessionPort => {
+  const workerPort = (resumeSessionId?: string, model?: string, noContextFiles?: boolean, allowRelocation?: boolean): DesktopRuntimeSessionPort => {
     const port =
       options.workerPortFactory?.({
         ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
         ...(model === undefined ? {} : { model }),
+        ...(allowRelocation === undefined ? {} : { allowRelocation }),
         nextRuntimeEpoch,
-      }) ?? createSingleDesktopRuntimeSessionPort(workerOptions, resumeSessionId, nextRuntimeEpoch, model, noContextFiles);
+      }) ?? createSingleDesktopRuntimeSessionPort(workerOptions, resumeSessionId, nextRuntimeEpoch, model, noContextFiles, allowRelocation);
     port.attachSessionSink?.((session) => {
       // Ownership comes from the Worker port, never from a returned snapshot.
       // A launch is selected only after admission; late callbacks from retired
@@ -544,6 +580,7 @@ export function createDesktopRuntimeSessionPort(
     noContextFiles?: boolean,
     evaluation = false,
     background = false,
+    allowRelocation?: boolean,
   ): Promise<DesktopRuntimeSession | undefined> => {
     const launchContext = context;
     const selected = launchWorkspace ?? workspace;
@@ -563,13 +600,14 @@ export function createDesktopRuntimeSessionPort(
     }
     await ensureCapacity();
     let lease: SessionLease | undefined;
-    const port = workerPort(resumeSessionId, model, noContextFiles);
+    const port = workerPort(resumeSessionId, model, noContextFiles, allowRelocation);
     try {
       if (resumeSessionId !== undefined) {
         lease = await getLeaseStore().acquire({ sessionId: resumeSessionId, ownerId });
       }
       const session = await port.start({ ...launchContext, workspace: selected });
       if (session === undefined) {
+        await port.stop();
         await lease?.release();
         rememberUnavailable(port.lastUnavailable?.() ?? unavailableFacts("launch-failed", "Runtime did not become ready"));
         return undefined;
@@ -610,7 +648,7 @@ export function createDesktopRuntimeSessionPort(
       emitResidents();
       if (lease.heartbeat !== undefined) {
         resident.heartbeatTimer = setInterval(() => {
-          void Promise.resolve(lease!.heartbeat!()).catch((error) => {
+          void Promise.resolve(resident.lease.heartbeat?.()).catch((error) => {
             options.log?.write("error", "runtime.worker.lease-lost", errorDetail(error));
             void serialized(async () => {
               const sessionId = resident.sessionId;
@@ -664,10 +702,13 @@ export function createDesktopRuntimeSessionPort(
     }
   };
 
-  const selectResident = async (sessionId: string, model?: string): Promise<DesktopRuntimeSession | undefined> => {
+  const selectResident = async (
+    sessionId: string, model?: string, resumeWorkspace?: { workspaceId: string; cwd: string }, allowRelocation?: boolean,
+  ): Promise<DesktopRuntimeSession | undefined> => {
     const existing = residents.get(sessionId);
     if (existing !== undefined) {
       if (existing.session.hello() !== undefined && existing.session.controller.publication()?.snapshot?.sessionId === sessionId) {
+        if (resumeWorkspace && resumeWorkspace.workspaceId !== existing.workspace.workspaceId) throw new Error(desktopText("会话已在另一个工作区运行", "Session is already running in another workspace"));
         if (model !== undefined) throw new Error("This session is already active; change its model using the model picker");
         // Resuming a Session of another project follows its Worker: the active
         // workspace moves with the selection so later `fresh` launches and
@@ -684,13 +725,25 @@ export function createDesktopRuntimeSessionPort(
         );
         return existing.session;
       }
-      // A dead resident is replaced in its own workspace, not the active one.
-      const previousWorkspace = existing.workspace;
+      // A dead resident keeps its workspace unless preparation explicitly chose
+      // another usable directory. Neither choice becomes active on launch failure.
+      const executionWorkspace = resumeWorkspace ?? existing.workspace;
       await stopResident(existing);
-      adoptWorkspace(previousWorkspace);
-      return await launchWorker(sessionId, previousWorkspace, model);
+      const session = await launchWorker(sessionId, executionWorkspace, model, undefined, false, true, allowRelocation);
+      if (session) {
+        adoptWorkspace(executionWorkspace);
+        setActiveSession(session.controller.publication()!.snapshot.sessionId);
+      }
+      return session;
     }
-    return await launchWorker(sessionId, undefined, model);
+    const session = await launchWorker(sessionId, resumeWorkspace, model, undefined, false, resumeWorkspace !== undefined, allowRelocation);
+    if (session && resumeWorkspace) {
+      // Commit the active workspace only after the replacement has authenticated.
+      // A missing cwd or failed native restore leaves the previous Worker selected.
+      adoptWorkspace(resumeWorkspace);
+      setActiveSession(session.controller.publication()!.snapshot.sessionId);
+    }
+    return session;
   };
 
   function armIdleTimer(resident: ResidentRuntime): void {
@@ -802,17 +855,26 @@ export function createDesktopRuntimeSessionPort(
   return {
     supportsConcurrentSessions: true,
     sessionFor(sessionId) { return residents.get(sessionId)?.session; },
+    synchronizeSessionIdentity(session) {
+      return serialized(async () => {
+        const resident = [...residents.values()].find(row => row.session === session && !row.stopping);
+        if (!resident) throw new Error(desktopText("会话 Worker 已不再常驻", "The session Worker is no longer resident"));
+        await rebindResidentIdentity(resident);
+      });
+    },
     openContextSession(target, intent) {
       return serialized(async () => {
         const id = intent.kind === "resume" ? intent.sessionId : undefined;
+        const execution = intent.kind === "resume" ? intent.resumeWorkspace ?? target : target;
         const resident = id === undefined ? undefined : residents.get(id);
         if (resident?.session.hello()) {
-          if (resident.workspace.workspaceId !== target.workspaceId) throw new Error("Session belongs to another workspace");
+          if (resident.workspace.workspaceId !== execution.workspaceId) throw new Error("Session belongs to another workspace");
           return resident.session;
         }
         if (resident) await stopResident(resident);
-        return launchWorker(id, target, intent.model,
-          intent.kind === "fresh" ? intent.noContextFiles : undefined, false, true);
+        return launchWorker(id, execution, intent.model,
+          intent.kind === "fresh" ? intent.noContextFiles : undefined, false, true,
+          intent.kind === "resume" ? intent.allowRelocation : undefined);
       });
     },
     evaluationSession(sessionId) { return residents.get(sessionId)?.session; },
@@ -1089,7 +1151,7 @@ export function createDesktopRuntimeSessionPort(
     },
     switchSession(intent): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
-        if (intent.kind === "resume") return await selectResident(intent.sessionId, intent.model);
+        if (intent.kind === "resume") return await selectResident(intent.sessionId, intent.model, intent.resumeWorkspace, intent.allowRelocation);
         return await launchWorker(undefined, undefined, intent.model, intent.noContextFiles);
       });
     },
@@ -1194,6 +1256,7 @@ function createSingleDesktopRuntimeSessionPort(
   nextRuntimeEpoch: () => number,
   initialModel?: string,
   initialNoContextFiles?: boolean,
+  initialAllowRelocation?: boolean,
 ): DesktopRuntimeSessionPort {
   // POSIX Runtimes lead their own process group so stopping one also stops
   // the tool processes it started; Windows keeps the kill-based fallback.
@@ -1214,6 +1277,7 @@ function createSingleDesktopRuntimeSessionPort(
   let alive = false;
   let resumeSessionId: string | undefined = initialResumeSessionId;
   let resumeModel = initialModel;
+  let allowResumeRelocation = initialAllowRelocation === true;
   let noContextFiles = initialNoContextFiles;
   /** Bumped on every launch so a late socket close cannot kill the next session. */
   let generation = 0;
@@ -1459,6 +1523,8 @@ function createSingleDesktopRuntimeSessionPort(
       if (current === undefined) {
         return;
       }
+      // An in-process fork changes the recovery target without changing this Worker.
+      resumeSessionId = current.snapshot.sessionId;
       for (const listener of [...publicationListeners]) {
         try {
           listener(current);
@@ -1553,6 +1619,9 @@ function createSingleDesktopRuntimeSessionPort(
       const port = new NodeRuntimeProcessPort({
         env: {
           ...process.env,
+          // The approval names this prepared session only. Never inherit a stale
+          // relocation grant into a fresh launch or an unrelated resume.
+          OMP_STUDIO_RESUME_RELOCATION: allowResumeRelocation ? resumeSessionId ?? "" : "",
           ...(socketDirectory === undefined || process.env.OMP_AUTH_BROKER_URL ? {} : { OMP_STUDIO_AUTH_BROKER_FILE: join(socketDirectory, "auth-broker.json") }),
           OMP_STUDIO_MEDIA_ROOT: mediaDirectory,
           ...(options.managedBrowser ? { OMP_STUDIO_MANAGED_BROWSER: "1" } : {}),
@@ -1658,6 +1727,7 @@ function createSingleDesktopRuntimeSessionPort(
       // rather than silently creating a different Session on auto-respawn.
       resumeSessionId = controller.publication()?.snapshot.sessionId ?? resumeSessionId;
       resumeModel = undefined;
+      allowResumeRelocation = false;
       log?.write("info", "runtime.launch.ready", `generation=${launchGeneration}`);
       rememberUnavailable(undefined);
       rememberDisconnect(undefined);
@@ -1721,7 +1791,7 @@ function createSingleDesktopRuntimeSessionPort(
       });
     },
 
-    switchSession(intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean; model?: string }): Promise<DesktopRuntimeSession | undefined> {
+    switchSession(intent: DesktopSessionSwitchIntent): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
         const previousResume = resumeSessionId;
         const previousModel = resumeModel;

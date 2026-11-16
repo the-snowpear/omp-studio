@@ -100,6 +100,26 @@ describe("InteractionDeck real cards", () => {
     expect(onRespond).toHaveBeenCalledWith("submit", "option:0");
   });
 
+  it("select starts on the native initial option", () => {
+    const onRespond = vi.fn();
+    render(<InteractionPrompt interaction={{ ...select("Model", ["Fast", "Deep"]), initialIndex: 1 } as ClientInteraction} onRespond={onRespond} />);
+    expect(screen.getByRole("radio", { name: /Deep/ }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    expect(onRespond).toHaveBeenCalledWith("submit", "option:1");
+  });
+
+  it("a checkbox-marked select shows native marks and answers one toggle per click", () => {
+    const onRespond = vi.fn();
+    const toggles = { ...select("Tools", ["read", "write", "Done selecting"]), selectionMarker: "checkbox", checkedIndices: [0], markableCount: 2 } as ClientInteraction;
+    render(<InteractionPrompt interaction={toggles} onRespond={onRespond} />);
+    expect(screen.getByRole("checkbox", { name: /read/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("checkbox", { name: /write/ }).getAttribute("aria-checked")).toBe("false");
+    // The finishing row is kept, unmarked, and still a single choice.
+    expect(screen.queryByRole("checkbox", { name: /Done selecting/ })).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: /write/ }));
+    expect(onRespond).toHaveBeenCalledWith("submit", "option:1");
+  });
+
   it("select custom answer submits the typed text", () => {
     const onRespond = vi.fn();
     render(<InteractionPrompt interaction={select("Which backend?", ["SQLite"])} onRespond={onRespond} />);
@@ -205,6 +225,19 @@ describe("InteractionDeck real cards", () => {
     fireEvent.click(screen.getByRole("radio", { name: /SQLite/ }));
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
     await waitFor(() => expect(onRespond).toHaveBeenCalledWith("submit", "option:0"));
+  });
+
+  it("the shared queue honours the native cursor and answers a toggle list per click", async () => {
+    const onRespond = vi.fn(() => Promise.resolve(true));
+    const { unmount } = render(<InteractionDeck interaction={{ ...select("Model", ["Fast", "Deep"]), initialIndex: 1 } as ClientInteraction} onRespond={onRespond} disabled={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    await waitFor(() => expect(onRespond).toHaveBeenCalledWith("submit", "option:1"));
+    unmount();
+    const toggles = { ...select("Tools", ["read", "write", "Done selecting"]), interactionId: "int-toggle" as InteractionId, selectionMarker: "checkbox", checkedIndices: [1], markableCount: 2 } as ClientInteraction;
+    render(<InteractionDeck interaction={toggles} onRespond={onRespond} disabled={false} />);
+    expect(screen.getByRole("checkbox", { name: /write/ }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: /Done selecting/ }));
+    await waitFor(() => expect(onRespond).toHaveBeenLastCalledWith("submit", "option:2"));
   });
 
   it("genies Ask cards in from the composer and does not genie approval cards", () => {

@@ -1,6 +1,18 @@
 import type { SessionCompactionState } from "./session-compaction-protocol";
 /** Additive settings surface for Runtime 18.10; the published settings payload stays unchanged. */
 export const FEATURE_SETTING_KEYS = [
+	"models.noJudge",
+	"models.noSpotlight",
+	"models.offline",
+	"find.verifyModel",
+	"find.hitThreshold",
+	"encourageEdits",
+	"commit.enabled",
+	"todo.midRunNudges",
+	"shellPath",
+	"bash.allowedEnvVars",
+	"bash.patterns",
+	"ttsr.repeatMode",
 	"magicKeywords.enabled",
 	"magicKeywords.chillax",
 	"out.enabled",
@@ -79,6 +91,8 @@ export interface FeatureSettingRow {
 	key: FeatureSettingKey;
 	value: FeatureSettingValue;
 	source: "env" | "runtime" | "overlay" | "project" | "global" | "default";
+	/** Authored layers, before project merging and path resolution. */
+	editableValues?: { global: FeatureSettingValue; session: FeatureSettingValue };
 }
 export interface PoolAccountOption {
 	provider: string;
@@ -158,7 +172,8 @@ function text(value: unknown, max = 1024, empty = false): void {
 		throw Error("Invalid feature settings text");
 }
 export function validateFeatureSettingValue(value: unknown, depth = 0): asserts value is FeatureSettingValue {
-	if (depth > 4) throw Error("Setting nesting exceeds limit");
+	// Authored path groups can nest rule lists with their per-rule env arrays.
+	if (depth > 8) throw Error("Setting nesting exceeds limit");
 	if (value === null || typeof value === "boolean") return;
 	if (typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 100_000_000) return;
 	if (typeof value === "string") {

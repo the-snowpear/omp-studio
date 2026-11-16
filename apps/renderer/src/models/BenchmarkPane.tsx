@@ -6,6 +6,7 @@ import type {
   StudioClient,
 } from "@omp-studio/client-contract";
 import {
+  type BenchmarkAccountSelection,
   type BenchmarkRun,
   type BenchmarkSnapshot,
   type BenchmarkSpec,
@@ -17,6 +18,7 @@ import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { PREVIEW_BENCHMARK } from "../preview/benchmarksPreview";
 import { WorkspaceStatus, workspaceStateLabel } from "../workspaces/Workspace";
+import { BenchmarkAccountPicker, NATIVE_SERVICE_TIERS, selectorProvider } from "./BenchmarkAccountPicker";
 import "./benchmark.css";
 
 type Props = {
@@ -53,6 +55,8 @@ export function BenchmarkPane({
   const [maxTokens, setMaxTokens] = useState(512);
   const [inputBytes, setInputBytes] = useState(32768);
   const [prompt, setPrompt] = useState("");
+  const [account, setAccount] = useState<BenchmarkAccountSelection>();
+  const [serviceTier, setServiceTier] = useState("");
   const [review, setReview] = useState<BenchmarkSpec>();
   const [closeReview, setCloseReview] = useState(false);
   const [metric, setMetric] = useState<Metric>("ttftMs");
@@ -91,6 +95,7 @@ export function BenchmarkPane({
     setSelected(preview ? PREVIEW_BENCHMARK.run.id : undefined);
     setSnapshot(preview ? PREVIEW_BENCHMARK : undefined);
     setPicked([]);
+    setAccount(undefined);
     return () => {
       epoch.current++;
     };
@@ -185,10 +190,16 @@ export function BenchmarkPane({
       }),
     [snapshot, metric],
   );
+  const providers = picked.flatMap((selector) => {
+    const provider = models.find((model) => model.selector === selector)?.provider ?? selectorProvider(selector);
+    return provider ? [provider] : [];
+  });
   const prepare = () => {
     const spec: BenchmarkSpec = {
       models: picked,
       profile,
+      ...(account ? { account } : {}),
+      ...(serviceTier ? { serviceTier } : {}),
       runs: count,
       concurrency,
       maxTokens,
@@ -399,6 +410,29 @@ export function BenchmarkPane({
                 onChange={(event) => setMaxTokens(Number(event.target.value))}
               />
             </label>
+            <label>
+              {t("服务档位", "Service tier")}
+              <AppSelect
+                className="select"
+                value={serviceTier}
+                onChange={(event) => setServiceTier(event.target.value)}
+              >
+                <option value="">{t("继承原生配置", "Native configuration")}</option>
+                {NATIVE_SERVICE_TIERS.map((tier) => (
+                  <option key={tier} value={tier}>{tier}</option>
+                ))}
+              </AppSelect>
+            </label>
+            <BenchmarkAccountPicker
+              client={client}
+              sessionId={sessionId}
+              preview={preview}
+              zh={zh}
+              providers={providers}
+              value={account}
+              onChange={setAccount}
+              disabled={busy || !enabled}
+            />
             {profile === "mix" ||
             profile === "prefill" ||
             profile === "cache" ? (
@@ -453,6 +487,8 @@ export function BenchmarkPane({
               (review.profile === "cache" ? 2 : 1)}{" "}
             {t("次模型请求", "model requests")} · {review.maxTokens}{" "}
             {t("输出 token / 次", "output tokens/request")}
+            {review.serviceTier ? ` · ${t("服务档位", "tier")} ${review.serviceTier}` : ""}
+            {review.account ? ` · ${t(`OAuth 账户 ${review.account.account}`, `OAuth account ${review.account.account}`)}` : ""}
           </p>
           <p>
             {t(

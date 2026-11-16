@@ -2,10 +2,11 @@ import type { Api, Model } from "@oh-my-pi/pi-catalog/types";
 import { stableStringifyJson } from "@oh-my-pi/pi-utils";
 import { createHash } from "node:crypto";
 import type { AgentSession } from "../../session/agent-session";
+import { cfgOffline } from "../../config/auxiliary-model-policy";
 import { cfgProvidersTinyModelDevice, cfgProvidersTinyModelDtype } from "../../session/settings";
 import { getSttModelSpec, resolveSttModelSpec, sttLanguageSupport } from "../../stt/models";
 import { cfgSttEnabled, cfgSttLanguage, cfgSttSubmitTrigger } from "../../stt/settings";
-import { resolveSttRoleModel } from "../../stt/stt-controller";
+import { resolveSttRoleModel, sttProviderAllowed } from "../../stt/stt-controller";
 import type { DictationConfiguration } from "../dictation-protocol";
 
 /** Side-effect-free: no OAuth refresh, command-backed key execution, model download or microphone. */
@@ -19,7 +20,13 @@ export function inspectDictationConfiguration(
 	const settings = session.settings;
 	// Include unauthed models so a missing credential cannot silently switch the
 	// configured voice provider to a local fallback during first-use inspection.
-	const model = resolveSttRoleModel(settings, session.modelRegistry, true);
+	const activeProvider = session.model?.provider;
+	const providerPolicy: NonNullable<DictationConfiguration["providerPolicy"]> = {
+		mode: cfgOffline.get(settings) ? "active-provider" : "unrestricted",
+		...(activeProvider ? { activeProvider } : {}),
+	};
+	const model = resolveSttRoleModel(settings, session.modelRegistry, true, activeProvider);
+	const providerRestricted = !sttProviderAllowed(settings, model, activeProvider);
 	const spec = resolveSttModelSpec(model?.id);
 	const cloud = !!model && model.api !== "local-inference";
 	const modelAvailable =
@@ -49,6 +56,7 @@ export function inspectDictationConfiguration(
 				enabled,
 				language,
 				submitTrigger,
+				providerPolicy: providerPolicy.mode === "active-provider" ? providerPolicy : { mode: "unrestricted" },
 				route: model
 					? { provider: model.provider, id: model.id, api: model.api, baseUrl: model.baseUrl }
 					: { local: spec.key, repo: spec.repo },
@@ -68,18 +76,21 @@ export function inspectDictationConfiguration(
 		? "desktop-unavailable"
 		: !enabled
 			? "disabled"
-			: !modelAvailable
-				? "model-unavailable"
-				: languageSupport === "unsupported"
-					? "language-unsupported"
-					: credentials === "missing"
-						? "credentials-missing"
-						: undefined;
+			: providerRestricted
+				? "provider-restricted"
+				: !modelAvailable
+					? "model-unavailable"
+					: languageSupport === "unsupported"
+						? "language-unsupported"
+						: credentials === "missing"
+							? "credentials-missing"
+							: undefined;
 	return {
 		model,
 		configuration: {
 			protocolVersion: 2,
 			configurationId,
+			providerPolicy,
 			available,
 			enabled,
 			model: model ? `${model.provider}/${model.id}` : spec.key,
@@ -92,9 +103,11 @@ export function inspectDictationConfiguration(
 			downloadRequired: false,
 			...(!cloud ? { downloadSize: spec.sizeHint } : {}),
 			...(blockedReason ? { blockedReason } : {}),
-			...(credentials === "configured"
-				? { message: "Credentials are configured locally; the remote service has not been verified" }
-				: {}),
+			...(providerRestricted
+				? { message: "Dictation is restricted to the active session provider by models.offline" }
+				: credentials === "configured"
+					? { message: "Credentials are configured locally; the remote service has not been verified" }
+					: {}),
 			sources: {
 				enabled: settings.getProvenance(cfgSttEnabled),
 				language: settings.getProvenance(cfgSttLanguage),

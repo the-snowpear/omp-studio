@@ -579,6 +579,31 @@ for (const supportsOwner of [false, true]) {
   });
 }
 
+test("expired Runtime model cursors retain the native retryable error across the Bridge", async () => {
+  const token = "bridge-token-model-cursor";
+  const bridge = await listenForHello(hello => helloResponse(hello, token), {
+    onRequest(request, socket, hello) {
+      socket.write(encodeFrame("receipt:stale-models", hello.runtimeEpoch, {
+        type: "studio.receipt", requestId: request.requestId, commandId: "runtime-stale-models",
+        runtimeEpoch: hello.runtimeEpoch, stateVersion: 0, status: "failed",
+        error: { code: "COMMAND_BLOCKED", message: "The native model snapshot changed", retryable: true },
+      }));
+    },
+  });
+  const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
+  try {
+    await client.connect();
+    const { snapshot } = await client.requestSnapshot();
+    await assert.rejects(
+      () => client.readRuntimeView({ kind: "models.available.read", sessionId: snapshot.sessionId, cursor: "expired-page" }),
+      { code: "COMMAND_BLOCKED", retryable: true },
+    );
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
 test("RT-002 Bridge command-manifest probe parses and returns the advertised manifest", async () => {
   const token = "bridge-token-command-manifest";
   const bridge = await listenForHello((hello) => helloResponse(hello, token), {

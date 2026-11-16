@@ -54,12 +54,15 @@ function createHarness(options: {
   maxResidentSessions?: number;
   idleWorkerTtlMs?: number;
   requiresModelFor?: string;
+  unavailableWorkspace?: string;
   continuation?: { requested: string; actual: string; confirmed: boolean };
 } = {}) {
   let nextFresh = 0;
   let commitSeq = 0;
   const stopped: string[] = [];
   const starts: Array<{ sessionId: string; model?: string }> = [];
+  const launches: Array<{ sessionId: string; cwd?: string; allowRelocation?: boolean }> = [];
+  const leases = new InMemorySessionLeaseStore();
   const snapshots = new Map<string, OperatorStateSnapshot>();
   const listeners = new Map<string, Set<(publication: FakePublication) => void>>();
   const makePublication = (sessionId: string, terminalOutcomes: readonly CommandLedgerEntry[] = []) => ({
@@ -68,7 +71,7 @@ function createHarness(options: {
     snapshot: snapshots.get(sessionId)!,
     terminalOutcomes,
   });
-  const workerPortFactory = ({ resumeSessionId, model, nextRuntimeEpoch }: Parameters<NonNullable<DesktopRuntimeSessionPortOptions["workerPortFactory"]>>[0]): DesktopRuntimeSessionPort => {
+  const workerPortFactory = ({ resumeSessionId, model, allowRelocation, nextRuntimeEpoch }: Parameters<NonNullable<DesktopRuntimeSessionPortOptions["workerPortFactory"]>>[0]): DesktopRuntimeSessionPort => {
     const continuation = options.continuation?.requested === resumeSessionId ? options.continuation : undefined;
     const sessionId = continuation?.actual ?? resumeSessionId ?? `fresh-${++nextFresh}`;
     const epoch = nextRuntimeEpoch();
@@ -103,7 +106,13 @@ function createHarness(options: {
       },
     } as unknown as DesktopRuntimeSession;
     return {
-      start: async () => { starts.push({ sessionId, ...(model === undefined ? {} : { model }) }); if (sessionId === options.requiresModelFor && !model) throw new Error("Could not restore saved model"); return session; },
+      start: async launchContext => {
+        starts.push({ sessionId, ...(model === undefined ? {} : { model }) });
+        launches.push({ sessionId, ...(launchContext.workspace ? { cwd: launchContext.workspace.cwd } : {}), ...(allowRelocation === undefined ? {} : { allowRelocation }) });
+        if (options.unavailableWorkspace && launchContext.workspace?.cwd === options.unavailableWorkspace) return undefined;
+        if (sessionId === options.requiresModelFor && !model) throw new Error("Could not restore saved model");
+        return session;
+      },
       stop: async () => {
         if (!alive) return;
         alive = false;
@@ -114,7 +123,7 @@ function createHarness(options: {
   };
   const port = createDesktopRuntimeSessionPort({
     ownerId: "resident-test",
-    sessionLeaseStore: new InMemorySessionLeaseStore(),
+    sessionLeaseStore: leases,
     ...(options.maxResidentSessions === undefined ? {} : { maxResidentSessions: options.maxResidentSessions }),
     ...(options.idleWorkerTtlMs === undefined ? {} : { idleWorkerTtlMs: options.idleWorkerTtlMs }),
     workerPortFactory,
@@ -128,7 +137,7 @@ function createHarness(options: {
     const current = makePublication(sessionId, terminalOutcomes);
     for (const listener of listeners.get(sessionId) ?? []) listener(current);
   };
-  return { port, snapshots, publish, stopped, starts };
+  return { port, snapshots, publish, stopped, starts, launches, leases };
 }
 
 const context = {
@@ -138,6 +147,68 @@ const context = {
   runtimeInstallDirectory: "C:/runtime",
   workspace: WORKSPACE_A,
 };
+
+test("prepared resume only adopts its selected workspace after successful restore", async () => {
+  const harness = createHarness({ unavailableWorkspace: "C:/removed", requiresModelFor: "saved" });
+  const { port } = harness;
+  const adopted: string[] = [];
+  const off = port.attachWorkspaceSink!(workspace => { adopted.push(workspace.cwd); });
+  try {
+    const previous = await port.start(context);
+    adopted.length = 0;
+    const unavailable = await port.switchSession!({ kind: "resume", sessionId: "saved", resumeWorkspace: { workspaceId: "gone", cwd: "C:/removed" }, allowRelocation: true });
+    assert.equal(unavailable, undefined);
+    assert.equal(port.sessionFor!("fresh-1"), previous);
+    assert.equal(port.listResidents!().activeSessionId, "fresh-1");
+    assert.deepEqual(adopted, []);
+    await assert.rejects(() => port.switchSession!({ kind: "resume", sessionId: "saved", resumeWorkspace: WORKSPACE_B, allowRelocation: true }), /Could not restore/);
+    assert.equal(harness.stopped.includes("fresh-1"), false);
+    assert.deepEqual(adopted, []);
+    await port.switchSession!({ kind: "resume", sessionId: "saved", resumeWorkspace: WORKSPACE_B, allowRelocation: true, model: "provider/replacement" });
+    assert.deepEqual(adopted, [WORKSPACE_B.cwd]);
+    assert.equal(port.listResidents!().activeSessionId, "saved");
+    assert.deepEqual(harness.launches.at(-1), { sessionId: "saved", cwd: WORKSPACE_B.cwd, allowRelocation: true });
+  } finally { off(); await port.stop(); }
+});
+
+test("a failed prepared replacement of a dead resident keeps the foreground Worker and uses the chosen workspace", async () => {
+  const harness = createHarness({ requiresModelFor: "saved" });
+  const { port } = harness;
+  const chosen = { workspaceId: "workspace-c", cwd: "C:/chosen" };
+  const adopted: string[] = [];
+  const off = port.attachWorkspaceSink!(workspace => { adopted.push(workspace.cwd); });
+  try {
+    const foreground = await port.start(context);
+    const dead = await port.openContextSession!(WORKSPACE_B, { kind: "resume", sessionId: "saved", model: "provider/old" });
+    dead!.hello = () => undefined;
+    adopted.length = 0;
+    await assert.rejects(() => port.switchSession!({ kind: "resume", sessionId: "saved", resumeWorkspace: chosen, allowRelocation: true }), /Could not restore/);
+    assert.deepEqual(harness.launches.at(-1), { sessionId: "saved", cwd: chosen.cwd, allowRelocation: true });
+    assert.deepEqual(adopted, []);
+    assert.equal(port.sessionFor!("fresh-1"), foreground);
+    assert.equal(port.listResidents!().activeSessionId, "fresh-1");
+    assert.equal(harness.stopped.includes("fresh-1"), false);
+  } finally { off(); await port.stop(); }
+});
+
+test("native fork rebinds one resident Worker and transfers its writer lease to the new session", async () => {
+  const harness = createHarness();
+  const { port } = harness;
+  try {
+    const previous = await port.start(context);
+    harness.publish("fresh-1", { sessionId: "forked" as SessionId });
+    await port.synchronizeSessionIdentity!(previous!);
+    assert.equal(port.sessionFor!("forked"), previous);
+    assert.equal(port.isResident!("fresh-1"), false);
+    assert.equal(port.isResident!("forked"), true);
+    assert.equal(port.listResidents!().activeSessionId, "forked");
+    assert.equal(harness.starts.length, 1);
+    assert.deepEqual(harness.stopped, []);
+    const old = await harness.leases.acquire({ sessionId: "fresh-1", ownerId: "another-owner" });
+    await old.release();
+    assert.throws(() => harness.leases.acquire({ sessionId: "forked", ownerId: "another-owner" }));
+  } finally { await port.stop(); }
+});
 
 test("resident projection prioritizes GUI interaction and plan review as waiting", async () => {
   const harness = createHarness();

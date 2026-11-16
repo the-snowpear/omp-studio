@@ -3084,6 +3084,11 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   border-color: var(--accent);
   box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 6px var(--accent);
 }
+/* Toggle-list rows that finish or act instead of carrying a native mark. */
+.dk-opt .o-action { width: 12px; height: 12px; flex: none; position: relative; }
+.dk-opt .o-action::before { content: ""; position: absolute; inset: 3px 2px 3px 3px; border-top: 1.5px solid var(--text-3); border-right: 1.5px solid var(--text-3); transform: rotate(45deg); transition: border-color var(--dur-fast) var(--ease); }
+.dk-opt.is-action { border-style: dashed; }
+.dk-opt.is-action:hover .o-action::before { border-color: var(--accent); }
 .dk-opt-desc {
   padding-left: 20px;
   font-size: var(--fs-11);

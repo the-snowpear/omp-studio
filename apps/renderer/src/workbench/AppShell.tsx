@@ -75,7 +75,7 @@ import { createSerialTaskQueue } from "../workspaceActionQueue";
 import { type ArchivePending, type ClientStateSource, type ProjectShellActionResult, type Route, type SecondaryRoute, type ShellChrome, type ShellDialog, type ThreadRowActionKind, type ViewState } from "./types";
 import { CURRENT_PROJECT, PROJECT_THREADS_INITIAL, PROJECT_THREADS_PAGE, PROJECT_THREADS_QUERY_MAX, type SelectedProject } from "./sessionSelection";
 import { SECONDARY_META, isSecondary, snapshotFrom } from "./shellState";
-import { archiveConfirmIsStreaming, runtimeSettingsPropsOf, shouldOpenLiveProvisional } from "./sessionActions";
+import { archiveConfirmIsStreaming, partialSessionDeletionNotice, resumePreparedHistoryEntry, runtimeSettingsPropsOf, shouldOpenLiveProvisional } from "./sessionActions";
 import { TitleMenu, execEditCommand, type EditCommand } from "./menus";
 import { setSlashUiIntent } from "./slashUiIntent";
 import { Titlebar } from "./Titlebar";
@@ -306,7 +306,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   /** 左上菜单「新建项目」：递增后 WorkbenchCanvas 打开已有创建项目对话框。 */
   const [createProjectNonce, setCreateProjectNonce] = useState(0);
   const sessionCreateWaitRef = useRef<Promise<NewSessionWaitResult> | null>(null);
-  const [shellNotice, setShellNotice] = useState<{ text: string; icon: IconName } | null>(null);
+  const [shellNotice, setShellNotice] = useState<{ text: string; icon: IconName; sticky?: boolean; partialDeletion?: { title: string; details: string } } | null>(null);
   const [compactPending, setCompactPending] = useState(false);
   /** 用户在压缩回执落地前点了「取消」：压缩命令回执完成后按取消提示，不再误报成功。 */
   const compactCancelRequestedRef = useRef(false);
@@ -1313,7 +1313,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           ?? residentForSession(residentModel, entry.sessionId)?.workspaceId;
         await ensureWorkspaceActive(targetWorkspaceId);
         const handle = await client.command("session.delete", { threadId: entry.threadId, deleteManagedArtifacts });
-        await waitReceipt(client, handle.requestId);
+        const removal = await waitReceipt<{ message?: string; cleanup?: "complete" | "partial" }>(client, handle.requestId);
         if (entry.sessionId) dock.store.deleteSession({ target: executionTarget.id ?? "local", project: targetWorkspaceId ?? null, session: entry.sessionId });
         if (entry.sessionId !== undefined) {
           archivedProvisionalSessionIdsRef.current = new Set([
@@ -1332,7 +1332,10 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         }
         if (selectedHistoryId === entry.historyId) onNewThread();
         await refreshHistoryModels(targetWorkspaceId);
-        setShellNotice({ text: zhRef.current ? `已删除会话「${entry.title}」` : `Deleted conversation "${entry.title}"`, icon: "trash" });
+        // A partial cleanup keeps the Host's full explanation on screen until dismissed.
+        setShellNotice(removal?.cleanup === "partial"
+          ? { text: "", partialDeletion: { title: entry.title ?? "", details: removal.message ?? "" }, icon: "alert", sticky: true }
+          : { text: zhRef.current ? `已删除会话「${entry.title}」` : `Deleted conversation "${entry.title}"`, icon: "trash" });
         return true;
       } catch (error) {
         setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "删除会话失败" : "Failed to delete conversation"), icon: "alert" });
@@ -2560,6 +2563,16 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
                   workspaceId={hubWorkspaceId}
                   client={client}
                   onImported={() => void refreshHistoryModels()}
+                  onNativeResume={async (threadId, workspaceId) => {
+                    try {
+                      const entry = await resumePreparedHistoryEntry(client, threadId, workspaceId, PROJECT_THREADS_QUERY_MAX,
+                        zhRef.current ? "会话已恢复，但目录尚未更新；请刷新会话历史。" : "The session resumed, but its history entry is not available yet. Refresh history.");
+                      await openHistoryEntry(entry, workspaceId);
+                    } catch (error) {
+                      setSessionActionError(hostErrorMessage(error, zhRef.current ? "恢复会话失败" : "Could not resume the session"));
+                      throw error;
+                    }
+                  }}
                   onImportedOpen={(sessionId, workspaceId) => { void client.query("history.list", { workspaceId, limit: PROJECT_THREADS_QUERY_MAX }).then(history => { const entry = history.entries.find(item => item.sessionId === sessionId); if (entry) void openHistoryEntry(entry, workspaceId); else setSessionActionError("Imported session is not yet available; refresh history"); }); }}
                   {...(historyModel ? { history: historyModel } : {})}
                   onRoute={go}
@@ -2856,7 +2869,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           </div>
         </div>
       ) : null}
-      <ToastHost message={shellNotice?.text ?? null} icon={shellNotice?.icon ?? "info"} onDismiss={() => setShellNotice(null)} />
+      <ToastHost message={shellNotice?.partialDeletion ? partialSessionDeletionNotice(shellNotice.partialDeletion.title, shellNotice.partialDeletion.details, resolvedLanguage === "zh") : shellNotice?.text ?? null} icon={shellNotice?.icon ?? "info"} sticky={shellNotice?.sticky === true} onDismiss={() => setShellNotice(null)} />
       <CommandPalette
         ref={paletteRef}
         open={paletteOpen}

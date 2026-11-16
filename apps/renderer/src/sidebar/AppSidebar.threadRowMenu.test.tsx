@@ -197,4 +197,26 @@ describe("AppSidebar thread row more menu", () => {
     fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Fork 当前对话" }));
     expect(onThreadRowAction).toHaveBeenCalledWith(historyEntry, workspaceId, "fork");
   });
+
+  it.each([
+    { name: "current streaming session", resident: false, phase: "running", blocked: false },
+    { name: "background streaming resident", resident: true, phase: "running", blocked: false },
+    { name: "background compacting resident", resident: true, phase: "compacting", blocked: true },
+  ])("keeps the right Fork gate for a saved $name", ({ resident, phase, blocked }) => {
+    const onThreadRowAction = vi.fn();
+    const chrome = { ...baseChrome(), compactPending: false, onThreadRowAction,
+      projectHistories: { [String(workspaceId)]: { status: "ready", requestedLimit: 6, model: { entries: [historyEntry], total: 1 } } },
+    } as unknown as ComponentProps<typeof AppSidebar>["chrome"];
+    const state = { ...baseState(), clientState: { connection: {}, interaction: {}, entities: {
+      snapshot: { sessionId: resident ? "another-session" : historyEntry.sessionId, isStreaming: !resident, isCompacting: false },
+      ...(resident ? { residents: { residents: [{ sessionId: historyEntry.sessionId, workspaceId, phase }] } } : {}),
+    } } } as unknown as ComponentProps<typeof AppSidebar>["state"];
+    renderSidebar({ preview: false, chrome, state });
+    const row = screen.getByRole("button", { name: new RegExp(historyEntry.title as string) }).closest(".thread-row")!;
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "更多操作" }));
+    const fork = screen.getByRole("menuitem", { name: "Fork 当前对话" }) as HTMLButtonElement;
+    expect(fork.disabled).toBe(blocked);
+    expect((screen.getByRole("menuitem", { name: "Handoff 到新对话" }) as HTMLButtonElement).disabled).toBe(true);
+    if (!blocked) { fireEvent.click(fork); expect(onThreadRowAction).toHaveBeenCalledWith(historyEntry, workspaceId, "fork"); }
+  });
 });

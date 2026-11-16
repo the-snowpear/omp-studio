@@ -300,9 +300,11 @@ export function insertNodesAtCaret(editor: HTMLElement, nodes: Node[]): void {
     return;
   }
   const range = selection.getRangeAt(0);
+  const fragment = document.createDocumentFragment();
+  for (const node of nodes) fragment.append(node);
+  const last = fragment.lastChild;
   range.deleteContents();
-  for (const node of [...nodes].reverse()) range.insertNode(node);
-  const last = nodes[nodes.length - 1];
+  range.insertNode(fragment);
   if (last) placeCaretAfter(last);
 }
 

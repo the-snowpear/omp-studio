@@ -1,26 +1,32 @@
 import { useEffect, useRef, useState } from "react";
-import type { StudioClient, WorkspaceId } from "@omp-studio/client-contract";
+import type { StudioClient, ThreadId, WorkspaceId, WorkspaceRecord } from "@omp-studio/client-contract";
 import type { SessionResumeRow, SessionWorktreeResultMap } from "@omp-studio/studio-protocol";
 import { AppSelect } from "../AppSelect";
 import { Icon } from "../icons";
 import { MarkdownText } from "../conversation/markdown";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { getPreviewResumeSessions } from "../preview/resumeScopePreview";
+import { getPreviewResumeSessions, PREVIEW_RESUME_STRANDED_CWD, PREVIEW_RESUME_STRANDED_ID } from "../preview/resumeScopePreview";
+import { PREVIEW_IMPORT_WORKSPACES } from "../preview/runtimeUpgradeFixtures";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { WorkspaceDialog, WorkspaceEmpty, WorkspaceStatus } from "../workspaces/Workspace";
 import { SessionPickerKeys, SessionPickerList, SessionPickerSearch, sessionPickerTime } from "./SessionPicker";
 import type { NativeHistoryContext } from "./NativeArchivePane";
 
+/** Consume the Host's prepared handle before looking up its relocated history entry. */
+export type OpenPreparedSession = (threadId: ThreadId, workspaceId: WorkspaceId) => void | Promise<void>;
+
 export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
   client?: StudioClient | undefined;
   context?: NativeHistoryContext | undefined;
-  onOpen?: ((sessionId: string, workspaceId: WorkspaceId) => void) | undefined;
+  onOpen?: OpenPreparedSession | undefined;
   onPreviewOpen?: (() => void) | undefined;
 }) {
   const { preview, marks } = usePreviewMode();
   const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const language = useRef(zh);
+  language.current = zh;
   const [opened, setOpened] = useState(false);
   // A missing override asks OMP for its configured default, rather than guessing it in the UI.
   const [scope, setScope] = useState<"directory" | "repo">();
@@ -33,6 +39,10 @@ export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
   const [loading, setLoading] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [error, setError] = useState("");
+  /** The recorded directory is gone: OMP needs an explicit workspace to continue in. */
+  const [placement, setPlacement] = useState<{ sessionId: string; recordedCwd: string }>();
+  const [workspaces, setWorkspaces] = useState<readonly WorkspaceRecord[]>([]);
+  const [executionWorkspaceId, setExecutionWorkspaceId] = useState("");
   const epoch = useRef(0);
   const listRef = useRef<HTMLUListElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -44,10 +54,9 @@ export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
 
   useEffect(() => {
     const current = ++epoch.current;
-    setRows([]); setError(""); setLoading(false); setResuming(false); setTruncated(false);
+    setRows([]); setError(""); setLoading(false); setResuming(false); setTruncated(false); setPlacement(undefined);
     if (!opened || !enabled) return;
     if (preview) {
-      setRows(getPreviewResumeSessions(zh).filter(row => scope !== "directory" || row.currentDirectory));
       setResolvedScope(scope ?? "repo");
       return;
     }
@@ -58,30 +67,50 @@ export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
         if (current !== epoch.current) return;
         setRows(result.sessions); setTruncated(result.truncated); setResolvedScope(result.scope);
       })
-      .catch(cause => { if (current === epoch.current) setError(hostErrorMessage(cause, zh ? "读取会话失败" : "Could not read sessions")); })
+      .catch(cause => { if (current === epoch.current) setError(hostErrorMessage(cause, language.current ? "读取会话失败" : "Could not read sessions")); })
       .finally(() => { if (current === epoch.current) setLoading(false); });
     return () => { epoch.current++; };
-  }, [opened, preview, client, context?.sessionId, enabled, scope, refresh, zh]);
+  }, [opened, preview, client, context?.sessionId, enabled, scope, refresh]);
 
   const needle = query.trim().toLocaleLowerCase();
-  const visibleRows = rows.filter(row => `${row.title} ${row.directoryName ?? ""} ${row.firstMessage ?? ""} ${row.conversationExcerpt ?? ""}`.toLocaleLowerCase().includes(needle));
+  const localizedRows = preview ? getPreviewResumeSessions(zh).filter(row => scope !== "directory" || row.currentDirectory) : rows;
+  const visibleRows = localizedRows.filter(row => `${row.title} ${row.directoryName ?? ""} ${row.firstMessage ?? ""} ${row.conversationExcerpt ?? ""}`.toLocaleLowerCase().includes(needle));
   const selected = visibleRows.find(row => row.sessionId === selectedId) ?? visibleRows[0];
+  const activePlacement = placement && placement.sessionId === selected?.sessionId ? placement : undefined;
 
   async function resume() {
     if (!selected || loading || resuming) return;
-    if (preview) { setOpened(false); onPreviewOpen?.(); return; }
+    // A chosen workspace only applies to the session it was asked for.
+    const chosen = activePlacement ? executionWorkspaceId : "";
+    if (activePlacement && !chosen) return;
+    if (preview) {
+      if (selected.sessionId === PREVIEW_RESUME_STRANDED_ID && !chosen) {
+        setWorkspaces(PREVIEW_IMPORT_WORKSPACES); setExecutionWorkspaceId("");
+        setPlacement({ sessionId: selected.sessionId, recordedCwd: PREVIEW_RESUME_STRANDED_CWD });
+        return;
+      }
+      setOpened(false); onPreviewOpen?.(); return;
+    }
     if (!client || !context?.sessionId || !onOpen) return;
     const current = epoch.current;
     setResuming(true); setError("");
     try {
-      const handle = await client.command("worktrees.session.resume.prepare", { sessionId: context.sessionId, targetSessionId: selected.sessionId, scope: scope ?? resolvedScope });
+      const handle = await client.command("worktrees.session.resume.prepare", { sessionId: context.sessionId, targetSessionId: selected.sessionId, scope: scope ?? resolvedScope, ...(chosen ? { executionWorkspaceId: chosen } : {}) });
       const { result } = await waitReceipt<{ result: SessionWorktreeResultMap["worktrees.session.resume.prepare"] }>(client, handle.requestId);
       if (current !== epoch.current) return;
-      if (!result.workspaceId) throw Error(zh ? "目标工作区不可用" : "The target workspace is unavailable");
-      onOpen(result.targetSessionId, result.workspaceId as WorkspaceId);
-      setOpened(false);
+      if (result.requiresWorkspaceSelection || !result.workspaceId) {
+        if (chosen) throw Error(zh ? "所选工作区不能用于继续这个会话，请换一个。" : "That workspace cannot continue this session. Choose another.");
+        const projects = await client.query("projects.list", {});
+        if (current !== epoch.current) return;
+        setWorkspaces(projects.workspaces); setExecutionWorkspaceId("");
+        setPlacement({ sessionId: selected.sessionId, recordedCwd: result.recordedCwd });
+        return;
+      }
+      if (!result.threadId) throw Error(language.current ? "此 Host 未提供恢复句柄，请升级 Host 后重试。" : "This Host does not provide prepared resume handles. Upgrade the Host and try again.");
+      await onOpen(result.threadId as ThreadId, result.workspaceId as WorkspaceId);
+      if (current === epoch.current) setOpened(false);
     } catch (cause) {
-      if (current === epoch.current) setError(hostErrorMessage(cause, zh ? "恢复会话失败" : "Could not resume the session"));
+      if (current === epoch.current) setError(hostErrorMessage(cause, language.current ? "恢复会话失败" : "Could not resume the session"));
     } finally {
       if (current === epoch.current) setResuming(false);
     }
@@ -130,11 +159,23 @@ export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
             </div>
           </aside>
         </div>
+        {activePlacement ? <section className="resume-placement" aria-label={zh ? "选择继续执行的工作区" : "Choose where to continue"}>
+          <span className="resume-placement-icon" aria-hidden="true"><Icon name="folder" /></span>
+          <div className="resume-placement-copy">
+            <b>{zh ? "原记录目录已不可用" : "The recorded directory is unavailable"}</b>
+            <code title={activePlacement.recordedCwd}>{activePlacement.recordedCwd}</code>
+            <p>{zh ? "OMP 不会把记录目录当作执行目录。选择一个工作区，会话会在那里继续读写文件；对话记录本身不变。" : "OMP never treats the recorded directory as the execution directory. Pick a workspace and the session reads and writes files there; the conversation itself stays unchanged."}</p>
+          </div>
+          <AppSelect className="select" aria-label={zh ? "继续执行的工作区" : "Execution workspace"} value={executionWorkspaceId} disabled={resuming} onChange={event => setExecutionWorkspaceId(event.target.value)}>
+            <option value="">{zh ? "选择工作区…" : "Choose a workspace…"}</option>
+            {workspaces.map(workspace => <option key={workspace.workspaceId} value={workspace.workspaceId}>{workspace.name}{workspace.active ? zh ? " · 当前" : " · current" : ""}</option>)}
+          </AppSelect>
+        </section> : null}
         {error ? <div className="session-picker-error" role="alert"><Icon name="alert-c" extra="sm" /><p>{error}</p><button type="button" className="btn small outline" disabled={loading || resuming} onClick={() => setRefresh(value => value + 1)}>{zh ? "重新读取" : "Retry"}</button></div> : null}
         <footer className="session-picker-foot">
           <div className="session-picker-foot-note"><p>{zh ? "恢复时切换到会话所属工作区。" : "Resume switches to the session's workspace."}{truncated ? zh ? " 仅列出最近 200 条会话。" : " Showing the latest 200 sessions." : ""}</p><SessionPickerKeys /></div>
           <button type="button" className="btn outline" onClick={() => setOpened(false)}>{t("common.cancel")}</button>
-          <button type="button" className="btn primary" disabled={!enabled || !selected || loading || resuming || (!preview && !onOpen)} onClick={() => void resume()}><Icon name="arrow-r" extra="sm" />{resuming ? zh ? "正在恢复…" : "Resuming…" : zh ? "恢复会话" : "Resume session"}</button>
+          <button type="button" className="btn primary" disabled={!enabled || !selected || loading || resuming || (!preview && !onOpen) || (!!activePlacement && !executionWorkspaceId)} onClick={() => void resume()}><Icon name="arrow-r" extra="sm" />{resuming ? zh ? "正在恢复…" : "Resuming…" : activePlacement ? zh ? "在所选工作区继续" : "Continue there" : zh ? "恢复会话" : "Resume session"}</button>
         </footer>
       </div>
     </WorkspaceDialog> : null}

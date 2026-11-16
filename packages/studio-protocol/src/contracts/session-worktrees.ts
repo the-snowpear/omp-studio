@@ -1,3 +1,5 @@
+import type { SessionResumePreparation } from "./session-lifecycle.js";
+
 export interface SessionResumeRow {
   sessionId: string;
   title: string;
@@ -15,7 +17,7 @@ export interface WorktreeStartPolicy { eligible: boolean; policy: "off" | "ask" 
 export interface WorktreeRemovalPreview { token: string; expiresAt: number; worktree: SessionWorktreeRow; keepBranch: boolean }
 export type SessionWorktreeOperation =
   | { kind: "worktrees.session.resume.list"; sessionId: string; scope?: "directory" | "repo" }
-  | { kind: "worktrees.session.resume.prepare"; sessionId: string; targetSessionId: string; scope: "directory" | "repo" }
+  | { kind: "worktrees.session.resume.prepare"; sessionId: string; targetSessionId: string; scope: "directory" | "repo"; executionWorkspaceId?: string; /** Host-resolved private path. */ executionCwd?: string }
   | { kind: "worktrees.session.list"; sessionId: string }
   | { kind: "worktrees.session.startPolicy"; sessionId: string }
   | { kind: "worktrees.session.continueHere"; sessionId: string }
@@ -25,7 +27,7 @@ export type SessionWorktreeOperation =
   | { kind: "worktrees.session.remove.apply"; sessionId: string; token: string };
 export interface SessionWorktreeResultMap {
   "worktrees.session.resume.list": { scope: "directory" | "repo"; sessions: SessionResumeRow[]; truncated: boolean };
-  "worktrees.session.resume.prepare": { targetSessionId: string; requestedSessionId: string; workspaceId?: string; cwd?: string };
+  "worktrees.session.resume.prepare": SessionResumePreparation;
   "worktrees.session.list": { worktrees: SessionWorktreeRow[]; truncated: boolean };
   "worktrees.session.startPolicy": WorktreeStartPolicy;
   "worktrees.session.continueHere": { continued: true };

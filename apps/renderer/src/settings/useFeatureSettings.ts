@@ -51,8 +51,11 @@ export function useFeatureSettings({ client, context, visible }: FeatureSettings
     const generation = epoch.current;
     lock.current = true; setBusy(true); setError(""); setNotice("");
     try {
-      const result: FeatureSettingRow = preview ? { key, value, source: scope === "session" ? "runtime" : "global" }
-        : await invoke("preferences.features.set", { sessionId: context!.sessionId!, key, value, scope });
+      const previous = rows.find(row => row.key === key);
+      const result: FeatureSettingRow = preview ? {
+        key, value, source: scope === "session" ? "runtime" : "global",
+        ...(previous?.editableValues ? { editableValues: { ...previous.editableValues, [scope]: value } } : {}),
+      } : await invoke("preferences.features.set", { sessionId: context!.sessionId!, key, value, scope });
       if (generation === epoch.current) { setRows(current => current.map(row => row.key === key ? result : row)); setNotice("saved"); }
     } catch (cause) { if (generation === epoch.current) setError(hostErrorMessage(cause, "Cannot save settings")); }
     finally { if (generation === epoch.current) { lock.current = false; setBusy(false); } }

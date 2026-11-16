@@ -564,7 +564,8 @@ export const ConversationItemView = memo(function ConversationItemView({
             onRestore: () => onRestoreUserMessage(row.itemId, row.text),
           }
         : undefined;
-    const branchReason = userBranchDisabledReason ?? userRestoreDisabledReason;
+    // Branch has its own gate: unlike restore it stays available while a turn streams.
+    const branchReason = userBranchDisabledReason;
     const branch =
       onBranchUserMessage !== undefined && committed
         ? {

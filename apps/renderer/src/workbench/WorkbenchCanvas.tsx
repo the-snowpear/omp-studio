@@ -16,6 +16,7 @@ import { locatePanel } from "../dock/model";
 import { agentPanelId, type AgentPanelId, type PanelId } from "../dock/types";
 import { DeferredPanel, lazyPanel } from "../DeferredPanel";
 import { DictationControl } from "../composer/DictationControl";
+import { PromptHistoryButton } from "../composer/PromptHistory";
 import { useExecutionTarget, useTargetMemory } from "../workspaces/ExecutionTargets";
 import { ExecutionTargetPicker } from "../workspaces/ExecutionTargetPicker";
 import { AppSelect } from "../AppSelect";
@@ -26,6 +27,8 @@ import { BrowserDockInstances } from "../browser/BrowserDockInstances";
 import { ComputerLinkProvider } from "../computer/links";
 import type { ComputerFrameIntent } from "../computer/types";
 import { TokenCounterPane } from "../usage/TokenCounterPane";
+import { SelectiveCommitPane, selectiveCommitHandoff, type SelectiveCommitIntent } from "../commit/SelectiveCommitPane";
+import { SelectiveCommitLauncherProvider } from "../commit/SelectiveCommitLauncher";
 import { setHubIntent, setModelConfigIntent, setSettingsIntent } from "../pageIntents";
 import { conversationViewLeases } from "../conversation/conversationViews";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -355,6 +358,12 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const [modeMenuNonce, setModeMenuNonce] = useState(0);
   const [modeOpenToggles, setModeOpenToggles] = useState(false);
   const [changesFocus, setChangesFocus] = useState<{ key: number; path?: string; turnId?: string }>({ key: 0 });
+  const [commitIntent, setCommitIntent] = useState<SelectiveCommitIntent | undefined>(undefined);
+  /* Git, Changes and `/commit` all land in the same session-scoped panel. */
+  const openSelectiveCommit = (intent: Omit<SelectiveCommitIntent, "key"> = {}) => {
+    setCommitIntent(previous => ({ ...intent, key: (previous?.key ?? 0) + 1 }));
+    dock.store.dispatch({ type: "open", panel: "commit" });
+  };
   const promptUnsub = useRef<Unsubscribe | undefined>(undefined);
   const promptDispatchGate = useMemo(createComposerDispatchGate, []);
   useEffect(() => () => promptUnsub.current?.(), []);
@@ -1417,9 +1426,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     gated: !preview && treeActionGated,
     canNavigateTree: can("session.tree.navigate") || can("session.tree") || canResumeViewedHistory,
   });
+  // Runtime 18.20.2 branches while a turn streams: the new session starts from the
+  // chosen message and the running turn keeps going in the original session.
   const userBranchDisabledReason = userMessageRestoreDisabledReason({
     preview,
-    running,
+    running: retrying,
     compacting: treeTargetMatches && snapshot?.isCompacting === true,
     resyncRequired: Boolean(connection?.resyncRequired) || convo.state.resyncRequired,
     sessionCreating: sessionCreating === true,
@@ -2053,6 +2064,10 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       return await btwSession.ask(question, true, images ? [...images] : undefined);
     }
     if (preview) {
+      if (execute.kind === "invoke" && execute.commandId === "builtin.commit") {
+        openSelectiveCommit(args.trim() ? { instructions: args.trim() } : {});
+        return true;
+      }
       if (marks) setStatusToast(zhRef.current ? `演示：/${command.name}${args ? ` ${args}` : ""}` : `Demo: /${command.name}${args ? ` ${args}` : ""}`);
       return true;
     }
@@ -2073,7 +2088,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           ...(execute.arguments ? { arguments: execute.arguments } : {}),
         });
         const outcome = await waitReceipt<OperatorInvokeOutcome>(client, handle.requestId);
-        if (compacting) {
+        const commitDraft = execute.commandId === "builtin.commit" ? selectiveCommitHandoff(outcome.result) : undefined;
+        if (commitDraft) {
+          /* builtin.commit only prepares a native draft; the panel owns preview and confirmation. */
+          openSelectiveCommit(commitDraft);
+        } else if (compacting) {
           const notice = compactNoticeFromOutput(outcome.output, { successText: zhRef.current ? "已压缩上下文" : "Context compacted" });
           setStatusToast(notice.text);
           if (notice.ok) onViewedTelemetryRefresh?.();
@@ -2097,8 +2116,12 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     }
     return false;
   }
+  const commitBlocked = preview ? undefined
+    : !runtimeConnected || !executionMatches || !snapshot?.sessionId ? (zh ? "连接 Runtime 并打开会话后可用" : "Available once a Runtime session is open")
+      : !can("commit.draft.prepare") ? (zh ? "当前 Runtime 不支持原生选择性提交" : "This Runtime has no native selective commit") : undefined;
   return (
     <ComputerLinkProvider onOpen={openComputerFrame}>
+    <SelectiveCommitLauncherProvider value={{ open: () => openSelectiveCommit(), blocked: commitBlocked }}>
     <SubagentHoverProvider scope={JSON.stringify([agentScope, viewIdentity, snapshot?.runtimeEpoch])}
       enabled={workbenchVisible && !sessionCreating} client={conversationClient} agents={dockAgents}
       runtimeConnected={runtimeConnected && !connection?.resyncRequired}
@@ -2787,6 +2810,9 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                 />
                 {!can("session.speed.get") ? <ServiceTierPicker client={client} sessionId={composerOwner} available={can("session.tier.get")} modelKey={JSON.stringify(snapshot?.model)} /> : null}
                 <div className="cb-group">
+                  <PromptHistoryButton client={client} sessionId={composerOwner ?? snapshot?.sessionId} ownSession={composerOwner !== undefined}
+                    available={can("history.prompts.list") && can("history.prompts.read") && runtimeConnected && !worktreeGated}
+                    canDelete={can("history.prompts.delete")} composerRef={composerInputRef} />
                   <DictationControl client={client} sessionId={composerOwner} draftId="composer" label={zh ? "工作台 / Composer" : "Workbench / Composer"} available={can("dictation.inspect") && runtimeConnected && !worktreeGated} visible={workbenchVisible} composerRef={composerInputRef} ensureSession={prepareDictationSession} onSubmit={() => { if (queueEdit !== undefined) commitQueuedEdit(); else void sendPrompt(); }} onSettings={() => { setSettingsIntent("voice", "dictation"); onRoute("settings"); }} onModels={() => { setModelConfigIntent({ tab: "roles", role: "dictation" }); onRoute("model-config"); }} />
                   {/* 运行中且没有草稿时，发送位变停止；上一轮停在没有最终汇报的尾巴上时
                       变播放键（空输入也能点，点了继续）；有草稿时保持"加入排队栏"，
@@ -2904,6 +2930,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       <PanelRegistration panels={{
         "context-viewer": visibility => <ContextInspector client={client} sessionId={selectedSessionId ?? snapshot?.sessionId} sessionName={viewedSessionName} sourceKey={preview ? previewThreadId : selectedSessionId} opened={contextInspectorOpened} available={runtimeConnected && executionMatches && !connection?.resyncRequired} width={visibility.width} height={visibility.height} />,
         "token-counter": <TokenCounterPane key={String(preview)} client={client} />,
+        commit: visibility => <SelectiveCommitPane client={client} sessionId={snapshot?.sessionId} runtimeEpoch={connection?.runtimeEpoch ?? undefined}
+          available={runtimeConnected && executionMatches && !connection?.resyncRequired && !sessionCreating}
+          supported={can("commit.draft.prepare") && can("commit.draft.select") && can("commit.draft.preview") && can("commit.draft.execute")}
+          visible={visibility.visible} intent={commitIntent}
+          onOpenSettings={() => { setSettingsIntent("tasks", "commit.enabled"); onRoute("settings"); }} />,
         changes: <>{preview ? <PreviewChanges {...(changesFocus.path === undefined ? {} : { focusPath: changesFocus.path })} {...(changesFocus.turnId === undefined ? {} : { focusTurnId: changesFocus.turnId })} focusKey={changesFocus.key} /> : <SessionChanges rows={convo.rows} {...(changesFocus.path === undefined ? {} : { focusPath: changesFocus.path })} {...(changesFocus.turnId === undefined ? {} : { focusTurnId: changesFocus.turnId })} focusKey={changesFocus.key} />}</>,
         environment: <EnvironmentDockCard {...(preview
           ? previewEnvironmentCard(activePreviewProject === undefined ? undefined : { name: activePreviewProject.name, root: activePreviewProject.path }, zh)
@@ -3007,6 +3038,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       <ToastHost message={statusToast} icon="info" onDismiss={() => setStatusToast(null)} />
       {treeConfirm.dialog}
     </SubagentHoverProvider>
+    </SelectiveCommitLauncherProvider>
     </ComputerLinkProvider>
   );
 }

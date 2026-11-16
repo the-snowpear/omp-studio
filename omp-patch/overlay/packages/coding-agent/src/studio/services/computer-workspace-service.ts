@@ -308,7 +308,7 @@ export class StudioComputerWorkspaceService {
 				observationOnly: false,
 			},
 			permissions: { capture: "unknown", input: "unknown", accessibility: "unknown" },
-			screen: { locked: false, asleep: false, known: false },
+			screen: { locked: false, asleep: false, lockKnown: false, sleepKnown: false, known: false },
 			control: this.#policy.state,
 			targets: [],
 			active: [],
@@ -358,6 +358,10 @@ export class StudioComputerWorkspaceService {
 			const capabilities = observer.capabilities,
 				screen = observer.screenState;
 			const supported = observer.observationOnly === true;
+			// Native 18.20 detects lock state on Windows and macOS; only macOS
+			// detects display sleep. A false value on other backends is not knowledge.
+			const lockKnown = capabilities.backend === "quartz" || capabilities.backend === "win32";
+			const sleepKnown = capabilities.backend === "quartz";
 			this.#snapshot = {
 				...this.#current(),
 				backend: capabilities.backend,
@@ -366,6 +370,8 @@ export class StudioComputerWorkspaceService {
 					input: capabilities.input,
 					accessibility: capabilities.ax && supported,
 					globalEscape: capabilities.globalEscape,
+					secureInput: capabilities.secureInput,
+					...(capabilities.secureInputApp ? { secureInputApp: capabilities.secureInputApp } : {}),
 					observationOnly: supported,
 				},
 				permissions: {
@@ -376,13 +382,19 @@ export class StudioComputerWorkspaceService {
 				screen: {
 					locked: screen.screenLocked,
 					asleep: screen.displayAsleep,
-					known: capabilities.backend === "quartz",
+					lockKnown,
+					sleepKnown,
+					known: lockKnown && sleepKnown,
 				},
 				reason: supported
 					? this.#media
-						? capabilities.backend === "quartz"
-							? undefined
-							: "This native backend cannot detect screen lock or display sleep; false does not establish an unlocked or awake screen"
+						? capabilities.secureInput
+							? `Secure Event Input is active${capabilities.secureInputApp ? ` in ${capabilities.secureInputApp}` : ""}; physical Escape may be unavailable`
+							: lockKnown && sleepKnown
+								? undefined
+								: lockKnown
+									? "This native backend detects screen lock but not display sleep; sleep state is unknown"
+									: "This native backend cannot detect screen lock or display sleep; false does not establish an unlocked or awake screen"
 						: "Private Computer image transport is unavailable"
 					: "This native binding does not support passive observation; rebuild or upgrade the Runtime",
 			};
@@ -774,6 +786,8 @@ export class StudioComputerWorkspaceService {
 				toolCallId: identity.toolCallId,
 				method: event.kind === "run" ? "computer.run" : event.method,
 				mode: event.kind === "run" ? "unknown" : event.mode,
+				...(event.kind === "action" && event.unconfirmed ? { unconfirmed: event.unconfirmed } : {}),
+				...(event.kind === "action" && event.focusReturn ? { focusReturn: event.focusReturn } : {}),
 				status: event.phase,
 				startedAt: previous?.startedAt ?? event.at,
 				frameIds: previous?.frameIds ?? [],

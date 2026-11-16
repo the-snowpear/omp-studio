@@ -1,4 +1,5 @@
 import { RUNTIME_VIEW_KINDS, isRuntimeViewKind, type RuntimeViewOperation } from "./runtime-views-protocol";
+import { isSelectiveCommitKind, validateSelectiveCommitOperation } from "./commit-protocol";
 import {
 	MODEL_SERVICES_COMMAND_KINDS,
 	isModelServicesKind,
@@ -233,6 +234,10 @@ export type StudioRemoteInteractionRequest =
 			title: string;
 			options: Array<{ id: string; label: string; description?: string }>;
 			multiple?: boolean;
+			initialIndex?: number;
+			selectionMarker?: "radio" | "checkbox";
+			checkedIndices?: readonly number[];
+			markableCount?: number;
 	  }
 	| {
 			kind: "input";
@@ -633,6 +638,10 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 		throw new StudioFrameError("Invalid Studio request");
 	}
 	if (operation.kind === "session.owner.update") return input as unknown as StudioRequest;
+	if (isSelectiveCommitKind(operation.kind)) {
+		validateSelectiveCommitOperation(operation);
+		return input as unknown as StudioRequest;
+	}
 	if (isRuntimeViewKind(operation.kind)) return input as unknown as StudioRequest;
 	if (isModelServicesKind(operation.kind)) return input as unknown as StudioRequest;
 	if (isContextViewKind(operation.kind)) return input as unknown as StudioRequest;

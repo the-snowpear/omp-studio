@@ -3,6 +3,8 @@ import type { EvaluationCoordinator } from "@omp-studio/studio-host";
 import { isComputerWorkspaceCommand, type ComputerWorkspaceQuery, type ContextViewOperation } from "@omp-studio/studio-protocol";
 import { isWorkbenchOperationKind, type ArtifactTextInput } from "@omp-studio/studio-protocol";
 import { hostText, isHostLocaleZh } from "./locale.js";
+import { RuntimeModelSnapshotReads } from "./runtime-model-snapshot.js";
+import { withRuntimeModels } from "./omp-models-adapter.js";
 /**
  * StudioHostClientFacade — the P1 presentation-neutral product API.
  *
@@ -429,7 +431,8 @@ function validateEnvelope(request: {
  */
 function rejectPrivateOperationFields(commandName: CommandName, input: unknown): void {
   if (!isWorkbenchOperationKind(commandName) || input === null || typeof input !== "object") return;
-  if ("inputTransfers" in input || "targetCwd" in input || "kind" in input) {
+  if ("inputTransfers" in input || "targetCwd" in input || "kind" in input ||
+      (commandName === "worktrees.session.resume.prepare" && "executionCwd" in input)) {
     throw clientError("INVALID_ARGUMENT", `${commandName} input is invalid: Private operation fields are not client inputs`);
   }
 }
@@ -692,6 +695,8 @@ export class StudioHostClientFacade implements ClientTransport {
   #unsubscribeGithubProgress: Unsubscribe | undefined;
   #closed = false;
   readonly #readLifetime = new AbortController();
+  readonly #modelReads = new RuntimeModelSnapshotReads();
+  #modelReadEpoch = 0;
   #lastHello: HostRuntimeHelloView | undefined;
   #lastEmittedConnection: RuntimeConnection | undefined;
   #lastPublishedVersion: StateVersion | undefined;
@@ -876,6 +881,15 @@ export class StudioHostClientFacade implements ClientTransport {
         }
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "commit.draft.prepare":
+      case "commit.draft.read":
+      case "commit.draft.preview":
+      case "commit.draft.release":
+      case "history.prompts.list":
+      case "history.prompts.read":
+      case "models.available.read":
+      case "models.available.release":
+      case "models.antigravity.readiness":
       case "models.systemTemplates.list":
       case "models.systemTemplates.inspect":
       case "models.systemTemplates.file.read":
@@ -895,7 +909,7 @@ export class StudioHostClientFacade implements ClientTransport {
       case "live.webrtc.release": {
         const session = this.#runtimeSession();
         if (!session) throw unavailableError("Runtime view requires a connected Runtime");
-        const result = await session.readRuntimeView({ kind: request.queryName, ...request.input } as RuntimeViewOperation);
+        const result = await session.readRuntimeView({ ...request.input, kind: request.queryName } as RuntimeViewOperation);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "context.view.open":
@@ -2700,7 +2714,7 @@ export class StudioHostClientFacade implements ClientTransport {
     return service.get();
   }
 
-  async #queryModels(): Promise<ModelConfigReadModel> {
+  async #queryModels(attempt = 0): Promise<ModelConfigReadModel> {
     const service = this.#options.models;
     if (service === undefined) {
       return {
@@ -2712,6 +2726,7 @@ export class StudioHostClientFacade implements ClientTransport {
         loginProviders: [],
         generatedModelsYml: "providers: {}\n",
         generatedConfigYml: "modelRoles: {}\n",
+        availability: { status: "unverified", source: "none", reason: hostText("Host 未接入模型配置适配器。", "Host model configuration adapter is not wired up.") },
         runtimeEffectHint: hostText("Host 未接入模型配置适配器。", "Host model configuration adapter is not wired up."),
         loginAvailable: false,
         ompAvailable: false,
@@ -2732,7 +2747,36 @@ export class StudioHostClientFacade implements ClientTransport {
         },
       };
     }
-    return this.#sharedProjectRead("models", service.get.bind(service));
+    const session = this.#runtimeSession();
+    const snapshot = this.#currentSnapshotRef();
+    if (!session || !snapshot) return withRuntimeModels(await service.get());
+    const cwd = this.#options.workspaceCwd?.();
+    const locale = isHostLocaleZh();
+    const epoch = this.#modelReadEpoch;
+    const isCurrent = () => {
+      const current = this.#currentSnapshotRef();
+      return !this.#closed && this.#runtimeSession() === session && current?.runtimeId === snapshot.runtimeId &&
+        current.runtimeEpoch === snapshot.runtimeEpoch && current.sessionId === snapshot.sessionId &&
+        this.#options.workspaceCwd?.() === cwd && isHostLocaleZh() === locale && this.#modelReadEpoch === epoch;
+    };
+    try {
+      return await this.#modelReads.read({
+        owner: session,
+        key: JSON.stringify([snapshot.runtimeId, snapshot.runtimeEpoch, snapshot.sessionId, cwd, locale, epoch]),
+        sessionId: snapshot.sessionId,
+        isCurrent,
+        read: operation => session.readRuntimeView(operation),
+      }, service.get.bind(service), this.#readLifetime.signal);
+    } catch {
+      this.#readLifetime.signal.throwIfAborted();
+      if (!isCurrent() && attempt === 0) return this.#queryModels(1);
+      // Missing/old/disconnected Runtime is not a reason to hide the configuration editor
+      // or to consult a model_cache row belonging to a different credential namespace.
+      return withRuntimeModels(await service.get(), undefined, hostText(
+        "当前 Runtime 无法验证模型可用性；配置与推荐目录仍可使用",
+        "The current Runtime could not verify model availability; configuration and recommendations remain available",
+      ));
+    }
   }
 
   async #currentInstalledManifest(): Promise<{ readonly manifest: RuntimeInstallationManifest } | undefined> {
@@ -3066,6 +3110,7 @@ export class StudioHostClientFacade implements ClientTransport {
       acceptedAt,
     };
     this.#bus.emit({ kind: "command.accepted", accepted });
+    this.#modelReadEpoch++;
     void this.#runModelsCommand(request, service);
     return accepted;
   }
@@ -3126,9 +3171,23 @@ export class StudioHostClientFacade implements ClientTransport {
           if (!service.refreshCatalog) throw clientError("CAPABILITY_UNAVAILABLE", "Model catalog updates are unavailable");
           result = await service.refreshCatalog();
           break;
-        case "models.discovery.refresh":
-          result = await service.refreshDiscovery();
+        case "models.discovery.refresh": {
+          const runtime = this.#runtimeSession();
+          const snapshot = this.#currentSnapshotRef();
+          if (runtime || snapshot) {
+            const commands = this.#options.commands;
+            if (!snapshot || !commands?.invoke) throw clientError("CAPABILITY_UNAVAILABLE", hostText(
+              "当前 Runtime 无法刷新模型目录。", "The current Runtime cannot refresh the model catalog.",
+            ));
+            // Refresh the same registry that serves models.get, never a detached CLI/cache namespace.
+            // A stale or older Runtime must surface its failure rather than silently falling back.
+            await commands.invoke({ kind: "models.available.refresh", sessionId: snapshot.sessionId }, request.requestId);
+            result = { applied: true, runtimeEffect: "immediate", message: hostText("已刷新当前 Runtime 模型目录", "Refreshed the current Runtime model catalog") };
+          } else {
+            result = await service.refreshDiscovery();
+          }
           break;
+        }
         case "models.cycleOrder.set":
           result = await service.setCycleOrder(request.input as { readonly order: ReadonlyArray<string> });
           break;
@@ -3713,6 +3772,7 @@ export class StudioHostClientFacade implements ClientTransport {
     if (this.#terminalEmitted.has(requestId)) {
       return;
     }
+    if (receipt.status === "completed" && /^(models\.|config\.)/.test(receipt.commandName)) this.#modelReadEpoch++;
     if (receipt.status === "completed" && /^(models\.|skills\.|plugins\.|runtime\.install|config\.)/.test(receipt.commandName)) {
       this.#options.projectReads?.invalidate();
       this.#options.archiveTelemetry?.invalidate();

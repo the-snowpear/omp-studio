@@ -1,4 +1,5 @@
 import type { ModelThinkingConfig } from "./model-thinking.js";
+import type { RuntimeModelDiscovery, RuntimeModelThinking } from "@omp-studio/studio-protocol";
 import type { ModelParameterValues, ModelParameterSources, ModelCatalogStatus } from "./model-adaptation.js";
 /**
  * Public read models for the P0 surface: environment, capability, diagnostic,
@@ -386,7 +387,10 @@ export type ModelApiKind =
   | "bedrock-converse-stream"
   | "google-generative-ai"
   | "google-gemini-cli"
-  | "google-vertex";
+  | "google-vertex"
+  | "google-decisions"
+  | "nace-systemone"
+  | "antigravity-acp";
 
 export type ModelAuthType = "oauth" | "api-key" | "env" | "command" | "none";
 
@@ -548,6 +552,8 @@ export interface ModelProviderRecord {
   readonly status: ModelProviderStatus;
   readonly statusDetail: string;
   readonly api: ModelApiKind | string;
+  /** Managed native transports cannot be saved as ordinary HTTP providers. */
+  readonly configurationMode?: "http" | "managed";
   readonly endpointUrl?: string;
   readonly local: boolean;
   readonly enabled: boolean;
@@ -567,6 +573,7 @@ export interface ModelProviderRecord {
 export type ModelPresetAuth = ModelAuthType;
 
 export interface ModelPresetItem {
+  readonly configurationMode?: "http" | "managed";
   readonly id: string;
   readonly name: string;
   readonly desc: string;
@@ -614,7 +621,21 @@ export interface ModelRoleRecord {
 }
 
 export interface AvailableModelRecord extends ModelExecutionMetadata {
-  readonly thinkingConfig?: ModelThinkingConfig | null;
+  readonly thinkingConfig?: RuntimeModelThinking | null;
+  readonly source?: "registry";
+  readonly providerType?: string;
+  readonly input?: readonly ("text" | "image")[];
+  readonly supportsComputerUse?: boolean;
+  readonly hostedImage?: boolean;
+  readonly imageCountBudget?: number;
+  readonly pricingStatus?: "fixed" | "free" | "included" | "variable" | "unknown";
+  readonly serviceTierCost?: Readonly<Partial<Record<"flex" | "priority" | "ultrafast", number>>>;
+  readonly discovery?: RuntimeModelDiscovery;
+  readonly description?: string;
+  readonly isNew?: boolean;
+  readonly isBeta?: boolean;
+  readonly isProviderDefault?: boolean;
+  readonly isRecommended?: boolean;
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly provider: string;
@@ -768,7 +789,18 @@ export interface ModelWebSearchCredentialRemoveInput {
  * Model-config page read model. Paths, API keys and auth-store secrets
  * never appear. `generated*Yml` is Host-built and already redacted.
  */
+export interface ModelAvailability {
+  readonly status: "verified" | "unverified";
+  readonly source: "runtime" | "none";
+  readonly sessionId?: string;
+  readonly version?: string;
+  readonly total?: number;
+  readonly truncated?: boolean;
+  readonly reason?: string;
+}
 export interface ModelConfigReadModel {
+  /** Static recommendations and configured credentials never establish model availability. */
+  readonly availability?: ModelAvailability;
   readonly catalog?: ModelCatalogStatus;
   readonly providers: ReadonlyArray<ModelProviderRecord>;
   readonly presets: ReadonlyArray<ModelPresetGroup>;

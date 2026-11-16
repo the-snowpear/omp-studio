@@ -1,4 +1,21 @@
+/** The native one-based --account choice, bound to stable credential rows for each provider. */
+export interface BenchmarkAccountSelection {
+	account: number;
+	credentialIds: Record<string, number>;
+}
+export interface BenchmarkAccountOption {
+	account: number;
+	credentialId: number;
+	label: string;
+}
+export interface BenchmarkAccounts {
+	providerId: string;
+	accounts: BenchmarkAccountOption[];
+}
+
 export interface BenchmarkSpec {
+	account?: BenchmarkAccountSelection;
+	serviceTier?: string;
 	models: string[];
 	profile: "chat" | "prefill" | "generation" | "mix" | "cache" | "detailed";
 	runs: number;
@@ -79,12 +96,14 @@ export interface BenchmarkSnapshot {
 	models: BenchmarkModelResult[];
 }
 export type BenchmarkOperation =
+	| { kind: "benchmarks.accounts.read"; sessionId: string; providerId: string }
 	| { kind: "benchmarks.list"; sessionId: string }
 	| { kind: "benchmarks.start"; sessionId: string; spec: BenchmarkSpec }
 	| { kind: "benchmarks.read"; sessionId: string; id: string }
 	| { kind: "benchmarks.cancel"; sessionId: string; id: string }
 	| { kind: "benchmarks.close"; sessionId: string; id: string };
 export interface BenchmarkResultMap {
+	"benchmarks.accounts.read": BenchmarkAccounts;
 	"benchmarks.list": { runs: BenchmarkRun[] };
 	"benchmarks.start": { run: BenchmarkRun };
 	"benchmarks.read": BenchmarkSnapshot;
@@ -92,6 +111,7 @@ export interface BenchmarkResultMap {
 	"benchmarks.close": { closed: boolean };
 }
 export const BENCHMARK_OPERATION_KINDS = [
+	"benchmarks.accounts.read",
 	"benchmarks.list",
 	"benchmarks.start",
 	"benchmarks.read",
@@ -121,6 +141,22 @@ function number(value: unknown, min = 0, max = Number.MAX_VALUE, integer = false
 	)
 		throw new Error("Invalid benchmark number");
 }
+export function validateBenchmarkAccountSelection(value: unknown): asserts value is BenchmarkAccountSelection {
+	const selection = record(value, ["account", "credentialIds"]);
+	number(selection.account, 1, Number.MAX_SAFE_INTEGER, true);
+	if (
+		!selection.credentialIds ||
+		typeof selection.credentialIds !== "object" ||
+		Array.isArray(selection.credentialIds)
+	)
+		throw new Error("Choose the stored credential for each selected provider");
+	const entries = Object.entries(selection.credentialIds);
+	if (!entries.length || entries.length > 8) throw new Error("Choose 1–8 provider credentials");
+	for (const [provider, id] of entries) {
+		text(provider);
+		number(id, 1, Number.MAX_SAFE_INTEGER, true);
+	}
+}
 export function validateBenchmarkSpec(value: unknown): asserts value is BenchmarkSpec {
 	const spec = record(value, [
 		"models",
@@ -131,7 +167,11 @@ export function validateBenchmarkSpec(value: unknown): asserts value is Benchmar
 		"prompt",
 		"prefillBytes",
 		"cachePrefixBytes",
+		"serviceTier",
+		"account",
 	]);
+	if (spec.account !== undefined) validateBenchmarkAccountSelection(spec.account);
+	if (spec.serviceTier !== undefined) text(spec.serviceTier);
 	if (
 		!Array.isArray(spec.models) ||
 		spec.models.length < 1 ||
@@ -170,9 +210,16 @@ export function validateBenchmarkOperation(value: unknown): asserts value is Ben
 	const input = record(value, [
 		"kind",
 		"sessionId",
-		...(kind === "benchmarks.start" ? ["spec"] : kind === "benchmarks.list" ? [] : ["id"]),
+		...(kind === "benchmarks.start"
+			? ["spec"]
+			: kind === "benchmarks.accounts.read"
+				? ["providerId"]
+				: kind === "benchmarks.list"
+					? []
+					: ["id"]),
 	]);
 	text(input.sessionId);
 	if (kind === "benchmarks.start") validateBenchmarkSpec(input.spec);
+	else if (kind === "benchmarks.accounts.read") text(input.providerId);
 	else if (kind !== "benchmarks.list") text(input.id);
 }

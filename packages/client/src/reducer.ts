@@ -171,6 +171,12 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
  * listed explicitly as `false`.
  */
 const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
+  "commit.draft.select": true,
+  "commit.draft.execute": true,
+  "history.prompts.delete": true,
+  "benchmarks.accounts.read": false,
+  "models.available.refresh": true,
+  "models.auth.unpause": true,
  "timeTravel.settings.set": true, "timeTravel.restore": true, "timeTravel.cleanup": true,
  "extensions.links.activate": true, "browser.webmcp.invoke": true,
  "browser.native.open": true, "browser.native.close": true,

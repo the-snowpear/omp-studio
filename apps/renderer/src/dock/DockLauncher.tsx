@@ -26,6 +26,7 @@ const TOOL_COPY: Partial<Record<PanelId, ToolCopy>> = {
   changes: { name: ["变更", "Changes"], detail: ["审查代码变更与差异", "Review code changes and diffs"], tint: "green" },
   git: { name: ["Git", "Git"], detail: ["分支、提交与暂存", "Branches, commits and staging"], tint: "rose" },
   "git-quick": { name: ["Git 快捷卡", "Git quick card"], detail: ["常用 Git 操作一卡集中", "Common Git actions in one card"], tint: "rose" },
+  commit: { name: ["选择性提交", "Selective commit"], detail: ["按改动归属挑选后再提交", "Pick changes by ownership, then commit"], tint: "teal" },
   agents: { name: ["Agents", "Agents"], detail: ["跟踪子 Agent 的运行状态", "Follow subagent runs"], tint: "teal" },
   btw: { name: ["BTW", "BTW"], detail: ["旁路提问，不打断主对话", "Ask aside without interrupting"], tint: "pink" },
   computer: { name: ["电脑", "Computer"], detail: ["查看并操控桌面", "View and control the desktop"], tint: "indigo" },

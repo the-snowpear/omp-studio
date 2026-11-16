@@ -98,6 +98,9 @@ import {
   HostBackend,
   type HostBackendOptions,
   createNodeSessionTelemetryProbe,
+  createNodeSessionPurgeMaintenance,
+  supportsSessionPurgeMaintenance,
+  type SessionPurgeMaintenancePort,
   createPathLocator,
   type RuntimePublication,
   type RuntimeResolution,
@@ -213,9 +216,16 @@ export interface DesktopRuntimeSessionContext {
  * Bridge bootstrap/handshake and wires the session controller; tests
  * substitute fakes so no untrusted file is ever executed.
  */
+/** Main-only launch intent. A prepared workspace is registered by the execution service, never a client path. */
+export type DesktopSessionSwitchIntent =
+  | { kind: "resume"; sessionId: string; model?: string; resumeWorkspace?: { workspaceId: string; cwd: string }; allowRelocation?: boolean }
+  | { kind: "fresh"; noContextFiles?: boolean; model?: string };
+
 export interface DesktopRuntimeSessionPort {
   sessionFor?(sessionId: string): DesktopRuntimeSession | undefined;
-  openContextSession?(workspace: { workspaceId: string; cwd: string }, intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean; model?: string }): Promise<DesktopRuntimeSession | undefined>;
+  /** Await native in-process fork/branch identity adoption and transfer the writer lease. */
+  synchronizeSessionIdentity?(session: DesktopRuntimeSession): Promise<void>;
+  openContextSession?(workspace: { workspaceId: string; cwd: string }, intent: DesktopSessionSwitchIntent): Promise<DesktopRuntimeSession | undefined>;
   /** True when switching the active view keeps sibling Runtime Workers resident. */
   readonly supportsConcurrentSessions?: boolean;
   openEvaluation?(workspace: { workspaceId: string; cwd: string }): Promise<DesktopRuntimeSession | undefined>;
@@ -268,7 +278,7 @@ export interface DesktopRuntimeSessionPort {
    * (`resume`) or a fresh process (`fresh`). Increments the Runtime epoch.
    * On launch failure the port restores the previous session when possible.
    */
-  switchSession?(intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh"; noContextFiles?: boolean; model?: string }): Promise<DesktopRuntimeSession | undefined>;
+  switchSession?(intent: DesktopSessionSwitchIntent): Promise<DesktopRuntimeSession | undefined>;
   /**
    * Apply the tool approval mode across resident Runtimes (plan §5.3): the
    * active Runtime persists the mode to the OMP global configuration, every
@@ -468,6 +478,8 @@ interface FacadeContext {
   readonly projectReads: ProjectReadServices;
   /** All conversation facades share the Host-owned durable evaluation service. */
   readonly evaluationOwner: object;
+  /** Private, profile-bound maintenance shared by every conversation facade. */
+  readonly sessionPurge: SessionPurgeMaintenancePort;
   /** One usage adapter per Host: it caches the resolved dashboard endpoint. */
   usage?: HostUsageService;
   readonly authority: PublicAuthorityIdentity;
@@ -760,6 +772,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       deleteServiceCwd = cwd;
       deleteService = new StudioSessionDeleteService({
         allowedCwd: cwd,
+        purgeRows: input => context.sessionPurge.run(input),
         isResident: (sessionId) =>
           context.runtimeSession?.isResident?.(sessionId) === true
           || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
@@ -859,6 +872,9 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       bindings: context.backend.bindings,
       leaseStore: sessionLeaseCleanup,
       agentDir: () => defaultOmpAgentDir(),
+      ...(context.runtimeSession?.synchronizeSessionIdentity === undefined ? {} : {
+        synchronizeSessionIdentity: session => context.runtimeSession!.synchronizeSessionIdentity!(session),
+      }),
       ...(context.runtimeSession?.switchSession === undefined
         ? {}
         : { switchSession: (intent) => {
@@ -1079,7 +1095,12 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
     if (session) wanted = session.controller.publication()?.snapshot.sessionId ?? wanted;
     interaction.attach(session?.controller);
     if (session) {
-      subscriptions.push(session.onPublication(value => context.publications.publish(value)));
+      subscriptions.push(session.onPublication(value => {
+        // Fork/branch reuses this Worker. Recovery must follow its new identity,
+        // not the session the view originally opened.
+        wanted = value.snapshot.sessionId;
+        context.publications.publish(value);
+      }));
       const controller = session.controller;
       if (controller.onConversationEvent) subscriptions.push(controller.onConversationEvent(value => context.conversationEvents.publish(value)));
       if (controller.onConversationResync) subscriptions.push(controller.onConversationResync(value => context.conversationResync.publish(value)));
@@ -1096,6 +1117,10 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
     try {
       const session = await pool.openContextSession!(workspace.current, intent);
       if (!session) throw new Error(pool.lastUnavailable?.()?.reason ?? "Runtime did not become ready");
+      if (intent.kind === "resume" && intent.resumeWorkspace) {
+        workspace.current = intent.resumeWorkspace;
+        context.workspaceCwd.current = intent.resumeWorkspace.cwd;
+      }
       context.lastUnavailable.current = undefined;
       clearDisconnect(context.lastDisconnect);
       bind(session);
@@ -1572,6 +1597,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     }
     this.#shutdownStarted = true;
     const startupSettled = this.#facadeContext.startup.close();
+    this.#facadeContext.sessionPurge.dispose();
     await Promise.all([...this.#contexts].map(context => context.close()));
     await this.#facade.close();
     await startupSettled;
@@ -1658,6 +1684,14 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
       const facadeContext: FacadeContext = {
         projectReads: new ProjectReadServices(),
         evaluationOwner: {},
+        sessionPurge: createNodeSessionPurgeMaintenance({
+          workingDirectory: profileDirectory,
+          executablePath: async () => {
+            const installed = await backend.installer.currentManifest();
+            return installed && supportsSessionPurgeMaintenance(installed.manifest) ? installed.entrypointPath : undefined;
+          },
+          onDiagnostic: info => seams.hostLog?.write(info.status === "complete" ? "info" : "warn", "session.purge", JSON.stringify(info)),
+        }),
         authority: authorityIdentityFromLease(lease),
         platform: platform.platform,
         arch,

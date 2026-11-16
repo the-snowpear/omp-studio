@@ -383,7 +383,13 @@ export class StudioBridgeClient {
   async readRuntimeView<K extends RuntimeViewOperation["kind"]>(operation: Extract<RuntimeViewOperation, { kind: K }>): Promise<RuntimeViewResultMap[K]> {
     if (this.#state !== "ready" || this.#runtimeEpoch === undefined) throw new StudioHostError("OUTCOME_UNKNOWN", "Runtime view unavailable");
     const receipt = await this.invoke({ type: "studio.request", requestId: (this.options.createRequestId ?? randomUUID)() as RequestId, runtimeEpoch: this.#runtimeEpoch, operation });
-    if (receipt.status !== "completed") throw new StudioHostError(receipt.error?.code ?? "OUTCOME_UNKNOWN", receipt.error?.message ?? "Runtime view failed");
+    if (receipt.status !== "completed") {
+      // Native cursor invalidation explicitly permits one bounded fresh read.
+      // Keep that signal across the Bridge instead of losing it during error mapping.
+      throw Object.assign(new StudioHostError(receipt.error?.code ?? "OUTCOME_UNKNOWN", receipt.error?.message ?? "Runtime view failed"), {
+        retryable: receipt.error?.retryable,
+      });
+    }
     return receipt.result as RuntimeViewResultMap[K];
   }
 

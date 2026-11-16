@@ -12,6 +12,8 @@ export type DictationPhase =
 export interface DictationConfiguration {
 	protocolVersion: 2;
 	configurationId: string;
+	/** Native auxiliary-provider policy; offline does not disable network access. */
+	providerPolicy?: { mode: "unrestricted" | "active-provider"; activeProvider?: string };
 	/** Effective native keybindings; empty lists explicitly disable the action. */
 	hotkeys?: { pushToTalk: string[]; toggle: string[] };
 	available: boolean;
@@ -31,6 +33,7 @@ export interface DictationConfiguration {
 		| "capture-active"
 		| "disabled"
 		| "model-unavailable"
+		| "provider-restricted"
 		| "language-unsupported"
 		| "credentials-missing";
 	message?: string;

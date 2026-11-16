@@ -265,6 +265,15 @@ const BOOTSTRAP: ClientBootstrap = {
 };
 
 const QUERY_INPUTS = {
+  "commit.draft.prepare": { sessionId: SESSION_ID },
+  "commit.draft.read": { sessionId: SESSION_ID, draftId: "draft-fixture", revision: 1 },
+  "commit.draft.preview": { sessionId: SESSION_ID, draftId: "draft-fixture", revision: 1 },
+  "commit.draft.release": { sessionId: SESSION_ID, draftId: "draft-fixture" },
+  "history.prompts.list": { sessionId: SESSION_ID },
+  "history.prompts.read": { sessionId: SESSION_ID, scope: "workspace", id: 1, revision: "0".repeat(64) },
+  "models.available.read": { sessionId: SESSION_ID },
+  "models.available.release": { sessionId: SESSION_ID, snapshotId: "models-fixture" },
+  "models.antigravity.readiness": { sessionId: SESSION_ID },
   "timeTravel.settings.get": {},
   "timeTravel.storage.get": {},
   "timeTravel.timeline.read": { sessionId: SESSION_ID },
@@ -363,6 +372,15 @@ const QUERY_INPUTS = {
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
+  "commit.draft.prepare": { ok: false, queryName: "commit.draft.prepare", error: { code: "CAPABILITY_UNAVAILABLE", message: "No native commit journal in this contract fixture" } },
+  "commit.draft.read": { ok: false, queryName: "commit.draft.read", error: { code: "CAPABILITY_UNAVAILABLE", message: "No prepared commit draft in this contract fixture" } },
+  "commit.draft.preview": { ok: false, queryName: "commit.draft.preview", error: { code: "CAPABILITY_UNAVAILABLE", message: "No prepared commit draft in this contract fixture" } },
+  "commit.draft.release": { ok: true, queryName: "commit.draft.release", result: { released: false } },
+  "history.prompts.list": { ok: true, queryName: "history.prompts.list", result: { sessionId: SESSION_ID, scope: "workspace", items: [], truncated: false } },
+  "history.prompts.read": { ok: false, queryName: "history.prompts.read", error: { code: "CAPABILITY_UNAVAILABLE", message: "No prompt history row in this contract fixture" } },
+  "models.available.read": { ok: true, queryName: "models.available.read", result: { sessionId: SESSION_ID, snapshotId: "models-fixture", version: "models-v1", expiresAt: 0, cursor: "models-page-1", total: 0, truncated: false, models: [] } },
+  "models.available.release": { ok: true, queryName: "models.available.release", result: { released: true } },
+  "models.antigravity.readiness": { ok: true, queryName: "models.antigravity.readiness", result: { providerId: "antigravity-cli", installed: false, authenticated: false, bridgeReady: false, status: "not-installed" } },
   "timeTravel.settings.get": { ok: true, queryName: "timeTravel.settings.get", result: { enabled: false, retentionDays: null, exclusions: [] } },
   "timeTravel.storage.get": { ok: true, queryName: "timeTravel.storage.get", result: { snapshots: 0, bytes: 0 } },
   "timeTravel.timeline.read": { ok: true, queryName: "timeTravel.timeline.read", result: { sessionId: SESSION_ID, activeLeafId: null, selectedLeafId: null, branches: [], events: [], points: [] } },

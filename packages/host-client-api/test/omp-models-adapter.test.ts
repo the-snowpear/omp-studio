@@ -26,8 +26,62 @@ import {
   upsertNestedRecordList,
   upsertYamlRecordEntry,
   upsertYamlStringList,
+  withRuntimeModels,
 } from "../src/omp-models-adapter.js";
 import { restoreRedactedApiKeys } from "../src/models-yml.js";
+
+test("Google Decisions uses the Google key header and unsupported model lists make no guessed HTTP requests", async () => {
+  const request = modelListRequest("https://generativelanguage.googleapis.com/v1beta", "google-decisions", "test-key");
+  assert.equal(request.headers["x-goog-api-key"], "test-key");
+  assert.equal(request.headers.Authorization, undefined);
+  assert.deepEqual(request.urls, []);
+  const directory = await mkdtemp(join(tmpdir(), "omp-model-probe-unsupported-"));
+  let calls = 0;
+  const service = createOmpModelsService({ agentDir: directory, fetch: async () => { calls++; throw new Error("No network request is authorized"); } });
+  try {
+    for (const api of ["google-decisions", "nace-systemone", "antigravity-acp", "unknown-api"]) {
+      const result = await service.probeProvider({ providerId: "test-provider", api, endpointUrl: "https://provider.invalid", apiKey: "test-key" });
+      assert.equal(result.ok, false);
+      assert.deepEqual(result.models, []);
+    }
+    assert.equal(calls, 0);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("managed Antigravity cannot be saved or tested as an HTTP provider, while Judge HTTP configuration remains editable", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-managed-models-"));
+  let calls = 0;
+  const service = createOmpModelsService({ agentDir: directory, fetch: async () => { calls++; throw new Error("No network request is authorized"); } });
+  try {
+    await assert.rejects(async () => service.upsertProvider({ id: "antigravity-cli", name: "Antigravity", api: "openai-completions", auth: { type: "none" } }), { code: "INVALID_ARGUMENT" });
+    await assert.rejects(async () => service.upsertProvider({ id: "alias", name: "Alias", api: "antigravity-acp", auth: { type: "none" } }), { code: "INVALID_ARGUMENT" });
+    await assert.rejects(async () => service.writeModelsYml({ text: "providers:\n  alias:\n    api: antigravity-acp\n" }), { code: "INVALID_ARGUMENT" });
+    assert.equal((await service.testProvider({ providerId: "antigravity-cli", endpointUrl: "https://provider.invalid" })).ok, false);
+    assert.equal(calls, 0);
+    await service.upsertProvider({ id: "nace", name: "Nace", api: "nace-systemone", auth: { type: "api-key", apiKey: "sk-test-only" }, models: [{ id: "drex-test", kind: "judge" }] });
+    const read = await service.get();
+    assert.equal(read.providers[0]?.models[0]?.kind, "judge");
+    assert.equal(read.presets.flatMap(group => group.items).find(provider => provider.id === "antigravity-cli")?.configurationMode, "managed");
+    assert.deepEqual(read.availableModels, []);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("only the Runtime snapshot authorizes configured models and invalid saved roles are not reassigned", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-model-runtime-truth-"));
+  try {
+    await writeFile(join(directory, "models.yml"), "providers:\n  gateway:\n    api: openai-completions\n    apiKey: sk-test-only\n    models:\n    - id: obsolete\n");
+    const roles = "modelRoles:\n  default: gateway/obsolete:high\n";
+    await writeFile(join(directory, "config.yml"), roles);
+    const saved = await createOmpModelsService({ agentDir: directory }).get();
+    const projected = withRuntimeModels(saved, { sessionId: "session", version: "native-generation", total: 1, truncated: false, models: [{ id: "judge", selector: "gateway/judge", name: "Judge", provider: "gateway", api: "google-decisions", kind: "judge", source: "registry", reasoning: false, image: true, tools: false }] });
+    assert.deepEqual(projected.availableModels.map(model => model.selector), ["gateway/judge"]);
+    assert.equal(projected.providers[0]?.models.find(model => model.id === "obsolete")?.status, "unavailable");
+    assert.equal(projected.roles.find(role => role.id === "default")?.primary, "gateway/obsolete");
+    assert.equal(projected.roles.find(role => role.id === "default")?.thinking, "high");
+    assert.equal(projected.roles.find(role => role.id === "default")?.issue?.kind, "model-missing");
+    assert.equal(await readFile(join(directory, "config.yml"), "utf8"), roles);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 
 describe("upsertYamlRecordEntry", () => {
   test("updates an existing entry in block form", () => {
@@ -813,7 +867,7 @@ describe("upsertProvider enabled / disabledProviders", () => {
     }
   });
 
-  test("disabled provider's models are dropped from availableModels", async () => {
+  test("provider disabling remains editable without treating a disk cache as available", async () => {
     const dir = await mkdtemp(join(tmpdir(), "omp-models-disabled-available-"));
     try {
       await writeFile(join(dir, "models.yml"), "providers:\n  acme:\n    api: openai-completions\n    apiKey: sk-test\n", "utf8");
@@ -828,7 +882,8 @@ describe("upsertProvider enabled / disabledProviders", () => {
       db.close();
       const service = createOmpModelsService({ agentDir: dir });
       const before = await service.get();
-      assert.equal(before.availableModels.some((item) => item.provider === "acme"), true);
+      assert.deepEqual(before.availableModels, []);
+      assert.equal(before.availability?.status, "unverified");
       await service.upsertProvider({
         id: "acme",
         name: "Acme",
@@ -846,7 +901,7 @@ describe("upsertProvider enabled / disabledProviders", () => {
   });
 });
 
-describe("models.get availableModels thinking", () => {
+describe("model configuration thinking without Runtime", () => {
   test("keeps models.yml thinking.efforts on the selector used by role rows", async () => {
     const dir = await mkdtemp(join(tmpdir(), "omp-models-role-thinking-"));
     try {
@@ -870,9 +925,11 @@ describe("models.get availableModels thinking", () => {
       );
       await writeFile(join(dir, "config.yml"), "modelRoles:\n  default: gateway/flash:high\n", "utf8");
       const snapshot = await createOmpModelsService({ agentDir: dir }).get();
-      const available = snapshot.availableModels.find((model) => model.selector === "gateway/flash");
-      assert.equal(available?.reasoning, true);
-      assert.deepEqual(available?.thinking, ["high", "max"]);
+      assert.deepEqual(snapshot.availableModels, []);
+      assert.equal(snapshot.availability?.status, "unverified");
+      assert.equal(snapshot.roles.find(role => role.id === "default")?.primary, "gateway/flash");
+      assert.equal(snapshot.roles.find(role => role.id === "default")?.thinking, "high");
+      assert.equal(snapshot.roles.find(role => role.id === "default")?.issue, undefined);
       const catalog = snapshot.providers[0]?.models.find((model) => model.id === "flash");
       assert.deepEqual(catalog?.thinking, ["high", "max"]);
       const roundTrip = availableFromCatalogEntry("gateway", catalog!);
@@ -1136,8 +1193,10 @@ describe("P1/P2 model-config adapter surfaces", () => {
       );
       db.close();
       const snapshot = await createOmpModelsService({ agentDir: dir }).get();
-      assert.deepEqual(snapshot.availableModels.find((item) => item.selector === "openai/shared")?.thinking, ["low"]);
-      assert.deepEqual(snapshot.availableModels.find((item) => item.selector === "anthropic/shared")?.thinking, ["max"]);
+      assert.deepEqual(snapshot.availableModels, []);
+      assert.equal(snapshot.availability?.status, "unverified");
+      assert.equal(snapshot.providers.find(provider => provider.id === "openai")?.models[0]?.thinking, undefined);
+      assert.equal(snapshot.providers.find(provider => provider.id === "anthropic")?.models[0]?.thinking, undefined);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1184,9 +1243,9 @@ describe("P1/P2 model-config adapter surfaces", () => {
         snapshot.availableModels.some((item) => item.provider === "zenmux" || item.selector.startsWith("zenmux/")),
         false,
       );
-      assert.equal(snapshot.availableModels.some((item) => item.selector === "gateway/flash"), true);
-      assert.equal(snapshot.availableModels.some((item) => item.selector === "gateway/pro"), true);
-      assert.deepEqual(snapshot.availableModels.find((item) => item.selector === "gateway/flash")?.thinking, ["high"]);
+      assert.deepEqual(snapshot.availableModels, []);
+      assert.deepEqual(snapshot.providers[0]?.models.map(model => model.id), ["flash"]);
+      assert.equal(snapshot.providers[0]?.models[0]?.thinking, undefined);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

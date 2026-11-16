@@ -1,7 +1,7 @@
 import type { ComputerAction, ComputerFrame, ComputerStructureSnapshot, ComputerWorkspaceSnapshot, FeatureSettingRow, StudioComputerStatus } from "@omp-studio/studio-protocol";
 import { isZh } from "../i18n";
 
-export const COMPUTER_PREVIEW_SCENARIOS = ["running", "disabled", "observe-only", "waiting", "stopped", "history", "target-gone", "locked", "asleep", "permission-denied", "expired", "unconfirmed"] as const;
+export const COMPUTER_PREVIEW_SCENARIOS = ["running", "disabled", "observe-only", "waiting", "stopped", "history", "target-gone", "locked", "asleep", "permission-denied", "expired", "unconfirmed", "secure-input"] as const;
 export type ComputerPreviewScenario = typeof COMPUTER_PREVIEW_SCENARIOS[number];
 
 export function getComputerPreviewScenarioLabels(zh = isZh()): Record<ComputerPreviewScenario, string> {
@@ -18,6 +18,7 @@ export function getComputerPreviewScenarioLabels(zh = isZh()): Record<ComputerPr
     "permission-denied": zh ? "权限撤销" : "Permission denied",
     expired: zh ? "图像过期" : "Frame expired",
     unconfirmed: zh ? "停止未确认" : "Stop unconfirmed",
+    "secure-input": zh ? "安全输入" : "Secure Input",
   };
 }
 
@@ -34,11 +35,16 @@ export function buildComputerPreview(sessionId: string, scenario: ComputerPrevie
     { id: "computer-preview-action-0", sessionId, runId: "computer-preview-run", toolCallId: "computer-preview-eval", method: "windows", mode: "read", status: "completed", startedAt: COMPUTER_PREVIEW_TIME - 1000, endedAt: COMPUTER_PREVIEW_TIME, frameIds: [] },
     ...frames.map((frame, i): ComputerAction => ({ id: frame.actionId!, sessionId, runId: frame.runId!, toolCallId: frame.toolCallId!, method: i ? "observe" : "screenshot", targetId: frame.targetId, targetName: frame.targetName!, mode: "read", status: "completed", startedAt: frame.capturedAt - 800, endedAt: frame.capturedAt, frameIds: [frame.frameId] })),
   ];
+  if (scenario === "secure-input") actions.push(
+    { id: "computer-preview-action-type", sessionId, runId: "computer-preview-run", toolCallId: "computer-preview-eval", method: "type", targetId: "demo-window", targetName: "OMP Studio · Workspace", mode: "takeover", status: "completed", startedAt: COMPUTER_PREVIEW_TIME + 3000, endedAt: COMPUTER_PREVIEW_TIME + 3600, frameIds: [], unconfirmed: zh ? "目标窗口启用了安全输入，按键回显不可读" : "the target window has Secure Input on, so keystroke echo is unreadable", focusReturn: { handedBack: false, previousPid: 4120, frontPid: 7388 } },
+  );
   const active: ComputerAction[] = scenario === "running" || scenario === "waiting" ? [{ id: "computer-preview-action-3", sessionId: `${sessionId}:child`, agentId: "ui-check", agentName: zh ? "界面检查" : "UI check", runId: "computer-preview-child", toolCallId: "computer-preview-child-eval", method: "run", targetId: "demo-window", targetName: "OMP Studio · Workspace", mode: "unknown", status: scenario === "waiting" ? "waiting" : "running", startedAt: COMPUTER_PREVIEW_TIME + 5000, frameIds: [] }] : [];
-  const snapshot: ComputerWorkspaceSnapshot = { version: 1, sessionId, revision: 8, updatedAt: COMPUTER_PREVIEW_TIME + 5000, enabled: scenario !== "disabled", preludeAvailable: scenario !== "observe-only", backend: "win32",
-    capabilities: { capture: scenario !== "permission-denied", input: scenario !== "observe-only", accessibility: scenario !== "observe-only", globalEscape: false, observationOnly: true },
+  const secure = scenario === "secure-input";
+  const snapshot: ComputerWorkspaceSnapshot = { version: 1, sessionId, revision: 8, updatedAt: COMPUTER_PREVIEW_TIME + 5000, enabled: scenario !== "disabled", preludeAvailable: scenario !== "observe-only", backend: secure ? "darwin" : "win32",
+    capabilities: { capture: scenario !== "permission-denied", input: scenario !== "observe-only", accessibility: scenario !== "observe-only", globalEscape: false, observationOnly: true, ...(secure ? { secureInput: true, secureInputApp: "1Password" } : {}) },
     permissions: { capture: scenario === "permission-denied" ? "denied" : "granted", input: scenario === "observe-only" ? "denied" : "granted", accessibility: scenario === "observe-only" ? "unavailable" : "granted" },
-    screen: { locked: scenario === "locked", asleep: scenario === "asleep", known: true },
+    // Secure-input demo also shows split knowledge: lock is reported, sleep is not.
+    screen: secure ? { locked: false, asleep: false, lockKnown: true, sleepKnown: false, known: false } : { locked: scenario === "locked", asleep: scenario === "asleep", known: true },
     control: { status: scenario === "stopped" ? "stopped" : scenario === "unconfirmed" ? "unconfirmed" : "allowed", revision: 3, updatedAt: COMPUTER_PREVIEW_TIME, foreground: scenario === "waiting" ? "requested" : "unknown" },
     targets: scenario === "target-gone" ? [] : PREVIEW_COMPUTER.targets, active, frames: scenario === "disabled" ? [] : frames,
     ...(scenario === "target-gone" ? { reason: zh ? "所选窗口已关闭。请选择仍然存在的观察目标。" : "The selected window closed. Choose a target that still exists." } : scenario === "permission-denied" ? { reason: zh ? "屏幕录制权限已撤销。请在系统设置中重新授权。" : "Screen recording permission was revoked. Re-enable it in System Settings." } : {}),

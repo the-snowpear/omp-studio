@@ -24,6 +24,8 @@ import type {
 	SessionWorktreeOperation,
 	WorktreeRemovalPreview,
 } from "../session-worktrees-protocol";
+import type { SessionResumePreparation } from "../session-lifecycle-protocol";
+import { runtimeText } from "../locale";
 import type { StudioInteractionGateway } from "./interaction-port";
 import { SessionControlError } from "./session-control-service";
 
@@ -36,6 +38,14 @@ const clean = (cause: unknown) =>
 	String(cause instanceof Error ? cause.message : cause)
 		.replace(/[\u0000-\u001f]/gu, " ")
 		.slice(0, 1024) || "Worktree operation failed";
+const executionDirectory = async (cwd: string): Promise<string | undefined> => {
+	try {
+		const directory = await fs.realpath(cwd);
+		return (await fs.stat(directory)).isDirectory() ? directory : undefined;
+	} catch {
+		return undefined;
+	}
+};
 const equalPath = async (a: string, b: string): Promise<boolean> => {
 	try {
 		const [left, right] = await Promise.all([fs.realpath(a), fs.realpath(b)]);
@@ -205,10 +215,42 @@ export class StudioSessionWorktreesService {
 			const selected = sessions.find(info => info.id === operation.targetSessionId);
 			if (!selected)
 				throw new SessionControlError("INVALID_ARGUMENT", "Session is outside the selected resume scope");
-			const target = await resolveResumeTarget(selected.id, selected.cwd);
+			const target = await resolveResumeTarget(selected.id, cwd);
 			this.#check(operation.sessionId);
 			if (!target) throw new SessionControlError("INVALID_ARGUMENT", "Resume session is unavailable");
-			return { targetSessionId: target.session.id, requestedSessionId: selected.id, cwd: target.session.cwd };
+			const recordedCwd = target.session.cwd;
+			let executionCwd = await executionDirectory(recordedCwd);
+			if (operation.executionCwd !== undefined) {
+				const chosen = await executionDirectory(operation.executionCwd);
+				if (!chosen)
+					throw new SessionControlError(
+						"INVALID_ARGUMENT",
+						runtimeText("所选执行工作区不可用。", "The selected execution workspace is unavailable"),
+					);
+				if (executionCwd && !(await equalPath(executionCwd, chosen))) {
+					throw new SessionControlError(
+						"INVALID_ARGUMENT",
+						runtimeText(
+							"保存的会话目录仍存在；请在该工作区恢复会话。",
+							"The saved session directory still exists; resume it in that workspace",
+						),
+					);
+				}
+				executionCwd = chosen;
+			} else if (!executionCwd && (await SessionManager.isStrandedIn(target.session, cwd))) {
+				// Native evidence says this removed worktree belongs to the already selected
+				// workspace. Actual relocation is still owned by native resume at startup.
+				executionCwd = await executionDirectory(cwd);
+			}
+			this.#check(operation.sessionId);
+			return {
+				targetSessionId: target.session.id,
+				requestedSessionId: selected.id,
+				recordedCwd,
+				cwd: recordedCwd,
+				...(executionCwd === undefined ? {} : { executionCwd }),
+				requiresWorkspaceSelection: executionCwd === undefined,
+			} satisfies SessionResumePreparation;
 		}
 		if (operation.kind === "worktrees.session.continueHere") {
 			this.#startDecisionSession = operation.sessionId;

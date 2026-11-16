@@ -53,6 +53,10 @@ export function mapRemoteInteractionToClient(
           ...(option.description === undefined ? {} : { description: option.description }),
         })),
         multiple: request.multiple ?? false,
+        ...(request.initialIndex === undefined ? {} : { initialIndex: request.initialIndex }),
+        ...(request.selectionMarker === undefined ? {} : { selectionMarker: request.selectionMarker }),
+        ...(request.checkedIndices === undefined ? {} : { checkedIndices: request.checkedIndices }),
+        ...(request.markableCount === undefined ? {} : { markableCount: request.markableCount }),
       };
     case "input":
       return {

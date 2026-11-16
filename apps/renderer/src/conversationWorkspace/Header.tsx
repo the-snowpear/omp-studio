@@ -22,7 +22,7 @@ type HeaderProps = {
   windowed: boolean;
   projectMenu: (close: () => void) => ReactNode;
   branchMenu: (close: () => void) => ReactNode;
-  threadActions: { disabled: boolean; reason: string; onFork: () => void; onHandoff: () => void };
+  threadActions: { disabled: boolean; forkDisabled?: boolean; reason: string; onFork: () => void; onHandoff: () => void };
   sessionMenu: (close: () => void) => ReactNode;
   tokenPanel: (close: () => void) => ReactNode;
   contextPanel: ReactNode;
@@ -54,8 +54,8 @@ function ConversationWindowTitle({ title, titleRow, source, status, windowed, pr
       <span className="cw-crumb-sep" aria-hidden="true">›</span>
       {titleMenu}
     </nav>
-    <button type="button" className="dock-icon-button cw-window-thread-action" aria-label={t("shell.forkThread")} data-tip={threadActions.disabled ? threadActions.reason : t("shell.tipForkThread")}
-      disabled={threadActions.disabled} onClick={threadActions.onFork}><Icon name="fork" extra="sm" /></button>
+    <button type="button" className="dock-icon-button cw-window-thread-action" aria-label={t("shell.forkThread")} data-tip={(threadActions.forkDisabled ?? threadActions.disabled) ? threadActions.reason : t("shell.tipForkThread")}
+      disabled={threadActions.forkDisabled ?? threadActions.disabled} onClick={threadActions.onFork}><Icon name="fork" extra="sm" /></button>
     <button type="button" className="dock-icon-button cw-window-thread-action" aria-label={t("shell.handoffThread")} data-tip={threadActions.disabled ? threadActions.reason : t("shell.tipHandoffThread")}
       disabled={threadActions.disabled} onClick={threadActions.onHandoff}><Icon name="handoff" extra="sm" /></button>
     {statusDot}

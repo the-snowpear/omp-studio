@@ -1,14 +1,22 @@
 import { LoginCancelledError } from "@oh-my-pi/pi-ai/error";
-import { getOAuthCredentialProvider, getOAuthProviders, loginRiskWarning } from "@oh-my-pi/pi-ai/oauth";
-import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
+import {
+	getOAuthCredentialProvider,
+	getOAuthProviders,
+	loginRiskWarning,
+	providerPauseReason,
+} from "@oh-my-pi/pi-ai/oauth";
+import { authPolicyFor, authProviders } from "@oh-my-pi/pi-catalog/compat/auth";
+import { cfgAuthUnpausedProviders } from "../../config/model-settings";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../../session/agent-session";
+import { applyUnpausedProviders } from "../../session/auth-broker-config";
 import { logoutCredential, toLogoutAccounts } from "../../slash-commands/helpers/logout";
 import { openPath } from "../../utils/open";
-import type {
-	ModelAuthLoginResult,
-	ModelAuthProvidersResult,
-	ModelServicesOperation,
+import {
+	validateModelAuthUnpauseOperation,
+	type ModelAuthLoginResult,
+	type ModelAuthProvidersResult,
+	type ModelServicesOperation,
 } from "../model-services-protocol";
 import type { StudioInteractionGateway } from "./interaction-port";
 import { SessionControlError } from "./session-control-service";
@@ -32,15 +40,25 @@ export class StudioModelAuthService {
 		this.#check(sessionId);
 		const auth = this.session.modelRegistry.authStorage;
 		await auth.credentials.revalidate();
+		// Native login hides paused providers. Keep a status-only row so retained
+		// credentials are not mistaken for a removed provider; never unpause to inspect.
+		const providers = getOAuthProviders();
+		for (const policy of authProviders()) {
+			if (providerPauseReason(policy.id) !== undefined && !providers.some(provider => provider.id === policy.id))
+				providers.push({ id: policy.id, name: policy.name, available: false });
+		}
 		return {
 			sessionId,
-			providers: getOAuthProviders().map(provider => {
+			providers: providers.map(provider => {
 				const storageProvider = getOAuthCredentialProvider(provider.id);
 				const warning = loginRiskWarning(provider.id);
+				const pauseReason = providerPauseReason(provider.id);
 				return {
 					id: provider.id,
 					name: provider.name,
-					available: provider.available,
+					available: provider.available && pauseReason === undefined,
+					paused: pauseReason !== undefined,
+					...(pauseReason === undefined ? {} : { pauseReason }),
 					authenticated: auth.keys.source(storageProvider) !== undefined,
 					kind: authPolicyFor(provider.id)?.login?.kind === "api-key" ? ("api-key" as const) : ("oauth" as const),
 					credentials: toLogoutAccounts(storageProvider, auth.credentials.list(storageProvider)).map(row => ({
@@ -74,6 +92,8 @@ export class StudioModelAuthService {
 
 	async login(sessionId: string, providerId: string): Promise<ModelAuthLoginResult> {
 		this.#check(sessionId);
+		const paused = providerPauseReason(providerId);
+		if (paused !== undefined) throw new SessionControlError("COMMAND_BLOCKED", paused);
 		const provider = getOAuthProviders().find(row => row.id === providerId && row.available);
 		if (!provider) throw new SessionControlError("INVALID_ARGUMENT", "This native login provider is unavailable");
 		if (!this.interaction)
@@ -88,10 +108,13 @@ export class StudioModelAuthService {
 			await this.session.modelRegistry.authStorage.oauth.login(providerId, {
 				signal: abort.signal,
 				onAuth: info => {
+					if (abort.signal.aborted) return;
 					openPath(info.url);
 					if (info.instructions) interaction.notify(info.instructions);
 				},
-				onProgress: message => interaction.notify(message),
+				onProgress: message => {
+					if (!abort.signal.aborted) interaction.notify(message);
+				},
 				onPrompt: async prompt => {
 					this.#check(sessionId);
 					abort.signal.throwIfAborted();
@@ -107,7 +130,9 @@ export class StudioModelAuthService {
 				},
 			});
 			this.#check(sessionId);
+			abort.signal.throwIfAborted();
 			await this.session.modelRegistry.refreshProvider(getOAuthCredentialProvider(providerId), "online");
+			abort.signal.throwIfAborted();
 			await this.session.refreshScopedModels();
 			return {
 				providerId,
@@ -138,8 +163,21 @@ export class StudioModelAuthService {
 		if (operation.kind === "models.auth.providers.read") return this.list(operation.sessionId);
 		if (operation.kind === "models.auth.login") return this.login(operation.sessionId, operation.providerId);
 		if (operation.kind === "models.auth.cancel") return this.cancel(operation.sessionId, operation.providerId);
+		if (operation.kind === "models.auth.unpause") {
+			validateModelAuthUnpauseOperation(operation);
+			if (authPolicyFor(operation.providerId)?.disabled === undefined)
+				throw new SessionControlError("INVALID_ARGUMENT", "This provider has no native pause to accept");
+			// Mutate only the operator's global membership; a repository-supplied
+			// list must never be copied into the operator's risk acceptance.
+			cfgAuthUnpausedProviders.setMember(this.session.settings, operation.providerId, { member: true });
+			await this.session.settings.flush();
+			applyUnpausedProviders(this.session.settings);
+			await this.session.modelRegistry.refreshProvider(getOAuthCredentialProvider(operation.providerId), "offline");
+			await this.session.refreshScopedModels();
+			return this.list(operation.sessionId);
+		}
 		const policy = authPolicyFor(operation.providerId);
-		if (policy?.disabled || policy?.login?.kind !== "api-key")
+		if (providerPauseReason(operation.providerId) !== undefined || policy?.login?.kind !== "api-key")
 			throw new SessionControlError("INVALID_ARGUMENT", "Select a native API-key provider");
 		const provider = getOAuthCredentialProvider(operation.providerId);
 		const auth = this.session.modelRegistry.authStorage;

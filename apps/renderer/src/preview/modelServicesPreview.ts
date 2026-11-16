@@ -1,13 +1,22 @@
-import type { ModelAuthProvider, ModelProviderRoster, ModelSystemTemplateInspection, ModelSystemTemplatesList } from "@omp-studio/studio-protocol";
+import type { ModelAntigravityReadiness, ModelAuthProvider, ModelProviderRoster, ModelSystemTemplateInspection, ModelSystemTemplatesList } from "@omp-studio/studio-protocol";
+import type { ModelAvailability } from "@omp-studio/client-contract";
 
 export const PREVIEW_MODEL_AUTH: ModelAuthProvider[] = [
   { id: "anthropic", name: "Anthropic", available: true, authenticated: true, kind: "oauth", credentials: [{ id: -1, label: "mira@studio.dev", type: "oauth" }] },
-  { id: "openai-codex", name: "OpenAI Codex", available: true, authenticated: false, kind: "oauth", credentials: [] },
+  { id: "antigravity-cli", name: "Antigravity CLI", available: true, authenticated: true, kind: "oauth", credentials: [{ id: -4, label: "mira@studio.dev", type: "oauth" }] },
+  { id: "openai-codex", name: "OpenAI Codex", available: true, authenticated: true, kind: "oauth", credentials: [{ id: -5, label: "mira@studio.dev", type: "oauth" }], paused: true, pauseReason: "Usage limit reached on 2026-11-15 09:12. Requests stay paused until you resume them." },
   { id: "liquid", name: "Liquid AI", available: true, authenticated: true, kind: "api-key", credentials: [{ id: -2, label: "API key", type: "api_key" }] },
   { id: "typesafe", name: "TypeSafe", available: true, authenticated: false, kind: "api-key", credentials: [] },
   { id: "otari", name: "Otari", available: true, authenticated: true, kind: "api-key", credentials: [{ id: -3, label: "Studio workspace key", type: "api_key" }] },
   { id: "google-antigravity", name: "Google Antigravity", available: true, authenticated: false, kind: "oauth", credentials: [], warning: "Google's Antigravity terms do not allow third-party sign-in. Accounts may be suspended. Use a Gemini API key or Vertex AI for an account you depend on." },
 ];
+/** Demo readiness only; a real `ready` never implies paid inference or quota was checked. */
+export const PREVIEW_ANTIGRAVITY_READINESS: ModelAntigravityReadiness = {
+  providerId: "antigravity-cli", installed: true, authenticated: true, bridgeReady: true, status: "ready", version: "1.5.9", source: "managed",
+};
+export function previewModelAvailability(total: number): ModelAvailability {
+  return { status: "verified", source: "runtime", sessionId: "preview", version: "demo-gen-7c49c11a", total, truncated: false };
+}
 export const PREVIEW_SYSTEM_TEMPLATES: ModelSystemTemplatesList = {
   sessionId: "preview", version: "preview-v1", bindings: [
     { pattern: "claude", file: "~/studio-prompts/claude.md", source: "global", editable: true, effective: true },

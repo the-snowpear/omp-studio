@@ -139,12 +139,14 @@ export function ComposerModelMenu({
   );
   const rolesWithModel = useMemo(
     () => (data?.roles ?? []).filter(
-      (role) => Boolean(role.primary) && !role.issue && bySelector.has(role.primary),
+      (role) => Boolean(role.primary) && !role.issue && bySelector.has(role.primary)
+        && (bySelector.get(role.primary)?.kind ?? "chat") === "chat",
     ),
     [data, bySelector],
   );
+  /* Chat picker: Judge, speech, image and other role runners stay in their roles. */
   const groups = useMemo(
-    () => (data ? groupModelsByProvider(data.availableModels, data.providers) : []),
+    () => (data ? groupModelsByProvider(data.availableModels.filter((model) => (model.kind ?? "chat") === "chat"), data.providers) : []),
     [data],
   );
 

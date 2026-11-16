@@ -1,0 +1,6 @@
+.bench-account { grid-column: 1 / -1; display: grid; gap: var(--sp-6); min-width: 0; }
+.bench-account-row { display: flex; align-items: flex-end; gap: var(--sp-8); min-width: 0; }
+.bench-account-row > label { flex: 1; min-width: 0; display: grid; gap: var(--sp-6); font-size: var(--fs-12); }
+.bench-account-row .select { width: 100%; }
+.bench-account-note { margin: 0; color: var(--text-3); font-size: var(--fs-11); line-height: 1.55; animation: var(--motion-fade); }
+.bench-account-note.is-warn { color: var(--amber); }

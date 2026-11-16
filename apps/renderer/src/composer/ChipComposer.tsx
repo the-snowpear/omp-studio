@@ -28,6 +28,7 @@ import type { PredictionResult } from "@omp-studio/studio-protocol";
 import { emptySnapshot, newChipId } from "./types";
 import { defaultImageChipLabel, localizeImageChipLabel, snapshotFromDoc, snapshotIsEmpty, displayDocFromSerializedText } from "./serialize";
 import { fileToPromptImage, imagePreviewUrl, isImageFile } from "./ingest";
+import { richPasteFromHtml, richPasteHasText, type RichPaste } from "./richPaste";
 import {
   chipRemoveTarget,
   createChipElement,
@@ -70,6 +71,8 @@ export type ChipComposerHandle = ComposerDictationHandle & {
   getSnapshot(): ComposerSnapshot;
   setSnapshot(snapshot: ComposerSnapshot, options?: { preserveFocus?: boolean }): void;
   insertChip(chip: Omit<ComposerChip, "id"> & { id?: string }): void;
+  /** Inserts text at the last caret (or the end), keeping serialized references as capsules. Never sends. */
+  insertText(text: string): void;
   removeSkillChip(name: string): void;
   openFilePicker(): void;
   waitForAttachments?(): Promise<boolean>;
@@ -221,6 +224,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     return () => document.removeEventListener("selectionchange", remember);
   }, [document, window]);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  /** Set by Ctrl/Cmd+Shift+V so the next paste skips HTML conversion. */
+  const plainPasteRef = useRef(false);
   const imagesRef = useRef(new Map<string, PromptImage>());
   const attachmentEpoch = useRef(0);
   const pendingAttachments = useRef<Promise<boolean> | null>(null);
@@ -569,6 +574,20 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       if (!options?.preserveFocus || editor.ownerDocument.activeElement === editor) placeCaretAtEnd(editor);
     },
     insertChip,
+    insertText(text) {
+      const editor = editorRef.current;
+      if (!editor || disabled || text.length === 0) return;
+      editor.focus();
+      const caret = savedCaret.current;
+      const selection = window.getSelection();
+      if (caret && editor.contains(caret.commonAncestorContainer)) { selection?.removeAllRanges(); selection?.addRange(caret); }
+      else if (!selection || selection.rangeCount === 0 || !editor.contains(selection.anchorNode)) placeCaretAtEnd(editor);
+      invalidatePrediction();
+      dictationEditorRef.current?.beforeEdit();
+      insertSerializedText(editor, text);
+      emit();
+      refreshMention();
+    },
     removeSkillChip(name) {
       const editor = editorRef.current;
       if (!editor || !removeSkillChipsByName(editor, name)) return;
@@ -757,18 +776,73 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     refreshMention();
   };
 
-  // Files on the clipboard (Explorer Ctrl+C, screenshot) become capsules; anything
-  // else pastes as plain text, so a pasted path stays a path.
+  /** Serialized `<github-reference>`-style text keeps its capsules; everything else is plain text. */
+  const insertSerializedText = (editor: HTMLDivElement, text: string): void => {
+    if (text.includes("<github-reference ") || text.includes("<git-commit-reference ") || text.includes("<browser-reference ")) {
+      const doc = displayDocFromSerializedText(text);
+      insertNodesAtCaret(editor, doc.nodes.map(node => node.type === "text" ? document.createTextNode(node.value) : createChipElement(node.chip, document)));
+    } else insertPlainText(editor, text);
+  };
+
+  /* Rich paste keeps the source order: text runs as Markdown, images as capsules.
+     Bytes stay in this editor's image map, never in the client reducer. */
+  const insertRich = (editor: HTMLDivElement, rich: RichPaste, fills: ReadonlyArray<PromptImage | null>): void => {
+    dictationEditorRef.current?.beforeEdit();
+    for (const part of rich.parts) {
+      if (part.kind === "text") { insertPlainText(editor, part.text); continue; }
+      const image = part.image ?? (part.slot === undefined ? null : fills[part.slot] ?? null);
+      if (image) insertChip({ kind: "image", label: defaultImageChipLabel(), image });
+      else if (part.alt) insertPlainText(editor, `[${part.alt}]`);
+    }
+    emit();
+    refreshMention();
+  };
+  const pasteRich = (editor: HTMLDivElement, rich: RichPaste, files: readonly File[]): void => {
+    // Nothing to read from clipboard files: insert at the caret now, like a plain paste.
+    if (rich.slots === 0) { insertRich(editor, rich, []); return; }
+    const selection = window.getSelection();
+    const pasteRange = selection?.rangeCount && editor.contains(selection.getRangeAt(0).commonAncestorContainer)
+      ? selection.getRangeAt(0).cloneRange() : null;
+    void enqueueAttachment(async current => {
+      const fills: Array<PromptImage | null> = [];
+      for (let slot = 0; slot < rich.slots; slot += 1) {
+        const file = files[slot];
+        fills.push(file ? await fileToPromptImage(file).catch(() => null) : null);
+        if (!current()) return false;
+      }
+      const target = editorRef.current;
+      if (target !== editor) return false;
+      if (pasteRange && editor.contains(pasteRange.commonAncestorContainer)) {
+        const liveSelection = window.getSelection();
+        liveSelection?.removeAllRanges(); liveSelection?.addRange(pasteRange);
+      }
+      insertRich(target, rich, fills);
+      return true;
+    });
+  };
+
+  // Files on the clipboard (Explorer Ctrl+C, screenshot) become capsules. Rich
+  // HTML (documents, web pages) becomes Markdown with ordered images; code-editor
+  // copies and Ctrl+Shift+V stay plain text, so a pasted path stays a path.
   const onPaste = (event: ClipboardEvent<HTMLDivElement>): void => {
     const data = event.clipboardData;
     if (!data) return;
     event.preventDefault();
-    if (data.files.length > 0) {
-      void ingestFiles(data.files);
-      return;
-    }
+    const plainOnly = plainPasteRef.current;
+    plainPasteRef.current = false;
     const editor = editorRef.current;
     const text = data.getData("text/plain");
+    const html = plainOnly ? "" : data.getData("text/html");
+    const files = Array.from(data.files);
+    const rich = editor && html ? richPasteFromHtml(html, text) : null;
+    if (files.length > 0 && !(rich && richPasteHasText(rich) && files.every(isImageFile))) {
+      void ingestFiles(files);
+      return;
+    }
+    if (editor && rich) {
+      pasteRich(editor, rich, files);
+      return;
+    }
     if (!editor || text.length === 0) return;
     if (resolveImagePaste && /\.(?:png|jpe?g|gif|webp|svg|svgz|bmp|tiff?|avif|heic|heif)["']?\s*$/iu.test(text)) {
       void enqueueAttachment(async current => {
@@ -783,10 +857,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       return;
     }
     dictationEditorRef.current?.beforeEdit();
-    if (text.includes("<github-reference ") || text.includes("<git-commit-reference ") || text.includes("<browser-reference ")) {
-      const doc = displayDocFromSerializedText(text);
-      insertNodesAtCaret(editor, doc.nodes.map(node => node.type === "text" ? document.createTextNode(node.value) : createChipElement(node.chip, document)));
-    } else insertPlainText(editor, text);
+    insertSerializedText(editor, text);
     emit();
     refreshMention();
   };
@@ -805,6 +876,10 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       const capsule = event.target.closest<HTMLElement>(".cm-chip-github, .cm-chip-git-commit, .cm-chip-browser");
       const reference = capsule && parseChipPayload(capsule.dataset.chip ?? "")?.reference;
       if (reference) { event.preventDefault(); setGithubPreview(reference); return; }
+    }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "v") {
+      plainPasteRef.current = true;
+      window.setTimeout(() => { plainPasteRef.current = false; }, 0);
     }
     if (dictationKeyboardRef.current?.keydown(event.nativeEvent)) { event.preventDefault(); return; }
     if(composingRef.current||event.nativeEvent.isComposing||event.keyCode===229)return;

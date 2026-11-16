@@ -61,13 +61,15 @@ export function AskHead({
 
 /** 换页时唯一会动的那一段：问题正文 + 选项 + 自定义回答。 */
 export function AskBody({
-  question, answer, disabled, onPick, onCustom, onPatch, onSubmit, onBusy,
+  question, answer, disabled, onPick, onChoose, onCustom, onPatch, onSubmit, onBusy,
 }: {
   onBusy?: (busy: boolean) => void;
   question: DeckAskQuestion;
   answer: DeckAskAnswer;
   disabled?: boolean;
   onPick: (label: string) => void;
+  /** Toggle lists answer a click immediately instead of staging it. */
+  onChoose?: (label: string) => void;
   onCustom: (value: string) => void;
   onPatch?: (patch: Partial<DeckAskAnswer>) => void;
   onSubmit: () => void;
@@ -106,19 +108,26 @@ export function AskBody({
     <div className="ask-body">
       <div className="dk-sub"><MarkdownInline text={question.question} k={`q-${question.id}`} /></div>
       <p className="ask-selection-hint">
-        {question.multi
+        {question.toggleList && onChoose
+          ? (zh ? "点击切换勾选，每次点击都会立即发送；选完后点结束项" : "Click to toggle a mark; each click is sent right away. Pick the finishing row when done")
+          : question.multi
           ? exclusive
             ? (zh ? "多选 · 自定义回答会替代已选项" : "Multi-select · Custom answer replaces selected options")
             : (zh ? "多选 · 可同时选择选项和自定义回答" : "Multi-select · Options and custom answer can be combined")
           : (zh ? "单选 · 选择一项，或填写自定义回答" : "Single-select · Pick an option or enter a custom answer")}
       </p>
-      <div className="dk-opts" role={question.multi ? "group" : "radiogroup"} aria-label={question.question}>
+      <div className="dk-opts" role={question.multi || (question.toggleList && onChoose) ? "group" : "radiogroup"} aria-label={question.question}>
         {question.options.map((option, index) => {
-          const on = picked.includes(option.label);
+          const toggle = question.toggleList === true && onChoose !== undefined;
+          const on = toggle ? option.mark === "checked" : picked.includes(option.label);
           return (
-            <button key={option.label} type="button" className={`dk-opt${on ? " sel" : ""}`} role={question.multi ? "checkbox" : "radio"} aria-checked={on} disabled={choicesDisabled} onClick={() => { setCustomEditing(false); onPick(option.label); }}>
+            <button key={option.label} type="button" className={`dk-opt${on ? " sel" : ""}${toggle && option.mark === undefined ? " is-action" : ""}`}
+              {...(toggle ? option.mark === undefined ? {} : { role: "checkbox", "aria-checked": on } : { role: question.multi ? "checkbox" : "radio", "aria-checked": on })}
+              autoFocus={index === question.initial && toggle}
+              disabled={choicesDisabled}
+              onClick={() => { setCustomEditing(false); if (toggle) onChoose(option.label); else onPick(option.label); }}>
               <span className="dk-opt-row">
-                <span className={question.multi ? "o-check" : "o-radio"} aria-hidden="true" />
+                <span className={toggle ? option.mark === undefined ? "o-action" : "o-check" : question.multi ? "o-check" : "o-radio"} aria-hidden="true" />
                 <span className="o-label">{option.label}</span>
                 {index === question.recommended ? <span className="chip purple xs">Recommended</span> : null}
               </span>

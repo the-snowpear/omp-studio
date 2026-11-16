@@ -893,6 +893,7 @@ export const en: LocaleDictionary = {
       "resume": "Switch to another session",
       "retry": "Retry last failed turn",
       "fork": "Fork from previous message",
+      "commit": "Pick changes by ownership and commit",
       "branch": "Create branch from previous message",
       "tree": "Open session tree",
       "session": "Session info / delete / pin account",

@@ -9,7 +9,9 @@ import { SessionOptionsPane } from "./models/SessionOptionsPane";
 import { AccountStatusPane } from "./models/AccountStatusPane";
 import { NativeModelAccessPane } from "./models/NativeModelAccessPane";
 import { ModelSystemTemplates, ModelSystemTemplateInspector } from "./models/ModelSystemTemplates";
-import { useModelAuth } from "./models/useModelAuth";
+import { modelServiceAvailable, useModelAuth } from "./models/useModelAuth";
+import { ModelAvailabilityStrip } from "./models/ModelAvailabilityStrip";
+import { previewModelAvailability } from "./preview/modelServicesPreview";
 import { loadRuntimeModels } from "./models/runtimeModels";
 import { RuntimeCredentials, VisionModelStatus } from "./models/RuntimeCredentials";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -126,6 +128,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [probeResult, setProbeResult] = useState<ModelDiscoveryResult | null>(null);
   const [probing, setProbing] = useState(false);
   const [catalogUpdating, setCatalogUpdating] = useState(false);
+  const [availabilityRefreshing, setAvailabilityRefreshing] = useState(false);
   const [createRoleOpen, setCreateRoleOpen] = useState(false);
   const [newRole, setNewRole] = useState({ id: "", name: "", desc: "" });
   const [fallbackDraft, setFallbackDraft] = useState<string[] | null>(null);
@@ -959,6 +962,27 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     }
   };
 
+  /* Current Runtime registry first; without a Runtime only the CLI cache for later sessions moves. */
+  const refreshAvailability = async () => {
+    if (preview) { if (marks) toast(t("modelConfig.toastDemoNoRefresh")); return; }
+    setAvailabilityRefreshing(true);
+    try {
+      if (runtimeAvailable && sessionId && modelServiceAvailable(modelContext, "models.available.refresh")) {
+        const handle = await client.command("models.available.refresh", { sessionId });
+        await waitReceipt(client, handle.requestId, 120_000);
+        toast(zh ? "已让当前 Runtime 重新读取授权目录" : "The current Runtime re-read its authorized models");
+      } else {
+        const result = await runWrite(client, "models.discovery.refresh", {});
+        toast(result.message ?? (runtimeAvailable ? t("modelConfig.toastRescannedDiscovery") : zh ? "已更新本地 CLI 缓存；之后的会话会读取它" : "Updated the CLI cache for later sessions"));
+      }
+      await refresh();
+    } catch (error) {
+      toast(hostErrorMessage(error, t("modelConfig.toastRefreshFailed")));
+    } finally {
+      setAvailabilityRefreshing(false);
+    }
+  };
+
   const setRoleStorage = async (storage: ModelRoleStorage) => {
     if (preview) {
       mutateLocal((current) => ({
@@ -1236,6 +1260,10 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
           <NativeModelAccessPane context={modelContext} auth={nativeAuth} visible={shownTab === "accounts"} accounts onChanged={() => { void refresh(); }} />
         </section>
         <section id="mcPanelProviders" role="tabpanel" aria-labelledby="mcTabProviders" hidden={shownTab !== "providers"} {...tabPanelMotion("providers")}>
+          {!editor ? <ModelAvailabilityStrip
+            availability={preview ? previewModelAvailability(data?.availableModels.length ?? 0) : data?.availability}
+            refreshing={availabilityRefreshing} canRefresh={preview || !!data} runtimeRefresh={preview || runtimeAvailable}
+            demo={preview && marks} onRefresh={() => void refreshAvailability()} /> : null}
           {!editor ? <NativeModelAccessPane context={modelContext} auth={nativeAuth} visible={shownTab === "providers"} onChanged={() => { void refresh(); }} /> : null}
           <div className={editorLive ? `mc-view ${pagePhaseClass(editorPhase)}` : "mc-view"} data-page-dir={pageDir(editorDir)}>
           {editor ? (

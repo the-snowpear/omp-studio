@@ -104,17 +104,21 @@ describe("WP-041 Studio Remote Extension UI", () => {
 	test("select maps labels to remote option ids and back; Other keeps the custom-input id", async () => {
 		const { port, gateway, opened } = fixture();
 		const ui = new StudioRemoteExtensionUiContext(gateway, "studio-tool:call-1");
-		const promise = ui.select("Which backend?", [
-			{ label: "SQLite", description: "embedded" },
-			"PostgreSQL",
-			"Other (type your own)",
-		]);
+		const promise = ui.select(
+			"Which backend?",
+			[{ label: "SQLite", description: "embedded" }, "PostgreSQL", "Other (type your own)"],
+			{ initialIndex: 1, selectionMarker: "checkbox", checkedIndices: [0], markableCount: 2 },
+		);
 		expect(opened).toHaveLength(1);
 		const request = opened[0]!.request;
 		expect(request).toMatchObject({
 			kind: "select",
 			commandId: "studio-tool:call-1",
 			title: "Which backend?",
+			initialIndex: 1,
+			selectionMarker: "checkbox",
+			checkedIndices: [0],
+			markableCount: 2,
 			options: [
 				{ id: "option:0", label: "SQLite", description: "embedded" },
 				{ id: "option:1", label: "PostgreSQL" },

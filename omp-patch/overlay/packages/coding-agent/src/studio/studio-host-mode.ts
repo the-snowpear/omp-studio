@@ -566,7 +566,12 @@ export function createStudioHostRuntime(
 	const modes = new StudioModeControlService(session);
 	const extensionModes = new StudioExtensionModes(session, modes, loop);
 	const models = new StudioModelControlService(session);
-	const workbench = new StudioWorkbenchService(session, liveAudio, mcpManager);
+	const workbench = new StudioWorkbenchService(
+		session,
+		liveAudio,
+		mcpManager,
+		() => bridgeConfig.runtimeEpoch as number,
+	);
 	workbench.planControl = modes;
 	const permissions = new StudioPermissionControlService(session);
 	const settings = new StudioRuntimeSettingsService(session);
@@ -628,7 +633,9 @@ export function createStudioHostRuntime(
 	const fork = new StudioForkService(session);
 	const handoff = new StudioHandoffService(session);
 	const fastPrewalk = new StudioFastPrewalkService(session);
-	const commands = new StudioCommandManifestService(session);
+	const commands = new StudioCommandManifestService(session, (args, signal) =>
+		workbench.commit.prepareFromArgs(args, signal),
+	);
 	const btw = new StudioBtwService(session, {
 		injectEnabled: () => cfgBtwInject.get(session.settings),
 		sendInjection: (text, sessionId) => sendStudioBtwInjection(session, text, sessionId),

@@ -10,6 +10,7 @@ import {
   askToDeckView,
   NO_ASK_ANSWER,
   nextPicked,
+  initialAskAnswer,
   patchAskAnswer,
   selectToAskView,
   submitAskValue,
@@ -49,8 +50,8 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
   useEffect(() => {
     if (interaction.kind === "editor") setText(interaction.content ?? "");
     else setText("");
-    setAnswer(NO_ASK_ANSWER);
-  }, [interaction.interactionId, interaction.leaseGeneration]);
+    setAnswer(interaction.kind === "select" ? initialAskAnswer(selectToAskView(interaction).question) : NO_ASK_ANSWER);
+  }, [interaction.interactionId, interaction.leaseGeneration]); // eslint-disable-line react-hooks/exhaustive-deps
   const busy = disabled || submitting;
   const submit = (value?: InteractionResponseValue) => {
     if (busy) return;
@@ -118,6 +119,7 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
           answer={answer}
           {...(busy ? { disabled: true } : {})}
           onPick={pick}
+          {...(view.question.toggleList ? { onChoose: (label: string) => { const id = view.idByLabel[label]; if (id !== undefined) submit(id); } } : {})}
           onCustom={custom => setAnswer(previous => patchAskAnswer(view.question, previous, { custom }))}
           onSubmit={send}
         />

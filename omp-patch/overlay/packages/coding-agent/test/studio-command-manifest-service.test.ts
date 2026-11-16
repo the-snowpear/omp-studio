@@ -1,21 +1,33 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { Agent } from "@oh-my-pi/pi-agent-core";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { TempDir } from "@oh-my-pi/pi-utils";
+import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { ModelRegistry } from "../src/config/model-registry";
+import { Settings } from "../src/config/settings";
+import { SessionManager } from "../src/session/session-manager";
+import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 import { BUILTIN_SLASH_COMMANDS_INTERNAL } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import {
 	StudioCommandManifestError,
 	StudioCommandManifestService,
 } from "@oh-my-pi/pi-coding-agent/studio/services/command-manifest-service";
 
-function fixture(): { service: StudioCommandManifestService; forcedTools: string[] } {
+function fixture() {
 	const forcedTools: string[] = [];
+	const prompts: Array<{ text: string; options: unknown }> = [];
 	const session = {
 		sessionManager: { getCwd: () => "C:/workspace" },
 		settings: {},
 		refreshSkills: async () => {},
 		setForcedToolChoice: (name: string) => forcedTools.push(name),
+		prompt: async (text: string, options: unknown) => {
+			prompts.push({ text, options });
+			return true;
+		},
 	} as unknown as AgentSession;
-	return { service: new StudioCommandManifestService(session), forcedTools };
+	return { service: new StudioCommandManifestService(session), forcedTools, prompts };
 }
 
 function titleFixture(initialTitle?: string, initialSource?: "auto" | "user") {
@@ -66,10 +78,61 @@ describe("WP-044 Studio command manifest", () => {
 	});
 
 	test("invokes a headless builtin through the shared registry", async () => {
-		const { service, forcedTools } = fixture();
+		const { service, forcedTools, prompts } = fixture();
 		const result = await service.invoke("builtin.force", "read run the tests");
 		expect(forcedTools).toEqual(["read"]);
-		expect(result).toEqual({ output: ["Next turn forced to use read."], result: { prompt: "run the tests" } });
+		expect(prompts).toEqual([{ text: "run the tests", options: { runCommands: false, streamingBehavior: "steer" } }]);
+		expect(result).toEqual({ output: ["Next turn forced to use read."], result: { consumed: true, started: true } });
+		expect(JSON.stringify(result)).not.toContain("run the tests");
+	});
+
+	test("a delayed custom command cannot submit its prompt into a replacement session", async () => {
+		using temp = TempDir.createSync("@studio-command-owner-");
+		const started = Promise.withResolvers<void>();
+		const reply = Promise.withResolvers<string>();
+		const session = new AgentSession({
+			agent: new Agent({
+				initialState: {
+					model: getBundledModel("anthropic", "claude-sonnet-4-5")!,
+					systemPrompt: ["Fixture"],
+					tools: [],
+				},
+			}),
+			sessionManager: SessionManager.create(temp.path(), temp.join("sessions")),
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry: new ModelRegistry(createInMemoryAuthStorage()),
+			advisorTools: { names: () => [], create: () => ({ tools: [] }) },
+			customCommands: [
+				{
+					path: "delayed.ts",
+					resolvedPath: temp.join("delayed.ts"),
+					source: "project",
+					command: {
+						name: "delayed",
+						description: "Deferred fixture",
+						execute: async () => {
+							started.resolve();
+							return reply.promise;
+						},
+					},
+				},
+			],
+		});
+		const prompt = spyOn(session, "prompt").mockImplementation(async () => true);
+		try {
+			const service = new StudioCommandManifestService(session);
+			await service.refresh();
+			const pending = service.invoke("prompt-template.delayed", undefined);
+			await started.promise;
+			await session.sessionManager.newSession();
+			reply.resolve("belongs to the original session");
+			await expect(pending).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+			expect(prompt).not.toHaveBeenCalled();
+		} finally {
+			reply.resolve("");
+			prompt.mockRestore();
+			await session.dispose();
+		}
 	});
 
 	test("routes TUI-only builtins explicitly and rejects malformed invocation", async () => {

@@ -30,7 +30,12 @@ test("rebuilt observation-only binding rejects control before starting a native 
 	}
 });
 
-function workerHarness() {
+function workerHarness(
+	options: {
+		unconfirmed?: string;
+		focusReturn?: { handedBack: boolean; previousPid?: number; frontPid?: number };
+	} = {},
+) {
 	const messages: ComputerWorkerOutbound[] = [];
 	const settled = Promise.withResolvers<void>();
 	let receive: (message: ComputerWorkerInbound) => void = () => {};
@@ -66,6 +71,9 @@ function workerHarness() {
 		listWindows: async () => [
 			{ id: "7", app: "test", title: "Editor", width: 1, height: 1, x: 0, y: 0, focused: true },
 		],
+		typeText: async () => options,
+		keyChord: async () => options.focusReturn,
+		drag: async () => ({ focusReturn: options.focusReturn }),
 		capture: async (target: string) => ({
 			data: png,
 			width: 1,
@@ -122,6 +130,39 @@ test("worker emits native method and generated screenshot evidence even when the
 	if (frame?.kind !== "frame") throw new Error("Frame evidence missing");
 	expect(await Bun.file(frame.screenshot.path).bytes()).toEqual(new Uint8Array(png));
 	expect(frame.screenshot).not.toHaveProperty("delivered");
+});
+
+test("worker projects nested typing and drag reports plus direct focus reports without leaking typed input", async () => {
+	const focusReturn = { handedBack: false, previousPid: 21, frontPid: 34 };
+	const h = workerHarness({ unconfirmed: "target receipt unavailable", focusReturn });
+	h.receive({
+		type: "run",
+		id: "metadata-run",
+		timeoutMs: 5_000,
+		code: "const win = await desktop.window('7'); await win.type('never-publish-this-input'); await win.press('Enter'); await win.drag([[0,0],[1,1]]);",
+		escape: { key: "test", acknowledged: 0 },
+		session: {
+			cwd: process.cwd(),
+			sessionId: "s",
+			display: "all",
+			captureMaxWidth: 1280,
+			captureMaxHeight: 896,
+			readOnly: false,
+			backgroundFallback: "takeover",
+			activity: { runId: "metadata", sessionId: "s" },
+		},
+	});
+	await h.settled.promise;
+	expect(h.messages.at(-1)).toMatchObject({ type: "result", ok: true });
+	const events = h.messages.filter(message => message.type === "activity").map(message => message.event);
+	for (const method of ["typeText", "keyChord", "drag"])
+		expect(
+			events.find(event => event.kind === "action" && event.method === method && event.phase === "completed"),
+		).toMatchObject({ mode: "takeover", focusReturn });
+	expect(
+		events.find(event => event.kind === "action" && event.method === "typeText" && event.phase === "completed"),
+	).toMatchObject({ unconfirmed: "target receipt unavailable" });
+	expect(JSON.stringify(events)).not.toContain("never-publish-this-input");
 });
 
 test("prelude bridge carries the outer Eval identity separately from its invocation id", async () => {

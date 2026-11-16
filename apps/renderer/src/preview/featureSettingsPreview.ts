@@ -1,5 +1,19 @@
 import type { FeatureSettingRow, PoolAccountOption } from "@omp-studio/studio-protocol";
 export const PREVIEW_FEATURE_SETTINGS: FeatureSettingRow[] = [
+  { key: "models.noJudge", value: false, source: "default" },
+  { key: "models.noSpotlight", value: true, source: "global" },
+  { key: "models.offline", value: false, source: "default" },
+  { key: "find.verifyModel", value: "", source: "default" },
+  { key: "find.hitThreshold", value: 0.5, source: "default" },
+  { key: "encourageEdits", value: true, source: "default" },
+  { key: "commit.enabled", value: true, source: "default" },
+  { key: "todo.midRunNudges", value: "capped", source: "default" },
+  { key: "ttsr.repeatMode", value: "once", source: "default" },
+  { key: "shellPath", value: "", source: "default" },
+  { key: "bash.allowedEnvVars", value: ["CI", "RUST_BACKTRACE"], source: "project" },
+  { key: "bash.patterns", value: [{ match: "cargo test*", approval: "allow", env: ["RUSTFLAGS"] }, { match: "git push*", approval: "prompt" }, { match: "rm -rf /*", approval: "deny" }], source: "project",
+    editableValues: { global: [{ match: "git push*", approval: "prompt" }, { match: "rm -rf /*", approval: "deny" }, { path: "/workspace/demo-tests", patterns: [{ match: "cargo test*", approval: "allow", env: ["RUSTFLAGS"] }] }], session: null } },
+
   { key: "magicKeywords.enabled", value: true, source: "default" },
   { key: "magicKeywords.chillax", value: true, source: "default" },
   {"key": "out.enabled", "value": true, "source": "default"},

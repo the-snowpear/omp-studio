@@ -1,8 +1,10 @@
 import { AgentBusyError } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { rasterizeSvg } from "@oh-my-pi/pi-natives";
+import type { AgentSession } from "../../session/agent-session";
 import type { CustomMessage } from "../../session/messages";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
+import { runtimeText } from "../locale";
 import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
 
 /**
@@ -17,6 +19,7 @@ export type SessionControlPrelude = Pick<
 >;
 
 export interface SessionControlSession {
+	readonly sessionId?: string;
 	readonly isStreaming: boolean;
 	readonly isCompacting: boolean;
 	readonly queuedMessageCount: number;
@@ -83,6 +86,97 @@ export interface SessionControlHooks {
 	beforeQueuedUserTurn?: () => Promise<void>;
 }
 
+interface SessionTransitionState {
+	generation: number;
+	pending?: { cancelled: boolean; committing: boolean };
+}
+const sessionTransitions = new WeakMap<object, SessionTransitionState>();
+function transitionState(session: object): SessionTransitionState {
+	let state = sessionTransitions.get(session);
+	if (!state) {
+		state = { generation: 0 };
+		sessionTransitions.set(session, state);
+	}
+	return state;
+}
+
+/** Capture before asynchronous input preparation; re-check immediately before native admission. */
+export function captureStudioSessionInput(session: { readonly sessionId?: string }): () => void {
+	const state = transitionState(session);
+	const generation = state.generation;
+	const owner = session.sessionId;
+	const check = () => {
+		if (state.pending || state.generation !== generation || session.sessionId !== owner)
+			throw new SessionControlError(
+				"COMMAND_BLOCKED",
+				runtimeText(
+					"准备输入时会话已改变；输入未发送。",
+					"The session changed while preparing input; the input was not sent",
+				),
+				true,
+			);
+	};
+	check();
+	return check;
+}
+
+export function cancelStudioSessionTransition(session: object): void {
+	const pending = sessionTransitions.get(session)?.pending;
+	if (pending && !pending.committing) pending.cancelled = true;
+}
+
+/**
+ * One native AgentSession, one lifecycle boundary. Withdrawing/holding native
+ * input groups preserves their original session identities; neither failure
+ * nor cancellation automatically replays them into a new conversation.
+ */
+export async function withStudioSessionTransition<T>(
+	session: AgentSession,
+	transition: () => Promise<T>,
+	beforeTransition?: () => Promise<void>,
+): Promise<T> {
+	const state = transitionState(session);
+	if (state.pending)
+		throw new SessionControlError(
+			"COMMAND_BLOCKED",
+			runtimeText("已有会话切换正在进行。", "A session transition is already running"),
+			true,
+		);
+	const pending = { cancelled: false, committing: false };
+	const owner = session.sessionId;
+	const barrier = crypto.randomUUID();
+	state.generation++;
+	state.pending = pending;
+	const current = () => {
+		if (pending.cancelled || session.isDisposed || session.sessionId !== owner)
+			throw new SessionControlError(
+				"COMMAND_BLOCKED",
+				runtimeText("会话切换已取消或已被新的操作替代。", "The session transition was cancelled or superseded"),
+				true,
+			);
+	};
+	try {
+		// abort cancels the old compaction barrier synchronously. Install ours
+		// before its first await so later native follow-ups cannot start a turn.
+		const aborted = session.abort({ reason: USER_INTERRUPT_LABEL, preserveQueuedInput: true });
+		session.beginStudioQueueBarrier(barrier, () => {
+			if (!pending.committing) pending.cancelled = true;
+		});
+		await aborted;
+		await session.waitForIdle();
+		current();
+		await beforeTransition?.();
+		current();
+		session.clearQueue({ forInterrupt: true, preserveGroups: true });
+		pending.committing = true;
+		return await transition();
+	} finally {
+		session.releaseStudioQueueBarrier(barrier, false);
+		state.pending = undefined;
+		state.generation++;
+	}
+}
+
 /** Pixel bound the upstream `:img` read selector applies to SVG rasterization. */
 const SVG_IMAGE_MAX_EDGE_PX = 2048;
 
@@ -136,6 +230,7 @@ export class SessionControlService {
 	 * turn would otherwise stop. Reuses AgentSession.followUp.
 	 */
 	async enqueue(text: string): Promise<{ queued: true; pendingMessages: number }> {
+		captureStudioSessionInput(this.#session);
 		this.#assertNotCompacting("queue a message");
 		this.#maybeStartTitleGeneration(text);
 		await this.#session.followUp(text);
@@ -148,6 +243,7 @@ export class SessionControlService {
 	 * foreground bash/python execution is in flight.
 	 */
 	async clearContext(): Promise<{ droppedCount: number }> {
+		captureStudioSessionInput(this.#session);
 		this.#assertNotCompacting("clear the session context");
 		if (this.#session.isStreaming) {
 			throw new SessionControlError("BUSY_STREAMING", "Cannot clear context while a response is streaming");
@@ -161,6 +257,7 @@ export class SessionControlService {
 
 	/** WP-023 session.drop: execute only after Runtime-side InteractionPort approval. */
 	async drop(approved: boolean): Promise<{ dropped: boolean; reason?: "cancelled" | "nothing_to_drop" }> {
+		captureStudioSessionInput(this.#session);
 		this.#assertNotCompacting("drop the session");
 		if (this.#session.isStreaming) {
 			throw new SessionControlError("BUSY_STREAMING", "Cannot drop a session while a response is streaming");
@@ -176,6 +273,7 @@ export class SessionControlService {
 	 * `nothing_to_retry` is an explicit, non-error result.
 	 */
 	async retry(): Promise<{ retried: boolean; reason?: "nothing_to_retry" }> {
+		captureStudioSessionInput(this.#session);
 		this.#assertNotCompacting("retry the last failed turn");
 		if (this.#session.isStreaming) {
 			throw new SessionControlError("BUSY_STREAMING", "Cannot retry while a response is streaming");
@@ -196,6 +294,7 @@ export class SessionControlService {
 	 * stale surface from turning a finished conversation into a fresh model call.
 	 */
 	async continueTurn(input: { readonly interrupted: boolean }): Promise<ContinueTurnOutcome> {
+		const checkOwner = captureStudioSessionInput(this.#session);
 		this.#assertNotCompacting("continue the interrupted turn");
 		if (this.#session.isStreaming) {
 			throw new SessionControlError("BUSY_STREAMING", "Cannot continue while a response is streaming");
@@ -204,6 +303,7 @@ export class SessionControlService {
 			return { started: true, mode: "restored" };
 		}
 		if (!input.interrupted) return { started: false, mode: "none" };
+		checkOwner();
 		const started = await this.#session.prompt(manualContinuePrompt, { synthetic: true, userInitiated: true });
 		return started ? { started: true, mode: "continue" } : { started: false, mode: "none" };
 	}
@@ -221,6 +321,7 @@ export class SessionControlService {
 		images?: readonly unknown[],
 		preludes?: readonly CustomMessage[],
 	): Promise<{ started: boolean }> {
+		const checkOwner = captureStudioSessionInput(this.#session);
 		this.#assertNotCompacting("send a prompt");
 		if (this.#session.isStreaming) {
 			await this.followUp(text, images, preludes);
@@ -228,13 +329,16 @@ export class SessionControlService {
 		}
 		this.#maybeStartTitleGeneration(text);
 		try {
+			const preparedImages = await this.#prepareImages(images);
+			checkOwner();
 			const started = await this.#session.prompt(text, {
-				images: await this.#prepareImages(images),
+				images: preparedImages,
 				...(preludes !== undefined && preludes.length > 0 ? { prependMessages: [...preludes] } : {}),
 			});
 			return { started };
 		} catch (error) {
 			if (error instanceof AgentBusyError) {
+				checkOwner();
 				await this.followUp(text, images, preludes);
 				return { started: false };
 			}
@@ -248,13 +352,16 @@ export class SessionControlService {
 		images?: readonly unknown[],
 		preludes?: readonly SessionControlPrelude[],
 	): Promise<{ queued: true; pendingMessages: number }> {
+		const checkOwner = captureStudioSessionInput(this.#session);
 		this.#assertNotCompacting("steer the session");
 		this.#maybeStartTitleGeneration(text);
 		try {
 			await this.#beforeQueuedUserTurn?.();
+			const preparedImages = await this.#prepareImages(images);
+			checkOwner();
 			await this.#session.steer(
 				text,
-				await this.#prepareImages(images),
+				preparedImages,
 				preludes?.length
 					? {
 							prependMessages: preludes.map(prelude => ({
@@ -277,13 +384,16 @@ export class SessionControlService {
 		images?: readonly unknown[],
 		preludes?: readonly SessionControlPrelude[],
 	): Promise<{ queued: true; pendingMessages: number }> {
+		const checkOwner = captureStudioSessionInput(this.#session);
 		this.#assertNotCompacting("queue a follow-up");
 		this.#maybeStartTitleGeneration(text);
 		try {
 			if (!this.#session.isStreaming) await this.#beforeQueuedUserTurn?.();
+			const preparedImages = await this.#prepareImages(images);
+			checkOwner();
 			await this.#session.followUp(
 				text,
-				await this.#prepareImages(images),
+				preparedImages,
 				preludes?.length
 					? {
 							prependMessages: preludes.map(prelude => ({
@@ -305,6 +415,7 @@ export class SessionControlService {
 	 *  refused — the GUI cancel button and native Esc share the semantics:
 	 *  `session.abort` → `abortCompaction`, then waits for its cleanup barrier. */
 	async abort(): Promise<{ aborted: true }> {
+		cancelStudioSessionTransition(this.#session);
 		try {
 			await this.#session.abort({ reason: USER_INTERRUPT_LABEL, preserveQueuedInput: true });
 		} catch (error) {

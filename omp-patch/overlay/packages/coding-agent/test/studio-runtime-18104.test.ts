@@ -195,6 +195,8 @@ test("worktree removal preserves files changed after review and startup policy f
 		const cwd = temp.join("repo");
 		await fs.mkdir(cwd);
 		git(cwd, "init", "-q", "-b", "main");
+		// CLI Git and the native checkout must agree regardless of machine-wide CRLF defaults.
+		git(cwd, "config", "core.autocrlf", "false");
 		await fs.writeFile(path.join(cwd, "source.txt"), "source\n");
 		git(cwd, "add", ".");
 		git(cwd, "commit", "-qm", "initial");

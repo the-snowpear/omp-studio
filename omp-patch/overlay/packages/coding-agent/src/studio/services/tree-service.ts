@@ -10,6 +10,7 @@ import type { StudioInteractionPort } from "./interaction-port";
 import { presentHtmlForm } from "./form-presentation";
 import { runtimeText } from "../locale";
 import { askTimeoutMs } from "../../modes/settings";
+import { withStudioSessionTransition } from "./session-control-service";
 
 const EDITOR_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
@@ -216,19 +217,28 @@ export class StudioTreeService {
 		};
 	}
 
-	async branch(_commandId: string, input: { targetId: string }): Promise<unknown> {
-		if (this.session.isStreaming) throw new StudioTreeError("BUSY_STREAMING", "Runtime is streaming");
+	async branch(
+		_commandId: string,
+		input: { targetId: string },
+		beforeTransition?: () => Promise<void>,
+	): Promise<unknown> {
 		if (this.session.isCompacting) throw new StudioTreeError("BUSY_COMPACTING", "Runtime is compacting");
 		this.cancelReanswer();
-		const mentions = [...(this.session.modelMentions ?? [])];
-		const result = await this.session.branch(input.targetId);
-		const editorImages = editorImagesFrom(result.selectedImages);
-		return {
-			cancelled: result.cancelled,
-			sessionId: this.session.sessionManager.getSessionId(),
-			editorText: this.#restoreModelTags(result.selectedText, mentions),
-			...(editorImages.length === 0 ? {} : { editorImages }),
-		};
+		return withStudioSessionTransition(
+			this.session,
+			async () => {
+				const mentions = [...(this.session.modelMentions ?? [])];
+				const result = await this.session.branch(input.targetId);
+				const editorImages = editorImagesFrom(result.selectedImages);
+				return {
+					cancelled: result.cancelled,
+					sessionId: this.session.sessionManager.getSessionId(),
+					editorText: this.#restoreModelTags(result.selectedText, mentions),
+					...(editorImages.length === 0 ? {} : { editorImages }),
+				};
+			},
+			beforeTransition,
+		);
 	}
 
 	#assertAskReanswerAvailable(targetId: string): void {

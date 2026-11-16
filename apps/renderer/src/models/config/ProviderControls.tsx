@@ -186,9 +186,19 @@ export function BedrockMessagesControl({value,onChange}:{value:""|"true"|"false"
 }
 
 export function ModelCaps({ model }: { model: ModelCatalogEntry }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const current = resolveModelPrice(model.cost, model.pricing);
   const rate = (value: number | undefined) => value === undefined ? "—" : Number(value.toFixed(6));
+  /* Native pricing status wins: only "free" may read as free; zero rates on an unknown price stay unknown. */
+  const pricingStatus = (model as { pricingStatus?: "fixed" | "free" | "included" | "variable" | "unknown" }).pricingStatus;
+  const statusChip = pricingStatus === "free" ? <span className="chip green xs">{zh ? "免费" : "Free"}</span>
+    : pricingStatus === "included" ? <span className="chip gray xs" data-tip={zh ? "包含在订阅或套餐内" : "Included in a plan or subscription"}>{zh ? "套餐内" : "Included"}</span>
+    : pricingStatus === "variable" ? <span className="chip gray xs" data-tip={zh ? "价格随路由或用量变化" : "Price varies by route or usage"}>{zh ? "浮动价" : "Variable"}</span>
+    : pricingStatus === "unknown" ? <span className="chip gray xs">{zh ? "价格未知" : "Price unknown"}</span>
+    : null;
+  const zeroRate = (current.cost?.input ?? 0) === 0 && (current.cost?.output ?? 0) === 0;
+  const showRate = (current.cost?.input !== undefined || current.cost?.output !== undefined) && !(pricingStatus && pricingStatus !== "fixed" && zeroRate);
   return (
     <span className="pm-meta">
       <span className="chip gray xs">{fmtK(model.contextWindow)} ctx</span>
@@ -197,9 +207,8 @@ export function ModelCaps({ model }: { model: ModelCatalogEntry }) {
       {model.image ? <span className="chip blue xs chip-icon" data-tip={t("modelConfig.tipImage")}><Icon name="image" extra="sm" /></span> : null}
       {model.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.tipThinking")}><Icon name="brain" extra="sm" /></span> : null}
       {model.tools ? <span className="chip gray xs chip-icon" data-tip={t("modelConfig.tipTools")}><Icon name="wrench" extra="sm" /></span> : null}
-      {current.cost?.input !== undefined || current.cost?.output !== undefined
-        ? <span className="chip gray xs">${rate(current.cost?.input)}/${rate(current.cost?.output)}</span>
-        : null}
+      {showRate ? <span className="chip gray xs">${rate(current.cost?.input)}/${rate(current.cost?.output)}</span> : null}
+      {statusChip}
       {current.period ? <span className="chip gray xs" data-tip={t("modelConfig.scheduledPrice")}>{current.period === "peak" ? "↑ " + t("modelConfig.peakPrice") : "↓ " + t("modelConfig.offPeakPrice")}</span> : null}
       {model.pricing?.longContext ? <span className="chip gray xs" data-tip={t("modelConfig.longContextPrice")}>{model.pricing.longContext.inputThresholdInclusive ? "≥" : ">"}{fmtK(model.pricing.longContext.inputThreshold)}</span> : null}
     </span>

@@ -70,6 +70,10 @@ export interface StudioInteractionPort {
 		title: string;
 		options: Array<{ id: string; label: string; description?: string }>;
 		multiple?: boolean;
+		initialIndex?: number;
+		selectionMarker?: "radio" | "checkbox";
+		checkedIndices?: readonly number[];
+		markableCount?: number;
 	}): Promise<string | string[] | undefined>;
 	input(input: {
 		commandId: string;
@@ -280,6 +284,10 @@ export class StudioInteractionGateway implements StudioInteractionPort {
 		title: string;
 		options: Array<{ id: string; label: string; description?: string }>;
 		multiple?: boolean;
+		initialIndex?: number;
+		selectionMarker?: "radio" | "checkbox";
+		checkedIndices?: readonly number[];
+		markableCount?: number;
 	}): Promise<string | string[] | undefined> {
 		return this.#requirePort().select(input);
 	}
@@ -392,6 +400,10 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 		title: string;
 		options: Array<{ id: string; label: string; description?: string }>;
 		multiple?: boolean;
+		initialIndex?: number;
+		selectionMarker?: "radio" | "checkbox";
+		checkedIndices?: readonly number[];
+		markableCount?: number;
 	}): Promise<string | string[] | undefined> {
 		const value = await this.#request({ kind: "select", ...input });
 		if (value === undefined || typeof value === "string") return value;
@@ -676,6 +688,10 @@ export class StudioScriptedInteractionPort implements StudioInteractionPort {
 		title: string;
 		options: Array<{ id: string; label: string; description?: string }>;
 		multiple?: boolean;
+		initialIndex?: number;
+		selectionMarker?: "radio" | "checkbox";
+		checkedIndices?: readonly number[];
+		markableCount?: number;
 	}): Promise<string | string[] | undefined> {
 		return Promise.resolve(this.responses.shift() as string | string[] | undefined);
 	}

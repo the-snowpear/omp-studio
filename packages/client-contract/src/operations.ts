@@ -445,7 +445,7 @@ export type PromptTextInput = {
 /** Public semantic command inputs exposed by the Runtime control surface. */
 export type EvaluationCommandInputMap = { [K in EvaluationOperation["kind"]]: Omit<Extract<EvaluationOperation, {kind:K}>, "kind"> };
 type UpgradeInputMap = { [K in UpgradeOperation["kind"]]: Omit<Extract<UpgradeOperation, { kind: K }>, "kind" | "fallbackCwd"> };
-type WorkbenchInputMap = { [K in WorkbenchOperation["kind"]]: Omit<Extract<WorkbenchOperation, { kind: K }>, "kind" | "inputTransfers" | "targetCwd"> };
+type WorkbenchInputMap = { [K in WorkbenchOperation["kind"]]: Omit<Extract<WorkbenchOperation, { kind: K }>, "kind" | "inputTransfers" | "targetCwd" | "executionCwd"> };
 export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, UpgradeInputMap, WorkbenchInputMap, ModelServicesCommandInputMap {
   "core.prompt": PromptTextInput;
   "core.steer": PromptTextInput;
@@ -663,7 +663,7 @@ interface CoreCommandInputMap {
   "models.provider.test": ModelProviderTestInput;
   /** One-shot discovery HTTP probe. Does not write `models.db`. */
   "models.provider.probe": ModelProviderProbeInput;
-  /** Force `omp models refresh` so runtime discovery rewrites `models.db`. */
+  /** Refresh the current native registry; without a Runtime, refresh the CLI cache for a later session. */
   "models.discovery.refresh": EmptyInput;
   "models.catalog.refresh": EmptyInput;
   /** Persist the quick model-switch rotation order into config.yml. */
@@ -794,7 +794,8 @@ interface CoreCommandResultMap {
   "session.drop": OperatorStateSnapshot;
   "session.archive": ConfigWriteResult;
   "session.unarchive": ConfigWriteResult;
-  "session.delete": ConfigWriteResult;
+  /** `cleanup: "partial"` means some native history/stats or artifact residue may remain; `message` says which. */
+  "session.delete": ConfigWriteResult & { readonly cleanup?: "complete" | "partial" };
   "interaction.respond": OperatorStateSnapshot;
   "permissions.mode.set": {
     readonly mode: ApprovalMode;

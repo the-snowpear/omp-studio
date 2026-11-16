@@ -1,6 +1,9 @@
 import type { SessionCompactionState } from "./session-compaction.js";
 /** Additive settings surface for Runtime 18.10; the published settings payload stays unchanged. */
 export const FEATURE_SETTING_KEYS = [
+  "models.noJudge", "models.noSpotlight", "models.offline",
+  "find.verifyModel", "find.hitThreshold", "encourageEdits", "commit.enabled", "todo.midRunNudges",
+  "shellPath", "bash.allowedEnvVars", "bash.patterns", "ttsr.repeatMode",
   "magicKeywords.enabled", "magicKeywords.chillax",
   "out.enabled",
   "btw.inject",
@@ -48,6 +51,8 @@ export interface FeatureSettingRow {
   key: FeatureSettingKey;
   value: FeatureSettingValue;
   source: "env" | "runtime" | "overlay" | "project" | "global" | "default";
+  /** Unmerged authored values for editors of layered rule lists; null means no session override. */
+  editableValues?: { global: FeatureSettingValue; session: FeatureSettingValue };
 }
 export interface PoolAccountOption { provider: string; identityKey: string; label: string }
 export type ProviderAccountPools = Record<string, string[]>;

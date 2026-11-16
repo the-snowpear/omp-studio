@@ -1,5 +1,4 @@
 import { createModelCatalogService, createModelOriginStore } from "./model-adaptation.js";
-import { BUILTIN_MODEL_CATALOG } from "./model-catalog.generated.js";
 import { hostText } from "./locale.js";
 import { modelParameterValues, parseModelThinkingConfig, providerModelYamlNode, providerOverrideYamlNode } from "@omp-studio/client-contract";
 import type { ModelParameterValues, ModelParameterSources } from "@omp-studio/client-contract";
@@ -55,6 +54,7 @@ import { parse as parseYaml, stringify as stringifyYaml, parseDocument } from "y
 import { parseModelsYml, redactModelsYmlText, restoreRedactedApiKeys, serializeModelsYml, type YamlValue } from "./models-yml.js";
 import { getAgentDir, getProjectConfigDir } from "./omp-discovery/paths.js";
 import type { HostModelsService } from "./services.js";
+import type { ModelAvailablePage } from "@omp-studio/studio-protocol";
 import { toClientError } from "./services.js";
 
 const execFileAsync = promisify(execFile);
@@ -229,6 +229,7 @@ const presetGroups = (): ReadonlyArray<ModelPresetGroup> => [
       { id: "openai-codex", name: "OpenAI Codex", desc: hostText("Codex 订阅额度（ChatGPT 账号）", "Codex subscription quota (ChatGPT account)"), api: "openai-codex-responses", auth: ["oauth"], oauth: true, endpoint: "https://api.openai.com/v1" },
       { id: "google-gemini", name: "Google Gemini", desc: hostText("Gemini 系列模型官方 API", "Official Gemini model API"), api: "google-generative-ai", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://generativelanguage.googleapis.com/v1beta" },
       { id: "gemini-cli", name: "Google Gemini CLI", desc: hostText("Gemini Code Assist 订阅", "Gemini Code Assist subscription"), api: "google-gemini-cli", auth: ["oauth"], oauth: true },
+      { id: "antigravity-cli", name: "Antigravity CLI", desc: hostText("Runtime 托管的 ACP 服务，不是 HTTP API 配置", "Runtime-managed ACP service, not an HTTP API configuration"), api: "antigravity-acp", auth: ["oauth"], oauth: true, configurationMode: "managed" },
       { id: "xai", name: "xAI", desc: hostText("Grok 系列模型", "Grok model family"), api: "openai-responses", auth: ["api-key"], endpoint: "https://api.x.ai/v1" },
       { id: "groq", name: "Groq", desc: hostText("高速推理（Llama / Mixtral）", "High-speed inference (Llama / Mixtral)"), api: "openai-completions", auth: ["api-key"], endpoint: "https://api.groq.com/openai/v1" },
       { id: "deepseek", name: "DeepSeek", desc: hostText("DeepSeek V / R 系列", "DeepSeek V / R series"), api: "openai-completions", auth: ["api-key"], endpoint: "https://api.deepseek.com/v1" },
@@ -256,6 +257,8 @@ const presetGroups = (): ReadonlyArray<ModelPresetGroup> => [
   {
     group: hostText("更多 Provider", "More Providers"),
     items: [
+      { id: "google", name: "Google Decisions", desc: hostText("原生 Judge 决策模型", "Native Judge decision models"), api: "google-decisions", auth: ["api-key", "env"], endpoint: "https://generativelanguage.googleapis.com/v1beta" },
+      { id: "nace", name: "Nace", desc: hostText("Drex 原生 Judge 模型", "Drex native Judge models"), api: "nace-systemone", auth: ["api-key", "env"], endpoint: "https://console.nace.ai" },
       { id: "qwen", name: "Qwen", desc: hostText("通义千问官方 API", "Official Qwen (Tongyi Qianwen) API"), api: "openai-completions", auth: ["api-key"], endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
       { id: "zhipu", name: hostText("Zhipu / 智谱", "Zhipu"), desc: hostText("GLM 系列模型", "GLM series models"), api: "openai-completions", auth: ["api-key"], endpoint: "https://open.bigmodel.cn/api/paas/v4" },
       { id: "fireworks", name: "Fireworks", desc: hostText("Fireworks AI 托管推理", "Fireworks AI hosted inference"), api: "openai-completions", auth: ["api-key"], endpoint: "https://api.fireworks.ai/inference/v1" },
@@ -306,8 +309,9 @@ export function authProbeUrl(base: string, api: string): string | undefined {
   if (api === "anthropic-messages") {
     return trimmed.endsWith("/v1") ? `${trimmed}/models` : `${trimmed}/v1/models`;
   }
-  if (api === "bedrock-converse-stream" || api === "google-gemini-cli") return undefined;
-  return `${trimmed}/models`;
+  if (["openai-completions", "openai-responses", "openai-codex-responses", "azure-openai-responses", "google-generative-ai", "google-vertex"].includes(api)) return `${trimmed}/models`;
+  // Judge/managed transports and unknown APIs do not inherit an OpenAI /models endpoint.
+  return undefined;
 }
 
 /** Classify a probe network error into a user-facing Chinese detail. */
@@ -405,7 +409,7 @@ export function modelListRequest(
     if (api === "anthropic-messages") {
       headers["x-api-key"] = apiKey;
       headers["anthropic-version"] = ANTHROPIC_VERSION;
-    } else if (api === "google-generative-ai" || api === "google-vertex") {
+    } else if (api === "google-generative-ai" || api === "google-vertex" || api === "google-decisions") {
       headers["x-goog-api-key"] = apiKey;
     } else {
       headers.Authorization = `Bearer ${apiKey}`;
@@ -656,6 +660,7 @@ function emptyModel(reason: string, ompAvailable: boolean): ModelConfigReadModel
     })),
     cycleOrder: ["smol", "default", "slow"],
     availableModels: [],
+    availability: { status: "unverified", source: "none", reason },
     loginProviders: [],
     generatedModelsYml: "providers: {}\n",
     generatedConfigYml: "modelRoles: {}\n",
@@ -797,7 +802,7 @@ export function executionMetadata(value: unknown): ModelExecutionMetadata {
   return { ...(tiers === undefined ? {} : { serviceTiers: tiers }), ...(promptCache === undefined ? {} : { promptCache }), ...(promptCacheConfig === undefined ? {} : { promptCacheConfig }), ...(Object.keys(compatibility).length ? { compatibility } : {}) };
 }
 
-/** Map one OMP `models.db` cache model into the Studio available-model record. */
+/** Project imported catalog metadata for display only. This helper does not establish availability. */
 export function availableFromCacheModel(
   model: Record<string, unknown>,
   providerFallback: string,
@@ -839,26 +844,13 @@ export function availableFromCacheModel(
 }
 
 export function catalogEntryFromAvailable(model: AvailableModelRecord): ModelCatalogEntry {
+  const { provider: _provider, source, ...metadata } = model;
   return {
-    ...executionMetadata(model),
-    id: model.id,
-    name: model.name,
-    selector: model.selector,
+    ...metadata,
     image: model.image === true,
-    reasoning: model.reasoning,
-    ...(model.kind === undefined ? {} : { kind: model.kind }),
-    ...(model.webSearch === undefined ? {} : { webSearch: model.webSearch }),
     tools: model.tools !== false,
     status: "available",
-    source: "catalog",
-    ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
-    ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
-    ...(model.cost ? { cost: model.cost } : {}),
-    ...(model.pricing ? { pricing: model.pricing } : {}),
-    ...(model.maxContextWindow === undefined ? {} : { maxContextWindow: model.maxContextWindow }),
-    ...(model.api === undefined ? {} : { api: model.api }),
-    ...(model.thinking && model.thinking.length > 0 ? { thinking: model.thinking } : {}),
-    ...(model.thinkingConfig === undefined ? {} : { thinkingConfig: model.thinkingConfig }),
+    source: source === "registry" ? "discovery" : "catalog",
   };
 }
 
@@ -986,7 +978,7 @@ function yamlModels(id: string, models: Array<Record<string, YamlValue>> | undef
       ...(typeof model.webSearch === "string" ? { webSearch: model.webSearch } : {}),
       tools: model.supportsTools !== false,
       ...(cost ? { cost } : {}),
-      status: "available" as const,
+      status: "unavailable" as const,
       source: "custom" as const,
       ...(extras.api === undefined ? {} : { api: extras.api }),
       ...(extras.baseUrl === undefined ? {} : { baseUrl: extras.baseUrl }),
@@ -1128,8 +1120,8 @@ function providerFromYaml(
   const catalogModels = catalogModelsFromAvailable(id, available, customIds, modelOverrides);
   const models = [...catalogModels, ...customModels];
   const hasAvailable = available.some((model) => model.selector.startsWith(`${id}/`));
-  let status: ModelProviderStatus = "available";
-  let statusDetail = hostText("已从 models.yml 读取", "Read from models.yml");
+  let status: ModelProviderStatus = "offline";
+  let statusDetail = hostText("已读取配置；当前 Runtime 可用性未验证", "Configuration loaded; current Runtime availability is unverified");
   if (disabled.has(id)) {
     status = "disabled";
     statusDetail = hostText("已在 disabledProviders 中禁用", "Disabled in disabledProviders");
@@ -1158,6 +1150,7 @@ function providerFromYaml(
     status,
     statusDetail,
     api: mapApi(yaml.api ?? preset?.api),
+    configurationMode: id === "antigravity-cli" || yaml.api === "antigravity-acp" ? "managed" : "http",
     ...(endpointUrl === undefined ? {} : { endpointUrl }),
     local: Boolean(preset?.local ?? raw.local === true),
     enabled: !disabled.has(id),
@@ -1183,10 +1176,6 @@ function providerFromYaml(
   };
 }
 
-function providerIsOperatorConfigured(id: string, authenticated: Set<string>): boolean {
-  return authenticated.has(id) || envHasSecret(id);
-}
-
 function providersFromAvailable(
   available: AvailableModelRecord[],
   existing: Set<string>,
@@ -1196,10 +1185,7 @@ function providersFromAvailable(
   const byProvider = new Map<string, AvailableModelRecord[]>();
   for (const model of available) {
     if (existing.has(model.provider)) continue;
-    // Bundled static catalogs (zenmux) land in models.db without models.yml.
-    // Builtin OAuth providers (opencode-go) also live in cache, but only after
-    // the operator logs in — those must still appear.
-    if (!providerIsOperatorConfigured(model.provider, authenticated)) continue;
+    // The current Runtime already applied auth, keyless, disabled-provider and namespace policy.
     const list = byProvider.get(model.provider) ?? [];
     list.push(model);
     byProvider.set(model.provider, list);
@@ -1214,8 +1200,9 @@ function providersFromAvailable(
       source: (preset ? "builtin" : "runtime") as ModelProviderRecord["source"],
       status: disabled.has(id) ? "disabled" : "available",
       statusDetail: disabled.has(id) ? hostText("已禁用", "Disabled") : hostText("OMP 已解析到可用模型", "Available models resolved by OMP"),
-      api: mapApi(preset?.api),
-      ...(preset?.endpoint === undefined ? {} : { endpointUrl: preset.endpoint }),
+      api: models[0]?.api ?? mapApi(preset?.api),
+      configurationMode: models[0]?.api === "antigravity-acp" ? "managed" : "http",
+      ...(models[0]?.api === "antigravity-acp" || preset?.endpoint === undefined ? {} : { endpointUrl: preset.endpoint }),
       local: Boolean(preset?.local),
       enabled: !disabled.has(id),
       auth: {
@@ -1227,6 +1214,44 @@ function providersFromAvailable(
       models: models.map((model) => catalogEntryFromAvailable(model)),
     };
   });
+}
+
+/** Combine configuration with one current, complete Runtime generation. Recommendations never authorize selectors. */
+export function withRuntimeModels(config: ModelConfigReadModel, snapshot?: Pick<ModelAvailablePage, "sessionId" | "version" | "total" | "truncated" | "models">, reason?: string): ModelConfigReadModel {
+  const available = (snapshot?.models ?? []) as ReadonlyArray<AvailableModelRecord>;
+  const bySelector = new Map(available.map(model => [model.selector, model]));
+  const providers: ModelProviderRecord[] = config.providers.map(provider => {
+    const selected = available.filter(model => model.provider === provider.id);
+    const known = new Set(provider.models.map(model => model.selector));
+    const models: ModelCatalogEntry[] = provider.models.map(model => {
+      const native = bySelector.get(model.selector);
+      return native
+        ? { ...model, ...native, image: native.image === true, tools: native.tools !== false, source: model.source, status: "available" as const }
+        : { ...model, status: provider.enabled ? "unavailable" as const : "disabled" as const };
+    });
+    models.push(...selected.filter(model => !known.has(model.selector)).map(model => catalogEntryFromAvailable(model)));
+    const api = selected[0]?.api ?? provider.api;
+    return {
+      ...provider, api, models,
+      configurationMode: api === "antigravity-acp" || provider.id === "antigravity-cli" ? "managed" as const : "http" as const,
+      status: selected.length ? "available" as const : provider.status === "available" ? "offline" as const : provider.status,
+      statusDetail: selected.length
+        ? hostText("当前 Runtime 已解析到可用模型", "Available models resolved by the current Runtime")
+        : snapshot ? hostText("当前 Runtime 未返回该供应商的可用模型", "The current Runtime returned no available models for this provider")
+          : hostText("已读取配置；当前 Runtime 可用性未验证", "Configuration loaded; current Runtime availability is unverified"),
+    };
+  });
+  providers.push(...providersFromAvailable([...available], new Set(providers.map(provider => provider.id)), new Set(), new Set(config.loginProviders.filter(provider => provider.authenticated).map(provider => provider.id))));
+  const roles = config.roles.map(({ issue: _issue, ...role }) => {
+    if (!snapshot || snapshot.truncated || !role.primary || bySelector.has(role.primary)) return role;
+    return { ...role, issue: { kind: "model-missing" as const, detail: hostText(`${role.primary} 当前不在可用模型列表中`, `${role.primary} is not currently in the available models list`) } };
+  });
+  return {
+    ...config, providers, roles, availableModels: available,
+    availability: snapshot
+      ? { status: "verified", source: "runtime", sessionId: snapshot.sessionId, version: snapshot.version, total: snapshot.total, truncated: snapshot.truncated }
+      : { status: "unverified", source: "none", reason: reason ?? hostText("尚未从当前 Runtime 验证模型可用性", "Model availability has not been verified by the current Runtime") },
+  };
 }
 
 export function toYamlProvider(input: ModelProviderUpsertInput, previous: Record<string, YamlValue> | undefined): Record<string, YamlValue> {
@@ -1679,50 +1704,6 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     };
   }
 
-  async function getAvailable(modelsDbPath: string): Promise<AvailableModelRecord[]> {
-    // 直接读 OMP 本机 models.db（model_cache 权威行）拿原生供应商/模型，
-    // 不 spawn omp CLI —— Electron 主进程下子进程不可靠，且多了 PATH/锁依赖。
-    let DatabaseSync: typeof import("node:sqlite").DatabaseSync | undefined;
-    try {
-      ({ DatabaseSync } = await import("node:sqlite"));
-    } catch {
-      return [];
-    }
-    if (DatabaseSync === undefined) return [];
-    let db: InstanceType<typeof import("node:sqlite").DatabaseSync> | undefined;
-    try {
-      db = new DatabaseSync(`file:${modelsDbPath}?mode=ro`, { readOnly: true });
-      const rows = db
-        .prepare("SELECT provider_id, models FROM model_cache WHERE authoritative = 1")
-        .all() as unknown as Array<{ provider_id: string; models: string }>;
-      const out: AvailableModelRecord[] = [];
-      for (const row of rows) {
-        let models: unknown;
-        try {
-          models = JSON.parse(row.models);
-        } catch {
-          continue;
-        }
-        if (!Array.isArray(models)) continue;
-        const provider = row.provider_id.split(":")[0] ?? "";
-        if (!provider) continue;
-        for (const model of models as Array<Record<string, unknown>>) {
-          const record = availableFromCacheModel(model, provider);
-          if (record) out.push(record);
-        }
-      }
-      return out;
-    } catch {
-      return [];
-    } finally {
-      try {
-        db?.close();
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
   async function readYamlFile(path: string): Promise<{ text: string; hash: string; root: Record<string, YamlValue> }> {
     let text = "";
     try {
@@ -1800,6 +1781,14 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
   }
 
   async function writeModelsFile(modelsPath: string, root: Record<string, YamlValue>, expectedHash?: string): Promise<string> {
+    for (const [id, value] of Object.entries(asRecord(root.providers) ?? {})) {
+      const provider = asRecord(value) ?? {};
+      const models = Array.isArray(provider.models) ? provider.models : [];
+      const overrides = Object.values(asRecord(provider.modelOverrides) ?? {});
+      if (id === "antigravity-cli" || provider.api === "antigravity-acp" || [...models, ...overrides].some(model => asRecord(model)?.api === "antigravity-acp")) {
+        throw { code: "INVALID_ARGUMENT", message: hostText("Antigravity ACP 由 Runtime 托管，不能保存为 models.yml HTTP 供应商。", "Antigravity ACP is managed by Runtime and cannot be saved as a models.yml HTTP provider.") };
+      }
+    }
     let previous = "";
     try {
       previous = await readFile(modelsPath, "utf8");
@@ -2180,46 +2169,11 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       }
       const tags = await readModelTags(paths.configPath, configRoot);
       const disabled = new Set(await readStringList(paths.configPath, "disabledProviders", configRoot));
-      const [auth, available] = await Promise.all([
-        readAuthData(paths.agentDir),
-        getAvailable(join(paths.agentDir, "models.db")),
-      ]);
-      const { authenticated, authKinds } = auth;
-      // Credential-scoped cache namespaces are resolved by the live native registry.
-      // A Host disk snapshot cannot authorize another workspace's ids/prices with this key.
-      const credentialScoped = new Set(BUILTIN_MODEL_CATALOG.nativeProviders?.filter(provider => provider.credentialScoped).map(provider => provider.id));
-      const publicCache = available.filter(model => !credentialScoped.has(model.provider));
+      const { authenticated, authKinds } = await readAuthData(paths.agentDir);
       const providersMap = asRecord(file.root.providers) ?? {};
-      const fromFile = Object.keys(providersMap).map((id) => providerFromYaml(id, asRecord(providersMap[id]) ?? {}, publicCache, disabled, authenticated));
-      const existing = new Set(fromFile.map((provider) => provider.id));
-      // models.db also holds bundled static catalogs the operator never opted into
-      // (zenmux). Keep yaml providers, plus cache providers with auth/env.
-      const providers = [...fromFile, ...providersFromAvailable(publicCache, existing, disabled, authenticated)];
-      const cacheBySelector = new Map<string, AvailableModelRecord>();
-      for (const model of publicCache) {
-        if (model.thinking && model.thinking.length > 0 && !cacheBySelector.has(model.selector)) cacheBySelector.set(model.selector, model);
-      }
-      const yamlAvailable: AvailableModelRecord[] = fromFile.flatMap((provider) =>
-        provider.models.map((model) => {
-          const record = availableFromCatalogEntry(provider.id, model);
-          if (record.thinking && record.thinking.length > 0) return record;
-          const cached = cacheBySelector.get(record.selector);
-          return cached?.thinking?.length ? { ...record, thinking: cached.thinking } : record;
-        }),
-      );
-      // Disabled providers stay in `providers` (cards keep the off state) but their
-      // models must not be selectable — mirrors runtime disabledProviders filtering
-      // in model-hub / executor.
-      const selectableProviders = new Set(
-        providers.filter((provider) => !disabled.has(provider.id)).map((provider) => provider.id),
-      );
-      const availableBySelector = new Map<string, AvailableModelRecord>();
-      for (const model of [...yamlAvailable, ...publicCache]) {
-        if (!selectableProviders.has(model.provider)) continue;
-        availableBySelector.set(model.selector, model);
-      }
-      const mergedAvailable = [...availableBySelector.values()];
-      const availableSet = new Set(mergedAvailable.map((model) => model.selector));
+      // This is configuration, not a second model registry. Only the facade's
+      // live Runtime snapshot may populate availableModels or diagnose a role.
+      const providers = Object.keys(providersMap).map((id) => providerFromYaml(id, asRecord(providersMap[id]) ?? {}, [], disabled, authenticated));
       const roleDefs = [
         ...builtinRoles().map((role) => ({ ...role, builtin: true })),
         ...Object.entries({ ...Object.fromEntries(Object.keys(modelRoles).map(id => [id, { name: id, desc: hostText("自定义角色", "Custom role") }])), ...tags })
@@ -2235,15 +2189,11 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       const roles: ModelRoleRecord[] = roleDefs.map((role) => {
         const raw = modelRoles[role.id] ?? "";
         const parsed = raw ? parseThinking(raw) : { primary: "" };
-        const issue = parsed.primary && !availableSet.has(parsed.primary) && parsed.primary.length > 0
-          ? { kind: "model-missing" as const, detail: hostText(`${parsed.primary} 当前不在可用模型列表中`, `${parsed.primary} is not currently in the available models list`) }
-          : undefined;
         return {
           ...role,
           primary: parsed.primary,
           ...(parsed.thinking === undefined ? {} : { thinking: parsed.thinking }),
           scope: projectKeys.has(role.id) ? "project" : "global",
-          ...(issue ? { issue } : {}),
         };
       });
       const savedSources = await origins.reader();
@@ -2270,7 +2220,8 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         catalog: await catalog.status(),
         roles,
         cycleOrder: cycleOrder.length > 0 ? cycleOrder : ["smol", "default", "slow"],
-        availableModels: mergedAvailable,
+        availableModels: [],
+        availability: { status: "unverified", source: "none", reason: hostText("尚未从当前 Runtime 验证模型可用性", "Model availability has not been verified by the current Runtime") },
         loginProviders: (() => {
           const fromPresets = presetGroups().flatMap((group) => group.items)
             .filter((item) => item.oauth)
@@ -2501,11 +2452,14 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
             // Fall through to whatever was provided in the request.
           }
         }
-        if (!endpointUrl) {
-          endpointUrl = presetGroups().flatMap((group) => group.items).find((item) => item.id === input.providerId)?.endpoint;
-        }
+        const preset = presetGroups().flatMap((group) => group.items).find((item) => item.id === input.providerId);
+        if (!endpointUrl) endpointUrl = preset?.endpoint;
+        if (!api) api = preset?.api;
       }
 
+      if (input.providerId === "antigravity-cli" || api === "antigravity-acp") {
+        return { ok: false, latencyMs: Date.now() - started, detail: hostText("托管 ACP 服务不支持 HTTP 探测，请读取 Runtime 就绪状态。", "Managed ACP services do not support HTTP probes; read Runtime readiness instead.") };
+      }
       if (!endpointUrl) {
         return { ok: false, latencyMs: Date.now() - started, detail: hostText("未配置 Base URL。", "Base URL is not configured.") };
       }
@@ -2672,6 +2626,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       if (!endpointUrl) endpointUrl = preset?.endpoint;
       if (!api) api = preset?.api;
       if (!discoveryType) discoveryType = preset?.discovery;
+      if (input.providerId === "antigravity-cli" || api === "antigravity-acp") {
+        return fail(hostText("托管 ACP 服务不支持 HTTP 模型探测，请读取 Runtime 就绪状态。", "Managed ACP services do not support HTTP model discovery; read Runtime readiness instead."));
+      }
       if (!endpointUrl) return fail(hostText("未配置 Base URL。", "Base URL is not configured."));
 
       // With a discovery type the runtime protocol dictates the endpoint

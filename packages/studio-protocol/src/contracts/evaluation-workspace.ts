@@ -1,4 +1,5 @@
 import type { StudioPendingInteraction } from "./interactions.js";
+import type { BenchmarkAccountSelection } from "./benchmarks.js";
 
 export type EvaluationKind = "benchmark" | "instruction" | "judgment" | "ratchet";
 export type EvaluationState =
@@ -13,6 +14,7 @@ export type EvaluationState =
   | "interrupted";
 export interface PerformanceEvaluationSpec {
   kind: "benchmark";
+  account?: BenchmarkAccountSelection;
   models: string[];
   profile: "chat" | "prefill" | "generation" | "mix" | "cache" | "detailed";
   runs?: number;
