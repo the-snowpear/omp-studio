@@ -10,13 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - 接入 OMP 18.20.2 的原生选择性提交、输入历史、模型授权目录、Antigravity 就绪状态、Provider 政策与 Benchmark 账户选择，提供现有页面内的真实／预览入口；接口约定见[适配交接](docs/migrations/omp-18.20.2-frontend-handoff.md)。
+- SSH 工作区终端支持附加 tmux ≥ 3.2：会话选择、窗口标签、布局分屏与拖动调整、隐藏 / 结束选择、断线重新附加和全屏程序恢复；退出 Studio 只分离连接，保留远端进程。详见 [tmux 使用说明](docs/tmux.md)。
+- 新增 Linux x64（AVX2）桌面客户端及 AppImage / deb 安装包，随下一版正式 Release 发布。以 Ubuntu 24.04 / glibc 2.39 为构建基线，内置签名 Runtime 和原生终端，无需另装 Node、Bun 或 Rust。应用菜单启动可发现用户 Shell 工具；保留 Chromium 沙箱，不依赖托盘隐藏工作台。桌面更新提供对应安装包下载，Runtime 继续签名在线更新。增加原生 Linux 打包、包审计、X11 / Wayland 验收与完整发布资产链路；详见 [Linux 客户端说明](docs/linux.md)（[#5](https://github.com/the-snowpear/omp-studio/issues/5)、[#22](https://github.com/the-snowpear/omp-studio/pull/22)）。
 - 新增全机文件浏览器：按窗口宽度切换树、详细列表与分栏，提供磁盘容量、快速访问、固定文件夹、筛选、隐藏文件和键盘导航；本机与 SSH 分别使用所属 Host 的真实文件服务。
 - 项目外文件可在内置文件窗口查看、编辑和保存，沿用版本冲突与关闭确认；项目内文件与 Explorer 共用缓冲区。支持新建文件夹、重命名、确认后移到本机回收站、打开方式、加入对话、设为项目和 Explorer 双向定位，详见[文件浏览器说明](docs/file-browser.md)。
 
 ### Changed
 
 - 后端固定到 **OMP 18.20.2**，Windows Antigravity CLI 使用同源 Runtime MCP relay，无需手工安装 nc；模型可用性以当前 Runtime 为准，不再从 Host 缓存猜测。迁移与验证范围见 [18.20.2 迁移报告](docs/migrations/omp-18.20.2.md)。
-- 底层引擎升级到 **OMP 18.19.0（`18.19.0-studio.10`）**，涵盖 18.18.1–18.19.0 共十次上游发布；逐版变化与 Studio 落点见 [18.19.0 迁移报告](docs/migrations/omp-18.19.0.md)。
+- 底层引擎升级到 **OMP 18.19.0（`18.19.0-studio.12`）**，涵盖 18.18.1–18.19.0 共十次上游发布；逐版变化与 Studio 落点见 [18.19.0 迁移报告](docs/migrations/omp-18.19.0.md)。
 - Agent 提问改为原生 HTML 表单：命名字段、题组、图示、「其他」与选项附注；折叠、放大和翻页不丢草稿，闲置超时提交当前值。
 - Agent Hub 新增「分步任务」：一次创建有序步骤，超过四步时由原生合并为四组，并在任务详情里按组查看进度与提示词。
 - GitHub Actions 结果按运行 → 作业 → 有序步骤展示，带真实状态、耗时与失败日志；任务步骤、Actions 与表单题组共用同一套步骤样式。
@@ -31,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bash 审批规则编辑保留项目和路径作用域，避免将局部允许规则写成全局授权；选择性提交隔离迟到的冻结补丁，释放被取消的草稿准备，并保留原生标题长度与 Agent 范围语义。
 - 原目录缺失时可在选定工作区完成真实恢复；输入历史与删除警告随语言更新，独立窗口弹层保持归属；聊天角色列表排除 Judge 模型，已保存会话可在流式期间 Fork，富文本粘贴保留 SVG 并避免嵌套表格重复。
 - 历史会话恢复区分记录目录与实际执行目录，启动失败保留原 Worker；删除会话通过私有原生维护清理 history/stats，并如实报告部分清理。流式 fork/branch 与异步命令输入保持原会话归属。
+- 普通终端识别到 `tmux -CC` 控制模式时不再无限缓冲 DCS 输出，显示提示并提供退出按钮；其他 DCS 和 Sixel 继续正常处理。
+- 修复新版 Runtime 的输入预测通道无法连接、输入框显示 `Invalid prediction fields`：桌面私有传输接受 Runtime 的协议版本元数据，继续校验实际通道所有权与本地文件授权。
 - 补齐英文模式下的工作台、对话、模型、浏览器、文件、SSH 与预览文案；切换语言时同步已连接的 Runtime 和远端 Host，并刷新命令目录与 Host 显示缓存。图片胶囊标签随界面语言更新，附件编号、字节和历史引用格式保持兼容。
 - 修复新对话的第一条消息被误报「发送期间已切换会话」而取消、草稿退回输入框：新草稿接管自己 `session.create` 刚建出的会话不再算作切换；真正切到其他对话时仍会取消发送。
 - 修复上述失败后发送按钮一直禁用：新草稿打开时拿到的空能力清单在 Runtime 接入后不再沿用，收到 `runtime.changed` 后改为向 Host 重新读取。

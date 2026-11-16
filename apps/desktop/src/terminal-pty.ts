@@ -63,7 +63,7 @@ export interface ShellResolveOptions {
   readonly platform?: NodeJS.Platform;
   readonly env?: NodeJS.ProcessEnv;
   readonly exists?: (path: string) => boolean;
-  /** macOS account shell (`os.userInfo().shell`); test seam. */
+  /** POSIX account shell (`os.userInfo().shell`); test seam. */
   readonly accountShell?: () => string | undefined;
 }
 
@@ -96,9 +96,11 @@ export function resolveDefaultShell(options: ShellResolveOptions = {}): Resolved
     return { name: "cmd", file: env.ComSpec ?? "cmd.exe" };
   }
 
-  // macOS: the account's login shell wins over an inherited $SHELL, like Terminal.app.
-  const configured = platform === "darwin" ? (options.accountShell ?? accountShell)() : undefined;
-  const unix = configured || (env.SHELL && env.SHELL.length > 0 ? env.SHELL : platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+  // macOS follows Terminal.app; Linux respects the launching shell first.
+  const configured = (options.accountShell ?? accountShell)();
+  const unix = platform === "darwin"
+    ? configured || env.SHELL || "/bin/zsh"
+    : env.SHELL || configured || "/bin/bash";
   const slash = unix.lastIndexOf("/");
   return { name: slash >= 0 ? unix.slice(slash + 1) : unix, file: unix };
 }
@@ -139,7 +141,7 @@ function loadNodePty(): NodePtyModule {
 
 /**
  * The shell's environment. `process.env` already carries the macOS login
- * shell's PATH and LANG (`platform/login-env.ts`); macOS also names the
+ * shell's PATH and LANG (`platform/login-env.ts`); POSIX also names the
  * terminal and keeps Electron's own switches out of the user's shell.
  */
 export function terminalEnvironment(
@@ -147,14 +149,15 @@ export function terminalEnvironment(
   platform: NodeJS.Platform = process.platform,
 ): Record<string, string> {
   const env: Record<string, string> = {};
+  const posix = platform === "darwin" || platform === "linux";
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue;
-    if (platform === "darwin" && key.startsWith("ELECTRON_")) continue;
+    if (posix && key.startsWith("ELECTRON_")) continue;
     env[key] = value;
   }
   env.TERM = env.TERM ?? "xterm-256color";
   env.COLORTERM = env.COLORTERM ?? "truecolor";
-  if (platform === "darwin") env.TERM_PROGRAM = "OMP-Studio";
+  if (posix) env.TERM_PROGRAM = "OMP-Studio";
   return env;
 }
 
@@ -174,6 +177,7 @@ export function shellArgs(
     if (base === "csh" || base === "tcsh") return options.backend === "pipes" ? ["-i", "-l"] : ["-l"];
     return options.backend === "pipes" ? ["-il"] : ["-l"];
   }
+  if ((options.platform ?? process.platform) === "linux" && options.backend === "pipes") return ["-i"];
   return [];
 }
 

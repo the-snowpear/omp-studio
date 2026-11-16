@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Desktop console for OMP Runtime</strong><br>
-  Typed Studio Bridge · Electron workbench · Windows / macOS
+  Typed Studio Bridge · Electron workbench · Windows / macOS / Linux
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
   <a href="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml"><img src="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.6-informational.svg" alt="0.1.6"></a>
-  <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0078D4.svg" alt="Windows | macOS"></a>
+  <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078D4.svg" alt="Windows | macOS | Linux"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-339933.svg" alt="Node 22+"></a>
   <a href="https://linux.do/"><img src="https://img.shields.io/badge/LINUX%20DO-Community-FFB003.svg" alt="LINUX DO"></a>
 </p>
@@ -113,6 +113,8 @@ npm run preview
 
 On Windows you can also double-click `preview.cmd` at the repo root. macOS needs the Xcode Command Line Tools; the steps are otherwise the same.
 
+Linux x64 supports source startup and native AppImage / deb packaging with `npm run pack:linux`. Installers will join the next release containing this change; 0.2.0 / 0.2.1 have no Linux desktop assets. The build targets Ubuntu 24.04 / glibc 2.39+ and bundles its signed Runtime and native PTY. Desktop upgrades use a manual installer download; Runtime updates remain available in the app. See [Linux setup](docs/linux.md). Linux remote archives in Releases remain separate SSH Host packages.
+
 Attach a real Runtime (slow the first time):
 
 ```powershell
@@ -134,7 +136,7 @@ packages/             protocol, Host, client, transports, platform
 omp-patch/overlay     Studio-owned Runtime sources
 omp-patch/patches     seam patches on upstream files (do not hand-edit)
 omp-patch/vendor      oh-my-pi submodule (commit the gitlink only)
-packaging/            Windows NSIS installer skeleton; macOS signing setup (packaging/mac)
+packaging/            Windows NSIS, macOS and Linux packaging resources
 ui_reference/ver1     visual reference, not product code
 docs/                 user and contributor docs
 ```
@@ -163,7 +165,7 @@ Invariants (see [docs/architecture.md](docs/architecture.md)):
 | [docs/getting-started.md](docs/getting-started.md) | Run from source |
 | [docs/development.md](docs/development.md) | Inner loop, preview mode, patch regen |
 | [docs/architecture.md](docs/architecture.md) | Packages and invariants |
-| [docs/releasing.md](docs/releasing.md) | Version, tag, Windows installer, macOS build |
+| [docs/releasing.md](docs/releasing.md) | Versions, tags and Windows / macOS / Linux packages |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to open a PR |
 | [SECURITY.md](SECURITY.md) | Vulnerability disclosure |
 | [CHANGELOG.md](CHANGELOG.md) | User-facing history |

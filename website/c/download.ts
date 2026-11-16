@@ -7,7 +7,7 @@ import {
   type Platform,
 } from "../shared/release";
 
-const PLATFORM_ICON: Record<Platform, IconName> = { "win-x64": "windows", "win-arm64": "windows", "mac-arm64": "apple" };
+const PLATFORM_ICON: Record<Platform, IconName> = { "win-x64": "windows", "win-arm64": "windows", "mac-arm64": "apple", "linux-x64": "terminal", "linux-x64-deb": "terminal" };
 
 const cmd = (text: string) =>
   `<li class="cmd"><code>${text.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</code><button class="copy" type="button" data-copy="${text.replace(/"/g, "&quot;")}">复制</button></li>`;
@@ -77,5 +77,5 @@ ${notice}
   }
   heroMeta.textContent = old
     ? `最新安装包 ${release.version}；窗口化工作台随 ${WORKBENCH_VERSION} 发布，现在可从源码运行`
-    : `版本 ${release.version}，支持 Windows x64、Windows ARM64 和 macOS Apple Silicon`;
+    : `版本 ${release.version}，可下载 ${release.assets.map(a => a.label).join("、")}`;
 }

@@ -1,7 +1,8 @@
 /**
  * Local managed-Runtime signing keys.
  *
- * Lives under the Host profile (`%APPDATA%\omp-studio\keys` on Windows),
+ * Lives under the Host profile (`%APPDATA%\omp-studio\keys` on Windows,
+ * `$XDG_CONFIG_HOME/omp-studio/keys` — `~/.config` by default — on Linux),
  * never in the git repository. Env vars still win when both are set.
  *
  *   npm run omp:keys
@@ -10,7 +11,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const RUNTIME_KEY_ID_FILE = "key-id.txt";
@@ -18,11 +19,16 @@ export const RUNTIME_PUBLIC_KEY_FILE = "trusted-public.pem";
 export const RUNTIME_PRIVATE_KEY_FILE = "signing-private.pem";
 export const DEFAULT_RUNTIME_KEY_ID = "omp-studio-local";
 
-export function defaultRuntimeKeysDirectory() {
-  if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Application Support", "omp-studio", "keys");
+export function defaultRuntimeKeysDirectory({ platform = process.platform, env = process.env, home = homedir() } = {}) {
+  if (platform === "darwin") {
+    return posix.join(home, "Library", "Application Support", "omp-studio", "keys");
   }
-  return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "omp-studio", "keys");
+  if (platform === "linux") {
+    const xdgConfigHome = env.XDG_CONFIG_HOME ?? "";
+    const appDataRoot = posix.isAbsolute(xdgConfigHome) ? xdgConfigHome : posix.join(home, ".config");
+    return posix.join(appDataRoot, "omp-studio", "keys");
+  }
+  return win32.join(env.APPDATA ?? win32.join(home, "AppData", "Roaming"), "omp-studio", "keys");
 }
 
 async function exists(path) {

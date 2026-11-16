@@ -21,6 +21,7 @@ import { createDesktopTransport } from "@omp-studio/transport-desktop";
 import { App, Unavailable } from "./App";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { getAppSettings } from "./settings/appSettings";
+import { applyLightLevel } from "./lux/lightLevel";
 import { applyTypography } from "./settings/typography";
 import { resolveLanguage } from "./i18n";
 import { initPerformanceTimelineCleanup } from "./performanceTimelineCleanup";
@@ -40,6 +41,7 @@ document.documentElement.setAttribute("data-theme", initialSettings.theme);
 document.documentElement.setAttribute("data-platform", PLATFORM);
 document.documentElement.setAttribute("data-density", initialSettings.density);
 if (initialSettings.fileTypePalette === "tri") document.documentElement.dataset.palette = "tri";
+applyLightLevel(document.documentElement, initialSettings.light);
 document.documentElement.setAttribute("lang", resolveLanguage(initialSettings.language));
 
 /**

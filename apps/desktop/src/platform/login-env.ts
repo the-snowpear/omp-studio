@@ -1,5 +1,5 @@
 /**
- * Login-shell environment for GUI-launched macOS apps.
+ * Login-shell environment for GUI-launched macOS and Linux apps.
  *
  * LaunchServices starts apps with launchd's minimal environment
  * (PATH=/usr/bin:/bin:/usr/sbin:/sbin, usually no LANG), so Homebrew, nvm,
@@ -34,7 +34,7 @@ const RESOLVING_FLAG = "OMP_STUDIO_RESOLVING_ENVIRONMENT";
 /** Electron's own switches and Studio's private Runtime channel never come from a profile. */
 const PRESERVED = /^(?:ELECTRON_|OMP_STUDIO_)/u;
 const SHELL_BOOKKEEPING = new Set(["PATH", "SHLVL", "PWD", "OLDPWD", "_"]);
-const FALLBACK_PATH = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "~/.bun/bin", "~/.local/bin", "~/.cargo/bin"];
+const FALLBACK_PATH = ["/usr/local/bin", "~/.bun/bin", "~/.local/bin", "~/.cargo/bin"];
 const MAX_OUTPUT = 1_000_000;
 
 /** The JSON object between the two markers; profile noise around it is ignored. */
@@ -80,8 +80,9 @@ export function mergeLoginEnvironment(current: NodeJS.ProcessEnv, shell: Readonl
   return merged;
 }
 
-export function withFallbackPath(current: NodeJS.ProcessEnv, home: string): NodeJS.ProcessEnv {
-  const fallback = FALLBACK_PATH.map((entry) => (entry.startsWith("~/") ? posix.join(home, entry.slice(2)) : entry)).join(":");
+export function withFallbackPath(current: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform = "darwin"): NodeJS.ProcessEnv {
+  const paths = platform === "darwin" ? ["/opt/homebrew/bin", "/opt/homebrew/sbin", ...FALLBACK_PATH] : FALLBACK_PATH;
+  const fallback = paths.map((entry) => (entry.startsWith("~/") ? posix.join(home, entry.slice(2)) : entry)).join(":");
   return { ...current, PATH: mergePath(current.PATH, fallback) };
 }
 
@@ -100,9 +101,9 @@ export function localeToLang(locale: string, hasLocale: (name: string) => boolea
   return candidate !== undefined && hasLocale(candidate) ? candidate : "en_US.UTF-8";
 }
 
-function withLang(env: NodeJS.ProcessEnv, locale: string | undefined, hasLocale: ((name: string) => boolean) | undefined): NodeJS.ProcessEnv {
+function withLang(env: NodeJS.ProcessEnv, locale: string | undefined, hasLocale: ((name: string) => boolean) | undefined, platform: NodeJS.Platform): NodeJS.ProcessEnv {
   if (env.LANG || env.LC_ALL || env.LC_CTYPE) return env;
-  return { ...env, LANG: localeToLang(locale ?? "", hasLocale) };
+  return { ...env, LANG: platform === "linux" ? "C.UTF-8" : localeToLang(locale ?? "", hasLocale) };
 }
 
 /** `userInfo()` throws for an account without a passwd entry. */
@@ -170,11 +171,12 @@ export interface LoginEnvironmentOptions {
 
 export async function resolveLoginEnvironment(options: LoginEnvironmentOptions = {}): Promise<LoginEnvironmentResult> {
   const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
   // Windows apps inherit the user's environment, and so does anything started from a terminal.
-  if ((options.platform ?? process.platform) !== "darwin" || env.TERM !== undefined || env.TERM_PROGRAM !== undefined) {
+  if ((platform !== "darwin" && platform !== "linux") || env.TERM !== undefined || env.TERM_PROGRAM !== undefined) {
     return { env, status: "skipped" };
   }
-  const shell = env.SHELL || accountShell() || "/bin/zsh";
+  const shell = env.SHELL || accountShell() || (platform === "darwin" ? "/bin/zsh" : "/bin/bash");
   const printer = `${shellQuote(options.execPath ?? process.execPath)} -p ${shellQuote(`"${MARK}" + JSON.stringify(process.env) + "${MARK}"`)}`;
   let result: ShellRunResult;
   try {
@@ -190,7 +192,7 @@ export async function resolveLoginEnvironment(options: LoginEnvironmentOptions =
   const parsed = result.timedOut ? undefined : parseLoginEnvironmentOutput(result.stdout);
   const status: LoginEnvironmentStatus = parsed !== undefined ? "resolved" : result.timedOut ? "timeout" : "failed";
   const merged = parsed === undefined ? env : mergeLoginEnvironment(env, parsed);
-  return { env: withLang(withFallbackPath(merged, options.homedir ?? osHomedir()), options.locale, options.hasLocale), status };
+  return { env: withLang(withFallbackPath(merged, options.homedir ?? osHomedir(), platform), options.locale, options.hasLocale, platform), status };
 }
 
 let applied: Promise<LoginEnvironmentStatus> | undefined;

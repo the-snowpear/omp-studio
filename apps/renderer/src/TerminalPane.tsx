@@ -8,6 +8,7 @@ import { TerminalRecordingControls } from "./recordings/TerminalRecordingControl
 import { useSurfaceDocument } from "./dock/SurfaceContext";
 import { BrowserLinkMenu } from "./browser/browserLinks";
 import { registerTerminalBrowserLinks } from "./browser/terminalBrowserLinks";
+import { useTmuxPanel } from "./tmux/TmuxPanel";
 /**
  * Desktop-chrome integrated shell. Uses `window.ompStudioTerminal` when the
  * Electron preload is present; otherwise shows an honest unavailable state.
@@ -39,9 +40,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
   const executionTarget = useExecutionTarget();
   const { preview } = usePreviewMode();
   const targetId = preview ? null : executionTarget.id;
-  const { store, sessions: allSessions, graphics, graphicsErrors, notices } = useTerminalSessions();
+  const { store, sessions: allSessions, graphics, graphicsErrors, notices, controlMode } = useTerminalSessions();
   const ownerKey = JSON.stringify([targetId, workspaceId ?? null, conversationId ?? sessionId ?? null]);
-  const sessions = allSessions.filter(session => session.targetId === targetId && (conversationId ? session.conversationId === conversationId : session.workspaceId === workspaceId && session.sessionId === sessionId));
+  const sessions = allSessions.filter(session => session.kind !== "tmux-pane" && session.targetId === targetId && (conversationId ? session.conversationId === conversationId : session.workspaceId === workspaceId && session.sessionId === sessionId));
   const [activeId, setActiveId] = useState<string | null>(() => store.activeIds.get(ownerKey) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -50,6 +51,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
   const targetStatus = executionTarget.inventory.statuses.find(status => status.id === executionTarget.id);
   const canCreate = !targetId || (targetStatus?.state === "connected" && !targetStatus.operation);
   const selectSession = (id: string): void => { store.activeIds.set(ownerKey, id); setActiveId(id); };
+  const tmuxPanel = useTmuxPanel({ targetId, workspaceId, ownerKey, connected: canCreate, cwd: sessions[0]?.cwd ?? executionTarget.inventory.profiles.find(profile => profile.id === targetId)?.lastDirectory ?? "", activeId, select: selectSession, visible, onError: setError });
   useEffect(() => { setActiveId(store.activeIds.get(ownerKey) ?? null); bootstrapped.current = sessions.length > 0; }, [ownerKey, allSessions, store]);
 
   const createSession = useCallback(async () => {
@@ -70,7 +72,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
     void createSession();
   }, [api, visible, canCreate, createSession]);
 
-  if (!api) {
+  if (!api && !preview) {
     return (
       <div className="empty">
         <Icon name="terminal" extra="lg" />
@@ -86,7 +88,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
     <div className="term-layout">
       <div className="term-list" role="listbox" aria-label={t("terminal.listAria")}>
         {sessions.map((session) => {
-          const selected = session.id === active?.id;
+          const selected = !tmuxPanel.selected && session.id === active?.id;
           return (
             <div
               key={session.id}
@@ -110,13 +112,15 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
             </div>
           );
         })}
-        <button className="term-new" type="button" disabled={creating || !canCreate} onClick={() => void createSession()}>
+        {tmuxPanel.list}
+        <button className="term-new" type="button" disabled={!api || creating || !canCreate} onClick={() => void createSession()}>
           <Icon name="plus" extra="sm" />
           {t("terminal.newTerminal")}
         </button>
+        {tmuxPanel.entry}
       </div>
       <div className="term-view">
-        {active ? (
+        {tmuxPanel.selected ? <>{tmuxPanel.toolbar}{error ? <p className="tmux-banner" role="alert">{error}</p> : null}</> : active ? (
           <>
             <div className="term-cwd">
               <Icon name="folder" extra="sm" />
@@ -131,9 +135,13 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
                 </span>
               )}
             </div>
-            {executionTarget.id ? <p className="muted small">{zh ? "SSH 终端暂不支持本机录制；关闭标签会结束该终端。" : "Local recording is not supported on SSH terminals; closing this tab ends the session."}</p> : <TerminalRecordingControls key={active.id} api={api} id={active.id} visible={visible} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />}
+            {executionTarget.id ? <p className="muted small">{zh ? "SSH 终端暂不支持本机录制；关闭标签会结束该终端。" : "Local recording is not supported on SSH terminals; closing this tab ends the session."}</p> : <TerminalRecordingControls key={active.id} api={api!} id={active.id} visible={visible} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />}
             {error ? <p role="alert" className="muted small">{error}</p> : null}
             {notices[active.id] ? <p role="status" className="muted small">{notices[active.id]}</p> : null}
+            {controlMode[active.id] ? <div role="status" className="muted small">
+              <p>{t("terminal.tmux.controlNotice")}</p>
+              <button type="button" className="btn" onClick={() => void api!.write(active.id, "\n").catch(cause => setError(String(cause)))}>{t("terminal.tmux.exitControl")}</button>
+            </div> : null}
             {(graphics[active.id]?.length || graphicsErrors[active.id]) ? <div style={{ maxHeight: 240, overflow: "auto" }} aria-label={zh ? "终端图片" : "Terminal images"}>
               {graphics[active.id]?.map((image, index) => <TerminalGraphicView key={index} image={image} />)}
               {graphicsErrors[active.id] ? <p role="status">{graphicsErrors[active.id]}</p> : null}
@@ -143,7 +151,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
                 <XtermScreen
                   key={session.id}
                   session={session}
-                  api={api}
+                  api={api!}
                   hosts={store.hosts}
                   store={store}
                   active={visible && session.id === active.id}
@@ -158,7 +166,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
             {error ? <p className="muted small">{error}</p> : <p className="muted small">{t("terminal.clickToStart")}</p>}
           </div>
         )}
+        {tmuxPanel.screens}
       </div>
+      {tmuxPanel.dialogs}
     </div>
   );
 });
@@ -236,7 +246,7 @@ function XtermScreen({
     let disposed = false;
     const fit = () => {
       if (disposed || !active || !node || node.clientWidth === 0 || node.clientHeight === 0) return;
-      host.fit.fit();
+      host.fit?.fit();
       void api.resize(session.id, host.term.cols, host.term.rows);
     };
     const frame = requestAnimationFrame(fit);
@@ -250,7 +260,7 @@ function XtermScreen({
     if (!host || !node || !active) return;
     const sync = (): void => {
       try {
-        host.fit.fit();
+        host.fit?.fit();
         void api.resize(session.id, host.term.cols, host.term.rows);
       } catch {
         // Fit can throw while the panel is mid-collapse.

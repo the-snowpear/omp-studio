@@ -105,8 +105,14 @@ export function findMacInstallerAsset(
   };
 }
 
-export function findInstallerAsset(assets: readonly GitHubReleaseAsset[] = [], platform: NodeJS.Platform = process.platform) {
-  return platform === "darwin" ? findMacInstallerAsset(assets) : findWindowsInstallerAsset(assets);
+export function findInstallerAsset(assets: readonly GitHubReleaseAsset[] = [], platform: NodeJS.Platform = process.platform, arch: string = process.arch) {
+  if (platform === "win32") return findWindowsInstallerAsset(assets);
+  if (platform === "darwin") return findMacInstallerAsset(assets);
+  if (platform === "linux") {
+    const asset = assets.find(asset => typeof asset.name === "string" && typeof asset.browser_download_url === "string" && asset.name.startsWith("OMP-Studio-") && asset.name.endsWith(`-linux-${arch}.AppImage`));
+    if (asset) return { name: asset.name!, downloadUrl: asset.browser_download_url!, ...(typeof asset.size === "number" ? { size: asset.size } : {}) };
+  }
+  return undefined;
 }
 
 export async function checkGitHubReleaseUpdate(options: {

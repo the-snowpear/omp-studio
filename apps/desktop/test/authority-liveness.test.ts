@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { lstat, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 
 import { ensurePrivateSocketDirectory } from "@omp-studio/studio-host";
 
@@ -78,4 +79,14 @@ test("the macOS temp root comes from getconf and falls back to TMPDIR", () => {
   assert.equal(darwinUserTempDir(() => "/var/folders/zz/abc123/T/\n"), "/var/folders/zz/abc123/T/");
   assert.equal(darwinUserTempDir(() => { throw new Error("no getconf"); }), tmpdir());
   assert.equal(darwinUserTempDir(() => "garbage"), tmpdir());
+});
+
+test("Linux processes with different TMPDIR values discover the same authority socket root", { skip: process.platform !== "linux" }, async () => {
+  const moduleUrl = new URL("../src/platform/desktop-paths.js", import.meta.url).href;
+  const script = `import { desktopSocketTmpRoot } from ${JSON.stringify(moduleUrl)}; console.log(desktopSocketTmpRoot());`;
+  const roots = await Promise.all(["/tmp/omp-terminal", "/tmp/omp-launcher"].map(TMPDIR =>
+    promisify(execFile)(process.execPath, ["--input-type=module", "-e", script], { env: { ...process.env, TMPDIR }, timeout: 10_000 }),
+  ));
+  assert.equal(roots[0]!.stdout.trim(), roots[1]!.stdout.trim());
+  assert.equal(roots[0]!.stdout.trim(), "/tmp");
 });

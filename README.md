@@ -11,7 +11,7 @@
   <a href="https://github.com/the-snowpear/omp-studio/releases"><img src="https://img.shields.io/github/v/release/the-snowpear/omp-studio?include_prereleases&style=flat-square&label=release&color=7c4dff" alt="Release"></a>
   <a href="https://github.com/the-snowpear/omp-studio/releases"><img src="https://img.shields.io/github/downloads/the-snowpear/omp-studio/total?style=flat-square&color=d946ef" alt="Downloads"></a>
   <a href="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/the-snowpear/omp-studio/ci.yml?style=flat-square&label=CI" alt="CI"></a>
-  <a href="#下载安装"><img src="https://img.shields.io/badge/Windows%20%7C%20macOS-x64%20%C2%B7%20ARM64-0ea5e9?style=flat-square" alt="Windows | macOS"></a>
+  <a href="#下载安装"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0ea5e9?style=flat-square" alt="Windows | macOS | Linux"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%E2%89%A522-339933?style=flat-square" alt="Node 22+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-64748b?style=flat-square" alt="MIT"></a>
   <a href="https://linux.do/"><img src="https://img.shields.io/badge/LINUX%20DO-社区-FFB003?style=flat-square" alt="LINUX DO"></a>
@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> 本页介绍的窗口化工作台属于 **0.2.0**，目前在 [`0.2.0`](https://github.com/the-snowpear/omp-studio/tree/0.2.0) 分支开发，尚未发布正式安装包。[Releases](https://github.com/the-snowpear/omp-studio/releases) 中的最新正式版仍是 0.1.x。各项变化与当前验证范围见 [CHANGELOG](CHANGELOG.md#unreleased)。
+> 窗口化工作台已随 **0.2.0** 发布。当前 [`0.2.0`](https://github.com/the-snowpear/omp-studio/tree/0.2.0) 开发分支继续准备 OMP 18.19.0 与 Linux 桌面；Linux 安装包将随下一版正式 Release 提供。实际可下载版本以 [Releases](https://github.com/the-snowpear/omp-studio/releases) 为准，开发变更见 [CHANGELOG](CHANGELOG.md#unreleased)。
 
 <table>
 <tr>
@@ -147,7 +147,7 @@ Files、Changes、Git、Browser、Computer、Agents、Terminal、Logs、BTW 等�
 
 <br>
 
-| 操作 | Windows | macOS |
+| 操作 | Windows / Linux | macOS |
 |---|---|---|
 | 新建对话 | <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>O</kbd> | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>O</kbd> |
 | 收起 / 展开左栏 | <kbd>Ctrl</kbd> <kbd>B</kbd> | <kbd>⌘</kbd> <kbd>B</kbd> |
@@ -272,6 +272,7 @@ Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管�
 | **Windows x64** | `OMP-Studio-Setup-<版本>-windows-x64.exe` | 安装器，支持应用内更新 |
 | **Windows ARM64** | `OMP-Studio-Setup-<版本>-windows-arm64.exe` | 骁龙等 ARM 设备 |
 | **macOS Apple Silicon** | `OMP-Studio-<版本>-macos-arm64.dmg` | macOS 13+；ad hoc 签名，尚未公证 |
+| **Linux x64（下一版）** | `OMP-Studio-<版本>-linux-x64.deb` / `.AppImage` | Ubuntu 24.04 / glibc 2.39+；[安装与沙箱说明](docs/linux.md) |
 
 👉 前往 **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases)** 下载。具体文件名以 Release 页为准。Runtime 与更新目录使用 Ed25519 签名；Windows 安装包没有 Authenticode 签名。
 
@@ -320,6 +321,8 @@ npm run preview
 ```
 
 Windows 也可以直接双击仓库根目录的 `preview.cmd`；macOS 需要先安装 Xcode Command Line Tools。
+
+Linux 支持源码运行与 `npm run pack:linux` 原生打包；环境、安装、更新与沙箱说明见 [Linux 客户端](docs/linux.md)。正式桌面附件为 AppImage / deb；Release 中的 Linux remote 压缩包用于 SSH Host。
 
 <details>
 <summary><b>🔌 接上真实的托管 Runtime</b>（首次较慢）</summary>
@@ -388,7 +391,7 @@ packages/             协议、Host、客户端、传输、平台、测试工具
 omp-patch/overlay     Studio 自有的 Runtime 源码（上游不存在的路径）
 omp-patch/patches     对上游文件的接缝补丁，按子系统分四组（不要手改）
 omp-patch/vendor      oh-my-pi 子模块（只提交 gitlink）
-packaging/            Windows NSIS 安装器；macOS 签名配置
+packaging/            Windows NSIS、macOS 与 Linux 安装包资源
 docs/                 使用与开发文档
 ```
 

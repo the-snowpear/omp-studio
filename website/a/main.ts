@@ -170,7 +170,7 @@ codeBlock($("#src-cmd"), SOURCE_COMMANDS);
 codeBlock($("#mac-cmd"), [MAC_QUARANTINE_COMMAND]);
 
 // ---------------- download ----------------
-const osIcon = (asset: Asset) => (asset.platform === "mac-arm64" ? icon.apple : icon.windows);
+const osIcon = (asset: Asset) => (asset.platform === "mac-arm64" ? icon.apple : asset.platform.startsWith("linux-") ? i("terminal") : icon.windows);
 
 Promise.all([loadRelease(), detectPlatform()]).then(([release, platform]) => {
   const mine = release.assets.find((a) => a.platform === platform);
@@ -191,7 +191,7 @@ Promise.all([loadRelease(), detectPlatform()]).then(([release, platform]) => {
     const mark = a.querySelector("[data-dl-icon]");
     if (mark) mark.innerHTML = mine ? osIcon(mine) : icon.download;
   });
-  $("[data-dl-note]").textContent = mine ? `版本 ${release.version}，${formatSize(mine.bytes)}，${mine.requires}` : "Windows x64 / ARM64 与 macOS Apple Silicon";
+  $("[data-dl-note]").textContent = mine ? `版本 ${release.version}，${formatSize(mine.bytes)}，${mine.requires}` : `此版本提供 ${release.assets.map(a => a.label).join(" / ")}`;
   $("#dl-req").textContent = mine ? `${mine.requires}，${formatSize(mine.bytes)}` : "本机系统没有对应的安装包，可以从源码运行。";
 
   if (old) {

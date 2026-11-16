@@ -50,6 +50,7 @@ import { RuntimeQueue } from "../composer/RuntimeQueue";
 import { ComposerModePicker } from "../ComposerModePicker";
 import { ChipComposer, type ChipComposerHandle } from "../composer/ChipComposer";
 import { bindSlashTypedCommand, composerSlashExecute, isDestructiveMemoryClear, mergeSlashCatalogWithManifest, planComposerSend, resolveSlashExecute, type SlashNativeUi, type StudioSlashCommand } from "../composer/commands";
+import { LuxOrbit } from "../lux/LuxOrbit";
 import { composerFollowUpEnabled, composerOwnerSessionId, composerOwnsLiveSnapshot, composerPromptEnabled, composerQueueEnabled, composerRunningForTarget, createComposerDispatchGate, promptTargetChanged, visibleQueuedMessages } from "../composer/dispatch";
 import { beginQueueEdit, cancelQueueEdit, commitQueueEdit, parkQueueEdit, snapshotOfQueued, switchQueueEdit, type QueueEditState } from "../composer/queueEdit";
 import { createWorkspaceFileIndex, followWorkspaceFileIndex, loadMentions, previewMentions, workspaceDirectoryLister } from "../composer/mentions";
@@ -985,7 +986,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const liveReviewKey = pendingInteraction || planReview === undefined
     ? ""
     : `${planReview.planReference ?? ""}:${planReview.title ?? ""}:${planReview.body ?? ""}`;
-  const previewPlanActive = preview === true && previewThreadId === "t3" && previewDeckKind === "plan";
+  const previewDeckActive = preview === true && previewThreadId === "t3" && previewDeckKind !== null;
+  const previewPlanActive = previewDeckActive && previewDeckKind === "plan";
   // `planReview` 是 `snapshot.plan`，每次 operator 状态更新都是新对象，所以直接
   // 依赖它会在整个评审期间每帧往 state 写一个全新对象，React 永远无法 bail out。
   // 按内容签名依赖，值真的变了才写；对象本身从 ref 读，不参与依赖比较。
@@ -1121,6 +1123,9 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   // being filed against the session the operator just left. Preview keeps its
   // fixture story (the local demo queue is not a Host target).
   const composerRunning = preview ? running : composerRunningForTarget({ ...composerTarget, running });
+  const composerLightState = pendingInteraction !== null || planReview !== undefined || previewDeckActive
+    ? "waiting"
+    : composerRunning ? "running" : "idle";
   // Title freezes on the first accepted prompt; later drafts never override it.
   const provisionalTitle = submittedPromptTitle ?? provisionalThreadTitle(draft.text);
   useEffect(() => {
@@ -2634,6 +2639,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
               </button>
             </div> : null}
             <div className={`composer${composerRunning ? ` running ${composerExpanded ? "expanded" : "compact"}` : ""}`} id="composer">
+              <LuxOrbit state={composerLightState} />
               <div className="composer-ctx" aria-label={zh ? "已引用的上下文" : "Referenced context"} role="group" />
               <label className="sr-only" htmlFor="composerInput">{zh ? "消息输入框。发送给 Runtime 的文本。" : "Message input box. Text to send to the Runtime."}</label>
               <ChipComposer

@@ -2,11 +2,11 @@
 
 ## 项目目标
 
-OMP Studio 是 OMP Runtime / AgentSession 的桌面控制台（Windows 与 macOS Apple Silicon）与配套 Web UI。它通过类型化的 Studio Bridge 暴露运行时能力；不要以 slash 文本、ANSI 输出解析或按键宏模拟控制。
+OMP Studio 是 OMP Runtime / AgentSession 的桌面控制台（Windows、macOS Apple Silicon 与 Linux x64）与配套 Web UI。它通过类型化的 Studio Bridge 暴露运行时能力；不要以 slash 文本、ANSI 输出解析或按键宏模拟控制。
 
 主要结构：
 
-- `apps/desktop/`：Electron 主进程与 Windows / macOS 桌面壳；平台差异集中在 `apps/desktop/src/platform/`。
+- `apps/desktop/`：Electron 主进程与 Windows / macOS / Linux 桌面壳；平台差异集中在 `apps/desktop/src/platform/`。
 - `apps/renderer/`：Vite + React 渲染进程 UI。
 - `packages/`：协议、host、客户端、transport、平台和测试工具包。
 - `omp-patch/overlay/`：Studio 自有的 Runtime 源码（`packages/coding-agent/src/studio/**` 与 `studio-*` 测试），上游没有这些路径，按普通源码维护。
@@ -31,7 +31,7 @@ Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`；macOS：`~
 | Agent Hub、Skills、MCP、模型 | Agent Hub、Skills、MCP、模型 |
 | Git / 文件树 / 工作区 | Git / GitHub / 工作区文件 |
 | 终端、设置、诊断 | 终端、窗口铬、设置、诊断 |
-| macOS / Windows 平台差异 | 平台层 |
+| macOS / Windows / Linux 平台差异 | 平台层 |
 | Host 协议 / Runtime 进程 | Host 内核 |
 | overlay / 接缝补丁 | Runtime overlay |
 | 检查门禁 / 架构约束 | 检查门禁与架构约束 |
@@ -61,6 +61,18 @@ Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`；macOS：`~
 - 测试只测用户能感知的行为和真实出过的 bug；不要为校验器、内部结构、"拒绝畸形输入"写成套测试，也不要为了测试改夹具绕圈。
 - 唯一的例外是 `scripts/architecture.test.mjs`：它只锚定已经写进本文的分层决策（依赖方向、electron / react 边界、预览开关唯一、校验只留一处），不限制内部重构。改决策就同一次提交里改表和代码，diff 就是记录。
 - 发布前的检查只拦真正会发坏包的问题（签名、架构、产物缺失）。不在发布流程里重跑源码测试或 GUI 验收。
+
+## 国际化与界面语言
+
+新增或修改用户可见文案时，按 [`docs/localization.md`](docs/localization.md) 实现和审查；文件落点仍查 `doc/feature-index.md` 的「界面语言与跨进程同步」。
+
+- Studio 自有界面文案必须同一次变更提供中文和英文，包括菜单、空态、错误与禁用原因、placeholder、tooltip、ARIA、桌面对话框和通知。预览 fixture 与真实路径都要覆盖；缺键回退到另一语言不算翻译完成。
+- Renderer 组件从 `useI18n()` 读取当前语言，调用 helper 时显式传入 `resolvedLanguage` 或对应 `zh` 值，不用模块加载时的 `isZh()` / `pickLocale()` 固定文案。
+- 派生菜单、搜索目录、memo / effect 和已翻译的缓存必须随语言更新；缓存按语言区分或在切换时失效，旧请求不能重新填回当前语言的缓存。订阅随所属实例释放。
+- 只本地化显示文案。用户输入、模型正文、终端与第三方原始输出、路径、ID、命令名、配置键和持久化格式保持原值；图片显示标签可以是 `图N` / `ImgN`，现有复制与序列化标记仍为 `[图N]`，读取兼容两种标记。
+- Main 改环境变量不会更新已运行的 Runtime。复用现有语言同步链路，覆盖初次连接、运行中切换和重连；Runtime / SSH 必须在认证与能力协商后同步，旧端未声明能力时不发送新消息。
+- 审查受影响界面时，在预览与真实模式下检查中英文，并在同一已挂载页面执行 `zh → en → zh`；切换不应要求重启，也不应清空草稿、改变图片身份或重置用户操作状态。字典键 / 占位符检查与英语初始渲染不能替代切换验收。
+- 字典变更运行现有 `i18n.test.ts`；缓存、跨进程同步或状态保持的修复运行对应行为测试。只补真实回归，不为每条文案新建测试，不对用户数据做全局汉字禁令；在 PR 记录验证范围与未验证的平台 / 连接。
 
 ## 预览模式与 Mock 数据
 
@@ -166,7 +178,7 @@ Renderer 的动效只有一套：数值在 `styles/tokens.css` 的 Motion 段，
 - `npm run test:tooling`（打包、签名、更新脚本改动时运行）
 - `npm run preview`（Windows：构建后启动 Electron 预览）
 
-普通 PR / main CI 跑 `npm run check -- --production`：架构规则、类型、核心测试和生产包各一次；纯文档改动跳过。完整双平台与 Runtime 检查通过 CI 的 `full` 手动运行，性能 workflow 也只手动触发。发布负责打包和产物校验，不重复跑源码测试。
+普通 PR / main / 0.2.0 CI 在 Windows 与 Linux x64 跑 `npm run check -- --production`：架构规则、类型、核心测试和生产包各一次；纯文档改动跳过。完整 Windows / macOS / Linux 与 Runtime 检查通过 CI 的 `full` 手动运行，性能 workflow 也只手动触发。Linux 的 `linux-package` 手动切片负责 AppImage / deb 与 X11 / Wayland 安装验收。发布负责打包和产物校验，不重复跑源码测试或 GUI 验收。
 
 运行时/补丁专项命令见根目录 `package.json`，包括 `runtime:verify-source` 和 `omp:verify:patches`，只在相关改动或升级上游时按需运行。
 

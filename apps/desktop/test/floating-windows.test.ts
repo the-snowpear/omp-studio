@@ -37,12 +37,12 @@ class Window extends EventEmitter {
   setAlwaysOnTop(value: boolean) { this.topmost = value; }
   destroy() { this.destroyed = true; this.emit("closed"); }
 }
-function setup() {
+function setup(restoreMainOnLastClose = false) {
   const parent = new Window();
   const handlers = new Map<string, (event: { sender: Contents }, input: unknown) => unknown>();
   const ipc = { handle: (key: string, handler: (event: { sender: Contents }, input: unknown) => unknown) => handlers.set(key, handler), removeHandler: (key: string) => handlers.delete(key) };
   let quitting = false;
-  const manager = registerFloatingWindows({ parent: parent as unknown as BrowserWindow, ipcMain: ipc as unknown as IpcMain, allowedOrigin: "http://localhost:5173", preloadPath: "preload.js", areas: () => [{ x: 0, y: 0, width: 1920, height: 1040 }], isQuitting: () => quitting, openExternal: () => {} });
+  const manager = registerFloatingWindows({ parent: parent as unknown as BrowserWindow, ipcMain: ipc as unknown as IpcMain, allowedOrigin: "http://localhost:5173", preloadPath: "preload.js", areas: () => [{ x: 0, y: 0, width: 1920, height: 1040 }], isQuitting: () => quitting, openExternal: () => {}, restoreMainOnLastClose });
   const call = (channel: string, input: unknown) => handlers.get(channel)!({ sender: parent.webContents }, input);
   const ticket = call(CHANNELS.prepare, { id: "real:group", title: "Terminal", topmost: false, minimized: false, maximized: false, sourceRect: { x: 80, y: 60, width: 640, height: 480 } }) as FloatWindowTicket;
   const creation = parent.webContents.handler({ url: ticket.url, frameName: ticket.key });
@@ -75,10 +75,20 @@ test("native close first requests panel handback; only acknowledgement destroys 
   manager.dispose();
 });
 test("explicit application quit does not send a user close request that would erase saved pins", () => {
-  const { parent, child, manager, quit } = setup();
+  const { parent, child, manager, quit } = setup(true);
   quit(); let prevented = false;
   child.emit("close", { preventDefault: () => { prevented = true; } });
   assert.equal(prevented, false); assert.equal(parent.webContents.events.some(event => event.kind === "close-request"), false);
+  manager.dispose();
+  assert.equal(parent.shown, false);
+});
+test("closing the last Linux floating window restores the hidden workbench", () => {
+  const { parent, manager, control } = setup(true);
+  control("ready"); parent.hide();
+  control("close");
+  assert.equal(manager.hasWindows(), false);
+  assert.equal(parent.shown, true);
+  assert.equal(parent.focused, true);
   manager.dispose();
 });
 test("saved native geometry survives negative-coordinate monitors and returns on screen after removal", () => {

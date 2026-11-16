@@ -3,12 +3,11 @@ import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { releaseKeys } from "./build-update-assets-v2.mjs";
 import { verifyUpdateManifest } from "@omp-studio/runtime-installer";
-import { MAC_TARGET_PLATFORM, legacyIndexName, releaseTargetsDarwin } from "./release-assets.mjs";
+import { legacyIndexName, resolveReleasePlatform } from "./release-assets.mjs";
 
 const root = resolve("."), repo = process.env.GITHUB_REPOSITORY ?? "the-snowpear/omp-studio";
-const darwin = releaseTargetsDarwin();
-const arch = process.env.OMP_TARGET_ARCH ?? "x64", platform = darwin ? MAC_TARGET_PLATFORM : `win32-${arch}`;
-const dest = join(process.env.RUNNER_TEMP ?? join(root, "outputs"), `update-history-${darwin ? platform : arch}`);
+const platform = resolveReleasePlatform();
+const dest = join(process.env.RUNNER_TEMP ?? join(root, "outputs"), `update-history-${platform}`);
 await mkdir(dest, { recursive: true });
 const catalogs = join(dest, "catalogs");
 await mkdir(catalogs, { recursive: true });

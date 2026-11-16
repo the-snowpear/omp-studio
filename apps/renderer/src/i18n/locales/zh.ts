@@ -381,6 +381,7 @@ const zhRaw = {
     "fileRevealInExplorer": "在{fileManager}中打开",
     "fileManagerWindows": "资源管理器",
     "fileManagerMac": "访达",
+    "fileManagerLinux": "文件管理器",
     "copyAbsolutePath": "复制绝对路径",
     "copyRelativePath": "复制相对路径",
     "fileDesktopOnly": "仅桌面端真实项目可用",
@@ -1796,6 +1797,12 @@ const zhRaw = {
       "densityCompact": "紧凑",
       "densityStandard": "标准",
       "densityCozy": "宽松",
+      "light": "光效",
+      "lightDesc": "界面的光感强度。柔和只点亮运行中、待审批等状态；标准再给菜单、浮窗和卡片加受光感；绚丽再加环境光和跟随指针的聚光。低配或软件渲染的机器会自动关闭。",
+      "lightOff": "关",
+      "lightSoft": "柔和",
+      "lightStandard": "标准",
+      "lightVivid": "绚丽",
       "streaming": "流式输出",
       "streamingDesc": "助手回复的流式渲染与底部运行状态",
       "toolActivity": "工具活动显示",
@@ -2633,6 +2640,21 @@ const zhRaw = {
     "overwriteAndAsk": "覆盖本轮并提问"
   },
   "terminal": {
+    "tmux": {
+      "controlNotice": "此终端进入了 tmux -CC 控制模式。SSH 工作区请使用「附加 tmux…」。",
+      "exitControl": "退出控制模式",
+      "endedDetail": "远端会话已结束。",
+      "attach": "附加 tmux…", "sessions": "tmux 会话", "newSession": "新建会话名称", "createAttach": "新建 / 附加", "loading": "正在连接 tmux…", "refresh": "刷新",
+      "sessionMeta": "{windows} 个窗口 · {attached} 个客户端", "noSessions": "暂无会话，可以在下方新建。", "nameHint": "名称需以字母、数字或下划线开头，仅包含字母、数字、下划线和短横线，最多 64 个字符。", "existingName": "名称已存在时会直接附加该会话。",
+      "sshOnly": "仅 SSH 工作区可附加 tmux", "connectFirst": "请先连接 SSH 并打开工作区", "unavailable": "当前桌面版本未提供 tmux 接口",
+      "states": { "attaching": "附加中", "attached": "已附加", "exited": "已结束", "lost": "已断开" },
+      "errors": { "remote-windows": "Windows SSH 目标不支持 tmux。", "not-installed": "远端未安装 tmux，或 tmux 不在 PATH 中。", "too-old": "请将远端 tmux 升级到 3.2 或更高版本。", "ssh-failed": "SSH 连接失败。", "attach-timeout": "附加 tmux 超时。", "lost": "SSH 连接已断开。" },
+      "menu": "tmux 会话菜单", "detach": "分离 tmux 连接", "detachedDetail": "已分离，远端会话保留。", "reattach": "重新附加", "remove": "移除", "killSession": "结束整个会话", "killSessionConfirm": "结束「{name}」的所有窗口和进程？此操作不可恢复。",
+      "closeWindow": "关闭窗口 {name}", "closeTitle": "关闭「{name}」", "closeDetail": "隐藏会保留远端窗口和进程；结束窗口会终止其中的全部窗格。", "hide": "隐藏", "killWindow": "结束窗口", "cancel": "取消", "remember": "记住选择", "closeSetting": "关闭 tmux 窗口时", "ask": "每次询问",
+      "hidden": "已隐藏 {count} 个窗口", "restore": "恢复 {name}", "noVisibleWindows": "没有可见窗口，可在左侧恢复隐藏窗口。",
+      "splitRight": "向右拆分", "splitDown": "向下拆分", "newWindow": "新建 tmux 窗口", "zoom": "缩放活动窗格", "rename": "重命名窗口", "save": "保存", "killPane": "结束窗格", "resizePane": "调整窗格大小",
+      "paused": "输出过快，正在重新同步", "off": "未显示", "sizeLimited": "尺寸受其他 tmux 客户端限制", "configErrors": "tmux 配置提示", "demo": "演示", "demoPane": "演示窗格"
+    },
     "title": "终端",
     "clear": "清屏",
     "newTerminal": "新建终端",
@@ -2655,6 +2677,8 @@ const zhRaw = {
     "visitGithub": "访问 GitHub 仓库"
   },
   "appUpdate": {
+    "downloadInstaller": "下载安装包",
+    "linuxManualInstall": "下载新版本后，关闭 OMP Studio，再安装 deb 或替换 AppImage。你的配置和会话会保留。Runtime 可继续在应用内更新。",
     "dialogTitle": "发现新版本",
     "currentVersion": "当前版本",
     "latestVersion": "最新版本",

@@ -1,15 +1,43 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { captureOverlay, overlayFiles, overlayHash } from "./omp-overlay.mjs";
+import { applyOverlay, assertForkApplied, captureOverlay, overlayFiles, overlayHash } from "./omp-overlay.mjs";
 
 async function put(root, name, content) {
   const file = join(root, ...name.split("/"));
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, content);
 }
+
+test("a clean git-applied seam with a new source file can build before or after staging", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-seam-new-file-"));
+  const overlay = join(directory, "overlay"), vendor = join(directory, "vendor"), patches = join(directory, "patches");
+  const git = (...args) => execFileSync("git", ["-C", vendor, ...args], { encoding: "utf8", windowsHide: true });
+  try {
+    await put(vendor, "existing.ts", "export const value = 1;\n");
+    await put(overlay, "studio/bridge.ts", "export {};\n");
+    git("init", "-q"); git("add", "."); git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "fixture");
+    await put(vendor, "existing.ts", "export const value = 2;\n");
+    await put(vendor, "new-model.ts", "export type Model = string;\n");
+    git("add", "-N", "new-model.ts");
+    const patch = git("diff", "HEAD");
+    await put(patches, "0004-studio-extensibility.patch", patch);
+    git("restore", "--staged", "new-model.ts");
+    git("restore", "existing.ts");
+    await rm(join(vendor, "new-model.ts"));
+    git("apply", join(patches, "0004-studio-extensibility.patch"));
+    await applyOverlay(vendor, overlay);
+    await assertForkApplied(vendor, overlay, patches);
+    git("add", "existing.ts", "new-model.ts");
+    await assertForkApplied(vendor, overlay, patches);
+    git("restore", "--staged", "new-model.ts");
+    await rm(join(vendor, "new-model.ts"));
+    await assert.rejects(() => assertForkApplied(vendor, overlay, patches), /Seam patch/u);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 
 test("regen collects new Studio modules, prompts and tests without importing upstream-owned namespaces", async () => {
   const directory = await mkdtemp(join(tmpdir(), "omp-overlay-discovery-"));

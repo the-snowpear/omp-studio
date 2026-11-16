@@ -6,7 +6,7 @@ import { createDesktopApplication } from "../src/composition.js";
 import type { DesktopHostComposition } from "../src/types.js";
 import { startAppNapGuard } from "../src/platform/app-nap.js";
 
-test("closing without a tray asks to save before destroying the window and stopping Host", async () => {
+for (const platform of ["win32", "linux"] as const) test(`${platform}: closing asks to save before destroying the window and stopping Host`, async () => {
   const events: string[] = [];
   let allow = false;
   const app = createDesktopApplication({
@@ -18,7 +18,8 @@ test("closing without a tray asks to save before destroying the window and stopp
   });
   await app.start();
   const close = () => handleMainWindowClose({ preventDefault() { events.push("prevent-close"); } }, {
-    platform: "win32", quitting: false, closeToTray: false, hasFloatingWindows: false,
+    // On Linux even a constructed Tray can be invisible to the desktop shell.
+    platform, quitting: false, closeToTray: platform === "linux", hasFloatingWindows: false,
     hide() { events.push("hide"); }, requestQuit: () => app.requestQuit(),
   });
   close(); await new Promise(resolve => setImmediate(resolve));
@@ -84,6 +85,7 @@ test("macOS Dock, Windows tray and floating windows keep the main window recover
     { platform: "darwin" as const, closeToTray: false, hasFloatingWindows: false },
     { platform: "win32" as const, closeToTray: true, hasFloatingWindows: false },
     { platform: "win32" as const, closeToTray: false, hasFloatingWindows: true },
+    { platform: "linux" as const, closeToTray: true, hasFloatingWindows: true },
   ]) {
     const events: string[] = [];
     const options = { ...input, quitting: false, hide() { events.push("hide"); }, requestQuit() { events.push("quit"); } };

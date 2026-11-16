@@ -12,14 +12,18 @@ const runners = [
   { target: "darwin-arm64", os: "macos-15" },
 ];
 
-export function releasePlan({ kind = "desktop", arch = "both", includeMacos = false, platforms } = {}) {
+export function releasePlan({ kind = "desktop", arch = "both", includeMacos = false, includeLinux = true, platforms } = {}) {
   const windows = runners.filter(row => row.target.startsWith("win32-") && (arch === "both" || row.target.endsWith(`-${arch}`)));
+  const linux = includeLinux ? runners.filter(row => row.target === "linux-x64") : [];
+  const desktopPlatforms = [...windows.map(row => row.target), ...(includeMacos ? ["darwin-arm64"] : []), ...linux.map(row => row.target)];
   const targets = platforms && platforms !== "all" ? platforms.split(",")
     : kind === "desktop" ? runners.map(row => row.target)
-    : [...windows.map(row => row.target), ...(includeMacos ? ["darwin-arm64"] : [])];
+    : desktopPlatforms;
   return {
     kind,
     matrix: { include: windows.map(row => ({ arch: row.target.slice(6), os: row.os })) },
+    linux_matrix: { include: linux.map(row => ({ ...row, arch: "x64" })) },
+    desktop_platforms: desktopPlatforms.join(","),
     runtime_platforms: targets.join(","),
     runtime_matrix: { include: runners.filter(row => targets.includes(row.target)) },
   };
@@ -27,7 +31,8 @@ export function releasePlan({ kind = "desktop", arch = "both", includeMacos = fa
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const includeMacos = process.env.INCLUDE_MACOS === "true";
-  const plan = releasePlan({ kind: process.env.REQUEST_KIND || "desktop", arch: process.env.TARGET_ARCH || "both", includeMacos, platforms: process.env.RUNTIME_PLATFORMS });
+  const includeLinux = process.env.INCLUDE_LINUX !== "false";
+  const plan = releasePlan({ kind: process.env.REQUEST_KIND || "desktop", arch: process.env.TARGET_ARCH || "both", includeMacos, includeLinux, platforms: process.env.RUNTIME_PLATFORMS });
   // Runtime preparation/cache warming also uses this CLI, without desktop publication.
   if (process.env.CHECK_RELEASE_NOTES === "true" && plan.kind === "desktop") {
     const root = join(import.meta.dirname, "..");
@@ -36,7 +41,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     try { notes = readFileSync(join(root, "docs", "releases", `v${version}.md`), "utf8"); }
     catch (error) { if (error.code !== "ENOENT") throw error; }
     if (notes !== undefined) {
-      const platforms = [...plan.matrix.include.map(row => `win32-${row.arch}`), ...(includeMacos ? ["darwin-arm64"] : [])];
+      const platforms = plan.desktop_platforms.split(",");
       assertReleaseNotePlatforms(notes, process.env.GITHUB_REPOSITORY, `v${version}`, version, platforms);
     }
   }

@@ -26,6 +26,7 @@ export interface AppUpdateDialogProps {
     readonly plan?: "none" | "hot" | "full";
     readonly reason?: string | undefined;
     readonly blockedReason?: string | undefined;
+    readonly manualInstallUrl?: string | undefined;
   };
   readonly preview?: boolean;
   readonly isDownloading?: boolean;
@@ -91,9 +92,11 @@ export function AppUpdateDialog({
   const applying = isApplying || operation === "apply";
   const busy = downloading || applying;
   const [simulatedProgress, setSimulatedProgress] = useState(0);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ key: "appUpdate.demoUpdate" | "appUpdate.demoApplied" | "appUpdate.restarting" | "updates.readyToApply"; demo?: boolean } | null>(null);
+  const statusMessage = notice ? t(notice.key) + (notice.demo && marks ? ` ${t("appUpdate.demoUpdate")}` : "") : null;
   const [previewReady, setPreviewReady] = useState(false);
   const ready = preview ? previewReady : readyToApply;
+  const manualInstallUrl = update.manualInstallUrl ?? (preview && PLATFORM === "linux" && update.component !== "runtime" ? update.htmlUrl : undefined);
 
   const progressPct = preview
     ? simulatedProgress
@@ -122,14 +125,21 @@ export function AppUpdateDialog({
 
   const handleDownload = useCallback(async () => {
     if (busy || update.blockedReason) return;
-    setStatusMessage(null);
+    setNotice(null);
+    if (manualInstallUrl && !ready) {
+      if (preview) { if (marks) setNotice({ key: "appUpdate.demoUpdate" }); return; }
+      const openUrl = globalThis.ompStudioChrome?.openUrl;
+      if (openUrl) await openUrl({ url: manualInstallUrl });
+      else window.open(manualInstallUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
     if (preview) {
       if (previewReady) {
         setOperation("apply");
         previewTimersRef.current.push(setTimeout(() => {
           setOperation(null);
           setPreviewReady(false);
-          if (marks) setStatusMessage(t("appUpdate.demoApplied"));
+          if (marks) setNotice({ key: "appUpdate.demoApplied" });
         }, 600));
         return;
       }
@@ -142,7 +152,7 @@ export function AppUpdateDialog({
       timers.push(setTimeout(() => {
         setOperation(null);
         setPreviewReady(true);
-        setStatusMessage(t("updates.readyToApply") + (marks ? " " + t("appUpdate.demoUpdate") : ""));
+        setNotice({ key: "updates.readyToApply", demo: true });
       }, 1600));
       return;
     }
@@ -152,13 +162,13 @@ export function AppUpdateDialog({
       try {
         const ok = await action();
         if (ok) {
-          setStatusMessage(t(ready ? "appUpdate.restarting" : "updates.readyToApply"));
+          setNotice({ key: ready ? "appUpdate.restarting" : "updates.readyToApply" });
         }
       } finally {
         setOperation(null);
       }
     }
-  }, [busy, marks, preview, previewReady, ready, onApply, onDownloadAndInstall, t, update.blockedReason]);
+  }, [busy, marks, preview, previewReady, ready, onApply, onDownloadAndInstall, update.blockedReason, manualInstallUrl]);
 
   const openGithub = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -206,6 +216,7 @@ export function AppUpdateDialog({
         </div>
 
         <div className="create-project-body app-update-body" style={{ maxHeight: 320, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+          {manualInstallUrl && !ready ? <p>{t("appUpdate.linuxManualInstall")}</p> : null}
           {update.plan === "full" && update.reason !== "restart-update" ? <p>{t("updates.fullInstallerRequired")}{update.reason ? ` · ${update.reason}` : ""}</p> : null}
           {ready && !applying ? <p>{t("updates.readyToApply")}</p> : null}
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", opacity: 0.8 }}>
@@ -301,11 +312,11 @@ export function AppUpdateDialog({
             <button
               type="button"
               className="btn primary"
-              disabled={busy || Boolean(update.blockedReason) || (!preview && !(ready ? onApply : onDownloadAndInstall))}
+              disabled={busy || Boolean(update.blockedReason) || (!preview && !(ready ? onApply : manualInstallUrl || onDownloadAndInstall))}
               autoFocus
               onClick={handleDownload}
             >
-              {applying ? t("appUpdate.restarting") : downloading ? t("updates.downloading") : ready ? t("updates.applyAndRestart") : t("appUpdate.downloadAndInstall")}
+              {applying ? t("appUpdate.restarting") : downloading ? t("updates.downloading") : ready ? t("updates.applyAndRestart") : manualInstallUrl ? t("appUpdate.downloadInstaller") : t("appUpdate.downloadAndInstall")}
             </button>
           </div>
         </div>

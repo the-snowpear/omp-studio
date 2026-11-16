@@ -111,6 +111,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 
 | 功能 | 入口 | 说明 |
 |---|---|---|
+| 光效（关／柔和／标准／绚丽） | `apps/renderer/src/styles/light.css`；`lux/{lightLevel,activity}.ts`、`LuxOrbit.tsx`（Composer）、`LuxAmbient.tsx`、`LuxSpotlight.tsx`（AppShell）；设置 `settings/LocalSettings.tsx` 外观；分级 `perf/tiers.css`；定调页 `apps/renderer/light-lab.html` | `data-light` 以层集合写在 `<html>`；只叠加光不改底样式：复用 `--shadow-menu/modal`、零特异性卡片回退、独立光节点；L2 起全部移除，L1 静止循环，高对比/强制色关闭；有壁纸时不画环境光 |
 | 窗口配色与焦点 | `apps/renderer/src/dock/windowTint.ts`、`WindowFrame.tsx`、`dock.css`；`conversationWorkspace/{Header,Tabs,Workspace}.tsx`、`drag.ts`、`workspace.css`；`dock/DockDragPreview.tsx` | 对话按稳定的打开顺序取色，工具及其实例按类型取色；标题栏保留底色，当前窗口以同色边线与轻微外发光表示焦点；顶部窗口标签、浮窗内工具标签和拖动预览共用色调，深浅主题与真实／预览共用外壳 |
 | 挂载 / 无 Host 空态 | `apps/renderer/src/main.tsx` | `StudioClientImpl` + `createDesktopTransport`；缺桥则 `Unavailable` |
 | 壳布局、侧栏、底栏、路由 | `apps/renderer/src/App.tsx`（启动与连接）、`SecondaryPage.tsx`、`workbench/{AppShell,WorkbenchCanvas,AppTopbar,BottomPanelChrome}.tsx`、`sidebar/{AppSidebar,WorkspaceTree}.tsx`、`DeferredPanel.tsx`、`pageIntents.ts`、`shellModelLoader.ts` | 首页、历史、统计及非当前重面板首次可见才加载；二级页头由轻量 `SecondaryPage` 持有；会话动作 `workbench/sessionActions.ts`、重命名 `history/useSessionRename.ts`，分支操作 `git/useWorkbenchBranches.ts`、文件动作 `files/useWorkspaceFileActions.ts`；草稿、共享读取与稳定 Dock 宿主继续由现有服务持有 |
@@ -268,6 +269,7 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 功能 | Renderer | Desktop |
 |---|---|---|
 | 底栏终端 | `apps/renderer/src/TerminalPane.tsx`、`terminalSessions.tsx` | `terminal-ipc.ts`、`terminal-pty.ts`、`terminal-batch.ts`、`remote/terminal.ts`；本地/SSH 共用有界输出合批与退出尾部排空 |
+| tmux 控制模式 | `TerminalPane.tsx`、`tmux/*.tsx`、`terminalSessions.tsx`、`preview/tmuxPreview.ts`；设置 `settings/appSettings.ts`、`FontSettings.tsx` | `apps/desktop/src/tmux/*.ts`、`terminal-ipc.ts`、`preload.ts`；SSH 管道 `tmux -u -C`，窗口标签、原生布局分屏、背压、屏幕恢复和 detach；类型化动作只在 Desktop 生成命令，不进入 Host / Runtime。说明 `docs/tmux.md` |
 | 正文命令块执行 | `conversation/CommandBlock.tsx`、`commandBlock.css`、`markdown.tsx`；共用高亮语法 `highlight/commandLanguages.ts`；预览 `preview/conversationFixtures.ts` | `terminal-shared.ts` 的 `create.command` → `terminal-command.ts` / `terminal-pty.ts` / `remote/terminal.ts`；识别 bash/sh/zsh 与 pwsh/powershell/ps1，显式点击后在当前对话工作区创建独立终端，整块脚本作为 Shell 参数执行并显示底栏输出；流式未完成时禁用，预览仅本地演示；Worker 与开发高亮共用命令名/选项着色，PowerShell 两条路径均注册别名 |
 | GPU / 低配档位 | `apps/renderer/src/perf/{tierControl,tiers}.ts`、`tiers.css` | `perf-profile.ts` 判定、`perf-profile-cache.ts` 解析磁盘缓存、`perf-profile-shared.ts` 固定只读 preload；最新快照与用户减少动效偏好叠加，重复档位不写 DOM |
 | Shell 录制 / 回放 | `recordings/TerminalRecordingControls.tsx`、`RecordingPlayer.tsx`、`format.ts`、`recording.worker.ts`；产物库录制项 | `terminal-recording.ts` + 固定 terminal recording IPC；真实 PTY 输出流写入产物库；支持 `.studiocast` 和上游 `.ompcast` 只读回放，无额外 AgentSession/TUI |
@@ -296,24 +298,26 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 
 Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `event` / `close`（`packages/transport-desktop/src/channels.ts`）。不要再加通用 `invoke(channel, payload)`。
 
-## 平台层（Windows / macOS）
+## 平台层（Windows / macOS / Linux）
 
 平台差异集中在 `apps/desktop/src/platform/`，其余模块沿用 `{ platform, env, … }` 注入，不再散落 `process.platform`。Windows 的路径、文件名与行为由金样测试逐字钉住。
 
 | 主题 | 文件 | 说明 |
 |---|---|---|
-| 数据 / 日志 / Runtime / 更新目录 | `apps/desktop/src/platform/desktop-paths.ts` | Windows `%APPDATA%` / `%LOCALAPPDATA%` 不变；macOS 全在 `~/Library/Application Support/omp-studio`；打包资源 win32 取 exe 目录，darwin 取 `process.resourcesPath` |
-| 登录 shell 环境 | `platform/login-env.ts` | macOS 从访达启动只有 launchd 的精简 PATH；Host 创建前从登录 shell 取环境写入 `process.env`，补常见工具目录与 UTF-8 `LANG`；结果记 host 日志 `desktop.login_env` |
+| 数据 / 日志 / Runtime / 更新目录 | `apps/desktop/src/platform/desktop-paths.ts`、`scripts/runtime-signing-keys.mjs` | Windows `%APPDATA%` / `%LOCALAPPDATA%` 不变；macOS 在 `~/Library/Application Support/omp-studio`；Linux Host 状态与密钥在 `$XDG_CONFIG_HOME/omp-studio`（空或相对值回退 `~/.config`）；打包资源 win32 取 exe 目录，POSIX 取 `process.resourcesPath` |
+| 登录 shell 环境 | `platform/login-env.ts` | macOS 访达 / Linux 应用菜单启动时，Host 创建前从登录 shell 取环境写入 `process.env`；按平台补工具目录，Linux 缺失 LANG 时用 `C.UTF-8`；终端启动保留继承环境；结果记 host 日志 `desktop.login_env` |
 | Command Line Tools 垫片 | `platform/developer-tools.ts`、`git-process.ts` | 解析到 `/usr/bin/git` 且 CLT 缺失时不执行垫片（它会弹系统安装框），直接报 `CAPABILITY_UNAVAILABLE` |
 | 进程树终止 | `platform/process-tree.ts`；`studio-host/src/posix-process-group.ts` | Windows `taskkill /t /f`；POSIX 以独立进程组启动并 `kill(-pgid)`，已回收的组长不再发信号 |
-| 单实例权威锁 | `apps/desktop/src/authority-liveness.ts`；`platform-win32/src/authority-lock.ts`（`pathStyle`） | Windows named pipe；POSIX unix socket，连不上即残留，核对 uid 与 dev/ino 后回收 |
+| 单实例权威锁 | `apps/desktop/src/authority-liveness.ts`、`host-factory.ts`、`platform/desktop-paths.ts`；`platform-win32/src/authority-lock.ts`（`pathStyle`） | Windows named pipe；POSIX unix socket，连不上即残留，核对 uid 与 dev/ino 后回收；Linux 使用固定 `/tmp` 和 uid 隔离的 authority scope，避免多用户碰撞与 `TMPDIR` 漂移 |
 | Owner-only 权限 | `host-factory.ts` `applyOwnerOnlyPermissions` | Windows `icacls`；macOS `chmod 0700/0600` 后 `lstat` 复核 |
-| Runtime 平台表 | `runtime-installer/src/runtime-platform.ts`；`scripts/target-platform.mjs` | 入口 `omp.exe` / `omp`、更新平台 allowlist、PE / Mach-O 架构校验；两张表由测试钉齐 |
+| Runtime 平台表 | `runtime-installer/src/runtime-platform.ts`；`scripts/target-platform.mjs` | 入口 `omp.exe` / `omp`、更新平台（含 Linux x64）、PE / Mach-O / ELF 架构校验；两张表由测试钉齐 |
 | mac 构建预检 | `scripts/mac-toolchain.mjs` | Node arm64 且未转译、CLT、Bun ≥ 1.4.2、Rust host `aarch64-apple-darwin` |
 | 窗口外观 | `platform/window-chrome.ts`、`titlebar-overlay.ts`；renderer `App.css` `.app-titlebar`、`TipHost.tsx` | Windows 右上 caption overlay（可随主题换色）；macOS `hidden` + 红绿灯 `trafficLightPosition`，overlay 不换色；标题栏两侧由 `env(titlebar-area-x/width)` 让位，TipHost 按同一留白翻转气泡 |
 | 原生菜单栏 | `platform/app-menu.ts`、`app-menu-shared.ts`；renderer `workbench/AppShell.tsx` `runMenuCommand` | 仅 macOS；Edit 全用 role；自定义项经 `omp-studio:desktop:menu-command` 发 allowlist 命令 ID；这些组合键归菜单独占，renderer keydown 在 macOS 桌面跳过（`nativeMenuOwnsShortcuts`）；打包版无 Reload / DevTools |
 | 生命周期 | `composition.ts`、`platform/app-lifecycle.ts`、`platform/app-nap.ts` | macOS 关窗隐藏到 Dock，`activate` 重开，⌘Q 走 `requestQuit`；关机 / 注销有界关停且不拦截；忙时才持 `prevent-app-suspension`；不在「应用程序」时提示移动；relaunch 去掉 `-psn_*` |
 | 托盘 | `tray.ts`、`app-icon.ts` `resolveTrayIconPath`；`apps/desktop/resources-darwin/trayTemplate*.png`（`scripts/generate-tray-template.mjs` 生成） | macOS 用菜单栏模板图，首项「打开 OMP Studio」；模板图不在 Windows 的 `resources/` 内 |
+| Linux 客户端 / 安装包 | `host-factory.ts`、`platform/app-lifecycle.ts`、`floating-windows.ts`、`terminal-pty.ts`；`scripts/{preview,pack-linux,linux-bundle,audit-linux,linux-package-smoke}.mjs`、`packaging/linux/AppRun`、`.github/workflows/{ci,release}.yml` | POSIX Host、XDG 状态、原生 PTY、沙箱与窗口恢复；Ubuntu 24.04 / glibc 2.39 x64 的 AppImage / deb，签名 Runtime 放 `resources`；CI 安装 / X11 / Wayland 验收，Release 默认带 Linux；见 `docs/linux.md` |
+| Linux 更新与下载 | `update-coordinator.ts` 的 `manualDesktopDownload`；`settings/appUpdate.ts`、`AppUpdateDialog.tsx`；`scripts/{release-assets,build-update-assets-v2,publish-update-release}.mjs`；`website/shared/release.ts` | Linux 签名清单提供 AppImage / deb 手动下载，Runtime 仍可在线更新；最低桌面版本阻止不兼容下载；三套官网入口识别真实 Linux 附件 |
 | 终端 shell | `terminal-pty.ts` | macOS 账户 shell → `$SHELL` → `/bin/zsh`，login 启动（`-l`，管道 `-il`）；剔除 `ELECTRON_*`，设 `TERM_PROGRAM`；进程组终止；无工作区时 cwd 为家目录 |
 | 外部编辑器 / 打开方式 | `external-editor.ts`；`main.ts` 打开方式 | macOS 查 `/Applications`、`~/Applications` 中的 VS Code / Insiders / Cursor / Windsurf，再查登录 PATH；「打开方式」选择框从 `/Applications` 开始；`rundll32` 仅 Windows |
 | 麦克风 / TCC | `chrome-media-access.ts`；renderer `media/microphoneAccess.tsx` | macOS 先查 `getMediaAccessStatus`，未决时 `askForMediaAccess`；拒绝后 renderer 提供「打开系统设置」（固定 URL）；其他平台不经这一步，采集时序不变 |

@@ -1,0 +1,267 @@
+/* ============================================================
+   OMP Studio — Light
+   ------------------------------------------------------------
+   Light is a layer on top of the flat UI, never a restyle of it. Colours,
+   borders, backgrounds, radii and spacing stay what tokens.css and the
+   component files say; this file only adds glow, rim highlights and soft
+   shadow. `data-light="off"` is therefore the flat UI, pixel for pixel.
+
+   The 光效 setting (Settings → 外观) writes one attribute on <html>, as a set
+   of included layers like `data-perf-tier`:
+
+     off       off
+     soft      soft                 state light: a surface that is working,
+                                    waiting or alive
+     standard  std soft             + material light: menus, dialogs,
+                                    floating windows and cards catch light
+     vivid     vivid std soft       + the ambient field and the pointer
+                                    spotlight
+
+   Every alpha below is multiplied by `--lux-k`, the level's strength.
+
+   Light reaches the UI by three routes only, so it can never take over a
+   property a component owns:
+   1. Tokens the components already spend (`--shadow-menu`, `--shadow-modal`,
+      the dock window's `--window-*-shadow`).
+   2. Zero-specificity fallbacks (`:where(...) :where(...)`): wherever a
+      component declares its own box-shadow (a hover halo, a focus ring) the
+      component wins and the light steps aside.
+   3. Light nodes of their own (`.lux-orbit`, `.lux-halo`, `.lux-ambient`,
+      `.lux-spot`): aria-hidden, pointer-events none, no borrowed pseudo
+      elements.
+
+   Performance: perf/tiers.css removes every shadow and light node from L2
+   down; L1 (reduced motion) keeps the light and stills its loops through the
+   one policy at the end of motion.css. Nothing here animates anything but
+   opacity, translate, rotate and scale.
+   ============================================================ */
+
+/* ---------- Level strength ---------- */
+:root { --lux-k: 0; }
+:root[data-light~="soft"] { --lux-k: 0.6; }
+:root[data-light~="std"] { --lux-k: 1; }
+:root[data-light~="vivid"] { --lux-k: 1.25; }
+
+/* ---------- Light colours per theme ----------
+   Dark adds light: a faint white rim on the top edge and glow in the accent.
+   Light cannot glow on white, so it speaks in shadow instead: a white rim,
+   and soft shadow tinted toward the accent rather than grey. */
+:root {
+  --lux-rim: rgb(255 255 255 / 0.9);
+  --lux-shade: rgb(52 40 120 / 0.07);
+  --lux-shade-deep: rgb(52 40 120 / 0.14);
+  --lux-glow: var(--accent);
+  /* Peak alpha of the ambient field and the spotlight before --lux-k. */
+  --lux-field-a: 5%;
+  --lux-spot-a: 7%;
+}
+:root[data-theme="dark"] {
+  --lux-rim: rgb(255 255 255 / 0.065);
+  --lux-shade: rgb(0 0 0 / 0.28);
+  --lux-shade-deep: rgb(0 0 0 / 0.5);
+  --lux-field-a: 9%;
+  --lux-spot-a: 10%;
+}
+
+/* ==========================================================
+   Material light (standard and up)
+   ========================================================== */
+
+/* Menus, popovers, dialogs: they already spend these two tokens, which are
+   `none` in the flat UI. Specificity (0,3,0)/(0,4,0) so they win over the
+   theme blocks in tokens.css whatever the source order. */
+:root:root[data-light~="std"] {
+  --shadow-menu:
+    inset 0 1px 0 var(--lux-rim),
+    0 2px 6px -2px var(--lux-shade),
+    0 12px 32px -10px var(--lux-shade-deep);
+  --shadow-modal:
+    inset 0 1px 0 var(--lux-rim),
+    0 4px 14px -4px var(--lux-shade),
+    0 28px 72px -18px var(--lux-shade-deep);
+}
+:root:root[data-light~="std"][data-theme="dark"] {
+  --shadow-menu:
+    inset 0 1px 0 var(--lux-rim),
+    0 2px 6px -2px var(--lux-shade),
+    0 14px 36px -10px var(--lux-shade-deep),
+    0 0 calc(40px * var(--lux-k)) -16px color-mix(in srgb, var(--lux-glow) calc(40% * var(--lux-k)), transparent);
+  --shadow-modal:
+    inset 0 1px 0 var(--lux-rim),
+    0 4px 14px -4px var(--lux-shade),
+    0 30px 80px -18px var(--lux-shade-deep),
+    0 0 calc(80px * var(--lux-k)) -24px color-mix(in srgb, var(--lux-glow) calc(34% * var(--lux-k)), transparent);
+}
+
+/* Floating windows keep their own drop shadow; the focused one's tint halo
+   grows with the level (dock.css draws it at the "off" strength). */
+:root[data-light~="std"] .dock-float.is-active-window {
+  --window-focus-shadow:
+    0 0 0 1px color-mix(in srgb, var(--window-tint) 55%, transparent),
+    0 0 calc(28px * var(--lux-k)) color-mix(in srgb, var(--window-tint) calc(24% * var(--lux-k)), transparent);
+}
+
+/* Cards: a rim on the top edge and a short soft shadow. Zero specificity, so
+   any card that already declares a box-shadow (hover halos, selection) keeps
+   its own. */
+:where(:root[data-light~="std"]) :where(
+  .card, .cap-item, .hub-card, .proj-card, .tk-card, .diag-card, .perm-card,
+  .pv-card, .yml-card, .sk-card, .env-card, .context-card, .session-card,
+  .dock-launcher-card, .approval-card, .ask-card
+) {
+  box-shadow:
+    inset 0 1px 0 var(--lux-rim),
+    0 1px 2px var(--lux-shade),
+    0 8px 20px -14px var(--lux-shade-deep);
+}
+
+/* ==========================================================
+   State light (soft and up)
+   ========================================================== */
+
+/* Running dots glow in their own colour; the glow rides the dot's existing
+   opacity pulse, so it costs no animation of its own. */
+:where(:root[data-light~="soft"]) :where(.dot.pulse) {
+  box-shadow: 0 0 calc(8px * var(--lux-k)) calc(1px * var(--lux-k)) color-mix(in srgb, var(--lux-dot, var(--accent)) calc(70% * var(--lux-k)), transparent);
+}
+:where(.dot.green) { --lux-dot: var(--green); }
+:where(.dot.amber) { --lux-dot: var(--amber); }
+:where(.dot.red) { --lux-dot: var(--red); }
+:where(.dot.blue) { --lux-dot: var(--blue); }
+
+/* A surface that is working: the composer while the agent runs.
+   `.lux-halo` is an outer glow (an outer box-shadow is only drawn outside the
+   border box, so the node can sit over the content transparently).
+   `.lux-orbit` is a light travelling round the border: a static ring mask
+   over an oversized conic square that turns with `rotate`, so the motion is
+   composited and never repaints the composer. */
+.lux-halo,
+.lux-orbit {
+  display: none;
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+}
+:root[data-light~="soft"] :is(.lux-halo, .lux-orbit)[data-state="running"],
+:root[data-light~="soft"] .lux-halo[data-state="waiting"] {
+  display: block;
+}
+
+.lux-halo {
+  --lux-halo-c: var(--lux-glow);
+  box-shadow: 0 0 calc(30px * var(--lux-k)) calc(-4px * var(--lux-k)) color-mix(in srgb, var(--lux-halo-c) calc(42% * var(--lux-k)), transparent);
+}
+:root:not([data-theme="dark"]) .lux-halo {
+  box-shadow: 0 calc(10px * var(--lux-k)) calc(30px * var(--lux-k)) calc(-8px * var(--lux-k)) color-mix(in srgb, var(--lux-halo-c) calc(40% * var(--lux-k)), transparent);
+}
+/* Waiting on the user: an amber halo breathing at the pulse tempo. */
+.lux-halo[data-state="waiting"] {
+  --lux-halo-c: var(--amber);
+  animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite;
+}
+
+.lux-orbit {
+  padding: 1.5px;
+  overflow: hidden;
+  container-type: size;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.lux-orbit::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: hypot(100cqw, 100cqh);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  background: conic-gradient(
+    transparent 0 56%,
+    color-mix(in srgb, var(--lux-glow) calc(55% * var(--lux-k)), transparent) 74%,
+    var(--lux-glow) 85%,
+    var(--blue) 90%,
+    transparent 97%
+  );
+  animation: omp-spin var(--loop-orbit) linear infinite;
+}
+
+/* ==========================================================
+   Ambient field (vivid)
+   A few large, soft spots of light over the workbench, below menus and
+   dialogs. It brightens while an agent works and settles when idle. With a
+   wallpaper on (`data-backdrop="on"`) the wallpaper is the atmosphere and the
+   field stays out of its way.
+   ========================================================== */
+.lux-ambient { display: none; }
+:root[data-light~="vivid"]:not([data-backdrop="on"]) .lux-ambient {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-fab);
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+  opacity: 0.55;
+  transition: opacity var(--dur-slower) var(--ease);
+}
+:root[data-light~="vivid"] .lux-ambient[data-activity="running"] { opacity: 1; }
+:root[data-light~="vivid"] .lux-ambient[data-activity="waiting"] { opacity: 0.8; }
+.lux-ambient > i {
+  position: absolute;
+  width: 64vmax;
+  height: 64vmax;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--lux-c) calc(var(--lux-field-a) * var(--lux-k)), transparent), transparent);
+  animation: omp-field-drift var(--loop-ambient) var(--ease-loop) infinite alternate;
+}
+.lux-ambient > i:nth-child(1) { --lux-c: var(--lux-glow); --drift-x: 6vmax; --drift-y: 4vmax; left: -22vmax; top: -30vmax; }
+.lux-ambient > i:nth-child(2) { --lux-c: var(--blue); --drift-x: -5vmax; --drift-y: -4vmax; right: -24vmax; bottom: -32vmax; animation-delay: calc(var(--loop-ambient) / -3); }
+.lux-ambient > i:nth-child(3) { --lux-c: var(--lux-tint, var(--tint-pink)); --drift-x: 4vmax; --drift-y: -5vmax; width: 40vmax; height: 40vmax; left: 40%; top: 30%; animation-delay: calc(var(--loop-ambient) / -1.5); }
+.lux-ambient[data-activity="waiting"] > i:nth-child(3) { --lux-c: var(--amber); }
+
+/* ==========================================================
+   Pointer spotlight (vivid)
+   One node for the whole window. LuxSpotlight lays it over the card or row
+   under the pointer and moves the light inside it; the target's own styles
+   are never touched. Not inside the conversation stream.
+   ========================================================== */
+.lux-spot { display: none; }
+:root[data-light~="vivid"] .lux-spot {
+  display: block;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: var(--z-fab);
+  pointer-events: none;
+  opacity: 0;
+  overflow: hidden;
+  background: radial-gradient(
+    260px circle at var(--mx, 50%) var(--my, 50%),
+    color-mix(in srgb, var(--lux-glow) calc(var(--lux-spot-a) * var(--lux-k)), transparent),
+    transparent 70%
+  );
+  transition: opacity var(--dur-fast) var(--ease);
+}
+:root[data-light~="vivid"] .lux-spot[data-on] { opacity: 1; }
+
+/* ==========================================================
+   Accessibility: forced colours and "more contrast" turn light off. The
+   chained :root out-ranks every level rule above.
+   ========================================================== */
+@media (forced-colors: active), (prefers-contrast: more) {
+  :root:root:root:root:root {
+    --lux-k: 0;
+    --lux-rim: transparent;
+    --lux-shade: transparent;
+    --lux-shade-deep: transparent;
+    --shadow-menu: none;
+    --shadow-modal: none;
+  }
+  .lux-halo,
+  .lux-orbit,
+  .lux-ambient,
+  .lux-spot {
+    display: none !important;
+  }
+}

@@ -121,6 +121,7 @@ import {
 import type { DesktopTray, DesktopWindowFactory, DesktopWindowSurface } from "./types.js";
 import { createProductionHostFactory } from "./host-factory.js";
 import { defaultHostLogsDirectory } from "./host-log.js";
+import { TmuxControlManager } from "./tmux/manager.js";
 import { desktopPaths } from "./platform/desktop-paths.js";
 import { applyLoginEnvironment } from "./platform/login-env.js";
 import {
@@ -237,10 +238,11 @@ export async function main(): Promise<void> {
   if (process.platform === "win32") {
     app.setAppUserModelId(resolveAppUserModelId());
   }
+  if (process.platform === "linux") app.setDesktopName("omp-studio.desktop");
   await app.whenReady();
   initDesktopLanguage(app.getLocale());
   if (await offerMoveToApplications()) return;
-  // A Finder launch has launchd's bare PATH; the Host waits for the login shell's before spawning.
+  // GUI launchers have a minimal PATH; resolve the user's tools before spawning the Host.
   const loginEnvironment = applyLoginEnvironment({ locale: app.getLocale() });
 
   const runtimeInstallLayout = packagedRuntimeInstallLayout({
@@ -348,7 +350,7 @@ export async function main(): Promise<void> {
   powerMonitor.on("on-ac", () => { void perfProfiles.refresh(true); });
   // Runs once the renderer has booted: a macOS update commits only then.
   let confirmMacDesktop: (() => Promise<void>) | undefined;
-  if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined)) {
+  if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined || process.platform === "linux" && process.arch === "x64")) {
     const { PreparedNsisUpdater, electronDifferentialDownload } = await import("./electron-update-adapter.js");
     const shared = {
       root: desktopPaths().updatesV2Root,
@@ -362,7 +364,9 @@ export async function main(): Promise<void> {
       fetcher: net.fetch.bind(net) as typeof fetch, log: hostFactory.log,
       restart: () => { app.relaunch({ args: relaunchArguments(process.argv) }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
     };
-    if (macBundle === undefined) {
+    if (process.platform === "linux") {
+      updateCoordinator = new UpdateCoordinator({ ...shared, manualDesktopDownload: process.env.APPIMAGE ? "app" : "firstInstall" });
+    } else if (macBundle === undefined) {
       const updater = new PreparedNsisUpdater();
       updateCoordinator = new UpdateCoordinator({
         ...shared,
@@ -409,6 +413,7 @@ export async function main(): Promise<void> {
     connected: (id, remote, signal, report) => connectRemoteServices(remoteConnections, id, remote, signal, report, remoteVault, url => session.defaultSession.resolveProxy(url), memoryCredentials, timeTravelService(activeProfileDirectory())),
   });
   const remoteTerminals = new RemoteTerminalManager(remoteConnections);
+  const tmux = new TmuxControlManager({ connections: remoteConnections, log: (level, event, detail) => hostFactory.log?.write(level, event, JSON.stringify(detail)) });
   const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);
   const mediaUploads = new MediaUploadManager(activeArtifactLibrary);
   const dictationAudio = new DesktopDictationAudio({
@@ -427,8 +432,8 @@ export async function main(): Promise<void> {
   const terminalManager = new TerminalSessionManager({
     recording: terminalRecordings,
     spawner: createNodePtySpawner(),
-    // A Finder launch starts in "/"; a new Mac terminal without a project opens in the home folder.
-    resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? (process.platform === "darwin" ? homedir() : process.cwd()),
+    // GUI launches on POSIX may start in "/"; open an unbound terminal in the home folder.
+    resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? (process.platform === "win32" ? process.cwd() : homedir()),
   });
 
   const editorDialogFilters = (platform: NodeJS.Platform): Array<{ name: string; extensions: string[] }> => {
@@ -583,7 +588,7 @@ export async function main(): Promise<void> {
       isPackaged: app.isPackaged,
       bundledVersion: app.getVersion(),
       // A macOS hot payload would live inside the signed bundle; the bundle is the only layout there.
-      forceBaseline: process.argv.includes("--omp-baseline") || process.platform === "darwin",
+      forceBaseline: process.argv.includes("--omp-baseline") || process.platform !== "win32",
       runtime: {
         electron: process.versions.electron,
         modules: process.versions.modules,
@@ -635,7 +640,7 @@ export async function main(): Promise<void> {
       openExternal: (url) => { void shell.openExternal(url); },
     });
     const windowSurface = window as typeof window & DesktopWindowSurface;
-    installDevelopmentTools((window as BrowserWindow).webContents, process.platform === "win32" && !app.isPackaged);
+    installDevelopmentTools((window as BrowserWindow).webContents, process.platform !== "darwin" && !app.isPackaged);
     if (validAppIcon !== undefined && typeof window.setIcon === "function") {
       window.setIcon(validAppIcon);
     }
@@ -643,6 +648,7 @@ export async function main(): Promise<void> {
     // `dispose` removes handlers before Host shutdown on app quit.
     const floatingWindows = registerFloatingWindows({
       parent: window as BrowserWindow, ipcMain, allowedOrigin, preloadPath,
+      restoreMainOnLastClose: process.platform === "linux",
       areas: () => screen.getAllDisplays().map(display => display.workArea),
       isQuitting: context.isQuitting, openExternal: url => { void shell.openExternal(url); },
       onWindow: child => desktopConversationViews.registerWindow(child.webContents, false),
@@ -704,7 +710,7 @@ export async function main(): Promise<void> {
     const remoteIpc = registerRemoteIpc({ ipc: ipcMain, manager: remoteConnections, isTrusted: isTrustedSender, installRuntime: async id => {
       const picked = await dialog.showOpenDialog(window, { title: desktopText("选择匹配远端系统的签名 Runtime ZIP", "Select Signed Runtime ZIP Matching the Remote OS"), properties: ["openFile"], filters: [{ name: "OMP Studio Runtime", extensions: ["zip"] }] });
       if (picked.canceled || !picked.filePaths[0]) return { installed: false };
-      if (remoteTerminals.hasTarget(id)) throw new Error(desktopText("请先关闭这个 SSH 目标的终端，再安装 Runtime", "Close terminals for this SSH target before installing the Runtime"));
+      if (remoteTerminals.hasTarget(id) || tmux.hasTarget(id)) throw new Error(desktopText("请先关闭这个 SSH 目标的终端，再安装 Runtime", "Close terminals for this SSH target before installing the Runtime"));
       await installRemoteRuntime(remoteConnections, id, picked.filePaths[0], trustedKeys);
       return { installed: true };
     } });
@@ -908,6 +914,7 @@ export async function main(): Promise<void> {
       isTrustedSender,
       manager: terminalManager,
       remote: remoteTerminals,
+      tmux,
       activeRemote: () => remoteConnections.activeId,
       resolveWorkspaceCwd: workspaceId => hostFactory.resolveWorkspaceCwd(workspaceId),
       recordings: terminalRecordings,
@@ -1117,7 +1124,7 @@ export async function main(): Promise<void> {
 
   const application = createDesktopApplication({
     confirmBeforeQuit: () => fileViewerIpc?.requestClose() ?? Promise.resolve(true),
-    beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await remoteConnections.close(); remoteVault.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await tmux.disposeAll(); await remoteConnections.close(); remoteVault.close(); macSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
     platform: process.platform,
@@ -1146,36 +1153,44 @@ export async function main(): Promise<void> {
       app.on("window-all-closed", listener);
     },
     createTray: ({ openWindow, requestQuit }) => {
-      const tray = createAppTray({
-        electron: {
-          createImageFromPath: (iconPath) => nativeImage.createFromPath(iconPath),
-          buildMenu: (template) => Menu.buildFromTemplate([...template]),
-          createTrayFromImage: (image) => {
-            const electronTray = new Tray(image as NativeImage);
-            return {
-              setToolTip: (toolTip: string) => electronTray.setToolTip(toolTip),
-              setContextMenu: (menu: object) => electronTray.setContextMenu(menu as Menu),
-              on: (event: "click", listener: () => void) => electronTray.on(event, listener),
-              displayBalloon: (options: { icon?: object; title: string; content: string }) =>
-                electronTray.displayBalloon({ ...options, icon: image as NativeImage }),
-              isDestroyed: () => electronTray.isDestroyed(),
-              destroy: () => electronTray.destroy(),
-            };
+      // Tray construction can fail on Linux. A successful object still does
+      // not prove visibility; handleMainWindowClose owns the close policy.
+      try {
+        const tray = createAppTray({
+          electron: {
+            createImageFromPath: (iconPath) => nativeImage.createFromPath(iconPath),
+            buildMenu: (template) => Menu.buildFromTemplate([...template]),
+            createTrayFromImage: (image) => {
+              const electronTray = new Tray(image as NativeImage);
+              return {
+                setToolTip: (toolTip: string) => electronTray.setToolTip(toolTip),
+                setContextMenu: (menu: object) => electronTray.setContextMenu(menu as Menu),
+                on: (event: "click", listener: () => void) => electronTray.on(event, listener),
+                displayBalloon: (options: { icon?: object; title: string; content: string }) =>
+                  electronTray.displayBalloon({ ...options, icon: image as NativeImage }),
+                isDestroyed: () => electronTray.isDestroyed(),
+                destroy: () => electronTray.destroy(),
+              };
+            },
           },
-        },
-        iconPath: resolveTrayIconPath({ appPath: app.getAppPath(), platform: process.platform }),
-        persistRoot: resolveProfilePersistRoot(app.getPath("appData")),
-        locale: getDesktopLanguage(),
-        onOpen: openWindow,
-        onQuit: requestQuit,
-      });
-      if (tray === undefined) {
-        console.log("[omp-studio] tray unavailable; window close keeps quit behavior");
+          iconPath: resolveTrayIconPath({ appPath: app.getAppPath(), platform: process.platform }),
+          persistRoot: resolveProfilePersistRoot(app.getPath("appData")),
+          locale: getDesktopLanguage(),
+          onOpen: openWindow,
+          onQuit: requestQuit,
+        });
+        if (tray === undefined) {
+          console.log("[omp-studio] tray unavailable; window close keeps quit behavior");
+          return undefined;
+        }
+        closeToTrayEnabled = true;
+        trayRef = tray;
+        return tray;
+      } catch (error) {
+        if (process.platform !== "linux") throw error;
+        console.warn(`[omp-studio] tray unavailable: ${String(error)}`);
         return undefined;
       }
-      closeToTrayEnabled = true;
-      trayRef = tray;
-      return tray;
     },
     confirmQuitWhileBusy: async () => {
       const options = quitBusyMessageBoxOptions(quitBusyDialogStrings(getDesktopLanguage()));

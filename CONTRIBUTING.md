@@ -28,9 +28,10 @@ npm run omp:keys          # first machine only
 npm run check
 ```
 
-Windows is the supported desktop. Node.js 22+ is required. Building the
-managed Runtime also needs Bun and a working MSVC / Rust toolchain; the
-install script documents those.
+Windows, Apple Silicon macOS and Linux x64 have native desktop packaging
+commands (see [Linux setup](docs/linux.md) for its AppImage / deb build). Node.js 22+ is required for development. Building the
+managed Runtime also needs Bun, Rust and a native C/C++ toolchain for the target
+platform; the Runtime development documentation records the pinned versions.
 
 The root `mermaid` development dependency mirrors the renderer's version so
 npm 11 applies the root KaTeX override when updating a cached workspace tree.
@@ -43,6 +44,9 @@ Keep the two Mermaid declarations aligned; rendering continues to use Mermaid 11
    [`doc/feature-index.md`](doc/feature-index.md) instead of a repo-wide search.
 3. Preview-mode pages must keep **both** preview fixtures and the real Host
    read model. Never fill an empty real surface with mock data.
+   User-facing copy must cover Chinese and English in both paths. Follow
+   [`docs/localization.md`](docs/localization.md), including live language
+   switching and the distinction between display labels and stored content.
 4. Do not edit `omp-patch/patches/*.patch` by hand. Apply the overlay, edit
    inside `omp-patch/vendor/oh-my-pi`, then `npm run omp:patches:regen`.
 5. Do not commit `backup/`, `node_modules/`, `dist/`, Host logs, signing
@@ -75,6 +79,8 @@ Use the GitHub PR template. At minimum:
 - [ ] Relevant checks recorded (`npm run check` for core regression; docs-only changes need no tests)
 - [ ] `CHANGELOG.md` updated when the change is user-facing
 - [ ] Preview and real data paths both handled, if you touched a read surface
+- [ ] Chinese and English copy covered, including empty/error states and accessibility labels, if UI copy changed
+- [ ] Live language switching checked on the affected surface; cache, Runtime/SSH compatibility and preserved drafts covered where affected ([guide](docs/localization.md))
 - [ ] No secrets, local paths, or `backup/` files
 
 ## Code of conduct

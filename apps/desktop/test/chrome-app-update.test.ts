@@ -81,10 +81,33 @@ describe("chrome-app-update", () => {
       assert.deepEqual(findInstallerAsset(assets, "darwin"), { name: "OMP-Studio-0.2.0-macos-arm64.dmg", downloadUrl: "https://example.com/mac.dmg", size: 3 });
       assert.equal(findInstallerAsset(assets, "win32")?.name, "OMP-Studio-Setup-0.2.0-windows-x64.exe");
       assert.equal(findInstallerAsset(assets.slice(0, 2), "darwin"), undefined);
+      const linux = [
+        ...assets,
+        { name: "OMP-Studio-0.2.2-linux-arm64.AppImage", browser_download_url: "https://example.com/linux-arm64.AppImage" },
+        { name: "OMP-Studio-0.2.2-linux-x64.AppImage", browser_download_url: "https://example.com/linux-x64.AppImage" },
+      ];
+      assert.equal(findInstallerAsset(linux, "linux", "x64")?.downloadUrl, "https://example.com/linux-x64.AppImage");
     });
   });
 
   describe("checkGitHubReleaseUpdate", () => {
+    test("Linux exposes release notes without offering a Windows desktop installer", async () => {
+      const result = await checkGitHubReleaseUpdate({
+        currentVersion: "0.1.3", platform: "linux",
+        fetcher: async () => new Response(JSON.stringify({
+          tag_name: "v0.2.0", html_url: "https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.0",
+          assets: [
+            { name: "OMP-Studio-Setup-0.2.0-windows-x64.exe", browser_download_url: "https://example.com/setup.exe" },
+            { name: "omp-studio-remote-0.2.0-linux-x64.tar.gz", browser_download_url: "https://example.com/remote.tar.gz" },
+          ],
+        })),
+      });
+      assert.equal(result.version, "0.2.0");
+      assert.ok(result.htmlUrl);
+      assert.equal(result.downloadUrl, undefined);
+      assert.equal(result.assetName, undefined);
+    });
+
     test("returns update info when newer release is found", async () => {
       const release: GitHubReleaseResponse = {
         tag_name: "v0.1.4",
