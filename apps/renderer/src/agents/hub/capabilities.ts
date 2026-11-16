@@ -54,12 +54,15 @@ export function missingCap(
   return !entry || entry.grade === "unavailable";
 }
 
-function lockedWhy(agent: HubAgent, zh: boolean): string {
+/** What the gate reads from an agent: Hub rows and the Agents deck both satisfy it. */
+export type CapsSubject = Pick<HubAgent, "kind" | "status" | "readOnly" | "isolated" | "canRevive">;
+
+function lockedWhy(agent: CapsSubject, zh: boolean): string {
   return isAdvisor(agent) ? (zh ? "只读" : "Read-only") : "read-only";
 }
 
 export function capsFor(
-  agent: HubAgent | undefined,
+  agent: CapsSubject | undefined,
   connOnline: boolean,
   capabilities: ClientBootstrap["capabilityManifest"] | undefined,
   hasClient: boolean,

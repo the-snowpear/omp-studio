@@ -135,7 +135,7 @@ export function sparkLevel(tokens: number): number {
   return Math.max(1, Math.min(3, Math.round(tokens / 40000)));
 }
 
-function hubStatus(status: StudioAgentSnapshot["status"]): HubStatus {
+export function hubStatus(status: StudioAgentSnapshot["status"]): HubStatus {
   if (status === "starting" || status === "running" || status === "reviving")
     return "running";
   if (status === "idle") return "idle";
@@ -160,7 +160,7 @@ export function hubDurationMs(agent: HubAgent, now: number): number | undefined 
   return Math.max(0, ended - agent.startedAt);
 }
 
-export function isAdvisor(agent: HubAgent): boolean {
+export function isAdvisor(agent: Pick<HubAgent, "kind">): boolean {
   return agent.kind === "advisor";
 }
 

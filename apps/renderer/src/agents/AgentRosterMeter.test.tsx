@@ -23,15 +23,15 @@ describe("Agent status in dock chrome", () => {
       <DockProvider definitions={WORKBENCH_PANELS} store={store}><div className="adaptive-workbench"><div className="convo-wrap"><DockRail mode={mode} /></div></div>
         <AgentRosterMeter agents={agents} ready source={source} /></DockProvider>;
     const view = render(draw("expanded"));
-    expect(screen.getByRole("button", { name: /Agents · 3 个子代理 · 1 失败 · 2 运行/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Agents · 5 个子代理 · 1 失败 · 3 运行 · 1 未运行/ })).toBeTruthy();
     expect(document.querySelector(".agent-roster")).toBeNull();
     agents = agents.map(agent => agent.kind === "main" ? agent : { ...agent, status: "idle" });
     view.rerender(draw("expanded"));
-    expect(screen.getByRole("button", { name: /Agents · 3 个子代理 · 3 未运行/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Agents · 5 个子代理 · 5 未运行/ })).toBeTruthy();
     act(() => store.dispatch({ type: "railMode", mode: "compact" }));
     view.rerender(draw("compact", "offline"));
-    const icon = screen.getByRole("button", { name: /Agents · 已断连 · 3 个子代理 · 3 未运行/ });
-    expect(icon.querySelector(".dock-meter-badge")?.textContent).toBe("3");
+    const icon = screen.getByRole("button", { name: /Agents · 已断连 · 5 个子代理 · 5 未运行/ });
+    expect(icon.querySelector(".dock-meter-badge")?.textContent).toBe("5");
     expect(icon.querySelector('.dock-meter-ring-value[data-category="inactive"]')?.getAttribute("stroke-dasharray")).toBe("100 100");
     expect(icon.getAttribute("data-tip")).toContain("上次收到的状态");
     expect(document.querySelector(".agent-roster")).toBeNull();
@@ -40,7 +40,7 @@ describe("Agent status in dock chrome", () => {
   it("keeps preview waiting states isolated, and distinguishes loading from an empty roster", () => {
     const base = { agents: PREVIEW_DOCK_AGENTS, ready: true, source: "live" as const, zh: true, marks: false };
     const demo = buildAgentRosterMeter({ ...base, preview: true });
-    expect(demo.counts.map(item => [item.id, item.count])).toEqual([["failed", 1], ["waiting", 1], ["running", 1]]);
+    expect(demo.counts.map(item => [item.id, item.count])).toEqual([["failed", 1], ["waiting", 1], ["running", 2], ["inactive", 1]]);
     expect(demo.label).not.toContain("演示");
     expect(buildAgentRosterMeter({ ...base, preview: false }).counts.some(item => item.id === "waiting")).toBe(false);
     expect(buildAgentRosterMeter({ ...base, preview: false, ready: false }).emptyLabel).toBe("读取中");

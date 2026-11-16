@@ -13,7 +13,7 @@ import { DockPanel, useAgentDockLayout, useDockEngine } from "../dock/DockContex
 import { DockGroupRegion, DockRail, DockCapsules, DockKeyboard } from "../dock/DockRegions";
 import { useBottomToggleClearance } from "../dock/revealClearance";
 import { locatePanel } from "../dock/model";
-import { agentPanelId, type AgentPanelId, type PanelId } from "../dock/types";
+import { agentPanelId, panelBaseId, type AgentPanelId, type PanelId } from "../dock/types";
 import { DeferredPanel, lazyPanel } from "../DeferredPanel";
 import { DictationControl } from "../composer/DictationControl";
 import { useExecutionTarget, useTargetMemory } from "../workspaces/ExecutionTargets";
@@ -77,14 +77,14 @@ import { ConversationEmpty } from "../conversation/ConversationEmpty";
 import { ConversationPane } from "../conversation/ConversationPane";
 import { CommandBlockProvider } from "../conversation/CommandBlock";
 import { SubagentHoverProvider } from "../conversation/SubagentHoverPreview";
-import { AgentRosterPanel } from "../agents/AgentRosterPanel";
-import { AgentRosterMeter } from "../agents/AgentRosterMeter";
+import { AgentsDock } from "../agents/deck/AgentsDock";
+import type { DeckLinks } from "../agents/deck/AgentDeck";
 import { BackgroundTasksDock } from "../backgroundTasks/BackgroundTasksDock";
 import { AgentDetailPanel } from "../agents/AgentDetailPanel";
 import { getPreviewDockAgents } from "../preview/agentDockPreview";
 import { sharedSubagentViewBook, subagentViewKey } from "../conversation/subagentViewState";
 import { agentPresentation } from "../agents/agentPresentation";
-import { collectLatestPlanDocument, SESSION_CHANGE_LAST_ID, sessionTaskProgress, type SubagentHubTarget } from "../conversation/toolMeta";
+import { collectAgents, collectLatestPlanDocument, SESSION_CHANGE_LAST_ID, sessionTaskProgress, type SubagentHubTarget } from "../conversation/toolMeta";
 import { TaskProgressDock } from "../conversation/TaskProgressDock";
 import { SessionChanges } from "../conversation/SessionChanges";
 import { ChangesDockMeter } from "../conversation/ChangesDockMeter";
@@ -461,6 +461,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       ...(agent?.resolvedModel === undefined ? {} : { resolvedModel: agent.resolvedModel }),
       ...(agentParentSessionId === undefined ? {} : { parentSessionId: agentParentSessionId }) } } });
   }, [agentScope, agentParentSessionId, dock.store, dockAgents]);
+  /** The deck's BTW action opens the agent's tab on its BTW page; the serial lets a repeat request re-apply. */
+  const [agentBtwIntent, setAgentBtwIntent] = useState<{ agentId: string; serial: number } | null>(null);
   const connection = state.clientState?.connection;
   const runtime = connection?.runtime ?? state.bootstrap?.runtime;
   const commands = state.clientState?.commands ?? {};
@@ -2102,6 +2104,44 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     }
     return false;
   }
+  const revealDeckDestination = (panel?: PanelId) => {
+    revealMainWindow();
+    for (const group of dock.store.getSnapshot().layout.floats) {
+      if (group.maximized && group.panels.some(id => panelBaseId(id) === "agents") && (!panel || !group.panels.includes(panel))) {
+        dock.store.dispatch({ type: "float", groupId: group.id, maximized: false });
+      }
+    }
+  };
+  const goMainAgent = () => { revealDeckDestination(); onRoute("workbench"); composerInputRef.current?.focus(); };
+  const openRosterAgent = (agent: StudioAgentSnapshot) => {
+    revealDeckDestination(agentPanelId(agentScope, agent.agentId));
+    openAgentDetail({ agentId: agent.agentId, displayName: agent.displayName, ...(agent.assignment === undefined ? {} : { task: agent.assignment }) });
+  };
+  /** The delegation that spawned an agent, when its card is among the loaded conversation rows. */
+  const agentSourceCall = (agentId: string): string | undefined => {
+    for (const row of convo.rows) {
+      if (row.type !== "assistant") continue;
+      for (const segment of row.segments) {
+        if (segment.type !== "batch") continue;
+        const found = collectAgents(segment.tools).find(agent => agent.agentId === agentId);
+        if (found) return found.toolCallId;
+      }
+    }
+    return undefined;
+  };
+  const agentDeckLinks: DeckLinks = {
+    onOpen: row => openRosterAgent(row.agent),
+    onMain: goMainAgent,
+    onHub: row => { setHubIntent(row.id, "chat"); onRoute("agent-hub"); },
+    onBtw: preview || can("agent.btw.read") ? row => { setAgentBtwIntent(current => ({ agentId: row.id, serial: (current?.serial ?? 0) + 1 })); openRosterAgent(row.agent); } : undefined,
+    canLocate: row => agentSourceCall(row.id) !== undefined,
+    onLocate: row => {
+      const toolCallId = agentSourceCall(row.id);
+      if (toolCallId === undefined) return Promise.resolve(false);
+      revealDeckDestination(); onRoute("workbench");
+      return revealConversationTarget(convoScrollerRef.current, { toolCallId });
+    },
+  };
   return (
     <ComputerLinkProvider onOpen={openComputerFrame}>
     <SubagentHoverProvider scope={JSON.stringify([agentScope, viewIdentity, snapshot?.runtimeEpoch])}
@@ -2890,8 +2930,10 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       />
       </SharedSurface>
       <DockKeyboard />
-      <AgentRosterMeter agents={dockAgents} ready={preview || rosterAgents !== undefined}
-        source={agentRosterSource} />
+      <AgentsDock agents={dockAgents} ready={preview || rosterAgents !== undefined} source={agentRosterSource} scope={agentScope}
+        openedIds={openedAgentIds} {...(inspectTarget === null ? {} : { selectedId: inspectTarget.agentId })}
+        onMain={goMainAgent} onOpenRoster={openRosterAgent} links={agentDeckLinks}
+        commandContext={{ client, capabilities, preview, viewingLive: preview || agentRosterSource === "live", online: runtimeConnected && !connection?.resyncRequired }} />
       <ChangesDockMeter rows={convo.rows} />
       <BackgroundTasksDock client={client} snapshot={snapshot} sessionId={selectedSessionId ?? snapshot?.sessionId}
         scopeKey={`${executionTarget.id ?? "local"}:${workspaceId ?? ""}:${selectedSessionId ?? snapshot?.sessionId ?? ""}:${connection?.runtimeEpoch ?? ""}:${preview ? previewThreadId ?? "preview" : "real"}`}
@@ -2928,10 +2970,6 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           frameIntent={computerFrameIntent} onRevealConversation={revealComputerAction}
           onRevealApproval={pendingInteraction ? () => { onRoute("workbench"); const deck = computerApprovalRef.current?.querySelector<HTMLElement>(".deck"); deck?.scrollIntoView({ block: "nearest" }); deck?.querySelector<HTMLElement>("button, input, [tabindex]")?.focus(); } : undefined}
           onOpenSettings={() => { setSettingsIntent("tasks", "computer.enabled"); onRoute("settings"); }} />,
-        agents: visibility => <AgentRosterPanel agents={dockAgents} ready={preview || rosterAgents !== undefined}
-          source={agentRosterSource} openedIds={openedAgentIds}
-          visible={visibility.visible} {...(inspectTarget === null ? {} : { selectedId: inspectTarget.agentId })}
-          onMain={() => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.focus(); }} onOpen={agent => openAgentDetail({ agentId: agent.agentId, displayName: agent.displayName, ...(agent.assignment === undefined ? {} : { task: agent.assignment }) })} />,
         "agent-detail": visibility => <AgentDetailPanel target={null} scope={agentScope} agents={dockAgents}
           visible={visibility.visible} client={client} conversationClient={conversationClient}
           runtimeConnected={runtimeConnected} canSend={can("agent.send")} canBtw={can("agent.btw.read")}
@@ -3003,6 +3041,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           {...(pendingInteraction?.sessionId === undefined ? {} : { pendingInteractionSessionId: pendingInteraction.sessionId })}
           {...(workspaceId === undefined ? {} : { workspaceId })} loadMentions={fetchMentions}
           viewState={agentViewBook.get(subagentViewKey(descriptor.scope, descriptor.target.agentId))}
+          {...(agentBtwIntent !== null && agentBtwIntent.agentId === descriptor.target.agentId && descriptor.scope === agentScope ? { btwIntent: agentBtwIntent.serial } : {})}
           onActivate={() => dock.store.dispatch({ type: "agent-focus", panel: id as AgentPanelId })}
           onMain={() => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.focus(); }}
           onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}

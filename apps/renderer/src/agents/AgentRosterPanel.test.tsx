@@ -17,7 +17,7 @@ describe("Agent roster density", () => {
     expect(document.querySelector(".agent-roster-task")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "极简" }));
     expect(document.querySelector(".agent-roster-task")).toBeNull();
-    expect(screen.getAllByText("gpt-5-mini")).toHaveLength(4);
+    expect(screen.getAllByText("gpt-5-mini")).toHaveLength(agents.length);
     const child = screen.getByRole("button", { name: "打开子 Agent deps 子 Agent" });
     expect(child.title).toContain("openai/gpt-5-mini");
     fireEvent.click(child);

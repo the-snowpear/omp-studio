@@ -15,6 +15,8 @@ export type SubagentViewState = {
   nextQueueId: number;
   contentTab?: "chat" | "details" | "btw";
   btwVisited?: boolean;
+  /** The last "open on BTW" request this tab has applied, so a remount does not apply it again. */
+  btwIntentSeen?: number;
   btw: SubagentBtwViewState;
   reading?: { anchor: ScrollAnchor | null; following: boolean; rows: number; conversationSessionId?: string };
 };
