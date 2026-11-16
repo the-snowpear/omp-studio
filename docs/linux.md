@@ -1,6 +1,6 @@
 # Linux 客户端
 
-Linux x64 的 AppImage 与 deb 已接入打包和发布流程，将随包含本次变更的下一版正式 Release 提供。已发布的 0.2.0 / 0.2.1 没有 Linux 桌面安装包。请以 [Releases](https://github.com/the-snowpear/omp-studio/releases) 中实际列出的附件为准；`omp-studio-remote-*-linux-*.tar.gz` 是 SSH 远程 Host，不能当作桌面客户端安装。
+Linux x64 桌面客户端支持 AppImage 与 deb 安装包。0.2.0 / 0.2.1 没有 Linux 桌面安装包，请以 [Releases](https://github.com/the-snowpear/omp-studio/releases) 中实际列出的附件为准；`omp-studio-remote-*-linux-*.tar.gz` 是 SSH 远程 Host，不能当作桌面客户端安装。
 
 ## 首发范围
 
@@ -97,7 +97,7 @@ npm run preview
 
 ## 连接本机 Runtime
 
-另需 Bun 和 Rust 工具链；版本以 `omp-patch/upstream.json`、vendor 的 `rust-toolchain.toml` 及 [Runtime 开发说明](../omp-patch/README.md) 为准。当前 OMP 18.19.0 使用 Bun 1.4.4。请在与目标架构一致的 Linux 机器上构建。
+另需 Bun 和 Rust 工具链；版本以 `omp-patch/upstream.json`、vendor 的 `rust-toolchain.toml` 及 [Runtime 开发说明](../omp-patch/README.md) 为准。当前 OMP 18.20.2 使用 Bun 1.4.4。请在与目标架构一致的 Linux 机器上构建。
 
 ```bash
 npm run omp:install-deps

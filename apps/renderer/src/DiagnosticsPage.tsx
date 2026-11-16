@@ -37,6 +37,7 @@ import { PLATFORM } from "./platform";
 import { ensureRuntimeConnection } from "./runtimeEnsure";
 import { isUpdateCheckTimeout, queryWithTimeout } from "./updateCheck";
 import { checkForUpdates, downloadUpdateToReady, fetchUpdatePrefs, useUpdates } from "./settings/updates";
+import { hostErrorMessage } from "./hostError";
 
 type DiagAction = {
   readonly kind: "reconnect" | "restart" | "install" | "update" | "reinstall" | "recheck" | "check-update" | "import" | "rollback" | "prune";
@@ -401,18 +402,27 @@ export function DiagnosticsPage({
       let remoteCheckResult: Awaited<ReturnType<NonNullable<typeof chrome>["checkUpdates"]>> = null;
       if (chrome && typeof chrome.checkUpdates === "function") {
         try {
-          if (notify || (await fetchUpdatePrefs())?.autoCheck) remoteCheckResult = await checkForUpdates();
-        } catch {
-          // ignore
+          if (notify || (await fetchUpdatePrefs())?.autoCheck) {
+            remoteCheckResult = await checkForUpdates({ silent: false });
+            if (!remoteCheckResult) throw new Error(t("updates.stateUnavailable"));
+          }
+        } catch (error) {
+          if (notify) {
+            show(`${t("diagnostics.updateCheckFailed")}: ${hostErrorMessage(error, t("updates.stateUnavailable"))}`, "alert-c");
+            return;
+          }
         }
+      }
+
+      if (notify && remoteCheckResult?.error) {
+        show(`${t("diagnostics.updateCheckFailed")}: ${remoteCheckResult.error}`, "alert-c");
+        return;
       }
 
       const next = await queryWithTimeout(() => client.query("environment.get", {}));
       setEnv(next);
       if (!notify) return;
-      if (remoteCheckResult?.error) {
-        show(`${t("diagnostics.updateCheckFailed")}: ${remoteCheckResult.error}`, "alert-c");
-      } else if (remoteCheckResult?.runtime.plan === "blocked") {
+      if (remoteCheckResult?.runtime.plan === "blocked") {
         show(remoteCheckResult.runtime.reason ?? t("diagnostics.runtimeUpdateBlocker"), "alert-c");
       } else if (remoteCheckResult?.runtime.plan === "available") {
         show(
@@ -431,7 +441,7 @@ export function DiagnosticsPage({
       } else if (next.installer.status === "failed") {
         show(next.installer.message ?? t("diagnostics.installStateFailed"), "alert-c");
       } else {
-        show(t("diagnostics.latestArtifact"), "check");
+        show(t(remoteCheckResult ? "diagnostics.latestArtifact" : "diagnostics.localArtifactChecked"), "check");
       }
     } catch (error) {
       if (notify) show(isUpdateCheckTimeout(error) ? t("diagnostics.updateCheckTimeout") : t("diagnostics.updateCheckFailed"), "alert-c");

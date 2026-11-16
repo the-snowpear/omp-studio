@@ -51,6 +51,44 @@ it("can dismiss a pending continue command and retry after its failure", async (
   expect(props.onGateChange).toHaveBeenLastCalledWith(false);
 });
 
+it("reopens an already created worktree when switching to it fails", async () => {
+  const props = setup();
+  const onOpenWorkspace = vi.fn()
+    .mockRejectedValueOnce(new Error("Workspace could not be opened"))
+    .mockResolvedValueOnce(undefined);
+  render(<WorktreeLaunchGate {...props} onOpenWorkspace={onOpenWorkspace} />);
+  await screen.findByRole("dialog");
+  vi.mocked(waitReceipt).mockResolvedValueOnce({ result: { workspaceId: "workspace-created" } });
+  fireEvent.click(screen.getByRole("button", { name: "创建并进入" }));
+  await screen.findByText("Workspace could not be opened");
+  fireEvent.click(screen.getByRole("button", { name: "重试打开已创建的 Worktree" }));
+  await waitFor(() => expect(props.onGateChange).toHaveBeenLastCalledWith(false));
+  expect(props.command.mock.calls.filter(([kind]) => kind === "worktrees.session.create")).toHaveLength(1);
+  expect(onOpenWorkspace).toHaveBeenCalledTimes(2);
+  expect(onOpenWorkspace).toHaveBeenLastCalledWith("workspace-created");
+});
+
+it("offers the created worktree again after the Runtime disconnects during the switch", async () => {
+  const props = setup();
+  let failOpen!: (error: Error) => void;
+  const onOpenWorkspace = vi.fn(() => new Promise<void>((_resolve, reject) => { failOpen = reject; }));
+  const view = render(<WorktreeLaunchGate {...props} onOpenWorkspace={onOpenWorkspace} />);
+  await screen.findByRole("dialog");
+  vi.mocked(waitReceipt).mockResolvedValueOnce({ result: { workspaceId: "workspace-created" } });
+  fireEvent.click(screen.getByRole("button", { name: "创建并进入" }));
+  await waitFor(() => expect(onOpenWorkspace).toHaveBeenCalledWith("workspace-created"));
+  view.rerender(<WorktreeLaunchGate {...props} onOpenWorkspace={onOpenWorkspace} context={{ ...props.context as object, available: false } as never} />);
+  await act(async () => failOpen(new Error("Runtime disconnected")));
+  vi.mocked(waitReceipt).mockResolvedValueOnce({ result: { eligible: false, policy: "create" } });
+  view.rerender(<WorktreeLaunchGate {...props} onOpenWorkspace={onOpenWorkspace} />);
+  await screen.findByRole("button", { name: "重试打开已创建的 Worktree" });
+  onOpenWorkspace.mockResolvedValueOnce(undefined);
+  fireEvent.click(screen.getByRole("button", { name: "重试打开已创建的 Worktree" }));
+  await waitFor(() => expect(props.onGateChange).toHaveBeenLastCalledWith(false));
+  expect(props.command.mock.calls.filter(([kind]) => kind === "worktrees.session.create")).toHaveLength(1);
+  expect(onOpenWorkspace).toHaveBeenCalledTimes(2);
+});
+
 it("removes the modal when the Runtime becomes unavailable", async () => {
   const props = setup();
   const view = render(<WorktreeLaunchGate {...props} />);

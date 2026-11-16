@@ -120,6 +120,8 @@ function readDockTarget(x: number, y: number, snap: boolean, ignoredFloat: strin
       }
       const empty = element.closest<HTMLElement>('[data-dock-empty]');
       if (empty) { const region = empty.dataset.dockEmpty as DockTarget["region"]; return { target: { region }, rect: empty.getBoundingClientRect(), label: moveRegionLabel(region) }; }
+      // The conversation directory is navigation, not the sidebar's tool dock.
+      if (element.closest("#sbProjects, #projectList")) { blocked = true; break; }
       if (element.closest(".dock-float, [data-conversation-view]")) {
         blocked = !ownerId || targetOwner !== ownerId || !!element.closest("[data-dock-float]");
         break;

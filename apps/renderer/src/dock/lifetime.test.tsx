@@ -660,14 +660,14 @@ describe("dock pointer protocol", () => {
     expect(previewBounds({ target: { region: "right" }, rect: entry, label: "" }, layout, ["output"])).toEqual({ x: 1120, y: 80, width: 480, height: 884 });
     expect(previewBounds({ target: { region: "bottom" }, rect: entry, label: "" }, layout, ["output"])).toEqual({ x: 328, y: 760, width: 1272, height: 240 });
   });
-  it("accepts the whole visible left sidebar while retaining precise dock targets", () => {
+  it("keeps the conversation directory unsnapped while retaining left tool targets", () => {
     geometry();
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this.matches(".adaptive-workbench")) return new DOMRect(60, 50, 1400, 900);
       if (this.matches(".sidebar")) return new DOMRect(60, 50, 272, 900);
       return new DOMRect(60, 400, 272, 200);
     });
-    render(<div className="adaptive-workbench"><aside className="sidebar"><section>Projects</section><div data-dock-cards="left"><section data-dock-card="files" /></div></aside><div data-dock-entry="right" /></div>);
+    render(<div className="adaptive-workbench"><aside className="sidebar"><section id="sbProjects"><h2>Projects</h2><div id="projectList"><button>Conversation</button></div></section><div data-dock-cards="left"><section data-dock-card="files" /></div></aside><div data-dock-entry="right" /></div>);
     const sidebar = document.querySelector<HTMLElement>(".sidebar")!;
     const card = document.querySelector<HTMLElement>('[data-dock-card="files"]')!;
     let elements: Element[] = [sidebar];
@@ -675,6 +675,10 @@ describe("dock pointer protocol", () => {
     for (const y of [70, 250, 750]) expect(dockHitTest(200, y, true)?.target).toEqual({ region: "left" });
     expect(dockHitTest(200, 70, false)?.target.region).toBe("float");
     expect(dockHitTest(350, 70, true)?.target.region).toBe("float");
+    for (const selector of ["#sbProjects h2", "#projectList button", "#projectList", "#sbProjects"]) {
+      elements = [document.querySelector(selector)!, sidebar];
+      expect(dockHitTest(200, 250, true)?.target.region).toBe("float");
+    }
     elements = [card];
     expect(dockHitTest(200, 450, true)?.target).toEqual({ region: "left", index: 0 });
     elements = [document.querySelector('[data-dock-entry="right"]')!];

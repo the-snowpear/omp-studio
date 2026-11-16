@@ -167,6 +167,55 @@ describe("Runtime update compatibility", () => {
     expect(screen.queryByText("发现可用制品 2.0.0")).toBeNull();
   });
 
+  it("reports a rejected update check instead of claiming the local Runtime is up to date", async () => {
+    const { client, environment } = installHarness();
+    window.ompStudioChrome = {
+      getUpdatePrefs: async () => installPrefs,
+      checkUpdates: async () => { throw new Error("更新请求 HTTP 403（api.github.com），请求受限"); },
+    } as never;
+    renderPage({ preview: false, client, environment });
+    fireEvent.click(screen.getAllByRole("button", { name: "检查更新" })[0]!);
+    await waitFor(() => expect(screen.getByText("检查更新失败: 更新请求 HTTP 403（api.github.com），请求受限")).toBeTruthy());
+    expect(screen.queryByText("已是最新版本")).toBeNull();
+  });
+
+  it("keeps a reported update check failure visible when the local environment cannot be read", async () => {
+    const { client, environment } = installHarness();
+    vi.mocked(client.query).mockRejectedValue(new Error("Local environment unavailable"));
+    window.ompStudioChrome = {
+      getUpdatePrefs: async () => installPrefs,
+      checkUpdates: async () => ({ checkedAt: new Date().toISOString(), error: "HTTP 403，请求受限", app: { plan: "none" }, runtime: { plan: "none" } }),
+    } as never;
+    renderPage({ preview: false, client, environment });
+    fireEvent.click(screen.getAllByRole("button", { name: "检查更新" })[0]!);
+    await waitFor(() => expect(screen.getByText("检查更新失败: HTTP 403，请求受限")).toBeTruthy());
+    expect(screen.queryByText("已是最新版本")).toBeNull();
+  });
+
+  it("distinguishes a local-only check from an online update check", async () => {
+    const { client, environment } = installHarness();
+    renderPage({ preview: false, client, environment });
+    fireEvent.click(screen.getAllByRole("button", { name: "检查更新" })[0]!);
+    await waitFor(() => expect(screen.getByText("已检查本地 Runtime 工件，未检查在线更新")).toBeTruthy());
+    expect(screen.queryByText("已是最新版本")).toBeNull();
+  });
+
+  it("still refreshes local Runtime information after a silent online check fails", async () => {
+    const { client, environment } = installHarness();
+    let failCheck!: (error: Error) => void;
+    const checkUpdates = vi.fn(() => new Promise<never>((_resolve, reject) => { failCheck = reject; }));
+    window.ompStudioChrome = {
+      getUpdatePrefs: async () => ({ ...installPrefs, autoCheck: true }),
+      checkUpdates,
+    } as never;
+    renderPage({ preview: false, client, environment });
+    await waitFor(() => expect(checkUpdates).toHaveBeenCalled());
+    vi.mocked(client.query).mockClear();
+    await act(async () => failCheck(new Error("Offline")));
+    await waitFor(() => expect(client.query).toHaveBeenCalledWith("environment.get", {}));
+    expect(screen.queryByText(/检查更新失败/)).toBeNull();
+  });
+
   it("demonstrates the same blocker without using Host data or writes", () => {
     __resetUpdatesForTests({ check: { checkedAt: new Date().toISOString(), app: { plan: "none" }, runtime: { plan: "blocked", reason: "Real Host blocker" } } });
     const client = renderPage({ preview: true });

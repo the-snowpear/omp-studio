@@ -42,7 +42,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      native: ${{ steps.plan.outputs.native }}
+      desktop: ${{ steps.plan.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: plan
+        run: node scripts/release-cache.mjs --warm-plan
+
   runtime:
+    needs: plan
+    if: needs.plan.outputs.native == 'true'
     uses: ./.github/workflows/runtime-artifacts.yml
     with:
       warm_cache: true
@@ -57,6 +72,8 @@ jobs:
     secrets: inherit
 
   warm:
+    needs: plan
+    if: needs.plan.outputs.desktop == 'true'
     strategy:
       fail-fast: false
       matrix:

@@ -9,7 +9,7 @@ on:
         options: [desktop, runtime]
         default: desktop
       target_arch:
-        description: Build only on matching native Windows runners
+        description: Windows architectures for Runtime-only releases (desktop releases build both)
         type: choice
         options: [both, x64, arm64]
         default: both
@@ -28,11 +28,11 @@ on:
         default: false
       include_macos:
         type: boolean
-        description: Also build and publish macOS (darwin-arm64, ad hoc signed)
-        default: false
+        description: Include macOS arm64 for Runtime-only releases (always included for desktop)
+        default: true
       include_linux:
         type: boolean
-        description: Build and publish Linux x64 AppImage and deb
+        description: Include Linux x64 for Runtime-only releases (always included for desktop)
         default: true
   push:
     tags: ["v*", "runtime-v*"]
@@ -63,9 +63,11 @@ jobs:
         env:
           TARGET_ARCH: ${{ inputs.target_arch || 'both' }}
           REQUEST_KIND: ${{ inputs.release_kind || (startsWith(github.ref_name, 'runtime-v') && 'runtime') || 'desktop' }}
-          INCLUDE_MACOS: ${{ inputs.include_macos }}
+          INCLUDE_MACOS: ${{ github.event_name == 'push' || inputs.include_macos }}
           INCLUDE_LINUX: ${{ github.event_name == 'push' || inputs.include_linux }}
-          CHECK_RELEASE_NOTES: "true"
+          CHECK_RELEASE: "true"
+          RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
+          GH_TOKEN: ${{ github.token }}
         run: node scripts/release-plan.mjs
 
   runtime:
@@ -95,6 +97,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       OMP_TARGET_ARCH: ${{ matrix.arch }}
       OMP_RELEASE_KIND: ${{ needs.prepare.outputs.kind }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ${{ needs.prepare.outputs.kind == 'runtime' && '1' || '' }}
       OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
       OMP_RUNTIME_MIN_APP_VERSION: ${{ inputs.runtime_min_app_version }}
     defaults:
@@ -109,12 +112,13 @@ jobs:
           node-version: 24
       - uses: ./.github/actions/cache-release-downloads
         with:
-          desktop: "true"
+          desktop: ${{ needs.prepare.outputs.kind == 'desktop' }}
       - name: Install dependencies
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           npm ci --prefer-offline --no-audit --no-fund
       - uses: ./.github/actions/cache-desktop-native
+        if: needs.prepare.outputs.kind == 'desktop'
       - name: Download prepared Runtime
         uses: actions/download-artifact@v4
         with:
@@ -132,7 +136,8 @@ jobs:
             $env:OMP_RUNTIME_SIGNING_KEY = $keyPath
             $env:OMP_RUNTIME_SIGNING_KEY_ID = (Get-Content packaging/keys/trusted-keys.json | ConvertFrom-Json).activeKeyId
             npm run omp:overlay:apply
-            npm run build
+            $buildScript = if ($env:OMP_RELEASE_KIND -eq "runtime") { "build:release-tools" } else { "build" }
+            npm run $buildScript
             npm run pack:win:prepare
             $runtime = Get-ChildItem packaging/runtime-payload -Recurse -Filter runtime-manifest.json | ForEach-Object { Get-Content $_.FullName | ConvertFrom-Json }
             if (@($runtime).Count -ne 1 -or $runtime.channel -ne $env:OMP_RUNTIME_CHANNEL) { throw "Runtime identity/channel mismatch" }
@@ -159,12 +164,9 @@ jobs:
           path: outputs/release/${{ matrix.arch }}/
           if-no-files-found: error
 
-  # macOS joins a release only when asked: publication is all-or-nothing, and
-  # an ad hoc signed Mac build must not hold back the Windows release while it
-  # stabilizes. Tag pushes never enable it.
   build-macos:
     needs: [prepare, runtime]
-    if: ${{ inputs.include_macos }}
+    if: ${{ contains(needs.prepare.outputs.desktop_platforms, 'darwin-arm64') }}
     runs-on: macos-15
     environment: release
     timeout-minutes: 180
@@ -176,6 +178,7 @@ jobs:
       OMP_TARGET_PLATFORM: darwin
       OMP_TARGET_ARCH: arm64
       OMP_RELEASE_KIND: ${{ needs.prepare.outputs.kind }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ${{ needs.prepare.outputs.kind == 'runtime' && '1' || '' }}
       OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
       OMP_RUNTIME_MIN_APP_VERSION: ${{ inputs.runtime_min_app_version }}
     defaults:
@@ -190,11 +193,12 @@ jobs:
           node-version: 24
       - uses: ./.github/actions/cache-release-downloads
         with:
-          desktop: "true"
+          desktop: ${{ needs.prepare.outputs.kind == 'desktop' }}
       - name: Install dependencies
         run: |
           npm ci --prefer-offline --no-audit --no-fund
       - uses: ./.github/actions/cache-desktop-native
+        if: needs.prepare.outputs.kind == 'desktop'
       - name: Download prepared Runtime
         uses: actions/download-artifact@v4
         with:
@@ -213,7 +217,7 @@ jobs:
           OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
           export OMP_RUNTIME_SIGNING_KEY_ID
           npm run omp:overlay:apply
-          npm run build
+          if [ "$OMP_RELEASE_KIND" = runtime ]; then npm run build:release-tools; else npm run build; fi
           npm run pack:mac:prepare
           runtime_version="$(node -e '
             const fs = require("node:fs"), path = require("node:path");
@@ -244,7 +248,7 @@ jobs:
 
   build-linux:
     needs: [prepare, runtime]
-    if: ${{ github.event_name == 'push' || inputs.include_linux }}
+    if: ${{ contains(needs.prepare.outputs.desktop_platforms, 'linux-x64') }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.linux_matrix) }}
@@ -259,6 +263,7 @@ jobs:
       OMP_TARGET_PLATFORM: linux
       OMP_TARGET_ARCH: ${{ matrix.arch }}
       OMP_RELEASE_KIND: ${{ needs.prepare.outputs.kind }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ${{ needs.prepare.outputs.kind == 'runtime' && '1' || '' }}
       OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
       OMP_RUNTIME_MIN_APP_VERSION: ${{ inputs.runtime_min_app_version }}
     defaults:
@@ -273,11 +278,13 @@ jobs:
           node-version: 24
       - uses: ./.github/actions/cache-release-downloads
         with:
-          desktop: "true"
+          desktop: ${{ needs.prepare.outputs.kind == 'desktop' }}
       - name: Linux packaging tools
+        if: needs.prepare.outputs.kind == 'desktop'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends desktop-file-utils libfuse2t64
       - run: npm ci --prefer-offline --no-audit --no-fund
       - uses: ./.github/actions/cache-desktop-native
+        if: needs.prepare.outputs.kind == 'desktop'
       - uses: actions/download-artifact@v4
         with:
           pattern: runtime-${{ matrix.target }}-*
@@ -294,7 +301,7 @@ jobs:
           export OMP_RUNTIME_SIGNING_KEY="$key_path"
           export OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
           npm run omp:overlay:apply
-          npm run build
+          if [ "$OMP_RELEASE_KIND" = runtime ]; then npm run build:release-tools; else npm run build; fi
           npm run pack:linux:prepare
           runtime_version="$(node -e '
             const fs = require("node:fs"), path = require("node:path");
@@ -336,8 +343,7 @@ jobs:
 
   publish:
     needs: [prepare, build, build-macos, build-linux, build-remote]
-    # A skipped macOS job (the default) must not skip the Windows release.
-    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') && (needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped') && (needs.build-remote.result == 'success' || needs.build-remote.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.build-macos.result == 'success' || (!contains(needs.prepare.outputs.desktop_platforms, 'darwin-arm64') && needs.build-macos.result == 'skipped')) && (needs.build-linux.result == 'success' || (!contains(needs.prepare.outputs.desktop_platforms, 'linux-x64') && needs.build-linux.result == 'skipped')) && (needs.build-remote.result == 'success' || (needs.prepare.outputs.kind == 'runtime' && needs.build-remote.result == 'skipped')) }}
     runs-on: ubuntu-latest
     environment: release
     permissions:

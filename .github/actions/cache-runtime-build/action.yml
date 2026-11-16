@@ -11,7 +11,8 @@ runs:
     - uses: Swatinem/rust-cache@v2
       with:
         workspaces: omp-patch/vendor/oh-my-pi -> target
-        shared-key: platform
-        key: natives-${{ env.OMP_TARGET_PLATFORM }}-${{ env.OMP_TARGET_ARCH }}
+        prefix-key: v1-release-rust
+        shared-key: natives
+        env-vars: OMP_NATIVE_CARGO_PROFILE OMP_NATIVE_FEATURES
         cache-workspace-crates: true
         cache-on-failure: "true"

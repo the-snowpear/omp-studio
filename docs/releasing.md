@@ -10,6 +10,11 @@ and performance diagnostics.
 Push a new desktop tag `v<workspace version>` or Runtime tag
 `runtime-v<Runtime version>`, or run the Release workflow manually.
 
+The preparation job rejects already published desktop versions and explicitly
+tagged Runtime releases before starting native jobs. It also checks desktop
+tag/version and stable-channel consistency. Draft releases remain retryable;
+the publisher still checks the final artifacts and publication state.
+
 1. Prepare each platform's signed Runtime once, including binary smoke and
    identity checks, or reuse a matching signed Runtime from an earlier run.
    Desktop and remote jobs download that same prepared artifact.
@@ -43,8 +48,15 @@ packaging keeps native rebuilding enabled; electron-rebuild decides whether
 the restored output matches its target.
 
 **Warm release caches** runs on `main` after relevant Runtime, dependency or
-packaging inputs change, and can also be run manually. It warms Rust workspace
-and dependency output plus Bun downloads on all six native platforms. Existing
+packaging inputs change, and can also be run manually. A lightweight plan compares
+the committed inputs across the push. Runtime source/toolchain and seam changes
+warm Rust workspace and dependency output plus Bun downloads on all six native
+platforms; TypeScript overlay changes and their series metadata do not. External
+npm dependency or desktop packaging-tool changes warm the Windows desktop caches.
+Workspace version bumps alone skip both sets of jobs. Manual runs warm both.
+The release Rust cache uses a separate policy key from source-test caches and
+includes native profile/features in its environment identity; dependency fallback
+within that scope remains available when Cargo dependencies change. Existing
 signed Runtimes are downloaded unchanged while native modules are compiled for
 the cache. Cache warming never signs a replacement Runtime; when no matching
 artifact exists, the next release producer builds it using the warm native cache. Windows
@@ -61,21 +73,21 @@ works across workflow runs separately from the compilation caches.
 The reusable **Prepare signed Runtimes** workflow owns the native build matrix.
 Consumers wait for it and never compile another Runtime during the same release.
 Runtime-only releases prepare the requested Windows architectures, Linux x64
-(enabled by default), and optional macOS arm64. Its manual entry can warm or
-prepare one native platform.
+and macOS arm64. Its manual entry can warm or prepare one native platform.
 
 | Manual input | Purpose |
 |---|---|
 | `release_kind` | Complete desktop release or independent Runtime |
-| `target_arch` | Windows x64, ARM64, or both (default) |
+| `target_arch` | Windows x64, ARM64, or both for Runtime-only releases; desktop always builds both |
 | `runtime_channel` | Stable, or canary for Runtime-only releases |
 | `runtime_min_app_version` | Tested desktop compatibility floor; blank uses the workspace version |
 | `rebuild_runtime` | Rebuild the Runtime even when its inputs are unchanged |
-| `include_macos` | Also build and publish macOS Apple Silicon; off by default |
-| `include_linux` | Build and publish Linux x64 AppImage / deb; on by default |
+| `include_macos` | Include macOS Apple Silicon for Runtime-only releases; desktop always includes it |
+| `include_linux` | Include Linux x64 for Runtime-only releases; desktop always includes it |
 
-Tag pushes build both Windows architectures and Linux x64. To include macOS,
-run the workflow manually with `include_macos=true`. Runtime-only releases never
+Desktop releases always build Windows x64, Windows ARM64, macOS Apple Silicon,
+and Linux x64, whether started from a tag or manually. Publication waits for
+all four desktop targets and the remote environments. Runtime-only releases never
 become Latest; canary releases are prereleases. Desktop releases use stable
 Runtime. Versions are unique across channels, and published assets are immutable.
 Reuse still validates signatures, source identity, platform and channel.
@@ -101,7 +113,10 @@ Desktop releases also build remote environments on native Windows, Linux and
 macOS x64/arm64 runners. Each archive contains private Node, the Host bundle
 and signed Runtime. All six jobs must succeed before the desktop publication.
 
-Runtime-only releases omit the desktop package. Windows also retains the
+Runtime-only releases build `build:release-tools` instead of the complete workspace:
+they skip the Renderer, remote Host bundle, Electron binary download, desktop
+native cache and Linux installer tools. They still stage and verify the signed
+Runtime and generate the signed update catalog. Windows also retains the
 signed v1 migration feed unchanged so old installations can migrate to Setup;
 removing the old generator does not remove client migration support.
 The macOS DMG and Linux deb digests are signed into their respective catalogs.

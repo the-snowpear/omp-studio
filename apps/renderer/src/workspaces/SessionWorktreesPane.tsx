@@ -27,6 +27,7 @@ export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(
   const [phase, setPhase] = useState<"idle" | "checking" | "ask" | "creating" | "continuing" | "failed">("idle"), [error, setError] = useState("");
   const [dismissed, setDismissed] = useState(false);
   const epoch = useRef(0), lock = useRef(false), moving = useRef(false);
+  const createdWorkspace = useRef<{ sessionId: string; workspaceId: string } | undefined>(undefined);
   const openWorkspaceAction = useRef(props.onOpenWorkspace);
   useLayoutEffect(() => { openWorkspaceAction.current = props.onOpenWorkspace; }, [props.onOpenWorkspace]);
   const supported = !!props.context?.capabilities?.capabilities.some(row => row.id === "worktrees.session.startPolicy" && row.grade !== "unavailable");
@@ -34,14 +35,22 @@ export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(
   const gate = props.onGateChange;
   const create = useCallback(async (current: number) => {
     if (!props.client || !props.context?.sessionId || lock.current) return;
+    const sessionId = props.context.sessionId;
     lock.current = true; setPhase("creating"); setError("");
     try {
-      const result = await invoke(props.client, "worktrees.session.create", { sessionId: props.context.sessionId, freshOnly: true, keepChanges: false });
+      let workspaceId = createdWorkspace.current?.sessionId === sessionId ? createdWorkspace.current.workspaceId : undefined;
+      if (!workspaceId) {
+        const result = await invoke(props.client, "worktrees.session.create", { sessionId, freshOnly: true, keepChanges: false });
+        if (epoch.current !== current) return;
+        if (!result.workspaceId) throw Error("Created worktree could not be registered");
+        workspaceId = result.workspaceId;
+        createdWorkspace.current = { sessionId, workspaceId };
+      }
       if (epoch.current !== current) return;
-      if (!result.workspaceId) throw Error("Created worktree could not be registered");
       moving.current = true;
-      if (openWorkspaceAction.current) await openWorkspaceAction.current(result.workspaceId);
-      else await openWorkspace(props.client, result.workspaceId, true);
+      if (openWorkspaceAction.current) await openWorkspaceAction.current(workspaceId);
+      else await openWorkspace(props.client, workspaceId, true);
+      if (createdWorkspace.current?.sessionId === sessionId) createdWorkspace.current = undefined;
       if (epoch.current === current) { setPhase("idle"); gate(false); }
     } catch (cause) { if (epoch.current === current) { setPhase("failed"); setError(hostErrorMessage(cause, "Worktree creation failed")); } }
     finally { if (epoch.current === current) { lock.current = false; moving.current = false; } }
@@ -49,11 +58,13 @@ export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(
   useLayoutEffect(() => {
     if (moving.current && enabled) return;
     const current = ++epoch.current; lock.current = false; setError(""); setDismissed(false);
-    if (!enabled) { setPhase("idle"); gate(false); return; }
+    if (!enabled) { moving.current = false; setPhase("idle"); gate(false); return; }
     setPhase("checking"); gate(true);
     void invoke(props.client!, "worktrees.session.startPolicy", { sessionId: props.context!.sessionId! }).then(policy => {
       if (current !== epoch.current) return;
-      if (!policy.eligible || policy.policy === "off") { setPhase("idle"); gate(false); }
+      if (createdWorkspace.current?.sessionId === props.context!.sessionId) {
+        setPhase("ask");
+      } else if (!policy.eligible || policy.policy === "off") { setPhase("idle"); gate(false); }
       else if (policy.policy === "create") void create(current);
       else setPhase("ask");
     }).catch(cause => { if (current === epoch.current) { setPhase("failed"); setError(hostErrorMessage(cause, "Cannot read worktree policy")); } });
@@ -70,7 +81,7 @@ export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(
     if (lock.current) return;
     if (!props.client || !props.context?.sessionId) { setPhase("idle"); gate(false); return; }
     const current = epoch.current; lock.current = true; setPhase("continuing"); setError("");
-    try { await invoke(props.client, "worktrees.session.continueHere", { sessionId: props.context.sessionId }); if (epoch.current === current) { setPhase("idle"); gate(false); } }
+    try { await invoke(props.client, "worktrees.session.continueHere", { sessionId: props.context.sessionId }); if (epoch.current === current) { createdWorkspace.current = undefined; setPhase("idle"); gate(false); } }
     catch (cause) { if (epoch.current === current) { setPhase("failed"); setError(hostErrorMessage(cause, "Cannot continue in this workspace")); } }
     finally { if (epoch.current === current) lock.current = false; }
   }
@@ -80,10 +91,11 @@ export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(
     <button className="btn small ghost" onClick={() => setDismissed(false)}>{zh ? "显示工作区选择" : "Show workspace choice"}</button>
     {error ? <p role="alert">{error}</p> : null}
   </div>;
+  const retryCreatedWorktree = createdWorkspace.current !== undefined && createdWorkspace.current.sessionId === props.context?.sessionId;
   return createPortal(<div className="worktree-modal-backdrop"><section className="worktree-modal worktree-launch" role="dialog" aria-modal="true" aria-label={zh ? "新会话工作区" : "New session workspace"}>
     <header className="feature-settings-head"><span className="feature-eyebrow">{zh ? "独立工作目录" : "ISOLATED WORKSPACE"}</span><button className="icon-btn" aria-label={zh ? "关闭工作区选择" : "Close workspace choice"} onClick={() => setDismissed(true)}><Icon name="x" /></button></header>
     <h2>{zh ? "为这次任务创建 Worktree" : "Create a worktree for this task"}</h2><p>{zh ? "从当前 HEAD 创建独立分支。原工作区的未提交修改保持原样，新会话在独立目录中运行。" : "Create a branch from HEAD. Uncommitted source changes stay in place; the new session runs in its own directory."}</p>
-    {phase === "creating" || phase === "continuing" ? <p role="status"><progress /> {phase === "creating" ? zh ? "正在准备分支与新会话…" : "Preparing the branch and session…" : zh ? "正在确认当前工作区…" : "Confirming the current workspace…"}</p> : <div className="feature-actions"><button className="btn primary" onClick={() => void create(epoch.current)}>{zh ? "创建并进入" : "Create and open"}</button><button className="btn outline" onClick={() => void continueHere()}>{zh ? "留在当前工作区" : "Stay in this workspace"}</button></div>}
+    {phase === "creating" || phase === "continuing" ? <p role="status"><progress /> {phase === "creating" ? zh ? "正在准备分支与新会话…" : "Preparing the branch and session…" : zh ? "正在确认当前工作区…" : "Confirming the current workspace…"}</p> : <div className="feature-actions"><button className="btn primary" onClick={() => void create(epoch.current)}>{retryCreatedWorktree ? zh ? "重试打开已创建的 Worktree" : "Retry opening the worktree" : zh ? "创建并进入" : "Create and open"}</button><button className="btn outline" onClick={() => void continueHere()}>{zh ? "留在当前工作区" : "Stay in this workspace"}</button></div>}
     {error ? <p role="alert" className="feature-error">{error}</p> : null}
   </section></div>, document.body);
 }
