@@ -98,6 +98,10 @@ const PATHS = {
   home: '<path d="M2.5 7 8 2l5.5 5M4 6v7.5h8V6"/>',
   mic: '<rect x="5.4" y="1.5" width="5.2" height="8.2" rx="2.6"/><path d="M3.3 7.1v.5a4.7 4.7 0 0 0 9.4 0v-.5M8 12.3v2.2M5.7 14.5h4.6"/>',
   pulse: '<path d="M1.5 8h3l1.5-4 3 8 1.5-4h4"/>',
+  // Agents deck views: a lead with two reports, staggered lanes, and a body with two satellites.
+  formation: '<rect x="1.8" y="2" width="5" height="3.6" rx="1.2"/><rect x="9.2" y="6.2" width="5" height="3.6" rx="1.2"/><rect x="9.2" y="10.6" width="5" height="3.6" rx="1.2"/><path d="M4.3 5.6v6.2a.7.7 0 0 0 .7.7h4.2M4.3 8h4.9"/>',
+  timeline: '<path d="M1.6 3.4h7.2M4.4 8h9.8M3 12.6h6.4"/><path d="M1.6 1.6v12.8" stroke-dasharray="1.2 1.6"/>',
+  orbit: '<circle cx="8" cy="8" r="2.2"/><ellipse cx="8" cy="8" rx="6.6" ry="3.1" transform="rotate(-28 8 8)"/><circle cx="13.2" cy="4.6" r="1.15" fill="currentColor" stroke="none"/><circle cx="2.9" cy="11.4" r=".9" fill="currentColor" stroke="none"/>',
   // 用量条形图：L 形坐标轴 + 三根不同高度的竖柱。顶栏压缩时顶替
   // 「↑ 3.5M ↓ 73k | 36.6M cache」整串数字（见 App.css 的 chrome-size 规则）。
   chart: '<path d="M2.5 2.4v11h11.2"/><path d="M5.7 13.4V10.2"/><path d="M8.9 13.4V4.6"/><path d="M12.1 13.4V7.4"/>',

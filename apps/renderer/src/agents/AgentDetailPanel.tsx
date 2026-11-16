@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SessionId, StudioClient } from "@omp-studio/client-contract";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import type { MentionCandidate } from "../composer/types";
@@ -47,10 +47,12 @@ type AgentDetailProps = {
   onRevealSource: (target: SubagentHubTarget) => Promise<boolean>;
   onActivate?: () => void;
   contextAvailable?: boolean;
+  /** A request (by serial) to show the BTW page, from the Agents deck. */
+  btwIntent?: number;
 };
 
 function AgentDetailContent({ target, agents, visible, client, conversationClient, canSend, canBtw, runtimeConnected,
-  parentSessionId, liveSessionId, pendingInteractionSessionId, workspaceId, loadMentions, viewState, onMain, onOpenHub, onRevealSource, onActivate, contextAvailable = true,
+  parentSessionId, liveSessionId, pendingInteractionSessionId, workspaceId, loadMentions, viewState, onMain, onOpenHub, onRevealSource, onActivate, contextAvailable = true, btwIntent,
 }: Omit<AgentDetailProps, "target"> & { target: SubagentHubTarget }) {
   const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
@@ -100,6 +102,13 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
     if (viewState) viewState.contentTab = next;
     if (next === "btw") { setBtwVisited(true); if (viewState) viewState.btwVisited = true; }
   };
+  const chooseTabRef = useRef(chooseTab);
+  chooseTabRef.current = chooseTab;
+  useEffect(() => {
+    if (btwIntent === undefined || !(preview || canBtw) || viewState?.btwIntentSeen === btwIntent) return;
+    if (viewState) viewState.btwIntentSeen = btwIntent;
+    chooseTabRef.current("btw");
+  }, [btwIntent, preview, canBtw, viewState]);
   // The conversation keeps one stable position in the tree in both layouts, so a
   // resize across the threshold never remounts it (no lost scroll or subscription).
   return <section className={`agent-detail${wide ? " is-wide" : ""}`} ref={rootRef} data-live={visible && (preview || runtimeConnected && !historical) || undefined} aria-label={zh ? `子 Agent ${target.agentId}` : `Agent ${target.agentId}`} onPointerDownCapture={onActivate} onFocusCapture={onActivate}>

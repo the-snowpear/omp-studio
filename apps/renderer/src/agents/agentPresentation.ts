@@ -2,8 +2,10 @@ import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { previewAgentDisplay } from "../preview/agentDockPreview";
 
 export function agentStatusText(status: string, zh: boolean): string {
-  const labels: Record<string, string> = { starting: "启动中", running: "运行中", idle: "空闲", parked: "已停靠", reviving: "恢复中", aborted: "已停止", failed: "失败", released: "已释放" };
-  return zh ? labels[status] ?? status : status;
+  const labels: Record<string, string> = zh
+    ? { starting: "启动中", running: "运行中", idle: "空闲", parked: "已停靠", reviving: "恢复中", aborted: "已停止", failed: "失败", released: "已释放" }
+    : { starting: "Starting", running: "Running", idle: "Idle", parked: "Parked", reviving: "Reviving", aborted: "Stopped", failed: "Failed", released: "Released" };
+  return labels[status] ?? status;
 }
 
 export function agentPresentation(agent: StudioAgentSnapshot, preview: boolean, zh: boolean) {

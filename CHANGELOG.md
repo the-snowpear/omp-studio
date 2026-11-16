@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 新增 Linux x64（AVX2）桌面客户端及 AppImage / deb 安装包，随下一版正式 Release 发布。以 Ubuntu 24.04 / glibc 2.39 为构建基线，内置签名 Runtime 和原生终端，无需另装 Node、Bun 或 Rust。应用菜单启动可发现用户 Shell 工具；保留 Chromium 沙箱，不依赖托盘隐藏工作台。桌面更新提供对应安装包下载，Runtime 继续签名在线更新。增加原生 Linux 打包、包审计、X11 / Wayland 验收与完整发布资产链路；详见 [Linux 客户端说明](docs/linux.md)（[#5](https://github.com/the-snowpear/omp-studio/issues/5)、[#22](https://github.com/the-snowpear/omp-studio/pull/22)）。
 - 新增全机文件浏览器：按窗口宽度切换树、详细列表与分栏，提供磁盘容量、快速访问、固定文件夹、筛选、隐藏文件和键盘导航；本机与 SSH 分别使用所属 Host 的真实文件服务。
 - 项目外文件可在内置文件窗口查看、编辑和保存，沿用版本冲突与关闭确认；项目内文件与 Explorer 共用缓冲区。支持新建文件夹、重命名、确认后移到本机回收站、打开方式、加入对话、设为项目和 Explorer 双向定位，详见[文件浏览器说明](docs/file-browser.md)。
+- Agents 放进左右侧栏、底栏或浮窗时成为「Agent 指挥台」：每个 Agent 有固定的像素徽记；顶部实时显示状态色带、Tokens、费用、工具调用和生成速率曲线；提供编队（派生树）、时间线（泳道与回放）、星图（径向关系图）和通讯四个视图，宽窗口三栏并排并显示选中 Agent 的检视栏。检视栏可打开对话、定位委派、BTW 提问、进入 Agent Hub，并在确认后停止或恢复。Agent 间通讯等待 Runtime 提供消息记录，目前显示未接入说明；对话工具区里的 Agents 卡片保持原样。
 
 ### Changed
 
