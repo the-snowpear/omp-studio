@@ -172,7 +172,12 @@ jobs:
       - name: Verify signed deb updates in an isolated package database
         timeout-minutes: 10
         run: |
-          docker run -i --rm -v "$GITHUB_WORKSPACE:/repo:ro" -e OMP_DEB_TEST_CONTAINER=1 ubuntu:24.04 sh -s <<'SCRIPT'
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+          import { linuxDebSwapHelperSource } from './apps/desktop/src/linux-deb-swap.ts';
+          writeFileSync(`${process.env.RUNNER_TEMP}/omp-deb-supervisor.cjs`, linuxDebSwapHelperSource());
+          NODE
+          docker run -i --rm -v "$GITHUB_WORKSPACE:/repo:ro" -v "$RUNNER_TEMP/omp-deb-supervisor.cjs:/tmp/omp-deb-supervisor.cjs:ro" -e OMP_DEB_TEST_CONTAINER=1 -e OMP_DEB_TEST_SUPERVISOR=1 -e OMP_DEB_TEST_SUPERVISOR_SOURCE=/tmp/omp-deb-supervisor.cjs ubuntu:24.04 sh -s <<'SCRIPT'
           set -e
           apt-get -o Acquire::Retries=4 update -qq
           apt-get -o Acquire::Retries=4 install -y -qq --no-install-recommends python3 openssl ca-certificates nodejs pkexec polkitd dbus > /tmp/setup.log

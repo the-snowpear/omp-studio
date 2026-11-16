@@ -102,6 +102,11 @@ def install(package_path, catalog_path, previous=None):
         print("AUTHORIZED", flush=True)
         if sys.stdin.readline().strip() != "install":
             return
+        if backup:
+            expected = subprocess.check_output(["/usr/bin/dpkg-deb", "--field", backup, "Version"], env=ENV, text=True).strip()
+            installed = subprocess.check_output(["/usr/bin/dpkg-query", "-W", "-f=${db:Status-Status} ${Version}", "omp-studio"], env=ENV, text=True).strip()
+            if installed != "installed " + expected:
+                raise RuntimeError("The installed package changed; restart OMP Studio before updating")
         command = ["/usr/bin/apt-get", "install", "-y", "--allow-downgrades", "--no-install-recommends"]
         result = subprocess.run([*command, target], env=ENV, stdin=subprocess.DEVNULL, stdout=sys.stderr)
         if result.returncode != 0:

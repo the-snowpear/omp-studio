@@ -77,6 +77,7 @@ fs.writeFileSync(process.argv[3], crypto.sign(null, Buffer.from("omp-studio-upda
     old = fixture("1.0.0")
     new = fixture("2.0.0")
     bad_install = fixture("3.0.0", fail=True)
+    external = fixture("4.0.0")
     run("dpkg", "-i", str(old[0]))
     assert installed() == "1.0.0"
 
@@ -94,6 +95,16 @@ fs.writeFileSync(process.argv[3], crypto.sign(null, Buffer.from("omp-studio-upda
         denied = subprocess.run(["/usr/sbin/runuser", "-u", "daemon", "--", "/usr/bin/pkexec", str(helper), str(new[0]), str(new[1]), str(old[0]), str(old[1])], input="", stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
         assert denied.returncode != 0 and installed() == "1.0.0"
         print("PASS: polkit refusal leaves the installed package untouched")
+
+    process = helper_process(new, old)
+    line(process, "AUTHORIZED")
+    run("dpkg", "-i", str(external[0]))
+    process.stdin.write("install\n"); process.stdin.flush()
+    assert process.wait() != 0
+    assert "installed package changed" in process.stderr.read()
+    assert installed() == "4.0.0"
+    run("dpkg", "-i", str(old[0]))
+    print("PASS: an external package upgrade is not overwritten by a stale update")
 
     process = helper_process(new, old)
     line(process, "AUTHORIZED")
@@ -150,7 +161,10 @@ fs.writeFileSync(process.argv[3], crypto.sign(null, Buffer.from("omp-studio-upda
         launcher.write_text("#!/bin/sh\nif [ \"$OMP_TEST_HEALTH\" = 1 ]; then printf healthy > \"$OMP_TEST_MARKER\"; sleep 1; else exit 1; fi\n")
         launcher.chmod(0o755)
         supervisor = root / "supervisor.cjs"
-        run("node", "--input-type=module", "-e", 'import {writeFileSync} from "node:fs"; import {linuxDebSwapHelperSource} from "file:///repo/apps/desktop/dist/src/linux-deb-swap.js"; writeFileSync(process.argv[1], linuxDebSwapHelperSource());', str(supervisor))
+        if os.environ.get("OMP_DEB_TEST_SUPERVISOR_SOURCE"):
+            shutil.copyfile(os.environ["OMP_DEB_TEST_SUPERVISOR_SOURCE"], supervisor)
+        else:
+            run("node", "--input-type=module", "-e", 'import {writeFileSync} from "node:fs"; import {linuxDebSwapHelperSource} from "file:///repo/apps/desktop/dist/src/linux-deb-swap.js"; writeFileSync(process.argv[1], linuxDebSwapHelperSource());', str(supervisor))
         supervisor.chmod(0o755)
 
         def supervise(target, previous, healthy):
