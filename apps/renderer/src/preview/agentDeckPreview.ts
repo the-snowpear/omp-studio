@@ -4,19 +4,24 @@ import { PREVIEW_AGENT_EPOCH } from "./agentDockPreview";
 
 /**
  * Demo-only extras for the Agents deck, on top of the shared roster story in
- * agentDockPreview.ts (main → docs, deps → typecheck, preview, lint). Nothing
+ * agentDockPreview.ts (main → docs, advisor, audit, spike, deps → typecheck,
+ * preview, lint). The advisor observes and does not message; nothing
  * here reaches the Host: stage trails stand in for what the recorder would have
  * seen, the rate curve for its samples, and the message thread for the IRC read
  * model the Runtime does not offer yet.
  */
 
 const MAIN = "agent-019fac94", DOCS = "agent-019fc9d2", DEPS = "agent-019fcb01", PREVIEW = "agent-019fcb17", LINT = "agent-019fcb55", TYPECHECK = "agent-019fcb20";
+const ADVISOR = "advisor-019fab10", AUDIT = "agent-019fc8a0", SPIKE = "agent-019fc77e";
 const at = (secondsAgo: number) => PREVIEW_AGENT_EPOCH - secondsAgo * 1000;
 
 const TRAILS: Record<string, readonly (readonly [number, string, string])[]> = {
   [MAIN]: [
     [1490, "读取 docs/ 与上游 CHANGELOG", "Reading docs/ and the upstream CHANGELOG"],
     [1450, "派生 docs 子 Agent 起草章节", "Spawned docs subagent to draft sections"],
+    [1385, "请 advisor 评审存储层重构", "Asked the advisor to review the storage refactor"],
+    [1325, "派生 audit 子 Agent 做发布前合规检查", "Spawned audit subagent for the pre-release compliance check"],
+    [1245, "派生 spike 子 Agent 试验 ws 通道", "Spawned spike subagent to try a WebSocket channel"],
     [815, "派生 deps 子 Agent 审计依赖", "Spawned deps subagent for the audit"],
     [668, "派生 preview 子 Agent 验证 Mermaid", "Spawned preview subagent for Mermaid"],
     [441, "派生 lint 子 Agent 回归扫描", "Spawned lint subagent for regressions"],
@@ -46,6 +51,21 @@ const TRAILS: Record<string, readonly (readonly [number, string, string])[]> = {
   [TYPECHECK]: [
     [292, "bunx tsc --noEmit", "bunx tsc --noEmit"],
     [140, "归类 renderer 类型错误", "Classifying renderer type errors"],
+  ],
+  [ADVISOR]: [
+    [1375, "读取 session 存储层重构方案", "Reading the session storage refactor proposal"],
+    [1290, "列出迁移与回滚风险点", "Listing migration and rollback risks"],
+    [1205, "评审意见已交付，只读待命", "Review delivered; standing by read-only"],
+  ],
+  [AUDIT]: [
+    [1315, "扫描 LICENSE 与 NOTICE", "Scanning LICENSE and NOTICE"],
+    [1150, "审计依赖许可证", "Auditing dependency licenses"],
+    [960, "生成合规报告与补丁", "Writing the compliance report and patch"],
+    [910, "报告已生成，等待手动 revive", "Report ready; waiting for manual revive"],
+  ],
+  [SPIKE]: [
+    [1236, "试验 ws 通道替代 stdio", "Trying a WebSocket channel in place of stdio"],
+    [1210, "方案被否决，由用户停止", "Proposal rejected; stopped by the user"],
   ],
 };
 

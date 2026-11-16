@@ -119,6 +119,7 @@ function renderHub(
     parentSessionId?: SessionId;
     liveSessionId?: SessionId;
     pendingInteraction?: boolean;
+    onOpenMain?: () => void;
   } = {},
 ) {
   localStorage.setItem("omp.previewMode", extras.preview === true ? "1" : "0");
@@ -139,7 +140,7 @@ function renderHub(
         {...(extras.parentSessionId === undefined ? {} : { parentSessionId: extras.parentSessionId })}
         {...(effectiveLiveSessionId === undefined ? {} : { liveSessionId: effectiveLiveSessionId })}
         {...(extras.pendingInteraction === undefined ? {} : { pendingInteraction: extras.pendingInteraction })}
-        onOpenMain={() => undefined}
+        onOpenMain={extras.onOpenMain ?? (() => undefined)}
       />
     </PreviewModeProvider>,
   );
@@ -657,4 +658,74 @@ it("uses task preview data with marks off without demo notices or Host writes", 
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "创建代理" })).toBeNull());
   expect(screen.queryByText(/演示任务已配置/)).toBeNull();
   expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
+});
+
+describe("AgentHubPage command deck view", () => {
+  const swarm = () => snapshotWith([
+    snapshotAgent({ agentId: "agent-lead" as AgentId, kind: "main", displayName: "Lead" }),
+    snapshotAgent({ agentId: "agent-0001" as AgentId, parentAgentId: "agent-lead" as AgentId, displayName: "Lockfile Auditor", status: "running" }),
+    snapshotAgent({ agentId: "agent-0002" as AgentId, parentAgentId: "agent-0001" as AgentId, displayName: "Docs Writer" }),
+  ]);
+  const deckCard = (name: string) => [...document.querySelectorAll<HTMLButtonElement>(".ad .ad-card-hit")]
+    .find(button => (button.getAttribute("aria-label") ?? "").includes(` · ${name} · `))!;
+  const detailName = () => document.querySelector("#hubDetail .hub-detail-head b")?.textContent;
+
+  it("shows the deck beside the Hub detail and keeps the view after a remount", () => {
+    const first = renderHub(swarm());
+    fireEvent.click(screen.getByRole("button", { name: "指挥台" }));
+    expect(document.querySelector(".hub-page.is-deck .ad[data-embedded]")).toBeTruthy();
+    expect(document.querySelector("#hubList")).toBeNull();
+    expect(document.querySelector(".hub-detail")).toBeTruthy();
+    // The deck covers status and search itself.
+    expect(screen.queryByRole("searchbox", { name: "搜索 Agent" })).toBeNull();
+    first.unmount();
+    renderHub(swarm());
+    expect(screen.getByRole("button", { name: "指挥台" }).getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector(".ad[data-embedded]")).toBeTruthy();
+  });
+
+  it("shares one selection between the deck and the Hub detail, with no inspector of the deck's own", () => {
+    renderHub(swarm());
+    fireEvent.click(screen.getByRole("button", { name: "指挥台" }));
+    fireEvent.click(deckCard("Docs Writer"));
+    expect(detailName()).toBe("Docs Writer");
+    expect(deckCard("Docs Writer").getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector(".ad-inspector, .ad-sheet")).toBeNull();
+    // Picking in the Hub moves the deck's pick too.
+    fireEvent.click(screen.getByRole("button", { name: /父代理: Lockfile Auditor/ }));
+    expect(detailName()).toBe("Lockfile Auditor");
+    expect(deckCard("Lockfile Auditor").getAttribute("aria-pressed")).toBe("true");
+    expect(deckCard("Docs Writer").getAttribute("aria-pressed")).toBe("false");
+    // The lead is the main conversation, not a Hub member.
+    fireEvent.click(deckCard("Lead"));
+    expect(detailName()).toBe("Lockfile Auditor");
+  });
+
+  it("opens the Hub's own conversation preview on double-click and sends the lead to the main conversation", async () => {
+    const onOpenMain = vi.fn();
+    const query = vi.fn(async (name: string, input: never) => {
+      if (name === "conversation.open") return openedAgentConversation(input);
+      throw new Error(name);
+    });
+    renderHub(swarm(), { client: mockClient(query), runtimeConnected: true, canSend: true, onOpenMain });
+    fireEvent.click(screen.getByRole("button", { name: "指挥台" }));
+    fireEvent.doubleClick(deckCard("Lockfile Auditor"));
+    expect(document.querySelector('#hubDetail [data-hub-face="chat"]')).toBeTruthy();
+    expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
+    await vi.waitFor(() => expect(query).toHaveBeenCalledWith("conversation.open", expect.objectContaining({ target: expect.objectContaining({ agentId: "agent-0001" }) })));
+    fireEvent.doubleClick(deckCard("Lead"));
+    expect(onOpenMain).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the preview deck on the demo story and never reaches the Host", () => {
+    const query = vi.fn(), command = vi.fn();
+    renderHub(snapshotWith([snapshotAgent()]), { preview: true, client: { ...mockClient(query), command } });
+    fireEvent.click(screen.getByRole("button", { name: "指挥台" }));
+    expect(deckCard("Lockfile Auditor")).toBeUndefined();
+    fireEvent.click(deckCard("audit 子 Agent"));
+    expect(detailName()).toBe("audit 子 Agent");
+    fireEvent.doubleClick(deckCard("deps 子 Agent"));
+    expect(document.querySelector('#hubDetail [data-hub-face="chat"]')).toBeTruthy();
+    expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
+  });
 });

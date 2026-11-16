@@ -2,6 +2,7 @@ import { revealWorkspaceFile } from "../fileBrowser/fileBrowserLinks";
 import { useWorkspaceFileActions } from "../files/useWorkspaceFileActions";
 import { ConversationTitleSurface, SharedSurface, useConversationView, useConversationDom } from "../conversationWorkspace/Context";
 import { EvaluationActivity } from "../evaluation/EvaluationActivity";
+import { agentSwarmScope } from "../agents/deck/swarmScope";
 import { useDock } from "../dock/DockContext";
 import { DockViewMenu } from "../dock/DockMenus";
 import { locatePanel } from "../dock/model";
@@ -2392,6 +2393,10 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       }) };
     mdi.store.updateDocument(mdi.document.id, { ref, title: threadTitle, projectName: previewMode.preview ? findPreviewProject(previewProjectId, zh)?.name : selectedProject?.name });
   }, [mdi?.document.id, threadTitle, viewedSessionId, dockSelection.project, selected?.threadId, selected?.historyId, previewProjectId, previewThreadId, previewMode.preview, previewMode.preview ? zh : false, executionTarget.id, selectedProject?.name, state.loading]);
+  const canvasSessionId = selectedProvisionalSessionId ?? selected?.sessionId ?? (mdi ? mdi.document.ref.sessionId ?? snapshot?.sessionId : undefined);
+  // The workbench deck records the swarm under this scope and the Hub's deck reads it: same inputs, same history.
+  const hubSwarmScope = agentSwarmScope(executionTarget.id, dockSelection.project ?? undefined,
+    previewMode.preview ? `preview:${chrome.previewThreadId ?? "current"}` : canvasSessionId ?? snapshot?.sessionId, previewMode.preview);
   return (
     <AnnotationsProvider client={client} workspaceId={hubWorkspaceId} sessionId={viewedSessionId} runtimeSessionId={snapshot?.sessionId} onInsert={insertPreparedPrompt}>
     <BackgroundProvider key={previewMode.preview ? "background-preview" : "background-real"} preview={previewMode.preview} theme={theme}>
@@ -2615,6 +2620,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
               pendingInteraction={pendingInteraction !== null}
               {...(hubWorkspaceId === undefined ? {} : { workspaceId: hubWorkspaceId })}
               loadMentions={fetchHubMentions}
+              swarmScope={hubSwarmScope}
               onOpenMain={() => go("workbench")}
             />
           ) : pageRoute === "media" ? (
@@ -2705,7 +2711,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
             viewIdentity={selectedProvisionalSessionId === undefined
               ? (selectedHistoryId === null ? `live:${freshView}` : `history:${selectedHistoryId}`)
               : `draft:${selectedProvisionalSessionId}`}
-             {...((selectedProvisionalSessionId ?? selected?.sessionId ?? (mdi ? mdi.document.ref.sessionId ?? snapshot?.sessionId : undefined)) === undefined ? {} : { selectedSessionId: (selectedProvisionalSessionId ?? selected?.sessionId ?? (mdi ? mdi.document.ref.sessionId ?? snapshot?.sessionId : undefined)) as string })}
+            {...(canvasSessionId === undefined ? {} : { selectedSessionId: canvasSessionId as string })}
             viewedAgents={viewedAgents}
             {...((selected?.threadId ?? mdi?.document.ref.threadId ?? state.bootstrap?.selected?.threadId) === undefined ? {} : { selectedThreadId: (selected?.threadId ?? mdi?.document.ref.threadId ?? state.bootstrap?.selected?.threadId) as ThreadId })}
             waitForNewSession={waitForNewSession}

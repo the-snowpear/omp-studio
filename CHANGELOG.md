@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Agent Hub 的「代理」页新增「指挥台」名册视图，与「平铺 / 按父代理」并列。左侧是指挥台的编队、时间线、星图和通讯，读取与工作台指挥台同一段运行记录；右侧仍是 Hub 详情，两边共用选中项，停止、恢复、发消息和 BTW 沿用 Hub 现有的确认与权限。详见[停靠说明](docs/workbench-docking.md#agents-与子-agent-对话)。
+
 ## [0.2.2] - 2026-11-16
 
 ### Added

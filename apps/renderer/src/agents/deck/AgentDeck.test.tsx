@@ -276,6 +276,31 @@ describe("Agents deck", () => {
     expect(screen.getByRole("dialog", { name: "deps 子 Agent" })).toBeTruthy();
   });
 
+  it("lets a host page own the selection: no inspector of its own, and Esc keeps the pick", () => {
+    const agents = getPreviewDockAgents(true);
+    const onSelect = vi.fn<(id: string) => void>();
+    const embedded = (selectedId: string | null) => <I18nProvider forcedLanguage="zh">
+      <AgentDeck instanceKey="test|hub" scope="test" agents={agents} ready source="live" visible width={1100} height={640} region="hub"
+        openedIds={[]} links={links()} commandContext={{ preview: false, viewingLive: true, online: true }} embedded={{ selectedId, onSelect }} />
+    </I18nProvider>;
+    const view = render(embedded(null));
+    expect(document.querySelector(".ad")?.getAttribute("data-tier")).toBe("bridge");
+    fireEvent.click(card(/deps 子 Agent/));
+    expect(onSelect).toHaveBeenLastCalledWith(DEPS);
+    // Nothing changes until the host answers: the pick is the host's to make.
+    expect(document.querySelector('.ad-card[data-selected]')).toBeNull();
+    view.rerender(embedded(DEPS));
+    expect(document.querySelector('.ad-card[data-selected] .ad-card-name strong')?.textContent).toBe("deps 子 Agent");
+    expect(document.querySelector(".ad-inspector, .ad-side, .ad-sheet")).toBeNull();
+    // A second click picks again instead of clearing; Esc leaves the pick alone.
+    fireEvent.click(screen.getAllByRole("button").find(button => /打开对话 · deps 子 Agent/.test(button.getAttribute("aria-label") ?? ""))!);
+    expect(onSelect).toHaveBeenLastCalledWith(DEPS);
+    fireEvent.keyDown(document.querySelector(".ad")!, { key: "Escape" });
+    expect(document.querySelector('.ad-card[data-selected]')).toBeTruthy();
+    view.rerender(embedded("agent-019fcb20"));
+    expect(document.querySelector('.ad-card[data-selected] .ad-card-name strong')?.textContent).toBe(agents.find(agent => agent.agentId === "agent-019fcb20")!.displayName);
+  });
+
   it("shows agent messaging as not connected in real mode, with no invented messages", () => {
     render(deck(getPreviewDockAgents(true), { links: links() }));
     fireEvent.click(screen.getByRole("tab", { name: "通讯" }));

@@ -85,7 +85,7 @@ export function loadPersisted(): Persisted {
     return {
       selectedBySession,
       tab: parseHubTab(saved.tab) ?? "overview",
-      view: saved.view === "tree" ? "tree" : "flat",
+      view: saved.view === "tree" || saved.view === "deck" ? saved.view : "flat",
     };
   } catch {
     return { selectedBySession: {}, tab: "overview", view: "flat" };
