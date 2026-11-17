@@ -15,6 +15,7 @@ export const CORE_NODE_SUITES = [
   // Opening, recovering, browsing and deleting conversations.
   "packages/studio-host/dist/test/backend-lifecycle.test.js",
   "packages/studio-host/dist/test/host-foundation.test.js",
+  "packages/studio-host/dist/test/workspace-registry.test.js",
   "packages/studio-host/dist/test/evaluation-coordinator.test.js",
   "packages/studio-host/dist/test/conversation-open.test.js",
   "packages/studio-host/dist/test/conversation-open-slice.test.js",

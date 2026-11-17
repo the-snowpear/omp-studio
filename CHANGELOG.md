@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 启动时识别失效工作区并回退到有效项目；诊断页可重新选择项目、新建对话或清除失效记录。清理前保存注册表副本，保留项目文件和历史会话，避免旧安装目录与保存的失效会话阻断恢复。
+
 ## [0.2.2] - 2026-11-16
 
 ### Added
