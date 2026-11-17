@@ -5,14 +5,11 @@ import { dirname, join, sep } from "node:path";
 import process from "node:process";
 
 import { bundlePreload } from "./preload-bundle.mjs";
-import { startLiveUiPreview } from "./preview-live-ui.mjs";
 
 const root = process.cwd();
 const previewHost = "127.0.0.1";
 const previewPort = process.env.OMP_PREVIEW_PORT ?? "5173";
 const previewUrl = `http://${previewHost}:${previewPort}`;
-/** 生产预览的 CDP 端口：用于在重建后触发渲染层重载。 */
-const previewCdpPort = process.env.OMP_PREVIEW_CDP_PORT ?? "9333";
 const previewAumid = "com.ompstudio.desktop.preview";
 /**
  * 生产预览（OMP_PREVIEW_MODE=production）必须复现已安装形态：改名的 exe
@@ -368,10 +365,6 @@ async function main() {
 
   console.log(`[preview] Opening OMP Studio Desktop (${production ? "production bundle" : previewData ? "dev server, preview data" : "dev server"})...`);
   const desktopArgs = [join(root, "apps", "desktop")];
-  if (production) {
-    // 生产预览的实时 UI 更新靠 CDP 触发渲染层重载。
-    desktopArgs.push(`--remote-debugging-port=${previewCdpPort}`);
-  }
   const desktop = start(electronExecutable, desktopArgs, {
     env: {
       ...process.env,
@@ -380,23 +373,6 @@ async function main() {
       ...(production ? {} : { OMP_RENDERER_DEV_URL: rendererEntryUrl }),
     },
   });
-
-  /**
-   * 生产预览的 UI 实时预览：改源码 → 重建 renderer → 重载渲染层。
-   *
-   * 这里启动的是打包形态（改名后的 exe，isPackaged === true），渲染层加载
-   * 的是 file:// 的构建产物，改 UI 源码本不会自动反映到窗口。生产预览刻意
-   * 保留这个形态（要复现已安装路径），所以「重建 + 重载」这一步在预览进程
-   * 侧完成，桌面端代码与 Studio Bridge 契约都不动。
-   */
-  if (production) {
-    await startLiveUiPreview({
-      rendererRoot: join(root, "apps", "renderer"),
-      devServerPort: previewCdpPort,
-      repoRoot: root,
-      npmCli,
-    });
-  }
 
   const exitCode = await new Promise((resolve, reject) => {
     desktop.once("error", reject);

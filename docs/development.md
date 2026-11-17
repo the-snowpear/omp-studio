@@ -82,6 +82,8 @@ and update transactions are kept under `outputs/production-preview/`; the
 installed application's Runtime is not replaced. Workspaces, conversations,
 model credentials, and other profile data continue to use the normal user
 profile. Close another running Studio instance before opening this preview.
+The production preview loads the build made at startup and does not watch or
+automatically reload when source files change; restart it to pick up changes.
 `启动预览.cmd` and `启动预览版.cmd` retain their development-preview behaviour.
 If the vendor overlay or patches have uncaptured changes, preserve and capture
 them using the normal Runtime workflow before starting production preview.
