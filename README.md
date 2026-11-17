@@ -47,25 +47,28 @@
 </p>
 
 > [!NOTE]
-> **[0.2.2](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.2)** 带来了 Linux 桌面安装包、全机文件浏览器和 SSH tmux，并将 Runtime 升级至 `18.20.2-studio.5`。各平台下载和更新内容见 [发布说明](docs/releases/v0.2.2.md)。
+> **[0.2.3](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.3)** 为 Linux 客户端（AppImage / deb）补齐了应用内差分更新，将指挥台与 Agent 间真实通讯并入 Agent Hub，重做了右侧 Agent 档案与模型拉取筛选，并修复了多处模型读取、配置审批与工作区恢复问题（内置 Runtime `18.20.2-studio.6`）。各平台下载和更新内容见 [发布说明](docs/releases/v0.2.3.md)。
 
 <table>
 <tr>
 <td width="33%" valign="top">
 
-### 🪟 自由的工作台
+### 自由的工作台
+
 对话、工具和网页使用同一套窗口：浮动、吸附、分屏、成组、最小化，或钉成独立系统窗口。布局在重启后恢复。
 
 </td>
-<td width="33%" valign="top">
+<td width="34%" valign="top">
 
-### 🧬 类型化 Bridge
+### 类型化 Bridge
+
 界面通过 `query` / `command` / `event` 与 Runtime 通信。Renderer 拿不到 token、进程句柄或本机路径；未知写操作一律失败关闭。
 
 </td>
 <td width="33%" valign="top">
 
-### 🧰 一站式本机能力
+### 一站式本机能力
+
 Git、文件、终端、浏览器、电脑操作、Time Travel、评测和语音输入都在工作台内，不必在 TUI 和一堆网页之间切换。
 
 </td>
@@ -143,18 +146,16 @@ Files、Changes、Git、Browser、Computer、Agents、Terminal、Logs、BTW 等�
 浮窗的 Pin 菜单提供 **不固定 · 固定在工作区 · 固定在应用 · 独立窗口 · 独立窗口并置顶**。独立窗口在任务栏有自己的图标，可以拖到另一块显示器；重启后恢复仍然打开的窗口和位置。
 
 <details>
-<summary><b>⌨️ 快捷键速查</b>（点击展开）</summary>
-
-<br>
+<summary><b>快捷键速查</b></summary>
 
 | 操作 | Windows / Linux | macOS |
 |---|---|---|
-| 新建对话 | <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>O</kbd> | <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>O</kbd> |
-| 收起 / 展开左栏 | <kbd>Ctrl</kbd> <kbd>B</kbd> | <kbd>⌘</kbd> <kbd>B</kbd> |
-| 收起 / 展开底栏 | <kbd>Ctrl</kbd> <kbd>J</kbd> | <kbd>⌘</kbd> <kbd>J</kbd> |
-| 在区域之间切换焦点 | <kbd>F6</kbd> / <kbd>Shift</kbd> <kbd>F6</kbd> | <kbd>F6</kbd> / <kbd>⇧</kbd> <kbd>F6</kbd> |
+| 新建对话 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> | <kbd>⌘</kbd>+<kbd>⇧</kbd>+<kbd>O</kbd> |
+| 收起 / 展开左栏 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | <kbd>⌘</kbd>+<kbd>B</kbd> |
+| 收起 / 展开底栏 | <kbd>Ctrl</kbd>+<kbd>J</kbd> | <kbd>⌘</kbd>+<kbd>J</kbd> |
+| 在区域之间切换焦点 | <kbd>F6</kbd> / <kbd>Shift</kbd>+<kbd>F6</kbd> | <kbd>F6</kbd> / <kbd>⇧</kbd>+<kbd>F6</kbd> |
 | 拖动时临时关闭吸附 | 按住 <kbd>Ctrl</kbd> | 按住 <kbd>⌘</kbd> |
-| 标签 / 卡片菜单 | <kbd>Shift</kbd> <kbd>F10</kbd> 或菜单键 | — |
+| 标签 / 卡片菜单 | <kbd>Shift</kbd>+<kbd>F10</kbd> 或菜单键 | — |
 | 取消拖动或关闭菜单 | <kbd>Esc</kbd> | <kbd>Esc</kbd> |
 
 隐藏的工具可以从 **视图 → 工具** 找回；首次使用教程可从 **帮助 → 使用教程** 重新打开。
@@ -162,9 +163,7 @@ Files、Changes、Git、Browser、Computer、Agents、Terminal、Logs、BTW 等�
 </details>
 
 <details>
-<summary><b>🎬 首次启动教程</b>：8 段动画讲清新工作台</summary>
-
-<br>
+<summary><b>首次启动教程</b>：8 段动画讲清新工作台</summary>
 
 <p align="center">
   <picture>
@@ -192,7 +191,7 @@ Files、Changes、Git、Browser、Computer、Agents、Terminal、Logs、BTW 等�
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/home-dark.webp">
   <img src="docs/readme/home-light.webp" width="100%" alt="首页：最近项目与 Token 用量曲线、热力图">
 </picture>
-<h3>📊 首页与用量</h3>
+<h3>首页与用量</h3>
 最近项目一键回到工作台；Token 折线图和热力图可按年、月、周、日切换。对话顶栏可随时展开本轮用量、缓存命中和上下文占用。
 </td>
 <td width="50%" valign="top">
@@ -200,64 +199,62 @@ Files、Changes、Git、Browser、Computer、Agents、Terminal、Logs、BTW 等�
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/history-dark.webp">
   <img src="docs/readme/history-light.webp" width="100%" alt="会话历史与 Time Travel">
 </picture>
-<h3>⏪ 会话历史 · Time Travel</h3>
+<h3>会话历史 · Time Travel</h3>
 按回合保存工作区快照，预览文件变化后，可以只恢复代码、只恢复对话或两者都恢复，恢复前会留下备份。此功能默认关闭。详见 <a href="docs/time-travel.md">Time Travel</a>。
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/agent-hub-dark.webp">
   <img src="docs/readme/agent-hub-light.webp" width="100%" alt="Agent Hub：主会话与子 Agent 的状态、用量和花费">
 </picture>
-<h3>🤖 Agent Hub</h3>
+<h3>Agent Hub</h3>
 集中查看主对话和全部子 Agent 的状态、请求数、Token 用量和花费；支持 worker 子 Agent、任务文件和按子代理设置账号策略。
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/model-config-dark.webp">
   <img src="docs/readme/model-config-light.webp" width="100%" alt="模型配置：统一供应商列表">
 </picture>
-<h3>🧠 统一模型配置</h3>
+<h3>统一模型配置</h3>
 Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管理开关、端点和 <code>modelProviderOrder</code>；在角色页为 <code>@default</code>、<code>@plan</code>、<code>@task</code> 分别指定模型和思考强度。
 </td>
 </tr>
 <tr>
-<td valign="top">
+<td width="50%" valign="top">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/capabilities-dark.webp">
   <img src="docs/readme/capabilities-light.webp" width="100%" alt="能力中心：Skills / Plugins / MCP / Slash Commands">
 </picture>
-<h3>🧩 能力中心</h3>
+<h3>能力中心</h3>
 在同一页开关和探测 Skills、Plugins、MCP 与 Slash Commands，也可以直接打开所在目录；侧栏点击「加入」即可把 Skill 放进当前草稿。
 </td>
-<td valign="top">
+<td width="50%" valign="top">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/settings-dark.webp">
   <img src="docs/readme/settings-light.webp" width="100%" alt="设置：常规、外观、对话、权限与更新">
 </picture>
-<h3>⚙️ 设置与更新</h3>
+<h3>设置与更新</h3>
 设置分类清楚，并支持搜索；Runtime 配置按全局、项目和会话分层保存。应用内更新会验证签名，可选组件按需安装。详见 <a href="docs/settings.md">设置说明</a>。
 </td>
 </tr>
 </table>
 
 <details>
-<summary><b>🔭 还有这些</b>：浏览器、电脑操作、Git、文件查看、SSH、评测、语音……（点击展开）</summary>
-
-<br>
+<summary><b>还有这些</b>：浏览器、电脑操作、Git、文件查看、SSH、评测、语音……</summary>
 
 | 能力 | 说明 | 文档 |
 |---|---|---|
-| 🌐 **聊天浏览器** | 原生网页、多标签、人工与 Agent 控制交接、DevTools、元素截图引用、持久登录空间，并接入原生 WebMCP | [browser.md](docs/browser.md) |
-| 🖥️ **电脑操作** | 动作与截图联动、历史画面、按会话停止和显式继续、只读界面结构 | [computer-use.md](docs/computer-use.md) |
-| 🌿 **Git / Changes** | 暂存、diff、提交、Fetch / Pull / Push、提交图和 Worktree；Changes 按回合列出文件变化 | [feature-index](doc/feature-index.md) |
-| 📄 **文件查看器** | 文本编辑、Markdown、PDF、图片、音视频、Excel / CSV；Word / PPT 通过可选组件打开 | [file-viewer.md](docs/file-viewer.md) |
-| 🔐 **SSH 工作区** | 在本机或远端工作，支持系统密钥和账号密码，远端 Runtime 可有限恢复（开发预览） | [ssh-workspaces.md](docs/ssh-workspaces.md) |
-| 💬 **BTW 旁路追问** | 不打断主线程地追问；支持图片、分支和子代理复用 | [btw.md](docs/btw.md) |
-| 🎙️ **语音输入** | 点击或按住空格听写，内容插入到光标位置；失败后可从内存恢复录音 | [dictation.md](docs/dictation.md) |
-| 📏 **评测工作区** | 原生基准、指令遵循评测、后台执行、历史对比，以及 Ratchet 最佳版本差异导出 | [evaluation.md](docs/evaluation.md) |
-| 🧾 **对话细节** | 工具卡片、Plan / Vibe / 审批、排队与中途回复、Shell 回放、提示缓存状态和最多四条输入预测 | [omp-18.18.0](docs/migrations/omp-18.18.0.md) |
+| **聊天浏览器** | 原生网页、多标签、人工与 Agent 控制交接、DevTools、元素截图引用、持久登录空间，并接入原生 WebMCP | [browser.md](docs/browser.md) |
+| **电脑操作** | 动作与截图联动、历史画面、按会话停止和显式继续、只读界面结构 | [computer-use.md](docs/computer-use.md) |
+| **Git / Changes** | 暂存、diff、提交、Fetch / Pull / Push、提交图和 Worktree；Changes 按回合列出文件变化 | [feature-index.md](doc/feature-index.md) |
+| **文件查看器** | 文本编辑、Markdown、PDF、图片、音视频、Excel / CSV；Word / PPT 通过可选组件打开 | [file-viewer.md](docs/file-viewer.md) |
+| **SSH 工作区** | 在本机或远端工作，支持系统密钥和账号密码，远端 Runtime 可有限恢复（开发预览） | [ssh-workspaces.md](docs/ssh-workspaces.md) |
+| **BTW 旁路追问** | 不打断主线程地追问；支持图片、分支和子代理复用 | [btw.md](docs/btw.md) |
+| **语音输入** | 点击或按住空格听写，内容插入到光标位置；失败后可从内存恢复录音 | [dictation.md](docs/dictation.md) |
+| **评测工作区** | 原生基准、指令遵循评测、后台执行、历史对比，以及 Ratchet 最佳版本差异导出 | [evaluation.md](docs/evaluation.md) |
+| **对话细节** | 工具卡片、Plan / Vibe / 审批、排队与中途回复、Shell 回放、提示缓存状态和最多四条输入预测 | [omp-18.18.0.md](docs/migrations/omp-18.18.0.md) |
 
 </details>
 
@@ -274,12 +271,10 @@ Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管�
 | **macOS Apple Silicon** | `OMP-Studio-<版本>-macos-arm64.dmg` | macOS 13+；ad hoc 签名，尚未公证 |
 | **Linux x64** | `OMP-Studio-<版本>-linux-x64.deb` / `.AppImage` | Ubuntu 24.04 / glibc 2.39+；[安装与沙箱说明](docs/linux.md) |
 
-👉 前往 **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases)** 下载。具体文件名以 Release 页为准。Runtime 与更新目录使用 Ed25519 签名；Windows 安装包没有 Authenticode 签名。
+前往 **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases)** 下载。具体文件名以 Release 页为准。Runtime 与更新目录使用 Ed25519 签名；Windows 安装包没有 Authenticode 签名。
 
 <details>
-<summary><b>🍎 macOS 首次打开被拦截？</b></summary>
-
-<br>
+<summary><b>macOS 首次打开被拦截？</b></summary>
 
 打开 dmg，把 OMP Studio 拖进「应用程序」。当前预览版是 ad hoc 签名，尚未公证，首次打开会被 Gatekeeper 拦截。处理方法任选其一：
 
@@ -290,7 +285,7 @@ Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管�
 xattr -dr com.apple.quarantine "/Applications/OMP Studio.app"
 ```
 
-也可以按 [getting-started](docs/getting-started.md) 从源码运行，或用 `npm run pack:mac` 自行打包。
+也可以按 [getting-started.md](docs/getting-started.md) 从源码运行，或用 `npm run pack:mac` 自行打包。
 
 </details>
 
@@ -325,9 +320,7 @@ Windows 也可以直接双击仓库根目录的 `preview.cmd`；macOS 需要先�
 Linux 支持源码运行与 `npm run pack:linux` 原生打包；环境、安装、更新与沙箱说明见 [Linux 客户端](docs/linux.md)。正式桌面附件为 AppImage / deb；Release 中的 Linux remote 压缩包用于 SSH Host。
 
 <details>
-<summary><b>🔌 接上真实的托管 Runtime</b>（首次较慢）</summary>
-
-<br>
+<summary><b>接上真实的托管 Runtime</b>（首次较慢）</summary>
 
 ```bash
 npm run omp:install-deps     # MSVC Build Tools + Rust（macOS：检查 Xcode CLT / rustup / Bun）
@@ -342,9 +335,7 @@ npm run preview
 </details>
 
 <details>
-<summary><b>🧪 开发者常用命令</b></summary>
-
-<br>
+<summary><b>开发者常用命令</b></summary>
 
 | 命令 | 用途 |
 |---|---|
@@ -380,9 +371,7 @@ npm run preview
 - Runtime 断开后封存旧 epoch，未完成的请求标记为 `outcome_unknown`。
 
 <details>
-<summary><b>🗂️ 仓库结构</b></summary>
-
-<br>
+<summary><b>仓库结构</b></summary>
 
 ```text
 apps/desktop          Electron 主进程；平台差异集中在 src/platform/
@@ -398,9 +387,7 @@ docs/                 使用与开发文档
 </details>
 
 <details>
-<summary><b>🧬 Runtime 是怎么维护的？</b></summary>
-
-<br>
+<summary><b>Runtime 是怎么维护的？</b></summary>
 
 Runtime 钉在 oh-my-pi 子模块上，Studio 的改动分两层：
 
@@ -417,26 +404,30 @@ Runtime 钉在 oh-my-pi 子模块上，Studio 的改动分两层：
 
 <details>
 <summary><b>它和 omp CLI 是什么关系？</b></summary>
-<br>
-OMP Studio 是 omp 的桌面外壳。模型、登录、Skills 和会话都沿用 OMP 自己的配置与格式；Studio 通过 Bridge 调用 Runtime 的语义能力，不包装终端。上游 OMP 的缺陷请提交到 <a href="https://github.com/can1357/oh-my-pi">can1357/oh-my-pi</a>。
+
+OMP Studio 是 omp 的桌面外壳。模型、登录、Skills 和会话都沿用 OMP 自己的配置与格式；Studio 通过 Bridge 调用 Runtime 的语义能力，不包装终端。上游 OMP 的缺陷请提交到 [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi)。
+
 </details>
 
 <details>
 <summary><b>支持哪些模型？需要我提供密钥吗？</b></summary>
-<br>
-支持 OMP 能连接的全部供应商，例如 Anthropic、OpenAI、OpenRouter、本地 LM Studio 等。密钥和登录走 OMP 的 <code>models.yml</code> / <code>omp login</code>，本仓库不内置任何密钥。
+
+支持 OMP 能连接的全部供应商，例如 Anthropic、OpenAI、OpenRouter、本地 LM Studio 等。密钥和登录走 OMP 的 `models.yml` / `omp login`，本仓库不内置任何密钥。
+
 </details>
 
 <details>
 <summary><b>截图里的数据是真的吗？</b></summary>
-<br>
+
 不是。README 中的截图和动画都在预览模式下录制，使用的是演示数据；实际使用时，界面只显示 Host 和本机返回的真实数据。
+
 </details>
 
 <details>
 <summary><b>出问题了去哪看日志？</b></summary>
-<br>
-Host 诊断日志在 <code>%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log</code>，macOS 在 <code>~/Library/Application Support/omp-studio/logs/</code>。应用内的「诊断中心」也可以查看。反馈问题请提交 <a href="https://github.com/the-snowpear/omp-studio/issues">Issue</a>。
+
+Host 诊断日志在 `%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`，macOS 在 `~/Library/Application Support/omp-studio/logs/`。应用内的「诊断中心」也可以查看。反馈问题请提交 [Issue](https://github.com/the-snowpear/omp-studio/issues)。
+
 </details>
 
 <br>

@@ -201,6 +201,10 @@ replace a published release.
 
 ## Preparing a version
 
+Before cutting a release or writing a pre-release review
+(`docs/reviews/*-release-review.md`), read [release-review.md](release-review.md)
+and walk through its historical failure guards and review checklist.
+
 Update the root/workspace versions and lockfile together, record user-facing
 changes in the changelog, and keep `PREVIEW_MODE_SWITCH_ENABLED=false`.
 Run checks for the affected code before tagging: the daily command is

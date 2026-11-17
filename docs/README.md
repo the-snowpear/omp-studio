@@ -22,6 +22,7 @@ Public documentation for OMP Studio.
 | [dictation.md](dictation.md) | 工作台与 BTW 语音输入、原生模式、麦克风配置和内存恢复 |
 | [btw.md](btw.md) | BTW 原生功能对齐、话题历史、图片、子代理与快捷键 |
 | [fonts.md](fonts.md) | Independent interface, terminal and output font preferences |
+| [releases/v0.2.3.md](releases/v0.2.3.md) | 0.2.3 发布说明、平台下载与升级提示 |
 | [releases/v0.2.2.md](releases/v0.2.2.md) | 0.2.2 发布说明、平台下载与升级提示 |
 | [releases/v0.2.1.md](releases/v0.2.1.md) | 0.2.1 使用阻断修复、三平台下载与升级说明 |
 | [reviews/v0.2.1-release-review.md](reviews/v0.2.1-release-review.md) | PR #25 / #26 / #28 审查、发布前验证与未覆盖范围 |
@@ -47,6 +48,7 @@ Public documentation for OMP Studio.
 | [performance-audit-2026-10-29.md](performance-audit-2026-10-29.md) | 启动/运行/GPU/低配独立审查、量化基线与 P0/P1/P2 路线 |
 | [performance-review-2026-10-29-round2.md](performance-review-2026-10-29-round2.md) | 第二轮综合审查：同 HEAD 复测、打包形态/GPU 软合成/6× 低配/动画 A/B、优化方案与门禁 |
 | [architecture.md](architecture.md) | Packages, Bridge, data rules |
+| [release-review.md](release-review.md) | 历史 Action 发布失败复盘、七道防坑准则与发布前审查清单 |
 | [releasing.md](releasing.md) | Version, changelog, tag, Windows installer, macOS build |
 | [updates.md](updates.md) | In-app updates on Windows and macOS: storage, trust, recovery |
 | [migrations/omp-18.3.0.md](migrations/omp-18.3.0.md) | OMP v18.3.0 upgrade, Studio features, verification and external acceptance decisions |

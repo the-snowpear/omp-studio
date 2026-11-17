@@ -35,6 +35,7 @@ Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`；macOS：`~
 | Host 协议 / Runtime 进程 | Host 内核 |
 | overlay / 接缝补丁 | Runtime overlay |
 | 检查门禁 / 架构约束 | 检查门禁与架构约束 |
+| 发布准备 / 发布审查 / 打包 | 检查门禁与架构约束（先读 `docs/release-review.md`） |
 | 某条 query/command 落哪 | 命令落点速查 |
 
 
@@ -181,6 +182,15 @@ Renderer 的动效只有一套：数值在 `styles/tokens.css` 的 Motion 段，
 普通 PR / main CI 在 Windows 与 Linux x64 跑 `npm run check -- --production`：架构规则、类型、核心测试和生产包各一次；纯文档改动跳过。完整 Windows / macOS / Linux 与 Runtime 检查通过 CI 的 `full` 手动运行，性能 workflow 也只手动触发。Linux 的 `linux-package` 手动切片负责 AppImage / deb 与 X11 / Wayland 安装验收。发布负责打包和产物校验，不重复跑源码测试或 GUI 验收。
 
 运行时/补丁专项命令见根目录 `package.json`，包括 `runtime:verify-source` 和 `omp:verify:patches`，只在相关改动或升级上游时按需运行。
+
+## 发布准备与发布审查
+
+准备发版、做发布前审查（如编写 `docs/reviews/*-release-review.md`），或改动 `.github/workflows/{release,runtime,remote}*`、`packaging/`、`scripts/{release,pack,audit,build-update,verify-update,runtime-}*` 时，**必须先读取 [`docs/release-review.md`](docs/release-review.md) 与 [`docs/releasing.md`](docs/releasing.md)**，逐项核对历史失败防线后再给结论或推 Tag：
+
+- 升版统一用脚本更新根与全部 workspace 的 `package.json` 及 `@omp-studio/*` 内部依赖后执行 `npm install --package-lock-only`，严禁手改或全文替换 `package-lock.json`；保持 `PREVIEW_MODE_SWITCH_ENABLED = false`。
+- 触碰 `omp-patch/` 必须走 `omp:patches:regen`、递增 `studio.N` 并确认 vendor 子模块干净；触碰协议能力或签名/打包脚本必须跑 `npm run test:tooling`，确保能力列表哈希与签名参数在源码阶段对齐。
+- 发布前必跑 `npm run check -- --production`（覆盖沙箱 preload 与远端 Host 产物）；跨 Job 下载可执行文件必须保留/恢复 `0755` 权限，不在 `release*.yml` 加回源码单测或 GUI E2E。
+- 合入 `main` 触发 `Warm release caches` 时，先等预热完成再推 `v<version>` Tag，避免双倍冷跑抢爆 `macos-15` 槽位；遇到托管 Runner 排队超时或瞬态抖动只在原 Run 执行 `Re-run failed jobs`，不删改已推 Tag。
 
 ## 改 OMP Runtime 源码
 
