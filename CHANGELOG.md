@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 未初始化的客户端首次提交命令前建立回执订阅，修复模型配置、子代理开关及同类操作已生效却一直等待、需手动刷新才显示的问题。
+
 ## [0.2.2] - 2026-11-16
 
 ### Added
