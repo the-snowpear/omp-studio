@@ -8,7 +8,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -116,5 +116,63 @@ test("a fresh registry reloads the persisted file", async () => {
     assert.equal(list[0]!.name, "alpha");
     assert.equal(list[0]!.canonicalPath.length > 0, true);
     assert.equal(reloaded.activeWorkspaceId, registry.activeWorkspaceId);
+  });
+});
+
+test("startup selects the most recent usable workspace when the active directory disappeared", async () => {
+  await withRegistry(async (registry, profile) => {
+    const usable = join(profile, "project"), vanished = join(profile, "old-install", "runtime");
+    await mkdir(usable);
+    await mkdir(vanished, { recursive: true });
+    const project = await registry.upsertByPath(usable, T0);
+    const stale = await registry.upsertByPath(vanished, "2026-08-14T01:00:00.000Z");
+    await rm(join(profile, "old-install"), { recursive: true });
+
+    const reloaded = new WorkspaceRegistry(registry.path);
+    await reloaded.load();
+    assert.equal(reloaded.activeWorkspaceId, project.workspaceId);
+    assert.equal(reloaded.list().length, 2, "old records remain available for recovery");
+    assert.equal(reloaded.get(stale.workspaceId)?.unavailable, true);
+    assert.equal(JSON.parse(await readFile(registry.path, "utf8")).activeWorkspaceId, project.workspaceId);
+    const copy = (await readdir(profile)).find(name => name.startsWith("workspaces.json.recovery-"))!;
+    assert.equal(JSON.parse(await readFile(join(profile, copy), "utf8")).activeWorkspaceId, stale.workspaceId);
+  });
+});
+
+test("forgetting stale records preserves session files and a record whose directory returned", async () => {
+  await withRegistry(async (registry, profile) => {
+    const missing = join(profile, "missing"), restored = join(profile, "restored"), live = join(profile, "live");
+    await Promise.all([missing, restored, live].map(dir => mkdir(dir)));
+    const stale = await registry.upsertByPath(missing, T0);
+    const returning = await registry.upsertByPath(restored, T0);
+    const project = await registry.upsertByPath(live, T0);
+    const session = join(profile, "session.jsonl");
+    await writeFile(session, "history to preserve\n");
+    await Promise.all([missing, restored].map(dir => rm(dir, { recursive: true })));
+    await registry.refreshAvailability();
+    assert.equal(registry.get(returning.workspaceId)?.unavailable, true);
+    await mkdir(restored);
+
+    await registry.forgetUnavailable();
+    assert.equal(registry.get(stale.workspaceId), undefined);
+    assert.equal(registry.get(returning.workspaceId)?.unavailable, undefined);
+    assert.equal(registry.activeWorkspaceId, project.workspaceId);
+    assert.equal(await readFile(session, "utf8"), "history to preserve\n");
+    const copy = (await readdir(profile)).find(name => name.startsWith("workspaces.json.recovery-"))!;
+    assert.equal(JSON.parse(await readFile(join(profile, copy), "utf8")).workspaces.length, 3);
+  });
+});
+
+test("startup with only stale workspaces leaves the project picker available without an active dead path", async () => {
+  await withRegistry(async (registry, profile) => {
+    const vanished = join(profile, "old-install");
+    await mkdir(vanished);
+    await registry.upsertByPath(vanished, T0);
+    await rm(vanished, { recursive: true });
+
+    const reloaded = new WorkspaceRegistry(registry.path);
+    await reloaded.load();
+    assert.equal(reloaded.activeWorkspaceId, undefined);
+    assert.equal(reloaded.list().length, 1);
   });
 });

@@ -2660,6 +2660,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
               {...(snapshot?.runtimeIdentity ? { buildProvenance: snapshot.runtimeIdentity } : {})}
               nativeContext={{sessionId:snapshot?.sessionId,available:hubRuntimeConnected,capabilities}}
               client={client}
+              recoveryClient={fileTargets.client(executionTarget.id)}
+              onOpenRecoveryWorkspace={workspace => startNewChatInProject({ id: workspace.workspaceId, name: workspace.name })}
+              {...(executionTarget.id ? { onChooseRemoteWorkspace: () => { go("workbench"); executionTarget.openDirectory(); } } : {})}
               {...(state.model.diagnostics ? { diagnostics: state.model.diagnostics } : {})}
               {...(capabilities ? { capabilities } : {})}
               {...(runtime ? { runtime } : {})}

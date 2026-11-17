@@ -4,6 +4,7 @@ import type {
   StudioClient,
   ClientBootstrap,
 } from "@omp-studio/client-contract";
+import type { SessionTitleRow } from "@omp-studio/studio-protocol";
 import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
@@ -101,4 +102,31 @@ it("keeps old Runtime and preview title display free of real queries", () => {
   );
   expect(client.command).not.toHaveBeenCalled();
   expect(screen.queryByText("SYNC")).toBeNull();
+});
+
+it("shows a saved native title's emoji and code only once across language changes", () => {
+  const title = "🛠️ FIX: Repair a test workspace";
+  const row: SessionTitleRow = { sessionId: "test", state: "available", title, source: "auto", card: { emoji: "🛠️", code: "FIX" } };
+  const view = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}>
+    <span data-testid="title"><SessionTitleMark row={row} title={title} /><span>{title}</span></span>
+  </I18nProvider>;
+  const mounted = render(view("zh"));
+  for (const language of ["zh", "en", "zh"] as const) {
+    mounted.rerender(view(language));
+    expect(screen.getByTestId("title").textContent).toBe(title);
+    expect(mounted.container.querySelector(".session-title-card")).toBeNull();
+  }
+});
+
+it("retains separate metadata cards for legacy and preview titles without an embedded card", () => {
+  const title = "Repair a test workspace";
+  const row: SessionTitleRow = { sessionId: "legacy", state: "available", title, source: "auto", card: { emoji: "🛠️", code: "FIX" } };
+  const previewTitle = "跟踪上游 pi-web 更新到 omp-web";
+  const mounted = render(<I18nProvider forcedLanguage="zh">
+    <SessionTitleMark row={row} title={title} /><span>{title}</span>
+    <SessionTitleMark row={previewSessionTitle("preview", previewTitle)} title={previewTitle} />
+  </I18nProvider>);
+  expect(mounted.container.querySelectorAll(".session-title-card")).toHaveLength(2);
+  expect(screen.getByText("FIX")).toBeTruthy();
+  expect(screen.getByText("SYNC")).toBeTruthy();
 });

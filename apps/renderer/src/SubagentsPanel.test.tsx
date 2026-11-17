@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { AgentDefinitionRecord, StudioClient } from "@omp-studio/client-contract";
+import type { AgentDefinitionRecord, StudioClient, ClientTransport, ClientEvent, ClientCommandRequest, ClientQueryRequest } from "@omp-studio/client-contract";
+import { StudioClientImpl } from "@omp-studio/client";
+import { contractFixtures } from "@omp-studio/testkit";
 
 import { SubagentsPanel } from "./SubagentsPanel";
 import { createPreviewAgentDefinitions } from "./preview/subagentsPreview";
@@ -24,6 +26,35 @@ beforeAll(() => {
 });
 
 afterEach(cleanup);
+
+it("updates a subagent switch after saving without a manual refresh or a pre-opened local client", async () => {
+  let disabled = false, sequence = 41;
+  let listener: ((event: ClientEvent) => void) | undefined;
+  const bootstrap = vi.fn(async () => ({ ...contractFixtures.bootstrap, cursor: "41" }));
+  const client = new StudioClientImpl({
+    bootstrap,
+    subscribe: (_scope: unknown, next: typeof listener) => { listener = next; return () => { listener = undefined; }; },
+    query: async (request: ClientQueryRequest) => ({ ok: true, queryName: request.queryName, result: { ...createPreviewAgentDefinitions(), agents: [{ ...projectAgent(), disabled }] } }),
+    command: async (request: ClientCommandRequest) => {
+      expect(request.commandName).toBe("agents.definition.configure");
+      disabled = (request.input as { disabled: boolean }).disabled;
+      const accepted = { requestId: request.requestId, commandName: request.commandName, status: "accepted", acceptedAt: "2026-01-01T00:00:00Z" };
+      const emit = (event: object) => listener?.({ ...event, authorityEpoch: 7, cursor: String(++sequence) } as ClientEvent);
+      emit({ kind: "command.accepted", accepted });
+      emit({ kind: "command.receipt", receipt: { requestId: request.requestId, commandName: request.commandName, status: "completed", result: { applied: true, runtimeEffect: "new-session" }, observedAt: "2026-01-01T00:00:00Z" } });
+      return accepted;
+    },
+    close: async () => {},
+  } as unknown as ClientTransport);
+  const mounted = render(<I18nProvider forcedLanguage="zh"><SubagentsPanel client={client} preview={false} models={null} /></I18nProvider>);
+  try {
+    fireEvent.click(await screen.findByRole("switch", { name: "禁用 local-review" }));
+    expect((await screen.findByRole("switch", { name: "启用 local-review" })).getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(screen.getByRole("switch", { name: "启用 local-review" }));
+    expect((await screen.findByRole("switch", { name: "禁用 local-review" })).getAttribute("aria-checked")).toBe("true");
+    expect(bootstrap).toHaveBeenCalledOnce();
+  } finally { mounted.unmount(); await client.close(); }
+});
 
 function stubClient(overrides: Record<string, unknown> = {}): StudioClient {
   return {

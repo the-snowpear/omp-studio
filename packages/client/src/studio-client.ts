@@ -135,6 +135,10 @@ export class StudioClientImpl implements StudioClient {
     options?: CommandOptions,
   ): Promise<CommandHandle<TName>> {
     this.assertOpen();
+    // Workspace-wide clients can be queried without opening a conversation.
+    // Establish the event stream before a command can emit its completion.
+    // Concurrent first commands share bootstrap's in-flight initialization.
+    if (this.state.connection.phase === "initial") await this.bootstrap();
     // The handle is created before the transport acknowledgement is awaited
     // so local_pending exists in reducer state immediately.
     const requestId = this.ids.newRequestId();
