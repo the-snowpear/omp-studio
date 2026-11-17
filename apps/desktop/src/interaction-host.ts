@@ -47,7 +47,7 @@ function isHighRisk(kind: string, destructive?: boolean): boolean {
 export class DesktopInteractionHost {
   readonly #sessionRef: { current: DesktopRuntimeSession | undefined };
   readonly #confirmations = new HostConfirmationRegistry();
-  readonly #tokens = new Map<string, string>();
+  readonly #tokens = new Map<string, Map<HostInteractionRespondInput["value"], string>>();
   readonly #events = new IsolatedForwarder<StudioInteractionForward>();
   readonly #adapter: RemoteInteractionAdapter;
   #unsubscribe: (() => void) | undefined;
@@ -147,7 +147,7 @@ export class DesktopInteractionHost {
     }
     const highRisk = isHighRisk(pending.request.kind, pending.request.kind === "confirm" ? pending.request.destructive : undefined);
     const tokenKey = `${pending.interactionId}:${pending.generation}`;
-    const confirmationToken = highRisk && input.decision === "submit" ? this.#tokens.get(tokenKey) : undefined;
+    const confirmationToken = highRisk && input.decision === "submit" ? this.#tokens.get(tokenKey)?.get(input.value) : undefined;
     if (highRisk && input.decision === "submit" && confirmationToken === undefined) {
       throw new StudioHostError("INVALID_ARGUMENT", "High-risk confirmation token is not available");
     }
@@ -183,6 +183,7 @@ export class DesktopInteractionHost {
           current.commandId,
           current.request.kind,
           current.request.kind === "confirm" ? current.request.destructive : undefined,
+          current.request.kind === "approval" ? current.request.approvalType : undefined,
         );
       } else {
         this.#tokens.delete(tokenKey);
@@ -207,7 +208,7 @@ export class DesktopInteractionHost {
         return;
       }
       const adopted = this.#adapter.adopt(forward.envelope.event);
-      this.#resign(adopted.interactionId, adopted.generation, adopted.commandId, adopted.request.kind, adopted.request.kind === "confirm" ? adopted.request.destructive : undefined);
+      this.#resign(adopted.interactionId, adopted.generation, adopted.commandId, adopted.request.kind, adopted.request.kind === "confirm" ? adopted.request.destructive : undefined, adopted.request.kind === "approval" ? adopted.request.approvalType : undefined);
       const clientRequestId =
         forward.clientRequestId ??
         (typeof controller.requestIdForCommandId === "function"
@@ -237,6 +238,7 @@ export class DesktopInteractionHost {
       adopted.commandId,
       adopted.request.kind,
       adopted.request.kind === "confirm" ? adopted.request.destructive : undefined,
+      adopted.request.kind === "approval" ? adopted.request.approvalType : undefined,
     );
   }
 
@@ -250,6 +252,7 @@ export class DesktopInteractionHost {
     commandId: CommandId,
     kind: string,
     destructive?: boolean,
+    approvalType?: string,
   ): void {
     for (const key of [...this.#tokens.keys()]) {
       if (key.startsWith(`${interactionId}:`)) this.#tokens.delete(key);
@@ -257,20 +260,22 @@ export class DesktopInteractionHost {
     if (!isHighRisk(kind, destructive)) {
       return;
     }
-    // The one-shot token is signed over the exact respond operation: submit
-    // with value true (plan §3.3/§3.4) — decision, value, interactionId and
-    // commandId are all bound by the operation hash.
-    const operation: StudioOperation = {
-      kind: "interaction.respond",
-      interactionId,
-      commandId,
-      decision: "submit",
-      value: true,
-    };
-    this.#tokens.set(
-      `${interactionId}:${generation}`,
-      this.#confirmations.issue(operation, "gui", { leaseGeneration: generation, runtimeEpoch: this.#runtimeEpoch() }),
-    );
+    // Configuration approvals use explicit scope values, not boolean true.
+    // Each pre-signed choice stays bound to its exact value, owner, generation,
+    // and Runtime epoch; the GUI response selects one existing token.
+    const values = kind === "approval" && approvalType === "configuration" ? ["once", "session"] : [true];
+    const tokens = new Map<HostInteractionRespondInput["value"], string>();
+    for (const value of values) {
+      const operation: StudioOperation = {
+        kind: "interaction.respond",
+        interactionId,
+        commandId,
+        decision: "submit",
+        value,
+      };
+      tokens.set(value, this.#confirmations.issue(operation, "gui", { leaseGeneration: generation, runtimeEpoch: this.#runtimeEpoch() }));
+    }
+    this.#tokens.set(`${interactionId}:${generation}`, tokens);
   }
 
   #runtimeEpoch(): number {
