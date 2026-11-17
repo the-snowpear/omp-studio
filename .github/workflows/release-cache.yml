@@ -21,8 +21,11 @@ on:
       - scripts/mac-bundle.mjs
       - scripts/build-installer-host.mjs
       - scripts/warm-release-tools.mjs
+      - scripts/warm-desktop-native.mjs
       - scripts/release-cache.mjs
       - scripts/release-plan.mjs
+      - scripts/native-artifact.mjs
+      - scripts/prune-*-cache*.mjs
       - scripts/target-platform.mjs
       - scripts/windows-architecture.mjs
       - scripts/mac-toolchain.mjs
@@ -30,23 +33,32 @@ on:
       - packaging/electron-builder.yml
       - .github/scripts/find-runtime.sh
       - .github/actions/cache-*/**
+      - .github/actions/setup-native-build/**
       - .github/workflows/runtime-artifacts.yml
+      - .github/workflows/runtime-platform.yml
       - .github/workflows/release-cache.yml
 
 permissions:
   contents: read
   actions: read
 
+env:
+  BUN_VERSION: "1.4.4"
+
 concurrency:
   group: release-cache-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   plan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     outputs:
       native: ${{ steps.plan.outputs.native }}
       desktop: ${{ steps.plan.outputs.desktop }}
+      warm_matrix: ${{ steps.plan.outputs.warm_matrix }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,47 +66,87 @@ jobs:
           node-version: 24
       - id: plan
         run: node scripts/release-cache.mjs --warm-plan
+      - name: Keep shared release caches within repository quota
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/prune-release-caches.mjs
 
   runtime:
     needs: plan
-    if: needs.plan.outputs.native == 'true'
+    if: needs.plan.outputs.native == 'true' && !inputs.verify_remote
     uses: ./.github/workflows/runtime-artifacts.yml
     with:
       warm_cache: true
     secrets: inherit
 
   verify-remote:
-    needs: runtime
+    needs: plan
     if: inputs.verify_remote
     uses: ./.github/workflows/remote-environments.yml
-    with:
-      prepared_runtime: true
     secrets: inherit
 
   warm:
     needs: plan
-    if: needs.plan.outputs.desktop == 'true'
+    if: needs.plan.outputs.desktop == 'true' || needs.plan.outputs.native == 'true'
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { arch: x64, os: windows-latest }
-          - { arch: arm64, os: windows-11-arm }
+      matrix: ${{ fromJSON(needs.plan.outputs.warm_matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       OMP_TARGET_ARCH: ${{ matrix.arch }}
+      OMP_TARGET_PLATFORM: ${{ matrix.platform }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: ${{ matrix.runtime && 'recursive' || 'false' }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - uses: ./.github/actions/cache-release-downloads
         with:
-          desktop: "true"
+          desktop: ${{ matrix.desktop }}
       - run: npm ci --prefer-offline --no-audit --no-fund
       - uses: ./.github/actions/cache-desktop-native
+        if: matrix.desktop
       - name: Download desktop packaging tools
+        if: matrix.desktop
         run: node scripts/warm-release-tools.mjs
       - name: Prepare Electron native dependencies
+        if: matrix.desktop && matrix.platform == 'win32'
         run: npm run pack:win -- --native-only
+      - name: Prepare Electron native dependencies
+        if: matrix.desktop && matrix.platform != 'win32'
+        run: node scripts/warm-desktop-native.mjs
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.runtime
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          no-cache: true
+      - uses: ./.github/actions/cache-runtime-build
+        if: matrix.runtime
+      - name: Apply sources for Runtime dependency downloads
+        if: matrix.runtime
+        run: node scripts/apply-omp-overlay.mjs
+      - name: Warm Runtime dependency downloads without compiling Rust
+        if: matrix.runtime
+        run: npm run omp:install-deps
+
+  maintain-caches:
+    needs: [plan, runtime, warm, verify-remote]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.plan.result == 'success' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Retain only the newest main cache in each release family
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/prune-release-caches.mjs

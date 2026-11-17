@@ -1,0 +1,213 @@
+name: Prepare one Studio Runtime
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        required: true
+      runner:
+        type: string
+        required: true
+      runtime_channel:
+        type: string
+        default: stable
+      rebuild_runtime:
+        type: boolean
+        default: false
+      warm_cache:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+env:
+  BUN_VERSION: "1.4.4"
+
+jobs:
+  discover:
+    runs-on: ubuntu-22.04
+    outputs:
+      runtime_key: ${{ steps.runtime.outputs.key }}
+      runtime_name: ${{ steps.runtime.outputs.name }}
+      runtime_run: ${{ steps.runtime.outputs.run_id }}
+      native_key: ${{ steps.native.outputs.key }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Find reusable signed Runtime
+        id: runtime
+        if: ${{ !inputs.warm_cache }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM: ${{ inputs.target }}
+          REBUILD: ${{ inputs.rebuild_runtime }}
+          OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel }}
+        run: bash .github/scripts/find-runtime.sh
+      - name: Apply Studio sources
+        if: steps.runtime.outputs.run_id == ''
+        run: node scripts/apply-omp-overlay.mjs
+      - name: Identify patched native sources
+        id: native
+        if: steps.runtime.outputs.run_id == ''
+        env:
+          TARGET: ${{ inputs.target }}
+        run: node scripts/native-artifact.mjs key "$TARGET"
+
+  native:
+    needs: discover
+    if: needs.discover.outputs.runtime_run == ''
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Find compiled Studio addon
+        id: native
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NATIVE_ARTIFACT_KEY: ${{ needs.discover.outputs.native_key }}
+          REBUILD: ${{ inputs.rebuild_runtime }}
+        run: node scripts/find-native-artifact.mjs
+      - name: Reuse compiled Studio addon
+        if: steps.native.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.discover.outputs.native_key }}
+          run-id: ${{ steps.native.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: outputs/native/${{ inputs.target }}
+      - name: Restore Bazel actions
+        id: bazel
+        if: steps.native.outputs.run_id == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/omp-bazel/disk
+          key: bazel-native-v1-${{ inputs.target }}-${{ needs.discover.outputs.native_key }}
+          restore-keys: bazel-native-v1-${{ inputs.target }}-
+      - uses: ./.github/actions/setup-native-build
+        if: steps.native.outputs.run_id == ''
+      - name: Build patched addon with upstream Bazel targets
+        if: steps.native.outputs.run_id == ''
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          ulimit -Sn 65536
+          node scripts/apply-omp-overlay.mjs
+          node scripts/native-artifact.mjs build "$TARGET" "outputs/native/$TARGET"
+      - name: Upload compiled Studio addon
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.discover.outputs.native_key }}
+          path: outputs/native/${{ inputs.target }}/
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error
+      - name: Bound Bazel cache before saving
+        if: github.ref == 'refs/heads/main' && steps.native.outputs.run_id == ''
+        run: |
+          cd omp-patch/vendor/oh-my-pi
+          bazelisk shutdown
+          cd ../../..
+          node scripts/prune-build-cache.mjs "$HOME/.cache/omp-bazel/disk" 1073741824
+      - name: Save Bazel actions on main
+        if: github.ref == 'refs/heads/main' && steps.native.outputs.run_id == '' && steps.bazel.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/omp-bazel/disk
+          key: ${{ steps.bazel.outputs.cache-primary-key }}
+
+      - name: Record native reuse and size
+        env:
+          TARGET: ${{ inputs.target }}
+          NATIVE_RUN: ${{ steps.native.outputs.run_id }}
+        run: |
+          {
+            echo "### Native addon: $TARGET"
+            if [ -n "$NATIVE_RUN" ]; then echo "Reused from run $NATIVE_RUN"; else echo "Built from Studio's patched Rust sources"; fi
+            du -sh "outputs/native/$TARGET"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  runtime:
+    needs: [discover, native]
+    if: ${{ !cancelled() && !inputs.warm_cache && needs.discover.result == 'success' && (needs.native.result == 'success' || needs.native.result == 'skipped') }}
+    runs-on: ${{ needs.discover.outputs.runtime_run != '' && 'ubuntu-22.04' || inputs.runner }}
+    environment: release
+    timeout-minutes: 45
+    env:
+      OMP_TARGET_PLATFORM: ${{ startsWith(inputs.target, 'win32-') && 'win32' || startsWith(inputs.target, 'darwin-') && 'darwin' || 'linux' }}
+      OMP_TARGET_ARCH: ${{ endsWith(inputs.target, '-arm64') && 'arm64' || 'x64' }}
+      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Reuse signed Runtime
+        if: needs.discover.outputs.runtime_run != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.discover.outputs.runtime_name }}
+          run-id: ${{ needs.discover.outputs.runtime_run }}
+          github-token: ${{ github.token }}
+          path: packages/runtime-installer/dist/artifacts/${{ inputs.target }}/
+      - uses: actions/checkout@v4
+        if: needs.discover.outputs.runtime_run == ''
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        if: needs.discover.outputs.runtime_run == ''
+        with:
+          node-version: 24
+      - uses: ./.github/actions/cache-release-downloads
+        if: needs.discover.outputs.runtime_run == ''
+      - uses: oven-sh/setup-bun@v2
+        if: needs.discover.outputs.runtime_run == ''
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          no-cache: true
+      - uses: ./.github/actions/cache-runtime-build
+        if: needs.discover.outputs.runtime_run == ''
+      - name: Install build dependencies
+        if: needs.discover.outputs.runtime_run == ''
+        run: npm ci --prefer-offline --no-audit --no-fund
+      - name: Download compiled Studio addon
+        if: needs.discover.outputs.runtime_run == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.discover.outputs.native_key }}
+          path: outputs/native/${{ inputs.target }}
+      - name: Bundle, probe and sign Runtime
+        if: needs.discover.outputs.runtime_run == ''
+        env:
+          OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          node -e 'require("node:fs").writeFileSync(require("node:path").join(process.env.RUNNER_TEMP,"omp-runtime-signing.pem"),process.env.OMP_SIGNING_SECRET,{mode:384})'
+          export OMP_RUNTIME_SIGNING_KEY="$RUNNER_TEMP/omp-runtime-signing.pem"
+          trap 'rm -f "$OMP_RUNTIME_SIGNING_KEY"' EXIT
+          export OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
+          node scripts/apply-omp-overlay.mjs
+          npm run build -w @omp-studio/studio-protocol
+          npm run build -w @omp-studio/runtime-installer
+          npm run build -w @omp-studio/studio-host
+          npm run omp:build:host -- --skip-build --native-artifact "outputs/native/$TARGET"
+      - name: Upload signed Runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.discover.outputs.runtime_key }}
+          path: packages/runtime-installer/dist/artifacts/${{ inputs.target }}/
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error

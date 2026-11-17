@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { assertLockedElectronVersion, dependencyFingerprint, releaseWarmPlan } from "./release-cache.mjs";
+import { assertLockedElectronVersion, dependencyFingerprint, releaseWarmPlan, releaseWarmMatrix } from "./release-cache.mjs";
 
 test("packaging rejects a stale installed Electron instead of shipping the older dependency", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-locked-electron-"));
@@ -49,6 +49,16 @@ test("Electron, native dependency bytes and nested dependency changes invalidate
   }
 });
 
+test("warming fills Bun downloads for six Runtime targets and Electron output only for desktop targets", () => {
+  const runtime = releaseWarmMatrix({ native: true, desktop: false }).include;
+  assert.equal(runtime.length, 6);
+  assert.ok(runtime.every(row => row.runtime && !row.desktop));
+  const desktop = releaseWarmMatrix({ native: false, desktop: true }).include;
+  assert.deepEqual(desktop.map(row => row.target).sort(), ["darwin-arm64", "linux-x64", "win32-arm64", "win32-x64"]);
+  assert.ok(desktop.every(row => row.desktop && !row.runtime));
+  assert.equal(releaseWarmMatrix({ native: false, desktop: false }).include.length, 0);
+});
+
 test("warming follows native and desktop inputs instead of every Studio change", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-release-warm-"));
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true }).trim();
@@ -84,8 +94,11 @@ test("warming follows native and desktop inputs instead of every Studio change",
   const nativeChange = commit();
   assert.deepEqual(releaseWarmPlan(electronChange, root), { native: true, desktop: false });
 
-  await put("omp-patch/patches/0001-studio-cli-entry.patch", "updated seam");
+  await put("omp-patch/patches/0001-studio-cli-entry.patch", "diff --git a/packages/coding-agent/src/cli.ts b/packages/coding-agent/src/cli.ts\n+TS change\n");
+  const tsSeam = commit();
+  assert.deepEqual(releaseWarmPlan(nativeChange, root), { native: false, desktop: false });
+  await put("omp-patch/patches/0001-studio-cli-entry.patch", "diff --git a/packages/coding-agent/src/cli.ts b/packages/coding-agent/src/cli.ts\n+TS change\ndiff --git a/crates/pi-natives/src/lib.rs b/crates/pi-natives/src/lib.rs\n+Rust change\n");
   commit();
-  assert.deepEqual(releaseWarmPlan(nativeChange, root), { native: true, desktop: false });
+  assert.deepEqual(releaseWarmPlan(tsSeam, root), { native: true, desktop: false });
   assert.deepEqual(releaseWarmPlan(undefined, root), { native: true, desktop: true });
 });

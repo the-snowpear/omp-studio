@@ -1,0 +1,292 @@
+name: Build one release platform
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        required: true
+      runner:
+        type: string
+        required: true
+      desktop:
+        type: boolean
+        required: true
+      kind:
+        type: string
+        required: true
+      runtime_channel:
+        type: string
+        default: stable
+      runtime_min_app_version:
+        type: string
+        default: ''
+      rebuild_runtime:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  runtime:
+    uses: ./.github/workflows/runtime-platform.yml
+    with:
+      target: ${{ inputs.target }}
+      runner: ${{ inputs.runner }}
+      runtime_channel: ${{ inputs.runtime_channel }}
+      rebuild_runtime: ${{ inputs.rebuild_runtime }}
+    secrets: inherit
+
+  build-windows:
+    needs: runtime
+    if: ${{ inputs.desktop && startsWith(inputs.target, 'win32-') }}
+    runs-on: ${{ inputs.runner }}
+    environment: release
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OMP_TARGET_ARCH: ${{ (endsWith(inputs.target, '-arm64') && 'arm64' || 'x64') }}
+      OMP_RELEASE_KIND: ${{ inputs.kind }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ${{ inputs.kind == 'runtime' && '1' || '' }}
+      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
+      OMP_RUNTIME_MIN_APP_VERSION: ${{ inputs.runtime_min_app_version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: ./.github/actions/cache-release-downloads
+        with:
+          desktop: ${{ inputs.kind == 'desktop' }}
+      - name: Install dependencies
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm ci --prefer-offline --no-audit --no-fund
+      - uses: ./.github/actions/cache-desktop-native
+        if: inputs.kind == 'desktop'
+      - name: Download prepared Runtime
+        uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-win32-${{ (endsWith(inputs.target, '-arm64') && 'arm64' || 'x64') }}-*
+          merge-multiple: true
+          path: packages/runtime-installer/dist/artifacts/win32-${{ (endsWith(inputs.target, '-arm64') && 'arm64' || 'x64') }}/
+      - name: Build, package and verify release
+        env:
+          OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $keyPath = Join-Path $env:RUNNER_TEMP "omp-release-signing.pem"
+          try {
+            [IO.File]::WriteAllText($keyPath, $env:OMP_SIGNING_SECRET, [Text.UTF8Encoding]::new($false))
+            $env:OMP_RUNTIME_SIGNING_KEY = $keyPath
+            $env:OMP_RUNTIME_SIGNING_KEY_ID = (Get-Content packaging/keys/trusted-keys.json | ConvertFrom-Json).activeKeyId
+            npm run omp:overlay:apply
+            $buildScript = if ($env:OMP_RELEASE_KIND -eq "runtime") { "build:release-tools" } else { "build" }
+            npm run $buildScript
+            npm run pack:win:prepare
+            $runtime = Get-ChildItem packaging/runtime-payload -Recurse -Filter runtime-manifest.json | ForEach-Object { Get-Content $_.FullName | ConvertFrom-Json }
+            if (@($runtime).Count -ne 1 -or $runtime.channel -ne $env:OMP_RUNTIME_CHANNEL) { throw "Runtime identity/channel mismatch" }
+            $appVersion = (Get-Content package.json | ConvertFrom-Json).version
+            $tag = if ($env:OMP_RELEASE_KIND -eq "runtime") { "runtime-v$($runtime.runtimeVersion)" } else { "v$appVersion" }
+            if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne $tag) { throw "Release tag mismatch" }
+            if ($env:OMP_RELEASE_KIND -eq "desktop" -and ($runtime.channel -ne "stable" -or $appVersion -match '-')) { throw "Desktop releases must be stable" }
+            $env:OMP_RELEASE_TAG = $tag
+            node scripts/collect-update-history.mjs
+            Get-Content $env:GITHUB_ENV | Where-Object { $_ -match '^OMP_PREVIOUS_(CATALOG_DIR|UPDATE_INDEX)=' } | ForEach-Object {
+              $pair = $_ -split '=', 2
+              [Environment]::SetEnvironmentVariable($pair[0], $pair[1], 'Process')
+            }
+            if ($env:OMP_RELEASE_KIND -eq "desktop") { npm run pack:win -- --skip-host --skip-build }
+            npm run updates:build
+            npm run updates:verify
+          } finally {
+            if (Test-Path -LiteralPath $keyPath) { Remove-Item -LiteralPath $keyPath -Force }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ (endsWith(inputs.target, '-arm64') && 'arm64' || 'x64') }}
+          compression-level: 0
+          path: outputs/release/${{ (endsWith(inputs.target, '-arm64') && 'arm64' || 'x64') }}/
+          if-no-files-found: error
+
+  build-macos:
+    needs: runtime
+    if: ${{ inputs.desktop && inputs.target == 'darwin-arm64' }}
+    runs-on: macos-15
+    environment: release
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OMP_TARGET_PLATFORM: darwin
+      OMP_TARGET_ARCH: arm64
+      OMP_RELEASE_KIND: ${{ inputs.kind }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ${{ inputs.kind == 'runtime' && '1' || '' }}
+      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
+      OMP_RUNTIME_MIN_APP_VERSION: ${{ inputs.runtime_min_app_version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: ./.github/actions/cache-release-downloads
+        with:
+          desktop: ${{ inputs.kind == 'desktop' }}
+      - name: Install dependencies
+        run: |
+          npm ci --prefer-offline --no-audit --no-fund
+      - uses: ./.github/actions/cache-desktop-native
+        if: inputs.kind == 'desktop'
+      - name: Download prepared Runtime
+        uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-darwin-arm64-*
+          merge-multiple: true
+          path: packages/runtime-installer/dist/artifacts/darwin-arm64/
+      - name: Build, package and verify release
+        env:
+          OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          key_path="$RUNNER_TEMP/omp-release-signing.pem"
+          trap 'rm -f "$key_path"' EXIT
+          (umask 077 && printf '%s' "$OMP_SIGNING_SECRET" > "$key_path")
+          export OMP_RUNTIME_SIGNING_KEY="$key_path"
+          OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
+          export OMP_RUNTIME_SIGNING_KEY_ID
+          npm run omp:overlay:apply
+          if [ "$OMP_RELEASE_KIND" = runtime ]; then npm run build:release-tools; else npm run build; fi
+          npm run pack:mac:prepare
+          runtime_version="$(node -e '
+            const fs = require("node:fs"), path = require("node:path");
+            const root = "packaging/runtime-payload";
+            const staged = fs.readdirSync(root).filter((name) => !name.startsWith("."));
+            const manifest = staged.length === 1 ? JSON.parse(fs.readFileSync(path.join(root, staged[0], "runtime-manifest.json"), "utf8")) : undefined;
+            if (!manifest || manifest.channel !== process.env.OMP_RUNTIME_CHANNEL) throw new Error("Runtime identity/channel mismatch");
+            console.log(manifest.runtimeVersion);
+          ')"
+          app_version="$(node -p 'require("./package.json").version')"
+          if [ "$OMP_RELEASE_KIND" = runtime ]; then tag="runtime-v$runtime_version"; else tag="v$app_version"; fi
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then echo "Release tag mismatch" >&2; exit 1; fi
+          if [ "$OMP_RELEASE_KIND" = desktop ] && { [ "$OMP_RUNTIME_CHANNEL" != stable ] || [[ "$app_version" == *-* ]]; }; then echo "Desktop releases must be stable" >&2; exit 1; fi
+          export OMP_RELEASE_TAG="$tag"
+          node scripts/collect-update-history.mjs
+          while IFS='=' read -r name value; do
+            case "$name" in OMP_PREVIOUS_CATALOG_DIR|OMP_PREVIOUS_UPDATE_INDEX) export "$name=$value" ;; esac
+          done < "$GITHUB_ENV"
+          if [ "$OMP_RELEASE_KIND" = desktop ]; then npm run pack:mac -- --skip-host --skip-build; fi
+          npm run updates:build
+          npm run updates:verify
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-darwin-arm64
+          compression-level: 0
+          path: outputs/release/darwin-arm64/
+          if-no-files-found: error
+
+  build-linux:
+    needs: runtime
+    if: ${{ inputs.desktop && inputs.target == 'linux-x64' }}
+    runs-on: ${{ inputs.runner }}
+    environment: release
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OMP_TARGET_PLATFORM: linux
+      OMP_TARGET_ARCH: ${{ (endsWith(inputs.target, '-arm64') && 'arm64' || 'x64') }}
+      OMP_RELEASE_KIND: ${{ inputs.kind }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ${{ inputs.kind == 'runtime' && '1' || '' }}
+      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
+      OMP_RUNTIME_MIN_APP_VERSION: ${{ inputs.runtime_min_app_version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: ./.github/actions/cache-release-downloads
+        with:
+          desktop: ${{ inputs.kind == 'desktop' }}
+      - name: Linux packaging tools
+        if: inputs.kind == 'desktop'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends desktop-file-utils libfuse2t64
+      - run: npm ci --prefer-offline --no-audit --no-fund
+      - uses: ./.github/actions/cache-desktop-native
+        if: inputs.kind == 'desktop'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-${{ inputs.target }}-*
+          merge-multiple: true
+          path: packages/runtime-installer/dist/artifacts/${{ inputs.target }}/
+      - name: Build, package and verify Linux release
+        env:
+          OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          key_path="$RUNNER_TEMP/omp-release-signing.pem"
+          trap 'rm -f "$key_path"' EXIT
+          (umask 077 && printf '%s' "$OMP_SIGNING_SECRET" > "$key_path")
+          export OMP_RUNTIME_SIGNING_KEY="$key_path"
+          export OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
+          npm run omp:overlay:apply
+          if [ "$OMP_RELEASE_KIND" = runtime ]; then npm run build:release-tools; else npm run build; fi
+          npm run pack:linux:prepare
+          runtime_version="$(node -e '
+            const fs = require("node:fs"), path = require("node:path");
+            const root = "packaging/runtime-payload";
+            const versions = fs.readdirSync(root).filter(name => !name.startsWith("."));
+            const m = versions.length === 1 ? JSON.parse(fs.readFileSync(path.join(root, versions[0], "runtime-manifest.json"), "utf8")) : undefined;
+            if (!m || m.channel !== process.env.OMP_RUNTIME_CHANNEL) throw new Error("Runtime identity/channel mismatch");
+            console.log(m.runtimeVersion);
+          ')"
+          app_version="$(node -p 'require("./package.json").version')"
+          if [ "$OMP_RELEASE_KIND" = runtime ]; then tag="runtime-v$runtime_version"; else tag="v$app_version"; fi
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then echo "Release tag mismatch" >&2; exit 1; fi
+          if [ "$OMP_RELEASE_KIND" = desktop ] && { [ "$OMP_RUNTIME_CHANNEL" != stable ] || [[ "$app_version" == *-* ]]; }; then echo "Desktop releases must be stable" >&2; exit 1; fi
+          export OMP_RELEASE_TAG="$tag"
+          node scripts/collect-update-history.mjs
+          while IFS='=' read -r name value; do
+            case "$name" in OMP_PREVIOUS_CATALOG_DIR|OMP_PREVIOUS_UPDATE_INDEX) export "$name=$value" ;; esac
+          done < "$GITHUB_ENV"
+          if [ "$OMP_RELEASE_KIND" = desktop ]; then npm run pack:linux -- --skip-host --skip-build; fi
+          npm run updates:build
+          npm run updates:verify
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ inputs.target }}
+          compression-level: 0
+          path: outputs/release/${{ inputs.target }}/
+          if-no-files-found: error
+
+  remote:
+    needs: runtime
+    if: inputs.kind == 'desktop'
+    uses: ./.github/workflows/remote-environments.yml
+    with:
+      platforms: ${{ inputs.target }}
+      prepared_runtime: true
+    secrets: inherit

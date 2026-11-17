@@ -1,0 +1,35 @@
+name: Set up upstream Bazel native build
+description: Linux cross toolchains from the pinned OMP tree, with bounded Studio caches
+runs:
+  using: composite
+  steps:
+    - name: Make room for cross toolchains on the disposable runner
+      shell: bash
+      run: |
+        set -euo pipefail
+        # LLVM/Swift/macOS SDK archives temporarily expand to many GiB. None
+        # of these preinstalled SDKs is used by the upstream native targets.
+        sudo rm -rf -- /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+        df -h "$GITHUB_WORKSPACE"
+    - name: Install pinned Bazelisk
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/omp-bin"
+        curl -fsSL --retry 3 -o "$RUNNER_TEMP/omp-bin/bazelisk" https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-linux-amd64
+        echo "5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992  $RUNNER_TEMP/omp-bin/bazelisk" | sha256sum -c -
+        chmod +x "$RUNNER_TEMP/omp-bin/bazelisk"
+        echo "$RUNNER_TEMP/omp-bin" >> "$GITHUB_PATH"
+    - name: Configure native build
+      shell: bash
+      run: |
+        set -euo pipefail
+        rc="$RUNNER_TEMP/omp-bazel.rc"
+        mkdir -p "$HOME/.cache/omp-bazel/disk"
+        {
+          echo 'build --config=ci'
+          echo 'build --jobs=4'
+          echo 'build --local_resources=memory=10000'
+          echo "build --disk_cache=$HOME/.cache/omp-bazel/disk"
+        } > "$rc"
+        echo "OMP_BAZEL_RC=$rc" >> "$GITHUB_ENV"

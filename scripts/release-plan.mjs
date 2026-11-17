@@ -28,6 +28,9 @@ export function releasePlan({ kind = "desktop", arch = "both", includeMacos = fa
     desktop_platforms: desktopPlatforms.join(","),
     runtime_platforms: targets.join(","),
     runtime_matrix: { include: runners.filter(row => targets.includes(row.target)) },
+    release_matrix: { include: runners.filter(row => targets.includes(row.target)).map(row => ({
+      ...row, desktop: desktopPlatforms.includes(row.target),
+    })) },
   };
 }
 

@@ -15,9 +15,9 @@ tagged Runtime releases before starting native jobs. It also checks desktop
 tag/version and stable-channel consistency. Draft releases remain retryable;
 the publisher still checks the final artifacts and publication state.
 
-1. Prepare each platform's signed Runtime once, including binary smoke and
-   identity checks, or reuse a matching signed Runtime from an earlier run.
-   Desktop and remote jobs download that same prepared artifact.
+1. Each platform independently prepares its signed Runtime, including binary
+   smoke and identity checks, or reuses a matching signed Runtime from an earlier
+   run. Desktop and remote jobs download that platform's same prepared artifact.
 2. Build the workspace once and package the desktop when requested.
    `pack:win` / `pack:mac` / `pack:linux` audit the resulting package.
 3. Collect previous update catalogs, build the new signed assets, and run
@@ -25,20 +25,71 @@ the publisher still checks the final artifacts and publication state.
 4. Upload candidates. The publisher checks signatures and uploaded digests,
    then publishes only after all requested architectures succeed.
 
+`release-platform.yml` starts desktop and remote packaging as soon as that
+platform's `runtime-platform.yml` completes. A slow Intel macOS Runtime no longer
+holds Windows/Linux packaging at a global Runtime barrier. Publication still
+waits for every required desktop and remote candidate. Standalone Runtime and
+remote-environment workflows call the same producer.
+
 The Runtime is reused automatically: the shared Runtime producer hashes its inputs
 (vendor commit, `omp-patch/overlay`, `omp-patch/patches`, `upstream.json`, the
 trusted key table, the Runtime build scripts, Bun version, channel and
 platform) and downloads the signed Runtime artifact of an earlier run with the
 same key (artifacts are kept 90 days). A desktop-only fix therefore skips Bun
-setup, Rust compilation and Runtime dependency installation. Set
-`rebuild_runtime` to force a fresh build. Neither path
+setup, Rust compilation and Runtime dependency installation; artifact reuse runs
+on Linux without acquiring a Windows/macOS runner. Set `rebuild_runtime` to
+rebuild the native addon and Runtime (valid Bazel action cache entries can still
+be used). Existing matching signed Runtimes retain their immutable bytes during
+the build-pipeline migration; new Runtime sources use the new producer. Neither path
 runs workspace tests, full patch replay or GUI acceptance during publication.
 The repeated P5 readiness gate and old v1 asset generator have been removed.
+
+## Native compilation and reuse
+
+Studio and OMP share the pinned vendor source, but Studio applies Rust as well as
+TypeScript patches. Always build Studio's applied source tree: upstream release
+executables and npm native modules cannot substitute for these artifacts.
+
+Like upstream, native compilation uses its explicit Bazel `//:natives-*` targets
+on Linux. Six Ubuntu 22.04 jobs cover Studio's six platforms; Linux x64 includes
+both baseline and modern addons. The pinned OMP tree owns Rust, LLVM, Zig, MSVC,
+macOS SDK and Swift toolchains. Studio pins Bazelisk and bounds concurrent compiler
+jobs and linker memory for GitHub-hosted runners. It does not require upstream's
+private vmon runners or remote cache service.
+
+The resulting `.node` files are separate `studio-native-v1-*` workflow artifacts,
+retained for 90 days and reusable across refs. Their key hashes actual native
+source contents **after applying Studio patches**, including added seam files,
+Cargo/Bazel/toolchain inputs and Studio's build policy. Git clean filters make
+Windows CRLF and Linux LF checkouts agree. TypeScript-only changes and Studio
+version bumps do not invalidate the native artifact. Source-changing Rust patches
+do. Only this repository's push/dispatch producers can supply reusable native code.
+Finish native warming before tagging when possible. A release that arrives
+before the corresponding addon is uploaded can still build concurrently; the
+release does not share a concurrency queue that a newer main push could replace.
+
+On the native platform runner, `build-omp-host.mjs --native-artifact <directory>`
+checks the input's source/platform identity and uses upstream's addon installer
+to stamp its version and load-probe it. Bun then builds the patched CLI; native
+architecture checks, macOS signing checks, smoke tests, Studio Bridge identity
+probing and Ed25519 artifact signing remain on the target platform. Local
+`omp:build:host` without this flag retains the Cargo host-build path.
+The producer compiles only studio-protocol, runtime-installer and studio-host,
+the dependency closure required by the identity probe, instead of all workspace
+packages.
+
+This separates two reuse decisions: a changed Studio Bridge can require a new
+Runtime while reusing the same patched Rust addon. A completely unchanged Runtime
+reuses its signed bytes and skips both stages.
+
+## Shared caches
 
 Release jobs also cache npm archives, Electron/electron-builder downloads and
 the WebView2 SDK. Their dependency fingerprint excludes workspace versions, so
 a Studio-only version bump keeps the same dependency cache. Download caches
 may fall back within the same OS/CPU; `npm ci` still installs the full lockfile.
+Workspace cache paths are relative so Windows runners using different workspace
+drives share the same cache version.
 
 Desktop jobs restore `node-pty/build/Release` after `npm ci`, including
 electron-rebuild's architecture/ABI metadata. This native cache uses an exact
@@ -47,33 +98,50 @@ fallback. Electron or dependency changes therefore rebuild the module. Normal
 packaging keeps native rebuilding enabled; electron-rebuild decides whether
 the restored output matches its target.
 
-**Warm release caches** runs on `main` after relevant Runtime, dependency or
-packaging inputs change, and can also be run manually. A lightweight plan compares
-the committed inputs across the push. Runtime source/toolchain and seam changes
-warm Rust workspace and dependency output plus Bun downloads on all six native
-platforms; TypeScript overlay changes and their series metadata do not. External
-npm dependency or desktop packaging-tool changes warm the Windows desktop caches.
-Workspace version bumps alone skip both sets of jobs. Manual runs warm both.
-The release Rust cache uses a separate policy key from source-test caches and
-includes native profile/features in its environment identity; dependency fallback
-within that scope remains available when Cargo dependencies change. Existing
-signed Runtimes are downloaded unchanged while native modules are compiled for
-the cache. Cache warming never signs a replacement Runtime; when no matching
-artifact exists, the next release producer builds it using the warm native cache. Windows
-jobs additionally download Electron, NSIS and WebView2 and prepare node-pty.
-Nothing is published. The optional `verify_remote` manual input packages and
-verifies all six remote candidates using existing signed Runtime artifacts;
-run that verification after a matching Runtime has been produced for every platform.
+**Warm release caches** runs on `main` after relevant native, dependency or
+packaging changes and can also run manually. The plan distinguishes native hunks
+from TypeScript hunks inside seam patch files. Native changes prepare the compiled
+addons and warm npm/Bun downloads on the six Runtime platforms without compiling
+Rust there; desktop changes warm Electron downloads and node-pty for Windows x64/ARM64,
+macOS ARM64 and Linux x64. Windows also warms NSIS/WebView2. Workspace version bumps
+alone skip both groups. Superseded warm runs are cancelled; release runs are not.
+Native warming never signs a replacement Runtime or publishes a release. The
+optional `verify_remote` input instead prepares any missing signed Runtimes and
+packages/verifies all six remote candidates, without publishing them.
 
-Warm on `main` so later release tags can restore the default branch caches.
-GitHub isolates caches saved under different tags; a cache saved only by one
-release tag is not available to the next tag. Signed Runtime artifact lookup
-works across workflow runs separately from the compilation caches.
+Only `main` saves shared download, desktop-native and Bazel action caches. Tags
+and other refs restore them, while compiled-addon and signed-Runtime artifacts
+remain reusable across runs. Bun setup's additional download cache is disabled in
+Runtime jobs to avoid duplicating the explicit Bun cache. Bazel action caches
+retain at most 1 GiB of recently used blobs per platform; evicted blobs are ordinary
+cache misses. Completed addon artifacts do not count against the Actions cache
+quota. On main, maintenance removes superseded release-cache entries, tag-scoped
+copies and the retired `v1-release-rust-*` / `desktop-tools-v1-*` caches. Unrelated source-test caches are
+left to CI. No cache maintenance deletes a Release or workflow artifact.
 
-The reusable **Prepare signed Runtimes** workflow owns the native build matrix.
-Consumers wait for it and never compile another Runtime during the same release.
-Runtime-only releases prepare the requested Windows architectures, Linux x64
-and macOS arm64. Its manual entry can warm or prepare one native platform.
+The reusable **Prepare signed Runtimes** manual entry can prepare one platform
+without publishing: select a platform and set `warm_cache: false`. With
+`warm_cache: true` it only prepares the compiled addon. The first run after the
+new native-artifact key requires compilation unless the Bazel action cache can
+supply it. Existing signed Runtimes are still reusable. Validate Windows ARM64, both
+macOS targets and Linux with this entry before the first production release;
+local tooling tests and YAML validation alone cannot establish those runtimes'
+behavior. Upstream's warm-cache timings are not a prediction for Studio's first
+GitHub-hosted Bazel build.
+
+Local validation on 2026-11-17 used an isolated Ubuntu 22.04 environment and the
+patched OMP 18.20.2 tree. The Windows x64 baseline target built successfully with
+Bazel 9.2.0; the addon was then stamped and loaded on Windows with Bun 1.4.4,
+including Studio's `DesktopSession.observationOnly` and `settle` APIs. The cold
+Bazel invocation took 22m07s including LLVM/MSVC preparation on that local network.
+After pruning the action cache to 1 GiB and cleaning build outputs, rebuilding
+took 3m57s in Bazel (4m02s including staging), with 1,585 disk-cache hits and 290
+executed actions; the toolchain repositories were already present. The rebuilt
+addon passed the Windows load/API check again. This is a feasibility check, not
+a hosted-runner release benchmark. Other target
+platforms and the full signing/publishing chain still need runner acceptance.
+
+## Release inputs
 
 | Manual input | Purpose |
 |---|---|

@@ -9,6 +9,8 @@ test("desktop releases always include both Windows architectures, macOS and Linu
   assert.deepEqual(plan.linux_matrix.include, [{ target: "linux-x64", os: "ubuntu-24.04", arch: "x64" }]);
   assert.equal(plan.runtime_matrix.include.length, 6);
   assert.equal(new Set(plan.runtime_matrix.include.map(row => row.target)).size, 6);
+  assert.deepEqual(plan.release_matrix.include.filter(row => row.desktop).map(row => row.target).sort(), ["darwin-arm64", "linux-x64", "win32-arm64", "win32-x64"]);
+  assert.deepEqual(plan.release_matrix.include.filter(row => !row.desktop).map(row => row.target).sort(), ["darwin-x64", "linux-arm64"]);
 });
 
 test("Runtime-only releases prepare only the requested native platforms", () => {

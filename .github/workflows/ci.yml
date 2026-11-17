@@ -102,6 +102,8 @@ jobs:
         with:
           desktop: "true"
       - uses: ./.github/actions/cache-runtime-build
+        with:
+          cargo: "true"
       - name: Linux desktop dependencies
         run: |
           sudo apt-get update

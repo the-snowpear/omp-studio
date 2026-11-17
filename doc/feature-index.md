@@ -99,8 +99,8 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 选择器规则 | `scripts/check-renderer-selects.mjs` | 普通单选必须用 `AppSelect`，例外在文件内的 `allowed` 表 |
 | 动效规则 | `scripts/check-renderer-motion.mjs` | 组件 CSS 不写字面时长 / 裸曲线 / `transition: all` / 自己的 reduced-motion；`@keyframes` 不重复不闲置；`motion.ts` 数值表与 `tokens.css` 相等；可直接查系统偏好的文件在 `REDUCED_QUERY_OWNERS` |
 | 增量编译 | `tsconfig.base.json` 的 `incremental` | 缓存落各包 `dist/.tsbuildinfo`；`tsc -p` 单包热编译约 2 秒 |
-| 发布 Runtime 复用 / 远程构建 | `.github/scripts/find-runtime.sh`、`.github/workflows/{runtime-artifacts,release,remote-environments}.yml`、`scripts/release-plan.mjs`；`package.json` 的 `build:remote` | 每平台准备一次签名 Runtime，桌面与 SSH 共用；按已提交输入复用历史产物，远程任务跳过 Renderer / Electron 二进制 |
-| 发布下载 / 原生编译缓存 | `.github/actions/cache-{release-downloads,desktop-native,runtime-build}/action.yml`、`scripts/release-cache.mjs`；`.github/workflows/release-cache.yml` | main 预热六个平台 Rust/Bun、Windows npm/Electron/NSIS/WebView2/node-pty；可手动验收远程候选，不发布版本；见 `docs/releasing.md` |
+| 发布 Runtime 复用 / 远程构建 | `.github/scripts/find-runtime.sh`、`.github/workflows/{runtime-artifacts,runtime-platform,release,release-platform,remote-environments}.yml`、`scripts/release-plan.mjs`；`package.json` 的 `build:remote` | 各平台独立准备一次签名 Runtime，桌面与 SSH 共用并立即打包；发布等待全部产物。完整 Runtime 命中后在 Linux 搬运，不占用目标平台 runner |
+| 发布下载 / 原生编译缓存 | `.github/actions/cache-{release-downloads,desktop-native,runtime-build}/action.yml`、`setup-native-build/action.yml`；`scripts/{native-artifact,find-native-artifact,release-cache,prune-build-cache,prune-release-caches,warm-release-tools,warm-desktop-native}.mjs`；`.github/workflows/release-cache.yml` | Linux 使用上游 Bazel 目标交叉编译 Studio 补丁后的 Rust，按实际原生输入复用 `.node`；只有 main 写共享缓存，Bazel 每平台 1 GiB；四个桌面目标预热 Electron/node-pty，按作用域清理旧发布缓存；见 `docs/releasing.md` |
 | 沙箱 preload 构建回归 | `scripts/preload-bundle.mjs`、`preload-bundle.test.mjs`；`apps/desktop/src/ipc-validation.ts` | 禁止 bundle 外部加载 Node/Host 模块；production 检查执行 bundle 并验证桌面桥接挂载 |
 
 > 命令与用法以 [`AGENTS.md`](../AGENTS.md) 的「验证」一节为准，这里只放文件落点。

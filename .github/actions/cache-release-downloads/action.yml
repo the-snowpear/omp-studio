@@ -10,16 +10,31 @@ runs:
     - id: identity
       shell: bash
       run: node scripts/release-cache.mjs
-    - name: Cache npm archives
+    - name: Cache npm archives on main
+      if: github.ref == 'refs/heads/main'
       uses: actions/cache@v4
       with:
         path: ${{ steps.identity.outputs.npm }}
         key: npm-v1-${{ runner.os }}-${{ runner.arch }}-node${{ steps.identity.outputs.node }}-${{ steps.identity.outputs.dependencies }}
         restore-keys: npm-v1-${{ runner.os }}-${{ runner.arch }}-node${{ steps.identity.outputs.node }}-
-    - name: Cache desktop tool downloads
-      if: inputs.desktop == 'true'
+    - name: Restore npm archives
+      if: github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.identity.outputs.npm }}
+        key: npm-v1-${{ runner.os }}-${{ runner.arch }}-node${{ steps.identity.outputs.node }}-${{ steps.identity.outputs.dependencies }}
+        restore-keys: npm-v1-${{ runner.os }}-${{ runner.arch }}-node${{ steps.identity.outputs.node }}-
+    - name: Cache desktop tool downloads on main
+      if: inputs.desktop == 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache@v4
       with:
         path: ${{ steps.identity.outputs.tools }}
-        key: desktop-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.dependencies }}-${{ hashFiles('scripts/build-installer-host.mjs', 'scripts/warm-release-tools.mjs') }}
-        restore-keys: desktop-tools-v1-${{ runner.os }}-${{ runner.arch }}-
+        key: desktop-tools-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.dependencies }}-${{ hashFiles('scripts/build-installer-host.mjs', 'scripts/warm-release-tools.mjs') }}
+        restore-keys: desktop-tools-v2-${{ runner.os }}-${{ runner.arch }}-
+    - name: Restore desktop tool downloads
+      if: inputs.desktop == 'true' && github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.identity.outputs.tools }}
+        key: desktop-tools-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.dependencies }}-${{ hashFiles('scripts/build-installer-host.mjs', 'scripts/warm-release-tools.mjs') }}
+        restore-keys: desktop-tools-v2-${{ runner.os }}-${{ runner.arch }}-

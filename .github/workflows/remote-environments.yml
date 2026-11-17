@@ -3,6 +3,9 @@ name: Remote environments
 on:
   workflow_call:
     inputs:
+      platforms:
+        type: string
+        default: all
       prepared_runtime:
         type: boolean
         default: false
@@ -25,17 +28,34 @@ env:
   OMP_RUNTIME_CHANNEL: stable
 
 jobs:
+  plan:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.runtime_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: plan
+        env:
+          RUNTIME_PLATFORMS: ${{ inputs.platforms || 'all' }}
+        run: node scripts/release-plan.mjs
+
+  runtime:
+    if: ${{ !inputs.prepared_runtime }}
+    uses: ./.github/workflows/runtime-artifacts.yml
+    with:
+      platforms: ${{ inputs.platforms || 'all' }}
+      rebuild_runtime: ${{ inputs.rebuild_runtime || false }}
+    secrets: inherit
+
   build:
+    needs: [plan, runtime]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (inputs.prepared_runtime || needs.runtime.result == 'success') }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { target: win32-x64, os: windows-latest }
-          - { target: win32-arm64, os: windows-11-arm }
-          - { target: linux-x64, os: ubuntu-24.04 }
-          - { target: linux-arm64, os: ubuntu-24.04-arm }
-          - { target: darwin-x64, os: macos-15-intel }
-          - { target: darwin-arm64, os: macos-15 }
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     environment: release
     timeout-minutes: 180
@@ -50,39 +70,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Find reusable Runtime
-        id: runtime
-        if: ${{ !inputs.prepared_runtime }}
-        env:
-          PLATFORM: ${{ matrix.target }}
-          REBUILD: ${{ inputs.rebuild_runtime }}
-        run: bash .github/scripts/find-runtime.sh
       - uses: actions/setup-node@v4
         with:
           node-version: 24
       - uses: ./.github/actions/cache-release-downloads
-      - uses: oven-sh/setup-bun@v2
-        if: ${{ !inputs.prepared_runtime && steps.runtime.outputs.run_id == '' }}
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      - uses: ./.github/actions/cache-runtime-build
-        if: ${{ !inputs.prepared_runtime && steps.runtime.outputs.run_id == '' }}
       - name: Install Host dependencies
         env:
           # Remote hosts use the bundled private Node, never Electron.
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: npm ci --prefer-offline --no-audit --no-fund
       - run: npm run omp:overlay:apply
-      - name: Reuse signed Runtime
-        if: ${{ !inputs.prepared_runtime && steps.runtime.outputs.run_id != '' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ steps.runtime.outputs.name }}
-          path: packages/runtime-installer/dist/artifacts/${{ matrix.target }}/
-          run-id: ${{ steps.runtime.outputs.run_id }}
-          github-token: ${{ github.token }}
       - name: Download prepared Runtime
-        if: inputs.prepared_runtime
         uses: actions/download-artifact@v4
         with:
           pattern: runtime-${{ matrix.target }}-*
@@ -90,29 +88,18 @@ jobs:
           path: packages/runtime-installer/dist/artifacts/${{ matrix.target }}/
       - name: Build remote Host without desktop renderer
         run: npm run build:remote
-      - name: Build signed native Runtime and complete remote environment
+      - name: Package and verify remote environment
         env:
           OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
           TARGET: ${{ matrix.target }}
-          PREPARED_RUNTIME: ${{ inputs.prepared_runtime }}
         run: |
           set -euo pipefail
           node -e 'require("node:fs").writeFileSync(require("node:path").join(process.env.RUNNER_TEMP,"omp-remote-signing.pem"),process.env.OMP_SIGNING_SECRET,{mode:384})'
           export OMP_RUNTIME_SIGNING_KEY="$RUNNER_TEMP/omp-remote-signing.pem"
           trap 'rm -f "$OMP_RUNTIME_SIGNING_KEY"' EXIT
           export OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
-          if [ "$PREPARED_RUNTIME" != true ] && [ -z "${{ steps.runtime.outputs.run_id }}" ]; then
-            npm run omp:build:host -- --skip-build
-          fi
           node scripts/build-remote-environment.mjs
           node scripts/verify-remote-environment.mjs "outputs/remote-environments/$TARGET"
-      - uses: actions/upload-artifact@v4
-        if: ${{ !inputs.prepared_runtime && steps.runtime.outputs.run_id == '' }}
-        with:
-          name: ${{ steps.runtime.outputs.key }}-remote
-          path: packages/runtime-installer/dist/artifacts/${{ matrix.target }}/
-          compression-level: 0
-          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: release-candidate-remote-${{ matrix.target }}

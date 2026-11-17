@@ -9,6 +9,7 @@ import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
 import { resolveTargetArch, assertNativeRuntimeBuild, assertPeArchitecture } from "./windows-architecture.mjs";
 import { assertExecutableTarget, assertNativeTargetBuild, resolveTargetPlatform, runtimeEntrypointFor, verifyMacCodeSignature } from "./target-platform.mjs";
 import { assertMacToolchain } from "./mac-toolchain.mjs";
+import { installNativeArtifact } from "./native-artifact.mjs";
 import {
   PATCHES_DIRECTORY,
   defaultArtifactDirectory,
@@ -42,6 +43,9 @@ async function assertRuntimeIdentityInSync() {
 }
 
 
+const nativeArtifactFlag = process.argv.indexOf("--native-artifact");
+const nativeArtifactDirectory = nativeArtifactFlag === -1 ? undefined : process.argv[nativeArtifactFlag + 1];
+if (nativeArtifactFlag !== -1 && !nativeArtifactDirectory) throw new Error("--native-artifact requires an artifact directory");
 if (process.platform === "win32") assertNativeRuntimeBuild(resolveTargetArch());
 else assertNativeTargetBuild(resolveTargetPlatform());
 const artifactPlatform = `${process.platform}-${process.arch}`;
@@ -53,7 +57,7 @@ const env = toolingEnvironment({
 // then kills the unsigned binary the moment the smoke test runs it.
 if (process.platform === "darwin") {
   delete env.BUN_NO_CODESIGN_MACHO_BINARY;
-  assertMacToolchain({ rust: true, targetArch: process.arch, bunVersion: run(bun, ["--version"], { env, capture: true }), env });
+  assertMacToolchain({ rust: !nativeArtifactDirectory, targetArch: process.arch, bunVersion: run(bun, ["--version"], { env, capture: true }), env });
 }
 
 // Building a vendor tree without the fork applied yields an omp.exe with no
@@ -68,7 +72,8 @@ await assertRuntimeIdentityInSync();
 run(process.execPath, [fileURLToPath(new URL("./verify-omp-source.mjs", import.meta.url))], { env });
 run(process.execPath, [fileURLToPath(new URL("./install-omp-deps.mjs", import.meta.url))], { env });
 
-run(process.execPath, [fileURLToPath(new URL("./build-omp-natives.mjs", import.meta.url))], { env });
+if (nativeArtifactDirectory) installNativeArtifact(artifactPlatform, nativeArtifactDirectory);
+else run(process.execPath, [fileURLToPath(new URL("./build-omp-natives.mjs", import.meta.url))], { env });
 run(bun, ["--cwd=packages/coding-agent", "run", "build"], { cwd: ompSourceDirectory, env });
 
 const executable = join(
